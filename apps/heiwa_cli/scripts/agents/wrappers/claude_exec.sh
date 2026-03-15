@@ -3,7 +3,7 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-ROOT="${HEIWA_WORKSPACE_ROOT:-$(cd "$SCRIPT_DIR/../../.." && pwd)}"
+ROOT="${HEIWA_WORKSPACE_ROOT:-$(cd "$SCRIPT_DIR/../../../../.." && pwd)}"
 LOG_DIR="$ROOT/runtime/logs/claude"
 mkdir -p "$LOG_DIR"
 
@@ -38,22 +38,40 @@ if [[ -n "$MODEL" && "$MODEL" == */* ]]; then
 fi
 MODEL="${MODEL//./-}"
 TIMEOUT_SEC="${CLAUDE_TIMEOUT:-900}"
+PERMISSION_MODE="${HEIWA_CLAUDE_PERMISSION_MODE:-${CLAUDE_PERMISSION_MODE:-bypassPermissions}}"
 
-CMD=(claude -p "$PAYLOAD" --output-format text --permission-mode plan --add-dir "$ROOT")
+case "$PERMISSION_MODE" in
+    default|acceptEdits|bypassPermissions|dontAsk|plan|auto) ;;
+    *)
+        echo "[WARN] invalid Claude permission mode '$PERMISSION_MODE'; defaulting to bypassPermissions" | tee -a "$LOG_FILE"
+        PERMISSION_MODE="bypassPermissions"
+        ;;
+esac
+
+CMD=(claude -p "$PAYLOAD" --output-format text --permission-mode "$PERMISSION_MODE" --add-dir "$ROOT")
 if [[ -n "$MODEL" ]]; then
     CMD+=(--model "$MODEL")
 fi
 
 set +e
 if command -v timeout &>/dev/null; then
-    timeout "$TIMEOUT_SEC" "${CMD[@]}" 2>&1 | tee -a "$LOG_FILE"
+    (
+        cd "$ROOT"
+        timeout "$TIMEOUT_SEC" "${CMD[@]}"
+    ) 2>&1 | tee -a "$LOG_FILE"
     EXIT_CODE=${PIPESTATUS[0]}
 elif command -v gtimeout &>/dev/null; then
-    gtimeout "$TIMEOUT_SEC" "${CMD[@]}" 2>&1 | tee -a "$LOG_FILE"
+    (
+        cd "$ROOT"
+        gtimeout "$TIMEOUT_SEC" "${CMD[@]}"
+    ) 2>&1 | tee -a "$LOG_FILE"
     EXIT_CODE=${PIPESTATUS[0]}
 else
     echo "[WARN] timeout command not found; running without timeout" | tee -a "$LOG_FILE"
-    "${CMD[@]}" 2>&1 | tee -a "$LOG_FILE"
+    (
+        cd "$ROOT"
+        "${CMD[@]}"
+    ) 2>&1 | tee -a "$LOG_FILE"
     EXIT_CODE=${PIPESTATUS[0]}
 fi
 set -e
@@ -61,6 +79,7 @@ set -e
 {
     echo "---"
     echo "model: ${MODEL:-default}"
+    echo "permission_mode: $PERMISSION_MODE"
     echo "exit_code: $EXIT_CODE"
     echo "=== CLAUDE EXEC END ==="
 } >> "$LOG_FILE"

@@ -8,7 +8,7 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-ROOT="${HEIWA_WORKSPACE_ROOT:-$(cd "$SCRIPT_DIR/../../.." && pwd)}"
+ROOT="${HEIWA_WORKSPACE_ROOT:-$(cd "$SCRIPT_DIR/../../../../.." && pwd)}"
 LOG_DIR="$ROOT/runtime/logs/openclaw"
 mkdir -p "$LOG_DIR"
 
@@ -46,6 +46,7 @@ TIMEOUT_SEC="${OPENCLAW_TIMEOUT:-600}"
 SESSION_ID="${OPENCLAW_SESSION_ID:-heiwa-worker}"
 PROFILE="${OPENCLAW_PROFILE:-}"
 MODEL="${HEIWA_ACTIVE_MODEL:-${OPENCLAW_MODEL:-}}"
+export OLLAMA_API_KEY="${OLLAMA_API_KEY:-ollama-local}"
 if [[ -n "$MODEL" && "$MODEL" != */* ]]; then
     MODEL="$MODEL"
 fi
@@ -121,19 +122,31 @@ run_local() {
 
 set +e
 if [[ "$MODE" == "gateway" ]]; then
-    run_gateway 2>&1 | tee -a "$LOG_FILE"
+    (
+        cd "$ROOT"
+        run_gateway
+    ) 2>&1 | tee -a "$LOG_FILE"
     EXIT_CODE=${PIPESTATUS[0]}
 elif [[ "$MODE" == "local" ]]; then
-    run_local 2>&1 | tee -a "$LOG_FILE"
+    (
+        cd "$ROOT"
+        run_local
+    ) 2>&1 | tee -a "$LOG_FILE"
     EXIT_CODE=${PIPESTATUS[0]}
 else
     if gateway_is_healthy; then
         echo "[INFO] gateway health: OK (mode=gateway)" | tee -a "$LOG_FILE"
-        run_gateway 2>&1 | tee -a "$LOG_FILE"
+        (
+            cd "$ROOT"
+            run_gateway
+        ) 2>&1 | tee -a "$LOG_FILE"
         EXIT_CODE=${PIPESTATUS[0]}
     else
         echo "[WARN] gateway unavailable (mode=local fallback)" | tee -a "$LOG_FILE"
-        run_local 2>&1 | tee -a "$LOG_FILE"
+        (
+            cd "$ROOT"
+            run_local
+        ) 2>&1 | tee -a "$LOG_FILE"
         EXIT_CODE=${PIPESTATUS[0]}
     fi
 fi

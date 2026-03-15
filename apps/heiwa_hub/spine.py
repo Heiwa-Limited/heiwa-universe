@@ -1,4 +1,10 @@
 # fleets/hub/spine.py
+"""
+DEPRECATED: This is the original NATS-based spine entrypoint.
+The active spine agent is now at apps/heiwa_hub/agents/spine.py and uses
+LocalBusTransport + WebSocket instead of NATS. This file is retained for
+reference only and will be removed in a future release.
+"""
 import asyncio
 import os
 import uvicorn
@@ -35,7 +41,7 @@ async def shutdown_event():
 
 @app.get("/")
 async def health_check():
-    return {"status": "online", "system": "heiwa-limited"}
+    return {"status": "online", "system": "heiwa"}
 
 @app.post("/webhook")
 async def receive_directive(request: Request):

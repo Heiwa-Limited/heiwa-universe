@@ -4,7 +4,7 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Heiwa Governance</title>
-    <meta name="description" content="Heiwa V1 governance, security posture, and operating boundaries." />
+    <meta name="description" content="Heiwa governance, security posture, and the public/runtime boundary for the supported v1 surfaces." />
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link
@@ -28,9 +28,11 @@
     <main>
       <section class="hero compact">
         <p class="eyebrow">Governance & security summary</p>
-        <h1>Human-governed autonomy, auditable execution, portable boundaries</h1>
+        <h1>Human-governed execution with a narrow public boundary</h1>
         <p class="lede">
-          Heiwa V1 is designed as an enterprise platform foundation: daemon-first execution, PR-only governance, policy-gated outbound network calls, and local-vs-runtime separation.
+          Heiwa exposes only the supported public surfaces and keeps privileged runtime behavior behind operator workflows.
+          Docs, status, and marketing stay read-only; runtime control remains on the Railway-hosted hub and approved local
+          operator paths.
         </p>
       </section>
 
@@ -38,42 +40,42 @@
         <article class="panel">
           <h2>Change Control</h2>
           <ul>
-            <li>Agents propose changes and open PRs.</li>
+            <li>Public claims must be backed by docs and CI.</li>
             <li>Humans review, merge, and deploy.</li>
-            <li>CI gates enforce schema, safety, and policy checks.</li>
+            <li>CI gates run hub smoke tests, docs build, and web static checks.</li>
           </ul>
         </article>
         <article class="panel">
           <h2>Secrets & Data</h2>
           <ul>
             <li>No runtime secrets committed to repos.</li>
-            <li>Local secrets stored outside repo and referenced by symlink.</li>
-            <li>Cloud secrets managed in provider variables (Railway/Cloudflare/GitHub).</li>
+            <li>Public pages stay read-only and public-safe.</li>
+            <li>Cloud secrets are managed in provider variables.</li>
           </ul>
         </article>
         <article class="panel">
           <h2>Execution Boundaries</h2>
           <ul>
-            <li>Railway runs control-plane services.</li>
-            <li>Privileged operations run on policy-gated local workers.</li>
-            <li>Public web status is read-only and non-privileged.</li>
+            <li>Railway runs the public runtime surface.</li>
+            <li>Cloudflare Pages hosts marketing, docs, and read-only status shell.</li>
+            <li>WebSocket-first status streaming is the preferred live transport.</li>
           </ul>
         </article>
       </section>
 
       <section class="callout">
         <div>
-          <p class="eyebrow">V1 provider stack</p>
-          <h2>Railway + Cloudflare + GitHub</h2>
+          <p class="eyebrow">Supported v1 surface</p>
+          <h2>CLI, MCP, HTTP API, and docs</h2>
           <p>
-            Heiwa V1 standardizes on a focused provider stack to reduce operational sprawl. Future platform expansion can add
-            providers only after the core control-plane and worker mesh are stable and verified.
+            Legacy chat ingress, experimental canvases, and planned auth surfaces are not represented here as
+            stack-complete. This page describes only the surfaces that the repo now treats as first-class.
           </p>
         </div>
         <div class="callout-metrics">
-          <div><span>Deploy host</span><strong>Railway</strong></div>
-          <div><span>Edge / DNS</span><strong>Cloudflare</strong></div>
-          <div><span>Source / CI</span><strong>GitHub</strong></div>
+          <div><span>Public docs</span><strong>Cloudflare Pages</strong></div>
+          <div><span>Runtime host</span><strong>Railway</strong></div>
+          <div><span>State direction</span><strong>SpacetimeDB</strong></div>
         </div>
       </section>
     </main>

@@ -59,7 +59,9 @@ Thumbs.db
 
 # Logs
 runtime/logs/
+railway_evidence_logs/
 *.log
+site/
 
 # Databases
 *.db
@@ -68,7 +70,7 @@ runtime/logs/
 # Terraform
 .terraform/
 *.tfstate
-*.tfstate.backup
+*.tfstate.*
 
 # Wrangler
 .wrangler/
@@ -79,6 +81,12 @@ target/
 **/*.rs.bk
 Cargo.lock
 
+# Memory / scratch
+memory/
+
+# Claude Code local settings
+.claude/
+
 # Windows/WSL artifacts
-D:\cache\cargo/
+**/D:\\cache\\cargo/
 **/*.bak

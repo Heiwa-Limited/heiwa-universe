@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import asdict, dataclass, field
 import logging
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable, Optional
 
 from heiwa_protocol.routing import BrokerRouteResult
 
@@ -114,6 +114,7 @@ class HeiwaClawGateway:
         route: BrokerRouteResult,
         dispatch: HeiwaClawDispatch,
         instruction: str,
+        system_prompt: str | None = None,
     ) -> str:
         try:
             from heiwa_hub.cognition.llm_local import LocalLLMEngine
@@ -124,6 +125,7 @@ class HeiwaClawGateway:
         engine = LocalLLMEngine()
         result = engine.generate(
             prompt=instruction,
+            system=system_prompt or None,
             complexity=self._runtime_engine_complexity(route),
             runtime=dispatch.target_runtime or route.target_runtime or "railway",
         )
@@ -157,7 +159,12 @@ class HeiwaClawGateway:
         lowered = str(output or "").lower()
         return any(marker in lowered for marker in _RUNTIME_ENGINE_UNAVAILABLE_MARKERS)
 
-    async def execute(self, payload: BrokerRouteResult | dict[str, Any], instruction: str) -> tuple[int, str]:
+    async def execute(
+        self,
+        payload: BrokerRouteResult | dict[str, Any],
+        instruction: str,
+        system_prompt: str | None = None,
+    ) -> tuple[int, str]:
         route = payload if isinstance(payload, BrokerRouteResult) else BrokerRouteResult.from_payload(payload)
         dispatch = self.resolve(route)
         env = {
@@ -168,9 +175,11 @@ class HeiwaClawGateway:
             "OPENCLAW_EXEC_MODE": "gateway" if dispatch.websocket_preferred else "local",
             "OPENCLAW_SESSION_ID": dispatch.session_id,
         }
+        if system_prompt:
+            env["HEIWA_SYSTEM_PROMPT"] = system_prompt
         env.update(dispatch.adapter_env)
         if self._should_prefer_runtime_engine(route, dispatch):
-            runtime_result = self._execute_via_runtime_engine(route, dispatch, instruction)
+            runtime_result = self._execute_via_runtime_engine(route, dispatch, instruction, system_prompt)
             if runtime_result:
                 return 0, runtime_result
 
@@ -181,7 +190,7 @@ class HeiwaClawGateway:
             extra_env=env,
         )
         if self._should_retry_with_runtime_engine(route, dispatch, exit_code, output):
-            runtime_result = self._execute_via_runtime_engine(route, dispatch, instruction)
+            runtime_result = self._execute_via_runtime_engine(route, dispatch, instruction, system_prompt)
             if runtime_result:
                 return 0, runtime_result
 
@@ -189,6 +198,48 @@ class HeiwaClawGateway:
         self._record_rate_usage(dispatch, exit_code, output)
 
         return exit_code, output
+
+    _LOCAL_ADAPTER_TOOLS = frozenset({"heiwa_reflex", "ollama", "local", "vllm", "litellm"})
+
+    def _is_local_ollama(self, dispatch: HeiwaClawDispatch) -> bool:
+        return dispatch.adapter_tool.lower() in self._LOCAL_ADAPTER_TOOLS
+
+    async def execute_streaming(
+        self,
+        payload: BrokerRouteResult | dict[str, Any],
+        instruction: str,
+        system_prompt: str | None = None,
+        on_token: Callable[[str], None] | None = None,
+    ) -> "StreamResult":
+        """Like execute(), but streams tokens for local Ollama models.
+
+        Returns StreamResult with exit_code, output, and usage stats.
+        Falls back to regular execute() for non-local providers.
+        """
+        from .ollama_stream import StreamResult
+
+        route = payload if isinstance(payload, BrokerRouteResult) else BrokerRouteResult.from_payload(payload)
+        dispatch = self.resolve(route)
+
+        if self._is_local_ollama(dispatch):
+            from .ollama_stream import stream_ollama_with_usage
+
+            model = dispatch.target_model
+            if model and "/" in model:
+                model = model.split("/", 1)[1]
+
+            result = await stream_ollama_with_usage(
+                instruction,
+                model=model or None,
+                system=system_prompt,
+                on_token=on_token,
+            )
+            self._record_rate_usage(dispatch, result.exit_code, result.output)
+            return result
+
+        # Non-local: fall back to regular (non-streaming) execution
+        exit_code, output = await self.execute(payload, instruction, system_prompt=system_prompt)
+        return StreamResult(exit_code=exit_code, output=output)
 
     @staticmethod
     def _record_rate_usage(dispatch: HeiwaClawDispatch, exit_code: int, output: str) -> None:

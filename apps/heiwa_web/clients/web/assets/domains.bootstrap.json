@@ -1,77 +1,78 @@
 {
   "version": 1,
-  "generated_from": "HEIWA_DOMAIN_PLAN.md",
+  "generated_from": "config/swarm/domain_plan.md",
   "root_domain": "heiwa.ltd",
   "platform": {
     "dns": "cloudflare",
-    "public_web": "railway_static_via_cloudflare",
+    "public_web": "cloudflare_pages",
     "control_plane": "railway",
     "edge_security": "cloudflare_waf"
   },
   "domains": [
     {
+      "host": "heiwa.ltd",
+      "purpose": "Public marketing shell",
+      "target": "Cloudflare Pages marketing project",
+      "state": "active",
+      "health_path": "/"
+    },
+    {
       "host": "status.heiwa.ltd",
-      "purpose": "Public status surface",
-      "target": "Railway heiwa-cloud-hq static route",
+      "purpose": "Read-only status shell",
+      "target": "Cloudflare Pages status shell backed by Railway API",
       "state": "active",
       "health_path": "/status.html"
     },
     {
-      "host": "auth.heiwa.ltd",
-      "purpose": "Identity and auth gateway",
-      "target": "Railway heiwa-cloud-hq (auth edge route)",
-      "state": "planned",
-      "health_path": "/health"
-    },
-    {
       "host": "api.heiwa.ltd",
-      "purpose": "Swarm API ingress",
-      "target": "Railway service domain + Cloudflare WAF",
+      "purpose": "Runtime API + MCP ingress",
+      "target": "Railway service domain behind Cloudflare proxy/WAF",
       "state": "active",
       "health_path": "/health"
     },
     {
       "host": "docs.heiwa.ltd",
       "purpose": "Heiwa canon docs",
-      "target": "Railway heiwa-cloud-hq static route",
+      "target": "Cloudflare Pages MkDocs deployment",
       "state": "active",
       "health_path": "/"
     }
   ],
   "dns_records": [
     {
-      "type": "CNAME",
-      "name": "status",
-      "value": "heiwa-cloud-hq-brain.up.railway.app",
+      "type": "CNAME flattening",
+      "name": "@",
+      "value": "Cloudflare Pages marketing project",
       "proxy": true,
       "ttl": "auto"
     },
     {
       "type": "CNAME",
-      "name": "auth",
-      "value": "heiwa-cloud-hq-brain.up.railway.app",
+      "name": "status",
+      "value": "Cloudflare Pages marketing project",
       "proxy": true,
       "ttl": "auto"
     },
     {
       "type": "CNAME",
       "name": "api",
-      "value": "heiwa-cloud-hq-brain.up.railway.app",
+      "value": "Railway service domain",
       "proxy": true,
       "ttl": "auto"
     },
     {
       "type": "CNAME",
       "name": "docs",
-      "value": "heiwa-cloud-hq-brain.up.railway.app",
+      "value": "Cloudflare Pages docs project",
       "proxy": true,
       "ttl": "auto"
     }
   ],
   "bootstrap_steps": [
-    "Point heiwa.ltd/status/docs to Railway service heiwa-cloud-hq and serve static site routes from the service.",
-    "Attach auth.heiwa.ltd and api.heiwa.ltd to Railway service heiwa-cloud-hq and enforce Cloudflare proxy/WAF.",
+    "Point heiwa.ltd and status.heiwa.ltd at the Cloudflare Pages marketing/status project.",
+    "Point docs.heiwa.ltd at the Cloudflare Pages docs project built from MkDocs Material.",
+    "Attach api.heiwa.ltd to the Railway hub service and enforce Cloudflare proxy/WAF.",
     "Enable strict TLS and baseline WAF rules for api.heiwa.ltd.",
-    "Run post-cutover checks for /health and public page endpoints."
+    "Run post-cutover checks for /health, /status, and public page endpoints."
   ]
 }

@@ -4,7 +4,7 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-ROOT="${HEIWA_WORKSPACE_ROOT:-$(cd "$SCRIPT_DIR/../../.." && pwd)}"
+ROOT="${HEIWA_WORKSPACE_ROOT:-$(cd "$SCRIPT_DIR/../../../../.." && pwd)}"
 LOG_DIR="$ROOT/runtime/logs/codex"
 mkdir -p "$LOG_DIR"
 
@@ -40,11 +40,20 @@ fi
 
 TIMEOUT_SEC="${CODEX_TIMEOUT:-600}"
 MODEL="${HEIWA_ACTIVE_MODEL:-${CODEX_MODEL:-}}"
+SANDBOX_MODE="${HEIWA_CODEX_SANDBOX:-${CODEX_SANDBOX:-danger-full-access}}"
 if [[ -n "$MODEL" && "$MODEL" == */* ]]; then
     MODEL="${MODEL#*/}"
 fi
 
-CMD=(codex exec --sandbox workspace-write --cd "$ROOT")
+case "$SANDBOX_MODE" in
+    read-only|workspace-write|danger-full-access) ;;
+    *)
+        echo "[WARN] invalid Codex sandbox mode '$SANDBOX_MODE'; defaulting to danger-full-access" | tee -a "$LOG_FILE"
+        SANDBOX_MODE="danger-full-access"
+        ;;
+esac
+
+CMD=(codex exec --sandbox "$SANDBOX_MODE" --cd "$ROOT")
 if [[ -n "$MODEL" ]]; then
     CMD+=(--model "$MODEL")
 fi
@@ -67,6 +76,7 @@ set -e
 {
     echo "---"
     echo "model: ${MODEL:-default}"
+    echo "sandbox_mode: $SANDBOX_MODE"
     echo "exit_code: $EXIT_CODE"
     echo "=== CODEX EXEC END ==="
 } >> "$LOG_FILE"

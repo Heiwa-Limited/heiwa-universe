@@ -9,9 +9,9 @@ import sys
 from pathlib import Path
 import shutil
 
-ROOT = Path(__file__).resolve().parents[2]
+ROOT = Path(__file__).resolve().parents[3]
 SOURCE_MANIFEST = ROOT / "infrastructure" / "domains" / "heiwa-ltd.bootstrap.json"
-DEST_MANIFEST = ROOT / "clients" / "clients" / "web" / "assets" / "domains.bootstrap.json"
+DEST_MANIFEST = ROOT / "apps" / "heiwa_web" / "clients" / "web" / "assets" / "domains.bootstrap.json"
 
 def main():
     print("--- HEIWA MANIFEST SYNC ---")

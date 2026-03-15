@@ -4,7 +4,7 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Heiwa Status</title>
-    <meta name="description" content="Read-only health and status checks for the Heiwa V1 platform." />
+    <meta name="description" content="WebSocket-first, read-only health and status checks for the Heiwa public runtime surface." />
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link
@@ -29,17 +29,17 @@
     <main>
       <section class="hero compact">
         <p class="eyebrow">Read-only status surface</p>
-        <h1>Platform health snapshots without privileged access</h1>
+        <h1>WebSocket-first platform status without privileged access</h1>
         <p class="lede">
-          This page performs lightweight GET checks against configured health/status endpoints. It does not expose secrets,
-          approvals, or execution controls.
+          This page prefers a live WebSocket status stream from the canonical API domain. If the stream is unavailable,
+          it falls back to lightweight HTTP diagnostics. It never exposes secrets, approvals, or execution controls.
         </p>
       </section>
 
       <section class="panel status-controls">
         <div>
-          <h2>Endpoints</h2>
-          <p class="muted">Override with `?endpoint=` query params (repeatable) for temporary diagnostics.</p>
+          <h2>Live source</h2>
+          <p class="muted">Override with `?ws=` or `?endpoint=` query params for temporary diagnostics.</p>
         </div>
         <button id="refresh-status" class="btn btn-solid" type="button">Refresh</button>
       </section>
@@ -51,6 +51,8 @@
           <p id="status-summary-text">Fetching endpoint responses.</p>
         </div>
         <div class="callout-metrics">
+          <div><span>Mode</span><strong id="transport-mode">connecting</strong></div>
+          <div><span>Updated</span><strong id="last-updated">waiting</strong></div>
           <div><span>Healthy</span><strong id="healthy-count">0</strong></div>
           <div><span>Warnings</span><strong id="warn-count">0</strong></div>
           <div><span>Checked</span><strong id="total-count">0</strong></div>
@@ -61,7 +63,7 @@
     </main>
 
     <footer class="footer">
-      <p>Heiwa status surface (read-only)</p>
+      <p>Heiwa status surface (read-only, WebSocket-first)</p>
       <p class="footer-links">
         <a href="./index.html">Home</a>
         <a href="./domains.html">Domains</a>

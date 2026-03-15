@@ -6,8 +6,9 @@ Use this file for Heiwa-specific operational constraints and file locations.
 
 Read these files before operational work:
 
-- `/Users/dmcgregsauce/heiwa-limited/docs/agents/openclaw/PINNED_VERSION.md`
-- `/Users/dmcgregsauce/heiwa-limited/docs/agents/openclaw/SECURITY_POLICY.md`
+- `/Users/dmcgregsauce/heiwa/apps/heiwa_cli/scripts/agents/sync_docs.sh`
+- `/Users/dmcgregsauce/heiwa/apps/heiwa_cli/scripts/agents/wrappers/openclaw_exec.sh`
+- `/Users/dmcgregsauce/heiwa/apps/heiwa_hub/agents/openclaw.py`
 
 Current local policy (at time of skill creation) indicates:
 
@@ -33,10 +34,8 @@ Heiwa uses PicoClaw in role-specialized worker flows (for example `scraper`, `fo
 
 Key code and config locations:
 
-- `/Users/dmcgregsauce/heiwa-limited/fleets/picoclaw/worker.py`
-- `/Users/dmcgregsauce/heiwa-limited/fleets/picoclaw/render_config.py`
-- `/Users/dmcgregsauce/heiwa-limited/fleets/docker/Dockerfile.picoclaw`
-- `/Users/dmcgregsauce/heiwa-limited/config/env/.env.picoclaw.*.railway.example`
+- `/Users/dmcgregsauce/heiwa/apps/heiwa_cli/scripts/agents/wrappers/picoclaw_exec.py`
+- Railway environment variables for `HEIWA_PICOCLAW_*`, `PICOCLAW_BIN`, and `PICOCLAW_TIMEOUT`
 
 When debugging PicoClaw execution issues, inspect:
 
@@ -50,5 +49,5 @@ When debugging PicoClaw execution issues, inspect:
 1. Confirm local/deployed env values (especially role + subject).
 2. Confirm `picoclaw` binary exists in runtime or image.
 3. Inspect Railway logs for timeouts, missing binary, or auth/provider errors.
-4. Check worker code path in `fleets/picoclaw/worker.py` for subprocess invocation and exit-code handling.
+4. Check the wrapper code path in `apps/heiwa_cli/scripts/agents/wrappers/picoclaw_exec.py` for subprocess invocation and exit-code handling.
 5. Validate queue subject matches the planner/dispatcher emission path.

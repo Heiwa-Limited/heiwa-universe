@@ -75,20 +75,20 @@ def _bool_env(key: str) -> bool:
 
 
 def load_swarm_env():
-    """Enterprise-grade environment loader. Priority: Vault > Local Worker > Standard Env."""
+    """Environment loader. Priority: Vault > Local Worker > Standard Env."""
     vault_path = Path.home() / ".heiwa" / "vault.env"
-    
+
     # 1. Standard .env (Base)
     env_path = MONOREPO_ROOT / ".env"
     if env_path.exists():
         load_dotenv(env_path, override=True)
-    
+
     # 2. Worker Local (Specific Node overrides)
     worker_env = MONOREPO_ROOT / ".env.worker.local"
     if worker_env.exists():
         load_dotenv(worker_env, override=True)
-    
-    # 3. Vault (Highest priority secrets)
+
+    # 3. Vault (Highest priority — ~/.heiwa/vault.env written by `heiwa vault set`)
     if vault_path.exists():
         load_dotenv(vault_path, override=True)
 

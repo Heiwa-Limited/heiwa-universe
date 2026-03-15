@@ -61,14 +61,22 @@ class SpacetimeDB:
         return True
 
     def query(self, sql: str) -> List[dict]:
-        cmd = ["spacetime", "sql", "--server", self.server, "--json", self.db_identity, sql]
+        cmd = ["spacetime", "sql", "--server", self.server, self.db_identity, sql]
         result = self._run(cmd)
         if not result:
             return []
 
+        stdout = result.stdout.strip()
+        if not stdout:
+            return []
+
+        # SpacetimeDB CLI v2.x outputs JSON by default (no --json flag needed).
+        # Try JSON parse first; fall back to empty list on non-JSON output.
         try:
-            payload = json.loads(result.stdout)
+            payload = json.loads(stdout)
         except json.JSONDecodeError:
+            # Some STDB versions emit "No results" or tabular text for empty queries
+            logger.debug("STDB query returned non-JSON output: %s", stdout[:200])
             return []
 
         if isinstance(payload, list):
@@ -154,6 +162,243 @@ class SpacetimeDB:
             f"FROM runs WHERE ended_at > '{cutoff}' AND model_id <> '' "
             "GROUP BY model_id"
         )
+
+    def upsert_provider_account_status(self, account_data: dict[str, Any]) -> bool:
+        updated_at = account_data.get("updated_at") or datetime.datetime.now(datetime.timezone.utc).isoformat()
+        return self.call(
+            "upsert_provider_account_status",
+            account_data["account_id"],
+            account_data["provider_id"],
+            account_data["node_id"],
+            account_data.get("auth_kind", "unknown"),
+            account_data.get("local_handle_ref", ""),
+            account_data.get("status", "unknown"),
+            account_data.get("display_name"),
+            account_data.get("default_model"),
+            account_data.get("rate_group", ""),
+            self._normalize_json_column(account_data.get("available_models")) or "[]",
+            account_data.get("last_validated_at"),
+            account_data.get("last_error"),
+            updated_at,
+        )
+
+    def list_provider_accounts(
+        self,
+        provider_id: str | None = None,
+        node_id: str | None = None,
+        status: str | None = None,
+        limit: int = 50,
+    ) -> list[dict[str, Any]]:
+        clauses: list[str] = []
+        if provider_id:
+            clauses.append(f"provider_id = '{self._escape_sql_literal(provider_id)}'")
+        if node_id:
+            clauses.append(f"node_id = '{self._escape_sql_literal(node_id)}'")
+        if status:
+            clauses.append(f"status = '{self._escape_sql_literal(status)}'")
+        query = "SELECT * FROM provider_accounts"
+        if clauses:
+            query += " WHERE " + " AND ".join(clauses)
+        query += f" ORDER BY updated_at DESC LIMIT {int(limit)}"
+        return self.query(query)
+
+    def get_provider_account(self, account_id: str) -> dict[str, Any] | None:
+        return self._first(
+            f"SELECT * FROM provider_accounts WHERE account_id = '{self._escape_sql_literal(account_id)}' LIMIT 1"
+        )
+
+    def create_mission(self, mission_data: dict[str, Any]) -> bool:
+        created_at = mission_data.get("created_at") or datetime.datetime.now(datetime.timezone.utc).isoformat()
+        updated_at = mission_data.get("updated_at") or created_at
+        return self.call(
+            "create_mission",
+            mission_data["mission_id"],
+            created_at,
+            updated_at,
+            mission_data.get("status", "draft"),
+            mission_data.get("source_surface", "cli"),
+            mission_data.get("node_id", ""),
+            mission_data.get("prompt", ""),
+            mission_data.get("intent_class", "general"),
+            mission_data.get("risk_level", "low"),
+            mission_data.get("active_step_id"),
+            mission_data.get("active_cell_id"),
+            mission_data.get("target_tool"),
+            mission_data.get("target_model"),
+            mission_data.get("summary"),
+            mission_data.get("error"),
+            self._normalize_json_column(mission_data.get("metadata")) or "{}",
+        )
+
+    def get_missions(self, status: str | None = None, limit: int = 50) -> list[dict[str, Any]]:
+        query = "SELECT * FROM missions"
+        if status:
+            query += f" WHERE status = '{self._escape_sql_literal(status)}'"
+        query += f" ORDER BY updated_at DESC LIMIT {int(limit)}"
+        return self.query(query)
+
+    def get_mission(self, mission_id: str) -> dict[str, Any] | None:
+        return self._first(
+            f"SELECT * FROM missions WHERE mission_id = '{self._escape_sql_literal(mission_id)}' LIMIT 1"
+        )
+
+    def append_mission_step(self, step_data: dict[str, Any]) -> bool:
+        created_at = step_data.get("created_at") or datetime.datetime.now(datetime.timezone.utc).isoformat()
+        updated_at = step_data.get("updated_at") or created_at
+        return self.call(
+            "append_mission_step",
+            step_data["step_id"],
+            step_data["mission_id"],
+            int(step_data.get("position") or 0),
+            step_data.get("status", "pending"),
+            step_data.get("step_kind", "turn"),
+            step_data.get("cell_role", ""),
+            step_data.get("title", ""),
+            step_data.get("detail"),
+            self._normalize_json_column(step_data.get("input")) or "{}",
+            self._normalize_json_column(step_data.get("output")) or "{}",
+            created_at,
+            updated_at,
+        )
+
+    def get_mission_steps(self, mission_id: str, limit: int = 100) -> list[dict[str, Any]]:
+        return self.query(
+            "SELECT * FROM mission_steps "
+            f"WHERE mission_id = '{self._escape_sql_literal(mission_id)}' "
+            f"ORDER BY position ASC, updated_at ASC LIMIT {int(limit)}"
+        )
+
+    def start_cell_run(self, run_data: dict[str, Any]) -> bool:
+        started_at = run_data.get("started_at") or datetime.datetime.now(datetime.timezone.utc).isoformat()
+        return self.call(
+            "start_cell_run",
+            run_data["cell_run_id"],
+            run_data["mission_id"],
+            run_data.get("step_id"),
+            run_data.get("status", "running"),
+            run_data.get("cell_id", ""),
+            run_data.get("cell_role", ""),
+            run_data.get("provider", ""),
+            run_data.get("model", ""),
+            run_data.get("rate_group", ""),
+            run_data.get("tool", ""),
+            started_at,
+            int(run_data.get("tokens_input") or 0),
+            int(run_data.get("tokens_output") or 0),
+            int(run_data.get("tokens_total") or 0),
+            run_data.get("output_summary"),
+        )
+
+    def finish_cell_run(self, run_data: dict[str, Any]) -> bool:
+        return self.call(
+            "finish_cell_run",
+            run_data["cell_run_id"],
+            run_data.get("status", "completed"),
+            run_data.get("ended_at") or datetime.datetime.now(datetime.timezone.utc).isoformat(),
+            int(run_data.get("tokens_input") or 0),
+            int(run_data.get("tokens_output") or 0),
+            int(run_data.get("tokens_total") or 0),
+            run_data.get("output_summary"),
+        )
+
+    def get_cell_runs(
+        self,
+        mission_id: str | None = None,
+        status: str | None = None,
+        limit: int = 100,
+    ) -> list[dict[str, Any]]:
+        clauses: list[str] = []
+        if mission_id:
+            clauses.append(f"mission_id = '{self._escape_sql_literal(mission_id)}'")
+        if status:
+            clauses.append(f"status = '{self._escape_sql_literal(status)}'")
+        query = "SELECT * FROM cell_runs"
+        if clauses:
+            query += " WHERE " + " AND ".join(clauses)
+        query += f" ORDER BY started_at DESC LIMIT {int(limit)}"
+        return self.query(query)
+
+    def pause_mission(self, mission_id: str, summary: str | None = None) -> bool:
+        return self.call(
+            "pause_mission",
+            mission_id,
+            datetime.datetime.now(datetime.timezone.utc).isoformat(),
+            summary,
+        )
+
+    def resume_mission(self, mission_id: str, summary: str | None = None) -> bool:
+        return self.call(
+            "resume_mission",
+            mission_id,
+            datetime.datetime.now(datetime.timezone.utc).isoformat(),
+            summary,
+        )
+
+    def complete_mission(self, mission_id: str, summary: str | None = None) -> bool:
+        return self.call(
+            "complete_mission",
+            mission_id,
+            datetime.datetime.now(datetime.timezone.utc).isoformat(),
+            summary,
+        )
+
+    def fail_mission(self, mission_id: str, error: str | None = None) -> bool:
+        return self.call(
+            "fail_mission",
+            mission_id,
+            datetime.datetime.now(datetime.timezone.utc).isoformat(),
+            error,
+        )
+
+    def write_session_summary(self, summary_data: dict[str, Any]) -> bool:
+        created_at = summary_data.get("created_at") or datetime.datetime.now(datetime.timezone.utc).isoformat()
+        return self.call(
+            "write_session_summary",
+            summary_data["summary_id"],
+            summary_data["session_id"],
+            summary_data.get("node_id", ""),
+            created_at,
+            summary_data.get("summary_text", ""),
+            self._normalize_json_column(summary_data.get("metadata")) or "{}",
+        )
+
+    def list_session_summaries(
+        self,
+        node_id: str | None = None,
+        session_id: str | None = None,
+        limit: int = 50,
+    ) -> list[dict[str, Any]]:
+        clauses: list[str] = []
+        if node_id:
+            clauses.append(f"node_id = '{self._escape_sql_literal(node_id)}'")
+        if session_id:
+            clauses.append(f"session_id = '{self._escape_sql_literal(session_id)}'")
+        query = "SELECT * FROM session_summaries"
+        if clauses:
+            query += " WHERE " + " AND ".join(clauses)
+        query += f" ORDER BY created_at DESC LIMIT {int(limit)}"
+        return self.query(query)
+
+    def register_artifact(self, artifact_data: dict[str, Any]) -> bool:
+        return self.call(
+            "register_artifact",
+            artifact_data["artifact_id"],
+            artifact_data.get("mission_id", ""),
+            artifact_data.get("cell_run_id"),
+            artifact_data.get("artifact_type", "summary"),
+            artifact_data.get("title", ""),
+            artifact_data.get("uri"),
+            artifact_data.get("path"),
+            self._normalize_json_column(artifact_data.get("content")) or "{}",
+            artifact_data.get("created_at") or datetime.datetime.now(datetime.timezone.utc).isoformat(),
+        )
+
+    def list_artifacts(self, mission_id: str | None = None, limit: int = 100) -> list[dict[str, Any]]:
+        query = "SELECT * FROM artifacts"
+        if mission_id:
+            query += f" WHERE mission_id = '{self._escape_sql_literal(mission_id)}'"
+        query += f" ORDER BY created_at DESC LIMIT {int(limit)}"
+        return self.query(query)
 
     def upsert_node_heartbeat(
         self,

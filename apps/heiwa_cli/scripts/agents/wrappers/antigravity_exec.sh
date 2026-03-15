@@ -3,7 +3,8 @@
 # Wrapper for Antigravity execution.
 set -euo pipefail
 
-ROOT="${HEIWA_WORKSPACE_ROOT:-$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)}"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+ROOT="${HEIWA_WORKSPACE_ROOT:-$(cd "$SCRIPT_DIR/../../../../.." && pwd)}"
 LOG_DIR="$ROOT/runtime/logs/antigravity"
 mkdir -p "$LOG_DIR"
 
@@ -21,7 +22,10 @@ fi
 MODEL="${ANTIGRAVITY_MODEL:-gpt-4o}"
 
 echo "=== ANTIGRAVITY EXEC START ===" >> "$LOG_FILE"
-antigravity chat "$PAYLOAD" --model "$MODEL" --non-interactive 2>&1 | tee -a "$LOG_FILE"
+(
+    cd "$ROOT"
+    antigravity chat "$PAYLOAD" --model "$MODEL" --non-interactive
+) 2>&1 | tee -a "$LOG_FILE"
 EXIT_CODE=${PIPESTATUS[0]}
 echo "=== ANTIGRAVITY EXEC END (code: $EXIT_CODE) ===" >> "$LOG_FILE"
 

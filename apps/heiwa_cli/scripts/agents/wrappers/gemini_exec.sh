@@ -3,7 +3,7 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-ROOT="${HEIWA_WORKSPACE_ROOT:-$(cd "$SCRIPT_DIR/../../.." && pwd)}"
+ROOT="${HEIWA_WORKSPACE_ROOT:-$(cd "$SCRIPT_DIR/../../../../.." && pwd)}"
 LOG_DIR="$ROOT/runtime/logs/gemini"
 mkdir -p "$LOG_DIR"
 
@@ -37,22 +37,40 @@ if [[ -n "$MODEL" && "$MODEL" == */* ]]; then
     MODEL="${MODEL#*/}"
 fi
 TIMEOUT_SEC="${GEMINI_TIMEOUT:-900}"
+APPROVAL_MODE="${HEIWA_GEMINI_APPROVAL_MODE:-${GEMINI_APPROVAL_MODE:-yolo}}"
 
-CMD=(gemini --prompt "$PAYLOAD" --output-format text --approval-mode plan)
+case "$APPROVAL_MODE" in
+    default|auto_edit|yolo|plan) ;;
+    *)
+        echo "[WARN] invalid Gemini approval mode '$APPROVAL_MODE'; defaulting to yolo" | tee -a "$LOG_FILE"
+        APPROVAL_MODE="yolo"
+        ;;
+esac
+
+CMD=(gemini --prompt "$PAYLOAD" --output-format text --approval-mode "$APPROVAL_MODE")
 if [[ -n "$MODEL" ]]; then
     CMD+=(--model "$MODEL")
 fi
 
 set +e
 if command -v timeout &>/dev/null; then
-    timeout "$TIMEOUT_SEC" "${CMD[@]}" 2>&1 | tee -a "$LOG_FILE"
+    (
+        cd "$ROOT"
+        timeout "$TIMEOUT_SEC" "${CMD[@]}"
+    ) 2>&1 | tee -a "$LOG_FILE"
     EXIT_CODE=${PIPESTATUS[0]}
 elif command -v gtimeout &>/dev/null; then
-    gtimeout "$TIMEOUT_SEC" "${CMD[@]}" 2>&1 | tee -a "$LOG_FILE"
+    (
+        cd "$ROOT"
+        gtimeout "$TIMEOUT_SEC" "${CMD[@]}"
+    ) 2>&1 | tee -a "$LOG_FILE"
     EXIT_CODE=${PIPESTATUS[0]}
 else
     echo "[WARN] timeout command not found; running without timeout" | tee -a "$LOG_FILE"
-    "${CMD[@]}" 2>&1 | tee -a "$LOG_FILE"
+    (
+        cd "$ROOT"
+        "${CMD[@]}"
+    ) 2>&1 | tee -a "$LOG_FILE"
     EXIT_CODE=${PIPESTATUS[0]}
 fi
 set -e
@@ -60,6 +78,7 @@ set -e
 {
     echo "---"
     echo "model: ${MODEL:-default}"
+    echo "approval_mode: $APPROVAL_MODE"
     echo "exit_code: $EXIT_CODE"
     echo "=== GEMINI EXEC END ==="
 } >> "$LOG_FILE"

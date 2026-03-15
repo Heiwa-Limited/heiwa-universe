@@ -1,117 +1,96 @@
-# 🌐 Heiwa Universe `v1.67`
+# Heiwa
 
-[![Railway Deployment](https://img.shields.io/badge/Railway-Deploys-blueviolet?style=flat-square&logo=railway)](https://railway.app)
-[![SpacetimeDB](https://img.shields.io/badge/Database-SpacetimeDB-blue?style=flat-square)](https://spacetimedb.com)
-[![NATS](https://img.shields.io/badge/Bus-NATS-cyan?style=flat-square&logo=nats)](https://nats.io)
-[![Status](https://img.shields.io/badge/Status-Fully%20Operational%20(1.67)-brightgreen?style=for-the-badge)](https://status.heiwa.ltd)
+[![Railway](https://img.shields.io/badge/runtime-Railway-5a3cc8?style=flat-square&logo=railway)](https://railway.app)
+[![SpacetimeDB](https://img.shields.io/badge/state-SpacetimeDB-0c73d8?style=flat-square)](https://spacetimedb.com)
+[![Cloudflare](https://img.shields.io/badge/public-Cloudflare-f38020?style=flat-square&logo=cloudflare)](https://cloudflare.com)
+[![Transport](https://img.shields.io/badge/transport-WebSockets-1d9bf0?style=flat-square)](https://developer.mozilla.org/en-US/docs/Web/API/WebSockets_API)
 
-> **Sovereign, 24/7 autonomous AI orchestration mesh.**
-> Built for durability, privacy, and multi-node execution across local and cloud surfaces.
+Heiwa is the canonical repo for the Heiwa control plane. The supported first-class surfaces are:
 
----
+- CLI
+- MCP
+- HTTP API
+- Docs
 
-## 🏔️ Current Operating State: Phase B (Broker Extraction)
+The current consolidation target is a fast stack built around SpacetimeDB state, Railway runtime, Cloudflare marketing/docs surfaces, and WebSocket-first live status/event transport.
 
-The Heiwa Swarm is currently operating under the **March 6, 2026 Enterprise Blueprint**.
+Cold-start operators and agents should begin with `HEIWA.md`.
 
-| Milestone | Capability | Status |
-|:----------|:-----------|:-------|
-| **Core v1.0** | Initial agentic loops & NATS dispatcher | ✅ STABLE |
-| **Bridge v1.5** | Local-to-Cloud Tailscale connectivity | ✅ STABLE |
-| **Identity v1.6** | SpacetimeDB v2 migration & Sovereign Auth | ✅ STABLE |
-| **Enterprise v1.67**| **Discord Bridge + Mesh Telemetry + Broker Logic** | ✅ ACTIVE |
-| **Phase C** | Policy Engines & Dynamic Budgeting | 🔨 PLANNED |
+## Current State
 
----
+Heiwa is under active runtime hardening against the March 6, 2026 blueprint. This repo should not describe placeholder agents, Discord flows, or legacy compatibility layers as stack-complete.
 
-## 🏗️ High-Level Topology
+What is in scope now:
+
+- Railway-hosted hub runtime
+- SpacetimeDB as the state layer
+- WebSocket-first public status/event transport
+- Heiwa CLI and MCP as operator surfaces
+- Cloudflare-hosted marketing and documentation pages
+
+What is not treated as stack-complete:
+
+- Discord as a required ingress surface
+- legacy `heiwa-limited` as an active target or source repo
+- placeholder Codex/OpenClaw personas presented as product capabilities
+
+## Runtime Topology
 
 ```mermaid
 graph TD
-    subgraph Ingress
-        A[Discord Messenger]
-        B[Terminal CLI]
-        C[API/Web]
-    end
-
-    subgraph Spine ["Spine (Railway HQ)"]
-        S1[NATS Dispatch]
-        S2[Auth Gate]
-        S3[SpacetimeDB]
-    end
-
-    subgraph Intelligence ["Broker Logic (Node A/B)"]
-        I1[Intent Classifier]
-        I2[Risk Scorer]
-        I3[Skill Router]
-    end
-
-    subgraph Workers
-        W1[Codex Builder]
-        W2[OpenClaw Strategist]
-        W3[Executor Node]
-    end
-
-    Ingress --> Spine
-    Spine <--> Intelligence
-    Intelligence --> Workers
+    A["CLI"] --> B["Railway Hub"]
+    C["MCP Clients"] --> B
+    D["HTTP API"] --> B
+    B --> E["SpacetimeDB"]
+    B --> F["WebSocket Status / Events"]
+    G["Cloudflare Pages"] --> H["Marketing + Docs"]
 ```
 
----
+- `apps/heiwa_hub`: Railway runtime, MCP/HTTP API surface, health/status endpoints
+- `apps/heiwa_cli`: operator CLI and local execution wrappers
+- `packages/heiwa_sdk`: state, security, gateway, and platform helpers
+- `packages/heiwa_bindings`: generated Rust/TypeScript SpacetimeDB clients plus the Python bridge slot
+- `packages/heiwa_protocol`: shared contracts and schemas
+- `docs/`: MkDocs Material documentation source
+- `apps/heiwa_web`: Cloudflare Pages marketing/status shell
 
-## 📂 Repository Topology
-
-* **`apps/heiwa_hub`**: The "Brain" — encompasses agents (Spine, Messenger, Broker), cognition, and main boot logic.
-* **`apps/heiwa_cli`**: The high-impact TUI for manual swarm interaction and real-time telemetry.
-* **`packages/heiwa_sdk`**: The substrate — contains the DB bridge, vault, state management, and unified config.
-* **`packages/heiwa_protocol`**: The shared contract — defining the NATS subject structure and payload schemas.
-* **`config/swarm`**: Environmental blueprints, router maps, and hardware constraints.
-
----
-
-## 🚀 Getting Started (Operator Mode)
-
-### 1. Environment Prep
+## Quick Start
 
 ```bash
-# Initialize the mesh
 cd ~/heiwa
 source .venv/bin/activate
-
-# Setup Pathing
-export PYTHONPATH=$(pwd)/packages/heiwa_sdk:$(pwd)/packages/heiwa_protocol:$(pwd)/packages/heiwa_identity:$(pwd)/packages/heiwa_ui:$(pwd)/apps
-```
-
-### 2. Local Spin-up
-
-```bash
-# Ensure NATS is active locally
-nats-server -js &
-
-# Boot the Messenger & Spinal Agents
+export PYTHONPATH="$(pwd)/packages/heiwa_sdk:$(pwd)/packages/heiwa_protocol:$(pwd)/packages/heiwa_identity:$(pwd)/packages/heiwa_ui:$(pwd)/apps"
 python -m apps.heiwa_hub.main
+./apps/heiwa_cli/heiwa cells
+./apps/heiwa_cli/heiwa bench
 ```
 
-### 3. Verification Suite
+## Verification
 
 ```bash
-# Run Classifier Validation (Target: 95%+)
 python apps/heiwa_hub/tests/test_intent_classifier.py
-
-# Run Full Mesh Smoke Test
-python apps/heiwa_hub/actions/smoke_test_discord.py
+python apps/heiwa_hub/tests/test_risk_scorer.py
+python apps/heiwa_hub/tests/test_compute_router.py
+python apps/heiwa_hub/tests/test_agent_context_map.py
+python apps/heiwa_hub/tests/test_heiwa_cells_catalog.py
+python apps/heiwa_hub/tests/test_heiwa_bench.py
+python apps/heiwa_hub/tests/test_stdb_native_state.py
+./apps/heiwa_hub/scripts/generate_spacetimedb_bindings.sh
+python -m pip install -r docs/requirements.txt
+mkdocs build --strict
+python apps/heiwa_web/scripts/check_static_surface.py
 ```
 
----
+## Docs
 
-## 📜 Key Enterprise Manifests
+- Source: [`docs/`](docs/)
+- MkDocs config: [`mkdocs.yml`](mkdocs.yml)
+- Public docs target: `docs.heiwa.ltd`
 
-| Document | Purpose |
-|:---------|:--------|
-| [SOUL.md](file:///Users/dmcgregsauce/heiwa/SOUL.md) | **Identity**: Behavioral guidelines and system ethics. |
-| [AGENTS.md](file:///Users/dmcgregsauce/heiwa/AGENTS.md) | **Reference**: Architecture, topology, and agent-specific constraints. |
-| [BUILD_BLUEPRINT](file:///Users/dmcgregsauce/heiwa/config/swarm/BUILD_BLUEPRINT_2026-03-06.md) | **Strategy**: Current build targets and non-negotiables. |
+## Key Manifests
 
----
-
-*"Be genuinely helpful, not performatively helpful. Have opinions. Actions speak louder than filler words."* — **HEIWA SOUL**
+- [`config/swarm/BUILD_BLUEPRINT_2026-03-06.md`](config/swarm/BUILD_BLUEPRINT_2026-03-06.md)
+- [`config/swarm/ai_router.json`](config/swarm/ai_router.json)
+- [`config/identities/profiles.json`](config/identities/profiles.json)
+- [`config/swarm/domain_plan.md`](config/swarm/domain_plan.md)
+- [`HEIWA.md`](HEIWA.md)

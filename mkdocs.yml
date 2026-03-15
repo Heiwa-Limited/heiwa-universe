@@ -1,0 +1,41 @@
+site_name: Heiwa
+site_description: Heiwa control-plane documentation
+site_url: https://docs.heiwa.ltd
+repo_url: https://github.com/Strategizing/heiwa-universe
+repo_name: Strategizing/heiwa-universe
+
+theme:
+  name: material
+  features:
+    - navigation.sections
+    - navigation.expand
+    - content.code.copy
+  palette:
+    - scheme: default
+      primary: black
+      accent: deep orange
+
+markdown_extensions:
+  - admonition
+  - attr_list
+  - tables
+  - toc:
+      permalink: true
+  - pymdownx.superfences
+  - pymdownx.inlinehilite
+  - pymdownx.tabbed:
+      alternate_style: true
+
+nav:
+  - Home: index.md
+  - Current Capability: current-capability.md
+  - Architecture: architecture.md
+  - Provider Registry: provider-registry.md
+  - Routing Policy: routing.md
+  - Deployment: deployment.md
+  - Security: security.md
+  - Failure Modes: failure-modes.md
+  - Operator Runbook: operator-runbook.md
+  - References:
+      - Upstream References: references/UPSTREAM_REFERENCES.md
+      - Historical Research: enterprise/AGENTIC_ENTERPRISE_2026-03-06.md

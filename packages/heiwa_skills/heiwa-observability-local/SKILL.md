@@ -16,7 +16,7 @@ This skill covers local observability for the Heiwa Codex operating layer.
 ## Commands
 
 ```bash
-/Users/dmcgregsauce/.codex/heiwa/bin/heiwax observe tail --profile heiwa-limited
+/Users/dmcgregsauce/.codex/heiwa/bin/heiwax observe tail --profile heiwa-one-system
 /Users/dmcgregsauce/.codex/heiwa/bin/heiwax observe summary --since 24h
 ```
 

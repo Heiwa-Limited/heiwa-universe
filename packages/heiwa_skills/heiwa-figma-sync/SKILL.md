@@ -18,5 +18,5 @@ Use this skill to keep Figma architecture visuals aligned with Heiwa's actual to
 ## Commands
 
 ```bash
-/Users/dmcgregsauce/.codex/heiwa/bin/heiwax sync figma --profile heiwa-limited
+/Users/dmcgregsauce/.codex/heiwa/bin/heiwax sync figma --profile heiwa-one-system
 ```

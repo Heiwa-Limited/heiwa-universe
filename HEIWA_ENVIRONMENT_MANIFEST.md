@@ -1,65 +1,67 @@
-# HEIWA ENVIRONMENT MANIFEST (v2.0 - D: Migration Aligned)
+# HEIWA ENVIRONMENT MANIFEST (v3.0 - MacBook Node A)
 
-## Unified System Paths (WSL/Linux)
+> Last updated: 2026-03-14. Reflects MacBook M4 Pro as the primary orchestrator node.
+> WSL/Ubuntu (Node B: Ryzen 7700X + RTX 3060) is the GPU worker — update paths there separately.
 
-- `HEIWA_ROOT`: `/home/devon/heiwa` (Active Repo)
-- `HEIWA_HOME`: `~/.heiwa` (Symlinked to `D:/identity/.heiwa`)
-- `HEIWA_IDENTITY`: `/mnt/d/identity`
-- `HEIWA_MEMORY`: `/mnt/d/memory`
-- `HEIWA_PROJECTS`: `/mnt/d/projects`
-- `HEIWA_D_DRIVE`: `/mnt/d`
-- `DEVON_OPERATOR_ROOT`: `~/.dmcgregsauce/operator`
-- `CODEX_HOME`: `~/.codex` (Symlinked to `D:/identity/.codex`)
-- `OPENCLAW_HOME`: `~/.openclaw` (Symlinked to `D:/identity/.openclaw`)
-- `ANTIGRAVITY_HOME`: `~/.gemini` (Symlinked to `D:/identity/.gemini`)
+## Node A — MacBook M4 Pro (Primary Orchestrator)
 
-## Toolchain Caches (D: Drive Aligned)
+### Core Paths
+- `HEIWA_ROOT`: `/Users/dmcgregsauce/heiwa` (canonical monorepo)
+- `HEIWA_HOME`: `~/.heiwa` (operator state, cache, summaries)
+- Canonical CLI: `/Users/dmcgregsauce/heiwa/apps/heiwa_cli/heiwa`
 
-- `CARGO_HOME`: `/mnt/d/cache/cargo`
-- `RUSTUP_HOME`: `/mnt/d/dev/rustup`
-- `GOPATH`: `/mnt/d/dev/go`
-- `GOCACHE`: `/mnt/d/cache/go`
-- `PIP_CACHE_DIR`: `/mnt/d/cache/pip`
-- `NPM_CONFIG_PREFIX`: `/mnt/d/dev/npm-global`
-- `npm_config_cache`: `/mnt/d/cache/npm`
-- `PNPM_HOME`: `/mnt/d/dev/pnpm-global`
-- `OLLAMA_MODELS`: `/mnt/d/ai/ollama`
+### Key Environment Variables
+- `HEIWA_ROOT` — monorepo root; auto-discovered by CLI if not set
+- `HEIWA_WORKSPACE_ROOT` — used by subprocess wrappers (ollama_exec.py) to find `config/agents.yaml`
+- `HEIWA_NODE_ID` — defaults to `macbook@heiwa-agile`
+- `HEIWA_AUTH_TOKEN` — hub auth token (set in `.env`)
+- `HEIWA_STATE_BACKEND` — `spacetimedb` | `postgres` | `sqlite` (defaults to sqlite locally)
+- `HEIWA_ENABLE_BROKER` — `true` | `false` (default: `true`)
+- `HEIWA_OLLAMA_URL` — defaults to `http://127.0.0.1:11434`
+- `HEIWA_OLLAMA_MODEL` — overrides resolved model for Ollama adapter
+- ~~`NATS_URL`~~ — removed; transport now uses LocalBusTransport (co-located) + WebSocket (remote workers)
 
-## Core Binaries
+### Local Model State (as of 2026-03-14)
+Installed via Ollama (`ollama list`):
+- `qwen3.5:4b` — primary for node A orchestration/reasoning
+- `qwen3-embedding:0.6b` — embeddings
+- `qwen2.5-coder:1.5b`, `qwen2.5-coder:0.5b` — code-first tasks
+- `llama3.2:3b` — fallback
+- Target (not yet pulled): `llama-4-scout:q4_k_m`, `glm-4.7-flash:q4_k_m`
 
-- `heiwax`: `/home/devon/heiwa/apps/heiwa_cli/heiwa` (V2)
-- `gemini`: Managed via `D:/dev/npm-global/bin/gemini`
-- `picoclaw`: `~/.local/bin/picoclaw`
-- `uv`: `~/.local/bin/uv`
+### Ollama
+- Binary: `/opt/homebrew/bin/ollama`
+- Start: `ollama serve` (background)
+- Models stored in Ollama's default location
+- `config/agents.yaml` provides fallback chain for ollama_exec.py wrapper
 
-## Infrastructure Services (WSL/systemd)
+### Active Config Files
+- `config/swarm/ai_router.json` — model registry, provider routing
+- `config/swarm/BUILD_BLUEPRINT_2026-03-06.md` — hardware topology, execution model
+- `config/agents.yaml` — ollama wrapper config (created 2026-03-14)
+- `config/identities/profiles.json` — HeiwaCells agent catalog
 
-- `heiwa-nats.service` (NATS Server with JetStream enabled)
-- `heiwa-hub.service` (The Spine Orchestrator)
+### Infrastructure Services (local, manual start)
+- Ollama: `ollama serve`
+- Hub: `python -m apps.heiwa_hub.main`
+- Note: NATS is no longer required. Agent transport is handled by LocalBusTransport for co-located agents and WebSocket for remote workers (see `packages/heiwa_sdk/heiwa_sdk/transport.py`).
 
-## Managed Tooling
+### DB Backend (local)
+- Default: `HEIWA_STATE_BACKEND=sqlite` → `hub.db` (SQLite)
+- STDB: Railway-hosted when `HEIWA_STATE_BACKEND=spacetimedb`
+- SQLite schema includes: proposals, nodes, runs, missions, mission_steps, cell_runs, artifacts, and more
 
-- `heiwa-sdk`: Core logic (mcp, security, vault, utils)
-- `heiwa-hub`: Central Hub (FastAPI, MCP Bridge, Web Static)
-- `heiwax`: Unified CLI tool
+## Node B — Ryzen 7700X + RTX 3060 (GPU Worker)
+- Headless Linux worker; connect via SSH
+- Primary models: `Qwen2.5-Coder-7B` Q4, `all-MiniLM-L6-v2`, `SDXL-Turbo`
+- Managed via WSL/systemd; see node B's local manifest for exact paths
 
-## Security & Sovereignty
+## Cloud (Railway)
+- Control plane host
+- SpacetimeDB authoritative state layer
+- Fixed cost target: < $40/month
 
-- `Vault`: `~/.heiwa/vault.env` (Shared via `D:/identity/.heiwa/vault.env`)
-- `Redaction`: Native in SDK (`heiwa_sdk.security.redact_any`)
-- `Registry`: `~/.heiwa/registry/repos/repos.json`
-
-## Config Hierarchy
-
-- `config/swarm/ai_router.json`: Model fallbacks and MCP servers
-- `config/swarm/messaging_channels.json`: Multi-channel matrix
-- `config/swarm/operator_profile.md`: Ideological core
-- `config/identities/`: Persona and identity profiles
-- `packages/heiwa_protocol/schemas/`: Immutable contracts
-
-## Security Hardening
-
-- **Master Key**: Set `HEIWA_MASTER_KEY` in your shell environment to override the default vault key.
-- **Redaction**: Patterns are managed in `packages/heiwa_sdk/heiwa_sdk/security.py`. Update as new sensitive patterns emerge.
-- **Access Control**: Keep `~/.heiwa/vault.env` permissions strictly limited (`chmod 600`).
-- **NATS Security**: Ensure the `NATS_URL` uses `tls://` and authenticated subjects for production traffic.
+## Security
+- Vault: `~/.heiwa/vault.env` (chmod 600)
+- Redaction: `packages/heiwa_sdk/heiwa_sdk/security.py`
+- Untrusted code: E2B sandboxes only — never run LLM-generated code on host

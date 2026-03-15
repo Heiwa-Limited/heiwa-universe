@@ -132,6 +132,25 @@ def test_status_report():
     assert status["claude_code"]["available"] is True
     assert "used" in status["claude_code"]
     assert "max" in status["claude_code"]
+    assert "reserve" in status["claude_code"]
+    assert "surplus_headroom" in status["claude_code"]
+
+
+def test_background_reserve_logic():
+    from heiwa_sdk.rate_ledger import RateGroupLedger
+
+    ledger = RateGroupLedger()
+    reserve = ledger.reserve("openai_codex")
+    assert reserve is not None and reserve >= 2
+    assert ledger.can_run_background("openai_codex")
+
+    # Consume down to the reserve floor.
+    max_turns = ledger.status()["openai_codex"]["max"]
+    for _ in range(max_turns - reserve):
+        ledger.record("openai_codex")
+
+    assert ledger.remaining("openai_codex") == reserve
+    assert not ledger.can_run_background("openai_codex")
 
 
 if __name__ == "__main__":

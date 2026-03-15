@@ -1,26 +1,39 @@
 # Heiwa.ltd Domain Strategy
 
-The `heiwa.ltd` domain serves as the public and administrative gateway to the Heiwa Swarm.
+`heiwa.ltd` is the public shell for the Heiwa stack. The public-first surfaces are marketing, docs, and read-only status. The control plane stays on Railway.
 
-## 📡 1. Public Status Page (`status.heiwa.ltd`)
-- **Technology**: Cloudflare Pages + Workers.
-- **Purpose**: Real-time heartbeat of the mesh.
-- **Data Source**: A Worker script that polls the Railway Cloud HQ and Macbook Node status via NATS (secured by a proxy).
-- **UX**: A minimalist, high-tech dashboard showing "Cloud HQ: Online", "Macbook GPU: Attached", and "Swarm Latency: 45ms".
+## 1. Root + marketing (`heiwa.ltd`)
 
-## 🔐 2. Identity & Auth (`auth.heiwa.ltd`)
-- **Purpose**: SSO for any future web dashboards and agent-to-agent secure handshake.
-- **Mechanism**: OAuth2 flow integrated with the Discord identity.
+- **Host**: Cloudflare Pages
+- **Purpose**: public landing page and product positioning
+- **Content**: supported surfaces, hosting model, and public-safe architecture summary
 
-## 🛠️ 3. Swarm API (`api.heiwa.ltd`)
-- **Purpose**: Trigger tasks from external sources (e.g., GitHub webhooks, personal mobile app).
-- **Action**: Proxies requests into the `heiwa.tasks.ingress` NATS subject.
+## 2. Public status (`status.heiwa.ltd`)
 
-## 📖 4. Documentation (`docs.heiwa.ltd`)
-- **Purpose**: Public/Private wiki for the Heiwa Canon.
-- **Action**: Automatically synced from `heiwa/runtime/docs`.
+- **Host**: Cloudflare Pages
+- **Runtime source**: Railway API + WebSocket status mirror
+- **Purpose**: read-only health and status checks
+- **Transport**: WebSocket-first with HTTP fallback for diagnostics
 
-# Next Steps
-1.  Deploy the initial `status.heiwa.ltd` page using the existing `wrangler.toml`.
-2.  Implement a NATS-to-HTTP proxy on Railway to feed the status page.
-3.  Enable "Zero-Command" Discord interaction by strictly enforcing the `IntentNormalizer`.
+## 3. Runtime API + MCP (`api.heiwa.ltd`)
+
+- **Host**: Railway behind Cloudflare proxy/WAF
+- **Purpose**: public-safe HTTP API, MCP surface, and runtime health
+- **Shape**: `/health`, `/status`, `/tools`, `/call/{tool_name}`, WebSocket status/events
+
+## 4. Documentation (`docs.heiwa.ltd`)
+
+- **Host**: Cloudflare Pages
+- **Source**: MkDocs Material from the canonical repo docs
+- **Purpose**: architecture, deployment, security, and operator guidance
+
+## Planned, not first-class
+
+- `auth.heiwa.ltd` may exist later, but it is not part of the supported v1 surface.
+- Discord is not treated as a required public entry point in the domain plan.
+
+## Next steps
+
+1. Keep the public shell on Cloudflare Pages.
+2. Keep the runtime on Railway with SpacetimeDB as the state layer.
+3. Prefer WebSocket-backed public status/event views over poll-heavy status pages.

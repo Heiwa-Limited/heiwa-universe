@@ -21,8 +21,15 @@ import requests
 import yaml
 
 
+def resolve_root() -> Path:
+    explicit = os.environ.get("HEIWA_WORKSPACE_ROOT")
+    if explicit:
+        return Path(explicit).resolve()
+    return (Path(__file__).resolve().parent / "../../../../..").resolve()
+
+
 def load_config() -> Dict:
-    root = Path(os.environ.get("HEIWA_WORKSPACE_ROOT", ".")).resolve()
+    root = resolve_root()
     cfg_path = root / "config" / "agents.yaml"
     if cfg_path.exists():
         return yaml.safe_load(cfg_path.read_text(encoding="utf-8"))
@@ -67,6 +74,7 @@ def call_ollama(
     timeout: int,
     temperature: float = 0.2,
     num_ctx: int = 8192,
+    system: Optional[str] = None,
 ) -> tuple[str, Optional[str]]:
     """Call Ollama API. Returns (response_text, error_or_none)."""
     url = f"{base_url.rstrip('/')}/api/generate"
@@ -79,6 +87,8 @@ def call_ollama(
             "num_ctx": num_ctx,
         },
     }
+    if system:
+        payload["system"] = system
     try:
         resp = requests.post(url, json=payload, timeout=timeout)
         resp.raise_for_status()
@@ -91,7 +101,7 @@ def call_ollama(
 
 
 def main() -> int:
-    root = Path(os.environ.get("HEIWA_WORKSPACE_ROOT", ".")).resolve()
+    root = resolve_root()
     cfg = load_config()
     prov = cfg["providers"]["ollama"]
     budgets = cfg["budgets"]
@@ -129,17 +139,18 @@ def main() -> int:
     fallback = prov.get("fallback_model")
     timeout = int(prov["timeout_seconds"])
     gen = prov.get("generation", {})
+    system_prompt = os.environ.get("HEIWA_SYSTEM_PROMPT") or None
     temperature = float(gen.get("temperature", 0.2))
     num_ctx = int(gen.get("num_ctx", 8192))
 
     # Attempt primary model
-    response, err = call_ollama(base_url, model, prompt, timeout, temperature, num_ctx)
+    response, err = call_ollama(base_url, model, prompt, timeout, temperature, num_ctx, system=system_prompt)
 
     # Fallback on failure
     if err and fallback:
         log_event(log_file, {"event": "FALLBACK", "from": model, "to": fallback, "error": err})
         model = fallback
-        response, err = call_ollama(base_url, model, prompt, timeout, temperature, num_ctx)
+        response, err = call_ollama(base_url, model, prompt, timeout, temperature, num_ctx, system=system_prompt)
 
     if err:
         log_event(log_file, {"event": "ERROR", "model": model, "error": err})

@@ -12,12 +12,12 @@ from pathlib import Path
 import discord
 
 # Ensure runtime libs can be imported
-MONOREPO_ROOT = Path(__file__).resolve().parents[2]
+MONOREPO_ROOT = Path(__file__).resolve().parents[3]
 RUNTIME_ROOT = MONOREPO_ROOT / "runtime"
 if str(RUNTIME_ROOT) not in sys.path:
-    sys.path.insert(0, str(ROOT / "packages/heiwa_sdk"))
-    sys.path.insert(0, str(ROOT / "packages"))
-    sys.path.insert(0, str(ROOT / "apps"))
+    sys.path.insert(0, str(MONOREPO_ROOT / "packages/heiwa_sdk"))
+    sys.path.insert(0, str(MONOREPO_ROOT / "packages"))
+    sys.path.insert(0, str(MONOREPO_ROOT / "apps"))
 
 from heiwa_sdk.db import Database
 from heiwa_hub.agents.messenger import STRUCTURE

@@ -42,11 +42,9 @@ Use `railway run` for commands that must see Railway-provided env vars locally (
 
 ## Heiwa PicoClaw Railway Notes
 
-This repo includes role-specific env templates under `/Users/dmcgregsauce/heiwa-limited/config/env/`, including:
+The canonical repo does not treat local `.env.picoclaw.*` files as the source of truth. Inspect Railway variables and the PicoClaw wrapper directly:
 
-- `.env.picoclaw.scraper.railway.example`
-- `.env.picoclaw.formatter.railway.example`
-- `.env.picoclaw.checker.railway.example`
+- `/Users/dmcgregsauce/heiwa/apps/heiwa_cli/scripts/agents/wrappers/picoclaw_exec.py`
 
 Check these fields carefully when debugging worker behavior:
 

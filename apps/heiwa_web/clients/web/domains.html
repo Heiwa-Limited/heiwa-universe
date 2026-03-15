@@ -3,52 +3,98 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>HEIWA | Edge Domain Governance</title>
+    <title>Heiwa | Domain Topology</title>
+    <meta
+      name="description"
+      content="Public domain topology for Heiwa's Cloudflare marketing/docs shell and Railway runtime ingress."
+    />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=Space+Grotesk:wght@400;500;700&display=swap"
+      rel="stylesheet"
+    />
     <link rel="stylesheet" href="./assets/styles.css" />
+    <script defer src="./assets/site.js"></script>
+    <script defer src="./assets/domains.js"></script>
   </head>
-  <body>
-    <div class="bg-grid"></div>
+  <body data-page="domains">
+    <div class="bg-grid" aria-hidden="true"></div>
     <header class="topbar">
-      <a class="brand" href="./index.html">HEIWA UNIVERSE</a>
+      <a class="brand" href="./index.html">HEIWA</a>
       <nav class="nav">
         <a href="./index.html">Home</a>
         <a href="./status.html">Status</a>
-        <a href="./domains.html" class="is-active">Domains</a>
+        <a href="./domains.html">Domains</a>
+        <a href="./governance.html">Governance</a>
       </nav>
     </header>
     <main>
       <section class="hero compact">
-        <p class="eyebrow">Digital Barrier Protocols</p>
-        <h1>Edge Domain Topology</h1>
-        <p class="lede">Heiwa's public and private surfaces are gated by Cloudflare Zero Trust and namespaced routing.</p>
+        <p class="eyebrow">Public topology</p>
+        <h1>Cloudflare pages in front, Railway runtime behind</h1>
+        <p class="lede">
+          The public shell stays on Cloudflare Pages. The runtime ingress stays on Railway behind the canonical API
+          domain. This page shows the public-safe routing intent only.
+        </p>
       </section>
-      
-      <section class="panels">
+
+      <section class="panel domain-controls">
+        <div>
+          <h2>Domain manifest</h2>
+          <p class="muted">Generated from the canonical public domain plan.</p>
+        </div>
+        <button id="refresh-domains" class="btn btn-solid" type="button">Refresh</button>
+      </section>
+
+      <section class="callout">
+        <div>
+          <p class="eyebrow">Current view</p>
+          <h2><span id="root-domain">heiwa.ltd</span></h2>
+          <p id="platform-summary">Loading platform summary…</p>
+          <p class="muted mono">Source: <span id="manifest-source">pending</span></p>
+        </div>
+        <div class="callout-metrics">
+          <div><span>DNS / WAF</span><strong id="platform-dns">-</strong></div>
+          <div><span>Public web</span><strong id="platform-web">-</strong></div>
+          <div><span>Control plane</span><strong id="platform-control">-</strong></div>
+        </div>
+      </section>
+
+      <section id="domains-list" class="panels domain-list" aria-live="polite"></section>
+
+      <section class="panels domain-detail-grid">
         <article class="panel">
-          <h2>Root Sovereignty</h2>
-          <p>The primary entry point for Heiwa enterprise information.</p>
-          <div class="domain-kv">
-            <div><span>Domain</span><strong>heiwa.ltd</strong></div>
-            <div><span>Status</span><strong class="good">Active</strong></div>
+          <h2>DNS intent</h2>
+          <div class="dns-table-wrap">
+            <table class="dns-table">
+              <thead>
+                <tr>
+                  <th>Type</th>
+                  <th>Name</th>
+                  <th>Value</th>
+                  <th>Proxy</th>
+                  <th>TTL</th>
+                </tr>
+              </thead>
+              <tbody id="dns-records"></tbody>
+            </table>
           </div>
         </article>
         <article class="panel">
-          <h2>Compute Ingress</h2>
-          <p>Dedicated lanes for NATS mesh and Agent synchronization.</p>
-          <div class="domain-kv">
-            <div><span>API</span><strong>api.heiwa.ltd</strong></div>
-            <div><span>Auth</span><strong>auth.heiwa.ltd</strong></div>
-          </div>
-        </article>
-        <article class="panel">
-          <h2>Observability</h2>
-          <p>Read-only surfaces for real-time telemetry and documentation.</p>
-          <div class="domain-kv">
-            <div><span>Status</span><strong>status.heiwa.ltd</strong></div>
-            <div><span>Docs</span><strong>docs.heiwa.ltd</strong></div>
-          </div>
+          <h2>Bootstrap steps</h2>
+          <ol id="bootstrap-steps" class="steps-list"></ol>
         </article>
       </section>
     </main>
+
+    <footer class="footer">
+      <p>Heiwa public domain plan</p>
+      <p class="footer-links">
+        <a href="./index.html">Home</a>
+        <a href="./status.html">Status</a>
+        <a href="./governance.html">Governance</a>
+      </p>
+    </footer>
   </body>
 </html>

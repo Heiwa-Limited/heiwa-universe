@@ -4,7 +4,7 @@ from pathlib import Path
 from datetime import datetime, timedelta
 
 # Ensure runtime libs can be imported
-ROOT = Path(__file__).resolve().parents[2]
+ROOT = Path(__file__).resolve().parents[3]
 RUNTIME_ROOT = ROOT / "runtime"
 if str(RUNTIME_ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT / "packages/heiwa_sdk"))

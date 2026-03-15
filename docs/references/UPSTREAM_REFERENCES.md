@@ -11,6 +11,7 @@
 | **vLLM** | [github.com/vllm-project/vllm](https://github.com/vllm-project/vllm) | latest | [docs.vllm.ai](https://docs.vllm.ai) | High-throughput inference engine (Node B) |
 | **SpacetimeDB** | [github.com/clockworklabs/SpacetimeDB](https://github.com/clockworklabs/SpacetimeDB) | 1.0.x | [spacetimedb.com/docs](https://spacetimedb.com/docs) | Phase D state layer |
 | **SpacetimeDB Python SDK** | [github.com/clockworklabs/spacetimedb-python-sdk](https://github.com/clockworklabs/spacetimedb-python-sdk) | latest | See repo README | Python client bindings |
+| **MkDocs Material** | [github.com/squidfunk/mkdocs-material](https://github.com/squidfunk/mkdocs-material) | latest | [squidfunk.github.io/mkdocs-material](https://squidfunk.github.io/mkdocs-material/) | Public docs system |
 | **cloudflared** | [github.com/cloudflare/cloudflared](https://github.com/cloudflare/cloudflared) | latest | [developers.cloudflare.com/cloudflare-one/connections/connect-networks](https://developers.cloudflare.com/cloudflare-one/connections/connect-networks) | Zero-trust tunnel |
 | **pgvector** | [github.com/pgvector/pgvector](https://github.com/pgvector/pgvector) | latest | See repo README | PostgreSQL vector extension |
 
@@ -23,6 +24,10 @@
 | **NATS** | — | [docs.nats.io](https://docs.nats.io) |
 | **E2B** | [e2b.dev](https://e2b.dev) | [e2b.dev/docs](https://e2b.dev/docs) |
 | **SiliconFlow** | [siliconflow.com](https://siliconflow.com) | [siliconflow.com/articles](https://siliconflow.com/articles) |
+
+## Historical / compatibility references
+
+- NATS and other compatibility-era components may still appear in historical materials, but they are not part of the public first-class surface described in this docs set.
 
 ## AI Model References
 

@@ -1,4 +1,9 @@
 # libs/heiwa_sdk/nervous_system.py
+"""
+DEPRECATED: This module is a compatibility shim. Use transport.py
+(LocalBusTransport/WorkerSessionManager) directly. Will be removed in a
+future release.
+"""
 from __future__ import annotations
 
 import logging

@@ -49,7 +49,7 @@ def main() -> int:
 
     gateway = HeiwaClawGateway(ROOT)
     gateway.tool_mesh = DummyToolMesh((2, "❌ [HEIWA TOOLMESH] Tool 'heiwa_reflex' is unavailable."))
-    gateway._execute_via_runtime_engine = lambda route, dispatch, instruction: "OK"  # type: ignore[method-assign]
+    gateway._execute_via_runtime_engine = lambda route, dispatch, instruction, system_prompt=None: "OK"  # type: ignore[method-assign]
 
     code, output = asyncio.run(gateway.execute(_route(), "reply with exactly OK"))
     if code != 0 or output != "OK":
@@ -57,7 +57,7 @@ def main() -> int:
 
     gateway = HeiwaClawGateway(ROOT)
     gateway.tool_mesh = DummyToolMesh((2, "❌ [HEIWA TOOLMESH] Tool 'heiwa_code' is unavailable."))
-    gateway._execute_via_runtime_engine = lambda route, dispatch, instruction: "SHOULD NOT RUN"  # type: ignore[method-assign]
+    gateway._execute_via_runtime_engine = lambda route, dispatch, instruction, system_prompt=None: "SHOULD NOT RUN"  # type: ignore[method-assign]
 
     code, output = asyncio.run(
         gateway.execute(

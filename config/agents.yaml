@@ -1,0 +1,15 @@
+providers:
+  ollama:
+    base_url: "http://127.0.0.1:11434"
+    default_model: "qwen3.5:4b"
+    fallback_model: "llama3.2:3b"
+    timeout_seconds: 120
+    generation:
+      temperature: 0.2
+      num_ctx: 8192
+
+budgets:
+  max_prompt_chars: 120000
+
+# Note: llama-4-scout:q4_k_m and glm-4.7-flash:q4_k_m are aspirational targets
+# (per BUILD_BLUEPRINT_2026-03-06). Use qwen3.5:4b until those are pulled.

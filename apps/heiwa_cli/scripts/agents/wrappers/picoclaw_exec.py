@@ -22,6 +22,13 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 
+def resolve_root() -> Path:
+    explicit = os.environ.get("HEIWA_WORKSPACE_ROOT")
+    if explicit:
+        return Path(explicit).resolve()
+    return (Path(__file__).resolve().parent / "../../../../..").resolve()
+
+
 def _read_payload() -> str:
     if len(sys.argv) > 1:
         return " ".join(sys.argv[1:]).strip()
@@ -56,7 +63,7 @@ def _parse_command(payload: str) -> tuple[str, list[str]]:
 
 
 def main() -> int:
-    root = Path(os.environ.get("HEIWA_WORKSPACE_ROOT", ".")).resolve()
+    root = resolve_root()
     log_dir, run_id = _log_dir(root)
     payload = _read_payload()
 
@@ -93,6 +100,7 @@ def main() -> int:
             capture_output=True,
             text=True,
             timeout=timeout_sec,
+            cwd=str(root),
             check=False,
         )
     except subprocess.TimeoutExpired:

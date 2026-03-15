@@ -22,6 +22,7 @@ from heiwa_sdk import (
     redact_any,
     load_swarm_env,
 )
+from heiwa_sdk.heiwaclaw import HeiwaClawGateway
 from heiwa_protocol.routing import BrokerRouteRequest
 
 from heiwa_hub.cognition.enrichment import BrokerEnrichmentService
@@ -44,6 +45,7 @@ TASK_SNAPSHOTS: dict[str, dict[str, Any]] = {}
 ROOT = Path(__file__).resolve().parents[2]
 bench = HeiwaBench(ROOT)
 cells = HeiwaCellCatalog(ROOT)
+claw_gateway = HeiwaClawGateway(ROOT)
 WEB_ROOT = ROOT / "apps" / "heiwa_web" / "clients" / "web"
 ASSETS_ROOT = WEB_ROOT / "assets"
 
@@ -73,6 +75,27 @@ def _snapshot_task(task_id: str, **patch: Any) -> dict[str, Any]:
     return record
 
 
+def _page_or_404(name: str) -> FileResponse:
+    page = _web_file(name)
+    if page:
+        return FileResponse(page)
+    raise HTTPException(status_code=404, detail=f"{name} unavailable")
+
+
+def _operator_snapshot_payload() -> dict[str, Any]:
+    from heiwa_sdk.rate_ledger import get_rate_ledger
+
+    return {
+        "providers": state.get_provider_accounts(),
+        "missions": state.get_missions(limit=100),
+        "approvals": [item for item in (_serialize_approval(task_id) for task_id in TASK_SNAPSHOTS) if item],
+        "live_tasks": list(TASK_SNAPSHOTS.values())[-100:],
+        "rate_groups": get_rate_ledger().status(),
+        "history": state.get_history(limit=25),
+        "timestamp": time.time(),
+    }
+
+
 async def _record_status_event(envelope: Dict[str, Any]):
     payload = envelope.get("data", envelope)
     task_id = payload.get("task_id")
@@ -91,6 +114,33 @@ async def _record_status_event(envelope: Dict[str, Any]):
     if not current.get("run_status"):
         patch["status"] = payload.get("status")
     _snapshot_task(task_id, **patch)
+    try:
+        status = str(payload.get("status") or "").upper()
+        if status == "AWAITING_APPROVAL":
+            db.set_mission_status(task_id, "waiting_approval", summary=payload.get("message"))
+        elif status == "APPROVED":
+            db.set_mission_status(task_id, "running", summary="Approval granted")
+            snapshot = TASK_SNAPSHOTS.get(task_id, {})
+            cell = dict((snapshot.get("route") or {}))
+            dispatch = dict(snapshot.get("dispatch") or {})
+            db.start_cell_run(
+                {
+                    "cell_run_id": f"cellrun-{task_id}",
+                    "mission_id": task_id,
+                    "step_id": f"{task_id}:execute",
+                    "status": "running",
+                    "cell_id": snapshot.get("assigned_worker") or cell.get("assigned_worker") or dispatch.get("provider") or "worker",
+                    "cell_role": snapshot.get("assigned_worker") or cell.get("assigned_worker") or "executor",
+                    "provider": dispatch.get("provider", ""),
+                    "model": dispatch.get("target_model", ""),
+                    "rate_group": dispatch.get("rate_group", ""),
+                    "tool": dispatch.get("adapter_tool", ""),
+                }
+            )
+        elif status in {"REJECTED", "EXPIRED"}:
+            db.pause_mission(task_id, summary=str(payload.get("message") or status))
+    except Exception:
+        pass
 
 
 async def _record_result_event(envelope: Dict[str, Any]):
@@ -110,6 +160,37 @@ async def _record_result_event(envelope: Dict[str, Any]):
         intent_class=payload.get("intent_class"),
         elapsed_sec=payload.get("elapsed_sec"),
     )
+    try:
+        summary = str(payload.get("summary") or "")
+        status = str(payload.get("status") or "").upper()
+        db.finish_cell_run(
+            {
+                "cell_run_id": f"cellrun-{task_id}",
+                "status": "completed" if status in {"PASS", "DELIVERED"} else "failed",
+                "output_summary": summary,
+            }
+        )
+        if status in {"PASS", "DELIVERED"}:
+            db.complete_mission(task_id, summary=summary[:500] if summary else "Completed")
+        elif status in {"FAIL", "BLOCKED_AUTH", "BLOCKED_NO_CONTENT"}:
+            db.fail_mission(task_id, error=summary[:500] if summary else status)
+        db.register_artifact(
+            {
+                "artifact_id": f"artifact-{task_id}",
+                "mission_id": task_id,
+                "cell_run_id": f"cellrun-{task_id}",
+                "artifact_type": "summary",
+                "title": "Hub task summary",
+                "content": {
+                    "summary": summary,
+                    "status": status,
+                    "provider": payload.get("provider"),
+                    "target_model": payload.get("target_model"),
+                },
+            }
+        )
+    except Exception:
+        pass
 
 
 async def _record_progress_event(envelope: Dict[str, Any]):
@@ -176,6 +257,42 @@ async def status_page():
     if page:
         return FileResponse(page)
     raise HTTPException(status_code=404, detail="status page unavailable")
+
+
+@app.get("/connections.html")
+async def connections_page():
+    return _page_or_404("connections.html")
+
+
+@app.get("/missions.html")
+async def missions_page():
+    return _page_or_404("missions.html")
+
+
+@app.get("/live")
+@app.get("/live.html")
+async def live_page():
+    return _page_or_404("live.html")
+
+
+@app.get("/approvals.html")
+async def approvals_page():
+    return _page_or_404("approvals.html")
+
+
+@app.get("/rate-groups.html")
+async def rate_groups_page():
+    return _page_or_404("rate-groups.html")
+
+
+@app.get("/cells.html")
+async def cells_page():
+    return _page_or_404("cells.html")
+
+
+@app.get("/history.html")
+async def history_page():
+    return _page_or_404("history.html")
 
 
 @app.get("/status")
@@ -374,6 +491,9 @@ async def create_task(req: TaskRequest, authorization: str | None = Header(None)
         "timestamp": time.time(),
     })
     route = enrichment.enrich(broker_req)
+    dispatch = claw_gateway.resolve(route)
+    cell_recommendation = cells.recommend(req.raw_text)
+    cell = dict(cell_recommendation.get("cell") or {})
 
     # Publish to local bus — include auth_token so Spine's barrier passes,
     # and include enrichment fields so Spine skips double-enrichment.
@@ -395,12 +515,82 @@ async def create_task(req: TaskRequest, authorization: str | None = Header(None)
         task_id,
         status="ACCEPTED",
         route=route.to_dict(),
+        dispatch=dispatch.to_dict(),
         sender_id=req.sender_id,
         source_surface=req.source_surface,
         raw_text=req.raw_text,
         risk_level=route.risk_level,
         requires_approval=route.requires_approval,
+        provider=dispatch.provider,
+        assigned_worker=route.assigned_worker,
+        target_tool=dispatch.adapter_tool,
+        target_model=dispatch.target_model,
+        rate_group=dispatch.rate_group,
+        mission_id=task_id,
     )
+
+    try:
+        db.create_mission(
+            {
+                "mission_id": task_id,
+                "status": "waiting_approval" if route.requires_approval else "running",
+                "source_surface": req.source_surface,
+                "node_id": req.sender_id,
+                "prompt": req.raw_text,
+                "intent_class": route.intent_class,
+                "risk_level": route.risk_level,
+                "active_cell_id": cell.get("cell_id") or route.assigned_worker,
+                "target_tool": dispatch.adapter_tool,
+                "target_model": dispatch.target_model,
+                "summary": None,
+                "metadata": {"route": route.to_dict(), "dispatch": dispatch.to_dict(), "cell": cell},
+            }
+        )
+        db.append_mission_step(
+            {
+                "step_id": f"{task_id}:ingress",
+                "mission_id": task_id,
+                "position": 1,
+                "status": "completed",
+                "step_kind": "ingress",
+                "cell_role": (cell.get("roster") or [{}])[0].get("role", route.assigned_worker),
+                "title": "Ingress",
+                "detail": f"{route.intent_class} via {req.source_surface}",
+                "input": {"prompt": req.raw_text},
+                "output": route.to_dict(),
+            }
+        )
+        db.append_mission_step(
+            {
+                "step_id": f"{task_id}:execute",
+                "mission_id": task_id,
+                "position": 2,
+                "status": "waiting_approval" if route.requires_approval else "running",
+                "step_kind": "execute",
+                "cell_role": (cell.get("roster") or [{}])[0].get("role", route.assigned_worker),
+                "title": "Execution",
+                "detail": f"{dispatch.provider} {dispatch.target_model}",
+                "input": route.to_dict(),
+                "output": {},
+            }
+        )
+        if not route.requires_approval:
+            db.start_cell_run(
+                {
+                    "cell_run_id": f"cellrun-{task_id}",
+                    "mission_id": task_id,
+                    "step_id": f"{task_id}:execute",
+                    "status": "running",
+                    "cell_id": cell.get("cell_id") or route.assigned_worker,
+                    "cell_role": (cell.get("roster") or [{}])[0].get("role", route.assigned_worker),
+                    "provider": dispatch.provider,
+                    "model": dispatch.target_model,
+                    "rate_group": dispatch.rate_group,
+                    "tool": dispatch.adapter_tool,
+                }
+            )
+    except Exception:
+        logger.exception("Failed to persist mission bootstrap for %s", task_id)
 
     return {
         "task_id": task_id,
@@ -518,6 +708,66 @@ async def reject_task(
     )
 
 
+@app.get("/auth/providers")
+async def list_provider_accounts(authorization: str | None = Header(None)):
+    _validate_auth_token(authorization)
+    return {"providers": state.get_provider_accounts()}
+
+
+@app.get("/auth/providers/{provider_id}/status")
+async def get_provider_account_status(provider_id: str, authorization: str | None = Header(None)):
+    _validate_auth_token(authorization)
+    payload = state.get_provider_status(provider_id)
+    if not payload:
+        raise HTTPException(status_code=404, detail=f"Provider {provider_id} not found")
+    return payload
+
+
+@app.get("/missions")
+async def list_missions(status: str | None = None, limit: int = 50, authorization: str | None = Header(None)):
+    _validate_auth_token(authorization)
+    return {"missions": state.get_missions(status=status, limit=limit)}
+
+
+@app.get("/missions/{mission_id}")
+async def get_mission(mission_id: str, authorization: str | None = Header(None)):
+    _validate_auth_token(authorization)
+    payload = state.get_mission_detail(mission_id)
+    if not payload:
+        raise HTTPException(status_code=404, detail=f"Mission {mission_id} not found")
+    return payload
+
+
+@app.post("/missions/{mission_id}/pause")
+async def pause_mission(mission_id: str, authorization: str | None = Header(None)):
+    _validate_auth_token(authorization)
+    if not state.pause_mission(mission_id, summary="Paused by operator"):
+        raise HTTPException(status_code=404, detail=f"Mission {mission_id} not found")
+    return state.get_mission_detail(mission_id) or {"mission_id": mission_id, "status": "paused"}
+
+
+@app.post("/missions/{mission_id}/resume")
+async def resume_mission(mission_id: str, authorization: str | None = Header(None)):
+    _validate_auth_token(authorization)
+    if not state.resume_mission(mission_id, summary="Resumed by operator"):
+        raise HTTPException(status_code=404, detail=f"Mission {mission_id} not found")
+    return state.get_mission_detail(mission_id) or {"mission_id": mission_id, "status": "running"}
+
+
+@app.get("/rate-groups")
+async def list_rate_groups(authorization: str | None = Header(None)):
+    _validate_auth_token(authorization)
+    from heiwa_sdk.rate_ledger import get_rate_ledger
+
+    return {"rate_groups": get_rate_ledger().status()}
+
+
+@app.get("/history")
+async def get_history(limit: int = 20, authorization: str | None = Header(None)):
+    _validate_auth_token(authorization)
+    return state.get_history(limit=limit)
+
+
 @app.websocket("/ws/tasks/{task_id}")
 async def task_events(ws: WebSocket, task_id: str, token: str | None = None):
     """Stream task events for a specific task to the CLI.
@@ -565,6 +815,22 @@ async def task_events(ws: WebSocket, task_id: str, token: str | None = None):
         # Unsubscribe to avoid leaked callbacks
         for subj in (Subject.TASK_STATUS, Subject.TASK_EXEC_RESULT, Subject.TASK_PROGRESS):
             bus.unsubscribe(subj, _capture)
+
+
+@app.websocket("/ws/operator")
+async def operator_events(ws: WebSocket, token: str | None = None):
+    expected = os.getenv("HEIWA_AUTH_TOKEN", "")
+    if not expected or not token or token != expected:
+        await ws.close(code=4003)
+        return
+
+    await ws.accept()
+    try:
+        while True:
+            await ws.send_json(_operator_snapshot_payload())
+            await asyncio.sleep(2)
+    except WebSocketDisconnect:
+        logger.debug("Operator websocket disconnected.")
 
 
 # ---------------------------------------------------------------------------

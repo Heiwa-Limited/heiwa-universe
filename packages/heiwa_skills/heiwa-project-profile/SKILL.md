@@ -18,5 +18,5 @@ Use this skill whenever a task spans GitHub/Railway/Figma/runtime context and sh
 
 ```bash
 /Users/dmcgregsauce/.codex/heiwa/bin/heiwax profile list
-/Users/dmcgregsauce/.codex/heiwa/bin/heiwax profile validate heiwa-limited
+/Users/dmcgregsauce/.codex/heiwa/bin/heiwax profile validate heiwa-one-system
 ```

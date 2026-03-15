@@ -1,5 +1,7 @@
 # **Architecting the Sovereign Agentic Enterprise: The Heiwa Operating Stack in 2026**
 
+> Historical research artifact. Keep for strategy background only. The current source of truth for supported surfaces and repo boundaries lives in the top-level README, `mkdocs.yml`, and the focused docs pages in this directory.
+
 The enterprise software landscape of March 2026 represents a definitive inflection point in computational architecture. Organizations are rapidly moving away from standard configurable software-as-a-service (SaaS) and intermediate SaaS+ models, fully committing to "agentic-only" architectures.1 Within this paradigm, software no longer functions as a static executor of predefined human commands. Instead, it operates as a decentralized, autonomous mesh of software agents capable of coordinating workflows, dynamically navigating edge cases, and making high-stakes decisions under human oversight.1 This transition addresses the prevailing "velocity paradox," wherein enterprises face intense pressure to adopt artificial intelligence to maintain competitiveness, yet find that the technology advances significantly faster than existing legacy operating models can safely support.3
 
 For the Heiwa entity, operating as a sovereign, revenue-generating technology stack, this environment necessitates a complete architectural re-evaluation. The objective is to construct a highly efficient, AI-native operating ecosystem that functions simultaneously as a rigorous engineering environment and a scalable commercial business stack.4 Grounded in the immediate realities of hardware availability, latency economics, and verifiable software engineering patterns, this analysis provides an exhaustive blueprint for deploying the Heiwa Swarm. The architecture must bridge localized, highly constrained hardware with elastic cloud infrastructures, ensuring that the resulting system remains robust, deterministic, and fiercely protective of its operational gross margins.
@@ -62,7 +64,7 @@ The PC workstation, featuring an RTX 3080/4070 with a strict 12GB VRAM ceiling, 
 
 The structural organization of the Heiwa ecosystem is paramount. A poorly structured filesystem will cause autonomous agents to hallucinate, ingest irrelevant context, and produce inconsistent artifacts. The repository architecture must natively support out-loop unattended execution.
 
-Following the analysis of the existing GitHub repositories, heiwa-universe serves as the canonical monorepo for the entire decentralized mesh.14 It acts as the central source of truth, containing 87.2 percent of the operational Python codebase, while heiwa-limited, heiwa-node, and heiwa-dj function as supporting components, prototypes, or archived references requiring strict contextual isolation from active agentic loops.4
+Following the analysis of the existing GitHub repositories, heiwa-universe serves as the canonical monorepo for the decentralized mesh.14 Supporting repos and historical references should not be treated as active source-of-truth runtime surfaces in the current stack documentation.4
 
 The heiwa-universe monorepo is meticulously segregated to enforce boundaries between agent reasoning, UI visibility, and infrastructure automation:
 

@@ -27,10 +27,10 @@ Use this as the umbrella skill for cross-provider operational work. It is the gl
 ## Quick Commands
 
 ```bash
-/Users/dmcgregsauce/.codex/heiwa/bin/heiwax doctor --profile heiwa-limited
-/Users/dmcgregsauce/.codex/heiwa/bin/heiwax audit ci --profile heiwa-limited
-/Users/dmcgregsauce/.codex/heiwa/bin/heiwax audit railway --profile heiwa-limited
-/Users/dmcgregsauce/.codex/heiwa/bin/heiwax workflow run ci-audit --profile heiwa-limited --dry-run
+/Users/dmcgregsauce/.codex/heiwa/bin/heiwax doctor --profile heiwa-one-system
+/Users/dmcgregsauce/.codex/heiwa/bin/heiwax audit ci --profile heiwa-one-system
+/Users/dmcgregsauce/.codex/heiwa/bin/heiwax audit railway --profile heiwa-one-system
+/Users/dmcgregsauce/.codex/heiwa/bin/heiwax workflow run ci-audit --profile heiwa-one-system --dry-run
 ```
 
 ## Bundled Resources
@@ -49,9 +49,9 @@ Use this as the umbrella skill for cross-provider operational work. It is the gl
 Before adding new automations or enabling more write-capable workflows, run a verification sweep:
 
 ```bash
-/Users/dmcgregsauce/.codex/heiwa/bin/heiwax verify redaction --profile heiwa-limited
-/Users/dmcgregsauce/.codex/heiwa/bin/heiwax verify skills --profile heiwa-limited
-/Users/dmcgregsauce/.codex/heiwa/bin/heiwax verify stack --profile heiwa-limited
+/Users/dmcgregsauce/.codex/heiwa/bin/heiwax verify redaction --profile heiwa-one-system
+/Users/dmcgregsauce/.codex/heiwa/bin/heiwax verify skills --profile heiwa-one-system
+/Users/dmcgregsauce/.codex/heiwa/bin/heiwax verify stack --profile heiwa-one-system
 ```
 
 Use `--full-live` on `verify stack` when you want to exercise live read-only runbooks and confirm output capture artifacts.

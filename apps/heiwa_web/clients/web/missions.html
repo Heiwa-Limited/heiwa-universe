@@ -1,0 +1,49 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Heiwa Operator | Mission Control</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=Space+Grotesk:wght@400;500;700&display=swap" rel="stylesheet" />
+    <link rel="stylesheet" href="./assets/styles.css" />
+    <script defer src="./assets/site.js"></script>
+    <script defer src="./assets/operator.js"></script>
+  </head>
+  <body data-page="missions" data-view="missions">
+    <div class="bg-grid" aria-hidden="true"></div>
+    <header class="topbar">
+      <a class="brand" href="./connections.html">HEIWA OPERATOR</a>
+      <nav class="nav">
+        <a href="./connections.html">Connections</a>
+        <a href="./missions.html">Mission Control</a>
+        <a href="./live.html">Live Run</a>
+        <a href="./approvals.html">Approvals</a>
+        <a href="./rate-groups.html">Rate Groups</a>
+        <a href="./cells.html">Cells</a>
+        <a href="./history.html">History</a>
+      </nav>
+    </header>
+    <main>
+      <section class="hero compact">
+        <p class="eyebrow">Operator App</p>
+        <h1>Mission state across the hub and CLI.</h1>
+        <p class="lede">Mission records mirror the same lifecycle the CLI writes locally and the hub updates during task ingress, approval, and execution.</p>
+        <div class="operator-toolbar">
+          <div class="operator-actions">
+            <button id="set-token" class="btn btn-solid">Set Token</button>
+            <button id="clear-token" class="btn btn-outline">Clear Token</button>
+            <button id="refresh-view" class="btn btn-outline">Refresh</button>
+          </div>
+          <span id="token-status" class="token-chip warn">token missing</span>
+        </div>
+      </section>
+      <section class="panels">
+        <article class="panel panel-full">
+          <div id="operator-root" class="stack"></div>
+        </article>
+      </section>
+    </main>
+  </body>
+</html>

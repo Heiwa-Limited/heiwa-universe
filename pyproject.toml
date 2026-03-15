@@ -1,0 +1,5 @@
+[tool.pytest.ini_options]
+testpaths = ["apps/heiwa_hub/tests"]
+python_files = "test_*.py"
+python_functions = "test_*"
+addopts = "--tb=short -q"

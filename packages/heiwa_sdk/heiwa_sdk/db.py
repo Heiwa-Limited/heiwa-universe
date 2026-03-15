@@ -512,6 +512,8 @@ class Database:
             """
             )
 
+            self._init_operator_tables(cursor)
+
             conn.commit()
             print("[DB] Postgres schema initialized")
 
@@ -545,6 +547,171 @@ class Database:
             CREATE INDEX IF NOT EXISTS idx_alerts_status_created_at
             ON alerts(status, created_at DESC)
         """
+        )
+
+    def _init_operator_tables(self, cursor):
+        self._exec(
+            cursor,
+            """
+            CREATE TABLE IF NOT EXISTS provider_accounts (
+                account_id TEXT PRIMARY KEY,
+                provider_id TEXT NOT NULL,
+                node_id TEXT NOT NULL,
+                auth_kind TEXT NOT NULL,
+                local_handle_ref TEXT NOT NULL,
+                status TEXT NOT NULL,
+                display_name TEXT,
+                default_model TEXT,
+                rate_group TEXT NOT NULL,
+                available_models_json TEXT,
+                last_validated_at TEXT,
+                last_error TEXT,
+                updated_at TEXT NOT NULL
+            )
+        """,
+        )
+        self._exec(
+            cursor,
+            "CREATE INDEX IF NOT EXISTS idx_provider_accounts_provider_updated ON provider_accounts(provider_id, updated_at DESC)",
+        )
+        self._exec(
+            cursor,
+            "CREATE INDEX IF NOT EXISTS idx_provider_accounts_node_updated ON provider_accounts(node_id, updated_at DESC)",
+        )
+
+        self._exec(
+            cursor,
+            """
+            CREATE TABLE IF NOT EXISTS missions (
+                mission_id TEXT PRIMARY KEY,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                status TEXT NOT NULL,
+                source_surface TEXT NOT NULL,
+                node_id TEXT NOT NULL,
+                prompt TEXT NOT NULL,
+                intent_class TEXT NOT NULL,
+                risk_level TEXT NOT NULL,
+                active_step_id TEXT,
+                active_cell_id TEXT,
+                target_tool TEXT,
+                target_model TEXT,
+                summary TEXT,
+                error TEXT,
+                metadata_json TEXT
+            )
+        """,
+        )
+        self._exec(
+            cursor,
+            "CREATE INDEX IF NOT EXISTS idx_missions_status_updated ON missions(status, updated_at DESC)",
+        )
+        self._exec(
+            cursor,
+            "CREATE INDEX IF NOT EXISTS idx_missions_node_updated ON missions(node_id, updated_at DESC)",
+        )
+
+        self._exec(
+            cursor,
+            """
+            CREATE TABLE IF NOT EXISTS mission_steps (
+                step_id TEXT PRIMARY KEY,
+                mission_id TEXT NOT NULL,
+                position INTEGER NOT NULL,
+                status TEXT NOT NULL,
+                step_kind TEXT NOT NULL,
+                cell_role TEXT NOT NULL,
+                title TEXT NOT NULL,
+                detail TEXT,
+                input_json TEXT,
+                output_json TEXT,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL
+            )
+        """,
+        )
+        self._exec(
+            cursor,
+            "CREATE INDEX IF NOT EXISTS idx_mission_steps_mission_position ON mission_steps(mission_id, position ASC)",
+        )
+
+        self._exec(
+            cursor,
+            """
+            CREATE TABLE IF NOT EXISTS cell_runs (
+                cell_run_id TEXT PRIMARY KEY,
+                mission_id TEXT NOT NULL,
+                step_id TEXT,
+                status TEXT NOT NULL,
+                cell_id TEXT NOT NULL,
+                cell_role TEXT NOT NULL,
+                provider TEXT NOT NULL,
+                model TEXT NOT NULL,
+                rate_group TEXT NOT NULL,
+                tool TEXT NOT NULL,
+                started_at TEXT NOT NULL,
+                ended_at TEXT,
+                tokens_input INTEGER DEFAULT 0,
+                tokens_output INTEGER DEFAULT 0,
+                tokens_total INTEGER DEFAULT 0,
+                output_summary TEXT
+            )
+        """,
+        )
+        self._exec(
+            cursor,
+            "CREATE INDEX IF NOT EXISTS idx_cell_runs_mission_started ON cell_runs(mission_id, started_at DESC)",
+        )
+        self._exec(
+            cursor,
+            "CREATE INDEX IF NOT EXISTS idx_cell_runs_status_started ON cell_runs(status, started_at DESC)",
+        )
+
+        self._exec(
+            cursor,
+            """
+            CREATE TABLE IF NOT EXISTS session_summaries (
+                summary_id TEXT PRIMARY KEY,
+                session_id TEXT NOT NULL,
+                node_id TEXT NOT NULL,
+                created_at TEXT NOT NULL,
+                summary_text TEXT NOT NULL,
+                metadata_json TEXT
+            )
+        """,
+        )
+        self._exec(
+            cursor,
+            "CREATE INDEX IF NOT EXISTS idx_session_summaries_node_created ON session_summaries(node_id, created_at DESC)",
+        )
+        self._exec(
+            cursor,
+            "CREATE INDEX IF NOT EXISTS idx_session_summaries_session_created ON session_summaries(session_id, created_at DESC)",
+        )
+
+        self._exec(
+            cursor,
+            """
+            CREATE TABLE IF NOT EXISTS artifacts (
+                artifact_id TEXT PRIMARY KEY,
+                mission_id TEXT NOT NULL,
+                cell_run_id TEXT,
+                artifact_type TEXT NOT NULL,
+                title TEXT NOT NULL,
+                uri TEXT,
+                path TEXT,
+                content_json TEXT,
+                created_at TEXT NOT NULL
+            )
+        """,
+        )
+        self._exec(
+            cursor,
+            "CREATE INDEX IF NOT EXISTS idx_artifacts_mission_created ON artifacts(mission_id, created_at DESC)",
+        )
+        self._exec(
+            cursor,
+            "CREATE INDEX IF NOT EXISTS idx_artifacts_type_created ON artifacts(artifact_type, created_at DESC)",
         )
 
     def _init_db(self):
@@ -803,6 +970,111 @@ class Database:
             )
         """
         )
+
+        # Missions (execution tracking layer)
+        cursor.execute(
+            """
+            CREATE TABLE IF NOT EXISTS missions (
+                mission_id TEXT PRIMARY KEY,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                status TEXT NOT NULL,
+                source_surface TEXT NOT NULL,
+                node_id TEXT NOT NULL,
+                prompt TEXT NOT NULL,
+                intent_class TEXT NOT NULL,
+                risk_level TEXT NOT NULL,
+                active_step_id TEXT,
+                active_cell_id TEXT,
+                target_tool TEXT,
+                target_model TEXT,
+                summary TEXT,
+                error TEXT,
+                metadata_json TEXT
+            )
+        """
+        )
+        cursor.execute(
+            "CREATE INDEX IF NOT EXISTS idx_missions_status_updated ON missions(status, updated_at DESC)"
+        )
+        cursor.execute(
+            "CREATE INDEX IF NOT EXISTS idx_missions_node_updated ON missions(node_id, updated_at DESC)"
+        )
+
+        cursor.execute(
+            """
+            CREATE TABLE IF NOT EXISTS mission_steps (
+                step_id TEXT PRIMARY KEY,
+                mission_id TEXT NOT NULL,
+                position INTEGER NOT NULL,
+                status TEXT NOT NULL,
+                step_kind TEXT NOT NULL,
+                cell_role TEXT NOT NULL,
+                title TEXT NOT NULL,
+                detail TEXT,
+                input_json TEXT,
+                output_json TEXT,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL
+            )
+        """
+        )
+        cursor.execute(
+            "CREATE INDEX IF NOT EXISTS idx_mission_steps_mission_position ON mission_steps(mission_id, position ASC)"
+        )
+
+        cursor.execute(
+            """
+            CREATE TABLE IF NOT EXISTS cell_runs (
+                cell_run_id TEXT PRIMARY KEY,
+                mission_id TEXT NOT NULL,
+                step_id TEXT,
+                status TEXT NOT NULL,
+                cell_id TEXT NOT NULL,
+                cell_role TEXT NOT NULL,
+                provider TEXT NOT NULL,
+                model TEXT NOT NULL,
+                rate_group TEXT NOT NULL,
+                tool TEXT NOT NULL,
+                started_at TEXT NOT NULL,
+                ended_at TEXT,
+                tokens_input INTEGER DEFAULT 0,
+                tokens_output INTEGER DEFAULT 0,
+                tokens_total INTEGER DEFAULT 0,
+                output_summary TEXT
+            )
+        """
+        )
+        cursor.execute(
+            "CREATE INDEX IF NOT EXISTS idx_cell_runs_mission_started ON cell_runs(mission_id, started_at DESC)"
+        )
+        cursor.execute(
+            "CREATE INDEX IF NOT EXISTS idx_cell_runs_status_started ON cell_runs(status, started_at DESC)"
+        )
+
+        cursor.execute(
+            """
+            CREATE TABLE IF NOT EXISTS artifacts (
+                artifact_id TEXT PRIMARY KEY,
+                mission_id TEXT NOT NULL,
+                cell_run_id TEXT,
+                artifact_type TEXT NOT NULL,
+                title TEXT NOT NULL,
+                uri TEXT,
+                path TEXT,
+                content_json TEXT,
+                created_at TEXT NOT NULL
+            )
+        """
+        )
+        cursor.execute(
+            "CREATE INDEX IF NOT EXISTS idx_artifacts_mission_created ON artifacts(mission_id, created_at DESC)"
+        )
+        cursor.execute(
+            "CREATE INDEX IF NOT EXISTS idx_artifacts_type_created ON artifacts(artifact_type, created_at DESC)"
+        )
+
+        self._init_operator_tables(cursor)
 
         conn.commit()
         conn.close()
@@ -1712,6 +1984,630 @@ class Database:
             self._exec(cursor, "SELECT * FROM runs WHERE run_id = ?", (run_id,))
             row = cursor.fetchone()
             return self._row_to_dict(row, cursor)
+        finally:
+            conn.close()
+
+    def upsert_provider_account_status(self, account_data):
+        if self.state_backend == "spacetimedb" and self.stdb:
+            return self.stdb.upsert_provider_account_status(account_data)
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        payload = {
+            "account_id": account_data["account_id"],
+            "provider_id": account_data["provider_id"],
+            "node_id": account_data["node_id"],
+            "auth_kind": account_data.get("auth_kind", "unknown"),
+            "local_handle_ref": account_data.get("local_handle_ref", ""),
+            "status": account_data.get("status", "unknown"),
+            "display_name": account_data.get("display_name"),
+            "default_model": account_data.get("default_model"),
+            "rate_group": account_data.get("rate_group", ""),
+            "available_models_json": json.dumps(account_data.get("available_models", [])),
+            "last_validated_at": account_data.get("last_validated_at"),
+            "last_error": account_data.get("last_error"),
+            "updated_at": account_data.get("updated_at") or datetime.datetime.now(datetime.timezone.utc).isoformat(),
+        }
+        try:
+            self._exec(
+                cursor,
+                """
+                INSERT INTO provider_accounts (
+                    account_id, provider_id, node_id, auth_kind, local_handle_ref, status,
+                    display_name, default_model, rate_group, available_models_json,
+                    last_validated_at, last_error, updated_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(account_id) DO UPDATE SET
+                    provider_id = excluded.provider_id,
+                    node_id = excluded.node_id,
+                    auth_kind = excluded.auth_kind,
+                    local_handle_ref = excluded.local_handle_ref,
+                    status = excluded.status,
+                    display_name = excluded.display_name,
+                    default_model = excluded.default_model,
+                    rate_group = excluded.rate_group,
+                    available_models_json = excluded.available_models_json,
+                    last_validated_at = excluded.last_validated_at,
+                    last_error = excluded.last_error,
+                    updated_at = excluded.updated_at
+                """,
+                (
+                    payload["account_id"],
+                    payload["provider_id"],
+                    payload["node_id"],
+                    payload["auth_kind"],
+                    payload["local_handle_ref"],
+                    payload["status"],
+                    payload["display_name"],
+                    payload["default_model"],
+                    payload["rate_group"],
+                    payload["available_models_json"],
+                    payload["last_validated_at"],
+                    payload["last_error"],
+                    payload["updated_at"],
+                ),
+            )
+            conn.commit()
+            return True
+        except Exception as e:
+            conn.rollback()
+            logger.error("Provider account upsert failed: %s", e)
+            return False
+        finally:
+            conn.close()
+
+    def list_provider_accounts(self, provider_id=None, node_id=None, status=None, limit=50):
+        if self.state_backend == "spacetimedb" and self.stdb:
+            return self.stdb.list_provider_accounts(provider_id=provider_id, node_id=node_id, status=status, limit=limit)
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        clauses = []
+        params = []
+        try:
+            if provider_id:
+                clauses.append("provider_id = ?")
+                params.append(provider_id)
+            if node_id:
+                clauses.append("node_id = ?")
+                params.append(node_id)
+            if status:
+                clauses.append("status = ?")
+                params.append(status)
+            query = "SELECT * FROM provider_accounts"
+            if clauses:
+                query += " WHERE " + " AND ".join(clauses)
+            query += " ORDER BY updated_at DESC LIMIT ?"
+            params.append(limit)
+            self._exec(cursor, query, tuple(params))
+            return self._rows_to_dicts(cursor.fetchall(), cursor)
+        finally:
+            conn.close()
+
+    def get_provider_account(self, account_id):
+        if self.state_backend == "spacetimedb" and self.stdb:
+            return self.stdb.get_provider_account(account_id)
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        try:
+            self._exec(cursor, "SELECT * FROM provider_accounts WHERE account_id = ?", (account_id,))
+            return self._row_to_dict(cursor.fetchone(), cursor)
+        finally:
+            conn.close()
+
+    def create_mission(self, mission_data):
+        if self.state_backend == "spacetimedb" and self.stdb:
+            return self.stdb.create_mission(mission_data)
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        payload = {
+            "mission_id": mission_data["mission_id"],
+            "created_at": mission_data.get("created_at") or datetime.datetime.now(datetime.timezone.utc).isoformat(),
+            "updated_at": mission_data.get("updated_at") or datetime.datetime.now(datetime.timezone.utc).isoformat(),
+            "status": mission_data.get("status", "draft"),
+            "source_surface": mission_data.get("source_surface", "cli"),
+            "node_id": mission_data.get("node_id", ""),
+            "prompt": mission_data.get("prompt", ""),
+            "intent_class": mission_data.get("intent_class", "general"),
+            "risk_level": mission_data.get("risk_level", "low"),
+            "active_step_id": mission_data.get("active_step_id"),
+            "active_cell_id": mission_data.get("active_cell_id"),
+            "target_tool": mission_data.get("target_tool"),
+            "target_model": mission_data.get("target_model"),
+            "summary": mission_data.get("summary"),
+            "error": mission_data.get("error"),
+            "metadata_json": json.dumps(mission_data.get("metadata", {})),
+        }
+        try:
+            self._exec(
+                cursor,
+                """
+                INSERT INTO missions (
+                    mission_id, created_at, updated_at, status, source_surface, node_id,
+                    prompt, intent_class, risk_level, active_step_id, active_cell_id,
+                    target_tool, target_model, summary, error, metadata_json
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(mission_id) DO UPDATE SET
+                    updated_at = excluded.updated_at,
+                    status = excluded.status,
+                    source_surface = excluded.source_surface,
+                    node_id = excluded.node_id,
+                    prompt = excluded.prompt,
+                    intent_class = excluded.intent_class,
+                    risk_level = excluded.risk_level,
+                    active_step_id = excluded.active_step_id,
+                    active_cell_id = excluded.active_cell_id,
+                    target_tool = excluded.target_tool,
+                    target_model = excluded.target_model,
+                    summary = excluded.summary,
+                    error = excluded.error,
+                    metadata_json = excluded.metadata_json
+                """,
+                (
+                    payload["mission_id"],
+                    payload["created_at"],
+                    payload["updated_at"],
+                    payload["status"],
+                    payload["source_surface"],
+                    payload["node_id"],
+                    payload["prompt"],
+                    payload["intent_class"],
+                    payload["risk_level"],
+                    payload["active_step_id"],
+                    payload["active_cell_id"],
+                    payload["target_tool"],
+                    payload["target_model"],
+                    payload["summary"],
+                    payload["error"],
+                    payload["metadata_json"],
+                ),
+            )
+            conn.commit()
+            return True
+        except Exception as e:
+            conn.rollback()
+            logger.error("Mission create failed: %s", e)
+            return False
+        finally:
+            conn.close()
+
+    def get_missions(self, status=None, limit=50):
+        if self.state_backend == "spacetimedb" and self.stdb:
+            return self.stdb.get_missions(status=status, limit=limit)
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        try:
+            if status:
+                self._exec(
+                    cursor,
+                    "SELECT * FROM missions WHERE status = ? ORDER BY updated_at DESC LIMIT ?",
+                    (status, limit),
+                )
+            else:
+                self._exec(cursor, "SELECT * FROM missions ORDER BY updated_at DESC LIMIT ?", (limit,))
+            return self._rows_to_dicts(cursor.fetchall(), cursor)
+        finally:
+            conn.close()
+
+    def get_mission(self, mission_id):
+        if self.state_backend == "spacetimedb" and self.stdb:
+            return self.stdb.get_mission(mission_id)
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        try:
+            self._exec(cursor, "SELECT * FROM missions WHERE mission_id = ?", (mission_id,))
+            return self._row_to_dict(cursor.fetchone(), cursor)
+        finally:
+            conn.close()
+
+    def append_mission_step(self, step_data):
+        if self.state_backend == "spacetimedb" and self.stdb:
+            return self.stdb.append_mission_step(step_data)
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        payload = {
+            "step_id": step_data["step_id"],
+            "mission_id": step_data["mission_id"],
+            "position": int(step_data.get("position") or 0),
+            "status": step_data.get("status", "pending"),
+            "step_kind": step_data.get("step_kind", "turn"),
+            "cell_role": step_data.get("cell_role", ""),
+            "title": step_data.get("title", ""),
+            "detail": step_data.get("detail"),
+            "input_json": json.dumps(step_data.get("input", {})),
+            "output_json": json.dumps(step_data.get("output", {})),
+            "created_at": step_data.get("created_at") or datetime.datetime.now(datetime.timezone.utc).isoformat(),
+            "updated_at": step_data.get("updated_at") or datetime.datetime.now(datetime.timezone.utc).isoformat(),
+        }
+        try:
+            self._exec(
+                cursor,
+                """
+                INSERT INTO mission_steps (
+                    step_id, mission_id, position, status, step_kind, cell_role,
+                    title, detail, input_json, output_json, created_at, updated_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(step_id) DO UPDATE SET
+                    mission_id = excluded.mission_id,
+                    position = excluded.position,
+                    status = excluded.status,
+                    step_kind = excluded.step_kind,
+                    cell_role = excluded.cell_role,
+                    title = excluded.title,
+                    detail = excluded.detail,
+                    input_json = excluded.input_json,
+                    output_json = excluded.output_json,
+                    updated_at = excluded.updated_at
+                """,
+                (
+                    payload["step_id"],
+                    payload["mission_id"],
+                    payload["position"],
+                    payload["status"],
+                    payload["step_kind"],
+                    payload["cell_role"],
+                    payload["title"],
+                    payload["detail"],
+                    payload["input_json"],
+                    payload["output_json"],
+                    payload["created_at"],
+                    payload["updated_at"],
+                ),
+            )
+            self._exec(
+                cursor,
+                "UPDATE missions SET active_step_id = ?, updated_at = ? WHERE mission_id = ?",
+                (payload["step_id"], payload["updated_at"], payload["mission_id"]),
+            )
+            conn.commit()
+            return True
+        except Exception as e:
+            conn.rollback()
+            logger.error("Mission step append failed: %s", e)
+            return False
+        finally:
+            conn.close()
+
+    def get_mission_steps(self, mission_id, limit=100):
+        if self.state_backend == "spacetimedb" and self.stdb:
+            return self.stdb.get_mission_steps(mission_id, limit=limit)
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        try:
+            self._exec(
+                cursor,
+                "SELECT * FROM mission_steps WHERE mission_id = ? ORDER BY position ASC, updated_at ASC LIMIT ?",
+                (mission_id, limit),
+            )
+            return self._rows_to_dicts(cursor.fetchall(), cursor)
+        finally:
+            conn.close()
+
+    def start_cell_run(self, run_data):
+        if self.state_backend == "spacetimedb" and self.stdb:
+            return self.stdb.start_cell_run(run_data)
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        payload = {
+            "cell_run_id": run_data["cell_run_id"],
+            "mission_id": run_data["mission_id"],
+            "step_id": run_data.get("step_id"),
+            "status": run_data.get("status", "running"),
+            "cell_id": run_data.get("cell_id", ""),
+            "cell_role": run_data.get("cell_role", ""),
+            "provider": run_data.get("provider", ""),
+            "model": run_data.get("model", ""),
+            "rate_group": run_data.get("rate_group", ""),
+            "tool": run_data.get("tool", ""),
+            "started_at": run_data.get("started_at") or datetime.datetime.now(datetime.timezone.utc).isoformat(),
+            "tokens_input": int(run_data.get("tokens_input") or 0),
+            "tokens_output": int(run_data.get("tokens_output") or 0),
+            "tokens_total": int(run_data.get("tokens_total") or 0),
+            "output_summary": run_data.get("output_summary"),
+        }
+        try:
+            self._exec(
+                cursor,
+                """
+                INSERT INTO cell_runs (
+                    cell_run_id, mission_id, step_id, status, cell_id, cell_role,
+                    provider, model, rate_group, tool, started_at, ended_at,
+                    tokens_input, tokens_output, tokens_total, output_summary
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, ?, ?, ?)
+                ON CONFLICT(cell_run_id) DO UPDATE SET
+                    mission_id = excluded.mission_id,
+                    step_id = excluded.step_id,
+                    status = excluded.status,
+                    cell_id = excluded.cell_id,
+                    cell_role = excluded.cell_role,
+                    provider = excluded.provider,
+                    model = excluded.model,
+                    rate_group = excluded.rate_group,
+                    tool = excluded.tool,
+                    started_at = excluded.started_at,
+                    tokens_input = excluded.tokens_input,
+                    tokens_output = excluded.tokens_output,
+                    tokens_total = excluded.tokens_total,
+                    output_summary = excluded.output_summary
+                """,
+                (
+                    payload["cell_run_id"],
+                    payload["mission_id"],
+                    payload["step_id"],
+                    payload["status"],
+                    payload["cell_id"],
+                    payload["cell_role"],
+                    payload["provider"],
+                    payload["model"],
+                    payload["rate_group"],
+                    payload["tool"],
+                    payload["started_at"],
+                    payload["tokens_input"],
+                    payload["tokens_output"],
+                    payload["tokens_total"],
+                    payload["output_summary"],
+                ),
+            )
+            self._exec(
+                cursor,
+                "UPDATE missions SET status = ?, active_step_id = ?, active_cell_id = ?, updated_at = ? WHERE mission_id = ?",
+                ("running", payload["step_id"], payload["cell_id"], payload["started_at"], payload["mission_id"]),
+            )
+            conn.commit()
+            return True
+        except Exception as e:
+            conn.rollback()
+            logger.error("Cell run start failed: %s", e)
+            return False
+        finally:
+            conn.close()
+
+    def finish_cell_run(self, run_data):
+        if self.state_backend == "spacetimedb" and self.stdb:
+            return self.stdb.finish_cell_run(run_data)
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        ended_at = run_data.get("ended_at") or datetime.datetime.now(datetime.timezone.utc).isoformat()
+        try:
+            self._exec(
+                cursor,
+                """
+                UPDATE cell_runs
+                SET status = ?, ended_at = ?, tokens_input = ?, tokens_output = ?, tokens_total = ?, output_summary = ?
+                WHERE cell_run_id = ?
+                """,
+                (
+                    run_data.get("status", "completed"),
+                    ended_at,
+                    int(run_data.get("tokens_input") or 0),
+                    int(run_data.get("tokens_output") or 0),
+                    int(run_data.get("tokens_total") or 0),
+                    run_data.get("output_summary"),
+                    run_data["cell_run_id"],
+                ),
+            )
+            conn.commit()
+            return True
+        except Exception as e:
+            conn.rollback()
+            logger.error("Cell run finish failed: %s", e)
+            return False
+        finally:
+            conn.close()
+
+    def get_cell_runs(self, mission_id=None, status=None, limit=100):
+        if self.state_backend == "spacetimedb" and self.stdb:
+            return self.stdb.get_cell_runs(mission_id=mission_id, status=status, limit=limit)
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        clauses = []
+        params = []
+        try:
+            if mission_id:
+                clauses.append("mission_id = ?")
+                params.append(mission_id)
+            if status:
+                clauses.append("status = ?")
+                params.append(status)
+            query = "SELECT * FROM cell_runs"
+            if clauses:
+                query += " WHERE " + " AND ".join(clauses)
+            query += " ORDER BY started_at DESC LIMIT ?"
+            params.append(limit)
+            self._exec(cursor, query, tuple(params))
+            return self._rows_to_dicts(cursor.fetchall(), cursor)
+        finally:
+            conn.close()
+
+    def _set_mission_status(self, mission_id, status, summary=None, error=None):
+        if self.state_backend == "spacetimedb" and self.stdb:
+            if status == "paused":
+                return self.stdb.pause_mission(mission_id, summary=summary)
+            if status == "running":
+                return self.stdb.resume_mission(mission_id, summary=summary)
+            if status == "completed":
+                return self.stdb.complete_mission(mission_id, summary=summary)
+            if status == "failed":
+                return self.stdb.fail_mission(mission_id, error=error)
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        updated_at = datetime.datetime.now(datetime.timezone.utc).isoformat()
+        try:
+            self._exec(
+                cursor,
+                "UPDATE missions SET status = ?, updated_at = ?, summary = COALESCE(?, summary), error = COALESCE(?, error) WHERE mission_id = ?",
+                (status, updated_at, summary, error, mission_id),
+            )
+            conn.commit()
+            return True
+        except Exception as e:
+            conn.rollback()
+            logger.error("Mission status update failed: %s", e)
+            return False
+        finally:
+            conn.close()
+
+    def set_mission_status(self, mission_id, status, summary=None, error=None):
+        normalized = str(status or "").strip().lower()
+        if normalized in {"paused", "running", "completed", "failed"}:
+            return self._set_mission_status(mission_id, normalized, summary=summary, error=error)
+        mission = self.get_mission(mission_id) or {"mission_id": mission_id}
+        mission["status"] = normalized or mission.get("status", "draft")
+        mission["updated_at"] = datetime.datetime.now(datetime.timezone.utc).isoformat()
+        if summary is not None:
+            mission["summary"] = summary
+        if error is not None:
+            mission["error"] = error
+        return self.create_mission(mission)
+
+    def pause_mission(self, mission_id, summary=None):
+        return self._set_mission_status(mission_id, "paused", summary=summary)
+
+    def resume_mission(self, mission_id, summary=None):
+        return self._set_mission_status(mission_id, "running", summary=summary)
+
+    def complete_mission(self, mission_id, summary=None):
+        return self._set_mission_status(mission_id, "completed", summary=summary)
+
+    def fail_mission(self, mission_id, error=None):
+        return self._set_mission_status(mission_id, "failed", error=error)
+
+    def write_session_summary(self, summary_data):
+        if self.state_backend == "spacetimedb" and self.stdb:
+            return self.stdb.write_session_summary(summary_data)
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        payload = {
+            "summary_id": summary_data["summary_id"],
+            "session_id": summary_data["session_id"],
+            "node_id": summary_data.get("node_id", ""),
+            "created_at": summary_data.get("created_at") or datetime.datetime.now(datetime.timezone.utc).isoformat(),
+            "summary_text": summary_data.get("summary_text", ""),
+            "metadata_json": json.dumps(summary_data.get("metadata", {})),
+        }
+        try:
+            self._exec(
+                cursor,
+                """
+                INSERT INTO session_summaries (
+                    summary_id, session_id, node_id, created_at, summary_text, metadata_json
+                ) VALUES (?, ?, ?, ?, ?, ?)
+                ON CONFLICT(summary_id) DO UPDATE SET
+                    session_id = excluded.session_id,
+                    node_id = excluded.node_id,
+                    created_at = excluded.created_at,
+                    summary_text = excluded.summary_text,
+                    metadata_json = excluded.metadata_json
+                """,
+                (
+                    payload["summary_id"],
+                    payload["session_id"],
+                    payload["node_id"],
+                    payload["created_at"],
+                    payload["summary_text"],
+                    payload["metadata_json"],
+                ),
+            )
+            conn.commit()
+            return True
+        except Exception as e:
+            conn.rollback()
+            logger.error("Session summary write failed: %s", e)
+            return False
+        finally:
+            conn.close()
+
+    def list_session_summaries(self, node_id=None, session_id=None, limit=50):
+        if self.state_backend == "spacetimedb" and self.stdb:
+            return self.stdb.list_session_summaries(node_id=node_id, session_id=session_id, limit=limit)
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        clauses = []
+        params = []
+        try:
+            if node_id:
+                clauses.append("node_id = ?")
+                params.append(node_id)
+            if session_id:
+                clauses.append("session_id = ?")
+                params.append(session_id)
+            query = "SELECT * FROM session_summaries"
+            if clauses:
+                query += " WHERE " + " AND ".join(clauses)
+            query += " ORDER BY created_at DESC LIMIT ?"
+            params.append(limit)
+            self._exec(cursor, query, tuple(params))
+            return self._rows_to_dicts(cursor.fetchall(), cursor)
+        finally:
+            conn.close()
+
+    def register_artifact(self, artifact_data):
+        if self.state_backend == "spacetimedb" and self.stdb:
+            return self.stdb.register_artifact(artifact_data)
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        payload = {
+            "artifact_id": artifact_data["artifact_id"],
+            "mission_id": artifact_data.get("mission_id", ""),
+            "cell_run_id": artifact_data.get("cell_run_id"),
+            "artifact_type": artifact_data.get("artifact_type", "summary"),
+            "title": artifact_data.get("title", ""),
+            "uri": artifact_data.get("uri"),
+            "path": artifact_data.get("path"),
+            "content_json": json.dumps(artifact_data.get("content", {})),
+            "created_at": artifact_data.get("created_at") or datetime.datetime.now(datetime.timezone.utc).isoformat(),
+        }
+        try:
+            self._exec(
+                cursor,
+                """
+                INSERT INTO artifacts (
+                    artifact_id, mission_id, cell_run_id, artifact_type, title, uri, path, content_json, created_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(artifact_id) DO UPDATE SET
+                    mission_id = excluded.mission_id,
+                    cell_run_id = excluded.cell_run_id,
+                    artifact_type = excluded.artifact_type,
+                    title = excluded.title,
+                    uri = excluded.uri,
+                    path = excluded.path,
+                    content_json = excluded.content_json,
+                    created_at = excluded.created_at
+                """,
+                (
+                    payload["artifact_id"],
+                    payload["mission_id"],
+                    payload["cell_run_id"],
+                    payload["artifact_type"],
+                    payload["title"],
+                    payload["uri"],
+                    payload["path"],
+                    payload["content_json"],
+                    payload["created_at"],
+                ),
+            )
+            conn.commit()
+            return True
+        except Exception as e:
+            conn.rollback()
+            logger.error("Artifact registration failed: %s", e)
+            return False
+        finally:
+            conn.close()
+
+    def list_artifacts(self, mission_id=None, limit=100):
+        if self.state_backend == "spacetimedb" and self.stdb:
+            return self.stdb.list_artifacts(mission_id=mission_id, limit=limit)
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        try:
+            if mission_id:
+                self._exec(
+                    cursor,
+                    "SELECT * FROM artifacts WHERE mission_id = ? ORDER BY created_at DESC LIMIT ?",
+                    (mission_id, limit),
+                )
+            else:
+                self._exec(cursor, "SELECT * FROM artifacts ORDER BY created_at DESC LIMIT ?", (limit,))
+            return self._rows_to_dicts(cursor.fetchall(), cursor)
         finally:
             conn.close()
 

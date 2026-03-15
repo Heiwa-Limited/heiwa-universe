@@ -9,10 +9,12 @@
     "cloud_gpu_rental": "banned"
   },
   "models": {
-    "primary": "ollama/llama-4-scout:q4_k_m",
+    "primary": "ollama/qwen3.5:4b",
     "fallbacks": [
-      "ollama/glm-4.7-flash:q4_k_m",
       "ollama/qwen3.5:4b",
+      "ollama/llama3.2:3b",
+      "ollama/llama-4-scout:q4_k_m",
+      "ollama/glm-4.7-flash:q4_k_m",
       "siliconflow/deepseek-r2",
       "cerebras/gpt-oss-120b",
       "google-gemini-cli/gemini-3-pro-preview",
@@ -22,11 +24,11 @@
     ],
     "registry": {
       "node_a_orchestrator": {
-        "id": "ollama/llama-4-scout:q4_k_m",
+        "id": "ollama/qwen3.5:4b",
         "provider": "ollama",
         "host_node": "macbook@heiwa-node-a",
         "compute_class": 2,
-        "role": "orchestration_reasoning"
+        "role": "orchestration_reasoning (qwen3.5:4b until llama-4-scout available)"
       },
       "node_a_codegen": {
         "id": "ollama/glm-4.7-flash:q4_k_m",
@@ -215,16 +217,68 @@
     }
   },
   "rate_limits": {
-    "claude_code": {"max_turns": 40, "window_sec": 18000, "cooldown_sec": 300},
-    "openai_codex": {"max_turns": 25, "window_sec": 3600, "cooldown_sec": 120},
-    "google_gemini_cli": {"max_turns": 50, "window_sec": 3600, "cooldown_sec": 60},
-    "google_antigravity": {"max_turns": 35, "window_sec": 3600, "cooldown_sec": 60},
-    "siliconflow": {"max_turns": 15, "window_sec": 3600, "cooldown_sec": 120},
-    "cerebras": {"max_turns": 20, "window_sec": 3600, "cooldown_sec": 90},
-    "openrouter": {"max_turns": 10, "window_sec": 3600, "cooldown_sec": 180},
-    "groq": {"max_turns": 20, "window_sec": 3600, "cooldown_sec": 90}
+    "claude_code": {
+      "max_turns": 40,
+      "window_sec": 18000,
+      "cooldown_sec": 300
+    },
+    "openai_codex": {
+      "max_turns": 25,
+      "window_sec": 3600,
+      "cooldown_sec": 120
+    },
+    "google_gemini_cli": {
+      "max_turns": 50,
+      "window_sec": 3600,
+      "cooldown_sec": 60
+    },
+    "google_antigravity": {
+      "max_turns": 35,
+      "window_sec": 3600,
+      "cooldown_sec": 60
+    },
+    "siliconflow": {
+      "max_turns": 15,
+      "window_sec": 3600,
+      "cooldown_sec": 120
+    },
+    "cerebras": {
+      "max_turns": 20,
+      "window_sec": 3600,
+      "cooldown_sec": 90
+    },
+    "openrouter": {
+      "max_turns": 10,
+      "window_sec": 3600,
+      "cooldown_sec": 180
+    },
+    "groq": {
+      "max_turns": 20,
+      "window_sec": 3600,
+      "cooldown_sec": 90
+    }
   },
   "routing_policy": {
+    "single_node_mac": {
+      "local_lanes": {
+        "chat": {"model": "ollama/llama3.2:3b", "worker": "node_a_orchestrator"},
+        "general": {"model": "ollama/llama3.2:3b", "worker": "node_a_orchestrator"},
+        "status_check": {"model": "ollama/llama3.2:3b", "worker": "node_a_orchestrator"},
+        "files": {"model": "ollama/qwen2.5-coder:1.5b", "worker": "node_a_codegen"},
+        "build": {"model": "ollama/qwen2.5-coder:1.5b", "worker": "node_a_codegen"},
+        "self_buff": {"model": "ollama/qwen2.5-coder:1.5b", "worker": "node_a_codegen"},
+        "mesh_ops": {"model": "ollama/llama3.2:3b", "worker": "node_a_orchestrator"},
+        "embeddings": {"model": "ollama/qwen3-embedding:0.6b", "worker": "node_a_embeddings"}
+      },
+      "cloud_lanes": {
+        "build": {"provider": "codex", "worker": "class_3_build"},
+        "review": {"provider": "claude-code", "worker": "class_3_review"},
+        "research": {"provider": "google-gemini-cli", "worker": "class_3_research"},
+        "strategy": {"provider": "google-antigravity", "worker": "class_3_strategy"}
+      },
+      "auto_enabled_providers": ["ollama", "codex", "claude-code", "google-gemini-cli", "google-antigravity"],
+      "manual_only_providers": ["siliconflow", "cerebras", "openrouter", "groq"]
+    },
     "provider_rotation": {
       "premium_remote": [
         "siliconflow/deepseek-r2",
@@ -267,7 +321,7 @@
     },
     "hard_rules": [
       "privacy_level=sovereign forces class_1_or_2_only",
-      "cheapest_acceptable_route_first",
+      "use_local_only_if_all_rate_groups_below_10_percent",
       "no_cloud_gpu_rental",
       "no_rest_only_multi_turn_agentic_sessions",
       "local_bus_is_ephemeral_not_durable_state"
@@ -276,19 +330,19 @@
   "agents": {
     "codex": {
       "compute_class": 3,
-      "specialty": "build"
+      "specialty": "executive_full_access"
     },
     "gemini_cli": {
       "compute_class": 3,
-      "specialty": "research_long_context"
+      "specialty": "executive_full_access"
     },
     "antigravity": {
       "compute_class": 3,
-      "specialty": "strategy_adversarial_review"
+      "specialty": "executive_full_access"
     },
     "claude_code": {
       "compute_class": 3,
-      "specialty": "adversarial_review"
+      "specialty": "executive_full_access"
     }
   },
   "control_plane": {

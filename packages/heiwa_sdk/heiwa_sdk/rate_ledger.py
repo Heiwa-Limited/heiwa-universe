@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import json
 import logging
+import math
 import threading
 import time
 from dataclasses import dataclass, field
@@ -180,6 +181,41 @@ class RateGroupLedger:
             state = self._state[group]
             return max(0, cfg.max_turns - len(state.timestamps))
 
+    def reserve(self, group: str) -> int | None:
+        """Interactive reserve for premium groups: max(2 turns, 20% of window quota)."""
+        with self._lock:
+            cfg = self._ensure_group(group)
+            if cfg.unlimited:
+                return None
+            return max(2, int(math.ceil(cfg.max_turns * 0.2)))
+
+    def surplus_headroom(self, group: str) -> int | None:
+        """Turns available beyond the interactive reserve."""
+        remaining = self.remaining(group)
+        if remaining is None:
+            return None
+        reserve = self.reserve(group) or 0
+        return max(0, remaining - reserve)
+
+    def can_run_background(self, group: str, requested_turns: int = 1) -> bool:
+        """Background work may use only surplus headroom above reserve."""
+        with self._lock:
+            cfg = self._ensure_group(group)
+            if cfg.unlimited:
+                return True
+            now = time.time()
+            state = self._state[group]
+            if now < state.cooldown_until:
+                return False
+            self._prune(group, now)
+            remaining = max(0, cfg.max_turns - len(state.timestamps))
+            reserve = max(2, int(math.ceil(cfg.max_turns * 0.2)))
+            return remaining - reserve >= max(1, int(requested_turns))
+
+    def summary(self) -> dict[str, dict[str, Any]]:
+        """Compact summary for CLI views."""
+        return self.status()
+
     def status(self) -> dict[str, dict[str, Any]]:
         """Return status for all tracked groups."""
         with self._lock:
@@ -192,11 +228,17 @@ class RateGroupLedger:
                 self._prune(group, now)
                 state = self._state[group]
                 used = len(state.timestamps)
+                remaining = max(0, cfg.max_turns - used)
+                reserve = max(2, int(math.ceil(cfg.max_turns * 0.2)))
                 available = now >= state.cooldown_until and used < cfg.max_turns
                 result[group] = {
                     "used": used,
                     "max": cfg.max_turns,
                     "window_sec": cfg.window_sec,
+                    "remaining": remaining,
+                    "reserve": reserve,
+                    "surplus_headroom": max(0, remaining - reserve),
+                    "background_allowed": available and remaining > reserve,
                     "available": available,
                     "cooldown_remaining": max(0, state.cooldown_until - now),
                 }

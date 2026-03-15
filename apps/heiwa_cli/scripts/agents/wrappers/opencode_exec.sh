@@ -4,7 +4,7 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-ROOT="${HEIWA_WORKSPACE_ROOT:-$(cd "$SCRIPT_DIR/../../.." && pwd)}"
+ROOT="${HEIWA_WORKSPACE_ROOT:-$(cd "$SCRIPT_DIR/../../../../.." && pwd)}"
 LOG_DIR="$ROOT/runtime/logs/opencode"
 mkdir -p "$LOG_DIR"
 
@@ -42,14 +42,23 @@ TIMEOUT_SEC="${OPENCODE_TIMEOUT:-600}"
 
 set +e
 if command -v timeout &>/dev/null; then
-    timeout "$TIMEOUT_SEC" opencode --non-interactive --prompt "$PAYLOAD" 2>&1 | tee -a "$LOG_FILE"
+    (
+        cd "$ROOT"
+        timeout "$TIMEOUT_SEC" opencode --non-interactive --prompt "$PAYLOAD"
+    ) 2>&1 | tee -a "$LOG_FILE"
     EXIT_CODE=${PIPESTATUS[0]}
 elif command -v gtimeout &>/dev/null; then
-    gtimeout "$TIMEOUT_SEC" opencode --non-interactive --prompt "$PAYLOAD" 2>&1 | tee -a "$LOG_FILE"
+    (
+        cd "$ROOT"
+        gtimeout "$TIMEOUT_SEC" opencode --non-interactive --prompt "$PAYLOAD"
+    ) 2>&1 | tee -a "$LOG_FILE"
     EXIT_CODE=${PIPESTATUS[0]}
 else
     echo "[WARN] timeout command not found; running without timeout" | tee -a "$LOG_FILE"
-    opencode --non-interactive --prompt "$PAYLOAD" 2>&1 | tee -a "$LOG_FILE"
+    (
+        cd "$ROOT"
+        opencode --non-interactive --prompt "$PAYLOAD"
+    ) 2>&1 | tee -a "$LOG_FILE"
     EXIT_CODE=${PIPESTATUS[0]}
 fi
 set -e
