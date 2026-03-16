@@ -1964,7 +1964,7 @@ pub fn insert_captain_directive(
 }
 
 #[reducer]
-pub fn prune_knowledge_embeddings(ctx: &ReducerContext, _ttl_hours: u32) -> Result<(), String> {
+pub fn prune_knowledge_embeddings(_ctx: &ReducerContext, _ttl_hours: u32) -> Result<(), String> {
     // In a real STDB app, we would use ctx.timestamp to find old rows.
     Ok(())
 }

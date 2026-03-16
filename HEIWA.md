@@ -65,10 +65,26 @@ Load only the rooms needed for the task unless the work is architectural.
 
 ## Room Index
 
-- `rooms/control-plane.md`
-- `rooms/execution.md`
-- `rooms/orchestration.md`
-- `rooms/infra.md`
-- `rooms/sdk.md`
+- `rooms/control-plane.md` — proposal lifecycle, routing/lease/approval, STDB state
+- `rooms/execution.md` — worker node execution, claim/run/result loops
+- `rooms/orchestration.md` — human-in-loop, LLM roles, approval posture, Discord channels
+- `rooms/infra.md` — Railway, Cloudflare, CI/CD, runtime topology
+- `rooms/sdk.md` — SDK changes, MCP/HTTP surface, protocol contracts
 
 If the task crosses more than one room, call that out explicitly in the result so context scope stays visible.
+
+## Directory Context Files
+
+Each major directory has a `CONTEXT.md` that agents should read when working in that area:
+
+| Directory | Context File | What It Covers |
+| --- | --- | --- |
+| `apps/heiwa_hub/` | `CONTEXT.md` | Hub runtime, boot sequence, key files |
+| `apps/heiwa_hub/agents/` | `CONTEXT.md` | Agent roster, BaseAgent contract, how to add agents |
+| `apps/heiwa_hub/cognition/` | `CONTEXT.md` | Intent/risk/compute pipeline, compute classes |
+| `apps/heiwa_cli/` | `CONTEXT.md` | CLI commands, operator surface |
+| `packages/heiwa_sdk/` | `CONTEXT.md` | DB, routing, security, transport, state layer |
+| `packages/heiwa_protocol/` | `CONTEXT.md` | Subject enum, envelope contracts |
+| `packages/heiwa_cognition/` | `CONTEXT.md` | LLM engine, tier routing |
+| `config/` | `CONTEXT.md` | Configuration layer overview |
+| `infra/` | `CONTEXT.md` | Node topology, env vars, deployment |

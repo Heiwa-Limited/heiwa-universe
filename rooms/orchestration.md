@@ -18,12 +18,29 @@ These should be treated as typed cells, not interchangeable generic AI.
 
 ## Human Surfaces
 
-- CLI
-- MCP
-- HTTP API
-- docs
+- CLI (`apps/heiwa_cli/heiwa`)
+- MCP/HTTP API (`apps/heiwa_hub/mcp_server.py`)
+- Discord (notification + human-facing query/approval UX)
 
 Discord is useful for notification and human-facing query/approval UX, but not as a trust boundary or state authority.
+
+### Discord Channel Topology
+
+| Channel | Purpose |
+| --- | --- |
+| `#operator-ingress` | Default entry for tasks, public status of current ops |
+| `#executive-briefing` | High-level outcomes, decision prompts |
+| `#ci-cd-stream` | Monorepo/build status, automatic logs |
+| `#thought-stream` | Agent reasoning transparency |
+| `#central-comms` | Inter-agent coordination (Captain broadcasts here) |
+| `#swarm-telemetry` | Live metrics, CPU/RAM/mesh health |
+
+### Communication Rules
+
+- Thread tasks in `#operator-ingress` by task ID to keep the main channel clean
+- Use rich artifacts (Mermaid diagrams, JSON blocks) for architectural data
+- High-risk approval requests should ping the operator with a link to the Discord thread
+- Privacy-sensitive data goes to Discord DMs, never public channels
 
 ## Approval Posture
 

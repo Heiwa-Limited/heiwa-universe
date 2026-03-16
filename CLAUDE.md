@@ -56,7 +56,7 @@
 
   Heiwa is a distributed AI operating system. The main execution flow is:
 
-  User input → IntentNormalizer → RiskScorer → ComputeRouter → Broker → HeiwaClaw → ToolMesh → execution
+  User input → IntentNormalizer → RiskScorer → ComputeRouter → Broker → HeiwaClaw → ToolMesh (heiwa_reflex / CLI adapters) → execution
 
   Key layers
 
@@ -82,8 +82,9 @@
 
   All extend BaseAgent from base.py:
   - Spine — fleet orchestration, node registry, heartbeats, request routing
-  - Broker — enriches BrokerRouteRequest with intent/risk/compute routing
   - Executor — claims and executes tasks via HeiwaClaw + ToolMesh
+  - Captain — always-on event-driven orchestrator (Gemini Flash). Monitors health, delegates, communicates
+  - Telemetry — system metrics collection and reporting
   - Messenger — Discord integration (optional, auto-detected)
 
   Cognition pipeline (apps/heiwa_hub/cognition/)
@@ -95,7 +96,7 @@
   Execution gateway (packages/heiwa_sdk/)
 
   - heiwaclaw.py — resolves BrokerRouteResult → HeiwaClawDispatch (tool, adapter, provider, transport)
-  - tool_mesh.py — executes selected adapter with environment (heiwa_ops, heiwa_reflex, heiwa_claw)
+  - tool_mesh.py — executes selected adapter with environment (heiwa_ops, heiwa_reflex)
   - routing.py — compute routing logic
   - db.py — multi-backend DB abstraction (SpacetimeDB, Postgres, SQLite via HEIWA_STATE_BACKEND)
   - spacetimedb.py — native SpacetimeDB client bridge

@@ -24,3 +24,4 @@ prompt_toolkit>=3.0.43
 # Testing
 pytest>=8.0.0
 pytest-asyncio>=0.23.0
+pytest-cov>=6.0.0

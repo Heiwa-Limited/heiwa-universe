@@ -16,14 +16,14 @@ A personal AI operating system that turns ~$83 CAD/month in subscriptions into a
 - Coordinates multi-agent workflows via ACP
 
 **Executors** — Class 3 CLI tools installed in Docker
-- Claude Code, Gemini CLI, Codex, OpenClaw — all installed on Railway
+- Claude Code, Gemini CLI, Codex — all installed on Railway
 - Spawned as ephemeral subprocesses per task
 - Auth via Railway env vars (subscription OAuth)
 - Tunable: thinking level, effort, context scope
 
 **API Inference** — Free-tier providers for lightweight tasks
 - Google AI Studio (Gemini Flash/Pro) — enrichment, classification, chat
-- Cerebras, OpenRouter — overflow inference
+- Cerebras, SiliconFlow, OpenRouter, Groq — overflow inference via direct API
 - No paid API credits — subscription-included or free only
 
 **Tool Surface** — MCP servers always available
@@ -59,7 +59,7 @@ When offline, nothing breaks. Railway handles everything with cloud tools.
 Input (CLI / Discord / Webhook / Cron)
   → Captain triages (event-driven Gemini Flash)
   → IntentNormalizer → RiskScorer → ComputeRouter
-  → HeiwaClaw (resolve to adapter + provider)
+  → HeiwaClaw (resolve to adapter + provider via direct API or CLI)
   → Rate cascade: pick best available tool with capacity
   → Execute on Railway (CLI subprocess or API inference)
   → If task needs boost (Ollama/filesystem): delegate to boost node
@@ -91,7 +91,7 @@ Heiwa spreads work across all providers. Never leaves capacity on the table.
 | --- | --- |
 | NATS | SpacetimeDB subscriptions + in-process bus |
 | Polling (tick.py) | STDB subscription callbacks |
-| Ad-hoc provider calls | All routing through HeiwaClaw |
+| Ad-hoc provider calls | All routing through HeiwaClaw (direct API, no messaging gateway) |
 | Local-first execution model | Railway-primary, boost nodes optional |
 | Paid API tiers (Claude/OpenAI API) | Subscription CLI tools + free APIs only |
 | Individual smoke tests | Unified pytest runner |
@@ -131,7 +131,7 @@ Heiwa spreads work across all providers. Never leaves capacity on the table.
 
 - Railway is fully self-sufficient — works with all boost nodes offline
 - Captain proactively manages work, communicates via Discord
-- Rate cascade spreads work across all 4 CLI tools + free APIs
+- Rate cascade spreads work across all 3 CLI tools (Claude Code, Gemini CLI, Codex) + free APIs
 - Zero external message brokers
 - All state changes flow through SpacetimeDB subscriptions
 - Sovereign tasks route to boost nodes only (never cloud)

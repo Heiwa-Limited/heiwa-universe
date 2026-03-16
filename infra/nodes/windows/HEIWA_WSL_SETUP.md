@@ -17,8 +17,10 @@ To finalize the integration, the human operator must perform the following:
 
 1.  **Open WSL terminal.**
 2.  **Verify local environment:** `cat ~/heiwa/.env.worker.local`
-3.  **Ensure NATS Auth:** Replace placeholders with verified credentials (`devon:noved` or your secure token).
+3.  **Configure auth:** Set `HEIWA_AUTH_TOKEN` in `.env.worker.local` (value from Railway env vars).
 4.  **Restart service:** `sudo systemctl restart heiwa-worker`
+
+> **Note:** NATS has been removed from Heiwa. Transport is now LocalBusTransport (co-located) + WebSocket (remote workers).
 
 ## 🧠 Model Quantization Note
 The **RTX 3060 has 12GB VRAM**. 

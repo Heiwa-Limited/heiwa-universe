@@ -42,8 +42,9 @@ User input → IntentNormalizer → RiskScorer → ComputeRouter → Broker → 
 
 All extend BaseAgent from base.py:
 - Spine — fleet orchestration, node registry, heartbeats, request routing
-- Broker — enriches BrokerRouteRequest with intent/risk/compute routing
 - Executor — claims and executes tasks via HeiwaClaw + ToolMesh
+- Captain — always-on event-driven orchestrator (Gemini Flash). Monitors health, delegates, communicates
+- Telemetry — system metrics collection and reporting
 - Messenger — Discord integration (optional, auto-detected)
 
 ## Commands
