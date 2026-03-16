@@ -113,7 +113,7 @@ def test_build_cascade_prefers_review_family():
     cascaded = router.route("build", "high")
     assert cascaded.compute_class == 3
     assert cascaded.assigned_worker == "class_3_review"
-    assert cascaded.target_model == "claude-code/claude-opus-4-6"
+    assert cascaded.target_model == "claude/opus-4-6"
     assert cascaded.rationale.startswith("Rate cascade")
 
     # Cleanup: reset the singleton

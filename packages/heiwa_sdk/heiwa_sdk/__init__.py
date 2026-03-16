@@ -1,6 +1,6 @@
 from .config import settings, load_swarm_env
 from .db import Database
-from .heiwaclaw import HeiwaClawGateway
+from .heiwaclaw import HeiwaClawGateway, HeiwaClawDispatch
 from .routing import ModelRouter
 from .mcp import MCPBridge
 from .security import redact_any, redact_text

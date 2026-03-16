@@ -17,10 +17,10 @@
       "ollama/glm-4.7-flash:q4_k_m",
       "siliconflow/deepseek-r2",
       "cerebras/gpt-oss-120b",
-      "google-gemini-cli/gemini-3-pro-preview",
-      "google-antigravity/gemini-3-pro-high",
-      "claude-code/claude-opus-4-6",
-      "openai-codex/gpt-5.3-codex"
+      "gemini-cli/gemini-3.1-pro",
+      "antigravity/gemini-3-auto",
+      "claude/opus-4-6",
+      "codex/gpt-4.1"
     ],
     "registry": {
       "node_a_orchestrator": {
@@ -80,28 +80,28 @@
         "role": "fast_reasoning"
       },
       "class_3_research": {
-        "id": "google-gemini-cli/gemini-3-pro-preview",
+        "id": "gemini-cli/gemini-3.1-pro",
         "provider": "google-gemini-cli",
         "host_node": "railway@heiwa-cloud-hq",
         "compute_class": 3,
         "role": "research_long_context"
       },
       "class_3_strategy": {
-        "id": "google-antigravity/gemini-3-flash",
+        "id": "google-antigravity/gemini-3-auto",
         "provider": "google-antigravity",
         "host_node": "railway@heiwa-cloud-hq",
         "compute_class": 3,
         "role": "strategy_adversarial_review"
       },
       "class_3_review": {
-        "id": "claude-code/claude-opus-4-6",
+        "id": "claude/opus-4-6",
         "provider": "claude-code",
         "host_node": "railway@heiwa-cloud-hq",
         "compute_class": 3,
         "role": "adversarial_review"
       },
       "class_3_build": {
-        "id": "openai-codex/gpt-5.3-codex",
+        "id": "codex/gpt-4.1",
         "provider": "codex",
         "host_node": "railway@heiwa-cloud-hq",
         "compute_class": 3,
@@ -148,16 +148,11 @@
       "websocket_preferred": false
     },
     "google-antigravity": {
-      "adapter_tool": "heiwa_claw",
-      "transport": "openclaw_profile_local",
-      "auth_kind": "oauth_openclaw",
+      "adapter_tool": "heiwa_reflex",
+      "transport": "api_http",
+      "auth_kind": "api_key",
       "rate_group": "google_antigravity",
-      "cli_command": "openclaw",
-      "websocket_preferred": false,
-      "env": {
-        "OPENCLAW_PROFILE": "heiwa-antigravity",
-        "OPENCLAW_COPY_AUTH_FROM_MAIN": "true"
-      }
+      "websocket_preferred": false
     },
     "claude-code": {
       "adapter_tool": "heiwa_claude",
@@ -184,35 +179,31 @@
       "websocket_preferred": false
     },
     "siliconflow": {
-      "adapter_tool": "heiwa_claw",
-      "transport": "openclaw_profile_local",
-      "auth_kind": "api_via_openclaw",
+      "adapter_tool": "heiwa_reflex",
+      "transport": "api_http",
+      "auth_kind": "api_key",
       "rate_group": "siliconflow",
-      "cli_command": "openclaw",
       "websocket_preferred": false
     },
     "cerebras": {
-      "adapter_tool": "heiwa_claw",
-      "transport": "openclaw_profile_local",
-      "auth_kind": "api_via_openclaw",
+      "adapter_tool": "heiwa_reflex",
+      "transport": "api_http",
+      "auth_kind": "api_key",
       "rate_group": "cerebras",
-      "cli_command": "openclaw",
       "websocket_preferred": false
     },
     "openrouter": {
-      "adapter_tool": "heiwa_claw",
-      "transport": "openclaw_profile_local",
-      "auth_kind": "api_via_openclaw",
+      "adapter_tool": "heiwa_reflex",
+      "transport": "api_http",
+      "auth_kind": "api_key",
       "rate_group": "openrouter",
-      "cli_command": "openclaw",
       "websocket_preferred": false
     },
     "groq": {
-      "adapter_tool": "heiwa_claw",
-      "transport": "openclaw_profile_local",
-      "auth_kind": "api_via_openclaw",
+      "adapter_tool": "heiwa_reflex",
+      "transport": "api_http",
+      "auth_kind": "api_key",
       "rate_group": "groq",
-      "cli_command": "openclaw",
       "websocket_preferred": false
     }
   },
@@ -283,31 +274,31 @@
       "premium_remote": [
         "siliconflow/deepseek-r2",
         "cerebras/gpt-oss-120b",
-        "google-gemini-cli/gemini-3-pro-preview",
-        "google-antigravity/gemini-3-flash",
-        "claude-code/claude-opus-4-6",
-        "openai-codex/gpt-5.3-codex"
+        "gemini-cli/gemini-3.1-pro",
+        "google-antigravity/gemini-3-auto",
+        "claude/opus-4-6",
+        "codex/gpt-4.1"
       ],
       "by_intent": {
         "research": [
-          "google-gemini-cli/gemini-3-pro-preview",
-          "google-antigravity/gemini-3-flash",
-          "claude-code/claude-opus-4-6",
+          "gemini-cli/gemini-3.1-pro",
+          "google-antigravity/gemini-3-auto",
+          "claude/opus-4-6",
           "siliconflow/deepseek-r2",
           "cerebras/gpt-oss-120b"
         ],
         "strategy": [
-          "google-antigravity/gemini-3-flash",
-          "claude-code/claude-opus-4-6",
-          "google-gemini-cli/gemini-3-pro-preview",
+          "google-antigravity/gemini-3-auto",
+          "claude/opus-4-6",
+          "gemini-cli/gemini-3.1-pro",
           "siliconflow/deepseek-r2",
           "cerebras/gpt-oss-120b"
         ],
         "build": [
-          "openai-codex/gpt-5.3-codex",
-          "claude-code/claude-opus-4-6",
-          "google-antigravity/gemini-3-flash",
-          "google-gemini-cli/gemini-3-pro-preview",
+          "codex/gpt-4.1",
+          "claude/opus-4-6",
+          "google-antigravity/gemini-3-auto",
+          "gemini-cli/gemini-3.1-pro",
           "siliconflow/deepseek-r2",
           "cerebras/gpt-oss-120b"
         ]
