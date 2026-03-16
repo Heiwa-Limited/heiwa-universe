@@ -7,6 +7,9 @@ from heiwa_cognition.router import ComputeRouter
 from heiwa_cognition.intent import IntentNormalizer
 from heiwa_cognition.risk import RiskScorer
 from heiwa_protocol.routing import BrokerRouteRequest, BrokerRouteResult
+from heiwa_sdk.db import Database
+from heiwa_sdk.memory import MemoryService
+import json
 
 
 # Map identity tool preferences to registry worker keys.
@@ -34,13 +37,17 @@ class BrokerEnrichmentService:
         self.router = ComputeRouter()
         self._selector = identity_selector
 
+        # Phase 2: Memory Layer
+        self.db = Database()
+        self.memory = MemoryService(stdb=self.db.stdb) if self.db.stdb else None
+
     @property
     def identity_selector(self) -> IdentitySelector:
         if self._selector is None:
             self._selector = IdentitySelector()
         return self._selector
 
-    def enrich(self, request: BrokerRouteRequest) -> BrokerRouteResult:
+    async def enrich(self, request: BrokerRouteRequest) -> BrokerRouteResult:
         profile = self.normalizer.normalize(request.raw_text)
         assessment = self.scorer.score(
             intent_class=profile.intent_class,
@@ -52,6 +59,9 @@ class BrokerEnrichmentService:
         identity = self.identity_selector.select(profile.intent_class, request.raw_text)
         worker_hint = _identity_worker_hint(identity)
 
+        # Update router with STDB instance from our local DB
+        self.router._stdb = self.db.stdb
+
         route = self.router.route(
             intent_class=profile.intent_class,
             risk_level=assessment.risk_level,
@@ -59,6 +69,19 @@ class BrokerEnrichmentService:
             privacy_level=request.privacy_level,
             identity_worker_hint=worker_hint,
         )
+
+        # Phase 2: Memory Context Enrichment
+        context_files = []
+        if self.memory:
+            try:
+                relevant = await self.memory.query_knowledge(request.raw_text, limit=3)
+                for entry in relevant:
+                    path = entry["source_id"].split("#")[0]
+                    if path not in context_files:
+                        context_files.append(path)
+            except Exception as e:
+                import logging
+                logging.getLogger("Cognition.Enrichment").warning("Memory enrichment failed: %s", e)
 
         normalization = profile.to_dict()
         normalization["preferred_runtime"] = route.target_runtime
@@ -89,4 +112,5 @@ class BrokerEnrichmentService:
             assumptions=profile.assumptions,
             missing_details=profile.missing_details,
             normalization=normalization,
+            context_files_json=json.dumps(context_files),
         )

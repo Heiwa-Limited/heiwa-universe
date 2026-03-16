@@ -90,6 +90,7 @@ class BrokerRouteResult:
     missing_details: list[str] = field(default_factory=list)
     normalization: dict[str, Any] = field(default_factory=dict)
     gateway_transport: str = "websocket"
+    context_files_json: str = "[]"  # Phase 2: relevant files from memory
     error: str | None = None
     message: str | None = None
 
@@ -118,6 +119,7 @@ class BrokerRouteResult:
             missing_details=list(payload.get("missing_details") or []),
             normalization=dict(payload.get("normalization") or {}),
             gateway_transport=str(payload.get("gateway_transport") or "websocket"),
+            context_files_json=str(payload.get("context_files_json") or "[]"),
             error=payload.get("error"),
             message=payload.get("message"),
         )

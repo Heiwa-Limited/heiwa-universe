@@ -88,7 +88,7 @@ class SpineAgent(BaseAgent):
             logger.info("Task %s already enriched by ingress.", task_id)
         elif not payload.get("steps") and payload.get("raw_text"):
             try:
-                route = self._enrich_via_broker(payload, task_id, sender_id)
+                route = await self._enrich_via_broker(payload, task_id, sender_id)
                 payload.update(route.to_dict())
                 logger.info("Broker enriched task %s.", task_id)
             except Exception as e:
@@ -407,7 +407,7 @@ class SpineAgent(BaseAgent):
         decision = str(payload.get("decision") or "").strip().lower()
         return decision in {"approve", "approved", "true", "1", "yes"}
 
-    def _enrich_via_broker(self, payload: dict, task_id: str, sender_id: str) -> BrokerRouteResult:
+    async def _enrich_via_broker(self, payload: dict, task_id: str, sender_id: str) -> BrokerRouteResult:
         """Direct call to BrokerEnrichmentService — no NATS round-trip."""
         request_id = f"broker-{task_id}-{uuid.uuid4().hex[:8]}"
         request = BrokerRouteRequest(
@@ -423,7 +423,7 @@ class SpineAgent(BaseAgent):
             envelope_version=BROKER_ENVELOPE_VERSION,
             privacy_level=payload.get("privacy_level"),
         )
-        result = self.enrichment.enrich(request)
+        result = await self.enrichment.enrich(request)
         if result.error:
             raise RuntimeError(f"{result.error}: {result.message or ''}".strip())
         return result

@@ -62,6 +62,11 @@ async def main():
         seed_loader.seed_model_tiers(ROOT / "config" / "seeds" / "model_tiers.json")
         seed_loader.seed_rate_groups(ROOT / "config" / "swarm" / "ai_router.json")
 
+        # Optional repository re-indexing on boot
+        if os.getenv("HEIWA_INDEX_ON_BOOT", "").lower() == "true":
+            from apps.heiwa_hub.scripts.index_repo import index_repo
+            asyncio.create_task(index_repo())
+
     # Register MCP servers from ai_router.json
     async def _register_mcp_servers():
         import json

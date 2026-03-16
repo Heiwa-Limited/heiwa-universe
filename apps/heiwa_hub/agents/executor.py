@@ -19,6 +19,7 @@ from heiwa_protocol.protocol import Subject
 from heiwa_protocol.routing import BROKER_ENVELOPE_VERSION, BrokerRouteResult
 from heiwa_sdk import HeiwaClawGateway
 from heiwa_sdk.db import Database
+from heiwa_sdk.memory import MemoryService
 
 logger = logging.getLogger("Executor")
 
@@ -30,6 +31,7 @@ class ExecutorAgent(BaseAgent):
         self.root = Path(__file__).resolve().parents[3]
         self.db = Database()
         self.gateway = HeiwaClawGateway(self.root)
+        self.memory = MemoryService(stdb=self.db.stdb) if self.db.stdb else None
 
     async def run(self):
         await self.start()
@@ -131,6 +133,20 @@ class ExecutorAgent(BaseAgent):
         }
 
         await self.speak(Subject.TASK_EXEC_RESULT, result_payload)
+
+        # Record in execution memory (Phase 2)
+        if self.memory:
+            try:
+                self.memory.record_execution(
+                    task_id=task_id,
+                    model=route.target_model,
+                    outcome=exec_status.lower(),
+                    duration_ms=int(elapsed * 1000),
+                    error=full_result if exec_status == "FAIL" else None,
+                )
+            except Exception as e:
+                logger.error("Failed to record execution memory: %s", e)
+
         await self.speak(Subject.TASK_STATUS, {
             "accepted": exec_status == "PASS",
             "reason": None if exec_status == "PASS" else "Executor produced a failure result.",

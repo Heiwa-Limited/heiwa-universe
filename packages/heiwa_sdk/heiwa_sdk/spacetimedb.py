@@ -827,3 +827,51 @@ class SpacetimeDB:
             avg_latency_ms,
             latency_p95_ms,
         )
+
+    # ── Memory ───────────────────────────────────────────────────────────
+
+    def insert_execution_memory(
+        self,
+        task_dispatch_id: str,
+        model_used: str,
+        outcome: str,
+        duration_ms: int,
+        error_summary: str | None = None,
+        feedback_score: float | None = None,
+    ) -> bool:
+        """Insert a record into execution_memory."""
+        return self.call(
+            "insert_execution_memory",
+            task_dispatch_id,
+            model_used,
+            outcome,
+            int(duration_ms),
+            error_summary,
+            feedback_score,
+        )
+
+    def insert_knowledge_embedding(
+        self,
+        source_type: str,
+        source_id: str,
+        content_hash: str,
+        embedding: list[float],
+        ttl_hours: int = 0,
+    ) -> bool:
+        """Insert a record into knowledge_embeddings."""
+        import json
+        return self.call(
+            "insert_knowledge_embedding",
+            source_type,
+            source_id,
+            content_hash,
+            json.dumps(embedding),
+            int(ttl_hours),
+        )
+
+    def search_knowledge_embeddings(self, limit: int = 100) -> list[dict]:
+        """
+        Fetch knowledge embeddings for similarity search in Python.
+        STDB SQL doesn't support vector search natively yet.
+        """
+        return self.query(f"SELECT * FROM knowledge_embeddings LIMIT {int(limit)}")

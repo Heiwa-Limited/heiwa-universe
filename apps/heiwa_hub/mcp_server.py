@@ -411,7 +411,7 @@ async def call_tool(tool_name: str, arguments: Dict[str, Any]):
                 "timestamp": time.time(),
             }
         )
-        result = enrichment.enrich(request)
+        result = await enrichment.enrich(request)
         return {"content": [{"type": "text", "text": json.dumps(result.to_dict(), indent=2)}]}
 
     if tool_name == "heiwa_run_bench":
@@ -490,7 +490,7 @@ async def create_task(req: TaskRequest, authorization: str | None = Header(None)
         "auth_validated": True,
         "timestamp": time.time(),
     })
-    route = enrichment.enrich(broker_req)
+    route = await enrichment.enrich(broker_req)
     dispatch = claw_gateway.resolve(route)
     cell_recommendation = cells.recommend(req.raw_text)
     cell = dict(cell_recommendation.get("cell") or {})
