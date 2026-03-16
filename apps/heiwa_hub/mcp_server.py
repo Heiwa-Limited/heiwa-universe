@@ -17,6 +17,7 @@ from heiwa_sdk import (
     HubStateService,
     MCPBridge,
     Database,
+    MemoryService,
     HeiwaBench,
     HeiwaCellCatalog,
     redact_any,
@@ -413,6 +414,25 @@ async def call_tool(tool_name: str, arguments: Dict[str, Any]):
         )
         result = await enrichment.enrich(request)
         return {"content": [{"type": "text", "text": json.dumps(result.to_dict(), indent=2)}]}
+
+    if tool_name == "heiwa_query_memory":
+        query = arguments.get("query", "")
+        limit = arguments.get("limit", 5)
+        memory = MemoryService(stdb=db.stdb) if db.stdb else None
+        if not memory:
+            return {"content": [{"type": "text", "text": "Memory service not available."}], "isError": True}
+        
+        relevant = await memory.query_knowledge(query, limit=int(limit))
+        return {"content": [{"type": "text", "text": json.dumps(relevant, indent=2)}]}
+
+    if tool_name == "heiwa_read_state":
+        table = arguments.get("table", "model_tiers")
+        limit = arguments.get("limit", 20)
+        if not db.stdb:
+            return {"content": [{"type": "text", "text": "STDB not available."}], "isError": True}
+        
+        rows = db.stdb.query(f"SELECT * FROM {table} LIMIT {int(limit)}")
+        return {"content": [{"type": "text", "text": json.dumps(rows, indent=2)}]}
 
     if tool_name == "heiwa_run_bench":
         suite = arguments.get("suite")

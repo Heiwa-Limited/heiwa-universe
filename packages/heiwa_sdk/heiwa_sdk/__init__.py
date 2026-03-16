@@ -3,6 +3,8 @@ from .db import Database
 from .heiwaclaw import HeiwaClawGateway, HeiwaClawDispatch
 from .routing import ModelRouter
 from .mcp import MCPBridge
+from .memory import MemoryService
+from .mission import MissionService
 from .security import redact_any, redact_text
 from .state import HubStateService
 from .utils import run_cmd

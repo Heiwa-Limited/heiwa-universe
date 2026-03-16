@@ -47,12 +47,14 @@ class HeiwaClawGateway:
         from heiwa_sdk.heiwaclaw.adapters.gemini import GeminiAdapter
         from heiwa_sdk.heiwaclaw.adapters.claude import ClaudeAdapter
         from heiwa_sdk.heiwaclaw.adapters.codex import CodexAdapter
+        from heiwa_sdk.heiwaclaw.adapters.acp import ACPAdapter
         
         self._adapters = {
             "heiwa_reflex": ReflexAdapter(self.root),
             "heiwa_gemini": GeminiAdapter(self.root),
             "heiwa_claude": ClaudeAdapter(self.root),
             "heiwa_code": CodexAdapter(self.root),
+            "heiwa_acp": ACPAdapter(self.root),
         }
 
     def _provider_for(self, route: BrokerRouteResult) -> str:
@@ -78,6 +80,22 @@ class HeiwaClawGateway:
                 auth_kind="none",
                 websocket_preferred=False,
                 direct_execution=True,
+                rationale=route.rationale,
+            )
+
+        if route.target_tool == "heiwa_acp":
+            return HeiwaClawDispatch(
+                gateway_tool=route.target_tool,
+                adapter_tool="heiwa_acp",
+                provider="remote",
+                target_model=route.target_model,
+                target_runtime=route.target_runtime,
+                session_id=f"heiwa-acp-{route.task_id}",
+                transport="acp_bridge",
+                rate_group="acp_remote",
+                auth_kind="none",
+                websocket_preferred=True,
+                direct_execution=False,
                 rationale=route.rationale,
             )
 
