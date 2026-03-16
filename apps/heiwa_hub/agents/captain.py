@@ -21,6 +21,9 @@ from typing import Any
 from heiwa_hub.agents.base import BaseAgent
 from heiwa_protocol.protocol import Subject
 from heiwa_sdk.db import Database
+from heiwa_sdk.audit import RepoAuditor
+from heiwa_sdk.memory import MemoryService
+from pathlib import Path
 
 logger = logging.getLogger("Captain")
 
@@ -28,6 +31,10 @@ logger = logging.getLogger("Captain")
 CAPTAIN_TICK_SEC = 60
 # Minimum interval between Discord status broadcasts
 STATUS_BROADCAST_INTERVAL_SEC = 300
+# How often to run repo audits
+AUDIT_INTERVAL_SEC = 600
+# How often to re-tune model tiers based on stats
+MODEL_TUNING_INTERVAL_SEC = 300
 
 
 class CaptainAgent(BaseAgent):
@@ -36,8 +43,13 @@ class CaptainAgent(BaseAgent):
     def __init__(self):
         super().__init__(name="heiwa-captain")
         self.db = Database()
+        self.root = Path(__file__).resolve().parents[3]
+        self.auditor = RepoAuditor(self.root)
+        self.memory = MemoryService(stdb=self.db.stdb) if self.db.stdb else None
         self._llm = None  # Lazy-loaded to avoid import-time side effects
         self._last_status_broadcast = 0.0
+        self._last_audit = 0.0
+        self._last_tuning = 0.0
         self._task_results: list[dict[str, Any]] = []
         self._pending_alerts: list[str] = []
 
@@ -125,6 +137,16 @@ class CaptainAgent(BaseAgent):
         if alerts:
             await self._handle_alerts(alerts, system_state)
 
+        # Periodic repo audit
+        if now - self._last_audit > AUDIT_INTERVAL_SEC:
+            asyncio.create_task(self._run_periodic_audit())
+            self._last_audit = now
+
+        # Periodic model tuning
+        if now - self._last_tuning > MODEL_TUNING_INTERVAL_SEC:
+            asyncio.create_task(self._tune_model_tiers())
+            self._last_tuning = now
+
         # Periodic status broadcast
         if now - self._last_status_broadcast > STATUS_BROADCAST_INTERVAL_SEC:
             await self._broadcast_status(system_state)
@@ -202,6 +224,79 @@ class CaptainAgent(BaseAgent):
             "system_state": system_state,
             "response_channel_id": self._get_comms_channel(),
         })
+
+    async def _run_periodic_audit(self):
+        """Run repository integrity checks and handle failures."""
+        result = await self.auditor.run_audit()
+        
+        level = "INFO" if result.passed else "WARNING"
+        logger.log(getattr(logging, level), "Repo Audit: %s", result.summary)
+        
+        await self.speak(Subject.LOG_INFO, {
+            "agent": "captain",
+            "content": f"**Repo Audit Result**: {result.summary}",
+            "response_channel_id": self._get_comms_channel(),
+        })
+        
+        if not result.passed:
+            await self._create_repair_directive(result)
+
+    async def _create_repair_directive(self, result: Any):
+        """Create an STDB directive to fix repository issues."""
+        if not self.db.stdb:
+            return
+            
+        directive_type = "repair_repo"
+        payload = {
+            "summary": result.summary,
+            "errors": result.errors,
+            "instruction": f"Fix repository issues reported by Captain audit: {result.summary}. Errors: {', '.join(result.errors)}"
+        }
+        
+        success = self.db.stdb.insert_captain_directive(
+            directive_type=directive_type,
+            payload=payload,
+            priority=2
+        )
+        
+        if success:
+            logger.info("Created repair directive in STDB.")
+            # Trigger immediate execution of directive (scaffold for Chunk 4)
+            await self.speak(Subject.LOG_INFO, {
+                "agent": "captain",
+                "content": "🛠 **Proactive Repair Triggered**: Created directive to fix repo issues.",
+                "response_channel_id": self._get_comms_channel(),
+            })
+
+    async def _tune_model_tiers(self):
+        """Aggregate execution memory and update model_tiers stats."""
+        if not self.db.stdb or not self.memory:
+            return
+            
+        logger.info("Starting model tier tuning...")
+        try:
+            tiers = self.db.stdb.get_model_tiers(enabled_only=False)
+            updated_count = 0
+            
+            for tier in tiers:
+                model_id = tier["model_id"]
+                stats = self.memory.get_execution_stats(model_id)
+                
+                # Only update if we have enough data (at least 3 runs)
+                if stats["count"] >= 3:
+                    success = self.db.stdb.update_model_tier_stats(
+                        model_id=model_id,
+                        success_rate=stats["success_rate"],
+                        avg_latency_ms=stats["avg_latency_ms"],
+                        latency_p95_ms=stats["p95_latency_ms"]
+                    )
+                    if success:
+                        updated_count += 1
+            
+            if updated_count > 0:
+                logger.info("Model tuning complete. Updated %d model(s).", updated_count)
+        except Exception as e:
+            logger.error("Failed to tune model tiers: %s", e)
 
     def _get_comms_channel(self) -> str | None:
         """Resolve the Captain's preferred Discord channel for comms."""

@@ -875,3 +875,18 @@ class SpacetimeDB:
         STDB SQL doesn't support vector search natively yet.
         """
         return self.query(f"SELECT * FROM knowledge_embeddings LIMIT {int(limit)}")
+
+    def insert_captain_directive(
+        self,
+        directive_type: str,
+        payload: dict[str, Any],
+        priority: int = 1,
+    ) -> bool:
+        """Create a new proactive directive for the system to execute."""
+        import json
+        return self.call(
+            "insert_captain_directive",
+            directive_type,
+            json.dumps(payload),
+            int(priority),
+        )

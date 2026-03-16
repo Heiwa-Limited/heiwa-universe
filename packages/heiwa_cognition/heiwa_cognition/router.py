@@ -96,11 +96,14 @@ class ComputeRouter:
         if not candidates:
             return None
 
-        # Sort: intent match first, then cheapest, then lowest effort
+        # Sort: intent match first, then success rate (desc), then cheapest, then lowest effort
+        # Penalize models with success rate < 0.5
         candidates.sort(key=lambda c: (
-            not c[1],                    # intent matches first
-            c[0]["cost_per_turn"],       # cheapest first
-            c[0]["effort_level"],        # lowest effort first
+            not c[1],                                # 1. Intent matches first (True -> False -> 0)
+            c[0].get("last_success_rate", 1.0) < 0.5, # 2. Penalize failed models (False first)
+            -c[0].get("last_success_rate", 1.0),     # 3. High success rate first
+            c[0]["cost_per_turn"],                   # 4. Cheapest first
+            c[0]["effort_level"],                    # 5. Lowest effort first
         ))
 
         best = candidates[0][0]

@@ -39,6 +39,7 @@ class ExecutorAgent(BaseAgent):
         await self.listen(Subject.TASK_EXEC, self._handle_exec)
         await self.listen(Subject.TASK_EXEC_REQUEST_CODE, self._handle_exec)
         await self.listen(Subject.TASK_EXEC_REQUEST_RESEARCH, self._handle_exec)
+        await self.listen(Subject.CAPTAIN_DIRECTIVE, self._handle_directive)
 
         logger.info("Executor active (%s). Awaiting directives...", self.executor_runtime)
 
@@ -159,6 +160,27 @@ class ExecutorAgent(BaseAgent):
             "response_channel_id": payload.get("response_channel_id"),
             "response_thread_id": payload.get("response_thread_id"),
         })
+
+    async def _handle_directive(self, data: dict[str, Any]) -> None:
+        """Handle proactive directives from the Captain (e.g., repair_repo)."""
+        payload = data.get("data", data)
+        dtype = payload.get("directive_type")
+
+        if dtype == "repair_repo":
+            instruction = payload.get("instruction", "Fix repository issues.")
+            logger.info("Executing repair directive: %s", instruction)
+
+            # Re-wrap as a high-risk build task for premium execution
+            repair_task = {
+                "task_id": f"repair-{int(time.time())}",
+                "instruction": instruction,
+                "intent_class": "build",
+                "risk_level": "high",
+                "source_surface": "captain",
+                "target_runtime": "macbook",  # Repair locally first
+            }
+            # Inject into the same handler
+            await self._handle_exec({"data": repair_task})
 
     def _resolve_runtime(self) -> str:
         explicit = str(os.getenv("HEIWA_EXECUTOR_RUNTIME", "")).strip().lower()

@@ -116,6 +116,32 @@ class MemoryService:
             error_summary=error,
         )
 
+    def get_execution_stats(self, model_id: str, limit: int = 20) -> Dict[str, Any]:
+        """Aggregate success rate and latency for a given model from STDB."""
+        query = (
+            f"SELECT outcome, duration_ms FROM execution_memory "
+            f"WHERE model_used = '{self.stdb._escape_sql_literal(model_id)}' "
+            f"ORDER BY created_at DESC LIMIT {int(limit)}"
+        )
+        rows = self.stdb.query(query)
+        if not rows:
+            return {"success_rate": 1.0, "avg_latency_ms": 0, "p95_latency_ms": 0, "count": 0}
+
+        passed = sum(1 for r in rows if r["outcome"] == "pass")
+        latencies = sorted([int(r["duration_ms"]) for r in rows])
+        
+        count = len(rows)
+        avg_latency = sum(latencies) // count
+        p95_index = min(count - 1, int(count * 0.95))
+        p95_latency = latencies[p95_index]
+
+        return {
+            "success_rate": round(passed / count, 2),
+            "avg_latency_ms": avg_latency,
+            "p95_latency_ms": p95_latency,
+            "count": count
+        }
+
     def _chunk_text(self, text: str, chunk_size: int = 1000, overlap: int = 100) -> List[str]:
         """Simple sliding window chunking."""
         if len(text) <= chunk_size:

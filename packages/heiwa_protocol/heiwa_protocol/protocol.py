@@ -28,6 +28,7 @@ class Subject(str, Enum):
     NODE_TELEMETRY = "heiwa.node.telemetry"    # Node -> Swarm (Resource stats)
     SWARM_STATUS_QUERY = "heiwa.swarm.status.query"
     SWARM_STATUS_REPORT = "heiwa.swarm.status.report"
+    CAPTAIN_DIRECTIVE = "heiwa.captain.directive"  # Proactive repair/audit directives
 
     # V2 Mesh Protocol (Decentralized Blackboard)
     MESH_CAPABILITY_BROADCAST = "heiwa.mesh.capability.broadcast" # Agent -> Mesh (Here are my tools)
