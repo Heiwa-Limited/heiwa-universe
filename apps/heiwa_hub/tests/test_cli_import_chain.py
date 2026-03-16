@@ -3,6 +3,8 @@
 import sys
 from pathlib import Path
 
+import pytest
+
 ROOT = Path(__file__).resolve().parents[3]
 for pkg in ("heiwa_cli", "heiwa_cognition", "heiwa_sdk", "heiwa_protocol", "heiwa_identity", "heiwa_ui"):
     p = str(ROOT / "packages" / pkg)
@@ -29,7 +31,8 @@ def test_cli_commands():
     assert required.issubset(set(cmds)), f"Missing: {required - set(cmds)}"
 
 
-def test_enrichment_pipeline():
+@pytest.mark.asyncio
+async def test_enrichment_pipeline():
     from heiwa_cognition.enrichment import BrokerEnrichmentService
     from heiwa_protocol.routing import BrokerRouteRequest
     svc = BrokerEnrichmentService()
@@ -40,7 +43,7 @@ def test_enrichment_pipeline():
         sender_id="test-node",
         source_surface="cli",
     )
-    result = svc.enrich(req)
+    result = await svc.enrich(req)
     assert result.intent_class
     assert result.risk_level
     assert result.target_tool
