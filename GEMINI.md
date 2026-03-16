@@ -86,7 +86,8 @@ Load only the rooms needed for the task:
 - State: write to SpacetimeDB first
 - Transport: prefer subscriptions/WebSockets over polling
 - Execution: route through HeiwaClaw/MCP, not ad-hoc provider calls
-- Cost: cheapest acceptable route first
-- Privacy: sovereign work stays local-first
+- Railway-primary: Railway is the primary execution plane, boost nodes are optional
+- Cost: no paid API credits — subscription CLI tools + free APIs only
+- Privacy: sovereign work stays on boost nodes (never cloud)
 - Untrusted code: E2B sandboxes only, never host
 - Honesty: do not overstate maturity in docs or diagrams

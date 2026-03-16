@@ -49,8 +49,8 @@
   Deployment (CI-driven — push to main triggers auto-deploy)
 
   git push origin main                    # Railway auto-deploys from main
-  # Cloudflare Pages: wrangler pages deploy apps/heiwa_web/clients/web --project-name=heiwa-clients
-  # Manual Railway (emergency only): railway up --service heiwa-cloud-hq --detach
+  # Railway is the primary execution plane — CLI tools installed in Docker
+  # MacBook/WSL are optional boost nodes, not requirements
 
   Architecture
 
@@ -126,7 +126,8 @@
   - State: write to SpacetimeDB first
   - Transport: prefer subscriptions/WebSockets over polling
   - Execution: route through HeiwaClaw/MCP, not ad-hoc provider calls
-  - Cost: cheapest acceptable route first
-  - Privacy: sovereign work stays local-first
+  - Railway-primary: Railway is the primary execution plane, boost nodes are optional
+  - Cost: no paid API credits — subscription CLI tools + free APIs only
+  - Privacy: sovereign work stays on boost nodes (never cloud)
   - Untrusted code: E2B sandboxes only, never host
   - Honesty: do not overstate maturity in docs or diagrams

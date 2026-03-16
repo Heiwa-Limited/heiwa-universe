@@ -126,5 +126,13 @@ fi
 
 echo "[HEIWA] Launching Core Collective..."
 cd /app || exit 1
-export PYTHONPATH=$PYTHONPATH:/app/packages/heiwa_sdk:/app/packages/heiwa_protocol:/app/packages/heiwa_identity:/app/packages/heiwa_ui:/app/apps
+
+# Verify CLI tool availability
+echo "[HEIWA] CLI tools:"
+command -v claude   && echo "  claude:   $(claude --version 2>/dev/null | head -1)" || echo "  claude:   not installed"
+command -v gemini   && echo "  gemini:   available" || echo "  gemini:   not installed"
+command -v codex    && echo "  codex:    available" || echo "  codex:    not installed"
+command -v openclaw && echo "  openclaw: available" || echo "  openclaw: not installed"
+
+# PYTHONPATH is set in Dockerfile ENV — no need to append here
 exec python -m apps.heiwa_hub.main

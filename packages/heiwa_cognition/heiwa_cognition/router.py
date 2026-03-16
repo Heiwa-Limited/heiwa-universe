@@ -310,10 +310,10 @@ class ComputeRouter:
                 intent=intent,
                 compute_class=1,
                 worker="node_a_codegen",
-                runtime="macbook",
+                runtime="boost",
                 tier="tier1_local",
                 privacy_level=privacy,
-                rationale="Filesystem mutations stay local and deterministic.",
+                rationale="Filesystem mutations prefer boost node (local files); Railway uses git clone.",
                 direct_tool="heiwa_ops",
             )
 
@@ -336,19 +336,19 @@ class ComputeRouter:
                     intent=intent,
                     compute_class=3,
                     worker="class_3_build",
-                    runtime="both",
+                    runtime="railway",
                     tier="tier5_heavy_code",
                     privacy_level=privacy,
-                    rationale="High-risk build work escalates to premium HeiwaClaw routing.",
+                    rationale="High-risk build escalates to Railway-hosted premium CLI session.",
                 )
             return self._route_from_worker(
                 intent=intent,
                 compute_class=2,
                 worker="node_a_codegen",
-                runtime="macbook",
+                runtime="railway",
                 tier="tier5_heavy_code",
                 privacy_level=privacy,
-                rationale="Cheapest acceptable build route stays local on the codegen node.",
+                rationale="Build work executes on Railway; boost node accelerates when available.",
             )
 
         if intent == "media":
@@ -356,10 +356,10 @@ class ComputeRouter:
                 intent=intent,
                 compute_class=2,
                 worker="node_b_media",
-                runtime="both",
+                runtime="boost",
                 tier="tier2_fast_context",
                 privacy_level=privacy,
-                rationale="Media work uses the localized fast-path media worker behind HeiwaClaw.",
+                rationale="Media work requires GPU — queued for boost node (MacBook/WSL).",
             )
 
         if intent == "research":
@@ -367,10 +367,10 @@ class ComputeRouter:
                 intent=intent,
                 compute_class=3,
                 worker="class_3_research",
-                runtime="both",
+                runtime="railway",
                 tier="tier6_premium_context",
                 privacy_level=privacy,
-                rationale="Research work routes through premium long-context infrastructure.",
+                rationale="Research executes on Railway via premium long-context CLI session.",
             )
 
         if intent == "strategy":
@@ -378,10 +378,10 @@ class ComputeRouter:
                 intent=intent,
                 compute_class=3,
                 worker="class_3_strategy",
-                runtime="both",
+                runtime="railway",
                 tier="tier7_supreme_court",
                 privacy_level=privacy,
-                rationale="Strategy work routes through adversarial-review capable premium infrastructure.",
+                rationale="Strategy executes on Railway via adversarial-review CLI session.",
             )
 
         if intent in {"mesh_ops", "self_buff"}:
@@ -389,10 +389,10 @@ class ComputeRouter:
                 intent=intent,
                 compute_class=2,
                 worker="node_a_orchestrator",
-                runtime="macbook",
+                runtime="railway",
                 tier="tier3_orchestrator",
                 privacy_level=privacy,
-                rationale="Core Heiwa maintenance stays local-first for speed and operator control.",
+                rationale="Heiwa maintenance runs on Railway; boost node assists when online.",
                 direct_tool="heiwa_ops" if intent == "mesh_ops" else None,
             )
 
@@ -404,15 +404,15 @@ class ComputeRouter:
                 runtime="railway",
                 tier="tier1_local",
                 privacy_level=privacy,
-                rationale="Low-latency chat uses the smallest acceptable HeiwaClaw route.",
+                rationale="Chat handled by Railway via free-tier API inference.",
             )
 
         return self._route_from_worker(
             intent=intent,
             compute_class=2,
             worker="node_a_orchestrator",
-            runtime="both",
+            runtime="railway",
             tier="tier3_orchestrator",
             privacy_level=privacy,
-            rationale="Default route keeps work on the local-first HeiwaClaw path.",
+            rationale="Default route executes on Railway primary plane.",
         )

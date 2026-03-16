@@ -26,16 +26,16 @@
       "node_a_orchestrator": {
         "id": "ollama/qwen3.5:4b",
         "provider": "ollama",
-        "host_node": "macbook@heiwa-node-a",
+        "host_node": "boost@macbook",
         "compute_class": 2,
-        "role": "orchestration_reasoning (qwen3.5:4b until llama-4-scout available)"
+        "role": "orchestration_reasoning — boost node (available when MacBook online)"
       },
       "node_a_codegen": {
         "id": "ollama/glm-4.7-flash:q4_k_m",
         "provider": "ollama",
-        "host_node": "macbook@heiwa-node-a",
+        "host_node": "boost@macbook",
         "compute_class": 2,
-        "role": "local_codegen"
+        "role": "local_codegen — boost node"
       },
       "node_b_gpu_builder": {
         "id": "ollama/qwen3.5:4b",
@@ -82,28 +82,28 @@
       "class_3_research": {
         "id": "google-gemini-cli/gemini-3-pro-preview",
         "provider": "google-gemini-cli",
-        "host_node": "cloud@premium-remote",
+        "host_node": "railway@heiwa-cloud-hq",
         "compute_class": 3,
         "role": "research_long_context"
       },
       "class_3_strategy": {
         "id": "google-antigravity/gemini-3-flash",
         "provider": "google-antigravity",
-        "host_node": "cloud@premium-remote",
+        "host_node": "railway@heiwa-cloud-hq",
         "compute_class": 3,
         "role": "strategy_adversarial_review"
       },
       "class_3_review": {
         "id": "claude-code/claude-opus-4-6",
         "provider": "claude-code",
-        "host_node": "cloud@premium-remote",
+        "host_node": "railway@heiwa-cloud-hq",
         "compute_class": 3,
         "role": "adversarial_review"
       },
       "class_3_build": {
         "id": "openai-codex/gpt-5.3-codex",
         "provider": "codex",
-        "host_node": "cloud@premium-remote",
+        "host_node": "railway@heiwa-cloud-hq",
         "compute_class": 3,
         "role": "build_codegen"
       }
@@ -320,10 +320,11 @@
       "4": "cloud_persistence"
     },
     "hard_rules": [
-      "privacy_level=sovereign forces class_1_or_2_only",
-      "use_local_only_if_all_rate_groups_below_10_percent",
+      "privacy_level=sovereign forces boost_node_only",
+      "railway_is_primary_execution_plane",
+      "boost_nodes_are_optional_not_required",
       "no_cloud_gpu_rental",
-      "no_rest_only_multi_turn_agentic_sessions",
+      "no_paid_api_credits_only_subscription_and_free",
       "local_bus_is_ephemeral_not_durable_state"
     ]
   },
@@ -347,14 +348,15 @@
   },
   "control_plane": {
     "railway_project_name": "heiwa-hub",
+    "primary_plane": "railway",
     "always_on_services": [
       "heiwa-cloud-hq",
       "spacetimedb",
       "heiwa-scheduler"
     ],
-    "ephemeral_nodes": [
-      "macbook@heiwa-node-a",
-      "pc@heiwa-node-b"
+    "boost_nodes": [
+      {"id": "macbook@heiwa-node-a", "capabilities": ["ollama", "docker", "filesystem", "gpu_m4"]},
+      {"id": "pc@heiwa-node-b", "capabilities": ["ollama", "gpu_rtx3060", "media", "embeddings"]}
     ]
   },
   "mcp_servers": {

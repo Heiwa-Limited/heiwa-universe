@@ -2,86 +2,138 @@
 
 ## What Heiwa IS
 
-A personal distributed AI operating system that turns ~$83 CAD/month in OAuth subscriptions into a unified, rate-limit-aware execution layer across four Class 3 cloud models + local inference, with a single identity, a single state layer, and one logical brain regardless of which physical model is executing.
+A personal AI operating system that turns ~$83 CAD/month in subscriptions into an always-on, rate-limit-aware execution layer. Railway is the primary plane — self-sufficient with CLI tools, API inference, state, and orchestration. MacBook and WSL are optional boost nodes that add capacity when online.
 
-## The Three Planes
+## Architecture: Railway-Primary
 
-### 1. Control Plane (Railway, always-on)
-- SpacetimeDB as the sole state layer and message bus (proposals, leases, runs, nodes — all via WebSocket subscriptions, zero polling)
-- HTTP/WebSocket ingress for external surfaces (MCP API, status, webhooks, Discord bot)
-- In-process local bus for co-located agents — no NATS, no Redis, no external broker
-- Crons, schedulers, and uptime-dependent automation
-- Cost: stays under $40 CAD/month
+### Railway (Primary Plane — always-on, self-sufficient)
 
-### 2. Execution Plane (MacBook + WSL, ephemeral)
-- Four Class 3 OAuth CLI executors (Claude, Gemini, Codex, Antigravity) spawned as subprocesses via HeiwaClaw
-- Local Ollama inference for sovereign/Class 1-2 work
-- E2B sandboxes for untrusted code — never host execution
-- Nodes connect, do work, disconnect. No daemons, no mini-servers
-- Rate-limit-aware routing: when one group throttles, overflow to another or queue
+**The Captain** — Event-driven Gemini Flash orchestrator
+- Persistent state in SpacetimeDB (focus, decisions, context)
+- Proactive communication via Discord
+- Delegates to Class 3 CLI tools and free API inference
+- Monitors rate limits, deploys, system health
+- Coordinates multi-agent workflows via ACP
 
-### 3. Identity Plane (config + SpacetimeDB)
-- HeiwaCells catalog: typed agent personas with model affinity, specialization, and risk profiles
+**Executors** — Class 3 CLI tools installed in Docker
+- Claude Code, Gemini CLI, Codex, OpenClaw — all installed on Railway
+- Spawned as ephemeral subprocesses per task
+- Auth via Railway env vars (subscription OAuth)
+- Tunable: thinking level, effort, context scope
+
+**API Inference** — Free-tier providers for lightweight tasks
+- Google AI Studio (Gemini Flash/Pro) — enrichment, classification, chat
+- Cerebras, OpenRouter — overflow inference
+- No paid API credits — subscription-included or free only
+
+**Tool Surface** — MCP servers always available
+- Playwright (headless Chromium in container)
+- Figma, Notion (cloud APIs)
+- Heiwa native tools (status, routing, bench)
+- SpacetimeDB state queries
+
+**State Layer**
+- SpacetimeDB — authoritative (proposals, nodes, runs, leases, approvals)
+- WebSocket subscriptions — no polling
+- In-process LocalBusTransport — no NATS, no Redis
+
+### Boost Nodes (Optional — MacBook, WSL)
+
+When online, boost nodes register via `/ws/worker` and add:
+- **Ollama** — local GPU inference (M4, RTX 3060)
+- **Local filesystem** — access to uncommitted code, local dev environment
+- **Docker daemon** — container builds, security scans
+- **GPU workloads** — media generation, embeddings
+- **Extra execution capacity** — parallel CLI sessions
+
+When offline, nothing breaks. Railway handles everything with cloud tools.
+
+### Identity Plane (config + SpacetimeDB)
+- HeiwaCells catalog: typed agent personas with model affinity
 - Single SOUL.md identity across all surfaces
 - profiles.json materializes cells; ai_router.json routes them
-- Every execution is attributable to a cell, a node, and a run
 
-## The Execution Flow (End-State)
+## The Execution Flow
 
 ```
-Human input (CLI / iMessage / MCP)
-  → IntentNormalizer (classify intent)
-  → RiskScorer (assign risk tier)
-  → ComputeRouter (pick class, model, node)
+Input (CLI / Discord / Webhook / Cron)
+  → Captain triages (event-driven Gemini Flash)
+  → IntentNormalizer → RiskScorer → ComputeRouter
   → HeiwaClaw (resolve to adapter + provider)
-  → CLI subprocess execution (claude/gemini/codex/ollama)
-  → Result → SpacetimeDB (state written via subscription callback)
-  → Operator surface (CLI output / Discord / web)
+  → Rate cascade: pick best available tool with capacity
+  → Execute on Railway (CLI subprocess or API inference)
+  → If task needs boost (Ollama/filesystem): delegate to boost node
+  → Result → SpacetimeDB → Operator surface (CLI / Discord / web)
 ```
 
-No polling. No NATS. No REST-only multi-turn. WebSocket subscriptions drive all reactive state.
+## Protocols
+
+- **MCP** (Model ↔ Tool): Any model calls any tool via MCP bridge
+- **ACP** (Agent ↔ Agent): Structured delegation with contracts (task, context, constraints, output format)
+- **Skills**: Executable workflow templates that compose MCP tools + ACP delegation
+
+## Rate Cascade (the value engine)
+
+```
+1. Gemini CLI     — 50 turns/hr    (free, Google AI Pro)
+2. Antigravity    — 35 turns/hr    (free, Google AI Pro)
+3. Claude Code    — 40 turns/5hr   ($31/mo subscription)
+4. Codex          — 25 turns/hr    ($27/mo subscription)
+5. Free APIs      — unlimited-ish  (Cerebras, Google AI Studio, OpenRouter)
+6. Ollama         — unlimited      (boost node only)
+```
+
+Heiwa spreads work across all providers. Never leaves capacity on the table.
 
 ## What Gets Killed
 
 | Kill | Replacement |
 | --- | --- |
-| NATS | SpacetimeDB WebSocket subscriptions + in-process bus |
-| tick.py polling | STDB subscription callbacks |
-| Ad-hoc provider calls in agents | All routing through HeiwaClaw/MCP |
-| Write-gated autonomy for Class 3 | Full executive capabilities, peer model |
-| Individual smoke test scripts | Unified pytest runner |
-| Monolithic Spine agent | Decomposed into focused agents (<10 skills each) |
-| 3 overlapping routing systems | Single unified compute_router → ai_router.json pipeline |
-| Hardcoded /home/devon/heiwa fallback | Env-var driven path resolution |
+| NATS | SpacetimeDB subscriptions + in-process bus |
+| Polling (tick.py) | STDB subscription callbacks |
+| Ad-hoc provider calls | All routing through HeiwaClaw |
+| Local-first execution model | Railway-primary, boost nodes optional |
+| Paid API tiers (Claude/OpenAI API) | Subscription CLI tools + free APIs only |
+| Individual smoke tests | Unified pytest runner |
+| Monolithic Spine | Decomposed agents + Captain orchestrator |
 
-## What Gets Built (that doesn't exist yet)
+## What Gets Built
 
 | Surface | Purpose |
 | --- | --- |
-| HeiwaCells marketplace (heiwa install) | Install/registry commands for cell catalog |
-| HeiwaBench red-team plane | Adversarial testing beyond release gates |
-| SpacetimeDB subscription layer | Replace all polling with reactive subscriptions |
-| Unified CLI heiwa probe | Sub-30s health verification across all adapters |
-| Cross-platform identity sync | Same SOUL across Mac, WSL, Railway |
-| Public ingress pipeline | Single entry point for internet-facing agentic work |
+| Captain agent | Always-on Gemini orchestrator on Railway |
+| CLI tools in Docker | Railway self-sufficient for Class 3 execution |
+| Boost node protocol | MacBook/WSL register capabilities via /ws/worker |
+| ACP contracts | Structured agent-to-agent delegation |
+| Skill execution engine | YAML workflows Captain can orchestrate |
+| STDB subscription layer | Replace all polling with reactive subscriptions |
+| MCP tool sharing | MacBook tools accessible from Railway via WebSocket |
 
-## The Four-Class Model (Unchanged from Blueprint)
+## The Four-Class Model
 
 - **Class 1 (CPU):** Shell, git, parse, lint, audit — free, instant
-- **Class 2 (GPU):** Local LLM, embeddings, image gen — free, seconds
-- **Class 3 (Premium Remote):** Complex reasoning, strategy, adversarial review — subscription-bounded
-- **Class 4 (Cloud Persistence):** Webhooks, schedulers, deploys, status APIs — Railway
+- **Class 2 (GPU):** Local LLM, embeddings, image gen — boost node, free
+- **Class 3 (Premium Remote):** Complex reasoning, strategy, code — Railway, subscription-included
+- **Class 4 (Cloud Persistence):** Webhooks, schedulers, deploys — Railway, always-on
 
-## End-State Success Criteria
+## Cost Structure
 
-- Any Class 3 tool launched from ~ or ~/heiwa instantly knows what it is, what to do, and how to collaborate
-- Zero external message brokers running anywhere
+| Resource | Monthly | Role |
+|---|---|---|
+| Railway Pro | $25 | Primary plane — everything runs here |
+| Claude Pro | $31 | Claude Code sessions on Railway |
+| ChatGPT Plus | $27 | Codex sessions on Railway |
+| Google AI Pro | $0 | Captain + Gemini/Antigravity (free until Dec 2026) |
+| Free APIs | $0 | Overflow inference |
+| Boost nodes | $0 | Optional capacity (your existing hardware) |
+
+## Success Criteria
+
+- Railway is fully self-sufficient — works with all boost nodes offline
+- Captain proactively manages work, communicates via Discord
+- Rate cascade spreads work across all 4 CLI tools + free APIs
+- Zero external message brokers
 - All state changes flow through SpacetimeDB subscriptions
-- heiwa bench gates every release automatically
-- Sovereign tasks never leave the local network
-- Monthly cloud spend stays under $40 CAD
-- The system is publicly showcasable and can accept internet-facing work
-
-## Transition Note
-
-NATS is debt to retire, not infrastructure to harden.
+- Sovereign tasks route to boost nodes only (never cloud)
+- Monthly spend stays at ~$83 CAD
+- The system is publicly showcasable
