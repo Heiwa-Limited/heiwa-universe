@@ -114,6 +114,23 @@ else
 fi
 
 # 4. Launch the Core Collective (Spine + Messenger)
+export HEIWA_STATE_BACKEND="${HEIWA_STATE_BACKEND:-spacetimedb}"
+export STDB_SERVER="${STDB_SERVER:-local}"
+export STDB_IDENTITY="${STDB_IDENTITY:-heiwaproductiondb}"
+
+# Pre-flight check for SpacetimeDB
+if [[ "$HEIWA_STATE_BACKEND" == "spacetimedb" ]]; then
+    echo "[HEIWA] Verifying SpacetimeDB availability..."
+    # Local fallback start for development if STDB_SERVER=local
+    if [[ "$STDB_SERVER" == "local" ]] && command -v spacetime &>/dev/null; then
+        if ! curl -s http://127.0.0.1:3000/v1/health >/dev/null; then
+            echo "[HEIWA] Starting local SpacetimeDB instance..."
+            spacetime start --listen-addr 127.0.0.1:3000 &
+            sleep 3
+        fi
+    fi
+fi
+
 # Bootstrap a cloud-safe default net policy if no runtime policy is mounted.
 HEIWA_HOME_DIR="${HEIWA_HOME:-/root/.heiwa}"
 HEIWA_NET_POLICY_TARGET="$HEIWA_HOME_DIR/policy/internet/net_policy_v2.json"
@@ -132,7 +149,7 @@ echo "[HEIWA] CLI tools:"
 command -v claude   && echo "  claude:   $(claude --version 2>/dev/null | head -1)" || echo "  claude:   not installed"
 command -v gemini   && echo "  gemini:   available" || echo "  gemini:   not installed"
 command -v codex    && echo "  codex:    available" || echo "  codex:    not installed"
-command -v openclaw && echo "  openclaw: available" || echo "  openclaw: not installed"
+
 
 # Ensure PYTHONPATH includes all monorepo packages.
 # Dockerfile ENV sets this, but Railway's startCommand override may not inherit it.

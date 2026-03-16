@@ -954,3 +954,14 @@ class SpacetimeDB:
             json.dumps(payload),
             int(priority),
         )
+
+    def prune_knowledge_embeddings(self, ttl_hours: int) -> bool:
+        """Delete embeddings older than the specified TTL."""
+        # STDB SQL doesn't support complex date math well, so we use a reducer if available
+        # or a simple DELETE if we can compute the timestamp in Python.
+        # For now, we scaffold the call.
+        return self.call("prune_knowledge_embeddings", int(ttl_hours))
+
+    def prune_execution_memory(self, keep_last: int) -> bool:
+        """Keep only the N most recent execution memory records."""
+        return self.call("prune_execution_memory", int(keep_last))

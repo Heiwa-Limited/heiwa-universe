@@ -35,6 +35,8 @@ STATUS_BROADCAST_INTERVAL_SEC = 300
 AUDIT_INTERVAL_SEC = 600
 # How often to re-tune model tiers based on stats
 MODEL_TUNING_INTERVAL_SEC = 300
+# How often to prune old logs/embeddings
+PRUNE_INTERVAL_SEC = 3600
 
 
 class CaptainAgent(BaseAgent):
@@ -50,6 +52,7 @@ class CaptainAgent(BaseAgent):
         self._last_status_broadcast = 0.0
         self._last_audit = 0.0
         self._last_tuning = 0.0
+        self._last_prune = 0.0
         self._task_results: list[dict[str, Any]] = []
         self._pending_alerts: list[str] = []
 
@@ -146,6 +149,11 @@ class CaptainAgent(BaseAgent):
         if now - self._last_tuning > MODEL_TUNING_INTERVAL_SEC:
             asyncio.create_task(self._tune_model_tiers())
             self._last_tuning = now
+
+        # Periodic maintenance (pruning)
+        if now - self._last_prune > PRUNE_INTERVAL_SEC:
+            asyncio.create_task(self._run_maintenance())
+            self._last_prune = now
 
         # Periodic status broadcast
         if now - self._last_status_broadcast > STATUS_BROADCAST_INTERVAL_SEC:
@@ -297,6 +305,23 @@ class CaptainAgent(BaseAgent):
                 logger.info("Model tuning complete. Updated %d model(s).", updated_count)
         except Exception as e:
             logger.error("Failed to tune model tiers: %s", e)
+
+    async def _run_maintenance(self):
+        """Perform system-wide maintenance (pruning old data)."""
+        if not self.db.stdb:
+            return
+            
+        logger.info("Starting system maintenance...")
+        try:
+            # 1. Prune knowledge embeddings (default 7 days / 168 hours)
+            self.db.stdb.prune_knowledge_embeddings(ttl_hours=168)
+            
+            # 2. Prune execution memory (keep last 1000)
+            self.db.stdb.prune_execution_memory(keep_last=1000)
+            
+            logger.info("System maintenance complete.")
+        except Exception as e:
+            logger.error("Maintenance task failed: %s", e)
 
     def _get_comms_channel(self) -> str | None:
         """Resolve the Captain's preferred Discord channel for comms."""

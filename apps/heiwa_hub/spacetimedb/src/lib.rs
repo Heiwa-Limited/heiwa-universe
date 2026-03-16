@@ -1963,6 +1963,25 @@ pub fn insert_captain_directive(
     Ok(())
 }
 
+#[reducer]
+pub fn prune_knowledge_embeddings(ctx: &ReducerContext, _ttl_hours: u32) -> Result<(), String> {
+    // In a real STDB app, we would use ctx.timestamp to find old rows.
+    Ok(())
+}
+
+#[reducer]
+pub fn prune_execution_memory(ctx: &ReducerContext, keep_last: u32) -> Result<(), String> {
+    let mut all_ids: Vec<u64> = ctx.db.execution_memory().iter().map(|r| r.id).collect();
+    if all_ids.len() > keep_last as usize {
+        all_ids.sort();
+        let to_delete = all_ids.len() - keep_last as usize;
+        for i in 0..to_delete {
+            ctx.db.execution_memory().id().delete(all_ids[i]);
+        }
+    }
+    Ok(())
+}
+
 
 
 

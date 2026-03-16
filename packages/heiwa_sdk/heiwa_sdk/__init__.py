@@ -9,7 +9,6 @@ from .security import redact_any, redact_text
 from .state import HubStateService
 from .utils import run_cmd
 from .vault import InstanceVault
-from .claw_adapter import ClawAdapter
 from .bench import HeiwaBench
 from .cells import HeiwaCellCatalog
 from .operator_surface import FastPathTurn, WELCOME_SUGGESTIONS, maybe_fast_path_turn, operator_display_name
