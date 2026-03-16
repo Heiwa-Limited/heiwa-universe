@@ -48,7 +48,8 @@ Everything that can change at runtime lives in STDB. No SQLite. No Postgres. No 
 **Model Tier Matrix**
 ```
 table model_tiers {
-    model_id: String,           // "ollama/qwen3.5:4b"
+    model_id: String,           // internal alias: "ollama/qwen3.5:4b"
+    provider_model_id: String,  // actual API string: "qwen3.5:4b" (what gets sent to the provider)
     provider: String,           // "ollama"
     rate_group: String,         // "local_ollama"
     capability_class: u8,       // 1=light, 2=medium, 3=heavy
@@ -60,6 +61,7 @@ table model_tiers {
     enabled: bool,
     last_success_rate: f64,     // rolling 20-execution window
     avg_latency_ms: u64,       // rolling average
+    latency_p95_ms: u64,       // 95th percentile — catches outlier spikes avg hides
     updated_at: Timestamp,
 }
 ```
@@ -68,6 +70,7 @@ table model_tiers {
 ```
 table task_dispatches {
     task_id: String,
+    parent_task_id: String,     // null for top-level; set when Captain directive spawns sub-tasks
     intent_class: String,       // "audit", "build", "research", etc.
     risk_level: String,         // "low", "medium", "high", "critical"
     assigned_model: String,     // FK to model_tiers.model_id
@@ -225,6 +228,8 @@ Three components, all backed by STDB:
 
 Retrieval: when an agent is dispatched, the context_files in the dispatch envelope are enriched with semantically similar chunks from `knowledge_embeddings`. The agent gets relevant context without loading the entire repo.
 
+**Pruning strategy**: Embeddings carry a `created_at` timestamp and an implicit relevance score (how often they're retrieved). A Captain directive runs weekly to prune: code file embeddings are re-indexed on every git push (stale chunks deleted); execution result embeddings older than 30 days with zero retrievals are pruned; document embeddings are re-indexed when source files change (hash comparison).
+
 **Feedback Collector** — three input channels:
 1. **Automated**: test pass/fail after code changes, lint scores, PR merge/reject
 2. **Captain review**: Captain spot-checks execution results using a cheap model
@@ -239,6 +244,11 @@ The Captain is not a monitor — it's the brain. It runs on Railway (always-on) 
 2. Subscribe to `task_dispatches` where status = "failed" or "budget_exceeded" — auto-retry with escalated model/effort
 3. Subscribe to `rate_group_state` — when a rate group recovers from cooldown, drain any queued tasks
 4. Subscribe to `execution_memory` — when quality_score patterns degrade, update `model_tiers`
+
+**Captain trust boundaries**:
+- **Autonomous (no approval)**: read-only audits, test runs, status checks, model tier tuning, embedding re-indexing
+- **Auto-fix with guard rails**: code changes on non-main branches only, PR creation (never direct push to main), max 50 lines changed per fix
+- **Requires human approval**: dependency changes, config changes affecting production, any risk_level >= "high" task, Dockerfile modifications, STDB schema migrations
 
 **Self-check directive** (runs every 30 minutes):
 1. `git diff HEAD~1` — what changed since last check?
@@ -361,6 +371,7 @@ Cells are stored in STDB (`agent_registry` table) so the Captain can deploy, upd
 - Update ComputeRouter to read from STDB subscription instead of ai_router.json
 - Delete db.py multi-backend code
 - `heiwa start` boots STDB + hub locally
+- `heiwa inspect [table]` CLI command — dump any STDB table as formatted output for debugging during development
 
 **Phase 2: Memory Layer + Feedback** (~2 days)
 - Embedding pipeline using qwen3-embedding:0.6b
