@@ -56,6 +56,11 @@ async def main():
         asyncio.create_task(asyncio.to_thread(db.init_db))
     else:
         logger.info("[BOOT] SpacetimeDB selected as authoritative state layer.")
+        # Seed STDB tables from checked-in config (first boot only)
+        from heiwa_sdk.seed import SeedLoader
+        seed_loader = SeedLoader(stdb=db.stdb)
+        seed_loader.seed_model_tiers(ROOT / "config" / "seeds" / "model_tiers.json")
+        seed_loader.seed_rate_groups(ROOT / "config" / "swarm" / "ai_router.json")
 
     # Register MCP servers from ai_router.json
     async def _register_mcp_servers():

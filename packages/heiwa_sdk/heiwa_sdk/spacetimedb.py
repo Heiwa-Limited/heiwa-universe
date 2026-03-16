@@ -758,3 +758,72 @@ class SpacetimeDB:
         if row and "trust_score" in row:
             return float(row["trust_score"])
         return 0.5
+
+    # ── Model Tiers ──────────────────────────────────────────────────────
+
+    def get_model_tiers(self, *, capability_class: int | None = None,
+                        enabled_only: bool = True) -> list[dict]:
+        """Query model_tiers table, optionally filtered."""
+        where_clauses = []
+        if enabled_only:
+            where_clauses.append("enabled = true")
+        if capability_class is not None:
+            where_clauses.append(f"capability_class = {capability_class}")
+        where = f" WHERE {' AND '.join(where_clauses)}" if where_clauses else ""
+        return self.query(
+            f"SELECT * FROM model_tiers{where} ORDER BY effort_level ASC, cost_per_turn ASC"
+        )
+
+    def get_model_tier(self, model_id: str) -> dict | None:
+        """Get a single model tier by model_id."""
+        rows = self.query(
+            f"SELECT * FROM model_tiers WHERE model_id = '{self._escape_sql_literal(model_id)}'"
+        )
+        return rows[0] if rows else None
+
+    def upsert_model_tier(
+        self,
+        model_id: str,
+        provider_model_id: str,
+        provider: str,
+        rate_group: str,
+        capability_class: int,
+        effort_knob: str,
+        effort_level: int,
+        cost_per_turn: float,
+        max_context_tokens: int,
+        strengths: list[str],
+        enabled: bool,
+    ) -> bool:
+        """Insert or update a model tier."""
+        import json
+        return self.call(
+            "upsert_model_tier",
+            model_id,
+            provider_model_id,
+            provider,
+            rate_group,
+            capability_class,
+            effort_knob,
+            effort_level,
+            cost_per_turn,
+            max_context_tokens,
+            json.dumps(strengths),
+            enabled,
+        )
+
+    def update_model_tier_stats(
+        self,
+        model_id: str,
+        success_rate: float,
+        avg_latency_ms: int,
+        latency_p95_ms: int,
+    ) -> bool:
+        """Update performance stats for a model tier (called by Captain)."""
+        return self.call(
+            "update_model_tier_stats",
+            model_id,
+            success_rate,
+            avg_latency_ms,
+            latency_p95_ms,
+        )

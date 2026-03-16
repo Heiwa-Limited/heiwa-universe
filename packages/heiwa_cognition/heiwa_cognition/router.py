@@ -4,6 +4,7 @@ import logging
 from dataclasses import dataclass
 import json
 from pathlib import Path
+from typing import Any
 
 from heiwa_protocol.routing import normalize_privacy_level
 
@@ -21,6 +22,7 @@ class ComputeRoute:
     privacy_level: str
     rationale: str
     intent_class: str = ""
+    effort_knob: str = ""  # provider-specific effort setting
 
 
 class ComputeRouter:
@@ -34,7 +36,7 @@ class ComputeRouter:
     to the next available provider in the rotation list from ai_router.json.
     """
 
-    def __init__(self, router_path: Path | None = None) -> None:
+    def __init__(self, router_path: Path | None = None, stdb: Any | None = None) -> None:
         root = Path(__file__).resolve().parents[3]
         self.router_path = router_path or root / "config" / "swarm" / "ai_router.json"
         self.router_config = self._load_router()
@@ -52,6 +54,57 @@ class ComputeRouter:
             .get("by_intent", {})
         )
         self._providers = self.router_config.get("providers", {})
+
+        # STDB model tier support (falls back to JSON config when None)
+        self._stdb = stdb
+        self._model_tiers: list[dict] | None = None
+        if stdb:
+            try:
+                self._model_tiers = stdb.get_model_tiers()
+                logger.info("ComputeRouter: loaded %d model tiers from STDB", len(self._model_tiers))
+            except Exception as e:
+                logger.warning("ComputeRouter: STDB unavailable (%s), falling back to JSON", e)
+
+    def _select_model_from_tiers(self, intent_class: str, risk_level: str) -> tuple[str, str] | None:
+        """Select cheapest capable model from STDB tiers. Returns (model_id, effort_knob) or None."""
+        if not self._model_tiers:
+            return None
+
+        # Determine minimum capability class from risk
+        min_class = {"low": 1, "medium": 2, "high": 3, "critical": 3}.get(risk_level, 2)
+
+        candidates = []
+        for tier in self._model_tiers:
+            if tier["capability_class"] < min_class:
+                continue
+            if not tier.get("enabled", True):
+                continue
+
+            strengths_json = tier.get("strengths_json") or "[]"
+            if isinstance(strengths_json, str):
+                try:
+                    strengths = json.loads(strengths_json)
+                except json.JSONDecodeError:
+                    strengths = []
+            else:
+                strengths = strengths_json
+
+            # Prefer models whose strengths include this intent
+            intent_match = intent_class in strengths or "general" in strengths
+            candidates.append((tier, intent_match))
+
+        if not candidates:
+            return None
+
+        # Sort: intent match first, then cheapest, then lowest effort
+        candidates.sort(key=lambda c: (
+            not c[1],                    # intent matches first
+            c[0]["cost_per_turn"],       # cheapest first
+            c[0]["effort_level"],        # lowest effort first
+        ))
+
+        best = candidates[0][0]
+        return best["model_id"], best["effort_knob"]
 
     def _load_router(self) -> dict:
         try:
@@ -125,6 +178,7 @@ class ComputeRouter:
                     privacy_level=route.privacy_level,
                     rationale=f"Rate cascade from {current_group} (exhausted) to {alt_group}.",
                     intent_class=route.intent_class,
+                    effort_knob=route.effort_knob,
                 )
 
         logger.warning(
@@ -198,7 +252,20 @@ class ComputeRouter:
         privacy_level: str | None = None,
         identity_worker_hint: str | None = None,
     ) -> ComputeRoute:
+        # STDB-first: override model selection from tiers if available
+        # (does NOT short-circuit — route still flows through identity hint,
+        #  feedback preference, and cascade logic below)
+        tier_result = self._select_model_from_tiers(intent_class, risk_level)
+        stdb_override = None
+        if tier_result:
+            stdb_override = tier_result  # (model_id, effort_knob)
+
         result = self._route_inner(intent_class, risk_level, raw_text, privacy_level)
+
+        if stdb_override:
+            result.target_model = stdb_override[0]
+            result.effort_knob = stdb_override[1]
+
         # Apply identity worker preference for premium (class 3+) routes
         if identity_worker_hint and result.compute_class >= 3 and result.target_tool != "heiwa_ops":
             hint_model = self._model_for_worker(identity_worker_hint)
@@ -213,6 +280,7 @@ class ComputeRouter:
                     privacy_level=result.privacy_level,
                     rationale=f"Identity-preferred worker: {identity_worker_hint}.",
                     intent_class=result.intent_class,
+                    effort_knob=result.effort_knob,
                 )
 
         # Apply feedback-based model preference within the same provider lane
@@ -257,6 +325,7 @@ class ComputeRouter:
                 privacy_level=route.privacy_level,
                 rationale=f"Feedback-preferred model: {preferred}.",
                 intent_class=route.intent_class,
+                effort_knob=route.effort_knob,
             )
         return route
 
@@ -328,6 +397,7 @@ class ComputeRouter:
                 privacy_level=privacy,
                 rationale="Operational control-plane work stays on Railway via bounded deterministic tools.",
                 intent_class=intent,
+                effort_knob="",
             )
 
         if intent == "build":

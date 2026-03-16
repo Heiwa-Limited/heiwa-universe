@@ -2,15 +2,20 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 import os
+import subprocess
 import sys
 import time
+from pathlib import Path
 from typing import TYPE_CHECKING, Any, Callable
 
 from rich.console import Console
 from rich.markdown import Markdown
 from rich.table import Table
+
+from heiwa_sdk.spacetimedb import SpacetimeDB
 
 if TYPE_CHECKING:
     from heiwa_cli.context import CLIContext
@@ -714,3 +719,99 @@ async def cmd_memory(ctx: CLIContext, args: str = "") -> None:
         f"\n[dim]Total feedback: {data['total_feedback']} "
         f"({data['good']} good, {data['bad']} bad)[/dim]"
     )
+
+
+@command("/inspect", "Inspect an STDB table (model_tiers, rate_group_state, task_dispatches)")
+async def cmd_inspect(ctx: CLIContext, args: str = "") -> None:
+    table_name = args.strip() or "model_tiers"
+    stdb = getattr(ctx, "stdb", None)
+    if not stdb:
+        # Try to find stdb in ctx.db if it exists
+        db = getattr(ctx, "db", None)
+        stdb = getattr(db, "stdb", None) if db else None
+
+    if not stdb:
+        console.print("  [red]STDB not connected.[/red] Run with HEIWA_STATE_BACKEND=spacetimedb.")
+        return
+
+    inspectors = {
+        "model_tiers": lambda: stdb.get_model_tiers(enabled_only=False),
+        "rate_group_state": lambda: stdb.query("SELECT * FROM rate_group_state"),
+        "task_dispatches": lambda: stdb.query(
+            "SELECT task_id, intent_class, status, assigned_model, effort_knob FROM task_dispatches ORDER BY created_at DESC LIMIT 20"
+        ),
+    }
+
+    if table_name not in inspectors:
+        console.print(f"  [yellow]Unknown table:[/yellow] {table_name}")
+        console.print(f"  Available: {', '.join(inspectors.keys())}")
+        return
+
+    rows = inspectors[table_name]()
+    if not rows:
+        console.print(f"  {table_name}: (empty)")
+        return
+
+    # Print as formatted table using rich
+    table = Table(title=f"STDB Inspect: {table_name}")
+    keys = list(rows[0].keys())
+    # Limit to first 6 columns for readability in CLI
+    display_keys = keys[:6]
+    for key in display_keys:
+        table.add_column(key)
+
+    for row in rows:
+        vals = [str(row.get(k, "")) for k in display_keys]
+        table.add_row(*vals)
+
+    console.print(table)
+
+
+@command("/start", "Start Heiwa hub locally (STDB + agents + HTTP server)")
+async def cmd_start(ctx: CLIContext, args: str = "") -> None:
+    repo_root = Path(ctx.root)
+
+    # Step 1: Start local STDB if not running
+    spacetime = os.path.expanduser("~/.local/bin/spacetime")
+    if os.path.exists(spacetime):
+        # Check if already running on 3000
+        import socket
+        sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        result = sock.connect_ex(('127.0.0.1', 3000))
+        if result != 0:
+            console.print("  [cyan]Starting local SpacetimeDB...[/cyan]")
+            subprocess.Popen(
+                [spacetime, "start", "--listen-addr", "127.0.0.1:3000"],
+                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+            )
+            await asyncio.sleep(3)
+        else:
+            console.print("  [dim]SpacetimeDB already running on port 3000.[/dim]")
+        sock.close()
+
+    # Step 2: Set env for STDB backend
+    os.environ["HEIWA_STATE_BACKEND"] = "spacetimedb"
+    os.environ["STDB_SERVER"] = "local"
+    os.environ["STDB_IDENTITY"] = "heiwaproductiondb"
+    os.environ.setdefault("OLLAMA_BASE_URL", "http://localhost:11434")
+
+    # Step 3: Start hub
+    console.print("  [cyan]Starting Heiwa Hub on port 8080...[/cyan]")
+    
+    # Construct PYTHONPATH
+    pkg_paths = [str(repo_root / "packages" / p) for p in
+                 ["heiwa_cli", "heiwa_cognition", "heiwa_sdk", "heiwa_protocol", "heiwa_identity", "heiwa_ui"]]
+    pkg_paths.append(str(repo_root / "apps"))
+    
+    env = os.environ.copy()
+    env["PYTHONPATH"] = ":".join(pkg_paths)
+
+    hub_proc = subprocess.Popen(
+        [
+            sys.executable, "-m", "apps.heiwa_hub.main",
+        ],
+        cwd=str(repo_root),
+        env=env,
+    )
+    console.print(f"  [green]Hub started (PID {hub_proc.pid}).[/green]")
+    console.print("  Health: [link=http://localhost:8080/health]http://localhost:8080/health[/link]")

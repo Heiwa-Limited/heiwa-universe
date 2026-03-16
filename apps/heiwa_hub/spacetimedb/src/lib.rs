@@ -1549,3 +1549,420 @@ pub fn record_interaction(
     });
     Ok(())
 }
+
+#[table(accessor = model_tiers, public)]
+pub struct ModelTier {
+    #[auto_inc]
+    #[primary_key]
+    pub id: u64,
+    #[unique]
+    pub model_id: String,           // "ollama/qwen3.5:4b"
+    pub provider_model_id: String,  // "qwen3.5:4b" (actual API string)
+    pub provider: String,           // "ollama"
+    pub rate_group: String,         // "local_ollama"
+    pub capability_class: u8,       // 1=light, 2=medium, 3=heavy
+    pub effort_knob: String,        // "thinking:off", "effort:medium", "reasoning:xhigh"
+    pub effort_level: u8,           // normalized 1-5
+    pub cost_per_turn: f64,         // 0.0 for local/free
+    pub max_context_tokens: u32,
+    pub strengths_json: String,     // JSON array: ["code_generation", "research"]
+    pub enabled: bool,
+    pub last_success_rate: f64,     // rolling 20-execution window
+    pub avg_latency_ms: u64,
+    pub latency_p95_ms: u64,
+    pub updated_at: String,         // ISO 8601
+}
+
+#[reducer]
+pub fn upsert_model_tier(
+    ctx: &ReducerContext,
+    model_id: String,
+    provider_model_id: String,
+    provider: String,
+    rate_group: String,
+    capability_class: u8,
+    effort_knob: String,
+    effort_level: u8,
+    cost_per_turn: f64,
+    max_context_tokens: u32,
+    strengths_json: String,
+    enabled: bool,
+) -> Result<(), String> {
+    let now = ctx.timestamp.to_string();
+    if let Some(mut existing) = ctx.db.model_tiers().model_id().find(&model_id) {
+        existing.provider_model_id = provider_model_id;
+        existing.provider = provider;
+        existing.rate_group = rate_group;
+        existing.capability_class = capability_class;
+        existing.effort_knob = effort_knob;
+        existing.effort_level = effort_level;
+        existing.cost_per_turn = cost_per_turn;
+        existing.max_context_tokens = max_context_tokens;
+        existing.strengths_json = strengths_json;
+        existing.enabled = enabled;
+        existing.updated_at = now;
+        ctx.db.model_tiers().id().update(existing);
+    } else {
+        ctx.db.model_tiers().insert(ModelTier {
+            id: 0, // auto_inc
+            model_id,
+            provider_model_id,
+            provider,
+            rate_group,
+            capability_class,
+            effort_knob,
+            effort_level,
+            cost_per_turn,
+            max_context_tokens,
+            strengths_json,
+            enabled,
+            last_success_rate: 1.0,
+            avg_latency_ms: 0,
+            latency_p95_ms: 0,
+            updated_at: now,
+        });
+    }
+    Ok(())
+}
+
+#[reducer]
+pub fn update_model_tier_stats(
+    ctx: &ReducerContext,
+    model_id: String,
+    success_rate: f64,
+    avg_latency_ms: u64,
+    latency_p95_ms: u64,
+) -> Result<(), String> {
+    if let Some(mut tier) = ctx.db.model_tiers().model_id().find(&model_id) {
+        tier.last_success_rate = success_rate;
+        tier.avg_latency_ms = avg_latency_ms;
+        tier.latency_p95_ms = latency_p95_ms;
+        tier.updated_at = ctx.timestamp.to_string();
+        ctx.db.model_tiers().id().update(tier);
+    }
+    Ok(())
+}
+
+#[table(accessor = task_dispatches, public)]
+pub struct TaskDispatch {
+    #[primary_key]
+    pub task_id: String,
+    pub parent_task_id: Option<String>, // None for top-level
+    pub intent_class: String,
+    pub risk_level: String,
+    pub assigned_model: String,     // FK to model_tiers.model_id
+    pub effort_knob: String,
+    pub assigned_cell: String,
+    pub budget_max_turns: u8,
+    pub budget_max_seconds: u32,
+    pub fallback_model: String,
+    pub sandbox_mode: String,       // "trusted" | "e2b"
+    pub tools_allowed_json: String, // JSON array
+    pub context_files_json: String, // JSON array
+    #[index(btree)]
+    pub status: String,             // "queued"|"running"|"complete"|"failed"|"budget_exceeded"
+    pub result_summary: String,
+    pub tokens_used: u32,
+    pub latency_ms: u64,
+    pub created_at: String,
+    pub completed_at: String,
+}
+
+#[reducer]
+pub fn create_task_dispatch(
+    ctx: &ReducerContext,
+    task_id: String,
+    parent_task_id: Option<String>,
+    intent_class: String,
+    risk_level: String,
+    assigned_model: String,
+    effort_knob: String,
+    assigned_cell: String,
+    budget_max_turns: u8,
+    budget_max_seconds: u32,
+    fallback_model: String,
+    sandbox_mode: String,
+    tools_allowed_json: String,
+    context_files_json: String,
+) -> Result<(), String> {
+    ctx.db.task_dispatches().insert(TaskDispatch {
+        task_id,
+        parent_task_id,
+        intent_class,
+        risk_level,
+        assigned_model,
+        effort_knob,
+        assigned_cell,
+        budget_max_turns,
+        budget_max_seconds,
+        fallback_model,
+        sandbox_mode,
+        tools_allowed_json,
+        context_files_json,
+        status: "queued".to_string(),
+        result_summary: String::new(),
+        tokens_used: 0,
+        latency_ms: 0,
+        created_at: ctx.timestamp.to_string(),
+        completed_at: String::new(),
+    });
+    Ok(())
+}
+
+#[reducer]
+pub fn update_task_dispatch_status(
+    ctx: &ReducerContext,
+    task_id: String,
+    status: String,
+    result_summary: String,
+    tokens_used: u32,
+    latency_ms: u64,
+) -> Result<(), String> {
+    if let Some(mut dispatch) = ctx.db.task_dispatches().task_id().find(&task_id) {
+        dispatch.status = status;
+        dispatch.result_summary = result_summary;
+        dispatch.tokens_used = tokens_used;
+        dispatch.latency_ms = latency_ms;
+        dispatch.completed_at = ctx.timestamp.to_string();
+        ctx.db.task_dispatches().task_id().update(dispatch);
+    }
+    Ok(())
+}
+
+#[table(accessor = rate_group_state, public)]
+pub struct RateGroupState {
+    #[primary_key]
+    pub rate_group: String,
+    pub turns_used: u32,
+    pub turns_max: u32,
+    pub window_start: String,       // ISO 8601
+    pub window_seconds: u32,
+    pub cooldown_until: String,     // ISO 8601, empty if not cooling down
+    pub available: bool,
+}
+
+#[reducer]
+pub fn upsert_rate_group_state(
+    ctx: &ReducerContext,
+    rate_group: String,
+    turns_used: u32,
+    turns_max: u32,
+    window_seconds: u32,
+    cooldown_until: String,
+    available: bool,
+) -> Result<(), String> {
+    if let Some(mut existing) = ctx.db.rate_group_state().rate_group().find(&rate_group) {
+        existing.turns_used = turns_used;
+        existing.turns_max = turns_max;
+        existing.window_start = ctx.timestamp.to_string();
+        existing.window_seconds = window_seconds;
+        existing.cooldown_until = cooldown_until;
+        existing.available = available;
+        ctx.db.rate_group_state().rate_group().update(existing);
+    } else {
+        ctx.db.rate_group_state().insert(RateGroupState {
+            rate_group,
+            turns_used,
+            turns_max,
+            window_start: ctx.timestamp.to_string(),
+            window_seconds,
+            cooldown_until,
+            available,
+        });
+    }
+    Ok(())
+}
+
+#[table(accessor = execution_memory, public)]
+pub struct ExecutionMemory {
+    #[auto_inc]
+    #[primary_key]
+    pub id: u64,
+    #[index(btree)]
+    pub task_dispatch_id: String,
+    pub model_used: String,
+    pub outcome: String,             // "success" | "fail" | "timeout"
+    pub duration_ms: u64,
+    pub error_summary: Option<String>,
+    pub feedback_score: Option<f64>,
+    pub created_at: String,
+}
+
+#[reducer]
+pub fn insert_execution_memory(
+    ctx: &ReducerContext,
+    task_dispatch_id: String,
+    model_used: String,
+    outcome: String,
+    duration_ms: u64,
+    error_summary: Option<String>,
+    feedback_score: Option<f64>,
+) -> Result<(), String> {
+    ctx.db.execution_memory().insert(ExecutionMemory {
+        id: 0,
+        task_dispatch_id,
+        model_used,
+        outcome,
+        duration_ms,
+        error_summary,
+        feedback_score,
+        created_at: ctx.timestamp.to_string(),
+    });
+    Ok(())
+}
+
+#[table(accessor = knowledge_embeddings, public)]
+pub struct KnowledgeEmbedding {
+    #[auto_inc]
+    #[primary_key]
+    pub id: u64,
+    pub source_type: String,
+    pub source_id: String,
+    pub content_hash: String,
+    pub embedding_json: String,
+    pub ttl_hours: u32,
+    pub created_at: String,
+    pub last_accessed_at: Option<String>,
+}
+
+#[reducer]
+pub fn insert_knowledge_embedding(
+    ctx: &ReducerContext,
+    source_type: String,
+    source_id: String,
+    content_hash: String,
+    embedding_json: String,
+    ttl_hours: u32,
+) -> Result<(), String> {
+    ctx.db.knowledge_embeddings().insert(KnowledgeEmbedding {
+        id: 0,
+        source_type,
+        source_id,
+        content_hash,
+        embedding_json,
+        ttl_hours,
+        created_at: ctx.timestamp.to_string(),
+        last_accessed_at: None,
+    });
+    Ok(())
+}
+
+#[table(accessor = agent_registry, public)]
+pub struct AgentRegistryEntry {
+    #[primary_key]
+    pub cell_id: String,
+    pub display_name: String,
+    pub model_preference: Option<String>,
+    pub tools_allowed_json: String,
+    pub sandbox_mode: String,
+    pub active: bool,
+    pub created_at: String,
+}
+
+#[reducer]
+pub fn upsert_agent_registry(
+    ctx: &ReducerContext,
+    cell_id: String,
+    display_name: String,
+    model_preference: Option<String>,
+    tools_allowed_json: String,
+    sandbox_mode: String,
+    active: bool,
+) -> Result<(), String> {
+    if let Some(mut existing) = ctx.db.agent_registry().cell_id().find(&cell_id) {
+        existing.display_name = display_name;
+        existing.model_preference = model_preference;
+        existing.tools_allowed_json = tools_allowed_json;
+        existing.sandbox_mode = sandbox_mode;
+        existing.active = active;
+        ctx.db.agent_registry().cell_id().update(existing);
+    } else {
+        ctx.db.agent_registry().insert(AgentRegistryEntry {
+            cell_id,
+            display_name,
+            model_preference,
+            tools_allowed_json,
+            sandbox_mode,
+            active,
+            created_at: ctx.timestamp.to_string(),
+        });
+    }
+    Ok(())
+}
+
+#[table(accessor = node_registry, public)]
+pub struct NodeRegistryEntry {
+    #[primary_key]
+    pub node_id: String,
+    pub hostname: String,
+    pub platform: String,
+    pub capabilities_json: String,
+    pub last_heartbeat: Option<String>,
+    pub status: String,
+}
+
+#[reducer]
+pub fn upsert_node_registry(
+    ctx: &ReducerContext,
+    node_id: String,
+    hostname: String,
+    platform: String,
+    capabilities_json: String,
+    status: String,
+) -> Result<(), String> {
+    if let Some(mut existing) = ctx.db.node_registry().node_id().find(&node_id) {
+        existing.hostname = hostname;
+        existing.platform = platform;
+        existing.capabilities_json = capabilities_json;
+        existing.last_heartbeat = Some(ctx.timestamp.to_string());
+        existing.status = status;
+        ctx.db.node_registry().node_id().update(existing);
+    } else {
+        ctx.db.node_registry().insert(NodeRegistryEntry {
+            node_id,
+            hostname,
+            platform,
+            capabilities_json,
+            last_heartbeat: Some(ctx.timestamp.to_string()),
+            status,
+        });
+    }
+    Ok(())
+}
+
+#[table(accessor = captain_directives, public)]
+pub struct CaptainDirective {
+    #[auto_inc]
+    #[primary_key]
+    pub id: u64,
+    pub directive_type: String,
+    pub payload_json: String,
+    pub priority: u8,
+    #[index(btree)]
+    pub status: String,
+    pub created_at: String,
+    pub executed_at: Option<String>,
+}
+
+#[reducer]
+pub fn insert_captain_directive(
+    ctx: &ReducerContext,
+    directive_type: String,
+    payload_json: String,
+    priority: u8,
+) -> Result<(), String> {
+    ctx.db.captain_directives().insert(CaptainDirective {
+        id: 0,
+        directive_type,
+        payload_json,
+        priority,
+        status: "pending".to_string(),
+        created_at: ctx.timestamp.to_string(),
+        executed_at: None,
+    });
+    Ok(())
+}
+
+
+
+
