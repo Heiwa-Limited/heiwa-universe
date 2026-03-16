@@ -624,9 +624,8 @@ class TestModelTiersSTDB:
 
     def setup_method(self):
         self.stdb = SpacetimeDB.__new__(SpacetimeDB)
-        self.stdb.identity = "test-identity"
+        self.stdb.db_identity = "test-identity"
         self.stdb.server = "local"
-        self.stdb.db_name = "heiwa-hub-dev"
 
     @patch.object(SpacetimeDB, "query")
     def test_get_model_tiers_returns_list(self, mock_query):
@@ -750,7 +749,7 @@ def upsert_model_tier(
     max_context_tokens: int,
     strengths: list[str],
     enabled: bool,
-) -> None:
+) -> bool:
     """Insert or update a model tier."""
     import json
     return self.call(
@@ -774,7 +773,7 @@ def update_model_tier_stats(
     success_rate: float,
     avg_latency_ms: int,
     latency_p95_ms: int,
-) -> None:
+) -> bool:
     """Update performance stats for a model tier (called by Captain)."""
     return self.call(
         "update_model_tier_stats",
@@ -1047,7 +1046,7 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from heiwa_sdk.spacetimedb import SpacetimeDB
 
-log = logging.getLogger(__name__)
+logger = logging.getLogger(__name__)
 
 
 class SeedLoader:
@@ -1060,7 +1059,7 @@ class SeedLoader:
         """Seed model_tiers from JSON. Skips if table already has data."""
         existing = self.stdb.get_model_tiers(enabled_only=False)
         if existing:
-            log.info("model_tiers already populated (%d rows), skipping seed.", len(existing))
+            logger.info("model_tiers already populated (%d rows), skipping seed.", len(existing))
             return
 
         with open(seed_path) as f:
@@ -1081,7 +1080,7 @@ class SeedLoader:
                 enabled=tier["enabled"],
             )
 
-        log.info("Seeded %d model tiers from %s", len(tiers), seed_path.name)
+        logger.info("Seeded %d model tiers from %s", len(tiers), seed_path.name)
 
     def seed_rate_groups(self, router_path: Path) -> None:
         """Seed rate_group_state from ai_router.json rate_limits section."""
@@ -1099,7 +1098,7 @@ class SeedLoader:
                 True,  # available
             )
 
-        log.info("Seeded %d rate groups.", len(router.get("rate_limits", {})))
+        logger.info("Seeded %d rate groups.", len(router.get("rate_limits", {})))
 ```
 
 - [ ] **Step 5: Run tests to verify they pass**
@@ -1265,9 +1264,9 @@ def __init__(self, router_path: Path | None = None, stdb=None) -> None:
     if stdb:
         try:
             self._model_tiers = stdb.get_model_tiers()
-            log.info("ComputeRouter: loaded %d model tiers from STDB", len(self._model_tiers))
+            logger.info("ComputeRouter: loaded %d model tiers from STDB", len(self._model_tiers))
         except Exception as e:
-            log.warning("ComputeRouter: STDB unavailable (%s), falling back to JSON", e)
+            logger.warning("ComputeRouter: STDB unavailable (%s), falling back to JSON", e)
 ```
 
 - [ ] **Step 5: Add _select_model_from_tiers method**
@@ -1313,14 +1312,20 @@ def _select_model_from_tiers(self, intent_class: str, risk_level: str) -> tuple[
 In the `route()` method, before the existing routing logic, add an STDB-first path:
 
 ```python
-# STDB-first: use model tiers if available
+# STDB-first: override model selection from tiers if available
+# (does NOT short-circuit — route still flows through identity hint,
+#  feedback preference, and cascade logic below)
 tier_result = self._select_model_from_tiers(intent_class, risk_level)
+stdb_override = None
 if tier_result:
-    model_id, effort_knob = tier_result
-    route = self._route_inner(intent_class, risk_level, raw_text, privacy_level)
-    route.target_model = model_id
-    route.effort_knob = effort_knob
-    return route
+    stdb_override = tier_result  # (model_id, effort_knob)
+
+# ... existing routing logic runs normally ...
+# After _route_inner + post-processing, apply STDB override:
+# (insert after existing route = self._route_inner(...) and post-processing)
+if stdb_override:
+    route.target_model = stdb_override[0]
+    route.effort_knob = stdb_override[1]
 ```
 
 - [ ] **Step 7: Run tests to verify they pass**
