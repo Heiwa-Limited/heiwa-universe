@@ -38,6 +38,7 @@ class SpacetimeDB:
         return json.dumps(value, separators=(",", ":"))
 
     def _run(self, cmd: list[str], timeout: int = 10) -> subprocess.CompletedProcess[str] | None:
+        logger.debug("STDB cmd: %s", cmd)
         try:
             result = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
         except Exception as exc:
@@ -45,7 +46,8 @@ class SpacetimeDB:
             return None
 
         if result.returncode != 0:
-            logger.error("STDB command failed: %s", result.stderr.strip())
+            # Log full command to diagnose argument issues
+            logger.error("STDB command failed (cmd=%r): %s", cmd, result.stderr.strip())
             return None
         return result
 
