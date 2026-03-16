@@ -121,9 +121,10 @@ class MemoryService:
         query = (
             f"SELECT outcome, duration_ms FROM execution_memory "
             f"WHERE model_used = '{self.stdb._escape_sql_literal(model_id)}' "
-            f"ORDER BY created_at DESC LIMIT {int(limit)}"
+            f"LIMIT {int(limit)}"
         )
         rows = self.stdb.query(query)
+        rows.sort(key=lambda r: r.get("created_at", ""), reverse=True)
         if not rows:
             return {"success_rate": 1.0, "avg_latency_ms": 0, "p95_latency_ms": 0, "count": 0}
 

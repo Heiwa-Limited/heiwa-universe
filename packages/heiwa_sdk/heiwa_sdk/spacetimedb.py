@@ -7,6 +7,30 @@ from typing import Any, List
 logger = logging.getLogger("SDK.SpacetimeDB")
 
 
+def _parse_stdb_value(val: str) -> Any:
+    """Parse a single value from STDB pipe-delimited output.
+
+    Handles: quoted strings, integers, floats, booleans, empty → None.
+    """
+    if not val or val == "":
+        return None
+    # Quoted string — strip outer quotes
+    if val.startswith('"') and val.endswith('"'):
+        return val[1:-1]
+    # Boolean
+    if val.lower() == "true":
+        return True
+    if val.lower() == "false":
+        return False
+    # Number
+    try:
+        if "." in val:
+            return float(val)
+        return int(val)
+    except ValueError:
+        return val
+
+
 class SpacetimeDB:
     """
     Heiwa SpacetimeDB bridge.
@@ -72,23 +96,40 @@ class SpacetimeDB:
         if not stdout:
             return []
 
-        # SpacetimeDB CLI v2.x outputs JSON by default (no --json flag needed).
-        # Try JSON parse first; fall back to empty list on non-JSON output.
-        try:
-            payload = json.loads(stdout)
-        except json.JSONDecodeError:
-            # Some STDB versions emit "No results" or tabular text for empty queries
-            logger.debug("STDB query returned non-JSON output: %s", stdout[:200])
+        # STDB CLI 2.0 outputs pipe-delimited table format (no JSON flag available).
+        # Parse the tabular output into list of dicts.
+        return self._parse_table_output(stdout)
+
+    @staticmethod
+    def _parse_table_output(text: str) -> List[dict]:
+        """Parse STDB CLI pipe-delimited table output into list of dicts.
+
+        Format:
+            col1 | col2 | col3
+           ------+------+------
+            val1 | val2 | val3
+        """
+        lines = [line for line in text.splitlines()
+                 if line.strip() and not line.strip().startswith("WARNING:")]
+        if len(lines) < 2:
             return []
 
-        if isinstance(payload, list):
-            return payload
-        if isinstance(payload, dict):
-            rows = payload.get("rows") or payload.get("data")
-            if isinstance(rows, list):
-                return rows
-            return [payload]
-        return []
+        # Header is first line, separator (---+---) is second
+        header_line = lines[0]
+        headers = [h.strip() for h in header_line.split("|")]
+
+        rows = []
+        for line in lines[2:]:  # skip header + separator
+            if not line.strip() or line.strip().startswith("-"):
+                continue
+            values = [v.strip() for v in line.split("|")]
+            if len(values) != len(headers):
+                continue
+            row = {}
+            for col, val in zip(headers, values):
+                row[col] = _parse_stdb_value(val)
+            rows.append(row)
+        return rows
 
     def _first(self, sql: str) -> dict[str, Any] | None:
         rows = self.query(sql)
@@ -151,19 +192,28 @@ class SpacetimeDB:
         )
         if proposal_id:
             query += f" WHERE proposal_id = '{self._escape_sql_literal(proposal_id)}'"
-        query += f" ORDER BY ended_at DESC LIMIT {int(limit)}"
-        return self.query(query)
+        query += f" LIMIT {int(limit)}"
+        rows = self.query(query)
+        return sorted(rows, key=lambda r: r.get("ended_at", ""), reverse=True)
 
     def get_model_usage_summary(self, minutes: int = 60) -> list[dict[str, Any]]:
         cutoff = (
             datetime.datetime.now(datetime.timezone.utc) - datetime.timedelta(minutes=minutes)
         ).isoformat()
-        return self.query(
-            "SELECT model_id, COUNT(*) AS request_count, "
-            "SUM(tokens_total) AS total_tokens, SUM(cost) AS total_cost "
-            f"FROM runs WHERE ended_at > '{cutoff}' AND model_id <> '' "
-            "GROUP BY model_id"
+        # STDB 2.0 SQL doesn't support GROUP BY / COUNT / SUM — aggregate in Python
+        rows = self.query(
+            f"SELECT model_id, tokens_total, cost FROM runs "
+            f"WHERE ended_at > '{self._escape_sql_literal(cutoff)}' AND model_id <> ''"
         )
+        summary: dict[str, dict] = {}
+        for r in rows:
+            mid = r.get("model_id", "")
+            if mid not in summary:
+                summary[mid] = {"model_id": mid, "request_count": 0, "total_tokens": 0, "total_cost": 0.0}
+            summary[mid]["request_count"] += 1
+            summary[mid]["total_tokens"] += int(r.get("tokens_total", 0) or 0)
+            summary[mid]["total_cost"] += float(r.get("cost", 0) or 0)
+        return list(summary.values())
 
     def upsert_provider_account_status(self, account_data: dict[str, Any]) -> bool:
         updated_at = account_data.get("updated_at") or datetime.datetime.now(datetime.timezone.utc).isoformat()
@@ -201,8 +251,9 @@ class SpacetimeDB:
         query = "SELECT * FROM provider_accounts"
         if clauses:
             query += " WHERE " + " AND ".join(clauses)
-        query += f" ORDER BY updated_at DESC LIMIT {int(limit)}"
-        return self.query(query)
+        query += f" LIMIT {int(limit)}"
+        rows = self.query(query)
+        return sorted(rows, key=lambda r: r.get("updated_at", ""), reverse=True)
 
     def get_provider_account(self, account_id: str) -> dict[str, Any] | None:
         return self._first(
@@ -236,8 +287,9 @@ class SpacetimeDB:
         query = "SELECT * FROM missions"
         if status:
             query += f" WHERE status = '{self._escape_sql_literal(status)}'"
-        query += f" ORDER BY updated_at DESC LIMIT {int(limit)}"
-        return self.query(query)
+        query += f" LIMIT {int(limit)}"
+        rows = self.query(query)
+        return sorted(rows, key=lambda r: r.get("updated_at", ""), reverse=True)
 
     def get_mission(self, mission_id: str) -> dict[str, Any] | None:
         return self._first(
@@ -264,11 +316,12 @@ class SpacetimeDB:
         )
 
     def get_mission_steps(self, mission_id: str, limit: int = 100) -> list[dict[str, Any]]:
-        return self.query(
+        rows = self.query(
             "SELECT * FROM mission_steps "
             f"WHERE mission_id = '{self._escape_sql_literal(mission_id)}' "
-            f"ORDER BY position ASC, updated_at ASC LIMIT {int(limit)}"
+            f"LIMIT {int(limit)}"
         )
+        return sorted(rows, key=lambda r: (r.get("position", 0), r.get("updated_at", "")))
 
     def start_cell_run(self, run_data: dict[str, Any]) -> bool:
         started_at = run_data.get("started_at") or datetime.datetime.now(datetime.timezone.utc).isoformat()
@@ -317,8 +370,9 @@ class SpacetimeDB:
         query = "SELECT * FROM cell_runs"
         if clauses:
             query += " WHERE " + " AND ".join(clauses)
-        query += f" ORDER BY started_at DESC LIMIT {int(limit)}"
-        return self.query(query)
+        query += f" LIMIT {int(limit)}"
+        rows = self.query(query)
+        return sorted(rows, key=lambda r: r.get("started_at", ""), reverse=True)
 
     def pause_mission(self, mission_id: str, summary: str | None = None) -> bool:
         return self.call(
@@ -378,8 +432,9 @@ class SpacetimeDB:
         query = "SELECT * FROM session_summaries"
         if clauses:
             query += " WHERE " + " AND ".join(clauses)
-        query += f" ORDER BY created_at DESC LIMIT {int(limit)}"
-        return self.query(query)
+        query += f" LIMIT {int(limit)}"
+        rows = self.query(query)
+        return sorted(rows, key=lambda r: r.get("created_at", ""), reverse=True)
 
     def register_artifact(self, artifact_data: dict[str, Any]) -> bool:
         return self.call(
@@ -399,8 +454,9 @@ class SpacetimeDB:
         query = "SELECT * FROM artifacts"
         if mission_id:
             query += f" WHERE mission_id = '{self._escape_sql_literal(mission_id)}'"
-        query += f" ORDER BY created_at DESC LIMIT {int(limit)}"
-        return self.query(query)
+        query += f" LIMIT {int(limit)}"
+        rows = self.query(query)
+        return sorted(rows, key=lambda r: r.get("created_at", ""), reverse=True)
 
     def upsert_node_heartbeat(
         self,
@@ -432,8 +488,8 @@ class SpacetimeDB:
         query = "SELECT * FROM nodes"
         if status:
             query += f" WHERE status = '{self._escape_sql_literal(status)}'"
-        query += " ORDER BY node_id"
-        return self.query(query)
+        rows = self.query(query)
+        return sorted(rows, key=lambda r: r.get("node_id", ""))
 
     def get_node(self, node_id: str) -> dict[str, Any] | None:
         return self._first(
@@ -481,8 +537,9 @@ class SpacetimeDB:
         query = "SELECT * FROM proposals"
         if status:
             query += f" WHERE status = '{self._escape_sql_literal(status)}'"
-        query += f" ORDER BY created_at DESC LIMIT {int(limit)}"
-        return self.query(query)
+        query += f" LIMIT {int(limit)}"
+        rows = self.query(query)
+        return sorted(rows, key=lambda r: r.get("created_at", ""), reverse=True)
 
     def get_proposal(self, proposal_id: str) -> dict[str, Any] | None:
         return self._first(
@@ -491,12 +548,12 @@ class SpacetimeDB:
 
     def get_routable_proposals(self) -> list[dict[str, Any]]:
         now_iso = datetime.datetime.now(datetime.timezone.utc).isoformat()
-        return self.query(
+        rows = self.query(
             "SELECT * FROM proposals "
             "WHERE status IN ('APPROVED', 'QUEUED') "
-            f"AND (expires_at IS NULL OR expires_at = '' OR expires_at > '{self._escape_sql_literal(now_iso)}') "
-            "ORDER BY created_at ASC"
+            f"AND (expires_at IS NULL OR expires_at = '' OR expires_at > '{self._escape_sql_literal(now_iso)}')"
         )
+        return sorted(rows, key=lambda r: r.get("created_at", ""))
 
     def assign_proposal(
         self,
@@ -536,12 +593,13 @@ class SpacetimeDB:
 
     def claim_next_approved_proposal(self, node_id: str) -> dict[str, Any] | None:
         now_iso = datetime.datetime.now(datetime.timezone.utc).isoformat()
-        proposal = self._first(
+        candidates = self.query(
             "SELECT * FROM proposals "
             "WHERE status = 'APPROVED' "
-            f"AND (expires_at IS NULL OR expires_at = '' OR expires_at > '{self._escape_sql_literal(now_iso)}') "
-            "ORDER BY created_at ASC LIMIT 1"
+            f"AND (expires_at IS NULL OR expires_at = '' OR expires_at > '{self._escape_sql_literal(now_iso)}')"
         )
+        candidates = sorted(candidates, key=lambda r: r.get("created_at", ""))
+        proposal = candidates[0] if candidates else None
         if not proposal:
             return None
         return self.claim_proposal(proposal["proposal_id"], node_id)
@@ -610,10 +668,11 @@ class SpacetimeDB:
         )
 
     def get_consents_for_proposal(self, proposal_id: str) -> list[dict[str, Any]]:
-        return self.query(
+        rows = self.query(
             "SELECT * FROM proposal_consents "
-            f"WHERE proposal_id = '{self._escape_sql_literal(proposal_id)}' ORDER BY created_at"
+            f"WHERE proposal_id = '{self._escape_sql_literal(proposal_id)}'"
         )
+        return sorted(rows, key=lambda r: r.get("created_at", ""))
 
     def add_approval_request(self, request_data: dict[str, Any]) -> bool:
         return self.call(
@@ -656,8 +715,9 @@ class SpacetimeDB:
         query = "SELECT * FROM approval_requests"
         if clauses:
             query += " WHERE " + " AND ".join(clauses)
-        query += f" ORDER BY requested_at DESC LIMIT {int(limit)}"
-        return self.query(query)
+        query += f" LIMIT {int(limit)}"
+        rows = self.query(query)
+        return sorted(rows, key=lambda r: r.get("requested_at", ""), reverse=True)
 
     def list_approval_decisions(
         self,
@@ -673,8 +733,9 @@ class SpacetimeDB:
         query = "SELECT * FROM approval_decisions"
         if clauses:
             query += " WHERE " + " AND ".join(clauses)
-        query += f" ORDER BY created_at DESC LIMIT {int(limit)}"
-        return self.query(query)
+        query += f" LIMIT {int(limit)}"
+        rows = self.query(query)
+        return sorted(rows, key=lambda r: r.get("created_at", ""), reverse=True)
 
     def issue_capability_lease(self, lease_data: dict[str, Any]) -> bool:
         return self.call(
@@ -728,19 +789,21 @@ class SpacetimeDB:
         query = "SELECT * FROM capability_leases"
         if clauses:
             query += " WHERE " + " AND ".join(clauses)
-        query += f" ORDER BY issued_at DESC LIMIT {int(limit)}"
-        return self.query(query)
+        query += f" LIMIT {int(limit)}"
+        rows = self.query(query)
+        return sorted(rows, key=lambda r: r.get("issued_at", ""), reverse=True)
 
     def get_active_capability_lease(self, proposal_id: str, holder_id: str) -> dict[str, Any] | None:
         now_iso = datetime.datetime.now(datetime.timezone.utc).isoformat()
-        return self._first(
+        rows = self.query(
             "SELECT * FROM capability_leases "
             f"WHERE proposal_id = '{self._escape_sql_literal(proposal_id)}' "
             f"AND holder_id = '{self._escape_sql_literal(holder_id)}' "
             "AND status = 'ACTIVE' "
-            f"AND expires_at > '{self._escape_sql_literal(now_iso)}' "
-            "ORDER BY issued_at DESC LIMIT 1"
+            f"AND expires_at > '{self._escape_sql_literal(now_iso)}'"
         )
+        rows = sorted(rows, key=lambda r: r.get("issued_at", ""), reverse=True)
+        return rows[0] if rows else None
 
     def get_discord_channel(self, purpose: str) -> int | None:
         row = self._first(
@@ -770,9 +833,10 @@ class SpacetimeDB:
         if capability_class is not None:
             where_clauses.append(f"capability_class = {capability_class}")
         where = f" WHERE {' AND '.join(where_clauses)}" if where_clauses else ""
-        return self.query(
-            f"SELECT * FROM model_tiers{where} ORDER BY effort_level ASC, cost_per_turn ASC"
+        rows = self.query(
+            f"SELECT * FROM model_tiers{where}"
         )
+        return sorted(rows, key=lambda r: (r.get("effort_level", 0), r.get("cost_per_turn", 0.0)))
 
     def get_model_tier(self, model_id: str) -> dict | None:
         """Get a single model tier by model_id."""
