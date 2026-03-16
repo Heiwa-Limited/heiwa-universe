@@ -4,7 +4,7 @@
 
 **Goal:** Replace the multi-backend database abstraction and static JSON config with SpacetimeDB as the single runtime state layer, starting with the Model Tier Matrix.
 
-**Architecture:** Add 3 new STDB tables (`model_tiers`, `task_dispatches`, `rate_group_state`) to the existing Rust module (19 tables already). Seed from `ai_router.json` on boot. ComputeRouter subscribes to `model_tiers` instead of reading JSON. New CLI commands `heiwa start` and `heiwa inspect` for local development.
+**Architecture:** Add 8 new STDB tables to the existing Rust module (19 tables already). Three primary tables (`model_tiers`, `task_dispatches`, `rate_group_state`) get full implementation with Python bridge, seed data, and CLI integration. Five additional tables (`execution_memory`, `knowledge_embeddings`, `agent_registry`, `node_registry`, `captain_directives`) get Rust table definitions + basic reducers only — no Python bridge, seed, or CLI integration in Phase 1. Seed from `ai_router.json` on boot. ComputeRouter subscribes to `model_tiers` instead of reading JSON. New CLI commands `heiwa start` and `heiwa inspect` for local development.
 
 **Tech Stack:** Rust (SpacetimeDB module), Python 3.14, SpacetimeDB CLI 2.0.2, pytest
 
@@ -24,7 +24,7 @@
 Append after the existing table definitions (after line ~1500 in lib.rs):
 
 ```rust
-#[spacetimedb::table(name = model_tiers, public)]
+#[table(accessor = model_tiers, public)]
 pub struct ModelTier {
     #[auto_inc]
     #[primary_key]
@@ -51,7 +51,7 @@ pub struct ModelTier {
 - [ ] **Step 2: Add the upsert_model_tier reducer**
 
 ```rust
-#[spacetimedb::reducer]
+#[reducer]
 pub fn upsert_model_tier(
     ctx: &ReducerContext,
     model_id: String,
@@ -65,52 +65,64 @@ pub fn upsert_model_tier(
     max_context_tokens: u32,
     strengths_json: String,
     enabled: bool,
-) {
+) -> Result<(), String> {
     let now = ctx.timestamp.to_string();
-    if let Some(existing) = ctx.db.model_tiers().model_id().find(&model_id) {
-        ctx.db.model_tiers().id().delete(&existing.id);
+    if let Some(mut existing) = ctx.db.model_tiers().model_id().find(&model_id) {
+        existing.provider_model_id = provider_model_id;
+        existing.provider = provider;
+        existing.rate_group = rate_group;
+        existing.capability_class = capability_class;
+        existing.effort_knob = effort_knob;
+        existing.effort_level = effort_level;
+        existing.cost_per_turn = cost_per_turn;
+        existing.max_context_tokens = max_context_tokens;
+        existing.strengths_json = strengths_json;
+        existing.enabled = enabled;
+        existing.updated_at = now;
+        ctx.db.model_tiers().id().update(existing);
+    } else {
+        ctx.db.model_tiers().insert(ModelTier {
+            id: 0, // auto_inc
+            model_id,
+            provider_model_id,
+            provider,
+            rate_group,
+            capability_class,
+            effort_knob,
+            effort_level,
+            cost_per_turn,
+            max_context_tokens,
+            strengths_json,
+            enabled,
+            last_success_rate: 1.0,
+            avg_latency_ms: 0,
+            latency_p95_ms: 0,
+            updated_at: now,
+        });
     }
-    ctx.db.model_tiers().insert(ModelTier {
-        id: 0, // auto_inc
-        model_id,
-        provider_model_id,
-        provider,
-        rate_group,
-        capability_class,
-        effort_knob,
-        effort_level,
-        cost_per_turn,
-        max_context_tokens,
-        strengths_json,
-        enabled,
-        last_success_rate: 1.0,
-        avg_latency_ms: 0,
-        latency_p95_ms: 0,
-        updated_at: now,
-    });
+    Ok(())
 }
 ```
 
 - [ ] **Step 3: Add the update_model_tier_stats reducer (for Captain auto-tuning)**
 
 ```rust
-#[spacetimedb::reducer]
+#[reducer]
 pub fn update_model_tier_stats(
     ctx: &ReducerContext,
     model_id: String,
     success_rate: f64,
     avg_latency_ms: u64,
     latency_p95_ms: u64,
-) {
+) -> Result<(), String> {
     if let Some(mut tier) = ctx.db.model_tiers().model_id().find(&model_id) {
-        let id = tier.id;
-        ctx.db.model_tiers().id().delete(&id);
         tier.last_success_rate = success_rate;
         tier.avg_latency_ms = avg_latency_ms;
         tier.latency_p95_ms = latency_p95_ms;
         tier.updated_at = ctx.timestamp.to_string();
-        ctx.db.model_tiers().insert(tier);
+        ctx.db.model_tiers().id().update(tier);
     }
+    Ok(())
 }
 ```
 
@@ -137,11 +149,11 @@ git commit -m "feat(stdb): add model_tiers table with upsert and stats reducers"
 - [ ] **Step 1: Add TaskDispatch struct**
 
 ```rust
-#[spacetimedb::table(name = task_dispatches, public)]
+#[table(accessor = task_dispatches, public)]
 pub struct TaskDispatch {
     #[primary_key]
     pub task_id: String,
-    pub parent_task_id: String,     // empty for top-level
+    pub parent_task_id: Option<String>, // None for top-level
     pub intent_class: String,
     pub risk_level: String,
     pub assigned_model: String,     // FK to model_tiers.model_id
@@ -166,11 +178,11 @@ pub struct TaskDispatch {
 - [ ] **Step 2: Add create_task_dispatch reducer**
 
 ```rust
-#[spacetimedb::reducer]
+#[reducer]
 pub fn create_task_dispatch(
     ctx: &ReducerContext,
     task_id: String,
-    parent_task_id: String,
+    parent_task_id: Option<String>,
     intent_class: String,
     risk_level: String,
     assigned_model: String,
@@ -182,7 +194,7 @@ pub fn create_task_dispatch(
     sandbox_mode: String,
     tools_allowed_json: String,
     context_files_json: String,
-) {
+) -> Result<(), String> {
     ctx.db.task_dispatches().insert(TaskDispatch {
         task_id,
         parent_task_id,
@@ -204,13 +216,14 @@ pub fn create_task_dispatch(
         created_at: ctx.timestamp.to_string(),
         completed_at: String::new(),
     });
+    Ok(())
 }
 ```
 
 - [ ] **Step 3: Add update_task_dispatch_status reducer**
 
 ```rust
-#[spacetimedb::reducer]
+#[reducer]
 pub fn update_task_dispatch_status(
     ctx: &ReducerContext,
     task_id: String,
@@ -218,16 +231,16 @@ pub fn update_task_dispatch_status(
     result_summary: String,
     tokens_used: u32,
     latency_ms: u64,
-) {
+) -> Result<(), String> {
     if let Some(mut dispatch) = ctx.db.task_dispatches().task_id().find(&task_id) {
-        ctx.db.task_dispatches().task_id().delete(&task_id);
         dispatch.status = status;
         dispatch.result_summary = result_summary;
         dispatch.tokens_used = tokens_used;
         dispatch.latency_ms = latency_ms;
         dispatch.completed_at = ctx.timestamp.to_string();
-        ctx.db.task_dispatches().insert(dispatch);
+        ctx.db.task_dispatches().task_id().update(dispatch);
     }
+    Ok(())
 }
 ```
 
@@ -251,7 +264,7 @@ git commit -m "feat(stdb): add task_dispatches table with create and status upda
 - [ ] **Step 1: Add RateGroupState struct and reducers**
 
 ```rust
-#[spacetimedb::table(name = rate_group_state, public)]
+#[table(accessor = rate_group_state, public)]
 pub struct RateGroupState {
     #[primary_key]
     pub rate_group: String,
@@ -263,7 +276,7 @@ pub struct RateGroupState {
     pub available: bool,
 }
 
-#[spacetimedb::reducer]
+#[reducer]
 pub fn upsert_rate_group_state(
     ctx: &ReducerContext,
     rate_group: String,
@@ -272,19 +285,27 @@ pub fn upsert_rate_group_state(
     window_seconds: u32,
     cooldown_until: String,
     available: bool,
-) {
-    if ctx.db.rate_group_state().rate_group().find(&rate_group).is_some() {
-        ctx.db.rate_group_state().rate_group().delete(&rate_group);
+) -> Result<(), String> {
+    if let Some(mut existing) = ctx.db.rate_group_state().rate_group().find(&rate_group) {
+        existing.turns_used = turns_used;
+        existing.turns_max = turns_max;
+        existing.window_start = ctx.timestamp.to_string();
+        existing.window_seconds = window_seconds;
+        existing.cooldown_until = cooldown_until;
+        existing.available = available;
+        ctx.db.rate_group_state().rate_group().update(existing);
+    } else {
+        ctx.db.rate_group_state().insert(RateGroupState {
+            rate_group,
+            turns_used,
+            turns_max,
+            window_start: ctx.timestamp.to_string(),
+            window_seconds,
+            cooldown_until,
+            available,
+        });
     }
-    ctx.db.rate_group_state().insert(RateGroupState {
-        rate_group,
-        turns_used,
-        turns_max,
-        window_start: ctx.timestamp.to_string(),
-        window_seconds,
-        cooldown_until,
-        available,
-    });
+    Ok(())
 }
 ```
 
@@ -300,7 +321,236 @@ git add apps/heiwa_hub/spacetimedb/src/lib.rs
 git commit -m "feat(stdb): add rate_group_state table with upsert reducer"
 ```
 
-### Task 4: Publish updated module to local STDB
+### Task 4: Add remaining 5 spec tables (Rust-only scaffolds)
+
+**Files:**
+- Modify: `apps/heiwa_hub/spacetimedb/src/lib.rs`
+
+> These tables complete the spec's 8-table requirement. Phase 1 adds Rust structs + basic insert/query reducers only — no Python bridge, no seeds, no CLI integration.
+
+- [ ] **Step 1: Add ExecutionMemory table and reducer**
+
+```rust
+#[table(accessor = execution_memory, public)]
+pub struct ExecutionMemory {
+    #[auto_inc]
+    #[primary_key]
+    pub id: u64,
+    #[index(btree)]
+    pub task_dispatch_id: String,
+    pub model_used: String,
+    pub outcome: String,             // "success" | "fail" | "timeout"
+    pub duration_ms: u64,
+    pub error_summary: Option<String>,
+    pub feedback_score: Option<f64>,
+    pub created_at: String,
+}
+
+#[reducer]
+pub fn insert_execution_memory(
+    ctx: &ReducerContext,
+    task_dispatch_id: String,
+    model_used: String,
+    outcome: String,
+    duration_ms: u64,
+    error_summary: Option<String>,
+    feedback_score: Option<f64>,
+) -> Result<(), String> {
+    ctx.db.execution_memory().insert(ExecutionMemory {
+        id: 0,
+        task_dispatch_id,
+        model_used,
+        outcome,
+        duration_ms,
+        error_summary,
+        feedback_score,
+        created_at: ctx.timestamp.to_string(),
+    });
+    Ok(())
+}
+```
+
+- [ ] **Step 2: Add KnowledgeEmbedding table and reducer**
+
+```rust
+#[table(accessor = knowledge_embeddings, public)]
+pub struct KnowledgeEmbedding {
+    #[auto_inc]
+    #[primary_key]
+    pub id: u64,
+    pub source_type: String,
+    pub source_id: String,
+    pub content_hash: String,
+    pub embedding_json: String,
+    pub ttl_hours: u32,
+    pub created_at: String,
+    pub last_accessed_at: Option<String>,
+}
+
+#[reducer]
+pub fn insert_knowledge_embedding(
+    ctx: &ReducerContext,
+    source_type: String,
+    source_id: String,
+    content_hash: String,
+    embedding_json: String,
+    ttl_hours: u32,
+) -> Result<(), String> {
+    ctx.db.knowledge_embeddings().insert(KnowledgeEmbedding {
+        id: 0,
+        source_type,
+        source_id,
+        content_hash,
+        embedding_json,
+        ttl_hours,
+        created_at: ctx.timestamp.to_string(),
+        last_accessed_at: None,
+    });
+    Ok(())
+}
+```
+
+- [ ] **Step 3: Add AgentRegistry table and reducer**
+
+```rust
+#[table(accessor = agent_registry, public)]
+pub struct AgentRegistryEntry {
+    #[primary_key]
+    pub cell_id: String,
+    pub display_name: String,
+    pub model_preference: Option<String>,
+    pub tools_allowed_json: String,
+    pub sandbox_mode: String,
+    pub active: bool,
+    pub created_at: String,
+}
+
+#[reducer]
+pub fn upsert_agent_registry(
+    ctx: &ReducerContext,
+    cell_id: String,
+    display_name: String,
+    model_preference: Option<String>,
+    tools_allowed_json: String,
+    sandbox_mode: String,
+    active: bool,
+) -> Result<(), String> {
+    if let Some(mut existing) = ctx.db.agent_registry().cell_id().find(&cell_id) {
+        existing.display_name = display_name;
+        existing.model_preference = model_preference;
+        existing.tools_allowed_json = tools_allowed_json;
+        existing.sandbox_mode = sandbox_mode;
+        existing.active = active;
+        ctx.db.agent_registry().cell_id().update(existing);
+    } else {
+        ctx.db.agent_registry().insert(AgentRegistryEntry {
+            cell_id,
+            display_name,
+            model_preference,
+            tools_allowed_json,
+            sandbox_mode,
+            active,
+            created_at: ctx.timestamp.to_string(),
+        });
+    }
+    Ok(())
+}
+```
+
+- [ ] **Step 4: Add NodeRegistry table and reducer**
+
+```rust
+#[table(accessor = node_registry, public)]
+pub struct NodeRegistryEntry {
+    #[primary_key]
+    pub node_id: String,
+    pub hostname: String,
+    pub platform: String,
+    pub capabilities_json: String,
+    pub last_heartbeat: Option<String>,
+    pub status: String,
+}
+
+#[reducer]
+pub fn upsert_node_registry(
+    ctx: &ReducerContext,
+    node_id: String,
+    hostname: String,
+    platform: String,
+    capabilities_json: String,
+    status: String,
+) -> Result<(), String> {
+    if let Some(mut existing) = ctx.db.node_registry().node_id().find(&node_id) {
+        existing.hostname = hostname;
+        existing.platform = platform;
+        existing.capabilities_json = capabilities_json;
+        existing.last_heartbeat = Some(ctx.timestamp.to_string());
+        existing.status = status;
+        ctx.db.node_registry().node_id().update(existing);
+    } else {
+        ctx.db.node_registry().insert(NodeRegistryEntry {
+            node_id,
+            hostname,
+            platform,
+            capabilities_json,
+            last_heartbeat: Some(ctx.timestamp.to_string()),
+            status,
+        });
+    }
+    Ok(())
+}
+```
+
+- [ ] **Step 5: Add CaptainDirective table and reducer**
+
+```rust
+#[table(accessor = captain_directives, public)]
+pub struct CaptainDirective {
+    #[auto_inc]
+    #[primary_key]
+    pub id: u64,
+    pub directive_type: String,
+    pub payload_json: String,
+    pub priority: u8,
+    #[index(btree)]
+    pub status: String,
+    pub created_at: String,
+    pub executed_at: Option<String>,
+}
+
+#[reducer]
+pub fn insert_captain_directive(
+    ctx: &ReducerContext,
+    directive_type: String,
+    payload_json: String,
+    priority: u8,
+) -> Result<(), String> {
+    ctx.db.captain_directives().insert(CaptainDirective {
+        id: 0,
+        directive_type,
+        payload_json,
+        priority,
+        status: "pending".to_string(),
+        created_at: ctx.timestamp.to_string(),
+        executed_at: None,
+    });
+    Ok(())
+}
+```
+
+- [ ] **Step 6: Compile**
+
+Run: `cd /Users/dmcgregsauce/heiwa/apps/heiwa_hub/spacetimedb && cargo build`
+Expected: Compiles without errors.
+
+- [ ] **Step 7: Commit**
+
+```bash
+git add apps/heiwa_hub/spacetimedb/src/lib.rs
+git commit -m "feat(stdb): add 5 scaffold tables (execution_memory, knowledge_embeddings, agent_registry, node_registry, captain_directives)"
+```
+
+### Task 5: Publish updated module to local STDB
 
 - [ ] **Step 1: Start local SpacetimeDB if not running**
 
@@ -325,8 +575,13 @@ Expected: Module published successfully with new tables registered.
 ~/.local/bin/spacetime sql --server local heiwa-hub-dev "SELECT * FROM model_tiers LIMIT 1"
 ~/.local/bin/spacetime sql --server local heiwa-hub-dev "SELECT * FROM task_dispatches LIMIT 1"
 ~/.local/bin/spacetime sql --server local heiwa-hub-dev "SELECT * FROM rate_group_state LIMIT 1"
+~/.local/bin/spacetime sql --server local heiwa-hub-dev "SELECT * FROM execution_memory LIMIT 1"
+~/.local/bin/spacetime sql --server local heiwa-hub-dev "SELECT * FROM knowledge_embeddings LIMIT 1"
+~/.local/bin/spacetime sql --server local heiwa-hub-dev "SELECT * FROM agent_registry LIMIT 1"
+~/.local/bin/spacetime sql --server local heiwa-hub-dev "SELECT * FROM node_registry LIMIT 1"
+~/.local/bin/spacetime sql --server local heiwa-hub-dev "SELECT * FROM captain_directives LIMIT 1"
 ```
-Expected: Empty result sets (tables exist but no data yet).
+Expected: Empty result sets (all 8 tables exist but no data yet).
 
 - [ ] **Step 4: Regenerate bindings**
 
@@ -340,14 +595,14 @@ Expected: Python, Rust, and TypeScript bindings regenerated.
 
 ```bash
 git add apps/heiwa_hub/spacetimedb/ packages/heiwa_bindings/
-git commit -m "feat(stdb): publish module with model_tiers, task_dispatches, rate_group_state"
+git commit -m "feat(stdb): publish module with 8 tables (3 primary + 5 scaffolds)"
 ```
 
 ---
 
 ## Chunk 2: Python STDB Bridge — Model Tier API
 
-### Task 5: Extend spacetimedb.py with model_tiers operations
+### Task 6: Extend spacetimedb.py with model_tiers operations
 
 **Files:**
 - Modify: `packages/heiwa_sdk/heiwa_sdk/spacetimedb.py`
@@ -478,7 +733,7 @@ def get_model_tiers(self, *, capability_class: int | None = None,
 def get_model_tier(self, model_id: str) -> dict | None:
     """Get a single model tier by model_id."""
     rows = self.query(
-        f"SELECT * FROM model_tiers WHERE model_id = '{model_id}'"
+        f"SELECT * FROM model_tiers WHERE model_id = '{self._escape_sql_literal(model_id)}'"
     )
     return rows[0] if rows else None
 
@@ -498,7 +753,7 @@ def upsert_model_tier(
 ) -> None:
     """Insert or update a model tier."""
     import json
-    self.call(
+    return self.call(
         "upsert_model_tier",
         model_id,
         provider_model_id,
@@ -521,7 +776,7 @@ def update_model_tier_stats(
     latency_p95_ms: int,
 ) -> None:
     """Update performance stats for a model tier (called by Captain)."""
-    self.call(
+    return self.call(
         "update_model_tier_stats",
         model_id,
         success_rate,
@@ -546,7 +801,7 @@ git commit -m "feat(sdk): add model_tiers STDB bridge operations with tests"
 
 ## Chunk 3: Seed Loader + Hub Boot Integration
 
-### Task 6: Create seed loader for model_tiers
+### Task 7: Create seed loader for model_tiers
 
 **Files:**
 - Create: `packages/heiwa_sdk/heiwa_sdk/seed.py`
@@ -859,7 +1114,7 @@ git add config/seeds/model_tiers.json packages/heiwa_sdk/heiwa_sdk/seed.py apps/
 git commit -m "feat(sdk): add seed loader for model_tiers and rate_group_state"
 ```
 
-### Task 7: Integrate seed loading into hub boot sequence
+### Task 8: Integrate seed loading into hub boot sequence
 
 **Files:**
 - Modify: `apps/heiwa_hub/main.py`
@@ -890,7 +1145,7 @@ git commit -m "feat(hub): seed model_tiers and rate_groups on STDB boot"
 
 ## Chunk 4: ComputeRouter Migration — Read from STDB
 
-### Task 8: Update ComputeRouter to read model_tiers from STDB
+### Task 9: Update ComputeRouter to read model_tiers from STDB
 
 **Files:**
 - Modify: `packages/heiwa_cognition/heiwa_cognition/router.py`
@@ -985,7 +1240,26 @@ effort_knob: str = ""  # provider-specific effort setting
 Modify the constructor to accept an optional STDB instance:
 
 ```python
-def __init__(self, router_path: Path | None = None, stdb=None):
+def __init__(self, router_path: Path | None = None, stdb=None) -> None:
+    root = Path(__file__).resolve().parents[3]
+    self.router_path = router_path or root / "config" / "swarm" / "ai_router.json"
+    self.router_config = self._load_router()
+    self.registry = self.router_config.get("models", {}).get("registry", {})
+    self._rotation = (
+        self.router_config
+        .get("routing_policy", {})
+        .get("provider_rotation", {})
+        .get("premium_remote", [])
+    )
+    self._intent_rotations = (
+        self.router_config
+        .get("routing_policy", {})
+        .get("provider_rotation", {})
+        .get("by_intent", {})
+    )
+    self._providers = self.router_config.get("providers", {})
+
+    # STDB model tier support (falls back to JSON config when None)
     self._stdb = stdb
     self._model_tiers: list[dict] | None = None
     if stdb:
@@ -994,7 +1268,6 @@ def __init__(self, router_path: Path | None = None, stdb=None):
             log.info("ComputeRouter: loaded %d model tiers from STDB", len(self._model_tiers))
         except Exception as e:
             log.warning("ComputeRouter: STDB unavailable (%s), falling back to JSON", e)
-    self._load_router(router_path)
 ```
 
 - [ ] **Step 5: Add _select_model_from_tiers method**
@@ -1044,7 +1317,7 @@ In the `route()` method, before the existing routing logic, add an STDB-first pa
 tier_result = self._select_model_from_tiers(intent_class, risk_level)
 if tier_result:
     model_id, effort_knob = tier_result
-    route = self._route_inner(intent_class, risk_level, raw_text, privacy_level, identity_worker_hint)
+    route = self._route_inner(intent_class, risk_level, raw_text, privacy_level)
     route.target_model = model_id
     route.effort_knob = effort_knob
     return route
@@ -1071,7 +1344,7 @@ git commit -m "feat(router): ComputeRouter reads model_tiers from STDB with JSON
 
 ## Chunk 5: CLI Commands — `heiwa start` + `heiwa inspect`
 
-### Task 9: Add `heiwa inspect` command
+### Task 10: Add `heiwa inspect` command
 
 **Files:**
 - Modify: `packages/heiwa_cli/heiwa_cli/commands.py`
@@ -1170,16 +1443,57 @@ git add packages/heiwa_cli/heiwa_cli/commands.py apps/heiwa_hub/tests/test_cli_i
 git commit -m "feat(cli): add /inspect command for STDB table debugging"
 ```
 
-### Task 10: Add `heiwa start` command
+### Task 11: Add `heiwa start` command
 
 **Files:**
 - Modify: `packages/heiwa_cli/heiwa_cli/commands.py`
+- Test: `apps/heiwa_hub/tests/test_cli_start.py`
 
-- [ ] **Step 1: Implement cmd_start**
+- [ ] **Step 1: Write failing test**
+
+Create `apps/heiwa_hub/tests/test_cli_start.py`:
+
+```python
+"""Tests for heiwa start CLI command."""
+import pytest
+from unittest.mock import AsyncMock, MagicMock, patch
+
+
+class TestStartCommand:
+    """Test the /start CLI command."""
+
+    @pytest.mark.asyncio
+    @patch("heiwa_cli.commands.subprocess")
+    async def test_start_sets_stdb_backend(self, mock_subprocess):
+        from heiwa_cli.commands import cmd_start
+        import os
+        ctx = MagicMock()
+        mock_subprocess.Popen.return_value = MagicMock(pid=12345)
+        with patch.dict(os.environ, {}, clear=False):
+            await cmd_start(ctx)
+        assert os.environ.get("HEIWA_STATE_BACKEND") == "spacetimedb"
+
+    @pytest.mark.asyncio
+    @patch("heiwa_cli.commands.subprocess")
+    async def test_start_launches_hub_process(self, mock_subprocess):
+        from heiwa_cli.commands import cmd_start
+        ctx = MagicMock()
+        mock_subprocess.Popen.return_value = MagicMock(pid=12345)
+        await cmd_start(ctx)
+        assert mock_subprocess.Popen.called
+```
+
+- [ ] **Step 2: Run test to verify it fails**
+
+Run: `cd /Users/dmcgregsauce/heiwa && pytest apps/heiwa_hub/tests/test_cli_start.py -v`
+Expected: FAIL — `cmd_start` not defined.
+
+- [ ] **Step 3: Implement cmd_start**
 
 ```python
 @command("/start", "Start Heiwa hub locally (STDB + agents + HTTP server)")
 async def cmd_start(ctx: CLIContext, args: str = "") -> None:
+    import asyncio
     import subprocess
     import os
     from pathlib import Path
@@ -1216,10 +1530,15 @@ async def cmd_start(ctx: CLIContext, args: str = "") -> None:
     print(f"  Hub started (PID {hub_proc.pid}). Health: http://localhost:8080/health")
 ```
 
-- [ ] **Step 2: Commit**
+- [ ] **Step 4: Run tests to verify they pass**
+
+Run: `cd /Users/dmcgregsauce/heiwa && pytest apps/heiwa_hub/tests/test_cli_start.py -v`
+Expected: All 2 tests PASS.
+
+- [ ] **Step 5: Commit**
 
 ```bash
-git add packages/heiwa_cli/heiwa_cli/commands.py
+git add packages/heiwa_cli/heiwa_cli/commands.py apps/heiwa_hub/tests/test_cli_start.py
 git commit -m "feat(cli): add /start command for one-command local boot"
 ```
 
@@ -1227,7 +1546,7 @@ git commit -m "feat(cli): add /start command for one-command local boot"
 
 ## Chunk 6: Integration Test — Full Pipeline
 
-### Task 11: End-to-end integration test
+### Task 12: End-to-end integration test
 
 **Files:**
 - Test: `apps/heiwa_hub/tests/test_phase1_integration.py`
@@ -1329,10 +1648,18 @@ Expected: All tests PASS. Phase 1 is complete.
 - [ ] **Step 5: Final commit with all Phase 1 changes**
 
 ```bash
-git add -A
+git add apps/heiwa_hub/spacetimedb/src/lib.rs \
+      packages/heiwa_bindings/ \
+      packages/heiwa_sdk/heiwa_sdk/spacetimedb.py \
+      packages/heiwa_sdk/heiwa_sdk/seed.py \
+      packages/heiwa_cognition/heiwa_cognition/router.py \
+      packages/heiwa_cli/heiwa_cli/commands.py \
+      apps/heiwa_hub/main.py \
+      apps/heiwa_hub/tests/ \
+      config/seeds/model_tiers.json
 git commit -m "feat: Phase 1 complete — STDB foundation + model tier matrix
 
-- 3 new STDB tables: model_tiers, task_dispatches, rate_group_state
+- 8 new STDB tables: model_tiers, task_dispatches, rate_group_state + 5 Rust-only scaffolds
 - Seed loader bootstraps from config/seeds/model_tiers.json
 - ComputeRouter reads from STDB with JSON fallback
 - CLI: /inspect for STDB debugging, /start for local boot
