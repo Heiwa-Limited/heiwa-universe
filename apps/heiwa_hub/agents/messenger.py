@@ -363,7 +363,7 @@ class MessengerAgent(BaseAgent):
     async def _ingest_interaction(self, instruction: str, source: Union[discord.Message, discord.Interaction], explicit: bool) -> None:
         raw_hex = str(uuid.uuid4().hex)
         task_id = f"task-{raw_hex[0:10]}"
-        intent_profile = self.planner.normalize_intent(instruction)
+        intent_profile = self.planner.normalizer.normalize(instruction)
         preview_intent = intent_profile.intent_class
         
         channel = source.channel if isinstance(source, discord.Message) else source.channel
@@ -386,6 +386,17 @@ class MessengerAgent(BaseAgent):
         await self._publish_raw(Subject.TASK_INGRESS.value, ingress)
 
         if intent_profile.intent_class == "chat":
+            # If it's a DM, route it directly to the Heiwa Agent for a contextual response
+            if source.guild is None:
+                await self._publish_raw(Subject.HEIWA_AGENT_INGRESS.value, {
+                    "task_id": task_id,
+                    "content": instruction,
+                    "author": str(author),
+                    "channel_id": channel.id,
+                })
+                return
+            
+            # Fallback for server-based chats
             reply = self.planner.engine.generate(prompt=instruction, runtime="railway", complexity="low") if self.planner.engine else "Cognitive engine unavailable."
             embed = UIManager.create_base_embed("Direct Response", reply or "...", status="online")
             if isinstance(source, discord.Interaction): await source.followup.send(embed=embed)

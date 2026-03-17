@@ -71,6 +71,7 @@ class HeiwaAgent(BaseAgent):
         await self.listen(Subject.TASK_EXEC_RESULT, self._on_task_result)
         await self.listen(Subject.TASK_STATUS, self._on_task_status)
         await self.listen(Subject.TASK_INGRESS, self._on_task_ingress)
+        await self.listen(Subject.HEIWA_AGENT_INGRESS, self._on_direct_dm)
         await self.listen(Subject.NODE_HEARTBEAT, self._on_heartbeat)
         await self.listen(Subject.LOG_ERROR, self._on_error)
 
@@ -112,6 +113,52 @@ class HeiwaAgent(BaseAgent):
     # ------------------------------------------------------------------ #
     #  Event handlers — observe and narrate                               #
     # ------------------------------------------------------------------ #
+
+    async def _on_direct_dm(self, data: dict[str, Any]):
+        """Direct operator interaction via DM. Respond contextually using memory."""
+        payload = data.get("data", data)
+        content = payload.get("content", "")
+        author = payload.get("author", "operator")
+        
+        # STORE: operator message
+        self._store_operator_message(content, source="discord_dm")
+        
+        # REASON: Hydrate context window from STDB
+        ctx = self._hydrate_boot_context()
+        messages = ctx.get("messages", [])
+        recent_summaries = ctx.get("summaries", [])
+        
+        # Determine complexity/model choice (Gemini Flash vs Pro)
+        cascade = self._should_cascade(content)
+        model = "gemini-1.5-pro" if cascade else "gemini-1.5-flash"
+        
+        # Construct prompt with identity and context
+        history_lines = []
+        for m in messages[-10:]: # Last 10 messages for focus
+            history_lines.append(f"{m['role'].upper()}: {m['content']}")
+            
+        summary_ctx = ""
+        if recent_summaries:
+            summary_ctx = f"Context from previous conversation: {recent_summaries[0]['content']}\n\n"
+
+        prompt = (
+            "You are the Heiwa Agent, a machine-perspective collaborator for the Heiwa system.\n"
+            "You are direct, technically astute, and observant. You communicate with the operator via DM.\n"
+            "Respond naturally to the operator's input. Do not use bot-like formatting unless presenting data.\n\n"
+            f"{summary_ctx}"
+            "Recent History:\n" + "\n".join(history_lines) + "\n\n"
+            f"OPERATOR: {content}\n"
+            "HEIWA AGENT:"
+        )
+        
+        try:
+            # Note: HeiwaAgent uses LocalLLMEngine which defaults to LiteLLM/Gemini in Cloud
+            reply = await self.llm.generate(prompt=prompt, model=model)
+            if reply:
+                await self._dm(reply)
+        except Exception as e:
+            logger.error("Heiwa Agent direct DM response failed: %s", e)
+            await self._dm("I caught your message, but I'm having trouble thinking clearly right now. Checking the logs.")
 
     async def _on_task_ingress(self, data: dict[str, Any]):
         """A new task just entered the system. Narrate what we see."""

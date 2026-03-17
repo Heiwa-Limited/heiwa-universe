@@ -76,6 +76,10 @@ class SpacetimeDB:
         return result
 
     def call(self, reducer_name: str, *args: Any) -> bool:
+        if not self.db_identity:
+            logger.warning("STDB call %s skipped: no db_identity", reducer_name)
+            return False
+            
         cmd = ["spacetime", "call", "--server", self.server, self.db_identity, reducer_name]
         for arg in args:
             cmd.append(json.dumps(arg))
@@ -87,6 +91,10 @@ class SpacetimeDB:
         return True
 
     def query(self, sql: str) -> List[dict]:
+        if not self.db_identity:
+            logger.warning("STDB query skipped: no db_identity")
+            return []
+            
         cmd = ["spacetime", "sql", "--server", self.server, self.db_identity, sql]
         result = self._run(cmd)
         if not result:

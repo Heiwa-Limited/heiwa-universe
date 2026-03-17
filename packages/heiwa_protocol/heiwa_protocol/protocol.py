@@ -31,6 +31,7 @@ class Subject(str, Enum):
     CAPTAIN_DIRECTIVE = "heiwa.captain.directive"  # Proactive repair/audit directives
     CAPTAIN_DM = "heiwa.captain.dm"                  # Captain -> Operator DM (meta-conversation)
     HEIWA_AGENT_DM = "heiwa.agent.dm"                # Heiwa Agent -> Operator DM
+    HEIWA_AGENT_INGRESS = "heiwa.agent.ingress"      # Operator -> Heiwa Agent DM (direct interaction)
 
     # V2 Mesh Protocol (Decentralized Blackboard)
     MESH_CAPABILITY_BROADCAST = "heiwa.mesh.capability.broadcast" # Agent -> Mesh (Here are my tools)

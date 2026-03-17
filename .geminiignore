@@ -1,0 +1,11 @@
+.venv/
+target/
+docs_and_deps/
+.git/
+__pycache__/
+*.pyc
+*.pyo
+.pytest_cache/
+.claude/
+.wrangler/
+site/

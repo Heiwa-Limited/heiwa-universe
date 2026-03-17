@@ -224,30 +224,53 @@ async def _register_task_snapshot_listeners():
             if not os.path.exists(st_bin):
                 st_bin = "spacetime"
             
+            # On Railway, the binary might be in the path if installed via Dockerfile
             cmd = [st_bin, "start", "--listen-addr", "127.0.0.1:3000"]
             if data_dir:
                 os.makedirs(data_dir, exist_ok=True)
                 cmd.extend(["--data-dir", data_dir])
             
             logger.info("[STARTUP] Running: %s", " ".join(cmd))
+            # Run in background. We don't wait for completion here, but we wait for it to be ready.
             subprocess.Popen(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-            await asyncio.sleep(10)
+            
+            # Wait for it to come up
+            for i in range(15):
+                await asyncio.sleep(1)
+                try:
+                    async with httpx.AsyncClient() as client:
+                        resp = await client.get("http://127.0.0.1:3000/v1/health")
+                        if resp.status_code == 200:
+                            logger.info("[STARTUP] SpacetimeDB is UP after %ds.", i+1)
+                            stdb_up = True
+                            break
+                except Exception:
+                    continue
 
         # 2. Schema Sync
-        stdb_identity = os.getenv("STDB_IDENTITY", "heiwaproductiondb")
+        # Default to heiwaproductiondb if STDB_IDENTITY is not set
+        stdb_identity = os.getenv("STDB_IDENTITY") or "heiwaproductiondb"
         stdb_path = Path(__file__).parent / "spacetimedb"
-        if stdb_path.exists():
+        
+        if stdb_path.exists() and stdb_up:
             st_bin = "/usr/local/bin/spacetime"
             if not os.path.exists(st_bin):
                 st_bin = "spacetime"
             
             logger.info("[STARTUP] Syncing SpacetimeDB schema for %s...", stdb_identity)
+            # Use publish --server local <identity>
             sync_cmd = [st_bin, "publish", "--server", "local", stdb_identity]
             proc = subprocess.run(sync_cmd, cwd=str(stdb_path), capture_output=True, text=True)
             if proc.returncode == 0:
                 logger.info("[STARTUP] STDB schema sync succeeded.")
             else:
-                logger.error("[STARTUP] STDB schema sync failed: %s", proc.stderr or proc.stdout)
+                stderr = proc.stderr or proc.stdout
+                if "No database target matches" in stderr:
+                    logger.warning("[STARTUP] Identity mismatch. Trying to use current identity...")
+                    # Try to find the identity if it was created with a different name
+                    ident_proc = subprocess.run([st_bin, "identity", "list", "--server", "local"], capture_output=True, text=True)
+                    logger.info("[STARTUP] Local identities: %s", ident_proc.stdout)
+                logger.error("[STARTUP] STDB schema sync failed: %s", stderr)
 
     # 3. Task Snapshot Listeners
     if getattr(app.state, "_task_snapshot_listeners", False):
