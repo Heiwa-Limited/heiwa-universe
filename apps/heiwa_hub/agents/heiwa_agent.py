@@ -24,6 +24,7 @@ from heiwa_protocol.protocol import Subject
 from heiwa_sdk.db import Database
 from heiwa_sdk.audit import RepoAuditor
 from heiwa_sdk.memory import MemoryService
+from heiwa_sdk.agent_memory import AgentMemory
 from pathlib import Path
 
 logger = logging.getLogger("HeiwaAgent")
@@ -54,6 +55,8 @@ class HeiwaAgent(BaseAgent):
         self._boot_time = time.time()
         self._tasks_seen = 0
         self._errors_seen = 0
+        self.agent_memory = AgentMemory(stdb=self.db.stdb) if self.db.stdb else None
+        self._boot_context: dict | None = None
 
     @property
     def llm(self):
@@ -71,15 +74,25 @@ class HeiwaAgent(BaseAgent):
         await self.listen(Subject.NODE_HEARTBEAT, self._on_heartbeat)
         await self.listen(Subject.LOG_ERROR, self._on_error)
 
-        logger.info("Captain online. Monitoring system health and coordinating work.")
+        logger.info("Heiwa Agent online. Monitoring system health and coordinating work.")
 
         # Wait for Messenger/Discord to connect before sending boot DM
         await asyncio.sleep(15)
-        await self._dm(self._build_boot_message())
+        
+        # Boot hydration: load last session's memory
+        self._boot_context = self._hydrate_boot_context()
+        boot_ctx_summary = ""
+        if self._boot_context.get("summaries"):
+            boot_ctx_summary = (
+                "\n\nFrom last session:\n> "
+                + self._boot_context["summaries"][0].get("content", "")[:200]
+            )
+
+        await self._dm(self._build_boot_message() + boot_ctx_summary)
 
         try:
             while self.running:
-                await self._captain_tick()
+                await self._agent_tick()
                 await asyncio.sleep(CAPTAIN_TICK_SEC)
         except KeyboardInterrupt:
             await self.shutdown()
@@ -90,6 +103,7 @@ class HeiwaAgent(BaseAgent):
 
     async def _dm(self, content: str):
         """Send a message to the operator via DM (Messenger handles delivery)."""
+        self._store_agent_response(content)
         await self.speak(Subject.HEIWA_AGENT_DM, {
             "agent": "heiwa-agent",
             "content": content,
@@ -108,12 +122,20 @@ class HeiwaAgent(BaseAgent):
         source = payload.get("source", "unknown")
         self._tasks_seen += 1
 
+        # STORE: persist the incoming task as an operator message
+        self._store_operator_message(
+            f"[task:{task_id}] {raw}", source=source
+        )
+
         await self._dm(
             f"New task landed from **{source}**.\n"
             f"`{task_id}` classified as **{intent}**\n"
             f"> {raw}\n"
             f"Routing it now — I'll tell you what happens."
         )
+
+        # FOCUS: track active topic
+        self._update_focus(intent, {"task_id": task_id, "raw": raw[:80]})
 
     async def _on_task_result(self, data: dict[str, Any]):
         """A task completed. Tell the operator what happened."""
@@ -170,13 +192,111 @@ class HeiwaAgent(BaseAgent):
         self._pending_alerts.append(f"**{agent}** threw: {content}")
 
     # ------------------------------------------------------------------ #
+    #  Memory Loop Methods                                               #
+    # ------------------------------------------------------------------ #
+
+    def _store_operator_message(self, content: str, source: str = "discord_dm"):
+        """STORE step: persist operator input to captain_messages."""
+        if self.agent_memory:
+            self.agent_memory.store_message(role="operator", content=content, source=source)
+
+    def _store_agent_response(self, content: str):
+        """STORE step: persist agent output to captain_messages."""
+        if self.agent_memory:
+            self.agent_memory.store_message(role="agent", content=content, source="system")
+
+    async def _maybe_compress(self):
+        """Check if rolling compression is needed and run it."""
+        if not self.agent_memory:
+            return
+        ctx = self.agent_memory.load_context_window()
+        messages = ctx.get("messages", [])
+        if self.agent_memory.needs_compression(messages):
+            await self._run_rolling_compression(messages)
+
+    async def _run_rolling_compression(self, messages: list[dict]):
+        """Compress oldest uncompressed messages into a rolling summary."""
+        if not messages:
+            return
+        mid = len(messages) // 2
+        to_compress = messages[:mid]
+        if not to_compress:
+            return
+
+        text_block = "\n".join(
+            f"[{m.get('role', '?')}] {m.get('content', '')}" for m in to_compress
+        )
+        try:
+            summary = await self._llm_summarize(text_block)
+        except Exception as e:
+            logger.error("Rolling compression failed: %s", e)
+            return
+
+        range_start = to_compress[0].get("timestamp", 0)
+        range_end = to_compress[-1].get("timestamp", 0)
+
+        self.agent_memory.store_summary(
+            summary_type="rolling",
+            content=summary,
+            range_start=range_start,
+            range_end=range_end,
+            messages_compressed=len(to_compress),
+        )
+        self.agent_memory.mark_compressed(before_timestamp=range_end + 1)
+        logger.info("Rolling compression: %d messages → summary", len(to_compress))
+
+    async def _llm_summarize(self, text: str) -> str:
+        """REASON helper: use LLM to generate a summary."""
+        prompt = (
+            "Summarize this conversation concisely, preserving key decisions, "
+            "action items, and technical details:\n\n" + text
+        )
+        return await self.llm.generate(prompt)
+
+    def _hydrate_boot_context(self) -> dict:
+        """BOOT: load last session's uncompressed messages + recent summaries."""
+        if not self.agent_memory:
+            return {"messages": [], "focuses": [], "summaries": []}
+        return self.agent_memory.load_context_window()
+
+    def _should_cascade(self, text: str) -> bool:
+        """REASON: detect if message needs stronger model (cascade) vs Flash."""
+        if not self.agent_memory:
+            return False
+        return self.agent_memory.detect_complexity(text)
+
+    def _update_focus(self, topic: str, context: dict[str, Any], priority: int = 3):
+        """FOCUS step: create or update active focus tracking entry."""
+        if not self.agent_memory:
+            return
+        # Check if there's already an active focus on this topic
+        active = self.agent_memory.stdb.get_active_focuses()
+        existing = next((f for f in active if f.get("topic") == topic), None)
+        if existing:
+            self.agent_memory.upsert_focus(
+                topic=topic,
+                context=context,
+                priority=priority,
+                focus_id=existing["focus_id"],
+            )
+        else:
+            self.agent_memory.upsert_focus(
+                topic=topic,
+                context=context,
+                priority=priority,
+            )
+
+    # ------------------------------------------------------------------ #
     #  Proactive loop                                                      #
     # ------------------------------------------------------------------ #
 
-    async def _captain_tick(self):
+    async def _agent_tick(self):
         now = time.time()
 
         system_state = await self._gather_system_state()
+
+        # Memory compression check
+        await self._maybe_compress()
 
         # Handle queued alerts
         alerts = list(self._pending_alerts)
