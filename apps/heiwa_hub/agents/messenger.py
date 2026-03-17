@@ -382,6 +382,7 @@ class MessengerAgent(BaseAgent):
             "ingress_ts": time.time(),
             "intent_class": intent_profile.intent_class,
             "normalization": intent_profile.to_dict(),
+            "is_dm": source.guild is None,
         }
 
         # --- ROUTING LOGIC ---
@@ -392,8 +393,14 @@ class MessengerAgent(BaseAgent):
                 "content": instruction,
                 "author": str(author),
                 "channel_id": channel.id,
+                "intent_class": intent_profile.intent_class,
             })
-            # Also publish to TASK_INGRESS for observability/history, but return early
+            
+            # If it's pure chat, don't spin up a formal swarm task.
+            if intent_profile.intent_class == "chat":
+                return
+                
+            # If it's an actual task (build, research, etc.), send to the Swarm.
             await self._publish_raw(Subject.TASK_INGRESS.value, ingress)
             return
 

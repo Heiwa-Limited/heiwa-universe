@@ -167,6 +167,7 @@ class HeiwaAgent(BaseAgent):
         raw = str(payload.get("raw_text", ""))[:120]
         intent = payload.get("intent_class", "unknown")
         source = payload.get("source", "unknown")
+        is_dm = payload.get("is_dm", False)
         self._tasks_seen += 1
 
         # STORE: persist the incoming task as an operator message
@@ -174,12 +175,13 @@ class HeiwaAgent(BaseAgent):
             f"[task:{task_id}] {raw}", source=source
         )
 
-        await self._dm(
-            f"New task landed from **{source}**.\n"
-            f"`{task_id}` classified as **{intent}**\n"
-            f"> {raw}\n"
-            f"Routing it now — I'll tell you what happens."
-        )
+        if not is_dm and intent != "chat":
+            await self._dm(
+                f"New task landed from **{source}**.\n"
+                f"`{task_id}` classified as **{intent}**\n"
+                f"> {raw}\n"
+                f"Routing it now — I'll tell you what happens."
+            )
 
         # FOCUS: track active topic
         self._update_focus(intent, {"task_id": task_id, "raw": raw[:80]})
@@ -193,6 +195,10 @@ class HeiwaAgent(BaseAgent):
         provider = payload.get("provider") or payload.get("target_tool", "unknown")
         elapsed = payload.get("elapsed_sec")
         summary = str(payload.get("summary", ""))[:300]
+        
+        # Don't announce 'chat' task results — HeiwaAgent handles this contextually
+        if intent == "chat":
+            return
 
         self._task_results.append({
             "task_id": task_id,
