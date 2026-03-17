@@ -112,6 +112,7 @@ class CLIContext:
         self.loaded_summaries = self.load_recent_session_summaries(limit=5)
 
         # Lazy-loaded to avoid import cost on simple commands
+        self.turn_history: list[dict[str, Any]] = []
         self._db = None
         self._enrichment = None
         self._gateway = None

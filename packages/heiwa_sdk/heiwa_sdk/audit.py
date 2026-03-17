@@ -33,6 +33,7 @@ class RepoAuditor:
         
         lint_ok, lint_summary = await self._run_lint()
         tests_ok, test_summary = await self._run_smoke_tests()
+        ollama_summary = await self._run_ollama_audit()
         
         errors = []
         if not lint_ok:
@@ -41,7 +42,8 @@ class RepoAuditor:
             errors.append(f"Test failure: {test_summary}")
             
         passed = lint_ok and tests_ok
-        summary = f"Audit {'PASSED' if passed else 'FAILED'}. Lint: {'OK' if lint_ok else 'FAIL'}, Tests: {'OK' if tests_ok else 'FAIL'}"
+        status_line = f"Lint: {'OK' if lint_ok else 'FAIL'}, Tests: {'OK' if tests_ok else 'FAIL'}"
+        summary = f"Audit {'PASSED' if passed else 'FAILED'}. {status_line}\n\nOllama Report: {ollama_summary}"
         
         return AuditResult(
             passed=passed,
@@ -50,6 +52,32 @@ class RepoAuditor:
             summary=summary,
             errors=errors
         )
+
+    async def _run_ollama_audit(self) -> str:
+        """Use local LLM to perform a high-level structural health check."""
+        try:
+            from heiwa_cognition.llm import LocalLLMEngine
+            llm = LocalLLMEngine()
+            if not llm.is_available():
+                return "Ollama unavailable — skipping deep audit."
+            
+            # Gather repo stats
+            import os
+            file_count = 0
+            for root, _, files in os.walk(str(self.root)):
+                if ".git" in root or ".venv" in root or "node_modules" in root:
+                    continue
+                file_count += len(files)
+            
+            prompt = (
+                f"You are the Heiwa Repo Auditor. The repository at {self.root} has {file_count} active files.\n"
+                "Based on the system integrity markers (Lint and Tests passed), provide a one-sentence natural status report "
+                "on the 'vibe' of the codebase. Be observant and machine-astute."
+            )
+            
+            return await llm.generate_async(prompt=prompt, complexity="low")
+        except Exception as e:
+            return f"Ollama audit failed: {e}"
 
     async def _run_lint(self) -> tuple[bool, str]:
         """Run the configuration linter."""

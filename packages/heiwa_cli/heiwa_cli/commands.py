@@ -55,9 +55,10 @@ async def cmd_help(ctx: CLIContext, args: str = "") -> None:
 async def cmd_status(ctx: CLIContext, args: str = "") -> None:
     from heiwa_sdk.rate_ledger import get_rate_ledger
 
-    table = Table(title="Heiwa Status")
-    table.add_column("Property")
+    table = Table(title="Heiwa Status", show_header=True, header_style="bold magenta")
+    table.add_column("Property", style="dim")
     table.add_column("Value")
+    
     table.add_row("Root", str(ctx.root))
     table.add_row("Node", ctx.node_id)
     table.add_row("Hub Auth", "set" if ctx.auth_token else "[red]not set[/red]")
@@ -71,7 +72,13 @@ async def cmd_status(ctx: CLIContext, args: str = "") -> None:
             resp = requests.get(f"{url}/health", timeout=5)
             if resp.status_code == 200:
                 hub_health = resp.json()
-                table.add_row("Hub", f"[green]{hub_health.get('status', 'ok')}[/green] ({url})")
+                status_color = "green" if hub_health.get("status") == "alive" else "yellow"
+                table.add_row("Hub", f"[{status_color}]{hub_health.get('status', 'ok')}[/{status_color}] ({url})")
+                
+                # Show STDB status from health check
+                stdb_status = hub_health.get("stdb", "unknown")
+                stdb_color = "green" if stdb_status == "connected" else "red"
+                table.add_row("SpacetimeDB", f"[{stdb_color}]{stdb_status}[/{stdb_color}]")
                 break
         except Exception:
             continue

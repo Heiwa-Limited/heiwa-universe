@@ -140,7 +140,7 @@ class Settings:
 
     @property
     def STDB_IDENTITY(self):
-        return get_env("STDB_IDENTITY", required=False)
+        return get_env("STDB_IDENTITY", default="heiwaproductiondb", required=False)
 
     @property
     def STDB_SERVER(self):
