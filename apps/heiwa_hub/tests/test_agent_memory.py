@@ -1,6 +1,8 @@
 """Tests for AgentMemory STDB bridge and service layer."""
 import pytest
 from unittest.mock import MagicMock, patch
+import uuid
+import time
 
 
 class TestSpacetimeDBBridge:
@@ -101,3 +103,71 @@ class TestSpacetimeDBBridge:
         assert result[0]["topic"] == "deployment"
         stdb.query.assert_called_once()
         assert "resolved_at = 0" in stdb.query.call_args[0][0]
+
+
+class TestAgentMemory:
+    """Test the AgentMemory high-level service."""
+
+    def _make_memory(self):
+        from heiwa_sdk.agent_memory import AgentMemory
+        mem = AgentMemory.__new__(AgentMemory)
+        mem.stdb = MagicMock()
+        mem.session_id = "test-session"
+        mem._token_budget = 8000
+        return mem
+
+    def test_store_message(self):
+        from unittest.mock import ANY
+        mem = self._make_memory()
+        mem.stdb.insert_captain_message = MagicMock(return_value=True)
+
+        result = mem.store_message(role="operator", content="deploy now", source="discord_dm")
+        assert result is True
+        mem.stdb.insert_captain_message.assert_called_once_with(
+            message_id=ANY,
+            session_id="test-session",
+            role="operator",
+            content="deploy now",
+            timestamp=ANY,
+            source="discord_dm",
+        )
+
+    def test_load_context_window(self):
+        mem = self._make_memory()
+        mem.stdb.get_uncompressed_messages = MagicMock(return_value=[
+            {"message_id": "m1", "role": "operator", "content": "hi", "timestamp": 100},
+            {"message_id": "m2", "role": "agent", "content": "hello", "timestamp": 200},
+        ])
+        mem.stdb.get_active_focuses = MagicMock(return_value=[])
+        mem.stdb.get_recent_summaries = MagicMock(return_value=[])
+
+        ctx = mem.load_context_window()
+        assert len(ctx["messages"]) == 2
+        assert ctx["messages"][0]["role"] == "operator"
+
+    def test_needs_compression_under_budget(self):
+        mem = self._make_memory()
+        # ~10 chars = ~2 tokens, well under 8000
+        messages = [{"content": "short msg"}]
+        assert mem.needs_compression(messages) is False
+
+    def test_needs_compression_over_budget(self):
+        mem = self._make_memory()
+        # Each message ~128K chars = ~32K tokens, over 8K budget
+        messages = [{"content": "x" * 128000}]
+        assert mem.needs_compression(messages) is True
+
+    def test_estimate_tokens(self):
+        from heiwa_sdk.agent_memory import AgentMemory
+        assert AgentMemory.estimate_tokens("hello world") == 2  # 11 chars // 4 = 2
+        assert AgentMemory.estimate_tokens("x" * 100) == 25  # 100 // 4
+
+    def test_detect_complexity_simple(self):
+        mem = self._make_memory()
+        assert mem.detect_complexity("how's the deploy going?") is False
+
+    def test_detect_complexity_architecture(self):
+        mem = self._make_memory()
+        assert mem.detect_complexity(
+            "I want to refactor the entire deployment pipeline and redesign the strategy for multi-node orchestration"
+        ) is True
