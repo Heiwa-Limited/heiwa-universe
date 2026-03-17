@@ -8,6 +8,8 @@ from typing import Any, Dict
 import os
 import uuid
 
+import subprocess
+import sys
 from fastapi import FastAPI, HTTPException, Header, WebSocket, WebSocketDisconnect
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
@@ -203,7 +205,41 @@ async def _record_progress_event(envelope: Dict[str, Any]):
 
 
 @app.on_event("startup")
-async def _register_task_snapshot_listeners():
+async def _on_startup_init():
+    # 1. SpacetimeDB auto-start (if running locally on Railway/Local)
+    if os.getenv("HEIWA_STATE_BACKEND") == "spacetimedb" and os.getenv("STDB_SERVER") == "local":
+        try:
+            import httpx
+            async with httpx.AsyncClient() as client:
+                resp = await client.get("http://127.0.0.1:3000/v1/health")
+                stdb_up = resp.status_code == 200
+        except Exception:
+            stdb_up = False
+
+        if not stdb_up:
+            logger.info("[STARTUP] SpacetimeDB not responding. Attempting background start...")
+            data_dir = os.getenv("STDB_DATA_DIR")
+            cmd = ["spacetime", "start", "--listen-addr", "127.0.0.1:3000"]
+            if data_dir:
+                os.makedirs(data_dir, exist_ok=True)
+                cmd.extend(["--data-dir", data_dir])
+            
+            subprocess.Popen(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            await asyncio.sleep(5)
+
+        # 2. Schema Sync
+        stdb_identity = os.getenv("STDB_IDENTITY", "heiwaproductiondb")
+        stdb_path = Path(__file__).parent / "spacetimedb"
+        if stdb_path.exists():
+            logger.info("[STARTUP] Syncing SpacetimeDB schema for %s...", stdb_identity)
+            sync_cmd = ["spacetime", "publish", "--server", "local", stdb_identity]
+            proc = subprocess.run(sync_cmd, cwd=str(stdb_path), capture_output=True, text=True)
+            if proc.returncode == 0:
+                logger.info("[STARTUP] STDB schema sync succeeded.")
+            else:
+                logger.error("[STARTUP] STDB schema sync failed: %s", proc.stderr)
+
+    # 3. Task Snapshot Listeners
     if getattr(app.state, "_task_snapshot_listeners", False):
         return
     bus = get_bus()
