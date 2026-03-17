@@ -61,10 +61,10 @@ class SpacetimeDB:
             return value
         return json.dumps(value, separators=(",", ":"))
 
-    def _run(self, cmd: list[str], timeout: int = 10) -> subprocess.CompletedProcess[str] | None:
-        logger.debug("STDB cmd: %s", cmd)
+    def _run(self, cmd: list[str], timeout: int = 10, cwd: str | None = None) -> subprocess.CompletedProcess[str] | None:
+        logger.debug("STDB cmd: %s (cwd=%s)", cmd, cwd)
         try:
-            result = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
+            result = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout, cwd=cwd)
         except Exception as exc:
             logger.error("STDB bridge error: %s", exc)
             return None
@@ -1022,7 +1022,8 @@ class SpacetimeDB:
 
     def publish_schema(self, module_dir: str) -> bool:
         """Publish the schema from the given directory to the server."""
-        return self.call_cli(["publish", "--server", self.server, self.db_identity], cwd=module_dir)
+        cmd = ["spacetime", "publish", "--server", self.server, self.db_identity]
+        return self._run(cmd, timeout=60, cwd=module_dir) is not None
 
     def prune_captain_messages(self, before_timestamp: int) -> bool:
         return self.call("prune_captain_messages", before_timestamp)
