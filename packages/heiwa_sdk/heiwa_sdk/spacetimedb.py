@@ -1020,6 +1020,10 @@ class SpacetimeDB:
         rows = self.query("SELECT * FROM captain_focus WHERE resolved_at = 0")
         return sorted(rows, key=lambda r: r.get("priority", 0), reverse=True)
 
+    def publish_schema(self, module_dir: str) -> bool:
+        """Publish the schema from the given directory to the server."""
+        return self.call_cli(["publish", "--server", self.server, self.db_identity], cwd=module_dir)
+
     def prune_captain_messages(self, before_timestamp: int) -> bool:
         return self.call("prune_captain_messages", before_timestamp)
 
