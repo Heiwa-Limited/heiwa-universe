@@ -205,7 +205,7 @@ async def _record_progress_event(envelope: Dict[str, Any]):
 
 
 @app.on_event("startup")
-async def _on_startup_init():
+async def _register_task_snapshot_listeners():
     # 1. SpacetimeDB auto-start (if running locally on Railway/Local)
     if os.getenv("HEIWA_STATE_BACKEND") == "spacetimedb" and os.getenv("STDB_SERVER") == "local":
         try:
