@@ -166,6 +166,27 @@ class Database:
         finally:
             conn.close()
 
+    def upsert_node_heartbeat(
+        self,
+        *,
+        node_id: str,
+        meta: dict[str, Any] | None = None,
+        capabilities: dict[str, Any] | None = None,
+        agent_version: str | None = None,
+        tags: list[str] | None = None,
+        max_concurrency: int = 1,
+    ) -> bool:
+        if self.stdb:
+            return self.stdb.upsert_node_heartbeat(
+                node_id=node_id,
+                meta=meta,
+                capabilities=capabilities,
+                agent_version=agent_version,
+                tags=tags,
+                max_concurrency=max_concurrency
+            )
+        return True # SQLite fallback doesn't track nodes yet
+
     # ── Internal Schemas ───────────────────────────────────────────────
 
     def _init_sqlite_schema(self):
