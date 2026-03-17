@@ -989,7 +989,7 @@ class SpacetimeDB:
             query += f" AND session_id = '{self._escape_sql_literal(session_id)}'"
         query += f" LIMIT {int(limit)}"
         rows = self.query(query)
-        return sorted(rows, key=lambda r: r.get("timestamp", 0))
+        return sorted(rows, key=lambda r: r.get("timestamp") or 0)
 
     def mark_messages_compressed(self, session_id: str, before_timestamp: int) -> bool:
         return self.call("mark_messages_compressed", session_id, before_timestamp)

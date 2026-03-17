@@ -21,14 +21,15 @@ logger = logging.getLogger("CLI")
 
 def main() -> None:
     configure_logging()
-    ctx = CLIContext()
 
-    # Load swarm env if available
+    # Load swarm env if available (CRITICAL: must happen before CLIContext)
     try:
         from heiwa_sdk.config import load_swarm_env
         load_swarm_env()
     except Exception:
         logger.debug("Failed to load swarm env", exc_info=True)
+
+    ctx = CLIContext()
 
     # Drain any locally-queued approval decisions to the hub
     try:

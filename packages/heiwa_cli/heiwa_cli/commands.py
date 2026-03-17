@@ -66,11 +66,11 @@ async def cmd_status(ctx: CLIContext, args: str = "") -> None:
     hub_health = None
     for url in ctx.hub_url_candidates():
         try:
-            import urllib.request
+            import requests
 
-            req = urllib.request.Request(f"{url}/health", method="GET")
-            with urllib.request.urlopen(req, timeout=5) as resp:
-                hub_health = json.loads(resp.read().decode())
+            resp = requests.get(f"{url}/health", timeout=5)
+            if resp.status_code == 200:
+                hub_health = resp.json()
                 table.add_row("Hub", f"[green]{hub_health.get('status', 'ok')}[/green] ({url})")
                 break
         except Exception:

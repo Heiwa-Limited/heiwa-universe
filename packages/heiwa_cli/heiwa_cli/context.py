@@ -109,14 +109,13 @@ class CLIContext:
             "profiles.json": self.root / "config" / "identities" / "profiles.json",
         }
 
-        self.turn_history: list[dict[str, Any]] = []
         self.loaded_summaries = self.load_recent_session_summaries(limit=5)
 
         # Lazy-loaded to avoid import cost on simple commands
+        self._db = None
         self._enrichment = None
         self._gateway = None
         self._identity_selector = None
-        self._db = None
         self._provider_registry = None
 
     @property

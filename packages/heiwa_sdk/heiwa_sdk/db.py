@@ -187,6 +187,12 @@ class Database:
             )
         return True # SQLite fallback doesn't track nodes yet
 
+    def get_model_usage_summary(self, minutes: int = 60) -> dict[str, Any]:
+        if self.stdb:
+            # Future: add get_model_usage_summary to SpacetimeDB
+            return {}
+        return {}
+
     # ── Internal Schemas ───────────────────────────────────────────────
 
     def _init_sqlite_schema(self):
