@@ -37,7 +37,8 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     PATH="/opt/venv/bin:/usr/local/bin:/root/.local/bin:$PATH" \
     LOG_LEVEL="INFO" \
     PYTHONPATH="/app/packages/heiwa_cli:/app/packages/heiwa_cognition:/app/packages/heiwa_sdk:/app/packages/heiwa_protocol:/app/packages/heiwa_identity:/app/packages/heiwa_ui:/app/apps" \
-    NODE_OPTIONS="--max-old-space-size=256"
+    NODE_OPTIONS="--max-old-space-size=256" \
+    SPACETIMEDB_HOME="/app/.spacetime"
 
 # System dependencies + git (for code freshness)
 RUN apt-get update && apt-get install -y \

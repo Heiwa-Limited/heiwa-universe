@@ -219,25 +219,35 @@ async def _on_startup_init():
         if not stdb_up:
             logger.info("[STARTUP] SpacetimeDB not responding. Attempting background start...")
             data_dir = os.getenv("STDB_DATA_DIR")
-            cmd = ["spacetime", "start", "--listen-addr", "127.0.0.1:3000"]
+            # Use absolute path to avoid PATH resolution issues
+            st_bin = "/usr/local/bin/spacetime"
+            if not os.path.exists(st_bin):
+                st_bin = "spacetime"
+            
+            cmd = [st_bin, "start", "--listen-addr", "127.0.0.1:3000"]
             if data_dir:
                 os.makedirs(data_dir, exist_ok=True)
                 cmd.extend(["--data-dir", data_dir])
             
+            logger.info("[STARTUP] Running: %s", " ".join(cmd))
             subprocess.Popen(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-            await asyncio.sleep(5)
+            await asyncio.sleep(10)
 
         # 2. Schema Sync
         stdb_identity = os.getenv("STDB_IDENTITY", "heiwaproductiondb")
         stdb_path = Path(__file__).parent / "spacetimedb"
         if stdb_path.exists():
+            st_bin = "/usr/local/bin/spacetime"
+            if not os.path.exists(st_bin):
+                st_bin = "spacetime"
+            
             logger.info("[STARTUP] Syncing SpacetimeDB schema for %s...", stdb_identity)
-            sync_cmd = ["spacetime", "publish", "--server", "local", stdb_identity]
+            sync_cmd = [st_bin, "publish", "--server", "local", stdb_identity]
             proc = subprocess.run(sync_cmd, cwd=str(stdb_path), capture_output=True, text=True)
             if proc.returncode == 0:
                 logger.info("[STARTUP] STDB schema sync succeeded.")
             else:
-                logger.error("[STARTUP] STDB schema sync failed: %s", proc.stderr)
+                logger.error("[STARTUP] STDB schema sync failed: %s", proc.stderr or proc.stdout)
 
     # 3. Task Snapshot Listeners
     if getattr(app.state, "_task_snapshot_listeners", False):
