@@ -18,7 +18,7 @@
       "siliconflow/deepseek-r2",
       "cerebras/gpt-oss-120b",
       "gemini-cli/gemini-3.1-pro",
-      "antigravity/gemini-3-auto",
+      "google-antigravity/gemini-3.1-pro",
       "claude/opus-4-6",
       "codex/gpt-4.1"
     ],
@@ -86,8 +86,15 @@
         "compute_class": 3,
         "role": "research_long_context"
       },
+      "heiwa_agent_routine": {
+        "id": "google-antigravity/gemini-3-flash",
+        "provider": "google-antigravity",
+        "host_node": "railway@heiwa-cloud-hq",
+        "compute_class": 2,
+        "role": "heiwa_agent_routine_reasoning"
+      },
       "class_3_strategy": {
-        "id": "google-antigravity/gemini-3-auto",
+        "id": "google-antigravity/gemini-3.1-pro",
         "provider": "google-antigravity",
         "host_node": "railway@heiwa-cloud-hq",
         "compute_class": 3,
@@ -151,7 +158,7 @@
       "adapter_tool": "heiwa_reflex",
       "transport": "api_http",
       "auth_kind": "api_key",
-      "rate_group": "google_antigravity",
+      "rate_group": "antigravity_pro",
       "websocket_preferred": false
     },
     "claude-code": {
@@ -223,8 +230,13 @@
       "window_sec": 3600,
       "cooldown_sec": 60
     },
-    "google_antigravity": {
-      "max_turns": 35,
+    "antigravity_flash": {
+      "max_turns": 20,
+      "window_sec": 3600,
+      "cooldown_sec": 60
+    },
+    "antigravity_pro": {
+      "max_turns": 15,
       "window_sec": 3600,
       "cooldown_sec": 60
     },
@@ -275,20 +287,20 @@
         "siliconflow/deepseek-r2",
         "cerebras/gpt-oss-120b",
         "gemini-cli/gemini-3.1-pro",
-        "google-antigravity/gemini-3-auto",
+        "google-antigravity/gemini-3.1-pro",
         "claude/opus-4-6",
         "codex/gpt-4.1"
       ],
       "by_intent": {
         "research": [
           "gemini-cli/gemini-3.1-pro",
-          "google-antigravity/gemini-3-auto",
+          "google-antigravity/gemini-3.1-pro",
           "claude/opus-4-6",
           "siliconflow/deepseek-r2",
           "cerebras/gpt-oss-120b"
         ],
         "strategy": [
-          "google-antigravity/gemini-3-auto",
+          "google-antigravity/gemini-3.1-pro",
           "claude/opus-4-6",
           "gemini-cli/gemini-3.1-pro",
           "siliconflow/deepseek-r2",
@@ -297,7 +309,7 @@
         "build": [
           "codex/gpt-4.1",
           "claude/opus-4-6",
-          "google-antigravity/gemini-3-auto",
+          "google-antigravity/gemini-3.1-pro",
           "gemini-cli/gemini-3.1-pro",
           "siliconflow/deepseek-r2",
           "cerebras/gpt-oss-120b"

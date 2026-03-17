@@ -78,16 +78,29 @@
     "enabled": true
   },
   {
-    "model_id": "antigravity/gemini-3-auto",
-    "provider_model_id": "gemini-3-auto",
+    "model_id": "google-antigravity/gemini-3-flash",
+    "provider_model_id": "gemini-3-flash",
     "provider": "google-antigravity",
-    "rate_group": "google_antigravity",
+    "rate_group": "antigravity_flash",
     "capability_class": 2,
-    "effort_knob": "thinking:always",
-    "effort_level": 4,
+    "effort_knob": "thinking:on",
+    "effort_level": 3,
     "cost_per_turn": 0.0,
     "max_context_tokens": 1000000,
-    "strengths": ["strategy", "review", "research"],
+    "strengths": ["chat", "status", "observation"],
+    "enabled": true
+  },
+  {
+    "model_id": "google-antigravity/gemini-3.1-pro",
+    "provider_model_id": "gemini-3.1-pro",
+    "provider": "google-antigravity",
+    "rate_group": "antigravity_pro",
+    "capability_class": 3,
+    "effort_knob": "thinking:always",
+    "effort_level": 5,
+    "cost_per_turn": 0.0,
+    "max_context_tokens": 1000000,
+    "strengths": ["strategy", "review", "research", "architecture"],
     "enabled": true
   },
   {
