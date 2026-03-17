@@ -137,7 +137,8 @@ if [[ "$HEIWA_STATE_BACKEND" == "spacetimedb" ]]; then
                 echo "[HEIWA] Starting local SpacetimeDB instance..."
                 spacetime start --listen-addr 127.0.0.1:3000 &
             fi
-            sleep 3
+            echo "[HEIWA] Waiting for SpacetimeDB to initialize..."
+            sleep 10
         fi
     fi
 
