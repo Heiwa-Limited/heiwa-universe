@@ -1982,6 +1982,171 @@ pub fn prune_execution_memory(ctx: &ReducerContext, keep_last: u32) -> Result<()
     Ok(())
 }
 
+// ── Captain Memory (Heiwa Agent persistent conversation) ───────
+
+#[table(accessor = captain_messages, public)]
+pub struct CaptainMessage {
+    #[primary_key]
+    pub message_id: String,
+    #[index(btree)]
+    pub session_id: String,
+    pub role: String,
+    pub content: String,
+    #[index(btree)]
+    pub timestamp: u64,
+    pub source: String,
+    pub compressed: bool,
+}
+
+#[table(accessor = captain_summaries, public)]
+pub struct CaptainSummary {
+    #[primary_key]
+    pub summary_id: String,
+    #[index(btree)]
+    pub summary_type: String,
+    pub content: String,
+    pub message_range_start: u64,
+    pub message_range_end: u64,
+    pub messages_compressed: u32,
+    pub created_at: u64,
+}
+
+#[table(accessor = captain_focus, public)]
+pub struct CaptainFocus {
+    #[primary_key]
+    pub focus_id: String,
+    pub topic: String,
+    pub context_json: String,
+    #[index(btree)]
+    pub priority: u8,
+    pub created_at: u64,
+    pub resolved_at: u64,
+}
+
+#[reducer]
+pub fn insert_captain_message(
+    ctx: &ReducerContext,
+    message_id: String,
+    session_id: String,
+    role: String,
+    content: String,
+    timestamp: u64,
+    source: String,
+) -> Result<(), String> {
+    ctx.db.captain_messages().insert(CaptainMessage {
+        message_id,
+        session_id,
+        role,
+        content,
+        timestamp,
+        source,
+        compressed: false,
+    });
+    Ok(())
+}
+
+#[reducer]
+pub fn mark_messages_compressed(
+    ctx: &ReducerContext,
+    session_id: String,
+    before_timestamp: u64,
+) -> Result<(), String> {
+    let msgs: Vec<CaptainMessage> = ctx
+        .db
+        .captain_messages()
+        .iter()
+        .filter(|m| m.session_id == session_id && m.timestamp < before_timestamp && !m.compressed)
+        .collect();
+    for mut msg in msgs {
+        msg.compressed = true;
+        ctx.db.captain_messages().message_id().update(msg);
+    }
+    Ok(())
+}
+
+#[reducer]
+pub fn insert_captain_summary(
+    ctx: &ReducerContext,
+    summary_id: String,
+    summary_type: String,
+    content: String,
+    range_start: u64,
+    range_end: u64,
+    messages_compressed: u32,
+) -> Result<(), String> {
+    ctx.db.captain_summaries().insert(CaptainSummary {
+        summary_id,
+        summary_type,
+        content,
+        message_range_start: range_start,
+        message_range_end: range_end,
+        messages_compressed,
+        created_at: (ctx.timestamp.to_micros_since_unix_epoch() / 1000) as u64,
+    });
+    Ok(())
+}
+
+#[reducer]
+pub fn upsert_captain_focus(
+    ctx: &ReducerContext,
+    focus_id: String,
+    topic: String,
+    context_json: String,
+    priority: u8,
+) -> Result<(), String> {
+    if let Some(mut existing) = ctx.db.captain_focus().focus_id().find(&focus_id) {
+        existing.topic = topic;
+        existing.context_json = context_json;
+        existing.priority = priority;
+        ctx.db.captain_focus().focus_id().update(existing);
+    } else {
+        ctx.db.captain_focus().insert(CaptainFocus {
+            focus_id,
+            topic,
+            context_json,
+            priority,
+            created_at: (ctx.timestamp.to_micros_since_unix_epoch() / 1000) as u64,
+            resolved_at: 0,
+        });
+    }
+    Ok(())
+}
+
+#[reducer]
+pub fn resolve_captain_focus(
+    ctx: &ReducerContext,
+    focus_id: String,
+    resolved_at: u64,
+) -> Result<(), String> {
+    let mut focus = ctx
+        .db
+        .captain_focus()
+        .focus_id()
+        .find(&focus_id)
+        .ok_or("Focus not found")?;
+    focus.resolved_at = resolved_at;
+    ctx.db.captain_focus().focus_id().update(focus);
+    Ok(())
+}
+
+#[reducer]
+pub fn prune_captain_messages(
+    ctx: &ReducerContext,
+    before_timestamp: u64,
+) -> Result<(), String> {
+    let old: Vec<String> = ctx
+        .db
+        .captain_messages()
+        .iter()
+        .filter(|m| m.compressed && m.timestamp < before_timestamp)
+        .map(|m| m.message_id.clone())
+        .collect();
+    for id in old {
+        ctx.db.captain_messages().message_id().delete(&id);
+    }
+    Ok(())
+}
+
 
 
 
