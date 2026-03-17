@@ -23,8 +23,9 @@ RUN pip install --no-cache-dir --upgrade pip && \
 RUN curl -L "https://github.com/clockworklabs/SpacetimeDB/releases/download/v2.0.3/spacetime-x86_64-unknown-linux-gnu.tar.gz" -o spacetime.tar.gz && \
     tar -xzf spacetime.tar.gz && \
     mv spacetimedb-cli /usr/local/bin/spacetime && \
-    chmod +x /usr/local/bin/spacetime && \
-    rm spacetime.tar.gz spacetimedb-standalone
+    mv spacetimedb-standalone /usr/local/bin/spacetimedb-standalone && \
+    chmod +x /usr/local/bin/spacetime /usr/local/bin/spacetimedb-standalone && \
+    rm spacetime.tar.gz
 
 # -----------------------------------------------------
 # STAGE 2: RUNTIME
@@ -57,8 +58,9 @@ RUN curl -fsSL https://deb.nodesource.com/setup_20.x | bash - \
 # Copy venv from builder
 COPY --from=builder /opt/venv /opt/venv
 
-# Copy SpacetimeDB CLI from builder
+# Copy SpacetimeDB CLI and Server from builder
 COPY --from=builder /usr/local/bin/spacetime /usr/local/bin/spacetime
+COPY --from=builder /usr/local/bin/spacetimedb-standalone /usr/local/bin/spacetimedb-standalone
 
 # --- Class 3 CLI Tools (cloud OAuth executors) ---
 # Each is a thin HTTP client; inference runs on provider servers.
