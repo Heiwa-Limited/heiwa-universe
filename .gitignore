@@ -90,3 +90,4 @@ memory/
 # Windows/WSL artifacts
 **/D:\\cache\\cargo/
 **/*.bak
+.worktrees/
