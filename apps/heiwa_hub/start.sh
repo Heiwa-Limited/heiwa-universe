@@ -124,8 +124,19 @@ if [[ "$HEIWA_STATE_BACKEND" == "spacetimedb" ]]; then
     # Local fallback start for development if STDB_SERVER=local
     if [[ "$STDB_SERVER" == "local" ]] && command -v spacetime &>/dev/null; then
         if ! curl -s http://127.0.0.1:3000/v1/health >/dev/null; then
-            echo "[HEIWA] Starting local SpacetimeDB instance..."
-            spacetime start --listen-addr 127.0.0.1:3000 &
+            # Configure STDB persistent data directory (Railway volume)
+            STDB_DATA_DIR="${STDB_DATA_DIR:-}"
+            if [[ -n "$STDB_DATA_DIR" ]]; then
+                if [[ ! -d "$STDB_DATA_DIR" ]]; then
+                    echo "[HEIWA] Creating STDB data directory at $STDB_DATA_DIR..."
+                    mkdir -p "$STDB_DATA_DIR"
+                fi
+                echo "[HEIWA] Starting local SpacetimeDB with persistent volume at $STDB_DATA_DIR..."
+                spacetime start --listen-addr 127.0.0.1:3000 --data-dir "$STDB_DATA_DIR" &
+            else
+                echo "[HEIWA] Starting local SpacetimeDB instance..."
+                spacetime start --listen-addr 127.0.0.1:3000 &
+            fi
             sleep 3
         fi
     fi
