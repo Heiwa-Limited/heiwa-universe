@@ -149,3 +149,30 @@ class TestHeiwaAgentMemory:
         # Should reuse existing focus_id
         call_kw = agent.agent_memory.upsert_focus.call_args
         assert call_kw[1]["focus_id"] == "focus-existing"
+
+
+class TestHealthCheck:
+    """Test STDB-aware health check."""
+
+    @pytest.mark.asyncio
+    async def test_health_returns_503_when_stdb_down(self):
+        with patch("apps.heiwa_hub.mcp_server.db") as mock_db:
+            mock_db.state_backend = "spacetimedb"
+            mock_db.stdb = MagicMock()
+            # Simulate failure
+            mock_db.stdb.query.side_effect = Exception("connection refused")
+
+            from apps.heiwa_hub.mcp_server import _check_stdb_health
+            result = await _check_stdb_health()
+            assert result is False
+
+    @pytest.mark.asyncio
+    async def test_health_returns_200_when_stdb_up(self):
+        with patch("apps.heiwa_hub.mcp_server.db") as mock_db:
+            mock_db.state_backend = "spacetimedb"
+            mock_db.stdb = MagicMock()
+            mock_db.stdb.query.return_value = [{"model_id": "test"}]
+
+            from apps.heiwa_hub.mcp_server import _check_stdb_health
+            result = await _check_stdb_health()
+            assert result is True

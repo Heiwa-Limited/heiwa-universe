@@ -213,13 +213,41 @@ async def _register_task_snapshot_listeners():
     app.state._task_snapshot_listeners = True
 
 
+async def _check_stdb_health() -> bool:
+    """Verify STDB connectivity with 2-second timeout."""
+    if db.state_backend != "spacetimedb" or not db.stdb:
+        return True  # Non-STDB backends are always "healthy"
+    try:
+        # Note: model_tiers is a known existing table in all environments
+        result = await asyncio.wait_for(
+            asyncio.to_thread(db.stdb.query, "SELECT * FROM model_tiers LIMIT 1"),
+            timeout=2.0,
+        )
+        return result is not None
+    except Exception:
+        return False
+
+
 @app.get("/health")
 @app.head("/health")
 async def health():
+    stdb_ok = await _check_stdb_health()
+    if not stdb_ok:
+        from starlette.responses import JSONResponse
+        return JSONResponse(
+            status_code=503,
+            content={
+                "status": "degraded",
+                "service": "heiwa-core-hub",
+                "stdb": "unreachable",
+                "timestamp": time.time(),
+            },
+        )
     return {
         "status": "alive",
         "service": "heiwa-core-hub",
         "state_backend": db.state_backend,
+        "stdb": "connected",
         "gateway_transport": "websocket",
         "timestamp": time.time(),
     }

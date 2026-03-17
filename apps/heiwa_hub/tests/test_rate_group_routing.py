@@ -85,7 +85,7 @@ def test_cascade_on_exhaustion():
     cascaded = router.route("research", "low")
     assert cascaded.compute_class == 3
     assert cascaded.assigned_worker == "class_3_strategy"
-    assert cascaded.target_model == "google-antigravity/gemini-3-auto"
+    assert cascaded.target_model == "google-antigravity/gemini-3.1-pro"
     assert cascaded.rationale.startswith("Rate cascade")
 
     # Cleanup: reset the singleton
