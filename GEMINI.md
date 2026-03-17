@@ -92,3 +92,5 @@ Load only the rooms needed for the task:
 - Privacy: sovereign work stays on boost nodes (never cloud)
 - Untrusted code: E2B sandboxes only, never host
 - Honesty: do not overstate maturity in docs or diagrams
+- Communication: DM interaction with Heiwa Agent must be natural, memory-aware, and bypass robotic orchestration logging.
+- Memory: Heiwa Agent maintains persistent conversational context via SpacetimeDB memory loops (STORE, RECEIVE, REASON, FOCUS, ACT, SPEAK, SUMMARIZE).
