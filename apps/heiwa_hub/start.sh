@@ -140,6 +140,13 @@ if [[ "$HEIWA_STATE_BACKEND" == "spacetimedb" ]]; then
             sleep 3
         fi
     fi
+
+    # Auto-publish module if source exists (Railway/Local boot)
+    STDB_SRC_DIR="apps/heiwa_hub/spacetimedb"
+    if [[ -d "$STDB_SRC_DIR" ]] && command -v spacetime &>/dev/null; then
+        echo "[HEIWA] Publishing SpacetimeDB module ($STDB_IDENTITY)..."
+        (cd "$STDB_SRC_DIR" && spacetime publish --server "$STDB_SERVER" "$STDB_IDENTITY") || echo "[HEIWA] STDB publish failed, continuing..."
+    fi
 fi
 
 # Bootstrap a cloud-safe default net policy if no runtime policy is mounted.
