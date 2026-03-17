@@ -383,25 +383,31 @@ class MessengerAgent(BaseAgent):
             "intent_class": intent_profile.intent_class,
             "normalization": intent_profile.to_dict(),
         }
-        await self._publish_raw(Subject.TASK_INGRESS.value, ingress)
 
+        # --- ROUTING LOGIC ---
+        # 1. DMs always go to the Heiwa Agent for contextual conversation.
+        if source.guild is None:
+            await self._publish_raw(Subject.HEIWA_AGENT_INGRESS.value, {
+                "task_id": task_id,
+                "content": instruction,
+                "author": str(author),
+                "channel_id": channel.id,
+            })
+            # Also publish to TASK_INGRESS for observability/history, but return early
+            await self._publish_raw(Subject.TASK_INGRESS.value, ingress)
+            return
+
+        # 2. Server chats (mentions) go to simple local fallback if classified as 'chat'
         if intent_profile.intent_class == "chat":
-            # If it's a DM, route it directly to the Heiwa Agent for a contextual response
-            if source.guild is None:
-                await self._publish_raw(Subject.HEIWA_AGENT_INGRESS.value, {
-                    "task_id": task_id,
-                    "content": instruction,
-                    "author": str(author),
-                    "channel_id": channel.id,
-                })
-                return
-            
-            # Fallback for server-based chats
             reply = self.planner.engine.generate(prompt=instruction, runtime="railway", complexity="low") if self.planner.engine else "Cognitive engine unavailable."
             embed = UIManager.create_base_embed("Direct Response", reply or "...", status="online")
             if isinstance(source, discord.Interaction): await source.followup.send(embed=embed)
             else: await source.channel.send(embed=embed)
+            await self._publish_raw(Subject.TASK_INGRESS.value, ingress)
             return
+
+        # 3. Everything else (tasks) goes to the standard swarm pipeline
+        await self._publish_raw(Subject.TASK_INGRESS.value, ingress)
 
         ack_embed = UIManager.create_base_embed("Request Received", f"Planning sequence initiated for `{preview_intent}`.", status="thinking")
         ack_embed.add_field(name="Task ID", value=f"`{task_id}`", inline=True)

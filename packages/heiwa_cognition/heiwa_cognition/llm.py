@@ -308,6 +308,35 @@ class LocalLLMEngine:
         logger.error("All LLM providers exhausted for prompt: %s...", prompt[:60])
         return ""
 
+    async def generate_async(
+        self,
+        prompt: str,
+        complexity: str = "low",
+        system: Optional[str] = None,
+        runtime: str = "auto",
+        model: Optional[str] = None,
+    ) -> str:
+        """Async version of generate, supports explicit model override."""
+        import asyncio
+        
+        if model:
+            # Explicit model requested (e.g. gemini-1.5-pro)
+            if "gemini" in model:
+                try:
+                    # Run in thread pool to avoid blocking event loop
+                    loop = asyncio.get_event_loop()
+                    result = await loop.run_in_executor(
+                        None, self._call_gemini, prompt, model, 2, system
+                    )
+                    return result.text if result else ""
+                except Exception as e:
+                    logger.warning("Async explicit model %s failed: %s", model, e)
+                    return ""
+        
+        # Fall back to standard tiered routing
+        loop = asyncio.get_event_loop()
+        return await loop.run_in_executor(None, self.generate, prompt, complexity, system, runtime)
+
     def generate_json(
         self,
         prompt: str,

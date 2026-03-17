@@ -44,11 +44,13 @@ class LocalBusTransport:
         returns immediately — the dispatch runs in a background task so the
         publisher is never blocked by slow subscribers.
         """
+        from heiwa_sdk.config import settings
         envelope = {
             Payload.SENDER_ID: sender_id,
             Payload.TIMESTAMP: time.time(),
             Payload.TYPE: subject.name,
             Payload.DATA: data,
+            "auth_token": settings.HEIWA_AUTH_TOKEN, # Critical: Spine requires this
         }
         key = subject.value
         # Snapshot the subscriber list so mutations during dispatch are safe
@@ -83,6 +85,7 @@ class LocalBusTransport:
         in-process (kept for interface compatibility but Spine should
         prefer direct BrokerEnrichmentService.enrich() calls).
         """
+        from heiwa_sdk.config import settings
         reply_event: asyncio.Event = asyncio.Event()
         reply_data: list[Dict[str, Any]] = []
 
@@ -98,6 +101,7 @@ class LocalBusTransport:
             Payload.TIMESTAMP: time.time(),
             Payload.TYPE: subject.name,
             Payload.DATA: data,
+            "auth_token": settings.HEIWA_AUTH_TOKEN, # Critical
             "_reply_subject": reply_subject_key,
         }
         for cb in self._subscribers.get(subject.value, []):

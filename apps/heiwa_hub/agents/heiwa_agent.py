@@ -153,7 +153,7 @@ class HeiwaAgent(BaseAgent):
         
         try:
             # Note: HeiwaAgent uses LocalLLMEngine which defaults to LiteLLM/Gemini in Cloud
-            reply = await self.llm.generate(prompt=prompt, model=model)
+            reply = await self.llm.generate_async(prompt=prompt, model=model)
             if reply:
                 await self._dm(reply)
         except Exception as e:
