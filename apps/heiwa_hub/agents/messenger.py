@@ -584,23 +584,104 @@ class MessengerAgent(BaseAgent):
             # Use a simple message instead of a full embed for progress to avoid noise
             await target.send(f"⏳ **Task Progress** `{task_id}`: {content}")
 
+    # Map legacy/existing Discord channel names to their canonical STRUCTURE purpose.
+    # This allows channels that were created before the STRUCTURE dict existed to be
+    # correctly routed by Captain and Messenger.
+    _LEGACY_NAME_TO_PURPOSE = {
+        "central-command": "central-comms",
+        "swarm-status": "swarm-telemetry",
+        "executive-reports": "executive-briefing",
+        "sysops": "infrastructure-as-code",
+        "engineering": "dev-labs",
+        "deployments": "ci-cd-stream",
+        "security-audit": "security-ops",
+        "field-intel": "market-intel",
+        "research-archive": "technical-research",
+        "scraper-logs": "archive-index",
+        "task-history": "audit-log",
+        "moltbook-logs": "thought-stream",
+        "smoke-log": "error-trace",
+        "local-macbook-comms": "operator-ingress",
+        "suggestions": "casual-brainstorm",
+        "rules": "governance",
+        "general": "open-forum",
+    }
+
     async def _sync_structure_to_stdb(self):
         """Map full Discord topology to SpacetimeDB for multi-node indexing."""
         logger.info("🛰️ Synchronizing Discord Topology to SpacetimeDB...")
+
+        # Build a flat set of all canonical channel names in STRUCTURE
+        canonical_names: set[str] = set()
+        for config in STRUCTURE.values():
+            canonical_names.update(config.get("text", []))
+
         for guild in self.bot.guilds:
             for channel in guild.text_channels:
-                purpose = "unknown"
-                for cat, config in STRUCTURE.items():
-                    if channel.name in config.get("text", []):
-                        purpose = channel.name
-                        break
-                
-                self.db.stdb.call("register_discord_channel", 
-                                  channel.id, 
-                                  channel.name, 
-                                  purpose, 
+                if channel.name in canonical_names:
+                    # Exact match to STRUCTURE — purpose = channel name
+                    purpose = channel.name
+                elif channel.name in self._LEGACY_NAME_TO_PURPOSE:
+                    # Legacy name — map to canonical purpose
+                    purpose = self._LEGACY_NAME_TO_PURPOSE[channel.name]
+                else:
+                    purpose = "unknown"
+
+                self.db.stdb.call("register_discord_channel",
+                                  channel.id,
+                                  channel.name,
+                                  purpose,
                                   json.dumps({"category": channel.category.name if channel.category else "none"}))
         logger.info("✅ Topology sync complete.")
+
+    async def handle_captain_dm(self, data: dict[str, Any]):
+        """Route Captain messages to the operator's Discord DM."""
+        if not self.bot.is_ready():
+            return
+        payload = self._unwrap(data)
+        content = str(payload.get("content", ""))
+        if not content:
+            return
+
+        owner = await self._get_owner_user()
+        if not owner:
+            logger.warning("Captain DM: could not resolve operator user — dropping message.")
+            return
+
+        try:
+            dm = owner.dm_channel or await owner.create_dm()
+            # Split long messages to stay under Discord's 2000-char limit
+            while content:
+                chunk, content = content[:1990], content[1990:]
+                await dm.send(chunk)
+        except Exception as exc:
+            logger.error("Captain DM delivery failed: %s", exc)
+
+    async def _get_owner_user(self) -> discord.User | None:
+        """Resolve the operator's Discord user from OWNER_ID or guild owner."""
+        if hasattr(self, "_owner_user_cache") and self._owner_user_cache:
+            return self._owner_user_cache
+
+        # Try OWNER_ID env var first (numeric Discord user ID)
+        owner_id_str = os.getenv("OWNER_ID", "")
+        if owner_id_str:
+            try:
+                user = self.bot.get_user(int(owner_id_str))
+                if not user:
+                    user = await self.bot.fetch_user(int(owner_id_str))
+                if user:
+                    self._owner_user_cache = user
+                    return user
+            except Exception as exc:
+                logger.debug("Could not fetch OWNER_ID %s: %s", owner_id_str, exc)
+
+        # Fallback: guild owner of the first guild
+        for guild in self.bot.guilds:
+            if guild.owner:
+                self._owner_user_cache = guild.owner
+                return guild.owner
+
+        return None
 
     async def run(self):
         if not self.token: return
@@ -613,6 +694,8 @@ class MessengerAgent(BaseAgent):
         await self.listen(Subject.NODE_TELEMETRY, self.handle_telemetry)
         await self.listen(Subject.LOG_INFO, self.handle_swarm_log)
         await self.listen(Subject.LOG_ERROR, self.handle_swarm_log)
+        await self.listen(Subject.CAPTAIN_DM, self.handle_captain_dm)
+        await self.listen(Subject.HEIWA_AGENT_DM, self.handle_captain_dm)
         logger.info("Starting Discord Gateway...")
         try: await self.bot.start(self.token)
         except Exception as exc: logger.error("Discord crash: %s", exc); await self.shutdown()

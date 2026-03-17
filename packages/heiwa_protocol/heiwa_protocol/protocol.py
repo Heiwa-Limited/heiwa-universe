@@ -29,6 +29,8 @@ class Subject(str, Enum):
     SWARM_STATUS_QUERY = "heiwa.swarm.status.query"
     SWARM_STATUS_REPORT = "heiwa.swarm.status.report"
     CAPTAIN_DIRECTIVE = "heiwa.captain.directive"  # Proactive repair/audit directives
+    CAPTAIN_DM = "heiwa.captain.dm"                  # Captain -> Operator DM (meta-conversation)
+    HEIWA_AGENT_DM = "heiwa.agent.dm"                # Heiwa Agent -> Operator DM
 
     # V2 Mesh Protocol (Decentralized Blackboard)
     MESH_CAPABILITY_BROADCAST = "heiwa.mesh.capability.broadcast" # Agent -> Mesh (Here are my tools)

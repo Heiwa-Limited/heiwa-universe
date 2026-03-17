@@ -22,7 +22,7 @@ from heiwa_hub.agents.spine import SpineAgent
 from heiwa_hub.agents.executor import ExecutorAgent
 from heiwa_hub.agents.messenger import MessengerAgent
 from heiwa_hub.agents.telemetry import TelemetryAgent
-from heiwa_hub.agents.captain import CaptainAgent
+from heiwa_hub.agents.heiwa_agent import HeiwaAgent
 from heiwa_hub.mcp_server import app as hub_app
 
 logging.basicConfig(
@@ -83,7 +83,7 @@ async def main():
         spine = SpineAgent()
         executor = ExecutorAgent()
         telemetry = TelemetryAgent()
-        captain = CaptainAgent()
+        captain = HeiwaAgent()
     except Exception as e:
         logger.error("[BOOT_FATAL] Failed to instantiate core agents: %s", e)
         sys.exit(1)
