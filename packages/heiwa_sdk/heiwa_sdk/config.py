@@ -140,6 +140,9 @@ class Settings:
 
     @property
     def STDB_IDENTITY(self):
+        # On local server (Railway primary), always use the module name to avoid stale hash overrides
+        if self.STDB_SERVER == "local":
+            return "heiwaproductiondb"
         return get_env("STDB_IDENTITY", default="heiwaproductiondb", required=False)
 
     @property
