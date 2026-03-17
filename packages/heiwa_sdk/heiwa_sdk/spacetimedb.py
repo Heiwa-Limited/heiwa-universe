@@ -955,6 +955,74 @@ class SpacetimeDB:
             int(priority),
         )
 
+    # ── Captain Memory (Heiwa Agent conversation persistence) ──────
+
+    def insert_captain_message(
+        self,
+        message_id: str,
+        session_id: str,
+        role: str,
+        content: str,
+        timestamp: int,
+        source: str,
+    ) -> bool:
+        return self.call(
+            "insert_captain_message",
+            message_id, session_id, role, content, timestamp, source,
+        )
+
+    def get_uncompressed_messages(
+        self,
+        session_id: str | None = None,
+        limit: int = 100,
+    ) -> list[dict[str, Any]]:
+        query = "SELECT * FROM captain_messages WHERE compressed = false"
+        if session_id:
+            query += f" AND session_id = '{self._escape_sql_literal(session_id)}'"
+        query += f" LIMIT {int(limit)}"
+        rows = self.query(query)
+        return sorted(rows, key=lambda r: r.get("timestamp", 0))
+
+    def mark_messages_compressed(self, session_id: str, before_timestamp: int) -> bool:
+        return self.call("mark_messages_compressed", session_id, before_timestamp)
+
+    def insert_captain_summary(
+        self,
+        summary_id: str,
+        summary_type: str,
+        content: str,
+        range_start: int,
+        range_end: int,
+        messages_compressed: int,
+    ) -> bool:
+        return self.call(
+            "insert_captain_summary",
+            summary_id, summary_type, content, range_start, range_end, messages_compressed,
+        )
+
+    def get_recent_summaries(self, limit: int = 5) -> list[dict[str, Any]]:
+        rows = self.query("SELECT * FROM captain_summaries")
+        return sorted(rows, key=lambda r: r.get("created_at", 0), reverse=True)[:limit]
+
+    def upsert_captain_focus(
+        self,
+        focus_id: str,
+        topic: str,
+        context_json: str,
+        priority: int,
+    ) -> bool:
+        return self.call("upsert_captain_focus", focus_id, topic, context_json, int(priority))
+
+    def resolve_captain_focus(self, focus_id: str, resolved_at: int) -> bool:
+        return self.call("resolve_captain_focus", focus_id, resolved_at)
+
+    def get_active_focuses(self) -> list[dict[str, Any]]:
+        rows = self.query("SELECT * FROM captain_focus WHERE resolved_at = 0")
+        return sorted(rows, key=lambda r: r.get("priority", 0), reverse=True)
+
+    def prune_captain_messages(self, before_timestamp: int) -> bool:
+        return self.call("prune_captain_messages", before_timestamp)
+
     def prune_knowledge_embeddings(self, ttl_hours: int) -> bool:
         """Delete embeddings older than the specified TTL."""
         # STDB SQL doesn't support complex date math well, so we use a reducer if available
