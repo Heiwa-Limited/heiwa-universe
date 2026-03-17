@@ -118,17 +118,40 @@ export HEIWA_STATE_BACKEND="${HEIWA_STATE_BACKEND:-spacetimedb}"
 export STDB_SERVER="${STDB_SERVER:-local}"
 export STDB_IDENTITY="${STDB_IDENTITY:-heiwaproductiondb}"
 
-# Pre-flight check for SpacetimeDB directories
+# Pre-flight check for SpacetimeDB
 if [[ "$HEIWA_STATE_BACKEND" == "spacetimedb" ]]; then
-    # Ensure SpacetimeDB home and data directories exist for non-root user
-    mkdir -p "$SPACETIMEDB_HOME"
-    if [[ -n "$STDB_DATA_DIR" ]]; then
-        mkdir -p "$STDB_DATA_DIR"
+    echo "[HEIWA] Verifying SpacetimeDB availability..."
+    # Local fallback start for development if STDB_SERVER=local
+    if [[ "$STDB_SERVER" == "local" ]] && command -v spacetime &>/dev/null; then
+        if ! curl -s http://127.0.0.1:3000/v1/health >/dev/null; then
+            # Configure STDB persistent data directory (Railway volume)
+            STDB_DATA_DIR="${STDB_DATA_DIR:-}"
+            if [[ -n "$STDB_DATA_DIR" ]]; then
+                if [[ ! -d "$STDB_DATA_DIR" ]]; then
+                    echo "[HEIWA] Creating STDB data directory at $STDB_DATA_DIR..."
+                    mkdir -p "$STDB_DATA_DIR"
+                fi
+                echo "[HEIWA] Starting local SpacetimeDB with persistent volume at $STDB_DATA_DIR..."
+                spacetime start --listen-addr 127.0.0.1:3000 --data-dir "$STDB_DATA_DIR" &
+            else
+                echo "[HEIWA] Starting local SpacetimeDB instance..."
+                spacetime start --listen-addr 127.0.0.1:3000 &
+            fi
+            echo "[HEIWA] Waiting for SpacetimeDB to initialize..."
+            sleep 10
+        fi
+    fi
+
+    # Auto-publish module if source exists (Railway/Local boot)
+    STDB_SRC_DIR="apps/heiwa_hub/spacetimedb"
+    if [[ -d "$STDB_SRC_DIR" ]] && command -v spacetime &>/dev/null; then
+        echo "[HEIWA] Publishing SpacetimeDB module ($STDB_IDENTITY)..."
+        (cd "$STDB_SRC_DIR" && spacetime publish --server "$STDB_SERVER" "$STDB_IDENTITY") || echo "[HEIWA] STDB publish failed, continuing..."
     fi
 fi
 
 # Bootstrap a cloud-safe default net policy if no runtime policy is mounted.
-HEIWA_HOME_DIR="${HEIWA_HOME:-/app/.heiwa}"
+HEIWA_HOME_DIR="${HEIWA_HOME:-/root/.heiwa}"
 HEIWA_NET_POLICY_TARGET="$HEIWA_HOME_DIR/policy/internet/net_policy_v2.json"
 HEIWA_NET_POLICY_BOOTSTRAP_PATH="${HEIWA_NET_POLICY_BOOTSTRAP_PATH:-/app/policies/net_policy_v2.cloud_hq.json}"
 if [[ ! -f "$HEIWA_NET_POLICY_TARGET" && -f "$HEIWA_NET_POLICY_BOOTSTRAP_PATH" ]]; then
