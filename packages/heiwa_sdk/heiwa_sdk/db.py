@@ -128,28 +128,33 @@ class Database:
         finally:
             conn.close()
 
-    def create_mission(self, mission_data: dict[str, Any]) -> bool:
+    def get_mission(self, mission_id: str) -> dict[str, Any] | None:
         if self.stdb:
-            # TODO: Implementation for STDB mission table in Phase 5
-            pass
+            return self.stdb.get_mission(mission_id)
             
         conn = self.get_connection()
         try:
             cursor = conn.cursor()
-            self._exec(cursor, """
-                INSERT INTO missions (mission_id, status, title, summary)
-                VALUES (?, ?, ?, ?)
-            """, (
-                mission_data.get("mission_id"),
-                mission_data.get("status", "pending"),
-                mission_data.get("title"),
-                mission_data.get("summary")
-            ))
-            conn.commit()
-            return True
-        except Exception as e:
-            logger.error("SQLite create_mission failed: %s", e)
-            return False
+            self._exec(cursor, "SELECT * FROM missions WHERE mission_id = ?", (mission_id,))
+            return self._row_to_dict(cursor.fetchone())
+        finally:
+            conn.close()
+
+    def get_missions(self, status: str | None = None, limit: int = 50) -> list[dict[str, Any]]:
+        if self.stdb:
+            return self.stdb.get_missions(status=status, limit=limit)
+            
+        conn = self.get_connection()
+        try:
+            cursor = conn.cursor()
+            query = "SELECT * FROM missions"
+            params = []
+            if status:
+                query += " WHERE status = ?"
+                params.append(status)
+            query += f" LIMIT {int(limit)}"
+            self._exec(cursor, query, tuple(params))
+            return self._rows_to_dicts(cursor.fetchall())
         finally:
             conn.close()
 
