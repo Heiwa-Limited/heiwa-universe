@@ -28,8 +28,9 @@ export PATH=$PATH:/usr/local/bin:/root/.local/bin
 TAILSCALE_READY=false
 
 if [[ "$HEIWA_ENABLE_TAILSCALE" == "true" ]] && command -v tailscaled &> /dev/null && command -v tailscale &> /dev/null; then
-    echo "[HEIWA] Starting tailscaled (Userspace Mode)..."
-    tailscaled --tun=userspace-networking --socket=/tmp/tailscaled.sock &
+    echo "[HEIWA] Starting tailscaled (Userspace Mode, Ephemeral State)..."
+    # --state=mem: ensures no local state is persisted between runs.
+    tailscaled --tun=userspace-networking --socket=/tmp/tailscaled.sock --state=mem: &
     TAILSCALE_READY=true
 else
     echo "[HEIWA] Tailscale binaries unavailable. Proceeding without mesh."
@@ -43,11 +44,11 @@ MAX_RETRIES="${TAILSCALE_MAX_RETRIES:-5}"
 
 run_tailscale_up() {
     if command -v timeout &>/dev/null; then
-        timeout "$TS_TIMEOUT_SEC" tailscale --socket=/tmp/tailscaled.sock up --authkey="$AUTH_KEY" --hostname="$TS_HOSTNAME"
+        timeout "$TS_TIMEOUT_SEC" tailscale --socket=/tmp/tailscaled.sock up --authkey="$AUTH_KEY" --hostname="$TS_HOSTNAME" --accept-dns=false --accept-routes=false --reset
     elif command -v gtimeout &>/dev/null; then
-        gtimeout "$TS_TIMEOUT_SEC" tailscale --socket=/tmp/tailscaled.sock up --authkey="$AUTH_KEY" --hostname="$TS_HOSTNAME"
+        gtimeout "$TS_TIMEOUT_SEC" tailscale --socket=/tmp/tailscaled.sock up --authkey="$AUTH_KEY" --hostname="$TS_HOSTNAME" --accept-dns=false --accept-routes=false --reset
     else
-        tailscale --socket=/tmp/tailscaled.sock up --authkey="$AUTH_KEY" --hostname="$TS_HOSTNAME"
+        tailscale --socket=/tmp/tailscaled.sock up --authkey="$AUTH_KEY" --hostname="$TS_HOSTNAME" --accept-dns=false --accept-routes=false --reset
     fi
 }
 
