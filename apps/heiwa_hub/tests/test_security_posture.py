@@ -10,13 +10,31 @@ sys.path.insert(0, str(ROOT / "packages/heiwa_protocol"))
 sys.path.insert(0, str(ROOT / "packages/heiwa_identity"))
 sys.path.insert(0, str(ROOT / "apps"))
 
-from heiwa_sdk.security import redact_text
+from heiwa_sdk.security import redact_text, SecurityService
 from heiwa_sdk.vault import InstanceVault
 
 
 def main() -> int:
     failures: list[str] = []
 
+    # 1. SecurityService Validation
+    original_token = os.environ.get("HEIWA_AUTH_TOKEN")
+    os.environ["HEIWA_AUTH_TOKEN"] = "test-barrier-token"
+    try:
+        ss = SecurityService()
+        if not ss.validate_token("test-barrier-token"):
+            failures.append("SecurityService failed to validate correct token")
+        if ss.validate_token("wrong-token"):
+            failures.append("SecurityService validated incorrect token")
+    except Exception as e:
+        failures.append(f"SecurityService error: {e}")
+    finally:
+        if original_token is not None:
+            os.environ["HEIWA_AUTH_TOKEN"] = original_token
+        else:
+            os.environ.pop("HEIWA_AUTH_TOKEN", None)
+
+    # 2. Vault Security
     original_master_key = os.environ.pop("HEIWA_MASTER_KEY", None)
     try:
         try:

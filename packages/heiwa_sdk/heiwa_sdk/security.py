@@ -68,3 +68,24 @@ def limit_payload_size(value: Any, max_chars: int) -> Tuple[Any, bool, Optional[
         True,
         payload_sha256,
     )
+
+
+class SecurityService:
+    """Centralized security manager for Heiwa digital barriers."""
+
+    def __init__(self):
+        from .config import settings
+        self._expected_token = str(settings.HEIWA_AUTH_TOKEN or "").strip()
+
+    def get_expected_token(self) -> str:
+        """Returns the authoritative auth token for comparison."""
+        return self._expected_token
+
+    def validate_token(self, token: str | None) -> bool:
+        """Strict equality check for the Heiwa auth token."""
+        if not self._expected_token:
+            # If token is unset in config, we fail closed for safety
+            return False
+        if not token:
+            return False
+        return str(token).strip() == self._expected_token
