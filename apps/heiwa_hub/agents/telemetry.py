@@ -19,8 +19,6 @@ class TelemetryAgent(BaseAgent):
     def __init__(self):
         super().__init__(name="heiwa-telemetry")
         self.db = Database()
-        # In-memory cache for live rate limits
-        self.usage_cache: Dict[str, Dict[str, Any]] = {}
         self.last_summary_ts = 0
 
     async def run(self):
@@ -69,8 +67,14 @@ class TelemetryAgent(BaseAgent):
 
     async def handle_status_query(self, data: dict[str, Any]):
         """Respond with the latest usage cache and node health."""
+        try:
+            summary = self.db.get_model_usage_summary(minutes=60)
+            usage = {s["model_id"]: s for s in summary}
+        except Exception:
+            usage = {}
+
         report = {
-            "models": self.usage_cache,
+            "models": usage,
             "timestamp": time.time(),
             "status": "OPERATIONAL"
         }
@@ -144,29 +148,14 @@ class TelemetryAgent(BaseAgent):
         """Analyze usage and poll local metrics."""
         now = time.time()
         
-        # BaseAgent heartbeat now handles the broadcast of local metrics automatically.
-        # This method can focus on Swarm-wide analytics and DB state.
+        # Swarm analytics are now aggregated on-demand from STDB.
+        # This loop can be used for proactive maintenance tasks.
 
         if now - self.last_summary_ts < 300: # Every 5 mins
             return
             
-        try:
-            summary = self.db.get_model_usage_summary(minutes=60)
-        except Exception as exc:
-            logger.warning("Skipping model usage summary (schema mismatch or DB issue): %s", exc)
-            self.last_summary_ts = now
-            return
-        # Update internal state
-        for s in summary:
-            mid = s["model_id"]
-            self.usage_cache[mid] = {
-                "requests_last_hour": s["request_count"],
-                "tokens_last_hour": s["total_tokens"],
-                "updated_at": now
-            }
-        
         self.last_summary_ts = now
-        logger.info(f"📊 Processed Swarm-wide Analytics.")
+        logger.info(f"📊 Heartbeat: Swarm-wide Analytics synced via STDB.")
 
     def _extract_tokens(self, payload: dict[str, Any]) -> dict[str, int]:
         """Attempt to find token usage in various payload formats."""

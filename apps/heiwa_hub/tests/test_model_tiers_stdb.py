@@ -87,3 +87,24 @@ class TestModelTiersSTDB:
         )
         mock_call.assert_called_once()
         assert mock_call.call_args[0][0] == "update_model_tier_stats"
+
+    @patch.object(SpacetimeDB, "query")
+    def test_get_model_usage_summary(self, mock_query):
+        mock_query.return_value = [
+            {"model_id": "claude", "tokens_total": 100, "cost": 0.01},
+            {"model_id": "claude", "tokens_total": 50, "cost": 0.005},
+            {"model_id": "gemini", "tokens_total": 200, "cost": 0.0},
+        ]
+        result = self.stdb.get_model_usage_summary(minutes=60)
+        # Sort results for consistent assertion
+        result = sorted(result, key=lambda x: x["model_id"])
+        
+        assert len(result) == 2
+        assert result[0]["model_id"] == "claude"
+        assert result[0]["request_count"] == 2
+        assert result[0]["total_tokens"] == 150
+        assert result[0]["total_cost"] == 0.015
+        
+        assert result[1]["model_id"] == "gemini"
+        assert result[1]["request_count"] == 1
+        assert result[1]["total_tokens"] == 200
