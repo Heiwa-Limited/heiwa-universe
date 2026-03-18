@@ -1,0 +1,42 @@
+[
+  {
+    "from": "hub_http",
+    "to": "stdb",
+    "label": "create / claim / consent / heartbeat writes"
+  },
+  {
+    "from": "router_tick",
+    "to": "stdb",
+    "label": "assignment decisions (transitional scheduler)"
+  },
+  {
+    "from": "stdb",
+    "to": "proposal_cluster",
+    "label": "authoritative proposal / approval / lease records"
+  },
+  {
+    "from": "proposal_cluster",
+    "to": "macbook_node",
+    "label": "assigned work + active leases"
+  },
+  {
+    "from": "proposal_cluster",
+    "to": "wsl_node",
+    "label": "assigned work + active leases"
+  },
+  {
+    "from": "macbook_node",
+    "to": "heiwaclaw",
+    "label": "execute under lease"
+  },
+  {
+    "from": "wsl_node",
+    "to": "heiwaclaw",
+    "label": "execute under lease"
+  },
+  {
+    "from": "approval_registry",
+    "to": "discord_surface",
+    "label": "compatibility notification path"
+  }
+]

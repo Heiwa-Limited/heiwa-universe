@@ -1,0 +1,32 @@
+[
+  {
+    "category": "core",
+    "feature": "Sovereignty Foundation",
+    "description": "SpacetimeDB-native state management and centralized security service.",
+    "passes": true
+  },
+  {
+    "category": "core",
+    "feature": "Workspace Consolidation",
+    "description": "Physical monorepo enforcement and archival of ghost repositories.",
+    "passes": false
+  },
+  {
+    "category": "mesh",
+    "feature": "Fluid Mesh Orchestration",
+    "description": "Centralized orchestration and delivery management for omnidirectional handoffs.",
+    "passes": false
+  },
+  {
+    "category": "mesh",
+    "feature": "MeshAgent Standalone Processes",
+    "description": "Claude, Gemini, and Codex running as independent, persistent peers.",
+    "passes": false
+  },
+  {
+    "category": "infra",
+    "feature": "Ephemeral Tailscale Networking",
+    "description": "Automatic node pruning and ephemeral auth key usage in Railway.",
+    "passes": true
+  }
+]

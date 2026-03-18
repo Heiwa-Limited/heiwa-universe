@@ -1,0 +1,28 @@
+{
+  "generated_at": "2026-03-13T09:43:17Z",
+  "repo_root": "/Users/dmcgregsauce/heiwa",
+  "state_plane": {
+    "module_path": "apps/heiwa_hub/spacetimedb",
+    "python_bridge": "packages/heiwa_sdk/heiwa_sdk/spacetimedb.py",
+    "generated_bindings": [
+      "packages/heiwa_bindings/rust",
+      "packages/heiwa_bindings/typescript"
+    ]
+  },
+  "native_entities": [
+    "route_decisions",
+    "runs",
+    "nodes",
+    "liveness_state"
+  ],
+  "validated_with": [
+    "python apps/heiwa_hub/tests/test_stdb_native_state.py",
+    "spacetime generate --lang rust --module-path apps/heiwa_hub/spacetimedb --out-dir /tmp/heiwa-stdb-rust --yes",
+    "spacetime generate --lang typescript --module-path apps/heiwa_hub/spacetimedb --out-dir /tmp/heiwa-stdb-ts --yes"
+  ],
+  "residual_boundary": [
+    "proposal lifecycle",
+    "lease heartbeat alerts",
+    "RFC publishing flow"
+  ]
+}

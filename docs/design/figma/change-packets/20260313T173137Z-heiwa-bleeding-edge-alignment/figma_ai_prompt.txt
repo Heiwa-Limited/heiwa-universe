@@ -1,0 +1,27 @@
+Update the Heiwa architecture visual with a roadmap overlay for bleeding-edge alignment.
+
+Keep the current live core visible:
+- Broker with typed route contracts
+- HeiwaClaw gateway
+- MCP / adapter mesh
+- SpacetimeDB fast state plane
+- WebSocket live transport
+
+Add proposed layers as clearly labeled roadmap modules:
+- HeiwaCells
+- HeiwaBench
+- HeiwaMemory
+- HeiwaUI
+- HeiwaPulse
+- HeiwaSafehouse
+- HeiwaLab
+
+Rules:
+- This is not a marketing diagram. Keep it technical and intentional.
+- Mark proposed layers as roadmap or next-pass, not already-live claims.
+- Show HeiwaMemory as STDB/subscription-first, not filesystem-first.
+- Show HeiwaPulse as optional and async, not in the hot path.
+- Show HeiwaLab as isolated from production.
+- Make the fast path feel modern: evented, typed, and low-latency.
+
+Use `architecture_nodes.json` and `architecture_connections.json` as the source graph.

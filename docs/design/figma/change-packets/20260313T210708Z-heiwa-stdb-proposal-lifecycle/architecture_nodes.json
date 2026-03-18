@@ -1,0 +1,56 @@
+[
+  {
+    "id": "hub_http",
+    "label": "Heiwa Hub HTTP/MCP",
+    "type": "service",
+    "host": "Railway"
+  },
+  {
+    "id": "router_tick",
+    "label": "Router Tick (Transitional)",
+    "type": "service",
+    "host": "Railway"
+  },
+  {
+    "id": "stdb",
+    "label": "SpacetimeDB",
+    "type": "state",
+    "host": "Railway"
+  },
+  {
+    "id": "proposal_cluster",
+    "label": "Proposal Authority Cluster",
+    "type": "state_group",
+    "host": "SpacetimeDB"
+  },
+  {
+    "id": "macbook_node",
+    "label": "MacBook Node",
+    "type": "node",
+    "host": "MacBook"
+  },
+  {
+    "id": "wsl_node",
+    "label": "WSL/Ubuntu Node",
+    "type": "node",
+    "host": "WSL/Ubuntu"
+  },
+  {
+    "id": "heiwaclaw",
+    "label": "HeiwaClaw / ToolMesh",
+    "type": "gateway",
+    "host": "Execution Layer"
+  },
+  {
+    "id": "approval_registry",
+    "label": "approval.py (Compatibility)",
+    "type": "compat",
+    "host": "Hub"
+  },
+  {
+    "id": "discord_surface",
+    "label": "Discord / RFC Notifications",
+    "type": "notification",
+    "host": "External"
+  }
+]

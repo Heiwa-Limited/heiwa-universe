@@ -1,0 +1,15 @@
+Update the Heiwa architecture diagram to reflect the new SpacetimeDB-native state plane.
+
+Show:
+- Railway Hub Runtime
+- SpacetimeDB Rust module at `apps/heiwa_hub/spacetimedb`
+- Python STDB bridge
+- Generated Rust bindings
+- Generated TypeScript bindings
+- Explicit route/run/node/liveness entities in the fast state path
+
+Keep the visual language technical and fast. The state plane should feel intentional and modern, not like a fallback DB box.
+
+Do not show the proposal/lease/RFC path as fully migrated. Mark it as a compatibility boundary that still exists beside the new native state plane.
+
+Use `architecture_nodes.json` and `architecture_connections.json` as the source graph for this update.

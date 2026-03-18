@@ -1,0 +1,87 @@
+{
+  "generated_at": "2026-03-15T18:11:42Z",
+  "profile_id": "heiwa-one-system",
+  "repo_root": "/Users/dmcgregsauce/heiwa",
+  "sync_mode": "manual_packet",
+  "runtime_focus": "local_execution_substrate",
+  "routing_contract": {
+    "source_of_truth": "/Users/dmcgregsauce/heiwa/config/swarm/ai_router.json",
+    "class_3_specialty": "executive_full_access"
+  },
+  "launcher_env": {
+    "HEIWA_ROOT": "/Users/dmcgregsauce/heiwa",
+    "HEIWA_WORKSPACE_ROOT": "/Users/dmcgregsauce/heiwa"
+  },
+  "wrapper_defaults": {
+    "gemini": {
+      "approval_mode": "yolo",
+      "workspace_root_fallback": "monorepo_root"
+    },
+    "claude": {
+      "permission_mode": "bypassPermissions",
+      "workspace_root_fallback": "monorepo_root"
+    },
+    "codex": {
+      "sandbox_mode": "danger-full-access",
+      "workspace_root_fallback": "monorepo_root"
+    },
+    "openclaw": {
+      "workspace_root_fallback": "monorepo_root",
+      "cwd_strategy": "run_from_repo_root",
+      "ollama_api_key_stub": "ollama-local"
+    },
+    "picoclaw": {
+      "workspace_root_fallback": "monorepo_root"
+    },
+    "ollama": {
+      "workspace_root_fallback": "monorepo_root"
+    }
+  },
+  "local_runtime_configs": {
+    "gemini": {
+      "settings_file": "/Users/dmcgregsauce/.gemini/settings.json",
+      "sandbox": false,
+      "default_approval_mode": "auto_edit",
+      "policy_file": "/Users/dmcgregsauce/.gemini/policies/heiwa-executive.toml"
+    },
+    "claude": {
+      "settings_file": "/Users/dmcgregsauce/.claude/settings.json",
+      "default_mode": "bypassPermissions"
+    },
+    "openclaw": {
+      "config_file": "/Users/dmcgregsauce/.openclaw/openclaw.json",
+      "workspace": "/Users/dmcgregsauce/heiwa",
+      "model_priority": [
+        "ollama/qwen3.5:4b",
+        "ollama/qwen2.5-coder:1.5b",
+        "ollama/qwen2.5-coder:0.5b",
+        "ollama/llama3.2:3b",
+        "google-gemini-cli/gemini-3-pro-preview",
+        "google-antigravity/gemini-3-pro-high",
+        "google-gemini-cli/gemini-3-flash-preview",
+        "google-antigravity/gemini-3-flash"
+      ],
+      "web_research_enabled": true,
+      "browser_denied": true
+    },
+    "picoclaw": {
+      "config_file": "/Users/dmcgregsauce/.picoclaw/config.json",
+      "provider": "ollama",
+      "model": "qwen3.5:4b",
+      "workspace": "/Users/dmcgregsauce/heiwa",
+      "identity_map": "/Users/dmcgregsauce/heiwa/config/identities/profiles.json"
+    }
+  },
+  "shell_runtime_exports": {
+    "zshrc": "/Users/dmcgregsauce/.zshrc",
+    "bash_profile": "/Users/dmcgregsauce/.bash_profile",
+    "ollama_api_key_default": "ollama-local"
+  },
+  "verification": {
+    "gemini_wrapper_file_read": "pass",
+    "claude_wrapper_file_read": "pass",
+    "codex_wrapper_file_read": "pass",
+    "gate_build": "pass",
+    "openclaw_local_probe": "reaches_model_stack_but_times_out_at_60s"
+  }
+}

@@ -1,0 +1,55 @@
+Update the Heiwa architecture board to include the local execution substrate that now enforces the live runtime contract.
+
+Preserve the existing Railway, SpacetimeDB, and broader Heiwa control-plane structure, but add a new execution-detail layer that shows how local operators actually reach the agent lanes.
+
+Represent these nodes explicitly:
+1. Operator Shell
+2. Shell Runtime Exports
+3. Heiwa CLI Launcher
+4. CLIContext
+5. Heiwa Monorepo Root
+6. Agent Wrapper Layer
+7. Gemini CLI OAuth Lane
+8. Claude Code OAuth Lane
+9. Codex OAuth Lane
+10. OpenClaw Lane
+11. PicoClaw Lane
+12. Local Ollama
+13. Heiwa Runtime Configs
+
+Use these invariants:
+- The canonical workspace root is the Heiwa monorepo root, not `apps/heiwa_cli` and not `apps`.
+- The launcher and `CLIContext` both export `HEIWA_ROOT` and `HEIWA_WORKSPACE_ROOT`.
+- The wrapper layer is where execution defaults are enforced.
+- Gemini runtime default: `yolo`
+- Claude runtime default: `bypassPermissions`
+- Codex runtime default: `danger-full-access`
+- OpenClaw and PicoClaw are local-first against the Heiwa repo root.
+- OpenClaw local mode requires an Ollama auth stub from the shell/runtime layer.
+
+Show directed edges:
+- Operator Shell -> Shell Runtime Exports
+- Operator Shell -> Heiwa CLI Launcher
+- Heiwa CLI Launcher -> CLIContext
+- CLIContext -> Heiwa Monorepo Root
+- CLIContext -> Agent Wrapper Layer
+- Agent Wrapper Layer -> Heiwa Monorepo Root
+- Agent Wrapper Layer -> Gemini CLI OAuth Lane
+- Agent Wrapper Layer -> Claude Code OAuth Lane
+- Agent Wrapper Layer -> Codex OAuth Lane
+- Agent Wrapper Layer -> OpenClaw Lane
+- Agent Wrapper Layer -> PicoClaw Lane
+- OpenClaw Lane -> Local Ollama
+- PicoClaw Lane -> Local Ollama
+- Heiwa Runtime Configs -> Agent Wrapper Layer
+
+Add visual callouts:
+- "wrapper root corrected to monorepo"
+- "runtime defaults aligned with executive_full_access"
+- "OpenClaw local-first model stack: qwen3.5 4b, qwen2.5-coder 1.5b, qwen2.5-coder 0.5b, llama3.2 3b"
+- "PicoClaw identity map updated to config/identities/profiles.json"
+
+Do not imply:
+- that wrapper defaults are still softer than the router contract
+- that the effective workspace root is nested under `apps/heiwa_cli`
+- that OpenClaw still dead-ends on missing local-provider auth

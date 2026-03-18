@@ -1,0 +1,51 @@
+[
+  {
+    "id": "railway-runtime",
+    "label": "Railway Hub Runtime",
+    "type": "service",
+    "category": "Runtime Plane",
+    "status": "active"
+  },
+  {
+    "id": "stdb-module",
+    "label": "SpacetimeDB Rust Module",
+    "type": "service",
+    "category": "State Plane",
+    "status": "active"
+  },
+  {
+    "id": "python-bridge",
+    "label": "Python STDB Bridge",
+    "type": "adapter",
+    "category": "SDK Layer",
+    "status": "active"
+  },
+  {
+    "id": "ts-bindings",
+    "label": "TypeScript Bindings",
+    "type": "artifact",
+    "category": "SDK Layer",
+    "status": "generated"
+  },
+  {
+    "id": "rust-bindings",
+    "label": "Rust Bindings",
+    "type": "artifact",
+    "category": "SDK Layer",
+    "status": "generated"
+  },
+  {
+    "id": "state-entities",
+    "label": "Route / Run / Node / Liveness State",
+    "type": "dataset",
+    "category": "State Plane",
+    "status": "active"
+  },
+  {
+    "id": "compat-boundary",
+    "label": "Proposal / Lease / RFC Compatibility Boundary",
+    "type": "warning",
+    "category": "Residual Risk",
+    "status": "partial"
+  }
+]

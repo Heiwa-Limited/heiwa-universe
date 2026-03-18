@@ -1,0 +1,21 @@
+{
+  "generated_at_utc": "2026-03-13T20:15:23Z",
+  "mode": "context_layer_overlay",
+  "repo_root": "/Users/dmcgregsauce/heiwa",
+  "files": [
+    "HEIWA.md",
+    "SOUL.md",
+    "rooms/control-plane.md",
+    "rooms/execution.md",
+    "rooms/orchestration.md",
+    "rooms/infra.md",
+    "rooms/sdk.md",
+    "apps/heiwa_hub/tests/test_agent_context_map.py"
+  ],
+  "constraints": [
+    "HEIWA.md is the canonical cold-start entrypoint",
+    "SOUL.md remains only as a compatibility shim",
+    "rooms are context silos, not runtime services",
+    "runtime backbone remains Broker -> HeiwaClaw -> SpacetimeDB/WebSockets"
+  ]
+}

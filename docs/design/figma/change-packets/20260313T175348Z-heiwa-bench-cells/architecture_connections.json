@@ -1,0 +1,62 @@
+[
+  {
+    "from": "cli",
+    "to": "cells",
+    "type": "lists_and_matches"
+  },
+  {
+    "from": "cli",
+    "to": "bench",
+    "type": "runs"
+  },
+  {
+    "from": "mcp",
+    "to": "cells",
+    "type": "serves"
+  },
+  {
+    "from": "mcp",
+    "to": "bench",
+    "type": "serves"
+  },
+  {
+    "from": "cells",
+    "to": "broker",
+    "type": "packages_identity_surface"
+  },
+  {
+    "from": "bench",
+    "to": "broker",
+    "type": "evaluates"
+  },
+  {
+    "from": "bench",
+    "to": "heiwaclaw",
+    "type": "evaluates"
+  },
+  {
+    "from": "broker",
+    "to": "heiwaclaw",
+    "type": "routes"
+  },
+  {
+    "from": "heiwaclaw",
+    "to": "mesh",
+    "type": "dispatches"
+  },
+  {
+    "from": "broker",
+    "to": "stdb",
+    "type": "records"
+  },
+  {
+    "from": "stdb",
+    "to": "ws",
+    "type": "streams"
+  },
+  {
+    "from": "ci",
+    "to": "bench",
+    "type": "gates"
+  }
+]

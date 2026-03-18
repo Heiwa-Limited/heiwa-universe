@@ -1,0 +1,31 @@
+{
+  "generated_at_utc": "2026-03-13T17:31:37Z",
+  "mode": "roadmap_overlay",
+  "repo_root": "/Users/dmcgregsauce/heiwa",
+  "blueprint": "/Users/dmcgregsauce/heiwa/config/swarm/BUILD_BLUEPRINT_2026-03-06.md",
+  "alignment_memo": "/Users/dmcgregsauce/heiwa/config/swarm/BLEEDING_EDGE_ALIGNMENT_2026-03-13.md",
+  "current_live_core": [
+    "config/identities/profiles.json",
+    "packages/heiwa_protocol/heiwa_protocol/routing.py",
+    "packages/heiwa_sdk/heiwa_sdk/heiwaclaw.py",
+    "packages/heiwa_sdk/heiwa_sdk/spacetimedb.py",
+    "apps/heiwa_hub/spacetimedb/src/lib.rs"
+  ],
+  "roadmap_modules": [
+    "HeiwaCells",
+    "HeiwaBench",
+    "HeiwaMemory",
+    "HeiwaUI",
+    "HeiwaPulse",
+    "HeiwaSafehouse",
+    "HeiwaLab"
+  ],
+  "constraints": [
+    "SpacetimeDB is the state layer",
+    "Railway is the cloud host",
+    "WebSocket-first multi-turn sessions",
+    "No REST-only agent sessions",
+    "No cloud GPU rental",
+    "No monolithic agent design"
+  ]
+}

@@ -1,0 +1,18 @@
+Update the Heiwa architecture diagram to include the new repo-readable context layer.
+
+Add:
+- HEIWA.md
+- SOUL.md (compatibility shim)
+- rooms/control-plane.md
+- rooms/execution.md
+- rooms/orchestration.md
+- rooms/infra.md
+- rooms/sdk.md
+
+Rules:
+- This context layer sits above the runtime path.
+- Do not depict it as runtime state or network transport.
+- It should feel like an operator/agent map that governs what context gets loaded for a task.
+- Keep Broker -> HeiwaClaw -> MCP/Adapters -> SpacetimeDB/WebSockets as the live technical backbone below it.
+
+Use `architecture_nodes.json` and `architecture_connections.json` as the source graph.

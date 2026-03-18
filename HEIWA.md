@@ -17,45 +17,26 @@ Read these in order before making runtime or architecture changes:
 
 ## Architecture Of Record
 
-- Railway is the always-on control plane and cloud host.
-- SpacetimeDB is the authoritative state layer.
-- The MacBook is the high-trust orchestrator and human-in-the-loop surface.
-- WSL/Ubuntu is the worker node and development/runtime execution surface.
-- Cloudflare is the public docs/marketing shell, not the trust boundary.
-- Discord is a notification and human-facing query surface, not a trust boundary.
+- **Railway (Linux)**: The always-on Primary Plane and ultimate agent harness.
+- **MacBook (macOS)**: Staging environment and high-trust orchestrator.
+- **SpacetimeDB**: The authoritative state ledger (Sovereignty).
+- **Consolidated Monorepo**: `~/heiwa` is the *only* active workspace. All ghost repositories have been archived.
 
-## Live Seed Surfaces
+## Harness Scaffolding (Ground Truth)
 
-- `HeiwaCells`: materialized from `config/identities/profiles.json`
-- `HeiwaBench`: checked-in release-gate suites for routes and cell selection
-
-These are live through:
-
-- CLI: `apps/heiwa_cli/heiwa`
-- MCP/HTTP: `apps/heiwa_hub/mcp_server.py`
-- CI: `.github/workflows/deploy.yml`
-
-## Task Routing Table
-
-Load only the rooms needed for the task unless the work is architectural.
-
-| Task Class | Load Rooms | Skip |
-| --- | --- | --- |
-| Proposal lifecycle | `rooms/control-plane.md`, `rooms/sdk.md` | `rooms/infra.md`, `rooms/execution.md` |
-| Worker node execution | `rooms/execution.md`, `rooms/infra.md` | `rooms/orchestration.md` |
-| SDK surface changes | `rooms/sdk.md`, `rooms/control-plane.md` | `rooms/infra.md` |
-| CI / deploy changes | `rooms/infra.md`, `rooms/execution.md` | `rooms/orchestration.md` |
-| Orchestration / human-in-loop | `rooms/orchestration.md`, `rooms/control-plane.md` | `rooms/infra.md` |
-| Architecture / design | all rooms | none |
+The system is anchored by machine-readable files that persist across agent sessions:
+- `docs/superpowers/status/feature_list.json`: The inviolable truth of system capabilities.
+- `docs/superpowers/status/progress.md`: The multi-session handoff log.
+- `scripts/init_env.sh`: Standardized environment initialization for all nodes.
 
 ## Hard Rules
 
-- Write important state to SpacetimeDB first.
-- Prefer subscriptions and WebSockets over polling.
-- Route model and tool execution through `HeiwaClaw` / MCP, not ad hoc provider calls in agent logic.
-- Cheapest acceptable route first.
-- Sovereign work must stay local-first.
-- Do not overstate maturity in docs or diagrams.
+- **State Sovereignty**: Write important state to SpacetimeDB first. SQLite is retired.
+- **Harness Fidelity**: Always develop for Railway/Linux target. The MacBook is for staging.
+- **Transport**: Prefer subscriptions and WebSockets over polling.
+- **Execution**: Route model and tool execution through `HeiwaClaw` / MCP.
+- **Economy**: Cheapest acceptable route first.
+- **Privacy**: Sovereign work stays on local boost nodes.
 
 ## Transitional Boundaries
 

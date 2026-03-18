@@ -1,0 +1,27 @@
+{
+  "generated_at_utc": "2026-03-13T17:53:48Z",
+  "mode": "live_seed_overlay",
+  "repo_root": "/Users/dmcgregsauce/heiwa",
+  "profile_id": "heiwa-one-system",
+  "live_seed_surfaces": [
+    "packages/heiwa_sdk/heiwa_sdk/cells.py",
+    "packages/heiwa_sdk/heiwa_sdk/bench.py",
+    "config/swarm/benchmarks/routing_matrix.json",
+    "config/swarm/benchmarks/cells_catalog.json",
+    "apps/heiwa_hub/mcp_server.py",
+    "apps/heiwa_cli/heiwa"
+  ],
+  "ci_gate": ".github/workflows/deploy.yml",
+  "tests": [
+    "apps/heiwa_hub/tests/test_heiwa_cells_catalog.py",
+    "apps/heiwa_hub/tests/test_heiwa_bench.py",
+    "apps/heiwa_hub/tests/test_mcp_server_surface.py"
+  ],
+  "constraints": [
+    "SpacetimeDB remains the state layer",
+    "Railway remains the cloud host",
+    "WebSocket-first multi-turn sessions",
+    "No REST-only agent sessions",
+    "No monolithic agent design"
+  ]
+}

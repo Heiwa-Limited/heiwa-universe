@@ -1,0 +1,74 @@
+[
+  {
+    "id": "broker",
+    "label": "Broker",
+    "kind": "runtime",
+    "status": "live"
+  },
+  {
+    "id": "heiwaclaw",
+    "label": "HeiwaClaw",
+    "kind": "gateway",
+    "status": "live"
+  },
+  {
+    "id": "tool_mesh",
+    "label": "MCP / Adapter Mesh",
+    "kind": "runtime",
+    "status": "live"
+  },
+  {
+    "id": "stdb",
+    "label": "SpacetimeDB State Plane",
+    "kind": "state",
+    "status": "live"
+  },
+  {
+    "id": "ws",
+    "label": "WebSocket Live Transport",
+    "kind": "transport",
+    "status": "live"
+  },
+  {
+    "id": "cells",
+    "label": "HeiwaCells",
+    "kind": "roadmap",
+    "status": "proposed"
+  },
+  {
+    "id": "bench",
+    "label": "HeiwaBench",
+    "kind": "roadmap",
+    "status": "proposed"
+  },
+  {
+    "id": "memory",
+    "label": "HeiwaMemory",
+    "kind": "roadmap",
+    "status": "proposed"
+  },
+  {
+    "id": "ui",
+    "label": "HeiwaUI",
+    "kind": "roadmap",
+    "status": "proposed"
+  },
+  {
+    "id": "pulse",
+    "label": "HeiwaPulse",
+    "kind": "roadmap",
+    "status": "proposed"
+  },
+  {
+    "id": "safehouse",
+    "label": "HeiwaSafehouse",
+    "kind": "roadmap",
+    "status": "proposed"
+  },
+  {
+    "id": "lab",
+    "label": "HeiwaLab",
+    "kind": "roadmap",
+    "status": "proposed"
+  }
+]

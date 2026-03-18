@@ -1,0 +1,57 @@
+Update the Heiwa operator architecture board to match the current runtime.
+
+Represent two layers clearly:
+1. Public shell
+   - Home
+   - Status
+   - Domains
+   - Governance
+2. Operator app
+   - Connections
+   - Mission Control
+   - Live Run
+   - Approvals
+   - Rate Groups
+   - Cells
+   - History
+
+Show the operator app as a hub-served web surface authenticated by the per-install hub token.
+
+Show the CLI as the primary ingress and the app as a mirrored operator control surface.
+
+Show provider auth managed by official provider CLIs:
+- Gemini CLI
+- Codex
+- Claude Code
+- Antigravity via OpenClaw profile
+
+Show the state plane centered on SpacetimeDB with the following durable entities:
+- provider_accounts
+- missions
+- mission_steps
+- cell_runs
+- session_summaries
+- artifacts
+
+Show mission lifecycle labels explicitly:
+- draft
+- clarifying
+- ready
+- running
+- waiting_approval
+- paused
+- completed
+- failed
+
+Show operator websocket snapshot outputs:
+- provider status changes
+- mission snapshots
+- approval queue changes
+- live task progress
+- rate group usage
+- history summaries
+
+Show rate-group reserve logic as part of the scheduling model:
+- reserve = max(2 turns, 20% of window)
+- background work uses only surplus headroom
+- interactive work preempts background work

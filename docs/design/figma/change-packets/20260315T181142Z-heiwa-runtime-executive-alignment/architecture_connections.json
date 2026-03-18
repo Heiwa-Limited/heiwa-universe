@@ -1,0 +1,72 @@
+[
+  {
+    "from": "operator_shell",
+    "to": "shell_runtime",
+    "label": "loads PATH and Ollama auth stub"
+  },
+  {
+    "from": "operator_shell",
+    "to": "heiwa_cli_launcher",
+    "label": "invokes heiwa"
+  },
+  {
+    "from": "heiwa_cli_launcher",
+    "to": "cli_context",
+    "label": "exports HEIWA_ROOT and HEIWA_WORKSPACE_ROOT"
+  },
+  {
+    "from": "cli_context",
+    "to": "repo_root",
+    "label": "pins canonical workspace root"
+  },
+  {
+    "from": "cli_context",
+    "to": "wrapper_layer",
+    "label": "subprocesses inherit repo-root env"
+  },
+  {
+    "from": "wrapper_layer",
+    "to": "repo_root",
+    "label": "fallback root is monorepo, not apps/heiwa_cli"
+  },
+  {
+    "from": "wrapper_layer",
+    "to": "gemini_lane",
+    "label": "approval mode yolo"
+  },
+  {
+    "from": "wrapper_layer",
+    "to": "claude_lane",
+    "label": "permission mode bypassPermissions"
+  },
+  {
+    "from": "wrapper_layer",
+    "to": "codex_lane",
+    "label": "sandbox danger-full-access"
+  },
+  {
+    "from": "wrapper_layer",
+    "to": "openclaw_lane",
+    "label": "runs from repo root and exports ollama auth stub"
+  },
+  {
+    "from": "wrapper_layer",
+    "to": "picoclaw_lane",
+    "label": "runs against Heiwa repo workspace"
+  },
+  {
+    "from": "openclaw_lane",
+    "to": "local_ollama",
+    "label": "local-first fallback stack"
+  },
+  {
+    "from": "picoclaw_lane",
+    "to": "local_ollama",
+    "label": "default provider qwen3.5:4b"
+  },
+  {
+    "from": "heiwa_configs",
+    "to": "wrapper_layer",
+    "label": "router contract and identity maps"
+  }
+]
