@@ -35,7 +35,8 @@ class TestPhase5Integration:
         
         exit_code, output = await gw.execute(route, "hello")
         assert exit_code == 0
-        assert "ACP handoff simulated" in output
+        assert "ACP handoff" in output
+        assert "succeeded" in output
 
     @pytest.mark.asyncio
     async def test_mission_service_calls_stdb(self):

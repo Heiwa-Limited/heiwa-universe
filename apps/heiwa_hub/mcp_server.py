@@ -494,14 +494,18 @@ async def call_tool(tool_name: str, arguments: Dict[str, Any]):
 def _validate_auth_token(token: str | None) -> str:
     """Validate the Authorization bearer token against HEIWA_AUTH_TOKEN.
     Returns the expected token on success, raises HTTPException on failure."""
-    expected = os.getenv("HEIWA_AUTH_TOKEN", "")
+    from heiwa_sdk.security import SecurityService
+    ss = SecurityService()
+    expected = ss.get_expected_token()
+    
     if not expected:
         raise HTTPException(status_code=500, detail="Hub auth not configured (HEIWA_AUTH_TOKEN unset)")
     if not token:
         raise HTTPException(status_code=401, detail="Missing Authorization header")
     # Accept "Bearer <token>" or raw token
     raw = token.removeprefix("Bearer ").strip() if token.startswith("Bearer ") else token.strip()
-    if raw != expected:
+    
+    if not ss.validate_token(raw):
         raise HTTPException(status_code=403, detail="Invalid auth token")
     return expected
 
@@ -902,7 +906,8 @@ async def worker_socket(ws: WebSocket):
     wm = get_worker_manager()
     worker_id = None
     authenticated = False
-    expected_token = os.getenv("HEIWA_AUTH_TOKEN", "")
+    from heiwa_sdk.security import SecurityService
+    ss = SecurityService()
 
     try:
         while True:
@@ -912,7 +917,7 @@ async def worker_socket(ws: WebSocket):
             if msg_type == "register":
                 # Auth gate: first message must include valid token
                 token = raw.get("auth_token", "")
-                if not expected_token or token != expected_token:
+                if not ss.validate_token(token):
                     await ws.send_json({"type": "error", "detail": "Invalid auth token"})
                     await ws.close(code=4003)
                     return

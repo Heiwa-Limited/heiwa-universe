@@ -57,14 +57,16 @@ class SpineAgent(BaseAgent):
         from heiwa_sdk.config import settings
         from heiwa_hub.envelope import extract_auth_token, extract_payload, normalize_sender
 
-        expected_token = settings.HEIWA_AUTH_TOKEN
-        if not expected_token:
+        from heiwa_sdk.security import SecurityService
+        ss = SecurityService()
+        
+        if not ss.get_expected_token():
             logger.error("Digital Barrier misconfigured: HEIWA_AUTH_TOKEN not set.")
             return
 
         sender_id = normalize_sender(data)
         auth_token = extract_auth_token(data)
-        if not auth_token or auth_token != expected_token:
+        if not ss.validate_token(auth_token):
             logger.warning("Digital Barrier: invalid token from %s", sender_id)
             await self.speak(Subject.TASK_STATUS, {
                 "accepted": False,
