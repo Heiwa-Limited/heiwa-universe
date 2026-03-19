@@ -19,6 +19,7 @@ class Subject(str, Enum):
     TASK_EXEC_REQUEST_AUTOMATION = "heiwa.tasks.exec.request.automation"
     TASK_EXEC_REQUEST_OPERATE = "heiwa.tasks.exec.request.operate"
     TASK_EXEC_RESULT = "heiwa.tasks.exec.result"
+    KNOWLEDGE_LEARN = "heiwa.knowledge.learn"
     TASK_APPROVAL_REQUEST = "heiwa.tasks.approval.request"
     TASK_APPROVAL_DECISION = "heiwa.tasks.approval.decision"
     TASK_STATUS = "heiwa.tasks.status"

@@ -8,7 +8,8 @@ configures paths before any test imports run.
 
 Mirrors the export PYTHONPATH line from CLAUDE.md / CI env:
   packages/heiwa_cli:packages/heiwa_cognition:packages/heiwa_sdk:
-  packages/heiwa_protocol:packages/heiwa_identity:packages/heiwa_ui:apps
+  packages/heiwa_protocol:packages/heiwa_identity:packages/heiwa_ui:
+  packages/heiwa_knowledge:apps
 """
 from __future__ import annotations
 
@@ -24,6 +25,7 @@ _path_entries = [
     ROOT / "packages" / "heiwa_protocol",
     ROOT / "packages" / "heiwa_identity",
     ROOT / "packages" / "heiwa_ui",
+    ROOT / "packages" / "heiwa_knowledge",
     ROOT / "apps",
 ]
 
