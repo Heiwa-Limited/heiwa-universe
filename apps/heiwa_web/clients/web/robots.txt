@@ -1,0 +1,14 @@
+User-agent: *
+Allow: /index.html
+Allow: /robots.txt
+Disallow: /status.html
+Disallow: /domains.html
+Disallow: /governance.html
+Disallow: /connections.html
+Disallow: /missions.html
+Disallow: /live.html
+Disallow: /approvals.html
+Disallow: /rate-groups.html
+Disallow: /cells.html
+Disallow: /history.html
+Disallow: /canvas/
