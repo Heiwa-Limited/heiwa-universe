@@ -6,14 +6,20 @@ from pathlib import Path
 
 # Ensure monorepo roots are on sys.path
 ROOT = Path(__file__).resolve().parents[2]
-if str(ROOT / "packages/heiwa_sdk") not in sys.path:
-    sys.path.insert(0, str(ROOT / "packages/heiwa_sdk"))
-if str(ROOT / "packages/heiwa_protocol") not in sys.path:
-    sys.path.insert(0, str(ROOT / "packages/heiwa_protocol"))
-    sys.path.insert(0, str(ROOT / "packages/heiwa_identity"))
-    sys.path.insert(0, str(ROOT / "packages/heiwa_ui"))
-if str(ROOT / "apps") not in sys.path:
-    sys.path.insert(0, str(ROOT / "apps"))
+_PYTHONPATH_ENTRIES = [
+    ROOT / "packages" / "heiwa_cli",
+    ROOT / "packages" / "heiwa_cognition",
+    ROOT / "packages" / "heiwa_sdk",
+    ROOT / "packages" / "heiwa_protocol",
+    ROOT / "packages" / "heiwa_identity",
+    ROOT / "packages" / "heiwa_ui",
+    ROOT / "apps",
+]
+
+for entry in reversed(_PYTHONPATH_ENTRIES):
+    entry_str = str(entry)
+    if entry_str not in sys.path:
+        sys.path.insert(0, entry_str)
 
 from heiwa_sdk.config import load_swarm_env
 load_swarm_env()

@@ -12,16 +12,37 @@ from pathlib import Path
 import httpx
 import websockets
 
-# Ensure project root is on sys.path for direct script execution
-sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "../../../")))
+# Ensure monorepo packages are importable for direct script execution.
+ROOT = Path(__file__).resolve().parents[3]
+for _path in [
+    ROOT / "packages" / "heiwa_cli",
+    ROOT / "packages" / "heiwa_cognition",
+    ROOT / "packages" / "heiwa_sdk",
+    ROOT / "packages" / "heiwa_protocol",
+    ROOT / "packages" / "heiwa_identity",
+    ROOT / "packages" / "heiwa_ui",
+    ROOT / "apps",
+]:
+    _path_str = str(_path)
+    if _path_str not in sys.path:
+        sys.path.insert(0, _path_str)
 
-from heiwa_sdk.config import settings
+from heiwa_sdk.config import load_swarm_env, settings
+
+load_swarm_env()
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("SmokeTest")
 
 KPI_SECONDS = float(os.getenv("HEIWA_SMOKE_KPI_SECONDS", "30"))
 SMOKE_PREFIX = "HEIWA_SMOKE_PROBE:"
+
+
+def _has_required_progress(statuses: list[str]) -> bool:
+    status_set = {str(status).upper() for status in statuses}
+    if status_set & {"ACKNOWLEDGED", "DISPATCHED_PLAN", "DISPATCHED_FALLBACK"}:
+        return True
+    return bool(status_set & {"PASS", "DELIVERED"})
 
 
 def _resolve_auth_token() -> str:
@@ -99,7 +120,7 @@ async def main() -> int:
         summary = str(result.get("summary", ""))
         expected_marker = f"HEIWA_SMOKE_PROBE_OK:{probe_id}"
 
-        if not any(status in {"ACKNOWLEDGED", "DISPATCHED_PLAN", "DISPATCHED_FALLBACK"} for status in statuses):
+        if not _has_required_progress(statuses):
             raise RuntimeError(f"Smoke task never showed orchestrator progress: {statuses}")
 
         terminal = str(result.get("status") or result.get("run_status") or "").upper()

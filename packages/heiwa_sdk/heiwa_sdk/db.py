@@ -77,6 +77,34 @@ class Database:
             return self.stdb.get_discord_channel(purpose)
         return None
 
+    def upsert_discord_channel(
+        self,
+        purpose: str,
+        channel_id: int,
+        *,
+        category_name: str | None = None,
+    ) -> bool:
+        if self.stdb:
+            metadata = {"category": category_name or "none"}
+            return self.stdb.call(
+                "register_discord_channel",
+                int(channel_id),
+                str(purpose),
+                str(purpose),
+                json.dumps(metadata),
+            )
+        return False
+
+    def upsert_discord_role(self, role_name: str, role_id: int) -> bool:
+        # Roles are inferred from Discord membership at runtime. Keep the old
+        # facade method as a compatibility no-op so sync utilities do not crash.
+        logger.info(
+            "[DB] Discord role persistence is not modeled in STDB yet; keeping %s (%s) in compatibility mode.",
+            role_name,
+            role_id,
+        )
+        return True
+
     def upsert_node_heartbeat(
         self,
         *,

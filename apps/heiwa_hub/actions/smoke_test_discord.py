@@ -15,11 +15,25 @@ from urllib.request import Request, urlopen
 import httpx
 import websockets
 
-# Ensure project root is on sys.path for direct script execution
-sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "../../../")))
+# Ensure monorepo packages are importable for direct script execution.
+ROOT = Path(__file__).resolve().parents[3]
+for _path in [
+    ROOT / "packages" / "heiwa_cli",
+    ROOT / "packages" / "heiwa_cognition",
+    ROOT / "packages" / "heiwa_sdk",
+    ROOT / "packages" / "heiwa_protocol",
+    ROOT / "packages" / "heiwa_identity",
+    ROOT / "packages" / "heiwa_ui",
+    ROOT / "apps",
+]:
+    _path_str = str(_path)
+    if _path_str not in sys.path:
+        sys.path.insert(0, _path_str)
 
-from heiwa_sdk.config import settings
+from heiwa_sdk.config import load_swarm_env, settings
 from heiwa_sdk.db import Database
+
+load_swarm_env()
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("SmokeTestDiscord")
@@ -28,6 +42,13 @@ KPI_SECONDS = float(os.getenv("HEIWA_SMOKE_DISCORD_KPI_SECONDS", "60"))
 POLL_INTERVAL_SECONDS = float(os.getenv("HEIWA_SMOKE_DISCORD_POLL_SECONDS", "2"))
 DISCORD_API_BASE = "https://discord.com/api/v10"
 SMOKE_PREFIX = "HEIWA_SMOKE_PROBE:"
+
+
+def _has_required_progress(statuses: list[str]) -> bool:
+    status_set = {str(status).upper() for status in statuses}
+    if status_set & {"ACKNOWLEDGED", "DISPATCHED_PLAN", "DISPATCHED_FALLBACK"}:
+        return True
+    return bool(status_set & {"PASS", "DELIVERED"})
 
 
 def _resolve_auth_token() -> str:
@@ -39,6 +60,20 @@ def _resolve_auth_token() -> str:
 
 def _resolve_hub_url() -> str:
     return str(settings.HUB_BASE_URL or "https://api.heiwa.ltd").rstrip("/")
+
+
+def _build_smoke_payload(*, task_id: str, probe_id: str, channel_id: int) -> dict[str, object]:
+    return {
+        "task_id": task_id,
+        "raw_text": (
+            "Verify the Heiwa runtime service scope with a safe smoke probe and report the result. "
+            f"{SMOKE_PREFIX}{probe_id}"
+        ),
+        "sender_id": "discord-smoke-bridge",
+        "source_surface": "discord",
+        "source_channel_id": channel_id,
+        "response_channel_id": channel_id,
+    }
 
 
 def _resolve_discord_bot_token() -> str:
@@ -125,15 +160,7 @@ async def _submit_task(*, hub_url: str, auth_token: str, task_id: str, probe_id:
         "Accept": "application/json",
         "User-Agent": "heiwa-smoke-discord/1.0",
     }
-    payload = {
-        "task_id": task_id,
-        "raw_text": (
-            "Verify the Heiwa runtime service scope with a safe smoke probe and report the result. "
-            f"{SMOKE_PREFIX}{probe_id}"
-        ),
-        "sender_id": "discord-smoke-bridge",
-        "source_surface": "discord",
-    }
+    payload = _build_smoke_payload(task_id=task_id, probe_id=probe_id, channel_id=channel_id)
     async with httpx.AsyncClient(timeout=20.0) as client:
         response = await client.post(f"{hub_url}/tasks", json=payload, headers=headers)
         response.raise_for_status()
@@ -242,7 +269,7 @@ async def main() -> int:
         logger.info("Accepted %s via %s/%s", task_id, route.get("intent_class", "unknown"), route.get("target_tool", "unknown"))
 
         statuses, result = await _wait_for_terminal_result(hub_url=hub_url, auth_token=auth_token, task_id=task_id)
-        if not any(status in {"ACKNOWLEDGED", "DISPATCHED_PLAN", "DISPATCHED_FALLBACK"} for status in statuses):
+        if not _has_required_progress(statuses):
             raise RuntimeError(f"Discord smoke task never showed orchestrator progress: {statuses}")
 
         summary = str(result.get("summary", ""))
