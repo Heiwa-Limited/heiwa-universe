@@ -143,11 +143,22 @@ if [[ "$HEIWA_STATE_BACKEND" == "spacetimedb" ]]; then
         fi
     fi
 
-    # Auto-publish module if source exists (Railway/Local boot)
-    STDB_SRC_DIR="apps/heiwa_hub/spacetimedb"
-    if [[ -d "$STDB_SRC_DIR" ]] && command -v spacetime &>/dev/null; then
-        echo "[HEIWA] Publishing SpacetimeDB module ($STDB_IDENTITY)..."
-        (cd "$STDB_SRC_DIR" && spacetime publish --server "$STDB_SERVER" "$STDB_IDENTITY") || echo "[HEIWA] STDB publish failed, continuing..."
+    # Auto-publish module from the project directory that owns spacetime.json.
+    STDB_PROJECT_DIR="apps/heiwa_hub"
+    STDB_MANIFEST_PATH="$STDB_PROJECT_DIR/spacetime.json"
+    if [[ ! -f "$STDB_MANIFEST_PATH" ]]; then
+        echo "[HEIWA] Missing SpacetimeDB manifest at $STDB_MANIFEST_PATH." >&2
+        exit 1
+    fi
+    if ! command -v spacetime &>/dev/null; then
+        echo "[HEIWA] spacetime CLI is required for STDB boot but is not installed." >&2
+        exit 1
+    fi
+
+    echo "[HEIWA] Publishing SpacetimeDB module ($STDB_IDENTITY) from $STDB_PROJECT_DIR..."
+    if ! (cd "$STDB_PROJECT_DIR" && spacetime publish --server "$STDB_SERVER" "$STDB_IDENTITY"); then
+        echo "[HEIWA] STDB publish failed for $STDB_IDENTITY from $STDB_PROJECT_DIR." >&2
+        exit 1
     fi
 fi
 
