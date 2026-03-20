@@ -38,6 +38,18 @@ The system is anchored by machine-readable files that persist across agent sessi
 - **Economy**: Cheapest acceptable route first.
 - **Privacy**: Sovereign work stays on local boost nodes.
 
+## Task Routing Table
+
+| Intent Class | Default Runtime | Primary Tool Surface | Primary Room |
+| --- | --- | --- | --- |
+| `chat` / `general` | `railway` | `heiwa_claw` | `rooms/orchestration.md` |
+| `build` / `fix` / `review` | `macbook` first, escalate as needed | native Class 3 agent lanes | `rooms/execution.md` |
+| `research` / `strategy` | `railway` unless sovereign | `heiwa_claw` / broker enrichment | `rooms/orchestration.md` |
+| `deploy` / `operate` / `automate` | `railway` | control-plane services | `rooms/infra.md` |
+| `audit` / `files` | local-first | deterministic ops / local execution | `rooms/sdk.md` |
+
+Routing details live in `config/swarm/ai_router.json`, `packages/heiwa_cognition/heiwa_cognition/intent.py`, and `packages/heiwa_cognition/heiwa_cognition/router.py`. Use the room files as the human-readable map before changing runtime behavior.
+
 ## Transitional Boundaries
 
 - Proposal / lease / RFC flow is still partly compatibility-SQL and polling-shaped.
