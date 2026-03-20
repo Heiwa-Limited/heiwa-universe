@@ -87,6 +87,9 @@ memory/
 # Claude Code local settings
 .claude/
 
+# Standalone apps (live outside monorepo)
+apps/heiwa_dj/
+
 # Windows/WSL artifacts
 **/D:\\cache\\cargo/
 **/*.bak
