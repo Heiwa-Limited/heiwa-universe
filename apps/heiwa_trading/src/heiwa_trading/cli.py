@@ -14,16 +14,32 @@ from heiwa_trading.cockpit import (
     build_cockpit_snapshot,
     serve_cockpit,
 )
-from heiwa_trading.cockpit_service import (
-    install_service as install_cockpit_service,
-    service_status as cockpit_service_status,
-    start_service as start_cockpit_service,
-    stop_service as stop_cockpit_service,
-    uninstall_service as uninstall_cockpit_service,
-)
+
+# cockpit_service is a mac-agent-only module (not available on Railway)
+try:
+    from heiwa_trading.cockpit_service import (
+        install_service as install_cockpit_service,
+        service_status as cockpit_service_status,
+        start_service as start_cockpit_service,
+        stop_service as stop_cockpit_service,
+        uninstall_service as uninstall_cockpit_service,
+    )
+except ImportError:
+    install_cockpit_service = None
+    cockpit_service_status = None
+    start_cockpit_service = None
+    stop_cockpit_service = None
+    uninstall_cockpit_service = None
+
 from heiwa_trading.coinmarketcap import fetch_coinmarketcap_summary
 from heiwa_trading.config import CHEAP_POLICY, DEFAULT_TOURNAMENT_LIMIT, DEFAULT_TOURNAMENT_SLEEP_SECONDS
-from heiwa_trading.live_dashboard import build_live_dashboard_text, build_supervisor_dashboard_text
+
+# live_dashboard is a mac-agent-only module (not available on Railway)
+try:
+    from heiwa_trading.live_dashboard import build_live_dashboard_text, build_supervisor_dashboard_text
+except ImportError:
+    build_live_dashboard_text = None
+    build_supervisor_dashboard_text = None
 from heiwa_trading.market_data import fetch_markets, get_market_by_slug
 from heiwa_trading.paper_trader import PaperTrade, load_portfolio, save_portfolio
 from heiwa_trading.scan import append_scan_history, build_scan_summary, build_tuning_report, load_scan_history, save_tuning_report
@@ -333,6 +349,8 @@ def command_supervisor_top5(args: argparse.Namespace) -> int:
 
 
 def command_supervisor_monitor(args: argparse.Namespace) -> int:
+    if build_supervisor_dashboard_text is None:
+        raise SystemExit("build_supervisor_dashboard_text module not available on this platform")
     iteration = 0
     while args.iterations == 0 or iteration < args.iterations:
         summary = build_supervisor_summary(load_supervisor_state())
@@ -368,6 +386,8 @@ def command_cockpit_serve(args: argparse.Namespace) -> int:
 
 
 def command_cockpit_service(args: argparse.Namespace) -> int:
+    if install_cockpit_service is None:
+        raise SystemExit("cockpit_service module not available on this platform (mac-agent only)")
     if args.cockpit_service_command == "install":
         payload = install_cockpit_service(port=args.port, host=args.host)
     elif args.cockpit_service_command == "start":
@@ -385,6 +405,8 @@ def command_cockpit_service(args: argparse.Namespace) -> int:
 
 
 def command_monitor(args: argparse.Namespace) -> int:
+    if build_live_dashboard_text is None:
+        raise SystemExit("live_dashboard module not available on this platform (mac-agent only)")
     iteration = 0
     while args.iterations == 0 or iteration < args.iterations:
         _, summary, report = _run_scan_cycle(
