@@ -885,6 +885,48 @@ async def task_events(ws: WebSocket, task_id: str, token: str | None = None):
             bus.unsubscribe(subj, _capture)
 
 
+@app.websocket("/ws/chat")
+async def chat_socket(ws: WebSocket, token: str | None = None):
+    """
+    WebSocket chat endpoint — fast, bidirectional conversation.
+
+    Auth via query param: ws://.../ws/chat?token=<bearer>
+
+    Client sends:  {"content": "yo", "session_id": "optional-session-key"}
+    Server sends:  {"content": "response text", "session_id": "...", "source": "ollama|gemini"}
+    """
+    import hmac
+    expected = os.getenv("HEIWA_AUTH_TOKEN", "")
+    if not expected or not token or not hmac.compare_digest(token.encode(), expected.encode()):
+        await ws.close(code=4003)
+        return
+
+    await ws.accept()
+
+    from heiwa_hub.chat import get_chat_engine
+    engine = get_chat_engine()
+    session_id = f"ws-{uuid.uuid4().hex[:8]}"
+
+    try:
+        while True:
+            raw = await ws.receive_json()
+            content = raw.get("content", "").strip()
+            if not content:
+                continue
+
+            # Use client-provided session_id or the one we assigned
+            sid = raw.get("session_id") or session_id
+
+            reply = await engine.respond(session_id=sid, content=content)
+            await ws.send_json({
+                "content": reply,
+                "session_id": sid,
+                "timestamp": time.time(),
+            })
+    except WebSocketDisconnect:
+        logger.debug("Chat WebSocket disconnected (session=%s)", session_id)
+
+
 @app.websocket("/ws/operator")
 async def operator_events(ws: WebSocket, token: str | None = None):
     expected = os.getenv("HEIWA_AUTH_TOKEN", "")
@@ -952,6 +994,12 @@ async def worker_socket(ws: WebSocket):
             elif msg_type == "result":
                 bus = get_bus()
                 await bus.publish(Subject.TASK_EXEC_RESULT, raw.get("data", raw), sender_id=worker_id or "worker")
+
+            elif msg_type == "llm_response":
+                # Boost node responding to an LLM proxy request
+                req_id = raw.get("request_id", "")
+                text = raw.get("text", "")
+                wm.resolve_llm_response(req_id, text)
 
             elif msg_type == "pull":
                 await ws.send_json({"type": "no_work"})

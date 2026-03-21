@@ -30,9 +30,9 @@ from pathlib import Path
 logger = logging.getLogger("HeiwaAgent")
 
 CAPTAIN_TICK_SEC = 60
-STATUS_BROADCAST_INTERVAL_SEC = 300
-AUDIT_INTERVAL_SEC = 600
-MODEL_TUNING_INTERVAL_SEC = 300
+STATUS_BROADCAST_INTERVAL_SEC = 1800    # 30 min — was 5 min, flooding operator DMs
+AUDIT_INTERVAL_SEC = 3600               # 1 hour — was 10 min, burning LLM quota
+MODEL_TUNING_INTERVAL_SEC = 1800        # 30 min — was 5 min
 PRUNE_INTERVAL_SEC = 3600
 
 
@@ -115,50 +115,33 @@ class HeiwaAgent(BaseAgent):
     # ------------------------------------------------------------------ #
 
     async def _on_direct_dm(self, data: dict[str, Any]):
-        """Direct operator interaction via DM. Respond contextually using memory."""
+        """Direct operator interaction via DM — routes through ChatEngine for
+        cost-cascading LLM routing and async value extraction."""
         payload = data.get("data", data)
         content = payload.get("content", "")
         author = payload.get("author", "operator")
-        
-        # STORE: operator message
-        self._store_operator_message(content, source="discord_dm")
-        
-        # REASON: Hydrate context window from STDB
-        ctx = self._hydrate_boot_context()
-        messages = ctx.get("messages", [])
-        recent_summaries = ctx.get("summaries", [])
-        
-        # Determine complexity/model choice (Gemini Flash vs Pro)
-        cascade = self._should_cascade(content)
-        model = "gemini-1.5-pro" if cascade else "gemini-1.5-flash"
-        
-        # Construct prompt with identity and context
-        history_lines = []
-        for m in messages[-10:]: # Last 10 messages for focus
-            history_lines.append(f"{m['role'].upper()}: {m['content']}")
-            
-        summary_ctx = ""
-        if recent_summaries:
-            summary_ctx = f"Context from previous conversation: {recent_summaries[0]['content']}\n\n"
 
-        prompt = (
-            "You are the Heiwa Agent, a machine-perspective collaborator for the Heiwa system.\n"
-            "You are direct, technically astute, and observant. You communicate with the operator via DM.\n"
-            "Respond naturally to the operator's input. Do not use bot-like formatting unless presenting data.\n\n"
-            f"{summary_ctx}"
-            "Recent History:\n" + "\n".join(history_lines) + "\n\n"
-            f"OPERATOR: {content}\n"
-            "HEIWA AGENT:"
-        )
-        
+        logger.info("DM from %s: %s", author, content[:80])
+
+        # Fire-and-forget STDB memory storage
+        loop = asyncio.get_event_loop()
+        loop.run_in_executor(None, self._store_operator_message, content, "discord_dm")
+
         try:
-            # Note: HeiwaAgent uses LocalLLMEngine which defaults to LiteLLM/Gemini in Cloud
-            reply = await self.llm.generate_async(prompt=prompt, model=model)
-            if reply:
-                await self._dm(reply)
+            from heiwa_hub.chat import get_chat_engine
+            engine = get_chat_engine()
+
+            # Session per author — maintains conversation state
+            session_id = f"discord-dm-{author}"
+            reply = await engine.respond(
+                session_id=session_id,
+                content=content,
+                author=author,
+            )
+            await self._dm(reply)
         except Exception as e:
-            logger.error("Heiwa Agent direct DM response failed: %s", e)
-            await self._dm("I caught your message, but I'm having trouble thinking clearly right now. Checking the logs.")
+            logger.error("Chat engine DM response failed: %s", e)
+            await self._dm("I caught your message, but I'm having trouble thinking clearly right now.")
 
     async def _on_task_ingress(self, data: dict[str, Any]):
         """A new task just entered the system. Narrate what we see."""
@@ -304,7 +287,7 @@ class HeiwaAgent(BaseAgent):
             "Summarize this conversation concisely, preserving key decisions, "
             "action items, and technical details:\n\n" + text
         )
-        return await self.llm.generate(prompt)
+        return await self.llm.generate_async(prompt=prompt, complexity="low")
 
     def _hydrate_boot_context(self) -> dict:
         """BOOT: load last session's uncompressed messages + recent summaries."""
@@ -360,12 +343,15 @@ class HeiwaAgent(BaseAgent):
         if alerts:
             await self._handle_alerts(alerts, system_state)
 
-        # Periodic repo audit
+        # Periodic repo audit — only when LLM quota has surplus headroom
         if now - self._last_audit > AUDIT_INTERVAL_SEC:
-            asyncio.create_task(self._run_periodic_audit())
+            if self._has_background_capacity():
+                asyncio.create_task(self._run_periodic_audit())
+            else:
+                logger.debug("Skipping periodic audit — LLM rate capacity low")
             self._last_audit = now
 
-        # Periodic model tuning
+        # Periodic model tuning (no LLM calls, just STDB stats)
         if now - self._last_tuning > MODEL_TUNING_INTERVAL_SEC:
             asyncio.create_task(self._tune_model_tiers())
             self._last_tuning = now
@@ -424,36 +410,28 @@ class HeiwaAgent(BaseAgent):
         await self._dm(f"Heads up — caught some issues:\n{lines}\n\nLet me know if you want me to dig into any of these.")
 
     async def _broadcast_status(self, system_state: dict[str, Any]):
-        """Conversational status update to the operator."""
-        nodes = system_state.get("nodes_online", 0)
+        """Conversational status update — only DM if there's something worth reporting."""
         tasks_5m = system_state.get("tasks_5m", 0)
         success_rate = system_state.get("task_success_rate_5m")
         llm_ok = system_state.get("llm_available", False)
-        uptime = system_state.get("uptime_sec", 0)
 
-        uptime_min = int(uptime / 60)
+        # Only DM if there's actual activity or problems — don't spam "all quiet"
+        parts: list[str] = []
 
-        parts = []
-
-        # Fleet
-        if nodes == 0:
-            parts.append("No nodes registered yet — fleet is cold.")
-        else:
-            parts.append(f"{nodes} node{'s' if nodes != 1 else ''} online.")
-
-        # Tasks
-        if tasks_5m == 0:
-            parts.append("Quiet last 5 minutes — no tasks in flight.")
-        else:
+        if tasks_5m > 0:
             rate_str = f" ({int(success_rate * 100)}% pass rate)" if success_rate is not None else ""
-            parts.append(f"{tasks_5m} task{'s' if tasks_5m != 1 else ''} in the last 5m{rate_str}.")
+            parts.append(f"{tasks_5m} task{'s' if tasks_5m != 1 else ''} recently{rate_str}.")
 
-        # LLM
         if not llm_ok:
-            parts.append("Local LLM is down — tasks will route to cloud providers.")
+            parts.append("LLM providers are down — routing to cloud fallbacks.")
 
-        # Uptime
-        parts.append(f"I've been up {uptime_min}m, seen {self._tasks_seen} tasks total, {self._errors_seen} errors.")
+        if self._errors_seen > 0:
+            parts.append(f"{self._errors_seen} errors caught since boot.")
+
+        if not parts:
+            # Nothing interesting — log only, don't DM
+            logger.debug("Status check: all quiet, skipping DM")
+            return
 
         status_msg = " ".join(parts)
         logger.info("Heiwa Agent status: %s", status_msg)
@@ -466,7 +444,8 @@ class HeiwaAgent(BaseAgent):
         logger.log(getattr(logging, level), "Repo Audit: %s", result.summary)
 
         if result.passed:
-            await self._dm(f"Ran a repo audit — everything checks out. {result.summary}")
+            logger.info("Repo audit passed: %s", result.summary)
+            # Don't DM on clean audits — only alert on problems
         else:
             await self._dm(
                 f"Repo audit found issues: {result.summary}\n"
@@ -518,10 +497,9 @@ class HeiwaAgent(BaseAgent):
                         tuned_models.append(f"`{model_id}` ({int(stats['success_rate'] * 100)}% / {stats['avg_latency_ms']}ms avg)")
 
             if updated_count > 0:
-                logger.info("Model tuning complete. Updated %d model(s).", updated_count)
-                await self._dm(
-                    f"Tuned {updated_count} model tier{'s' if updated_count != 1 else ''} based on execution history:\n"
-                    + "\n".join(f"- {m}" for m in tuned_models)
+                logger.info(
+                    "Model tuning complete. Updated %d model(s): %s",
+                    updated_count, ", ".join(tuned_models),
                 )
         except Exception as e:
             logger.error("Failed to tune model tiers: %s", e)
@@ -540,6 +518,16 @@ class HeiwaAgent(BaseAgent):
     # ------------------------------------------------------------------ #
     #  Boot message                                                        #
     # ------------------------------------------------------------------ #
+
+    @staticmethod
+    def _has_background_capacity() -> bool:
+        """Check if the Gemini API rate group has surplus headroom for background work."""
+        try:
+            from heiwa_sdk.rate_ledger import get_rate_ledger
+            ledger = get_rate_ledger()
+            return ledger.can_run_background("google_gemini_api")
+        except Exception:
+            return True  # If ledger unavailable, allow (fail-open for background)
 
     def _build_boot_message(self) -> str:
         """First message to the operator when the system comes online."""

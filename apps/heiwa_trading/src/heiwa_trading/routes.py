@@ -6,9 +6,11 @@ API endpoints require Bearer auth via HEIWA_AUTH_TOKEN.
 from __future__ import annotations
 
 import asyncio
+import hmac
 import json
 import logging
 import os
+import time
 from pathlib import Path
 from typing import Any
 
@@ -32,6 +34,34 @@ router = APIRouter(prefix="/trading", tags=["trading"])
 WEB_DIR = Path(__file__).parent / "web"
 
 
+def _constant_time_compare(a: str, b: str) -> bool:
+    """Timing-safe string comparison to prevent timing attacks."""
+    return hmac.compare_digest(a.encode(), b.encode())
+
+
+# Simple in-memory rate limiter for auth attempts
+_auth_attempts: dict[str, list[float]] = {}
+_AUTH_MAX_ATTEMPTS = 5
+_AUTH_WINDOW_SEC = 300  # 5 minutes
+
+
+def _check_auth_rate_limit(client_ip: str) -> None:
+    """Block brute-force auth attempts: max 5 per 5 minutes per IP."""
+    now = time.time()
+    attempts = _auth_attempts.get(client_ip, [])
+    # Prune old attempts
+    attempts = [t for t in attempts if now - t < _AUTH_WINDOW_SEC]
+    _auth_attempts[client_ip] = attempts
+    if len(attempts) >= _AUTH_MAX_ATTEMPTS:
+        logger.warning("Auth rate limit hit for %s", client_ip)
+        raise HTTPException(status_code=429, detail="Too many attempts. Try again later.")
+
+
+def _record_auth_attempt(client_ip: str) -> None:
+    """Record a failed auth attempt."""
+    _auth_attempts.setdefault(client_ip, []).append(time.time())
+
+
 def _check_auth(authorization: str | None) -> None:
     """Validate bearer token against HEIWA_AUTH_TOKEN."""
     expected = os.environ.get("HEIWA_AUTH_TOKEN", "")
@@ -40,7 +70,7 @@ def _check_auth(authorization: str | None) -> None:
     if not authorization:
         raise HTTPException(status_code=401, detail="Missing Authorization header")
     raw = authorization.removeprefix("Bearer ").strip()
-    if raw != expected:
+    if not _constant_time_compare(raw, expected):
         raise HTTPException(status_code=403, detail="Invalid auth token")
 
 
@@ -67,10 +97,14 @@ async def cockpit_js():
 @router.post("/api/auth")
 async def validate_token(request: Request):
     """Validate a token without exposing internals. Used by the login gate."""
+    client_ip = request.client.host if request.client else "unknown"
+    _check_auth_rate_limit(client_ip)
+
     body = await request.json()
     token = body.get("token", "")
     expected = os.environ.get("HEIWA_AUTH_TOKEN", "")
-    if not expected or token != expected:
+    if not expected or not _constant_time_compare(token, expected):
+        _record_auth_attempt(client_ip)
         raise HTTPException(status_code=403, detail="Invalid token")
     return {"status": "ok"}
 

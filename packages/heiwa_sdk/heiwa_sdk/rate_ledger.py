@@ -56,6 +56,7 @@ _DEFAULT_LIMITS: dict[str, dict[str, Any]] = {
     "claude_code": {"max_turns": 40, "window_sec": 18000, "cooldown_sec": 300},
     "openai_codex": {"max_turns": 25, "window_sec": 3600, "cooldown_sec": 120},
     "google_gemini_cli": {"max_turns": 50, "window_sec": 3600, "cooldown_sec": 60},
+    "google_gemini_api": {"max_turns": 30, "window_sec": 60, "cooldown_sec": 30},
     "google_antigravity": {"max_turns": 35, "window_sec": 3600, "cooldown_sec": 60},
     "siliconflow": {"max_turns": 15, "window_sec": 3600, "cooldown_sec": 120},
     "cerebras": {"max_turns": 20, "window_sec": 3600, "cooldown_sec": 90},

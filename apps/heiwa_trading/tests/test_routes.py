@@ -67,6 +67,10 @@ def test_api_settings_returns_json(client):
 
 def test_api_auth_validates_token(client):
     """Token validation endpoint for JS login gate."""
+    # Clear rate limiter state between tests
+    from heiwa_trading.routes import _auth_attempts
+    _auth_attempts.clear()
+
     response = client.post(
         "/trading/api/auth",
         json={"token": TEST_TOKEN},
@@ -78,6 +82,26 @@ def test_api_auth_validates_token(client):
         json={"token": "wrong-token"},
     )
     assert response.status_code == 403
+
+
+def test_api_auth_rate_limiting(client):
+    """Auth endpoint rate-limits brute-force attempts."""
+    from heiwa_trading.routes import _auth_attempts, _AUTH_MAX_ATTEMPTS
+    _auth_attempts.clear()
+
+    # Exhaust the rate limit
+    for _ in range(_AUTH_MAX_ATTEMPTS):
+        client.post("/trading/api/auth", json={"token": "wrong"})
+
+    # Next attempt should be rate-limited
+    response = client.post("/trading/api/auth", json={"token": "wrong"})
+    assert response.status_code == 429
+
+    # Even correct token should be blocked during rate limit
+    response = client.post("/trading/api/auth", json={"token": TEST_TOKEN})
+    assert response.status_code == 429
+
+    _auth_attempts.clear()
 
 
 def test_cockpit_no_mac_agent_branding(client):
