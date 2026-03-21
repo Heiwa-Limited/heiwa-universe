@@ -54,7 +54,17 @@ class HeiwaBench:
 
         request = BrokerRouteRequest.from_payload(case.get("request") or {})
         enrichment = BrokerEnrichmentService()
-        result = asyncio.run(enrichment.enrich(request))
+        coro = enrichment.enrich(request)
+        try:
+            loop = asyncio.get_running_loop()
+        except RuntimeError:
+            loop = None
+        if loop and loop.is_running():
+            import concurrent.futures
+            with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
+                result = pool.submit(asyncio.run, coro).result()
+        else:
+            result = asyncio.run(coro)
         dispatch = self.gateway.resolve(result)
         actual = {"route": result.to_dict(), "dispatch": dispatch.to_dict()}
         failures: list[BenchFailure] = []
