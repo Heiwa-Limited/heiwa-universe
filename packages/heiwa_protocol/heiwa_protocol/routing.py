@@ -4,6 +4,8 @@ from dataclasses import asdict, dataclass, field
 import time
 from typing import Any
 
+from heiwa_protocol.program import ExecutionProgram
+
 
 BROKER_ENVELOPE_VERSION = "2026-03-13"
 PRIVACY_LEVELS = {"local", "sensitive", "sovereign"}
@@ -93,6 +95,7 @@ class BrokerRouteResult:
     context_files_json: str = "[]"  # Phase 2: relevant files from memory
     error: str | None = None
     message: str | None = None
+    execution_program: ExecutionProgram | None = None
 
     @classmethod
     def from_payload(cls, payload: dict[str, Any]) -> "BrokerRouteResult":
@@ -122,6 +125,7 @@ class BrokerRouteResult:
             context_files_json=str(payload.get("context_files_json") or "[]"),
             error=payload.get("error"),
             message=payload.get("message"),
+            execution_program=ExecutionProgram.from_dict(payload.get("execution_program")) if payload.get("execution_program") else None,
         )
 
     def to_dict(self) -> dict[str, Any]:
