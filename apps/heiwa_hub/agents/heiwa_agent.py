@@ -349,7 +349,10 @@ class HeiwaAgent(BaseAgent):
         system_state = await self._gather_system_state()
 
         # Memory compression check
-        await self._maybe_compress()
+        try:
+            await self._maybe_compress()
+        except Exception as e:
+            self.logger.warning("Memory compression failed: %s", e)
 
         # Handle queued alerts
         alerts = list(self._pending_alerts)
