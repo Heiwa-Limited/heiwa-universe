@@ -951,6 +951,14 @@ async def worker_socket(ws: WebSocket):
             wm.unregister(worker_id)
 
 
+try:
+    from heiwa_trading.routes import router as trading_router
+    app.include_router(trading_router)
+    logger.info("Trading routes mounted at /trading/*")
+except ImportError:
+    logger.info("heiwa_trading not available, trading routes disabled")
+
+
 def start_mcp_server():
     import uvicorn
     logger.info("Heiwa MCP Server booting on port 8000...")

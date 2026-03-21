@@ -27,7 +27,7 @@
   ```bash
   python -m venv .venv && source .venv/bin/activate
   pip install -r requirements.txt
-  export PYTHONPATH="$(pwd)/packages/heiwa_cli:$(pwd)/packages/heiwa_cognition:$(pwd)/packages/heiwa_sdk:$(pwd)/packages/heiwa_protocol:$(pwd)/packages/heiwa_identity:$(pwd)/packages/heiwa_ui:$(pwd)/apps"
+  export PYTHONPATH="$(pwd)/packages/heiwa_cli:$(pwd)/packages/heiwa_cognition:$(pwd)/packages/heiwa_sdk:$(pwd)/packages/heiwa_protocol:$(pwd)/packages/heiwa_identity:$(pwd)/packages/heiwa_ui:$(pwd)/apps:$(pwd)/apps/heiwa_trading/src"
 
   Run
 
