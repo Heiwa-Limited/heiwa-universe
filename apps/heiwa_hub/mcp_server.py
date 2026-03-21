@@ -257,7 +257,14 @@ async def health():
 
 @app.get("/")
 @app.head("/")
-async def root():
+async def root(request: Request):
+    # trade.heiwa.ltd serves the trading cockpit at /
+    host = (request.headers.get("host") or "").split(":")[0].lower()
+    if host == "trade.heiwa.ltd":
+        trading_web = Path(__file__).resolve().parents[2] / "apps" / "heiwa_trading" / "src" / "heiwa_trading" / "web"
+        cockpit = trading_web / "cockpit.html"
+        if cockpit.exists():
+            return FileResponse(cockpit, media_type="text/html")
     index = _web_file("index.html")
     if index:
         return FileResponse(index)

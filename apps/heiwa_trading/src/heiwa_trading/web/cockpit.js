@@ -1,3 +1,90 @@
+// --- Auth Gate ---
+// Token is stored in localStorage. If missing, show a login prompt.
+const AUTH_KEY = "heiwa_trading_token";
+
+function getToken() {
+  return localStorage.getItem(AUTH_KEY) || "";
+}
+
+function authHeaders() {
+  return { Authorization: `Bearer ${getToken()}` };
+}
+
+async function authFetch(url, opts = {}) {
+  const headers = { ...authHeaders(), ...(opts.headers || {}) };
+  const resp = await fetch(url, { ...opts, headers });
+  if (resp.status === 401 || resp.status === 403) {
+    localStorage.removeItem(AUTH_KEY);
+    showLoginGate();
+    throw new Error("Authentication failed");
+  }
+  return resp;
+}
+
+function showLoginGate() {
+  document.querySelector(".shell").style.display = "none";
+  let gate = document.getElementById("auth-gate");
+  if (!gate) {
+    gate = document.createElement("div");
+    gate.id = "auth-gate";
+    gate.innerHTML = `
+      <div style="display:flex;align-items:center;justify-content:center;min-height:100vh;background:var(--bg,#0a0a0f);font-family:system-ui,sans-serif">
+        <div style="background:var(--panel-bg,#12121a);border:1px solid var(--border,#1e1e2e);border-radius:12px;padding:2.5rem;max-width:380px;width:100%">
+          <h1 style="color:var(--text,#e0e0e6);font-size:1.25rem;margin:0 0 0.25rem">Heiwa Trading</h1>
+          <p style="color:var(--text-muted,#888);font-size:0.85rem;margin:0 0 1.5rem">Enter your operator token to continue.</p>
+          <input id="auth-token-input" type="password" placeholder="Operator token"
+            style="width:100%;padding:0.6rem 0.8rem;border:1px solid var(--border,#1e1e2e);border-radius:6px;background:var(--bg,#0a0a0f);color:var(--text,#e0e0e6);font-size:0.9rem;box-sizing:border-box;margin-bottom:0.75rem" />
+          <button id="auth-submit-btn"
+            style="width:100%;padding:0.6rem;border:none;border-radius:6px;background:var(--accent,#6366f1);color:#fff;font-size:0.9rem;cursor:pointer">
+            Connect
+          </button>
+          <p id="auth-error" style="color:#ef4444;font-size:0.8rem;margin:0.75rem 0 0;display:none"></p>
+        </div>
+      </div>`;
+    document.body.appendChild(gate);
+    const input = document.getElementById("auth-token-input");
+    const btn = document.getElementById("auth-submit-btn");
+    const err = document.getElementById("auth-error");
+    async function tryLogin() {
+      const token = input.value.trim();
+      if (!token) return;
+      btn.disabled = true;
+      btn.textContent = "Connecting...";
+      err.style.display = "none";
+      try {
+        const resp = await fetch("/trading/api/auth", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ token }),
+        });
+        if (!resp.ok) throw new Error("Invalid token");
+        localStorage.setItem(AUTH_KEY, token);
+        gate.remove();
+        document.querySelector(".shell").style.display = "";
+        bootCockpit();
+      } catch (e) {
+        err.textContent = "Invalid token. Try again.";
+        err.style.display = "block";
+        btn.disabled = false;
+        btn.textContent = "Connect";
+      }
+    }
+    btn.addEventListener("click", tryLogin);
+    input.addEventListener("keydown", (e) => { if (e.key === "Enter") tryLogin(); });
+    input.focus();
+  }
+  gate.style.display = "";
+}
+
+// Check auth on load — if no token, show gate; otherwise boot
+if (!getToken()) {
+  showLoginGate();
+} else {
+  bootCockpit();
+}
+
+function bootCockpit() {
+
 const els = {
   timestamp: document.getElementById("timestamp"),
   bestOpportunity: document.getElementById("best-opportunity"),
@@ -287,7 +374,7 @@ async function runAction(action) {
   const popup = action === "open_openclaw_dashboard" ? window.open("about:blank", "_blank") : null;
   els.actionResult.textContent = `Running ${action}...`;
   try {
-    const response = await fetch("/trading/api/action", {
+    const response = await authFetch("/trading/api/action", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ action }),
@@ -315,7 +402,7 @@ async function submitChat(text) {
   const trimmed = text.trim();
   if (!trimmed) return;
   els.actionResult.textContent = "Sending chat command...";
-  const response = await fetch("/trading/api/action", {
+  const response = await authFetch("/trading/api/action", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
@@ -334,7 +421,7 @@ async function saveLayout() {
     .filter((input) => input.checked)
     .map((input) => input.dataset.panelToggle);
   const selectedDensity = document.querySelector('input[name="density"]:checked')?.value || "dense";
-  const response = await fetch("/trading/api/action", {
+  const response = await authFetch("/trading/api/action", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
@@ -343,7 +430,7 @@ async function saveLayout() {
     }),
   });
   const panelsPayload = await response.json();
-  const densityResponse = await fetch("/trading/api/action", {
+  const densityResponse = await authFetch("/trading/api/action", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
@@ -357,9 +444,9 @@ async function saveLayout() {
 }
 
 async function resetLayout() {
-  const response = await fetch("/trading/api/settings");
+  const response = await authFetch("/trading/api/settings");
   const settings = await response.json();
-  await fetch("/trading/api/action", {
+  await authFetch("/trading/api/action", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
@@ -367,7 +454,7 @@ async function resetLayout() {
       visible_panels: settings.visible_panels || Object.keys(panelNames),
     }),
   });
-  await fetch("/trading/api/action", {
+  await authFetch("/trading/api/action", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
@@ -375,7 +462,7 @@ async function resetLayout() {
       density: settings.density || "dense",
     }),
   });
-  const snapshot = await fetch("/trading/api/state").then((result) => result.json());
+  const snapshot = await authFetch("/trading/api/state").then((result) => result.json());
   renderState(snapshot);
 }
 
@@ -423,17 +510,19 @@ els.resetLayout.addEventListener("click", () => {
   });
 });
 
-fetch("/trading/api/state")
+authFetch("/trading/api/state")
   .then((response) => response.json())
   .then(renderState)
   .catch((error) => {
     els.agentBrief.textContent = `Failed to load initial state: ${error}`;
   });
 
-const events = new EventSource("/trading/sse");
+const events = new EventSource(`/trading/sse?token=${encodeURIComponent(getToken())}`);
 events.onmessage = (event) => {
   renderState(JSON.parse(event.data));
 };
 events.onerror = () => {
   els.agentBrief.textContent = "Live update stream disconnected. Waiting for reconnect…";
 };
+
+} // end bootCockpit

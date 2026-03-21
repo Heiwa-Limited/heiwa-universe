@@ -1,7 +1,8 @@
 """FastAPI routes for Heiwa Trading cockpit.
 
 Mounted on the Hub at /trading/*.
-All endpoints require auth via HEIWA_AUTH_TOKEN.
+Static assets (HTML/CSS/JS) are public — auth is handled client-side via localStorage.
+API endpoints require Bearer auth via HEIWA_AUTH_TOKEN.
 """
 from __future__ import annotations
 
@@ -12,7 +13,7 @@ import os
 from pathlib import Path
 from typing import Any
 
-from fastapi import APIRouter, Header, HTTPException, Request
+from fastapi import APIRouter, Header, HTTPException, Query, Request
 from fastapi.responses import FileResponse, HTMLResponse, StreamingResponse
 
 from heiwa_trading.cockpit import (
@@ -41,24 +42,38 @@ def _check_auth(authorization: str | None) -> None:
         raise HTTPException(status_code=403, detail="Invalid auth token")
 
 
+# --- Static assets (public — auth handled in JS via localStorage) ---
+
 @router.get("/cockpit")
-async def cockpit_page(authorization: str | None = Header(None)):
+async def cockpit_page():
     """Serve the trading cockpit HTML."""
-    _check_auth(authorization)
     return FileResponse(WEB_DIR / "cockpit.html", media_type="text/html")
 
 
 @router.get("/cockpit.css")
-async def cockpit_css(authorization: str | None = Header(None)):
-    _check_auth(authorization)
+async def cockpit_css():
     return FileResponse(WEB_DIR / "cockpit.css", media_type="text/css")
 
 
 @router.get("/cockpit.js")
-async def cockpit_js(authorization: str | None = Header(None)):
-    _check_auth(authorization)
+async def cockpit_js():
     return FileResponse(WEB_DIR / "cockpit.js", media_type="application/javascript")
 
+
+# --- Auth validation endpoint (for the JS login gate) ---
+
+@router.post("/api/auth")
+async def validate_token(request: Request):
+    """Validate a token without exposing internals. Used by the login gate."""
+    body = await request.json()
+    token = body.get("token", "")
+    expected = os.environ.get("HEIWA_AUTH_TOKEN", "")
+    if not expected or token != expected:
+        raise HTTPException(status_code=403, detail="Invalid token")
+    return {"status": "ok"}
+
+
+# --- API endpoints (auth required) ---
 
 @router.get("/api/state")
 async def trading_state(authorization: str | None = Header(None)):
@@ -95,9 +110,15 @@ async def trading_action(request: Request, authorization: str | None = Header(No
 
 
 @router.get("/sse")
-async def trading_sse(authorization: str | None = Header(None)):
-    """SSE stream pushing cockpit state updates."""
-    _check_auth(authorization)
+async def trading_sse(token: str | None = Query(None)):
+    """SSE stream pushing cockpit state updates.
+
+    Auth via query param: /trading/sse?token=<bearer>
+    (SSE EventSource API doesn't support custom headers)
+    """
+    expected = os.environ.get("HEIWA_AUTH_TOKEN", "")
+    if not expected or not token or token != expected:
+        raise HTTPException(status_code=401, detail="Missing or invalid token")
 
     async def event_generator():
         while True:

@@ -24,40 +24,56 @@ def client():
 AUTH = {"Authorization": f"Bearer {TEST_TOKEN}"}
 
 
-def test_cockpit_rejects_without_auth(client):
+def test_cockpit_page_public(client):
+    """Static HTML is public (auth handled client-side)."""
     response = client.get("/trading/cockpit")
-    assert response.status_code == 401
-
-
-def test_cockpit_page_returns_html(client):
-    response = client.get("/trading/cockpit", headers=AUTH)
     assert response.status_code == 200
     assert "text/html" in response.headers["content-type"]
     assert "Heiwa Trading" in response.text
 
 
-def test_cockpit_css_returns_css(client):
-    response = client.get("/trading/cockpit.css", headers=AUTH)
+def test_cockpit_css_public(client):
+    response = client.get("/trading/cockpit.css")
     assert response.status_code == 200
     assert "text/css" in response.headers["content-type"]
 
 
-def test_cockpit_js_returns_js(client):
-    response = client.get("/trading/cockpit.js", headers=AUTH)
+def test_cockpit_js_public(client):
+    response = client.get("/trading/cockpit.js")
     assert response.status_code == 200
     assert "javascript" in response.headers["content-type"]
 
 
-def test_trading_state_returns_json(client):
+def test_api_state_rejects_without_auth(client):
+    response = client.get("/trading/api/state")
+    assert response.status_code == 401
+
+
+def test_api_state_returns_json(client):
     response = client.get("/trading/api/state", headers=AUTH)
     assert response.status_code == 200
     data = response.json()
     assert isinstance(data, dict)
 
 
+def test_api_auth_validates_token(client):
+    """Token validation endpoint for JS login gate."""
+    response = client.post(
+        "/trading/api/auth",
+        json={"token": TEST_TOKEN},
+    )
+    assert response.status_code == 200
+
+    response = client.post(
+        "/trading/api/auth",
+        json={"token": "wrong-token"},
+    )
+    assert response.status_code == 403
+
+
 def test_cockpit_no_mac_agent_branding(client):
     """Verify all Mac Agent branding has been removed."""
-    response = client.get("/trading/cockpit", headers=AUTH)
+    response = client.get("/trading/cockpit")
     text = response.text.lower()
     assert "mac agent" not in text
     assert "mac-agent" not in text
@@ -65,6 +81,12 @@ def test_cockpit_no_mac_agent_branding(client):
 
 def test_cockpit_css_js_paths_correct(client):
     """Verify CSS and JS references use /trading/ prefix."""
-    response = client.get("/trading/cockpit", headers=AUTH)
+    response = client.get("/trading/cockpit")
     assert "/trading/cockpit.css" in response.text
     assert "/trading/cockpit.js" in response.text
+
+
+def test_sse_rejects_without_token(client):
+    """SSE requires token query param."""
+    response = client.get("/trading/sse")
+    assert response.status_code == 401
