@@ -41,21 +41,27 @@ Five sources feed one priority queue. Everything becomes a `WorkItem` in Spaceti
 
 ```
 WorkItem {
-  id:           uuid
-  source:       "discord" | "github" | "goals" | "cron" | "system"
-  intent:       string
-  intent_class: IntentEnum       # from existing cognition pipeline
-  priority:     float            # 0.0 - 1.0
-  status:       "queued" | "active" | "done" | "failed" | "blocked"
-  created_at:   timestamp
-  started_at:   timestamp?
-  result:       string?
-  tool_used:    string?
-  parent_id:    uuid?            # if decomposed from a goal
-  issue_ref:    string?          # github issue number
-  retry_count:  int              # max 3
+  id:                 uuid
+  source:             "discord" | "github" | "goals" | "cron" | "system"
+  intent:             string
+  intent_class:       IntentEnum       # from existing cognition pipeline
+  priority:           float            # 0.0 - 1.0
+  status:             "queued" | "active" | "done" | "failed" | "blocked"
+  created_at:         timestamp
+  started_at:         timestamp?
+  result:             string?
+  tool_used:          string?
+  assigned_agent:     string?          # which provider-scoped agent is executing
+  estimated_cost_class: int?           # 1-4, set at dispatch time
+  branch_name:        string?          # git branch for autoresearch execution
+  parent_id:          uuid?            # if decomposed from another WorkItem
+  goal_id:            string?          # reference to goals.md goal (top-level intent)
+  issue_ref:          string?          # github issue number
+  retry_count:        int              # max 3
 }
 ```
+
+**Relationship to existing Proposal table:** WorkItem replaces the existing `Proposal` table in SpacetimeDB. The `MissionRecord`, `MissionStepRecord`, and `CellRunRecord` tables are also superseded — missions become goals, mission steps become WorkItems, cell runs become DecisionMemos. Migration: existing proposals are converted to WorkItems with `source: "system"` during Phase 2 deployment. Old tables are kept read-only for 30 days, then dropped.
 
 ### Priority Scoring
 
@@ -183,6 +189,7 @@ Every action the system takes gets a structured record in SpacetimeDB.
 DecisionMemo {
   id:            uuid
   work_item_id:  uuid
+  agent_id:      string        # which provider-scoped agent (claude, gemini, etc.)
   timestamp:     datetime
   intent:        string
   decision:      string
@@ -500,3 +507,111 @@ Proposed: 1 new goal suggested — review in goals.md
 - PR workflow for main-branch changes
 - Daily/weekly digest refinement
 - Final doc pass: all md files and CONTEXT.md files
+
+## Design Decisions & Clarifications
+
+### SpacetimeDB Module Strategy
+
+New tables (work_items, decision_memos, rate_budgets, trading_*) are added to the production STDB module at `apps/heiwa_hub/spacetimedb/src/lib.rs`, which already has 20+ tables (Proposals, Nodes, Runs, etc.). The scaffold module at `heiwaproductiondb/` is deleted.
+
+WorkItem replaces the existing Proposal table. MissionRecord/MissionStepRecord/CellRunRecord are superseded (missions → goals, steps → WorkItems, cell runs → DecisionMemos). During Phase 2 deployment, existing proposals are migrated to WorkItems. Old tables are kept read-only for 30 days, then dropped.
+
+### Orchestrator LLM Budget
+
+The orchestrator's core loop (ingest, score priorities, dispatch) is **entirely deterministic** — no LLM calls. Priority scoring is formulaic. Rate budget checks are arithmetic. Cron scheduling is clock-based.
+
+LLM calls are only needed for:
+- **Goal decomposition** (reading goals.md, creating GitHub Issues) — happens on goals.md change, not every tick
+- **Experiment analysis** (interpreting autoresearch results) — happens after batches of experiments, not per-experiment
+- **Discord interpretation** (understanding natural language intent from Devon) — happens on message receipt
+
+These are **WorkItems themselves**, dispatched through the same cascade. Goal decomposition is a WorkItem with `intent_class: ORCHESTRATE`. The orchestrator does not consume a separate LLM budget — it creates work that goes through the queue like everything else.
+
+When all rate groups are exhausted, the deterministic loop continues running: it ingests, scores, and discovers it cannot dispatch anything. It defers, sleeps, and notifies Devon. No LLM needed for this path.
+
+### Concurrency Model
+
+The work loop is **single-threaded and sequential** in Phase 3. One WorkItem executes at a time. The loop blocks while an agent subprocess runs.
+
+**Agent subprocess constraints:**
+- Maximum 1 concurrent subprocess (Phase 3-4 baseline)
+- Timeout: 15 minutes for standard tasks, 30 minutes for complex code tasks (configurable per intent_class)
+- Memory: Railway container limit (512MB base, scales to 2GB under Pro)
+- If a subprocess exceeds timeout, it is killed, the WorkItem is marked failed, partial changes are reverted
+
+**Parallel execution (future, not in this spec):** Phase 4 could be extended to run 2-3 non-overlapping agents concurrently (e.g., Claude on a heiwa_hub task while Gemini researches for heiwa_trading). This requires file-level lock tracking to prevent overlapping edits. Deferred — single-threaded is correct until proven insufficient.
+
+### Goals.md Write Coordination
+
+Only the Heiwa orchestrator writes to goals.md. Agents do not write directly.
+
+When an agent completes work that should update a goal (narrowing scope, updating confidence, adding notes), it returns structured metadata in its result:
+
+```python
+AgentResult {
+  work_item_id: uuid
+  output: string
+  goal_updates: GoalUpdate? {    # optional
+    goal_id: string
+    update_type: "narrow_scope" | "update_confidence" | "append_notes"
+    content: string
+    evidence: list[str]          # DecisionMemo IDs
+  }
+}
+```
+
+The orchestrator receives this result, validates the update against the agent permission rules, and writes to goals.md in a single atomic commit. No race condition — one writer, serialized through the loop.
+
+### Transport Layer for Subprocess Agents
+
+The existing `LocalBusTransport` (in-process pub/sub) is removed in Phase 4. Provider-scoped agents are subprocesses — they cannot share an in-process bus.
+
+**Replacement:** Direct subprocess invocation and result capture. The orchestrator:
+1. Creates a git branch for the task
+2. Writes a task brief to a temp file (the "program.md" equivalent)
+3. Spawns the CLI subprocess (e.g., `claude --task-file /tmp/task-brief.md`)
+4. Reads stdout/stderr for progress and result
+5. Parses the structured result (exit code + output file)
+6. Evaluates (tests pass? metric improved?)
+7. Keeps or discards the branch
+
+No IPC protocol needed. The interface is: filesystem (task brief in, code changes out) + stdout (progress) + exit code (success/failure). This is the same model Karpathy's autoresearch uses — the agent gets a file telling it what to do and modifies code in response.
+
+### Qwen/Boost Node Availability
+
+Qwen is position 6 in the cascade and is **not an always-available fallback**. When the MacBook boost node is offline, Qwen is unavailable. The effective cascade becomes positions 1-5 only.
+
+When all cloud rate groups (positions 1-5) are exhausted and the boost node is offline, work is deferred. This is the same behavior as the "All rate groups exhausted" error handler. The system does not break — it sleeps and waits for rate windows to reset.
+
+The cascade diagram is accurate as written. Qwen is listed with "(boost node only)" to make the availability constraint visible.
+
+### Skill Execution Integration
+
+Provider-scoped agents receive skill templates as part of their task brief. The orchestrator:
+1. Matches the WorkItem's intent_class to available skills in `heiwa_skills/`
+2. If a matching skill exists, includes the YAML template in the task brief
+3. The agent follows the skill template (tool calls, MCP invocations, validation steps)
+4. If no skill matches, the agent works from the raw intent description
+
+Skills are guidance, not enforcement. An agent can deviate from a skill template if the situation requires it. The DecisionMemo records whether a skill was used and whether the agent followed or deviated from it.
+
+### ACP (Agent Communication Protocol)
+
+ACP as described in END_STATE is superseded by this design. Provider-scoped agents do not communicate with each other — they communicate with the orchestrator through the subprocess result interface. The orchestrator is the sole coordinator.
+
+If agent-to-agent delegation is ever needed (e.g., Claude discovers mid-task that it needs Gemini to research something), it returns a result requesting a follow-up WorkItem. The orchestrator creates the new WorkItem and dispatches it through the normal cascade. This is sequential delegation, not peer-to-peer ACP.
+
+END_STATE_2026-03.md should be updated to reflect this change.
+
+### Phase Dependency Chain (Agent Transition)
+
+Phase 3 extracts business logic from Spine and Executor into the Heiwa orchestrator:
+- Spine's request routing → orchestrator's dispatch function
+- Spine's node registry → SpacetimeDB table + health cron function
+- Executor's HeiwaClaw invocation → extracted into a shared utility the orchestrator and future agents both call
+
+Phase 4 then:
+- Creates new provider-scoped agent subprocess wrappers that use the extracted HeiwaClaw utility
+- Deletes the now-empty Spine, Executor, Telemetry, Messenger shells
+
+Between Phases 3 and 4, the system runs with: Heiwa orchestrator (new) + Executor (legacy, for HeiwaClaw calls) + Telemetry (legacy, as cron) + Messenger (legacy, for Discord). Phase 4 completes the transition.
