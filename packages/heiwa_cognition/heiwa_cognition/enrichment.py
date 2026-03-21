@@ -6,6 +6,7 @@ from heiwa_cognition.identity import Identity, IdentitySelector
 from heiwa_cognition.router import ComputeRouter
 from heiwa_cognition.intent import IntentNormalizer
 from heiwa_cognition.risk import RiskScorer
+from heiwa_cognition.program_compiler import ProgramCompiler
 from heiwa_protocol.routing import BrokerRouteRequest, BrokerRouteResult
 from heiwa_sdk.db import Database
 from heiwa_sdk.memory import MemoryService
@@ -36,6 +37,7 @@ class BrokerEnrichmentService:
         self.scorer = RiskScorer()
         self.router = ComputeRouter()
         self._selector = identity_selector
+        self.program_compiler = ProgramCompiler()
 
         # Phase 2: Memory Layer
         self.db = Database()
@@ -90,6 +92,13 @@ class BrokerEnrichmentService:
         normalization["risk_level"] = assessment.risk_level
         normalization["identity_id"] = identity.id
 
+        # Compile typed execution program from intent + route + raw text
+        execution_program = self.program_compiler.compile(
+            profile=profile,
+            route=route,
+            raw_text=request.raw_text,
+        )
+
         return BrokerRouteResult(
             request_id=request.request_id,
             task_id=request.task_id,
@@ -113,4 +122,5 @@ class BrokerEnrichmentService:
             missing_details=profile.missing_details,
             normalization=normalization,
             context_files_json=json.dumps(context_files),
+            execution_program=execution_program,
         )
