@@ -99,6 +99,9 @@ class SpineAgent(BaseAgent):
             except Exception as e:
                 logger.warning("Broker enrichment failed for %s: %s. Falling back inline.", task_id, e)
 
+        # Save enrichment fields that TaskPlan.to_dict() would overwrite
+        _saved_execution_program = payload.get("execution_program")
+
         # --- INLINE PLANNING FALLBACK ---
         if not payload.get("steps") and payload.get("raw_text"):
             logger.info("Planning raw request for task %s...", task_id)
@@ -118,6 +121,9 @@ class SpineAgent(BaseAgent):
                     intent_profile=profile,
                 )
                 payload = task_plan.to_dict()
+                # Restore execution_program lost by TaskPlan.to_dict() overwrite
+                if _saved_execution_program:
+                    payload["execution_program"] = _saved_execution_program
                 dispatch_status_code = "DISPATCHED_PLAN"
             except Exception as e:
                 logger.error("Planning failed: %s. Direct fallback.", e)
@@ -289,6 +295,7 @@ class SpineAgent(BaseAgent):
                 "raw_text": payload.get("raw_text"),
                 "normalization": payload.get("normalization"),
                 "envelope_version": payload.get("envelope_version"),
+                "execution_program": payload.get("execution_program"),
             }
 
             # Try remote worker if task targets a non-Railway runtime

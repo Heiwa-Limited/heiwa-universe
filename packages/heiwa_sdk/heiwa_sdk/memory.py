@@ -106,8 +106,19 @@ class MemoryService:
         outcome: str,
         duration_ms: int,
         error: str | None = None,
+        execution_program_json: str | None = None,
     ) -> bool:
-        """Record task outcome in execution_memory."""
+        """Record task outcome in execution_memory.
+
+        execution_program_json is accepted for future persistence but NOT forwarded
+        to STDB — the insert_execution_memory reducer has fixed arity (6 args).
+        The program is logged here; STDB schema migration comes in v2.
+        """
+        if execution_program_json:
+            import logging
+            logging.getLogger(__name__).debug(
+                "ExecutionProgram for %s logged (STDB persistence deferred to v2)", task_id,
+            )
         return self.stdb.insert_execution_memory(
             task_dispatch_id=task_id,
             model_used=model,

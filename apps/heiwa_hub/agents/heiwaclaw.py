@@ -14,6 +14,7 @@ and ExecutorAgent (execution) into a single living entity.
 """
 
 import asyncio
+import json
 import logging
 import os
 import sys
@@ -22,6 +23,7 @@ from pathlib import Path
 from typing import Any
 
 from heiwa_hub.agents.base import BaseAgent
+from heiwa_protocol.program import ExecutionProgram
 from heiwa_protocol.protocol import Subject
 from heiwa_protocol.routing import BROKER_ENVELOPE_VERSION, BrokerRouteResult
 from heiwa_sdk import OpenClaw
@@ -281,6 +283,11 @@ class HeiwaClawAgent(BaseAgent):
         })
         dispatch = self.gateway.resolve(route)
 
+        execution_program = None
+        prog_data = payload.get("execution_program")
+        if prog_data:
+            execution_program = ExecutionProgram.from_dict(prog_data)
+
         logger.info("Processing task: %s | Intent: %s", task_id, intent_class)
         await self.speak(Subject.TASK_STATUS, {
             "accepted": True,
@@ -318,6 +325,15 @@ class HeiwaClawAgent(BaseAgent):
         elapsed = round(time.time() - start, 2)
         logger.info("Task %s finished in %ss.", task_id, elapsed)
 
+        # Advisory: validate against execution program acceptance criteria
+        # V1: does NOT override exec_status — reported separately
+        program_validation = self._validate_acceptance(execution_program, full_result)
+        if execution_program and execution_program.is_bounded() and not program_validation["passed"]:
+            logger.warning(
+                "Task %s: advisory acceptance unmet: %s",
+                task_id, program_validation["unmatched"],
+            )
+
         result_payload = {
             "task_id": task_id,
             "status": exec_status,
@@ -332,6 +348,8 @@ class HeiwaClawAgent(BaseAgent):
             "requested_by": payload.get("requested_by"),
             "response_channel_id": payload.get("response_channel_id"),
             "response_thread_id": payload.get("response_thread_id"),
+            "program_validation": program_validation,
+            "execution_program": execution_program.to_dict() if execution_program else None,
         }
 
         await self.speak(Subject.TASK_EXEC_RESULT, result_payload)
@@ -345,6 +363,7 @@ class HeiwaClawAgent(BaseAgent):
                     outcome=exec_status.lower(),
                     duration_ms=int(elapsed * 1000),
                     error=full_result if exec_status == "FAIL" else None,
+                    execution_program_json=json.dumps(execution_program.to_dict()) if execution_program else None,
                 )
             except Exception as e:
                 logger.error("Failed to record execution memory: %s", e)
@@ -649,6 +668,34 @@ class HeiwaClawAgent(BaseAgent):
     # ================================================================== #
     #  Utilities                                                          #
     # ================================================================== #
+
+    def _validate_acceptance(
+        self,
+        program: "ExecutionProgram | None",
+        output: str,
+    ) -> dict[str, Any]:
+        """Advisory check: execution output against program acceptance criteria.
+
+        V1: This is ADVISORY ONLY. It does not override exec_status.
+        Returns dict with: passed (bool), matched (list), unmatched (list).
+        """
+        if not program or not program.acceptance:
+            return {"passed": True, "matched": [], "unmatched": []}
+
+        output_lower = output.lower()
+        matched = []
+        unmatched = []
+        for criterion in program.acceptance:
+            if criterion.lower() in output_lower:
+                matched.append(criterion)
+            else:
+                unmatched.append(criterion)
+
+        return {
+            "passed": len(unmatched) == 0,
+            "matched": matched,
+            "unmatched": unmatched,
+        }
 
     @staticmethod
     def _has_background_capacity() -> bool:
