@@ -1,4 +1,8 @@
-"""Modular HeiwaClaw Gateway."""
+"""OpenClaw: Spawning/dispatch mechanism for HeiwaClaw.
+
+Resolves routing decisions to concrete adapters and executes tasks
+via Claude Code, Codex, Gemini, Antigravity, and Ollama.
+"""
 from __future__ import annotations
 
 import logging
@@ -10,10 +14,10 @@ from heiwa_protocol.routing import BrokerRouteResult
 from heiwa_sdk.provider_registry import ProviderRegistry
 from heiwa_sdk.heiwaclaw.adapters.base import BaseClawAdapter
 
-logger = logging.getLogger("SDK.HeiwaClaw")
+logger = logging.getLogger("SDK.OpenClaw")
 
 @dataclass(slots=True)
-class HeiwaClawDispatch:
+class OpenClawDispatch:
     gateway_tool: str
     adapter_tool: str
     provider: str
@@ -32,8 +36,16 @@ class HeiwaClawDispatch:
         return asdict(self)
 
 
-class HeiwaClawGateway:
-    """Unified execution gateway for all model/provider routing."""
+# Backward compatibility alias
+HeiwaClawDispatch = OpenClawDispatch
+
+
+class OpenClaw:
+    """Spawning mechanism for all model/provider routing.
+
+    This is how HeiwaClaw (the living agent) reaches out to
+    Claude Code, Codex, Gemini, Antigravity, and Ollama.
+    """
 
     def __init__(self, root_dir: Path):
         self.root = root_dir
@@ -48,7 +60,7 @@ class HeiwaClawGateway:
         from heiwa_sdk.heiwaclaw.adapters.claude import ClaudeAdapter
         from heiwa_sdk.heiwaclaw.adapters.codex import CodexAdapter
         from heiwa_sdk.heiwaclaw.adapters.acp import ACPAdapter
-        
+
         self._adapters = {
             "heiwa_reflex": ReflexAdapter(self.root),
             "heiwa_gemini": GeminiAdapter(self.root),
@@ -64,11 +76,11 @@ class HeiwaClawGateway:
         provider = self.providers.provider_for_model(route.target_model)
         return provider or "local"
 
-    def resolve(self, payload: BrokerRouteResult | dict[str, Any]) -> HeiwaClawDispatch:
+    def resolve(self, payload: BrokerRouteResult | dict[str, Any]) -> OpenClawDispatch:
         route = payload if isinstance(payload, BrokerRouteResult) else BrokerRouteResult.from_payload(payload)
-        
+
         if route.target_tool == "heiwa_ops":
-            return HeiwaClawDispatch(
+            return OpenClawDispatch(
                 gateway_tool=route.target_tool,
                 adapter_tool="heiwa_ops",
                 provider="local",
@@ -84,7 +96,7 @@ class HeiwaClawGateway:
             )
 
         if route.target_tool == "heiwa_acp":
-            return HeiwaClawDispatch(
+            return OpenClawDispatch(
                 gateway_tool=route.target_tool,
                 adapter_tool="heiwa_acp",
                 provider="remote",
@@ -102,7 +114,7 @@ class HeiwaClawGateway:
         provider = self._provider_for(route)
         provider_config = self.providers.resolve(provider)
 
-        return HeiwaClawDispatch(
+        return OpenClawDispatch(
             gateway_tool=provider_config.gateway_tool,
             adapter_tool=provider_config.adapter_tool,
             provider=provider,
@@ -126,7 +138,7 @@ class HeiwaClawGateway:
     ) -> tuple[int, str]:
         route = payload if isinstance(payload, BrokerRouteResult) else BrokerRouteResult.from_payload(payload)
         dispatch = self.resolve(route)
-        
+
         env = {
             "HEIWA_GATEWAY_TRANSPORT": dispatch.transport,
             "HEIWA_PROVIDER": dispatch.provider,
@@ -141,7 +153,6 @@ class HeiwaClawGateway:
 
         adapter = self._adapters.get(dispatch.adapter_tool)
         if not adapter:
-            # Fallback to direct execution for heiwa_ops
             if dispatch.adapter_tool == "heiwa_ops":
                 return await self._execute_direct_ops(instruction)
             return 1, f"Unknown adapter tool: {dispatch.adapter_tool}"
@@ -153,16 +164,18 @@ class HeiwaClawGateway:
             model=dispatch.target_model or None
         )
 
-        # Record usage in the rate ledger
         self._record_rate_usage(dispatch, exit_code, output)
 
         return exit_code, output
 
     async def _execute_direct_ops(self, instruction: str) -> tuple[int, str]:
-        # Implementation moved to specialized logic if needed, or kept simple here
         return 0, "Direct ops executed."
 
-    def _record_rate_usage(self, dispatch: HeiwaClawDispatch, exit_code: int, output: str):
+    def _record_rate_usage(self, dispatch: OpenClawDispatch, exit_code: int, output: str):
         from ..rate_ledger import get_rate_ledger
         ledger = get_rate_ledger()
         ledger.record(dispatch.rate_group)
+
+
+# Backward compatibility alias
+HeiwaClawGateway = OpenClaw

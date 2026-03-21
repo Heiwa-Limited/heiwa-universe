@@ -1,15 +1,15 @@
-"""Tests for HeiwaAgent memory loop and compression."""
+"""Tests for HeiwaClaw agent memory loop and compression."""
 import pytest
 from unittest.mock import MagicMock, AsyncMock, patch
 
 
 class TestHeiwaAgentMemory:
-    """Test memory loop integration in HeiwaAgent."""
+    """Test memory loop integration in HeiwaClawAgent."""
 
     def _make_agent(self):
-        with patch("heiwa_hub.agents.heiwa_agent.RepoAuditor"):
-            from heiwa_hub.agents.heiwa_agent import HeiwaAgent
-            agent = HeiwaAgent()
+        with patch("heiwa_hub.agents.heiwaclaw.RepoAuditor"):
+            from heiwa_hub.agents.heiwaclaw import HeiwaClawAgent
+            agent = HeiwaClawAgent()
             agent.db = MagicMock()
             agent.db.stdb = MagicMock()
             agent._llm = MagicMock()

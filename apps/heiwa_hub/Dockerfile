@@ -89,7 +89,7 @@ COPY pyproject.toml /app/pyproject.toml
 RUN chmod +x /app/apps/heiwa_hub/start.sh
 
 # Cloud Identity
-RUN echo '{"uuid": "heiwa-cloud-hq", "role": "orchestrator", "capabilities": ["routing", "discord", "execution", "mcp", "cli_tools"]}' > identity.json
+RUN echo '{"uuid": "heiwaclaw", "role": "orchestrator", "capabilities": ["routing", "discord", "execution", "mcp", "cli_tools", "openclaw"]}' > identity.json
 
 EXPOSE 8080
 

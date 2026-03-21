@@ -2,7 +2,7 @@
 import json
 import pytest
 from unittest.mock import MagicMock, patch, AsyncMock
-from heiwa_hub.agents.heiwa_agent import HeiwaAgent
+from heiwa_hub.agents.heiwaclaw import HeiwaClawAgent as HeiwaAgent
 from heiwa_cognition.router import ComputeRouter
 
 
@@ -11,7 +11,7 @@ class TestPhase3Integration:
 
     @pytest.mark.asyncio
     async def test_captain_triggers_audit_and_directive(self):
-        with patch("heiwa_hub.agents.heiwa_agent.RepoAuditor") as mock_auditor_cls:
+        with patch("heiwa_hub.agents.heiwaclaw.RepoAuditor") as mock_auditor_cls:
             mock_auditor = MagicMock()
             # Simulate audit failure
             mock_auditor.run_audit = AsyncMock(return_value=MagicMock(

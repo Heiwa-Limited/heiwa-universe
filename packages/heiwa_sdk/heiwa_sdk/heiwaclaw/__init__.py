@@ -1,4 +1,9 @@
-"""HeiwaClaw: Unified execution gateway."""
-from heiwa_sdk.heiwaclaw.gateway import HeiwaClawGateway, HeiwaClawDispatch
+"""OpenClaw: Spawning/dispatch mechanism for HeiwaClaw."""
+from heiwa_sdk.heiwaclaw.gateway import (
+    OpenClaw,
+    OpenClawDispatch,
+    HeiwaClawGateway,    # backward compat
+    HeiwaClawDispatch,   # backward compat
+)
 
-__all__ = ["HeiwaClawGateway", "HeiwaClawDispatch"]
+__all__ = ["OpenClaw", "OpenClawDispatch", "HeiwaClawGateway", "HeiwaClawDispatch"]

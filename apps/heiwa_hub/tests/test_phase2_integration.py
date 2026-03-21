@@ -58,11 +58,11 @@ class TestPhase2Integration:
 
     @pytest.mark.asyncio
     async def test_executor_records_memory(self):
-        from heiwa_hub.agents.executor import ExecutorAgent
+        from heiwa_hub.agents.heiwaclaw import HeiwaClawAgent as ExecutorAgent
         from heiwa_protocol.protocol import Subject
 
         mock_stdb = MagicMock()
-        with patch("heiwa_hub.agents.executor.Database") as mock_db_cls:
+        with patch("heiwa_hub.agents.heiwaclaw.Database") as mock_db_cls:
             mock_db = MagicMock()
             mock_db.stdb = mock_stdb
             mock_db_cls.return_value = mock_db

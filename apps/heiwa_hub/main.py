@@ -25,10 +25,9 @@ from heiwa_sdk.config import load_swarm_env
 load_swarm_env()
 
 from heiwa_hub.agents.spine import SpineAgent
-from heiwa_hub.agents.executor import ExecutorAgent
+from heiwa_hub.agents.heiwaclaw import HeiwaClawAgent
 from heiwa_hub.agents.messenger import MessengerAgent
 from heiwa_hub.agents.telemetry import TelemetryAgent
-from heiwa_hub.agents.heiwa_agent import HeiwaAgent
 from heiwa_hub.mcp_server import app as hub_app
 
 logging.basicConfig(
@@ -50,7 +49,7 @@ async def main():
     splash = """
     █░█ █▀▀ █ █░█░█ ▄▀█
     █▀█ ██▄ █ ▀▄▀▄▀ █▀█
-    [ HEIWA HUB v3.0 — Railway + SpacetimeDB ]
+    [ HEIWA HUB v3.0 — HeiwaClaw + OpenClaw ]
     """
     logger = logging.getLogger("Hub")
     print(splash)
@@ -96,11 +95,11 @@ async def main():
     asyncio.create_task(_register_mcp_servers())
 
     # Boot agents — all use local bus transport (no NATS)
+    # HeiwaClaw is the unified living agent (observation + execution via OpenClaw)
     try:
         spine = SpineAgent()
-        executor = ExecutorAgent()
+        heiwaclaw = HeiwaClawAgent()
         telemetry = TelemetryAgent()
-        captain = HeiwaAgent()
     except Exception as e:
         logger.error("[BOOT_FATAL] Failed to instantiate core agents: %s", e)
         sys.exit(1)
@@ -108,9 +107,8 @@ async def main():
     port = int(os.getenv("PORT", "8080"))
     tasks = [
         asyncio.create_task(spine.run()),
-        asyncio.create_task(executor.run()),
+        asyncio.create_task(heiwaclaw.run()),
         asyncio.create_task(telemetry.run()),
-        asyncio.create_task(captain.run()),
         asyncio.create_task(_start_server(port=port)),
     ]
 

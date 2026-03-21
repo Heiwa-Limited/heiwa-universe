@@ -82,8 +82,7 @@
 
   All extend BaseAgent from base.py:
   - Spine — fleet orchestration, node registry, heartbeats, request routing
-  - Executor — claims and executes tasks via HeiwaClaw + ToolMesh
-  - Captain — always-on event-driven orchestrator (Gemini Flash). Monitors health, delegates, communicates
+  - HeiwaClaw — unified living agent: observes system, DMs operator, executes tasks via OpenClaw (spawning mechanism)
   - Telemetry — system metrics collection and reporting
   - Messenger — Discord integration (optional, auto-detected)
 
@@ -95,7 +94,7 @@
 
   Execution gateway (packages/heiwa_sdk/)
 
-  - heiwaclaw.py — resolves BrokerRouteResult → HeiwaClawDispatch (tool, adapter, provider, transport)
+  - heiwaclaw/ — OpenClaw spawning mechanism: resolves BrokerRouteResult → OpenClawDispatch (tool, adapter, provider, transport)
   - tool_mesh.py — executes selected adapter with environment (heiwa_ops, heiwa_reflex)
   - routing.py — compute routing logic
   - db.py — multi-backend DB abstraction (SpacetimeDB, Postgres, SQLite via HEIWA_STATE_BACKEND)

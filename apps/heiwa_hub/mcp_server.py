@@ -26,7 +26,7 @@ from heiwa_sdk import (
     redact_any,
     load_swarm_env,
 )
-from heiwa_sdk.heiwaclaw import HeiwaClawGateway
+from heiwa_sdk.heiwaclaw import OpenClaw
 from heiwa_protocol.routing import BrokerRouteRequest
 
 from heiwa_hub.cognition.enrichment import BrokerEnrichmentService
@@ -62,7 +62,7 @@ TASK_SNAPSHOTS: dict[str, dict[str, Any]] = {}
 ROOT = Path(__file__).resolve().parents[2]
 bench = HeiwaBench(ROOT)
 cells = HeiwaCellCatalog(ROOT)
-claw_gateway = HeiwaClawGateway(ROOT)
+claw_gateway = OpenClaw(ROOT)
 WEB_ROOT = ROOT / "apps" / "heiwa_web" / "clients" / "web"
 ASSETS_ROOT = WEB_ROOT / "assets"
 
