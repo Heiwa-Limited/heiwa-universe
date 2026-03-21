@@ -13,7 +13,14 @@ from urllib.parse import urlparse
 from uuid import uuid4
 
 from heiwa_trading.config import PROJECT_ROOT
-from heiwa_trading.supervisor import build_supervisor_summary, load_supervisor_state
+from heiwa_trading.market_data import fetch_markets
+from heiwa_trading.supervisor import (
+    build_supervisor_summary,
+    create_supervisor_state,
+    load_supervisor_state,
+    save_supervisor_state,
+    supervisor_tick,
+)
 
 
 def resolve_agent_root(project_root: Path) -> Path:
@@ -264,6 +271,9 @@ def _run_mac_agent_command(root_dir: Path, *args: str) -> str:
 
 
 def load_market_supervisor_status(root_dir: Path) -> dict[str, object]:
+    # On Railway (or any env without mac-agent binary), skip the subprocess call
+    if not (root_dir / "bin" / "mac-agent").exists():
+        return {"running": False, "mode": "on-demand"}
     try:
         return _safe_json_loads(_run_mac_agent_command(root_dir, "market-supervisor", "status"))
     except Exception:
@@ -348,48 +358,38 @@ def build_cockpit_snapshot(root_dir: Path = MAC_AGENT_ROOT) -> dict[str, object]
     return snapshot
 
 
+def _do_tick() -> dict[str, object]:
+    """Run a supervisor tick using the Python engine directly."""
+    from datetime import datetime, timezone
+
+    state = load_supervisor_state()
+    markets = fetch_markets()
+    ts = datetime.now(timezone.utc).isoformat()
+    new_state, summary = supervisor_tick(state=state, markets=markets, timestamp=ts)
+    save_supervisor_state(new_state)
+    return summary
+
+
 def run_cockpit_action(root_dir: Path, *, action: str, payload: dict[str, object] | None = None) -> dict[str, object]:
     payload = payload or {}
     if action == "tick_now":
-        try:
-            output = _run_mac_agent_command(root_dir, "polymarket", "supervisor", "tick", "--limit", "25")
-        except Exception:
-            output = ""
-        return {"action": action, "result": _safe_json_loads(output)}
+        summary = _do_tick()
+        return {"action": action, "result": summary}
     if action == "init_cohort":
-        try:
-            output = _run_mac_agent_command(root_dir, "polymarket", "supervisor", "init")
-        except Exception:
-            output = ""
-        return {"action": action, "result": _safe_json_loads(output)}
-    if action == "start_supervisor":
-        try:
-            output = _run_mac_agent_command(root_dir, "market-supervisor", "start")
-        except Exception:
-            output = ""
-        return {"action": action, "result": _safe_json_loads(output)}
-    if action == "stop_supervisor":
-        try:
-            output = _run_mac_agent_command(root_dir, "market-supervisor", "stop")
-        except Exception:
-            output = ""
-        return {"action": action, "result": _safe_json_loads(output)}
-    if action == "restart_supervisor":
-        try:
-            _run_mac_agent_command(root_dir, "market-supervisor", "stop")
-            output = _run_mac_agent_command(root_dir, "market-supervisor", "start")
-        except Exception:
-            output = ""
-        return {"action": action, "result": _safe_json_loads(output)}
-    if action == "open_openclaw_dashboard":
-        try:
-            output = _run_mac_agent_command(root_dir, "dashboard", "--no-open")
-        except Exception:
-            output = ""
+        state = load_supervisor_state()
+        fresh = create_supervisor_state(policy=state.policy)
+        save_supervisor_state(fresh)
+        return {"action": action, "result": {"message": "New supervisor state initialized"}}
+    if action in ("start_supervisor", "stop_supervisor", "restart_supervisor"):
         return {
             "action": action,
-            "dashboard_url": parse_dashboard_url(output),
-            "result": output.strip(),
+            "result": {"message": f"{action} is not applicable — supervisor runs on-demand via tick"},
+        }
+    if action == "open_openclaw_dashboard":
+        return {
+            "action": action,
+            "dashboard_url": None,
+            "result": "OpenClaw is not available on Railway",
             "openclaw": load_openclaw_status(),
         }
     if action == "submit_chat":

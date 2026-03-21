@@ -22,7 +22,7 @@ from heiwa_trading.cockpit import (
     load_cockpit_settings,
     run_cockpit_action,
 )
-from heiwa_trading.supervisor import supervisor_tick, load_supervisor_state
+from heiwa_trading.supervisor import supervisor_tick, load_supervisor_state, save_supervisor_state
 from heiwa_trading.market_data import fetch_markets
 
 logger = logging.getLogger("Trading.Routes")
@@ -103,7 +103,8 @@ async def trading_action(request: Request, authorization: str | None = Header(No
         state = load_supervisor_state()
         markets = fetch_markets()
         ts = datetime.now(timezone.utc).isoformat()
-        _new_state, summary = supervisor_tick(state=state, markets=markets, timestamp=ts)
+        new_state, summary = supervisor_tick(state=state, markets=markets, timestamp=ts)
+        save_supervisor_state(new_state)
         return {
             "status": "ok",
             "action": action,
