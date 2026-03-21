@@ -8,7 +8,10 @@ function stateBadgeClass(state) {
 
 function humanPlatform(platform) {
   if (!platform) return "Domain routing data unavailable.";
-  return `DNS on ${platform.dns}, public web on ${platform.public_web}, and control plane on ${platform.control_plane}.`;
+  const state = platform.state_endpoint
+    ? ` State ledger on ${platform.state_endpoint}.`
+    : "";
+  return `DNS on ${platform.dns}, public web on ${platform.public_web}, and control plane on ${platform.control_plane}.${state}`;
 }
 
 function renderDomainCards(domains) {

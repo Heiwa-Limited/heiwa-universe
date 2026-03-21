@@ -16,7 +16,12 @@ from heiwa_trading.config import PROJECT_ROOT
 from heiwa_trading.supervisor import build_supervisor_summary, load_supervisor_state
 
 
-MAC_AGENT_ROOT = PROJECT_ROOT.parents[1]
+def resolve_agent_root(project_root: Path) -> Path:
+    """Map an app-local project root to the broader workspace root when available."""
+    return project_root.parents[1] if len(project_root.parents) > 1 else project_root
+
+
+MAC_AGENT_ROOT = resolve_agent_root(PROJECT_ROOT)
 WEB_DIR = Path(__file__).resolve().parent / "web"
 LOG_DIR = Path.home() / ".heiwa" / "logs"
 OPENCLAW_STATE_DIR = Path.home() / ".heiwa" / "openclaw"

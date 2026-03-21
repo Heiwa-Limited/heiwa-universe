@@ -197,6 +197,6 @@ command -v codex    && echo "  codex:    available" || echo "  codex:    not ins
 
 # Ensure PYTHONPATH includes all monorepo packages.
 # Dockerfile ENV sets this, but Railway's startCommand override may not inherit it.
-export PYTHONPATH="/app/packages/heiwa_cli:/app/packages/heiwa_cognition:/app/packages/heiwa_sdk:/app/packages/heiwa_protocol:/app/packages/heiwa_identity:/app/packages/heiwa_ui:/app/apps:/app/apps/heiwa_trading/src:${PYTHONPATH:-}"
+export PYTHONPATH="/app/packages/heiwa_cli:/app/packages/heiwa_cognition:/app/packages/heiwa_sdk:/app/packages/heiwa_protocol:/app/packages/heiwa_identity:/app/packages/heiwa_ui:/app/apps:${PYTHONPATH:-}"
 
 exec python -m apps.heiwa_hub.main

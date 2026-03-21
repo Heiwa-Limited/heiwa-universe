@@ -56,6 +56,15 @@ def test_api_state_returns_json(client):
     assert isinstance(data, dict)
 
 
+def test_api_settings_returns_json(client):
+    response = client.get("/trading/api/settings", headers=AUTH)
+    assert response.status_code == 200
+    data = response.json()
+    assert isinstance(data, dict)
+    assert "visible_panels" in data
+    assert "density" in data
+
+
 def test_api_auth_validates_token(client):
     """Token validation endpoint for JS login gate."""
     response = client.post(

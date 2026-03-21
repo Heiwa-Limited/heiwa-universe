@@ -1,6 +1,5 @@
-"""FastAPI routes for Heiwa Trading cockpit.
+"""FastAPI routes for the Heiwa Trading cockpit service.
 
-Mounted on the Hub at /trading/*.
 Static assets (HTML/CSS/JS) are public — auth is handled client-side via localStorage.
 API endpoints require Bearer auth via HEIWA_AUTH_TOKEN.
 """
@@ -17,8 +16,11 @@ from fastapi import APIRouter, Header, HTTPException, Query, Request
 from fastapi.responses import FileResponse, HTMLResponse, StreamingResponse
 
 from heiwa_trading.cockpit import (
+    MAC_AGENT_ROOT,
     build_cockpit_snapshot,
     append_cockpit_chat_message,
+    load_cockpit_settings,
+    run_cockpit_action,
 )
 from heiwa_trading.supervisor import supervisor_tick, load_supervisor_state
 from heiwa_trading.market_data import fetch_markets
@@ -83,30 +85,41 @@ async def trading_state(authorization: str | None = Header(None)):
     return snapshot
 
 
+@router.get("/api/settings")
+async def trading_settings(authorization: str | None = Header(None)):
+    """Return persisted cockpit settings for the current operator."""
+    _check_auth(authorization)
+    return load_cockpit_settings()
+
+
 @router.post("/api/action")
 async def trading_action(request: Request, authorization: str | None = Header(None)):
     """Handle operator control actions (tick, init cohort, etc.)."""
     _check_auth(authorization)
     body = await request.json()
     action = body.get("action", "")
-    result: dict[str, object] = {"status": "ok", "action": action}
-
     if action == "tick":
         from datetime import datetime, timezone
         state = load_supervisor_state()
         markets = fetch_markets()
         ts = datetime.now(timezone.utc).isoformat()
-        new_state, summary = supervisor_tick(state=state, markets=markets, timestamp=ts)
-        result["message"] = "Tick completed"
-        result["summary"] = summary
-    elif action == "chat":
+        _new_state, summary = supervisor_tick(state=state, markets=markets, timestamp=ts)
+        return {
+            "status": "ok",
+            "action": action,
+            "message": "Tick completed",
+            "summary": summary,
+        }
+    if action == "chat":
         text = body.get("text", "")
         append_cockpit_chat_message(role="operator", text=text)
-        result["message"] = f"Chat: {text}"
-    else:
-        result["status"] = "unknown_action"
+        return {"status": "ok", "action": action, "message": f"Chat: {text}"}
 
-    return result
+    try:
+        result = run_cockpit_action(MAC_AGENT_ROOT, action=str(action), payload=dict(body))
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return {"status": "ok", **result}
 
 
 @router.get("/sse")

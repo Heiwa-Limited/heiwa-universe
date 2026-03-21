@@ -8,7 +8,8 @@ Polymarket paper-trading tournament engine. Scans prediction markets, scores opp
 
 | File | Purpose |
 |------|---------|
-| `routes.py` | FastAPI router mounted on Hub at `/trading/*` |
+| `routes.py` | FastAPI router for the cockpit/API surface |
+| `app.py` | Standalone FastAPI service entrypoint for `trade.heiwa.ltd` |
 | `supervisor.py` | Market supervisor — called as a function, not a daemon |
 | `cockpit.py` | State builder, SSE helper functions |
 | `strategy.py` | Scoring engine (EV, Kelly, Bayes, log-odds) |
@@ -23,7 +24,7 @@ Polymarket paper-trading tournament engine. Scans prediction markets, scores opp
 
 ## How It Runs
 
-The cockpit is served via the Hub's FastAPI at `/trading/cockpit`. The supervisor is called as a Python function — in Phase 3 this becomes a cron-triggered WorkItem in Heiwa's work loop.
+The dedicated trading service owns `trade.heiwa.ltd`. It serves the cockpit at `/` and exposes the cockpit/API routes under `/trading/*` for the current UI contract. The hub does not mount this surface anymore. The supervisor is called as a Python function — in Phase 3 this becomes a cron-triggered WorkItem in Heiwa's work loop.
 
 ## State
 

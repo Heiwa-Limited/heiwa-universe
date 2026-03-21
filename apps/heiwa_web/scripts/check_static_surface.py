@@ -41,8 +41,18 @@ def check_domain_manifest(path: Path) -> list[str]:
     if public_web != "cloudflare_pages":
         problems.append(f"{path}: expected platform.public_web to be 'cloudflare_pages', got {public_web!r}")
 
+    platform = data.get("platform", {})
+    if platform.get("state_ledger") != "spacetimedb_maincloud":
+        problems.append(
+            f"{path}: expected platform.state_ledger to be 'spacetimedb_maincloud', got {platform.get('state_ledger')!r}"
+        )
+    if platform.get("state_endpoint") != "maincloud.spacetimedb.com":
+        problems.append(
+            f"{path}: expected platform.state_endpoint to be 'maincloud.spacetimedb.com', got {platform.get('state_endpoint')!r}"
+        )
+
     hosts = {entry.get("host") for entry in data.get("domains", [])}
-    expected_hosts = {"heiwa.ltd", "status.heiwa.ltd", "api.heiwa.ltd", "docs.heiwa.ltd"}
+    expected_hosts = {"heiwa.ltd", "status.heiwa.ltd", "api.heiwa.ltd", "trade.heiwa.ltd", "docs.heiwa.ltd"}
     missing = sorted(expected_hosts - hosts)
     if missing:
         problems.append(f"{path}: missing expected hosts {', '.join(missing)}")
@@ -76,10 +86,10 @@ def main() -> int:
     problems.extend(
         require_contains(
             WEB_ROOT / "index.html",
-            "CLI, MCP, HTTP API, and docs",
+            "Your AI. Your rules. One system.",
+            "Personal AI OS",
             "Railway",
             "SpacetimeDB",
-            "WebSockets first",
         )
     )
     problems.extend(
@@ -117,7 +127,8 @@ def main() -> int:
         require_contains(
             WEB_ROOT / "domains.html",
             "Cloudflare Pages",
-            "Railway runtime",
+            "split Railway services",
+            "maincloud",
             "domains.js",
         )
     )

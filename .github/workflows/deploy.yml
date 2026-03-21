@@ -138,14 +138,25 @@ jobs:
       - repo-hygiene
       - web-static-checks
     if: github.ref == 'refs/heads/main'
+    env:
+      ENABLE_TRADING_DEPLOY: ${{ vars.ENABLE_TRADING_DEPLOY }}
     steps:
       - uses: actions/checkout@v4
       - name: Install Railway CLI
         run: npm i -g @railway/cli
-      - name: Deploy Swarm
+      - name: Deploy hub service
         run: railway up --service heiwa-cloud-hq --detach
         env:
           RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
+      - name: Deploy trading service
+        if: env.ENABLE_TRADING_DEPLOY == 'true'
+        working-directory: apps/heiwa_trading
+        run: railway up --service heiwa-trading --detach
+        env:
+          RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
+      - name: Skip trading deploy (service not enabled)
+        if: env.ENABLE_TRADING_DEPLOY != 'true'
+        run: echo "ENABLE_TRADING_DEPLOY is not true — skipping heiwa-trading deploy"
       - name: Set up Python for Checks
         uses: actions/setup-python@v5
         with:
@@ -155,7 +166,7 @@ jobs:
         run: pip install requests
       - name: Await Deployment (Sleep)
         run: sleep 45
-      - name: Verify public runtime endpoints
+      - name: Verify hub runtime endpoints
         run: |
           python - <<'PY'
           import requests
@@ -177,6 +188,18 @@ jobs:
 
           if failures:
               raise SystemExit("\n".join(failures))
+          PY
+      - name: Verify trading runtime endpoint
+        if: env.ENABLE_TRADING_DEPLOY == 'true'
+        run: |
+          python - <<'PY'
+          import requests
+
+          url = "https://trade.heiwa.ltd/health"
+          response = requests.get(url, timeout=15)
+          print(f"{url} -> HTTP {response.status_code}")
+          if response.status_code >= 400:
+              raise SystemExit(f"{url} returned HTTP {response.status_code}")
           PY
 
   deploy-web:

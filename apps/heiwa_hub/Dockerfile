@@ -37,7 +37,7 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
     PATH="/opt/venv/bin:/usr/local/bin:/root/.local/bin:$PATH" \
     LOG_LEVEL="INFO" \
-    PYTHONPATH="/app/packages/heiwa_cli:/app/packages/heiwa_cognition:/app/packages/heiwa_sdk:/app/packages/heiwa_protocol:/app/packages/heiwa_identity:/app/packages/heiwa_ui:/app/apps:/app/apps/heiwa_trading/src" \
+    PYTHONPATH="/app/packages/heiwa_cli:/app/packages/heiwa_cognition:/app/packages/heiwa_sdk:/app/packages/heiwa_protocol:/app/packages/heiwa_identity:/app/packages/heiwa_ui:/app/apps" \
     NODE_OPTIONS="--max-old-space-size=256" \
     SPACETIMEDB_HOME="/app/.spacetime"
 
@@ -80,7 +80,6 @@ COPY packages/ /app/packages/
 COPY config/ /app/config/
 COPY policies/ /app/policies/
 COPY apps/heiwa_hub/ /app/apps/heiwa_hub/
-COPY apps/heiwa_trading/ /app/apps/heiwa_trading/
 COPY apps/heiwa_web/clients/web/ /app/apps/heiwa_web/clients/web/
 COPY requirements.txt /app/requirements.txt
 COPY conftest.py /app/conftest.py

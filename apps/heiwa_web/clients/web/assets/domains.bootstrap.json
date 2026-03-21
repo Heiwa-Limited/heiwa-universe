@@ -1,12 +1,14 @@
 {
-  "version": 1,
+  "version": 2,
   "generated_from": "config/swarm/domain_plan.md",
   "root_domain": "heiwa.ltd",
   "platform": {
     "dns": "cloudflare",
     "public_web": "cloudflare_pages",
     "control_plane": "railway",
-    "edge_security": "cloudflare_waf"
+    "edge_security": "cloudflare_waf",
+    "state_ledger": "spacetimedb_maincloud",
+    "state_endpoint": "maincloud.spacetimedb.com"
   },
   "domains": [
     {
@@ -26,9 +28,16 @@
     {
       "host": "api.heiwa.ltd",
       "purpose": "Runtime API + MCP ingress",
-      "target": "Railway service domain behind Cloudflare proxy/WAF",
+      "target": "Railway heiwa-cloud-hq service behind Cloudflare proxy/WAF",
       "state": "active",
       "health_path": "/health"
+    },
+    {
+      "host": "trade.heiwa.ltd",
+      "purpose": "Dedicated trading cockpit",
+      "target": "Railway heiwa-trading service behind Cloudflare proxy/WAF",
+      "state": "active",
+      "health_path": "/"
     },
     {
       "host": "docs.heiwa.ltd",
@@ -56,7 +65,14 @@
     {
       "type": "CNAME",
       "name": "api",
-      "value": "Railway service domain",
+      "value": "Railway heiwa-cloud-hq service domain",
+      "proxy": true,
+      "ttl": "auto"
+    },
+    {
+      "type": "CNAME",
+      "name": "trade",
+      "value": "Railway heiwa-trading service domain",
       "proxy": true,
       "ttl": "auto"
     },
@@ -71,8 +87,10 @@
   "bootstrap_steps": [
     "Point heiwa.ltd and status.heiwa.ltd at the Cloudflare Pages marketing/status project.",
     "Point docs.heiwa.ltd at the Cloudflare Pages docs project built from MkDocs Material.",
-    "Attach api.heiwa.ltd to the Railway hub service and enforce Cloudflare proxy/WAF.",
-    "Enable strict TLS and baseline WAF rules for api.heiwa.ltd.",
-    "Run post-cutover checks for /health, /status, and public page endpoints."
+    "Attach api.heiwa.ltd to the Railway heiwa-cloud-hq service and enforce Cloudflare proxy/WAF.",
+    "Attach trade.heiwa.ltd directly to the Railway heiwa-trading service with its own proxied DNS target.",
+    "Keep SpacetimeDB external on maincloud.spacetimedb.com rather than modeling it as a Railway service or volume.",
+    "Enable strict TLS and baseline WAF rules for api.heiwa.ltd and trade.heiwa.ltd.",
+    "Run post-cutover checks for api.heiwa.ltd/health, status.heiwa.ltd, trade.heiwa.ltd, and public page endpoints."
   ]
 }

@@ -2,6 +2,7 @@ import asyncio
 import json
 import logging
 import time
+from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Any, Dict
 
@@ -37,7 +38,20 @@ from heiwa_protocol.protocol import Subject
 load_swarm_env()
 
 logger = logging.getLogger("Hub.MCP")
-app = FastAPI(title="Heiwa Core MCP Server")
+
+
+@asynccontextmanager
+async def _lifespan(application: FastAPI):
+    # Register event bus listeners for task snapshots
+    bus = get_bus()
+    await bus.subscribe(Subject.TASK_STATUS, _record_status_event)
+    await bus.subscribe(Subject.TASK_EXEC_RESULT, _record_result_event)
+    await bus.subscribe(Subject.TASK_PROGRESS, _record_progress_event)
+    application.state._task_snapshot_listeners = True
+    yield
+
+
+app = FastAPI(title="Heiwa Core MCP Server", lifespan=_lifespan)
 db = Database()
 state = HubStateService(db)
 mcp_bridge = MCPBridge()
@@ -204,17 +218,6 @@ async def _record_progress_event(envelope: Dict[str, Any]):
     _snapshot_task(task_id, progress=payload.get("content") or payload.get("message"))
 
 
-@app.on_event("startup")
-async def _register_task_snapshot_listeners():
-    if getattr(app.state, "_task_snapshot_listeners", False):
-        return
-    bus = get_bus()
-    await bus.subscribe(Subject.TASK_STATUS, _record_status_event)
-    await bus.subscribe(Subject.TASK_EXEC_RESULT, _record_result_event)
-    await bus.subscribe(Subject.TASK_PROGRESS, _record_progress_event)
-    app.state._task_snapshot_listeners = True
-
-
 async def _check_stdb_health() -> bool:
     """Verify STDB connectivity with 2-second timeout."""
     if db.state_backend != "spacetimedb" or not db.stdb:
@@ -258,13 +261,6 @@ async def health():
 @app.get("/")
 @app.head("/")
 async def root(request: Request):
-    # trade.heiwa.ltd serves the trading cockpit at /
-    host = (request.headers.get("host") or "").split(":")[0].lower()
-    if host == "trade.heiwa.ltd":
-        trading_web = Path(__file__).resolve().parents[2] / "apps" / "heiwa_trading" / "src" / "heiwa_trading" / "web"
-        cockpit = trading_web / "cockpit.html"
-        if cockpit.exists():
-            return FileResponse(cockpit, media_type="text/html")
     index = _web_file("index.html")
     if index:
         return FileResponse(index)
@@ -967,14 +963,6 @@ async def worker_socket(ws: WebSocket):
         logger.error("Worker socket error: %s", exc)
         if worker_id:
             wm.unregister(worker_id)
-
-
-try:
-    from heiwa_trading.routes import router as trading_router
-    app.include_router(trading_router)
-    logger.info("Trading routes mounted at /trading/*")
-except ImportError:
-    logger.info("heiwa_trading not available, trading routes disabled")
 
 
 def start_mcp_server():
