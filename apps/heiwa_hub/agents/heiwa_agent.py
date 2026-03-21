@@ -47,7 +47,7 @@ class HeiwaAgent(BaseAgent):
         self.memory = MemoryService(stdb=self.db.stdb) if self.db.stdb else None
         self._llm = None
         self._last_status_broadcast = 0.0
-        self._last_audit = 0.0
+        self._last_audit = time.time()  # Delay first audit — don't fire on startup
         self._last_tuning = 0.0
         self._last_prune = 0.0
         self._task_results: list[dict[str, Any]] = []

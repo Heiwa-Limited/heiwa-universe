@@ -574,9 +574,17 @@ class MessengerAgent(BaseAgent):
             chan = self.bot.get_channel(cid)
             if chan: await chan.send(embed=UIManager.create_thought_embed(agent, thought, task_id))
 
+    _telemetry_last_post: float = 0.0
+    _TELEMETRY_POST_INTERVAL = 300  # Only post telemetry to Discord every 5 minutes
+
     async def handle_telemetry(self, data: dict[str, Any]):
-        """Post system metrics to the swarm-telemetry channel."""
+        """Post system metrics to the swarm-telemetry channel (rate-limited to every 5 min)."""
         if not self.bot.is_ready(): return
+
+        now = time.time()
+        if now - self._telemetry_last_post < self._TELEMETRY_POST_INTERVAL:
+            return  # Suppress — too soon since last post
+
         payload = self._unwrap(data)
         node_id = payload.get("node_id", "unknown")
         agent_name = payload.get("agent_name", "unknown")
@@ -584,26 +592,26 @@ class MessengerAgent(BaseAgent):
         ram = payload.get("ram_pct", 0)
         ram_used = payload.get("ram_used_gb", 0)
         ram_total = payload.get("ram_total_gb", 0)
-        
+
         cid = self._get_channel_id("swarm-telemetry")
         if cid:
             chan = self.bot.get_channel(cid)
             if chan:
-                # Use professional UI for telemetry
                 embed = UIManager.create_base_embed(
                     f"Node Status: {node_id}",
                     f"Active Agent: `{agent_name}`",
                     status="online",
                     metrics={"cpu": cpu, "ram": ram},
                     snapshot={
-                        "railway": "Operational", 
-                        "node_id": node_id, 
-                        "provider": f"System Poll ({agent_name})", 
+                        "railway": "Operational",
+                        "node_id": node_id,
+                        "provider": f"System Poll ({agent_name})",
                         "tokens": 0
                     }
                 )
                 embed.add_field(name="Memory Details", value=f"`{ram_used} GB` / `{ram_total} GB`", inline=True)
                 await chan.send(embed=embed)
+                self._telemetry_last_post = now
 
     async def handle_exec_result(self, data: dict[str, Any]) -> None:
         if not self.bot.is_ready(): return

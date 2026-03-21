@@ -56,6 +56,10 @@ class RepoAuditor:
     async def _run_ollama_audit(self) -> str:
         """Use local LLM to perform a high-level structural health check."""
         try:
+            # Only run LLM audit when local Ollama is available — skip on Railway
+            # to avoid burning Gemini API quota on a cosmetic "vibe check"
+            if os.environ.get("RAILWAY_ENVIRONMENT") or os.environ.get("RAILWAY_PROJECT_ID"):
+                return ""
             from heiwa_cognition.llm import LocalLLMEngine
             llm = LocalLLMEngine()
             if not llm.is_available():

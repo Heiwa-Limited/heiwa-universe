@@ -20,14 +20,16 @@ class CostEstimator:
     }
 
     @staticmethod
-    def calculate(model_id: str, input_tokens: int, output_tokens: int) -> float:
+    def calculate(model_id: str | None, input_tokens: int, output_tokens: int) -> float:
+        if not model_id:
+            return 0.0
         # Find best match in pricing table
         rate = None
         for key, val in CostEstimator.PRICING.items():
             if model_id.startswith(key):
                 rate = val
                 break
-        
+
         if not rate:
             # Default to a safe high estimate for unknown cloud models
             if any(p in model_id for p in ["google", "openai", "anthropic", "groq"]):

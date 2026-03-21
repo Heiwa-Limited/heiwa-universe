@@ -200,8 +200,8 @@ class LocalLLMEngine:
     _GEMINI_RATE_GROUP = "google_gemini_api"
 
     @retry(
-        stop=stop_after_attempt(1),
-        wait=wait_exponential(multiplier=1, min=1, max=5),
+        stop=stop_after_attempt(3),
+        wait=wait_exponential(multiplier=2, min=2, max=30),
         retry=retry_if_exception_type(requests.exceptions.HTTPError),
     )
     def _call_gemini(

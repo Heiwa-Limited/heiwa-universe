@@ -35,12 +35,15 @@ class SpineAgent(BaseAgent):
 
         logger.info("Spine active. Monitoring fleet...")
 
+        fleet_log_counter = 0
         try:
             while self.running:
                 self._prune_registry()
                 self.approvals.prune()
-                if self.fleet_registry:
+                fleet_log_counter += 1
+                if self.fleet_registry and fleet_log_counter >= 30:  # Log every 5 min (30 × 10s)
                     logger.info("Fleet: %d active node(s).", len(self.fleet_registry))
+                    fleet_log_counter = 0
                 await asyncio.sleep(10)
         except KeyboardInterrupt:
             await self.shutdown()
