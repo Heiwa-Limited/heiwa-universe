@@ -49,11 +49,22 @@ class HeiwaBench:
         return current
 
     def _run_routing_case(self, case: dict[str, Any]) -> tuple[dict[str, Any], list[BenchFailure]]:
+        import asyncio
         from heiwa_hub.cognition.enrichment import BrokerEnrichmentService
 
         request = BrokerRouteRequest.from_payload(case.get("request") or {})
         enrichment = BrokerEnrichmentService()
-        result = enrichment.enrich(request)
+        coro = enrichment.enrich(request)
+        try:
+            loop = asyncio.get_running_loop()
+        except RuntimeError:
+            loop = None
+        if loop and loop.is_running():
+            import concurrent.futures
+            with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
+                result = pool.submit(asyncio.run, coro).result()
+        else:
+            result = asyncio.run(coro)
         dispatch = self.gateway.resolve(result)
         actual = {"route": result.to_dict(), "dispatch": dispatch.to_dict()}
         failures: list[BenchFailure] = []

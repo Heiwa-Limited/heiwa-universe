@@ -58,7 +58,7 @@ _INTENT_RULES = (
     # --- Domain-specific intents ---
     ("mesh_ops", ("mesh", "nodes", "sync", "connection", "throughput", "latency"), "medium", True),
     ("self_buff", ("improve", "optimize", "refactor yourself", "buff", "sota", "upgrade"), "high", True),
-    ("chat", ("hi", "hello", "hey", "wsg", "sup", "ping"), "low", False),
+    ("chat", ("hi", "hello", "hey", "yo", "wsg", "sup", "ping", "gm", "hola", "howdy", "what's up", "whats up", "wassup"), "low", False),
     ("automate", ("automate", "workflow", "schedule", "cron", "monitor", "trigger"), "medium", True),
     ("strategy", ("strategy", "architect", "roadmap", "proposal", "design"), "medium", False),
     ("research", ("research", "analyze", "compare", "summarize", "investigate"), "low", False),

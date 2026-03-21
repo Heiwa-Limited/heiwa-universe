@@ -1,3 +1,4 @@
+import asyncio
 import json
 import logging
 import os
@@ -266,20 +267,53 @@ class MessengerAgent(BaseAgent):
         if message.author == self.bot.user or message.author.bot:
             return
 
-        # STDB Identity Trace: Record interaction for trust and context tracking
+        is_dm = message.guild is None
+
+        # ── DM FAST PATH ──────────────────────────────────────────────
+        # DMs go straight to HeiwaAgent. No intent classification, no
+        # task pipeline, no STDB subprocess calls blocking the response.
+        # HeiwaAgent handles conversation, memory, and LLM routing.
+        if is_dm:
+            content = self._extract_full_content(message)
+            if not content:
+                return
+            logger.info("DM from %s → HeiwaAgent: %s", message.author, content[:80])
+            await self._publish_raw(Subject.HEIWA_AGENT_INGRESS.value, {
+                "content": content,
+                "author": str(message.author),
+                "channel_id": message.channel.id,
+            })
+            # Fire-and-forget STDB tracking (don't block the response)
+            asyncio.create_task(self._track_identity(message))
+            return
+
+        # ── SERVER MESSAGES ────────────────────────────────────────────
+        # STDB Identity Trace
         user_id = message.author.id
         username = str(message.author)
-        # Admins get immediate trust tier 1.0 (Enterprise logic)
         trust = 1.0 if any(role.name.lower() in ["admin", "operator", "heiwa admin"] for role in getattr(message.author, 'roles', [])) else 0.5
-        
+
         self.db.stdb.call("upsert_discord_user", user_id, username, trust)
         self.db.stdb.call("record_interaction", user_id, message.channel.id, "chat")
 
-        # Implicit Listener (Zero-Mention)
         if self.conversational_mode and self._should_consume_conversation(message):
             full_content = self._extract_full_content(message)
             if full_content:
                 await self._ingest_interaction(full_content, message, explicit=False)
+
+    async def _track_identity(self, message: discord.Message) -> None:
+        """Fire-and-forget STDB identity tracking for DMs."""
+        try:
+            user_id = message.author.id
+            username = str(message.author)
+            trust = 1.0 if any(
+                role.name.lower() in ["admin", "operator", "heiwa admin"]
+                for role in getattr(message.author, 'roles', [])
+            ) else 0.5
+            self.db.stdb.call("upsert_discord_user", user_id, username, trust)
+            self.db.stdb.call("record_interaction", user_id, message.channel.id, "chat")
+        except Exception as exc:
+            logger.debug("STDB identity tracking failed (non-blocking): %s", exc)
 
     def _extract_full_content(self, message: discord.Message) -> str:
         parts = []

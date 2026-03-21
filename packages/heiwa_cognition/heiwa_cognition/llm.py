@@ -33,6 +33,12 @@ try:
 except ImportError:
     _NET_PROXY = None
 
+try:
+    from heiwa_sdk.rate_ledger import get_rate_ledger
+    _RATE_LEDGER = get_rate_ledger()
+except ImportError:
+    _RATE_LEDGER = None
+
 logger = logging.getLogger("LLMEngine")
 
 
@@ -84,7 +90,7 @@ class LocalLLMEngine:
         self.gemini_pro_model = os.getenv(
             "HEIWA_GEMINI_PRO_MODEL", "gemini-2.5-pro"
         )
-        self.gemini_timeout = float(os.getenv("HEIWA_GEMINI_TIMEOUT_SEC", "30"))
+        self.gemini_timeout = float(os.getenv("HEIWA_GEMINI_TIMEOUT_SEC", "15"))
 
         # --- Rate limiting (optional Redis) ---
         self._redis = None
@@ -191,9 +197,11 @@ class LocalLLMEngine:
             text=text, provider="ollama-local-http", model=self.ollama_model, tier=1
         )
 
+    _GEMINI_RATE_GROUP = "google_gemini_api"
+
     @retry(
-        stop=stop_after_attempt(2),
-        wait=wait_exponential(multiplier=2, min=2, max=30),
+        stop=stop_after_attempt(1),
+        wait=wait_exponential(multiplier=1, min=1, max=5),
         retry=retry_if_exception_type(requests.exceptions.HTTPError),
     )
     def _call_gemini(
@@ -203,6 +211,11 @@ class LocalLLMEngine:
         tier: int,
         system: Optional[str] = None,
     ) -> LLMResult:
+        # Check rate ledger before calling
+        if _RATE_LEDGER and not _RATE_LEDGER.has_capacity(self._GEMINI_RATE_GROUP):
+            logger.warning("Gemini rate-limited by ledger — skipping %s call", model_name)
+            return LLMResult(text="", provider="gemini", model=model_name, tier=tier)
+
         url = (
             f"https://generativelanguage.googleapis.com/v1beta/models/"
             f"{model_name}:generateContent?key={self.gemini_key}"
@@ -222,10 +235,17 @@ class LocalLLMEngine:
             )
         else:
             resp = requests.post(url, json=payload, timeout=self.gemini_timeout)
+
         if resp.status_code == 429:
-            logger.warning("Gemini 429 on %s — backing off", model_name)
+            logger.warning("Gemini 429 on %s — recording throttle and backing off", model_name)
+            if _RATE_LEDGER:
+                _RATE_LEDGER.record_throttle(self._GEMINI_RATE_GROUP)
             resp.raise_for_status()
         resp.raise_for_status()
+
+        # Record successful call
+        if _RATE_LEDGER:
+            _RATE_LEDGER.record(self._GEMINI_RATE_GROUP)
 
         data = resp.json()
         text = ""

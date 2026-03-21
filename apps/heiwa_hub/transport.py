@@ -140,15 +140,17 @@ class WorkerSessionManager:
     sessions, pushes task assignments, and receives results/heartbeats.
     """
 
-    def __init__(self):
+    def __init__(self) -> None:
         # worker_id -> WebSocket instance
         self._sessions: Dict[str, Any] = {}
         # worker_id -> capabilities dict
         self._capabilities: Dict[str, Dict[str, Any]] = {}
         # worker_id -> last heartbeat timestamp
         self._heartbeats: Dict[str, float] = {}
+        # request_id -> (event, text_list) for LLM proxy requests
+        self._llm_pending: Dict[str, tuple[asyncio.Event, list[str]]] = {}
 
-    def register(self, worker_id: str, ws: Any, capabilities: Dict[str, Any] = None):
+    def register(self, worker_id: str, ws: Any, capabilities: Optional[Dict[str, Any]] = None):
         """Register a worker WebSocket session."""
         self._sessions[worker_id] = ws
         self._capabilities[worker_id] = capabilities or {}
@@ -216,6 +218,72 @@ class WorkerSessionManager:
             logger.error("Failed to push task to worker %s: %s", worker_id, exc)
             self.unregister(worker_id)
             return False
+
+    def has_ollama_worker(self) -> bool:
+        """Check if any active worker advertises Ollama capability."""
+        for wid in self.get_active_workers():
+            caps = self._capabilities.get(wid, {})
+            if caps.get("ollama") or "ollama" in str(caps.get("capabilities", "")):
+                return True
+            # Boost nodes (macbook/wsl) always have Ollama
+            if any(tag in wid.lower() for tag in ("macbook", "mac", "wsl", "boost")):
+                return True
+        return False
+
+    def get_ollama_worker(self) -> Optional[str]:
+        """Return the best active worker with Ollama capability."""
+        for wid in self.get_active_workers():
+            caps = self._capabilities.get(wid, {})
+            if caps.get("ollama") or any(tag in wid.lower() for tag in ("macbook", "mac", "wsl", "boost")):
+                return wid
+        return None
+
+    async def request_llm(
+        self, worker_id: str, prompt: str, model: str = "", system: str = "", timeout: float = 10.0
+    ) -> Optional[str]:
+        """Request-reply LLM inference via a boost node worker.
+
+        Sends an llm_request frame and waits for llm_response.
+        Returns the generated text, or None on failure/timeout.
+        """
+        ws = self._sessions.get(worker_id)
+        if not ws:
+            return None
+
+        import uuid as _uuid
+        request_id = _uuid.uuid4().hex[:12]
+        response_event: asyncio.Event = asyncio.Event()
+        response_text: list[str] = []
+        self._llm_pending[request_id] = (response_event, response_text)
+
+        try:
+            await ws.send_json({
+                "type": "llm_request",
+                "request_id": request_id,
+                "prompt": prompt,
+                "model": model,
+                "system": system,
+            })
+            await asyncio.wait_for(response_event.wait(), timeout=timeout)
+            return response_text[0] if response_text else None
+        except asyncio.TimeoutError:
+            logger.warning("LLM proxy to %s timed out after %.1fs", worker_id, timeout)
+            return None
+        except Exception as exc:
+            logger.error("LLM proxy to %s failed: %s", worker_id, exc)
+            return None
+        finally:
+            self._llm_pending.pop(request_id, None)
+
+    def resolve_llm_response(self, request_id: str, text: str) -> bool:
+        """Called when a worker sends an llm_response frame."""
+        entry = self._llm_pending.get(request_id)
+        if entry:
+            event, text_list = entry
+            text_list.append(text)
+            event.set()
+            return True
+        return False
 
     async def broadcast(self, message: Dict[str, Any]):
         """Send a message to all connected workers."""

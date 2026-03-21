@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import sys
 from pathlib import Path
 
@@ -14,7 +15,7 @@ from heiwa_protocol.routing import BrokerRouteRequest
 from heiwa_sdk.heiwaclaw import HeiwaClawGateway
 
 
-def main() -> int:
+async def _run_cases() -> int:
     enrichment = BrokerEnrichmentService()
     gateway = HeiwaClawGateway(ROOT)
 
@@ -50,7 +51,7 @@ def main() -> int:
                 source_surface="cli",
                 auth_validated=True,
             ),
-            {"compute_class": 3, "gateway_tool": "heiwa_claw", "adapter_tool": "heiwa_claw"},
+            {"compute_class": 3, "gateway_tool": "heiwa_claw", "adapter_tool": "heiwa_reflex"},
         ),
         (
             "audit stays on deterministic direct path",
@@ -67,7 +68,7 @@ def main() -> int:
 
     failures: list[str] = []
     for name, request, expect in cases:
-        result = enrichment.enrich(request)
+        result = await enrichment.enrich(request)
         dispatch = gateway.resolve(result)
         if result.compute_class != expect["compute_class"]:
             failures.append(f"{name}: expected compute_class={expect['compute_class']} actual={result.compute_class}")
@@ -84,6 +85,10 @@ def main() -> int:
 
     print("HeiwaClaw gateway contract test PASSED")
     return 0
+
+
+def main() -> int:
+    return asyncio.run(_run_cases())
 
 
 if __name__ == "__main__":

@@ -100,7 +100,7 @@ def main() -> int:
                 failures.append("record_route_decision should use the STDB adapter")
             if not db.record_run({"run_id": "run-stdb", "proposal_id": "task-stdb", "status": "PASS", "model_id": "openai-codex/gpt-5.3-codex"}):
                 failures.append("record_run should use the STDB adapter")
-            if not db.upsert_node_heartbeat("macbook@heiwa-node-a", meta={"cpu_pct": 10}):
+            if not db.upsert_node_heartbeat(node_id="macbook@heiwa-node-a", meta={"cpu_pct": 10}):
                 failures.append("upsert_node_heartbeat should use the STDB adapter")
             if not db.set_liveness_state("hub", "ONLINE"):
                 failures.append("set_liveness_state should use the STDB adapter")
