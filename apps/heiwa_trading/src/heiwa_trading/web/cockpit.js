@@ -287,7 +287,7 @@ async function runAction(action) {
   const popup = action === "open_openclaw_dashboard" ? window.open("about:blank", "_blank") : null;
   els.actionResult.textContent = `Running ${action}...`;
   try {
-    const response = await fetch("/api/action", {
+    const response = await fetch("/trading/api/action", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ action }),
@@ -315,7 +315,7 @@ async function submitChat(text) {
   const trimmed = text.trim();
   if (!trimmed) return;
   els.actionResult.textContent = "Sending chat command...";
-  const response = await fetch("/api/action", {
+  const response = await fetch("/trading/api/action", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
@@ -334,7 +334,7 @@ async function saveLayout() {
     .filter((input) => input.checked)
     .map((input) => input.dataset.panelToggle);
   const selectedDensity = document.querySelector('input[name="density"]:checked')?.value || "dense";
-  const response = await fetch("/api/action", {
+  const response = await fetch("/trading/api/action", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
@@ -343,7 +343,7 @@ async function saveLayout() {
     }),
   });
   const panelsPayload = await response.json();
-  const densityResponse = await fetch("/api/action", {
+  const densityResponse = await fetch("/trading/api/action", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
@@ -357,9 +357,9 @@ async function saveLayout() {
 }
 
 async function resetLayout() {
-  const response = await fetch("/api/settings");
+  const response = await fetch("/trading/api/settings");
   const settings = await response.json();
-  await fetch("/api/action", {
+  await fetch("/trading/api/action", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
@@ -367,7 +367,7 @@ async function resetLayout() {
       visible_panels: settings.visible_panels || Object.keys(panelNames),
     }),
   });
-  await fetch("/api/action", {
+  await fetch("/trading/api/action", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
@@ -375,7 +375,7 @@ async function resetLayout() {
       density: settings.density || "dense",
     }),
   });
-  const snapshot = await fetch("/api/state").then((result) => result.json());
+  const snapshot = await fetch("/trading/api/state").then((result) => result.json());
   renderState(snapshot);
 }
 
@@ -423,14 +423,14 @@ els.resetLayout.addEventListener("click", () => {
   });
 });
 
-fetch("/api/state")
+fetch("/trading/api/state")
   .then((response) => response.json())
   .then(renderState)
   .catch((error) => {
     els.agentBrief.textContent = `Failed to load initial state: ${error}`;
   });
 
-const events = new EventSource("/api/events");
+const events = new EventSource("/trading/sse");
 events.onmessage = (event) => {
   renderState(JSON.parse(event.data));
 };

@@ -355,7 +355,8 @@ async def status_stream(ws: WebSocket):
 
 
 @app.get("/tools")
-async def list_tools():
+async def list_tools(authorization: str | None = Header(None)):
+    _validate_auth_token(authorization)
     native_tools = [
         {
             "name": "heiwa_get_swarm_status",
@@ -419,7 +420,8 @@ async def list_tools():
 
 
 @app.post("/call/{tool_name}")
-async def call_tool(tool_name: str, arguments: Dict[str, Any]):
+async def call_tool(tool_name: str, arguments: Dict[str, Any], authorization: str | None = Header(None)):
+    _validate_auth_token(authorization)
     safe_args = redact_any(arguments)
 
     if tool_name == "heiwa_get_swarm_status":
