@@ -10,7 +10,7 @@ import uuid
 
 import subprocess
 import sys
-from fastapi import FastAPI, HTTPException, Header, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, HTTPException, Header, Request, WebSocket, WebSocketDisconnect
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
@@ -269,6 +269,11 @@ async def root(request: Request):
     if index:
         return FileResponse(index)
     return {"name": "Heiwa", "status": "operational"}
+
+
+@app.get("/index.html")
+async def index_page():
+    return _page_or_404("index.html")
 
 
 @app.get("/domains")
