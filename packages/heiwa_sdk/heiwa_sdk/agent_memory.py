@@ -60,7 +60,7 @@ class AgentMemory:
 
     def needs_compression(self, messages: list[dict[str, Any]]) -> bool:
         """Check if uncompressed messages exceed the token budget (~32K chars = ~8K tokens)."""
-        total_chars = sum(len(m.get("content", "")) for m in messages)
+        total_chars = sum(len(str(m.get("content") or "")) for m in messages)
         return (total_chars // 4) > self._token_budget
 
     def detect_complexity(self, text: str) -> bool:
