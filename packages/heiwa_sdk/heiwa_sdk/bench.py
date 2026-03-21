@@ -49,11 +49,12 @@ class HeiwaBench:
         return current
 
     def _run_routing_case(self, case: dict[str, Any]) -> tuple[dict[str, Any], list[BenchFailure]]:
+        import asyncio
         from heiwa_hub.cognition.enrichment import BrokerEnrichmentService
 
         request = BrokerRouteRequest.from_payload(case.get("request") or {})
         enrichment = BrokerEnrichmentService()
-        result = enrichment.enrich(request)
+        result = asyncio.run(enrichment.enrich(request))
         dispatch = self.gateway.resolve(result)
         actual = {"route": result.to_dict(), "dispatch": dispatch.to_dict()}
         failures: list[BenchFailure] = []

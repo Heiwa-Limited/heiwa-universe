@@ -63,9 +63,9 @@
         "route.assigned_worker": "class_3_strategy",
         "route.target_tool": "heiwa_claw",
         "dispatch.gateway_tool": "heiwa_claw",
-        "dispatch.adapter_tool": "heiwa_claw",
+        "dispatch.adapter_tool": "heiwa_reflex",
         "dispatch.provider": "google-antigravity",
-        "dispatch.rate_group": "google_antigravity",
+        "dispatch.rate_group": "antigravity_pro",
         "dispatch.websocket_preferred": false,
         "dispatch.direct_execution": false
       }
