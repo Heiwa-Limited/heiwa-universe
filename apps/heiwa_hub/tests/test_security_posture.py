@@ -51,8 +51,11 @@ def main() -> int:
         failures.append("redaction failed to scrub transport credentials")
 
     original_state_backend = os.environ.get("HEIWA_STATE_BACKEND")
-    original_stdb_identity = os.environ.pop("STDB_IDENTITY", None)
+    original_stdb_identity = os.environ.get("STDB_IDENTITY")
+    original_stdb_server = os.environ.get("STDB_SERVER")
     os.environ["HEIWA_STATE_BACKEND"] = "spacetimedb"
+    os.environ["STDB_IDENTITY"] = ""
+    os.environ["STDB_SERVER"] = "maincloud"
     try:
         from heiwa_sdk.db import Database
         try:
@@ -67,6 +70,12 @@ def main() -> int:
             os.environ.pop("HEIWA_STATE_BACKEND", None)
         if original_stdb_identity is not None:
             os.environ["STDB_IDENTITY"] = original_stdb_identity
+        else:
+            os.environ.pop("STDB_IDENTITY", None)
+        if original_stdb_server is not None:
+            os.environ["STDB_SERVER"] = original_stdb_server
+        else:
+            os.environ.pop("STDB_SERVER", None)
 
     if failures:
         print("Security posture test FAILED")
