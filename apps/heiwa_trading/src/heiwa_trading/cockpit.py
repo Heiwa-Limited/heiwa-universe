@@ -246,17 +246,23 @@ def _safe_json_loads(raw_value: str) -> dict[str, object]:
 
 
 def _run_mac_agent_command(root_dir: Path, *args: str) -> str:
-    completed = subprocess.run(
-        [str(root_dir / "bin" / "mac-agent"), *args],
-        capture_output=True,
-        text=True,
-        check=True,
-    )
-    return completed.stdout
+    try:
+        completed = subprocess.run(
+            [str(root_dir / "bin" / "mac-agent"), *args],
+            capture_output=True,
+            text=True,
+            check=True,
+        )
+        return completed.stdout
+    except FileNotFoundError:
+        return ""
 
 
 def load_market_supervisor_status(root_dir: Path) -> dict[str, object]:
-    return _safe_json_loads(_run_mac_agent_command(root_dir, "market-supervisor", "status"))
+    try:
+        return _safe_json_loads(_run_mac_agent_command(root_dir, "market-supervisor", "status"))
+    except Exception:
+        return {}
 
 
 def build_agent_brief(
@@ -290,7 +296,10 @@ def build_agent_brief(
 
 def build_cockpit_snapshot(root_dir: Path = MAC_AGENT_ROOT) -> dict[str, object]:
     supervisor_summary = build_supervisor_summary(load_supervisor_state())
-    market_supervisor_status = load_market_supervisor_status(root_dir)
+    try:
+        market_supervisor_status = load_market_supervisor_status(root_dir)
+    except Exception:
+        market_supervisor_status = {}
     openclaw_status = load_openclaw_status()
     snapshot = {
         "timestamp": supervisor_summary.get("timestamp"),
@@ -319,7 +328,7 @@ def build_cockpit_snapshot(root_dir: Path = MAC_AGENT_ROOT) -> dict[str, object]
             "market_supervisor": market_supervisor_status,
         },
         "openclaw": {
-            "profile": "mac-agent",
+            "profile": "heiwa-trading",
             "gateway_port": 19789,
             "state_dir": str(Path.home() / ".heiwa" / "openclaw"),
             "pairing": openclaw_status,
@@ -337,23 +346,41 @@ def build_cockpit_snapshot(root_dir: Path = MAC_AGENT_ROOT) -> dict[str, object]
 def run_cockpit_action(root_dir: Path, *, action: str, payload: dict[str, object] | None = None) -> dict[str, object]:
     payload = payload or {}
     if action == "tick_now":
-        output = _run_mac_agent_command(root_dir, "polymarket", "supervisor", "tick", "--limit", "25")
+        try:
+            output = _run_mac_agent_command(root_dir, "polymarket", "supervisor", "tick", "--limit", "25")
+        except Exception:
+            output = ""
         return {"action": action, "result": _safe_json_loads(output)}
     if action == "init_cohort":
-        output = _run_mac_agent_command(root_dir, "polymarket", "supervisor", "init")
+        try:
+            output = _run_mac_agent_command(root_dir, "polymarket", "supervisor", "init")
+        except Exception:
+            output = ""
         return {"action": action, "result": _safe_json_loads(output)}
     if action == "start_supervisor":
-        output = _run_mac_agent_command(root_dir, "market-supervisor", "start")
+        try:
+            output = _run_mac_agent_command(root_dir, "market-supervisor", "start")
+        except Exception:
+            output = ""
         return {"action": action, "result": _safe_json_loads(output)}
     if action == "stop_supervisor":
-        output = _run_mac_agent_command(root_dir, "market-supervisor", "stop")
+        try:
+            output = _run_mac_agent_command(root_dir, "market-supervisor", "stop")
+        except Exception:
+            output = ""
         return {"action": action, "result": _safe_json_loads(output)}
     if action == "restart_supervisor":
-        _run_mac_agent_command(root_dir, "market-supervisor", "stop")
-        output = _run_mac_agent_command(root_dir, "market-supervisor", "start")
+        try:
+            _run_mac_agent_command(root_dir, "market-supervisor", "stop")
+            output = _run_mac_agent_command(root_dir, "market-supervisor", "start")
+        except Exception:
+            output = ""
         return {"action": action, "result": _safe_json_loads(output)}
     if action == "open_openclaw_dashboard":
-        output = _run_mac_agent_command(root_dir, "dashboard", "--no-open")
+        try:
+            output = _run_mac_agent_command(root_dir, "dashboard", "--no-open")
+        except Exception:
+            output = ""
         return {
             "action": action,
             "dashboard_url": parse_dashboard_url(output),
