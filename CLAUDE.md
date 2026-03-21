@@ -56,7 +56,7 @@
 
   Heiwa is a distributed AI operating system. The main execution flow is:
 
-  User input → IntentNormalizer → RiskScorer → ComputeRouter → Broker → HeiwaClaw → ToolMesh (heiwa_reflex / CLI adapters) → execution
+  User input → IntentNormalizer → RiskScorer → ComputeRouter → ProgramCompiler → Broker → HeiwaClaw (advisory validation) → ToolMesh (heiwa_reflex / CLI adapters) → execution
 
   Key layers
 
@@ -86,11 +86,17 @@
   - Telemetry — system metrics collection and reporting
   - Messenger — Discord integration (optional, auto-detected)
 
-  Cognition pipeline (apps/heiwa_hub/cognition/)
+  Cognition pipeline (packages/heiwa_cognition/)
 
   - intent_normalizer.py — classifies user input into intent enums (build, deploy, research, audit, etc.)
   - risk_scorer.py — assigns risk level
   - compute_router.py — routes to compute class/worker/model/tier; enforces privacy-first and cost gates
+  - program_compiler.py — compiles IntentProfile + ComputeRoute + raw text into typed ExecutionProgram (deterministic, no LLM)
+
+  Protocol contracts (packages/heiwa_protocol/)
+
+  - routing.py — BrokerRouteRequest/Result typed contracts, carries optional ExecutionProgram
+  - program.py — ExecutionProgram typed contract: objective, steps, constraints, acceptance, budget, rollback, scope, tools_allowed
 
   Execution gateway (packages/heiwa_sdk/)
 

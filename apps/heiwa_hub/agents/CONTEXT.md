@@ -7,7 +7,7 @@ All agents extend `BaseAgent` from `base.py` and communicate via `LocalBusTransp
 | Agent | File | Role | Always On? |
 | --- | --- | --- | --- |
 | Spine | `spine.py` | Fleet orchestration, node registry, heartbeats, request routing | Yes |
-| HeiwaClaw | `heiwaclaw.py` | Unified living agent: observes system, DMs operator, executes tasks via OpenClaw | Yes |
+| HeiwaClaw | `heiwaclaw.py` | Unified living agent: observes system, DMs operator, executes tasks via OpenClaw, advisory acceptance validation via ExecutionProgram | Yes |
 | Telemetry | `telemetry.py` | System metrics collection and reporting | Yes |
 | Messenger | `messenger.py` | Discord integration (reads/writes Discord channels) | Only when `DISCORD_TOKEN` is set |
 
