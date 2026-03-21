@@ -129,7 +129,7 @@ class ChatEngine:
 
         # Build prompt with conversation history
         history = session.format_history()
-        prompt = f"{history}\nOPERATOR: {content}\nHEIWA AGENT:"
+        prompt = f"{history}\nHEIWA AGENT:"
 
         # Cost cascade: boost node → Gemini Flash → Gemini Pro
         reply = await self._route_llm(prompt)
@@ -169,7 +169,7 @@ class ChatEngine:
             loop = asyncio.get_event_loop()
             reply = await asyncio.wait_for(
                 loop.run_in_executor(
-                    None, self.llm.generate, prompt, "low", SYSTEM_PROMPT, "auto",
+                    None, self.llm.generate, prompt, "high", SYSTEM_PROMPT, "auto",
                 ),
                 timeout=15.0,
             )

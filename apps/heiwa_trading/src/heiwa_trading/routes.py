@@ -97,7 +97,9 @@ async def cockpit_js():
 @router.post("/api/auth")
 async def validate_token(request: Request):
     """Validate a token without exposing internals. Used by the login gate."""
-    client_ip = request.client.host if request.client else "unknown"
+    # Use X-Forwarded-For when behind Railway's reverse proxy, fall back to direct IP
+    forwarded = request.headers.get("x-forwarded-for", "")
+    client_ip = forwarded.split(",")[0].strip() if forwarded else (request.client.host if request.client else "unknown")
     _check_auth_rate_limit(client_ip)
 
     body = await request.json()

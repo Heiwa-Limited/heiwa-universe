@@ -145,7 +145,7 @@ jobs:
       - name: Install Railway CLI
         run: npm i -g @railway/cli
       - name: Deploy hub service
-        run: railway up --service heiwa-cloud-hq --detach
+        run: railway up --service heiwa-hub --detach
         env:
           RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
       - name: Deploy trading service

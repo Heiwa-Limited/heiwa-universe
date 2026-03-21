@@ -219,22 +219,27 @@ class WorkerSessionManager:
             self.unregister(worker_id)
             return False
 
+    def _worker_has_ollama(self, worker_id: str) -> bool:
+        """Check if a worker has Ollama capability via validated registration data."""
+        caps = self._capabilities.get(worker_id, {})
+        if caps.get("ollama"):
+            return True
+        cap_list = caps.get("capabilities", [])
+        if isinstance(cap_list, list) and "ollama" in cap_list:
+            return True
+        runtime = caps.get("runtime", "")
+        if isinstance(runtime, str) and "ollama" in runtime.lower():
+            return True
+        return False
+
     def has_ollama_worker(self) -> bool:
         """Check if any active worker advertises Ollama capability."""
-        for wid in self.get_active_workers():
-            caps = self._capabilities.get(wid, {})
-            if caps.get("ollama") or "ollama" in str(caps.get("capabilities", "")):
-                return True
-            # Boost nodes (macbook/wsl) always have Ollama
-            if any(tag in wid.lower() for tag in ("macbook", "mac", "wsl", "boost")):
-                return True
-        return False
+        return any(self._worker_has_ollama(wid) for wid in self.get_active_workers())
 
     def get_ollama_worker(self) -> Optional[str]:
         """Return the best active worker with Ollama capability."""
         for wid in self.get_active_workers():
-            caps = self._capabilities.get(wid, {})
-            if caps.get("ollama") or any(tag in wid.lower() for tag in ("macbook", "mac", "wsl", "boost")):
+            if self._worker_has_ollama(wid):
                 return wid
         return None
 

@@ -886,22 +886,33 @@ async def task_events(ws: WebSocket, task_id: str, token: str | None = None):
 
 
 @app.websocket("/ws/chat")
-async def chat_socket(ws: WebSocket, token: str | None = None):
+async def chat_socket(ws: WebSocket):
     """
     WebSocket chat endpoint — fast, bidirectional conversation.
 
-    Auth via query param: ws://.../ws/chat?token=<bearer>
-
-    Client sends:  {"content": "yo", "session_id": "optional-session-key"}
-    Server sends:  {"content": "response text", "session_id": "...", "source": "ollama|gemini"}
+    Auth via first frame: client sends {"type": "auth", "token": "<bearer>"}
+    Then chat frames:     {"content": "yo", "session_id": "optional-session-key"}
+    Server sends:         {"content": "response text", "session_id": "...", "timestamp": ...}
     """
     import hmac
-    expected = os.getenv("HEIWA_AUTH_TOKEN", "")
-    if not expected or not token or not hmac.compare_digest(token.encode(), expected.encode()):
+    await ws.accept()
+
+    # First frame must be auth
+    try:
+        auth_frame = await asyncio.wait_for(ws.receive_json(), timeout=10.0)
+    except (asyncio.TimeoutError, Exception):
+        await ws.send_json({"error": "Auth timeout"})
         await ws.close(code=4003)
         return
 
-    await ws.accept()
+    expected = os.getenv("HEIWA_AUTH_TOKEN", "")
+    token = auth_frame.get("token", "")
+    if not expected or not token or not hmac.compare_digest(token.encode(), expected.encode()):
+        await ws.send_json({"error": "Invalid auth"})
+        await ws.close(code=4003)
+        return
+
+    await ws.send_json({"type": "auth_ok"})
 
     from heiwa_hub.chat import get_chat_engine
     engine = get_chat_engine()
@@ -914,7 +925,6 @@ async def chat_socket(ws: WebSocket, token: str | None = None):
             if not content:
                 continue
 
-            # Use client-provided session_id or the one we assigned
             sid = raw.get("session_id") or session_id
 
             reply = await engine.respond(session_id=sid, content=content)
