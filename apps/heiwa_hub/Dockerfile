@@ -71,6 +71,9 @@ RUN npm install -g @anthropic-ai/claude-code @google/gemini-cli @openai/codex 2>
 ENV PLAYWRIGHT_BROWSERS_PATH=/opt/pw-browsers
 RUN npx playwright install chromium 2>/dev/null || true
 
+# Cache-bust: change this value to force Railway to rebuild layers below
+ARG CACHE_BUST=2026-03-21a
+
 # --- Copy monorepo components explicitly ---
 # Railway/Railpack decomposes COPY for caching; be explicit about what's needed.
 COPY packages/ /app/packages/
