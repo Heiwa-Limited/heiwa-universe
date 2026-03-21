@@ -143,22 +143,35 @@ if [[ "$HEIWA_STATE_BACKEND" == "spacetimedb" ]]; then
         fi
     fi
 
-    # Auto-publish module from the project directory that owns spacetime.json.
-    STDB_PROJECT_DIR="apps/heiwa_hub"
-    STDB_MANIFEST_PATH="$STDB_PROJECT_DIR/spacetime.json"
-    if [[ ! -f "$STDB_MANIFEST_PATH" ]]; then
-        echo "[HEIWA] Missing SpacetimeDB manifest at $STDB_MANIFEST_PATH." >&2
-        exit 1
-    fi
-    if ! command -v spacetime &>/dev/null; then
-        echo "[HEIWA] spacetime CLI is required for STDB boot but is not installed." >&2
-        exit 1
-    fi
+    # STDB module publishing: only attempt for local dev (requires Rust toolchain).
+    # For maincloud/production, the module is published separately via CI or manual deploy.
+    if [[ "$STDB_SERVER" == "local" ]]; then
+        STDB_PROJECT_DIR="apps/heiwa_hub"
+        STDB_MANIFEST_PATH="$STDB_PROJECT_DIR/spacetime.json"
+        if [[ ! -f "$STDB_MANIFEST_PATH" ]]; then
+            echo "[HEIWA] Missing SpacetimeDB manifest at $STDB_MANIFEST_PATH." >&2
+            exit 1
+        fi
+        if ! command -v spacetime &>/dev/null; then
+            echo "[HEIWA] spacetime CLI is required for STDB boot but is not installed." >&2
+            exit 1
+        fi
 
-    echo "[HEIWA] Publishing SpacetimeDB module ($STDB_IDENTITY) from $STDB_PROJECT_DIR..."
-    if ! (cd "$STDB_PROJECT_DIR" && spacetime publish --server "$STDB_SERVER" "$STDB_IDENTITY"); then
-        echo "[HEIWA] STDB publish failed for $STDB_IDENTITY from $STDB_PROJECT_DIR." >&2
-        exit 1
+        echo "[HEIWA] Publishing SpacetimeDB module ($STDB_IDENTITY) from $STDB_PROJECT_DIR..."
+        if ! (cd "$STDB_PROJECT_DIR" && spacetime publish --server "$STDB_SERVER" "$STDB_IDENTITY"); then
+            echo "[HEIWA] STDB publish failed for $STDB_IDENTITY from $STDB_PROJECT_DIR." >&2
+            exit 1
+        fi
+    else
+        echo "[HEIWA] STDB server is '$STDB_SERVER' (remote). Skipping module publish (handled by CI)."
+        # Verify connectivity to remote STDB
+        if command -v spacetime &>/dev/null; then
+            if spacetime sql --server "$STDB_SERVER" "$STDB_IDENTITY" "SELECT 1" 2>/dev/null; then
+                echo "[HEIWA] SpacetimeDB ($STDB_SERVER/$STDB_IDENTITY) is reachable."
+            else
+                echo "[HEIWA] WARNING: Could not reach SpacetimeDB ($STDB_SERVER/$STDB_IDENTITY). Proceeding anyway."
+            fi
+        fi
     fi
 fi
 

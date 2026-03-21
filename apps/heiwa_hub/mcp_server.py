@@ -344,7 +344,11 @@ def _public_status_payload() -> dict[str, Any]:
 @app.websocket("/ws/status")
 @app.websocket("/status/ws")
 @app.websocket("/events")
-async def status_stream(ws: WebSocket):
+async def status_stream(ws: WebSocket, token: str | None = None):
+    expected = os.getenv("HEIWA_AUTH_TOKEN", "")
+    if not expected or not token or token != expected:
+        await ws.close(code=4003)
+        return
     await ws.accept()
     try:
         while True:

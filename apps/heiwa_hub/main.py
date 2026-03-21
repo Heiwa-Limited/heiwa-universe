@@ -62,12 +62,16 @@ async def main():
         asyncio.create_task(asyncio.to_thread(db.init_db))
     else:
         logger.info("[BOOT] SpacetimeDB selected as authoritative state layer.")
-        # Auto-publish schema to ensure reducers are up-to-date
-        if db.stdb:
+        # Auto-publish schema only for local dev (requires Rust toolchain).
+        # Remote servers (maincloud) have the module published via CI.
+        stdb_server = os.getenv("STDB_SERVER", "local")
+        if db.stdb and stdb_server == "local":
             stdb_path = str(ROOT / "apps/heiwa_hub/spacetimedb")
             if os.path.isdir(stdb_path):
                 logger.info("[BOOT] Syncing SpacetimeDB schema...")
                 db.stdb.publish_schema(stdb_path)
+        else:
+            logger.info("[BOOT] STDB server is '%s' — skipping schema publish.", stdb_server)
 
         # Seed STDB tables from checked-in config (first boot only)
         from heiwa_sdk.seed import SeedLoader
