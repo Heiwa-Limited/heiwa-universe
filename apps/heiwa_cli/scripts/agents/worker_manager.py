@@ -60,7 +60,30 @@ class WorkerManager:
                 caps = {"heavy_compute", "gpu_native", "standard_compute"}
             else:
                 caps = {"standard_compute", "workspace_interaction", "agile_coding"}
-        return {"runtime": node_type, "capabilities": list(caps), "node_id": self.node_id}
+
+        # Auto-detect Ollama
+        ollama_available = self._probe_ollama()
+        result: dict = {
+            "runtime": node_type,
+            "capabilities": list(caps),
+            "node_id": self.node_id,
+            "ollama": ollama_available,
+        }
+        if ollama_available:
+            logger.info("Ollama detected — advertising LLM proxy capability")
+        return result
+
+    @staticmethod
+    def _probe_ollama() -> bool:
+        """Check if Ollama is reachable on this machine."""
+        import urllib.request
+        base = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434")
+        try:
+            req = urllib.request.Request(f"{base}/api/tags", method="GET")
+            with urllib.request.urlopen(req, timeout=3) as resp:
+                return resp.status == 200
+        except Exception:
+            return False
 
     async def execute(self, payload: Dict[str, Any], ws: Any) -> None:
         """Execute a task locally and send the result back via WebSocket."""
@@ -128,12 +151,50 @@ class WorkerManager:
                         msg_type = msg.get("type", "")
                         if msg_type == "task_assignment":
                             asyncio.create_task(self.execute(msg.get("data", {}), ws))
+                        elif msg_type == "llm_request":
+                            asyncio.create_task(self._handle_llm_request(msg, ws))
                         elif msg_type == "no_work":
                             pass
 
             except Exception as e:
                 logger.warning("Connection lost: %s. Reconnecting in 5s...", e)
                 await asyncio.sleep(5)
+
+    async def _handle_llm_request(self, msg: dict, ws: Any) -> None:
+        """Proxy an LLM request through local Ollama."""
+        request_id = msg.get("request_id", "")
+        prompt = msg.get("prompt", "")
+        model = msg.get("model") or os.getenv("OLLAMA_MODEL", "llama3.2")
+        system = msg.get("system", "")
+
+        base = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434")
+        payload = {"model": model, "prompt": prompt, "stream": False}
+        if system:
+            payload["system"] = system
+
+        text = ""
+        try:
+            import urllib.request
+            req = urllib.request.Request(
+                f"{base}/api/generate",
+                data=json.dumps(payload).encode(),
+                headers={"Content-Type": "application/json"},
+                method="POST",
+            )
+            with urllib.request.urlopen(req, timeout=30) as resp:
+                body = json.loads(resp.read())
+                text = body.get("response", "")
+        except Exception as e:
+            logger.error("Ollama LLM request failed: %s", e)
+
+        try:
+            await ws.send(json.dumps({
+                "type": "llm_response",
+                "request_id": request_id,
+                "text": text,
+            }))
+        except Exception as e:
+            logger.error("Failed to send llm_response: %s", e)
 
     async def _heartbeat_loop(self, ws: Any) -> None:
         try:

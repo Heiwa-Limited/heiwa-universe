@@ -165,7 +165,7 @@ jobs:
       - name: Install verification dependencies
         run: pip install requests
       - name: Await Deployment (Sleep)
-        run: sleep 45
+        run: sleep 90
       - name: Verify hub runtime endpoints
         run: |
           python - <<'PY'
