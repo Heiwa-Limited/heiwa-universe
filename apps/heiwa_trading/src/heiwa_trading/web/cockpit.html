@@ -1,0 +1,150 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Mac Agent Trading Cockpit</title>
+    <link rel="stylesheet" href="/cockpit.css" />
+  </head>
+  <body>
+    <div class="shell">
+      <header class="hero panel panel-accent" data-panel="hero">
+        <div>
+          <p class="eyebrow">Mac Agent Operator Layer</p>
+          <h1>Trading Cockpit</h1>
+          <p id="agent-brief" class="brief">Loading live supervisor state…</p>
+        </div>
+        <div class="hero-meta">
+          <div class="metric-card">
+            <span class="metric-label">Clock</span>
+            <span id="timestamp" class="metric-value">--</span>
+          </div>
+          <div class="metric-card">
+            <span class="metric-label">Best Setup</span>
+            <span id="best-opportunity" class="metric-value">--</span>
+          </div>
+        </div>
+      </header>
+
+      <main class="grid">
+        <section class="panel status-panel" data-panel="status">
+          <div class="panel-heading">
+            <h2>System Status</h2>
+          </div>
+          <div id="status-chips" class="chips"></div>
+          <div id="source-health" class="stack"></div>
+        </section>
+
+        <section class="panel controls-panel" data-panel="controls">
+          <div class="panel-heading">
+            <h2>Operator Controls</h2>
+          </div>
+          <div class="controls">
+            <button data-action="tick_now">Tick Now</button>
+            <button data-action="init_cohort">Init Cohort</button>
+            <button data-action="restart_supervisor">Restart Supervisor</button>
+            <button data-action="start_supervisor">Start Supervisor</button>
+            <button data-action="stop_supervisor">Stop Supervisor</button>
+            <button data-action="open_openclaw_dashboard">Open OpenClaw</button>
+          </div>
+          <pre id="action-result" class="console">Awaiting operator action…</pre>
+        </section>
+
+        <section class="panel chat-panel" data-panel="chat">
+          <div class="panel-heading">
+            <h2>Operator Chat</h2>
+          </div>
+          <div class="chat-note">
+            Write a note or run a command like <code>/tick</code>, <code>/leaderboard</code>, <code>/top5</code>, <code>/openclaw</code>, or <code>/restart</code>.
+          </div>
+          <div id="chat-messages" class="chat-messages"></div>
+          <div class="chat-composer">
+            <textarea id="chat-input" rows="3" placeholder="Tell the operator what to do..."></textarea>
+            <div class="controls controls-inline chat-actions">
+              <button id="send-chat">Send</button>
+              <button data-chat-command="/tick">/tick</button>
+              <button data-chat-command="/leaderboard">/leaderboard</button>
+              <button data-chat-command="/openclaw">/openclaw</button>
+            </div>
+          </div>
+        </section>
+
+        <section class="panel cohort-panel" data-panel="cohort">
+          <div class="panel-heading">
+            <h2>Active Cohort</h2>
+          </div>
+          <div id="cohort-summary" class="stack"></div>
+        </section>
+
+        <section class="panel leaderboard-panel" data-panel="leaderboard">
+          <div class="panel-heading">
+            <h2>Cohort Leaderboard</h2>
+          </div>
+          <div id="cohort-leaderboard"></div>
+        </section>
+
+        <section class="panel opportunity-panel" data-panel="opportunities">
+          <div class="panel-heading">
+            <h2>Best Opportunities</h2>
+          </div>
+          <div id="top-opportunities"></div>
+        </section>
+
+        <section class="panel live-panel" data-panel="live">
+          <div class="panel-heading">
+            <h2>Live Top 5</h2>
+          </div>
+          <div id="live-top5"></div>
+        </section>
+
+        <section class="panel movers-panel" data-panel="movers">
+          <div class="panel-heading">
+            <h2>CoinMarketCap Movers</h2>
+          </div>
+          <div id="coinmarketcap-movers"></div>
+        </section>
+
+        <section class="panel logs-panel" data-panel="logs">
+          <div class="panel-heading">
+            <h2>Supervisor Log</h2>
+          </div>
+          <pre id="supervisor-log" class="console"></pre>
+        </section>
+
+        <section class="panel openclaw-panel" data-panel="openclaw">
+          <div class="panel-heading">
+            <h2>OpenClaw Bridge</h2>
+          </div>
+          <div id="openclaw-summary" class="stack"></div>
+          <div id="openclaw-pairing-message" class="openclaw-pairing-message"></div>
+          <pre id="gateway-log" class="console"></pre>
+        </section>
+
+        <section class="panel customize-panel" data-panel="customize">
+          <div class="panel-heading">
+            <h2>Customize</h2>
+          </div>
+          <div class="stack">
+            <div class="card">
+              <strong>Density</strong>
+              <div class="controls controls-inline">
+                <label><input type="radio" name="density" value="dense" /> Dense</label>
+                <label><input type="radio" name="density" value="comfortable" /> Comfortable</label>
+              </div>
+            </div>
+            <div class="card">
+              <strong>Visible Panels</strong>
+              <div id="panel-checkboxes" class="panel-checkboxes"></div>
+            </div>
+            <div class="controls">
+              <button id="save-layout">Save Layout</button>
+              <button id="reset-layout">Reset Layout</button>
+            </div>
+          </div>
+        </section>
+      </main>
+    </div>
+
+    <script src="/cockpit.js" defer></script>
+  </body>
+</html>
