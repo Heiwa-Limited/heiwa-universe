@@ -25,6 +25,7 @@ _path_entries = [
     ROOT / "packages" / "heiwa_identity",
     ROOT / "packages" / "heiwa_ui",
     ROOT / "apps",
+    ROOT / "apps" / "heiwa_trading" / "src",
 ]
 
 for entry in reversed(_path_entries):
