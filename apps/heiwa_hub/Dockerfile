@@ -71,21 +71,24 @@ RUN npm install -g @anthropic-ai/claude-code @google/gemini-cli @openai/codex 2>
 ENV PLAYWRIGHT_BROWSERS_PATH=/opt/pw-browsers
 RUN npx playwright install chromium 2>/dev/null || true
 
-# --- Copy full monorepo (agents need codebase access) ---
-# .dockerignore excludes .venv, target/, docs_and_deps/, .git/, etc.
-COPY . /app/
+# --- Copy monorepo components explicitly ---
+# Railway/Railpack decomposes COPY for caching; be explicit about what's needed.
+COPY packages/ /app/packages/
+COPY config/ /app/config/
+COPY policies/ /app/policies/
+COPY apps/heiwa_hub/ /app/apps/heiwa_hub/
+COPY apps/heiwa_trading/ /app/apps/heiwa_trading/
+COPY apps/heiwa_web/clients/web/ /app/apps/heiwa_web/clients/web/
+COPY requirements.txt /app/requirements.txt
+COPY conftest.py /app/conftest.py
+COPY pyproject.toml /app/pyproject.toml
 
 # Entrypoint
 RUN chmod +x /app/apps/heiwa_hub/start.sh
 
-# Cloud Identity — Railway-primary orchestrator with full execution capability
+# Cloud Identity
 RUN echo '{"uuid": "heiwa-cloud-hq", "role": "orchestrator", "capabilities": ["routing", "discord", "execution", "mcp", "cli_tools"]}' > identity.json
 
-# Create non-root user and set ownership
-RUN useradd -r -s /bin/false -d /app heiwa && chown -R heiwa:heiwa /app
-
 EXPOSE 8080
-
-USER heiwa
 
 CMD ["bash", "/app/apps/heiwa_hub/start.sh"]
