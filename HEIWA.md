@@ -76,6 +76,8 @@ Each major directory has a `CONTEXT.md` that agents should read when working in 
 | `apps/heiwa_hub/agents/` | `CONTEXT.md` | Agent roster, BaseAgent contract, how to add agents |
 | `apps/heiwa_hub/cognition/` | `CONTEXT.md` | Intent/risk/compute pipeline, compute classes |
 | `apps/heiwa_cli/` | `CONTEXT.md` | CLI commands, operator surface |
+| `apps/heiwa_trading/` | `CONTEXT.md` | Trading cockpit, supervisor, strategy engine |
+| `apps/heiwa_dj/` | `CONTEXT.md` | Archived — shipped v1.7.0 standalone app |
 | `packages/heiwa_sdk/` | `CONTEXT.md` | DB, routing, security, transport, state layer |
 | `packages/heiwa_protocol/` | `CONTEXT.md` | Subject enum, envelope contracts |
 | `packages/heiwa_cognition/` | `CONTEXT.md` | LLM engine, tier routing |
