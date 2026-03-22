@@ -102,6 +102,12 @@ class SpineAgent(BaseAgent):
 
         # Save enrichment fields that TaskPlan.to_dict() would overwrite
         _saved_execution_program = payload.get("execution_program")
+        _saved_route_fields = {
+            k: payload[k] for k in (
+                "target_model", "assigned_worker", "compute_class",
+                "target_tool", "target_tier", "target_runtime",
+            ) if k in payload and payload[k]
+        }
 
         # --- INLINE PLANNING FALLBACK ---
         if not payload.get("steps") and payload.get("raw_text"):
@@ -122,9 +128,10 @@ class SpineAgent(BaseAgent):
                     intent_profile=profile,
                 )
                 payload = task_plan.to_dict()
-                # Restore execution_program lost by TaskPlan.to_dict() overwrite
+                # Restore enrichment route fields lost by TaskPlan.to_dict() overwrite
                 if _saved_execution_program:
                     payload["execution_program"] = _saved_execution_program
+                payload.update(_saved_route_fields)
                 dispatch_status_code = "DISPATCHED_PLAN"
             except Exception as e:
                 logger.error("Planning failed: %s. Direct fallback.", e)
