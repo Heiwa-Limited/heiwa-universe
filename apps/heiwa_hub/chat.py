@@ -164,22 +164,23 @@ class ChatEngine:
             logger.info("Chat response via boost node Ollama")
             return boost_reply
 
-        # Layer 2+3: Gemini cascade (handled by LLMEngine tier chain)
+        # Layer 2+: LLMEngine tier chain (Gemini API → Gemini CLI → Claude CLI → Ollama)
+        # CLI tools need longer timeout than API calls
         try:
             loop = asyncio.get_event_loop()
             reply = await asyncio.wait_for(
                 loop.run_in_executor(
                     None, self.llm.generate, prompt, "high", SYSTEM_PROMPT, "auto",
                 ),
-                timeout=15.0,
+                timeout=120.0,
             )
             if reply:
-                logger.info("Chat response via Gemini")
+                logger.info("Chat response via LLMEngine")
                 return reply
         except asyncio.TimeoutError:
-            logger.warning("Gemini timed out for chat response")
+            logger.warning("LLMEngine timed out for chat response")
         except Exception as exc:
-            logger.error("Gemini chat failed: %s", exc)
+            logger.error("LLMEngine chat failed: %s", exc)
 
         return ""
 

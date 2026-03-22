@@ -262,19 +262,62 @@ class LocalLLMEngine:
     def _tier_chain(self, complexity: str, runtime: str = "auto") -> list[str]:
         """Return ordered list of providers to try for a given complexity.
 
-        Railway-primary: Gemini API (free) is the default. Ollama only
-        available when a boost node (MacBook/WSL) is online.
+        Railway-primary: Gemini API (free) → Gemini CLI (free, separate
+        rate group) → Claude Code CLI (Pro sub) → Ollama (boost node).
         """
         effective_runtime = self._effective_runtime(runtime)
         if complexity == "low":
-            chain = ["gemini_flash", "ollama"]
+            chain = ["gemini_flash", "gemini_cli", "ollama"]
         elif complexity == "medium":
-            chain = ["gemini_flash", "gemini_pro", "ollama"]
+            chain = ["gemini_flash", "gemini_pro", "gemini_cli", "claude_cli", "ollama"]
         else:  # high
-            chain = ["gemini_pro", "gemini_flash", "ollama"]
+            chain = ["gemini_pro", "gemini_flash", "gemini_cli", "claude_cli", "ollama"]
         if not self._runtime_allows_ollama(effective_runtime):
             chain = [provider for provider in chain if provider != "ollama"]
         return chain
+
+    def _call_cli_tool(self, tool: str, prompt: str, system: Optional[str] = None) -> LLMResult:
+        """Invoke a CLI tool (gemini/claude) synchronously for inference fallback.
+
+        These use separate OAuth rate groups from the API, so they're
+        available even when the API tier is exhausted.
+        """
+        import subprocess
+        import shutil
+
+        rate_group = {"gemini": "google_gemini_cli", "claude": "claude_code"}.get(tool)
+        if _RATE_LEDGER and rate_group and not _RATE_LEDGER.has_capacity(rate_group):
+            logger.warning("CLI tool %s rate-limited by ledger — skipping", tool)
+            return LLMResult(text="", provider=f"{tool}-cli", model=tool, tier=3)
+
+        binary = shutil.which(tool)
+        if not binary:
+            return LLMResult(text="", provider=f"{tool}-cli", model=tool, tier=3)
+
+        full_prompt = f"{system}\n\n{prompt}" if system else prompt
+
+        if tool == "gemini":
+            cmd = [binary, "--prompt", full_prompt, "--output-format", "text"]
+        elif tool == "claude":
+            cmd = [binary, "-p", full_prompt, "--output-format", "text"]
+        else:
+            return LLMResult(text="", provider=f"{tool}-cli", model=tool, tier=3)
+
+        try:
+            result = subprocess.run(
+                cmd, capture_output=True, text=True, timeout=90, cwd="/app"
+            )
+            text = result.stdout.strip()
+            if result.returncode == 0 and text:
+                if _RATE_LEDGER and rate_group:
+                    _RATE_LEDGER.record(rate_group)
+                return LLMResult(text=text, provider=f"{tool}-cli", model=tool, tier=3)
+            logger.warning("CLI tool %s returned code %d", tool, result.returncode)
+        except subprocess.TimeoutExpired:
+            logger.warning("CLI tool %s timed out", tool)
+        except Exception as e:
+            logger.warning("CLI tool %s failed: %s", tool, e)
+        return LLMResult(text="", provider=f"{tool}-cli", model=tool, tier=3)
 
     def _try_provider(
         self,
@@ -288,13 +331,21 @@ class LocalLLMEngine:
             if provider == "ollama" and self._ollama_available(runtime=runtime):
                 return self._call_ollama(prompt, system)
             elif provider == "gemini_flash" and self.gemini_key:
-                return self._call_gemini(
+                result = self._call_gemini(
                     prompt, self.gemini_flash_model, tier=1, system=system
                 )
+                return result if result and result.text else None
             elif provider == "gemini_pro" and self.gemini_key:
-                return self._call_gemini(
+                result = self._call_gemini(
                     prompt, self.gemini_pro_model, tier=2, system=system
                 )
+                return result if result and result.text else None
+            elif provider == "gemini_cli":
+                result = self._call_cli_tool("gemini", prompt, system)
+                return result if result and result.text else None
+            elif provider == "claude_cli":
+                result = self._call_cli_tool("claude", prompt, system)
+                return result if result and result.text else None
         except Exception as e:
             logger.warning("Provider %s failed: %s", provider, e)
         return None
