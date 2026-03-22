@@ -27,7 +27,7 @@ def main() -> int:
     test_cases = [
         {"name": "audit stays cpu-first", "intent": "audit", "risk": "low", "expect_class": 1},
         {"name": "files stay local cpu-first", "intent": "files", "risk": "high", "expect_class": 1},
-        {"name": "build defaults to local class 2", "intent": "build", "risk": "medium", "expect_class": 2},
+        {"name": "build escalates to cloud class 3 on Railway (no local Ollama)", "intent": "build", "risk": "medium", "expect_class": 3},
         {"name": "high-risk build escalates to class 3", "intent": "build", "risk": "high", "expect_class": 3},
         {"name": "media uses local gpu class 2", "intent": "media", "risk": "low", "expect_class": 2},
         {"name": "research uses premium remote class 3", "intent": "research", "risk": "low", "expect_class": 3},
