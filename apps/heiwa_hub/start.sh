@@ -214,7 +214,7 @@ if [[ -n "${CODEX_OAUTH_REFRESH_TOKEN:-}" ]]; then
     cat > /root/.codex/auth.json <<CODEX_AUTH
 {
   "auth_mode": "chatgpt",
-  "OPENAI_API_KEY": null,
+  "OPENAI_API_KEY": "",
   "tokens": {
     "id_token": "",
     "access_token": "",
