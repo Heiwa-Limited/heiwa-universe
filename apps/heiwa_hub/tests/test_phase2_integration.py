@@ -76,7 +76,7 @@ class TestPhase2Integration:
                 "task_id": "test-task-123",
                 "instruction": "test instruction",
                 "target_model": "test-model",
-                "target_runtime": "macbook"
+                "target_runtime": agent.executor_runtime,
             }
             
             # We mock the internal _handle_exec to just check memory recording
