@@ -58,7 +58,7 @@
     },
     {
       "id": "codex-builder",
-      "description": "Premium build specialist for large implementation, repo mutation, and PR preparation.",
+      "description": "Premium build specialist for large implementation, repo mutation, and PR preparation. Routes to Claude Code as primary builder.",
       "trigger_keywords": [
         "build",
         "implement",
@@ -68,8 +68,8 @@
         "pr"
       ],
       "targets": {
-        "tool": "codex",
-        "runtime": "cloud@class-3-build",
+        "tool": "claude",
+        "runtime": "cloud@class-3-review",
         "required_capabilities": [
           "agile_coding",
           "repo_mutation"
@@ -83,12 +83,12 @@
         },
         {
           "role": "builder",
-          "model": "openai-codex/gpt-5.3-codex",
+          "model": "claude-code/claude-opus-4-6",
           "difficulty": "high"
         },
         {
           "role": "reviewer",
-          "model": "claude-code/claude-opus-4-6",
+          "model": "openai-codex/gpt-5.3-codex",
           "difficulty": "high"
         }
       ],
@@ -96,11 +96,11 @@
         "openclaw": [
           "ollama/qwen3.5:4b",
           "ollama/glm-4.7-flash:q4_k_m",
-          "openai-codex/gpt-5.3-codex",
-          "claude-code/claude-opus-4-6"
-        ],
-        "codex": [
+          "claude-code/claude-opus-4-6",
           "openai-codex/gpt-5.3-codex"
+        ],
+        "claude": [
+          "claude-code/claude-opus-4-6"
         ]
       },
       "actions": {
