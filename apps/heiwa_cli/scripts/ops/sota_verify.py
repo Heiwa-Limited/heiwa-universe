@@ -20,8 +20,18 @@ for pkg in ["heiwa_sdk", "heiwa_protocol", "heiwa_identity"]:
 if str(ROOT / "apps") not in sys.path:
     sys.path.insert(0, str(ROOT / "apps"))
 
+# Preserve explicit env vars before load_swarm_env can override them
+_saved_hub = os.environ.get("HEIWA_HUB_URL")
+_saved_token = os.environ.get("HEIWA_AUTH_TOKEN")
+
 from heiwa_sdk.config import load_swarm_env, settings
 load_swarm_env()
+
+# Restore explicit overrides
+if _saved_hub:
+    os.environ["HEIWA_HUB_URL"] = _saved_hub
+if _saved_token:
+    os.environ["HEIWA_AUTH_TOKEN"] = _saved_token
 
 
 def render_output_text(output: str) -> str:
@@ -49,8 +59,8 @@ def render_output_text(output: str) -> str:
 
 
 async def sota_verify(instruction: str):
-    hub_url = os.getenv("HEIWA_HUB_URL") or getattr(settings, "HUB_BASE_URL", None) or "https://api.heiwa.ltd"
-    token = os.getenv("HEIWA_AUTH_TOKEN") or getattr(settings, "HEIWA_AUTH_TOKEN", "") or ""
+    hub_url = os.environ.get("HEIWA_HUB_URL") or getattr(settings, "HUB_BASE_URL", None) or "https://api.heiwa.ltd"
+    token = os.environ.get("HEIWA_AUTH_TOKEN") or getattr(settings, "HEIWA_AUTH_TOKEN", "") or ""
     task_id = f"sota-task-{uuid.uuid4().hex[:6]}"
 
     # Submit via HTTP
@@ -63,7 +73,11 @@ async def sota_verify(instruction: str):
         "source_surface": "sota-verification",
         "task_id": task_id,
     }).encode()
-    headers = {"Content-Type": "application/json", "Authorization": f"Bearer {token}"}
+    headers = {
+        "Content-Type": "application/json",
+        "Authorization": f"Bearer {token}",
+        "User-Agent": "heiwa-sota-verify/1.0",
+    }
 
     req = urllib.request.Request(f"{hub_url}/tasks", data=body, headers=headers, method="POST")
     try:
@@ -78,7 +92,7 @@ async def sota_verify(instruction: str):
 
     # Stream result via WebSocket
     async def poll_result(timeout: float = 60.0) -> int:
-        headers = {"Authorization": f"Bearer {token}"} if token else {}
+        headers = {"Authorization": f"Bearer {token}", "User-Agent": "heiwa-sota-verify/1.0"} if token else {"User-Agent": "heiwa-sota-verify/1.0"}
         deadline = time.time() + timeout
         while time.time() < deadline:
             try:

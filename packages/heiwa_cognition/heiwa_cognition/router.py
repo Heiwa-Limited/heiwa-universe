@@ -238,6 +238,16 @@ class ComputeRouter:
         lane = snm.get(intent_class, {})
         return lane.get("model") or None
 
+    def _cloud_lane_for_intent(self, intent_class: str) -> dict | None:
+        """Return cloud lane config for an intent from single_node_mac, if any."""
+        return (
+            self.router_config
+            .get("routing_policy", {})
+            .get("single_node_mac", {})
+            .get("cloud_lanes", {})
+            .get(intent_class)
+        )
+
     def _route_from_worker(
         self,
         *,
@@ -256,6 +266,28 @@ class ComputeRouter:
             lane_model = self._local_model_for_intent(intent)
             if lane_model:
                 model_id = lane_model
+
+        # Guard: Railway runtime must never get a local-only model.
+        # Escalate to the cloud lane or a known Railway-safe provider.
+        if runtime == "railway" and model_id:
+            provider_prefix = model_id.split("/", 1)[0] if "/" in model_id else ""
+            if self._is_local_provider(provider_prefix):
+                cloud_lane = self._cloud_lane_for_intent(intent)
+                if cloud_lane and cloud_lane.get("worker"):
+                    worker = cloud_lane["worker"]
+                    model_id = self._model_for_worker(worker)
+                    compute_class = max(compute_class, 3)
+                    logger.info(
+                        "Railway guard: escalated local model to cloud lane %s (%s)",
+                        worker, model_id,
+                    )
+                else:
+                    # Fallback: use Gemini Flash via LLMEngine (heiwa_claw handles this)
+                    model_id = "gemini/gemini-2.5-flash"
+                    logger.info(
+                        "Railway guard: replaced local model with Gemini Flash fallback",
+                    )
+
         target_tool = direct_tool or "heiwa_claw"
         return ComputeRoute(
             compute_class=compute_class,
