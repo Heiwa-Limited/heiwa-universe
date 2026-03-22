@@ -80,13 +80,16 @@ COPY packages/ /app/packages/
 COPY config/ /app/config/
 COPY policies/ /app/policies/
 COPY apps/heiwa_hub/ /app/apps/heiwa_hub/
+COPY apps/heiwa_cli/scripts/agents/wrappers/ /app/apps/heiwa_cli/scripts/agents/wrappers/
+COPY apps/heiwa_cli/scripts/ops/ /app/apps/heiwa_cli/scripts/ops/
 COPY apps/heiwa_web/clients/web/ /app/apps/heiwa_web/clients/web/
 COPY requirements.txt /app/requirements.txt
 COPY conftest.py /app/conftest.py
 COPY pyproject.toml /app/pyproject.toml
 
-# Entrypoint
-RUN chmod +x /app/apps/heiwa_hub/start.sh
+# Entrypoint + wrapper scripts
+RUN chmod +x /app/apps/heiwa_hub/start.sh && \
+    chmod +x /app/apps/heiwa_cli/scripts/agents/wrappers/*.sh
 
 # Cloud Identity
 RUN echo '{"uuid": "heiwaclaw", "role": "orchestrator", "capabilities": ["routing", "discord", "execution", "mcp", "cli_tools", "openclaw"]}' > identity.json

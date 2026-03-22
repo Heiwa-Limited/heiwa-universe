@@ -202,30 +202,43 @@ if [[ -n "${CLAUDE_OAUTH_REFRESH_TOKEN:-}" ]]; then
     export CLAUDE_CODE_OAUTH_SCOPES="openid profile email offline_access"
     echo "[HEIWA] Claude Code OAuth refresh token injected via env var."
 fi
+# Identify this as a Railway deployment (not a local dev session)
+export CLAUDE_CODE_ENVIRONMENT_KIND="${CLAUDE_CODE_ENVIRONMENT_KIND:-cloud}"
 
 # Codex: writes ~/.codex/auth.json
+# Full structure required — Codex validates all fields on load.
+# access_token/id_token set to "expired" so Codex triggers refresh from refresh_token.
 if [[ -n "${CODEX_OAUTH_REFRESH_TOKEN:-}" ]]; then
     mkdir -p /root/.codex
+    CODEX_ACCOUNT_ID="${CODEX_ACCOUNT_ID:-}"
     cat > /root/.codex/auth.json <<CODEX_AUTH
 {
   "auth_mode": "chatgpt",
   "OPENAI_API_KEY": null,
   "tokens": {
-    "refresh_token": "${CODEX_OAUTH_REFRESH_TOKEN}"
-  }
+    "id_token": "expired",
+    "access_token": "expired",
+    "refresh_token": "${CODEX_OAUTH_REFRESH_TOKEN}",
+    "account_id": "${CODEX_ACCOUNT_ID}"
+  },
+  "last_refresh": "1970-01-01T00:00:00.000Z"
 }
 CODEX_AUTH
     echo "[HEIWA] Codex auth.json written."
 fi
 
 # Gemini CLI: writes ~/.gemini/oauth_creds.json
+# expiry_date set to 0 to force refresh on first use.
 if [[ -n "${GEMINI_OAUTH_REFRESH_TOKEN:-}" ]]; then
     mkdir -p /root/.gemini
     cat > /root/.gemini/oauth_creds.json <<GEMINI_AUTH
 {
+  "access_token": "expired",
   "refresh_token": "${GEMINI_OAUTH_REFRESH_TOKEN}",
+  "scope": "https://www.googleapis.com/auth/userinfo.profile openid https://www.googleapis.com/auth/cloud-platform https://www.googleapis.com/auth/userinfo.email",
   "token_type": "Bearer",
-  "scope": "https://www.googleapis.com/auth/userinfo.profile openid https://www.googleapis.com/auth/cloud-platform https://www.googleapis.com/auth/userinfo.email"
+  "id_token": "expired",
+  "expiry_date": 0
 }
 GEMINI_AUTH
     echo "[HEIWA] Gemini oauth_creds.json written."

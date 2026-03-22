@@ -84,6 +84,17 @@ Cargo.lock
 # Memory / scratch
 memory/
 
+# Secrets & credentials (defense in depth)
+*.pem
+*.key
+*.p12
+*.pfx
+*credentials*.json
+*secret*.json
+auth.json
+oauth_creds.json
+*.keystore
+
 # Claude Code local settings
 .claude/
 
