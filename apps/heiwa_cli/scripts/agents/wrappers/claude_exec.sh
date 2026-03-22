@@ -53,24 +53,48 @@ if [[ -n "$MODEL" ]]; then
     CMD+=(--model "$MODEL")
 fi
 
+# Claude Code refuses bypassPermissions as root — drop to a non-root user.
+RUN_CMD=("${CMD[@]}")
+if [[ "$(id -u)" == "0" ]]; then
+    # Create heiwa user if it doesn't exist
+    if ! id -u heiwa &>/dev/null; then
+        useradd -m -s /bin/bash heiwa 2>/dev/null || true
+    fi
+    # Ensure heiwa user owns the workspace and config dirs
+    chown -R heiwa:heiwa "$ROOT" 2>/dev/null || true
+    chown -R heiwa:heiwa /root/.claude 2>/dev/null || true
+    mkdir -p /home/heiwa/.claude
+    cp -rn /root/.claude/* /home/heiwa/.claude/ 2>/dev/null || true
+    chown -R heiwa:heiwa /home/heiwa/.claude 2>/dev/null || true
+    # Pass through env vars needed by claude
+    SUDO_ENV=()
+    for var in CLAUDE_OAUTH_ACCESS_TOKEN CLAUDE_OAUTH_REFRESH_TOKEN CLAUDE_MODEL ANTHROPIC_API_KEY HOME PATH NODE_OPTIONS; do
+        if [[ -n "${!var:-}" ]]; then
+            SUDO_ENV+=("$var=${!var}")
+        fi
+    done
+    SUDO_ENV+=("HOME=/home/heiwa")
+    RUN_CMD=(env "${SUDO_ENV[@]}" su -s /bin/bash heiwa -c "cd \"$ROOT\" && $(printf '%q ' "${CMD[@]}")")
+fi
+
 set +e
 if command -v timeout &>/dev/null; then
     (
         cd "$ROOT"
-        timeout "$TIMEOUT_SEC" "${CMD[@]}"
+        timeout "$TIMEOUT_SEC" "${RUN_CMD[@]}"
     ) 2>&1 | tee -a "$LOG_FILE"
     EXIT_CODE=${PIPESTATUS[0]}
 elif command -v gtimeout &>/dev/null; then
     (
         cd "$ROOT"
-        gtimeout "$TIMEOUT_SEC" "${CMD[@]}"
+        gtimeout "$TIMEOUT_SEC" "${RUN_CMD[@]}"
     ) 2>&1 | tee -a "$LOG_FILE"
     EXIT_CODE=${PIPESTATUS[0]}
 else
     echo "[WARN] timeout command not found; running without timeout" | tee -a "$LOG_FILE"
     (
         cd "$ROOT"
-        "${CMD[@]}"
+        "${RUN_CMD[@]}"
     ) 2>&1 | tee -a "$LOG_FILE"
     EXIT_CODE=${PIPESTATUS[0]}
 fi
