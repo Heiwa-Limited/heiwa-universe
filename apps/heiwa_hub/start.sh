@@ -216,8 +216,8 @@ if [[ -n "${CODEX_OAUTH_REFRESH_TOKEN:-}" ]]; then
   "auth_mode": "chatgpt",
   "OPENAI_API_KEY": null,
   "tokens": {
-    "id_token": null,
-    "access_token": null,
+    "id_token": "",
+    "access_token": "",
     "refresh_token": "${CODEX_OAUTH_REFRESH_TOKEN}",
     "account_id": "${CODEX_ACCOUNT_ID}"
   },
