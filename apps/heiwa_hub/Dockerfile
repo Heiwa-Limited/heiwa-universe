@@ -49,7 +49,11 @@ RUN apt-get update && apt-get install -y \
     gh \
     libpq-dev \
     zstd \
+    gosu \
     && rm -rf /var/lib/apt/lists/*
+
+# Non-root user for CLI tools that refuse to run as root (e.g. Claude Code)
+RUN useradd -m -s /bin/bash heiwa
 
 # Node.js 20 LTS (for CLI tools)
 RUN curl -fsSL https://deb.nodesource.com/setup_20.x | bash - \
@@ -73,7 +77,7 @@ ENV PLAYWRIGHT_BROWSERS_PATH=/opt/pw-browsers
 RUN npx playwright install chromium 2>/dev/null || true
 
 # Cache-bust: change this value to force Railway to rebuild layers below
-ARG CACHE_BUST=2026-03-22e
+ARG CACHE_BUST=2026-03-22f
 
 # --- Copy monorepo components explicitly ---
 # Railway/Railpack decomposes COPY for caching; be explicit about what's needed.
@@ -90,7 +94,8 @@ COPY pyproject.toml /app/pyproject.toml
 
 # Entrypoint + wrapper scripts
 RUN chmod +x /app/apps/heiwa_hub/start.sh && \
-    chmod +x /app/apps/heiwa_cli/scripts/agents/wrappers/*.sh
+    chmod +x /app/apps/heiwa_cli/scripts/agents/wrappers/*.sh && \
+    chown -R heiwa:heiwa /app
 
 # Cloud Identity
 RUN echo '{"uuid": "heiwaclaw", "role": "orchestrator", "capabilities": ["routing", "discord", "execution", "mcp", "cli_tools", "openclaw"]}' > identity.json

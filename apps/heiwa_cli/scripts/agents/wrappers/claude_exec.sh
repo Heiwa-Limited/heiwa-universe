@@ -38,20 +38,13 @@ if [[ -n "$MODEL" && "$MODEL" == */* ]]; then
 fi
 MODEL="${MODEL//./-}"
 TIMEOUT_SEC="${CLAUDE_TIMEOUT:-900}"
-
-# Claude Code refuses bypassPermissions as root (Docker default).
-# When running as root, downgrade to acceptEdits which is allowed.
-if [[ "$(id -u)" == "0" ]]; then
-    PERMISSION_MODE="acceptEdits"
-else
-    PERMISSION_MODE="${HEIWA_CLAUDE_PERMISSION_MODE:-${CLAUDE_PERMISSION_MODE:-bypassPermissions}}"
-fi
+PERMISSION_MODE="${HEIWA_CLAUDE_PERMISSION_MODE:-${CLAUDE_PERMISSION_MODE:-bypassPermissions}}"
 
 case "$PERMISSION_MODE" in
     default|acceptEdits|bypassPermissions|dontAsk|plan|auto) ;;
     *)
-        echo "[WARN] invalid Claude permission mode '$PERMISSION_MODE'; defaulting to acceptEdits" | tee -a "$LOG_FILE"
-        PERMISSION_MODE="acceptEdits"
+        echo "[WARN] invalid Claude permission mode '$PERMISSION_MODE'; defaulting to bypassPermissions" | tee -a "$LOG_FILE"
+        PERMISSION_MODE="bypassPermissions"
         ;;
 esac
 
@@ -60,24 +53,41 @@ if [[ -n "$MODEL" ]]; then
     CMD+=(--model "$MODEL")
 fi
 
+# Claude Code refuses bypassPermissions (and similar) as root.
+# Use gosu to drop to the non-root 'heiwa' user created in the Dockerfile.
+# gosu preserves env vars (unlike su) — designed for exactly this Docker use case.
+EXEC_PREFIX=()
+if [[ "$(id -u)" == "0" ]] && command -v gosu &>/dev/null && id -u heiwa &>/dev/null; then
+    # Ensure heiwa user has access to workspace and claude config
+    chown -R heiwa:heiwa "$LOG_DIR" 2>/dev/null || true
+    if [[ -d /root/.claude ]]; then
+        mkdir -p /home/heiwa/.claude
+        cp -rn /root/.claude/* /home/heiwa/.claude/ 2>/dev/null || true
+        chown -R heiwa:heiwa /home/heiwa/.claude 2>/dev/null || true
+    fi
+    export HOME=/home/heiwa
+    EXEC_PREFIX=(gosu heiwa)
+    echo "[INFO] Dropping to non-root user 'heiwa' via gosu" >> "$LOG_FILE"
+fi
+
 set +e
 if command -v timeout &>/dev/null; then
     (
         cd "$ROOT"
-        timeout "$TIMEOUT_SEC" "${CMD[@]}"
+        timeout "$TIMEOUT_SEC" "${EXEC_PREFIX[@]}" "${CMD[@]}"
     ) 2>&1 | tee -a "$LOG_FILE"
     EXIT_CODE=${PIPESTATUS[0]}
 elif command -v gtimeout &>/dev/null; then
     (
         cd "$ROOT"
-        gtimeout "$TIMEOUT_SEC" "${CMD[@]}"
+        gtimeout "$TIMEOUT_SEC" "${EXEC_PREFIX[@]}" "${CMD[@]}"
     ) 2>&1 | tee -a "$LOG_FILE"
     EXIT_CODE=${PIPESTATUS[0]}
 else
     echo "[WARN] timeout command not found; running without timeout" | tee -a "$LOG_FILE"
     (
         cd "$ROOT"
-        "${CMD[@]}"
+        "${EXEC_PREFIX[@]}" "${CMD[@]}"
     ) 2>&1 | tee -a "$LOG_FILE"
     EXIT_CODE=${PIPESTATUS[0]}
 fi
