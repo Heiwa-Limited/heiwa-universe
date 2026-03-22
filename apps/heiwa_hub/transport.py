@@ -168,6 +168,10 @@ class WorkerSessionManager:
         """Update heartbeat timestamp for a worker."""
         self._heartbeats[worker_id] = time.time()
 
+    def get_capabilities(self, worker_id: str) -> Dict[str, Any]:
+        """Return the last advertised capabilities for a worker."""
+        return dict(self._capabilities.get(worker_id, {}))
+
     def get_active_workers(self, max_stale_sec: float = 60.0) -> list[str]:
         """Return worker IDs with recent heartbeats."""
         now = time.time()

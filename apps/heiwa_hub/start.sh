@@ -188,11 +188,82 @@ fi
 echo "[HEIWA] Launching Core Collective..."
 cd /app || exit 1
 
-# Verify CLI tool availability
+# 5. Inject CLI tool credentials from Railway env vars
+# These tokens are set as Railway secrets and injected into the credential
+# files/env vars that each CLI tool expects on headless Linux.
+
+# Claude Code: uses env vars directly (no keychain on Linux)
+if [[ -n "${CLAUDE_OAUTH_ACCESS_TOKEN:-}" ]]; then
+    export CLAUDE_CODE_OAUTH_TOKEN="$CLAUDE_OAUTH_ACCESS_TOKEN"
+    echo "[HEIWA] Claude Code OAuth token injected via env var."
+fi
+if [[ -n "${CLAUDE_OAUTH_REFRESH_TOKEN:-}" ]]; then
+    export CLAUDE_CODE_OAUTH_REFRESH_TOKEN="$CLAUDE_OAUTH_REFRESH_TOKEN"
+    export CLAUDE_CODE_OAUTH_SCOPES="openid profile email offline_access"
+    echo "[HEIWA] Claude Code OAuth refresh token injected via env var."
+fi
+
+# Codex: writes ~/.codex/auth.json
+if [[ -n "${CODEX_OAUTH_REFRESH_TOKEN:-}" ]]; then
+    mkdir -p /root/.codex
+    cat > /root/.codex/auth.json <<CODEX_AUTH
+{
+  "auth_mode": "chatgpt",
+  "OPENAI_API_KEY": null,
+  "tokens": {
+    "refresh_token": "${CODEX_OAUTH_REFRESH_TOKEN}"
+  }
+}
+CODEX_AUTH
+    echo "[HEIWA] Codex auth.json written."
+fi
+
+# Gemini CLI: writes ~/.gemini/oauth_creds.json
+if [[ -n "${GEMINI_OAUTH_REFRESH_TOKEN:-}" ]]; then
+    mkdir -p /root/.gemini
+    cat > /root/.gemini/oauth_creds.json <<GEMINI_AUTH
+{
+  "refresh_token": "${GEMINI_OAUTH_REFRESH_TOKEN}",
+  "token_type": "Bearer",
+  "scope": "https://www.googleapis.com/auth/userinfo.profile openid https://www.googleapis.com/auth/cloud-platform https://www.googleapis.com/auth/userinfo.email"
+}
+GEMINI_AUTH
+    echo "[HEIWA] Gemini oauth_creds.json written."
+fi
+
+# Verify CLI tool availability and auth
 echo "[HEIWA] CLI tools:"
-command -v claude   && echo "  claude:   $(claude --version 2>/dev/null | head -1)" || echo "  claude:   not installed"
-command -v gemini   && echo "  gemini:   available" || echo "  gemini:   not installed"
-command -v codex    && echo "  codex:    available" || echo "  codex:    not installed"
+if command -v claude &>/dev/null; then
+    CLAUDE_VER=$(claude --version 2>/dev/null | head -1)
+    echo "  claude:   $CLAUDE_VER"
+    if [[ -n "${CLAUDE_CODE_OAUTH_TOKEN:-}" ]]; then
+        echo "  claude:   auth configured (OAuth env var)"
+    else
+        echo "  claude:   WARNING — no auth token (set CLAUDE_OAUTH_ACCESS_TOKEN)"
+    fi
+else
+    echo "  claude:   not installed"
+fi
+if command -v codex &>/dev/null; then
+    echo "  codex:    available"
+    if [[ -f /root/.codex/auth.json ]]; then
+        echo "  codex:    auth configured (auth.json)"
+    else
+        echo "  codex:    WARNING — no auth (set CODEX_OAUTH_REFRESH_TOKEN)"
+    fi
+else
+    echo "  codex:    not installed"
+fi
+if command -v gemini &>/dev/null; then
+    echo "  gemini:   available"
+    if [[ -f /root/.gemini/oauth_creds.json ]]; then
+        echo "  gemini:   auth configured (oauth_creds.json)"
+    else
+        echo "  gemini:   WARNING — no auth (set GEMINI_OAUTH_REFRESH_TOKEN)"
+    fi
+else
+    echo "  gemini:   not installed"
+fi
 
 
 # Ensure PYTHONPATH includes all monorepo packages.

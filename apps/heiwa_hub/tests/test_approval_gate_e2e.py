@@ -60,7 +60,7 @@ def main() -> int:
 
         executor.gateway.execute = _fake_execute  # type: ignore[method-assign]
 
-        def _fake_enrich(request):
+        async def _fake_enrich(request):
             return BrokerRouteResult(
                 request_id=request.request_id,
                 task_id=request.task_id,

@@ -31,8 +31,10 @@ from heiwa_protocol.routing import BrokerRouteRequest
 
 from heiwa_hub.cognition.enrichment import BrokerEnrichmentService
 from heiwa_hub.cognition.approval import get_approval_registry
+from heiwa_hub.approval_views import list_approvals_from_stdb
 from heiwa_hub.transport import get_bus, get_worker_manager
 from heiwa_protocol.protocol import Subject
+from heiwa_sdk.proposal_dispatch import dispatch_routable_proposals, sync_remote_worker_node
 
 # Initialized Environment
 load_swarm_env()
@@ -58,6 +60,7 @@ mcp_bridge = MCPBridge()
 enrichment = BrokerEnrichmentService()
 approvals = get_approval_registry()
 TASK_SNAPSHOTS: dict[str, dict[str, Any]] = {}
+OPERATOR_STREAMS: set[asyncio.Queue] = set()
 
 ROOT = Path(__file__).resolve().parents[2]
 bench = HeiwaBench(ROOT)
@@ -99,18 +102,57 @@ def _page_or_404(name: str) -> FileResponse:
     raise HTTPException(status_code=404, detail=f"{name} unavailable")
 
 
+def _approval_state_uses_stdb() -> bool:
+    return bool(getattr(db, "stdb", None)) and getattr(db, "state_backend", None) == "spacetimedb"
+
+
+def _list_approvals_snapshot(status: str | None = None) -> list[dict[str, Any]]:
+    if _approval_state_uses_stdb():
+        try:
+            approvals_from_stdb = list_approvals_from_stdb(db.stdb, status=status, limit=100)
+            if approvals_from_stdb:
+                return approvals_from_stdb
+        except Exception:
+            logger.exception("Failed to load approvals from STDB")
+    items: list[dict[str, Any]] = []
+    for state in approvals.list_states(status=status):
+        serialized = _serialize_approval(state.task_id)
+        if serialized:
+            items.append(serialized)
+    return items
+
+
 def _operator_snapshot_payload() -> dict[str, Any]:
     from heiwa_sdk.rate_ledger import get_rate_ledger
 
     return {
         "providers": state.get_provider_accounts(),
         "missions": state.get_missions(limit=100),
-        "approvals": [item for item in (_serialize_approval(task_id) for task_id in TASK_SNAPSHOTS) if item],
+        "approvals": _list_approvals_snapshot(),
         "live_tasks": list(TASK_SNAPSHOTS.values())[-100:],
         "rate_groups": get_rate_ledger().status(),
         "history": state.get_history(limit=25),
         "timestamp": time.time(),
     }
+
+
+def _notify_operator_streams() -> None:
+    if not OPERATOR_STREAMS:
+        return
+    payload = _operator_snapshot_payload()
+    stale: list[asyncio.Queue] = []
+    for queue in list(OPERATOR_STREAMS):
+        try:
+            if queue.full():
+                try:
+                    queue.get_nowait()
+                except Exception:
+                    pass
+            queue.put_nowait(payload)
+        except Exception:
+            stale.append(queue)
+    for queue in stale:
+        OPERATOR_STREAMS.discard(queue)
 
 
 async def _record_status_event(envelope: Dict[str, Any]):
@@ -158,6 +200,7 @@ async def _record_status_event(envelope: Dict[str, Any]):
             db.pause_mission(task_id, summary=str(payload.get("message") or status))
     except Exception:
         pass
+    _notify_operator_streams()
 
 
 async def _record_result_event(envelope: Dict[str, Any]):
@@ -208,6 +251,7 @@ async def _record_result_event(envelope: Dict[str, Any]):
         )
     except Exception:
         pass
+    _notify_operator_streams()
 
 
 async def _record_progress_event(envelope: Dict[str, Any]):
@@ -216,6 +260,7 @@ async def _record_progress_event(envelope: Dict[str, Any]):
     if not task_id:
         return
     _snapshot_task(task_id, progress=payload.get("content") or payload.get("message"))
+    _notify_operator_streams()
 
 
 async def _check_stdb_health() -> bool:
@@ -681,6 +726,14 @@ async def get_task(task_id: str, authorization: str | None = Header(None)):
 
 
 def _serialize_approval(task_id: str) -> dict[str, Any] | None:
+    if _approval_state_uses_stdb():
+        try:
+            approvals_from_stdb = list_approvals_from_stdb(db.stdb, limit=100)
+            for item in approvals_from_stdb:
+                if item.get("task_id") == task_id:
+                    return item
+        except Exception:
+            logger.exception("Failed to serialize approval from STDB for %s", task_id)
     state = approvals.get_state(task_id)
     if not state:
         return None
@@ -704,12 +757,7 @@ def _serialize_approval(task_id: str) -> dict[str, Any] | None:
 @app.get("/approvals")
 async def list_approvals(status: str | None = None, authorization: str | None = Header(None)):
     _validate_auth_token(authorization)
-    items = []
-    for state in approvals.list_states(status=status):
-        serialized = _serialize_approval(state.task_id)
-        if serialized:
-            items.append(serialized)
-    return {"approvals": items}
+    return {"approvals": _list_approvals_snapshot(status=status)}
 
 
 async def _submit_approval_decision(
@@ -744,6 +792,7 @@ async def _submit_approval_decision(
         "reason": request.reason,
         "_state_applied": True,
     }, sender_id=request.actor or "operator")
+    _notify_operator_streams()
     serialized = _serialize_approval(task_id)
     return serialized or {"task_id": task_id, "status": applied.status}
 
@@ -945,12 +994,17 @@ async def operator_events(ws: WebSocket, token: str | None = None):
         return
 
     await ws.accept()
+    queue: asyncio.Queue = asyncio.Queue(maxsize=1)
+    OPERATOR_STREAMS.add(queue)
     try:
+        await ws.send_json(_operator_snapshot_payload())
         while True:
-            await ws.send_json(_operator_snapshot_payload())
-            await asyncio.sleep(2)
+            payload = await queue.get()
+            await ws.send_json(payload)
     except WebSocketDisconnect:
         logger.debug("Operator websocket disconnected.")
+    finally:
+        OPERATOR_STREAMS.discard(queue)
 
 
 # ---------------------------------------------------------------------------
@@ -989,7 +1043,10 @@ async def worker_socket(ws: WebSocket):
                     return
                 authenticated = True
                 worker_id = raw.get("worker_id", f"worker-{uuid.uuid4().hex[:8]}")
-                wm.register(worker_id, ws, raw.get("capabilities", {}))
+                capabilities = raw.get("capabilities", {})
+                wm.register(worker_id, ws, capabilities)
+                sync_remote_worker_node(db, worker_id, capabilities, status="ONLINE")
+                dispatch_routable_proposals(db)
                 await ws.send_json({"type": "registered", "worker_id": worker_id})
 
             elif not authenticated:
@@ -1000,6 +1057,13 @@ async def worker_socket(ws: WebSocket):
             elif msg_type == "heartbeat":
                 if worker_id:
                     wm.heartbeat(worker_id)
+                    sync_remote_worker_node(
+                        db,
+                        worker_id,
+                        wm.get_capabilities(worker_id),
+                        status="ONLINE",
+                    )
+                    dispatch_routable_proposals(db)
 
             elif msg_type == "result":
                 bus = get_bus()
@@ -1017,10 +1081,12 @@ async def worker_socket(ws: WebSocket):
     except WebSocketDisconnect:
         if worker_id:
             wm.unregister(worker_id)
+            db.set_node_status(worker_id, "OFFLINE")
     except Exception as exc:
         logger.error("Worker socket error: %s", exc)
         if worker_id:
             wm.unregister(worker_id)
+            db.set_node_status(worker_id, "OFFLINE")
 
 
 def start_mcp_server():

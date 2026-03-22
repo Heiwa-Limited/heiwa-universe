@@ -61,6 +61,12 @@ class SpacetimeDB:
             return value
         return json.dumps(value, separators=(",", ":"))
 
+    @staticmethod
+    def _sats_option(value: Any) -> dict[str, Any]:
+        if value is None:
+            return {"none": []}
+        return {"some": value}
+
     def _run(self, cmd: list[str], timeout: int = 10, cwd: str | None = None) -> subprocess.CompletedProcess[str] | None:
         logger.debug("STDB cmd: %s (cwd=%s)", cmd, cwd)
         try:
@@ -79,7 +85,7 @@ class SpacetimeDB:
         if not self.db_identity:
             logger.warning("STDB call %s skipped: no db_identity", reducer_name)
             return False
-            
+
         cmd = ["spacetime", "call", "--server", self.server, self.db_identity, reducer_name]
         for arg in args:
             cmd.append(json.dumps(arg))
@@ -233,12 +239,12 @@ class SpacetimeDB:
             account_data.get("auth_kind", "unknown"),
             account_data.get("local_handle_ref", ""),
             account_data.get("status", "unknown"),
-            account_data.get("display_name"),
-            account_data.get("default_model"),
+            self._sats_option(account_data.get("display_name")),
+            self._sats_option(account_data.get("default_model")),
             account_data.get("rate_group", ""),
             self._normalize_json_column(account_data.get("available_models")) or "[]",
-            account_data.get("last_validated_at"),
-            account_data.get("last_error"),
+            self._sats_option(account_data.get("last_validated_at")),
+            self._sats_option(account_data.get("last_error")),
             updated_at,
         )
 
@@ -282,12 +288,12 @@ class SpacetimeDB:
             mission_data.get("prompt", ""),
             mission_data.get("intent_class", "general"),
             mission_data.get("risk_level", "low"),
-            mission_data.get("active_step_id"),
-            mission_data.get("active_cell_id"),
-            mission_data.get("target_tool"),
-            mission_data.get("target_model"),
-            mission_data.get("summary"),
-            mission_data.get("error"),
+            self._sats_option(mission_data.get("active_step_id")),
+            self._sats_option(mission_data.get("active_cell_id")),
+            self._sats_option(mission_data.get("target_tool")),
+            self._sats_option(mission_data.get("target_model")),
+            self._sats_option(mission_data.get("summary")),
+            self._sats_option(mission_data.get("error")),
             self._normalize_json_column(mission_data.get("metadata")) or "{}",
         )
 
@@ -316,7 +322,7 @@ class SpacetimeDB:
             step_data.get("step_kind", "turn"),
             step_data.get("cell_role", ""),
             step_data.get("title", ""),
-            step_data.get("detail"),
+            self._sats_option(step_data.get("detail")),
             self._normalize_json_column(step_data.get("input")) or "{}",
             self._normalize_json_column(step_data.get("output")) or "{}",
             created_at,
@@ -337,7 +343,7 @@ class SpacetimeDB:
             "start_cell_run",
             run_data["cell_run_id"],
             run_data["mission_id"],
-            run_data.get("step_id"),
+            self._sats_option(run_data.get("step_id")),
             run_data.get("status", "running"),
             run_data.get("cell_id", ""),
             run_data.get("cell_role", ""),
@@ -349,7 +355,7 @@ class SpacetimeDB:
             int(run_data.get("tokens_input") or 0),
             int(run_data.get("tokens_output") or 0),
             int(run_data.get("tokens_total") or 0),
-            run_data.get("output_summary"),
+            self._sats_option(run_data.get("output_summary")),
         )
 
     def finish_cell_run(self, run_data: dict[str, Any]) -> bool:
@@ -361,7 +367,7 @@ class SpacetimeDB:
             int(run_data.get("tokens_input") or 0),
             int(run_data.get("tokens_output") or 0),
             int(run_data.get("tokens_total") or 0),
-            run_data.get("output_summary"),
+            self._sats_option(run_data.get("output_summary")),
         )
 
     def get_cell_runs(
@@ -387,7 +393,7 @@ class SpacetimeDB:
             "pause_mission",
             mission_id,
             datetime.datetime.now(datetime.timezone.utc).isoformat(),
-            summary,
+            self._sats_option(summary),
         )
 
     def resume_mission(self, mission_id: str, summary: str | None = None) -> bool:
@@ -395,7 +401,7 @@ class SpacetimeDB:
             "resume_mission",
             mission_id,
             datetime.datetime.now(datetime.timezone.utc).isoformat(),
-            summary,
+            self._sats_option(summary),
         )
 
     def complete_mission(self, mission_id: str, summary: str | None = None) -> bool:
@@ -403,7 +409,7 @@ class SpacetimeDB:
             "complete_mission",
             mission_id,
             datetime.datetime.now(datetime.timezone.utc).isoformat(),
-            summary,
+            self._sats_option(summary),
         )
 
     def fail_mission(self, mission_id: str, error: str | None = None) -> bool:
@@ -411,7 +417,7 @@ class SpacetimeDB:
             "fail_mission",
             mission_id,
             datetime.datetime.now(datetime.timezone.utc).isoformat(),
-            error,
+            self._sats_option(error),
         )
 
     def write_session_summary(self, summary_data: dict[str, Any]) -> bool:
@@ -449,11 +455,11 @@ class SpacetimeDB:
             "register_artifact",
             artifact_data["artifact_id"],
             artifact_data.get("mission_id", ""),
-            artifact_data.get("cell_run_id"),
+            self._sats_option(artifact_data.get("cell_run_id")),
             artifact_data.get("artifact_type", "summary"),
             artifact_data.get("title", ""),
-            artifact_data.get("uri"),
-            artifact_data.get("path"),
+            self._sats_option(artifact_data.get("uri")),
+            self._sats_option(artifact_data.get("path")),
             self._normalize_json_column(artifact_data.get("content")) or "{}",
             artifact_data.get("created_at") or datetime.datetime.now(datetime.timezone.utc).isoformat(),
         )
@@ -526,19 +532,19 @@ class SpacetimeDB:
             proposal["proposal_id"],
             proposal.get("created_at") or datetime.datetime.now(datetime.timezone.utc).isoformat(),
             proposal.get("status", "QUEUED"),
-            proposal.get("fingerprint"),
+            self._sats_option(proposal.get("fingerprint")),
             payload_str,
-            proposal.get("payload_raw"),
+            self._sats_option(proposal.get("payload_raw")),
             proposal.get("mode", "PRODUCTION"),
-            self._normalize_json_column(proposal.get("execution_targeting")),
-            proposal.get("assigned_node_id"),
-            proposal.get("hub_signature"),
-            proposal.get("assignment_expires_at"),
+            self._sats_option(self._normalize_json_column(proposal.get("execution_targeting"))),
+            self._sats_option(proposal.get("assigned_node_id")),
+            self._sats_option(proposal.get("hub_signature")),
+            self._sats_option(proposal.get("assignment_expires_at")),
             int(proposal.get("attempt_count") or 0),
-            proposal.get("proposal_hash"),
-            proposal.get("approved_at"),
-            proposal.get("expires_at"),
-            self._normalize_json_column(proposal.get("eligibility_snapshot")),
+            self._sats_option(proposal.get("proposal_hash")),
+            self._sats_option(proposal.get("approved_at")),
+            self._sats_option(proposal.get("expires_at")),
+            self._sats_option(self._normalize_json_column(proposal.get("eligibility_snapshot"))),
         )
 
     def get_proposals(self, status: str | None = None, limit: int = 50) -> list[dict[str, Any]]:
@@ -581,7 +587,7 @@ class SpacetimeDB:
             hub_signature,
             proposal_hash,
             int(attempt_count),
-            self._normalize_json_column(eligibility_snapshot),
+            self._sats_option(self._normalize_json_column(eligibility_snapshot)),
         )
 
     def claim_proposal(
@@ -619,16 +625,30 @@ class SpacetimeDB:
         approved_at: str,
         expires_at: str | None = None,
     ) -> bool:
-        return self.call("approve_proposal", proposal_id, approved_at, expires_at, proposal_hash)
+        return self.call(
+            "approve_proposal",
+            proposal_id,
+            approved_at,
+            self._sats_option(expires_at),
+            proposal_hash,
+        )
 
     def reject_proposal(self, proposal_id: str) -> bool:
         return self.call("reject_proposal", proposal_id)
 
     def queue_proposal(self, proposal_id: str, eligibility_snapshot: dict[str, Any] | str | None = None) -> bool:
-        return self.call("queue_proposal", proposal_id, self._normalize_json_column(eligibility_snapshot))
+        return self.call(
+            "queue_proposal",
+            proposal_id,
+            self._sats_option(self._normalize_json_column(eligibility_snapshot)),
+        )
 
     def expire_proposal(self, proposal_id: str, eligibility_snapshot: dict[str, Any] | str | None = None) -> bool:
-        return self.call("expire_proposal", proposal_id, self._normalize_json_column(eligibility_snapshot))
+        return self.call(
+            "expire_proposal",
+            proposal_id,
+            self._sats_option(self._normalize_json_column(eligibility_snapshot)),
+        )
 
     def requeue_proposal(self, proposal_id: str) -> bool:
         return self.call("requeue_proposal", proposal_id)
@@ -647,7 +667,7 @@ class SpacetimeDB:
             node_id,
             node_instance_id,
             ts_iso,
-            self._normalize_json_column(detail),
+            self._sats_option(self._normalize_json_column(detail)),
         ):
             return None
         return self.get_proposal(proposal_id)
@@ -663,16 +683,16 @@ class SpacetimeDB:
             consent_data["actor_type"],
             consent_data["actor_id"],
             str(consent_data["decision"]).upper(),
-            consent_data.get("comment"),
-            self._normalize_json_column(metadata) or "{}",
-            consent_data.get("approval_request_id"),
-            consent_data.get("requested_by"),
-            consent_data.get("requested_at"),
-            consent_data.get("request_expires_at"),
-            consent_data.get("request_reason"),
-            self._normalize_json_column(request_payload),
-            consent_data.get("approved_at"),
-            consent_data.get("expires_at"),
+            self._sats_option(consent_data.get("comment")),
+            self._sats_option(self._normalize_json_column(metadata) or "{}"),
+            self._sats_option(consent_data.get("approval_request_id")),
+            self._sats_option(consent_data.get("requested_by")),
+            self._sats_option(consent_data.get("requested_at")),
+            self._sats_option(consent_data.get("request_expires_at")),
+            self._sats_option(consent_data.get("request_reason")),
+            self._sats_option(self._normalize_json_column(request_payload)),
+            self._sats_option(consent_data.get("approved_at")),
+            self._sats_option(consent_data.get("expires_at")),
         )
 
     def get_consents_for_proposal(self, proposal_id: str) -> list[dict[str, Any]]:
@@ -689,9 +709,9 @@ class SpacetimeDB:
             request_data["proposal_id"],
             request_data.get("status", "PENDING"),
             request_data.get("requested_at") or datetime.datetime.now(datetime.timezone.utc).isoformat(),
-            request_data.get("expires_at"),
+            self._sats_option(request_data.get("expires_at")),
             request_data.get("requested_by", "heiwa-hub"),
-            request_data.get("reason"),
+            self._sats_option(request_data.get("reason")),
             self._normalize_json_column(request_data.get("payload")) or "{}",
         )
 
@@ -704,7 +724,7 @@ class SpacetimeDB:
             decision_data["actor_type"],
             decision_data["actor_id"],
             str(decision_data["decision"]).upper(),
-            decision_data.get("reason"),
+            self._sats_option(decision_data.get("reason")),
             decision_data.get("created_at") or datetime.datetime.now(datetime.timezone.utc).isoformat(),
             self._normalize_json_column(decision_data.get("metadata")) or "{}",
         )
@@ -750,7 +770,7 @@ class SpacetimeDB:
             "issue_capability_lease",
             lease_data["lease_id"],
             lease_data["proposal_id"],
-            lease_data.get("run_id"),
+            self._sats_option(lease_data.get("run_id")),
             lease_data.get("holder_kind", "node"),
             lease_data["holder_id"],
             self._normalize_json_column(lease_data.get("tool_scope")) or "[]",
@@ -777,7 +797,7 @@ class SpacetimeDB:
             "revoke_capability_lease",
             lease_id,
             revoked_at or datetime.datetime.now(datetime.timezone.utc).isoformat(),
-            revocation_reason,
+            self._sats_option(revocation_reason),
         )
 
     def get_capability_leases(

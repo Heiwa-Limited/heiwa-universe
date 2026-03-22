@@ -322,118 +322,14 @@ def router_tick() -> dict:
     """
     from heiwa_sdk.db import db
     from heiwa_sdk.config import settings
-    import hashlib
-    import json as _json
+    from heiwa_sdk.proposal_dispatch import dispatch_routable_proposals
 
     if not settings.PHASE2_ROUTER_ENABLED:
         print("[ROUTER] Router disabled by feature flag")
         return {"status": "disabled", "routed": 0, "queued": 0, "expired": 0}
-
-    now = datetime.datetime.now(datetime.timezone.utc)
-    now_iso = now.isoformat()
-
-    result = {
-        "status": "OK",
-        "routed": 0,
-        "queued": 0,
-        "expired": 0,
-        "errors": [],
-    }
-
-    print(f"[ROUTER] Starting router tick at {now_iso}")
-
-    try:
-        proposals = db.get_routable_proposals()
-        print(f"[ROUTER] Found {len(proposals)} routable proposals")
-
-        for p in proposals:
-            proposal_id = p["proposal_id"]
-
-            # Parse execution_targeting
-            targeting = {}
-            try:
-                targeting_raw = p.get("execution_targeting") or "{}"
-                targeting = (
-                    _json.loads(targeting_raw)
-                    if isinstance(targeting_raw, str)
-                    else targeting_raw
-                )
-            except:
-                pass
-
-            requires = targeting.get("requires", [])
-            privilege_tier = targeting.get("privilege_tier", "cloud_safe")
-            policy = targeting.get("policy", "QUEUE")  # QUEUE, REROUTE, EXPIRE
-
-            # Find eligible nodes
-            eligible = db.get_eligible_nodes(requires, privilege_tier)
-
-            if eligible:
-                # Pick first eligible node (could add scoring later)
-                node = eligible[0]
-                node_id = node["node_id"]
-
-                # Assignment TTL: 15 minutes (or from targeting)
-                assignment_ttl = targeting.get("assignment_ttl_seconds", 900)
-                assignment_expires = (
-                    now + datetime.timedelta(seconds=assignment_ttl)
-                ).isoformat()
-
-                # Compute hub_signature (signing the proposal for node verification)
-                payload_str = p.get("payload") or ""
-                proposal_hash = (
-                    p.get("proposal_hash")
-                    or hashlib.sha256(payload_str.encode()).hexdigest()
-                )
-                # In production, this would be a proper cryptographic signature
-                hub_signature = f"SIG-{proposal_hash[:16]}"
-
-                # Increment attempt count
-                attempt_count = (p.get("attempt_count") or 0) + 1
-
-                success = db.assign_proposal_to_node(
-                    proposal_id,
-                    node_id,
-                    assignment_expires,
-                    proposal_hash=proposal_hash,
-                    hub_signature=hub_signature,
-                    attempt_count=attempt_count,
-                    eligibility_snapshot={
-                        "eligible_count": len(eligible),
-                        "assigned_to": node_id,
-                        "timestamp": now_iso,
-                    },
-                )
-
-                if success:
-                    print(f"[ROUTER] Assigned {proposal_id} to {node_id}")
-                    result["routed"] += 1
-                else:
-                    result["errors"].append(f"Failed to assign {proposal_id}")
-
-            else:
-                # No eligible nodes
-                if policy == "EXPIRE":
-                    db.expire_proposal(proposal_id, "no_eligible_nodes")
-                    print(f"[ROUTER] Expired {proposal_id} (EXPIRE policy, no nodes)")
-                    result["expired"] += 1
-                else:
-                    # QUEUE or REROUTE policy - keep in queue
-                    if p.get("status") != "QUEUED":
-                        db.transition_proposal_status(proposal_id, "QUEUED")
-                        print(
-                            f"[ROUTER] Queued {proposal_id} (waiting for eligible node)"
-                        )
-                    result["queued"] += 1
-
-    except Exception as e:
-        error_msg = f"Router error: {e}"
-        print(f"[ROUTER] ERROR: {error_msg}")
-        result["errors"].append(error_msg)
-        result["status"] = "FAIL"
-
+    result = dispatch_routable_proposals(db)
     print(
-        f"[ROUTER] Complete: routed={result['routed']}, queued={result['queued']}, expired={result['expired']}"
+        f"[ROUTER] Reactive dispatch: routed={result['routed']}, queued={result['queued']}, expired={result['expired']}"
     )
     return result
 

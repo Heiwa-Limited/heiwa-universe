@@ -71,6 +71,99 @@ class Database:
             return self.stdb.get_missions(status=status, limit=limit)
         return []
 
+    def create_mission(self, mission_data: dict[str, Any]) -> bool:
+        if self.stdb:
+            return self.stdb.create_mission(mission_data)
+        return False
+
+    def append_mission_step(self, step_data: dict[str, Any]) -> bool:
+        if self.stdb:
+            return self.stdb.append_mission_step(step_data)
+        return False
+
+    def get_mission_steps(self, mission_id: str, limit: int = 100) -> list[dict[str, Any]]:
+        if self.stdb:
+            return self.stdb.get_mission_steps(mission_id, limit=limit)
+        return []
+
+    def start_cell_run(self, run_data: dict[str, Any]) -> bool:
+        if self.stdb:
+            return self.stdb.start_cell_run(run_data)
+        return False
+
+    def finish_cell_run(self, run_data: dict[str, Any]) -> bool:
+        if self.stdb:
+            return self.stdb.finish_cell_run(run_data)
+        return False
+
+    def get_cell_runs(
+        self,
+        mission_id: str | None = None,
+        status: str | None = None,
+        limit: int = 100,
+    ) -> list[dict[str, Any]]:
+        if self.stdb:
+            return self.stdb.get_cell_runs(mission_id=mission_id, status=status, limit=limit)
+        return []
+
+    def pause_mission(self, mission_id: str, summary: str | None = None) -> bool:
+        if self.stdb:
+            return self.stdb.pause_mission(mission_id, summary=summary)
+        return False
+
+    def resume_mission(self, mission_id: str, summary: str | None = None) -> bool:
+        if self.stdb:
+            return self.stdb.resume_mission(mission_id, summary=summary)
+        return False
+
+    def complete_mission(self, mission_id: str, summary: str | None = None) -> bool:
+        if self.stdb:
+            return self.stdb.complete_mission(mission_id, summary=summary)
+        return False
+
+    def fail_mission(self, mission_id: str, error: str | None = None) -> bool:
+        if self.stdb:
+            return self.stdb.fail_mission(mission_id, error=error)
+        return False
+
+    def set_mission_status(self, mission_id: str, status: str, summary: str | None = None) -> bool:
+        normalized = str(status or "").strip().lower()
+        if normalized in {"waiting_approval", "paused"}:
+            return self.pause_mission(mission_id, summary=summary)
+        if normalized in {"running", "resumed"}:
+            return self.resume_mission(mission_id, summary=summary)
+        if normalized in {"completed", "complete", "done"}:
+            return self.complete_mission(mission_id, summary=summary)
+        if normalized in {"failed", "error"}:
+            return self.fail_mission(mission_id, error=summary)
+        logger.warning("Unsupported mission status transition: %s for %s", status, mission_id)
+        return False
+
+    def write_session_summary(self, summary_data: dict[str, Any]) -> bool:
+        if self.stdb:
+            return self.stdb.write_session_summary(summary_data)
+        return False
+
+    def list_session_summaries(
+        self,
+        node_id: str | None = None,
+        session_id: str | None = None,
+        limit: int = 50,
+    ) -> list[dict[str, Any]]:
+        if self.stdb:
+            return self.stdb.list_session_summaries(node_id=node_id, session_id=session_id, limit=limit)
+        return []
+
+    def register_artifact(self, artifact_data: dict[str, Any]) -> bool:
+        if self.stdb:
+            return self.stdb.register_artifact(artifact_data)
+        return False
+
+    def list_artifacts(self, mission_id: str | None = None, limit: int = 100) -> list[dict[str, Any]]:
+        if self.stdb:
+            return self.stdb.list_artifacts(mission_id=mission_id, limit=limit)
+        return []
+
     def get_discord_channel(self, purpose: str) -> int | None:
         if self.stdb:
             return self.stdb.get_discord_channel(purpose)
@@ -162,6 +255,11 @@ class Database:
         if self.stdb:
             return self.stdb.get_node(node_id)
         return None
+
+    def set_node_status(self, node_id: str, status: str) -> bool:
+        if self.stdb:
+            return self.stdb.set_node_status(node_id, status)
+        return False
 
     def add_proposal(self, proposal: dict[str, Any]) -> bool:
         if self.stdb:
@@ -367,6 +465,44 @@ class Database:
         if self.stdb:
             return self.stdb.record_consent(consent_data)
         return False
+
+    def add_approval_request(self, request_data: dict[str, Any]) -> bool:
+        if self.stdb:
+            return self.stdb.add_approval_request(request_data)
+        return False
+
+    def record_approval_decision(self, decision_data: dict[str, Any]) -> bool:
+        if self.stdb:
+            return self.stdb.record_approval_decision(decision_data)
+        return False
+
+    def list_approval_requests(
+        self,
+        proposal_id: str | None = None,
+        status: str | None = None,
+        limit: int = 50,
+    ) -> list[dict[str, Any]]:
+        if self.stdb:
+            return self.stdb.list_approval_requests(
+                proposal_id=proposal_id,
+                status=status,
+                limit=limit,
+            )
+        return []
+
+    def list_approval_decisions(
+        self,
+        proposal_id: str | None = None,
+        request_id: str | None = None,
+        limit: int = 50,
+    ) -> list[dict[str, Any]]:
+        if self.stdb:
+            return self.stdb.list_approval_decisions(
+                proposal_id=proposal_id,
+                request_id=request_id,
+                limit=limit,
+            )
+        return []
 
     def get_consents_for_proposal(self, proposal_id: str) -> list[dict[str, Any]]:
         if self.stdb:

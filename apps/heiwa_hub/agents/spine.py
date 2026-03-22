@@ -1,4 +1,5 @@
 import asyncio
+import datetime
 import logging
 import time
 import uuid
@@ -216,6 +217,8 @@ class SpineAgent(BaseAgent):
 
         self._cancel_approval_timer(task_id)
         held_payload = self.approvals.get_payload(task_id) or payload
+        approval_id = str(held_payload.get("approval_id") or f"approval-{task_id}")
+        self._persist_approval_terminal_state(task_id, approval_id, held_payload, state)
 
         if state.status == "APPROVED":
             exec_payload = self.approvals.consume_payload(task_id) or held_payload
@@ -336,6 +339,7 @@ class SpineAgent(BaseAgent):
         stored_payload = dict(payload)
         stored_payload["approval_id"] = approval_id
         state = self.approvals.add(task_id, stored_payload)
+        self._persist_approval_request(task_id, approval_id, stored_payload, state)
 
         await self.speak(Subject.TASK_APPROVAL_REQUEST, {
             "task_id": task_id,
@@ -371,6 +375,8 @@ class SpineAgent(BaseAgent):
             if not current or current.status != "EXPIRED":
                 return
             held_payload = self.approvals.consume_payload(task_id) or {}
+            approval_id = str(held_payload.get("approval_id") or f"approval-{task_id}")
+            self._persist_approval_terminal_state(task_id, approval_id, held_payload, current)
             await self._emit_task_status(
                 held_payload,
                 task_id=task_id,
@@ -387,6 +393,93 @@ class SpineAgent(BaseAgent):
         timer = self._approval_timers.pop(task_id, None)
         if timer and not timer.done():
             timer.cancel()
+
+    @staticmethod
+    def _approval_times(
+        created_at: float | None = None,
+        expires_at: float | None = None,
+        decision_at: float | None = None,
+    ) -> dict[str, str | None]:
+        def _to_iso(value: float | None) -> str | None:
+            if value is None:
+                return None
+            return datetime.datetime.fromtimestamp(
+                value,
+                tz=datetime.timezone.utc,
+            ).isoformat()
+
+        return {
+            "created_at": _to_iso(created_at),
+            "expires_at": _to_iso(expires_at),
+            "decision_at": _to_iso(decision_at),
+        }
+
+    @staticmethod
+    def _approval_view_payload(payload: dict) -> dict:
+        return {
+            "risk_level": payload.get("risk_level"),
+            "source_surface": payload.get("source_surface"),
+            "requested_by": payload.get("requested_by"),
+            "raw_text": payload.get("raw_text"),
+        }
+
+    def _persist_approval_request(self, task_id: str, approval_id: str, payload: dict, state) -> None:
+        try:
+            from heiwa_sdk.db import db as state_db
+
+            if not getattr(state_db, "stdb", None):
+                return
+            times = self._approval_times(state.created_at, state.expires_at, state.decision_at)
+            state_db.add_approval_request(
+                {
+                    "request_id": approval_id,
+                    "proposal_id": task_id,
+                    "status": state.status,
+                    "requested_at": times["created_at"],
+                    "expires_at": times["expires_at"],
+                    "requested_by": payload.get("requested_by", "heiwa-hub"),
+                    "reason": state.reason or "manual_approval_required",
+                    "payload": self._approval_view_payload(payload),
+                }
+            )
+        except Exception as exc:
+            logger.warning("Failed to persist approval request for %s: %s", task_id, exc)
+
+    def _persist_approval_terminal_state(self, task_id: str, approval_id: str, payload: dict, state) -> None:
+        try:
+            from heiwa_sdk.db import db as state_db
+
+            if not getattr(state_db, "stdb", None):
+                return
+            times = self._approval_times(state.created_at, state.expires_at, state.decision_at)
+            state_db.add_approval_request(
+                {
+                    "request_id": approval_id,
+                    "proposal_id": task_id,
+                    "status": state.status,
+                    "requested_at": times["created_at"],
+                    "expires_at": times["expires_at"],
+                    "requested_by": payload.get("requested_by", "heiwa-hub"),
+                    "reason": state.reason,
+                    "payload": self._approval_view_payload(payload),
+                }
+            )
+            if state.status in {"APPROVED", "REJECTED"}:
+                state_db.record_approval_decision(
+                    {
+                        "decision_id": f"DEC-{approval_id}-{int((state.decision_at or time.time()) * 1000)}",
+                        "request_id": approval_id,
+                        "proposal_id": task_id,
+                        "actor_type": "human",
+                        "actor_id": state.decision_by or "operator",
+                        "decision": state.status,
+                        "reason": state.reason,
+                        "created_at": times["decision_at"],
+                        "metadata": self._approval_view_payload(payload),
+                    }
+                )
+        except Exception as exc:
+            logger.warning("Failed to persist approval terminal state for %s: %s", task_id, exc)
 
     async def _emit_task_status(
         self,

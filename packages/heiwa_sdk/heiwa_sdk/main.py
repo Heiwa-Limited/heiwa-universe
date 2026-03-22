@@ -12,6 +12,7 @@ import uuid
 from .db import db
 from .config import settings
 from .eligibility import compute_eligibility
+from .proposal_dispatch import dispatch_routable_proposals
 from heiwa_sdk.routers.products import router as product_router
 
 from contextlib import asynccontextmanager
@@ -129,6 +130,8 @@ def submit_proposal(proposal: ProposalInput):
     success = db.add_proposal(proposal.dict())
     if not success:
         raise HTTPException(status_code=409, detail="Proposal ID already exists")
+    if settings.PHASE2_ROUTER_ENABLED:
+        dispatch_routable_proposals(db)
     return {"status": "queued", "proposal_id": proposal.proposal_id}
 
 
@@ -473,10 +476,17 @@ def node_heartbeat(node_id: str, hb: NodeHeartbeatInput):
         raise HTTPException(status_code=400, detail="Payload too large (>4096 bytes)")
 
     success = db.upsert_node_heartbeat(
-        node_id, hb.meta, hb.capabilities, hb.agent_version, hb.tags, hb.max_concurrency
+        node_id=node_id,
+        meta=hb.meta,
+        capabilities=hb.capabilities,
+        agent_version=hb.agent_version,
+        tags=hb.tags,
+        max_concurrency=hb.max_concurrency or 1,
     )
     if not success:
         raise HTTPException(status_code=500, detail="Database write failed")
+    if settings.PHASE2_ROUTER_ENABLED:
+        dispatch_routable_proposals(db)
     return {"status": "heartbeat_received", "node_id": node_id}
 
 
@@ -585,6 +595,8 @@ def submit_consent(proposal_id: str, consent: ConsentInput):
     )
     if not success:
         raise HTTPException(status_code=500, detail="Failed to record consent")
+    if decision == "APPROVE" and settings.PHASE2_ROUTER_ENABLED:
+        dispatch_routable_proposals(db)
 
     return {"status": "consent_recorded", "consent_id": consent_id}
 
