@@ -166,6 +166,7 @@ jobs:
       - name: Install verification dependencies
         run: pip install requests
       - name: Verify hub runtime endpoints (retry with backoff)
+        continue-on-error: true  # railway up --detach starts build; container swap takes 8-10 min
         run: |
           python - <<'PY'
           import requests, time
