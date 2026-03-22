@@ -158,7 +158,7 @@
       "adapter_tool": "heiwa_reflex",
       "transport": "api_http",
       "auth_kind": "api_key",
-      "rate_group": "antigravity_pro",
+      "rate_group": "google_antigravity",
       "websocket_preferred": false
     },
     "claude-code": {
@@ -230,15 +230,15 @@
       "window_sec": 3600,
       "cooldown_sec": 60
     },
-    "antigravity_flash": {
-      "max_turns": 20,
+    "google_antigravity": {
+      "max_turns": 35,
       "window_sec": 3600,
       "cooldown_sec": 60
     },
-    "antigravity_pro": {
-      "max_turns": 15,
-      "window_sec": 3600,
-      "cooldown_sec": 60
+    "google_gemini_api": {
+      "max_turns": 30,
+      "window_sec": 60,
+      "cooldown_sec": 30
     },
     "siliconflow": {
       "max_turns": 15,
