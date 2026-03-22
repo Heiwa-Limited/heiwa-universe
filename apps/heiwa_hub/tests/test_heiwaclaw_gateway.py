@@ -29,7 +29,7 @@ async def _run_cases() -> int:
                 source_surface="cli",
                 auth_validated=True,
             ),
-            {"compute_class": 3, "gateway_tool": "heiwa_claw", "adapter_tool": "heiwa_code"},
+            {"compute_class": 3, "gateway_tool": "heiwa_claw", "adapter_tool": "heiwa_claude"},
         ),
         (
             "research resolves to premium websocket path",
