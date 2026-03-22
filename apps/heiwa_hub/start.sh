@@ -244,6 +244,37 @@ GEMINI_AUTH
     echo "[HEIWA] Gemini oauth_creds.json written."
 fi
 
+# GitHub CLI: uses GH_TOKEN/GITHUB_TOKEN env vars directly.
+GH_EFFECTIVE_TOKEN="${GH_TOKEN:-${GITHUB_TOKEN:-}}"
+if [[ -n "$GH_EFFECTIVE_TOKEN" ]]; then
+    export GH_TOKEN="$GH_EFFECTIVE_TOKEN"
+    export GITHUB_TOKEN="${GITHUB_TOKEN:-$GH_EFFECTIVE_TOKEN}"
+    export GH_PROMPT_DISABLED=1
+    echo "[HEIWA] GitHub CLI token injected via env var."
+fi
+
+# Railway CLI: uses RAILWAY_TOKEN env var directly.
+if [[ -n "${RAILWAY_TOKEN:-}" ]]; then
+    export RAILWAY_TOKEN
+    echo "[HEIWA] Railway CLI token injected via env var."
+fi
+
+# Wrangler: uses CLOUDFLARE_API_TOKEN directly for headless auth.
+if [[ -n "${CLOUDFLARE_API_TOKEN:-}" ]]; then
+    export CLOUDFLARE_API_TOKEN
+    echo "[HEIWA] Cloudflare API token injected via env var."
+fi
+
+# SpacetimeDB CLI: support direct token login for headless Railway boots.
+STDB_LOGIN_TOKEN="${SPACETIMEDB_TOKEN:-${STDB_AUTH_TOKEN:-}}"
+if [[ -n "$STDB_LOGIN_TOKEN" ]] && command -v spacetime &>/dev/null; then
+    if spacetime login --token "$STDB_LOGIN_TOKEN" --no-browser >/tmp/heiwa-spacetime-login.log 2>&1; then
+        echo "[HEIWA] SpacetimeDB CLI login configured."
+    else
+        echo "[HEIWA] WARNING — SpacetimeDB CLI token rejected (see /tmp/heiwa-spacetime-login.log)."
+    fi
+fi
+
 # Verify CLI tool availability and auth
 echo "[HEIWA] CLI tools:"
 if command -v claude &>/dev/null; then
@@ -276,6 +307,66 @@ if command -v gemini &>/dev/null; then
     fi
 else
     echo "  gemini:   not installed"
+fi
+if command -v gh &>/dev/null; then
+    GH_VER=$(gh --version 2>/dev/null | head -1)
+    echo "  gh:       $GH_VER"
+    if [[ -n "${GH_TOKEN:-${GITHUB_TOKEN:-}}" ]]; then
+        if gh auth status >/tmp/heiwa-gh-auth.log 2>&1; then
+            echo "  gh:       auth configured (GH_TOKEN/GITHUB_TOKEN)"
+        else
+            echo "  gh:       WARNING — auth check failed (see /tmp/heiwa-gh-auth.log)"
+        fi
+    else
+        echo "  gh:       WARNING — no auth token (set GH_TOKEN or GITHUB_TOKEN)"
+    fi
+else
+    echo "  gh:       not installed"
+fi
+if command -v railway &>/dev/null; then
+    RAILWAY_VER=$(railway --version 2>/dev/null | head -1)
+    echo "  railway:  $RAILWAY_VER"
+    if [[ -n "${RAILWAY_TOKEN:-}" ]]; then
+        if railway whoami >/tmp/heiwa-railway-auth.log 2>&1; then
+            echo "  railway:  auth configured (RAILWAY_TOKEN)"
+        else
+            echo "  railway:  WARNING — auth check failed (see /tmp/heiwa-railway-auth.log)"
+        fi
+    else
+        echo "  railway:  WARNING — no auth token (set RAILWAY_TOKEN)"
+    fi
+else
+    echo "  railway:  not installed"
+fi
+if command -v wrangler &>/dev/null; then
+    WRANGLER_VER=$(wrangler --version 2>/dev/null | head -1)
+    echo "  wrangler: $WRANGLER_VER"
+    if [[ -n "${CLOUDFLARE_API_TOKEN:-}" ]]; then
+        if wrangler whoami >/tmp/heiwa-wrangler-auth.log 2>&1; then
+            echo "  wrangler: auth configured (CLOUDFLARE_API_TOKEN)"
+        else
+            echo "  wrangler: WARNING — auth check failed (see /tmp/heiwa-wrangler-auth.log)"
+        fi
+    else
+        echo "  wrangler: WARNING — no auth token (set CLOUDFLARE_API_TOKEN)"
+    fi
+else
+    echo "  wrangler: not installed"
+fi
+if command -v spacetime &>/dev/null; then
+    STDB_VER=$(spacetime --version 2>/dev/null | head -1)
+    echo "  spacetime: $STDB_VER"
+    if [[ -n "$STDB_LOGIN_TOKEN" ]]; then
+        if spacetime login show >/tmp/heiwa-spacetime-auth.log 2>&1; then
+            echo "  spacetime: auth configured (SPACETIMEDB_TOKEN/STDB_AUTH_TOKEN)"
+        else
+            echo "  spacetime: WARNING — auth check failed (see /tmp/heiwa-spacetime-auth.log)"
+        fi
+    else
+        echo "  spacetime: WARNING — no auth token (set SPACETIMEDB_TOKEN or STDB_AUTH_TOKEN)"
+    fi
+else
+    echo "  spacetime: not installed"
 fi
 
 

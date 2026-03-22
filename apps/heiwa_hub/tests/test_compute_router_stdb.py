@@ -16,7 +16,7 @@ class TestComputeRouterSTDB:
                 "capability_class": 2,
                 "effort_knob": "thinking:on",
                 "effort_level": 4,
-                "strengths_json": '["code_generation","research","general"]',
+                "strengths_json": '["build","files","research","general"]',
                 "enabled": True,
                 "cost_per_turn": 0.0,
                 "last_success_rate": 1.0,
@@ -28,10 +28,22 @@ class TestComputeRouterSTDB:
                 "capability_class": 2,
                 "effort_knob": "thinking:on",
                 "effort_level": 4,
-                "strengths_json": '["research","code_generation"]',
+                "strengths_json": '["research","audit","status_check"]',
                 "enabled": True,
                 "cost_per_turn": 0.0,
                 "last_success_rate": 0.95,
+            },
+            {
+                "model_id": "codex/gpt-4.1",
+                "provider": "codex",
+                "rate_group": "openai_codex",
+                "capability_class": 2,
+                "effort_knob": "reasoning:medium",
+                "effort_level": 3,
+                "strengths_json": '["build","refactor","self_buff"]',
+                "enabled": True,
+                "cost_per_turn": 0.6,
+                "last_success_rate": 0.97,
             },
         ]
 
@@ -42,13 +54,21 @@ class TestComputeRouterSTDB:
         route = router.route("audit", "low")
         assert route.target_model is not None
 
-    def test_router_picks_cheapest_capable_model(self):
+    def test_router_prefers_local_model_for_sovereign_execution(self):
         mock_stdb = MagicMock()
         mock_stdb.get_model_tiers.return_value = self._mock_tiers()
         router = ComputeRouter(stdb=mock_stdb)
-        route = router.route("audit", "low")
-        # Audit is light — should pick cheapest (ollama, cost=0.0)
+        route = router.route("build", "low", privacy_level="sovereign")
         assert "ollama" in route.target_model
+
+    def test_router_skips_local_only_models_for_railway_runtime(self):
+        mock_stdb = MagicMock()
+        mock_stdb.get_model_tiers.return_value = self._mock_tiers()
+        router = ComputeRouter(stdb=mock_stdb)
+        route = router.route("build", "medium")
+
+        assert route.target_runtime == "railway"
+        assert route.target_model == "codex/gpt-4.1"
 
     def test_router_falls_back_to_json_if_no_stdb(self):
         router = ComputeRouter(stdb=None)

@@ -9,6 +9,7 @@ Read these before runtime changes:
 3. `config/swarm/BUILD_BLUEPRINT_2026-03-06.md`
 4. `config/swarm/ai_router.json`
 5. `config/identities/profiles.json`
+6. `docs/railway-self-operation.md`
 
 ## Basic checks
 

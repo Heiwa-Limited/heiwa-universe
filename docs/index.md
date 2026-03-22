@@ -39,3 +39,4 @@ If a surface is not covered by the current docs, build checks, or hub smoke test
 - [`config/swarm/ai_router.json`](https://github.com/Strategizing/heiwa-universe/blob/main/config/swarm/ai_router.json)
 - [`config/identities/profiles.json`](https://github.com/Strategizing/heiwa-universe/blob/main/config/identities/profiles.json)
 - [`config/swarm/domain_plan.md`](https://github.com/Strategizing/heiwa-universe/blob/main/config/swarm/domain_plan.md)
+- [`docs/railway-self-operation.md`](https://github.com/Strategizing/heiwa-universe/blob/main/docs/railway-self-operation.md)

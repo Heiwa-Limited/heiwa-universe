@@ -65,19 +65,39 @@ class ComputeRouter:
             except Exception as e:
                 logger.warning("ComputeRouter: STDB unavailable (%s), falling back to JSON", e)
 
-    def _select_model_from_tiers(self, intent_class: str, risk_level: str) -> tuple[str, str] | None:
+    def _is_local_provider(self, provider: str) -> bool:
+        return provider in {"ollama", "local", "vllm", "litellm"}
+
+    def _select_model_from_tiers(
+        self,
+        intent_class: str,
+        risk_level: str,
+        *,
+        target_runtime: str,
+        privacy_level: str,
+    ) -> tuple[str, str] | None:
         """Select cheapest capable model from STDB tiers. Returns (model_id, effort_knob) or None."""
         if not self._model_tiers:
             return None
 
         # Determine minimum capability class from risk
         min_class = {"low": 1, "medium": 2, "high": 3, "critical": 3}.get(risk_level, 2)
+        runtime = str(target_runtime or "").strip().lower()
+        privacy = str(privacy_level or "").strip().lower()
 
         candidates = []
         for tier in self._model_tiers:
             if tier["capability_class"] < min_class:
                 continue
             if not tier.get("enabled", True):
+                continue
+
+            provider = str(tier.get("provider") or "")
+            is_local_provider = self._is_local_provider(provider)
+            if privacy == "sovereign" or runtime in {"boost", "macbook"}:
+                if not is_local_provider:
+                    continue
+            elif runtime == "railway" and is_local_provider:
                 continue
 
             strengths_json = tier.get("strengths_json") or "[]"
@@ -89,21 +109,23 @@ class ComputeRouter:
             else:
                 strengths = strengths_json
 
-            # Prefer models whose strengths include this intent
-            intent_match = intent_class in strengths or "general" in strengths
-            candidates.append((tier, intent_match))
+            exact_intent_match = intent_class in strengths
+            intent_match = exact_intent_match or "general" in strengths
+            candidates.append((tier, exact_intent_match, intent_match))
 
         if not candidates:
             return None
 
-        # Sort: intent match first, then success rate (desc), then cheapest, then lowest effort
+        # Sort: exact intent match first, then general fit, then success rate (desc),
+        # then cheapest, then lowest effort.
         # Penalize models with success rate < 0.5
         candidates.sort(key=lambda c: (
-            not c[1],                                # 1. Intent matches first (True -> False -> 0)
-            c[0].get("last_success_rate", 1.0) < 0.5, # 2. Penalize failed models (False first)
-            -c[0].get("last_success_rate", 1.0),     # 3. High success rate first
-            c[0]["cost_per_turn"],                   # 4. Cheapest first
-            c[0]["effort_level"],                    # 5. Lowest effort first
+            not c[1],                                  # 1. Exact intent matches first
+            not c[2],                                  # 2. Then general-fit matches
+            c[0].get("last_success_rate", 1.0) < 0.5, # 3. Penalize failed models
+            -c[0].get("last_success_rate", 1.0),      # 4. High success rate first
+            c[0]["cost_per_turn"],                     # 5. Cheapest first
+            c[0]["effort_level"],                      # 6. Lowest effort first
         ))
 
         best = candidates[0][0]
@@ -255,19 +277,21 @@ class ComputeRouter:
         privacy_level: str | None = None,
         identity_worker_hint: str | None = None,
     ) -> ComputeRoute:
-        # STDB-first: override model selection from tiers if available
-        # (does NOT short-circuit — route still flows through identity hint,
-        #  feedback preference, and cascade logic below)
-        tier_result = self._select_model_from_tiers(intent_class, risk_level)
-        stdb_override = None
-        if tier_result:
-            stdb_override = tier_result  # (model_id, effort_knob)
-
         result = self._route_inner(intent_class, risk_level, raw_text, privacy_level)
 
-        if stdb_override:
-            result.target_model = stdb_override[0]
-            result.effort_knob = stdb_override[1]
+        # STDB-first model selection stays advisory, but it must respect the
+        # already-chosen runtime lane. Otherwise Railway can select boost-only
+        # local models and create invalid dispatches.
+        if result.target_tool != "heiwa_ops":
+            tier_result = self._select_model_from_tiers(
+                result.intent_class or intent_class,
+                risk_level,
+                target_runtime=result.target_runtime,
+                privacy_level=result.privacy_level,
+            )
+            if tier_result:
+                result.target_model = tier_result[0]
+                result.effort_knob = tier_result[1]
 
         # Apply identity worker preference for premium (class 3+) routes
         if identity_worker_hint and result.compute_class >= 3 and result.target_tool != "heiwa_ops":

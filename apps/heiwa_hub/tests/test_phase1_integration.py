@@ -22,16 +22,16 @@ class TestPhase1Integration:
         ]
         return mock_stdb
 
-    def test_audit_routes_to_cheapest_local_model(self):
+    def test_audit_routes_stay_on_deterministic_ops_path(self):
         from heiwa_cognition.router import ComputeRouter
         stdb = self._seed_mock_stdb()
         router = ComputeRouter(stdb=stdb)
         route = router.route("audit", "low")
-        # Audit/low should pick a cheap local model
+
         assert route.target_model is not None
-        assert route.effort_knob != ""
-        # In our seed, ollama models are cheapest (0.0)
-        assert "ollama" in route.target_model or route.compute_class == 1
+        assert route.target_tool == "heiwa_ops"
+        assert route.compute_class == 1
+        assert route.effort_knob == ""
 
     def test_research_routes_to_capable_model_with_thinking(self):
         from heiwa_cognition.router import ComputeRouter

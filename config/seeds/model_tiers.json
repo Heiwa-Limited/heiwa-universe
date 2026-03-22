@@ -9,7 +9,7 @@
     "effort_level": 4,
     "cost_per_turn": 0.0,
     "max_context_tokens": 32768,
-    "strengths": ["code_generation", "research", "general"],
+    "strengths": ["build", "research", "self_buff", "general"],
     "enabled": true
   },
   {
@@ -22,7 +22,7 @@
     "effort_level": 1,
     "cost_per_turn": 0.0,
     "max_context_tokens": 16384,
-    "strengths": ["code_generation", "files"],
+    "strengths": ["build", "files", "self_buff"],
     "enabled": true
   },
   {
@@ -61,7 +61,7 @@
     "effort_level": 4,
     "cost_per_turn": 0.0,
     "max_context_tokens": 1000000,
-    "strengths": ["research", "code_generation", "general"],
+    "strengths": ["audit", "status_check", "chat", "general"],
     "enabled": true
   },
   {
@@ -74,7 +74,7 @@
     "effort_level": 5,
     "cost_per_turn": 0.0,
     "max_context_tokens": 2000000,
-    "strengths": ["research", "architecture", "long_context"],
+    "strengths": ["research", "architecture", "long_context", "strategy"],
     "enabled": true
   },
   {
@@ -87,7 +87,7 @@
     "effort_level": 3,
     "cost_per_turn": 0.0,
     "max_context_tokens": 1000000,
-    "strengths": ["chat", "status", "observation"],
+    "strengths": ["chat", "status_check", "audit", "observation"],
     "enabled": true
   },
   {
@@ -100,7 +100,7 @@
     "effort_level": 5,
     "cost_per_turn": 0.0,
     "max_context_tokens": 1000000,
-    "strengths": ["strategy", "review", "research", "architecture"],
+    "strengths": ["strategy", "review", "research", "architecture", "adversarial_review"],
     "enabled": true
   },
   {
@@ -113,7 +113,7 @@
     "effort_level": 3,
     "cost_per_turn": 1.08,
     "max_context_tokens": 1000000,
-    "strengths": ["code_generation", "build", "refactor"],
+    "strengths": ["build", "refactor", "self_buff", "code_generation"],
     "enabled": true
   },
   {
@@ -126,7 +126,7 @@
     "effort_level": 5,
     "cost_per_turn": 1.08,
     "max_context_tokens": 1000000,
-    "strengths": ["architecture", "adversarial_review", "complex_reasoning"],
+    "strengths": ["build", "architecture", "adversarial_review", "complex_reasoning", "strategy"],
     "enabled": true
   },
   {
@@ -139,7 +139,7 @@
     "effort_level": 3,
     "cost_per_turn": 0.775,
     "max_context_tokens": 200000,
-    "strengths": ["code_generation", "review", "research"],
+    "strengths": ["review", "research", "code_review", "build"],
     "enabled": true
   },
   {
@@ -152,7 +152,7 @@
     "effort_level": 5,
     "cost_per_turn": 0.775,
     "max_context_tokens": 200000,
-    "strengths": ["architecture", "adversarial_review", "complex_reasoning", "code_review"],
+    "strengths": ["strategy", "architecture", "adversarial_review", "complex_reasoning", "code_review", "review"],
     "enabled": true
   },
   {

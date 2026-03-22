@@ -46,6 +46,7 @@ RUN apt-get update && apt-get install -y \
     curl \
     ca-certificates \
     git \
+    gh \
     libpq-dev \
     zstd \
     && rm -rf /var/lib/apt/lists/*
@@ -65,7 +66,7 @@ COPY --from=builder /usr/local/bin/spacetimedb-standalone /usr/local/bin/spaceti
 # --- Class 3 CLI Tools (cloud OAuth executors) ---
 # Each is a thin HTTP client; inference runs on provider servers.
 # Auth injected via Railway env vars at runtime.
-RUN npm install -g @anthropic-ai/claude-code @google/gemini-cli @openai/codex 2>/dev/null || true
+RUN npm install -g @anthropic-ai/claude-code @google/gemini-cli @openai/codex @railway/cli wrangler 2>/dev/null || true
 
 # Playwright browsers (for MCP browser automation)
 ENV PLAYWRIGHT_BROWSERS_PATH=/opt/pw-browsers
