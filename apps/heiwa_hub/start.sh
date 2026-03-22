@@ -207,7 +207,7 @@ export CLAUDE_CODE_ENVIRONMENT_KIND="${CLAUDE_CODE_ENVIRONMENT_KIND:-cloud}"
 
 # Codex: writes ~/.codex/auth.json
 # Full structure required — Codex validates all fields on load.
-# access_token/id_token set to "expired" so Codex triggers refresh from refresh_token.
+# access_token/id_token set to null so Codex triggers refresh from refresh_token.
 if [[ -n "${CODEX_OAUTH_REFRESH_TOKEN:-}" ]]; then
     mkdir -p /root/.codex
     CODEX_ACCOUNT_ID="${CODEX_ACCOUNT_ID:-}"
@@ -216,8 +216,8 @@ if [[ -n "${CODEX_OAUTH_REFRESH_TOKEN:-}" ]]; then
   "auth_mode": "chatgpt",
   "OPENAI_API_KEY": null,
   "tokens": {
-    "id_token": "expired",
-    "access_token": "expired",
+    "id_token": null,
+    "access_token": null,
     "refresh_token": "${CODEX_OAUTH_REFRESH_TOKEN}",
     "account_id": "${CODEX_ACCOUNT_ID}"
   },
