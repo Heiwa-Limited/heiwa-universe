@@ -49,6 +49,13 @@ case "$PERMISSION_MODE" in
         ;;
 esac
 
+# Auth priority: OAuth token (Pro subscription) > API key (free tier fallback).
+# Unset ANTHROPIC_API_KEY when OAuth token is available so Claude Code
+# uses the subscription instead of burning free API credits.
+if [[ -n "${CLAUDE_CODE_OAUTH_TOKEN:-}" ]]; then
+    unset ANTHROPIC_API_KEY
+fi
+
 CMD=(claude -p "$PAYLOAD" --output-format text --permission-mode "$PERMISSION_MODE" --add-dir "$ROOT")
 if [[ -n "$MODEL" ]]; then
     CMD+=(--model "$MODEL")
