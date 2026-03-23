@@ -1092,11 +1092,13 @@ async def worker_socket(ws: WebSocket):
         if worker_id:
             wm.unregister(worker_id)
             db.set_node_status(worker_id, "OFFLINE")
+            dispatch_routable_proposals(db)
     except Exception as exc:
         logger.error("Worker socket error: %s", exc)
         if worker_id:
             wm.unregister(worker_id)
             db.set_node_status(worker_id, "OFFLINE")
+            dispatch_routable_proposals(db)
 
 
 def start_mcp_server():
