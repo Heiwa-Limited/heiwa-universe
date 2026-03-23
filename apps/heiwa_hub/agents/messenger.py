@@ -96,6 +96,33 @@ class ApprovalView(discord.ui.View):
         await self.messenger.handle_approval_timeout(self.task_id)
 
 
+class TaskView(discord.ui.View):
+    def __init__(self, messenger: "MessengerAgent", task_id: str):
+        super().__init__(timeout=None)
+        self.messenger = messenger
+        self.task_id = task_id
+
+    @discord.ui.button(label="Force Requeue", style=discord.ButtonStyle.secondary)
+    async def requeue(self, interaction: discord.Interaction, _: discord.ui.Button):
+        await interaction.response.send_message(f"🔄 Requeuing task `{self.task_id}`...", ephemeral=True)
+        self.messenger.db.stdb.requeue_proposal(self.task_id, reason=f"Forced by {interaction.user}")
+
+    @discord.ui.button(label="View Telemetry", style=discord.ButtonStyle.link, url="https://heiwa.ltd/telemetry")
+    async def telemetry(self, interaction: discord.Interaction, _: discord.ui.Button):
+        pass
+
+
+class SpoolRecoveryView(discord.ui.View):
+    def __init__(self, messenger: "MessengerAgent"):
+        super().__init__(timeout=None)
+        self.messenger = messenger
+
+    @discord.ui.button(label="Retry Spool", style=discord.ButtonStyle.primary)
+    async def retry_spool(self, interaction: discord.Interaction, _: discord.ui.Button):
+        await interaction.response.send_message("🚛 Attempting to recover spooled proposals...", ephemeral=True)
+        # Logic to read runtime/spool/dead_letter_proposals.jsonl and retry writes
+
+
 class MessengerAgent(BaseAgent):
     """
     Discord control plane for Heiwa.
@@ -619,14 +646,33 @@ class MessengerAgent(BaseAgent):
         task_id = str(payload.get("task_id", "n/a"))
         target = self._resolve_target_channel(payload, task_id)
         if target:
+            runtime = str(payload.get("runtime", "unknown")).lower()
+            is_boost = runtime in {"boost", "macbook", "local"}
+            label = "[⚡ Boost]" if is_boost else "[☁️ Cloud]"
+            
             summary = str(payload.get("summary", ""))
             truncated_summary = summary[0:100] + "..." if len(summary) > 100 else summary
-            embed = UIManager.create_task_embed(task_id, truncated_summary, status=("completed" if payload.get("status") == "PASS" else "error"), result=payload.get("summary"), usage=payload.get("usage"), snapshot={"railway": "Online", "node_id": payload.get("runtime", "unknown"), "provider": payload.get("target_tool", "OpenClaw")})
-            await target.send(embed=embed)
+            
+            embed = UIManager.create_task_embed(
+                task_id, 
+                f"{label} {truncated_summary}", 
+                status=("completed" if payload.get("status") == "PASS" else "error"), 
+                result=payload.get("summary"), 
+                usage=payload.get("usage"), 
+                snapshot={
+                    "railway": "Online", 
+                    "node_id": payload.get("runtime", "unknown"), 
+                    "provider": payload.get("target_tool", "OpenClaw")
+                }
+            )
+            
+            view = TaskView(self, task_id)
+            await target.send(embed=embed, view=view)
+            
             rid = self._get_channel_id(payload.get("report_channel") or "executive-briefing")
             if rid and rid != target.id:
                 rc = self.bot.get_channel(rid)
-                if rc: await rc.send(embed=embed)
+                if rc: await rc.send(embed=embed, view=view)
 
     async def handle_swarm_log(self, data: dict[str, Any]):
         if not self.bot.is_ready(): return

@@ -1,12 +1,25 @@
 import discord
 from datetime import datetime
 import os
+import hashlib
+import hmac
 
 class UIManager:
     """Advanced UI System for Heiwa Swarm with professional embeds and layout."""
     
     BRAND_NAME = "HEIWA SWARM"
     BRAND_ICON = "https://heiwa.ltd/assets/logo.png" # Placeholder if exists
+
+    @staticmethod
+    def _sign_footer(text: str) -> str:
+        """Generate a Hub Signature for the footer text."""
+        secret = os.getenv("HEIWA_HUB_SECRET", "heiwa-default-secret")
+        signature = hmac.new(
+            secret.encode(),
+            text.encode(),
+            hashlib.sha256
+        ).hexdigest()[:16]
+        return f"{text} | SIG: {signature}"
 
     COLORS = {
         "thinking": 0x3498db,   # Blue
@@ -55,14 +68,13 @@ class UIManager:
         if snapshot:
             railway = snapshot.get("railway", "Online")
             tokens = snapshot.get("tokens", 0)
-            local_health = snapshot.get("local_health", "Stable")
             node_id = snapshot.get("node_id", "Unknown")
             provider = snapshot.get("provider", "Ollama")
             
             footer_text = f"Railway: {railway} | Provider: {provider} | Tokens: {tokens} | Node: {node_id}"
-            embed.set_footer(text=footer_text)
+            embed.set_footer(text=UIManager._sign_footer(footer_text))
         else:
-            embed.set_footer(text="Heiwa Swarm Control Plane")
+            embed.set_footer(text=UIManager._sign_footer("Heiwa Swarm Control Plane"))
             
         return embed
 
@@ -109,7 +121,7 @@ class UIManager:
             node_id = snapshot.get("node_id", "Unknown")
             provider = snapshot.get("provider", "Ollama")
             footer_text = f"Cloud HQ: {railway} | Provider: {provider} | Node: {node_id}"
-            embed.set_footer(text=footer_text)
+            embed.set_footer(text=UIManager._sign_footer(footer_text))
             
         return embed
 
