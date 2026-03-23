@@ -274,7 +274,7 @@
         "embeddings": {"model": "ollama/qwen3-embedding:0.6b", "worker": "node_a_embeddings"}
       },
       "cloud_lanes": {
-        "build": {"provider": "claude-code", "worker": "class_3_review"},
+        "build": {"provider": "google-antigravity", "worker": "heiwa_agent_routine"},
         "review": {"provider": "claude-code", "worker": "class_3_review"},
         "research": {"provider": "google-gemini-cli", "worker": "class_3_research"},
         "strategy": {"provider": "google-antigravity", "worker": "class_3_strategy"}
@@ -307,10 +307,11 @@
           "cerebras/gpt-oss-120b"
         ],
         "build": [
+          "google-antigravity/gemini-3-flash",
+          "gemini-cli/gemini-3.1-pro",
+          "google-antigravity/gemini-3.1-pro",
           "claude/opus-4-6",
           "codex/gpt-4.1",
-          "google-antigravity/gemini-3.1-pro",
-          "gemini-cli/gemini-3.1-pro",
           "siliconflow/deepseek-r2",
           "cerebras/gpt-oss-120b"
         ]

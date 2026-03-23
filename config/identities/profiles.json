@@ -58,7 +58,7 @@
     },
     {
       "id": "codex-builder",
-      "description": "Premium build specialist for large implementation, repo mutation, and PR preparation. Routes to Claude Code as primary builder.",
+      "description": "Build specialist — Gemini Flash primary (free, high rate limits), Claude Code for review/escalation.",
       "trigger_keywords": [
         "build",
         "implement",
@@ -68,8 +68,8 @@
         "pr"
       ],
       "targets": {
-        "tool": "claude",
-        "runtime": "cloud@class-3-review",
+        "tool": "antigravity_build",
+        "runtime": "cloud@heiwa-agent-routine",
         "required_capabilities": [
           "agile_coding",
           "repo_mutation"
@@ -83,12 +83,12 @@
         },
         {
           "role": "builder",
-          "model": "claude-code/claude-opus-4-6",
-          "difficulty": "high"
+          "model": "google-antigravity/gemini-3-flash",
+          "difficulty": "medium"
         },
         {
           "role": "reviewer",
-          "model": "openai-codex/gpt-5.3-codex",
+          "model": "claude-code/claude-opus-4-6",
           "difficulty": "high"
         }
       ],
@@ -96,11 +96,11 @@
         "openclaw": [
           "ollama/qwen3.5:4b",
           "ollama/glm-4.7-flash:q4_k_m",
-          "claude-code/claude-opus-4-6",
-          "openai-codex/gpt-5.3-codex"
-        ],
-        "claude": [
+          "google-antigravity/gemini-3-flash",
           "claude-code/claude-opus-4-6"
+        ],
+        "antigravity_build": [
+          "google-antigravity/gemini-3-flash"
         ]
       },
       "actions": {

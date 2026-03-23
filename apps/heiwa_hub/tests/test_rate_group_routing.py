@@ -105,16 +105,29 @@ def test_build_cascade_prefers_review_family():
     router = ComputeRouter(ROOT / "config" / "swarm" / "ai_router.json")
 
     route = router.route("build", "high")
+    # Raw router (no identity pipeline) still picks class_3_build;
+    # identity override to heiwa_agent_routine happens in enrichment.
     assert route.assigned_worker == "class_3_build"
 
+    # Exhaust codex → cascade to Gemini Flash (first in build rotation)
     for _ in range(30):
         ledger.record("openai_codex")
 
     cascaded = router.route("build", "high")
     assert cascaded.compute_class == 3
-    assert cascaded.assigned_worker == "class_3_review"
-    assert cascaded.target_model == "claude/opus-4-6"
+    assert cascaded.assigned_worker == "heiwa_agent_routine"
+    assert cascaded.target_model == "google-antigravity/gemini-3-flash"
     assert cascaded.rationale.startswith("Rate cascade")
+
+    # Exhaust antigravity too → cascade to Gemini CLI (next available)
+    for _ in range(40):
+        ledger.record("google_antigravity")
+
+    cascaded2 = router.route("build", "high")
+    assert cascaded2.compute_class == 3
+    assert cascaded2.assigned_worker == "class_3_research"
+    assert cascaded2.target_model == "gemini-cli/gemini-3.1-pro"
+    assert cascaded2.rationale.startswith("Rate cascade")
 
     # Cleanup: reset the singleton
     with _ledger_lock:
@@ -161,6 +174,7 @@ if __name__ == "__main__":
         ("cascade_on_exhaustion", test_cascade_on_exhaustion),
         ("build_cascade_prefers_review_family", test_build_cascade_prefers_review_family),
         ("status_report", test_status_report),
+        ("background_reserve_logic", test_background_reserve_logic),
     ]
     passed = 0
     for name, fn in tests:

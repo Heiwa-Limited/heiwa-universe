@@ -19,6 +19,7 @@ _TOOL_TO_WORKER: dict[str, str] = {
     "codex": "class_3_build",
     "gemini_cli": "class_3_research",
     "antigravity": "class_3_strategy",
+    "antigravity_build": "heiwa_agent_routine",
     "claude": "class_3_review",
 }
 
