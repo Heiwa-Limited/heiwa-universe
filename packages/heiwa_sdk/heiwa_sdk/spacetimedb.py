@@ -2,7 +2,8 @@ import datetime
 import json
 import logging
 import subprocess
-from typing import Any, List
+import time
+from typing import Any, Callable, List
 
 logger = logging.getLogger("SDK.SpacetimeDB")
 
@@ -80,6 +81,21 @@ class SpacetimeDB:
             logger.error("STDB command failed (cmd=%r): %s", cmd, result.stderr.strip())
             return None
         return result
+
+    def call_with_retry(self, func: Callable[..., bool], *args: Any, max_retries: int = 3) -> bool:
+        """Call a SpacetimeDB method with exponential backoff (1s, 2s, 4s)."""
+        backoff = 1
+        for i in range(max_retries):
+            if func(*args):
+                return True
+            if i < max_retries - 1:
+                logger.warning(
+                    "STDB call failed, retrying in %ds (attempt %d/%d)", 
+                    backoff, i + 1, max_retries
+                )
+                time.sleep(backoff)
+                backoff *= 2
+        return False
 
     def call(self, reducer_name: str, *args: Any) -> bool:
         if not self.db_identity:
@@ -359,7 +375,8 @@ class SpacetimeDB:
         )
 
     def finish_cell_run(self, run_data: dict[str, Any]) -> bool:
-        return self.call(
+        return self.call_with_retry(
+            self.call,
             "finish_cell_run",
             run_data["cell_run_id"],
             run_data.get("status", "completed"),
@@ -483,7 +500,8 @@ class SpacetimeDB:
         max_concurrency: int = 1,
     ) -> bool:
         now_iso = datetime.datetime.now(datetime.timezone.utc).isoformat()
-        return self.call(
+        return self.call_with_retry(
+            self.call,
             "upsert_node_heartbeat",
             node_id,
             now_iso,
@@ -564,7 +582,7 @@ class SpacetimeDB:
         now_iso = datetime.datetime.now(datetime.timezone.utc).isoformat()
         rows = self.query(
             "SELECT * FROM proposals "
-            "WHERE status IN ('APPROVED', 'QUEUED') "
+            "WHERE (status = 'APPROVED' OR status = 'QUEUED') "
             f"AND (expires_at IS NULL OR expires_at = '' OR expires_at > '{self._escape_sql_literal(now_iso)}')"
         )
         return sorted(rows, key=lambda r: r.get("created_at", ""))
