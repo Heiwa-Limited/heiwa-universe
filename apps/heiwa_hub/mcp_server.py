@@ -223,17 +223,27 @@ async def _record_result_event(envelope: Dict[str, Any]):
     try:
         summary = str(payload.get("summary") or "")
         status = str(payload.get("status") or "").upper()
-        db.finish_cell_run(
-            {
-                "cell_run_id": f"cellrun-{task_id}",
-                "status": "completed" if status in {"PASS", "DELIVERED"} else "failed",
-                "output_summary": summary,
-            }
-        )
+        
+        # 1. Attempt to close the specific cell-run (execution-level)
+        try:
+            db.finish_cell_run(
+                {
+                    "cell_run_id": f"cellrun-{task_id}",
+                    "status": "completed" if status in {"PASS", "DELIVERED"} else "failed",
+                    "output_summary": summary,
+                }
+            )
+        except Exception as e:
+            # Log but don't block — the mission result is more important than the execution log.
+            logger.warning("Failed to finish cell-run %s (orphaned?): %s", task_id, e)
+
+        # 2. Always attempt to close the mission (user-level)
         if status in {"PASS", "DELIVERED"}:
             db.complete_mission(task_id, summary=summary[:500] if summary else "Completed")
         elif status in {"FAIL", "BLOCKED_AUTH", "BLOCKED_NO_CONTENT"}:
             db.fail_mission(task_id, error=summary[:500] if summary else status)
+            
+        # 3. Always register the artifact
         db.register_artifact(
             {
                 "artifact_id": f"artifact-{task_id}",
