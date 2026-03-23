@@ -938,8 +938,8 @@ class SpacetimeDB:
             model_used,
             outcome,
             int(duration_ms),
-            error_summary,
-            feedback_score,
+            self._sats_option(error_summary),
+            self._sats_option(feedback_score),
         )
 
     def insert_knowledge_embedding(
