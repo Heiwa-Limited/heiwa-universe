@@ -14,7 +14,6 @@ from heiwa_cognition.intent import (
     IntentNormalizer,
     IntentProfile,
 )
-from heiwa_cognition.llm import LLMPolicyError, LocalLLMEngine
 
 
 @dataclass
@@ -66,13 +65,8 @@ class LocalTaskPlanner:
             root / "schemas" / "task_envelope_v2.schema.json",
         ]
         self.schema_path = next((path for path in candidates if path.exists()), candidates[0])
-        self.engine: LocalLLMEngine | None = None
-        try:
-            self.engine = LocalLLMEngine()
-        except LLMPolicyError:
-            # Keep planner running in deterministic fallback mode.
-            self.engine = None
-        self.normalizer = IntentNormalizer(engine=self.engine)
+        self.engine = None
+        self.normalizer = IntentNormalizer()
 
     def plan(
         self,

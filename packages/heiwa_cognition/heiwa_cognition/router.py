@@ -26,6 +26,37 @@ class ComputeRoute:
     requires_human_oversight: bool = False
 
 
+@dataclass(slots=True)
+class InferenceTarget:
+    model_id: str
+    provider_model_id: str
+    provider: str
+    rate_group: str
+    transport: str
+    effort_knob: str
+    capability_class: int
+
+
+@dataclass(slots=True)
+class RoutedPlan:
+    primary: InferenceTarget
+    fallbacks: list[InferenceTarget]
+    intent: str
+    risk: str
+    privacy: str
+    reason: str
+    retry_policy: str
+
+
+@dataclass(slots=True)
+class InferenceResult:
+    text: str
+    provider: str
+    model: str
+    attempts: int
+    rerouted: bool
+
+
 class ComputeRouter:
     """
     Heiwa routing core.
@@ -79,21 +110,40 @@ class ComputeRouter:
         min_capability_override: int | None = None,
     ) -> tuple[str, str] | None:
         """Select cheapest capable model from STDB tiers. Returns (model_id, effort_knob) or None."""
-        if not self._model_tiers:
+        candidates = self._ranked_tier_candidates(
+            intent_class,
+            risk_level,
+            target_runtime=target_runtime,
+            privacy_level=privacy_level,
+            min_capability_override=min_capability_override,
+        )
+        if not candidates:
             return None
 
-        # Determine minimum capability class from risk or override
-        # Mapping: low -> 1, medium -> 2, high/critical -> 3
+        best = candidates[0]
+        return best["model_id"], best["effort_knob"]
+
+    def _ranked_tier_candidates(
+        self,
+        intent_class: str,
+        risk_level: str,
+        *,
+        target_runtime: str,
+        privacy_level: str,
+        min_capability_override: int | None = None,
+    ) -> list[dict[str, Any]]:
+        if not self._model_tiers:
+            return []
+
         min_class = min_capability_override
         if min_class is None:
             min_class = {"low": 1, "medium": 2, "high": 3, "critical": 3}.get(risk_level, 2)
-            
+
         runtime = str(target_runtime or "").strip().lower()
         privacy = str(privacy_level or "").strip().lower()
 
-        candidates = []
+        candidates: list[tuple[dict[str, Any], bool, bool]] = []
         for tier in self._model_tiers:
-            # STRICT CLASS PRESERVATION: must meet minimum capability
             if tier["capability_class"] < min_class:
                 continue
             if not tier.get("enabled", True):
@@ -120,23 +170,15 @@ class ComputeRouter:
             intent_match = exact_intent_match or "general" in strengths
             candidates.append((tier, exact_intent_match, intent_match))
 
-        if not candidates:
-            return None
-
-        # Sort: exact intent match first, then general fit, then success rate (desc),
-        # then cheapest, then lowest effort.
-        # Penalize models with success rate < 0.5
         candidates.sort(key=lambda c: (
-            not c[1],                                  # 1. Exact intent matches first
-            not c[2],                                  # 2. Then general-fit matches
-            c[0].get("last_success_rate", 1.0) < 0.5, # 3. Penalize failed models
-            -c[0].get("last_success_rate", 1.0),      # 4. High success rate first
-            c[0]["cost_per_turn"],                     # 5. Cheapest first
-            c[0]["effort_level"],                      # 6. Lowest effort first
+            not c[1],
+            not c[2],
+            c[0].get("last_success_rate", 1.0) < 0.5,
+            -c[0].get("last_success_rate", 1.0),
+            c[0]["cost_per_turn"],
+            c[0]["effort_level"],
         ))
-
-        best = candidates[0][0]
-        return best["model_id"], best["effort_knob"]
+        return [item[0] for item in candidates]
 
     def _load_router(self) -> dict:
         try:
@@ -361,6 +403,90 @@ class ComputeRouter:
         result = self._apply_feedback_preference(result)
 
         return self._maybe_cascade(result)
+
+    def route_inference(
+        self,
+        intent: str,
+        risk: str,
+        privacy: str | None = None,
+        runtime: str | None = None,
+    ) -> RoutedPlan:
+        route = self.route(
+            intent_class=intent,
+            risk_level=risk,
+            raw_text="",
+            privacy_level=privacy,
+        )
+        runtime_value = str(runtime or route.target_runtime or "auto").strip().lower() or "auto"
+        privacy_value = str(route.privacy_level or privacy or "").strip().lower()
+
+        try:
+            from heiwa_sdk.provider_registry import ProviderRegistry
+            registry = ProviderRegistry()
+        except Exception:
+            registry = None
+
+        def _make_target(model_id: str, effort_knob: str, capability_class: int) -> InferenceTarget:
+            provider = (
+                registry.provider_for_model(model_id)
+                if registry is not None
+                else (model_id.split("/", 1)[0] if "/" in model_id else model_id)
+            )
+            provider_cfg = registry.resolve(provider) if registry is not None else None
+            provider_model_id = model_id.split("/", 1)[1] if "/" in model_id else model_id
+            return InferenceTarget(
+                model_id=model_id,
+                provider_model_id=provider_model_id,
+                provider=provider,
+                rate_group=(provider_cfg.rate_group if provider_cfg else provider),
+                transport=(provider_cfg.transport if provider_cfg else ("local_http" if self._is_local_provider(provider) else "api_http")),
+                effort_knob=effort_knob,
+                capability_class=capability_class,
+            )
+
+        capability_class = route.compute_class
+        primary = _make_target(route.target_model, route.effort_knob, capability_class)
+
+        fallbacks: list[InferenceTarget] = []
+        for tier in self._ranked_tier_candidates(
+            intent,
+            risk,
+            target_runtime=runtime_value,
+            privacy_level=privacy_value,
+            min_capability_override=capability_class,
+        ):
+            if tier["model_id"] == primary.model_id:
+                continue
+            fallback_provider = (
+                registry.provider_for_model(tier["model_id"])
+                if registry is not None
+                else (tier["model_id"].split("/", 1)[0] if "/" in tier["model_id"] else tier["model_id"])
+            )
+            fallback_cfg = registry.resolve(fallback_provider) if registry is not None else None
+            fallbacks.append(
+                InferenceTarget(
+                    model_id=tier["model_id"],
+                    provider_model_id=tier["model_id"].split("/", 1)[1] if "/" in tier["model_id"] else tier["model_id"],
+                    provider=fallback_provider,
+                    rate_group=(fallback_cfg.rate_group if fallback_cfg else fallback_provider),
+                    transport=(fallback_cfg.transport if fallback_cfg else ("local_http" if self._is_local_provider(fallback_provider) else "api_http")),
+                    effort_knob=str(tier.get("effort_knob") or ""),
+                    capability_class=int(tier.get("capability_class") or capability_class),
+                )
+            )
+            if len(fallbacks) >= 2:
+                break
+
+        retry_policy = "exhaust_then_reroute" if fallbacks else "reroute_immediately"
+        return RoutedPlan(
+            primary=primary,
+            fallbacks=fallbacks,
+            intent=intent,
+            risk=risk,
+            privacy=privacy_value or "unspecified",
+            reason=route.rationale,
+            retry_policy=retry_policy,
+        )
 
     def _apply_feedback_preference(self, route: ComputeRoute) -> ComputeRoute:
         """Adjust model based on accumulated /feedback signals.

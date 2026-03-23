@@ -82,16 +82,8 @@ class ChatEngine:
 
     def __init__(self) -> None:
         self._sessions: dict[str, ChatSession] = {}
-        self._llm = None
         self._bus_publish: Callable | None = None
         self._value_listeners: list[Callable[[dict[str, Any]], Coroutine]] = []
-
-    @property
-    def llm(self):
-        if self._llm is None:
-            from heiwa_cognition.llm import LocalLLMEngine
-            self._llm = LocalLLMEngine()
-        return self._llm
 
     def get_session(self, session_id: str) -> ChatSession:
         if session_id not in self._sessions:
@@ -167,10 +159,16 @@ class ChatEngine:
         # Layer 2+: LLMEngine tier chain (Gemini API → Gemini CLI → Claude CLI → Ollama)
         # CLI tools need longer timeout than API calls
         try:
-            loop = asyncio.get_event_loop()
+            from heiwa_cognition.llm import llm_generate
+
             reply = await asyncio.wait_for(
-                loop.run_in_executor(
-                    None, self.llm.generate, prompt, "high", SYSTEM_PROMPT, "auto",
+                asyncio.to_thread(
+                    llm_generate,
+                    prompt,
+                    intent="chat",
+                    risk="low",
+                    runtime="railway",
+                    system=SYSTEM_PROMPT,
                 ),
                 timeout=120.0,
             )

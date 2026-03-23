@@ -464,7 +464,11 @@ class MessengerAgent(BaseAgent):
 
         # 2. Server chats (mentions) go to simple local fallback if classified as 'chat'
         if intent_profile.intent_class == "chat":
-            reply = self.planner.engine.generate(prompt=instruction, runtime="railway", complexity="low") if self.planner.engine else "Cognitive engine unavailable."
+            try:
+                from heiwa_cognition.llm import llm_generate
+                reply = llm_generate(prompt=instruction, intent="chat", risk="low", runtime="railway")
+            except Exception:
+                reply = "Cognitive engine unavailable."
             embed = UIManager.create_base_embed("Direct Response", reply or "...", status="online")
             if isinstance(source, discord.Interaction): await source.followup.send(embed=embed)
             else: await source.channel.send(embed=embed)

@@ -79,22 +79,22 @@ class ReflexAdapter(BaseClawAdapter):
         system_prompt: str | None = None,
     ) -> str:
         try:
-            from heiwa_hub.cognition.llm_local import LocalLLMEngine
+            from heiwa_hub.cognition.llm_local import llm_generate
         except Exception as exc:
             logger.info("Runtime engine unavailable: %s", exc)
             return ""
 
-        engine = LocalLLMEngine()
-        result = engine.generate(
+        result = llm_generate(
             prompt=instruction,
+            intent=str(route.intent_class or "general"),
+            risk=self._runtime_engine_risk(route),
             system=system_prompt or None,
-            complexity=self._runtime_engine_complexity(route),
             runtime=route.target_runtime or "railway",
         )
         return result.strip() if result else ""
 
     @staticmethod
-    def _runtime_engine_complexity(route: BrokerRouteResult) -> str:
+    def _runtime_engine_risk(route: BrokerRouteResult) -> str:
         tier = str(route.target_tier or "").strip().lower()
         if tier in {"tier6_premium_context", "tier7_supreme_court"}:
             return "high"

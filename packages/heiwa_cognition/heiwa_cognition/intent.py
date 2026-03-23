@@ -4,7 +4,7 @@ from dataclasses import dataclass
 import re
 from typing import Any
 
-from heiwa_cognition.llm import LocalLLMEngine
+from heiwa_cognition.llm import llm_generate_json
 
 INTENT_ENUM = {
     "audit",
@@ -140,7 +140,7 @@ class IntentNormalizer:
     and a structured execution brief.
     """
 
-    def __init__(self, engine: LocalLLMEngine | None = None) -> None:
+    def __init__(self, engine: object | None = None) -> None:
         self.engine = engine
 
     def normalize(self, raw_text: str) -> IntentProfile:
@@ -230,9 +230,6 @@ class IntentNormalizer:
         return re.search(pattern, lowered_text) is not None
 
     def _infer_with_llm(self, text: str) -> dict[str, Any]:
-        if not self.engine or not self.engine.is_available("railway"):
-            return {}
-
         prompt = (
             "Classify this request and return JSON only with keys: "
             "intent_class, risk_level, requires_approval, preferred_runtime, preferred_tool, confidence.\n"
@@ -245,7 +242,12 @@ class IntentNormalizer:
             "Request:\n"
             f"{text}"
         )
-        data = self.engine.generate_json(prompt=prompt, runtime="railway", complexity="medium")
+        data = llm_generate_json(
+            prompt=prompt,
+            intent="classification",
+            risk="low",
+            runtime="railway",
+        )
         intent = str(data.get("intent_class", "")).strip().lower()
         risk = str(data.get("risk_level", "")).strip().lower()
         runtime = str(data.get("preferred_runtime", "")).strip().lower()

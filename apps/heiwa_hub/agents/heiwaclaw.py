@@ -61,7 +61,6 @@ class HeiwaClawAgent(BaseAgent):
         self.auditor = RepoAuditor(self.root)
         self.memory = MemoryService(stdb=self.db.stdb) if self.db.stdb else None
         self.agent_memory = AgentMemory(stdb=self.db.stdb) if self.db.stdb else None
-        self._llm = None
 
         # Observation state
         self._last_status_broadcast = 0.0
@@ -74,13 +73,6 @@ class HeiwaClawAgent(BaseAgent):
         self._tasks_seen = 0
         self._errors_seen = 0
         self._boot_context: dict | None = None
-
-    @property
-    def llm(self):
-        if self._llm is None:
-            from heiwa_cognition.llm import LocalLLMEngine
-            self._llm = LocalLLMEngine()
-        return self._llm
 
     async def run(self):
         await self.start()
@@ -454,7 +446,9 @@ class HeiwaClawAgent(BaseAgent):
             "Summarize this conversation concisely, preserving key decisions, "
             "action items, and technical details:\n\n" + text
         )
-        return await self.llm.generate_async(prompt=prompt, complexity="low")
+        from heiwa_cognition.llm import llm_generate_async
+
+        return await llm_generate_async(prompt=prompt, intent="summary", risk="low", runtime="railway")
 
     def _hydrate_boot_context(self) -> dict:
         if not self.agent_memory:
@@ -546,7 +540,8 @@ class HeiwaClawAgent(BaseAgent):
             state["tasks_5m"] = 0
 
         try:
-            state["llm_available"] = self.llm.is_available()
+            from heiwa_cognition.llm import llm_is_available
+            state["llm_available"] = llm_is_available(runtime=self.executor_runtime)
         except Exception:
             state["llm_available"] = False
 
@@ -756,7 +751,8 @@ class HeiwaClawAgent(BaseAgent):
             parts.append("- No STDB connection — running degraded")
 
         try:
-            if self.llm.is_available():
+            from heiwa_cognition.llm import llm_is_available
+            if llm_is_available(runtime=self.executor_runtime):
                 parts.append("- Local LLM: up")
             else:
                 parts.append("- Local LLM: down (tasks will route to cloud)")

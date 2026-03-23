@@ -3,6 +3,7 @@ import asyncio
 import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
 
+import heiwa_cognition.llm as llm_module
 from heiwa_hub.chat import ChatEngine, ChatSession, _ZERO_VALUE, _VALUE_PATTERNS
 import re
 
@@ -108,19 +109,19 @@ class TestCostCascade:
     @pytest.mark.asyncio
     async def test_falls_back_to_gemini_when_no_boost(self):
         engine = ChatEngine()
-        mock_llm = MagicMock()
-        mock_llm.generate.return_value = "gemini reply"
-        engine._llm = mock_llm
+        monkeypatch = pytest.MonkeyPatch()
+        monkeypatch.setattr(llm_module, "llm_generate", lambda *args, **kwargs: "gemini reply", raising=False)
         with patch.object(engine, '_try_boost_node', new_callable=AsyncMock, return_value=None):
             reply = await engine._route_llm("test prompt")
             assert reply == "gemini reply"
+        monkeypatch.undo()
 
     @pytest.mark.asyncio
     async def test_returns_empty_when_all_fail(self):
         engine = ChatEngine()
-        mock_llm = MagicMock()
-        mock_llm.generate.return_value = ""
-        engine._llm = mock_llm
+        monkeypatch = pytest.MonkeyPatch()
+        monkeypatch.setattr(llm_module, "llm_generate", lambda *args, **kwargs: "", raising=False)
         with patch.object(engine, '_try_boost_node', new_callable=AsyncMock, return_value=None):
             reply = await engine._route_llm("test prompt")
             assert reply == ""
+        monkeypatch.undo()

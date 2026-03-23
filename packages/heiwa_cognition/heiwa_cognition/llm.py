@@ -255,27 +255,6 @@ class LocalLLMEngine:
             ).strip()
         return LLMResult(text=text, provider="gemini", model=model_name, tier=tier)
 
-    # ------------------------------------------------------------------ #
-    #  Tiered routing                                                      #
-    # ------------------------------------------------------------------ #
-
-    def _tier_chain(self, complexity: str, runtime: str = "auto") -> list[str]:
-        """Return ordered list of providers to try for a given complexity.
-
-        Railway-primary: Gemini API (free) → Gemini CLI (free, separate
-        rate group) → Claude Code CLI (Pro sub) → Ollama (boost node).
-        """
-        effective_runtime = self._effective_runtime(runtime)
-        if complexity == "low":
-            chain = ["gemini_flash", "gemini_cli", "ollama"]
-        elif complexity == "medium":
-            chain = ["gemini_flash", "gemini_pro", "gemini_cli", "claude_cli", "ollama"]
-        else:  # high
-            chain = ["gemini_pro", "gemini_flash", "gemini_cli", "claude_cli", "ollama"]
-        if not self._runtime_allows_ollama(effective_runtime):
-            chain = [provider for provider in chain if provider != "ollama"]
-        return chain
-
     def _call_cli_tool(self, tool: str, prompt: str, system: Optional[str] = None) -> LLMResult:
         """Invoke a CLI tool (gemini/claude) synchronously for inference fallback.
 
@@ -319,6 +298,39 @@ class LocalLLMEngine:
             logger.warning("CLI tool %s failed: %s", tool, e)
         return LLMResult(text="", provider=f"{tool}-cli", model=tool, tier=3)
 
+    def execute(self, target: Any, prompt: str, system: Optional[str] = None) -> str:
+        """Execute one routed inference target."""
+        try:
+            from heiwa_sdk.provider_registry import ProviderRegistry
+        except Exception as exc:
+            logger.warning("Provider registry unavailable: %s", exc)
+            return ""
+
+        provider_cfg = ProviderRegistry().resolve(str(getattr(target, "provider", "") or ""))
+        transport = str(getattr(target, "transport", "") or provider_cfg.transport or "").strip().lower()
+        model_id = str(getattr(target, "provider_model_id", "") or getattr(target, "model_id", "") or "").strip()
+
+        try:
+            if transport == "local_http":
+                return self._call_ollama(prompt, system).text
+            if transport == "cli_stdio":
+                command = provider_cfg.cli_command or provider_cfg.adapter_tool
+                tool = command.split()[0].strip() if command else provider_cfg.adapter_tool
+                return self._call_cli_tool(tool, prompt, system).text
+            if "gemini" in provider_cfg.name or "gemini" in model_id:
+                return self._call_gemini(
+                    prompt,
+                    model_id or self.gemini_flash_model,
+                    tier=int(getattr(target, "capability_class", 1) or 1),
+                    system=system,
+                ).text
+            if provider_cfg.direct_execution and provider_cfg.adapter_tool:
+                return self._call_cli_tool(provider_cfg.adapter_tool, prompt, system).text
+            return self._call_cli_tool(provider_cfg.adapter_tool or provider_cfg.name, prompt, system).text
+        except Exception as exc:
+            logger.warning("Target execution failed for %s: %s", provider_cfg.name, exc)
+            return ""
+
     def _try_provider(
         self,
         provider: str,
@@ -350,88 +362,135 @@ class LocalLLMEngine:
             logger.warning("Provider %s failed: %s", provider, e)
         return None
 
-    def generate(
-        self,
-        prompt: str,
-        complexity: str = "low",
-        system: Optional[str] = None,
-        # Legacy param kept for backward compat with existing callers
-        runtime: str = "auto",
-    ) -> str:
-        """
-        Generate text using tiered provider routing.
+def llm_generate_with_plan(
+    prompt: str,
+    intent: str = "general",
+    risk: str = "low",
+    *,
+    privacy: str | None = None,
+    runtime: str | None = None,
+    system: str | None = None,
+) -> tuple[Any, Any]:
+    from heiwa_cognition.router import ComputeRouter, InferenceResult
 
-        complexity: "low" | "medium" | "high"
-        """
-        chain = self._tier_chain(complexity, runtime=runtime)
-        for provider in chain:
-            result = self._try_provider(provider, prompt, system, runtime=runtime)
-            if result and result.text:
-                logger.info(
-                    "LLM response via %s/%s (tier %d) [runtime=%s]",
-                    result.provider,
-                    result.model,
-                    result.tier,
-                    self._effective_runtime(runtime),
+    router = ComputeRouter()
+    plan = router.route_inference(intent=intent, risk=risk, privacy=privacy, runtime=runtime)
+    engine = LocalLLMEngine()
+
+    attempts = 0
+    seen: set[str] = set()
+    for target in [plan.primary, *plan.fallbacks]:
+        attempts += 1
+        seen.add(target.model_id)
+        text = engine.execute(target, prompt, system=system)
+        if text:
+            return plan, InferenceResult(
+                text=text,
+                provider=target.provider,
+                model=target.model_id,
+                attempts=attempts,
+                rerouted=attempts > 1,
+            )
+
+    if plan.retry_policy == "exhaust_then_reroute":
+        rerouted_plan = router.route_inference(intent=intent, risk=risk, privacy=privacy, runtime=runtime)
+        if rerouted_plan.primary.model_id not in seen:
+            attempts += 1
+            text = engine.execute(rerouted_plan.primary, prompt, system=system)
+            if text:
+                return rerouted_plan, InferenceResult(
+                    text=text,
+                    provider=rerouted_plan.primary.provider,
+                    model=rerouted_plan.primary.model_id,
+                    attempts=attempts,
+                    rerouted=True,
                 )
-                return result.text
+        plan = rerouted_plan
 
-        logger.error("All LLM providers exhausted for prompt: %s...", prompt[:60])
-        return ""
+    return plan, InferenceResult(text="", provider="", model="", attempts=attempts, rerouted=attempts > 1)
 
-    async def generate_async(
-        self,
-        prompt: str,
-        complexity: str = "low",
-        system: Optional[str] = None,
-        runtime: str = "auto",
-        model: Optional[str] = None,
-    ) -> str:
-        """Async version of generate, supports explicit model override."""
-        import asyncio
-        
-        if model:
-            # Explicit model requested (e.g. gemini-1.5-pro)
-            if "gemini" in model:
-                try:
-                    # Run in thread pool to avoid blocking event loop
-                    loop = asyncio.get_event_loop()
-                    result = await loop.run_in_executor(
-                        None, self._call_gemini, prompt, model, 2, system
-                    )
-                    return result.text if result else ""
-                except Exception as e:
-                    logger.warning("Async explicit model %s failed: %s", model, e)
-                    return ""
-        
-        # Fall back to standard tiered routing
-        loop = asyncio.get_event_loop()
-        return await loop.run_in_executor(None, self.generate, prompt, complexity, system, runtime)
 
-    def generate_json(
-        self,
-        prompt: str,
-        complexity: str = "low",
-        system: Optional[str] = None,
-        runtime: str = "auto",
-    ) -> dict[str, Any]:
-        """Generate and parse JSON from LLM response."""
-        text = self.generate(prompt=prompt, complexity=complexity, system=system, runtime=runtime)
-        if not text:
-            return {}
+def llm_generate(
+    prompt: str,
+    intent: str = "general",
+    risk: str = "low",
+    *,
+    privacy: str | None = None,
+    runtime: str | None = None,
+    system: str | None = None,
+) -> str:
+    _, result = llm_generate_with_plan(
+        prompt,
+        intent=intent,
+        risk=risk,
+        privacy=privacy,
+        runtime=runtime,
+        system=system,
+    )
+    return result.text
 
-        text = text.strip()
-        if text.startswith("```"):
-            text = text.strip("`").replace("json", "", 1).strip()
 
-        try:
-            return json.loads(text)
-        except json.JSONDecodeError:
-            start = text.find("{")
-            end = text.rfind("}")
-            if start != -1 and end != -1 and end > start:
-                try:
-                    return json.loads(text[start : end + 1])
-                except json.JSONDecodeError:
-                    return {}
+async def llm_generate_async(
+    prompt: str,
+    intent: str = "general",
+    risk: str = "low",
+    *,
+    privacy: str | None = None,
+    runtime: str | None = None,
+    system: str | None = None,
+) -> str:
+    import asyncio
+
+    return await asyncio.to_thread(
+        llm_generate,
+        prompt,
+        intent,
+        risk,
+        privacy=privacy,
+        runtime=runtime,
+        system=system,
+    )
+
+
+def llm_generate_json(
+    prompt: str,
+    intent: str = "general",
+    risk: str = "low",
+    *,
+    privacy: str | None = None,
+    runtime: str | None = None,
+    system: str | None = None,
+) -> dict[str, Any]:
+    text = llm_generate(
+        prompt,
+        intent=intent,
+        risk=risk,
+        privacy=privacy,
+        runtime=runtime,
+        system=system,
+    )
+    if not text:
         return {}
+
+    text = text.strip()
+    if text.startswith("```"):
+        text = text.strip("`").replace("json", "", 1).strip()
+
+    try:
+        return json.loads(text)
+    except json.JSONDecodeError:
+        start = text.find("{")
+        end = text.rfind("}")
+        if start != -1 and end != -1 and end > start:
+            try:
+                    return json.loads(text[start : end + 1])
+            except json.JSONDecodeError:
+                return {}
+    return {}
+
+
+def llm_is_available(runtime: str = "auto") -> bool:
+    try:
+        return LocalLLMEngine().is_available(runtime=runtime)
+    except Exception:
+        return False

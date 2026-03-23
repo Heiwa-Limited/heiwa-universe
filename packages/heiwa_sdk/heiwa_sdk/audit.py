@@ -60,13 +60,8 @@ class RepoAuditor:
             # to avoid burning Gemini API quota on a cosmetic "vibe check"
             if os.environ.get("RAILWAY_ENVIRONMENT") or os.environ.get("RAILWAY_PROJECT_ID"):
                 return ""
-            from heiwa_cognition.llm import LocalLLMEngine
-            llm = LocalLLMEngine()
-            if not llm.is_available():
-                return "Ollama unavailable — skipping deep audit."
             
             # Gather repo stats
-            import os
             file_count = 0
             for root, _, files in os.walk(str(self.root)):
                 if ".git" in root or ".venv" in root or "node_modules" in root:
@@ -78,8 +73,10 @@ class RepoAuditor:
                 "Based on the system integrity markers (Lint and Tests passed), provide a one-sentence natural status report "
                 "on the 'vibe' of the codebase. Be observant and machine-astute."
             )
-            
-            return await llm.generate_async(prompt=prompt, complexity="low")
+
+            from heiwa_cognition.llm import llm_generate_async
+
+            return await llm_generate_async(prompt=prompt, intent="audit", risk="low", runtime="macbook")
         except Exception as e:
             return f"Ollama audit failed: {e}"
 
