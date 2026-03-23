@@ -23,6 +23,7 @@ class ComputeRoute:
     rationale: str
     intent_class: str = ""
     effort_knob: str = ""  # provider-specific effort setting
+    requires_human_oversight: bool = False
 
 
 class ComputeRouter:
@@ -75,18 +76,24 @@ class ComputeRouter:
         *,
         target_runtime: str,
         privacy_level: str,
+        min_capability_override: int | None = None,
     ) -> tuple[str, str] | None:
         """Select cheapest capable model from STDB tiers. Returns (model_id, effort_knob) or None."""
         if not self._model_tiers:
             return None
 
-        # Determine minimum capability class from risk
-        min_class = {"low": 1, "medium": 2, "high": 3, "critical": 3}.get(risk_level, 2)
+        # Determine minimum capability class from risk or override
+        # Mapping: low -> 1, medium -> 2, high/critical -> 3
+        min_class = min_capability_override
+        if min_class is None:
+            min_class = {"low": 1, "medium": 2, "high": 3, "critical": 3}.get(risk_level, 2)
+            
         runtime = str(target_runtime or "").strip().lower()
         privacy = str(privacy_level or "").strip().lower()
 
         candidates = []
         for tier in self._model_tiers:
+            # STRICT CLASS PRESERVATION: must meet minimum capability
             if tier["capability_class"] < min_class:
                 continue
             if not tier.get("enabled", True):
@@ -311,15 +318,23 @@ class ComputeRouter:
     ) -> ComputeRoute:
         result = self._route_inner(intent_class, risk_level, raw_text, privacy_level)
 
+        # Policy Gate: Scan for REQUIRES_HUMAN_OVERSIGHT in raw_text or metadata
+        if "REQUIRES_HUMAN_OVERSIGHT" in raw_text:
+            result.requires_human_oversight = True
+
         # STDB-first model selection stays advisory, but it must respect the
         # already-chosen runtime lane. Otherwise Railway can select boost-only
         # local models and create invalid dispatches.
         if result.target_tool != "heiwa_ops":
+            # For Class 3 routes, we MUST preserve Class 3 reasoning during fallback
+            min_cap = 3 if result.compute_class >= 3 else None
+            
             tier_result = self._select_model_from_tiers(
                 result.intent_class or intent_class,
                 risk_level,
                 target_runtime=result.target_runtime,
                 privacy_level=result.privacy_level,
+                min_capability_override=min_cap,
             )
             if tier_result:
                 result.target_model = tier_result[0]
