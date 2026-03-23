@@ -35,5 +35,5 @@ Load this room for:
 ## Infra Rules
 
 - Do not add polling-oriented public surfaces where subscriptions or WebSockets belong.
-- Do not route durable control-plane state through NATS.
+- Do not route durable control-plane state through external message brokers.
 - Do not make Cloudflare or Discord look like the authority for runtime truth.

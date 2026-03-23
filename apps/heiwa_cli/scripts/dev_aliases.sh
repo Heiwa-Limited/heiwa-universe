@@ -2,11 +2,7 @@
 # Heiwa Limited - Dev Workflow Aliases
 # Source this file: source ~/heiwa-limited/cli/scripts/dev_aliases.sh
 
-# 1. NATS Management
-alias nats-up='nats-server -V'  # Start NATS locally (verbose)
-alias nats-mon='nats server report jetstream' # Check stream status
-
-# 2. Fleet Execution (The new structure)
+# 1. Fleet Execution
 # Core Orchestrator
 alias h-core='python3 -m fleets.hub.main'
 

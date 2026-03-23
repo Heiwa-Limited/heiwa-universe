@@ -6,7 +6,7 @@
   "cases": [
     {
       "id": 1,
-      "input": "Build a Python CLI tool that validates all NATS subjects against the protocol spec",
+      "input": "Build a Python CLI tool that validates all SpacetimeDB table schemas against the protocol spec",
       "expected_class": "build",
       "category": "clear",
       "notes": "Direct 'build' keyword match"
@@ -34,7 +34,7 @@
     },
     {
       "id": 5,
-      "input": "Code a NATS request-reply handler for the broker route subject",
+      "input": "Code a WebSocket subscription handler for the broker route events",
       "expected_class": "build",
       "category": "clear",
       "notes": "'code' keyword → build"
@@ -62,7 +62,7 @@
     },
     {
       "id": 9,
-      "input": "Summarize the NATS JetStream documentation for stream-based task persistence patterns",
+      "input": "Summarize the SpacetimeDB subscription documentation for reactive state persistence patterns",
       "expected_class": "research",
       "category": "clear",
       "notes": "'summarize' keyword → research"
@@ -90,7 +90,7 @@
     },
     {
       "id": 13,
-      "input": "There's an incident — NATS is dropping messages under load on the Railway deployment",
+      "input": "There's an incident — SpacetimeDB is dropping subscriptions under load on the Railway deployment",
       "expected_class": "operate",
       "category": "clear",
       "notes": "'incident' keyword → operate"
@@ -111,7 +111,7 @@
     },
     {
       "id": 16,
-      "input": "Verify that all NATS subjects in the protocol.py match the documented subject map",
+      "input": "Verify that all SpacetimeDB reducers in the protocol.py match the documented API surface",
       "expected_class": "audit",
       "category": "clear",
       "notes": "'verify' keyword → audit"
@@ -188,7 +188,7 @@
     },
     {
       "id": 27,
-      "input": "Render a visualization of the NATS subject topology as a mermaid diagram",
+      "input": "Render a visualization of the SpacetimeDB table topology as a mermaid diagram",
       "expected_class": "media",
       "category": "clear",
       "notes": "'render' keyword → media"
