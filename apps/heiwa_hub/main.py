@@ -57,6 +57,10 @@ async def main():
     # Initialize persistence
     from heiwa_sdk.db import Database
     db = Database()
+    
+    # Ensure runtime spool exists for durable dead-lettering
+    os.makedirs("runtime/spool", exist_ok=True)
+    
     if db.state_backend != "spacetimedb":
         asyncio.create_task(asyncio.to_thread(db.init_db))
     else:

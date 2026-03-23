@@ -20,6 +20,21 @@ class Dispatcher:
             cls._db = Database()
         return cls._db
 
+    @staticmethod
+    def _spool_to_dead_letter(task_data: dict):
+        """Durable persistence for failed proposal writes."""
+        spool_path = "runtime/spool/dead_letter_proposals.jsonl"
+        try:
+            with open(spool_path, "a") as f:
+                entry = {
+                    "timestamp": datetime.now(timezone.utc).isoformat(),
+                    "payload": task_data
+                }
+                f.write(json.dumps(entry) + "\n")
+            print(f"[CRITICAL] Proposal spooled to disk: {spool_path}")
+        except Exception as e:
+            print(f"[FATAL] Disk spooling failed: {e}")
+
     @classmethod
     async def log_command(cls, user_id: int, user_name: str, command: str, params: str = None):
         """Record an audit trail of the command in Postgres/SQLite."""
@@ -102,7 +117,15 @@ class Dispatcher:
                     "proposal_id": proposal_id
                 }
             else:
-                return {"status": "error", "message": "Failed to record proposal in database."}
+                # Durable spooling fallback
+                Dispatcher._spool_to_dead_letter(proposal)
+                return {
+                    "status": "warning", 
+                    "message": "Database write failed. Task spooled to dead-letter storage for retry.",
+                    "node": target_node,
+                    "proposal_id": proposal_id,
+                    "spooled": True
+                }
 
         except Exception as e:
             print(f"[ERROR] Dispatch failed: {e}")
