@@ -4,6 +4,13 @@
 
 echo "[HEIWA] Initializing Cloud HQ..."
 HEIWA_ENABLE_TAILSCALE="${HEIWA_ENABLE_TAILSCALE:-true}"
+HEIWA_PORTABLE_MODE="${HEIWA_PORTABLE_MODE:-false}"
+
+# 0. Handle Portable Mode (bypass Tailscale/TPM requirements)
+if [[ "$HEIWA_PORTABLE_MODE" == "true" ]]; then
+    echo "[HEIWA] Running in PORTABLE mode. Hardware-mesh features (Tailscale) disabled."
+    HEIWA_ENABLE_TAILSCALE="false"
+fi
 
 # 0. Tailscale is optional for Cloud HQ boot. If unavailable, continue in
 # non-mesh mode so the HTTP/WebSocket control plane still comes up.

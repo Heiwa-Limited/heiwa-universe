@@ -22,25 +22,36 @@ class MemoryService:
 
     def __init__(self, stdb: SpacetimeDB, ollama_url: str | None = None) -> None:
         self.stdb = stdb
-        self.ollama_url = ollama_url or os.getenv("HEIWA_OLLAMA_URL", "http://127.0.0.1:11434")
+        # On Railway, Ollama is OFF by default unless HEIWA_OLLAMA_URL is provided.
+        # On Boost nodes, it defaults to localhost.
+        host_runtime = os.getenv("HEIWA_RUNTIME", "local").lower()
+        default_url = "http://127.0.0.1:11434" if host_runtime != "railway" else None
+        
+        self.ollama_url = ollama_url or os.getenv("HEIWA_OLLAMA_URL") or default_url
         self.model = "qwen3-embedding:0.6b"
+        
+        if not self.ollama_url:
+            logger.info("MemoryService: Ollama disabled (Railway/Cloud mode). Using degraded embedding path.")
 
     async def generate_embedding(self, text: str) -> List[float]:
-        """Generate vector embedding for the given text using Ollama."""
+        """Generate vector embedding for the given text using Ollama with Cloud Fallback."""
+        if not self.ollama_url:
+            # Future: add direct Gemini/OpenAI embedding fallback here
+            return []
+
         url = f"{self.ollama_url}/api/embeddings"
         payload = {"model": self.model, "prompt": text}
 
         try:
             async with aiohttp.ClientSession() as session:
-                async with session.post(url, json=payload, timeout=10) as resp:
+                async with session.post(url, json=payload, timeout=5) as resp:
                     if resp.status != 200:
-                        err = await resp.text()
-                        logger.error("Ollama embedding error (%d): %s", resp.status, err)
+                        logger.warning("Ollama unavailable (status %d). Memory operating in degraded mode.", resp.status)
                         return []
                     data = await resp.json()
                     return data.get("embedding") or []
         except Exception as exc:
-            logger.error("Failed to generate embedding: %s", exc)
+            logger.warning("Ollama connection failed: %s. Memory operating in degraded mode.", exc)
             return []
 
     async def index_file(self, file_path: str, content: str, source_type: str = "code_file") -> bool:
