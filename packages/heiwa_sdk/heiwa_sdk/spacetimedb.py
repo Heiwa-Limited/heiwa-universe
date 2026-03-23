@@ -587,6 +587,25 @@ class SpacetimeDB:
         )
         return sorted(rows, key=lambda r: r.get("created_at", ""))
 
+    def get_stale_proposals(self) -> list[dict[str, Any]]:
+        """Find ASSIGNED proposals that have passed their assignment_expires_at."""
+        now_iso = datetime.datetime.now(datetime.timezone.utc).isoformat()
+        rows = self.query(
+            "SELECT * FROM proposals "
+            "WHERE status = 'ASSIGNED' "
+            f"AND assignment_expires_at < '{self._escape_sql_literal(now_iso)}' "
+            "AND claimed_at IS NULL"
+        )
+        return sorted(rows, key=lambda r: r.get("created_at", ""))
+
+    def requeue_proposal(self, proposal_id: str, reason: str | None = None) -> bool:
+        """Reset an ASSIGNED/FAILED proposal back to QUEUED for a fresh attempt."""
+        return self.call(
+            "requeue_proposal",
+            proposal_id,
+            self._sats_option(reason)
+        )
+
     def assign_proposal(
         self,
         proposal_id: str,

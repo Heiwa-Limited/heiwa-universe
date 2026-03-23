@@ -37,10 +37,18 @@ class SpineAgent(BaseAgent):
         logger.info("Spine active. Monitoring fleet...")
 
         fleet_log_counter = 0
+        watchdog_counter = 0
         try:
             while self.running:
                 self._prune_registry()
                 self.approvals.prune()
+                
+                # Audit Watchdog: reconcile stale assignments every 60s
+                watchdog_counter += 1
+                if watchdog_counter >= 6:  # Tick is 10s, 6 ticks = 60s
+                    await self._audit_watchdog()
+                    watchdog_counter = 0
+
                 fleet_log_counter += 1
                 if self.fleet_registry and fleet_log_counter >= 30:  # Log every 5 min (30 × 10s)
                     logger.info("Fleet: %d active node(s).", len(self.fleet_registry))
@@ -48,6 +56,24 @@ class SpineAgent(BaseAgent):
                 await asyncio.sleep(10)
         except KeyboardInterrupt:
             await self.shutdown()
+
+    async def _audit_watchdog(self):
+        """Scan STDB for assigned tasks that never got claimed (stale assignment)."""
+        try:
+            from heiwa_sdk.db import db
+            stale = db.stdb.get_stale_proposals()
+            if not stale:
+                return
+
+            logger.info("Watchdog found %d stale proposal(s). Requeueing...", len(stale))
+            for prop in stale:
+                pid = prop["proposal_id"]
+                node = prop.get("assigned_node_id", "unknown")
+                logger.warning("Requeueing %s (assigned to %s but expired)", pid, node)
+                db.stdb.requeue_proposal(pid, reason=f"Assignment expired on node {node}")
+                
+        except Exception as e:
+            logger.error("Audit Watchdog error: %s", e)
 
     async def handle_heartbeat(self, data: dict):
         sender = data.get("sender_id")
