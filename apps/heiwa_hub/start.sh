@@ -193,11 +193,15 @@ cd /app || exit 1
 # files/env vars that each CLI tool expects on headless Linux.
 
 # Claude Code: uses env vars directly (no keychain on Linux)
-if [[ -n "${CLAUDE_OAUTH_ACCESS_TOKEN:-}" ]]; then
+# CLAUDE_CODE_OAUTH_TOKEN may already be set (e.g., via `claude setup-token`).
+# Only fall back to CLAUDE_OAUTH_ACCESS_TOKEN if not already set.
+if [[ -n "${CLAUDE_CODE_OAUTH_TOKEN:-}" ]]; then
+    echo "[HEIWA] Claude Code OAuth token already set (setup-token or shared var)."
+elif [[ -n "${CLAUDE_OAUTH_ACCESS_TOKEN:-}" ]]; then
     export CLAUDE_CODE_OAUTH_TOKEN="$CLAUDE_OAUTH_ACCESS_TOKEN"
-    echo "[HEIWA] Claude Code OAuth token injected via env var."
+    echo "[HEIWA] Claude Code OAuth token injected from CLAUDE_OAUTH_ACCESS_TOKEN."
 fi
-if [[ -n "${CLAUDE_OAUTH_REFRESH_TOKEN:-}" ]]; then
+if [[ -z "${CLAUDE_CODE_OAUTH_REFRESH_TOKEN:-}" && -n "${CLAUDE_OAUTH_REFRESH_TOKEN:-}" ]]; then
     export CLAUDE_CODE_OAUTH_REFRESH_TOKEN="$CLAUDE_OAUTH_REFRESH_TOKEN"
     export CLAUDE_CODE_OAUTH_SCOPES="openid profile email offline_access"
     echo "[HEIWA] Claude Code OAuth refresh token injected via env var."
