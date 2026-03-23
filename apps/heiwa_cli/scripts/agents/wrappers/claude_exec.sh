@@ -34,7 +34,8 @@ fi
 
 MODEL="${HEIWA_ACTIVE_MODEL:-${CLAUDE_MODEL:-}}"
 if [[ -n "$MODEL" && "$MODEL" == */* ]]; then
-    MODEL="${MODEL#*/}"
+    # claude/opus-4-6 -> claude-opus-4-6 (replace / with -)
+    MODEL="${MODEL//\//-}"
 fi
 MODEL="${MODEL//./-}"
 TIMEOUT_SEC="${CLAUDE_TIMEOUT:-900}"
