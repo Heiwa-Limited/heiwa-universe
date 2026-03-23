@@ -546,7 +546,7 @@ class SpineAgent(BaseAgent):
         return decision in {"approve", "approved", "true", "1", "yes"}
 
     async def _enrich_via_broker(self, payload: dict, task_id: str, sender_id: str) -> BrokerRouteResult:
-        """Direct call to BrokerEnrichmentService — no NATS round-trip."""
+        """Direct call to BrokerEnrichmentService."""
         request_id = f"broker-{task_id}-{uuid.uuid4().hex[:8]}"
         request = BrokerRouteRequest(
             request_id=request_id,

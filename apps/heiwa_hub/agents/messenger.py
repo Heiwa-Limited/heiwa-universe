@@ -101,15 +101,12 @@ class TaskView(discord.ui.View):
         super().__init__(timeout=None)
         self.messenger = messenger
         self.task_id = task_id
+        self.add_item(discord.ui.Button(label="View Telemetry", style=discord.ButtonStyle.link, url="https://heiwa.ltd/telemetry"))
 
     @discord.ui.button(label="Force Requeue", style=discord.ButtonStyle.secondary)
     async def requeue(self, interaction: discord.Interaction, _: discord.ui.Button):
         await interaction.response.send_message(f"🔄 Requeuing task `{self.task_id}`...", ephemeral=True)
         self.messenger.db.stdb.requeue_proposal(self.task_id, reason=f"Forced by {interaction.user}")
-
-    @discord.ui.button(label="View Telemetry", style=discord.ButtonStyle.link, url="https://heiwa.ltd/telemetry")
-    async def telemetry(self, interaction: discord.Interaction, _: discord.ui.Button):
-        pass
 
 
 class SpoolRecoveryView(discord.ui.View):

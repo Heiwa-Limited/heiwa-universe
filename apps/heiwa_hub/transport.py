@@ -1,7 +1,7 @@
 """
 Hub-native transport layer.
 
-Replaces NATS with two transport backends that share one interface:
+Provides two transport backends that share one interface:
   - LocalBusTransport: asyncio-based in-process pub/sub for Railway agents
   - WorkerSessionManager: outbound WebSocket delivery for remote Mac/WSL workers
 
@@ -28,8 +28,7 @@ class LocalBusTransport:
     """
     In-process event bus for agents running inside the Railway hub.
 
-    Replaces NATS pub/sub for co-located agents. Zero network overhead.
-    Subscribers receive events via asyncio tasks — non-blocking fanout.
+    Subscribers receive events via asyncio tasks for non-blocking fanout.
     """
 
     def __init__(self):

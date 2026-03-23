@@ -14,7 +14,7 @@ The shared library powering state, routing, security, and execution gateway.
 | `security.py` | Auth validation, token handling, redaction |
 | `config.py` | Environment loading (`load_swarm_env()`) |
 | `transport.py` | LocalBusTransport (in-process pub/sub) + WebSocket transport for remote workers |
-| `tick.py` | Proposal scheduler/lifecycle |
+| `tick.py` | Maintenance tick (alerts, RFC publishing, persistence) |
 | `claw_adapter.py` | DEPRECATED — OpenClaw wrapper, do not extend |
 
 ## State Layer

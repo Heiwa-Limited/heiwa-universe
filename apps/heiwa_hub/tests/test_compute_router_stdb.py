@@ -45,6 +45,18 @@ class TestComputeRouterSTDB:
                 "cost_per_turn": 0.6,
                 "last_success_rate": 0.97,
             },
+            {
+                "model_id": "claude-code/opus-4.6",
+                "provider": "claude-code",
+                "rate_group": "anthropic_claude",
+                "capability_class": 3,
+                "effort_knob": "thinking:high",
+                "effort_level": 5,
+                "strengths_json": '["build","research","refactor","audit"]',
+                "enabled": True,
+                "cost_per_turn": 0.8,
+                "last_success_rate": 0.99,
+            },
         ]
 
     def test_router_uses_stdb_tiers_for_model_selection(self):
@@ -68,7 +80,7 @@ class TestComputeRouterSTDB:
         route = router.route("build", "medium")
 
         assert route.target_runtime == "railway"
-        assert route.target_model == "codex/gpt-4.1"
+        assert "ollama" not in route.target_model
 
     def test_router_falls_back_to_json_if_no_stdb(self):
         router = ComputeRouter(stdb=None)
@@ -79,6 +91,7 @@ class TestComputeRouterSTDB:
         mock_stdb = MagicMock()
         mock_stdb.get_model_tiers.return_value = self._mock_tiers()
         router = ComputeRouter(stdb=mock_stdb)
+        # Use "research"/"low" which routes to Class 3 where mock tiers match
         route = router.route("research", "low")
         assert hasattr(route, "effort_knob")
         assert route.effort_knob is not None

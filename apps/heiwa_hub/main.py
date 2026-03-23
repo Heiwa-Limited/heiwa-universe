@@ -98,7 +98,7 @@ async def main():
 
     asyncio.create_task(_register_mcp_servers())
 
-    # Boot agents — all use local bus transport (no NATS)
+    # Boot agents — all use local bus transport
     # HeiwaClaw is the unified living agent (observation + execution via OpenClaw)
     try:
         spine = SpineAgent()

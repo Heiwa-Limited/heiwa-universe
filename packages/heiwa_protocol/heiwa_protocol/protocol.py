@@ -2,7 +2,7 @@ from enum import Enum
 
 class Subject(str, Enum):
     """
-    The NATS Subject Topology for Heiwa Swarm.
+    The subject topology for Heiwa Swarm.
     Format: heiwa.<domain>.<action>
     """
     # Core Orchestration

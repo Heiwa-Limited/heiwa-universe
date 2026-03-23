@@ -306,34 +306,6 @@ def run_tick() -> dict:
     return metrics
 
 
-def router_tick() -> dict:
-    """
-    Phase 2 Router Tick: Route APPROVED/QUEUED proposals to eligible nodes.
-
-    Behavior:
-    - Scan APPROVED/QUEUED proposals that haven't expired
-    - For each, find eligible nodes based on execution_targeting
-    - If eligible node available → ASSIGNED
-    - If no eligible nodes + QUEUE policy → QUEUED
-    - If no eligible nodes + EXPIRE policy → EXPIRED
-
-    Returns:
-        dict with routing results
-    """
-    from heiwa_sdk.db import db
-    from heiwa_sdk.config import settings
-    from heiwa_sdk.proposal_dispatch import dispatch_routable_proposals
-
-    if not settings.PHASE2_ROUTER_ENABLED:
-        print("[ROUTER] Router disabled by feature flag")
-        return {"status": "disabled", "routed": 0, "queued": 0, "expired": 0}
-    result = dispatch_routable_proposals(db)
-    print(
-        f"[ROUTER] Reactive dispatch: routed={result['routed']}, queued={result['queued']}, expired={result['expired']}"
-    )
-    return result
-
-
 def main():
     """Main entry point for CLI/cron execution."""
     import argparse
