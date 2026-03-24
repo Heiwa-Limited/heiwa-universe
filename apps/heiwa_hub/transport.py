@@ -89,19 +89,19 @@ class LocalBusTransport:
         reply_event: asyncio.Event = asyncio.Event()
         reply_data: list[Dict[str, Any]] = []
 
-        async def _capture(data: Dict[str, Any]):
+        async def _capture(data: Dict[str, Any]) -> None:
             reply_data.append(data)
             reply_event.set()
 
         reply_subject_key = f"_reply.{subject.value}.{id(reply_event)}"
-        self._subscribers[reply_subject_key].append(_capture)
+        self._subscribers.setdefault(reply_subject_key, []).append(_capture)
 
         envelope = {
             Payload.SENDER_ID: sender_id,
             Payload.TIMESTAMP: time.time(),
             Payload.TYPE: subject.name,
             Payload.DATA: data,
-            "auth_token": settings.HEIWA_AUTH_TOKEN, # Critical
+            "auth_token": getattr(settings, "HEIWA_AUTH_TOKEN", ""), # Critical
             "_reply_subject": reply_subject_key,
         }
         for cb in self._subscribers.get(subject.value, []):
@@ -113,7 +113,8 @@ class LocalBusTransport:
         except asyncio.TimeoutError:
             return None
         finally:
-            self._subscribers[reply_subject_key].remove(_capture)
+            if _capture in self._subscribers.get(reply_subject_key, []):
+                self._subscribers[reply_subject_key].remove(_capture)
 
     async def reply(self, reply_subject_key: str, data: Dict[str, Any]):
         """Send a reply to a request-reply exchange."""
@@ -175,8 +176,9 @@ class WorkerSessionManager:
         
         # Parse runtime and capabilities list
         runtime_capabilities = []
-        if isinstance(caps.get("capabilities"), list):
-            runtime_capabilities.extend(caps.get("capabilities"))
+        _caps_list = caps.get("capabilities", [])
+        if isinstance(_caps_list, list):
+            runtime_capabilities.extend(list(_caps_list))
         if caps.get("ollama"):
             runtime_capabilities.append("ollama")
         
@@ -323,7 +325,7 @@ class WorkerSessionManager:
             return None
 
         import uuid as _uuid
-        request_id = _uuid.uuid4().hex[:12]
+        request_id = str(_uuid.uuid4())
         response_event: asyncio.Event = asyncio.Event()
         response_text: list[str] = []
         self._llm_pending[request_id] = (response_event, response_text)
