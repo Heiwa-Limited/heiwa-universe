@@ -4,6 +4,22 @@ from dataclasses import dataclass, field
 from typing import Any, Dict, List
 
 @dataclass
+class GpuSlot:
+    gpu_type: str
+    vram_gb: int
+    loaded_models: List[str]
+    available_slots: int
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> "GpuSlot":
+        return cls(
+            gpu_type=str(data.get("gpu_type", "cpu")),
+            vram_gb=int(data.get("vram_gb", 0)),
+            loaded_models=list(data.get("loaded_models", [])),
+            available_slots=int(data.get("available_slots", 0)),
+        )
+
+@dataclass
 class PodRecord:
     pod_id: str
     host_identity: str
@@ -11,7 +27,7 @@ class PodRecord:
     runtime_capabilities: List[str]
     trust_tier: str
     privacy_floor: str
-    gpu_inventory: List[Dict[str, Any]]
+    gpu_inventory: List[GpuSlot]
     liveness: str
     leaseable: bool
     registered_at: str
@@ -26,7 +42,7 @@ class PodRecord:
             runtime_capabilities=list(data.get("runtime_capabilities", [])),
             trust_tier=str(data.get("trust_tier", "untrusted")),
             privacy_floor=str(data.get("privacy_floor", "public")),
-            gpu_inventory=list(data.get("gpu_inventory", [])),
+            gpu_inventory=[GpuSlot.from_dict(g) for g in data.get("gpu_inventory", [])],
             liveness=str(data.get("liveness", "offline")),
             leaseable=bool(data.get("leaseable", False)),
             registered_at=str(data.get("registered_at", "")),

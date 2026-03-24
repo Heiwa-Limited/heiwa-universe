@@ -537,11 +537,30 @@ class SpacetimeDB:
             pod.get("runtime_capabilities", []),
             pod.get("trust_tier", "untrusted"),
             pod.get("privacy_floor", "global"),
-            pod.get("gpu_inventory", []),
             pod.get("liveness", "online"),
             pod.get("leaseable", False),
             pod.get("registered_at") or datetime.datetime.now(datetime.timezone.utc).isoformat(),
             pod.get("last_heartbeat") or datetime.datetime.now(datetime.timezone.utc).isoformat(),
+        )
+
+    def get_pods(self) -> list[dict[str, Any]]:
+        return self.query("SELECT * FROM pods")
+
+    def get_gpu_slots(self, pod_id: str | None = None) -> list[dict[str, Any]]:
+        query = "SELECT * FROM gpu_slots"
+        if pod_id:
+            query += f" WHERE pod_id = '{self._escape_sql_literal(pod_id)}'"
+        return self.query(query)
+
+    def upsert_gpu_slot(self, slot: dict[str, Any]) -> bool:
+        return self.call(
+            "upsert_gpu_slot",
+            slot["slot_id"],
+            slot.get("pod_id", "unknown"),
+            slot.get("gpu_type", "cpu"),
+            int(slot.get("vram_gb", 0)),
+            slot.get("loaded_models", []),
+            int(slot.get("available_slots", 0)),
         )
 
     def update_pod_heartbeat(self, pod_id: str, last_heartbeat: str, liveness: str = "online") -> bool:

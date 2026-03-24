@@ -1066,7 +1066,8 @@ async def worker_socket(ws: WebSocket):
 
             elif msg_type == "heartbeat":
                 if worker_id:
-                    wm.heartbeat(worker_id)
+                    capabilities = raw.get("capabilities") or {}
+                    wm.heartbeat(worker_id, capabilities)
                     sync_remote_worker_node(
                         db,
                         worker_id,
