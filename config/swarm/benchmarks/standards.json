@@ -1,0 +1,15 @@
+{
+  "suite": "agent_standard",
+  "evaluator": "agent_standard",
+  "description": "Validates that the canonical agent standard exists, is versioned correctly, and matches format specifiers.",
+  "cases": [
+    {
+      "name": "standard_v1_validation",
+      "path": "docs/standards/agent_standard_v1.md",
+      "expect": {
+        "exists": true,
+        "version": "1.0.0"
+      }
+    }
+  ]
+}

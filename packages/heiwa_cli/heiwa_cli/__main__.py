@@ -73,6 +73,12 @@ def main() -> None:
         )
         return
 
+    if first == "panel":
+        from heiwa_ui.dashboard import HeiwaDashboardApp
+        app = HeiwaDashboardApp()
+        app.run()
+        return
+
     if first == "auth":
         from heiwa_cli.auth import handle_auth_command
 

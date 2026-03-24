@@ -94,7 +94,7 @@ class WorkerManager:
             instruction = str(payload.get("instruction") or payload.get("raw_text") or "").strip()
 
             logger.info("Executing %s (tool=%s) ...", task_id, tool)
-            code, out = await self.mesh.execute(tool, instruction)
+            code, out = await self.mesh.execute(tool, instruction, proposal_id=task_id)
             status = "PASS" if code == 0 else "FAIL"
             duration = int((time.time() - start) * 1000)
 

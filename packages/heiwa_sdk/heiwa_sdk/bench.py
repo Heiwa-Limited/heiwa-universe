@@ -99,6 +99,30 @@ class HeiwaBench:
                 )
         return actual, failures
 
+    def _run_standards_case(self, case: dict[str, Any]) -> tuple[dict[str, Any], list[BenchFailure]]:
+        path = self.root / case.get("path", "")
+        actual: dict[str, Any] = {"exists": path.exists(), "version": None}
+        if path.exists():
+            import re
+            content = path.read_text(encoding="utf-8")
+            match = re.search(r"-\s*\*\*Version\*\*:\s*([^\n]+)", content)
+            if match:
+                actual["version"] = match.group(1).strip()
+        failures: list[BenchFailure] = []
+        for field, expected in dict(case.get("expect") or {}).items():
+            observed = self._resolve_field(actual, field)
+            if observed != expected:
+                failures.append(
+                    BenchFailure(
+                        suite="agent_standard",
+                        case=str(case.get("name") or "unnamed"),
+                        field=field,
+                        expected=expected,
+                        actual=observed,
+                    )
+                )
+        return actual, failures
+
     def _run_suite(self, suite_file: Path) -> dict[str, Any]:
         payload = json.loads(suite_file.read_text(encoding="utf-8"))
         suite_name = str(payload.get("suite") or suite_file.stem)
@@ -111,6 +135,8 @@ class HeiwaBench:
                 actual, case_failures = self._run_routing_case(case)
             elif evaluator == "cells_catalog":
                 actual, case_failures = self._run_cells_case(case)
+            elif evaluator == "agent_standard":
+                actual, case_failures = self._run_standards_case(case)
             else:
                 actual = {}
                 case_failures = [

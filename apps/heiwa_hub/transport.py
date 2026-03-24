@@ -17,6 +17,7 @@ from collections import defaultdict
 from typing import Any, Callable, Coroutine, Dict, Optional
 
 from heiwa_protocol.protocol import Subject, Payload
+from heiwa_protocol.schemas.pod import PodRecord
 
 logger = logging.getLogger("Hub.Transport")
 
@@ -142,34 +143,102 @@ class WorkerSessionManager:
     def __init__(self) -> None:
         # worker_id -> WebSocket instance
         self._sessions: Dict[str, Any] = {}
-        # worker_id -> capabilities dict
-        self._capabilities: Dict[str, Dict[str, Any]] = {}
+        # worker_id -> PodRecord
+        self._pods: Dict[str, PodRecord] = {}
         # worker_id -> last heartbeat timestamp
         self._heartbeats: Dict[str, float] = {}
+        # worker_id -> last STDB heartbeat write timestamp
+        self._last_stdb_heartbeats: Dict[str, float] = {}
         # request_id -> (event, text_list) for LLM proxy requests
         self._llm_pending: Dict[str, tuple[asyncio.Event, list[str]]] = {}
+
+    def _get_stdb(self) -> Any:
+        import os
+        from heiwa_sdk.spacetimedb import SpacetimeDB
+        identity = os.environ.get("STDB_IDENTITY", "heiwaproductiondb")
+        server = os.environ.get("STDB_SERVER", "local")
+        return SpacetimeDB(db_identity=identity, server=server)
+
+    async def _persist_pod(self, pod: PodRecord) -> None:
+        db = self._get_stdb()
+        import dataclasses
+        await asyncio.to_thread(db.upsert_pod, dataclasses.asdict(pod))
+
+    async def _update_heartbeat_stdb(self, pod_id: str, ts: str, liveness: str) -> None:
+        db = self._get_stdb()
+        await asyncio.to_thread(db.update_pod_heartbeat, pod_id, ts, liveness)
 
     def register(self, worker_id: str, ws: Any, capabilities: Optional[Dict[str, Any]] = None):
         """Register a worker WebSocket session."""
         self._sessions[worker_id] = ws
-        self._capabilities[worker_id] = capabilities or {}
+        caps = capabilities or {}
+        
+        # Parse runtime and capabilities list
+        runtime_capabilities = []
+        if isinstance(caps.get("capabilities"), list):
+            runtime_capabilities.extend(caps.get("capabilities"))
+        if caps.get("ollama"):
+            runtime_capabilities.append("ollama")
+        
+        # Instantiate PodRecord schema
+        pod = PodRecord(
+            pod_id=worker_id,
+            host_identity=worker_id,
+            provider="local",
+            runtime_capabilities=runtime_capabilities,
+            trust_tier="local" if "macbook" in worker_id.lower() or "local" in caps.get("runtime", "").lower() else "untrusted",
+            privacy_floor="sovereign" if "macbook" in worker_id.lower() else "public",
+            gpu_inventory=[],
+            liveness="online",
+            leaseable=True,
+            registered_at=str(time.time()),
+            last_heartbeat=str(time.time()),
+        )
+        self._pods[worker_id] = pod
+        
         self._heartbeats[worker_id] = time.time()
-        logger.info("Worker registered: %s (capabilities: %s)", worker_id, list((capabilities or {}).keys()))
+        self._last_stdb_heartbeats[worker_id] = time.time()
+        
+        try:
+            asyncio.create_task(self._persist_pod(pod))
+        except RuntimeError:
+            pass  # Fallback if no running loop, though Hub always has one
+        
+        logger.info("Worker registered: %s (capabilities: %s)", worker_id, runtime_capabilities)
 
     def unregister(self, worker_id: str):
         """Remove a worker session."""
         self._sessions.pop(worker_id, None)
-        self._capabilities.pop(worker_id, None)
+        if worker_id in self._pods:
+             self._pods[worker_id].liveness = "offline"
+             try:
+                 asyncio.create_task(self._update_heartbeat_stdb(worker_id, str(time.time()), "offline"))
+             except RuntimeError:
+                 pass
         self._heartbeats.pop(worker_id, None)
         logger.info("Worker unregistered: %s", worker_id)
 
     def heartbeat(self, worker_id: str):
         """Update heartbeat timestamp for a worker."""
-        self._heartbeats[worker_id] = time.time()
+        now = time.time()
+        self._heartbeats[worker_id] = now
+        
+        last_write = self._last_stdb_heartbeats.get(worker_id, 0.0)
+        if now - last_write > 10.0:
+            self._last_stdb_heartbeats[worker_id] = now
+            pod = self._pods.get(worker_id)
+            if pod:
+                try:
+                    asyncio.create_task(self._update_heartbeat_stdb(worker_id, str(now), pod.liveness))
+                except RuntimeError:
+                    pass
 
     def get_capabilities(self, worker_id: str) -> Dict[str, Any]:
         """Return the last advertised capabilities for a worker."""
-        return dict(self._capabilities.get(worker_id, {}))
+        pod = self._pods.get(worker_id)
+        if not pod:
+            return {}
+        return pod.to_dict()
 
     def get_active_workers(self, max_stale_sec: float = 60.0) -> list[str]:
         """Return worker IDs with recent heartbeats."""
@@ -195,14 +264,15 @@ class WorkerSessionManager:
             return active[0] if active else None
 
         for wid in self.get_active_workers():
-            caps = self._capabilities.get(wid, {})
-            node_id = str(caps.get("node_id", "")).lower()
-            runtime = str(caps.get("runtime", "")).lower()
+            pod = self._pods.get(wid)
+            if not pod:
+                 continue
+            
+            node_id = pod.pod_id.lower()
             wid_lower = wid.lower()
             if (
                 target == wid_lower
                 or target == node_id
-                or target == runtime
                 or target in wid_lower
                 or target in node_id
             ):
@@ -224,16 +294,10 @@ class WorkerSessionManager:
 
     def _worker_has_ollama(self, worker_id: str) -> bool:
         """Check if a worker has Ollama capability via validated registration data."""
-        caps = self._capabilities.get(worker_id, {})
-        if caps.get("ollama"):
-            return True
-        cap_list = caps.get("capabilities", [])
-        if isinstance(cap_list, list) and "ollama" in cap_list:
-            return True
-        runtime = caps.get("runtime", "")
-        if isinstance(runtime, str) and "ollama" in runtime.lower():
-            return True
-        return False
+        pod = self._pods.get(worker_id)
+        if not pod:
+            return False
+        return "ollama" in pod.runtime_capabilities
 
     def has_ollama_worker(self) -> bool:
         """Check if any active worker advertises Ollama capability."""

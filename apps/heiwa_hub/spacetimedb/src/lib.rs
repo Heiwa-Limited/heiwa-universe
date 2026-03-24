@@ -284,6 +284,24 @@ pub struct ArtifactRecord {
     pub created_at: String,
 }
 
+#[table(accessor = pods, public)]
+pub struct Pod {
+    #[primary_key]
+    pub pod_id: String,
+    pub host_identity: String,
+    pub provider: String,
+    pub runtime_capabilities: Vec<String>,
+    pub trust_tier: String,
+    pub privacy_floor: String,
+    pub gpu_inventory: Vec<String>,
+    #[index(btree)]
+    pub liveness: String,
+    pub leaseable: bool,
+    pub registered_at: String,
+    #[index(btree)]
+    pub last_heartbeat: String,
+}
+
 #[table(accessor = nodes, public)]
 pub struct NodeStatus {
     #[primary_key]
@@ -757,6 +775,57 @@ pub fn record_approval_decision(
         ctx.db.approval_decisions().decision_id().update(row);
     } else {
         ctx.db.approval_decisions().insert(row);
+    }
+    Ok(())
+}
+
+#[reducer]
+pub fn upsert_pod(
+    ctx: &ReducerContext,
+    pod_id: String,
+    host_identity: String,
+    provider: String,
+    runtime_capabilities: Vec<String>,
+    trust_tier: String,
+    privacy_floor: String,
+    gpu_inventory: Vec<String>,
+    liveness: String,
+    leaseable: bool,
+    registered_at: String,
+    last_heartbeat: String,
+) -> Result<(), String> {
+    let row = Pod {
+        pod_id: pod_id.clone(),
+        host_identity,
+        provider,
+        runtime_capabilities,
+        trust_tier,
+        privacy_floor,
+        gpu_inventory,
+        liveness,
+        leaseable,
+        registered_at,
+        last_heartbeat,
+    };
+    if ctx.db.pods().pod_id().find(pod_id).is_some() {
+        ctx.db.pods().pod_id().update(row);
+    } else {
+        ctx.db.pods().insert(row);
+    }
+    Ok(())
+}
+
+#[reducer]
+pub fn update_pod_heartbeat(
+    ctx: &ReducerContext,
+    pod_id: String,
+    last_heartbeat: String,
+    liveness: String,
+) -> Result<(), String> {
+    if let Some(mut pod) = ctx.db.pods().pod_id().find(pod_id) {
+        pod.last_heartbeat = last_heartbeat;
+        pod.liveness = liveness;
+        ctx.db.pods().pod_id().update(pod);
     }
     Ok(())
 }

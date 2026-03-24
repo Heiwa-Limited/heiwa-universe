@@ -372,6 +372,47 @@ async def cmd_doctor(ctx: CLIContext, args: str = "") -> None:
             console.print(f"\n[dim]{issue_count} issue(s) found. Run [bold]heiwa doctor --fix[/bold] to auto-repair.[/dim]")
 
 
+@command("/pods", "List active registered worker pods and their capabilities")
+async def cmd_pods(ctx: CLIContext, args: str = "") -> None:
+    for url in ctx.hub_url_candidates():
+        try:
+            import urllib.request
+            req = urllib.request.Request(
+                f"{url}/workers/pods",
+                headers={"Authorization": f"Bearer {ctx.auth_token}"},
+            )
+            with urllib.request.urlopen(req, timeout=5) as resp:
+                data = json.loads(resp.read().decode())
+                
+                table = Table(title="Registered Pods")
+                table.add_column("Pod ID")
+                table.add_column("Trust Tier")
+                table.add_column("Privacy")
+                table.add_column("Liveness")
+                table.add_column("Capabilities")
+                
+                pods = data.get("pods", [])
+                if not pods:
+                     console.print("[dim]No active pods connected.[/dim]")
+                     return
+                     
+                for pod in pods:
+                     caps = ", ".join(pod.get("runtime_capabilities", [])) or "-"
+                     status_color = "green" if pod.get("liveness") == "online" else "yellow"
+                     table.add_row(
+                          pod.get("pod_id", "?"),
+                          pod.get("trust_tier", "?"),
+                          pod.get("privacy_floor", "?"),
+                          f"[{status_color}]{pod.get('liveness', '?')}[/{status_color}]",
+                          caps
+                     )
+                console.print(table)
+                return
+        except Exception:
+             continue
+    console.print("[red]Failed to fetch pods — hub unreachable.[/red]")
+
+
 @command("/bench", "Run release gate suites")
 async def cmd_bench(ctx: CLIContext, args: str = "") -> None:
     from heiwa_sdk.bench import HeiwaBench

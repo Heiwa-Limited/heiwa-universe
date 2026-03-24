@@ -14,6 +14,8 @@ class ToolMesh:
     def __init__(self, root_dir: Path):
         self.root = root_dir
         self.wrappers_dir = self.root / "apps/heiwa_cli/scripts/agents/wrappers"
+        from heiwa_sdk.hooks import ExecutionHookManager
+        self.hooks = ExecutionHookManager(root_dir)
 
     def _wrapper_for_tool(self, tool: str) -> Path | None:
         wrapper_map = {
@@ -44,7 +46,26 @@ class ToolMesh:
         instruction: str,
         model: Optional[str] = None,
         extra_env: Optional[dict[str, str]] = None,
+        proposal_id: Optional[str] = None,
     ) -> Tuple[int, str]:
+        
+        # 1. pre_tool_call hook validation
+        if os.getenv("OPENCLAW_SESSION_ID"):
+             # Skip verification: OpenClaw chokepoint already validated this execution frame.
+             allow, reason, hook_metadata = True, "Skipped (OpenClaw verified)", None
+        else:
+             node_id = os.getenv("HEIWA_NODE_ID", "local_node")
+             allow, reason, hook_metadata = self.hooks.before_tool_call(
+                 tool=tool,
+                 proposal_id=proposal_id or "unknown",
+                 node_id=node_id,
+                 payload={"instruction": instruction},
+             )
+        
+        if not allow:
+            logger.warning("🚫 Execution denied by ToolMesh hook: %s", reason)
+            return 1, f"Execution denied by ToolMesh hook: {reason}"
+
         wrapper = self._wrapper_for_tool(tool)
         if not wrapper or not wrapper.exists():
             return 2, f"❌ [HEIWA TOOLMESH] Tool '{tool}' is unavailable."
@@ -80,6 +101,18 @@ class ToolMesh:
             )
             stdout, stderr = await proc.communicate()
             output = (stdout + stderr).decode(errors="ignore").strip()
-            return int(proc.returncode), output
+            exit_code = int(proc.returncode)
+
+            # 2. post_tool_call hook execution (skip if OpenClaw already validated)
+            if not os.getenv("OPENCLAW_SESSION_ID"):
+                self.hooks.after_tool_call(
+                    tool=tool,
+                    proposal_id=proposal_id or "unknown",
+                    exit_code=exit_code,
+                    output=output,
+                    audit_metadata=hook_metadata,
+                )
+
+            return exit_code, output
         except Exception as exc:
             return 1, f"Tool mesh execution error: {exc}"

@@ -52,6 +52,8 @@ class OpenClaw:
         self.providers = ProviderRegistry(root_dir)
         self._adapters: Dict[str, BaseClawAdapter] = {}
         self._load_adapters()
+        from heiwa_sdk.hooks import ExecutionHookManager
+        self.hooks = ExecutionHookManager(root_dir)
 
     def _load_adapters(self):
         """Initialize specialized adapters."""
@@ -139,6 +141,17 @@ class OpenClaw:
         route = payload if isinstance(payload, BrokerRouteResult) else BrokerRouteResult.from_payload(payload)
         dispatch = self.resolve(route)
 
+        # 1. pre_tool_call hook validation
+        allow, reason, hook_metadata = self.hooks.before_tool_call(
+            tool=dispatch.adapter_tool,
+            proposal_id=str(route.task_id),
+            node_id=str(route.assigned_worker or "unknown"),
+            payload=dispatch.to_dict(),
+        )
+        if not allow:
+            logger.error("🚫 Execution denied by pre-hook: %s", reason)
+            return 1, f"Execution denied by pre-hook: {reason}"
+
         env = {
             "HEIWA_GATEWAY_TRANSPORT": dispatch.transport,
             "HEIWA_PROVIDER": dispatch.provider,
@@ -162,6 +175,15 @@ class OpenClaw:
             instruction=instruction,
             env=env,
             model=dispatch.target_model or None
+        )
+
+        # 2. post_tool_call hook execution
+        self.hooks.after_tool_call(
+            tool=dispatch.adapter_tool,
+            proposal_id=str(route.task_id),
+            exit_code=exit_code,
+            output=output,
+            audit_metadata=hook_metadata,
         )
 
         self._record_rate_usage(dispatch, exit_code, output)

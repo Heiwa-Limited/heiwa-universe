@@ -528,6 +528,30 @@ class SpacetimeDB:
             f"SELECT * FROM nodes WHERE node_id = '{self._escape_sql_literal(node_id)}' LIMIT 1"
         )
 
+    def upsert_pod(self, pod: dict[str, Any]) -> bool:
+        return self.call(
+            "upsert_pod",
+            pod["pod_id"],
+            pod.get("host_identity", "unknown"),
+            pod.get("provider", "unknown"),
+            pod.get("runtime_capabilities", []),
+            pod.get("trust_tier", "untrusted"),
+            pod.get("privacy_floor", "global"),
+            pod.get("gpu_inventory", []),
+            pod.get("liveness", "online"),
+            pod.get("leaseable", False),
+            pod.get("registered_at") or datetime.datetime.now(datetime.timezone.utc).isoformat(),
+            pod.get("last_heartbeat") or datetime.datetime.now(datetime.timezone.utc).isoformat(),
+        )
+
+    def update_pod_heartbeat(self, pod_id: str, last_heartbeat: str, liveness: str = "online") -> bool:
+        return self.call(
+            "update_pod_heartbeat",
+            pod_id,
+            last_heartbeat,
+            liveness,
+        )
+
     def upsert_liveness_state(self, key: str, state: str, changed_at: str | None = None) -> bool:
         return self.call(
             "upsert_liveness_state",

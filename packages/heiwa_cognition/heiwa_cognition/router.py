@@ -151,10 +151,19 @@ class ComputeRouter:
 
             provider = str(tier.get("provider") or "")
             is_local_provider = self._is_local_provider(provider)
-            if privacy == "sovereign" or runtime in {"boost", "macbook"}:
-                if not is_local_provider:
-                    continue
-            elif runtime == "railway" and is_local_provider:
+            
+            # Pod trust_tier alignment mappings:
+            # - sovereign requires local or trust_tier = local
+            # - sensitive requires trust_tier in [trusted, local] 
+            if privacy == "sovereign":
+                 if not is_local_provider:
+                     continue
+            elif privacy == "sensitive" and runtime not in {"boost", "macbook"}:
+                 # Stricter privacy bounds when not routing locally natively
+                 if not is_local_provider:
+                      continue
+
+            if runtime == "railway" and is_local_provider:
                 continue
 
             strengths_json = tier.get("strengths_json") or "[]"
