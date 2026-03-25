@@ -1,5 +1,5 @@
 {
-  "version": 2,
+  "version": 3,
   "generated_from": "config/swarm/domain_plan.md",
   "root_domain": "heiwa.ltd",
   "platform": {
@@ -19,6 +19,13 @@
       "health_path": "/"
     },
     {
+      "host": "app.heiwa.ltd",
+      "purpose": "Authenticated product shell",
+      "target": "Cloudflare Pages app shell backed by Railway hub API",
+      "state": "active",
+      "health_path": "/"
+    },
+    {
       "host": "status.heiwa.ltd",
       "purpose": "Read-only status shell",
       "target": "Cloudflare Pages status shell backed by Railway API",
@@ -31,13 +38,6 @@
       "target": "Railway heiwa-cloud-hq service behind Cloudflare proxy/WAF",
       "state": "active",
       "health_path": "/health"
-    },
-    {
-      "host": "trade.heiwa.ltd",
-      "purpose": "Dedicated trading cockpit",
-      "target": "Railway heiwa-trading service behind Cloudflare proxy/WAF",
-      "state": "active",
-      "health_path": "/"
     },
     {
       "host": "docs.heiwa.ltd",
@@ -57,6 +57,13 @@
     },
     {
       "type": "CNAME",
+      "name": "app",
+      "value": "Cloudflare Pages app shell project",
+      "proxy": true,
+      "ttl": "auto"
+    },
+    {
+      "type": "CNAME",
       "name": "status",
       "value": "Cloudflare Pages marketing project",
       "proxy": true,
@@ -71,13 +78,6 @@
     },
     {
       "type": "CNAME",
-      "name": "trade",
-      "value": "Railway heiwa-trading service domain",
-      "proxy": true,
-      "ttl": "auto"
-    },
-    {
-      "type": "CNAME",
       "name": "docs",
       "value": "Cloudflare Pages docs project",
       "proxy": true,
@@ -85,12 +85,14 @@
     }
   ],
   "bootstrap_steps": [
-    "Point heiwa.ltd and status.heiwa.ltd at the Cloudflare Pages marketing/status project.",
+    "Point heiwa.ltd at the Cloudflare Pages marketing project.",
+    "Point app.heiwa.ltd at the Cloudflare Pages authenticated app shell.",
+    "Point status.heiwa.ltd at the Cloudflare Pages status shell.",
     "Point docs.heiwa.ltd at the Cloudflare Pages docs project built from MkDocs Material.",
     "Attach api.heiwa.ltd to the Railway heiwa-cloud-hq service and enforce Cloudflare proxy/WAF.",
-    "Attach trade.heiwa.ltd directly to the Railway heiwa-trading service with its own proxied DNS target.",
     "Keep SpacetimeDB external on maincloud.spacetimedb.com rather than modeling it as a Railway service or volume.",
-    "Enable strict TLS and baseline WAF rules for api.heiwa.ltd and trade.heiwa.ltd.",
-    "Run post-cutover checks for api.heiwa.ltd/health, status.heiwa.ltd, trade.heiwa.ltd, and public page endpoints."
+    "Keep internal preview runtimes such as heiwa-trading off the supported public host manifest until they graduate into first-class product surfaces.",
+    "Enable strict TLS and baseline WAF rules for api.heiwa.ltd while keeping app.heiwa.ltd and the other Pages shells behind Cloudflare edge controls.",
+    "Run post-cutover checks for api.heiwa.ltd/health, status.heiwa.ltd, app.heiwa.ltd, and public page endpoints."
   ]
 }

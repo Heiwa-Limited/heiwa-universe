@@ -201,34 +201,6 @@ jobs:
               else:
                   raise SystemExit("Endpoints still unhealthy after all retries:\n" + "\n".join(failures))
           PY
-      - name: Verify trading runtime endpoint (retry with backoff)
-        if: env.ENABLE_TRADING_DEPLOY == 'true'
-        run: |
-          python - <<'PY'
-          import requests, time
-
-          url = "https://trade.heiwa.ltd/health"
-          max_attempts = 6
-          wait_seconds = 30
-
-          for attempt in range(1, max_attempts + 1):
-              print(f"Attempt {attempt}/{max_attempts}")
-              try:
-                  response = requests.get(url, timeout=15)
-                  print(f"{url} -> HTTP {response.status_code}")
-                  if response.status_code < 400:
-                      print("Trading endpoint healthy.")
-                      break
-              except Exception as exc:
-                  print(f"{url} failed: {exc}")
-
-              if attempt < max_attempts:
-                  print(f"Retrying in {wait_seconds}s...")
-                  time.sleep(wait_seconds)
-              else:
-                  raise SystemExit(f"{url} still unhealthy after {max_attempts} attempts")
-          PY
-
   deploy-web:
     name: Deploy Cloudflare Public Shell
     runs-on: ubuntu-latest

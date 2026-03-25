@@ -52,13 +52,15 @@ def check_domain_manifest(path: Path) -> list[str]:
         )
 
     hosts = {entry.get("host") for entry in data.get("domains", [])}
-    expected_hosts = {"heiwa.ltd", "status.heiwa.ltd", "api.heiwa.ltd", "trade.heiwa.ltd", "docs.heiwa.ltd"}
+    expected_hosts = {"heiwa.ltd", "app.heiwa.ltd", "status.heiwa.ltd", "api.heiwa.ltd", "docs.heiwa.ltd"}
     missing = sorted(expected_hosts - hosts)
     if missing:
         problems.append(f"{path}: missing expected hosts {', '.join(missing)}")
 
     if "auth.heiwa.ltd" in hosts:
         problems.append(f"{path}: auth.heiwa.ltd should not be presented as an active public surface")
+    if "trade.heiwa.ltd" in hosts:
+        problems.append(f"{path}: trade.heiwa.ltd should not be presented as an active public surface")
 
     return problems
 
@@ -128,7 +130,8 @@ def main() -> int:
         require_contains(
             WEB_ROOT / "domains.html",
             "Cloudflare Pages",
-            "split Railway services",
+            "app.heiwa.ltd",
+            "internal preview runtimes",
             "maincloud",
             "domains.js",
         )

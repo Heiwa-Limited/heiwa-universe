@@ -4,17 +4,19 @@
 
 Heiwa uses a narrow split between runtime and public presentation:
 
-- **Railway** hosts the Heiwa application services: `heiwa-cloud-hq` for hub/API work and `heiwa-trading` for the trading cockpit.
+- **Railway** hosts the Heiwa application services: `heiwa-cloud-hq` for hub/API work and optional internal runtimes such as `heiwa-trading`.
 - **SpacetimeDB** is the authoritative external state layer on `maincloud.spacetimedb.com`.
-- **Cloudflare Pages** hosts marketing and docs for `heiwa.ltd`.
+- **Cloudflare Pages** hosts the public shells for `heiwa.ltd`, `app.heiwa.ltd`, `status.heiwa.ltd`, and `docs.heiwa.ltd`.
 - **WebSockets** carry live status/event transport when the runtime exposes them.
 
 ## Public/runtime boundaries
 
+- `heiwa.ltd` is the public marketing hostname.
+- `app.heiwa.ltd` is the canonical authenticated product shell.
 - `api.heiwa.ltd` is the public HTTP + MCP ingress.
-- `trade.heiwa.ltd` is the dedicated trading cockpit hostname and should route directly to the trading service.
 - `status.heiwa.ltd` is a read-only status shell backed by runtime health/status data.
 - `docs.heiwa.ltd` is the documentation site.
+- Internal vertical runtimes such as trading can stay on separate Railway services, but they are not part of the supported public surface until they graduate into first-class product surfaces.
 - The public web surface should not duplicate privileged runtime behavior.
 
 ## Repo boundaries
