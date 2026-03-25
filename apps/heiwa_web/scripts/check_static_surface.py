@@ -90,6 +90,7 @@ def main() -> int:
             "AI Orchestration Platform",
             "Railway",
             "SpacetimeDB",
+            "https://api.heiwa.ltd/auth/discord",
         )
     )
     problems.extend(

@@ -26,6 +26,12 @@ def test_domain_plan_describes_split_service_topology():
     assert "maincloud.spacetimedb.com" in text
 
 
+def test_public_index_points_get_started_at_live_oauth_entry():
+    index_text = (ROOT / "apps" / "heiwa_web" / "clients" / "web" / "index.html").read_text(encoding="utf-8")
+
+    assert 'href="https://api.heiwa.ltd/auth/discord"' in index_text
+
+
 def test_domain_manifest_includes_trade_host_and_external_state():
     data = json.loads(DOMAIN_MANIFEST.read_text(encoding="utf-8"))
     hosts = {entry["host"] for entry in data["domains"]}
