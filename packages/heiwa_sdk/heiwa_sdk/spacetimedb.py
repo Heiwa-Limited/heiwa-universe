@@ -212,16 +212,26 @@ class SpacetimeDB:
             float(run_data.get("cost") or 0.0),
         )
 
-    def get_runs(self, proposal_id: str | None = None, limit: int = 50) -> list[dict[str, Any]]:
+    def get_runs(
+        self,
+        proposal_id: str | None = None,
+        limit: int = 50,
+        user_id: str | None = None,
+    ) -> list[dict[str, Any]]:
         query = (
-            "SELECT run_id, proposal_id, started_at, ended_at, status, "
+            "SELECT run_id, user_id, proposal_id, started_at, ended_at, status, "
             "chain_result_json AS chain_result, signals_json AS signals, "
             "artifact_index_json AS artifact_index, node_id, replay_receipt_json AS replay_receipt, "
             "mode, model_id, tokens_input, tokens_output, tokens_total, cost "
             "FROM runs"
         )
+        clauses: list[str] = []
+        if user_id:
+            clauses.append(f"user_id = '{self._escape_sql_literal(user_id)}'")
         if proposal_id:
-            query += f" WHERE proposal_id = '{self._escape_sql_literal(proposal_id)}'"
+            clauses.append(f"proposal_id = '{self._escape_sql_literal(proposal_id)}'")
+        if clauses:
+            query += " WHERE " + " AND ".join(clauses)
         query += f" LIMIT {int(limit)}"
         rows = self.query(query)
         return sorted(rows, key=lambda r: r.get("ended_at", ""), reverse=True)
@@ -270,8 +280,11 @@ class SpacetimeDB:
         node_id: str | None = None,
         status: str | None = None,
         limit: int = 50,
+        user_id: str | None = None,
     ) -> list[dict[str, Any]]:
         clauses: list[str] = []
+        if user_id:
+            clauses.append(f"user_id = '{self._escape_sql_literal(user_id)}'")
         if provider_id:
             clauses.append(f"provider_id = '{self._escape_sql_literal(provider_id)}'")
         if node_id:
@@ -313,18 +326,29 @@ class SpacetimeDB:
             self._normalize_json_column(mission_data.get("metadata")) or "{}",
         )
 
-    def get_missions(self, status: str | None = None, limit: int = 50) -> list[dict[str, Any]]:
+    def get_missions(
+        self,
+        status: str | None = None,
+        limit: int = 50,
+        user_id: str | None = None,
+    ) -> list[dict[str, Any]]:
         query = "SELECT * FROM missions"
+        clauses: list[str] = []
+        if user_id:
+            clauses.append(f"user_id = '{self._escape_sql_literal(user_id)}'")
         if status:
-            query += f" WHERE status = '{self._escape_sql_literal(status)}'"
+            clauses.append(f"status = '{self._escape_sql_literal(status)}'")
+        if clauses:
+            query += " WHERE " + " AND ".join(clauses)
         query += f" LIMIT {int(limit)}"
         rows = self.query(query)
         return sorted(rows, key=lambda r: r.get("updated_at", ""), reverse=True)
 
-    def get_mission(self, mission_id: str) -> dict[str, Any] | None:
-        return self._first(
-            f"SELECT * FROM missions WHERE mission_id = '{self._escape_sql_literal(mission_id)}' LIMIT 1"
-        )
+    def get_mission(self, mission_id: str, user_id: str | None = None) -> dict[str, Any] | None:
+        clauses = [f"mission_id = '{self._escape_sql_literal(mission_id)}'"]
+        if user_id:
+            clauses.append(f"user_id = '{self._escape_sql_literal(user_id)}'")
+        return self._first(f"SELECT * FROM missions WHERE {' AND '.join(clauses)} LIMIT 1")
 
     def append_mission_step(self, step_data: dict[str, Any]) -> bool:
         created_at = step_data.get("created_at") or datetime.datetime.now(datetime.timezone.utc).isoformat()
@@ -392,8 +416,11 @@ class SpacetimeDB:
         mission_id: str | None = None,
         status: str | None = None,
         limit: int = 100,
+        user_id: str | None = None,
     ) -> list[dict[str, Any]]:
         clauses: list[str] = []
+        if user_id:
+            clauses.append(f"user_id = '{self._escape_sql_literal(user_id)}'")
         if mission_id:
             clauses.append(f"mission_id = '{self._escape_sql_literal(mission_id)}'")
         if status:
@@ -454,8 +481,11 @@ class SpacetimeDB:
         node_id: str | None = None,
         session_id: str | None = None,
         limit: int = 50,
+        user_id: str | None = None,
     ) -> list[dict[str, Any]]:
         clauses: list[str] = []
+        if user_id:
+            clauses.append(f"user_id = '{self._escape_sql_literal(user_id)}'")
         if node_id:
             clauses.append(f"node_id = '{self._escape_sql_literal(node_id)}'")
         if session_id:
@@ -481,10 +511,20 @@ class SpacetimeDB:
             artifact_data.get("created_at") or datetime.datetime.now(datetime.timezone.utc).isoformat(),
         )
 
-    def list_artifacts(self, mission_id: str | None = None, limit: int = 100) -> list[dict[str, Any]]:
+    def list_artifacts(
+        self,
+        mission_id: str | None = None,
+        limit: int = 100,
+        user_id: str | None = None,
+    ) -> list[dict[str, Any]]:
         query = "SELECT * FROM artifacts"
+        clauses: list[str] = []
+        if user_id:
+            clauses.append(f"user_id = '{self._escape_sql_literal(user_id)}'")
         if mission_id:
-            query += f" WHERE mission_id = '{self._escape_sql_literal(mission_id)}'"
+            clauses.append(f"mission_id = '{self._escape_sql_literal(mission_id)}'")
+        if clauses:
+            query += " WHERE " + " AND ".join(clauses)
         query += f" LIMIT {int(limit)}"
         rows = self.query(query)
         return sorted(rows, key=lambda r: r.get("created_at", ""), reverse=True)

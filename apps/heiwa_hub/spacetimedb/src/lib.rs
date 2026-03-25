@@ -17,6 +17,8 @@ pub struct OrganizationTask {
 pub struct Proposal {
     #[primary_key]
     pub proposal_id: String,
+    #[index(btree)]
+    pub user_id: String,
     pub created_at: String,
     #[index(btree)]
     pub status: String,
@@ -119,6 +121,8 @@ pub struct RouteDecision {
     #[primary_key]
     pub request_id: String,
     #[index(btree)]
+    pub user_id: String,
+    #[index(btree)]
     pub task_id: String,
     pub envelope_version: String,
     pub raw_text: String,
@@ -145,6 +149,8 @@ pub struct RunRecord {
     #[primary_key]
     pub run_id: String,
     #[index(btree)]
+    pub user_id: String,
+    #[index(btree)]
     pub proposal_id: String,
     pub started_at: String,
     #[index(btree)]
@@ -170,6 +176,8 @@ pub struct ProviderAccount {
     #[primary_key]
     pub account_id: String,
     #[index(btree)]
+    pub user_id: String,
+    #[index(btree)]
     pub provider_id: String,
     #[index(btree)]
     pub node_id: String,
@@ -191,6 +199,8 @@ pub struct ProviderAccount {
 pub struct MissionRecord {
     #[primary_key]
     pub mission_id: String,
+    #[index(btree)]
+    pub user_id: String,
     #[index(btree)]
     pub created_at: String,
     #[index(btree)]
@@ -235,6 +245,8 @@ pub struct CellRunRecord {
     #[primary_key]
     pub cell_run_id: String,
     #[index(btree)]
+    pub user_id: String,
+    #[index(btree)]
     pub mission_id: String,
     pub step_id: Option<String>,
     #[index(btree)]
@@ -258,6 +270,8 @@ pub struct SessionSummaryRecord {
     #[primary_key]
     pub summary_id: String,
     #[index(btree)]
+    pub user_id: String,
+    #[index(btree)]
     pub session_id: String,
     #[index(btree)]
     pub node_id: String,
@@ -271,6 +285,8 @@ pub struct SessionSummaryRecord {
 pub struct ArtifactRecord {
     #[primary_key]
     pub artifact_id: String,
+    #[index(btree)]
+    pub user_id: String,
     #[index(btree)]
     pub mission_id: String,
     pub cell_run_id: Option<String>,
@@ -358,6 +374,80 @@ pub struct DiscordInteraction {
     pub timestamp: u64,
 }
 
+#[table(accessor = users, public)]
+pub struct User {
+    #[primary_key]
+    pub user_id: String,
+    pub display_name: String,
+    pub email: Option<String>,
+    pub avatar_url: Option<String>,
+    #[index(btree)]
+    pub status: String,
+    pub tier: String,
+    pub created_at: String,
+    #[index(btree)]
+    pub last_seen_at: String,
+    pub metadata_json: String,
+}
+
+#[table(accessor = oauth_identities, public)]
+pub struct OAuthIdentity {
+    #[primary_key]
+    pub identity_id: String,
+    #[index(btree)]
+    pub user_id: String,
+    pub provider: String,
+    pub provider_user_id: String,
+    pub username: String,
+    pub access_token_enc: String,
+    pub refresh_token_enc: Option<String>,
+    pub token_expires_at: Option<String>,
+    pub scopes_json: String,
+    pub created_at: String,
+    pub updated_at: String,
+}
+
+#[table(accessor = provider_credentials, public)]
+pub struct ProviderCredential {
+    #[primary_key]
+    pub credential_id: String,
+    #[index(btree)]
+    pub user_id: String,
+    #[index(btree)]
+    pub provider_id: String,
+    pub credential_kind: String,
+    pub credential_enc: String,
+    #[index(btree)]
+    pub status: String,
+    pub rate_group: String,
+    pub display_label: Option<String>,
+    pub last_validated_at: Option<String>,
+    pub last_error: Option<String>,
+    pub created_at: String,
+    pub updated_at: String,
+}
+
+#[table(accessor = billing_events, public)]
+pub struct BillingEvent {
+    #[primary_key]
+    #[auto_inc]
+    pub id: u64,
+    #[index(btree)]
+    pub user_id: String,
+    #[index(btree)]
+    pub event_type: String,
+    pub provider_id: String,
+    pub model_id: String,
+    pub tokens_input: i64,
+    pub tokens_output: i64,
+    pub estimated_cost_usd: f64,
+    pub credential_id: Option<String>,
+    pub mission_id: Option<String>,
+    pub run_id: Option<String>,
+    #[index(btree)]
+    pub created_at: String,
+}
+
 #[view(accessor = tenant_task_view, public)]
 pub fn tenant_tasks(ctx: &ViewContext) -> Vec<OrganizationTask> {
     ctx.db
@@ -429,6 +519,7 @@ pub fn claim_task(ctx: &ReducerContext, task_id: u64, worker_id: String) -> Resu
 pub fn add_proposal(
     ctx: &ReducerContext,
     proposal_id: String,
+    user_id: String,
     created_at: String,
     status: String,
     fingerprint: Option<String>,
@@ -457,6 +548,7 @@ pub fn add_proposal(
 
     ctx.db.proposals().insert(Proposal {
         proposal_id,
+        user_id,
         created_at: if created_at.is_empty() {
             now_string(ctx)
         } else {
@@ -1033,6 +1125,7 @@ pub fn revoke_capability_lease(
 pub fn record_route_decision(
     ctx: &ReducerContext,
     request_id: String,
+    user_id: String,
     task_id: String,
     envelope_version: String,
     raw_text: String,
@@ -1054,6 +1147,7 @@ pub fn record_route_decision(
 ) -> Result<(), String> {
     let row = RouteDecision {
         request_id: request_id.clone(),
+        user_id,
         task_id,
         envelope_version,
         raw_text,
@@ -1092,6 +1186,7 @@ pub fn record_route_decision(
 pub fn record_run(
     ctx: &ReducerContext,
     run_id: String,
+    user_id: String,
     proposal_id: String,
     started_at: String,
     ended_at: String,
@@ -1110,6 +1205,7 @@ pub fn record_run(
 ) -> Result<(), String> {
     let row = RunRecord {
         run_id: run_id.clone(),
+        user_id,
         proposal_id: proposal_id.clone(),
         started_at,
         ended_at,
@@ -1151,6 +1247,7 @@ pub fn record_run(
 pub fn upsert_provider_account_status(
     ctx: &ReducerContext,
     account_id: String,
+    user_id: String,
     provider_id: String,
     node_id: String,
     auth_kind: String,
@@ -1166,6 +1263,7 @@ pub fn upsert_provider_account_status(
 ) -> Result<(), String> {
     let row = ProviderAccount {
         account_id: account_id.clone(),
+        user_id,
         provider_id,
         node_id,
         auth_kind,
@@ -1198,6 +1296,7 @@ pub fn upsert_provider_account_status(
 pub fn create_mission(
     ctx: &ReducerContext,
     mission_id: String,
+    user_id: String,
     created_at: String,
     updated_at: String,
     status: String,
@@ -1216,6 +1315,7 @@ pub fn create_mission(
 ) -> Result<(), String> {
     let row = MissionRecord {
         mission_id: mission_id.clone(),
+        user_id,
         created_at,
         updated_at,
         status,
@@ -1291,6 +1391,7 @@ pub fn append_mission_step(
 pub fn start_cell_run(
     ctx: &ReducerContext,
     cell_run_id: String,
+    user_id: String,
     mission_id: String,
     step_id: Option<String>,
     status: String,
@@ -1308,6 +1409,7 @@ pub fn start_cell_run(
 ) -> Result<(), String> {
     let row = CellRunRecord {
         cell_run_id: cell_run_id.clone(),
+        user_id,
         mission_id: mission_id.clone(),
         step_id: step_id.clone(),
         status,
@@ -1415,6 +1517,7 @@ pub fn fail_mission(
 pub fn write_session_summary(
     ctx: &ReducerContext,
     summary_id: String,
+    user_id: String,
     session_id: String,
     node_id: String,
     created_at: String,
@@ -1423,6 +1526,7 @@ pub fn write_session_summary(
 ) -> Result<(), String> {
     let row = SessionSummaryRecord {
         summary_id: summary_id.clone(),
+        user_id,
         session_id,
         node_id,
         created_at,
@@ -1448,6 +1552,7 @@ pub fn write_session_summary(
 pub fn register_artifact(
     ctx: &ReducerContext,
     artifact_id: String,
+    user_id: String,
     mission_id: String,
     cell_run_id: Option<String>,
     artifact_type: String,
@@ -1459,6 +1564,7 @@ pub fn register_artifact(
 ) -> Result<(), String> {
     let row = ArtifactRecord {
         artifact_id: artifact_id.clone(),
+        user_id,
         mission_id,
         cell_run_id,
         artifact_type,
@@ -2216,6 +2322,153 @@ pub fn prune_captain_messages(
     Ok(())
 }
 
+#[reducer]
+pub fn create_user(
+    ctx: &ReducerContext,
+    user_id: String,
+    display_name: String,
+    email: Option<String>,
+    avatar_url: Option<String>,
+    tier: String,
+) -> Result<(), String> {
+    if ctx.db.users().user_id().find(user_id.clone()).is_some() {
+        return Err("User already exists".into());
+    }
+    let now = now_string(ctx);
+    ctx.db.users().insert(User {
+        user_id,
+        display_name,
+        email,
+        avatar_url,
+        status: "active".to_string(),
+        tier,
+        created_at: now.clone(),
+        last_seen_at: now,
+        metadata_json: "{}".to_string(),
+    });
+    Ok(())
+}
 
+#[reducer]
+pub fn update_user_seen(
+    ctx: &ReducerContext,
+    user_id: String,
+) -> Result<(), String> {
+    let mut user = ctx.db.users().user_id().find(user_id).ok_or("User not found")?;
+    user.last_seen_at = now_string(ctx);
+    ctx.db.users().user_id().update(user);
+    Ok(())
+}
 
+#[reducer]
+pub fn link_oauth_identity(
+    ctx: &ReducerContext,
+    identity_id: String,
+    user_id: String,
+    provider: String,
+    provider_user_id: String,
+    username: String,
+    access_token_enc: String,
+    refresh_token_enc: Option<String>,
+    token_expires_at: Option<String>,
+    scopes_json: String,
+) -> Result<(), String> {
+    let now = now_string(ctx);
+    let row = OAuthIdentity {
+        identity_id: identity_id.clone(),
+        user_id,
+        provider,
+        provider_user_id,
+        username,
+        access_token_enc,
+        refresh_token_enc,
+        token_expires_at,
+        scopes_json,
+        created_at: now.clone(),
+        updated_at: now,
+    };
+    if ctx.db.oauth_identities().identity_id().find(identity_id).is_some() {
+        ctx.db.oauth_identities().identity_id().update(row);
+    } else {
+        ctx.db.oauth_identities().insert(row);
+    }
+    Ok(())
+}
+
+#[reducer]
+pub fn store_provider_credential(
+    ctx: &ReducerContext,
+    credential_id: String,
+    user_id: String,
+    provider_id: String,
+    credential_kind: String,
+    credential_enc: String,
+    rate_group: String,
+    display_label: Option<String>,
+) -> Result<(), String> {
+    let now = now_string(ctx);
+    let row = ProviderCredential {
+        credential_id: credential_id.clone(),
+        user_id,
+        provider_id,
+        credential_kind,
+        credential_enc,
+        status: "active".to_string(),
+        rate_group,
+        display_label,
+        last_validated_at: None,
+        last_error: None,
+        created_at: now.clone(),
+        updated_at: now,
+    };
+    if ctx.db.provider_credentials().credential_id().find(credential_id).is_some() {
+        ctx.db.provider_credentials().credential_id().update(row);
+    } else {
+        ctx.db.provider_credentials().insert(row);
+    }
+    Ok(())
+}
+
+#[reducer]
+pub fn revoke_provider_credential(
+    ctx: &ReducerContext,
+    credential_id: String,
+) -> Result<(), String> {
+    let mut cred = ctx.db.provider_credentials().credential_id().find(credential_id).ok_or("Credential not found")?;
+    cred.status = "revoked".to_string();
+    cred.updated_at = now_string(ctx);
+    ctx.db.provider_credentials().credential_id().update(cred);
+    Ok(())
+}
+
+#[reducer]
+pub fn record_billing_event(
+    ctx: &ReducerContext,
+    user_id: String,
+    event_type: String,
+    provider_id: String,
+    model_id: String,
+    tokens_input: i64,
+    tokens_output: i64,
+    estimated_cost_usd: f64,
+    credential_id: Option<String>,
+    mission_id: Option<String>,
+    run_id: Option<String>,
+) -> Result<(), String> {
+    ctx.db.billing_events().insert(BillingEvent {
+        id: 0,
+        user_id,
+        event_type,
+        provider_id,
+        model_id,
+        tokens_input,
+        tokens_output,
+        estimated_cost_usd,
+        credential_id,
+        mission_id,
+        run_id,
+        created_at: now_string(ctx),
+    });
+    Ok(())
+}
 

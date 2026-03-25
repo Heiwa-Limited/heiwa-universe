@@ -1,0 +1,39 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="robots" content="noindex, nofollow" />
+    <title>Heiwa | Dashboard</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=Space+Grotesk:wght@400;500;700&display=swap" rel="stylesheet" />
+    <link rel="stylesheet" href="./assets/styles.css" />
+    <script defer src="./assets/site.js"></script>
+    <script defer src="./assets/operator.js"></script>
+  </head>
+  <body data-page="dashboard" data-view="dashboard">
+    <div class="bg-grid" aria-hidden="true"></div>
+    <header class="topbar">
+      <a class="brand" href="./dashboard.html">HEIWA</a>
+      <nav class="nav">
+        <a href="./dashboard.html">Dashboard</a>
+        <a href="./connections.html">Connections</a>
+        <a href="./missions.html">Mission Control</a>
+        <a href="./history.html">History</a>
+      </nav>
+    </header>
+    <main>
+      <section class="hero compact">
+        <p class="eyebrow">Dashboard</p>
+        <h1>Your Heiwa account is connected.</h1>
+        <p class="lede">This landing page captures the Discord OAuth session token, verifies your account with the Hub, and links you into the first authenticated product surfaces.</p>
+      </section>
+      <section class="panels">
+        <article class="panel panel-full">
+          <div id="operator-root" class="stack"></div>
+        </article>
+      </section>
+    </main>
+  </body>
+</html>

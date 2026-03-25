@@ -61,14 +61,54 @@ class Database:
                 logger.error("STDB list_nodes failed: %s", e)
         return []
 
-    def get_mission(self, mission_id: str) -> dict[str, Any] | None:
+    def list_provider_accounts(
+        self,
+        provider_id: str | None = None,
+        node_id: str | None = None,
+        status: str | None = None,
+        limit: int = 50,
+        user_id: str | None = None,
+    ) -> list[dict[str, Any]]:
         if self.stdb:
+            kwargs: dict[str, Any] = dict(
+                provider_id=provider_id,
+                node_id=node_id,
+                status=status,
+                limit=limit,
+            )
+            if user_id is not None:
+                kwargs["user_id"] = user_id
+            return self.stdb.list_provider_accounts(**kwargs)
+        return []
+
+    def get_provider_account(self, account_id: str) -> dict[str, Any] | None:
+        if self.stdb:
+            return self.stdb.get_provider_account(account_id)
+        return None
+
+    def upsert_provider_account_status(self, account_data: dict[str, Any]) -> bool:
+        if self.stdb:
+            return self.stdb.upsert_provider_account_status(account_data)
+        return False
+
+    def get_mission(self, mission_id: str, user_id: str | None = None) -> dict[str, Any] | None:
+        if self.stdb:
+            if user_id is not None:
+                return self.stdb.get_mission(mission_id, user_id=user_id)
             return self.stdb.get_mission(mission_id)
         return None
 
-    def get_missions(self, status: str | None = None, limit: int = 50) -> list[dict[str, Any]]:
+    def get_missions(
+        self,
+        status: str | None = None,
+        limit: int = 50,
+        user_id: str | None = None,
+    ) -> list[dict[str, Any]]:
         if self.stdb:
-            return self.stdb.get_missions(status=status, limit=limit)
+            kwargs: dict[str, Any] = {"status": status, "limit": limit}
+            if user_id is not None:
+                kwargs["user_id"] = user_id
+            return self.stdb.get_missions(**kwargs)
         return []
 
     def create_mission(self, mission_data: dict[str, Any]) -> bool:
@@ -101,9 +141,17 @@ class Database:
         mission_id: str | None = None,
         status: str | None = None,
         limit: int = 100,
+        user_id: str | None = None,
     ) -> list[dict[str, Any]]:
         if self.stdb:
-            return self.stdb.get_cell_runs(mission_id=mission_id, status=status, limit=limit)
+            kwargs: dict[str, Any] = dict(
+                mission_id=mission_id,
+                status=status,
+                limit=limit,
+            )
+            if user_id is not None:
+                kwargs["user_id"] = user_id
+            return self.stdb.get_cell_runs(**kwargs)
         return []
 
     def pause_mission(self, mission_id: str, summary: str | None = None) -> bool:
@@ -149,9 +197,17 @@ class Database:
         node_id: str | None = None,
         session_id: str | None = None,
         limit: int = 50,
+        user_id: str | None = None,
     ) -> list[dict[str, Any]]:
         if self.stdb:
-            return self.stdb.list_session_summaries(node_id=node_id, session_id=session_id, limit=limit)
+            kwargs: dict[str, Any] = dict(
+                node_id=node_id,
+                session_id=session_id,
+                limit=limit,
+            )
+            if user_id is not None:
+                kwargs["user_id"] = user_id
+            return self.stdb.list_session_summaries(**kwargs)
         return []
 
     def register_artifact(self, artifact_data: dict[str, Any]) -> bool:
@@ -159,9 +215,17 @@ class Database:
             return self.stdb.register_artifact(artifact_data)
         return False
 
-    def list_artifacts(self, mission_id: str | None = None, limit: int = 100) -> list[dict[str, Any]]:
+    def list_artifacts(
+        self,
+        mission_id: str | None = None,
+        limit: int = 100,
+        user_id: str | None = None,
+    ) -> list[dict[str, Any]]:
         if self.stdb:
-            return self.stdb.list_artifacts(mission_id=mission_id, limit=limit)
+            kwargs: dict[str, Any] = {"mission_id": mission_id, "limit": limit}
+            if user_id is not None:
+                kwargs["user_id"] = user_id
+            return self.stdb.list_artifacts(**kwargs)
         return []
 
     def get_discord_channel(self, purpose: str) -> int | None:
@@ -228,9 +292,17 @@ class Database:
             return self.stdb.record_route_decision(route_data)
         return False
 
-    def get_runs(self, proposal_id: str | None = None, limit: int = 50) -> list[dict[str, Any]]:
+    def get_runs(
+        self,
+        proposal_id: str | None = None,
+        limit: int = 50,
+        user_id: str | None = None,
+    ) -> list[dict[str, Any]]:
         if self.stdb:
-            return self.stdb.get_runs(proposal_id=proposal_id, limit=limit)
+            kwargs: dict[str, Any] = {"proposal_id": proposal_id, "limit": limit}
+            if user_id is not None:
+                kwargs["user_id"] = user_id
+            return self.stdb.get_runs(**kwargs)
         return []
 
     def get_run(self, run_id: str) -> dict[str, Any] | None:

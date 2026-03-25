@@ -33,6 +33,13 @@ from heiwa_hub.cognition.enrichment import BrokerEnrichmentService
 from heiwa_hub.cognition.approval import get_approval_registry
 from heiwa_hub.approval_views import list_approvals_from_stdb
 from heiwa_hub.transport import get_bus, get_worker_manager
+from heiwa_hub.auth import (
+    auth_discord_redirect,
+    auth_discord_callback,
+    get_current_user,
+    require_user,
+    verify_jwt,
+)
 from heiwa_protocol.protocol import Subject
 from heiwa_sdk.proposal_dispatch import dispatch_routable_proposals, sync_remote_worker_node
 
@@ -313,6 +320,43 @@ async def health():
     }
 
 
+# ---------------------------------------------------------------------------
+#  Auth routes — Discord OAuth2 + JWT sessions
+# ---------------------------------------------------------------------------
+
+@app.get("/auth/discord")
+async def start_discord_oauth():
+    """Redirect to Discord OAuth consent screen."""
+    return auth_discord_redirect()
+
+
+@app.get("/auth/discord/callback")
+async def discord_oauth_callback(code: str = "", state: str = ""):
+    """Exchange Discord OAuth code for JWT session token."""
+    if not code or not state:
+        raise HTTPException(status_code=400, detail="Missing code or state parameter")
+    stdb = getattr(db, "stdb", None)
+    if not stdb:
+        raise HTTPException(status_code=503, detail="STDB not available")
+    return await auth_discord_callback(code, state, stdb)
+
+
+@app.get("/auth/me")
+async def get_me(request: Request):
+    """Return the authenticated user's profile from their JWT."""
+    claims = require_user(request)
+    user_id = claims.get("sub", "")
+    # Optionally fetch full profile from STDB
+    stdb = getattr(db, "stdb", None)
+    if stdb:
+        rows = stdb.query(
+            f"SELECT * FROM users WHERE user_id = '{stdb._escape_sql_literal(user_id)}'"
+        )
+        if rows:
+            return {"user": rows[0], "claims": claims}
+    return {"user": {"user_id": user_id}, "claims": claims}
+
+
 @app.get("/")
 @app.head("/")
 async def root(request: Request):
@@ -356,6 +400,12 @@ async def status_page():
 @app.get("/connections.html")
 async def connections_page():
     return _page_or_404("connections.html")
+
+
+@app.get("/dashboard")
+@app.get("/dashboard.html")
+async def dashboard_page():
+    return _page_or_404("dashboard.html")
 
 
 @app.get("/missions.html")
@@ -836,30 +886,34 @@ async def reject_task(
 
 
 @app.get("/auth/providers")
-async def list_provider_accounts(authorization: str | None = Header(None)):
-    _validate_auth_token(authorization)
-    return {"providers": state.get_provider_accounts()}
+async def list_provider_accounts(request: Request):
+    claims = require_user(request)
+    user_id = str(claims.get("sub") or "")
+    return {"providers": state.get_provider_accounts(user_id=user_id)}
 
 
 @app.get("/auth/providers/{provider_id}/status")
-async def get_provider_account_status(provider_id: str, authorization: str | None = Header(None)):
-    _validate_auth_token(authorization)
-    payload = state.get_provider_status(provider_id)
+async def get_provider_account_status(provider_id: str, request: Request):
+    claims = require_user(request)
+    user_id = str(claims.get("sub") or "")
+    payload = state.get_provider_status(provider_id, user_id=user_id)
     if not payload:
         raise HTTPException(status_code=404, detail=f"Provider {provider_id} not found")
     return payload
 
 
 @app.get("/missions")
-async def list_missions(status: str | None = None, limit: int = 50, authorization: str | None = Header(None)):
-    _validate_auth_token(authorization)
-    return {"missions": state.get_missions(status=status, limit=limit)}
+async def list_missions(request: Request, status: str | None = None, limit: int = 50):
+    claims = require_user(request)
+    user_id = str(claims.get("sub") or "")
+    return {"missions": state.get_missions(status=status, limit=limit, user_id=user_id)}
 
 
 @app.get("/missions/{mission_id}")
-async def get_mission(mission_id: str, authorization: str | None = Header(None)):
-    _validate_auth_token(authorization)
-    payload = state.get_mission_detail(mission_id)
+async def get_mission(mission_id: str, request: Request):
+    claims = require_user(request)
+    user_id = str(claims.get("sub") or "")
+    payload = state.get_mission_detail(mission_id, user_id=user_id)
     if not payload:
         raise HTTPException(status_code=404, detail=f"Mission {mission_id} not found")
     return payload
@@ -890,9 +944,10 @@ async def list_rate_groups(authorization: str | None = Header(None)):
 
 
 @app.get("/history")
-async def get_history(limit: int = 20, authorization: str | None = Header(None)):
-    _validate_auth_token(authorization)
-    return state.get_history(limit=limit)
+async def get_history(request: Request, limit: int = 20):
+    claims = require_user(request)
+    user_id = str(claims.get("sub") or "")
+    return state.get_history(limit=limit, user_id=user_id)
 
 
 @app.websocket("/ws/tasks/{task_id}")

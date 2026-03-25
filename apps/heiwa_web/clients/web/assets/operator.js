@@ -1,12 +1,28 @@
 (function () {
   const STORAGE_KEY = "heiwa_operator_token";
   const view = document.body?.dataset?.view || "";
+
+  // --- OAuth JWT capture: extract token from URL fragment after Discord redirect ---
+  (function captureOAuthToken() {
+    const hash = window.location.hash;
+    if (hash && hash.includes("token=")) {
+      const params = new URLSearchParams(hash.substring(1));
+      const jwt = params.get("token");
+      if (jwt) {
+        window.localStorage.setItem(STORAGE_KEY, jwt);
+        // Clean the URL fragment so token isn't visible/bookmarkable
+        history.replaceState(null, "", window.location.pathname + window.location.search);
+      }
+    }
+  })();
+
   const state = {
     token: window.localStorage.getItem(STORAGE_KEY) || "",
     socket: null,
   };
 
   const endpointForView = {
+    dashboard: { method: "GET", path: "/auth/me", auth: true },
     connections: { method: "GET", path: "/auth/providers", auth: true },
     missions: { method: "GET", path: "/missions", auth: true },
     live: { method: "GET", path: "/missions?status=running&limit=50", auth: true },
@@ -348,7 +364,26 @@
     `;
   }
 
+  function renderDashboard(payload) {
+    const user = payload.user || {};
+    const claims = payload.claims || {};
+    return `
+      <div class="card-list">
+        <article>
+          <div class="operator-toolbar">
+            <h3>${escapeHtml(user.display_name || claims.username || user.user_id || "Heiwa user")}</h3>
+            <span class="pill ok">${escapeHtml(user.tier || "authenticated")}</span>
+          </div>
+          <p><strong>User ID:</strong> ${escapeHtml(user.user_id || claims.sub || "-")}</p>
+          <p><strong>Discord:</strong> ${escapeHtml(claims.discord_user_id || "-")}</p>
+          <p><strong>Next:</strong> Open Connections to review linked providers, Mission Control to inspect active work, or History to review prior runs.</p>
+        </article>
+      </div>
+    `;
+  }
+
   function render(viewName, payload) {
+    if (viewName === "dashboard") return renderDashboard(payload);
     if (viewName === "connections") return renderConnections(payload);
     if (viewName === "missions") return renderMissions(payload);
     if (viewName === "live") return renderLive(payload);
@@ -363,7 +398,7 @@
     const definition = endpointForView[view];
     if (!definition) return;
     if (definition.auth !== false && !state.token) {
-      renderError("Operator token missing. Use Set Token to load the current hub token.");
+      renderError("Session token missing. Sign in with Discord or load the current hub token.");
       return;
     }
     try {
