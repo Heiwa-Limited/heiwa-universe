@@ -24,7 +24,9 @@ Polymarket paper-trading tournament engine. Scans prediction markets, scores opp
 
 ## How It Runs
 
-The dedicated trading service owns `trade.heiwa.ltd`. It serves the cockpit at `/` and exposes the cockpit/API routes under `/trading/*` for the current UI contract. The hub does not mount this surface anymore. The supervisor is called as a Python function — in Phase 3 this becomes a cron-triggered WorkItem in Heiwa's work loop.
+The trading service runs as a standalone Railway service. It serves the cockpit at `/` and exposes the cockpit/API routes under `/trading/*`. The hub does not mount this surface.
+
+`trade.heiwa.ltd` no longer has a public DNS record. The standalone `heiwa-trading` Railway service remains an internal preview surface, not a supported public product domain, and does not appear in the public host manifest. In the target state (Phase 3+), the trading supervisor becomes a cron-triggered WorkItem in Heiwa's Hub work loop and the standalone service is retired.
 
 ## State
 

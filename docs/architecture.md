@@ -6,7 +6,7 @@ Heiwa uses a narrow split between runtime and public presentation:
 
 - **Railway** hosts the Heiwa application services: `heiwa-cloud-hq` for hub/API work and optional internal runtimes such as `heiwa-trading`.
 - **SpacetimeDB** is the authoritative external state layer on `maincloud.spacetimedb.com`.
-- **Cloudflare Pages** hosts the public shells for `heiwa.ltd`, `app.heiwa.ltd`, `status.heiwa.ltd`, and `docs.heiwa.ltd`.
+- **Cloudflare** proxies all public domains. Currently all route to Railway, which serves both API and static shells. The target state splits the static shells onto Cloudflare Pages at the edge.
 - **WebSockets** carry live status/event transport when the runtime exposes them.
 
 ## Public/runtime boundaries

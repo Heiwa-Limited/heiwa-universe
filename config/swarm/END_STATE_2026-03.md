@@ -1,5 +1,7 @@
 # Heiwa End-State: Objective Conceptualization (March 2026)
 
+> **Status**: Target end-state, not current operational reality. Some capabilities described here are live; others are aspirational. When current implementation differs from this document, update configs and code toward this target without overstating what exists today.
+
 ## What Heiwa IS
 
 A personal AI operating system that turns ~$83 CAD/month in subscriptions into an always-on, rate-limit-aware execution layer. Railway is the primary plane — self-sufficient with CLI tools, API inference, state, and orchestration. MacBook and WSL are optional boost nodes that add capacity when online.
