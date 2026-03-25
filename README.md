@@ -2,57 +2,55 @@
 
 [![Railway](https://img.shields.io/badge/runtime-Railway-5a3cc8?style=flat-square&logo=railway)](https://railway.app)
 [![SpacetimeDB](https://img.shields.io/badge/state-SpacetimeDB-0c73d8?style=flat-square)](https://spacetimedb.com)
-[![Cloudflare](https://img.shields.io/badge/public-Cloudflare-f38020?style=flat-square&logo=cloudflare)](https://cloudflare.com)
-[![Transport](https://img.shields.io/badge/transport-WebSockets-1d9bf0?style=flat-square)](https://developer.mozilla.org/en-US/docs/Web/API/WebSockets_API)
+[![Web](https://img.shields.io/badge/dashboard-app.heiwa.ltd-000000?style=flat-square)](https://app.heiwa.ltd)
+[![Discord](https://img.shields.io/badge/interface-Discord-5865F2?style=flat-square&logo=discord)](https://discord.com)
 
-Heiwa is the canonical repo for the Heiwa control plane. The supported first-class surfaces are:
+Heiwa is a BYOK (Bring Your Own Keys) agent orchestration platform. Connect your own AI provider API keys and OAuth credentials. Heiwa wraps every inference provider, scores intent and risk, and routes each task to the optimal model and provider -- across multi-step agent workflows.
 
-- CLI
-- MCP
-- HTTP API
-- Docs
+Access via [app.heiwa.ltd](https://app.heiwa.ltd) (web dashboard) and Discord DMs.
 
-The current consolidation target is a fast stack built around SpacetimeDB state, Railway runtime, Cloudflare marketing/docs surfaces, and WebSocket-first live status/event transport.
+## What Heiwa Does
 
-Cold-start operators and agents should begin with `HEIWA.md`.
+Users bring their own API keys (OpenAI, Anthropic, Google, etc.). Heiwa handles the rest:
 
-## Current State
+- **Intent classification** -- understands what you want to do
+- **Risk scoring** -- evaluates safety and cost implications
+- **Optimal routing** -- picks the best model/provider for each step, using your keys and rate limits
+- **Multi-step orchestration** -- chains tasks into agent workflows with structured execution programs
+- **Multi-tenant state** -- every user's credentials, runs, and results are scoped and isolated
 
-Heiwa is under active runtime hardening against the March 6, 2026 blueprint. This repo should not describe placeholder agents, Discord flows, or legacy compatibility layers as stack-complete.
+No vendor lock-in. No platform inference costs passed to you. Your keys, your budget, Heiwa's routing intelligence.
 
-What is in scope now:
+## Architecture
 
-- Railway-hosted hub runtime
-- SpacetimeDB as the state layer
-- WebSocket-first public status/event transport
-- Heiwa CLI and MCP as operator surfaces
-- Cloudflare-hosted marketing and documentation pages
-
-What is not treated as stack-complete:
-
-- Discord as a required ingress surface
-- legacy `heiwa-limited` as an active target or source repo
-- placeholder Codex/OpenClaw personas presented as product capabilities
+| Component | Location | Role |
+|-----------|----------|------|
+| **Hub** | `apps/heiwa_hub/` | Railway-hosted runtime -- cognition pipeline, agent execution, API surface |
+| **SpacetimeDB** | `apps/heiwa_hub/spacetimedb/` | Multi-tenant state engine -- users, credentials, proposals, runs, billing |
+| **Web** | `apps/heiwa_web/` | `app.heiwa.ltd` -- dashboard, key management, mission history |
+| **Discord** | `apps/heiwa_hub/agents/` | Alternative interface -- DM-based task submission and results |
+| **SDK** | `packages/heiwa_sdk/` | State, security, gateway, routing, scheduler |
+| **Cognition** | `packages/heiwa_cognition/` | Intent normalizer, risk scorer, compute router, program compiler |
+| **Protocol** | `packages/heiwa_protocol/` | Shared typed contracts and schemas |
+| **Bindings** | `packages/heiwa_bindings/` | Generated SpacetimeDB clients (Rust/TypeScript/Python) |
 
 ## Runtime Topology
 
 ```mermaid
 graph TD
-    A["CLI"] --> B["Railway Hub"]
-    C["MCP Clients"] --> B
-    D["HTTP API"] --> B
-    B --> E["SpacetimeDB"]
-    B --> F["WebSocket Status / Events"]
-    G["Cloudflare Pages"] --> H["Marketing + Docs"]
+    A["app.heiwa.ltd"] --> B["Hub (Railway)"]
+    C["Discord"] --> B
+    B --> D["SpacetimeDB"]
+    B --> E["Provider APIs (user keys)"]
+    B --> F["CLI Tools (platform keys)"]
+    D --> G["User State / Credentials / Billing"]
 ```
 
-- `apps/heiwa_hub`: Railway runtime, MCP/HTTP API surface, health/status endpoints
-- `apps/heiwa_cli`: operator CLI and local execution wrappers
-- `packages/heiwa_sdk`: state, security, gateway, and platform helpers
-- `packages/heiwa_bindings`: generated Rust/TypeScript SpacetimeDB clients plus the Python bridge slot
-- `packages/heiwa_protocol`: shared contracts and schemas
-- `docs/`: MkDocs Material documentation source
-- `apps/heiwa_web`: Cloudflare Pages marketing/status shell
+## Verticals
+
+**Trading** -- Polymarket analysis and paper-trading. Heiwa runs market scans using your inference budget, scores opportunities, and surfaces results via Discord DM and web dashboard. Source: `apps/heiwa_trading/`.
+
+**Autoresearch** -- Karpathy-style autonomous research loops. Define a research question, Heiwa orchestrates multi-model deep dives and delivers structured findings.
 
 ## Quick Start
 
@@ -64,28 +62,6 @@ python -m apps.heiwa_hub.main
 ./apps/heiwa_cli/heiwa cells
 ./apps/heiwa_cli/heiwa bench
 ```
-
-## Verification
-
-```bash
-python apps/heiwa_hub/tests/test_intent_classifier.py
-python apps/heiwa_hub/tests/test_risk_scorer.py
-python apps/heiwa_hub/tests/test_compute_router.py
-python apps/heiwa_hub/tests/test_agent_context_map.py
-python apps/heiwa_hub/tests/test_heiwa_cells_catalog.py
-python apps/heiwa_hub/tests/test_heiwa_bench.py
-python apps/heiwa_hub/tests/test_stdb_native_state.py
-./apps/heiwa_hub/scripts/generate_spacetimedb_bindings.sh
-python -m pip install -r docs/requirements.txt
-mkdocs build --strict
-python apps/heiwa_web/scripts/check_static_surface.py
-```
-
-## Docs
-
-- Source: [`docs/`](docs/)
-- MkDocs config: [`mkdocs.yml`](mkdocs.yml)
-- Public docs target: `docs.heiwa.ltd`
 
 ## Key Manifests
 

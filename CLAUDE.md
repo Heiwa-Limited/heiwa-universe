@@ -54,7 +54,7 @@
 
   Architecture
 
-  Heiwa is a distributed AI operating system. The main execution flow is:
+  Heiwa is a BYOK agent orchestration platform. Users bring their own API keys; Heiwa routes optimally. The main execution flow is:
 
   User input → IntentNormalizer → RiskScorer → ComputeRouter → ProgramCompiler → Broker → HeiwaClaw (advisory validation) → ToolMesh (heiwa_reflex / CLI adapters) → execution
 
@@ -73,7 +73,7 @@
   ├─────────────────────┼──────────────────────────┼──────────────────────────────────────────────────────┤
   │ Bindings            │ packages/heiwa_bindings/ │ Generated SpacetimeDB types                          │
   ├─────────────────────┼──────────────────────────┼──────────────────────────────────────────────────────┤
-  │ Web                 │ apps/heiwa_web/          │ Cloudflare Pages marketing/status shell              │
+  │ Web                 │ apps/heiwa_web/          │ app.heiwa.ltd — dashboard, key vault, mission history │
   ├─────────────────────┼──────────────────────────┼──────────────────────────────────────────────────────┤
   │ Docs                │ docs/                    │ MkDocs Material source → docs.heiwa.ltd              │
   └─────────────────────┴──────────────────────────┴──────────────────────────────────────────────────────┘
@@ -111,7 +111,8 @@
 
   - SpacetimeDB is authoritative. Rust module at apps/heiwa_hub/heiwaproductiondb/spacetimedb/
   - Backend selected via HEIWA_STATE_BACKEND env var
-  - Tables: proposals, nodes, runs, capability_leases, approval_requests, approval_decisions
+  - Tables: users, oauth_identities, provider_credentials, billing_events, proposals, missions, runs, nodes, capability_leases, approval_requests, approval_decisions, pods
+  - All core tables scoped by user_id for multi-tenant isolation
 
   CI/CD Pipeline (.github/workflows/deploy.yml)
 

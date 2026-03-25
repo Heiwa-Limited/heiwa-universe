@@ -124,7 +124,7 @@ class Settings:
         return candidates[1:] if len(candidates) > 1 else []
     
     @property
-    def PORT(self): return int(get_env("PORT", default=8000, required=False))
+    def PORT(self): return int(get_env("PORT", default=8080, required=False))
     
     # --- DATABASE ---
     @property
@@ -161,6 +161,15 @@ class Settings:
     
     @property
     def DISCORD_WEBHOOK_URL(self): return get_env("DISCORD_WEBHOOK_URL", required=False)
+
+    @property
+    def DISCORD_CLIENT_ID(self): return get_env("DISCORD_CLIENT_ID", required=False) or self.DISCORD_APPLICATION_ID
+
+    @property
+    def DISCORD_CLIENT_SECRET(self): return get_env("DISCORD_CLIENT_SECRET", required=False)
+
+    @property
+    def HEIWA_AUTH_SECRET(self): return get_env("HEIWA_AUTH_SECRET", required=False)
 
     # --- LLM & WORKER ---
     @property

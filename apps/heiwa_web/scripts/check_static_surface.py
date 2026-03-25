@@ -86,8 +86,8 @@ def main() -> int:
     problems.extend(
         require_contains(
             WEB_ROOT / "index.html",
-            "Your AI. Your rules. One system.",
-            "Personal AI OS",
+            "Every AI provider. One orchestration layer. Your keys.",
+            "AI Orchestration Platform",
             "Railway",
             "SpacetimeDB",
         )
