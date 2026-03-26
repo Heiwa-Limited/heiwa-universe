@@ -8,13 +8,13 @@ Gemini CLI is a Class 3 cloud OAuth executor with full agentic/sub-agentic capab
 
 Read these before making runtime or architecture changes:
 
-1. `HEIWA.md` — repo routing, hard rules, task routing table
+1. `ops/context/HEIWA.md` — repo routing, hard rules, task routing table
 2. `AGENTS.md` — agent architecture pointers
 3. `config/swarm/BUILD_BLUEPRINT_2026-03-06.md` — hardware topology, execution model
 4. `config/swarm/END_STATE_2026-03.md` — target architecture and kill list
 5. `config/swarm/ai_router.json` — model/provider registry
 6. `config/identities/profiles.json` — HeiwaCells agent catalog
-7. `rooms/*.md` — architecture decisions (load per task routing table in HEIWA.md)
+7. `ops/rooms/*.md` — architecture decisions (load per task routing table in `ops/context/HEIWA.md`)
 
 ## Peer Collaboration
 
@@ -75,11 +75,11 @@ Load only the rooms needed for the task:
 
 | Task Class | Load Rooms | Skip |
 | --- | --- | --- |
-| Proposal lifecycle | `rooms/control-plane.md`, `rooms/sdk.md` | `rooms/infra.md`, `rooms/execution.md` |
-| Worker node execution | `rooms/execution.md`, `rooms/infra.md` | `rooms/orchestration.md` |
-| SDK surface changes | `rooms/sdk.md`, `rooms/control-plane.md` | `rooms/infra.md` |
-| CI / deploy changes | `rooms/infra.md`, `rooms/execution.md` | `rooms/orchestration.md` |
-| Orchestration / human-in-loop | `rooms/orchestration.md`, `rooms/control-plane.md` | `rooms/infra.md` |
+| Proposal lifecycle | `ops/rooms/control-plane.md`, `ops/rooms/sdk.md` | `ops/rooms/infra.md`, `ops/rooms/execution.md` |
+| Worker node execution | `ops/rooms/execution.md`, `ops/rooms/infra.md` | `ops/rooms/orchestration.md` |
+| SDK surface changes | `ops/rooms/sdk.md`, `ops/rooms/control-plane.md` | `ops/rooms/infra.md` |
+| CI / deploy changes | `ops/rooms/infra.md`, `ops/rooms/execution.md` | `ops/rooms/orchestration.md` |
+| Orchestration / human-in-loop | `ops/rooms/orchestration.md`, `ops/rooms/control-plane.md` | `ops/rooms/infra.md` |
 | Architecture / design | all rooms | none |
 
 ## Hard Rules

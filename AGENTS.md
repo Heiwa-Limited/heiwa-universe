@@ -24,6 +24,7 @@ Stand-alone processes in non-Python languages (e.g., Rust) that connect to the m
 
 - `docs/superpowers/status/feature_list.json`: System capability checklist.
 - `docs/superpowers/status/progress.md`: Active work logs.
+- Canonical operator context now lives under `ops/context/` and `ops/rooms/`.
 
 ## 5. Security Posture
 

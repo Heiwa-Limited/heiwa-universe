@@ -12,13 +12,13 @@
 
   Read these before making runtime or architecture changes:
 
-  1. `HEIWA.md` — repo routing, hard rules, task routing table
+  1. `ops/context/HEIWA.md` — repo routing, hard rules, task routing table
   2. `AGENTS.md` — agent architecture pointers
   3. `config/swarm/BUILD_BLUEPRINT_2026-03-06.md` — hardware topology, execution model
   4. `config/swarm/END_STATE_2026-03.md` — target architecture and kill list
   5. `config/swarm/ai_router.json` — model/provider registry
   6. `config/identities/profiles.json` — HeiwaCells agent catalog
-  7. `rooms/*.md` — architecture decisions (load per task routing table in HEIWA.md)
+  7. `ops/rooms/*.md` — architecture decisions (load per task routing table in `ops/context/HEIWA.md`)
 
 ## Commands
 

@@ -63,6 +63,13 @@ python -m apps.heiwa_hub.main
 ./apps/heiwa_cli/heiwa bench
 ```
 
+## Product Graph
+
+The root [`justfile`](justfile) is the product build contract. If a task is not represented there, it is not part of the hosted product graph.
+
+- Product surfaces: `apps/`, `packages/`, `config/`, `infra/`, `docs/`, `scripts/`
+- Operator-only context/tooling: `ops/`
+
 ## Key Manifests
 
 - [`config/swarm/BUILD_BLUEPRINT_2026-03-06.md`](config/swarm/BUILD_BLUEPRINT_2026-03-06.md)
