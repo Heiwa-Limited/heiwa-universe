@@ -31,6 +31,10 @@ def _find_json_arg(cmd: list[str], value: object) -> bool:
     return False
 
 
+def _reducer_args(cmd: list[str]) -> list[object]:
+    return [json.loads(arg) for arg in cmd[6:]]
+
+
 def test_add_proposal_encodes_option_fields():
     db = CaptureSpacetimeDB()
     db.add_proposal(
@@ -57,6 +61,21 @@ def test_add_proposal_encodes_option_fields():
     assert _find_json_arg(cmd, {"none": []}), f"None fields should encode as option none: {cmd}"
     assert _find_json_arg(cmd, {"some": "deploy the hub"}), f"payload_raw should encode as option some: {cmd}"
     assert _find_json_arg(cmd, {"some": '{"requires":["shell"]}'}), f"execution_targeting should encode as option some: {cmd}"
+
+
+def test_add_proposal_appends_optional_user_id():
+    db = CaptureSpacetimeDB()
+    db.add_proposal(
+        {
+            "proposal_id": "prop-compat-1",
+            "payload": {"task": "deploy"},
+            "user_id": "user-alpha",
+        }
+    )
+    args = _reducer_args(db.commands[-1])
+    assert args[0] == "prop-compat-1"
+    assert args[1] != {"some": "user-alpha"}
+    assert args[-1] == {"some": "user-alpha"}
 
 
 def test_add_approval_request_encodes_option_fields():
@@ -193,3 +212,82 @@ def test_insert_execution_memory_encodes_lease_id():
     )
     cmd = db.commands[-1]
     assert _find_json_arg(cmd, "LEASE-1"), f"lease_id should be encoded in execution memory insert: {cmd}"
+
+
+def test_record_route_decision_appends_optional_user_id():
+    db = CaptureSpacetimeDB()
+    db.record_route_decision(
+        {
+            "request_id": "req-1",
+            "task_id": "task-1",
+            "envelope_version": "2026-03-28",
+            "raw_text": "route this",
+            "user_id": "user-alpha",
+        }
+    )
+    args = _reducer_args(db.commands[-1])
+    assert args[0] == "req-1"
+    assert args[1] == "task-1"
+    assert args[-1] == {"some": "user-alpha"}
+
+
+def test_create_mission_appends_optional_user_id():
+    db = CaptureSpacetimeDB()
+    db.create_mission(
+        {
+            "mission_id": "mission-1",
+            "prompt": "ship it",
+            "user_id": "user-alpha",
+        }
+    )
+    args = _reducer_args(db.commands[-1])
+    assert args[0] == "mission-1"
+    assert args[-2] == "{}"
+    assert args[-1] == {"some": "user-alpha"}
+
+
+def test_start_cell_run_appends_optional_user_id():
+    db = CaptureSpacetimeDB()
+    db.start_cell_run(
+        {
+            "cell_run_id": "cell-1",
+            "mission_id": "mission-1",
+            "user_id": "user-alpha",
+        }
+    )
+    args = _reducer_args(db.commands[-1])
+    assert args[0] == "cell-1"
+    assert args[1] == "mission-1"
+    assert args[-1] == {"some": "user-alpha"}
+
+
+def test_write_session_summary_appends_optional_user_id():
+    db = CaptureSpacetimeDB()
+    db.write_session_summary(
+        {
+            "summary_id": "summary-1",
+            "session_id": "session-1",
+            "user_id": "user-alpha",
+        }
+    )
+    args = _reducer_args(db.commands[-1])
+    assert args[0] == "summary-1"
+    assert args[1] == "session-1"
+    assert args[-1] == {"some": "user-alpha"}
+
+
+def test_upsert_provider_account_status_appends_optional_user_id():
+    db = CaptureSpacetimeDB()
+    db.upsert_provider_account_status(
+        {
+            "account_id": "acct-1",
+            "provider_id": "codex",
+            "node_id": "node-1",
+            "user_id": "user-alpha",
+        }
+    )
+    args = _reducer_args(db.commands[-1])
+    assert args[0] == "acct-1"
+    assert args[1] == "codex"
+    assert args[2] == "node-1"
+    assert args[-1] == {"some": "user-alpha"}

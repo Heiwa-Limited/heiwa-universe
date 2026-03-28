@@ -188,6 +188,7 @@ class SpacetimeDB:
             float(route.get("confidence", 0.0)),
             route.get("gateway_transport", "websocket"),
             created_at,
+            self._sats_option(route.get("user_id")),
         )
 
     def record_run(self, run_data: dict[str, Any]) -> bool:
@@ -274,6 +275,7 @@ class SpacetimeDB:
             self._sats_option(account_data.get("last_validated_at")),
             self._sats_option(account_data.get("last_error")),
             updated_at,
+            self._sats_option(account_data.get("user_id")),
         )
 
     def list_provider_accounts(
@@ -326,6 +328,7 @@ class SpacetimeDB:
             self._sats_option(mission_data.get("summary")),
             self._sats_option(mission_data.get("error")),
             self._normalize_json_column(mission_data.get("metadata")) or "{}",
+            self._sats_option(mission_data.get("user_id")),
         )
 
     def get_missions(
@@ -398,6 +401,7 @@ class SpacetimeDB:
             int(run_data.get("tokens_output") or 0),
             int(run_data.get("tokens_total") or 0),
             self._sats_option(run_data.get("output_summary")),
+            self._sats_option(run_data.get("user_id")),
         )
 
     def finish_cell_run(self, run_data: dict[str, Any]) -> bool:
@@ -476,6 +480,7 @@ class SpacetimeDB:
             created_at,
             summary_data.get("summary_text", ""),
             self._normalize_json_column(summary_data.get("metadata")) or "{}",
+            self._sats_option(summary_data.get("user_id")),
         )
 
     def list_session_summaries(
@@ -631,6 +636,7 @@ class SpacetimeDB:
             self._sats_option(proposal.get("approved_at")),
             self._sats_option(proposal.get("expires_at")),
             self._sats_option(self._normalize_json_column(proposal.get("eligibility_snapshot"))),
+            self._sats_option(proposal.get("user_id")),
         )
 
     def get_proposals(self, status: str | None = None, limit: int = 50) -> list[dict[str, Any]]:

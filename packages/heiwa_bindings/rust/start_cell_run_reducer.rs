@@ -8,7 +8,6 @@ use spacetimedb_sdk::__codegen::{self as __sdk, __lib, __sats, __ws};
 #[sats(crate = __lib)]
 pub(super) struct StartCellRunArgs {
     pub cell_run_id: String,
-    pub user_id: String,
     pub mission_id: String,
     pub step_id: Option<String>,
     pub status: String,
@@ -23,13 +22,13 @@ pub(super) struct StartCellRunArgs {
     pub tokens_output: i64,
     pub tokens_total: i64,
     pub output_summary: Option<String>,
+    pub user_id: Option<String>,
 }
 
 impl From<StartCellRunArgs> for super::Reducer {
     fn from(args: StartCellRunArgs) -> Self {
         Self::StartCellRun {
             cell_run_id: args.cell_run_id,
-            user_id: args.user_id,
             mission_id: args.mission_id,
             step_id: args.step_id,
             status: args.status,
@@ -44,6 +43,7 @@ impl From<StartCellRunArgs> for super::Reducer {
             tokens_output: args.tokens_output,
             tokens_total: args.tokens_total,
             output_summary: args.output_summary,
+            user_id: args.user_id,
         }
     }
 }
@@ -66,7 +66,6 @@ pub trait start_cell_run {
     fn start_cell_run(
         &self,
         cell_run_id: String,
-        user_id: String,
         mission_id: String,
         step_id: Option<String>,
         status: String,
@@ -81,10 +80,10 @@ pub trait start_cell_run {
         tokens_output: i64,
         tokens_total: i64,
         output_summary: Option<String>,
+        user_id: Option<String>,
     ) -> __sdk::Result<()> {
         self.start_cell_run_then(
             cell_run_id,
-            user_id,
             mission_id,
             step_id,
             status,
@@ -99,6 +98,7 @@ pub trait start_cell_run {
             tokens_output,
             tokens_total,
             output_summary,
+            user_id,
             |_, _| {},
         )
     }
@@ -112,7 +112,6 @@ pub trait start_cell_run {
     fn start_cell_run_then(
         &self,
         cell_run_id: String,
-        user_id: String,
         mission_id: String,
         step_id: Option<String>,
         status: String,
@@ -127,6 +126,7 @@ pub trait start_cell_run {
         tokens_output: i64,
         tokens_total: i64,
         output_summary: Option<String>,
+        user_id: Option<String>,
 
         callback: impl FnOnce(&super::ReducerEventContext, Result<Result<(), String>, __sdk::InternalError>)
             + Send
@@ -138,7 +138,6 @@ impl start_cell_run for super::RemoteReducers {
     fn start_cell_run_then(
         &self,
         cell_run_id: String,
-        user_id: String,
         mission_id: String,
         step_id: Option<String>,
         status: String,
@@ -153,6 +152,7 @@ impl start_cell_run for super::RemoteReducers {
         tokens_output: i64,
         tokens_total: i64,
         output_summary: Option<String>,
+        user_id: Option<String>,
 
         callback: impl FnOnce(&super::ReducerEventContext, Result<Result<(), String>, __sdk::InternalError>)
             + Send
@@ -161,7 +161,6 @@ impl start_cell_run for super::RemoteReducers {
         self.imp.invoke_reducer_with_callback(
             StartCellRunArgs {
                 cell_run_id,
-                user_id,
                 mission_id,
                 step_id,
                 status,
@@ -176,6 +175,7 @@ impl start_cell_run for super::RemoteReducers {
                 tokens_output,
                 tokens_total,
                 output_summary,
+                user_id,
             },
             callback,
         )

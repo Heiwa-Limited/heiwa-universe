@@ -44,6 +44,7 @@ class MissionService:
             None, # summary
             None, # error
             "{}", # metadata_json
+            self.stdb._sats_option(None),
         )
 
     def append_step(

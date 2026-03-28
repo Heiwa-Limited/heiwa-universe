@@ -292,7 +292,6 @@ pub enum Reducer {
     },
     AddProposal {
         proposal_id: String,
-        user_id: String,
         created_at: String,
         status: String,
         fingerprint: Option<String>,
@@ -308,6 +307,7 @@ pub enum Reducer {
         approved_at: Option<String>,
         expires_at: Option<String>,
         eligibility_snapshot: Option<String>,
+        user_id: Option<String>,
     },
     AppendMissionStep {
         step_id: String,
@@ -355,7 +355,6 @@ pub enum Reducer {
     },
     CreateMission {
         mission_id: String,
-        user_id: String,
         created_at: String,
         updated_at: String,
         status: String,
@@ -371,6 +370,7 @@ pub enum Reducer {
         summary: Option<String>,
         error: Option<String>,
         metadata_json: String,
+        user_id: Option<String>,
     },
     CreateTaskDispatch {
         task_id: String,
@@ -557,7 +557,6 @@ pub enum Reducer {
     },
     RecordRouteDecision {
         request_id: String,
-        user_id: String,
         task_id: String,
         envelope_version: String,
         raw_text: String,
@@ -576,6 +575,7 @@ pub enum Reducer {
         confidence: f64,
         gateway_transport: String,
         created_at: String,
+        user_id: Option<String>,
     },
     RecordRun {
         run_id: String,
@@ -655,7 +655,6 @@ pub enum Reducer {
     },
     StartCellRun {
         cell_run_id: String,
-        user_id: String,
         mission_id: String,
         step_id: Option<String>,
         status: String,
@@ -670,6 +669,7 @@ pub enum Reducer {
         tokens_output: i64,
         tokens_total: i64,
         output_summary: Option<String>,
+        user_id: Option<String>,
     },
     StoreProviderCredential {
         credential_id: String,
@@ -770,7 +770,6 @@ pub enum Reducer {
     },
     UpsertProviderAccountStatus {
         account_id: String,
-        user_id: String,
         provider_id: String,
         node_id: String,
         auth_kind: String,
@@ -783,6 +782,7 @@ pub enum Reducer {
         last_validated_at: Option<String>,
         last_error: Option<String>,
         updated_at: String,
+        user_id: Option<String>,
     },
     UpsertRateGroupState {
         rate_group: String,
@@ -794,12 +794,12 @@ pub enum Reducer {
     },
     WriteSessionSummary {
         summary_id: String,
-        user_id: String,
         session_id: String,
         node_id: String,
         created_at: String,
         summary_text: String,
         metadata_json: String,
+        user_id: Option<String>,
     },
 }
 
@@ -899,7 +899,6 @@ impl __sdk::Reducer for Reducer {
             }),
             Reducer::AddProposal {
                 proposal_id,
-                user_id,
                 created_at,
                 status,
                 fingerprint,
@@ -915,9 +914,9 @@ impl __sdk::Reducer for Reducer {
                 approved_at,
                 expires_at,
                 eligibility_snapshot,
+                user_id,
             } => __sats::bsatn::to_vec(&add_proposal_reducer::AddProposalArgs {
                 proposal_id: proposal_id.clone(),
-                user_id: user_id.clone(),
                 created_at: created_at.clone(),
                 status: status.clone(),
                 fingerprint: fingerprint.clone(),
@@ -933,6 +932,7 @@ impl __sdk::Reducer for Reducer {
                 approved_at: approved_at.clone(),
                 expires_at: expires_at.clone(),
                 eligibility_snapshot: eligibility_snapshot.clone(),
+                user_id: user_id.clone(),
             }),
             Reducer::AppendMissionStep {
                 step_id,
@@ -1017,7 +1017,6 @@ impl __sdk::Reducer for Reducer {
             }),
             Reducer::CreateMission {
                 mission_id,
-                user_id,
                 created_at,
                 updated_at,
                 status,
@@ -1033,9 +1032,9 @@ impl __sdk::Reducer for Reducer {
                 summary,
                 error,
                 metadata_json,
+                user_id,
             } => __sats::bsatn::to_vec(&create_mission_reducer::CreateMissionArgs {
                 mission_id: mission_id.clone(),
-                user_id: user_id.clone(),
                 created_at: created_at.clone(),
                 updated_at: updated_at.clone(),
                 status: status.clone(),
@@ -1051,6 +1050,7 @@ impl __sdk::Reducer for Reducer {
                 summary: summary.clone(),
                 error: error.clone(),
                 metadata_json: metadata_json.clone(),
+                user_id: user_id.clone(),
             }),
             Reducer::CreateTaskDispatch {
                 task_id,
@@ -1409,7 +1409,6 @@ impl __sdk::Reducer for Reducer {
             ),
             Reducer::RecordRouteDecision {
                 request_id,
-                user_id,
                 task_id,
                 envelope_version,
                 raw_text,
@@ -1428,9 +1427,9 @@ impl __sdk::Reducer for Reducer {
                 confidence,
                 gateway_transport,
                 created_at,
+                user_id,
             } => __sats::bsatn::to_vec(&record_route_decision_reducer::RecordRouteDecisionArgs {
                 request_id: request_id.clone(),
-                user_id: user_id.clone(),
                 task_id: task_id.clone(),
                 envelope_version: envelope_version.clone(),
                 raw_text: raw_text.clone(),
@@ -1449,6 +1448,7 @@ impl __sdk::Reducer for Reducer {
                 confidence: confidence.clone(),
                 gateway_transport: gateway_transport.clone(),
                 created_at: created_at.clone(),
+                user_id: user_id.clone(),
             }),
             Reducer::RecordRun {
                 run_id,
@@ -1597,7 +1597,6 @@ impl __sdk::Reducer for Reducer {
             }
             Reducer::StartCellRun {
                 cell_run_id,
-                user_id,
                 mission_id,
                 step_id,
                 status,
@@ -1612,9 +1611,9 @@ impl __sdk::Reducer for Reducer {
                 tokens_output,
                 tokens_total,
                 output_summary,
+                user_id,
             } => __sats::bsatn::to_vec(&start_cell_run_reducer::StartCellRunArgs {
                 cell_run_id: cell_run_id.clone(),
-                user_id: user_id.clone(),
                 mission_id: mission_id.clone(),
                 step_id: step_id.clone(),
                 status: status.clone(),
@@ -1629,6 +1628,7 @@ impl __sdk::Reducer for Reducer {
                 tokens_output: tokens_output.clone(),
                 tokens_total: tokens_total.clone(),
                 output_summary: output_summary.clone(),
+                user_id: user_id.clone(),
             }),
             Reducer::StoreProviderCredential {
                 credential_id,
@@ -1819,7 +1819,6 @@ impl __sdk::Reducer for Reducer {
             }),
             Reducer::UpsertProviderAccountStatus {
                 account_id,
-                user_id,
                 provider_id,
                 node_id,
                 auth_kind,
@@ -1832,10 +1831,10 @@ impl __sdk::Reducer for Reducer {
                 last_validated_at,
                 last_error,
                 updated_at,
+                user_id,
             } => __sats::bsatn::to_vec(
                 &upsert_provider_account_status_reducer::UpsertProviderAccountStatusArgs {
                     account_id: account_id.clone(),
-                    user_id: user_id.clone(),
                     provider_id: provider_id.clone(),
                     node_id: node_id.clone(),
                     auth_kind: auth_kind.clone(),
@@ -1848,6 +1847,7 @@ impl __sdk::Reducer for Reducer {
                     last_validated_at: last_validated_at.clone(),
                     last_error: last_error.clone(),
                     updated_at: updated_at.clone(),
+                    user_id: user_id.clone(),
                 },
             ),
             Reducer::UpsertRateGroupState {
@@ -1869,20 +1869,20 @@ impl __sdk::Reducer for Reducer {
             }
             Reducer::WriteSessionSummary {
                 summary_id,
-                user_id,
                 session_id,
                 node_id,
                 created_at,
                 summary_text,
                 metadata_json,
+                user_id,
             } => __sats::bsatn::to_vec(&write_session_summary_reducer::WriteSessionSummaryArgs {
                 summary_id: summary_id.clone(),
-                user_id: user_id.clone(),
                 session_id: session_id.clone(),
                 node_id: node_id.clone(),
                 created_at: created_at.clone(),
                 summary_text: summary_text.clone(),
                 metadata_json: metadata_json.clone(),
+                user_id: user_id.clone(),
             }),
             _ => unreachable!(),
         }

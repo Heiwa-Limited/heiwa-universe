@@ -12,7 +12,6 @@ import {
 
 export default {
   proposalId: __t.string(),
-  userId: __t.string(),
   createdAt: __t.string(),
   status: __t.string(),
   fingerprint: __t.option(__t.string()),
@@ -28,4 +27,5 @@ export default {
   approvedAt: __t.option(__t.string()),
   expiresAt: __t.option(__t.string()),
   eligibilitySnapshot: __t.option(__t.string()),
+  userId: __t.option(__t.string()),
 };

@@ -12,10 +12,10 @@ import {
 
 export default {
   summaryId: __t.string(),
-  userId: __t.string(),
   sessionId: __t.string(),
   nodeId: __t.string(),
   createdAt: __t.string(),
   summaryText: __t.string(),
   metadataJson: __t.string(),
+  userId: __t.option(__t.string()),
 };

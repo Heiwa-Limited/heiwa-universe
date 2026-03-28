@@ -8,7 +8,6 @@ use spacetimedb_sdk::__codegen::{self as __sdk, __lib, __sats, __ws};
 #[sats(crate = __lib)]
 pub(super) struct AddProposalArgs {
     pub proposal_id: String,
-    pub user_id: String,
     pub created_at: String,
     pub status: String,
     pub fingerprint: Option<String>,
@@ -24,13 +23,13 @@ pub(super) struct AddProposalArgs {
     pub approved_at: Option<String>,
     pub expires_at: Option<String>,
     pub eligibility_snapshot: Option<String>,
+    pub user_id: Option<String>,
 }
 
 impl From<AddProposalArgs> for super::Reducer {
     fn from(args: AddProposalArgs) -> Self {
         Self::AddProposal {
             proposal_id: args.proposal_id,
-            user_id: args.user_id,
             created_at: args.created_at,
             status: args.status,
             fingerprint: args.fingerprint,
@@ -46,6 +45,7 @@ impl From<AddProposalArgs> for super::Reducer {
             approved_at: args.approved_at,
             expires_at: args.expires_at,
             eligibility_snapshot: args.eligibility_snapshot,
+            user_id: args.user_id,
         }
     }
 }
@@ -68,7 +68,6 @@ pub trait add_proposal {
     fn add_proposal(
         &self,
         proposal_id: String,
-        user_id: String,
         created_at: String,
         status: String,
         fingerprint: Option<String>,
@@ -84,10 +83,10 @@ pub trait add_proposal {
         approved_at: Option<String>,
         expires_at: Option<String>,
         eligibility_snapshot: Option<String>,
+        user_id: Option<String>,
     ) -> __sdk::Result<()> {
         self.add_proposal_then(
             proposal_id,
-            user_id,
             created_at,
             status,
             fingerprint,
@@ -103,6 +102,7 @@ pub trait add_proposal {
             approved_at,
             expires_at,
             eligibility_snapshot,
+            user_id,
             |_, _| {},
         )
     }
@@ -116,7 +116,6 @@ pub trait add_proposal {
     fn add_proposal_then(
         &self,
         proposal_id: String,
-        user_id: String,
         created_at: String,
         status: String,
         fingerprint: Option<String>,
@@ -132,6 +131,7 @@ pub trait add_proposal {
         approved_at: Option<String>,
         expires_at: Option<String>,
         eligibility_snapshot: Option<String>,
+        user_id: Option<String>,
 
         callback: impl FnOnce(&super::ReducerEventContext, Result<Result<(), String>, __sdk::InternalError>)
             + Send
@@ -143,7 +143,6 @@ impl add_proposal for super::RemoteReducers {
     fn add_proposal_then(
         &self,
         proposal_id: String,
-        user_id: String,
         created_at: String,
         status: String,
         fingerprint: Option<String>,
@@ -159,6 +158,7 @@ impl add_proposal for super::RemoteReducers {
         approved_at: Option<String>,
         expires_at: Option<String>,
         eligibility_snapshot: Option<String>,
+        user_id: Option<String>,
 
         callback: impl FnOnce(&super::ReducerEventContext, Result<Result<(), String>, __sdk::InternalError>)
             + Send
@@ -167,7 +167,6 @@ impl add_proposal for super::RemoteReducers {
         self.imp.invoke_reducer_with_callback(
             AddProposalArgs {
                 proposal_id,
-                user_id,
                 created_at,
                 status,
                 fingerprint,
@@ -183,6 +182,7 @@ impl add_proposal for super::RemoteReducers {
                 approved_at,
                 expires_at,
                 eligibility_snapshot,
+                user_id,
             },
             callback,
         )

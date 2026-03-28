@@ -17,8 +17,6 @@ pub struct OrganizationTask {
 pub struct Proposal {
     #[primary_key]
     pub proposal_id: String,
-    #[index(btree)]
-    pub user_id: String,
     pub created_at: String,
     #[index(btree)]
     pub status: String,
@@ -42,6 +40,9 @@ pub struct Proposal {
     pub approved_at: Option<String>,
     pub expires_at: Option<String>,
     pub eligibility_snapshot: Option<String>,
+    #[default(None::<String>)]
+    #[index(btree)]
+    pub user_id: Option<String>,
 }
 
 #[table(accessor = proposal_consents, public)]
@@ -66,8 +67,6 @@ pub struct CapabilityLease {
     #[index(btree)]
     pub proposal_id: String,
     pub run_id: Option<String>,
-    #[index(btree)]
-    pub parent_lease_id: Option<String>,
     pub holder_kind: String,
     #[index(btree)]
     pub holder_id: String,
@@ -76,10 +75,6 @@ pub struct CapabilityLease {
     pub filesystem_scope_json: String,
     pub secret_scope_json: String,
     pub privilege_tier: String,
-    pub failure_policy: String,
-    #[index(btree)]
-    pub chain_state: String,
-    pub routing_lock_json: Option<String>,
     #[index(btree)]
     pub status: String,
     pub issued_at: String,
@@ -89,6 +84,16 @@ pub struct CapabilityLease {
     pub revoked_at: Option<String>,
     pub revocation_reason: Option<String>,
     pub hub_signature: String,
+    #[default(None::<String>)]
+    #[index(btree)]
+    pub parent_lease_id: Option<String>,
+    #[default(None::<String>)]
+    pub failure_policy: Option<String>,
+    #[default(None::<String>)]
+    #[index(btree)]
+    pub chain_state: Option<String>,
+    #[default(None::<String>)]
+    pub routing_lock_json: Option<String>,
 }
 
 #[table(accessor = approval_requests, public)]
@@ -127,8 +132,6 @@ pub struct RouteDecision {
     #[primary_key]
     pub request_id: String,
     #[index(btree)]
-    pub user_id: String,
-    #[index(btree)]
     pub task_id: String,
     pub envelope_version: String,
     pub raw_text: String,
@@ -148,6 +151,9 @@ pub struct RouteDecision {
     pub gateway_transport: String,
     #[index(btree)]
     pub created_at: String,
+    #[default(None::<String>)]
+    #[index(btree)]
+    pub user_id: Option<String>,
 }
 
 #[table(accessor = runs, public)]
@@ -155,11 +161,7 @@ pub struct RunRecord {
     #[primary_key]
     pub run_id: String,
     #[index(btree)]
-    pub user_id: String,
-    #[index(btree)]
     pub proposal_id: String,
-    #[index(btree)]
-    pub lease_id: String,
     pub started_at: String,
     #[index(btree)]
     pub ended_at: String,
@@ -177,14 +179,18 @@ pub struct RunRecord {
     pub tokens_output: i64,
     pub tokens_total: i64,
     pub cost: f64,
+    #[default(None::<String>)]
+    #[index(btree)]
+    pub user_id: Option<String>,
+    #[default(None::<String>)]
+    #[index(btree)]
+    pub lease_id: Option<String>,
 }
 
 #[table(accessor = provider_accounts, public)]
 pub struct ProviderAccount {
     #[primary_key]
     pub account_id: String,
-    #[index(btree)]
-    pub user_id: String,
     #[index(btree)]
     pub provider_id: String,
     #[index(btree)]
@@ -201,14 +207,15 @@ pub struct ProviderAccount {
     pub last_error: Option<String>,
     #[index(btree)]
     pub updated_at: String,
+    #[default(None::<String>)]
+    #[index(btree)]
+    pub user_id: Option<String>,
 }
 
 #[table(accessor = missions, public)]
 pub struct MissionRecord {
     #[primary_key]
     pub mission_id: String,
-    #[index(btree)]
-    pub user_id: String,
     #[index(btree)]
     pub created_at: String,
     #[index(btree)]
@@ -227,6 +234,9 @@ pub struct MissionRecord {
     pub summary: Option<String>,
     pub error: Option<String>,
     pub metadata_json: String,
+    #[default(None::<String>)]
+    #[index(btree)]
+    pub user_id: Option<String>,
 }
 
 #[table(accessor = mission_steps, public)]
@@ -253,8 +263,6 @@ pub struct CellRunRecord {
     #[primary_key]
     pub cell_run_id: String,
     #[index(btree)]
-    pub user_id: String,
-    #[index(btree)]
     pub mission_id: String,
     pub step_id: Option<String>,
     #[index(btree)]
@@ -271,14 +279,15 @@ pub struct CellRunRecord {
     pub tokens_output: i64,
     pub tokens_total: i64,
     pub output_summary: Option<String>,
+    #[default(None::<String>)]
+    #[index(btree)]
+    pub user_id: Option<String>,
 }
 
 #[table(accessor = session_summaries, public)]
 pub struct SessionSummaryRecord {
     #[primary_key]
     pub summary_id: String,
-    #[index(btree)]
-    pub user_id: String,
     #[index(btree)]
     pub session_id: String,
     #[index(btree)]
@@ -287,16 +296,15 @@ pub struct SessionSummaryRecord {
     pub created_at: String,
     pub summary_text: String,
     pub metadata_json: String,
+    #[default(None::<String>)]
+    #[index(btree)]
+    pub user_id: Option<String>,
 }
 
 #[table(accessor = artifacts, public)]
 pub struct ArtifactRecord {
     #[primary_key]
     pub artifact_id: String,
-    #[index(btree)]
-    pub lease_id: Option<String>,
-    #[index(btree)]
-    pub user_id: String,
     #[index(btree)]
     pub mission_id: String,
     pub cell_run_id: Option<String>,
@@ -308,6 +316,12 @@ pub struct ArtifactRecord {
     pub content_json: String,
     #[index(btree)]
     pub created_at: String,
+    #[default(None::<String>)]
+    #[index(btree)]
+    pub lease_id: Option<String>,
+    #[default(None::<String>)]
+    #[index(btree)]
+    pub user_id: Option<String>,
 }
 
 #[table(accessor = pods, public)]
@@ -529,7 +543,6 @@ pub fn claim_task(ctx: &ReducerContext, task_id: u64, worker_id: String) -> Resu
 pub fn add_proposal(
     ctx: &ReducerContext,
     proposal_id: String,
-    user_id: String,
     created_at: String,
     status: String,
     fingerprint: Option<String>,
@@ -545,6 +558,7 @@ pub fn add_proposal(
     approved_at: Option<String>,
     expires_at: Option<String>,
     eligibility_snapshot: Option<String>,
+    user_id: Option<String>,
 ) -> Result<(), String> {
     if ctx
         .db
@@ -558,7 +572,6 @@ pub fn add_proposal(
 
     ctx.db.proposals().insert(Proposal {
         proposal_id,
-        user_id,
         created_at: if created_at.is_empty() {
             now_string(ctx)
         } else {
@@ -585,6 +598,7 @@ pub fn add_proposal(
         approved_at,
         expires_at,
         eligibility_snapshot,
+        user_id: option_if_not_blank(user_id),
     });
     Ok(())
 }
@@ -1063,7 +1077,6 @@ pub fn issue_capability_lease(
         lease_id: lease_id.clone(),
         proposal_id,
         run_id,
-        parent_lease_id,
         holder_kind,
         holder_id,
         tool_scope_json,
@@ -1071,9 +1084,6 @@ pub fn issue_capability_lease(
         filesystem_scope_json,
         secret_scope_json,
         privilege_tier,
-        failure_policy,
-        chain_state,
-        routing_lock_json,
         status,
         issued_at,
         renewed_at: None,
@@ -1081,6 +1091,10 @@ pub fn issue_capability_lease(
         revoked_at: None,
         revocation_reason: None,
         hub_signature,
+        parent_lease_id: option_if_not_blank(parent_lease_id),
+        failure_policy: some_if_not_blank(failure_policy),
+        chain_state: some_if_not_blank(chain_state),
+        routing_lock_json: option_if_not_blank(routing_lock_json),
     };
 
     if ctx
@@ -1159,16 +1173,21 @@ pub fn revoke_capability_chain(
             continue;
         };
 
-        let failure_policy = lease.failure_policy.trim().to_uppercase();
+        let failure_policy = lease
+            .failure_policy
+            .clone()
+            .unwrap_or_else(|| "ABORT".to_string())
+            .trim()
+            .to_uppercase();
         let cascade_children = failure_policy != "CONTINUE";
         lease.status = "REVOKED".to_string();
         lease.revoked_at = Some(revoked_at.clone());
         lease.revocation_reason = revocation_reason.clone();
-        lease.chain_state = if failure_policy == "COMPENSATE" {
+        lease.chain_state = Some(if failure_policy == "COMPENSATE" {
             "ROLLED_BACK".to_string()
         } else {
             "FAILED".to_string()
-        };
+        });
         ctx.db.capability_leases().lease_id().update(lease);
 
         if !cascade_children {
@@ -1192,7 +1211,6 @@ pub fn revoke_capability_chain(
 pub fn record_route_decision(
     ctx: &ReducerContext,
     request_id: String,
-    user_id: String,
     task_id: String,
     envelope_version: String,
     raw_text: String,
@@ -1211,10 +1229,10 @@ pub fn record_route_decision(
     confidence: f64,
     gateway_transport: String,
     created_at: String,
+    user_id: Option<String>,
 ) -> Result<(), String> {
     let row = RouteDecision {
         request_id: request_id.clone(),
-        user_id,
         task_id,
         envelope_version,
         raw_text,
@@ -1233,6 +1251,7 @@ pub fn record_route_decision(
         confidence,
         gateway_transport,
         created_at,
+        user_id: option_if_not_blank(user_id),
     };
 
     if ctx
@@ -1273,9 +1292,7 @@ pub fn record_run(
 ) -> Result<(), String> {
     let row = RunRecord {
         run_id: run_id.clone(),
-        user_id,
         proposal_id: proposal_id.clone(),
-        lease_id,
         started_at,
         ended_at,
         status: status.clone(),
@@ -1290,6 +1307,8 @@ pub fn record_run(
         tokens_output,
         tokens_total,
         cost,
+        user_id: some_if_not_blank(user_id),
+        lease_id: some_if_not_blank(lease_id),
     };
 
     if ctx.db.runs().run_id().find(run_id).is_some() {
@@ -1316,7 +1335,6 @@ pub fn record_run(
 pub fn upsert_provider_account_status(
     ctx: &ReducerContext,
     account_id: String,
-    user_id: String,
     provider_id: String,
     node_id: String,
     auth_kind: String,
@@ -1329,10 +1347,10 @@ pub fn upsert_provider_account_status(
     last_validated_at: Option<String>,
     last_error: Option<String>,
     updated_at: String,
+    user_id: Option<String>,
 ) -> Result<(), String> {
     let row = ProviderAccount {
         account_id: account_id.clone(),
-        user_id,
         provider_id,
         node_id,
         auth_kind,
@@ -1345,6 +1363,7 @@ pub fn upsert_provider_account_status(
         last_validated_at,
         last_error,
         updated_at,
+        user_id: option_if_not_blank(user_id),
     };
 
     if ctx
@@ -1365,7 +1384,6 @@ pub fn upsert_provider_account_status(
 pub fn create_mission(
     ctx: &ReducerContext,
     mission_id: String,
-    user_id: String,
     created_at: String,
     updated_at: String,
     status: String,
@@ -1381,10 +1399,10 @@ pub fn create_mission(
     summary: Option<String>,
     error: Option<String>,
     metadata_json: String,
+    user_id: Option<String>,
 ) -> Result<(), String> {
     let row = MissionRecord {
         mission_id: mission_id.clone(),
-        user_id,
         created_at,
         updated_at,
         status,
@@ -1400,6 +1418,7 @@ pub fn create_mission(
         summary,
         error,
         metadata_json,
+        user_id: option_if_not_blank(user_id),
     };
 
     if ctx.db.missions().mission_id().find(mission_id).is_some() {
@@ -1460,7 +1479,6 @@ pub fn append_mission_step(
 pub fn start_cell_run(
     ctx: &ReducerContext,
     cell_run_id: String,
-    user_id: String,
     mission_id: String,
     step_id: Option<String>,
     status: String,
@@ -1475,10 +1493,10 @@ pub fn start_cell_run(
     tokens_output: i64,
     tokens_total: i64,
     output_summary: Option<String>,
+    user_id: Option<String>,
 ) -> Result<(), String> {
     let row = CellRunRecord {
         cell_run_id: cell_run_id.clone(),
-        user_id,
         mission_id: mission_id.clone(),
         step_id: step_id.clone(),
         status,
@@ -1494,6 +1512,7 @@ pub fn start_cell_run(
         tokens_output,
         tokens_total,
         output_summary,
+        user_id: option_if_not_blank(user_id),
     };
 
     if ctx.db.cell_runs().cell_run_id().find(cell_run_id).is_some() {
@@ -1586,21 +1605,21 @@ pub fn fail_mission(
 pub fn write_session_summary(
     ctx: &ReducerContext,
     summary_id: String,
-    user_id: String,
     session_id: String,
     node_id: String,
     created_at: String,
     summary_text: String,
     metadata_json: String,
+    user_id: Option<String>,
 ) -> Result<(), String> {
     let row = SessionSummaryRecord {
         summary_id: summary_id.clone(),
-        user_id,
         session_id,
         node_id,
         created_at,
         summary_text,
         metadata_json,
+        user_id: option_if_not_blank(user_id),
     };
 
     if ctx
@@ -1634,8 +1653,6 @@ pub fn register_artifact(
 ) -> Result<(), String> {
     let row = ArtifactRecord {
         artifact_id: artifact_id.clone(),
-        lease_id,
-        user_id,
         mission_id,
         cell_run_id,
         artifact_type,
@@ -1644,6 +1661,8 @@ pub fn register_artifact(
         path,
         content_json,
         created_at,
+        lease_id: option_if_not_blank(lease_id),
+        user_id: some_if_not_blank(user_id),
     };
 
     if ctx.db.artifacts().artifact_id().find(artifact_id).is_some() {
@@ -2026,14 +2045,27 @@ pub struct ExecutionMemory {
     pub id: u64,
     #[index(btree)]
     pub task_dispatch_id: String,
-    #[index(btree)]
-    pub lease_id: String,
     pub model_used: String,
     pub outcome: String,             // "success" | "fail" | "timeout"
     pub duration_ms: u64,
     pub error_summary: Option<String>,
     pub feedback_score: Option<f64>,
     pub created_at: String,
+    #[default(None::<String>)]
+    #[index(btree)]
+    pub lease_id: Option<String>,
+}
+
+fn some_if_not_blank(value: String) -> Option<String> {
+    if value.trim().is_empty() {
+        None
+    } else {
+        Some(value)
+    }
+}
+
+fn option_if_not_blank(value: Option<String>) -> Option<String> {
+    value.and_then(some_if_not_blank)
 }
 
 #[reducer]
@@ -2050,13 +2082,13 @@ pub fn insert_execution_memory(
     ctx.db.execution_memory().insert(ExecutionMemory {
         id: 0,
         task_dispatch_id,
-        lease_id,
         model_used,
         outcome,
         duration_ms,
         error_summary,
         feedback_score,
         created_at: ctx.timestamp.to_string(),
+        lease_id: some_if_not_blank(lease_id),
     });
     Ok(())
 }

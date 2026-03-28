@@ -12,7 +12,6 @@ import {
 
 export default __t.row({
   accountId: __t.string().primaryKey().name("account_id"),
-  userId: __t.string().name("user_id"),
   providerId: __t.string().name("provider_id"),
   nodeId: __t.string().name("node_id"),
   authKind: __t.string().name("auth_kind"),
@@ -25,4 +24,5 @@ export default __t.row({
   lastValidatedAt: __t.option(__t.string()).name("last_validated_at"),
   lastError: __t.option(__t.string()).name("last_error"),
   updatedAt: __t.string().name("updated_at"),
+  userId: __t.option(__t.string()).name("user_id"),
 });

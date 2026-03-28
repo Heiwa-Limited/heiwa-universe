@@ -48,8 +48,6 @@ export type ApprovalRequest = __Infer<typeof ApprovalRequest>;
 
 export const ArtifactRecord = __t.object("ArtifactRecord", {
   artifactId: __t.string(),
-  leaseId: __t.option(__t.string()),
-  userId: __t.string(),
   missionId: __t.string(),
   cellRunId: __t.option(__t.string()),
   artifactType: __t.string(),
@@ -58,6 +56,8 @@ export const ArtifactRecord = __t.object("ArtifactRecord", {
   path: __t.option(__t.string()),
   contentJson: __t.string(),
   createdAt: __t.string(),
+  leaseId: __t.option(__t.string()),
+  userId: __t.option(__t.string()),
 });
 export type ArtifactRecord = __Infer<typeof ArtifactRecord>;
 
@@ -81,7 +81,6 @@ export const CapabilityLease = __t.object("CapabilityLease", {
   leaseId: __t.string(),
   proposalId: __t.string(),
   runId: __t.option(__t.string()),
-  parentLeaseId: __t.option(__t.string()),
   holderKind: __t.string(),
   holderId: __t.string(),
   toolScopeJson: __t.string(),
@@ -89,9 +88,6 @@ export const CapabilityLease = __t.object("CapabilityLease", {
   filesystemScopeJson: __t.string(),
   secretScopeJson: __t.string(),
   privilegeTier: __t.string(),
-  failurePolicy: __t.string(),
-  chainState: __t.string(),
-  routingLockJson: __t.option(__t.string()),
   status: __t.string(),
   issuedAt: __t.string(),
   renewedAt: __t.option(__t.string()),
@@ -99,6 +95,10 @@ export const CapabilityLease = __t.object("CapabilityLease", {
   revokedAt: __t.option(__t.string()),
   revocationReason: __t.option(__t.string()),
   hubSignature: __t.string(),
+  parentLeaseId: __t.option(__t.string()),
+  failurePolicy: __t.option(__t.string()),
+  chainState: __t.option(__t.string()),
+  routingLockJson: __t.option(__t.string()),
 });
 export type CapabilityLease = __Infer<typeof CapabilityLease>;
 
@@ -147,7 +147,6 @@ export type CaptainSummary = __Infer<typeof CaptainSummary>;
 
 export const CellRunRecord = __t.object("CellRunRecord", {
   cellRunId: __t.string(),
-  userId: __t.string(),
   missionId: __t.string(),
   stepId: __t.option(__t.string()),
   status: __t.string(),
@@ -163,6 +162,7 @@ export const CellRunRecord = __t.object("CellRunRecord", {
   tokensOutput: __t.i64(),
   tokensTotal: __t.i64(),
   outputSummary: __t.option(__t.string()),
+  userId: __t.option(__t.string()),
 });
 export type CellRunRecord = __Infer<typeof CellRunRecord>;
 
@@ -194,13 +194,13 @@ export type DiscordUser = __Infer<typeof DiscordUser>;
 export const ExecutionMemory = __t.object("ExecutionMemory", {
   id: __t.u64(),
   taskDispatchId: __t.string(),
-  leaseId: __t.string(),
   modelUsed: __t.string(),
   outcome: __t.string(),
   durationMs: __t.u64(),
   errorSummary: __t.option(__t.string()),
   feedbackScore: __t.option(__t.f64()),
   createdAt: __t.string(),
+  leaseId: __t.option(__t.string()),
 });
 export type ExecutionMemory = __Infer<typeof ExecutionMemory>;
 
@@ -225,7 +225,6 @@ export type LivenessState = __Infer<typeof LivenessState>;
 
 export const MissionRecord = __t.object("MissionRecord", {
   missionId: __t.string(),
-  userId: __t.string(),
   createdAt: __t.string(),
   updatedAt: __t.string(),
   status: __t.string(),
@@ -241,6 +240,7 @@ export const MissionRecord = __t.object("MissionRecord", {
   summary: __t.option(__t.string()),
   error: __t.option(__t.string()),
   metadataJson: __t.string(),
+  userId: __t.option(__t.string()),
 });
 export type MissionRecord = __Infer<typeof MissionRecord>;
 
@@ -345,7 +345,6 @@ export type Pod = __Infer<typeof Pod>;
 
 export const Proposal = __t.object("Proposal", {
   proposalId: __t.string(),
-  userId: __t.string(),
   createdAt: __t.string(),
   status: __t.string(),
   fingerprint: __t.option(__t.string()),
@@ -368,6 +367,7 @@ export const Proposal = __t.object("Proposal", {
   approvedAt: __t.option(__t.string()),
   expiresAt: __t.option(__t.string()),
   eligibilitySnapshot: __t.option(__t.string()),
+  userId: __t.option(__t.string()),
 });
 export type Proposal = __Infer<typeof Proposal>;
 
@@ -386,7 +386,6 @@ export type ProposalConsent = __Infer<typeof ProposalConsent>;
 
 export const ProviderAccount = __t.object("ProviderAccount", {
   accountId: __t.string(),
-  userId: __t.string(),
   providerId: __t.string(),
   nodeId: __t.string(),
   authKind: __t.string(),
@@ -399,6 +398,7 @@ export const ProviderAccount = __t.object("ProviderAccount", {
   lastValidatedAt: __t.option(__t.string()),
   lastError: __t.option(__t.string()),
   updatedAt: __t.string(),
+  userId: __t.option(__t.string()),
 });
 export type ProviderAccount = __Infer<typeof ProviderAccount>;
 
@@ -431,7 +431,6 @@ export type RateGroupState = __Infer<typeof RateGroupState>;
 
 export const RouteDecision = __t.object("RouteDecision", {
   requestId: __t.string(),
-  userId: __t.string(),
   taskId: __t.string(),
   envelopeVersion: __t.string(),
   rawText: __t.string(),
@@ -450,14 +449,13 @@ export const RouteDecision = __t.object("RouteDecision", {
   confidence: __t.f64(),
   gatewayTransport: __t.string(),
   createdAt: __t.string(),
+  userId: __t.option(__t.string()),
 });
 export type RouteDecision = __Infer<typeof RouteDecision>;
 
 export const RunRecord = __t.object("RunRecord", {
   runId: __t.string(),
-  userId: __t.string(),
   proposalId: __t.string(),
-  leaseId: __t.string(),
   startedAt: __t.string(),
   endedAt: __t.string(),
   status: __t.string(),
@@ -472,17 +470,19 @@ export const RunRecord = __t.object("RunRecord", {
   tokensOutput: __t.i64(),
   tokensTotal: __t.i64(),
   cost: __t.f64(),
+  userId: __t.option(__t.string()),
+  leaseId: __t.option(__t.string()),
 });
 export type RunRecord = __Infer<typeof RunRecord>;
 
 export const SessionSummaryRecord = __t.object("SessionSummaryRecord", {
   summaryId: __t.string(),
-  userId: __t.string(),
   sessionId: __t.string(),
   nodeId: __t.string(),
   createdAt: __t.string(),
   summaryText: __t.string(),
   metadataJson: __t.string(),
+  userId: __t.option(__t.string()),
 });
 export type SessionSummaryRecord = __Infer<typeof SessionSummaryRecord>;
 

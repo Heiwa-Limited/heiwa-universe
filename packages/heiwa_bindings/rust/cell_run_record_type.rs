@@ -8,7 +8,6 @@ use spacetimedb_sdk::__codegen::{self as __sdk, __lib, __sats, __ws};
 #[sats(crate = __lib)]
 pub struct CellRunRecord {
     pub cell_run_id: String,
-    pub user_id: String,
     pub mission_id: String,
     pub step_id: Option<String>,
     pub status: String,
@@ -24,6 +23,7 @@ pub struct CellRunRecord {
     pub tokens_output: i64,
     pub tokens_total: i64,
     pub output_summary: Option<String>,
+    pub user_id: Option<String>,
 }
 
 impl __sdk::InModule for CellRunRecord {
@@ -35,7 +35,6 @@ impl __sdk::InModule for CellRunRecord {
 /// Provides typed access to columns for query building.
 pub struct CellRunRecordCols {
     pub cell_run_id: __sdk::__query_builder::Col<CellRunRecord, String>,
-    pub user_id: __sdk::__query_builder::Col<CellRunRecord, String>,
     pub mission_id: __sdk::__query_builder::Col<CellRunRecord, String>,
     pub step_id: __sdk::__query_builder::Col<CellRunRecord, Option<String>>,
     pub status: __sdk::__query_builder::Col<CellRunRecord, String>,
@@ -51,6 +50,7 @@ pub struct CellRunRecordCols {
     pub tokens_output: __sdk::__query_builder::Col<CellRunRecord, i64>,
     pub tokens_total: __sdk::__query_builder::Col<CellRunRecord, i64>,
     pub output_summary: __sdk::__query_builder::Col<CellRunRecord, Option<String>>,
+    pub user_id: __sdk::__query_builder::Col<CellRunRecord, Option<String>>,
 }
 
 impl __sdk::__query_builder::HasCols for CellRunRecord {
@@ -58,7 +58,6 @@ impl __sdk::__query_builder::HasCols for CellRunRecord {
     fn cols(table_name: &'static str) -> Self::Cols {
         CellRunRecordCols {
             cell_run_id: __sdk::__query_builder::Col::new(table_name, "cell_run_id"),
-            user_id: __sdk::__query_builder::Col::new(table_name, "user_id"),
             mission_id: __sdk::__query_builder::Col::new(table_name, "mission_id"),
             step_id: __sdk::__query_builder::Col::new(table_name, "step_id"),
             status: __sdk::__query_builder::Col::new(table_name, "status"),
@@ -74,6 +73,7 @@ impl __sdk::__query_builder::HasCols for CellRunRecord {
             tokens_output: __sdk::__query_builder::Col::new(table_name, "tokens_output"),
             tokens_total: __sdk::__query_builder::Col::new(table_name, "tokens_total"),
             output_summary: __sdk::__query_builder::Col::new(table_name, "output_summary"),
+            user_id: __sdk::__query_builder::Col::new(table_name, "user_id"),
         }
     }
 }
@@ -85,7 +85,7 @@ pub struct CellRunRecordIxCols {
     pub cell_run_id: __sdk::__query_builder::IxCol<CellRunRecord, String>,
     pub mission_id: __sdk::__query_builder::IxCol<CellRunRecord, String>,
     pub status: __sdk::__query_builder::IxCol<CellRunRecord, String>,
-    pub user_id: __sdk::__query_builder::IxCol<CellRunRecord, String>,
+    pub user_id: __sdk::__query_builder::IxCol<CellRunRecord, Option<String>>,
 }
 
 impl __sdk::__query_builder::HasIxCols for CellRunRecord {

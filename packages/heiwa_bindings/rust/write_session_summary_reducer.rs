@@ -8,24 +8,24 @@ use spacetimedb_sdk::__codegen::{self as __sdk, __lib, __sats, __ws};
 #[sats(crate = __lib)]
 pub(super) struct WriteSessionSummaryArgs {
     pub summary_id: String,
-    pub user_id: String,
     pub session_id: String,
     pub node_id: String,
     pub created_at: String,
     pub summary_text: String,
     pub metadata_json: String,
+    pub user_id: Option<String>,
 }
 
 impl From<WriteSessionSummaryArgs> for super::Reducer {
     fn from(args: WriteSessionSummaryArgs) -> Self {
         Self::WriteSessionSummary {
             summary_id: args.summary_id,
-            user_id: args.user_id,
             session_id: args.session_id,
             node_id: args.node_id,
             created_at: args.created_at,
             summary_text: args.summary_text,
             metadata_json: args.metadata_json,
+            user_id: args.user_id,
         }
     }
 }
@@ -48,21 +48,21 @@ pub trait write_session_summary {
     fn write_session_summary(
         &self,
         summary_id: String,
-        user_id: String,
         session_id: String,
         node_id: String,
         created_at: String,
         summary_text: String,
         metadata_json: String,
+        user_id: Option<String>,
     ) -> __sdk::Result<()> {
         self.write_session_summary_then(
             summary_id,
-            user_id,
             session_id,
             node_id,
             created_at,
             summary_text,
             metadata_json,
+            user_id,
             |_, _| {},
         )
     }
@@ -76,12 +76,12 @@ pub trait write_session_summary {
     fn write_session_summary_then(
         &self,
         summary_id: String,
-        user_id: String,
         session_id: String,
         node_id: String,
         created_at: String,
         summary_text: String,
         metadata_json: String,
+        user_id: Option<String>,
 
         callback: impl FnOnce(&super::ReducerEventContext, Result<Result<(), String>, __sdk::InternalError>)
             + Send
@@ -93,12 +93,12 @@ impl write_session_summary for super::RemoteReducers {
     fn write_session_summary_then(
         &self,
         summary_id: String,
-        user_id: String,
         session_id: String,
         node_id: String,
         created_at: String,
         summary_text: String,
         metadata_json: String,
+        user_id: Option<String>,
 
         callback: impl FnOnce(&super::ReducerEventContext, Result<Result<(), String>, __sdk::InternalError>)
             + Send
@@ -107,12 +107,12 @@ impl write_session_summary for super::RemoteReducers {
         self.imp.invoke_reducer_with_callback(
             WriteSessionSummaryArgs {
                 summary_id,
-                user_id,
                 session_id,
                 node_id,
                 created_at,
                 summary_text,
                 metadata_json,
+                user_id,
             },
             callback,
         )

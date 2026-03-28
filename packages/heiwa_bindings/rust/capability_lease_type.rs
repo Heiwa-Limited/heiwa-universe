@@ -10,7 +10,6 @@ pub struct CapabilityLease {
     pub lease_id: String,
     pub proposal_id: String,
     pub run_id: Option<String>,
-    pub parent_lease_id: Option<String>,
     pub holder_kind: String,
     pub holder_id: String,
     pub tool_scope_json: String,
@@ -18,9 +17,6 @@ pub struct CapabilityLease {
     pub filesystem_scope_json: String,
     pub secret_scope_json: String,
     pub privilege_tier: String,
-    pub failure_policy: String,
-    pub chain_state: String,
-    pub routing_lock_json: Option<String>,
     pub status: String,
     pub issued_at: String,
     pub renewed_at: Option<String>,
@@ -28,6 +24,10 @@ pub struct CapabilityLease {
     pub revoked_at: Option<String>,
     pub revocation_reason: Option<String>,
     pub hub_signature: String,
+    pub parent_lease_id: Option<String>,
+    pub failure_policy: Option<String>,
+    pub chain_state: Option<String>,
+    pub routing_lock_json: Option<String>,
 }
 
 impl __sdk::InModule for CapabilityLease {
@@ -41,7 +41,6 @@ pub struct CapabilityLeaseCols {
     pub lease_id: __sdk::__query_builder::Col<CapabilityLease, String>,
     pub proposal_id: __sdk::__query_builder::Col<CapabilityLease, String>,
     pub run_id: __sdk::__query_builder::Col<CapabilityLease, Option<String>>,
-    pub parent_lease_id: __sdk::__query_builder::Col<CapabilityLease, Option<String>>,
     pub holder_kind: __sdk::__query_builder::Col<CapabilityLease, String>,
     pub holder_id: __sdk::__query_builder::Col<CapabilityLease, String>,
     pub tool_scope_json: __sdk::__query_builder::Col<CapabilityLease, String>,
@@ -49,9 +48,6 @@ pub struct CapabilityLeaseCols {
     pub filesystem_scope_json: __sdk::__query_builder::Col<CapabilityLease, String>,
     pub secret_scope_json: __sdk::__query_builder::Col<CapabilityLease, String>,
     pub privilege_tier: __sdk::__query_builder::Col<CapabilityLease, String>,
-    pub failure_policy: __sdk::__query_builder::Col<CapabilityLease, String>,
-    pub chain_state: __sdk::__query_builder::Col<CapabilityLease, String>,
-    pub routing_lock_json: __sdk::__query_builder::Col<CapabilityLease, Option<String>>,
     pub status: __sdk::__query_builder::Col<CapabilityLease, String>,
     pub issued_at: __sdk::__query_builder::Col<CapabilityLease, String>,
     pub renewed_at: __sdk::__query_builder::Col<CapabilityLease, Option<String>>,
@@ -59,6 +55,10 @@ pub struct CapabilityLeaseCols {
     pub revoked_at: __sdk::__query_builder::Col<CapabilityLease, Option<String>>,
     pub revocation_reason: __sdk::__query_builder::Col<CapabilityLease, Option<String>>,
     pub hub_signature: __sdk::__query_builder::Col<CapabilityLease, String>,
+    pub parent_lease_id: __sdk::__query_builder::Col<CapabilityLease, Option<String>>,
+    pub failure_policy: __sdk::__query_builder::Col<CapabilityLease, Option<String>>,
+    pub chain_state: __sdk::__query_builder::Col<CapabilityLease, Option<String>>,
+    pub routing_lock_json: __sdk::__query_builder::Col<CapabilityLease, Option<String>>,
 }
 
 impl __sdk::__query_builder::HasCols for CapabilityLease {
@@ -68,7 +68,6 @@ impl __sdk::__query_builder::HasCols for CapabilityLease {
             lease_id: __sdk::__query_builder::Col::new(table_name, "lease_id"),
             proposal_id: __sdk::__query_builder::Col::new(table_name, "proposal_id"),
             run_id: __sdk::__query_builder::Col::new(table_name, "run_id"),
-            parent_lease_id: __sdk::__query_builder::Col::new(table_name, "parent_lease_id"),
             holder_kind: __sdk::__query_builder::Col::new(table_name, "holder_kind"),
             holder_id: __sdk::__query_builder::Col::new(table_name, "holder_id"),
             tool_scope_json: __sdk::__query_builder::Col::new(table_name, "tool_scope_json"),
@@ -79,9 +78,6 @@ impl __sdk::__query_builder::HasCols for CapabilityLease {
             ),
             secret_scope_json: __sdk::__query_builder::Col::new(table_name, "secret_scope_json"),
             privilege_tier: __sdk::__query_builder::Col::new(table_name, "privilege_tier"),
-            failure_policy: __sdk::__query_builder::Col::new(table_name, "failure_policy"),
-            chain_state: __sdk::__query_builder::Col::new(table_name, "chain_state"),
-            routing_lock_json: __sdk::__query_builder::Col::new(table_name, "routing_lock_json"),
             status: __sdk::__query_builder::Col::new(table_name, "status"),
             issued_at: __sdk::__query_builder::Col::new(table_name, "issued_at"),
             renewed_at: __sdk::__query_builder::Col::new(table_name, "renewed_at"),
@@ -89,6 +85,10 @@ impl __sdk::__query_builder::HasCols for CapabilityLease {
             revoked_at: __sdk::__query_builder::Col::new(table_name, "revoked_at"),
             revocation_reason: __sdk::__query_builder::Col::new(table_name, "revocation_reason"),
             hub_signature: __sdk::__query_builder::Col::new(table_name, "hub_signature"),
+            parent_lease_id: __sdk::__query_builder::Col::new(table_name, "parent_lease_id"),
+            failure_policy: __sdk::__query_builder::Col::new(table_name, "failure_policy"),
+            chain_state: __sdk::__query_builder::Col::new(table_name, "chain_state"),
+            routing_lock_json: __sdk::__query_builder::Col::new(table_name, "routing_lock_json"),
         }
     }
 }
@@ -97,7 +97,7 @@ impl __sdk::__query_builder::HasCols for CapabilityLease {
 ///
 /// Provides typed access to indexed columns for query building.
 pub struct CapabilityLeaseIxCols {
-    pub chain_state: __sdk::__query_builder::IxCol<CapabilityLease, String>,
+    pub chain_state: __sdk::__query_builder::IxCol<CapabilityLease, Option<String>>,
     pub expires_at: __sdk::__query_builder::IxCol<CapabilityLease, String>,
     pub holder_id: __sdk::__query_builder::IxCol<CapabilityLease, String>,
     pub lease_id: __sdk::__query_builder::IxCol<CapabilityLease, String>,

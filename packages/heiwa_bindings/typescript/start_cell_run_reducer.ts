@@ -12,7 +12,6 @@ import {
 
 export default {
   cellRunId: __t.string(),
-  userId: __t.string(),
   missionId: __t.string(),
   stepId: __t.option(__t.string()),
   status: __t.string(),
@@ -27,4 +26,5 @@ export default {
   tokensOutput: __t.i64(),
   tokensTotal: __t.i64(),
   outputSummary: __t.option(__t.string()),
+  userId: __t.option(__t.string()),
 };

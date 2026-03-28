@@ -12,8 +12,6 @@ import {
 
 export default __t.row({
   artifactId: __t.string().primaryKey().name("artifact_id"),
-  leaseId: __t.option(__t.string()).name("lease_id"),
-  userId: __t.string().name("user_id"),
   missionId: __t.string().name("mission_id"),
   cellRunId: __t.option(__t.string()).name("cell_run_id"),
   artifactType: __t.string().name("artifact_type"),
@@ -22,4 +20,6 @@ export default __t.row({
   path: __t.option(__t.string()),
   contentJson: __t.string().name("content_json"),
   createdAt: __t.string().name("created_at"),
+  leaseId: __t.option(__t.string()).name("lease_id"),
+  userId: __t.option(__t.string()).name("user_id"),
 });

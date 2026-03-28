@@ -12,7 +12,6 @@ import {
 
 export default {
   missionId: __t.string(),
-  userId: __t.string(),
   createdAt: __t.string(),
   updatedAt: __t.string(),
   status: __t.string(),
@@ -28,4 +27,5 @@ export default {
   summary: __t.option(__t.string()),
   error: __t.option(__t.string()),
   metadataJson: __t.string(),
+  userId: __t.option(__t.string()),
 };

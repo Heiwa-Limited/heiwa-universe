@@ -8,7 +8,6 @@ use spacetimedb_sdk::__codegen::{self as __sdk, __lib, __sats, __ws};
 #[sats(crate = __lib)]
 pub struct Proposal {
     pub proposal_id: String,
-    pub user_id: String,
     pub created_at: String,
     pub status: String,
     pub fingerprint: Option<String>,
@@ -31,6 +30,7 @@ pub struct Proposal {
     pub approved_at: Option<String>,
     pub expires_at: Option<String>,
     pub eligibility_snapshot: Option<String>,
+    pub user_id: Option<String>,
 }
 
 impl __sdk::InModule for Proposal {
@@ -42,7 +42,6 @@ impl __sdk::InModule for Proposal {
 /// Provides typed access to columns for query building.
 pub struct ProposalCols {
     pub proposal_id: __sdk::__query_builder::Col<Proposal, String>,
-    pub user_id: __sdk::__query_builder::Col<Proposal, String>,
     pub created_at: __sdk::__query_builder::Col<Proposal, String>,
     pub status: __sdk::__query_builder::Col<Proposal, String>,
     pub fingerprint: __sdk::__query_builder::Col<Proposal, Option<String>>,
@@ -65,6 +64,7 @@ pub struct ProposalCols {
     pub approved_at: __sdk::__query_builder::Col<Proposal, Option<String>>,
     pub expires_at: __sdk::__query_builder::Col<Proposal, Option<String>>,
     pub eligibility_snapshot: __sdk::__query_builder::Col<Proposal, Option<String>>,
+    pub user_id: __sdk::__query_builder::Col<Proposal, Option<String>>,
 }
 
 impl __sdk::__query_builder::HasCols for Proposal {
@@ -72,7 +72,6 @@ impl __sdk::__query_builder::HasCols for Proposal {
     fn cols(table_name: &'static str) -> Self::Cols {
         ProposalCols {
             proposal_id: __sdk::__query_builder::Col::new(table_name, "proposal_id"),
-            user_id: __sdk::__query_builder::Col::new(table_name, "user_id"),
             created_at: __sdk::__query_builder::Col::new(table_name, "created_at"),
             status: __sdk::__query_builder::Col::new(table_name, "status"),
             fingerprint: __sdk::__query_builder::Col::new(table_name, "fingerprint"),
@@ -113,6 +112,7 @@ impl __sdk::__query_builder::HasCols for Proposal {
                 table_name,
                 "eligibility_snapshot",
             ),
+            user_id: __sdk::__query_builder::Col::new(table_name, "user_id"),
         }
     }
 }
@@ -123,7 +123,7 @@ impl __sdk::__query_builder::HasCols for Proposal {
 pub struct ProposalIxCols {
     pub proposal_id: __sdk::__query_builder::IxCol<Proposal, String>,
     pub status: __sdk::__query_builder::IxCol<Proposal, String>,
-    pub user_id: __sdk::__query_builder::IxCol<Proposal, String>,
+    pub user_id: __sdk::__query_builder::IxCol<Proposal, Option<String>>,
 }
 
 impl __sdk::__query_builder::HasIxCols for Proposal {

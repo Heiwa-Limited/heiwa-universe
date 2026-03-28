@@ -12,10 +12,10 @@ import {
 
 export default __t.row({
   summaryId: __t.string().primaryKey().name("summary_id"),
-  userId: __t.string().name("user_id"),
   sessionId: __t.string().name("session_id"),
   nodeId: __t.string().name("node_id"),
   createdAt: __t.string().name("created_at"),
   summaryText: __t.string().name("summary_text"),
   metadataJson: __t.string().name("metadata_json"),
+  userId: __t.option(__t.string()).name("user_id"),
 });

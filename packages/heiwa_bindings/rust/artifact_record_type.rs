@@ -8,8 +8,6 @@ use spacetimedb_sdk::__codegen::{self as __sdk, __lib, __sats, __ws};
 #[sats(crate = __lib)]
 pub struct ArtifactRecord {
     pub artifact_id: String,
-    pub lease_id: Option<String>,
-    pub user_id: String,
     pub mission_id: String,
     pub cell_run_id: Option<String>,
     pub artifact_type: String,
@@ -18,6 +16,8 @@ pub struct ArtifactRecord {
     pub path: Option<String>,
     pub content_json: String,
     pub created_at: String,
+    pub lease_id: Option<String>,
+    pub user_id: Option<String>,
 }
 
 impl __sdk::InModule for ArtifactRecord {
@@ -29,8 +29,6 @@ impl __sdk::InModule for ArtifactRecord {
 /// Provides typed access to columns for query building.
 pub struct ArtifactRecordCols {
     pub artifact_id: __sdk::__query_builder::Col<ArtifactRecord, String>,
-    pub lease_id: __sdk::__query_builder::Col<ArtifactRecord, Option<String>>,
-    pub user_id: __sdk::__query_builder::Col<ArtifactRecord, String>,
     pub mission_id: __sdk::__query_builder::Col<ArtifactRecord, String>,
     pub cell_run_id: __sdk::__query_builder::Col<ArtifactRecord, Option<String>>,
     pub artifact_type: __sdk::__query_builder::Col<ArtifactRecord, String>,
@@ -39,6 +37,8 @@ pub struct ArtifactRecordCols {
     pub path: __sdk::__query_builder::Col<ArtifactRecord, Option<String>>,
     pub content_json: __sdk::__query_builder::Col<ArtifactRecord, String>,
     pub created_at: __sdk::__query_builder::Col<ArtifactRecord, String>,
+    pub lease_id: __sdk::__query_builder::Col<ArtifactRecord, Option<String>>,
+    pub user_id: __sdk::__query_builder::Col<ArtifactRecord, Option<String>>,
 }
 
 impl __sdk::__query_builder::HasCols for ArtifactRecord {
@@ -46,8 +46,6 @@ impl __sdk::__query_builder::HasCols for ArtifactRecord {
     fn cols(table_name: &'static str) -> Self::Cols {
         ArtifactRecordCols {
             artifact_id: __sdk::__query_builder::Col::new(table_name, "artifact_id"),
-            lease_id: __sdk::__query_builder::Col::new(table_name, "lease_id"),
-            user_id: __sdk::__query_builder::Col::new(table_name, "user_id"),
             mission_id: __sdk::__query_builder::Col::new(table_name, "mission_id"),
             cell_run_id: __sdk::__query_builder::Col::new(table_name, "cell_run_id"),
             artifact_type: __sdk::__query_builder::Col::new(table_name, "artifact_type"),
@@ -56,6 +54,8 @@ impl __sdk::__query_builder::HasCols for ArtifactRecord {
             path: __sdk::__query_builder::Col::new(table_name, "path"),
             content_json: __sdk::__query_builder::Col::new(table_name, "content_json"),
             created_at: __sdk::__query_builder::Col::new(table_name, "created_at"),
+            lease_id: __sdk::__query_builder::Col::new(table_name, "lease_id"),
+            user_id: __sdk::__query_builder::Col::new(table_name, "user_id"),
         }
     }
 }
@@ -69,7 +69,7 @@ pub struct ArtifactRecordIxCols {
     pub created_at: __sdk::__query_builder::IxCol<ArtifactRecord, String>,
     pub lease_id: __sdk::__query_builder::IxCol<ArtifactRecord, Option<String>>,
     pub mission_id: __sdk::__query_builder::IxCol<ArtifactRecord, String>,
-    pub user_id: __sdk::__query_builder::IxCol<ArtifactRecord, String>,
+    pub user_id: __sdk::__query_builder::IxCol<ArtifactRecord, Option<String>>,
 }
 
 impl __sdk::__query_builder::HasIxCols for ArtifactRecord {

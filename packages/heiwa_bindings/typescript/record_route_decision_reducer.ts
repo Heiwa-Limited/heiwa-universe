@@ -12,7 +12,6 @@ import {
 
 export default {
   requestId: __t.string(),
-  userId: __t.string(),
   taskId: __t.string(),
   envelopeVersion: __t.string(),
   rawText: __t.string(),
@@ -31,4 +30,5 @@ export default {
   confidence: __t.f64(),
   gatewayTransport: __t.string(),
   createdAt: __t.string(),
+  userId: __t.option(__t.string()),
 };

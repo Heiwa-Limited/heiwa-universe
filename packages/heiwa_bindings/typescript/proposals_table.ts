@@ -12,7 +12,6 @@ import {
 
 export default __t.row({
   proposalId: __t.string().primaryKey().name("proposal_id"),
-  userId: __t.string().name("user_id"),
   createdAt: __t.string().name("created_at"),
   status: __t.string(),
   fingerprint: __t.option(__t.string()),
@@ -35,4 +34,5 @@ export default __t.row({
   approvedAt: __t.option(__t.string()).name("approved_at"),
   expiresAt: __t.option(__t.string()).name("expires_at"),
   eligibilitySnapshot: __t.option(__t.string()).name("eligibility_snapshot"),
+  userId: __t.option(__t.string()).name("user_id"),
 });

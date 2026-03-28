@@ -8,7 +8,6 @@ use spacetimedb_sdk::__codegen::{self as __sdk, __lib, __sats, __ws};
 #[sats(crate = __lib)]
 pub(super) struct UpsertProviderAccountStatusArgs {
     pub account_id: String,
-    pub user_id: String,
     pub provider_id: String,
     pub node_id: String,
     pub auth_kind: String,
@@ -21,13 +20,13 @@ pub(super) struct UpsertProviderAccountStatusArgs {
     pub last_validated_at: Option<String>,
     pub last_error: Option<String>,
     pub updated_at: String,
+    pub user_id: Option<String>,
 }
 
 impl From<UpsertProviderAccountStatusArgs> for super::Reducer {
     fn from(args: UpsertProviderAccountStatusArgs) -> Self {
         Self::UpsertProviderAccountStatus {
             account_id: args.account_id,
-            user_id: args.user_id,
             provider_id: args.provider_id,
             node_id: args.node_id,
             auth_kind: args.auth_kind,
@@ -40,6 +39,7 @@ impl From<UpsertProviderAccountStatusArgs> for super::Reducer {
             last_validated_at: args.last_validated_at,
             last_error: args.last_error,
             updated_at: args.updated_at,
+            user_id: args.user_id,
         }
     }
 }
@@ -62,7 +62,6 @@ pub trait upsert_provider_account_status {
     fn upsert_provider_account_status(
         &self,
         account_id: String,
-        user_id: String,
         provider_id: String,
         node_id: String,
         auth_kind: String,
@@ -75,10 +74,10 @@ pub trait upsert_provider_account_status {
         last_validated_at: Option<String>,
         last_error: Option<String>,
         updated_at: String,
+        user_id: Option<String>,
     ) -> __sdk::Result<()> {
         self.upsert_provider_account_status_then(
             account_id,
-            user_id,
             provider_id,
             node_id,
             auth_kind,
@@ -91,6 +90,7 @@ pub trait upsert_provider_account_status {
             last_validated_at,
             last_error,
             updated_at,
+            user_id,
             |_, _| {},
         )
     }
@@ -104,7 +104,6 @@ pub trait upsert_provider_account_status {
     fn upsert_provider_account_status_then(
         &self,
         account_id: String,
-        user_id: String,
         provider_id: String,
         node_id: String,
         auth_kind: String,
@@ -117,6 +116,7 @@ pub trait upsert_provider_account_status {
         last_validated_at: Option<String>,
         last_error: Option<String>,
         updated_at: String,
+        user_id: Option<String>,
 
         callback: impl FnOnce(&super::ReducerEventContext, Result<Result<(), String>, __sdk::InternalError>)
             + Send
@@ -128,7 +128,6 @@ impl upsert_provider_account_status for super::RemoteReducers {
     fn upsert_provider_account_status_then(
         &self,
         account_id: String,
-        user_id: String,
         provider_id: String,
         node_id: String,
         auth_kind: String,
@@ -141,6 +140,7 @@ impl upsert_provider_account_status for super::RemoteReducers {
         last_validated_at: Option<String>,
         last_error: Option<String>,
         updated_at: String,
+        user_id: Option<String>,
 
         callback: impl FnOnce(&super::ReducerEventContext, Result<Result<(), String>, __sdk::InternalError>)
             + Send
@@ -149,7 +149,6 @@ impl upsert_provider_account_status for super::RemoteReducers {
         self.imp.invoke_reducer_with_callback(
             UpsertProviderAccountStatusArgs {
                 account_id,
-                user_id,
                 provider_id,
                 node_id,
                 auth_kind,
@@ -162,6 +161,7 @@ impl upsert_provider_account_status for super::RemoteReducers {
                 last_validated_at,
                 last_error,
                 updated_at,
+                user_id,
             },
             callback,
         )

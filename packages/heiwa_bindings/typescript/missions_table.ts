@@ -12,7 +12,6 @@ import {
 
 export default __t.row({
   missionId: __t.string().primaryKey().name("mission_id"),
-  userId: __t.string().name("user_id"),
   createdAt: __t.string().name("created_at"),
   updatedAt: __t.string().name("updated_at"),
   status: __t.string(),
@@ -28,4 +27,5 @@ export default __t.row({
   summary: __t.option(__t.string()),
   error: __t.option(__t.string()),
   metadataJson: __t.string().name("metadata_json"),
+  userId: __t.option(__t.string()).name("user_id"),
 });

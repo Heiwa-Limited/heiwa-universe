@@ -12,9 +12,7 @@ import {
 
 export default __t.row({
   runId: __t.string().primaryKey().name("run_id"),
-  userId: __t.string().name("user_id"),
   proposalId: __t.string().name("proposal_id"),
-  leaseId: __t.string().name("lease_id"),
   startedAt: __t.string().name("started_at"),
   endedAt: __t.string().name("ended_at"),
   status: __t.string(),
@@ -29,4 +27,6 @@ export default __t.row({
   tokensOutput: __t.i64().name("tokens_output"),
   tokensTotal: __t.i64().name("tokens_total"),
   cost: __t.f64(),
+  userId: __t.option(__t.string()).name("user_id"),
+  leaseId: __t.option(__t.string()).name("lease_id"),
 });

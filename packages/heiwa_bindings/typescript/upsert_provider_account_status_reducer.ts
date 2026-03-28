@@ -12,7 +12,6 @@ import {
 
 export default {
   accountId: __t.string(),
-  userId: __t.string(),
   providerId: __t.string(),
   nodeId: __t.string(),
   authKind: __t.string(),
@@ -25,4 +24,5 @@ export default {
   lastValidatedAt: __t.option(__t.string()),
   lastError: __t.option(__t.string()),
   updatedAt: __t.string(),
+  userId: __t.option(__t.string()),
 };

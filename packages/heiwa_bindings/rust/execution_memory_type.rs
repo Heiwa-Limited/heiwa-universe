@@ -9,13 +9,13 @@ use spacetimedb_sdk::__codegen::{self as __sdk, __lib, __sats, __ws};
 pub struct ExecutionMemory {
     pub id: u64,
     pub task_dispatch_id: String,
-    pub lease_id: String,
     pub model_used: String,
     pub outcome: String,
     pub duration_ms: u64,
     pub error_summary: Option<String>,
     pub feedback_score: Option<f64>,
     pub created_at: String,
+    pub lease_id: Option<String>,
 }
 
 impl __sdk::InModule for ExecutionMemory {
@@ -28,13 +28,13 @@ impl __sdk::InModule for ExecutionMemory {
 pub struct ExecutionMemoryCols {
     pub id: __sdk::__query_builder::Col<ExecutionMemory, u64>,
     pub task_dispatch_id: __sdk::__query_builder::Col<ExecutionMemory, String>,
-    pub lease_id: __sdk::__query_builder::Col<ExecutionMemory, String>,
     pub model_used: __sdk::__query_builder::Col<ExecutionMemory, String>,
     pub outcome: __sdk::__query_builder::Col<ExecutionMemory, String>,
     pub duration_ms: __sdk::__query_builder::Col<ExecutionMemory, u64>,
     pub error_summary: __sdk::__query_builder::Col<ExecutionMemory, Option<String>>,
     pub feedback_score: __sdk::__query_builder::Col<ExecutionMemory, Option<f64>>,
     pub created_at: __sdk::__query_builder::Col<ExecutionMemory, String>,
+    pub lease_id: __sdk::__query_builder::Col<ExecutionMemory, Option<String>>,
 }
 
 impl __sdk::__query_builder::HasCols for ExecutionMemory {
@@ -43,13 +43,13 @@ impl __sdk::__query_builder::HasCols for ExecutionMemory {
         ExecutionMemoryCols {
             id: __sdk::__query_builder::Col::new(table_name, "id"),
             task_dispatch_id: __sdk::__query_builder::Col::new(table_name, "task_dispatch_id"),
-            lease_id: __sdk::__query_builder::Col::new(table_name, "lease_id"),
             model_used: __sdk::__query_builder::Col::new(table_name, "model_used"),
             outcome: __sdk::__query_builder::Col::new(table_name, "outcome"),
             duration_ms: __sdk::__query_builder::Col::new(table_name, "duration_ms"),
             error_summary: __sdk::__query_builder::Col::new(table_name, "error_summary"),
             feedback_score: __sdk::__query_builder::Col::new(table_name, "feedback_score"),
             created_at: __sdk::__query_builder::Col::new(table_name, "created_at"),
+            lease_id: __sdk::__query_builder::Col::new(table_name, "lease_id"),
         }
     }
 }
@@ -59,7 +59,7 @@ impl __sdk::__query_builder::HasCols for ExecutionMemory {
 /// Provides typed access to indexed columns for query building.
 pub struct ExecutionMemoryIxCols {
     pub id: __sdk::__query_builder::IxCol<ExecutionMemory, u64>,
-    pub lease_id: __sdk::__query_builder::IxCol<ExecutionMemory, String>,
+    pub lease_id: __sdk::__query_builder::IxCol<ExecutionMemory, Option<String>>,
     pub task_dispatch_id: __sdk::__query_builder::IxCol<ExecutionMemory, String>,
 }
 

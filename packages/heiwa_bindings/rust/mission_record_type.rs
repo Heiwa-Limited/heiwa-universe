@@ -8,7 +8,6 @@ use spacetimedb_sdk::__codegen::{self as __sdk, __lib, __sats, __ws};
 #[sats(crate = __lib)]
 pub struct MissionRecord {
     pub mission_id: String,
-    pub user_id: String,
     pub created_at: String,
     pub updated_at: String,
     pub status: String,
@@ -24,6 +23,7 @@ pub struct MissionRecord {
     pub summary: Option<String>,
     pub error: Option<String>,
     pub metadata_json: String,
+    pub user_id: Option<String>,
 }
 
 impl __sdk::InModule for MissionRecord {
@@ -35,7 +35,6 @@ impl __sdk::InModule for MissionRecord {
 /// Provides typed access to columns for query building.
 pub struct MissionRecordCols {
     pub mission_id: __sdk::__query_builder::Col<MissionRecord, String>,
-    pub user_id: __sdk::__query_builder::Col<MissionRecord, String>,
     pub created_at: __sdk::__query_builder::Col<MissionRecord, String>,
     pub updated_at: __sdk::__query_builder::Col<MissionRecord, String>,
     pub status: __sdk::__query_builder::Col<MissionRecord, String>,
@@ -51,6 +50,7 @@ pub struct MissionRecordCols {
     pub summary: __sdk::__query_builder::Col<MissionRecord, Option<String>>,
     pub error: __sdk::__query_builder::Col<MissionRecord, Option<String>>,
     pub metadata_json: __sdk::__query_builder::Col<MissionRecord, String>,
+    pub user_id: __sdk::__query_builder::Col<MissionRecord, Option<String>>,
 }
 
 impl __sdk::__query_builder::HasCols for MissionRecord {
@@ -58,7 +58,6 @@ impl __sdk::__query_builder::HasCols for MissionRecord {
     fn cols(table_name: &'static str) -> Self::Cols {
         MissionRecordCols {
             mission_id: __sdk::__query_builder::Col::new(table_name, "mission_id"),
-            user_id: __sdk::__query_builder::Col::new(table_name, "user_id"),
             created_at: __sdk::__query_builder::Col::new(table_name, "created_at"),
             updated_at: __sdk::__query_builder::Col::new(table_name, "updated_at"),
             status: __sdk::__query_builder::Col::new(table_name, "status"),
@@ -74,6 +73,7 @@ impl __sdk::__query_builder::HasCols for MissionRecord {
             summary: __sdk::__query_builder::Col::new(table_name, "summary"),
             error: __sdk::__query_builder::Col::new(table_name, "error"),
             metadata_json: __sdk::__query_builder::Col::new(table_name, "metadata_json"),
+            user_id: __sdk::__query_builder::Col::new(table_name, "user_id"),
         }
     }
 }
@@ -86,7 +86,7 @@ pub struct MissionRecordIxCols {
     pub mission_id: __sdk::__query_builder::IxCol<MissionRecord, String>,
     pub status: __sdk::__query_builder::IxCol<MissionRecord, String>,
     pub updated_at: __sdk::__query_builder::IxCol<MissionRecord, String>,
-    pub user_id: __sdk::__query_builder::IxCol<MissionRecord, String>,
+    pub user_id: __sdk::__query_builder::IxCol<MissionRecord, Option<String>>,
 }
 
 impl __sdk::__query_builder::HasIxCols for MissionRecord {

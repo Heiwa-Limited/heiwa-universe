@@ -12,7 +12,6 @@ import {
 
 export default __t.row({
   cellRunId: __t.string().primaryKey().name("cell_run_id"),
-  userId: __t.string().name("user_id"),
   missionId: __t.string().name("mission_id"),
   stepId: __t.option(__t.string()).name("step_id"),
   status: __t.string(),
@@ -28,4 +27,5 @@ export default __t.row({
   tokensOutput: __t.i64().name("tokens_output"),
   tokensTotal: __t.i64().name("tokens_total"),
   outputSummary: __t.option(__t.string()).name("output_summary"),
+  userId: __t.option(__t.string()).name("user_id"),
 });

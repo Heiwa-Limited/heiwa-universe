@@ -13,11 +13,11 @@ import {
 export default __t.row({
   id: __t.u64().primaryKey(),
   taskDispatchId: __t.string().name("task_dispatch_id"),
-  leaseId: __t.string().name("lease_id"),
   modelUsed: __t.string().name("model_used"),
   outcome: __t.string(),
   durationMs: __t.u64().name("duration_ms"),
   errorSummary: __t.option(__t.string()).name("error_summary"),
   feedbackScore: __t.option(__t.f64()).name("feedback_score"),
   createdAt: __t.string().name("created_at"),
+  leaseId: __t.option(__t.string()).name("lease_id"),
 });

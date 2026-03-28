@@ -8,7 +8,6 @@ use spacetimedb_sdk::__codegen::{self as __sdk, __lib, __sats, __ws};
 #[sats(crate = __lib)]
 pub struct RouteDecision {
     pub request_id: String,
-    pub user_id: String,
     pub task_id: String,
     pub envelope_version: String,
     pub raw_text: String,
@@ -27,6 +26,7 @@ pub struct RouteDecision {
     pub confidence: f64,
     pub gateway_transport: String,
     pub created_at: String,
+    pub user_id: Option<String>,
 }
 
 impl __sdk::InModule for RouteDecision {
@@ -38,7 +38,6 @@ impl __sdk::InModule for RouteDecision {
 /// Provides typed access to columns for query building.
 pub struct RouteDecisionCols {
     pub request_id: __sdk::__query_builder::Col<RouteDecision, String>,
-    pub user_id: __sdk::__query_builder::Col<RouteDecision, String>,
     pub task_id: __sdk::__query_builder::Col<RouteDecision, String>,
     pub envelope_version: __sdk::__query_builder::Col<RouteDecision, String>,
     pub raw_text: __sdk::__query_builder::Col<RouteDecision, String>,
@@ -57,6 +56,7 @@ pub struct RouteDecisionCols {
     pub confidence: __sdk::__query_builder::Col<RouteDecision, f64>,
     pub gateway_transport: __sdk::__query_builder::Col<RouteDecision, String>,
     pub created_at: __sdk::__query_builder::Col<RouteDecision, String>,
+    pub user_id: __sdk::__query_builder::Col<RouteDecision, Option<String>>,
 }
 
 impl __sdk::__query_builder::HasCols for RouteDecision {
@@ -64,7 +64,6 @@ impl __sdk::__query_builder::HasCols for RouteDecision {
     fn cols(table_name: &'static str) -> Self::Cols {
         RouteDecisionCols {
             request_id: __sdk::__query_builder::Col::new(table_name, "request_id"),
-            user_id: __sdk::__query_builder::Col::new(table_name, "user_id"),
             task_id: __sdk::__query_builder::Col::new(table_name, "task_id"),
             envelope_version: __sdk::__query_builder::Col::new(table_name, "envelope_version"),
             raw_text: __sdk::__query_builder::Col::new(table_name, "raw_text"),
@@ -83,6 +82,7 @@ impl __sdk::__query_builder::HasCols for RouteDecision {
             confidence: __sdk::__query_builder::Col::new(table_name, "confidence"),
             gateway_transport: __sdk::__query_builder::Col::new(table_name, "gateway_transport"),
             created_at: __sdk::__query_builder::Col::new(table_name, "created_at"),
+            user_id: __sdk::__query_builder::Col::new(table_name, "user_id"),
         }
     }
 }
@@ -94,7 +94,7 @@ pub struct RouteDecisionIxCols {
     pub created_at: __sdk::__query_builder::IxCol<RouteDecision, String>,
     pub request_id: __sdk::__query_builder::IxCol<RouteDecision, String>,
     pub task_id: __sdk::__query_builder::IxCol<RouteDecision, String>,
-    pub user_id: __sdk::__query_builder::IxCol<RouteDecision, String>,
+    pub user_id: __sdk::__query_builder::IxCol<RouteDecision, Option<String>>,
 }
 
 impl __sdk::__query_builder::HasIxCols for RouteDecision {

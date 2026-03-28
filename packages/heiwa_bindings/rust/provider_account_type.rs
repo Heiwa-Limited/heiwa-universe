@@ -8,7 +8,6 @@ use spacetimedb_sdk::__codegen::{self as __sdk, __lib, __sats, __ws};
 #[sats(crate = __lib)]
 pub struct ProviderAccount {
     pub account_id: String,
-    pub user_id: String,
     pub provider_id: String,
     pub node_id: String,
     pub auth_kind: String,
@@ -21,6 +20,7 @@ pub struct ProviderAccount {
     pub last_validated_at: Option<String>,
     pub last_error: Option<String>,
     pub updated_at: String,
+    pub user_id: Option<String>,
 }
 
 impl __sdk::InModule for ProviderAccount {
@@ -32,7 +32,6 @@ impl __sdk::InModule for ProviderAccount {
 /// Provides typed access to columns for query building.
 pub struct ProviderAccountCols {
     pub account_id: __sdk::__query_builder::Col<ProviderAccount, String>,
-    pub user_id: __sdk::__query_builder::Col<ProviderAccount, String>,
     pub provider_id: __sdk::__query_builder::Col<ProviderAccount, String>,
     pub node_id: __sdk::__query_builder::Col<ProviderAccount, String>,
     pub auth_kind: __sdk::__query_builder::Col<ProviderAccount, String>,
@@ -45,6 +44,7 @@ pub struct ProviderAccountCols {
     pub last_validated_at: __sdk::__query_builder::Col<ProviderAccount, Option<String>>,
     pub last_error: __sdk::__query_builder::Col<ProviderAccount, Option<String>>,
     pub updated_at: __sdk::__query_builder::Col<ProviderAccount, String>,
+    pub user_id: __sdk::__query_builder::Col<ProviderAccount, Option<String>>,
 }
 
 impl __sdk::__query_builder::HasCols for ProviderAccount {
@@ -52,7 +52,6 @@ impl __sdk::__query_builder::HasCols for ProviderAccount {
     fn cols(table_name: &'static str) -> Self::Cols {
         ProviderAccountCols {
             account_id: __sdk::__query_builder::Col::new(table_name, "account_id"),
-            user_id: __sdk::__query_builder::Col::new(table_name, "user_id"),
             provider_id: __sdk::__query_builder::Col::new(table_name, "provider_id"),
             node_id: __sdk::__query_builder::Col::new(table_name, "node_id"),
             auth_kind: __sdk::__query_builder::Col::new(table_name, "auth_kind"),
@@ -68,6 +67,7 @@ impl __sdk::__query_builder::HasCols for ProviderAccount {
             last_validated_at: __sdk::__query_builder::Col::new(table_name, "last_validated_at"),
             last_error: __sdk::__query_builder::Col::new(table_name, "last_error"),
             updated_at: __sdk::__query_builder::Col::new(table_name, "updated_at"),
+            user_id: __sdk::__query_builder::Col::new(table_name, "user_id"),
         }
     }
 }
@@ -81,7 +81,7 @@ pub struct ProviderAccountIxCols {
     pub provider_id: __sdk::__query_builder::IxCol<ProviderAccount, String>,
     pub status: __sdk::__query_builder::IxCol<ProviderAccount, String>,
     pub updated_at: __sdk::__query_builder::IxCol<ProviderAccount, String>,
-    pub user_id: __sdk::__query_builder::IxCol<ProviderAccount, String>,
+    pub user_id: __sdk::__query_builder::IxCol<ProviderAccount, Option<String>>,
 }
 
 impl __sdk::__query_builder::HasIxCols for ProviderAccount {

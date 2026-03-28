@@ -8,12 +8,12 @@ use spacetimedb_sdk::__codegen::{self as __sdk, __lib, __sats, __ws};
 #[sats(crate = __lib)]
 pub struct SessionSummaryRecord {
     pub summary_id: String,
-    pub user_id: String,
     pub session_id: String,
     pub node_id: String,
     pub created_at: String,
     pub summary_text: String,
     pub metadata_json: String,
+    pub user_id: Option<String>,
 }
 
 impl __sdk::InModule for SessionSummaryRecord {
@@ -25,12 +25,12 @@ impl __sdk::InModule for SessionSummaryRecord {
 /// Provides typed access to columns for query building.
 pub struct SessionSummaryRecordCols {
     pub summary_id: __sdk::__query_builder::Col<SessionSummaryRecord, String>,
-    pub user_id: __sdk::__query_builder::Col<SessionSummaryRecord, String>,
     pub session_id: __sdk::__query_builder::Col<SessionSummaryRecord, String>,
     pub node_id: __sdk::__query_builder::Col<SessionSummaryRecord, String>,
     pub created_at: __sdk::__query_builder::Col<SessionSummaryRecord, String>,
     pub summary_text: __sdk::__query_builder::Col<SessionSummaryRecord, String>,
     pub metadata_json: __sdk::__query_builder::Col<SessionSummaryRecord, String>,
+    pub user_id: __sdk::__query_builder::Col<SessionSummaryRecord, Option<String>>,
 }
 
 impl __sdk::__query_builder::HasCols for SessionSummaryRecord {
@@ -38,12 +38,12 @@ impl __sdk::__query_builder::HasCols for SessionSummaryRecord {
     fn cols(table_name: &'static str) -> Self::Cols {
         SessionSummaryRecordCols {
             summary_id: __sdk::__query_builder::Col::new(table_name, "summary_id"),
-            user_id: __sdk::__query_builder::Col::new(table_name, "user_id"),
             session_id: __sdk::__query_builder::Col::new(table_name, "session_id"),
             node_id: __sdk::__query_builder::Col::new(table_name, "node_id"),
             created_at: __sdk::__query_builder::Col::new(table_name, "created_at"),
             summary_text: __sdk::__query_builder::Col::new(table_name, "summary_text"),
             metadata_json: __sdk::__query_builder::Col::new(table_name, "metadata_json"),
+            user_id: __sdk::__query_builder::Col::new(table_name, "user_id"),
         }
     }
 }
@@ -56,7 +56,7 @@ pub struct SessionSummaryRecordIxCols {
     pub node_id: __sdk::__query_builder::IxCol<SessionSummaryRecord, String>,
     pub session_id: __sdk::__query_builder::IxCol<SessionSummaryRecord, String>,
     pub summary_id: __sdk::__query_builder::IxCol<SessionSummaryRecord, String>,
-    pub user_id: __sdk::__query_builder::IxCol<SessionSummaryRecord, String>,
+    pub user_id: __sdk::__query_builder::IxCol<SessionSummaryRecord, Option<String>>,
 }
 
 impl __sdk::__query_builder::HasIxCols for SessionSummaryRecord {

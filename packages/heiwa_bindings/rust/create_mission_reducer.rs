@@ -8,7 +8,6 @@ use spacetimedb_sdk::__codegen::{self as __sdk, __lib, __sats, __ws};
 #[sats(crate = __lib)]
 pub(super) struct CreateMissionArgs {
     pub mission_id: String,
-    pub user_id: String,
     pub created_at: String,
     pub updated_at: String,
     pub status: String,
@@ -24,13 +23,13 @@ pub(super) struct CreateMissionArgs {
     pub summary: Option<String>,
     pub error: Option<String>,
     pub metadata_json: String,
+    pub user_id: Option<String>,
 }
 
 impl From<CreateMissionArgs> for super::Reducer {
     fn from(args: CreateMissionArgs) -> Self {
         Self::CreateMission {
             mission_id: args.mission_id,
-            user_id: args.user_id,
             created_at: args.created_at,
             updated_at: args.updated_at,
             status: args.status,
@@ -46,6 +45,7 @@ impl From<CreateMissionArgs> for super::Reducer {
             summary: args.summary,
             error: args.error,
             metadata_json: args.metadata_json,
+            user_id: args.user_id,
         }
     }
 }
@@ -68,7 +68,6 @@ pub trait create_mission {
     fn create_mission(
         &self,
         mission_id: String,
-        user_id: String,
         created_at: String,
         updated_at: String,
         status: String,
@@ -84,10 +83,10 @@ pub trait create_mission {
         summary: Option<String>,
         error: Option<String>,
         metadata_json: String,
+        user_id: Option<String>,
     ) -> __sdk::Result<()> {
         self.create_mission_then(
             mission_id,
-            user_id,
             created_at,
             updated_at,
             status,
@@ -103,6 +102,7 @@ pub trait create_mission {
             summary,
             error,
             metadata_json,
+            user_id,
             |_, _| {},
         )
     }
@@ -116,7 +116,6 @@ pub trait create_mission {
     fn create_mission_then(
         &self,
         mission_id: String,
-        user_id: String,
         created_at: String,
         updated_at: String,
         status: String,
@@ -132,6 +131,7 @@ pub trait create_mission {
         summary: Option<String>,
         error: Option<String>,
         metadata_json: String,
+        user_id: Option<String>,
 
         callback: impl FnOnce(&super::ReducerEventContext, Result<Result<(), String>, __sdk::InternalError>)
             + Send
@@ -143,7 +143,6 @@ impl create_mission for super::RemoteReducers {
     fn create_mission_then(
         &self,
         mission_id: String,
-        user_id: String,
         created_at: String,
         updated_at: String,
         status: String,
@@ -159,6 +158,7 @@ impl create_mission for super::RemoteReducers {
         summary: Option<String>,
         error: Option<String>,
         metadata_json: String,
+        user_id: Option<String>,
 
         callback: impl FnOnce(&super::ReducerEventContext, Result<Result<(), String>, __sdk::InternalError>)
             + Send
@@ -167,7 +167,6 @@ impl create_mission for super::RemoteReducers {
         self.imp.invoke_reducer_with_callback(
             CreateMissionArgs {
                 mission_id,
-                user_id,
                 created_at,
                 updated_at,
                 status,
@@ -183,6 +182,7 @@ impl create_mission for super::RemoteReducers {
                 summary,
                 error,
                 metadata_json,
+                user_id,
             },
             callback,
         )
