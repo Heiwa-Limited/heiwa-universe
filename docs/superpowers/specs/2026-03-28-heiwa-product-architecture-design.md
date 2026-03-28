@@ -96,7 +96,7 @@ Each model/provider/rate group is fully monitored by Pulse: rate limit state, re
 
 - SpacetimeDB — state layer inside Hub
 - LocalBusTransport — in-process event bus
-- OpenClaw — spawning mechanism for CLI tools; Captain uses OpenClaw to dispatch work to CLI tool Nodes (Claude Code, Codex, Gemini CLI). OpenClaw remains the execution gateway but is called by Captain, not exposed as a product boundary.
+- OpenClaw — spawning mechanism for CLI tools; Captain uses OpenClaw to dispatch work to Executors (Claude Code, Codex, Gemini CLI) hosted on reachable Nodes. OpenClaw remains the execution gateway but is called by Captain, not exposed as a product boundary.
 - Cognition pipeline (IntentNormalizer, RiskScorer, ComputeRouter, ProgramCompiler) — stays as a library that Captain calls. These are the Captain's decision-making internals, not separate agents.
 - SDK/packages — shared libraries
 
@@ -186,7 +186,7 @@ event-driven path:
     plan action (model selected by rate cascade)
     check: do I need approval? (risk score > threshold)
     if needs approval: emit approval_needed event, pause
-    if approved or low-risk: execute via rate cascade on best available Node
+    if approved or low-risk: execute via best available Executor on a reachable Node
     emit result events
 
 periodic tick path:
