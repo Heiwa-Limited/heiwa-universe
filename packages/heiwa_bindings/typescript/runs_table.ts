@@ -12,7 +12,9 @@ import {
 
 export default __t.row({
   runId: __t.string().primaryKey().name("run_id"),
+  userId: __t.string().name("user_id"),
   proposalId: __t.string().name("proposal_id"),
+  leaseId: __t.string().name("lease_id"),
   startedAt: __t.string().name("started_at"),
   endedAt: __t.string().name("ended_at"),
   status: __t.string(),

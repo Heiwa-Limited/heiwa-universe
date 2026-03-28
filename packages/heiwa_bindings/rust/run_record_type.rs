@@ -8,7 +8,9 @@ use spacetimedb_sdk::__codegen::{self as __sdk, __lib, __sats, __ws};
 #[sats(crate = __lib)]
 pub struct RunRecord {
     pub run_id: String,
+    pub user_id: String,
     pub proposal_id: String,
+    pub lease_id: String,
     pub started_at: String,
     pub ended_at: String,
     pub status: String,
@@ -34,7 +36,9 @@ impl __sdk::InModule for RunRecord {
 /// Provides typed access to columns for query building.
 pub struct RunRecordCols {
     pub run_id: __sdk::__query_builder::Col<RunRecord, String>,
+    pub user_id: __sdk::__query_builder::Col<RunRecord, String>,
     pub proposal_id: __sdk::__query_builder::Col<RunRecord, String>,
+    pub lease_id: __sdk::__query_builder::Col<RunRecord, String>,
     pub started_at: __sdk::__query_builder::Col<RunRecord, String>,
     pub ended_at: __sdk::__query_builder::Col<RunRecord, String>,
     pub status: __sdk::__query_builder::Col<RunRecord, String>,
@@ -56,7 +60,9 @@ impl __sdk::__query_builder::HasCols for RunRecord {
     fn cols(table_name: &'static str) -> Self::Cols {
         RunRecordCols {
             run_id: __sdk::__query_builder::Col::new(table_name, "run_id"),
+            user_id: __sdk::__query_builder::Col::new(table_name, "user_id"),
             proposal_id: __sdk::__query_builder::Col::new(table_name, "proposal_id"),
+            lease_id: __sdk::__query_builder::Col::new(table_name, "lease_id"),
             started_at: __sdk::__query_builder::Col::new(table_name, "started_at"),
             ended_at: __sdk::__query_builder::Col::new(table_name, "ended_at"),
             status: __sdk::__query_builder::Col::new(table_name, "status"),
@@ -86,10 +92,12 @@ impl __sdk::__query_builder::HasCols for RunRecord {
 /// Provides typed access to indexed columns for query building.
 pub struct RunRecordIxCols {
     pub ended_at: __sdk::__query_builder::IxCol<RunRecord, String>,
+    pub lease_id: __sdk::__query_builder::IxCol<RunRecord, String>,
     pub model_id: __sdk::__query_builder::IxCol<RunRecord, String>,
     pub proposal_id: __sdk::__query_builder::IxCol<RunRecord, String>,
     pub run_id: __sdk::__query_builder::IxCol<RunRecord, String>,
     pub status: __sdk::__query_builder::IxCol<RunRecord, String>,
+    pub user_id: __sdk::__query_builder::IxCol<RunRecord, String>,
 }
 
 impl __sdk::__query_builder::HasIxCols for RunRecord {
@@ -97,10 +105,12 @@ impl __sdk::__query_builder::HasIxCols for RunRecord {
     fn ix_cols(table_name: &'static str) -> Self::IxCols {
         RunRecordIxCols {
             ended_at: __sdk::__query_builder::IxCol::new(table_name, "ended_at"),
+            lease_id: __sdk::__query_builder::IxCol::new(table_name, "lease_id"),
             model_id: __sdk::__query_builder::IxCol::new(table_name, "model_id"),
             proposal_id: __sdk::__query_builder::IxCol::new(table_name, "proposal_id"),
             run_id: __sdk::__query_builder::IxCol::new(table_name, "run_id"),
             status: __sdk::__query_builder::IxCol::new(table_name, "status"),
+            user_id: __sdk::__query_builder::IxCol::new(table_name, "user_id"),
         }
     }
 }

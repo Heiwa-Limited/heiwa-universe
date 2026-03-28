@@ -12,6 +12,7 @@ import {
 
 export default {
   requestId: __t.string(),
+  userId: __t.string(),
   taskId: __t.string(),
   envelopeVersion: __t.string(),
   rawText: __t.string(),

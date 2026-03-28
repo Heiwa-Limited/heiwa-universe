@@ -46,6 +46,7 @@ class ProposalInput(BaseModel):
 class RunInput(BaseModel):
     run_id: str
     proposal_id: str
+    lease_id: str = ""
     status: str
     chain_result: Dict[str, Any]
     signals: Optional[List[Dict[str, Any]]] = None

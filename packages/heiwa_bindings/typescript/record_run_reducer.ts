@@ -12,7 +12,9 @@ import {
 
 export default {
   runId: __t.string(),
+  userId: __t.string(),
   proposalId: __t.string(),
+  leaseId: __t.string(),
   startedAt: __t.string(),
   endedAt: __t.string(),
   status: __t.string(),

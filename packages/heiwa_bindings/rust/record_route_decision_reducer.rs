@@ -8,6 +8,7 @@ use spacetimedb_sdk::__codegen::{self as __sdk, __lib, __sats, __ws};
 #[sats(crate = __lib)]
 pub(super) struct RecordRouteDecisionArgs {
     pub request_id: String,
+    pub user_id: String,
     pub task_id: String,
     pub envelope_version: String,
     pub raw_text: String,
@@ -32,6 +33,7 @@ impl From<RecordRouteDecisionArgs> for super::Reducer {
     fn from(args: RecordRouteDecisionArgs) -> Self {
         Self::RecordRouteDecision {
             request_id: args.request_id,
+            user_id: args.user_id,
             task_id: args.task_id,
             envelope_version: args.envelope_version,
             raw_text: args.raw_text,
@@ -72,6 +74,7 @@ pub trait record_route_decision {
     fn record_route_decision(
         &self,
         request_id: String,
+        user_id: String,
         task_id: String,
         envelope_version: String,
         raw_text: String,
@@ -93,6 +96,7 @@ pub trait record_route_decision {
     ) -> __sdk::Result<()> {
         self.record_route_decision_then(
             request_id,
+            user_id,
             task_id,
             envelope_version,
             raw_text,
@@ -124,6 +128,7 @@ pub trait record_route_decision {
     fn record_route_decision_then(
         &self,
         request_id: String,
+        user_id: String,
         task_id: String,
         envelope_version: String,
         raw_text: String,
@@ -153,6 +158,7 @@ impl record_route_decision for super::RemoteReducers {
     fn record_route_decision_then(
         &self,
         request_id: String,
+        user_id: String,
         task_id: String,
         envelope_version: String,
         raw_text: String,
@@ -179,6 +185,7 @@ impl record_route_decision for super::RemoteReducers {
         self.imp.invoke_reducer_with_callback(
             RecordRouteDecisionArgs {
                 request_id,
+                user_id,
                 task_id,
                 envelope_version,
                 raw_text,

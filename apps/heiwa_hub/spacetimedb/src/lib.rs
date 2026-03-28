@@ -66,6 +66,8 @@ pub struct CapabilityLease {
     #[index(btree)]
     pub proposal_id: String,
     pub run_id: Option<String>,
+    #[index(btree)]
+    pub parent_lease_id: Option<String>,
     pub holder_kind: String,
     #[index(btree)]
     pub holder_id: String,
@@ -74,6 +76,10 @@ pub struct CapabilityLease {
     pub filesystem_scope_json: String,
     pub secret_scope_json: String,
     pub privilege_tier: String,
+    pub failure_policy: String,
+    #[index(btree)]
+    pub chain_state: String,
+    pub routing_lock_json: Option<String>,
     #[index(btree)]
     pub status: String,
     pub issued_at: String,
@@ -152,6 +158,8 @@ pub struct RunRecord {
     pub user_id: String,
     #[index(btree)]
     pub proposal_id: String,
+    #[index(btree)]
+    pub lease_id: String,
     pub started_at: String,
     #[index(btree)]
     pub ended_at: String,
@@ -285,6 +293,8 @@ pub struct SessionSummaryRecord {
 pub struct ArtifactRecord {
     #[primary_key]
     pub artifact_id: String,
+    #[index(btree)]
+    pub lease_id: Option<String>,
     #[index(btree)]
     pub user_id: String,
     #[index(btree)]
@@ -1033,6 +1043,7 @@ pub fn issue_capability_lease(
     lease_id: String,
     proposal_id: String,
     run_id: Option<String>,
+    parent_lease_id: Option<String>,
     holder_kind: String,
     holder_id: String,
     tool_scope_json: String,
@@ -1040,6 +1051,9 @@ pub fn issue_capability_lease(
     filesystem_scope_json: String,
     secret_scope_json: String,
     privilege_tier: String,
+    failure_policy: String,
+    chain_state: String,
+    routing_lock_json: Option<String>,
     status: String,
     issued_at: String,
     expires_at: String,
@@ -1049,6 +1063,7 @@ pub fn issue_capability_lease(
         lease_id: lease_id.clone(),
         proposal_id,
         run_id,
+        parent_lease_id,
         holder_kind,
         holder_id,
         tool_scope_json,
@@ -1056,6 +1071,9 @@ pub fn issue_capability_lease(
         filesystem_scope_json,
         secret_scope_json,
         privilege_tier,
+        failure_policy,
+        chain_state,
+        routing_lock_json,
         status,
         issued_at,
         renewed_at: None,
@@ -1118,6 +1136,55 @@ pub fn revoke_capability_lease(
     lease.revoked_at = Some(revoked_at);
     lease.revocation_reason = revocation_reason;
     ctx.db.capability_leases().lease_id().update(lease);
+    Ok(())
+}
+
+#[reducer]
+pub fn revoke_capability_chain(
+    ctx: &ReducerContext,
+    lease_id: String,
+    revoked_at: String,
+    revocation_reason: Option<String>,
+) -> Result<(), String> {
+    let mut stack = vec![lease_id];
+    let mut seen: Vec<String> = Vec::new();
+
+    while let Some(current_id) = stack.pop() {
+        if seen.iter().any(|seen_id| seen_id == &current_id) {
+            continue;
+        }
+        seen.push(current_id.clone());
+
+        let Some(mut lease) = ctx.db.capability_leases().lease_id().find(current_id.clone()) else {
+            continue;
+        };
+
+        let failure_policy = lease.failure_policy.trim().to_uppercase();
+        let cascade_children = failure_policy != "CONTINUE";
+        lease.status = "REVOKED".to_string();
+        lease.revoked_at = Some(revoked_at.clone());
+        lease.revocation_reason = revocation_reason.clone();
+        lease.chain_state = if failure_policy == "COMPENSATE" {
+            "ROLLED_BACK".to_string()
+        } else {
+            "FAILED".to_string()
+        };
+        ctx.db.capability_leases().lease_id().update(lease);
+
+        if !cascade_children {
+            continue;
+        }
+
+        let child_ids: Vec<String> = ctx
+            .db
+            .capability_leases()
+            .iter()
+            .filter(|row| row.parent_lease_id.as_deref() == Some(current_id.as_str()))
+            .map(|row| row.lease_id.clone())
+            .collect();
+        stack.extend(child_ids);
+    }
+
     Ok(())
 }
 
@@ -1188,6 +1255,7 @@ pub fn record_run(
     run_id: String,
     user_id: String,
     proposal_id: String,
+    lease_id: String,
     started_at: String,
     ended_at: String,
     status: String,
@@ -1207,6 +1275,7 @@ pub fn record_run(
         run_id: run_id.clone(),
         user_id,
         proposal_id: proposal_id.clone(),
+        lease_id,
         started_at,
         ended_at,
         status: status.clone(),
@@ -1552,6 +1621,7 @@ pub fn write_session_summary(
 pub fn register_artifact(
     ctx: &ReducerContext,
     artifact_id: String,
+    lease_id: Option<String>,
     user_id: String,
     mission_id: String,
     cell_run_id: Option<String>,
@@ -1564,6 +1634,7 @@ pub fn register_artifact(
 ) -> Result<(), String> {
     let row = ArtifactRecord {
         artifact_id: artifact_id.clone(),
+        lease_id,
         user_id,
         mission_id,
         cell_run_id,
@@ -1955,6 +2026,8 @@ pub struct ExecutionMemory {
     pub id: u64,
     #[index(btree)]
     pub task_dispatch_id: String,
+    #[index(btree)]
+    pub lease_id: String,
     pub model_used: String,
     pub outcome: String,             // "success" | "fail" | "timeout"
     pub duration_ms: u64,
@@ -1967,6 +2040,7 @@ pub struct ExecutionMemory {
 pub fn insert_execution_memory(
     ctx: &ReducerContext,
     task_dispatch_id: String,
+    lease_id: String,
     model_used: String,
     outcome: String,
     duration_ms: u64,
@@ -1976,6 +2050,7 @@ pub fn insert_execution_memory(
     ctx.db.execution_memory().insert(ExecutionMemory {
         id: 0,
         task_dispatch_id,
+        lease_id,
         model_used,
         outcome,
         duration_ms,
@@ -2471,4 +2546,3 @@ pub fn record_billing_event(
     });
     Ok(())
 }
-

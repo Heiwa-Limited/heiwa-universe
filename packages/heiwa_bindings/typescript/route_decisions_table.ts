@@ -12,6 +12,7 @@ import {
 
 export default __t.row({
   requestId: __t.string().primaryKey().name("request_id"),
+  userId: __t.string().name("user_id"),
   taskId: __t.string().name("task_id"),
   envelopeVersion: __t.string().name("envelope_version"),
   rawText: __t.string().name("raw_text"),

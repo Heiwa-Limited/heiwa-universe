@@ -6,57 +6,271 @@
 #![allow(unused, clippy::all)]
 use spacetimedb_sdk::__codegen::{self as __sdk, __lib, __sats, __ws};
 
+pub mod add_approval_request_reducer;
+pub mod add_proposal_reducer;
+pub mod agent_registry_entry_type;
+pub mod agent_registry_table;
+pub mod append_mission_step_reducer;
+pub mod approval_decision_type;
+pub mod approval_decisions_table;
+pub mod approval_request_type;
+pub mod approval_requests_table;
+pub mod approve_proposal_reducer;
+pub mod artifact_record_type;
+pub mod artifacts_table;
+pub mod assign_proposal_reducer;
+pub mod billing_event_type;
+pub mod billing_events_table;
+pub mod capability_lease_type;
+pub mod capability_leases_table;
+pub mod captain_directive_type;
+pub mod captain_directives_table;
+pub mod captain_focus_table;
+pub mod captain_focus_type;
+pub mod captain_message_type;
+pub mod captain_messages_table;
+pub mod captain_summaries_table;
+pub mod captain_summary_type;
+pub mod cell_run_record_type;
+pub mod cell_runs_table;
+pub mod claim_proposal_reducer;
 pub mod claim_task_reducer;
+pub mod complete_mission_reducer;
+pub mod create_mission_reducer;
+pub mod create_task_dispatch_reducer;
+pub mod create_user_reducer;
 pub mod discord_channel_type;
 pub mod discord_channels_table;
 pub mod discord_interaction_type;
 pub mod discord_interactions_table;
 pub mod discord_user_type;
 pub mod discord_users_table;
+pub mod execution_memory_table;
+pub mod execution_memory_type;
+pub mod expire_proposal_reducer;
+pub mod fail_mission_reducer;
+pub mod finish_cell_run_reducer;
+pub mod insert_captain_directive_reducer;
+pub mod insert_captain_message_reducer;
+pub mod insert_captain_summary_reducer;
+pub mod insert_execution_memory_reducer;
+pub mod insert_knowledge_embedding_reducer;
+pub mod issue_capability_lease_reducer;
+pub mod knowledge_embedding_type;
+pub mod knowledge_embeddings_table;
+pub mod link_oauth_identity_reducer;
 pub mod liveness_state_table;
 pub mod liveness_state_type;
+pub mod mark_messages_compressed_reducer;
+pub mod mission_record_type;
+pub mod mission_step_record_type;
+pub mod mission_steps_table;
+pub mod missions_table;
+pub mod model_tier_type;
+pub mod model_tiers_table;
+pub mod node_registry_entry_type;
+pub mod node_registry_table;
 pub mod node_status_type;
 pub mod nodes_table;
+pub mod o_auth_identity_type;
+pub mod oauth_identities_table;
 pub mod organization_task_type;
+pub mod pause_mission_reducer;
+pub mod pod_type;
+pub mod pods_table;
+pub mod proposal_consent_type;
+pub mod proposal_consents_table;
+pub mod proposal_type;
+pub mod proposals_table;
+pub mod provider_account_type;
+pub mod provider_accounts_table;
+pub mod provider_credential_type;
+pub mod provider_credentials_table;
+pub mod prune_captain_messages_reducer;
+pub mod prune_execution_memory_reducer;
+pub mod prune_knowledge_embeddings_reducer;
+pub mod queue_proposal_reducer;
+pub mod rate_group_state_table;
+pub mod rate_group_state_type;
+pub mod record_approval_decision_reducer;
+pub mod record_billing_event_reducer;
+pub mod record_consent_reducer;
 pub mod record_interaction_reducer;
+pub mod record_proposal_heartbeat_reducer;
 pub mod record_route_decision_reducer;
 pub mod record_run_reducer;
+pub mod register_artifact_reducer;
 pub mod register_discord_channel_reducer;
+pub mod reject_proposal_reducer;
+pub mod renew_capability_lease_reducer;
+pub mod requeue_proposal_reducer;
+pub mod resolve_captain_focus_reducer;
+pub mod resume_mission_reducer;
+pub mod revoke_capability_chain_reducer;
+pub mod revoke_capability_lease_reducer;
+pub mod revoke_provider_credential_reducer;
 pub mod route_decision_type;
 pub mod route_decisions_table;
 pub mod run_record_type;
 pub mod runs_table;
+pub mod session_summaries_table;
+pub mod session_summary_record_type;
 pub mod set_node_status_reducer;
+pub mod start_cell_run_reducer;
+pub mod store_provider_credential_reducer;
+pub mod task_dispatch_type;
+pub mod task_dispatches_table;
 pub mod tenant_task_view_table;
+pub mod update_model_tier_stats_reducer;
+pub mod update_pod_heartbeat_reducer;
+pub mod update_task_dispatch_status_reducer;
+pub mod update_user_seen_reducer;
+pub mod upsert_agent_registry_reducer;
+pub mod upsert_captain_focus_reducer;
 pub mod upsert_discord_user_reducer;
 pub mod upsert_liveness_state_reducer;
+pub mod upsert_model_tier_reducer;
 pub mod upsert_node_heartbeat_reducer;
+pub mod upsert_node_registry_reducer;
+pub mod upsert_pod_reducer;
+pub mod upsert_provider_account_status_reducer;
+pub mod upsert_rate_group_state_reducer;
+pub mod user_type;
+pub mod users_table;
+pub mod write_session_summary_reducer;
 
+pub use add_approval_request_reducer::add_approval_request;
+pub use add_proposal_reducer::add_proposal;
+pub use agent_registry_entry_type::AgentRegistryEntry;
+pub use agent_registry_table::*;
+pub use append_mission_step_reducer::append_mission_step;
+pub use approval_decision_type::ApprovalDecision;
+pub use approval_decisions_table::*;
+pub use approval_request_type::ApprovalRequest;
+pub use approval_requests_table::*;
+pub use approve_proposal_reducer::approve_proposal;
+pub use artifact_record_type::ArtifactRecord;
+pub use artifacts_table::*;
+pub use assign_proposal_reducer::assign_proposal;
+pub use billing_event_type::BillingEvent;
+pub use billing_events_table::*;
+pub use capability_lease_type::CapabilityLease;
+pub use capability_leases_table::*;
+pub use captain_directive_type::CaptainDirective;
+pub use captain_directives_table::*;
+pub use captain_focus_table::*;
+pub use captain_focus_type::CaptainFocus;
+pub use captain_message_type::CaptainMessage;
+pub use captain_messages_table::*;
+pub use captain_summaries_table::*;
+pub use captain_summary_type::CaptainSummary;
+pub use cell_run_record_type::CellRunRecord;
+pub use cell_runs_table::*;
+pub use claim_proposal_reducer::claim_proposal;
 pub use claim_task_reducer::claim_task;
+pub use complete_mission_reducer::complete_mission;
+pub use create_mission_reducer::create_mission;
+pub use create_task_dispatch_reducer::create_task_dispatch;
+pub use create_user_reducer::create_user;
 pub use discord_channel_type::DiscordChannel;
 pub use discord_channels_table::*;
 pub use discord_interaction_type::DiscordInteraction;
 pub use discord_interactions_table::*;
 pub use discord_user_type::DiscordUser;
 pub use discord_users_table::*;
+pub use execution_memory_table::*;
+pub use execution_memory_type::ExecutionMemory;
+pub use expire_proposal_reducer::expire_proposal;
+pub use fail_mission_reducer::fail_mission;
+pub use finish_cell_run_reducer::finish_cell_run;
+pub use insert_captain_directive_reducer::insert_captain_directive;
+pub use insert_captain_message_reducer::insert_captain_message;
+pub use insert_captain_summary_reducer::insert_captain_summary;
+pub use insert_execution_memory_reducer::insert_execution_memory;
+pub use insert_knowledge_embedding_reducer::insert_knowledge_embedding;
+pub use issue_capability_lease_reducer::issue_capability_lease;
+pub use knowledge_embedding_type::KnowledgeEmbedding;
+pub use knowledge_embeddings_table::*;
+pub use link_oauth_identity_reducer::link_oauth_identity;
 pub use liveness_state_table::*;
 pub use liveness_state_type::LivenessState;
+pub use mark_messages_compressed_reducer::mark_messages_compressed;
+pub use mission_record_type::MissionRecord;
+pub use mission_step_record_type::MissionStepRecord;
+pub use mission_steps_table::*;
+pub use missions_table::*;
+pub use model_tier_type::ModelTier;
+pub use model_tiers_table::*;
+pub use node_registry_entry_type::NodeRegistryEntry;
+pub use node_registry_table::*;
 pub use node_status_type::NodeStatus;
 pub use nodes_table::*;
+pub use o_auth_identity_type::OAuthIdentity;
+pub use oauth_identities_table::*;
 pub use organization_task_type::OrganizationTask;
+pub use pause_mission_reducer::pause_mission;
+pub use pod_type::Pod;
+pub use pods_table::*;
+pub use proposal_consent_type::ProposalConsent;
+pub use proposal_consents_table::*;
+pub use proposal_type::Proposal;
+pub use proposals_table::*;
+pub use provider_account_type::ProviderAccount;
+pub use provider_accounts_table::*;
+pub use provider_credential_type::ProviderCredential;
+pub use provider_credentials_table::*;
+pub use prune_captain_messages_reducer::prune_captain_messages;
+pub use prune_execution_memory_reducer::prune_execution_memory;
+pub use prune_knowledge_embeddings_reducer::prune_knowledge_embeddings;
+pub use queue_proposal_reducer::queue_proposal;
+pub use rate_group_state_table::*;
+pub use rate_group_state_type::RateGroupState;
+pub use record_approval_decision_reducer::record_approval_decision;
+pub use record_billing_event_reducer::record_billing_event;
+pub use record_consent_reducer::record_consent;
 pub use record_interaction_reducer::record_interaction;
+pub use record_proposal_heartbeat_reducer::record_proposal_heartbeat;
 pub use record_route_decision_reducer::record_route_decision;
 pub use record_run_reducer::record_run;
+pub use register_artifact_reducer::register_artifact;
 pub use register_discord_channel_reducer::register_discord_channel;
+pub use reject_proposal_reducer::reject_proposal;
+pub use renew_capability_lease_reducer::renew_capability_lease;
+pub use requeue_proposal_reducer::requeue_proposal;
+pub use resolve_captain_focus_reducer::resolve_captain_focus;
+pub use resume_mission_reducer::resume_mission;
+pub use revoke_capability_chain_reducer::revoke_capability_chain;
+pub use revoke_capability_lease_reducer::revoke_capability_lease;
+pub use revoke_provider_credential_reducer::revoke_provider_credential;
 pub use route_decision_type::RouteDecision;
 pub use route_decisions_table::*;
 pub use run_record_type::RunRecord;
 pub use runs_table::*;
+pub use session_summaries_table::*;
+pub use session_summary_record_type::SessionSummaryRecord;
 pub use set_node_status_reducer::set_node_status;
+pub use start_cell_run_reducer::start_cell_run;
+pub use store_provider_credential_reducer::store_provider_credential;
+pub use task_dispatch_type::TaskDispatch;
+pub use task_dispatches_table::*;
 pub use tenant_task_view_table::*;
+pub use update_model_tier_stats_reducer::update_model_tier_stats;
+pub use update_pod_heartbeat_reducer::update_pod_heartbeat;
+pub use update_task_dispatch_status_reducer::update_task_dispatch_status;
+pub use update_user_seen_reducer::update_user_seen;
+pub use upsert_agent_registry_reducer::upsert_agent_registry;
+pub use upsert_captain_focus_reducer::upsert_captain_focus;
 pub use upsert_discord_user_reducer::upsert_discord_user;
 pub use upsert_liveness_state_reducer::upsert_liveness_state;
+pub use upsert_model_tier_reducer::upsert_model_tier;
 pub use upsert_node_heartbeat_reducer::upsert_node_heartbeat;
+pub use upsert_node_registry_reducer::upsert_node_registry;
+pub use upsert_pod_reducer::upsert_pod;
+pub use upsert_provider_account_status_reducer::upsert_provider_account_status;
+pub use upsert_rate_group_state_reducer::upsert_rate_group_state;
+pub use user_type::User;
+pub use users_table::*;
+pub use write_session_summary_reducer::write_session_summary;
 
 #[derive(Clone, PartialEq, Debug)]
 
@@ -66,17 +280,284 @@ pub use upsert_node_heartbeat_reducer::upsert_node_heartbeat;
 /// to indicate which reducer caused the event.
 
 pub enum Reducer {
+    AddApprovalRequest {
+        request_id: String,
+        proposal_id: String,
+        status: String,
+        requested_at: String,
+        expires_at: Option<String>,
+        requested_by: String,
+        reason: Option<String>,
+        payload_json: String,
+    },
+    AddProposal {
+        proposal_id: String,
+        user_id: String,
+        created_at: String,
+        status: String,
+        fingerprint: Option<String>,
+        payload: String,
+        payload_raw: Option<String>,
+        mode: String,
+        execution_targeting: Option<String>,
+        assigned_node_id: Option<String>,
+        hub_signature: Option<String>,
+        assignment_expires_at: Option<String>,
+        attempt_count: i64,
+        proposal_hash: Option<String>,
+        approved_at: Option<String>,
+        expires_at: Option<String>,
+        eligibility_snapshot: Option<String>,
+    },
+    AppendMissionStep {
+        step_id: String,
+        mission_id: String,
+        position: i64,
+        status: String,
+        step_kind: String,
+        cell_role: String,
+        title: String,
+        detail: Option<String>,
+        input_json: String,
+        output_json: String,
+        created_at: String,
+        updated_at: String,
+    },
+    ApproveProposal {
+        proposal_id: String,
+        approved_at: String,
+        expires_at: Option<String>,
+        proposal_hash: String,
+    },
+    AssignProposal {
+        proposal_id: String,
+        assigned_node_id: String,
+        assignment_expires_at: String,
+        hub_signature: String,
+        proposal_hash: String,
+        attempt_count: i64,
+        eligibility_snapshot: Option<String>,
+    },
+    ClaimProposal {
+        proposal_id: String,
+        node_id: String,
+        claimed_at: String,
+        lease_expires_at: String,
+    },
     ClaimTask {
         task_id: u64,
         worker_id: String,
+    },
+    CompleteMission {
+        mission_id: String,
+        updated_at: String,
+        summary: Option<String>,
+    },
+    CreateMission {
+        mission_id: String,
+        user_id: String,
+        created_at: String,
+        updated_at: String,
+        status: String,
+        source_surface: String,
+        node_id: String,
+        prompt: String,
+        intent_class: String,
+        risk_level: String,
+        active_step_id: Option<String>,
+        active_cell_id: Option<String>,
+        target_tool: Option<String>,
+        target_model: Option<String>,
+        summary: Option<String>,
+        error: Option<String>,
+        metadata_json: String,
+    },
+    CreateTaskDispatch {
+        task_id: String,
+        parent_task_id: Option<String>,
+        intent_class: String,
+        risk_level: String,
+        assigned_model: String,
+        effort_knob: String,
+        assigned_cell: String,
+        budget_max_turns: u8,
+        budget_max_seconds: u32,
+        fallback_model: String,
+        sandbox_mode: String,
+        tools_allowed_json: String,
+        context_files_json: String,
+    },
+    CreateUser {
+        user_id: String,
+        display_name: String,
+        email: Option<String>,
+        avatar_url: Option<String>,
+        tier: String,
+    },
+    ExpireProposal {
+        proposal_id: String,
+        eligibility_snapshot: Option<String>,
+    },
+    FailMission {
+        mission_id: String,
+        updated_at: String,
+        error: Option<String>,
+    },
+    FinishCellRun {
+        cell_run_id: String,
+        status: String,
+        ended_at: String,
+        tokens_input: i64,
+        tokens_output: i64,
+        tokens_total: i64,
+        output_summary: Option<String>,
+    },
+    InsertCaptainDirective {
+        directive_type: String,
+        payload_json: String,
+        priority: u8,
+    },
+    InsertCaptainMessage {
+        message_id: String,
+        session_id: String,
+        role: String,
+        content: String,
+        timestamp: u64,
+        source: String,
+    },
+    InsertCaptainSummary {
+        summary_id: String,
+        summary_type: String,
+        content: String,
+        range_start: u64,
+        range_end: u64,
+        messages_compressed: u32,
+    },
+    InsertExecutionMemory {
+        task_dispatch_id: String,
+        lease_id: String,
+        model_used: String,
+        outcome: String,
+        duration_ms: u64,
+        error_summary: Option<String>,
+        feedback_score: Option<f64>,
+    },
+    InsertKnowledgeEmbedding {
+        source_type: String,
+        source_id: String,
+        content_hash: String,
+        embedding_json: String,
+        ttl_hours: u32,
+    },
+    IssueCapabilityLease {
+        lease_id: String,
+        proposal_id: String,
+        run_id: Option<String>,
+        parent_lease_id: Option<String>,
+        holder_kind: String,
+        holder_id: String,
+        tool_scope_json: String,
+        network_scope_json: String,
+        filesystem_scope_json: String,
+        secret_scope_json: String,
+        privilege_tier: String,
+        failure_policy: String,
+        chain_state: String,
+        routing_lock_json: Option<String>,
+        status: String,
+        issued_at: String,
+        expires_at: String,
+        hub_signature: String,
+    },
+    LinkOauthIdentity {
+        identity_id: String,
+        user_id: String,
+        provider: String,
+        provider_user_id: String,
+        username: String,
+        access_token_enc: String,
+        refresh_token_enc: Option<String>,
+        token_expires_at: Option<String>,
+        scopes_json: String,
+    },
+    MarkMessagesCompressed {
+        session_id: String,
+        before_timestamp: u64,
+    },
+    PauseMission {
+        mission_id: String,
+        updated_at: String,
+        summary: Option<String>,
+    },
+    PruneCaptainMessages {
+        before_timestamp: u64,
+    },
+    PruneExecutionMemory {
+        keep_last: u32,
+    },
+    PruneKnowledgeEmbeddings {
+        ttl_hours: u32,
+    },
+    QueueProposal {
+        proposal_id: String,
+        eligibility_snapshot: Option<String>,
+    },
+    RecordApprovalDecision {
+        decision_id: String,
+        request_id: String,
+        proposal_id: String,
+        actor_type: String,
+        actor_id: String,
+        decision: String,
+        reason: Option<String>,
+        created_at: String,
+        metadata_json: String,
+    },
+    RecordBillingEvent {
+        user_id: String,
+        event_type: String,
+        provider_id: String,
+        model_id: String,
+        tokens_input: i64,
+        tokens_output: i64,
+        estimated_cost_usd: f64,
+        credential_id: Option<String>,
+        mission_id: Option<String>,
+        run_id: Option<String>,
+    },
+    RecordConsent {
+        consent_id: String,
+        proposal_id: String,
+        proposal_hash: String,
+        actor_type: String,
+        actor_id: String,
+        decision: String,
+        comment: Option<String>,
+        metadata: Option<String>,
+        approval_request_id: Option<String>,
+        requested_by: Option<String>,
+        requested_at: Option<String>,
+        request_expires_at: Option<String>,
+        request_reason: Option<String>,
+        request_payload_json: Option<String>,
+        approved_at: Option<String>,
+        expires_at: Option<String>,
     },
     RecordInteraction {
         user_id: u64,
         channel_id: u64,
         intent: String,
     },
+    RecordProposalHeartbeat {
+        proposal_id: String,
+        node_id: String,
+        node_instance_id: String,
+        heartbeat_at: String,
+        detail: Option<String>,
+    },
     RecordRouteDecision {
         request_id: String,
+        user_id: String,
         task_id: String,
         envelope_version: String,
         raw_text: String,
@@ -98,7 +579,9 @@ pub enum Reducer {
     },
     RecordRun {
         run_id: String,
+        user_id: String,
         proposal_id: String,
+        lease_id: String,
         started_at: String,
         ended_at: String,
         status: String,
@@ -114,15 +597,123 @@ pub enum Reducer {
         tokens_total: i64,
         cost: f64,
     },
+    RegisterArtifact {
+        artifact_id: String,
+        lease_id: Option<String>,
+        user_id: String,
+        mission_id: String,
+        cell_run_id: Option<String>,
+        artifact_type: String,
+        title: String,
+        uri: Option<String>,
+        path: Option<String>,
+        content_json: String,
+        created_at: String,
+    },
     RegisterDiscordChannel {
         channel_id: u64,
         name: String,
         purpose: String,
         metadata: String,
     },
+    RejectProposal {
+        proposal_id: String,
+    },
+    RenewCapabilityLease {
+        lease_id: String,
+        renewed_at: String,
+        expires_at: String,
+    },
+    RequeueProposal {
+        proposal_id: String,
+    },
+    ResolveCaptainFocus {
+        focus_id: String,
+        resolved_at: u64,
+    },
+    ResumeMission {
+        mission_id: String,
+        updated_at: String,
+        summary: Option<String>,
+    },
+    RevokeCapabilityChain {
+        lease_id: String,
+        revoked_at: String,
+        revocation_reason: Option<String>,
+    },
+    RevokeCapabilityLease {
+        lease_id: String,
+        revoked_at: String,
+        revocation_reason: Option<String>,
+    },
+    RevokeProviderCredential {
+        credential_id: String,
+    },
     SetNodeStatus {
         node_id: String,
         status: String,
+    },
+    StartCellRun {
+        cell_run_id: String,
+        user_id: String,
+        mission_id: String,
+        step_id: Option<String>,
+        status: String,
+        cell_id: String,
+        cell_role: String,
+        provider: String,
+        model: String,
+        rate_group: String,
+        tool: String,
+        started_at: String,
+        tokens_input: i64,
+        tokens_output: i64,
+        tokens_total: i64,
+        output_summary: Option<String>,
+    },
+    StoreProviderCredential {
+        credential_id: String,
+        user_id: String,
+        provider_id: String,
+        credential_kind: String,
+        credential_enc: String,
+        rate_group: String,
+        display_label: Option<String>,
+    },
+    UpdateModelTierStats {
+        model_id: String,
+        success_rate: f64,
+        avg_latency_ms: u64,
+        latency_p_95_ms: u64,
+    },
+    UpdatePodHeartbeat {
+        pod_id: String,
+        last_heartbeat: String,
+        liveness: String,
+    },
+    UpdateTaskDispatchStatus {
+        task_id: String,
+        status: String,
+        result_summary: String,
+        tokens_used: u32,
+        latency_ms: u64,
+    },
+    UpdateUserSeen {
+        user_id: String,
+    },
+    UpsertAgentRegistry {
+        cell_id: String,
+        display_name: String,
+        model_preference: Option<String>,
+        tools_allowed_json: String,
+        sandbox_mode: String,
+        active: bool,
+    },
+    UpsertCaptainFocus {
+        focus_id: String,
+        topic: String,
+        context_json: String,
+        priority: u8,
     },
     UpsertDiscordUser {
         user_id: u64,
@@ -134,6 +725,19 @@ pub enum Reducer {
         last_state: String,
         last_changed_at: String,
     },
+    UpsertModelTier {
+        model_id: String,
+        provider_model_id: String,
+        provider: String,
+        rate_group: String,
+        capability_class: u8,
+        effort_knob: String,
+        effort_level: u8,
+        cost_per_turn: f64,
+        max_context_tokens: u32,
+        strengths_json: String,
+        enabled: bool,
+    },
     UpsertNodeHeartbeat {
         node_id: String,
         last_heartbeat_at: String,
@@ -144,6 +748,59 @@ pub enum Reducer {
         tags_json: String,
         max_concurrency: i64,
     },
+    UpsertNodeRegistry {
+        node_id: String,
+        hostname: String,
+        platform: String,
+        capabilities_json: String,
+        status: String,
+    },
+    UpsertPod {
+        pod_id: String,
+        host_identity: String,
+        provider: String,
+        runtime_capabilities: Vec<String>,
+        trust_tier: String,
+        privacy_floor: String,
+        gpu_inventory: Vec<String>,
+        liveness: String,
+        leaseable: bool,
+        registered_at: String,
+        last_heartbeat: String,
+    },
+    UpsertProviderAccountStatus {
+        account_id: String,
+        user_id: String,
+        provider_id: String,
+        node_id: String,
+        auth_kind: String,
+        local_handle_ref: String,
+        status: String,
+        display_name: Option<String>,
+        default_model: Option<String>,
+        rate_group: String,
+        available_models_json: String,
+        last_validated_at: Option<String>,
+        last_error: Option<String>,
+        updated_at: String,
+    },
+    UpsertRateGroupState {
+        rate_group: String,
+        turns_used: u32,
+        turns_max: u32,
+        window_seconds: u32,
+        cooldown_until: String,
+        available: bool,
+    },
+    WriteSessionSummary {
+        summary_id: String,
+        user_id: String,
+        session_id: String,
+        node_id: String,
+        created_at: String,
+        summary_text: String,
+        metadata_json: String,
+    },
 }
 
 impl __sdk::InModule for Reducer {
@@ -153,27 +810,579 @@ impl __sdk::InModule for Reducer {
 impl __sdk::Reducer for Reducer {
     fn reducer_name(&self) -> &'static str {
         match self {
+            Reducer::AddApprovalRequest { .. } => "add_approval_request",
+            Reducer::AddProposal { .. } => "add_proposal",
+            Reducer::AppendMissionStep { .. } => "append_mission_step",
+            Reducer::ApproveProposal { .. } => "approve_proposal",
+            Reducer::AssignProposal { .. } => "assign_proposal",
+            Reducer::ClaimProposal { .. } => "claim_proposal",
             Reducer::ClaimTask { .. } => "claim_task",
+            Reducer::CompleteMission { .. } => "complete_mission",
+            Reducer::CreateMission { .. } => "create_mission",
+            Reducer::CreateTaskDispatch { .. } => "create_task_dispatch",
+            Reducer::CreateUser { .. } => "create_user",
+            Reducer::ExpireProposal { .. } => "expire_proposal",
+            Reducer::FailMission { .. } => "fail_mission",
+            Reducer::FinishCellRun { .. } => "finish_cell_run",
+            Reducer::InsertCaptainDirective { .. } => "insert_captain_directive",
+            Reducer::InsertCaptainMessage { .. } => "insert_captain_message",
+            Reducer::InsertCaptainSummary { .. } => "insert_captain_summary",
+            Reducer::InsertExecutionMemory { .. } => "insert_execution_memory",
+            Reducer::InsertKnowledgeEmbedding { .. } => "insert_knowledge_embedding",
+            Reducer::IssueCapabilityLease { .. } => "issue_capability_lease",
+            Reducer::LinkOauthIdentity { .. } => "link_oauth_identity",
+            Reducer::MarkMessagesCompressed { .. } => "mark_messages_compressed",
+            Reducer::PauseMission { .. } => "pause_mission",
+            Reducer::PruneCaptainMessages { .. } => "prune_captain_messages",
+            Reducer::PruneExecutionMemory { .. } => "prune_execution_memory",
+            Reducer::PruneKnowledgeEmbeddings { .. } => "prune_knowledge_embeddings",
+            Reducer::QueueProposal { .. } => "queue_proposal",
+            Reducer::RecordApprovalDecision { .. } => "record_approval_decision",
+            Reducer::RecordBillingEvent { .. } => "record_billing_event",
+            Reducer::RecordConsent { .. } => "record_consent",
             Reducer::RecordInteraction { .. } => "record_interaction",
+            Reducer::RecordProposalHeartbeat { .. } => "record_proposal_heartbeat",
             Reducer::RecordRouteDecision { .. } => "record_route_decision",
             Reducer::RecordRun { .. } => "record_run",
+            Reducer::RegisterArtifact { .. } => "register_artifact",
             Reducer::RegisterDiscordChannel { .. } => "register_discord_channel",
+            Reducer::RejectProposal { .. } => "reject_proposal",
+            Reducer::RenewCapabilityLease { .. } => "renew_capability_lease",
+            Reducer::RequeueProposal { .. } => "requeue_proposal",
+            Reducer::ResolveCaptainFocus { .. } => "resolve_captain_focus",
+            Reducer::ResumeMission { .. } => "resume_mission",
+            Reducer::RevokeCapabilityChain { .. } => "revoke_capability_chain",
+            Reducer::RevokeCapabilityLease { .. } => "revoke_capability_lease",
+            Reducer::RevokeProviderCredential { .. } => "revoke_provider_credential",
             Reducer::SetNodeStatus { .. } => "set_node_status",
+            Reducer::StartCellRun { .. } => "start_cell_run",
+            Reducer::StoreProviderCredential { .. } => "store_provider_credential",
+            Reducer::UpdateModelTierStats { .. } => "update_model_tier_stats",
+            Reducer::UpdatePodHeartbeat { .. } => "update_pod_heartbeat",
+            Reducer::UpdateTaskDispatchStatus { .. } => "update_task_dispatch_status",
+            Reducer::UpdateUserSeen { .. } => "update_user_seen",
+            Reducer::UpsertAgentRegistry { .. } => "upsert_agent_registry",
+            Reducer::UpsertCaptainFocus { .. } => "upsert_captain_focus",
             Reducer::UpsertDiscordUser { .. } => "upsert_discord_user",
             Reducer::UpsertLivenessState { .. } => "upsert_liveness_state",
+            Reducer::UpsertModelTier { .. } => "upsert_model_tier",
             Reducer::UpsertNodeHeartbeat { .. } => "upsert_node_heartbeat",
+            Reducer::UpsertNodeRegistry { .. } => "upsert_node_registry",
+            Reducer::UpsertPod { .. } => "upsert_pod",
+            Reducer::UpsertProviderAccountStatus { .. } => "upsert_provider_account_status",
+            Reducer::UpsertRateGroupState { .. } => "upsert_rate_group_state",
+            Reducer::WriteSessionSummary { .. } => "write_session_summary",
             _ => unreachable!(),
         }
     }
     #[allow(clippy::clone_on_copy)]
     fn args_bsatn(&self) -> Result<Vec<u8>, __sats::bsatn::EncodeError> {
         match self {
+            Reducer::AddApprovalRequest {
+                request_id,
+                proposal_id,
+                status,
+                requested_at,
+                expires_at,
+                requested_by,
+                reason,
+                payload_json,
+            } => __sats::bsatn::to_vec(&add_approval_request_reducer::AddApprovalRequestArgs {
+                request_id: request_id.clone(),
+                proposal_id: proposal_id.clone(),
+                status: status.clone(),
+                requested_at: requested_at.clone(),
+                expires_at: expires_at.clone(),
+                requested_by: requested_by.clone(),
+                reason: reason.clone(),
+                payload_json: payload_json.clone(),
+            }),
+            Reducer::AddProposal {
+                proposal_id,
+                user_id,
+                created_at,
+                status,
+                fingerprint,
+                payload,
+                payload_raw,
+                mode,
+                execution_targeting,
+                assigned_node_id,
+                hub_signature,
+                assignment_expires_at,
+                attempt_count,
+                proposal_hash,
+                approved_at,
+                expires_at,
+                eligibility_snapshot,
+            } => __sats::bsatn::to_vec(&add_proposal_reducer::AddProposalArgs {
+                proposal_id: proposal_id.clone(),
+                user_id: user_id.clone(),
+                created_at: created_at.clone(),
+                status: status.clone(),
+                fingerprint: fingerprint.clone(),
+                payload: payload.clone(),
+                payload_raw: payload_raw.clone(),
+                mode: mode.clone(),
+                execution_targeting: execution_targeting.clone(),
+                assigned_node_id: assigned_node_id.clone(),
+                hub_signature: hub_signature.clone(),
+                assignment_expires_at: assignment_expires_at.clone(),
+                attempt_count: attempt_count.clone(),
+                proposal_hash: proposal_hash.clone(),
+                approved_at: approved_at.clone(),
+                expires_at: expires_at.clone(),
+                eligibility_snapshot: eligibility_snapshot.clone(),
+            }),
+            Reducer::AppendMissionStep {
+                step_id,
+                mission_id,
+                position,
+                status,
+                step_kind,
+                cell_role,
+                title,
+                detail,
+                input_json,
+                output_json,
+                created_at,
+                updated_at,
+            } => __sats::bsatn::to_vec(&append_mission_step_reducer::AppendMissionStepArgs {
+                step_id: step_id.clone(),
+                mission_id: mission_id.clone(),
+                position: position.clone(),
+                status: status.clone(),
+                step_kind: step_kind.clone(),
+                cell_role: cell_role.clone(),
+                title: title.clone(),
+                detail: detail.clone(),
+                input_json: input_json.clone(),
+                output_json: output_json.clone(),
+                created_at: created_at.clone(),
+                updated_at: updated_at.clone(),
+            }),
+            Reducer::ApproveProposal {
+                proposal_id,
+                approved_at,
+                expires_at,
+                proposal_hash,
+            } => __sats::bsatn::to_vec(&approve_proposal_reducer::ApproveProposalArgs {
+                proposal_id: proposal_id.clone(),
+                approved_at: approved_at.clone(),
+                expires_at: expires_at.clone(),
+                proposal_hash: proposal_hash.clone(),
+            }),
+            Reducer::AssignProposal {
+                proposal_id,
+                assigned_node_id,
+                assignment_expires_at,
+                hub_signature,
+                proposal_hash,
+                attempt_count,
+                eligibility_snapshot,
+            } => __sats::bsatn::to_vec(&assign_proposal_reducer::AssignProposalArgs {
+                proposal_id: proposal_id.clone(),
+                assigned_node_id: assigned_node_id.clone(),
+                assignment_expires_at: assignment_expires_at.clone(),
+                hub_signature: hub_signature.clone(),
+                proposal_hash: proposal_hash.clone(),
+                attempt_count: attempt_count.clone(),
+                eligibility_snapshot: eligibility_snapshot.clone(),
+            }),
+            Reducer::ClaimProposal {
+                proposal_id,
+                node_id,
+                claimed_at,
+                lease_expires_at,
+            } => __sats::bsatn::to_vec(&claim_proposal_reducer::ClaimProposalArgs {
+                proposal_id: proposal_id.clone(),
+                node_id: node_id.clone(),
+                claimed_at: claimed_at.clone(),
+                lease_expires_at: lease_expires_at.clone(),
+            }),
             Reducer::ClaimTask { task_id, worker_id } => {
                 __sats::bsatn::to_vec(&claim_task_reducer::ClaimTaskArgs {
                     task_id: task_id.clone(),
                     worker_id: worker_id.clone(),
                 })
             }
+            Reducer::CompleteMission {
+                mission_id,
+                updated_at,
+                summary,
+            } => __sats::bsatn::to_vec(&complete_mission_reducer::CompleteMissionArgs {
+                mission_id: mission_id.clone(),
+                updated_at: updated_at.clone(),
+                summary: summary.clone(),
+            }),
+            Reducer::CreateMission {
+                mission_id,
+                user_id,
+                created_at,
+                updated_at,
+                status,
+                source_surface,
+                node_id,
+                prompt,
+                intent_class,
+                risk_level,
+                active_step_id,
+                active_cell_id,
+                target_tool,
+                target_model,
+                summary,
+                error,
+                metadata_json,
+            } => __sats::bsatn::to_vec(&create_mission_reducer::CreateMissionArgs {
+                mission_id: mission_id.clone(),
+                user_id: user_id.clone(),
+                created_at: created_at.clone(),
+                updated_at: updated_at.clone(),
+                status: status.clone(),
+                source_surface: source_surface.clone(),
+                node_id: node_id.clone(),
+                prompt: prompt.clone(),
+                intent_class: intent_class.clone(),
+                risk_level: risk_level.clone(),
+                active_step_id: active_step_id.clone(),
+                active_cell_id: active_cell_id.clone(),
+                target_tool: target_tool.clone(),
+                target_model: target_model.clone(),
+                summary: summary.clone(),
+                error: error.clone(),
+                metadata_json: metadata_json.clone(),
+            }),
+            Reducer::CreateTaskDispatch {
+                task_id,
+                parent_task_id,
+                intent_class,
+                risk_level,
+                assigned_model,
+                effort_knob,
+                assigned_cell,
+                budget_max_turns,
+                budget_max_seconds,
+                fallback_model,
+                sandbox_mode,
+                tools_allowed_json,
+                context_files_json,
+            } => __sats::bsatn::to_vec(&create_task_dispatch_reducer::CreateTaskDispatchArgs {
+                task_id: task_id.clone(),
+                parent_task_id: parent_task_id.clone(),
+                intent_class: intent_class.clone(),
+                risk_level: risk_level.clone(),
+                assigned_model: assigned_model.clone(),
+                effort_knob: effort_knob.clone(),
+                assigned_cell: assigned_cell.clone(),
+                budget_max_turns: budget_max_turns.clone(),
+                budget_max_seconds: budget_max_seconds.clone(),
+                fallback_model: fallback_model.clone(),
+                sandbox_mode: sandbox_mode.clone(),
+                tools_allowed_json: tools_allowed_json.clone(),
+                context_files_json: context_files_json.clone(),
+            }),
+            Reducer::CreateUser {
+                user_id,
+                display_name,
+                email,
+                avatar_url,
+                tier,
+            } => __sats::bsatn::to_vec(&create_user_reducer::CreateUserArgs {
+                user_id: user_id.clone(),
+                display_name: display_name.clone(),
+                email: email.clone(),
+                avatar_url: avatar_url.clone(),
+                tier: tier.clone(),
+            }),
+            Reducer::ExpireProposal {
+                proposal_id,
+                eligibility_snapshot,
+            } => __sats::bsatn::to_vec(&expire_proposal_reducer::ExpireProposalArgs {
+                proposal_id: proposal_id.clone(),
+                eligibility_snapshot: eligibility_snapshot.clone(),
+            }),
+            Reducer::FailMission {
+                mission_id,
+                updated_at,
+                error,
+            } => __sats::bsatn::to_vec(&fail_mission_reducer::FailMissionArgs {
+                mission_id: mission_id.clone(),
+                updated_at: updated_at.clone(),
+                error: error.clone(),
+            }),
+            Reducer::FinishCellRun {
+                cell_run_id,
+                status,
+                ended_at,
+                tokens_input,
+                tokens_output,
+                tokens_total,
+                output_summary,
+            } => __sats::bsatn::to_vec(&finish_cell_run_reducer::FinishCellRunArgs {
+                cell_run_id: cell_run_id.clone(),
+                status: status.clone(),
+                ended_at: ended_at.clone(),
+                tokens_input: tokens_input.clone(),
+                tokens_output: tokens_output.clone(),
+                tokens_total: tokens_total.clone(),
+                output_summary: output_summary.clone(),
+            }),
+            Reducer::InsertCaptainDirective {
+                directive_type,
+                payload_json,
+                priority,
+            } => __sats::bsatn::to_vec(
+                &insert_captain_directive_reducer::InsertCaptainDirectiveArgs {
+                    directive_type: directive_type.clone(),
+                    payload_json: payload_json.clone(),
+                    priority: priority.clone(),
+                },
+            ),
+            Reducer::InsertCaptainMessage {
+                message_id,
+                session_id,
+                role,
+                content,
+                timestamp,
+                source,
+            } => __sats::bsatn::to_vec(&insert_captain_message_reducer::InsertCaptainMessageArgs {
+                message_id: message_id.clone(),
+                session_id: session_id.clone(),
+                role: role.clone(),
+                content: content.clone(),
+                timestamp: timestamp.clone(),
+                source: source.clone(),
+            }),
+            Reducer::InsertCaptainSummary {
+                summary_id,
+                summary_type,
+                content,
+                range_start,
+                range_end,
+                messages_compressed,
+            } => __sats::bsatn::to_vec(&insert_captain_summary_reducer::InsertCaptainSummaryArgs {
+                summary_id: summary_id.clone(),
+                summary_type: summary_type.clone(),
+                content: content.clone(),
+                range_start: range_start.clone(),
+                range_end: range_end.clone(),
+                messages_compressed: messages_compressed.clone(),
+            }),
+            Reducer::InsertExecutionMemory {
+                task_dispatch_id,
+                lease_id,
+                model_used,
+                outcome,
+                duration_ms,
+                error_summary,
+                feedback_score,
+            } => __sats::bsatn::to_vec(
+                &insert_execution_memory_reducer::InsertExecutionMemoryArgs {
+                    task_dispatch_id: task_dispatch_id.clone(),
+                    lease_id: lease_id.clone(),
+                    model_used: model_used.clone(),
+                    outcome: outcome.clone(),
+                    duration_ms: duration_ms.clone(),
+                    error_summary: error_summary.clone(),
+                    feedback_score: feedback_score.clone(),
+                },
+            ),
+            Reducer::InsertKnowledgeEmbedding {
+                source_type,
+                source_id,
+                content_hash,
+                embedding_json,
+                ttl_hours,
+            } => __sats::bsatn::to_vec(
+                &insert_knowledge_embedding_reducer::InsertKnowledgeEmbeddingArgs {
+                    source_type: source_type.clone(),
+                    source_id: source_id.clone(),
+                    content_hash: content_hash.clone(),
+                    embedding_json: embedding_json.clone(),
+                    ttl_hours: ttl_hours.clone(),
+                },
+            ),
+            Reducer::IssueCapabilityLease {
+                lease_id,
+                proposal_id,
+                run_id,
+                parent_lease_id,
+                holder_kind,
+                holder_id,
+                tool_scope_json,
+                network_scope_json,
+                filesystem_scope_json,
+                secret_scope_json,
+                privilege_tier,
+                failure_policy,
+                chain_state,
+                routing_lock_json,
+                status,
+                issued_at,
+                expires_at,
+                hub_signature,
+            } => __sats::bsatn::to_vec(&issue_capability_lease_reducer::IssueCapabilityLeaseArgs {
+                lease_id: lease_id.clone(),
+                proposal_id: proposal_id.clone(),
+                run_id: run_id.clone(),
+                parent_lease_id: parent_lease_id.clone(),
+                holder_kind: holder_kind.clone(),
+                holder_id: holder_id.clone(),
+                tool_scope_json: tool_scope_json.clone(),
+                network_scope_json: network_scope_json.clone(),
+                filesystem_scope_json: filesystem_scope_json.clone(),
+                secret_scope_json: secret_scope_json.clone(),
+                privilege_tier: privilege_tier.clone(),
+                failure_policy: failure_policy.clone(),
+                chain_state: chain_state.clone(),
+                routing_lock_json: routing_lock_json.clone(),
+                status: status.clone(),
+                issued_at: issued_at.clone(),
+                expires_at: expires_at.clone(),
+                hub_signature: hub_signature.clone(),
+            }),
+            Reducer::LinkOauthIdentity {
+                identity_id,
+                user_id,
+                provider,
+                provider_user_id,
+                username,
+                access_token_enc,
+                refresh_token_enc,
+                token_expires_at,
+                scopes_json,
+            } => __sats::bsatn::to_vec(&link_oauth_identity_reducer::LinkOauthIdentityArgs {
+                identity_id: identity_id.clone(),
+                user_id: user_id.clone(),
+                provider: provider.clone(),
+                provider_user_id: provider_user_id.clone(),
+                username: username.clone(),
+                access_token_enc: access_token_enc.clone(),
+                refresh_token_enc: refresh_token_enc.clone(),
+                token_expires_at: token_expires_at.clone(),
+                scopes_json: scopes_json.clone(),
+            }),
+            Reducer::MarkMessagesCompressed {
+                session_id,
+                before_timestamp,
+            } => __sats::bsatn::to_vec(
+                &mark_messages_compressed_reducer::MarkMessagesCompressedArgs {
+                    session_id: session_id.clone(),
+                    before_timestamp: before_timestamp.clone(),
+                },
+            ),
+            Reducer::PauseMission {
+                mission_id,
+                updated_at,
+                summary,
+            } => __sats::bsatn::to_vec(&pause_mission_reducer::PauseMissionArgs {
+                mission_id: mission_id.clone(),
+                updated_at: updated_at.clone(),
+                summary: summary.clone(),
+            }),
+            Reducer::PruneCaptainMessages { before_timestamp } => {
+                __sats::bsatn::to_vec(&prune_captain_messages_reducer::PruneCaptainMessagesArgs {
+                    before_timestamp: before_timestamp.clone(),
+                })
+            }
+            Reducer::PruneExecutionMemory { keep_last } => {
+                __sats::bsatn::to_vec(&prune_execution_memory_reducer::PruneExecutionMemoryArgs {
+                    keep_last: keep_last.clone(),
+                })
+            }
+            Reducer::PruneKnowledgeEmbeddings { ttl_hours } => __sats::bsatn::to_vec(
+                &prune_knowledge_embeddings_reducer::PruneKnowledgeEmbeddingsArgs {
+                    ttl_hours: ttl_hours.clone(),
+                },
+            ),
+            Reducer::QueueProposal {
+                proposal_id,
+                eligibility_snapshot,
+            } => __sats::bsatn::to_vec(&queue_proposal_reducer::QueueProposalArgs {
+                proposal_id: proposal_id.clone(),
+                eligibility_snapshot: eligibility_snapshot.clone(),
+            }),
+            Reducer::RecordApprovalDecision {
+                decision_id,
+                request_id,
+                proposal_id,
+                actor_type,
+                actor_id,
+                decision,
+                reason,
+                created_at,
+                metadata_json,
+            } => __sats::bsatn::to_vec(
+                &record_approval_decision_reducer::RecordApprovalDecisionArgs {
+                    decision_id: decision_id.clone(),
+                    request_id: request_id.clone(),
+                    proposal_id: proposal_id.clone(),
+                    actor_type: actor_type.clone(),
+                    actor_id: actor_id.clone(),
+                    decision: decision.clone(),
+                    reason: reason.clone(),
+                    created_at: created_at.clone(),
+                    metadata_json: metadata_json.clone(),
+                },
+            ),
+            Reducer::RecordBillingEvent {
+                user_id,
+                event_type,
+                provider_id,
+                model_id,
+                tokens_input,
+                tokens_output,
+                estimated_cost_usd,
+                credential_id,
+                mission_id,
+                run_id,
+            } => __sats::bsatn::to_vec(&record_billing_event_reducer::RecordBillingEventArgs {
+                user_id: user_id.clone(),
+                event_type: event_type.clone(),
+                provider_id: provider_id.clone(),
+                model_id: model_id.clone(),
+                tokens_input: tokens_input.clone(),
+                tokens_output: tokens_output.clone(),
+                estimated_cost_usd: estimated_cost_usd.clone(),
+                credential_id: credential_id.clone(),
+                mission_id: mission_id.clone(),
+                run_id: run_id.clone(),
+            }),
+            Reducer::RecordConsent {
+                consent_id,
+                proposal_id,
+                proposal_hash,
+                actor_type,
+                actor_id,
+                decision,
+                comment,
+                metadata,
+                approval_request_id,
+                requested_by,
+                requested_at,
+                request_expires_at,
+                request_reason,
+                request_payload_json,
+                approved_at,
+                expires_at,
+            } => __sats::bsatn::to_vec(&record_consent_reducer::RecordConsentArgs {
+                consent_id: consent_id.clone(),
+                proposal_id: proposal_id.clone(),
+                proposal_hash: proposal_hash.clone(),
+                actor_type: actor_type.clone(),
+                actor_id: actor_id.clone(),
+                decision: decision.clone(),
+                comment: comment.clone(),
+                metadata: metadata.clone(),
+                approval_request_id: approval_request_id.clone(),
+                requested_by: requested_by.clone(),
+                requested_at: requested_at.clone(),
+                request_expires_at: request_expires_at.clone(),
+                request_reason: request_reason.clone(),
+                request_payload_json: request_payload_json.clone(),
+                approved_at: approved_at.clone(),
+                expires_at: expires_at.clone(),
+            }),
             Reducer::RecordInteraction {
                 user_id,
                 channel_id,
@@ -183,8 +1392,24 @@ impl __sdk::Reducer for Reducer {
                 channel_id: channel_id.clone(),
                 intent: intent.clone(),
             }),
+            Reducer::RecordProposalHeartbeat {
+                proposal_id,
+                node_id,
+                node_instance_id,
+                heartbeat_at,
+                detail,
+            } => __sats::bsatn::to_vec(
+                &record_proposal_heartbeat_reducer::RecordProposalHeartbeatArgs {
+                    proposal_id: proposal_id.clone(),
+                    node_id: node_id.clone(),
+                    node_instance_id: node_instance_id.clone(),
+                    heartbeat_at: heartbeat_at.clone(),
+                    detail: detail.clone(),
+                },
+            ),
             Reducer::RecordRouteDecision {
                 request_id,
+                user_id,
                 task_id,
                 envelope_version,
                 raw_text,
@@ -205,6 +1430,7 @@ impl __sdk::Reducer for Reducer {
                 created_at,
             } => __sats::bsatn::to_vec(&record_route_decision_reducer::RecordRouteDecisionArgs {
                 request_id: request_id.clone(),
+                user_id: user_id.clone(),
                 task_id: task_id.clone(),
                 envelope_version: envelope_version.clone(),
                 raw_text: raw_text.clone(),
@@ -226,7 +1452,9 @@ impl __sdk::Reducer for Reducer {
             }),
             Reducer::RecordRun {
                 run_id,
+                user_id,
                 proposal_id,
+                lease_id,
                 started_at,
                 ended_at,
                 status,
@@ -243,7 +1471,9 @@ impl __sdk::Reducer for Reducer {
                 cost,
             } => __sats::bsatn::to_vec(&record_run_reducer::RecordRunArgs {
                 run_id: run_id.clone(),
+                user_id: user_id.clone(),
                 proposal_id: proposal_id.clone(),
+                lease_id: lease_id.clone(),
                 started_at: started_at.clone(),
                 ended_at: ended_at.clone(),
                 status: status.clone(),
@@ -259,6 +1489,31 @@ impl __sdk::Reducer for Reducer {
                 tokens_total: tokens_total.clone(),
                 cost: cost.clone(),
             }),
+            Reducer::RegisterArtifact {
+                artifact_id,
+                lease_id,
+                user_id,
+                mission_id,
+                cell_run_id,
+                artifact_type,
+                title,
+                uri,
+                path,
+                content_json,
+                created_at,
+            } => __sats::bsatn::to_vec(&register_artifact_reducer::RegisterArtifactArgs {
+                artifact_id: artifact_id.clone(),
+                lease_id: lease_id.clone(),
+                user_id: user_id.clone(),
+                mission_id: mission_id.clone(),
+                cell_run_id: cell_run_id.clone(),
+                artifact_type: artifact_type.clone(),
+                title: title.clone(),
+                uri: uri.clone(),
+                path: path.clone(),
+                content_json: content_json.clone(),
+                created_at: created_at.clone(),
+            }),
             Reducer::RegisterDiscordChannel {
                 channel_id,
                 name,
@@ -272,12 +1527,196 @@ impl __sdk::Reducer for Reducer {
                     metadata: metadata.clone(),
                 },
             ),
+            Reducer::RejectProposal { proposal_id } => {
+                __sats::bsatn::to_vec(&reject_proposal_reducer::RejectProposalArgs {
+                    proposal_id: proposal_id.clone(),
+                })
+            }
+            Reducer::RenewCapabilityLease {
+                lease_id,
+                renewed_at,
+                expires_at,
+            } => __sats::bsatn::to_vec(&renew_capability_lease_reducer::RenewCapabilityLeaseArgs {
+                lease_id: lease_id.clone(),
+                renewed_at: renewed_at.clone(),
+                expires_at: expires_at.clone(),
+            }),
+            Reducer::RequeueProposal { proposal_id } => {
+                __sats::bsatn::to_vec(&requeue_proposal_reducer::RequeueProposalArgs {
+                    proposal_id: proposal_id.clone(),
+                })
+            }
+            Reducer::ResolveCaptainFocus {
+                focus_id,
+                resolved_at,
+            } => __sats::bsatn::to_vec(&resolve_captain_focus_reducer::ResolveCaptainFocusArgs {
+                focus_id: focus_id.clone(),
+                resolved_at: resolved_at.clone(),
+            }),
+            Reducer::ResumeMission {
+                mission_id,
+                updated_at,
+                summary,
+            } => __sats::bsatn::to_vec(&resume_mission_reducer::ResumeMissionArgs {
+                mission_id: mission_id.clone(),
+                updated_at: updated_at.clone(),
+                summary: summary.clone(),
+            }),
+            Reducer::RevokeCapabilityChain {
+                lease_id,
+                revoked_at,
+                revocation_reason,
+            } => __sats::bsatn::to_vec(
+                &revoke_capability_chain_reducer::RevokeCapabilityChainArgs {
+                    lease_id: lease_id.clone(),
+                    revoked_at: revoked_at.clone(),
+                    revocation_reason: revocation_reason.clone(),
+                },
+            ),
+            Reducer::RevokeCapabilityLease {
+                lease_id,
+                revoked_at,
+                revocation_reason,
+            } => __sats::bsatn::to_vec(
+                &revoke_capability_lease_reducer::RevokeCapabilityLeaseArgs {
+                    lease_id: lease_id.clone(),
+                    revoked_at: revoked_at.clone(),
+                    revocation_reason: revocation_reason.clone(),
+                },
+            ),
+            Reducer::RevokeProviderCredential { credential_id } => __sats::bsatn::to_vec(
+                &revoke_provider_credential_reducer::RevokeProviderCredentialArgs {
+                    credential_id: credential_id.clone(),
+                },
+            ),
             Reducer::SetNodeStatus { node_id, status } => {
                 __sats::bsatn::to_vec(&set_node_status_reducer::SetNodeStatusArgs {
                     node_id: node_id.clone(),
                     status: status.clone(),
                 })
             }
+            Reducer::StartCellRun {
+                cell_run_id,
+                user_id,
+                mission_id,
+                step_id,
+                status,
+                cell_id,
+                cell_role,
+                provider,
+                model,
+                rate_group,
+                tool,
+                started_at,
+                tokens_input,
+                tokens_output,
+                tokens_total,
+                output_summary,
+            } => __sats::bsatn::to_vec(&start_cell_run_reducer::StartCellRunArgs {
+                cell_run_id: cell_run_id.clone(),
+                user_id: user_id.clone(),
+                mission_id: mission_id.clone(),
+                step_id: step_id.clone(),
+                status: status.clone(),
+                cell_id: cell_id.clone(),
+                cell_role: cell_role.clone(),
+                provider: provider.clone(),
+                model: model.clone(),
+                rate_group: rate_group.clone(),
+                tool: tool.clone(),
+                started_at: started_at.clone(),
+                tokens_input: tokens_input.clone(),
+                tokens_output: tokens_output.clone(),
+                tokens_total: tokens_total.clone(),
+                output_summary: output_summary.clone(),
+            }),
+            Reducer::StoreProviderCredential {
+                credential_id,
+                user_id,
+                provider_id,
+                credential_kind,
+                credential_enc,
+                rate_group,
+                display_label,
+            } => __sats::bsatn::to_vec(
+                &store_provider_credential_reducer::StoreProviderCredentialArgs {
+                    credential_id: credential_id.clone(),
+                    user_id: user_id.clone(),
+                    provider_id: provider_id.clone(),
+                    credential_kind: credential_kind.clone(),
+                    credential_enc: credential_enc.clone(),
+                    rate_group: rate_group.clone(),
+                    display_label: display_label.clone(),
+                },
+            ),
+            Reducer::UpdateModelTierStats {
+                model_id,
+                success_rate,
+                avg_latency_ms,
+                latency_p_95_ms,
+            } => {
+                __sats::bsatn::to_vec(&update_model_tier_stats_reducer::UpdateModelTierStatsArgs {
+                    model_id: model_id.clone(),
+                    success_rate: success_rate.clone(),
+                    avg_latency_ms: avg_latency_ms.clone(),
+                    latency_p_95_ms: latency_p_95_ms.clone(),
+                })
+            }
+            Reducer::UpdatePodHeartbeat {
+                pod_id,
+                last_heartbeat,
+                liveness,
+            } => __sats::bsatn::to_vec(&update_pod_heartbeat_reducer::UpdatePodHeartbeatArgs {
+                pod_id: pod_id.clone(),
+                last_heartbeat: last_heartbeat.clone(),
+                liveness: liveness.clone(),
+            }),
+            Reducer::UpdateTaskDispatchStatus {
+                task_id,
+                status,
+                result_summary,
+                tokens_used,
+                latency_ms,
+            } => __sats::bsatn::to_vec(
+                &update_task_dispatch_status_reducer::UpdateTaskDispatchStatusArgs {
+                    task_id: task_id.clone(),
+                    status: status.clone(),
+                    result_summary: result_summary.clone(),
+                    tokens_used: tokens_used.clone(),
+                    latency_ms: latency_ms.clone(),
+                },
+            ),
+            Reducer::UpdateUserSeen { user_id } => {
+                __sats::bsatn::to_vec(&update_user_seen_reducer::UpdateUserSeenArgs {
+                    user_id: user_id.clone(),
+                })
+            }
+            Reducer::UpsertAgentRegistry {
+                cell_id,
+                display_name,
+                model_preference,
+                tools_allowed_json,
+                sandbox_mode,
+                active,
+            } => __sats::bsatn::to_vec(&upsert_agent_registry_reducer::UpsertAgentRegistryArgs {
+                cell_id: cell_id.clone(),
+                display_name: display_name.clone(),
+                model_preference: model_preference.clone(),
+                tools_allowed_json: tools_allowed_json.clone(),
+                sandbox_mode: sandbox_mode.clone(),
+                active: active.clone(),
+            }),
+            Reducer::UpsertCaptainFocus {
+                focus_id,
+                topic,
+                context_json,
+                priority,
+            } => __sats::bsatn::to_vec(&upsert_captain_focus_reducer::UpsertCaptainFocusArgs {
+                focus_id: focus_id.clone(),
+                topic: topic.clone(),
+                context_json: context_json.clone(),
+                priority: priority.clone(),
+            }),
             Reducer::UpsertDiscordUser {
                 user_id,
                 username,
@@ -295,6 +1734,31 @@ impl __sdk::Reducer for Reducer {
                 key: key.clone(),
                 last_state: last_state.clone(),
                 last_changed_at: last_changed_at.clone(),
+            }),
+            Reducer::UpsertModelTier {
+                model_id,
+                provider_model_id,
+                provider,
+                rate_group,
+                capability_class,
+                effort_knob,
+                effort_level,
+                cost_per_turn,
+                max_context_tokens,
+                strengths_json,
+                enabled,
+            } => __sats::bsatn::to_vec(&upsert_model_tier_reducer::UpsertModelTierArgs {
+                model_id: model_id.clone(),
+                provider_model_id: provider_model_id.clone(),
+                provider: provider.clone(),
+                rate_group: rate_group.clone(),
+                capability_class: capability_class.clone(),
+                effort_knob: effort_knob.clone(),
+                effort_level: effort_level.clone(),
+                cost_per_turn: cost_per_turn.clone(),
+                max_context_tokens: max_context_tokens.clone(),
+                strengths_json: strengths_json.clone(),
+                enabled: enabled.clone(),
             }),
             Reducer::UpsertNodeHeartbeat {
                 node_id,
@@ -315,6 +1779,111 @@ impl __sdk::Reducer for Reducer {
                 tags_json: tags_json.clone(),
                 max_concurrency: max_concurrency.clone(),
             }),
+            Reducer::UpsertNodeRegistry {
+                node_id,
+                hostname,
+                platform,
+                capabilities_json,
+                status,
+            } => __sats::bsatn::to_vec(&upsert_node_registry_reducer::UpsertNodeRegistryArgs {
+                node_id: node_id.clone(),
+                hostname: hostname.clone(),
+                platform: platform.clone(),
+                capabilities_json: capabilities_json.clone(),
+                status: status.clone(),
+            }),
+            Reducer::UpsertPod {
+                pod_id,
+                host_identity,
+                provider,
+                runtime_capabilities,
+                trust_tier,
+                privacy_floor,
+                gpu_inventory,
+                liveness,
+                leaseable,
+                registered_at,
+                last_heartbeat,
+            } => __sats::bsatn::to_vec(&upsert_pod_reducer::UpsertPodArgs {
+                pod_id: pod_id.clone(),
+                host_identity: host_identity.clone(),
+                provider: provider.clone(),
+                runtime_capabilities: runtime_capabilities.clone(),
+                trust_tier: trust_tier.clone(),
+                privacy_floor: privacy_floor.clone(),
+                gpu_inventory: gpu_inventory.clone(),
+                liveness: liveness.clone(),
+                leaseable: leaseable.clone(),
+                registered_at: registered_at.clone(),
+                last_heartbeat: last_heartbeat.clone(),
+            }),
+            Reducer::UpsertProviderAccountStatus {
+                account_id,
+                user_id,
+                provider_id,
+                node_id,
+                auth_kind,
+                local_handle_ref,
+                status,
+                display_name,
+                default_model,
+                rate_group,
+                available_models_json,
+                last_validated_at,
+                last_error,
+                updated_at,
+            } => __sats::bsatn::to_vec(
+                &upsert_provider_account_status_reducer::UpsertProviderAccountStatusArgs {
+                    account_id: account_id.clone(),
+                    user_id: user_id.clone(),
+                    provider_id: provider_id.clone(),
+                    node_id: node_id.clone(),
+                    auth_kind: auth_kind.clone(),
+                    local_handle_ref: local_handle_ref.clone(),
+                    status: status.clone(),
+                    display_name: display_name.clone(),
+                    default_model: default_model.clone(),
+                    rate_group: rate_group.clone(),
+                    available_models_json: available_models_json.clone(),
+                    last_validated_at: last_validated_at.clone(),
+                    last_error: last_error.clone(),
+                    updated_at: updated_at.clone(),
+                },
+            ),
+            Reducer::UpsertRateGroupState {
+                rate_group,
+                turns_used,
+                turns_max,
+                window_seconds,
+                cooldown_until,
+                available,
+            } => {
+                __sats::bsatn::to_vec(&upsert_rate_group_state_reducer::UpsertRateGroupStateArgs {
+                    rate_group: rate_group.clone(),
+                    turns_used: turns_used.clone(),
+                    turns_max: turns_max.clone(),
+                    window_seconds: window_seconds.clone(),
+                    cooldown_until: cooldown_until.clone(),
+                    available: available.clone(),
+                })
+            }
+            Reducer::WriteSessionSummary {
+                summary_id,
+                user_id,
+                session_id,
+                node_id,
+                created_at,
+                summary_text,
+                metadata_json,
+            } => __sats::bsatn::to_vec(&write_session_summary_reducer::WriteSessionSummaryArgs {
+                summary_id: summary_id.clone(),
+                user_id: user_id.clone(),
+                session_id: session_id.clone(),
+                node_id: node_id.clone(),
+                created_at: created_at.clone(),
+                summary_text: summary_text.clone(),
+                metadata_json: metadata_json.clone(),
+            }),
             _ => unreachable!(),
         }
     }
@@ -324,14 +1893,41 @@ impl __sdk::Reducer for Reducer {
 #[allow(non_snake_case)]
 #[doc(hidden)]
 pub struct DbUpdate {
+    agent_registry: __sdk::TableUpdate<AgentRegistryEntry>,
+    approval_decisions: __sdk::TableUpdate<ApprovalDecision>,
+    approval_requests: __sdk::TableUpdate<ApprovalRequest>,
+    artifacts: __sdk::TableUpdate<ArtifactRecord>,
+    billing_events: __sdk::TableUpdate<BillingEvent>,
+    capability_leases: __sdk::TableUpdate<CapabilityLease>,
+    captain_directives: __sdk::TableUpdate<CaptainDirective>,
+    captain_focus: __sdk::TableUpdate<CaptainFocus>,
+    captain_messages: __sdk::TableUpdate<CaptainMessage>,
+    captain_summaries: __sdk::TableUpdate<CaptainSummary>,
+    cell_runs: __sdk::TableUpdate<CellRunRecord>,
     discord_channels: __sdk::TableUpdate<DiscordChannel>,
     discord_interactions: __sdk::TableUpdate<DiscordInteraction>,
     discord_users: __sdk::TableUpdate<DiscordUser>,
+    execution_memory: __sdk::TableUpdate<ExecutionMemory>,
+    knowledge_embeddings: __sdk::TableUpdate<KnowledgeEmbedding>,
     liveness_state: __sdk::TableUpdate<LivenessState>,
+    mission_steps: __sdk::TableUpdate<MissionStepRecord>,
+    missions: __sdk::TableUpdate<MissionRecord>,
+    model_tiers: __sdk::TableUpdate<ModelTier>,
+    node_registry: __sdk::TableUpdate<NodeRegistryEntry>,
     nodes: __sdk::TableUpdate<NodeStatus>,
+    oauth_identities: __sdk::TableUpdate<OAuthIdentity>,
+    pods: __sdk::TableUpdate<Pod>,
+    proposal_consents: __sdk::TableUpdate<ProposalConsent>,
+    proposals: __sdk::TableUpdate<Proposal>,
+    provider_accounts: __sdk::TableUpdate<ProviderAccount>,
+    provider_credentials: __sdk::TableUpdate<ProviderCredential>,
+    rate_group_state: __sdk::TableUpdate<RateGroupState>,
     route_decisions: __sdk::TableUpdate<RouteDecision>,
     runs: __sdk::TableUpdate<RunRecord>,
+    session_summaries: __sdk::TableUpdate<SessionSummaryRecord>,
+    task_dispatches: __sdk::TableUpdate<TaskDispatch>,
     tenant_task_view: __sdk::TableUpdate<OrganizationTask>,
+    users: __sdk::TableUpdate<User>,
 }
 
 impl TryFrom<__ws::v2::TransactionUpdate> for DbUpdate {
@@ -340,6 +1936,39 @@ impl TryFrom<__ws::v2::TransactionUpdate> for DbUpdate {
         let mut db_update = DbUpdate::default();
         for table_update in __sdk::transaction_update_iter_table_updates(raw) {
             match &table_update.table_name[..] {
+                "agent_registry" => db_update
+                    .agent_registry
+                    .append(agent_registry_table::parse_table_update(table_update)?),
+                "approval_decisions" => db_update
+                    .approval_decisions
+                    .append(approval_decisions_table::parse_table_update(table_update)?),
+                "approval_requests" => db_update
+                    .approval_requests
+                    .append(approval_requests_table::parse_table_update(table_update)?),
+                "artifacts" => db_update
+                    .artifacts
+                    .append(artifacts_table::parse_table_update(table_update)?),
+                "billing_events" => db_update
+                    .billing_events
+                    .append(billing_events_table::parse_table_update(table_update)?),
+                "capability_leases" => db_update
+                    .capability_leases
+                    .append(capability_leases_table::parse_table_update(table_update)?),
+                "captain_directives" => db_update
+                    .captain_directives
+                    .append(captain_directives_table::parse_table_update(table_update)?),
+                "captain_focus" => db_update
+                    .captain_focus
+                    .append(captain_focus_table::parse_table_update(table_update)?),
+                "captain_messages" => db_update
+                    .captain_messages
+                    .append(captain_messages_table::parse_table_update(table_update)?),
+                "captain_summaries" => db_update
+                    .captain_summaries
+                    .append(captain_summaries_table::parse_table_update(table_update)?),
+                "cell_runs" => db_update
+                    .cell_runs
+                    .append(cell_runs_table::parse_table_update(table_update)?),
                 "discord_channels" => db_update
                     .discord_channels
                     .append(discord_channels_table::parse_table_update(table_update)?),
@@ -349,21 +1978,69 @@ impl TryFrom<__ws::v2::TransactionUpdate> for DbUpdate {
                 "discord_users" => db_update
                     .discord_users
                     .append(discord_users_table::parse_table_update(table_update)?),
+                "execution_memory" => db_update
+                    .execution_memory
+                    .append(execution_memory_table::parse_table_update(table_update)?),
+                "knowledge_embeddings" => db_update.knowledge_embeddings.append(
+                    knowledge_embeddings_table::parse_table_update(table_update)?,
+                ),
                 "liveness_state" => db_update
                     .liveness_state
                     .append(liveness_state_table::parse_table_update(table_update)?),
+                "mission_steps" => db_update
+                    .mission_steps
+                    .append(mission_steps_table::parse_table_update(table_update)?),
+                "missions" => db_update
+                    .missions
+                    .append(missions_table::parse_table_update(table_update)?),
+                "model_tiers" => db_update
+                    .model_tiers
+                    .append(model_tiers_table::parse_table_update(table_update)?),
+                "node_registry" => db_update
+                    .node_registry
+                    .append(node_registry_table::parse_table_update(table_update)?),
                 "nodes" => db_update
                     .nodes
                     .append(nodes_table::parse_table_update(table_update)?),
+                "oauth_identities" => db_update
+                    .oauth_identities
+                    .append(oauth_identities_table::parse_table_update(table_update)?),
+                "pods" => db_update
+                    .pods
+                    .append(pods_table::parse_table_update(table_update)?),
+                "proposal_consents" => db_update
+                    .proposal_consents
+                    .append(proposal_consents_table::parse_table_update(table_update)?),
+                "proposals" => db_update
+                    .proposals
+                    .append(proposals_table::parse_table_update(table_update)?),
+                "provider_accounts" => db_update
+                    .provider_accounts
+                    .append(provider_accounts_table::parse_table_update(table_update)?),
+                "provider_credentials" => db_update.provider_credentials.append(
+                    provider_credentials_table::parse_table_update(table_update)?,
+                ),
+                "rate_group_state" => db_update
+                    .rate_group_state
+                    .append(rate_group_state_table::parse_table_update(table_update)?),
                 "route_decisions" => db_update
                     .route_decisions
                     .append(route_decisions_table::parse_table_update(table_update)?),
                 "runs" => db_update
                     .runs
                     .append(runs_table::parse_table_update(table_update)?),
+                "session_summaries" => db_update
+                    .session_summaries
+                    .append(session_summaries_table::parse_table_update(table_update)?),
+                "task_dispatches" => db_update
+                    .task_dispatches
+                    .append(task_dispatches_table::parse_table_update(table_update)?),
                 "tenant_task_view" => db_update
                     .tenant_task_view
                     .append(tenant_task_view_table::parse_table_update(table_update)?),
+                "users" => db_update
+                    .users
+                    .append(users_table::parse_table_update(table_update)?),
 
                 unknown => {
                     return Err(__sdk::InternalError::unknown_name(
@@ -390,6 +2067,39 @@ impl __sdk::DbUpdate for DbUpdate {
     ) -> AppliedDiff<'_> {
         let mut diff = AppliedDiff::default();
 
+        diff.agent_registry = cache
+            .apply_diff_to_table::<AgentRegistryEntry>("agent_registry", &self.agent_registry)
+            .with_updates_by_pk(|row| &row.cell_id);
+        diff.approval_decisions = cache
+            .apply_diff_to_table::<ApprovalDecision>("approval_decisions", &self.approval_decisions)
+            .with_updates_by_pk(|row| &row.decision_id);
+        diff.approval_requests = cache
+            .apply_diff_to_table::<ApprovalRequest>("approval_requests", &self.approval_requests)
+            .with_updates_by_pk(|row| &row.request_id);
+        diff.artifacts = cache
+            .apply_diff_to_table::<ArtifactRecord>("artifacts", &self.artifacts)
+            .with_updates_by_pk(|row| &row.artifact_id);
+        diff.billing_events = cache
+            .apply_diff_to_table::<BillingEvent>("billing_events", &self.billing_events)
+            .with_updates_by_pk(|row| &row.id);
+        diff.capability_leases = cache
+            .apply_diff_to_table::<CapabilityLease>("capability_leases", &self.capability_leases)
+            .with_updates_by_pk(|row| &row.lease_id);
+        diff.captain_directives = cache
+            .apply_diff_to_table::<CaptainDirective>("captain_directives", &self.captain_directives)
+            .with_updates_by_pk(|row| &row.id);
+        diff.captain_focus = cache
+            .apply_diff_to_table::<CaptainFocus>("captain_focus", &self.captain_focus)
+            .with_updates_by_pk(|row| &row.focus_id);
+        diff.captain_messages = cache
+            .apply_diff_to_table::<CaptainMessage>("captain_messages", &self.captain_messages)
+            .with_updates_by_pk(|row| &row.message_id);
+        diff.captain_summaries = cache
+            .apply_diff_to_table::<CaptainSummary>("captain_summaries", &self.captain_summaries)
+            .with_updates_by_pk(|row| &row.summary_id);
+        diff.cell_runs = cache
+            .apply_diff_to_table::<CellRunRecord>("cell_runs", &self.cell_runs)
+            .with_updates_by_pk(|row| &row.cell_run_id);
         diff.discord_channels = cache
             .apply_diff_to_table::<DiscordChannel>("discord_channels", &self.discord_channels)
             .with_updates_by_pk(|row| &row.channel_id);
@@ -402,18 +2112,75 @@ impl __sdk::DbUpdate for DbUpdate {
         diff.discord_users = cache
             .apply_diff_to_table::<DiscordUser>("discord_users", &self.discord_users)
             .with_updates_by_pk(|row| &row.user_id);
+        diff.execution_memory = cache
+            .apply_diff_to_table::<ExecutionMemory>("execution_memory", &self.execution_memory)
+            .with_updates_by_pk(|row| &row.id);
+        diff.knowledge_embeddings = cache
+            .apply_diff_to_table::<KnowledgeEmbedding>(
+                "knowledge_embeddings",
+                &self.knowledge_embeddings,
+            )
+            .with_updates_by_pk(|row| &row.id);
         diff.liveness_state = cache
             .apply_diff_to_table::<LivenessState>("liveness_state", &self.liveness_state)
             .with_updates_by_pk(|row| &row.key);
+        diff.mission_steps = cache
+            .apply_diff_to_table::<MissionStepRecord>("mission_steps", &self.mission_steps)
+            .with_updates_by_pk(|row| &row.step_id);
+        diff.missions = cache
+            .apply_diff_to_table::<MissionRecord>("missions", &self.missions)
+            .with_updates_by_pk(|row| &row.mission_id);
+        diff.model_tiers = cache
+            .apply_diff_to_table::<ModelTier>("model_tiers", &self.model_tiers)
+            .with_updates_by_pk(|row| &row.id);
+        diff.node_registry = cache
+            .apply_diff_to_table::<NodeRegistryEntry>("node_registry", &self.node_registry)
+            .with_updates_by_pk(|row| &row.node_id);
         diff.nodes = cache
             .apply_diff_to_table::<NodeStatus>("nodes", &self.nodes)
             .with_updates_by_pk(|row| &row.node_id);
+        diff.oauth_identities = cache
+            .apply_diff_to_table::<OAuthIdentity>("oauth_identities", &self.oauth_identities)
+            .with_updates_by_pk(|row| &row.identity_id);
+        diff.pods = cache
+            .apply_diff_to_table::<Pod>("pods", &self.pods)
+            .with_updates_by_pk(|row| &row.pod_id);
+        diff.proposal_consents = cache
+            .apply_diff_to_table::<ProposalConsent>("proposal_consents", &self.proposal_consents)
+            .with_updates_by_pk(|row| &row.consent_id);
+        diff.proposals = cache
+            .apply_diff_to_table::<Proposal>("proposals", &self.proposals)
+            .with_updates_by_pk(|row| &row.proposal_id);
+        diff.provider_accounts = cache
+            .apply_diff_to_table::<ProviderAccount>("provider_accounts", &self.provider_accounts)
+            .with_updates_by_pk(|row| &row.account_id);
+        diff.provider_credentials = cache
+            .apply_diff_to_table::<ProviderCredential>(
+                "provider_credentials",
+                &self.provider_credentials,
+            )
+            .with_updates_by_pk(|row| &row.credential_id);
+        diff.rate_group_state = cache
+            .apply_diff_to_table::<RateGroupState>("rate_group_state", &self.rate_group_state)
+            .with_updates_by_pk(|row| &row.rate_group);
         diff.route_decisions = cache
             .apply_diff_to_table::<RouteDecision>("route_decisions", &self.route_decisions)
             .with_updates_by_pk(|row| &row.request_id);
         diff.runs = cache
             .apply_diff_to_table::<RunRecord>("runs", &self.runs)
             .with_updates_by_pk(|row| &row.run_id);
+        diff.session_summaries = cache
+            .apply_diff_to_table::<SessionSummaryRecord>(
+                "session_summaries",
+                &self.session_summaries,
+            )
+            .with_updates_by_pk(|row| &row.summary_id);
+        diff.task_dispatches = cache
+            .apply_diff_to_table::<TaskDispatch>("task_dispatches", &self.task_dispatches)
+            .with_updates_by_pk(|row| &row.task_id);
+        diff.users = cache
+            .apply_diff_to_table::<User>("users", &self.users)
+            .with_updates_by_pk(|row| &row.user_id);
         diff.tenant_task_view = cache
             .apply_diff_to_table::<OrganizationTask>("tenant_task_view", &self.tenant_task_view);
 
@@ -423,6 +2190,39 @@ impl __sdk::DbUpdate for DbUpdate {
         let mut db_update = DbUpdate::default();
         for table_rows in raw.tables {
             match &table_rows.table[..] {
+                "agent_registry" => db_update
+                    .agent_registry
+                    .append(__sdk::parse_row_list_as_inserts(table_rows.rows)?),
+                "approval_decisions" => db_update
+                    .approval_decisions
+                    .append(__sdk::parse_row_list_as_inserts(table_rows.rows)?),
+                "approval_requests" => db_update
+                    .approval_requests
+                    .append(__sdk::parse_row_list_as_inserts(table_rows.rows)?),
+                "artifacts" => db_update
+                    .artifacts
+                    .append(__sdk::parse_row_list_as_inserts(table_rows.rows)?),
+                "billing_events" => db_update
+                    .billing_events
+                    .append(__sdk::parse_row_list_as_inserts(table_rows.rows)?),
+                "capability_leases" => db_update
+                    .capability_leases
+                    .append(__sdk::parse_row_list_as_inserts(table_rows.rows)?),
+                "captain_directives" => db_update
+                    .captain_directives
+                    .append(__sdk::parse_row_list_as_inserts(table_rows.rows)?),
+                "captain_focus" => db_update
+                    .captain_focus
+                    .append(__sdk::parse_row_list_as_inserts(table_rows.rows)?),
+                "captain_messages" => db_update
+                    .captain_messages
+                    .append(__sdk::parse_row_list_as_inserts(table_rows.rows)?),
+                "captain_summaries" => db_update
+                    .captain_summaries
+                    .append(__sdk::parse_row_list_as_inserts(table_rows.rows)?),
+                "cell_runs" => db_update
+                    .cell_runs
+                    .append(__sdk::parse_row_list_as_inserts(table_rows.rows)?),
                 "discord_channels" => db_update
                     .discord_channels
                     .append(__sdk::parse_row_list_as_inserts(table_rows.rows)?),
@@ -432,11 +2232,50 @@ impl __sdk::DbUpdate for DbUpdate {
                 "discord_users" => db_update
                     .discord_users
                     .append(__sdk::parse_row_list_as_inserts(table_rows.rows)?),
+                "execution_memory" => db_update
+                    .execution_memory
+                    .append(__sdk::parse_row_list_as_inserts(table_rows.rows)?),
+                "knowledge_embeddings" => db_update
+                    .knowledge_embeddings
+                    .append(__sdk::parse_row_list_as_inserts(table_rows.rows)?),
                 "liveness_state" => db_update
                     .liveness_state
                     .append(__sdk::parse_row_list_as_inserts(table_rows.rows)?),
+                "mission_steps" => db_update
+                    .mission_steps
+                    .append(__sdk::parse_row_list_as_inserts(table_rows.rows)?),
+                "missions" => db_update
+                    .missions
+                    .append(__sdk::parse_row_list_as_inserts(table_rows.rows)?),
+                "model_tiers" => db_update
+                    .model_tiers
+                    .append(__sdk::parse_row_list_as_inserts(table_rows.rows)?),
+                "node_registry" => db_update
+                    .node_registry
+                    .append(__sdk::parse_row_list_as_inserts(table_rows.rows)?),
                 "nodes" => db_update
                     .nodes
+                    .append(__sdk::parse_row_list_as_inserts(table_rows.rows)?),
+                "oauth_identities" => db_update
+                    .oauth_identities
+                    .append(__sdk::parse_row_list_as_inserts(table_rows.rows)?),
+                "pods" => db_update
+                    .pods
+                    .append(__sdk::parse_row_list_as_inserts(table_rows.rows)?),
+                "proposal_consents" => db_update
+                    .proposal_consents
+                    .append(__sdk::parse_row_list_as_inserts(table_rows.rows)?),
+                "proposals" => db_update
+                    .proposals
+                    .append(__sdk::parse_row_list_as_inserts(table_rows.rows)?),
+                "provider_accounts" => db_update
+                    .provider_accounts
+                    .append(__sdk::parse_row_list_as_inserts(table_rows.rows)?),
+                "provider_credentials" => db_update
+                    .provider_credentials
+                    .append(__sdk::parse_row_list_as_inserts(table_rows.rows)?),
+                "rate_group_state" => db_update
+                    .rate_group_state
                     .append(__sdk::parse_row_list_as_inserts(table_rows.rows)?),
                 "route_decisions" => db_update
                     .route_decisions
@@ -444,8 +2283,17 @@ impl __sdk::DbUpdate for DbUpdate {
                 "runs" => db_update
                     .runs
                     .append(__sdk::parse_row_list_as_inserts(table_rows.rows)?),
+                "session_summaries" => db_update
+                    .session_summaries
+                    .append(__sdk::parse_row_list_as_inserts(table_rows.rows)?),
+                "task_dispatches" => db_update
+                    .task_dispatches
+                    .append(__sdk::parse_row_list_as_inserts(table_rows.rows)?),
                 "tenant_task_view" => db_update
                     .tenant_task_view
+                    .append(__sdk::parse_row_list_as_inserts(table_rows.rows)?),
+                "users" => db_update
+                    .users
                     .append(__sdk::parse_row_list_as_inserts(table_rows.rows)?),
                 unknown => {
                     return Err(
@@ -460,6 +2308,39 @@ impl __sdk::DbUpdate for DbUpdate {
         let mut db_update = DbUpdate::default();
         for table_rows in raw.tables {
             match &table_rows.table[..] {
+                "agent_registry" => db_update
+                    .agent_registry
+                    .append(__sdk::parse_row_list_as_deletes(table_rows.rows)?),
+                "approval_decisions" => db_update
+                    .approval_decisions
+                    .append(__sdk::parse_row_list_as_deletes(table_rows.rows)?),
+                "approval_requests" => db_update
+                    .approval_requests
+                    .append(__sdk::parse_row_list_as_deletes(table_rows.rows)?),
+                "artifacts" => db_update
+                    .artifacts
+                    .append(__sdk::parse_row_list_as_deletes(table_rows.rows)?),
+                "billing_events" => db_update
+                    .billing_events
+                    .append(__sdk::parse_row_list_as_deletes(table_rows.rows)?),
+                "capability_leases" => db_update
+                    .capability_leases
+                    .append(__sdk::parse_row_list_as_deletes(table_rows.rows)?),
+                "captain_directives" => db_update
+                    .captain_directives
+                    .append(__sdk::parse_row_list_as_deletes(table_rows.rows)?),
+                "captain_focus" => db_update
+                    .captain_focus
+                    .append(__sdk::parse_row_list_as_deletes(table_rows.rows)?),
+                "captain_messages" => db_update
+                    .captain_messages
+                    .append(__sdk::parse_row_list_as_deletes(table_rows.rows)?),
+                "captain_summaries" => db_update
+                    .captain_summaries
+                    .append(__sdk::parse_row_list_as_deletes(table_rows.rows)?),
+                "cell_runs" => db_update
+                    .cell_runs
+                    .append(__sdk::parse_row_list_as_deletes(table_rows.rows)?),
                 "discord_channels" => db_update
                     .discord_channels
                     .append(__sdk::parse_row_list_as_deletes(table_rows.rows)?),
@@ -469,11 +2350,50 @@ impl __sdk::DbUpdate for DbUpdate {
                 "discord_users" => db_update
                     .discord_users
                     .append(__sdk::parse_row_list_as_deletes(table_rows.rows)?),
+                "execution_memory" => db_update
+                    .execution_memory
+                    .append(__sdk::parse_row_list_as_deletes(table_rows.rows)?),
+                "knowledge_embeddings" => db_update
+                    .knowledge_embeddings
+                    .append(__sdk::parse_row_list_as_deletes(table_rows.rows)?),
                 "liveness_state" => db_update
                     .liveness_state
                     .append(__sdk::parse_row_list_as_deletes(table_rows.rows)?),
+                "mission_steps" => db_update
+                    .mission_steps
+                    .append(__sdk::parse_row_list_as_deletes(table_rows.rows)?),
+                "missions" => db_update
+                    .missions
+                    .append(__sdk::parse_row_list_as_deletes(table_rows.rows)?),
+                "model_tiers" => db_update
+                    .model_tiers
+                    .append(__sdk::parse_row_list_as_deletes(table_rows.rows)?),
+                "node_registry" => db_update
+                    .node_registry
+                    .append(__sdk::parse_row_list_as_deletes(table_rows.rows)?),
                 "nodes" => db_update
                     .nodes
+                    .append(__sdk::parse_row_list_as_deletes(table_rows.rows)?),
+                "oauth_identities" => db_update
+                    .oauth_identities
+                    .append(__sdk::parse_row_list_as_deletes(table_rows.rows)?),
+                "pods" => db_update
+                    .pods
+                    .append(__sdk::parse_row_list_as_deletes(table_rows.rows)?),
+                "proposal_consents" => db_update
+                    .proposal_consents
+                    .append(__sdk::parse_row_list_as_deletes(table_rows.rows)?),
+                "proposals" => db_update
+                    .proposals
+                    .append(__sdk::parse_row_list_as_deletes(table_rows.rows)?),
+                "provider_accounts" => db_update
+                    .provider_accounts
+                    .append(__sdk::parse_row_list_as_deletes(table_rows.rows)?),
+                "provider_credentials" => db_update
+                    .provider_credentials
+                    .append(__sdk::parse_row_list_as_deletes(table_rows.rows)?),
+                "rate_group_state" => db_update
+                    .rate_group_state
                     .append(__sdk::parse_row_list_as_deletes(table_rows.rows)?),
                 "route_decisions" => db_update
                     .route_decisions
@@ -481,8 +2401,17 @@ impl __sdk::DbUpdate for DbUpdate {
                 "runs" => db_update
                     .runs
                     .append(__sdk::parse_row_list_as_deletes(table_rows.rows)?),
+                "session_summaries" => db_update
+                    .session_summaries
+                    .append(__sdk::parse_row_list_as_deletes(table_rows.rows)?),
+                "task_dispatches" => db_update
+                    .task_dispatches
+                    .append(__sdk::parse_row_list_as_deletes(table_rows.rows)?),
                 "tenant_task_view" => db_update
                     .tenant_task_view
+                    .append(__sdk::parse_row_list_as_deletes(table_rows.rows)?),
+                "users" => db_update
+                    .users
                     .append(__sdk::parse_row_list_as_deletes(table_rows.rows)?),
                 unknown => {
                     return Err(
@@ -499,14 +2428,41 @@ impl __sdk::DbUpdate for DbUpdate {
 #[allow(non_snake_case)]
 #[doc(hidden)]
 pub struct AppliedDiff<'r> {
+    agent_registry: __sdk::TableAppliedDiff<'r, AgentRegistryEntry>,
+    approval_decisions: __sdk::TableAppliedDiff<'r, ApprovalDecision>,
+    approval_requests: __sdk::TableAppliedDiff<'r, ApprovalRequest>,
+    artifacts: __sdk::TableAppliedDiff<'r, ArtifactRecord>,
+    billing_events: __sdk::TableAppliedDiff<'r, BillingEvent>,
+    capability_leases: __sdk::TableAppliedDiff<'r, CapabilityLease>,
+    captain_directives: __sdk::TableAppliedDiff<'r, CaptainDirective>,
+    captain_focus: __sdk::TableAppliedDiff<'r, CaptainFocus>,
+    captain_messages: __sdk::TableAppliedDiff<'r, CaptainMessage>,
+    captain_summaries: __sdk::TableAppliedDiff<'r, CaptainSummary>,
+    cell_runs: __sdk::TableAppliedDiff<'r, CellRunRecord>,
     discord_channels: __sdk::TableAppliedDiff<'r, DiscordChannel>,
     discord_interactions: __sdk::TableAppliedDiff<'r, DiscordInteraction>,
     discord_users: __sdk::TableAppliedDiff<'r, DiscordUser>,
+    execution_memory: __sdk::TableAppliedDiff<'r, ExecutionMemory>,
+    knowledge_embeddings: __sdk::TableAppliedDiff<'r, KnowledgeEmbedding>,
     liveness_state: __sdk::TableAppliedDiff<'r, LivenessState>,
+    mission_steps: __sdk::TableAppliedDiff<'r, MissionStepRecord>,
+    missions: __sdk::TableAppliedDiff<'r, MissionRecord>,
+    model_tiers: __sdk::TableAppliedDiff<'r, ModelTier>,
+    node_registry: __sdk::TableAppliedDiff<'r, NodeRegistryEntry>,
     nodes: __sdk::TableAppliedDiff<'r, NodeStatus>,
+    oauth_identities: __sdk::TableAppliedDiff<'r, OAuthIdentity>,
+    pods: __sdk::TableAppliedDiff<'r, Pod>,
+    proposal_consents: __sdk::TableAppliedDiff<'r, ProposalConsent>,
+    proposals: __sdk::TableAppliedDiff<'r, Proposal>,
+    provider_accounts: __sdk::TableAppliedDiff<'r, ProviderAccount>,
+    provider_credentials: __sdk::TableAppliedDiff<'r, ProviderCredential>,
+    rate_group_state: __sdk::TableAppliedDiff<'r, RateGroupState>,
     route_decisions: __sdk::TableAppliedDiff<'r, RouteDecision>,
     runs: __sdk::TableAppliedDiff<'r, RunRecord>,
+    session_summaries: __sdk::TableAppliedDiff<'r, SessionSummaryRecord>,
+    task_dispatches: __sdk::TableAppliedDiff<'r, TaskDispatch>,
     tenant_task_view: __sdk::TableAppliedDiff<'r, OrganizationTask>,
+    users: __sdk::TableAppliedDiff<'r, User>,
     __unused: std::marker::PhantomData<&'r ()>,
 }
 
@@ -520,6 +2476,53 @@ impl<'r> __sdk::AppliedDiff<'r> for AppliedDiff<'r> {
         event: &EventContext,
         callbacks: &mut __sdk::DbCallbacks<RemoteModule>,
     ) {
+        callbacks.invoke_table_row_callbacks::<AgentRegistryEntry>(
+            "agent_registry",
+            &self.agent_registry,
+            event,
+        );
+        callbacks.invoke_table_row_callbacks::<ApprovalDecision>(
+            "approval_decisions",
+            &self.approval_decisions,
+            event,
+        );
+        callbacks.invoke_table_row_callbacks::<ApprovalRequest>(
+            "approval_requests",
+            &self.approval_requests,
+            event,
+        );
+        callbacks.invoke_table_row_callbacks::<ArtifactRecord>("artifacts", &self.artifacts, event);
+        callbacks.invoke_table_row_callbacks::<BillingEvent>(
+            "billing_events",
+            &self.billing_events,
+            event,
+        );
+        callbacks.invoke_table_row_callbacks::<CapabilityLease>(
+            "capability_leases",
+            &self.capability_leases,
+            event,
+        );
+        callbacks.invoke_table_row_callbacks::<CaptainDirective>(
+            "captain_directives",
+            &self.captain_directives,
+            event,
+        );
+        callbacks.invoke_table_row_callbacks::<CaptainFocus>(
+            "captain_focus",
+            &self.captain_focus,
+            event,
+        );
+        callbacks.invoke_table_row_callbacks::<CaptainMessage>(
+            "captain_messages",
+            &self.captain_messages,
+            event,
+        );
+        callbacks.invoke_table_row_callbacks::<CaptainSummary>(
+            "captain_summaries",
+            &self.captain_summaries,
+            event,
+        );
+        callbacks.invoke_table_row_callbacks::<CellRunRecord>("cell_runs", &self.cell_runs, event);
         callbacks.invoke_table_row_callbacks::<DiscordChannel>(
             "discord_channels",
             &self.discord_channels,
@@ -535,23 +2538,83 @@ impl<'r> __sdk::AppliedDiff<'r> for AppliedDiff<'r> {
             &self.discord_users,
             event,
         );
+        callbacks.invoke_table_row_callbacks::<ExecutionMemory>(
+            "execution_memory",
+            &self.execution_memory,
+            event,
+        );
+        callbacks.invoke_table_row_callbacks::<KnowledgeEmbedding>(
+            "knowledge_embeddings",
+            &self.knowledge_embeddings,
+            event,
+        );
         callbacks.invoke_table_row_callbacks::<LivenessState>(
             "liveness_state",
             &self.liveness_state,
             event,
         );
+        callbacks.invoke_table_row_callbacks::<MissionStepRecord>(
+            "mission_steps",
+            &self.mission_steps,
+            event,
+        );
+        callbacks.invoke_table_row_callbacks::<MissionRecord>("missions", &self.missions, event);
+        callbacks.invoke_table_row_callbacks::<ModelTier>("model_tiers", &self.model_tiers, event);
+        callbacks.invoke_table_row_callbacks::<NodeRegistryEntry>(
+            "node_registry",
+            &self.node_registry,
+            event,
+        );
         callbacks.invoke_table_row_callbacks::<NodeStatus>("nodes", &self.nodes, event);
+        callbacks.invoke_table_row_callbacks::<OAuthIdentity>(
+            "oauth_identities",
+            &self.oauth_identities,
+            event,
+        );
+        callbacks.invoke_table_row_callbacks::<Pod>("pods", &self.pods, event);
+        callbacks.invoke_table_row_callbacks::<ProposalConsent>(
+            "proposal_consents",
+            &self.proposal_consents,
+            event,
+        );
+        callbacks.invoke_table_row_callbacks::<Proposal>("proposals", &self.proposals, event);
+        callbacks.invoke_table_row_callbacks::<ProviderAccount>(
+            "provider_accounts",
+            &self.provider_accounts,
+            event,
+        );
+        callbacks.invoke_table_row_callbacks::<ProviderCredential>(
+            "provider_credentials",
+            &self.provider_credentials,
+            event,
+        );
+        callbacks.invoke_table_row_callbacks::<RateGroupState>(
+            "rate_group_state",
+            &self.rate_group_state,
+            event,
+        );
         callbacks.invoke_table_row_callbacks::<RouteDecision>(
             "route_decisions",
             &self.route_decisions,
             event,
         );
         callbacks.invoke_table_row_callbacks::<RunRecord>("runs", &self.runs, event);
+        callbacks.invoke_table_row_callbacks::<SessionSummaryRecord>(
+            "session_summaries",
+            &self.session_summaries,
+            event,
+        );
+        callbacks.invoke_table_row_callbacks::<TaskDispatch>(
+            "task_dispatches",
+            &self.task_dispatches,
+            event,
+        );
         callbacks.invoke_table_row_callbacks::<OrganizationTask>(
             "tenant_task_view",
             &self.tenant_task_view,
             event,
         );
+        callbacks.invoke_table_row_callbacks::<User>("users", &self.users, event);
     }
 }
 
@@ -1196,23 +3259,77 @@ impl __sdk::SpacetimeModule for RemoteModule {
     type QueryBuilder = __sdk::QueryBuilder;
 
     fn register_tables(client_cache: &mut __sdk::ClientCache<Self>) {
+        agent_registry_table::register_table(client_cache);
+        approval_decisions_table::register_table(client_cache);
+        approval_requests_table::register_table(client_cache);
+        artifacts_table::register_table(client_cache);
+        billing_events_table::register_table(client_cache);
+        capability_leases_table::register_table(client_cache);
+        captain_directives_table::register_table(client_cache);
+        captain_focus_table::register_table(client_cache);
+        captain_messages_table::register_table(client_cache);
+        captain_summaries_table::register_table(client_cache);
+        cell_runs_table::register_table(client_cache);
         discord_channels_table::register_table(client_cache);
         discord_interactions_table::register_table(client_cache);
         discord_users_table::register_table(client_cache);
+        execution_memory_table::register_table(client_cache);
+        knowledge_embeddings_table::register_table(client_cache);
         liveness_state_table::register_table(client_cache);
+        mission_steps_table::register_table(client_cache);
+        missions_table::register_table(client_cache);
+        model_tiers_table::register_table(client_cache);
+        node_registry_table::register_table(client_cache);
         nodes_table::register_table(client_cache);
+        oauth_identities_table::register_table(client_cache);
+        pods_table::register_table(client_cache);
+        proposal_consents_table::register_table(client_cache);
+        proposals_table::register_table(client_cache);
+        provider_accounts_table::register_table(client_cache);
+        provider_credentials_table::register_table(client_cache);
+        rate_group_state_table::register_table(client_cache);
         route_decisions_table::register_table(client_cache);
         runs_table::register_table(client_cache);
+        session_summaries_table::register_table(client_cache);
+        task_dispatches_table::register_table(client_cache);
         tenant_task_view_table::register_table(client_cache);
+        users_table::register_table(client_cache);
     }
     const ALL_TABLE_NAMES: &'static [&'static str] = &[
+        "agent_registry",
+        "approval_decisions",
+        "approval_requests",
+        "artifacts",
+        "billing_events",
+        "capability_leases",
+        "captain_directives",
+        "captain_focus",
+        "captain_messages",
+        "captain_summaries",
+        "cell_runs",
         "discord_channels",
         "discord_interactions",
         "discord_users",
+        "execution_memory",
+        "knowledge_embeddings",
         "liveness_state",
+        "mission_steps",
+        "missions",
+        "model_tiers",
+        "node_registry",
         "nodes",
+        "oauth_identities",
+        "pods",
+        "proposal_consents",
+        "proposals",
+        "provider_accounts",
+        "provider_credentials",
+        "rate_group_state",
         "route_decisions",
         "runs",
+        "session_summaries",
+        "task_dispatches",
         "tenant_task_view",
+        "users",
     ];
 }

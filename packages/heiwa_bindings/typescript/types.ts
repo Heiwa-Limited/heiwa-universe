@@ -10,6 +10,162 @@ import {
   type Infer as __Infer,
 } from "spacetimedb";
 
+export const AgentRegistryEntry = __t.object("AgentRegistryEntry", {
+  cellId: __t.string(),
+  displayName: __t.string(),
+  modelPreference: __t.option(__t.string()),
+  toolsAllowedJson: __t.string(),
+  sandboxMode: __t.string(),
+  active: __t.bool(),
+  createdAt: __t.string(),
+});
+export type AgentRegistryEntry = __Infer<typeof AgentRegistryEntry>;
+
+export const ApprovalDecision = __t.object("ApprovalDecision", {
+  decisionId: __t.string(),
+  requestId: __t.string(),
+  proposalId: __t.string(),
+  actorType: __t.string(),
+  actorId: __t.string(),
+  decision: __t.string(),
+  reason: __t.option(__t.string()),
+  createdAt: __t.string(),
+  metadataJson: __t.string(),
+});
+export type ApprovalDecision = __Infer<typeof ApprovalDecision>;
+
+export const ApprovalRequest = __t.object("ApprovalRequest", {
+  requestId: __t.string(),
+  proposalId: __t.string(),
+  status: __t.string(),
+  requestedAt: __t.string(),
+  expiresAt: __t.option(__t.string()),
+  requestedBy: __t.string(),
+  reason: __t.option(__t.string()),
+  payloadJson: __t.string(),
+});
+export type ApprovalRequest = __Infer<typeof ApprovalRequest>;
+
+export const ArtifactRecord = __t.object("ArtifactRecord", {
+  artifactId: __t.string(),
+  leaseId: __t.option(__t.string()),
+  userId: __t.string(),
+  missionId: __t.string(),
+  cellRunId: __t.option(__t.string()),
+  artifactType: __t.string(),
+  title: __t.string(),
+  uri: __t.option(__t.string()),
+  path: __t.option(__t.string()),
+  contentJson: __t.string(),
+  createdAt: __t.string(),
+});
+export type ArtifactRecord = __Infer<typeof ArtifactRecord>;
+
+export const BillingEvent = __t.object("BillingEvent", {
+  id: __t.u64(),
+  userId: __t.string(),
+  eventType: __t.string(),
+  providerId: __t.string(),
+  modelId: __t.string(),
+  tokensInput: __t.i64(),
+  tokensOutput: __t.i64(),
+  estimatedCostUsd: __t.f64(),
+  credentialId: __t.option(__t.string()),
+  missionId: __t.option(__t.string()),
+  runId: __t.option(__t.string()),
+  createdAt: __t.string(),
+});
+export type BillingEvent = __Infer<typeof BillingEvent>;
+
+export const CapabilityLease = __t.object("CapabilityLease", {
+  leaseId: __t.string(),
+  proposalId: __t.string(),
+  runId: __t.option(__t.string()),
+  parentLeaseId: __t.option(__t.string()),
+  holderKind: __t.string(),
+  holderId: __t.string(),
+  toolScopeJson: __t.string(),
+  networkScopeJson: __t.string(),
+  filesystemScopeJson: __t.string(),
+  secretScopeJson: __t.string(),
+  privilegeTier: __t.string(),
+  failurePolicy: __t.string(),
+  chainState: __t.string(),
+  routingLockJson: __t.option(__t.string()),
+  status: __t.string(),
+  issuedAt: __t.string(),
+  renewedAt: __t.option(__t.string()),
+  expiresAt: __t.string(),
+  revokedAt: __t.option(__t.string()),
+  revocationReason: __t.option(__t.string()),
+  hubSignature: __t.string(),
+});
+export type CapabilityLease = __Infer<typeof CapabilityLease>;
+
+export const CaptainDirective = __t.object("CaptainDirective", {
+  id: __t.u64(),
+  directiveType: __t.string(),
+  payloadJson: __t.string(),
+  priority: __t.u8(),
+  status: __t.string(),
+  createdAt: __t.string(),
+  executedAt: __t.option(__t.string()),
+});
+export type CaptainDirective = __Infer<typeof CaptainDirective>;
+
+export const CaptainFocus = __t.object("CaptainFocus", {
+  focusId: __t.string(),
+  topic: __t.string(),
+  contextJson: __t.string(),
+  priority: __t.u8(),
+  createdAt: __t.u64(),
+  resolvedAt: __t.u64(),
+});
+export type CaptainFocus = __Infer<typeof CaptainFocus>;
+
+export const CaptainMessage = __t.object("CaptainMessage", {
+  messageId: __t.string(),
+  sessionId: __t.string(),
+  role: __t.string(),
+  content: __t.string(),
+  timestamp: __t.u64(),
+  source: __t.string(),
+  compressed: __t.bool(),
+});
+export type CaptainMessage = __Infer<typeof CaptainMessage>;
+
+export const CaptainSummary = __t.object("CaptainSummary", {
+  summaryId: __t.string(),
+  summaryType: __t.string(),
+  content: __t.string(),
+  messageRangeStart: __t.u64(),
+  messageRangeEnd: __t.u64(),
+  messagesCompressed: __t.u32(),
+  createdAt: __t.u64(),
+});
+export type CaptainSummary = __Infer<typeof CaptainSummary>;
+
+export const CellRunRecord = __t.object("CellRunRecord", {
+  cellRunId: __t.string(),
+  userId: __t.string(),
+  missionId: __t.string(),
+  stepId: __t.option(__t.string()),
+  status: __t.string(),
+  cellId: __t.string(),
+  cellRole: __t.string(),
+  provider: __t.string(),
+  model: __t.string(),
+  rateGroup: __t.string(),
+  tool: __t.string(),
+  startedAt: __t.string(),
+  endedAt: __t.option(__t.string()),
+  tokensInput: __t.i64(),
+  tokensOutput: __t.i64(),
+  tokensTotal: __t.i64(),
+  outputSummary: __t.option(__t.string()),
+});
+export type CellRunRecord = __Infer<typeof CellRunRecord>;
+
 export const DiscordChannel = __t.object("DiscordChannel", {
   channelId: __t.u64(),
   name: __t.string(),
@@ -35,12 +191,104 @@ export const DiscordUser = __t.object("DiscordUser", {
 });
 export type DiscordUser = __Infer<typeof DiscordUser>;
 
+export const ExecutionMemory = __t.object("ExecutionMemory", {
+  id: __t.u64(),
+  taskDispatchId: __t.string(),
+  leaseId: __t.string(),
+  modelUsed: __t.string(),
+  outcome: __t.string(),
+  durationMs: __t.u64(),
+  errorSummary: __t.option(__t.string()),
+  feedbackScore: __t.option(__t.f64()),
+  createdAt: __t.string(),
+});
+export type ExecutionMemory = __Infer<typeof ExecutionMemory>;
+
+export const KnowledgeEmbedding = __t.object("KnowledgeEmbedding", {
+  id: __t.u64(),
+  sourceType: __t.string(),
+  sourceId: __t.string(),
+  contentHash: __t.string(),
+  embeddingJson: __t.string(),
+  ttlHours: __t.u32(),
+  createdAt: __t.string(),
+  lastAccessedAt: __t.option(__t.string()),
+});
+export type KnowledgeEmbedding = __Infer<typeof KnowledgeEmbedding>;
+
 export const LivenessState = __t.object("LivenessState", {
   key: __t.string(),
   lastState: __t.string(),
   lastChangedAt: __t.string(),
 });
 export type LivenessState = __Infer<typeof LivenessState>;
+
+export const MissionRecord = __t.object("MissionRecord", {
+  missionId: __t.string(),
+  userId: __t.string(),
+  createdAt: __t.string(),
+  updatedAt: __t.string(),
+  status: __t.string(),
+  sourceSurface: __t.string(),
+  nodeId: __t.string(),
+  prompt: __t.string(),
+  intentClass: __t.string(),
+  riskLevel: __t.string(),
+  activeStepId: __t.option(__t.string()),
+  activeCellId: __t.option(__t.string()),
+  targetTool: __t.option(__t.string()),
+  targetModel: __t.option(__t.string()),
+  summary: __t.option(__t.string()),
+  error: __t.option(__t.string()),
+  metadataJson: __t.string(),
+});
+export type MissionRecord = __Infer<typeof MissionRecord>;
+
+export const MissionStepRecord = __t.object("MissionStepRecord", {
+  stepId: __t.string(),
+  missionId: __t.string(),
+  position: __t.i64(),
+  status: __t.string(),
+  stepKind: __t.string(),
+  cellRole: __t.string(),
+  title: __t.string(),
+  detail: __t.option(__t.string()),
+  inputJson: __t.string(),
+  outputJson: __t.string(),
+  createdAt: __t.string(),
+  updatedAt: __t.string(),
+});
+export type MissionStepRecord = __Infer<typeof MissionStepRecord>;
+
+export const ModelTier = __t.object("ModelTier", {
+  id: __t.u64(),
+  modelId: __t.string(),
+  providerModelId: __t.string(),
+  provider: __t.string(),
+  rateGroup: __t.string(),
+  capabilityClass: __t.u8(),
+  effortKnob: __t.string(),
+  effortLevel: __t.u8(),
+  costPerTurn: __t.f64(),
+  maxContextTokens: __t.u32(),
+  strengthsJson: __t.string(),
+  enabled: __t.bool(),
+  lastSuccessRate: __t.f64(),
+  avgLatencyMs: __t.u64(),
+  latencyP95Ms: __t.u64(),
+  updatedAt: __t.string(),
+});
+export type ModelTier = __Infer<typeof ModelTier>;
+
+export const NodeRegistryEntry = __t.object("NodeRegistryEntry", {
+  nodeId: __t.string(),
+  hostname: __t.string(),
+  platform: __t.string(),
+  capabilitiesJson: __t.string(),
+  lastHeartbeat: __t.option(__t.string()),
+  status: __t.string(),
+});
+export type NodeRegistryEntry = __Infer<typeof NodeRegistryEntry>;
 
 export const NodeStatus = __t.object("NodeStatus", {
   nodeId: __t.string(),
@@ -56,6 +304,21 @@ export const NodeStatus = __t.object("NodeStatus", {
 });
 export type NodeStatus = __Infer<typeof NodeStatus>;
 
+export const OAuthIdentity = __t.object("OAuthIdentity", {
+  identityId: __t.string(),
+  userId: __t.string(),
+  provider: __t.string(),
+  providerUserId: __t.string(),
+  username: __t.string(),
+  accessTokenEnc: __t.string(),
+  refreshTokenEnc: __t.option(__t.string()),
+  tokenExpiresAt: __t.option(__t.string()),
+  scopesJson: __t.string(),
+  createdAt: __t.string(),
+  updatedAt: __t.string(),
+});
+export type OAuthIdentity = __Infer<typeof OAuthIdentity>;
+
 export const OrganizationTask = __t.object("OrganizationTask", {
   id: __t.u64(),
   tenantId: __t.identity(),
@@ -65,8 +328,110 @@ export const OrganizationTask = __t.object("OrganizationTask", {
 });
 export type OrganizationTask = __Infer<typeof OrganizationTask>;
 
+export const Pod = __t.object("Pod", {
+  podId: __t.string(),
+  hostIdentity: __t.string(),
+  provider: __t.string(),
+  runtimeCapabilities: __t.array(__t.string()),
+  trustTier: __t.string(),
+  privacyFloor: __t.string(),
+  gpuInventory: __t.array(__t.string()),
+  liveness: __t.string(),
+  leaseable: __t.bool(),
+  registeredAt: __t.string(),
+  lastHeartbeat: __t.string(),
+});
+export type Pod = __Infer<typeof Pod>;
+
+export const Proposal = __t.object("Proposal", {
+  proposalId: __t.string(),
+  userId: __t.string(),
+  createdAt: __t.string(),
+  status: __t.string(),
+  fingerprint: __t.option(__t.string()),
+  payload: __t.string(),
+  payloadRaw: __t.option(__t.string()),
+  nodeId: __t.option(__t.string()),
+  claimedAt: __t.option(__t.string()),
+  leaseExpiresAt: __t.option(__t.string()),
+  lastHeartbeatAt: __t.option(__t.string()),
+  lastHeartbeatNodeId: __t.option(__t.string()),
+  lastHeartbeatNodeInstanceId: __t.option(__t.string()),
+  lastHeartbeatDetail: __t.option(__t.string()),
+  mode: __t.string(),
+  executionTargeting: __t.option(__t.string()),
+  assignedNodeId: __t.option(__t.string()),
+  assignmentExpiresAt: __t.option(__t.string()),
+  attemptCount: __t.i64(),
+  proposalHash: __t.option(__t.string()),
+  hubSignature: __t.option(__t.string()),
+  approvedAt: __t.option(__t.string()),
+  expiresAt: __t.option(__t.string()),
+  eligibilitySnapshot: __t.option(__t.string()),
+});
+export type Proposal = __Infer<typeof Proposal>;
+
+export const ProposalConsent = __t.object("ProposalConsent", {
+  consentId: __t.string(),
+  proposalId: __t.string(),
+  proposalHash: __t.string(),
+  actorType: __t.string(),
+  actorId: __t.string(),
+  decision: __t.string(),
+  comment: __t.option(__t.string()),
+  createdAt: __t.string(),
+  metadata: __t.option(__t.string()),
+});
+export type ProposalConsent = __Infer<typeof ProposalConsent>;
+
+export const ProviderAccount = __t.object("ProviderAccount", {
+  accountId: __t.string(),
+  userId: __t.string(),
+  providerId: __t.string(),
+  nodeId: __t.string(),
+  authKind: __t.string(),
+  localHandleRef: __t.string(),
+  status: __t.string(),
+  displayName: __t.option(__t.string()),
+  defaultModel: __t.option(__t.string()),
+  rateGroup: __t.string(),
+  availableModelsJson: __t.string(),
+  lastValidatedAt: __t.option(__t.string()),
+  lastError: __t.option(__t.string()),
+  updatedAt: __t.string(),
+});
+export type ProviderAccount = __Infer<typeof ProviderAccount>;
+
+export const ProviderCredential = __t.object("ProviderCredential", {
+  credentialId: __t.string(),
+  userId: __t.string(),
+  providerId: __t.string(),
+  credentialKind: __t.string(),
+  credentialEnc: __t.string(),
+  status: __t.string(),
+  rateGroup: __t.string(),
+  displayLabel: __t.option(__t.string()),
+  lastValidatedAt: __t.option(__t.string()),
+  lastError: __t.option(__t.string()),
+  createdAt: __t.string(),
+  updatedAt: __t.string(),
+});
+export type ProviderCredential = __Infer<typeof ProviderCredential>;
+
+export const RateGroupState = __t.object("RateGroupState", {
+  rateGroup: __t.string(),
+  turnsUsed: __t.u32(),
+  turnsMax: __t.u32(),
+  windowStart: __t.string(),
+  windowSeconds: __t.u32(),
+  cooldownUntil: __t.string(),
+  available: __t.bool(),
+});
+export type RateGroupState = __Infer<typeof RateGroupState>;
+
 export const RouteDecision = __t.object("RouteDecision", {
   requestId: __t.string(),
+  userId: __t.string(),
   taskId: __t.string(),
   envelopeVersion: __t.string(),
   rawText: __t.string(),
@@ -90,7 +455,9 @@ export type RouteDecision = __Infer<typeof RouteDecision>;
 
 export const RunRecord = __t.object("RunRecord", {
   runId: __t.string(),
+  userId: __t.string(),
   proposalId: __t.string(),
+  leaseId: __t.string(),
   startedAt: __t.string(),
   endedAt: __t.string(),
   status: __t.string(),
@@ -107,4 +474,51 @@ export const RunRecord = __t.object("RunRecord", {
   cost: __t.f64(),
 });
 export type RunRecord = __Infer<typeof RunRecord>;
+
+export const SessionSummaryRecord = __t.object("SessionSummaryRecord", {
+  summaryId: __t.string(),
+  userId: __t.string(),
+  sessionId: __t.string(),
+  nodeId: __t.string(),
+  createdAt: __t.string(),
+  summaryText: __t.string(),
+  metadataJson: __t.string(),
+});
+export type SessionSummaryRecord = __Infer<typeof SessionSummaryRecord>;
+
+export const TaskDispatch = __t.object("TaskDispatch", {
+  taskId: __t.string(),
+  parentTaskId: __t.option(__t.string()),
+  intentClass: __t.string(),
+  riskLevel: __t.string(),
+  assignedModel: __t.string(),
+  effortKnob: __t.string(),
+  assignedCell: __t.string(),
+  budgetMaxTurns: __t.u8(),
+  budgetMaxSeconds: __t.u32(),
+  fallbackModel: __t.string(),
+  sandboxMode: __t.string(),
+  toolsAllowedJson: __t.string(),
+  contextFilesJson: __t.string(),
+  status: __t.string(),
+  resultSummary: __t.string(),
+  tokensUsed: __t.u32(),
+  latencyMs: __t.u64(),
+  createdAt: __t.string(),
+  completedAt: __t.string(),
+});
+export type TaskDispatch = __Infer<typeof TaskDispatch>;
+
+export const User = __t.object("User", {
+  userId: __t.string(),
+  displayName: __t.string(),
+  email: __t.option(__t.string()),
+  avatarUrl: __t.option(__t.string()),
+  status: __t.string(),
+  tier: __t.string(),
+  createdAt: __t.string(),
+  lastSeenAt: __t.string(),
+  metadataJson: __t.string(),
+});
+export type User = __Infer<typeof User>;
 

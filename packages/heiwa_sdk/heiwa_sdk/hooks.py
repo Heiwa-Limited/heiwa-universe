@@ -46,8 +46,21 @@ class ExecutionHookManager:
             logger.warning("[OBSERVE] %s", reason)
             return True, reason, None
 
+        expected_scope_fields = (
+            "tool_scope_json",
+            "filesystem_scope_json",
+            "network_scope_json",
+            "secret_scope_json",
+        )
+        for field_name in expected_scope_fields:
+            if field_name not in lease or lease.get(field_name) is None:
+                reason = f"Missing lease scope field: {field_name}"
+                if mode == "enforce":
+                    return False, reason, None
+                logger.warning("[OBSERVE] %s", reason)
+
         # Scope validation: Tool Scope (Exact match)
-        tool_scope = self._parse_json_field(lease.get("tool_scope"))
+        tool_scope = self._parse_json_field(lease.get("tool_scope_json"))
         if tool_scope and tool not in tool_scope:
             reason = f"Tool '{tool}' not authorized in lease tool_scope: {tool_scope}"
             if mode == "enforce":
@@ -58,10 +71,23 @@ class ExecutionHookManager:
         # - filesystem_scope: Path prefix match
         # - network_scope: Host/domain allowlist match
         # - secret_scope: Exact secret ID match
-        for scope_name in ["filesystem_scope", "network_scope", "secret_scope"]:
+        for scope_name in [
+            "filesystem_scope_json",
+            "network_scope_json",
+            "secret_scope_json",
+        ]:
             val = lease.get(scope_name)
             if val and val not in ("{}", "[]"):
                 logger.warning("[TODO] Skipping %s verification for: %s", scope_name, val)
+
+        routing_lock = self._parse_json_field(lease.get("routing_lock_json"))
+        if routing_lock:
+            lock_mismatches = self._routing_lock_mismatches(routing_lock, payload)
+            if lock_mismatches:
+                reason = f"Routing lock mismatch: {', '.join(lock_mismatches)}"
+                if mode == "enforce":
+                    return False, reason, None
+                logger.warning("[OBSERVE] %s", reason)
 
         return True, "Authorized", {"lease_id": lease.get("lease_id")}
 
@@ -85,6 +111,7 @@ class ExecutionHookManager:
             try:
                 self.db.register_artifact({
                     "artifact_id": f"audit-{event_id}",
+                    "lease_id": (audit_metadata or {}).get("lease_id"),
                     "mission_id": proposal_id,
                     "artifact_type": "execution_audit",
                     "title": f"Execution ({mode}): {tool}",
@@ -112,3 +139,24 @@ class ExecutionHookManager:
             except Exception:
                 return []
         return field_val or []
+
+    @staticmethod
+    def _routing_lock_mismatches(routing_lock: Any, payload: dict[str, Any]) -> list[str]:
+        if not isinstance(routing_lock, dict):
+            return []
+
+        comparisons = {
+            "model_id": payload.get("target_model") or payload.get("model") or payload.get("model_id"),
+            "provider": payload.get("provider"),
+            "runtime": payload.get("target_runtime") or payload.get("runtime"),
+        }
+        mismatches: list[str] = []
+        for key, actual in comparisons.items():
+            expected = routing_lock.get(key)
+            if expected is None:
+                continue
+            if actual is None:
+                mismatches.append(f"{key} missing")
+            elif str(actual) != str(expected):
+                mismatches.append(f"{key} expected={expected} actual={actual}")
+        return mismatches

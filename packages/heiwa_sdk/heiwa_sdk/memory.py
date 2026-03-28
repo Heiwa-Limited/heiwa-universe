@@ -113,6 +113,7 @@ class MemoryService:
     def record_execution(
         self,
         task_id: str,
+        lease_id: str,
         model: str,
         outcome: str,
         duration_ms: int,
@@ -122,7 +123,7 @@ class MemoryService:
         """Record task outcome in execution_memory.
 
         execution_program_json is accepted for future persistence but NOT forwarded
-        to STDB — the insert_execution_memory reducer has fixed arity (6 args).
+        to STDB — the insert_execution_memory reducer has fixed arity.
         The program is logged here; STDB schema migration comes in v2.
         """
         if execution_program_json:
@@ -132,6 +133,7 @@ class MemoryService:
             )
         return self.stdb.insert_execution_memory(
             task_dispatch_id=task_id,
+            lease_id=lease_id,
             model_used=model,
             outcome=outcome,
             duration_ms=duration_ms,

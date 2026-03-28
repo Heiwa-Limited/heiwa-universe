@@ -279,6 +279,18 @@ class HeiwaClawAgent(BaseAgent):
         prog_data = payload.get("execution_program")
         if prog_data:
             execution_program = ExecutionProgram.from_dict(prog_data)
+        active_lease = None
+        if self.db.stdb:
+            try:
+                active_lease = self.db.get_active_capability_lease(task_id, route.assigned_worker)
+            except Exception as e:
+                logger.error(
+                    "Failed to resolve active lease for proposal=%s holder=%s: %s",
+                    task_id,
+                    route.assigned_worker,
+                    e,
+                )
+        lease_id = (active_lease or {}).get("lease_id", "")
 
         logger.info("Processing task: %s | Intent: %s", task_id, intent_class)
         await self.speak(Subject.TASK_STATUS, {
@@ -328,6 +340,7 @@ class HeiwaClawAgent(BaseAgent):
 
         result_payload = {
             "task_id": task_id,
+            "lease_id": lease_id,
             "status": exec_status,
             "summary": full_result,
             "runtime": self.executor_runtime,
@@ -351,6 +364,7 @@ class HeiwaClawAgent(BaseAgent):
             try:
                 self.memory.record_execution(
                     task_id=task_id,
+                    lease_id=lease_id,
                     model=route.target_model,
                     outcome=exec_status.lower(),
                     duration_ms=int(elapsed * 1000),

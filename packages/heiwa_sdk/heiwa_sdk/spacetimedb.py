@@ -195,7 +195,9 @@ class SpacetimeDB:
         return self.call(
             "record_run",
             run_data.get("run_id", ""),
+            run_data.get("user_id") or "",
             run_data.get("proposal_id", ""),
+            run_data.get("lease_id", ""),
             run_data.get("started_at") or "",
             ended_at,
             run_data.get("status", "UNKNOWN"),
@@ -219,7 +221,7 @@ class SpacetimeDB:
         user_id: str | None = None,
     ) -> list[dict[str, Any]]:
         query = (
-            "SELECT run_id, user_id, proposal_id, started_at, ended_at, status, "
+            "SELECT run_id, user_id, proposal_id, lease_id, started_at, ended_at, status, "
             "chain_result_json AS chain_result, signals_json AS signals, "
             "artifact_index_json AS artifact_index, node_id, replay_receipt_json AS replay_receipt, "
             "mode, model_id, tokens_input, tokens_output, tokens_total, cost "
@@ -501,6 +503,8 @@ class SpacetimeDB:
         return self.call(
             "register_artifact",
             artifact_data["artifact_id"],
+            self._sats_option(artifact_data.get("lease_id")),
+            artifact_data.get("user_id", ""),
             artifact_data.get("mission_id", ""),
             self._sats_option(artifact_data.get("cell_run_id")),
             artifact_data.get("artifact_type", "summary"),
@@ -872,6 +876,7 @@ class SpacetimeDB:
             lease_data["lease_id"],
             lease_data["proposal_id"],
             self._sats_option(lease_data.get("run_id")),
+            self._sats_option(lease_data.get("parent_lease_id")),
             lease_data.get("holder_kind", "node"),
             lease_data["holder_id"],
             self._normalize_json_column(lease_data.get("tool_scope")) or "[]",
@@ -879,6 +884,9 @@ class SpacetimeDB:
             self._normalize_json_column(lease_data.get("filesystem_scope")) or "{}",
             self._normalize_json_column(lease_data.get("secret_scope")) or "[]",
             lease_data.get("privilege_tier", "cloud_safe"),
+            lease_data.get("failure_policy", "ABORT"),
+            lease_data.get("chain_state", "ACTIVE"),
+            self._sats_option(self._normalize_json_column(lease_data.get("routing_lock"))),
             lease_data.get("status", "ACTIVE"),
             lease_data.get("issued_at") or datetime.datetime.now(datetime.timezone.utc).isoformat(),
             lease_data["expires_at"],
@@ -896,6 +904,19 @@ class SpacetimeDB:
     ) -> bool:
         return self.call(
             "revoke_capability_lease",
+            lease_id,
+            revoked_at or datetime.datetime.now(datetime.timezone.utc).isoformat(),
+            self._sats_option(revocation_reason),
+        )
+
+    def revoke_capability_chain(
+        self,
+        lease_id: str,
+        revoked_at: str | None = None,
+        revocation_reason: str | None = None,
+    ) -> bool:
+        return self.call(
+            "revoke_capability_chain",
             lease_id,
             revoked_at or datetime.datetime.now(datetime.timezone.utc).isoformat(),
             self._sats_option(revocation_reason),
@@ -1026,6 +1047,7 @@ class SpacetimeDB:
     def insert_execution_memory(
         self,
         task_dispatch_id: str,
+        lease_id: str,
         model_used: str,
         outcome: str,
         duration_ms: int,
@@ -1036,6 +1058,7 @@ class SpacetimeDB:
         return self.call(
             "insert_execution_memory",
             task_dispatch_id,
+            lease_id,
             model_used,
             outcome,
             int(duration_ms),

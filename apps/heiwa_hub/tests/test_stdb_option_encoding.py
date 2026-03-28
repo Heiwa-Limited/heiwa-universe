@@ -131,3 +131,65 @@ def test_revoke_capability_lease_encodes_none():
     db.revoke_capability_lease("LEASE-1", "2026-03-22T00:03:00+00:00", None)
     cmd = db.commands[-1]
     assert _find_json_arg(cmd, {"none": []}), f"None revoked_by should encode as option none: {cmd}"
+
+
+def test_issue_capability_lease_encodes_chain_fields_and_routing_lock():
+    db = CaptureSpacetimeDB()
+    db.issue_capability_lease(
+        {
+            "lease_id": "LEASE-CHAIN-1",
+            "proposal_id": "prop-1",
+            "holder_id": "node-1",
+            "expires_at": "2026-03-22T00:30:00+00:00",
+            "parent_lease_id": "LEASE-PARENT-1",
+            "failure_policy": "ABORT",
+            "chain_state": "ACTIVE",
+            "routing_lock": {
+                "model_id": "codex/gpt-5.4",
+                "provider": "codex",
+                "runtime": "railway",
+            },
+        }
+    )
+    cmd = db.commands[-1]
+    assert _find_json_arg(cmd, {"some": "LEASE-PARENT-1"}), f"parent_lease_id should encode as option some: {cmd}"
+    assert _find_json_arg(cmd, "ABORT"), f"failure_policy should be encoded: {cmd}"
+    assert _find_json_arg(cmd, "ACTIVE"), f"chain_state should be encoded: {cmd}"
+    assert _find_json_arg(
+        cmd,
+        {"some": '{"model_id":"codex/gpt-5.4","provider":"codex","runtime":"railway"}'},
+    ), f"routing_lock should encode as option some JSON: {cmd}"
+
+
+def test_revoke_capability_chain_encodes_none():
+    db = CaptureSpacetimeDB()
+    db.revoke_capability_chain("LEASE-CHAIN-1", "2026-03-22T00:03:00+00:00", None)
+    cmd = db.commands[-1]
+    assert _find_json_arg(cmd, {"none": []}), f"None chain revocation reason should encode as option none: {cmd}"
+
+
+def test_record_run_encodes_lease_id():
+    db = CaptureSpacetimeDB()
+    db.record_run(
+        {
+            "run_id": "run-1",
+            "proposal_id": "prop-1",
+            "lease_id": "LEASE-1",
+            "status": "PASS",
+        }
+    )
+    cmd = db.commands[-1]
+    assert _find_json_arg(cmd, "LEASE-1"), f"lease_id should be encoded in record_run: {cmd}"
+
+
+def test_insert_execution_memory_encodes_lease_id():
+    db = CaptureSpacetimeDB()
+    db.insert_execution_memory(
+        task_dispatch_id="task-1",
+        lease_id="LEASE-1",
+        model_used="codex/gpt-5.4",
+        outcome="pass",
+        duration_ms=123,
+    )
+    cmd = db.commands[-1]
+    assert _find_json_arg(cmd, "LEASE-1"), f"lease_id should be encoded in execution memory insert: {cmd}"

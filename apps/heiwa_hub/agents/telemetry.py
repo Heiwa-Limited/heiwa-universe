@@ -103,6 +103,7 @@ class TelemetryAgent(BaseAgent):
         run_data = {
             "run_id": f"run-{int(time.time()*1000)}",
             "proposal_id": task_id,
+            "lease_id": payload.get("lease_id", ""),
             "started_at": None, # Could be improved if tracked
             "status": payload.get("status", "UNKNOWN"),
             "node_id": node_id,

@@ -8,7 +8,9 @@ use spacetimedb_sdk::__codegen::{self as __sdk, __lib, __sats, __ws};
 #[sats(crate = __lib)]
 pub(super) struct RecordRunArgs {
     pub run_id: String,
+    pub user_id: String,
     pub proposal_id: String,
+    pub lease_id: String,
     pub started_at: String,
     pub ended_at: String,
     pub status: String,
@@ -29,7 +31,9 @@ impl From<RecordRunArgs> for super::Reducer {
     fn from(args: RecordRunArgs) -> Self {
         Self::RecordRun {
             run_id: args.run_id,
+            user_id: args.user_id,
             proposal_id: args.proposal_id,
+            lease_id: args.lease_id,
             started_at: args.started_at,
             ended_at: args.ended_at,
             status: args.status,
@@ -66,7 +70,9 @@ pub trait record_run {
     fn record_run(
         &self,
         run_id: String,
+        user_id: String,
         proposal_id: String,
+        lease_id: String,
         started_at: String,
         ended_at: String,
         status: String,
@@ -84,7 +90,9 @@ pub trait record_run {
     ) -> __sdk::Result<()> {
         self.record_run_then(
             run_id,
+            user_id,
             proposal_id,
+            lease_id,
             started_at,
             ended_at,
             status,
@@ -112,7 +120,9 @@ pub trait record_run {
     fn record_run_then(
         &self,
         run_id: String,
+        user_id: String,
         proposal_id: String,
+        lease_id: String,
         started_at: String,
         ended_at: String,
         status: String,
@@ -138,7 +148,9 @@ impl record_run for super::RemoteReducers {
     fn record_run_then(
         &self,
         run_id: String,
+        user_id: String,
         proposal_id: String,
+        lease_id: String,
         started_at: String,
         ended_at: String,
         status: String,
@@ -161,7 +173,9 @@ impl record_run for super::RemoteReducers {
         self.imp.invoke_reducer_with_callback(
             RecordRunArgs {
                 run_id,
+                user_id,
                 proposal_id,
+                lease_id,
                 started_at,
                 ended_at,
                 status,

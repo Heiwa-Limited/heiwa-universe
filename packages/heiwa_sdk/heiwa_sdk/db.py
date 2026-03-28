@@ -419,6 +419,7 @@ class Database:
         lease_data = {
             "lease_id": lease_id,
             "proposal_id": result["proposal_id"],
+            "parent_lease_id": (targeting or {}).get("parent_lease_id"),
             "holder_kind": "node",
             "holder_id": node_id,
             "tool_scope": (targeting or {}).get("allowed_tools", []),
@@ -426,6 +427,9 @@ class Database:
             "filesystem_scope": (targeting or {}).get("filesystem_scope", {}),
             "secret_scope": (targeting or {}).get("secret_scope", []),
             "privilege_tier": (targeting or {}).get("privilege_tier", "cloud_safe"),
+            "failure_policy": str((targeting or {}).get("failure_policy", "ABORT")).upper(),
+            "chain_state": str((targeting or {}).get("chain_state", "ACTIVE")).upper(),
+            "routing_lock": (targeting or {}).get("routing_lock"),
             "status": "ACTIVE",
             "issued_at": now_iso,
             "expires_at": lease_expires,
@@ -461,6 +465,7 @@ class Database:
                 lease_data = {
                     "lease_id": lease_id,
                     "proposal_id": row["proposal_id"],
+                    "parent_lease_id": (targeting or {}).get("parent_lease_id"),
                     "holder_kind": "node",
                     "holder_id": node_id,
                     "tool_scope": (targeting or {}).get("allowed_tools", []),
@@ -468,6 +473,9 @@ class Database:
                     "filesystem_scope": (targeting or {}).get("filesystem_scope", {}),
                     "secret_scope": (targeting or {}).get("secret_scope", []),
                     "privilege_tier": (targeting or {}).get("privilege_tier", "cloud_safe"),
+                    "failure_policy": str((targeting or {}).get("failure_policy", "ABORT")).upper(),
+                    "chain_state": str((targeting or {}).get("chain_state", "ACTIVE")).upper(),
+                    "routing_lock": (targeting or {}).get("routing_lock"),
                     "status": "ACTIVE",
                     "issued_at": now_iso,
                     "expires_at": lease_expires,
@@ -618,6 +626,13 @@ class Database:
     ) -> bool:
         if self.stdb:
             return self.stdb.revoke_capability_lease(lease_id, revoked_at, revocation_reason)
+        return False
+
+    def revoke_capability_chain(
+        self, lease_id: str, revoked_at: str | None = None, revocation_reason: str | None = None,
+    ) -> bool:
+        if self.stdb:
+            return self.stdb.revoke_capability_chain(lease_id, revoked_at, revocation_reason)
         return False
 
     def record_proposal_heartbeat(
