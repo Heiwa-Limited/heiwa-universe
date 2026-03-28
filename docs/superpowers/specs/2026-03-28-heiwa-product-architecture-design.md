@@ -30,7 +30,14 @@ Each user deploys their own Heiwa Hub instance. There is no shared multi-tenant 
 
 This does not mean there is only one actor inside the Hub. Discord identities, GitHub OAuth, future collaborators, and tool sessions can exist as internal principals. The instance belongs to one owner.
 
-Identity scoping (`user_id`) exists for ownership and audit — approvals, leases, battlefields, credentials, and audit trail — not for stranger isolation. If Heiwa Limited later offers managed hosting, the scoping is already there.
+Identity has two layers:
+
+- **`owner_id`** — the identity that owns the Hub instance. Scopes all tenant-level resources: Battlefields, Credentials, billing. One per instance in single-owner deployment.
+- **`principal_id`** — the identity that performed an action. May be: the owner directly, a Discord identity, a GitHub OAuth collaborator, a tool session (Captain acting autonomously), or a future collaborator. Every write stamps both `owner_id` (who owns the record) and `principal_id` (who created it).
+
+This separation means the audit trail can always answer "who owns this?" and "who did this?" independently. Read filtering uses `owner_id` (all records belong to the instance owner). Audit queries use `principal_id` (which actor created this Lease, approved this Mission, stored this credential).
+
+If Heiwa Limited later offers managed hosting, `owner_id` becomes the tenant boundary with no schema migration.
 
 ### Captain is Heiwa
 
@@ -71,9 +78,10 @@ Each model/provider/rate group is fully monitored by Pulse: rate limit state, re
 
 | Name | What it is |
 |------|-----------|
-| **Node** | A compute endpoint the Captain commands. Railway workers, Claude Code, Codex, Gemini CLI, Antigravity rate groups, MacBook Ollama limb, future GPU boxes. Each Node has health, capacity, and rate state tracked by Pulse. |
-| **Session** | The authenticated operator/client interaction stream. Created when a client connects over Wire. Carries history, active tasks, Battlefield context, and a lease scope (the Session's authorization boundary). Ephemeral — ends when the client disconnects or times out. |
-| **Mission** | The durable unit of work the Captain executes. May outlive or span Sessions. Has steps, status, leases, and artifacts. |
+| **Node** | A reachable runtime endpoint. Railway container, MacBook boost node, future GPU boxes. Has health, heartbeat, and availability tracked by Pulse. Nodes are where execution physically happens — they are not providers or models. A Node hosts one or more Executors. |
+| **Executor** | A provider/model surface available on a Node. "Claude Code on Railway", "Ollama qwen3.5 on MacBook", "Codex on Railway". Has a provider account (credentials in Vault) and rate group state (capacity, limits). The Captain's rate cascade selects an Executor, not a Node — the Node is the physical host, the Executor is the capability. |
+| **Session** | The authenticated client transport context. Created when a client connects over Wire. Carries history, active tasks, and Battlefield context. Ephemeral — ends when the client disconnects or times out. Sessions do not own leases or authorization scope; they are an interaction channel, not an execution boundary. |
+| **Mission** | The durable unit of work the Captain executes. Owns its own leases. May outlive or span Sessions — when a client disconnects, active Missions continue executing. Has steps, status, leases, and artifacts. The Captain is the execution authority, not the Session. |
 | **Battlefield** | A workspace the Hub is focused on. Registered when CLI connects from a repo. Hub scopes context, tasks, file access, and history per Battlefield. An owner can have multiple Battlefields. See Battlefield data model below. |
 | **Lease** | Permission grant with scope, chain state, and routing lock. The authority mechanism — nothing executes without one. |
 | **Rate Cascade** | The routing algorithm. Spreads work across all available providers, cheapest-with-capacity first. Monitored by Pulse, executed by Captain. |
@@ -98,12 +106,13 @@ Each model/provider/rate group is fully monitored by Pulse: rate limit state, re
 
 | Resource | What it represents |
 |----------|--------------------|
-| **Session** | Interaction context with an operator. Has history, active tasks, Battlefield context, and a lease scope. |
-| **Mission** | Durable work unit. Steps, status, leases, artifacts. May span Sessions. |
+| **Session** | Authenticated client transport context. Has history, active tasks, Battlefield context. Does not own leases — it is an interaction channel, not an execution boundary. |
+| **Mission** | Durable work unit. Owns its leases. Steps, status, artifacts. May outlive or span Sessions. The Captain continues executing Missions after client disconnect. |
 | **Event** | Something that happened — immutable, append-only. Task lifecycle, Captain observations, approvals, errors. |
 | **Lease** | Permission grant with scope, chain state, routing lock. |
 | **Credential** | Owner's BYOK keys. Encrypted at rest in Vault. |
-| **Node** | Compute endpoint with health, capacity, and rate state. |
+| **Node** | Reachable runtime endpoint with health and heartbeat. |
+| **Executor** | Provider/model surface on a Node with rate group state and credentials. |
 | **Battlefield** | Workspace with scoped context and history. |
 
 ### Client protocol
@@ -121,7 +130,8 @@ Each model/provider/rate group is fully monitored by Pulse: rate limit state, re
 ```
 Event {
   event_id: str
-  user_id: str
+  owner_id: str
+  principal_id: str
   session_id: Option<str>
   mission_id: Option<str>
   battlefield_id: Option<str>
@@ -232,7 +242,7 @@ Tenant zero. No special-casing. Same template, same Hub, same Captain.
 
 ## Object Hierarchy
 
-Owner deploys a Hub. Captain operates across Nodes. Work happens in Battlefields. Missions are durable work units. Sessions are interaction streams. Leases authorize execution. Events flow over Wire to clients. Pulse monitors the fleet.
+Owner deploys a Hub. Captain operates across Nodes via Executors. Work happens in Battlefields. Missions are durable work units that own their Leases. Sessions are client transport contexts. Events flow over Wire to clients. Pulse monitors Nodes (health) and Executors (capacity). Principals are attributed on every action.
 
 ## Battlefield Data Model
 
@@ -241,7 +251,7 @@ New STDB table. A Battlefield is a registered workspace.
 ```
 Battlefield {
   battlefield_id: str (primary key, UUID)
-  user_id: str
+  owner_id: str
   name: str (display name, e.g. "heiwa", "ai-dj")
   repo_url: Option<str> (git remote, if applicable)
   root_path: str (absolute path on the node that registered it)
@@ -256,31 +266,41 @@ Lifecycle: CLI connects from a repo → registers or reattaches a Battlefield �
 
 Archiving a Battlefield detaches it from active routing but preserves history.
 
-## Node and Provider Relationship
+## Node, Executor, and Provider Relationships
 
-A Node is a runtime endpoint. A provider account is a credential/auth relationship. They relate but are not 1:1.
+Three distinct concepts, layered:
 
-- **Node** represents a reachable compute surface: "Claude Code on Railway", "Ollama on MacBook", "Codex on Railway". Tracked in existing `node_registry` STDB table. Has health, heartbeat, capacity.
-- **Provider account** represents an authenticated relationship with a provider: "my Claude Pro subscription", "my Google AI Pro account". Tracked in existing `provider_accounts` STDB table. Has credentials in Vault, rate group state.
-- A Node uses one or more provider accounts. The MacBook Ollama Node uses no provider account (local). The Railway Claude Code Node uses the Anthropic provider account.
-- Pulse monitors both: Node-level health (is it reachable?) and provider-level capacity (rate limits, token budget).
+- **Node** — a reachable runtime endpoint: Railway container, MacBook, future GPU box. Tracked in STDB `node_registry` table. Has health, heartbeat, platform, capabilities. Pulse monitors: is this Node reachable?
+- **Executor** — a provider/model surface hosted on a Node: "Claude Code Opus 4.6 on Railway", "Ollama qwen3.5 on MacBook", "Antigravity Gemini 3.1 Pro (High) on Railway". An Executor combines a Node (where it runs) with a provider account (how it authenticates) and a rate group (what capacity it has). The Captain's rate cascade selects Executors.
+- **Provider account** — an authenticated relationship with a provider: "my Claude Pro subscription", "my Google AI Pro account". Tracked in STDB `provider_accounts` table. Has credentials in Vault, rate group state in `rate_group_state` table.
 
-Both STDB tables survive. The Captain queries Nodes for health/availability and provider accounts for rate/capacity when making cascade decisions.
+Relationships:
+- One Node hosts many Executors (Railway hosts Claude Code, Codex, Gemini CLI, Antigravity)
+- One provider account backs many Executors (Google AI Pro backs Gemini CLI + Antigravity rate groups)
+- Some Executors have no provider account (MacBook Ollama — local, no auth)
+
+Pulse monitors both layers: Node-level health (is it reachable?) and Executor-level capacity (rate limits, token budget, model availability). The Captain queries Nodes for "can I reach this?" and Executors for "does this have capacity?"
 
 ## Ownership and Audit Enforcement
 
-`user_id` enforcement means two things:
+Every tenant-scoped record carries two identity fields:
 
-1. **Write-time stamping** — every STDB write that creates a tenant-scoped record (Mission, Lease, Session, Battlefield, Credential, Event) stamps `user_id` from the authenticated context. No record is created without an owner.
-2. **Read-time filtering** — every query for tenant-scoped data includes `user_id` in the filter. The Hub API never returns records belonging to a different principal.
+- **`owner_id`** — who owns this record. Set from the authenticated instance owner. Used for read-time filtering (the Hub API only returns records matching the instance owner).
+- **`principal_id`** — who created this record. Set from the acting principal: the owner themselves, a Discord identity, a collaborator, the Captain (autonomous action), or a tool session. Used for audit queries.
 
-In single-owner deployment, this is lightweight — there's one owner. But it enforces auditability (who created this Lease?) and prepares the data model for managed hosting.
+Enforcement:
 
-The "observe to enforce" flip (step 8) refers specifically to Lease enforcement: in observe mode, execution proceeds even without a valid Lease (logging only). In enforce mode, execution is blocked without a valid Lease. Ownership stamping and read filtering are always on.
+1. **Write-time stamping** — every STDB write that creates a tenant-scoped record (Mission, Lease, Session, Battlefield, Credential, Event) stamps both `owner_id` and `principal_id` from the authenticated context. No record is created without both.
+2. **Read-time filtering** — every query for tenant-scoped data includes `owner_id` in the filter. The Hub API never returns records belonging to a different owner.
+3. **Audit querying** — `principal_id` enables answering "which Discord user triggered this Mission?", "did the Captain create this Lease autonomously or did the operator request it?", "which tool session stored this credential?"
+
+In single-owner deployment, `owner_id` is the same for all records. `principal_id` is where the audit value lives.
+
+The "observe to enforce" flip (step 8) refers specifically to Lease enforcement: in observe mode, execution proceeds even without a valid Lease (logging only). In enforce mode, execution is blocked without a valid Lease. Ownership stamping, principal attribution, and read filtering are always on.
 
 ## Critical Path (implementation order)
 
-1. App-layer ownership and audit scoping (user_id enforcement)
+1. App-layer ownership and audit scoping (migrate `user_id` → `owner_id` + `principal_id`)
 2. BYOK Vault routing integration (per-owner credentials feed the rate cascade) — *parallelizable with step 3*
 3. Wire protocol (WebSocket client endpoint, event schema, catch-up) — *parallelizable with step 2*
 4. Captain merge (Spine + HeiwaClaw into captain.py) — *depends on step 3 for event delivery testing*
@@ -294,7 +314,7 @@ The "observe to enforce" flip (step 8) refers specifically to Lease enforcement:
 
 These are not design issues — they are existing schema gaps that the critical path will resolve:
 
-- **`CapabilityLease` has no `user_id`** — other tenant-scoped tables (Proposal, RunRecord, MissionRecord) already have it. Step 1 adds it.
+- **Existing `user_id` columns need migration to `owner_id` + `principal_id`** — all tenant-scoped tables currently have `user_id`. Step 1 splits this into `owner_id` (ownership/filtering) and `principal_id` (audit attribution). `CapabilityLease` additionally needs both fields added (currently has neither).
 - **Dual node tables** — STDB has both `node_registry` (NodeRegistryEntry) and `nodes` (NodeStatus) with overlapping fields. One should be consolidated or killed before step 4 (Captain merge).
 - **`events` table does not exist** — the Wire catch-up mechanism requires a new STDB table. Step 3 creates it.
 - **`battlefield` table does not exist** — new STDB table per the Battlefield Data Model section. Step 6 (CLI battlefield registration) creates it.
