@@ -1,0 +1,12 @@
+# Canonical agent registry — maps to ops/agents/<id>/
+agents:
+  - id: heiwa-architect
+    status: active
+  - id: heiwa-security
+    status: active
+  - id: heiwa-builder
+    status: active
+  - id: heiwa-operator
+    status: active
+  - id: heiwa-researcher
+    status: active
