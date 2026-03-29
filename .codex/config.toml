@@ -16,6 +16,16 @@ args = ["mcp", "gateway", "run"]
 command = "npx"
 args = ["@playwright/mcp@latest"]
 
+[mcp_servers.figma]
+url = "https://mcp.figma.com/mcp"
+
+[mcp_servers.notion]
+url = "https://mcp.notion.com/mcp"
+
+[mcp_servers.codebase-retrieval]
+command = "auggie"
+args = ["--mcp", "--mcp-auto-workspace"]
+
 [features]
 multi_agent = true
 guardian_approval = true
@@ -25,4 +35,10 @@ prevent_idle_sleep = true
 enabled = true
 
 [plugins."cloudflare@openai-curated"]
+enabled = true
+
+[plugins."google-drive@openai-curated"]
+enabled = true
+
+[plugins."hugging-face@openai-curated"]
 enabled = true

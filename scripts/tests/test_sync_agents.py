@@ -200,12 +200,10 @@ def test_check_wrapper_drift_clean_passes():
     assert errors == []
 
 
-def test_check_codex_config_current_state():
-    """Codex config check should report missing surfaces before parity fix."""
+def test_check_codex_config_passes_after_parity_fix():
+    """After config parity fix, Codex config check should pass clean."""
     errors = check_codex_config()
-    # Before Task 8 fixes the config, figma/notion/codebase-retrieval are missing
-    missing_names = [e for e in errors if "figma" in e or "notion" in e or "codebase-retrieval" in e]
-    assert len(missing_names) > 0
+    assert errors == [], f"Unexpected Codex config errors: {errors}"
 
 
 def test_check_claude_config_passes():
