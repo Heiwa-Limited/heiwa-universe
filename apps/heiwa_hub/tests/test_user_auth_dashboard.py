@@ -220,6 +220,26 @@ def test_user_views_are_scoped_to_authenticated_user(auth_client: TestClient):
     assert {row["user_id"] for row in payload["recent_runs"]} == {"user-alpha"}
 
 
+def test_resolve_identity_context_returns_owner_and_principal():
+    """resolve_identity_context should produce owner_id + principal_id from JWT claims."""
+    from apps.heiwa_hub.auth import resolve_identity_context
+
+    claims = {"owner_id": "owner-devon", "principal_id": "discord:123"}
+    ctx = resolve_identity_context(claims)
+    assert ctx["owner_id"] == "owner-devon"
+    assert ctx["principal_id"] == "discord:123"
+
+
+def test_resolve_identity_context_autonomous_uses_captain():
+    """When autonomous=True, principal_id should be 'captain'."""
+    from apps.heiwa_hub.auth import resolve_identity_context
+
+    claims = {"owner_id": "owner-devon", "principal_id": "discord:123"}
+    ctx = resolve_identity_context(claims, autonomous=True)
+    assert ctx["owner_id"] == "owner-devon"
+    assert ctx["principal_id"] == "captain"
+
+
 def test_validate_state_prunes_expired_entries(monkeypatch):
     expired = _state_token("expired")
     valid = _state_token("valid")
