@@ -80,6 +80,22 @@ jobs:
       - name: Run unified pytest suite
         run: pytest apps/heiwa_hub/tests/ apps/heiwa_trading/tests/ -v
 
+  agent-sync-check:
+    name: Agent Sync Check
+    runs-on: ubuntu-latest
+    needs: security-scan
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+      - name: Install dependencies
+        run: pip install pyyaml
+      - name: Verify canonical agent sync
+        run: python scripts/sync_agents.py --check
+
   repo-hygiene:
     name: Repo Hygiene
     runs-on: ubuntu-latest
@@ -137,6 +153,7 @@ jobs:
       - hub-smoke-tests
       - docs-build
       - repo-hygiene
+      - agent-sync-check
       - web-static-checks
     if: github.ref == 'refs/heads/main'
     env:
