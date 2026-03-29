@@ -46,6 +46,9 @@ class TaskPlan:
     target_tool: str
     target_tier: str
     steps: list[StepPlan]
+    owner_id: str = ""
+    principal_id: str = ""
+    session_id: str = ""
     normalization: dict[str, Any] = field(default_factory=dict)
 
     def to_dict(self) -> dict[str, Any]:
@@ -79,6 +82,9 @@ class LocalTaskPlanner:
         response_thread_id: int | str | None,
         parent_task_id: str = "",
         intent_profile: IntentProfile | None = None,
+        owner_id: str = "",
+        principal_id: str = "",
+        session_id: str = "",
     ) -> TaskPlan:
         profile = intent_profile or self.normalizer.normalize(raw_text, owner_id=requested_by)
         steps = self._build_steps(profile=profile, raw_text=raw_text)
@@ -107,6 +113,9 @@ class LocalTaskPlanner:
             target_tool=target_tool,
             target_tier=target_tier,
             steps=steps,
+            owner_id=owner_id,
+            principal_id=principal_id,
+            session_id=session_id,
             normalization=profile.to_dict(),
         )
         self.validate_task_envelope(plan.to_dict())
@@ -129,6 +138,9 @@ class LocalTaskPlanner:
             "response_thread_id",
             "target_runtime",
             "target_tool",
+            "owner_id",
+            "principal_id",
+            "session_id",
         }
         missing = required - payload.keys()
         if missing:

@@ -301,10 +301,19 @@ class MessengerAgent(BaseAgent):
             content = self._extract_full_content(message)
             if not content:
                 return
+            
+            author = message.author
+            owner_id = f"discord-{author.id}"
+            principal_id = f"discord-user-{author.id}"
+            session_id = f"discord-session-{author.id}-{int(time.time())}"
+
             logger.info("DM from %s → HeiwaAgent: %s", message.author, content[:80])
             await self._publish_raw(Subject.HEIWA_AGENT_INGRESS.value, {
                 "content": content,
                 "author": str(message.author),
+                "owner_id": owner_id,
+                "principal_id": principal_id,
+                "session_id": session_id,
                 "channel_id": message.channel.id,
             })
             # Fire-and-forget STDB tracking (don't block the response)
@@ -423,6 +432,10 @@ class MessengerAgent(BaseAgent):
         task_id = f"task-{raw_hex[0:10]}"
         
         author = source.author if isinstance(source, discord.Message) else source.user
+        owner_id = f"discord-{author.id}"
+        principal_id = f"discord-user-{author.id}"
+        session_id = f"discord-session-{author.id}-{int(time.time())}"
+
         intent_profile = self.planner.normalizer.normalize(instruction, owner_id=str(author))
         preview_intent = intent_profile.intent_class
         
@@ -436,6 +449,9 @@ class MessengerAgent(BaseAgent):
             "raw_text": instruction,
             "source": "discord",
             "requested_by": str(author),
+            "owner_id": owner_id,
+            "principal_id": principal_id,
+            "session_id": session_id,
             "source_channel_id": channel.id,
             "source_message_id": source.id if isinstance(source, discord.Message) else 0,
             "ingress_ts": time.time(),
@@ -451,6 +467,9 @@ class MessengerAgent(BaseAgent):
                 "task_id": task_id,
                 "content": instruction,
                 "author": str(author),
+                "owner_id": owner_id,
+                "principal_id": principal_id,
+                "session_id": session_id,
                 "channel_id": channel.id,
                 "intent_class": intent_profile.intent_class,
             })
@@ -484,7 +503,19 @@ class MessengerAgent(BaseAgent):
         if isinstance(source, discord.Interaction): await source.followup.send(embed=ack_embed)
         else: await source.channel.send(embed=ack_embed)
 
-        plan = self.planner.plan(task_id=task_id, raw_text=instruction, requested_by=str(author), source_channel_id=channel.id, source_message_id=0, response_channel_id=response_channel_id, response_thread_id=response_thread_id, intent_profile=intent_profile)
+        plan = self.planner.plan(
+            task_id=task_id, 
+            raw_text=instruction, 
+            requested_by=str(author), 
+            source_channel_id=channel.id, 
+            source_message_id=0, 
+            response_channel_id=response_channel_id, 
+            response_thread_id=response_thread_id, 
+            intent_profile=intent_profile,
+            owner_id=owner_id,
+            principal_id=principal_id,
+            session_id=session_id
+        )
         plan_payload = plan.to_dict()
         self.task_targets[task_id] = {
             "channel_id": int(response_channel_id) if response_channel_id else None, 
@@ -533,6 +564,9 @@ class MessengerAgent(BaseAgent):
             "approved": approved,
             "decision_by": actor,
             "decision_at": state.decision_at,
+            "owner_id": plan_payload.get("owner_id"),
+            "principal_id": plan_payload.get("principal_id"),
+            "session_id": plan_payload.get("session_id"),
             "response_channel_id": plan_payload.get("response_channel_id"),
             "response_thread_id": plan_payload.get("response_thread_id"),
         }
@@ -569,6 +603,9 @@ class MessengerAgent(BaseAgent):
                 "decision_by": state.decision_by,
                 "decision_at": state.decision_at,
                 "reason": state.reason,
+                "owner_id": plan_payload.get("owner_id"),
+                "principal_id": plan_payload.get("principal_id"),
+                "session_id": plan_payload.get("session_id"),
                 "response_channel_id": plan_payload.get("response_channel_id"),
                 "response_thread_id": plan_payload.get("response_thread_id"),
             },
