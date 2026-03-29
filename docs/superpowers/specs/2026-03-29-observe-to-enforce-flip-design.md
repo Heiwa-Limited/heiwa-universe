@@ -47,7 +47,7 @@ To satisfy the production flip gate, the hook must emit structured telemetry to 
 #### Production Flip Gate
 The environment variable `HEIWA_ROLLOUT_MODE` may only be set to `enforce` in production when:
 1.  Full automated test suite passes (including new enforce-mode deny/bypass tests in `apps/heiwa_hub/tests/test_execution_hooks.py`).
-2. STDB `hook_audit` artifacts show **48 hours of zero non-operator `WOULD_DENY` events** across ALL enforced rules (Identity, Lease Presence, Scope Fields, Tool Match, Routing Match, and Lookup Success).
+2. STDB `hook_audit` artifacts show **48 hours of zero non-operator `WOULD_DENY` events** across ALL enforced rules (Decision Codes: `MISSING_OWNER_ID`, `MISSING_LEASE`, `MISSING_SCOPE_FIELD`, `INVALID_SCOPE_JSON`, `TOOL_SCOPE_MISMATCH`, `ROUTING_LOCK_MISMATCH`, `LOOKUP_FAILURE`).
 
 3.  Manual bench run confirms:
     - `OPERATOR_BYPASS_MISSING_LEASE` works for emergency repairs.
