@@ -718,6 +718,13 @@ def _validate_auth_token(token: str | None) -> str:
 #  Task ingress
 # ---------------------------------------------------------------------------
 
+class ProviderCredentialRequest(BaseModel):
+    provider_id: str
+    credential_kind: str
+    credential_value: str
+    display_label: str | None = None
+
+
 class TaskRequest(BaseModel):
     raw_text: str
     sender_id: str = "cli"
@@ -1061,6 +1068,37 @@ async def get_provider_account_status(provider_id: str, request: Request):
     if not payload:
         raise HTTPException(status_code=404, detail=f"Provider {provider_id} not found")
     return payload
+
+
+@app.post("/auth/credentials")
+async def add_credential(req: ProviderCredentialRequest, request: Request):
+    claims = require_user(request)
+    identity = resolve_identity_context(claims)
+    owner_id = identity["owner_id"]
+    
+    # Validation against ProviderRegistry
+    from heiwa_sdk.provider_registry import ProviderRegistry
+    registry = ProviderRegistry(ROOT)
+    prov = registry.resolve(req.provider_id)
+    if prov.name == "unknown":
+         raise HTTPException(status_code=400, detail=f"Unknown provider: {req.provider_id}")
+
+    from heiwa_sdk.vault import UserVault
+    vault = UserVault(db.stdb)
+    
+    # Map provider_id to its default rate_group from registry
+    rate_group = prov.rate_group
+    
+    cred_id = vault.store_credential(
+        owner_id=owner_id,
+        provider_id=req.provider_id,
+        credential_kind=req.credential_kind,
+        plaintext_value=req.credential_value,
+        rate_group=rate_group,
+        display_label=req.display_label,
+    )
+    
+    return {"status": "stored", "credential_id": cred_id}
 
 
 @app.get("/missions")
