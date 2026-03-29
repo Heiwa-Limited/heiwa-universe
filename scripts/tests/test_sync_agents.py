@@ -219,3 +219,38 @@ def test_check_gemini_config_passes():
     """Gemini config should already have required keys."""
     errors = check_gemini_config()
     assert errors == []
+
+
+from sync_agents import cmd_install_codex
+
+
+def test_install_codex_creates_symlinks(tmp_path):
+    """Verify install creates symlinks from target dir to generated source."""
+    agents = load_registry()
+    cmd_install_codex(agents, skills_dir=tmp_path)
+
+    for agent in agents:
+        m = agent["manifest"]
+        codex = m["targets"].get("codex", {})
+        if not codex.get("enabled"):
+            continue
+        install_name = codex["install_name"]
+        link = tmp_path / install_name
+        assert link.is_symlink(), f"{install_name} should be a symlink"
+        assert (link / "SKILL.md").exists(), f"{install_name}/SKILL.md should exist"
+
+
+def test_install_codex_copy_mode(tmp_path):
+    """Verify --copy creates real directories instead of symlinks."""
+    agents = load_registry()
+    cmd_install_codex(agents, skills_dir=tmp_path, copy_mode=True)
+
+    for agent in agents:
+        m = agent["manifest"]
+        codex = m["targets"].get("codex", {})
+        if not codex.get("enabled"):
+            continue
+        install_name = codex["install_name"]
+        target = tmp_path / install_name
+        assert target.is_dir() and not target.is_symlink()
+        assert (target / "SKILL.md").exists()

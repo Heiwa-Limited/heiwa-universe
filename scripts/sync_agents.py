@@ -11,7 +11,13 @@ Usage:
 """
 from __future__ import annotations
 
+import argparse
 import json
+import shutil
+import sys
+from pathlib import Path
+
+import yaml
 
 # -- Constants --
 
@@ -288,11 +294,45 @@ def cmd_check(agents: list[dict]) -> bool:
     return True
 
 
-import argparse
-import sys
-from pathlib import Path
+import shutil
 
-import yaml
+DEFAULT_SKILLS_DIR = Path.home() / ".agents" / "skills"
+
+
+def cmd_install_codex(
+    agents: list[dict],
+    skills_dir: Path | None = None,
+    copy_mode: bool = False,
+) -> None:
+    """Install Codex wrappers into the native discovery path."""
+    if skills_dir is None:
+        skills_dir = DEFAULT_SKILLS_DIR
+    skills_dir.mkdir(parents=True, exist_ok=True)
+
+    for agent in agents:
+        m = agent["manifest"]
+        codex = m["targets"].get("codex", {})
+        if not codex.get("enabled"):
+            continue
+
+        install_name = codex["install_name"]
+        generated_dir = REPO_ROOT / codex["generated_dir"]
+        install_target = skills_dir / install_name
+
+        if copy_mode:
+            if install_target.exists():
+                shutil.rmtree(install_target)
+            shutil.copytree(generated_dir, install_target)
+        else:
+            if install_target.is_symlink() or install_target.exists():
+                if install_target.is_symlink():
+                    install_target.unlink()
+                else:
+                    shutil.rmtree(install_target)
+            install_target.symlink_to(generated_dir.resolve())
+
+        print(f"  Installed {install_name} → {install_target}")
+
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 AGENTS_DIR = REPO_ROOT / "ops" / "agents"
@@ -365,8 +405,9 @@ def main() -> int:
         return 0 if ok else 1
 
     if args.install_codex:
-        print("Install mode not yet implemented.")
-        return 1
+        cmd_install_codex(agents, copy_mode=args.copy)
+        print("Done.")
+        return 0
 
     cmd_generate(agents)
     print("Done.")
