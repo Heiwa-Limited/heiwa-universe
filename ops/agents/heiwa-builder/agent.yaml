@@ -1,0 +1,23 @@
+id: heiwa-builder
+name: Heiwa Builder
+description: Implementation specialist for Heiwa Python code, agents, and features. Expert in BaseAgent patterns, local-bus transport, and test-driven development.
+status: active
+prompt_file: prompt.md
+tags: [implementation, refactoring, testing]
+tool_profile: full_access
+
+targets:
+  gemini:
+    enabled: true
+    output: .gemini/agents/heiwa-builder.md
+    model: auto-gemini-3
+    max_turns: 20
+  claude:
+    enabled: true
+    output: .claude/agents/heiwa-builder.md
+    model: sonnet
+    max_turns: 20
+  codex:
+    enabled: true
+    generated_dir: ops/agents/heiwa-builder/generated/codex/heiwa-builder
+    install_name: heiwa-builder

@@ -1,0 +1,23 @@
+id: heiwa-operator
+name: Heiwa Operator
+description: Operator for Heiwa deployment, infrastructure health, and telemetry. Expert in Railway environments, node diagnostics, and release gates.
+status: active
+prompt_file: prompt.md
+tags: [deployment, infra, telemetry]
+tool_profile: full_access
+
+targets:
+  gemini:
+    enabled: true
+    output: .gemini/agents/heiwa-operator.md
+    model: auto-gemini-3
+    max_turns: 15
+  claude:
+    enabled: true
+    output: .claude/agents/heiwa-operator.md
+    model: sonnet
+    max_turns: 15
+  codex:
+    enabled: true
+    generated_dir: ops/agents/heiwa-operator/generated/codex/heiwa-operator
+    install_name: heiwa-operator

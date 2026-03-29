@@ -1,0 +1,23 @@
+id: heiwa-researcher
+name: Heiwa Researcher
+description: Read-only codebase investigator for Heiwa. Synthesizes context from code, docs, and logs without mutating state.
+status: active
+prompt_file: prompt.md
+tags: [research, investigation, read-only]
+tool_profile: read_only
+
+targets:
+  gemini:
+    enabled: true
+    output: .gemini/agents/heiwa-researcher.md
+    model: auto-gemini-3
+    max_turns: 15
+  claude:
+    enabled: true
+    output: .claude/agents/heiwa-researcher.md
+    model: sonnet
+    max_turns: 15
+  codex:
+    enabled: true
+    generated_dir: ops/agents/heiwa-researcher/generated/codex/heiwa-researcher
+    install_name: heiwa-researcher

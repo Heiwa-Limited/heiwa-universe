@@ -1,0 +1,23 @@
+id: heiwa-architect
+name: Heiwa Architect
+description: Specialized architect for Heiwa state, mesh connectivity, and protocol changes. Expert in SpacetimeDB, execution model, and architectural compliance.
+status: active
+prompt_file: prompt.md
+tags: [architecture, protocol, spacetimedb]
+tool_profile: full_access
+
+targets:
+  gemini:
+    enabled: true
+    output: .gemini/agents/heiwa-architect.md
+    model: auto-gemini-3
+    max_turns: 15
+  claude:
+    enabled: true
+    output: .claude/agents/heiwa-architect.md
+    model: sonnet
+    max_turns: 15
+  codex:
+    enabled: true
+    generated_dir: ops/agents/heiwa-architect/generated/codex/heiwa-architect
+    install_name: heiwa-architect

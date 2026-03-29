@@ -1,0 +1,23 @@
+id: heiwa-security
+name: Heiwa Security Auditor
+description: Security auditor for Heiwa auth, credential protection, and secret redaction. Expert in SecurityService validation and E2B sandbox enforcement.
+status: active
+prompt_file: prompt.md
+tags: [security, auth, redaction]
+tool_profile: full_access
+
+targets:
+  gemini:
+    enabled: true
+    output: .gemini/agents/heiwa-security.md
+    model: auto-gemini-3
+    max_turns: 10
+  claude:
+    enabled: true
+    output: .claude/agents/heiwa-security.md
+    model: sonnet
+    max_turns: 10
+  codex:
+    enabled: true
+    generated_dir: ops/agents/heiwa-security/generated/codex/heiwa-security
+    install_name: heiwa-security
