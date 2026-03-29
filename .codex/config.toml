@@ -1,0 +1,28 @@
+# Heiwa project-level Codex config
+# Overrides ~/.codex/config.toml within ~/heiwa/
+#
+# Global settings (model, personality, approval_policy, sandbox_mode)
+# are inherited — only Heiwa-specific overrides below.
+
+[mcp_servers.railway]
+command = "npx"
+args = ["@railway/mcp-server"]
+
+[mcp_servers.MCP_DOCKER]
+command = "docker"
+args = ["mcp", "gateway", "run"]
+
+[mcp_servers.playwright]
+command = "npx"
+args = ["@playwright/mcp@latest"]
+
+[features]
+multi_agent = true
+guardian_approval = true
+prevent_idle_sleep = true
+
+[plugins."github@openai-curated"]
+enabled = true
+
+[plugins."cloudflare@openai-curated"]
+enabled = true

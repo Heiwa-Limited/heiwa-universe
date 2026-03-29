@@ -7,5 +7,7 @@ __pycache__/
 *.pyo
 .pytest_cache/
 .claude/
+.codex/
+.ollama/
 .wrangler/
 site/

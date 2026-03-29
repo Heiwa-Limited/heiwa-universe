@@ -1,0 +1,38 @@
+# Heiwa executive policy for Gemini CLI sessions.
+# Aligns Gemini's runtime policy with Heiwa's Class 3 executive posture.
+# All core tools + shell auto-approved. MCP tools for infra auto-approved.
+
+# Core file/search/plan tools
+[[rule]]
+toolName = [
+  "read_file",
+  "list_directory",
+  "glob",
+  "grep_search",
+  "write_file",
+  "replace",
+  "activate_skill",
+  "enter_plan_mode",
+  "exit_plan_mode",
+  "codebase_investigator",
+]
+decision = "allow"
+priority = 900
+
+# Shell execution
+[[rule]]
+toolName = "run_shell_command"
+decision = "allow"
+priority = 900
+
+# Railway MCP — primary execution plane
+[[rule]]
+decision = "allow"
+priority = 850
+mcpName = "railway"
+
+# Docker MCP — container operations
+[[rule]]
+decision = "allow"
+priority = 850
+mcpName = "docker"

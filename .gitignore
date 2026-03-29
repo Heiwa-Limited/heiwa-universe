@@ -95,8 +95,27 @@ auth.json
 oauth_creds.json
 *.keystore
 
-# Claude Code local settings
-.claude/
+# Claude Code — allow team settings, ignore local
+.claude/*
+!.claude/settings.json
+!.claude/commands/
+!.claude/commands/**
+
+# Codex — override global gitignore, allow project config
+!.codex/
+.codex/*
+!.codex/config.toml
+
+# Gemini CLI — allow project config, ignore local state
+.gemini/*
+!.gemini/settings.json
+!.gemini/policies/
+!.gemini/policies/**
+
+# Ollama — model manifest for boost nodes
+!.ollama/
+.ollama/*
+!.ollama/models.json
 
 # Standalone apps (live outside monorepo)
 apps/heiwa_dj/

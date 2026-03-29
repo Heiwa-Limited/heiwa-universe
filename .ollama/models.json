@@ -1,0 +1,48 @@
+{
+  "description": "Ollama model manifest for Heiwa boost nodes. Source of truth: config/swarm/ai_router.json",
+  "connection": {
+    "default_url": "http://127.0.0.1:11434",
+    "env_var": "HEIWA_OLLAMA_URL",
+    "embedding_model_env": "HEIWA_OLLAMA_EMBEDDING_MODEL"
+  },
+  "required": [
+    {
+      "model": "qwen3.5:4b",
+      "role": "primary orchestration and reasoning",
+      "compute_class": 2,
+      "nodes": ["boost@macbook", "pc@heiwa-node-b"]
+    },
+    {
+      "model": "llama3.2:3b",
+      "role": "chat and general fallback",
+      "compute_class": 2,
+      "nodes": ["boost@macbook"]
+    },
+    {
+      "model": "qwen2.5-coder:1.5b",
+      "role": "local codegen",
+      "compute_class": 2,
+      "nodes": ["boost@macbook"]
+    },
+    {
+      "model": "qwen3-embedding:0.6b",
+      "role": "embedding generation",
+      "compute_class": 1,
+      "nodes": ["boost@macbook", "pc@heiwa-node-b"]
+    }
+  ],
+  "optional": [
+    {
+      "model": "glm-4.7-flash:q4_k_m",
+      "role": "alternative codegen",
+      "compute_class": 2,
+      "nodes": ["boost@macbook"]
+    },
+    {
+      "model": "llama-4-scout:q4_k_m",
+      "role": "reasoning fallback",
+      "compute_class": 2,
+      "nodes": ["boost@macbook"]
+    }
+  ]
+}
