@@ -51,6 +51,22 @@ class WorkerManager:
         self.sem = asyncio.Semaphore(max(1, self.concurrency))
         self.running = True
 
+    @staticmethod
+    def _probe_ollama_models() -> list[str] | None:
+        """Check if Ollama is reachable on this machine and list loaded models."""
+        import urllib.request
+        base = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434")
+        try:
+            req = urllib.request.Request(f"{base}/api/tags", method="GET")
+            with urllib.request.urlopen(req, timeout=3) as resp:
+                if resp.status == 200:
+                    import json
+                    body = json.loads(resp.read())
+                    return [m.get("name") for m in body.get("models", []) if m.get("name")]
+        except Exception:
+            pass
+        return None
+
     def _detect_capabilities(self) -> dict:
         caps_str = os.getenv("HEIWA_CAPABILITIES", "")
         caps = {c.strip().lower() for c in caps_str.split(",") if c.strip()}
@@ -62,28 +78,20 @@ class WorkerManager:
                 caps = {"standard_compute", "workspace_interaction", "agile_coding"}
 
         # Auto-detect Ollama
-        ollama_available = self._probe_ollama()
+        ollama_models = self._probe_ollama_models()
+        ollama_available = ollama_models is not None
         result: dict = {
             "runtime": node_type,
             "capabilities": list(caps),
             "node_id": self.node_id,
             "ollama": ollama_available,
+            "ollama_models": ollama_models or [],
         }
         if ollama_available:
-            logger.info("Ollama detected — advertising LLM proxy capability")
+            logger.info("Ollama detected — advertising LLM proxy capabilities (%d model(s))", len(ollama_models or []))
         return result
 
-    @staticmethod
-    def _probe_ollama() -> bool:
-        """Check if Ollama is reachable on this machine."""
-        import urllib.request
-        base = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434")
-        try:
-            req = urllib.request.Request(f"{base}/api/tags", method="GET")
-            with urllib.request.urlopen(req, timeout=3) as resp:
-                return resp.status == 200
-        except Exception:
-            return False
+
 
     async def execute(self, payload: Dict[str, Any], ws: Any) -> None:
         """Execute a task locally and send the result back via WebSocket."""
@@ -199,7 +207,11 @@ class WorkerManager:
     async def _heartbeat_loop(self, ws: Any) -> None:
         try:
             while self.running:
-                await ws.send(json.dumps({"type": "heartbeat"}))
+                self.capabilities = self._detect_capabilities()
+                await ws.send(json.dumps({
+                    "type": "heartbeat",
+                    "capabilities": self.capabilities,
+                }))
                 await asyncio.sleep(15)
         except Exception:
             pass

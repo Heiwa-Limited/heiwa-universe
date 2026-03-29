@@ -432,13 +432,23 @@ pub struct Pod {
     pub runtime_capabilities: Vec<String>,
     pub trust_tier: String,
     pub privacy_floor: String,
-    pub gpu_inventory: Vec<String>,
     #[index(btree)]
     pub liveness: String,
     pub leaseable: bool,
     pub registered_at: String,
-    #[index(btree)]
     pub last_heartbeat: String,
+}
+
+#[table(accessor = gpu_slots, public)]
+pub struct GpuSlot {
+    #[primary_key]
+    pub slot_id: String,
+    #[index(btree)]
+    pub pod_id: String,
+    pub gpu_type: String,
+    pub vram_gb: i64,
+    pub loaded_models: Vec<String>,
+    pub available_slots: i64,
 }
 
 #[table(accessor = nodes, public)]
@@ -1007,7 +1017,6 @@ pub fn upsert_pod(
     runtime_capabilities: Vec<String>,
     trust_tier: String,
     privacy_floor: String,
-    gpu_inventory: Vec<String>,
     liveness: String,
     leaseable: bool,
     registered_at: String,
@@ -1020,7 +1029,6 @@ pub fn upsert_pod(
         runtime_capabilities,
         trust_tier,
         privacy_floor,
-        gpu_inventory,
         liveness,
         leaseable,
         registered_at,
@@ -1030,6 +1038,32 @@ pub fn upsert_pod(
         ctx.db.pods().pod_id().update(row);
     } else {
         ctx.db.pods().insert(row);
+    }
+    Ok(())
+}
+
+#[reducer]
+pub fn upsert_gpu_slot(
+    ctx: &ReducerContext,
+    slot_id: String,
+    pod_id: String,
+    gpu_type: String,
+    vram_gb: i64,
+    loaded_models: Vec<String>,
+    available_slots: i64,
+) -> Result<(), String> {
+    let row = GpuSlot {
+        slot_id: slot_id.clone(),
+        pod_id,
+        gpu_type,
+        vram_gb,
+        loaded_models,
+        available_slots,
+    };
+    if ctx.db.gpu_slots().slot_id().find(slot_id).is_some() {
+        ctx.db.gpu_slots().slot_id().update(row);
+    } else {
+        ctx.db.gpu_slots().insert(row);
     }
     Ok(())
 }

@@ -89,19 +89,19 @@ class LocalBusTransport:
         reply_event: asyncio.Event = asyncio.Event()
         reply_data: list[Dict[str, Any]] = []
 
-        async def _capture(data: Dict[str, Any]):
+        async def _capture(data: Dict[str, Any]) -> None:
             reply_data.append(data)
             reply_event.set()
 
         reply_subject_key = f"_reply.{subject.value}.{id(reply_event)}"
-        self._subscribers[reply_subject_key].append(_capture)
+        self._subscribers.setdefault(reply_subject_key, []).append(_capture)
 
         envelope = {
             Payload.SENDER_ID: sender_id,
             Payload.TIMESTAMP: time.time(),
             Payload.TYPE: subject.name,
             Payload.DATA: data,
-            "auth_token": settings.HEIWA_AUTH_TOKEN, # Critical
+            "auth_token": getattr(settings, "HEIWA_AUTH_TOKEN", ""), # Critical
             "_reply_subject": reply_subject_key,
         }
         for cb in self._subscribers.get(subject.value, []):
@@ -113,7 +113,8 @@ class LocalBusTransport:
         except asyncio.TimeoutError:
             return None
         finally:
-            self._subscribers[reply_subject_key].remove(_capture)
+            if _capture in self._subscribers.get(reply_subject_key, []):
+                self._subscribers[reply_subject_key].remove(_capture)
 
     async def reply(self, reply_subject_key: str, data: Dict[str, Any]):
         """Send a reply to a request-reply exchange."""
@@ -161,8 +162,23 @@ class WorkerSessionManager:
 
     async def _persist_pod(self, pod: PodRecord) -> None:
         db = self._get_stdb()
-        import dataclasses
-        await asyncio.to_thread(db.upsert_pod, dataclasses.asdict(pod))
+        # To avoid dataclasses recursive list parsing bugs, map manually or use local to_dict
+        await asyncio.to_thread(db.upsert_pod, pod.to_dict())
+
+    async def _persist_gpu_slots(self, pod: PodRecord) -> None:
+        db = self._get_stdb()
+        for slot in pod.gpu_inventory:
+            if not slot.loaded_models:
+                continue
+            payload = {
+                "slot_id": f"{pod.pod_id}:{slot.loaded_models[0]}",
+                "pod_id": pod.pod_id,
+                "gpu_type": slot.gpu_type,
+                "vram_gb": slot.vram_gb,
+                "loaded_models": slot.loaded_models,
+                "available_slots": slot.available_slots,
+            }
+            await asyncio.to_thread(db.upsert_gpu_slot, payload)
 
     async def _update_heartbeat_stdb(self, pod_id: str, ts: str, liveness: str) -> None:
         db = self._get_stdb()
@@ -175,11 +191,19 @@ class WorkerSessionManager:
         
         # Parse runtime and capabilities list
         runtime_capabilities = []
-        if isinstance(caps.get("capabilities"), list):
-            runtime_capabilities.extend(caps.get("capabilities"))
+        _caps_list = caps.get("capabilities", [])
+        if isinstance(_caps_list, list):
+            runtime_capabilities.extend(list(_caps_list))
         if caps.get("ollama"):
             runtime_capabilities.append("ollama")
         
+        # Map loaded Ollama models into GpuSlots tracking
+        from heiwa_protocol.schemas.pod import GpuSlot
+        gpu_inventory = [
+            GpuSlot(gpu_type="cpu", vram_gb=0, loaded_models=[m], available_slots=1)
+            for m in list(caps.get("ollama_models", []))
+        ]
+
         # Instantiate PodRecord schema
         pod = PodRecord(
             pod_id=worker_id,
@@ -188,7 +212,7 @@ class WorkerSessionManager:
             runtime_capabilities=runtime_capabilities,
             trust_tier="local" if "macbook" in worker_id.lower() or "local" in caps.get("runtime", "").lower() else "untrusted",
             privacy_floor="sovereign" if "macbook" in worker_id.lower() else "public",
-            gpu_inventory=[],
+            gpu_inventory=gpu_inventory,
             liveness="online",
             leaseable=True,
             registered_at=str(time.time()),
@@ -201,10 +225,12 @@ class WorkerSessionManager:
         
         try:
             asyncio.create_task(self._persist_pod(pod))
+            if gpu_inventory:
+                asyncio.create_task(self._persist_gpu_slots(pod))
         except RuntimeError:
             pass  # Fallback if no running loop, though Hub always has one
         
-        logger.info("Worker registered: %s (capabilities: %s)", worker_id, runtime_capabilities)
+        logger.info("Worker registered: %s (capabilities: %s, models: %s)", worker_id, runtime_capabilities, len(gpu_inventory))
 
     def unregister(self, worker_id: str):
         """Remove a worker session."""
@@ -218,27 +244,63 @@ class WorkerSessionManager:
         self._heartbeats.pop(worker_id, None)
         logger.info("Worker unregistered: %s", worker_id)
 
-    def heartbeat(self, worker_id: str):
+    def heartbeat(self, worker_id: str, capabilities: Optional[Dict[str, Any]] = None):
         """Update heartbeat timestamp for a worker."""
         now = time.time()
         self._heartbeats[worker_id] = now
+        pod = self._pods.get(worker_id)
+        
+        models_changed = False
+        if pod and capabilities and "ollama_models" in capabilities:
+            from heiwa_protocol.schemas.pod import GpuSlot
+            new_models = set(capabilities.get("ollama_models", []))
+            current_models = {s.loaded_models[0] for s in pod.gpu_inventory if s.loaded_models}
+            if new_models != current_models:
+                new_inventory = []
+                for s in pod.gpu_inventory:
+                    if s.loaded_models and s.loaded_models[0] not in new_models:
+                        s.available_slots = 0
+                    new_inventory.append(s)
+                for m in new_models - current_models:
+                    new_inventory.append(GpuSlot(gpu_type="cpu", vram_gb=0, loaded_models=[m], available_slots=1))
+                pod.gpu_inventory = new_inventory
+                models_changed = True
         
         last_write = self._last_stdb_heartbeats.get(worker_id, 0.0)
         if now - last_write > 10.0:
             self._last_stdb_heartbeats[worker_id] = now
-            pod = self._pods.get(worker_id)
             if pod:
                 try:
                     asyncio.create_task(self._update_heartbeat_stdb(worker_id, str(now), pod.liveness))
+                    if models_changed:
+                        asyncio.create_task(self._persist_gpu_slots(pod))
                 except RuntimeError:
                     pass
 
     def get_capabilities(self, worker_id: str) -> Dict[str, Any]:
-        """Return the last advertised capabilities for a worker."""
+        """Return the last advertised capabilities for a worker in legacy payload shape."""
         pod = self._pods.get(worker_id)
         if not pod:
             return {}
-        return pod.to_dict()
+            
+        caps = list(pod.runtime_capabilities)
+        ollama = "ollama" in caps
+        if ollama:
+            caps.remove("ollama")
+
+        models = [s.loaded_models[0] for s in pod.gpu_inventory if s.loaded_models and s.available_slots > 0]
+
+        return {
+            "node_id": worker_id,
+            "runtime": "local_node" if pod.trust_tier == "local" else "remote_node",
+            "capabilities": caps,
+            "ollama_models": models,
+            "ollama": ollama,
+        }
+
+    def get_pod_record(self, worker_id: str) -> Optional[PodRecord]:
+        """Return the full PodRecord metadata for a worker."""
+        return self._pods.get(worker_id)
 
     def get_active_workers(self, max_stale_sec: float = 60.0) -> list[str]:
         """Return worker IDs with recent heartbeats."""
@@ -323,7 +385,7 @@ class WorkerSessionManager:
             return None
 
         import uuid as _uuid
-        request_id = _uuid.uuid4().hex[:12]
+        request_id = str(_uuid.uuid4())
         response_event: asyncio.Event = asyncio.Event()
         response_text: list[str] = []
         self._llm_pending[request_id] = (response_event, response_text)

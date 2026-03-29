@@ -132,6 +132,20 @@ class ComputeRouter:
         privacy_level: str,
         min_capability_override: int | None = None,
     ) -> list[dict[str, Any]]:
+        if self._model_tiers is None:
+            try:
+                db = self._stdb
+                if not db:
+                    import os
+                    from heiwa_sdk.spacetimedb import SpacetimeDB
+                    identity = os.environ.get("STDB_IDENTITY", "heiwaproductiondb")
+                    server = os.environ.get("STDB_SERVER", "local")
+                    db = SpacetimeDB(db_identity=identity, server=server)
+                self._model_tiers = db.get_model_tiers()
+            except Exception:
+                # Leave self._model_tiers as None to allow transient retry attempts
+                pass
+
         if not self._model_tiers:
             return []
 
@@ -142,7 +156,33 @@ class ComputeRouter:
         runtime = str(target_runtime or "").strip().lower()
         privacy = str(privacy_level or "").strip().lower()
 
-        candidates: list[tuple[dict[str, Any], bool, bool]] = []
+        try:
+            db = self._stdb
+            if not db:
+                import os
+                from heiwa_sdk.spacetimedb import SpacetimeDB
+                identity = os.environ.get("STDB_IDENTITY", "heiwaproductiondb")
+                server = os.environ.get("STDB_SERVER", "local")
+                db = SpacetimeDB(db_identity=identity, server=server)
+            slots = db.get_gpu_slots()
+            pods = db.get_pods()
+        except Exception:
+            slots = []
+            pods = []
+
+        active_loaded_models = set()
+        for s in slots:
+            if s.get("available_slots", 0) > 0:
+                models = s.get("loaded_models")
+                if isinstance(models, list) and models:
+                    active_loaded_models.add(models[0])
+                elif isinstance(models, str) and models:
+                    # Support legacy or CLI bridge-flattened formats
+                    active_loaded_models.add(models)
+
+        max_available_vram = max([s.get("vram_gb", 0) for s in slots if s.get("available_slots", 0) > 0], default=0)
+
+        candidates: list[tuple[dict[str, Any], bool, bool, bool, bool]] = []
         for tier in self._model_tiers:
             if tier["capability_class"] < min_class:
                 continue
@@ -177,11 +217,24 @@ class ComputeRouter:
 
             exact_intent_match = intent_class in strengths
             intent_match = exact_intent_match or "general" in strengths
-            candidates.append((tier, exact_intent_match, intent_match))
+            
+            # Capacity-aware constraint:
+            # Provider "ollama" natively refers to local GPU capacity constraints. We extract exact models avoiding prefix splits if they align perfectly.
+            model_key = tier["model_id"].split("/", 1)[1] if "/" in tier["model_id"] else tier["model_id"]
+            is_hot = model_key in active_loaded_models
+            has_capacity = is_hot or (max_available_vram > 0)
+            
+            # If it's a local model that requires VRAM but we have none, technically reject it unless we can't be sure
+            if is_local_provider and not has_capacity and runtime != "railway":
+                pass # Usually we still fallback but we penalize it severely in sort
+                
+            candidates.append((tier, exact_intent_match, intent_match, is_hot, has_capacity))
 
         candidates.sort(key=lambda c: (
-            not c[1],
-            not c[2],
+            not c[3], # is_hot (Loaded already)
+            not c[1], # exact intent match
+            not c[2], # general intent match
+            not c[4], # has capacity 
             c[0].get("last_success_rate", 1.0) < 0.5,
             -c[0].get("last_success_rate", 1.0),
             c[0]["cost_per_turn"],
