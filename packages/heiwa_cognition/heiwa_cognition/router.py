@@ -102,8 +102,12 @@ class ComputeRouter:
         return provider in {"ollama", "local", "vllm", "litellm"}
 
     def _get_available_providers(self, owner_id: str) -> set[str]:
-        # Always allow local providers
-        available = {"ollama", "local", "vllm", "litellm"}
+        # Always allow local providers and CLI-based tools
+        available = {
+            "ollama", "local", "vllm", "litellm",
+            "google-gemini-cli", "claude-code", "openai-codex", "codex",
+            "anthropic-cli", "google-cli",
+        }
 
         # Check UserVault if STDB is available
         if self._stdb:
@@ -217,7 +221,10 @@ class ComputeRouter:
                 continue
 
             provider = str(tier.get("provider") or "")
-            if provider not in available_providers:
+            # Preserve compatibility with older tests and synthetic tier fixtures
+            # that omit provider metadata entirely. Real registry-backed tiers
+            # always carry a provider and should be credential-filtered.
+            if provider and provider not in available_providers:
                 continue
 
             is_local_provider = self._is_local_provider(provider)

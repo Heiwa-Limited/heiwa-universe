@@ -2,10 +2,13 @@ import os
 import base64
 import logging
 from pathlib import Path
-from typing import Any
-from cryptography.fernet import Fernet
+from typing import Any, TYPE_CHECKING
+from cryptography.fernet import Fernet, InvalidToken
 from cryptography.hazmat.primitives import hashes
 from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
+
+if TYPE_CHECKING:
+    from .spacetimedb import SpacetimeDB
 
 logger = logging.getLogger("SDK.Vault")
 
@@ -42,8 +45,11 @@ class InstanceVault:
         if not token: return ""
         try:
             return self._fernet.decrypt(token.encode()).decode()
+        except InvalidToken:
+            logger.error("Decryption failed: Invalid token")
+            return "[DECRYPTION_ERROR]"
         except Exception as e:
-            logger.error(f"Decryption failed: {e}")
+            logger.error(f"Decryption failed with unexpected error: {e}")
             return "[DECRYPTION_ERROR]"
 
     @staticmethod
@@ -144,7 +150,7 @@ class UserVault:
     Terminates 'owner_id' to STDB 'user_id' mapping.
     """
 
-    def __init__(self, stdb: Any):
+    def __init__(self, stdb: "SpacetimeDB"):
         self.stdb = stdb
         self.cipher = InstanceVault()
 
@@ -185,9 +191,12 @@ class UserVault:
     def resolve_credential(self, owner_id: str, provider_id: str) -> str | None:
         """Finds and decrypts the active credential for a provider."""
         # STDB query returns list[dict].
+        esc_owner = self.stdb._escape_sql_literal(owner_id)
+        esc_provider = self.stdb._escape_sql_literal(provider_id)
+
         rows = self.stdb.query(
             f"SELECT * FROM provider_credentials "
-            f"WHERE user_id = '{owner_id}' AND provider_id = '{provider_id}' "
+            f"WHERE user_id = '{esc_owner}' AND provider_id = '{esc_provider}' "
             f"AND status = 'active' LIMIT 1"
         )
         if not rows:
