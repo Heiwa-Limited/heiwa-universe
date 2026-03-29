@@ -3,6 +3,7 @@ from __future__ import annotations
 import logging
 from dataclasses import dataclass
 import json
+import os
 from pathlib import Path
 from typing import Any
 
@@ -100,11 +101,34 @@ class ComputeRouter:
     def _is_local_provider(self, provider: str) -> bool:
         return provider in {"ollama", "local", "vllm", "litellm"}
 
+    def _get_available_providers(self, owner_id: str) -> set[str]:
+        # Always allow local providers
+        available = {"ollama", "local", "vllm", "litellm"}
+
+        # Check UserVault if STDB is available
+        if self._stdb:
+            try:
+                # STDB client has get_provider_credentials(user_id)
+                creds = self._stdb.get_provider_credentials(owner_id)
+                for c in creds:
+                    available.add(c["provider_id"])
+            except Exception:
+                pass
+
+        # Operator fallback (Railway/Local system keys)
+        if owner_id == "operator":
+            if os.getenv("GEMINI_API_KEY"): available.add("google")
+            if os.getenv("ANTHROPIC_API_KEY"): available.add("anthropic")
+            if os.getenv("OPENAI_API_KEY"): available.add("openai")
+
+        return available
+
     def _select_model_from_tiers(
         self,
         intent_class: str,
         risk_level: str,
         *,
+        owner_id: str = "operator",
         target_runtime: str,
         privacy_level: str,
         min_capability_override: int | None = None,
@@ -113,6 +137,7 @@ class ComputeRouter:
         candidates = self._ranked_tier_candidates(
             intent_class,
             risk_level,
+            owner_id=owner_id,
             target_runtime=target_runtime,
             privacy_level=privacy_level,
             min_capability_override=min_capability_override,
@@ -128,6 +153,7 @@ class ComputeRouter:
         intent_class: str,
         risk_level: str,
         *,
+        owner_id: str = "operator",
         target_runtime: str,
         privacy_level: str,
         min_capability_override: int | None = None,
@@ -181,6 +207,7 @@ class ComputeRouter:
                     active_loaded_models.add(models)
 
         max_available_vram = max([s.get("vram_gb", 0) for s in slots if s.get("available_slots", 0) > 0], default=0)
+        available_providers = self._get_available_providers(owner_id)
 
         candidates: list[tuple[dict[str, Any], bool, bool, bool, bool]] = []
         for tier in self._model_tiers:
@@ -190,6 +217,9 @@ class ComputeRouter:
                 continue
 
             provider = str(tier.get("provider") or "")
+            if provider not in available_providers:
+                continue
+
             is_local_provider = self._is_local_provider(provider)
             
             # Pod trust_tier alignment mappings:
@@ -418,6 +448,7 @@ class ComputeRouter:
         risk_level: str,
         raw_text: str = "",
         privacy_level: str | None = None,
+        owner_id: str = "operator",
         identity_worker_hint: str | None = None,
     ) -> ComputeRoute:
         result = self._route_inner(intent_class, risk_level, raw_text, privacy_level)
@@ -436,6 +467,7 @@ class ComputeRouter:
             tier_result = self._select_model_from_tiers(
                 result.intent_class or intent_class,
                 risk_level,
+                owner_id=owner_id,
                 target_runtime=result.target_runtime,
                 privacy_level=result.privacy_level,
                 min_capability_override=min_cap,
@@ -472,12 +504,14 @@ class ComputeRouter:
         risk: str,
         privacy: str | None = None,
         runtime: str | None = None,
+        owner_id: str = "operator",
     ) -> RoutedPlan:
         route = self.route(
             intent_class=intent,
             risk_level=risk,
             raw_text="",
             privacy_level=privacy,
+            owner_id=owner_id,
         )
         runtime_value = str(runtime or route.target_runtime or "auto").strip().lower() or "auto"
         privacy_value = str(route.privacy_level or privacy or "").strip().lower()
@@ -513,6 +547,7 @@ class ComputeRouter:
         for tier in self._ranked_tier_candidates(
             intent,
             risk,
+            owner_id=owner_id,
             target_runtime=runtime_value,
             privacy_level=privacy_value,
             min_capability_override=capability_class,
