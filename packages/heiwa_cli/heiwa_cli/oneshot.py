@@ -15,7 +15,8 @@ from rich.panel import Panel
 
 from heiwa_cli.approval_inline import request_inline_approval
 from heiwa_cli.context import CLIContext
-from heiwa_cli.stream import render_output, stream_from_hub
+from heiwa_cli.stream import render_output
+from heiwa_cli.wire import WireClient
 
 logger = logging.getLogger("CLI")
 console = Console(stderr=True)
@@ -223,13 +224,27 @@ async def dispatch_once(ctx: CLIContext, prompt: str) -> int:
 
     # distributed mode: try hub first, fall back to direct
     for hub_url in ctx.hub_url_candidates():
+        battlefield = ctx.battlefield_registration()
+        wire = WireClient(
+            base_url=hub_url,
+            token=ctx.auth_token,
+            battlefield_id=battlefield["battlefield_id"],
+            session_id=ctx.session_id,
+        )
         try:
-            result = await _submit_to_hub(ctx, prompt, task_id, hub_url)
+            await wire.connect()
+            await wire.register_battlefield(battlefield)
+            result = await wire.submit_task(
+                raw_text=prompt,
+                sender_id=ctx.node_id,
+                source_surface="cli",
+                task_id=task_id,
+            )
             if result:
                 accepted_id = result.get("task_id", task_id)
                 route = result.get("route", {})
                 _trace(ctx, f"route {route.get('intent_class', '?')} → {route.get('target_tool', '?')} → {route.get('target_model', 'default')}")
-                exit_code, summary = await stream_from_hub(hub_url, accepted_id, token=ctx.auth_token, trace=ctx.trace)
+                exit_code, summary = await wire.wait_for_task(accepted_id, trace=ctx.trace)
                 if exit_code == 2:
                     approval = await request_inline_approval(
                         ctx,
@@ -239,7 +254,7 @@ async def dispatch_once(ctx: CLIContext, prompt: str) -> int:
                         prompt_session=None,
                     )
                     if approval.status == "approved":
-                        exit_code, summary = await stream_from_hub(hub_url, accepted_id, token=ctx.auth_token, trace=ctx.trace)
+                        exit_code, summary = await wire.wait_for_task(accepted_id, trace=ctx.trace)
                     else:
                         return 1
                 if summary:
@@ -247,6 +262,8 @@ async def dispatch_once(ctx: CLIContext, prompt: str) -> int:
                 return exit_code
         except Exception as e:
             _trace(ctx, f"Hub {hub_url}: {e}")
+        finally:
+            await wire.close()
 
     _trace(ctx, "Hub unreachable — direct local route.")
     return await _direct_execute(ctx, prompt, task_id)

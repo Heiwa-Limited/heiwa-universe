@@ -536,6 +536,10 @@ class SpineAgent(BaseAgent):
             "response_channel_id": payload.get("response_channel_id"),
             "response_thread_id": payload.get("response_thread_id"),
             "approval_id": payload.get("approval_id"),
+            "owner_id": payload.get("owner_id"),
+            "principal_id": payload.get("principal_id"),
+            "session_id": payload.get("session_id"),
+            "battlefield_id": payload.get("battlefield_id"),
         })
 
     @staticmethod
