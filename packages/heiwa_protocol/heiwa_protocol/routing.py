@@ -38,6 +38,9 @@ class BrokerRouteRequest:
     task_id: str
     raw_text: str
     sender_id: str = ""
+    owner_id: str = "operator"
+    principal_id: str | None = None
+    session_id: str | None = None
     source_surface: str = "cli"
     response_channel_id: str | int | None = None
     response_thread_id: str | int | None = None
@@ -53,6 +56,9 @@ class BrokerRouteRequest:
             task_id=str(payload.get("task_id") or ""),
             raw_text=str(payload.get("raw_text") or ""),
             sender_id=str(payload.get("sender_id") or ""),
+            owner_id=str(payload.get("owner_id") or "operator"),
+            principal_id=payload.get("principal_id"),
+            session_id=payload.get("session_id"),
             source_surface=str(payload.get("source_surface") or "cli"),
             response_channel_id=payload.get("response_channel_id"),
             response_thread_id=payload.get("response_thread_id"),
@@ -86,6 +92,9 @@ class BrokerRouteResult:
     target_tier: str
     requires_approval: bool
     rationale: str
+    owner_id: str = "operator"
+    principal_id: str | None = None
+    session_id: str | None = None
     confidence: float = 0.0
     escalation_reasons: list[str] = field(default_factory=list)
     assumptions: list[str] = field(default_factory=list)
@@ -116,6 +125,9 @@ class BrokerRouteResult:
             target_tier=str(payload.get("target_tier") or "tier1_local"),
             requires_approval=bool(payload.get("requires_approval")),
             rationale=str(payload.get("rationale") or ""),
+            owner_id=str(payload.get("owner_id") or "operator"),
+            principal_id=payload.get("principal_id"),
+            session_id=payload.get("session_id"),
             confidence=float(payload.get("confidence") or 0.0),
             escalation_reasons=list(payload.get("escalation_reasons") or []),
             assumptions=list(payload.get("assumptions") or []),
