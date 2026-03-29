@@ -51,7 +51,7 @@ class BrokerEnrichmentService:
         return self._selector
 
     async def enrich(self, request: BrokerRouteRequest) -> BrokerRouteResult:
-        profile = self.normalizer.normalize(request.raw_text)
+        profile = self.normalizer.normalize(request.raw_text, owner_id=request.owner_id)
         assessment = self.scorer.score(
             intent_class=profile.intent_class,
             raw_text=request.raw_text,
@@ -71,6 +71,7 @@ class BrokerEnrichmentService:
             raw_text=request.raw_text,
             privacy_level=request.privacy_level,
             identity_worker_hint=worker_hint,
+            owner_id=request.owner_id,
         )
 
         # Phase 2: Memory Context Enrichment
@@ -117,6 +118,9 @@ class BrokerEnrichmentService:
             target_tier=route.target_tier,
             requires_approval=assessment.requires_approval or profile.requires_approval,
             rationale=route.rationale,
+            owner_id=request.owner_id,
+            principal_id=request.principal_id,
+            session_id=request.session_id,
             confidence=profile.confidence,
             escalation_reasons=assessment.escalation_reasons,
             assumptions=profile.assumptions,

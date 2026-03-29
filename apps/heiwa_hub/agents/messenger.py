@@ -421,11 +421,12 @@ class MessengerAgent(BaseAgent):
     async def _ingest_interaction(self, instruction: str, source: Union[discord.Message, discord.Interaction], explicit: bool) -> None:
         raw_hex = str(uuid.uuid4().hex)
         task_id = f"task-{raw_hex[0:10]}"
-        intent_profile = self.planner.normalizer.normalize(instruction)
+        
+        author = source.author if isinstance(source, discord.Message) else source.user
+        intent_profile = self.planner.normalizer.normalize(instruction, owner_id=str(author))
         preview_intent = intent_profile.intent_class
         
         channel = source.channel if isinstance(source, discord.Message) else source.channel
-        author = source.author if isinstance(source, discord.Message) else source.user
         
         response_channel_id = self.intent_channel_map.get(preview_intent, channel.id)
         response_thread_id = channel.id if isinstance(channel, discord.Thread) else None

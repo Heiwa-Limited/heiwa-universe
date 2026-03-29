@@ -80,7 +80,7 @@ class LocalTaskPlanner:
         parent_task_id: str = "",
         intent_profile: IntentProfile | None = None,
     ) -> TaskPlan:
-        profile = intent_profile or self.normalizer.normalize(raw_text)
+        profile = intent_profile or self.normalizer.normalize(raw_text, owner_id=requested_by)
         steps = self._build_steps(profile=profile, raw_text=raw_text)
 
         runtimes = {step.target_runtime for step in steps}

@@ -143,7 +143,7 @@ class IntentNormalizer:
     def __init__(self, engine: object | None = None) -> None:
         self.engine = engine
 
-    def normalize(self, raw_text: str) -> IntentProfile:
+    def normalize(self, raw_text: str, owner_id: str = "operator") -> IntentProfile:
         text = " ".join((raw_text or "").split()).strip()
         if not text:
             text = "handle this task with safe defaults"
@@ -154,7 +154,7 @@ class IntentNormalizer:
         
         # Only burn API quota if the regex wall fails to classify it (general)
         if intent == "general":
-            llm = self._infer_with_llm(text)
+            llm = self._infer_with_llm(text, owner_id=owner_id)
             if llm:
                 intent = llm["intent_class"]
                 risk = llm["risk_level"]
@@ -229,7 +229,7 @@ class IntentNormalizer:
         pattern = rf"\b{re.escape(token)}\b"
         return re.search(pattern, lowered_text) is not None
 
-    def _infer_with_llm(self, text: str) -> dict[str, Any]:
+    def _infer_with_llm(self, text: str, owner_id: str = "operator") -> dict[str, Any]:
         prompt = (
             "Classify this request and return JSON only with keys: "
             "intent_class, risk_level, requires_approval, preferred_runtime, preferred_tool, confidence.\n"
@@ -247,6 +247,7 @@ class IntentNormalizer:
             intent="classification",
             risk="low",
             runtime="railway",
+            owner_id=owner_id,
         )
         intent = str(data.get("intent_class", "")).strip().lower()
         risk = str(data.get("risk_level", "")).strip().lower()
