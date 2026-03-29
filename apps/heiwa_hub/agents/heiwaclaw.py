@@ -138,8 +138,10 @@ class HeiwaClawAgent(BaseAgent):
         payload = data.get("data", data)
         content = payload.get("content", "")
         author = payload.get("author", "operator")
+        owner_id = f"discord-{author}"
+        session_id = payload.get("session_id") or f"discord-dm-{author}"
 
-        logger.info("DM from %s: %s", author, content[:80])
+        logger.info("DM from %s (%s): %s", author, owner_id, content[:80])
 
         loop = asyncio.get_event_loop()
         loop.run_in_executor(None, self._store_operator_message, content, "discord_dm")
@@ -147,11 +149,11 @@ class HeiwaClawAgent(BaseAgent):
         try:
             from heiwa_hub.chat import get_chat_engine
             engine = get_chat_engine()
-            session_id = f"discord-dm-{author}"
             reply = await engine.respond(
                 session_id=session_id,
                 content=content,
                 author=author,
+                owner_id=owner_id,
             )
             await self._dm(reply)
         except Exception as e:
@@ -250,6 +252,11 @@ class HeiwaClawAgent(BaseAgent):
         target_model = payload.get("target_model", "")
         target_tool = str(payload.get("target_tool", "heiwa_claw")).strip().lower() or "heiwa_claw"
 
+        owner_id = payload.get("owner_id", "operator")
+        principal_id = payload.get("principal_id")
+        session_id = payload.get("session_id")
+        battlefield_id = payload.get("battlefield_id")
+
         if target_runtime not in {self.executor_runtime, "both", "any"}:
             logger.info("Skipping task %s: target=%s, local=%s", task_id, target_runtime, self.executor_runtime)
             return
@@ -273,7 +280,7 @@ class HeiwaClawAgent(BaseAgent):
             "rationale": payload.get("rationale", ""),
             "normalization": payload.get("normalization", {}),
         })
-        dispatch = self.gateway.resolve(route)
+        dispatch = self.gateway.resolve(route, owner_id=owner_id)
 
         execution_program = None
         prog_data = payload.get("execution_program")
@@ -292,7 +299,7 @@ class HeiwaClawAgent(BaseAgent):
                 )
         lease_id = (active_lease or {}).get("lease_id", "")
 
-        logger.info("Processing task: %s | Intent: %s", task_id, intent_class)
+        logger.info("Processing task: %s | Intent: %s | Owner: %s", task_id, intent_class, owner_id)
         await self.speak(Subject.TASK_STATUS, {
             "accepted": True,
             "reason": None,
@@ -303,6 +310,10 @@ class HeiwaClawAgent(BaseAgent):
             "runtime": self.executor_runtime,
             "response_channel_id": payload.get("response_channel_id"),
             "response_thread_id": payload.get("response_thread_id"),
+            "owner_id": owner_id,
+            "principal_id": principal_id,
+            "session_id": session_id,
+            "battlefield_id": battlefield_id,
         })
 
         start = time.time()
@@ -315,10 +326,10 @@ class HeiwaClawAgent(BaseAgent):
                 exec_status, full_result = await self._run_bounded_audit(instruction)
             else:
                 logger.info(
-                    "Routing %s through OpenClaw (%s -> %s).",
-                    task_id, dispatch.provider, dispatch.adapter_tool,
+                    "Routing %s through OpenClaw (%s -> %s) for owner %s.",
+                    task_id, dispatch.provider, dispatch.adapter_tool, owner_id
                 )
-                code, output = await self.gateway.execute(route, instruction)
+                code, output = await self.gateway.execute(route, instruction, owner_id=owner_id)
                 exec_status = "PASS" if code == 0 else "FAIL"
                 full_result = output.strip()
         except Exception as e:
@@ -353,10 +364,10 @@ class HeiwaClawAgent(BaseAgent):
             "requested_by": payload.get("requested_by"),
             "response_channel_id": payload.get("response_channel_id"),
             "response_thread_id": payload.get("response_thread_id"),
-            "owner_id": payload.get("owner_id"),
-            "principal_id": payload.get("principal_id"),
-            "session_id": payload.get("session_id"),
-            "battlefield_id": payload.get("battlefield_id"),
+            "owner_id": owner_id,
+            "principal_id": principal_id,
+            "session_id": session_id,
+            "battlefield_id": battlefield_id,
             "program_validation": program_validation,
             "execution_program": execution_program.to_dict() if execution_program else None,
         }
@@ -389,10 +400,10 @@ class HeiwaClawAgent(BaseAgent):
             "target_tool": dispatch.gateway_tool,
             "response_channel_id": payload.get("response_channel_id"),
             "response_thread_id": payload.get("response_thread_id"),
-            "owner_id": payload.get("owner_id"),
-            "principal_id": payload.get("principal_id"),
-            "session_id": payload.get("session_id"),
-            "battlefield_id": payload.get("battlefield_id"),
+            "owner_id": owner_id,
+            "principal_id": principal_id,
+            "session_id": session_id,
+            "battlefield_id": battlefield_id,
         })
 
     async def _handle_directive(self, data: dict[str, Any]) -> None:

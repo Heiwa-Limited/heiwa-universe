@@ -107,6 +107,7 @@ class ChatEngine:
         session_id: str,
         content: str,
         author: str = "operator",
+        owner_id: str = "operator",
     ) -> str:
         """
         Generate a response to a chat message.
@@ -135,7 +136,7 @@ class ChatEngine:
         session.add("agent", reply)
 
         # Fire-and-forget value extraction — never blocks the response
-        asyncio.create_task(self._extract_value(session_id, content, author))
+        asyncio.create_task(self._extract_value(session_id, content, author, owner_id))
 
         return reply
 
@@ -207,7 +208,7 @@ class ChatEngine:
     #  Value extraction — async, never blocks response                     #
     # ------------------------------------------------------------------ #
 
-    async def _extract_value(self, session_id: str, content: str, author: str) -> None:
+    async def _extract_value(self, session_id: str, content: str, author: str, owner_id: str = "operator") -> None:
         """
         Determine if a chat message has research value.
         If it does, publish a signal to the auto-research pipeline.
@@ -232,6 +233,7 @@ class ChatEngine:
         signal_payload = {
             "session_id": session_id,
             "author": author,
+            "owner_id": owner_id,
             "content": content,
             "signals": signals,
             "timestamp": time.time(),
@@ -265,6 +267,8 @@ class ChatEngine:
                     "raw_text": content,
                     "source": "chat_value_router",
                     "requested_by": author,
+                    "owner_id": owner_id,
+                    "session_id": session_id,
                     "signal_types": [s["type"] for s in signals],
                     "priority": "low",
                     "auto_generated": True,
