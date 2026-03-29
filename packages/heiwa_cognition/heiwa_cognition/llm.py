@@ -17,6 +17,7 @@ import json
 import logging
 import os
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any, Optional
 
 import requests
@@ -39,7 +40,20 @@ try:
 except ImportError:
     _RATE_LEDGER = None
 
+PROJECT_ROOT = Path(__file__).resolve().parents[3]
 logger = logging.getLogger("LLMEngine")
+
+_ENGINE_CACHE: dict[str, LocalLLMEngine] = {}
+
+
+def get_llm_engine(stdb: Any | None = None) -> LocalLLMEngine:
+    """Get or create a cached LocalLLMEngine instance."""
+    # Using string representation of stdb's memory address as key if it exists,
+    # otherwise using 'default'.
+    cache_key = f"stdb_{id(stdb)}" if stdb is not None else "default"
+    if cache_key not in _ENGINE_CACHE:
+        _ENGINE_CACHE[cache_key] = LocalLLMEngine(stdb=stdb)
+    return _ENGINE_CACHE[cache_key]
 
 
 class LLMPolicyError(RuntimeError):
@@ -63,7 +77,8 @@ class LocalLLMEngine:
     demands higher capability.
     """
 
-    def __init__(self) -> None:
+    def __init__(self, stdb: Any | None = None) -> None:
+        self._stdb = stdb
         self.host_runtime = self._detect_host_runtime()
 
         # --- Ollama (Tier 1: Free, local inference) ---
@@ -104,12 +119,43 @@ class LocalLLMEngine:
                 logger.warning("Redis unavailable — rate limits will not be tracked.")
                 self._redis = None
 
+        # --- Provider Registry (cached) ---
+        self._provider_registry = None
+        try:
+            from heiwa_sdk.provider_registry import ProviderRegistry
+            self._provider_registry = ProviderRegistry(root_dir=PROJECT_ROOT)
+        except Exception as exc:
+            logger.warning("Provider registry unavailable: %s", exc)
+
         logger.info(
             "LLMEngine initialized | host_runtime=%s ollama=%s gemini=%s",
             self.host_runtime,
             "ON" if self._ollama_available(runtime=self.host_runtime) else "OFF",
             "ON" if self.gemini_key else "OFF",
         )
+
+    def _resolve_api_key(self, provider_id: str, owner_id: str = "operator") -> str | None:
+        """Resolve API key for a provider, scoped to an owner."""
+        # 1. User-scoped credential from STDB
+        if owner_id != "operator" and self._stdb:
+            try:
+                from heiwa_sdk.vault import UserVault
+                vault = UserVault(self._stdb)
+                key = vault.resolve_credential(owner_id, provider_id)
+                if key:
+                    return key
+            except Exception as e:
+                logger.debug("Failed to resolve user credential for %s: %s", provider_id, e)
+
+        # 2. Operator fallback (Environment variables)
+        if provider_id == "google":
+            return self.gemini_key
+        if provider_id == "anthropic":
+            return os.getenv("ANTHROPIC_API_KEY")
+        if provider_id == "openai":
+            return os.getenv("OPENAI_API_KEY")
+
+        return None
 
     # ------------------------------------------------------------------ #
     #  Availability checks                                                 #
@@ -185,11 +231,20 @@ class LocalLLMEngine:
         if system:
             payload["system"] = system
 
-        resp = requests.post(
-            f"{self.ollama_url}/api/generate",
-            json=payload,
-            timeout=self.ollama_timeout,
-        )
+        if _NET_PROXY:
+            resp = _NET_PROXY.post(
+                f"{self.ollama_url}/api/generate",
+                purpose="ollama inference",
+                purpose_class="model_inference",
+                json=payload,
+                timeout=int(self.ollama_timeout),
+            )
+        else:
+            resp = requests.post(
+                f"{self.ollama_url}/api/generate",
+                json=payload,
+                timeout=self.ollama_timeout,
+            )
         resp.raise_for_status()
         data = resp.json()
         text = str(data.get("response") or "").strip()
@@ -210,15 +265,21 @@ class LocalLLMEngine:
         model_name: str,
         tier: int,
         system: Optional[str] = None,
+        api_key: Optional[str] = None,
     ) -> LLMResult:
         # Check rate ledger before calling
         if _RATE_LEDGER and not _RATE_LEDGER.has_capacity(self._GEMINI_RATE_GROUP):
             logger.warning("Gemini rate-limited by ledger — skipping %s call", model_name)
             return LLMResult(text="", provider="gemini", model=model_name, tier=tier)
 
+        key = api_key or self.gemini_key
+        if not key:
+            logger.warning("No API key available for Gemini call")
+            return LLMResult(text="", provider="gemini", model=model_name, tier=tier)
+
         url = (
             f"https://generativelanguage.googleapis.com/v1beta/models/"
-            f"{model_name}:generateContent?key={self.gemini_key}"
+            f"{model_name}:generateContent?key={key}"
         )
         payload: dict[str, Any] = {
             "contents": [{"parts": [{"text": prompt}]}],
@@ -284,7 +345,7 @@ class LocalLLMEngine:
 
         try:
             result = subprocess.run(
-                cmd, capture_output=True, text=True, timeout=90, cwd="/app"
+                cmd, capture_output=True, text=True, timeout=90, cwd=str(PROJECT_ROOT)
             )
             text = result.stdout.strip()
             if result.returncode == 0 and text:
@@ -298,17 +359,19 @@ class LocalLLMEngine:
             logger.warning("CLI tool %s failed: %s", tool, e)
         return LLMResult(text="", provider=f"{tool}-cli", model=tool, tier=3)
 
-    def execute(self, target: Any, prompt: str, system: Optional[str] = None) -> str:
+    def execute(self, target: Any, prompt: str, system: Optional[str] = None, owner_id: str = "operator") -> str:
         """Execute one routed inference target."""
-        try:
-            from heiwa_sdk.provider_registry import ProviderRegistry
-        except Exception as exc:
-            logger.warning("Provider registry unavailable: %s", exc)
+        if not self._provider_registry:
+            logger.warning("Provider registry unavailable")
             return ""
 
-        provider_cfg = ProviderRegistry().resolve(str(getattr(target, "provider", "") or ""))
+        provider_id = str(getattr(target, "provider", "") or "")
+        provider_cfg = self._provider_registry.resolve(provider_id)
         transport = str(getattr(target, "transport", "") or provider_cfg.transport or "").strip().lower()
         model_id = str(getattr(target, "provider_model_id", "") or getattr(target, "model_id", "") or "").strip()
+
+        # Resolve API key for this provider and owner
+        api_key = self._resolve_api_key(provider_id, owner_id)
 
         try:
             if transport == "local_http":
@@ -323,6 +386,7 @@ class LocalLLMEngine:
                     model_id or self.gemini_flash_model,
                     tier=int(getattr(target, "capability_class", 1) or 1),
                     system=system,
+                    api_key=api_key,
                 ).text
             if provider_cfg.direct_execution and provider_cfg.adapter_tool:
                 return self._call_cli_tool(provider_cfg.adapter_tool, prompt, system).text
@@ -331,83 +395,169 @@ class LocalLLMEngine:
             logger.warning("Target execution failed for %s: %s", provider_cfg.name, exc)
             return ""
 
-    def _try_provider(
+    def generate(
         self,
-        provider: str,
         prompt: str,
-        system: Optional[str],
-        runtime: str = "auto",
-    ) -> Optional[LLMResult]:
-        """Attempt a single provider. Returns None on failure."""
+        intent: str = "general",
+        risk: str = "low",
+        *,
+        owner_id: str = "operator",
+        privacy: str | None = None,
+        runtime: str | None = None,
+        system: str | None = None,
+    ) -> InferenceResult:
+        """High-level entry point for routed inference."""
+        from heiwa_cognition.router import ComputeRouter, InferenceResult
+
+        router = ComputeRouter(stdb=self._stdb)
+        plan = router.route_inference(
+            intent=intent,
+            risk=risk,
+            privacy=privacy,
+            runtime=runtime,
+            owner_id=owner_id,
+        )
+
+        attempts = 0
+        seen: set[str] = set()
+        for target in [plan.primary, *plan.fallbacks]:
+            attempts += 1
+            seen.add(target.model_id)
+            text = self.execute(target, prompt, system=system, owner_id=owner_id)
+            if text:
+                return InferenceResult(
+                    text=text,
+                    provider=target.provider,
+                    model=target.model_id,
+                    attempts=attempts,
+                    rerouted=attempts > 1,
+                )
+
+        if plan.retry_policy == "exhaust_then_reroute":
+            # Re-route once if primary/fallbacks are exhausted
+            rerouted_plan = router.route_inference(
+                intent=intent,
+                risk=risk,
+                privacy=privacy,
+                runtime=runtime,
+                owner_id=owner_id,
+            )
+            if rerouted_plan.primary.model_id not in seen:
+                attempts += 1
+                text = self.execute(
+                    rerouted_plan.primary, prompt, system=system, owner_id=owner_id
+                )
+                if text:
+                    return InferenceResult(
+                        text=text,
+                        provider=rerouted_plan.primary.provider,
+                        model=rerouted_plan.primary.model_id,
+                        attempts=attempts,
+                        rerouted=True,
+                    )
+
+        return InferenceResult(
+            text="", provider="", model="", attempts=attempts, rerouted=attempts > 1
+        )
+
+    async def generate_async(
+        self,
+        prompt: str,
+        intent: str = "general",
+        risk: str = "low",
+        *,
+        owner_id: str = "operator",
+        privacy: str | None = None,
+        runtime: str | None = None,
+        system: str | None = None,
+    ) -> InferenceResult:
+        import asyncio
+
+        return await asyncio.to_thread(
+            self.generate,
+            prompt,
+            intent=intent,
+            risk=risk,
+            owner_id=owner_id,
+            privacy=privacy,
+            runtime=runtime,
+            system=system,
+        )
+
+    def generate_json(
+        self,
+        prompt: str,
+        intent: str = "general",
+        risk: str = "low",
+        *,
+        owner_id: str = "operator",
+        privacy: str | None = None,
+        runtime: str | None = None,
+        system: str | None = None,
+    ) -> dict[str, Any]:
+        result = self.generate(
+            prompt,
+            intent=intent,
+            risk=risk,
+            owner_id=owner_id,
+            privacy=privacy,
+            runtime=runtime,
+            system=system,
+        )
+        text = result.text
+        if not text:
+            return {}
+
+        text = text.strip()
+        if text.startswith("```"):
+            text = text.strip("`").replace("json", "", 1).strip()
+
         try:
-            if provider == "ollama" and self._ollama_available(runtime=runtime):
-                return self._call_ollama(prompt, system)
-            elif provider == "gemini_flash" and self.gemini_key:
-                result = self._call_gemini(
-                    prompt, self.gemini_flash_model, tier=1, system=system
-                )
-                return result if result and result.text else None
-            elif provider == "gemini_pro" and self.gemini_key:
-                result = self._call_gemini(
-                    prompt, self.gemini_pro_model, tier=2, system=system
-                )
-                return result if result and result.text else None
-            elif provider == "gemini_cli":
-                result = self._call_cli_tool("gemini", prompt, system)
-                return result if result and result.text else None
-            elif provider == "claude_cli":
-                result = self._call_cli_tool("claude", prompt, system)
-                return result if result and result.text else None
-        except Exception as e:
-            logger.warning("Provider %s failed: %s", provider, e)
-        return None
+            return json.loads(text)
+        except json.JSONDecodeError:
+            start = text.find("{")
+            end = text.rfind("}")
+            if start != -1 and end != -1 and end > start:
+                try:
+                    return json.loads(text[start : end + 1])
+                except json.JSONDecodeError:
+                    return {}
+        return {}
 
 def llm_generate_with_plan(
     prompt: str,
     intent: str = "general",
     risk: str = "low",
     *,
+    owner_id: str = "operator",
     privacy: str | None = None,
     runtime: str | None = None,
     system: str | None = None,
+    stdb: Any | None = None,
 ) -> tuple[Any, Any]:
-    from heiwa_cognition.router import ComputeRouter, InferenceResult
+    from heiwa_cognition.router import ComputeRouter
 
-    router = ComputeRouter()
-    plan = router.route_inference(intent=intent, risk=risk, privacy=privacy, runtime=runtime)
-    engine = LocalLLMEngine()
-
-    attempts = 0
-    seen: set[str] = set()
-    for target in [plan.primary, *plan.fallbacks]:
-        attempts += 1
-        seen.add(target.model_id)
-        text = engine.execute(target, prompt, system=system)
-        if text:
-            return plan, InferenceResult(
-                text=text,
-                provider=target.provider,
-                model=target.model_id,
-                attempts=attempts,
-                rerouted=attempts > 1,
-            )
-
-    if plan.retry_policy == "exhaust_then_reroute":
-        rerouted_plan = router.route_inference(intent=intent, risk=risk, privacy=privacy, runtime=runtime)
-        if rerouted_plan.primary.model_id not in seen:
-            attempts += 1
-            text = engine.execute(rerouted_plan.primary, prompt, system=system)
-            if text:
-                return rerouted_plan, InferenceResult(
-                    text=text,
-                    provider=rerouted_plan.primary.provider,
-                    model=rerouted_plan.primary.model_id,
-                    attempts=attempts,
-                    rerouted=True,
-                )
-        plan = rerouted_plan
-
-    return plan, InferenceResult(text="", provider="", model="", attempts=attempts, rerouted=attempts > 1)
+    engine = get_llm_engine(stdb=stdb)
+    # We re-run route_inference here just to return the plan to the caller
+    # for transparency, although generate() also does it.
+    router = ComputeRouter(stdb=stdb)
+    plan = router.route_inference(
+        intent=intent,
+        risk=risk,
+        privacy=privacy,
+        runtime=runtime,
+        owner_id=owner_id,
+    )
+    result = engine.generate(
+        prompt,
+        intent=intent,
+        risk=risk,
+        owner_id=owner_id,
+        privacy=privacy,
+        runtime=runtime,
+        system=system,
+    )
+    return plan, result
 
 
 def llm_generate(
@@ -415,14 +565,18 @@ def llm_generate(
     intent: str = "general",
     risk: str = "low",
     *,
+    owner_id: str = "operator",
     privacy: str | None = None,
     runtime: str | None = None,
     system: str | None = None,
+    stdb: Any | None = None,
 ) -> str:
-    _, result = llm_generate_with_plan(
+    engine = get_llm_engine(stdb=stdb)
+    result = engine.generate(
         prompt,
         intent=intent,
         risk=risk,
+        owner_id=owner_id,
         privacy=privacy,
         runtime=runtime,
         system=system,
@@ -435,21 +589,23 @@ async def llm_generate_async(
     intent: str = "general",
     risk: str = "low",
     *,
+    owner_id: str = "operator",
     privacy: str | None = None,
     runtime: str | None = None,
     system: str | None = None,
+    stdb: Any | None = None,
 ) -> str:
-    import asyncio
-
-    return await asyncio.to_thread(
-        llm_generate,
+    engine = get_llm_engine(stdb=stdb)
+    result = await engine.generate_async(
         prompt,
-        intent,
-        risk,
+        intent=intent,
+        risk=risk,
+        owner_id=owner_id,
         privacy=privacy,
         runtime=runtime,
         system=system,
     )
+    return result.text
 
 
 def llm_generate_json(
@@ -457,40 +613,26 @@ def llm_generate_json(
     intent: str = "general",
     risk: str = "low",
     *,
+    owner_id: str = "operator",
     privacy: str | None = None,
     runtime: str | None = None,
     system: str | None = None,
+    stdb: Any | None = None,
 ) -> dict[str, Any]:
-    text = llm_generate(
+    engine = get_llm_engine(stdb=stdb)
+    return engine.generate_json(
         prompt,
         intent=intent,
         risk=risk,
+        owner_id=owner_id,
         privacy=privacy,
         runtime=runtime,
         system=system,
     )
-    if not text:
-        return {}
-
-    text = text.strip()
-    if text.startswith("```"):
-        text = text.strip("`").replace("json", "", 1).strip()
-
-    try:
-        return json.loads(text)
-    except json.JSONDecodeError:
-        start = text.find("{")
-        end = text.rfind("}")
-        if start != -1 and end != -1 and end > start:
-            try:
-                    return json.loads(text[start : end + 1])
-            except json.JSONDecodeError:
-                return {}
-    return {}
 
 
 def llm_is_available(runtime: str = "auto") -> bool:
     try:
-        return LocalLLMEngine().is_available(runtime=runtime)
+        return get_llm_engine().is_available(runtime=runtime)
     except Exception:
         return False
