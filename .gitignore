@@ -84,6 +84,11 @@ Cargo.lock
 # Memory / scratch
 memory/
 
+# Root-level local context files (not repo artifacts)
+/HEARTBEAT.md
+/TOOLS.md
+/USER.md
+
 # Secrets & credentials (defense in depth)
 *.pem
 *.key
@@ -95,22 +100,26 @@ auth.json
 oauth_creds.json
 *.keystore
 
-# Claude Code — allow team settings, ignore local
+# Claude Code — allow team settings + agents, ignore local
 .claude/*
 !.claude/settings.json
 !.claude/commands/
 !.claude/commands/**
+!.claude/agents/
+!.claude/agents/**
 
 # Codex — override global gitignore, allow project config
 !.codex/
 .codex/*
 !.codex/config.toml
 
-# Gemini CLI — allow project config, ignore local state
+# Gemini CLI — allow project config + agents, ignore local state
 .gemini/*
 !.gemini/settings.json
 !.gemini/policies/
 !.gemini/policies/**
+!.gemini/agents/
+!.gemini/agents/**
 
 # Ollama — model manifest for boost nodes
 !.ollama/
