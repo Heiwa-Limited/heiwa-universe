@@ -53,59 +53,59 @@ class FakeDatabase:
             }
         )
         self.provider_accounts = [
-            {"account_id": "acct-alpha", "provider_id": "google-gemini-cli", "user_id": "user-alpha", "status": "connected"},
-            {"account_id": "acct-bravo", "provider_id": "codex", "user_id": "user-bravo", "status": "connected"},
+            {"account_id": "acct-alpha", "provider_id": "google-gemini-cli", "owner_id": "user-alpha", "status": "connected"},
+            {"account_id": "acct-bravo", "provider_id": "codex", "owner_id": "user-bravo", "status": "connected"},
         ]
         self.missions = [
-            {"mission_id": "mission-alpha", "user_id": "user-alpha", "status": "running", "updated_at": "2026-03-25T18:00:00Z"},
-            {"mission_id": "mission-bravo", "user_id": "user-bravo", "status": "running", "updated_at": "2026-03-25T17:00:00Z"},
-            {"mission_id": "mission-alpha-complete", "user_id": "user-alpha", "status": "completed", "updated_at": "2026-03-25T16:00:00Z"},
-            {"mission_id": "mission-bravo-failed", "user_id": "user-bravo", "status": "failed", "updated_at": "2026-03-25T15:00:00Z"},
+            {"mission_id": "mission-alpha", "owner_id": "user-alpha", "status": "running", "updated_at": "2026-03-25T18:00:00Z"},
+            {"mission_id": "mission-bravo", "owner_id": "user-bravo", "status": "running", "updated_at": "2026-03-25T17:00:00Z"},
+            {"mission_id": "mission-alpha-complete", "owner_id": "user-alpha", "status": "completed", "updated_at": "2026-03-25T16:00:00Z"},
+            {"mission_id": "mission-bravo-failed", "owner_id": "user-bravo", "status": "failed", "updated_at": "2026-03-25T15:00:00Z"},
         ]
         self.mission_steps = [
             {"mission_id": "mission-alpha", "step_id": "step-1", "position": 1, "updated_at": "2026-03-25T18:00:00Z"},
             {"mission_id": "mission-bravo", "step_id": "step-2", "position": 1, "updated_at": "2026-03-25T17:00:00Z"},
         ]
         self.cell_runs = [
-            {"cell_run_id": "cell-alpha", "mission_id": "mission-alpha", "user_id": "user-alpha", "started_at": "2026-03-25T18:00:00Z"},
-            {"cell_run_id": "cell-bravo", "mission_id": "mission-bravo", "user_id": "user-bravo", "started_at": "2026-03-25T17:00:00Z"},
+            {"cell_run_id": "cell-alpha", "mission_id": "mission-alpha", "owner_id": "user-alpha", "started_at": "2026-03-25T18:00:00Z"},
+            {"cell_run_id": "cell-bravo", "mission_id": "mission-bravo", "owner_id": "user-bravo", "started_at": "2026-03-25T17:00:00Z"},
         ]
         self.artifacts = [
-            {"artifact_id": "artifact-alpha", "mission_id": "mission-alpha", "user_id": "user-alpha", "created_at": "2026-03-25T18:00:00Z"},
-            {"artifact_id": "artifact-bravo", "mission_id": "mission-bravo", "user_id": "user-bravo", "created_at": "2026-03-25T17:00:00Z"},
+            {"artifact_id": "artifact-alpha", "mission_id": "mission-alpha", "owner_id": "user-alpha", "created_at": "2026-03-25T18:00:00Z"},
+            {"artifact_id": "artifact-bravo", "mission_id": "mission-bravo", "owner_id": "user-bravo", "created_at": "2026-03-25T17:00:00Z"},
         ]
         self.session_summaries = [
-            {"summary_id": "summary-alpha", "session_id": "sess-alpha", "user_id": "user-alpha", "created_at": "2026-03-25T18:00:00Z"},
-            {"summary_id": "summary-bravo", "session_id": "sess-bravo", "user_id": "user-bravo", "created_at": "2026-03-25T17:00:00Z"},
+            {"summary_id": "summary-alpha", "session_id": "sess-alpha", "owner_id": "user-alpha", "created_at": "2026-03-25T18:00:00Z"},
+            {"summary_id": "summary-bravo", "session_id": "sess-bravo", "owner_id": "user-bravo", "created_at": "2026-03-25T17:00:00Z"},
         ]
         self.runs = [
-            {"run_id": "run-alpha", "proposal_id": "proposal-alpha", "user_id": "user-alpha", "ended_at": "2026-03-25T18:00:00Z"},
-            {"run_id": "run-bravo", "proposal_id": "proposal-bravo", "user_id": "user-bravo", "ended_at": "2026-03-25T17:00:00Z"},
+            {"run_id": "run-alpha", "proposal_id": "proposal-alpha", "owner_id": "user-alpha", "ended_at": "2026-03-25T18:00:00Z"},
+            {"run_id": "run-bravo", "proposal_id": "proposal-bravo", "owner_id": "user-bravo", "ended_at": "2026-03-25T17:00:00Z"},
         ]
 
-    def list_provider_accounts(self, provider_id=None, node_id=None, status=None, limit=100, user_id=None):
+    def list_provider_accounts(self, provider_id=None, node_id=None, status=None, limit=100, owner_id=None):
         rows = list(self.provider_accounts)
         if provider_id:
             rows = [row for row in rows if row["provider_id"] == provider_id]
         if status:
             rows = [row for row in rows if row["status"] == status]
-        if user_id:
-            rows = [row for row in rows if row["user_id"] == user_id]
+        if owner_id:
+            rows = [row for row in rows if row["owner_id"] == owner_id]
         return rows[:limit]
 
-    def get_missions(self, status=None, limit=50, user_id=None):
+    def get_missions(self, status=None, limit=50, owner_id=None):
         rows = list(self.missions)
         if status:
             rows = [row for row in rows if row["status"] == status]
-        if user_id:
-            rows = [row for row in rows if row["user_id"] == user_id]
+        if owner_id:
+            rows = [row for row in rows if row["owner_id"] == owner_id]
         return rows[:limit]
 
-    def get_mission(self, mission_id, user_id=None):
+    def get_mission(self, mission_id, owner_id=None):
         for row in self.missions:
             if row["mission_id"] != mission_id:
                 continue
-            if user_id and row["user_id"] != user_id:
+            if owner_id and row["owner_id"] != owner_id:
                 continue
             return dict(row)
         return None
@@ -114,36 +114,36 @@ class FakeDatabase:
         rows = [row for row in self.mission_steps if row["mission_id"] == mission_id]
         return rows[:limit]
 
-    def get_cell_runs(self, mission_id=None, status=None, limit=100, user_id=None):
+    def get_cell_runs(self, mission_id=None, status=None, limit=100, owner_id=None):
         rows = list(self.cell_runs)
         if mission_id:
             rows = [row for row in rows if row["mission_id"] == mission_id]
-        if user_id:
-            rows = [row for row in rows if row["user_id"] == user_id]
+        if owner_id:
+            rows = [row for row in rows if row["owner_id"] == owner_id]
         return rows[:limit]
 
-    def list_artifacts(self, mission_id=None, limit=100, user_id=None):
+    def list_artifacts(self, mission_id=None, limit=100, owner_id=None):
         rows = list(self.artifacts)
         if mission_id:
             rows = [row for row in rows if row["mission_id"] == mission_id]
-        if user_id:
-            rows = [row for row in rows if row["user_id"] == user_id]
+        if owner_id:
+            rows = [row for row in rows if row["owner_id"] == owner_id]
         return rows[:limit]
 
-    def list_session_summaries(self, node_id=None, session_id=None, limit=50, user_id=None):
+    def list_session_summaries(self, node_id=None, session_id=None, limit=50, owner_id=None):
         rows = list(self.session_summaries)
         if session_id:
             rows = [row for row in rows if row["session_id"] == session_id]
-        if user_id:
-            rows = [row for row in rows if row["user_id"] == user_id]
+        if owner_id:
+            rows = [row for row in rows if row["owner_id"] == owner_id]
         return rows[:limit]
 
-    def get_runs(self, proposal_id=None, limit=50, user_id=None):
+    def get_runs(self, proposal_id=None, limit=50, owner_id=None):
         rows = list(self.runs)
         if proposal_id:
             rows = [row for row in rows if row["proposal_id"] == proposal_id]
-        if user_id:
-            rows = [row for row in rows if row["user_id"] == user_id]
+        if owner_id:
+            rows = [row for row in rows if row["owner_id"] == owner_id]
         return rows[:limit]
 
 
@@ -157,7 +157,13 @@ def auth_client(monkeypatch):
 
 
 def _user_headers(user_id: str, discord_user_id: str) -> dict[str, str]:
-    token = sign_jwt({"sub": user_id, "discord_user_id": discord_user_id, "username": user_id})
+    token = sign_jwt({
+        "sub": user_id,
+        "owner_id": user_id,
+        "principal_id": f"discord:{discord_user_id}",
+        "discord_user_id": discord_user_id,
+        "username": user_id,
+    })
     return {"Authorization": f"Bearer {token}"}
 
 
@@ -199,25 +205,25 @@ def test_user_views_are_scoped_to_authenticated_user(auth_client: TestClient):
     history = auth_client.get("/history", headers=headers)
 
     assert providers.status_code == 200
-    assert [row["user_id"] for row in providers.json()["providers"]] == ["user-alpha"]
+    assert [row["owner_id"] for row in providers.json()["providers"]] == ["user-alpha"]
 
     assert missions.status_code == 200
-    assert {row["user_id"] for row in missions.json()["missions"]} == {"user-alpha"}
+    assert {row["owner_id"] for row in missions.json()["missions"]} == {"user-alpha"}
 
     assert mission_detail.status_code == 200
-    assert mission_detail.json()["user_id"] == "user-alpha"
-    assert {row["user_id"] for row in mission_detail.json()["cell_runs"]} == {"user-alpha"}
-    assert {row["user_id"] for row in mission_detail.json()["artifacts"]} == {"user-alpha"}
+    assert mission_detail.json()["owner_id"] == "user-alpha"
+    assert {row["owner_id"] for row in mission_detail.json()["cell_runs"]} == {"user-alpha"}
+    assert {row["owner_id"] for row in mission_detail.json()["artifacts"]} == {"user-alpha"}
 
     assert foreign_mission.status_code == 404
 
     assert history.status_code == 200
     payload = history.json()
-    assert {row["user_id"] for row in payload["session_summaries"]} == {"user-alpha"}
-    assert {row["user_id"] for row in payload["completed_missions"]} == {"user-alpha"}
+    assert {row["owner_id"] for row in payload["session_summaries"]} == {"user-alpha"}
+    assert {row["owner_id"] for row in payload["completed_missions"]} == {"user-alpha"}
     assert payload["failed_missions"] == []
-    assert {row["user_id"] for row in payload["artifacts"]} == {"user-alpha"}
-    assert {row["user_id"] for row in payload["recent_runs"]} == {"user-alpha"}
+    assert {row["owner_id"] for row in payload["artifacts"]} == {"user-alpha"}
+    assert {row["owner_id"] for row in payload["recent_runs"]} == {"user-alpha"}
 
 
 def test_resolve_identity_context_returns_owner_and_principal():
