@@ -111,6 +111,15 @@ class SpineAgent(BaseAgent):
 
         payload = extract_payload(data)
         task_id = payload.get("task_id", f"task-{int(time.time())}")
+        
+        # Propagate owner context
+        owner_id = payload.get("owner_id") or "operator"
+        principal_id = payload.get("principal_id")
+        session_id = payload.get("session_id")
+        payload["owner_id"] = owner_id
+        payload["principal_id"] = principal_id
+        payload["session_id"] = session_id
+
         dispatch_status_code = "DISPATCHED_PLAN"
         payload["source_surface"] = payload.get("source_surface") or payload.get("source") or "cli"
         payload["requested_by"] = payload.get("requested_by") or sender_id
@@ -152,6 +161,9 @@ class SpineAgent(BaseAgent):
                     response_channel_id=payload.get("response_channel_id", "cli"),
                     response_thread_id=payload.get("response_thread_id"),
                     intent_profile=profile,
+                    owner_id=payload.get("owner_id", "operator"),
+                    principal_id=payload.get("principal_id"),
+                    session_id=payload.get("session_id"),
                 )
                 payload = task_plan.to_dict()
                 # Restore enrichment route fields lost by TaskPlan.to_dict() overwrite
@@ -326,6 +338,9 @@ class SpineAgent(BaseAgent):
                 "compute_class": payload.get("compute_class"),
                 "assigned_worker": payload.get("assigned_worker"),
                 "requires_approval": payload.get("requires_approval"),
+                "owner_id": payload.get("owner_id"),
+                "principal_id": payload.get("principal_id"),
+                "session_id": payload.get("session_id"),
                 "response_channel_id": payload.get("response_channel_id"),
                 "response_thread_id": payload.get("response_thread_id"),
                 "raw_text": payload.get("raw_text"),
@@ -557,6 +572,9 @@ class SpineAgent(BaseAgent):
             task_id=task_id,
             raw_text=payload.get("raw_text", ""),
             sender_id=sender_id,
+            owner_id=payload.get("owner_id", "operator"),
+            principal_id=payload.get("principal_id"),
+            session_id=payload.get("session_id"),
             source_surface=payload.get("source", "cli"),
             response_channel_id=payload.get("response_channel_id", "cli"),
             response_thread_id=payload.get("response_thread_id"),
