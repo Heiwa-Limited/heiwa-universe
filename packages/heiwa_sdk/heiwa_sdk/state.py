@@ -31,34 +31,34 @@ class HubStateService:
         self,
         provider_id: str | None = None,
         node_id: str | None = None,
-        user_id: str | None = None,
+        owner_id: str | None = None,
     ) -> list[dict[str, Any]]:
         return self.db.list_provider_accounts(
             provider_id=provider_id,
             node_id=node_id,
             limit=100,
-            user_id=user_id,
+            owner_id=owner_id,
         )
 
-    def get_provider_status(self, provider_id: str, user_id: str | None = None) -> dict[str, Any] | None:
-        rows = self.db.list_provider_accounts(provider_id=provider_id, limit=10, user_id=user_id)
+    def get_provider_status(self, provider_id: str, owner_id: str | None = None) -> dict[str, Any] | None:
+        rows = self.db.list_provider_accounts(provider_id=provider_id, limit=10, owner_id=owner_id)
         return rows[0] if rows else None
 
     def get_missions(
         self,
         status: str | None = None,
         limit: int = 50,
-        user_id: str | None = None,
+        owner_id: str | None = None,
     ) -> list[dict[str, Any]]:
-        return self.db.get_missions(status=status, limit=max(1, int(limit)), user_id=user_id)
+        return self.db.get_missions(status=status, limit=max(1, int(limit)), owner_id=owner_id)
 
-    def get_mission_detail(self, mission_id: str, user_id: str | None = None) -> dict[str, Any] | None:
-        mission = self.db.get_mission(mission_id, user_id=user_id)
+    def get_mission_detail(self, mission_id: str, owner_id: str | None = None) -> dict[str, Any] | None:
+        mission = self.db.get_mission(mission_id, owner_id=owner_id)
         if not mission:
             return None
         mission["steps"] = self.db.get_mission_steps(mission_id, limit=100)
-        mission["cell_runs"] = self.db.get_cell_runs(mission_id=mission_id, limit=100, user_id=user_id)
-        mission["artifacts"] = self.db.list_artifacts(mission_id=mission_id, limit=100, user_id=user_id)
+        mission["cell_runs"] = self.db.get_cell_runs(mission_id=mission_id, limit=100, owner_id=owner_id)
+        mission["artifacts"] = self.db.list_artifacts(mission_id=mission_id, limit=100, owner_id=owner_id)
         return mission
 
     def pause_mission(self, mission_id: str, summary: str | None = None) -> bool:
@@ -67,11 +67,11 @@ class HubStateService:
     def resume_mission(self, mission_id: str, summary: str | None = None) -> bool:
         return self.db.resume_mission(mission_id, summary=summary)
 
-    def get_history(self, limit: int = 20, user_id: str | None = None) -> dict[str, Any]:
+    def get_history(self, limit: int = 20, owner_id: str | None = None) -> dict[str, Any]:
         return {
-            "session_summaries": self.db.list_session_summaries(limit=max(1, int(limit)), user_id=user_id),
-            "completed_missions": self.db.get_missions(status="completed", limit=max(1, int(limit)), user_id=user_id),
-            "failed_missions": self.db.get_missions(status="failed", limit=max(1, int(limit)), user_id=user_id),
-            "artifacts": self.db.list_artifacts(limit=max(1, int(limit)), user_id=user_id),
-            "recent_runs": self.db.get_runs(limit=max(1, int(limit)), user_id=user_id),
+            "session_summaries": self.db.list_session_summaries(limit=max(1, int(limit)), owner_id=owner_id),
+            "completed_missions": self.db.get_missions(status="completed", limit=max(1, int(limit)), owner_id=owner_id),
+            "failed_missions": self.db.get_missions(status="failed", limit=max(1, int(limit)), owner_id=owner_id),
+            "artifacts": self.db.list_artifacts(limit=max(1, int(limit)), owner_id=owner_id),
+            "recent_runs": self.db.get_runs(limit=max(1, int(limit)), owner_id=owner_id),
         }

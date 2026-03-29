@@ -429,16 +429,17 @@ async def discord_oauth_callback(code: str = "", state: str = ""):
 async def get_me(request: Request):
     """Return the authenticated user's profile from their JWT."""
     claims = require_user(request)
-    user_id = claims.get("sub", "")
+    identity = resolve_identity_context(claims)
+    owner_id = identity["owner_id"]
     # Optionally fetch full profile from STDB
     stdb = getattr(db, "stdb", None)
     if stdb:
         rows = stdb.query(
-            f"SELECT * FROM users WHERE user_id = '{stdb._escape_sql_literal(user_id)}'"
+            f"SELECT * FROM users WHERE user_id = '{stdb._escape_sql_literal(owner_id)}'"
         )
         if rows:
             return {"user": rows[0], "claims": claims}
-    return {"user": {"user_id": user_id}, "claims": claims}
+    return {"user": {"user_id": owner_id, "owner_id": owner_id}, "claims": claims}
 
 
 @app.get("/")
@@ -1048,15 +1049,15 @@ async def reject_task(
 @app.get("/auth/providers")
 async def list_provider_accounts(request: Request):
     claims = require_user(request)
-    user_id = str(claims.get("sub") or "")
-    return {"providers": state.get_provider_accounts(user_id=user_id)}
+    identity = resolve_identity_context(claims)
+    return {"providers": state.get_provider_accounts(owner_id=identity["owner_id"])}
 
 
 @app.get("/auth/providers/{provider_id}/status")
 async def get_provider_account_status(provider_id: str, request: Request):
     claims = require_user(request)
-    user_id = str(claims.get("sub") or "")
-    payload = state.get_provider_status(provider_id, user_id=user_id)
+    identity = resolve_identity_context(claims)
+    payload = state.get_provider_status(provider_id, owner_id=identity["owner_id"])
     if not payload:
         raise HTTPException(status_code=404, detail=f"Provider {provider_id} not found")
     return payload
@@ -1065,15 +1066,15 @@ async def get_provider_account_status(provider_id: str, request: Request):
 @app.get("/missions")
 async def list_missions(request: Request, status: str | None = None, limit: int = 50):
     claims = require_user(request)
-    user_id = str(claims.get("sub") or "")
-    return {"missions": state.get_missions(status=status, limit=limit, user_id=user_id)}
+    identity = resolve_identity_context(claims)
+    return {"missions": state.get_missions(status=status, limit=limit, owner_id=identity["owner_id"])}
 
 
 @app.get("/missions/{mission_id}")
 async def get_mission(mission_id: str, request: Request):
     claims = require_user(request)
-    user_id = str(claims.get("sub") or "")
-    payload = state.get_mission_detail(mission_id, user_id=user_id)
+    identity = resolve_identity_context(claims)
+    payload = state.get_mission_detail(mission_id, owner_id=identity["owner_id"])
     if not payload:
         raise HTTPException(status_code=404, detail=f"Mission {mission_id} not found")
     return payload
@@ -1106,8 +1107,8 @@ async def list_rate_groups(authorization: str | None = Header(None)):
 @app.get("/history")
 async def get_history(request: Request, limit: int = 20):
     claims = require_user(request)
-    user_id = str(claims.get("sub") or "")
-    return state.get_history(limit=limit, user_id=user_id)
+    identity = resolve_identity_context(claims)
+    return state.get_history(limit=limit, owner_id=identity["owner_id"])
 
 
 def _ws_client_claims(token: str | None) -> dict[str, Any] | None:

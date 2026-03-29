@@ -366,6 +366,8 @@ async def auth_discord_callback(code: str, state: str, stdb) -> RedirectResponse
     username = discord_data.get("username", "")
     token = sign_jwt({
         "sub": user_id,
+        "owner_id": user_id,
+        "principal_id": f"discord:{discord_uid}",
         "discord_user_id": discord_uid,
         "username": username,
     })
