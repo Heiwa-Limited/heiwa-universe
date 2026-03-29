@@ -66,6 +66,45 @@ pub struct ProposalConsent {
     pub metadata: Option<String>,
 }
 
+#[table(accessor = events, public)]
+pub struct EventRecord {
+    #[primary_key]
+    pub event_id: String,
+    #[index(btree)]
+    pub owner_id: Option<String>,
+    #[index(btree)]
+    pub principal_id: Option<String>,
+    pub session_id: Option<String>,
+    pub mission_id: Option<String>,
+    pub battlefield_id: Option<String>,
+    #[index(btree)]
+    pub event_type: String,
+    pub payload_json: String,
+    #[index(btree)]
+    pub created_at: String,
+}
+
+#[table(accessor = battlefields, public)]
+pub struct BattlefieldRecord {
+    #[primary_key]
+    pub battlefield_id: String,
+    #[index(btree)]
+    pub owner_id: Option<String>,
+    #[index(btree)]
+    pub principal_id: Option<String>,
+    pub name: String,
+    pub repo_url: Option<String>,
+    pub root_path: Option<String>,
+    #[index(btree)]
+    pub node_id: Option<String>,
+    #[index(btree)]
+    pub status: String,
+    #[index(btree)]
+    pub created_at: String,
+    #[index(btree)]
+    pub last_active_at: String,
+}
+
 #[table(accessor = capability_leases, public)]
 pub struct CapabilityLease {
     #[primary_key]
@@ -100,6 +139,12 @@ pub struct CapabilityLease {
     pub chain_state: Option<String>,
     #[default(None::<String>)]
     pub routing_lock_json: Option<String>,
+    #[default(None::<String>)]
+    #[index(btree)]
+    pub owner_id: Option<String>,
+    #[default(None::<String>)]
+    #[index(btree)]
+    pub principal_id: Option<String>,
 }
 
 #[table(accessor = approval_requests, public)]
@@ -286,6 +331,12 @@ pub struct MissionStepRecord {
     pub output_json: String,
     pub created_at: String,
     pub updated_at: String,
+    #[default(None::<String>)]
+    #[index(btree)]
+    pub owner_id: Option<String>,
+    #[default(None::<String>)]
+    #[index(btree)]
+    pub principal_id: Option<String>,
 }
 
 #[table(accessor = cell_runs, public)]
@@ -1124,6 +1175,8 @@ pub fn issue_capability_lease(
     issued_at: String,
     expires_at: String,
     hub_signature: String,
+    owner_id: Option<String>,
+    principal_id: Option<String>,
 ) -> Result<(), String> {
     let row = CapabilityLease {
         lease_id: lease_id.clone(),
@@ -1147,6 +1200,8 @@ pub fn issue_capability_lease(
         failure_policy: some_if_not_blank(failure_policy),
         chain_state: some_if_not_blank(chain_state),
         routing_lock_json: option_if_not_blank(routing_lock_json),
+        owner_id: option_if_not_blank(owner_id),
+        principal_id: option_if_not_blank(principal_id),
     };
 
     if ctx
@@ -1512,6 +1567,8 @@ pub fn append_mission_step(
     output_json: String,
     created_at: String,
     updated_at: String,
+    owner_id: Option<String>,
+    principal_id: Option<String>,
 ) -> Result<(), String> {
     let step_id_for_mission = step_id.clone();
     let row = MissionStepRecord {
@@ -1527,6 +1584,8 @@ pub fn append_mission_step(
         output_json,
         created_at,
         updated_at: updated_at.clone(),
+        owner_id: option_if_not_blank(owner_id),
+        principal_id: option_if_not_blank(principal_id),
     };
 
     if ctx.db.mission_steps().step_id().find(step_id).is_some() {
@@ -1540,6 +1599,100 @@ pub fn append_mission_step(
         mission.updated_at = updated_at;
         ctx.db.missions().mission_id().update(mission);
     }
+    Ok(())
+}
+
+#[reducer]
+pub fn append_event(
+    ctx: &ReducerContext,
+    event_id: String,
+    owner_id: Option<String>,
+    principal_id: Option<String>,
+    session_id: Option<String>,
+    mission_id: Option<String>,
+    battlefield_id: Option<String>,
+    event_type: String,
+    payload_json: String,
+    created_at: String,
+) -> Result<(), String> {
+    if ctx.db.events().event_id().find(event_id.clone()).is_some() {
+        return Err("Event already exists".into());
+    }
+    ctx.db.events().insert(EventRecord {
+        event_id,
+        owner_id: option_if_not_blank(owner_id),
+        principal_id: option_if_not_blank(principal_id),
+        session_id: option_if_not_blank(session_id),
+        mission_id: option_if_not_blank(mission_id),
+        battlefield_id: option_if_not_blank(battlefield_id),
+        event_type,
+        payload_json,
+        created_at: if created_at.is_empty() {
+            now_string(ctx)
+        } else {
+            created_at
+        },
+    });
+    Ok(())
+}
+
+#[reducer]
+pub fn upsert_battlefield(
+    ctx: &ReducerContext,
+    battlefield_id: String,
+    owner_id: Option<String>,
+    principal_id: Option<String>,
+    name: String,
+    repo_url: Option<String>,
+    root_path: Option<String>,
+    node_id: Option<String>,
+    status: String,
+    created_at: Option<String>,
+    last_active_at: Option<String>,
+) -> Result<(), String> {
+    let now = now_string(ctx);
+    let row = BattlefieldRecord {
+        battlefield_id: battlefield_id.clone(),
+        owner_id: option_if_not_blank(owner_id),
+        principal_id: option_if_not_blank(principal_id),
+        name,
+        repo_url: option_if_not_blank(repo_url),
+        root_path: option_if_not_blank(root_path),
+        node_id: option_if_not_blank(node_id),
+        status,
+        created_at: created_at
+            .and_then(some_if_not_blank)
+            .unwrap_or_else(|| now.clone()),
+        last_active_at: last_active_at
+            .and_then(some_if_not_blank)
+            .unwrap_or_else(|| now.clone()),
+    };
+
+    if ctx
+        .db
+        .battlefields()
+        .battlefield_id()
+        .find(battlefield_id)
+        .is_some()
+    {
+        ctx.db.battlefields().battlefield_id().update(row);
+    } else {
+        ctx.db.battlefields().insert(row);
+    }
+    Ok(())
+}
+
+#[reducer]
+pub fn archive_battlefield(ctx: &ReducerContext, battlefield_id: String) -> Result<(), String> {
+    let mut row = ctx
+        .db
+        .battlefields()
+        .battlefield_id()
+        .find(battlefield_id)
+        .ok_or_else(|| "Battlefield not found".to_string())?;
+    row.status = "archived".into();
+    row.last_active_at = now_string(ctx);
+    ctx.db.battlefields().battlefield_id().update(row);
     Ok(())
 }
 

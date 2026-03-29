@@ -75,7 +75,22 @@ def test_add_proposal_appends_optional_user_id():
     args = _reducer_args(db.commands[-1])
     assert args[0] == "prop-compat-1"
     assert args[1] != {"some": "user-alpha"}
-    assert args[-1] == {"some": "user-alpha"}
+    assert args[-3] == {"some": "user-alpha"}
+
+
+def test_add_proposal_appends_owner_id_and_principal_id():
+    db = CaptureSpacetimeDB()
+    db.add_proposal(
+        {
+            "proposal_id": "prop-owner-1",
+            "payload": {"task": "deploy"},
+            "owner_id": "owner-devon",
+            "principal_id": "discord:123",
+        }
+    )
+    args = _reducer_args(db.commands[-1])
+    assert args[-2] == {"some": "owner-devon"}
+    assert args[-1] == {"some": "discord:123"}
 
 
 def test_add_approval_request_encodes_option_fields():

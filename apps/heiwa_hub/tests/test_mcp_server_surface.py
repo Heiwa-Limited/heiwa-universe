@@ -7,6 +7,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[3]
 sys.path.insert(0, str(ROOT))
+sys.path.insert(0, str(ROOT / "packages/heiwa_cognition"))
 sys.path.insert(0, str(ROOT / "packages/heiwa_sdk"))
 sys.path.insert(0, str(ROOT / "packages/heiwa_protocol"))
 sys.path.insert(0, str(ROOT / "packages/heiwa_identity"))

@@ -204,6 +204,41 @@ class Database:
             return self.stdb.write_session_summary(summary_data)
         return False
 
+    def append_event(self, event_data: dict[str, Any]) -> bool:
+        if self.stdb:
+            return self.stdb.append_event(event_data)
+        return False
+
+    def list_events(
+        self,
+        after_event_id: str | None = None,
+        owner_id: str | None = None,
+        limit: int = 100,
+    ) -> list[dict[str, Any]]:
+        if self.stdb:
+            return self.stdb.list_events(after_event_id=after_event_id, owner_id=owner_id, limit=limit)
+        return []
+
+    def upsert_battlefield(self, battlefield_data: dict[str, Any]) -> bool:
+        if self.stdb:
+            return self.stdb.upsert_battlefield(battlefield_data)
+        return False
+
+    def list_battlefields(self, owner_id: str | None = None, limit: int = 50) -> list[dict[str, Any]]:
+        if self.stdb:
+            return self.stdb.list_battlefields(owner_id=owner_id, limit=limit)
+        return []
+
+    def get_battlefield(self, battlefield_id: str, owner_id: str | None = None) -> dict[str, Any] | None:
+        if self.stdb:
+            return self.stdb.get_battlefield(battlefield_id, owner_id=owner_id)
+        return None
+
+    def archive_battlefield(self, battlefield_id: str) -> bool:
+        if self.stdb:
+            return self.stdb.archive_battlefield(battlefield_id)
+        return False
+
     def list_session_summaries(
         self,
         node_id: str | None = None,

@@ -391,6 +391,8 @@ class SpacetimeDB:
             self._normalize_json_column(step_data.get("output")) or "{}",
             created_at,
             updated_at,
+            self._sats_option(step_data.get("owner_id")),
+            self._sats_option(step_data.get("principal_id")),
         )
 
     def get_mission_steps(self, mission_id: str, limit: int = 100) -> list[dict[str, Any]]:
@@ -533,6 +535,78 @@ class SpacetimeDB:
         rows = self.query(query)
         return sorted(rows, key=lambda r: r.get("created_at", ""), reverse=True)
 
+    def append_event(self, event_data: dict[str, Any]) -> bool:
+        created_at = event_data.get("created_at") or datetime.datetime.now(datetime.timezone.utc).isoformat()
+        payload_json = (
+            self._normalize_json_column(event_data.get("payload"))
+            or self._normalize_json_column(event_data.get("payload_json"))
+            or "{}"
+        )
+        return self.call(
+            "append_event",
+            event_data["event_id"],
+            self._sats_option(event_data.get("owner_id")),
+            self._sats_option(event_data.get("principal_id")),
+            self._sats_option(event_data.get("session_id")),
+            self._sats_option(event_data.get("mission_id")),
+            self._sats_option(event_data.get("battlefield_id")),
+            event_data.get("event_type", "unknown"),
+            payload_json,
+            created_at,
+        )
+
+    def list_events(
+        self,
+        after_event_id: str | None = None,
+        owner_id: str | None = None,
+        limit: int = 100,
+    ) -> list[dict[str, Any]]:
+        query = "SELECT * FROM events"
+        clauses: list[str] = []
+        if owner_id:
+            clauses.append(f"owner_id = '{self._escape_sql_literal(owner_id)}'")
+        if after_event_id:
+            clauses.append(f"event_id > '{self._escape_sql_literal(after_event_id)}'")
+        if clauses:
+            query += " WHERE " + " AND ".join(clauses)
+        query += " ORDER BY created_at ASC"
+        query += f" LIMIT {int(limit)}"
+        return self.query(query)
+
+    def upsert_battlefield(self, bf_data: dict[str, Any]) -> bool:
+        created_at = bf_data.get("created_at") or datetime.datetime.now(datetime.timezone.utc).isoformat()
+        last_active_at = bf_data.get("last_active_at") or created_at
+        return self.call(
+            "upsert_battlefield",
+            bf_data["battlefield_id"],
+            self._sats_option(bf_data.get("owner_id")),
+            self._sats_option(bf_data.get("principal_id")),
+            bf_data.get("name", ""),
+            self._sats_option(bf_data.get("repo_url")),
+            self._sats_option(bf_data.get("root_path")),
+            self._sats_option(bf_data.get("node_id")),
+            bf_data.get("status", "active"),
+            self._sats_option(created_at),
+            self._sats_option(last_active_at),
+        )
+
+    def list_battlefields(self, owner_id: str | None = None, limit: int = 50) -> list[dict[str, Any]]:
+        query = "SELECT * FROM battlefields"
+        if owner_id:
+            query += f" WHERE owner_id = '{self._escape_sql_literal(owner_id)}'"
+        query += " ORDER BY last_active_at DESC"
+        query += f" LIMIT {int(limit)}"
+        return self.query(query)
+
+    def get_battlefield(self, battlefield_id: str, owner_id: str | None = None) -> dict[str, Any] | None:
+        clauses = [f"battlefield_id = '{self._escape_sql_literal(battlefield_id)}'"]
+        if owner_id:
+            clauses.append(f"owner_id = '{self._escape_sql_literal(owner_id)}'")
+        return self._first(f"SELECT * FROM battlefields WHERE {' AND '.join(clauses)} LIMIT 1")
+
+    def archive_battlefield(self, battlefield_id: str) -> bool:
+        return self.call("archive_battlefield", battlefield_id)
+
     def register_artifact(self, artifact_data: dict[str, Any]) -> bool:
         return self.call(
             "register_artifact",
@@ -547,6 +621,8 @@ class SpacetimeDB:
             self._sats_option(artifact_data.get("path")),
             self._normalize_json_column(artifact_data.get("content")) or "{}",
             artifact_data.get("created_at") or datetime.datetime.now(datetime.timezone.utc).isoformat(),
+            self._sats_option(artifact_data.get("owner_id")),
+            self._sats_option(artifact_data.get("principal_id")),
         )
 
     def list_artifacts(
@@ -669,6 +745,8 @@ class SpacetimeDB:
             self._sats_option(proposal.get("expires_at")),
             self._sats_option(self._normalize_json_column(proposal.get("eligibility_snapshot"))),
             self._sats_option(proposal.get("user_id")),
+            self._sats_option(proposal.get("owner_id")),
+            self._sats_option(proposal.get("principal_id")),
         )
 
     def get_proposals(self, status: str | None = None, limit: int = 50) -> list[dict[str, Any]]:
