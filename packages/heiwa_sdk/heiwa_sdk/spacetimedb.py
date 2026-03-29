@@ -189,6 +189,8 @@ class SpacetimeDB:
             route.get("gateway_transport", "websocket"),
             created_at,
             self._sats_option(route.get("user_id")),
+            self._sats_option(route.get("owner_id")),
+            self._sats_option(route.get("principal_id")),
         )
 
     def record_run(self, run_data: dict[str, Any]) -> bool:
@@ -213,6 +215,8 @@ class SpacetimeDB:
             int(run_data.get("tokens_output") or 0),
             int(run_data.get("tokens_total") or 0),
             float(run_data.get("cost") or 0.0),
+            self._sats_option(run_data.get("owner_id")),
+            self._sats_option(run_data.get("principal_id")),
         )
 
     def get_runs(
@@ -220,15 +224,18 @@ class SpacetimeDB:
         proposal_id: str | None = None,
         limit: int = 50,
         user_id: str | None = None,
+        owner_id: str | None = None,
     ) -> list[dict[str, Any]]:
         query = (
-            "SELECT run_id, user_id, proposal_id, lease_id, started_at, ended_at, status, "
+            "SELECT run_id, user_id, owner_id, principal_id, proposal_id, lease_id, started_at, ended_at, status, "
             "chain_result_json AS chain_result, signals_json AS signals, "
             "artifact_index_json AS artifact_index, node_id, replay_receipt_json AS replay_receipt, "
             "mode, model_id, tokens_input, tokens_output, tokens_total, cost "
             "FROM runs"
         )
         clauses: list[str] = []
+        if owner_id:
+            clauses.append(f"owner_id = '{self._escape_sql_literal(owner_id)}'")
         if user_id:
             clauses.append(f"user_id = '{self._escape_sql_literal(user_id)}'")
         if proposal_id:
@@ -276,6 +283,8 @@ class SpacetimeDB:
             self._sats_option(account_data.get("last_error")),
             updated_at,
             self._sats_option(account_data.get("user_id")),
+            self._sats_option(account_data.get("owner_id")),
+            self._sats_option(account_data.get("principal_id")),
         )
 
     def list_provider_accounts(
@@ -285,8 +294,11 @@ class SpacetimeDB:
         status: str | None = None,
         limit: int = 50,
         user_id: str | None = None,
+        owner_id: str | None = None,
     ) -> list[dict[str, Any]]:
         clauses: list[str] = []
+        if owner_id:
+            clauses.append(f"owner_id = '{self._escape_sql_literal(owner_id)}'")
         if user_id:
             clauses.append(f"user_id = '{self._escape_sql_literal(user_id)}'")
         if provider_id:
@@ -329,6 +341,8 @@ class SpacetimeDB:
             self._sats_option(mission_data.get("error")),
             self._normalize_json_column(mission_data.get("metadata")) or "{}",
             self._sats_option(mission_data.get("user_id")),
+            self._sats_option(mission_data.get("owner_id")),
+            self._sats_option(mission_data.get("principal_id")),
         )
 
     def get_missions(
@@ -336,9 +350,12 @@ class SpacetimeDB:
         status: str | None = None,
         limit: int = 50,
         user_id: str | None = None,
+        owner_id: str | None = None,
     ) -> list[dict[str, Any]]:
         query = "SELECT * FROM missions"
         clauses: list[str] = []
+        if owner_id:
+            clauses.append(f"owner_id = '{self._escape_sql_literal(owner_id)}'")
         if user_id:
             clauses.append(f"user_id = '{self._escape_sql_literal(user_id)}'")
         if status:
@@ -349,8 +366,10 @@ class SpacetimeDB:
         rows = self.query(query)
         return sorted(rows, key=lambda r: r.get("updated_at", ""), reverse=True)
 
-    def get_mission(self, mission_id: str, user_id: str | None = None) -> dict[str, Any] | None:
+    def get_mission(self, mission_id: str, user_id: str | None = None, owner_id: str | None = None) -> dict[str, Any] | None:
         clauses = [f"mission_id = '{self._escape_sql_literal(mission_id)}'"]
+        if owner_id:
+            clauses.append(f"owner_id = '{self._escape_sql_literal(owner_id)}'")
         if user_id:
             clauses.append(f"user_id = '{self._escape_sql_literal(user_id)}'")
         return self._first(f"SELECT * FROM missions WHERE {' AND '.join(clauses)} LIMIT 1")
@@ -402,6 +421,8 @@ class SpacetimeDB:
             int(run_data.get("tokens_total") or 0),
             self._sats_option(run_data.get("output_summary")),
             self._sats_option(run_data.get("user_id")),
+            self._sats_option(run_data.get("owner_id")),
+            self._sats_option(run_data.get("principal_id")),
         )
 
     def finish_cell_run(self, run_data: dict[str, Any]) -> bool:
@@ -423,8 +444,11 @@ class SpacetimeDB:
         status: str | None = None,
         limit: int = 100,
         user_id: str | None = None,
+        owner_id: str | None = None,
     ) -> list[dict[str, Any]]:
         clauses: list[str] = []
+        if owner_id:
+            clauses.append(f"owner_id = '{self._escape_sql_literal(owner_id)}'")
         if user_id:
             clauses.append(f"user_id = '{self._escape_sql_literal(user_id)}'")
         if mission_id:
@@ -481,6 +505,8 @@ class SpacetimeDB:
             summary_data.get("summary_text", ""),
             self._normalize_json_column(summary_data.get("metadata")) or "{}",
             self._sats_option(summary_data.get("user_id")),
+            self._sats_option(summary_data.get("owner_id")),
+            self._sats_option(summary_data.get("principal_id")),
         )
 
     def list_session_summaries(
@@ -489,8 +515,11 @@ class SpacetimeDB:
         session_id: str | None = None,
         limit: int = 50,
         user_id: str | None = None,
+        owner_id: str | None = None,
     ) -> list[dict[str, Any]]:
         clauses: list[str] = []
+        if owner_id:
+            clauses.append(f"owner_id = '{self._escape_sql_literal(owner_id)}'")
         if user_id:
             clauses.append(f"user_id = '{self._escape_sql_literal(user_id)}'")
         if node_id:
@@ -525,9 +554,12 @@ class SpacetimeDB:
         mission_id: str | None = None,
         limit: int = 100,
         user_id: str | None = None,
+        owner_id: str | None = None,
     ) -> list[dict[str, Any]]:
         query = "SELECT * FROM artifacts"
         clauses: list[str] = []
+        if owner_id:
+            clauses.append(f"owner_id = '{self._escape_sql_literal(owner_id)}'")
         if user_id:
             clauses.append(f"user_id = '{self._escape_sql_literal(user_id)}'")
         if mission_id:

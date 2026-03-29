@@ -313,6 +313,24 @@ def require_user(request: Request) -> dict[str, Any]:
 
 
 # ---------------------------------------------------------------------------
+#  Identity context
+# ---------------------------------------------------------------------------
+
+def resolve_identity_context(claims: dict[str, Any], *, autonomous: bool = False) -> dict[str, str]:
+    """Resolve owner_id and principal_id from auth claims.
+
+    For authenticated users, owner_id and principal_id both come from claims.
+    For autonomous Captain actions, principal_id is 'captain'.
+    """
+    owner_id = str(claims.get("owner_id") or claims.get("user_id") or claims.get("sub", "unknown"))
+    if autonomous:
+        principal_id = "captain"
+    else:
+        principal_id = str(claims.get("principal_id") or claims.get("user_id") or claims.get("sub", "unknown"))
+    return {"owner_id": owner_id, "principal_id": principal_id}
+
+
+# ---------------------------------------------------------------------------
 #  Route handlers (mounted by mcp_server.py)
 # ---------------------------------------------------------------------------
 

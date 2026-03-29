@@ -43,6 +43,12 @@ pub struct Proposal {
     #[default(None::<String>)]
     #[index(btree)]
     pub user_id: Option<String>,
+    #[default(None::<String>)]
+    #[index(btree)]
+    pub owner_id: Option<String>,
+    #[default(None::<String>)]
+    #[index(btree)]
+    pub principal_id: Option<String>,
 }
 
 #[table(accessor = proposal_consents, public)]
@@ -154,6 +160,12 @@ pub struct RouteDecision {
     #[default(None::<String>)]
     #[index(btree)]
     pub user_id: Option<String>,
+    #[default(None::<String>)]
+    #[index(btree)]
+    pub owner_id: Option<String>,
+    #[default(None::<String>)]
+    #[index(btree)]
+    pub principal_id: Option<String>,
 }
 
 #[table(accessor = runs, public)]
@@ -185,6 +197,12 @@ pub struct RunRecord {
     #[default(None::<String>)]
     #[index(btree)]
     pub lease_id: Option<String>,
+    #[default(None::<String>)]
+    #[index(btree)]
+    pub owner_id: Option<String>,
+    #[default(None::<String>)]
+    #[index(btree)]
+    pub principal_id: Option<String>,
 }
 
 #[table(accessor = provider_accounts, public)]
@@ -210,6 +228,12 @@ pub struct ProviderAccount {
     #[default(None::<String>)]
     #[index(btree)]
     pub user_id: Option<String>,
+    #[default(None::<String>)]
+    #[index(btree)]
+    pub owner_id: Option<String>,
+    #[default(None::<String>)]
+    #[index(btree)]
+    pub principal_id: Option<String>,
 }
 
 #[table(accessor = missions, public)]
@@ -237,6 +261,12 @@ pub struct MissionRecord {
     #[default(None::<String>)]
     #[index(btree)]
     pub user_id: Option<String>,
+    #[default(None::<String>)]
+    #[index(btree)]
+    pub owner_id: Option<String>,
+    #[default(None::<String>)]
+    #[index(btree)]
+    pub principal_id: Option<String>,
 }
 
 #[table(accessor = mission_steps, public)]
@@ -282,6 +312,12 @@ pub struct CellRunRecord {
     #[default(None::<String>)]
     #[index(btree)]
     pub user_id: Option<String>,
+    #[default(None::<String>)]
+    #[index(btree)]
+    pub owner_id: Option<String>,
+    #[default(None::<String>)]
+    #[index(btree)]
+    pub principal_id: Option<String>,
 }
 
 #[table(accessor = session_summaries, public)]
@@ -299,6 +335,12 @@ pub struct SessionSummaryRecord {
     #[default(None::<String>)]
     #[index(btree)]
     pub user_id: Option<String>,
+    #[default(None::<String>)]
+    #[index(btree)]
+    pub owner_id: Option<String>,
+    #[default(None::<String>)]
+    #[index(btree)]
+    pub principal_id: Option<String>,
 }
 
 #[table(accessor = artifacts, public)]
@@ -322,6 +364,12 @@ pub struct ArtifactRecord {
     #[default(None::<String>)]
     #[index(btree)]
     pub user_id: Option<String>,
+    #[default(None::<String>)]
+    #[index(btree)]
+    pub owner_id: Option<String>,
+    #[default(None::<String>)]
+    #[index(btree)]
+    pub principal_id: Option<String>,
 }
 
 #[table(accessor = pods, public)]
@@ -559,6 +607,8 @@ pub fn add_proposal(
     expires_at: Option<String>,
     eligibility_snapshot: Option<String>,
     user_id: Option<String>,
+    owner_id: Option<String>,
+    principal_id: Option<String>,
 ) -> Result<(), String> {
     if ctx
         .db
@@ -599,6 +649,8 @@ pub fn add_proposal(
         expires_at,
         eligibility_snapshot,
         user_id: option_if_not_blank(user_id),
+        owner_id: option_if_not_blank(owner_id),
+        principal_id: option_if_not_blank(principal_id),
     });
     Ok(())
 }
@@ -1230,6 +1282,8 @@ pub fn record_route_decision(
     gateway_transport: String,
     created_at: String,
     user_id: Option<String>,
+    owner_id: Option<String>,
+    principal_id: Option<String>,
 ) -> Result<(), String> {
     let row = RouteDecision {
         request_id: request_id.clone(),
@@ -1252,6 +1306,8 @@ pub fn record_route_decision(
         gateway_transport,
         created_at,
         user_id: option_if_not_blank(user_id),
+        owner_id: option_if_not_blank(owner_id),
+        principal_id: option_if_not_blank(principal_id),
     };
 
     if ctx
@@ -1289,6 +1345,8 @@ pub fn record_run(
     tokens_output: i64,
     tokens_total: i64,
     cost: f64,
+    owner_id: Option<String>,
+    principal_id: Option<String>,
 ) -> Result<(), String> {
     let row = RunRecord {
         run_id: run_id.clone(),
@@ -1309,6 +1367,8 @@ pub fn record_run(
         cost,
         user_id: some_if_not_blank(user_id),
         lease_id: some_if_not_blank(lease_id),
+        owner_id: option_if_not_blank(owner_id),
+        principal_id: option_if_not_blank(principal_id),
     };
 
     if ctx.db.runs().run_id().find(run_id).is_some() {
@@ -1348,6 +1408,8 @@ pub fn upsert_provider_account_status(
     last_error: Option<String>,
     updated_at: String,
     user_id: Option<String>,
+    owner_id: Option<String>,
+    principal_id: Option<String>,
 ) -> Result<(), String> {
     let row = ProviderAccount {
         account_id: account_id.clone(),
@@ -1364,6 +1426,8 @@ pub fn upsert_provider_account_status(
         last_error,
         updated_at,
         user_id: option_if_not_blank(user_id),
+        owner_id: option_if_not_blank(owner_id),
+        principal_id: option_if_not_blank(principal_id),
     };
 
     if ctx
@@ -1400,6 +1464,8 @@ pub fn create_mission(
     error: Option<String>,
     metadata_json: String,
     user_id: Option<String>,
+    owner_id: Option<String>,
+    principal_id: Option<String>,
 ) -> Result<(), String> {
     let row = MissionRecord {
         mission_id: mission_id.clone(),
@@ -1419,6 +1485,8 @@ pub fn create_mission(
         error,
         metadata_json,
         user_id: option_if_not_blank(user_id),
+        owner_id: option_if_not_blank(owner_id),
+        principal_id: option_if_not_blank(principal_id),
     };
 
     if ctx.db.missions().mission_id().find(mission_id).is_some() {
@@ -1494,6 +1562,8 @@ pub fn start_cell_run(
     tokens_total: i64,
     output_summary: Option<String>,
     user_id: Option<String>,
+    owner_id: Option<String>,
+    principal_id: Option<String>,
 ) -> Result<(), String> {
     let row = CellRunRecord {
         cell_run_id: cell_run_id.clone(),
@@ -1513,6 +1583,8 @@ pub fn start_cell_run(
         tokens_total,
         output_summary,
         user_id: option_if_not_blank(user_id),
+        owner_id: option_if_not_blank(owner_id),
+        principal_id: option_if_not_blank(principal_id),
     };
 
     if ctx.db.cell_runs().cell_run_id().find(cell_run_id).is_some() {
@@ -1611,6 +1683,8 @@ pub fn write_session_summary(
     summary_text: String,
     metadata_json: String,
     user_id: Option<String>,
+    owner_id: Option<String>,
+    principal_id: Option<String>,
 ) -> Result<(), String> {
     let row = SessionSummaryRecord {
         summary_id: summary_id.clone(),
@@ -1620,6 +1694,8 @@ pub fn write_session_summary(
         summary_text,
         metadata_json,
         user_id: option_if_not_blank(user_id),
+        owner_id: option_if_not_blank(owner_id),
+        principal_id: option_if_not_blank(principal_id),
     };
 
     if ctx
@@ -1650,6 +1726,8 @@ pub fn register_artifact(
     path: Option<String>,
     content_json: String,
     created_at: String,
+    owner_id: Option<String>,
+    principal_id: Option<String>,
 ) -> Result<(), String> {
     let row = ArtifactRecord {
         artifact_id: artifact_id.clone(),
@@ -1663,6 +1741,8 @@ pub fn register_artifact(
         created_at,
         lease_id: option_if_not_blank(lease_id),
         user_id: some_if_not_blank(user_id),
+        owner_id: option_if_not_blank(owner_id),
+        principal_id: option_if_not_blank(principal_id),
     };
 
     if ctx.db.artifacts().artifact_id().find(artifact_id).is_some() {
