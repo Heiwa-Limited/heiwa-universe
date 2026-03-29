@@ -319,6 +319,40 @@ class SpacetimeDB:
             f"SELECT * FROM provider_accounts WHERE account_id = '{self._escape_sql_literal(account_id)}' LIMIT 1"
         )
 
+    def update_provider_credential(
+        self,
+        credential_id: str,
+        user_id: str,
+        provider_id: str,
+        credential_kind: str,
+        credential_enc: str,
+        rate_group: str,
+        display_label: str | None = None,
+    ) -> bool:
+        """Update or insert a provider credential."""
+        return self.call(
+            "update_provider_credential",
+            credential_id,
+            user_id,
+            provider_id,
+            credential_kind,
+            credential_enc,
+            rate_group,
+            self._sats_option(display_label),
+        )
+
+    def revoke_provider_credential(self, credential_id: str) -> bool:
+        """Revoke a provider credential."""
+        return self.call("revoke_provider_credential", credential_id)
+
+    def get_provider_credentials(self, user_id: str) -> list[dict[str, Any]]:
+        """Get all active provider credentials for a user."""
+        # user_id maps to owner_id in Python surface
+        return self.query(
+            f"SELECT * FROM provider_credentials "
+            f"WHERE user_id = '{self._escape_sql_literal(user_id)}' AND status = 'active'"
+        )
+
     def create_mission(self, mission_data: dict[str, Any]) -> bool:
         created_at = mission_data.get("created_at") or datetime.datetime.now(datetime.timezone.utc).isoformat()
         updated_at = mission_data.get("updated_at") or created_at
