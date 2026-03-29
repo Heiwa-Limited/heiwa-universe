@@ -75,7 +75,22 @@ def test_add_proposal_appends_optional_user_id():
     args = _reducer_args(db.commands[-1])
     assert args[0] == "prop-compat-1"
     assert args[1] != {"some": "user-alpha"}
-    assert args[-1] == {"some": "user-alpha"}
+    assert args[-3] == {"some": "user-alpha"}
+
+
+def test_add_proposal_appends_owner_id_and_principal_id():
+    db = CaptureSpacetimeDB()
+    db.add_proposal(
+        {
+            "proposal_id": "prop-owner-1",
+            "payload": {"task": "deploy"},
+            "owner_id": "owner-devon",
+            "principal_id": "discord:123",
+        }
+    )
+    args = _reducer_args(db.commands[-1])
+    assert args[-2] == {"some": "owner-devon"}
+    assert args[-1] == {"some": "discord:123"}
 
 
 def test_add_approval_request_encodes_option_fields():
@@ -228,7 +243,24 @@ def test_record_route_decision_appends_optional_user_id():
     args = _reducer_args(db.commands[-1])
     assert args[0] == "req-1"
     assert args[1] == "task-1"
-    assert args[-1] == {"some": "user-alpha"}
+    assert {"some": "user-alpha"} in args
+
+
+def test_record_route_decision_encodes_owner_and_principal():
+    db = CaptureSpacetimeDB()
+    db.record_route_decision(
+        {
+            "request_id": "req-2",
+            "task_id": "task-2",
+            "envelope_version": "2026-03-28",
+            "raw_text": "route this",
+            "owner_id": "owner-devon",
+            "principal_id": "discord:456",
+        }
+    )
+    args = _reducer_args(db.commands[-1])
+    assert {"some": "owner-devon"} in args
+    assert {"some": "discord:456"} in args
 
 
 def test_create_mission_appends_optional_user_id():
@@ -242,8 +274,38 @@ def test_create_mission_appends_optional_user_id():
     )
     args = _reducer_args(db.commands[-1])
     assert args[0] == "mission-1"
-    assert args[-2] == "{}"
-    assert args[-1] == {"some": "user-alpha"}
+    assert {"some": "user-alpha"} in args
+
+
+def test_create_mission_encodes_owner_id_and_principal_id():
+    db = CaptureSpacetimeDB()
+    db.create_mission(
+        {
+            "mission_id": "mission-owner-1",
+            "prompt": "status",
+            "owner_id": "owner-devon",
+            "principal_id": "discord:123",
+        }
+    )
+    args = _reducer_args(db.commands[-1])
+    assert args[0] == "mission-owner-1"
+    assert {"some": "owner-devon"} in args
+    assert {"some": "discord:123"} in args
+
+
+def test_create_mission_encodes_none_owner_id_and_principal_id():
+    db = CaptureSpacetimeDB()
+    db.create_mission(
+        {
+            "mission_id": "mission-no-owner",
+            "prompt": "test",
+        }
+    )
+    args = _reducer_args(db.commands[-1])
+    assert args[0] == "mission-no-owner"
+    # owner_id and principal_id should be encoded as option none when absent
+    none_count = sum(1 for a in args if a == {"none": []})
+    assert none_count >= 2, f"Expected at least 2 none-encoded options for owner_id/principal_id, got {none_count}"
 
 
 def test_start_cell_run_appends_optional_user_id():
@@ -258,7 +320,22 @@ def test_start_cell_run_appends_optional_user_id():
     args = _reducer_args(db.commands[-1])
     assert args[0] == "cell-1"
     assert args[1] == "mission-1"
-    assert args[-1] == {"some": "user-alpha"}
+    assert {"some": "user-alpha"} in args
+
+
+def test_start_cell_run_encodes_owner_and_principal():
+    db = CaptureSpacetimeDB()
+    db.start_cell_run(
+        {
+            "cell_run_id": "cell-owner-1",
+            "mission_id": "mission-1",
+            "owner_id": "owner-devon",
+            "principal_id": "discord:123",
+        }
+    )
+    args = _reducer_args(db.commands[-1])
+    assert {"some": "owner-devon"} in args
+    assert {"some": "discord:123"} in args
 
 
 def test_write_session_summary_appends_optional_user_id():
@@ -273,7 +350,22 @@ def test_write_session_summary_appends_optional_user_id():
     args = _reducer_args(db.commands[-1])
     assert args[0] == "summary-1"
     assert args[1] == "session-1"
-    assert args[-1] == {"some": "user-alpha"}
+    assert {"some": "user-alpha"} in args
+
+
+def test_write_session_summary_encodes_owner_and_principal():
+    db = CaptureSpacetimeDB()
+    db.write_session_summary(
+        {
+            "summary_id": "summary-owner-1",
+            "session_id": "session-1",
+            "owner_id": "owner-devon",
+            "principal_id": "captain",
+        }
+    )
+    args = _reducer_args(db.commands[-1])
+    assert {"some": "owner-devon"} in args
+    assert {"some": "captain"} in args
 
 
 def test_upsert_provider_account_status_appends_optional_user_id():
@@ -290,4 +382,20 @@ def test_upsert_provider_account_status_appends_optional_user_id():
     assert args[0] == "acct-1"
     assert args[1] == "codex"
     assert args[2] == "node-1"
-    assert args[-1] == {"some": "user-alpha"}
+    assert {"some": "user-alpha"} in args
+
+
+def test_upsert_provider_account_status_encodes_owner_and_principal():
+    db = CaptureSpacetimeDB()
+    db.upsert_provider_account_status(
+        {
+            "account_id": "acct-owner-1",
+            "provider_id": "codex",
+            "node_id": "node-1",
+            "owner_id": "owner-devon",
+            "principal_id": "discord:789",
+        }
+    )
+    args = _reducer_args(db.commands[-1])
+    assert {"some": "owner-devon"} in args
+    assert {"some": "discord:789"} in args

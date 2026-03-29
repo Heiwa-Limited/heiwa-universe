@@ -68,6 +68,7 @@ class Database:
         status: str | None = None,
         limit: int = 50,
         user_id: str | None = None,
+        owner_id: str | None = None,
     ) -> list[dict[str, Any]]:
         if self.stdb:
             kwargs: dict[str, Any] = dict(
@@ -78,6 +79,8 @@ class Database:
             )
             if user_id is not None:
                 kwargs["user_id"] = user_id
+            if owner_id is not None:
+                kwargs["owner_id"] = owner_id
             return self.stdb.list_provider_accounts(**kwargs)
         return []
 
@@ -91,11 +94,14 @@ class Database:
             return self.stdb.upsert_provider_account_status(account_data)
         return False
 
-    def get_mission(self, mission_id: str, user_id: str | None = None) -> dict[str, Any] | None:
+    def get_mission(self, mission_id: str, user_id: str | None = None, owner_id: str | None = None) -> dict[str, Any] | None:
         if self.stdb:
+            kwargs: dict[str, Any] = {}
             if user_id is not None:
-                return self.stdb.get_mission(mission_id, user_id=user_id)
-            return self.stdb.get_mission(mission_id)
+                kwargs["user_id"] = user_id
+            if owner_id is not None:
+                kwargs["owner_id"] = owner_id
+            return self.stdb.get_mission(mission_id, **kwargs)
         return None
 
     def get_missions(
@@ -103,11 +109,14 @@ class Database:
         status: str | None = None,
         limit: int = 50,
         user_id: str | None = None,
+        owner_id: str | None = None,
     ) -> list[dict[str, Any]]:
         if self.stdb:
             kwargs: dict[str, Any] = {"status": status, "limit": limit}
             if user_id is not None:
                 kwargs["user_id"] = user_id
+            if owner_id is not None:
+                kwargs["owner_id"] = owner_id
             return self.stdb.get_missions(**kwargs)
         return []
 
@@ -142,6 +151,7 @@ class Database:
         status: str | None = None,
         limit: int = 100,
         user_id: str | None = None,
+        owner_id: str | None = None,
     ) -> list[dict[str, Any]]:
         if self.stdb:
             kwargs: dict[str, Any] = dict(
@@ -151,6 +161,8 @@ class Database:
             )
             if user_id is not None:
                 kwargs["user_id"] = user_id
+            if owner_id is not None:
+                kwargs["owner_id"] = owner_id
             return self.stdb.get_cell_runs(**kwargs)
         return []
 
@@ -192,12 +204,48 @@ class Database:
             return self.stdb.write_session_summary(summary_data)
         return False
 
+    def append_event(self, event_data: dict[str, Any]) -> bool:
+        if self.stdb:
+            return self.stdb.append_event(event_data)
+        return False
+
+    def list_events(
+        self,
+        after_event_id: str | None = None,
+        owner_id: str | None = None,
+        limit: int = 100,
+    ) -> list[dict[str, Any]]:
+        if self.stdb:
+            return self.stdb.list_events(after_event_id=after_event_id, owner_id=owner_id, limit=limit)
+        return []
+
+    def upsert_battlefield(self, battlefield_data: dict[str, Any]) -> bool:
+        if self.stdb:
+            return self.stdb.upsert_battlefield(battlefield_data)
+        return False
+
+    def list_battlefields(self, owner_id: str | None = None, limit: int = 50) -> list[dict[str, Any]]:
+        if self.stdb:
+            return self.stdb.list_battlefields(owner_id=owner_id, limit=limit)
+        return []
+
+    def get_battlefield(self, battlefield_id: str, owner_id: str | None = None) -> dict[str, Any] | None:
+        if self.stdb:
+            return self.stdb.get_battlefield(battlefield_id, owner_id=owner_id)
+        return None
+
+    def archive_battlefield(self, battlefield_id: str) -> bool:
+        if self.stdb:
+            return self.stdb.archive_battlefield(battlefield_id)
+        return False
+
     def list_session_summaries(
         self,
         node_id: str | None = None,
         session_id: str | None = None,
         limit: int = 50,
         user_id: str | None = None,
+        owner_id: str | None = None,
     ) -> list[dict[str, Any]]:
         if self.stdb:
             kwargs: dict[str, Any] = dict(
@@ -207,6 +255,8 @@ class Database:
             )
             if user_id is not None:
                 kwargs["user_id"] = user_id
+            if owner_id is not None:
+                kwargs["owner_id"] = owner_id
             return self.stdb.list_session_summaries(**kwargs)
         return []
 
@@ -220,11 +270,14 @@ class Database:
         mission_id: str | None = None,
         limit: int = 100,
         user_id: str | None = None,
+        owner_id: str | None = None,
     ) -> list[dict[str, Any]]:
         if self.stdb:
             kwargs: dict[str, Any] = {"mission_id": mission_id, "limit": limit}
             if user_id is not None:
                 kwargs["user_id"] = user_id
+            if owner_id is not None:
+                kwargs["owner_id"] = owner_id
             return self.stdb.list_artifacts(**kwargs)
         return []
 
@@ -297,11 +350,14 @@ class Database:
         proposal_id: str | None = None,
         limit: int = 50,
         user_id: str | None = None,
+        owner_id: str | None = None,
     ) -> list[dict[str, Any]]:
         if self.stdb:
             kwargs: dict[str, Any] = {"proposal_id": proposal_id, "limit": limit}
             if user_id is not None:
                 kwargs["user_id"] = user_id
+            if owner_id is not None:
+                kwargs["owner_id"] = owner_id
             return self.stdb.get_runs(**kwargs)
         return []
 

@@ -1,4 +1,5 @@
 import asyncio
+import datetime
 import json
 import logging
 import time
@@ -38,6 +39,7 @@ from heiwa_hub.auth import (
     auth_discord_callback,
     get_current_user,
     require_user,
+    resolve_identity_context,
     verify_jwt,
 )
 from heiwa_protocol.protocol import Subject
@@ -162,6 +164,34 @@ def _notify_operator_streams() -> None:
         OPERATOR_STREAMS.discard(queue)
 
 
+def _append_wire_event(
+    *,
+    event_type: str,
+    payload: dict[str, Any],
+    owner_id: str | None = None,
+    principal_id: str | None = None,
+    session_id: str | None = None,
+    mission_id: str | None = None,
+    battlefield_id: str | None = None,
+) -> None:
+    try:
+        db.append_event(
+            {
+                "event_id": f"evt-{uuid.uuid4().hex[:12]}",
+                "owner_id": owner_id,
+                "principal_id": principal_id,
+                "session_id": session_id,
+                "mission_id": mission_id,
+                "battlefield_id": battlefield_id,
+                "event_type": event_type,
+                "payload_json": payload,
+                "created_at": datetime.datetime.now(datetime.timezone.utc).isoformat(),
+            }
+        )
+    except Exception:
+        logger.debug("Failed to append wire event %s", event_type, exc_info=True)
+
+
 async def _record_status_event(envelope: Dict[str, Any]):
     payload = envelope.get("data", envelope)
     task_id = payload.get("task_id")
@@ -180,6 +210,15 @@ async def _record_status_event(envelope: Dict[str, Any]):
     if not current.get("run_status"):
         patch["status"] = payload.get("status")
     _snapshot_task(task_id, **patch)
+    _append_wire_event(
+        event_type="task_status",
+        payload=payload,
+        owner_id=payload.get("owner_id"),
+        principal_id=payload.get("principal_id"),
+        session_id=payload.get("session_id"),
+        mission_id=task_id,
+        battlefield_id=payload.get("battlefield_id"),
+    )
     try:
         status = str(payload.get("status") or "").upper()
         if status == "AWAITING_APPROVAL":
@@ -226,6 +265,15 @@ async def _record_result_event(envelope: Dict[str, Any]):
         target_model=payload.get("target_model"),
         intent_class=payload.get("intent_class"),
         elapsed_sec=payload.get("elapsed_sec"),
+    )
+    _append_wire_event(
+        event_type="task_result",
+        payload=payload,
+        owner_id=payload.get("owner_id"),
+        principal_id=payload.get("principal_id"),
+        session_id=payload.get("session_id"),
+        mission_id=task_id,
+        battlefield_id=payload.get("battlefield_id"),
     )
     try:
         summary = str(payload.get("summary") or "")
@@ -277,6 +325,15 @@ async def _record_progress_event(envelope: Dict[str, Any]):
     if not task_id:
         return
     _snapshot_task(task_id, progress=payload.get("content") or payload.get("message"))
+    _append_wire_event(
+        event_type="task_progress",
+        payload=payload,
+        owner_id=payload.get("owner_id"),
+        principal_id=payload.get("principal_id"),
+        session_id=payload.get("session_id"),
+        mission_id=task_id,
+        battlefield_id=payload.get("battlefield_id"),
+    )
     _notify_operator_streams()
 
 
@@ -948,6 +1005,45 @@ async def get_history(request: Request, limit: int = 20):
     claims = require_user(request)
     user_id = str(claims.get("sub") or "")
     return state.get_history(limit=limit, user_id=user_id)
+
+
+def _ws_client_claims(token: str | None) -> dict[str, Any] | None:
+    if token:
+        claims = verify_jwt(token)
+        if claims:
+            return claims
+    expected = os.getenv("HEIWA_AUTH_TOKEN", "")
+    if expected and token == expected:
+        return {"owner_id": "local-operator", "principal_id": "local-operator"}
+    return None
+
+
+@app.websocket("/ws/client")
+async def client_events(
+    ws: WebSocket,
+    token: str | None = None,
+    last_seen_event_id: str | None = None,
+):
+    claims = _ws_client_claims(token)
+    if not claims:
+        await ws.close(code=4003)
+        return
+
+    identity = resolve_identity_context(claims)
+    await ws.accept()
+    try:
+        events = db.list_events(
+            after_event_id=last_seen_event_id,
+            owner_id=identity["owner_id"],
+            limit=200,
+        )
+        for event in events:
+            await ws.send_json(event)
+        while True:
+            await asyncio.sleep(30)
+            await ws.send_json({"type": "heartbeat"})
+    except WebSocketDisconnect:
+        logger.debug("Client websocket disconnected.")
 
 
 @app.websocket("/ws/tasks/{task_id}")
