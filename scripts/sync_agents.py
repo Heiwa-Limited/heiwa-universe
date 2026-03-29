@@ -125,6 +125,169 @@ def generate_codex_wrapper(manifest: dict, prompt_body: str) -> str:
     return "\n".join(parts)
 
 
+import tomllib
+
+# -- Config parity constants --
+
+REQUIRED_CODEX_MCP = {
+    "MCP_DOCKER", "playwright", "railway", "figma", "notion", "codebase-retrieval",
+}
+REQUIRED_CODEX_PLUGINS = {"github", "cloudflare", "google-drive", "hugging-face"}
+REQUIRED_CODEX_FEATURES = {"multi_agent", "guardian_approval", "prevent_idle_sleep"}
+
+
+def check_wrapper_drift(agents: list[dict]) -> list[str]:
+    """Check all generated wrappers for drift and orphans."""
+    errors: list[str] = []
+    managed_gemini: set[str] = set()
+    managed_claude: set[str] = set()
+
+    for agent in agents:
+        m = agent["manifest"]
+        p = agent["prompt_body"]
+
+        for runtime, target in m["targets"].items():
+            if not target.get("enabled", False):
+                continue
+
+            if runtime == "gemini":
+                path = REPO_ROOT / target["output"]
+                managed_gemini.add(path.name)
+                expected = generate_gemini_wrapper(m, p)
+                if not path.exists():
+                    errors.append(f"MISSING: {path.relative_to(REPO_ROOT)}")
+                elif path.read_text() != expected:
+                    errors.append(f"DRIFT: {path.relative_to(REPO_ROOT)}")
+
+            elif runtime == "claude":
+                path = REPO_ROOT / target["output"]
+                managed_claude.add(path.name)
+                expected = generate_claude_wrapper(m, p)
+                if not path.exists():
+                    errors.append(f"MISSING: {path.relative_to(REPO_ROOT)}")
+                elif path.read_text() != expected:
+                    errors.append(f"DRIFT: {path.relative_to(REPO_ROOT)}")
+
+            elif runtime == "codex":
+                skill_path = REPO_ROOT / target["generated_dir"] / "SKILL.md"
+                expected = generate_codex_wrapper(m, p)
+                if not skill_path.exists():
+                    errors.append(f"MISSING: {skill_path.relative_to(REPO_ROOT)}")
+                elif skill_path.read_text() != expected:
+                    errors.append(f"DRIFT: {skill_path.relative_to(REPO_ROOT)}")
+
+    # Orphan detection — Gemini
+    if GEMINI_AGENTS_DIR.exists():
+        for f in GEMINI_AGENTS_DIR.glob("*.md"):
+            if f.name not in managed_gemini:
+                errors.append(f"ORPHAN: {f.relative_to(REPO_ROOT)}")
+
+    # Orphan detection — Claude
+    if CLAUDE_AGENTS_DIR.exists():
+        for f in CLAUDE_AGENTS_DIR.glob("*.md"):
+            if f.name not in managed_claude:
+                errors.append(f"ORPHAN: {f.relative_to(REPO_ROOT)}")
+
+    return errors
+
+
+def check_codex_config() -> list[str]:
+    """Verify .codex/config.toml declares all Heiwa-required surfaces."""
+    errors: list[str] = []
+    config_path = REPO_ROOT / ".codex" / "config.toml"
+
+    if not config_path.exists():
+        return ["MISSING: .codex/config.toml"]
+
+    with open(config_path, "rb") as f:
+        config = tomllib.load(f)
+
+    mcp_keys = set(config.get("mcp_servers", {}).keys())
+    for required in sorted(REQUIRED_CODEX_MCP):
+        if required not in mcp_keys:
+            errors.append(f"CODEX CONFIG: missing MCP server '{required}'")
+
+    plugin_names: set[str] = set()
+    for key, val in config.get("plugins", {}).items():
+        if val.get("enabled", False):
+            plugin_names.add(key.split("@")[0])
+    for required in sorted(REQUIRED_CODEX_PLUGINS):
+        if required not in plugin_names:
+            errors.append(f"CODEX CONFIG: missing plugin '{required}'")
+
+    features = config.get("features", {})
+    for required in sorted(REQUIRED_CODEX_FEATURES):
+        if not features.get(required, False):
+            errors.append(f"CODEX CONFIG: missing feature '{required}'")
+
+    return errors
+
+
+def check_claude_config() -> list[str]:
+    """Verify .claude/settings.json has required Heiwa keys."""
+    errors: list[str] = []
+    config_path = REPO_ROOT / ".claude" / "settings.json"
+
+    if not config_path.exists():
+        return ["MISSING: .claude/settings.json"]
+
+    with open(config_path) as f:
+        config = json.load(f)
+
+    if not config.get("enableAllProjectMcpServers"):
+        errors.append("CLAUDE CONFIG: enableAllProjectMcpServers not true")
+
+    if not config.get("enabledPlugins"):
+        errors.append("CLAUDE CONFIG: no enabledPlugins defined")
+
+    return errors
+
+
+def check_gemini_config() -> list[str]:
+    """Verify .gemini/settings.json has required Heiwa keys."""
+    errors: list[str] = []
+    config_path = REPO_ROOT / ".gemini" / "settings.json"
+
+    if not config_path.exists():
+        return ["MISSING: .gemini/settings.json"]
+
+    with open(config_path) as f:
+        config = json.load(f)
+
+    general = config.get("general", {})
+    if "defaultApprovalMode" not in general:
+        errors.append("GEMINI CONFIG: missing general.defaultApprovalMode")
+
+    security = config.get("security", {})
+    if not security.get("environmentVariableRedaction", {}).get("enabled"):
+        errors.append("GEMINI CONFIG: environmentVariableRedaction not enabled")
+
+    filtering = config.get("context", {}).get("fileFiltering", {})
+    if not filtering.get("respectGitIgnore"):
+        errors.append("GEMINI CONFIG: respectGitIgnore not enabled")
+
+    return errors
+
+
+def cmd_check(agents: list[dict]) -> bool:
+    """Run all verification checks. Returns True if clean."""
+    all_errors: list[str] = []
+
+    all_errors.extend(check_wrapper_drift(agents))
+    all_errors.extend(check_codex_config())
+    all_errors.extend(check_claude_config())
+    all_errors.extend(check_gemini_config())
+
+    if all_errors:
+        print(f"CHECK FAILED — {len(all_errors)} error(s):", file=sys.stderr)
+        for e in all_errors:
+            print(f"  {e}", file=sys.stderr)
+        return False
+
+    print("All checks passed.")
+    return True
+
+
 import argparse
 import sys
 from pathlib import Path
@@ -198,8 +361,8 @@ def main() -> int:
     agents = load_registry()
 
     if args.check:
-        print("Check mode not yet implemented.")
-        return 1
+        ok = cmd_check(agents)
+        return 0 if ok else 1
 
     if args.install_codex:
         print("Install mode not yet implemented.")

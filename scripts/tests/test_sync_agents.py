@@ -181,3 +181,41 @@ def test_load_registry_researcher_is_read_only():
     agents = load_registry()
     researcher = [a for a in agents if a["manifest"]["id"] == "heiwa-researcher"][0]
     assert researcher["manifest"]["tool_profile"] == "read_only"
+
+
+import tomllib
+
+from sync_agents import (
+    check_codex_config,
+    check_claude_config,
+    check_gemini_config,
+    check_wrapper_drift,
+)
+
+
+def test_check_wrapper_drift_clean_passes():
+    """After a fresh sync, drift check should find zero errors."""
+    agents = load_registry()
+    errors = check_wrapper_drift(agents)
+    assert errors == []
+
+
+def test_check_codex_config_current_state():
+    """Codex config check should report missing surfaces before parity fix."""
+    errors = check_codex_config()
+    # Before Task 8 fixes the config, figma/notion/codebase-retrieval are missing
+    missing_names = [e for e in errors if "figma" in e or "notion" in e or "codebase-retrieval" in e]
+    assert len(missing_names) > 0
+
+
+def test_check_claude_config_passes():
+    """Claude config should already have enableAllProjectMcpServers."""
+    errors = check_claude_config()
+    mcp_errors = [e for e in errors if "enableAllProjectMcpServers" in e]
+    assert mcp_errors == []
+
+
+def test_check_gemini_config_passes():
+    """Gemini config should already have required keys."""
+    errors = check_gemini_config()
+    assert errors == []
