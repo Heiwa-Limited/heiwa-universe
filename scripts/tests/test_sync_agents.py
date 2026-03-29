@@ -1,0 +1,155 @@
+"""Tests for the cross-runtime agent sync tool."""
+from __future__ import annotations
+
+from sync_agents import (
+    generate_banner,
+    generate_claude_wrapper,
+    generate_codex_wrapper,
+    generate_gemini_wrapper,
+)
+
+# -- Fixtures --
+
+FULL_ACCESS_MANIFEST = {
+    "id": "heiwa-architect",
+    "name": "Heiwa Architect",
+    "description": "Specialized architect for Heiwa state, mesh connectivity, and protocol changes.",
+    "tool_profile": "full_access",
+    "targets": {
+        "gemini": {"enabled": True, "model": "auto-gemini-3", "max_turns": 15},
+        "claude": {"enabled": True, "model": "sonnet", "max_turns": 15},
+        "codex": {"enabled": True},
+    },
+}
+
+READ_ONLY_MANIFEST = {
+    "id": "heiwa-researcher",
+    "name": "Heiwa Researcher",
+    "description": "Read-only codebase investigator for Heiwa.",
+    "tool_profile": "read_only",
+    "targets": {
+        "gemini": {"enabled": True, "model": "auto-gemini-3", "max_turns": 15},
+        "claude": {"enabled": True, "model": "sonnet", "max_turns": 15},
+        "codex": {"enabled": True},
+    },
+}
+
+PROMPT_BODY = "# Test Agent\n\nYou are a test agent."
+
+
+# -- Banner tests --
+
+
+def test_banner_contains_manifest_path():
+    banner = generate_banner("heiwa-architect")
+    assert "ops/agents/heiwa-architect/agent.yaml" in banner
+
+
+def test_banner_contains_prompt_path():
+    banner = generate_banner("heiwa-architect")
+    assert "ops/agents/heiwa-architect/prompt.md" in banner
+
+
+def test_banner_contains_regen_command():
+    banner = generate_banner("heiwa-architect")
+    assert "uv run scripts/sync_agents.py" in banner
+
+
+def test_banner_starts_with_generated_warning():
+    banner = generate_banner("heiwa-architect")
+    assert banner.startswith("<!-- GENERATED FILE - DO NOT EDIT")
+
+
+# -- Gemini wrapper tests --
+
+
+def test_gemini_full_access_has_wildcard_tools():
+    result = generate_gemini_wrapper(FULL_ACCESS_MANIFEST, PROMPT_BODY)
+    assert 'tools: ["*"]' in result
+
+
+def test_gemini_read_only_has_restricted_tools():
+    result = generate_gemini_wrapper(READ_ONLY_MANIFEST, PROMPT_BODY)
+    assert "read_file" in result
+    assert "grep_search" in result
+    assert '"*"' not in result
+
+
+def test_gemini_wrapper_has_model_and_turns():
+    result = generate_gemini_wrapper(FULL_ACCESS_MANIFEST, PROMPT_BODY)
+    assert "model: auto-gemini-3" in result
+    assert "max_turns: 15" in result
+
+
+def test_gemini_wrapper_contains_prompt_body():
+    result = generate_gemini_wrapper(FULL_ACCESS_MANIFEST, PROMPT_BODY)
+    assert PROMPT_BODY in result
+
+
+def test_gemini_wrapper_contains_banner():
+    result = generate_gemini_wrapper(FULL_ACCESS_MANIFEST, PROMPT_BODY)
+    assert "GENERATED FILE - DO NOT EDIT" in result
+
+
+# -- Claude wrapper tests --
+
+
+def test_claude_full_access_omits_disallowed_tools():
+    result = generate_claude_wrapper(FULL_ACCESS_MANIFEST, PROMPT_BODY)
+    assert "disallowedTools" not in result
+
+
+def test_claude_read_only_has_disallowed_tools():
+    result = generate_claude_wrapper(READ_ONLY_MANIFEST, PROMPT_BODY)
+    assert "disallowedTools" in result
+    assert '"Write"' in result
+    assert '"Edit"' in result
+    assert '"MultiEdit"' in result
+    assert '"Bash"' in result
+
+
+def test_claude_wrapper_uses_camel_case_max_turns():
+    result = generate_claude_wrapper(FULL_ACCESS_MANIFEST, PROMPT_BODY)
+    assert "maxTurns: 15" in result
+    assert "max_turns" not in result
+
+
+def test_claude_wrapper_contains_prompt_body():
+    result = generate_claude_wrapper(FULL_ACCESS_MANIFEST, PROMPT_BODY)
+    assert PROMPT_BODY in result
+
+
+def test_claude_wrapper_contains_banner():
+    result = generate_claude_wrapper(FULL_ACCESS_MANIFEST, PROMPT_BODY)
+    assert "GENERATED FILE - DO NOT EDIT" in result
+
+
+# -- Codex wrapper tests --
+
+
+def test_codex_full_access_has_no_policy_section():
+    result = generate_codex_wrapper(FULL_ACCESS_MANIFEST, PROMPT_BODY)
+    assert "Read-Only Policy" not in result
+
+
+def test_codex_read_only_has_policy_section():
+    result = generate_codex_wrapper(READ_ONLY_MANIFEST, PROMPT_BODY)
+    assert "## Read-Only Policy" in result
+    assert "read-only mode" in result
+
+
+def test_codex_wrapper_has_name_and_description_only():
+    result = generate_codex_wrapper(FULL_ACCESS_MANIFEST, PROMPT_BODY)
+    # Codex frontmatter should not include model or max_turns
+    assert "model:" not in result.split("---")[1]
+    assert "max_turns" not in result.split("---")[1]
+
+
+def test_codex_wrapper_contains_prompt_body():
+    result = generate_codex_wrapper(FULL_ACCESS_MANIFEST, PROMPT_BODY)
+    assert PROMPT_BODY in result
+
+
+def test_codex_wrapper_contains_banner():
+    result = generate_codex_wrapper(FULL_ACCESS_MANIFEST, PROMPT_BODY)
+    assert "GENERATED FILE - DO NOT EDIT" in result

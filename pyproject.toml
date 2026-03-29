@@ -1,6 +1,6 @@
 [tool.pytest.ini_options]
-testpaths = ["apps/heiwa_hub/tests", "apps/heiwa_trading/tests"]
-pythonpath = ["apps/heiwa_trading/src"]
+testpaths = ["apps/heiwa_hub/tests", "apps/heiwa_trading/tests", "scripts/tests"]
+pythonpath = ["apps/heiwa_trading/src", "scripts"]
 python_files = "test_*.py"
 python_functions = "test_*"
 addopts = "--tb=short -q"
