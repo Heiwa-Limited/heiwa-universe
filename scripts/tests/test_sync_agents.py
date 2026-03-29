@@ -153,3 +153,31 @@ def test_codex_wrapper_contains_prompt_body():
 def test_codex_wrapper_contains_banner():
     result = generate_codex_wrapper(FULL_ACCESS_MANIFEST, PROMPT_BODY)
     assert "GENERATED FILE - DO NOT EDIT" in result
+
+
+import os
+from pathlib import Path
+
+import yaml
+
+from sync_agents import load_registry, REPO_ROOT
+
+
+def test_load_registry_returns_five_agents():
+    agents = load_registry()
+    assert len(agents) == 5
+
+
+def test_load_registry_agents_have_manifest_and_prompt():
+    agents = load_registry()
+    for agent in agents:
+        assert "manifest" in agent
+        assert "prompt_body" in agent
+        assert agent["manifest"]["id"]
+        assert len(agent["prompt_body"]) > 0
+
+
+def test_load_registry_researcher_is_read_only():
+    agents = load_registry()
+    researcher = [a for a in agents if a["manifest"]["id"] == "heiwa-researcher"][0]
+    assert researcher["manifest"]["tool_profile"] == "read_only"

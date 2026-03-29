@@ -123,3 +123,92 @@ def generate_codex_wrapper(manifest: dict, prompt_body: str) -> str:
 
     parts.extend([prompt_body, ""])
     return "\n".join(parts)
+
+
+import argparse
+import sys
+from pathlib import Path
+
+import yaml
+
+REPO_ROOT = Path(__file__).resolve().parent.parent
+AGENTS_DIR = REPO_ROOT / "ops" / "agents"
+REGISTRY_FILE = AGENTS_DIR / "registry.yaml"
+GEMINI_AGENTS_DIR = REPO_ROOT / ".gemini" / "agents"
+CLAUDE_AGENTS_DIR = REPO_ROOT / ".claude" / "agents"
+
+
+def load_registry() -> list[dict]:
+    """Load canonical agent registry and return manifests with prompt bodies."""
+    with open(REGISTRY_FILE) as f:
+        registry = yaml.safe_load(f)
+
+    agents = []
+    for entry in registry["agents"]:
+        agent_id = entry["id"]
+        agent_dir = AGENTS_DIR / agent_id
+
+        with open(agent_dir / "agent.yaml") as f:
+            manifest = yaml.safe_load(f)
+
+        prompt_file = agent_dir / manifest.get("prompt_file", "prompt.md")
+        prompt_body = prompt_file.read_text().rstrip("\n")
+
+        agents.append({"manifest": manifest, "prompt_body": prompt_body})
+
+    return agents
+
+
+def cmd_generate(agents: list[dict]) -> None:
+    """Generate all runtime wrappers from canonical sources."""
+    for agent in agents:
+        m = agent["manifest"]
+        p = agent["prompt_body"]
+
+        for runtime, target in m["targets"].items():
+            if not target.get("enabled", False):
+                continue
+
+            if runtime == "gemini":
+                output = REPO_ROOT / target["output"]
+                output.parent.mkdir(parents=True, exist_ok=True)
+                output.write_text(generate_gemini_wrapper(m, p))
+                print(f"  Generated {output.relative_to(REPO_ROOT)}")
+
+            elif runtime == "claude":
+                output = REPO_ROOT / target["output"]
+                output.parent.mkdir(parents=True, exist_ok=True)
+                output.write_text(generate_claude_wrapper(m, p))
+                print(f"  Generated {output.relative_to(REPO_ROOT)}")
+
+            elif runtime == "codex":
+                output_dir = REPO_ROOT / target["generated_dir"]
+                output_dir.mkdir(parents=True, exist_ok=True)
+                (output_dir / "SKILL.md").write_text(generate_codex_wrapper(m, p))
+                print(f"  Generated {(output_dir / 'SKILL.md').relative_to(REPO_ROOT)}")
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser(description="Heiwa canonical agent sync tool")
+    parser.add_argument("--check", action="store_true", help="Verify wrappers are current")
+    parser.add_argument("--install-codex", action="store_true", help="Install Codex wrappers")
+    parser.add_argument("--copy", action="store_true", help="Copy instead of symlink for Codex install")
+    args = parser.parse_args()
+
+    agents = load_registry()
+
+    if args.check:
+        print("Check mode not yet implemented.")
+        return 1
+
+    if args.install_codex:
+        print("Install mode not yet implemented.")
+        return 1
+
+    cmd_generate(agents)
+    print("Done.")
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())
