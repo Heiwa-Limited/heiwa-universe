@@ -3,9 +3,11 @@
 from __future__ import annotations
 
 import datetime as dt
+import hashlib
 import json
 import logging
 import os
+import subprocess
 import sys
 import uuid
 from pathlib import Path
@@ -180,6 +182,44 @@ class CLIContext:
         from heiwa_sdk.config import hub_url_candidates
 
         return hub_url_candidates()
+
+    @property
+    def battlefield_root(self) -> Path:
+        return Path.cwd().resolve()
+
+    @property
+    def battlefield_name(self) -> str:
+        return self.battlefield_root.name or "battlefield"
+
+    def battlefield_repo_url(self) -> str | None:
+        try:
+            result = subprocess.run(
+                ["git", "-C", str(self.battlefield_root), "config", "--get", "remote.origin.url"],
+                check=False,
+                capture_output=True,
+                text=True,
+            )
+        except Exception:
+            logger.debug("Failed to resolve battlefield remote URL", exc_info=True)
+            return None
+        repo_url = result.stdout.strip()
+        return repo_url or None
+
+    @property
+    def battlefield_id(self) -> str:
+        descriptor = f"{self.battlefield_repo_url() or ''}:{self.battlefield_root}"
+        digest = hashlib.sha1(descriptor.encode("utf-8")).hexdigest()[:12]
+        return f"bf-{digest}"
+
+    def battlefield_registration(self) -> dict[str, Any]:
+        return {
+            "battlefield_id": self.battlefield_id,
+            "name": self.battlefield_name,
+            "repo_url": self.battlefield_repo_url(),
+            "root_path": str(self.battlefield_root),
+            "node_id": self.node_id,
+            "status": "active",
+        }
 
     def provider_alias(self, provider: str) -> str:
         return self.PROVIDER_ALIASES.get(str(provider or "").strip().lower(), str(provider or "").strip())

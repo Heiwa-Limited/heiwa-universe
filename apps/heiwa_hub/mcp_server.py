@@ -70,6 +70,8 @@ enrichment = BrokerEnrichmentService()
 approvals = get_approval_registry()
 TASK_SNAPSHOTS: dict[str, dict[str, Any]] = {}
 OPERATOR_STREAMS: set[asyncio.Queue] = set()
+CLIENT_STREAM_HEARTBEAT_SEC = 30.0
+CLIENT_EVENT_STREAMS: dict[str, set[tuple[asyncio.AbstractEventLoop, asyncio.Queue[dict[str, Any]]]]] = {}
 
 ROOT = Path(__file__).resolve().parents[2]
 bench = HeiwaBench(ROOT)
@@ -164,6 +166,33 @@ def _notify_operator_streams() -> None:
         OPERATOR_STREAMS.discard(queue)
 
 
+def _offer_client_event(queue: asyncio.Queue[dict[str, Any]], payload: dict[str, Any]) -> None:
+    if queue.full():
+        try:
+            queue.get_nowait()
+        except asyncio.QueueEmpty:
+            pass
+    queue.put_nowait(payload)
+
+
+def _notify_client_streams(owner_id: str | None, payload: dict[str, Any]) -> None:
+    if not owner_id:
+        return
+    subscribers = CLIENT_EVENT_STREAMS.get(owner_id)
+    if not subscribers:
+        return
+    stale: list[tuple[asyncio.AbstractEventLoop, asyncio.Queue[dict[str, Any]]]] = []
+    for loop, queue in list(subscribers):
+        try:
+            loop.call_soon_threadsafe(_offer_client_event, queue, payload)
+        except RuntimeError:
+            stale.append((loop, queue))
+    for subscriber in stale:
+        subscribers.discard(subscriber)
+    if not subscribers:
+        CLIENT_EVENT_STREAMS.pop(owner_id, None)
+
+
 def _append_wire_event(
     *,
     event_type: str,
@@ -174,20 +203,21 @@ def _append_wire_event(
     mission_id: str | None = None,
     battlefield_id: str | None = None,
 ) -> None:
+    event_record = {
+        "event_id": f"evt-{uuid.uuid4().hex[:12]}",
+        "owner_id": owner_id,
+        "principal_id": principal_id,
+        "session_id": session_id,
+        "mission_id": mission_id,
+        "battlefield_id": battlefield_id,
+        "event_type": event_type,
+        "payload_json": payload,
+        "created_at": datetime.datetime.now(datetime.timezone.utc).isoformat(),
+    }
     try:
-        db.append_event(
-            {
-                "event_id": f"evt-{uuid.uuid4().hex[:12]}",
-                "owner_id": owner_id,
-                "principal_id": principal_id,
-                "session_id": session_id,
-                "mission_id": mission_id,
-                "battlefield_id": battlefield_id,
-                "event_type": event_type,
-                "payload_json": payload,
-                "created_at": datetime.datetime.now(datetime.timezone.utc).isoformat(),
-            }
-        )
+        saved = db.append_event(event_record)
+        if saved is not False:
+            _notify_client_streams(owner_id, event_record)
     except Exception:
         logger.debug("Failed to append wire event %s", event_type, exc_info=True)
 
@@ -669,7 +699,7 @@ async def call_tool(tool_name: str, arguments: Dict[str, Any], authorization: st
 
 def _validate_auth_token(token: str | None) -> str:
     """Validate the Authorization bearer token against HEIWA_AUTH_TOKEN.
-    Returns the expected token on success, raises HTTPException on failure."""
+    Returns the raw token on success, raises HTTPException on failure."""
     from heiwa_sdk.security import SecurityService
     ss = SecurityService()
     expected = ss.get_expected_token()
@@ -683,7 +713,7 @@ def _validate_auth_token(token: str | None) -> str:
     
     if not ss.validate_token(raw):
         raise HTTPException(status_code=403, detail="Invalid auth token")
-    return expected
+    return raw
 
 
 # ---------------------------------------------------------------------------
@@ -696,6 +726,8 @@ class TaskRequest(BaseModel):
     source_surface: str = "cli"
     privacy_level: str | None = None
     task_id: str | None = None
+    session_id: str | None = None
+    battlefield_id: str | None = None
 
 
 class ApprovalDecisionRequest(BaseModel):
@@ -703,10 +735,49 @@ class ApprovalDecisionRequest(BaseModel):
     reason: str | None = None
 
 
+class BattlefieldRequest(BaseModel):
+    battlefield_id: str
+    name: str
+    repo_url: str | None = None
+    root_path: str | None = None
+    node_id: str | None = None
+    status: str = "active"
+
+
+@app.post("/battlefields")
+async def register_battlefield(req: BattlefieldRequest, authorization: str | None = Header(None)):
+    auth_token = _validate_auth_token(authorization)
+    claims = _ws_client_claims(auth_token) or {"owner_id": "local-operator", "principal_id": "local-operator"}
+    identity = resolve_identity_context(claims)
+    payload = {
+        "battlefield_id": req.battlefield_id,
+        "owner_id": identity["owner_id"],
+        "principal_id": identity["principal_id"],
+        "name": req.name,
+        "repo_url": req.repo_url,
+        "root_path": req.root_path,
+        "node_id": req.node_id,
+        "status": req.status,
+    }
+    if not db.upsert_battlefield(payload):
+        raise HTTPException(status_code=500, detail="Failed to register battlefield")
+    row = db.get_battlefield(req.battlefield_id, owner_id=identity["owner_id"]) or payload
+    _append_wire_event(
+        event_type="battlefield_registered",
+        payload=row,
+        owner_id=identity["owner_id"],
+        principal_id=identity["principal_id"],
+        battlefield_id=req.battlefield_id,
+    )
+    return row
+
+
 @app.post("/tasks")
 async def create_task(req: TaskRequest, authorization: str | None = Header(None)):
     """Authenticated task ingress. Enriches once here — Spine skips re-enrichment."""
     auth_token = _validate_auth_token(authorization)
+    claims = _ws_client_claims(auth_token) or {"owner_id": "local-operator", "principal_id": "local-operator"}
+    identity = resolve_identity_context(claims)
     task_id = req.task_id or f"cli-task-{uuid.uuid4().hex[:8]}"
 
     # Single source of truth: enrich here, pass route fields through the bus
@@ -737,6 +808,10 @@ async def create_task(req: TaskRequest, authorization: str | None = Header(None)
         "sender_id": req.sender_id,
         "requested_by": req.sender_id,
         "auth_token": auth_token,
+        "owner_id": identity["owner_id"],
+        "principal_id": identity["principal_id"],
+        "session_id": req.session_id,
+        "battlefield_id": req.battlefield_id,
         "_pre_enriched": True,
     })
     await bus.publish(Subject.CORE_REQUEST, route_payload, sender_id=req.sender_id)
@@ -757,6 +832,10 @@ async def create_task(req: TaskRequest, authorization: str | None = Header(None)
         target_model=dispatch.target_model,
         rate_group=dispatch.rate_group,
         mission_id=task_id,
+        owner_id=identity["owner_id"],
+        principal_id=identity["principal_id"],
+        session_id=req.session_id,
+        battlefield_id=req.battlefield_id,
     )
 
     try:
@@ -772,6 +851,8 @@ async def create_task(req: TaskRequest, authorization: str | None = Header(None)
                 "active_cell_id": cell.get("cell_id") or route.assigned_worker,
                 "target_tool": dispatch.adapter_tool,
                 "target_model": dispatch.target_model,
+                "owner_id": identity["owner_id"],
+                "principal_id": identity["principal_id"],
                 "summary": None,
                 "metadata": {"route": route.to_dict(), "dispatch": dispatch.to_dict(), "cell": cell},
             }
@@ -788,6 +869,8 @@ async def create_task(req: TaskRequest, authorization: str | None = Header(None)
                 "detail": f"{route.intent_class} via {req.source_surface}",
                 "input": {"prompt": req.raw_text},
                 "output": route.to_dict(),
+                "owner_id": identity["owner_id"],
+                "principal_id": identity["principal_id"],
             }
         )
         db.append_mission_step(
@@ -802,6 +885,8 @@ async def create_task(req: TaskRequest, authorization: str | None = Header(None)
                 "detail": f"{dispatch.provider} {dispatch.target_model}",
                 "input": route.to_dict(),
                 "output": {},
+                "owner_id": identity["owner_id"],
+                "principal_id": identity["principal_id"],
             }
         )
         if not route.requires_approval:
@@ -817,10 +902,31 @@ async def create_task(req: TaskRequest, authorization: str | None = Header(None)
                     "model": dispatch.target_model,
                     "rate_group": dispatch.rate_group,
                     "tool": dispatch.adapter_tool,
+                    "owner_id": identity["owner_id"],
+                    "principal_id": identity["principal_id"],
                 }
             )
     except Exception:
         logger.exception("Failed to persist mission bootstrap for %s", task_id)
+
+    _append_wire_event(
+        event_type="task_accepted",
+        payload={
+            "task_id": task_id,
+            "status": "ACCEPTED",
+            "raw_text": req.raw_text,
+            "source_surface": req.source_surface,
+            "sender_id": req.sender_id,
+            "intent_class": route.intent_class,
+            "target_tool": dispatch.adapter_tool,
+            "target_model": dispatch.target_model,
+        },
+        owner_id=identity["owner_id"],
+        principal_id=identity["principal_id"],
+        session_id=req.session_id,
+        mission_id=task_id,
+        battlefield_id=req.battlefield_id,
+    )
 
     return {
         "task_id": task_id,
@@ -1031,6 +1137,9 @@ async def client_events(
 
     identity = resolve_identity_context(claims)
     await ws.accept()
+    event_queue: asyncio.Queue[dict[str, Any]] = asyncio.Queue(maxsize=100)
+    subscriber = (asyncio.get_running_loop(), event_queue)
+    CLIENT_EVENT_STREAMS.setdefault(identity["owner_id"], set()).add(subscriber)
     try:
         events = db.list_events(
             after_event_id=last_seen_event_id,
@@ -1040,10 +1149,19 @@ async def client_events(
         for event in events:
             await ws.send_json(event)
         while True:
-            await asyncio.sleep(30)
-            await ws.send_json({"type": "heartbeat"})
+            try:
+                event = await asyncio.wait_for(event_queue.get(), timeout=CLIENT_STREAM_HEARTBEAT_SEC)
+                await ws.send_json(event)
+            except asyncio.TimeoutError:
+                await ws.send_json({"type": "heartbeat"})
     except WebSocketDisconnect:
         logger.debug("Client websocket disconnected.")
+    finally:
+        subscribers = CLIENT_EVENT_STREAMS.get(identity["owner_id"])
+        if subscribers is not None:
+            subscribers.discard(subscriber)
+            if not subscribers:
+                CLIENT_EVENT_STREAMS.pop(identity["owner_id"], None)
 
 
 @app.websocket("/ws/tasks/{task_id}")

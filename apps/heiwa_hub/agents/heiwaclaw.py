@@ -353,6 +353,10 @@ class HeiwaClawAgent(BaseAgent):
             "requested_by": payload.get("requested_by"),
             "response_channel_id": payload.get("response_channel_id"),
             "response_thread_id": payload.get("response_thread_id"),
+            "owner_id": payload.get("owner_id"),
+            "principal_id": payload.get("principal_id"),
+            "session_id": payload.get("session_id"),
+            "battlefield_id": payload.get("battlefield_id"),
             "program_validation": program_validation,
             "execution_program": execution_program.to_dict() if execution_program else None,
         }
@@ -385,6 +389,10 @@ class HeiwaClawAgent(BaseAgent):
             "target_tool": dispatch.gateway_tool,
             "response_channel_id": payload.get("response_channel_id"),
             "response_thread_id": payload.get("response_thread_id"),
+            "owner_id": payload.get("owner_id"),
+            "principal_id": payload.get("principal_id"),
+            "session_id": payload.get("session_id"),
+            "battlefield_id": payload.get("battlefield_id"),
         })
 
     async def _handle_directive(self, data: dict[str, Any]) -> None:
