@@ -8,11 +8,14 @@ from __future__ import annotations
 import logging
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
-from typing import Any, Dict, Type
+from typing import Any, Dict, Type, TYPE_CHECKING
 
 from heiwa_protocol.routing import BrokerRouteResult
 from heiwa_sdk.provider_registry import ProviderRegistry
 from heiwa_sdk.heiwaclaw.adapters.base import BaseClawAdapter
+
+if TYPE_CHECKING:
+    from heiwa_sdk.spacetimedb import SpacetimeDB
 
 logger = logging.getLogger("SDK.OpenClaw")
 
@@ -47,13 +50,27 @@ class OpenClaw:
     Claude Code, Codex, Gemini, Antigravity, and Ollama.
     """
 
-    def __init__(self, root_dir: Path):
+    def __init__(self, root_dir: Path, stdb: SpacetimeDB | None = None):
         self.root = root_dir
         self.providers = ProviderRegistry(root_dir)
+        self._stdb = stdb
+
+        if not self._stdb:
+            try:
+                from heiwa_sdk.db import db
+                if db:
+                    self._stdb = db.stdb
+            except ImportError:
+                pass
+
         self._adapters: Dict[str, BaseClawAdapter] = {}
         self._load_adapters()
         from heiwa_sdk.hooks import ExecutionHookManager
         self.hooks = ExecutionHookManager(root_dir)
+
+        # UserVault for owner-specific credential resolution
+        from heiwa_sdk.vault import UserVault
+        self.vault = UserVault(self._stdb) if self._stdb else None
 
     def _load_adapters(self):
         """Initialize specialized adapters."""
@@ -78,7 +95,15 @@ class OpenClaw:
         provider = self.providers.provider_for_model(route.target_model)
         return provider or "local"
 
-    def resolve(self, payload: BrokerRouteResult | dict[str, Any]) -> OpenClawDispatch:
+    def _map_provider_to_env_key(self, provider: str) -> str:
+        mapping = {
+            "google": "GEMINI_API_KEY",
+            "anthropic": "ANTHROPIC_API_KEY",
+            "openai": "OPENAI_API_KEY",
+        }
+        return mapping.get(provider, f"{provider.upper()}_API_KEY")
+
+    def resolve(self, payload: BrokerRouteResult | dict[str, Any], owner_id: str = "operator") -> OpenClawDispatch:
         route = payload if isinstance(payload, BrokerRouteResult) else BrokerRouteResult.from_payload(payload)
 
         if route.target_tool == "heiwa_ops":
@@ -116,6 +141,13 @@ class OpenClaw:
         provider = self._provider_for(route)
         provider_config = self.providers.resolve(provider)
 
+        adapter_env = dict(provider_config.env)
+        if owner_id != "operator" and self.vault:
+            user_cred = self.vault.resolve_credential(owner_id, provider)
+            if user_cred:
+                env_key = self._map_provider_to_env_key(provider)
+                adapter_env[env_key] = user_cred
+
         return OpenClawDispatch(
             gateway_tool=provider_config.gateway_tool,
             adapter_tool=provider_config.adapter_tool,
@@ -129,7 +161,7 @@ class OpenClaw:
             websocket_preferred=provider_config.websocket_preferred,
             direct_execution=provider_config.direct_execution,
             rationale=route.rationale,
-            adapter_env=provider_config.env,
+            adapter_env=adapter_env,
         )
 
     async def execute(
@@ -137,9 +169,10 @@ class OpenClaw:
         payload: BrokerRouteResult | dict[str, Any],
         instruction: str,
         system_prompt: str | None = None,
+        owner_id: str = "operator",
     ) -> tuple[int, str]:
         route = payload if isinstance(payload, BrokerRouteResult) else BrokerRouteResult.from_payload(payload)
-        dispatch = self.resolve(route)
+        dispatch = self.resolve(route, owner_id=owner_id)
 
         # 1. pre_tool_call hook validation
         allow, reason, hook_metadata = self.hooks.before_tool_call(
