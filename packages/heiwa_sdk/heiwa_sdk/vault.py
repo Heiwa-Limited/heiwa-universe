@@ -2,6 +2,7 @@ import os
 import base64
 import logging
 from pathlib import Path
+from typing import Any
 from cryptography.fernet import Fernet
 from cryptography.hazmat.primitives import hashes
 from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
@@ -135,3 +136,61 @@ class VaultStore:
             return 1, result.stderr.strip() or "railway import failed"
         finally:
             os.unlink(tmp)
+
+
+class UserVault:
+    """
+    Handles user-scoped credentials stored in STDB.
+    Terminates 'owner_id' to STDB 'user_id' mapping.
+    """
+
+    def __init__(self, stdb: Any):
+        self.stdb = stdb
+        self.cipher = InstanceVault()
+
+    def store_credential(
+        self,
+        owner_id: str,
+        provider_id: str,
+        credential_kind: str,
+        plaintext_value: str,
+        rate_group: str,
+        display_label: str | None = None,
+    ) -> str:
+        """Encrypts and stores a credential in STDB."""
+        import uuid
+
+        credential_id = f"cred-{owner_id[:8]}-{provider_id[:8]}-{uuid.uuid4().hex[:6]}"
+        encrypted = self.cipher.encrypt(plaintext_value)
+
+        self.stdb.update_provider_credential(
+            credential_id=credential_id,
+            user_id=owner_id,
+            provider_id=provider_id,
+            credential_kind=credential_kind,
+            credential_enc=encrypted,
+            rate_group=rate_group,
+            display_label=display_label,
+        )
+        return credential_id
+
+    def list_credentials(self, owner_id: str) -> list[dict[str, Any]]:
+        """Returns metadata for all active credentials for an owner."""
+        creds = self.stdb.get_provider_credentials(owner_id)
+        # Redact the actual encrypted string for list views
+        for c in creds:
+            c["credential_enc"] = "[ENCRYPTED]"
+        return creds
+
+    def resolve_credential(self, owner_id: str, provider_id: str) -> str | None:
+        """Finds and decrypts the active credential for a provider."""
+        # STDB query returns list[dict].
+        rows = self.stdb.query(
+            f"SELECT * FROM provider_credentials "
+            f"WHERE user_id = '{owner_id}' AND provider_id = '{provider_id}' "
+            f"AND status = 'active' LIMIT 1"
+        )
+        if not rows:
+            return None
+
+        return self.cipher.decrypt(rows[0]["credential_enc"])
