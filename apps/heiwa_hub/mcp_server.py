@@ -13,6 +13,7 @@ import uuid
 import subprocess
 import sys
 from fastapi import FastAPI, HTTPException, Header, Request, WebSocket, WebSocketDisconnect
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
@@ -51,6 +52,14 @@ load_swarm_env()
 logger = logging.getLogger("Hub.MCP")
 
 
+def _cors_allowed_origins() -> list[str]:
+    origins = {"https://heiwa.ltd", "https://app.heiwa.ltd"}
+    web_origin = os.getenv("HEIWA_WEB_ORIGIN", "").strip()
+    if web_origin:
+        origins.add(web_origin.rstrip("/"))
+    return sorted(origin for origin in origins if origin)
+
+
 @asynccontextmanager
 async def _lifespan(application: FastAPI):
     # Register event bus listeners for task snapshots
@@ -63,6 +72,13 @@ async def _lifespan(application: FastAPI):
 
 
 app = FastAPI(title="Heiwa Core MCP Server", lifespan=_lifespan)
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=_cors_allowed_origins(),
+    allow_credentials=False,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 db = Database()
 state = HubStateService(db)
 mcp_bridge = MCPBridge()

@@ -1,9 +1,8 @@
 """Baseline smoke tests for Class 3 runtime safety."""
-from __future__ import annotations
-
 import json
 import os
 import subprocess
+import pytest
 from pathlib import Path
 
 
@@ -14,10 +13,11 @@ CODEX_SAFE = HOME / ".codex/bin/codex-safe"
 DEVONX = HOME / "heiwa_archive/heiwa-core/bin/devonx"
 
 
-def run_json_command(cmd: list[str], payload: dict[str, object]) -> dict[str, object]:
+def run_json_command(cmd: list[str], payload: str | dict[str, object]) -> dict[str, object]:
+    input_str = payload if isinstance(payload, str) else json.dumps(payload)
     proc = subprocess.run(
         cmd,
-        input=json.dumps(payload),
+        input=input_str,
         text=True,
         capture_output=True,
         check=False,
@@ -56,9 +56,48 @@ def test_gemini_blocks_sensitive_write() -> None:
     assert result["decision"] == "deny"
 
 
+def test_gemini_fails_closed_on_malformed_input() -> None:
+    assert_exists(GEMINI_POLICY, "Gemini policy hook")
+    result = run_json_command(["node", str(GEMINI_POLICY)], "{ malformed json }")
+    assert result["decision"] == "deny"
+    assert "parse" in result["reason"].lower()
+
+
+@pytest.mark.xfail(reason="Gemini lease-based allow is dormant until identity fields are stable")
+def test_gemini_lease_bypass_is_dormant() -> None:
+    assert_exists(GEMINI_POLICY, "Gemini policy hook")
+    # This payload is dangerous but has dummy lease info; should still deny in Phase 1A
+    payload = {
+        "tool_name": "run_shell_command",
+        "tool_input": {"command": "rm -rf /tmp/test"},
+        "session_id": "test-session",
+        "proposal_id": "test-proposal"
+    }
+    result = run_json_command(["node", str(GEMINI_POLICY)], payload)
+    assert result["decision"] == "deny"
+
+
 def test_claude_blocks_network_post() -> None:
     assert_exists(CLAUDE_POLICY, "Claude policy hook")
     payload = {"tool_name": "WebFetch", "tool_input": {"url": "https://example.com", "method": "POST"}}
+    result = run_json_command(["python3", str(CLAUDE_POLICY)], payload)
+    assert result["decision"] == "deny"
+
+
+def test_claude_fails_closed_on_malformed_input() -> None:
+    assert_exists(CLAUDE_POLICY, "Claude policy hook")
+    result = run_json_command(["python3", str(CLAUDE_POLICY)], "{ malformed json }")
+    assert result["decision"] == "deny"
+
+
+@pytest.mark.xfail(reason="Claude lease-based allow is dormant until identity fields are stable")
+def test_claude_lease_bypass_is_dormant() -> None:
+    assert_exists(CLAUDE_POLICY, "Claude policy hook")
+    payload = {
+        "tool_name": "Bash",
+        "tool_input": {"command": "rm -rf /tmp/test"},
+        "session_id": "test-session"
+    }
     result = run_json_command(["python3", str(CLAUDE_POLICY)], payload)
     assert result["decision"] == "deny"
 

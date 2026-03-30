@@ -38,49 +38,22 @@ User input → IntentNormalizer → RiskScorer → ComputeRouter → Broker → 
 | Web | `apps/heiwa_web/` | Cloudflare Pages marketing/status shell |
 | Docs | `docs/` | MkDocs Material source → docs.heiwa.ltd |
 
-## Agents (`apps/heiwa_hub/agents/`)
+## Engineering Standards (2026-03 BYOK Update)
 
-All extend BaseAgent from base.py:
-- Spine — fleet orchestration, node registry, heartbeats, request routing
-- Executor — claims and executes tasks via HeiwaClaw + ToolMesh
-- Captain — always-on event-driven orchestrator (Gemini Flash). Monitors health, delegates, communicates
-- Telemetry — system metrics collection and reporting
-- Messenger — Discord integration (optional, auto-detected)
+### 1. Identity & Multi-tenancy
+- **Primary human operator (Devon)**: `owner_id="0"`.
+- **System identities**: `operator` and `local-operator` are equivalent to `0` for system-wide key access.
+- **Helper**: Always use `is_system_operator(owner_id)` from `heiwa_protocol.routing` to check privileges.
+- **Auth**: `HEIWA_ADMIN_ID_MAPPINGS` (e.g., `discord:123456789=0`) handles admin promotion and relinking.
 
-## Commands
+### 2. Security & Credentials
+- **Vault First**: All provider keys MUST be resolved via `UserVault` in SpacetimeDB for `owner_id != system`.
+- **Scrubbing**: `ToolMesh` uses `SAFE_ENV_ALLOWLIST`. Never expose `HEIWA_MASTER_KEY` or `RAILWAY_AUTH_TOKEN` to child processes.
+- **BYOK**: Strict enforcement. If a user key is missing, return `BLOCKED_AUTH`.
 
-```bash
-# Setup
-python -m venv .venv && source .venv/bin/activate
-pip install -r requirements.txt
-export PYTHONPATH="$(pwd)/packages/heiwa_cli:$(pwd)/packages/heiwa_cognition:$(pwd)/packages/heiwa_sdk:$(pwd)/packages/heiwa_protocol:$(pwd)/packages/heiwa_identity:$(pwd)/packages/heiwa_ui:$(pwd)/apps"
-
-# Run
-python -m apps.heiwa_hub.main          # Start hub locally
-./apps/heiwa_cli/heiwa cells           # CLI: view cell catalog
-./apps/heiwa_cli/heiwa bench           # CLI: run release gates
-
-# Tests
-pytest                                    # Run all tests (configured in pyproject.toml)
-pytest apps/heiwa_hub/tests/test_intent_classifier.py  # Single file
-pytest -k "test_risk"                     # Pattern match
-
-# Deploy (CI-driven — push to main triggers Railway auto-deploy)
-git push origin main
-```
-
-## Task Routing Table
-
-Load only the rooms needed for the task:
-
-| Task Class | Load Rooms | Skip |
-| --- | --- | --- |
-| Proposal lifecycle | `ops/rooms/control-plane.md`, `ops/rooms/sdk.md` | `ops/rooms/infra.md`, `ops/rooms/execution.md` |
-| Worker node execution | `ops/rooms/execution.md`, `ops/rooms/infra.md` | `ops/rooms/orchestration.md` |
-| SDK surface changes | `ops/rooms/sdk.md`, `ops/rooms/control-plane.md` | `ops/rooms/infra.md` |
-| CI / deploy changes | `ops/rooms/infra.md`, `ops/rooms/execution.md` | `ops/rooms/orchestration.md` |
-| Orchestration / human-in-loop | `ops/rooms/orchestration.md`, `ops/rooms/control-plane.md` | `ops/rooms/infra.md` |
-| Architecture / design | all rooms | none |
+### 3. Execution Patterns
+- **Propagation**: `owner_id` must be carried in `BrokerRouteRequest` and `BrokerRouteResult`.
+- **Status Mapping**: Map authentication failures to `BLOCKED_AUTH` in `OpenClaw` and narrate specifically in `HeiwaClawAgent`.
 
 ## Hard Rules
 
@@ -92,5 +65,4 @@ Load only the rooms needed for the task:
 - Privacy: sovereign work stays on boost nodes (never cloud)
 - Untrusted code: E2B sandboxes only, never host
 - Honesty: do not overstate maturity in docs or diagrams
-- Communication: DM interaction with Heiwa Agent must be natural, memory-aware, and bypass robotic orchestration logging.
-- Memory: Heiwa Agent maintains persistent conversational context via SpacetimeDB memory loops (STORE, RECEIVE, REASON, FOCUS, ACT, SPEAK, SUMMARIZE).
+- Memory: Heiwa Agent maintains persistent conversational context via SpacetimeDB memory loops.
