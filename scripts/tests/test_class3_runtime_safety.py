@@ -14,14 +14,28 @@ CODEX_SAFE = HOME / ".codex/bin/codex-safe"
 DEVONX = HOME / "heiwa_archive/heiwa-core/bin/devonx"
 
 
-def run_json_command(cmd: list[str], payload: dict[str, object]) -> subprocess.CompletedProcess[str]:
-    return subprocess.run(
+def run_json_command(cmd: list[str], payload: dict[str, object]) -> dict[str, object]:
+    proc = subprocess.run(
         cmd,
         input=json.dumps(payload),
         text=True,
         capture_output=True,
         check=False,
     )
+    if proc.returncode != 0:
+        raise AssertionError(
+            f"{cmd[0]} exited with {proc.returncode}\n"
+            f"stdout:\n{proc.stdout}\n"
+            f"stderr:\n{proc.stderr}"
+        )
+    try:
+        return json.loads(proc.stdout)
+    except json.JSONDecodeError as exc:
+        raise AssertionError(
+            f"{cmd[0]} did not emit valid JSON\n"
+            f"stdout:\n{proc.stdout}\n"
+            f"stderr:\n{proc.stderr}"
+        ) from exc
 
 
 def assert_exists(path: Path, label: str) -> None:
@@ -31,24 +45,21 @@ def assert_exists(path: Path, label: str) -> None:
 def test_gemini_blocks_root_delete() -> None:
     assert_exists(GEMINI_POLICY, "Gemini policy hook")
     payload = {"tool_name": "run_shell_command", "tool_input": {"command": "rm -rf /"}}
-    proc = run_json_command(["node", str(GEMINI_POLICY)], payload)
-    result = json.loads(proc.stdout)
+    result = run_json_command(["node", str(GEMINI_POLICY)], payload)
     assert result["decision"] == "deny"
 
 
 def test_gemini_blocks_sensitive_write() -> None:
     assert_exists(GEMINI_POLICY, "Gemini policy hook")
     payload = {"tool_name": "write_file", "tool_input": {"path": "/Users/dmcgregsauce/.ssh/config"}}
-    proc = run_json_command(["node", str(GEMINI_POLICY)], payload)
-    result = json.loads(proc.stdout)
+    result = run_json_command(["node", str(GEMINI_POLICY)], payload)
     assert result["decision"] == "deny"
 
 
 def test_claude_blocks_network_post() -> None:
     assert_exists(CLAUDE_POLICY, "Claude policy hook")
     payload = {"tool_name": "WebFetch", "tool_input": {"url": "https://example.com", "method": "POST"}}
-    proc = run_json_command(["python3", str(CLAUDE_POLICY)], payload)
-    result = json.loads(proc.stdout)
+    result = run_json_command(["python3", str(CLAUDE_POLICY)], payload)
     assert result["decision"] == "deny"
 
 
@@ -91,4 +102,7 @@ def test_antigravity_operator_denies_off_limits_write() -> None:
         },
     )
     result = json.loads(proc.stdout)
-    assert result["result"]["status"] == "denied"
+    denial = result["result"]
+    assert denial["status"] == "denied"
+    assert denial["executed_mode"] == "none"
+    assert "missing required approval metadata" in denial["summary"]
