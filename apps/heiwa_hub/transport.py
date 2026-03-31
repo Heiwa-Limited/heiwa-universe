@@ -188,7 +188,7 @@ class WorkerSessionManager:
         """Register a worker WebSocket session."""
         self._sessions[worker_id] = ws
         caps = capabilities or {}
-        
+
         # Parse runtime and capabilities list
         runtime_capabilities = []
         _caps_list = caps.get("capabilities", [])
@@ -196,13 +196,20 @@ class WorkerSessionManager:
             runtime_capabilities.extend(list(_caps_list))
         if caps.get("ollama"):
             runtime_capabilities.append("ollama")
-        
-        # Map loaded Ollama models into GpuSlots tracking
+
+        # Read real GPU hardware from worker detection
+        gpu_type = str(caps.get("gpu_type", "cpu"))
+        gpu_vram_gb = int(caps.get("gpu_vram_gb", 0))
+
+        # Map loaded Ollama models into GpuSlots with actual hardware data
         from heiwa_protocol.schemas.pod import GpuSlot
         gpu_inventory = [
-            GpuSlot(gpu_type="cpu", vram_gb=0, loaded_models=[m], available_slots=1)
+            GpuSlot(gpu_type=gpu_type, vram_gb=gpu_vram_gb, loaded_models=[m], available_slots=1)
             for m in list(caps.get("ollama_models", []))
         ]
+        # If GPU detected but no Ollama models yet, still record the hardware
+        if gpu_vram_gb > 0 and not gpu_inventory:
+            gpu_inventory = [GpuSlot(gpu_type=gpu_type, vram_gb=gpu_vram_gb, loaded_models=[], available_slots=1)]
 
         # Instantiate PodRecord schema
         pod = PodRecord(
@@ -219,18 +226,19 @@ class WorkerSessionManager:
             last_heartbeat=str(time.time()),
         )
         self._pods[worker_id] = pod
-        
+
         self._heartbeats[worker_id] = time.time()
         self._last_stdb_heartbeats[worker_id] = time.time()
-        
+
         try:
             asyncio.create_task(self._persist_pod(pod))
             if gpu_inventory:
                 asyncio.create_task(self._persist_gpu_slots(pod))
         except RuntimeError:
             pass  # Fallback if no running loop, though Hub always has one
-        
-        logger.info("Worker registered: %s (capabilities: %s, models: %s)", worker_id, runtime_capabilities, len(gpu_inventory))
+
+        logger.info("Worker registered: %s (gpu=%s/%dGB, capabilities=%s, models=%d)",
+                     worker_id, gpu_type, gpu_vram_gb, runtime_capabilities, len(gpu_inventory))
 
     def unregister(self, worker_id: str):
         """Remove a worker session."""
@@ -253,6 +261,10 @@ class WorkerSessionManager:
         models_changed = False
         if pod and capabilities and "ollama_models" in capabilities:
             from heiwa_protocol.schemas.pod import GpuSlot
+            # Use real GPU data from heartbeat, falling back to existing pod values
+            gpu_type = str(capabilities.get("gpu_type", pod.gpu_inventory[0].gpu_type if pod.gpu_inventory else "cpu"))
+            gpu_vram_gb = int(capabilities.get("gpu_vram_gb", pod.gpu_inventory[0].vram_gb if pod.gpu_inventory else 0))
+
             new_models = set(capabilities.get("ollama_models", []))
             current_models = {s.loaded_models[0] for s in pod.gpu_inventory if s.loaded_models}
             if new_models != current_models:
@@ -260,9 +272,13 @@ class WorkerSessionManager:
                 for s in pod.gpu_inventory:
                     if s.loaded_models and s.loaded_models[0] not in new_models:
                         s.available_slots = 0
+                    else:
+                        # Update existing slots with latest GPU data
+                        s.gpu_type = gpu_type
+                        s.vram_gb = gpu_vram_gb
                     new_inventory.append(s)
                 for m in new_models - current_models:
-                    new_inventory.append(GpuSlot(gpu_type="cpu", vram_gb=0, loaded_models=[m], available_slots=1))
+                    new_inventory.append(GpuSlot(gpu_type=gpu_type, vram_gb=gpu_vram_gb, loaded_models=[m], available_slots=1))
                 pod.gpu_inventory = new_inventory
                 models_changed = True
         
@@ -310,26 +326,62 @@ class WorkerSessionManager:
             if now - ts < max_stale_sec and wid in self._sessions
         ]
 
-    def get_worker_for_runtime(self, target_runtime: str) -> Optional[str]:
+    def get_worker_for_capabilities(self, requires: list[str]) -> Optional[str]:
+        """Find an active worker whose runtime_capabilities satisfy all requirements.
+
+        Uses set intersection: the worker must advertise every capability in
+        ``requires``.  When multiple workers match, prefer the one with the
+        most capabilities (likely the more specialised node).
+        """
+        if not requires:
+            active = self.get_active_workers()
+            return active[0] if active else None
+
+        required = set(requires)
+        best: Optional[str] = None
+        best_score = -1
+        for wid in self.get_active_workers():
+            pod = self._pods.get(wid)
+            if not pod:
+                continue
+            caps = set(pod.runtime_capabilities)
+            if required <= caps:
+                score = len(caps)
+                if score > best_score:
+                    best = wid
+                    best_score = score
+        return best
+
+    def get_worker_for_runtime(self, target_runtime: str, requires: Optional[list[str]] = None) -> Optional[str]:
         """Find an active worker matching the target runtime.
 
-        Matches against:
+        When ``requires`` is provided, uses capability set intersection
+        instead of substring matching.  Falls back to name-based matching
+        for backward compatibility when no requirements are specified.
+
+        Matches against (legacy path):
           - worker_id itself (e.g. ``macbook@heiwa-node-a``)
           - the ``node_id`` capability field
-          - the ``runtime`` capability field
           - substring match on worker_id (e.g. ``macbook`` matches ``macbook@heiwa-node-a``)
           - ``any`` / ``both`` match any active worker
         """
         target = target_runtime.lower()
         if target in {"any", "both"}:
+            if requires:
+                return self.get_worker_for_capabilities(requires)
             active = self.get_active_workers()
             return active[0] if active else None
 
+        # Capability-based dispatch when requirements are specified
+        if requires:
+            return self.get_worker_for_capabilities(requires)
+
+        # Legacy substring matching fallback
         for wid in self.get_active_workers():
             pod = self._pods.get(wid)
             if not pod:
                  continue
-            
+
             node_id = pod.pod_id.lower()
             wid_lower = wid.lower()
             if (

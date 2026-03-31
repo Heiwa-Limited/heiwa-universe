@@ -67,6 +67,43 @@ class WorkerManager:
             pass
         return None
 
+    @staticmethod
+    def _detect_gpu_hardware() -> tuple[str, int]:
+        """Detect GPU type and usable VRAM in GB from actual hardware.
+
+        Returns (gpu_type, vram_gb) — e.g. ("metal", 18) or ("nvidia", 12).
+        Falls back to ("cpu", 0) if no accelerator is detected.
+        """
+        import platform
+        import subprocess
+
+        os_type = platform.system()
+
+        if os_type == "Darwin" and platform.machine() == "arm64":
+            try:
+                mem_bytes = int(subprocess.check_output(
+                    ["sysctl", "-n", "hw.memsize"], timeout=5,
+                ).strip())
+                # macOS reserves ~25% for the OS; ~75% is usable for GPU workloads
+                usable_gb = int(mem_bytes / (1024 ** 3) * 0.75)
+                return ("metal", usable_gb)
+            except Exception:
+                pass
+
+        elif os_type == "Linux":
+            try:
+                smi_output = subprocess.check_output(
+                    ["nvidia-smi", "--query-gpu=memory.total",
+                     "--format=csv,noheader,nounits"],
+                    text=True, timeout=5,
+                ).strip()
+                vram_mb = int(smi_output.split("\n")[0].strip())
+                return ("nvidia", int(vram_mb / 1024))
+            except (FileNotFoundError, subprocess.CalledProcessError, ValueError):
+                pass
+
+        return ("cpu", 0)
+
     def _detect_capabilities(self) -> dict:
         caps_str = os.getenv("HEIWA_CAPABILITIES", "")
         caps = {c.strip().lower() for c in caps_str.split(",") if c.strip()}
@@ -77,6 +114,18 @@ class WorkerManager:
             else:
                 caps = {"standard_compute", "workspace_interaction", "agile_coding"}
 
+        # Auto-detect GPU hardware
+        gpu_type, gpu_vram_gb = self._detect_gpu_hardware()
+        if gpu_vram_gb > 0:
+            caps.add("gpu_native")
+            # Advertise VRAM tier for capability-based dispatch
+            if gpu_vram_gb >= 16:
+                caps.add("gpu_vram_16gb")
+                caps.add("large_model")
+            elif gpu_vram_gb >= 8:
+                caps.add("gpu_vram_8gb")
+                caps.add("fast_inference")
+
         # Auto-detect Ollama
         ollama_models = self._probe_ollama_models()
         ollama_available = ollama_models is not None
@@ -86,7 +135,11 @@ class WorkerManager:
             "node_id": self.node_id,
             "ollama": ollama_available,
             "ollama_models": ollama_models or [],
+            "gpu_type": gpu_type,
+            "gpu_vram_gb": gpu_vram_gb,
         }
+        if gpu_vram_gb > 0:
+            logger.info("GPU detected: %s with %d GB usable VRAM", gpu_type, gpu_vram_gb)
         if ollama_available:
             logger.info("Ollama detected — advertising LLM proxy capabilities (%d model(s))", len(ollama_models or []))
         return result
