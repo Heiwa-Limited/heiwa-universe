@@ -1,10 +1,12 @@
 use std::time::{SystemTime, UNIX_EPOCH};
+use std::sync::Arc;
 
 use anyhow::{anyhow, Result};
 use heiwa_bindings::{
     attach_drex_decision_to_route_reducer::attach_drex_decision_to_route as AttachDrexDecisionToRouteReducer,
     record_drex_decision_reducer::record_drex_decision as RecordDrexDecisionReducer,
     record_drex_failure_reducer::record_drex_failure as RecordDrexFailureReducer,
+    DbConnection,
 };
 use serde_json::json;
 
@@ -57,28 +59,20 @@ pub trait StdbTransport: Send + Sync + 'static {
         -> Result<()>;
 }
 
-#[derive(Debug, Clone)]
-pub struct ReducerTransport<R> {
-    reducers: R,
+#[derive(Clone)]
+pub struct ReducerTransport {
+    pub conn: Arc<DbConnection>,
 }
 
-impl<R> ReducerTransport<R> {
-    pub fn new(reducers: R) -> Self {
-        Self { reducers }
+impl ReducerTransport {
+    pub fn new(conn: DbConnection) -> Self {
+        Self { conn: Arc::new(conn) }
     }
 }
 
-impl<R> StdbTransport for ReducerTransport<R>
-where
-    R: RecordDrexDecisionReducer
-        + RecordDrexFailureReducer
-        + AttachDrexDecisionToRouteReducer
-        + Send
-        + Sync
-        + 'static,
-{
+impl StdbTransport for ReducerTransport {
     fn upsert_drex_decision(&self, decision: PersistedDrexDecision) -> Result<()> {
-        self.reducers
+        self.conn.reducers
             .record_drex_decision(
                 decision.drex_decision_id,
                 decision.request_id,
@@ -110,7 +104,7 @@ where
     }
 
     fn insert_drex_failure(&self, failure: PersistedDrexFailure) -> Result<()> {
-        self.reducers
+        self.conn.reducers
             .record_drex_failure(
                 failure.drex_decision_id,
                 failure.request_id,
@@ -128,7 +122,7 @@ where
         request_id: &str,
         drex_decision_id: &str,
     ) -> Result<()> {
-        self.reducers
+        self.conn.reducers
             .attach_drex_decision_to_route(
                 request_id.to_string(),
                 drex_decision_id.to_string(),
@@ -160,7 +154,7 @@ impl StdbTransport for NoopTransport {
 
 #[derive(Debug)]
 pub struct StdbRuntime<T: StdbTransport = NoopTransport> {
-    transport: T,
+    pub transport: T,
 }
 
 impl Default for StdbRuntime<NoopTransport> {

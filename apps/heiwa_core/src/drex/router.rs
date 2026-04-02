@@ -5,7 +5,9 @@ use super::policy::{DrexDecision, DrexPolicy, ResolutionTier};
 use super::scorer::evaluate_drex;
 use super::vector::DrexVector;
 
-#[derive(Clone, Debug, PartialEq)]
+use serde::Deserialize;
+
+#[derive(Clone, Debug, PartialEq, Deserialize)]
 pub struct DrexIngress {
     pub intent: String,
     pub risk: String,
