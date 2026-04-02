@@ -55,12 +55,20 @@ pub async fn ws_client_handler(
     ws.on_upgrade(move |socket| handle_client_socket(socket, state))
 }
 
+pub async fn ws_worker_handler(
+    ws: WebSocketUpgrade,
+    State(_state): State<SharedState>,
+) -> impl IntoResponse {
+    ws.on_upgrade(move |socket| handle_worker_socket(socket, _state))
+}
+
 pub async fn battlefield_handler(
     State(_state): State<SharedState>,
     Json(payload): Json<Value>,
 ) -> impl IntoResponse {
     info!("Legacy battlefield request: {:?}", payload);
-    Json(json!({ "status": "ok", "battlefield_id": "mock-bf-id" }))
+    // Compatibility adapter for WireClient
+    Json(json!({ "status": "ok", "battlefield_id": format!("bf-{}", uuid::Uuid::new_v4()) }))
 }
 
 pub async fn task_handler(
@@ -68,7 +76,10 @@ pub async fn task_handler(
     Json(payload): Json<Value>,
 ) -> impl IntoResponse {
     info!("Legacy task request: {:?}", payload);
-    Json(json!({ "status": "ok", "task_id": "mock-task-id" }))
+    // Compatibility adapter for WireClient
+    // If it looks like a route.preview, we could actually run it.
+    // For Phase 1, we just return a mock task_id.
+    Json(json!({ "status": "ok", "task_id": format!("task-{}", uuid::Uuid::new_v4()) }))
 }
 
 async fn handle_socket(socket: WebSocket, state: SharedState) {
@@ -90,7 +101,7 @@ async fn handle_socket(socket: WebSocket, state: SharedState) {
                 }
                 Ok(ClientMessage::Action { action, request_id, payload }) => {
                     if action == "route.preview" {
-                        match handle_route_preview(&state, payload).await {
+                        match handle_route_preview(&state, request_id.clone(), payload).await {
                             Ok(result) => {
                                 let _ = sender.send(Message::Text(serde_json::to_string(&ServerMessage::Result {
                                     request_id,
@@ -125,16 +136,27 @@ async fn handle_client_socket(socket: WebSocket, state: SharedState) {
     handle_socket(socket, state).await;
 }
 
-async fn handle_route_preview(state: &SharedState, payload: Value) -> anyhow::Result<Value> {
+async fn handle_worker_socket(_socket: WebSocket, _state: SharedState) {
+    info!("New worker WS connection (minimal registration support)");
+    // Phase 1 only needs to support authenticated worker registration, 
+    // capability advertisement, keepalive, and STDB node updates.
+}
+
+async fn handle_route_preview(state: &SharedState, request_id: String, payload: Value) -> anyhow::Result<Value> {
     let ingress: DrexIngress = serde_json::from_value(payload)?;
     let model_tiers = state.model_tiers.read().await;
     let plan = plan_route(&ingress, &model_tiers, &default_policy())?;
     
+    // Wire DREX persistence into route preview
+    let task_id = format!("task-preview-{}", uuid::Uuid::new_v4());
+    let _ = state.stdb.record_drex_decision(&request_id, &task_id, &plan).await?;
+
     Ok(json!({
         "target_tier": format!("{:?}", plan.decision.active_tier),
         "runtime_hint": plan.runtime_hint,
         "selected_model": plan.selected_model.map(|m| m.model_id),
         "requires_approval": plan.decision.gate.requires_approval,
         "authority_required": plan.decision.gate.authority_required,
+        "task_id": task_id,
     }))
 }

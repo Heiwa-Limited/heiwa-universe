@@ -19,6 +19,7 @@ pub mod gateway;
 
 use crate::config::RuntimeConfig;
 use crate::drex::{default_policy, plan_route, DrexIngress, RoutePlan};
+use crate::stdb::{StdbRuntime, ReducerTransport};
 use self::state::{CoreState, SharedState, SystemStatus};
 use heiwa_bindings::{
     DbConnection,
@@ -48,8 +49,6 @@ struct ModelTierSeed {
 pub async fn run(cfg: RuntimeConfig) -> Result<()> {
     info!("Initializing Heiwa Core Runtime...");
     
-    let state = Arc::new(CoreState::new(cfg.clone()));
-    
     // 1. Initialize STDB connection
     info!("Connecting to SpacetimeDB at {}/{}", cfg.stdb_url, cfg.stdb_identity);
     let conn = DbConnection::builder()
@@ -72,6 +71,10 @@ pub async fn run(cfg: RuntimeConfig) -> Result<()> {
         }
     });
 
+    let transport = ReducerTransport::new(conn_arc.clone());
+    let stdb_runtime = StdbRuntime::new(transport);
+    let state = Arc::new(CoreState::new(cfg.clone(), stdb_runtime));
+    
     // 3. Seed runtime catalogs and register node
     let state_clone = state.clone();
     let conn_heartbeat = conn_arc.clone();
@@ -80,8 +83,14 @@ pub async fn run(cfg: RuntimeConfig) -> Result<()> {
         sleep(Duration::from_secs(2)).await;
         
         match seed_catalogs(&conn_heartbeat, state_clone.clone()).await {
-            Ok(_) => info!("Runtime catalogs seeded successfully"),
-            Err(e) => error!("Failed to seed runtime catalogs: {:?}", e),
+            Ok(_) => {
+                info!("Runtime catalogs seeded successfully");
+                let mut seeded = state_clone.seeded.write().await;
+                *seeded = true;
+            },
+            Err(e) => {
+                error!("Failed to seed runtime catalogs: {:?}", e);
+            },
         }
 
         loop {
@@ -91,8 +100,14 @@ pub async fn run(cfg: RuntimeConfig) -> Result<()> {
                 *status = SystemStatus::Degraded;
             } else {
                 let mut status = state_clone.status.write().await;
-                if *status == SystemStatus::Starting || *status == SystemStatus::Degraded {
-                    *status = SystemStatus::Ready;
+                let seeded = state_clone.seeded.read().await;
+                if *seeded {
+                    if *status == SystemStatus::Starting || *status == SystemStatus::Degraded {
+                        *status = SystemStatus::Ready;
+                    }
+                } else {
+                    // Stay starting/red if not seeded
+                    *status = SystemStatus::Starting;
                 }
             }
             sleep(Duration::from_secs(30)).await;
@@ -105,6 +120,7 @@ pub async fn run(cfg: RuntimeConfig) -> Result<()> {
         .route("/status", get(status_handler))
         .route("/ws", get(gateway::ws_handler))
         .route("/ws/client", get(gateway::ws_client_handler))
+        .route("/ws/worker", get(gateway::ws_worker_handler))
         .route("/battlefields", post(gateway::battlefield_handler))
         .route("/tasks", post(gateway::task_handler))
         .layer(TraceLayer::new_for_http())

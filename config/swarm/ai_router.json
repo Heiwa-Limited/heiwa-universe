@@ -324,12 +324,13 @@
       "4": "cloud_persistence"
     },
     "hard_rules": [
-      "privacy_level=sovereign forces boost_node_only",
-      "railway_is_primary_execution_plane",
-      "boost_nodes_are_optional_not_required",
+      "privacy_level=sovereign forces local_execution_node_only",
+      "railway_is_control_plane",
+      "execution_nodes_are_ephemeral_not_required",
       "no_cloud_gpu_rental",
       "no_paid_api_credits_only_subscription_and_free",
-      "local_bus_is_ephemeral_not_durable_state"
+      "local_bus_is_ephemeral_not_durable_state",
+      "node_capabilities_detected_dynamically_not_static"
     ]
   },
   "agents": {
@@ -358,9 +359,9 @@
       "spacetimedb",
       "heiwa-scheduler"
     ],
-    "boost_nodes": [
-      {"id": "macbook@heiwa-node-a", "capabilities": ["ollama", "docker", "filesystem", "gpu_m4"]},
-      {"id": "pc@heiwa-node-b", "capabilities": ["ollama", "gpu_rtx3060", "media", "embeddings"]}
+    "execution_nodes": [
+      {"id": "macbook@heiwa-node-a", "role": "operator_node", "note": "Capabilities detected dynamically at /ws/worker registration"},
+      {"id": "pc@heiwa-node-b", "role": "execution_server", "note": "Capabilities detected dynamically at /ws/worker registration"}
     ]
   },
   "mcp_servers": {

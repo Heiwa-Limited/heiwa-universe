@@ -65,8 +65,8 @@ pub struct ReducerTransport {
 }
 
 impl ReducerTransport {
-    pub fn new(conn: DbConnection) -> Self {
-        Self { conn: Arc::new(conn) }
+    pub fn new(conn: Arc<DbConnection>) -> Self {
+        Self { conn }
     }
 }
 
