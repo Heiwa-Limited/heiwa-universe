@@ -1,5 +1,7 @@
 use super::vector::DrexVector;
 
+pub const DEFAULT_POLICY_VERSION: &str = "2026-04-01";
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum ResolutionTier {
     Macro,

@@ -191,7 +191,11 @@ class SpacetimeDB:
             self._sats_option(route.get("user_id")),
             self._sats_option(route.get("owner_id")),
             self._sats_option(route.get("principal_id")),
+            self._sats_option(route.get("drex_decision_id")),
         )
+
+    def attach_drex_decision_to_route(self, request_id: str, drex_decision_id: str) -> bool:
+        return self.call("attach_drex_decision_to_route", request_id, drex_decision_id)
 
     def record_run(self, run_data: dict[str, Any]) -> bool:
         ended_at = run_data.get("ended_at") or datetime.datetime.now(datetime.timezone.utc).isoformat()

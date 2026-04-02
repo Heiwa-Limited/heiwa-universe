@@ -211,6 +211,47 @@ export const DiscordUser = __t.object("DiscordUser", {
 });
 export type DiscordUser = __Infer<typeof DiscordUser>;
 
+export const DrexDecisionRow = __t.object("DrexDecisionRow", {
+  decisionId: __t.string(),
+  requestId: __t.string(),
+  taskId: __t.string(),
+  activeTier: __t.string(),
+  routeRuntime: __t.string(),
+  routeModel: __t.string(),
+  scope: __t.f64(),
+  abstraction: __t.f64(),
+  contextSpan: __t.f64(),
+  executionProximity: __t.f64(),
+  blastRadius: __t.f64(),
+  coordinationLoad: __t.f64(),
+  latencyPressure: __t.f64(),
+  macroScore: __t.f64(),
+  mesoScore: __t.f64(),
+  microScore: __t.f64(),
+  scoreConfidence: __t.f64(),
+  authorityRequired: __t.string(),
+  requiresApproval: __t.bool(),
+  reasonsJson: __t.string(),
+  vectorJson: __t.string(),
+  scorecardJson: __t.string(),
+  gateJson: __t.string(),
+  policyVersion: __t.string(),
+  createdAtMs: __t.u64(),
+});
+export type DrexDecisionRow = __Infer<typeof DrexDecisionRow>;
+
+export const DrexFailureRow = __t.object("DrexFailureRow", {
+  id: __t.u64(),
+  decisionId: __t.string(),
+  requestId: __t.string(),
+  failureMode: __t.string(),
+  stage: __t.string(),
+  detailsJson: __t.string(),
+  recovered: __t.bool(),
+  createdAtMs: __t.u64(),
+});
+export type DrexFailureRow = __Infer<typeof DrexFailureRow>;
+
 export const EventRecord = __t.object("EventRecord", {
   eventId: __t.string(),
   ownerId: __t.option(__t.string()),
@@ -502,6 +543,7 @@ export const RouteDecision = __t.object("RouteDecision", {
   confidence: __t.f64(),
   gatewayTransport: __t.string(),
   createdAt: __t.string(),
+  drexDecisionId: __t.option(__t.string()),
   userId: __t.option(__t.string()),
   ownerId: __t.option(__t.string()),
   principalId: __t.option(__t.string()),

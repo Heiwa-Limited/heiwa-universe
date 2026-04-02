@@ -21,6 +21,7 @@ pub mod archive_battlefield_reducer;
 pub mod artifact_record_type;
 pub mod artifacts_table;
 pub mod assign_proposal_reducer;
+pub mod attach_drex_decision_to_route_reducer;
 pub mod battlefield_record_type;
 pub mod battlefields_table;
 pub mod billing_event_type;
@@ -49,6 +50,10 @@ pub mod discord_interaction_type;
 pub mod discord_interactions_table;
 pub mod discord_user_type;
 pub mod discord_users_table;
+pub mod drex_decision_row_type;
+pub mod drex_decisions_table;
+pub mod drex_failure_row_type;
+pub mod drex_failures_table;
 pub mod event_record_type;
 pub mod events_table;
 pub mod execution_memory_table;
@@ -103,6 +108,8 @@ pub mod rate_group_state_type;
 pub mod record_approval_decision_reducer;
 pub mod record_billing_event_reducer;
 pub mod record_consent_reducer;
+pub mod record_drex_decision_reducer;
+pub mod record_drex_failure_reducer;
 pub mod record_interaction_reducer;
 pub mod record_proposal_heartbeat_reducer;
 pub mod record_route_decision_reducer;
@@ -164,6 +171,7 @@ pub use archive_battlefield_reducer::archive_battlefield;
 pub use artifact_record_type::ArtifactRecord;
 pub use artifacts_table::*;
 pub use assign_proposal_reducer::assign_proposal;
+pub use attach_drex_decision_to_route_reducer::attach_drex_decision_to_route;
 pub use battlefield_record_type::BattlefieldRecord;
 pub use battlefields_table::*;
 pub use billing_event_type::BillingEvent;
@@ -192,6 +200,10 @@ pub use discord_interaction_type::DiscordInteraction;
 pub use discord_interactions_table::*;
 pub use discord_user_type::DiscordUser;
 pub use discord_users_table::*;
+pub use drex_decision_row_type::DrexDecisionRow;
+pub use drex_decisions_table::*;
+pub use drex_failure_row_type::DrexFailureRow;
+pub use drex_failures_table::*;
 pub use event_record_type::EventRecord;
 pub use events_table::*;
 pub use execution_memory_table::*;
@@ -246,6 +258,8 @@ pub use rate_group_state_type::RateGroupState;
 pub use record_approval_decision_reducer::record_approval_decision;
 pub use record_billing_event_reducer::record_billing_event;
 pub use record_consent_reducer::record_consent;
+pub use record_drex_decision_reducer::record_drex_decision;
+pub use record_drex_failure_reducer::record_drex_failure;
 pub use record_interaction_reducer::record_interaction;
 pub use record_proposal_heartbeat_reducer::record_proposal_heartbeat;
 pub use record_route_decision_reducer::record_route_decision;
@@ -375,6 +389,10 @@ pub enum Reducer {
         proposal_hash: String,
         attempt_count: i64,
         eligibility_snapshot: Option<String>,
+    },
+    AttachDrexDecisionToRoute {
+        request_id: String,
+        drex_decision_id: String,
     },
     ClaimProposal {
         proposal_id: String,
@@ -585,6 +603,42 @@ pub enum Reducer {
         approved_at: Option<String>,
         expires_at: Option<String>,
     },
+    RecordDrexDecision {
+        decision_id: String,
+        request_id: String,
+        task_id: String,
+        active_tier: String,
+        route_runtime: String,
+        route_model: String,
+        scope: f64,
+        abstraction: f64,
+        context_span: f64,
+        execution_proximity: f64,
+        blast_radius: f64,
+        coordination_load: f64,
+        latency_pressure: f64,
+        macro_score: f64,
+        meso_score: f64,
+        micro_score: f64,
+        score_confidence: f64,
+        authority_required: String,
+        requires_approval: bool,
+        reasons_json: String,
+        vector_json: String,
+        scorecard_json: String,
+        gate_json: String,
+        policy_version: String,
+        created_at_ms: u64,
+    },
+    RecordDrexFailure {
+        decision_id: String,
+        request_id: String,
+        failure_mode: String,
+        stage: String,
+        details_json: String,
+        recovered: bool,
+        created_at_ms: u64,
+    },
     RecordInteraction {
         user_id: u64,
         channel_id: u64,
@@ -620,6 +674,7 @@ pub enum Reducer {
         user_id: Option<String>,
         owner_id: Option<String>,
         principal_id: Option<String>,
+        drex_decision_id: Option<String>,
     },
     RecordRun {
         run_id: String,
@@ -893,6 +948,7 @@ impl __sdk::Reducer for Reducer {
             Reducer::ApproveProposal { .. } => "approve_proposal",
             Reducer::ArchiveBattlefield { .. } => "archive_battlefield",
             Reducer::AssignProposal { .. } => "assign_proposal",
+            Reducer::AttachDrexDecisionToRoute { .. } => "attach_drex_decision_to_route",
             Reducer::ClaimProposal { .. } => "claim_proposal",
             Reducer::ClaimTask { .. } => "claim_task",
             Reducer::CompleteMission { .. } => "complete_mission",
@@ -918,6 +974,8 @@ impl __sdk::Reducer for Reducer {
             Reducer::RecordApprovalDecision { .. } => "record_approval_decision",
             Reducer::RecordBillingEvent { .. } => "record_billing_event",
             Reducer::RecordConsent { .. } => "record_consent",
+            Reducer::RecordDrexDecision { .. } => "record_drex_decision",
+            Reducer::RecordDrexFailure { .. } => "record_drex_failure",
             Reducer::RecordInteraction { .. } => "record_interaction",
             Reducer::RecordProposalHeartbeat { .. } => "record_proposal_heartbeat",
             Reducer::RecordRouteDecision { .. } => "record_route_decision",
@@ -1103,6 +1161,15 @@ impl __sdk::Reducer for Reducer {
                 attempt_count: attempt_count.clone(),
                 eligibility_snapshot: eligibility_snapshot.clone(),
             }),
+            Reducer::AttachDrexDecisionToRoute {
+                request_id,
+                drex_decision_id,
+            } => __sats::bsatn::to_vec(
+                &attach_drex_decision_to_route_reducer::AttachDrexDecisionToRouteArgs {
+                    request_id: request_id.clone(),
+                    drex_decision_id: drex_decision_id.clone(),
+                },
+            ),
             Reducer::ClaimProposal {
                 proposal_id,
                 node_id,
@@ -1505,6 +1572,76 @@ impl __sdk::Reducer for Reducer {
                 approved_at: approved_at.clone(),
                 expires_at: expires_at.clone(),
             }),
+            Reducer::RecordDrexDecision {
+                decision_id,
+                request_id,
+                task_id,
+                active_tier,
+                route_runtime,
+                route_model,
+                scope,
+                abstraction,
+                context_span,
+                execution_proximity,
+                blast_radius,
+                coordination_load,
+                latency_pressure,
+                macro_score,
+                meso_score,
+                micro_score,
+                score_confidence,
+                authority_required,
+                requires_approval,
+                reasons_json,
+                vector_json,
+                scorecard_json,
+                gate_json,
+                policy_version,
+                created_at_ms,
+            } => __sats::bsatn::to_vec(&record_drex_decision_reducer::RecordDrexDecisionArgs {
+                decision_id: decision_id.clone(),
+                request_id: request_id.clone(),
+                task_id: task_id.clone(),
+                active_tier: active_tier.clone(),
+                route_runtime: route_runtime.clone(),
+                route_model: route_model.clone(),
+                scope: scope.clone(),
+                abstraction: abstraction.clone(),
+                context_span: context_span.clone(),
+                execution_proximity: execution_proximity.clone(),
+                blast_radius: blast_radius.clone(),
+                coordination_load: coordination_load.clone(),
+                latency_pressure: latency_pressure.clone(),
+                macro_score: macro_score.clone(),
+                meso_score: meso_score.clone(),
+                micro_score: micro_score.clone(),
+                score_confidence: score_confidence.clone(),
+                authority_required: authority_required.clone(),
+                requires_approval: requires_approval.clone(),
+                reasons_json: reasons_json.clone(),
+                vector_json: vector_json.clone(),
+                scorecard_json: scorecard_json.clone(),
+                gate_json: gate_json.clone(),
+                policy_version: policy_version.clone(),
+                created_at_ms: created_at_ms.clone(),
+            }),
+            Reducer::RecordDrexFailure {
+                decision_id,
+                request_id,
+                failure_mode,
+                stage,
+                details_json,
+                recovered,
+                created_at_ms,
+            } => __sats::bsatn::to_vec(&record_drex_failure_reducer::RecordDrexFailureArgs {
+                decision_id: decision_id.clone(),
+                request_id: request_id.clone(),
+                failure_mode: failure_mode.clone(),
+                stage: stage.clone(),
+                details_json: details_json.clone(),
+                recovered: recovered.clone(),
+                created_at_ms: created_at_ms.clone(),
+            }),
             Reducer::RecordInteraction {
                 user_id,
                 channel_id,
@@ -1552,6 +1689,7 @@ impl __sdk::Reducer for Reducer {
                 user_id,
                 owner_id,
                 principal_id,
+                drex_decision_id,
             } => __sats::bsatn::to_vec(&record_route_decision_reducer::RecordRouteDecisionArgs {
                 request_id: request_id.clone(),
                 task_id: task_id.clone(),
@@ -1575,6 +1713,7 @@ impl __sdk::Reducer for Reducer {
                 user_id: user_id.clone(),
                 owner_id: owner_id.clone(),
                 principal_id: principal_id.clone(),
+                drex_decision_id: drex_decision_id.clone(),
             }),
             Reducer::RecordRun {
                 run_id,
@@ -2096,6 +2235,8 @@ pub struct DbUpdate {
     discord_channels: __sdk::TableUpdate<DiscordChannel>,
     discord_interactions: __sdk::TableUpdate<DiscordInteraction>,
     discord_users: __sdk::TableUpdate<DiscordUser>,
+    drex_decisions: __sdk::TableUpdate<DrexDecisionRow>,
+    drex_failures: __sdk::TableUpdate<DrexFailureRow>,
     events: __sdk::TableUpdate<EventRecord>,
     execution_memory: __sdk::TableUpdate<ExecutionMemory>,
     gpu_slots: __sdk::TableUpdate<GpuSlot>,
@@ -2172,6 +2313,12 @@ impl TryFrom<__ws::v2::TransactionUpdate> for DbUpdate {
                 "discord_users" => db_update
                     .discord_users
                     .append(discord_users_table::parse_table_update(table_update)?),
+                "drex_decisions" => db_update
+                    .drex_decisions
+                    .append(drex_decisions_table::parse_table_update(table_update)?),
+                "drex_failures" => db_update
+                    .drex_failures
+                    .append(drex_failures_table::parse_table_update(table_update)?),
                 "events" => db_update
                     .events
                     .append(events_table::parse_table_update(table_update)?),
@@ -2315,6 +2462,12 @@ impl __sdk::DbUpdate for DbUpdate {
         diff.discord_users = cache
             .apply_diff_to_table::<DiscordUser>("discord_users", &self.discord_users)
             .with_updates_by_pk(|row| &row.user_id);
+        diff.drex_decisions = cache
+            .apply_diff_to_table::<DrexDecisionRow>("drex_decisions", &self.drex_decisions)
+            .with_updates_by_pk(|row| &row.decision_id);
+        diff.drex_failures = cache
+            .apply_diff_to_table::<DrexFailureRow>("drex_failures", &self.drex_failures)
+            .with_updates_by_pk(|row| &row.id);
         diff.events = cache
             .apply_diff_to_table::<EventRecord>("events", &self.events)
             .with_updates_by_pk(|row| &row.event_id);
@@ -2444,6 +2597,12 @@ impl __sdk::DbUpdate for DbUpdate {
                 "discord_users" => db_update
                     .discord_users
                     .append(__sdk::parse_row_list_as_inserts(table_rows.rows)?),
+                "drex_decisions" => db_update
+                    .drex_decisions
+                    .append(__sdk::parse_row_list_as_inserts(table_rows.rows)?),
+                "drex_failures" => db_update
+                    .drex_failures
+                    .append(__sdk::parse_row_list_as_inserts(table_rows.rows)?),
                 "events" => db_update
                     .events
                     .append(__sdk::parse_row_list_as_inserts(table_rows.rows)?),
@@ -2571,6 +2730,12 @@ impl __sdk::DbUpdate for DbUpdate {
                 "discord_users" => db_update
                     .discord_users
                     .append(__sdk::parse_row_list_as_deletes(table_rows.rows)?),
+                "drex_decisions" => db_update
+                    .drex_decisions
+                    .append(__sdk::parse_row_list_as_deletes(table_rows.rows)?),
+                "drex_failures" => db_update
+                    .drex_failures
+                    .append(__sdk::parse_row_list_as_deletes(table_rows.rows)?),
                 "events" => db_update
                     .events
                     .append(__sdk::parse_row_list_as_deletes(table_rows.rows)?),
@@ -2670,6 +2835,8 @@ pub struct AppliedDiff<'r> {
     discord_channels: __sdk::TableAppliedDiff<'r, DiscordChannel>,
     discord_interactions: __sdk::TableAppliedDiff<'r, DiscordInteraction>,
     discord_users: __sdk::TableAppliedDiff<'r, DiscordUser>,
+    drex_decisions: __sdk::TableAppliedDiff<'r, DrexDecisionRow>,
+    drex_failures: __sdk::TableAppliedDiff<'r, DrexFailureRow>,
     events: __sdk::TableAppliedDiff<'r, EventRecord>,
     execution_memory: __sdk::TableAppliedDiff<'r, ExecutionMemory>,
     gpu_slots: __sdk::TableAppliedDiff<'r, GpuSlot>,
@@ -2771,6 +2938,16 @@ impl<'r> __sdk::AppliedDiff<'r> for AppliedDiff<'r> {
         callbacks.invoke_table_row_callbacks::<DiscordUser>(
             "discord_users",
             &self.discord_users,
+            event,
+        );
+        callbacks.invoke_table_row_callbacks::<DrexDecisionRow>(
+            "drex_decisions",
+            &self.drex_decisions,
+            event,
+        );
+        callbacks.invoke_table_row_callbacks::<DrexFailureRow>(
+            "drex_failures",
+            &self.drex_failures,
             event,
         );
         callbacks.invoke_table_row_callbacks::<EventRecord>("events", &self.events, event);
@@ -3511,6 +3688,8 @@ impl __sdk::SpacetimeModule for RemoteModule {
         discord_channels_table::register_table(client_cache);
         discord_interactions_table::register_table(client_cache);
         discord_users_table::register_table(client_cache);
+        drex_decisions_table::register_table(client_cache);
+        drex_failures_table::register_table(client_cache);
         events_table::register_table(client_cache);
         execution_memory_table::register_table(client_cache);
         gpu_slots_table::register_table(client_cache);
@@ -3551,6 +3730,8 @@ impl __sdk::SpacetimeModule for RemoteModule {
         "discord_channels",
         "discord_interactions",
         "discord_users",
+        "drex_decisions",
+        "drex_failures",
         "events",
         "execution_memory",
         "gpu_slots",

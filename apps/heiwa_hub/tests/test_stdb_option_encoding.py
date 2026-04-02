@@ -263,6 +263,21 @@ def test_record_route_decision_encodes_owner_and_principal():
     assert {"some": "discord:456"} in args
 
 
+def test_record_route_decision_appends_optional_drex_decision_id():
+    db = CaptureSpacetimeDB()
+    db.record_route_decision(
+        {
+            "request_id": "req-3",
+            "task_id": "task-3",
+            "envelope_version": "2026-03-28",
+            "raw_text": "route this",
+            "drex_decision_id": "drex-123",
+        }
+    )
+    args = _reducer_args(db.commands[-1])
+    assert {"some": "drex-123"} in args
+
+
 def test_create_mission_appends_optional_user_id():
     db = CaptureSpacetimeDB()
     db.create_mission(

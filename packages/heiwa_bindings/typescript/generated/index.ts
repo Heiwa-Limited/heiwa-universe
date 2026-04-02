@@ -41,6 +41,7 @@ import AppendMissionStepReducer from "./append_mission_step_reducer";
 import ApproveProposalReducer from "./approve_proposal_reducer";
 import ArchiveBattlefieldReducer from "./archive_battlefield_reducer";
 import AssignProposalReducer from "./assign_proposal_reducer";
+import AttachDrexDecisionToRouteReducer from "./attach_drex_decision_to_route_reducer";
 import ClaimProposalReducer from "./claim_proposal_reducer";
 import ClaimTaskReducer from "./claim_task_reducer";
 import CompleteMissionReducer from "./complete_mission_reducer";
@@ -66,6 +67,8 @@ import QueueProposalReducer from "./queue_proposal_reducer";
 import RecordApprovalDecisionReducer from "./record_approval_decision_reducer";
 import RecordBillingEventReducer from "./record_billing_event_reducer";
 import RecordConsentReducer from "./record_consent_reducer";
+import RecordDrexDecisionReducer from "./record_drex_decision_reducer";
+import RecordDrexFailureReducer from "./record_drex_failure_reducer";
 import RecordInteractionReducer from "./record_interaction_reducer";
 import RecordProposalHeartbeatReducer from "./record_proposal_heartbeat_reducer";
 import RecordRouteDecisionReducer from "./record_route_decision_reducer";
@@ -119,6 +122,8 @@ import CellRunsRow from "./cell_runs_table";
 import DiscordChannelsRow from "./discord_channels_table";
 import DiscordInteractionsRow from "./discord_interactions_table";
 import DiscordUsersRow from "./discord_users_table";
+import DrexDecisionsRow from "./drex_decisions_table";
+import DrexFailuresRow from "./drex_failures_table";
 import EventsRow from "./events_table";
 import ExecutionMemoryRow from "./execution_memory_table";
 import GpuSlotsRow from "./gpu_slots_table";
@@ -429,6 +434,49 @@ const tablesSchema = __schema({
       { name: 'discord_users_user_id_key', constraint: 'unique', columns: ['userId'] },
     ],
   }, DiscordUsersRow),
+  drex_decisions: __table({
+    name: 'drex_decisions',
+    indexes: [
+      { name: 'active_tier', algorithm: 'btree', columns: [
+        'activeTier',
+      ] },
+      { name: 'created_at_ms', algorithm: 'btree', columns: [
+        'createdAtMs',
+      ] },
+      { name: 'decision_id', algorithm: 'btree', columns: [
+        'decisionId',
+      ] },
+      { name: 'request_id', algorithm: 'btree', columns: [
+        'requestId',
+      ] },
+      { name: 'task_id', algorithm: 'btree', columns: [
+        'taskId',
+      ] },
+    ],
+    constraints: [
+      { name: 'drex_decisions_decision_id_key', constraint: 'unique', columns: ['decisionId'] },
+    ],
+  }, DrexDecisionsRow),
+  drex_failures: __table({
+    name: 'drex_failures',
+    indexes: [
+      { name: 'created_at_ms', algorithm: 'btree', columns: [
+        'createdAtMs',
+      ] },
+      { name: 'decision_id', algorithm: 'btree', columns: [
+        'decisionId',
+      ] },
+      { name: 'id', algorithm: 'btree', columns: [
+        'id',
+      ] },
+      { name: 'request_id', algorithm: 'btree', columns: [
+        'requestId',
+      ] },
+    ],
+    constraints: [
+      { name: 'drex_failures_id_key', constraint: 'unique', columns: ['id'] },
+    ],
+  }, DrexFailuresRow),
   events: __table({
     name: 'events',
     indexes: [
@@ -737,6 +785,9 @@ const tablesSchema = __schema({
       { name: 'created_at', algorithm: 'btree', columns: [
         'createdAt',
       ] },
+      { name: 'drex_decision_id', algorithm: 'btree', columns: [
+        'drexDecisionId',
+      ] },
       { name: 'owner_id', algorithm: 'btree', columns: [
         'ownerId',
       ] },
@@ -870,6 +921,7 @@ const reducersSchema = __reducers(
   __reducerSchema("approve_proposal", ApproveProposalReducer),
   __reducerSchema("archive_battlefield", ArchiveBattlefieldReducer),
   __reducerSchema("assign_proposal", AssignProposalReducer),
+  __reducerSchema("attach_drex_decision_to_route", AttachDrexDecisionToRouteReducer),
   __reducerSchema("claim_proposal", ClaimProposalReducer),
   __reducerSchema("claim_task", ClaimTaskReducer),
   __reducerSchema("complete_mission", CompleteMissionReducer),
@@ -895,6 +947,8 @@ const reducersSchema = __reducers(
   __reducerSchema("record_approval_decision", RecordApprovalDecisionReducer),
   __reducerSchema("record_billing_event", RecordBillingEventReducer),
   __reducerSchema("record_consent", RecordConsentReducer),
+  __reducerSchema("record_drex_decision", RecordDrexDecisionReducer),
+  __reducerSchema("record_drex_failure", RecordDrexFailureReducer),
   __reducerSchema("record_interaction", RecordInteractionReducer),
   __reducerSchema("record_proposal_heartbeat", RecordProposalHeartbeatReducer),
   __reducerSchema("record_route_decision", RecordRouteDecisionReducer),

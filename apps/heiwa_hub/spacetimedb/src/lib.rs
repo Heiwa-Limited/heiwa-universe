@@ -204,6 +204,9 @@ pub struct RouteDecision {
     pub created_at: String,
     #[default(None::<String>)]
     #[index(btree)]
+    pub drex_decision_id: Option<String>,
+    #[default(None::<String>)]
+    #[index(btree)]
     pub user_id: Option<String>,
     #[default(None::<String>)]
     #[index(btree)]
@@ -211,6 +214,57 @@ pub struct RouteDecision {
     #[default(None::<String>)]
     #[index(btree)]
     pub principal_id: Option<String>,
+}
+
+#[table(accessor = drex_decisions, public)]
+pub struct DrexDecisionRow {
+    #[primary_key]
+    pub decision_id: String,
+    #[index(btree)]
+    pub request_id: String,
+    #[index(btree)]
+    pub task_id: String,
+    #[index(btree)]
+    pub active_tier: String,
+    pub route_runtime: String,
+    pub route_model: String,
+    pub scope: f64,
+    pub abstraction: f64,
+    pub context_span: f64,
+    pub execution_proximity: f64,
+    pub blast_radius: f64,
+    pub coordination_load: f64,
+    pub latency_pressure: f64,
+    pub macro_score: f64,
+    pub meso_score: f64,
+    pub micro_score: f64,
+    pub score_confidence: f64,
+    pub authority_required: String,
+    pub requires_approval: bool,
+    pub reasons_json: String,
+    pub vector_json: String,
+    pub scorecard_json: String,
+    pub gate_json: String,
+    pub policy_version: String,
+    #[index(btree)]
+    pub created_at_ms: u64,
+}
+
+#[table(accessor = drex_failures, public)]
+pub struct DrexFailureRow {
+    #[auto_inc]
+    #[primary_key]
+    pub id: u64,
+    #[index(btree)]
+    pub decision_id: String,
+    #[index(btree)]
+    pub request_id: String,
+    pub failure_mode: String,
+    pub stage: String,
+    pub details_json: String,
+    pub recovered: bool,
+    #[index(btree)]
+    pub created_at_ms: u64,
 }
 
 #[table(accessor = runs, public)]
@@ -1373,6 +1427,7 @@ pub fn record_route_decision(
     user_id: Option<String>,
     owner_id: Option<String>,
     principal_id: Option<String>,
+    drex_decision_id: Option<String>,
 ) -> Result<(), String> {
     let row = RouteDecision {
         request_id: request_id.clone(),
@@ -1394,6 +1449,7 @@ pub fn record_route_decision(
         confidence,
         gateway_transport,
         created_at,
+        drex_decision_id: option_if_not_blank(drex_decision_id),
         user_id: option_if_not_blank(user_id),
         owner_id: option_if_not_blank(owner_id),
         principal_id: option_if_not_blank(principal_id),
@@ -1410,6 +1466,118 @@ pub fn record_route_decision(
     } else {
         ctx.db.route_decisions().insert(row);
     }
+    Ok(())
+}
+
+#[reducer]
+pub fn attach_drex_decision_to_route(
+    ctx: &ReducerContext,
+    request_id: String,
+    drex_decision_id: String,
+) -> Result<(), String> {
+    let mut row = ctx
+        .db
+        .route_decisions()
+        .request_id()
+        .find(request_id.clone())
+        .ok_or_else(|| format!("route decision not found for request_id={request_id}"))?;
+    row.drex_decision_id = some_if_not_blank(drex_decision_id);
+    ctx.db.route_decisions().request_id().update(row);
+    Ok(())
+}
+
+#[reducer]
+pub fn record_drex_decision(
+    ctx: &ReducerContext,
+    decision_id: String,
+    request_id: String,
+    task_id: String,
+    active_tier: String,
+    route_runtime: String,
+    route_model: String,
+    scope: f64,
+    abstraction: f64,
+    context_span: f64,
+    execution_proximity: f64,
+    blast_radius: f64,
+    coordination_load: f64,
+    latency_pressure: f64,
+    macro_score: f64,
+    meso_score: f64,
+    micro_score: f64,
+    score_confidence: f64,
+    authority_required: String,
+    requires_approval: bool,
+    reasons_json: String,
+    vector_json: String,
+    scorecard_json: String,
+    gate_json: String,
+    policy_version: String,
+    created_at_ms: u64,
+) -> Result<(), String> {
+    let row = DrexDecisionRow {
+        decision_id: decision_id.clone(),
+        request_id,
+        task_id,
+        active_tier,
+        route_runtime,
+        route_model,
+        scope,
+        abstraction,
+        context_span,
+        execution_proximity,
+        blast_radius,
+        coordination_load,
+        latency_pressure,
+        macro_score,
+        meso_score,
+        micro_score,
+        score_confidence,
+        authority_required,
+        requires_approval,
+        reasons_json,
+        vector_json,
+        scorecard_json,
+        gate_json,
+        policy_version,
+        created_at_ms,
+    };
+
+    if ctx
+        .db
+        .drex_decisions()
+        .decision_id()
+        .find(decision_id)
+        .is_some()
+    {
+        ctx.db.drex_decisions().decision_id().update(row);
+    } else {
+        ctx.db.drex_decisions().insert(row);
+    }
+    Ok(())
+}
+
+#[reducer]
+pub fn record_drex_failure(
+    ctx: &ReducerContext,
+    decision_id: String,
+    request_id: String,
+    failure_mode: String,
+    stage: String,
+    details_json: String,
+    recovered: bool,
+    created_at_ms: u64,
+) -> Result<(), String> {
+    ctx.db.drex_failures().insert(DrexFailureRow {
+        id: 0,
+        decision_id,
+        request_id,
+        failure_mode,
+        stage,
+        details_json,
+        recovered,
+        created_at_ms,
+    });
     Ok(())
 }
 
