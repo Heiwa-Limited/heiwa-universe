@@ -1175,6 +1175,9 @@ class SpacetimeDB:
         effort_level: int,
         cost_per_turn: float,
         max_context_tokens: int,
+        vram_requirement_mb: int,
+        quantization_type: str,
+        kv_cache_strategy: str,
         strengths: list[str],
         enabled: bool,
     ) -> bool:
@@ -1191,6 +1194,9 @@ class SpacetimeDB:
             effort_level,
             cost_per_turn,
             max_context_tokens,
+            vram_requirement_mb,
+            quantization_type,
+            kv_cache_strategy,
             json.dumps(strengths),
             enabled,
         )

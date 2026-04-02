@@ -12,4 +12,5 @@ path = "src/main.rs"
 
 [dependencies]
 anyhow = "1.0"
+heiwa-bindings = { path = "../../packages/heiwa_bindings/rust" }
 tokio = { version = "1.50.0", features = ["full"] }

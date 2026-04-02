@@ -41,6 +41,9 @@ class SeedLoader:
                 effort_level=tier["effort_level"],
                 cost_per_turn=tier["cost_per_turn"],
                 max_context_tokens=tier["max_context_tokens"],
+                vram_requirement_mb=tier["vram_requirement_mb"],
+                quantization_type=tier["quantization_type"],
+                kv_cache_strategy=tier["kv_cache_strategy"],
                 strengths=tier["strengths"],
                 enabled=tier["enabled"],
             )

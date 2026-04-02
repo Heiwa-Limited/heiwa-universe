@@ -57,7 +57,8 @@ class TestPhase1Integration:
 
         required = ["model_id", "provider_model_id", "provider", "rate_group",
                      "capability_class", "effort_knob", "effort_level",
-                     "cost_per_turn", "max_context_tokens", "strengths", "enabled"]
+                     "cost_per_turn", "max_context_tokens", "vram_requirement_mb",
+                     "quantization_type", "kv_cache_strategy", "strengths", "enabled"]
         for tier in tiers:
             for field in required:
                 assert field in tier, f"Missing {field} in tier {tier.get('model_id', '?')}"
