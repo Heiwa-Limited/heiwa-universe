@@ -746,6 +746,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "heiwa-orchestrator"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "tokio",
+]
+
+[[package]]
 name = "heiwa_production_db"
 version = "0.1.0"
 dependencies = [

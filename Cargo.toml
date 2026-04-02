@@ -1,5 +1,6 @@
 [workspace]
 members = [
+    "apps/heiwa_orchestrator",
     "apps/heiwa_hub/heiwaproductiondb/spacetimedb",
     "apps/heiwa_hub/spacetimedb",
     "packages/heiwa_bindings/rust",
