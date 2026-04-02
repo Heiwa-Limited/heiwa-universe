@@ -1,13 +1,15 @@
 set shell := ["bash", "-cu"]
 
+# Transitional product graph: Rust + TypeScript + Shell is the target stack.
+# Python recipes remain here as regression coverage during migration.
 python := ".venv/bin/python"
 pytest := ".venv/bin/python -m pytest"
 
 default:
     @echo "Product graph recipes:"
-    @echo "  test-hub       Run hub test suite"
+    @echo "  test-hub       Run legacy Python hub regression suite"
     @echo "  test-trading   Run incubator trading tests"
-    @echo "  check-web      Validate static web surface"
+    @echo "  check-web      Validate transitional web surface"
     @echo "  check-docs     Build MkDocs docs strictly"
     @echo "  test-product   Run product test recipes"
     @echo "  check-product  Run product verification recipes"

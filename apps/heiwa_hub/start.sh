@@ -1,6 +1,8 @@
 #!/bin/bash
 # fleets/hub/start.sh
-# Unified entrypoint for Railway deployment.
+# Transitional bootstrap entrypoint for Railway deployment.
+# Shell remains authoritative for environment/bootstrap concerns while the
+# production orchestration layer migrates from the Python Hub to Rust.
 
 echo "[HEIWA] Initializing Cloud HQ..."
 HEIWA_ENABLE_TAILSCALE="${HEIWA_ENABLE_TAILSCALE:-true}"

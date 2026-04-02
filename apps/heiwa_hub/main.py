@@ -1,3 +1,10 @@
+"""Legacy Python Hub entrypoint.
+
+This path remains available for compatibility and regression coverage while
+Heiwa migrates its production control plane to Rust. Do not treat this file as
+the long-term orchestration home for new runtime architecture.
+"""
+
 import asyncio
 import logging
 import sys

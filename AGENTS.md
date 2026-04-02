@@ -20,6 +20,14 @@ Heiwa is an omnidirectional fluid mesh of peer agents. Any agent can spawn any o
 
 Stand-alone processes in non-Python languages (e.g., Rust) that connect to the mesh via SpacetimeDB or WebSockets.
 
+## 3.5 Architecture Direction (April 2026)
+
+- Production target stack is **Rust + TypeScript + Shell**.
+- **Rust** owns the authoritative state layer, orchestration, routing, and future DREX execution logic.
+- **TypeScript** owns operator-facing web surfaces and typed client contracts.
+- **Shell** remains the bootstrap and operator glue layer for Railway, Linux, and WSL execution.
+- The Python Hub and cognition packages are still live in the repo, but they are prototype and compatibility surfaces, not the long-term control plane.
+
 ## 4. Ground Truth & Progress
 
 - `docs/superpowers/status/feature_list.json`: System capability checklist.
