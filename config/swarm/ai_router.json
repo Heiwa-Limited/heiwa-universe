@@ -82,35 +82,35 @@
       "class_3_research": {
         "id": "gemini-cli/gemini-3.1-pro",
         "provider": "google-gemini-cli",
-        "host_node": "railway@heiwa-cloud-hq",
+        "host_node": "railway@heiwa-core",
         "compute_class": 3,
         "role": "research_long_context"
       },
       "heiwa_agent_routine": {
         "id": "google-antigravity/gemini-3-flash",
         "provider": "google-antigravity",
-        "host_node": "railway@heiwa-cloud-hq",
+        "host_node": "railway@heiwa-core",
         "compute_class": 2,
         "role": "heiwa_agent_routine_reasoning"
       },
       "class_3_strategy": {
         "id": "google-antigravity/gemini-3.1-pro",
         "provider": "google-antigravity",
-        "host_node": "railway@heiwa-cloud-hq",
+        "host_node": "railway@heiwa-core",
         "compute_class": 3,
         "role": "strategy_adversarial_review"
       },
       "class_3_review": {
         "id": "claude/opus-4-6",
         "provider": "claude-code",
-        "host_node": "railway@heiwa-cloud-hq",
+        "host_node": "railway@heiwa-core",
         "compute_class": 3,
         "role": "adversarial_review"
       },
       "class_3_build": {
         "id": "codex/gpt-4.1",
         "provider": "codex",
-        "host_node": "railway@heiwa-cloud-hq",
+        "host_node": "railway@heiwa-core",
         "compute_class": 3,
         "role": "build_codegen"
       }
@@ -352,12 +352,11 @@
     }
   },
   "control_plane": {
-    "railway_project_name": "heiwa-hub",
+    "railway_project_name": "heiwa-core",
     "primary_plane": "railway",
     "always_on_services": [
-      "heiwa-cloud-hq",
-      "spacetimedb",
-      "heiwa-scheduler"
+      "heiwa-core",
+      "spacetimedb"
     ],
     "execution_nodes": [
       {"id": "macbook@heiwa-node-a", "role": "operator_node", "note": "Capabilities detected dynamically at /ws/worker registration"},

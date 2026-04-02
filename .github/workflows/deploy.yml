@@ -186,7 +186,6 @@ jobs:
       - name: Install verification dependencies
         run: pip install requests
       - name: Verify core runtime endpoints (retry with backoff)
-        continue-on-error: true
         run: |
           python - <<'PY'
           import requests, time
