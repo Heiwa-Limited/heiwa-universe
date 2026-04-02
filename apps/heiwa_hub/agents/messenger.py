@@ -11,6 +11,7 @@ import discord
 from discord import app_commands
 from discord.ext import commands
 
+from heiwa_hub.auth import ensure_user
 from heiwa_hub.agents.base import BaseAgent
 from heiwa_hub.cognition.approval import ApprovalRegistry
 from heiwa_hub.cognition.planner import LocalTaskPlanner
@@ -294,8 +295,8 @@ class MessengerAgent(BaseAgent):
         is_dm = message.guild is None
 
         # ── DM FAST PATH ──────────────────────────────────────────────
-        # DMs go straight to HeiwaAgent. No intent classification, no
-        # task pipeline, no STDB subprocess calls blocking the response.
+        # DMs go straight to HeiwaAgent. We resolve canonical identity
+        # synchronously so the conversation lane carries a real owner.
         # HeiwaAgent handles conversation, memory, and LLM routing.
         if is_dm:
             content = self._extract_full_content(message)
@@ -303,9 +304,8 @@ class MessengerAgent(BaseAgent):
                 return
             
             author = message.author
-            owner_id = f"discord-{author.id}"
-            principal_id = f"discord-user-{author.id}"
-            session_id = f"discord-session-{author.id}-{int(time.time())}"
+            owner_id, principal_id = self._resolve_discord_identity(author, bootstrap_source="discord_dm")
+            session_id = self._discord_session_id(author.id)
 
             logger.info("DM from %s → HeiwaAgent: %s", message.author, content[:80])
             await self._publish_raw(Subject.HEIWA_AGENT_INGRESS.value, {
@@ -347,6 +347,20 @@ class MessengerAgent(BaseAgent):
             self.db.stdb.call("record_interaction", user_id, message.channel.id, "chat")
         except Exception as exc:
             logger.debug("STDB identity tracking failed (non-blocking): %s", exc)
+
+    def _resolve_discord_identity(self, author: discord.abc.User, *, bootstrap_source: str) -> tuple[str, str]:
+        discord_data = {
+            "discord_user_id": str(author.id),
+            "username": str(author),
+            "bootstrap_source": bootstrap_source,
+        }
+        owner_id = ensure_user(self.db.stdb, discord_data)
+        principal_id = f"discord:{author.id}"
+        return owner_id, principal_id
+
+    @staticmethod
+    def _discord_session_id(discord_user_id: int | str) -> str:
+        return f"discord-dm-{discord_user_id}"
 
     def _extract_full_content(self, message: discord.Message) -> str:
         parts = []
@@ -432,9 +446,8 @@ class MessengerAgent(BaseAgent):
         task_id = f"task-{raw_hex[0:10]}"
         
         author = source.author if isinstance(source, discord.Message) else source.user
-        owner_id = f"discord-{author.id}"
-        principal_id = f"discord-user-{author.id}"
-        session_id = f"discord-session-{author.id}-{int(time.time())}"
+        owner_id, principal_id = self._resolve_discord_identity(author, bootstrap_source="discord_ingress")
+        session_id = self._discord_session_id(author.id)
 
         intent_profile = self.planner.normalizer.normalize(instruction, owner_id=str(author))
         preview_intent = intent_profile.intent_class
