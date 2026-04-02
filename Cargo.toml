@@ -1,6 +1,7 @@
 [workspace]
 members = [
-    "apps/heiwa_hub/heiwaproductiondb/spacetimedb",
+    "apps/heiwa_core",
     "apps/heiwa_hub/spacetimedb",
+    "packages/heiwa_bindings/rust",
 ]
 resolver = "2"
