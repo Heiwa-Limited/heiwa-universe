@@ -10,6 +10,8 @@
 
 **Spec:** `docs/enterprise/HEIWA_AGENTIC_DIGITAL_ENTITY_DREX_2026-04-01.md`
 
+**Research context:** `ops/research/1bit_llm_migration_report.md`
+
 ---
 
 ## Constraints
@@ -74,6 +76,16 @@
 | TypeScript/web exposure in `apps/heiwa_web/` | Current web surface is not yet the DREX inspection surface; typed dashboard objects can follow once routing decisions are stable |
 | Railway policy bundling and deployment docs | The first slice uses env/config fallback for policy loading; packaging the policy into deploy images is follow-on hardening |
 | Cloudflare/public reduction surfaces | Public edge projection should consume already-reduced state, not raw routing internals; not part of v1 |
+
+### Rust port note
+
+When DREX moves into the Rust orchestrator, the `ModelTier` contract should be extended for local inference-aware routing. `max_context_tokens` already exists in the STDB schema and should be preserved. Add:
+
+- `vram_requirement_mb: u32`
+- `quantization_type: String`
+- `kv_cache_strategy: String`
+
+This is what allows Rust DREX routing to reason about TurboQuant-style KV compression today and 1-bit providers later without redesigning the tier model again.
 
 ---
 

@@ -12,6 +12,7 @@
 - `docs/enterprise/HEIWA_AGENTIC_DIGITAL_ENTITY_DREX_2026-04-01.md`
 - `docs/superpowers/plans/2026-04-01-drex-runtime-routing.md`
 - `config/swarm/END_STATE_2026-03.md`
+- `ops/research/1bit_llm_migration_report.md`
 
 ---
 
@@ -273,7 +274,20 @@ git commit -m "feat(rust): scaffold orchestrator crate"
 - Create: `apps/heiwa_orchestrator/src/drex/router.rs`
 - Modify: `apps/heiwa_orchestrator/src/lib.rs`
 - Modify: `apps/heiwa_orchestrator/src/runtime/mod.rs`
+- Modify: `apps/heiwa_hub/spacetimedb/src/lib.rs`
+- Modify: `apps/heiwa_hub/scripts/generate_spacetimedb_bindings.sh`
+- Modify: `packages/heiwa_bindings/rust`
+- Modify: `packages/heiwa_bindings/typescript`
+- Test: `apps/heiwa_hub/tests/test_model_tiers_stdb.py`
 - Test: `apps/heiwa_orchestrator/tests/drex_scoring.rs`
+
+**Task 3 note:** The Rust DREX port must treat local inference metadata as first-class routing input. `ModelTier.max_context_tokens` already exists in the STDB schema today and should be preserved as the effective context ceiling for a given execution profile. Add these new `ModelTier` fields during this task:
+
+- `vram_requirement_mb: u32`
+- `quantization_type: String`
+- `kv_cache_strategy: String`
+
+This keeps the router compatible with standard GGUF quantization, TurboQuant-style KV compression, and future 1-bit providers without blocking migration on any one inference engine.
 
 - [ ] **Step 1: Write the failing DREX parity tests**
 
@@ -322,7 +336,19 @@ active_tier = argmax([macro_score, meso_score, micro_score])
 
 Use `docs/superpowers/plans/2026-04-01-drex-runtime-routing.md` as the normative source. Do not invent new axes or scoring logic during implementation.
 
-- [ ] **Step 5: Wire the scorer into a route-decision assembly path**
+- [ ] **Step 5: Extend the `ModelTier` schema for inference-aware routing**
+
+Write a failing schema/read test in `apps/heiwa_hub/tests/test_model_tiers_stdb.py`, then update `apps/heiwa_hub/spacetimedb/src/lib.rs` and the generated bindings so `ModelTier` carries:
+
+```rust
+pub vram_requirement_mb: u32,
+pub quantization_type: String,
+pub kv_cache_strategy: String,
+```
+
+Keep `cost_per_turn` as `f64`, and keep the existing `max_context_tokens: u32` field. Treat `max_context_tokens` as the effective context ceiling under the selected KV strategy rather than adding a duplicate field.
+
+- [ ] **Step 6: Wire the scorer into a route-decision assembly path**
 
 The orchestrator runtime should be able to turn task ingress into:
 - DREX vector
@@ -330,16 +356,32 @@ The orchestrator runtime should be able to turn task ingress into:
 - scorecard
 - approval gate result
 - assigned execution runtime hint
+- model-tier selection that can distinguish VRAM fit, quantization profile, and KV cache strategy
 
-- [ ] **Step 6: Re-run the DREX scoring tests**
+- [ ] **Step 7: Re-run the DREX scoring tests**
 
 Run: `cargo test -p heiwa-orchestrator --test drex_scoring`
 Expected: PASS
 
-- [ ] **Step 7: Commit**
+- [ ] **Step 8: Rebuild bindings and verify model-tier coverage**
+
+Run:
+- `CARGO_NET_OFFLINE=true bash apps/heiwa_hub/scripts/generate_spacetimedb_bindings.sh`
+- `cargo test --offline -p heiwa-orchestrator --test drex_scoring`
+- `.venv/bin/python -m pytest apps/heiwa_hub/tests/test_model_tiers_stdb.py -q`
+
+Expected: PASS
+
+- [ ] **Step 9: Commit**
 
 ```bash
-git add apps/heiwa_orchestrator/src apps/heiwa_orchestrator/tests/drex_scoring.rs
+git add apps/heiwa_orchestrator/src \
+  apps/heiwa_orchestrator/tests/drex_scoring.rs \
+  apps/heiwa_hub/spacetimedb/src/lib.rs \
+  apps/heiwa_hub/scripts/generate_spacetimedb_bindings.sh \
+  packages/heiwa_bindings/rust \
+  packages/heiwa_bindings/typescript \
+  apps/heiwa_hub/tests/test_model_tiers_stdb.py
 git commit -m "feat(rust): port drex scoring and routing"
 ```
 
