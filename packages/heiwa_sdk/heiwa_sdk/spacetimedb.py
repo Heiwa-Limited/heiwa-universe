@@ -191,6 +191,7 @@ class SpacetimeDB:
             self._sats_option(route.get("user_id")),
             self._sats_option(route.get("owner_id")),
             self._sats_option(route.get("principal_id")),
+            self._sats_option(route.get("drex_decision_id")),
         )
 
     def record_run(self, run_data: dict[str, Any]) -> bool:
@@ -1176,6 +1177,9 @@ class SpacetimeDB:
         cost_per_turn: float,
         max_context_tokens: int,
         strengths: list[str],
+        vram_requirement_mb: int,
+        quantization_type: str,
+        kv_cache_strategy: str,
         enabled: bool,
     ) -> bool:
         """Insert or update a model tier."""
@@ -1192,6 +1196,9 @@ class SpacetimeDB:
             cost_per_turn,
             max_context_tokens,
             json.dumps(strengths),
+            int(vram_requirement_mb),
+            quantization_type,
+            kv_cache_strategy,
             enabled,
         )
 

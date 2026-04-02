@@ -10,6 +10,9 @@
     "cost_per_turn": 0.0,
     "max_context_tokens": 32768,
     "strengths": ["build", "research", "self_buff", "general"],
+    "vram_requirement_mb": 0,
+    "quantization_type": "n/a",
+    "kv_cache_strategy": "n/a",
     "enabled": true
   },
   {
@@ -23,6 +26,9 @@
     "cost_per_turn": 0.0,
     "max_context_tokens": 16384,
     "strengths": ["build", "files", "self_buff"],
+    "vram_requirement_mb": 0,
+    "quantization_type": "n/a",
+    "kv_cache_strategy": "n/a",
     "enabled": true
   },
   {
@@ -36,6 +42,9 @@
     "cost_per_turn": 0.0,
     "max_context_tokens": 8192,
     "strengths": ["lint", "format", "simple_lookup"],
+    "vram_requirement_mb": 0,
+    "quantization_type": "n/a",
+    "kv_cache_strategy": "n/a",
     "enabled": true
   },
   {
@@ -49,6 +58,9 @@
     "cost_per_turn": 0.0,
     "max_context_tokens": 8192,
     "strengths": ["chat", "general"],
+    "vram_requirement_mb": 0,
+    "quantization_type": "n/a",
+    "kv_cache_strategy": "n/a",
     "enabled": true
   },
   {
@@ -62,6 +74,9 @@
     "cost_per_turn": 0.0,
     "max_context_tokens": 1000000,
     "strengths": ["audit", "status_check", "chat", "general"],
+    "vram_requirement_mb": 0,
+    "quantization_type": "n/a",
+    "kv_cache_strategy": "n/a",
     "enabled": true
   },
   {
@@ -75,6 +90,9 @@
     "cost_per_turn": 0.0,
     "max_context_tokens": 2000000,
     "strengths": ["research", "architecture", "long_context", "strategy"],
+    "vram_requirement_mb": 0,
+    "quantization_type": "n/a",
+    "kv_cache_strategy": "n/a",
     "enabled": true
   },
   {
@@ -88,6 +106,9 @@
     "cost_per_turn": 0.0,
     "max_context_tokens": 1000000,
     "strengths": ["chat", "status_check", "audit", "observation"],
+    "vram_requirement_mb": 0,
+    "quantization_type": "n/a",
+    "kv_cache_strategy": "n/a",
     "enabled": true
   },
   {
@@ -101,6 +122,9 @@
     "cost_per_turn": 0.0,
     "max_context_tokens": 1000000,
     "strengths": ["strategy", "review", "research", "architecture", "adversarial_review"],
+    "vram_requirement_mb": 0,
+    "quantization_type": "n/a",
+    "kv_cache_strategy": "n/a",
     "enabled": true
   },
   {
@@ -114,6 +138,9 @@
     "cost_per_turn": 1.08,
     "max_context_tokens": 1000000,
     "strengths": ["build", "refactor", "self_buff", "code_generation"],
+    "vram_requirement_mb": 0,
+    "quantization_type": "n/a",
+    "kv_cache_strategy": "n/a",
     "enabled": true
   },
   {
@@ -127,6 +154,9 @@
     "cost_per_turn": 1.08,
     "max_context_tokens": 1000000,
     "strengths": ["build", "architecture", "adversarial_review", "complex_reasoning", "strategy"],
+    "vram_requirement_mb": 0,
+    "quantization_type": "n/a",
+    "kv_cache_strategy": "n/a",
     "enabled": true
   },
   {
@@ -140,6 +170,9 @@
     "cost_per_turn": 0.775,
     "max_context_tokens": 200000,
     "strengths": ["review", "research", "code_review", "build"],
+    "vram_requirement_mb": 0,
+    "quantization_type": "n/a",
+    "kv_cache_strategy": "n/a",
     "enabled": true
   },
   {
@@ -153,6 +186,9 @@
     "cost_per_turn": 0.775,
     "max_context_tokens": 200000,
     "strengths": ["strategy", "architecture", "adversarial_review", "complex_reasoning", "code_review", "review"],
+    "vram_requirement_mb": 0,
+    "quantization_type": "n/a",
+    "kv_cache_strategy": "n/a",
     "enabled": true
   },
   {
@@ -166,6 +202,9 @@
     "cost_per_turn": 0.0,
     "max_context_tokens": 8192,
     "strengths": ["embeddings"],
+    "vram_requirement_mb": 0,
+    "quantization_type": "n/a",
+    "kv_cache_strategy": "n/a",
     "enabled": true
   }
 ]
