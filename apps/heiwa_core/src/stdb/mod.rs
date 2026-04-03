@@ -57,6 +57,16 @@ pub trait StdbTransport: Send + Sync + 'static {
     fn insert_drex_failure(&self, failure: PersistedDrexFailure) -> Result<()>;
     fn attach_drex_decision_to_route(&self, request_id: &str, drex_decision_id: &str)
         -> Result<()>;
+    fn register_session(
+        &self,
+        session_id: String,
+        owner_id: Option<String>,
+        node_id: String,
+        session_type: String,
+        expires_at: Option<String>,
+        metadata_json: String,
+    ) -> Result<()>;
+    fn close_session(&self, session_id: String) -> Result<()>;
 }
 
 #[derive(Clone)]
@@ -71,6 +81,35 @@ impl ReducerTransport {
 }
 
 impl StdbTransport for ReducerTransport {
+    fn register_session(
+        &self,
+        session_id: String,
+        owner_id: Option<String>,
+        node_id: String,
+        session_type: String,
+        expires_at: Option<String>,
+        metadata_json: String,
+    ) -> Result<()> {
+        use heiwa_bindings::upsert_session;
+        self.conn.reducers
+            .upsert_session(
+                session_id,
+                owner_id,
+                node_id,
+                session_type,
+                expires_at,
+                metadata_json,
+            )
+            .map_err(|error| anyhow!(error.to_string()))
+    }
+
+    fn close_session(&self, session_id: String) -> Result<()> {
+        use heiwa_bindings::close_session;
+        self.conn.reducers
+            .close_session(session_id)
+            .map_err(|error| anyhow!(error.to_string()))
+    }
+
     fn upsert_drex_decision(&self, decision: PersistedDrexDecision) -> Result<()> {
         self.conn.reducers
             .record_drex_decision(
@@ -148,6 +187,22 @@ impl StdbTransport for NoopTransport {
         _request_id: &str,
         _drex_decision_id: &str,
     ) -> Result<()> {
+        Ok(())
+    }
+
+    fn register_session(
+        &self,
+        _session_id: String,
+        _owner_id: Option<String>,
+        _node_id: String,
+        _session_type: String,
+        _expires_at: Option<String>,
+        _metadata_json: String,
+    ) -> Result<()> {
+        Ok(())
+    }
+
+    fn close_session(&self, _session_id: String) -> Result<()> {
         Ok(())
     }
 }

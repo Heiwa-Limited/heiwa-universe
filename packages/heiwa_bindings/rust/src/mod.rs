@@ -129,6 +129,7 @@ pub mod route_decisions_table;
 pub mod run_record_type;
 pub mod runs_table;
 pub mod session_summaries_table;
+pub mod sessions_table;
 pub mod session_summary_record_type;
 pub mod set_node_status_reducer;
 pub mod start_cell_run_reducer;
@@ -148,6 +149,12 @@ pub mod upsert_gpu_slot_reducer;
 pub mod upsert_liveness_state_reducer;
 pub mod upsert_model_tier_reducer;
 pub mod upsert_node_heartbeat_reducer;
+pub mod close_session_reducer;
+pub mod session_record;
+pub mod upsert_session_reducer;
+pub use close_session_reducer::close_session;
+pub use session_record::SessionRecord;
+pub use upsert_session_reducer::upsert_session;
 pub mod upsert_node_registry_reducer;
 pub mod upsert_pod_reducer;
 pub mod upsert_provider_account_status_reducer;
@@ -279,6 +286,7 @@ pub use route_decisions_table::*;
 pub use run_record_type::RunRecord;
 pub use runs_table::*;
 pub use session_summaries_table::*;
+pub use sessions_table::SessionsTableAccess;
 pub use session_summary_record_type::SessionSummaryRecord;
 pub use set_node_status_reducer::set_node_status;
 pub use start_cell_run_reducer::start_cell_run;
@@ -888,6 +896,17 @@ pub enum Reducer {
         capabilities_json: String,
         status: String,
     },
+    UpsertSession {
+        session_id: String,
+        owner_id: Option<String>,
+        node_id: String,
+        session_type: String,
+        expires_at: Option<String>,
+        metadata_json: String,
+    },
+    CloseSession {
+        session_id: String,
+    },
     UpsertPod {
         pod_id: String,
         host_identity: String,
@@ -1011,6 +1030,8 @@ impl __sdk::Reducer for Reducer {
             Reducer::UpsertModelTier { .. } => "upsert_model_tier",
             Reducer::UpsertNodeHeartbeat { .. } => "upsert_node_heartbeat",
             Reducer::UpsertNodeRegistry { .. } => "upsert_node_registry",
+            Reducer::UpsertSession { .. } => "upsert_session",
+            Reducer::CloseSession { .. } => "close_session",
             Reducer::UpsertPod { .. } => "upsert_pod",
             Reducer::UpsertProviderAccountStatus { .. } => "upsert_provider_account_status",
             Reducer::UpsertRateGroupState { .. } => "upsert_rate_group_state",
@@ -2128,6 +2149,26 @@ impl __sdk::Reducer for Reducer {
                 capabilities_json: capabilities_json.clone(),
                 status: status.clone(),
             }),
+            Reducer::UpsertSession {
+                session_id,
+                owner_id,
+                node_id,
+                session_type,
+                expires_at,
+                metadata_json,
+            } => __sats::bsatn::to_vec(&upsert_session_reducer::UpsertSessionArgs {
+                session_id: session_id.clone(),
+                owner_id: owner_id.clone(),
+                node_id: node_id.clone(),
+                session_type: session_type.clone(),
+                expires_at: expires_at.clone(),
+                metadata_json: metadata_json.clone(),
+            }),
+            Reducer::CloseSession { session_id } => {
+                __sats::bsatn::to_vec(&close_session_reducer::CloseSessionArgs {
+                    session_id: session_id.clone(),
+                })
+            }
             Reducer::UpsertPod {
                 pod_id,
                 host_identity,
@@ -3725,6 +3766,7 @@ impl __sdk::SpacetimeModule for RemoteModule {
         route_decisions_table::register_table(client_cache);
         runs_table::register_table(client_cache);
         session_summaries_table::register_table(client_cache);
+        sessions_table::register_table(client_cache);
         task_dispatches_table::register_table(client_cache);
         tenant_task_view_table::register_table(client_cache);
         users_table::register_table(client_cache);
@@ -3767,6 +3809,7 @@ impl __sdk::SpacetimeModule for RemoteModule {
         "route_decisions",
         "runs",
         "session_summaries",
+        "sessions",
         "task_dispatches",
         "tenant_task_view",
         "users",

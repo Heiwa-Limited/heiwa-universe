@@ -715,6 +715,31 @@ class SpacetimeDB:
             self._json_text(model_inventory or []),
         )
 
+    def upsert_session(
+        self,
+        *,
+        session_id: str,
+        owner_id: str | None = None,
+        node_id: str,
+        session_type: str = "worker",
+        expires_at: str | None = None,
+        metadata: dict[str, Any] | None = None,
+    ) -> bool:
+        """Insert or update a session record."""
+        return self.call(
+            "upsert_session",
+            session_id,
+            owner_id,
+            node_id,
+            session_type,
+            expires_at,
+            self._json_text(metadata or {}),
+        )
+
+    def close_session(self, session_id: str) -> bool:
+        """Mark a session as closed."""
+        return self.call("close_session", session_id)
+
     def set_node_status(self, node_id: str, status: str) -> bool:
         return self.call("set_node_status", node_id, status)
 

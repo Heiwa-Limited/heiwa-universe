@@ -651,7 +651,7 @@ async fn handle_worker_socket(socket: WebSocket, state: SharedState) {
                     };
                     let session = {
                         let mut registry = state.worker_registry.write().await;
-                        registry.register_session(registration)
+                        registry.register_session(&state.stdb, registration)
                     };
                     state
                         .worker_senders
@@ -882,7 +882,7 @@ async fn handle_worker_socket(socket: WebSocket, state: SharedState) {
 
     if let Some(session_id) = session_id {
         state.worker_senders.write().await.remove(&session_id);
-        state.worker_registry.write().await.remove_session(&session_id);
+        state.worker_registry.write().await.remove_session(&state.stdb, &session_id);
     }
     writer.abort();
 }
@@ -937,7 +937,7 @@ async fn handle_legacy_worker_socket(socket: WebSocket, state: SharedState) {
                 let expires_at_ms = now_ms + WORKER_SESSION_TTL_MS;
                 let session = {
                     let mut registry = state.worker_registry.write().await;
-                    registry.register_session(WorkerSessionRegistration {
+                    registry.register_session(&state.stdb, WorkerSessionRegistration {
                         session_id: created_session_id.clone(),
                         node_id: node.clone(),
                         instance_id: format!("legacy-{created_session_id}"),
@@ -1038,7 +1038,7 @@ async fn handle_legacy_worker_socket(socket: WebSocket, state: SharedState) {
 
     if let Some(session_id) = session_id {
         state.worker_senders.write().await.remove(&session_id);
-        state.worker_registry.write().await.remove_session(&session_id);
+        state.worker_registry.write().await.remove_session(&state.stdb, &session_id);
     }
     writer.abort();
 }

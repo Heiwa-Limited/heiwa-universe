@@ -31,3 +31,30 @@ def test_upsert_node_heartbeat_binding(mock_call):
     assert args[11] == 10
     assert '"openai"' in args[12]
     assert '"ollama/llama3"' in args[13]
+
+@patch("heiwa_sdk.spacetimedb.SpacetimeDB.call")
+def test_upsert_session_binding(mock_call):
+    db = SpacetimeDB(server="local", db_identity="test")
+    db.upsert_session(
+        session_id="sess-123",
+        node_id="node-1",
+        session_type="worker",
+        metadata={"version": "1.0"}
+    )
+    
+    args = mock_call.call_args[0]
+    assert args[0] == "upsert_session"
+    assert args[1] == "sess-123"
+    assert args[2] is None
+    assert args[3] == "node-1"
+    assert args[4] == "worker"
+    assert '"1.0"' in args[6]
+
+@patch("heiwa_sdk.spacetimedb.SpacetimeDB.call")
+def test_close_session_binding(mock_call):
+    db = SpacetimeDB(server="local", db_identity="test")
+    db.close_session("sess-123")
+    
+    args = mock_call.call_args[0]
+    assert args[0] == "close_session"
+    assert args[1] == "sess-123"

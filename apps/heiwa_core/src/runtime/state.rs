@@ -5,15 +5,15 @@ use serde_json::Value;
 use tokio::sync::{RwLock, mpsc};
 
 use crate::config::RuntimeConfig;
-use crate::stdb::{StdbRuntime, ReducerTransport};
+use crate::stdb::{StdbRuntime, StdbTransport, ReducerTransport};
 use heiwa_bindings::ModelTier;
 
-pub struct CoreState {
+pub struct CoreState<T: StdbTransport = ReducerTransport> {
     pub config: RuntimeConfig,
     pub model_tiers: RwLock<Vec<ModelTier>>,
     pub status: RwLock<SystemStatus>,
     pub seeded: RwLock<bool>,
-    pub stdb: StdbRuntime<ReducerTransport>,
+    pub stdb: StdbRuntime<T>,
     pub worker_registry: RwLock<WorkerRegistry>,
     pub worker_senders: RwLock<HashMap<String, mpsc::UnboundedSender<Message>>>,
 }
@@ -35,8 +35,8 @@ impl SystemStatus {
     }
 }
 
-impl CoreState {
-    pub fn new(config: RuntimeConfig, stdb: StdbRuntime<ReducerTransport>) -> Self {
+impl<T: StdbTransport> CoreState<T> {
+    pub fn new(config: RuntimeConfig, stdb: StdbRuntime<T>) -> Self {
         Self {
             config,
             model_tiers: RwLock::new(Vec::new()),
@@ -126,20 +126,21 @@ pub struct WorkerRegistry {
 }
 
 impl WorkerRegistry {
-    pub fn register_session(
+    pub fn register_session<T: StdbTransport>(
         &mut self,
+        stdb: &StdbRuntime<T>,
         registration: WorkerSessionRegistration,
     ) -> WorkerSessionRecord {
         let session = WorkerSessionRecord {
             session_id: registration.session_id.clone(),
-            node_id: registration.node_id,
+            node_id: registration.node_id.clone(),
             instance_id: registration.instance_id,
             runtime: registration.runtime,
             runtime_version: registration.runtime_version,
             worker_version: registration.worker_version,
             protocol: registration.protocol,
             capabilities: registration.capabilities,
-            metadata: registration.metadata,
+            metadata: registration.metadata.clone(),
             max_concurrency: registration.max_concurrency.max(1),
             active_tasks: 0,
             status: "idle".to_string(),
@@ -149,6 +150,17 @@ impl WorkerRegistry {
         };
         self.sessions
             .insert(session.session_id.clone(), session.clone());
+
+        // Persist to STDB
+        let _ = stdb.transport.register_session(
+            session.session_id.clone(),
+            None,
+            session.node_id.clone(),
+            "worker".to_string(),
+            Some(registration.session_expires_at_ms.to_string()),
+            session.metadata.to_string(),
+        );
+
         session
     }
 
@@ -296,8 +308,12 @@ impl WorkerRegistry {
         Some(lease)
     }
 
-    pub fn remove_session(&mut self, session_id: &str) {
+    pub fn remove_session<T: StdbTransport>(&mut self, stdb: &StdbRuntime<T>, session_id: &str) {
         self.sessions.remove(session_id);
+
+        // Persist to STDB
+        let _ = stdb.transport.close_session(session_id.to_string());
+
         let orphaned: Vec<String> = self
             .task_leases
             .values()
@@ -314,4 +330,4 @@ impl WorkerRegistry {
     }
 }
 
-pub type SharedState = Arc<CoreState>;
+pub type SharedState = Arc<CoreState<ReducerTransport>>;
