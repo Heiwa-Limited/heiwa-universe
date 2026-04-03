@@ -71,6 +71,57 @@ def load_node_identity() -> Dict[str, Any]:
             
     return {"uuid": "unknown", "name": "ghost-node", "role": "worker", "capabilities": []}
 
+def gather_device_capabilities() -> Dict[str, Any]:
+    """
+    Gather rich hardware and software capabilities of the current device.
+    """
+    import subprocess
+    
+    # 1. Detect VRAM (Simple nvidia-smi probe)
+    vram_mb = 0
+    try:
+        res = subprocess.run(
+            ["nvidia-smi", "--query-gpu=memory.total", "--format=csv,noheader,nounits"],
+            capture_output=True, text=True, timeout=2
+        )
+        if res.returncode == 0:
+            vram_mb = int(res.stdout.strip().split('\n')[0])
+    except: pass
+
+    # 2. Locality detection
+    locality = "local"
+    if os.getenv("RAILWAY_SERVICE_ID"):
+        locality = "cloud"
+    elif os.getenv("TAILSCALE_IP"): # Or presence of tailscale
+        locality = "mesh"
+
+    # 3. Model Inventory (Ollama check)
+    models = []
+    try:
+        res = subprocess.run(["ollama", "list"], capture_output=True, text=True, timeout=2)
+        if res.returncode == 0:
+            # Parse ollama list output (skipping header)
+            lines = res.stdout.strip().split('\n')[1:]
+            for line in lines:
+                if line:
+                    models.append(f"ollama/{line.split()[0]}")
+    except: pass
+
+    # 4. Provider Keys (BYOK)
+    keys = []
+    for provider in ["OPENAI_API_KEY", "ANTHROPIC_API_KEY", "GOOGLE_API_KEY"]:
+        if os.getenv(provider):
+            keys.append(provider.replace("_API_KEY", "").lower())
+
+    return {
+        "vram_mb": vram_mb,
+        "locality": locality,
+        "trust_tier": 10 if locality == "local" else 5,
+        "provider_keys": keys,
+        "model_inventory": models,
+    }
+
+
 def get_tailscale_ip() -> str:
     """Get the current node's Tailscale IP."""
     import subprocess

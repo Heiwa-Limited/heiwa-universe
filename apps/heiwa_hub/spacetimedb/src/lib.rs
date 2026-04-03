@@ -520,6 +520,11 @@ pub struct NodeStatus {
     pub agent_version: String,
     pub tags_json: String,
     pub max_concurrency: i64,
+    pub vram_mb: i64,
+    pub locality: String,
+    pub trust_tier: i32,
+    pub provider_keys_json: String,
+    pub model_inventory_json: String,
 }
 
 #[table(accessor = liveness_state, public)]
@@ -2119,6 +2124,11 @@ pub fn upsert_node_heartbeat(
     agent_version: String,
     tags_json: String,
     max_concurrency: i64,
+    vram_mb: i64,
+    locality: String,
+    trust_tier: i32,
+    provider_keys_json: String,
+    model_inventory_json: String,
 ) -> Result<(), String> {
     if let Some(mut node) = ctx.db.nodes().node_id().find(node_id.clone()) {
         node.last_heartbeat_at = last_heartbeat_at;
@@ -2129,6 +2139,11 @@ pub fn upsert_node_heartbeat(
         node.agent_version = agent_version;
         node.tags_json = tags_json;
         node.max_concurrency = max_concurrency;
+        node.vram_mb = vram_mb;
+        node.locality = locality;
+        node.trust_tier = trust_tier;
+        node.provider_keys_json = provider_keys_json;
+        node.model_inventory_json = model_inventory_json;
         ctx.db.nodes().node_id().update(node);
     } else {
         ctx.db.nodes().insert(NodeStatus {
@@ -2142,6 +2157,11 @@ pub fn upsert_node_heartbeat(
             agent_version,
             tags_json,
             max_concurrency,
+            vram_mb,
+            locality,
+            trust_tier,
+            provider_keys_json,
+            model_inventory_json,
         });
     }
     Ok(())

@@ -1169,6 +1169,11 @@ async fn persist_worker_presence(
         session.worker_version.clone(),
         tags.to_string(),
         session.max_concurrency,
+        0, // vram_mb
+        "local".to_string(), // locality
+        10, // trust_tier
+        "[]".to_string(), // provider_keys
+        "[]".to_string(), // model_inventory
     );
 }
 

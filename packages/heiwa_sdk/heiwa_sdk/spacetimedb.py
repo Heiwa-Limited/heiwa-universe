@@ -690,6 +690,11 @@ class SpacetimeDB:
         agent_version: str | None = None,
         tags: list[str] | None = None,
         max_concurrency: int = 1,
+        vram_mb: int = 0,
+        locality: str = "cloud",
+        trust_tier: int = 5,
+        provider_keys: list[str] | None = None,
+        model_inventory: list[str] | None = None,
     ) -> bool:
         now_iso = datetime.datetime.now(datetime.timezone.utc).isoformat()
         return self.call_with_retry(
@@ -703,6 +708,11 @@ class SpacetimeDB:
             agent_version or "",
             self._json_text(tags or []),
             int(max_concurrency),
+            int(vram_mb),
+            locality,
+            int(trust_tier),
+            self._json_text(provider_keys or []),
+            self._json_text(model_inventory or []),
         )
 
     def set_node_status(self, node_id: str, status: str) -> bool:
