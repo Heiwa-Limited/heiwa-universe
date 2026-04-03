@@ -10,6 +10,7 @@ use tracing::{info, warn};
 use std::time::{SystemTime, UNIX_EPOCH};
 use crate::runtime::state::SharedState;
 use crate::drex::{DrexIngress, plan_route, default_policy};
+use crate::auth::verify_jwt;
 use heiwa_bindings::{
     upsert_battlefield_reducer::upsert_battlefield,
     create_task_dispatch_reducer::create_task_dispatch,
@@ -52,6 +53,8 @@ pub enum ServerMessage {
 pub enum WorkerMessage {
     #[serde(rename = "auth")]
     Auth { token: String, node_id: String },
+    #[serde(rename = "register")]
+    Register { auth_token: String, node_id: String, capabilities: Vec<String>, meta: Value },
     #[serde(rename = "capabilities")]
     Capabilities {
         capabilities: Vec<String>,
@@ -145,7 +148,15 @@ async fn handle_socket(socket: WebSocket, state: SharedState) {
         if let Message::Text(text) = msg {
             match serde_json::from_str::<ClientMessage>(&text) {
                 Ok(ClientMessage::Auth { token }) => {
-                    if token == state.config.machine_auth_token {
+                    let authenticated = if token == state.config.machine_auth_token {
+                        true
+                    } else if !state.config.jwt_signing_secret.is_empty() {
+                        verify_jwt(&token, &state.config.jwt_signing_secret).is_ok()
+                    } else {
+                        false
+                    };
+
+                    if authenticated {
                         let _ = sender.send(Message::Text(serde_json::to_string(&ServerMessage::AuthOk).unwrap())).await;
                     } else {
                         let _ = sender.send(Message::Text(serde_json::to_string(&ServerMessage::Error {
@@ -210,6 +221,29 @@ async fn handle_worker_socket(socket: WebSocket, state: SharedState) {
                         }).unwrap())).await;
                     }
                 }
+                Ok(WorkerMessage::Register { auth_token, node_id, capabilities, meta }) => {
+                    if auth_token == state.config.machine_auth_token {
+                        authenticated_node_id = Some(node_id.clone());
+                        info!("Legacy worker {} registered with capabilities: {:?}", node_id, capabilities);
+                        let _ = state.stdb.transport.conn.reducers.upsert_node_heartbeat(
+                            node_id,
+                            now_iso(),
+                            now_iso(),
+                            meta.to_string(),
+                            json!(capabilities).to_string(),
+                            "0.1.0-legacy".to_string(),
+                            "[]".to_string(),
+                            1,
+                        );
+                        let _ = sender.send(Message::Text(serde_json::to_string(&ServerMessage::AuthOk).unwrap())).await;
+                    } else {
+                        let _ = sender.send(Message::Text(serde_json::to_string(&ServerMessage::Error {
+                            request_id: None,
+                            message: "Invalid legacy auth token".to_string(),
+                        }).unwrap())).await;
+                    }
+                }
+
                 Ok(WorkerMessage::Capabilities { capabilities, meta }) => {
                     if let Some(ref node_id) = authenticated_node_id {
                         info!("Worker {} advertised capabilities: {:?}", node_id, capabilities);
