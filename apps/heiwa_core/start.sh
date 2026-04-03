@@ -6,11 +6,11 @@ echo "[HEIWA] Initializing Core Runtime..."
 
 # 1. Environment Defaults
 export HEIWA_STATE_BACKEND="${HEIWA_STATE_BACKEND:-spacetimedb}"
-export STDB_SERVER="${STDB_SERVER:-local}"
+export STDB_SERVER="${STDB_SERVER:-maincloud}"
 export STDB_IDENTITY="${STDB_IDENTITY:-heiwaproductiondb}"
 export PATH=$PATH:/usr/local/bin:/root/.local/bin
 
-# 2. Local State Management (Bootstrap Only)
+# 2. Optional Local State Management (Dev Only)
 if [[ "$HEIWA_STATE_BACKEND" == "spacetimedb" && "$STDB_SERVER" == "local" ]]; then
     echo "[HEIWA] Verifying local SpacetimeDB..."
     if command -v spacetime &>/dev/null; then
@@ -32,6 +32,8 @@ if [[ "$HEIWA_STATE_BACKEND" == "spacetimedb" && "$STDB_SERVER" == "local" ]]; t
             echo "[HEIWA] Publishing local module..."
             (cd "$STDB_PROJECT_DIR" && spacetime publish --server "$STDB_SERVER" "$STDB_IDENTITY") || true
         fi
+    else
+        echo "[HEIWA] WARN: local STDB requested but spacetime CLI is unavailable."
     fi
 fi
 

@@ -20,6 +20,7 @@ pub mod gateway;
 use crate::config::RuntimeConfig;
 use crate::drex::{default_policy, plan_route, DrexIngress, RoutePlan};
 use crate::stdb::{StdbRuntime, ReducerTransport};
+use crate::auth;
 use self::state::{CoreState, SharedState, SystemStatus};
 use heiwa_bindings::{
     DbConnection,
@@ -54,7 +55,11 @@ pub async fn run(cfg: RuntimeConfig) -> Result<()> {
     let conn = DbConnection::builder()
         .with_uri(&cfg.stdb_url)
         .with_database_name(&cfg.stdb_identity)
-        .with_token(Some(&cfg.auth_token))
+        .with_token(if cfg.stdb_token.is_empty() {
+            None
+        } else {
+            Some(&cfg.stdb_token)
+        })
         .build()?;
 
     let conn_arc = Arc::new(conn);
@@ -114,17 +119,7 @@ pub async fn run(cfg: RuntimeConfig) -> Result<()> {
         }
     });
 
-    let app = Router::new()
-        .route("/health", get(health_handler))
-        .route("/ready", get(ready_handler))
-        .route("/status", get(status_handler))
-        .route("/ws", get(gateway::ws_handler))
-        .route("/ws/client", get(gateway::ws_client_handler))
-        .route("/ws/worker", get(gateway::ws_worker_handler))
-        .route("/battlefields", post(gateway::battlefield_handler))
-        .route("/tasks", post(gateway::task_handler))
-        .layer(TraceLayer::new_for_http())
-        .with_state(state);
+    let app = build_router(state);
 
     let addr = SocketAddr::from(([0, 0, 0, 0], cfg.port));
     info!("Heiwa Core listening on {}", addr);
@@ -133,6 +128,21 @@ pub async fn run(cfg: RuntimeConfig) -> Result<()> {
     axum::serve(listener, app).await?;
 
     Ok(())
+}
+
+pub fn build_router(state: SharedState) -> Router {
+    Router::new()
+        .route("/health", get(health_handler))
+        .route("/ready", get(ready_handler))
+        .route("/status", get(status_handler))
+        .route("/auth/me", get(auth::auth_me_handler))
+        .route("/ws", get(gateway::ws_handler))
+        .route("/ws/client", get(gateway::ws_client_handler))
+        .route("/ws/worker", get(gateway::ws_worker_handler))
+        .route("/battlefields", post(gateway::battlefield_handler))
+        .route("/tasks", post(gateway::task_handler))
+        .layer(TraceLayer::new_for_http())
+        .with_state(state)
 }
 
 async fn seed_catalogs(conn: &DbConnection, state: SharedState) -> Result<()> {

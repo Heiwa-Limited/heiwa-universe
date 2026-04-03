@@ -4,7 +4,7 @@
 # -----------------------------------------------------
 # STAGE 1: RUST BUILDER
 # -----------------------------------------------------
-FROM rust:1.75-slim AS rust-builder
+FROM rust:1.85-slim AS rust-builder
 WORKDIR /app
 
 RUN apt-get update && apt-get install -y git build-essential curl ca-certificates zstd libpq-dev pkg-config && rm -rf /var/lib/apt/lists/*
@@ -25,7 +25,6 @@ FROM debian:bookworm-slim
 WORKDIR /app
 
 ENV LOG_LEVEL="INFO" \
-    SPACETIMEDB_HOME="/app/.spacetime" \
     PATH="/usr/local/bin:/root/.local/bin:$PATH"
 
 # System dependencies (minimal for production runtime)
@@ -36,13 +35,6 @@ RUN apt-get update && apt-get install -y \
     zstd \
     procps \
     && rm -rf /var/lib/apt/lists/*
-
-# SpacetimeDB CLI (required for state management)
-RUN curl -L "https://github.com/clockworklabs/SpacetimeDB/releases/download/v2.0.3/spacetime-x86_64-unknown-linux-gnu.tar.gz" -o spacetime.tar.gz && \
-    tar -xzf spacetime.tar.gz && \
-    mv spacetimedb-cli /usr/local/bin/spacetime && \
-    chmod +x /usr/local/bin/spacetime && \
-    rm spacetime.tar.gz
 
 # Copy Rust binary from builder
 COPY --from=rust-builder /app/target/release/heiwa-core /usr/local/bin/heiwa-core

@@ -7,9 +7,10 @@ pub struct RuntimeConfig {
     pub stdb_server: String,
     pub stdb_identity: String,
     pub stdb_url: String,
+    pub stdb_token: String,
     pub log_level: String,
-    pub auth_token: String,
-    pub auth_secret: String,
+    pub machine_auth_token: String,
+    pub jwt_signing_secret: String,
     pub node_id: String,
     pub model_tiers_seed_path: String,
     pub ai_router_seed_path: String,
@@ -18,12 +19,14 @@ pub struct RuntimeConfig {
 impl RuntimeConfig {
     #[must_use]
     pub fn from_env() -> Self {
-        let stdb_server = env::var("STDB_SERVER").unwrap_or_else(|_| "local".to_string());
-        let stdb_url = if stdb_server == "local" {
-            "http://localhost:3000".to_string()
-        } else {
-            "https://maincloud.spacetimedb.com".to_string()
-        };
+        let stdb_server = env::var("STDB_SERVER").unwrap_or_else(|_| "maincloud".to_string());
+        let stdb_url = env::var("STDB_URL").unwrap_or_else(|_| {
+            if stdb_server == "local" {
+                "http://localhost:3000".to_string()
+            } else {
+                "https://maincloud.spacetimedb.com".to_string()
+            }
+        });
 
         Self {
             port: env::var("PORT")
@@ -34,9 +37,17 @@ impl RuntimeConfig {
             stdb_server,
             stdb_identity: env::var("STDB_IDENTITY").unwrap_or_else(|_| "heiwaproductiondb".to_string()),
             stdb_url,
+            stdb_token: env::var("STDB_TOKEN")
+                .or_else(|_| env::var("STDB_AUTH_TOKEN"))
+                .or_else(|_| env::var("SPACETIMEDB_TOKEN"))
+                .unwrap_or_default(),
             log_level: env::var("LOG_LEVEL").unwrap_or_else(|_| "INFO".to_string()),
-            auth_token: env::var("HEIWA_AUTH_TOKEN").unwrap_or_default(),
-            auth_secret: env::var("HEIWA_AUTH_SECRET").unwrap_or_default(),
+            machine_auth_token: env::var("HEIWA_MACHINE_AUTH_TOKEN")
+                .or_else(|_| env::var("HEIWA_AUTH_TOKEN"))
+                .unwrap_or_default(),
+            jwt_signing_secret: env::var("HEIWA_JWT_SIGNING_SECRET")
+                .or_else(|_| env::var("HEIWA_AUTH_SECRET"))
+                .unwrap_or_default(),
             node_id: env::var("HEIWA_NODE_ID").unwrap_or_else(|_| "cloud-hq-0".to_string()),
             model_tiers_seed_path: env::var("MODEL_TIERS_SEED_PATH")
                 .unwrap_or_else(|_| "config/seeds/model_tiers.json".to_string()),

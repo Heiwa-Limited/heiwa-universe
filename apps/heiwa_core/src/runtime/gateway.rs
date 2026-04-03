@@ -145,7 +145,7 @@ async fn handle_socket(socket: WebSocket, state: SharedState) {
         if let Message::Text(text) = msg {
             match serde_json::from_str::<ClientMessage>(&text) {
                 Ok(ClientMessage::Auth { token }) => {
-                    if token == state.config.auth_token {
+                    if token == state.config.machine_auth_token {
                         let _ = sender.send(Message::Text(serde_json::to_string(&ServerMessage::AuthOk).unwrap())).await;
                     } else {
                         let _ = sender.send(Message::Text(serde_json::to_string(&ServerMessage::Error {
@@ -200,7 +200,7 @@ async fn handle_worker_socket(socket: WebSocket, state: SharedState) {
         if let Message::Text(text) = msg {
             match serde_json::from_str::<WorkerMessage>(&text) {
                 Ok(WorkerMessage::Auth { token, node_id }) => {
-                    if token == state.config.auth_token {
+                    if token == state.config.machine_auth_token {
                         authenticated_node_id = Some(node_id);
                         let _ = sender.send(Message::Text(serde_json::to_string(&ServerMessage::AuthOk).unwrap())).await;
                     } else {

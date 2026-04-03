@@ -191,7 +191,7 @@ jobs:
           import requests, time
 
           urls = [
-              "https://api.heiwa.ltd/health",
+              "https://api.heiwa.ltd/ready",
               "https://api.heiwa.ltd/status",
           ]
 
