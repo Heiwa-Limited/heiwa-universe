@@ -17,6 +17,13 @@ Heiwa is an omnidirectional fluid mesh of peer agents. The authoritative control
 - **Heiwa CLI**: Operator surface connecting to the core auth/runtime plane.
 - **app.heiwa.ltd**: Unified product shell (TypeScript) over the core API.
 
+## 2.5. Provider Authority
+
+- **Class 3 Peers**: Codex, Claude Code, Gemini CLI, and Antigravity are peer executors over the same Heiwa stack.
+- **Provider-Owned Subagents**: Each provider owns its own subagents, reviewers, and delegated execution loops. Routine spawn/message/wait/close flow stays provider-managed.
+- **Escalation Boundary**: Interrupt the human operator only for destructive host actions, irreversible external side effects, credential or policy break-glass, or platform/harness prompts that the provider cannot suppress from configuration.
+- **Project Auto-Activation**: Repo-local provider config lives in `.codex/`, `.claude/`, and `.gemini/`. Canonical specialist wrappers live in `ops/agents/`, sync into `.gemini/agents/` and `.claude/agents/`, and install into `~/.codex/skills` via `uv run scripts/sync_agents.py --install-codex`.
+
 ## 3. Legacy / Reference (`apps/heiwa_hub/`)
 
 - **Python Hub**: Legacy prototype logic. High-value patterns (Spine, Telemetry, Messenger) are being ported to the Rust Core.

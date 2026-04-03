@@ -4,6 +4,31 @@ import sys
 from pathlib import Path
 from dotenv import load_dotenv
 
+
+def _is_monorepo_root(path: Path) -> bool:
+    return (path / "apps").exists() and (path / "packages").exists()
+
+
+def _candidate_monorepo_roots() -> list[Path]:
+    candidates: list[Path] = []
+    seen: set[Path] = set()
+    for key in ("HEIWA_WORKSPACE_ROOT", "HEIWA_ROOT", "HEIWA_ROOT_DIR"):
+        raw = os.getenv(key)
+        if not raw:
+            continue
+        path = Path(raw).expanduser().resolve()
+        if path in seen:
+            continue
+        candidates.append(path)
+        seen.add(path)
+    for path in (Path.home() / "heiwa-universe", Path.home() / "heiwa"):
+        resolved = path.expanduser().resolve()
+        if resolved in seen:
+            continue
+        candidates.append(resolved)
+        seen.add(resolved)
+    return candidates
+
 def get_env(key, default=None, required=True):
     """Strict environment variable fetcher. Crashes on missing required keys."""
     val = os.getenv(key, default)
@@ -16,20 +41,19 @@ def get_env(key, default=None, required=True):
     return val
 
 def _find_monorepo_root() -> Path:
-    """Recursively search for the monorepo root. Honors HEIWA_ROOT env var."""
-    explicit = os.getenv("HEIWA_ROOT")
-    if explicit:
-        p = Path(explicit).resolve()
-        if (p / "apps").exists() and (p / "packages").exists():
-            return p
+    """Recursively search for the monorepo root. Honors explicit env overrides."""
+    for candidate in _candidate_monorepo_roots():
+        if _is_monorepo_root(candidate):
+            return candidate
     current = Path(__file__).resolve()
     for _ in range(5):
-        if (current.parent / "apps").exists() and (current.parent / "packages").exists():
+        if _is_monorepo_root(current.parent):
             return current.parent
         current = current.parent
     raise RuntimeError(
         "Could not discover Heiwa monorepo root (looked for apps/ + packages/ "
-        "up to 5 levels from sdk). Set HEIWA_ROOT or run from inside the repo."
+        "up to 5 levels from sdk). Set HEIWA_WORKSPACE_ROOT or HEIWA_ROOT, "
+        "or run from inside the repo."
     )
 
 MONOREPO_ROOT = _find_monorepo_root()

@@ -36,3 +36,27 @@ mcpName = "railway"
 decision = "allow"
 priority = 850
 mcpName = "docker"
+
+# Git MCP — repo inspection and structured git operations
+[[rule]]
+decision = "allow"
+priority = 840
+mcpName = "git"
+
+# Playwright MCP — browser automation for product and operator surfaces
+[[rule]]
+decision = "allow"
+priority = 840
+mcpName = "playwright"
+
+# Figma MCP — design context and design-system sync
+[[rule]]
+decision = "allow"
+priority = 830
+mcpName = "figma"
+
+# Notion MCP — structured product and operator knowledge
+[[rule]]
+decision = "allow"
+priority = 830
+mcpName = "notion"

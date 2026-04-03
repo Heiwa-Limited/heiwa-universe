@@ -20,7 +20,7 @@ Read these in order before making runtime or architecture changes:
 - **Railway (Linux)**: The always-on Primary Plane and ultimate agent harness.
 - **MacBook (macOS)**: Staging environment and high-trust orchestrator.
 - **SpacetimeDB**: The authoritative state ledger (Sovereignty).
-- **Consolidated Monorepo**: `~/heiwa` is the *only* active workspace. All ghost repositories have been archived.
+- **Consolidated Monorepo**: `~/heiwa-universe` is the canonical active workspace. Older `~/heiwa` references are compatibility debt to retire, not the source of truth.
 
 ## Harness Scaffolding (Ground Truth)
 
@@ -28,6 +28,12 @@ The system is anchored by machine-readable files that persist across agent sessi
 - `docs/superpowers/status/feature_list.json`: The inviolable truth of system capabilities.
 - `docs/superpowers/status/progress.md`: The multi-session handoff log.
 - `scripts/init_env.sh`: Standardized environment initialization for all nodes.
+
+## Provider Control Surfaces
+
+- Repo-local provider posture lives in `.codex/`, `.claude/`, and `.gemini/`.
+- Canonical cross-runtime specialists live in `ops/agents/` and sync into provider-native discovery surfaces with `uv run scripts/sync_agents.py`.
+- Native provider tools stay enabled. Heiwa only adds boot order, canonical context, policies, and specialist wrappers.
 
 ## Hard Rules
 

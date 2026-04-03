@@ -5,9 +5,9 @@ Reads canonical agent definitions from ops/agents/ and generates
 runtime-specific wrappers for Gemini, Claude, and Codex.
 
 Usage:
-    uv run scripts/sync_agents.py              # Generate all wrappers
-    uv run scripts/sync_agents.py --check      # Verify wrappers are current
-    uv run scripts/sync_agents.py --install-codex  # Symlink Codex wrappers
+    uv run scripts/sync_agents.py                  # Generate all wrappers
+    uv run scripts/sync_agents.py --check          # Verify wrappers are current
+    uv run scripts/sync_agents.py --install-codex  # Symlink Codex wrappers into ~/.codex/skills
 """
 from __future__ import annotations
 
@@ -139,7 +139,7 @@ REQUIRED_CODEX_MCP = {
     "MCP_DOCKER", "playwright", "railway", "figma", "notion", "codebase-retrieval",
 }
 REQUIRED_CODEX_PLUGINS = {"github", "cloudflare", "google-drive", "hugging-face"}
-REQUIRED_CODEX_FEATURES = {"multi_agent", "guardian_approval", "prevent_idle_sleep"}
+REQUIRED_CODEX_FEATURES = {"multi_agent", "prevent_idle_sleep"}
 
 
 def check_wrapper_drift(agents: list[dict]) -> list[str]:
@@ -225,6 +225,13 @@ def check_codex_config() -> list[str]:
     for required in sorted(REQUIRED_CODEX_FEATURES):
         if not features.get(required, False):
             errors.append(f"CODEX CONFIG: missing feature '{required}'")
+    if features.get("guardian_approval"):
+        errors.append("CODEX CONFIG: guardian_approval must be false for provider-owned subagent orchestration")
+
+    if config.get("approval_policy") != "on-request":
+        errors.append("CODEX CONFIG: approval_policy must be 'on-request'")
+    if config.get("sandbox_mode") != "workspace-write":
+        errors.append("CODEX CONFIG: sandbox_mode must be 'workspace-write'")
 
     return errors
 
@@ -263,14 +270,22 @@ def check_gemini_config() -> list[str]:
     general = config.get("general", {})
     if "defaultApprovalMode" not in general:
         errors.append("GEMINI CONFIG: missing general.defaultApprovalMode")
+    elif general.get("defaultApprovalMode") != "auto_edit":
+        errors.append("GEMINI CONFIG: general.defaultApprovalMode must be 'auto_edit'")
 
     security = config.get("security", {})
     if not security.get("environmentVariableRedaction", {}).get("enabled"):
         errors.append("GEMINI CONFIG: environmentVariableRedaction not enabled")
+    if not security.get("enablePermanentToolApproval"):
+        errors.append("GEMINI CONFIG: enablePermanentToolApproval not enabled")
 
     filtering = config.get("context", {}).get("fileFiltering", {})
     if not filtering.get("respectGitIgnore"):
         errors.append("GEMINI CONFIG: respectGitIgnore not enabled")
+
+    experimental = config.get("experimental", {})
+    if not experimental.get("enableAgents"):
+        errors.append("GEMINI CONFIG: experimental.enableAgents not enabled")
 
     return errors
 
@@ -296,7 +311,7 @@ def cmd_check(agents: list[dict]) -> bool:
 
 import shutil
 
-DEFAULT_SKILLS_DIR = Path.home() / ".agents" / "skills"
+DEFAULT_SKILLS_DIR = Path.home() / ".codex" / "skills"
 
 
 def cmd_install_codex(

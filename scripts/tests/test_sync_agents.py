@@ -220,6 +220,7 @@ def test_check_gemini_config_passes():
 
 
 from sync_agents import cmd_install_codex
+from sync_agents import DEFAULT_SKILLS_DIR
 
 
 def test_install_codex_creates_symlinks(tmp_path):
@@ -252,3 +253,21 @@ def test_install_codex_copy_mode(tmp_path):
         target = tmp_path / install_name
         assert target.is_dir() and not target.is_symlink()
         assert (target / "SKILL.md").exists()
+
+
+def test_codex_install_defaults_to_native_codex_skills_dir():
+    assert DEFAULT_SKILLS_DIR == Path.home() / ".codex" / "skills"
+
+
+def test_check_codex_config_requires_on_request_without_guardian():
+    errors = check_codex_config()
+    assert all("guardian_approval" not in e for e in errors), errors
+    assert all("approval_policy" not in e for e in errors), errors
+    assert all("sandbox_mode" not in e for e in errors), errors
+
+
+def test_check_gemini_config_requires_auto_edit_and_agents():
+    errors = check_gemini_config()
+    assert all("auto_edit" not in e for e in errors), errors
+    assert all("enablePermanentToolApproval" not in e for e in errors), errors
+    assert all("enableAgents" not in e for e in errors), errors

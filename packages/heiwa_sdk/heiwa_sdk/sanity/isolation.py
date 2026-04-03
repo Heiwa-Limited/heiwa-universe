@@ -1,9 +1,54 @@
 
 import asyncio
 import os
+from pathlib import Path
+
+
+def _is_monorepo_root(path: Path) -> bool:
+    return (path / "apps").exists() and (path / "packages").exists()
+
+
+def _candidate_monorepo_roots() -> list[Path]:
+    candidates: list[Path] = []
+    seen: set[Path] = set()
+    for key in ("HEIWA_ROOT_DIR", "HEIWA_WORKSPACE_ROOT", "HEIWA_ROOT"):
+        raw = os.getenv(key)
+        if not raw:
+            continue
+        path = Path(raw).expanduser().resolve()
+        if path in seen:
+            continue
+        candidates.append(path)
+        seen.add(path)
+    for path in (Path.home() / "heiwa-universe", Path.home() / "heiwa"):
+        resolved = path.expanduser().resolve()
+        if resolved in seen:
+            continue
+        candidates.append(resolved)
+        seen.add(resolved)
+    return candidates
+
+
+def resolve_root_dir(start_path: Path | None = None) -> Path:
+    for candidate in _candidate_monorepo_roots():
+        if _is_monorepo_root(candidate):
+            return candidate
+    current = (start_path or Path(__file__).resolve()).resolve()
+    for _ in range(6):
+        probe = current if current.is_dir() else current.parent
+        if _is_monorepo_root(probe):
+            return probe
+        if probe.parent == probe:
+            break
+        current = probe.parent
+    for candidate in _candidate_monorepo_roots():
+        if candidate.exists():
+            return candidate
+    return current if current.is_dir() else current.parent
+
 
 # Paths
-ROOT_DIR = os.getenv("HEIWA_ROOT_DIR", "/Users/dmcgregsauce/heiwa")
+ROOT_DIR = str(resolve_root_dir())
 RUNTIME_SCRIPT = os.path.join(ROOT_DIR, "apps/heiwa_hub/agent_runtime.py")
 INTERNAL_CONFIG = os.getenv("HEIWA_INTERNAL_AGENT_CONFIG", "")
 CLIENT_CONFIG = os.getenv("HEIWA_CLIENT_AGENT_CONFIG", "")

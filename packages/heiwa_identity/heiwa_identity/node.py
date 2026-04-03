@@ -3,13 +3,52 @@ import os
 from pathlib import Path
 from typing import Dict, Any
 
+
+def _is_monorepo_root(path: Path) -> bool:
+    return (path / "apps").exists() and (path / "packages").exists()
+
+
+def _candidate_monorepo_roots() -> list[Path]:
+    candidates: list[Path] = []
+    seen: set[Path] = set()
+    for key in ("HEIWA_WORKSPACE_ROOT", "HEIWA_ROOT", "HEIWA_ROOT_DIR"):
+        raw = os.getenv(key)
+        if not raw:
+            continue
+        path = Path(raw).expanduser().resolve()
+        if path in seen:
+            continue
+        candidates.append(path)
+        seen.add(path)
+    for path in (Path.home() / "heiwa-universe", Path.home() / "heiwa"):
+        resolved = path.expanduser().resolve()
+        if resolved in seen:
+            continue
+        candidates.append(resolved)
+        seen.add(resolved)
+    return candidates
+
+
+def discover_monorepo_root(start_path: Path | None = None) -> Path:
+    current = (start_path or Path(__file__).resolve()).resolve()
+    for candidate in _candidate_monorepo_roots():
+        if _is_monorepo_root(candidate):
+            return candidate
+    for _ in range(6):
+        probe = current if current.is_dir() else current.parent
+        if _is_monorepo_root(probe):
+            return probe
+        if probe.parent == probe:
+            break
+        current = probe.parent
+    for candidate in _candidate_monorepo_roots():
+        if candidate.exists():
+            return candidate
+    return current if current.is_dir() else current.parent
+
+
 def get_monorepo_root() -> Path:
-    current = Path(__file__).resolve()
-    for _ in range(5):
-        if (current.parent / "apps").exists() and (current.parent / "packages").exists():
-            return current.parent
-        current = current.parent
-    return Path("/Users/dmcgregsauce/heiwa")
+    return discover_monorepo_root()
 
 def load_node_identity() -> Dict[str, Any]:
     """

@@ -37,7 +37,7 @@ Devon's machine is the operator and boost-node plane. It needs a wider tool surf
 
 - `git`
 - `rustup`, `rustc`, `cargo`
-- Node `22.x` available for repo work
+- Node `24.x` available for repo work
 - `python3` `3.14.x`
 - `uv`
 - `gh`

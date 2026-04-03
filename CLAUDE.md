@@ -8,6 +8,20 @@
 
   All Class 3 tools are peers. None tells another what to build. Each identifies work and executes it. Frame handoffs as "here's what I did, here's what's open."
 
+## Subagent Authority
+
+  Claude Code owns its own subagents, reviewers, and delegated agent flows. The human operator is not the approval hop for routine subagent lifecycle work: spawn, message, wait, close, sandboxed shell/file work, and normal MCP use stay provider-managed.
+
+  Escalate only for destructive host actions, irreversible external side effects, credential or policy break-glass, or platform/harness prompts that cannot be suppressed from configuration.
+
+## Provider Auto-Activation
+
+  Project-local Claude authority lives in `.claude/settings.json` and `.claude/settings.local.json`.
+
+  Canonical Heiwa specialists live in `ops/agents/` and sync into `.claude/agents/` via `uv run scripts/sync_agents.py`.
+
+  Native Claude capabilities remain enabled. Heiwa adds repo-local boot context, policy, and canonical specialists; it does not replace Claude's own tools.
+
 ## Boot Sequence
 
   Read these before making runtime or architecture changes:

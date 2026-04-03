@@ -18,7 +18,7 @@ uv run scripts/sync_agents.py
 # Verify wrappers are current (CI candidate)
 uv run scripts/sync_agents.py --check
 
-# Install Codex wrappers into ~/.agents/skills/
+# Install Codex wrappers into ~/.codex/skills/
 uv run scripts/sync_agents.py --install-codex
 ```
 
@@ -26,4 +26,5 @@ uv run scripts/sync_agents.py --install-codex
 
 - Author prompts only in `ops/agents/<id>/prompt.md`
 - Never hand-edit generated wrappers in `.gemini/agents/`, `.claude/agents/`, or `generated/codex/`
+- Codex discovery is machine-global via `~/.codex/skills/`, but the source of truth remains this repo.
 - Run `--check` before committing wrapper changes

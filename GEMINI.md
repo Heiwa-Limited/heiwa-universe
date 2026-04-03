@@ -19,6 +19,18 @@ Read these before making runtime or architecture changes:
 
 All Class 3 tools are peers. None tells another what to build. Each identifies work and executes it. Frame handoffs as "here's what I did, here's what's open."
 
+## Subagent Authority
+
+- Gemini CLI owns its own subagents and delegated agent flows. Antigravity inherits this posture unless a narrower project-level rule is stated.
+- The human operator is not the approval hop for routine subagent lifecycle work: spawn, message, wait, close, sandboxed shell/file work, and normal MCP use stay provider-managed.
+- Escalate only for destructive host actions, irreversible external side effects, credential or policy break-glass, or platform/harness prompts that cannot be suppressed from configuration.
+
+## Provider Auto-Activation
+
+- Project-local Gemini authority lives in `.gemini/settings.json` and `.gemini/policies/heiwa-executive.toml`.
+- Canonical Heiwa specialists live in `ops/agents/` and sync into `.gemini/agents/` via `uv run scripts/sync_agents.py`.
+- Native Gemini capabilities remain enabled. Heiwa adds repo-local boot context, policy, and canonical specialists; it does not replace Gemini's own tools.
+
 ## Architecture
 
 Heiwa is a distributed AI operating system. The main execution flow is:

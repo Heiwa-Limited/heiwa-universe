@@ -6,7 +6,7 @@ The goal is simple: a fresh Railway deployment should be able to authenticate it
 
 ## Required Railway variables
 
-These must exist on the `heiwa-hub` production service before Cloud HQ can self-operate fully:
+These must exist on the `heiwa-core` production service before Cloud HQ can self-operate fully:
 
 | Variable | Purpose |
 | --- | --- |
@@ -25,14 +25,14 @@ These must exist on the `heiwa-hub` production service before Cloud HQ can self-
 
 ## Boot contract
 
-`apps/heiwa_hub/Dockerfile` now installs:
+`apps/heiwa_core/Dockerfile` now installs:
 
 - `gh`
 - `@railway/cli`
 - `wrangler`
 - existing Claude Code, Codex, Gemini CLI, and SpacetimeDB CLIs
 
-`apps/heiwa_hub/start.sh` now does four things during boot:
+`apps/heiwa_core/start.sh` now does four things during boot:
 
 1. Normalizes env-backed auth for `gh`, `railway`, `wrangler`, and `spacetime`
 2. Performs headless SpacetimeDB login when a token is present
@@ -70,9 +70,9 @@ Use these checks after the next deploy:
 
 ```bash
 uv run pytest apps/heiwa_hub/tests/test_cloud_hq_start_script.py
-PYTHONPATH=/Users/dmcgregsauce/heiwa/packages/heiwa_cli:/Users/dmcgregsauce/heiwa/packages/heiwa_cognition:/Users/dmcgregsauce/heiwa/packages/heiwa_sdk:/Users/dmcgregsauce/heiwa/packages/heiwa_protocol:/Users/dmcgregsauce/heiwa/packages/heiwa_identity:/Users/dmcgregsauce/heiwa/packages/heiwa_ui:/Users/dmcgregsauce/heiwa/apps uv run pytest apps/heiwa_hub/tests/test_compute_router_stdb.py
-PYTHONPATH=/Users/dmcgregsauce/heiwa/packages/heiwa_cli:/Users/dmcgregsauce/heiwa/packages/heiwa_cognition:/Users/dmcgregsauce/heiwa/packages/heiwa_sdk:/Users/dmcgregsauce/heiwa/packages/heiwa_protocol:/Users/dmcgregsauce/heiwa/packages/heiwa_identity:/Users/dmcgregsauce/heiwa/packages/heiwa_ui:/Users/dmcgregsauce/heiwa/apps uv run pytest apps/heiwa_hub/tests/test_phase1_integration.py
-railway logs --service heiwa-hub
+PYTHONPATH=/Users/dmcgregsauce/heiwa-universe/packages/heiwa_cli:/Users/dmcgregsauce/heiwa-universe/packages/heiwa_cognition:/Users/dmcgregsauce/heiwa-universe/packages/heiwa_sdk:/Users/dmcgregsauce/heiwa-universe/packages/heiwa_protocol:/Users/dmcgregsauce/heiwa-universe/packages/heiwa_identity:/Users/dmcgregsauce/heiwa-universe/packages/heiwa_ui:/Users/dmcgregsauce/heiwa-universe/apps uv run pytest apps/heiwa_hub/tests/test_compute_router_stdb.py
+PYTHONPATH=/Users/dmcgregsauce/heiwa-universe/packages/heiwa_cli:/Users/dmcgregsauce/heiwa-universe/packages/heiwa_cognition:/Users/dmcgregsauce/heiwa-universe/packages/heiwa_sdk:/Users/dmcgregsauce/heiwa-universe/packages/heiwa_protocol:/Users/dmcgregsauce/heiwa-universe/packages/heiwa_identity:/Users/dmcgregsauce/heiwa-universe/packages/heiwa_ui:/Users/dmcgregsauce/heiwa-universe/apps uv run pytest apps/heiwa_hub/tests/test_phase1_integration.py
+railway logs --service heiwa-core
 ```
 
 At runtime, the log should show authenticated status lines for `claude`, `codex`, `gemini`, `gh`, `railway`, `wrangler`, and `spacetime`.

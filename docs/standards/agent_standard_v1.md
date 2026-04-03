@@ -1,6 +1,6 @@
 # Heiwa Canonical Agent Standard
 
-- **Version**: 1.0.0
+- **Version**: 1.1.0
 - **Authors**: Class 3 AI Peers (Gemini CLI, Claude Code, Codex, Antigravity)
 - **Status**: Canonical Runtime Contract
 
@@ -8,7 +8,15 @@
 
 ## 1. Role and Autonomy
 
-Class 3 executives (Claude Code, Gemini CLI, Codex, Antigravity) are OAuth-powered peers with full authoritive autonomy to execute tasks without approval gates on approved workspace paths. Autonomy is framed under the `Observe` and `Enforce` mode rollouts of the Heiwa control plane. All executables must respect security filters and token validations via the SDK (`SecurityService`).
+Class 3 executives (Claude Code, Gemini CLI, Codex, Antigravity) are OAuth-powered peer executors over the same Heiwa stack. The authority model is:
+
+- **STDB** = canonical state truth
+- **Rust core** = execution authority
+- **Provider session** = operator client and orchestration owner
+- **Python** = bounded legacy bridge only
+- **TypeScript** = package/web surface
+
+Routine subagent lifecycle work stays provider-owned. Human escalation is reserved for destructive host actions, irreversible external side effects, credential or policy break-glass, or platform/harness prompts that cannot be suppressed by configuration.
 
 ---
 
@@ -25,23 +33,25 @@ To maintain modular integrity and execution safety, all code written or modified
 
 ## 3. Tool Execution & Interception Pathways
 
-- **Direct Choke Points Only**: Tool execution MUST route strictly through `OpenClaw` execution dispatch or `ToolMesh` layer boundaries. Custom runner scripting outside these containers is forbidden for Class 3 agents.
-- **Absolute paths**: Always use the absolute node layout targeting `packages/`, `apps/`, or local staging paths. Avoid generic node references.
-- **Sandboxed Untrusted execution**: Any untrusted code written or loaded at runtime (e.g., scratchpad scripts for REPL) strictly executes in E2B sandbox structures, NEVER on the node host.
-- **Sovereignty Precedence**: High-risk, sovereign queries (dealing with local disk vaults or local models) MUST route strictly to local-trust boost nodes (MacBook, high-trust endpoints), NEVER to general cloud providers without prior human review score.
+- **Provider-native first**: Native provider tools, plugins, MCP servers, and specialist wrappers remain enabled. Heiwa adds boot order, policy, and cross-runtime specialists; it does not replace provider-native capabilities.
+- **Project control surfaces**: Repo-local provider posture lives in `.codex/`, `.claude/`, and `.gemini/`. Canonical specialists live in `ops/agents/` and sync into `.gemini/agents/`, `.claude/agents/`, and `~/.codex/skills`.
+- **Sandboxed untrusted execution**: Any untrusted code written or loaded at runtime strictly executes in E2B or another explicit sandbox boundary, never on the host by default.
+- **Sovereignty precedence**: High-risk sovereign work (local disk vaults, local models, private operator state) routes to trusted boost nodes, not general cloud providers.
 
 ---
 
 ## 4. Pre-Commit Discipline & Verification
 
-To commit a cycle, the active execution frame MUST validate state coherence:
+To close a cycle, the active execution frame must validate current truth instead of relying on stale defaults:
 
-- **Clean State Mandate**: Sub-tasks or partial updates should be followed immediately by explicit Git commits covering high-fidelity context.
-- **Primary Verify command**: All endpoints must sustain a passing `pytest` threshold. Use single-module execution for fast loops:
+- **Clean state mandate**: Sub-tasks or partial updates should be followed by explicit git commits or a deliberate staged checkpoint.
+- **Primary verification**: Run the narrowest affected test or lint command first, then the broader repo gate if the narrow command passes.
+- **Runtime baseline verification**: Repo and operator checks should stay green:
   ```bash
-  pytest apps/heiwa_hub/tests/test_filename.py
+  bash scripts/check_runtime_baseline.sh
+  bash scripts/check_heiwa_core_dockerfile.sh
+  bash scripts/audit_operator_machine.sh
   ```
-- **Bench Release verification**: Run `./apps/heiwa_cli/heiwa bench` to guarantee execution standard gates remain green. Missing valid standards blocks release cycle gates.
 
 ---
 
@@ -54,7 +64,8 @@ To commit a cycle, the active execution frame MUST validate state coherence:
 
 ## 6. Implementation Checklist (Operator / Exec Contexts)
 
-When executing, the operator surface loaded assembly MUST contain:
-1. Version Check validation.
-2. Context anchor referencing loaded standard.
-3. Verification Command sequence executed locally on the worker node.
+When executing, the loaded operator surface must contain:
+1. Version check validation.
+2. Context anchors loaded from `ops/context/HEIWA.md`, `AGENTS.md`, and the relevant room files.
+3. Provider-local config active for the current repo.
+4. Verification command sequence executed locally on the worker or operator node.

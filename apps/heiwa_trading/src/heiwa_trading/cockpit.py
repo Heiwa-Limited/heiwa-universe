@@ -23,9 +23,32 @@ from heiwa_trading.supervisor import (
 )
 
 
+def _canonical_workspace_root() -> Path | None:
+    for key in ("HEIWA_WORKSPACE_ROOT", "HEIWA_ROOT", "HEIWA_ROOT_DIR"):
+        raw = str(__import__("os").environ.get(key, "")).strip()
+        if not raw:
+            continue
+        path = Path(raw).expanduser().resolve()
+        if path.exists():
+            return path
+    for path in (Path.home() / "heiwa-universe", Path.home() / "heiwa"):
+        resolved = path.expanduser().resolve()
+        if resolved.exists():
+            return resolved
+    return None
+
+
 def resolve_agent_root(project_root: Path) -> Path:
     """Map an app-local project root to the broader workspace root when available."""
-    return project_root.parents[1] if len(project_root.parents) > 1 else project_root
+    candidate = project_root.parents[1] if len(project_root.parents) > 1 else project_root
+    if project_root == Path("/app"):
+        return project_root
+    canonical = _canonical_workspace_root()
+    if candidate.name == "heiwa" and canonical is not None:
+        return canonical
+    if candidate.exists():
+        return candidate
+    return canonical or candidate
 
 
 MAC_AGENT_ROOT = resolve_agent_root(PROJECT_ROOT)

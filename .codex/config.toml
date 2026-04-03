@@ -1,8 +1,11 @@
 # Heiwa project-level Codex config
-# Overrides ~/.codex/config.toml within ~/heiwa/
+# Overrides ~/.codex/config.toml within ~/heiwa-universe/
 #
 # Global settings (model, personality, approval_policy, sandbox_mode)
 # are inherited — only Heiwa-specific overrides below.
+
+approval_policy = "on-request"
+sandbox_mode = "workspace-write"
 
 [mcp_servers.railway]
 command = "npx"
@@ -28,7 +31,7 @@ args = ["--mcp", "--mcp-auto-workspace"]
 
 [features]
 multi_agent = true
-guardian_approval = true
+guardian_approval = false
 prevent_idle_sleep = true
 
 [plugins."github@openai-curated"]

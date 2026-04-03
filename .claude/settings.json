@@ -3,7 +3,8 @@
     "allow": [
       "Write",
       "Bash"
-    ]
+    ],
+    "defaultMode": "dontAsk"
   },
   "enableAllProjectMcpServers": true,
   "worktree": {

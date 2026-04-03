@@ -4,6 +4,7 @@
     "enableNotifications": true
   },
   "security": {
+    "enablePermanentToolApproval": true,
     "environmentVariableRedaction": {
       "enabled": true
     }
@@ -16,6 +17,9 @@
     "loadMemoryFromIncludeDirectories": true
   },
   "tools": {
-    "sandbox": false
+    "sandbox": true
+  },
+  "experimental": {
+    "enableAgents": true
   }
 }
