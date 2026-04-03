@@ -9,6 +9,7 @@ use spacetimedb_sdk::__codegen::{self as __sdk, __lib, __sats, __ws};
 pub struct ArtifactRecord {
     pub artifact_id: String,
     pub mission_id: String,
+    pub run_id: Option<String>,
     pub cell_run_id: Option<String>,
     pub artifact_type: String,
     pub title: String,
@@ -32,6 +33,7 @@ impl __sdk::InModule for ArtifactRecord {
 pub struct ArtifactRecordCols {
     pub artifact_id: __sdk::__query_builder::Col<ArtifactRecord, String>,
     pub mission_id: __sdk::__query_builder::Col<ArtifactRecord, String>,
+    pub run_id: __sdk::__query_builder::Col<ArtifactRecord, Option<String>>,
     pub cell_run_id: __sdk::__query_builder::Col<ArtifactRecord, Option<String>>,
     pub artifact_type: __sdk::__query_builder::Col<ArtifactRecord, String>,
     pub title: __sdk::__query_builder::Col<ArtifactRecord, String>,
@@ -51,6 +53,7 @@ impl __sdk::__query_builder::HasCols for ArtifactRecord {
         ArtifactRecordCols {
             artifact_id: __sdk::__query_builder::Col::new(table_name, "artifact_id"),
             mission_id: __sdk::__query_builder::Col::new(table_name, "mission_id"),
+            run_id: __sdk::__query_builder::Col::new(table_name, "run_id"),
             cell_run_id: __sdk::__query_builder::Col::new(table_name, "cell_run_id"),
             artifact_type: __sdk::__query_builder::Col::new(table_name, "artifact_type"),
             title: __sdk::__query_builder::Col::new(table_name, "title"),
@@ -77,6 +80,7 @@ pub struct ArtifactRecordIxCols {
     pub mission_id: __sdk::__query_builder::IxCol<ArtifactRecord, String>,
     pub owner_id: __sdk::__query_builder::IxCol<ArtifactRecord, Option<String>>,
     pub principal_id: __sdk::__query_builder::IxCol<ArtifactRecord, Option<String>>,
+    pub run_id: __sdk::__query_builder::IxCol<ArtifactRecord, Option<String>>,
     pub user_id: __sdk::__query_builder::IxCol<ArtifactRecord, Option<String>>,
 }
 
@@ -91,6 +95,7 @@ impl __sdk::__query_builder::HasIxCols for ArtifactRecord {
             mission_id: __sdk::__query_builder::IxCol::new(table_name, "mission_id"),
             owner_id: __sdk::__query_builder::IxCol::new(table_name, "owner_id"),
             principal_id: __sdk::__query_builder::IxCol::new(table_name, "principal_id"),
+            run_id: __sdk::__query_builder::IxCol::new(table_name, "run_id"),
             user_id: __sdk::__query_builder::IxCol::new(table_name, "user_id"),
         }
     }

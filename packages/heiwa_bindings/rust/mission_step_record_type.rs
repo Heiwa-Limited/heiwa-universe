@@ -19,6 +19,8 @@ pub struct MissionStepRecord {
     pub output_json: String,
     pub created_at: String,
     pub updated_at: String,
+    pub owner_id: Option<String>,
+    pub principal_id: Option<String>,
 }
 
 impl __sdk::InModule for MissionStepRecord {
@@ -41,6 +43,8 @@ pub struct MissionStepRecordCols {
     pub output_json: __sdk::__query_builder::Col<MissionStepRecord, String>,
     pub created_at: __sdk::__query_builder::Col<MissionStepRecord, String>,
     pub updated_at: __sdk::__query_builder::Col<MissionStepRecord, String>,
+    pub owner_id: __sdk::__query_builder::Col<MissionStepRecord, Option<String>>,
+    pub principal_id: __sdk::__query_builder::Col<MissionStepRecord, Option<String>>,
 }
 
 impl __sdk::__query_builder::HasCols for MissionStepRecord {
@@ -59,6 +63,8 @@ impl __sdk::__query_builder::HasCols for MissionStepRecord {
             output_json: __sdk::__query_builder::Col::new(table_name, "output_json"),
             created_at: __sdk::__query_builder::Col::new(table_name, "created_at"),
             updated_at: __sdk::__query_builder::Col::new(table_name, "updated_at"),
+            owner_id: __sdk::__query_builder::Col::new(table_name, "owner_id"),
+            principal_id: __sdk::__query_builder::Col::new(table_name, "principal_id"),
         }
     }
 }
@@ -68,6 +74,8 @@ impl __sdk::__query_builder::HasCols for MissionStepRecord {
 /// Provides typed access to indexed columns for query building.
 pub struct MissionStepRecordIxCols {
     pub mission_id: __sdk::__query_builder::IxCol<MissionStepRecord, String>,
+    pub owner_id: __sdk::__query_builder::IxCol<MissionStepRecord, Option<String>>,
+    pub principal_id: __sdk::__query_builder::IxCol<MissionStepRecord, Option<String>>,
     pub status: __sdk::__query_builder::IxCol<MissionStepRecord, String>,
     pub step_id: __sdk::__query_builder::IxCol<MissionStepRecord, String>,
 }
@@ -77,6 +85,8 @@ impl __sdk::__query_builder::HasIxCols for MissionStepRecord {
     fn ix_cols(table_name: &'static str) -> Self::IxCols {
         MissionStepRecordIxCols {
             mission_id: __sdk::__query_builder::IxCol::new(table_name, "mission_id"),
+            owner_id: __sdk::__query_builder::IxCol::new(table_name, "owner_id"),
+            principal_id: __sdk::__query_builder::IxCol::new(table_name, "principal_id"),
             status: __sdk::__query_builder::IxCol::new(table_name, "status"),
             step_id: __sdk::__query_builder::IxCol::new(table_name, "step_id"),
         }

@@ -23,4 +23,6 @@ export default {
   outputJson: __t.string(),
   createdAt: __t.string(),
   updatedAt: __t.string(),
+  ownerId: __t.option(__t.string()),
+  principalId: __t.option(__t.string()),
 };

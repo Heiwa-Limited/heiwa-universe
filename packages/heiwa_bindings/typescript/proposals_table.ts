@@ -35,4 +35,6 @@ export default __t.row({
   expiresAt: __t.option(__t.string()).name("expires_at"),
   eligibilitySnapshot: __t.option(__t.string()).name("eligibility_snapshot"),
   userId: __t.option(__t.string()).name("user_id"),
+  ownerId: __t.option(__t.string()).name("owner_id"),
+  principalId: __t.option(__t.string()).name("principal_id"),
 });

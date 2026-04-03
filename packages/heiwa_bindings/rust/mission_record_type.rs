@@ -24,6 +24,8 @@ pub struct MissionRecord {
     pub error: Option<String>,
     pub metadata_json: String,
     pub user_id: Option<String>,
+    pub owner_id: Option<String>,
+    pub principal_id: Option<String>,
 }
 
 impl __sdk::InModule for MissionRecord {
@@ -51,6 +53,8 @@ pub struct MissionRecordCols {
     pub error: __sdk::__query_builder::Col<MissionRecord, Option<String>>,
     pub metadata_json: __sdk::__query_builder::Col<MissionRecord, String>,
     pub user_id: __sdk::__query_builder::Col<MissionRecord, Option<String>>,
+    pub owner_id: __sdk::__query_builder::Col<MissionRecord, Option<String>>,
+    pub principal_id: __sdk::__query_builder::Col<MissionRecord, Option<String>>,
 }
 
 impl __sdk::__query_builder::HasCols for MissionRecord {
@@ -74,6 +78,8 @@ impl __sdk::__query_builder::HasCols for MissionRecord {
             error: __sdk::__query_builder::Col::new(table_name, "error"),
             metadata_json: __sdk::__query_builder::Col::new(table_name, "metadata_json"),
             user_id: __sdk::__query_builder::Col::new(table_name, "user_id"),
+            owner_id: __sdk::__query_builder::Col::new(table_name, "owner_id"),
+            principal_id: __sdk::__query_builder::Col::new(table_name, "principal_id"),
         }
     }
 }
@@ -84,6 +90,8 @@ impl __sdk::__query_builder::HasCols for MissionRecord {
 pub struct MissionRecordIxCols {
     pub created_at: __sdk::__query_builder::IxCol<MissionRecord, String>,
     pub mission_id: __sdk::__query_builder::IxCol<MissionRecord, String>,
+    pub owner_id: __sdk::__query_builder::IxCol<MissionRecord, Option<String>>,
+    pub principal_id: __sdk::__query_builder::IxCol<MissionRecord, Option<String>>,
     pub status: __sdk::__query_builder::IxCol<MissionRecord, String>,
     pub updated_at: __sdk::__query_builder::IxCol<MissionRecord, String>,
     pub user_id: __sdk::__query_builder::IxCol<MissionRecord, Option<String>>,
@@ -95,6 +103,8 @@ impl __sdk::__query_builder::HasIxCols for MissionRecord {
         MissionRecordIxCols {
             created_at: __sdk::__query_builder::IxCol::new(table_name, "created_at"),
             mission_id: __sdk::__query_builder::IxCol::new(table_name, "mission_id"),
+            owner_id: __sdk::__query_builder::IxCol::new(table_name, "owner_id"),
+            principal_id: __sdk::__query_builder::IxCol::new(table_name, "principal_id"),
             status: __sdk::__query_builder::IxCol::new(table_name, "status"),
             updated_at: __sdk::__query_builder::IxCol::new(table_name, "updated_at"),
             user_id: __sdk::__query_builder::IxCol::new(table_name, "user_id"),

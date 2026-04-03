@@ -32,4 +32,6 @@ export default __t.row({
   failurePolicy: __t.option(__t.string()).name("failure_policy"),
   chainState: __t.option(__t.string()).name("chain_state"),
   routingLockJson: __t.option(__t.string()).name("routing_lock_json"),
+  ownerId: __t.option(__t.string()).name("owner_id"),
+  principalId: __t.option(__t.string()).name("principal_id"),
 });

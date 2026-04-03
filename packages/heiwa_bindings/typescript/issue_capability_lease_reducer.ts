@@ -29,4 +29,6 @@ export default {
   issuedAt: __t.string(),
   expiresAt: __t.string(),
   hubSignature: __t.string(),
+  ownerId: __t.option(__t.string()),
+  principalId: __t.option(__t.string()),
 };

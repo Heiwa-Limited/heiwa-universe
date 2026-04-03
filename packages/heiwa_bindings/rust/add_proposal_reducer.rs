@@ -24,6 +24,8 @@ pub(super) struct AddProposalArgs {
     pub expires_at: Option<String>,
     pub eligibility_snapshot: Option<String>,
     pub user_id: Option<String>,
+    pub owner_id: Option<String>,
+    pub principal_id: Option<String>,
 }
 
 impl From<AddProposalArgs> for super::Reducer {
@@ -46,6 +48,8 @@ impl From<AddProposalArgs> for super::Reducer {
             expires_at: args.expires_at,
             eligibility_snapshot: args.eligibility_snapshot,
             user_id: args.user_id,
+            owner_id: args.owner_id,
+            principal_id: args.principal_id,
         }
     }
 }
@@ -84,6 +88,8 @@ pub trait add_proposal {
         expires_at: Option<String>,
         eligibility_snapshot: Option<String>,
         user_id: Option<String>,
+        owner_id: Option<String>,
+        principal_id: Option<String>,
     ) -> __sdk::Result<()> {
         self.add_proposal_then(
             proposal_id,
@@ -103,6 +109,8 @@ pub trait add_proposal {
             expires_at,
             eligibility_snapshot,
             user_id,
+            owner_id,
+            principal_id,
             |_, _| {},
         )
     }
@@ -132,6 +140,8 @@ pub trait add_proposal {
         expires_at: Option<String>,
         eligibility_snapshot: Option<String>,
         user_id: Option<String>,
+        owner_id: Option<String>,
+        principal_id: Option<String>,
 
         callback: impl FnOnce(&super::ReducerEventContext, Result<Result<(), String>, __sdk::InternalError>)
             + Send
@@ -159,6 +169,8 @@ impl add_proposal for super::RemoteReducers {
         expires_at: Option<String>,
         eligibility_snapshot: Option<String>,
         user_id: Option<String>,
+        owner_id: Option<String>,
+        principal_id: Option<String>,
 
         callback: impl FnOnce(&super::ReducerEventContext, Result<Result<(), String>, __sdk::InternalError>)
             + Send
@@ -183,6 +195,8 @@ impl add_proposal for super::RemoteReducers {
                 expires_at,
                 eligibility_snapshot,
                 user_id,
+                owner_id,
+                principal_id,
             },
             callback,
         )

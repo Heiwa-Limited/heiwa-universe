@@ -14,6 +14,8 @@ pub struct SessionSummaryRecord {
     pub summary_text: String,
     pub metadata_json: String,
     pub user_id: Option<String>,
+    pub owner_id: Option<String>,
+    pub principal_id: Option<String>,
 }
 
 impl __sdk::InModule for SessionSummaryRecord {
@@ -31,6 +33,8 @@ pub struct SessionSummaryRecordCols {
     pub summary_text: __sdk::__query_builder::Col<SessionSummaryRecord, String>,
     pub metadata_json: __sdk::__query_builder::Col<SessionSummaryRecord, String>,
     pub user_id: __sdk::__query_builder::Col<SessionSummaryRecord, Option<String>>,
+    pub owner_id: __sdk::__query_builder::Col<SessionSummaryRecord, Option<String>>,
+    pub principal_id: __sdk::__query_builder::Col<SessionSummaryRecord, Option<String>>,
 }
 
 impl __sdk::__query_builder::HasCols for SessionSummaryRecord {
@@ -44,6 +48,8 @@ impl __sdk::__query_builder::HasCols for SessionSummaryRecord {
             summary_text: __sdk::__query_builder::Col::new(table_name, "summary_text"),
             metadata_json: __sdk::__query_builder::Col::new(table_name, "metadata_json"),
             user_id: __sdk::__query_builder::Col::new(table_name, "user_id"),
+            owner_id: __sdk::__query_builder::Col::new(table_name, "owner_id"),
+            principal_id: __sdk::__query_builder::Col::new(table_name, "principal_id"),
         }
     }
 }
@@ -54,6 +60,8 @@ impl __sdk::__query_builder::HasCols for SessionSummaryRecord {
 pub struct SessionSummaryRecordIxCols {
     pub created_at: __sdk::__query_builder::IxCol<SessionSummaryRecord, String>,
     pub node_id: __sdk::__query_builder::IxCol<SessionSummaryRecord, String>,
+    pub owner_id: __sdk::__query_builder::IxCol<SessionSummaryRecord, Option<String>>,
+    pub principal_id: __sdk::__query_builder::IxCol<SessionSummaryRecord, Option<String>>,
     pub session_id: __sdk::__query_builder::IxCol<SessionSummaryRecord, String>,
     pub summary_id: __sdk::__query_builder::IxCol<SessionSummaryRecord, String>,
     pub user_id: __sdk::__query_builder::IxCol<SessionSummaryRecord, Option<String>>,
@@ -65,6 +73,8 @@ impl __sdk::__query_builder::HasIxCols for SessionSummaryRecord {
         SessionSummaryRecordIxCols {
             created_at: __sdk::__query_builder::IxCol::new(table_name, "created_at"),
             node_id: __sdk::__query_builder::IxCol::new(table_name, "node_id"),
+            owner_id: __sdk::__query_builder::IxCol::new(table_name, "owner_id"),
+            principal_id: __sdk::__query_builder::IxCol::new(table_name, "principal_id"),
             session_id: __sdk::__query_builder::IxCol::new(table_name, "session_id"),
             summary_id: __sdk::__query_builder::IxCol::new(table_name, "summary_id"),
             user_id: __sdk::__query_builder::IxCol::new(table_name, "user_id"),

@@ -17,6 +17,11 @@ pub struct NodeStatus {
     pub agent_version: String,
     pub tags_json: String,
     pub max_concurrency: i64,
+    pub vram_mb: i64,
+    pub locality: String,
+    pub trust_tier: i32,
+    pub provider_keys_json: String,
+    pub model_inventory_json: String,
 }
 
 impl __sdk::InModule for NodeStatus {
@@ -37,6 +42,11 @@ pub struct NodeStatusCols {
     pub agent_version: __sdk::__query_builder::Col<NodeStatus, String>,
     pub tags_json: __sdk::__query_builder::Col<NodeStatus, String>,
     pub max_concurrency: __sdk::__query_builder::Col<NodeStatus, i64>,
+    pub vram_mb: __sdk::__query_builder::Col<NodeStatus, i64>,
+    pub locality: __sdk::__query_builder::Col<NodeStatus, String>,
+    pub trust_tier: __sdk::__query_builder::Col<NodeStatus, i32>,
+    pub provider_keys_json: __sdk::__query_builder::Col<NodeStatus, String>,
+    pub model_inventory_json: __sdk::__query_builder::Col<NodeStatus, String>,
 }
 
 impl __sdk::__query_builder::HasCols for NodeStatus {
@@ -53,6 +63,14 @@ impl __sdk::__query_builder::HasCols for NodeStatus {
             agent_version: __sdk::__query_builder::Col::new(table_name, "agent_version"),
             tags_json: __sdk::__query_builder::Col::new(table_name, "tags_json"),
             max_concurrency: __sdk::__query_builder::Col::new(table_name, "max_concurrency"),
+            vram_mb: __sdk::__query_builder::Col::new(table_name, "vram_mb"),
+            locality: __sdk::__query_builder::Col::new(table_name, "locality"),
+            trust_tier: __sdk::__query_builder::Col::new(table_name, "trust_tier"),
+            provider_keys_json: __sdk::__query_builder::Col::new(table_name, "provider_keys_json"),
+            model_inventory_json: __sdk::__query_builder::Col::new(
+                table_name,
+                "model_inventory_json",
+            ),
         }
     }
 }

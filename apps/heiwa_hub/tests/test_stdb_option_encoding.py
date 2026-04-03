@@ -216,6 +216,20 @@ def test_record_run_encodes_lease_id():
     assert _find_json_arg(cmd, "LEASE-1"), f"lease_id should be encoded in record_run: {cmd}"
 
 
+def test_register_artifact_encodes_run_id():
+    db = CaptureSpacetimeDB()
+    db.register_artifact(
+        {
+            "artifact_id": "artifact-1",
+            "run_id": "run-1",
+            "mission_id": "task-1",
+            "artifact_type": "log",
+        }
+    )
+    cmd = db.commands[-1]
+    assert _find_json_arg(cmd, {"some": "run-1"}), f"run_id should encode as option some: {cmd}"
+
+
 def test_insert_execution_memory_encodes_lease_id():
     db = CaptureSpacetimeDB()
     db.insert_execution_memory(

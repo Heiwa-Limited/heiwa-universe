@@ -23,6 +23,8 @@ pub(super) struct StartCellRunArgs {
     pub tokens_total: i64,
     pub output_summary: Option<String>,
     pub user_id: Option<String>,
+    pub owner_id: Option<String>,
+    pub principal_id: Option<String>,
 }
 
 impl From<StartCellRunArgs> for super::Reducer {
@@ -44,6 +46,8 @@ impl From<StartCellRunArgs> for super::Reducer {
             tokens_total: args.tokens_total,
             output_summary: args.output_summary,
             user_id: args.user_id,
+            owner_id: args.owner_id,
+            principal_id: args.principal_id,
         }
     }
 }
@@ -81,6 +85,8 @@ pub trait start_cell_run {
         tokens_total: i64,
         output_summary: Option<String>,
         user_id: Option<String>,
+        owner_id: Option<String>,
+        principal_id: Option<String>,
     ) -> __sdk::Result<()> {
         self.start_cell_run_then(
             cell_run_id,
@@ -99,6 +105,8 @@ pub trait start_cell_run {
             tokens_total,
             output_summary,
             user_id,
+            owner_id,
+            principal_id,
             |_, _| {},
         )
     }
@@ -127,6 +135,8 @@ pub trait start_cell_run {
         tokens_total: i64,
         output_summary: Option<String>,
         user_id: Option<String>,
+        owner_id: Option<String>,
+        principal_id: Option<String>,
 
         callback: impl FnOnce(&super::ReducerEventContext, Result<Result<(), String>, __sdk::InternalError>)
             + Send
@@ -153,6 +163,8 @@ impl start_cell_run for super::RemoteReducers {
         tokens_total: i64,
         output_summary: Option<String>,
         user_id: Option<String>,
+        owner_id: Option<String>,
+        principal_id: Option<String>,
 
         callback: impl FnOnce(&super::ReducerEventContext, Result<Result<(), String>, __sdk::InternalError>)
             + Send
@@ -176,6 +188,8 @@ impl start_cell_run for super::RemoteReducers {
                 tokens_total,
                 output_summary,
                 user_id,
+                owner_id,
+                principal_id,
             },
             callback,
         )

@@ -454,6 +454,9 @@ pub struct ArtifactRecord {
     pub artifact_id: String,
     #[index(btree)]
     pub mission_id: String,
+    #[default(None::<String>)]
+    #[index(btree)]
+    pub run_id: Option<String>,
     pub cell_run_id: Option<String>,
     #[index(btree)]
     pub artifact_type: String,
@@ -2077,6 +2080,7 @@ pub fn register_artifact(
     ctx: &ReducerContext,
     artifact_id: String,
     lease_id: Option<String>,
+    run_id: Option<String>,
     user_id: String,
     mission_id: String,
     cell_run_id: Option<String>,
@@ -2092,6 +2096,7 @@ pub fn register_artifact(
     let row = ArtifactRecord {
         artifact_id: artifact_id.clone(),
         mission_id,
+        run_id: option_if_not_blank(run_id),
         cell_run_id,
         artifact_type,
         title,

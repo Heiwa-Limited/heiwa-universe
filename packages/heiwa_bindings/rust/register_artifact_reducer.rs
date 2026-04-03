@@ -9,6 +9,7 @@ use spacetimedb_sdk::__codegen::{self as __sdk, __lib, __sats, __ws};
 pub(super) struct RegisterArtifactArgs {
     pub artifact_id: String,
     pub lease_id: Option<String>,
+    pub run_id: Option<String>,
     pub user_id: String,
     pub mission_id: String,
     pub cell_run_id: Option<String>,
@@ -18,6 +19,8 @@ pub(super) struct RegisterArtifactArgs {
     pub path: Option<String>,
     pub content_json: String,
     pub created_at: String,
+    pub owner_id: Option<String>,
+    pub principal_id: Option<String>,
 }
 
 impl From<RegisterArtifactArgs> for super::Reducer {
@@ -25,6 +28,7 @@ impl From<RegisterArtifactArgs> for super::Reducer {
         Self::RegisterArtifact {
             artifact_id: args.artifact_id,
             lease_id: args.lease_id,
+            run_id: args.run_id,
             user_id: args.user_id,
             mission_id: args.mission_id,
             cell_run_id: args.cell_run_id,
@@ -34,6 +38,8 @@ impl From<RegisterArtifactArgs> for super::Reducer {
             path: args.path,
             content_json: args.content_json,
             created_at: args.created_at,
+            owner_id: args.owner_id,
+            principal_id: args.principal_id,
         }
     }
 }
@@ -57,6 +63,7 @@ pub trait register_artifact {
         &self,
         artifact_id: String,
         lease_id: Option<String>,
+        run_id: Option<String>,
         user_id: String,
         mission_id: String,
         cell_run_id: Option<String>,
@@ -66,10 +73,13 @@ pub trait register_artifact {
         path: Option<String>,
         content_json: String,
         created_at: String,
+        owner_id: Option<String>,
+        principal_id: Option<String>,
     ) -> __sdk::Result<()> {
         self.register_artifact_then(
             artifact_id,
             lease_id,
+            run_id,
             user_id,
             mission_id,
             cell_run_id,
@@ -79,6 +89,8 @@ pub trait register_artifact {
             path,
             content_json,
             created_at,
+            owner_id,
+            principal_id,
             |_, _| {},
         )
     }
@@ -93,6 +105,7 @@ pub trait register_artifact {
         &self,
         artifact_id: String,
         lease_id: Option<String>,
+        run_id: Option<String>,
         user_id: String,
         mission_id: String,
         cell_run_id: Option<String>,
@@ -102,6 +115,8 @@ pub trait register_artifact {
         path: Option<String>,
         content_json: String,
         created_at: String,
+        owner_id: Option<String>,
+        principal_id: Option<String>,
 
         callback: impl FnOnce(&super::ReducerEventContext, Result<Result<(), String>, __sdk::InternalError>)
             + Send
@@ -114,6 +129,7 @@ impl register_artifact for super::RemoteReducers {
         &self,
         artifact_id: String,
         lease_id: Option<String>,
+        run_id: Option<String>,
         user_id: String,
         mission_id: String,
         cell_run_id: Option<String>,
@@ -123,6 +139,8 @@ impl register_artifact for super::RemoteReducers {
         path: Option<String>,
         content_json: String,
         created_at: String,
+        owner_id: Option<String>,
+        principal_id: Option<String>,
 
         callback: impl FnOnce(&super::ReducerEventContext, Result<Result<(), String>, __sdk::InternalError>)
             + Send
@@ -132,6 +150,7 @@ impl register_artifact for super::RemoteReducers {
             RegisterArtifactArgs {
                 artifact_id,
                 lease_id,
+                run_id,
                 user_id,
                 mission_id,
                 cell_run_id,
@@ -141,6 +160,8 @@ impl register_artifact for super::RemoteReducers {
                 path,
                 content_json,
                 created_at,
+                owner_id,
+                principal_id,
             },
             callback,
         )

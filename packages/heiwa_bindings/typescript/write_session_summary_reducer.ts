@@ -18,4 +18,6 @@ export default {
   summaryText: __t.string(),
   metadataJson: __t.string(),
   userId: __t.option(__t.string()),
+  ownerId: __t.option(__t.string()),
+  principalId: __t.option(__t.string()),
 };

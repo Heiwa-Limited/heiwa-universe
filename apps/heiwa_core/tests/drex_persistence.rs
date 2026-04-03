@@ -6,7 +6,8 @@ use heiwa_core::drex::{
     DrexAuthorityGate, DrexDecision, DrexScoreCard, DrexVector, ResolutionTier, RoutePlan,
 };
 use heiwa_core::stdb::{
-    PersistedDrexDecision, PersistedDrexFailure, StdbRuntime, StdbTransport,
+    PersistedArtifact, PersistedDrexDecision, PersistedDrexFailure, PersistedRunReceipt,
+    StdbRuntime, StdbTransport,
 };
 
 #[derive(Clone, Default)]
@@ -32,6 +33,30 @@ impl StdbTransport for MemoryTransport {
             .lock()
             .unwrap()
             .push((request_id.to_string(), drex_decision_id.to_string()));
+        Ok(())
+    }
+
+    fn register_session(
+        &self,
+        _session_id: String,
+        _owner_id: Option<String>,
+        _node_id: String,
+        _session_type: String,
+        _expires_at: Option<String>,
+        _metadata_json: String,
+    ) -> Result<()> {
+        Ok(())
+    }
+
+    fn close_session(&self, _session_id: String) -> Result<()> {
+        Ok(())
+    }
+
+    fn register_artifact(&self, _artifact: PersistedArtifact) -> Result<()> {
+        Ok(())
+    }
+
+    fn record_run_receipt(&self, _receipt: PersistedRunReceipt) -> Result<()> {
         Ok(())
     }
 }

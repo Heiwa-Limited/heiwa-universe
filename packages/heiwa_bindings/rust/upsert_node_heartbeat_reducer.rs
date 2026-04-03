@@ -15,6 +15,11 @@ pub(super) struct UpsertNodeHeartbeatArgs {
     pub agent_version: String,
     pub tags_json: String,
     pub max_concurrency: i64,
+    pub vram_mb: i64,
+    pub locality: String,
+    pub trust_tier: i32,
+    pub provider_keys_json: String,
+    pub model_inventory_json: String,
 }
 
 impl From<UpsertNodeHeartbeatArgs> for super::Reducer {
@@ -28,6 +33,11 @@ impl From<UpsertNodeHeartbeatArgs> for super::Reducer {
             agent_version: args.agent_version,
             tags_json: args.tags_json,
             max_concurrency: args.max_concurrency,
+            vram_mb: args.vram_mb,
+            locality: args.locality,
+            trust_tier: args.trust_tier,
+            provider_keys_json: args.provider_keys_json,
+            model_inventory_json: args.model_inventory_json,
         }
     }
 }
@@ -57,6 +67,11 @@ pub trait upsert_node_heartbeat {
         agent_version: String,
         tags_json: String,
         max_concurrency: i64,
+        vram_mb: i64,
+        locality: String,
+        trust_tier: i32,
+        provider_keys_json: String,
+        model_inventory_json: String,
     ) -> __sdk::Result<()> {
         self.upsert_node_heartbeat_then(
             node_id,
@@ -67,6 +82,11 @@ pub trait upsert_node_heartbeat {
             agent_version,
             tags_json,
             max_concurrency,
+            vram_mb,
+            locality,
+            trust_tier,
+            provider_keys_json,
+            model_inventory_json,
             |_, _| {},
         )
     }
@@ -87,6 +107,11 @@ pub trait upsert_node_heartbeat {
         agent_version: String,
         tags_json: String,
         max_concurrency: i64,
+        vram_mb: i64,
+        locality: String,
+        trust_tier: i32,
+        provider_keys_json: String,
+        model_inventory_json: String,
 
         callback: impl FnOnce(&super::ReducerEventContext, Result<Result<(), String>, __sdk::InternalError>)
             + Send
@@ -105,6 +130,11 @@ impl upsert_node_heartbeat for super::RemoteReducers {
         agent_version: String,
         tags_json: String,
         max_concurrency: i64,
+        vram_mb: i64,
+        locality: String,
+        trust_tier: i32,
+        provider_keys_json: String,
+        model_inventory_json: String,
 
         callback: impl FnOnce(&super::ReducerEventContext, Result<Result<(), String>, __sdk::InternalError>)
             + Send
@@ -120,6 +150,11 @@ impl upsert_node_heartbeat for super::RemoteReducers {
                 agent_version,
                 tags_json,
                 max_concurrency,
+                vram_mb,
+                locality,
+                trust_tier,
+                provider_keys_json,
+                model_inventory_json,
             },
             callback,
         )

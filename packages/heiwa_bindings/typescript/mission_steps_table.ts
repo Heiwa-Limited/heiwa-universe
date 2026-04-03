@@ -23,4 +23,6 @@ export default __t.row({
   outputJson: __t.string().name("output_json"),
   createdAt: __t.string().name("created_at"),
   updatedAt: __t.string().name("updated_at"),
+  ownerId: __t.option(__t.string()).name("owner_id"),
+  principalId: __t.option(__t.string()).name("principal_id"),
 });

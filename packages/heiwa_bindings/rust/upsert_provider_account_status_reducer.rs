@@ -21,6 +21,8 @@ pub(super) struct UpsertProviderAccountStatusArgs {
     pub last_error: Option<String>,
     pub updated_at: String,
     pub user_id: Option<String>,
+    pub owner_id: Option<String>,
+    pub principal_id: Option<String>,
 }
 
 impl From<UpsertProviderAccountStatusArgs> for super::Reducer {
@@ -40,6 +42,8 @@ impl From<UpsertProviderAccountStatusArgs> for super::Reducer {
             last_error: args.last_error,
             updated_at: args.updated_at,
             user_id: args.user_id,
+            owner_id: args.owner_id,
+            principal_id: args.principal_id,
         }
     }
 }
@@ -75,6 +79,8 @@ pub trait upsert_provider_account_status {
         last_error: Option<String>,
         updated_at: String,
         user_id: Option<String>,
+        owner_id: Option<String>,
+        principal_id: Option<String>,
     ) -> __sdk::Result<()> {
         self.upsert_provider_account_status_then(
             account_id,
@@ -91,6 +97,8 @@ pub trait upsert_provider_account_status {
             last_error,
             updated_at,
             user_id,
+            owner_id,
+            principal_id,
             |_, _| {},
         )
     }
@@ -117,6 +125,8 @@ pub trait upsert_provider_account_status {
         last_error: Option<String>,
         updated_at: String,
         user_id: Option<String>,
+        owner_id: Option<String>,
+        principal_id: Option<String>,
 
         callback: impl FnOnce(&super::ReducerEventContext, Result<Result<(), String>, __sdk::InternalError>)
             + Send
@@ -141,6 +151,8 @@ impl upsert_provider_account_status for super::RemoteReducers {
         last_error: Option<String>,
         updated_at: String,
         user_id: Option<String>,
+        owner_id: Option<String>,
+        principal_id: Option<String>,
 
         callback: impl FnOnce(&super::ReducerEventContext, Result<Result<(), String>, __sdk::InternalError>)
             + Send
@@ -162,6 +174,8 @@ impl upsert_provider_account_status for super::RemoteReducers {
                 last_error,
                 updated_at,
                 user_id,
+                owner_id,
+                principal_id,
             },
             callback,
         )

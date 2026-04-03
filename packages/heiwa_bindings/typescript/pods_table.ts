@@ -17,7 +17,6 @@ export default __t.row({
   runtimeCapabilities: __t.array(__t.string()).name("runtime_capabilities"),
   trustTier: __t.string().name("trust_tier"),
   privacyFloor: __t.string().name("privacy_floor"),
-  gpuInventory: __t.array(__t.string()).name("gpu_inventory"),
   liveness: __t.string(),
   leaseable: __t.bool(),
   registeredAt: __t.string().name("registered_at"),

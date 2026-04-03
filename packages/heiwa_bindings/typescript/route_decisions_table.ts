@@ -30,5 +30,8 @@ export default __t.row({
   confidence: __t.f64(),
   gatewayTransport: __t.string().name("gateway_transport"),
   createdAt: __t.string().name("created_at"),
+  drexDecisionId: __t.option(__t.string()).name("drex_decision_id"),
   userId: __t.option(__t.string()).name("user_id"),
+  ownerId: __t.option(__t.string()).name("owner_id"),
+  principalId: __t.option(__t.string()).name("principal_id"),
 });

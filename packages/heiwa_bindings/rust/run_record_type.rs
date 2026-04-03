@@ -25,6 +25,8 @@ pub struct RunRecord {
     pub cost: f64,
     pub user_id: Option<String>,
     pub lease_id: Option<String>,
+    pub owner_id: Option<String>,
+    pub principal_id: Option<String>,
 }
 
 impl __sdk::InModule for RunRecord {
@@ -53,6 +55,8 @@ pub struct RunRecordCols {
     pub cost: __sdk::__query_builder::Col<RunRecord, f64>,
     pub user_id: __sdk::__query_builder::Col<RunRecord, Option<String>>,
     pub lease_id: __sdk::__query_builder::Col<RunRecord, Option<String>>,
+    pub owner_id: __sdk::__query_builder::Col<RunRecord, Option<String>>,
+    pub principal_id: __sdk::__query_builder::Col<RunRecord, Option<String>>,
 }
 
 impl __sdk::__query_builder::HasCols for RunRecord {
@@ -83,6 +87,8 @@ impl __sdk::__query_builder::HasCols for RunRecord {
             cost: __sdk::__query_builder::Col::new(table_name, "cost"),
             user_id: __sdk::__query_builder::Col::new(table_name, "user_id"),
             lease_id: __sdk::__query_builder::Col::new(table_name, "lease_id"),
+            owner_id: __sdk::__query_builder::Col::new(table_name, "owner_id"),
+            principal_id: __sdk::__query_builder::Col::new(table_name, "principal_id"),
         }
     }
 }
@@ -94,6 +100,8 @@ pub struct RunRecordIxCols {
     pub ended_at: __sdk::__query_builder::IxCol<RunRecord, String>,
     pub lease_id: __sdk::__query_builder::IxCol<RunRecord, Option<String>>,
     pub model_id: __sdk::__query_builder::IxCol<RunRecord, String>,
+    pub owner_id: __sdk::__query_builder::IxCol<RunRecord, Option<String>>,
+    pub principal_id: __sdk::__query_builder::IxCol<RunRecord, Option<String>>,
     pub proposal_id: __sdk::__query_builder::IxCol<RunRecord, String>,
     pub run_id: __sdk::__query_builder::IxCol<RunRecord, String>,
     pub status: __sdk::__query_builder::IxCol<RunRecord, String>,
@@ -107,6 +115,8 @@ impl __sdk::__query_builder::HasIxCols for RunRecord {
             ended_at: __sdk::__query_builder::IxCol::new(table_name, "ended_at"),
             lease_id: __sdk::__query_builder::IxCol::new(table_name, "lease_id"),
             model_id: __sdk::__query_builder::IxCol::new(table_name, "model_id"),
+            owner_id: __sdk::__query_builder::IxCol::new(table_name, "owner_id"),
+            principal_id: __sdk::__query_builder::IxCol::new(table_name, "principal_id"),
             proposal_id: __sdk::__query_builder::IxCol::new(table_name, "proposal_id"),
             run_id: __sdk::__query_builder::IxCol::new(table_name, "run_id"),
             status: __sdk::__query_builder::IxCol::new(table_name, "status"),

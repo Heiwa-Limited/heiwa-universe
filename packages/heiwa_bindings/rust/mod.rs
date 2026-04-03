@@ -10,15 +10,20 @@ pub mod add_approval_request_reducer;
 pub mod add_proposal_reducer;
 pub mod agent_registry_entry_type;
 pub mod agent_registry_table;
+pub mod append_event_reducer;
 pub mod append_mission_step_reducer;
 pub mod approval_decision_type;
 pub mod approval_decisions_table;
 pub mod approval_request_type;
 pub mod approval_requests_table;
 pub mod approve_proposal_reducer;
+pub mod archive_battlefield_reducer;
 pub mod artifact_record_type;
 pub mod artifacts_table;
 pub mod assign_proposal_reducer;
+pub mod attach_drex_decision_to_route_reducer;
+pub mod battlefield_record_type;
+pub mod battlefields_table;
 pub mod billing_event_type;
 pub mod billing_events_table;
 pub mod capability_lease_type;
@@ -45,11 +50,19 @@ pub mod discord_interaction_type;
 pub mod discord_interactions_table;
 pub mod discord_user_type;
 pub mod discord_users_table;
+pub mod drex_decision_row_type;
+pub mod drex_decisions_table;
+pub mod drex_failure_row_type;
+pub mod drex_failures_table;
+pub mod event_record_type;
+pub mod events_table;
 pub mod execution_memory_table;
 pub mod execution_memory_type;
 pub mod expire_proposal_reducer;
 pub mod fail_mission_reducer;
 pub mod finish_cell_run_reducer;
+pub mod gpu_slot_type;
+pub mod gpu_slots_table;
 pub mod insert_captain_directive_reducer;
 pub mod insert_captain_message_reducer;
 pub mod insert_captain_summary_reducer;
@@ -95,6 +108,8 @@ pub mod rate_group_state_type;
 pub mod record_approval_decision_reducer;
 pub mod record_billing_event_reducer;
 pub mod record_consent_reducer;
+pub mod record_drex_decision_reducer;
+pub mod record_drex_failure_reducer;
 pub mod record_interaction_reducer;
 pub mod record_proposal_heartbeat_reducer;
 pub mod record_route_decision_reducer;
@@ -126,8 +141,10 @@ pub mod update_pod_heartbeat_reducer;
 pub mod update_task_dispatch_status_reducer;
 pub mod update_user_seen_reducer;
 pub mod upsert_agent_registry_reducer;
+pub mod upsert_battlefield_reducer;
 pub mod upsert_captain_focus_reducer;
 pub mod upsert_discord_user_reducer;
+pub mod upsert_gpu_slot_reducer;
 pub mod upsert_liveness_state_reducer;
 pub mod upsert_model_tier_reducer;
 pub mod upsert_node_heartbeat_reducer;
@@ -143,15 +160,20 @@ pub use add_approval_request_reducer::add_approval_request;
 pub use add_proposal_reducer::add_proposal;
 pub use agent_registry_entry_type::AgentRegistryEntry;
 pub use agent_registry_table::*;
+pub use append_event_reducer::append_event;
 pub use append_mission_step_reducer::append_mission_step;
 pub use approval_decision_type::ApprovalDecision;
 pub use approval_decisions_table::*;
 pub use approval_request_type::ApprovalRequest;
 pub use approval_requests_table::*;
 pub use approve_proposal_reducer::approve_proposal;
+pub use archive_battlefield_reducer::archive_battlefield;
 pub use artifact_record_type::ArtifactRecord;
 pub use artifacts_table::*;
 pub use assign_proposal_reducer::assign_proposal;
+pub use attach_drex_decision_to_route_reducer::attach_drex_decision_to_route;
+pub use battlefield_record_type::BattlefieldRecord;
+pub use battlefields_table::*;
 pub use billing_event_type::BillingEvent;
 pub use billing_events_table::*;
 pub use capability_lease_type::CapabilityLease;
@@ -178,11 +200,19 @@ pub use discord_interaction_type::DiscordInteraction;
 pub use discord_interactions_table::*;
 pub use discord_user_type::DiscordUser;
 pub use discord_users_table::*;
+pub use drex_decision_row_type::DrexDecisionRow;
+pub use drex_decisions_table::*;
+pub use drex_failure_row_type::DrexFailureRow;
+pub use drex_failures_table::*;
+pub use event_record_type::EventRecord;
+pub use events_table::*;
 pub use execution_memory_table::*;
 pub use execution_memory_type::ExecutionMemory;
 pub use expire_proposal_reducer::expire_proposal;
 pub use fail_mission_reducer::fail_mission;
 pub use finish_cell_run_reducer::finish_cell_run;
+pub use gpu_slot_type::GpuSlot;
+pub use gpu_slots_table::*;
 pub use insert_captain_directive_reducer::insert_captain_directive;
 pub use insert_captain_message_reducer::insert_captain_message;
 pub use insert_captain_summary_reducer::insert_captain_summary;
@@ -228,6 +258,8 @@ pub use rate_group_state_type::RateGroupState;
 pub use record_approval_decision_reducer::record_approval_decision;
 pub use record_billing_event_reducer::record_billing_event;
 pub use record_consent_reducer::record_consent;
+pub use record_drex_decision_reducer::record_drex_decision;
+pub use record_drex_failure_reducer::record_drex_failure;
 pub use record_interaction_reducer::record_interaction;
 pub use record_proposal_heartbeat_reducer::record_proposal_heartbeat;
 pub use record_route_decision_reducer::record_route_decision;
@@ -259,8 +291,10 @@ pub use update_pod_heartbeat_reducer::update_pod_heartbeat;
 pub use update_task_dispatch_status_reducer::update_task_dispatch_status;
 pub use update_user_seen_reducer::update_user_seen;
 pub use upsert_agent_registry_reducer::upsert_agent_registry;
+pub use upsert_battlefield_reducer::upsert_battlefield;
 pub use upsert_captain_focus_reducer::upsert_captain_focus;
 pub use upsert_discord_user_reducer::upsert_discord_user;
+pub use upsert_gpu_slot_reducer::upsert_gpu_slot;
 pub use upsert_liveness_state_reducer::upsert_liveness_state;
 pub use upsert_model_tier_reducer::upsert_model_tier;
 pub use upsert_node_heartbeat_reducer::upsert_node_heartbeat;
@@ -308,6 +342,19 @@ pub enum Reducer {
         expires_at: Option<String>,
         eligibility_snapshot: Option<String>,
         user_id: Option<String>,
+        owner_id: Option<String>,
+        principal_id: Option<String>,
+    },
+    AppendEvent {
+        event_id: String,
+        owner_id: Option<String>,
+        principal_id: Option<String>,
+        session_id: Option<String>,
+        mission_id: Option<String>,
+        battlefield_id: Option<String>,
+        event_type: String,
+        payload_json: String,
+        created_at: String,
     },
     AppendMissionStep {
         step_id: String,
@@ -322,12 +369,17 @@ pub enum Reducer {
         output_json: String,
         created_at: String,
         updated_at: String,
+        owner_id: Option<String>,
+        principal_id: Option<String>,
     },
     ApproveProposal {
         proposal_id: String,
         approved_at: String,
         expires_at: Option<String>,
         proposal_hash: String,
+    },
+    ArchiveBattlefield {
+        battlefield_id: String,
     },
     AssignProposal {
         proposal_id: String,
@@ -337,6 +389,10 @@ pub enum Reducer {
         proposal_hash: String,
         attempt_count: i64,
         eligibility_snapshot: Option<String>,
+    },
+    AttachDrexDecisionToRoute {
+        request_id: String,
+        drex_decision_id: String,
     },
     ClaimProposal {
         proposal_id: String,
@@ -371,6 +427,8 @@ pub enum Reducer {
         error: Option<String>,
         metadata_json: String,
         user_id: Option<String>,
+        owner_id: Option<String>,
+        principal_id: Option<String>,
     },
     CreateTaskDispatch {
         task_id: String,
@@ -468,6 +526,8 @@ pub enum Reducer {
         issued_at: String,
         expires_at: String,
         hub_signature: String,
+        owner_id: Option<String>,
+        principal_id: Option<String>,
     },
     LinkOauthIdentity {
         identity_id: String,
@@ -543,6 +603,42 @@ pub enum Reducer {
         approved_at: Option<String>,
         expires_at: Option<String>,
     },
+    RecordDrexDecision {
+        decision_id: String,
+        request_id: String,
+        task_id: String,
+        active_tier: String,
+        route_runtime: String,
+        route_model: String,
+        scope: f64,
+        abstraction: f64,
+        context_span: f64,
+        execution_proximity: f64,
+        blast_radius: f64,
+        coordination_load: f64,
+        latency_pressure: f64,
+        macro_score: f64,
+        meso_score: f64,
+        micro_score: f64,
+        score_confidence: f64,
+        authority_required: String,
+        requires_approval: bool,
+        reasons_json: String,
+        vector_json: String,
+        scorecard_json: String,
+        gate_json: String,
+        policy_version: String,
+        created_at_ms: u64,
+    },
+    RecordDrexFailure {
+        decision_id: String,
+        request_id: String,
+        failure_mode: String,
+        stage: String,
+        details_json: String,
+        recovered: bool,
+        created_at_ms: u64,
+    },
     RecordInteraction {
         user_id: u64,
         channel_id: u64,
@@ -576,6 +672,9 @@ pub enum Reducer {
         gateway_transport: String,
         created_at: String,
         user_id: Option<String>,
+        owner_id: Option<String>,
+        principal_id: Option<String>,
+        drex_decision_id: Option<String>,
     },
     RecordRun {
         run_id: String,
@@ -596,10 +695,13 @@ pub enum Reducer {
         tokens_output: i64,
         tokens_total: i64,
         cost: f64,
+        owner_id: Option<String>,
+        principal_id: Option<String>,
     },
     RegisterArtifact {
         artifact_id: String,
         lease_id: Option<String>,
+        run_id: Option<String>,
         user_id: String,
         mission_id: String,
         cell_run_id: Option<String>,
@@ -609,6 +711,8 @@ pub enum Reducer {
         path: Option<String>,
         content_json: String,
         created_at: String,
+        owner_id: Option<String>,
+        principal_id: Option<String>,
     },
     RegisterDiscordChannel {
         channel_id: u64,
@@ -670,6 +774,8 @@ pub enum Reducer {
         tokens_total: i64,
         output_summary: Option<String>,
         user_id: Option<String>,
+        owner_id: Option<String>,
+        principal_id: Option<String>,
     },
     StoreProviderCredential {
         credential_id: String,
@@ -709,6 +815,18 @@ pub enum Reducer {
         sandbox_mode: String,
         active: bool,
     },
+    UpsertBattlefield {
+        battlefield_id: String,
+        owner_id: Option<String>,
+        principal_id: Option<String>,
+        name: String,
+        repo_url: Option<String>,
+        root_path: Option<String>,
+        node_id: Option<String>,
+        status: String,
+        created_at: Option<String>,
+        last_active_at: Option<String>,
+    },
     UpsertCaptainFocus {
         focus_id: String,
         topic: String,
@@ -719,6 +837,14 @@ pub enum Reducer {
         user_id: u64,
         username: String,
         trust_score: f32,
+    },
+    UpsertGpuSlot {
+        slot_id: String,
+        pod_id: String,
+        gpu_type: String,
+        vram_gb: i64,
+        loaded_models: Vec<String>,
+        available_slots: i64,
     },
     UpsertLivenessState {
         key: String,
@@ -736,6 +862,9 @@ pub enum Reducer {
         cost_per_turn: f64,
         max_context_tokens: u32,
         strengths_json: String,
+        vram_requirement_mb: u32,
+        quantization_type: String,
+        kv_cache_strategy: String,
         enabled: bool,
     },
     UpsertNodeHeartbeat {
@@ -747,6 +876,11 @@ pub enum Reducer {
         agent_version: String,
         tags_json: String,
         max_concurrency: i64,
+        vram_mb: i64,
+        locality: String,
+        trust_tier: i32,
+        provider_keys_json: String,
+        model_inventory_json: String,
     },
     UpsertNodeRegistry {
         node_id: String,
@@ -762,7 +896,6 @@ pub enum Reducer {
         runtime_capabilities: Vec<String>,
         trust_tier: String,
         privacy_floor: String,
-        gpu_inventory: Vec<String>,
         liveness: String,
         leaseable: bool,
         registered_at: String,
@@ -783,6 +916,8 @@ pub enum Reducer {
         last_error: Option<String>,
         updated_at: String,
         user_id: Option<String>,
+        owner_id: Option<String>,
+        principal_id: Option<String>,
     },
     UpsertRateGroupState {
         rate_group: String,
@@ -800,6 +935,8 @@ pub enum Reducer {
         summary_text: String,
         metadata_json: String,
         user_id: Option<String>,
+        owner_id: Option<String>,
+        principal_id: Option<String>,
     },
 }
 
@@ -812,9 +949,12 @@ impl __sdk::Reducer for Reducer {
         match self {
             Reducer::AddApprovalRequest { .. } => "add_approval_request",
             Reducer::AddProposal { .. } => "add_proposal",
+            Reducer::AppendEvent { .. } => "append_event",
             Reducer::AppendMissionStep { .. } => "append_mission_step",
             Reducer::ApproveProposal { .. } => "approve_proposal",
+            Reducer::ArchiveBattlefield { .. } => "archive_battlefield",
             Reducer::AssignProposal { .. } => "assign_proposal",
+            Reducer::AttachDrexDecisionToRoute { .. } => "attach_drex_decision_to_route",
             Reducer::ClaimProposal { .. } => "claim_proposal",
             Reducer::ClaimTask { .. } => "claim_task",
             Reducer::CompleteMission { .. } => "complete_mission",
@@ -840,6 +980,8 @@ impl __sdk::Reducer for Reducer {
             Reducer::RecordApprovalDecision { .. } => "record_approval_decision",
             Reducer::RecordBillingEvent { .. } => "record_billing_event",
             Reducer::RecordConsent { .. } => "record_consent",
+            Reducer::RecordDrexDecision { .. } => "record_drex_decision",
+            Reducer::RecordDrexFailure { .. } => "record_drex_failure",
             Reducer::RecordInteraction { .. } => "record_interaction",
             Reducer::RecordProposalHeartbeat { .. } => "record_proposal_heartbeat",
             Reducer::RecordRouteDecision { .. } => "record_route_decision",
@@ -862,8 +1004,10 @@ impl __sdk::Reducer for Reducer {
             Reducer::UpdateTaskDispatchStatus { .. } => "update_task_dispatch_status",
             Reducer::UpdateUserSeen { .. } => "update_user_seen",
             Reducer::UpsertAgentRegistry { .. } => "upsert_agent_registry",
+            Reducer::UpsertBattlefield { .. } => "upsert_battlefield",
             Reducer::UpsertCaptainFocus { .. } => "upsert_captain_focus",
             Reducer::UpsertDiscordUser { .. } => "upsert_discord_user",
+            Reducer::UpsertGpuSlot { .. } => "upsert_gpu_slot",
             Reducer::UpsertLivenessState { .. } => "upsert_liveness_state",
             Reducer::UpsertModelTier { .. } => "upsert_model_tier",
             Reducer::UpsertNodeHeartbeat { .. } => "upsert_node_heartbeat",
@@ -915,6 +1059,8 @@ impl __sdk::Reducer for Reducer {
                 expires_at,
                 eligibility_snapshot,
                 user_id,
+                owner_id,
+                principal_id,
             } => __sats::bsatn::to_vec(&add_proposal_reducer::AddProposalArgs {
                 proposal_id: proposal_id.clone(),
                 created_at: created_at.clone(),
@@ -933,6 +1079,29 @@ impl __sdk::Reducer for Reducer {
                 expires_at: expires_at.clone(),
                 eligibility_snapshot: eligibility_snapshot.clone(),
                 user_id: user_id.clone(),
+                owner_id: owner_id.clone(),
+                principal_id: principal_id.clone(),
+            }),
+            Reducer::AppendEvent {
+                event_id,
+                owner_id,
+                principal_id,
+                session_id,
+                mission_id,
+                battlefield_id,
+                event_type,
+                payload_json,
+                created_at,
+            } => __sats::bsatn::to_vec(&append_event_reducer::AppendEventArgs {
+                event_id: event_id.clone(),
+                owner_id: owner_id.clone(),
+                principal_id: principal_id.clone(),
+                session_id: session_id.clone(),
+                mission_id: mission_id.clone(),
+                battlefield_id: battlefield_id.clone(),
+                event_type: event_type.clone(),
+                payload_json: payload_json.clone(),
+                created_at: created_at.clone(),
             }),
             Reducer::AppendMissionStep {
                 step_id,
@@ -947,6 +1116,8 @@ impl __sdk::Reducer for Reducer {
                 output_json,
                 created_at,
                 updated_at,
+                owner_id,
+                principal_id,
             } => __sats::bsatn::to_vec(&append_mission_step_reducer::AppendMissionStepArgs {
                 step_id: step_id.clone(),
                 mission_id: mission_id.clone(),
@@ -960,6 +1131,8 @@ impl __sdk::Reducer for Reducer {
                 output_json: output_json.clone(),
                 created_at: created_at.clone(),
                 updated_at: updated_at.clone(),
+                owner_id: owner_id.clone(),
+                principal_id: principal_id.clone(),
             }),
             Reducer::ApproveProposal {
                 proposal_id,
@@ -972,6 +1145,11 @@ impl __sdk::Reducer for Reducer {
                 expires_at: expires_at.clone(),
                 proposal_hash: proposal_hash.clone(),
             }),
+            Reducer::ArchiveBattlefield { battlefield_id } => {
+                __sats::bsatn::to_vec(&archive_battlefield_reducer::ArchiveBattlefieldArgs {
+                    battlefield_id: battlefield_id.clone(),
+                })
+            }
             Reducer::AssignProposal {
                 proposal_id,
                 assigned_node_id,
@@ -989,6 +1167,15 @@ impl __sdk::Reducer for Reducer {
                 attempt_count: attempt_count.clone(),
                 eligibility_snapshot: eligibility_snapshot.clone(),
             }),
+            Reducer::AttachDrexDecisionToRoute {
+                request_id,
+                drex_decision_id,
+            } => __sats::bsatn::to_vec(
+                &attach_drex_decision_to_route_reducer::AttachDrexDecisionToRouteArgs {
+                    request_id: request_id.clone(),
+                    drex_decision_id: drex_decision_id.clone(),
+                },
+            ),
             Reducer::ClaimProposal {
                 proposal_id,
                 node_id,
@@ -1033,6 +1220,8 @@ impl __sdk::Reducer for Reducer {
                 error,
                 metadata_json,
                 user_id,
+                owner_id,
+                principal_id,
             } => __sats::bsatn::to_vec(&create_mission_reducer::CreateMissionArgs {
                 mission_id: mission_id.clone(),
                 created_at: created_at.clone(),
@@ -1051,6 +1240,8 @@ impl __sdk::Reducer for Reducer {
                 error: error.clone(),
                 metadata_json: metadata_json.clone(),
                 user_id: user_id.clone(),
+                owner_id: owner_id.clone(),
+                principal_id: principal_id.clone(),
             }),
             Reducer::CreateTaskDispatch {
                 task_id,
@@ -1221,6 +1412,8 @@ impl __sdk::Reducer for Reducer {
                 issued_at,
                 expires_at,
                 hub_signature,
+                owner_id,
+                principal_id,
             } => __sats::bsatn::to_vec(&issue_capability_lease_reducer::IssueCapabilityLeaseArgs {
                 lease_id: lease_id.clone(),
                 proposal_id: proposal_id.clone(),
@@ -1240,6 +1433,8 @@ impl __sdk::Reducer for Reducer {
                 issued_at: issued_at.clone(),
                 expires_at: expires_at.clone(),
                 hub_signature: hub_signature.clone(),
+                owner_id: owner_id.clone(),
+                principal_id: principal_id.clone(),
             }),
             Reducer::LinkOauthIdentity {
                 identity_id,
@@ -1383,6 +1578,76 @@ impl __sdk::Reducer for Reducer {
                 approved_at: approved_at.clone(),
                 expires_at: expires_at.clone(),
             }),
+            Reducer::RecordDrexDecision {
+                decision_id,
+                request_id,
+                task_id,
+                active_tier,
+                route_runtime,
+                route_model,
+                scope,
+                abstraction,
+                context_span,
+                execution_proximity,
+                blast_radius,
+                coordination_load,
+                latency_pressure,
+                macro_score,
+                meso_score,
+                micro_score,
+                score_confidence,
+                authority_required,
+                requires_approval,
+                reasons_json,
+                vector_json,
+                scorecard_json,
+                gate_json,
+                policy_version,
+                created_at_ms,
+            } => __sats::bsatn::to_vec(&record_drex_decision_reducer::RecordDrexDecisionArgs {
+                decision_id: decision_id.clone(),
+                request_id: request_id.clone(),
+                task_id: task_id.clone(),
+                active_tier: active_tier.clone(),
+                route_runtime: route_runtime.clone(),
+                route_model: route_model.clone(),
+                scope: scope.clone(),
+                abstraction: abstraction.clone(),
+                context_span: context_span.clone(),
+                execution_proximity: execution_proximity.clone(),
+                blast_radius: blast_radius.clone(),
+                coordination_load: coordination_load.clone(),
+                latency_pressure: latency_pressure.clone(),
+                macro_score: macro_score.clone(),
+                meso_score: meso_score.clone(),
+                micro_score: micro_score.clone(),
+                score_confidence: score_confidence.clone(),
+                authority_required: authority_required.clone(),
+                requires_approval: requires_approval.clone(),
+                reasons_json: reasons_json.clone(),
+                vector_json: vector_json.clone(),
+                scorecard_json: scorecard_json.clone(),
+                gate_json: gate_json.clone(),
+                policy_version: policy_version.clone(),
+                created_at_ms: created_at_ms.clone(),
+            }),
+            Reducer::RecordDrexFailure {
+                decision_id,
+                request_id,
+                failure_mode,
+                stage,
+                details_json,
+                recovered,
+                created_at_ms,
+            } => __sats::bsatn::to_vec(&record_drex_failure_reducer::RecordDrexFailureArgs {
+                decision_id: decision_id.clone(),
+                request_id: request_id.clone(),
+                failure_mode: failure_mode.clone(),
+                stage: stage.clone(),
+                details_json: details_json.clone(),
+                recovered: recovered.clone(),
+                created_at_ms: created_at_ms.clone(),
+            }),
             Reducer::RecordInteraction {
                 user_id,
                 channel_id,
@@ -1428,6 +1693,9 @@ impl __sdk::Reducer for Reducer {
                 gateway_transport,
                 created_at,
                 user_id,
+                owner_id,
+                principal_id,
+                drex_decision_id,
             } => __sats::bsatn::to_vec(&record_route_decision_reducer::RecordRouteDecisionArgs {
                 request_id: request_id.clone(),
                 task_id: task_id.clone(),
@@ -1449,6 +1717,9 @@ impl __sdk::Reducer for Reducer {
                 gateway_transport: gateway_transport.clone(),
                 created_at: created_at.clone(),
                 user_id: user_id.clone(),
+                owner_id: owner_id.clone(),
+                principal_id: principal_id.clone(),
+                drex_decision_id: drex_decision_id.clone(),
             }),
             Reducer::RecordRun {
                 run_id,
@@ -1469,6 +1740,8 @@ impl __sdk::Reducer for Reducer {
                 tokens_output,
                 tokens_total,
                 cost,
+                owner_id,
+                principal_id,
             } => __sats::bsatn::to_vec(&record_run_reducer::RecordRunArgs {
                 run_id: run_id.clone(),
                 user_id: user_id.clone(),
@@ -1488,10 +1761,13 @@ impl __sdk::Reducer for Reducer {
                 tokens_output: tokens_output.clone(),
                 tokens_total: tokens_total.clone(),
                 cost: cost.clone(),
+                owner_id: owner_id.clone(),
+                principal_id: principal_id.clone(),
             }),
             Reducer::RegisterArtifact {
                 artifact_id,
                 lease_id,
+                run_id,
                 user_id,
                 mission_id,
                 cell_run_id,
@@ -1501,9 +1777,12 @@ impl __sdk::Reducer for Reducer {
                 path,
                 content_json,
                 created_at,
+                owner_id,
+                principal_id,
             } => __sats::bsatn::to_vec(&register_artifact_reducer::RegisterArtifactArgs {
                 artifact_id: artifact_id.clone(),
                 lease_id: lease_id.clone(),
+                run_id: run_id.clone(),
                 user_id: user_id.clone(),
                 mission_id: mission_id.clone(),
                 cell_run_id: cell_run_id.clone(),
@@ -1513,6 +1792,8 @@ impl __sdk::Reducer for Reducer {
                 path: path.clone(),
                 content_json: content_json.clone(),
                 created_at: created_at.clone(),
+                owner_id: owner_id.clone(),
+                principal_id: principal_id.clone(),
             }),
             Reducer::RegisterDiscordChannel {
                 channel_id,
@@ -1612,6 +1893,8 @@ impl __sdk::Reducer for Reducer {
                 tokens_total,
                 output_summary,
                 user_id,
+                owner_id,
+                principal_id,
             } => __sats::bsatn::to_vec(&start_cell_run_reducer::StartCellRunArgs {
                 cell_run_id: cell_run_id.clone(),
                 mission_id: mission_id.clone(),
@@ -1629,6 +1912,8 @@ impl __sdk::Reducer for Reducer {
                 tokens_total: tokens_total.clone(),
                 output_summary: output_summary.clone(),
                 user_id: user_id.clone(),
+                owner_id: owner_id.clone(),
+                principal_id: principal_id.clone(),
             }),
             Reducer::StoreProviderCredential {
                 credential_id,
@@ -1706,6 +1991,29 @@ impl __sdk::Reducer for Reducer {
                 sandbox_mode: sandbox_mode.clone(),
                 active: active.clone(),
             }),
+            Reducer::UpsertBattlefield {
+                battlefield_id,
+                owner_id,
+                principal_id,
+                name,
+                repo_url,
+                root_path,
+                node_id,
+                status,
+                created_at,
+                last_active_at,
+            } => __sats::bsatn::to_vec(&upsert_battlefield_reducer::UpsertBattlefieldArgs {
+                battlefield_id: battlefield_id.clone(),
+                owner_id: owner_id.clone(),
+                principal_id: principal_id.clone(),
+                name: name.clone(),
+                repo_url: repo_url.clone(),
+                root_path: root_path.clone(),
+                node_id: node_id.clone(),
+                status: status.clone(),
+                created_at: created_at.clone(),
+                last_active_at: last_active_at.clone(),
+            }),
             Reducer::UpsertCaptainFocus {
                 focus_id,
                 topic,
@@ -1725,6 +2033,21 @@ impl __sdk::Reducer for Reducer {
                 user_id: user_id.clone(),
                 username: username.clone(),
                 trust_score: trust_score.clone(),
+            }),
+            Reducer::UpsertGpuSlot {
+                slot_id,
+                pod_id,
+                gpu_type,
+                vram_gb,
+                loaded_models,
+                available_slots,
+            } => __sats::bsatn::to_vec(&upsert_gpu_slot_reducer::UpsertGpuSlotArgs {
+                slot_id: slot_id.clone(),
+                pod_id: pod_id.clone(),
+                gpu_type: gpu_type.clone(),
+                vram_gb: vram_gb.clone(),
+                loaded_models: loaded_models.clone(),
+                available_slots: available_slots.clone(),
             }),
             Reducer::UpsertLivenessState {
                 key,
@@ -1746,6 +2069,9 @@ impl __sdk::Reducer for Reducer {
                 cost_per_turn,
                 max_context_tokens,
                 strengths_json,
+                vram_requirement_mb,
+                quantization_type,
+                kv_cache_strategy,
                 enabled,
             } => __sats::bsatn::to_vec(&upsert_model_tier_reducer::UpsertModelTierArgs {
                 model_id: model_id.clone(),
@@ -1758,6 +2084,9 @@ impl __sdk::Reducer for Reducer {
                 cost_per_turn: cost_per_turn.clone(),
                 max_context_tokens: max_context_tokens.clone(),
                 strengths_json: strengths_json.clone(),
+                vram_requirement_mb: vram_requirement_mb.clone(),
+                quantization_type: quantization_type.clone(),
+                kv_cache_strategy: kv_cache_strategy.clone(),
                 enabled: enabled.clone(),
             }),
             Reducer::UpsertNodeHeartbeat {
@@ -1769,6 +2098,11 @@ impl __sdk::Reducer for Reducer {
                 agent_version,
                 tags_json,
                 max_concurrency,
+                vram_mb,
+                locality,
+                trust_tier,
+                provider_keys_json,
+                model_inventory_json,
             } => __sats::bsatn::to_vec(&upsert_node_heartbeat_reducer::UpsertNodeHeartbeatArgs {
                 node_id: node_id.clone(),
                 last_heartbeat_at: last_heartbeat_at.clone(),
@@ -1778,6 +2112,11 @@ impl __sdk::Reducer for Reducer {
                 agent_version: agent_version.clone(),
                 tags_json: tags_json.clone(),
                 max_concurrency: max_concurrency.clone(),
+                vram_mb: vram_mb.clone(),
+                locality: locality.clone(),
+                trust_tier: trust_tier.clone(),
+                provider_keys_json: provider_keys_json.clone(),
+                model_inventory_json: model_inventory_json.clone(),
             }),
             Reducer::UpsertNodeRegistry {
                 node_id,
@@ -1799,7 +2138,6 @@ impl __sdk::Reducer for Reducer {
                 runtime_capabilities,
                 trust_tier,
                 privacy_floor,
-                gpu_inventory,
                 liveness,
                 leaseable,
                 registered_at,
@@ -1811,7 +2149,6 @@ impl __sdk::Reducer for Reducer {
                 runtime_capabilities: runtime_capabilities.clone(),
                 trust_tier: trust_tier.clone(),
                 privacy_floor: privacy_floor.clone(),
-                gpu_inventory: gpu_inventory.clone(),
                 liveness: liveness.clone(),
                 leaseable: leaseable.clone(),
                 registered_at: registered_at.clone(),
@@ -1832,6 +2169,8 @@ impl __sdk::Reducer for Reducer {
                 last_error,
                 updated_at,
                 user_id,
+                owner_id,
+                principal_id,
             } => __sats::bsatn::to_vec(
                 &upsert_provider_account_status_reducer::UpsertProviderAccountStatusArgs {
                     account_id: account_id.clone(),
@@ -1848,6 +2187,8 @@ impl __sdk::Reducer for Reducer {
                     last_error: last_error.clone(),
                     updated_at: updated_at.clone(),
                     user_id: user_id.clone(),
+                    owner_id: owner_id.clone(),
+                    principal_id: principal_id.clone(),
                 },
             ),
             Reducer::UpsertRateGroupState {
@@ -1875,6 +2216,8 @@ impl __sdk::Reducer for Reducer {
                 summary_text,
                 metadata_json,
                 user_id,
+                owner_id,
+                principal_id,
             } => __sats::bsatn::to_vec(&write_session_summary_reducer::WriteSessionSummaryArgs {
                 summary_id: summary_id.clone(),
                 session_id: session_id.clone(),
@@ -1883,6 +2226,8 @@ impl __sdk::Reducer for Reducer {
                 summary_text: summary_text.clone(),
                 metadata_json: metadata_json.clone(),
                 user_id: user_id.clone(),
+                owner_id: owner_id.clone(),
+                principal_id: principal_id.clone(),
             }),
             _ => unreachable!(),
         }
@@ -1897,6 +2242,7 @@ pub struct DbUpdate {
     approval_decisions: __sdk::TableUpdate<ApprovalDecision>,
     approval_requests: __sdk::TableUpdate<ApprovalRequest>,
     artifacts: __sdk::TableUpdate<ArtifactRecord>,
+    battlefields: __sdk::TableUpdate<BattlefieldRecord>,
     billing_events: __sdk::TableUpdate<BillingEvent>,
     capability_leases: __sdk::TableUpdate<CapabilityLease>,
     captain_directives: __sdk::TableUpdate<CaptainDirective>,
@@ -1907,7 +2253,11 @@ pub struct DbUpdate {
     discord_channels: __sdk::TableUpdate<DiscordChannel>,
     discord_interactions: __sdk::TableUpdate<DiscordInteraction>,
     discord_users: __sdk::TableUpdate<DiscordUser>,
+    drex_decisions: __sdk::TableUpdate<DrexDecisionRow>,
+    drex_failures: __sdk::TableUpdate<DrexFailureRow>,
+    events: __sdk::TableUpdate<EventRecord>,
     execution_memory: __sdk::TableUpdate<ExecutionMemory>,
+    gpu_slots: __sdk::TableUpdate<GpuSlot>,
     knowledge_embeddings: __sdk::TableUpdate<KnowledgeEmbedding>,
     liveness_state: __sdk::TableUpdate<LivenessState>,
     mission_steps: __sdk::TableUpdate<MissionStepRecord>,
@@ -1948,6 +2298,9 @@ impl TryFrom<__ws::v2::TransactionUpdate> for DbUpdate {
                 "artifacts" => db_update
                     .artifacts
                     .append(artifacts_table::parse_table_update(table_update)?),
+                "battlefields" => db_update
+                    .battlefields
+                    .append(battlefields_table::parse_table_update(table_update)?),
                 "billing_events" => db_update
                     .billing_events
                     .append(billing_events_table::parse_table_update(table_update)?),
@@ -1978,9 +2331,21 @@ impl TryFrom<__ws::v2::TransactionUpdate> for DbUpdate {
                 "discord_users" => db_update
                     .discord_users
                     .append(discord_users_table::parse_table_update(table_update)?),
+                "drex_decisions" => db_update
+                    .drex_decisions
+                    .append(drex_decisions_table::parse_table_update(table_update)?),
+                "drex_failures" => db_update
+                    .drex_failures
+                    .append(drex_failures_table::parse_table_update(table_update)?),
+                "events" => db_update
+                    .events
+                    .append(events_table::parse_table_update(table_update)?),
                 "execution_memory" => db_update
                     .execution_memory
                     .append(execution_memory_table::parse_table_update(table_update)?),
+                "gpu_slots" => db_update
+                    .gpu_slots
+                    .append(gpu_slots_table::parse_table_update(table_update)?),
                 "knowledge_embeddings" => db_update.knowledge_embeddings.append(
                     knowledge_embeddings_table::parse_table_update(table_update)?,
                 ),
@@ -2079,6 +2444,9 @@ impl __sdk::DbUpdate for DbUpdate {
         diff.artifacts = cache
             .apply_diff_to_table::<ArtifactRecord>("artifacts", &self.artifacts)
             .with_updates_by_pk(|row| &row.artifact_id);
+        diff.battlefields = cache
+            .apply_diff_to_table::<BattlefieldRecord>("battlefields", &self.battlefields)
+            .with_updates_by_pk(|row| &row.battlefield_id);
         diff.billing_events = cache
             .apply_diff_to_table::<BillingEvent>("billing_events", &self.billing_events)
             .with_updates_by_pk(|row| &row.id);
@@ -2112,9 +2480,21 @@ impl __sdk::DbUpdate for DbUpdate {
         diff.discord_users = cache
             .apply_diff_to_table::<DiscordUser>("discord_users", &self.discord_users)
             .with_updates_by_pk(|row| &row.user_id);
+        diff.drex_decisions = cache
+            .apply_diff_to_table::<DrexDecisionRow>("drex_decisions", &self.drex_decisions)
+            .with_updates_by_pk(|row| &row.decision_id);
+        diff.drex_failures = cache
+            .apply_diff_to_table::<DrexFailureRow>("drex_failures", &self.drex_failures)
+            .with_updates_by_pk(|row| &row.id);
+        diff.events = cache
+            .apply_diff_to_table::<EventRecord>("events", &self.events)
+            .with_updates_by_pk(|row| &row.event_id);
         diff.execution_memory = cache
             .apply_diff_to_table::<ExecutionMemory>("execution_memory", &self.execution_memory)
             .with_updates_by_pk(|row| &row.id);
+        diff.gpu_slots = cache
+            .apply_diff_to_table::<GpuSlot>("gpu_slots", &self.gpu_slots)
+            .with_updates_by_pk(|row| &row.slot_id);
         diff.knowledge_embeddings = cache
             .apply_diff_to_table::<KnowledgeEmbedding>(
                 "knowledge_embeddings",
@@ -2202,6 +2582,9 @@ impl __sdk::DbUpdate for DbUpdate {
                 "artifacts" => db_update
                     .artifacts
                     .append(__sdk::parse_row_list_as_inserts(table_rows.rows)?),
+                "battlefields" => db_update
+                    .battlefields
+                    .append(__sdk::parse_row_list_as_inserts(table_rows.rows)?),
                 "billing_events" => db_update
                     .billing_events
                     .append(__sdk::parse_row_list_as_inserts(table_rows.rows)?),
@@ -2232,8 +2615,20 @@ impl __sdk::DbUpdate for DbUpdate {
                 "discord_users" => db_update
                     .discord_users
                     .append(__sdk::parse_row_list_as_inserts(table_rows.rows)?),
+                "drex_decisions" => db_update
+                    .drex_decisions
+                    .append(__sdk::parse_row_list_as_inserts(table_rows.rows)?),
+                "drex_failures" => db_update
+                    .drex_failures
+                    .append(__sdk::parse_row_list_as_inserts(table_rows.rows)?),
+                "events" => db_update
+                    .events
+                    .append(__sdk::parse_row_list_as_inserts(table_rows.rows)?),
                 "execution_memory" => db_update
                     .execution_memory
+                    .append(__sdk::parse_row_list_as_inserts(table_rows.rows)?),
+                "gpu_slots" => db_update
+                    .gpu_slots
                     .append(__sdk::parse_row_list_as_inserts(table_rows.rows)?),
                 "knowledge_embeddings" => db_update
                     .knowledge_embeddings
@@ -2320,6 +2715,9 @@ impl __sdk::DbUpdate for DbUpdate {
                 "artifacts" => db_update
                     .artifacts
                     .append(__sdk::parse_row_list_as_deletes(table_rows.rows)?),
+                "battlefields" => db_update
+                    .battlefields
+                    .append(__sdk::parse_row_list_as_deletes(table_rows.rows)?),
                 "billing_events" => db_update
                     .billing_events
                     .append(__sdk::parse_row_list_as_deletes(table_rows.rows)?),
@@ -2350,8 +2748,20 @@ impl __sdk::DbUpdate for DbUpdate {
                 "discord_users" => db_update
                     .discord_users
                     .append(__sdk::parse_row_list_as_deletes(table_rows.rows)?),
+                "drex_decisions" => db_update
+                    .drex_decisions
+                    .append(__sdk::parse_row_list_as_deletes(table_rows.rows)?),
+                "drex_failures" => db_update
+                    .drex_failures
+                    .append(__sdk::parse_row_list_as_deletes(table_rows.rows)?),
+                "events" => db_update
+                    .events
+                    .append(__sdk::parse_row_list_as_deletes(table_rows.rows)?),
                 "execution_memory" => db_update
                     .execution_memory
+                    .append(__sdk::parse_row_list_as_deletes(table_rows.rows)?),
+                "gpu_slots" => db_update
+                    .gpu_slots
                     .append(__sdk::parse_row_list_as_deletes(table_rows.rows)?),
                 "knowledge_embeddings" => db_update
                     .knowledge_embeddings
@@ -2432,6 +2842,7 @@ pub struct AppliedDiff<'r> {
     approval_decisions: __sdk::TableAppliedDiff<'r, ApprovalDecision>,
     approval_requests: __sdk::TableAppliedDiff<'r, ApprovalRequest>,
     artifacts: __sdk::TableAppliedDiff<'r, ArtifactRecord>,
+    battlefields: __sdk::TableAppliedDiff<'r, BattlefieldRecord>,
     billing_events: __sdk::TableAppliedDiff<'r, BillingEvent>,
     capability_leases: __sdk::TableAppliedDiff<'r, CapabilityLease>,
     captain_directives: __sdk::TableAppliedDiff<'r, CaptainDirective>,
@@ -2442,7 +2853,11 @@ pub struct AppliedDiff<'r> {
     discord_channels: __sdk::TableAppliedDiff<'r, DiscordChannel>,
     discord_interactions: __sdk::TableAppliedDiff<'r, DiscordInteraction>,
     discord_users: __sdk::TableAppliedDiff<'r, DiscordUser>,
+    drex_decisions: __sdk::TableAppliedDiff<'r, DrexDecisionRow>,
+    drex_failures: __sdk::TableAppliedDiff<'r, DrexFailureRow>,
+    events: __sdk::TableAppliedDiff<'r, EventRecord>,
     execution_memory: __sdk::TableAppliedDiff<'r, ExecutionMemory>,
+    gpu_slots: __sdk::TableAppliedDiff<'r, GpuSlot>,
     knowledge_embeddings: __sdk::TableAppliedDiff<'r, KnowledgeEmbedding>,
     liveness_state: __sdk::TableAppliedDiff<'r, LivenessState>,
     mission_steps: __sdk::TableAppliedDiff<'r, MissionStepRecord>,
@@ -2492,6 +2907,11 @@ impl<'r> __sdk::AppliedDiff<'r> for AppliedDiff<'r> {
             event,
         );
         callbacks.invoke_table_row_callbacks::<ArtifactRecord>("artifacts", &self.artifacts, event);
+        callbacks.invoke_table_row_callbacks::<BattlefieldRecord>(
+            "battlefields",
+            &self.battlefields,
+            event,
+        );
         callbacks.invoke_table_row_callbacks::<BillingEvent>(
             "billing_events",
             &self.billing_events,
@@ -2538,11 +2958,23 @@ impl<'r> __sdk::AppliedDiff<'r> for AppliedDiff<'r> {
             &self.discord_users,
             event,
         );
+        callbacks.invoke_table_row_callbacks::<DrexDecisionRow>(
+            "drex_decisions",
+            &self.drex_decisions,
+            event,
+        );
+        callbacks.invoke_table_row_callbacks::<DrexFailureRow>(
+            "drex_failures",
+            &self.drex_failures,
+            event,
+        );
+        callbacks.invoke_table_row_callbacks::<EventRecord>("events", &self.events, event);
         callbacks.invoke_table_row_callbacks::<ExecutionMemory>(
             "execution_memory",
             &self.execution_memory,
             event,
         );
+        callbacks.invoke_table_row_callbacks::<GpuSlot>("gpu_slots", &self.gpu_slots, event);
         callbacks.invoke_table_row_callbacks::<KnowledgeEmbedding>(
             "knowledge_embeddings",
             &self.knowledge_embeddings,
@@ -3263,6 +3695,7 @@ impl __sdk::SpacetimeModule for RemoteModule {
         approval_decisions_table::register_table(client_cache);
         approval_requests_table::register_table(client_cache);
         artifacts_table::register_table(client_cache);
+        battlefields_table::register_table(client_cache);
         billing_events_table::register_table(client_cache);
         capability_leases_table::register_table(client_cache);
         captain_directives_table::register_table(client_cache);
@@ -3273,7 +3706,11 @@ impl __sdk::SpacetimeModule for RemoteModule {
         discord_channels_table::register_table(client_cache);
         discord_interactions_table::register_table(client_cache);
         discord_users_table::register_table(client_cache);
+        drex_decisions_table::register_table(client_cache);
+        drex_failures_table::register_table(client_cache);
+        events_table::register_table(client_cache);
         execution_memory_table::register_table(client_cache);
+        gpu_slots_table::register_table(client_cache);
         knowledge_embeddings_table::register_table(client_cache);
         liveness_state_table::register_table(client_cache);
         mission_steps_table::register_table(client_cache);
@@ -3300,6 +3737,7 @@ impl __sdk::SpacetimeModule for RemoteModule {
         "approval_decisions",
         "approval_requests",
         "artifacts",
+        "battlefields",
         "billing_events",
         "capability_leases",
         "captain_directives",
@@ -3310,7 +3748,11 @@ impl __sdk::SpacetimeModule for RemoteModule {
         "discord_channels",
         "discord_interactions",
         "discord_users",
+        "drex_decisions",
+        "drex_failures",
+        "events",
         "execution_memory",
+        "gpu_slots",
         "knowledge_embeddings",
         "liveness_state",
         "mission_steps",

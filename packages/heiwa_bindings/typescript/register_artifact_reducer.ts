@@ -13,6 +13,7 @@ import {
 export default {
   artifactId: __t.string(),
   leaseId: __t.option(__t.string()),
+  runId: __t.option(__t.string()),
   userId: __t.string(),
   missionId: __t.string(),
   cellRunId: __t.option(__t.string()),
@@ -22,4 +23,6 @@ export default {
   path: __t.option(__t.string()),
   contentJson: __t.string(),
   createdAt: __t.string(),
+  ownerId: __t.option(__t.string()),
+  principalId: __t.option(__t.string()),
 };

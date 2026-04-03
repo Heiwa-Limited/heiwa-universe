@@ -31,6 +31,8 @@ pub struct Proposal {
     pub expires_at: Option<String>,
     pub eligibility_snapshot: Option<String>,
     pub user_id: Option<String>,
+    pub owner_id: Option<String>,
+    pub principal_id: Option<String>,
 }
 
 impl __sdk::InModule for Proposal {
@@ -65,6 +67,8 @@ pub struct ProposalCols {
     pub expires_at: __sdk::__query_builder::Col<Proposal, Option<String>>,
     pub eligibility_snapshot: __sdk::__query_builder::Col<Proposal, Option<String>>,
     pub user_id: __sdk::__query_builder::Col<Proposal, Option<String>>,
+    pub owner_id: __sdk::__query_builder::Col<Proposal, Option<String>>,
+    pub principal_id: __sdk::__query_builder::Col<Proposal, Option<String>>,
 }
 
 impl __sdk::__query_builder::HasCols for Proposal {
@@ -113,6 +117,8 @@ impl __sdk::__query_builder::HasCols for Proposal {
                 "eligibility_snapshot",
             ),
             user_id: __sdk::__query_builder::Col::new(table_name, "user_id"),
+            owner_id: __sdk::__query_builder::Col::new(table_name, "owner_id"),
+            principal_id: __sdk::__query_builder::Col::new(table_name, "principal_id"),
         }
     }
 }
@@ -121,6 +127,8 @@ impl __sdk::__query_builder::HasCols for Proposal {
 ///
 /// Provides typed access to indexed columns for query building.
 pub struct ProposalIxCols {
+    pub owner_id: __sdk::__query_builder::IxCol<Proposal, Option<String>>,
+    pub principal_id: __sdk::__query_builder::IxCol<Proposal, Option<String>>,
     pub proposal_id: __sdk::__query_builder::IxCol<Proposal, String>,
     pub status: __sdk::__query_builder::IxCol<Proposal, String>,
     pub user_id: __sdk::__query_builder::IxCol<Proposal, Option<String>>,
@@ -130,6 +138,8 @@ impl __sdk::__query_builder::HasIxCols for Proposal {
     type IxCols = ProposalIxCols;
     fn ix_cols(table_name: &'static str) -> Self::IxCols {
         ProposalIxCols {
+            owner_id: __sdk::__query_builder::IxCol::new(table_name, "owner_id"),
+            principal_id: __sdk::__query_builder::IxCol::new(table_name, "principal_id"),
             proposal_id: __sdk::__query_builder::IxCol::new(table_name, "proposal_id"),
             status: __sdk::__query_builder::IxCol::new(table_name, "status"),
             user_id: __sdk::__query_builder::IxCol::new(table_name, "user_id"),

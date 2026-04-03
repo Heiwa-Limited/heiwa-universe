@@ -25,10 +25,10 @@ use crate::{
     runtime::state::{
         RegistryErrorCode, SharedState, WorkerProtocolFlavor, WorkerSessionRegistration,
     },
+    stdb::{PersistedArtifact, PersistedRunReceipt},
 };
 use heiwa_bindings::{
     create_task_dispatch_reducer::create_task_dispatch, issue_capability_lease_reducer::issue_capability_lease,
-    record_run_reducer::record_run, register_artifact_reducer::register_artifact,
     revoke_capability_lease_reducer::revoke_capability_lease,
     update_task_dispatch_status_reducer::update_task_dispatch_status,
     upsert_battlefield_reducer::upsert_battlefield,
@@ -1192,29 +1192,38 @@ async fn finalize_result(
                 message: error.message,
             })?
     };
-
-    for artifact in &payload.artifacts {
-        let _ = state.stdb.transport.conn.reducers.register_artifact(
-            artifact.artifact_id.clone(),
-            Some(payload.lease_id.clone()),
-            "mesh-worker".to_string(),
-            payload.task_id.clone(),
-            None,
-            artifact.artifact_type.clone(),
-            format!("{} artifact", artifact.artifact_type),
-            Some(artifact.location.clone()),
-            None,
-            json!({
+    let run_id = format!("run-{}", payload.task_id);
+    let completed_at = now_iso();
+    let artifact_ids: Vec<String> = payload
+        .artifacts
+        .iter()
+        .map(|artifact| artifact.artifact_id.clone())
+        .collect();
+    let artifacts: Vec<PersistedArtifact> = payload
+        .artifacts
+        .iter()
+        .map(|artifact| PersistedArtifact {
+            artifact_id: artifact.artifact_id.clone(),
+            run_id: Some(run_id.clone()),
+            lease_id: Some(payload.lease_id.clone()),
+            user_id: "mesh-worker".to_string(),
+            mission_id: payload.task_id.clone(),
+            cell_run_id: None,
+            artifact_type: artifact.artifact_type.clone(),
+            title: format!("{} artifact", artifact.artifact_type),
+            uri: Some(artifact.location.clone()),
+            path: None,
+            content_json: json!({
                 "hash": artifact.hash,
                 "size_bytes": artifact.size_bytes,
                 "location": artifact.location,
             })
             .to_string(),
-            now_iso(),
-            None,
-            Some(session_id.to_string()),
-        );
-    }
+            created_at: completed_at.clone(),
+            owner_id: None,
+            principal_id: Some(session_id.to_string()),
+        })
+        .collect();
 
     let summary = format!(
         "worker result {} for task {}",
@@ -1236,37 +1245,45 @@ async fn finalize_result(
             payload.metrics.tokens_in.saturating_add(payload.metrics.tokens_out),
             payload.metrics.duration_ms,
         );
-    let _ = state.stdb.transport.conn.reducers.record_run(
-        format!("run-{}", payload.task_id),
-        "mesh-worker".to_string(),
-        payload.task_id.clone(),
-        payload.lease_id.clone(),
-        now_iso(),
-        now_iso(),
-        payload.status.to_uppercase(),
-        json!(payload).to_string(),
-        json!({
-            "session_id": session_id,
-            "node_id": node_id,
-        })
-        .to_string(),
-        json!(payload.artifacts.iter().map(|artifact| artifact.artifact_id.clone()).collect::<Vec<_>>()).to_string(),
-        node_id.to_string(),
-        json!({
-            "task_id": payload.task_id,
-            "lease_id": payload.lease_id,
-            "session_id": session_id,
-        })
-        .to_string(),
-        "worker_mesh".to_string(),
-        lease.capability.clone(),
-        payload.metrics.tokens_in as i64,
-        payload.metrics.tokens_out as i64,
-        (payload.metrics.tokens_in + payload.metrics.tokens_out) as i64,
-        0.0,
-        None,
-        Some(session_id.to_string()),
-    );
+    let _ = state
+        .stdb
+        .record_receipt_bundle(
+            PersistedRunReceipt {
+                run_id,
+                user_id: "mesh-worker".to_string(),
+                proposal_id: payload.task_id.clone(),
+                lease_id: payload.lease_id.clone(),
+                started_at: completed_at.clone(),
+                ended_at: completed_at,
+                status: payload.status.to_uppercase(),
+                chain_result_json: json!(payload).to_string(),
+                signals_json: json!({
+                    "session_id": session_id,
+                    "node_id": node_id,
+                })
+                .to_string(),
+                artifact_index_json: json!(artifact_ids).to_string(),
+                node_id: node_id.to_string(),
+                replay_receipt_json: json!({
+                    "task_id": payload.task_id,
+                    "lease_id": payload.lease_id,
+                    "session_id": session_id,
+                })
+                .to_string(),
+                mode: "worker_mesh".to_string(),
+                model_id: lease.capability.clone(),
+                tokens_input: payload.metrics.tokens_in as i64,
+                tokens_output: payload.metrics.tokens_out as i64,
+                tokens_total: (payload.metrics.tokens_in + payload.metrics.tokens_out) as i64,
+                cost: 0.0,
+                owner_id: None,
+                principal_id: Some(session_id.to_string()),
+                failure_code: None,
+                failure_message: None,
+            },
+            artifacts,
+        )
+        .await;
     let _ = state
         .stdb
         .transport
@@ -1310,27 +1327,9 @@ async fn finalize_error(
             })?;
     }
 
+    let run_id = format!("run-{task_id}");
     let artifact_id = format!("artifact-{}", uuid::Uuid::new_v4());
-    let _ = state.stdb.transport.conn.reducers.register_artifact(
-        artifact_id.clone(),
-        Some(lease_id.clone()),
-        "mesh-worker".to_string(),
-        task_id.clone(),
-        None,
-        "log".to_string(),
-        "worker error log".to_string(),
-        Some(format!("artifact://runs/{task_id}/error")),
-        None,
-        json!({
-            "code": payload.code,
-            "message": payload.message,
-            "retryable": payload.retryable,
-        })
-        .to_string(),
-        now_iso(),
-        None,
-        Some(session_id.to_string()),
-    );
+    let completed_at = now_iso();
     let _ = state
         .stdb
         .transport
@@ -1343,37 +1342,66 @@ async fn finalize_error(
             0,
             0,
         );
-    let _ = state.stdb.transport.conn.reducers.record_run(
-        format!("run-{task_id}"),
-        "mesh-worker".to_string(),
-        task_id.clone(),
-        lease_id.clone(),
-        now_iso(),
-        now_iso(),
-        payload.code.clone(),
-        json!(payload).to_string(),
-        json!({
-            "session_id": session_id,
-            "node_id": node_id,
-        })
-        .to_string(),
-        json!([artifact_id]).to_string(),
-        node_id.to_string(),
-        json!({
-            "task_id": task_id,
-            "lease_id": lease_id,
-            "session_id": session_id,
-        })
-        .to_string(),
-        "worker_mesh".to_string(),
-        "error".to_string(),
-        0,
-        0,
-        0,
-        0.0,
-        None,
-        Some(session_id.to_string()),
-    );
+    let _ = state
+        .stdb
+        .record_receipt_bundle(
+            PersistedRunReceipt {
+                run_id: run_id.clone(),
+                user_id: "mesh-worker".to_string(),
+                proposal_id: task_id.clone(),
+                lease_id: lease_id.clone(),
+                started_at: completed_at.clone(),
+                ended_at: completed_at.clone(),
+                status: "FAILED".to_string(),
+                chain_result_json: json!(payload).to_string(),
+                signals_json: json!({
+                    "session_id": session_id,
+                    "node_id": node_id,
+                })
+                .to_string(),
+                artifact_index_json: json!([artifact_id.clone()]).to_string(),
+                node_id: node_id.to_string(),
+                replay_receipt_json: json!({
+                    "task_id": task_id,
+                    "lease_id": lease_id,
+                    "session_id": session_id,
+                    "retryable": payload.retryable,
+                })
+                .to_string(),
+                mode: "worker_mesh".to_string(),
+                model_id: "error".to_string(),
+                tokens_input: 0,
+                tokens_output: 0,
+                tokens_total: 0,
+                cost: 0.0,
+                owner_id: None,
+                principal_id: Some(session_id.to_string()),
+                failure_code: Some(payload.code.clone()),
+                failure_message: Some(payload.message.clone()),
+            },
+            vec![PersistedArtifact {
+                artifact_id,
+                run_id: Some(run_id),
+                lease_id: Some(lease_id.clone()),
+                user_id: "mesh-worker".to_string(),
+                mission_id: task_id.clone(),
+                cell_run_id: None,
+                artifact_type: "log".to_string(),
+                title: "worker error log".to_string(),
+                uri: Some(format!("artifact://runs/{task_id}/error")),
+                path: None,
+                content_json: json!({
+                    "code": payload.code,
+                    "message": payload.message,
+                    "retryable": payload.retryable,
+                })
+                .to_string(),
+                created_at: completed_at,
+                owner_id: None,
+                principal_id: Some(session_id.to_string()),
+            }],
+        )
+        .await;
     let _ = state.stdb.transport.conn.reducers.revoke_capability_lease(
         lease_id.clone(),
         now_iso(),

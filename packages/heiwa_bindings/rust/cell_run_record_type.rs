@@ -24,6 +24,8 @@ pub struct CellRunRecord {
     pub tokens_total: i64,
     pub output_summary: Option<String>,
     pub user_id: Option<String>,
+    pub owner_id: Option<String>,
+    pub principal_id: Option<String>,
 }
 
 impl __sdk::InModule for CellRunRecord {
@@ -51,6 +53,8 @@ pub struct CellRunRecordCols {
     pub tokens_total: __sdk::__query_builder::Col<CellRunRecord, i64>,
     pub output_summary: __sdk::__query_builder::Col<CellRunRecord, Option<String>>,
     pub user_id: __sdk::__query_builder::Col<CellRunRecord, Option<String>>,
+    pub owner_id: __sdk::__query_builder::Col<CellRunRecord, Option<String>>,
+    pub principal_id: __sdk::__query_builder::Col<CellRunRecord, Option<String>>,
 }
 
 impl __sdk::__query_builder::HasCols for CellRunRecord {
@@ -74,6 +78,8 @@ impl __sdk::__query_builder::HasCols for CellRunRecord {
             tokens_total: __sdk::__query_builder::Col::new(table_name, "tokens_total"),
             output_summary: __sdk::__query_builder::Col::new(table_name, "output_summary"),
             user_id: __sdk::__query_builder::Col::new(table_name, "user_id"),
+            owner_id: __sdk::__query_builder::Col::new(table_name, "owner_id"),
+            principal_id: __sdk::__query_builder::Col::new(table_name, "principal_id"),
         }
     }
 }
@@ -84,6 +90,8 @@ impl __sdk::__query_builder::HasCols for CellRunRecord {
 pub struct CellRunRecordIxCols {
     pub cell_run_id: __sdk::__query_builder::IxCol<CellRunRecord, String>,
     pub mission_id: __sdk::__query_builder::IxCol<CellRunRecord, String>,
+    pub owner_id: __sdk::__query_builder::IxCol<CellRunRecord, Option<String>>,
+    pub principal_id: __sdk::__query_builder::IxCol<CellRunRecord, Option<String>>,
     pub status: __sdk::__query_builder::IxCol<CellRunRecord, String>,
     pub user_id: __sdk::__query_builder::IxCol<CellRunRecord, Option<String>>,
 }
@@ -94,6 +102,8 @@ impl __sdk::__query_builder::HasIxCols for CellRunRecord {
         CellRunRecordIxCols {
             cell_run_id: __sdk::__query_builder::IxCol::new(table_name, "cell_run_id"),
             mission_id: __sdk::__query_builder::IxCol::new(table_name, "mission_id"),
+            owner_id: __sdk::__query_builder::IxCol::new(table_name, "owner_id"),
+            principal_id: __sdk::__query_builder::IxCol::new(table_name, "principal_id"),
             status: __sdk::__query_builder::IxCol::new(table_name, "status"),
             user_id: __sdk::__query_builder::IxCol::new(table_name, "user_id"),
         }

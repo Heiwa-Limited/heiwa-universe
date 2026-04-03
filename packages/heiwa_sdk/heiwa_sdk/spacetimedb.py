@@ -647,6 +647,7 @@ class SpacetimeDB:
             "register_artifact",
             artifact_data["artifact_id"],
             self._sats_option(artifact_data.get("lease_id")),
+            self._sats_option(artifact_data.get("run_id")),
             artifact_data.get("user_id", ""),
             artifact_data.get("mission_id", ""),
             self._sats_option(artifact_data.get("cell_run_id")),

@@ -17,6 +17,9 @@ pub(super) struct UpsertModelTierArgs {
     pub cost_per_turn: f64,
     pub max_context_tokens: u32,
     pub strengths_json: String,
+    pub vram_requirement_mb: u32,
+    pub quantization_type: String,
+    pub kv_cache_strategy: String,
     pub enabled: bool,
 }
 
@@ -33,6 +36,9 @@ impl From<UpsertModelTierArgs> for super::Reducer {
             cost_per_turn: args.cost_per_turn,
             max_context_tokens: args.max_context_tokens,
             strengths_json: args.strengths_json,
+            vram_requirement_mb: args.vram_requirement_mb,
+            quantization_type: args.quantization_type,
+            kv_cache_strategy: args.kv_cache_strategy,
             enabled: args.enabled,
         }
     }
@@ -65,6 +71,9 @@ pub trait upsert_model_tier {
         cost_per_turn: f64,
         max_context_tokens: u32,
         strengths_json: String,
+        vram_requirement_mb: u32,
+        quantization_type: String,
+        kv_cache_strategy: String,
         enabled: bool,
     ) -> __sdk::Result<()> {
         self.upsert_model_tier_then(
@@ -78,6 +87,9 @@ pub trait upsert_model_tier {
             cost_per_turn,
             max_context_tokens,
             strengths_json,
+            vram_requirement_mb,
+            quantization_type,
+            kv_cache_strategy,
             enabled,
             |_, _| {},
         )
@@ -101,6 +113,9 @@ pub trait upsert_model_tier {
         cost_per_turn: f64,
         max_context_tokens: u32,
         strengths_json: String,
+        vram_requirement_mb: u32,
+        quantization_type: String,
+        kv_cache_strategy: String,
         enabled: bool,
 
         callback: impl FnOnce(&super::ReducerEventContext, Result<Result<(), String>, __sdk::InternalError>)
@@ -122,6 +137,9 @@ impl upsert_model_tier for super::RemoteReducers {
         cost_per_turn: f64,
         max_context_tokens: u32,
         strengths_json: String,
+        vram_requirement_mb: u32,
+        quantization_type: String,
+        kv_cache_strategy: String,
         enabled: bool,
 
         callback: impl FnOnce(&super::ReducerEventContext, Result<Result<(), String>, __sdk::InternalError>)
@@ -140,6 +158,9 @@ impl upsert_model_tier for super::RemoteReducers {
                 cost_per_turn,
                 max_context_tokens,
                 strengths_json,
+                vram_requirement_mb,
+                quantization_type,
+                kv_cache_strategy,
                 enabled,
             },
             callback,

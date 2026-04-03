@@ -28,4 +28,6 @@ export default __t.row({
   error: __t.option(__t.string()),
   metadataJson: __t.string().name("metadata_json"),
   userId: __t.option(__t.string()).name("user_id"),
+  ownerId: __t.option(__t.string()).name("owner_id"),
+  principalId: __t.option(__t.string()).name("principal_id"),
 });

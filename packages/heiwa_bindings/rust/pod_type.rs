@@ -13,7 +13,6 @@ pub struct Pod {
     pub runtime_capabilities: Vec<String>,
     pub trust_tier: String,
     pub privacy_floor: String,
-    pub gpu_inventory: Vec<String>,
     pub liveness: String,
     pub leaseable: bool,
     pub registered_at: String,
@@ -34,7 +33,6 @@ pub struct PodCols {
     pub runtime_capabilities: __sdk::__query_builder::Col<Pod, Vec<String>>,
     pub trust_tier: __sdk::__query_builder::Col<Pod, String>,
     pub privacy_floor: __sdk::__query_builder::Col<Pod, String>,
-    pub gpu_inventory: __sdk::__query_builder::Col<Pod, Vec<String>>,
     pub liveness: __sdk::__query_builder::Col<Pod, String>,
     pub leaseable: __sdk::__query_builder::Col<Pod, bool>,
     pub registered_at: __sdk::__query_builder::Col<Pod, String>,
@@ -54,7 +52,6 @@ impl __sdk::__query_builder::HasCols for Pod {
             ),
             trust_tier: __sdk::__query_builder::Col::new(table_name, "trust_tier"),
             privacy_floor: __sdk::__query_builder::Col::new(table_name, "privacy_floor"),
-            gpu_inventory: __sdk::__query_builder::Col::new(table_name, "gpu_inventory"),
             liveness: __sdk::__query_builder::Col::new(table_name, "liveness"),
             leaseable: __sdk::__query_builder::Col::new(table_name, "leaseable"),
             registered_at: __sdk::__query_builder::Col::new(table_name, "registered_at"),
@@ -67,7 +64,6 @@ impl __sdk::__query_builder::HasCols for Pod {
 ///
 /// Provides typed access to indexed columns for query building.
 pub struct PodIxCols {
-    pub last_heartbeat: __sdk::__query_builder::IxCol<Pod, String>,
     pub liveness: __sdk::__query_builder::IxCol<Pod, String>,
     pub pod_id: __sdk::__query_builder::IxCol<Pod, String>,
 }
@@ -76,7 +72,6 @@ impl __sdk::__query_builder::HasIxCols for Pod {
     type IxCols = PodIxCols;
     fn ix_cols(table_name: &'static str) -> Self::IxCols {
         PodIxCols {
-            last_heartbeat: __sdk::__query_builder::IxCol::new(table_name, "last_heartbeat"),
             liveness: __sdk::__query_builder::IxCol::new(table_name, "liveness"),
             pod_id: __sdk::__query_builder::IxCol::new(table_name, "pod_id"),
         }

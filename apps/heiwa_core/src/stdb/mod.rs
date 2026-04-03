@@ -6,6 +6,8 @@ use heiwa_bindings::{
     attach_drex_decision_to_route_reducer::attach_drex_decision_to_route as AttachDrexDecisionToRouteReducer,
     record_drex_decision_reducer::record_drex_decision as RecordDrexDecisionReducer,
     record_drex_failure_reducer::record_drex_failure as RecordDrexFailureReducer,
+    record_run_reducer::record_run as RecordRunReducer,
+    register_artifact_reducer::register_artifact as RegisterArtifactReducer,
     DbConnection,
 };
 use serde_json::json;
@@ -52,6 +54,50 @@ pub struct PersistedDrexFailure {
     pub created_at_ms: u64,
 }
 
+#[derive(Clone, Debug, PartialEq)]
+pub struct PersistedArtifact {
+    pub artifact_id: String,
+    pub run_id: Option<String>,
+    pub lease_id: Option<String>,
+    pub user_id: String,
+    pub mission_id: String,
+    pub cell_run_id: Option<String>,
+    pub artifact_type: String,
+    pub title: String,
+    pub uri: Option<String>,
+    pub path: Option<String>,
+    pub content_json: String,
+    pub created_at: String,
+    pub owner_id: Option<String>,
+    pub principal_id: Option<String>,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct PersistedRunReceipt {
+    pub run_id: String,
+    pub user_id: String,
+    pub proposal_id: String,
+    pub lease_id: String,
+    pub started_at: String,
+    pub ended_at: String,
+    pub status: String,
+    pub chain_result_json: String,
+    pub signals_json: String,
+    pub artifact_index_json: String,
+    pub node_id: String,
+    pub replay_receipt_json: String,
+    pub mode: String,
+    pub model_id: String,
+    pub tokens_input: i64,
+    pub tokens_output: i64,
+    pub tokens_total: i64,
+    pub cost: f64,
+    pub owner_id: Option<String>,
+    pub principal_id: Option<String>,
+    pub failure_code: Option<String>,
+    pub failure_message: Option<String>,
+}
+
 pub trait StdbTransport: Send + Sync + 'static {
     fn upsert_drex_decision(&self, decision: PersistedDrexDecision) -> Result<()>;
     fn insert_drex_failure(&self, failure: PersistedDrexFailure) -> Result<()>;
@@ -67,6 +113,8 @@ pub trait StdbTransport: Send + Sync + 'static {
         metadata_json: String,
     ) -> Result<()>;
     fn close_session(&self, session_id: String) -> Result<()>;
+    fn register_artifact(&self, artifact: PersistedArtifact) -> Result<()>;
+    fn record_run_receipt(&self, receipt: PersistedRunReceipt) -> Result<()>;
 }
 
 #[derive(Clone)]
@@ -83,30 +131,75 @@ impl ReducerTransport {
 impl StdbTransport for ReducerTransport {
     fn register_session(
         &self,
-        session_id: String,
-        owner_id: Option<String>,
-        node_id: String,
-        session_type: String,
-        expires_at: Option<String>,
-        metadata_json: String,
+        _session_id: String,
+        _owner_id: Option<String>,
+        _node_id: String,
+        _session_type: String,
+        _expires_at: Option<String>,
+        _metadata_json: String,
     ) -> Result<()> {
-        use heiwa_bindings::upsert_session;
+        // Canonical session persistence is still being formalized in the STDB module.
+        // Until Task 1 lands the explicit worker_session reducers, keep session writes
+        // honest as a no-op rather than relying on bindings that the live module does
+        // not generate.
+        Ok(())
+    }
+
+    fn close_session(&self, _session_id: String) -> Result<()> {
+        Ok(())
+    }
+
+    fn register_artifact(&self, artifact: PersistedArtifact) -> Result<()> {
         self.conn.reducers
-            .upsert_session(
-                session_id,
-                owner_id,
-                node_id,
-                session_type,
-                expires_at,
-                metadata_json,
+            .register_artifact(
+                artifact.artifact_id,
+                artifact.lease_id,
+                artifact.run_id,
+                artifact.user_id,
+                artifact.mission_id,
+                artifact.cell_run_id,
+                artifact.artifact_type,
+                artifact.title,
+                artifact.uri,
+                artifact.path,
+                artifact.content_json,
+                artifact.created_at,
+                artifact.owner_id,
+                artifact.principal_id,
             )
             .map_err(|error| anyhow!(error.to_string()))
     }
 
-    fn close_session(&self, session_id: String) -> Result<()> {
-        use heiwa_bindings::close_session;
+    fn record_run_receipt(&self, receipt: PersistedRunReceipt) -> Result<()> {
         self.conn.reducers
-            .close_session(session_id)
+            .record_run(
+                receipt.run_id,
+                receipt.user_id,
+                receipt.proposal_id,
+                receipt.lease_id,
+                receipt.started_at,
+                receipt.ended_at,
+                receipt.status,
+                receipt.chain_result_json,
+                json!({
+                    "signals": serde_json::from_str::<serde_json::Value>(&receipt.signals_json)
+                        .unwrap_or_else(|_| json!({ "raw": receipt.signals_json })),
+                    "failure_code": receipt.failure_code,
+                    "failure_message": receipt.failure_message,
+                })
+                .to_string(),
+                receipt.artifact_index_json,
+                receipt.node_id,
+                receipt.replay_receipt_json,
+                receipt.mode,
+                receipt.model_id,
+                receipt.tokens_input,
+                receipt.tokens_output,
+                receipt.tokens_total,
+                receipt.cost,
+                receipt.owner_id,
+                receipt.principal_id,
+            )
             .map_err(|error| anyhow!(error.to_string()))
     }
 
@@ -203,6 +296,14 @@ impl StdbTransport for NoopTransport {
     }
 
     fn close_session(&self, _session_id: String) -> Result<()> {
+        Ok(())
+    }
+
+    fn register_artifact(&self, _artifact: PersistedArtifact) -> Result<()> {
+        Ok(())
+    }
+
+    fn record_run_receipt(&self, _receipt: PersistedRunReceipt) -> Result<()> {
         Ok(())
     }
 }
@@ -314,6 +415,22 @@ impl<T: StdbTransport> StdbRuntime<T> {
         };
         self.transport.insert_drex_failure(record.clone())?;
         Ok(record)
+    }
+
+    pub async fn record_receipt_bundle(
+        &self,
+        receipt: PersistedRunReceipt,
+        artifacts: Vec<PersistedArtifact>,
+    ) -> Result<PersistedRunReceipt> {
+        if artifacts.is_empty() {
+            return Err(anyhow!("run receipt requires at least one artifact"));
+        }
+
+        for artifact in artifacts {
+            self.transport.register_artifact(artifact)?;
+        }
+        self.transport.record_run_receipt(receipt.clone())?;
+        Ok(receipt)
     }
 }
 

@@ -5,6 +5,7 @@ use heiwa_core::runtime::{
     },
     state::{WorkerProtocolFlavor, WorkerRegistry, WorkerSessionRegistration},
 };
+use heiwa_core::stdb::{NoopTransport, StdbRuntime};
 use serde_json::json;
 
 #[test]
@@ -58,7 +59,8 @@ fn canonical_worker_envelope_accepts_register_shape() {
 #[test]
 fn worker_registry_tracks_session_dispatch_and_completion() {
     let mut registry = WorkerRegistry::default();
-    let session = registry.register_session(WorkerSessionRegistration {
+    let stdb = StdbRuntime::new(NoopTransport);
+    let session = registry.register_session(&stdb, WorkerSessionRegistration {
         session_id: "session-1".to_string(),
         node_id: "node-123".to_string(),
         instance_id: "instance-1".to_string(),
@@ -105,7 +107,8 @@ fn worker_registry_tracks_session_dispatch_and_completion() {
 #[test]
 fn worker_registry_rejects_expired_or_mismatched_leases() {
     let mut registry = WorkerRegistry::default();
-    registry.register_session(WorkerSessionRegistration {
+    let stdb = StdbRuntime::new(NoopTransport);
+    registry.register_session(&stdb, WorkerSessionRegistration {
         session_id: "session-2".to_string(),
         node_id: "node-456".to_string(),
         instance_id: "instance-2".to_string(),

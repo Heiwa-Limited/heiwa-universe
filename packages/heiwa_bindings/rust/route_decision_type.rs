@@ -26,7 +26,10 @@ pub struct RouteDecision {
     pub confidence: f64,
     pub gateway_transport: String,
     pub created_at: String,
+    pub drex_decision_id: Option<String>,
     pub user_id: Option<String>,
+    pub owner_id: Option<String>,
+    pub principal_id: Option<String>,
 }
 
 impl __sdk::InModule for RouteDecision {
@@ -56,7 +59,10 @@ pub struct RouteDecisionCols {
     pub confidence: __sdk::__query_builder::Col<RouteDecision, f64>,
     pub gateway_transport: __sdk::__query_builder::Col<RouteDecision, String>,
     pub created_at: __sdk::__query_builder::Col<RouteDecision, String>,
+    pub drex_decision_id: __sdk::__query_builder::Col<RouteDecision, Option<String>>,
     pub user_id: __sdk::__query_builder::Col<RouteDecision, Option<String>>,
+    pub owner_id: __sdk::__query_builder::Col<RouteDecision, Option<String>>,
+    pub principal_id: __sdk::__query_builder::Col<RouteDecision, Option<String>>,
 }
 
 impl __sdk::__query_builder::HasCols for RouteDecision {
@@ -82,7 +88,10 @@ impl __sdk::__query_builder::HasCols for RouteDecision {
             confidence: __sdk::__query_builder::Col::new(table_name, "confidence"),
             gateway_transport: __sdk::__query_builder::Col::new(table_name, "gateway_transport"),
             created_at: __sdk::__query_builder::Col::new(table_name, "created_at"),
+            drex_decision_id: __sdk::__query_builder::Col::new(table_name, "drex_decision_id"),
             user_id: __sdk::__query_builder::Col::new(table_name, "user_id"),
+            owner_id: __sdk::__query_builder::Col::new(table_name, "owner_id"),
+            principal_id: __sdk::__query_builder::Col::new(table_name, "principal_id"),
         }
     }
 }
@@ -92,6 +101,9 @@ impl __sdk::__query_builder::HasCols for RouteDecision {
 /// Provides typed access to indexed columns for query building.
 pub struct RouteDecisionIxCols {
     pub created_at: __sdk::__query_builder::IxCol<RouteDecision, String>,
+    pub drex_decision_id: __sdk::__query_builder::IxCol<RouteDecision, Option<String>>,
+    pub owner_id: __sdk::__query_builder::IxCol<RouteDecision, Option<String>>,
+    pub principal_id: __sdk::__query_builder::IxCol<RouteDecision, Option<String>>,
     pub request_id: __sdk::__query_builder::IxCol<RouteDecision, String>,
     pub task_id: __sdk::__query_builder::IxCol<RouteDecision, String>,
     pub user_id: __sdk::__query_builder::IxCol<RouteDecision, Option<String>>,
@@ -102,6 +114,9 @@ impl __sdk::__query_builder::HasIxCols for RouteDecision {
     fn ix_cols(table_name: &'static str) -> Self::IxCols {
         RouteDecisionIxCols {
             created_at: __sdk::__query_builder::IxCol::new(table_name, "created_at"),
+            drex_decision_id: __sdk::__query_builder::IxCol::new(table_name, "drex_decision_id"),
+            owner_id: __sdk::__query_builder::IxCol::new(table_name, "owner_id"),
+            principal_id: __sdk::__query_builder::IxCol::new(table_name, "principal_id"),
             request_id: __sdk::__query_builder::IxCol::new(table_name, "request_id"),
             task_id: __sdk::__query_builder::IxCol::new(table_name, "task_id"),
             user_id: __sdk::__query_builder::IxCol::new(table_name, "user_id"),

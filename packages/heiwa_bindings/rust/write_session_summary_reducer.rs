@@ -14,6 +14,8 @@ pub(super) struct WriteSessionSummaryArgs {
     pub summary_text: String,
     pub metadata_json: String,
     pub user_id: Option<String>,
+    pub owner_id: Option<String>,
+    pub principal_id: Option<String>,
 }
 
 impl From<WriteSessionSummaryArgs> for super::Reducer {
@@ -26,6 +28,8 @@ impl From<WriteSessionSummaryArgs> for super::Reducer {
             summary_text: args.summary_text,
             metadata_json: args.metadata_json,
             user_id: args.user_id,
+            owner_id: args.owner_id,
+            principal_id: args.principal_id,
         }
     }
 }
@@ -54,6 +58,8 @@ pub trait write_session_summary {
         summary_text: String,
         metadata_json: String,
         user_id: Option<String>,
+        owner_id: Option<String>,
+        principal_id: Option<String>,
     ) -> __sdk::Result<()> {
         self.write_session_summary_then(
             summary_id,
@@ -63,6 +69,8 @@ pub trait write_session_summary {
             summary_text,
             metadata_json,
             user_id,
+            owner_id,
+            principal_id,
             |_, _| {},
         )
     }
@@ -82,6 +90,8 @@ pub trait write_session_summary {
         summary_text: String,
         metadata_json: String,
         user_id: Option<String>,
+        owner_id: Option<String>,
+        principal_id: Option<String>,
 
         callback: impl FnOnce(&super::ReducerEventContext, Result<Result<(), String>, __sdk::InternalError>)
             + Send
@@ -99,6 +109,8 @@ impl write_session_summary for super::RemoteReducers {
         summary_text: String,
         metadata_json: String,
         user_id: Option<String>,
+        owner_id: Option<String>,
+        principal_id: Option<String>,
 
         callback: impl FnOnce(&super::ReducerEventContext, Result<Result<(), String>, __sdk::InternalError>)
             + Send
@@ -113,6 +125,8 @@ impl write_session_summary for super::RemoteReducers {
                 summary_text,
                 metadata_json,
                 user_id,
+                owner_id,
+                principal_id,
             },
             callback,
         )

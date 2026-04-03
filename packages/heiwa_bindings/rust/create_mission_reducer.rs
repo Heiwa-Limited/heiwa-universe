@@ -24,6 +24,8 @@ pub(super) struct CreateMissionArgs {
     pub error: Option<String>,
     pub metadata_json: String,
     pub user_id: Option<String>,
+    pub owner_id: Option<String>,
+    pub principal_id: Option<String>,
 }
 
 impl From<CreateMissionArgs> for super::Reducer {
@@ -46,6 +48,8 @@ impl From<CreateMissionArgs> for super::Reducer {
             error: args.error,
             metadata_json: args.metadata_json,
             user_id: args.user_id,
+            owner_id: args.owner_id,
+            principal_id: args.principal_id,
         }
     }
 }
@@ -84,6 +88,8 @@ pub trait create_mission {
         error: Option<String>,
         metadata_json: String,
         user_id: Option<String>,
+        owner_id: Option<String>,
+        principal_id: Option<String>,
     ) -> __sdk::Result<()> {
         self.create_mission_then(
             mission_id,
@@ -103,6 +109,8 @@ pub trait create_mission {
             error,
             metadata_json,
             user_id,
+            owner_id,
+            principal_id,
             |_, _| {},
         )
     }
@@ -132,6 +140,8 @@ pub trait create_mission {
         error: Option<String>,
         metadata_json: String,
         user_id: Option<String>,
+        owner_id: Option<String>,
+        principal_id: Option<String>,
 
         callback: impl FnOnce(&super::ReducerEventContext, Result<Result<(), String>, __sdk::InternalError>)
             + Send
@@ -159,6 +169,8 @@ impl create_mission for super::RemoteReducers {
         error: Option<String>,
         metadata_json: String,
         user_id: Option<String>,
+        owner_id: Option<String>,
+        principal_id: Option<String>,
 
         callback: impl FnOnce(&super::ReducerEventContext, Result<Result<(), String>, __sdk::InternalError>)
             + Send
@@ -183,6 +195,8 @@ impl create_mission for super::RemoteReducers {
                 error,
                 metadata_json,
                 user_id,
+                owner_id,
+                principal_id,
             },
             callback,
         )

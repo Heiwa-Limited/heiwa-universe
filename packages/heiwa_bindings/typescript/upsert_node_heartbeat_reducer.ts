@@ -19,4 +19,9 @@ export default {
   agentVersion: __t.string(),
   tagsJson: __t.string(),
   maxConcurrency: __t.i64(),
+  vramMb: __t.i64(),
+  locality: __t.string(),
+  trustTier: __t.i32(),
+  providerKeysJson: __t.string(),
+  modelInventoryJson: __t.string(),
 };

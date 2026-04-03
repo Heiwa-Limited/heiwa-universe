@@ -29,4 +29,6 @@ export default {
   tokensOutput: __t.i64(),
   tokensTotal: __t.i64(),
   cost: __t.f64(),
+  ownerId: __t.option(__t.string()),
+  principalId: __t.option(__t.string()),
 };

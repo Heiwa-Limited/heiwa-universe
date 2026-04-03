@@ -21,5 +21,8 @@ export default {
   costPerTurn: __t.f64(),
   maxContextTokens: __t.u32(),
   strengthsJson: __t.string(),
+  vramRequirementMb: __t.u32(),
+  quantizationType: __t.string(),
+  kvCacheStrategy: __t.string(),
   enabled: __t.bool(),
 };

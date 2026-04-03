@@ -13,6 +13,7 @@ import {
 export default __t.row({
   artifactId: __t.string().primaryKey().name("artifact_id"),
   missionId: __t.string().name("mission_id"),
+  runId: __t.option(__t.string()).name("run_id"),
   cellRunId: __t.option(__t.string()).name("cell_run_id"),
   artifactType: __t.string().name("artifact_type"),
   title: __t.string(),
@@ -22,4 +23,6 @@ export default __t.row({
   createdAt: __t.string().name("created_at"),
   leaseId: __t.option(__t.string()).name("lease_id"),
   userId: __t.option(__t.string()).name("user_id"),
+  ownerId: __t.option(__t.string()).name("owner_id"),
+  principalId: __t.option(__t.string()).name("principal_id"),
 });

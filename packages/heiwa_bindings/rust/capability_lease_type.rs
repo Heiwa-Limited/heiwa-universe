@@ -28,6 +28,8 @@ pub struct CapabilityLease {
     pub failure_policy: Option<String>,
     pub chain_state: Option<String>,
     pub routing_lock_json: Option<String>,
+    pub owner_id: Option<String>,
+    pub principal_id: Option<String>,
 }
 
 impl __sdk::InModule for CapabilityLease {
@@ -59,6 +61,8 @@ pub struct CapabilityLeaseCols {
     pub failure_policy: __sdk::__query_builder::Col<CapabilityLease, Option<String>>,
     pub chain_state: __sdk::__query_builder::Col<CapabilityLease, Option<String>>,
     pub routing_lock_json: __sdk::__query_builder::Col<CapabilityLease, Option<String>>,
+    pub owner_id: __sdk::__query_builder::Col<CapabilityLease, Option<String>>,
+    pub principal_id: __sdk::__query_builder::Col<CapabilityLease, Option<String>>,
 }
 
 impl __sdk::__query_builder::HasCols for CapabilityLease {
@@ -89,6 +93,8 @@ impl __sdk::__query_builder::HasCols for CapabilityLease {
             failure_policy: __sdk::__query_builder::Col::new(table_name, "failure_policy"),
             chain_state: __sdk::__query_builder::Col::new(table_name, "chain_state"),
             routing_lock_json: __sdk::__query_builder::Col::new(table_name, "routing_lock_json"),
+            owner_id: __sdk::__query_builder::Col::new(table_name, "owner_id"),
+            principal_id: __sdk::__query_builder::Col::new(table_name, "principal_id"),
         }
     }
 }
@@ -101,7 +107,9 @@ pub struct CapabilityLeaseIxCols {
     pub expires_at: __sdk::__query_builder::IxCol<CapabilityLease, String>,
     pub holder_id: __sdk::__query_builder::IxCol<CapabilityLease, String>,
     pub lease_id: __sdk::__query_builder::IxCol<CapabilityLease, String>,
+    pub owner_id: __sdk::__query_builder::IxCol<CapabilityLease, Option<String>>,
     pub parent_lease_id: __sdk::__query_builder::IxCol<CapabilityLease, Option<String>>,
+    pub principal_id: __sdk::__query_builder::IxCol<CapabilityLease, Option<String>>,
     pub proposal_id: __sdk::__query_builder::IxCol<CapabilityLease, String>,
     pub status: __sdk::__query_builder::IxCol<CapabilityLease, String>,
 }
@@ -114,7 +122,9 @@ impl __sdk::__query_builder::HasIxCols for CapabilityLease {
             expires_at: __sdk::__query_builder::IxCol::new(table_name, "expires_at"),
             holder_id: __sdk::__query_builder::IxCol::new(table_name, "holder_id"),
             lease_id: __sdk::__query_builder::IxCol::new(table_name, "lease_id"),
+            owner_id: __sdk::__query_builder::IxCol::new(table_name, "owner_id"),
             parent_lease_id: __sdk::__query_builder::IxCol::new(table_name, "parent_lease_id"),
+            principal_id: __sdk::__query_builder::IxCol::new(table_name, "principal_id"),
             proposal_id: __sdk::__query_builder::IxCol::new(table_name, "proposal_id"),
             status: __sdk::__query_builder::IxCol::new(table_name, "status"),
         }

@@ -49,6 +49,7 @@ export type ApprovalRequest = __Infer<typeof ApprovalRequest>;
 export const ArtifactRecord = __t.object("ArtifactRecord", {
   artifactId: __t.string(),
   missionId: __t.string(),
+  runId: __t.option(__t.string()),
   cellRunId: __t.option(__t.string()),
   artifactType: __t.string(),
   title: __t.string(),
@@ -58,8 +59,24 @@ export const ArtifactRecord = __t.object("ArtifactRecord", {
   createdAt: __t.string(),
   leaseId: __t.option(__t.string()),
   userId: __t.option(__t.string()),
+  ownerId: __t.option(__t.string()),
+  principalId: __t.option(__t.string()),
 });
 export type ArtifactRecord = __Infer<typeof ArtifactRecord>;
+
+export const BattlefieldRecord = __t.object("BattlefieldRecord", {
+  battlefieldId: __t.string(),
+  ownerId: __t.option(__t.string()),
+  principalId: __t.option(__t.string()),
+  name: __t.string(),
+  repoUrl: __t.option(__t.string()),
+  rootPath: __t.option(__t.string()),
+  nodeId: __t.option(__t.string()),
+  status: __t.string(),
+  createdAt: __t.string(),
+  lastActiveAt: __t.string(),
+});
+export type BattlefieldRecord = __Infer<typeof BattlefieldRecord>;
 
 export const BillingEvent = __t.object("BillingEvent", {
   id: __t.u64(),
@@ -99,6 +116,8 @@ export const CapabilityLease = __t.object("CapabilityLease", {
   failurePolicy: __t.option(__t.string()),
   chainState: __t.option(__t.string()),
   routingLockJson: __t.option(__t.string()),
+  ownerId: __t.option(__t.string()),
+  principalId: __t.option(__t.string()),
 });
 export type CapabilityLease = __Infer<typeof CapabilityLease>;
 
@@ -163,6 +182,8 @@ export const CellRunRecord = __t.object("CellRunRecord", {
   tokensTotal: __t.i64(),
   outputSummary: __t.option(__t.string()),
   userId: __t.option(__t.string()),
+  ownerId: __t.option(__t.string()),
+  principalId: __t.option(__t.string()),
 });
 export type CellRunRecord = __Infer<typeof CellRunRecord>;
 
@@ -191,6 +212,60 @@ export const DiscordUser = __t.object("DiscordUser", {
 });
 export type DiscordUser = __Infer<typeof DiscordUser>;
 
+export const DrexDecisionRow = __t.object("DrexDecisionRow", {
+  decisionId: __t.string(),
+  requestId: __t.string(),
+  taskId: __t.string(),
+  activeTier: __t.string(),
+  routeRuntime: __t.string(),
+  routeModel: __t.string(),
+  scope: __t.f64(),
+  abstraction: __t.f64(),
+  contextSpan: __t.f64(),
+  executionProximity: __t.f64(),
+  blastRadius: __t.f64(),
+  coordinationLoad: __t.f64(),
+  latencyPressure: __t.f64(),
+  macroScore: __t.f64(),
+  mesoScore: __t.f64(),
+  microScore: __t.f64(),
+  scoreConfidence: __t.f64(),
+  authorityRequired: __t.string(),
+  requiresApproval: __t.bool(),
+  reasonsJson: __t.string(),
+  vectorJson: __t.string(),
+  scorecardJson: __t.string(),
+  gateJson: __t.string(),
+  policyVersion: __t.string(),
+  createdAtMs: __t.u64(),
+});
+export type DrexDecisionRow = __Infer<typeof DrexDecisionRow>;
+
+export const DrexFailureRow = __t.object("DrexFailureRow", {
+  id: __t.u64(),
+  decisionId: __t.string(),
+  requestId: __t.string(),
+  failureMode: __t.string(),
+  stage: __t.string(),
+  detailsJson: __t.string(),
+  recovered: __t.bool(),
+  createdAtMs: __t.u64(),
+});
+export type DrexFailureRow = __Infer<typeof DrexFailureRow>;
+
+export const EventRecord = __t.object("EventRecord", {
+  eventId: __t.string(),
+  ownerId: __t.option(__t.string()),
+  principalId: __t.option(__t.string()),
+  sessionId: __t.option(__t.string()),
+  missionId: __t.option(__t.string()),
+  battlefieldId: __t.option(__t.string()),
+  eventType: __t.string(),
+  payloadJson: __t.string(),
+  createdAt: __t.string(),
+});
+export type EventRecord = __Infer<typeof EventRecord>;
+
 export const ExecutionMemory = __t.object("ExecutionMemory", {
   id: __t.u64(),
   taskDispatchId: __t.string(),
@@ -203,6 +278,16 @@ export const ExecutionMemory = __t.object("ExecutionMemory", {
   leaseId: __t.option(__t.string()),
 });
 export type ExecutionMemory = __Infer<typeof ExecutionMemory>;
+
+export const GpuSlot = __t.object("GpuSlot", {
+  slotId: __t.string(),
+  podId: __t.string(),
+  gpuType: __t.string(),
+  vramGb: __t.i64(),
+  loadedModels: __t.array(__t.string()),
+  availableSlots: __t.i64(),
+});
+export type GpuSlot = __Infer<typeof GpuSlot>;
 
 export const KnowledgeEmbedding = __t.object("KnowledgeEmbedding", {
   id: __t.u64(),
@@ -241,6 +326,8 @@ export const MissionRecord = __t.object("MissionRecord", {
   error: __t.option(__t.string()),
   metadataJson: __t.string(),
   userId: __t.option(__t.string()),
+  ownerId: __t.option(__t.string()),
+  principalId: __t.option(__t.string()),
 });
 export type MissionRecord = __Infer<typeof MissionRecord>;
 
@@ -257,6 +344,8 @@ export const MissionStepRecord = __t.object("MissionStepRecord", {
   outputJson: __t.string(),
   createdAt: __t.string(),
   updatedAt: __t.string(),
+  ownerId: __t.option(__t.string()),
+  principalId: __t.option(__t.string()),
 });
 export type MissionStepRecord = __Infer<typeof MissionStepRecord>;
 
@@ -272,6 +361,9 @@ export const ModelTier = __t.object("ModelTier", {
   costPerTurn: __t.f64(),
   maxContextTokens: __t.u32(),
   strengthsJson: __t.string(),
+  vramRequirementMb: __t.u32(),
+  quantizationType: __t.string(),
+  kvCacheStrategy: __t.string(),
   enabled: __t.bool(),
   lastSuccessRate: __t.f64(),
   avgLatencyMs: __t.u64(),
@@ -301,6 +393,11 @@ export const NodeStatus = __t.object("NodeStatus", {
   agentVersion: __t.string(),
   tagsJson: __t.string(),
   maxConcurrency: __t.i64(),
+  vramMb: __t.i64(),
+  locality: __t.string(),
+  trustTier: __t.i32(),
+  providerKeysJson: __t.string(),
+  modelInventoryJson: __t.string(),
 });
 export type NodeStatus = __Infer<typeof NodeStatus>;
 
@@ -335,7 +432,6 @@ export const Pod = __t.object("Pod", {
   runtimeCapabilities: __t.array(__t.string()),
   trustTier: __t.string(),
   privacyFloor: __t.string(),
-  gpuInventory: __t.array(__t.string()),
   liveness: __t.string(),
   leaseable: __t.bool(),
   registeredAt: __t.string(),
@@ -368,6 +464,8 @@ export const Proposal = __t.object("Proposal", {
   expiresAt: __t.option(__t.string()),
   eligibilitySnapshot: __t.option(__t.string()),
   userId: __t.option(__t.string()),
+  ownerId: __t.option(__t.string()),
+  principalId: __t.option(__t.string()),
 });
 export type Proposal = __Infer<typeof Proposal>;
 
@@ -399,6 +497,8 @@ export const ProviderAccount = __t.object("ProviderAccount", {
   lastError: __t.option(__t.string()),
   updatedAt: __t.string(),
   userId: __t.option(__t.string()),
+  ownerId: __t.option(__t.string()),
+  principalId: __t.option(__t.string()),
 });
 export type ProviderAccount = __Infer<typeof ProviderAccount>;
 
@@ -449,7 +549,10 @@ export const RouteDecision = __t.object("RouteDecision", {
   confidence: __t.f64(),
   gatewayTransport: __t.string(),
   createdAt: __t.string(),
+  drexDecisionId: __t.option(__t.string()),
   userId: __t.option(__t.string()),
+  ownerId: __t.option(__t.string()),
+  principalId: __t.option(__t.string()),
 });
 export type RouteDecision = __Infer<typeof RouteDecision>;
 
@@ -472,6 +575,8 @@ export const RunRecord = __t.object("RunRecord", {
   cost: __t.f64(),
   userId: __t.option(__t.string()),
   leaseId: __t.option(__t.string()),
+  ownerId: __t.option(__t.string()),
+  principalId: __t.option(__t.string()),
 });
 export type RunRecord = __Infer<typeof RunRecord>;
 
@@ -483,6 +588,8 @@ export const SessionSummaryRecord = __t.object("SessionSummaryRecord", {
   summaryText: __t.string(),
   metadataJson: __t.string(),
   userId: __t.option(__t.string()),
+  ownerId: __t.option(__t.string()),
+  principalId: __t.option(__t.string()),
 });
 export type SessionSummaryRecord = __Infer<typeof SessionSummaryRecord>;
 

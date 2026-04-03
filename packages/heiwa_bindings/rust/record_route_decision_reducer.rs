@@ -27,6 +27,9 @@ pub(super) struct RecordRouteDecisionArgs {
     pub gateway_transport: String,
     pub created_at: String,
     pub user_id: Option<String>,
+    pub owner_id: Option<String>,
+    pub principal_id: Option<String>,
+    pub drex_decision_id: Option<String>,
 }
 
 impl From<RecordRouteDecisionArgs> for super::Reducer {
@@ -52,6 +55,9 @@ impl From<RecordRouteDecisionArgs> for super::Reducer {
             gateway_transport: args.gateway_transport,
             created_at: args.created_at,
             user_id: args.user_id,
+            owner_id: args.owner_id,
+            principal_id: args.principal_id,
+            drex_decision_id: args.drex_decision_id,
         }
     }
 }
@@ -93,6 +99,9 @@ pub trait record_route_decision {
         gateway_transport: String,
         created_at: String,
         user_id: Option<String>,
+        owner_id: Option<String>,
+        principal_id: Option<String>,
+        drex_decision_id: Option<String>,
     ) -> __sdk::Result<()> {
         self.record_route_decision_then(
             request_id,
@@ -115,6 +124,9 @@ pub trait record_route_decision {
             gateway_transport,
             created_at,
             user_id,
+            owner_id,
+            principal_id,
+            drex_decision_id,
             |_, _| {},
         )
     }
@@ -147,6 +159,9 @@ pub trait record_route_decision {
         gateway_transport: String,
         created_at: String,
         user_id: Option<String>,
+        owner_id: Option<String>,
+        principal_id: Option<String>,
+        drex_decision_id: Option<String>,
 
         callback: impl FnOnce(&super::ReducerEventContext, Result<Result<(), String>, __sdk::InternalError>)
             + Send
@@ -177,6 +192,9 @@ impl record_route_decision for super::RemoteReducers {
         gateway_transport: String,
         created_at: String,
         user_id: Option<String>,
+        owner_id: Option<String>,
+        principal_id: Option<String>,
+        drex_decision_id: Option<String>,
 
         callback: impl FnOnce(&super::ReducerEventContext, Result<Result<(), String>, __sdk::InternalError>)
             + Send
@@ -204,6 +222,9 @@ impl record_route_decision for super::RemoteReducers {
                 gateway_transport,
                 created_at,
                 user_id,
+                owner_id,
+                principal_id,
+                drex_decision_id,
             },
             callback,
         )

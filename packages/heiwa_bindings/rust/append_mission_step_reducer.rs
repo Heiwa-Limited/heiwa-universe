@@ -19,6 +19,8 @@ pub(super) struct AppendMissionStepArgs {
     pub output_json: String,
     pub created_at: String,
     pub updated_at: String,
+    pub owner_id: Option<String>,
+    pub principal_id: Option<String>,
 }
 
 impl From<AppendMissionStepArgs> for super::Reducer {
@@ -36,6 +38,8 @@ impl From<AppendMissionStepArgs> for super::Reducer {
             output_json: args.output_json,
             created_at: args.created_at,
             updated_at: args.updated_at,
+            owner_id: args.owner_id,
+            principal_id: args.principal_id,
         }
     }
 }
@@ -69,6 +73,8 @@ pub trait append_mission_step {
         output_json: String,
         created_at: String,
         updated_at: String,
+        owner_id: Option<String>,
+        principal_id: Option<String>,
     ) -> __sdk::Result<()> {
         self.append_mission_step_then(
             step_id,
@@ -83,6 +89,8 @@ pub trait append_mission_step {
             output_json,
             created_at,
             updated_at,
+            owner_id,
+            principal_id,
             |_, _| {},
         )
     }
@@ -107,6 +115,8 @@ pub trait append_mission_step {
         output_json: String,
         created_at: String,
         updated_at: String,
+        owner_id: Option<String>,
+        principal_id: Option<String>,
 
         callback: impl FnOnce(&super::ReducerEventContext, Result<Result<(), String>, __sdk::InternalError>)
             + Send
@@ -129,6 +139,8 @@ impl append_mission_step for super::RemoteReducers {
         output_json: String,
         created_at: String,
         updated_at: String,
+        owner_id: Option<String>,
+        principal_id: Option<String>,
 
         callback: impl FnOnce(&super::ReducerEventContext, Result<Result<(), String>, __sdk::InternalError>)
             + Send
@@ -148,6 +160,8 @@ impl append_mission_step for super::RemoteReducers {
                 output_json,
                 created_at,
                 updated_at,
+                owner_id,
+                principal_id,
             },
             callback,
         )

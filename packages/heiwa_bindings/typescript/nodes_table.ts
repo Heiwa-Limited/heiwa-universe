@@ -21,4 +21,9 @@ export default __t.row({
   agentVersion: __t.string().name("agent_version"),
   tagsJson: __t.string().name("tags_json"),
   maxConcurrency: __t.i64().name("max_concurrency"),
+  vramMb: __t.i64().name("vram_mb"),
+  locality: __t.string(),
+  trustTier: __t.i32().name("trust_tier"),
+  providerKeysJson: __t.string().name("provider_keys_json"),
+  modelInventoryJson: __t.string().name("model_inventory_json"),
 });

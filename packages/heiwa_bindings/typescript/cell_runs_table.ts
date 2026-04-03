@@ -28,4 +28,6 @@ export default __t.row({
   tokensTotal: __t.i64().name("tokens_total"),
   outputSummary: __t.option(__t.string()).name("output_summary"),
   userId: __t.option(__t.string()).name("user_id"),
+  ownerId: __t.option(__t.string()).name("owner_id"),
+  principalId: __t.option(__t.string()).name("principal_id"),
 });

@@ -25,6 +25,8 @@ pub(super) struct RecordRunArgs {
     pub tokens_output: i64,
     pub tokens_total: i64,
     pub cost: f64,
+    pub owner_id: Option<String>,
+    pub principal_id: Option<String>,
 }
 
 impl From<RecordRunArgs> for super::Reducer {
@@ -48,6 +50,8 @@ impl From<RecordRunArgs> for super::Reducer {
             tokens_output: args.tokens_output,
             tokens_total: args.tokens_total,
             cost: args.cost,
+            owner_id: args.owner_id,
+            principal_id: args.principal_id,
         }
     }
 }
@@ -87,6 +91,8 @@ pub trait record_run {
         tokens_output: i64,
         tokens_total: i64,
         cost: f64,
+        owner_id: Option<String>,
+        principal_id: Option<String>,
     ) -> __sdk::Result<()> {
         self.record_run_then(
             run_id,
@@ -107,6 +113,8 @@ pub trait record_run {
             tokens_output,
             tokens_total,
             cost,
+            owner_id,
+            principal_id,
             |_, _| {},
         )
     }
@@ -137,6 +145,8 @@ pub trait record_run {
         tokens_output: i64,
         tokens_total: i64,
         cost: f64,
+        owner_id: Option<String>,
+        principal_id: Option<String>,
 
         callback: impl FnOnce(&super::ReducerEventContext, Result<Result<(), String>, __sdk::InternalError>)
             + Send
@@ -165,6 +175,8 @@ impl record_run for super::RemoteReducers {
         tokens_output: i64,
         tokens_total: i64,
         cost: f64,
+        owner_id: Option<String>,
+        principal_id: Option<String>,
 
         callback: impl FnOnce(&super::ReducerEventContext, Result<Result<(), String>, __sdk::InternalError>)
             + Send
@@ -190,6 +202,8 @@ impl record_run for super::RemoteReducers {
                 tokens_output,
                 tokens_total,
                 cost,
+                owner_id,
+                principal_id,
             },
             callback,
         )

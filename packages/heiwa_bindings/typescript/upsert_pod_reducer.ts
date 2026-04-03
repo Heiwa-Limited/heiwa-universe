@@ -17,7 +17,6 @@ export default {
   runtimeCapabilities: __t.array(__t.string()),
   trustTier: __t.string(),
   privacyFloor: __t.string(),
-  gpuInventory: __t.array(__t.string()),
   liveness: __t.string(),
   leaseable: __t.bool(),
   registeredAt: __t.string(),

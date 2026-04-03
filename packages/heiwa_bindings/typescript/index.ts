@@ -36,9 +36,12 @@ import {
 // Import all reducer arg schemas
 import AddApprovalRequestReducer from "./add_approval_request_reducer";
 import AddProposalReducer from "./add_proposal_reducer";
+import AppendEventReducer from "./append_event_reducer";
 import AppendMissionStepReducer from "./append_mission_step_reducer";
 import ApproveProposalReducer from "./approve_proposal_reducer";
+import ArchiveBattlefieldReducer from "./archive_battlefield_reducer";
 import AssignProposalReducer from "./assign_proposal_reducer";
+import AttachDrexDecisionToRouteReducer from "./attach_drex_decision_to_route_reducer";
 import ClaimProposalReducer from "./claim_proposal_reducer";
 import ClaimTaskReducer from "./claim_task_reducer";
 import CompleteMissionReducer from "./complete_mission_reducer";
@@ -64,6 +67,8 @@ import QueueProposalReducer from "./queue_proposal_reducer";
 import RecordApprovalDecisionReducer from "./record_approval_decision_reducer";
 import RecordBillingEventReducer from "./record_billing_event_reducer";
 import RecordConsentReducer from "./record_consent_reducer";
+import RecordDrexDecisionReducer from "./record_drex_decision_reducer";
+import RecordDrexFailureReducer from "./record_drex_failure_reducer";
 import RecordInteractionReducer from "./record_interaction_reducer";
 import RecordProposalHeartbeatReducer from "./record_proposal_heartbeat_reducer";
 import RecordRouteDecisionReducer from "./record_route_decision_reducer";
@@ -86,8 +91,10 @@ import UpdatePodHeartbeatReducer from "./update_pod_heartbeat_reducer";
 import UpdateTaskDispatchStatusReducer from "./update_task_dispatch_status_reducer";
 import UpdateUserSeenReducer from "./update_user_seen_reducer";
 import UpsertAgentRegistryReducer from "./upsert_agent_registry_reducer";
+import UpsertBattlefieldReducer from "./upsert_battlefield_reducer";
 import UpsertCaptainFocusReducer from "./upsert_captain_focus_reducer";
 import UpsertDiscordUserReducer from "./upsert_discord_user_reducer";
+import UpsertGpuSlotReducer from "./upsert_gpu_slot_reducer";
 import UpsertLivenessStateReducer from "./upsert_liveness_state_reducer";
 import UpsertModelTierReducer from "./upsert_model_tier_reducer";
 import UpsertNodeHeartbeatReducer from "./upsert_node_heartbeat_reducer";
@@ -104,6 +111,7 @@ import AgentRegistryRow from "./agent_registry_table";
 import ApprovalDecisionsRow from "./approval_decisions_table";
 import ApprovalRequestsRow from "./approval_requests_table";
 import ArtifactsRow from "./artifacts_table";
+import BattlefieldsRow from "./battlefields_table";
 import BillingEventsRow from "./billing_events_table";
 import CapabilityLeasesRow from "./capability_leases_table";
 import CaptainDirectivesRow from "./captain_directives_table";
@@ -114,7 +122,11 @@ import CellRunsRow from "./cell_runs_table";
 import DiscordChannelsRow from "./discord_channels_table";
 import DiscordInteractionsRow from "./discord_interactions_table";
 import DiscordUsersRow from "./discord_users_table";
+import DrexDecisionsRow from "./drex_decisions_table";
+import DrexFailuresRow from "./drex_failures_table";
+import EventsRow from "./events_table";
 import ExecutionMemoryRow from "./execution_memory_table";
+import GpuSlotsRow from "./gpu_slots_table";
 import KnowledgeEmbeddingsRow from "./knowledge_embeddings_table";
 import LivenessStateRow from "./liveness_state_table";
 import MissionStepsRow from "./mission_steps_table";
@@ -203,6 +215,15 @@ const tablesSchema = __schema({
       { name: 'mission_id', algorithm: 'btree', columns: [
         'missionId',
       ] },
+      { name: 'owner_id', algorithm: 'btree', columns: [
+        'ownerId',
+      ] },
+      { name: 'principal_id', algorithm: 'btree', columns: [
+        'principalId',
+      ] },
+      { name: 'run_id', algorithm: 'btree', columns: [
+        'runId',
+      ] },
       { name: 'user_id', algorithm: 'btree', columns: [
         'userId',
       ] },
@@ -211,6 +232,35 @@ const tablesSchema = __schema({
       { name: 'artifacts_artifact_id_key', constraint: 'unique', columns: ['artifactId'] },
     ],
   }, ArtifactsRow),
+  battlefields: __table({
+    name: 'battlefields',
+    indexes: [
+      { name: 'battlefield_id', algorithm: 'btree', columns: [
+        'battlefieldId',
+      ] },
+      { name: 'created_at', algorithm: 'btree', columns: [
+        'createdAt',
+      ] },
+      { name: 'last_active_at', algorithm: 'btree', columns: [
+        'lastActiveAt',
+      ] },
+      { name: 'node_id', algorithm: 'btree', columns: [
+        'nodeId',
+      ] },
+      { name: 'owner_id', algorithm: 'btree', columns: [
+        'ownerId',
+      ] },
+      { name: 'principal_id', algorithm: 'btree', columns: [
+        'principalId',
+      ] },
+      { name: 'status', algorithm: 'btree', columns: [
+        'status',
+      ] },
+    ],
+    constraints: [
+      { name: 'battlefields_battlefield_id_key', constraint: 'unique', columns: ['battlefieldId'] },
+    ],
+  }, BattlefieldsRow),
   billing_events: __table({
     name: 'billing_events',
     indexes: [
@@ -246,8 +296,14 @@ const tablesSchema = __schema({
       { name: 'lease_id', algorithm: 'btree', columns: [
         'leaseId',
       ] },
+      { name: 'owner_id', algorithm: 'btree', columns: [
+        'ownerId',
+      ] },
       { name: 'parent_lease_id', algorithm: 'btree', columns: [
         'parentLeaseId',
+      ] },
+      { name: 'principal_id', algorithm: 'btree', columns: [
+        'principalId',
       ] },
       { name: 'proposal_id', algorithm: 'btree', columns: [
         'proposalId',
@@ -328,6 +384,12 @@ const tablesSchema = __schema({
       { name: 'mission_id', algorithm: 'btree', columns: [
         'missionId',
       ] },
+      { name: 'owner_id', algorithm: 'btree', columns: [
+        'ownerId',
+      ] },
+      { name: 'principal_id', algorithm: 'btree', columns: [
+        'principalId',
+      ] },
       { name: 'status', algorithm: 'btree', columns: [
         'status',
       ] },
@@ -375,6 +437,72 @@ const tablesSchema = __schema({
       { name: 'discord_users_user_id_key', constraint: 'unique', columns: ['userId'] },
     ],
   }, DiscordUsersRow),
+  drex_decisions: __table({
+    name: 'drex_decisions',
+    indexes: [
+      { name: 'active_tier', algorithm: 'btree', columns: [
+        'activeTier',
+      ] },
+      { name: 'created_at_ms', algorithm: 'btree', columns: [
+        'createdAtMs',
+      ] },
+      { name: 'decision_id', algorithm: 'btree', columns: [
+        'decisionId',
+      ] },
+      { name: 'request_id', algorithm: 'btree', columns: [
+        'requestId',
+      ] },
+      { name: 'task_id', algorithm: 'btree', columns: [
+        'taskId',
+      ] },
+    ],
+    constraints: [
+      { name: 'drex_decisions_decision_id_key', constraint: 'unique', columns: ['decisionId'] },
+    ],
+  }, DrexDecisionsRow),
+  drex_failures: __table({
+    name: 'drex_failures',
+    indexes: [
+      { name: 'created_at_ms', algorithm: 'btree', columns: [
+        'createdAtMs',
+      ] },
+      { name: 'decision_id', algorithm: 'btree', columns: [
+        'decisionId',
+      ] },
+      { name: 'id', algorithm: 'btree', columns: [
+        'id',
+      ] },
+      { name: 'request_id', algorithm: 'btree', columns: [
+        'requestId',
+      ] },
+    ],
+    constraints: [
+      { name: 'drex_failures_id_key', constraint: 'unique', columns: ['id'] },
+    ],
+  }, DrexFailuresRow),
+  events: __table({
+    name: 'events',
+    indexes: [
+      { name: 'created_at', algorithm: 'btree', columns: [
+        'createdAt',
+      ] },
+      { name: 'event_id', algorithm: 'btree', columns: [
+        'eventId',
+      ] },
+      { name: 'event_type', algorithm: 'btree', columns: [
+        'eventType',
+      ] },
+      { name: 'owner_id', algorithm: 'btree', columns: [
+        'ownerId',
+      ] },
+      { name: 'principal_id', algorithm: 'btree', columns: [
+        'principalId',
+      ] },
+    ],
+    constraints: [
+      { name: 'events_event_id_key', constraint: 'unique', columns: ['eventId'] },
+    ],
+  }, EventsRow),
   execution_memory: __table({
     name: 'execution_memory',
     indexes: [
@@ -392,6 +520,20 @@ const tablesSchema = __schema({
       { name: 'execution_memory_id_key', constraint: 'unique', columns: ['id'] },
     ],
   }, ExecutionMemoryRow),
+  gpu_slots: __table({
+    name: 'gpu_slots',
+    indexes: [
+      { name: 'pod_id', algorithm: 'btree', columns: [
+        'podId',
+      ] },
+      { name: 'slot_id', algorithm: 'btree', columns: [
+        'slotId',
+      ] },
+    ],
+    constraints: [
+      { name: 'gpu_slots_slot_id_key', constraint: 'unique', columns: ['slotId'] },
+    ],
+  }, GpuSlotsRow),
   knowledge_embeddings: __table({
     name: 'knowledge_embeddings',
     indexes: [
@@ -423,6 +565,12 @@ const tablesSchema = __schema({
       { name: 'mission_id', algorithm: 'btree', columns: [
         'missionId',
       ] },
+      { name: 'owner_id', algorithm: 'btree', columns: [
+        'ownerId',
+      ] },
+      { name: 'principal_id', algorithm: 'btree', columns: [
+        'principalId',
+      ] },
       { name: 'status', algorithm: 'btree', columns: [
         'status',
       ] },
@@ -442,6 +590,12 @@ const tablesSchema = __schema({
       ] },
       { name: 'mission_id', algorithm: 'btree', columns: [
         'missionId',
+      ] },
+      { name: 'owner_id', algorithm: 'btree', columns: [
+        'ownerId',
+      ] },
+      { name: 'principal_id', algorithm: 'btree', columns: [
+        'principalId',
       ] },
       { name: 'status', algorithm: 'btree', columns: [
         'status',
@@ -517,9 +671,6 @@ const tablesSchema = __schema({
   pods: __table({
     name: 'pods',
     indexes: [
-      { name: 'last_heartbeat', algorithm: 'btree', columns: [
-        'lastHeartbeat',
-      ] },
       { name: 'liveness', algorithm: 'btree', columns: [
         'liveness',
       ] },
@@ -548,6 +699,12 @@ const tablesSchema = __schema({
   proposals: __table({
     name: 'proposals',
     indexes: [
+      { name: 'owner_id', algorithm: 'btree', columns: [
+        'ownerId',
+      ] },
+      { name: 'principal_id', algorithm: 'btree', columns: [
+        'principalId',
+      ] },
       { name: 'proposal_id', algorithm: 'btree', columns: [
         'proposalId',
       ] },
@@ -570,6 +727,12 @@ const tablesSchema = __schema({
       ] },
       { name: 'node_id', algorithm: 'btree', columns: [
         'nodeId',
+      ] },
+      { name: 'owner_id', algorithm: 'btree', columns: [
+        'ownerId',
+      ] },
+      { name: 'principal_id', algorithm: 'btree', columns: [
+        'principalId',
       ] },
       { name: 'provider_id', algorithm: 'btree', columns: [
         'providerId',
@@ -625,6 +788,15 @@ const tablesSchema = __schema({
       { name: 'created_at', algorithm: 'btree', columns: [
         'createdAt',
       ] },
+      { name: 'drex_decision_id', algorithm: 'btree', columns: [
+        'drexDecisionId',
+      ] },
+      { name: 'owner_id', algorithm: 'btree', columns: [
+        'ownerId',
+      ] },
+      { name: 'principal_id', algorithm: 'btree', columns: [
+        'principalId',
+      ] },
       { name: 'request_id', algorithm: 'btree', columns: [
         'requestId',
       ] },
@@ -651,6 +823,12 @@ const tablesSchema = __schema({
       { name: 'model_id', algorithm: 'btree', columns: [
         'modelId',
       ] },
+      { name: 'owner_id', algorithm: 'btree', columns: [
+        'ownerId',
+      ] },
+      { name: 'principal_id', algorithm: 'btree', columns: [
+        'principalId',
+      ] },
       { name: 'proposal_id', algorithm: 'btree', columns: [
         'proposalId',
       ] },
@@ -676,6 +854,12 @@ const tablesSchema = __schema({
       ] },
       { name: 'node_id', algorithm: 'btree', columns: [
         'nodeId',
+      ] },
+      { name: 'owner_id', algorithm: 'btree', columns: [
+        'ownerId',
+      ] },
+      { name: 'principal_id', algorithm: 'btree', columns: [
+        'principalId',
       ] },
       { name: 'session_id', algorithm: 'btree', columns: [
         'sessionId',
@@ -735,9 +919,12 @@ const tablesSchema = __schema({
 const reducersSchema = __reducers(
   __reducerSchema("add_approval_request", AddApprovalRequestReducer),
   __reducerSchema("add_proposal", AddProposalReducer),
+  __reducerSchema("append_event", AppendEventReducer),
   __reducerSchema("append_mission_step", AppendMissionStepReducer),
   __reducerSchema("approve_proposal", ApproveProposalReducer),
+  __reducerSchema("archive_battlefield", ArchiveBattlefieldReducer),
   __reducerSchema("assign_proposal", AssignProposalReducer),
+  __reducerSchema("attach_drex_decision_to_route", AttachDrexDecisionToRouteReducer),
   __reducerSchema("claim_proposal", ClaimProposalReducer),
   __reducerSchema("claim_task", ClaimTaskReducer),
   __reducerSchema("complete_mission", CompleteMissionReducer),
@@ -763,6 +950,8 @@ const reducersSchema = __reducers(
   __reducerSchema("record_approval_decision", RecordApprovalDecisionReducer),
   __reducerSchema("record_billing_event", RecordBillingEventReducer),
   __reducerSchema("record_consent", RecordConsentReducer),
+  __reducerSchema("record_drex_decision", RecordDrexDecisionReducer),
+  __reducerSchema("record_drex_failure", RecordDrexFailureReducer),
   __reducerSchema("record_interaction", RecordInteractionReducer),
   __reducerSchema("record_proposal_heartbeat", RecordProposalHeartbeatReducer),
   __reducerSchema("record_route_decision", RecordRouteDecisionReducer),
@@ -785,8 +974,10 @@ const reducersSchema = __reducers(
   __reducerSchema("update_task_dispatch_status", UpdateTaskDispatchStatusReducer),
   __reducerSchema("update_user_seen", UpdateUserSeenReducer),
   __reducerSchema("upsert_agent_registry", UpsertAgentRegistryReducer),
+  __reducerSchema("upsert_battlefield", UpsertBattlefieldReducer),
   __reducerSchema("upsert_captain_focus", UpsertCaptainFocusReducer),
   __reducerSchema("upsert_discord_user", UpsertDiscordUserReducer),
+  __reducerSchema("upsert_gpu_slot", UpsertGpuSlotReducer),
   __reducerSchema("upsert_liveness_state", UpsertLivenessStateReducer),
   __reducerSchema("upsert_model_tier", UpsertModelTierReducer),
   __reducerSchema("upsert_node_heartbeat", UpsertNodeHeartbeatReducer),

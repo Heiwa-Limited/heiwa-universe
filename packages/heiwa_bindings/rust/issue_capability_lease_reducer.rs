@@ -25,6 +25,8 @@ pub(super) struct IssueCapabilityLeaseArgs {
     pub issued_at: String,
     pub expires_at: String,
     pub hub_signature: String,
+    pub owner_id: Option<String>,
+    pub principal_id: Option<String>,
 }
 
 impl From<IssueCapabilityLeaseArgs> for super::Reducer {
@@ -48,6 +50,8 @@ impl From<IssueCapabilityLeaseArgs> for super::Reducer {
             issued_at: args.issued_at,
             expires_at: args.expires_at,
             hub_signature: args.hub_signature,
+            owner_id: args.owner_id,
+            principal_id: args.principal_id,
         }
     }
 }
@@ -87,6 +91,8 @@ pub trait issue_capability_lease {
         issued_at: String,
         expires_at: String,
         hub_signature: String,
+        owner_id: Option<String>,
+        principal_id: Option<String>,
     ) -> __sdk::Result<()> {
         self.issue_capability_lease_then(
             lease_id,
@@ -107,6 +113,8 @@ pub trait issue_capability_lease {
             issued_at,
             expires_at,
             hub_signature,
+            owner_id,
+            principal_id,
             |_, _| {},
         )
     }
@@ -137,6 +145,8 @@ pub trait issue_capability_lease {
         issued_at: String,
         expires_at: String,
         hub_signature: String,
+        owner_id: Option<String>,
+        principal_id: Option<String>,
 
         callback: impl FnOnce(&super::ReducerEventContext, Result<Result<(), String>, __sdk::InternalError>)
             + Send
@@ -165,6 +175,8 @@ impl issue_capability_lease for super::RemoteReducers {
         issued_at: String,
         expires_at: String,
         hub_signature: String,
+        owner_id: Option<String>,
+        principal_id: Option<String>,
 
         callback: impl FnOnce(&super::ReducerEventContext, Result<Result<(), String>, __sdk::InternalError>)
             + Send
@@ -190,6 +202,8 @@ impl issue_capability_lease for super::RemoteReducers {
                 issued_at,
                 expires_at,
                 hub_signature,
+                owner_id,
+                principal_id,
             },
             callback,
         )
