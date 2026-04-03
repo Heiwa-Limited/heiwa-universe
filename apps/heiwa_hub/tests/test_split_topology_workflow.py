@@ -8,7 +8,7 @@ DEPLOY_WORKFLOW = ROOT / ".github" / "workflows" / "deploy.yml"
 def test_deploy_workflow_targets_split_railway_services():
     text = DEPLOY_WORKFLOW.read_text(encoding="utf-8")
 
-    assert "--service heiwa-hub" in text
+    assert "--service heiwa-core" in text
     assert "--service heiwa-trading" in text
 
 

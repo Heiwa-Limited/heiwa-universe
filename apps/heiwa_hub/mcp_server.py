@@ -383,25 +383,21 @@ async def _check_stdb_health() -> bool:
 @app.head("/health")
 async def health():
     stdb_ok = await _check_stdb_health()
-    if not stdb_ok:
-        from starlette.responses import JSONResponse
-        return JSONResponse(
-            status_code=503,
-            content={
-                "status": "degraded",
-                "service": "heiwa-core-hub",
-                "stdb": "unreachable",
-                "timestamp": time.time(),
-            },
-        )
-    return {
-        "status": "alive",
-        "service": "heiwa-core-hub",
+    status = "ok" if stdb_ok else "degraded"
+    
+    payload = {
+        "status": status,
+        "service": "heiwa-hub",
+        "ready": stdb_ok,
         "state_backend": db.state_backend,
-        "stdb": "connected",
-        "gateway_transport": "websocket",
+        "stdb": "connected" if stdb_ok else "unreachable",
         "timestamp": time.time(),
     }
+    
+    if not stdb_ok:
+        from starlette.responses import JSONResponse
+        return JSONResponse(status_code=503, content=payload)
+    return payload
 
 
 # ---------------------------------------------------------------------------
