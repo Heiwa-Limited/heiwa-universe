@@ -133,7 +133,6 @@ pub async fn run(cfg: RuntimeConfig) -> Result<()> {
 pub fn build_router(state: SharedState) -> Router {
     Router::new()
         .route("/health", get(health_handler))
-        .route("/ready", get(ready_handler))
         .route("/status", get(status_handler))
         .route("/auth/me", get(auth::auth_me_handler))
         .route("/ws", get(gateway::ws_handler))
@@ -211,7 +210,7 @@ async fn seed_catalogs(conn: &DbConnection, state: SharedState) -> Result<()> {
 async fn heartbeat(conn: &DbConnection, cfg: &RuntimeConfig) -> Result<()> {
     conn.reducers.upsert_node_heartbeat(
         cfg.node_id.clone(),
-        "cloud-hq".to_string(),
+        "heiwa-core".to_string(),
         "ready".to_string(),
         "{}".to_string(),
         "{}".to_string(),
@@ -221,16 +220,21 @@ async fn heartbeat(conn: &DbConnection, cfg: &RuntimeConfig) -> Result<()> {
     ).map_err(|e| anyhow!(e.to_string()))
 }
 
-async fn health_handler() -> impl IntoResponse {
-    Json(json!({ "status": "ok" }))
-}
-
-async fn ready_handler(axum::extract::State(state): axum::extract::State<SharedState>) -> impl IntoResponse {
+async fn health_handler(axum::extract::State(state): axum::extract::State<SharedState>) -> impl IntoResponse {
     let status = state.status.read().await;
-    if *status == SystemStatus::Ready {
-        (axum::http::StatusCode::OK, Json(json!({ "ready": true })))
+    let is_ready = *status == SystemStatus::Ready;
+    
+    let body = Json(json!({
+        "status": status.as_str(),
+        "service": "heiwa-core",
+        "ready": is_ready,
+        "timestamp": time::OffsetDateTime::now_utc().unix_timestamp(),
+    }));
+
+    if is_ready {
+        (axum::http::StatusCode::OK, body)
     } else {
-        (axum::http::StatusCode::SERVICE_UNAVAILABLE, Json(json!({ "ready": false })))
+        (axum::http::StatusCode::SERVICE_UNAVAILABLE, body)
     }
 }
 

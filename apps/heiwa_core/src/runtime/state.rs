@@ -25,6 +25,16 @@ pub enum SystemStatus {
     Degraded,
 }
 
+impl SystemStatus {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            SystemStatus::Starting => "starting",
+            SystemStatus::Ready => "ok",
+            SystemStatus::Degraded => "degraded",
+        }
+    }
+}
+
 impl CoreState {
     pub fn new(config: RuntimeConfig, stdb: StdbRuntime<ReducerTransport>) -> Self {
         Self {

@@ -17,7 +17,7 @@ fn test_config() -> RuntimeConfig {
         log_level: "INFO".to_string(),
         machine_auth_token: "operator-token".to_string(),
         jwt_signing_secret: "auth-secret".to_string(),
-        node_id: "cloud-hq-0".to_string(),
+        node_id: "heiwa-core-0".to_string(),
         model_tiers_seed_path: "config/seeds/model_tiers.json".to_string(),
         ai_router_seed_path: "config/swarm/ai_router.json".to_string(),
     }

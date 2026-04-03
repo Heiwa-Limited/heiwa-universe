@@ -48,7 +48,7 @@ impl RuntimeConfig {
             jwt_signing_secret: env::var("HEIWA_JWT_SIGNING_SECRET")
                 .or_else(|_| env::var("HEIWA_AUTH_SECRET"))
                 .unwrap_or_default(),
-            node_id: env::var("HEIWA_NODE_ID").unwrap_or_else(|_| "cloud-hq-0".to_string()),
+            node_id: env::var("HEIWA_NODE_ID").unwrap_or_else(|_| "heiwa-core-0".to_string()),
             model_tiers_seed_path: env::var("MODEL_TIERS_SEED_PATH")
                 .unwrap_or_else(|_| "config/seeds/model_tiers.json".to_string()),
             ai_router_seed_path: env::var("AI_ROUTER_SEED_PATH")
