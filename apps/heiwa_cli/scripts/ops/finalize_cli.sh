@@ -2,7 +2,8 @@
 # apps/heiwa_cli/scripts/ops/finalize_cli.sh
 set -euo pipefail
 
-CLI_BIN="/Users/dmcgregsauce/heiwa/apps/heiwa_cli/heiwa"
+REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../../.." && pwd)"
+CLI_BIN="$REPO_ROOT/apps/heiwa_cli/heiwa"
 ALIAS_CMD="alias heiwa='$CLI_BIN'"
 
 echo "🚀 Finalizing Heiwa CLI Integration..."
@@ -20,7 +21,7 @@ done
 
 # 2. Re-install Node Wrapper
 echo "📦 Refreshing Global Node Link..."
-cd /Users/dmcgregsauce/heiwa/apps/heiwa_cli
+cd "$REPO_ROOT/apps/heiwa_cli"
 npm install -g . --quiet
 
 # 3. Test Binary

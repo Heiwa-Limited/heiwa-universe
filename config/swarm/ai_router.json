@@ -1,7 +1,7 @@
 {
   "version": "2026-03-06",
-  "source_report": "/Users/dmcgregsauce/Downloads/heiwa_build_report.docx",
-  "blueprint": "/Users/dmcgregsauce/heiwa/config/swarm/BUILD_BLUEPRINT_2026-03-06.md",
+  "source_report": "ops/research/heiwa_build_report.docx",
+  "blueprint": "config/swarm/BUILD_BLUEPRINT_2026-03-06.md",
   "foundation": {
     "state_layer": "spacetimedb",
     "cloud_host": "railway",
@@ -386,7 +386,7 @@
     }
   },
   "trust_boundaries": [
-    "/Users/dmcgregsauce/heiwa",
+    "/Users/dmcgregsauce/heiwa-universe",
     "/Users/dmcgregsauce"
   ]
 }

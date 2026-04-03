@@ -16,8 +16,8 @@ This guide has been successfully executed by the Antigravity Agent to initialize
 To finalize the integration, the human operator must perform the following:
 
 1.  **Open WSL terminal.**
-2.  **Verify local environment:** `cat ~/heiwa/.env.worker.local`
-3.  **Configure auth:** Set `HEIWA_AUTH_TOKEN` in `.env.worker.local` (value from Railway env vars).
+2.  **Verify local environment:** `cat ~/heiwa-universe/.env.worker.local`
+3.  **Configure auth:** Set `HEIWA_MACHINE_AUTH_TOKEN` in `.env.worker.local` (value from Railway env vars).
 4.  **Restart service:** `sudo systemctl restart heiwa-worker`
 
 > **Note:** NATS has been removed from Heiwa. Transport is now LocalBusTransport (co-located) + WebSocket (remote workers).

@@ -6,17 +6,17 @@
     <string>ltd.heiwa.worker</string>
     <key>ProgramArguments</key>
     <array>
-        <string>/Users/dmcgregsauce/heiwa/apps/heiwa_cli/scripts/ops/start_worker_stack.sh</string>
+        <string>/Users/dmcgregsauce/heiwa-universe/apps/heiwa_cli/scripts/ops/start_worker_stack.sh</string>
     </array>
     <key>RunAtLoad</key>
     <true/>
     <key>KeepAlive</key>
     <true/>
     <key>StandardOutPath</key>
-    <string>/Users/dmcgregsauce/heiwa/runtime/logs/worker_launchd.log</string>
+    <string>/Users/dmcgregsauce/heiwa-universe/runtime/logs/worker_launchd.log</string>
     <key>StandardErrorPath</key>
-    <string>/Users/dmcgregsauce/heiwa/runtime/logs/worker_launchd.err</string>
+    <string>/Users/dmcgregsauce/heiwa-universe/runtime/logs/worker_launchd.err</string>
     <key>WorkingDirectory</key>
-    <string>/Users/dmcgregsauce/heiwa</string>
+    <string>/Users/dmcgregsauce/heiwa-universe</string>
 </dict>
 </plist>

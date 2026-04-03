@@ -25,10 +25,10 @@ No vendor lock-in. No platform inference costs passed to you. Your keys, your bu
 
 | Component | Location | Role |
 |-----------|----------|------|
-| **Hub** | `apps/heiwa_hub/` | Railway-hosted runtime -- cognition pipeline, agent execution, API surface |
+| **Core** | `apps/heiwa_core/` | Railway-hosted Rust runtime authority -- auth, worker ingress, DREX routing, API/WS surface |
 | **SpacetimeDB** | `apps/heiwa_hub/spacetimedb/` | Multi-tenant state engine -- users, credentials, proposals, runs, billing |
-| **Web** | `apps/heiwa_web/` | `app.heiwa.ltd` -- dashboard, key management, mission history |
-| **Discord** | `apps/heiwa_hub/agents/` | Alternative interface -- DM-based task submission and results |
+| **Web** | `apps/heiwa_web/` | Cloudflare-delivered public/product shell surface -- static today, TypeScript baseline added |
+| **Discord** | `apps/heiwa_hub/agents/` | Legacy/porting surface -- high-value patterns still being migrated |
 | **SDK** | `packages/heiwa_sdk/` | State, security, gateway, routing, scheduler |
 | **Cognition** | `packages/heiwa_cognition/` | Intent normalizer, risk scorer, compute router, program compiler |
 | **Protocol** | `packages/heiwa_protocol/` | Shared typed contracts and schemas |
@@ -38,13 +38,15 @@ No vendor lock-in. No platform inference costs passed to you. Your keys, your bu
 
 ```mermaid
 graph TD
-    A["app.heiwa.ltd"] --> B["Hub (Railway)"]
+    A["app.heiwa.ltd"] --> B["Heiwa Core (Railway)"]
     C["Discord"] --> B
     B --> D["SpacetimeDB"]
     B --> E["Provider APIs (user keys)"]
     B --> F["CLI Tools (platform keys)"]
     D --> G["User State / Credentials / Billing"]
 ```
+
+The active runtime authority is **Heiwa Core** on Railway. Python hub code remains as legacy/reference and for transitional surfaces while the mesh and product shell continue moving onto the Rust + TypeScript spine.
 
 ## Verticals
 
@@ -55,12 +57,11 @@ graph TD
 ## Quick Start
 
 ```bash
-cd ~/heiwa
-source .venv/bin/activate
-export PYTHONPATH="$(pwd)/packages/heiwa_sdk:$(pwd)/packages/heiwa_protocol:$(pwd)/packages/heiwa_identity:$(pwd)/packages/heiwa_ui:$(pwd)/apps"
-python -m apps.heiwa_hub.main
-./apps/heiwa_cli/heiwa cells
-./apps/heiwa_cli/heiwa bench
+cd ~/heiwa-universe
+bash scripts/check_runtime_baseline.sh
+npm install
+npm run typecheck
+cargo run -p heiwa-core
 ```
 
 ## Product Graph
@@ -76,4 +77,5 @@ The root [`justfile`](justfile) is the product build contract. If a task is not 
 - [`config/swarm/ai_router.json`](config/swarm/ai_router.json)
 - [`config/identities/profiles.json`](config/identities/profiles.json)
 - [`config/swarm/domain_plan.md`](config/swarm/domain_plan.md)
+- [`docs/standards/runtime-baseline.md`](docs/standards/runtime-baseline.md)
 - [`HEIWA.md`](HEIWA.md)

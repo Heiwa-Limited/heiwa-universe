@@ -3,20 +3,22 @@
 Heiwa's primary execution plane on Railway.
 
 ## Components
-1. **heiwa-hub** (Main Python worker & server)
-2. **SpacetimeDB** (Authoritative state — proposals, nodes, runs, leases, approvals)
+1. **heiwa-core** (Main Rust runtime authority)
+2. **heiwa-trading** (Optional trading surface)
+3. **SpacetimeDB** (Authoritative state — routes, tasks, runs, nodes, leases, approvals)
 
 ## Bootstrapping a New Environment
 
 ```bash
-railway init --name heiwa_hub
+railway init --name heiwa-universe
 
-# Set Variables for Hub
-railway variables --set 'HEIWA_STATE_BACKEND=spacetimedb' --service heiwa-hub
-railway variables --set 'PORT=8080' --service heiwa-hub
+# Set Variables for Core
+railway variables --set 'HEIWA_STATE_BACKEND=spacetimedb' --service heiwa-core
+railway variables --set 'STDB_SERVER=maincloud' --service heiwa-core
+railway variables --set 'PORT=8080' --service heiwa-core
 
 # Link custom domain
-railway domain link api.heiwa.ltd --service heiwa-hub
+railway domain link api.heiwa.ltd --service heiwa-core
 ```
 
 ## Volumes & Persistence
@@ -26,6 +28,13 @@ railway domain link api.heiwa.ltd --service heiwa-hub
 
 ## Transport
 
-- In-process `LocalBusTransport` for co-located agents
-- WebSocket for remote boost node connections
+- WebSocket worker ingress at `/ws/worker`
+- Legacy compatibility bridge at `/ws/worker/legacy`
 - No external message brokers
+
+## Runtime Baseline
+
+- Docker builder pin: `rust:1.93-slim`
+- Healthcheck: `/ready`
+- Start command: `bash apps/heiwa_core/start.sh`
+- Production default: remote STDB (`maincloud`)

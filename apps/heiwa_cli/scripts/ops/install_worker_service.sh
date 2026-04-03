@@ -3,7 +3,8 @@
 set -euo pipefail
 
 PLIST_NAME="ltd.heiwa.worker.plist"
-SOURCE_PLIST="/Users/dmcgregsauce/heiwa/infra/nodes/macos/$PLIST_NAME"
+REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../../.." && pwd)"
+SOURCE_PLIST="$REPO_ROOT/infra/nodes/macos/$PLIST_NAME"
 TARGET_DIR="$HOME/Library/LaunchAgents"
 TARGET_PLIST="$TARGET_DIR/$PLIST_NAME"
 
@@ -23,4 +24,4 @@ echo "✅ Loading service: $PLIST_NAME"
 launchctl load "$TARGET_PLIST"
 
 echo "✨ Heiwa Worker is now persistent and always-on."
-echo "   Logs: tail -f ~/heiwa/runtime/logs/worker_manager.log"
+echo "   Logs: tail -f ~/heiwa-universe/runtime/logs/worker_manager.log"

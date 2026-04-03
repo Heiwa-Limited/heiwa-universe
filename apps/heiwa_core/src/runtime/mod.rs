@@ -139,6 +139,7 @@ pub fn build_router(state: SharedState) -> Router {
         .route("/ws", get(gateway::ws_handler))
         .route("/ws/client", get(gateway::ws_client_handler))
         .route("/ws/worker", get(gateway::ws_worker_handler))
+        .route("/ws/worker/legacy", get(gateway::ws_worker_legacy_handler))
         .route("/battlefields", post(gateway::battlefield_handler))
         .route("/tasks", post(gateway::task_handler))
         .layer(TraceLayer::new_for_http())

@@ -34,13 +34,16 @@ class ACPAdapter(BaseClawAdapter):
         from heiwa_sdk.config import settings
 
         hub_url = settings.HUB_BASE_URL.replace("https://", "wss://").replace("http://", "ws://")
-        ws_url = f"{hub_url}/ws/worker"
+        ws_url = f"{hub_url}/ws/worker/legacy"
 
         try:
             # We timeout quickly to avoid blocking the gateway if the hub is unreachable
             async with websockets.connect(ws_url, open_timeout=5) as websocket:
                 # 1. Register as an ACP proxy
-                auth_token = settings.HEIWA_AUTH_TOKEN
+                auth_token = (
+                    getattr(settings, "HEIWA_MACHINE_AUTH_TOKEN", None)
+                    or settings.HEIWA_AUTH_TOKEN
+                )
                 registration = {
                     "type": "register",
                     "worker_id": f"acp-proxy-{settings.RAILWAY_ENVIRONMENT_NAME}",

@@ -66,7 +66,7 @@ def hub_url_candidates() -> list[str]:
         os.getenv("HEIWA_HUB_FALLBACK_URL", ""),
     ]
     profile_urls = _profile_hub_fallbacks()
-    defaults = ["https://api.heiwa.ltd", "https://heiwa-cloud-hq-brain.up.railway.app"]
+    defaults = ["https://api.heiwa.ltd"]
     return _unique_strings(direct_env + defaults + profile_urls)
 
 
@@ -103,12 +103,20 @@ class Settings:
     
     @property
     def HEIWA_AUTH_TOKEN(self): return get_env("HEIWA_AUTH_TOKEN", required=False)
+
+    @property
+    def HEIWA_MACHINE_AUTH_TOKEN(self):
+        return get_env("HEIWA_MACHINE_AUTH_TOKEN", default=self.HEIWA_AUTH_TOKEN, required=False)
     
     @property
     def OWNER_ID(self): return get_env("OWNER_ID", required=False)
     
     @property
     def HEIWA_AUTH_MODE(self): return get_env("HEIWA_AUTH_MODE", default="payload_token", required=False)
+
+    @property
+    def HEIWA_JWT_SIGNING_SECRET(self):
+        return get_env("HEIWA_JWT_SIGNING_SECRET", default=self.HEIWA_AUTH_SECRET, required=False)
     
     # --- HUB & MESH ---
     @property
@@ -148,6 +156,10 @@ class Settings:
     @property
     def STDB_SERVER(self):
         return get_env("STDB_SERVER", default="maincloud", required=False)
+
+    @property
+    def STDB_TOKEN(self):
+        return get_env("STDB_TOKEN", default=get_env("SPACETIMEDB_TOKEN", required=False), required=False)
 
     # --- DISCORD ---
     @property

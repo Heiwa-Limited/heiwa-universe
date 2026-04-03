@@ -1,6 +1,9 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+root_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+cd "$root_dir"
+
 dockerfile="apps/heiwa_core/Dockerfile"
 minimum_major=1
 minimum_minor=93
