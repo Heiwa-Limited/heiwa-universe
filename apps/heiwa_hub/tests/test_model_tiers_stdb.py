@@ -71,6 +71,9 @@ class TestModelTiersSTDB:
             cost_per_turn=0.0,
             max_context_tokens=32768,
             strengths=["code_generation", "research"],
+            vram_requirement_mb=4096,
+            quantization_type="q4_k_m",
+            kv_cache_strategy="none",
             enabled=True,
         )
         mock_call.assert_called_once()

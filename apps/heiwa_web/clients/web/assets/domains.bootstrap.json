@@ -35,7 +35,7 @@
     {
       "host": "api.heiwa.ltd",
       "purpose": "Runtime API + MCP ingress",
-      "target": "Railway heiwa-cloud-hq service behind Cloudflare proxy/WAF",
+      "target": "Railway heiwa-core service behind Cloudflare proxy/WAF",
       "state": "active",
       "health_path": "/health"
     },
@@ -72,7 +72,7 @@
     {
       "type": "CNAME",
       "name": "api",
-      "value": "Railway heiwa-cloud-hq service domain",
+      "value": "Railway heiwa-core service domain",
       "proxy": true,
       "ttl": "auto"
     },
@@ -89,7 +89,7 @@
     "Point app.heiwa.ltd at the Cloudflare Pages authenticated app shell.",
     "Point status.heiwa.ltd at the Cloudflare Pages status shell.",
     "Point docs.heiwa.ltd at the Cloudflare Pages docs project built from MkDocs Material.",
-    "Attach api.heiwa.ltd to the Railway heiwa-cloud-hq service and enforce Cloudflare proxy/WAF.",
+    "Attach api.heiwa.ltd to the Railway heiwa-core service and enforce Cloudflare proxy/WAF.",
     "Keep SpacetimeDB external on maincloud.spacetimedb.com rather than modeling it as a Railway service or volume.",
     "Keep internal preview runtimes such as heiwa-trading off the supported public host manifest until they graduate into first-class product surfaces.",
     "Enable strict TLS and baseline WAF rules for api.heiwa.ltd while keeping app.heiwa.ltd and the other Pages shells behind Cloudflare edge controls.",

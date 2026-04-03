@@ -48,7 +48,7 @@ def test_domain_manifest_includes_app_host_and_external_state():
 
     by_host = {entry["host"]: entry for entry in data["domains"]}
     assert "Cloudflare Pages" in by_host["app.heiwa.ltd"]["target"]
-    assert "heiwa-cloud-hq" in by_host["api.heiwa.ltd"]["target"]
+    assert "heiwa-core" in by_host["api.heiwa.ltd"]["target"]
 
 
 def test_static_surface_guard_rejects_stale_four_host_manifest(tmp_path: Path):
