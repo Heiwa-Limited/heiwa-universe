@@ -29,5 +29,5 @@ def test_health_reports_trading_service():
     response = client.get("/health")
     assert response.status_code == 200
     payload = response.json()
-    assert payload["status"] == "alive"
+    assert payload["status"] == "ok"
     assert payload["service"] == "heiwa-trading"

@@ -30,8 +30,9 @@ async def index_page():
 @app.head("/health")
 async def health():
     return {
-        "status": "alive",
+        "status": "ok",
         "service": "heiwa-trading",
+        "ready": True,
         "routes_base": "/trading",
         "timestamp": time.time(),
     }

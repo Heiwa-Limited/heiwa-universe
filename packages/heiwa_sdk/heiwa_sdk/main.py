@@ -107,7 +107,12 @@ def start_alerts_scheduler():
 
 @app.get("/health")
 def health():
-    return {"status": "ok", "service": "heiwa_hub"}
+    return {
+        "status": "ok",
+        "service": "heiwa-sdk",
+        "ready": True,
+        "timestamp": time.time(),
+    }
 
 
 @app.get("/health/ops", dependencies=[Depends(verify_token)])
