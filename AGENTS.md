@@ -1,31 +1,35 @@
 # AGENTS.md — The Heiwa Swarm Map
 
-Heiwa is an omnidirectional fluid mesh of peer agents. Any agent can spawn any other agent or tool via the Hub.
+Heiwa is an omnidirectional fluid mesh of peer agents. The authoritative control plane is **Heiwa Core** (Rust).
 
-## 1. Core Agent Roster (`apps/heiwa_hub/agents/`)
+## 1. Core Authority (`apps/heiwa_core/`)
 
-- **Captain** (`heiwa_agent.py`): The 24/7 identity. Handles Discord DMs and entry routing.
-- **Spine** (`spine.py`): Fleet coordination, heartbeats, and node registry.
-- **Messenger** (`messenger.py`): Discord server integration and human-in-the-loop approvals.
-- **Telemetry** (`telemetry.py`): Swarm-wide usage tracking and rate-limit awareness (STDB-native).
-- **Executor** (`executor.py`): Local tool and shell execution surface.
+- **Heiwa Core** (`heiwa-core`): The authoritative Rust orchestrator and gateway. Manages:
+    - Unified WebSocket Pipe (`/ws`) for all clients.
+    - DREX routing and model-tier selection.
+    - Mission and Task lifecycle (STDB-backed).
+    - Machine and session authentication.
+    - Worker ingress for boost nodes.
 
-## 2. Mesh Connectivity (`packages/heiwa_sdk/`)
+## 2. Mesh Connectivity
 
-- **SecurityService**: Centralized auth token validation and secret redaction.
-- **OrchestrationService**: (In Progress) Centralized enrichment and handoff logic.
-- **DeliveryManager**: (In Progress) Unified routing for LocalBus and WebSocket task delivery.
+- **Sovereign Boost Nodes**: Optional local nodes (Mac/WSL) that dial into `heiwa-core` to provide delegated execution and inference.
+- **Heiwa CLI**: Operator surface connecting to the core auth/runtime plane.
+- **app.heiwa.ltd**: Unified product shell (TypeScript) over the core API.
 
-## 3. Heiwa Limbs (`apps/heiwa_limbs/`)
+## 3. Legacy / Reference (`apps/heiwa_hub/`)
 
-Stand-alone processes in non-Python languages (e.g., Rust) that connect to the mesh via SpacetimeDB or WebSockets.
+- **Python Hub**: Legacy prototype logic. High-value patterns (Spine, Telemetry, Messenger) are being ported to the Rust Core.
+- **SpacetimeDB**: Still rooted at `apps/heiwa_hub/spacetimedb/` as the state authority.
 
 ## 4. Ground Truth & Progress
 
 - `docs/superpowers/status/feature_list.json`: System capability checklist.
 - `docs/superpowers/status/progress.md`: Active work logs.
-- Canonical operator context now lives under `ops/context/` and `ops/rooms/`.
+- `docs/superpowers/specs/2026-04-02-heiwa-rationalization-design.md`: Current architecture specification.
 
 ## 5. Security Posture
 
-Agents must never access `HEIWA_AUTH_TOKEN` directly. Use `SecurityService().validate_token()`. All logs are automatically redacted via `redact_text`.
+- **Machine Auth**: Managed via `HEIWA_MACHINE_AUTH_TOKEN`.
+- **User Sessions**: Managed via `HEIWA_JWT_SIGNING_SECRET` and `.heiwa.ltd` wildcard cookies.
+- **Redaction**: All logs are automatically redacted via centralized Rust primitives.
