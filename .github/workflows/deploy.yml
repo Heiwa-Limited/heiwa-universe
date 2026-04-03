@@ -115,6 +115,8 @@ jobs:
               raise SystemExit("Tracked cargo cache artifacts detected:\n" + "\n".join(bad[:20]))
           print("Repo hygiene check passed.")
           PY
+      - name: Verify heiwa-core Dockerfile Rust floor
+        run: bash scripts/check_heiwa_core_dockerfile.sh
 
   docs-build:
     name: Docs Build

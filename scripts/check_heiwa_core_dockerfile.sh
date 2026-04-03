@@ -1,0 +1,24 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+dockerfile="apps/heiwa_core/Dockerfile"
+minimum_major=1
+minimum_minor=93
+
+builder_line="$(grep -E '^FROM rust:[0-9]+\.[0-9]+-slim AS rust-builder$' "$dockerfile" || true)"
+if [[ -z "$builder_line" ]]; then
+  echo "Could not find rust-builder image pin in $dockerfile" >&2
+  exit 1
+fi
+
+version="${builder_line#FROM rust:}"
+version="${version%-slim AS rust-builder}"
+major="${version%%.*}"
+minor="${version#*.}"
+
+if (( major < minimum_major || (major == minimum_major && minor < minimum_minor) )); then
+  echo "$dockerfile pins rust-builder to $major.$minor, but heiwa-core requires at least $minimum_major.$minimum_minor" >&2
+  exit 1
+fi
+
+echo "$dockerfile pins rust-builder to $major.$minor, meeting the minimum $minimum_major.$minimum_minor requirement."
