@@ -28,7 +28,26 @@ else
     echo "  - WARNING: SpacetimeDB CLI not found in PATH."
 fi
 
-# 5. Git Status
+# 5. Git & GitHub Initialization
+if [[ -n "${GH_TOKEN:-${GITHUB_TOKEN:-}}" ]]; then
+    export GH_TOKEN="${GH_TOKEN:-$GITHUB_TOKEN}"
+    export GITHUB_TOKEN="$GH_TOKEN"
+    export GH_PROMPT_DISABLED=1
+    echo "  - GitHub CLI auth established."
+fi
+
+if [[ -n "${HEIWA_GPG_KEY:-}" ]]; then
+    echo "  - Importing GPG key..."
+    echo "$HEIWA_GPG_KEY" | base64 -d | gpg --import --batch --no-tty &>/dev/null
+    GPG_KEY_ID=$(gpg --list-secret-keys --keyid-format LONG | grep sec | awk '{print $2}' | cut -d'/' -f2 | head -1)
+    if [[ -n "$GPG_KEY_ID" ]]; then
+        git config user.signingkey "$GPG_KEY_ID"
+        git config commit.gpgsign true
+        echo "  - GPG signing active ($GPG_KEY_ID)."
+    fi
+fi
+
+# 6. Git Status
 echo "  - Recent work:"
 git log --oneline -5
 
