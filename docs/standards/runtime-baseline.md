@@ -24,7 +24,7 @@ These versions are the canonical floor for `heiwa-universe`:
 
 ### Non-negotiables
 
-- Railway deploys must build from the pinned Dockerfile and `/ready` healthcheck.
+- Railway deploys must build from the pinned Dockerfile and `/health` healthcheck.
 - CI must set up Rust and Node explicitly instead of relying on runner defaults.
 - Root TypeScript checks must run under the repo-pinned Node version.
 - Local development may use newer global runtimes, but repo commands should use the pinned Rust and Node lanes.

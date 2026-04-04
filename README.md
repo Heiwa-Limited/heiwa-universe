@@ -3,79 +3,54 @@
 [![Railway](https://img.shields.io/badge/runtime-Railway-5a3cc8?style=flat-square&logo=railway)](https://railway.app)
 [![SpacetimeDB](https://img.shields.io/badge/state-SpacetimeDB-0c73d8?style=flat-square)](https://spacetimedb.com)
 [![Web](https://img.shields.io/badge/dashboard-app.heiwa.ltd-000000?style=flat-square)](https://app.heiwa.ltd)
-[![Discord](https://img.shields.io/badge/interface-Discord-5865F2?style=flat-square&logo=discord)](https://discord.com)
 
-Heiwa is a BYOK (Bring Your Own Keys) agent orchestration platform. Connect your own AI provider API keys and OAuth credentials. Heiwa wraps every inference provider, scores intent and risk, and routes each task to the optimal model and provider -- across multi-step agent workflows.
+Heiwa is a local-first AI runtime and enterprise platform. It normalizes access to provider subscriptions, API keys, local models, device capabilities, and evidence through a unified execution kernel.
 
-Access via [app.heiwa.ltd](https://app.heiwa.ltd) (web dashboard) and Discord DMs.
+## One-Sentence Truth
 
-## What Heiwa Does
+`heiwa` is the installed product surface, DREX is the internal execution kernel, SpacetimeDB is the adjudication and evidence plane, Rust proposes and executes, and `heiwa` presents.
 
-Users bring their own API keys (OpenAI, Anthropic, Google, etc.). Heiwa handles the rest:
+## Core Pillars
 
-- **Intent classification** -- understands what you want to do
-- **Risk scoring** -- evaluates safety and cost implications
-- **Optimal routing** -- picks the best model/provider for each step, using your keys and rate limits
-- **Multi-step orchestration** -- chains tasks into agent workflows with structured execution programs
-- **Multi-tenant state** -- every user's credentials, runs, and results are scoped and isolated
-
-No vendor lock-in. No platform inference costs passed to you. Your keys, your budget, Heiwa's routing intelligence.
+- **Local-First Runtime** -- `heiwa` on your machine is the primary operator surface.
+- **DREX Kernel** -- Advanced intent classification, risk scoring, and device-aware routing.
+- **Evidence-First** -- Every task, model selection, and run is adjudicated and persisted in SpacetimeDB.
+- **Provider Neutral** -- Unified access to Claude Code, Codex, Gemini CLI, Antigravity, and local runtimes like Ollama.
+- **Sovereign Execution** -- Prefer local models and local devices for privacy and cost control.
 
 ## Architecture
 
-| Component | Location | Role |
-|-----------|----------|------|
-| **Core** | `apps/heiwa_core/` | Railway-hosted Rust runtime authority -- auth, worker ingress, DREX routing, API/WS surface |
-| **SpacetimeDB** | `apps/heiwa_hub/spacetimedb/` | Multi-tenant state engine -- users, credentials, proposals, runs, billing |
-| **Web** | `apps/heiwa_web/` | Cloudflare-delivered public/product shell surface -- static today, TypeScript baseline added |
-| **Discord** | `apps/heiwa_hub/agents/` | Legacy/porting surface -- high-value patterns still being migrated |
-| **SDK** | `packages/heiwa_sdk/` | State, security, gateway, routing, scheduler |
-| **Cognition** | `packages/heiwa_cognition/` | Intent normalizer, risk scorer, compute router, program compiler |
-| **Protocol** | `packages/heiwa_protocol/` | Shared typed contracts and schemas |
-| **Bindings** | `packages/heiwa_bindings/` | Generated SpacetimeDB clients (Rust/TypeScript/Python) |
+| Layer | Canonical meaning | Location |
+| --- | --- | --- |
+| **Heiwa** | Company and product identity | Repo root |
+| **`heiwa`** | Primary installed runtime and operator surface | `apps/heiwa_shell/` |
+| **DREX** | Internal execution kernel and routing substrate | `apps/heiwa_core/` |
+| **SpacetimeDB** | Adjudication, canonical state, and evidence plane | `apps/heiwa_hub/spacetimedb/` |
+| **Rust runtime** | Volatile execution: provider supervision and candidate generation | `crates/` |
 
-## Runtime Topology
-
-```mermaid
-graph TD
-    A["app.heiwa.ltd"] --> B["Heiwa Core (Railway)"]
-    C["Discord"] --> B
-    B --> D["SpacetimeDB"]
-    B --> E["Provider APIs (user keys)"]
-    B --> F["CLI Tools (platform keys)"]
-    D --> G["User State / Credentials / Billing"]
-```
-
-The active runtime authority is **Heiwa Core** on Railway. Python hub code remains as legacy/reference and for transitional surfaces while the mesh and product shell continue moving onto the Rust + TypeScript spine.
-
-## Verticals
-
-**Trading** -- Polymarket analysis and paper-trading. Heiwa runs market scans using your inference budget, scores opportunities, and surfaces results via Discord DM and web dashboard. Source: `apps/heiwa_trading/`.
-
-**Autoresearch** -- Karpathy-style autonomous research loops. Define a research question, Heiwa orchestrates multi-model deep dives and delivers structured findings.
+> Rust proposes, SpacetimeDB adjudicates, `heiwa` presents.
 
 ## Quick Start
 
 ```bash
-cd ~/heiwa-universe
+# 1. Install and verify baseline
 bash scripts/check_runtime_baseline.sh
-npm install
-npm run typecheck
-cargo run -p heiwa-core
+
+# 2. Build the local runtime
+cargo build -p heiwa-shell
+
+# 3. Run install and doctor
+./target/debug/heiwa-shell install
+./target/debug/heiwa-shell doctor
+
+# 4. List providers and auth
+./target/debug/heiwa-shell providers
+./target/debug/heiwa-shell auth status
 ```
-
-## Product Graph
-
-The root [`justfile`](justfile) is the product build contract. If a task is not represented there, it is not part of the hosted product graph.
-
-- Product surfaces: `apps/`, `packages/`, `config/`, `infra/`, `docs/`, `scripts/`
-- Operator-only context/tooling: `ops/`
 
 ## Key Manifests
 
-- [`config/swarm/BUILD_BLUEPRINT_2026-03-06.md`](config/swarm/BUILD_BLUEPRINT_2026-03-06.md)
-- [`config/swarm/ai_router.json`](config/swarm/ai_router.json)
-- [`config/identities/profiles.json`](config/identities/profiles.json)
-- [`config/swarm/domain_plan.md`](config/swarm/domain_plan.md)
+- [`HEIWA.md`](HEIWA.md) -- **The Canonical Truth** (Read this first)
 - [`docs/standards/runtime-baseline.md`](docs/standards/runtime-baseline.md)
-- [`HEIWA.md`](HEIWA.md)
+- [`config/swarm/BUILD_BLUEPRINT_2026-03-06.md`](config/swarm/BUILD_BLUEPRINT_2026-03-06.md)
+- [`justfile`](justfile) -- Build and task contract

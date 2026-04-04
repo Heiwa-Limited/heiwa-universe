@@ -3,9 +3,8 @@
 Heiwa's primary execution plane on Railway.
 
 ## Components
-1. **heiwa-core** (Main Rust runtime authority)
-2. **heiwa-trading** (Optional trading surface)
-3. **SpacetimeDB** (Authoritative state — routes, tasks, runs, nodes, leases, approvals)
+1. **heiwa-core** (DREX Routing kernel and control plane)
+2. **SpacetimeDB** (Authoritative state and evidence — routes, tasks, runs, nodes, leases, approvals)
 
 ## Bootstrapping a New Environment
 
@@ -35,6 +34,6 @@ railway domain link api.heiwa.ltd --service heiwa-core
 ## Runtime Baseline
 
 - Docker builder pin: `rust:1.93-slim`
-- Healthcheck: `/ready`
+- Healthcheck: `/health`
 - Start command: `bash apps/heiwa_core/start.sh`
 - Production default: remote STDB (`maincloud`)
