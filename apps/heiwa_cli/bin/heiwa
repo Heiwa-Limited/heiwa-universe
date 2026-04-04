@@ -1,15 +1,22 @@
 #!/usr/bin/env node
-const { spawn } = require('child_process');
+const { spawnSync } = require('child_process');
 const path = require('path');
+const fs = require('fs');
 
-const pythonScript = path.join(__dirname, '../heiwa');
 const args = process.argv.slice(2);
+const rustBinary = path.join(__dirname, '../../../target/debug/heiwa-shell');
+const pythonScript = path.join(__dirname, '../heiwa');
 
-const child = spawn(pythonScript, args, {
-  stdio: 'inherit',
-  env: process.env
-});
-
-child.on('exit', (code) => {
-  process.exit(code);
-});
+if (fs.existsSync(rustBinary)) {
+  const result = spawnSync(rustBinary, args, {
+    stdio: 'inherit',
+    env: process.env
+  });
+  process.exit(result.status);
+} else {
+  const result = spawnSync(pythonScript, args, {
+    stdio: 'inherit',
+    env: process.env
+  });
+  process.exit(result.status);
+}
