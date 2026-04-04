@@ -2952,43 +2952,39 @@ pub fn record_dispatch_ack(
 #[table(accessor = rate_group_state, public)]
 pub struct RateGroupState {
     #[primary_key]
-    pub rate_group: String,
-    pub turns_used: u32,
-    pub turns_max: u32,
-    pub window_start: String,       // ISO 8601
-    pub window_seconds: u32,
-    pub cooldown_until: String,     // ISO 8601, empty if not cooling down
-    pub available: bool,
+    pub group_id: String,
+    pub tier: String,
+    pub limit_rpm: i64,
+    pub limit_tpm: i64,
+    pub current_rpm: i64,
+    pub current_tpm: i64,
+    pub reset_at: String,
 }
 
 #[reducer]
 pub fn upsert_rate_group_state(
     ctx: &ReducerContext,
-    rate_group: String,
-    turns_used: u32,
-    turns_max: u32,
-    window_seconds: u32,
-    cooldown_until: String,
-    available: bool,
+    group_id: String,
+    tier: String,
+    limit_rpm: i64,
+    limit_tpm: i64,
+    current_rpm: i64,
+    current_tpm: i64,
+    reset_at: String,
 ) -> Result<(), String> {
-    if let Some(mut existing) = ctx.db.rate_group_state().rate_group().find(&rate_group) {
-        existing.turns_used = turns_used;
-        existing.turns_max = turns_max;
-        existing.window_start = ctx.timestamp.to_string();
-        existing.window_seconds = window_seconds;
-        existing.cooldown_until = cooldown_until;
-        existing.available = available;
-        ctx.db.rate_group_state().rate_group().update(existing);
+    let row = RateGroupState {
+        group_id: group_id.clone(),
+        tier,
+        limit_rpm,
+        limit_tpm,
+        current_rpm,
+        current_tpm,
+        reset_at,
+    };
+    if ctx.db.rate_group_state().group_id().find(group_id).is_some() {
+        ctx.db.rate_group_state().group_id().update(row);
     } else {
-        ctx.db.rate_group_state().insert(RateGroupState {
-            rate_group,
-            turns_used,
-            turns_max,
-            window_start: ctx.timestamp.to_string(),
-            window_seconds,
-            cooldown_until,
-            available,
-        });
+        ctx.db.rate_group_state().insert(row);
     }
     Ok(())
 }

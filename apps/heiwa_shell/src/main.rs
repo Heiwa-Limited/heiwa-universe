@@ -28,7 +28,48 @@ async fn main() -> Result<()> {
             println!("  Ollama: {}", if report.ollama_installed { "Installed" } else { "Not found" });
         }
         "auth" => {
-            println!("Running auth...");
+            if args.len() < 3 {
+                println!("Usage: heiwa auth [status|login|logout] [provider]");
+            } else {
+                match args[2].as_str() {
+                    "status" => {
+                        let providers = vec!["claude", "codex", "gemini", "ollama"];
+                        println!("Provider Auth Status:");
+                        for p in providers {
+                            if let Some(status) = heiwa_provider::get_auth_status(p) {
+                                println!("  {:<10} {:<15} ({:?})", p, status.status, status.auth_kind);
+                            }
+                        }
+                    }
+                    "login" => {
+                        if args.len() < 4 {
+                            println!("Usage: heiwa auth login [provider]");
+                        } else {
+                            heiwa_provider::login(&args[3])?;
+                        }
+                    }
+                    "logout" => {
+                        if args.len() < 4 {
+                            println!("Usage: heiwa auth logout [provider]");
+                        } else {
+                            heiwa_provider::logout(&args[3])?;
+                        }
+                    }
+                    _ => println!("Unknown auth subcommand: {}", args[2]),
+                }
+            }
+        }
+        "providers" => {
+            let providers = vec!["claude", "codex", "gemini", "ollama"];
+            println!("Available Providers:");
+            for p in providers {
+                if let Some(status) = heiwa_provider::get_auth_status(p) {
+                    println!("  {:<10} - {:?}", p, status.auth_kind);
+                    if let Some(model) = status.default_model {
+                        println!("    Default Model: {}", model);
+                    }
+                }
+            }
         }
         "session" => {
             if args.len() >= 3 && args[2] == "attach" {
@@ -59,6 +100,7 @@ fn print_help() {
     println!("  install          Install Heiwa and its dependencies");
     println!("  doctor           Check the status of the Heiwa installation");
     println!("  auth             Manage provider authentication");
+    println!("  providers        List available providers and their status");
     println!("  session attach   Attach to a Heiwa session");
     println!("  help             Print this message or the help of the given subcommand(s)");
 }

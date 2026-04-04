@@ -7,23 +7,25 @@ use spacetimedb_sdk::__codegen::{self as __sdk, __lib, __sats, __ws};
 #[derive(__lib::ser::Serialize, __lib::de::Deserialize, Clone, PartialEq, Debug)]
 #[sats(crate = __lib)]
 pub(super) struct UpsertRateGroupStateArgs {
-    pub rate_group: String,
-    pub turns_used: u32,
-    pub turns_max: u32,
-    pub window_seconds: u32,
-    pub cooldown_until: String,
-    pub available: bool,
+    pub group_id: String,
+    pub tier: String,
+    pub limit_rpm: i64,
+    pub limit_tpm: i64,
+    pub current_rpm: i64,
+    pub current_tpm: i64,
+    pub reset_at: String,
 }
 
 impl From<UpsertRateGroupStateArgs> for super::Reducer {
     fn from(args: UpsertRateGroupStateArgs) -> Self {
         Self::UpsertRateGroupState {
-            rate_group: args.rate_group,
-            turns_used: args.turns_used,
-            turns_max: args.turns_max,
-            window_seconds: args.window_seconds,
-            cooldown_until: args.cooldown_until,
-            available: args.available,
+            group_id: args.group_id,
+            tier: args.tier,
+            limit_rpm: args.limit_rpm,
+            limit_tpm: args.limit_tpm,
+            current_rpm: args.current_rpm,
+            current_tpm: args.current_tpm,
+            reset_at: args.reset_at,
         }
     }
 }
@@ -33,50 +35,38 @@ impl __sdk::InModule for UpsertRateGroupStateArgs {
 }
 
 #[allow(non_camel_case_types)]
-/// Extension trait for access to the reducer `upsert_rate_group_state`.
-///
-/// Implemented for [`super::RemoteReducers`].
 pub trait upsert_rate_group_state {
-    /// Request that the remote module invoke the reducer `upsert_rate_group_state` to run as soon as possible.
-    ///
-    /// This method returns immediately, and errors only if we are unable to send the request.
-    /// The reducer will run asynchronously in the future,
-    ///  and this method provides no way to listen for its completion status.
-    /// /// Use [`upsert_rate_group_state:upsert_rate_group_state_then`] to run a callback after the reducer completes.
     fn upsert_rate_group_state(
         &self,
-        rate_group: String,
-        turns_used: u32,
-        turns_max: u32,
-        window_seconds: u32,
-        cooldown_until: String,
-        available: bool,
+        group_id: String,
+        tier: String,
+        limit_rpm: i64,
+        limit_tpm: i64,
+        current_rpm: i64,
+        current_tpm: i64,
+        reset_at: String,
     ) -> __sdk::Result<()> {
         self.upsert_rate_group_state_then(
-            rate_group,
-            turns_used,
-            turns_max,
-            window_seconds,
-            cooldown_until,
-            available,
+            group_id,
+            tier,
+            limit_rpm,
+            limit_tpm,
+            current_rpm,
+            current_tpm,
+            reset_at,
             |_, _| {},
         )
     }
 
-    /// Request that the remote module invoke the reducer `upsert_rate_group_state` to run as soon as possible,
-    /// registering `callback` to run when we are notified that the reducer completed.
-    ///
-    /// This method returns immediately, and errors only if we are unable to send the request.
-    /// The reducer will run asynchronously in the future,
-    ///  and its status can be observed with the `callback`.
     fn upsert_rate_group_state_then(
         &self,
-        rate_group: String,
-        turns_used: u32,
-        turns_max: u32,
-        window_seconds: u32,
-        cooldown_until: String,
-        available: bool,
+        group_id: String,
+        tier: String,
+        limit_rpm: i64,
+        limit_tpm: i64,
+        current_rpm: i64,
+        current_tpm: i64,
+        reset_at: String,
 
         callback: impl FnOnce(&super::ReducerEventContext, Result<Result<(), String>, __sdk::InternalError>)
             + Send
@@ -87,12 +77,13 @@ pub trait upsert_rate_group_state {
 impl upsert_rate_group_state for super::RemoteReducers {
     fn upsert_rate_group_state_then(
         &self,
-        rate_group: String,
-        turns_used: u32,
-        turns_max: u32,
-        window_seconds: u32,
-        cooldown_until: String,
-        available: bool,
+        group_id: String,
+        tier: String,
+        limit_rpm: i64,
+        limit_tpm: i64,
+        current_rpm: i64,
+        current_tpm: i64,
+        reset_at: String,
 
         callback: impl FnOnce(&super::ReducerEventContext, Result<Result<(), String>, __sdk::InternalError>)
             + Send
@@ -100,12 +91,13 @@ impl upsert_rate_group_state for super::RemoteReducers {
     ) -> __sdk::Result<()> {
         self.imp.invoke_reducer_with_callback(
             UpsertRateGroupStateArgs {
-                rate_group,
-                turns_used,
-                turns_max,
-                window_seconds,
-                cooldown_until,
-                available,
+                group_id,
+                tier,
+                limit_rpm,
+                limit_tpm,
+                current_rpm,
+                current_tpm,
+                reset_at,
             },
             callback,
         )

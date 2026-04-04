@@ -5,26 +5,14 @@
 use super::rate_group_state_type::RateGroupState;
 use spacetimedb_sdk::__codegen::{self as __sdk, __lib, __sats, __ws};
 
-/// Table handle for the table `rate_group_state`.
-///
-/// Obtain a handle from the [`RateGroupStateTableAccess::rate_group_state`] method on [`super::RemoteTables`],
-/// like `ctx.db.rate_group_state()`.
-///
-/// Users are encouraged not to explicitly reference this type,
-/// but to directly chain method calls,
-/// like `ctx.db.rate_group_state().on_insert(...)`.
 pub struct RateGroupStateTableHandle<'ctx> {
     imp: __sdk::TableHandle<RateGroupState>,
     ctx: std::marker::PhantomData<&'ctx super::RemoteTables>,
 }
 
 #[allow(non_camel_case_types)]
-/// Extension trait for access to the table `rate_group_state`.
-///
-/// Implemented for [`super::RemoteTables`].
 pub trait RateGroupStateTableAccess {
     #[allow(non_snake_case)]
-    /// Obtain a [`RateGroupStateTableHandle`], which mediates access to the table `rate_group_state`.
     fn rate_group_state(&self) -> RateGroupStateTableHandle<'_>;
 }
 
@@ -95,31 +83,21 @@ impl<'ctx> __sdk::TableWithPrimaryKey for RateGroupStateTableHandle<'ctx> {
     }
 }
 
-/// Access to the `rate_group` unique index on the table `rate_group_state`,
-/// which allows point queries on the field of the same name
-/// via the [`RateGroupStateRateGroupUnique::find`] method.
-///
-/// Users are encouraged not to explicitly reference this type,
-/// but to directly chain method calls,
-/// like `ctx.db.rate_group_state().rate_group().find(...)`.
-pub struct RateGroupStateRateGroupUnique<'ctx> {
+pub struct RateGroupStateGroupIdUnique<'ctx> {
     imp: __sdk::UniqueConstraintHandle<RateGroupState, String>,
     phantom: std::marker::PhantomData<&'ctx super::RemoteTables>,
 }
 
 impl<'ctx> RateGroupStateTableHandle<'ctx> {
-    /// Get a handle on the `rate_group` unique index on the table `rate_group_state`.
-    pub fn rate_group(&self) -> RateGroupStateRateGroupUnique<'ctx> {
-        RateGroupStateRateGroupUnique {
-            imp: self.imp.get_unique_constraint::<String>("rate_group"),
+    pub fn group_id(&self) -> RateGroupStateGroupIdUnique<'ctx> {
+        RateGroupStateGroupIdUnique {
+            imp: self.imp.get_unique_constraint::<String>("group_id"),
             phantom: std::marker::PhantomData,
         }
     }
 }
 
-impl<'ctx> RateGroupStateRateGroupUnique<'ctx> {
-    /// Find the subscribed row whose `rate_group` column value is equal to `col_val`,
-    /// if such a row is present in the client cache.
+impl<'ctx> RateGroupStateGroupIdUnique<'ctx> {
     pub fn find(&self, col_val: &String) -> Option<RateGroupState> {
         self.imp.find(col_val)
     }
@@ -128,10 +106,9 @@ impl<'ctx> RateGroupStateRateGroupUnique<'ctx> {
 #[doc(hidden)]
 pub(super) fn register_table(client_cache: &mut __sdk::ClientCache<super::RemoteModule>) {
     let _table = client_cache.get_or_make_table::<RateGroupState>("rate_group_state");
-    _table.add_unique_constraint::<String>("rate_group", |row| &row.rate_group);
+    _table.add_unique_constraint::<String>("group_id", |row| &row.group_id);
 }
 
-#[doc(hidden)]
 pub(super) fn parse_table_update(
     raw_updates: __ws::v2::TableUpdate,
 ) -> __sdk::Result<__sdk::TableUpdate<RateGroupState>> {
@@ -140,20 +117,4 @@ pub(super) fn parse_table_update(
             .with_cause(e)
             .into()
     })
-}
-
-#[allow(non_camel_case_types)]
-/// Extension trait for query builder access to the table `RateGroupState`.
-///
-/// Implemented for [`__sdk::QueryTableAccessor`].
-pub trait rate_group_stateQueryTableAccess {
-    #[allow(non_snake_case)]
-    /// Get a query builder for the table `RateGroupState`.
-    fn rate_group_state(&self) -> __sdk::__query_builder::Table<RateGroupState>;
-}
-
-impl rate_group_stateQueryTableAccess for __sdk::QueryTableAccessor {
-    fn rate_group_state(&self) -> __sdk::__query_builder::Table<RateGroupState> {
-        __sdk::__query_builder::Table::new("rate_group_state")
-    }
 }

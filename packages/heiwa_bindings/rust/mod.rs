@@ -989,12 +989,13 @@ pub enum Reducer {
         principal_id: Option<String>,
     },
     UpsertRateGroupState {
-        rate_group: String,
-        turns_used: u32,
-        turns_max: u32,
-        window_seconds: u32,
-        cooldown_until: String,
-        available: bool,
+        group_id: String,
+        tier: String,
+        limit_rpm: i64,
+        limit_tpm: i64,
+        current_rpm: i64,
+        current_tpm: i64,
+        reset_at: String,
     },
     UpsertSession {
         session_id: String,
@@ -2370,20 +2371,22 @@ impl __sdk::Reducer for Reducer {
                 },
             ),
             Reducer::UpsertRateGroupState {
-                rate_group,
-                turns_used,
-                turns_max,
-                window_seconds,
-                cooldown_until,
-                available,
+                group_id,
+                tier,
+                limit_rpm,
+                limit_tpm,
+                current_rpm,
+                current_tpm,
+                reset_at,
             } => {
                 __sats::bsatn::to_vec(&upsert_rate_group_state_reducer::UpsertRateGroupStateArgs {
-                    rate_group: rate_group.clone(),
-                    turns_used: turns_used.clone(),
-                    turns_max: turns_max.clone(),
-                    window_seconds: window_seconds.clone(),
-                    cooldown_until: cooldown_until.clone(),
-                    available: available.clone(),
+                    group_id: group_id.clone(),
+                    tier: tier.clone(),
+                    limit_rpm: limit_rpm.clone(),
+                    limit_tpm: limit_tpm.clone(),
+                    current_rpm: current_rpm.clone(),
+                    current_tpm: current_tpm.clone(),
+                    reset_at: reset_at.clone(),
                 })
             }
             Reducer::UpsertSession {
@@ -2785,7 +2788,7 @@ impl __sdk::DbUpdate for DbUpdate {
             .with_updates_by_pk(|row| &row.credential_id);
         diff.rate_group_state = cache
             .apply_diff_to_table::<RateGroupState>("rate_group_state", &self.rate_group_state)
-            .with_updates_by_pk(|row| &row.rate_group);
+            .with_updates_by_pk(|row| &row.group_id);
         diff.route_decisions = cache
             .apply_diff_to_table::<RouteDecision>("route_decisions", &self.route_decisions)
             .with_updates_by_pk(|row| &row.request_id);
