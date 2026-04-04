@@ -1,5 +1,9 @@
-use anyhow::Result;
+use anyhow::{anyhow, Result};
 use std::env;
+use std::sync::Arc;
+use heiwa_provider::adapter::ProviderAdapter;
+use heiwa_provider::providers::ollama::OllamaAdapter;
+use heiwa_provider::providers::claude_code::ClaudeCodeAdapter;
 
 #[tokio::main]
 async fn main() -> Result<()> {
@@ -110,24 +114,66 @@ async fn main() -> Result<()> {
                 let max_turns = args[2].parse::<u32>().unwrap_or(10);
                 let objective = if args.len() >= 4 { args[3..].join(" ") } else { "no objective provided".to_string() };
                 
+                let identity = heiwa_provider::load_identity().ok_or_else(|| anyhow!("Not logged in. Please run 'heiwa login' first."))?;
+                
                 let config = heiwa_loop::LoopConfig {
-                    user_id: "devon-canonical".to_string(), // In real app, load from identity
+                    user_id: identity.user_id,
                     objective,
                     max_turns,
                     max_cost_usd: 1.0,
                 };
                 
-                let controller = heiwa_loop::LoopController::new(config);
+                // For now, we mock model tiers since we don't have a live STDB connection established here yet
+                let model_tiers = vec![
+                    heiwa_bindings::ModelTier {
+                        id: 1,
+                        model_id: "llama3".to_string(),
+                        provider_model_id: "llama3:latest".to_string(),
+                        provider: "ollama".to_string(),
+                        rate_group: "local".to_string(),
+                        capability_class: 1,
+                        effort_knob: "default".to_string(),
+                        effort_level: 1,
+                        cost_per_turn: 0.0,
+                        max_context_tokens: 8192,
+                        strengths_json: "[\"chat\"]".to_string(),
+                        vram_requirement_mb: 4096,
+                        quantization_type: "q4_K_M".to_string(),
+                        kv_cache_strategy: "standard".to_string(),
+                        enabled: true,
+                        last_success_rate: 1.0,
+                        avg_latency_ms: 100,
+                        latency_p_95_ms: 150,
+                        updated_at: "2026-04-04T00:00:00Z".to_string(),
+                    }
+                ];
+
+                // In a real implementation, we'd use heiwa_bindings::DbConnection::builder().connect(...)
+                let stdb: Option<Arc<heiwa_bindings::DbConnection>> = None;
+
+                let controller = heiwa_loop::LoopController::new(config, stdb, model_tiers);
                 let (tx, mut rx) = tokio::sync::mpsc::channel(10);
                 
                 println!("Loop initiated: {}", controller.get_id());
                 
-                // For now, run blocking in the main task for the shell
-                controller.run(tx).await?;
+                let adapters: Arc<dyn Fn(&str) -> Option<Arc<dyn ProviderAdapter>> + Send + Sync> = Arc::new(|provider: &str| {
+                    match provider {
+                        "ollama" => Some(Arc::new(OllamaAdapter::new()) as Arc<dyn ProviderAdapter>),
+                        "claude" => Some(Arc::new(ClaudeCodeAdapter::new()) as Arc<dyn ProviderAdapter>),
+                        _ => None,
+                    }
+                });
+
+                let c = controller;
+                tokio::spawn(async move {
+                    if let Err(e) = c.run(tx, adapters).await {
+                        eprintln!("Loop error: {}", e);
+                    }
+                });
                 
                 while let Some(status) = rx.recv().await {
+                    println!("[{}] Turn: {} | Cost: ${:.4}", status.status, status.current_turn, status.total_cost_usd);
                     if status.status == "COMPLETED" || status.status == "CANCELLED" || status.status == "FAILED" {
-                        println!("Loop finished with status: {}", status.status);
                         break;
                     }
                 }

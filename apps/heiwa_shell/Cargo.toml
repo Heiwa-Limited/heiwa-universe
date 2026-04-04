@@ -5,6 +5,8 @@ edition = "2021"
 
 [dependencies]
 anyhow = "1.0"
+heiwa-bindings = { path = "../../packages/heiwa_bindings/rust" }
+heiwa-core = { path = "../../apps/heiwa_core" }
 heiwa-session = { path = "../../crates/heiwa_session" }
 heiwa-repl = { path = "../../crates/heiwa_repl" }
 heiwa-provider = { path = "../../crates/heiwa_provider" }

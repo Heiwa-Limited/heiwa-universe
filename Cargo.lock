@@ -897,7 +897,11 @@ name = "heiwa-loop"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "heiwa-bindings",
+ "heiwa-core",
+ "heiwa-provider",
  "serde",
+ "serde_json",
  "tokio",
  "uuid",
 ]
@@ -940,6 +944,8 @@ name = "heiwa-shell"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "heiwa-bindings",
+ "heiwa-core",
  "heiwa-install",
  "heiwa-loop",
  "heiwa-provider",
