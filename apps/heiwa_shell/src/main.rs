@@ -103,6 +103,36 @@ async fn main() -> Result<()> {
                 println!("Usage: heiwa session attach");
             }
         }
+        "loop" => {
+            if args.len() < 3 {
+                println!("Usage: heiwa loop [max_turns] \"objective\"");
+            } else {
+                let max_turns = args[2].parse::<u32>().unwrap_or(10);
+                let objective = if args.len() >= 4 { args[3..].join(" ") } else { "no objective provided".to_string() };
+                
+                let config = heiwa_loop::LoopConfig {
+                    user_id: "devon-canonical".to_string(), // In real app, load from identity
+                    objective,
+                    max_turns,
+                    max_cost_usd: 1.0,
+                };
+                
+                let controller = heiwa_loop::LoopController::new(config);
+                let (tx, mut rx) = tokio::sync::mpsc::channel(10);
+                
+                println!("Loop initiated: {}", controller.get_id());
+                
+                // For now, run blocking in the main task for the shell
+                controller.run(tx).await?;
+                
+                while let Some(status) = rx.recv().await {
+                    if status.status == "COMPLETED" || status.status == "CANCELLED" || status.status == "FAILED" {
+                        println!("Loop finished with status: {}", status.status);
+                        break;
+                    }
+                }
+            }
+        }
         "--help" | "-h" | "help" => {
             print_help();
         }
@@ -130,6 +160,7 @@ fn print_help() {
     println!("  auth             Manage provider authentication");
     println!("  providers        List available providers and their status");
     println!("  session attach   Attach to a Heiwa session");
+    println!("  loop [turns] obj Run a bounded execution loop");
     println!("  help             Print this message or the help of the given subcommand(s)");
 }
 

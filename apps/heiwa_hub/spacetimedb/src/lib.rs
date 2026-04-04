@@ -2389,6 +2389,37 @@ pub struct PlatformEntitlement {
     pub features_json: String, // ["advanced_routing", "priority_support"]
 }
 
+#[table(accessor = loop_sessions, public)]
+pub struct LoopSession {
+    #[primary_key]
+    pub loop_id: String,
+    #[index(btree)]
+    pub user_id: String,
+    pub objective: String,
+    pub status: String, // "RUNNING", "COMPLETED", "FAILED", "CANCELLED"
+    pub max_turns: u32,
+    pub max_cost_usd: f64,
+    pub current_turn: u32,
+    pub total_cost_usd: f64,
+    pub termination_reason: Option<String>,
+    pub created_at: String,
+    pub updated_at: String,
+}
+
+#[table(accessor = loop_iterations, public)]
+pub struct LoopIteration {
+    #[primary_key]
+    pub iteration_id: String,
+    #[index(btree)]
+    pub loop_id: String,
+    pub turn_number: u32,
+    pub input_summary: String,
+    pub output_summary: String,
+    pub score: f64, // 0.0 to 1.0 (success/completion probability)
+    pub run_id: Option<String>, // Link to RunRecord
+    pub created_at: String,
+}
+
 #[reducer]
 pub fn upsert_model_tier(
     ctx: &ReducerContext,
@@ -2513,6 +2544,81 @@ pub fn upsert_platform_entitlement(
         ctx.db.platform_entitlements().user_id().update(row);
     } else {
         ctx.db.platform_entitlements().insert(row);
+    }
+    Ok(())
+}
+
+#[reducer]
+pub fn start_loop_session(
+    ctx: &ReducerContext,
+    loop_id: String,
+    user_id: String,
+    objective: String,
+    max_turns: u32,
+    max_cost_usd: f64,
+) -> Result<(), String> {
+    let now = ctx.timestamp.to_string();
+    ctx.db.loop_sessions().insert(LoopSession {
+        loop_id,
+        user_id,
+        objective,
+        status: "RUNNING".to_string(),
+        max_turns,
+        max_cost_usd,
+        current_turn: 0,
+        total_cost_usd: 0.0,
+        termination_reason: None,
+        created_at: now.clone(),
+        updated_at: now,
+    });
+    Ok(())
+}
+
+#[reducer]
+pub fn record_loop_iteration(
+    ctx: &ReducerContext,
+    iteration_id: String,
+    loop_id: String,
+    turn_number: u32,
+    input_summary: String,
+    output_summary: String,
+    score: f64,
+    run_id: Option<String>,
+    cost_increment: f64,
+) -> Result<(), String> {
+    let now = ctx.timestamp.to_string();
+    ctx.db.loop_iterations().insert(LoopIteration {
+        iteration_id,
+        loop_id: loop_id.clone(),
+        turn_number,
+        input_summary,
+        output_summary,
+        score,
+        run_id,
+        created_at: now.clone(),
+    });
+
+    if let Some(mut session) = ctx.db.loop_sessions().loop_id().find(&loop_id) {
+        session.current_turn = turn_number;
+        session.total_cost_usd += cost_increment;
+        session.updated_at = now;
+        ctx.db.loop_sessions().loop_id().update(session);
+    }
+    Ok(())
+}
+
+#[reducer]
+pub fn complete_loop_session(
+    ctx: &ReducerContext,
+    loop_id: String,
+    status: String, // "COMPLETED", "FAILED", "CANCELLED"
+    termination_reason: String,
+) -> Result<(), String> {
+    if let Some(mut session) = ctx.db.loop_sessions().loop_id().find(&loop_id) {
+        session.status = status;
+        session.termination_reason = Some(termination_reason);
+        session.updated_at = ctx.timestamp.to_string();
+        ctx.db.loop_sessions().loop_id().update(session);
     }
     Ok(())
 }

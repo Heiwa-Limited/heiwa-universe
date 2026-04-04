@@ -41,6 +41,7 @@ pub mod cell_runs_table;
 pub mod claim_proposal_reducer;
 pub mod claim_task_reducer;
 pub mod close_session_reducer;
+pub mod complete_loop_session_reducer;
 pub mod complete_mission_reducer;
 pub mod create_mission_reducer;
 pub mod create_task_dispatch_reducer;
@@ -81,6 +82,10 @@ pub mod leases_table;
 pub mod link_oauth_identity_reducer;
 pub mod liveness_state_table;
 pub mod liveness_state_type;
+pub mod loop_iteration_type;
+pub mod loop_iterations_table;
+pub mod loop_session_type;
+pub mod loop_sessions_table;
 pub mod mark_messages_compressed_reducer;
 pub mod mission_record_type;
 pub mod mission_step_record_type;
@@ -121,6 +126,7 @@ pub mod record_dispatch_ack_reducer;
 pub mod record_drex_decision_reducer;
 pub mod record_drex_failure_reducer;
 pub mod record_interaction_reducer;
+pub mod record_loop_iteration_reducer;
 pub mod record_proposal_heartbeat_reducer;
 pub mod record_route_decision_reducer;
 pub mod record_run_reducer;
@@ -143,6 +149,7 @@ pub mod session_summaries_table;
 pub mod session_summary_record_type;
 pub mod set_node_status_reducer;
 pub mod start_cell_run_reducer;
+pub mod start_loop_session_reducer;
 pub mod store_provider_credential_reducer;
 pub mod task_dispatch_type;
 pub mod task_dispatches_table;
@@ -211,6 +218,7 @@ pub use cell_runs_table::*;
 pub use claim_proposal_reducer::claim_proposal;
 pub use claim_task_reducer::claim_task;
 pub use close_session_reducer::close_session;
+pub use complete_loop_session_reducer::complete_loop_session;
 pub use complete_mission_reducer::complete_mission;
 pub use create_mission_reducer::create_mission;
 pub use create_task_dispatch_reducer::create_task_dispatch;
@@ -251,6 +259,10 @@ pub use leases_table::*;
 pub use link_oauth_identity_reducer::link_oauth_identity;
 pub use liveness_state_table::*;
 pub use liveness_state_type::LivenessState;
+pub use loop_iteration_type::LoopIteration;
+pub use loop_iterations_table::*;
+pub use loop_session_type::LoopSession;
+pub use loop_sessions_table::*;
 pub use mark_messages_compressed_reducer::mark_messages_compressed;
 pub use mission_record_type::MissionRecord;
 pub use mission_step_record_type::MissionStepRecord;
@@ -291,6 +303,7 @@ pub use record_dispatch_ack_reducer::record_dispatch_ack;
 pub use record_drex_decision_reducer::record_drex_decision;
 pub use record_drex_failure_reducer::record_drex_failure;
 pub use record_interaction_reducer::record_interaction;
+pub use record_loop_iteration_reducer::record_loop_iteration;
 pub use record_proposal_heartbeat_reducer::record_proposal_heartbeat;
 pub use record_route_decision_reducer::record_route_decision;
 pub use record_run_reducer::record_run;
@@ -313,6 +326,7 @@ pub use session_summaries_table::*;
 pub use session_summary_record_type::SessionSummaryRecord;
 pub use set_node_status_reducer::set_node_status;
 pub use start_cell_run_reducer::start_cell_run;
+pub use start_loop_session_reducer::start_loop_session;
 pub use store_provider_credential_reducer::store_provider_credential;
 pub use task_dispatch_type::TaskDispatch;
 pub use task_dispatches_table::*;
@@ -446,6 +460,11 @@ pub enum Reducer {
     },
     CloseSession {
         session_id: String,
+    },
+    CompleteLoopSession {
+        loop_id: String,
+        status: String,
+        termination_reason: String,
     },
     CompleteMission {
         mission_id: String,
@@ -697,6 +716,16 @@ pub enum Reducer {
         channel_id: u64,
         intent: String,
     },
+    RecordLoopIteration {
+        iteration_id: String,
+        loop_id: String,
+        turn_number: u32,
+        input_summary: String,
+        output_summary: String,
+        score: f64,
+        run_id: Option<String>,
+        cost_increment: f64,
+    },
     RecordProposalHeartbeat {
         proposal_id: String,
         node_id: String,
@@ -844,6 +873,13 @@ pub enum Reducer {
         user_id: Option<String>,
         owner_id: Option<String>,
         principal_id: Option<String>,
+    },
+    StartLoopSession {
+        loop_id: String,
+        user_id: String,
+        objective: String,
+        max_turns: u32,
+        max_cost_usd: f64,
     },
     StoreProviderCredential {
         credential_id: String,
@@ -1081,6 +1117,7 @@ impl __sdk::Reducer for Reducer {
             Reducer::ClaimProposal { .. } => "claim_proposal",
             Reducer::ClaimTask { .. } => "claim_task",
             Reducer::CloseSession { .. } => "close_session",
+            Reducer::CompleteLoopSession { .. } => "complete_loop_session",
             Reducer::CompleteMission { .. } => "complete_mission",
             Reducer::CreateMission { .. } => "create_mission",
             Reducer::CreateTaskDispatch { .. } => "create_task_dispatch",
@@ -1108,6 +1145,7 @@ impl __sdk::Reducer for Reducer {
             Reducer::RecordDrexDecision { .. } => "record_drex_decision",
             Reducer::RecordDrexFailure { .. } => "record_drex_failure",
             Reducer::RecordInteraction { .. } => "record_interaction",
+            Reducer::RecordLoopIteration { .. } => "record_loop_iteration",
             Reducer::RecordProposalHeartbeat { .. } => "record_proposal_heartbeat",
             Reducer::RecordRouteDecision { .. } => "record_route_decision",
             Reducer::RecordRun { .. } => "record_run",
@@ -1124,6 +1162,7 @@ impl __sdk::Reducer for Reducer {
             Reducer::RevokeProviderCredential { .. } => "revoke_provider_credential",
             Reducer::SetNodeStatus { .. } => "set_node_status",
             Reducer::StartCellRun { .. } => "start_cell_run",
+            Reducer::StartLoopSession { .. } => "start_loop_session",
             Reducer::StoreProviderCredential { .. } => "store_provider_credential",
             Reducer::UpdateModelTierStats { .. } => "update_model_tier_stats",
             Reducer::UpdatePodHeartbeat { .. } => "update_pod_heartbeat",
@@ -1329,6 +1368,15 @@ impl __sdk::Reducer for Reducer {
                     session_id: session_id.clone(),
                 })
             }
+            Reducer::CompleteLoopSession {
+                loop_id,
+                status,
+                termination_reason,
+            } => __sats::bsatn::to_vec(&complete_loop_session_reducer::CompleteLoopSessionArgs {
+                loop_id: loop_id.clone(),
+                status: status.clone(),
+                termination_reason: termination_reason.clone(),
+            }),
             Reducer::CompleteMission {
                 mission_id,
                 updated_at,
@@ -1812,6 +1860,25 @@ impl __sdk::Reducer for Reducer {
                 channel_id: channel_id.clone(),
                 intent: intent.clone(),
             }),
+            Reducer::RecordLoopIteration {
+                iteration_id,
+                loop_id,
+                turn_number,
+                input_summary,
+                output_summary,
+                score,
+                run_id,
+                cost_increment,
+            } => __sats::bsatn::to_vec(&record_loop_iteration_reducer::RecordLoopIterationArgs {
+                iteration_id: iteration_id.clone(),
+                loop_id: loop_id.clone(),
+                turn_number: turn_number.clone(),
+                input_summary: input_summary.clone(),
+                output_summary: output_summary.clone(),
+                score: score.clone(),
+                run_id: run_id.clone(),
+                cost_increment: cost_increment.clone(),
+            }),
             Reducer::RecordProposalHeartbeat {
                 proposal_id,
                 node_id,
@@ -2098,6 +2165,19 @@ impl __sdk::Reducer for Reducer {
                 user_id: user_id.clone(),
                 owner_id: owner_id.clone(),
                 principal_id: principal_id.clone(),
+            }),
+            Reducer::StartLoopSession {
+                loop_id,
+                user_id,
+                objective,
+                max_turns,
+                max_cost_usd,
+            } => __sats::bsatn::to_vec(&start_loop_session_reducer::StartLoopSessionArgs {
+                loop_id: loop_id.clone(),
+                user_id: user_id.clone(),
+                objective: objective.clone(),
+                max_turns: max_turns.clone(),
+                max_cost_usd: max_cost_usd.clone(),
             }),
             Reducer::StoreProviderCredential {
                 credential_id,
@@ -2554,6 +2634,8 @@ pub struct DbUpdate {
     knowledge_embeddings: __sdk::TableUpdate<KnowledgeEmbedding>,
     leases: __sdk::TableUpdate<Lease>,
     liveness_state: __sdk::TableUpdate<LivenessState>,
+    loop_iterations: __sdk::TableUpdate<LoopIteration>,
+    loop_sessions: __sdk::TableUpdate<LoopSession>,
     mission_steps: __sdk::TableUpdate<MissionStepRecord>,
     missions: __sdk::TableUpdate<MissionRecord>,
     model_tiers: __sdk::TableUpdate<ModelTier>,
@@ -2658,6 +2740,12 @@ impl TryFrom<__ws::v2::TransactionUpdate> for DbUpdate {
                 "liveness_state" => db_update
                     .liveness_state
                     .append(liveness_state_table::parse_table_update(table_update)?),
+                "loop_iterations" => db_update
+                    .loop_iterations
+                    .append(loop_iterations_table::parse_table_update(table_update)?),
+                "loop_sessions" => db_update
+                    .loop_sessions
+                    .append(loop_sessions_table::parse_table_update(table_update)?),
                 "mission_steps" => db_update
                     .mission_steps
                     .append(mission_steps_table::parse_table_update(table_update)?),
@@ -2828,7 +2916,14 @@ impl __sdk::DbUpdate for DbUpdate {
         diff.liveness_state = cache
             .apply_diff_to_table::<LivenessState>("liveness_state", &self.liveness_state)
             .with_updates_by_pk(|row| &row.key);
+        diff.loop_iterations = cache
+            .apply_diff_to_table::<LoopIteration>("loop_iterations", &self.loop_iterations)
+            .with_updates_by_pk(|row| &row.iteration_id);
+        diff.loop_sessions = cache
+            .apply_diff_to_table::<LoopSession>("loop_sessions", &self.loop_sessions)
+            .with_updates_by_pk(|row| &row.loop_id);
         diff.mission_steps = cache
+
             .apply_diff_to_table::<MissionStepRecord>("mission_steps", &self.mission_steps)
             .with_updates_by_pk(|row| &row.step_id);
         diff.missions = cache
@@ -3217,6 +3312,8 @@ pub struct AppliedDiff<'r> {
     knowledge_embeddings: __sdk::TableAppliedDiff<'r, KnowledgeEmbedding>,
     leases: __sdk::TableAppliedDiff<'r, Lease>,
     liveness_state: __sdk::TableAppliedDiff<'r, LivenessState>,
+    loop_iterations: __sdk::TableAppliedDiff<'r, LoopIteration>,
+    loop_sessions: __sdk::TableAppliedDiff<'r, LoopSession>,
     mission_steps: __sdk::TableAppliedDiff<'r, MissionStepRecord>,
     missions: __sdk::TableAppliedDiff<'r, MissionRecord>,
     model_tiers: __sdk::TableAppliedDiff<'r, ModelTier>,
@@ -3350,6 +3447,16 @@ impl<'r> __sdk::AppliedDiff<'r> for AppliedDiff<'r> {
         callbacks.invoke_table_row_callbacks::<LivenessState>(
             "liveness_state",
             &self.liveness_state,
+            event,
+        );
+        callbacks.invoke_table_row_callbacks::<LoopIteration>(
+            "loop_iterations",
+            &self.loop_iterations,
+            event,
+        );
+        callbacks.invoke_table_row_callbacks::<LoopSession>(
+            "loop_sessions",
+            &self.loop_sessions,
             event,
         );
         callbacks.invoke_table_row_callbacks::<MissionStepRecord>(
@@ -4094,6 +4201,8 @@ impl __sdk::SpacetimeModule for RemoteModule {
         knowledge_embeddings_table::register_table(client_cache);
         leases_table::register_table(client_cache);
         liveness_state_table::register_table(client_cache);
+        loop_iterations_table::register_table(client_cache);
+        loop_sessions_table::register_table(client_cache);
         mission_steps_table::register_table(client_cache);
         missions_table::register_table(client_cache);
         model_tiers_table::register_table(client_cache);
@@ -4142,6 +4251,8 @@ impl __sdk::SpacetimeModule for RemoteModule {
         "knowledge_embeddings",
         "leases",
         "liveness_state",
+        "loop_iterations",
+        "loop_sessions",
         "mission_steps",
         "missions",
         "model_tiers",

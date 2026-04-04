@@ -899,6 +899,7 @@ dependencies = [
  "anyhow",
  "serde",
  "tokio",
+ "uuid",
 ]
 
 [[package]]

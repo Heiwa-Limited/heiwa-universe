@@ -14,12 +14,18 @@ pub struct TelemetryState {
     pub route: String,
     pub status: String,
     pub turn_count: u32,
+    pub loop_info: Option<(u32, u32)>, // (current, max)
 }
 
 pub fn render_footer(state: &TelemetryState) -> String {
+    let loop_str = if let Some((current, max)) = state.loop_info {
+        format!(" | L: {}/{}", current, max)
+    } else {
+        "".to_string()
+    };
     format!(
-        "[{}] {} | {} | {} | turns: {}",
-        state.status, state.provider, state.model, state.route, state.turn_count
+        "[{}] {} | {} | {}{} | turns: {}",
+        state.status, state.provider, state.model, state.route, loop_str, state.turn_count
     )
 }
 
