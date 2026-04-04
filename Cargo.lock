@@ -844,6 +844,66 @@ dependencies = [
 ]
 
 [[package]]
+name = "heiwa-install"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "serde",
+ "tokio",
+]
+
+[[package]]
+name = "heiwa-loop"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "serde",
+ "tokio",
+]
+
+[[package]]
+name = "heiwa-provider"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "serde",
+ "tokio",
+]
+
+[[package]]
+name = "heiwa-repl"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "serde",
+ "tokio",
+]
+
+[[package]]
+name = "heiwa-session"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "serde",
+ "tokio",
+]
+
+[[package]]
+name = "heiwa-shell"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "heiwa-install",
+ "heiwa-loop",
+ "heiwa-provider",
+ "heiwa-repl",
+ "heiwa-session",
+ "serde",
+ "serde_json",
+ "tokio",
+]
+
+[[package]]
 name = "heiwa_production_db"
 version = "0.1.0"
 dependencies = [

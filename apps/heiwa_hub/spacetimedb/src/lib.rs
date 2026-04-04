@@ -1677,6 +1677,17 @@ pub fn record_run(
         ctx.db.runs().insert(row);
     }
 
+    if let Some(mut proposal) = ctx.db.proposals().proposal_id().find(proposal_id) {
+        let normalized_status = status.trim().to_uppercase();
+        proposal.status = if matches!(normalized_status.as_str(), "PASS" | "SUCCESS" | "COMPLETED")
+        {
+            "COMPLETED".to_string()
+        } else {
+            "FAILED".to_string()
+        };
+        ctx.db.proposals().proposal_id().update(proposal);
+    }
+
     Ok(())
 }
 
@@ -1705,20 +1716,6 @@ pub fn record_run_failure(
         details_json,
         created_at: ctx.timestamp.to_string(),
     });
-    Ok(())
-}
-
-    if let Some(mut proposal) = ctx.db.proposals().proposal_id().find(proposal_id) {
-        let normalized_status = status.trim().to_uppercase();
-        proposal.status = if matches!(normalized_status.as_str(), "PASS" | "SUCCESS" | "COMPLETED")
-        {
-            "COMPLETED".to_string()
-        } else {
-            "FAILED".to_string()
-        };
-        ctx.db.proposals().proposal_id().update(proposal);
-    }
-
     Ok(())
 }
 

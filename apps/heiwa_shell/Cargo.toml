@@ -1,0 +1,15 @@
+[package]
+name = "heiwa-shell"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+anyhow = "1.0"
+heiwa-session = { path = "../../crates/heiwa_session" }
+heiwa-repl = { path = "../../crates/heiwa_repl" }
+heiwa-provider = { path = "../../crates/heiwa_provider" }
+heiwa-install = { path = "../../crates/heiwa_install" }
+heiwa-loop = { path = "../../crates/heiwa_loop" }
+tokio = { version = "1.50.0", features = ["full"] }
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"

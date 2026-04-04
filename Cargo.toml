@@ -2,6 +2,12 @@
 members = [
     "apps/heiwa_core",
     "apps/heiwa_hub/spacetimedb",
+    "apps/heiwa_shell",
+    "crates/heiwa_session",
+    "crates/heiwa_repl",
+    "crates/heiwa_provider",
+    "crates/heiwa_install",
+    "crates/heiwa_loop",
     "packages/heiwa_bindings/rust",
 ]
 resolver = "2"
