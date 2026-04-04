@@ -3,6 +3,7 @@ use heiwa_bindings::{
     complete_loop_session_reducer::complete_loop_session,
     record_loop_iteration_reducer::record_loop_iteration,
     start_loop_session_reducer::start_loop_session,
+    record_run_reducer::record_run,
     DbConnection, ModelTier,
 };
 use heiwa_core::drex::{default_policy, plan_route, DrexIngress};
@@ -12,6 +13,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use tokio::sync::mpsc;
 use uuid::Uuid;
+use chrono::Utc;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct LoopConfig {
@@ -19,6 +21,10 @@ pub struct LoopConfig {
     pub objective: String,
     pub max_turns: u32,
     pub max_cost_usd: f64,
+    pub intent: String,
+    pub risk: String,
+    pub privacy: String,
+    pub runtime: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -102,16 +108,17 @@ impl LoopController {
             }
 
             current_turn += 1;
+            let turn_started_at = Utc::now().to_rfc3339();
             println!("Turn {}/{}...", current_turn, self.config.max_turns);
 
             // 2. DREX Routing
             let ingress = DrexIngress {
-                intent: "code".to_string(), // Simple default for now
-                risk: "low".to_string(),
+                intent: self.config.intent.clone(),
+                risk: self.config.risk.clone(),
                 raw_text: format!("Objective: {}. Context: {}", self.config.objective, last_summary),
-                privacy: "standard".to_string(),
-                runtime: "any".to_string(),
-                available_vram_mb: 8192,
+                privacy: self.config.privacy.clone(),
+                runtime: self.config.runtime.clone(),
+                available_vram_mb: 8192, // TODO: Pull from machine manifest
                 required_context_tokens: 1024,
             };
             
@@ -133,24 +140,47 @@ impl LoopController {
                 .collect::<Vec<_>>()
                 .join("\n");
             
+            let turn_ended_at = Utc::now().to_rfc3339();
             last_summary = output_summary.clone();
             
             // 4. Record Evidence in STDB
-            let iteration_id = Uuid::new_v4().to_string();
-            let run_id = format!("run-{}", Uuid::new_v4()); // In a real system, record_run would be called here
-            
-            // Mocking cost from tier
+            let run_id = format!("run-{}", Uuid::new_v4());
             let turn_cost = selected_tier.cost_per_turn;
             total_cost += turn_cost;
 
             if let Some(ref stdb) = self.stdb {
+                // Real Run Receipt
+                stdb.reducers.record_run(
+                    run_id.clone(),
+                    self.config.user_id.clone(),
+                    format!("loop-{}", self.loop_id), // Link to loop via proposal_id proxy or similar
+                    "loop-lease".to_string(),
+                    Some(self.loop_id.clone()),
+                    turn_started_at,
+                    turn_ended_at,
+                    "SUCCESS".to_string(),
+                    "{}".to_string(), // chain_result
+                    "{}".to_string(), // signals
+                    "[]".to_string(), // artifacts
+                    "local-node".to_string(),
+                    "{}".to_string(), // replay
+                    "loop".to_string(),
+                    selected_tier.model_id.clone(),
+                    0, 0, 0, // tokens
+                    turn_cost,
+                    None, None, // owner/principal
+                    None, None, // failure
+                ).map_err(|e| anyhow!(e.to_string()))?;
+
+                // Record Iteration
+                let iteration_id = Uuid::new_v4().to_string();
                 stdb.reducers.record_loop_iteration(
                     iteration_id,
                     self.loop_id.clone(),
                     current_turn,
                     ingress.raw_text.clone(),
                     output_summary,
-                    0.5, // Mock score
+                    0.5, // TODO: Real scoring logic
                     Some(run_id),
                     turn_cost,
                 ).map_err(|e| anyhow!(e.to_string()))?;

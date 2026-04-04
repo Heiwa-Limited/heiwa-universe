@@ -897,6 +897,8 @@ name = "heiwa-loop"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "async-trait",
+ "chrono",
  "heiwa-bindings",
  "heiwa-core",
  "heiwa-provider",
@@ -944,6 +946,7 @@ name = "heiwa-shell"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "chrono",
  "heiwa-bindings",
  "heiwa-core",
  "heiwa-install",

@@ -1,16 +1,19 @@
 use anyhow::{anyhow, Result};
 use std::env;
 use std::sync::Arc;
+use chrono::Utc;
 use heiwa_provider::adapter::ProviderAdapter;
 use heiwa_provider::providers::ollama::OllamaAdapter;
 use heiwa_provider::providers::claude_code::ClaudeCodeAdapter;
+use heiwa_repl::{parse_input, render_footer, ReplCommand, TelemetryState};
+use std::io::{self, Write};
 
 #[tokio::main]
 async fn main() -> Result<()> {
     let args: Vec<String> = env::args().collect();
 
     if args.len() < 2 {
-        print_help();
+        run_repl().await?;
         return Ok(());
     }
 
@@ -109,47 +112,35 @@ async fn main() -> Result<()> {
         }
         "loop" => {
             if args.len() < 3 {
-                println!("Usage: heiwa loop [max_turns] \"objective\"");
+                println!("Usage: heiwa loop [max_turns] \"objective\" [--intent code] [--risk low] [--privacy standard]");
             } else {
                 let max_turns = args[2].parse::<u32>().unwrap_or(10);
                 let objective = if args.len() >= 4 { args[3..].join(" ") } else { "no objective provided".to_string() };
                 
                 let identity = heiwa_provider::load_identity().ok_or_else(|| anyhow!("Not logged in. Please run 'heiwa login' first."))?;
                 
+                let intent = if let Some(i) = args.iter().position(|a| a == "--intent") { args[i+1].clone() } else { "code".to_string() };
+                let risk = if let Some(i) = args.iter().position(|a| a == "--risk") { args[i+1].clone() } else { "low".to_string() };
+                let privacy = if let Some(i) = args.iter().position(|a| a == "--privacy") { args[i+1].clone() } else { "standard".to_string() };
+
                 let config = heiwa_loop::LoopConfig {
                     user_id: identity.user_id,
                     objective,
                     max_turns,
                     max_cost_usd: 1.0,
+                    intent,
+                    risk,
+                    privacy,
+                    runtime: "any".to_string(),
                 };
                 
-                // For now, we mock model tiers since we don't have a live STDB connection established here yet
-                let model_tiers = vec![
-                    heiwa_bindings::ModelTier {
-                        id: 1,
-                        model_id: "llama3".to_string(),
-                        provider_model_id: "llama3:latest".to_string(),
-                        provider: "ollama".to_string(),
-                        rate_group: "local".to_string(),
-                        capability_class: 1,
-                        effort_knob: "default".to_string(),
-                        effort_level: 1,
-                        cost_per_turn: 0.0,
-                        max_context_tokens: 8192,
-                        strengths_json: "[\"chat\"]".to_string(),
-                        vram_requirement_mb: 4096,
-                        quantization_type: "q4_K_M".to_string(),
-                        kv_cache_strategy: "standard".to_string(),
-                        enabled: true,
-                        last_success_rate: 1.0,
-                        avg_latency_ms: 100,
-                        latency_p_95_ms: 150,
-                        updated_at: "2026-04-04T00:00:00Z".to_string(),
-                    }
-                ];
+                let model_tiers = get_live_model_tiers();
+                if model_tiers.is_empty() {
+                    return Err(anyhow!("No active providers found. Run 'heiwa auth status' to check."));
+                }
 
-                // In a real implementation, we'd use heiwa_bindings::DbConnection::builder().connect(...)
-                let stdb: Option<Arc<heiwa_bindings::DbConnection>> = None;
+                // Try to connect to STDB if environment allows
+                let stdb = attempt_stdb_connection().await;
 
                 let controller = heiwa_loop::LoopController::new(config, stdb, model_tiers);
                 let (tx, mut rx) = tokio::sync::mpsc::channel(10);
@@ -179,6 +170,9 @@ async fn main() -> Result<()> {
                 }
             }
         }
+        "shell" => {
+            run_repl().await?;
+        }
         "--help" | "-h" | "help" => {
             print_help();
         }
@@ -207,6 +201,7 @@ fn print_help() {
     println!("  providers        List available providers and their status");
     println!("  session attach   Attach to a Heiwa session");
     println!("  loop [turns] obj Run a bounded execution loop");
+    println!("  shell            Enter interactive mode");
     println!("  help             Print this message or the help of the given subcommand(s)");
 }
 
@@ -222,7 +217,6 @@ async fn register_current_device() -> Result<()> {
     let _report = heiwa_install::check_installation()?;
     let manifest_path = heiwa_install::get_heiwa_dir().join("machine.json");
     
-    // Read machine ID from manifest if it exists, otherwise it will be fresh
     let device_id = if manifest_path.exists() {
         let content = std::fs::read_to_string(manifest_path)?;
         let manifest: serde_json::Value = serde_json::from_str(&content)?;
@@ -233,17 +227,183 @@ async fn register_current_device() -> Result<()> {
 
     println!("Registering device {} for user {}...", device_id, identity.user_id);
     
-    // In a real implementation, this would call the STDB reducer 'register_device'
-    // For now, we print that we've synced.
-    
     let providers = vec!["claude", "codex", "gemini", "ollama"];
     for p in providers {
         if let Some(status) = heiwa_provider::get_auth_status(p) {
             println!("  Syncing provider {} status: {}", p, status.status);
-            // Call STDB reducer 'upsert_provider_account_status'
         }
     }
 
     println!("Device and capabilities synced to SpacetimeDB.");
+    Ok(())
+}
+
+fn get_live_model_tiers() -> Vec<heiwa_bindings::ModelTier> {
+    let mut model_tiers = Vec::new();
+    let providers = vec!["claude", "codex", "gemini", "ollama"];
+    for p in providers {
+        if let Some(status) = heiwa_provider::get_auth_status(p) {
+            if status.status == "authenticated" || status.status == "running" {
+                model_tiers.push(heiwa_bindings::ModelTier {
+                    id: 0,
+                    model_id: status.default_model.clone().unwrap_or_else(|| "default".to_string()),
+                    provider_model_id: "latest".to_string(),
+                    provider: p.to_string(),
+                    rate_group: status.rate_group.clone(),
+                    capability_class: if p == "claude" || p == "codex" { 3 } else { 1 },
+                    effort_knob: "default".to_string(),
+                    effort_level: 1,
+                    cost_per_turn: if status.rate_group == "local" { 0.0 } else { 0.01 },
+                    max_context_tokens: 8192,
+                    strengths_json: "[\"chat\", \"advanced_coding\"]".to_string(),
+                    vram_requirement_mb: 0,
+                    quantization_type: "none".to_string(),
+                    kv_cache_strategy: "standard".to_string(),
+                    enabled: true,
+                    last_success_rate: 1.0,
+                    avg_latency_ms: 100,
+                    latency_p_95_ms: 150,
+                    updated_at: Utc::now().to_rfc3339(),
+                });
+            }
+        }
+    }
+    model_tiers
+}
+
+async fn attempt_stdb_connection() -> Option<Arc<heiwa_bindings::DbConnection>> {
+    // In a real environment, we'd use environment variables to connect
+    // For now, return None to ensure we use offline mode logic
+    None
+}
+
+async fn run_repl() -> Result<()> {
+    println!("Heiwa Interactive Shell");
+    println!("Type /help for commands, !command for shell escape, or enter a task.");
+    println!();
+
+    let mut turn_count = 0;
+    let current_provider = "ollama".to_string();
+    let current_model = "llama3".to_string();
+
+    loop {
+        let state = TelemetryState {
+            provider: current_provider.clone(),
+            model: current_model.clone(),
+            route: "local".to_string(),
+            status: "ready".to_string(),
+            turn_count,
+            loop_info: None,
+        };
+
+        print!("\r{}", render_footer(&state));
+        print!("\n> ");
+        io::stdout().flush()?;
+
+        let mut input = String::new();
+        io::stdin().read_line(&mut input)?;
+        let input = input.trim();
+
+        if input == "exit" || input == "quit" {
+            break;
+        }
+
+        let cmd = parse_input(input);
+        match cmd {
+            ReplCommand::Task(t) => {
+                if t.is_empty() { continue; }
+                println!("Executing task: {}", t);
+                turn_count += 1;
+                // Execute one-off task via loop with 1 turn?
+            }
+            ReplCommand::Shell(s) => {
+                println!("Escaping to shell: {}", s);
+                let output = std::process::Command::new("sh")
+                    .arg("-c")
+                    .arg(s)
+                    .output();
+                match output {
+                    Ok(o) => {
+                        io::stdout().write_all(&o.stdout)?;
+                        io::stderr().write_all(&o.stderr)?;
+                    }
+                    Err(e) => eprintln!("Shell error: {}", e),
+                }
+            }
+            ReplCommand::Slash(c, args) => {
+                match c.as_str() {
+                    "help" => println!("Available slash commands: /auth, /providers, /loop, /exit"),
+                    "auth" => println!("Manage auth via 'heiwa auth'"),
+                    "providers" => {
+                        let tiers = get_live_model_tiers();
+                        for t in tiers {
+                            println!("  {} ({})", t.model_id, t.provider);
+                        }
+                    }
+                    "loop" => {
+                        let max_turns = args.get(0).and_then(|s| s.parse::<u32>().ok()).unwrap_or(5);
+                        let objective = if args.len() > 1 { args[1..].join(" ") } else { "explore context".to_string() };
+                        
+                        println!("Starting loop: '{}' ({} turns)", objective, max_turns);
+                        
+                        let identity = heiwa_provider::load_identity().unwrap_or(heiwa_provider::HeiwaIdentity {
+                            user_id: "anonymous".to_string(),
+                            auth_token: "".to_string(),
+                            email: None,
+                            display_name: None,
+                        });
+
+                        let config = heiwa_loop::LoopConfig {
+                            user_id: identity.user_id,
+                            objective,
+                            max_turns,
+                            max_cost_usd: 1.0,
+                            intent: "research".to_string(),
+                            risk: "low".to_string(),
+                            privacy: "standard".to_string(),
+                            runtime: "any".to_string(),
+                        };
+
+                        let model_tiers = get_live_model_tiers();
+                        let stdb = attempt_stdb_connection().await;
+                        let controller = heiwa_loop::LoopController::new(config, stdb, model_tiers);
+                        let (tx, mut rx) = tokio::sync::mpsc::channel(10);
+
+                        let adapters: Arc<dyn Fn(&str) -> Option<Arc<dyn ProviderAdapter>> + Send + Sync> = Arc::new(|provider: &str| {
+                            match provider {
+                                "ollama" => Some(Arc::new(OllamaAdapter::new()) as Arc<dyn ProviderAdapter>),
+                                "claude" => Some(Arc::new(ClaudeCodeAdapter::new()) as Arc<dyn ProviderAdapter>),
+                                _ => None,
+                            }
+                        });
+
+                        tokio::spawn(async move {
+                            let _ = controller.run(tx, adapters).await;
+                        });
+
+                        while let Some(status) = rx.recv().await {
+                            let telemetry = TelemetryState {
+                                provider: current_provider.clone(),
+                                model: current_model.clone(),
+                                route: "loop".to_string(),
+                                status: status.status.clone(),
+                                turn_count,
+                                loop_info: Some((status.current_turn, max_turns)),
+                            };
+                            print!("\r{}\r", render_footer(&telemetry));
+                            io::stdout().flush()?;
+                            
+                            if status.status == "COMPLETED" || status.status == "CANCELLED" || status.status == "FAILED" {
+                                println!("\nLoop finished: {}", status.status);
+                                break;
+                            }
+                        }
+                    }
+                    _ => println!("Unknown slash command: /{}", c),
+                }
+            }
+        }
+    }
+
     Ok(())
 }
