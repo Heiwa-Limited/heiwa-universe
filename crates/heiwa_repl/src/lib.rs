@@ -7,6 +7,22 @@ pub enum ReplCommand {
     Slash(String, Vec<String>),
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TelemetryState {
+    pub provider: String,
+    pub model: String,
+    pub route: String,
+    pub status: String,
+    pub turn_count: u32,
+}
+
+pub fn render_footer(state: &TelemetryState) -> String {
+    format!(
+        "[{}] {} | {} | {} | turns: {}",
+        state.status, state.provider, state.model, state.route, state.turn_count
+    )
+}
+
 pub fn parse_input(input: &str) -> ReplCommand {
     let input = input.trim();
     if input.is_empty() {
