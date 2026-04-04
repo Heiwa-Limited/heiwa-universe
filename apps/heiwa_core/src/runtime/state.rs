@@ -5,7 +5,10 @@ use serde_json::Value;
 use tokio::sync::{RwLock, mpsc};
 
 use crate::config::RuntimeConfig;
-use crate::stdb::{StdbRuntime, StdbTransport, ReducerTransport};
+use crate::stdb::{
+    PersistedDispatchAck, PersistedWorkerLease, PersistedWorkerSession, ReducerTransport,
+    StdbRuntime, StdbTransport,
+};
 use heiwa_bindings::ModelTier;
 
 pub struct CoreState<T: StdbTransport = ReducerTransport> {
@@ -70,8 +73,11 @@ pub struct WorkerSessionRecord {
     pub active_tasks: u32,
     pub status: String,
     pub load: f64,
+    pub created_at_ms: u64,
     pub session_expires_at_ms: u64,
     pub last_seen_at_ms: u64,
+    pub current_task_id: Option<String>,
+    pub lease_id: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -97,9 +103,14 @@ pub struct WorkerLeaseRecord {
     pub session_id: String,
     pub node_id: String,
     pub capability: String,
+    pub status: String,
     pub issued_at_ms: u64,
     pub expires_at_ms: u64,
     pub accepted: Option<bool>,
+    pub acked_at_ms: Option<u64>,
+    pub completed_at_ms: Option<u64>,
+    pub failure_code: Option<String>,
+    pub reason: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -125,6 +136,82 @@ pub struct WorkerRegistry {
     task_index: HashMap<String, String>,
 }
 
+fn iso_from_ms(value: u64) -> String {
+    use time::{format_description::well_known::Rfc3339, OffsetDateTime};
+
+    let offset = OffsetDateTime::from_unix_timestamp_nanos((value as i128) * 1_000_000)
+        .expect("valid unix timestamp");
+    offset
+        .format(&Rfc3339)
+        .expect("timestamp formatting should succeed")
+}
+
+impl WorkerSessionRecord {
+    fn to_persisted(&self) -> PersistedWorkerSession {
+        let persisted_status = if self.status == "closed" {
+            "closed".to_string()
+        } else if self.session_expires_at_ms <= self.last_seen_at_ms {
+            "expired".to_string()
+        } else {
+            "active".to_string()
+        };
+        PersistedWorkerSession {
+            session_id: self.session_id.clone(),
+            node_id: self.node_id.clone(),
+            instance_id: self.instance_id.clone(),
+            runtime: self.runtime.clone(),
+            runtime_version: self.runtime_version.clone(),
+            worker_version: self.worker_version.clone(),
+            protocol: match self.protocol {
+                WorkerProtocolFlavor::V1 => "v1".to_string(),
+                WorkerProtocolFlavor::Legacy => "legacy".to_string(),
+            },
+            capabilities_json: serde_json::to_string(&self.capabilities)
+                .expect("worker capabilities serialize"),
+            metadata_json: self.metadata.to_string(),
+            max_concurrency: self.max_concurrency,
+            active_tasks: self.active_tasks,
+            status: persisted_status,
+            load: self.load,
+            created_at: iso_from_ms(self.created_at_ms),
+            updated_at: iso_from_ms(self.last_seen_at_ms),
+            expires_at: iso_from_ms(self.session_expires_at_ms),
+            last_seen_at: iso_from_ms(self.last_seen_at_ms),
+            closed_at: if self.status == "closed" {
+                Some(iso_from_ms(self.last_seen_at_ms))
+            } else {
+                None
+            },
+            current_task_id: self.current_task_id.clone(),
+            lease_id: self.lease_id.clone(),
+        }
+    }
+}
+
+impl WorkerLeaseRecord {
+    fn to_persisted(&self) -> PersistedWorkerLease {
+        PersistedWorkerLease {
+            lease_id: self.lease_id.clone(),
+            task_id: self.task_id.clone(),
+            session_id: self.session_id.clone(),
+            node_id: self.node_id.clone(),
+            capability: self.capability.clone(),
+            status: self.status.clone(),
+            issued_at: iso_from_ms(self.issued_at_ms),
+            updated_at: self
+                .completed_at_ms
+                .or(self.acked_at_ms)
+                .map(iso_from_ms)
+                .unwrap_or_else(|| iso_from_ms(self.issued_at_ms)),
+            expires_at: iso_from_ms(self.expires_at_ms),
+            acked_at: self.acked_at_ms.map(iso_from_ms),
+            completed_at: self.completed_at_ms.map(iso_from_ms),
+            failure_code: self.failure_code.clone(),
+            reason: self.reason.clone(),
+        }
+    }
+}
+
 impl WorkerRegistry {
     pub fn register_session<T: StdbTransport>(
         &mut self,
@@ -145,27 +232,23 @@ impl WorkerRegistry {
             active_tasks: 0,
             status: "idle".to_string(),
             load: 0.0,
+            created_at_ms: registration.last_seen_at_ms,
             session_expires_at_ms: registration.session_expires_at_ms,
             last_seen_at_ms: registration.last_seen_at_ms,
+            current_task_id: None,
+            lease_id: None,
         };
         self.sessions
             .insert(session.session_id.clone(), session.clone());
 
-        // Persist to STDB
-        let _ = stdb.transport.register_session(
-            session.session_id.clone(),
-            None,
-            session.node_id.clone(),
-            "worker".to_string(),
-            Some(registration.session_expires_at_ms.to_string()),
-            session.metadata.to_string(),
-        );
+        let _ = stdb.transport.upsert_worker_session(session.to_persisted());
 
         session
     }
 
-    pub fn update_heartbeat(
+    pub fn update_heartbeat<T: StdbTransport>(
         &mut self,
+        stdb: &StdbRuntime<T>,
         session_id: &str,
         now_ms: u64,
         status: String,
@@ -193,11 +276,14 @@ impl WorkerRegistry {
         if let Some(capabilities) = capabilities {
             session.capabilities = capabilities;
         }
-        Ok(session.clone())
+        let persisted = session.clone();
+        let _ = stdb.transport.upsert_worker_session(persisted.to_persisted());
+        Ok(persisted)
     }
 
-    pub fn reserve_dispatch(
+    pub fn reserve_dispatch<T: StdbTransport>(
         &mut self,
+        stdb: &StdbRuntime<T>,
         capability: &str,
         task_id: String,
         lease_id: String,
@@ -220,6 +306,9 @@ impl WorkerRegistry {
         let session = self.sessions.get_mut(&selected_session_id)?;
         session.active_tasks += 1;
         session.status = "busy".to_string();
+        session.last_seen_at_ms = issued_at_ms;
+        session.current_task_id = Some(task_id.clone());
+        session.lease_id = Some(lease_id.clone());
 
         let lease = WorkerLeaseRecord {
             lease_id: lease_id.clone(),
@@ -227,13 +316,20 @@ impl WorkerRegistry {
             session_id: session.session_id.clone(),
             node_id: session.node_id.clone(),
             capability: capability.to_string(),
+            status: "issued".to_string(),
             issued_at_ms,
             expires_at_ms,
             accepted: None,
+            acked_at_ms: None,
+            completed_at_ms: None,
+            failure_code: None,
+            reason: None,
         };
 
         self.task_index.insert(task_id, lease_id.clone());
         self.task_leases.insert(lease_id, lease.clone());
+        let _ = stdb.transport.upsert_worker_lease(lease.to_persisted());
+        let _ = stdb.transport.upsert_worker_session(session.clone().to_persisted());
         Some((session.clone(), lease))
     }
 
@@ -242,12 +338,14 @@ impl WorkerRegistry {
         self.task_leases.get(lease_id).cloned()
     }
 
-    pub fn record_dispatch_ack(
+    pub fn record_dispatch_ack<T: StdbTransport>(
         &mut self,
+        stdb: &StdbRuntime<T>,
         session_id: &str,
         task_id: &str,
         lease_id: &str,
         accepted: bool,
+        detail: Option<String>,
         now_ms: u64,
     ) -> Result<WorkerLeaseRecord, RegistryError> {
         let _lease = self.validate_lease(session_id, task_id, lease_id, now_ms)?;
@@ -256,14 +354,54 @@ impl WorkerRegistry {
             .get_mut(lease_id)
             .expect("validated lease should exist");
         stored.accepted = Some(accepted);
+        stored.reason = detail.clone();
+        let ack = PersistedDispatchAck {
+            ack_id: format!("ack:{lease_id}:{now_ms}"),
+            lease_id: stored.lease_id.clone(),
+            session_id: stored.session_id.clone(),
+            task_id: stored.task_id.clone(),
+            node_id: stored.node_id.clone(),
+            status: if accepted {
+                "accepted".to_string()
+            } else {
+                "rejected".to_string()
+            },
+            decided_at: iso_from_ms(now_ms),
+            detail: detail.clone(),
+        };
         if !accepted {
-            self.complete_dispatch(lease_id);
+            stored.status = "failed".to_string();
+            stored.completed_at_ms = Some(now_ms);
+            stored.failure_code = Some("DISPATCH_REJECTED".to_string());
+            let rejected = stored.clone();
+            let _ = stdb.transport.upsert_worker_lease(rejected.to_persisted());
+            let _ = stdb.transport.record_dispatch_ack(ack);
+            if let Some(session) = self.sessions.get_mut(session_id) {
+                session.active_tasks = session.active_tasks.saturating_sub(1);
+                session.status = "idle".to_string();
+                session.load = 0.0;
+                session.last_seen_at_ms = now_ms;
+                session.current_task_id = None;
+                session.lease_id = None;
+                let _ = stdb.transport.upsert_worker_session(session.clone().to_persisted());
+            }
+            self.task_index.remove(task_id);
+            self.task_leases.remove(lease_id);
             return Err(RegistryError {
                 code: RegistryErrorCode::DispatchRejected,
                 message: format!("dispatch rejected for task {task_id}"),
             });
         }
-        Ok(stored.clone())
+        stored.status = "acked".to_string();
+        stored.acked_at_ms = Some(now_ms);
+        let accepted_record = stored.clone();
+        let _ = stdb.transport.upsert_worker_lease(accepted_record.to_persisted());
+        let _ = stdb.transport.record_dispatch_ack(ack);
+        if let Some(session) = self.sessions.get_mut(session_id) {
+            session.last_seen_at_ms = now_ms;
+            let _ = stdb.transport.upsert_worker_session(session.clone().to_persisted());
+        }
+        Ok(accepted_record)
     }
 
     pub fn validate_lease(
@@ -295,24 +433,47 @@ impl WorkerRegistry {
         Ok(lease.clone())
     }
 
-    pub fn complete_dispatch(&mut self, lease_id: &str) -> Option<WorkerLeaseRecord> {
-        let lease = self.task_leases.remove(lease_id)?;
+    pub fn complete_dispatch<T: StdbTransport>(
+        &mut self,
+        stdb: &StdbRuntime<T>,
+        lease_id: &str,
+        status: &str,
+        failure_code: Option<String>,
+        reason: Option<String>,
+        now_ms: u64,
+    ) -> Option<WorkerLeaseRecord> {
+        let mut lease = self.task_leases.remove(lease_id)?;
         self.task_index.remove(&lease.task_id);
+        lease.status = status.to_string();
+        lease.completed_at_ms = Some(now_ms);
+        lease.failure_code = failure_code;
+        lease.reason = reason;
+        let _ = stdb.transport.upsert_worker_lease(lease.clone().to_persisted());
         if let Some(session) = self.sessions.get_mut(&lease.session_id) {
             session.active_tasks = session.active_tasks.saturating_sub(1);
+            session.last_seen_at_ms = now_ms;
+            session.current_task_id = None;
+            session.lease_id = None;
             if session.active_tasks == 0 {
                 session.status = "idle".to_string();
                 session.load = 0.0;
             }
+            let _ = stdb.transport.upsert_worker_session(session.clone().to_persisted());
         }
         Some(lease)
     }
 
     pub fn remove_session<T: StdbTransport>(&mut self, stdb: &StdbRuntime<T>, session_id: &str) {
-        self.sessions.remove(session_id);
-
-        // Persist to STDB
-        let _ = stdb.transport.close_session(session_id.to_string());
+        let mut closed_at_ms = 0;
+        if let Some(session) = self.sessions.remove(session_id) {
+            let mut closed = session;
+            closed_at_ms = closed.last_seen_at_ms;
+            closed.status = "closed".to_string();
+            closed.active_tasks = 0;
+            closed.load = 0.0;
+            let _ = stdb.transport.upsert_worker_session(closed.to_persisted());
+            let _ = stdb.transport.close_session(session_id.to_string());
+        }
 
         let orphaned: Vec<String> = self
             .task_leases
@@ -321,7 +482,14 @@ impl WorkerRegistry {
             .map(|lease| lease.lease_id.clone())
             .collect();
         for lease_id in orphaned {
-            self.complete_dispatch(&lease_id);
+            let _ = self.complete_dispatch(
+                stdb,
+                &lease_id,
+                "revoked",
+                Some("SESSION_CLOSED".to_string()),
+                Some("worker session closed".to_string()),
+                closed_at_ms,
+            );
         }
     }
 

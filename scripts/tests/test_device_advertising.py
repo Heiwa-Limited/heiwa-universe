@@ -45,10 +45,9 @@ def test_upsert_session_binding(mock_call):
     args = mock_call.call_args[0]
     assert args[0] == "upsert_session"
     assert args[1] == "sess-123"
-    assert args[2] is None
-    assert args[3] == "node-1"
-    assert args[4] == "worker"
-    assert '"1.0"' in args[6]
+    assert args[2] == "node-1"
+    assert args[7] == "v1"
+    assert args[9] == '{"version":"1.0","session_type":"worker"}'
 
 @patch("heiwa_sdk.spacetimedb.SpacetimeDB.call")
 def test_close_session_binding(mock_call):

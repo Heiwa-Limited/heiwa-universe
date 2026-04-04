@@ -212,6 +212,18 @@ export const DiscordUser = __t.object("DiscordUser", {
 });
 export type DiscordUser = __Infer<typeof DiscordUser>;
 
+export const DispatchAck = __t.object("DispatchAck", {
+  ackId: __t.string(),
+  leaseId: __t.string(),
+  sessionId: __t.string(),
+  taskId: __t.string(),
+  nodeId: __t.string(),
+  status: __t.string(),
+  decidedAt: __t.string(),
+  detail: __t.option(__t.string()),
+});
+export type DispatchAck = __Infer<typeof DispatchAck>;
+
 export const DrexDecisionRow = __t.object("DrexDecisionRow", {
   decisionId: __t.string(),
   requestId: __t.string(),
@@ -300,6 +312,23 @@ export const KnowledgeEmbedding = __t.object("KnowledgeEmbedding", {
   lastAccessedAt: __t.option(__t.string()),
 });
 export type KnowledgeEmbedding = __Infer<typeof KnowledgeEmbedding>;
+
+export const Lease = __t.object("Lease", {
+  leaseId: __t.string(),
+  taskId: __t.string(),
+  sessionId: __t.string(),
+  nodeId: __t.string(),
+  capability: __t.string(),
+  status: __t.string(),
+  issuedAt: __t.string(),
+  updatedAt: __t.string(),
+  expiresAt: __t.string(),
+  ackedAt: __t.option(__t.string()),
+  completedAt: __t.option(__t.string()),
+  failureCode: __t.option(__t.string()),
+  reason: __t.option(__t.string()),
+});
+export type Lease = __Infer<typeof Lease>;
 
 export const LivenessState = __t.object("LivenessState", {
   key: __t.string(),
@@ -628,4 +657,28 @@ export const User = __t.object("User", {
   metadataJson: __t.string(),
 });
 export type User = __Infer<typeof User>;
+
+export const WorkerSession = __t.object("WorkerSession", {
+  sessionId: __t.string(),
+  nodeId: __t.string(),
+  instanceId: __t.string(),
+  runtime: __t.string(),
+  runtimeVersion: __t.string(),
+  workerVersion: __t.string(),
+  protocol: __t.string(),
+  capabilitiesJson: __t.string(),
+  metadataJson: __t.string(),
+  maxConcurrency: __t.i64(),
+  activeTasks: __t.u32(),
+  status: __t.string(),
+  load: __t.f64(),
+  createdAt: __t.string(),
+  updatedAt: __t.string(),
+  expiresAt: __t.string(),
+  lastSeenAt: __t.string(),
+  closedAt: __t.option(__t.string()),
+  currentTaskId: __t.option(__t.string()),
+  leaseId: __t.option(__t.string()),
+});
+export type WorkerSession = __Infer<typeof WorkerSession>;
 

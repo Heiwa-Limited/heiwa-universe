@@ -44,6 +44,7 @@ import AssignProposalReducer from "./assign_proposal_reducer";
 import AttachDrexDecisionToRouteReducer from "./attach_drex_decision_to_route_reducer";
 import ClaimProposalReducer from "./claim_proposal_reducer";
 import ClaimTaskReducer from "./claim_task_reducer";
+import CloseSessionReducer from "./close_session_reducer";
 import CompleteMissionReducer from "./complete_mission_reducer";
 import CreateMissionReducer from "./create_mission_reducer";
 import CreateTaskDispatchReducer from "./create_task_dispatch_reducer";
@@ -67,6 +68,7 @@ import QueueProposalReducer from "./queue_proposal_reducer";
 import RecordApprovalDecisionReducer from "./record_approval_decision_reducer";
 import RecordBillingEventReducer from "./record_billing_event_reducer";
 import RecordConsentReducer from "./record_consent_reducer";
+import RecordDispatchAckReducer from "./record_dispatch_ack_reducer";
 import RecordDrexDecisionReducer from "./record_drex_decision_reducer";
 import RecordDrexFailureReducer from "./record_drex_failure_reducer";
 import RecordInteractionReducer from "./record_interaction_reducer";
@@ -95,6 +97,7 @@ import UpsertBattlefieldReducer from "./upsert_battlefield_reducer";
 import UpsertCaptainFocusReducer from "./upsert_captain_focus_reducer";
 import UpsertDiscordUserReducer from "./upsert_discord_user_reducer";
 import UpsertGpuSlotReducer from "./upsert_gpu_slot_reducer";
+import UpsertLeaseReducer from "./upsert_lease_reducer";
 import UpsertLivenessStateReducer from "./upsert_liveness_state_reducer";
 import UpsertModelTierReducer from "./upsert_model_tier_reducer";
 import UpsertNodeHeartbeatReducer from "./upsert_node_heartbeat_reducer";
@@ -102,6 +105,7 @@ import UpsertNodeRegistryReducer from "./upsert_node_registry_reducer";
 import UpsertPodReducer from "./upsert_pod_reducer";
 import UpsertProviderAccountStatusReducer from "./upsert_provider_account_status_reducer";
 import UpsertRateGroupStateReducer from "./upsert_rate_group_state_reducer";
+import UpsertSessionReducer from "./upsert_session_reducer";
 import WriteSessionSummaryReducer from "./write_session_summary_reducer";
 
 // Import all procedure arg schemas
@@ -122,12 +126,14 @@ import CellRunsRow from "./cell_runs_table";
 import DiscordChannelsRow from "./discord_channels_table";
 import DiscordInteractionsRow from "./discord_interactions_table";
 import DiscordUsersRow from "./discord_users_table";
+import DispatchAcksRow from "./dispatch_acks_table";
 import DrexDecisionsRow from "./drex_decisions_table";
 import DrexFailuresRow from "./drex_failures_table";
 import EventsRow from "./events_table";
 import ExecutionMemoryRow from "./execution_memory_table";
 import GpuSlotsRow from "./gpu_slots_table";
 import KnowledgeEmbeddingsRow from "./knowledge_embeddings_table";
+import LeasesRow from "./leases_table";
 import LivenessStateRow from "./liveness_state_table";
 import MissionStepsRow from "./mission_steps_table";
 import MissionsRow from "./missions_table";
@@ -147,6 +153,7 @@ import SessionSummariesRow from "./session_summaries_table";
 import TaskDispatchesRow from "./task_dispatches_table";
 import TenantTaskViewRow from "./tenant_task_view_table";
 import UsersRow from "./users_table";
+import WorkerSessionsRow from "./worker_sessions_table";
 
 /** Type-only namespace exports for generated type groups. */
 
@@ -437,6 +444,35 @@ const tablesSchema = __schema({
       { name: 'discord_users_user_id_key', constraint: 'unique', columns: ['userId'] },
     ],
   }, DiscordUsersRow),
+  dispatch_acks: __table({
+    name: 'dispatch_acks',
+    indexes: [
+      { name: 'ack_id', algorithm: 'btree', columns: [
+        'ackId',
+      ] },
+      { name: 'decided_at', algorithm: 'btree', columns: [
+        'decidedAt',
+      ] },
+      { name: 'lease_id', algorithm: 'btree', columns: [
+        'leaseId',
+      ] },
+      { name: 'node_id', algorithm: 'btree', columns: [
+        'nodeId',
+      ] },
+      { name: 'session_id', algorithm: 'btree', columns: [
+        'sessionId',
+      ] },
+      { name: 'status', algorithm: 'btree', columns: [
+        'status',
+      ] },
+      { name: 'task_id', algorithm: 'btree', columns: [
+        'taskId',
+      ] },
+    ],
+    constraints: [
+      { name: 'dispatch_acks_ack_id_key', constraint: 'unique', columns: ['ackId'] },
+    ],
+  }, DispatchAcksRow),
   drex_decisions: __table({
     name: 'drex_decisions',
     indexes: [
@@ -545,6 +581,41 @@ const tablesSchema = __schema({
       { name: 'knowledge_embeddings_id_key', constraint: 'unique', columns: ['id'] },
     ],
   }, KnowledgeEmbeddingsRow),
+  leases: __table({
+    name: 'leases',
+    indexes: [
+      { name: 'acked_at', algorithm: 'btree', columns: [
+        'ackedAt',
+      ] },
+      { name: 'capability', algorithm: 'btree', columns: [
+        'capability',
+      ] },
+      { name: 'completed_at', algorithm: 'btree', columns: [
+        'completedAt',
+      ] },
+      { name: 'expires_at', algorithm: 'btree', columns: [
+        'expiresAt',
+      ] },
+      { name: 'lease_id', algorithm: 'btree', columns: [
+        'leaseId',
+      ] },
+      { name: 'node_id', algorithm: 'btree', columns: [
+        'nodeId',
+      ] },
+      { name: 'session_id', algorithm: 'btree', columns: [
+        'sessionId',
+      ] },
+      { name: 'status', algorithm: 'btree', columns: [
+        'status',
+      ] },
+      { name: 'task_id', algorithm: 'btree', columns: [
+        'taskId',
+      ] },
+    ],
+    constraints: [
+      { name: 'leases_lease_id_key', constraint: 'unique', columns: ['leaseId'] },
+    ],
+  }, LeasesRow),
   liveness_state: __table({
     name: 'liveness_state',
     indexes: [
@@ -906,6 +977,47 @@ const tablesSchema = __schema({
       { name: 'users_user_id_key', constraint: 'unique', columns: ['userId'] },
     ],
   }, UsersRow),
+  worker_sessions: __table({
+    name: 'worker_sessions',
+    indexes: [
+      { name: 'closed_at', algorithm: 'btree', columns: [
+        'closedAt',
+      ] },
+      { name: 'created_at', algorithm: 'btree', columns: [
+        'createdAt',
+      ] },
+      { name: 'current_task_id', algorithm: 'btree', columns: [
+        'currentTaskId',
+      ] },
+      { name: 'expires_at', algorithm: 'btree', columns: [
+        'expiresAt',
+      ] },
+      { name: 'instance_id', algorithm: 'btree', columns: [
+        'instanceId',
+      ] },
+      { name: 'last_seen_at', algorithm: 'btree', columns: [
+        'lastSeenAt',
+      ] },
+      { name: 'lease_id', algorithm: 'btree', columns: [
+        'leaseId',
+      ] },
+      { name: 'node_id', algorithm: 'btree', columns: [
+        'nodeId',
+      ] },
+      { name: 'session_id', algorithm: 'btree', columns: [
+        'sessionId',
+      ] },
+      { name: 'status', algorithm: 'btree', columns: [
+        'status',
+      ] },
+      { name: 'updated_at', algorithm: 'btree', columns: [
+        'updatedAt',
+      ] },
+    ],
+    constraints: [
+      { name: 'worker_sessions_session_id_key', constraint: 'unique', columns: ['sessionId'] },
+    ],
+  }, WorkerSessionsRow),
   tenant_task_view: __table({
     name: 'tenant_task_view',
     indexes: [
@@ -927,6 +1039,7 @@ const reducersSchema = __reducers(
   __reducerSchema("attach_drex_decision_to_route", AttachDrexDecisionToRouteReducer),
   __reducerSchema("claim_proposal", ClaimProposalReducer),
   __reducerSchema("claim_task", ClaimTaskReducer),
+  __reducerSchema("close_session", CloseSessionReducer),
   __reducerSchema("complete_mission", CompleteMissionReducer),
   __reducerSchema("create_mission", CreateMissionReducer),
   __reducerSchema("create_task_dispatch", CreateTaskDispatchReducer),
@@ -950,6 +1063,7 @@ const reducersSchema = __reducers(
   __reducerSchema("record_approval_decision", RecordApprovalDecisionReducer),
   __reducerSchema("record_billing_event", RecordBillingEventReducer),
   __reducerSchema("record_consent", RecordConsentReducer),
+  __reducerSchema("record_dispatch_ack", RecordDispatchAckReducer),
   __reducerSchema("record_drex_decision", RecordDrexDecisionReducer),
   __reducerSchema("record_drex_failure", RecordDrexFailureReducer),
   __reducerSchema("record_interaction", RecordInteractionReducer),
@@ -978,6 +1092,7 @@ const reducersSchema = __reducers(
   __reducerSchema("upsert_captain_focus", UpsertCaptainFocusReducer),
   __reducerSchema("upsert_discord_user", UpsertDiscordUserReducer),
   __reducerSchema("upsert_gpu_slot", UpsertGpuSlotReducer),
+  __reducerSchema("upsert_lease", UpsertLeaseReducer),
   __reducerSchema("upsert_liveness_state", UpsertLivenessStateReducer),
   __reducerSchema("upsert_model_tier", UpsertModelTierReducer),
   __reducerSchema("upsert_node_heartbeat", UpsertNodeHeartbeatReducer),
@@ -985,6 +1100,7 @@ const reducersSchema = __reducers(
   __reducerSchema("upsert_pod", UpsertPodReducer),
   __reducerSchema("upsert_provider_account_status", UpsertProviderAccountStatusReducer),
   __reducerSchema("upsert_rate_group_state", UpsertRateGroupStateReducer),
+  __reducerSchema("upsert_session", UpsertSessionReducer),
   __reducerSchema("write_session_summary", WriteSessionSummaryReducer),
 );
 

@@ -3,11 +3,15 @@ use std::sync::Arc;
 
 use anyhow::{anyhow, Result};
 use heiwa_bindings::{
+    close_session_reducer::close_session as CloseSessionReducer,
     attach_drex_decision_to_route_reducer::attach_drex_decision_to_route as AttachDrexDecisionToRouteReducer,
+    record_dispatch_ack_reducer::record_dispatch_ack as RecordDispatchAckReducer,
     record_drex_decision_reducer::record_drex_decision as RecordDrexDecisionReducer,
     record_drex_failure_reducer::record_drex_failure as RecordDrexFailureReducer,
     record_run_reducer::record_run as RecordRunReducer,
     register_artifact_reducer::register_artifact as RegisterArtifactReducer,
+    upsert_lease_reducer::upsert_lease as UpsertLeaseReducer,
+    upsert_session_reducer::upsert_session as UpsertSessionReducer,
     DbConnection,
 };
 use serde_json::json;
@@ -73,6 +77,59 @@ pub struct PersistedArtifact {
 }
 
 #[derive(Clone, Debug, PartialEq)]
+pub struct PersistedWorkerSession {
+    pub session_id: String,
+    pub node_id: String,
+    pub instance_id: String,
+    pub runtime: String,
+    pub runtime_version: String,
+    pub worker_version: String,
+    pub protocol: String,
+    pub capabilities_json: String,
+    pub metadata_json: String,
+    pub max_concurrency: i64,
+    pub active_tasks: u32,
+    pub status: String,
+    pub load: f64,
+    pub created_at: String,
+    pub updated_at: String,
+    pub expires_at: String,
+    pub last_seen_at: String,
+    pub closed_at: Option<String>,
+    pub current_task_id: Option<String>,
+    pub lease_id: Option<String>,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct PersistedWorkerLease {
+    pub lease_id: String,
+    pub task_id: String,
+    pub session_id: String,
+    pub node_id: String,
+    pub capability: String,
+    pub status: String,
+    pub issued_at: String,
+    pub updated_at: String,
+    pub expires_at: String,
+    pub acked_at: Option<String>,
+    pub completed_at: Option<String>,
+    pub failure_code: Option<String>,
+    pub reason: Option<String>,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct PersistedDispatchAck {
+    pub ack_id: String,
+    pub lease_id: String,
+    pub session_id: String,
+    pub task_id: String,
+    pub node_id: String,
+    pub status: String,
+    pub decided_at: String,
+    pub detail: Option<String>,
+}
+
+#[derive(Clone, Debug, PartialEq)]
 pub struct PersistedRunReceipt {
     pub run_id: String,
     pub user_id: String,
@@ -103,16 +160,10 @@ pub trait StdbTransport: Send + Sync + 'static {
     fn insert_drex_failure(&self, failure: PersistedDrexFailure) -> Result<()>;
     fn attach_drex_decision_to_route(&self, request_id: &str, drex_decision_id: &str)
         -> Result<()>;
-    fn register_session(
-        &self,
-        session_id: String,
-        owner_id: Option<String>,
-        node_id: String,
-        session_type: String,
-        expires_at: Option<String>,
-        metadata_json: String,
-    ) -> Result<()>;
+    fn upsert_worker_session(&self, session: PersistedWorkerSession) -> Result<()>;
     fn close_session(&self, session_id: String) -> Result<()>;
+    fn upsert_worker_lease(&self, lease: PersistedWorkerLease) -> Result<()>;
+    fn record_dispatch_ack(&self, ack: PersistedDispatchAck) -> Result<()>;
     fn register_artifact(&self, artifact: PersistedArtifact) -> Result<()>;
     fn record_run_receipt(&self, receipt: PersistedRunReceipt) -> Result<()>;
 }
@@ -129,24 +180,72 @@ impl ReducerTransport {
 }
 
 impl StdbTransport for ReducerTransport {
-    fn register_session(
-        &self,
-        _session_id: String,
-        _owner_id: Option<String>,
-        _node_id: String,
-        _session_type: String,
-        _expires_at: Option<String>,
-        _metadata_json: String,
-    ) -> Result<()> {
-        // Canonical session persistence is still being formalized in the STDB module.
-        // Until Task 1 lands the explicit worker_session reducers, keep session writes
-        // honest as a no-op rather than relying on bindings that the live module does
-        // not generate.
-        Ok(())
+    fn upsert_worker_session(&self, session: PersistedWorkerSession) -> Result<()> {
+        self.conn.reducers
+            .upsert_session(
+                session.session_id,
+                session.node_id,
+                session.instance_id,
+                session.runtime,
+                session.runtime_version,
+                session.worker_version,
+                session.protocol,
+                session.capabilities_json,
+                session.metadata_json,
+                session.max_concurrency,
+                session.active_tasks,
+                session.status,
+                session.load,
+                session.created_at,
+                session.updated_at,
+                session.expires_at,
+                session.last_seen_at,
+                session.closed_at,
+                session.current_task_id,
+                session.lease_id,
+            )
+            .map_err(|error| anyhow!(error.to_string()))
     }
 
-    fn close_session(&self, _session_id: String) -> Result<()> {
-        Ok(())
+    fn close_session(&self, session_id: String) -> Result<()> {
+        self.conn.reducers
+            .close_session(session_id)
+            .map_err(|error| anyhow!(error.to_string()))
+    }
+
+    fn upsert_worker_lease(&self, lease: PersistedWorkerLease) -> Result<()> {
+        self.conn.reducers
+            .upsert_lease(
+                lease.lease_id,
+                lease.task_id,
+                lease.session_id,
+                lease.node_id,
+                lease.capability,
+                lease.status,
+                lease.issued_at,
+                lease.updated_at,
+                lease.expires_at,
+                lease.acked_at,
+                lease.completed_at,
+                lease.failure_code,
+                lease.reason,
+            )
+            .map_err(|error| anyhow!(error.to_string()))
+    }
+
+    fn record_dispatch_ack(&self, ack: PersistedDispatchAck) -> Result<()> {
+        self.conn.reducers
+            .record_dispatch_ack(
+                ack.ack_id,
+                ack.lease_id,
+                ack.session_id,
+                ack.task_id,
+                ack.node_id,
+                ack.status,
+                ack.decided_at,
+                ack.detail,
+            )
+            .map_err(|error| anyhow!(error.to_string()))
     }
 
     fn register_artifact(&self, artifact: PersistedArtifact) -> Result<()> {
@@ -283,19 +382,19 @@ impl StdbTransport for NoopTransport {
         Ok(())
     }
 
-    fn register_session(
-        &self,
-        _session_id: String,
-        _owner_id: Option<String>,
-        _node_id: String,
-        _session_type: String,
-        _expires_at: Option<String>,
-        _metadata_json: String,
-    ) -> Result<()> {
+    fn upsert_worker_session(&self, _session: PersistedWorkerSession) -> Result<()> {
         Ok(())
     }
 
     fn close_session(&self, _session_id: String) -> Result<()> {
+        Ok(())
+    }
+
+    fn upsert_worker_lease(&self, _lease: PersistedWorkerLease) -> Result<()> {
+        Ok(())
+    }
+
+    fn record_dispatch_ack(&self, _ack: PersistedDispatchAck) -> Result<()> {
         Ok(())
     }
 
@@ -431,6 +530,30 @@ impl<T: StdbTransport> StdbRuntime<T> {
         }
         self.transport.record_run_receipt(receipt.clone())?;
         Ok(receipt)
+    }
+
+    pub async fn upsert_worker_session(
+        &self,
+        session: PersistedWorkerSession,
+    ) -> Result<PersistedWorkerSession> {
+        self.transport.upsert_worker_session(session.clone())?;
+        Ok(session)
+    }
+
+    pub async fn upsert_worker_lease(
+        &self,
+        lease: PersistedWorkerLease,
+    ) -> Result<PersistedWorkerLease> {
+        self.transport.upsert_worker_lease(lease.clone())?;
+        Ok(lease)
+    }
+
+    pub async fn record_worker_dispatch_ack(
+        &self,
+        ack: PersistedDispatchAck,
+    ) -> Result<PersistedDispatchAck> {
+        self.transport.record_dispatch_ack(ack.clone())?;
+        Ok(ack)
     }
 }
 

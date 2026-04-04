@@ -2,8 +2,8 @@ use std::sync::{Arc, Mutex};
 
 use anyhow::Result;
 use heiwa_core::stdb::{
-    PersistedArtifact, PersistedDrexDecision, PersistedDrexFailure, PersistedRunReceipt,
-    StdbRuntime, StdbTransport,
+    PersistedArtifact, PersistedDispatchAck, PersistedDrexDecision, PersistedDrexFailure,
+    PersistedRunReceipt, PersistedWorkerLease, PersistedWorkerSession, StdbRuntime, StdbTransport,
 };
 
 #[derive(Clone, Default)]
@@ -29,19 +29,19 @@ impl StdbTransport for MemoryTransport {
         Ok(())
     }
 
-    fn register_session(
-        &self,
-        _session_id: String,
-        _owner_id: Option<String>,
-        _node_id: String,
-        _session_type: String,
-        _expires_at: Option<String>,
-        _metadata_json: String,
-    ) -> Result<()> {
+    fn upsert_worker_session(&self, _session: PersistedWorkerSession) -> Result<()> {
         Ok(())
     }
 
     fn close_session(&self, _session_id: String) -> Result<()> {
+        Ok(())
+    }
+
+    fn upsert_worker_lease(&self, _lease: PersistedWorkerLease) -> Result<()> {
+        Ok(())
+    }
+
+    fn record_dispatch_ack(&self, _ack: PersistedDispatchAck) -> Result<()> {
         Ok(())
     }
 

@@ -40,6 +40,7 @@ pub mod cell_run_record_type;
 pub mod cell_runs_table;
 pub mod claim_proposal_reducer;
 pub mod claim_task_reducer;
+pub mod close_session_reducer;
 pub mod complete_mission_reducer;
 pub mod create_mission_reducer;
 pub mod create_task_dispatch_reducer;
@@ -50,6 +51,8 @@ pub mod discord_interaction_type;
 pub mod discord_interactions_table;
 pub mod discord_user_type;
 pub mod discord_users_table;
+pub mod dispatch_ack_type;
+pub mod dispatch_acks_table;
 pub mod drex_decision_row_type;
 pub mod drex_decisions_table;
 pub mod drex_failure_row_type;
@@ -71,6 +74,8 @@ pub mod insert_knowledge_embedding_reducer;
 pub mod issue_capability_lease_reducer;
 pub mod knowledge_embedding_type;
 pub mod knowledge_embeddings_table;
+pub mod lease_type;
+pub mod leases_table;
 pub mod link_oauth_identity_reducer;
 pub mod liveness_state_table;
 pub mod liveness_state_type;
@@ -108,6 +113,7 @@ pub mod rate_group_state_type;
 pub mod record_approval_decision_reducer;
 pub mod record_billing_event_reducer;
 pub mod record_consent_reducer;
+pub mod record_dispatch_ack_reducer;
 pub mod record_drex_decision_reducer;
 pub mod record_drex_failure_reducer;
 pub mod record_interaction_reducer;
@@ -145,6 +151,7 @@ pub mod upsert_battlefield_reducer;
 pub mod upsert_captain_focus_reducer;
 pub mod upsert_discord_user_reducer;
 pub mod upsert_gpu_slot_reducer;
+pub mod upsert_lease_reducer;
 pub mod upsert_liveness_state_reducer;
 pub mod upsert_model_tier_reducer;
 pub mod upsert_node_heartbeat_reducer;
@@ -152,8 +159,11 @@ pub mod upsert_node_registry_reducer;
 pub mod upsert_pod_reducer;
 pub mod upsert_provider_account_status_reducer;
 pub mod upsert_rate_group_state_reducer;
+pub mod upsert_session_reducer;
 pub mod user_type;
 pub mod users_table;
+pub mod worker_session_type;
+pub mod worker_sessions_table;
 pub mod write_session_summary_reducer;
 
 pub use add_approval_request_reducer::add_approval_request;
@@ -190,6 +200,7 @@ pub use cell_run_record_type::CellRunRecord;
 pub use cell_runs_table::*;
 pub use claim_proposal_reducer::claim_proposal;
 pub use claim_task_reducer::claim_task;
+pub use close_session_reducer::close_session;
 pub use complete_mission_reducer::complete_mission;
 pub use create_mission_reducer::create_mission;
 pub use create_task_dispatch_reducer::create_task_dispatch;
@@ -200,6 +211,8 @@ pub use discord_interaction_type::DiscordInteraction;
 pub use discord_interactions_table::*;
 pub use discord_user_type::DiscordUser;
 pub use discord_users_table::*;
+pub use dispatch_ack_type::DispatchAck;
+pub use dispatch_acks_table::*;
 pub use drex_decision_row_type::DrexDecisionRow;
 pub use drex_decisions_table::*;
 pub use drex_failure_row_type::DrexFailureRow;
@@ -221,6 +234,8 @@ pub use insert_knowledge_embedding_reducer::insert_knowledge_embedding;
 pub use issue_capability_lease_reducer::issue_capability_lease;
 pub use knowledge_embedding_type::KnowledgeEmbedding;
 pub use knowledge_embeddings_table::*;
+pub use lease_type::Lease;
+pub use leases_table::*;
 pub use link_oauth_identity_reducer::link_oauth_identity;
 pub use liveness_state_table::*;
 pub use liveness_state_type::LivenessState;
@@ -258,6 +273,7 @@ pub use rate_group_state_type::RateGroupState;
 pub use record_approval_decision_reducer::record_approval_decision;
 pub use record_billing_event_reducer::record_billing_event;
 pub use record_consent_reducer::record_consent;
+pub use record_dispatch_ack_reducer::record_dispatch_ack;
 pub use record_drex_decision_reducer::record_drex_decision;
 pub use record_drex_failure_reducer::record_drex_failure;
 pub use record_interaction_reducer::record_interaction;
@@ -295,6 +311,7 @@ pub use upsert_battlefield_reducer::upsert_battlefield;
 pub use upsert_captain_focus_reducer::upsert_captain_focus;
 pub use upsert_discord_user_reducer::upsert_discord_user;
 pub use upsert_gpu_slot_reducer::upsert_gpu_slot;
+pub use upsert_lease_reducer::upsert_lease;
 pub use upsert_liveness_state_reducer::upsert_liveness_state;
 pub use upsert_model_tier_reducer::upsert_model_tier;
 pub use upsert_node_heartbeat_reducer::upsert_node_heartbeat;
@@ -302,8 +319,11 @@ pub use upsert_node_registry_reducer::upsert_node_registry;
 pub use upsert_pod_reducer::upsert_pod;
 pub use upsert_provider_account_status_reducer::upsert_provider_account_status;
 pub use upsert_rate_group_state_reducer::upsert_rate_group_state;
+pub use upsert_session_reducer::upsert_session;
 pub use user_type::User;
 pub use users_table::*;
+pub use worker_session_type::WorkerSession;
+pub use worker_sessions_table::*;
 pub use write_session_summary_reducer::write_session_summary;
 
 #[derive(Clone, PartialEq, Debug)]
@@ -403,6 +423,9 @@ pub enum Reducer {
     ClaimTask {
         task_id: u64,
         worker_id: String,
+    },
+    CloseSession {
+        session_id: String,
     },
     CompleteMission {
         mission_id: String,
@@ -602,6 +625,16 @@ pub enum Reducer {
         request_payload_json: Option<String>,
         approved_at: Option<String>,
         expires_at: Option<String>,
+    },
+    RecordDispatchAck {
+        ack_id: String,
+        lease_id: String,
+        session_id: String,
+        task_id: String,
+        node_id: String,
+        status: String,
+        decided_at: String,
+        detail: Option<String>,
     },
     RecordDrexDecision {
         decision_id: String,
@@ -846,6 +879,21 @@ pub enum Reducer {
         loaded_models: Vec<String>,
         available_slots: i64,
     },
+    UpsertLease {
+        lease_id: String,
+        task_id: String,
+        session_id: String,
+        node_id: String,
+        capability: String,
+        status: String,
+        issued_at: String,
+        updated_at: String,
+        expires_at: String,
+        acked_at: Option<String>,
+        completed_at: Option<String>,
+        failure_code: Option<String>,
+        reason: Option<String>,
+    },
     UpsertLivenessState {
         key: String,
         last_state: String,
@@ -927,6 +975,28 @@ pub enum Reducer {
         cooldown_until: String,
         available: bool,
     },
+    UpsertSession {
+        session_id: String,
+        node_id: String,
+        instance_id: String,
+        runtime: String,
+        runtime_version: String,
+        worker_version: String,
+        protocol: String,
+        capabilities_json: String,
+        metadata_json: String,
+        max_concurrency: i64,
+        active_tasks: u32,
+        status: String,
+        load: f64,
+        created_at: String,
+        updated_at: String,
+        expires_at: String,
+        last_seen_at: String,
+        closed_at: Option<String>,
+        current_task_id: Option<String>,
+        lease_id: Option<String>,
+    },
     WriteSessionSummary {
         summary_id: String,
         session_id: String,
@@ -957,6 +1027,7 @@ impl __sdk::Reducer for Reducer {
             Reducer::AttachDrexDecisionToRoute { .. } => "attach_drex_decision_to_route",
             Reducer::ClaimProposal { .. } => "claim_proposal",
             Reducer::ClaimTask { .. } => "claim_task",
+            Reducer::CloseSession { .. } => "close_session",
             Reducer::CompleteMission { .. } => "complete_mission",
             Reducer::CreateMission { .. } => "create_mission",
             Reducer::CreateTaskDispatch { .. } => "create_task_dispatch",
@@ -980,6 +1051,7 @@ impl __sdk::Reducer for Reducer {
             Reducer::RecordApprovalDecision { .. } => "record_approval_decision",
             Reducer::RecordBillingEvent { .. } => "record_billing_event",
             Reducer::RecordConsent { .. } => "record_consent",
+            Reducer::RecordDispatchAck { .. } => "record_dispatch_ack",
             Reducer::RecordDrexDecision { .. } => "record_drex_decision",
             Reducer::RecordDrexFailure { .. } => "record_drex_failure",
             Reducer::RecordInteraction { .. } => "record_interaction",
@@ -1008,6 +1080,7 @@ impl __sdk::Reducer for Reducer {
             Reducer::UpsertCaptainFocus { .. } => "upsert_captain_focus",
             Reducer::UpsertDiscordUser { .. } => "upsert_discord_user",
             Reducer::UpsertGpuSlot { .. } => "upsert_gpu_slot",
+            Reducer::UpsertLease { .. } => "upsert_lease",
             Reducer::UpsertLivenessState { .. } => "upsert_liveness_state",
             Reducer::UpsertModelTier { .. } => "upsert_model_tier",
             Reducer::UpsertNodeHeartbeat { .. } => "upsert_node_heartbeat",
@@ -1015,6 +1088,7 @@ impl __sdk::Reducer for Reducer {
             Reducer::UpsertPod { .. } => "upsert_pod",
             Reducer::UpsertProviderAccountStatus { .. } => "upsert_provider_account_status",
             Reducer::UpsertRateGroupState { .. } => "upsert_rate_group_state",
+            Reducer::UpsertSession { .. } => "upsert_session",
             Reducer::WriteSessionSummary { .. } => "write_session_summary",
             _ => unreachable!(),
         }
@@ -1191,6 +1265,11 @@ impl __sdk::Reducer for Reducer {
                 __sats::bsatn::to_vec(&claim_task_reducer::ClaimTaskArgs {
                     task_id: task_id.clone(),
                     worker_id: worker_id.clone(),
+                })
+            }
+            Reducer::CloseSession { session_id } => {
+                __sats::bsatn::to_vec(&close_session_reducer::CloseSessionArgs {
+                    session_id: session_id.clone(),
                 })
             }
             Reducer::CompleteMission {
@@ -1577,6 +1656,25 @@ impl __sdk::Reducer for Reducer {
                 request_payload_json: request_payload_json.clone(),
                 approved_at: approved_at.clone(),
                 expires_at: expires_at.clone(),
+            }),
+            Reducer::RecordDispatchAck {
+                ack_id,
+                lease_id,
+                session_id,
+                task_id,
+                node_id,
+                status,
+                decided_at,
+                detail,
+            } => __sats::bsatn::to_vec(&record_dispatch_ack_reducer::RecordDispatchAckArgs {
+                ack_id: ack_id.clone(),
+                lease_id: lease_id.clone(),
+                session_id: session_id.clone(),
+                task_id: task_id.clone(),
+                node_id: node_id.clone(),
+                status: status.clone(),
+                decided_at: decided_at.clone(),
+                detail: detail.clone(),
             }),
             Reducer::RecordDrexDecision {
                 decision_id,
@@ -2049,6 +2147,35 @@ impl __sdk::Reducer for Reducer {
                 loaded_models: loaded_models.clone(),
                 available_slots: available_slots.clone(),
             }),
+            Reducer::UpsertLease {
+                lease_id,
+                task_id,
+                session_id,
+                node_id,
+                capability,
+                status,
+                issued_at,
+                updated_at,
+                expires_at,
+                acked_at,
+                completed_at,
+                failure_code,
+                reason,
+            } => __sats::bsatn::to_vec(&upsert_lease_reducer::UpsertLeaseArgs {
+                lease_id: lease_id.clone(),
+                task_id: task_id.clone(),
+                session_id: session_id.clone(),
+                node_id: node_id.clone(),
+                capability: capability.clone(),
+                status: status.clone(),
+                issued_at: issued_at.clone(),
+                updated_at: updated_at.clone(),
+                expires_at: expires_at.clone(),
+                acked_at: acked_at.clone(),
+                completed_at: completed_at.clone(),
+                failure_code: failure_code.clone(),
+                reason: reason.clone(),
+            }),
             Reducer::UpsertLivenessState {
                 key,
                 last_state,
@@ -2208,6 +2335,49 @@ impl __sdk::Reducer for Reducer {
                     available: available.clone(),
                 })
             }
+            Reducer::UpsertSession {
+                session_id,
+                node_id,
+                instance_id,
+                runtime,
+                runtime_version,
+                worker_version,
+                protocol,
+                capabilities_json,
+                metadata_json,
+                max_concurrency,
+                active_tasks,
+                status,
+                load,
+                created_at,
+                updated_at,
+                expires_at,
+                last_seen_at,
+                closed_at,
+                current_task_id,
+                lease_id,
+            } => __sats::bsatn::to_vec(&upsert_session_reducer::UpsertSessionArgs {
+                session_id: session_id.clone(),
+                node_id: node_id.clone(),
+                instance_id: instance_id.clone(),
+                runtime: runtime.clone(),
+                runtime_version: runtime_version.clone(),
+                worker_version: worker_version.clone(),
+                protocol: protocol.clone(),
+                capabilities_json: capabilities_json.clone(),
+                metadata_json: metadata_json.clone(),
+                max_concurrency: max_concurrency.clone(),
+                active_tasks: active_tasks.clone(),
+                status: status.clone(),
+                load: load.clone(),
+                created_at: created_at.clone(),
+                updated_at: updated_at.clone(),
+                expires_at: expires_at.clone(),
+                last_seen_at: last_seen_at.clone(),
+                closed_at: closed_at.clone(),
+                current_task_id: current_task_id.clone(),
+                lease_id: lease_id.clone(),
+            }),
             Reducer::WriteSessionSummary {
                 summary_id,
                 session_id,
@@ -2253,12 +2423,14 @@ pub struct DbUpdate {
     discord_channels: __sdk::TableUpdate<DiscordChannel>,
     discord_interactions: __sdk::TableUpdate<DiscordInteraction>,
     discord_users: __sdk::TableUpdate<DiscordUser>,
+    dispatch_acks: __sdk::TableUpdate<DispatchAck>,
     drex_decisions: __sdk::TableUpdate<DrexDecisionRow>,
     drex_failures: __sdk::TableUpdate<DrexFailureRow>,
     events: __sdk::TableUpdate<EventRecord>,
     execution_memory: __sdk::TableUpdate<ExecutionMemory>,
     gpu_slots: __sdk::TableUpdate<GpuSlot>,
     knowledge_embeddings: __sdk::TableUpdate<KnowledgeEmbedding>,
+    leases: __sdk::TableUpdate<Lease>,
     liveness_state: __sdk::TableUpdate<LivenessState>,
     mission_steps: __sdk::TableUpdate<MissionStepRecord>,
     missions: __sdk::TableUpdate<MissionRecord>,
@@ -2278,6 +2450,7 @@ pub struct DbUpdate {
     task_dispatches: __sdk::TableUpdate<TaskDispatch>,
     tenant_task_view: __sdk::TableUpdate<OrganizationTask>,
     users: __sdk::TableUpdate<User>,
+    worker_sessions: __sdk::TableUpdate<WorkerSession>,
 }
 
 impl TryFrom<__ws::v2::TransactionUpdate> for DbUpdate {
@@ -2331,6 +2504,9 @@ impl TryFrom<__ws::v2::TransactionUpdate> for DbUpdate {
                 "discord_users" => db_update
                     .discord_users
                     .append(discord_users_table::parse_table_update(table_update)?),
+                "dispatch_acks" => db_update
+                    .dispatch_acks
+                    .append(dispatch_acks_table::parse_table_update(table_update)?),
                 "drex_decisions" => db_update
                     .drex_decisions
                     .append(drex_decisions_table::parse_table_update(table_update)?),
@@ -2349,6 +2525,9 @@ impl TryFrom<__ws::v2::TransactionUpdate> for DbUpdate {
                 "knowledge_embeddings" => db_update.knowledge_embeddings.append(
                     knowledge_embeddings_table::parse_table_update(table_update)?,
                 ),
+                "leases" => db_update
+                    .leases
+                    .append(leases_table::parse_table_update(table_update)?),
                 "liveness_state" => db_update
                     .liveness_state
                     .append(liveness_state_table::parse_table_update(table_update)?),
@@ -2406,6 +2585,9 @@ impl TryFrom<__ws::v2::TransactionUpdate> for DbUpdate {
                 "users" => db_update
                     .users
                     .append(users_table::parse_table_update(table_update)?),
+                "worker_sessions" => db_update
+                    .worker_sessions
+                    .append(worker_sessions_table::parse_table_update(table_update)?),
 
                 unknown => {
                     return Err(__sdk::InternalError::unknown_name(
@@ -2480,6 +2662,9 @@ impl __sdk::DbUpdate for DbUpdate {
         diff.discord_users = cache
             .apply_diff_to_table::<DiscordUser>("discord_users", &self.discord_users)
             .with_updates_by_pk(|row| &row.user_id);
+        diff.dispatch_acks = cache
+            .apply_diff_to_table::<DispatchAck>("dispatch_acks", &self.dispatch_acks)
+            .with_updates_by_pk(|row| &row.ack_id);
         diff.drex_decisions = cache
             .apply_diff_to_table::<DrexDecisionRow>("drex_decisions", &self.drex_decisions)
             .with_updates_by_pk(|row| &row.decision_id);
@@ -2501,6 +2686,9 @@ impl __sdk::DbUpdate for DbUpdate {
                 &self.knowledge_embeddings,
             )
             .with_updates_by_pk(|row| &row.id);
+        diff.leases = cache
+            .apply_diff_to_table::<Lease>("leases", &self.leases)
+            .with_updates_by_pk(|row| &row.lease_id);
         diff.liveness_state = cache
             .apply_diff_to_table::<LivenessState>("liveness_state", &self.liveness_state)
             .with_updates_by_pk(|row| &row.key);
@@ -2561,6 +2749,9 @@ impl __sdk::DbUpdate for DbUpdate {
         diff.users = cache
             .apply_diff_to_table::<User>("users", &self.users)
             .with_updates_by_pk(|row| &row.user_id);
+        diff.worker_sessions = cache
+            .apply_diff_to_table::<WorkerSession>("worker_sessions", &self.worker_sessions)
+            .with_updates_by_pk(|row| &row.session_id);
         diff.tenant_task_view = cache
             .apply_diff_to_table::<OrganizationTask>("tenant_task_view", &self.tenant_task_view);
 
@@ -2615,6 +2806,9 @@ impl __sdk::DbUpdate for DbUpdate {
                 "discord_users" => db_update
                     .discord_users
                     .append(__sdk::parse_row_list_as_inserts(table_rows.rows)?),
+                "dispatch_acks" => db_update
+                    .dispatch_acks
+                    .append(__sdk::parse_row_list_as_inserts(table_rows.rows)?),
                 "drex_decisions" => db_update
                     .drex_decisions
                     .append(__sdk::parse_row_list_as_inserts(table_rows.rows)?),
@@ -2632,6 +2826,9 @@ impl __sdk::DbUpdate for DbUpdate {
                     .append(__sdk::parse_row_list_as_inserts(table_rows.rows)?),
                 "knowledge_embeddings" => db_update
                     .knowledge_embeddings
+                    .append(__sdk::parse_row_list_as_inserts(table_rows.rows)?),
+                "leases" => db_update
+                    .leases
                     .append(__sdk::parse_row_list_as_inserts(table_rows.rows)?),
                 "liveness_state" => db_update
                     .liveness_state
@@ -2689,6 +2886,9 @@ impl __sdk::DbUpdate for DbUpdate {
                     .append(__sdk::parse_row_list_as_inserts(table_rows.rows)?),
                 "users" => db_update
                     .users
+                    .append(__sdk::parse_row_list_as_inserts(table_rows.rows)?),
+                "worker_sessions" => db_update
+                    .worker_sessions
                     .append(__sdk::parse_row_list_as_inserts(table_rows.rows)?),
                 unknown => {
                     return Err(
@@ -2748,6 +2948,9 @@ impl __sdk::DbUpdate for DbUpdate {
                 "discord_users" => db_update
                     .discord_users
                     .append(__sdk::parse_row_list_as_deletes(table_rows.rows)?),
+                "dispatch_acks" => db_update
+                    .dispatch_acks
+                    .append(__sdk::parse_row_list_as_deletes(table_rows.rows)?),
                 "drex_decisions" => db_update
                     .drex_decisions
                     .append(__sdk::parse_row_list_as_deletes(table_rows.rows)?),
@@ -2765,6 +2968,9 @@ impl __sdk::DbUpdate for DbUpdate {
                     .append(__sdk::parse_row_list_as_deletes(table_rows.rows)?),
                 "knowledge_embeddings" => db_update
                     .knowledge_embeddings
+                    .append(__sdk::parse_row_list_as_deletes(table_rows.rows)?),
+                "leases" => db_update
+                    .leases
                     .append(__sdk::parse_row_list_as_deletes(table_rows.rows)?),
                 "liveness_state" => db_update
                     .liveness_state
@@ -2823,6 +3029,9 @@ impl __sdk::DbUpdate for DbUpdate {
                 "users" => db_update
                     .users
                     .append(__sdk::parse_row_list_as_deletes(table_rows.rows)?),
+                "worker_sessions" => db_update
+                    .worker_sessions
+                    .append(__sdk::parse_row_list_as_deletes(table_rows.rows)?),
                 unknown => {
                     return Err(
                         __sdk::InternalError::unknown_name("table", unknown, "QueryRows").into(),
@@ -2853,12 +3062,14 @@ pub struct AppliedDiff<'r> {
     discord_channels: __sdk::TableAppliedDiff<'r, DiscordChannel>,
     discord_interactions: __sdk::TableAppliedDiff<'r, DiscordInteraction>,
     discord_users: __sdk::TableAppliedDiff<'r, DiscordUser>,
+    dispatch_acks: __sdk::TableAppliedDiff<'r, DispatchAck>,
     drex_decisions: __sdk::TableAppliedDiff<'r, DrexDecisionRow>,
     drex_failures: __sdk::TableAppliedDiff<'r, DrexFailureRow>,
     events: __sdk::TableAppliedDiff<'r, EventRecord>,
     execution_memory: __sdk::TableAppliedDiff<'r, ExecutionMemory>,
     gpu_slots: __sdk::TableAppliedDiff<'r, GpuSlot>,
     knowledge_embeddings: __sdk::TableAppliedDiff<'r, KnowledgeEmbedding>,
+    leases: __sdk::TableAppliedDiff<'r, Lease>,
     liveness_state: __sdk::TableAppliedDiff<'r, LivenessState>,
     mission_steps: __sdk::TableAppliedDiff<'r, MissionStepRecord>,
     missions: __sdk::TableAppliedDiff<'r, MissionRecord>,
@@ -2878,6 +3089,7 @@ pub struct AppliedDiff<'r> {
     task_dispatches: __sdk::TableAppliedDiff<'r, TaskDispatch>,
     tenant_task_view: __sdk::TableAppliedDiff<'r, OrganizationTask>,
     users: __sdk::TableAppliedDiff<'r, User>,
+    worker_sessions: __sdk::TableAppliedDiff<'r, WorkerSession>,
     __unused: std::marker::PhantomData<&'r ()>,
 }
 
@@ -2958,6 +3170,11 @@ impl<'r> __sdk::AppliedDiff<'r> for AppliedDiff<'r> {
             &self.discord_users,
             event,
         );
+        callbacks.invoke_table_row_callbacks::<DispatchAck>(
+            "dispatch_acks",
+            &self.dispatch_acks,
+            event,
+        );
         callbacks.invoke_table_row_callbacks::<DrexDecisionRow>(
             "drex_decisions",
             &self.drex_decisions,
@@ -2980,6 +3197,7 @@ impl<'r> __sdk::AppliedDiff<'r> for AppliedDiff<'r> {
             &self.knowledge_embeddings,
             event,
         );
+        callbacks.invoke_table_row_callbacks::<Lease>("leases", &self.leases, event);
         callbacks.invoke_table_row_callbacks::<LivenessState>(
             "liveness_state",
             &self.liveness_state,
@@ -3047,6 +3265,11 @@ impl<'r> __sdk::AppliedDiff<'r> for AppliedDiff<'r> {
             event,
         );
         callbacks.invoke_table_row_callbacks::<User>("users", &self.users, event);
+        callbacks.invoke_table_row_callbacks::<WorkerSession>(
+            "worker_sessions",
+            &self.worker_sessions,
+            event,
+        );
     }
 }
 
@@ -3706,12 +3929,14 @@ impl __sdk::SpacetimeModule for RemoteModule {
         discord_channels_table::register_table(client_cache);
         discord_interactions_table::register_table(client_cache);
         discord_users_table::register_table(client_cache);
+        dispatch_acks_table::register_table(client_cache);
         drex_decisions_table::register_table(client_cache);
         drex_failures_table::register_table(client_cache);
         events_table::register_table(client_cache);
         execution_memory_table::register_table(client_cache);
         gpu_slots_table::register_table(client_cache);
         knowledge_embeddings_table::register_table(client_cache);
+        leases_table::register_table(client_cache);
         liveness_state_table::register_table(client_cache);
         mission_steps_table::register_table(client_cache);
         missions_table::register_table(client_cache);
@@ -3731,6 +3956,7 @@ impl __sdk::SpacetimeModule for RemoteModule {
         task_dispatches_table::register_table(client_cache);
         tenant_task_view_table::register_table(client_cache);
         users_table::register_table(client_cache);
+        worker_sessions_table::register_table(client_cache);
     }
     const ALL_TABLE_NAMES: &'static [&'static str] = &[
         "agent_registry",
@@ -3748,12 +3974,14 @@ impl __sdk::SpacetimeModule for RemoteModule {
         "discord_channels",
         "discord_interactions",
         "discord_users",
+        "dispatch_acks",
         "drex_decisions",
         "drex_failures",
         "events",
         "execution_memory",
         "gpu_slots",
         "knowledge_embeddings",
+        "leases",
         "liveness_state",
         "mission_steps",
         "missions",
@@ -3773,5 +4001,6 @@ impl __sdk::SpacetimeModule for RemoteModule {
         "task_dispatches",
         "tenant_task_view",
         "users",
+        "worker_sessions",
     ];
 }

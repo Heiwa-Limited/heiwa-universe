@@ -720,26 +720,153 @@ class SpacetimeDB:
         self,
         *,
         session_id: str,
-        owner_id: str | None = None,
         node_id: str,
+        instance_id: str = "",
+        runtime: str = "unknown",
+        runtime_version: str = "",
+        worker_version: str = "",
+        protocol: str = "v1",
+        capabilities: list[str] | None = None,
+        max_concurrency: int = 1,
+        active_tasks: int = 0,
+        status: str = "active",
+        load: float = 0.0,
+        created_at: str | None = None,
+        updated_at: str | None = None,
+        last_seen_at: str | None = None,
         session_type: str = "worker",
         expires_at: str | None = None,
+        closed_at: str | None = None,
+        current_task_id: str | None = None,
+        lease_id: str | None = None,
+        owner_id: str | None = None,
         metadata: dict[str, Any] | None = None,
     ) -> bool:
         """Insert or update a session record."""
+        now_iso = datetime.datetime.now(datetime.timezone.utc).isoformat()
+        created_at = created_at or now_iso
+        updated_at = updated_at or created_at
+        last_seen_at = last_seen_at or updated_at
+        expires_at = expires_at or updated_at
+        metadata = dict(metadata or {})
+        metadata.setdefault("session_type", session_type)
+        if owner_id is not None:
+            metadata.setdefault("owner_id", owner_id)
+
         return self.call(
             "upsert_session",
             session_id,
-            owner_id,
             node_id,
-            session_type,
+            instance_id,
+            runtime,
+            runtime_version,
+            worker_version,
+            protocol,
+            self._json_text(capabilities or []),
+            self._json_text(metadata),
+            int(max_concurrency),
+            int(active_tasks),
+            status,
+            float(load),
+            created_at,
+            updated_at,
             expires_at,
-            self._json_text(metadata or {}),
+            last_seen_at,
+            self._sats_option(closed_at),
+            self._sats_option(current_task_id),
+            self._sats_option(lease_id),
         )
 
     def close_session(self, session_id: str) -> bool:
         """Mark a session as closed."""
         return self.call("close_session", session_id)
+
+    def upsert_lease(
+        self,
+        *,
+        lease_id: str,
+        task_id: str,
+        session_id: str,
+        node_id: str,
+        capability: str,
+        status: str = "issued",
+        issued_at: str | None = None,
+        updated_at: str | None = None,
+        expires_at: str | None = None,
+        acked_at: str | None = None,
+        completed_at: str | None = None,
+        failure_code: str | None = None,
+        reason: str | None = None,
+    ) -> bool:
+        now_iso = datetime.datetime.now(datetime.timezone.utc).isoformat()
+        issued_at = issued_at or now_iso
+        updated_at = updated_at or issued_at
+        expires_at = expires_at or updated_at
+        return self.call(
+            "upsert_lease",
+            lease_id,
+            task_id,
+            session_id,
+            node_id,
+            capability,
+            status,
+            issued_at,
+            updated_at,
+            expires_at,
+            self._sats_option(acked_at),
+            self._sats_option(completed_at),
+            self._sats_option(failure_code),
+            self._sats_option(reason),
+        )
+
+    def reserve_lease(
+        self,
+        *,
+        lease_id: str,
+        task_id: str,
+        session_id: str,
+        node_id: str,
+        capability: str,
+        status: str = "issued",
+        issued_at: str | None = None,
+        updated_at: str | None = None,
+        expires_at: str | None = None,
+    ) -> bool:
+        return self.upsert_lease(
+            lease_id=lease_id,
+            task_id=task_id,
+            session_id=session_id,
+            node_id=node_id,
+            capability=capability,
+            status=status,
+            issued_at=issued_at,
+            updated_at=updated_at,
+            expires_at=expires_at,
+        )
+
+    def record_dispatch_ack(
+        self,
+        *,
+        ack_id: str,
+        lease_id: str,
+        session_id: str,
+        task_id: str,
+        node_id: str,
+        status: str,
+        decided_at: str | None = None,
+        detail: str | None = None,
+    ) -> bool:
+        return self.call(
+            "record_dispatch_ack",
+            ack_id,
+            lease_id,
+            session_id,
+            task_id,
+            node_id,
+            status,
+            decided_at or datetime.datetime.now(datetime.timezone.utc).isoformat(),
+            self._sats_option(detail),
+        )
 
     def set_node_status(self, node_id: str, status: str) -> bool:
         return self.call("set_node_status", node_id, status)

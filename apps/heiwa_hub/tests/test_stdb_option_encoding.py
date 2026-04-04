@@ -230,6 +230,75 @@ def test_register_artifact_encodes_run_id():
     assert _find_json_arg(cmd, {"some": "run-1"}), f"run_id should encode as option some: {cmd}"
 
 
+def test_upsert_session_encodes_worker_state():
+    db = CaptureSpacetimeDB()
+    db.upsert_session(
+        session_id="session-1",
+        node_id="node-1",
+        instance_id="instance-1",
+        runtime="python",
+        runtime_version="3.14.0",
+        worker_version="1.0.0",
+        protocol="v1",
+        capabilities=["llm", "fs"],
+        metadata={"platform": "darwin-arm64"},
+        max_concurrency=2,
+        active_tasks=1,
+        status="active",
+        load=0.5,
+        created_at="2026-04-03T00:00:00Z",
+        updated_at="2026-04-03T00:00:10Z",
+        expires_at="2026-04-03T06:00:00Z",
+        last_seen_at="2026-04-03T00:00:10Z",
+        current_task_id="task-1",
+        lease_id="lease-1",
+    )
+    cmd = db.commands[-1]
+    assert cmd[5] == "upsert_session"
+    assert _find_json_arg(cmd, "session-1"), f"session_id should be encoded: {cmd}"
+    assert _find_json_arg(cmd, '["llm","fs"]'), f"capabilities JSON should be encoded: {cmd}"
+    assert _find_json_arg(cmd, {"some": "task-1"}), f"current_task_id should encode as option some: {cmd}"
+    assert _find_json_arg(cmd, {"some": "lease-1"}), f"lease_id should encode as option some: {cmd}"
+
+
+def test_reserve_lease_encodes_authority_fields():
+    db = CaptureSpacetimeDB()
+    db.reserve_lease(
+        lease_id="lease-1",
+        task_id="task-1",
+        session_id="session-1",
+        node_id="node-1",
+        capability="llm",
+        status="issued",
+        issued_at="2026-04-03T00:00:00Z",
+        updated_at="2026-04-03T00:00:00Z",
+        expires_at="2026-04-03T00:05:00Z",
+    )
+    cmd = db.commands[-1]
+    assert cmd[5] == "upsert_lease"
+    assert _find_json_arg(cmd, "lease-1"), f"lease_id should be encoded: {cmd}"
+    assert _find_json_arg(cmd, "session-1"), f"session_id should be encoded: {cmd}"
+    assert _find_json_arg(cmd, "issued"), f"lease status should be encoded: {cmd}"
+
+
+def test_record_dispatch_ack_encodes_detail_option():
+    db = CaptureSpacetimeDB()
+    db.record_dispatch_ack(
+        ack_id="ack-1",
+        lease_id="lease-1",
+        session_id="session-1",
+        task_id="task-1",
+        node_id="node-1",
+        status="accepted",
+        decided_at="2026-04-03T00:01:00Z",
+        detail=None,
+    )
+    cmd = db.commands[-1]
+    assert cmd[5] == "record_dispatch_ack"
+    assert _find_json_arg(cmd, "accepted"), f"dispatch ack status should be encoded: {cmd}"
+    assert _find_json_arg(cmd, {"none": []}), f"detail None should encode as option none: {cmd}"
+
+
 def test_insert_execution_memory_encodes_lease_id():
     db = CaptureSpacetimeDB()
     db.insert_execution_memory(

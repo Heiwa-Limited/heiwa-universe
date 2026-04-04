@@ -5,8 +5,68 @@ use heiwa_core::runtime::{
     },
     state::{WorkerProtocolFlavor, WorkerRegistry, WorkerSessionRegistration},
 };
-use heiwa_core::stdb::{NoopTransport, StdbRuntime};
+use heiwa_core::stdb::{
+    NoopTransport, PersistedArtifact, PersistedDispatchAck, PersistedDrexDecision,
+    PersistedDrexFailure, PersistedRunReceipt, PersistedWorkerLease, PersistedWorkerSession,
+    StdbRuntime, StdbTransport,
+};
+use anyhow::Result;
 use serde_json::json;
+use std::sync::{Arc, Mutex};
+
+#[derive(Clone, Default)]
+struct RecordingTransport {
+    sessions: Arc<Mutex<Vec<PersistedWorkerSession>>>,
+    leases: Arc<Mutex<Vec<PersistedWorkerLease>>>,
+    acks: Arc<Mutex<Vec<PersistedDispatchAck>>>,
+    closed_sessions: Arc<Mutex<Vec<String>>>,
+}
+
+impl StdbTransport for RecordingTransport {
+    fn upsert_drex_decision(&self, _decision: PersistedDrexDecision) -> Result<()> {
+        Ok(())
+    }
+
+    fn insert_drex_failure(&self, _failure: PersistedDrexFailure) -> Result<()> {
+        Ok(())
+    }
+
+    fn attach_drex_decision_to_route(
+        &self,
+        _request_id: &str,
+        _drex_decision_id: &str,
+    ) -> Result<()> {
+        Ok(())
+    }
+
+    fn upsert_worker_session(&self, session: PersistedWorkerSession) -> Result<()> {
+        self.sessions.lock().unwrap().push(session);
+        Ok(())
+    }
+
+    fn close_session(&self, session_id: String) -> Result<()> {
+        self.closed_sessions.lock().unwrap().push(session_id);
+        Ok(())
+    }
+
+    fn upsert_worker_lease(&self, lease: PersistedWorkerLease) -> Result<()> {
+        self.leases.lock().unwrap().push(lease);
+        Ok(())
+    }
+
+    fn record_dispatch_ack(&self, ack: PersistedDispatchAck) -> Result<()> {
+        self.acks.lock().unwrap().push(ack);
+        Ok(())
+    }
+
+    fn register_artifact(&self, _artifact: PersistedArtifact) -> Result<()> {
+        Ok(())
+    }
+
+    fn record_run_receipt(&self, _receipt: PersistedRunReceipt) -> Result<()> {
+        Ok(())
+    }
+}
 
 #[test]
 fn canonical_worker_envelope_rejects_non_v1_versions() {
@@ -78,6 +138,7 @@ fn worker_registry_tracks_session_dispatch_and_completion() {
     assert_eq!(session.session_id, "session-1");
     let (chosen_session, lease) = registry
         .reserve_dispatch(
+            &stdb,
             "llm",
             "task-1".to_string(),
             "lease-1".to_string(),
@@ -89,7 +150,7 @@ fn worker_registry_tracks_session_dispatch_and_completion() {
     assert_eq!(lease.task_id, "task-1");
 
     registry
-        .record_dispatch_ack("session-1", "task-1", "lease-1", true, 2_100)
+        .record_dispatch_ack(&stdb, "session-1", "task-1", "lease-1", true, None, 2_100)
         .expect("ack should succeed");
     let validated = registry
         .validate_lease("session-1", "task-1", "lease-1", 2_200)
@@ -97,11 +158,73 @@ fn worker_registry_tracks_session_dispatch_and_completion() {
     assert_eq!(validated.capability, "llm");
 
     let completed = registry
-        .complete_dispatch("lease-1")
+        .complete_dispatch(&stdb, "lease-1", "completed", None, None, 2_300)
         .expect("completion should remove lease");
     assert_eq!(completed.session_id, "session-1");
     assert!(registry.resolve_lease_for_task("task-1").is_none());
     assert_eq!(registry.session("session-1").expect("session").active_tasks, 0);
+}
+
+#[test]
+fn worker_registry_persists_session_lease_and_ack_events() {
+    let mut registry = WorkerRegistry::default();
+    let transport = RecordingTransport::default();
+    let stdb = StdbRuntime::new(transport.clone());
+
+    registry.register_session(&stdb, WorkerSessionRegistration {
+        session_id: "session-persist".to_string(),
+        node_id: "node-persist".to_string(),
+        instance_id: "instance-persist".to_string(),
+        runtime: "python".to_string(),
+        runtime_version: "3.14.0".to_string(),
+        worker_version: "1.0.0".to_string(),
+        protocol: WorkerProtocolFlavor::V1,
+        capabilities: vec!["llm".to_string()],
+        metadata: json!({"platform":"darwin-arm64"}),
+        max_concurrency: 1,
+        session_expires_at_ms: 10_000,
+        last_seen_at_ms: 1_000,
+    });
+
+    registry
+        .reserve_dispatch(
+            &stdb,
+            "llm",
+            "task-persist".to_string(),
+            "lease-persist".to_string(),
+            2_000,
+            5_000,
+        )
+        .expect("dispatch should reserve");
+
+    registry
+        .record_dispatch_ack(
+            &stdb,
+            "session-persist",
+            "task-persist",
+            "lease-persist",
+            true,
+            None,
+            2_100,
+        )
+        .expect("ack should succeed");
+
+    registry.remove_session(&stdb, "session-persist");
+
+    let sessions = transport.sessions.lock().unwrap().clone();
+    let leases = transport.leases.lock().unwrap().clone();
+    let acks = transport.acks.lock().unwrap().clone();
+    let closed = transport.closed_sessions.lock().unwrap().clone();
+
+    assert_eq!(sessions.first().expect("registration").status, "active");
+    assert_eq!(leases.first().expect("issued lease").status, "issued");
+    assert!(
+        leases.iter().any(|lease| lease.status == "acked"),
+        "dispatch ack should persist an acked lease state"
+    );
+    assert_eq!(leases.last().expect("final lease state").status, "revoked");
+    assert_eq!(acks.last().expect("dispatch ack").status, "accepted");
+    assert_eq!(closed, vec!["session-persist".to_string()]);
 }
 
 #[test]
@@ -124,6 +247,7 @@ fn worker_registry_rejects_expired_or_mismatched_leases() {
     });
     registry
         .reserve_dispatch(
+            &stdb,
             "llm",
             "task-2".to_string(),
             "lease-2".to_string(),

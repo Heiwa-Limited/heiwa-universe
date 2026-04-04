@@ -2466,6 +2466,424 @@ pub fn update_task_dispatch_status(
     Ok(())
 }
 
+// worker_sessions: active | expired | closed
+#[table(accessor = worker_sessions, public)]
+#[derive(Clone)]
+pub struct WorkerSession {
+    #[primary_key]
+    pub session_id: String,
+    #[index(btree)]
+    pub node_id: String,
+    #[index(btree)]
+    pub instance_id: String,
+    pub runtime: String,
+    pub runtime_version: String,
+    pub worker_version: String,
+    pub protocol: String,
+    pub capabilities_json: String,
+    pub metadata_json: String,
+    pub max_concurrency: i64,
+    pub active_tasks: u32,
+    #[index(btree)]
+    pub status: String,
+    pub load: f64,
+    #[index(btree)]
+    pub created_at: String,
+    #[index(btree)]
+    pub updated_at: String,
+    #[index(btree)]
+    pub expires_at: String,
+    #[index(btree)]
+    pub last_seen_at: String,
+    #[default(None::<String>)]
+    #[index(btree)]
+    pub closed_at: Option<String>,
+    #[default(None::<String>)]
+    #[index(btree)]
+    pub current_task_id: Option<String>,
+    #[default(None::<String>)]
+    #[index(btree)]
+    pub lease_id: Option<String>,
+}
+
+// leases: issued | acked | running | completed | failed | expired | revoked
+#[table(accessor = leases, public)]
+#[derive(Clone)]
+pub struct Lease {
+    #[primary_key]
+    pub lease_id: String,
+    #[index(btree)]
+    pub task_id: String,
+    #[index(btree)]
+    pub session_id: String,
+    #[index(btree)]
+    pub node_id: String,
+    #[index(btree)]
+    pub capability: String,
+    #[index(btree)]
+    pub status: String,
+    pub issued_at: String,
+    pub updated_at: String,
+    #[index(btree)]
+    pub expires_at: String,
+    #[default(None::<String>)]
+    #[index(btree)]
+    pub acked_at: Option<String>,
+    #[default(None::<String>)]
+    #[index(btree)]
+    pub completed_at: Option<String>,
+    #[default(None::<String>)]
+    pub failure_code: Option<String>,
+    #[default(None::<String>)]
+    pub reason: Option<String>,
+}
+
+// dispatch_acks: accepted | rejected
+#[table(accessor = dispatch_acks, public)]
+#[derive(Clone)]
+pub struct DispatchAck {
+    #[primary_key]
+    pub ack_id: String,
+    #[index(btree)]
+    pub lease_id: String,
+    #[index(btree)]
+    pub session_id: String,
+    #[index(btree)]
+    pub task_id: String,
+    #[index(btree)]
+    pub node_id: String,
+    #[index(btree)]
+    pub status: String,
+    #[index(btree)]
+    pub decided_at: String,
+    #[default(None::<String>)]
+    pub detail: Option<String>,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum WorkerSessionStatus {
+    Active,
+    Expired,
+    Closed,
+}
+
+impl WorkerSessionStatus {
+    const fn as_str(self) -> &'static str {
+        match self {
+            Self::Active => "active",
+            Self::Expired => "expired",
+            Self::Closed => "closed",
+        }
+    }
+
+    fn parse(status: &str) -> Result<Self, String> {
+        match status.trim().to_lowercase().as_str() {
+            "active" => Ok(Self::Active),
+            "expired" => Ok(Self::Expired),
+            "closed" => Ok(Self::Closed),
+            other => Err(format!("invalid worker session status: {other}")),
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum LeaseStatus {
+    Issued,
+    Acked,
+    Running,
+    Completed,
+    Failed,
+    Expired,
+    Revoked,
+}
+
+impl LeaseStatus {
+    const fn as_str(self) -> &'static str {
+        match self {
+            Self::Issued => "issued",
+            Self::Acked => "acked",
+            Self::Running => "running",
+            Self::Completed => "completed",
+            Self::Failed => "failed",
+            Self::Expired => "expired",
+            Self::Revoked => "revoked",
+        }
+    }
+
+    fn parse(status: &str) -> Result<Self, String> {
+        match status.trim().to_lowercase().as_str() {
+            "issued" => Ok(Self::Issued),
+            "acked" => Ok(Self::Acked),
+            "running" => Ok(Self::Running),
+            "completed" => Ok(Self::Completed),
+            "failed" => Ok(Self::Failed),
+            "expired" => Ok(Self::Expired),
+            "revoked" => Ok(Self::Revoked),
+            other => Err(format!("invalid lease status: {other}")),
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum DispatchAckStatus {
+    Accepted,
+    Rejected,
+}
+
+impl DispatchAckStatus {
+    const fn as_str(self) -> &'static str {
+        match self {
+            Self::Accepted => "accepted",
+            Self::Rejected => "rejected",
+        }
+    }
+
+    fn parse(status: &str) -> Result<Self, String> {
+        match status.trim().to_lowercase().as_str() {
+            "accepted" => Ok(Self::Accepted),
+            "rejected" => Ok(Self::Rejected),
+            other => Err(format!("invalid dispatch ack status: {other}")),
+        }
+    }
+}
+
+fn upsert_worker_session_row(ctx: &ReducerContext, row: WorkerSession) {
+    if ctx
+        .db
+        .worker_sessions()
+        .session_id()
+        .find(row.session_id.clone())
+        .is_some()
+    {
+        ctx.db.worker_sessions().session_id().update(row);
+    } else {
+        ctx.db.worker_sessions().insert(row);
+    }
+}
+
+fn load_worker_session(ctx: &ReducerContext, session_id: &str) -> Result<WorkerSession, String> {
+    ctx.db
+        .worker_sessions()
+        .session_id()
+        .find(session_id.to_string())
+        .ok_or_else(|| format!("worker session not found: {session_id}"))
+}
+
+fn upsert_lease_row(ctx: &ReducerContext, row: Lease) {
+    if ctx.db.leases().lease_id().find(row.lease_id.clone()).is_some() {
+        ctx.db.leases().lease_id().update(row);
+    } else {
+        ctx.db.leases().insert(row);
+    }
+}
+
+fn upsert_dispatch_ack_row(ctx: &ReducerContext, row: DispatchAck) {
+    if ctx
+        .db
+        .dispatch_acks()
+        .ack_id()
+        .find(row.ack_id.clone())
+        .is_some()
+    {
+        ctx.db.dispatch_acks().ack_id().update(row);
+    } else {
+        ctx.db.dispatch_acks().insert(row);
+    }
+}
+
+#[reducer]
+pub fn upsert_session(
+    ctx: &ReducerContext,
+    session_id: String,
+    node_id: String,
+    instance_id: String,
+    runtime: String,
+    runtime_version: String,
+    worker_version: String,
+    protocol: String,
+    capabilities_json: String,
+    metadata_json: String,
+    max_concurrency: i64,
+    active_tasks: u32,
+    status: String,
+    load: f64,
+    created_at: String,
+    updated_at: String,
+    expires_at: String,
+    last_seen_at: String,
+    closed_at: Option<String>,
+    current_task_id: Option<String>,
+    lease_id: Option<String>,
+) -> Result<(), String> {
+    let _ = WorkerSessionStatus::parse(&status)?;
+    if session_id.trim().is_empty() {
+        return Err("session_id is required".to_string());
+    }
+    if node_id.trim().is_empty() {
+        return Err("node_id is required".to_string());
+    }
+    if expires_at.trim().is_empty() {
+        return Err("expires_at is required".to_string());
+    }
+
+    upsert_worker_session_row(
+        ctx,
+        WorkerSession {
+            session_id,
+            node_id,
+            instance_id,
+            runtime,
+            runtime_version,
+            worker_version,
+            protocol,
+            capabilities_json,
+            metadata_json,
+            max_concurrency: max_concurrency.max(1),
+            active_tasks,
+            status,
+            load,
+            created_at,
+            updated_at,
+            expires_at,
+            last_seen_at,
+            closed_at,
+            current_task_id,
+            lease_id,
+        },
+    );
+    Ok(())
+}
+
+#[reducer]
+pub fn close_session(ctx: &ReducerContext, session_id: String) -> Result<(), String> {
+    let mut session = load_worker_session(ctx, &session_id)?;
+    let now = now_string(ctx);
+    session.status = WorkerSessionStatus::Closed.as_str().to_string();
+    session.active_tasks = 0;
+    session.load = 0.0;
+    session.updated_at = now.clone();
+    session.last_seen_at = now.clone();
+    session.closed_at = Some(now);
+    session.current_task_id = None;
+    session.lease_id = None;
+    upsert_worker_session_row(ctx, session);
+    Ok(())
+}
+
+#[reducer]
+pub fn upsert_lease(
+    ctx: &ReducerContext,
+    lease_id: String,
+    task_id: String,
+    session_id: String,
+    node_id: String,
+    capability: String,
+    status: String,
+    issued_at: String,
+    updated_at: String,
+    expires_at: String,
+    acked_at: Option<String>,
+    completed_at: Option<String>,
+    failure_code: Option<String>,
+    reason: Option<String>,
+) -> Result<(), String> {
+    let _ = LeaseStatus::parse(&status)?;
+    if lease_id.trim().is_empty() {
+        return Err("lease_id is required".to_string());
+    }
+    if task_id.trim().is_empty() {
+        return Err("task_id is required".to_string());
+    }
+    if session_id.trim().is_empty() {
+        return Err("session_id is required".to_string());
+    }
+    if node_id.trim().is_empty() {
+        return Err("node_id is required".to_string());
+    }
+    if capability.trim().is_empty() {
+        return Err("capability is required".to_string());
+    }
+
+    upsert_lease_row(
+        ctx,
+        Lease {
+            lease_id,
+            task_id,
+            session_id,
+            node_id,
+            capability,
+            status,
+            issued_at,
+            updated_at,
+            expires_at,
+            acked_at,
+            completed_at,
+            failure_code,
+            reason,
+        },
+    );
+    Ok(())
+}
+
+#[reducer]
+pub fn record_dispatch_ack(
+    ctx: &ReducerContext,
+    ack_id: String,
+    lease_id: String,
+    session_id: String,
+    task_id: String,
+    node_id: String,
+    status: String,
+    decided_at: String,
+    detail: Option<String>,
+) -> Result<(), String> {
+    let ack_status = DispatchAckStatus::parse(&status)?;
+    let mut lease = ctx
+        .db
+        .leases()
+        .lease_id()
+        .find(lease_id.clone())
+        .ok_or_else(|| format!("lease not found: {lease_id}"))?;
+    if lease.session_id != session_id || lease.task_id != task_id {
+        return Err(format!(
+            "dispatch ack/session mismatch for lease {}",
+            lease.lease_id
+        ));
+    }
+
+    lease.status = match ack_status {
+        DispatchAckStatus::Accepted => LeaseStatus::Acked.as_str().to_string(),
+        DispatchAckStatus::Rejected => LeaseStatus::Failed.as_str().to_string(),
+    };
+    lease.updated_at = decided_at.clone();
+    lease.acked_at = if ack_status == DispatchAckStatus::Accepted {
+        Some(decided_at.clone())
+    } else {
+        None
+    };
+    if ack_status == DispatchAckStatus::Rejected {
+        lease.completed_at = Some(decided_at.clone());
+        lease.failure_code = Some("DISPATCH_REJECTED".to_string());
+    }
+    lease.reason = detail.clone();
+    upsert_lease_row(ctx, lease);
+
+    upsert_dispatch_ack_row(
+        ctx,
+        DispatchAck {
+            ack_id,
+            lease_id,
+            session_id,
+            task_id,
+            node_id,
+            status,
+            decided_at,
+            detail,
+        },
+    );
+    Ok(())
+}
+
 #[table(accessor = rate_group_state, public)]
 pub struct RateGroupState {
     #[primary_key]

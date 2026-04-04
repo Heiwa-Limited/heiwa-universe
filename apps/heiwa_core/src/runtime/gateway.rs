@@ -344,6 +344,7 @@ pub async fn task_handler(
     let selected = {
         let mut registry = state.worker_registry.write().await;
         registry.reserve_dispatch(
+            &state.stdb,
             &capability,
             task_id.clone(),
             lease_id.clone(),
@@ -453,7 +454,14 @@ pub async fn task_handler(
     {
         if sender.send(outbound).is_err() {
             let mut registry = state.worker_registry.write().await;
-            registry.complete_dispatch(&lease.lease_id);
+            registry.complete_dispatch(
+                &state.stdb,
+                &lease.lease_id,
+                "failed",
+                Some("DISPATCH_UNAVAILABLE".to_string()),
+                Some("worker sender unavailable".to_string()),
+                now_ms,
+            );
             return Json(json!({
                 "status": "queued",
                 "task_id": task_id,
@@ -707,6 +715,7 @@ async fn handle_worker_socket(socket: WebSocket, state: SharedState) {
                         let session = {
                             let mut registry = state.worker_registry.write().await;
                             registry.update_heartbeat(
+                                &state.stdb,
                                 &current_session_id,
                                 now_ms(),
                                 heartbeat.status,
@@ -749,10 +758,12 @@ async fn handle_worker_socket(socket: WebSocket, state: SharedState) {
                         let result = {
                             let mut registry = state.worker_registry.write().await;
                             registry.record_dispatch_ack(
+                                &state.stdb,
                                 &current_session_id,
                                 &ack.task_id,
                                 &ack.lease_id,
                                 ack.accepted,
+                                ack.reason.clone(),
                                 now_ms(),
                             )
                         };
@@ -979,6 +990,7 @@ async fn handle_legacy_worker_socket(socket: WebSocket, state: SharedState) {
                 let updated = {
                     let mut registry = state.worker_registry.write().await;
                     registry.update_heartbeat(
+                        &state.stdb,
                         &current_session_id,
                         now_ms(),
                         status.unwrap_or_else(|| "idle".to_string()),
@@ -1298,7 +1310,14 @@ async fn finalize_result(
         .worker_registry
         .write()
         .await
-        .complete_dispatch(&payload.lease_id);
+        .complete_dispatch(
+            &state.stdb,
+            &payload.lease_id,
+            "completed",
+            None,
+            Some(payload.status.clone()),
+            now_ms(),
+        );
     Ok(())
 }
 
@@ -1407,7 +1426,18 @@ async fn finalize_error(
         now_iso(),
         Some(payload.code.clone()),
     );
-    state.worker_registry.write().await.complete_dispatch(&lease_id);
+    state
+        .worker_registry
+        .write()
+        .await
+        .complete_dispatch(
+            &state.stdb,
+            &lease_id,
+            "failed",
+            Some(payload.code.clone()),
+            Some(payload.message.clone()),
+            now_ms(),
+        );
     Ok(())
 }
 
