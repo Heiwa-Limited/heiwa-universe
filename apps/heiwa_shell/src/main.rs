@@ -12,10 +12,20 @@ async fn main() -> Result<()> {
 
     match args[1].as_str() {
         "install" => {
-            println!("Running install...");
+            heiwa_install::run_install()?;
         }
         "doctor" => {
-            println!("Running doctor...");
+            let report = heiwa_install::check_installation()?;
+            println!("Heiwa Doctor Report:");
+            println!("  Rust:   {}", report.rust_version.unwrap_or_else(|| "Not found".to_string()));
+            println!("  Node:   {}", report.node_version.unwrap_or_else(|| "Not found".to_string()));
+            println!("  Python: {}", report.python_version.unwrap_or_else(|| "Not found".to_string()));
+            println!();
+            println!("Providers:");
+            println!("  Claude: {}", if report.claude_installed { "Installed" } else { "Not found" });
+            println!("  Codex:  {}", if report.codex_installed { "Installed" } else { "Not found" });
+            println!("  Gemini: {}", if report.gemini_installed { "Installed" } else { "Not found" });
+            println!("  Ollama: {}", if report.ollama_installed { "Installed" } else { "Not found" });
         }
         "auth" => {
             println!("Running auth...");
