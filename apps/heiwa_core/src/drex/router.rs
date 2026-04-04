@@ -23,6 +23,7 @@ pub struct RoutePlan {
     pub decision: DrexDecision,
     pub runtime_hint: String,
     pub selected_model: Option<ModelTier>,
+    pub routing_metadata: String,
 }
 
 pub fn plan_route(
@@ -42,14 +43,20 @@ pub fn plan_route(
     let decision = evaluate_drex(&vector, policy, 0.95, runtime_fit, 0.65);
     let selected_model = select_model_tier(ingress, &runtime_hint, &decision, model_tiers);
 
-    if selected_model.is_none() {
+    let routing_metadata = if let Some(ref tier) = selected_model {
+        format!(
+            "{{\"reason\": \"best_score\", \"model_id\": \"{}\", \"provider\": \"{}\"}}",
+            tier.model_id, tier.provider
+        )
+    } else {
         return Err(anyhow!("no compatible model tier found for route"));
-    }
+    };
 
     Ok(RoutePlan {
         decision,
         runtime_hint,
         selected_model,
+        routing_metadata,
     })
 }
 

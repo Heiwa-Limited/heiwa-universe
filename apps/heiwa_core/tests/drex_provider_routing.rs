@@ -66,6 +66,7 @@ fn test_drex_routing_allows_cloud_for_standard_privacy() {
     
     let selected = plan.selected_model.expect("should select a model");
     assert_eq!(selected.model_id, "claude-3-5-sonnet");
+    assert!(plan.routing_metadata.contains("claude-3-5-sonnet"));
 }
 
 #[test]
@@ -87,4 +88,5 @@ fn test_drex_routing_forces_local_for_sovereign_privacy() {
     let selected = plan.selected_model.expect("should select a model");
     assert_eq!(selected.model_id, "llama3");
     assert_eq!(selected.provider, "ollama");
+    assert!(plan.routing_metadata.contains("llama3"));
 }

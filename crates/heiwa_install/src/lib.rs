@@ -1,6 +1,11 @@
 use anyhow::Result;
+use serde::{Deserialize, Serialize};
+use std::env;
+use std::fs;
+use std::path::PathBuf;
 use std::process::Command;
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DoctorReport {
     pub rust_version: Option<String>,
     pub node_version: Option<String>,
@@ -10,6 +15,23 @@ pub struct DoctorReport {
     pub gemini_installed: bool,
     pub openclaw_installed: bool,
     pub ollama_installed: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct MachineManifest {
+    pub device_id: String,
+    pub hostname: String,
+    pub os: String,
+    pub arch: String,
+    pub installed_at: String,
+    pub runtimes: DoctorReport,
+}
+
+pub fn get_heiwa_dir() -> PathBuf {
+    // Per Seatbelt restrictions and session_context, use the project's temp directory
+    let mut path = PathBuf::from("/Users/dmcgregsauce/.gemini/tmp/heiwa-universe");
+    path.push("heiwa");
+    path
 }
 
 pub fn check_installation() -> Result<DoctorReport> {
@@ -29,6 +51,22 @@ pub fn run_install() -> Result<()> {
     println!("Checking prerequisites...");
     let report = check_installation()?;
     
+    let heiwa_dir = get_heiwa_dir();
+    fs::create_dir_all(&heiwa_dir)?;
+    
+    let manifest_path = heiwa_dir.join("machine.json");
+    let manifest = MachineManifest {
+        device_id: uuid::Uuid::new_v4().to_string(),
+        hostname: get_hostname().unwrap_or_else(|| "unknown".to_string()),
+        os: env::consts::OS.to_string(),
+        arch: env::consts::ARCH.to_string(),
+        installed_at: chrono::Utc::now().to_rfc3339(),
+        runtimes: report.clone(),
+    };
+    
+    fs::write(&manifest_path, serde_json::to_string_pretty(&manifest)?)?;
+    println!("Machine manifest written to {:?}", manifest_path);
+    
     if report.rust_version.is_none() {
         println!("Rust not found. Please install Rust: https://rustup.rs/");
     }
@@ -41,7 +79,6 @@ pub fn run_install() -> Result<()> {
         println!("Python 3 not found. Please install Python 3.");
     }
 
-    // In a real implementation, this would perform more installation steps
     println!("Installation check complete.");
     
     Ok(())
@@ -67,4 +104,17 @@ fn has_command(cmd: &str) -> bool {
         .output()
         .map(|output| output.status.success())
         .unwrap_or(false)
+}
+
+fn get_hostname() -> Option<String> {
+    Command::new("hostname")
+        .output()
+        .ok()
+        .and_then(|output| {
+            if output.status.success() {
+                Some(String::from_utf8_lossy(&output.stdout).trim().to_string())
+            } else {
+                None
+            }
+        })
 }

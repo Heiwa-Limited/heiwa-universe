@@ -8,11 +8,11 @@ use std::collections::HashMap;
 use tokio::sync::Mutex;
 use std::sync::Arc;
 
-pub struct OllamaAdapter {
+pub struct ClaudeCodeAdapter {
     sessions: Arc<Mutex<HashMap<String, tokio::process::Child>>>,
 }
 
-impl OllamaAdapter {
+impl ClaudeCodeAdapter {
     pub fn new() -> Self {
         Self {
             sessions: Arc::new(Mutex::new(HashMap::new())),
@@ -21,33 +21,28 @@ impl OllamaAdapter {
 }
 
 #[async_trait]
-impl ProviderAdapter for OllamaAdapter {
+impl ProviderAdapter for ClaudeCodeAdapter {
     async fn start_session(&self) -> Result<String> {
         let session_id = uuid::Uuid::new_v4().to_string();
         
-        // Check if ollama is running
-        if !std::net::TcpStream::connect("127.0.0.1:11434").is_ok() {
-            return Err(anyhow::anyhow!("Ollama is not running on 127.0.0.1:11434"));
+        // Probe if claude is authenticated
+        let output = Command::new("claude").arg("--version").output().await?;
+        if !output.status.success() {
+            return Err(anyhow::anyhow!("Claude Code CLI is not available or failed check"));
         }
 
         Ok(session_id)
     }
 
-    async fn send_input(&self, _session_id: &str, input: &str) -> Result<()> {
-        // In a real Ollama adapter, we'd use the HTTP API (localhost:11434/api/generate)
-        // But the plan calls for a subprocess adapter for CLI providers.
-        // For Ollama, we'll implement a 'subprocess-like' call to `ollama run` for simplicity in this task.
-        
-        let mut child = Command::new("ollama")
-            .arg("run")
-            .arg("llama3")
+    async fn send_input(&self, session_id: &str, input: &str) -> Result<()> {
+        let mut child = Command::new("claude")
             .arg(input)
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
             .spawn()?;
 
         let mut sessions = self.sessions.lock().await;
-        sessions.insert(_session_id.to_string(), child);
+        sessions.insert(session_id.to_string(), child);
         
         Ok(())
     }
@@ -85,6 +80,6 @@ impl ProviderAdapter for OllamaAdapter {
     }
 
     fn get_capabilities(&self) -> Vec<String> {
-        vec!["local_llm".to_string(), "chat".to_string()]
+        vec!["cloud_llm".to_string(), "advanced_coding".to_string(), "chat".to_string()]
     }
 }

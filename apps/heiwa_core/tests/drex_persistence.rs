@@ -219,5 +219,6 @@ fn sample_route_plan() -> RoutePlan {
             latency_p_95_ms: 1200,
             updated_at: "2026-04-01T00:00:00Z".to_string(),
         }),
+        routing_metadata: "{\"reason\": \"test\"}".to_string(),
     }
 }
