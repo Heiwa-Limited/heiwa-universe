@@ -35,7 +35,7 @@ impl ProviderAdapter for ClaudeCodeAdapter {
     }
 
     async fn send_input(&self, session_id: &str, input: &str) -> Result<()> {
-        let mut child = Command::new("claude")
+        let child = Command::new("claude")
             .arg(input)
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())

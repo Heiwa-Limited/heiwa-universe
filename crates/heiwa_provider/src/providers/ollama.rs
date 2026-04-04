@@ -38,7 +38,7 @@ impl ProviderAdapter for OllamaAdapter {
         // But the plan calls for a subprocess adapter for CLI providers.
         // For Ollama, we'll implement a 'subprocess-like' call to `ollama run` for simplicity in this task.
         
-        let mut child = Command::new("ollama")
+        let child = Command::new("ollama")
             .arg("run")
             .arg("llama3")
             .arg(input)

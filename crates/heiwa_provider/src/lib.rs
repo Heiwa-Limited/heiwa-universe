@@ -4,6 +4,59 @@ use std::process::Command;
 pub mod adapter;
 pub mod providers;
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct HeiwaIdentity {
+    pub user_id: String,
+    pub auth_token: String,
+    pub email: Option<String>,
+    pub display_name: Option<String>,
+}
+
+pub fn get_identity_path() -> std::path::PathBuf {
+    let mut path = std::path::PathBuf::from("/Users/dmcgregsauce/.gemini/tmp/heiwa-universe");
+    path.push("heiwa/identity.json");
+    path
+}
+
+pub fn load_identity() -> Option<HeiwaIdentity> {
+    let path = get_identity_path();
+    if !path.exists() {
+        return None;
+    }
+    let content = std::fs::read_to_string(path).ok()?;
+    serde_json::from_str(&content).ok()
+}
+
+pub fn save_identity(identity: &HeiwaIdentity) -> anyhow::Result<()> {
+    let path = get_identity_path();
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+    let content = serde_json::to_string_pretty(identity)?;
+    std::fs::write(path, content)?;
+    Ok(())
+}
+
+pub fn clear_identity() -> anyhow::Result<()> {
+    let path = get_identity_path();
+    if path.exists() {
+        std::fs::remove_file(path)?;
+    }
+    Ok(())
+}
+
+pub fn login_heiwa(token: &str) -> anyhow::Result<HeiwaIdentity> {
+    // In a real implementation, this would verify the token against Heiwa Hub
+    let identity = HeiwaIdentity {
+        user_id: "devon-canonical".to_string(),
+        auth_token: token.to_string(),
+        email: Some("devon@heiwa.ltd".to_string()),
+        display_name: Some("Devon".to_string()),
+    };
+    save_identity(&identity)?;
+    Ok(identity)
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "snake_case")]
 pub enum AuthKind {

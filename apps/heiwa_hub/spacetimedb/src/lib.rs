@@ -2366,6 +2366,29 @@ pub struct ModelTier {
     pub updated_at: String,         // ISO 8601
 }
 
+#[table(accessor = devices, public)]
+pub struct Device {
+    #[primary_key]
+    pub device_id: String,
+    #[index(btree)]
+    pub user_id: String,
+    pub hostname: String,
+    pub os: String,
+    pub arch: String,
+    pub last_seen_at: String,
+    pub status: String, // "ONLINE", "OFFLINE"
+}
+
+#[table(accessor = platform_entitlements, public)]
+pub struct PlatformEntitlement {
+    #[primary_key]
+    pub user_id: String,
+    pub tier: String, // "FREE", "PRO", "ENTERPRISE"
+    pub concurrency_limit: i64,
+    pub monthly_token_budget: i64,
+    pub features_json: String, // ["advanced_routing", "priority_support"]
+}
+
 #[reducer]
 pub fn upsert_model_tier(
     ctx: &ReducerContext,
@@ -2423,6 +2446,73 @@ pub fn upsert_model_tier(
             latency_p95_ms: 0,
             updated_at: now,
         });
+    }
+    Ok(())
+}
+
+#[reducer]
+pub fn register_device(
+    ctx: &ReducerContext,
+    device_id: String,
+    user_id: String,
+    hostname: String,
+    os: String,
+    arch: String,
+) -> Result<(), String> {
+    let now = ctx.timestamp.to_string();
+    let row = Device {
+        device_id: device_id.clone(),
+        user_id,
+        hostname,
+        os,
+        arch,
+        last_seen_at: now,
+        status: "ONLINE".to_string(),
+    };
+    if ctx.db.devices().device_id().find(&device_id).is_some() {
+        ctx.db.devices().device_id().update(row);
+    } else {
+        ctx.db.devices().insert(row);
+    }
+    Ok(())
+}
+
+#[reducer]
+pub fn update_device_heartbeat(ctx: &ReducerContext, device_id: String) -> Result<(), String> {
+    if let Some(mut device) = ctx.db.devices().device_id().find(&device_id) {
+        device.last_seen_at = ctx.timestamp.to_string();
+        device.status = "ONLINE".to_string();
+        ctx.db.devices().device_id().update(device);
+    }
+    Ok(())
+}
+
+#[reducer]
+pub fn upsert_platform_entitlement(
+    ctx: &ReducerContext,
+    user_id: String,
+    tier: String,
+    concurrency_limit: i64,
+    monthly_token_budget: i64,
+    features_json: String,
+) -> Result<(), String> {
+    let row = PlatformEntitlement {
+        user_id: user_id.clone(),
+        tier,
+        concurrency_limit,
+        monthly_token_budget,
+        features_json,
+    };
+    if ctx
+        .db
+        .platform_entitlements()
+        .user_id()
+        .find(&user_id)
+        .is_some()
+    {
+        ctx.db.platform_entitlements().user_id().update(row);
+    } else {
+        ctx.db.platform_entitlements().insert(row);
     }
     Ok(())
 }

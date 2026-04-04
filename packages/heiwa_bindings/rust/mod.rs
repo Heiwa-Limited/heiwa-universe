@@ -45,6 +45,8 @@ pub mod complete_mission_reducer;
 pub mod create_mission_reducer;
 pub mod create_task_dispatch_reducer;
 pub mod create_user_reducer;
+pub mod device_type;
+pub mod devices_table;
 pub mod discord_channel_type;
 pub mod discord_channels_table;
 pub mod discord_interaction_type;
@@ -94,6 +96,8 @@ pub mod o_auth_identity_type;
 pub mod oauth_identities_table;
 pub mod organization_task_type;
 pub mod pause_mission_reducer;
+pub mod platform_entitlement_type;
+pub mod platform_entitlements_table;
 pub mod pod_type;
 pub mod pods_table;
 pub mod proposal_consent_type;
@@ -121,6 +125,7 @@ pub mod record_proposal_heartbeat_reducer;
 pub mod record_route_decision_reducer;
 pub mod record_run_reducer;
 pub mod register_artifact_reducer;
+pub mod register_device_reducer;
 pub mod register_discord_channel_reducer;
 pub mod reject_proposal_reducer;
 pub mod renew_capability_lease_reducer;
@@ -142,6 +147,7 @@ pub mod store_provider_credential_reducer;
 pub mod task_dispatch_type;
 pub mod task_dispatches_table;
 pub mod tenant_task_view_table;
+pub mod update_device_heartbeat_reducer;
 pub mod update_model_tier_stats_reducer;
 pub mod update_pod_heartbeat_reducer;
 pub mod update_task_dispatch_status_reducer;
@@ -156,6 +162,7 @@ pub mod upsert_liveness_state_reducer;
 pub mod upsert_model_tier_reducer;
 pub mod upsert_node_heartbeat_reducer;
 pub mod upsert_node_registry_reducer;
+pub mod upsert_platform_entitlement_reducer;
 pub mod upsert_pod_reducer;
 pub mod upsert_provider_account_status_reducer;
 pub mod upsert_rate_group_state_reducer;
@@ -208,6 +215,8 @@ pub use complete_mission_reducer::complete_mission;
 pub use create_mission_reducer::create_mission;
 pub use create_task_dispatch_reducer::create_task_dispatch;
 pub use create_user_reducer::create_user;
+pub use device_type::Device;
+pub use devices_table::*;
 pub use discord_channel_type::DiscordChannel;
 pub use discord_channels_table::*;
 pub use discord_interaction_type::DiscordInteraction;
@@ -257,6 +266,8 @@ pub use o_auth_identity_type::OAuthIdentity;
 pub use oauth_identities_table::*;
 pub use organization_task_type::OrganizationTask;
 pub use pause_mission_reducer::pause_mission;
+pub use platform_entitlement_type::PlatformEntitlement;
+pub use platform_entitlements_table::*;
 pub use pod_type::Pod;
 pub use pods_table::*;
 pub use proposal_consent_type::ProposalConsent;
@@ -284,6 +295,7 @@ pub use record_proposal_heartbeat_reducer::record_proposal_heartbeat;
 pub use record_route_decision_reducer::record_route_decision;
 pub use record_run_reducer::record_run;
 pub use register_artifact_reducer::register_artifact;
+pub use register_device_reducer::register_device;
 pub use register_discord_channel_reducer::register_discord_channel;
 pub use reject_proposal_reducer::reject_proposal;
 pub use renew_capability_lease_reducer::renew_capability_lease;
@@ -305,6 +317,7 @@ pub use store_provider_credential_reducer::store_provider_credential;
 pub use task_dispatch_type::TaskDispatch;
 pub use task_dispatches_table::*;
 pub use tenant_task_view_table::*;
+pub use update_device_heartbeat_reducer::update_device_heartbeat;
 pub use update_model_tier_stats_reducer::update_model_tier_stats;
 pub use update_pod_heartbeat_reducer::update_pod_heartbeat;
 pub use update_task_dispatch_status_reducer::update_task_dispatch_status;
@@ -319,6 +332,7 @@ pub use upsert_liveness_state_reducer::upsert_liveness_state;
 pub use upsert_model_tier_reducer::upsert_model_tier;
 pub use upsert_node_heartbeat_reducer::upsert_node_heartbeat;
 pub use upsert_node_registry_reducer::upsert_node_registry;
+pub use upsert_platform_entitlement_reducer::upsert_platform_entitlement;
 pub use upsert_pod_reducer::upsert_pod;
 pub use upsert_provider_account_status_reducer::upsert_provider_account_status;
 pub use upsert_rate_group_state_reducer::upsert_rate_group_state;
@@ -1030,6 +1044,23 @@ pub enum Reducer {
         owner_id: Option<String>,
         principal_id: Option<String>,
     },
+    RegisterDevice {
+        device_id: String,
+        user_id: String,
+        hostname: String,
+        os: String,
+        arch: String,
+    },
+    UpdateDeviceHeartbeat {
+        device_id: String,
+    },
+    UpsertPlatformEntitlement {
+        user_id: String,
+        tier: String,
+        concurrency_limit: i64,
+        monthly_token_budget: i64,
+        features_json: String,
+    },
 }
 
 impl __sdk::InModule for Reducer {
@@ -1113,6 +1144,9 @@ impl __sdk::Reducer for Reducer {
             Reducer::UpsertRateGroupState { .. } => "upsert_rate_group_state",
             Reducer::UpsertSession { .. } => "upsert_session",
             Reducer::WriteSessionSummary { .. } => "write_session_summary",
+            Reducer::RegisterDevice { .. } => "register_device",
+            Reducer::UpdateDeviceHeartbeat { .. } => "update_device_heartbeat",
+            Reducer::UpsertPlatformEntitlement { .. } => "upsert_platform_entitlement",
             _ => unreachable!(),
         }
     }
@@ -2453,6 +2487,39 @@ impl __sdk::Reducer for Reducer {
                 owner_id: owner_id.clone(),
                 principal_id: principal_id.clone(),
             }),
+            Reducer::RegisterDevice {
+                device_id,
+                user_id,
+                hostname,
+                os,
+                arch,
+            } => __sats::bsatn::to_vec(&register_device_reducer::RegisterDeviceArgs {
+                device_id: device_id.clone(),
+                user_id: user_id.clone(),
+                hostname: hostname.clone(),
+                os: os.clone(),
+                arch: arch.clone(),
+            }),
+            Reducer::UpdateDeviceHeartbeat { device_id } => {
+                __sats::bsatn::to_vec(&update_device_heartbeat_reducer::UpdateDeviceHeartbeatArgs {
+                    device_id: device_id.clone(),
+                })
+            }
+            Reducer::UpsertPlatformEntitlement {
+                user_id,
+                tier,
+                concurrency_limit,
+                monthly_token_budget,
+                features_json,
+            } => __sats::bsatn::to_vec(
+                &upsert_platform_entitlement_reducer::UpsertPlatformEntitlementArgs {
+                    user_id: user_id.clone(),
+                    tier: tier.clone(),
+                    concurrency_limit: concurrency_limit.clone(),
+                    monthly_token_budget: monthly_token_budget.clone(),
+                    features_json: features_json.clone(),
+                },
+            ),
             _ => unreachable!(),
         }
     }
@@ -2474,6 +2541,7 @@ pub struct DbUpdate {
     captain_messages: __sdk::TableUpdate<CaptainMessage>,
     captain_summaries: __sdk::TableUpdate<CaptainSummary>,
     cell_runs: __sdk::TableUpdate<CellRunRecord>,
+    devices: __sdk::TableUpdate<Device>,
     discord_channels: __sdk::TableUpdate<DiscordChannel>,
     discord_interactions: __sdk::TableUpdate<DiscordInteraction>,
     discord_users: __sdk::TableUpdate<DiscordUser>,
@@ -2492,6 +2560,7 @@ pub struct DbUpdate {
     node_registry: __sdk::TableUpdate<NodeRegistryEntry>,
     nodes: __sdk::TableUpdate<NodeStatus>,
     oauth_identities: __sdk::TableUpdate<OAuthIdentity>,
+    platform_entitlements: __sdk::TableUpdate<PlatformEntitlement>,
     pods: __sdk::TableUpdate<Pod>,
     proposal_consents: __sdk::TableUpdate<ProposalConsent>,
     proposals: __sdk::TableUpdate<Proposal>,
@@ -2550,6 +2619,9 @@ impl TryFrom<__ws::v2::TransactionUpdate> for DbUpdate {
                 "cell_runs" => db_update
                     .cell_runs
                     .append(cell_runs_table::parse_table_update(table_update)?),
+                "devices" => db_update
+                    .devices
+                    .append(devices_table::parse_table_update(table_update)?),
                 "discord_channels" => db_update
                     .discord_channels
                     .append(discord_channels_table::parse_table_update(table_update)?),
@@ -2604,6 +2676,9 @@ impl TryFrom<__ws::v2::TransactionUpdate> for DbUpdate {
                 "oauth_identities" => db_update
                     .oauth_identities
                     .append(oauth_identities_table::parse_table_update(table_update)?),
+                "platform_entitlements" => db_update
+                    .platform_entitlements
+                    .append(platform_entitlements_table::parse_table_update(table_update)?),
                 "pods" => db_update
                     .pods
                     .append(pods_table::parse_table_update(table_update)?),
@@ -2708,6 +2783,9 @@ impl __sdk::DbUpdate for DbUpdate {
         diff.cell_runs = cache
             .apply_diff_to_table::<CellRunRecord>("cell_runs", &self.cell_runs)
             .with_updates_by_pk(|row| &row.cell_run_id);
+        diff.devices = cache
+            .apply_diff_to_table::<Device>("devices", &self.devices)
+            .with_updates_by_pk(|row| &row.device_id);
         diff.discord_channels = cache
             .apply_diff_to_table::<DiscordChannel>("discord_channels", &self.discord_channels)
             .with_updates_by_pk(|row| &row.channel_id);
@@ -2768,6 +2846,12 @@ impl __sdk::DbUpdate for DbUpdate {
         diff.oauth_identities = cache
             .apply_diff_to_table::<OAuthIdentity>("oauth_identities", &self.oauth_identities)
             .with_updates_by_pk(|row| &row.identity_id);
+        diff.platform_entitlements = cache
+            .apply_diff_to_table::<PlatformEntitlement>(
+                "platform_entitlements",
+                &self.platform_entitlements,
+            )
+            .with_updates_by_pk(|row| &row.user_id);
         diff.pods = cache
             .apply_diff_to_table::<Pod>("pods", &self.pods)
             .with_updates_by_pk(|row| &row.pod_id);
@@ -3120,6 +3204,7 @@ pub struct AppliedDiff<'r> {
     captain_messages: __sdk::TableAppliedDiff<'r, CaptainMessage>,
     captain_summaries: __sdk::TableAppliedDiff<'r, CaptainSummary>,
     cell_runs: __sdk::TableAppliedDiff<'r, CellRunRecord>,
+    devices: __sdk::TableAppliedDiff<'r, Device>,
     discord_channels: __sdk::TableAppliedDiff<'r, DiscordChannel>,
     discord_interactions: __sdk::TableAppliedDiff<'r, DiscordInteraction>,
     discord_users: __sdk::TableAppliedDiff<'r, DiscordUser>,
@@ -3138,6 +3223,7 @@ pub struct AppliedDiff<'r> {
     node_registry: __sdk::TableAppliedDiff<'r, NodeRegistryEntry>,
     nodes: __sdk::TableAppliedDiff<'r, NodeStatus>,
     oauth_identities: __sdk::TableAppliedDiff<'r, OAuthIdentity>,
+    platform_entitlements: __sdk::TableAppliedDiff<'r, PlatformEntitlement>,
     pods: __sdk::TableAppliedDiff<'r, Pod>,
     proposal_consents: __sdk::TableAppliedDiff<'r, ProposalConsent>,
     proposals: __sdk::TableAppliedDiff<'r, Proposal>,
@@ -3217,6 +3303,7 @@ impl<'r> __sdk::AppliedDiff<'r> for AppliedDiff<'r> {
             event,
         );
         callbacks.invoke_table_row_callbacks::<CellRunRecord>("cell_runs", &self.cell_runs, event);
+        callbacks.invoke_table_row_callbacks::<Device>("devices", &self.devices, event);
         callbacks.invoke_table_row_callbacks::<DiscordChannel>(
             "discord_channels",
             &self.discord_channels,
@@ -3281,6 +3368,11 @@ impl<'r> __sdk::AppliedDiff<'r> for AppliedDiff<'r> {
         callbacks.invoke_table_row_callbacks::<OAuthIdentity>(
             "oauth_identities",
             &self.oauth_identities,
+            event,
+        );
+        callbacks.invoke_table_row_callbacks::<PlatformEntitlement>(
+            "platform_entitlements",
+            &self.platform_entitlements,
             event,
         );
         callbacks.invoke_table_row_callbacks::<Pod>("pods", &self.pods, event);
@@ -3989,6 +4081,7 @@ impl __sdk::SpacetimeModule for RemoteModule {
         captain_messages_table::register_table(client_cache);
         captain_summaries_table::register_table(client_cache);
         cell_runs_table::register_table(client_cache);
+        devices_table::register_table(client_cache);
         discord_channels_table::register_table(client_cache);
         discord_interactions_table::register_table(client_cache);
         discord_users_table::register_table(client_cache);
@@ -4007,6 +4100,7 @@ impl __sdk::SpacetimeModule for RemoteModule {
         node_registry_table::register_table(client_cache);
         nodes_table::register_table(client_cache);
         oauth_identities_table::register_table(client_cache);
+        platform_entitlements_table::register_table(client_cache);
         pods_table::register_table(client_cache);
         proposal_consents_table::register_table(client_cache);
         proposals_table::register_table(client_cache);
@@ -4035,6 +4129,7 @@ impl __sdk::SpacetimeModule for RemoteModule {
         "captain_messages",
         "captain_summaries",
         "cell_runs",
+        "devices",
         "discord_channels",
         "discord_interactions",
         "discord_users",
@@ -4053,6 +4148,7 @@ impl __sdk::SpacetimeModule for RemoteModule {
         "node_registry",
         "nodes",
         "oauth_identities",
+        "platform_entitlements",
         "pods",
         "proposal_consents",
         "proposals",
