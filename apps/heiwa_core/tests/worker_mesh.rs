@@ -7,7 +7,8 @@ use heiwa_core::runtime::{
 };
 use heiwa_core::stdb::{
     NoopTransport, PersistedArtifact, PersistedDispatchAck, PersistedDrexDecision,
-    PersistedDrexFailure, PersistedRunReceipt, PersistedWorkerLease, PersistedWorkerSession,
+    PersistedDrexFailure, PersistedRunFailure, PersistedRunReceipt, PersistedWorkerLease,
+ PersistedWorkerSession,
     StdbRuntime, StdbTransport,
 };
 use anyhow::Result;
@@ -64,6 +65,10 @@ impl StdbTransport for RecordingTransport {
     }
 
     fn record_run_receipt(&self, _receipt: PersistedRunReceipt) -> Result<()> {
+        Ok(())
+    }
+
+    fn record_run_failure(&self, _failure: PersistedRunFailure) -> Result<()> {
         Ok(())
     }
 }

@@ -7,7 +7,8 @@ use heiwa_core::drex::{
 };
 use heiwa_core::stdb::{
     PersistedArtifact, PersistedDispatchAck, PersistedDrexDecision, PersistedDrexFailure,
-    PersistedRunReceipt, PersistedWorkerLease, PersistedWorkerSession, StdbRuntime, StdbTransport,
+    PersistedRunFailure, PersistedRunReceipt, PersistedWorkerLease, PersistedWorkerSession,
+ StdbRuntime, StdbTransport,
 };
 
 #[derive(Clone, Default)]
@@ -57,6 +58,10 @@ impl StdbTransport for MemoryTransport {
     }
 
     fn record_run_receipt(&self, _receipt: PersistedRunReceipt) -> Result<()> {
+        Ok(())
+    }
+
+    fn record_run_failure(&self, _failure: PersistedRunFailure) -> Result<()> {
         Ok(())
     }
 }

@@ -15,6 +15,7 @@ export default {
   userId: __t.string(),
   proposalId: __t.string(),
   leaseId: __t.string(),
+  sessionId: __t.option(__t.string()),
   startedAt: __t.string(),
   endedAt: __t.string(),
   status: __t.string(),
@@ -31,4 +32,6 @@ export default {
   cost: __t.f64(),
   ownerId: __t.option(__t.string()),
   principalId: __t.option(__t.string()),
+  failureCode: __t.option(__t.string()),
+  failureMessage: __t.option(__t.string()),
 };

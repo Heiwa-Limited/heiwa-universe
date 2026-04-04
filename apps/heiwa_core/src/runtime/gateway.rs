@@ -1218,6 +1218,7 @@ async fn finalize_result(
             artifact_id: artifact.artifact_id.clone(),
             run_id: Some(run_id.clone()),
             lease_id: Some(payload.lease_id.clone()),
+            session_id: Some(session_id.to_string()),
             user_id: "mesh-worker".to_string(),
             mission_id: payload.task_id.clone(),
             cell_run_id: None,
@@ -1265,6 +1266,7 @@ async fn finalize_result(
                 user_id: "mesh-worker".to_string(),
                 proposal_id: payload.task_id.clone(),
                 lease_id: payload.lease_id.clone(),
+                session_id: Some(session_id.to_string()),
                 started_at: completed_at.clone(),
                 ended_at: completed_at,
                 status: payload.status.to_uppercase(),
@@ -1369,6 +1371,7 @@ async fn finalize_error(
                 user_id: "mesh-worker".to_string(),
                 proposal_id: task_id.clone(),
                 lease_id: lease_id.clone(),
+                session_id: Some(session_id.to_string()),
                 started_at: completed_at.clone(),
                 ended_at: completed_at.clone(),
                 status: "FAILED".to_string(),
@@ -1400,8 +1403,9 @@ async fn finalize_error(
             },
             vec![PersistedArtifact {
                 artifact_id,
-                run_id: Some(run_id),
+                run_id: Some(run_id.clone()),
                 lease_id: Some(lease_id.clone()),
+                session_id: Some(session_id.to_string()),
                 user_id: "mesh-worker".to_string(),
                 mission_id: task_id.clone(),
                 cell_run_id: None,
@@ -1419,6 +1423,28 @@ async fn finalize_error(
                 owner_id: None,
                 principal_id: Some(session_id.to_string()),
             }],
+        )
+        .await;
+
+    let failure_type = match payload.code.as_str() {
+        "TIMEOUT" | "CONNECTION_LOST" | "SYSTEM_ERROR" => "system",
+        "EXEC_ERROR" | "TOOL_NOT_FOUND" | "PERMISSION_DENIED" => "tool",
+        "MODEL_ERROR" | "INFERENCE_FAILED" | "TOKEN_LIMIT" => "model",
+        "INVALID_INPUT" | "USER_ABORT" => "terminal",
+        _ => "worker",
+    };
+
+    let _ = state
+        .stdb
+        .record_run_failure(
+            &run_id,
+            &lease_id,
+            session_id,
+            &payload.code,
+            &payload.message,
+            failure_type,
+            payload.retryable,
+            &json!(payload).to_string(),
         )
         .await;
     let _ = state.stdb.transport.conn.reducers.revoke_capability_lease(

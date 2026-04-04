@@ -298,10 +298,36 @@ pub struct RunRecord {
     pub lease_id: Option<String>,
     #[default(None::<String>)]
     #[index(btree)]
+    pub session_id: Option<String>,
+    #[default(None::<String>)]
+    #[index(btree)]
     pub owner_id: Option<String>,
     #[default(None::<String>)]
     #[index(btree)]
     pub principal_id: Option<String>,
+    #[default(None::<String>)]
+    pub failure_code: Option<String>,
+    #[default(None::<String>)]
+    pub failure_message: Option<String>,
+}
+
+#[table(accessor = run_failures, public)]
+pub struct RunFailure {
+    #[primary_key]
+    pub failure_id: String,
+    #[index(btree)]
+    pub run_id: String,
+    #[index(btree)]
+    pub lease_id: String,
+    #[index(btree)]
+    pub session_id: String,
+    #[index(btree)]
+    pub failure_code: String,
+    pub failure_message: String,
+    pub failure_type: String, // "transient" | "terminal" | "system"
+    pub retryable: bool,
+    pub details_json: String,
+    pub created_at: String,
 }
 
 #[table(accessor = provider_accounts, public)]
@@ -469,6 +495,9 @@ pub struct ArtifactRecord {
     #[default(None::<String>)]
     #[index(btree)]
     pub lease_id: Option<String>,
+    #[default(None::<String>)]
+    #[index(btree)]
+    pub session_id: Option<String>,
     #[default(None::<String>)]
     #[index(btree)]
     pub user_id: Option<String>,
@@ -1596,6 +1625,7 @@ pub fn record_run(
     user_id: String,
     proposal_id: String,
     lease_id: String,
+    session_id: Option<String>,
     started_at: String,
     ended_at: String,
     status: String,
@@ -1612,6 +1642,8 @@ pub fn record_run(
     cost: f64,
     owner_id: Option<String>,
     principal_id: Option<String>,
+    failure_code: Option<String>,
+    failure_message: Option<String>,
 ) -> Result<(), String> {
     let row = RunRecord {
         run_id: run_id.clone(),
@@ -1632,8 +1664,11 @@ pub fn record_run(
         cost,
         user_id: some_if_not_blank(user_id),
         lease_id: some_if_not_blank(lease_id),
+        session_id,
         owner_id: option_if_not_blank(owner_id),
         principal_id: option_if_not_blank(principal_id),
+        failure_code,
+        failure_message,
     };
 
     if ctx.db.runs().run_id().find(run_id).is_some() {
@@ -1641,6 +1676,37 @@ pub fn record_run(
     } else {
         ctx.db.runs().insert(row);
     }
+
+    Ok(())
+}
+
+#[reducer]
+pub fn record_run_failure(
+    ctx: &ReducerContext,
+    failure_id: String,
+    run_id: String,
+    lease_id: String,
+    session_id: String,
+    failure_code: String,
+    failure_message: String,
+    failure_type: String,
+    retryable: bool,
+    details_json: String,
+) -> Result<(), String> {
+    ctx.db.run_failures().insert(RunFailure {
+        failure_id,
+        run_id,
+        lease_id,
+        session_id,
+        failure_code,
+        failure_message,
+        failure_type,
+        retryable,
+        details_json,
+        created_at: ctx.timestamp.to_string(),
+    });
+    Ok(())
+}
 
     if let Some(mut proposal) = ctx.db.proposals().proposal_id().find(proposal_id) {
         let normalized_status = status.trim().to_uppercase();
@@ -2081,6 +2147,7 @@ pub fn register_artifact(
     artifact_id: String,
     lease_id: Option<String>,
     run_id: Option<String>,
+    session_id: Option<String>,
     user_id: String,
     mission_id: String,
     cell_run_id: Option<String>,
@@ -2105,6 +2172,7 @@ pub fn register_artifact(
         content_json,
         created_at,
         lease_id: option_if_not_blank(lease_id),
+        session_id,
         user_id: some_if_not_blank(user_id),
         owner_id: option_if_not_blank(owner_id),
         principal_id: option_if_not_blank(principal_id),

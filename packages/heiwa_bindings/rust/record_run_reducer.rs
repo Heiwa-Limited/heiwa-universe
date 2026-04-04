@@ -11,6 +11,7 @@ pub(super) struct RecordRunArgs {
     pub user_id: String,
     pub proposal_id: String,
     pub lease_id: String,
+    pub session_id: Option<String>,
     pub started_at: String,
     pub ended_at: String,
     pub status: String,
@@ -27,6 +28,8 @@ pub(super) struct RecordRunArgs {
     pub cost: f64,
     pub owner_id: Option<String>,
     pub principal_id: Option<String>,
+    pub failure_code: Option<String>,
+    pub failure_message: Option<String>,
 }
 
 impl From<RecordRunArgs> for super::Reducer {
@@ -36,6 +39,7 @@ impl From<RecordRunArgs> for super::Reducer {
             user_id: args.user_id,
             proposal_id: args.proposal_id,
             lease_id: args.lease_id,
+            session_id: args.session_id,
             started_at: args.started_at,
             ended_at: args.ended_at,
             status: args.status,
@@ -52,6 +56,8 @@ impl From<RecordRunArgs> for super::Reducer {
             cost: args.cost,
             owner_id: args.owner_id,
             principal_id: args.principal_id,
+            failure_code: args.failure_code,
+            failure_message: args.failure_message,
         }
     }
 }
@@ -61,22 +67,14 @@ impl __sdk::InModule for RecordRunArgs {
 }
 
 #[allow(non_camel_case_types)]
-/// Extension trait for access to the reducer `record_run`.
-///
-/// Implemented for [`super::RemoteReducers`].
 pub trait record_run {
-    /// Request that the remote module invoke the reducer `record_run` to run as soon as possible.
-    ///
-    /// This method returns immediately, and errors only if we are unable to send the request.
-    /// The reducer will run asynchronously in the future,
-    ///  and this method provides no way to listen for its completion status.
-    /// /// Use [`record_run:record_run_then`] to run a callback after the reducer completes.
     fn record_run(
         &self,
         run_id: String,
         user_id: String,
         proposal_id: String,
         lease_id: String,
+        session_id: Option<String>,
         started_at: String,
         ended_at: String,
         status: String,
@@ -93,12 +91,15 @@ pub trait record_run {
         cost: f64,
         owner_id: Option<String>,
         principal_id: Option<String>,
+        failure_code: Option<String>,
+        failure_message: Option<String>,
     ) -> __sdk::Result<()> {
         self.record_run_then(
             run_id,
             user_id,
             proposal_id,
             lease_id,
+            session_id,
             started_at,
             ended_at,
             status,
@@ -115,22 +116,19 @@ pub trait record_run {
             cost,
             owner_id,
             principal_id,
+            failure_code,
+            failure_message,
             |_, _| {},
         )
     }
 
-    /// Request that the remote module invoke the reducer `record_run` to run as soon as possible,
-    /// registering `callback` to run when we are notified that the reducer completed.
-    ///
-    /// This method returns immediately, and errors only if we are unable to send the request.
-    /// The reducer will run asynchronously in the future,
-    ///  and its status can be observed with the `callback`.
     fn record_run_then(
         &self,
         run_id: String,
         user_id: String,
         proposal_id: String,
         lease_id: String,
+        session_id: Option<String>,
         started_at: String,
         ended_at: String,
         status: String,
@@ -147,6 +145,8 @@ pub trait record_run {
         cost: f64,
         owner_id: Option<String>,
         principal_id: Option<String>,
+        failure_code: Option<String>,
+        failure_message: Option<String>,
 
         callback: impl FnOnce(&super::ReducerEventContext, Result<Result<(), String>, __sdk::InternalError>)
             + Send
@@ -161,6 +161,7 @@ impl record_run for super::RemoteReducers {
         user_id: String,
         proposal_id: String,
         lease_id: String,
+        session_id: Option<String>,
         started_at: String,
         ended_at: String,
         status: String,
@@ -177,6 +178,8 @@ impl record_run for super::RemoteReducers {
         cost: f64,
         owner_id: Option<String>,
         principal_id: Option<String>,
+        failure_code: Option<String>,
+        failure_message: Option<String>,
 
         callback: impl FnOnce(&super::ReducerEventContext, Result<Result<(), String>, __sdk::InternalError>)
             + Send
@@ -188,6 +191,7 @@ impl record_run for super::RemoteReducers {
                 user_id,
                 proposal_id,
                 lease_id,
+                session_id,
                 started_at,
                 ended_at,
                 status,
@@ -204,6 +208,8 @@ impl record_run for super::RemoteReducers {
                 cost,
                 owner_id,
                 principal_id,
+                failure_code,
+                failure_message,
             },
             callback,
         )

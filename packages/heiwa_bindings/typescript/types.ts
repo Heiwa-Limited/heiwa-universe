@@ -58,6 +58,7 @@ export const ArtifactRecord = __t.object("ArtifactRecord", {
   contentJson: __t.string(),
   createdAt: __t.string(),
   leaseId: __t.option(__t.string()),
+  sessionId: __t.option(__t.string()),
   userId: __t.option(__t.string()),
   ownerId: __t.option(__t.string()),
   principalId: __t.option(__t.string()),
@@ -604,10 +605,27 @@ export const RunRecord = __t.object("RunRecord", {
   cost: __t.f64(),
   userId: __t.option(__t.string()),
   leaseId: __t.option(__t.string()),
+  sessionId: __t.option(__t.string()),
   ownerId: __t.option(__t.string()),
   principalId: __t.option(__t.string()),
+  failureCode: __t.option(__t.string()),
+  failureMessage: __t.option(__t.string()),
 });
 export type RunRecord = __Infer<typeof RunRecord>;
+
+export const RunFailure = __t.object("RunFailure", {
+  failureId: __t.string(),
+  runId: __t.string(),
+  leaseId: __t.string(),
+  sessionId: __t.string(),
+  failureCode: __t.string(),
+  failureMessage: __t.string(),
+  failureType: __t.string(),
+  retryable: __t.bool(),
+  detailsJson: __t.string(),
+  createdAt: __t.string(),
+});
+export type RunFailure = __Infer<typeof RunFailure>;
 
 export const SessionSummaryRecord = __t.object("SessionSummaryRecord", {
   summaryId: __t.string(),

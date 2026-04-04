@@ -29,6 +29,9 @@ export default __t.row({
   cost: __t.f64(),
   userId: __t.option(__t.string()).name("user_id"),
   leaseId: __t.option(__t.string()).name("lease_id"),
+  sessionId: __t.option(__t.string()).name("session_id"),
   ownerId: __t.option(__t.string()).name("owner_id"),
   principalId: __t.option(__t.string()).name("principal_id"),
+  failureCode: __t.option(__t.string()).name("failure_code"),
+  failureMessage: __t.option(__t.string()).name("failure_message"),
 });

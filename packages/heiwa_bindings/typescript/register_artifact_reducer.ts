@@ -14,6 +14,7 @@ export default {
   artifactId: __t.string(),
   leaseId: __t.option(__t.string()),
   runId: __t.option(__t.string()),
+  sessionId: __t.option(__t.string()),
   userId: __t.string(),
   missionId: __t.string(),
   cellRunId: __t.option(__t.string()),

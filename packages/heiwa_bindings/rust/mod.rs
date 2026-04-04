@@ -165,6 +165,9 @@ pub mod users_table;
 pub mod worker_session_type;
 pub mod worker_sessions_table;
 pub mod write_session_summary_reducer;
+pub mod run_failure_type;
+pub mod run_failures_table;
+pub mod record_run_failure_reducer;
 
 pub use add_approval_request_reducer::add_approval_request;
 pub use add_proposal_reducer::add_proposal;
@@ -325,6 +328,9 @@ pub use users_table::*;
 pub use worker_session_type::WorkerSession;
 pub use worker_sessions_table::*;
 pub use write_session_summary_reducer::write_session_summary;
+pub use run_failure_type::RunFailure;
+pub use run_failures_table::RunFailuresTableAccess;
+pub use record_run_failure_reducer::record_run_failure;
 
 #[derive(Clone, PartialEq, Debug)]
 
@@ -714,6 +720,7 @@ pub enum Reducer {
         user_id: String,
         proposal_id: String,
         lease_id: String,
+        session_id: Option<String>,
         started_at: String,
         ended_at: String,
         status: String,
@@ -730,11 +737,25 @@ pub enum Reducer {
         cost: f64,
         owner_id: Option<String>,
         principal_id: Option<String>,
+        failure_code: Option<String>,
+        failure_message: Option<String>,
+    },
+    RecordRunFailure {
+        failure_id: String,
+        run_id: String,
+        lease_id: String,
+        session_id: String,
+        failure_code: String,
+        failure_message: String,
+        failure_type: String,
+        retryable: bool,
+        details_json: String,
     },
     RegisterArtifact {
         artifact_id: String,
         lease_id: Option<String>,
         run_id: Option<String>,
+        session_id: Option<String>,
         user_id: String,
         mission_id: String,
         cell_run_id: Option<String>,
@@ -1058,6 +1079,7 @@ impl __sdk::Reducer for Reducer {
             Reducer::RecordProposalHeartbeat { .. } => "record_proposal_heartbeat",
             Reducer::RecordRouteDecision { .. } => "record_route_decision",
             Reducer::RecordRun { .. } => "record_run",
+            Reducer::RecordRunFailure { .. } => "record_run_failure",
             Reducer::RegisterArtifact { .. } => "register_artifact",
             Reducer::RegisterDiscordChannel { .. } => "register_discord_channel",
             Reducer::RejectProposal { .. } => "reject_proposal",
@@ -1824,6 +1846,7 @@ impl __sdk::Reducer for Reducer {
                 user_id,
                 proposal_id,
                 lease_id,
+                session_id,
                 started_at,
                 ended_at,
                 status,
@@ -1840,11 +1863,14 @@ impl __sdk::Reducer for Reducer {
                 cost,
                 owner_id,
                 principal_id,
+                failure_code,
+                failure_message,
             } => __sats::bsatn::to_vec(&record_run_reducer::RecordRunArgs {
                 run_id: run_id.clone(),
                 user_id: user_id.clone(),
                 proposal_id: proposal_id.clone(),
                 lease_id: lease_id.clone(),
+                session_id: session_id.clone(),
                 started_at: started_at.clone(),
                 ended_at: ended_at.clone(),
                 status: status.clone(),
@@ -1861,11 +1887,35 @@ impl __sdk::Reducer for Reducer {
                 cost: cost.clone(),
                 owner_id: owner_id.clone(),
                 principal_id: principal_id.clone(),
+                failure_code: failure_code.clone(),
+                failure_message: failure_message.clone(),
+            }),
+            Reducer::RecordRunFailure {
+                failure_id,
+                run_id,
+                lease_id,
+                session_id,
+                failure_code,
+                failure_message,
+                failure_type,
+                retryable,
+                details_json,
+            } => __sats::bsatn::to_vec(&record_run_failure_reducer::RecordRunFailureArgs {
+                failure_id: failure_id.clone(),
+                run_id: run_id.clone(),
+                lease_id: lease_id.clone(),
+                session_id: session_id.clone(),
+                failure_code: failure_code.clone(),
+                failure_message: failure_message.clone(),
+                failure_type: failure_type.clone(),
+                retryable: retryable.clone(),
+                details_json: details_json.clone(),
             }),
             Reducer::RegisterArtifact {
                 artifact_id,
                 lease_id,
                 run_id,
+                session_id,
                 user_id,
                 mission_id,
                 cell_run_id,
@@ -1881,6 +1931,7 @@ impl __sdk::Reducer for Reducer {
                 artifact_id: artifact_id.clone(),
                 lease_id: lease_id.clone(),
                 run_id: run_id.clone(),
+                session_id: session_id.clone(),
                 user_id: user_id.clone(),
                 mission_id: mission_id.clone(),
                 cell_run_id: cell_run_id.clone(),
@@ -2445,6 +2496,7 @@ pub struct DbUpdate {
     provider_credentials: __sdk::TableUpdate<ProviderCredential>,
     rate_group_state: __sdk::TableUpdate<RateGroupState>,
     route_decisions: __sdk::TableUpdate<RouteDecision>,
+    run_failures: __sdk::TableUpdate<RunFailure>,
     runs: __sdk::TableUpdate<RunRecord>,
     session_summaries: __sdk::TableUpdate<SessionSummaryRecord>,
     task_dispatches: __sdk::TableUpdate<TaskDispatch>,
@@ -2570,6 +2622,9 @@ impl TryFrom<__ws::v2::TransactionUpdate> for DbUpdate {
                 "route_decisions" => db_update
                     .route_decisions
                     .append(route_decisions_table::parse_table_update(table_update)?),
+                "run_failures" => db_update
+                    .run_failures
+                    .append(run_failures_table::parse_table_update(table_update)?),
                 "runs" => db_update
                     .runs
                     .append(runs_table::parse_table_update(table_update)?),
@@ -2734,6 +2789,9 @@ impl __sdk::DbUpdate for DbUpdate {
         diff.route_decisions = cache
             .apply_diff_to_table::<RouteDecision>("route_decisions", &self.route_decisions)
             .with_updates_by_pk(|row| &row.request_id);
+        diff.run_failures = cache
+            .apply_diff_to_table::<RunFailure>("run_failures", &self.run_failures)
+            .with_updates_by_pk(|row| &row.failure_id);
         diff.runs = cache
             .apply_diff_to_table::<RunRecord>("runs", &self.runs)
             .with_updates_by_pk(|row| &row.run_id);
@@ -3084,6 +3142,7 @@ pub struct AppliedDiff<'r> {
     provider_credentials: __sdk::TableAppliedDiff<'r, ProviderCredential>,
     rate_group_state: __sdk::TableAppliedDiff<'r, RateGroupState>,
     route_decisions: __sdk::TableAppliedDiff<'r, RouteDecision>,
+    run_failures: __sdk::TableAppliedDiff<'r, RunFailure>,
     runs: __sdk::TableAppliedDiff<'r, RunRecord>,
     session_summaries: __sdk::TableAppliedDiff<'r, SessionSummaryRecord>,
     task_dispatches: __sdk::TableAppliedDiff<'r, TaskDispatch>,
@@ -3248,6 +3307,7 @@ impl<'r> __sdk::AppliedDiff<'r> for AppliedDiff<'r> {
             &self.route_decisions,
             event,
         );
+        callbacks.invoke_table_row_callbacks::<RunFailure>("run_failures", &self.run_failures, event);
         callbacks.invoke_table_row_callbacks::<RunRecord>("runs", &self.runs, event);
         callbacks.invoke_table_row_callbacks::<SessionSummaryRecord>(
             "session_summaries",
@@ -3951,6 +4011,7 @@ impl __sdk::SpacetimeModule for RemoteModule {
         provider_credentials_table::register_table(client_cache);
         rate_group_state_table::register_table(client_cache);
         route_decisions_table::register_table(client_cache);
+        run_failures_table::register_table(client_cache);
         runs_table::register_table(client_cache);
         session_summaries_table::register_table(client_cache);
         task_dispatches_table::register_table(client_cache);
@@ -3996,6 +4057,7 @@ impl __sdk::SpacetimeModule for RemoteModule {
         "provider_credentials",
         "rate_group_state",
         "route_decisions",
+        "run_failures",
         "runs",
         "session_summaries",
         "task_dispatches",

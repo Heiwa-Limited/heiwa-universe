@@ -202,6 +202,7 @@ class SpacetimeDB:
             run_data.get("user_id") or "",
             run_data.get("proposal_id", ""),
             run_data.get("lease_id", ""),
+            self._sats_option(run_data.get("session_id")),
             run_data.get("started_at") or "",
             ended_at,
             run_data.get("status", "UNKNOWN"),
@@ -218,6 +219,33 @@ class SpacetimeDB:
             float(run_data.get("cost") or 0.0),
             self._sats_option(run_data.get("owner_id")),
             self._sats_option(run_data.get("principal_id")),
+            self._sats_option(run_data.get("failure_code")),
+            self._sats_option(run_data.get("failure_message")),
+        )
+
+    def record_run_failure(
+        self,
+        failure_id: str,
+        run_id: str,
+        lease_id: str,
+        session_id: str,
+        failure_code: str,
+        failure_message: str,
+        failure_type: str,
+        retryable: bool,
+        details: dict[str, Any] | str | None = None,
+    ) -> bool:
+        return self.call(
+            "record_run_failure",
+            failure_id,
+            run_id,
+            lease_id,
+            session_id,
+            failure_code,
+            failure_message,
+            failure_type,
+            retryable,
+            self._json_text(details),
         )
 
     def get_runs(
@@ -648,6 +676,7 @@ class SpacetimeDB:
             artifact_data["artifact_id"],
             self._sats_option(artifact_data.get("lease_id")),
             self._sats_option(artifact_data.get("run_id")),
+            self._sats_option(artifact_data.get("session_id")),
             artifact_data.get("user_id", ""),
             artifact_data.get("mission_id", ""),
             self._sats_option(artifact_data.get("cell_run_id")),

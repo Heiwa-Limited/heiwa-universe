@@ -3,13 +3,15 @@ use std::sync::{Arc, Mutex};
 use anyhow::Result;
 use heiwa_core::stdb::{
     PersistedArtifact, PersistedDispatchAck, PersistedDrexDecision, PersistedDrexFailure,
-    PersistedRunReceipt, PersistedWorkerLease, PersistedWorkerSession, StdbRuntime, StdbTransport,
+    PersistedRunFailure, PersistedRunReceipt, PersistedWorkerLease, PersistedWorkerSession,
+ StdbRuntime, StdbTransport,
 };
 
 #[derive(Clone, Default)]
 struct MemoryTransport {
     artifacts: Arc<Mutex<Vec<PersistedArtifact>>>,
     receipts: Arc<Mutex<Vec<PersistedRunReceipt>>>,
+    failures: Arc<Mutex<Vec<PersistedRunFailure>>>,
 }
 
 impl StdbTransport for MemoryTransport {
@@ -54,6 +56,11 @@ impl StdbTransport for MemoryTransport {
         self.receipts.lock().unwrap().push(receipt);
         Ok(())
     }
+
+    fn record_run_failure(&self, failure: PersistedRunFailure) -> Result<()> {
+        self.failures.lock().unwrap().push(failure);
+        Ok(())
+    }
 }
 
 struct TestStdbClient {
@@ -72,6 +79,10 @@ impl TestStdbClient {
         self.transport.receipts.lock().unwrap().last().cloned()
     }
 
+    fn last_failure(&self) -> Option<PersistedRunFailure> {
+        self.transport.failures.lock().unwrap().last().cloned()
+    }
+
     fn artifacts(&self) -> Vec<PersistedArtifact> {
         self.transport.artifacts.lock().unwrap().clone()
     }
@@ -84,6 +95,7 @@ async fn successful_receipt_persists_run_and_artifacts() {
         artifact_id: "artifact-success-1".to_string(),
         run_id: Some("run-task-1".to_string()),
         lease_id: Some("lease-1".to_string()),
+        session_id: Some("session-1".to_string()),
         user_id: "mesh-worker".to_string(),
         mission_id: "task-1".to_string(),
         cell_run_id: None,
@@ -101,6 +113,7 @@ async fn successful_receipt_persists_run_and_artifacts() {
         user_id: "mesh-worker".to_string(),
         proposal_id: "task-1".to_string(),
         lease_id: "lease-1".to_string(),
+        session_id: Some("session-1".to_string()),
         started_at: "2026-04-03T07:19:00Z".to_string(),
         ended_at: "2026-04-03T07:20:00Z".to_string(),
         status: "SUCCESS".to_string(),
@@ -138,6 +151,7 @@ async fn failure_receipt_persists_structured_code_and_log_artifact() {
         artifact_id: "artifact-error-1".to_string(),
         run_id: Some("run-task-2".to_string()),
         lease_id: Some("lease-2".to_string()),
+        session_id: Some("session-2".to_string()),
         user_id: "mesh-worker".to_string(),
         mission_id: "task-2".to_string(),
         cell_run_id: None,
@@ -155,6 +169,7 @@ async fn failure_receipt_persists_structured_code_and_log_artifact() {
         user_id: "mesh-worker".to_string(),
         proposal_id: "task-2".to_string(),
         lease_id: "lease-2".to_string(),
+        session_id: Some("session-2".to_string()),
         started_at: "2026-04-03T07:21:00Z".to_string(),
         ended_at: "2026-04-03T07:22:00Z".to_string(),
         status: "FAILED".to_string(),
@@ -185,12 +200,35 @@ async fn failure_receipt_persists_structured_code_and_log_artifact() {
 
     let stored = client.last_receipt().expect("receipt");
     assert_eq!(stored.failure_code.as_deref(), Some("EXEC_ERROR"));
-    assert_eq!(
-        stored.failure_message.as_deref(),
-        Some("tool subprocess exited 1")
-    );
+    assert_eq!(stored.failure_message.as_deref(), Some("tool subprocess exited 1"));
     assert_eq!(client.artifacts(), vec![artifact]);
-}
+    }
+
+    #[tokio::test]
+    async fn record_run_failure_persists_explicit_failure_event() {
+    let client = TestStdbClient::new();
+    let failure = client
+        .runtime
+        .record_run_failure(
+            "run-123",
+            "lease-456",
+            "session-789",
+            "TIMEOUT",
+            "worker did not respond in time",
+            "system",
+            true,
+            r#"{"latency_ms": 30000}"#,
+        )
+        .await
+        .expect("should record failure");
+
+    assert_eq!(failure.run_id, "run-123");
+    assert_eq!(failure.failure_code, "TIMEOUT");
+    assert_eq!(failure.failure_type, "system");
+    assert!(failure.retryable);
+    assert_eq!(client.last_failure(), Some(failure));
+    }
+
 
 #[tokio::test]
 async fn receipt_bundle_requires_at_least_one_artifact() {
@@ -200,6 +238,7 @@ async fn receipt_bundle_requires_at_least_one_artifact() {
         user_id: "mesh-worker".to_string(),
         proposal_id: "task-3".to_string(),
         lease_id: "lease-3".to_string(),
+        session_id: Some("session-3".to_string()),
         started_at: "2026-04-03T07:23:00Z".to_string(),
         ended_at: "2026-04-03T07:24:00Z".to_string(),
         status: "SUCCESS".to_string(),

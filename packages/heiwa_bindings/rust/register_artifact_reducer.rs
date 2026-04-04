@@ -10,6 +10,7 @@ pub(super) struct RegisterArtifactArgs {
     pub artifact_id: String,
     pub lease_id: Option<String>,
     pub run_id: Option<String>,
+    pub session_id: Option<String>,
     pub user_id: String,
     pub mission_id: String,
     pub cell_run_id: Option<String>,
@@ -29,6 +30,7 @@ impl From<RegisterArtifactArgs> for super::Reducer {
             artifact_id: args.artifact_id,
             lease_id: args.lease_id,
             run_id: args.run_id,
+            session_id: args.session_id,
             user_id: args.user_id,
             mission_id: args.mission_id,
             cell_run_id: args.cell_run_id,
@@ -49,21 +51,13 @@ impl __sdk::InModule for RegisterArtifactArgs {
 }
 
 #[allow(non_camel_case_types)]
-/// Extension trait for access to the reducer `register_artifact`.
-///
-/// Implemented for [`super::RemoteReducers`].
 pub trait register_artifact {
-    /// Request that the remote module invoke the reducer `register_artifact` to run as soon as possible.
-    ///
-    /// This method returns immediately, and errors only if we are unable to send the request.
-    /// The reducer will run asynchronously in the future,
-    ///  and this method provides no way to listen for its completion status.
-    /// /// Use [`register_artifact:register_artifact_then`] to run a callback after the reducer completes.
     fn register_artifact(
         &self,
         artifact_id: String,
         lease_id: Option<String>,
         run_id: Option<String>,
+        session_id: Option<String>,
         user_id: String,
         mission_id: String,
         cell_run_id: Option<String>,
@@ -80,6 +74,7 @@ pub trait register_artifact {
             artifact_id,
             lease_id,
             run_id,
+            session_id,
             user_id,
             mission_id,
             cell_run_id,
@@ -95,17 +90,12 @@ pub trait register_artifact {
         )
     }
 
-    /// Request that the remote module invoke the reducer `register_artifact` to run as soon as possible,
-    /// registering `callback` to run when we are notified that the reducer completed.
-    ///
-    /// This method returns immediately, and errors only if we are unable to send the request.
-    /// The reducer will run asynchronously in the future,
-    ///  and its status can be observed with the `callback`.
     fn register_artifact_then(
         &self,
         artifact_id: String,
         lease_id: Option<String>,
         run_id: Option<String>,
+        session_id: Option<String>,
         user_id: String,
         mission_id: String,
         cell_run_id: Option<String>,
@@ -130,6 +120,7 @@ impl register_artifact for super::RemoteReducers {
         artifact_id: String,
         lease_id: Option<String>,
         run_id: Option<String>,
+        session_id: Option<String>,
         user_id: String,
         mission_id: String,
         cell_run_id: Option<String>,
@@ -151,6 +142,7 @@ impl register_artifact for super::RemoteReducers {
                 artifact_id,
                 lease_id,
                 run_id,
+                session_id,
                 user_id,
                 mission_id,
                 cell_run_id,

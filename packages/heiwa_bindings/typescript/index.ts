@@ -74,6 +74,7 @@ import RecordDrexFailureReducer from "./record_drex_failure_reducer";
 import RecordInteractionReducer from "./record_interaction_reducer";
 import RecordProposalHeartbeatReducer from "./record_proposal_heartbeat_reducer";
 import RecordRouteDecisionReducer from "./record_route_decision_reducer";
+import RecordRunFailureReducer from "./record_run_failure_reducer";
 import RecordRunReducer from "./record_run_reducer";
 import RegisterArtifactReducer from "./register_artifact_reducer";
 import RegisterDiscordChannelReducer from "./register_discord_channel_reducer";
@@ -148,6 +149,7 @@ import ProviderAccountsRow from "./provider_accounts_table";
 import ProviderCredentialsRow from "./provider_credentials_table";
 import RateGroupStateRow from "./rate_group_state_table";
 import RouteDecisionsRow from "./route_decisions_table";
+import RunFailuresRow from "./run_failures_table";
 import RunsRow from "./runs_table";
 import SessionSummariesRow from "./session_summaries_table";
 import TaskDispatchesRow from "./task_dispatches_table";
@@ -230,6 +232,9 @@ const tablesSchema = __schema({
       ] },
       { name: 'run_id', algorithm: 'btree', columns: [
         'runId',
+      ] },
+      { name: 'session_id', algorithm: 'btree', columns: [
+        'sessionId',
       ] },
       { name: 'user_id', algorithm: 'btree', columns: [
         'userId',
@@ -882,6 +887,26 @@ const tablesSchema = __schema({
       { name: 'route_decisions_request_id_key', constraint: 'unique', columns: ['requestId'] },
     ],
   }, RouteDecisionsRow),
+  run_failures: __table({
+    name: 'run_failures',
+    indexes: [
+      { name: 'failure_code', algorithm: 'btree', columns: [
+        'failureCode',
+      ] },
+      { name: 'lease_id', algorithm: 'btree', columns: [
+        'leaseId',
+      ] },
+      { name: 'run_id', algorithm: 'btree', columns: [
+        'runId',
+      ] },
+      { name: 'session_id', algorithm: 'btree', columns: [
+        'sessionId',
+      ] },
+    ],
+    constraints: [
+      { name: 'run_failures_failure_id_key', constraint: 'unique', columns: ['failureId'] },
+    ],
+  }, RunFailuresRow),
   runs: __table({
     name: 'runs',
     indexes: [
@@ -905,6 +930,9 @@ const tablesSchema = __schema({
       ] },
       { name: 'run_id', algorithm: 'btree', columns: [
         'runId',
+      ] },
+      { name: 'session_id', algorithm: 'btree', columns: [
+        'sessionId',
       ] },
       { name: 'status', algorithm: 'btree', columns: [
         'status',
@@ -1069,6 +1097,7 @@ const reducersSchema = __reducers(
   __reducerSchema("record_interaction", RecordInteractionReducer),
   __reducerSchema("record_proposal_heartbeat", RecordProposalHeartbeatReducer),
   __reducerSchema("record_route_decision", RecordRouteDecisionReducer),
+  __reducerSchema("record_run_failure", RecordRunFailureReducer),
   __reducerSchema("record_run", RecordRunReducer),
   __reducerSchema("register_artifact", RegisterArtifactReducer),
   __reducerSchema("register_discord_channel", RegisterDiscordChannelReducer),

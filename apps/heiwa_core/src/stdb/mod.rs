@@ -63,6 +63,7 @@ pub struct PersistedArtifact {
     pub artifact_id: String,
     pub run_id: Option<String>,
     pub lease_id: Option<String>,
+    pub session_id: Option<String>,
     pub user_id: String,
     pub mission_id: String,
     pub cell_run_id: Option<String>,
@@ -135,6 +136,7 @@ pub struct PersistedRunReceipt {
     pub user_id: String,
     pub proposal_id: String,
     pub lease_id: String,
+    pub session_id: Option<String>,
     pub started_at: String,
     pub ended_at: String,
     pub status: String,
@@ -155,6 +157,19 @@ pub struct PersistedRunReceipt {
     pub failure_message: Option<String>,
 }
 
+#[derive(Clone, Debug, PartialEq)]
+pub struct PersistedRunFailure {
+    pub failure_id: String,
+    pub run_id: String,
+    pub lease_id: String,
+    pub session_id: String,
+    pub failure_code: String,
+    pub failure_message: String,
+    pub failure_type: String,
+    pub retryable: bool,
+    pub details_json: String,
+}
+
 pub trait StdbTransport: Send + Sync + 'static {
     fn upsert_drex_decision(&self, decision: PersistedDrexDecision) -> Result<()>;
     fn insert_drex_failure(&self, failure: PersistedDrexFailure) -> Result<()>;
@@ -166,6 +181,7 @@ pub trait StdbTransport: Send + Sync + 'static {
     fn record_dispatch_ack(&self, ack: PersistedDispatchAck) -> Result<()>;
     fn register_artifact(&self, artifact: PersistedArtifact) -> Result<()>;
     fn record_run_receipt(&self, receipt: PersistedRunReceipt) -> Result<()>;
+    fn record_run_failure(&self, failure: PersistedRunFailure) -> Result<()>;
 }
 
 #[derive(Clone)]
@@ -254,6 +270,7 @@ impl StdbTransport for ReducerTransport {
                 artifact.artifact_id,
                 artifact.lease_id,
                 artifact.run_id,
+                artifact.session_id,
                 artifact.user_id,
                 artifact.mission_id,
                 artifact.cell_run_id,
@@ -276,17 +293,12 @@ impl StdbTransport for ReducerTransport {
                 receipt.user_id,
                 receipt.proposal_id,
                 receipt.lease_id,
+                receipt.session_id,
                 receipt.started_at,
                 receipt.ended_at,
                 receipt.status,
                 receipt.chain_result_json,
-                json!({
-                    "signals": serde_json::from_str::<serde_json::Value>(&receipt.signals_json)
-                        .unwrap_or_else(|_| json!({ "raw": receipt.signals_json })),
-                    "failure_code": receipt.failure_code,
-                    "failure_message": receipt.failure_message,
-                })
-                .to_string(),
+                receipt.signals_json,
                 receipt.artifact_index_json,
                 receipt.node_id,
                 receipt.replay_receipt_json,
@@ -298,6 +310,25 @@ impl StdbTransport for ReducerTransport {
                 receipt.cost,
                 receipt.owner_id,
                 receipt.principal_id,
+                receipt.failure_code,
+                receipt.failure_message,
+            )
+            .map_err(|error| anyhow!(error.to_string()))
+    }
+
+    fn record_run_failure(&self, failure: PersistedRunFailure) -> Result<()> {
+        use heiwa_bindings::record_run_failure_reducer::record_run_failure;
+        self.conn.reducers
+            .record_run_failure(
+                failure.failure_id,
+                failure.run_id,
+                failure.lease_id,
+                failure.session_id,
+                failure.failure_code,
+                failure.failure_message,
+                failure.failure_type,
+                failure.retryable,
+                failure.details_json,
             )
             .map_err(|error| anyhow!(error.to_string()))
     }
@@ -403,6 +434,10 @@ impl StdbTransport for NoopTransport {
     }
 
     fn record_run_receipt(&self, _receipt: PersistedRunReceipt) -> Result<()> {
+        Ok(())
+    }
+
+    fn record_run_failure(&self, _failure: PersistedRunFailure) -> Result<()> {
         Ok(())
     }
 }
@@ -530,6 +565,32 @@ impl<T: StdbTransport> StdbRuntime<T> {
         }
         self.transport.record_run_receipt(receipt.clone())?;
         Ok(receipt)
+    }
+
+    pub async fn record_run_failure(
+        &self,
+        run_id: &str,
+        lease_id: &str,
+        session_id: &str,
+        failure_code: &str,
+        failure_message: &str,
+        failure_type: &str,
+        retryable: bool,
+        details_json: &str,
+    ) -> Result<PersistedRunFailure> {
+        let record = PersistedRunFailure {
+            failure_id: format!("fail-{}", uuid::Uuid::new_v4()),
+            run_id: run_id.to_string(),
+            lease_id: lease_id.to_string(),
+            session_id: session_id.to_string(),
+            failure_code: failure_code.to_string(),
+            failure_message: failure_message.to_string(),
+            failure_type: failure_type.to_string(),
+            retryable,
+            details_json: details_json.to_string(),
+        };
+        self.transport.record_run_failure(record.clone())?;
+        Ok(record)
     }
 
     pub async fn upsert_worker_session(

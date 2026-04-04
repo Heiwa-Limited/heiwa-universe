@@ -22,6 +22,7 @@ export default __t.row({
   contentJson: __t.string().name("content_json"),
   createdAt: __t.string().name("created_at"),
   leaseId: __t.option(__t.string()).name("lease_id"),
+  sessionId: __t.option(__t.string()).name("session_id"),
   userId: __t.option(__t.string()).name("user_id"),
   ownerId: __t.option(__t.string()).name("owner_id"),
   principalId: __t.option(__t.string()).name("principal_id"),
