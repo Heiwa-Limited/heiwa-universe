@@ -189,6 +189,15 @@ fn select_model_tier(
         })
         .filter(|tier| tier.vram_requirement_mb <= ingress.available_vram_mb || !local_only)
         .filter(|tier| !local_only || is_local_provider(&tier.provider))
+        .filter(|tier| {
+            if ingress.intent == "code" {
+                let strengths: Vec<String> =
+                    serde_json::from_str(&tier.strengths_json).unwrap_or_default();
+                strengths.contains(&"advanced_coding".to_string()) || tier.capability_class >= 3
+            } else {
+                true
+            }
+        })
         .max_by(|left, right| {
             model_score(left, ingress, decision)
                 .total_cmp(&model_score(right, ingress, decision))
@@ -213,6 +222,13 @@ fn model_score(tier: &ModelTier, ingress: &DrexIngress, decision: &DrexDecision)
     }
     if tier.capability_class == 2 && decision.active_tier == ResolutionTier::Micro {
         score += 0.25;
+    }
+    score += (tier.capability_class as f64) * 2.0;
+
+    // Strength bonuses
+    let strengths: Vec<String> = serde_json::from_str(&tier.strengths_json).unwrap_or_default();
+    if ingress.intent == "code" && strengths.contains(&"advanced_coding".to_string()) {
+        score += 2.0;
     }
 
     score - (tier.cost_per_turn * 0.1) - ((tier.vram_requirement_mb as f64) / 32_768.0)
