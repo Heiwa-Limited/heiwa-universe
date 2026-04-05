@@ -2,7 +2,7 @@ use anyhow::{anyhow, Result};
 use std::env;
 use std::sync::Arc;
 use chrono::Utc;
-use heiwa_protocol::{SessionState, RoutingState, TranscriptBlock};
+use heiwa_protocol::{SessionState, RoutingState, TranscriptBlock, TurnRequest, parse_turn_intent};
 use heiwa_tui::render_cockpit;
 use heiwa_core::drex::{default_policy, plan_route, preflight_execution, DrexIngress, ExecutionMode};
 use heiwa_provider::adapter::{Message, ProviderAdapter, Role, StreamEvent};
@@ -633,12 +633,37 @@ async fn run_repl() -> Result<()> {
                 let request_id = uuid::Uuid::new_v4().to_string();
                 let turn_started_at = chrono::Utc::now().to_rfc3339();
 
+                // 1. Direct Turn Instruction
+                let turn_request = parse_turn_intent(&t);
+                let (provider_pin, model_pin) = match (turn_request.provider_pin, turn_request.model_pin) {
+                    (Some(p), Some(m)) => (Some(p), Some(m)),
+                    (Some(p), None) => (Some(p), None),
+                    _ => (None, None),
+                };
+
+                // 2. Session Override
+                let final_provider_pin = provider_pin.as_deref().or(pinned_provider.as_deref());
+                let final_model_pin = model_pin.as_deref().or(pinned_model.as_deref());
+
+                // 3. Filter model tiers by precedence
                 let routed_tiers = filtered_model_tiers(
                     &model_tiers,
                     route_preference,
-                    pinned_provider.as_deref(),
-                    pinned_model.as_deref(),
+                    final_provider_pin,
+                    final_model_pin,
                 );
+
+                if routed_tiers.is_empty() {
+                    let reason = if final_model_pin.is_some() {
+                        format!("Model '{}' not available.", final_model_pin.unwrap())
+                    } else if final_provider_pin.is_some() {
+                        format!("Provider '{}' not available.", final_provider_pin.unwrap())
+                    } else {
+                        "No models available.".to_string()
+                    };
+                    println!("Routing failed: {}", reason);
+                    continue;
+                }
 
                 // DREX route the task
                 let ingress = DrexIngress {
@@ -653,6 +678,8 @@ async fn run_repl() -> Result<()> {
 
                 let policy = default_policy();
                 let preflight = preflight_execution(&ingress, &routed_tiers, &policy);
+                
+                // 4. Ban silent fallback: If DREX preflight says a mode that's not possible with our pins, fail.
                 match preflight.execution_mode {
                     ExecutionMode::Deterministic | ExecutionMode::Clarify => {
                         if let Some(response) = preflight.response_text {
@@ -663,6 +690,7 @@ async fn run_repl() -> Result<()> {
                     }
                     _ => {}
                 }
+
                 let effective_route_preference = if route_preference == RoutePreference::Auto {
                     match preflight.execution_mode {
                         ExecutionMode::LocalModel => RoutePreference::LocalOnly,
@@ -672,20 +700,19 @@ async fn run_repl() -> Result<()> {
                 } else {
                     route_preference
                 };
+
                 let effective_tiers = filtered_model_tiers(
                     &routed_tiers,
                     effective_route_preference,
-                    pinned_provider.as_deref(),
-                    pinned_model.as_deref(),
+                    final_provider_pin,
+                    final_model_pin,
                 );
+
                 if effective_tiers.is_empty() {
-                    if model_tiers.is_empty() {
-                        println!("No models available. Connect a provider first.");
-                    } else {
-                        println!("No models match the DREX execution mode for this task.");
-                    }
+                    println!("Routing failed: Chosen model stack unavailable for this execution mode.");
                     continue;
                 }
+
                 let route = match plan_route(&ingress, &effective_tiers, &policy) {
                     Ok(r) => r,
                     Err(e) => {
