@@ -8,6 +8,7 @@ members = [
     "crates/heiwa_provider",
     "crates/heiwa_install",
     "crates/heiwa_loop",
+    "crates/heiwa_stdb",
     "packages/heiwa_bindings/rust",
 ]
 resolver = "2"
