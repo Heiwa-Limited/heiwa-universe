@@ -9,7 +9,7 @@ use heiwa_provider::adapter::{Message, ProviderAdapter, Role, StreamEvent};
 use heiwa_provider::providers::ollama::OllamaCliAdapter;
 use heiwa_provider::providers::claude_code::ClaudeCodeCliAdapter;
 use heiwa_repl::{parse_input, render_footer, ReplCommand, TelemetryState};
-use std::io::{self, Write};
+use std::io::{self, Write, IsTerminal};
 
 fn provider_supports_loop_adapter(provider: &str) -> bool {
     matches!(provider, "claude" | "ollama")
@@ -26,8 +26,12 @@ enum RoutePreference {
 async fn main() -> Result<()> {
     let args: Vec<String> = env::args().collect();
 
-    if args.len() < 2 {
-        run_repl().await?;
+    let is_tty = std::io::stdout().is_terminal();
+    let is_plain = args.iter().any(|arg| arg == "--plain");
+    let use_cockpit = is_tty && !is_plain;
+
+    if args.len() < 2 || (args.len() == 2 && args[1] == "--plain") {
+        run_repl(use_cockpit).await?;
         return Ok(());
     }
 
@@ -528,7 +532,7 @@ async fn attempt_stdb_connection() -> heiwa_stdb::StdbClient {
     }
 }
 
-async fn run_repl() -> Result<()> {
+async fn run_repl(use_cockpit: bool) -> Result<()> {
     println!("Heiwa Interactive Shell");
     println!("Type /help for commands, !command for shell escape, or enter a task.");
     println!();
@@ -602,6 +606,36 @@ async fn run_repl() -> Result<()> {
         current_model = first.model_id.clone();
         state.routing.current_provider = current_provider.clone();
         state.routing.current_model = current_model.clone();
+    }
+
+    if use_cockpit {
+        let mut stdout = io::stdout();
+        crossterm::terminal::enable_raw_mode()?;
+        crossterm::execute!(stdout, crossterm::terminal::EnterAlternateScreen, crossterm::event::EnableMouseCapture)?;
+        let backend = ratatui::backend::CrosstermBackend::new(stdout);
+        let mut terminal = ratatui::Terminal::new(backend)?;
+
+        loop {
+            terminal.draw(|f| render_cockpit(f, &state))?;
+
+            if crossterm::event::poll(std::time::Duration::from_millis(100))? {
+                if let crossterm::event::Event::Key(key) = crossterm::event::read()? {
+                    if key.code == crossterm::event::KeyCode::Esc {
+                        break;
+                    }
+                    // Handle other keys, multi-line input, etc.
+                }
+            }
+        }
+
+        crossterm::terminal::disable_raw_mode()?;
+        crossterm::execute!(
+            terminal.backend_mut(),
+            crossterm::terminal::LeaveAlternateScreen,
+            crossterm::event::DisableMouseCapture
+        )?;
+        terminal.show_cursor()?;
+        return Ok(());
     }
 
     loop {
