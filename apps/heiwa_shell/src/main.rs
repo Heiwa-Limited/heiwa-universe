@@ -758,6 +758,8 @@ async fn run_repl() -> Result<()> {
                 current_model = selected.model_id.clone();
                 let selected_model_id = selected.model_id.clone();
 
+                state.transcript.push(TranscriptBlock::User(t.clone()));
+
                 // Stream the response
                 let messages = vec![Message { role: Role::User, content: t }];
                 let (stream_tx, mut stream_rx) = tokio::sync::mpsc::channel(32);
@@ -774,11 +776,13 @@ async fn run_repl() -> Result<()> {
 
                 // Print tokens as they arrive
                 let mut usage = None;
+                let mut full_response = String::new();
                 while let Some(event) = stream_rx.recv().await {
                     match event {
                         StreamEvent::Token(text) => {
                             print!("{}", text);
                             io::stdout().flush()?;
+                            full_response.push_str(&text);
                         }
                         StreamEvent::Done(u) => {
                             usage = Some(u);
@@ -790,10 +794,12 @@ async fn run_repl() -> Result<()> {
                         }
                         StreamEvent::ToolUse { name, .. } => {
                             println!("\n[tool: {}]", name);
+                            state.transcript.push(TranscriptBlock::Tool(name, "executed".to_string()));
                         }
                     }
                 }
                 println!(); // newline after streamed output
+                state.transcript.push(TranscriptBlock::Assistant(full_response));
 
                 let turn_ended_at = chrono::Utc::now().to_rfc3339();
                 let user_id = heiwa_provider::load_identity()

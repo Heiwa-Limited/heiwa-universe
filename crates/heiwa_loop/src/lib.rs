@@ -1,4 +1,5 @@
 use anyhow::{anyhow, Result};
+use heiwa_protocol::TranscriptBlock;
 use heiwa_bindings::{
     complete_loop_session_reducer::complete_loop_session,
     record_loop_iteration_reducer::record_loop_iteration,
@@ -34,6 +35,7 @@ pub struct LoopStatus {
     pub current_turn: u32,
     pub total_cost_usd: f64,
     pub status: String,
+    pub latest_block: Option<TranscriptBlock>,
 }
 
 pub struct LoopController {
@@ -104,7 +106,9 @@ impl LoopController {
                     current_turn,
                     total_cost_usd: total_cost,
                     status: "CANCELLED".to_string(),
+                    latest_block: None,
                 }).await;
+
                 return Ok(());
             }
 
@@ -220,6 +224,7 @@ impl LoopController {
                 current_turn,
                 total_cost_usd: total_cost,
                 status: "RUNNING".to_string(),
+                latest_block: Some(TranscriptBlock::Assistant(output_summary)),
             }).await;
 
             if total_cost >= self.config.max_cost_usd {
@@ -242,6 +247,7 @@ impl LoopController {
             current_turn,
             total_cost_usd: total_cost,
             status: "COMPLETED".to_string(),
+            latest_block: None,
         }).await;
 
         println!("Loop {} finished.", self.loop_id);
