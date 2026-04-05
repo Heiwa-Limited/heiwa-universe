@@ -212,7 +212,7 @@ impl LoopController {
                     self.loop_id.clone(),
                     current_turn,
                     ingress.raw_text.clone(),
-                    output_summary,
+                    output_summary.clone(),
                     0.5,
                     Some(run_id),
                     turn_cost,

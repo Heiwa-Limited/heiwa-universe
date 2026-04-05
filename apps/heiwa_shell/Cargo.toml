@@ -22,6 +22,8 @@ heiwa-tui = { path = "../../crates/heiwa_tui" }
 uuid = { version = "1.0", features = ["v4"] }
 hostname = "0.4"
 dirs = "5.0"
+ratatui = "0.26"
+crossterm = "0.27"
 tokio = { version = "1.50.0", features = ["full"] }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"

@@ -8,6 +8,7 @@ anyhow = "1.0"
 async-trait = "0.1"
 heiwa-bindings = { path = "../../packages/heiwa_bindings/rust" }
 heiwa-stdb = { path = "../../crates/heiwa_stdb" }
+heiwa-protocol = { path = "../../crates/heiwa_protocol" }
 heiwa-core = { path = "../../apps/heiwa_core" }
 heiwa-provider = { path = "../../crates/heiwa_provider" }
 serde = { version = "1.0", features = ["derive"] }

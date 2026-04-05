@@ -2,7 +2,7 @@ use anyhow::{anyhow, Result};
 use std::env;
 use std::sync::Arc;
 use chrono::Utc;
-use heiwa_protocol::{SessionState, RoutingState, TranscriptBlock, TurnRequest, parse_turn_intent};
+use heiwa_protocol::{SessionState, RoutingState, TranscriptBlock, parse_turn_intent};
 use heiwa_tui::render_cockpit;
 use heiwa_core::drex::{default_policy, plan_route, preflight_execution, DrexIngress, ExecutionMode};
 use heiwa_provider::adapter::{Message, ProviderAdapter, Role, StreamEvent};
@@ -374,7 +374,8 @@ async fn main() -> Result<()> {
             }
         }
         "shell" => {
-            run_repl().await?;
+            let use_cockpit = std::io::stdout().is_terminal();
+            run_repl(use_cockpit).await?;
         }
         "--help" | "-h" | "help" => {
             print_help();
