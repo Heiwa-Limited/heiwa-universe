@@ -2,6 +2,8 @@ use anyhow::{anyhow, Result};
 use std::env;
 use std::sync::Arc;
 use chrono::Utc;
+use heiwa_protocol::{SessionState, RoutingState, TranscriptBlock};
+use heiwa_tui::render_cockpit;
 use heiwa_core::drex::{default_policy, plan_route, preflight_execution, DrexIngress, ExecutionMode};
 use heiwa_provider::adapter::{Message, ProviderAdapter, Role, StreamEvent};
 use heiwa_provider::providers::ollama::OllamaCliAdapter;
@@ -574,6 +576,19 @@ async fn run_repl() -> Result<()> {
         println!("No loop-capable models available. Run 'heiwa providers' or 'heiwa auth add-key' to connect.");
     }
 
+    let mut state = SessionState {
+        session_id: "default".to_string(),
+        transcript: vec![],
+        routing: RoutingState {
+            current_provider: "none".to_string(),
+            current_model: "none".to_string(),
+            mode: "Auto".to_string(),
+            explanation: None,
+        },
+        devices: vec![],
+        receipts: vec![],
+    };
+
     let mut turn_count = 0;
     let mut current_provider = String::new();
     let mut current_model = String::new();
@@ -585,10 +600,12 @@ async fn run_repl() -> Result<()> {
     if let Some(first) = model_tiers.first() {
         current_provider = first.provider.clone();
         current_model = first.model_id.clone();
+        state.routing.current_provider = current_provider.clone();
+        state.routing.current_model = current_model.clone();
     }
 
     loop {
-        let state = TelemetryState {
+        let footer_state = TelemetryState {
             provider: if current_provider.is_empty() { "none".to_string() } else { current_provider.clone() },
             model: if current_model.is_empty() { "none".to_string() } else { current_model.clone() },
             route: current_route_label(route_preference, pinned_provider.as_deref(), pinned_model.as_deref()),
@@ -597,7 +614,7 @@ async fn run_repl() -> Result<()> {
             loop_info: None,
         };
 
-        print!("\r{}", render_footer(&state));
+        print!("\r{}", render_footer(&footer_state));
         print!("\n> ");
         io::stdout().flush()?;
 
