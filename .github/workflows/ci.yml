@@ -1,0 +1,268 @@
+name: Heiwa CI
+
+on:
+  pull_request:
+    branches: ["main"]
+  push:
+    branches: ["main"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: heiwa-ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  changes:
+    name: Detect Changed Surfaces
+    runs-on: ubuntu-latest
+    outputs:
+      rust_terminal: ${{ steps.detect.outputs.rust_terminal }}
+      typescript: ${{ steps.detect.outputs.typescript }}
+      python_reference: ${{ steps.detect.outputs.python_reference }}
+      legacy_hub: ${{ steps.detect.outputs.legacy_hub }}
+      docs: ${{ steps.detect.outputs.docs }}
+      web_static: ${{ steps.detect.outputs.web_static }}
+      agent_sync: ${{ steps.detect.outputs.agent_sync }}
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+      - id: detect
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          if [[ "${GITHUB_EVENT_NAME}" == "workflow_dispatch" ]]; then
+            scripts/detect_changed_surfaces.sh --all >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          if [[ "${GITHUB_EVENT_NAME}" == "pull_request" ]]; then
+            base_sha="${{ github.event.pull_request.base.sha }}"
+            head_sha="${{ github.event.pull_request.head.sha }}"
+          else
+            base_sha="${{ github.event.before }}"
+            head_sha="${{ github.sha }}"
+            if [[ "$base_sha" == "0000000000000000000000000000000000000000" ]]; then
+              base_sha="$(git rev-list --max-count=1 HEAD^ 2>/dev/null || git rev-list --max-count=1 HEAD)"
+            fi
+          fi
+
+          scripts/detect_changed_surfaces.sh "$base_sha" "$head_sha" >> "$GITHUB_OUTPUT"
+
+  security-scan:
+    name: Security Vulnerability Scan
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - name: Run Trivy vulnerability scanner
+        uses: aquasecurity/trivy-action@57a97c7e7821a5776cebc9bb87c984fa69cba8f1
+        with:
+          scan-type: fs
+          ignore-unfixed: true
+          format: table
+          severity: CRITICAL,HIGH
+
+  core-build-and-test:
+    name: Core Rust Build & Test
+    runs-on: ubuntu-latest
+    needs:
+      - changes
+      - security-scan
+    steps:
+      - uses: actions/checkout@v5
+      - name: Skip Rust workspace checks
+        if: needs.changes.outputs.rust_terminal != 'true'
+        run: echo "No Rust terminal/core changes detected."
+      - name: Install Rust toolchain
+        if: needs.changes.outputs.rust_terminal == 'true'
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: 1.93.1
+      - name: Rust Cache
+        if: needs.changes.outputs.rust_terminal == 'true'
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: |
+            .
+      - name: Build and test Rust workspace
+        if: needs.changes.outputs.rust_terminal == 'true'
+        run: cargo test --workspace --locked
+
+  typescript-workspace-checks:
+    name: TypeScript Workspace Checks
+    runs-on: ubuntu-latest
+    needs:
+      - changes
+      - security-scan
+    steps:
+      - uses: actions/checkout@v5
+      - name: Skip TypeScript workspace checks
+        if: needs.changes.outputs.typescript != 'true'
+        run: echo "No TypeScript/web changes detected."
+      - name: Set up Node
+        if: needs.changes.outputs.typescript == 'true'
+        uses: actions/setup-node@v6
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+      - name: Install npm workspace dependencies
+        if: needs.changes.outputs.typescript == 'true'
+        run: npm ci --ignore-scripts
+      - name: Run root typecheck
+        if: needs.changes.outputs.typescript == 'true'
+        run: npm run typecheck
+
+  python-regression-tests:
+    name: Python Regression Tests
+    runs-on: ubuntu-latest
+    needs:
+      - changes
+      - security-scan
+    continue-on-error: true
+    env:
+      PYTHONPATH: ${{ github.workspace }}/packages/heiwa_cli:${{ github.workspace }}/packages/heiwa_cognition:${{ github.workspace }}/packages/heiwa_sdk:${{ github.workspace }}/packages/heiwa_protocol:${{ github.workspace }}/packages/heiwa_identity:${{ github.workspace }}/packages/heiwa_ui:${{ github.workspace }}/apps:${{ github.workspace }}/apps/heiwa_trading/src
+    steps:
+      - uses: actions/checkout@v5
+      - name: Skip Python regression tests
+        if: needs.changes.outputs.python_reference != 'true'
+        run: echo "No legacy Python reference changes detected."
+      - name: Set up Python
+        if: needs.changes.outputs.python_reference == 'true'
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.14"
+          cache: pip
+      - name: Install dependencies
+        if: needs.changes.outputs.python_reference == 'true'
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+      - name: Run unified pytest suite (reference only)
+        if: needs.changes.outputs.python_reference == 'true'
+        run: pytest packages/ apps/heiwa_trading/tests/ -v
+
+  legacy-hub-tests:
+    name: Legacy Hub Tests (Non-blocking)
+    runs-on: ubuntu-latest
+    needs:
+      - changes
+      - security-scan
+    continue-on-error: true
+    env:
+      PYTHONPATH: ${{ github.workspace }}/packages/heiwa_cli:${{ github.workspace }}/packages/heiwa_cognition:${{ github.workspace }}/packages/heiwa_sdk:${{ github.workspace }}/packages/heiwa_protocol:${{ github.workspace }}/packages/heiwa_identity:${{ github.workspace }}/packages/heiwa_ui:${{ github.workspace }}/apps
+    steps:
+      - uses: actions/checkout@v5
+      - name: Skip legacy hub tests
+        if: needs.changes.outputs.legacy_hub != 'true'
+        run: echo "No legacy hub changes detected."
+      - name: Set up Python
+        if: needs.changes.outputs.legacy_hub == 'true'
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.14"
+          cache: pip
+      - name: Install dependencies
+        if: needs.changes.outputs.legacy_hub == 'true'
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+      - name: Run legacy hub tests
+        if: needs.changes.outputs.legacy_hub == 'true'
+        run: pytest apps/heiwa_hub/tests/ -v
+
+  agent-sync-check:
+    name: Agent Sync Check
+    runs-on: ubuntu-latest
+    needs:
+      - changes
+      - security-scan
+    steps:
+      - uses: actions/checkout@v5
+      - name: Skip agent sync check
+        if: needs.changes.outputs.agent_sync != 'true'
+        run: echo "No agent sync changes detected."
+      - name: Set up Python
+        if: needs.changes.outputs.agent_sync == 'true'
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.14"
+          cache: pip
+      - name: Install dependencies
+        if: needs.changes.outputs.agent_sync == 'true'
+        run: pip install pyyaml
+      - name: Verify canonical agent sync
+        if: needs.changes.outputs.agent_sync == 'true'
+        run: python scripts/sync_agents.py --check
+
+  repo-hygiene:
+    name: Repo Hygiene
+    runs-on: ubuntu-latest
+    needs: security-scan
+    steps:
+      - uses: actions/checkout@v5
+      - name: Fail on tracked cargo cache artifacts
+        run: |
+          python - <<'PY'
+          import subprocess
+
+          tracked = subprocess.check_output(["git", "ls-files"], text=True).splitlines()
+          bad = [path for path in tracked if "D:\\cache\\cargo" in path]
+          if bad:
+              raise SystemExit("Tracked cargo cache artifacts detected:\n" + "\n".join(bad[:20]))
+          print("Repo hygiene check passed.")
+          PY
+      - name: Verify heiwa-core Dockerfile Rust floor
+        run: bash scripts/check_heiwa_core_dockerfile.sh
+      - name: Verify runtime baseline pins
+        run: bash scripts/check_runtime_baseline.sh
+
+  docs-build:
+    name: Docs Build
+    runs-on: ubuntu-latest
+    needs:
+      - changes
+      - security-scan
+    steps:
+      - uses: actions/checkout@v5
+      - name: Skip docs build
+        if: needs.changes.outputs.docs != 'true'
+        run: echo "No docs changes detected."
+      - name: Set up Python
+        if: needs.changes.outputs.docs == 'true'
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.14"
+          cache: pip
+      - name: Install docs dependencies
+        if: needs.changes.outputs.docs == 'true'
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r docs/requirements.txt
+      - name: Build MkDocs site
+        if: needs.changes.outputs.docs == 'true'
+        run: mkdocs build --strict
+
+  web-static-checks:
+    name: Web Static Checks
+    runs-on: ubuntu-latest
+    needs:
+      - changes
+      - security-scan
+    steps:
+      - uses: actions/checkout@v5
+      - name: Skip web static checks
+        if: needs.changes.outputs.web_static != 'true'
+        run: echo "No web/static changes detected."
+      - name: Set up Python
+        if: needs.changes.outputs.web_static == 'true'
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.14"
+          cache: pip
+      - name: Validate static public shell
+        if: needs.changes.outputs.web_static == 'true'
+        run: python apps/heiwa_web/scripts/check_static_surface.py
