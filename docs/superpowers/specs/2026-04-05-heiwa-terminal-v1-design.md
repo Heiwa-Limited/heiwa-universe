@@ -8,10 +8,13 @@
 
 Heiwa is a local-first, sovereign AI operator cockpit. The primary product surface is the `heiwa` binary installed on the user's machine.
 
-- **`heiwa` Binary**: The single, authoritative Rust entry point.
-- **Native Cockpit (TUI)**: The default interactive interface, built in Rust (using `ratatui` or similar), providing a multi-pane operator experience.
-- **Zero JS Runtime**: No TypeScript or JavaScript is involved in the terminal execution path. Rust owns the engine, the TUI, and the provider supervision.
-- **Offline-First**: Immediate utility with local models (Ollama, etc.) and on-device provider CLIs. No Heiwa account is required for core functionality.
+- **Rust-First Sovereignty**: The `heiwa` binary is the single, authoritative Rust entry point.
+- **Native Cockpit (TUI)**: The default interactive interface, built in Rust, providing a multi-pane operator experience.
+- **JS/TS Boundary**: 
+    - No raw JavaScript in the Heiwa Terminal runtime path.
+    - TypeScript is allowed for tooling, hosted/web surfaces, generated bindings, and optional non-authoritative clients.
+    - If TypeScript ever wraps the terminal experience, Rust remains the engine and source of truth.
+- **Offline-First**: Immediate utility with local models and on-device provider CLIs. No Heiwa account is required for core functionality.
 - **Additive Cloud Layer**: A Heiwa account provides transient sync for settings, device registry, and hosted history, but remains non-blocking and optional.
 
 ## 2. Deterministic Routing & Precedence
@@ -19,15 +22,16 @@ Heiwa is a local-first, sovereign AI operator cockpit. The primary product surfa
 Heiwa uses a strict, predictable precedence model. Routing is a transparent feasibility check, not a "fuzzy" or hidden auto-substitution.
 
 ### Precedence Order
-1. **Direct Turn Instruction**: Specific `@model` or `@provider` tags in the current prompt.
+1. **Direct Turn Instruction**: Specific `@model`/@`provider` tags, natural-language directives (e.g., "use opus 4.6 with my oauth key"), and explicit slash/manual pins.
 2. **Session/Manual Override**: Pins or modes set for the duration of the current session.
-3. **Local Workspace Profile**: Configuration defined in the current project/directory.
-4. **Synced Workspace/Account Baseline**: Transient profile data pulled from the Heiwa account.
-5. **Device Capability Discovery**: Hardware/env-level filter (e.g., "Is Ollama running?", "Is GPU available?").
+3. **Local Workspace Profile**: Authoritative project intent; defined in the current project/directory.
+4. **Synced Account Profile**: Transient baseline; data pulled from the Heiwa account.
+5. **Device State**: Local-only overlay and hardware feasibility context (e.g., "Is Ollama running?", "Is GPU available?").
 6. **DREX Automatic Selection**: Kernel-level choice based on cost, privacy, and capability among remaining valid candidates.
 
 ### Routing Behavior
-- **Fail-Fast**: If a requested target is unavailable, Heiwa reports the reason rather than silently switching.
+- **No Silent Auto-Fallback**: Automatic substitution is disabled by default. If a requested target is unavailable, Heiwa fails fast and reports the exact reason.
+- **Full-Auto Opt-In**: Silent fallback occurs only when the user has explicitly enabled "full-auto" behavior via command or settings.
 - **Explicit Proposal**: Heiwa suggests substitutes if the primary target fails feasibility checks.
 - **Provider Truth**: The UI explicitly displays provider status: Discovered, Authenticated, Executable, Loop-Capable, and Verified.
 
@@ -56,8 +60,8 @@ The implementation is an evolutionary extraction from the current `apps/heiwa_sh
 - `apps/heiwa_shell`: CLI entry, boot logic, and Plain-mode fallback.
 - `crates/heiwa_protocol`: New! Shared typed state, event models, transcript blocks, and command metadata.
 - `crates/heiwa_tui`: New! The native cockpit renderer and terminal event loop.
-- `crates/heiwa_router`: Logic for DREX route preparation and feasibility checking.
-- `crates/heiwa_profile`: Layered config management (Device + Workspace + Sync).
+- `crates/heiwa_router` (Optional): Extraction for DREX route preparation if logic grows substantial.
+- `crates/heiwa_profile` (Optional): Extraction for layered config management if complexity warrants it.
 
 ### Implementation Phases
 1. **Protocol Extraction**: Move `TelemetryState` and `ReplCommand` to `heiwa_protocol` and expand into a full UI/Session state model.
