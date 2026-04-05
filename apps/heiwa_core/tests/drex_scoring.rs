@@ -1,6 +1,7 @@
 use heiwa_bindings::ModelTier;
 use heiwa_core::drex::{
-    default_policy, evaluate_drex, plan_route, DrexIngress, DrexVector, ResolutionTier,
+    default_policy, evaluate_drex, plan_route, preflight_execution, DrexIngress, DrexVector,
+    ExecutionMode, ResolutionTier,
 };
 
 fn local_model(
@@ -88,7 +89,50 @@ fn route_plan_prefers_vram_fit_and_kv_strategy_for_local_execution() {
     let selected = route.selected_model.expect("selected model");
 
     assert_eq!(route.decision.active_tier, ResolutionTier::Micro);
-    assert_eq!(route.runtime_hint, "macbook");
+    assert_eq!(route.execution_mode, ExecutionMode::LocalModel);
+    assert_eq!(route.runtime_hint, "local");
     assert_eq!(selected.model_id, "ollama/qwen3.5:4b");
     assert_eq!(selected.kv_cache_strategy, "turboquant");
+}
+
+#[test]
+fn preflight_handles_greeting_without_model_spend() {
+    let ingress = DrexIngress {
+        intent: "chat".to_string(),
+        risk: "low".to_string(),
+        raw_text: "hi".to_string(),
+        privacy: "standard".to_string(),
+        runtime: "any".to_string(),
+        available_vram_mb: 8_192,
+        required_context_tokens: 256,
+    };
+
+    let result = preflight_execution(&ingress, &[], &default_policy());
+    assert_eq!(result.execution_mode, ExecutionMode::Deterministic);
+    assert!(
+        result.response_text.as_deref().unwrap_or_default().contains("Ready"),
+        "expected deterministic greeting response, got {:?}",
+        result.response_text
+    );
+}
+
+#[test]
+fn preflight_asks_for_clarification_on_underspecified_prompt() {
+    let ingress = DrexIngress {
+        intent: "chat".to_string(),
+        risk: "low".to_string(),
+        raw_text: "help".to_string(),
+        privacy: "standard".to_string(),
+        runtime: "any".to_string(),
+        available_vram_mb: 8_192,
+        required_context_tokens: 256,
+    };
+
+    let result = preflight_execution(&ingress, &[], &default_policy());
+    assert_eq!(result.execution_mode, ExecutionMode::Clarify);
+    assert!(
+        result.response_text.as_deref().unwrap_or_default().contains("Tell me"),
+        "expected clarify response, got {:?}",
+        result.response_text
+    );
 }

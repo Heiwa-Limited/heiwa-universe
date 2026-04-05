@@ -9,6 +9,14 @@ pub enum ResolutionTier {
     Micro,
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum ExecutionMode {
+    Deterministic,
+    LocalModel,
+    RemoteModel,
+    Clarify,
+}
+
 #[derive(Clone, Debug, PartialEq)]
 pub struct DrexPolicy {
     pub macro_weights: [f64; 7],

@@ -90,3 +90,24 @@ fn test_drex_routing_forces_local_for_sovereign_privacy() {
     assert_eq!(selected.provider, "ollama");
     assert!(plan.routing_metadata.contains("llama3"));
 }
+
+#[test]
+fn test_drex_routing_prefers_local_for_simple_chat_when_available() {
+    let ingress = DrexIngress {
+        intent: "chat".to_string(),
+        risk: "low".to_string(),
+        raw_text: "hi there".to_string(),
+        privacy: "standard".to_string(),
+        runtime: "any".to_string(),
+        available_vram_mb: 8192,
+        required_context_tokens: 256,
+    };
+
+    let model_tiers = get_mock_model_tiers();
+    let policy = default_policy();
+    let plan = plan_route(&ingress, &model_tiers, &policy).expect("should plan route");
+
+    let selected = plan.selected_model.expect("should select a model");
+    assert_eq!(selected.provider, "ollama");
+    assert_eq!(selected.model_id, "llama3");
+}

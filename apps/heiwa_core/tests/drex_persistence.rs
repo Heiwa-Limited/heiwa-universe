@@ -3,7 +3,8 @@ use std::sync::{Arc, Mutex};
 use anyhow::Result;
 use heiwa_bindings::ModelTier;
 use heiwa_core::drex::{
-    DrexAuthorityGate, DrexDecision, DrexScoreCard, DrexVector, ResolutionTier, RoutePlan,
+    DrexAuthorityGate, DrexDecision, DrexScoreCard, DrexVector, ExecutionMode,
+    ResolutionTier, RoutePlan,
 };
 use heiwa_core::stdb::{
     PersistedArtifact, PersistedDispatchAck, PersistedDrexDecision, PersistedDrexFailure,
@@ -197,6 +198,7 @@ fn sample_route_plan() -> RoutePlan {
                 reasons: vec![],
             },
         },
+        execution_mode: ExecutionMode::LocalModel,
         runtime_hint: "macbook".to_string(),
         selected_model: Some(ModelTier {
             id: 0,

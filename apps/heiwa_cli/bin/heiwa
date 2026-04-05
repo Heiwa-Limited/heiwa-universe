@@ -4,19 +4,46 @@ const path = require('path');
 const fs = require('fs');
 
 const args = process.argv.slice(2);
-const rustBinary = path.join(__dirname, '../../../target/debug/heiwa-shell');
+const repoRoot = process.env.HEIWA_ROOT
+  ? path.resolve(process.env.HEIWA_ROOT)
+  : path.join(__dirname, '../../..');
+const rustBinaryOverride = process.env.HEIWA_SHELL_BIN;
+const rustBinaryCandidates = [
+  rustBinaryOverride,
+  path.join(repoRoot, 'target/debug/heiwa'),
+  path.join(repoRoot, 'target/release/heiwa'),
+  path.join(repoRoot, 'target/debug/heiwa-shell'),
+  path.join(repoRoot, 'target/release/heiwa-shell'),
+].filter(Boolean);
 const pythonScript = path.join(__dirname, '../heiwa');
 
-if (fs.existsSync(rustBinary)) {
+for (const rustBinary of rustBinaryCandidates) {
+  if (!fs.existsSync(rustBinary)) continue;
   const result = spawnSync(rustBinary, args, {
     stdio: 'inherit',
     env: process.env
   });
   process.exit(result.status);
-} else {
+}
+
+if (fs.existsSync(path.join(repoRoot, 'Cargo.toml'))) {
+  const result = spawnSync('cargo', ['run', '-q', '-p', 'heiwa-shell', '--bin', 'heiwa', '--', ...args], {
+    cwd: repoRoot,
+    stdio: 'inherit',
+    env: process.env
+  });
+  if (typeof result.status === 'number') {
+    process.exit(result.status);
+  }
+}
+
+if (fs.existsSync(pythonScript)) {
   const result = spawnSync(pythonScript, args, {
     stdio: 'inherit',
     env: process.env
   });
   process.exit(result.status);
 }
+
+console.error(`[FATAL] Could not locate a Heiwa launcher. Checked repo root ${repoRoot}`);
+process.exit(1);

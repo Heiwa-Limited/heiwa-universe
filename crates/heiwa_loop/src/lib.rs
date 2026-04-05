@@ -4,10 +4,11 @@ use heiwa_bindings::{
     record_loop_iteration_reducer::record_loop_iteration,
     start_loop_session_reducer::start_loop_session,
     record_run_reducer::record_run,
-    DbConnection, ModelTier,
+    ModelTier,
 };
+use heiwa_stdb::StdbClient;
 use heiwa_core::drex::{default_policy, plan_route, DrexIngress};
-use heiwa_provider::adapter::ProviderAdapter;
+use heiwa_provider::adapter::{Message, ProviderAdapter, Role, StreamEvent};
 use serde::{Deserialize, Serialize};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
@@ -39,12 +40,12 @@ pub struct LoopController {
     config: LoopConfig,
     loop_id: String,
     cancelled: Arc<AtomicBool>,
-    stdb: Option<Arc<DbConnection>>,
+    stdb: StdbClient,
     model_tiers: Vec<ModelTier>,
 }
 
 impl LoopController {
-    pub fn new(config: LoopConfig, stdb: Option<Arc<DbConnection>>, model_tiers: Vec<ModelTier>) -> Self {
+    pub fn new(config: LoopConfig, stdb: StdbClient, model_tiers: Vec<ModelTier>) -> Self {
         Self {
             config,
             loop_id: Uuid::new_v4().to_string(),
@@ -73,8 +74,8 @@ impl LoopController {
         );
 
         // 1. Initialize Loop Session in STDB
-        if let Some(ref stdb) = self.stdb {
-            stdb.reducers.start_loop_session(
+        if let Some(conn) = self.stdb.connection() {
+            conn.reducers.start_loop_session(
                 self.loop_id.clone(),
                 self.config.user_id.clone(),
                 self.config.objective.clone(),
@@ -90,14 +91,14 @@ impl LoopController {
         while current_turn < self.config.max_turns {
             if self.cancelled.load(Ordering::SeqCst) {
                 println!("Loop {} cancelled.", self.loop_id);
-                if let Some(ref stdb) = self.stdb {
-                    stdb.reducers.complete_loop_session(
+                if let Some(conn) = self.stdb.connection() {
+                    conn.reducers.complete_loop_session(
                         self.loop_id.clone(),
                         "CANCELLED".to_string(),
                         "User requested cancellation".to_string(),
                     ).map_err(|e| anyhow!(e.to_string()))?;
                 }
-                
+
                 let _ = status_tx.send(LoopStatus {
                     loop_id: self.loop_id.clone(),
                     current_turn,
@@ -118,69 +119,97 @@ impl LoopController {
                 raw_text: format!("Objective: {}. Context: {}", self.config.objective, last_summary),
                 privacy: self.config.privacy.clone(),
                 runtime: self.config.runtime.clone(),
-                available_vram_mb: 8192, // TODO: Pull from machine manifest
+                available_vram_mb: 8192,
                 required_context_tokens: 1024,
             };
-            
+
             let policy = default_policy();
             let route_plan = plan_route(&ingress, &self.model_tiers, &policy)?;
-            
+
             let selected_tier = route_plan.selected_model.ok_or_else(|| anyhow!("No model available for turn {}", current_turn))?;
             let adapter = adapters(&selected_tier.provider).ok_or_else(|| anyhow!("No adapter found for provider {}", selected_tier.provider))?;
 
-            // 3. Execution
-            let session_id = adapter.start_session().await?;
-            adapter.send_input(&session_id, &ingress.raw_text).await?;
-            let events = adapter.read_events(&session_id).await?;
-            adapter.close(&session_id).await?;
+            // 3. Execution via streaming adapter
+            let messages = vec![Message {
+                role: Role::User,
+                content: ingress.raw_text.clone(),
+            }];
 
-            let output_summary = events.iter()
-                .filter(|e| e.event_type == "text")
-                .map(|e| e.payload.clone())
-                .collect::<Vec<_>>()
-                .join("\n");
-            
+            let (stream_tx, mut stream_rx) = mpsc::channel(32);
+            let adapter_clone = adapter.clone();
+            let model_id = selected_tier.model_id.clone();
+
+            tokio::spawn(async move {
+                if let Err(e) = adapter_clone.send(&model_id, &messages, stream_tx).await {
+                    eprintln!("Adapter error: {}", e);
+                }
+            });
+
+            // Collect streamed output
+            let mut output_parts = Vec::new();
+            let mut turn_usage = heiwa_provider::adapter::TokenUsage::default();
+
+            while let Some(event) = stream_rx.recv().await {
+                match event {
+                    StreamEvent::Token(text) => output_parts.push(text),
+                    StreamEvent::Done(usage) => {
+                        turn_usage = usage;
+                        break;
+                    }
+                    StreamEvent::Error(e) => {
+                        eprintln!("Stream error: {}", e);
+                        break;
+                    }
+                    StreamEvent::ToolUse { .. } => { /* future */ }
+                }
+            }
+
+            let output_summary = output_parts.join("\n");
             let turn_ended_at = Utc::now().to_rfc3339();
             last_summary = output_summary.clone();
-            
+
             // 4. Record Evidence in STDB
             let run_id = format!("run-{}", Uuid::new_v4());
-            let turn_cost = selected_tier.cost_per_turn;
+            let turn_cost = if turn_usage.cost_usd > 0.0 {
+                turn_usage.cost_usd
+            } else {
+                selected_tier.cost_per_turn
+            };
             total_cost += turn_cost;
 
-            if let Some(ref stdb) = self.stdb {
-                // Real Run Receipt
-                stdb.reducers.record_run(
+            if let Some(conn) = self.stdb.connection() {
+                conn.reducers.record_run(
                     run_id.clone(),
                     self.config.user_id.clone(),
-                    format!("loop-{}", self.loop_id), // Link to loop via proposal_id proxy or similar
+                    format!("loop-{}", self.loop_id),
                     "loop-lease".to_string(),
                     Some(self.loop_id.clone()),
                     turn_started_at,
                     turn_ended_at,
                     "SUCCESS".to_string(),
-                    "{}".to_string(), // chain_result
-                    "{}".to_string(), // signals
-                    "[]".to_string(), // artifacts
+                    "{}".to_string(),
+                    "{}".to_string(),
+                    "[]".to_string(),
                     "local-node".to_string(),
-                    "{}".to_string(), // replay
+                    "{}".to_string(),
                     "loop".to_string(),
                     selected_tier.model_id.clone(),
-                    0, 0, 0, // tokens
+                    turn_usage.input_tokens as i64,
+                    turn_usage.output_tokens as i64,
+                    0,
                     turn_cost,
-                    None, None, // owner/principal
-                    None, None, // failure
+                    None, None,
+                    None, None,
                 ).map_err(|e| anyhow!(e.to_string()))?;
 
-                // Record Iteration
                 let iteration_id = Uuid::new_v4().to_string();
-                stdb.reducers.record_loop_iteration(
+                conn.reducers.record_loop_iteration(
                     iteration_id,
                     self.loop_id.clone(),
                     current_turn,
                     ingress.raw_text.clone(),
                     output_summary,
-                    0.5, // TODO: Real scoring logic
+                    0.5,
                     Some(run_id),
                     turn_cost,
                 ).map_err(|e| anyhow!(e.to_string()))?;
@@ -200,8 +229,8 @@ impl LoopController {
         }
 
         // 5. Finalize Session in STDB
-        if let Some(ref stdb) = self.stdb {
-            stdb.reducers.complete_loop_session(
+        if let Some(conn) = self.stdb.connection() {
+            conn.reducers.complete_loop_session(
                 self.loop_id.clone(),
                 "COMPLETED".to_string(),
                 "Max turns reached or objective met".to_string(),

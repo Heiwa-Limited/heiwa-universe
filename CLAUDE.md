@@ -1,130 +1,57 @@
-# CLAUDE.md
+# CLAUDE.md — heiwa-universe
 
-  This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+This repository builds Heiwa, a local-first AI runtime and enterprise platform. Claude Code is one wrapped provider surface inside Heiwa, not the product itself.
 
-## Class 3 Executor Role
+## Claude's Role Here
 
-  Claude Code is a Class 3 cloud OAuth executor in the Heiwa system alongside Gemini CLI, Codex, and Antigravity. All Class 3 models possess full executive capabilities with full-access to all user actions. Write-gated autonomy is suspended for these models. Direct execution authorized.
+- Claude Code is a peer executor alongside Codex, Gemini CLI, Antigravity, and local model runtimes.
+- Claude owns its own native tools, system prompts, auth semantics, model availability, and quota behavior.
+- Heiwa adds repo-local context, routing, evidence, shell ergonomics, and cross-provider normalization.
+- Do not write docs or code that implies Heiwa owns Claude's inference internals.
 
-  All Class 3 tools are peers. None tells another what to build. Each identifies work and executes it. Frame handoffs as "here's what I did, here's what's open."
+## Required Reading
 
-## Subagent Authority
+Before touching runtime or architecture work, read in this order:
 
-  Claude Code owns its own subagents, reviewers, and delegated agent flows. The human operator is not the approval hop for routine subagent lifecycle work: spawn, message, wait, close, sandboxed shell/file work, and normal MCP use stay provider-managed.
+1. `HEIWA.md`
+2. `AGENTS.md`
+3. `.claude/settings.json`
+4. `.claude/settings.local.json`
 
-  Escalate only for destructive host actions, irreversible external side effects, credential or policy break-glass, or platform/harness prompts that cannot be suppressed from configuration.
+## Current Product Truth
 
-## Provider Auto-Activation
+- The installed `heiwa` runtime is the current product center.
+- `apps/heiwa_shell/` is the primary operator surface in this repo.
+- `apps/heiwa_core/` contains the Rust execution kernel and hosted runtime path.
+- `apps/heiwa_hub/spacetimedb/` is the backend authority plane.
+- Web and `/code` surfaces are later work. Do not overstate them.
 
-  Project-local Claude authority lives in `.claude/settings.json` and `.claude/settings.local.json`.
+## Provider Truth
 
-  Canonical Heiwa specialists live in `ops/agents/` and sync into `.claude/agents/` via `uv run scripts/sync_agents.py`.
+Heiwa wraps provider-owned runtimes:
 
-  Native Claude capabilities remain enabled. Heiwa adds repo-local boot context, policy, and canonical specialists; it does not replace Claude's own tools.
+- Claude Code
+- Codex
+- Gemini CLI
+- Antigravity
+- Ollama and later local runtimes
 
-## Boot Sequence
-
-  Read these before making runtime or architecture changes:
-
-  1. `ops/context/HEIWA.md` — repo routing, hard rules, task routing table
-  2. `AGENTS.md` — agent architecture pointers (Rust-first)
-  3. `config/swarm/BUILD_BLUEPRINT_2026-03-06.md` — hardware topology, execution model
-  4. `config/swarm/END_STATE_2026-03.md` — target architecture and kill list
-  5. `config/swarm/ai_router.json` — model/provider registry
-  6. `docs/superpowers/specs/2026-04-02-heiwa-rationalization-design.md` — rationalization spec
+Integration maturity is not identical across them. Be explicit about what is truly wired today.
 
 ## Commands
 
-### Setup
+```bash
+cargo build --workspace
+cargo test -p heiwa-shell --test smoke -- --nocapture
+cargo test -p heiwa-loop -- --nocapture
+```
 
-  ```bash
-  rustup default stable
-  cargo build --workspace
-  python -m venv .venv && source .venv/bin/activate
-  pip install -r requirements.txt
-  ```
+Use targeted crate tests before claiming runtime progress.
 
-  Run
+## Hard Rules
 
-  ```bash
-  cd apps/heiwa_core && cargo run        # Start Rust core locally
-  ```
-
-  Tests
-
-  ```bash
-  cargo test -p heiwa-core                # Rust Core tests
-  pytest packages/                        # SDK/Logic tests
-  ```
-
-  Docs
-
-  ```bash
-  pip install -r docs/requirements.txt
-  mkdocs build --strict
-  ```
-
-  Deployment (CI-driven — push to main triggers auto-deploy)
-
-  ```bash
-  git push origin main                    # Railway auto-deploys heiwa-core from main
-  ```
-
-  Architecture
-
-  Heiwa is a BYOK agent orchestration platform. Users bring their own API keys; Heiwa routes optimally. The main execution flow is:
-
-  User input → Heiwa Core (DREX) → Broker → Execution Node → ToolMesh → execution
-
-  Key layers
-
-  ┌─────────────────────┬──────────────────────────┬──────────────────────────────────────────────────────┐
-  │        Layer        │         Location         │                       Purpose                        │
-  ├─────────────────────┼──────────────────────────┼──────────────────────────────────────────────────────┤
-  │ Core (control plane)│ apps/heiwa_core/         │ Railway-hosted Rust runtime: orchestrator, gateway   │
-  ├─────────────────────┼──────────────────────────┼──────────────────────────────────────────────────────┤
-  │ CLI                 │ apps/heiwa_cli/          │ Operator surface, local execution wrappers           │
-  ├─────────────────────┼──────────────────────────┼──────────────────────────────────────────────────────┤
-  │ SDK                 │ packages/heiwa_sdk/      │ Python client for STDB and core APIs                 │
-  ├─────────────────────┼──────────────────────────┼──────────────────────────────────────────────────────┤
-  │ Protocol            │ packages/heiwa_protocol/ │ Shared typed contracts                               │
-  ├─────────────────────┼──────────────────────────┼──────────────────────────────────────────────────────┤
-  │ Bindings            │ packages/heiwa_bindings/ │ Generated SpacetimeDB Rust and TS types              │
-  ├─────────────────────┼──────────────────────────┼──────────────────────────────────────────────────────┤
-  │ Web                 │ apps/heiwa_web/          │ Cloudflare Pages product shell (app.heiwa.ltd)       │
-  ├─────────────────────┼──────────────────────────┼──────────────────────────────────────────────────────┤
-  │ Docs                │ docs/                    │ MkDocs Material source → docs.heiwa.ltd              │
-  └─────────────────────┴──────────────────────────┴──────────────────────────────────────────────────────┘
-
-  State layer
-
-  - SpacetimeDB is authoritative. Root module at apps/heiwa_hub/spacetimedb/
-  - Bindings available in packages/heiwa_bindings/rust/
-  - Tables: users, oauth_identities, provider_credentials, missions, runs, nodes, etc.
-  - All core tables scoped by user_id for multi-tenant isolation
-
-  CI/CD Pipeline (.github/workflows/deploy.yml)
-
-  PR gates (all must pass): security-scan (Trivy) → core-build-and-test → python-regression-tests → repo-hygiene → docs-build → web-static-checks
-
-  On merge to main: deploy-railway + deploy-web
-
-  Key Environment Variables
-
-  - HEIWA_MACHINE_AUTH_TOKEN — machine-to-machine core auth
-  - HEIWA_JWT_SIGNING_SECRET — user session JWT signing
-  - STDB_TOKEN — spacetimeDB authentication
-  - HEIWA_STATE_BACKEND — spacetimedb (canonical)
-  - PORT — HTTP server port (default: 8080)
-
-  Hard Rules
-
-  - State: write to SpacetimeDB first
-  - Transport: prefer subscriptions/WebSockets over polling
-  - Execution: route through Heiwa Core / DREX
-  - Railway-primary: Railway is the primary control plane, boost nodes are optional
-  - Cost: no paid API credits — subscription CLI tools + free APIs only
-  - Privacy: sovereign work stays on boost nodes (never cloud)
-  - Untrusted code: E2B sandboxes only, never host
-  - Honesty: do not overstate maturity in docs or diagrams
-  - Communication: users talk to **Heiwa**.
+- local-first truth over web-first framing
+- provider-owned semantics stay provider-owned
+- SpacetimeDB is backend authority, not a normal operator surface
+- Railway is support infra, not the product center
+- honesty over completeness theater

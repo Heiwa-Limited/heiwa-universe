@@ -1,42 +1,80 @@
-# AGENTS.md — The Heiwa Swarm Map
+# AGENTS.md — heiwa-universe
 
-Heiwa is an omnidirectional fluid mesh of peer agents. The authoritative control plane is **Heiwa Core** (Rust).
+This repository builds the Heiwa full stack. The current product center of gravity is the installed `heiwa` runtime on the user's machine.
 
-## 1. Core Authority (`apps/heiwa_core/`)
+## Canonical Product Truth
 
-- **Heiwa Core** (`heiwa-core`): The authoritative Rust orchestrator and gateway. Manages:
-    - Unified WebSocket Pipe (`/ws`) for all clients.
-    - DREX routing and model-tier selection.
-    - Mission and Task lifecycle (STDB-backed).
-    - Machine and session authentication.
-    - Worker ingress for boost nodes.
+- **Heiwa** is the company and product identity.
+- **`heiwa`** is the primary installed operator surface.
+- **DREX** is the internal execution kernel.
+- **SpacetimeDB** is the backend adjudication, subscription, and evidence plane.
+- **Railway, GitHub, and Cloudflare** are support infrastructure for hosted, deployment, edge, and enterprise needs.
 
-## 2. Mesh Connectivity
+Compression:
 
-- **Sovereign Boost Nodes**: Optional local nodes (Mac/WSL) that dial into `heiwa-core` to provide delegated execution and inference.
-- **Heiwa CLI**: Operator surface connecting to the core auth/runtime plane.
-- **app.heiwa.ltd**: Unified product shell (TypeScript) over the core API.
+> Rust proposes and executes, SpacetimeDB adjudicates and records, `heiwa` presents.
 
-## 2.5. Provider Authority
+## Current Repo Spine
 
-- **Class 3 Peers**: Codex, Claude Code, Gemini CLI, and Antigravity are peer executors over the same Heiwa stack.
-- **Provider-Owned Subagents**: Each provider owns its own subagents, reviewers, and delegated execution loops. Routine spawn/message/wait/close flow stays provider-managed.
-- **Escalation Boundary**: Interrupt the human operator only for destructive host actions, irreversible external side effects, credential or policy break-glass, or platform/harness prompts that the provider cannot suppress from configuration.
-- **Project Auto-Activation**: Repo-local provider config lives in `.codex/`, `.claude/`, and `.gemini/`. Canonical specialist wrappers live in `ops/agents/`, sync into `.gemini/agents/` and `.claude/agents/`, and install into `~/.codex/skills` via `uv run scripts/sync_agents.py --install-codex`.
+| Path | Role |
+| --- | --- |
+| `apps/heiwa_shell/` | Installed `heiwa` runtime and shell surface |
+| `apps/heiwa_core/` | Rust execution kernel and hosted runtime path |
+| `apps/heiwa_hub/spacetimedb/` | Canonical STDB module and reducers |
+| `crates/heiwa_provider/` | Provider normalization and adapter surfaces |
+| `crates/heiwa_install/` | Install and doctor flows |
+| `crates/heiwa_session/` | Local session daemon primitives |
+| `crates/heiwa_repl/` | REPL parsing and footer telemetry |
+| `crates/heiwa_loop/` | Bounded loop workflow |
+| `packages/heiwa_sdk/` | Python compatibility and migration surface |
+| `packages/heiwa_bindings/` | Generated bindings for STDB types |
 
-## 3. Legacy / Reference (`apps/heiwa_hub/`)
+## Provider Truth
 
-- **Python Hub**: Legacy prototype logic. High-value patterns (Spine, Telemetry, Messenger) are being ported to the Rust Core.
-- **SpacetimeDB**: Still rooted at `apps/heiwa_hub/spacetimedb/` as the state authority.
+Heiwa wraps provider-owned runtimes. It does not own their internals.
 
-## 4. Ground Truth & Progress
+- Claude Code, Codex, Gemini CLI, and Antigravity remain provider-owned CLI surfaces.
+- Providers own their own system prompts, auth semantics, session behavior, cloud model inventory, and native quotas.
+- Ollama and other local runtimes remain local-model providers, not Heiwa-native models.
+- Heiwa adds local install/auth UX, routing, evidence, bounded loops, and operator coherence across those surfaces.
 
-- `docs/superpowers/status/feature_list.json`: System capability checklist.
-- `docs/superpowers/status/progress.md`: Active work logs.
-- `docs/superpowers/specs/2026-04-02-heiwa-rationalization-design.md`: Current architecture specification.
+Be honest about maturity:
 
-## 5. Security Posture
+- discovery and wrapping may exist before parity does
+- a provider may be known before it is fully loop-capable
+- hosted surfaces exist in the repo, but they are not the current product center
 
-- **Machine Auth**: Managed via `HEIWA_MACHINE_AUTH_TOKEN`.
-- **User Sessions**: Managed via `HEIWA_JWT_SIGNING_SECRET` and `.heiwa.ltd` wildcard cookies.
-- **Redaction**: All logs are automatically redacted via centralized Rust primitives.
+## Operator and Infra Truth
+
+- `~/.heiwa/` is the owner-local runtime root on Devon's machine.
+- Users/operators should not have to think about SpacetimeDB directly.
+- Railway hosts supported Heiwa services; it does not define the product.
+- GitHub is source, CI, and release distribution.
+- Cloudflare is public edge and later remote-surface infrastructure.
+
+## Working Priorities
+
+Prioritize this order:
+
+1. local runtime truth
+2. provider/account normalization
+3. evidence and bounded execution
+4. internal backend sync and hosted support paths
+5. remote surfaces such as `/code`
+
+Do not optimize for maturity theater first:
+
+- do not overstate `/code`
+- do not over-rotate into web-console-first language
+- do not treat Railway as the product center
+- do not pretend every wrapped provider is equally integrated
+
+## Required Reading
+
+Before making architecture or runtime changes, read:
+
+1. `HEIWA.md`
+2. this file
+3. `CLAUDE.md` or `GEMINI.md` when working through that provider surface
+
+If repo docs drift, `HEIWA.md` is the canonical architecture file.

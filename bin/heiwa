@@ -1,0 +1,34 @@
+#!/bin/zsh
+set -euo pipefail
+
+CANONICAL_LAUNCHER="${HEIWA_HOME:-$HOME/.heiwa}/bin/heiwa"
+if [[ -x "$CANONICAL_LAUNCHER" && "$CANONICAL_LAUNCHER" != "$0" ]]; then
+  exec "$CANONICAL_LAUNCHER" "$@"
+fi
+
+REPO_ROOT="${HEIWA_ROOT:-$HOME/heiwa-universe}"
+typeset -a candidates=(
+  "$REPO_ROOT/target/debug/heiwa"
+  "$REPO_ROOT/target/release/heiwa"
+  "$REPO_ROOT/target/debug/heiwa-shell"
+  "$REPO_ROOT/target/release/heiwa-shell"
+)
+
+for candidate in "${candidates[@]}"; do
+  if [[ -x "$candidate" ]]; then
+    exec "$candidate" "$@"
+  fi
+done
+
+LAUNCHER="$REPO_ROOT/apps/heiwa_cli/bin/heiwa"
+if [[ -f "$LAUNCHER" ]]; then
+  exec node "$LAUNCHER" "$@"
+fi
+
+if [[ -f "$REPO_ROOT/Cargo.toml" ]]; then
+  exec cargo run -q -p heiwa-shell --bin heiwa -- "$@"
+fi
+
+echo "[FATAL] Could not locate a Heiwa launcher from $REPO_ROOT" >&2
+echo "Set HEIWA_ROOT to your heiwa-universe checkout or reinstall Heiwa." >&2
+exit 1

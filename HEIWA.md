@@ -7,7 +7,7 @@ This file replaces the old repo-root compatibility shim. When `README.md`, legac
 
 ## One-Sentence Truth
 
-Heiwa is a local-first AI runtime and enterprise platform: `heiwa` is the installed product surface, DREX is the internal execution kernel, SpacetimeDB is the adjudication and evidence plane, Rust proposes and executes, and `heiwa` presents.
+Heiwa is a local-first AI runtime and enterprise platform: `heiwa` is the installed product surface, DREX is the internal execution kernel, SpacetimeDB is the backend adjudication and evidence plane, Rust proposes and executes, providers still own their own inference internals, and `heiwa` presents one coherent operator experience above them.
 
 ## What Heiwa Is
 
@@ -55,8 +55,13 @@ As of 2026-04-04, `heiwa-universe` has already landed meaningful local runtime s
   - `session attach`
   via [`apps/heiwa_shell/src/main.rs`](apps/heiwa_shell/src/main.rs).
 - The Rust shell/session/repl/telemetry surface is real enough to test, but it is not the same thing as final product maturity.
+- The Heiwa account/provider plane exists in a narrow but real form, with local identity and wrapped provider status discovery.
+- Bounded loop execution is now a real workflow in [`crates/heiwa_loop/`](crates/heiwa_loop/) rather than a stub.
 - Python remains in the repo as a compatibility and migration surface. It is not the long-term product center.
-- `crates/heiwa_loop/` exists, but bounded loop execution is not yet the canonical finished workflow.
+- Provider execution parity is still uneven:
+  - Claude Code and Ollama are the real loop-capable adapters today.
+  - Codex, Gemini CLI, and Antigravity are discovered and wrapped, but not yet at the same execution depth.
+- Online-local backend sync is still less mature than the local shell/runtime path.
 - `/code` and broader remote product surfaces remain later work.
 
 ## Canonical Product Identity
@@ -66,7 +71,7 @@ As of 2026-04-04, `heiwa-universe` has already landed meaningful local runtime s
 | **Heiwa** | Company and product identity |
 | **`heiwa`** | Primary installed runtime and operator surface |
 | **DREX** | Internal execution kernel and routing substrate |
-| **SpacetimeDB** | Adjudication, canonical state, subscriptions, evidence |
+| **SpacetimeDB** | Backend adjudication, canonical state, subscriptions, evidence |
 | **Rust runtime** | Volatile execution plane: provider supervision, candidate generation, shell/process control |
 | **Web surfaces** | Later attached or hosted surfaces over the same kernel |
 
@@ -104,6 +109,10 @@ That is the architecture. DREX is not the public brand. It is the kernel inside 
 - Local auth/config UX
 - Command invocation and shell escape
 - Presentation of runtime and evidence state
+
+### Important user-facing boundary
+
+Normal users and operators should not have to think about SpacetimeDB directly. They interact with Heiwa surfaces; Heiwa services and runtimes own the backend connection path on their behalf.
 
 ### Important nuance
 
@@ -162,6 +171,13 @@ There are always two limit planes:
      - Team and enterprise governance features
 
 A task is eligible only if it satisfies both the provider-side constraint set and the Heiwa-side policy set.
+
+### Current provider reality in this repo
+
+- Claude Code, Codex, Gemini CLI, and Antigravity are wrapped as provider-owned CLI surfaces.
+- Ollama is the canonical local-runtime provider today.
+- Discovery, auth status wrapping, and routing metadata do not imply equal execution depth across all providers.
+- Heiwa should always say which providers are merely wrapped, which are verified connected, and which are actually execution-capable for a given workflow.
 
 ### Provider auth is per integration mode
 
@@ -313,6 +329,28 @@ The minimum living system is:
 - local `heiwa` runtime
 - routing and evidence spine
 - basic sync of settings/history/personalization
+
+## What We Have Been Doing
+
+The repo has been moving in the right order:
+
+1. tighten the Rust/STDB authority substrate
+2. land the local `heiwa` shell/runtime
+3. normalize provider accounts and auth status
+4. make bounded loop execution real
+5. clean up docs so the repo describes Heiwa honestly
+
+That is the right direction.
+
+## What We Should Be Doing Now
+
+Prioritize the remaining product-alive gaps, not maturity theater:
+
+1. strengthen the local MacBook/operator runtime
+2. tighten honest provider verification and adapter coverage
+3. complete the internal online-local backend sync path
+4. keep evidence and bounded execution trustworthy
+5. defer `/code`, marketplace, and heavy remote surfaces until the local runtime is undeniably solid
 
 ## Development Order
 

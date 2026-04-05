@@ -1,7 +1,7 @@
 use anyhow::{anyhow, Result};
 use heiwa_bindings::ModelTier;
 
-use super::policy::{DrexDecision, DrexPolicy, ResolutionTier};
+use super::policy::{DrexDecision, DrexPolicy, ExecutionMode, ResolutionTier};
 use super::scorer::evaluate_drex;
 use super::vector::DrexVector;
 
@@ -21,9 +21,95 @@ pub struct DrexIngress {
 #[derive(Clone, Debug, PartialEq)]
 pub struct RoutePlan {
     pub decision: DrexDecision,
+    pub execution_mode: ExecutionMode,
     pub runtime_hint: String,
     pub selected_model: Option<ModelTier>,
     pub routing_metadata: String,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct PreflightDecision {
+    pub execution_mode: ExecutionMode,
+    pub response_text: Option<String>,
+    pub reason: String,
+}
+
+pub fn preflight_execution(
+    ingress: &DrexIngress,
+    model_tiers: &[ModelTier],
+    policy: &DrexPolicy,
+) -> PreflightDecision {
+    let trimmed = ingress.raw_text.trim();
+    if trimmed.is_empty() {
+        return PreflightDecision {
+            execution_mode: ExecutionMode::Clarify,
+            response_text: Some(
+                "Tell me the outcome you want, or use /status, /providers, or /models.".to_string(),
+            ),
+            reason: "empty_input".to_string(),
+        };
+    }
+
+    let lowercase = trimmed.to_ascii_lowercase();
+    if is_greeting(&lowercase) {
+        return PreflightDecision {
+            execution_mode: ExecutionMode::Deterministic,
+            response_text: Some(
+                "Ready. Tell me what you want to do, or use /status, /providers, or /models."
+                    .to_string(),
+            ),
+            reason: "greeting".to_string(),
+        };
+    }
+
+    if is_underspecified(&lowercase) {
+        return PreflightDecision {
+            execution_mode: ExecutionMode::Clarify,
+            response_text: Some(
+                "Tell me the outcome you want, the repo or file target, or the command context."
+                    .to_string(),
+            ),
+            reason: "underspecified".to_string(),
+        };
+    }
+
+    let vector = build_drex_vector(
+        &ingress.intent,
+        &ingress.risk,
+        &ingress.raw_text,
+        &ingress.privacy,
+        &ingress.runtime,
+    );
+    let runtime_hint = runtime_hint(ingress, &vector);
+    let runtime_fit = if is_local_runtime(&runtime_hint) { 1.0 } else { 0.8 };
+    let decision = evaluate_drex(&vector, policy, 0.95, runtime_fit, 0.65);
+    let local_candidates: Vec<&ModelTier> = model_tiers
+        .iter()
+        .filter(|tier| tier.enabled && is_local_provider(&tier.provider))
+        .collect();
+    let remote_candidates: Vec<&ModelTier> = model_tiers
+        .iter()
+        .filter(|tier| tier.enabled && !is_local_provider(&tier.provider))
+        .collect();
+
+    let execution_mode = if should_prefer_local(ingress, &decision, &local_candidates)
+        || remote_candidates.is_empty()
+    {
+        ExecutionMode::LocalModel
+    } else {
+        ExecutionMode::RemoteModel
+    };
+
+    PreflightDecision {
+        execution_mode,
+        response_text: None,
+        reason: match execution_mode {
+            ExecutionMode::LocalModel => "local_first".to_string(),
+            ExecutionMode::RemoteModel => "remote_escalation".to_string(),
+            ExecutionMode::Deterministic => "deterministic".to_string(),
+            ExecutionMode::Clarify => "clarify".to_string(),
+        },
+    }
 }
 
 pub fn plan_route(
@@ -38,22 +124,29 @@ pub fn plan_route(
         &ingress.privacy,
         &ingress.runtime,
     );
-    let runtime_hint = runtime_hint(ingress, &vector);
-    let runtime_fit = if is_local_runtime(&runtime_hint) { 1.0 } else { 0.8 };
+    let initial_runtime_hint = runtime_hint(ingress, &vector);
+    let runtime_fit = if is_local_runtime(&initial_runtime_hint) { 1.0 } else { 0.8 };
     let decision = evaluate_drex(&vector, policy, 0.95, runtime_fit, 0.65);
-    let selected_model = select_model_tier(ingress, &runtime_hint, &decision, model_tiers);
+    let selected_model = select_model_tier(ingress, &initial_runtime_hint, &decision, model_tiers);
 
-    let routing_metadata = if let Some(ref tier) = selected_model {
-        format!(
-            "{{\"reason\": \"best_score\", \"model_id\": \"{}\", \"provider\": \"{}\"}}",
-            tier.model_id, tier.provider
-        )
+    let (execution_mode, runtime_hint, routing_metadata) = if let Some(ref tier) = selected_model {
+        let execution_mode = execution_mode_for_tier(tier);
+        let runtime_hint = if matches!(execution_mode, ExecutionMode::LocalModel) {
+            "local".to_string()
+        } else {
+            initial_runtime_hint.clone()
+        };
+        (execution_mode, runtime_hint, format!(
+            "{{\"reason\": \"best_score\", \"mode\": \"{}\", \"model_id\": \"{}\", \"provider\": \"{}\"}}",
+            execution_mode_label(execution_mode), tier.model_id, tier.provider
+        ))
     } else {
         return Err(anyhow!("no compatible model tier found for route"));
     };
 
     Ok(RoutePlan {
         decision,
+        execution_mode,
         runtime_hint,
         selected_model,
         routing_metadata,
@@ -185,8 +278,7 @@ fn select_model_tier(
         _ => 1,
     };
     let local_only = ingress.privacy == "sovereign" || is_local_runtime(runtime_hint);
-
-    model_tiers
+    let compatible: Vec<&ModelTier> = model_tiers
         .iter()
         .filter(|tier| tier.enabled)
         .filter(|tier| tier.capability_class >= min_capability_class)
@@ -205,11 +297,25 @@ fn select_model_tier(
                 true
             }
         })
-        .max_by(|left, right| {
-            model_score(left, ingress, decision)
-                .total_cmp(&model_score(right, ingress, decision))
-        })
-        .cloned()
+        .collect();
+
+    let local_candidates: Vec<&ModelTier> = compatible
+        .iter()
+        .copied()
+        .filter(|tier| is_local_provider(&tier.provider))
+        .collect();
+
+    if local_only {
+        return best_tier(&local_candidates, ingress, decision);
+    }
+
+    if should_prefer_local(ingress, decision, &local_candidates) {
+        if let Some(best_local) = best_tier(&local_candidates, ingress, decision) {
+            return Some(best_local);
+        }
+    }
+
+    best_tier(&compatible, ingress, decision)
 }
 
 fn model_score(tier: &ModelTier, ingress: &DrexIngress, decision: &DrexDecision) -> f64 {
@@ -249,6 +355,89 @@ fn is_local_runtime(runtime: &str) -> bool {
     matches!(runtime, "macbook" | "boost" | "local")
 }
 
+fn best_tier(
+    candidates: &[&ModelTier],
+    ingress: &DrexIngress,
+    decision: &DrexDecision,
+) -> Option<ModelTier> {
+    candidates
+        .iter()
+        .max_by(|left, right| {
+            model_score(left, ingress, decision)
+                .total_cmp(&model_score(right, ingress, decision))
+        })
+        .map(|tier| (*tier).clone())
+}
+
+fn should_prefer_local(
+    ingress: &DrexIngress,
+    decision: &DrexDecision,
+    local_candidates: &[&ModelTier],
+) -> bool {
+    if local_candidates.is_empty() {
+        return false;
+    }
+
+    if matches!(ingress.intent.as_str(), "chat" | "status_check") {
+        return true;
+    }
+
+    if ingress.privacy == "sovereign" {
+        return true;
+    }
+
+    if ingress.intent == "code" {
+        let strongest_local = local_candidates
+            .iter()
+            .map(|tier| tier.capability_class)
+            .max()
+            .unwrap_or(0);
+        return strongest_local >= 3
+            && ingress.required_context_tokens <= 32_768
+            && !matches!(ingress.risk.as_str(), "high" | "critical");
+    }
+
+    decision.active_tier == ResolutionTier::Micro
+        && ingress.required_context_tokens <= 32_768
+        && !matches!(ingress.risk.as_str(), "high" | "critical")
+}
+
+fn execution_mode_for_tier(tier: &ModelTier) -> ExecutionMode {
+    if is_local_provider(&tier.provider) {
+        ExecutionMode::LocalModel
+    } else {
+        ExecutionMode::RemoteModel
+    }
+}
+
+fn execution_mode_label(mode: ExecutionMode) -> &'static str {
+    match mode {
+        ExecutionMode::Deterministic => "deterministic",
+        ExecutionMode::LocalModel => "local_model",
+        ExecutionMode::RemoteModel => "remote_model",
+        ExecutionMode::Clarify => "clarify",
+    }
+}
+
 fn clamp(value: f64) -> f64 {
     value.clamp(0.0, 1.0)
+}
+
+fn is_greeting(lowercase: &str) -> bool {
+    matches!(
+        lowercase.trim(),
+        "hi" | "hello" | "hey" | "yo" | "sup" | "gm" | "good morning" | "good afternoon"
+            | "good evening"
+    )
+}
+
+fn is_underspecified(lowercase: &str) -> bool {
+    let trimmed = lowercase.trim();
+    let token_count = trimmed.split_whitespace().count();
+    token_count <= 2
+        && matches!(
+            trimmed,
+            "help" | "what" | "why" | "huh" | "okay" | "ok" | "sure" | "go" | "start"
+                | "continue"
+        )
 }

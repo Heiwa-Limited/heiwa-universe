@@ -3,6 +3,10 @@ name = "heiwa-shell"
 version = "0.1.0"
 edition = "2021"
 
+[[bin]]
+name = "heiwa"
+path = "src/main.rs"
+
 [dependencies]
 anyhow = "1.0"
 heiwa-bindings = { path = "../../packages/heiwa_bindings/rust" }
@@ -12,6 +16,10 @@ heiwa-repl = { path = "../../crates/heiwa_repl" }
 heiwa-provider = { path = "../../crates/heiwa_provider" }
 heiwa-install = { path = "../../crates/heiwa_install" }
 heiwa-loop = { path = "../../crates/heiwa_loop" }
+heiwa-stdb = { path = "../../crates/heiwa_stdb" }
+uuid = { version = "1.0", features = ["v4"] }
+hostname = "0.4"
+dirs = "5.0"
 tokio = { version = "1.50.0", features = ["full"] }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"

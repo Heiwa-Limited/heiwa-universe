@@ -1,85 +1,109 @@
 use anyhow::Result;
 use async_trait::async_trait;
-use crate::adapter::{ProviderAdapter, ProviderEvent};
+use crate::adapter::{Message, ProviderAdapter, StreamEvent, TokenUsage};
 use std::process::Stdio;
 use tokio::io::{AsyncBufReadExt, BufReader};
 use tokio::process::Command;
-use std::collections::HashMap;
-use tokio::sync::Mutex;
-use std::sync::Arc;
+use tokio::sync::mpsc;
 
-pub struct ClaudeCodeAdapter {
-    sessions: Arc<Mutex<HashMap<String, tokio::process::Child>>>,
-}
+/// CLI subprocess adapter for Claude Code.
+///
+/// Wraps `claude -p <prompt> --output-format stream-json --verbose --model <model>`.
+/// For BYOK API key users, the Anthropic HTTP API adapter is preferred.
+/// This adapter is for subscription users who have Claude Code installed.
+pub struct ClaudeCodeCliAdapter;
 
-impl ClaudeCodeAdapter {
+impl ClaudeCodeCliAdapter {
     pub fn new() -> Self {
-        Self {
-            sessions: Arc::new(Mutex::new(HashMap::new())),
-        }
+        Self
     }
 }
 
 #[async_trait]
-impl ProviderAdapter for ClaudeCodeAdapter {
-    async fn start_session(&self) -> Result<String> {
-        let session_id = uuid::Uuid::new_v4().to_string();
-        
-        // Probe if claude is authenticated
-        let output = Command::new("claude").arg("--version").output().await?;
-        if !output.status.success() {
-            return Err(anyhow::anyhow!("Claude Code CLI is not available or failed check"));
-        }
+impl ProviderAdapter for ClaudeCodeCliAdapter {
+    async fn send(
+        &self,
+        model: &str,
+        messages: &[Message],
+        stream_tx: mpsc::Sender<StreamEvent>,
+    ) -> Result<()> {
+        let prompt: String = messages
+            .iter()
+            .map(|m| m.content.as_str())
+            .collect::<Vec<_>>()
+            .join("\n");
 
-        Ok(session_id)
-    }
-
-    async fn send_input(&self, session_id: &str, input: &str) -> Result<()> {
-        let child = Command::new("claude")
-            .arg(input)
+        let mut cmd = Command::new("claude");
+        cmd.arg("-p").arg(&prompt)
+            .arg("--output-format").arg("stream-json")
+            .arg("--verbose")
             .stdout(Stdio::piped())
-            .stderr(Stdio::piped())
-            .spawn()?;
+            .stderr(Stdio::piped());
 
-        let mut sessions = self.sessions.lock().await;
-        sessions.insert(session_id.to_string(), child);
-        
-        Ok(())
-    }
+        if !model.is_empty() {
+            cmd.arg("--model").arg(model);
+        }
 
-    async fn read_events(&self, session_id: &str) -> Result<Vec<ProviderEvent>> {
-        let mut sessions = self.sessions.lock().await;
-        if let Some(mut child) = sessions.remove(session_id) {
-            let stdout = child.stdout.take().unwrap();
-            let mut reader = BufReader::new(stdout).lines();
-            let mut events = Vec::new();
+        let mut child = cmd.spawn()?;
+        let stdout = child.stdout.take().unwrap();
+        let mut reader = BufReader::new(stdout).lines();
 
-            while let Some(line) = reader.next_line().await? {
-                events.push(ProviderEvent {
-                    event_type: "text".to_string(),
-                    payload: line,
-                });
+        while let Some(line) = reader.next_line().await? {
+            // Claude Code stream-json emits JSON objects per line.
+            // Extract text content from assistant messages.
+            if let Ok(obj) = serde_json::from_str::<serde_json::Value>(&line) {
+                if obj.get("type").and_then(|t| t.as_str()) == Some("assistant") {
+                    if let Some(msg) = obj.get("message") {
+                        if let Some(content) = msg.get("content") {
+                            if let Some(arr) = content.as_array() {
+                                for block in arr {
+                                    if block.get("type").and_then(|t| t.as_str()) == Some("text") {
+                                        if let Some(text) = block.get("text").and_then(|t| t.as_str()) {
+                                            if stream_tx.send(StreamEvent::Token(text.to_string())).await.is_err() {
+                                                child.kill().await.ok();
+                                                return Ok(());
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+                // Extract usage from result events
+                if obj.get("type").and_then(|t| t.as_str()) == Some("result") {
+                    let usage = extract_usage(&obj);
+                    let _ = stream_tx.send(StreamEvent::Done(usage)).await;
+                    return Ok(());
+                }
             }
-
-            Ok(events)
-        } else {
-            Ok(vec![])
         }
-    }
 
-    async fn interrupt(&self, session_id: &str) -> Result<()> {
-        let mut sessions = self.sessions.lock().await;
-        if let Some(mut child) = sessions.remove(session_id) {
-            child.kill().await?;
-        }
+        // If we get here without a result event, send Done anyway
+        let _ = stream_tx.send(StreamEvent::Done(TokenUsage::default())).await;
         Ok(())
     }
 
-    async fn close(&self, session_id: &str) -> Result<()> {
-        self.interrupt(session_id).await
+    async fn interrupt(&self) -> Result<()> {
+        Ok(())
     }
 
-    fn get_capabilities(&self) -> Vec<String> {
-        vec!["cloud_llm".to_string(), "advanced_coding".to_string(), "chat".to_string()]
+    fn supported_models(&self) -> Vec<String> {
+        vec![
+            "claude-sonnet-4-6".to_string(),
+            "claude-opus-4-6".to_string(),
+            "claude-haiku-4-5".to_string(),
+        ]
+    }
+}
+
+fn extract_usage(result: &serde_json::Value) -> TokenUsage {
+    let usage = result.get("usage").unwrap_or(result);
+    TokenUsage {
+        input_tokens: usage.get("input_tokens").and_then(|v| v.as_u64()).unwrap_or(0) as u32,
+        output_tokens: usage.get("output_tokens").and_then(|v| v.as_u64()).unwrap_or(0) as u32,
+        cache_read_tokens: usage.get("cache_read_input_tokens").and_then(|v| v.as_u64()).unwrap_or(0) as u32,
+        cache_write_tokens: usage.get("cache_creation_input_tokens").and_then(|v| v.as_u64()).unwrap_or(0) as u32,
+        cost_usd: result.get("total_cost_usd").and_then(|v| v.as_f64()).unwrap_or(0.0),
     }
 }

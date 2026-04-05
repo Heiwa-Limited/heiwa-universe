@@ -3,6 +3,22 @@ use std::fs;
 use tokio::net::UnixStream;
 use std::time::Duration;
 
+#[test]
+fn test_session_dir_uses_heiwa_owner_state_root() {
+    let session_dir = get_session_dir();
+    let dir_str = session_dir.to_string_lossy();
+    assert!(
+        dir_str.contains(".heiwa"),
+        "expected session dir under ~/.heiwa, got {:?}",
+        session_dir
+    );
+    assert!(
+        !dir_str.contains(".gemini/tmp/heiwa-universe"),
+        "session dir should not live under gemini temp roots: {:?}",
+        session_dir
+    );
+}
+
 #[tokio::test]
 async fn test_session_daemon_socket_creation() {
     let session_dir = get_session_dir();
