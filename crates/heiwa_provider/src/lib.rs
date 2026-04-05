@@ -1,8 +1,26 @@
 use serde::{Deserialize, Serialize};
+use std::env;
+use std::fs;
+use std::path::PathBuf;
 use std::process::Command;
 
 pub mod adapter;
+pub mod detect;
+pub mod keychain;
 pub mod providers;
+pub mod registry;
+
+// ---------------------------------------------------------------------------
+// Re-exports for convenience
+// ---------------------------------------------------------------------------
+
+pub use registry::{
+    AccountRegistry, AccountStatus, Credential, DetectedModel, InventoryTruth, ProviderAccount,
+};
+
+// ---------------------------------------------------------------------------
+// Heiwa identity (account plane — separate from provider accounts)
+// ---------------------------------------------------------------------------
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct HeiwaIdentity {
@@ -12,10 +30,15 @@ pub struct HeiwaIdentity {
     pub display_name: Option<String>,
 }
 
+fn get_heiwa_state_dir() -> PathBuf {
+    let home = env::var("HOME")
+        .or_else(|_| env::var("USERPROFILE"))
+        .expect("HOME or USERPROFILE must be set");
+    PathBuf::from(home).join(".heiwa")
+}
+
 pub fn get_identity_path() -> std::path::PathBuf {
-    let mut path = std::path::PathBuf::from("/Users/dmcgregsauce/.gemini/tmp/heiwa-universe");
-    path.push("heiwa/identity.json");
-    path
+    get_heiwa_state_dir().join("identity.json")
 }
 
 pub fn load_identity() -> Option<HeiwaIdentity> {
@@ -57,6 +80,13 @@ pub fn login_heiwa(token: &str) -> anyhow::Result<HeiwaIdentity> {
     Ok(identity)
 }
 
+// ---------------------------------------------------------------------------
+// Legacy provider auth status — kept for backward compat during migration
+//
+// The new path is: AccountRegistry + detect::* for model inventory.
+// These functions will be replaced as main.rs migrates to the new registry.
+// ---------------------------------------------------------------------------
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "snake_case")]
 pub enum AuthKind {
@@ -68,7 +98,7 @@ pub enum AuthKind {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-pub struct ProviderAccount {
+pub struct LegacyProviderAccount {
     pub provider_id: String,
     pub account_id: String,
     pub auth_kind: AuthKind,
@@ -78,30 +108,68 @@ pub struct ProviderAccount {
     pub device_binding: Option<String>,
 }
 
-pub fn get_auth_status(provider_id: &str) -> Option<ProviderAccount> {
+fn get_provider_connections_path() -> PathBuf {
+    get_heiwa_state_dir().join("provider_connections.json")
+}
+
+fn load_provider_connections() -> Vec<String> {
+    let path = get_provider_connections_path();
+    if !path.exists() {
+        return Vec::new();
+    }
+    let content = fs::read_to_string(path).ok();
+    content
+        .and_then(|raw| serde_json::from_str::<Vec<String>>(&raw).ok())
+        .unwrap_or_default()
+}
+
+fn save_provider_connections(connections: &[String]) -> anyhow::Result<()> {
+    let path = get_provider_connections_path();
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent)?;
+    }
+    fs::write(path, serde_json::to_string_pretty(connections)?)?;
+    Ok(())
+}
+
+fn mark_provider_connected(provider_id: &str) -> anyhow::Result<()> {
+    let mut connections = load_provider_connections();
+    if !connections.iter().any(|p| p == provider_id) {
+        connections.push(provider_id.to_string());
+    }
+    save_provider_connections(&connections)
+}
+
+fn clear_provider_connection(provider_id: &str) -> anyhow::Result<()> {
+    let mut connections = load_provider_connections();
+    connections.retain(|p| p != provider_id);
+    save_provider_connections(&connections)
+}
+
+fn provider_is_connected(provider_id: &str) -> bool {
+    load_provider_connections().iter().any(|p| p == provider_id)
+}
+
+pub fn get_auth_status(provider_id: &str) -> Option<LegacyProviderAccount> {
+    let connected = provider_is_connected(provider_id);
     match provider_id {
         "claude" => {
-            // Real probe: check if claude is authenticated
             let status = if has_command("claude") {
-                // In a real implementation, we'd run `claude auth status` or similar
-                // For now, we probe if the CLI exists as a proxy for 'installed'
-                "authenticated".to_string()
+                if connected { "connected".to_string() } else { "installed_unverified".to_string() }
             } else {
                 "not_installed".to_string()
             };
-            
-            Some(ProviderAccount {
+            Some(LegacyProviderAccount {
                 provider_id: "claude".to_string(),
                 account_id: "claude-default".to_string(),
                 auth_kind: AuthKind::OauthCli,
                 status,
-                rate_group: "standard".to_string(),
-                default_model: Some("claude-3-5-sonnet".to_string()),
+                rate_group: "anthropic".to_string(),
+                default_model: None,
                 device_binding: None,
             })
         }
         "ollama" => {
-            // Real probe: check if ollama is running
             let status = if is_ollama_running() {
                 "running".to_string()
             } else if has_command("ollama") {
@@ -109,46 +177,61 @@ pub fn get_auth_status(provider_id: &str) -> Option<ProviderAccount> {
             } else {
                 "not_installed".to_string()
             };
-            
-            Some(ProviderAccount {
+            Some(LegacyProviderAccount {
                 provider_id: "ollama".to_string(),
                 account_id: "local".to_string(),
                 auth_kind: AuthKind::LocalRuntime,
                 status,
                 rate_group: "local".to_string(),
-                default_model: Some("llama3".to_string()),
+                default_model: None,
                 device_binding: None,
             })
         }
         "codex" => {
-             let status = if has_command("codex") {
-                "authenticated".to_string()
+            let status = if has_command("codex") {
+                if connected { "connected".to_string() } else { "installed_unverified".to_string() }
             } else {
                 "not_installed".to_string()
             };
-            Some(ProviderAccount {
+            Some(LegacyProviderAccount {
                 provider_id: "codex".to_string(),
                 account_id: "codex-default".to_string(),
-                auth_kind: AuthKind::ApiKey,
+                auth_kind: AuthKind::OauthCli,
                 status,
-                rate_group: "standard".to_string(),
-                default_model: Some("gpt-4o".to_string()),
+                rate_group: "openai".to_string(),
+                default_model: None,
                 device_binding: None,
             })
         }
         "gemini" => {
-             let status = if has_command("gemini") {
-                "authenticated".to_string()
+            let status = if has_command("gemini") {
+                if connected { "connected".to_string() } else { "installed_unverified".to_string() }
             } else {
                 "not_installed".to_string()
             };
-            Some(ProviderAccount {
+            Some(LegacyProviderAccount {
                 provider_id: "gemini".to_string(),
                 account_id: "gemini-default".to_string(),
                 auth_kind: AuthKind::OauthCli,
                 status,
-                rate_group: "standard".to_string(),
-                default_model: Some("gemini-1.5-pro".to_string()),
+                rate_group: "google".to_string(),
+                default_model: None,
+                device_binding: None,
+            })
+        }
+        "antigravity" => {
+            let status = if has_command("antigravity") {
+                if connected { "connected".to_string() } else { "installed_unverified".to_string() }
+            } else {
+                "not_installed".to_string()
+            };
+            Some(LegacyProviderAccount {
+                provider_id: "antigravity".to_string(),
+                account_id: "antigravity-default".to_string(),
+                auth_kind: AuthKind::OauthCli,
+                status,
+                rate_group: "google_bonus".to_string(),
+                default_model: None,
                 device_binding: None,
             })
         }
@@ -160,11 +243,18 @@ pub fn login(provider_id: &str) -> anyhow::Result<()> {
     println!("Initiating real login for {}...", provider_id);
     match provider_id {
         "claude" => {
-            // Real invocation: claude auth login
             Command::new("claude").arg("auth").arg("login").status()?;
+            mark_provider_connected(provider_id)?;
+        }
+        "codex" => {
+            Command::new("codex").arg("login").status()?;
+            mark_provider_connected(provider_id)?;
         }
         "gemini" => {
-            Command::new("gemini").arg("auth").arg("login").status()?;
+            println!("Gemini CLI does not expose a stable non-interactive auth subcommand here. Authenticate in Gemini, then rerun Heiwa once connected.");
+        }
+        "antigravity" => {
+            println!("Antigravity auth remains provider-owned. Connect Antigravity in its own surface, then let Heiwa wrap the installed runtime.");
         }
         _ => {
             println!("No automated login flow for {}. Please login manually.", provider_id);
@@ -178,6 +268,15 @@ pub fn logout(provider_id: &str) -> anyhow::Result<()> {
     match provider_id {
         "claude" => {
             Command::new("claude").arg("auth").arg("logout").status()?;
+            clear_provider_connection(provider_id)?;
+        }
+        "codex" => {
+            Command::new("codex").arg("logout").status()?;
+            clear_provider_connection(provider_id)?;
+        }
+        "gemini" | "antigravity" => {
+            clear_provider_connection(provider_id)?;
+            println!("Cleared Heiwa's local connection record for {}. Provider-owned auth may still need to be disconnected in the provider surface.", provider_id);
         }
         _ => {
             println!("No automated logout flow for {}. Please logout manually.", provider_id);
@@ -195,6 +294,5 @@ fn has_command(cmd: &str) -> bool {
 }
 
 fn is_ollama_running() -> bool {
-    // Probe local port 11434
     std::net::TcpStream::connect("127.0.0.1:11434").is_ok()
 }

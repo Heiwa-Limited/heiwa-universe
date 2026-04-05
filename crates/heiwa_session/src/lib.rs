@@ -1,5 +1,6 @@
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
+use std::env;
 use std::fs;
 use std::path::PathBuf;
 use tokio::net::UnixListener;
@@ -13,9 +14,10 @@ pub struct SessionInfo {
 }
 
 pub fn get_session_dir() -> PathBuf {
-    let mut path = PathBuf::from("/Users/dmcgregsauce/.gemini/tmp/heiwa-universe");
-    path.push("heiwa/sessions");
-    path
+    let home = env::var("HOME")
+        .or_else(|_| env::var("USERPROFILE"))
+        .expect("HOME or USERPROFILE must be set");
+    PathBuf::from(home).join(".heiwa").join("sessions")
 }
 
 pub fn start_daemon() -> Result<SessionInfo> {
