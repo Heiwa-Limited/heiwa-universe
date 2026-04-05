@@ -1,3 +1,5 @@
+pub mod evidence;
+
 use std::path::PathBuf;
 use std::sync::Arc;
 
