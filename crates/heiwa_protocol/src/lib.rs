@@ -78,11 +78,30 @@ pub struct RunReceipt {
     pub tokens: u32,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub enum Intent {
     Chat,
-    Code,
+    Build,
+    Deploy,
+    Audit,
     Research,
+    Strategy,
+    StatusCheck,
+}
+
+impl Intent {
+    /// Map to the key used by DREX's vector builder in `build_drex_vector()`.
+    pub fn as_drex_key(&self) -> &'static str {
+        match self {
+            Intent::Chat => "chat",
+            Intent::Build => "build",
+            Intent::Deploy => "deploy",
+            Intent::Audit => "audit",
+            Intent::Research => "research",
+            Intent::Strategy => "strategy",
+            Intent::StatusCheck => "status_check",
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -93,31 +112,47 @@ pub struct TurnRequest {
     pub intent: Intent,
 }
 
+/// Known provider names for pin extraction.
+const KNOWN_PROVIDERS: &[&str] = &[
+    "claude", "ollama", "anthropic", "openai", "google", "gemini",
+    "codex", "antigravity",
+];
+
 pub fn parse_turn_intent(input: &str) -> TurnRequest {
     let lowercase = input.to_lowercase();
+    let parts: Vec<&str> = lowercase.split_whitespace().collect();
+
+    // --- Provider / model pin extraction ---
+    // Patterns: "use <provider> [model] ...", "with <provider> [model] ...",
+    //           "using <provider> [model] ..."
     let mut provider_pin = None;
     let mut model_pin = None;
 
-    // Very simple extraction for "use [provider] [model]"
-    if lowercase.contains("use ") {
-        let parts: Vec<&str> = lowercase.split_whitespace().collect();
-        if let Some(pos) = parts.iter().position(|&x| x == "use") {
-            if let Some(provider) = parts.get(pos + 1) {
-                provider_pin = Some((*provider).to_string());
-                if let Some(model) = parts.get(pos + 2) {
-                    model_pin = Some((*model).to_string());
+    for keyword in &["use", "with", "using"] {
+        if let Some(pos) = parts.iter().position(|&x| x == *keyword) {
+            if let Some(candidate) = parts.get(pos + 1) {
+                if KNOWN_PROVIDERS.contains(candidate) {
+                    provider_pin = Some((*candidate).to_string());
+                    // Next token after provider is a model pin only if it
+                    // looks like a model identifier (contains digits, dashes,
+                    // or dots — e.g. "opus-4.6", "sonnet-4", "qwen3:8b").
+                    if let Some(maybe_model) = parts.get(pos + 2) {
+                        let looks_like_model = maybe_model.chars().any(|c| c.is_ascii_digit())
+                            || maybe_model.contains('-')
+                            || maybe_model.contains('.')
+                            || maybe_model.contains(':');
+                        if looks_like_model {
+                            model_pin = Some((*maybe_model).to_string());
+                        }
+                    }
+                    break;
                 }
             }
         }
     }
 
-    let intent = if lowercase.contains("code") || lowercase.contains("rust") || lowercase.contains("fix") {
-        Intent::Code
-    } else if lowercase.contains("research") || lowercase.contains("explore") {
-        Intent::Research
-    } else {
-        Intent::Chat
-    };
+    // --- Intent classification ---
+    let intent = classify_intent(&lowercase);
 
     TurnRequest {
         raw_text: input.to_string(),
@@ -126,3 +161,74 @@ pub fn parse_turn_intent(input: &str) -> TurnRequest {
         intent,
     }
 }
+
+fn classify_intent(lowercase: &str) -> Intent {
+    // Build / code — file-level, repo-level, or tool-level coding work.
+    // Only include words strongly associated with programming tasks.
+    let build_keywords = [
+        "refactor", "function", "crate", "cargo", "rust", "python", "typescript",
+        "javascript", "code", "bug", "test", "repo", "implement", "fix",
+        "patch", "compile", "build", "cli", "adapter", "pytest", "bash", "npm",
+        "struct", "enum", "trait", "dependency", "module",
+    ];
+    // Check for code-like sigils (but not bare `/` which is ambiguous)
+    let has_code_sigil = lowercase.contains("::")
+        || lowercase.contains('`')
+        || lowercase.contains(".rs")
+        || lowercase.contains(".py")
+        || lowercase.contains(".ts")
+        || lowercase.contains(".js");
+
+    if has_code_sigil || build_keywords.iter().any(|kw| {
+        // Match whole words to avoid substring collisions.
+        lowercase.split(|c: char| !c.is_alphanumeric() && c != '_')
+            .any(|word| word == *kw)
+    }) {
+        return Intent::Build;
+    }
+
+    // Deploy — shipping, infrastructure, ops
+    let deploy_keywords = [
+        "deploy", "ship", "release", "publish", "railway", "docker",
+        "dockerfile", "ci", "cd", "pipeline", "prod", "staging",
+    ];
+    if deploy_keywords.iter().any(|kw| lowercase.contains(kw)) {
+        return Intent::Deploy;
+    }
+
+    // StatusCheck — system health (before Audit so "check status" wins)
+    let status_keywords = ["status", "health", "uptime", "heartbeat"];
+    if status_keywords.iter().any(|kw| lowercase.contains(kw)) {
+        return Intent::StatusCheck;
+    }
+
+    // Audit — review, inspection, checking
+    let audit_keywords = ["audit", "lint", "review", "scan", "inspect"];
+    if audit_keywords.iter().any(|kw| {
+        lowercase.split(|c: char| !c.is_alphanumeric() && c != '_')
+            .any(|word| word == *kw)
+    }) {
+        return Intent::Audit;
+    }
+
+    // Strategy — high-level planning
+    let strategy_keywords = [
+        "strategy", "roadmap", "plan", "architecture", "design",
+        "priority", "governance", "enterprise", "portfolio",
+    ];
+    if strategy_keywords.iter().any(|kw| lowercase.contains(kw)) {
+        return Intent::Strategy;
+    }
+
+    // Research — exploration, understanding
+    let research_keywords = [
+        "research", "explore", "explain", "summarize", "analyze",
+        "understand", "how does", "what is", "why does", "compare",
+    ];
+    if research_keywords.iter().any(|kw| lowercase.contains(kw)) {
+        return Intent::Research;
+    }
+
+    Intent::Chat
+}
+

@@ -6,7 +6,7 @@ use heiwa_protocol::{
     CockpitCommand, CockpitEvent, SessionState, RoutingState, TranscriptBlock, parse_turn_intent,
 };
 use heiwa_core::drex::{default_policy, plan_route, preflight_execution, DrexIngress, ExecutionMode};
-use heiwa_provider::adapter::{Message, ProviderAdapter, Role, StreamEvent};
+use heiwa_provider::adapter::{Message, ProviderAdapter, Role, StreamEvent, TokenUsage};
 use heiwa_provider::providers::ollama::OllamaCliAdapter;
 use heiwa_provider::providers::claude_code::ClaudeCodeCliAdapter;
 use heiwa_repl::{parse_input, render_footer, ReplCommand, TelemetryState};
@@ -21,6 +21,50 @@ enum RoutePreference {
     Auto,
     LocalOnly,
     RemoteOnly,
+}
+
+// ---------------------------------------------------------------------------
+// Shared session state — used by both plain REPL and cockpit controller
+// ---------------------------------------------------------------------------
+
+struct SessionPins {
+    pinned_provider: Option<String>,
+    pinned_model: Option<String>,
+    route_preference: RoutePreference,
+    current_provider: String,
+    current_model: String,
+}
+
+impl SessionPins {
+    fn new() -> Self {
+        Self {
+            pinned_provider: None,
+            pinned_model: None,
+            route_preference: RoutePreference::Auto,
+            current_provider: String::new(),
+            current_model: String::new(),
+        }
+    }
+}
+
+/// Result of successfully routing a task to a model.
+struct RouteResult {
+    adapter: Arc<dyn ProviderAdapter>,
+    model_id: String,
+    provider: String,
+    provider_model_id: String,
+    routing_metadata: String,
+    intent_key: String,
+    request_id: String,
+    turn_started_at: String,
+}
+
+/// Outcome of the routing pipeline.
+enum RouteOutcome {
+    /// Task routed to a model, ready to stream.
+    Routed(RouteResult),
+    /// DREX returned a deterministic response (no model needed).
+    Deterministic(String),
 }
 
 #[tokio::main]
@@ -600,18 +644,13 @@ async fn run_repl(use_cockpit: bool) -> Result<()> {
     };
 
     let mut turn_count = 0;
-    let mut current_provider = String::new();
-    let mut current_model = String::new();
-    let mut pinned_provider: Option<String> = None;
-    let mut pinned_model: Option<String> = None;
-    let mut route_preference = RoutePreference::Auto;
+    let mut pins = SessionPins::new();
 
-    // Set initial telemetry from first available model tier
     if let Some(first) = model_tiers.first() {
-        current_provider = first.provider.clone();
-        current_model = first.model_id.clone();
-        state.routing.current_provider = current_provider.clone();
-        state.routing.current_model = current_model.clone();
+        pins.current_provider = first.provider.clone();
+        pins.current_model = first.model_id.clone();
+        state.routing.current_provider = pins.current_provider.clone();
+        state.routing.current_model = pins.current_model.clone();
     }
 
     if use_cockpit {
@@ -636,9 +675,9 @@ async fn run_repl(use_cockpit: bool) -> Result<()> {
 
     loop {
         let footer_state = TelemetryState {
-            provider: if current_provider.is_empty() { "none".to_string() } else { current_provider.clone() },
-            model: if current_model.is_empty() { "none".to_string() } else { current_model.clone() },
-            route: current_route_label(route_preference, pinned_provider.as_deref(), pinned_model.as_deref()),
+            provider: if pins.current_provider.is_empty() { "none".to_string() } else { pins.current_provider.clone() },
+            model: if pins.current_model.is_empty() { "none".to_string() } else { pins.current_model.clone() },
+            route: current_route_label(pins.route_preference, pins.pinned_provider.as_deref(), pins.pinned_model.as_deref()),
             status: "ready".to_string(),
             turn_count,
             loop_info: None,
@@ -660,222 +699,66 @@ async fn run_repl(use_cockpit: bool) -> Result<()> {
         match cmd {
             ReplCommand::Task(t) => {
                 if t.is_empty() { continue; }
-                let request_id = uuid::Uuid::new_v4().to_string();
-                let turn_started_at = chrono::Utc::now().to_rfc3339();
 
-                // 1. Direct Turn Instruction
-                let turn_request = parse_turn_intent(&t);
-                let (provider_pin, model_pin) = match (turn_request.provider_pin, turn_request.model_pin) {
-                    (Some(p), Some(m)) => (Some(p), Some(m)),
-                    (Some(p), None) => (Some(p), None),
-                    _ => (None, None),
-                };
-
-                // 2. Session Override
-                let final_provider_pin = provider_pin.as_deref().or(pinned_provider.as_deref());
-                let final_model_pin = model_pin.as_deref().or(pinned_model.as_deref());
-
-                // 3. Filter model tiers by precedence
-                let routed_tiers = filtered_model_tiers(
-                    &model_tiers,
-                    route_preference,
-                    final_provider_pin,
-                    final_model_pin,
-                );
-
-                if routed_tiers.is_empty() {
-                    let reason = if final_model_pin.is_some() {
-                        format!("Model '{}' not available.", final_model_pin.unwrap())
-                    } else if final_provider_pin.is_some() {
-                        format!("Provider '{}' not available.", final_provider_pin.unwrap())
-                    } else {
-                        "No models available.".to_string()
-                    };
-                    println!("Routing failed: {}", reason);
-                    continue;
-                }
-
-                // DREX route the task
-                let ingress = DrexIngress {
-                    intent: infer_task_intent(&t),
-                    risk: "low".to_string(),
-                    raw_text: t.clone(),
-                    privacy: "standard".to_string(),
-                    runtime: runtime_for_route_preference(route_preference).to_string(),
-                    available_vram_mb: 8192,
-                    required_context_tokens: 1024,
-                };
-
-                let policy = default_policy();
-                let preflight = preflight_execution(&ingress, &routed_tiers, &policy);
-                
-                // 4. Ban silent fallback: If DREX preflight says a mode that's not possible with our pins, fail.
-                match preflight.execution_mode {
-                    ExecutionMode::Deterministic | ExecutionMode::Clarify => {
-                        if let Some(response) = preflight.response_text {
-                            println!("{}", response);
-                        }
+                match route_task(&t, &pins, &model_tiers) {
+                    Err(msg) => {
+                        println!("{}", msg);
+                        continue;
+                    }
+                    Ok(RouteOutcome::Deterministic(response)) => {
+                        println!("{}", response);
                         turn_count += 1;
                         continue;
                     }
-                    _ => {}
-                }
+                    Ok(RouteOutcome::Routed(route)) => {
+                        pins.current_provider = route.provider.clone();
+                        pins.current_model = route.model_id.clone();
+                        record_route_evidence(&stdb_client, &route, &t);
 
-                let effective_route_preference = if route_preference == RoutePreference::Auto {
-                    match preflight.execution_mode {
-                        ExecutionMode::LocalModel => RoutePreference::LocalOnly,
-                        ExecutionMode::RemoteModel => RoutePreference::RemoteOnly,
-                        _ => RoutePreference::Auto,
-                    }
-                } else {
-                    route_preference
-                };
+                        state.transcript.push(TranscriptBlock::User(t.clone()));
 
-                let effective_tiers = filtered_model_tiers(
-                    &routed_tiers,
-                    effective_route_preference,
-                    final_provider_pin,
-                    final_model_pin,
-                );
+                        let messages = vec![Message { role: Role::User, content: t }];
+                        let (stream_tx, mut stream_rx) = tokio::sync::mpsc::channel(32);
+                        let model_id = route.provider_model_id.clone();
 
-                if effective_tiers.is_empty() {
-                    println!("Routing failed: Chosen model stack unavailable for this execution mode.");
-                    continue;
-                }
+                        tokio::spawn({
+                            let adapter = route.adapter.clone();
+                            async move {
+                                if let Err(e) = adapter.send(&model_id, &messages, stream_tx).await {
+                                    eprintln!("Adapter error: {}", e);
+                                }
+                            }
+                        });
 
-                let route = match plan_route(&ingress, &effective_tiers, &policy) {
-                    Ok(r) => r,
-                    Err(e) => {
-                        eprintln!("Routing failed: {}", e);
-                        continue;
-                    }
-                };
-
-                let selected = match route.selected_model {
-                    Some(ref m) => m,
-                    None => {
-                        eprintln!("No model matched for this task.");
-                        continue;
-                    }
-                };
-
-                let _ = stdb_client.record_route_decision(
-                    &request_id,
-                    &request_id, // task_id = request_id for REPL tasks
-                    &t,
-                    &infer_task_intent(&t),
-                    "low",
-                    "standard",
-                    &selected.provider,
-                    &selected.provider,
-                    &selected.model_id,
-                    if is_local_provider_check(&selected.provider) { "local" } else { "remote" },
-                    &route.routing_metadata,
-                    0.9,
-                );
-
-                // Resolve adapter for provider
-                let adapter: Arc<dyn ProviderAdapter> = match selected.provider.as_str() {
-                    "ollama" => Arc::new(OllamaCliAdapter::with_model(&selected.model_id)),
-                    "claude" => Arc::new(ClaudeCodeCliAdapter::new()),
-                    _ => {
-                        eprintln!("No adapter for provider '{}' yet.", selected.provider);
-                        continue;
-                    }
-                };
-
-                current_provider = selected.provider.clone();
-                current_model = selected.model_id.clone();
-                let selected_model_id = selected.model_id.clone();
-
-                state.transcript.push(TranscriptBlock::User(t.clone()));
-
-                // Stream the response
-                let messages = vec![Message { role: Role::User, content: t }];
-                let (stream_tx, mut stream_rx) = tokio::sync::mpsc::channel(32);
-                let model_id = selected.provider_model_id.clone();
-
-                tokio::spawn({
-                    let adapter = adapter.clone();
-                    async move {
-                        if let Err(e) = adapter.send(&model_id, &messages, stream_tx).await {
-                            eprintln!("Adapter error: {}", e);
+                        let mut usage = None;
+                        let mut full_response = String::new();
+                        while let Some(event) = stream_rx.recv().await {
+                            match event {
+                                StreamEvent::Token(text) => {
+                                    print!("{}", text);
+                                    io::stdout().flush()?;
+                                    full_response.push_str(&text);
+                                }
+                                StreamEvent::Done(u) => { usage = Some(u); break; }
+                                StreamEvent::Error(e) => { eprintln!("\nStream error: {}", e); break; }
+                                StreamEvent::ToolUse { name, .. } => {
+                                    println!("\n[tool: {}]", name);
+                                    state.transcript.push(TranscriptBlock::Tool(name, "executed".to_string()));
+                                }
+                            }
                         }
-                    }
-                });
+                        println!();
+                        state.transcript.push(TranscriptBlock::Assistant(full_response));
 
-                // Print tokens as they arrive
-                let mut usage = None;
-                let mut full_response = String::new();
-                while let Some(event) = stream_rx.recv().await {
-                    match event {
-                        StreamEvent::Token(text) => {
-                            print!("{}", text);
-                            io::stdout().flush()?;
-                            full_response.push_str(&text);
+                        if let Some(ref u) = usage {
+                            if u.input_tokens > 0 || u.cost_usd > 0.0 {
+                                println!("  [{} in / {} out | ${:.4}]", u.input_tokens, u.output_tokens, u.cost_usd);
+                            }
                         }
-                        StreamEvent::Done(u) => {
-                            usage = Some(u);
-                            break;
-                        }
-                        StreamEvent::Error(e) => {
-                            eprintln!("\nStream error: {}", e);
-                            break;
-                        }
-                        StreamEvent::ToolUse { name, .. } => {
-                            println!("\n[tool: {}]", name);
-                            state.transcript.push(TranscriptBlock::Tool(name, "executed".to_string()));
-                        }
+                        record_run_evidence(&stdb_client, &route, usage.as_ref());
+                        turn_count += 1;
                     }
                 }
-                println!(); // newline after streamed output
-                state.transcript.push(TranscriptBlock::Assistant(full_response));
-
-                let turn_ended_at = chrono::Utc::now().to_rfc3339();
-                let user_id = heiwa_provider::load_identity()
-                    .map(|id| id.user_id)
-                    .unwrap_or_else(|| "anonymous".to_string());
-
-                if let Some(u) = usage {
-                    let _ = stdb_client.record_run(
-                        &format!("run-{}", uuid::Uuid::new_v4()),
-                        &user_id,
-                        &request_id,
-                        &turn_started_at,
-                        &turn_ended_at,
-                        "SUCCESS",
-                        &selected_model_id,
-                        u.input_tokens as i64,
-                        u.output_tokens as i64,
-                        u.cost_usd,
-                        None,
-                        None,
-                        None,
-                    );
-                    if u.input_tokens > 0 || u.cost_usd > 0.0 {
-                        println!(
-                            "  [{} in / {} out | ${:.4}]",
-                            u.input_tokens, u.output_tokens, u.cost_usd
-                        );
-                    }
-                } else {
-                    let _ = stdb_client.record_run(
-                        &format!("run-{}", uuid::Uuid::new_v4()),
-                        &user_id,
-                        &request_id,
-                        &turn_started_at,
-                        &turn_ended_at,
-                        "COMPLETED_NO_USAGE",
-                        &selected_model_id,
-                        0,
-                        0,
-                        0.0,
-                        None,
-                        None,
-                        None,
-                    );
-                }
-                turn_count += 1;
             }
             ReplCommand::Shell(s) => {
                 println!("Escaping to shell: {}", s);
@@ -893,8 +776,7 @@ async fn run_repl(use_cockpit: bool) -> Result<()> {
             }
             ReplCommand::Slash(c, args) => {
                 match c.as_str() {
-                    "help" => println!("Available slash commands: /auth, /providers, /provider, /models, /model, /route, /status, /clear, /loop, /exit"),
-                    "auth" => println!("Manage auth via 'heiwa auth'"),
+                    // Plain-mode specific: re-discovers providers at call time
                     "providers" => {
                         let mut reg = heiwa_provider::AccountRegistry::load();
                         heiwa_provider::detect::auto_discover(&mut reg).await;
@@ -903,138 +785,13 @@ async fn run_repl(use_cockpit: bool) -> Result<()> {
                             println!("  {} ({}) class:{}", t.model_id, t.provider, t.capability_class);
                         }
                     }
-                    "provider" => {
-                        let available_providers = available_providers(&model_tiers);
-                        match args.first().map(|s| s.as_str()) {
-                            None => {
-                                let active = pinned_provider.as_deref().unwrap_or("auto");
-                                println!("Current provider routing: {}", active);
-                                if available_providers.is_empty() {
-                                    println!("No loop-capable providers available.");
-                                } else {
-                                    println!("Available providers:");
-                                    for provider in available_providers {
-                                        println!("  {}", provider);
-                                    }
-                                }
-                            }
-                            Some("auto") | Some("clear") => {
-                                pinned_provider = None;
-                                pinned_model = None;
-                                println!("Provider routing reset to automatic.");
-                            }
-                            Some(provider) => {
-                                if available_providers.iter().any(|p| p == provider) {
-                                    pinned_provider = Some(provider.to_string());
-                                    if let Some(model) = pinned_model.as_ref() {
-                                        let matches_provider = model_tiers.iter().any(|tier| {
-                                            tier.model_id == *model && tier.provider == provider
-                                        });
-                                        if !matches_provider {
-                                            pinned_model = None;
-                                        }
-                                    }
-                                    println!("Pinned provider to {}.", provider);
-                                } else {
-                                    println!("Unknown provider '{}'.", provider);
-                                }
-                            }
-                        }
-                    }
-                    "models" => {
-                        if model_tiers.is_empty() {
-                            println!("No loop-capable models available.");
-                        } else {
-                            for tier in &model_tiers {
-                                println!("  {} ({}) class:{}", tier.model_id, tier.provider, tier.capability_class);
-                            }
-                        }
-                    }
-                    "model" => {
-                        match args.first().map(|s| s.as_str()) {
-                            None => {
-                                let active = pinned_model.as_deref().unwrap_or("auto");
-                                println!("Current model routing: {}", active);
-                                if model_tiers.is_empty() {
-                                    println!("No loop-capable models available.");
-                                } else {
-                                    println!("Available models:");
-                                    for tier in &model_tiers {
-                                        println!("  {} ({})", tier.model_id, tier.provider);
-                                    }
-                                }
-                            }
-                            Some("auto") | Some("clear") => {
-                                pinned_model = None;
-                                println!("Model routing reset to automatic.");
-                            }
-                            Some(model_id) => {
-                                if let Some(tier) = model_tiers.iter().find(|tier| {
-                                    tier.model_id == model_id || tier.provider_model_id == model_id
-                                }) {
-                                    pinned_model = Some(tier.model_id.clone());
-                                    pinned_provider = Some(tier.provider.clone());
-                                    println!("Pinned model to {} ({}).", tier.model_id, tier.provider);
-                                } else {
-                                    println!("Unknown model '{}'.", model_id);
-                                }
-                            }
-                        }
-                    }
-                    "route" => {
-                        match args.first().map(|s| s.as_str()) {
-                            None => {
-                                println!("Current route preference: {}", route_preference_label(route_preference));
-                                println!("Options: /route auto | /route local | /route remote");
-                            }
-                            Some("auto") => {
-                                route_preference = RoutePreference::Auto;
-                                println!("Route preference reset to automatic.");
-                            }
-                            Some("local") => {
-                                route_preference = RoutePreference::LocalOnly;
-                                println!("Route preference set to local-only.");
-                            }
-                            Some("remote") => {
-                                route_preference = RoutePreference::RemoteOnly;
-                                println!("Route preference set to remote-only.");
-                            }
-                            Some(other) => {
-                                println!("Unknown route preference '{}'.", other);
-                            }
-                        }
-                    }
-                    "status" => {
-                        println!("Session status:");
-                        println!(
-                            "  provider: {}",
-                            if current_provider.is_empty() { "none" } else { &current_provider }
-                        );
-                        println!(
-                            "  model: {}",
-                            if current_model.is_empty() { "none" } else { &current_model }
-                        );
-                        println!("  route: {}", route_preference_label(route_preference));
-                        println!(
-                            "  pinned provider: {}",
-                            pinned_provider.as_deref().unwrap_or("auto")
-                        );
-                        println!("  pinned model: {}", pinned_model.as_deref().unwrap_or("auto"));
-                        println!("  turn count: {}", turn_count);
-                        println!("  available loop models: {}", model_tiers.len());
-                    }
-                    "clear" => {
-                        pinned_provider = None;
-                        pinned_model = None;
-                        route_preference = RoutePreference::Auto;
-                        println!("Cleared route, provider, and model session pins.");
-                    }
+                    // Plain-mode specific: runs loop controller inline
                     "loop" => {
-                        let max_turns = args.get(0).and_then(|s| s.parse::<u32>().ok()).unwrap_or(5);
+                        let max_turns = args.first().and_then(|s| s.parse::<u32>().ok()).unwrap_or(5);
                         let objective = if args.len() > 1 { args[1..].join(" ") } else { "explore context".to_string() };
-                        
+
                         println!("Starting loop: '{}' ({} turns)", objective, max_turns);
-                        
+
                         let identity = heiwa_provider::load_identity().unwrap_or(heiwa_provider::HeiwaIdentity {
                             user_id: "anonymous".to_string(),
                             auth_token: "".to_string(),
@@ -1055,9 +812,9 @@ async fn run_repl(use_cockpit: bool) -> Result<()> {
 
                         let mut reg = heiwa_provider::AccountRegistry::load();
                         heiwa_provider::detect::auto_discover(&mut reg).await;
-                        let model_tiers = get_live_model_tiers(&reg);
-                        
-                        let controller = heiwa_loop::LoopController::new(config, stdb_client.clone(), model_tiers);
+                        let loop_tiers = get_live_model_tiers(&reg);
+
+                        let controller = heiwa_loop::LoopController::new(config, stdb_client.clone(), loop_tiers);
                         let (tx, mut rx) = tokio::sync::mpsc::channel(10);
 
                         let adapters: Arc<dyn Fn(&str) -> Option<Arc<dyn ProviderAdapter>> + Send + Sync> = Arc::new(|provider: &str| {
@@ -1074,23 +831,28 @@ async fn run_repl(use_cockpit: bool) -> Result<()> {
 
                         while let Some(status) = rx.recv().await {
                             let telemetry = TelemetryState {
-                                provider: current_provider.clone(),
-                                model: current_model.clone(),
-                                route: current_route_label(route_preference, pinned_provider.as_deref(), pinned_model.as_deref()),
+                                provider: pins.current_provider.clone(),
+                                model: pins.current_model.clone(),
+                                route: current_route_label(pins.route_preference, pins.pinned_provider.as_deref(), pins.pinned_model.as_deref()),
                                 status: status.status.clone(),
                                 turn_count,
                                 loop_info: Some((status.current_turn, max_turns)),
                             };
                             print!("\r{}\r", render_footer(&telemetry));
                             io::stdout().flush()?;
-                            
+
                             if status.status == "COMPLETED" || status.status == "CANCELLED" || status.status == "FAILED" {
                                 println!("\nLoop finished: {}", status.status);
                                 break;
                             }
                         }
                     }
-                    _ => println!("Unknown slash command: /{}", c),
+                    // All other slash commands use shared handler
+                    _ => {
+                        if let Some(text) = handle_slash(&c, &args, &model_tiers, &mut pins) {
+                            println!("{}", text);
+                        }
+                    }
                 }
             }
         }
@@ -1109,15 +871,11 @@ async fn run_cockpit_controller(
     stdb_client: heiwa_stdb::StdbClient,
     model_tiers: Vec<heiwa_bindings::ModelTier>,
 ) {
-    let mut pinned_provider: Option<String> = None;
-    let mut pinned_model: Option<String> = None;
-    let mut route_preference = RoutePreference::Auto;
-    let mut current_provider = String::new();
-    let mut current_model = String::new();
+    let mut pins = SessionPins::new();
 
     if let Some(first) = model_tiers.first() {
-        current_provider = first.provider.clone();
-        current_model = first.model_id.clone();
+        pins.current_provider = first.provider.clone();
+        pins.current_model = first.model_id.clone();
     }
 
     while let Some(cmd) = cmd_rx.recv().await {
@@ -1127,322 +885,94 @@ async fn run_cockpit_controller(
                 let parsed = parse_input(&input);
                 match parsed {
                     ReplCommand::Task(t) => {
-                        if t.is_empty() {
-                            continue;
-                        }
+                        if t.is_empty() { continue; }
                         let _ = event_tx.send(CockpitEvent::StatusUpdate("routing...".into()));
 
-                        let request_id = uuid::Uuid::new_v4().to_string();
-                        let turn_started_at = Utc::now().to_rfc3339();
-
-                        // 1. Parse turn intent for inline pins
-                        let turn_request = parse_turn_intent(&t);
-                        let (provider_pin, model_pin) = match (
-                            turn_request.provider_pin,
-                            turn_request.model_pin,
-                        ) {
-                            (Some(p), Some(m)) => (Some(p), Some(m)),
-                            (Some(p), None) => (Some(p), None),
-                            _ => (None, None),
-                        };
-
-                        // 2. Merge session overrides
-                        let final_provider_pin =
-                            provider_pin.as_deref().or(pinned_provider.as_deref());
-                        let final_model_pin =
-                            model_pin.as_deref().or(pinned_model.as_deref());
-
-                        // 3. Filter model tiers
-                        let routed_tiers = filtered_model_tiers(
-                            &model_tiers,
-                            route_preference,
-                            final_provider_pin,
-                            final_model_pin,
-                        );
-
-                        if routed_tiers.is_empty() {
-                            let reason = if final_model_pin.is_some() {
-                                format!(
-                                    "Model '{}' not available.",
-                                    final_model_pin.unwrap()
-                                )
-                            } else if final_provider_pin.is_some() {
-                                format!(
-                                    "Provider '{}' not available.",
-                                    final_provider_pin.unwrap()
-                                )
-                            } else {
-                                "No models available.".to_string()
-                            };
-                            let _ = event_tx.send(CockpitEvent::TranscriptAppend(
-                                TranscriptBlock::Evidence(format!("routing failed: {}", reason)),
-                            ));
-                            let _ = event_tx.send(CockpitEvent::StatusUpdate("ready".into()));
-                            continue;
-                        }
-
-                        // 4. DREX preflight + route
-                        let ingress = DrexIngress {
-                            intent: infer_task_intent(&t),
-                            risk: "low".to_string(),
-                            raw_text: t.clone(),
-                            privacy: "standard".to_string(),
-                            runtime: runtime_for_route_preference(route_preference)
-                                .to_string(),
-                            available_vram_mb: 8192,
-                            required_context_tokens: 1024,
-                        };
-
-                        let policy = default_policy();
-                        let preflight =
-                            preflight_execution(&ingress, &routed_tiers, &policy);
-
-                        match preflight.execution_mode {
-                            ExecutionMode::Deterministic | ExecutionMode::Clarify => {
-                                if let Some(response) = preflight.response_text {
-                                    let _ = event_tx.send(
-                                        CockpitEvent::TranscriptAppend(
-                                            TranscriptBlock::Assistant(response),
-                                        ),
-                                    );
-                                }
-                                let _ = event_tx
-                                    .send(CockpitEvent::StatusUpdate("ready".into()));
+                        match route_task(&t, &pins, &model_tiers) {
+                            Err(msg) => {
+                                let _ = event_tx.send(CockpitEvent::TranscriptAppend(
+                                    TranscriptBlock::Evidence(msg),
+                                ));
+                                let _ = event_tx.send(CockpitEvent::StatusUpdate("ready".into()));
                                 continue;
                             }
-                            _ => {}
-                        }
-
-                        let effective_route_preference =
-                            if route_preference == RoutePreference::Auto {
-                                match preflight.execution_mode {
-                                    ExecutionMode::LocalModel => RoutePreference::LocalOnly,
-                                    ExecutionMode::RemoteModel => {
-                                        RoutePreference::RemoteOnly
-                                    }
-                                    _ => RoutePreference::Auto,
-                                }
-                            } else {
-                                route_preference
-                            };
-
-                        let effective_tiers = filtered_model_tiers(
-                            &routed_tiers,
-                            effective_route_preference,
-                            final_provider_pin,
-                            final_model_pin,
-                        );
-
-                        if effective_tiers.is_empty() {
-                            let _ = event_tx.send(CockpitEvent::TranscriptAppend(
-                                TranscriptBlock::Evidence(
-                                    "routing failed: model stack unavailable".into(),
-                                ),
-                            ));
-                            let _ = event_tx
-                                .send(CockpitEvent::StatusUpdate("ready".into()));
-                            continue;
-                        }
-
-                        let route = match plan_route(
-                            &ingress,
-                            &effective_tiers,
-                            &policy,
-                        ) {
-                            Ok(r) => r,
-                            Err(e) => {
+                            Ok(RouteOutcome::Deterministic(response)) => {
                                 let _ = event_tx.send(CockpitEvent::TranscriptAppend(
-                                    TranscriptBlock::Evidence(format!(
-                                        "routing error: {}",
-                                        e
-                                    )),
+                                    TranscriptBlock::Assistant(response),
                                 ));
-                                let _ = event_tx.send(CockpitEvent::StatusUpdate(
-                                    "ready".into(),
-                                ));
+                                let _ = event_tx.send(CockpitEvent::StatusUpdate("ready".into()));
                                 continue;
                             }
-                        };
+                            Ok(RouteOutcome::Routed(route)) => {
+                                pins.current_provider = route.provider.clone();
+                                pins.current_model = route.model_id.clone();
 
-                        let selected = match route.selected_model {
-                            Some(ref m) => m.clone(),
-                            None => {
-                                let _ = event_tx.send(CockpitEvent::TranscriptAppend(
-                                    TranscriptBlock::Evidence(
-                                        "no model matched for this task".into(),
+                                let _ = event_tx.send(CockpitEvent::RoutingUpdate(RoutingState {
+                                    current_provider: pins.current_provider.clone(),
+                                    current_model: pins.current_model.clone(),
+                                    mode: current_route_label(
+                                        pins.route_preference,
+                                        pins.pinned_provider.as_deref(),
+                                        pins.pinned_model.as_deref(),
                                     ),
-                                ));
-                                let _ = event_tx.send(CockpitEvent::StatusUpdate(
-                                    "ready".into(),
-                                ));
-                                continue;
-                            }
-                        };
+                                    explanation: Some(route.routing_metadata.clone()),
+                                }));
 
-                        // 5. Update routing display
-                        current_provider = selected.provider.clone();
-                        current_model = selected.model_id.clone();
-                        let _ = event_tx.send(CockpitEvent::RoutingUpdate(RoutingState {
-                            current_provider: current_provider.clone(),
-                            current_model: current_model.clone(),
-                            mode: current_route_label(
-                                route_preference,
-                                pinned_provider.as_deref(),
-                                pinned_model.as_deref(),
-                            ),
-                            explanation: Some(route.routing_metadata.clone()),
-                        }));
+                                record_route_evidence(&stdb_client, &route, &t);
 
-                        // 6. Record route decision evidence
-                        let _ = stdb_client.record_route_decision(
-                            &request_id,
-                            &request_id,
-                            &t,
-                            &infer_task_intent(&t),
-                            "low",
-                            "standard",
-                            &selected.provider,
-                            &selected.provider,
-                            &selected.model_id,
-                            if is_local_provider_check(&selected.provider) {
-                                "local"
-                            } else {
-                                "remote"
-                            },
-                            &route.routing_metadata,
-                            0.9,
-                        );
+                                let _ = event_tx.send(CockpitEvent::StatusUpdate("streaming...".into()));
 
-                        // 7. Resolve adapter
-                        let adapter: Arc<dyn ProviderAdapter> =
-                            match selected.provider.as_str() {
-                                "ollama" => Arc::new(OllamaCliAdapter::with_model(
-                                    &selected.model_id,
-                                )),
-                                "claude" => Arc::new(ClaudeCodeCliAdapter::new()),
-                                _ => {
-                                    let _ = event_tx.send(
-                                        CockpitEvent::TranscriptAppend(
-                                            TranscriptBlock::Evidence(format!(
-                                                "no adapter for provider '{}'",
-                                                selected.provider
-                                            )),
-                                        ),
-                                    );
-                                    let _ = event_tx.send(CockpitEvent::StatusUpdate(
-                                        "ready".into(),
-                                    ));
-                                    continue;
+                                // Stream response
+                                let messages = vec![Message { role: Role::User, content: t }];
+                                let (stream_tx, mut stream_rx) = tokio::sync::mpsc::channel(32);
+                                let model_id = route.provider_model_id.clone();
+
+                                tokio::spawn({
+                                    let adapter = route.adapter.clone();
+                                    let err_tx = event_tx.clone();
+                                    async move {
+                                        if let Err(e) = adapter.send(&model_id, &messages, stream_tx).await {
+                                            let _ = err_tx.send(CockpitEvent::StreamError(
+                                                format!("adapter error: {}", e),
+                                            ));
+                                        }
+                                    }
+                                });
+
+                                let mut usage = None;
+                                while let Some(ev) = stream_rx.recv().await {
+                                    match ev {
+                                        StreamEvent::Token(text) => {
+                                            let _ = event_tx.send(CockpitEvent::StreamToken(text));
+                                        }
+                                        StreamEvent::Done(u) => { usage = Some(u); break; }
+                                        StreamEvent::Error(e) => {
+                                            let _ = event_tx.send(CockpitEvent::StreamError(e));
+                                            break;
+                                        }
+                                        StreamEvent::ToolUse { name, .. } => {
+                                            let _ = event_tx.send(CockpitEvent::TranscriptAppend(
+                                                TranscriptBlock::Tool(name, "executed".to_string()),
+                                            ));
+                                        }
+                                    }
                                 }
-                            };
 
-                        let _ =
-                            event_tx.send(CockpitEvent::StatusUpdate("streaming...".into()));
-
-                        // 8. Stream response
-                        let messages = vec![Message {
-                            role: Role::User,
-                            content: t,
-                        }];
-                        let (stream_tx, mut stream_rx) =
-                            tokio::sync::mpsc::channel(32);
-                        let model_id = selected.provider_model_id.clone();
-
-                        tokio::spawn({
-                            let adapter = adapter.clone();
-                            let err_tx = event_tx.clone();
-                            async move {
-                                if let Err(e) =
-                                    adapter.send(&model_id, &messages, stream_tx).await
-                                {
-                                    let _ = err_tx.send(CockpitEvent::StreamError(
-                                        format!("adapter error: {}", e),
-                                    ));
+                                if let Some(ref u) = usage {
+                                    let _ = event_tx.send(CockpitEvent::StreamDone {
+                                        tokens_in: u.input_tokens as i64,
+                                        tokens_out: u.output_tokens as i64,
+                                        cost: u.cost_usd,
+                                    });
+                                } else {
+                                    let _ = event_tx.send(CockpitEvent::StreamDone {
+                                        tokens_in: 0, tokens_out: 0, cost: 0.0,
+                                    });
                                 }
-                            }
-                        });
-
-                        let mut usage = None;
-                        while let Some(ev) = stream_rx.recv().await {
-                            match ev {
-                                StreamEvent::Token(text) => {
-                                    let _ =
-                                        event_tx.send(CockpitEvent::StreamToken(text));
-                                }
-                                StreamEvent::Done(u) => {
-                                    usage = Some(u);
-                                    break;
-                                }
-                                StreamEvent::Error(e) => {
-                                    let _ = event_tx
-                                        .send(CockpitEvent::StreamError(e));
-                                    break;
-                                }
-                                StreamEvent::ToolUse { name, .. } => {
-                                    let _ = event_tx.send(
-                                        CockpitEvent::TranscriptAppend(
-                                            TranscriptBlock::Tool(
-                                                name,
-                                                "executed".to_string(),
-                                            ),
-                                        ),
-                                    );
-                                }
+                                record_run_evidence(&stdb_client, &route, usage.as_ref());
+                                let _ = event_tx.send(CockpitEvent::StatusUpdate("ready".into()));
                             }
                         }
-
-                        // 9. Record run evidence
-                        let turn_ended_at = Utc::now().to_rfc3339();
-                        let user_id = heiwa_provider::load_identity()
-                            .map(|id| id.user_id)
-                            .unwrap_or_else(|| "anonymous".to_string());
-
-                        if let Some(u) = usage {
-                            let _ = event_tx.send(CockpitEvent::StreamDone {
-                                tokens_in: u.input_tokens as i64,
-                                tokens_out: u.output_tokens as i64,
-                                cost: u.cost_usd,
-                            });
-                            let _ = stdb_client.record_run(
-                                &format!("run-{}", uuid::Uuid::new_v4()),
-                                &user_id,
-                                &request_id,
-                                &turn_started_at,
-                                &turn_ended_at,
-                                "SUCCESS",
-                                &selected.model_id,
-                                u.input_tokens as i64,
-                                u.output_tokens as i64,
-                                u.cost_usd,
-                                None,
-                                None,
-                                None,
-                            );
-                        } else {
-                            let _ = event_tx.send(CockpitEvent::StreamDone {
-                                tokens_in: 0,
-                                tokens_out: 0,
-                                cost: 0.0,
-                            });
-                            let _ = stdb_client.record_run(
-                                &format!("run-{}", uuid::Uuid::new_v4()),
-                                &user_id,
-                                &request_id,
-                                &turn_started_at,
-                                &turn_ended_at,
-                                "COMPLETED_NO_USAGE",
-                                &selected.model_id,
-                                0,
-                                0,
-                                0.0,
-                                None,
-                                None,
-                                None,
-                            );
-                        }
-
-                        let _ =
-                            event_tx.send(CockpitEvent::StatusUpdate("ready".into()));
                     }
                     ReplCommand::Shell(s) => {
                         let output = std::process::Command::new("sh")
@@ -1451,56 +981,38 @@ async fn run_cockpit_controller(
                             .output();
                         match output {
                             Ok(o) => {
-                                let stdout_str =
-                                    String::from_utf8_lossy(&o.stdout).to_string();
-                                let stderr_str =
-                                    String::from_utf8_lossy(&o.stderr).to_string();
+                                let stdout_str = String::from_utf8_lossy(&o.stdout).to_string();
+                                let stderr_str = String::from_utf8_lossy(&o.stderr).to_string();
                                 let combined = if stderr_str.is_empty() {
                                     stdout_str
                                 } else {
                                     format!("{}\n{}", stdout_str, stderr_str)
                                 };
                                 let _ = event_tx.send(CockpitEvent::TranscriptAppend(
-                                    TranscriptBlock::Tool(
-                                        format!("shell: {}", s),
-                                        combined,
-                                    ),
+                                    TranscriptBlock::Tool(format!("shell: {}", s), combined),
                                 ));
                             }
                             Err(e) => {
                                 let _ = event_tx.send(CockpitEvent::TranscriptAppend(
-                                    TranscriptBlock::Evidence(format!(
-                                        "shell error: {}",
-                                        e
-                                    )),
+                                    TranscriptBlock::Evidence(format!("shell error: {}", e)),
                                 ));
                             }
                         }
                     }
                     ReplCommand::Slash(c, args) => {
-                        let msg = handle_slash_cockpit(
-                            &c,
-                            &args,
-                            &model_tiers,
-                            &mut pinned_provider,
-                            &mut pinned_model,
-                            &mut route_preference,
-                            &current_provider,
-                            &current_model,
-                        );
+                        let msg = handle_slash(&c, &args, &model_tiers, &mut pins);
                         if let Some(text) = msg {
                             let _ = event_tx.send(CockpitEvent::TranscriptAppend(
                                 TranscriptBlock::Evidence(text),
                             ));
                         }
-                        // Push routing update after slash command may have changed pins
                         let _ = event_tx.send(CockpitEvent::RoutingUpdate(RoutingState {
-                            current_provider: current_provider.clone(),
-                            current_model: current_model.clone(),
+                            current_provider: pins.current_provider.clone(),
+                            current_model: pins.current_model.clone(),
                             mode: current_route_label(
-                                route_preference,
-                                pinned_provider.as_deref(),
-                                pinned_model.as_deref(),
+                                pins.route_preference,
+                                pins.pinned_provider.as_deref(),
+                                pins.pinned_model.as_deref(),
                             ),
                             explanation: None,
                         }));
@@ -1512,24 +1024,19 @@ async fn run_cockpit_controller(
     }
 }
 
-/// Handle slash commands in cockpit mode, returning text to display.
-fn handle_slash_cockpit(
+/// Handle slash commands, returning text to display. Shared by both modes.
+fn handle_slash(
     cmd: &str,
     args: &[String],
     model_tiers: &[heiwa_bindings::ModelTier],
-    pinned_provider: &mut Option<String>,
-    pinned_model: &mut Option<String>,
-    route_preference: &mut RoutePreference,
-    current_provider: &str,
-    current_model: &str,
+    pins: &mut SessionPins,
 ) -> Option<String> {
     match cmd {
         "help" => Some(
-            "commands: /provider [name|auto] /providers /model [name|auto] /models /route [auto|local|remote] /status /clear /exit"
+            "commands: /provider [name|auto] /providers /model [name|auto] /models /route [auto|local|remote] /status /clear /loop /exit"
                 .to_string(),
         ),
         "providers" => {
-            // Same as /models but grouped by provider
             if model_tiers.is_empty() {
                 Some("no loop-capable providers available".into())
             } else {
@@ -1545,12 +1052,12 @@ fn handle_slash_cockpit(
             }
         }
         "auth" => Some("manage auth via 'heiwa auth' in the terminal".into()),
-        "loop" => Some("loop execution is available via 'heiwa loop' in plain mode".into()),
+        "loop" => Some("loop: use '/loop [turns] [objective]' in plain mode or 'heiwa loop'".into()),
         "provider" => {
             let available = available_providers(model_tiers);
             match args.first().map(|s| s.as_str()) {
                 None => {
-                    let active = pinned_provider.as_deref().unwrap_or("auto");
+                    let active = pins.pinned_provider.as_deref().unwrap_or("auto");
                     Some(format!(
                         "provider: {} | available: {}",
                         active,
@@ -1558,19 +1065,19 @@ fn handle_slash_cockpit(
                     ))
                 }
                 Some("auto") | Some("clear") => {
-                    *pinned_provider = None;
-                    *pinned_model = None;
+                    pins.pinned_provider = None;
+                    pins.pinned_model = None;
                     Some("provider routing reset to auto".into())
                 }
                 Some(p) => {
                     if available.iter().any(|x| x == p) {
-                        *pinned_provider = Some(p.to_string());
-                        if let Some(model) = pinned_model.as_ref() {
+                        pins.pinned_provider = Some(p.to_string());
+                        if let Some(model) = pins.pinned_model.as_ref() {
                             let matches = model_tiers
                                 .iter()
                                 .any(|t| t.model_id == *model && t.provider == p);
                             if !matches {
-                                *pinned_model = None;
+                                pins.pinned_model = None;
                             }
                         }
                         Some(format!("pinned provider to {}", p))
@@ -1582,7 +1089,7 @@ fn handle_slash_cockpit(
         }
         "model" => match args.first().map(|s| s.as_str()) {
             None => {
-                let active = pinned_model.as_deref().unwrap_or("auto");
+                let active = pins.pinned_model.as_deref().unwrap_or("auto");
                 let list: Vec<String> = model_tiers
                     .iter()
                     .map(|t| format!("{} ({})", t.model_id, t.provider))
@@ -1590,7 +1097,7 @@ fn handle_slash_cockpit(
                 Some(format!("model: {} | available: {}", active, list.join(", ")))
             }
             Some("auto") | Some("clear") => {
-                *pinned_model = None;
+                pins.pinned_model = None;
                 Some("model routing reset to auto".into())
             }
             Some(m) => {
@@ -1598,8 +1105,8 @@ fn handle_slash_cockpit(
                     .iter()
                     .find(|t| t.model_id == m || t.provider_model_id == m)
                 {
-                    *pinned_model = Some(tier.model_id.clone());
-                    *pinned_provider = Some(tier.provider.clone());
+                    pins.pinned_model = Some(tier.model_id.clone());
+                    pins.pinned_provider = Some(tier.provider.clone());
                     Some(format!(
                         "pinned model to {} ({})",
                         tier.model_id, tier.provider
@@ -1628,71 +1135,255 @@ fn handle_slash_cockpit(
         "route" => match args.first().map(|s| s.as_str()) {
             None => Some(format!(
                 "route: {} | options: auto, local, remote",
-                route_preference_label(*route_preference)
+                route_preference_label(pins.route_preference)
             )),
             Some("auto") => {
-                *route_preference = RoutePreference::Auto;
+                pins.route_preference = RoutePreference::Auto;
                 Some("route preference: auto".into())
             }
             Some("local") => {
-                *route_preference = RoutePreference::LocalOnly;
+                pins.route_preference = RoutePreference::LocalOnly;
                 Some("route preference: local-only".into())
             }
             Some("remote") => {
-                *route_preference = RoutePreference::RemoteOnly;
+                pins.route_preference = RoutePreference::RemoteOnly;
                 Some("route preference: remote-only".into())
             }
             Some(other) => Some(format!("unknown route preference '{}'", other)),
         },
         "status" => Some(format!(
             "provider: {} | model: {} | route: {} | pinned_provider: {} | pinned_model: {}",
-            if current_provider.is_empty() {
+            if pins.current_provider.is_empty() {
                 "none"
             } else {
-                current_provider
+                &pins.current_provider
             },
-            if current_model.is_empty() {
+            if pins.current_model.is_empty() {
                 "none"
             } else {
-                current_model
+                &pins.current_model
             },
-            route_preference_label(*route_preference),
-            pinned_provider.as_deref().unwrap_or("auto"),
-            pinned_model.as_deref().unwrap_or("auto"),
+            route_preference_label(pins.route_preference),
+            pins.pinned_provider.as_deref().unwrap_or("auto"),
+            pins.pinned_model.as_deref().unwrap_or("auto"),
         )),
         "clear" => {
-            *pinned_provider = None;
-            *pinned_model = None;
-            *route_preference = RoutePreference::Auto;
+            pins.pinned_provider = None;
+            pins.pinned_model = None;
+            pins.route_preference = RoutePreference::Auto;
             Some("cleared route, provider, and model pins".into())
         }
-        "exit" | "quit" => None, // handled by Esc in TUI
+        "exit" | "quit" => None,
         _ => Some(format!("unknown command: /{}", cmd)),
     }
 }
 
-fn infer_task_intent(input: &str) -> String {
-    let trimmed = input.trim();
-    if trimmed.is_empty() {
-        return "chat".to_string();
-    }
+// ---------------------------------------------------------------------------
+// Shared execution core — used by both plain REPL and cockpit controller
+// ---------------------------------------------------------------------------
 
-    let lowercase = trimmed.to_ascii_lowercase();
-    let code_keywords = [
-        "refactor", "function", "crate", "cargo", "rust", "python", "typescript", "javascript",
-        "code", "bug", "test", "file", "repo", "implement", "fix", "patch", "compile", "build",
-        "shell", "command", "cli", "adapter", "stream", "binary", "terminal",
-    ];
-    if code_keywords.iter().any(|needle| lowercase.contains(needle))
-        || trimmed.contains("::")
-        || trimmed.contains('/')
-        || trimmed.contains('`')
-    {
-        return "code".to_string();
-    }
+/// Providers that have a working adapter in `resolve_adapter()`.
+const SUPPORTED_ADAPTER_PROVIDERS: &[&str] = &["ollama", "claude"];
 
-    "chat".to_string()
+/// Returns true if the provider has a working adapter in this binary.
+fn has_adapter(provider: &str) -> bool {
+    SUPPORTED_ADAPTER_PROVIDERS.contains(&provider)
 }
+
+/// Route a task through DREX, returning the adapter + metadata needed to stream.
+fn route_task(
+    task: &str,
+    pins: &SessionPins,
+    model_tiers: &[heiwa_bindings::ModelTier],
+) -> Result<RouteOutcome, String> {
+    let turn_request = parse_turn_intent(task);
+    let (provider_pin, model_pin) = match (turn_request.provider_pin, turn_request.model_pin) {
+        (Some(p), Some(m)) => (Some(p), Some(m)),
+        (Some(p), None) => (Some(p), None),
+        _ => (None, None),
+    };
+
+    let final_provider_pin = provider_pin.as_deref().or(pins.pinned_provider.as_deref());
+    let final_model_pin = model_pin.as_deref().or(pins.pinned_model.as_deref());
+
+    // Filter to providers with working adapters before DREX ever sees them.
+    let adapter_capable: Vec<heiwa_bindings::ModelTier> = model_tiers
+        .iter()
+        .filter(|t| has_adapter(&t.provider))
+        .cloned()
+        .collect();
+
+    if adapter_capable.is_empty() {
+        return Err(format!(
+            "No models with working adapters. Supported providers: {}.",
+            SUPPORTED_ADAPTER_PROVIDERS.join(", "),
+        ));
+    }
+
+    let routed_tiers = filtered_model_tiers(&adapter_capable, pins.route_preference, final_provider_pin, final_model_pin);
+
+    if routed_tiers.is_empty() {
+        let reason = if final_model_pin.is_some() {
+            format!("Model '{}' not available.", final_model_pin.unwrap())
+        } else if final_provider_pin.is_some() {
+            let supported: Vec<&str> = adapter_capable.iter().map(|t| t.provider.as_str()).collect::<std::collections::HashSet<_>>().into_iter().collect();
+            format!(
+                "Provider '{}' not available. Supported: {}.",
+                final_provider_pin.unwrap(),
+                supported.join(", "),
+            )
+        } else {
+            "No models available.".to_string()
+        };
+        return Err(format!("Routing failed: {}", reason));
+    }
+
+    let ingress = DrexIngress {
+        intent: turn_request.intent.as_drex_key().to_string(),
+        risk: "low".to_string(),
+        raw_text: task.to_string(),
+        privacy: "standard".to_string(),
+        runtime: runtime_for_route_preference(pins.route_preference).to_string(),
+        available_vram_mb: 8192,
+        required_context_tokens: 1024,
+    };
+
+    let policy = default_policy();
+    let preflight = preflight_execution(&ingress, &routed_tiers, &policy);
+
+    match preflight.execution_mode {
+        ExecutionMode::Deterministic | ExecutionMode::Clarify => {
+            let response = preflight.response_text.unwrap_or_default();
+            return Ok(RouteOutcome::Deterministic(response));
+        }
+        _ => {}
+    }
+
+    let effective_route_preference = if pins.route_preference == RoutePreference::Auto {
+        match preflight.execution_mode {
+            ExecutionMode::LocalModel => RoutePreference::LocalOnly,
+            ExecutionMode::RemoteModel => RoutePreference::RemoteOnly,
+            _ => RoutePreference::Auto,
+        }
+    } else {
+        pins.route_preference
+    };
+
+    let effective_tiers = filtered_model_tiers(
+        &routed_tiers,
+        effective_route_preference,
+        final_provider_pin,
+        final_model_pin,
+    );
+
+    if effective_tiers.is_empty() {
+        return Err("Routing failed: model stack unavailable for this execution mode.".to_string());
+    }
+
+    let route = plan_route(&ingress, &effective_tiers, &policy)
+        .map_err(|e| format!("Routing failed: {}", e))?;
+
+    let selected = route
+        .selected_model
+        .as_ref()
+        .ok_or_else(|| "No model matched for this task.".to_string())?;
+
+    let adapter = resolve_adapter(&selected.provider, &selected.model_id)?;
+
+    Ok(RouteOutcome::Routed(RouteResult {
+        adapter,
+        model_id: selected.model_id.clone(),
+        provider: selected.provider.clone(),
+        provider_model_id: selected.provider_model_id.clone(),
+        routing_metadata: route.routing_metadata,
+        intent_key: turn_request.intent.as_drex_key().to_string(),
+        request_id: uuid::Uuid::new_v4().to_string(),
+        turn_started_at: Utc::now().to_rfc3339(),
+    }))
+}
+
+/// Resolve a provider adapter by name.
+fn resolve_adapter(provider: &str, model_id: &str) -> Result<Arc<dyn ProviderAdapter>, String> {
+    match provider {
+        "ollama" => Ok(Arc::new(OllamaCliAdapter::with_model(model_id))),
+        "claude" => Ok(Arc::new(ClaudeCodeCliAdapter::new())),
+        _ => Err(format!("No adapter for provider '{}' yet.", provider)),
+    }
+}
+
+/// Record a DREX route decision in SpacetimeDB.
+fn record_route_evidence(
+    stdb: &heiwa_stdb::StdbClient,
+    route: &RouteResult,
+    task: &str,
+) {
+    let _ = stdb.record_route_decision(
+        &route.request_id,
+        &route.request_id,
+        task,
+        &route.intent_key,
+        "low",
+        "standard",
+        &route.provider,
+        &route.provider,
+        &route.model_id,
+        if is_local_provider(&route.provider) { "local" } else { "remote" },
+        &route.routing_metadata,
+        0.9,
+    );
+}
+
+/// Record a completed run in SpacetimeDB.
+fn record_run_evidence(
+    stdb: &heiwa_stdb::StdbClient,
+    route: &RouteResult,
+    usage: Option<&TokenUsage>,
+) {
+    let turn_ended_at = Utc::now().to_rfc3339();
+    let user_id = heiwa_provider::load_identity()
+        .map(|id| id.user_id)
+        .unwrap_or_else(|| "anonymous".to_string());
+
+    if let Some(u) = usage {
+        let _ = stdb.record_run(
+            &format!("run-{}", uuid::Uuid::new_v4()),
+            &user_id,
+            &route.request_id,
+            &route.turn_started_at,
+            &turn_ended_at,
+            "SUCCESS",
+            &route.model_id,
+            u.input_tokens as i64,
+            u.output_tokens as i64,
+            u.cost_usd,
+            None,
+            None,
+            None,
+        );
+    } else {
+        let _ = stdb.record_run(
+            &format!("run-{}", uuid::Uuid::new_v4()),
+            &user_id,
+            &route.request_id,
+            &route.turn_started_at,
+            &turn_ended_at,
+            "COMPLETED_NO_USAGE",
+            &route.model_id,
+            0,
+            0,
+            0.0,
+            None,
+            None,
+            None,
+        );
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Helpers
+// ---------------------------------------------------------------------------
+
+
 
 fn filtered_model_tiers(
     model_tiers: &[heiwa_bindings::ModelTier],
@@ -1758,23 +1449,71 @@ fn is_local_provider(provider: &str) -> bool {
     matches!(provider, "ollama" | "local" | "vllm" | "litellm")
 }
 
-fn is_local_provider_check(provider: &str) -> bool {
-    is_local_provider(provider)
-}
-
 #[cfg(test)]
 mod tests {
-    use super::infer_task_intent;
+    use heiwa_protocol::{parse_turn_intent, Intent};
 
     #[test]
     fn greeting_input_defaults_to_chat_intent() {
-        assert_eq!(infer_task_intent("hi"), "chat");
-        assert_eq!(infer_task_intent("hello there"), "chat");
+        assert_eq!(parse_turn_intent("hi").intent, Intent::Chat);
+        assert_eq!(parse_turn_intent("hello there").intent, Intent::Chat);
     }
 
     #[test]
-    fn coding_input_uses_code_intent() {
-        assert_eq!(infer_task_intent("refactor this Rust function"), "code");
-        assert_eq!(infer_task_intent("fix the failing cargo test"), "code");
+    fn coding_input_uses_build_intent() {
+        assert_eq!(parse_turn_intent("refactor this Rust function").intent, Intent::Build);
+        assert_eq!(parse_turn_intent("fix the failing cargo test").intent, Intent::Build);
+    }
+
+    #[test]
+    fn research_input_uses_research_intent() {
+        assert_eq!(parse_turn_intent("explain how DREX routing works").intent, Intent::Research);
+        assert_eq!(parse_turn_intent("what is the weather like").intent, Intent::Research);
+    }
+
+    #[test]
+    fn deploy_input_uses_deploy_intent() {
+        assert_eq!(parse_turn_intent("deploy this to railway").intent, Intent::Deploy);
+        assert_eq!(parse_turn_intent("ship the new release").intent, Intent::Deploy);
+    }
+
+    #[test]
+    fn strategy_input_uses_strategy_intent() {
+        assert_eq!(parse_turn_intent("plan the roadmap for Q3").intent, Intent::Strategy);
+        assert_eq!(parse_turn_intent("design the architecture").intent, Intent::Strategy);
+    }
+
+    #[test]
+    fn audit_input_uses_audit_intent() {
+        assert_eq!(parse_turn_intent("review the PR").intent, Intent::Audit);
+        assert_eq!(parse_turn_intent("lint the codebase").intent, Intent::Audit);
+    }
+
+    #[test]
+    fn math_question_does_not_false_positive_to_code() {
+        // "what is 3/4?" should not match code just because of `/`
+        assert_eq!(parse_turn_intent("what is 3/4?").intent, Intent::Research);
+    }
+
+    #[test]
+    fn provider_pin_with_using_keyword() {
+        let req = parse_turn_intent("using ollama explain the code");
+        assert_eq!(req.provider_pin.as_deref(), Some("ollama"));
+        assert!(req.model_pin.is_none()); // "explain" is a task starter word
+    }
+
+    #[test]
+    fn provider_pin_with_keyword() {
+        let req = parse_turn_intent("with claude sonnet-4 fix the bug");
+        assert_eq!(req.provider_pin.as_deref(), Some("claude"));
+        assert_eq!(req.model_pin.as_deref(), Some("sonnet-4"));
+    }
+
+    #[test]
+    fn has_adapter_filters_known_providers() {
+        assert!(super::has_adapter("ollama"));
+        assert!(super::has_adapter("claude"));
+        assert!(!super::has_adapter("anthropic"));
+        assert!(!super::has_adapter("openai"));
     }
 }

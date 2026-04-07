@@ -120,13 +120,91 @@ fn parse_turn_intent_extracts_provider_and_model() {
     let req = heiwa_protocol::parse_turn_intent("use claude opus-4.6 fix the bug");
     assert_eq!(req.provider_pin.as_deref(), Some("claude"));
     assert_eq!(req.model_pin.as_deref(), Some("opus-4.6"));
-    assert!(matches!(req.intent, heiwa_protocol::Intent::Code));
+    assert!(matches!(req.intent, heiwa_protocol::Intent::Build));
 }
 
 #[test]
 fn parse_turn_intent_defaults_to_chat() {
-    let req = heiwa_protocol::parse_turn_intent("what is the weather like");
+    let req = heiwa_protocol::parse_turn_intent("good morning everyone");
     assert!(req.provider_pin.is_none());
     assert!(req.model_pin.is_none());
     assert!(matches!(req.intent, heiwa_protocol::Intent::Chat));
+}
+
+#[test]
+fn parse_turn_intent_build_variants() {
+    use heiwa_protocol::Intent;
+    assert_eq!(heiwa_protocol::parse_turn_intent("refactor the router module").intent, Intent::Build);
+    assert_eq!(heiwa_protocol::parse_turn_intent("fix the failing cargo test").intent, Intent::Build);
+    assert_eq!(heiwa_protocol::parse_turn_intent("implement the new adapter").intent, Intent::Build);
+    assert_eq!(heiwa_protocol::parse_turn_intent("patch main.rs").intent, Intent::Build);
+}
+
+#[test]
+fn parse_turn_intent_deploy() {
+    use heiwa_protocol::Intent;
+    assert_eq!(heiwa_protocol::parse_turn_intent("deploy to railway").intent, Intent::Deploy);
+    assert_eq!(heiwa_protocol::parse_turn_intent("ship the release").intent, Intent::Deploy);
+    assert_eq!(heiwa_protocol::parse_turn_intent("publish the docker image").intent, Intent::Deploy);
+}
+
+#[test]
+fn parse_turn_intent_audit() {
+    use heiwa_protocol::Intent;
+    assert_eq!(heiwa_protocol::parse_turn_intent("review the PR").intent, Intent::Audit);
+    assert_eq!(heiwa_protocol::parse_turn_intent("lint this file").intent, Intent::Audit);
+}
+
+#[test]
+fn parse_turn_intent_research() {
+    use heiwa_protocol::Intent;
+    assert_eq!(heiwa_protocol::parse_turn_intent("explain how DREX works").intent, Intent::Research);
+    assert_eq!(heiwa_protocol::parse_turn_intent("what is the difference between X and Y").intent, Intent::Research);
+    assert_eq!(heiwa_protocol::parse_turn_intent("summarize the last meeting").intent, Intent::Research);
+}
+
+#[test]
+fn parse_turn_intent_strategy() {
+    use heiwa_protocol::Intent;
+    assert_eq!(heiwa_protocol::parse_turn_intent("plan the roadmap").intent, Intent::Strategy);
+    assert_eq!(heiwa_protocol::parse_turn_intent("design the architecture").intent, Intent::Strategy);
+}
+
+#[test]
+fn parse_turn_intent_status_check() {
+    use heiwa_protocol::Intent;
+    assert_eq!(heiwa_protocol::parse_turn_intent("check the system status").intent, Intent::StatusCheck);
+}
+
+#[test]
+fn parse_turn_intent_with_keyword_extracts_pin() {
+    let req = heiwa_protocol::parse_turn_intent("with ollama summarize this");
+    assert_eq!(req.provider_pin.as_deref(), Some("ollama"));
+    assert!(req.model_pin.is_none()); // no model after provider
+}
+
+#[test]
+fn parse_turn_intent_using_keyword_extracts_pin() {
+    let req = heiwa_protocol::parse_turn_intent("using claude sonnet-4 fix the tests");
+    assert_eq!(req.provider_pin.as_deref(), Some("claude"));
+    assert_eq!(req.model_pin.as_deref(), Some("sonnet-4"));
+}
+
+#[test]
+fn parse_turn_intent_unknown_provider_not_pinned() {
+    let req = heiwa_protocol::parse_turn_intent("use foobar to do something");
+    assert!(req.provider_pin.is_none());
+    assert!(req.model_pin.is_none());
+}
+
+#[test]
+fn parse_turn_intent_as_drex_key_round_trip() {
+    use heiwa_protocol::Intent;
+    assert_eq!(Intent::Chat.as_drex_key(), "chat");
+    assert_eq!(Intent::Build.as_drex_key(), "build");
+    assert_eq!(Intent::Deploy.as_drex_key(), "deploy");
+    assert_eq!(Intent::Audit.as_drex_key(), "audit");
+    assert_eq!(Intent::Research.as_drex_key(), "research");
+    assert_eq!(Intent::Strategy.as_drex_key(), "strategy");
+    assert_eq!(Intent::StatusCheck.as_drex_key(), "status_check");
 }
