@@ -1040,6 +1040,7 @@ dependencies = [
  "heiwa-bindings",
  "serde",
  "serde_json",
+ "tokio",
  "uuid",
 ]
 
@@ -1125,6 +1126,7 @@ dependencies = [
  "crossterm",
  "heiwa-protocol",
  "ratatui",
+ "tokio",
 ]
 
 [[package]]

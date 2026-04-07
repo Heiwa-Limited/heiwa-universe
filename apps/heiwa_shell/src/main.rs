@@ -2,8 +2,9 @@ use anyhow::{anyhow, Result};
 use std::env;
 use std::sync::Arc;
 use chrono::Utc;
-use heiwa_protocol::{SessionState, RoutingState, TranscriptBlock, parse_turn_intent};
-use heiwa_tui::render_cockpit;
+use heiwa_protocol::{
+    CockpitCommand, CockpitEvent, SessionState, RoutingState, TranscriptBlock, parse_turn_intent,
+};
 use heiwa_core::drex::{default_policy, plan_route, preflight_execution, DrexIngress, ExecutionMode};
 use heiwa_provider::adapter::{Message, ProviderAdapter, Role, StreamEvent};
 use heiwa_provider::providers::ollama::OllamaCliAdapter;
@@ -534,17 +535,21 @@ async fn attempt_stdb_connection() -> heiwa_stdb::StdbClient {
 }
 
 async fn run_repl(use_cockpit: bool) -> Result<()> {
-    println!("Heiwa Interactive Shell");
-    println!("Type /help for commands, !command for shell escape, or enter a task.");
-    println!();
+    if !use_cockpit {
+        println!("Heiwa Interactive Shell");
+        println!("Type /help for commands, !command for shell escape, or enter a task.");
+        println!();
+    }
 
     let stdb_client = attempt_stdb_connection().await;
-    if stdb_client.is_connected() {
-        println!("  Connected to SpacetimeDB");
-    } else if heiwa_provider::load_identity().is_some() {
-        println!("  SpacetimeDB unreachable — running offline");
-    } else {
-        println!("  Not logged in — run 'heiwa login' to enable sync");
+    if !use_cockpit {
+        if stdb_client.is_connected() {
+            println!("  Connected to SpacetimeDB");
+        } else if heiwa_provider::load_identity().is_some() {
+            println!("  SpacetimeDB unreachable — running offline");
+        } else {
+            println!("  Not logged in — run 'heiwa login' to enable sync");
+        }
     }
 
     // Start device heartbeat if connected
@@ -577,7 +582,7 @@ async fn run_repl(use_cockpit: bool) -> Result<()> {
     heiwa_provider::detect::auto_discover(&mut registry).await;
     let model_tiers = get_live_model_tiers(&registry);
 
-    if model_tiers.is_empty() {
+    if model_tiers.is_empty() && !use_cockpit {
         println!("No loop-capable models available. Run 'heiwa providers' or 'heiwa auth add-key' to connect.");
     }
 
@@ -610,32 +615,22 @@ async fn run_repl(use_cockpit: bool) -> Result<()> {
     }
 
     if use_cockpit {
-        let mut stdout = io::stdout();
-        crossterm::terminal::enable_raw_mode()?;
-        crossterm::execute!(stdout, crossterm::terminal::EnterAlternateScreen, crossterm::event::EnableMouseCapture)?;
-        let backend = ratatui::backend::CrosstermBackend::new(stdout);
-        let mut terminal = ratatui::Terminal::new(backend)?;
+        let (event_tx, event_rx) =
+            tokio::sync::mpsc::unbounded_channel::<CockpitEvent>();
+        let (cmd_tx, cmd_rx) =
+            tokio::sync::mpsc::unbounded_channel::<CockpitCommand>();
 
-        loop {
-            terminal.draw(|f| render_cockpit(f, &state))?;
+        // Spawn the async controller — it owns routing, execution, evidence
+        let ctrl_stdb = stdb_client.clone();
+        let ctrl_tiers = model_tiers.clone();
+        tokio::spawn(async move {
+            run_cockpit_controller(cmd_rx, event_tx, ctrl_stdb, ctrl_tiers).await;
+        });
 
-            if crossterm::event::poll(std::time::Duration::from_millis(100))? {
-                if let crossterm::event::Event::Key(key) = crossterm::event::read()? {
-                    if key.code == crossterm::event::KeyCode::Esc {
-                        break;
-                    }
-                    // Handle other keys, multi-line input, etc.
-                }
-            }
-        }
+        // Run TUI on the main thread (blocking) — it owns terminal I/O
+        let stdb_connected = stdb_client.is_connected();
+        heiwa_tui::run_cockpit(event_rx, cmd_tx, state, stdb_connected)?;
 
-        crossterm::terminal::disable_raw_mode()?;
-        crossterm::execute!(
-            terminal.backend_mut(),
-            crossterm::terminal::LeaveAlternateScreen,
-            crossterm::event::DisableMouseCapture
-        )?;
-        terminal.show_cursor()?;
         return Ok(());
     }
 
@@ -1102,6 +1097,560 @@ async fn run_repl(use_cockpit: bool) -> Result<()> {
     }
 
     Ok(())
+}
+
+// ---------------------------------------------------------------------------
+// Cockpit controller — async task that processes CockpitCommands
+// ---------------------------------------------------------------------------
+
+async fn run_cockpit_controller(
+    mut cmd_rx: tokio::sync::mpsc::UnboundedReceiver<CockpitCommand>,
+    event_tx: tokio::sync::mpsc::UnboundedSender<CockpitEvent>,
+    stdb_client: heiwa_stdb::StdbClient,
+    model_tiers: Vec<heiwa_bindings::ModelTier>,
+) {
+    let mut pinned_provider: Option<String> = None;
+    let mut pinned_model: Option<String> = None;
+    let mut route_preference = RoutePreference::Auto;
+    let mut current_provider = String::new();
+    let mut current_model = String::new();
+
+    if let Some(first) = model_tiers.first() {
+        current_provider = first.provider.clone();
+        current_model = first.model_id.clone();
+    }
+
+    while let Some(cmd) = cmd_rx.recv().await {
+        match cmd {
+            CockpitCommand::Quit => break,
+            CockpitCommand::SubmitInput(input) => {
+                let parsed = parse_input(&input);
+                match parsed {
+                    ReplCommand::Task(t) => {
+                        if t.is_empty() {
+                            continue;
+                        }
+                        let _ = event_tx.send(CockpitEvent::StatusUpdate("routing...".into()));
+
+                        let request_id = uuid::Uuid::new_v4().to_string();
+                        let turn_started_at = Utc::now().to_rfc3339();
+
+                        // 1. Parse turn intent for inline pins
+                        let turn_request = parse_turn_intent(&t);
+                        let (provider_pin, model_pin) = match (
+                            turn_request.provider_pin,
+                            turn_request.model_pin,
+                        ) {
+                            (Some(p), Some(m)) => (Some(p), Some(m)),
+                            (Some(p), None) => (Some(p), None),
+                            _ => (None, None),
+                        };
+
+                        // 2. Merge session overrides
+                        let final_provider_pin =
+                            provider_pin.as_deref().or(pinned_provider.as_deref());
+                        let final_model_pin =
+                            model_pin.as_deref().or(pinned_model.as_deref());
+
+                        // 3. Filter model tiers
+                        let routed_tiers = filtered_model_tiers(
+                            &model_tiers,
+                            route_preference,
+                            final_provider_pin,
+                            final_model_pin,
+                        );
+
+                        if routed_tiers.is_empty() {
+                            let reason = if final_model_pin.is_some() {
+                                format!(
+                                    "Model '{}' not available.",
+                                    final_model_pin.unwrap()
+                                )
+                            } else if final_provider_pin.is_some() {
+                                format!(
+                                    "Provider '{}' not available.",
+                                    final_provider_pin.unwrap()
+                                )
+                            } else {
+                                "No models available.".to_string()
+                            };
+                            let _ = event_tx.send(CockpitEvent::TranscriptAppend(
+                                TranscriptBlock::Evidence(format!("routing failed: {}", reason)),
+                            ));
+                            let _ = event_tx.send(CockpitEvent::StatusUpdate("ready".into()));
+                            continue;
+                        }
+
+                        // 4. DREX preflight + route
+                        let ingress = DrexIngress {
+                            intent: infer_task_intent(&t),
+                            risk: "low".to_string(),
+                            raw_text: t.clone(),
+                            privacy: "standard".to_string(),
+                            runtime: runtime_for_route_preference(route_preference)
+                                .to_string(),
+                            available_vram_mb: 8192,
+                            required_context_tokens: 1024,
+                        };
+
+                        let policy = default_policy();
+                        let preflight =
+                            preflight_execution(&ingress, &routed_tiers, &policy);
+
+                        match preflight.execution_mode {
+                            ExecutionMode::Deterministic | ExecutionMode::Clarify => {
+                                if let Some(response) = preflight.response_text {
+                                    let _ = event_tx.send(
+                                        CockpitEvent::TranscriptAppend(
+                                            TranscriptBlock::Assistant(response),
+                                        ),
+                                    );
+                                }
+                                let _ = event_tx
+                                    .send(CockpitEvent::StatusUpdate("ready".into()));
+                                continue;
+                            }
+                            _ => {}
+                        }
+
+                        let effective_route_preference =
+                            if route_preference == RoutePreference::Auto {
+                                match preflight.execution_mode {
+                                    ExecutionMode::LocalModel => RoutePreference::LocalOnly,
+                                    ExecutionMode::RemoteModel => {
+                                        RoutePreference::RemoteOnly
+                                    }
+                                    _ => RoutePreference::Auto,
+                                }
+                            } else {
+                                route_preference
+                            };
+
+                        let effective_tiers = filtered_model_tiers(
+                            &routed_tiers,
+                            effective_route_preference,
+                            final_provider_pin,
+                            final_model_pin,
+                        );
+
+                        if effective_tiers.is_empty() {
+                            let _ = event_tx.send(CockpitEvent::TranscriptAppend(
+                                TranscriptBlock::Evidence(
+                                    "routing failed: model stack unavailable".into(),
+                                ),
+                            ));
+                            let _ = event_tx
+                                .send(CockpitEvent::StatusUpdate("ready".into()));
+                            continue;
+                        }
+
+                        let route = match plan_route(
+                            &ingress,
+                            &effective_tiers,
+                            &policy,
+                        ) {
+                            Ok(r) => r,
+                            Err(e) => {
+                                let _ = event_tx.send(CockpitEvent::TranscriptAppend(
+                                    TranscriptBlock::Evidence(format!(
+                                        "routing error: {}",
+                                        e
+                                    )),
+                                ));
+                                let _ = event_tx.send(CockpitEvent::StatusUpdate(
+                                    "ready".into(),
+                                ));
+                                continue;
+                            }
+                        };
+
+                        let selected = match route.selected_model {
+                            Some(ref m) => m.clone(),
+                            None => {
+                                let _ = event_tx.send(CockpitEvent::TranscriptAppend(
+                                    TranscriptBlock::Evidence(
+                                        "no model matched for this task".into(),
+                                    ),
+                                ));
+                                let _ = event_tx.send(CockpitEvent::StatusUpdate(
+                                    "ready".into(),
+                                ));
+                                continue;
+                            }
+                        };
+
+                        // 5. Update routing display
+                        current_provider = selected.provider.clone();
+                        current_model = selected.model_id.clone();
+                        let _ = event_tx.send(CockpitEvent::RoutingUpdate(RoutingState {
+                            current_provider: current_provider.clone(),
+                            current_model: current_model.clone(),
+                            mode: current_route_label(
+                                route_preference,
+                                pinned_provider.as_deref(),
+                                pinned_model.as_deref(),
+                            ),
+                            explanation: Some(route.routing_metadata.clone()),
+                        }));
+
+                        // 6. Record route decision evidence
+                        let _ = stdb_client.record_route_decision(
+                            &request_id,
+                            &request_id,
+                            &t,
+                            &infer_task_intent(&t),
+                            "low",
+                            "standard",
+                            &selected.provider,
+                            &selected.provider,
+                            &selected.model_id,
+                            if is_local_provider_check(&selected.provider) {
+                                "local"
+                            } else {
+                                "remote"
+                            },
+                            &route.routing_metadata,
+                            0.9,
+                        );
+
+                        // 7. Resolve adapter
+                        let adapter: Arc<dyn ProviderAdapter> =
+                            match selected.provider.as_str() {
+                                "ollama" => Arc::new(OllamaCliAdapter::with_model(
+                                    &selected.model_id,
+                                )),
+                                "claude" => Arc::new(ClaudeCodeCliAdapter::new()),
+                                _ => {
+                                    let _ = event_tx.send(
+                                        CockpitEvent::TranscriptAppend(
+                                            TranscriptBlock::Evidence(format!(
+                                                "no adapter for provider '{}'",
+                                                selected.provider
+                                            )),
+                                        ),
+                                    );
+                                    let _ = event_tx.send(CockpitEvent::StatusUpdate(
+                                        "ready".into(),
+                                    ));
+                                    continue;
+                                }
+                            };
+
+                        let _ =
+                            event_tx.send(CockpitEvent::StatusUpdate("streaming...".into()));
+
+                        // 8. Stream response
+                        let messages = vec![Message {
+                            role: Role::User,
+                            content: t,
+                        }];
+                        let (stream_tx, mut stream_rx) =
+                            tokio::sync::mpsc::channel(32);
+                        let model_id = selected.provider_model_id.clone();
+
+                        tokio::spawn({
+                            let adapter = adapter.clone();
+                            let err_tx = event_tx.clone();
+                            async move {
+                                if let Err(e) =
+                                    adapter.send(&model_id, &messages, stream_tx).await
+                                {
+                                    let _ = err_tx.send(CockpitEvent::StreamError(
+                                        format!("adapter error: {}", e),
+                                    ));
+                                }
+                            }
+                        });
+
+                        let mut usage = None;
+                        while let Some(ev) = stream_rx.recv().await {
+                            match ev {
+                                StreamEvent::Token(text) => {
+                                    let _ =
+                                        event_tx.send(CockpitEvent::StreamToken(text));
+                                }
+                                StreamEvent::Done(u) => {
+                                    usage = Some(u);
+                                    break;
+                                }
+                                StreamEvent::Error(e) => {
+                                    let _ = event_tx
+                                        .send(CockpitEvent::StreamError(e));
+                                    break;
+                                }
+                                StreamEvent::ToolUse { name, .. } => {
+                                    let _ = event_tx.send(
+                                        CockpitEvent::TranscriptAppend(
+                                            TranscriptBlock::Tool(
+                                                name,
+                                                "executed".to_string(),
+                                            ),
+                                        ),
+                                    );
+                                }
+                            }
+                        }
+
+                        // 9. Record run evidence
+                        let turn_ended_at = Utc::now().to_rfc3339();
+                        let user_id = heiwa_provider::load_identity()
+                            .map(|id| id.user_id)
+                            .unwrap_or_else(|| "anonymous".to_string());
+
+                        if let Some(u) = usage {
+                            let _ = event_tx.send(CockpitEvent::StreamDone {
+                                tokens_in: u.input_tokens as i64,
+                                tokens_out: u.output_tokens as i64,
+                                cost: u.cost_usd,
+                            });
+                            let _ = stdb_client.record_run(
+                                &format!("run-{}", uuid::Uuid::new_v4()),
+                                &user_id,
+                                &request_id,
+                                &turn_started_at,
+                                &turn_ended_at,
+                                "SUCCESS",
+                                &selected.model_id,
+                                u.input_tokens as i64,
+                                u.output_tokens as i64,
+                                u.cost_usd,
+                                None,
+                                None,
+                                None,
+                            );
+                        } else {
+                            let _ = event_tx.send(CockpitEvent::StreamDone {
+                                tokens_in: 0,
+                                tokens_out: 0,
+                                cost: 0.0,
+                            });
+                            let _ = stdb_client.record_run(
+                                &format!("run-{}", uuid::Uuid::new_v4()),
+                                &user_id,
+                                &request_id,
+                                &turn_started_at,
+                                &turn_ended_at,
+                                "COMPLETED_NO_USAGE",
+                                &selected.model_id,
+                                0,
+                                0,
+                                0.0,
+                                None,
+                                None,
+                                None,
+                            );
+                        }
+
+                        let _ =
+                            event_tx.send(CockpitEvent::StatusUpdate("ready".into()));
+                    }
+                    ReplCommand::Shell(s) => {
+                        let output = std::process::Command::new("sh")
+                            .arg("-c")
+                            .arg(&s)
+                            .output();
+                        match output {
+                            Ok(o) => {
+                                let stdout_str =
+                                    String::from_utf8_lossy(&o.stdout).to_string();
+                                let stderr_str =
+                                    String::from_utf8_lossy(&o.stderr).to_string();
+                                let combined = if stderr_str.is_empty() {
+                                    stdout_str
+                                } else {
+                                    format!("{}\n{}", stdout_str, stderr_str)
+                                };
+                                let _ = event_tx.send(CockpitEvent::TranscriptAppend(
+                                    TranscriptBlock::Tool(
+                                        format!("shell: {}", s),
+                                        combined,
+                                    ),
+                                ));
+                            }
+                            Err(e) => {
+                                let _ = event_tx.send(CockpitEvent::TranscriptAppend(
+                                    TranscriptBlock::Evidence(format!(
+                                        "shell error: {}",
+                                        e
+                                    )),
+                                ));
+                            }
+                        }
+                    }
+                    ReplCommand::Slash(c, args) => {
+                        let msg = handle_slash_cockpit(
+                            &c,
+                            &args,
+                            &model_tiers,
+                            &mut pinned_provider,
+                            &mut pinned_model,
+                            &mut route_preference,
+                            &current_provider,
+                            &current_model,
+                        );
+                        if let Some(text) = msg {
+                            let _ = event_tx.send(CockpitEvent::TranscriptAppend(
+                                TranscriptBlock::Evidence(text),
+                            ));
+                        }
+                        // Push routing update after slash command may have changed pins
+                        let _ = event_tx.send(CockpitEvent::RoutingUpdate(RoutingState {
+                            current_provider: current_provider.clone(),
+                            current_model: current_model.clone(),
+                            mode: current_route_label(
+                                route_preference,
+                                pinned_provider.as_deref(),
+                                pinned_model.as_deref(),
+                            ),
+                            explanation: None,
+                        }));
+                        let _ = event_tx.send(CockpitEvent::StatusUpdate("ready".into()));
+                    }
+                }
+            }
+        }
+    }
+}
+
+/// Handle slash commands in cockpit mode, returning text to display.
+fn handle_slash_cockpit(
+    cmd: &str,
+    args: &[String],
+    model_tiers: &[heiwa_bindings::ModelTier],
+    pinned_provider: &mut Option<String>,
+    pinned_model: &mut Option<String>,
+    route_preference: &mut RoutePreference,
+    current_provider: &str,
+    current_model: &str,
+) -> Option<String> {
+    match cmd {
+        "help" => Some(
+            "commands: /provider [name|auto] /model [name|auto] /route [auto|local|remote] /models /status /clear /exit"
+                .to_string(),
+        ),
+        "provider" => {
+            let available = available_providers(model_tiers);
+            match args.first().map(|s| s.as_str()) {
+                None => {
+                    let active = pinned_provider.as_deref().unwrap_or("auto");
+                    Some(format!(
+                        "provider: {} | available: {}",
+                        active,
+                        available.join(", ")
+                    ))
+                }
+                Some("auto") | Some("clear") => {
+                    *pinned_provider = None;
+                    *pinned_model = None;
+                    Some("provider routing reset to auto".into())
+                }
+                Some(p) => {
+                    if available.iter().any(|x| x == p) {
+                        *pinned_provider = Some(p.to_string());
+                        if let Some(model) = pinned_model.as_ref() {
+                            let matches = model_tiers
+                                .iter()
+                                .any(|t| t.model_id == *model && t.provider == p);
+                            if !matches {
+                                *pinned_model = None;
+                            }
+                        }
+                        Some(format!("pinned provider to {}", p))
+                    } else {
+                        Some(format!("unknown provider '{}'", p))
+                    }
+                }
+            }
+        }
+        "model" => match args.first().map(|s| s.as_str()) {
+            None => {
+                let active = pinned_model.as_deref().unwrap_or("auto");
+                let list: Vec<String> = model_tiers
+                    .iter()
+                    .map(|t| format!("{} ({})", t.model_id, t.provider))
+                    .collect();
+                Some(format!("model: {} | available: {}", active, list.join(", ")))
+            }
+            Some("auto") | Some("clear") => {
+                *pinned_model = None;
+                Some("model routing reset to auto".into())
+            }
+            Some(m) => {
+                if let Some(tier) = model_tiers
+                    .iter()
+                    .find(|t| t.model_id == m || t.provider_model_id == m)
+                {
+                    *pinned_model = Some(tier.model_id.clone());
+                    *pinned_provider = Some(tier.provider.clone());
+                    Some(format!(
+                        "pinned model to {} ({})",
+                        tier.model_id, tier.provider
+                    ))
+                } else {
+                    Some(format!("unknown model '{}'", m))
+                }
+            }
+        },
+        "models" => {
+            if model_tiers.is_empty() {
+                Some("no loop-capable models available".into())
+            } else {
+                let list: Vec<String> = model_tiers
+                    .iter()
+                    .map(|t| {
+                        format!(
+                            "{} ({}) class:{}",
+                            t.model_id, t.provider, t.capability_class
+                        )
+                    })
+                    .collect();
+                Some(list.join("\n"))
+            }
+        }
+        "route" => match args.first().map(|s| s.as_str()) {
+            None => Some(format!(
+                "route: {} | options: auto, local, remote",
+                route_preference_label(*route_preference)
+            )),
+            Some("auto") => {
+                *route_preference = RoutePreference::Auto;
+                Some("route preference: auto".into())
+            }
+            Some("local") => {
+                *route_preference = RoutePreference::LocalOnly;
+                Some("route preference: local-only".into())
+            }
+            Some("remote") => {
+                *route_preference = RoutePreference::RemoteOnly;
+                Some("route preference: remote-only".into())
+            }
+            Some(other) => Some(format!("unknown route preference '{}'", other)),
+        },
+        "status" => Some(format!(
+            "provider: {} | model: {} | route: {} | pinned_provider: {} | pinned_model: {}",
+            if current_provider.is_empty() {
+                "none"
+            } else {
+                current_provider
+            },
+            if current_model.is_empty() {
+                "none"
+            } else {
+                current_model
+            },
+            route_preference_label(*route_preference),
+            pinned_provider.as_deref().unwrap_or("auto"),
+            pinned_model.as_deref().unwrap_or("auto"),
+        )),
+        "clear" => {
+            *pinned_provider = None;
+            *pinned_model = None;
+            *route_preference = RoutePreference::Auto;
+            Some("cleared route, provider, and model pins".into())
+        }
+        "exit" | "quit" => None, // handled by Esc in TUI
+        _ => Some(format!("unknown command: /{}", cmd)),
+    }
 }
 
 fn infer_task_intent(input: &str) -> String {

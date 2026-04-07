@@ -1,5 +1,43 @@
 use serde::{Deserialize, Serialize};
 
+// ---------------------------------------------------------------------------
+// Cockpit event contract — controller <-> TUI communication
+// ---------------------------------------------------------------------------
+
+/// Events sent from the controller to the TUI for rendering.
+#[derive(Debug, Clone)]
+pub enum CockpitEvent {
+    /// Append a completed block to the transcript.
+    TranscriptAppend(TranscriptBlock),
+    /// Update the routing display.
+    RoutingUpdate(RoutingState),
+    /// A streamed token fragment from the current assistant response.
+    StreamToken(String),
+    /// The current stream finished with usage stats.
+    StreamDone {
+        tokens_in: i64,
+        tokens_out: i64,
+        cost: f64,
+    },
+    /// The current stream hit an error.
+    StreamError(String),
+    /// Update the footer status text.
+    StatusUpdate(String),
+}
+
+/// Commands sent from the TUI to the controller.
+#[derive(Debug, Clone)]
+pub enum CockpitCommand {
+    /// User submitted input from the composer.
+    SubmitInput(String),
+    /// User requested exit.
+    Quit,
+}
+
+// ---------------------------------------------------------------------------
+// State structs
+// ---------------------------------------------------------------------------
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SessionState {
     pub session_id: String,
