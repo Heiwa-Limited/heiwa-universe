@@ -122,7 +122,11 @@ impl AppState {
                 return true;
             }
             KeyCode::Enter => {
-                if !self.composer.is_empty() && !self.is_streaming {
+                if modifiers.contains(KeyModifiers::ALT) {
+                    // Alt+Enter: insert newline
+                    self.composer.push('\n');
+                } else if !self.composer.is_empty() && !self.is_streaming {
+                    // Enter: submit
                     let input = std::mem::take(&mut self.composer);
                     self.session
                         .transcript
@@ -161,13 +165,28 @@ impl AppState {
 // Rendering
 // ---------------------------------------------------------------------------
 
+/// Composer height: 1 line of content + 2 for border, growing up to a cap.
+const COMPOSER_MIN_HEIGHT: u16 = 3; // 1 content line + 2 border
+const COMPOSER_MAX_HEIGHT: u16 = 10; // 8 content lines + 2 border
+
+fn composer_height(text: &str) -> u16 {
+    let line_count = if text.is_empty() {
+        1
+    } else {
+        text.lines().count().max(1) + if text.ends_with('\n') { 1 } else { 0 }
+    };
+    let desired = (line_count as u16) + 2; // +2 for border
+    desired.clamp(COMPOSER_MIN_HEIGHT, COMPOSER_MAX_HEIGHT)
+}
+
 fn render(f: &mut Frame, state: &AppState) {
+    let ch = composer_height(&state.composer);
     let outer = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
             Constraint::Length(3),  // Header
             Constraint::Min(6),    // Middle (transcript + optional inspector)
-            Constraint::Length(3), // Composer
+            Constraint::Length(ch), // Composer (dynamic)
             Constraint::Length(1), // Footer
         ])
         .split(f.size());
@@ -360,18 +379,24 @@ fn render_inspector(f: &mut Frame, state: &AppState, area: Rect) {
 }
 
 fn render_composer(f: &mut Frame, state: &AppState, area: Rect) {
-    let composer_display = if state.is_streaming {
-        " (streaming...)".to_string()
+    let (text, style) = if state.is_streaming {
+        (
+            " (streaming...)".to_string(),
+            Style::default().fg(Color::DarkGray),
+        )
     } else {
-        state.composer.clone()
-    };
-    let composer = Paragraph::new(composer_display)
-        .block(Block::default().borders(Borders::ALL).title(" > "))
-        .style(if state.is_streaming {
-            Style::default().fg(Color::DarkGray)
+        // Show cursor indicator at the end of the text
+        let display = if state.composer.is_empty() {
+            "▍".to_string()
         } else {
-            Style::default().fg(Color::White)
-        });
+            format!("{}▍", state.composer)
+        };
+        (display, Style::default().fg(Color::White))
+    };
+    let composer = Paragraph::new(text)
+        .block(Block::default().borders(Borders::ALL).title(" > "))
+        .style(style)
+        .wrap(Wrap { trim: false });
     f.render_widget(composer, area);
 }
 
@@ -386,7 +411,10 @@ fn render_footer(f: &mut Frame, state: &AppState, area: Rect) {
             format!(" [{}] ", state.status),
             Style::default().fg(Color::DarkGray),
         ),
-        Span::raw(format!("Esc quit · ↑↓ scroll · {}", inspector_hint)),
+        Span::raw(format!(
+            "Esc quit · ↑↓ scroll · Alt+Enter newline · {}",
+            inspector_hint
+        )),
     ]));
     f.render_widget(footer, area);
 }
@@ -440,4 +468,36 @@ pub fn run_cockpit(
 pub fn render_cockpit(f: &mut Frame, state: &SessionState) {
     let app = AppState::new(state.clone(), false);
     render(f, &app);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn composer_height_empty() {
+        assert_eq!(composer_height(""), COMPOSER_MIN_HEIGHT);
+    }
+
+    #[test]
+    fn composer_height_single_line() {
+        assert_eq!(composer_height("hello"), COMPOSER_MIN_HEIGHT);
+    }
+
+    #[test]
+    fn composer_height_two_lines() {
+        assert_eq!(composer_height("line1\nline2"), 4); // 2 lines + 2 border
+    }
+
+    #[test]
+    fn composer_height_trailing_newline() {
+        // "line1\n" means cursor is on line 2 (empty), so 2 lines of content
+        assert_eq!(composer_height("line1\n"), 4);
+    }
+
+    #[test]
+    fn composer_height_capped() {
+        let many_lines = "a\n".repeat(20);
+        assert_eq!(composer_height(&many_lines), COMPOSER_MAX_HEIGHT);
+    }
 }

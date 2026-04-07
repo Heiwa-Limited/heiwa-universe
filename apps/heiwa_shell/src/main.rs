@@ -1525,9 +1525,27 @@ fn handle_slash_cockpit(
 ) -> Option<String> {
     match cmd {
         "help" => Some(
-            "commands: /provider [name|auto] /model [name|auto] /route [auto|local|remote] /models /status /clear /exit"
+            "commands: /provider [name|auto] /providers /model [name|auto] /models /route [auto|local|remote] /status /clear /exit"
                 .to_string(),
         ),
+        "providers" => {
+            // Same as /models but grouped by provider
+            if model_tiers.is_empty() {
+                Some("no loop-capable providers available".into())
+            } else {
+                let providers = available_providers(model_tiers);
+                let list: Vec<String> = providers
+                    .iter()
+                    .map(|p| {
+                        let count = model_tiers.iter().filter(|t| &t.provider == p).count();
+                        format!("{} ({} models)", p, count)
+                    })
+                    .collect();
+                Some(list.join("\n"))
+            }
+        }
+        "auth" => Some("manage auth via 'heiwa auth' in the terminal".into()),
+        "loop" => Some("loop execution is available via 'heiwa loop' in plain mode".into()),
         "provider" => {
             let available = available_providers(model_tiers);
             match args.first().map(|s| s.as_str()) {
