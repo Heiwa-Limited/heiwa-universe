@@ -24,6 +24,12 @@ pub mod assign_proposal_reducer;
 pub mod attach_drex_decision_to_route_reducer;
 pub mod battlefield_record_type;
 pub mod battlefields_table;
+pub mod belief_contradiction_type;
+pub mod belief_contradictions_table;
+pub mod belief_evidence_link_type;
+pub mod belief_type;
+pub mod belief_verification_schedule_type;
+pub mod beliefs_table;
 pub mod billing_event_type;
 pub mod billing_events_table;
 pub mod capability_lease_type;
@@ -38,14 +44,28 @@ pub mod captain_summaries_table;
 pub mod captain_summary_type;
 pub mod cell_run_record_type;
 pub mod cell_runs_table;
+pub mod claim_belief_verification_reducer;
 pub mod claim_proposal_reducer;
 pub mod claim_task_reducer;
+pub mod claim_treasury_rebalance_reducer;
 pub mod close_session_reducer;
+pub mod complete_belief_verification_reducer;
 pub mod complete_loop_session_reducer;
 pub mod complete_mission_reducer;
+pub mod complete_treasury_rebalance_reducer;
+pub mod consume_reservation_reducer;
+pub mod contradict_belief_reducer;
+pub mod corroborate_belief_reducer;
 pub mod create_mission_reducer;
+pub mod create_page_link_reducer;
+pub mod create_page_reducer;
+pub mod create_source_version_reducer;
 pub mod create_task_dispatch_reducer;
+pub mod create_treasury_reducer;
 pub mod create_user_reducer;
+pub mod decay_belief_tick_reducer;
+pub mod decay_profile_type;
+pub mod decay_profiles_table;
 pub mod device_type;
 pub mod devices_table;
 pub mod discord_channel_type;
@@ -56,6 +76,7 @@ pub mod discord_user_type;
 pub mod discord_users_table;
 pub mod dispatch_ack_type;
 pub mod dispatch_acks_table;
+pub mod disprove_belief_reducer;
 pub mod drex_decision_row_type;
 pub mod drex_decisions_table;
 pub mod drex_failure_row_type;
@@ -65,10 +86,14 @@ pub mod events_table;
 pub mod execution_memory_table;
 pub mod execution_memory_type;
 pub mod expire_proposal_reducer;
+pub mod expire_reservation_reducer;
+pub mod extract_belief_candidate_reducer;
 pub mod fail_mission_reducer;
 pub mod finish_cell_run_reducer;
+pub mod gate_mission_treasury_reducer;
 pub mod gpu_slot_type;
 pub mod gpu_slots_table;
+pub mod ingest_source_reducer;
 pub mod insert_captain_directive_reducer;
 pub mod insert_captain_message_reducer;
 pub mod insert_captain_summary_reducer;
@@ -79,6 +104,7 @@ pub mod knowledge_embedding_type;
 pub mod knowledge_embeddings_table;
 pub mod lease_type;
 pub mod leases_table;
+pub mod link_belief_evidence_reducer;
 pub mod link_oauth_identity_reducer;
 pub mod liveness_state_table;
 pub mod liveness_state_type;
@@ -87,6 +113,9 @@ pub mod loop_iterations_table;
 pub mod loop_session_type;
 pub mod loop_sessions_table;
 pub mod mark_messages_compressed_reducer;
+pub mod mark_page_stale_reducer;
+pub mod mark_run_non_novel_reducer;
+pub mod mark_source_parsed_reducer;
 pub mod mission_record_type;
 pub mod mission_step_record_type;
 pub mod mission_steps_table;
@@ -97,14 +126,22 @@ pub mod node_registry_entry_type;
 pub mod node_registry_table;
 pub mod node_status_type;
 pub mod nodes_table;
+pub mod novelty_vector_type;
+pub mod novelty_vectors_table;
 pub mod o_auth_identity_type;
 pub mod oauth_identities_table;
 pub mod organization_task_type;
+pub mod page_link_type;
+pub mod page_links_table;
+pub mod page_type;
+pub mod pages_table;
 pub mod pause_mission_reducer;
+pub mod plan_mission_doctrine_reducer;
 pub mod platform_entitlement_type;
 pub mod platform_entitlements_table;
 pub mod pod_type;
 pub mod pods_table;
+pub mod promote_belief_reducer;
 pub mod proposal_consent_type;
 pub mod proposal_consents_table;
 pub mod proposal_type;
@@ -119,6 +156,8 @@ pub mod prune_knowledge_embeddings_reducer;
 pub mod queue_proposal_reducer;
 pub mod rate_group_state_table;
 pub mod rate_group_state_type;
+pub mod rebalance_treasury_reducer;
+pub mod recompile_page_reducer;
 pub mod record_approval_decision_reducer;
 pub mod record_billing_event_reducer;
 pub mod record_consent_reducer;
@@ -127,33 +166,53 @@ pub mod record_drex_decision_reducer;
 pub mod record_drex_failure_reducer;
 pub mod record_interaction_reducer;
 pub mod record_loop_iteration_reducer;
+pub mod record_novelty_vector_reducer;
 pub mod record_proposal_heartbeat_reducer;
+pub mod record_provider_failure_reducer;
 pub mod record_route_decision_reducer;
+pub mod record_run_failure_reducer;
 pub mod record_run_reducer;
+pub mod record_spend_reducer;
 pub mod register_artifact_reducer;
 pub mod register_device_reducer;
 pub mod register_discord_channel_reducer;
 pub mod reject_proposal_reducer;
+pub mod release_budget_reducer;
 pub mod renew_capability_lease_reducer;
 pub mod requeue_proposal_reducer;
+pub mod reserve_budget_reducer;
+pub mod reset_treasury_window_reducer;
 pub mod resolve_captain_focus_reducer;
+pub mod resolve_contradiction_reducer;
 pub mod resume_mission_reducer;
+pub mod retire_belief_reducer;
+pub mod retire_page_reducer;
+pub mod reverify_belief_reducer;
 pub mod revoke_capability_chain_reducer;
 pub mod revoke_capability_lease_reducer;
 pub mod revoke_provider_credential_reducer;
 pub mod route_decision_type;
 pub mod route_decisions_table;
+pub mod run_failure_type;
+pub mod run_failures_table;
 pub mod run_record_type;
 pub mod runs_table;
+pub mod schedule_belief_verification_reducer;
+pub mod schedule_treasury_rebalance_reducer;
 pub mod session_summaries_table;
 pub mod session_summary_record_type;
 pub mod set_node_status_reducer;
+pub mod source_type;
 pub mod start_cell_run_reducer;
 pub mod start_loop_session_reducer;
 pub mod store_provider_credential_reducer;
 pub mod task_dispatch_type;
 pub mod task_dispatches_table;
 pub mod tenant_task_view_table;
+pub mod treasuries_table;
+pub mod treasury_rebalance_schedule_type;
+pub mod treasury_reservation_type;
+pub mod treasury_type;
 pub mod update_device_heartbeat_reducer;
 pub mod update_model_tier_stats_reducer;
 pub mod update_pod_heartbeat_reducer;
@@ -162,6 +221,7 @@ pub mod update_user_seen_reducer;
 pub mod upsert_agent_registry_reducer;
 pub mod upsert_battlefield_reducer;
 pub mod upsert_captain_focus_reducer;
+pub mod upsert_decay_profile_reducer;
 pub mod upsert_discord_user_reducer;
 pub mod upsert_gpu_slot_reducer;
 pub mod upsert_lease_reducer;
@@ -179,9 +239,6 @@ pub mod users_table;
 pub mod worker_session_type;
 pub mod worker_sessions_table;
 pub mod write_session_summary_reducer;
-pub mod run_failure_type;
-pub mod run_failures_table;
-pub mod record_run_failure_reducer;
 
 pub use add_approval_request_reducer::add_approval_request;
 pub use add_proposal_reducer::add_proposal;
@@ -201,6 +258,12 @@ pub use assign_proposal_reducer::assign_proposal;
 pub use attach_drex_decision_to_route_reducer::attach_drex_decision_to_route;
 pub use battlefield_record_type::BattlefieldRecord;
 pub use battlefields_table::*;
+pub use belief_contradiction_type::BeliefContradiction;
+pub use belief_contradictions_table::*;
+pub use belief_evidence_link_type::BeliefEvidenceLink;
+pub use belief_type::Belief;
+pub use belief_verification_schedule_type::BeliefVerificationSchedule;
+pub use beliefs_table::*;
 pub use billing_event_type::BillingEvent;
 pub use billing_events_table::*;
 pub use capability_lease_type::CapabilityLease;
@@ -215,14 +278,28 @@ pub use captain_summaries_table::*;
 pub use captain_summary_type::CaptainSummary;
 pub use cell_run_record_type::CellRunRecord;
 pub use cell_runs_table::*;
+pub use claim_belief_verification_reducer::claim_belief_verification;
 pub use claim_proposal_reducer::claim_proposal;
 pub use claim_task_reducer::claim_task;
+pub use claim_treasury_rebalance_reducer::claim_treasury_rebalance;
 pub use close_session_reducer::close_session;
+pub use complete_belief_verification_reducer::complete_belief_verification;
 pub use complete_loop_session_reducer::complete_loop_session;
 pub use complete_mission_reducer::complete_mission;
+pub use complete_treasury_rebalance_reducer::complete_treasury_rebalance;
+pub use consume_reservation_reducer::consume_reservation;
+pub use contradict_belief_reducer::contradict_belief;
+pub use corroborate_belief_reducer::corroborate_belief;
 pub use create_mission_reducer::create_mission;
+pub use create_page_link_reducer::create_page_link;
+pub use create_page_reducer::create_page;
+pub use create_source_version_reducer::create_source_version;
 pub use create_task_dispatch_reducer::create_task_dispatch;
+pub use create_treasury_reducer::create_treasury;
 pub use create_user_reducer::create_user;
+pub use decay_belief_tick_reducer::decay_belief_tick;
+pub use decay_profile_type::DecayProfile;
+pub use decay_profiles_table::*;
 pub use device_type::Device;
 pub use devices_table::*;
 pub use discord_channel_type::DiscordChannel;
@@ -233,6 +310,7 @@ pub use discord_user_type::DiscordUser;
 pub use discord_users_table::*;
 pub use dispatch_ack_type::DispatchAck;
 pub use dispatch_acks_table::*;
+pub use disprove_belief_reducer::disprove_belief;
 pub use drex_decision_row_type::DrexDecisionRow;
 pub use drex_decisions_table::*;
 pub use drex_failure_row_type::DrexFailureRow;
@@ -242,10 +320,14 @@ pub use events_table::*;
 pub use execution_memory_table::*;
 pub use execution_memory_type::ExecutionMemory;
 pub use expire_proposal_reducer::expire_proposal;
+pub use expire_reservation_reducer::expire_reservation;
+pub use extract_belief_candidate_reducer::extract_belief_candidate;
 pub use fail_mission_reducer::fail_mission;
 pub use finish_cell_run_reducer::finish_cell_run;
+pub use gate_mission_treasury_reducer::gate_mission_treasury;
 pub use gpu_slot_type::GpuSlot;
 pub use gpu_slots_table::*;
+pub use ingest_source_reducer::ingest_source;
 pub use insert_captain_directive_reducer::insert_captain_directive;
 pub use insert_captain_message_reducer::insert_captain_message;
 pub use insert_captain_summary_reducer::insert_captain_summary;
@@ -256,6 +338,7 @@ pub use knowledge_embedding_type::KnowledgeEmbedding;
 pub use knowledge_embeddings_table::*;
 pub use lease_type::Lease;
 pub use leases_table::*;
+pub use link_belief_evidence_reducer::link_belief_evidence;
 pub use link_oauth_identity_reducer::link_oauth_identity;
 pub use liveness_state_table::*;
 pub use liveness_state_type::LivenessState;
@@ -264,6 +347,9 @@ pub use loop_iterations_table::*;
 pub use loop_session_type::LoopSession;
 pub use loop_sessions_table::*;
 pub use mark_messages_compressed_reducer::mark_messages_compressed;
+pub use mark_page_stale_reducer::mark_page_stale;
+pub use mark_run_non_novel_reducer::mark_run_non_novel;
+pub use mark_source_parsed_reducer::mark_source_parsed;
 pub use mission_record_type::MissionRecord;
 pub use mission_step_record_type::MissionStepRecord;
 pub use mission_steps_table::*;
@@ -274,14 +360,22 @@ pub use node_registry_entry_type::NodeRegistryEntry;
 pub use node_registry_table::*;
 pub use node_status_type::NodeStatus;
 pub use nodes_table::*;
+pub use novelty_vector_type::NoveltyVector;
+pub use novelty_vectors_table::*;
 pub use o_auth_identity_type::OAuthIdentity;
 pub use oauth_identities_table::*;
 pub use organization_task_type::OrganizationTask;
+pub use page_link_type::PageLink;
+pub use page_links_table::*;
+pub use page_type::Page;
+pub use pages_table::*;
 pub use pause_mission_reducer::pause_mission;
+pub use plan_mission_doctrine_reducer::plan_mission_doctrine;
 pub use platform_entitlement_type::PlatformEntitlement;
 pub use platform_entitlements_table::*;
 pub use pod_type::Pod;
 pub use pods_table::*;
+pub use promote_belief_reducer::promote_belief;
 pub use proposal_consent_type::ProposalConsent;
 pub use proposal_consents_table::*;
 pub use proposal_type::Proposal;
@@ -296,6 +390,8 @@ pub use prune_knowledge_embeddings_reducer::prune_knowledge_embeddings;
 pub use queue_proposal_reducer::queue_proposal;
 pub use rate_group_state_table::*;
 pub use rate_group_state_type::RateGroupState;
+pub use rebalance_treasury_reducer::rebalance_treasury;
+pub use recompile_page_reducer::recompile_page;
 pub use record_approval_decision_reducer::record_approval_decision;
 pub use record_billing_event_reducer::record_billing_event;
 pub use record_consent_reducer::record_consent;
@@ -304,33 +400,53 @@ pub use record_drex_decision_reducer::record_drex_decision;
 pub use record_drex_failure_reducer::record_drex_failure;
 pub use record_interaction_reducer::record_interaction;
 pub use record_loop_iteration_reducer::record_loop_iteration;
+pub use record_novelty_vector_reducer::record_novelty_vector;
 pub use record_proposal_heartbeat_reducer::record_proposal_heartbeat;
+pub use record_provider_failure_reducer::record_provider_failure;
 pub use record_route_decision_reducer::record_route_decision;
+pub use record_run_failure_reducer::record_run_failure;
 pub use record_run_reducer::record_run;
+pub use record_spend_reducer::record_spend;
 pub use register_artifact_reducer::register_artifact;
 pub use register_device_reducer::register_device;
 pub use register_discord_channel_reducer::register_discord_channel;
 pub use reject_proposal_reducer::reject_proposal;
+pub use release_budget_reducer::release_budget;
 pub use renew_capability_lease_reducer::renew_capability_lease;
 pub use requeue_proposal_reducer::requeue_proposal;
+pub use reserve_budget_reducer::reserve_budget;
+pub use reset_treasury_window_reducer::reset_treasury_window;
 pub use resolve_captain_focus_reducer::resolve_captain_focus;
+pub use resolve_contradiction_reducer::resolve_contradiction;
 pub use resume_mission_reducer::resume_mission;
+pub use retire_belief_reducer::retire_belief;
+pub use retire_page_reducer::retire_page;
+pub use reverify_belief_reducer::reverify_belief;
 pub use revoke_capability_chain_reducer::revoke_capability_chain;
 pub use revoke_capability_lease_reducer::revoke_capability_lease;
 pub use revoke_provider_credential_reducer::revoke_provider_credential;
 pub use route_decision_type::RouteDecision;
 pub use route_decisions_table::*;
+pub use run_failure_type::RunFailure;
+pub use run_failures_table::*;
 pub use run_record_type::RunRecord;
 pub use runs_table::*;
+pub use schedule_belief_verification_reducer::schedule_belief_verification;
+pub use schedule_treasury_rebalance_reducer::schedule_treasury_rebalance;
 pub use session_summaries_table::*;
 pub use session_summary_record_type::SessionSummaryRecord;
 pub use set_node_status_reducer::set_node_status;
+pub use source_type::Source;
 pub use start_cell_run_reducer::start_cell_run;
 pub use start_loop_session_reducer::start_loop_session;
 pub use store_provider_credential_reducer::store_provider_credential;
 pub use task_dispatch_type::TaskDispatch;
 pub use task_dispatches_table::*;
 pub use tenant_task_view_table::*;
+pub use treasuries_table::*;
+pub use treasury_rebalance_schedule_type::TreasuryRebalanceSchedule;
+pub use treasury_reservation_type::TreasuryReservation;
+pub use treasury_type::Treasury;
 pub use update_device_heartbeat_reducer::update_device_heartbeat;
 pub use update_model_tier_stats_reducer::update_model_tier_stats;
 pub use update_pod_heartbeat_reducer::update_pod_heartbeat;
@@ -339,6 +455,7 @@ pub use update_user_seen_reducer::update_user_seen;
 pub use upsert_agent_registry_reducer::upsert_agent_registry;
 pub use upsert_battlefield_reducer::upsert_battlefield;
 pub use upsert_captain_focus_reducer::upsert_captain_focus;
+pub use upsert_decay_profile_reducer::upsert_decay_profile;
 pub use upsert_discord_user_reducer::upsert_discord_user;
 pub use upsert_gpu_slot_reducer::upsert_gpu_slot;
 pub use upsert_lease_reducer::upsert_lease;
@@ -356,9 +473,6 @@ pub use users_table::*;
 pub use worker_session_type::WorkerSession;
 pub use worker_sessions_table::*;
 pub use write_session_summary_reducer::write_session_summary;
-pub use run_failure_type::RunFailure;
-pub use run_failures_table::RunFailuresTableAccess;
-pub use record_run_failure_reducer::record_run_failure;
 
 #[derive(Clone, PartialEq, Debug)]
 
@@ -448,6 +562,10 @@ pub enum Reducer {
         request_id: String,
         drex_decision_id: String,
     },
+    ClaimBeliefVerification {
+        schedule_id: String,
+        run_id: String,
+    },
     ClaimProposal {
         proposal_id: String,
         node_id: String,
@@ -458,8 +576,15 @@ pub enum Reducer {
         task_id: u64,
         worker_id: String,
     },
+    ClaimTreasuryRebalance {
+        schedule_id: String,
+        run_id: String,
+    },
     CloseSession {
         session_id: String,
+    },
+    CompleteBeliefVerification {
+        schedule_id: String,
     },
     CompleteLoopSession {
         loop_id: String,
@@ -470,6 +595,25 @@ pub enum Reducer {
         mission_id: String,
         updated_at: String,
         summary: Option<String>,
+    },
+    CompleteTreasuryRebalance {
+        schedule_id: String,
+    },
+    ConsumeReservation {
+        reservation_id: String,
+    },
+    ContradictBelief {
+        belief_id: String,
+        challenger_belief_id: Option<String>,
+        challenger_source_id: Option<String>,
+        contradiction_id: String,
+        description: String,
+        severity: f64,
+    },
+    CorroborateBelief {
+        belief_id: String,
+        evidence_source_id: String,
+        evidence_weight: f64,
     },
     CreateMission {
         mission_id: String,
@@ -492,6 +636,40 @@ pub enum Reducer {
         owner_id: Option<String>,
         principal_id: Option<String>,
     },
+    CreatePage {
+        page_id: String,
+        namespace: String,
+        title: String,
+        slug: String,
+        body_markdown: String,
+        summary: String,
+        topic_keys_json: String,
+        source_set_hash: String,
+        owner_scope: String,
+        generated_by_run_id: Option<String>,
+    },
+    CreatePageLink {
+        link_id: String,
+        from_page_id: String,
+        to_page_id: Option<String>,
+        to_source_id: Option<String>,
+        link_type: String,
+    },
+    CreateSourceVersion {
+        new_source_id: String,
+        supersedes_source_id: String,
+        source_kind: String,
+        uri: String,
+        content_hash: String,
+        title: String,
+        author: String,
+        captured_at: String,
+        published_at: String,
+        retrieved_by: String,
+        owner_scope: String,
+        trust_class: String,
+        raw_storage_ref: String,
+    },
     CreateTaskDispatch {
         task_id: String,
         parent_task_id: Option<String>,
@@ -507,6 +685,20 @@ pub enum Reducer {
         tools_allowed_json: String,
         context_files_json: String,
     },
+    CreateTreasury {
+        treasury_id: String,
+        scope: String,
+        provider: String,
+        account_ref: String,
+        budget_window_kind: String,
+        max_requests: i64,
+        max_tokens_in: i64,
+        max_tokens_out: i64,
+        max_cost_millicents: i64,
+        reserve_fraction: f64,
+        reserve_policy: String,
+        degraded_mode_threshold: f64,
+    },
     CreateUser {
         user_id: String,
         display_name: String,
@@ -514,9 +706,30 @@ pub enum Reducer {
         avatar_url: Option<String>,
         tier: String,
     },
+    DecayBeliefTick {
+        belief_id: String,
+    },
+    DisproveBelief {
+        belief_id: String,
+    },
     ExpireProposal {
         proposal_id: String,
         eligibility_snapshot: Option<String>,
+    },
+    ExpireReservation {
+        reservation_id: String,
+    },
+    ExtractBeliefCandidate {
+        belief_id: String,
+        claim_text: String,
+        domain: String,
+        topic_keys_json: String,
+        initial_confidence: f64,
+        decay_profile_id: String,
+        derived_from_page_ids_json: String,
+        derived_from_source_ids_json: String,
+        owner_scope: String,
+        generated_by_run_id: Option<String>,
     },
     FailMission {
         mission_id: String,
@@ -531,6 +744,24 @@ pub enum Reducer {
         tokens_output: i64,
         tokens_total: i64,
         output_summary: Option<String>,
+    },
+    GateMissionTreasury {
+        mission_id: String,
+    },
+    IngestSource {
+        source_id: String,
+        source_kind: String,
+        uri: String,
+        content_hash: String,
+        title: String,
+        author: String,
+        captured_at: String,
+        published_at: String,
+        retrieved_by: String,
+        owner_scope: String,
+        trust_class: String,
+        raw_storage_ref: String,
+        supersedes_source_id: Option<String>,
     },
     InsertCaptainDirective {
         directive_type: String,
@@ -591,6 +822,15 @@ pub enum Reducer {
         owner_id: Option<String>,
         principal_id: Option<String>,
     },
+    LinkBeliefEvidence {
+        link_id: String,
+        belief_id: String,
+        source_id: Option<String>,
+        page_id: Option<String>,
+        run_id: Option<String>,
+        link_type: String,
+        weight: f64,
+    },
     LinkOauthIdentity {
         identity_id: String,
         user_id: String,
@@ -606,10 +846,37 @@ pub enum Reducer {
         session_id: String,
         before_timestamp: u64,
     },
+    MarkPageStale {
+        page_id: String,
+    },
+    MarkRunNonNovel {
+        run_id: String,
+        mission_id: String,
+        turn_index: u32,
+    },
+    MarkSourceParsed {
+        source_id: String,
+        parse_status: String,
+    },
     PauseMission {
         mission_id: String,
         updated_at: String,
         summary: Option<String>,
+    },
+    PlanMissionDoctrine {
+        mission_id: String,
+        task_class: String,
+        budget_class: String,
+        treasury_id: Option<String>,
+        novelty_policy_json: Option<String>,
+        termination_policy_json: Option<String>,
+        required_belief_query: Option<String>,
+        allowed_tools_json: Option<String>,
+        allowed_side_effects_json: Option<String>,
+        target_outputs_json: Option<String>,
+    },
+    PromoteBelief {
+        belief_id: String,
     },
     PruneCaptainMessages {
         before_timestamp: u64,
@@ -623,6 +890,17 @@ pub enum Reducer {
     QueueProposal {
         proposal_id: String,
         eligibility_snapshot: Option<String>,
+    },
+    RebalanceTreasury {
+        treasury_id: String,
+    },
+    RecompilePage {
+        page_id: String,
+        body_markdown: String,
+        summary: String,
+        topic_keys_json: String,
+        source_set_hash: String,
+        novelty_score: f64,
     },
     RecordApprovalDecision {
         decision_id: String,
@@ -726,12 +1004,28 @@ pub enum Reducer {
         run_id: Option<String>,
         cost_increment: f64,
     },
+    RecordNoveltyVector {
+        vector_id: String,
+        run_id: String,
+        mission_id: String,
+        turn_index: u32,
+        new_entity: f64,
+        new_contradiction: f64,
+        stronger_citation: f64,
+        new_causal_connection: f64,
+        changed_recommendation: f64,
+        composite_score: f64,
+    },
     RecordProposalHeartbeat {
         proposal_id: String,
         node_id: String,
         node_instance_id: String,
         heartbeat_at: String,
         detail: Option<String>,
+    },
+    RecordProviderFailure {
+        treasury_id: String,
+        failure_type: String,
     },
     RecordRouteDecision {
         request_id: String,
@@ -794,6 +1088,13 @@ pub enum Reducer {
         retryable: bool,
         details_json: String,
     },
+    RecordSpend {
+        treasury_id: String,
+        requests: i64,
+        tokens_in: i64,
+        tokens_out: i64,
+        cost_millicents: i64,
+    },
     RegisterArtifact {
         artifact_id: String,
         lease_id: Option<String>,
@@ -811,6 +1112,13 @@ pub enum Reducer {
         owner_id: Option<String>,
         principal_id: Option<String>,
     },
+    RegisterDevice {
+        device_id: String,
+        user_id: String,
+        hostname: String,
+        os: String,
+        arch: String,
+    },
     RegisterDiscordChannel {
         channel_id: u64,
         name: String,
@@ -820,6 +1128,9 @@ pub enum Reducer {
     RejectProposal {
         proposal_id: String,
     },
+    ReleaseBudget {
+        reservation_id: String,
+    },
     RenewCapabilityLease {
         lease_id: String,
         renewed_at: String,
@@ -828,14 +1139,40 @@ pub enum Reducer {
     RequeueProposal {
         proposal_id: String,
     },
+    ReserveBudget {
+        reservation_id: String,
+        treasury_id: String,
+        mission_id: String,
+        reserved_requests: i64,
+        reserved_tokens: i64,
+        reserved_cost_millicents: i64,
+        expires_at: String,
+    },
+    ResetTreasuryWindow {
+        treasury_id: String,
+    },
     ResolveCaptainFocus {
         focus_id: String,
         resolved_at: u64,
+    },
+    ResolveContradiction {
+        contradiction_id: String,
+        resolution_status: String,
     },
     ResumeMission {
         mission_id: String,
         updated_at: String,
         summary: Option<String>,
+    },
+    RetireBelief {
+        belief_id: String,
+    },
+    RetirePage {
+        page_id: String,
+    },
+    ReverifyBelief {
+        belief_id: String,
+        verification_evidence_refs_json: String,
     },
     RevokeCapabilityChain {
         lease_id: String,
@@ -849,6 +1186,20 @@ pub enum Reducer {
     },
     RevokeProviderCredential {
         credential_id: String,
+    },
+    ScheduleBeliefVerification {
+        schedule_id: String,
+        belief_id: String,
+        reason: String,
+        priority: i64,
+        scheduled_at: String,
+    },
+    ScheduleTreasuryRebalance {
+        schedule_id: String,
+        treasury_id: String,
+        reason: String,
+        priority: i64,
+        scheduled_at: String,
     },
     SetNodeStatus {
         node_id: String,
@@ -889,6 +1240,9 @@ pub enum Reducer {
         credential_enc: String,
         rate_group: String,
         display_label: Option<String>,
+    },
+    UpdateDeviceHeartbeat {
+        device_id: String,
     },
     UpdateModelTierStats {
         model_id: String,
@@ -936,6 +1290,14 @@ pub enum Reducer {
         topic: String,
         context_json: String,
         priority: u8,
+    },
+    UpsertDecayProfile {
+        decay_profile_id: String,
+        domain: String,
+        half_life_seconds: u64,
+        floor_freshness: f64,
+        verification_reset_mode: String,
+        staleness_trigger_policy: String,
     },
     UpsertDiscordUser {
         user_id: u64,
@@ -1007,6 +1369,13 @@ pub enum Reducer {
         platform: String,
         capabilities_json: String,
         status: String,
+    },
+    UpsertPlatformEntitlement {
+        user_id: String,
+        tier: String,
+        concurrency_limit: i64,
+        monthly_token_budget: i64,
+        features_json: String,
     },
     UpsertPod {
         pod_id: String,
@@ -1080,23 +1449,6 @@ pub enum Reducer {
         owner_id: Option<String>,
         principal_id: Option<String>,
     },
-    RegisterDevice {
-        device_id: String,
-        user_id: String,
-        hostname: String,
-        os: String,
-        arch: String,
-    },
-    UpdateDeviceHeartbeat {
-        device_id: String,
-    },
-    UpsertPlatformEntitlement {
-        user_id: String,
-        tier: String,
-        concurrency_limit: i64,
-        monthly_token_budget: i64,
-        features_json: String,
-    },
 }
 
 impl __sdk::InModule for Reducer {
@@ -1114,30 +1466,55 @@ impl __sdk::Reducer for Reducer {
             Reducer::ArchiveBattlefield { .. } => "archive_battlefield",
             Reducer::AssignProposal { .. } => "assign_proposal",
             Reducer::AttachDrexDecisionToRoute { .. } => "attach_drex_decision_to_route",
+            Reducer::ClaimBeliefVerification { .. } => "claim_belief_verification",
             Reducer::ClaimProposal { .. } => "claim_proposal",
             Reducer::ClaimTask { .. } => "claim_task",
+            Reducer::ClaimTreasuryRebalance { .. } => "claim_treasury_rebalance",
             Reducer::CloseSession { .. } => "close_session",
+            Reducer::CompleteBeliefVerification { .. } => "complete_belief_verification",
             Reducer::CompleteLoopSession { .. } => "complete_loop_session",
             Reducer::CompleteMission { .. } => "complete_mission",
+            Reducer::CompleteTreasuryRebalance { .. } => "complete_treasury_rebalance",
+            Reducer::ConsumeReservation { .. } => "consume_reservation",
+            Reducer::ContradictBelief { .. } => "contradict_belief",
+            Reducer::CorroborateBelief { .. } => "corroborate_belief",
             Reducer::CreateMission { .. } => "create_mission",
+            Reducer::CreatePage { .. } => "create_page",
+            Reducer::CreatePageLink { .. } => "create_page_link",
+            Reducer::CreateSourceVersion { .. } => "create_source_version",
             Reducer::CreateTaskDispatch { .. } => "create_task_dispatch",
+            Reducer::CreateTreasury { .. } => "create_treasury",
             Reducer::CreateUser { .. } => "create_user",
+            Reducer::DecayBeliefTick { .. } => "decay_belief_tick",
+            Reducer::DisproveBelief { .. } => "disprove_belief",
             Reducer::ExpireProposal { .. } => "expire_proposal",
+            Reducer::ExpireReservation { .. } => "expire_reservation",
+            Reducer::ExtractBeliefCandidate { .. } => "extract_belief_candidate",
             Reducer::FailMission { .. } => "fail_mission",
             Reducer::FinishCellRun { .. } => "finish_cell_run",
+            Reducer::GateMissionTreasury { .. } => "gate_mission_treasury",
+            Reducer::IngestSource { .. } => "ingest_source",
             Reducer::InsertCaptainDirective { .. } => "insert_captain_directive",
             Reducer::InsertCaptainMessage { .. } => "insert_captain_message",
             Reducer::InsertCaptainSummary { .. } => "insert_captain_summary",
             Reducer::InsertExecutionMemory { .. } => "insert_execution_memory",
             Reducer::InsertKnowledgeEmbedding { .. } => "insert_knowledge_embedding",
             Reducer::IssueCapabilityLease { .. } => "issue_capability_lease",
+            Reducer::LinkBeliefEvidence { .. } => "link_belief_evidence",
             Reducer::LinkOauthIdentity { .. } => "link_oauth_identity",
             Reducer::MarkMessagesCompressed { .. } => "mark_messages_compressed",
+            Reducer::MarkPageStale { .. } => "mark_page_stale",
+            Reducer::MarkRunNonNovel { .. } => "mark_run_non_novel",
+            Reducer::MarkSourceParsed { .. } => "mark_source_parsed",
             Reducer::PauseMission { .. } => "pause_mission",
+            Reducer::PlanMissionDoctrine { .. } => "plan_mission_doctrine",
+            Reducer::PromoteBelief { .. } => "promote_belief",
             Reducer::PruneCaptainMessages { .. } => "prune_captain_messages",
             Reducer::PruneExecutionMemory { .. } => "prune_execution_memory",
             Reducer::PruneKnowledgeEmbeddings { .. } => "prune_knowledge_embeddings",
             Reducer::QueueProposal { .. } => "queue_proposal",
+            Reducer::RebalanceTreasury { .. } => "rebalance_treasury",
+            Reducer::RecompilePage { .. } => "recompile_page",
             Reducer::RecordApprovalDecision { .. } => "record_approval_decision",
             Reducer::RecordBillingEvent { .. } => "record_billing_event",
             Reducer::RecordConsent { .. } => "record_consent",
@@ -1146,24 +1523,38 @@ impl __sdk::Reducer for Reducer {
             Reducer::RecordDrexFailure { .. } => "record_drex_failure",
             Reducer::RecordInteraction { .. } => "record_interaction",
             Reducer::RecordLoopIteration { .. } => "record_loop_iteration",
+            Reducer::RecordNoveltyVector { .. } => "record_novelty_vector",
             Reducer::RecordProposalHeartbeat { .. } => "record_proposal_heartbeat",
+            Reducer::RecordProviderFailure { .. } => "record_provider_failure",
             Reducer::RecordRouteDecision { .. } => "record_route_decision",
             Reducer::RecordRun { .. } => "record_run",
             Reducer::RecordRunFailure { .. } => "record_run_failure",
+            Reducer::RecordSpend { .. } => "record_spend",
             Reducer::RegisterArtifact { .. } => "register_artifact",
+            Reducer::RegisterDevice { .. } => "register_device",
             Reducer::RegisterDiscordChannel { .. } => "register_discord_channel",
             Reducer::RejectProposal { .. } => "reject_proposal",
+            Reducer::ReleaseBudget { .. } => "release_budget",
             Reducer::RenewCapabilityLease { .. } => "renew_capability_lease",
             Reducer::RequeueProposal { .. } => "requeue_proposal",
+            Reducer::ReserveBudget { .. } => "reserve_budget",
+            Reducer::ResetTreasuryWindow { .. } => "reset_treasury_window",
             Reducer::ResolveCaptainFocus { .. } => "resolve_captain_focus",
+            Reducer::ResolveContradiction { .. } => "resolve_contradiction",
             Reducer::ResumeMission { .. } => "resume_mission",
+            Reducer::RetireBelief { .. } => "retire_belief",
+            Reducer::RetirePage { .. } => "retire_page",
+            Reducer::ReverifyBelief { .. } => "reverify_belief",
             Reducer::RevokeCapabilityChain { .. } => "revoke_capability_chain",
             Reducer::RevokeCapabilityLease { .. } => "revoke_capability_lease",
             Reducer::RevokeProviderCredential { .. } => "revoke_provider_credential",
+            Reducer::ScheduleBeliefVerification { .. } => "schedule_belief_verification",
+            Reducer::ScheduleTreasuryRebalance { .. } => "schedule_treasury_rebalance",
             Reducer::SetNodeStatus { .. } => "set_node_status",
             Reducer::StartCellRun { .. } => "start_cell_run",
             Reducer::StartLoopSession { .. } => "start_loop_session",
             Reducer::StoreProviderCredential { .. } => "store_provider_credential",
+            Reducer::UpdateDeviceHeartbeat { .. } => "update_device_heartbeat",
             Reducer::UpdateModelTierStats { .. } => "update_model_tier_stats",
             Reducer::UpdatePodHeartbeat { .. } => "update_pod_heartbeat",
             Reducer::UpdateTaskDispatchStatus { .. } => "update_task_dispatch_status",
@@ -1171,6 +1562,7 @@ impl __sdk::Reducer for Reducer {
             Reducer::UpsertAgentRegistry { .. } => "upsert_agent_registry",
             Reducer::UpsertBattlefield { .. } => "upsert_battlefield",
             Reducer::UpsertCaptainFocus { .. } => "upsert_captain_focus",
+            Reducer::UpsertDecayProfile { .. } => "upsert_decay_profile",
             Reducer::UpsertDiscordUser { .. } => "upsert_discord_user",
             Reducer::UpsertGpuSlot { .. } => "upsert_gpu_slot",
             Reducer::UpsertLease { .. } => "upsert_lease",
@@ -1178,14 +1570,12 @@ impl __sdk::Reducer for Reducer {
             Reducer::UpsertModelTier { .. } => "upsert_model_tier",
             Reducer::UpsertNodeHeartbeat { .. } => "upsert_node_heartbeat",
             Reducer::UpsertNodeRegistry { .. } => "upsert_node_registry",
+            Reducer::UpsertPlatformEntitlement { .. } => "upsert_platform_entitlement",
             Reducer::UpsertPod { .. } => "upsert_pod",
             Reducer::UpsertProviderAccountStatus { .. } => "upsert_provider_account_status",
             Reducer::UpsertRateGroupState { .. } => "upsert_rate_group_state",
             Reducer::UpsertSession { .. } => "upsert_session",
             Reducer::WriteSessionSummary { .. } => "write_session_summary",
-            Reducer::RegisterDevice { .. } => "register_device",
-            Reducer::UpdateDeviceHeartbeat { .. } => "update_device_heartbeat",
-            Reducer::UpsertPlatformEntitlement { .. } => "upsert_platform_entitlement",
             _ => unreachable!(),
         }
     }
@@ -1346,6 +1736,15 @@ impl __sdk::Reducer for Reducer {
                     drex_decision_id: drex_decision_id.clone(),
                 },
             ),
+            Reducer::ClaimBeliefVerification {
+                schedule_id,
+                run_id,
+            } => __sats::bsatn::to_vec(
+                &claim_belief_verification_reducer::ClaimBeliefVerificationArgs {
+                    schedule_id: schedule_id.clone(),
+                    run_id: run_id.clone(),
+                },
+            ),
             Reducer::ClaimProposal {
                 proposal_id,
                 node_id,
@@ -1363,11 +1762,25 @@ impl __sdk::Reducer for Reducer {
                     worker_id: worker_id.clone(),
                 })
             }
+            Reducer::ClaimTreasuryRebalance {
+                schedule_id,
+                run_id,
+            } => __sats::bsatn::to_vec(
+                &claim_treasury_rebalance_reducer::ClaimTreasuryRebalanceArgs {
+                    schedule_id: schedule_id.clone(),
+                    run_id: run_id.clone(),
+                },
+            ),
             Reducer::CloseSession { session_id } => {
                 __sats::bsatn::to_vec(&close_session_reducer::CloseSessionArgs {
                     session_id: session_id.clone(),
                 })
             }
+            Reducer::CompleteBeliefVerification { schedule_id } => __sats::bsatn::to_vec(
+                &complete_belief_verification_reducer::CompleteBeliefVerificationArgs {
+                    schedule_id: schedule_id.clone(),
+                },
+            ),
             Reducer::CompleteLoopSession {
                 loop_id,
                 status,
@@ -1385,6 +1798,40 @@ impl __sdk::Reducer for Reducer {
                 mission_id: mission_id.clone(),
                 updated_at: updated_at.clone(),
                 summary: summary.clone(),
+            }),
+            Reducer::CompleteTreasuryRebalance { schedule_id } => __sats::bsatn::to_vec(
+                &complete_treasury_rebalance_reducer::CompleteTreasuryRebalanceArgs {
+                    schedule_id: schedule_id.clone(),
+                },
+            ),
+            Reducer::ConsumeReservation { reservation_id } => {
+                __sats::bsatn::to_vec(&consume_reservation_reducer::ConsumeReservationArgs {
+                    reservation_id: reservation_id.clone(),
+                })
+            }
+            Reducer::ContradictBelief {
+                belief_id,
+                challenger_belief_id,
+                challenger_source_id,
+                contradiction_id,
+                description,
+                severity,
+            } => __sats::bsatn::to_vec(&contradict_belief_reducer::ContradictBeliefArgs {
+                belief_id: belief_id.clone(),
+                challenger_belief_id: challenger_belief_id.clone(),
+                challenger_source_id: challenger_source_id.clone(),
+                contradiction_id: contradiction_id.clone(),
+                description: description.clone(),
+                severity: severity.clone(),
+            }),
+            Reducer::CorroborateBelief {
+                belief_id,
+                evidence_source_id,
+                evidence_weight,
+            } => __sats::bsatn::to_vec(&corroborate_belief_reducer::CorroborateBeliefArgs {
+                belief_id: belief_id.clone(),
+                evidence_source_id: evidence_source_id.clone(),
+                evidence_weight: evidence_weight.clone(),
             }),
             Reducer::CreateMission {
                 mission_id,
@@ -1427,6 +1874,71 @@ impl __sdk::Reducer for Reducer {
                 owner_id: owner_id.clone(),
                 principal_id: principal_id.clone(),
             }),
+            Reducer::CreatePage {
+                page_id,
+                namespace,
+                title,
+                slug,
+                body_markdown,
+                summary,
+                topic_keys_json,
+                source_set_hash,
+                owner_scope,
+                generated_by_run_id,
+            } => __sats::bsatn::to_vec(&create_page_reducer::CreatePageArgs {
+                page_id: page_id.clone(),
+                namespace: namespace.clone(),
+                title: title.clone(),
+                slug: slug.clone(),
+                body_markdown: body_markdown.clone(),
+                summary: summary.clone(),
+                topic_keys_json: topic_keys_json.clone(),
+                source_set_hash: source_set_hash.clone(),
+                owner_scope: owner_scope.clone(),
+                generated_by_run_id: generated_by_run_id.clone(),
+            }),
+            Reducer::CreatePageLink {
+                link_id,
+                from_page_id,
+                to_page_id,
+                to_source_id,
+                link_type,
+            } => __sats::bsatn::to_vec(&create_page_link_reducer::CreatePageLinkArgs {
+                link_id: link_id.clone(),
+                from_page_id: from_page_id.clone(),
+                to_page_id: to_page_id.clone(),
+                to_source_id: to_source_id.clone(),
+                link_type: link_type.clone(),
+            }),
+            Reducer::CreateSourceVersion {
+                new_source_id,
+                supersedes_source_id,
+                source_kind,
+                uri,
+                content_hash,
+                title,
+                author,
+                captured_at,
+                published_at,
+                retrieved_by,
+                owner_scope,
+                trust_class,
+                raw_storage_ref,
+            } => __sats::bsatn::to_vec(&create_source_version_reducer::CreateSourceVersionArgs {
+                new_source_id: new_source_id.clone(),
+                supersedes_source_id: supersedes_source_id.clone(),
+                source_kind: source_kind.clone(),
+                uri: uri.clone(),
+                content_hash: content_hash.clone(),
+                title: title.clone(),
+                author: author.clone(),
+                captured_at: captured_at.clone(),
+                published_at: published_at.clone(),
+                retrieved_by: retrieved_by.clone(),
+                owner_scope: owner_scope.clone(),
+                trust_class: trust_class.clone(),
+                raw_storage_ref: raw_storage_ref.clone(),
+            }),
             Reducer::CreateTaskDispatch {
                 task_id,
                 parent_task_id,
@@ -1456,6 +1968,33 @@ impl __sdk::Reducer for Reducer {
                 tools_allowed_json: tools_allowed_json.clone(),
                 context_files_json: context_files_json.clone(),
             }),
+            Reducer::CreateTreasury {
+                treasury_id,
+                scope,
+                provider,
+                account_ref,
+                budget_window_kind,
+                max_requests,
+                max_tokens_in,
+                max_tokens_out,
+                max_cost_millicents,
+                reserve_fraction,
+                reserve_policy,
+                degraded_mode_threshold,
+            } => __sats::bsatn::to_vec(&create_treasury_reducer::CreateTreasuryArgs {
+                treasury_id: treasury_id.clone(),
+                scope: scope.clone(),
+                provider: provider.clone(),
+                account_ref: account_ref.clone(),
+                budget_window_kind: budget_window_kind.clone(),
+                max_requests: max_requests.clone(),
+                max_tokens_in: max_tokens_in.clone(),
+                max_tokens_out: max_tokens_out.clone(),
+                max_cost_millicents: max_cost_millicents.clone(),
+                reserve_fraction: reserve_fraction.clone(),
+                reserve_policy: reserve_policy.clone(),
+                degraded_mode_threshold: degraded_mode_threshold.clone(),
+            }),
             Reducer::CreateUser {
                 user_id,
                 display_name,
@@ -1469,6 +2008,16 @@ impl __sdk::Reducer for Reducer {
                 avatar_url: avatar_url.clone(),
                 tier: tier.clone(),
             }),
+            Reducer::DecayBeliefTick { belief_id } => {
+                __sats::bsatn::to_vec(&decay_belief_tick_reducer::DecayBeliefTickArgs {
+                    belief_id: belief_id.clone(),
+                })
+            }
+            Reducer::DisproveBelief { belief_id } => {
+                __sats::bsatn::to_vec(&disprove_belief_reducer::DisproveBeliefArgs {
+                    belief_id: belief_id.clone(),
+                })
+            }
             Reducer::ExpireProposal {
                 proposal_id,
                 eligibility_snapshot,
@@ -1476,6 +2025,36 @@ impl __sdk::Reducer for Reducer {
                 proposal_id: proposal_id.clone(),
                 eligibility_snapshot: eligibility_snapshot.clone(),
             }),
+            Reducer::ExpireReservation { reservation_id } => {
+                __sats::bsatn::to_vec(&expire_reservation_reducer::ExpireReservationArgs {
+                    reservation_id: reservation_id.clone(),
+                })
+            }
+            Reducer::ExtractBeliefCandidate {
+                belief_id,
+                claim_text,
+                domain,
+                topic_keys_json,
+                initial_confidence,
+                decay_profile_id,
+                derived_from_page_ids_json,
+                derived_from_source_ids_json,
+                owner_scope,
+                generated_by_run_id,
+            } => __sats::bsatn::to_vec(
+                &extract_belief_candidate_reducer::ExtractBeliefCandidateArgs {
+                    belief_id: belief_id.clone(),
+                    claim_text: claim_text.clone(),
+                    domain: domain.clone(),
+                    topic_keys_json: topic_keys_json.clone(),
+                    initial_confidence: initial_confidence.clone(),
+                    decay_profile_id: decay_profile_id.clone(),
+                    derived_from_page_ids_json: derived_from_page_ids_json.clone(),
+                    derived_from_source_ids_json: derived_from_source_ids_json.clone(),
+                    owner_scope: owner_scope.clone(),
+                    generated_by_run_id: generated_by_run_id.clone(),
+                },
+            ),
             Reducer::FailMission {
                 mission_id,
                 updated_at,
@@ -1501,6 +2080,40 @@ impl __sdk::Reducer for Reducer {
                 tokens_output: tokens_output.clone(),
                 tokens_total: tokens_total.clone(),
                 output_summary: output_summary.clone(),
+            }),
+            Reducer::GateMissionTreasury { mission_id } => {
+                __sats::bsatn::to_vec(&gate_mission_treasury_reducer::GateMissionTreasuryArgs {
+                    mission_id: mission_id.clone(),
+                })
+            }
+            Reducer::IngestSource {
+                source_id,
+                source_kind,
+                uri,
+                content_hash,
+                title,
+                author,
+                captured_at,
+                published_at,
+                retrieved_by,
+                owner_scope,
+                trust_class,
+                raw_storage_ref,
+                supersedes_source_id,
+            } => __sats::bsatn::to_vec(&ingest_source_reducer::IngestSourceArgs {
+                source_id: source_id.clone(),
+                source_kind: source_kind.clone(),
+                uri: uri.clone(),
+                content_hash: content_hash.clone(),
+                title: title.clone(),
+                author: author.clone(),
+                captured_at: captured_at.clone(),
+                published_at: published_at.clone(),
+                retrieved_by: retrieved_by.clone(),
+                owner_scope: owner_scope.clone(),
+                trust_class: trust_class.clone(),
+                raw_storage_ref: raw_storage_ref.clone(),
+                supersedes_source_id: supersedes_source_id.clone(),
             }),
             Reducer::InsertCaptainDirective {
                 directive_type,
@@ -1620,6 +2233,23 @@ impl __sdk::Reducer for Reducer {
                 owner_id: owner_id.clone(),
                 principal_id: principal_id.clone(),
             }),
+            Reducer::LinkBeliefEvidence {
+                link_id,
+                belief_id,
+                source_id,
+                page_id,
+                run_id,
+                link_type,
+                weight,
+            } => __sats::bsatn::to_vec(&link_belief_evidence_reducer::LinkBeliefEvidenceArgs {
+                link_id: link_id.clone(),
+                belief_id: belief_id.clone(),
+                source_id: source_id.clone(),
+                page_id: page_id.clone(),
+                run_id: run_id.clone(),
+                link_type: link_type.clone(),
+                weight: weight.clone(),
+            }),
             Reducer::LinkOauthIdentity {
                 identity_id,
                 user_id,
@@ -1650,6 +2280,27 @@ impl __sdk::Reducer for Reducer {
                     before_timestamp: before_timestamp.clone(),
                 },
             ),
+            Reducer::MarkPageStale { page_id } => {
+                __sats::bsatn::to_vec(&mark_page_stale_reducer::MarkPageStaleArgs {
+                    page_id: page_id.clone(),
+                })
+            }
+            Reducer::MarkRunNonNovel {
+                run_id,
+                mission_id,
+                turn_index,
+            } => __sats::bsatn::to_vec(&mark_run_non_novel_reducer::MarkRunNonNovelArgs {
+                run_id: run_id.clone(),
+                mission_id: mission_id.clone(),
+                turn_index: turn_index.clone(),
+            }),
+            Reducer::MarkSourceParsed {
+                source_id,
+                parse_status,
+            } => __sats::bsatn::to_vec(&mark_source_parsed_reducer::MarkSourceParsedArgs {
+                source_id: source_id.clone(),
+                parse_status: parse_status.clone(),
+            }),
             Reducer::PauseMission {
                 mission_id,
                 updated_at,
@@ -1659,6 +2310,34 @@ impl __sdk::Reducer for Reducer {
                 updated_at: updated_at.clone(),
                 summary: summary.clone(),
             }),
+            Reducer::PlanMissionDoctrine {
+                mission_id,
+                task_class,
+                budget_class,
+                treasury_id,
+                novelty_policy_json,
+                termination_policy_json,
+                required_belief_query,
+                allowed_tools_json,
+                allowed_side_effects_json,
+                target_outputs_json,
+            } => __sats::bsatn::to_vec(&plan_mission_doctrine_reducer::PlanMissionDoctrineArgs {
+                mission_id: mission_id.clone(),
+                task_class: task_class.clone(),
+                budget_class: budget_class.clone(),
+                treasury_id: treasury_id.clone(),
+                novelty_policy_json: novelty_policy_json.clone(),
+                termination_policy_json: termination_policy_json.clone(),
+                required_belief_query: required_belief_query.clone(),
+                allowed_tools_json: allowed_tools_json.clone(),
+                allowed_side_effects_json: allowed_side_effects_json.clone(),
+                target_outputs_json: target_outputs_json.clone(),
+            }),
+            Reducer::PromoteBelief { belief_id } => {
+                __sats::bsatn::to_vec(&promote_belief_reducer::PromoteBeliefArgs {
+                    belief_id: belief_id.clone(),
+                })
+            }
             Reducer::PruneCaptainMessages { before_timestamp } => {
                 __sats::bsatn::to_vec(&prune_captain_messages_reducer::PruneCaptainMessagesArgs {
                     before_timestamp: before_timestamp.clone(),
@@ -1680,6 +2359,26 @@ impl __sdk::Reducer for Reducer {
             } => __sats::bsatn::to_vec(&queue_proposal_reducer::QueueProposalArgs {
                 proposal_id: proposal_id.clone(),
                 eligibility_snapshot: eligibility_snapshot.clone(),
+            }),
+            Reducer::RebalanceTreasury { treasury_id } => {
+                __sats::bsatn::to_vec(&rebalance_treasury_reducer::RebalanceTreasuryArgs {
+                    treasury_id: treasury_id.clone(),
+                })
+            }
+            Reducer::RecompilePage {
+                page_id,
+                body_markdown,
+                summary,
+                topic_keys_json,
+                source_set_hash,
+                novelty_score,
+            } => __sats::bsatn::to_vec(&recompile_page_reducer::RecompilePageArgs {
+                page_id: page_id.clone(),
+                body_markdown: body_markdown.clone(),
+                summary: summary.clone(),
+                topic_keys_json: topic_keys_json.clone(),
+                source_set_hash: source_set_hash.clone(),
+                novelty_score: novelty_score.clone(),
             }),
             Reducer::RecordApprovalDecision {
                 decision_id,
@@ -1879,6 +2578,29 @@ impl __sdk::Reducer for Reducer {
                 run_id: run_id.clone(),
                 cost_increment: cost_increment.clone(),
             }),
+            Reducer::RecordNoveltyVector {
+                vector_id,
+                run_id,
+                mission_id,
+                turn_index,
+                new_entity,
+                new_contradiction,
+                stronger_citation,
+                new_causal_connection,
+                changed_recommendation,
+                composite_score,
+            } => __sats::bsatn::to_vec(&record_novelty_vector_reducer::RecordNoveltyVectorArgs {
+                vector_id: vector_id.clone(),
+                run_id: run_id.clone(),
+                mission_id: mission_id.clone(),
+                turn_index: turn_index.clone(),
+                new_entity: new_entity.clone(),
+                new_contradiction: new_contradiction.clone(),
+                stronger_citation: stronger_citation.clone(),
+                new_causal_connection: new_causal_connection.clone(),
+                changed_recommendation: changed_recommendation.clone(),
+                composite_score: composite_score.clone(),
+            }),
             Reducer::RecordProposalHeartbeat {
                 proposal_id,
                 node_id,
@@ -1892,6 +2614,15 @@ impl __sdk::Reducer for Reducer {
                     node_instance_id: node_instance_id.clone(),
                     heartbeat_at: heartbeat_at.clone(),
                     detail: detail.clone(),
+                },
+            ),
+            Reducer::RecordProviderFailure {
+                treasury_id,
+                failure_type,
+            } => __sats::bsatn::to_vec(
+                &record_provider_failure_reducer::RecordProviderFailureArgs {
+                    treasury_id: treasury_id.clone(),
+                    failure_type: failure_type.clone(),
                 },
             ),
             Reducer::RecordRouteDecision {
@@ -2013,6 +2744,19 @@ impl __sdk::Reducer for Reducer {
                 retryable: retryable.clone(),
                 details_json: details_json.clone(),
             }),
+            Reducer::RecordSpend {
+                treasury_id,
+                requests,
+                tokens_in,
+                tokens_out,
+                cost_millicents,
+            } => __sats::bsatn::to_vec(&record_spend_reducer::RecordSpendArgs {
+                treasury_id: treasury_id.clone(),
+                requests: requests.clone(),
+                tokens_in: tokens_in.clone(),
+                tokens_out: tokens_out.clone(),
+                cost_millicents: cost_millicents.clone(),
+            }),
             Reducer::RegisterArtifact {
                 artifact_id,
                 lease_id,
@@ -2046,6 +2790,19 @@ impl __sdk::Reducer for Reducer {
                 owner_id: owner_id.clone(),
                 principal_id: principal_id.clone(),
             }),
+            Reducer::RegisterDevice {
+                device_id,
+                user_id,
+                hostname,
+                os,
+                arch,
+            } => __sats::bsatn::to_vec(&register_device_reducer::RegisterDeviceArgs {
+                device_id: device_id.clone(),
+                user_id: user_id.clone(),
+                hostname: hostname.clone(),
+                os: os.clone(),
+                arch: arch.clone(),
+            }),
             Reducer::RegisterDiscordChannel {
                 channel_id,
                 name,
@@ -2064,6 +2821,11 @@ impl __sdk::Reducer for Reducer {
                     proposal_id: proposal_id.clone(),
                 })
             }
+            Reducer::ReleaseBudget { reservation_id } => {
+                __sats::bsatn::to_vec(&release_budget_reducer::ReleaseBudgetArgs {
+                    reservation_id: reservation_id.clone(),
+                })
+            }
             Reducer::RenewCapabilityLease {
                 lease_id,
                 renewed_at,
@@ -2078,12 +2840,41 @@ impl __sdk::Reducer for Reducer {
                     proposal_id: proposal_id.clone(),
                 })
             }
+            Reducer::ReserveBudget {
+                reservation_id,
+                treasury_id,
+                mission_id,
+                reserved_requests,
+                reserved_tokens,
+                reserved_cost_millicents,
+                expires_at,
+            } => __sats::bsatn::to_vec(&reserve_budget_reducer::ReserveBudgetArgs {
+                reservation_id: reservation_id.clone(),
+                treasury_id: treasury_id.clone(),
+                mission_id: mission_id.clone(),
+                reserved_requests: reserved_requests.clone(),
+                reserved_tokens: reserved_tokens.clone(),
+                reserved_cost_millicents: reserved_cost_millicents.clone(),
+                expires_at: expires_at.clone(),
+            }),
+            Reducer::ResetTreasuryWindow { treasury_id } => {
+                __sats::bsatn::to_vec(&reset_treasury_window_reducer::ResetTreasuryWindowArgs {
+                    treasury_id: treasury_id.clone(),
+                })
+            }
             Reducer::ResolveCaptainFocus {
                 focus_id,
                 resolved_at,
             } => __sats::bsatn::to_vec(&resolve_captain_focus_reducer::ResolveCaptainFocusArgs {
                 focus_id: focus_id.clone(),
                 resolved_at: resolved_at.clone(),
+            }),
+            Reducer::ResolveContradiction {
+                contradiction_id,
+                resolution_status,
+            } => __sats::bsatn::to_vec(&resolve_contradiction_reducer::ResolveContradictionArgs {
+                contradiction_id: contradiction_id.clone(),
+                resolution_status: resolution_status.clone(),
             }),
             Reducer::ResumeMission {
                 mission_id,
@@ -2093,6 +2884,23 @@ impl __sdk::Reducer for Reducer {
                 mission_id: mission_id.clone(),
                 updated_at: updated_at.clone(),
                 summary: summary.clone(),
+            }),
+            Reducer::RetireBelief { belief_id } => {
+                __sats::bsatn::to_vec(&retire_belief_reducer::RetireBeliefArgs {
+                    belief_id: belief_id.clone(),
+                })
+            }
+            Reducer::RetirePage { page_id } => {
+                __sats::bsatn::to_vec(&retire_page_reducer::RetirePageArgs {
+                    page_id: page_id.clone(),
+                })
+            }
+            Reducer::ReverifyBelief {
+                belief_id,
+                verification_evidence_refs_json,
+            } => __sats::bsatn::to_vec(&reverify_belief_reducer::ReverifyBeliefArgs {
+                belief_id: belief_id.clone(),
+                verification_evidence_refs_json: verification_evidence_refs_json.clone(),
             }),
             Reducer::RevokeCapabilityChain {
                 lease_id,
@@ -2119,6 +2927,36 @@ impl __sdk::Reducer for Reducer {
             Reducer::RevokeProviderCredential { credential_id } => __sats::bsatn::to_vec(
                 &revoke_provider_credential_reducer::RevokeProviderCredentialArgs {
                     credential_id: credential_id.clone(),
+                },
+            ),
+            Reducer::ScheduleBeliefVerification {
+                schedule_id,
+                belief_id,
+                reason,
+                priority,
+                scheduled_at,
+            } => __sats::bsatn::to_vec(
+                &schedule_belief_verification_reducer::ScheduleBeliefVerificationArgs {
+                    schedule_id: schedule_id.clone(),
+                    belief_id: belief_id.clone(),
+                    reason: reason.clone(),
+                    priority: priority.clone(),
+                    scheduled_at: scheduled_at.clone(),
+                },
+            ),
+            Reducer::ScheduleTreasuryRebalance {
+                schedule_id,
+                treasury_id,
+                reason,
+                priority,
+                scheduled_at,
+            } => __sats::bsatn::to_vec(
+                &schedule_treasury_rebalance_reducer::ScheduleTreasuryRebalanceArgs {
+                    schedule_id: schedule_id.clone(),
+                    treasury_id: treasury_id.clone(),
+                    reason: reason.clone(),
+                    priority: priority.clone(),
+                    scheduled_at: scheduled_at.clone(),
                 },
             ),
             Reducer::SetNodeStatus { node_id, status } => {
@@ -2196,6 +3034,11 @@ impl __sdk::Reducer for Reducer {
                     credential_enc: credential_enc.clone(),
                     rate_group: rate_group.clone(),
                     display_label: display_label.clone(),
+                },
+            ),
+            Reducer::UpdateDeviceHeartbeat { device_id } => __sats::bsatn::to_vec(
+                &update_device_heartbeat_reducer::UpdateDeviceHeartbeatArgs {
+                    device_id: device_id.clone(),
                 },
             ),
             Reducer::UpdateModelTierStats {
@@ -2288,6 +3131,21 @@ impl __sdk::Reducer for Reducer {
                 topic: topic.clone(),
                 context_json: context_json.clone(),
                 priority: priority.clone(),
+            }),
+            Reducer::UpsertDecayProfile {
+                decay_profile_id,
+                domain,
+                half_life_seconds,
+                floor_freshness,
+                verification_reset_mode,
+                staleness_trigger_policy,
+            } => __sats::bsatn::to_vec(&upsert_decay_profile_reducer::UpsertDecayProfileArgs {
+                decay_profile_id: decay_profile_id.clone(),
+                domain: domain.clone(),
+                half_life_seconds: half_life_seconds.clone(),
+                floor_freshness: floor_freshness.clone(),
+                verification_reset_mode: verification_reset_mode.clone(),
+                staleness_trigger_policy: staleness_trigger_policy.clone(),
             }),
             Reducer::UpsertDiscordUser {
                 user_id,
@@ -2424,6 +3282,21 @@ impl __sdk::Reducer for Reducer {
                 capabilities_json: capabilities_json.clone(),
                 status: status.clone(),
             }),
+            Reducer::UpsertPlatformEntitlement {
+                user_id,
+                tier,
+                concurrency_limit,
+                monthly_token_budget,
+                features_json,
+            } => __sats::bsatn::to_vec(
+                &upsert_platform_entitlement_reducer::UpsertPlatformEntitlementArgs {
+                    user_id: user_id.clone(),
+                    tier: tier.clone(),
+                    concurrency_limit: concurrency_limit.clone(),
+                    monthly_token_budget: monthly_token_budget.clone(),
+                    features_json: features_json.clone(),
+                },
+            ),
             Reducer::UpsertPod {
                 pod_id,
                 host_identity,
@@ -2567,39 +3440,6 @@ impl __sdk::Reducer for Reducer {
                 owner_id: owner_id.clone(),
                 principal_id: principal_id.clone(),
             }),
-            Reducer::RegisterDevice {
-                device_id,
-                user_id,
-                hostname,
-                os,
-                arch,
-            } => __sats::bsatn::to_vec(&register_device_reducer::RegisterDeviceArgs {
-                device_id: device_id.clone(),
-                user_id: user_id.clone(),
-                hostname: hostname.clone(),
-                os: os.clone(),
-                arch: arch.clone(),
-            }),
-            Reducer::UpdateDeviceHeartbeat { device_id } => {
-                __sats::bsatn::to_vec(&update_device_heartbeat_reducer::UpdateDeviceHeartbeatArgs {
-                    device_id: device_id.clone(),
-                })
-            }
-            Reducer::UpsertPlatformEntitlement {
-                user_id,
-                tier,
-                concurrency_limit,
-                monthly_token_budget,
-                features_json,
-            } => __sats::bsatn::to_vec(
-                &upsert_platform_entitlement_reducer::UpsertPlatformEntitlementArgs {
-                    user_id: user_id.clone(),
-                    tier: tier.clone(),
-                    concurrency_limit: concurrency_limit.clone(),
-                    monthly_token_budget: monthly_token_budget.clone(),
-                    features_json: features_json.clone(),
-                },
-            ),
             _ => unreachable!(),
         }
     }
@@ -2614,6 +3454,8 @@ pub struct DbUpdate {
     approval_requests: __sdk::TableUpdate<ApprovalRequest>,
     artifacts: __sdk::TableUpdate<ArtifactRecord>,
     battlefields: __sdk::TableUpdate<BattlefieldRecord>,
+    belief_contradictions: __sdk::TableUpdate<BeliefContradiction>,
+    beliefs: __sdk::TableUpdate<Belief>,
     billing_events: __sdk::TableUpdate<BillingEvent>,
     capability_leases: __sdk::TableUpdate<CapabilityLease>,
     captain_directives: __sdk::TableUpdate<CaptainDirective>,
@@ -2621,6 +3463,7 @@ pub struct DbUpdate {
     captain_messages: __sdk::TableUpdate<CaptainMessage>,
     captain_summaries: __sdk::TableUpdate<CaptainSummary>,
     cell_runs: __sdk::TableUpdate<CellRunRecord>,
+    decay_profiles: __sdk::TableUpdate<DecayProfile>,
     devices: __sdk::TableUpdate<Device>,
     discord_channels: __sdk::TableUpdate<DiscordChannel>,
     discord_interactions: __sdk::TableUpdate<DiscordInteraction>,
@@ -2641,7 +3484,10 @@ pub struct DbUpdate {
     model_tiers: __sdk::TableUpdate<ModelTier>,
     node_registry: __sdk::TableUpdate<NodeRegistryEntry>,
     nodes: __sdk::TableUpdate<NodeStatus>,
+    novelty_vectors: __sdk::TableUpdate<NoveltyVector>,
     oauth_identities: __sdk::TableUpdate<OAuthIdentity>,
+    page_links: __sdk::TableUpdate<PageLink>,
+    pages: __sdk::TableUpdate<Page>,
     platform_entitlements: __sdk::TableUpdate<PlatformEntitlement>,
     pods: __sdk::TableUpdate<Pod>,
     proposal_consents: __sdk::TableUpdate<ProposalConsent>,
@@ -2655,6 +3501,7 @@ pub struct DbUpdate {
     session_summaries: __sdk::TableUpdate<SessionSummaryRecord>,
     task_dispatches: __sdk::TableUpdate<TaskDispatch>,
     tenant_task_view: __sdk::TableUpdate<OrganizationTask>,
+    treasuries: __sdk::TableUpdate<Treasury>,
     users: __sdk::TableUpdate<User>,
     worker_sessions: __sdk::TableUpdate<WorkerSession>,
 }
@@ -2680,6 +3527,12 @@ impl TryFrom<__ws::v2::TransactionUpdate> for DbUpdate {
                 "battlefields" => db_update
                     .battlefields
                     .append(battlefields_table::parse_table_update(table_update)?),
+                "belief_contradictions" => db_update.belief_contradictions.append(
+                    belief_contradictions_table::parse_table_update(table_update)?,
+                ),
+                "beliefs" => db_update
+                    .beliefs
+                    .append(beliefs_table::parse_table_update(table_update)?),
                 "billing_events" => db_update
                     .billing_events
                     .append(billing_events_table::parse_table_update(table_update)?),
@@ -2701,6 +3554,9 @@ impl TryFrom<__ws::v2::TransactionUpdate> for DbUpdate {
                 "cell_runs" => db_update
                     .cell_runs
                     .append(cell_runs_table::parse_table_update(table_update)?),
+                "decay_profiles" => db_update
+                    .decay_profiles
+                    .append(decay_profiles_table::parse_table_update(table_update)?),
                 "devices" => db_update
                     .devices
                     .append(devices_table::parse_table_update(table_update)?),
@@ -2761,12 +3617,21 @@ impl TryFrom<__ws::v2::TransactionUpdate> for DbUpdate {
                 "nodes" => db_update
                     .nodes
                     .append(nodes_table::parse_table_update(table_update)?),
+                "novelty_vectors" => db_update
+                    .novelty_vectors
+                    .append(novelty_vectors_table::parse_table_update(table_update)?),
                 "oauth_identities" => db_update
                     .oauth_identities
                     .append(oauth_identities_table::parse_table_update(table_update)?),
-                "platform_entitlements" => db_update
-                    .platform_entitlements
-                    .append(platform_entitlements_table::parse_table_update(table_update)?),
+                "page_links" => db_update
+                    .page_links
+                    .append(page_links_table::parse_table_update(table_update)?),
+                "pages" => db_update
+                    .pages
+                    .append(pages_table::parse_table_update(table_update)?),
+                "platform_entitlements" => db_update.platform_entitlements.append(
+                    platform_entitlements_table::parse_table_update(table_update)?,
+                ),
                 "pods" => db_update
                     .pods
                     .append(pods_table::parse_table_update(table_update)?),
@@ -2803,6 +3668,9 @@ impl TryFrom<__ws::v2::TransactionUpdate> for DbUpdate {
                 "tenant_task_view" => db_update
                     .tenant_task_view
                     .append(tenant_task_view_table::parse_table_update(table_update)?),
+                "treasuries" => db_update
+                    .treasuries
+                    .append(treasuries_table::parse_table_update(table_update)?),
                 "users" => db_update
                     .users
                     .append(users_table::parse_table_update(table_update)?),
@@ -2850,6 +3718,15 @@ impl __sdk::DbUpdate for DbUpdate {
         diff.battlefields = cache
             .apply_diff_to_table::<BattlefieldRecord>("battlefields", &self.battlefields)
             .with_updates_by_pk(|row| &row.battlefield_id);
+        diff.belief_contradictions = cache
+            .apply_diff_to_table::<BeliefContradiction>(
+                "belief_contradictions",
+                &self.belief_contradictions,
+            )
+            .with_updates_by_pk(|row| &row.contradiction_id);
+        diff.beliefs = cache
+            .apply_diff_to_table::<Belief>("beliefs", &self.beliefs)
+            .with_updates_by_pk(|row| &row.belief_id);
         diff.billing_events = cache
             .apply_diff_to_table::<BillingEvent>("billing_events", &self.billing_events)
             .with_updates_by_pk(|row| &row.id);
@@ -2871,6 +3748,9 @@ impl __sdk::DbUpdate for DbUpdate {
         diff.cell_runs = cache
             .apply_diff_to_table::<CellRunRecord>("cell_runs", &self.cell_runs)
             .with_updates_by_pk(|row| &row.cell_run_id);
+        diff.decay_profiles = cache
+            .apply_diff_to_table::<DecayProfile>("decay_profiles", &self.decay_profiles)
+            .with_updates_by_pk(|row| &row.decay_profile_id);
         diff.devices = cache
             .apply_diff_to_table::<Device>("devices", &self.devices)
             .with_updates_by_pk(|row| &row.device_id);
@@ -2923,7 +3803,6 @@ impl __sdk::DbUpdate for DbUpdate {
             .apply_diff_to_table::<LoopSession>("loop_sessions", &self.loop_sessions)
             .with_updates_by_pk(|row| &row.loop_id);
         diff.mission_steps = cache
-
             .apply_diff_to_table::<MissionStepRecord>("mission_steps", &self.mission_steps)
             .with_updates_by_pk(|row| &row.step_id);
         diff.missions = cache
@@ -2938,9 +3817,18 @@ impl __sdk::DbUpdate for DbUpdate {
         diff.nodes = cache
             .apply_diff_to_table::<NodeStatus>("nodes", &self.nodes)
             .with_updates_by_pk(|row| &row.node_id);
+        diff.novelty_vectors = cache
+            .apply_diff_to_table::<NoveltyVector>("novelty_vectors", &self.novelty_vectors)
+            .with_updates_by_pk(|row| &row.vector_id);
         diff.oauth_identities = cache
             .apply_diff_to_table::<OAuthIdentity>("oauth_identities", &self.oauth_identities)
             .with_updates_by_pk(|row| &row.identity_id);
+        diff.page_links = cache
+            .apply_diff_to_table::<PageLink>("page_links", &self.page_links)
+            .with_updates_by_pk(|row| &row.link_id);
+        diff.pages = cache
+            .apply_diff_to_table::<Page>("pages", &self.pages)
+            .with_updates_by_pk(|row| &row.page_id);
         diff.platform_entitlements = cache
             .apply_diff_to_table::<PlatformEntitlement>(
                 "platform_entitlements",
@@ -2986,6 +3874,9 @@ impl __sdk::DbUpdate for DbUpdate {
         diff.task_dispatches = cache
             .apply_diff_to_table::<TaskDispatch>("task_dispatches", &self.task_dispatches)
             .with_updates_by_pk(|row| &row.task_id);
+        diff.treasuries = cache
+            .apply_diff_to_table::<Treasury>("treasuries", &self.treasuries)
+            .with_updates_by_pk(|row| &row.treasury_id);
         diff.users = cache
             .apply_diff_to_table::<User>("users", &self.users)
             .with_updates_by_pk(|row| &row.user_id);
@@ -3016,6 +3907,12 @@ impl __sdk::DbUpdate for DbUpdate {
                 "battlefields" => db_update
                     .battlefields
                     .append(__sdk::parse_row_list_as_inserts(table_rows.rows)?),
+                "belief_contradictions" => db_update
+                    .belief_contradictions
+                    .append(__sdk::parse_row_list_as_inserts(table_rows.rows)?),
+                "beliefs" => db_update
+                    .beliefs
+                    .append(__sdk::parse_row_list_as_inserts(table_rows.rows)?),
                 "billing_events" => db_update
                     .billing_events
                     .append(__sdk::parse_row_list_as_inserts(table_rows.rows)?),
@@ -3036,6 +3933,12 @@ impl __sdk::DbUpdate for DbUpdate {
                     .append(__sdk::parse_row_list_as_inserts(table_rows.rows)?),
                 "cell_runs" => db_update
                     .cell_runs
+                    .append(__sdk::parse_row_list_as_inserts(table_rows.rows)?),
+                "decay_profiles" => db_update
+                    .decay_profiles
+                    .append(__sdk::parse_row_list_as_inserts(table_rows.rows)?),
+                "devices" => db_update
+                    .devices
                     .append(__sdk::parse_row_list_as_inserts(table_rows.rows)?),
                 "discord_channels" => db_update
                     .discord_channels
@@ -3073,6 +3976,12 @@ impl __sdk::DbUpdate for DbUpdate {
                 "liveness_state" => db_update
                     .liveness_state
                     .append(__sdk::parse_row_list_as_inserts(table_rows.rows)?),
+                "loop_iterations" => db_update
+                    .loop_iterations
+                    .append(__sdk::parse_row_list_as_inserts(table_rows.rows)?),
+                "loop_sessions" => db_update
+                    .loop_sessions
+                    .append(__sdk::parse_row_list_as_inserts(table_rows.rows)?),
                 "mission_steps" => db_update
                     .mission_steps
                     .append(__sdk::parse_row_list_as_inserts(table_rows.rows)?),
@@ -3088,8 +3997,20 @@ impl __sdk::DbUpdate for DbUpdate {
                 "nodes" => db_update
                     .nodes
                     .append(__sdk::parse_row_list_as_inserts(table_rows.rows)?),
+                "novelty_vectors" => db_update
+                    .novelty_vectors
+                    .append(__sdk::parse_row_list_as_inserts(table_rows.rows)?),
                 "oauth_identities" => db_update
                     .oauth_identities
+                    .append(__sdk::parse_row_list_as_inserts(table_rows.rows)?),
+                "page_links" => db_update
+                    .page_links
+                    .append(__sdk::parse_row_list_as_inserts(table_rows.rows)?),
+                "pages" => db_update
+                    .pages
+                    .append(__sdk::parse_row_list_as_inserts(table_rows.rows)?),
+                "platform_entitlements" => db_update
+                    .platform_entitlements
                     .append(__sdk::parse_row_list_as_inserts(table_rows.rows)?),
                 "pods" => db_update
                     .pods
@@ -3112,6 +4033,9 @@ impl __sdk::DbUpdate for DbUpdate {
                 "route_decisions" => db_update
                     .route_decisions
                     .append(__sdk::parse_row_list_as_inserts(table_rows.rows)?),
+                "run_failures" => db_update
+                    .run_failures
+                    .append(__sdk::parse_row_list_as_inserts(table_rows.rows)?),
                 "runs" => db_update
                     .runs
                     .append(__sdk::parse_row_list_as_inserts(table_rows.rows)?),
@@ -3123,6 +4047,9 @@ impl __sdk::DbUpdate for DbUpdate {
                     .append(__sdk::parse_row_list_as_inserts(table_rows.rows)?),
                 "tenant_task_view" => db_update
                     .tenant_task_view
+                    .append(__sdk::parse_row_list_as_inserts(table_rows.rows)?),
+                "treasuries" => db_update
+                    .treasuries
                     .append(__sdk::parse_row_list_as_inserts(table_rows.rows)?),
                 "users" => db_update
                     .users
@@ -3158,6 +4085,12 @@ impl __sdk::DbUpdate for DbUpdate {
                 "battlefields" => db_update
                     .battlefields
                     .append(__sdk::parse_row_list_as_deletes(table_rows.rows)?),
+                "belief_contradictions" => db_update
+                    .belief_contradictions
+                    .append(__sdk::parse_row_list_as_deletes(table_rows.rows)?),
+                "beliefs" => db_update
+                    .beliefs
+                    .append(__sdk::parse_row_list_as_deletes(table_rows.rows)?),
                 "billing_events" => db_update
                     .billing_events
                     .append(__sdk::parse_row_list_as_deletes(table_rows.rows)?),
@@ -3178,6 +4111,12 @@ impl __sdk::DbUpdate for DbUpdate {
                     .append(__sdk::parse_row_list_as_deletes(table_rows.rows)?),
                 "cell_runs" => db_update
                     .cell_runs
+                    .append(__sdk::parse_row_list_as_deletes(table_rows.rows)?),
+                "decay_profiles" => db_update
+                    .decay_profiles
+                    .append(__sdk::parse_row_list_as_deletes(table_rows.rows)?),
+                "devices" => db_update
+                    .devices
                     .append(__sdk::parse_row_list_as_deletes(table_rows.rows)?),
                 "discord_channels" => db_update
                     .discord_channels
@@ -3215,6 +4154,12 @@ impl __sdk::DbUpdate for DbUpdate {
                 "liveness_state" => db_update
                     .liveness_state
                     .append(__sdk::parse_row_list_as_deletes(table_rows.rows)?),
+                "loop_iterations" => db_update
+                    .loop_iterations
+                    .append(__sdk::parse_row_list_as_deletes(table_rows.rows)?),
+                "loop_sessions" => db_update
+                    .loop_sessions
+                    .append(__sdk::parse_row_list_as_deletes(table_rows.rows)?),
                 "mission_steps" => db_update
                     .mission_steps
                     .append(__sdk::parse_row_list_as_deletes(table_rows.rows)?),
@@ -3230,8 +4175,20 @@ impl __sdk::DbUpdate for DbUpdate {
                 "nodes" => db_update
                     .nodes
                     .append(__sdk::parse_row_list_as_deletes(table_rows.rows)?),
+                "novelty_vectors" => db_update
+                    .novelty_vectors
+                    .append(__sdk::parse_row_list_as_deletes(table_rows.rows)?),
                 "oauth_identities" => db_update
                     .oauth_identities
+                    .append(__sdk::parse_row_list_as_deletes(table_rows.rows)?),
+                "page_links" => db_update
+                    .page_links
+                    .append(__sdk::parse_row_list_as_deletes(table_rows.rows)?),
+                "pages" => db_update
+                    .pages
+                    .append(__sdk::parse_row_list_as_deletes(table_rows.rows)?),
+                "platform_entitlements" => db_update
+                    .platform_entitlements
                     .append(__sdk::parse_row_list_as_deletes(table_rows.rows)?),
                 "pods" => db_update
                     .pods
@@ -3254,6 +4211,9 @@ impl __sdk::DbUpdate for DbUpdate {
                 "route_decisions" => db_update
                     .route_decisions
                     .append(__sdk::parse_row_list_as_deletes(table_rows.rows)?),
+                "run_failures" => db_update
+                    .run_failures
+                    .append(__sdk::parse_row_list_as_deletes(table_rows.rows)?),
                 "runs" => db_update
                     .runs
                     .append(__sdk::parse_row_list_as_deletes(table_rows.rows)?),
@@ -3265,6 +4225,9 @@ impl __sdk::DbUpdate for DbUpdate {
                     .append(__sdk::parse_row_list_as_deletes(table_rows.rows)?),
                 "tenant_task_view" => db_update
                     .tenant_task_view
+                    .append(__sdk::parse_row_list_as_deletes(table_rows.rows)?),
+                "treasuries" => db_update
+                    .treasuries
                     .append(__sdk::parse_row_list_as_deletes(table_rows.rows)?),
                 "users" => db_update
                     .users
@@ -3292,6 +4255,8 @@ pub struct AppliedDiff<'r> {
     approval_requests: __sdk::TableAppliedDiff<'r, ApprovalRequest>,
     artifacts: __sdk::TableAppliedDiff<'r, ArtifactRecord>,
     battlefields: __sdk::TableAppliedDiff<'r, BattlefieldRecord>,
+    belief_contradictions: __sdk::TableAppliedDiff<'r, BeliefContradiction>,
+    beliefs: __sdk::TableAppliedDiff<'r, Belief>,
     billing_events: __sdk::TableAppliedDiff<'r, BillingEvent>,
     capability_leases: __sdk::TableAppliedDiff<'r, CapabilityLease>,
     captain_directives: __sdk::TableAppliedDiff<'r, CaptainDirective>,
@@ -3299,6 +4264,7 @@ pub struct AppliedDiff<'r> {
     captain_messages: __sdk::TableAppliedDiff<'r, CaptainMessage>,
     captain_summaries: __sdk::TableAppliedDiff<'r, CaptainSummary>,
     cell_runs: __sdk::TableAppliedDiff<'r, CellRunRecord>,
+    decay_profiles: __sdk::TableAppliedDiff<'r, DecayProfile>,
     devices: __sdk::TableAppliedDiff<'r, Device>,
     discord_channels: __sdk::TableAppliedDiff<'r, DiscordChannel>,
     discord_interactions: __sdk::TableAppliedDiff<'r, DiscordInteraction>,
@@ -3319,7 +4285,10 @@ pub struct AppliedDiff<'r> {
     model_tiers: __sdk::TableAppliedDiff<'r, ModelTier>,
     node_registry: __sdk::TableAppliedDiff<'r, NodeRegistryEntry>,
     nodes: __sdk::TableAppliedDiff<'r, NodeStatus>,
+    novelty_vectors: __sdk::TableAppliedDiff<'r, NoveltyVector>,
     oauth_identities: __sdk::TableAppliedDiff<'r, OAuthIdentity>,
+    page_links: __sdk::TableAppliedDiff<'r, PageLink>,
+    pages: __sdk::TableAppliedDiff<'r, Page>,
     platform_entitlements: __sdk::TableAppliedDiff<'r, PlatformEntitlement>,
     pods: __sdk::TableAppliedDiff<'r, Pod>,
     proposal_consents: __sdk::TableAppliedDiff<'r, ProposalConsent>,
@@ -3333,6 +4302,7 @@ pub struct AppliedDiff<'r> {
     session_summaries: __sdk::TableAppliedDiff<'r, SessionSummaryRecord>,
     task_dispatches: __sdk::TableAppliedDiff<'r, TaskDispatch>,
     tenant_task_view: __sdk::TableAppliedDiff<'r, OrganizationTask>,
+    treasuries: __sdk::TableAppliedDiff<'r, Treasury>,
     users: __sdk::TableAppliedDiff<'r, User>,
     worker_sessions: __sdk::TableAppliedDiff<'r, WorkerSession>,
     __unused: std::marker::PhantomData<&'r ()>,
@@ -3369,6 +4339,12 @@ impl<'r> __sdk::AppliedDiff<'r> for AppliedDiff<'r> {
             &self.battlefields,
             event,
         );
+        callbacks.invoke_table_row_callbacks::<BeliefContradiction>(
+            "belief_contradictions",
+            &self.belief_contradictions,
+            event,
+        );
+        callbacks.invoke_table_row_callbacks::<Belief>("beliefs", &self.beliefs, event);
         callbacks.invoke_table_row_callbacks::<BillingEvent>(
             "billing_events",
             &self.billing_events,
@@ -3400,6 +4376,11 @@ impl<'r> __sdk::AppliedDiff<'r> for AppliedDiff<'r> {
             event,
         );
         callbacks.invoke_table_row_callbacks::<CellRunRecord>("cell_runs", &self.cell_runs, event);
+        callbacks.invoke_table_row_callbacks::<DecayProfile>(
+            "decay_profiles",
+            &self.decay_profiles,
+            event,
+        );
         callbacks.invoke_table_row_callbacks::<Device>("devices", &self.devices, event);
         callbacks.invoke_table_row_callbacks::<DiscordChannel>(
             "discord_channels",
@@ -3472,11 +4453,18 @@ impl<'r> __sdk::AppliedDiff<'r> for AppliedDiff<'r> {
             event,
         );
         callbacks.invoke_table_row_callbacks::<NodeStatus>("nodes", &self.nodes, event);
+        callbacks.invoke_table_row_callbacks::<NoveltyVector>(
+            "novelty_vectors",
+            &self.novelty_vectors,
+            event,
+        );
         callbacks.invoke_table_row_callbacks::<OAuthIdentity>(
             "oauth_identities",
             &self.oauth_identities,
             event,
         );
+        callbacks.invoke_table_row_callbacks::<PageLink>("page_links", &self.page_links, event);
+        callbacks.invoke_table_row_callbacks::<Page>("pages", &self.pages, event);
         callbacks.invoke_table_row_callbacks::<PlatformEntitlement>(
             "platform_entitlements",
             &self.platform_entitlements,
@@ -3509,7 +4497,11 @@ impl<'r> __sdk::AppliedDiff<'r> for AppliedDiff<'r> {
             &self.route_decisions,
             event,
         );
-        callbacks.invoke_table_row_callbacks::<RunFailure>("run_failures", &self.run_failures, event);
+        callbacks.invoke_table_row_callbacks::<RunFailure>(
+            "run_failures",
+            &self.run_failures,
+            event,
+        );
         callbacks.invoke_table_row_callbacks::<RunRecord>("runs", &self.runs, event);
         callbacks.invoke_table_row_callbacks::<SessionSummaryRecord>(
             "session_summaries",
@@ -3526,6 +4518,7 @@ impl<'r> __sdk::AppliedDiff<'r> for AppliedDiff<'r> {
             &self.tenant_task_view,
             event,
         );
+        callbacks.invoke_table_row_callbacks::<Treasury>("treasuries", &self.treasuries, event);
         callbacks.invoke_table_row_callbacks::<User>("users", &self.users, event);
         callbacks.invoke_table_row_callbacks::<WorkerSession>(
             "worker_sessions",
@@ -4181,6 +5174,8 @@ impl __sdk::SpacetimeModule for RemoteModule {
         approval_requests_table::register_table(client_cache);
         artifacts_table::register_table(client_cache);
         battlefields_table::register_table(client_cache);
+        belief_contradictions_table::register_table(client_cache);
+        beliefs_table::register_table(client_cache);
         billing_events_table::register_table(client_cache);
         capability_leases_table::register_table(client_cache);
         captain_directives_table::register_table(client_cache);
@@ -4188,6 +5183,7 @@ impl __sdk::SpacetimeModule for RemoteModule {
         captain_messages_table::register_table(client_cache);
         captain_summaries_table::register_table(client_cache);
         cell_runs_table::register_table(client_cache);
+        decay_profiles_table::register_table(client_cache);
         devices_table::register_table(client_cache);
         discord_channels_table::register_table(client_cache);
         discord_interactions_table::register_table(client_cache);
@@ -4208,7 +5204,10 @@ impl __sdk::SpacetimeModule for RemoteModule {
         model_tiers_table::register_table(client_cache);
         node_registry_table::register_table(client_cache);
         nodes_table::register_table(client_cache);
+        novelty_vectors_table::register_table(client_cache);
         oauth_identities_table::register_table(client_cache);
+        page_links_table::register_table(client_cache);
+        pages_table::register_table(client_cache);
         platform_entitlements_table::register_table(client_cache);
         pods_table::register_table(client_cache);
         proposal_consents_table::register_table(client_cache);
@@ -4222,6 +5221,7 @@ impl __sdk::SpacetimeModule for RemoteModule {
         session_summaries_table::register_table(client_cache);
         task_dispatches_table::register_table(client_cache);
         tenant_task_view_table::register_table(client_cache);
+        treasuries_table::register_table(client_cache);
         users_table::register_table(client_cache);
         worker_sessions_table::register_table(client_cache);
     }
@@ -4231,6 +5231,8 @@ impl __sdk::SpacetimeModule for RemoteModule {
         "approval_requests",
         "artifacts",
         "battlefields",
+        "belief_contradictions",
+        "beliefs",
         "billing_events",
         "capability_leases",
         "captain_directives",
@@ -4238,6 +5240,7 @@ impl __sdk::SpacetimeModule for RemoteModule {
         "captain_messages",
         "captain_summaries",
         "cell_runs",
+        "decay_profiles",
         "devices",
         "discord_channels",
         "discord_interactions",
@@ -4258,7 +5261,10 @@ impl __sdk::SpacetimeModule for RemoteModule {
         "model_tiers",
         "node_registry",
         "nodes",
+        "novelty_vectors",
         "oauth_identities",
+        "page_links",
+        "pages",
         "platform_entitlements",
         "pods",
         "proposal_consents",
@@ -4272,6 +5278,7 @@ impl __sdk::SpacetimeModule for RemoteModule {
         "session_summaries",
         "task_dispatches",
         "tenant_task_view",
+        "treasuries",
         "users",
         "worker_sessions",
     ];

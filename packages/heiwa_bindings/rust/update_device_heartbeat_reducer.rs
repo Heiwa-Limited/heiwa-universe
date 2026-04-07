@@ -23,11 +23,26 @@ impl __sdk::InModule for UpdateDeviceHeartbeatArgs {
 }
 
 #[allow(non_camel_case_types)]
+/// Extension trait for access to the reducer `update_device_heartbeat`.
+///
+/// Implemented for [`super::RemoteReducers`].
 pub trait update_device_heartbeat {
+    /// Request that the remote module invoke the reducer `update_device_heartbeat` to run as soon as possible.
+    ///
+    /// This method returns immediately, and errors only if we are unable to send the request.
+    /// The reducer will run asynchronously in the future,
+    ///  and this method provides no way to listen for its completion status.
+    /// /// Use [`update_device_heartbeat:update_device_heartbeat_then`] to run a callback after the reducer completes.
     fn update_device_heartbeat(&self, device_id: String) -> __sdk::Result<()> {
         self.update_device_heartbeat_then(device_id, |_, _| {})
     }
 
+    /// Request that the remote module invoke the reducer `update_device_heartbeat` to run as soon as possible,
+    /// registering `callback` to run when we are notified that the reducer completed.
+    ///
+    /// This method returns immediately, and errors only if we are unable to send the request.
+    /// The reducer will run asynchronously in the future,
+    ///  and its status can be observed with the `callback`.
     fn update_device_heartbeat_then(
         &self,
         device_id: String,
@@ -47,9 +62,7 @@ impl update_device_heartbeat for super::RemoteReducers {
             + Send
             + 'static,
     ) -> __sdk::Result<()> {
-        self.imp.invoke_reducer_with_callback(
-            UpdateDeviceHeartbeatArgs { device_id },
-            callback,
-        )
+        self.imp
+            .invoke_reducer_with_callback(UpdateDeviceHeartbeatArgs { device_id }, callback)
     }
 }

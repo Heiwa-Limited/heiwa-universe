@@ -37,7 +37,16 @@ impl __sdk::InModule for RecordLoopIterationArgs {
 }
 
 #[allow(non_camel_case_types)]
+/// Extension trait for access to the reducer `record_loop_iteration`.
+///
+/// Implemented for [`super::RemoteReducers`].
 pub trait record_loop_iteration {
+    /// Request that the remote module invoke the reducer `record_loop_iteration` to run as soon as possible.
+    ///
+    /// This method returns immediately, and errors only if we are unable to send the request.
+    /// The reducer will run asynchronously in the future,
+    ///  and this method provides no way to listen for its completion status.
+    /// /// Use [`record_loop_iteration:record_loop_iteration_then`] to run a callback after the reducer completes.
     fn record_loop_iteration(
         &self,
         iteration_id: String,
@@ -62,6 +71,12 @@ pub trait record_loop_iteration {
         )
     }
 
+    /// Request that the remote module invoke the reducer `record_loop_iteration` to run as soon as possible,
+    /// registering `callback` to run when we are notified that the reducer completed.
+    ///
+    /// This method returns immediately, and errors only if we are unable to send the request.
+    /// The reducer will run asynchronously in the future,
+    ///  and its status can be observed with the `callback`.
     fn record_loop_iteration_then(
         &self,
         iteration_id: String,

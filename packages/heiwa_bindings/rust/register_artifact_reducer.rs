@@ -51,7 +51,16 @@ impl __sdk::InModule for RegisterArtifactArgs {
 }
 
 #[allow(non_camel_case_types)]
+/// Extension trait for access to the reducer `register_artifact`.
+///
+/// Implemented for [`super::RemoteReducers`].
 pub trait register_artifact {
+    /// Request that the remote module invoke the reducer `register_artifact` to run as soon as possible.
+    ///
+    /// This method returns immediately, and errors only if we are unable to send the request.
+    /// The reducer will run asynchronously in the future,
+    ///  and this method provides no way to listen for its completion status.
+    /// /// Use [`register_artifact:register_artifact_then`] to run a callback after the reducer completes.
     fn register_artifact(
         &self,
         artifact_id: String,
@@ -90,6 +99,12 @@ pub trait register_artifact {
         )
     }
 
+    /// Request that the remote module invoke the reducer `register_artifact` to run as soon as possible,
+    /// registering `callback` to run when we are notified that the reducer completed.
+    ///
+    /// This method returns immediately, and errors only if we are unable to send the request.
+    /// The reducer will run asynchronously in the future,
+    ///  and its status can be observed with the `callback`.
     fn register_artifact_then(
         &self,
         artifact_id: String,

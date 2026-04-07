@@ -23,3 +23,59 @@ pub struct LoopSession {
 impl __sdk::InModule for LoopSession {
     type Module = super::RemoteModule;
 }
+
+/// Column accessor struct for the table `LoopSession`.
+///
+/// Provides typed access to columns for query building.
+pub struct LoopSessionCols {
+    pub loop_id: __sdk::__query_builder::Col<LoopSession, String>,
+    pub user_id: __sdk::__query_builder::Col<LoopSession, String>,
+    pub objective: __sdk::__query_builder::Col<LoopSession, String>,
+    pub status: __sdk::__query_builder::Col<LoopSession, String>,
+    pub max_turns: __sdk::__query_builder::Col<LoopSession, u32>,
+    pub max_cost_usd: __sdk::__query_builder::Col<LoopSession, f64>,
+    pub current_turn: __sdk::__query_builder::Col<LoopSession, u32>,
+    pub total_cost_usd: __sdk::__query_builder::Col<LoopSession, f64>,
+    pub termination_reason: __sdk::__query_builder::Col<LoopSession, Option<String>>,
+    pub created_at: __sdk::__query_builder::Col<LoopSession, String>,
+    pub updated_at: __sdk::__query_builder::Col<LoopSession, String>,
+}
+
+impl __sdk::__query_builder::HasCols for LoopSession {
+    type Cols = LoopSessionCols;
+    fn cols(table_name: &'static str) -> Self::Cols {
+        LoopSessionCols {
+            loop_id: __sdk::__query_builder::Col::new(table_name, "loop_id"),
+            user_id: __sdk::__query_builder::Col::new(table_name, "user_id"),
+            objective: __sdk::__query_builder::Col::new(table_name, "objective"),
+            status: __sdk::__query_builder::Col::new(table_name, "status"),
+            max_turns: __sdk::__query_builder::Col::new(table_name, "max_turns"),
+            max_cost_usd: __sdk::__query_builder::Col::new(table_name, "max_cost_usd"),
+            current_turn: __sdk::__query_builder::Col::new(table_name, "current_turn"),
+            total_cost_usd: __sdk::__query_builder::Col::new(table_name, "total_cost_usd"),
+            termination_reason: __sdk::__query_builder::Col::new(table_name, "termination_reason"),
+            created_at: __sdk::__query_builder::Col::new(table_name, "created_at"),
+            updated_at: __sdk::__query_builder::Col::new(table_name, "updated_at"),
+        }
+    }
+}
+
+/// Indexed column accessor struct for the table `LoopSession`.
+///
+/// Provides typed access to indexed columns for query building.
+pub struct LoopSessionIxCols {
+    pub loop_id: __sdk::__query_builder::IxCol<LoopSession, String>,
+    pub user_id: __sdk::__query_builder::IxCol<LoopSession, String>,
+}
+
+impl __sdk::__query_builder::HasIxCols for LoopSession {
+    type IxCols = LoopSessionIxCols;
+    fn ix_cols(table_name: &'static str) -> Self::IxCols {
+        LoopSessionIxCols {
+            loop_id: __sdk::__query_builder::IxCol::new(table_name, "loop_id"),
+            user_id: __sdk::__query_builder::IxCol::new(table_name, "user_id"),
+        }
+    }
+}
+
+impl __sdk::__query_builder::CanBeLookupTable for LoopSession {}

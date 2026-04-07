@@ -5,14 +5,26 @@
 use super::run_failure_type::RunFailure;
 use spacetimedb_sdk::__codegen::{self as __sdk, __lib, __sats, __ws};
 
+/// Table handle for the table `run_failures`.
+///
+/// Obtain a handle from the [`RunFailuresTableAccess::run_failures`] method on [`super::RemoteTables`],
+/// like `ctx.db.run_failures()`.
+///
+/// Users are encouraged not to explicitly reference this type,
+/// but to directly chain method calls,
+/// like `ctx.db.run_failures().on_insert(...)`.
 pub struct RunFailuresTableHandle<'ctx> {
     imp: __sdk::TableHandle<RunFailure>,
     ctx: std::marker::PhantomData<&'ctx super::RemoteTables>,
 }
 
 #[allow(non_camel_case_types)]
+/// Extension trait for access to the table `run_failures`.
+///
+/// Implemented for [`super::RemoteTables`].
 pub trait RunFailuresTableAccess {
     #[allow(non_snake_case)]
+    /// Obtain a [`RunFailuresTableHandle`], which mediates access to the table `run_failures`.
     fn run_failures(&self) -> RunFailuresTableHandle<'_>;
 }
 
@@ -83,12 +95,20 @@ impl<'ctx> __sdk::TableWithPrimaryKey for RunFailuresTableHandle<'ctx> {
     }
 }
 
+/// Access to the `failure_id` unique index on the table `run_failures`,
+/// which allows point queries on the field of the same name
+/// via the [`RunFailuresFailureIdUnique::find`] method.
+///
+/// Users are encouraged not to explicitly reference this type,
+/// but to directly chain method calls,
+/// like `ctx.db.run_failures().failure_id().find(...)`.
 pub struct RunFailuresFailureIdUnique<'ctx> {
     imp: __sdk::UniqueConstraintHandle<RunFailure, String>,
     phantom: std::marker::PhantomData<&'ctx super::RemoteTables>,
 }
 
 impl<'ctx> RunFailuresTableHandle<'ctx> {
+    /// Get a handle on the `failure_id` unique index on the table `run_failures`.
     pub fn failure_id(&self) -> RunFailuresFailureIdUnique<'ctx> {
         RunFailuresFailureIdUnique {
             imp: self.imp.get_unique_constraint::<String>("failure_id"),
@@ -98,6 +118,8 @@ impl<'ctx> RunFailuresTableHandle<'ctx> {
 }
 
 impl<'ctx> RunFailuresFailureIdUnique<'ctx> {
+    /// Find the subscribed row whose `failure_id` column value is equal to `col_val`,
+    /// if such a row is present in the client cache.
     pub fn find(&self, col_val: &String) -> Option<RunFailure> {
         self.imp.find(col_val)
     }
@@ -109,6 +131,7 @@ pub(super) fn register_table(client_cache: &mut __sdk::ClientCache<super::Remote
     _table.add_unique_constraint::<String>("failure_id", |row| &row.failure_id);
 }
 
+#[doc(hidden)]
 pub(super) fn parse_table_update(
     raw_updates: __ws::v2::TableUpdate,
 ) -> __sdk::Result<__sdk::TableUpdate<RunFailure>> {
@@ -117,4 +140,20 @@ pub(super) fn parse_table_update(
             .with_cause(e)
             .into()
     })
+}
+
+#[allow(non_camel_case_types)]
+/// Extension trait for query builder access to the table `RunFailure`.
+///
+/// Implemented for [`__sdk::QueryTableAccessor`].
+pub trait run_failuresQueryTableAccess {
+    #[allow(non_snake_case)]
+    /// Get a query builder for the table `RunFailure`.
+    fn run_failures(&self) -> __sdk::__query_builder::Table<RunFailure>;
+}
+
+impl run_failuresQueryTableAccess for __sdk::QueryTableAccessor {
+    fn run_failures(&self) -> __sdk::__query_builder::Table<RunFailure> {
+        __sdk::__query_builder::Table::new("run_failures")
+    }
 }

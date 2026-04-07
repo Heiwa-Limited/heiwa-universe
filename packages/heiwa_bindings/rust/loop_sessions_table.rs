@@ -5,14 +5,26 @@
 use super::loop_session_type::LoopSession;
 use spacetimedb_sdk::__codegen::{self as __sdk, __lib, __sats, __ws};
 
+/// Table handle for the table `loop_sessions`.
+///
+/// Obtain a handle from the [`LoopSessionsTableAccess::loop_sessions`] method on [`super::RemoteTables`],
+/// like `ctx.db.loop_sessions()`.
+///
+/// Users are encouraged not to explicitly reference this type,
+/// but to directly chain method calls,
+/// like `ctx.db.loop_sessions().on_insert(...)`.
 pub struct LoopSessionsTableHandle<'ctx> {
     imp: __sdk::TableHandle<LoopSession>,
     ctx: std::marker::PhantomData<&'ctx super::RemoteTables>,
 }
 
 #[allow(non_camel_case_types)]
+/// Extension trait for access to the table `loop_sessions`.
+///
+/// Implemented for [`super::RemoteTables`].
 pub trait LoopSessionsTableAccess {
     #[allow(non_snake_case)]
+    /// Obtain a [`LoopSessionsTableHandle`], which mediates access to the table `loop_sessions`.
     fn loop_sessions(&self) -> LoopSessionsTableHandle<'_>;
 }
 
@@ -25,8 +37,8 @@ impl LoopSessionsTableAccess for super::RemoteTables {
     }
 }
 
-pub struct LoopSessionInsertCallbackId(__sdk::CallbackId);
-pub struct LoopSessionDeleteCallbackId(__sdk::CallbackId);
+pub struct LoopSessionsInsertCallbackId(__sdk::CallbackId);
+pub struct LoopSessionsDeleteCallbackId(__sdk::CallbackId);
 
 impl<'ctx> __sdk::Table for LoopSessionsTableHandle<'ctx> {
     type Row = LoopSession;
@@ -39,65 +51,75 @@ impl<'ctx> __sdk::Table for LoopSessionsTableHandle<'ctx> {
         self.imp.iter()
     }
 
-    type InsertCallbackId = LoopSessionInsertCallbackId;
+    type InsertCallbackId = LoopSessionsInsertCallbackId;
 
     fn on_insert(
         &self,
         callback: impl FnMut(&Self::EventContext, &Self::Row) + Send + 'static,
-    ) -> LoopSessionInsertCallbackId {
-        LoopSessionInsertCallbackId(self.imp.on_insert(Box::new(callback)))
+    ) -> LoopSessionsInsertCallbackId {
+        LoopSessionsInsertCallbackId(self.imp.on_insert(Box::new(callback)))
     }
 
-    fn remove_on_insert(&self, callback: LoopSessionInsertCallbackId) {
+    fn remove_on_insert(&self, callback: LoopSessionsInsertCallbackId) {
         self.imp.remove_on_insert(callback.0)
     }
 
-    type DeleteCallbackId = LoopSessionDeleteCallbackId;
+    type DeleteCallbackId = LoopSessionsDeleteCallbackId;
 
     fn on_delete(
         &self,
         callback: impl FnMut(&Self::EventContext, &Self::Row) + Send + 'static,
-    ) -> LoopSessionDeleteCallbackId {
-        LoopSessionDeleteCallbackId(self.imp.on_delete(Box::new(callback)))
+    ) -> LoopSessionsDeleteCallbackId {
+        LoopSessionsDeleteCallbackId(self.imp.on_delete(Box::new(callback)))
     }
 
-    fn remove_on_delete(&self, callback: LoopSessionDeleteCallbackId) {
+    fn remove_on_delete(&self, callback: LoopSessionsDeleteCallbackId) {
         self.imp.remove_on_delete(callback.0)
     }
 }
 
-pub struct LoopSessionUpdateCallbackId(__sdk::CallbackId);
+pub struct LoopSessionsUpdateCallbackId(__sdk::CallbackId);
 
 impl<'ctx> __sdk::TableWithPrimaryKey for LoopSessionsTableHandle<'ctx> {
-    type UpdateCallbackId = LoopSessionUpdateCallbackId;
+    type UpdateCallbackId = LoopSessionsUpdateCallbackId;
 
     fn on_update(
         &self,
         callback: impl FnMut(&Self::EventContext, &Self::Row, &Self::Row) + Send + 'static,
-    ) -> LoopSessionUpdateCallbackId {
-        LoopSessionUpdateCallbackId(self.imp.on_update(Box::new(callback)))
+    ) -> LoopSessionsUpdateCallbackId {
+        LoopSessionsUpdateCallbackId(self.imp.on_update(Box::new(callback)))
     }
 
-    fn remove_on_update(&self, callback: LoopSessionUpdateCallbackId) {
+    fn remove_on_update(&self, callback: LoopSessionsUpdateCallbackId) {
         self.imp.remove_on_update(callback.0)
     }
 }
 
-pub struct LoopSessionLoopIdUnique<'ctx> {
+/// Access to the `loop_id` unique index on the table `loop_sessions`,
+/// which allows point queries on the field of the same name
+/// via the [`LoopSessionsLoopIdUnique::find`] method.
+///
+/// Users are encouraged not to explicitly reference this type,
+/// but to directly chain method calls,
+/// like `ctx.db.loop_sessions().loop_id().find(...)`.
+pub struct LoopSessionsLoopIdUnique<'ctx> {
     imp: __sdk::UniqueConstraintHandle<LoopSession, String>,
     phantom: std::marker::PhantomData<&'ctx super::RemoteTables>,
 }
 
 impl<'ctx> LoopSessionsTableHandle<'ctx> {
-    pub fn loop_id(&self) -> LoopSessionLoopIdUnique<'ctx> {
-        LoopSessionLoopIdUnique {
+    /// Get a handle on the `loop_id` unique index on the table `loop_sessions`.
+    pub fn loop_id(&self) -> LoopSessionsLoopIdUnique<'ctx> {
+        LoopSessionsLoopIdUnique {
             imp: self.imp.get_unique_constraint::<String>("loop_id"),
             phantom: std::marker::PhantomData,
         }
     }
 }
 
-impl<'ctx> LoopSessionLoopIdUnique<'ctx> {
+impl<'ctx> LoopSessionsLoopIdUnique<'ctx> {
+    /// Find the subscribed row whose `loop_id` column value is equal to `col_val`,
+    /// if such a row is present in the client cache.
     pub fn find(&self, col_val: &String) -> Option<LoopSession> {
         self.imp.find(col_val)
     }
@@ -109,6 +131,7 @@ pub(super) fn register_table(client_cache: &mut __sdk::ClientCache<super::Remote
     _table.add_unique_constraint::<String>("loop_id", |row| &row.loop_id);
 }
 
+#[doc(hidden)]
 pub(super) fn parse_table_update(
     raw_updates: __ws::v2::TableUpdate,
 ) -> __sdk::Result<__sdk::TableUpdate<LoopSession>> {
@@ -117,4 +140,20 @@ pub(super) fn parse_table_update(
             .with_cause(e)
             .into()
     })
+}
+
+#[allow(non_camel_case_types)]
+/// Extension trait for query builder access to the table `LoopSession`.
+///
+/// Implemented for [`__sdk::QueryTableAccessor`].
+pub trait loop_sessionsQueryTableAccess {
+    #[allow(non_snake_case)]
+    /// Get a query builder for the table `LoopSession`.
+    fn loop_sessions(&self) -> __sdk::__query_builder::Table<LoopSession>;
+}
+
+impl loop_sessionsQueryTableAccess for __sdk::QueryTableAccessor {
+    fn loop_sessions(&self) -> __sdk::__query_builder::Table<LoopSession> {
+        __sdk::__query_builder::Table::new("loop_sessions")
+    }
 }

@@ -31,7 +31,16 @@ impl __sdk::InModule for RegisterDeviceArgs {
 }
 
 #[allow(non_camel_case_types)]
+/// Extension trait for access to the reducer `register_device`.
+///
+/// Implemented for [`super::RemoteReducers`].
 pub trait register_device {
+    /// Request that the remote module invoke the reducer `register_device` to run as soon as possible.
+    ///
+    /// This method returns immediately, and errors only if we are unable to send the request.
+    /// The reducer will run asynchronously in the future,
+    ///  and this method provides no way to listen for its completion status.
+    /// /// Use [`register_device:register_device_then`] to run a callback after the reducer completes.
     fn register_device(
         &self,
         device_id: String,
@@ -43,6 +52,12 @@ pub trait register_device {
         self.register_device_then(device_id, user_id, hostname, os, arch, |_, _| {})
     }
 
+    /// Request that the remote module invoke the reducer `register_device` to run as soon as possible,
+    /// registering `callback` to run when we are notified that the reducer completed.
+    ///
+    /// This method returns immediately, and errors only if we are unable to send the request.
+    /// The reducer will run asynchronously in the future,
+    ///  and its status can be observed with the `callback`.
     fn register_device_then(
         &self,
         device_id: String,

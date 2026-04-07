@@ -17,3 +17,48 @@ pub struct PlatformEntitlement {
 impl __sdk::InModule for PlatformEntitlement {
     type Module = super::RemoteModule;
 }
+
+/// Column accessor struct for the table `PlatformEntitlement`.
+///
+/// Provides typed access to columns for query building.
+pub struct PlatformEntitlementCols {
+    pub user_id: __sdk::__query_builder::Col<PlatformEntitlement, String>,
+    pub tier: __sdk::__query_builder::Col<PlatformEntitlement, String>,
+    pub concurrency_limit: __sdk::__query_builder::Col<PlatformEntitlement, i64>,
+    pub monthly_token_budget: __sdk::__query_builder::Col<PlatformEntitlement, i64>,
+    pub features_json: __sdk::__query_builder::Col<PlatformEntitlement, String>,
+}
+
+impl __sdk::__query_builder::HasCols for PlatformEntitlement {
+    type Cols = PlatformEntitlementCols;
+    fn cols(table_name: &'static str) -> Self::Cols {
+        PlatformEntitlementCols {
+            user_id: __sdk::__query_builder::Col::new(table_name, "user_id"),
+            tier: __sdk::__query_builder::Col::new(table_name, "tier"),
+            concurrency_limit: __sdk::__query_builder::Col::new(table_name, "concurrency_limit"),
+            monthly_token_budget: __sdk::__query_builder::Col::new(
+                table_name,
+                "monthly_token_budget",
+            ),
+            features_json: __sdk::__query_builder::Col::new(table_name, "features_json"),
+        }
+    }
+}
+
+/// Indexed column accessor struct for the table `PlatformEntitlement`.
+///
+/// Provides typed access to indexed columns for query building.
+pub struct PlatformEntitlementIxCols {
+    pub user_id: __sdk::__query_builder::IxCol<PlatformEntitlement, String>,
+}
+
+impl __sdk::__query_builder::HasIxCols for PlatformEntitlement {
+    type IxCols = PlatformEntitlementIxCols;
+    fn ix_cols(table_name: &'static str) -> Self::IxCols {
+        PlatformEntitlementIxCols {
+            user_id: __sdk::__query_builder::IxCol::new(table_name, "user_id"),
+        }
+    }
+}
+
+impl __sdk::__query_builder::CanBeLookupTable for PlatformEntitlement {}

@@ -26,6 +26,19 @@ pub struct MissionRecord {
     pub user_id: Option<String>,
     pub owner_id: Option<String>,
     pub principal_id: Option<String>,
+    pub task_class: Option<String>,
+    pub budget_class: Option<String>,
+    pub treasury_id: Option<String>,
+    pub novelty_policy_json: Option<String>,
+    pub termination_policy_json: Option<String>,
+    pub required_belief_query: Option<String>,
+    pub allowed_tools_json: Option<String>,
+    pub allowed_side_effects_json: Option<String>,
+    pub target_outputs_json: Option<String>,
+    pub cost_so_far_millicents: Option<i64>,
+    pub novelty_so_far: Option<f64>,
+    pub turn_count: Option<u32>,
+    pub approval_state: Option<String>,
 }
 
 impl __sdk::InModule for MissionRecord {
@@ -55,6 +68,19 @@ pub struct MissionRecordCols {
     pub user_id: __sdk::__query_builder::Col<MissionRecord, Option<String>>,
     pub owner_id: __sdk::__query_builder::Col<MissionRecord, Option<String>>,
     pub principal_id: __sdk::__query_builder::Col<MissionRecord, Option<String>>,
+    pub task_class: __sdk::__query_builder::Col<MissionRecord, Option<String>>,
+    pub budget_class: __sdk::__query_builder::Col<MissionRecord, Option<String>>,
+    pub treasury_id: __sdk::__query_builder::Col<MissionRecord, Option<String>>,
+    pub novelty_policy_json: __sdk::__query_builder::Col<MissionRecord, Option<String>>,
+    pub termination_policy_json: __sdk::__query_builder::Col<MissionRecord, Option<String>>,
+    pub required_belief_query: __sdk::__query_builder::Col<MissionRecord, Option<String>>,
+    pub allowed_tools_json: __sdk::__query_builder::Col<MissionRecord, Option<String>>,
+    pub allowed_side_effects_json: __sdk::__query_builder::Col<MissionRecord, Option<String>>,
+    pub target_outputs_json: __sdk::__query_builder::Col<MissionRecord, Option<String>>,
+    pub cost_so_far_millicents: __sdk::__query_builder::Col<MissionRecord, Option<i64>>,
+    pub novelty_so_far: __sdk::__query_builder::Col<MissionRecord, Option<f64>>,
+    pub turn_count: __sdk::__query_builder::Col<MissionRecord, Option<u32>>,
+    pub approval_state: __sdk::__query_builder::Col<MissionRecord, Option<String>>,
 }
 
 impl __sdk::__query_builder::HasCols for MissionRecord {
@@ -80,6 +106,37 @@ impl __sdk::__query_builder::HasCols for MissionRecord {
             user_id: __sdk::__query_builder::Col::new(table_name, "user_id"),
             owner_id: __sdk::__query_builder::Col::new(table_name, "owner_id"),
             principal_id: __sdk::__query_builder::Col::new(table_name, "principal_id"),
+            task_class: __sdk::__query_builder::Col::new(table_name, "task_class"),
+            budget_class: __sdk::__query_builder::Col::new(table_name, "budget_class"),
+            treasury_id: __sdk::__query_builder::Col::new(table_name, "treasury_id"),
+            novelty_policy_json: __sdk::__query_builder::Col::new(
+                table_name,
+                "novelty_policy_json",
+            ),
+            termination_policy_json: __sdk::__query_builder::Col::new(
+                table_name,
+                "termination_policy_json",
+            ),
+            required_belief_query: __sdk::__query_builder::Col::new(
+                table_name,
+                "required_belief_query",
+            ),
+            allowed_tools_json: __sdk::__query_builder::Col::new(table_name, "allowed_tools_json"),
+            allowed_side_effects_json: __sdk::__query_builder::Col::new(
+                table_name,
+                "allowed_side_effects_json",
+            ),
+            target_outputs_json: __sdk::__query_builder::Col::new(
+                table_name,
+                "target_outputs_json",
+            ),
+            cost_so_far_millicents: __sdk::__query_builder::Col::new(
+                table_name,
+                "cost_so_far_millicents",
+            ),
+            novelty_so_far: __sdk::__query_builder::Col::new(table_name, "novelty_so_far"),
+            turn_count: __sdk::__query_builder::Col::new(table_name, "turn_count"),
+            approval_state: __sdk::__query_builder::Col::new(table_name, "approval_state"),
         }
     }
 }
@@ -88,11 +145,14 @@ impl __sdk::__query_builder::HasCols for MissionRecord {
 ///
 /// Provides typed access to indexed columns for query building.
 pub struct MissionRecordIxCols {
+    pub approval_state: __sdk::__query_builder::IxCol<MissionRecord, Option<String>>,
     pub created_at: __sdk::__query_builder::IxCol<MissionRecord, String>,
     pub mission_id: __sdk::__query_builder::IxCol<MissionRecord, String>,
     pub owner_id: __sdk::__query_builder::IxCol<MissionRecord, Option<String>>,
     pub principal_id: __sdk::__query_builder::IxCol<MissionRecord, Option<String>>,
     pub status: __sdk::__query_builder::IxCol<MissionRecord, String>,
+    pub task_class: __sdk::__query_builder::IxCol<MissionRecord, Option<String>>,
+    pub treasury_id: __sdk::__query_builder::IxCol<MissionRecord, Option<String>>,
     pub updated_at: __sdk::__query_builder::IxCol<MissionRecord, String>,
     pub user_id: __sdk::__query_builder::IxCol<MissionRecord, Option<String>>,
 }
@@ -101,11 +161,14 @@ impl __sdk::__query_builder::HasIxCols for MissionRecord {
     type IxCols = MissionRecordIxCols;
     fn ix_cols(table_name: &'static str) -> Self::IxCols {
         MissionRecordIxCols {
+            approval_state: __sdk::__query_builder::IxCol::new(table_name, "approval_state"),
             created_at: __sdk::__query_builder::IxCol::new(table_name, "created_at"),
             mission_id: __sdk::__query_builder::IxCol::new(table_name, "mission_id"),
             owner_id: __sdk::__query_builder::IxCol::new(table_name, "owner_id"),
             principal_id: __sdk::__query_builder::IxCol::new(table_name, "principal_id"),
             status: __sdk::__query_builder::IxCol::new(table_name, "status"),
+            task_class: __sdk::__query_builder::IxCol::new(table_name, "task_class"),
+            treasury_id: __sdk::__query_builder::IxCol::new(table_name, "treasury_id"),
             updated_at: __sdk::__query_builder::IxCol::new(table_name, "updated_at"),
             user_id: __sdk::__query_builder::IxCol::new(table_name, "user_id"),
         }

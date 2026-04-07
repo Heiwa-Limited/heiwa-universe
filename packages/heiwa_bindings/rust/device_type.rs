@@ -19,3 +19,51 @@ pub struct Device {
 impl __sdk::InModule for Device {
     type Module = super::RemoteModule;
 }
+
+/// Column accessor struct for the table `Device`.
+///
+/// Provides typed access to columns for query building.
+pub struct DeviceCols {
+    pub device_id: __sdk::__query_builder::Col<Device, String>,
+    pub user_id: __sdk::__query_builder::Col<Device, String>,
+    pub hostname: __sdk::__query_builder::Col<Device, String>,
+    pub os: __sdk::__query_builder::Col<Device, String>,
+    pub arch: __sdk::__query_builder::Col<Device, String>,
+    pub last_seen_at: __sdk::__query_builder::Col<Device, String>,
+    pub status: __sdk::__query_builder::Col<Device, String>,
+}
+
+impl __sdk::__query_builder::HasCols for Device {
+    type Cols = DeviceCols;
+    fn cols(table_name: &'static str) -> Self::Cols {
+        DeviceCols {
+            device_id: __sdk::__query_builder::Col::new(table_name, "device_id"),
+            user_id: __sdk::__query_builder::Col::new(table_name, "user_id"),
+            hostname: __sdk::__query_builder::Col::new(table_name, "hostname"),
+            os: __sdk::__query_builder::Col::new(table_name, "os"),
+            arch: __sdk::__query_builder::Col::new(table_name, "arch"),
+            last_seen_at: __sdk::__query_builder::Col::new(table_name, "last_seen_at"),
+            status: __sdk::__query_builder::Col::new(table_name, "status"),
+        }
+    }
+}
+
+/// Indexed column accessor struct for the table `Device`.
+///
+/// Provides typed access to indexed columns for query building.
+pub struct DeviceIxCols {
+    pub device_id: __sdk::__query_builder::IxCol<Device, String>,
+    pub user_id: __sdk::__query_builder::IxCol<Device, String>,
+}
+
+impl __sdk::__query_builder::HasIxCols for Device {
+    type IxCols = DeviceIxCols;
+    fn ix_cols(table_name: &'static str) -> Self::IxCols {
+        DeviceIxCols {
+            device_id: __sdk::__query_builder::IxCol::new(table_name, "device_id"),
+            user_id: __sdk::__query_builder::IxCol::new(table_name, "user_id"),
+        }
+    }
+}
+
+impl __sdk::__query_builder::CanBeLookupTable for Device {}

@@ -39,7 +39,16 @@ impl __sdk::InModule for RecordRunFailureArgs {
 }
 
 #[allow(non_camel_case_types)]
+/// Extension trait for access to the reducer `record_run_failure`.
+///
+/// Implemented for [`super::RemoteReducers`].
 pub trait record_run_failure {
+    /// Request that the remote module invoke the reducer `record_run_failure` to run as soon as possible.
+    ///
+    /// This method returns immediately, and errors only if we are unable to send the request.
+    /// The reducer will run asynchronously in the future,
+    ///  and this method provides no way to listen for its completion status.
+    /// /// Use [`record_run_failure:record_run_failure_then`] to run a callback after the reducer completes.
     fn record_run_failure(
         &self,
         failure_id: String,
@@ -66,6 +75,12 @@ pub trait record_run_failure {
         )
     }
 
+    /// Request that the remote module invoke the reducer `record_run_failure` to run as soon as possible,
+    /// registering `callback` to run when we are notified that the reducer completed.
+    ///
+    /// This method returns immediately, and errors only if we are unable to send the request.
+    /// The reducer will run asynchronously in the future,
+    ///  and its status can be observed with the `callback`.
     fn record_run_failure_then(
         &self,
         failure_id: String,

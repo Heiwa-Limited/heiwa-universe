@@ -5,14 +5,26 @@
 use super::loop_iteration_type::LoopIteration;
 use spacetimedb_sdk::__codegen::{self as __sdk, __lib, __sats, __ws};
 
+/// Table handle for the table `loop_iterations`.
+///
+/// Obtain a handle from the [`LoopIterationsTableAccess::loop_iterations`] method on [`super::RemoteTables`],
+/// like `ctx.db.loop_iterations()`.
+///
+/// Users are encouraged not to explicitly reference this type,
+/// but to directly chain method calls,
+/// like `ctx.db.loop_iterations().on_insert(...)`.
 pub struct LoopIterationsTableHandle<'ctx> {
     imp: __sdk::TableHandle<LoopIteration>,
     ctx: std::marker::PhantomData<&'ctx super::RemoteTables>,
 }
 
 #[allow(non_camel_case_types)]
+/// Extension trait for access to the table `loop_iterations`.
+///
+/// Implemented for [`super::RemoteTables`].
 pub trait LoopIterationsTableAccess {
     #[allow(non_snake_case)]
+    /// Obtain a [`LoopIterationsTableHandle`], which mediates access to the table `loop_iterations`.
     fn loop_iterations(&self) -> LoopIterationsTableHandle<'_>;
 }
 
@@ -25,8 +37,8 @@ impl LoopIterationsTableAccess for super::RemoteTables {
     }
 }
 
-pub struct LoopIterationInsertCallbackId(__sdk::CallbackId);
-pub struct LoopIterationDeleteCallbackId(__sdk::CallbackId);
+pub struct LoopIterationsInsertCallbackId(__sdk::CallbackId);
+pub struct LoopIterationsDeleteCallbackId(__sdk::CallbackId);
 
 impl<'ctx> __sdk::Table for LoopIterationsTableHandle<'ctx> {
     type Row = LoopIteration;
@@ -39,65 +51,75 @@ impl<'ctx> __sdk::Table for LoopIterationsTableHandle<'ctx> {
         self.imp.iter()
     }
 
-    type InsertCallbackId = LoopIterationInsertCallbackId;
+    type InsertCallbackId = LoopIterationsInsertCallbackId;
 
     fn on_insert(
         &self,
         callback: impl FnMut(&Self::EventContext, &Self::Row) + Send + 'static,
-    ) -> LoopIterationInsertCallbackId {
-        LoopIterationInsertCallbackId(self.imp.on_insert(Box::new(callback)))
+    ) -> LoopIterationsInsertCallbackId {
+        LoopIterationsInsertCallbackId(self.imp.on_insert(Box::new(callback)))
     }
 
-    fn remove_on_insert(&self, callback: LoopIterationInsertCallbackId) {
+    fn remove_on_insert(&self, callback: LoopIterationsInsertCallbackId) {
         self.imp.remove_on_insert(callback.0)
     }
 
-    type DeleteCallbackId = LoopIterationDeleteCallbackId;
+    type DeleteCallbackId = LoopIterationsDeleteCallbackId;
 
     fn on_delete(
         &self,
         callback: impl FnMut(&Self::EventContext, &Self::Row) + Send + 'static,
-    ) -> LoopIterationDeleteCallbackId {
-        LoopIterationDeleteCallbackId(self.imp.on_delete(Box::new(callback)))
+    ) -> LoopIterationsDeleteCallbackId {
+        LoopIterationsDeleteCallbackId(self.imp.on_delete(Box::new(callback)))
     }
 
-    fn remove_on_delete(&self, callback: LoopIterationDeleteCallbackId) {
+    fn remove_on_delete(&self, callback: LoopIterationsDeleteCallbackId) {
         self.imp.remove_on_delete(callback.0)
     }
 }
 
-pub struct LoopIterationUpdateCallbackId(__sdk::CallbackId);
+pub struct LoopIterationsUpdateCallbackId(__sdk::CallbackId);
 
 impl<'ctx> __sdk::TableWithPrimaryKey for LoopIterationsTableHandle<'ctx> {
-    type UpdateCallbackId = LoopIterationUpdateCallbackId;
+    type UpdateCallbackId = LoopIterationsUpdateCallbackId;
 
     fn on_update(
         &self,
         callback: impl FnMut(&Self::EventContext, &Self::Row, &Self::Row) + Send + 'static,
-    ) -> LoopIterationUpdateCallbackId {
-        LoopIterationUpdateCallbackId(self.imp.on_update(Box::new(callback)))
+    ) -> LoopIterationsUpdateCallbackId {
+        LoopIterationsUpdateCallbackId(self.imp.on_update(Box::new(callback)))
     }
 
-    fn remove_on_update(&self, callback: LoopIterationUpdateCallbackId) {
+    fn remove_on_update(&self, callback: LoopIterationsUpdateCallbackId) {
         self.imp.remove_on_update(callback.0)
     }
 }
 
-pub struct LoopIterationIterationIdUnique<'ctx> {
+/// Access to the `iteration_id` unique index on the table `loop_iterations`,
+/// which allows point queries on the field of the same name
+/// via the [`LoopIterationsIterationIdUnique::find`] method.
+///
+/// Users are encouraged not to explicitly reference this type,
+/// but to directly chain method calls,
+/// like `ctx.db.loop_iterations().iteration_id().find(...)`.
+pub struct LoopIterationsIterationIdUnique<'ctx> {
     imp: __sdk::UniqueConstraintHandle<LoopIteration, String>,
     phantom: std::marker::PhantomData<&'ctx super::RemoteTables>,
 }
 
 impl<'ctx> LoopIterationsTableHandle<'ctx> {
-    pub fn iteration_id(&self) -> LoopIterationIterationIdUnique<'ctx> {
-        LoopIterationIterationIdUnique {
+    /// Get a handle on the `iteration_id` unique index on the table `loop_iterations`.
+    pub fn iteration_id(&self) -> LoopIterationsIterationIdUnique<'ctx> {
+        LoopIterationsIterationIdUnique {
             imp: self.imp.get_unique_constraint::<String>("iteration_id"),
             phantom: std::marker::PhantomData,
         }
     }
 }
 
-impl<'ctx> LoopIterationIterationIdUnique<'ctx> {
+impl<'ctx> LoopIterationsIterationIdUnique<'ctx> {
+    /// Find the subscribed row whose `iteration_id` column value is equal to `col_val`,
+    /// if such a row is present in the client cache.
     pub fn find(&self, col_val: &String) -> Option<LoopIteration> {
         self.imp.find(col_val)
     }
@@ -109,6 +131,7 @@ pub(super) fn register_table(client_cache: &mut __sdk::ClientCache<super::Remote
     _table.add_unique_constraint::<String>("iteration_id", |row| &row.iteration_id);
 }
 
+#[doc(hidden)]
 pub(super) fn parse_table_update(
     raw_updates: __ws::v2::TableUpdate,
 ) -> __sdk::Result<__sdk::TableUpdate<LoopIteration>> {
@@ -117,4 +140,20 @@ pub(super) fn parse_table_update(
             .with_cause(e)
             .into()
     })
+}
+
+#[allow(non_camel_case_types)]
+/// Extension trait for query builder access to the table `LoopIteration`.
+///
+/// Implemented for [`__sdk::QueryTableAccessor`].
+pub trait loop_iterationsQueryTableAccess {
+    #[allow(non_snake_case)]
+    /// Get a query builder for the table `LoopIteration`.
+    fn loop_iterations(&self) -> __sdk::__query_builder::Table<LoopIteration>;
+}
+
+impl loop_iterationsQueryTableAccess for __sdk::QueryTableAccessor {
+    fn loop_iterations(&self) -> __sdk::__query_builder::Table<LoopIteration> {
+        __sdk::__query_builder::Table::new("loop_iterations")
+    }
 }

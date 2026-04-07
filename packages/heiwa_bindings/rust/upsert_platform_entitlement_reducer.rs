@@ -31,7 +31,16 @@ impl __sdk::InModule for UpsertPlatformEntitlementArgs {
 }
 
 #[allow(non_camel_case_types)]
+/// Extension trait for access to the reducer `upsert_platform_entitlement`.
+///
+/// Implemented for [`super::RemoteReducers`].
 pub trait upsert_platform_entitlement {
+    /// Request that the remote module invoke the reducer `upsert_platform_entitlement` to run as soon as possible.
+    ///
+    /// This method returns immediately, and errors only if we are unable to send the request.
+    /// The reducer will run asynchronously in the future,
+    ///  and this method provides no way to listen for its completion status.
+    /// /// Use [`upsert_platform_entitlement:upsert_platform_entitlement_then`] to run a callback after the reducer completes.
     fn upsert_platform_entitlement(
         &self,
         user_id: String,
@@ -50,6 +59,12 @@ pub trait upsert_platform_entitlement {
         )
     }
 
+    /// Request that the remote module invoke the reducer `upsert_platform_entitlement` to run as soon as possible,
+    /// registering `callback` to run when we are notified that the reducer completed.
+    ///
+    /// This method returns immediately, and errors only if we are unable to send the request.
+    /// The reducer will run asynchronously in the future,
+    ///  and its status can be observed with the `callback`.
     fn upsert_platform_entitlement_then(
         &self,
         user_id: String,

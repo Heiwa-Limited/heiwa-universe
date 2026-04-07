@@ -27,7 +27,16 @@ impl __sdk::InModule for CompleteLoopSessionArgs {
 }
 
 #[allow(non_camel_case_types)]
+/// Extension trait for access to the reducer `complete_loop_session`.
+///
+/// Implemented for [`super::RemoteReducers`].
 pub trait complete_loop_session {
+    /// Request that the remote module invoke the reducer `complete_loop_session` to run as soon as possible.
+    ///
+    /// This method returns immediately, and errors only if we are unable to send the request.
+    /// The reducer will run asynchronously in the future,
+    ///  and this method provides no way to listen for its completion status.
+    /// /// Use [`complete_loop_session:complete_loop_session_then`] to run a callback after the reducer completes.
     fn complete_loop_session(
         &self,
         loop_id: String,
@@ -37,6 +46,12 @@ pub trait complete_loop_session {
         self.complete_loop_session_then(loop_id, status, termination_reason, |_, _| {})
     }
 
+    /// Request that the remote module invoke the reducer `complete_loop_session` to run as soon as possible,
+    /// registering `callback` to run when we are notified that the reducer completed.
+    ///
+    /// This method returns immediately, and errors only if we are unable to send the request.
+    /// The reducer will run asynchronously in the future,
+    ///  and its status can be observed with the `callback`.
     fn complete_loop_session_then(
         &self,
         loop_id: String,

@@ -1,4 +1,197 @@
 use serde::{Deserialize, Serialize};
+use std::fmt;
+use std::str::FromStr;
+
+// ---------------------------------------------------------------------------
+// Doctrine enums — canonical string representations for STDB fields
+// ---------------------------------------------------------------------------
+
+/// Generates a doctrine enum with Display, FromStr, Serialize, Deserialize.
+/// STDB stores these as strings; Rust code uses typed enums.
+macro_rules! doctrine_enum {
+    (
+        $(#[$meta:meta])*
+        $vis:vis enum $name:ident {
+            $( $(#[$vmeta:meta])* $variant:ident => $str:literal ),+ $(,)?
+        }
+    ) => {
+        $(#[$meta])*
+        #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+        $vis enum $name {
+            $( $(#[$vmeta])* $variant ),+
+        }
+
+        impl fmt::Display for $name {
+            fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+                let s = match self {
+                    $( $name::$variant => $str ),+
+                };
+                f.write_str(s)
+            }
+        }
+
+        impl FromStr for $name {
+            type Err = String;
+            fn from_str(s: &str) -> Result<Self, Self::Err> {
+                match s {
+                    $( $str => Ok($name::$variant), )+
+                    _ => Err(format!("invalid {}: {}", stringify!($name), s)),
+                }
+            }
+        }
+
+        impl $name {
+            pub const ALL: &'static [Self] = &[$( $name::$variant ),+];
+
+            pub fn as_str(&self) -> &'static str {
+                match self {
+                    $( $name::$variant => $str ),+
+                }
+            }
+        }
+    };
+}
+
+doctrine_enum! {
+    pub enum BeliefStatus {
+        Candidate => "candidate",
+        Supported => "supported",
+        Durable => "durable",
+        Contested => "contested",
+        Stale => "stale",
+        Retired => "retired",
+        False => "false",
+    }
+}
+
+doctrine_enum! {
+    pub enum PageStatus {
+        Draft => "draft",
+        Active => "active",
+        Stale => "stale",
+        Superseded => "superseded",
+        Retired => "retired",
+    }
+}
+
+doctrine_enum! {
+    pub enum MissionTaskClass {
+        Compile => "compile",
+        Consolidate => "consolidate",
+        Act => "act",
+    }
+}
+
+doctrine_enum! {
+    pub enum MissionBudgetClass {
+        Cheap => "cheap",
+        Standard => "standard",
+        Premium => "premium",
+    }
+}
+
+doctrine_enum! {
+    pub enum ApprovalState {
+        NoneNeeded => "none_needed",
+        Pending => "pending",
+        Granted => "granted",
+        Denied => "denied",
+    }
+}
+
+doctrine_enum! {
+    pub enum TreasuryHealthState {
+        Healthy => "healthy",
+        Guarded => "guarded",
+        Degraded => "degraded",
+        Cooldown => "cooldown",
+        Exhausted => "exhausted",
+    }
+}
+
+doctrine_enum! {
+    pub enum TreasuryScope {
+        User => "user",
+        Org => "org",
+        Device => "device",
+        ProviderAccount => "provider_account",
+    }
+}
+
+doctrine_enum! {
+    pub enum BudgetWindowKind {
+        Hour => "hour",
+        Day => "day",
+        Month => "month",
+        Rolling => "rolling",
+    }
+}
+
+doctrine_enum! {
+    pub enum ReservePolicy {
+        Strict => "strict",
+        Soft => "soft",
+        None => "none",
+    }
+}
+
+doctrine_enum! {
+    pub enum ReservationStatus {
+        Held => "held",
+        Consumed => "consumed",
+        Released => "released",
+        Expired => "expired",
+    }
+}
+
+doctrine_enum! {
+    pub enum TreasuryDecision {
+        Allow => "allow",
+        AllowDowngraded => "allow_downgraded",
+        Defer => "defer",
+        Deny => "deny",
+        RequireApproval => "require_approval",
+    }
+}
+
+doctrine_enum! {
+    pub enum ContradictionResolution {
+        Open => "open",
+        ResolvedPrimaryWins => "resolved_primary_wins",
+        ResolvedChallengerWins => "resolved_challenger_wins",
+        BothRetired => "both_retired",
+        Merged => "merged",
+    }
+}
+
+doctrine_enum! {
+    pub enum EvidenceLinkType {
+        Supports => "supports",
+        Contradicts => "contradicts",
+        DerivedFrom => "derived_from",
+        VerifiedBy => "verified_by",
+    }
+}
+
+doctrine_enum! {
+    pub enum SourceKind {
+        Web => "web",
+        Pdf => "pdf",
+        RepoFile => "repo_file",
+        Conversation => "conversation",
+        Api => "api",
+        Note => "note",
+        Dataset => "dataset",
+    }
+}
+
+doctrine_enum! {
+    pub enum ParseStatus {
+        Pending => "pending",
+        Parsed => "parsed",
+        Failed => "failed",
+    }
+}
 
 // ---------------------------------------------------------------------------
 // Cockpit event contract — controller <-> TUI communication

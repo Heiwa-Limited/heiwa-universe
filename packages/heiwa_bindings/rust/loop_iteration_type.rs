@@ -20,3 +20,53 @@ pub struct LoopIteration {
 impl __sdk::InModule for LoopIteration {
     type Module = super::RemoteModule;
 }
+
+/// Column accessor struct for the table `LoopIteration`.
+///
+/// Provides typed access to columns for query building.
+pub struct LoopIterationCols {
+    pub iteration_id: __sdk::__query_builder::Col<LoopIteration, String>,
+    pub loop_id: __sdk::__query_builder::Col<LoopIteration, String>,
+    pub turn_number: __sdk::__query_builder::Col<LoopIteration, u32>,
+    pub input_summary: __sdk::__query_builder::Col<LoopIteration, String>,
+    pub output_summary: __sdk::__query_builder::Col<LoopIteration, String>,
+    pub score: __sdk::__query_builder::Col<LoopIteration, f64>,
+    pub run_id: __sdk::__query_builder::Col<LoopIteration, Option<String>>,
+    pub created_at: __sdk::__query_builder::Col<LoopIteration, String>,
+}
+
+impl __sdk::__query_builder::HasCols for LoopIteration {
+    type Cols = LoopIterationCols;
+    fn cols(table_name: &'static str) -> Self::Cols {
+        LoopIterationCols {
+            iteration_id: __sdk::__query_builder::Col::new(table_name, "iteration_id"),
+            loop_id: __sdk::__query_builder::Col::new(table_name, "loop_id"),
+            turn_number: __sdk::__query_builder::Col::new(table_name, "turn_number"),
+            input_summary: __sdk::__query_builder::Col::new(table_name, "input_summary"),
+            output_summary: __sdk::__query_builder::Col::new(table_name, "output_summary"),
+            score: __sdk::__query_builder::Col::new(table_name, "score"),
+            run_id: __sdk::__query_builder::Col::new(table_name, "run_id"),
+            created_at: __sdk::__query_builder::Col::new(table_name, "created_at"),
+        }
+    }
+}
+
+/// Indexed column accessor struct for the table `LoopIteration`.
+///
+/// Provides typed access to indexed columns for query building.
+pub struct LoopIterationIxCols {
+    pub iteration_id: __sdk::__query_builder::IxCol<LoopIteration, String>,
+    pub loop_id: __sdk::__query_builder::IxCol<LoopIteration, String>,
+}
+
+impl __sdk::__query_builder::HasIxCols for LoopIteration {
+    type IxCols = LoopIterationIxCols;
+    fn ix_cols(table_name: &'static str) -> Self::IxCols {
+        LoopIterationIxCols {
+            iteration_id: __sdk::__query_builder::IxCol::new(table_name, "iteration_id"),
+            loop_id: __sdk::__query_builder::IxCol::new(table_name, "loop_id"),
+        }
+    }
+}
+
+impl __sdk::__query_builder::CanBeLookupTable for LoopIteration {}

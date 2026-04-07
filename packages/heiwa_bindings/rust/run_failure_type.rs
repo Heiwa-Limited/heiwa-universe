@@ -22,3 +22,63 @@ pub struct RunFailure {
 impl __sdk::InModule for RunFailure {
     type Module = super::RemoteModule;
 }
+
+/// Column accessor struct for the table `RunFailure`.
+///
+/// Provides typed access to columns for query building.
+pub struct RunFailureCols {
+    pub failure_id: __sdk::__query_builder::Col<RunFailure, String>,
+    pub run_id: __sdk::__query_builder::Col<RunFailure, String>,
+    pub lease_id: __sdk::__query_builder::Col<RunFailure, String>,
+    pub session_id: __sdk::__query_builder::Col<RunFailure, String>,
+    pub failure_code: __sdk::__query_builder::Col<RunFailure, String>,
+    pub failure_message: __sdk::__query_builder::Col<RunFailure, String>,
+    pub failure_type: __sdk::__query_builder::Col<RunFailure, String>,
+    pub retryable: __sdk::__query_builder::Col<RunFailure, bool>,
+    pub details_json: __sdk::__query_builder::Col<RunFailure, String>,
+    pub created_at: __sdk::__query_builder::Col<RunFailure, String>,
+}
+
+impl __sdk::__query_builder::HasCols for RunFailure {
+    type Cols = RunFailureCols;
+    fn cols(table_name: &'static str) -> Self::Cols {
+        RunFailureCols {
+            failure_id: __sdk::__query_builder::Col::new(table_name, "failure_id"),
+            run_id: __sdk::__query_builder::Col::new(table_name, "run_id"),
+            lease_id: __sdk::__query_builder::Col::new(table_name, "lease_id"),
+            session_id: __sdk::__query_builder::Col::new(table_name, "session_id"),
+            failure_code: __sdk::__query_builder::Col::new(table_name, "failure_code"),
+            failure_message: __sdk::__query_builder::Col::new(table_name, "failure_message"),
+            failure_type: __sdk::__query_builder::Col::new(table_name, "failure_type"),
+            retryable: __sdk::__query_builder::Col::new(table_name, "retryable"),
+            details_json: __sdk::__query_builder::Col::new(table_name, "details_json"),
+            created_at: __sdk::__query_builder::Col::new(table_name, "created_at"),
+        }
+    }
+}
+
+/// Indexed column accessor struct for the table `RunFailure`.
+///
+/// Provides typed access to indexed columns for query building.
+pub struct RunFailureIxCols {
+    pub failure_code: __sdk::__query_builder::IxCol<RunFailure, String>,
+    pub failure_id: __sdk::__query_builder::IxCol<RunFailure, String>,
+    pub lease_id: __sdk::__query_builder::IxCol<RunFailure, String>,
+    pub run_id: __sdk::__query_builder::IxCol<RunFailure, String>,
+    pub session_id: __sdk::__query_builder::IxCol<RunFailure, String>,
+}
+
+impl __sdk::__query_builder::HasIxCols for RunFailure {
+    type IxCols = RunFailureIxCols;
+    fn ix_cols(table_name: &'static str) -> Self::IxCols {
+        RunFailureIxCols {
+            failure_code: __sdk::__query_builder::IxCol::new(table_name, "failure_code"),
+            failure_id: __sdk::__query_builder::IxCol::new(table_name, "failure_id"),
+            lease_id: __sdk::__query_builder::IxCol::new(table_name, "lease_id"),
+            run_id: __sdk::__query_builder::IxCol::new(table_name, "run_id"),
+            session_id: __sdk::__query_builder::IxCol::new(table_name, "session_id"),
+        }
+    }
+}
+
+impl __sdk::__query_builder::CanBeLookupTable for RunFailure {}

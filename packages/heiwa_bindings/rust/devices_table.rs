@@ -5,14 +5,26 @@
 use super::device_type::Device;
 use spacetimedb_sdk::__codegen::{self as __sdk, __lib, __sats, __ws};
 
+/// Table handle for the table `devices`.
+///
+/// Obtain a handle from the [`DevicesTableAccess::devices`] method on [`super::RemoteTables`],
+/// like `ctx.db.devices()`.
+///
+/// Users are encouraged not to explicitly reference this type,
+/// but to directly chain method calls,
+/// like `ctx.db.devices().on_insert(...)`.
 pub struct DevicesTableHandle<'ctx> {
     imp: __sdk::TableHandle<Device>,
     ctx: std::marker::PhantomData<&'ctx super::RemoteTables>,
 }
 
 #[allow(non_camel_case_types)]
+/// Extension trait for access to the table `devices`.
+///
+/// Implemented for [`super::RemoteTables`].
 pub trait DevicesTableAccess {
     #[allow(non_snake_case)]
+    /// Obtain a [`DevicesTableHandle`], which mediates access to the table `devices`.
     fn devices(&self) -> DevicesTableHandle<'_>;
 }
 
@@ -25,8 +37,8 @@ impl DevicesTableAccess for super::RemoteTables {
     }
 }
 
-pub struct DeviceInsertCallbackId(__sdk::CallbackId);
-pub struct DeviceDeleteCallbackId(__sdk::CallbackId);
+pub struct DevicesInsertCallbackId(__sdk::CallbackId);
+pub struct DevicesDeleteCallbackId(__sdk::CallbackId);
 
 impl<'ctx> __sdk::Table for DevicesTableHandle<'ctx> {
     type Row = Device;
@@ -39,65 +51,75 @@ impl<'ctx> __sdk::Table for DevicesTableHandle<'ctx> {
         self.imp.iter()
     }
 
-    type InsertCallbackId = DeviceInsertCallbackId;
+    type InsertCallbackId = DevicesInsertCallbackId;
 
     fn on_insert(
         &self,
         callback: impl FnMut(&Self::EventContext, &Self::Row) + Send + 'static,
-    ) -> DeviceInsertCallbackId {
-        DeviceInsertCallbackId(self.imp.on_insert(Box::new(callback)))
+    ) -> DevicesInsertCallbackId {
+        DevicesInsertCallbackId(self.imp.on_insert(Box::new(callback)))
     }
 
-    fn remove_on_insert(&self, callback: DeviceInsertCallbackId) {
+    fn remove_on_insert(&self, callback: DevicesInsertCallbackId) {
         self.imp.remove_on_insert(callback.0)
     }
 
-    type DeleteCallbackId = DeviceDeleteCallbackId;
+    type DeleteCallbackId = DevicesDeleteCallbackId;
 
     fn on_delete(
         &self,
         callback: impl FnMut(&Self::EventContext, &Self::Row) + Send + 'static,
-    ) -> DeviceDeleteCallbackId {
-        DeviceDeleteCallbackId(self.imp.on_delete(Box::new(callback)))
+    ) -> DevicesDeleteCallbackId {
+        DevicesDeleteCallbackId(self.imp.on_delete(Box::new(callback)))
     }
 
-    fn remove_on_delete(&self, callback: DeviceDeleteCallbackId) {
+    fn remove_on_delete(&self, callback: DevicesDeleteCallbackId) {
         self.imp.remove_on_delete(callback.0)
     }
 }
 
-pub struct DeviceUpdateCallbackId(__sdk::CallbackId);
+pub struct DevicesUpdateCallbackId(__sdk::CallbackId);
 
 impl<'ctx> __sdk::TableWithPrimaryKey for DevicesTableHandle<'ctx> {
-    type UpdateCallbackId = DeviceUpdateCallbackId;
+    type UpdateCallbackId = DevicesUpdateCallbackId;
 
     fn on_update(
         &self,
         callback: impl FnMut(&Self::EventContext, &Self::Row, &Self::Row) + Send + 'static,
-    ) -> DeviceUpdateCallbackId {
-        DeviceUpdateCallbackId(self.imp.on_update(Box::new(callback)))
+    ) -> DevicesUpdateCallbackId {
+        DevicesUpdateCallbackId(self.imp.on_update(Box::new(callback)))
     }
 
-    fn remove_on_update(&self, callback: DeviceUpdateCallbackId) {
+    fn remove_on_update(&self, callback: DevicesUpdateCallbackId) {
         self.imp.remove_on_update(callback.0)
     }
 }
 
-pub struct DeviceDeviceIdUnique<'ctx> {
+/// Access to the `device_id` unique index on the table `devices`,
+/// which allows point queries on the field of the same name
+/// via the [`DevicesDeviceIdUnique::find`] method.
+///
+/// Users are encouraged not to explicitly reference this type,
+/// but to directly chain method calls,
+/// like `ctx.db.devices().device_id().find(...)`.
+pub struct DevicesDeviceIdUnique<'ctx> {
     imp: __sdk::UniqueConstraintHandle<Device, String>,
     phantom: std::marker::PhantomData<&'ctx super::RemoteTables>,
 }
 
 impl<'ctx> DevicesTableHandle<'ctx> {
-    pub fn device_id(&self) -> DeviceDeviceIdUnique<'ctx> {
-        DeviceDeviceIdUnique {
+    /// Get a handle on the `device_id` unique index on the table `devices`.
+    pub fn device_id(&self) -> DevicesDeviceIdUnique<'ctx> {
+        DevicesDeviceIdUnique {
             imp: self.imp.get_unique_constraint::<String>("device_id"),
             phantom: std::marker::PhantomData,
         }
     }
 }
 
-impl<'ctx> DeviceDeviceIdUnique<'ctx> {
+impl<'ctx> DevicesDeviceIdUnique<'ctx> {
+    /// Find the subscribed row whose `device_id` column value is equal to `col_val`,
+    /// if such a row is present in the client cache.
     pub fn find(&self, col_val: &String) -> Option<Device> {
         self.imp.find(col_val)
     }
@@ -109,6 +131,7 @@ pub(super) fn register_table(client_cache: &mut __sdk::ClientCache<super::Remote
     _table.add_unique_constraint::<String>("device_id", |row| &row.device_id);
 }
 
+#[doc(hidden)]
 pub(super) fn parse_table_update(
     raw_updates: __ws::v2::TableUpdate,
 ) -> __sdk::Result<__sdk::TableUpdate<Device>> {
@@ -117,4 +140,20 @@ pub(super) fn parse_table_update(
             .with_cause(e)
             .into()
     })
+}
+
+#[allow(non_camel_case_types)]
+/// Extension trait for query builder access to the table `Device`.
+///
+/// Implemented for [`__sdk::QueryTableAccessor`].
+pub trait devicesQueryTableAccess {
+    #[allow(non_snake_case)]
+    /// Get a query builder for the table `Device`.
+    fn devices(&self) -> __sdk::__query_builder::Table<Device>;
+}
+
+impl devicesQueryTableAccess for __sdk::QueryTableAccessor {
+    fn devices(&self) -> __sdk::__query_builder::Table<Device> {
+        __sdk::__query_builder::Table::new("devices")
+    }
 }

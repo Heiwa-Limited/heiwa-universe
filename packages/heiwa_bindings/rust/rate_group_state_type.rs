@@ -19,3 +19,49 @@ pub struct RateGroupState {
 impl __sdk::InModule for RateGroupState {
     type Module = super::RemoteModule;
 }
+
+/// Column accessor struct for the table `RateGroupState`.
+///
+/// Provides typed access to columns for query building.
+pub struct RateGroupStateCols {
+    pub group_id: __sdk::__query_builder::Col<RateGroupState, String>,
+    pub tier: __sdk::__query_builder::Col<RateGroupState, String>,
+    pub limit_rpm: __sdk::__query_builder::Col<RateGroupState, i64>,
+    pub limit_tpm: __sdk::__query_builder::Col<RateGroupState, i64>,
+    pub current_rpm: __sdk::__query_builder::Col<RateGroupState, i64>,
+    pub current_tpm: __sdk::__query_builder::Col<RateGroupState, i64>,
+    pub reset_at: __sdk::__query_builder::Col<RateGroupState, String>,
+}
+
+impl __sdk::__query_builder::HasCols for RateGroupState {
+    type Cols = RateGroupStateCols;
+    fn cols(table_name: &'static str) -> Self::Cols {
+        RateGroupStateCols {
+            group_id: __sdk::__query_builder::Col::new(table_name, "group_id"),
+            tier: __sdk::__query_builder::Col::new(table_name, "tier"),
+            limit_rpm: __sdk::__query_builder::Col::new(table_name, "limit_rpm"),
+            limit_tpm: __sdk::__query_builder::Col::new(table_name, "limit_tpm"),
+            current_rpm: __sdk::__query_builder::Col::new(table_name, "current_rpm"),
+            current_tpm: __sdk::__query_builder::Col::new(table_name, "current_tpm"),
+            reset_at: __sdk::__query_builder::Col::new(table_name, "reset_at"),
+        }
+    }
+}
+
+/// Indexed column accessor struct for the table `RateGroupState`.
+///
+/// Provides typed access to indexed columns for query building.
+pub struct RateGroupStateIxCols {
+    pub group_id: __sdk::__query_builder::IxCol<RateGroupState, String>,
+}
+
+impl __sdk::__query_builder::HasIxCols for RateGroupState {
+    type IxCols = RateGroupStateIxCols;
+    fn ix_cols(table_name: &'static str) -> Self::IxCols {
+        RateGroupStateIxCols {
+            group_id: __sdk::__query_builder::IxCol::new(table_name, "group_id"),
+        }
+    }
+}
+
+impl __sdk::__query_builder::CanBeLookupTable for RateGroupState {}
