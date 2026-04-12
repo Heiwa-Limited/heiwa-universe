@@ -13,8 +13,17 @@ use heiwa_provider::providers::claude_code::ClaudeCodeCliAdapter;
 use heiwa_repl::{parse_input, render_footer, ReplCommand, TelemetryState};
 use std::io::{self, Write, IsTerminal};
 
+fn canonical_surface_id(provider: &str) -> &str {
+    match provider {
+        "claude-code" => "claude",
+        "google-gemini-cli" => "gemini",
+        "google-antigravity" => "antigravity",
+        _ => provider,
+    }
+}
+
 fn provider_supports_loop_adapter(provider: &str) -> bool {
-    matches!(provider, "claude" | "ollama")
+    matches!(canonical_surface_id(provider), "claude" | "ollama")
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -232,9 +241,10 @@ async fn main() -> Result<()> {
                         if !registry.accounts.is_empty() {
                             println!("Registered Accounts:");
                             for a in &registry.accounts {
+                                let surface_provider = canonical_surface_id(&a.provider);
                                 println!(
                                     "  {:<20} {:<12} ({}) [{:?}] — {} models",
-                                    a.account_id, a.provider, a.credential.kind_label(),
+                                    a.account_id, surface_provider, a.credential.kind_label(),
                                     a.status, a.models.len(),
                                 );
                             }
@@ -327,11 +337,12 @@ async fn main() -> Result<()> {
                 println!("Provider Accounts:");
                 for account in &registry.accounts {
                     let model_count = account.models.len();
+                    let surface_provider = canonical_surface_id(&account.provider);
                     let loop_cap = if provider_supports_loop_adapter(&account.provider) { " [loop]" } else { "" };
                     println!(
                         "  {:<20} {} ({}) [{:?}] — {} model{}{}",
                         account.account_id,
-                        account.provider,
+                        surface_provider,
                         account.credential.kind_label(),
                         account.status,
                         model_count,
@@ -346,7 +357,7 @@ async fn main() -> Result<()> {
             let mut unregistered = Vec::new();
             for p in cli_providers {
                 if let Some(status) = heiwa_provider::get_auth_status(p) {
-                    let in_registry = registry.accounts.iter().any(|a| a.provider == p);
+                    let in_registry = registry.accounts.iter().any(|a| canonical_surface_id(&a.provider) == p);
                     if !in_registry {
                         let loop_cap = if provider_supports_loop_adapter(p) { " [loop]" } else { "" };
                         unregistered.push(format!(
@@ -382,7 +393,12 @@ async fn main() -> Result<()> {
                         current_group = m.rate_group.clone();
                         let account = registry.get(&m.account_id);
                         let kind = account.map(|a| a.credential.kind_label()).unwrap_or("unknown");
-                        println!("\n  {} ({}) [rate: {}]", m.provider, kind, m.rate_group);
+                        println!(
+                            "\n  {} ({}) [rate: {}]",
+                            canonical_surface_id(&m.provider),
+                            kind,
+                            m.rate_group
+                        );
                     }
                     let truth_marker = match m.inventory_truth {
                         heiwa_provider::InventoryTruth::Verified => "",
@@ -561,10 +577,11 @@ async fn register_current_device(stdb_client: &heiwa_stdb::StdbClient) -> Result
     let mut registry = heiwa_provider::AccountRegistry::load();
     heiwa_provider::detect::auto_discover(&mut registry).await;
     for account in &registry.accounts {
+        let surface_provider = canonical_surface_id(&account.provider);
         let models_json = serde_json::to_string(&account.models).unwrap_or_else(|_| "[]".to_string());
         stdb_client.sync_provider_status(
             &account.account_id,
-            &account.provider,
+            surface_provider,
             &device_id,
             account.credential.kind_label(),
             &account.account_id, // local_handle_ref
@@ -573,7 +590,7 @@ async fn register_current_device(stdb_client: &heiwa_stdb::StdbClient) -> Result
             None,
             &models_json,
         )?;
-        println!("  Synced provider {} status: {:?}", account.provider, account.status);
+        println!("  Synced provider {} status: {:?}", surface_provider, account.status);
     }
 
     if stdb_client.is_connected() {
@@ -590,6 +607,7 @@ fn get_live_model_tiers(registry: &heiwa_provider::AccountRegistry) -> Vec<heiwa
         .into_iter()
         .filter(|m| provider_supports_loop_adapter(&m.provider))
         .map(|m| {
+            let surface_provider = canonical_surface_id(&m.provider).to_string();
             let mut strengths = vec!["chat"];
             if m.supports_tools { strengths.push("tool_use"); }
             if m.supports_vision { strengths.push("vision"); }
@@ -599,7 +617,7 @@ fn get_live_model_tiers(registry: &heiwa_provider::AccountRegistry) -> Vec<heiwa
                 id: 0,
                 model_id: m.model_id.clone(),
                 provider_model_id: m.provider_model_id.clone(),
-                provider: m.provider.clone(),
+                provider: surface_provider,
                 rate_group: m.rate_group.clone(),
                 capability_class: m.capability_class,
                 effort_knob: "default".to_string(),
@@ -1240,7 +1258,7 @@ const SUPPORTED_ADAPTER_PROVIDERS: &[&str] = &["ollama", "claude"];
 
 /// Returns true if the provider has a working adapter in this binary.
 fn has_adapter(provider: &str) -> bool {
-    SUPPORTED_ADAPTER_PROVIDERS.contains(&provider)
+    SUPPORTED_ADAPTER_PROVIDERS.contains(&canonical_surface_id(provider))
 }
 
 /// Route a task through DREX, returning the adapter + metadata needed to stream.
@@ -1357,7 +1375,7 @@ fn route_task(
 
 /// Resolve a provider adapter by name.
 fn resolve_adapter(provider: &str, model_id: &str) -> Result<Arc<dyn ProviderAdapter>, String> {
-    match provider {
+    match canonical_surface_id(provider) {
         "ollama" => Ok(Arc::new(OllamaCliAdapter::with_model(model_id))),
         "claude" => Ok(Arc::new(ClaudeCodeCliAdapter::new())),
         _ => Err(format!("No adapter for provider '{}' yet.", provider)),
@@ -1499,11 +1517,14 @@ fn runtime_for_route_preference(route_preference: RoutePreference) -> &'static s
 }
 
 fn is_local_provider(provider: &str) -> bool {
-    matches!(provider, "ollama" | "local" | "vllm" | "litellm")
+    matches!(canonical_surface_id(provider), "ollama" | "local" | "vllm" | "litellm")
 }
 
 #[cfg(test)]
 mod tests {
+    use heiwa_provider::{
+        AccountRegistry, AccountStatus, Credential, DetectedModel, InventoryTruth, ProviderAccount,
+    };
     use heiwa_protocol::{parse_turn_intent, Intent};
 
     #[test]
@@ -1568,5 +1589,47 @@ mod tests {
         assert!(super::has_adapter("claude"));
         assert!(!super::has_adapter("anthropic"));
         assert!(!super::has_adapter("openai"));
+    }
+
+    #[test]
+    fn provider_aliases_map_to_canonical_surface_ids() {
+        assert_eq!(super::canonical_surface_id("claude-code"), "claude");
+        assert_eq!(super::canonical_surface_id("google-gemini-cli"), "gemini");
+        assert_eq!(super::canonical_surface_id("google-antigravity"), "antigravity");
+        assert_eq!(super::canonical_surface_id("codex"), "codex");
+    }
+
+    #[test]
+    fn live_model_tiers_canonicalize_cli_wrapped_provider_ids() {
+        let registry = AccountRegistry {
+            accounts: vec![ProviderAccount {
+                account_id: "anthropic-cli".to_string(),
+                provider: "claude-code".to_string(),
+                credential: Credential::OauthCli {
+                    binary: "claude".to_string(),
+                },
+                rate_group: "claude_code".to_string(),
+                status: AccountStatus::Connected,
+                models: vec![DetectedModel {
+                    model_id: "claude/sonnet-4-6".to_string(),
+                    provider_model_id: "claude-sonnet-4-6".to_string(),
+                    provider: "claude-code".to_string(),
+                    account_id: "anthropic-cli".to_string(),
+                    rate_group: "claude_code".to_string(),
+                    capability_class: 4,
+                    context_window: 200_000,
+                    supports_streaming: true,
+                    supports_tools: true,
+                    supports_vision: true,
+                    cost_per_1k_input: 0.003,
+                    cost_per_1k_output: 0.015,
+                    inventory_truth: InventoryTruth::Inferred,
+                }],
+            }],
+        };
+
+        let tiers = super::get_live_model_tiers(&registry);
+        assert_eq!(tiers.len(), 1);
+        assert_eq!(tiers[0].provider, "claude");
     }
 }

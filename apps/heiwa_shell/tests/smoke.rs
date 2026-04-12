@@ -85,6 +85,91 @@ fn run_heiwa_with_temp_home(args: &[&str]) -> (PathBuf, std::process::Output) {
 }
 
 #[test]
+fn test_providers_canonicalize_wrapped_cli_aliases_without_duplicate_cli_discovery() {
+    let home = create_temp_home();
+    let providers_dir = home.join(".heiwa/providers");
+    fs::create_dir_all(&providers_dir).expect("create providers dir");
+    fs::write(
+        providers_dir.join("registry.json"),
+        serde_json::json!({
+            "accounts": [
+                {
+                    "account_id": "anthropic-cli",
+                    "provider": "claude-code",
+                    "credential": { "kind": "oauth_cli", "binary": "claude" },
+                    "rate_group": "anthropic",
+                    "status": "connected",
+                    "models": []
+                },
+                {
+                    "account_id": "openai-cli",
+                    "provider": "codex",
+                    "credential": { "kind": "oauth_cli", "binary": "codex" },
+                    "rate_group": "openai",
+                    "status": "connected",
+                    "models": []
+                },
+                {
+                    "account_id": "google-cli",
+                    "provider": "google-gemini-cli",
+                    "credential": { "kind": "oauth_cli", "binary": "gemini" },
+                    "rate_group": "google",
+                    "status": "connected",
+                    "models": []
+                },
+                {
+                    "account_id": "google-antigravity-cli",
+                    "provider": "google-antigravity",
+                    "credential": { "kind": "oauth_cli", "binary": "antigravity" },
+                    "rate_group": "google_bonus",
+                    "status": "connected",
+                    "models": []
+                },
+                {
+                    "account_id": "ollama-local",
+                    "provider": "ollama",
+                    "credential": { "kind": "local_runtime", "endpoint": "http://127.0.0.1:11434" },
+                    "rate_group": "local",
+                    "status": "connected",
+                    "models": []
+                }
+            ]
+        })
+        .to_string(),
+    )
+    .expect("write registry");
+
+    let output = run_heiwa_in_home(&home, &["providers"]);
+    assert!(output.status.success(), "providers should succeed");
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains(" claude (oauth_cli)"), "expected canonical claude surface: {stdout}");
+    assert!(stdout.contains(" gemini (oauth_cli)"), "expected canonical gemini surface: {stdout}");
+    assert!(
+        stdout.contains(" antigravity (oauth_cli)"),
+        "expected canonical antigravity surface: {stdout}"
+    );
+    assert!(
+        !stdout.contains(" claude-code (oauth_cli)"),
+        "raw claude alias leaked into provider column: {stdout}"
+    );
+    assert!(
+        !stdout.contains(" google-gemini-cli (oauth_cli)"),
+        "raw gemini alias leaked into provider column: {stdout}"
+    );
+    assert!(
+        !stdout.contains(" google-antigravity (oauth_cli)"),
+        "raw antigravity alias leaked into provider column: {stdout}"
+    );
+    assert!(
+        !stdout.contains("CLI Discovery:"),
+        "registered wrapped providers should suppress duplicate CLI discovery: {stdout}"
+    );
+
+    let _ = fs::remove_dir_all(home);
+}
+
+#[test]
 fn test_shell_supports_model_and_provider_slash_commands() {
     let output = run_shell_script("/model\n/provider\nquit\n");
 
