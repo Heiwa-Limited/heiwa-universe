@@ -1,9 +1,6 @@
 pub mod ollama;
 
-use crate::registry::{
-    AccountRegistry, AccountStatus, ProviderAccount,
-    add_local_runtime_account,
-};
+use crate::registry::{add_local_runtime_account, AccountRegistry, AccountStatus, ProviderAccount};
 
 /// Auto-discover local providers and refresh model inventories for all
 /// connected accounts.
@@ -25,7 +22,11 @@ pub async fn auto_discover(registry: &mut AccountRegistry) -> Vec<String> {
     }
 
     // Probe all Ollama accounts
-    for account in registry.accounts.iter_mut().filter(|a| a.provider == "ollama") {
+    for account in registry
+        .accounts
+        .iter_mut()
+        .filter(|a| a.provider == "ollama")
+    {
         match ollama::detect_models(account).await {
             Ok(()) => {
                 changes.push(format!(
@@ -53,8 +54,9 @@ pub async fn auto_discover(registry: &mut AccountRegistry) -> Vec<String> {
 /// On success, updates the account's status to Connected and populates
 /// the model inventory.  On failure, sets status to Error.
 pub async fn verify_api_key(account: &mut ProviderAccount) -> anyhow::Result<()> {
-    let api_key = crate::registry::resolve_secret(&account.account_id)
-        .ok_or_else(|| anyhow::anyhow!("No API key found in Keychain for {}", account.account_id))?;
+    let api_key = crate::registry::resolve_secret(&account.account_id).ok_or_else(|| {
+        anyhow::anyhow!("No API key found in Keychain for {}", account.account_id)
+    })?;
 
     match account.provider.as_str() {
         "anthropic" => verify_anthropic(account, &api_key).await,
@@ -102,7 +104,10 @@ async fn verify_anthropic(account: &mut ProviderAccount, api_key: &str) -> anyho
     }
 }
 
-fn anthropic_known_models(account_id: &str, rate_group: &str) -> Vec<crate::registry::DetectedModel> {
+fn anthropic_known_models(
+    account_id: &str,
+    rate_group: &str,
+) -> Vec<crate::registry::DetectedModel> {
     use crate::registry::{DetectedModel, InventoryTruth};
     vec![
         DetectedModel {
@@ -116,6 +121,7 @@ fn anthropic_known_models(account_id: &str, rate_group: &str) -> Vec<crate::regi
             supports_streaming: true,
             supports_tools: true,
             supports_vision: true,
+            supports_audio: false,
             cost_per_1k_input: 0.015,
             cost_per_1k_output: 0.075,
             inventory_truth: InventoryTruth::Inferred,
@@ -131,6 +137,7 @@ fn anthropic_known_models(account_id: &str, rate_group: &str) -> Vec<crate::regi
             supports_streaming: true,
             supports_tools: true,
             supports_vision: true,
+            supports_audio: false,
             cost_per_1k_input: 0.003,
             cost_per_1k_output: 0.015,
             inventory_truth: InventoryTruth::Inferred,
@@ -146,6 +153,7 @@ fn anthropic_known_models(account_id: &str, rate_group: &str) -> Vec<crate::regi
             supports_streaming: true,
             supports_tools: true,
             supports_vision: true,
+            supports_audio: false,
             cost_per_1k_input: 0.0008,
             cost_per_1k_output: 0.004,
             inventory_truth: InventoryTruth::Inferred,
@@ -193,7 +201,10 @@ async fn verify_openai(account: &mut ProviderAccount, api_key: &str) -> anyhow::
                         context_window: openai_context_window(id),
                         supports_streaming: true,
                         supports_tools: true,
-                        supports_vision: id.contains("gpt-4") || id.contains("o3") || id.contains("o4"),
+                        supports_vision: id.contains("gpt-4")
+                            || id.contains("o3")
+                            || id.contains("o4"),
+                        supports_audio: false,
                         cost_per_1k_input: 0.002, // approximate default
                         cost_per_1k_output: 0.008,
                         inventory_truth: crate::registry::InventoryTruth::Verified,
@@ -210,8 +221,12 @@ async fn verify_openai(account: &mut ProviderAccount, api_key: &str) -> anyhow::
 }
 
 fn is_openai_chat_model(id: &str) -> bool {
-    id.starts_with("gpt-4") || id.starts_with("gpt-3.5") || id.starts_with("o1")
-        || id.starts_with("o3") || id.starts_with("o4") || id.starts_with("chatgpt")
+    id.starts_with("gpt-4")
+        || id.starts_with("gpt-3.5")
+        || id.starts_with("o1")
+        || id.starts_with("o3")
+        || id.starts_with("o4")
+        || id.starts_with("chatgpt")
 }
 
 fn openai_capability_class(id: &str) -> u8 {

@@ -7,7 +7,46 @@ This file replaces the old repo-root compatibility shim. When `README.md`, legac
 
 ## One-Sentence Truth
 
-Heiwa is a local-first AI runtime and enterprise platform: `heiwa` is the installed product surface, DREX is the internal execution kernel, SpacetimeDB is the backend adjudication and evidence plane, Rust proposes and executes, providers still own their own inference internals, and `heiwa` presents one coherent operator experience above them.
+Heiwa is a local-first AI operating layer for consumer and edge hardware: `heiwa` is the installed product surface, DREX is the internal execution kernel, SpacetimeDB is the backend adjudication and evidence plane, Rust proposes and executes, providers still own their own inference internals, and `heiwa` turns the user’s local models and connected providers into one coherent operator experience.
+
+## Optimization Doctrine
+
+Heiwa does not optimize for “most frontier model calls.” It optimizes for `quality + accuracy + efficiency`.
+
+That means:
+
+- local models are the default working tier
+- remote providers are escalation surfaces
+- provider-native tools are used when they add real leverage
+- raw memory and raw traces are kept when they improve future performance
+- every harness is expected to evolve as new model capabilities land
+
+Compression:
+
+> Smallest sufficient model, shortest sufficient context, richest sufficient evidence.
+
+## Working Context vs Harness Memory
+
+Model context windows are not Heiwa’s memory system. They are only the model’s current working context.
+
+Heiwa owns the broader memory and context system:
+
+- durable user-scoped memory
+- project-scoped retrieval
+- trace and artifact history
+- routing-time context selection
+
+Per task, Heiwa should:
+
+1. retrieve the smallest high-value slice from user and project context
+2. attach that slice to the chosen agent or provider session
+3. let the model spend its native context window on active work rather than repeated setup
+
+Compression:
+
+> Native context window = working memory.  
+> Heiwa memory = durable external memory.  
+> Harness job = decide what enters working memory, when, and why.
 
 ## What Heiwa Is
 

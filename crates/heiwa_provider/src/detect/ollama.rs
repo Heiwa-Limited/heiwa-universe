@@ -35,6 +35,20 @@ struct OllamaModelDetails {
     quantization_level: String,
 }
 
+#[derive(Debug, Default, Deserialize)]
+struct OllamaShowResponse {
+    #[serde(default)]
+    capabilities: Vec<String>,
+}
+
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+struct CapabilityFlags {
+    supports_streaming: bool,
+    supports_tools: bool,
+    supports_vision: bool,
+    supports_audio: bool,
+}
+
 // ---------------------------------------------------------------------------
 // Detection
 // ---------------------------------------------------------------------------
@@ -61,7 +75,11 @@ pub async fn detect_models(account: &mut ProviderAccount) -> anyhow::Result<()> 
         Err(e) => {
             account.status = AccountStatus::Disconnected;
             account.models.clear();
-            return Err(anyhow::anyhow!("Ollama not reachable at {}: {}", endpoint, e));
+            return Err(anyhow::anyhow!(
+                "Ollama not reachable at {}: {}",
+                endpoint,
+                e
+            ));
         }
     };
 
@@ -73,30 +91,33 @@ pub async fn detect_models(account: &mut ProviderAccount) -> anyhow::Result<()> 
 
     let tags: OllamaTagsResponse = resp.json().await?;
 
-    account.models = tags
-        .models
-        .into_iter()
-        .map(|m| {
-            let capability_class = infer_capability_class(&m.name, &m.details);
-            let context_window = infer_context_window(&m.name, &m.details);
+    let mut detected_models = Vec::with_capacity(tags.models.len());
+    for m in tags.models {
+        let capability_class = infer_capability_class(&m.name, &m.details);
+        let context_window = infer_context_window(&m.name, &m.details);
+        let capability_flags = match fetch_capability_flags(&client, &endpoint, &m.name).await {
+            Ok(flags) => flags,
+            Err(_) => infer_capability_flags_from_name(&m.name),
+        };
 
-            DetectedModel {
-                model_id: m.name.clone(),
-                provider_model_id: m.name,
-                provider: "ollama".to_string(),
-                account_id: account.account_id.clone(),
-                rate_group: "local".to_string(),
-                capability_class,
-                context_window,
-                supports_streaming: true,
-                supports_tools: false, // conservative — depends on model
-                supports_vision: false,
-                cost_per_1k_input: 0.0,
-                cost_per_1k_output: 0.0,
-                inventory_truth: InventoryTruth::Verified,
-            }
-        })
-        .collect();
+        detected_models.push(DetectedModel {
+            model_id: m.name.clone(),
+            provider_model_id: m.name,
+            provider: "ollama".to_string(),
+            account_id: account.account_id.clone(),
+            rate_group: "local".to_string(),
+            capability_class,
+            context_window,
+            supports_streaming: capability_flags.supports_streaming,
+            supports_tools: capability_flags.supports_tools,
+            supports_vision: capability_flags.supports_vision,
+            supports_audio: capability_flags.supports_audio,
+            cost_per_1k_input: 0.0,
+            cost_per_1k_output: 0.0,
+            inventory_truth: InventoryTruth::Verified,
+        });
+    }
+    account.models = detected_models;
 
     account.status = AccountStatus::Connected;
     Ok(())
@@ -165,6 +186,48 @@ fn parse_param_billions_from_name(name: &str) -> Option<f64> {
     None
 }
 
+async fn fetch_capability_flags(
+    client: &reqwest::Client,
+    endpoint: &str,
+    model_name: &str,
+) -> anyhow::Result<CapabilityFlags> {
+    let url = format!("{}/api/show", endpoint);
+    let resp = client
+        .post(&url)
+        .json(&serde_json::json!({ "model": model_name }))
+        .send()
+        .await?;
+
+    if !resp.status().is_success() {
+        anyhow::bail!("Ollama show returned HTTP {}", resp.status());
+    }
+
+    let show: OllamaShowResponse = resp.json().await?;
+    Ok(capability_flags_from_list(&show.capabilities))
+}
+
+fn capability_flags_from_list(capabilities: &[String]) -> CapabilityFlags {
+    let has = |needle: &str| capabilities.iter().any(|item| item == needle);
+    let supports_streaming =
+        has("completion") || has("thinking") || has("vision") || has("audio") || has("tools");
+    CapabilityFlags {
+        supports_streaming,
+        supports_tools: has("tools"),
+        supports_vision: has("vision"),
+        supports_audio: has("audio"),
+    }
+}
+
+fn infer_capability_flags_from_name(name: &str) -> CapabilityFlags {
+    let lowered = name.to_lowercase();
+    CapabilityFlags {
+        supports_streaming: !lowered.contains("embedding"),
+        supports_tools: false,
+        supports_vision: false,
+        supports_audio: false,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -180,8 +243,14 @@ mod tests {
     #[test]
     fn parse_param_billions_from_model_name() {
         assert_eq!(parse_param_billions_from_name("llama3.2:3b"), Some(3.0));
-        assert_eq!(parse_param_billions_from_name("qwen2.5-coder:1.5b"), Some(1.5));
-        assert_eq!(parse_param_billions_from_name("qwen2.5-coder:0.5b"), Some(0.5));
+        assert_eq!(
+            parse_param_billions_from_name("qwen2.5-coder:1.5b"),
+            Some(1.5)
+        );
+        assert_eq!(
+            parse_param_billions_from_name("qwen2.5-coder:0.5b"),
+            Some(0.5)
+        );
         assert_eq!(parse_param_billions_from_name("qwen3.5:4b"), Some(4.0));
     }
 
@@ -190,9 +259,50 @@ mod tests {
         let default_details = OllamaModelDetails::default();
         assert_eq!(infer_capability_class("qwen3.5:4b", &default_details), 2);
         assert_eq!(infer_capability_class("llama3.2:3b", &default_details), 2);
-        assert_eq!(infer_capability_class("qwen2.5-coder:0.5b", &default_details), 1);
+        assert_eq!(
+            infer_capability_class("qwen2.5-coder:0.5b", &default_details),
+            1
+        );
 
-        let big = OllamaModelDetails { parameter_size: "70B".to_string(), ..Default::default() };
+        let big = OllamaModelDetails {
+            parameter_size: "70B".to_string(),
+            ..Default::default()
+        };
         assert_eq!(infer_capability_class("llama3:70b", &big), 4);
+    }
+
+    #[test]
+    fn capability_flags_detect_embedding_only_models() {
+        let capabilities = vec!["embedding".to_string()];
+        let flags = capability_flags_from_list(&capabilities);
+        assert!(!flags.supports_streaming);
+        assert!(!flags.supports_tools);
+        assert!(!flags.supports_vision);
+        assert!(!flags.supports_audio);
+    }
+
+    #[test]
+    fn capability_flags_detect_multimodal_models() {
+        let capabilities = vec![
+            "completion".to_string(),
+            "vision".to_string(),
+            "audio".to_string(),
+            "tools".to_string(),
+            "thinking".to_string(),
+        ];
+        let flags = capability_flags_from_list(&capabilities);
+        assert!(flags.supports_streaming);
+        assert!(flags.supports_tools);
+        assert!(flags.supports_vision);
+        assert!(flags.supports_audio);
+    }
+
+    #[test]
+    fn fallback_capability_flags_disable_streaming_for_embedding_models() {
+        let flags = infer_capability_flags_from_name("qwen3-embedding:0.6b");
+        assert!(!flags.supports_streaming);
+        assert!(!flags.supports_tools);
+        assert!(!flags.supports_vision);
+        assert!(!flags.supports_audio);
     }
 }

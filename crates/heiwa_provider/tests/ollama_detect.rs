@@ -24,7 +24,10 @@ async fn detect_ollama_models_live() {
     match result {
         Ok(()) => {
             assert_eq!(account.status, AccountStatus::Connected);
-            assert!(!account.models.is_empty(), "should detect at least one model");
+            assert!(
+                !account.models.is_empty(),
+                "should detect at least one model"
+            );
             println!("Detected {} Ollama models:", account.models.len());
             for m in &account.models {
                 println!(
@@ -70,6 +73,7 @@ async fn detect_ollama_unreachable() {
             supports_streaming: true,
             supports_tools: false,
             supports_vision: false,
+            supports_audio: false,
             cost_per_1k_input: 0.0,
             cost_per_1k_output: 0.0,
             inventory_truth: InventoryTruth::Verified,
@@ -79,5 +83,8 @@ async fn detect_ollama_unreachable() {
     let result = heiwa_provider::detect::ollama::detect_models(&mut account).await;
     assert!(result.is_err());
     assert_eq!(account.status, AccountStatus::Disconnected);
-    assert!(account.models.is_empty(), "stale models should be cleared on failure");
+    assert!(
+        account.models.is_empty(),
+        "stale models should be cleared on failure"
+    );
 }

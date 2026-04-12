@@ -14,16 +14,22 @@ pub fn store_secret(account_id: &str, secret: &str) -> Result<()> {
 
     let status = Command::new("security")
         .arg("add-generic-password")
-        .arg("-a").arg(KEYCHAIN_SERVICE)
-        .arg("-s").arg(account_id)
-        .arg("-w").arg(secret)
+        .arg("-a")
+        .arg(KEYCHAIN_SERVICE)
+        .arg("-s")
+        .arg(account_id)
+        .arg("-w")
+        .arg(secret)
         .arg("-U") // upsert
         .status()?;
 
     if status.success() {
         Ok(())
     } else {
-        Err(anyhow!("Failed to store secret in Keychain for {}", account_id))
+        Err(anyhow!(
+            "Failed to store secret in Keychain for {}",
+            account_id
+        ))
     }
 }
 
@@ -37,8 +43,10 @@ pub fn load_secret(account_id: &str) -> Result<String> {
 
     let output = Command::new("security")
         .arg("find-generic-password")
-        .arg("-a").arg(KEYCHAIN_SERVICE)
-        .arg("-s").arg(account_id)
+        .arg("-a")
+        .arg(KEYCHAIN_SERVICE)
+        .arg("-s")
+        .arg(account_id)
         .arg("-w")
         .output()?;
 
@@ -58,8 +66,10 @@ pub fn delete_secret(account_id: &str) -> Result<()> {
 
     let status = Command::new("security")
         .arg("delete-generic-password")
-        .arg("-a").arg(KEYCHAIN_SERVICE)
-        .arg("-s").arg(account_id)
+        .arg("-a")
+        .arg(KEYCHAIN_SERVICE)
+        .arg("-s")
+        .arg(account_id)
         .status()?;
 
     if status.success() {

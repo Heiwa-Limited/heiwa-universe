@@ -24,9 +24,7 @@ pub enum Credential {
     /// OAuth token — secrets stored in Keychain, not here.
     /// `expires_at` is metadata (not secret) so it lives here for
     /// refresh scheduling.
-    OAuth {
-        expires_at: Option<String>,
-    },
+    OAuth { expires_at: Option<String> },
 
     /// Reference to an installed provider CLI.  Heiwa wraps the subprocess
     /// for subscription-backed access.
@@ -141,6 +139,10 @@ pub struct DetectedModel {
     /// Whether the model supports vision/image inputs.
     pub supports_vision: bool,
 
+    /// Whether the model supports audio inputs/outputs.
+    #[serde(default)]
+    pub supports_audio: bool,
+
     /// Cost per 1K input tokens (0.0 for local models).
     pub cost_per_1k_input: f64,
 
@@ -192,7 +194,10 @@ impl AccountRegistry {
 
     /// All accounts for a given provider.
     pub fn accounts_for(&self, provider: &str) -> Vec<&ProviderAccount> {
-        self.accounts.iter().filter(|a| a.provider == provider).collect()
+        self.accounts
+            .iter()
+            .filter(|a| a.provider == provider)
+            .collect()
     }
 
     /// Find an account by its unique ID.
@@ -203,7 +208,11 @@ impl AccountRegistry {
     /// Add or update an account.  If an account with the same `account_id`
     /// exists, it is replaced.
     pub fn upsert(&mut self, account: ProviderAccount) {
-        if let Some(pos) = self.accounts.iter().position(|a| a.account_id == account.account_id) {
+        if let Some(pos) = self
+            .accounts
+            .iter()
+            .position(|a| a.account_id == account.account_id)
+        {
             self.accounts[pos] = account;
         } else {
             self.accounts.push(account);
@@ -230,7 +239,11 @@ impl AccountRegistry {
             a.rate_group
                 .cmp(&b.rate_group)
                 .then(b.capability_class.cmp(&a.capability_class))
-                .then(a.cost_per_1k_input.partial_cmp(&b.cost_per_1k_input).unwrap_or(std::cmp::Ordering::Equal))
+                .then(
+                    a.cost_per_1k_input
+                        .partial_cmp(&b.cost_per_1k_input)
+                        .unwrap_or(std::cmp::Ordering::Equal),
+                )
         });
         models
     }
@@ -286,7 +299,8 @@ pub fn add_api_key_account(
     api_key: &str,
     rate_group: &str,
 ) -> anyhow::Result<String> {
-    let existing_count = registry.accounts_for(provider)
+    let existing_count = registry
+        .accounts_for(provider)
         .iter()
         .filter(|a| matches!(a.credential, Credential::ApiKey))
         .count();
@@ -322,7 +336,9 @@ pub fn add_local_runtime_account(
     let account = ProviderAccount {
         account_id: account_id.clone(),
         provider: provider.to_string(),
-        credential: Credential::LocalRuntime { endpoint: endpoint.to_string() },
+        credential: Credential::LocalRuntime {
+            endpoint: endpoint.to_string(),
+        },
         rate_group: "local".to_string(),
         status: AccountStatus::Disconnected, // verified after probe
         models: Vec::new(),
@@ -347,7 +363,9 @@ pub fn add_cli_account(
     let account = ProviderAccount {
         account_id: account_id.clone(),
         provider: provider.to_string(),
-        credential: Credential::OauthCli { binary: binary.to_string() },
+        credential: Credential::OauthCli {
+            binary: binary.to_string(),
+        },
         rate_group: rate_group.to_string(),
         status: AccountStatus::Disconnected, // verified after probe
         models: Vec::new(),
@@ -398,7 +416,9 @@ mod tests {
         reg.upsert(ProviderAccount {
             account_id: "anthropic-cli".to_string(),
             provider: "anthropic".to_string(),
-            credential: Credential::OauthCli { binary: "claude".to_string() },
+            credential: Credential::OauthCli {
+                binary: "claude".to_string(),
+            },
             rate_group: "anthropic_sub".to_string(),
             status: AccountStatus::Connected,
             models: vec![],
@@ -429,6 +449,7 @@ mod tests {
                     supports_streaming: true,
                     supports_tools: true,
                     supports_vision: true,
+                    supports_audio: false,
                     cost_per_1k_input: 0.0008,
                     cost_per_1k_output: 0.004,
                     inventory_truth: InventoryTruth::Verified,
@@ -444,6 +465,7 @@ mod tests {
                     supports_streaming: true,
                     supports_tools: true,
                     supports_vision: true,
+                    supports_audio: false,
                     cost_per_1k_input: 0.003,
                     cost_per_1k_output: 0.015,
                     inventory_truth: InventoryTruth::Verified,
@@ -453,26 +475,27 @@ mod tests {
         reg.upsert(ProviderAccount {
             account_id: "ollama-local".to_string(),
             provider: "ollama".to_string(),
-            credential: Credential::LocalRuntime { endpoint: "http://127.0.0.1:11434".to_string() },
+            credential: Credential::LocalRuntime {
+                endpoint: "http://127.0.0.1:11434".to_string(),
+            },
             rate_group: "local".to_string(),
             status: AccountStatus::Connected,
-            models: vec![
-                DetectedModel {
-                    model_id: "llama3.2:3b".to_string(),
-                    provider_model_id: "llama3.2:3b".to_string(),
-                    provider: "ollama".to_string(),
-                    account_id: "ollama-local".to_string(),
-                    rate_group: "local".to_string(),
-                    capability_class: 1,
-                    context_window: 128_000,
-                    supports_streaming: true,
-                    supports_tools: false,
-                    supports_vision: false,
-                    cost_per_1k_input: 0.0,
-                    cost_per_1k_output: 0.0,
-                    inventory_truth: InventoryTruth::Verified,
-                },
-            ],
+            models: vec![DetectedModel {
+                model_id: "llama3.2:3b".to_string(),
+                provider_model_id: "llama3.2:3b".to_string(),
+                provider: "ollama".to_string(),
+                account_id: "ollama-local".to_string(),
+                rate_group: "local".to_string(),
+                capability_class: 1,
+                context_window: 128_000,
+                supports_streaming: true,
+                supports_tools: false,
+                supports_vision: false,
+                supports_audio: false,
+                cost_per_1k_input: 0.0,
+                cost_per_1k_output: 0.0,
+                inventory_truth: InventoryTruth::Verified,
+            }],
         });
 
         let models = reg.all_models();
@@ -487,8 +510,20 @@ mod tests {
     fn credential_kind_labels() {
         assert_eq!(Credential::ApiKey.kind_label(), "api_key");
         assert_eq!(Credential::OAuth { expires_at: None }.kind_label(), "oauth");
-        assert_eq!(Credential::OauthCli { binary: "claude".to_string() }.kind_label(), "oauth_cli");
-        assert_eq!(Credential::LocalRuntime { endpoint: "http://localhost:11434".to_string() }.kind_label(), "local_runtime");
+        assert_eq!(
+            Credential::OauthCli {
+                binary: "claude".to_string()
+            }
+            .kind_label(),
+            "oauth_cli"
+        );
+        assert_eq!(
+            Credential::LocalRuntime {
+                endpoint: "http://localhost:11434".to_string()
+            }
+            .kind_label(),
+            "local_runtime"
+        );
     }
 
     #[test]

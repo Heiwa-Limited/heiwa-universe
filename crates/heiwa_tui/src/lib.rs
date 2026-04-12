@@ -240,12 +240,7 @@ fn render_transcript(f: &mut Frame, state: &AppState, area: Rect) {
                 lines.push(Line::from(""));
             }
             TranscriptBlock::Assistant(text) => {
-                for line in text.lines() {
-                    lines.push(Line::from(Span::styled(
-                        format!("  {}", line),
-                        Style::default().fg(Color::White),
-                    )));
-                }
+                render_markdown_lines(text, &mut lines, Color::White);
                 lines.push(Line::from(""));
             }
             TranscriptBlock::Tool(name, output) => {
@@ -277,14 +272,9 @@ fn render_transcript(f: &mut Frame, state: &AppState, area: Rect) {
         }
     }
 
-    // Append in-progress streaming content
+    // Append in-progress streaming content with markdown rendering
     if state.is_streaming && !state.stream_buffer.is_empty() {
-        for line in state.stream_buffer.lines() {
-            lines.push(Line::from(Span::styled(
-                format!("  {}", line),
-                Style::default().fg(Color::Green),
-            )));
-        }
+        render_markdown_lines(&state.stream_buffer, &mut lines, Color::Green);
         lines.push(Line::from(Span::styled(
             "  ▍",
             Style::default().fg(Color::Green),
@@ -304,6 +294,221 @@ fn render_transcript(f: &mut Frame, state: &AppState, area: Rect) {
         .wrap(Wrap { trim: false })
         .scroll((scroll_offset as u16, 0));
     f.render_widget(transcript, area);
+}
+
+// ---------------------------------------------------------------------------
+// Markdown-aware line renderer
+// ---------------------------------------------------------------------------
+
+/// Convert markdown text into styled `Line` items for ratatui rendering.
+///
+/// This is a simple line-by-line state machine — not a full CommonMark parser.
+/// It handles the most common patterns in LLM assistant output:
+/// - Fenced code blocks (``` ... ```)
+/// - Headings (#, ##, ###)
+/// - Bullet lists (-, *)
+/// - Blockquotes (>)
+/// - Inline bold (**text**) and inline code (`code`)
+fn render_markdown_lines<'a>(text: &str, lines: &mut Vec<Line<'a>>, base_color: Color) {
+    let mut in_code_block = false;
+    let mut code_lang = String::new();
+
+    for raw_line in text.lines() {
+        let trimmed = raw_line.trim();
+
+        // --- Fenced code block toggle ---
+        if trimmed.starts_with("```") {
+            if !in_code_block {
+                in_code_block = true;
+                code_lang = trimmed.trim_start_matches('`').trim().to_string();
+                let label = if code_lang.is_empty() {
+                    "  ──── code ────".to_string()
+                } else {
+                    format!("  ──── {} ────", code_lang)
+                };
+                lines.push(Line::from(Span::styled(
+                    label,
+                    Style::default().fg(Color::DarkGray),
+                )));
+            } else {
+                in_code_block = false;
+                code_lang.clear();
+                lines.push(Line::from(Span::styled(
+                    "  ────────────────",
+                    Style::default().fg(Color::DarkGray),
+                )));
+            }
+            continue;
+        }
+
+        // --- Inside code block: render as-is with code styling ---
+        if in_code_block {
+            lines.push(Line::from(Span::styled(
+                format!("  │ {}", raw_line),
+                Style::default().fg(Color::Yellow),
+            )));
+            continue;
+        }
+
+        // --- Headings ---
+        if trimmed.starts_with("### ") {
+            let heading = trimmed.trim_start_matches('#').trim();
+            lines.push(Line::from(Span::styled(
+                format!("  {}", heading),
+                Style::default()
+                    .fg(base_color)
+                    .add_modifier(Modifier::BOLD),
+            )));
+            continue;
+        }
+        if trimmed.starts_with("## ") {
+            let heading = trimmed.trim_start_matches('#').trim();
+            lines.push(Line::from(Span::styled(
+                format!("  {}", heading),
+                Style::default()
+                    .fg(base_color)
+                    .add_modifier(Modifier::BOLD | Modifier::UNDERLINED),
+            )));
+            continue;
+        }
+        if trimmed.starts_with("# ") {
+            let heading = trimmed.trim_start_matches('#').trim();
+            lines.push(Line::from(Span::styled(
+                format!("  {}", heading),
+                Style::default()
+                    .fg(Color::Cyan)
+                    .add_modifier(Modifier::BOLD),
+            )));
+            continue;
+        }
+
+        // --- Blockquote ---
+        if trimmed.starts_with("> ") || trimmed == ">" {
+            let quote_text = trimmed.trim_start_matches('>').trim();
+            lines.push(Line::from(Span::styled(
+                format!("  │ {}", quote_text),
+                Style::default()
+                    .fg(Color::DarkGray)
+                    .add_modifier(Modifier::ITALIC),
+            )));
+            continue;
+        }
+
+        // --- Bullet lists ---
+        if trimmed.starts_with("- ") || trimmed.starts_with("* ") {
+            let item = &trimmed[2..];
+            let mut spans = vec![Span::styled(
+                "  • ".to_string(),
+                Style::default().fg(base_color),
+            )];
+            parse_inline_spans(item, &mut spans, base_color);
+            lines.push(Line::from(spans));
+            continue;
+        }
+
+        // --- Numbered lists ---
+        if trimmed.len() > 2 && trimmed.chars().next().map_or(false, |c| c.is_ascii_digit()) {
+            if let Some(rest) = trimmed.split_once(". ").map(|(_, r)| r) {
+                let prefix_end = trimmed.find(". ").unwrap_or(0);
+                let num = &trimmed[..prefix_end + 1];
+                let mut spans = vec![Span::styled(
+                    format!("  {} ", num),
+                    Style::default().fg(base_color),
+                )];
+                parse_inline_spans(rest, &mut spans, base_color);
+                lines.push(Line::from(spans));
+                continue;
+            }
+        }
+
+        // --- Empty lines ---
+        if trimmed.is_empty() {
+            lines.push(Line::from(""));
+            continue;
+        }
+
+        // --- Regular text with inline formatting ---
+        let mut spans = vec![Span::raw("  ".to_string())];
+        parse_inline_spans(trimmed, &mut spans, base_color);
+        lines.push(Line::from(spans));
+    }
+}
+
+/// Parse inline markdown spans: **bold** and `code`.
+fn parse_inline_spans<'a>(text: &str, spans: &mut Vec<Span<'a>>, base_color: Color) {
+    let mut remaining = text;
+    let bold_style = Style::default()
+        .fg(base_color)
+        .add_modifier(Modifier::BOLD);
+    let code_style = Style::default().fg(Color::Magenta);
+    let normal_style = Style::default().fg(base_color);
+
+    while !remaining.is_empty() {
+        // Find the nearest inline marker
+        let bold_pos = remaining.find("**");
+        let code_pos = remaining.find('`');
+
+        match (bold_pos, code_pos) {
+            (Some(bp), Some(cp)) if cp < bp => {
+                // Inline code comes first
+                if cp > 0 {
+                    spans.push(Span::styled(remaining[..cp].to_string(), normal_style));
+                }
+                let after_tick = &remaining[cp + 1..];
+                if let Some(end) = after_tick.find('`') {
+                    spans.push(Span::styled(
+                        after_tick[..end].to_string(),
+                        code_style,
+                    ));
+                    remaining = &after_tick[end + 1..];
+                } else {
+                    // Unclosed backtick — render rest as-is
+                    spans.push(Span::styled(remaining[cp..].to_string(), normal_style));
+                    return;
+                }
+            }
+            (Some(bp), _) => {
+                // Bold comes first (or no code)
+                if bp > 0 {
+                    spans.push(Span::styled(remaining[..bp].to_string(), normal_style));
+                }
+                let after_stars = &remaining[bp + 2..];
+                if let Some(end) = after_stars.find("**") {
+                    spans.push(Span::styled(
+                        after_stars[..end].to_string(),
+                        bold_style,
+                    ));
+                    remaining = &after_stars[end + 2..];
+                } else {
+                    // Unclosed bold — render rest as-is
+                    spans.push(Span::styled(remaining[bp..].to_string(), normal_style));
+                    return;
+                }
+            }
+            (None, Some(cp)) => {
+                // Only inline code
+                if cp > 0 {
+                    spans.push(Span::styled(remaining[..cp].to_string(), normal_style));
+                }
+                let after_tick = &remaining[cp + 1..];
+                if let Some(end) = after_tick.find('`') {
+                    spans.push(Span::styled(
+                        after_tick[..end].to_string(),
+                        code_style,
+                    ));
+                    remaining = &after_tick[end + 1..];
+                } else {
+                    spans.push(Span::styled(remaining[cp..].to_string(), normal_style));
+                    return;
+                }
+            }
+            (None, None) => {
+                // No markers — push remainder
+                spans.push(Span::styled(remaining.to_string(), normal_style));
+                return;
+            }
+        }
+    }
 }
 
 fn render_inspector(f: &mut Frame, state: &AppState, area: Rect) {
@@ -499,5 +704,116 @@ mod tests {
     fn composer_height_capped() {
         let many_lines = "a\n".repeat(20);
         assert_eq!(composer_height(&many_lines), COMPOSER_MAX_HEIGHT);
+    }
+
+    // --- Markdown renderer tests ---
+
+    fn render_to_lines(text: &str) -> Vec<Line<'static>> {
+        let mut lines = Vec::new();
+        render_markdown_lines(text, &mut lines, Color::White);
+        lines
+    }
+
+    #[test]
+    fn markdown_heading_h1() {
+        let lines = render_to_lines("# Hello World");
+        assert_eq!(lines.len(), 1);
+        // H1 should be Cyan + Bold
+        let span = &lines[0].spans[0];
+        assert!(span.content.contains("Hello World"));
+        assert_eq!(span.style.fg, Some(Color::Cyan));
+    }
+
+    #[test]
+    fn markdown_heading_h2() {
+        let lines = render_to_lines("## Subheading");
+        assert_eq!(lines.len(), 1);
+        let span = &lines[0].spans[0];
+        assert!(span.content.contains("Subheading"));
+        assert!(span
+            .style
+            .add_modifier
+            .contains(Modifier::UNDERLINED));
+    }
+
+    #[test]
+    fn markdown_fenced_code_block() {
+        let text = "before\n```rust\nlet x = 1;\n```\nafter";
+        let lines = render_to_lines(text);
+        // before, code-label, code-line, code-end, after = 5 lines
+        assert_eq!(lines.len(), 5);
+        // Code label should mention "rust"
+        assert!(lines[1].spans[0].content.contains("rust"));
+        // Code line should have │ prefix
+        assert!(lines[2].spans[0].content.contains("│"));
+        assert!(lines[2].spans[0].content.contains("let x = 1;"));
+        // Code end should be a separator
+        assert!(lines[3].spans[0].content.contains("────"));
+    }
+
+    #[test]
+    fn markdown_bullet_list() {
+        let lines = render_to_lines("- first item\n- second item");
+        assert_eq!(lines.len(), 2);
+        // Should have bullet prefix
+        assert!(lines[0].spans[0].content.contains("•"));
+    }
+
+    #[test]
+    fn markdown_blockquote() {
+        let lines = render_to_lines("> quoted text");
+        assert_eq!(lines.len(), 1);
+        assert!(lines[0].spans[0].content.contains("│"));
+        assert!(lines[0].spans[0].content.contains("quoted text"));
+    }
+
+    #[test]
+    fn markdown_inline_code() {
+        let lines = render_to_lines("Use `cargo test` to run");
+        assert_eq!(lines.len(), 1);
+        // Should have multiple spans: prefix, "Use ", "cargo test", " to run"
+        assert!(lines[0].spans.len() >= 3);
+        // Find the code span (Magenta)
+        let code_span = lines[0]
+            .spans
+            .iter()
+            .find(|s| s.style.fg == Some(Color::Magenta));
+        assert!(code_span.is_some());
+        assert_eq!(code_span.unwrap().content.as_ref(), "cargo test");
+    }
+
+    #[test]
+    fn markdown_inline_bold() {
+        let lines = render_to_lines("This is **important** text");
+        assert_eq!(lines.len(), 1);
+        let bold_span = lines[0]
+            .spans
+            .iter()
+            .find(|s| s.style.add_modifier.contains(Modifier::BOLD));
+        assert!(bold_span.is_some());
+        assert_eq!(bold_span.unwrap().content.as_ref(), "important");
+    }
+
+    #[test]
+    fn markdown_mixed_content() {
+        let text = "# Title\n\nSome text with `code` and **bold**.\n\n```python\nprint('hello')\n```\n\n- item one\n- item two";
+        let lines = render_to_lines(text);
+        // Title + empty + text + empty + code-label + code-line + code-end + empty + item1 + item2
+        assert_eq!(lines.len(), 10);
+    }
+
+    #[test]
+    fn markdown_empty_text() {
+        let lines = render_to_lines("");
+        // Empty string produces no lines (no newlines to iterate)
+        assert!(lines.is_empty());
+    }
+
+    #[test]
+    fn markdown_plain_text_no_formatting() {
+        let lines = render_to_lines("Just plain text here");
+        assert_eq!(lines.len(), 1);
+        // Should have 2 spans: "  " prefix + text
+        assert_eq!(lines[0].spans.len(), 2);
     }
 }

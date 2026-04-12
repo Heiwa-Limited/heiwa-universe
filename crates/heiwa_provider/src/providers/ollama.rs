@@ -1,6 +1,6 @@
+use crate::adapter::{Message, ProviderAdapter, StreamEvent, TokenUsage};
 use anyhow::Result;
 use async_trait::async_trait;
-use crate::adapter::{Message, ProviderAdapter, StreamEvent, TokenUsage};
 use std::process::Stdio;
 use tokio::io::{AsyncBufReadExt, BufReader};
 use tokio::process::Command;
@@ -37,7 +37,11 @@ impl ProviderAdapter for OllamaCliAdapter {
         messages: &[Message],
         stream_tx: mpsc::Sender<StreamEvent>,
     ) -> Result<()> {
-        let model = if model.is_empty() { &self.default_model } else { model };
+        let model = if model.is_empty() {
+            &self.default_model
+        } else {
+            model
+        };
 
         // Flatten messages into a single prompt for the CLI
         let prompt: String = messages
@@ -65,7 +69,9 @@ impl ProviderAdapter for OllamaCliAdapter {
             }
         }
 
-        let _ = stream_tx.send(StreamEvent::Done(TokenUsage::default())).await;
+        let _ = stream_tx
+            .send(StreamEvent::Done(TokenUsage::default()))
+            .await;
         Ok(())
     }
 

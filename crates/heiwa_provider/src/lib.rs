@@ -155,7 +155,11 @@ pub fn get_auth_status(provider_id: &str) -> Option<LegacyProviderAccount> {
     match provider_id {
         "claude" => {
             let status = if has_command("claude") {
-                if connected { "connected".to_string() } else { "installed_unverified".to_string() }
+                if connected {
+                    "connected".to_string()
+                } else {
+                    "installed_unverified".to_string()
+                }
             } else {
                 "not_installed".to_string()
             };
@@ -189,7 +193,11 @@ pub fn get_auth_status(provider_id: &str) -> Option<LegacyProviderAccount> {
         }
         "codex" => {
             let status = if has_command("codex") {
-                if connected { "connected".to_string() } else { "installed_unverified".to_string() }
+                if connected {
+                    "connected".to_string()
+                } else {
+                    "installed_unverified".to_string()
+                }
             } else {
                 "not_installed".to_string()
             };
@@ -205,7 +213,11 @@ pub fn get_auth_status(provider_id: &str) -> Option<LegacyProviderAccount> {
         }
         "gemini" => {
             let status = if has_command("gemini") {
-                if connected { "connected".to_string() } else { "installed_unverified".to_string() }
+                if connected {
+                    "connected".to_string()
+                } else {
+                    "installed_unverified".to_string()
+                }
             } else {
                 "not_installed".to_string()
             };
@@ -221,7 +233,11 @@ pub fn get_auth_status(provider_id: &str) -> Option<LegacyProviderAccount> {
         }
         "antigravity" => {
             let status = if has_command("antigravity") {
-                if connected { "connected".to_string() } else { "installed_unverified".to_string() }
+                if connected {
+                    "connected".to_string()
+                } else {
+                    "installed_unverified".to_string()
+                }
             } else {
                 "not_installed".to_string()
             };
@@ -257,7 +273,10 @@ pub fn login(provider_id: &str) -> anyhow::Result<()> {
             println!("Antigravity auth remains provider-owned. Connect Antigravity in its own surface, then let Heiwa wrap the installed runtime.");
         }
         _ => {
-            println!("No automated login flow for {}. Please login manually.", provider_id);
+            println!(
+                "No automated login flow for {}. Please login manually.",
+                provider_id
+            );
         }
     }
     Ok(())
@@ -279,7 +298,10 @@ pub fn logout(provider_id: &str) -> anyhow::Result<()> {
             println!("Cleared Heiwa's local connection record for {}. Provider-owned auth may still need to be disconnected in the provider surface.", provider_id);
         }
         _ => {
-            println!("No automated logout flow for {}. Please logout manually.", provider_id);
+            println!(
+                "No automated logout flow for {}. Please logout manually.",
+                provider_id
+            );
         }
     }
     Ok(())
