@@ -5,5 +5,8 @@
     "checkJs": false,
     "types": []
   },
-  "include": ["clients/web/assets/**/*.js"]
+  "include": [
+    "clients/web/assets/**/*.js",
+    "clients/web/assets/**/*.ts"
+  ]
 }
