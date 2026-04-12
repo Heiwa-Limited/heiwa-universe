@@ -117,6 +117,50 @@ fn install_creates_structured_runtime_layout() {
                 .exists(),
             "expected gemini concise skill install"
         );
+        assert!(
+            runtime_root.join("generated/codex/AGENTS.md").exists(),
+            "expected generated codex startup context"
+        );
+        assert!(
+            runtime_root.join("generated/claude/CLAUDE.md").exists(),
+            "expected generated claude startup context"
+        );
+        assert!(
+            runtime_root.join("generated/gemini/GEMINI.md").exists(),
+            "expected generated gemini startup context"
+        );
+        assert!(
+            runtime_root.join("generated/antigravity/GEMINI.md").exists(),
+            "expected generated antigravity startup context"
+        );
+        assert!(
+            runtime_root.join("generated/ollama/SYSTEM.md").exists(),
+            "expected generated ollama system context"
+        );
+        assert!(
+            fs::read_to_string(home.join(".codex/AGENTS.md"))
+                .expect("read codex startup context")
+                .contains("HEIWA:BEGIN concise-context"),
+            "expected codex startup file to contain managed concise context"
+        );
+        assert!(
+            fs::read_to_string(home.join(".claude/CLAUDE.md"))
+                .expect("read claude startup context")
+                .contains("HEIWA:BEGIN concise-context"),
+            "expected claude startup file to contain managed concise context"
+        );
+        assert!(
+            fs::read_to_string(home.join(".gemini/GEMINI.md"))
+                .expect("read gemini startup context")
+                .contains("HEIWA:BEGIN concise-context"),
+            "expected gemini startup file to contain managed concise context"
+        );
+        assert!(
+            fs::read_to_string(home.join(".gemini/antigravity/GEMINI.md"))
+                .expect("read antigravity startup context")
+                .contains("HEIWA:BEGIN concise-context"),
+            "expected antigravity startup file to contain managed concise context"
+        );
     });
 }
 
@@ -154,6 +198,33 @@ fn install_migrates_flat_root_files_forward_without_deleting_them() {
         assert_eq!(
             fs::read_to_string(runtime_root.join("state/connection.json")).expect("read migrated connection"),
             "{\n  \"url\": \"https://example.com\"\n}\n"
+        );
+    });
+}
+
+#[test]
+fn install_updates_managed_startup_block_without_duplicating_it() {
+    with_temp_home(|home| {
+        let codex_dir = home.join(".codex");
+        fs::create_dir_all(&codex_dir).expect("create codex dir");
+        fs::write(
+            codex_dir.join("AGENTS.md"),
+            "# AGENTS.md\n\nOperator notes stay here.\n",
+        )
+        .expect("write existing codex agents");
+
+        run_install().expect("first install should succeed");
+        run_install().expect("second install should succeed");
+
+        let agents = fs::read_to_string(codex_dir.join("AGENTS.md")).expect("read codex agents");
+        assert!(
+            agents.contains("Operator notes stay here."),
+            "expected existing content to survive install"
+        );
+        assert_eq!(
+            agents.matches("<!-- HEIWA:BEGIN concise-context -->").count(),
+            1,
+            "expected exactly one managed concise block"
         );
     });
 }

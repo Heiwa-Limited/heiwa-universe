@@ -11,7 +11,18 @@ use heiwa_provider::adapter::{Message, ProviderAdapter, Role, StreamEvent, Token
 use heiwa_provider::providers::ollama::OllamaCliAdapter;
 use heiwa_provider::providers::claude_code::ClaudeCodeCliAdapter;
 use heiwa_repl::{parse_input, render_footer, ReplCommand, TelemetryState};
+use std::fs;
 use std::io::{self, Write, IsTerminal};
+
+const HEIWA_CONCISE_FALLBACK: &str = concat!(
+    "Heiwa concise mode active.\n",
+    "- Be terse by default.\n",
+    "- Lead with result, action, or blocker.\n",
+    "- Interim updates: 1-2 short lines max.\n",
+    "- Keep commands, paths, dates, risks, and errors exact.\n",
+    "- If user asks for Caveman, compress harder without losing technical truth.\n",
+    "- Use normal clarity for destructive actions, security warnings, or ambiguity.\n",
+);
 
 fn canonical_surface_id(provider: &str) -> &str {
     match provider {
@@ -788,7 +799,7 @@ async fn run_repl(use_cockpit: bool) -> Result<()> {
 
                         state.transcript.push(TranscriptBlock::User(t.clone()));
 
-                        let messages = vec![Message { role: Role::User, content: t }];
+                        let messages = build_provider_messages(t);
                         let (stream_tx, mut stream_rx) = tokio::sync::mpsc::channel(32);
                         let model_id = route.provider_model_id.clone();
 
@@ -994,7 +1005,7 @@ async fn run_cockpit_controller(
                                 let _ = event_tx.send(CockpitEvent::StatusUpdate("streaming...".into()));
 
                                 // Stream response
-                                let messages = vec![Message { role: Role::User, content: t }];
+                                let messages = build_provider_messages(t);
                                 let (stream_tx, mut stream_rx) = tokio::sync::mpsc::channel(32);
                                 let model_id = route.provider_model_id.clone();
 
@@ -1454,6 +1465,36 @@ fn record_run_evidence(
 // Helpers
 // ---------------------------------------------------------------------------
 
+fn build_provider_messages(user_content: String) -> Vec<Message> {
+    vec![
+        Message {
+            role: Role::System,
+            content: load_heiwa_concise_context(),
+        },
+        Message {
+            role: Role::User,
+            content: user_content,
+        },
+    ]
+}
+
+fn load_heiwa_concise_context() -> String {
+    let paths = RuntimePaths::discover();
+    for path in [
+        paths.root().join("generated/ollama/SYSTEM.md"),
+        paths.root().join("generated/gemini/GEMINI.md"),
+        paths.root().join("modes/heiwa-concise-mode/MODE.md"),
+        paths.concise_mode(),
+    ] {
+        if let Ok(content) = fs::read_to_string(&path) {
+            if !content.trim().is_empty() {
+                return content;
+            }
+        }
+    }
+    HEIWA_CONCISE_FALLBACK.to_string()
+}
+
 
 
 fn filtered_model_tiers(
@@ -1631,5 +1672,15 @@ mod tests {
         let tiers = super::get_live_model_tiers(&registry);
         assert_eq!(tiers.len(), 1);
         assert_eq!(tiers[0].provider, "claude");
+    }
+
+    #[test]
+    fn provider_messages_prepend_heiwa_concise_system_context() {
+        let messages = super::build_provider_messages("fix runtime".to_string());
+        assert_eq!(messages.len(), 2);
+        assert!(matches!(messages[0].role, heiwa_provider::adapter::Role::System));
+        assert!(messages[0].content.contains("Heiwa concise") || messages[0].content.contains("Be terse by default"));
+        assert!(matches!(messages[1].role, heiwa_provider::adapter::Role::User));
+        assert_eq!(messages[1].content, "fix runtime");
     }
 }
