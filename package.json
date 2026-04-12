@@ -13,6 +13,10 @@
     "typecheck": "tsc -p packages/heiwa_bindings/typescript/tsconfig.json --noEmit && tsc -p apps/heiwa_web/tsconfig.json --noEmit"
   },
   "devDependencies": {
-    "typescript": "5.9.3"
+    "@biomejs/biome": "^2.4.10",
+    "eslint": "^10.2.0",
+    "prettier": "^3.8.1",
+    "typescript": "5.9.3",
+    "typescript-language-server": "^5.1.3"
   }
 }
