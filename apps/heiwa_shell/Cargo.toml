@@ -14,6 +14,7 @@ heiwa-core = { path = "../../apps/heiwa_core" }
 heiwa-session = { path = "../../crates/heiwa_session" }
 heiwa-repl = { path = "../../crates/heiwa_repl" }
 heiwa-provider = { path = "../../crates/heiwa_provider" }
+heiwa-paths = { path = "../../crates/heiwa_paths" }
 heiwa-install = { path = "../../crates/heiwa_install" }
 heiwa-loop = { path = "../../crates/heiwa_loop" }
 heiwa-stdb = { path = "../../crates/heiwa_stdb" }

@@ -4,10 +4,11 @@ from pathlib import Path
 import uuid
 
 HEIWA_GLOBAL_DIR = Path(os.path.expanduser("~/.heiwa"))
-IDENTITY_PATH = HEIWA_GLOBAL_DIR / "identity.json"
+IDENTITY_PATH = HEIWA_GLOBAL_DIR / "state" / "identity.json"
 
 def bootstrap():
     HEIWA_GLOBAL_DIR.mkdir(parents=True, exist_ok=True)
+    IDENTITY_PATH.parent.mkdir(parents=True, exist_ok=True)
     
     if IDENTITY_PATH.exists():
         print(f"✅ Identity found: {IDENTITY_PATH}")

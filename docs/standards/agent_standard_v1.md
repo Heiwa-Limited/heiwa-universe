@@ -34,7 +34,7 @@ To maintain modular integrity and execution safety, all code written or modified
 ## 3. Tool Execution & Interception Pathways
 
 - **Provider-native first**: Native provider tools, plugins, MCP servers, and specialist wrappers remain enabled. Heiwa adds boot order, policy, and cross-runtime specialists; it does not replace provider-native capabilities.
-- **Project control surfaces**: Repo-local provider posture lives in `.codex/`, `.claude/`, and `.gemini/`. Canonical specialists live in `ops/agents/` and sync into `.gemini/agents/`, `.claude/agents/`, and `~/.codex/skills`.
+- **Project control surfaces**: Canonical runtime authority lives in `~/.heiwa/`. Repo-local `.codex/`, `.claude/`, and `.gemini/` files are project overlays only. Canonical specialists live in `ops/agents/` and sync into `.gemini/agents/`, `.claude/agents/`, and `~/.codex/skills`.
 - **Sandboxed untrusted execution**: Any untrusted code written or loaded at runtime strictly executes in E2B or another explicit sandbox boundary, never on the host by default.
 - **Sovereignty precedence**: High-risk sovereign work (local disk vaults, local models, private operator state) routes to trusted boost nodes, not general cloud providers.
 

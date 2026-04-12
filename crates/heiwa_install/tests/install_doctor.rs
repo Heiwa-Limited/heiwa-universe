@@ -96,3 +96,17 @@ fn test_install_creates_runtime_layout_and_canonical_launcher() {
         );
     });
 }
+
+#[test]
+fn test_install_does_not_overwrite_existing_real_heiwa_binary() {
+    with_temp_home(|home| {
+        let launcher_path = home.join(".heiwa").join("bin").join("heiwa");
+        fs::create_dir_all(launcher_path.parent().expect("launcher parent")).expect("create bin dir");
+        fs::write(&launcher_path, b"\x7fELFfake-heiwa-binary").expect("write fake binary");
+
+        run_install().expect("run_install should succeed");
+
+        let contents = fs::read(&launcher_path).expect("read launcher path");
+        assert_eq!(contents, b"\x7fELFfake-heiwa-binary");
+    });
+}

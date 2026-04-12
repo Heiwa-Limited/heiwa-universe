@@ -3,6 +3,7 @@ members = [
     "apps/heiwa_core",
     "apps/heiwa_hub/spacetimedb",
     "apps/heiwa_shell",
+    "crates/heiwa_paths",
     "crates/heiwa_session",
     "crates/heiwa_repl",
     "crates/heiwa_provider",

@@ -1,10 +1,7 @@
-# Heiwa project-level Codex config
-# Overrides ~/.codex/config.toml within ~/heiwa-universe/
-#
-# Global settings (model, personality, approval_policy, sandbox_mode)
-# are inherited — only Heiwa-specific overrides below.
+# Heiwa repo overlay only.
+# Installed runtime authority lives under ~/.heiwa/.
+# Keep this file project-scoped and minimal.
 
-approval_policy = "on-request"
 sandbox_mode = "workspace-write"
 
 [mcp_servers.railway]

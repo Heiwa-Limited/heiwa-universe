@@ -2,6 +2,7 @@ use anyhow::{anyhow, Result};
 use std::env;
 use std::sync::Arc;
 use chrono::Utc;
+use heiwa_paths::RuntimePaths;
 use heiwa_protocol::{
     CockpitCommand, CockpitEvent, SessionState, RoutingState, TranscriptBlock, parse_turn_intent,
 };
@@ -87,6 +88,10 @@ async fn main() -> Result<()> {
             let stdb_client = attempt_stdb_connection().await;
             register_current_device(&stdb_client).await?;
         }
+        "repair" => {
+            heiwa_install::run_install()?;
+            println!("Rebuilt Heiwa runtime root.");
+        }
         "login" => {
             if args.len() < 3 {
                 println!("Usage: heiwa login [token]");
@@ -94,14 +99,16 @@ async fn main() -> Result<()> {
                 let identity = heiwa_provider::login_heiwa(&args[2])?;
                 println!("Successfully logged in as {} ({})", identity.display_name.as_deref().unwrap_or_default(), identity.user_id);
                 
-                // Write ~/.heiwa/connection.json with default STDB endpoint
-                let heiwa_dir = dirs::home_dir().map(|h| h.join(".heiwa")).expect("HOME must be set");
-                let conn_path = heiwa_dir.join("connection.json");
+                // Write structured runtime connection state with default STDB endpoint.
+                let conn_path = RuntimePaths::discover().connection();
                 let conn_json = serde_json::json!({
                     "url": "https://maincloud.spacetimedb.com",
                     "database": "heiwaproductiondb",
                     "token": ""
                 });
+                if let Some(parent) = conn_path.parent() {
+                    std::fs::create_dir_all(parent)?;
+                }
                 std::fs::write(conn_path, serde_json::to_string_pretty(&conn_json)?)?;
                 println!("Sync connection initialized. Run 'heiwa register' to sync this device.");
             }
@@ -148,7 +155,52 @@ async fn main() -> Result<()> {
         }
         "doctor" => {
             let report = heiwa_install::check_installation()?;
+            let paths = RuntimePaths::discover();
             println!("Heiwa Doctor Report:");
+            println!("  Runtime root: {}", paths.root().display());
+            println!(
+                "  Default mode: {}",
+                if paths.concise_mode().exists() {
+                    "concise"
+                } else {
+                    "missing"
+                }
+            );
+            println!("  Ownership: providers=inference/auth, heiwa=sessions/sandboxes");
+            println!("  Projections:");
+            println!(
+                "    Codex: {}",
+                if paths.root().join("generated/codex/config.toml").exists() {
+                    "generated"
+                } else {
+                    "missing"
+                }
+            );
+            println!(
+                "    Claude: {}",
+                if paths.root().join("generated/claude/settings.json").exists() {
+                    "generated"
+                } else {
+                    "missing"
+                }
+            );
+            println!(
+                "    Gemini: {}",
+                if paths.root().join("generated/gemini/settings.json").exists() {
+                    "generated"
+                } else {
+                    "missing"
+                }
+            );
+            println!(
+                "    Antigravity: {}",
+                if paths.root().join("generated/antigravity/settings.json").exists() {
+                    "generated"
+                } else {
+                    "missing"
+                }
+            );
+            println!();
             println!("  Rust:   {}", report.rust_version.unwrap_or_else(|| "Not found".to_string()));
             println!("  Node:   {}", report.node_version.unwrap_or_else(|| "Not found".to_string()));
             println!("  Python: {}", report.python_version.unwrap_or_else(|| "Not found".to_string()));
@@ -442,6 +494,7 @@ fn print_help() {
     println!();
     println!("Commands:");
     println!("  install                       Install Heiwa and its dependencies");
+    println!("  repair                        Rebuild Heiwa runtime files and projections");
     println!("  login [token]                 Sign in to Heiwa");
     println!("  logout                        Sign out from Heiwa");
     println!("  doctor                        Check the status of the Heiwa installation");

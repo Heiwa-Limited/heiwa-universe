@@ -107,8 +107,12 @@ That is the architecture. DREX is not the public brand. It is the kernel inside 
 - Operator input surface
 - Local install and doctor flows
 - Local auth/config UX
+- Harness session lifecycle
+- Harness sandbox lifecycle
 - Command invocation and shell escape
 - Presentation of runtime and evidence state
+
+Provider auth and provider inference internals remain provider-owned. Heiwa owns the harness around them.
 
 ### Important user-facing boundary
 

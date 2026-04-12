@@ -1008,6 +1008,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "chrono",
+ "heiwa-paths",
  "serde",
  "serde_json",
  "tokio",
@@ -1033,6 +1034,10 @@ dependencies = [
 ]
 
 [[package]]
+name = "heiwa-paths"
+version = "0.1.0"
+
+[[package]]
 name = "heiwa-protocol"
 version = "0.1.0"
 dependencies = [
@@ -1050,6 +1055,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "async-trait",
+ "heiwa-paths",
  "reqwest",
  "serde",
  "serde_json",
@@ -1090,6 +1096,7 @@ dependencies = [
  "heiwa-core",
  "heiwa-install",
  "heiwa-loop",
+ "heiwa-paths",
  "heiwa-protocol",
  "heiwa-provider",
  "heiwa-repl",
@@ -1112,6 +1119,7 @@ dependencies = [
  "chrono",
  "dirs 6.0.0",
  "heiwa-bindings",
+ "heiwa-paths",
  "serde",
  "serde_json",
  "tokio",

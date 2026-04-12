@@ -1,3 +1,4 @@
+use heiwa_paths::RuntimePaths;
 use serde::{Deserialize, Serialize};
 use std::env;
 use std::fs;
@@ -9,7 +10,7 @@ use std::path::PathBuf;
 
 /// How Heiwa authenticates against a provider for a given account.
 ///
-/// **Secrets are never stored in this struct or in accounts.json.**
+/// **Secrets are never stored in this struct or in provider registry JSON.**
 /// API keys and OAuth tokens are stored in the macOS Keychain, looked up
 /// by `account_id` at runtime via `resolve_secret()`.
 ///
@@ -156,6 +157,10 @@ pub struct DetectedModel {
 // ---------------------------------------------------------------------------
 
 fn get_registry_path() -> PathBuf {
+    RuntimePaths::discover().provider_registry()
+}
+
+fn get_legacy_registry_path() -> PathBuf {
     let home = env::var("HOME").unwrap_or_else(|_| ".".to_string());
     PathBuf::from(home).join(".heiwa").join("accounts.json")
 }
@@ -170,14 +175,17 @@ impl AccountRegistry {
     /// Load the registry from disk.  Returns an empty registry if the file
     /// does not exist.
     pub fn load() -> Self {
-        let path = get_registry_path();
-        if !path.exists() {
-            return Self::default();
+        for path in [get_registry_path(), get_legacy_registry_path()] {
+            if !path.exists() {
+                continue;
+            }
+            if let Ok(content) = fs::read_to_string(&path) {
+                if let Ok(registry) = serde_json::from_str(&content) {
+                    return registry;
+                }
+            }
         }
-        fs::read_to_string(&path)
-            .ok()
-            .and_then(|raw| serde_json::from_str(&raw).ok())
-            .unwrap_or_default()
+        Self::default()
     }
 
     /// Persist the registry to disk.
@@ -254,7 +262,7 @@ impl AccountRegistry {
 /// Store an API key or OAuth token for an account.
 ///
 /// On macOS, secrets go to the system Keychain via `security` CLI.
-/// The `accounts.json` file never contains raw secrets.
+/// The provider registry file never contains raw secrets.
 pub fn store_secret(account_id: &str, secret: &str) -> anyhow::Result<()> {
     crate::keychain::store_secret(account_id, secret)
 }
@@ -278,7 +286,7 @@ pub fn remove_secret(account_id: &str) -> anyhow::Result<()> {
 
 /// Register an API key for a provider.
 ///
-/// The key is stored in the macOS Keychain — `accounts.json` only records
+/// The key is stored in the macOS Keychain — provider registry JSON only records
 /// the credential kind and account metadata.  Returns the generated account_id.
 pub fn add_api_key_account(
     registry: &mut AccountRegistry,

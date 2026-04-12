@@ -1,5 +1,5 @@
+use heiwa_paths::RuntimePaths;
 use serde::{Deserialize, Serialize};
-use std::env;
 use std::fs;
 use std::path::PathBuf;
 use std::process::Command;
@@ -31,23 +31,28 @@ pub struct HeiwaIdentity {
 }
 
 fn get_heiwa_state_dir() -> PathBuf {
-    let home = env::var("HOME")
-        .or_else(|_| env::var("USERPROFILE"))
-        .expect("HOME or USERPROFILE must be set");
-    PathBuf::from(home).join(".heiwa")
+    RuntimePaths::discover().root().to_path_buf()
 }
 
-pub fn get_identity_path() -> std::path::PathBuf {
+fn get_legacy_identity_path() -> PathBuf {
     get_heiwa_state_dir().join("identity.json")
 }
 
+pub fn get_identity_path() -> std::path::PathBuf {
+    RuntimePaths::discover().identity()
+}
+
 pub fn load_identity() -> Option<HeiwaIdentity> {
-    let path = get_identity_path();
-    if !path.exists() {
-        return None;
+    for path in [get_identity_path(), get_legacy_identity_path()] {
+        if !path.exists() {
+            continue;
+        }
+        let content = std::fs::read_to_string(path).ok()?;
+        if let Ok(identity) = serde_json::from_str(&content) {
+            return Some(identity);
+        }
     }
-    let content = std::fs::read_to_string(path).ok()?;
-    serde_json::from_str(&content).ok()
+    None
 }
 
 pub fn save_identity(identity: &HeiwaIdentity) -> anyhow::Result<()> {
@@ -61,9 +66,10 @@ pub fn save_identity(identity: &HeiwaIdentity) -> anyhow::Result<()> {
 }
 
 pub fn clear_identity() -> anyhow::Result<()> {
-    let path = get_identity_path();
-    if path.exists() {
-        std::fs::remove_file(path)?;
+    for path in [get_identity_path(), get_legacy_identity_path()] {
+        if path.exists() {
+            std::fs::remove_file(path)?;
+        }
     }
     Ok(())
 }
@@ -109,18 +115,27 @@ pub struct LegacyProviderAccount {
 }
 
 fn get_provider_connections_path() -> PathBuf {
+    RuntimePaths::discover().legacy_connections()
+}
+
+fn get_legacy_provider_connections_path() -> PathBuf {
     get_heiwa_state_dir().join("provider_connections.json")
 }
 
 fn load_provider_connections() -> Vec<String> {
-    let path = get_provider_connections_path();
-    if !path.exists() {
-        return Vec::new();
+    for path in [get_provider_connections_path(), get_legacy_provider_connections_path()] {
+        if !path.exists() {
+            continue;
+        }
+        let content = fs::read_to_string(path).ok();
+        let parsed = content
+            .and_then(|raw| serde_json::from_str::<Vec<String>>(&raw).ok())
+            .unwrap_or_default();
+        if !parsed.is_empty() {
+            return parsed;
+        }
     }
-    let content = fs::read_to_string(path).ok();
-    content
-        .and_then(|raw| serde_json::from_str::<Vec<String>>(&raw).ok())
-        .unwrap_or_default()
+    Vec::new()
 }
 
 fn save_provider_connections(connections: &[String]) -> anyhow::Result<()> {
