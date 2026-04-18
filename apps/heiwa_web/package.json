@@ -4,6 +4,17 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "typecheck": "tsc -p tsconfig.json --noEmit"
+    "test": "cd app && svelte-kit sync && vitest tests/auth",
+    "typecheck": "cd app && svelte-kit sync && tsc -p tsconfig.json --noEmit",
+    "build": "cd app && svelte-kit sync && vite build"
+  },
+  "devDependencies": {
+    "@types/node": "^24.2.0",
+    "@sveltejs/adapter-cloudflare": "^5.0.0",
+    "@sveltejs/kit": "^2.49.0",
+    "@workos-inc/node": "^8.8.0",
+    "svelte": "^5.38.2",
+    "typescript": "^5.9.3",
+    "vitest": "^3.2.4"
   }
 }

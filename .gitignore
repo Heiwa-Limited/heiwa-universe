@@ -16,6 +16,9 @@ node_modules/
 build/
 develop-eggs/
 dist/
+apps/heiwa_web/app/.svelte-kit/
+!apps/heiwa_web/app/src/lib/
+!apps/heiwa_web/app/src/lib/**
 downloads/
 eggs/
 .eggs/
