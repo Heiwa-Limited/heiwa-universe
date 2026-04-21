@@ -28,10 +28,10 @@ def main() -> int:
 
     if not failures:
         heiwa_text = (ROOT / "HEIWA.md").read_text(encoding="utf-8")
-        if "compatibility shim" not in heiwa_text.lower():
-            failures.append("HEIWA.md should explain that it is a compatibility shim")
+        if "Canonical truth for `heiwa-universe`" not in heiwa_text:
+            failures.append("HEIWA.md should declare itself canonical architecture truth")
         if "ops/context/HEIWA.md" not in heiwa_text:
-            failures.append("HEIWA.md should redirect to ops/context/HEIWA.md")
+            failures.append("HEIWA.md should reference ops/context/HEIWA.md as companion routing map")
 
         soul_text = (ROOT / "SOUL.md").read_text(encoding="utf-8")
         if "compatibility shim" not in soul_text.lower():

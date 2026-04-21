@@ -1,8 +1,8 @@
 # SOUL.md
 
-This file exists as a compatibility shim because older Heiwa boot sequences still reference repo-root `SOUL.md`.
+Compatibility shim. Legacy boot sequences still open repo-root `SOUL.md`.
 
-Read in this order:
+Canonical continuity / persona layer lives at [`ops/context/SOUL.md`](ops/context/SOUL.md).
 
-1. `ops/context/HEIWA.md` for the current repo routing map
-2. `ops/context/SOUL.md` for the continuity / persona layer
+For architecture truth, read [`HEIWA.md`](HEIWA.md) at repo root.  
+For agent routing map, read [`ops/context/HEIWA.md`](ops/context/HEIWA.md).
