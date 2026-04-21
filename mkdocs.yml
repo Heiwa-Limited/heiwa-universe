@@ -45,6 +45,7 @@ nav:
   - Architecture: architecture.md
   - Provider Registry: provider-registry.md
   - Routing Policy: routing.md
+  - Plugins: plugins.md
   - Deployment: deployment.md
   - Security: security.md
   - Failure Modes: failure-modes.md

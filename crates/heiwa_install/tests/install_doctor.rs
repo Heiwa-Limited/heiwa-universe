@@ -1,4 +1,6 @@
-use heiwa_install::{check_installation, get_heiwa_dir, run_install};
+use heiwa_install::{
+    check_installation, get_heiwa_dir, parse_plugin_source, plan_plugin_install, run_install,
+};
 use std::env;
 use std::fs;
 use std::path::PathBuf;
@@ -42,7 +44,7 @@ fn with_temp_home<T>(f: impl FnOnce(&PathBuf) -> T) -> T {
 #[test]
 fn test_doctor_discovery() {
     let report = check_installation().expect("failed to run doctor");
-    
+
     // In this environment, we expect at least Rust and Python to be present
     assert!(report.rust_version.is_some(), "Rust should be detected");
     assert!(report.python_version.is_some(), "Python should be detected");
@@ -70,9 +72,14 @@ fn test_install_creates_runtime_layout_and_canonical_launcher() {
         run_install().expect("run_install should succeed");
 
         let runtime_root = home.join(".heiwa");
-        assert!(runtime_root.join("machine.json").exists(), "machine manifest should exist");
+        assert!(
+            runtime_root.join("machine.json").exists(),
+            "machine manifest should exist"
+        );
 
-        for dirname in ["bin", "logs", "sessions", "cache", "state", "secrets"] {
+        for dirname in [
+            "bin", "logs", "sessions", "cache", "state", "secrets", "plugins",
+        ] {
             assert!(
                 runtime_root.join(dirname).is_dir(),
                 "expected runtime directory {} under ~/.heiwa",
@@ -81,7 +88,10 @@ fn test_install_creates_runtime_layout_and_canonical_launcher() {
         }
 
         let launcher_path = runtime_root.join("bin").join("heiwa");
-        assert!(launcher_path.exists(), "expected canonical launcher at ~/.heiwa/bin/heiwa");
+        assert!(
+            launcher_path.exists(),
+            "expected canonical launcher at ~/.heiwa/bin/heiwa"
+        );
 
         let launcher = fs::read_to_string(&launcher_path).expect("read launcher");
         assert!(
@@ -93,6 +103,74 @@ fn test_install_creates_runtime_layout_and_canonical_launcher() {
             launcher.contains("apps/heiwa_cli/bin/heiwa"),
             "launcher should still support repo/dev wrapper fallback: {}",
             launcher
+        );
+    });
+}
+
+#[test]
+fn test_parse_plugin_source_supports_github_shortform() {
+    let source = parse_plugin_source("gh:Strategizing/heiwa-example").expect("parse plugin source");
+
+    assert_eq!(source.scheme, "gh");
+    assert_eq!(source.host, "github.com");
+    assert_eq!(source.owner, "Strategizing");
+    assert_eq!(source.repo, "heiwa-example");
+    assert_eq!(source.reference, None);
+    assert_eq!(source.canonical(), "gh:Strategizing/heiwa-example");
+    assert_eq!(
+        source.clone_url(),
+        "https://github.com/Strategizing/heiwa-example.git"
+    );
+}
+
+#[test]
+fn test_parse_plugin_source_supports_optional_reference() {
+    let source =
+        parse_plugin_source("gh:Strategizing/heiwa-example@v1.2.3").expect("parse plugin source");
+
+    assert_eq!(source.reference.as_deref(), Some("v1.2.3"));
+    assert_eq!(source.canonical(), "gh:Strategizing/heiwa-example@v1.2.3");
+}
+
+#[test]
+fn test_parse_plugin_source_rejects_invalid_specs() {
+    for raw in [
+        "Strategizing/heiwa-example",
+        "gh:Strategizing",
+        "gh:/heiwa-example",
+        "gh:Strategizing/heiwa example",
+        "gh:Strategizing/heiwa-example@",
+        "gh:Strategizing/heiwa-example/extra",
+    ] {
+        assert!(
+            parse_plugin_source(raw).is_err(),
+            "expected invalid plugin source: {}",
+            raw
+        );
+    }
+}
+
+#[test]
+fn test_plan_plugin_install_uses_runtime_plugin_layout() {
+    with_temp_home(|home| {
+        let planned = plan_plugin_install("gh:Strategizing/heiwa-example@stable")
+            .expect("plan plugin install");
+        let expected_dir = home
+            .join(".heiwa")
+            .join("plugins")
+            .join("github.com")
+            .join("Strategizing")
+            .join("heiwa-example");
+
+        assert_eq!(planned.install_dir, expected_dir);
+        assert_eq!(
+            planned.receipt_path,
+            expected_dir.join(".heiwa-install.json")
+        );
+        assert_eq!(planned.canonical, "gh:Strategizing/heiwa-example@stable");
+        assert_eq!(
+            planned.clone_url,
+            "https://github.com/Strategizing/heiwa-example.git"
         );
     });
 }
