@@ -8,4 +8,4 @@ path = "src/lib.rs"
 
 [dependencies]
 serde = { version = "1.0", features = ["derive"] }
-spacetimedb-sdk = "=2.0.3"
+spacetimedb-sdk = "2.0.3"

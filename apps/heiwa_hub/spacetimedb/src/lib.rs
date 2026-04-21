@@ -2403,10 +2403,10 @@ pub struct ModelTier {
     pub effort_level: u8,           // normalized 1-5
     pub cost_per_turn: f64,         // 0.0 for local/free
     pub max_context_tokens: u32,
-    pub strengths_json: String,     // JSON array: ["code_generation", "research"]
     pub vram_requirement_mb: u32,
     pub quantization_type: String,
     pub kv_cache_strategy: String,
+    pub strengths_json: String,     // JSON array: ["code_generation", "research"]
     pub enabled: bool,
     pub last_success_rate: f64,     // rolling 20-execution window
     pub avg_latency_ms: u64,
@@ -2480,10 +2480,10 @@ pub fn upsert_model_tier(
     effort_level: u8,
     cost_per_turn: f64,
     max_context_tokens: u32,
-    strengths_json: String,
     vram_requirement_mb: u32,
     quantization_type: String,
     kv_cache_strategy: String,
+    strengths_json: String,
     enabled: bool,
 ) -> Result<(), String> {
     let now = ctx.timestamp.to_string();
@@ -2496,10 +2496,10 @@ pub fn upsert_model_tier(
         existing.effort_level = effort_level;
         existing.cost_per_turn = cost_per_turn;
         existing.max_context_tokens = max_context_tokens;
-        existing.strengths_json = strengths_json;
         existing.vram_requirement_mb = vram_requirement_mb;
         existing.quantization_type = quantization_type;
         existing.kv_cache_strategy = kv_cache_strategy;
+        existing.strengths_json = strengths_json;
         existing.enabled = enabled;
         existing.updated_at = now;
         ctx.db.model_tiers().id().update(existing);
@@ -2515,10 +2515,10 @@ pub fn upsert_model_tier(
             effort_level,
             cost_per_turn,
             max_context_tokens,
-            strengths_json,
             vram_requirement_mb,
             quantization_type,
             kv_cache_strategy,
+            strengths_json,
             enabled,
             last_success_rate: 1.0,
             avg_latency_ms: 0,

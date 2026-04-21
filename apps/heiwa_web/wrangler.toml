@@ -1,3 +1,5 @@
+# Transitional static Pages surface. Target operator UI is a TypeScript app
+# that will replace direct hand-authored HTML in `clients/web`.
 name = "heiwa-clients"
 compatibility_date = "2026-02-26"
 pages_build_output_dir = "clients/web"

@@ -25,6 +25,9 @@ class TestModelTiersSTDB:
                 "effort_level": 4,
                 "cost_per_turn": 0.0,
                 "max_context_tokens": 32768,
+                "vram_requirement_mb": 4096,
+                "quantization_type": "q4_k_m",
+                "kv_cache_strategy": "turboquant",
                 "strengths_json": '["code_generation","research"]',
                 "enabled": True,
                 "last_success_rate": 1.0,
@@ -36,6 +39,9 @@ class TestModelTiersSTDB:
         assert len(result) == 1
         assert result[0]["model_id"] == "ollama/qwen3.5:4b"
         assert result[0]["effort_level"] == 4
+        assert result[0]["vram_requirement_mb"] == 4096
+        assert result[0]["quantization_type"] == "q4_k_m"
+        assert result[0]["kv_cache_strategy"] == "turboquant"
 
     @patch.object(SpacetimeDB, "query")
     def test_get_model_tiers_by_capability_class(self, mock_query):
@@ -70,6 +76,9 @@ class TestModelTiersSTDB:
             effort_level=4,
             cost_per_turn=0.0,
             max_context_tokens=32768,
+            vram_requirement_mb=4096,
+            quantization_type="q4_k_m",
+            kv_cache_strategy="turboquant",
             strengths=["code_generation", "research"],
             vram_requirement_mb=4096,
             quantization_type="q4_k_m",
@@ -79,6 +88,9 @@ class TestModelTiersSTDB:
         mock_call.assert_called_once()
         call_args = mock_call.call_args[0]
         assert call_args[0] == "upsert_model_tier"
+        assert call_args[10] == 4096
+        assert call_args[11] == "q4_k_m"
+        assert call_args[12] == "turboquant"
 
     @patch.object(SpacetimeDB, "call")
     def test_update_model_tier_stats(self, mock_call):

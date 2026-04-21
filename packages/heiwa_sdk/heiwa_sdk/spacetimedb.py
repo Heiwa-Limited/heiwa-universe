@@ -194,6 +194,9 @@ class SpacetimeDB:
             self._sats_option(route.get("drex_decision_id")),
         )
 
+    def attach_drex_decision_to_route(self, request_id: str, drex_decision_id: str) -> bool:
+        return self.call("attach_drex_decision_to_route", request_id, drex_decision_id)
+
     def record_run(self, run_data: dict[str, Any]) -> bool:
         ended_at = run_data.get("ended_at") or datetime.datetime.now(datetime.timezone.utc).isoformat()
         return self.call(
@@ -1368,6 +1371,9 @@ class SpacetimeDB:
         effort_level: int,
         cost_per_turn: float,
         max_context_tokens: int,
+        vram_requirement_mb: int,
+        quantization_type: str,
+        kv_cache_strategy: str,
         strengths: list[str],
         vram_requirement_mb: int,
         quantization_type: str,
@@ -1387,6 +1393,9 @@ class SpacetimeDB:
             effort_level,
             cost_per_turn,
             max_context_tokens,
+            vram_requirement_mb,
+            quantization_type,
+            kv_cache_strategy,
             json.dumps(strengths),
             int(vram_requirement_mb),
             quantization_type,

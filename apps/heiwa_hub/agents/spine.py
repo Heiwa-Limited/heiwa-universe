@@ -347,15 +347,17 @@ class SpineAgent(BaseAgent):
                 "normalization": payload.get("normalization"),
                 "envelope_version": payload.get("envelope_version"),
                 "execution_program": payload.get("execution_program"),
+                "execution_requires": payload.get("execution_requires", []),
             }
 
             # Try remote worker if task targets a non-Railway runtime
             dispatched_remote = False
             target_rt = exec_payload.get("target_runtime", "railway")
             assigned = exec_payload.get("assigned_worker")
-            if target_rt not in {"railway", "cloud"} or assigned:
+            exec_requires = exec_payload.get("execution_requires") or []
+            if target_rt not in {"railway", "cloud"} or assigned or exec_requires:
                 wm = get_worker_manager()
-                worker_id = assigned or wm.get_worker_for_runtime(target_rt)
+                worker_id = assigned or wm.get_worker_for_runtime(target_rt, requires=exec_requires or None)
                 if worker_id:
                     pushed = await wm.push_task(worker_id, exec_payload)
                     if pushed:

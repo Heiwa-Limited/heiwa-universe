@@ -40,7 +40,10 @@ import QueueProposalReducer from "../queue_proposal_reducer";
 import RecordApprovalDecisionReducer from "../record_approval_decision_reducer";
 import RecordBillingEventReducer from "../record_billing_event_reducer";
 import RecordConsentReducer from "../record_consent_reducer";
+<<<<<<< HEAD:packages/heiwa_bindings/typescript/types/reducers.ts
 import RecordDispatchAckReducer from "../record_dispatch_ack_reducer";
+=======
+>>>>>>> rust-ts-first-migration:packages/heiwa_bindings/typescript/generated/types/reducers.ts
 import RecordDrexDecisionReducer from "../record_drex_decision_reducer";
 import RecordDrexFailureReducer from "../record_drex_failure_reducer";
 import RecordInteractionReducer from "../record_interaction_reducer";
@@ -69,7 +72,10 @@ import UpsertBattlefieldReducer from "../upsert_battlefield_reducer";
 import UpsertCaptainFocusReducer from "../upsert_captain_focus_reducer";
 import UpsertDiscordUserReducer from "../upsert_discord_user_reducer";
 import UpsertGpuSlotReducer from "../upsert_gpu_slot_reducer";
+<<<<<<< HEAD:packages/heiwa_bindings/typescript/types/reducers.ts
 import UpsertLeaseReducer from "../upsert_lease_reducer";
+=======
+>>>>>>> rust-ts-first-migration:packages/heiwa_bindings/typescript/generated/types/reducers.ts
 import UpsertLivenessStateReducer from "../upsert_liveness_state_reducer";
 import UpsertModelTierReducer from "../upsert_model_tier_reducer";
 import UpsertNodeHeartbeatReducer from "../upsert_node_heartbeat_reducer";
@@ -114,7 +120,10 @@ export type QueueProposalParams = __Infer<typeof QueueProposalReducer>;
 export type RecordApprovalDecisionParams = __Infer<typeof RecordApprovalDecisionReducer>;
 export type RecordBillingEventParams = __Infer<typeof RecordBillingEventReducer>;
 export type RecordConsentParams = __Infer<typeof RecordConsentReducer>;
+<<<<<<< HEAD:packages/heiwa_bindings/typescript/types/reducers.ts
 export type RecordDispatchAckParams = __Infer<typeof RecordDispatchAckReducer>;
+=======
+>>>>>>> rust-ts-first-migration:packages/heiwa_bindings/typescript/generated/types/reducers.ts
 export type RecordDrexDecisionParams = __Infer<typeof RecordDrexDecisionReducer>;
 export type RecordDrexFailureParams = __Infer<typeof RecordDrexFailureReducer>;
 export type RecordInteractionParams = __Infer<typeof RecordInteractionReducer>;
@@ -143,7 +152,10 @@ export type UpsertBattlefieldParams = __Infer<typeof UpsertBattlefieldReducer>;
 export type UpsertCaptainFocusParams = __Infer<typeof UpsertCaptainFocusReducer>;
 export type UpsertDiscordUserParams = __Infer<typeof UpsertDiscordUserReducer>;
 export type UpsertGpuSlotParams = __Infer<typeof UpsertGpuSlotReducer>;
+<<<<<<< HEAD:packages/heiwa_bindings/typescript/types/reducers.ts
 export type UpsertLeaseParams = __Infer<typeof UpsertLeaseReducer>;
+=======
+>>>>>>> rust-ts-first-migration:packages/heiwa_bindings/typescript/generated/types/reducers.ts
 export type UpsertLivenessStateParams = __Infer<typeof UpsertLivenessStateReducer>;
 export type UpsertModelTierParams = __Infer<typeof UpsertModelTierReducer>;
 export type UpsertNodeHeartbeatParams = __Infer<typeof UpsertNodeHeartbeatReducer>;

@@ -1,17 +1,18 @@
 {
   "name": "@heiwa/bindings",
-  "version": "0.1.0",
   "private": true,
   "type": "module",
+  "types": "./generated/index.ts",
   "exports": {
-    ".": "./index.ts"
+    ".": "./generated/index.ts"
   },
-  "types": "./index.ts",
-  "sideEffects": false,
   "dependencies": {
-    "spacetimedb": "2.0.0"
+    "spacetimedb": "2.0.3"
+  },
+  "devDependencies": {
+    "typescript": "5.9.3"
   },
   "scripts": {
-    "typecheck": "tsc -p tsconfig.json --noEmit"
+    "typecheck": "tsc --noEmit -p tsconfig.json"
   }
 }

@@ -29,6 +29,14 @@ Compression:
 | `packages/heiwa_sdk/` | Python compatibility and migration surface |
 | `packages/heiwa_bindings/` | Generated bindings for STDB types |
 
+## Architecture Direction (April 2026)
+
+- Production target stack is **Rust + TypeScript + Shell**.
+- **Rust** owns the authoritative state layer, orchestration, routing, and future DREX execution logic.
+- **TypeScript** owns operator-facing web surfaces and typed client contracts.
+- **Shell** remains the bootstrap and operator glue layer for Railway, Linux, and WSL execution.
+- The Python Hub and cognition packages are still live in the repo, but they are prototype and compatibility surfaces, not the long-term control plane.
+
 ## Provider Truth
 
 Heiwa wraps provider-owned runtimes. It does not own their internals.

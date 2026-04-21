@@ -138,7 +138,7 @@ class HeiwaClawAgent(BaseAgent):
         payload = data.get("data", data)
         content = payload.get("content", "")
         author = payload.get("author", "operator")
-        owner_id = f"discord-{author}"
+        owner_id = str(payload.get("owner_id") or f"discord-{author}")
         session_id = payload.get("session_id") or f"discord-dm-{author}"
 
         logger.info("DM from %s (%s): %s", author, owner_id, content[:80])

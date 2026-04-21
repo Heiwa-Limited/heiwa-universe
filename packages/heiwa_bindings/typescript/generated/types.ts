@@ -213,6 +213,7 @@ export const DiscordUser = __t.object("DiscordUser", {
 });
 export type DiscordUser = __Infer<typeof DiscordUser>;
 
+<<<<<<< HEAD:packages/heiwa_bindings/typescript/types.ts
 export const DispatchAck = __t.object("DispatchAck", {
   ackId: __t.string(),
   leaseId: __t.string(),
@@ -225,6 +226,8 @@ export const DispatchAck = __t.object("DispatchAck", {
 });
 export type DispatchAck = __Infer<typeof DispatchAck>;
 
+=======
+>>>>>>> rust-ts-first-migration:packages/heiwa_bindings/typescript/generated/types.ts
 export const DrexDecisionRow = __t.object("DrexDecisionRow", {
   decisionId: __t.string(),
   requestId: __t.string(),
@@ -390,6 +393,9 @@ export const ModelTier = __t.object("ModelTier", {
   effortLevel: __t.u8(),
   costPerTurn: __t.f64(),
   maxContextTokens: __t.u32(),
+  vramRequirementMb: __t.u32(),
+  quantizationType: __t.string(),
+  kvCacheStrategy: __t.string(),
   strengthsJson: __t.string(),
   vramRequirementMb: __t.u32(),
   quantizationType: __t.string(),
@@ -605,11 +611,16 @@ export const RunRecord = __t.object("RunRecord", {
   cost: __t.f64(),
   userId: __t.option(__t.string()),
   leaseId: __t.option(__t.string()),
+<<<<<<< HEAD:packages/heiwa_bindings/typescript/types.ts
   sessionId: __t.option(__t.string()),
   ownerId: __t.option(__t.string()),
   principalId: __t.option(__t.string()),
   failureCode: __t.option(__t.string()),
   failureMessage: __t.option(__t.string()),
+=======
+  ownerId: __t.option(__t.string()),
+  principalId: __t.option(__t.string()),
+>>>>>>> rust-ts-first-migration:packages/heiwa_bindings/typescript/generated/types.ts
 });
 export type RunRecord = __Infer<typeof RunRecord>;
 

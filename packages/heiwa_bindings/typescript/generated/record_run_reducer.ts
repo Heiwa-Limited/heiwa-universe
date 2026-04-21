@@ -32,6 +32,9 @@ export default {
   cost: __t.f64(),
   ownerId: __t.option(__t.string()),
   principalId: __t.option(__t.string()),
+<<<<<<< HEAD:packages/heiwa_bindings/typescript/record_run_reducer.ts
   failureCode: __t.option(__t.string()),
   failureMessage: __t.option(__t.string()),
+=======
+>>>>>>> rust-ts-first-migration:packages/heiwa_bindings/typescript/generated/record_run_reducer.ts
 };

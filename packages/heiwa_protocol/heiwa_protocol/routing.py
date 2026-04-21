@@ -105,6 +105,7 @@ class BrokerRouteResult:
     error: str | None = None
     message: str | None = None
     execution_program: ExecutionProgram | None = None
+    execution_requires: list[str] = field(default_factory=list)
 
     @classmethod
     def from_payload(cls, payload: dict[str, Any]) -> "BrokerRouteResult":
@@ -138,6 +139,7 @@ class BrokerRouteResult:
             error=payload.get("error"),
             message=payload.get("message"),
             execution_program=ExecutionProgram.from_dict(payload.get("execution_program")) if payload.get("execution_program") else None,
+            execution_requires=list(payload.get("execution_requires") or []),
         )
 
     def to_dict(self) -> dict[str, Any]:

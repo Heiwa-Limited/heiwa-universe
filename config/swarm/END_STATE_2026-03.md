@@ -1,141 +1,152 @@
-# Heiwa End-State: Objective Conceptualization (March 2026)
+# Heiwa End-State: Objective Conceptualization (April 2026 Update)
 
-> **Status**: Target end-state, not current operational reality. Some capabilities described here are live; others are aspirational. When current implementation differs from this document, update configs and code toward this target without overstating what exists today.
+> **Status**: Target end-state, not current operational reality. The repo still contains Python-first runtime paths, static web surfaces, and transitional glue. This document defines the direction the codebase should be converging toward without overstating what already ships.
 
-## What Heiwa IS
+## What Heiwa Is
 
-A personal AI operating system that turns ~$83 CAD/month in subscriptions into an always-on, rate-limit-aware execution layer. Railway is the primary plane — self-sufficient with CLI tools, API inference, state, and orchestration. MacBook and WSL are optional boost nodes that add capacity when online.
+Heiwa is a frontier digital enterprise system: an always-on Agentic Digital Entity that preserves identity, state, memory, governance, and execution continuity across changing models, tools, and nodes.
 
-## Architecture: Railway-Primary
+It should be treated as a computationally legible organization layer, not a chatbot, not a thin multi-agent wrapper, and not a Python application with a few AI hooks attached.
 
-### Railway (Primary Plane — always-on, self-sufficient)
+## Production Stack Direction
 
-**The Captain** — Event-driven Gemini Flash orchestrator
-- Persistent state in SpacetimeDB (focus, decisions, context)
-- Proactive communication via Discord
-- Delegates to Class 3 CLI tools and free API inference
-- Monitors rate limits, deploys, system health
-- Coordinates multi-agent workflows via ACP
+### Rust (Primary Control Plane)
 
-**Executors** — Class 3 CLI tools installed in Docker
-- Claude Code, Gemini CLI, Codex — all installed on Railway
-- Spawned as ephemeral subprocesses per task
-- Auth via Railway env vars (subscription OAuth)
-- Tunable: thinking level, effort, context scope
+Rust is the target backend language for:
 
-**API Inference** — Free-tier providers for lightweight tasks
-- Google AI Studio (Gemini Flash/Pro) — enrichment, classification, chat
-- Cerebras, SiliconFlow, OpenRouter, Groq — overflow inference via direct API
-- No paid API credits — subscription-included or free only
+- SpacetimeDB reducers, tables, and invariant-preserving state logic
+- orchestration and runtime supervision
+- routing and DREX scoring
+- persistence of decisions, failures, leases, and execution telemetry
 
-**Tool Surface** — MCP servers always available
-- Playwright (headless Chromium in container)
-- Figma, Notion (cloud APIs)
-- Heiwa native tools (status, routing, bench)
-- SpacetimeDB state queries
+### TypeScript (Primary Operator Surface)
 
-**State Layer**
-- SpacetimeDB — authoritative (proposals, nodes, runs, leases, approvals)
-- WebSocket subscriptions — no polling
-- In-process LocalBusTransport — no NATS, no Redis
+TypeScript is the target language for:
 
-### Boost Nodes (Optional — MacBook, WSL)
+- operator-facing web applications
+- generated client contracts over SpacetimeDB
+- dashboards, routing views, and administrative control surfaces
+- protocol mirrors that need to stay type-aligned with Rust state
 
-When online, boost nodes register via `/ws/worker` and add:
-- **Ollama** — local GPU inference (M4, RTX 3060)
-- **Local filesystem** — access to uncommitted code, local dev environment
-- **Docker daemon** — container builds, security scans
-- **GPU workloads** — media generation, embeddings
-- **Extra execution capacity** — parallel CLI sessions
+### Shell (Bootstrap and Execution Glue)
 
-When offline, nothing breaks. Railway handles everything with cloud tools.
+Shell remains first-class for:
 
-### Identity Plane (config + SpacetimeDB)
-- HeiwaCells catalog: typed agent personas with model affinity
-- Single SOUL.md identity across all surfaces
-- profiles.json materializes cells; ai_router.json routes them
+- Railway bootstrapping
+- Linux and WSL execution surfaces
+- CLI wrappers and operator workflows
+- environment setup, auth materialization, and runtime glue
 
-## The Execution Flow
+### Python (Legacy and Regression Only)
+
+Python remains in the repo for:
+
+- compatibility during migration
+- regression tests against the old Hub/cognition paths
+- bridge code that has not been ported yet
+
+Python is **not** the target production control plane.
+
+## Deployment Model
+
+### Railway (Primary Runtime Plane)
+
+Railway stays the always-on runtime plane. Its job is to keep the entity reachable, supervised, and stateful even when boost nodes are offline.
+
+Railway should host:
+
+- the Rust orchestrator
+- the SpacetimeDB-backed control plane
+- CLI and HTTP execution surfaces that remain cloud-safe
+- shell bootstrap scripts that prepare the environment before handing off to Rust
+
+### Cloudflare (Edge and Public Surfaces)
+
+Cloudflare remains the edge boundary and public presentation layer.
+
+Cloudflare should host:
+
+- public and semi-public operator surfaces
+- ingress-safe edge reductions
+- status and governance views that expose already-reduced state instead of raw runtime internals
+
+### Boost Nodes (Optional Capacity)
+
+MacBook and WSL nodes remain optional.
+
+When online, they contribute:
+
+- local filesystem access
+- GPU and local inference capacity
+- Docker and local build surfaces
+- trusted local execution for sovereign tasks
+
+When offline, the primary plane should still function.
+
+## Authoritative State Model
+
+SpacetimeDB remains the source of truth for:
+
+- missions
+- proposals
+- route decisions
+- DREX decisions and failures
+- capability leases
+- node and executor state
+- approvals
+- events
+- memory projections and summaries
+
+The system should move toward a model where state transitions are typed, queryable, and reducer-backed instead of reconstructed from logs or hidden in process memory.
+
+## Execution Flow
 
 ```
 Input (CLI / Discord / Webhook / Cron)
-  → Captain triages (event-driven Gemini Flash)
-  → IntentNormalizer → RiskScorer → ComputeRouter
-  → HeiwaClaw (resolve to adapter + provider via direct API or CLI)
-  → Rate cascade: pick best available tool with capacity
-  → Execute on Railway (CLI subprocess or API inference)
-  → If task needs boost (Ollama/filesystem): delegate to boost node
-  → Result → SpacetimeDB → Operator surface (CLI / Discord / web)
+  → Shell bootstrap (env, auth, STDB readiness, optional local services)
+  → Rust orchestrator
+  → DREX scoring + routing
+  → STDB-backed decision persistence
+  → Execution lane selection (Railway surface or boost node)
+  → Result / state transition / memory projection
+  → TypeScript operator surfaces + edge views
 ```
 
-## Protocols
+## Resolution-Native Intelligence
 
-- **MCP** (Model ↔ Tool): Any model calls any tool via MCP bridge
-- **ACP** (Agent ↔ Agent): Structured delegation with contracts (task, context, constraints, output format)
-- **Skills**: Executable workflow templates that compose MCP tools + ACP delegation
+Heiwa should route work according to **DREX**: Dynamic Resolution of Execution.
 
-## Rate Cascade (the value engine)
+- **Macro**: strategic planning, policy, coordination, resource posture
+- **Meso**: domain routing, supervision, lease shaping, escalation
+- **Micro**: shell, files, APIs, runtime mutation, tactical execution
 
-```
-1. Gemini CLI     — 50 turns/hr    (free, Google AI Pro)
-2. Antigravity    — 35 turns/hr    (free, Google AI Pro)
-3. Claude Code    — 40 turns/5hr   ($31/mo subscription)
-4. Codex          — 25 turns/hr    ($27/mo subscription)
-5. Free APIs      — unlimited-ish  (Cerebras, Google AI Studio, OpenRouter)
-6. Ollama         — unlimited      (boost node only)
-```
+The enterprise view should be a structured reduction of lower-level activity, not a separate narrative system.
 
-Heiwa spreads work across all providers. Never leaves capacity on the table.
+## What Gets Replaced
 
-## What Gets Killed
-
-| Kill | Replacement |
+| Legacy Primary Path | Target Replacement |
 | --- | --- |
-| NATS | SpacetimeDB subscriptions + in-process bus |
-| Polling (tick.py) | STDB subscription callbacks |
-| Ad-hoc provider calls | All routing through HeiwaClaw (direct API, no messaging gateway) |
-| Local-first execution model | Railway-primary, boost nodes optional |
-| Paid API tiers (Claude/OpenAI API) | Subscription CLI tools + free APIs only |
-| Individual smoke tests | Unified pytest runner |
-| Monolithic Spine | Decomposed agents + Captain orchestrator |
+| Python Hub as primary control plane | Rust orchestrator + Rust-owned routing |
+| Python cognition router as the long-term runtime selector | Rust DREX scoring and route selection |
+| Static HTML web as the main operator surface | TypeScript operator application |
+| Ad hoc JSON contracts between layers | Generated, typed Rust and TypeScript bindings |
+| Python-first mental model of the repo | Rust + TypeScript + Shell-first architecture |
 
-## What Gets Built
+## What Stays
 
-| Surface | Purpose |
+| Surface | Ongoing Role |
 | --- | --- |
-| Captain agent | Always-on Gemini orchestrator on Railway |
-| CLI tools in Docker | Railway self-sufficient for Class 3 execution |
-| Boost node protocol | MacBook/WSL register capabilities via /ws/worker |
-| ACP contracts | Structured agent-to-agent delegation |
-| Skill execution engine | YAML workflows Captain can orchestrate |
-| STDB subscription layer | Replace all polling with reactive subscriptions |
-| MCP tool sharing | MacBook tools accessible from Railway via WebSocket |
-
-## The Four-Class Model
-
-- **Class 1 (CPU):** Shell, git, parse, lint, audit — free, instant
-- **Class 2 (GPU):** Local LLM, embeddings, image gen — boost node, free
-- **Class 3 (Premium Remote):** Complex reasoning, strategy, code — Railway, subscription-included
-- **Class 4 (Cloud Persistence):** Webhooks, schedulers, deploys — Railway, always-on
-
-## Cost Structure
-
-| Resource | Monthly | Role |
-|---|---|---|
-| Railway Pro | $25 | Primary plane — everything runs here |
-| Claude Pro | $31 | Claude Code sessions on Railway |
-| ChatGPT Plus | $27 | Codex sessions on Railway |
-| Google AI Pro | $0 | Captain + Gemini/Antigravity (free until Dec 2026) |
-| Free APIs | $0 | Overflow inference |
-| Boost nodes | $0 | Optional capacity (your existing hardware) |
+| SpacetimeDB | Authoritative durable state |
+| Railway | Primary always-on runtime plane |
+| Cloudflare | Edge ingress and public presentation |
+| Shell | Bootstrap, execution glue, operator workflows |
+| Boost nodes | Optional sovereign/local execution capacity |
 
 ## Success Criteria
 
-- Railway is fully self-sufficient — works with all boost nodes offline
-- Captain proactively manages work, communicates via Discord
-- Rate cascade spreads work across all 3 CLI tools (Claude Code, Gemini CLI, Codex) + free APIs
-- Zero external message brokers
-- All state changes flow through SpacetimeDB subscriptions
-- Sovereign tasks route to boost nodes only (never cloud)
-- Monthly spend stays at ~$83 CAD
-- The system is publicly showcasable
+- Rust owns the production orchestration and routing path
+- TypeScript owns the primary operator-facing web application
+- Shell remains stable bootstrap glue without becoming the cognitive runtime
+- Python is demoted to compatibility and regression-only status
+- SpacetimeDB remains authoritative throughout the migration
+- The system can operate continuously on Railway while still exploiting local boost nodes when available

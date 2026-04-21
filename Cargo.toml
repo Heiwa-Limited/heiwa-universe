@@ -1,15 +1,17 @@
 [workspace]
 members = [
     "apps/heiwa_core",
+    "apps/heiwa_hub/heiwaproductiondb/spacetimedb",
     "apps/heiwa_hub/spacetimedb",
+    "apps/heiwa_orchestrator",
     "apps/heiwa_shell",
-    "crates/heiwa_session",
-    "crates/heiwa_repl",
-    "crates/heiwa_provider",
     "crates/heiwa_install",
     "crates/heiwa_loop",
-    "crates/heiwa_stdb",
     "crates/heiwa_protocol",
+    "crates/heiwa_provider",
+    "crates/heiwa_repl",
+    "crates/heiwa_session",
+    "crates/heiwa_stdb",
     "crates/heiwa_tui",
     "packages/heiwa_bindings/rust",
 ]

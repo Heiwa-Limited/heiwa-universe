@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import logging
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 import json
 import os
 from pathlib import Path
@@ -25,6 +25,7 @@ class ComputeRoute:
     intent_class: str = ""
     effort_knob: str = ""  # provider-specific effort setting
     requires_human_oversight: bool = False
+    execution_requires: list[str] = field(default_factory=list)
 
 
 @dataclass(slots=True)
@@ -352,6 +353,7 @@ class ComputeRouter:
                     rationale=f"Rate cascade from {current_group} (exhausted) to {alt_group}.",
                     intent_class=route.intent_class,
                     effort_knob=route.effort_knob,
+                    execution_requires=route.execution_requires,
                 )
 
         logger.warning(
@@ -437,6 +439,24 @@ class ComputeRouter:
                     )
 
         target_tool = direct_tool or "heiwa_claw"
+
+        # Derive execution capability requirements from workload characteristics
+        requires: list[str] = []
+        if privacy_level == "sovereign":
+            requires.append("sovereign")
+        if runtime in {"boost", "macbook"} or intent in {"media", "files"}:
+            # Workloads that need local execution with GPU
+            if intent == "media":
+                requires.append("gpu_native")
+            if intent == "files":
+                requires.append("standard_compute")
+        if compute_class >= 2 and intent in {"media", "research", "strategy"}:
+            requires.append("gpu_vram_8gb")
+        # Large-model workloads prefer higher VRAM nodes
+        if intent in {"research", "strategy"} and privacy_level == "sovereign":
+            requires.append("gpu_vram_16gb")
+            requires.append("large_model")
+
         return ComputeRoute(
             compute_class=compute_class,
             assigned_worker=worker,
@@ -447,6 +467,7 @@ class ComputeRouter:
             privacy_level=privacy_level,
             rationale=rationale,
             intent_class=intent,
+            execution_requires=requires,
         )
 
     def route(
@@ -498,6 +519,7 @@ class ComputeRouter:
                     rationale=f"Identity-preferred worker: {identity_worker_hint}.",
                     intent_class=result.intent_class,
                     effort_knob=result.effort_knob,
+                    execution_requires=result.execution_requires,
                 )
 
         # Apply feedback-based model preference within the same provider lane
@@ -630,6 +652,7 @@ class ComputeRouter:
                 rationale=f"Feedback-preferred model: {preferred}.",
                 intent_class=route.intent_class,
                 effort_knob=route.effort_knob,
+                execution_requires=route.execution_requires,
             )
         return route
 

@@ -1,9 +1,10 @@
 {
-  "extends": "../../../tsconfig.base.json",
   "compilerOptions": {
-    "rootDir": ".",
-    "baseUrl": ".",
-    "types": []
+    "module": "ESNext",
+    "moduleResolution": "Bundler",
+    "target": "ES2022",
+    "noEmit": true,
+    "skipLibCheck": true
   },
-  "include": ["./**/*.ts"]
+  "include": ["generated/**/*.ts"]
 }
