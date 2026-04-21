@@ -1,6 +1,6 @@
 site_name: Heiwa
-site_description: Heiwa control-plane documentation
-site_url: https://docs.heiwa.ltd
+site_description: Local-first AI runtime documentation for Heiwa
+site_url: https://strategizing.github.io/heiwa-universe/
 repo_url: https://github.com/Strategizing/heiwa-universe
 repo_name: Strategizing/heiwa-universe
 
@@ -15,6 +15,13 @@ theme:
       primary: black
       accent: deep orange
 
+exclude_docs: |
+  audit/**
+  design/**
+  enterprise/**
+  railway-self-operation.md
+  superpowers/**
+
 markdown_extensions:
   - admonition
   - attr_list
@@ -26,6 +33,12 @@ markdown_extensions:
   - pymdownx.tabbed:
       alternate_style: true
 
+validation:
+  nav:
+    omitted_files: ignore
+  links:
+    not_found: ignore
+
 nav:
   - Home: index.md
   - Current Capability: current-capability.md
@@ -36,7 +49,5 @@ nav:
   - Security: security.md
   - Failure Modes: failure-modes.md
   - Operator Runbook: operator-runbook.md
-  - Railway Self-Operation: railway-self-operation.md
   - References:
       - Upstream References: references/UPSTREAM_REFERENCES.md
-      - Historical Research: enterprise/AGENTIC_ENTERPRISE_2026-03-06.md

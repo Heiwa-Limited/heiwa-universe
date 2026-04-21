@@ -1,8 +1,8 @@
 use anyhow::Result;
 use crossterm::{
     event::{self, Event, KeyCode, KeyModifiers},
-    terminal::{self, EnterAlternateScreen, LeaveAlternateScreen},
     execute,
+    terminal::{self, EnterAlternateScreen, LeaveAlternateScreen},
 };
 use ratatui::{
     backend::CrosstermBackend,
@@ -15,9 +15,7 @@ use ratatui::{
 use std::io;
 use tokio::sync::mpsc;
 
-use heiwa_protocol::{
-    CockpitCommand, CockpitEvent, SessionState, TranscriptBlock,
-};
+use heiwa_protocol::{CockpitCommand, CockpitEvent, SessionState, TranscriptBlock};
 
 // ---------------------------------------------------------------------------
 // App state — owned by the TUI thread
@@ -185,9 +183,9 @@ fn render(f: &mut Frame, state: &AppState) {
         .direction(Direction::Vertical)
         .constraints([
             Constraint::Length(3),  // Header
-            Constraint::Min(6),    // Middle (transcript + optional inspector)
+            Constraint::Min(6),     // Middle (transcript + optional inspector)
             Constraint::Length(ch), // Composer (dynamic)
-            Constraint::Length(1), // Footer
+            Constraint::Length(1),  // Footer
         ])
         .split(f.size());
 
@@ -205,8 +203,11 @@ fn render_header(f: &mut Frame, state: &AppState, area: Rect) {
         state.session.routing.current_model,
         state.session.routing.mode,
     );
-    let header = Paragraph::new(header_text)
-        .block(Block::default().borders(Borders::ALL).title(" Heiwa Cockpit "));
+    let header = Paragraph::new(header_text).block(
+        Block::default()
+            .borders(Borders::ALL)
+            .title(" Heiwa Cockpit "),
+    );
     f.render_widget(header, area);
 }
 
@@ -355,9 +356,7 @@ fn render_markdown_lines<'a>(text: &str, lines: &mut Vec<Line<'a>>, base_color: 
             let heading = trimmed.trim_start_matches('#').trim();
             lines.push(Line::from(Span::styled(
                 format!("  {}", heading),
-                Style::default()
-                    .fg(base_color)
-                    .add_modifier(Modifier::BOLD),
+                Style::default().fg(base_color).add_modifier(Modifier::BOLD),
             )));
             continue;
         }
@@ -407,7 +406,7 @@ fn render_markdown_lines<'a>(text: &str, lines: &mut Vec<Line<'a>>, base_color: 
         }
 
         // --- Numbered lists ---
-        if trimmed.len() > 2 && trimmed.chars().next().map_or(false, |c| c.is_ascii_digit()) {
+        if trimmed.len() > 2 && trimmed.chars().next().is_some_and(|c| c.is_ascii_digit()) {
             if let Some(rest) = trimmed.split_once(". ").map(|(_, r)| r) {
                 let prefix_end = trimmed.find(". ").unwrap_or(0);
                 let num = &trimmed[..prefix_end + 1];
@@ -437,9 +436,7 @@ fn render_markdown_lines<'a>(text: &str, lines: &mut Vec<Line<'a>>, base_color: 
 /// Parse inline markdown spans: **bold** and `code`.
 fn parse_inline_spans<'a>(text: &str, spans: &mut Vec<Span<'a>>, base_color: Color) {
     let mut remaining = text;
-    let bold_style = Style::default()
-        .fg(base_color)
-        .add_modifier(Modifier::BOLD);
+    let bold_style = Style::default().fg(base_color).add_modifier(Modifier::BOLD);
     let code_style = Style::default().fg(Color::Magenta);
     let normal_style = Style::default().fg(base_color);
 
@@ -456,10 +453,7 @@ fn parse_inline_spans<'a>(text: &str, spans: &mut Vec<Span<'a>>, base_color: Col
                 }
                 let after_tick = &remaining[cp + 1..];
                 if let Some(end) = after_tick.find('`') {
-                    spans.push(Span::styled(
-                        after_tick[..end].to_string(),
-                        code_style,
-                    ));
+                    spans.push(Span::styled(after_tick[..end].to_string(), code_style));
                     remaining = &after_tick[end + 1..];
                 } else {
                     // Unclosed backtick — render rest as-is
@@ -474,10 +468,7 @@ fn parse_inline_spans<'a>(text: &str, spans: &mut Vec<Span<'a>>, base_color: Col
                 }
                 let after_stars = &remaining[bp + 2..];
                 if let Some(end) = after_stars.find("**") {
-                    spans.push(Span::styled(
-                        after_stars[..end].to_string(),
-                        bold_style,
-                    ));
+                    spans.push(Span::styled(after_stars[..end].to_string(), bold_style));
                     remaining = &after_stars[end + 2..];
                 } else {
                     // Unclosed bold — render rest as-is
@@ -492,10 +483,7 @@ fn parse_inline_spans<'a>(text: &str, spans: &mut Vec<Span<'a>>, base_color: Col
                 }
                 let after_tick = &remaining[cp + 1..];
                 if let Some(end) = after_tick.find('`') {
-                    spans.push(Span::styled(
-                        after_tick[..end].to_string(),
-                        code_style,
-                    ));
+                    spans.push(Span::styled(after_tick[..end].to_string(), code_style));
                     remaining = &after_tick[end + 1..];
                 } else {
                     spans.push(Span::styled(remaining[cp..].to_string(), normal_style));
@@ -574,11 +562,7 @@ fn render_inspector(f: &mut Frame, state: &AppState, area: Rect) {
     )));
 
     let inspector = Paragraph::new(lines)
-        .block(
-            Block::default()
-                .borders(Borders::ALL)
-                .title(" Inspector "),
-        )
+        .block(Block::default().borders(Borders::ALL).title(" Inspector "))
         .wrap(Wrap { trim: true });
     f.render_widget(inspector, area);
 }
@@ -730,10 +714,7 @@ mod tests {
         assert_eq!(lines.len(), 1);
         let span = &lines[0].spans[0];
         assert!(span.content.contains("Subheading"));
-        assert!(span
-            .style
-            .add_modifier
-            .contains(Modifier::UNDERLINED));
+        assert!(span.style.add_modifier.contains(Modifier::UNDERLINED));
     }
 
     #[test]

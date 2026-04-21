@@ -1,0 +1,36 @@
+name: Platform request
+description: Propose a concrete build, release, docs, or packaging improvement.
+title: "[Request]: "
+labels:
+  - enhancement
+body:
+  - type: textarea
+    id: outcome
+    attributes:
+      label: Desired outcome
+      description: What should exist after this work is done?
+    validations:
+      required: true
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem or gap
+      description: What is blocked, inconsistent, or missing today?
+    validations:
+      required: true
+  - type: textarea
+    id: scope
+    attributes:
+      label: Scope
+      description: Name the likely files, crates, workflows, or docs surfaces involved.
+  - type: dropdown
+    id: lane
+    attributes:
+      label: Build matrix lane
+      options:
+        - LOCAL
+        - PLATFORM
+        - CLEANUP
+        - Not sure
+    validations:
+      required: true

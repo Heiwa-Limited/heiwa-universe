@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Architecture truth
+    url: https://github.com/Strategizing/heiwa-universe/blob/main/HEIWA.md
+    about: Read the canonical architecture document before filing an issue about product direction.
+  - name: Build matrix
+    url: https://github.com/Strategizing/heiwa-universe/blob/main/BUILD_MATRIX.md
+    about: Check current task ownership and dependency order before opening a platform request.

@@ -313,12 +313,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "fd16c4719339c4530435d38e511904438d07cce7950afa3718a84ac36c10e89e"
 
 [[package]]
-name = "cfg_aliases"
-version = "0.2.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "613afe47fcd5fac7ccf1db93babcb082c5994d996f20b8b159f2ad1658eb5724"
-
-[[package]]
 name = "chrono"
 version = "0.4.44"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1081,7 +1075,6 @@ name = "heiwa-session"
 version = "0.1.0"
 dependencies = [
  "anyhow",
- "nix 0.31.2",
  "portable-pty",
  "serde",
  "tokio",
@@ -1709,19 +1702,7 @@ checksum = "ab2156c4fce2f8df6c499cc1c763e4394b7482525bf2a9701c9d79d215f519e4"
 dependencies = [
  "bitflags 2.11.0",
  "cfg-if",
- "cfg_aliases 0.1.1",
- "libc",
-]
-
-[[package]]
-name = "nix"
-version = "0.31.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5d6d0705320c1e6ba1d912b5e37cf18071b6c2e9b7fa8215a1e8a7651966f5d3"
-dependencies = [
- "bitflags 2.11.0",
- "cfg-if",
- "cfg_aliases 0.2.1",
+ "cfg_aliases",
  "libc",
 ]
 
@@ -1881,7 +1862,7 @@ dependencies = [
  "lazy_static",
  "libc",
  "log",
- "nix 0.28.0",
+ "nix",
  "serde",
  "serial2",
  "shared_library",

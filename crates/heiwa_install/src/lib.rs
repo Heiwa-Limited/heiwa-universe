@@ -2,10 +2,10 @@ use anyhow::Result;
 use serde::{Deserialize, Serialize};
 use std::env;
 use std::fs;
-use std::path::PathBuf;
-use std::process::Command;
 #[cfg(unix)]
 use std::os::unix::fs::PermissionsExt;
+use std::path::{Path, PathBuf};
+use std::process::Command;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DoctorReport {
@@ -95,7 +95,7 @@ pub fn run_install() -> Result<()> {
     Ok(())
 }
 
-fn ensure_runtime_layout(heiwa_dir: &PathBuf) -> Result<()> {
+fn ensure_runtime_layout(heiwa_dir: &Path) -> Result<()> {
     fs::create_dir_all(heiwa_dir)?;
     for dirname in ["bin", "logs", "sessions", "cache", "state", "secrets"] {
         fs::create_dir_all(heiwa_dir.join(dirname))?;
@@ -103,7 +103,7 @@ fn ensure_runtime_layout(heiwa_dir: &PathBuf) -> Result<()> {
     Ok(())
 }
 
-fn write_canonical_launcher(heiwa_dir: &PathBuf) -> Result<()> {
+fn write_canonical_launcher(heiwa_dir: &Path) -> Result<()> {
     let launcher_path = heiwa_dir.join("bin").join("heiwa");
     let repo_root = get_repo_root();
     let launcher = format!(
@@ -164,7 +164,7 @@ fn get_repo_root() -> PathBuf {
         })
 }
 
-fn load_existing_manifest(path: &PathBuf) -> Option<MachineManifest> {
+fn load_existing_manifest(path: &Path) -> Option<MachineManifest> {
     fs::read_to_string(path)
         .ok()
         .and_then(|raw| serde_json::from_str(&raw).ok())
@@ -193,14 +193,11 @@ fn has_command(cmd: &str) -> bool {
 }
 
 fn get_hostname() -> Option<String> {
-    Command::new("hostname")
-        .output()
-        .ok()
-        .and_then(|output| {
-            if output.status.success() {
-                Some(String::from_utf8_lossy(&output.stdout).trim().to_string())
-            } else {
-                None
-            }
-        })
+    Command::new("hostname").output().ok().and_then(|output| {
+        if output.status.success() {
+            Some(String::from_utf8_lossy(&output.stdout).trim().to_string())
+        } else {
+            None
+        }
+    })
 }

@@ -1,45 +1,32 @@
 # Deployment
 
-## Railway
+## Current publish path
 
-Railway is the cloud runtime for the live Heiwa services.
+The current platform goal is GitHub-native distribution:
 
-Expected public runtime surfaces:
+- GitHub Actions validates the Rust workspace on macOS, Linux, and Windows.
+- GitHub Pages publishes the docs site from `docs/` on release tags.
+- GitHub Releases are the intended handoff point for packaged runtime artifacts.
 
-- `api.heiwa.ltd` -> `heiwa-cloud-hq`
-- Hub endpoints: `/auth/*`, `/health`, `/status`, `/tools`, `/call/{tool_name}`, WebSocket status/events
-- Internal vertical services such as `heiwa-trading` can still deploy on Railway, but they are not treated as supported public runtime surfaces
+This repo should be able to go from fresh clone to verified build and published docs without assuming Railway, Cloudflare, or a hosted control plane.
 
-## Cloudflare
+## CI contract
 
-Cloudflare proxies all public domains. Currently all domains route to the Railway hub, which serves both the API and the static web shells. The target state splits the static shells onto Cloudflare Pages at the edge, but this migration is not yet done.
+- `cargo build --workspace --locked`
+- `cargo test --workspace --locked`
+- `cargo clippy --workspace --locked --all-targets`
+- `mkdocs build --strict`
 
-Target Cloudflare Pages surfaces (not yet split from Railway):
+## Docs publishing
 
-- root marketing pages (`heiwa.ltd`)
-- authenticated app shell (`app.heiwa.ltd`)
-- status shell (`status.heiwa.ltd`)
-- docs site built from MkDocs Material (`docs.heiwa.ltd`)
+The docs site is built by MkDocs Material and deployed by GitHub Pages from the generated `site/` directory. Publishing is tag-driven so the public docs track intentional release points instead of every `main` push.
 
-`trade.heiwa.ltd` no longer has a public DNS record. The standalone `heiwa-trading` Railway service still exists for internal preview work, but it is not a supported public surface.
+## Legacy hosted paths
 
-Cloudflare should present public-safe shells. It should not become a second control plane or make privileged decisions outside the hub API.
-
-## SpacetimeDB
-
-SpacetimeDB remains external infrastructure on `maincloud.spacetimedb.com`.
-
-- Do not describe it as a Railway sidecar, attached volume, or private database service.
-- Hub and any internal vertical runtimes should both treat it as the shared authoritative ledger.
-
-## Build outputs
-
-- `apps/heiwa_web/clients/web`: static marketing, app shell, and status shell
-- `mkdocs build`: documentation output for `docs.heiwa.ltd`
+Hosted and control-plane material still exists in the repository as reference or migration context. It is not the primary release path for the current client-first build matrix, and it should not be described as the default operator experience.
 
 ## Verification
 
-- hub smoke tests must run in CI
-- internal trading deploys stay optional and are not verified through a public hostname gate
-- docs must build with `mkdocs build --strict`
-- the static web shell must pass `python apps/heiwa_web/scripts/check_static_surface.py`
+- CI must pass on all Rust matrix platforms before release work continues.
+- Docs must build cleanly with `mkdocs build --strict`.
+- Release automation should extend from this baseline rather than bypass it.

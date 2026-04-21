@@ -1,0 +1,49 @@
+name: Bug report
+description: Report a reproducible defect in the runtime, docs, or platform workflows.
+title: "[Bug]: "
+labels:
+  - bug
+body:
+  - type: textarea
+    id: summary
+    attributes:
+      label: Summary
+      description: What is broken?
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Reproduction
+      description: Exact commands, paths, or inputs needed to reproduce the issue.
+      placeholder: |
+        1. Run ...
+        2. Open ...
+        3. Observe ...
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual behavior
+    validations:
+      required: true
+  - type: dropdown
+    id: surface
+    attributes:
+      label: Surface
+      options:
+        - CLI runtime
+        - Rust workspace
+        - Docs / GitHub Pages
+        - GitHub Actions
+        - Provider integration
+        - Legacy / reference surface
+    validations:
+      required: true

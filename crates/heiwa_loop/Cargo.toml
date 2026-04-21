@@ -2,6 +2,14 @@
 name = "heiwa-loop"
 version = "0.1.0"
 edition = "2021"
+description = "Routing and bounded execution loop primitives for Heiwa"
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+documentation.workspace = true
+readme.workspace = true
+keywords.workspace = true
+categories.workspace = true
 
 [dependencies]
 anyhow = "1.0"

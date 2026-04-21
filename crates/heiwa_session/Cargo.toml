@@ -2,10 +2,17 @@
 name = "heiwa-session"
 version = "0.1.0"
 edition = "2021"
+description = "Session daemon and PTY primitives for Heiwa"
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+documentation.workspace = true
+readme.workspace = true
+keywords.workspace = true
+categories.workspace = true
 
 [dependencies]
 anyhow = "1.0"
-nix = "0.31.2"
 portable-pty = { version = "0.9.0", features = ["serde"] }
 serde = { version = "1.0", features = ["derive"] }
 tokio = { version = "1.50.0", features = ["full"] }

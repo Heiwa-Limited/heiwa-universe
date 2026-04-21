@@ -16,3 +16,12 @@ members = [
     "packages/heiwa_bindings/rust",
 ]
 resolver = "2"
+
+[workspace.package]
+license = "UNLICENSED"
+repository = "https://github.com/Strategizing/heiwa-universe"
+homepage = "https://github.com/Strategizing/heiwa-universe"
+documentation = "https://strategizing.github.io/heiwa-universe/"
+readme = "README.md"
+keywords = ["heiwa", "ai", "agents", "cli", "local-first"]
+categories = ["command-line-utilities", "development-tools"]

@@ -1,11 +1,13 @@
 use anyhow::Result;
+use portable_pty::{native_pty_system, CommandBuilder, PtySize};
+#[cfg(unix)]
 use serde::{Deserialize, Serialize};
 use std::env;
 use std::fs;
 use std::path::PathBuf;
+#[cfg(unix)]
 use tokio::net::UnixListener;
 use uuid::Uuid;
-use portable_pty::{native_pty_system, PtySize, CommandBuilder};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SessionInfo {
@@ -24,11 +26,20 @@ pub fn start_daemon() -> Result<SessionInfo> {
     let session_id = Uuid::new_v4().to_string();
     let session_dir = get_session_dir();
     fs::create_dir_all(&session_dir)?;
-    
+
     let socket_path = session_dir.join(format!("{}.sock", session_id));
-    
-    // Spawn the daemon task
+
+    #[cfg(not(unix))]
+    {
+        return Err(anyhow::anyhow!(
+            "session daemon sockets are not supported on this platform yet"
+        ));
+    }
+
+    #[cfg(unix)]
     let socket_path_clone = socket_path.clone();
+
+    #[cfg(unix)]
     tokio::spawn(async move {
         let listener = UnixListener::bind(&socket_path_clone).expect("failed to bind socket");
         loop {
@@ -71,7 +82,7 @@ impl PtySession {
         } else {
             "bash"
         };
-        
+
         let cmd = CommandBuilder::new(shell);
         let _child = pair.slave.spawn_command(cmd)?;
 

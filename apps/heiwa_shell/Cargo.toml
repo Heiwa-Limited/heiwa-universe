@@ -2,6 +2,14 @@
 name = "heiwa-shell"
 version = "0.1.0"
 edition = "2021"
+description = "Installed heiwa CLI surface for the Heiwa local-first AI runtime"
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+documentation.workspace = true
+readme.workspace = true
+keywords.workspace = true
+categories.workspace = true
 
 [[bin]]
 name = "heiwa"

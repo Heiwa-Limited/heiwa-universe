@@ -1,21 +1,19 @@
 # Heiwa
 
-[![SpacetimeDB](https://img.shields.io/badge/state-SpacetimeDB-0c73d8?style=flat-square)](https://spacetimedb.com)
-[![Web](https://img.shields.io/badge/dashboard-app.heiwa.ltd-000000?style=flat-square)](https://app.heiwa.ltd)
-
-Heiwa is a local-first AI runtime and enterprise platform. It normalizes access to provider subscriptions, API keys, local models, device capabilities, and evidence through a unified execution kernel.
+Heiwa is a local-first AI operating layer. The installed `heiwa` runtime is the product center, Rust owns the execution path, and this repository is being hardened for GitHub-native distribution rather than hosted-platform theater.
 
 ## One-Sentence Truth
 
 `heiwa` is the installed product surface, DREX is the internal execution kernel, SpacetimeDB is the adjudication and evidence plane, Rust proposes and executes, and `heiwa` presents.
 
-## Core Pillars
+## Current Repo Focus
 
-- **Local-First Runtime** -- `heiwa` on your machine is the primary operator surface.
-- **DREX Kernel** -- Advanced intent classification, risk scoring, and device-aware routing.
-- **Evidence-First** -- Every task, model selection, and run is adjudicated and persisted in SpacetimeDB.
-- **Provider Neutral** -- Unified access to Claude Code, Codex, Gemini CLI, Antigravity, and local runtimes like Ollama.
-- **Sovereign Execution** -- Prefer local models and local devices for privacy and cost control.
+- Installed runtime: `apps/heiwa_shell/`
+- Core execution and routing: `apps/heiwa_core/`, `crates/heiwa_loop/`, `crates/heiwa_session/`
+- Provider normalization: `crates/heiwa_provider/`
+- Terminal UX: `crates/heiwa_tui/`, `crates/heiwa_repl/`
+- Reference state plane: `apps/heiwa_hub/spacetimedb/`
+- GitHub distribution surfaces: Actions, Pages, and release metadata
 
 ## Architecture
 
@@ -32,24 +30,31 @@ Heiwa is a local-first AI runtime and enterprise platform. It normalizes access 
 ## Quick Start
 
 ```bash
-# 1. Install and verify baseline
+# Verify the local toolchain baseline
 bash scripts/check_runtime_baseline.sh
 
-# 2. Build the local runtime
+# Build the installed runtime
 cargo build -p heiwa-shell
 
-# 3. Run install and doctor
-./target/debug/heiwa-shell install
-./target/debug/heiwa-shell doctor
+# Run install and doctor
+cargo run -p heiwa-shell --bin heiwa -- install
+cargo run -p heiwa-shell --bin heiwa -- doctor
 
-# 4. List providers and auth
-./target/debug/heiwa-shell providers
-./target/debug/heiwa-shell auth status
+# Inspect providers and auth state
+cargo run -p heiwa-shell --bin heiwa -- providers
+cargo run -p heiwa-shell --bin heiwa -- auth status
 ```
 
-## Key Manifests
+## Platform Lane
 
-- [`HEIWA.md`](HEIWA.md) -- **The Canonical Truth** (Read this first)
-- [`docs/standards/runtime-baseline.md`](docs/standards/runtime-baseline.md)
-- [`config/swarm/BUILD_BLUEPRINT_2026-03-06.md`](config/swarm/BUILD_BLUEPRINT_2026-03-06.md)
-- [`justfile`](justfile) -- Build and task contract
+- CI runs Rust build/test/clippy across macOS, Linux, and Windows.
+- Docs publish through GitHub Pages on release tags.
+- Cargo manifests now carry shared package metadata for release readiness.
+- Contributor docs and issue templates live under `.github/`.
+
+## Read First
+
+- [`HEIWA.md`](HEIWA.md)
+- [`AGENTS.md`](AGENTS.md)
+- [`BUILD_MATRIX.md`](BUILD_MATRIX.md)
+- [`docs/`](docs/)

@@ -35,12 +35,12 @@ pub fn parse_input(input: &str) -> ReplCommand {
         return ReplCommand::Task("".to_string());
     }
 
-    if input.starts_with('!') {
-        return ReplCommand::Shell(input[1..].trim().to_string());
+    if let Some(stripped) = input.strip_prefix('!') {
+        return ReplCommand::Shell(stripped.trim().to_string());
     }
 
-    if input.starts_with('/') {
-        let parts: Vec<String> = input[1..].split_whitespace().map(|s| s.to_string()).collect();
+    if let Some(stripped) = input.strip_prefix('/') {
+        let parts: Vec<String> = stripped.split_whitespace().map(|s| s.to_string()).collect();
         if parts.is_empty() {
             return ReplCommand::Task(input.to_string());
         }

@@ -1,42 +1,39 @@
 # Heiwa
 
-Heiwa is the canonical control-plane repo for the Heiwa stack.
+Heiwa is a local-first AI runtime and operator surface. The installed `heiwa` CLI is the current product center, and this repository is being prepared for GitHub-native distribution, documentation, and contributor intake.
 
 ## Supported surfaces
 
-- CLI
-- MCP
-- HTTP API
-- Docs
+- Installed CLI runtime
+- Rust execution kernel
+- Provider discovery and routing
+- Documentation published from this repository
 
-Discord, mobile canvases, and legacy portability scaffolding may still exist in the repo, but they are not treated as stack-complete public surfaces.
+Legacy hub, hosted, and experimental surfaces may still exist in the tree, but they should not be presented as equally mature public product surfaces.
 
 ## Current target architecture
 
-- **Runtime**: Railway
-- **State**: SpacetimeDB
-- **Public web/docs**: Cloudflare Pages
-- **Live transport**: WebSockets for status and event streaming
+- **Primary runtime**: local `heiwa` install
+- **Execution stack**: Rust + TypeScript + Shell
+- **Published docs**: GitHub Pages
+- **Release channel**: GitHub Actions + Releases
 - **Operator node**: MacBook M4 Pro 24GB
 
 ## Design intent
 
-Heiwa is being hardened toward a faster stack:
+Heiwa is being hardened toward a cleaner, smaller public contract:
 
-- retire slow compatibility paths
-- remove inflated public claims
-- route public status through WebSocket-first surfaces
-- keep the canonical repo at `/Users/dmcgregsauce/heiwa`
-- retire `heiwa-limited` as a public-facing target description
+- keep the installed runtime as the product center
+- prefer local execution and provider-owned runtimes over hosted abstractions
+- make docs, CI, and releases coherent from a cold clone
+- stop overstating legacy hosted/control-plane paths
 
 ## Truth boundary
 
-If a surface is not covered by the current docs, build checks, or hub smoke tests, it should not be presented here as complete.
+If a surface is not covered by current docs, CI, or an explicit build matrix task, it should not be presented here as complete.
 
 ## Source of truth
 
-- [`config/swarm/BUILD_BLUEPRINT_2026-03-06.md`](https://github.com/Strategizing/heiwa-universe/blob/main/config/swarm/BUILD_BLUEPRINT_2026-03-06.md)
-- [`config/swarm/ai_router.json`](https://github.com/Strategizing/heiwa-universe/blob/main/config/swarm/ai_router.json)
-- [`config/identities/profiles.json`](https://github.com/Strategizing/heiwa-universe/blob/main/config/identities/profiles.json)
-- [`config/swarm/domain_plan.md`](https://github.com/Strategizing/heiwa-universe/blob/main/config/swarm/domain_plan.md)
-- [`docs/railway-self-operation.md`](https://github.com/Strategizing/heiwa-universe/blob/main/docs/railway-self-operation.md)
+- [`HEIWA.md`](https://github.com/Strategizing/heiwa-universe/blob/main/HEIWA.md)
+- [`BUILD_MATRIX.md`](https://github.com/Strategizing/heiwa-universe/blob/main/BUILD_MATRIX.md)
+- [`README.md`](https://github.com/Strategizing/heiwa-universe/blob/main/README.md)
