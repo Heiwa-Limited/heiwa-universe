@@ -19,7 +19,6 @@
 
 | Service | Dashboard | Docs |
 |:--------|:----------|:-----|
-| **Railway** | [railway.app](https://railway.app) | [docs.railway.app](https://docs.railway.app) |
 | **Cloudflare** | [dash.cloudflare.com](https://dash.cloudflare.com) | [developers.cloudflare.com](https://developers.cloudflare.com) |
 | **NATS** | — | [docs.nats.io](https://docs.nats.io) |
 | **E2B** | [e2b.dev](https://e2b.dev) | [e2b.dev/docs](https://e2b.dev/docs) |

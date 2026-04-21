@@ -25,12 +25,6 @@ toolName = "run_shell_command"
 decision = "allow"
 priority = 900
 
-# Railway MCP — primary execution plane
-[[rule]]
-decision = "allow"
-priority = 850
-mcpName = "railway"
-
 # Docker MCP — container operations
 [[rule]]
 decision = "allow"

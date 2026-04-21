@@ -9,10 +9,10 @@ Load this room for:
 
 ## What This Room Owns
 
-- Railway as the control-plane host
-- SpacetimeDB as the authoritative state layer
+- SpacetimeDB as the authoritative state layer where the current stack still depends on it
 - proposal, assignment, consent, approval, and lease state
-- `HeiwaCells` and `HeiwaBench` as control-plane surfaces
+- evidence-bearing routing/control behavior
+- `HeiwaCells` and `HeiwaBench` as control surfaces where still active
 
 ## Live Surfaces
 
@@ -28,6 +28,8 @@ Load this room for:
 - `HeiwaBench` now gates route and cell behavior through checked-in suites under `config/swarm/benchmarks/`.
 - `HeiwaCells` now materializes identity profiles into a real catalog surface.
 - The hub proposal HTTP surface now writes through the STDB bridge for create / claim / consent / heartbeat flows when `HEIWA_STATE_BACKEND=spacetimedb`.
+
+This room is about state authority and control semantics, not about promoting any specific hosted vendor as the product center.
 
 ## Transitional Boundary
 

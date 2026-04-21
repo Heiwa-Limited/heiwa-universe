@@ -2,21 +2,24 @@
 
 Load this room for:
 
-- Railway and Cloudflare changes
-- CI / deployment work
+- GitHub Actions and release automation
+- docs publishing and repo-distribution work
 - runtime topology validation
 - build and verification workflows
 
 ## Runtime Topology
 
-- Railway hosts the hub runtime and always-on control plane
-- SpacetimeDB is the state plane
-- Cloudflare serves docs / marketing shell
-- WebSockets are the live transport for public status and future event subscriptions
+- The installed `heiwa` runtime is the primary operator surface.
+- GitHub is the primary distribution and automation surface for this repo.
+- SpacetimeDB remains a backend/state authority where the current runtime still depends on it.
+- Hosted infra may exist, but it is not the default product story for current repo/platform work.
 
 ## Important Files
 
+- `.github/workflows/ci.yml`
+- `.github/workflows/pages.yml`
 - `.github/workflows/deploy.yml`
+- `mkdocs.yml`
 - `apps/heiwa_hub/main.py`
 - `apps/heiwa_hub/mcp_server.py`
 - `apps/heiwa_hub/scripts/generate_spacetimedb_bindings.sh`
@@ -35,5 +38,6 @@ Load this room for:
 ## Infra Rules
 
 - Do not add polling-oriented public surfaces where subscriptions or WebSockets belong.
-- Do not route durable control-plane state through external message brokers.
-- Do not make Cloudflare or Discord look like the authority for runtime truth.
+- Do not route durable state through external message brokers.
+- Do not make docs, status shells, or hosted edges look like the authority for runtime truth.
+- Do not overstate legacy hosted paths when the task is really about repo distribution or local runtime behavior.

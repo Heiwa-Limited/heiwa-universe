@@ -6,7 +6,7 @@ If the static site advertises surfaces or providers that the docs and CI do not 
 
 ## Runtime unavailable
 
-If Railway runtime endpoints are unavailable, status pages should degrade to an explicit warning state. Public docs and marketing should continue serving from Cloudflare Pages.
+If the installed runtime or a required backend/state dependency is unavailable, status reporting should degrade to an explicit warning state. Documentation should still build and publish independently of runtime health.
 
 ## WebSocket unavailable
 

@@ -4,15 +4,15 @@
 
 - **CLI**: supported operator surface
 - **MCP**: supported integration surface
-- **HTTP API**: supported public-safe runtime surface
+- **Rust workspace**: supported implementation surface
 - **Docs**: supported public documentation surface
 
 ## Supported architecture claims
 
-- Railway is the runtime host for the hub service.
-- SpacetimeDB is the intended authoritative state layer.
-- Cloudflare Pages hosts the public marketing and docs shell.
-- Public status is WebSocket-first with HTTP fallback for diagnostics.
+- The installed `heiwa` runtime is the current product center.
+- SpacetimeDB is the intended authoritative state layer where the current runtime still depends on it.
+- GitHub Actions and GitHub Pages are the active repo-native distribution surfaces.
+- Public claims should stay behind verified local/runtime and docs build checks.
 
 ## Not presented as complete
 

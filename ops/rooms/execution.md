@@ -14,15 +14,14 @@ Load this room for:
 
 Every decision in this room must satisfy: works for Devon's current topology AND does not block multi-operator scaling.
 
-## Asymmetric Topology
+## Current Topology
 
-Heiwa is a sovereign control mesh with asymmetric roles, not an active-active cluster.
+Heiwa is local-first and asymmetric, not an active-active cluster.
 
-- **Railway (Control Plane):** Public ingress, auth, routing, approvals, state coordination, remote premium reasoning. Records intent and authority in STDB. Does not execute GPU workloads.
-- **WSL (Primary Execution Server):** Static, always-on. RTX 3060, 12GB VRAM. Fast inference for ≤8B models. GPU, embeddings, media, sovereign workloads.
-- **MacBook (Operator Node):** Ephemeral, roaming. M4 Pro, 24GB unified memory (~18GB usable). 14B–32B large models. Operator terminal, ad-hoc high-trust execution.
-
-Nodes dial out to Railway via `/ws/worker`. Railway does not push through a broker. STDB is the durable work ledger, not an external message queue.
+- **Installed runtime:** `heiwa` on Devon's machine is the current product center.
+- **Local execution nodes:** MacBook and any attached/local compute surfaces own the primary execution reality.
+- **Backend/state plane:** SpacetimeDB remains the durable adjudication/evidence layer where that stack is still live.
+- **Hosted paths:** Legacy or support topology only. Do not make them the default explanation unless the task is specifically about them.
 
 ## Dynamic Capability Dispatch
 
@@ -73,9 +72,8 @@ When an execution node goes offline:
 
 - Do not hardcode GPU capabilities in `ai_router.json` or any static config. Capabilities are detected from hardware.
 - Do not add external message brokers (NATS, Redis) for task queuing. STDB proposal/lease state machine is the queue.
-- Do not add mesh VPNs (Tailscale) for node connectivity. `/ws/worker` outbound dial handles all networks.
-- Do not call execution nodes "boost nodes." WSL is the primary execution server. MacBook is the operator node.
-- Do not route GPU workloads to Railway. Railway is the control plane.
+- Do not add mesh VPNs (Tailscale) as an architectural crutch when direct local/runtime connectivity already covers the required workflow.
+- Do not hide local execution reality behind vague hosted-control-plane language.
 - Every meaningful execution should run under a lease.
 - `HeiwaClaw` / `ToolMesh` should reject execution without a valid lease.
 - Deny-first applies to both external provider calls and internal tool execution.

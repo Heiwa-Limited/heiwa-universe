@@ -1,29 +1,25 @@
 # Architecture
 
-## Runtime split
+## Product split
 
-Heiwa uses a narrow split between runtime and public presentation:
+Heiwa uses a narrow split between execution, state, and presentation:
 
-- **Railway** hosts the Heiwa application services: `heiwa-cloud-hq` for hub/API work and optional internal runtimes such as `heiwa-trading`.
-- **SpacetimeDB** is the authoritative external state layer on `maincloud.spacetimedb.com`.
-- **Cloudflare** proxies all public domains. Currently all route to Railway, which serves both API and static shells. The target state splits the static shells onto Cloudflare Pages at the edge.
-- **WebSockets** carry live status/event transport when the runtime exposes them.
+- **Installed runtime:** `heiwa` on the local machine is the primary operator surface.
+- **Rust workspace:** runtime execution, provider supervision, session flow, and CLI/TUI behavior live in `apps/` and `crates/`.
+- **SpacetimeDB:** remains the authoritative state/evidence plane where the current runtime still depends on it.
+- **Docs and release surfaces:** GitHub Actions and GitHub Pages are the current repo-native distribution surfaces.
 
-## Public/runtime boundaries
+## Surface boundaries
 
-- `heiwa.ltd` is the public marketing hostname.
-- `app.heiwa.ltd` is the canonical authenticated product shell.
-- `api.heiwa.ltd` is the public HTTP + MCP ingress.
-- `status.heiwa.ltd` is a read-only status shell backed by runtime health/status data.
-- `docs.heiwa.ltd` is the documentation site.
-- Internal vertical runtimes such as trading can stay on separate Railway services, but they are not part of the supported public surface until they graduate into first-class product surfaces.
-- The public web surface should not duplicate privileged runtime behavior.
+- The installed runtime is the current product center.
+- Docs are explanatory and release-facing, not authoritative runtime surfaces.
+- Web or hosted shells may exist, but they should not be described as more mature than the installed runtime.
+- Presentation layers must not duplicate privileged runtime behavior or pretend to own execution truth.
 
 ## Repo boundaries
 
-The canonical repo is `/Users/dmcgregsauce/heiwa`.
-
-`heiwa-limited` is no longer treated as an active source-of-truth repo in this documentation set.
+- `heiwa-universe` is the canonical repo for the current stack.
+- Legacy or compatibility material may remain in-tree, but `HEIWA.md` and the current build matrix define the active contract.
 
 ## State bindings
 

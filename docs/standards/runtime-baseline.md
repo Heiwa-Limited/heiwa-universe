@@ -2,20 +2,20 @@
 
 Heiwa has two distinct upgrade surfaces:
 
-1. **Deploy baseline** for reproducible Railway and CI builds.
-2. **Operator baseline** for Devon's local machine and boost-node workflows.
+1. **Repo baseline** for reproducible CI and release builds.
+2. **Operator baseline** for Devon's local machine and runtime workflows.
 
-The deploy baseline is pinned and conservative. The operator baseline can move faster, but only around the pinned repo contract.
+The repo baseline is pinned and conservative. The operator baseline can move faster, but only around the pinned repo contract.
 
-## Deploy Baseline
+## Repo Baseline
 
 These versions are the canonical floor for `heiwa-universe`:
 
 | Surface | Baseline | Reason |
 | --- | --- | --- |
 | Rust | `1.93.1` | Required by `heiwa-core` and SpacetimeDB crates. |
-| Docker rust-builder | `rust:1.93-slim` | Matches the workspace toolchain floor used in CI and Railway. |
-| Node | `24.14.1` | Stable LTS lane for TypeScript workspace and deploy tooling. |
+| Docker rust-builder | `rust:1.93-slim` | Matches the workspace toolchain floor used in CI and containerized build paths. |
+| Node | `24.14.1` | Stable LTS lane for TypeScript workspace and release tooling. |
 | npm | bundled with Node 24 | Repo installs should follow the pinned Node lane. |
 | Python | `3.14.x` | Current repo pytest/docs/runtime compatibility lane. |
 | STDB auth | `STDB_TOKEN` | Canonical state auth boundary. |
@@ -24,14 +24,13 @@ These versions are the canonical floor for `heiwa-universe`:
 
 ### Non-negotiables
 
-- Railway deploys must build from the pinned Dockerfile and `/health` healthcheck.
 - CI must set up Rust and Node explicitly instead of relying on runner defaults.
 - Root TypeScript checks must run under the repo-pinned Node version.
 - Local development may use newer global runtimes, but repo commands should use the pinned Rust and Node lanes.
 
 ## Operator Machine Baseline
 
-Devon's machine is the operator and boost-node plane. It needs a wider tool surface than Railway, but not every tool is production-critical.
+Devon's machine is the operator plane and the current product center. It needs a wider tool surface than the pinned repo baseline, but not every tool is production-critical.
 
 ### Required
 
@@ -41,14 +40,12 @@ Devon's machine is the operator and boost-node plane. It needs a wider tool surf
 - `python3` `3.14.x`
 - `uv`
 - `gh`
-- `railway`
-- `wrangler`
+- `wrangler` when web/docs deployment work is active
 
 ### Optional but expected
 
 - `pnpm`
 - `ollama`
-- `tailscale`
 
 ### Recommended practice
 
@@ -74,8 +71,8 @@ bash scripts/check_runtime_baseline.sh
 bash scripts/audit_operator_machine.sh
 ```
 
-## Railway Notes
+## Runtime Notes
 
-- `heiwa-core` is the only canonical Railway runtime service for the Rust control plane.
-- Production should use remote STDB (`maincloud`) by default.
-- No production boot path should start local STDB or depend on local operator tooling.
+- `heiwa-core` remains a primary Rust runtime surface in this repo.
+- Production or shared-state paths should use remote STDB (`maincloud`) by default.
+- No supported runtime path should silently depend on undocumented local operator tooling.

@@ -1,44 +1,36 @@
 # Security
 
-Heiwa is a multi-tenant BYOK orchestration platform. The platform boundary is intentionally narrow: public users see `heiwa.ltd`, `app.heiwa.ltd`, `status.heiwa.ltd`, `docs.heiwa.ltd`, and the hub control plane at `api.heiwa.ltd`. Internal preview runtimes such as trading can remain on separate Railway services, but they are not part of the supported public surface until their isolation and operational posture are ready.
+Heiwa is a local-first AI runtime with evolving hosted and state-backed surfaces. The security boundary should describe the installed runtime, the backend/state authority where it exists, and the release surfaces that are actually live today.
 
-## Public surfaces
+## Active surfaces
 
-- `heiwa.ltd`: marketing only
-- `app.heiwa.ltd`: authenticated product shell for keys, runs, and mission views
-- `api.heiwa.ltd`: Discord OAuth entry/callback, user/session APIs, hub health, MCP, and task ingress
-- `status.heiwa.ltd`: read-only operational status
-- `docs.heiwa.ltd`: public documentation
+- installed `heiwa` runtime
+- repo source and CI on GitHub
+- published docs from MkDocs/GitHub Pages
+- state/evidence services where the current runtime still depends on SpacetimeDB
 
 ## Trust boundaries
 
-### Browser or Discord client -> Hub API
+### Operator surface -> runtime
 
-- All public authentication and orchestration requests terminate at `api.heiwa.ltd`.
-- Discord OAuth identifies the user; hub-issued JWTs identify subsequent web API calls.
-- Cloudflare provides TLS termination, proxying, and baseline WAF coverage before traffic reaches Railway.
+- The installed runtime should not expose platform secrets through local logs, transcripts, or environment leakage.
+- Provider credentials and tokens must remain scoped to the owning user or machine context.
+- Presentation layers must not be treated as the authority for privileged execution decisions.
 
-### App shell -> Hub API
-
-- `app.heiwa.ltd` is a UI surface, not a second control plane.
-- The app shell should never hold platform secrets or make privileged decisions locally.
-- All user reads and mutations must be enforced at the Hub with tenant-scoped authorization.
-
-### Hub API -> SpacetimeDB
+### Runtime -> state plane
 
 - SpacetimeDB is the authoritative ledger for users, OAuth identities, provider credentials, runs, routes, missions, and billing events.
 - Multi-tenant data separation is enforced by `user_id` scoping throughout the route, state, database, and STDB layers.
 - User auth and operator auth remain separate so operator tooling does not inherit user-facing trust.
 
-### Hub API -> provider APIs
+### Runtime -> provider APIs
 
 - BYOK credentials are tenant-scoped assets. They must never be shared across users, leaked through logs, or reused outside the owning tenant's execution path.
 - The target posture is encrypted-at-rest credential storage with just-in-time decryption at execution. The current hardening backlog still includes encrypting stored Discord OAuth tokens and removing the remaining string-built queries.
 - Routing decisions must respect each user's own budget, rate limits, and provider inventory rather than a shared global pool.
 
-### Hub API -> execution runtimes
+### Runtime -> execution surfaces
 
-- The Hub should act as the control plane, not the long-lived execution plane for arbitrary user workloads.
 - Public launch paths should stay limited to curated missions and curated tools until stronger sandboxing exists.
 - Any future arbitrary execution path should move through isolated workers or sandboxes rather than shared in-process execution.
 
@@ -61,9 +53,9 @@ Heiwa is a multi-tenant BYOK orchestration platform. The platform boundary is in
 
 - fail closed on missing secrets and identities
 - redact transport and provider credentials in logs
-- keep marketing, docs, and status separate from privileged runtime state
-- prefer canonical domains over direct provider URLs in the public shell
-- keep internal preview runtimes off the supported public host map
+- keep docs and release surfaces separate from privileged runtime state
+- do not overstate hosted or preview surfaces as the primary product contract
+- keep internal preview/runtime experiments off the supported public story until verified
 
 ## Near-term hardening backlog
 
@@ -75,4 +67,4 @@ Heiwa is a multi-tenant BYOK orchestration platform. The platform boundary is in
 
 ## Non-goals for public docs
 
-This doc set does not claim that Discord or experimental canvases are the only product interfaces, and it does not claim that internal preview services are ready public surfaces.
+This doc set does not claim that legacy hosted paths are the current product center, and it does not claim that experimental surfaces are ready public interfaces.
