@@ -169,10 +169,10 @@ async fn seed_catalogs(conn: &DbConnection, state: SharedState) -> Result<()> {
             seed.effort_level,
             seed.cost_per_turn,
             seed.max_context_tokens,
-            strengths_json.clone(),
             seed.vram_requirement_mb,
             seed.quantization_type.clone(),
             seed.kv_cache_strategy.clone(),
+            strengths_json.clone(),
             seed.enabled,
         )?;
 
@@ -187,10 +187,10 @@ async fn seed_catalogs(conn: &DbConnection, state: SharedState) -> Result<()> {
             effort_level: seed.effort_level,
             cost_per_turn: seed.cost_per_turn,
             max_context_tokens: seed.max_context_tokens,
-            strengths_json,
             vram_requirement_mb: seed.vram_requirement_mb,
             quantization_type: seed.quantization_type,
             kv_cache_strategy: seed.kv_cache_strategy,
+            strengths_json,
             enabled: seed.enabled,
             last_success_rate: 1.0,
             avg_latency_ms: 0,

@@ -24,6 +24,12 @@ pub mod assign_proposal_reducer;
 pub mod attach_drex_decision_to_route_reducer;
 pub mod battlefield_record_type;
 pub mod battlefields_table;
+pub mod belief_contradiction_type;
+pub mod belief_contradictions_table;
+pub mod belief_evidence_link_type;
+pub mod belief_type;
+pub mod belief_verification_schedule_type;
+pub mod beliefs_table;
 pub mod billing_event_type;
 pub mod billing_events_table;
 pub mod capability_lease_type;
@@ -38,18 +44,39 @@ pub mod captain_summaries_table;
 pub mod captain_summary_type;
 pub mod cell_run_record_type;
 pub mod cell_runs_table;
+pub mod claim_belief_verification_reducer;
 pub mod claim_proposal_reducer;
 pub mod claim_task_reducer;
+pub mod claim_treasury_rebalance_reducer;
+pub mod close_session_reducer;
+pub mod complete_belief_verification_reducer;
+pub mod complete_loop_session_reducer;
 pub mod complete_mission_reducer;
+pub mod complete_treasury_rebalance_reducer;
+pub mod consume_reservation_reducer;
+pub mod contradict_belief_reducer;
+pub mod corroborate_belief_reducer;
 pub mod create_mission_reducer;
+pub mod create_page_link_reducer;
+pub mod create_page_reducer;
+pub mod create_source_version_reducer;
 pub mod create_task_dispatch_reducer;
+pub mod create_treasury_reducer;
 pub mod create_user_reducer;
+pub mod decay_belief_tick_reducer;
+pub mod decay_profile_type;
+pub mod decay_profiles_table;
+pub mod device_type;
+pub mod devices_table;
 pub mod discord_channel_type;
 pub mod discord_channels_table;
 pub mod discord_interaction_type;
 pub mod discord_interactions_table;
 pub mod discord_user_type;
 pub mod discord_users_table;
+pub mod dispatch_ack_type;
+pub mod dispatch_acks_table;
+pub mod disprove_belief_reducer;
 pub mod drex_decision_row_type;
 pub mod drex_decisions_table;
 pub mod drex_failure_row_type;
@@ -59,10 +86,14 @@ pub mod events_table;
 pub mod execution_memory_table;
 pub mod execution_memory_type;
 pub mod expire_proposal_reducer;
+pub mod expire_reservation_reducer;
+pub mod extract_belief_candidate_reducer;
 pub mod fail_mission_reducer;
 pub mod finish_cell_run_reducer;
+pub mod gate_mission_treasury_reducer;
 pub mod gpu_slot_type;
 pub mod gpu_slots_table;
+pub mod ingest_source_reducer;
 pub mod insert_captain_directive_reducer;
 pub mod insert_captain_message_reducer;
 pub mod insert_captain_summary_reducer;
@@ -71,10 +102,20 @@ pub mod insert_knowledge_embedding_reducer;
 pub mod issue_capability_lease_reducer;
 pub mod knowledge_embedding_type;
 pub mod knowledge_embeddings_table;
+pub mod lease_type;
+pub mod leases_table;
+pub mod link_belief_evidence_reducer;
 pub mod link_oauth_identity_reducer;
 pub mod liveness_state_table;
 pub mod liveness_state_type;
+pub mod loop_iteration_type;
+pub mod loop_iterations_table;
+pub mod loop_session_type;
+pub mod loop_sessions_table;
 pub mod mark_messages_compressed_reducer;
+pub mod mark_page_stale_reducer;
+pub mod mark_run_non_novel_reducer;
+pub mod mark_source_parsed_reducer;
 pub mod mission_record_type;
 pub mod mission_step_record_type;
 pub mod mission_steps_table;
@@ -85,12 +126,22 @@ pub mod node_registry_entry_type;
 pub mod node_registry_table;
 pub mod node_status_type;
 pub mod nodes_table;
+pub mod novelty_vector_type;
+pub mod novelty_vectors_table;
 pub mod o_auth_identity_type;
 pub mod oauth_identities_table;
 pub mod organization_task_type;
+pub mod page_link_type;
+pub mod page_links_table;
+pub mod page_type;
+pub mod pages_table;
 pub mod pause_mission_reducer;
+pub mod plan_mission_doctrine_reducer;
+pub mod platform_entitlement_type;
+pub mod platform_entitlements_table;
 pub mod pod_type;
 pub mod pods_table;
+pub mod promote_belief_reducer;
 pub mod proposal_consent_type;
 pub mod proposal_consents_table;
 pub mod proposal_type;
@@ -105,37 +156,64 @@ pub mod prune_knowledge_embeddings_reducer;
 pub mod queue_proposal_reducer;
 pub mod rate_group_state_table;
 pub mod rate_group_state_type;
+pub mod rebalance_treasury_reducer;
+pub mod recompile_page_reducer;
 pub mod record_approval_decision_reducer;
 pub mod record_billing_event_reducer;
 pub mod record_consent_reducer;
+pub mod record_dispatch_ack_reducer;
 pub mod record_drex_decision_reducer;
 pub mod record_drex_failure_reducer;
 pub mod record_interaction_reducer;
+pub mod record_loop_iteration_reducer;
+pub mod record_novelty_vector_reducer;
 pub mod record_proposal_heartbeat_reducer;
+pub mod record_provider_failure_reducer;
 pub mod record_route_decision_reducer;
+pub mod record_run_failure_reducer;
 pub mod record_run_reducer;
+pub mod record_spend_reducer;
 pub mod register_artifact_reducer;
+pub mod register_device_reducer;
 pub mod register_discord_channel_reducer;
 pub mod reject_proposal_reducer;
+pub mod release_budget_reducer;
 pub mod renew_capability_lease_reducer;
 pub mod requeue_proposal_reducer;
+pub mod reserve_budget_reducer;
+pub mod reset_treasury_window_reducer;
 pub mod resolve_captain_focus_reducer;
+pub mod resolve_contradiction_reducer;
 pub mod resume_mission_reducer;
+pub mod retire_belief_reducer;
+pub mod retire_page_reducer;
+pub mod reverify_belief_reducer;
 pub mod revoke_capability_chain_reducer;
 pub mod revoke_capability_lease_reducer;
 pub mod revoke_provider_credential_reducer;
 pub mod route_decision_type;
 pub mod route_decisions_table;
+pub mod run_failure_type;
+pub mod run_failures_table;
 pub mod run_record_type;
 pub mod runs_table;
+pub mod schedule_belief_verification_reducer;
+pub mod schedule_treasury_rebalance_reducer;
 pub mod session_summaries_table;
 pub mod session_summary_record_type;
 pub mod set_node_status_reducer;
+pub mod source_type;
 pub mod start_cell_run_reducer;
+pub mod start_loop_session_reducer;
 pub mod store_provider_credential_reducer;
 pub mod task_dispatch_type;
 pub mod task_dispatches_table;
 pub mod tenant_task_view_table;
+pub mod treasuries_table;
+pub mod treasury_rebalance_schedule_type;
+pub mod treasury_reservation_type;
+pub mod treasury_type;
+pub mod update_device_heartbeat_reducer;
 pub mod update_model_tier_stats_reducer;
 pub mod update_pod_heartbeat_reducer;
 pub mod update_task_dispatch_status_reducer;
@@ -143,17 +221,23 @@ pub mod update_user_seen_reducer;
 pub mod upsert_agent_registry_reducer;
 pub mod upsert_battlefield_reducer;
 pub mod upsert_captain_focus_reducer;
+pub mod upsert_decay_profile_reducer;
 pub mod upsert_discord_user_reducer;
 pub mod upsert_gpu_slot_reducer;
+pub mod upsert_lease_reducer;
 pub mod upsert_liveness_state_reducer;
 pub mod upsert_model_tier_reducer;
 pub mod upsert_node_heartbeat_reducer;
 pub mod upsert_node_registry_reducer;
+pub mod upsert_platform_entitlement_reducer;
 pub mod upsert_pod_reducer;
 pub mod upsert_provider_account_status_reducer;
 pub mod upsert_rate_group_state_reducer;
+pub mod upsert_session_reducer;
 pub mod user_type;
 pub mod users_table;
+pub mod worker_session_type;
+pub mod worker_sessions_table;
 pub mod write_session_summary_reducer;
 
 pub use add_approval_request_reducer::add_approval_request;
@@ -1262,9 +1346,6 @@ pub enum Reducer {
         quantization_type: String,
         kv_cache_strategy: String,
         strengths_json: String,
-        vram_requirement_mb: u32,
-        quantization_type: String,
-        kv_cache_strategy: String,
         enabled: bool,
     },
     UpsertNodeHeartbeat {
@@ -3142,9 +3223,6 @@ impl __sdk::Reducer for Reducer {
                 quantization_type,
                 kv_cache_strategy,
                 strengths_json,
-                vram_requirement_mb,
-                quantization_type,
-                kv_cache_strategy,
                 enabled,
             } => __sats::bsatn::to_vec(&upsert_model_tier_reducer::UpsertModelTierArgs {
                 model_id: model_id.clone(),
@@ -3160,9 +3238,6 @@ impl __sdk::Reducer for Reducer {
                 quantization_type: quantization_type.clone(),
                 kv_cache_strategy: kv_cache_strategy.clone(),
                 strengths_json: strengths_json.clone(),
-                vram_requirement_mb: vram_requirement_mb.clone(),
-                quantization_type: quantization_type.clone(),
-                kv_cache_strategy: kv_cache_strategy.clone(),
                 enabled: enabled.clone(),
             }),
             Reducer::UpsertNodeHeartbeat {
