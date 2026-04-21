@@ -1,0 +1,22 @@
+[package]
+name = "heiwa_mcp"
+version = "0.1.0"
+edition = "2021"
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+documentation.workspace = true
+readme.workspace = true
+keywords.workspace = true
+categories.workspace = true
+description = "Model Context Protocol server and client scaffold for Heiwa."
+
+[dependencies]
+async-trait = "0.1"
+schemars = { version = "0.8", features = ["preserve_order"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+thiserror = "2"
+
+[dev-dependencies]
+tokio = { version = "1", features = ["macros", "rt", "rt-multi-thread"] }
