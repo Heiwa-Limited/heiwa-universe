@@ -10,6 +10,7 @@ members = [
     "crates/heiwa_mcp",
     "crates/heiwa_protocol",
     "crates/heiwa_provider",
+    "crates/heiwa_quota",
     "crates/heiwa_repl",
     "crates/heiwa_session",
     "crates/heiwa_stdb",
