@@ -11,10 +11,11 @@ import {
 } from "spacetimedb";
 
 export default {
-  rateGroup: __t.string(),
-  turnsUsed: __t.u32(),
-  turnsMax: __t.u32(),
-  windowSeconds: __t.u32(),
-  cooldownUntil: __t.string(),
-  available: __t.bool(),
+  groupId: __t.string(),
+  tier: __t.string(),
+  limitRpm: __t.i64(),
+  limitTpm: __t.i64(),
+  currentRpm: __t.i64(),
+  currentTpm: __t.i64(),
+  resetAt: __t.string(),
 };

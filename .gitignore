@@ -60,7 +60,6 @@ Thumbs.db
 
 # Logs
 runtime/logs/
-railway_evidence_logs/
 *.log
 site/
 

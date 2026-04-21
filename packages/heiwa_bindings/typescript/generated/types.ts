@@ -79,6 +79,71 @@ export const BattlefieldRecord = __t.object("BattlefieldRecord", {
 });
 export type BattlefieldRecord = __Infer<typeof BattlefieldRecord>;
 
+export const Belief = __t.object("Belief", {
+  beliefId: __t.string(),
+  claimText: __t.string(),
+  domain: __t.string(),
+  topicKeysJson: __t.string(),
+  confidence: __t.f64(),
+  status: __t.string(),
+  freshnessScore: __t.f64(),
+  decayProfileId: __t.string(),
+  corroborationCount: __t.u32(),
+  contradictionCount: __t.u32(),
+  sourceCount: __t.u32(),
+  supportingEvidenceWeight: __t.f64(),
+  contradictingEvidenceWeight: __t.f64(),
+  lastVerifiedAt: __t.option(__t.string()),
+  expiresAt: __t.option(__t.string()),
+  promotedAt: __t.option(__t.string()),
+  retiredAt: __t.option(__t.string()),
+  derivedFromPageIdsJson: __t.string(),
+  derivedFromSourceIdsJson: __t.string(),
+  ownerScope: __t.string(),
+  generatedByRunId: __t.option(__t.string()),
+  createdAt: __t.string(),
+  updatedAt: __t.string(),
+});
+export type Belief = __Infer<typeof Belief>;
+
+export const BeliefContradiction = __t.object("BeliefContradiction", {
+  contradictionId: __t.string(),
+  primaryBeliefId: __t.string(),
+  challengerBeliefId: __t.option(__t.string()),
+  challengerSourceId: __t.option(__t.string()),
+  description: __t.string(),
+  severity: __t.f64(),
+  resolutionStatus: __t.string(),
+  resolvedAt: __t.option(__t.string()),
+  createdAt: __t.string(),
+  updatedAt: __t.string(),
+});
+export type BeliefContradiction = __Infer<typeof BeliefContradiction>;
+
+export const BeliefEvidenceLink = __t.object("BeliefEvidenceLink", {
+  linkId: __t.string(),
+  beliefId: __t.string(),
+  sourceId: __t.option(__t.string()),
+  pageId: __t.option(__t.string()),
+  runId: __t.option(__t.string()),
+  linkType: __t.string(),
+  weight: __t.f64(),
+  createdAt: __t.string(),
+});
+export type BeliefEvidenceLink = __Infer<typeof BeliefEvidenceLink>;
+
+export const BeliefVerificationSchedule = __t.object("BeliefVerificationSchedule", {
+  scheduleId: __t.string(),
+  beliefId: __t.string(),
+  reason: __t.string(),
+  priority: __t.i64(),
+  scheduledAt: __t.string(),
+  claimedByRunId: __t.option(__t.string()),
+  completedAt: __t.option(__t.string()),
+  createdAt: __t.string(),
+});
+export type BeliefVerificationSchedule = __Infer<typeof BeliefVerificationSchedule>;
+
 export const BillingEvent = __t.object("BillingEvent", {
   id: __t.u64(),
   userId: __t.string(),
@@ -188,6 +253,29 @@ export const CellRunRecord = __t.object("CellRunRecord", {
 });
 export type CellRunRecord = __Infer<typeof CellRunRecord>;
 
+export const DecayProfile = __t.object("DecayProfile", {
+  decayProfileId: __t.string(),
+  domain: __t.string(),
+  halfLifeSeconds: __t.u64(),
+  floorFreshness: __t.f64(),
+  verificationResetMode: __t.string(),
+  stalenessTriggerPolicy: __t.string(),
+  createdAt: __t.string(),
+  updatedAt: __t.string(),
+});
+export type DecayProfile = __Infer<typeof DecayProfile>;
+
+export const Device = __t.object("Device", {
+  deviceId: __t.string(),
+  userId: __t.string(),
+  hostname: __t.string(),
+  os: __t.string(),
+  arch: __t.string(),
+  lastSeenAt: __t.string(),
+  status: __t.string(),
+});
+export type Device = __Infer<typeof Device>;
+
 export const DiscordChannel = __t.object("DiscordChannel", {
   channelId: __t.u64(),
   name: __t.string(),
@@ -213,7 +301,6 @@ export const DiscordUser = __t.object("DiscordUser", {
 });
 export type DiscordUser = __Infer<typeof DiscordUser>;
 
-<<<<<<< HEAD:packages/heiwa_bindings/typescript/types.ts
 export const DispatchAck = __t.object("DispatchAck", {
   ackId: __t.string(),
   leaseId: __t.string(),
@@ -226,8 +313,6 @@ export const DispatchAck = __t.object("DispatchAck", {
 });
 export type DispatchAck = __Infer<typeof DispatchAck>;
 
-=======
->>>>>>> rust-ts-first-migration:packages/heiwa_bindings/typescript/generated/types.ts
 export const DrexDecisionRow = __t.object("DrexDecisionRow", {
   decisionId: __t.string(),
   requestId: __t.string(),
@@ -341,6 +426,33 @@ export const LivenessState = __t.object("LivenessState", {
 });
 export type LivenessState = __Infer<typeof LivenessState>;
 
+export const LoopIteration = __t.object("LoopIteration", {
+  iterationId: __t.string(),
+  loopId: __t.string(),
+  turnNumber: __t.u32(),
+  inputSummary: __t.string(),
+  outputSummary: __t.string(),
+  score: __t.f64(),
+  runId: __t.option(__t.string()),
+  createdAt: __t.string(),
+});
+export type LoopIteration = __Infer<typeof LoopIteration>;
+
+export const LoopSession = __t.object("LoopSession", {
+  loopId: __t.string(),
+  userId: __t.string(),
+  objective: __t.string(),
+  status: __t.string(),
+  maxTurns: __t.u32(),
+  maxCostUsd: __t.f64(),
+  currentTurn: __t.u32(),
+  totalCostUsd: __t.f64(),
+  terminationReason: __t.option(__t.string()),
+  createdAt: __t.string(),
+  updatedAt: __t.string(),
+});
+export type LoopSession = __Infer<typeof LoopSession>;
+
 export const MissionRecord = __t.object("MissionRecord", {
   missionId: __t.string(),
   createdAt: __t.string(),
@@ -361,6 +473,19 @@ export const MissionRecord = __t.object("MissionRecord", {
   userId: __t.option(__t.string()),
   ownerId: __t.option(__t.string()),
   principalId: __t.option(__t.string()),
+  taskClass: __t.option(__t.string()),
+  budgetClass: __t.option(__t.string()),
+  treasuryId: __t.option(__t.string()),
+  noveltyPolicyJson: __t.option(__t.string()),
+  terminationPolicyJson: __t.option(__t.string()),
+  requiredBeliefQuery: __t.option(__t.string()),
+  allowedToolsJson: __t.option(__t.string()),
+  allowedSideEffectsJson: __t.option(__t.string()),
+  targetOutputsJson: __t.option(__t.string()),
+  costSoFarMillicents: __t.option(__t.i64()),
+  noveltySoFar: __t.option(__t.f64()),
+  turnCount: __t.option(__t.u32()),
+  approvalState: __t.option(__t.string()),
 });
 export type MissionRecord = __Infer<typeof MissionRecord>;
 
@@ -397,9 +522,6 @@ export const ModelTier = __t.object("ModelTier", {
   quantizationType: __t.string(),
   kvCacheStrategy: __t.string(),
   strengthsJson: __t.string(),
-  vramRequirementMb: __t.u32(),
-  quantizationType: __t.string(),
-  kvCacheStrategy: __t.string(),
   enabled: __t.bool(),
   lastSuccessRate: __t.f64(),
   avgLatencyMs: __t.u64(),
@@ -437,6 +559,21 @@ export const NodeStatus = __t.object("NodeStatus", {
 });
 export type NodeStatus = __Infer<typeof NodeStatus>;
 
+export const NoveltyVector = __t.object("NoveltyVector", {
+  vectorId: __t.string(),
+  runId: __t.string(),
+  missionId: __t.string(),
+  turnIndex: __t.u32(),
+  newEntity: __t.f64(),
+  newContradiction: __t.f64(),
+  strongerCitation: __t.f64(),
+  newCausalConnection: __t.f64(),
+  changedRecommendation: __t.f64(),
+  compositeScore: __t.f64(),
+  createdAt: __t.string(),
+});
+export type NoveltyVector = __Infer<typeof NoveltyVector>;
+
 export const OAuthIdentity = __t.object("OAuthIdentity", {
   identityId: __t.string(),
   userId: __t.string(),
@@ -460,6 +597,46 @@ export const OrganizationTask = __t.object("OrganizationTask", {
   assignedWorker: __t.option(__t.string()),
 });
 export type OrganizationTask = __Infer<typeof OrganizationTask>;
+
+export const Page = __t.object("Page", {
+  pageId: __t.string(),
+  namespace: __t.string(),
+  title: __t.string(),
+  slug: __t.string(),
+  bodyMarkdown: __t.string(),
+  summary: __t.string(),
+  topicKeysJson: __t.string(),
+  status: __t.string(),
+  sourceSetHash: __t.string(),
+  lastCompiledAt: __t.string(),
+  lastVerifiedAt: __t.string(),
+  freshnessScore: __t.f64(),
+  noveltyScoreLastCompile: __t.f64(),
+  ownerScope: __t.string(),
+  generatedByRunId: __t.option(__t.string()),
+  createdAt: __t.string(),
+  updatedAt: __t.string(),
+});
+export type Page = __Infer<typeof Page>;
+
+export const PageLink = __t.object("PageLink", {
+  linkId: __t.string(),
+  fromPageId: __t.string(),
+  toPageId: __t.option(__t.string()),
+  toSourceId: __t.option(__t.string()),
+  linkType: __t.string(),
+  createdAt: __t.string(),
+});
+export type PageLink = __Infer<typeof PageLink>;
+
+export const PlatformEntitlement = __t.object("PlatformEntitlement", {
+  userId: __t.string(),
+  tier: __t.string(),
+  concurrencyLimit: __t.i64(),
+  monthlyTokenBudget: __t.i64(),
+  featuresJson: __t.string(),
+});
+export type PlatformEntitlement = __Infer<typeof PlatformEntitlement>;
 
 export const Pod = __t.object("Pod", {
   podId: __t.string(),
@@ -555,13 +732,13 @@ export const ProviderCredential = __t.object("ProviderCredential", {
 export type ProviderCredential = __Infer<typeof ProviderCredential>;
 
 export const RateGroupState = __t.object("RateGroupState", {
-  rateGroup: __t.string(),
-  turnsUsed: __t.u32(),
-  turnsMax: __t.u32(),
-  windowStart: __t.string(),
-  windowSeconds: __t.u32(),
-  cooldownUntil: __t.string(),
-  available: __t.bool(),
+  groupId: __t.string(),
+  tier: __t.string(),
+  limitRpm: __t.i64(),
+  limitTpm: __t.i64(),
+  currentRpm: __t.i64(),
+  currentTpm: __t.i64(),
+  resetAt: __t.string(),
 });
 export type RateGroupState = __Infer<typeof RateGroupState>;
 
@@ -592,6 +769,20 @@ export const RouteDecision = __t.object("RouteDecision", {
 });
 export type RouteDecision = __Infer<typeof RouteDecision>;
 
+export const RunFailure = __t.object("RunFailure", {
+  failureId: __t.string(),
+  runId: __t.string(),
+  leaseId: __t.string(),
+  sessionId: __t.string(),
+  failureCode: __t.string(),
+  failureMessage: __t.string(),
+  failureType: __t.string(),
+  retryable: __t.bool(),
+  detailsJson: __t.string(),
+  createdAt: __t.string(),
+});
+export type RunFailure = __Infer<typeof RunFailure>;
+
 export const RunRecord = __t.object("RunRecord", {
   runId: __t.string(),
   proposalId: __t.string(),
@@ -611,32 +802,13 @@ export const RunRecord = __t.object("RunRecord", {
   cost: __t.f64(),
   userId: __t.option(__t.string()),
   leaseId: __t.option(__t.string()),
-<<<<<<< HEAD:packages/heiwa_bindings/typescript/types.ts
   sessionId: __t.option(__t.string()),
   ownerId: __t.option(__t.string()),
   principalId: __t.option(__t.string()),
   failureCode: __t.option(__t.string()),
   failureMessage: __t.option(__t.string()),
-=======
-  ownerId: __t.option(__t.string()),
-  principalId: __t.option(__t.string()),
->>>>>>> rust-ts-first-migration:packages/heiwa_bindings/typescript/generated/types.ts
 });
 export type RunRecord = __Infer<typeof RunRecord>;
-
-export const RunFailure = __t.object("RunFailure", {
-  failureId: __t.string(),
-  runId: __t.string(),
-  leaseId: __t.string(),
-  sessionId: __t.string(),
-  failureCode: __t.string(),
-  failureMessage: __t.string(),
-  failureType: __t.string(),
-  retryable: __t.bool(),
-  detailsJson: __t.string(),
-  createdAt: __t.string(),
-});
-export type RunFailure = __Infer<typeof RunFailure>;
 
 export const SessionSummaryRecord = __t.object("SessionSummaryRecord", {
   summaryId: __t.string(),
@@ -650,6 +822,25 @@ export const SessionSummaryRecord = __t.object("SessionSummaryRecord", {
   principalId: __t.option(__t.string()),
 });
 export type SessionSummaryRecord = __Infer<typeof SessionSummaryRecord>;
+
+export const Source = __t.object("Source", {
+  sourceId: __t.string(),
+  sourceKind: __t.string(),
+  uri: __t.string(),
+  contentHash: __t.string(),
+  title: __t.string(),
+  author: __t.string(),
+  capturedAt: __t.string(),
+  publishedAt: __t.string(),
+  retrievedBy: __t.string(),
+  ownerScope: __t.string(),
+  trustClass: __t.string(),
+  rawStorageRef: __t.string(),
+  parseStatus: __t.string(),
+  supersedesSourceId: __t.option(__t.string()),
+  createdAt: __t.string(),
+});
+export type Source = __Infer<typeof Source>;
 
 export const TaskDispatch = __t.object("TaskDispatch", {
   taskId: __t.string(),
@@ -673,6 +864,64 @@ export const TaskDispatch = __t.object("TaskDispatch", {
   completedAt: __t.string(),
 });
 export type TaskDispatch = __Infer<typeof TaskDispatch>;
+
+export const Treasury = __t.object("Treasury", {
+  treasuryId: __t.string(),
+  scope: __t.string(),
+  provider: __t.string(),
+  accountRef: __t.string(),
+  budgetWindowKind: __t.string(),
+  maxRequests: __t.i64(),
+  maxTokensIn: __t.i64(),
+  maxTokensOut: __t.i64(),
+  maxCostMillicents: __t.i64(),
+  reserveFraction: __t.f64(),
+  reservePolicy: __t.string(),
+  degradedModeThreshold: __t.f64(),
+  healthState: __t.string(),
+  healthScore: __t.f64(),
+  cooldownUntil: __t.option(__t.string()),
+  failureStreak: __t.u32(),
+  last429At: __t.option(__t.string()),
+  lastAuthFailureAt: __t.option(__t.string()),
+  spendSoFarRequests: __t.i64(),
+  spendSoFarTokensIn: __t.i64(),
+  spendSoFarTokensOut: __t.i64(),
+  spendSoFarCostMillicents: __t.i64(),
+  lastRebalancedAt: __t.string(),
+  createdAt: __t.string(),
+  updatedAt: __t.string(),
+});
+export type Treasury = __Infer<typeof Treasury>;
+
+export const TreasuryRebalanceSchedule = __t.object("TreasuryRebalanceSchedule", {
+  scheduleId: __t.string(),
+  treasuryId: __t.string(),
+  reason: __t.string(),
+  priority: __t.i64(),
+  scheduledAt: __t.string(),
+  claimedByRunId: __t.option(__t.string()),
+  completedAt: __t.option(__t.string()),
+  createdAt: __t.string(),
+});
+export type TreasuryRebalanceSchedule = __Infer<typeof TreasuryRebalanceSchedule>;
+
+export const TreasuryReservation = __t.object("TreasuryReservation", {
+  reservationId: __t.string(),
+  treasuryId: __t.string(),
+  missionId: __t.string(),
+  reservedRequests: __t.i64(),
+  reservedTokens: __t.i64(),
+  reservedCostMillicents: __t.i64(),
+  status: __t.string(),
+  decision: __t.string(),
+  createdAt: __t.string(),
+  expiresAt: __t.string(),
+  consumedAt: __t.option(__t.string()),
+  releasedAt: __t.option(__t.string()),
+  updatedAt: __t.string(),
+});
+export type TreasuryReservation = __Infer<typeof TreasuryReservation>;
 
 export const User = __t.object("User", {
   userId: __t.string(),

@@ -42,29 +42,55 @@ import ApproveProposalReducer from "./approve_proposal_reducer";
 import ArchiveBattlefieldReducer from "./archive_battlefield_reducer";
 import AssignProposalReducer from "./assign_proposal_reducer";
 import AttachDrexDecisionToRouteReducer from "./attach_drex_decision_to_route_reducer";
+import ClaimBeliefVerificationReducer from "./claim_belief_verification_reducer";
 import ClaimProposalReducer from "./claim_proposal_reducer";
 import ClaimTaskReducer from "./claim_task_reducer";
+import ClaimTreasuryRebalanceReducer from "./claim_treasury_rebalance_reducer";
 import CloseSessionReducer from "./close_session_reducer";
+import CompleteBeliefVerificationReducer from "./complete_belief_verification_reducer";
+import CompleteLoopSessionReducer from "./complete_loop_session_reducer";
 import CompleteMissionReducer from "./complete_mission_reducer";
+import CompleteTreasuryRebalanceReducer from "./complete_treasury_rebalance_reducer";
+import ConsumeReservationReducer from "./consume_reservation_reducer";
+import ContradictBeliefReducer from "./contradict_belief_reducer";
+import CorroborateBeliefReducer from "./corroborate_belief_reducer";
 import CreateMissionReducer from "./create_mission_reducer";
+import CreatePageReducer from "./create_page_reducer";
+import CreatePageLinkReducer from "./create_page_link_reducer";
+import CreateSourceVersionReducer from "./create_source_version_reducer";
 import CreateTaskDispatchReducer from "./create_task_dispatch_reducer";
+import CreateTreasuryReducer from "./create_treasury_reducer";
 import CreateUserReducer from "./create_user_reducer";
+import DecayBeliefTickReducer from "./decay_belief_tick_reducer";
+import DisproveBeliefReducer from "./disprove_belief_reducer";
 import ExpireProposalReducer from "./expire_proposal_reducer";
+import ExpireReservationReducer from "./expire_reservation_reducer";
+import ExtractBeliefCandidateReducer from "./extract_belief_candidate_reducer";
 import FailMissionReducer from "./fail_mission_reducer";
 import FinishCellRunReducer from "./finish_cell_run_reducer";
+import GateMissionTreasuryReducer from "./gate_mission_treasury_reducer";
+import IngestSourceReducer from "./ingest_source_reducer";
 import InsertCaptainDirectiveReducer from "./insert_captain_directive_reducer";
 import InsertCaptainMessageReducer from "./insert_captain_message_reducer";
 import InsertCaptainSummaryReducer from "./insert_captain_summary_reducer";
 import InsertExecutionMemoryReducer from "./insert_execution_memory_reducer";
 import InsertKnowledgeEmbeddingReducer from "./insert_knowledge_embedding_reducer";
 import IssueCapabilityLeaseReducer from "./issue_capability_lease_reducer";
+import LinkBeliefEvidenceReducer from "./link_belief_evidence_reducer";
 import LinkOauthIdentityReducer from "./link_oauth_identity_reducer";
 import MarkMessagesCompressedReducer from "./mark_messages_compressed_reducer";
+import MarkPageStaleReducer from "./mark_page_stale_reducer";
+import MarkRunNonNovelReducer from "./mark_run_non_novel_reducer";
+import MarkSourceParsedReducer from "./mark_source_parsed_reducer";
 import PauseMissionReducer from "./pause_mission_reducer";
+import PlanMissionDoctrineReducer from "./plan_mission_doctrine_reducer";
+import PromoteBeliefReducer from "./promote_belief_reducer";
 import PruneCaptainMessagesReducer from "./prune_captain_messages_reducer";
 import PruneExecutionMemoryReducer from "./prune_execution_memory_reducer";
 import PruneKnowledgeEmbeddingsReducer from "./prune_knowledge_embeddings_reducer";
 import QueueProposalReducer from "./queue_proposal_reducer";
+import RebalanceTreasuryReducer from "./rebalance_treasury_reducer";
+import RecompilePageReducer from "./recompile_page_reducer";
 import RecordApprovalDecisionReducer from "./record_approval_decision_reducer";
 import RecordBillingEventReducer from "./record_billing_event_reducer";
 import RecordConsentReducer from "./record_consent_reducer";
@@ -72,23 +98,39 @@ import RecordDispatchAckReducer from "./record_dispatch_ack_reducer";
 import RecordDrexDecisionReducer from "./record_drex_decision_reducer";
 import RecordDrexFailureReducer from "./record_drex_failure_reducer";
 import RecordInteractionReducer from "./record_interaction_reducer";
+import RecordLoopIterationReducer from "./record_loop_iteration_reducer";
+import RecordNoveltyVectorReducer from "./record_novelty_vector_reducer";
 import RecordProposalHeartbeatReducer from "./record_proposal_heartbeat_reducer";
+import RecordProviderFailureReducer from "./record_provider_failure_reducer";
 import RecordRouteDecisionReducer from "./record_route_decision_reducer";
-import RecordRunFailureReducer from "./record_run_failure_reducer";
 import RecordRunReducer from "./record_run_reducer";
+import RecordRunFailureReducer from "./record_run_failure_reducer";
+import RecordSpendReducer from "./record_spend_reducer";
 import RegisterArtifactReducer from "./register_artifact_reducer";
+import RegisterDeviceReducer from "./register_device_reducer";
 import RegisterDiscordChannelReducer from "./register_discord_channel_reducer";
 import RejectProposalReducer from "./reject_proposal_reducer";
+import ReleaseBudgetReducer from "./release_budget_reducer";
 import RenewCapabilityLeaseReducer from "./renew_capability_lease_reducer";
 import RequeueProposalReducer from "./requeue_proposal_reducer";
+import ReserveBudgetReducer from "./reserve_budget_reducer";
+import ResetTreasuryWindowReducer from "./reset_treasury_window_reducer";
 import ResolveCaptainFocusReducer from "./resolve_captain_focus_reducer";
+import ResolveContradictionReducer from "./resolve_contradiction_reducer";
 import ResumeMissionReducer from "./resume_mission_reducer";
+import RetireBeliefReducer from "./retire_belief_reducer";
+import RetirePageReducer from "./retire_page_reducer";
+import ReverifyBeliefReducer from "./reverify_belief_reducer";
 import RevokeCapabilityChainReducer from "./revoke_capability_chain_reducer";
 import RevokeCapabilityLeaseReducer from "./revoke_capability_lease_reducer";
 import RevokeProviderCredentialReducer from "./revoke_provider_credential_reducer";
+import ScheduleBeliefVerificationReducer from "./schedule_belief_verification_reducer";
+import ScheduleTreasuryRebalanceReducer from "./schedule_treasury_rebalance_reducer";
 import SetNodeStatusReducer from "./set_node_status_reducer";
 import StartCellRunReducer from "./start_cell_run_reducer";
+import StartLoopSessionReducer from "./start_loop_session_reducer";
 import StoreProviderCredentialReducer from "./store_provider_credential_reducer";
+import UpdateDeviceHeartbeatReducer from "./update_device_heartbeat_reducer";
 import UpdateModelTierStatsReducer from "./update_model_tier_stats_reducer";
 import UpdatePodHeartbeatReducer from "./update_pod_heartbeat_reducer";
 import UpdateTaskDispatchStatusReducer from "./update_task_dispatch_status_reducer";
@@ -96,6 +138,7 @@ import UpdateUserSeenReducer from "./update_user_seen_reducer";
 import UpsertAgentRegistryReducer from "./upsert_agent_registry_reducer";
 import UpsertBattlefieldReducer from "./upsert_battlefield_reducer";
 import UpsertCaptainFocusReducer from "./upsert_captain_focus_reducer";
+import UpsertDecayProfileReducer from "./upsert_decay_profile_reducer";
 import UpsertDiscordUserReducer from "./upsert_discord_user_reducer";
 import UpsertGpuSlotReducer from "./upsert_gpu_slot_reducer";
 import UpsertLeaseReducer from "./upsert_lease_reducer";
@@ -103,6 +146,7 @@ import UpsertLivenessStateReducer from "./upsert_liveness_state_reducer";
 import UpsertModelTierReducer from "./upsert_model_tier_reducer";
 import UpsertNodeHeartbeatReducer from "./upsert_node_heartbeat_reducer";
 import UpsertNodeRegistryReducer from "./upsert_node_registry_reducer";
+import UpsertPlatformEntitlementReducer from "./upsert_platform_entitlement_reducer";
 import UpsertPodReducer from "./upsert_pod_reducer";
 import UpsertProviderAccountStatusReducer from "./upsert_provider_account_status_reducer";
 import UpsertRateGroupStateReducer from "./upsert_rate_group_state_reducer";
@@ -117,6 +161,8 @@ import ApprovalDecisionsRow from "./approval_decisions_table";
 import ApprovalRequestsRow from "./approval_requests_table";
 import ArtifactsRow from "./artifacts_table";
 import BattlefieldsRow from "./battlefields_table";
+import BeliefContradictionsRow from "./belief_contradictions_table";
+import BeliefsRow from "./beliefs_table";
 import BillingEventsRow from "./billing_events_table";
 import CapabilityLeasesRow from "./capability_leases_table";
 import CaptainDirectivesRow from "./captain_directives_table";
@@ -124,6 +170,8 @@ import CaptainFocusRow from "./captain_focus_table";
 import CaptainMessagesRow from "./captain_messages_table";
 import CaptainSummariesRow from "./captain_summaries_table";
 import CellRunsRow from "./cell_runs_table";
+import DecayProfilesRow from "./decay_profiles_table";
+import DevicesRow from "./devices_table";
 import DiscordChannelsRow from "./discord_channels_table";
 import DiscordInteractionsRow from "./discord_interactions_table";
 import DiscordUsersRow from "./discord_users_table";
@@ -136,12 +184,18 @@ import GpuSlotsRow from "./gpu_slots_table";
 import KnowledgeEmbeddingsRow from "./knowledge_embeddings_table";
 import LeasesRow from "./leases_table";
 import LivenessStateRow from "./liveness_state_table";
+import LoopIterationsRow from "./loop_iterations_table";
+import LoopSessionsRow from "./loop_sessions_table";
 import MissionStepsRow from "./mission_steps_table";
 import MissionsRow from "./missions_table";
 import ModelTiersRow from "./model_tiers_table";
 import NodeRegistryRow from "./node_registry_table";
 import NodesRow from "./nodes_table";
+import NoveltyVectorsRow from "./novelty_vectors_table";
 import OauthIdentitiesRow from "./oauth_identities_table";
+import PageLinksRow from "./page_links_table";
+import PagesRow from "./pages_table";
+import PlatformEntitlementsRow from "./platform_entitlements_table";
 import PodsRow from "./pods_table";
 import ProposalConsentsRow from "./proposal_consents_table";
 import ProposalsRow from "./proposals_table";
@@ -154,6 +208,7 @@ import RunsRow from "./runs_table";
 import SessionSummariesRow from "./session_summaries_table";
 import TaskDispatchesRow from "./task_dispatches_table";
 import TenantTaskViewRow from "./tenant_task_view_table";
+import TreasuriesRow from "./treasuries_table";
 import UsersRow from "./users_table";
 import WorkerSessionsRow from "./worker_sessions_table";
 
@@ -273,6 +328,64 @@ const tablesSchema = __schema({
       { name: 'battlefields_battlefield_id_key', constraint: 'unique', columns: ['battlefieldId'] },
     ],
   }, BattlefieldsRow),
+  belief_contradictions: __table({
+    name: 'belief_contradictions',
+    indexes: [
+      { name: 'challenger_belief_id', algorithm: 'btree', columns: [
+        'challengerBeliefId',
+      ] },
+      { name: 'challenger_source_id', algorithm: 'btree', columns: [
+        'challengerSourceId',
+      ] },
+      { name: 'contradiction_id', algorithm: 'btree', columns: [
+        'contradictionId',
+      ] },
+      { name: 'primary_belief_id', algorithm: 'btree', columns: [
+        'primaryBeliefId',
+      ] },
+      { name: 'resolution_status', algorithm: 'btree', columns: [
+        'resolutionStatus',
+      ] },
+    ],
+    constraints: [
+      { name: 'belief_contradictions_contradiction_id_key', constraint: 'unique', columns: ['contradictionId'] },
+    ],
+  }, BeliefContradictionsRow),
+  beliefs: __table({
+    name: 'beliefs',
+    indexes: [
+      { name: 'belief_id', algorithm: 'btree', columns: [
+        'beliefId',
+      ] },
+      { name: 'confidence', algorithm: 'btree', columns: [
+        'confidence',
+      ] },
+      { name: 'created_at', algorithm: 'btree', columns: [
+        'createdAt',
+      ] },
+      { name: 'decay_profile_id', algorithm: 'btree', columns: [
+        'decayProfileId',
+      ] },
+      { name: 'domain', algorithm: 'btree', columns: [
+        'domain',
+      ] },
+      { name: 'freshness_score', algorithm: 'btree', columns: [
+        'freshnessScore',
+      ] },
+      { name: 'owner_scope', algorithm: 'btree', columns: [
+        'ownerScope',
+      ] },
+      { name: 'status', algorithm: 'btree', columns: [
+        'status',
+      ] },
+      { name: 'updated_at', algorithm: 'btree', columns: [
+        'updatedAt',
+      ] },
+    ],
+    constraints: [
+      { name: 'beliefs_belief_id_key', constraint: 'unique', columns: ['beliefId'] },
+    ],
+  }, BeliefsRow),
   billing_events: __table({
     name: 'billing_events',
     indexes: [
@@ -413,6 +526,34 @@ const tablesSchema = __schema({
       { name: 'cell_runs_cell_run_id_key', constraint: 'unique', columns: ['cellRunId'] },
     ],
   }, CellRunsRow),
+  decay_profiles: __table({
+    name: 'decay_profiles',
+    indexes: [
+      { name: 'decay_profile_id', algorithm: 'btree', columns: [
+        'decayProfileId',
+      ] },
+      { name: 'domain', algorithm: 'btree', columns: [
+        'domain',
+      ] },
+    ],
+    constraints: [
+      { name: 'decay_profiles_decay_profile_id_key', constraint: 'unique', columns: ['decayProfileId'] },
+    ],
+  }, DecayProfilesRow),
+  devices: __table({
+    name: 'devices',
+    indexes: [
+      { name: 'device_id', algorithm: 'btree', columns: [
+        'deviceId',
+      ] },
+      { name: 'user_id', algorithm: 'btree', columns: [
+        'userId',
+      ] },
+    ],
+    constraints: [
+      { name: 'devices_device_id_key', constraint: 'unique', columns: ['deviceId'] },
+    ],
+  }, DevicesRow),
   discord_channels: __table({
     name: 'discord_channels',
     indexes: [
@@ -635,6 +776,34 @@ const tablesSchema = __schema({
       { name: 'liveness_state_key_key', constraint: 'unique', columns: ['key'] },
     ],
   }, LivenessStateRow),
+  loop_iterations: __table({
+    name: 'loop_iterations',
+    indexes: [
+      { name: 'iteration_id', algorithm: 'btree', columns: [
+        'iterationId',
+      ] },
+      { name: 'loop_id', algorithm: 'btree', columns: [
+        'loopId',
+      ] },
+    ],
+    constraints: [
+      { name: 'loop_iterations_iteration_id_key', constraint: 'unique', columns: ['iterationId'] },
+    ],
+  }, LoopIterationsRow),
+  loop_sessions: __table({
+    name: 'loop_sessions',
+    indexes: [
+      { name: 'loop_id', algorithm: 'btree', columns: [
+        'loopId',
+      ] },
+      { name: 'user_id', algorithm: 'btree', columns: [
+        'userId',
+      ] },
+    ],
+    constraints: [
+      { name: 'loop_sessions_loop_id_key', constraint: 'unique', columns: ['loopId'] },
+    ],
+  }, LoopSessionsRow),
   mission_steps: __table({
     name: 'mission_steps',
     indexes: [
@@ -661,6 +830,9 @@ const tablesSchema = __schema({
   missions: __table({
     name: 'missions',
     indexes: [
+      { name: 'approval_state', algorithm: 'btree', columns: [
+        'approvalState',
+      ] },
       { name: 'created_at', algorithm: 'btree', columns: [
         'createdAt',
       ] },
@@ -675,6 +847,12 @@ const tablesSchema = __schema({
       ] },
       { name: 'status', algorithm: 'btree', columns: [
         'status',
+      ] },
+      { name: 'task_class', algorithm: 'btree', columns: [
+        'taskClass',
+      ] },
+      { name: 'treasury_id', algorithm: 'btree', columns: [
+        'treasuryId',
       ] },
       { name: 'updated_at', algorithm: 'btree', columns: [
         'updatedAt',
@@ -730,6 +908,29 @@ const tablesSchema = __schema({
       { name: 'nodes_node_id_key', constraint: 'unique', columns: ['nodeId'] },
     ],
   }, NodesRow),
+  novelty_vectors: __table({
+    name: 'novelty_vectors',
+    indexes: [
+      { name: 'composite_score', algorithm: 'btree', columns: [
+        'compositeScore',
+      ] },
+      { name: 'mission_id', algorithm: 'btree', columns: [
+        'missionId',
+      ] },
+      { name: 'run_id', algorithm: 'btree', columns: [
+        'runId',
+      ] },
+      { name: 'turn_index', algorithm: 'btree', columns: [
+        'turnIndex',
+      ] },
+      { name: 'vector_id', algorithm: 'btree', columns: [
+        'vectorId',
+      ] },
+    ],
+    constraints: [
+      { name: 'novelty_vectors_vector_id_key', constraint: 'unique', columns: ['vectorId'] },
+    ],
+  }, NoveltyVectorsRow),
   oauth_identities: __table({
     name: 'oauth_identities',
     indexes: [
@@ -744,6 +945,75 @@ const tablesSchema = __schema({
       { name: 'oauth_identities_identity_id_key', constraint: 'unique', columns: ['identityId'] },
     ],
   }, OauthIdentitiesRow),
+  page_links: __table({
+    name: 'page_links',
+    indexes: [
+      { name: 'from_page_id', algorithm: 'btree', columns: [
+        'fromPageId',
+      ] },
+      { name: 'link_id', algorithm: 'btree', columns: [
+        'linkId',
+      ] },
+      { name: 'link_type', algorithm: 'btree', columns: [
+        'linkType',
+      ] },
+      { name: 'to_page_id', algorithm: 'btree', columns: [
+        'toPageId',
+      ] },
+      { name: 'to_source_id', algorithm: 'btree', columns: [
+        'toSourceId',
+      ] },
+    ],
+    constraints: [
+      { name: 'page_links_link_id_key', constraint: 'unique', columns: ['linkId'] },
+    ],
+  }, PageLinksRow),
+  pages: __table({
+    name: 'pages',
+    indexes: [
+      { name: 'created_at', algorithm: 'btree', columns: [
+        'createdAt',
+      ] },
+      { name: 'freshness_score', algorithm: 'btree', columns: [
+        'freshnessScore',
+      ] },
+      { name: 'last_compiled_at', algorithm: 'btree', columns: [
+        'lastCompiledAt',
+      ] },
+      { name: 'namespace', algorithm: 'btree', columns: [
+        'namespace',
+      ] },
+      { name: 'owner_scope', algorithm: 'btree', columns: [
+        'ownerScope',
+      ] },
+      { name: 'page_id', algorithm: 'btree', columns: [
+        'pageId',
+      ] },
+      { name: 'slug', algorithm: 'btree', columns: [
+        'slug',
+      ] },
+      { name: 'status', algorithm: 'btree', columns: [
+        'status',
+      ] },
+      { name: 'updated_at', algorithm: 'btree', columns: [
+        'updatedAt',
+      ] },
+    ],
+    constraints: [
+      { name: 'pages_page_id_key', constraint: 'unique', columns: ['pageId'] },
+    ],
+  }, PagesRow),
+  platform_entitlements: __table({
+    name: 'platform_entitlements',
+    indexes: [
+      { name: 'user_id', algorithm: 'btree', columns: [
+        'userId',
+      ] },
+    ],
+    constraints: [
+      { name: 'platform_entitlements_user_id_key', constraint: 'unique', columns: ['userId'] },
+    ],
+  }, PlatformEntitlementsRow),
   pods: __table({
     name: 'pods',
     indexes: [
@@ -850,12 +1120,12 @@ const tablesSchema = __schema({
   rate_group_state: __table({
     name: 'rate_group_state',
     indexes: [
-      { name: 'rate_group', algorithm: 'btree', columns: [
-        'rateGroup',
+      { name: 'group_id', algorithm: 'btree', columns: [
+        'groupId',
       ] },
     ],
     constraints: [
-      { name: 'rate_group_state_rate_group_key', constraint: 'unique', columns: ['rateGroup'] },
+      { name: 'rate_group_state_group_id_key', constraint: 'unique', columns: ['groupId'] },
     ],
   }, RateGroupStateRow),
   route_decisions: __table({
@@ -892,6 +1162,9 @@ const tablesSchema = __schema({
     indexes: [
       { name: 'failure_code', algorithm: 'btree', columns: [
         'failureCode',
+      ] },
+      { name: 'failure_id', algorithm: 'btree', columns: [
+        'failureId',
       ] },
       { name: 'lease_id', algorithm: 'btree', columns: [
         'leaseId',
@@ -988,6 +1261,32 @@ const tablesSchema = __schema({
       { name: 'task_dispatches_task_id_key', constraint: 'unique', columns: ['taskId'] },
     ],
   }, TaskDispatchesRow),
+  treasuries: __table({
+    name: 'treasuries',
+    indexes: [
+      { name: 'health_score', algorithm: 'btree', columns: [
+        'healthScore',
+      ] },
+      { name: 'health_state', algorithm: 'btree', columns: [
+        'healthState',
+      ] },
+      { name: 'provider', algorithm: 'btree', columns: [
+        'provider',
+      ] },
+      { name: 'scope', algorithm: 'btree', columns: [
+        'scope',
+      ] },
+      { name: 'treasury_id', algorithm: 'btree', columns: [
+        'treasuryId',
+      ] },
+      { name: 'updated_at', algorithm: 'btree', columns: [
+        'updatedAt',
+      ] },
+    ],
+    constraints: [
+      { name: 'treasuries_treasury_id_key', constraint: 'unique', columns: ['treasuryId'] },
+    ],
+  }, TreasuriesRow),
   users: __table({
     name: 'users',
     indexes: [
@@ -1065,29 +1364,55 @@ const reducersSchema = __reducers(
   __reducerSchema("archive_battlefield", ArchiveBattlefieldReducer),
   __reducerSchema("assign_proposal", AssignProposalReducer),
   __reducerSchema("attach_drex_decision_to_route", AttachDrexDecisionToRouteReducer),
+  __reducerSchema("claim_belief_verification", ClaimBeliefVerificationReducer),
   __reducerSchema("claim_proposal", ClaimProposalReducer),
   __reducerSchema("claim_task", ClaimTaskReducer),
+  __reducerSchema("claim_treasury_rebalance", ClaimTreasuryRebalanceReducer),
   __reducerSchema("close_session", CloseSessionReducer),
+  __reducerSchema("complete_belief_verification", CompleteBeliefVerificationReducer),
+  __reducerSchema("complete_loop_session", CompleteLoopSessionReducer),
   __reducerSchema("complete_mission", CompleteMissionReducer),
+  __reducerSchema("complete_treasury_rebalance", CompleteTreasuryRebalanceReducer),
+  __reducerSchema("consume_reservation", ConsumeReservationReducer),
+  __reducerSchema("contradict_belief", ContradictBeliefReducer),
+  __reducerSchema("corroborate_belief", CorroborateBeliefReducer),
   __reducerSchema("create_mission", CreateMissionReducer),
+  __reducerSchema("create_page", CreatePageReducer),
+  __reducerSchema("create_page_link", CreatePageLinkReducer),
+  __reducerSchema("create_source_version", CreateSourceVersionReducer),
   __reducerSchema("create_task_dispatch", CreateTaskDispatchReducer),
+  __reducerSchema("create_treasury", CreateTreasuryReducer),
   __reducerSchema("create_user", CreateUserReducer),
+  __reducerSchema("decay_belief_tick", DecayBeliefTickReducer),
+  __reducerSchema("disprove_belief", DisproveBeliefReducer),
   __reducerSchema("expire_proposal", ExpireProposalReducer),
+  __reducerSchema("expire_reservation", ExpireReservationReducer),
+  __reducerSchema("extract_belief_candidate", ExtractBeliefCandidateReducer),
   __reducerSchema("fail_mission", FailMissionReducer),
   __reducerSchema("finish_cell_run", FinishCellRunReducer),
+  __reducerSchema("gate_mission_treasury", GateMissionTreasuryReducer),
+  __reducerSchema("ingest_source", IngestSourceReducer),
   __reducerSchema("insert_captain_directive", InsertCaptainDirectiveReducer),
   __reducerSchema("insert_captain_message", InsertCaptainMessageReducer),
   __reducerSchema("insert_captain_summary", InsertCaptainSummaryReducer),
   __reducerSchema("insert_execution_memory", InsertExecutionMemoryReducer),
   __reducerSchema("insert_knowledge_embedding", InsertKnowledgeEmbeddingReducer),
   __reducerSchema("issue_capability_lease", IssueCapabilityLeaseReducer),
+  __reducerSchema("link_belief_evidence", LinkBeliefEvidenceReducer),
   __reducerSchema("link_oauth_identity", LinkOauthIdentityReducer),
   __reducerSchema("mark_messages_compressed", MarkMessagesCompressedReducer),
+  __reducerSchema("mark_page_stale", MarkPageStaleReducer),
+  __reducerSchema("mark_run_non_novel", MarkRunNonNovelReducer),
+  __reducerSchema("mark_source_parsed", MarkSourceParsedReducer),
   __reducerSchema("pause_mission", PauseMissionReducer),
+  __reducerSchema("plan_mission_doctrine", PlanMissionDoctrineReducer),
+  __reducerSchema("promote_belief", PromoteBeliefReducer),
   __reducerSchema("prune_captain_messages", PruneCaptainMessagesReducer),
   __reducerSchema("prune_execution_memory", PruneExecutionMemoryReducer),
   __reducerSchema("prune_knowledge_embeddings", PruneKnowledgeEmbeddingsReducer),
   __reducerSchema("queue_proposal", QueueProposalReducer),
+  __reducerSchema("rebalance_treasury", RebalanceTreasuryReducer),
+  __reducerSchema("recompile_page", RecompilePageReducer),
   __reducerSchema("record_approval_decision", RecordApprovalDecisionReducer),
   __reducerSchema("record_billing_event", RecordBillingEventReducer),
   __reducerSchema("record_consent", RecordConsentReducer),
@@ -1095,23 +1420,39 @@ const reducersSchema = __reducers(
   __reducerSchema("record_drex_decision", RecordDrexDecisionReducer),
   __reducerSchema("record_drex_failure", RecordDrexFailureReducer),
   __reducerSchema("record_interaction", RecordInteractionReducer),
+  __reducerSchema("record_loop_iteration", RecordLoopIterationReducer),
+  __reducerSchema("record_novelty_vector", RecordNoveltyVectorReducer),
   __reducerSchema("record_proposal_heartbeat", RecordProposalHeartbeatReducer),
+  __reducerSchema("record_provider_failure", RecordProviderFailureReducer),
   __reducerSchema("record_route_decision", RecordRouteDecisionReducer),
-  __reducerSchema("record_run_failure", RecordRunFailureReducer),
   __reducerSchema("record_run", RecordRunReducer),
+  __reducerSchema("record_run_failure", RecordRunFailureReducer),
+  __reducerSchema("record_spend", RecordSpendReducer),
   __reducerSchema("register_artifact", RegisterArtifactReducer),
+  __reducerSchema("register_device", RegisterDeviceReducer),
   __reducerSchema("register_discord_channel", RegisterDiscordChannelReducer),
   __reducerSchema("reject_proposal", RejectProposalReducer),
+  __reducerSchema("release_budget", ReleaseBudgetReducer),
   __reducerSchema("renew_capability_lease", RenewCapabilityLeaseReducer),
   __reducerSchema("requeue_proposal", RequeueProposalReducer),
+  __reducerSchema("reserve_budget", ReserveBudgetReducer),
+  __reducerSchema("reset_treasury_window", ResetTreasuryWindowReducer),
   __reducerSchema("resolve_captain_focus", ResolveCaptainFocusReducer),
+  __reducerSchema("resolve_contradiction", ResolveContradictionReducer),
   __reducerSchema("resume_mission", ResumeMissionReducer),
+  __reducerSchema("retire_belief", RetireBeliefReducer),
+  __reducerSchema("retire_page", RetirePageReducer),
+  __reducerSchema("reverify_belief", ReverifyBeliefReducer),
   __reducerSchema("revoke_capability_chain", RevokeCapabilityChainReducer),
   __reducerSchema("revoke_capability_lease", RevokeCapabilityLeaseReducer),
   __reducerSchema("revoke_provider_credential", RevokeProviderCredentialReducer),
+  __reducerSchema("schedule_belief_verification", ScheduleBeliefVerificationReducer),
+  __reducerSchema("schedule_treasury_rebalance", ScheduleTreasuryRebalanceReducer),
   __reducerSchema("set_node_status", SetNodeStatusReducer),
   __reducerSchema("start_cell_run", StartCellRunReducer),
+  __reducerSchema("start_loop_session", StartLoopSessionReducer),
   __reducerSchema("store_provider_credential", StoreProviderCredentialReducer),
+  __reducerSchema("update_device_heartbeat", UpdateDeviceHeartbeatReducer),
   __reducerSchema("update_model_tier_stats", UpdateModelTierStatsReducer),
   __reducerSchema("update_pod_heartbeat", UpdatePodHeartbeatReducer),
   __reducerSchema("update_task_dispatch_status", UpdateTaskDispatchStatusReducer),
@@ -1119,6 +1460,7 @@ const reducersSchema = __reducers(
   __reducerSchema("upsert_agent_registry", UpsertAgentRegistryReducer),
   __reducerSchema("upsert_battlefield", UpsertBattlefieldReducer),
   __reducerSchema("upsert_captain_focus", UpsertCaptainFocusReducer),
+  __reducerSchema("upsert_decay_profile", UpsertDecayProfileReducer),
   __reducerSchema("upsert_discord_user", UpsertDiscordUserReducer),
   __reducerSchema("upsert_gpu_slot", UpsertGpuSlotReducer),
   __reducerSchema("upsert_lease", UpsertLeaseReducer),
@@ -1126,6 +1468,7 @@ const reducersSchema = __reducers(
   __reducerSchema("upsert_model_tier", UpsertModelTierReducer),
   __reducerSchema("upsert_node_heartbeat", UpsertNodeHeartbeatReducer),
   __reducerSchema("upsert_node_registry", UpsertNodeRegistryReducer),
+  __reducerSchema("upsert_platform_entitlement", UpsertPlatformEntitlementReducer),
   __reducerSchema("upsert_pod", UpsertPodReducer),
   __reducerSchema("upsert_provider_account_status", UpsertProviderAccountStatusReducer),
   __reducerSchema("upsert_rate_group_state", UpsertRateGroupStateReducer),

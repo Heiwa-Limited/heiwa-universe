@@ -7,8 +7,8 @@ Flow:
   3. Hub exchanges code for Discord access token
   4. Hub fetches Discord user profile
   5. Hub creates/links User + OAuthIdentity in STDB
-  6. Hub signs a short-lived JWT
-  7. Redirect to app.heiwa.ltd#token=<jwt>
+  6. JWT utilities remain for non-browser compatibility paths
+  7. Legacy browser path redirects to app.heiwa.ltd/auth/callback for SvelteKit cookie session
 """
 
 import hashlib
@@ -354,24 +354,15 @@ def auth_discord_redirect():
 
 
 async def auth_discord_callback(code: str, state: str, stdb) -> RedirectResponse:
-    """GET /auth/discord/callback — exchange code, create user, redirect with JWT."""
+    """GET /auth/discord/callback — exchange code, create user, redirect through SvelteKit."""
     if not _validate_state(state):
         raise HTTPException(status_code=400, detail="Invalid or expired state parameter")
 
     discord_data = await exchange_discord_code(code)
-    user_id = ensure_user(stdb, discord_data)
+    ensure_user(stdb, discord_data)
 
-    # Build JWT
-    discord_uid = str(discord_data["discord_user_id"])
-    username = discord_data.get("username", "")
-    token = sign_jwt({
-        "sub": user_id,
-        "owner_id": user_id,
-        "principal_id": f"discord:{discord_uid}",
-        "discord_user_id": discord_uid,
-        "username": username,
-    })
-
-    # Redirect to web with token in fragment (not query string — fragments stay client-side)
+    # Deprecated browser fragment handoff:
+    # keep this Python surface only as the legacy OAuth bridge.
+    # Browser UX now lands on SvelteKit's callback route and cookie session model.
     web_origin = _web_origin()
-    return RedirectResponse(url=f"{web_origin}/dashboard.html#token={token}", status_code=302)
+    return RedirectResponse(url=f"{web_origin}/auth/callback", status_code=302)

@@ -1033,6 +1033,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "heiwa-orchestrator"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "heiwa-bindings",
+ "serde_json",
+ "tokio",
+]
+
+[[package]]
 name = "heiwa-protocol"
 version = "0.1.0"
 dependencies = [
@@ -1131,6 +1141,14 @@ dependencies = [
 
 [[package]]
 name = "heiwa_production_db"
+version = "0.1.0"
+dependencies = [
+ "log",
+ "spacetimedb",
+]
+
+[[package]]
+name = "heiwaproductiondb"
 version = "0.1.0"
 dependencies = [
  "log",

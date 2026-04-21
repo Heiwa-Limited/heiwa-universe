@@ -10,19 +10,18 @@
 
 The current web surface (`apps/heiwa_web/clients/web/`) is ~15 hand-written HTML files with vanilla JS.
 Each page duplicates the nav, styles, and API wiring. Adding a feature means touching raw HTML, duplicating
-the auth-token-from-fragment dance, and hoping the CSP headers stay in sync. The static shell served
+the auth redirect dance, and hoping the CSP headers stay in sync. The static shell served
 its purpose for bootstrapping — now it's a drag on velocity.
 
 The hub (`mcp_server.py`) also mirrors every HTML page as a route (lines 445–522), creating dual
-maintenance. Auth redirect lands on `dashboard.html#token=<jwt>` — a fragile fragment-passing pattern
-that a proper client-side router should own.
+maintenance. Browser auth now belongs to the SvelteKit shell, not `dashboard.html#token=<jwt>`.
 
 ## 2. Goals
 
 1. **Single SvelteKit app** at `apps/heiwa_web/app/` replacing both heiwa.ltd (marketing) and app.heiwa.ltd (product)
 2. **Cloudflare Pages deployment** via `wrangler pages deploy` (adapter-cloudflare)
 3. **Consume api.heiwa.ltd** exclusively — no SSR data fetching, no server functions hitting STDB directly
-4. **Discord OAuth flow** stays on the hub; SvelteKit handles the redirect landing + JWT storage
+4. **Discord OAuth flow** stays on the hub; SvelteKit handles the callback landing + secure cookie session
 5. **Kill the static HTML routes** in mcp_server.py once migration is validated
 6. **Zero new infra cost** — Cloudflare Pages free tier is sufficient
 
@@ -84,7 +83,7 @@ shared design system.
 
 | Route | Purpose |
 |-------|---------|
-| `/auth/callback` | Catches `#token=<jwt>` from hub redirect, stores in cookie/localStorage, redirects to dashboard |
+| `/auth/callback` | Finalizes the browser session in SvelteKit, sets the secure cookie, redirects to dashboard |
 | `/auth/logout` | Clears session, redirects to heiwa.ltd |
 
 ## 5. Auth Flow (Revised)
@@ -94,18 +93,18 @@ User clicks "Sign in" on heiwa.ltd
   → redirects to api.heiwa.ltd/auth/discord
   → Discord OAuth consent
   → api.heiwa.ltd/auth/discord/callback
-  → hub signs JWT, redirects to app.heiwa.ltd/auth/callback#token=<jwt>
-  → SvelteKit catches fragment, stores JWT in httpOnly cookie (via +page.ts)
+  → hub redirects to app.heiwa.ltd/auth/callback
+  → SvelteKit finalizes the secure session cookie
   → redirects to /dashboard
 ```
 
 **Changes from current:**
-- Hub redirect target changes from `/dashboard.html#token=` to `/auth/callback#token=`
-- SvelteKit layout guard checks JWT on every auth'd route (not per-page JS)
-- JWT refresh: not needed at 1hr lifetime for v1; user re-authenticates
+- Hub redirect target changes from `/dashboard.html#token=` to `/auth/callback`
+- SvelteKit layout guard checks the secure session on every auth'd route (not per-page JS)
+- Browser session authority moves out of fragments/localStorage and into the cookie session
 
-**Hub change required:** Update `HEIWA_WEB_ORIGIN` redirect in `auth.py:377` from
-`/dashboard.html#token=` to `/auth/callback#token=`.
+**Hub change required:** Update `HEIWA_WEB_ORIGIN` redirect in `auth.py` from
+`/dashboard.html#token=` to `/auth/callback`.
 
 ## 6. API Client
 
@@ -190,7 +189,7 @@ apps/heiwa_web/app/
 │   │   │   ├── canvas/
 │   │   │   └── settings/
 │   │   ├── auth/
-│   │   │   ├── callback/+page.ts   # JWT extraction from fragment
+│   │   │   ├── callback/+page.ts   # Callback landing; finalizes secure cookie session
 │   │   │   └── logout/+page.ts
 │   │   └── +layout.svelte     # Root layout
 │   ├── app.html
@@ -211,7 +210,7 @@ apps/heiwa_web/app/
 ### Phase 1 — Scaffold + Auth (this PR)
 - `pnpm create svelte@latest` in `apps/heiwa_web/app/`
 - Install adapter-cloudflare, tailwind, base dependencies
-- Implement auth callback route + JWT store
+- Implement auth callback route + secure session cookie
 - Port homepage (index.html → marketing route group)
 - Port dashboard (dashboard.html → app route group)
 - Deploy to Cloudflare Pages as new project
@@ -241,7 +240,7 @@ apps/heiwa_web/app/
 ## 10. Hub Changes Required
 
 1. **CORS middleware** — Add FastAPI CORSMiddleware allowing `heiwa.ltd` + `app.heiwa.ltd` origins
-2. **Auth redirect** — Change redirect target from `/dashboard.html#token=` to `/auth/callback#token=`
+2. **Auth redirect** — Change redirect target from `/dashboard.html#token=` to `/auth/callback`
 3. **Remove static routes** — Delete HTML-serving routes (Phase 3, after cutover validated)
 4. **API-only surface** — Hub becomes pure API; no static assets served
 
@@ -264,7 +263,7 @@ deploy-web:
 
 ## 12. Open Questions
 
-1. **Cookie vs localStorage for JWT?** Cookie is more secure (httpOnly) but fragments can't set cookies client-side. Likely: extract from fragment in JS, set via API call, then httpOnly cookie for subsequent requests. Or just localStorage for v1 simplicity.
+1. **Cookie vs localStorage for JWT?** Resolved: secure httpOnly cookie only; browser should not use fragments or localStorage as auth authority.
 2. **Should status.heiwa.ltd become a SvelteKit route or stay static?** Lean toward SvelteKit route — it's simple and benefits from shared layout.
 3. **Hostname-based routing or path-based?** SvelteKit can detect hostname in hooks. Need to verify adapter-cloudflare supports this cleanly.
 4. **Do we need SSR at all?** Marketing pages benefit from SSR (SEO). App pages are client-only. SvelteKit handles this per-route with `export const ssr = false` on app routes.

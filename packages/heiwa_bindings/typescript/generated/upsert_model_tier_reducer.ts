@@ -24,8 +24,5 @@ export default {
   quantizationType: __t.string(),
   kvCacheStrategy: __t.string(),
   strengthsJson: __t.string(),
-  vramRequirementMb: __t.u32(),
-  quantizationType: __t.string(),
-  kvCacheStrategy: __t.string(),
   enabled: __t.bool(),
 };

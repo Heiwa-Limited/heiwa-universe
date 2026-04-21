@@ -29,14 +29,9 @@ export default __t.row({
   cost: __t.f64(),
   userId: __t.option(__t.string()).name("user_id"),
   leaseId: __t.option(__t.string()).name("lease_id"),
-<<<<<<< HEAD:packages/heiwa_bindings/typescript/runs_table.ts
   sessionId: __t.option(__t.string()).name("session_id"),
   ownerId: __t.option(__t.string()).name("owner_id"),
   principalId: __t.option(__t.string()).name("principal_id"),
   failureCode: __t.option(__t.string()).name("failure_code"),
   failureMessage: __t.option(__t.string()).name("failure_message"),
-=======
-  ownerId: __t.option(__t.string()).name("owner_id"),
-  principalId: __t.option(__t.string()).name("principal_id"),
->>>>>>> rust-ts-first-migration:packages/heiwa_bindings/typescript/generated/runs_table.ts
 });

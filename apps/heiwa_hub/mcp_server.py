@@ -417,7 +417,7 @@ async def health():
 
 
 # ---------------------------------------------------------------------------
-#  Auth routes — Discord OAuth2 + JWT sessions
+#  Auth routes — Discord OAuth2 bridge + JWT session verification
 # ---------------------------------------------------------------------------
 
 @app.get("/auth/discord")
@@ -428,7 +428,7 @@ async def start_discord_oauth():
 
 @app.get("/auth/discord/callback")
 async def discord_oauth_callback(code: str = "", state: str = ""):
-    """Exchange Discord OAuth code for JWT session token."""
+    """Legacy Discord OAuth callback bridge for browser sign-in."""
     if not code or not state:
         raise HTTPException(status_code=400, detail="Missing code or state parameter")
     stdb = getattr(db, "stdb", None)
