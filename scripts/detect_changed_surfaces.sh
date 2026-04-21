@@ -78,7 +78,7 @@ while IFS= read -r file; do
   esac
 
   case "$file" in
-    package.json|package-lock.json|tsconfig.base.json|.nvmrc|apps/heiwa_web/*|packages/heiwa_bindings/typescript/*)
+    package.json|package-lock.json|tsconfig.base.json|.nvmrc|apps/heiwa_app/*|packages/heiwa_bindings/typescript/*)
       typescript=true
       web_static=true
       deploy_web=true

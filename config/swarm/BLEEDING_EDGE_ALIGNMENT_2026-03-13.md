@@ -96,7 +96,7 @@ Why:
 - Its value is an opinionated control surface for UI iteration.
 
 Build from:
-- `apps/heiwa_web`
+- `apps/heiwa_app`
 - `packages/heiwa_skills/playwright`
 - `packages/heiwa_skills/imagegen`
 

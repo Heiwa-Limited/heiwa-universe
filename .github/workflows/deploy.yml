@@ -120,7 +120,7 @@ jobs:
           cache: pip
       - name: Validate static public shell
         if: needs.changes.outputs.deploy_web == 'true'
-        run: python apps/heiwa_web/scripts/check_static_surface.py
+        run: python apps/heiwa_app/scripts/check_static_surface.py
 
   deploy-railway:
     name: Deploy to Railway
@@ -212,7 +212,7 @@ jobs:
         with:
           apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-          command: pages deploy apps/heiwa_web/clients/web --project-name=heiwa-clients
+          command: pages deploy apps/heiwa_app/clients/web --project-name=heiwa-clients
       - name: Skip (no Cloudflare secrets)
         if: env.CF_API_TOKEN == '' || env.CF_ACCOUNT_ID == ''
         run: echo "Cloudflare secrets not configured — skipping web deploy"

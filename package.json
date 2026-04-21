@@ -5,12 +5,12 @@
     "node": "24.x"
   },
   "workspaces": [
-    "apps/heiwa_web",
+    "apps/heiwa_app",
     "packages/heiwa_bindings/typescript"
   ],
   "scripts": {
     "check:runtime": "bash scripts/check_runtime_baseline.sh",
-    "typecheck": "tsc -p packages/heiwa_bindings/typescript/tsconfig.json --noEmit && tsc -p apps/heiwa_web/tsconfig.json --noEmit"
+    "typecheck": "tsc -p packages/heiwa_bindings/typescript/tsconfig.json --noEmit && tsc -p apps/heiwa_app/tsconfig.json --noEmit"
   },
   "devDependencies": {
     "@biomejs/biome": "^2.4.10",

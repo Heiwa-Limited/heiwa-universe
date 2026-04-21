@@ -87,7 +87,7 @@ COPY policies/ /app/policies/
 COPY apps/heiwa_hub/ /app/apps/heiwa_hub/
 COPY apps/heiwa_cli/scripts/agents/wrappers/ /app/apps/heiwa_cli/scripts/agents/wrappers/
 COPY apps/heiwa_cli/scripts/ops/ /app/apps/heiwa_cli/scripts/ops/
-COPY apps/heiwa_web/clients/web/ /app/apps/heiwa_web/clients/web/
+COPY apps/heiwa_app/clients/web/ /app/apps/heiwa_app/clients/web/
 COPY requirements.txt /app/requirements.txt
 COPY conftest.py /app/conftest.py
 COPY pyproject.toml /app/pyproject.toml

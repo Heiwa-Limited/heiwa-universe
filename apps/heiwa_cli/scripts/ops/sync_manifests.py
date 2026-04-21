@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 Syncs the authoritative domain manifest to the public web assets directory.
-Ensures apps/heiwa_web/clients/web always reflects infrastructure/truth.
+Ensures apps/heiwa_app/clients/web always reflects infrastructure/truth.
 """
 
 import json
@@ -11,7 +11,7 @@ import shutil
 
 ROOT = Path(__file__).resolve().parents[3]
 SOURCE_MANIFEST = ROOT / "infrastructure" / "domains" / "heiwa-ltd.bootstrap.json"
-DEST_MANIFEST = ROOT / "apps" / "heiwa_web" / "clients" / "web" / "assets" / "domains.bootstrap.json"
+DEST_MANIFEST = ROOT / "apps" / "heiwa_app" / "clients" / "web" / "assets" / "domains.bootstrap.json"
 
 def main():
     print("--- HEIWA MANIFEST SYNC ---")
