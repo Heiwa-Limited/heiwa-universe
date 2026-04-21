@@ -74,6 +74,21 @@ Either agent claims. Keeps main repo portable.
 3. Cleanup C1–C7 ride along where they unblock specific lane tasks.
 4. Merge point: L7 `heiwa init` + P3 homebrew tap → first shippable alpha.
 
+## Worktree convention
+
+- Claude works in `.worktrees/claude/<task-id>/`
+- Codex works in `.worktrees/codex/<task-id>/`
+- Branch name mirrors path: `claude/<task-id>` or `codex/<task-id>`
+- All worktrees ignored by git (`.worktrees/` in `.gitignore`)
+- Short-lived: delete worktree + branch after PR merge
+
+## Git state (2026-04-21 consolidation)
+
+- `main` is trunk; all other local branches deleted
+- Pre-consolidation branches preserved as `backup/*-20260421` tags (pushed to origin)
+- Lost origin branches: `feat/heiwa-terminal-v1-cockpit`, `phase2-auth-plane` — left intact on remote as extra backup
+- Known CVE: GitHub flagged 6 dependabot alerts on `main` — audit during P5
+
 ## Non-goals (deferred)
 
 - VPS or hosted backend
