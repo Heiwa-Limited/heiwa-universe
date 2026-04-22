@@ -1,0 +1,161 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Heiwa vs Manifest | Different Categories</title>
+    <meta
+      name="description"
+      content="Manifest is a smart model router. Heiwa is a local operator runtime where routing is one capability among several. Compare, honestly."
+    />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=Space+Grotesk:wght@400;500;700&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="../assets/styles.css" />
+  </head>
+  <body data-page="vs-manifest">
+    <div class="bg-grid" aria-hidden="true"></div>
+    <header class="topbar">
+      <a class="brand" href="/index.html">HEIWA</a>
+      <nav class="nav">
+        <a href="/index.html">Home</a>
+        <a href="/providers.html">Providers</a>
+        <a href="/download.html">Download</a>
+        <a href="https://docs.heiwa.ltd">Docs</a>
+        <a href="https://github.com/Strategizing/heiwa-universe">GitHub</a>
+      </nav>
+    </header>
+
+    <main class="marketing-main">
+      <section class="hero compact">
+        <p class="eyebrow">Heiwa vs Manifest</p>
+        <h1>Different categories, honestly.</h1>
+        <p class="lede">
+          Manifest is a sharp smart model router with first-rate self-hosted packaging. Heiwa is a local operator
+          runtime where routing is one capability alongside memory, evidence, subagents, crons, and a REPL. If smart
+          routing is all you need, Manifest is smaller and more focused. If you want one coherent operator surface,
+          Heiwa sits in a different category.
+        </p>
+      </section>
+
+      <section class="section-block table-shell">
+        <div class="table-head">
+          <div>
+            <p class="eyebrow">Side by side</p>
+            <h2>Scope and shape</h2>
+          </div>
+          <p class="section-copy">
+            Both ship as software operators install themselves. The split is scope: a router vs a runtime.
+          </p>
+        </div>
+
+        <div class="marketing-table-wrap">
+          <table class="marketing-table">
+            <thead>
+              <tr>
+                <th>Axis</th>
+                <th>Heiwa</th>
+                <th>Manifest</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td><strong>Category</strong></td>
+                <td>Local operator runtime with routing, memory, evidence, orchestration</td>
+                <td>Smart model router with fallbacks and budgets</td>
+              </tr>
+              <tr>
+                <td><strong>Primary surface</strong></td>
+                <td>Installed <code>heiwa</code> binary, REPL, and local cockpit on <code>localhost</code></td>
+                <td>Web app on <code>localhost:2099</code> after Docker install (or hosted at app.manifest.build)</td>
+              </tr>
+              <tr>
+                <td><strong>CLI</strong></td>
+                <td>Unified <code>heiwa</code> verb surface (run, loop, cron, agent, route, providers, app)</td>
+                <td>Web-first; no first-party CLI</td>
+              </tr>
+              <tr>
+                <td><strong>OAuth subscription reuse</strong></td>
+                <td>First-class via provider CLIs (Claude Code, Codex, Gemini, Antigravity)</td>
+                <td>Supported for ChatGPT, Claude, Copilot, MiniMax, Z.ai via their APIs</td>
+              </tr>
+              <tr>
+                <td><strong>Local models</strong></td>
+                <td>First-class via Ollama; preferred tier when capable</td>
+                <td>Supported via Ollama</td>
+              </tr>
+              <tr>
+                <td><strong>Memory and evidence</strong></td>
+                <td>Durable operator memory and traces are product concerns</td>
+                <td>Request history; not the center of gravity</td>
+              </tr>
+              <tr>
+                <td><strong>Subagents, loops, crons</strong></td>
+                <td>In scope</td>
+                <td>Not in scope today</td>
+              </tr>
+              <tr>
+                <td><strong>Hosting model</strong></td>
+                <td>Self-hosted only. Heiwa never hosts the runtime for users.</td>
+                <td>Self-hosted via Docker, or hosted cloud version at app.manifest.build</td>
+              </tr>
+              <tr>
+                <td><strong>Cloud version</strong></td>
+                <td>None</td>
+                <td>Yes (app.manifest.build)</td>
+              </tr>
+              <tr>
+                <td><strong>License</strong></td>
+                <td>See repo LICENSE</td>
+                <td>MIT</td>
+              </tr>
+              <tr>
+                <td><strong>Maturity</strong></td>
+                <td>Early; runtime and surfaces shipping incrementally. Present honestly.</td>
+                <td>Beta; wide provider coverage, active community.</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <section class="section-block section-split">
+        <div>
+          <p class="eyebrow">Which to pick</p>
+          <h2>Pick the one that matches the job.</h2>
+          <p class="section-copy">
+            No framing tricks. If the problem is "route requests across providers to cut cost," Manifest will likely
+            fit without wrestling. If the problem is "I want one installed surface that holds routing, REPL, memory,
+            evidence, subagents, and crons together," Heiwa is built for that shape.
+          </p>
+        </div>
+        <div class="story-grid">
+          <article>
+            <span>Pick Manifest if</span>
+            <strong>Routing is the product</strong>
+            <p>Cost-aware routing across many providers, clean fallbacks, and a web UI are the top asks.</p>
+          </article>
+          <article>
+            <span>Pick Heiwa if</span>
+            <strong>Operator surface is the product</strong>
+            <p>CLI, REPL, memory, evidence, and orchestration alongside routing belong in one place.</p>
+          </article>
+        </div>
+      </section>
+    </main>
+
+    <footer class="footer">
+      <p>Operator runtime first. Provider internals stay provider-owned.</p>
+      <p class="footer-links">
+        <a href="/index.html">Home</a>
+        <a href="/providers.html">Providers</a>
+        <a href="/vs/openrouter.html">vs OpenRouter</a>
+        <a href="/vs/litellm.html">vs LiteLLM</a>
+        <a href="https://github.com/Strategizing/heiwa-universe">GitHub</a>
+      </p>
+    </footer>
+  </body>
+</html>

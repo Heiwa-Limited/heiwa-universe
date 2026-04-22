@@ -1,0 +1,151 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Heiwa vs OpenRouter | Local Runtime vs Remote Gateway</title>
+    <meta
+      name="description"
+      content="OpenRouter is a remote model gateway. Heiwa is a local self-hosted operator runtime. Your prompts and keys never leave your machine."
+    />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=Space+Grotesk:wght@400;500;700&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="../assets/styles.css" />
+  </head>
+  <body data-page="vs-openrouter">
+    <div class="bg-grid" aria-hidden="true"></div>
+    <header class="topbar">
+      <a class="brand" href="/index.html">HEIWA</a>
+      <nav class="nav">
+        <a href="/index.html">Home</a>
+        <a href="/providers.html">Providers</a>
+        <a href="/download.html">Download</a>
+        <a href="https://docs.heiwa.ltd">Docs</a>
+        <a href="https://github.com/Strategizing/heiwa-universe">GitHub</a>
+      </nav>
+    </header>
+
+    <main class="marketing-main">
+      <section class="hero compact">
+        <p class="eyebrow">Heiwa vs OpenRouter</p>
+        <h1>Local runtime vs remote gateway.</h1>
+        <p class="lede">
+          OpenRouter is a hosted model gateway. Requests route through their servers. Heiwa is a local self-hosted
+          runtime. Prompts, keys, memory, and evidence stay on the operator's machine. OpenRouter can still appear as
+          one optional lane inside Heiwa when it's the right tool for a single task.
+        </p>
+      </section>
+
+      <section class="section-block table-shell">
+        <div class="table-head">
+          <div>
+            <p class="eyebrow">Side by side</p>
+            <h2>Where the request goes</h2>
+          </div>
+          <p class="section-copy">
+            The sharpest difference is the path of the prompt. One crosses the internet through a third party. The
+            other doesn't.
+          </p>
+        </div>
+
+        <div class="marketing-table-wrap">
+          <table class="marketing-table">
+            <thead>
+              <tr>
+                <th>Axis</th>
+                <th>Heiwa</th>
+                <th>OpenRouter</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td><strong>Architecture</strong></td>
+                <td>Local-first operator runtime on the operator's machine</td>
+                <td>Cloud proxy between the operator's app and each provider</td>
+              </tr>
+              <tr>
+                <td><strong>Where prompts flow</strong></td>
+                <td>Directly to the selected provider or the local model</td>
+                <td>Through OpenRouter's servers on the way to the provider</td>
+              </tr>
+              <tr>
+                <td><strong>Where keys live</strong></td>
+                <td>In <code>~/.heiwa/</code> on the operator's machine</td>
+                <td>Either on OpenRouter (account-level) or scoped to a client key</td>
+              </tr>
+              <tr>
+                <td><strong>Per-call fee</strong></td>
+                <td>None — Heiwa is software, not a toll</td>
+                <td>5% fee on API calls through the gateway</td>
+              </tr>
+              <tr>
+                <td><strong>OAuth subscription reuse</strong></td>
+                <td>First-class via provider CLIs</td>
+                <td>Not applicable (API-key gateway model)</td>
+              </tr>
+              <tr>
+                <td><strong>Local models</strong></td>
+                <td>First-class via Ollama</td>
+                <td>Not the product's focus</td>
+              </tr>
+              <tr>
+                <td><strong>Operator surface</strong></td>
+                <td>Installed binary, REPL, local cockpit</td>
+                <td>API plus dashboard; operator context lives elsewhere</td>
+              </tr>
+              <tr>
+                <td><strong>Source</strong></td>
+                <td>Open (see repo)</td>
+                <td>Proprietary</td>
+              </tr>
+              <tr>
+                <td><strong>Complement vs compete</strong></td>
+                <td>Can wrap OpenRouter as one optional API-key lane</td>
+                <td>Stand-alone gateway</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <section class="section-block section-split">
+        <div>
+          <p class="eyebrow">Which to pick</p>
+          <h2>These solve different problems.</h2>
+          <p class="section-copy">
+            OpenRouter is useful when the operator wants one API surface for many models and is fine with a hosted
+            proxy in the path. Heiwa is useful when the operator wants the runtime, the memory, and the decision
+            surface on their own machine and treats remote gateways as optional escalation lanes.
+          </p>
+        </div>
+        <div class="story-grid">
+          <article>
+            <span>Pick OpenRouter if</span>
+            <strong>You want a hosted multi-model API</strong>
+            <p>Single HTTP endpoint across many models matters more than local-first posture.</p>
+          </article>
+          <article>
+            <span>Pick Heiwa if</span>
+            <strong>Local-first is non-negotiable</strong>
+            <p>Prompts, evidence, memory, and keys stay on your machine; remote lanes are optional.</p>
+          </article>
+        </div>
+      </section>
+    </main>
+
+    <footer class="footer">
+      <p>Operator runtime first. Provider internals stay provider-owned.</p>
+      <p class="footer-links">
+        <a href="/index.html">Home</a>
+        <a href="/providers.html">Providers</a>
+        <a href="/vs/manifest.html">vs Manifest</a>
+        <a href="/vs/litellm.html">vs LiteLLM</a>
+        <a href="https://github.com/Strategizing/heiwa-universe">GitHub</a>
+      </p>
+    </footer>
+  </body>
+</html>

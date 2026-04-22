@@ -1,0 +1,152 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Heiwa vs LiteLLM | Operator Runtime vs Compatibility Library</title>
+    <meta
+      name="description"
+      content="LiteLLM is a compatibility library and proxy for OpenAI-format requests across many providers. Heiwa is an operator runtime. Different layers of the stack."
+    />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=Space+Grotesk:wght@400;500;700&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="../assets/styles.css" />
+  </head>
+  <body data-page="vs-litellm">
+    <div class="bg-grid" aria-hidden="true"></div>
+    <header class="topbar">
+      <a class="brand" href="/index.html">HEIWA</a>
+      <nav class="nav">
+        <a href="/index.html">Home</a>
+        <a href="/providers.html">Providers</a>
+        <a href="/download.html">Download</a>
+        <a href="https://docs.heiwa.ltd">Docs</a>
+        <a href="https://github.com/Strategizing/heiwa-universe">GitHub</a>
+      </nav>
+    </header>
+
+    <main class="marketing-main">
+      <section class="hero compact">
+        <p class="eyebrow">Heiwa vs LiteLLM</p>
+        <h1>Different layers of the stack.</h1>
+        <p class="lede">
+          LiteLLM is a compatibility library and proxy that presents many providers as an OpenAI-format API. It is
+          excellent at what it does. Heiwa is not trying to be a drop-in OpenAI-compatible library. Heiwa is an
+          operator runtime where the operator uses a REPL, a CLI, a local cockpit, memory, evidence, and scheduled
+          routines — with routing as one capability among several.
+        </p>
+      </section>
+
+      <section class="section-block table-shell">
+        <div class="table-head">
+          <div>
+            <p class="eyebrow">Side by side</p>
+            <h2>Library vs operator product</h2>
+          </div>
+          <p class="section-copy">
+            These tools sit at different layers. One is a dependency a developer imports. The other is a surface the
+            operator uses.
+          </p>
+        </div>
+
+        <div class="marketing-table-wrap">
+          <table class="marketing-table">
+            <thead>
+              <tr>
+                <th>Axis</th>
+                <th>Heiwa</th>
+                <th>LiteLLM</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td><strong>Shape</strong></td>
+                <td>Installed operator runtime and cockpit</td>
+                <td>Python SDK plus an optional OpenAI-compatible proxy</td>
+              </tr>
+              <tr>
+                <td><strong>Primary user</strong></td>
+                <td>Operators using a REPL, CLI, and local cockpit</td>
+                <td>Developers building their own app against a unified LLM API</td>
+              </tr>
+              <tr>
+                <td><strong>Surface</strong></td>
+                <td><code>heiwa</code> binary, REPL, localhost cockpit</td>
+                <td><code>import litellm</code> or <code>litellm --proxy</code></td>
+              </tr>
+              <tr>
+                <td><strong>Scope beyond routing</strong></td>
+                <td>Memory, evidence, receipts, subagents, crons, approvals</td>
+                <td>Request-time concerns: format translation, retries, cost tracking</td>
+              </tr>
+              <tr>
+                <td><strong>OAuth subscription reuse</strong></td>
+                <td>First-class via provider CLIs</td>
+                <td>API-key lane (OpenAI-format translation)</td>
+              </tr>
+              <tr>
+                <td><strong>Local models</strong></td>
+                <td>First-class via Ollama</td>
+                <td>Supported via Ollama provider in the SDK</td>
+              </tr>
+              <tr>
+                <td><strong>Hosting model</strong></td>
+                <td>Self-hosted runtime on the operator's machine</td>
+                <td>Library; proxy runs wherever the developer deploys it</td>
+              </tr>
+              <tr>
+                <td><strong>Complement vs compete</strong></td>
+                <td>Could call LiteLLM as a library inside a custom provider lane</td>
+                <td>Solves a compatibility problem, not an operator-surface problem</td>
+              </tr>
+              <tr>
+                <td><strong>License</strong></td>
+                <td>See repo LICENSE</td>
+                <td>MIT (core library)</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <section class="section-block section-split">
+        <div>
+          <p class="eyebrow">Which to pick</p>
+          <h2>Layer first, then decide.</h2>
+          <p class="section-copy">
+            If the task is "give my own Python app one unified LLM API," LiteLLM is the right tool. If the task is "I
+            want one installed operator surface that holds routing, REPL, memory, and orchestration together," that's
+            Heiwa. Using both is reasonable — LiteLLM as a library inside a Heiwa custom provider, for example.
+          </p>
+        </div>
+        <div class="story-grid">
+          <article>
+            <span>Pick LiteLLM if</span>
+            <strong>You're building your own app</strong>
+            <p>You need a provider-agnostic LLM client and don't need an operator surface.</p>
+          </article>
+          <article>
+            <span>Pick Heiwa if</span>
+            <strong>You want the operator surface</strong>
+            <p>REPL, CLI, cockpit, memory, and evidence belong in one installed product.</p>
+          </article>
+        </div>
+      </section>
+    </main>
+
+    <footer class="footer">
+      <p>Operator runtime first. Provider internals stay provider-owned.</p>
+      <p class="footer-links">
+        <a href="/index.html">Home</a>
+        <a href="/providers.html">Providers</a>
+        <a href="/vs/manifest.html">vs Manifest</a>
+        <a href="/vs/openrouter.html">vs OpenRouter</a>
+        <a href="https://github.com/Strategizing/heiwa-universe">GitHub</a>
+      </p>
+    </footer>
+  </body>
+</html>

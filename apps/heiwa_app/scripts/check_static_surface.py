@@ -80,6 +80,10 @@ def main() -> int:
         WEB_ROOT / "_headers",
         WEB_ROOT / "assets" / "status.js",
         WEB_ROOT / "assets" / "domains.bootstrap.json",
+        WEB_ROOT / "assets" / "providers.json",
+        WEB_ROOT / "vs" / "manifest.html",
+        WEB_ROOT / "vs" / "openrouter.html",
+        WEB_ROOT / "vs" / "litellm.html",
     ]
     for path in required_files:
         if not path.exists():
@@ -153,6 +157,37 @@ def main() -> int:
             "wss://api.heiwa.ltd/status/ws",
             "http-fallback",
             "websocket-live",
+        )
+    )
+    problems.extend(
+        require_contains(
+            WEB_ROOT / "vs" / "manifest.html",
+            "Different categories, honestly.",
+            "local operator runtime",
+            "smart model router",
+        )
+    )
+    problems.extend(
+        require_absent(
+            WEB_ROOT / "vs" / "manifest.html",
+            "Manifest is bad",
+            "we are better",
+        )
+    )
+    problems.extend(
+        require_contains(
+            WEB_ROOT / "vs" / "openrouter.html",
+            "Local runtime vs remote gateway.",
+            "Cloud proxy",
+            "5% fee",
+        )
+    )
+    problems.extend(
+        require_contains(
+            WEB_ROOT / "vs" / "litellm.html",
+            "Different layers of the stack.",
+            "compatibility library",
+            "operator runtime",
         )
     )
     problems.extend(check_domain_manifest(WEB_ROOT / "assets" / "domains.bootstrap.json"))
