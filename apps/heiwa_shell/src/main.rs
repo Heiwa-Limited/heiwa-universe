@@ -1,16 +1,18 @@
 use anyhow::{anyhow, Result};
-use std::env;
-use std::sync::Arc;
 use chrono::Utc;
-use heiwa_protocol::{
-    CockpitCommand, CockpitEvent, SessionState, RoutingState, TranscriptBlock, parse_turn_intent,
+use heiwa_core::drex::{
+    default_policy, plan_route, preflight_execution, DrexIngress, ExecutionMode,
 };
-use heiwa_core::drex::{default_policy, plan_route, preflight_execution, DrexIngress, ExecutionMode};
+use heiwa_protocol::{
+    parse_turn_intent, CockpitCommand, CockpitEvent, RoutingState, SessionState, TranscriptBlock,
+};
 use heiwa_provider::adapter::{Message, ProviderAdapter, Role, StreamEvent, TokenUsage};
-use heiwa_provider::providers::ollama::OllamaCliAdapter;
 use heiwa_provider::providers::claude_code::ClaudeCodeCliAdapter;
+use heiwa_provider::providers::ollama::OllamaCliAdapter;
 use heiwa_repl::{parse_input, render_footer, ReplCommand, TelemetryState};
-use std::io::{self, Write, IsTerminal};
+use std::env;
+use std::io::{self, IsTerminal, Write};
+use std::sync::Arc;
 
 fn provider_supports_loop_adapter(provider: &str) -> bool {
     matches!(provider, "claude" | "ollama")
@@ -81,21 +83,36 @@ async fn main() -> Result<()> {
     }
 
     match args[1].as_str() {
-        "install" => {
-            heiwa_install::run_install()?;
-            println!("Registering device...");
-            let stdb_client = attempt_stdb_connection().await;
-            register_current_device(&stdb_client).await?;
-        }
+        "install" => match heiwa_install::run_install_target(args.get(2).map(String::as_str))? {
+            heiwa_install::InstallOutcome::RuntimeBootstrap => {
+                println!("Registering device...");
+                let stdb_client = attempt_stdb_connection().await;
+                register_current_device(&stdb_client).await?;
+            }
+            heiwa_install::InstallOutcome::Plugin(plugin) => {
+                println!("Plugin installed: {}", plugin.canonical);
+                println!("  Path:   {}", plugin.install_dir.display());
+                println!("  Remote: {}", plugin.clone_url);
+                if let Some(reference) = plugin.source.reference.as_deref() {
+                    println!("  Ref:    {}", reference);
+                }
+            }
+        },
         "login" => {
             if args.len() < 3 {
                 println!("Usage: heiwa login [token]");
             } else {
                 let identity = heiwa_provider::login_heiwa(&args[2])?;
-                println!("Successfully logged in as {} ({})", identity.display_name.as_deref().unwrap_or_default(), identity.user_id);
-                
+                println!(
+                    "Successfully logged in as {} ({})",
+                    identity.display_name.as_deref().unwrap_or_default(),
+                    identity.user_id
+                );
+
                 // Write ~/.heiwa/connection.json with default STDB endpoint
-                let heiwa_dir = dirs::home_dir().map(|h| h.join(".heiwa")).expect("HOME must be set");
+                let heiwa_dir = dirs::home_dir()
+                    .map(|h| h.join(".heiwa"))
+                    .expect("HOME must be set");
                 let conn_path = heiwa_dir.join("connection.json");
                 let conn_json = serde_json::json!({
                     "url": "https://maincloud.spacetimedb.com",
@@ -130,11 +147,26 @@ async fn main() -> Result<()> {
                 let content = std::fs::read_to_string(&manifest_path)?;
                 let manifest: serde_json::Value = serde_json::from_str(&content)?;
                 println!("Devices:");
-                println!("  ID:       {}", manifest["device_id"].as_str().unwrap_or("unknown"));
-                println!("  Hostname: {}", manifest["hostname"].as_str().unwrap_or("unknown"));
-                println!("  OS:       {}", manifest["os"].as_str().unwrap_or("unknown"));
-                println!("  Arch:     {}", manifest["arch"].as_str().unwrap_or("unknown"));
-                println!("  Installed: {}", manifest["installed_at"].as_str().unwrap_or("unknown"));
+                println!(
+                    "  ID:       {}",
+                    manifest["device_id"].as_str().unwrap_or("unknown")
+                );
+                println!(
+                    "  Hostname: {}",
+                    manifest["hostname"].as_str().unwrap_or("unknown")
+                );
+                println!(
+                    "  OS:       {}",
+                    manifest["os"].as_str().unwrap_or("unknown")
+                );
+                println!(
+                    "  Arch:     {}",
+                    manifest["arch"].as_str().unwrap_or("unknown")
+                );
+                println!(
+                    "  Installed: {}",
+                    manifest["installed_at"].as_str().unwrap_or("unknown")
+                );
 
                 let stdb_client = attempt_stdb_connection().await;
                 if stdb_client.is_connected() {
@@ -149,24 +181,77 @@ async fn main() -> Result<()> {
         "doctor" => {
             let report = heiwa_install::check_installation()?;
             println!("Heiwa Doctor Report:");
-            println!("  Rust:   {}", report.rust_version.unwrap_or_else(|| "Not found".to_string()));
-            println!("  Node:   {}", report.node_version.unwrap_or_else(|| "Not found".to_string()));
-            println!("  Python: {}", report.python_version.unwrap_or_else(|| "Not found".to_string()));
+            println!(
+                "  Rust:   {}",
+                report
+                    .rust_version
+                    .unwrap_or_else(|| "Not found".to_string())
+            );
+            println!(
+                "  Node:   {}",
+                report
+                    .node_version
+                    .unwrap_or_else(|| "Not found".to_string())
+            );
+            println!(
+                "  Python: {}",
+                report
+                    .python_version
+                    .unwrap_or_else(|| "Not found".to_string())
+            );
             println!();
             if let Some(identity) = heiwa_provider::load_identity() {
                 println!("Heiwa Identity:");
                 println!("  User ID: {}", identity.user_id);
-                println!("  Email:   {}", identity.email.unwrap_or_else(|| "N/A".to_string()));
+                println!(
+                    "  Email:   {}",
+                    identity.email.unwrap_or_else(|| "N/A".to_string())
+                );
             } else {
                 println!("Heiwa Identity: Not logged in (run 'heiwa login')");
             }
             println!();
             println!("Providers:");
-            println!("  Claude: {}", if report.claude_installed { "Installed" } else { "Not found" });
-            println!("  Codex:  {}", if report.codex_installed { "Installed" } else { "Not found" });
-            println!("  Gemini: {}", if report.gemini_installed { "Installed" } else { "Not found" });
-            println!("  Antigravity: {}", if report.antigravity_installed { "Installed" } else { "Not found" });
-            println!("  Ollama: {}", if report.ollama_installed { "Installed" } else { "Not found" });
+            println!(
+                "  Claude: {}",
+                if report.claude_installed {
+                    "Installed"
+                } else {
+                    "Not found"
+                }
+            );
+            println!(
+                "  Codex:  {}",
+                if report.codex_installed {
+                    "Installed"
+                } else {
+                    "Not found"
+                }
+            );
+            println!(
+                "  Gemini: {}",
+                if report.gemini_installed {
+                    "Installed"
+                } else {
+                    "Not found"
+                }
+            );
+            println!(
+                "  Antigravity: {}",
+                if report.antigravity_installed {
+                    "Installed"
+                } else {
+                    "Not found"
+                }
+            );
+            println!(
+                "  Ollama: {}",
+                if report.ollama_installed {
+                    "Installed"
+                } else {
+                    "Not found"
+                }
+            );
         }
         "auth" => {
             if args.len() < 3 {
@@ -182,8 +267,11 @@ async fn main() -> Result<()> {
                             for a in &registry.accounts {
                                 println!(
                                     "  {:<20} {:<12} ({}) [{:?}] — {} models",
-                                    a.account_id, a.provider, a.credential.kind_label(),
-                                    a.status, a.models.len(),
+                                    a.account_id,
+                                    a.provider,
+                                    a.credential.kind_label(),
+                                    a.status,
+                                    a.models.len(),
                                 );
                             }
                             println!();
@@ -193,8 +281,15 @@ async fn main() -> Result<()> {
                         println!("CLI Discovery:");
                         for p in providers {
                             if let Some(status) = heiwa_provider::get_auth_status(p) {
-                                let loop_capable = if provider_supports_loop_adapter(p) { " [loop]" } else { "" };
-                                println!("  {:<12} {:<20} ({:?}){}", p, status.status, status.auth_kind, loop_capable);
+                                let loop_capable = if provider_supports_loop_adapter(p) {
+                                    " [loop]"
+                                } else {
+                                    ""
+                                };
+                                println!(
+                                    "  {:<12} {:<20} ({:?}){}",
+                                    p, status.status, status.auth_kind, loop_capable
+                                );
                             }
                         }
                     }
@@ -216,21 +311,36 @@ async fn main() -> Result<()> {
 
                             let mut registry = heiwa_provider::AccountRegistry::load();
                             match heiwa_provider::registry::add_api_key_account(
-                                &mut registry, provider, api_key, rate_group,
+                                &mut registry,
+                                provider,
+                                api_key,
+                                rate_group,
                             ) {
                                 Ok(account_id) => {
-                                    println!("Stored {} API key in Keychain as '{}'", provider, account_id);
+                                    println!(
+                                        "Stored {} API key in Keychain as '{}'",
+                                        provider, account_id
+                                    );
                                     // Verify key and detect models
                                     print!("Verifying...");
                                     io::stdout().flush()?;
-                                    if let Some(account) = registry.accounts.iter_mut()
+                                    if let Some(account) = registry
+                                        .accounts
+                                        .iter_mut()
                                         .find(|a| a.account_id == account_id)
                                     {
-                                        match heiwa_provider::detect::verify_api_key(account).await {
+                                        match heiwa_provider::detect::verify_api_key(account).await
+                                        {
                                             Ok(()) => {
-                                                println!(" {} models available", account.models.len());
+                                                println!(
+                                                    " {} models available",
+                                                    account.models.len()
+                                                );
                                                 for m in &account.models {
-                                                    println!("  {} (class:{})", m.model_id, m.capability_class);
+                                                    println!(
+                                                        "  {} (class:{})",
+                                                        m.model_id, m.capability_class
+                                                    );
                                                 }
                                                 registry.save()?;
                                             }
@@ -275,7 +385,11 @@ async fn main() -> Result<()> {
                 println!("Provider Accounts:");
                 for account in &registry.accounts {
                     let model_count = account.models.len();
-                    let loop_cap = if provider_supports_loop_adapter(&account.provider) { " [loop]" } else { "" };
+                    let loop_cap = if provider_supports_loop_adapter(&account.provider) {
+                        " [loop]"
+                    } else {
+                        ""
+                    };
                     println!(
                         "  {:<20} {} ({}) [{:?}] — {} model{}{}",
                         account.account_id,
@@ -296,9 +410,14 @@ async fn main() -> Result<()> {
                 if let Some(status) = heiwa_provider::get_auth_status(p) {
                     let in_registry = registry.accounts.iter().any(|a| a.provider == p);
                     if !in_registry {
-                        let loop_cap = if provider_supports_loop_adapter(p) { " [loop]" } else { "" };
+                        let loop_cap = if provider_supports_loop_adapter(p) {
+                            " [loop]"
+                        } else {
+                            ""
+                        };
                         unregistered.push(format!(
-                            "  {:<20} {} ({:?}){}", p, status.status, status.auth_kind, loop_cap,
+                            "  {:<20} {} ({:?}){}",
+                            p, status.status, status.auth_kind, loop_cap,
                         ));
                     }
                 }
@@ -329,7 +448,9 @@ async fn main() -> Result<()> {
                     if m.rate_group != current_group {
                         current_group = m.rate_group.clone();
                         let account = registry.get(&m.account_id);
-                        let kind = account.map(|a| a.credential.kind_label()).unwrap_or("unknown");
+                        let kind = account
+                            .map(|a| a.credential.kind_label())
+                            .unwrap_or("unknown");
                         println!("\n  {} ({}) [rate: {}]", m.provider, kind, m.rate_group);
                     }
                     let truth_marker = match m.inventory_truth {
@@ -361,13 +482,30 @@ async fn main() -> Result<()> {
                 println!("Usage: heiwa loop [max_turns] \"objective\" [--intent code] [--risk low] [--privacy standard]");
             } else {
                 let max_turns = args[2].parse::<u32>().unwrap_or(10);
-                let objective = if args.len() >= 4 { args[3..].join(" ") } else { "no objective provided".to_string() };
-                
-                let identity = heiwa_provider::load_identity().ok_or_else(|| anyhow!("Not logged in. Please run 'heiwa login' first."))?;
-                
-                let intent = if let Some(i) = args.iter().position(|a| a == "--intent") { args[i+1].clone() } else { "code".to_string() };
-                let risk = if let Some(i) = args.iter().position(|a| a == "--risk") { args[i+1].clone() } else { "low".to_string() };
-                let privacy = if let Some(i) = args.iter().position(|a| a == "--privacy") { args[i+1].clone() } else { "standard".to_string() };
+                let objective = if args.len() >= 4 {
+                    args[3..].join(" ")
+                } else {
+                    "no objective provided".to_string()
+                };
+
+                let identity = heiwa_provider::load_identity()
+                    .ok_or_else(|| anyhow!("Not logged in. Please run 'heiwa login' first."))?;
+
+                let intent = if let Some(i) = args.iter().position(|a| a == "--intent") {
+                    args[i + 1].clone()
+                } else {
+                    "code".to_string()
+                };
+                let risk = if let Some(i) = args.iter().position(|a| a == "--risk") {
+                    args[i + 1].clone()
+                } else {
+                    "low".to_string()
+                };
+                let privacy = if let Some(i) = args.iter().position(|a| a == "--privacy") {
+                    args[i + 1].clone()
+                } else {
+                    "standard".to_string()
+                };
 
                 let config = heiwa_loop::LoopConfig {
                     user_id: identity.user_id,
@@ -384,7 +522,9 @@ async fn main() -> Result<()> {
                 heiwa_provider::detect::auto_discover(&mut registry).await;
                 let model_tiers = get_live_model_tiers(&registry);
                 if model_tiers.is_empty() {
-                    return Err(anyhow!("No loop-capable models found. Run 'heiwa providers' to check."));
+                    return Err(anyhow!(
+                        "No loop-capable models found. Run 'heiwa providers' to check."
+                    ));
                 }
 
                 // Try to connect to STDB if environment allows
@@ -392,16 +532,19 @@ async fn main() -> Result<()> {
 
                 let controller = heiwa_loop::LoopController::new(config, stdb_client, model_tiers);
                 let (tx, mut rx) = tokio::sync::mpsc::channel(10);
-                
+
                 println!("Loop initiated: {}", controller.get_id());
-                
-                let adapters: Arc<dyn Fn(&str) -> Option<Arc<dyn ProviderAdapter>> + Send + Sync> = Arc::new(|provider: &str| {
-                    match provider {
-                        "ollama" => Some(Arc::new(OllamaCliAdapter::new()) as Arc<dyn ProviderAdapter>),
-                        "claude" => Some(Arc::new(ClaudeCodeCliAdapter::new()) as Arc<dyn ProviderAdapter>),
+
+                let adapters: Arc<dyn Fn(&str) -> Option<Arc<dyn ProviderAdapter>> + Send + Sync> =
+                    Arc::new(|provider: &str| match provider {
+                        "ollama" => {
+                            Some(Arc::new(OllamaCliAdapter::new()) as Arc<dyn ProviderAdapter>)
+                        }
+                        "claude" => {
+                            Some(Arc::new(ClaudeCodeCliAdapter::new()) as Arc<dyn ProviderAdapter>)
+                        }
                         _ => None,
-                    }
-                });
+                    });
 
                 let c = controller;
                 tokio::spawn(async move {
@@ -409,10 +552,16 @@ async fn main() -> Result<()> {
                         eprintln!("Loop error: {}", e);
                     }
                 });
-                
+
                 while let Some(status) = rx.recv().await {
-                    println!("[{}] Turn: {} | Cost: ${:.4}", status.status, status.current_turn, status.total_cost_usd);
-                    if status.status == "COMPLETED" || status.status == "CANCELLED" || status.status == "FAILED" {
+                    println!(
+                        "[{}] Turn: {} | Cost: ${:.4}",
+                        status.status, status.current_turn, status.total_cost_usd
+                    );
+                    if status.status == "COMPLETED"
+                        || status.status == "CANCELLED"
+                        || status.status == "FAILED"
+                    {
                         break;
                     }
                 }
@@ -441,7 +590,7 @@ fn print_help() {
     println!("Usage: heiwa [COMMAND]");
     println!();
     println!("Commands:");
-    println!("  install                       Install Heiwa and its dependencies");
+    println!("  install [gh:owner/repo[@ref]] Bootstrap Heiwa or install a GitHub plugin");
     println!("  login [token]                 Sign in to Heiwa");
     println!("  logout                        Sign out from Heiwa");
     println!("  doctor                        Check the status of the Heiwa installation");
@@ -481,11 +630,14 @@ async fn register_current_device(stdb_client: &heiwa_stdb::StdbClient) -> Result
 
     let _report = heiwa_install::check_installation()?;
     let manifest_path = heiwa_install::get_heiwa_dir().join("machine.json");
-    
+
     let device_id = if manifest_path.exists() {
         let content = std::fs::read_to_string(&manifest_path)?;
         let manifest: serde_json::Value = serde_json::from_str(&content)?;
-        manifest["device_id"].as_str().unwrap_or("unknown").to_string()
+        manifest["device_id"]
+            .as_str()
+            .unwrap_or("unknown")
+            .to_string()
     } else {
         "unknown".to_string()
     };
@@ -494,7 +646,10 @@ async fn register_current_device(stdb_client: &heiwa_stdb::StdbClient) -> Result
         .map(|h| h.to_string_lossy().to_string())
         .unwrap_or_else(|_| "unknown".to_string());
 
-    println!("Registering device {} for user {}...", device_id, identity.user_id);
+    println!(
+        "Registering device {} for user {}...",
+        device_id, identity.user_id
+    );
 
     stdb_client.register_device(
         &device_id,
@@ -508,7 +663,8 @@ async fn register_current_device(stdb_client: &heiwa_stdb::StdbClient) -> Result
     let mut registry = heiwa_provider::AccountRegistry::load();
     heiwa_provider::detect::auto_discover(&mut registry).await;
     for account in &registry.accounts {
-        let models_json = serde_json::to_string(&account.models).unwrap_or_else(|_| "[]".to_string());
+        let models_json =
+            serde_json::to_string(&account.models).unwrap_or_else(|_| "[]".to_string());
         stdb_client.sync_provider_status(
             &account.account_id,
             &account.provider,
@@ -520,7 +676,10 @@ async fn register_current_device(stdb_client: &heiwa_stdb::StdbClient) -> Result
             None,
             &models_json,
         )?;
-        println!("  Synced provider {} status: {:?}", account.provider, account.status);
+        println!(
+            "  Synced provider {} status: {:?}",
+            account.provider, account.status
+        );
     }
 
     if stdb_client.is_connected() {
@@ -531,16 +690,24 @@ async fn register_current_device(stdb_client: &heiwa_stdb::StdbClient) -> Result
     Ok(())
 }
 
-fn get_live_model_tiers(registry: &heiwa_provider::AccountRegistry) -> Vec<heiwa_bindings::ModelTier> {
+fn get_live_model_tiers(
+    registry: &heiwa_provider::AccountRegistry,
+) -> Vec<heiwa_bindings::ModelTier> {
     registry
         .all_models()
         .into_iter()
         .filter(|m| provider_supports_loop_adapter(&m.provider))
         .map(|m| {
             let mut strengths = vec!["chat"];
-            if m.supports_tools { strengths.push("tool_use"); }
-            if m.supports_vision { strengths.push("vision"); }
-            if m.capability_class >= 4 { strengths.push("advanced_coding"); }
+            if m.supports_tools {
+                strengths.push("tool_use");
+            }
+            if m.supports_vision {
+                strengths.push("vision");
+            }
+            if m.capability_class >= 4 {
+                strengths.push("advanced_coding");
+            }
 
             heiwa_bindings::ModelTier {
                 id: 0,
@@ -654,10 +821,8 @@ async fn run_repl(use_cockpit: bool) -> Result<()> {
     }
 
     if use_cockpit {
-        let (event_tx, event_rx) =
-            tokio::sync::mpsc::unbounded_channel::<CockpitEvent>();
-        let (cmd_tx, cmd_rx) =
-            tokio::sync::mpsc::unbounded_channel::<CockpitCommand>();
+        let (event_tx, event_rx) = tokio::sync::mpsc::unbounded_channel::<CockpitEvent>();
+        let (cmd_tx, cmd_rx) = tokio::sync::mpsc::unbounded_channel::<CockpitCommand>();
 
         // Spawn the async controller — it owns routing, execution, evidence
         let ctrl_stdb = stdb_client.clone();
@@ -675,9 +840,21 @@ async fn run_repl(use_cockpit: bool) -> Result<()> {
 
     loop {
         let footer_state = TelemetryState {
-            provider: if pins.current_provider.is_empty() { "none".to_string() } else { pins.current_provider.clone() },
-            model: if pins.current_model.is_empty() { "none".to_string() } else { pins.current_model.clone() },
-            route: current_route_label(pins.route_preference, pins.pinned_provider.as_deref(), pins.pinned_model.as_deref()),
+            provider: if pins.current_provider.is_empty() {
+                "none".to_string()
+            } else {
+                pins.current_provider.clone()
+            },
+            model: if pins.current_model.is_empty() {
+                "none".to_string()
+            } else {
+                pins.current_model.clone()
+            },
+            route: current_route_label(
+                pins.route_preference,
+                pins.pinned_provider.as_deref(),
+                pins.pinned_model.as_deref(),
+            ),
             status: "ready".to_string(),
             turn_count,
             loop_info: None,
@@ -698,7 +875,9 @@ async fn run_repl(use_cockpit: bool) -> Result<()> {
         let cmd = parse_input(input);
         match cmd {
             ReplCommand::Task(t) => {
-                if t.is_empty() { continue; }
+                if t.is_empty() {
+                    continue;
+                }
 
                 match route_task(&t, &pins, &model_tiers) {
                     Err(msg) => {
@@ -717,14 +896,18 @@ async fn run_repl(use_cockpit: bool) -> Result<()> {
 
                         state.transcript.push(TranscriptBlock::User(t.clone()));
 
-                        let messages = vec![Message { role: Role::User, content: t }];
+                        let messages = vec![Message {
+                            role: Role::User,
+                            content: t,
+                        }];
                         let (stream_tx, mut stream_rx) = tokio::sync::mpsc::channel(32);
                         let model_id = route.provider_model_id.clone();
 
                         tokio::spawn({
                             let adapter = route.adapter.clone();
                             async move {
-                                if let Err(e) = adapter.send(&model_id, &messages, stream_tx).await {
+                                if let Err(e) = adapter.send(&model_id, &messages, stream_tx).await
+                                {
                                     eprintln!("Adapter error: {}", e);
                                 }
                             }
@@ -739,20 +922,33 @@ async fn run_repl(use_cockpit: bool) -> Result<()> {
                                     io::stdout().flush()?;
                                     full_response.push_str(&text);
                                 }
-                                StreamEvent::Done(u) => { usage = Some(u); break; }
-                                StreamEvent::Error(e) => { eprintln!("\nStream error: {}", e); break; }
+                                StreamEvent::Done(u) => {
+                                    usage = Some(u);
+                                    break;
+                                }
+                                StreamEvent::Error(e) => {
+                                    eprintln!("\nStream error: {}", e);
+                                    break;
+                                }
                                 StreamEvent::ToolUse { name, .. } => {
                                     println!("\n[tool: {}]", name);
-                                    state.transcript.push(TranscriptBlock::Tool(name, "executed".to_string()));
+                                    state
+                                        .transcript
+                                        .push(TranscriptBlock::Tool(name, "executed".to_string()));
                                 }
                             }
                         }
                         println!();
-                        state.transcript.push(TranscriptBlock::Assistant(full_response));
+                        state
+                            .transcript
+                            .push(TranscriptBlock::Assistant(full_response));
 
                         if let Some(ref u) = usage {
                             if u.input_tokens > 0 || u.cost_usd > 0.0 {
-                                println!("  [{} in / {} out | ${:.4}]", u.input_tokens, u.output_tokens, u.cost_usd);
+                                println!(
+                                    "  [{} in / {} out | ${:.4}]",
+                                    u.input_tokens, u.output_tokens, u.cost_usd
+                                );
                             }
                         }
                         record_run_evidence(&stdb_client, &route, usage.as_ref());
@@ -762,10 +958,7 @@ async fn run_repl(use_cockpit: bool) -> Result<()> {
             }
             ReplCommand::Shell(s) => {
                 println!("Escaping to shell: {}", s);
-                let output = std::process::Command::new("sh")
-                    .arg("-c")
-                    .arg(s)
-                    .output();
+                let output = std::process::Command::new("sh").arg("-c").arg(s).output();
                 match output {
                     Ok(o) => {
                         io::stdout().write_all(&o.stdout)?;
@@ -782,22 +975,34 @@ async fn run_repl(use_cockpit: bool) -> Result<()> {
                         heiwa_provider::detect::auto_discover(&mut reg).await;
                         let tiers = get_live_model_tiers(&reg);
                         for t in tiers {
-                            println!("  {} ({}) class:{}", t.model_id, t.provider, t.capability_class);
+                            println!(
+                                "  {} ({}) class:{}",
+                                t.model_id, t.provider, t.capability_class
+                            );
                         }
                     }
                     // Plain-mode specific: runs loop controller inline
                     "loop" => {
-                        let max_turns = args.first().and_then(|s| s.parse::<u32>().ok()).unwrap_or(5);
-                        let objective = if args.len() > 1 { args[1..].join(" ") } else { "explore context".to_string() };
+                        let max_turns = args
+                            .first()
+                            .and_then(|s| s.parse::<u32>().ok())
+                            .unwrap_or(5);
+                        let objective = if args.len() > 1 {
+                            args[1..].join(" ")
+                        } else {
+                            "explore context".to_string()
+                        };
 
                         println!("Starting loop: '{}' ({} turns)", objective, max_turns);
 
-                        let identity = heiwa_provider::load_identity().unwrap_or(heiwa_provider::HeiwaIdentity {
-                            user_id: "anonymous".to_string(),
-                            auth_token: "".to_string(),
-                            email: None,
-                            display_name: None,
-                        });
+                        let identity = heiwa_provider::load_identity().unwrap_or(
+                            heiwa_provider::HeiwaIdentity {
+                                user_id: "anonymous".to_string(),
+                                auth_token: "".to_string(),
+                                email: None,
+                                display_name: None,
+                            },
+                        );
 
                         let config = heiwa_loop::LoopConfig {
                             user_id: identity.user_id,
@@ -814,15 +1019,24 @@ async fn run_repl(use_cockpit: bool) -> Result<()> {
                         heiwa_provider::detect::auto_discover(&mut reg).await;
                         let loop_tiers = get_live_model_tiers(&reg);
 
-                        let controller = heiwa_loop::LoopController::new(config, stdb_client.clone(), loop_tiers);
+                        let controller = heiwa_loop::LoopController::new(
+                            config,
+                            stdb_client.clone(),
+                            loop_tiers,
+                        );
                         let (tx, mut rx) = tokio::sync::mpsc::channel(10);
 
-                        let adapters: Arc<dyn Fn(&str) -> Option<Arc<dyn ProviderAdapter>> + Send + Sync> = Arc::new(|provider: &str| {
-                            match provider {
-                                "ollama" => Some(Arc::new(OllamaCliAdapter::new()) as Arc<dyn ProviderAdapter>),
-                                "claude" => Some(Arc::new(ClaudeCodeCliAdapter::new()) as Arc<dyn ProviderAdapter>),
-                                _ => None,
+                        let adapters: Arc<
+                            dyn Fn(&str) -> Option<Arc<dyn ProviderAdapter>> + Send + Sync,
+                        > = Arc::new(|provider: &str| match provider {
+                            "ollama" => {
+                                Some(Arc::new(OllamaCliAdapter::new()) as Arc<dyn ProviderAdapter>)
                             }
+                            "claude" => {
+                                Some(Arc::new(ClaudeCodeCliAdapter::new())
+                                    as Arc<dyn ProviderAdapter>)
+                            }
+                            _ => None,
                         });
 
                         tokio::spawn(async move {
@@ -833,7 +1047,11 @@ async fn run_repl(use_cockpit: bool) -> Result<()> {
                             let telemetry = TelemetryState {
                                 provider: pins.current_provider.clone(),
                                 model: pins.current_model.clone(),
-                                route: current_route_label(pins.route_preference, pins.pinned_provider.as_deref(), pins.pinned_model.as_deref()),
+                                route: current_route_label(
+                                    pins.route_preference,
+                                    pins.pinned_provider.as_deref(),
+                                    pins.pinned_model.as_deref(),
+                                ),
                                 status: status.status.clone(),
                                 turn_count,
                                 loop_info: Some((status.current_turn, max_turns)),
@@ -841,7 +1059,10 @@ async fn run_repl(use_cockpit: bool) -> Result<()> {
                             print!("\r{}\r", render_footer(&telemetry));
                             io::stdout().flush()?;
 
-                            if status.status == "COMPLETED" || status.status == "CANCELLED" || status.status == "FAILED" {
+                            if status.status == "COMPLETED"
+                                || status.status == "CANCELLED"
+                                || status.status == "FAILED"
+                            {
                                 println!("\nLoop finished: {}", status.status);
                                 break;
                             }
@@ -885,7 +1106,9 @@ async fn run_cockpit_controller(
                 let parsed = parse_input(&input);
                 match parsed {
                     ReplCommand::Task(t) => {
-                        if t.is_empty() { continue; }
+                        if t.is_empty() {
+                            continue;
+                        }
                         let _ = event_tx.send(CockpitEvent::StatusUpdate("routing...".into()));
 
                         match route_task(&t, &pins, &model_tiers) {
@@ -920,10 +1143,14 @@ async fn run_cockpit_controller(
 
                                 record_route_evidence(&stdb_client, &route, &t);
 
-                                let _ = event_tx.send(CockpitEvent::StatusUpdate("streaming...".into()));
+                                let _ = event_tx
+                                    .send(CockpitEvent::StatusUpdate("streaming...".into()));
 
                                 // Stream response
-                                let messages = vec![Message { role: Role::User, content: t }];
+                                let messages = vec![Message {
+                                    role: Role::User,
+                                    content: t,
+                                }];
                                 let (stream_tx, mut stream_rx) = tokio::sync::mpsc::channel(32);
                                 let model_id = route.provider_model_id.clone();
 
@@ -931,7 +1158,9 @@ async fn run_cockpit_controller(
                                     let adapter = route.adapter.clone();
                                     let err_tx = event_tx.clone();
                                     async move {
-                                        if let Err(e) = adapter.send(&model_id, &messages, stream_tx).await {
+                                        if let Err(e) =
+                                            adapter.send(&model_id, &messages, stream_tx).await
+                                        {
                                             let _ = err_tx.send(CockpitEvent::StreamError(
                                                 format!("adapter error: {}", e),
                                             ));
@@ -945,7 +1174,10 @@ async fn run_cockpit_controller(
                                         StreamEvent::Token(text) => {
                                             let _ = event_tx.send(CockpitEvent::StreamToken(text));
                                         }
-                                        StreamEvent::Done(u) => { usage = Some(u); break; }
+                                        StreamEvent::Done(u) => {
+                                            usage = Some(u);
+                                            break;
+                                        }
                                         StreamEvent::Error(e) => {
                                             let _ = event_tx.send(CockpitEvent::StreamError(e));
                                             break;
@@ -966,7 +1198,9 @@ async fn run_cockpit_controller(
                                     });
                                 } else {
                                     let _ = event_tx.send(CockpitEvent::StreamDone {
-                                        tokens_in: 0, tokens_out: 0, cost: 0.0,
+                                        tokens_in: 0,
+                                        tokens_out: 0,
+                                        cost: 0.0,
                                     });
                                 }
                                 record_run_evidence(&stdb_client, &route, usage.as_ref());
@@ -975,10 +1209,7 @@ async fn run_cockpit_controller(
                         }
                     }
                     ReplCommand::Shell(s) => {
-                        let output = std::process::Command::new("sh")
-                            .arg("-c")
-                            .arg(&s)
-                            .output();
+                        let output = std::process::Command::new("sh").arg("-c").arg(&s).output();
                         match output {
                             Ok(o) => {
                                 let stdout_str = String::from_utf8_lossy(&o.stdout).to_string();
@@ -1220,13 +1451,23 @@ fn route_task(
         ));
     }
 
-    let routed_tiers = filtered_model_tiers(&adapter_capable, pins.route_preference, final_provider_pin, final_model_pin);
+    let routed_tiers = filtered_model_tiers(
+        &adapter_capable,
+        pins.route_preference,
+        final_provider_pin,
+        final_model_pin,
+    );
 
     if routed_tiers.is_empty() {
         let reason = if final_model_pin.is_some() {
             format!("Model '{}' not available.", final_model_pin.unwrap())
         } else if final_provider_pin.is_some() {
-            let supported: Vec<&str> = adapter_capable.iter().map(|t| t.provider.as_str()).collect::<std::collections::HashSet<_>>().into_iter().collect();
+            let supported: Vec<&str> = adapter_capable
+                .iter()
+                .map(|t| t.provider.as_str())
+                .collect::<std::collections::HashSet<_>>()
+                .into_iter()
+                .collect();
             format!(
                 "Provider '{}' not available. Supported: {}.",
                 final_provider_pin.unwrap(),
@@ -1312,11 +1553,7 @@ fn resolve_adapter(provider: &str, model_id: &str) -> Result<Arc<dyn ProviderAda
 }
 
 /// Record a DREX route decision in SpacetimeDB.
-fn record_route_evidence(
-    stdb: &heiwa_stdb::StdbClient,
-    route: &RouteResult,
-    task: &str,
-) {
+fn record_route_evidence(stdb: &heiwa_stdb::StdbClient, route: &RouteResult, task: &str) {
     let _ = stdb.record_route_decision(
         &route.request_id,
         &route.request_id,
@@ -1327,7 +1564,11 @@ fn record_route_evidence(
         &route.provider,
         &route.provider,
         &route.model_id,
-        if is_local_provider(&route.provider) { "local" } else { "remote" },
+        if is_local_provider(&route.provider) {
+            "local"
+        } else {
+            "remote"
+        },
         &route.routing_metadata,
         0.9,
     );
@@ -1383,8 +1624,6 @@ fn record_run_evidence(
 // Helpers
 // ---------------------------------------------------------------------------
 
-
-
 fn filtered_model_tiers(
     model_tiers: &[heiwa_bindings::ModelTier],
     route_preference: RoutePreference,
@@ -1398,8 +1637,16 @@ fn filtered_model_tiers(
             RoutePreference::LocalOnly => is_local_provider(&tier.provider),
             RoutePreference::RemoteOnly => !is_local_provider(&tier.provider),
         })
-        .filter(|tier| pinned_provider.map(|provider| tier.provider == provider).unwrap_or(true))
-        .filter(|tier| pinned_model.map(|model| tier.model_id == model).unwrap_or(true))
+        .filter(|tier| {
+            pinned_provider
+                .map(|provider| tier.provider == provider)
+                .unwrap_or(true)
+        })
+        .filter(|tier| {
+            pinned_model
+                .map(|model| tier.model_id == model)
+                .unwrap_or(true)
+        })
         .cloned()
         .collect()
 }
@@ -1461,26 +1708,50 @@ mod tests {
 
     #[test]
     fn coding_input_uses_build_intent() {
-        assert_eq!(parse_turn_intent("refactor this Rust function").intent, Intent::Build);
-        assert_eq!(parse_turn_intent("fix the failing cargo test").intent, Intent::Build);
+        assert_eq!(
+            parse_turn_intent("refactor this Rust function").intent,
+            Intent::Build
+        );
+        assert_eq!(
+            parse_turn_intent("fix the failing cargo test").intent,
+            Intent::Build
+        );
     }
 
     #[test]
     fn research_input_uses_research_intent() {
-        assert_eq!(parse_turn_intent("explain how DREX routing works").intent, Intent::Research);
-        assert_eq!(parse_turn_intent("what is the weather like").intent, Intent::Research);
+        assert_eq!(
+            parse_turn_intent("explain how DREX routing works").intent,
+            Intent::Research
+        );
+        assert_eq!(
+            parse_turn_intent("what is the weather like").intent,
+            Intent::Research
+        );
     }
 
     #[test]
     fn deploy_input_uses_deploy_intent() {
-        assert_eq!(parse_turn_intent("deploy this to railway").intent, Intent::Deploy);
-        assert_eq!(parse_turn_intent("ship the new release").intent, Intent::Deploy);
+        assert_eq!(
+            parse_turn_intent("deploy this to railway").intent,
+            Intent::Deploy
+        );
+        assert_eq!(
+            parse_turn_intent("ship the new release").intent,
+            Intent::Deploy
+        );
     }
 
     #[test]
     fn strategy_input_uses_strategy_intent() {
-        assert_eq!(parse_turn_intent("plan the roadmap for Q3").intent, Intent::Strategy);
-        assert_eq!(parse_turn_intent("design the architecture").intent, Intent::Strategy);
+        assert_eq!(
+            parse_turn_intent("plan the roadmap for Q3").intent,
+            Intent::Strategy
+        );
+        assert_eq!(
+            parse_turn_intent("design the architecture").intent,
+            Intent::Strategy
+        );
     }
 
     #[test]
