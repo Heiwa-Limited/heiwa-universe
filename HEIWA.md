@@ -636,6 +636,18 @@ References:
 - SpacetimeDB as canonical adjudication and evidence plane
 - progressive exposure of internals, not opaque platform behavior
 
+## Companion Context Files
+
+This document is the canonical architecture truth. Two short companion files at `ops/context/` carry navigational and continuity context:
+
+| File | Purpose |
+| --- | --- |
+| [`ops/context/HEIWA.md`](ops/context/HEIWA.md) | Task routing map and ops/rooms index for agents |
+| [`ops/context/IDENTITY.md`](ops/context/IDENTITY.md) | Operator identity note (referenced by `IDENTITY.md` shim) |
+| [`ops/context/SOUL.md`](ops/context/SOUL.md) | Continuity / persona layer (referenced by `SOUL.md` shim) |
+
+The repo-root files `IDENTITY.md` and `SOUL.md` are compatibility shims that forward to the `ops/context/` counterparts; legacy boot sequences still open them at repo root.
+
 ## References
 
 1. [SpacetimeDB reducers overview](https://spacetimedb.com/docs/functions/reducers/)

@@ -1,30 +1,34 @@
-# HEIWA.md
+# HEIWA.md — Agent Routing Map
 
-Heiwa is a distributed AI operating system with one logical identity and multiple physical homes.
+Companion to repo-root [`HEIWA.md`](../../HEIWA.md). That document is the canonical architecture truth. This file is the short agent-facing routing map.
 
 ## Read Order
 
 Read these in order before making runtime or architecture changes:
 
-1. `ops/context/HEIWA.md`
-2. `AGENTS.md`
-3. `ops/context/SOUL.md`
-4. `config/swarm/BUILD_BLUEPRINT_2026-03-06.md`
-5. `config/swarm/END_STATE_2026-03.md` — target architecture and kill list
-6. `config/swarm/ai_router.json`
-7. `config/identities/profiles.json`
-8. The room files relevant to the task under `ops/rooms/`
+1. Repo-root [`HEIWA.md`](../../HEIWA.md) — canonical architecture truth
+2. [`AGENTS.md`](../../AGENTS.md) — agent contract
+3. [`ops/context/SOUL.md`](SOUL.md) — continuity layer
+4. [`config/swarm/BUILD_BLUEPRINT_2026-03-06.md`](../../config/swarm/BUILD_BLUEPRINT_2026-03-06.md)
+5. [`config/swarm/END_STATE_2026-03.md`](../../config/swarm/END_STATE_2026-03.md) — target architecture and kill list
+6. [`config/swarm/ai_router.json`](../../config/swarm/ai_router.json)
+7. [`config/identities/profiles.json`](../../config/identities/profiles.json)
+8. The room files relevant to the task under [`ops/rooms/`](../rooms/)
 
 ## Architecture Of Record
 
-- **Railway (Linux)**: The always-on Primary Plane and ultimate agent harness.
-- **MacBook (macOS)**: Staging environment and high-trust orchestrator.
-- **SpacetimeDB**: The authoritative state ledger (Sovereignty).
+- **MacBook (macOS)**: Owner/operator seat. Primary local runtime host.
+- **Local `heiwa` runtime**: Installed on each operator machine; owns routing and execution locally.
+- **SpacetimeDB**: Backend authority plane for cross-device adjudication and evidence. Not a normal operator surface.
+- **GitHub**: Distribution surface — Releases, Pages, Actions, homebrew tap.
 - **Consolidated Monorepo**: `~/heiwa-universe` is the canonical active workspace. Older `~/heiwa` references are compatibility debt to retire, not the source of truth.
+
+A cloud/VPS plane is deferred until traction warrants it; the client-only architecture is the current truth.
 
 ## Harness Scaffolding (Ground Truth)
 
 The system is anchored by machine-readable files that persist across agent sessions:
+
 - `docs/superpowers/status/feature_list.json`: The inviolable truth of system capabilities.
 - `docs/superpowers/status/progress.md`: The multi-session handoff log.
 - `scripts/init_env.sh`: Standardized environment initialization for all nodes.
@@ -37,8 +41,8 @@ The system is anchored by machine-readable files that persist across agent sessi
 
 ## Hard Rules
 
-- **State Sovereignty**: Write important state to SpacetimeDB first. SQLite is retired.
-- **Harness Fidelity**: Always develop for Railway/Linux target. The MacBook is for staging.
+- **State Authority**: SpacetimeDB is the authority plane for cross-device state. Local SQLite (e.g. `~/.heiwa/state.db`) is the legitimate per-machine ledger for quota, history, and run traces; it is not retired.
+- **Target Fidelity**: Develop for the operator's local machine first. Cross-device sync flows through STDB when it matters.
 - **Transport**: Prefer subscriptions and WebSockets over polling.
 - **Execution**: Route model and tool execution through `HeiwaClaw` / MCP.
 - **Economy**: Cheapest acceptable route first.
@@ -48,10 +52,10 @@ The system is anchored by machine-readable files that persist across agent sessi
 
 | Intent Class | Default Runtime | Primary Tool Surface | Primary Room |
 | --- | --- | --- | --- |
-| `chat` / `general` | `railway` | `heiwa_claw` | `ops/rooms/orchestration.md` |
-| `build` / `fix` / `review` | `macbook` first, escalate as needed | native Class 3 agent lanes | `ops/rooms/execution.md` |
-| `research` / `strategy` | `railway` unless sovereign | `heiwa_claw` / broker enrichment | `ops/rooms/orchestration.md` |
-| `deploy` / `operate` / `automate` | `railway` | control-plane services | `ops/rooms/infra.md` |
+| `chat` / `general` | local `heiwa` runtime | `heiwa_claw` | `ops/rooms/orchestration.md` |
+| `build` / `fix` / `review` | local operator seat, escalate to provider CLIs as needed | native Class 3 agent lanes | `ops/rooms/execution.md` |
+| `research` / `strategy` | local `heiwa` runtime unless sovereign | `heiwa_claw` / broker enrichment | `ops/rooms/orchestration.md` |
+| `deploy` / `operate` / `automate` | local `heiwa` runtime + GitHub Actions | control-plane services | `ops/rooms/infra.md` |
 | `audit` / `files` | local-first | deterministic ops / local execution | `ops/rooms/sdk.md` |
 
 Routing details live in `config/swarm/ai_router.json`, `packages/heiwa_cognition/heiwa_cognition/intent.py`, and `packages/heiwa_cognition/heiwa_cognition/router.py`. Use the room files as the human-readable map before changing runtime behavior.
@@ -67,7 +71,7 @@ Routing details live in `config/swarm/ai_router.json`, `packages/heiwa_cognition
 - `ops/rooms/control-plane.md` — proposal lifecycle, routing/lease/approval, STDB state
 - `ops/rooms/execution.md` — worker node execution, claim/run/result loops
 - `ops/rooms/orchestration.md` — human-in-loop, LLM roles, approval posture, Discord channels
-- `ops/rooms/infra.md` — Railway, Cloudflare, CI/CD, runtime topology
+- `ops/rooms/infra.md` — GitHub distribution, Cloudflare edge, CI/CD, runtime topology
 - `ops/rooms/sdk.md` — SDK changes, MCP/HTTP surface, protocol contracts
 
 If the task crosses more than one room, call that out explicitly in the result so context scope stays visible.
@@ -88,4 +92,4 @@ Each major directory has a `CONTEXT.md` that agents should read when working in 
 | `packages/heiwa_protocol/` | `CONTEXT.md` | Subject enum, envelope contracts |
 | `packages/heiwa_cognition/` | `CONTEXT.md` | LLM engine, tier routing |
 | `config/` | `CONTEXT.md` | Configuration layer overview |
-| `infra/` | `CONTEXT.md` | Node topology, env vars, deployment |
+| `infra/` | `CONTEXT.md` | Local vs platform ops split, per-machine bootstrap |
