@@ -1,5 +1,10 @@
 const DOMAIN_MANIFEST_URL = "./assets/domains.bootstrap.json";
 
+function humanLabel(value) {
+  if (!value) return "-";
+  return String(value).replaceAll("_", " ");
+}
+
 function stateBadgeClass(state) {
   if (state === "active") return "ok";
   if (state === "planned") return "warn";
@@ -11,7 +16,7 @@ function humanPlatform(platform) {
   const state = platform.state_endpoint
     ? ` State ledger on ${platform.state_endpoint}.`
     : "";
-  return `DNS on ${platform.dns}, public web on ${platform.public_web}, and control plane on ${platform.control_plane}.${state}`;
+  return `DNS on ${humanLabel(platform.dns)}, public web on ${humanLabel(platform.public_web)}, and control plane on ${humanLabel(platform.control_plane)}.${state}`;
 }
 
 function renderDomainCards(domains) {
@@ -68,9 +73,9 @@ function renderManifest(manifest) {
     manifest.generated_from || DOMAIN_MANIFEST_URL;
   document.getElementById("root-domain").textContent = manifest.root_domain || "heiwa.ltd";
   document.getElementById("platform-summary").textContent = humanPlatform(manifest.platform);
-  document.getElementById("platform-dns").textContent = manifest.platform?.dns || "-";
-  document.getElementById("platform-web").textContent = manifest.platform?.public_web || "-";
-  document.getElementById("platform-control").textContent = manifest.platform?.control_plane || "-";
+  document.getElementById("platform-dns").textContent = humanLabel(manifest.platform?.dns);
+  document.getElementById("platform-web").textContent = humanLabel(manifest.platform?.public_web);
+  document.getElementById("platform-control").textContent = humanLabel(manifest.platform?.control_plane);
 
   renderDomainCards(manifest.domains || []);
   renderDnsRecords(manifest.dns_records || []);

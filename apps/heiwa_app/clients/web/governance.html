@@ -33,8 +33,8 @@
         <h1>Human-governed execution with a narrow public boundary</h1>
         <p class="lede">
           Heiwa exposes only the supported public surfaces and keeps privileged runtime behavior behind operator workflows.
-          Docs, status, and marketing stay read-only; runtime control remains on the Railway-hosted hub and approved local
-          operator paths.
+          Docs, status, and marketing stay read-only; runtime control belongs to the installed local runtime and approved
+          provider paths.
         </p>
       </section>
 
@@ -58,9 +58,9 @@
         <article class="panel">
           <h2>Execution Boundaries</h2>
           <ul>
-            <li>Railway runs the public runtime surface.</li>
-            <li>Cloudflare Pages hosts marketing, docs, and read-only status shell.</li>
-            <li>WebSocket-first status streaming is the preferred live transport.</li>
+            <li>The operator hosts the runtime, app, and REPL locally.</li>
+            <li>Cloudflare Pages hosts marketing, docs, and the read-only status shell.</li>
+            <li>Public edge paths exist for delivery, status, and identity exchange only.</li>
           </ul>
         </article>
       </section>
@@ -76,7 +76,7 @@
         </div>
         <div class="callout-metrics">
           <div><span>Public docs</span><strong>Cloudflare Pages</strong></div>
-          <div><span>Runtime host</span><strong>Railway</strong></div>
+          <div><span>Runtime host</span><strong>Installed local runtime</strong></div>
           <div><span>State direction</span><strong>SpacetimeDB</strong></div>
         </div>
       </section>

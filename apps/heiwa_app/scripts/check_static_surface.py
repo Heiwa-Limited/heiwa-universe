@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Validate the Heiwa static public shell against current public-surface claims."""
+"""Validate the Heiwa static public shell against current self-hosted public-surface claims."""
 
 from __future__ import annotations
 
@@ -52,11 +52,13 @@ def check_domain_manifest(path: Path) -> list[str]:
         )
 
     hosts = {entry.get("host") for entry in data.get("domains", [])}
-    expected_hosts = {"heiwa.ltd", "app.heiwa.ltd", "status.heiwa.ltd", "api.heiwa.ltd", "docs.heiwa.ltd"}
+    expected_hosts = {"heiwa.ltd", "status.heiwa.ltd", "api.heiwa.ltd", "docs.heiwa.ltd"}
     missing = sorted(expected_hosts - hosts)
     if missing:
         problems.append(f"{path}: missing expected hosts {', '.join(missing)}")
 
+    if "app.heiwa.ltd" in hosts:
+        problems.append(f"{path}: app.heiwa.ltd should not be presented as an active public surface")
     if "auth.heiwa.ltd" in hosts:
         problems.append(f"{path}: auth.heiwa.ltd should not be presented as an active public surface")
     if "trade.heiwa.ltd" in hosts:
@@ -70,6 +72,8 @@ def main() -> int:
 
     required_files = [
         WEB_ROOT / "index.html",
+        WEB_ROOT / "providers.html",
+        WEB_ROOT / "download.html",
         WEB_ROOT / "status.html",
         WEB_ROOT / "domains.html",
         WEB_ROOT / "governance.html",
@@ -88,52 +92,51 @@ def main() -> int:
     problems.extend(
         require_contains(
             WEB_ROOT / "index.html",
-            "Every AI provider. One orchestration layer. Your keys.",
-            "AI Orchestration Platform",
-            "Railway",
-            "SpacetimeDB",
-            "https://api.heiwa.ltd/auth/discord",
+            "Reuse the AI subscriptions you already pay for.",
+            "Self-hosted local AI runtime",
+            "curl -fsSL https://heiwa.ltd/install | sh",
+            "You host everything. Heiwa ships software, not a hosted operator app.",
         )
     )
     problems.extend(
         require_absent(
             WEB_ROOT / "index.html",
-            "Autonomous AI-Dentity Enterprise",
-            "NATS",
-            "PostgreSQL sovereignty",
-            "OpenClaw Integration",
+            "https://api.heiwa.ltd/auth/discord",
+            "Every AI provider. One orchestration layer. Your keys.",
+            "Railway",
         )
     )
     problems.extend(
         require_contains(
-            WEB_ROOT / "status.html",
-            "WebSocket-first",
-            "transport-mode",
-            "last-updated",
+            WEB_ROOT / "providers.html",
+            "OAuth CLI",
+            "API key",
+            "Providers still own auth and inference internals.",
+        )
+    )
+    problems.extend(
+        require_contains(
+            WEB_ROOT / "download.html",
+            "GitHub Releases remain the source of truth",
+            "heiwa doctor",
+            "heiwa app",
         )
     )
     problems.extend(
         require_contains(
             WEB_ROOT / "governance.html",
-            "CLI, MCP, HTTP API, and docs",
+            "installed local runtime",
+            "Cloudflare Pages",
             "Cloudflare Pages",
             "SpacetimeDB",
-        )
-    )
-    problems.extend(
-        require_absent(
-            WEB_ROOT / "governance.html",
-            "enterprise platform foundation",
         )
     )
     problems.extend(
         require_contains(
             WEB_ROOT / "domains.html",
             "Cloudflare Pages",
-            "app.heiwa.ltd",
-            "internal preview runtimes",
-            "maincloud",
-            "domains.js",
+            "public-safe routing intent only",
+            "status.heiwa.ltd",
         )
     )
     problems.extend(

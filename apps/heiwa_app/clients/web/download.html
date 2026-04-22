@@ -1,0 +1,127 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Download Heiwa | Install and Releases</title>
+    <meta
+      name="description"
+      content="Install Heiwa from the canonical one-line path or use GitHub Releases for tagged archives and checksums."
+    />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=Space+Grotesk:wght@400;500;700&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="./assets/styles.css" />
+  </head>
+  <body data-page="download">
+    <div class="bg-grid" aria-hidden="true"></div>
+    <header class="topbar">
+      <a class="brand" href="/index.html">HEIWA</a>
+      <nav class="nav">
+        <a href="/index.html">Home</a>
+        <a href="/providers.html">Providers</a>
+        <a href="/download.html">Download</a>
+        <a href="https://docs.heiwa.ltd">Docs</a>
+        <a href="https://github.com/Strategizing/heiwa-universe">GitHub</a>
+      </nav>
+    </header>
+
+    <main class="marketing-main">
+      <section class="hero compact">
+        <p class="eyebrow">Install and releases</p>
+        <h1>Install locally. Run locally. Keep the operator surface local.</h1>
+        <p class="lede">
+          The canonical public path is a one-line installer. Tagged GitHub Releases remain the source of truth for
+          platform archives and checksums.
+        </p>
+        <div class="command-band">
+          <span class="command-label">Canonical install path</span>
+          <code>curl -fsSL https://heiwa.ltd/install | sh</code>
+        </div>
+        <div class="hero-actions">
+          <a class="btn btn-solid" href="https://github.com/Strategizing/heiwa-universe/releases">Open Releases</a>
+          <a class="btn btn-outline" href="https://docs.heiwa.ltd">Install Docs</a>
+        </div>
+      </section>
+
+      <section class="section-block download-grid">
+        <article>
+          <span>macOS (Apple Silicon)</span>
+          <strong><code>heiwa-&lt;version&gt;-macos-aarch64.tar.gz</code></strong>
+          <p>Tagged release archive built by the release workflow for <code>aarch64-apple-darwin</code>.</p>
+        </article>
+        <article>
+          <span>Linux x86_64</span>
+          <strong><code>heiwa-&lt;version&gt;-linux-x86_64.tar.gz</code></strong>
+          <p>Tagged release archive built by the release workflow for <code>x86_64-unknown-linux-gnu</code>.</p>
+        </article>
+        <article>
+          <span>Windows x86_64</span>
+          <strong><code>heiwa-&lt;version&gt;-windows-x86_64.zip</code></strong>
+          <p>Tagged release archive built by the release workflow for <code>x86_64-pc-windows-msvc</code>.</p>
+        </article>
+        <article>
+          <span>Checksums</span>
+          <strong><code>heiwa-&lt;version&gt;-checksums.txt</code></strong>
+          <p>Published beside the release archives so installs can be verified and mirrored cleanly.</p>
+        </article>
+      </section>
+
+      <section class="section-block">
+        <p class="eyebrow">First run</p>
+        <div class="sequence-grid">
+          <article>
+            <strong>1. Bootstrap</strong>
+            <p>Run the install path or unpack a tagged release. The runtime writes its local state under <code>~/.heiwa/</code>.</p>
+          </article>
+          <article>
+            <strong>2. Verify</strong>
+            <p>Run <code>heiwa doctor</code> to confirm local runtimes and provider CLIs are discoverable.</p>
+          </article>
+          <article>
+            <strong>3. Open the local app</strong>
+            <p>Run <code>heiwa app</code> when the local operator app lands. The web surface belongs on <code>localhost</code>, not a hosted dashboard.</p>
+          </article>
+        </div>
+      </section>
+
+      <section class="section-block section-split">
+        <div>
+          <p class="eyebrow">Source of truth</p>
+          <h2>GitHub Releases stay authoritative.</h2>
+          <p class="section-copy">
+            The installer is a convenience path. Tagged GitHub Releases are where archives, checksums, release notes,
+            and platform build outputs live.
+          </p>
+        </div>
+        <div class="story-grid">
+          <article>
+            <span>Public site</span>
+            <strong>Delivery and docs</strong>
+            <p><code>heiwa.ltd</code> exists to deliver software, docs, and identity exchange. It does not execute operator work.</p>
+          </article>
+          <article>
+            <span>Operator machine</span>
+            <strong>Runtime and data</strong>
+            <p>The runtime, app, memory, and provider secrets live where the operator hosts them.</p>
+          </article>
+        </div>
+      </section>
+    </main>
+
+    <footer class="footer">
+      <p>Install path for software. GitHub Releases for tagged artifacts. Localhost for the app.</p>
+      <p class="footer-links">
+        <a href="/index.html">Home</a>
+        <a href="/providers.html">Providers</a>
+        <a href="https://docs.heiwa.ltd">Docs</a>
+        <a href="https://github.com/Strategizing/heiwa-universe/releases">Releases</a>
+      </p>
+    </footer>
+
+    <script src="./assets/site.js"></script>
+  </body>
+</html>

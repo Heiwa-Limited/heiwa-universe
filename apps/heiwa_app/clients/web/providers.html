@@ -1,0 +1,177 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Heiwa Providers | Local, OAuth CLI, and API-Key Lanes</title>
+    <meta
+      name="description"
+      content="See how Heiwa unifies local models, OAuth CLI subscriptions, and API-key providers under one self-hosted operator runtime."
+    />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=Space+Grotesk:wght@400;500;700&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="./assets/styles.css" />
+  </head>
+  <body data-page="providers">
+    <div class="bg-grid" aria-hidden="true"></div>
+    <header class="topbar">
+      <a class="brand" href="/index.html">HEIWA</a>
+      <nav class="nav">
+        <a href="/index.html">Home</a>
+        <a href="/providers.html">Providers</a>
+        <a href="/download.html">Download</a>
+        <a href="https://docs.heiwa.ltd">Docs</a>
+        <a href="https://github.com/Strategizing/heiwa-universe">GitHub</a>
+      </nav>
+    </header>
+
+    <main class="marketing-main">
+      <section class="hero compact">
+        <p class="eyebrow">Provider lanes</p>
+        <h1>One runtime across local models, subscriptions, and APIs.</h1>
+        <p class="lede">
+          Heiwa does not pretend every provider is identical. It gives operators one routing surface across three
+          honest lanes: local inference, OAuth-backed provider CLIs, and API-key providers.
+        </p>
+      </section>
+
+      <section class="section-block provider-legend">
+        <span class="lane-pill lane-local">Local</span>
+        <span class="lane-pill lane-oauth">OAuth CLI</span>
+        <span class="lane-pill lane-api">API key</span>
+      </section>
+
+      <section class="section-block table-shell">
+        <div class="table-head">
+          <div>
+            <p class="eyebrow">Current framing</p>
+            <h2>Provider surface</h2>
+          </div>
+          <p class="section-copy">
+            Providers still own auth and inference internals. Heiwa owns operator routing, evidence, session control,
+            and local coherence.
+          </p>
+        </div>
+
+        <div class="marketing-table-wrap">
+          <table class="marketing-table">
+            <thead>
+              <tr>
+                <th>Provider</th>
+                <th>Lane</th>
+                <th>What the operator brings</th>
+                <th>Where inference runs</th>
+                <th>Heiwa's role</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td><strong>Ollama</strong></td>
+                <td><span class="lane-pill lane-local">Local</span></td>
+                <td>Installed local runtime and local models</td>
+                <td>On the operator machine</td>
+                <td>Discovery, routing, receipts, and operator control</td>
+              </tr>
+              <tr>
+                <td><strong>Claude Code</strong></td>
+                <td><span class="lane-pill lane-oauth">OAuth CLI</span></td>
+                <td>Claude Max or related Anthropic account in provider CLI</td>
+                <td>Provider-managed inference via local CLI</td>
+                <td>Runtime orchestration around the provider-owned tool</td>
+              </tr>
+              <tr>
+                <td><strong>Codex</strong></td>
+                <td><span class="lane-pill lane-oauth">OAuth CLI</span></td>
+                <td>ChatGPT Plus or OpenAI account in provider CLI</td>
+                <td>Provider-managed inference via local CLI</td>
+                <td>Unified routing and receipts with the rest of the runtime</td>
+              </tr>
+              <tr>
+                <td><strong>Gemini CLI</strong></td>
+                <td><span class="lane-pill lane-oauth">OAuth CLI</span></td>
+                <td>Google AI Pro account in provider CLI</td>
+                <td>Provider-managed inference via local CLI</td>
+                <td>Shared operator surface across Google and non-Google lanes</td>
+              </tr>
+              <tr>
+                <td><strong>Antigravity</strong></td>
+                <td><span class="lane-pill lane-oauth">OAuth CLI</span></td>
+                <td>Provider-owned Google lane through local CLI</td>
+                <td>Provider-managed inference via local CLI</td>
+                <td>Additional routed capacity under one local runtime</td>
+              </tr>
+              <tr>
+                <td><strong>OpenAI API</strong></td>
+                <td><span class="lane-pill lane-api">API key</span></td>
+                <td>API key</td>
+                <td>Provider API</td>
+                <td>Route selection, operator context, approval, and evidence</td>
+              </tr>
+              <tr>
+                <td><strong>Anthropic API</strong></td>
+                <td><span class="lane-pill lane-api">API key</span></td>
+                <td>API key</td>
+                <td>Provider API</td>
+                <td>Same runtime surface without provider lock-in</td>
+              </tr>
+              <tr>
+                <td><strong>Google AI API</strong></td>
+                <td><span class="lane-pill lane-api">API key</span></td>
+                <td>API key</td>
+                <td>Provider API</td>
+                <td>Bring API access into the same operator flow as local and CLI lanes</td>
+              </tr>
+              <tr>
+                <td><strong>OpenRouter</strong></td>
+                <td><span class="lane-pill lane-api">API key</span></td>
+                <td>API key</td>
+                <td>Remote gateway</td>
+                <td>Optional remote lane, not the product center of gravity</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <section class="section-block section-split">
+        <div>
+          <p class="eyebrow">Honesty boundary</p>
+          <h2>Heiwa is not fake parity.</h2>
+          <p class="section-copy">
+            Discovery, routing metadata, and install support do not imply equal execution depth across every provider
+            surface. Heiwa should say which lanes are local, which are provider CLI wrappers, and which are API-key
+            integrations.
+          </p>
+        </div>
+        <div class="story-grid">
+          <article>
+            <span>What stays local</span>
+            <strong>Runtime, app, memory, and secrets</strong>
+            <p>The operator machine hosts the control surface and durable state.</p>
+          </article>
+          <article>
+            <span>What stays provider-owned</span>
+            <strong>Auth and inference internals</strong>
+            <p>Heiwa wraps and routes. It does not claim ownership of provider internals.</p>
+          </article>
+        </div>
+      </section>
+    </main>
+
+    <footer class="footer">
+      <p>Operator runtime first. Provider internals stay provider-owned.</p>
+      <p class="footer-links">
+        <a href="/index.html">Home</a>
+        <a href="/download.html">Download</a>
+        <a href="https://docs.heiwa.ltd">Docs</a>
+        <a href="https://github.com/Strategizing/heiwa-universe">GitHub</a>
+      </p>
+    </footer>
+
+    <script src="./assets/site.js"></script>
+  </body>
+</html>

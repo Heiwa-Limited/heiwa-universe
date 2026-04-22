@@ -3,10 +3,10 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Heiwa</title>
+    <title>Heiwa | Reuse The AI Subscriptions You Already Pay For</title>
     <meta
       name="description"
-      content="Heiwa — a BYOK agent orchestration platform. Connect your AI provider keys, and let Heiwa route every task to the optimal model."
+      content="Heiwa is the self-hosted local AI runtime that unifies local models, OAuth CLI subscriptions, and API-key providers under one operator surface."
     />
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
@@ -19,91 +19,144 @@
   <body data-page="home">
     <div class="bg-grid" aria-hidden="true"></div>
     <header class="topbar">
-      <a class="brand" href="/">HEIWA</a>
+      <a class="brand" href="/index.html">HEIWA</a>
       <nav class="nav">
-        <a href="https://api.heiwa.ltd/auth/discord">Dashboard</a>
-        <a href="https://status.heiwa.ltd">Status</a>
+        <a href="/index.html">Home</a>
+        <a href="/providers.html">Providers</a>
+        <a href="/download.html">Download</a>
         <a href="https://docs.heiwa.ltd">Docs</a>
         <a href="https://github.com/Strategizing/heiwa-universe">GitHub</a>
       </nav>
     </header>
 
-    <main>
-      <section class="hero">
-        <p class="eyebrow">AI Orchestration Platform</p>
-        <h1>Every AI provider. One orchestration layer. Your keys.</h1>
-        <p class="lede">
-          Connect your API keys from OpenAI, Anthropic, Google, and more.
-          Heiwa scores every task for intent and risk, then routes to the
-          optimal model across all your providers — automatically.
-        </p>
-        <div class="hero-actions">
-          <a class="btn btn-solid" href="https://api.heiwa.ltd/auth/discord">Get Started</a>
-          <a class="btn btn-outline" href="https://github.com/Strategizing/heiwa-universe">Source Code</a>
+    <main class="marketing-main">
+      <section class="hero hero-grid">
+        <div class="hero-copy">
+          <p class="eyebrow">Self-hosted local AI runtime</p>
+          <p class="hero-kicker">You host everything. Heiwa ships software, not a hosted operator app.</p>
+          <h1>Reuse the AI subscriptions you already pay for.</h1>
+          <p class="lede">
+            Heiwa turns Claude Max, ChatGPT Plus, Google AI Pro, API-key providers, and local Ollama
+            into one operator runtime you host yourself, with routing, receipts, approvals, and evidence.
+          </p>
+          <div class="command-band">
+            <span class="command-label">Canonical install path</span>
+            <code>curl -fsSL https://heiwa.ltd/install | sh</code>
+          </div>
+          <div class="hero-actions">
+            <a class="btn btn-solid" href="/download.html">Install Heiwa</a>
+            <a class="btn btn-outline" href="/providers.html">See Provider Lanes</a>
+            <a class="btn btn-outline" href="https://docs.heiwa.ltd">Read Docs</a>
+          </div>
         </div>
-      </section>
 
-      <section class="panels">
-        <article class="panel">
-          <h2>Bring your own keys</h2>
-          <p>
-            Connect API keys from any provider. Heiwa routes each task
-            to the best model based on cost, capability, and your rate
-            limits. No vendor lock-in.
-          </p>
-        </article>
-        <article class="panel">
-          <h2>Web and Discord</h2>
-          <p>
-            Run missions from app.heiwa.ltd or DM Heiwa on Discord.
-            Sign in once with Discord OAuth and control everything
-            from either surface.
-          </p>
-        </article>
-        <article class="panel">
-          <h2>Always-on missions</h2>
-          <p>
-            Trading analysis, autonomous research, scheduled
-            workflows — Hub runs 24/7 on Railway so your agents
-            work while you sleep.
-          </p>
-        </article>
-      </section>
-
-      <section class="callout">
-        <div>
-          <p class="eyebrow">Architecture</p>
-          <h2>Built for real orchestration</h2>
-          <p>
-            Heiwa classifies intent, scores risk, and routes to the cheapest
-            capable model across all your connected providers. Multi-step
-            agent workflows with full audit trail in SpacetimeDB.
-          </p>
-        </div>
-        <div class="callout-metrics" aria-label="Stack summary">
-          <div>
+        <aside class="hero-rail">
+          <div class="hero-stat">
             <span>Runtime</span>
-            <strong>Railway</strong>
+            <strong>Local-first</strong>
+            <p><code>heiwa</code> is the installed center of gravity. The operator runs the system locally.</p>
           </div>
-          <div>
-            <span>State</span>
-            <strong>SpacetimeDB</strong>
+          <div class="hero-stat">
+            <span>Provider lanes</span>
+            <strong>OAuth CLI + API key + local</strong>
+            <p>OAuth-backed subscriptions, key-based providers, and local Ollama fit under one surface.</p>
           </div>
-          <div>
-            <span>Interface</span>
-            <strong>Web + Discord</strong>
+          <div class="hero-stat">
+            <span>Control</span>
+            <strong>Receipts and approvals built in</strong>
+            <p>Heiwa owns routing, sessions, sandboxes, and evidence. Providers still own inference internals.</p>
           </div>
+        </aside>
+      </section>
+
+      <section class="section-block section-split">
+        <div>
+          <p class="eyebrow">Why Heiwa exists</p>
+          <h2>Not another hosted router.</h2>
+          <p class="section-copy">
+            Heiwa is for operators who want one runtime across local models, provider CLIs, and API-key
+            providers without handing the runtime, app, memory, or secrets to someone else's hosted surface.
+          </p>
+        </div>
+        <div class="story-grid">
+          <article>
+            <span>Hosted gateways</span>
+            <strong>Centralize traffic</strong>
+            <p>Useful for remote model access, but they are not the same thing as a self-hosted operator runtime.</p>
+          </article>
+          <article>
+            <span>Heiwa</span>
+            <strong>Centralizes operator control</strong>
+            <p>The website delivers software. The operator machine runs the runtime, app, REPL, and secrets.</p>
+          </article>
+        </div>
+      </section>
+
+      <section class="section-block">
+        <p class="eyebrow">Three provider lanes</p>
+        <div class="lane-grid">
+          <article class="lane">
+            <span class="lane-pill lane-local">Local</span>
+            <h3>Ollama and machine-owned models</h3>
+            <p>Private, fast, and cheap by default. Local inference stays on the operator's machine.</p>
+          </article>
+          <article class="lane">
+            <span class="lane-pill lane-oauth">OAuth CLI</span>
+            <h3>Claude Max, ChatGPT Plus, Google AI Pro</h3>
+            <p>Reuse subscriptions you already pay for through provider-owned CLIs under one routing surface.</p>
+          </article>
+          <article class="lane">
+            <span class="lane-pill lane-api">API key</span>
+            <h3>OpenAI, Anthropic, Google, OpenRouter, and more</h3>
+            <p>Bring keyed providers into the same runtime when remote APIs are the right escalation path.</p>
+          </article>
+        </div>
+      </section>
+
+      <section class="section-block">
+        <p class="eyebrow">Operator flow</p>
+        <div class="sequence-grid">
+          <article>
+            <strong>1. Install</strong>
+            <p>Start from a one-line install or GitHub Release. The runtime lands on the operator machine.</p>
+          </article>
+          <article>
+            <strong>2. Connect providers</strong>
+            <p>Authenticate provider CLIs, add keys, and discover local models. Heiwa normalizes the lanes.</p>
+          </article>
+          <article>
+            <strong>3. Run with receipts</strong>
+            <p>Use the REPL, open the local app with <code>heiwa app</code>, and keep evidence on the machine.</p>
+          </article>
+        </div>
+      </section>
+
+      <section class="section-block final-band">
+        <div>
+          <p class="eyebrow">Shop window only</p>
+          <h2><code>heiwa.ltd</code> delivers software. Your machine runs Heiwa.</h2>
+          <p class="section-copy">
+            The public site is for install, docs, release delivery, and identity exchange. Operator work, memory,
+            sessions, and provider secrets stay with the runtime you host yourself.
+          </p>
+        </div>
+        <div class="hero-actions">
+          <a class="btn btn-solid" href="/download.html">Open Download Guide</a>
+          <a class="btn btn-outline" href="https://github.com/Strategizing/heiwa-universe/releases">GitHub Releases</a>
         </div>
       </section>
     </main>
 
     <footer class="footer">
-      <p>Built by Heiwa Ltd</p>
+      <p>Heiwa is the self-hosted local AI runtime for sovereign operators.</p>
       <p class="footer-links">
-        <a href="https://status.heiwa.ltd">Status</a>
+        <a href="/providers.html">Providers</a>
+        <a href="/download.html">Download</a>
         <a href="https://docs.heiwa.ltd">Docs</a>
         <a href="https://github.com/Strategizing/heiwa-universe">GitHub</a>
       </p>
     </footer>
+
+    <script src="./assets/site.js"></script>
   </body>
 </html>

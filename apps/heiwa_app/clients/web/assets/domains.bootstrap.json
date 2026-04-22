@@ -5,7 +5,7 @@
   "platform": {
     "dns": "cloudflare",
     "public_web": "cloudflare_pages",
-    "control_plane": "railway",
+    "control_plane": "local_runtime",
     "edge_security": "cloudflare_waf",
     "state_ledger": "spacetimedb_maincloud",
     "state_endpoint": "maincloud.spacetimedb.com"
@@ -19,23 +19,16 @@
       "health_path": "/"
     },
     {
-      "host": "app.heiwa.ltd",
-      "purpose": "Authenticated product shell",
-      "target": "Cloudflare Pages app shell backed by Railway hub API",
-      "state": "active",
-      "health_path": "/"
-    },
-    {
       "host": "status.heiwa.ltd",
       "purpose": "Read-only status shell",
-      "target": "Cloudflare Pages status shell backed by Railway API",
+      "target": "Cloudflare Pages status shell backed by public-safe status telemetry",
       "state": "active",
       "health_path": "/status.html"
     },
     {
       "host": "api.heiwa.ltd",
-      "purpose": "Runtime API + MCP ingress",
-      "target": "Railway heiwa-core service behind Cloudflare proxy/WAF",
+      "purpose": "Public-safe status, install, or identity helper paths",
+      "target": "Narrow edge or service surface behind Cloudflare proxy/WAF",
       "state": "active",
       "health_path": "/health"
     },
@@ -86,13 +79,13 @@
   ],
   "bootstrap_steps": [
     "Point heiwa.ltd at the Cloudflare Pages marketing project.",
-    "Point app.heiwa.ltd at the Cloudflare Pages authenticated app shell.",
     "Point status.heiwa.ltd at the Cloudflare Pages status shell.",
     "Point docs.heiwa.ltd at the Cloudflare Pages docs project built from MkDocs Material.",
-    "Attach api.heiwa.ltd to the Railway heiwa-core service and enforce Cloudflare proxy/WAF.",
+    "Keep runtime control on the installed local heiwa runtime rather than a hosted product shell.",
+    "Attach api.heiwa.ltd only to public-safe helper paths such as status, install delivery, or identity exchange.",
     "Keep SpacetimeDB external on maincloud.spacetimedb.com rather than modeling it as a Railway service or volume.",
     "Keep internal preview runtimes such as heiwa-trading off the supported public host manifest until they graduate into first-class product surfaces.",
-    "Enable strict TLS and baseline WAF rules for api.heiwa.ltd while keeping app.heiwa.ltd and the other Pages shells behind Cloudflare edge controls.",
-    "Run post-cutover checks for api.heiwa.ltd/health, status.heiwa.ltd, app.heiwa.ltd, and public page endpoints."
+    "Enable strict TLS and baseline WAF rules for api.heiwa.ltd while keeping the Pages shells behind Cloudflare edge controls.",
+    "Run post-cutover checks for api.heiwa.ltd/health, status.heiwa.ltd, and public page endpoints."
   ]
 }
