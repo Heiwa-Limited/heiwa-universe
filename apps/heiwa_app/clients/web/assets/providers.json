@@ -1,0 +1,204 @@
+{
+  "$schema": "./providers.schema.json",
+  "version": "1.0.0",
+  "updated": "2026-04-22",
+  "note": "Shared data source for the marketing /providers page and the local cockpit providers view. BRAND.md rule: present maturity honestly per surface. Do not claim parity.",
+  "lanes": {
+    "oauth_cli": {
+      "label": "OAuth CLI",
+      "short": "oauth",
+      "description": "Reuse a provider's own CLI via OAuth device/login flow. The operator authenticates once through the vendor's real auth flow; Heiwa wraps the CLI as a provider surface. No API key required. Paid subscription credits apply where the vendor allows.",
+      "lead": true
+    },
+    "subscription": {
+      "label": "Subscription reuse",
+      "short": "subscription",
+      "description": "Route work through flat-rate consumer subscriptions the operator already pays for. Functions as a feature of the OAuth CLI lane where the vendor's CLI honors subscription quota."
+    },
+    "api_key": {
+      "label": "API key",
+      "short": "key",
+      "description": "Standard pay-per-token API access via vendor-issued key. Heiwa stores the key locally on the operator's machine; it never touches heiwa.ltd."
+    },
+    "local": {
+      "label": "Local",
+      "short": "local",
+      "description": "Models running on the operator's own hardware. Zero cost, zero data egress, lowest latency for supported sizes."
+    }
+  },
+  "maturity": {
+    "stable":       { "label": "Stable",       "description": "Wired, exercised, used in daily routing." },
+    "beta":         { "label": "Beta",         "description": "Wired, works in the happy path, edges unproven." },
+    "experimental": { "label": "Experimental", "description": "Present in the provider registry but not yet a default route." },
+    "planned":      { "label": "Planned",      "description": "Intended but not yet integrated." }
+  },
+  "providers": [
+    {
+      "id": "claude-code",
+      "name": "Claude Code",
+      "vendor": "Anthropic",
+      "lanes": ["oauth_cli", "subscription", "api_key"],
+      "subscriptions": ["Claude Pro", "Claude Max"],
+      "maturity": "stable",
+      "rate_group": "anthropic",
+      "priority": 4,
+      "description": "Anthropic's first-party CLI. OAuth login reuses Claude Pro or Claude Max subscription credit.",
+      "models_example": ["claude-opus-4-7", "claude-sonnet-4-6", "claude-haiku-4-5"],
+      "homepage": "https://claude.com/code"
+    },
+    {
+      "id": "codex",
+      "name": "Codex",
+      "vendor": "OpenAI",
+      "lanes": ["oauth_cli", "subscription", "api_key"],
+      "subscriptions": ["ChatGPT Plus", "ChatGPT Pro", "ChatGPT Team"],
+      "maturity": "stable",
+      "rate_group": "openai",
+      "priority": 5,
+      "description": "OpenAI's first-party CLI. OAuth login reuses ChatGPT Plus/Pro subscription credit.",
+      "models_example": ["gpt-5", "gpt-5-codex"],
+      "homepage": "https://developers.openai.com/codex/cli/"
+    },
+    {
+      "id": "gemini-cli",
+      "name": "Gemini CLI",
+      "vendor": "Google",
+      "lanes": ["oauth_cli", "subscription", "api_key"],
+      "subscriptions": ["Google AI Pro"],
+      "maturity": "stable",
+      "rate_group": "google",
+      "priority": 2,
+      "description": "Google's first-party Gemini CLI. OAuth login reuses Google AI Pro entitlements.",
+      "models_example": ["gemini-3.1-pro", "gemini-2.5-flash"],
+      "homepage": "https://ai.google.dev/gemini-api/docs/cli"
+    },
+    {
+      "id": "antigravity",
+      "name": "Antigravity",
+      "vendor": "Google",
+      "lanes": ["oauth_cli", "subscription"],
+      "subscriptions": ["Google AI Pro"],
+      "maturity": "beta",
+      "rate_group": "google_bonus",
+      "priority": 3,
+      "description": "Google's standalone agentic CLI. Separate rate group from Gemini CLI — stacks with it under one Google AI Pro subscription.",
+      "models_example": ["gemini-3.1-pro"],
+      "homepage": "https://antigravity.google"
+    },
+    {
+      "id": "ollama",
+      "name": "Ollama",
+      "vendor": "Ollama",
+      "lanes": ["local"],
+      "subscriptions": [],
+      "maturity": "stable",
+      "rate_group": "local",
+      "priority": 1,
+      "description": "Local model runtime. Always preferred when the selected model is available on the operator's machine.",
+      "models_example": ["gemma4", "qwen3.5:9b", "qwen3.5:4b", "qwen3-embedding:0.6b"],
+      "homepage": "https://ollama.com"
+    },
+    {
+      "id": "anthropic-api",
+      "name": "Anthropic API",
+      "vendor": "Anthropic",
+      "lanes": ["api_key"],
+      "subscriptions": [],
+      "maturity": "stable",
+      "rate_group": "anthropic",
+      "description": "Direct pay-per-token access. Alternative to the Claude Code OAuth CLI lane.",
+      "homepage": "https://www.anthropic.com/api"
+    },
+    {
+      "id": "openai-api",
+      "name": "OpenAI API",
+      "vendor": "OpenAI",
+      "lanes": ["api_key"],
+      "subscriptions": [],
+      "maturity": "stable",
+      "rate_group": "openai",
+      "description": "Direct pay-per-token access. Alternative to the Codex OAuth CLI lane.",
+      "homepage": "https://platform.openai.com"
+    },
+    {
+      "id": "gemini-api",
+      "name": "Gemini API",
+      "vendor": "Google",
+      "lanes": ["api_key"],
+      "subscriptions": [],
+      "maturity": "stable",
+      "rate_group": "google",
+      "description": "Direct pay-per-token access via Google AI Studio key.",
+      "homepage": "https://ai.google.dev"
+    },
+    {
+      "id": "openrouter",
+      "name": "OpenRouter",
+      "vendor": "OpenRouter",
+      "lanes": ["api_key"],
+      "subscriptions": [],
+      "maturity": "experimental",
+      "rate_group": "openrouter",
+      "description": "Remote multi-model gateway. Useful as an escape hatch when a specific model is needed and no first-party lane covers it.",
+      "homepage": "https://openrouter.ai"
+    },
+    {
+      "id": "copilot",
+      "name": "GitHub Copilot",
+      "vendor": "GitHub",
+      "lanes": ["subscription"],
+      "subscriptions": ["Copilot Pro", "Copilot Business"],
+      "maturity": "planned",
+      "rate_group": "github",
+      "description": "Copilot subscription reuse. Not yet wired; on the OAuth CLI lane roadmap."
+    },
+    {
+      "id": "deepseek",
+      "name": "DeepSeek",
+      "vendor": "DeepSeek",
+      "lanes": ["api_key"],
+      "maturity": "planned",
+      "description": "API key lane planned."
+    },
+    {
+      "id": "xai",
+      "name": "xAI",
+      "vendor": "xAI",
+      "lanes": ["api_key"],
+      "maturity": "planned",
+      "description": "API key lane planned."
+    },
+    {
+      "id": "mistral",
+      "name": "Mistral",
+      "vendor": "Mistral AI",
+      "lanes": ["api_key"],
+      "maturity": "planned"
+    },
+    {
+      "id": "qwen-cloud",
+      "name": "Qwen (cloud)",
+      "vendor": "Alibaba",
+      "lanes": ["api_key"],
+      "maturity": "planned",
+      "description": "Cloud Qwen via API key. Local Qwen variants already work via the Ollama lane."
+    },
+    {
+      "id": "custom-openai-compatible",
+      "name": "Custom (OpenAI-compatible)",
+      "vendor": "Arbitrary",
+      "lanes": ["api_key", "local"],
+      "maturity": "experimental",
+      "description": "Any OpenAI-compatible endpoint — self-hosted inference servers, LAN model hosts, niche providers."
+    }
+  ],
+  "rate_groups": {
+    "local":         { "priority": 1, "description": "Local models. Unlimited. Always preferred when capable." },
+    "google":        { "priority": 2, "description": "Google AI Pro group. Shared across Gemini CLI and API." },
+    "google_bonus":  { "priority": 3, "description": "Antigravity bonus group. Separate from main Google group." },
+    "anthropic":     { "priority": 4, "description": "Anthropic group. Shared across Claude Code and Anthropic API." },
+    "openai":        { "priority": 5, "description": "OpenAI group. Shared across Codex and OpenAI API." },
+    "github":        { "priority": 6, "description": "GitHub Copilot group. Planned." },
+    "openrouter":    { "priority": 7, "description": "OpenRouter group. Fallback lane." }
+  }
+}
