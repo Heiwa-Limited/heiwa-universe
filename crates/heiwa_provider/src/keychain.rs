@@ -1,93 +1,58 @@
+//! Secret storage for plain-string credentials (API keys).
+//!
+//! Delegates to [`heiwa_vault::Vault`], which wraps the platform keyring:
+//! macOS Keychain, Linux Secret Service, Windows Credential Manager.
+//!
+//! Structured OAuth tokens go through [`crate::oauth::ProviderVault`] instead,
+//! which uses a separate service namespace so OAuth and API-key secrets can
+//! be rotated or wiped independently.
+
 use anyhow::{anyhow, Result};
-use std::process::Command;
+use heiwa_vault::{Vault, VaultError};
 
 const KEYCHAIN_SERVICE: &str = "heiwa";
 
-/// Store a secret in the macOS Keychain.
-///
-/// Uses `security add-generic-password` with `-U` (upsert).
-/// Falls back to nothing on non-macOS — caller should handle that.
+fn vault() -> Vault {
+    Vault::new(KEYCHAIN_SERVICE)
+}
+
+/// Store a secret (API key) under the shared heiwa service.
 pub fn store_secret(account_id: &str, secret: &str) -> Result<()> {
-    if !cfg!(target_os = "macos") {
-        return Err(anyhow!("Keychain storage only supported on macOS"));
-    }
-
-    let status = Command::new("security")
-        .arg("add-generic-password")
-        .arg("-a")
-        .arg(KEYCHAIN_SERVICE)
-        .arg("-s")
-        .arg(account_id)
-        .arg("-w")
-        .arg(secret)
-        .arg("-U") // upsert
-        .status()?;
-
-    if status.success() {
-        Ok(())
-    } else {
-        Err(anyhow!(
-            "Failed to store secret in Keychain for {}",
-            account_id
-        ))
-    }
+    vault()
+        .store(account_id, secret)
+        .map_err(|e| anyhow!("failed to store secret for {account_id}: {e}"))
 }
 
-/// Retrieve a secret from the macOS Keychain.
-///
-/// Uses `security find-generic-password -w` which outputs just the password.
+/// Retrieve a stored secret. Returns an error if not present.
 pub fn load_secret(account_id: &str) -> Result<String> {
-    if !cfg!(target_os = "macos") {
-        return Err(anyhow!("Keychain storage only supported on macOS"));
-    }
-
-    let output = Command::new("security")
-        .arg("find-generic-password")
-        .arg("-a")
-        .arg(KEYCHAIN_SERVICE)
-        .arg("-s")
-        .arg(account_id)
-        .arg("-w")
-        .output()?;
-
-    if output.status.success() {
-        let secret = String::from_utf8_lossy(&output.stdout).trim().to_string();
-        Ok(secret)
-    } else {
-        Err(anyhow!("No secret found in Keychain for {}", account_id))
+    match vault().load(account_id) {
+        Ok(s) => Ok(s),
+        Err(VaultError::NotFound { .. }) => {
+            Err(anyhow!("no secret found for {account_id}"))
+        }
+        Err(e) => Err(anyhow!("keyring error for {account_id}: {e}")),
     }
 }
 
-/// Delete a secret from the macOS Keychain.
+/// Delete a stored secret. Missing entries are treated as success.
 pub fn delete_secret(account_id: &str) -> Result<()> {
-    if !cfg!(target_os = "macos") {
-        return Err(anyhow!("Keychain storage only supported on macOS"));
-    }
-
-    let status = Command::new("security")
-        .arg("delete-generic-password")
-        .arg("-a")
-        .arg(KEYCHAIN_SERVICE)
-        .arg("-s")
-        .arg(account_id)
-        .status()?;
-
-    if status.success() {
-        Ok(())
-    } else {
-        // Not finding the entry is not an error for delete
-        Ok(())
+    match vault().delete(account_id) {
+        Ok(()) => Ok(()),
+        Err(VaultError::NotFound { .. }) => Ok(()),
+        Err(e) => Err(anyhow!("failed to delete secret for {account_id}: {e}")),
     }
 }
 
-/// Check if the Keychain is available (macOS with `security` CLI).
+/// Check whether the keyring backend is reachable on this platform.
+///
+/// Attempts a throwaway load on a synthetic account. `NotFound` counts as
+/// "backend available but account missing" — i.e. healthy.
 pub fn is_available() -> bool {
-    cfg!(target_os = "macos")
-        && Command::new("security")
-            .arg("help")
-            .output()
-            .map(|o| o.status.success())
-            .unwrap_or(false)
+    match vault().load("__heiwa_probe__") {
+        Ok(_) => true,
+        Err(VaultError::NotFound { .. }) => true,
+        Err(_) => false,
+    }
 }
 
 #[cfg(test)]
@@ -95,9 +60,15 @@ mod tests {
     use super::*;
 
     #[test]
-    fn keychain_available_on_macos() {
-        if cfg!(target_os = "macos") {
-            assert!(is_available());
-        }
+    fn is_available_does_not_panic() {
+        // The result depends on the test sandbox; we just assert no panic.
+        let _ = is_available();
+    }
+
+    #[test]
+    #[ignore = "requires real OS keychain session"]
+    fn missing_secret_returns_error() {
+        let err = load_secret("__nonexistent_heiwa_account__").unwrap_err();
+        assert!(err.to_string().contains("no secret found"));
     }
 }
