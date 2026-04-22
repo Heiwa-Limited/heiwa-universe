@@ -46,3 +46,7 @@ The cockpit is self-hosted. It must never:
 - call out to `heiwa.ltd` for user data
 - store operator secrets outside `~/.heiwa/`
 - require a network connection for local-only operations
+
+## Runtime contract
+
+API shape lives in [docs/design/refs/API.md](/Users/dmcgregsauce/heiwa-universe/docs/design/refs/API.md).
