@@ -53,5 +53,5 @@ Use targeted crate tests before claiming runtime progress.
 - local-first truth over web-first framing
 - provider-owned semantics stay provider-owned
 - SpacetimeDB is backend authority, not a normal operator surface
-- Railway is support infra, not the product center
+- GitHub is the distribution surface; a cloud/VPS plane is deferred until traction warrants it
 - honesty over completeness theater
