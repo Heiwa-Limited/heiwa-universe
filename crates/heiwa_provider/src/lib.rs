@@ -7,6 +7,7 @@ use std::process::Command;
 pub mod adapter;
 pub mod detect;
 pub mod keychain;
+pub mod oauth;
 pub mod providers;
 pub mod registry;
 
@@ -14,9 +15,13 @@ pub mod registry;
 // Re-exports for convenience
 // ---------------------------------------------------------------------------
 
+pub use oauth::{needs_refresh, OAuthBridgeError, ProviderVault, OAUTH_SERVICE};
 pub use registry::{
     AccountRegistry, AccountStatus, Credential, DetectedModel, InventoryTruth, ProviderAccount,
 };
+
+// Re-export the OAuth payload type so callers don't need a direct dep on heiwa-vault.
+pub use heiwa_vault::OAuthSecret;
 
 // ---------------------------------------------------------------------------
 // Heiwa identity (account plane — separate from provider accounts)
