@@ -13,6 +13,7 @@ members = [
     "crates/heiwa_session",
     "crates/heiwa_stdb",
     "crates/heiwa_tui",
+    "crates/heiwa_vault",
     "packages/heiwa_bindings/rust",
 ]
 resolver = "2"

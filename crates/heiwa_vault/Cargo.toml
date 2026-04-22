@@ -1,0 +1,21 @@
+[package]
+name = "heiwa_vault"
+version = "0.1.0"
+edition = "2021"
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+documentation.workspace = true
+readme.workspace = true
+keywords.workspace = true
+categories.workspace = true
+description = "OS keychain wrapper for Heiwa — stores OAuth tokens and secrets per user, per machine."
+
+[dependencies]
+keyring = "3"
+thiserror = "2"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+[dev-dependencies]
+tempfile = "3"
