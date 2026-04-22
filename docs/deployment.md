@@ -6,7 +6,7 @@ The current platform goal is GitHub-native distribution:
 
 - GitHub Actions validates the Rust workspace on macOS, Linux, and Windows.
 - GitHub Pages publishes the docs site from `docs/` on release tags.
-- GitHub Releases are the intended handoff point for packaged runtime artifacts.
+- GitHub Releases publish tagged `heiwa` archives plus checksums through `.github/workflows/release.yml`.
 
 This repo should be able to go from fresh clone to verified build and published docs without assuming Railway, Cloudflare, or a hosted control plane.
 
@@ -30,3 +30,4 @@ Hosted and control-plane material still exists in the repository as reference or
 - CI must pass on all Rust matrix platforms before release work continues.
 - Docs must build cleanly with `mkdocs build --strict`.
 - Release automation should extend from this baseline rather than bypass it.
+- Release asset names and checksum output should stay aligned with `infra/platform/github/README.md`.

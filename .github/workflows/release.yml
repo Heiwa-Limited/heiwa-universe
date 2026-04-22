@@ -1,0 +1,167 @@
+name: Heiwa Release
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Existing git tag to release (for example v0.1.0)
+        required: true
+        type: string
+
+permissions:
+  contents: write
+
+concurrency:
+  group: heiwa-release-${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  metadata:
+    name: Resolve Release Metadata
+    runs-on: ubuntu-latest
+    outputs:
+      tag: ${{ steps.meta.outputs.tag }}
+      version: ${{ steps.meta.outputs.version }}
+    steps:
+      - id: meta
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          if [[ "${GITHUB_EVENT_NAME}" == "workflow_dispatch" ]]; then
+            tag="${{ inputs.tag }}"
+          else
+            tag="${GITHUB_REF_NAME}"
+          fi
+
+          if [[ ! "$tag" =~ ^v[0-9] ]]; then
+            echo "Release tags must look like v0.1.0" >&2
+            exit 1
+          fi
+
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+          echo "version=${tag#v}" >> "$GITHUB_OUTPUT"
+
+  build:
+    name: Build Release Asset (${{ matrix.name }})
+    needs: metadata
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: linux-x86_64
+            runner: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
+            archive_ext: tar.gz
+            binary_name: heiwa
+          - name: macos-aarch64
+            runner: macos-14
+            target: aarch64-apple-darwin
+            archive_ext: tar.gz
+            binary_name: heiwa
+          - name: windows-x86_64
+            runner: windows-latest
+            target: x86_64-pc-windows-msvc
+            archive_ext: zip
+            binary_name: heiwa.exe
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: ${{ needs.metadata.outputs.tag }}
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: 1.93.1
+          target: ${{ matrix.target }}
+
+      - name: Rust cache
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: |
+            .
+
+      - name: Build release binary
+        run: cargo build --locked --release -p heiwa-shell --bin heiwa --target ${{ matrix.target }}
+
+      - name: Package archive
+        shell: bash
+        env:
+          VERSION: ${{ needs.metadata.outputs.version }}
+          ASSET_NAME: ${{ matrix.name }}
+          TARGET: ${{ matrix.target }}
+          ARCHIVE_EXT: ${{ matrix.archive_ext }}
+          BINARY_NAME: ${{ matrix.binary_name }}
+        run: |
+          set -euo pipefail
+
+          release_root="dist/heiwa-${VERSION}-${ASSET_NAME}"
+          archive_path="${release_root}.${ARCHIVE_EXT}"
+          binary_path="target/${TARGET}/release/${BINARY_NAME}"
+
+          mkdir -p "${release_root}"
+          cp "${binary_path}" "${release_root}/"
+          cp README.md CONTRIBUTING.md CODE_OF_CONDUCT.md "${release_root}/"
+
+          if [[ "${ARCHIVE_EXT}" == "zip" ]]; then
+            7z a "${archive_path}" "${release_root}" >/dev/null
+          else
+            tar -C dist -czf "${archive_path}" "heiwa-${VERSION}-${ASSET_NAME}"
+          fi
+
+      - name: Upload packaged asset
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.name }}
+          path: dist/heiwa-${{ needs.metadata.outputs.version }}-${{ matrix.name }}.${{ matrix.archive_ext }}
+          if-no-files-found: error
+
+  checksums:
+    name: Generate Checksums
+    needs: [metadata, build]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download packaged assets
+        uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+
+      - name: Write checksum manifest
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd dist
+          sha256sum heiwa-* > "heiwa-${{ needs.metadata.outputs.version }}-checksums.txt"
+
+      - name: Upload checksum artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: checksums
+          path: dist/heiwa-${{ needs.metadata.outputs.version }}-checksums.txt
+          if-no-files-found: error
+
+  publish:
+    name: Publish GitHub Release
+    needs: [metadata, build, checksums]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download release artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: release-artifacts
+          merge-multiple: true
+
+      - name: Publish release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ needs.metadata.outputs.tag }}
+          name: Heiwa ${{ needs.metadata.outputs.tag }}
+          draft: false
+          prerelease: false
+          generate_release_notes: true
+          files: release-artifacts/*
