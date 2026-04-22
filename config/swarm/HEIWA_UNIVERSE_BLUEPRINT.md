@@ -183,7 +183,7 @@ This plan dictates the exact sequential execution required to transition the `~/
 ### **Phase 0: Monorepo Bootstrapping**
 1. Initialize the monorepo directory structure.
    ```bash
-   mkdir -p ~/heiwa/apps/{heiwa_hub,heiwa_limbs,heiwa_web,heiwa_cli}
+   mkdir -p ~/heiwa/apps/{heiwa_hub,heiwa_limbs,heiwa_app,heiwa_cli}
    mkdir -p ~/heiwa/packages/module_bindings/{python,typescript}
    ```
 2. Install foundational compilers and tools.
@@ -226,7 +226,7 @@ This plan dictates the exact sequential execution required to transition the `~/
 4. **Worker Execution:** Start the Python worker loop (`worker.py`). The worker authenticates with SpacetimeDB, syncs its cache, and awaits tasks.
 
 ### **Phase 5: The Pure Client (The Face)**
-1. Inside `apps/heiwa_web/` (SvelteKit), import the generated TypeScript SDK from `packages/module_bindings/typescript`.
+1. Inside `apps/heiwa_app/` (SvelteKit), import the generated TypeScript SDK from `packages/module_bindings/typescript`.
 2. Replace all HTTP `fetch()` logic with SpacetimeDB WebSocket subscriptions.
 3. Bind Svelte stores directly to SpacetimeDB `on_update` callbacks, achieving zero-latency UI reactivity.
 

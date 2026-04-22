@@ -93,7 +93,7 @@ ROOT = Path(__file__).resolve().parents[2]
 bench = HeiwaBench(ROOT)
 cells = HeiwaCellCatalog(ROOT)
 claw_gateway = OpenClaw(ROOT)
-WEB_ROOT = ROOT / "apps" / "heiwa_web" / "clients" / "web"
+WEB_ROOT = ROOT / "apps" / "heiwa_app" / "clients" / "web"
 ASSETS_ROOT = WEB_ROOT / "assets"
 
 if ASSETS_ROOT.exists():

@@ -17,7 +17,7 @@ def run_audit():
         "Monorepo Standard (Packages)": (root / "packages").exists(),
         "Namespaced SDK": (root / "packages/heiwa_sdk/heiwa_sdk").exists(),
         "Enterprise CLI": (root / "apps/heiwa_cli/heiwa").exists(),
-        "Public Surface (Web)": (root / "apps/heiwa_web/clients/web/index.html").exists(),
+        "Public Surface (Web)": (root / "apps/heiwa_app/clients/web/index.html").exists(),
         "Identity Manifest": (root / "config/identities/profiles.json").exists(),
         "Soul Core": (root / "config/identities/soul/core.md").exists(),
     }

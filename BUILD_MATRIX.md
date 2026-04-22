@@ -7,7 +7,7 @@ Updated 2026-04-21. Client-only architecture. Parallel lanes for Claude + Codex 
 | Layer | Component | Crate/Path |
 | --- | --- | --- |
 | L1 Runtime | `heiwa` CLI (Ratatui TUI) | `apps/heiwa_cli`, `crates/heiwa_tui`, `crates/heiwa_repl` |
-| L1 Runtime | Heiwa.app (Tauri desktop) | `apps/heiwa_web` (rename → `apps/heiwa_app`) |
+| L1 Runtime | Heiwa.app (Tauri desktop) | `apps/heiwa_app` |
 | L2 Secrets | OS keychain vault | `crates/heiwa_vault` (NEW) |
 | L2 Providers | OAuth bridges — claude/gemini/codex/ollama | `crates/heiwa_provider` |
 | L3 Routing | DREX kernel | `crates/heiwa_loop`, `crates/heiwa_session` |
@@ -66,6 +66,13 @@ Either agent claims. Keeps main repo portable.
 | C5 | Delete or archive `apps/heiwa_trading/` from main tree if not MVP scope |
 | C6 | Unify `HEIWA.md`, `IDENTITY.md`, `SOUL.md` into one canonical `HEIWA.md` |
 | C7 | Prune `docs/superpowers/plans/` of obsolete Railway plans |
+
+## Dispatch Status (2026-04-21)
+
+- Platform on `main`: `P1`, `P4`, `P6`, `P8`
+- Open Codex PRs: `#7` (`P5`), `#9` (`P2`), `#11` (`P7`)
+- Open Claude PRs: `#5` (`L1`), `#6` (`L3`), `#8` (`L5`), `#10` (`L8`)
+- Current cleanup claim: `C3` path rename in progress
 
 ## Build order
 

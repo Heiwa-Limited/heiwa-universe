@@ -8,7 +8,7 @@
 
 ## 1. Problem
 
-The current web surface (`apps/heiwa_web/clients/web/`) is ~15 hand-written HTML files with vanilla JS.
+The current web surface (`apps/heiwa_app/clients/web/`) is ~15 hand-written HTML files with vanilla JS.
 Each page duplicates the nav, styles, and API wiring. Adding a feature means touching raw HTML, duplicating
 the auth redirect dance, and hoping the CSP headers stay in sync. The static shell served
 its purpose for bootstrapping — now it's a drag on velocity.
@@ -18,7 +18,7 @@ maintenance. Browser auth now belongs to the SvelteKit shell, not `dashboard.htm
 
 ## 2. Goals
 
-1. **Single SvelteKit app** at `apps/heiwa_web/app/` replacing both heiwa.ltd (marketing) and app.heiwa.ltd (product)
+1. **Single SvelteKit app** at `apps/heiwa_app/app/` replacing both heiwa.ltd (marketing) and app.heiwa.ltd (product)
 2. **Cloudflare Pages deployment** via `wrangler pages deploy` (adapter-cloudflare)
 3. **Consume api.heiwa.ltd** exclusively — no SSR data fetching, no server functions hitting STDB directly
 4. **Discord OAuth flow** stays on the hub; SvelteKit handles the callback landing + secure cookie session
@@ -29,8 +29,8 @@ maintenance. Browser auth now belongs to the SvelteKit shell, not `dashboard.htm
 
 | Domain | Source | Deploy Target | Notes |
 |--------|--------|---------------|-------|
-| `heiwa.ltd` | `apps/heiwa_web/app/` (marketing routes) | Cloudflare Pages | Homepage, pricing, signup CTA |
-| `app.heiwa.ltd` | `apps/heiwa_web/app/` (auth'd routes) | Cloudflare Pages | Dashboard, missions, tools, etc. |
+| `heiwa.ltd` | `apps/heiwa_app/app/` (marketing routes) | Cloudflare Pages | Homepage, pricing, signup CTA |
+| `app.heiwa.ltd` | `apps/heiwa_app/app/` (auth'd routes) | Cloudflare Pages | Dashboard, missions, tools, etc. |
 | `status.heiwa.ltd` | Same app or keep static | Cloudflare Pages | Could be a SvelteKit route or stay static |
 | `api.heiwa.ltd` | `apps/heiwa_hub/` (unchanged) | Railway | Hub API, MCP, WebSockets |
 | `docs.heiwa.ltd` | `docs/` (unchanged) | Cloudflare Pages | MkDocs Material |
@@ -157,7 +157,7 @@ export function ws(path: string): WebSocket;
 ## 8. Project Structure
 
 ```
-apps/heiwa_web/app/
+apps/heiwa_app/app/
 ├── src/
 │   ├── lib/
 │   │   ├── api.ts              # Typed API client
@@ -208,7 +208,7 @@ apps/heiwa_web/app/
 ## 9. Migration Strategy
 
 ### Phase 1 — Scaffold + Auth (this PR)
-- `pnpm create svelte@latest` in `apps/heiwa_web/app/`
+- `pnpm create svelte@latest` in `apps/heiwa_app/app/`
 - Install adapter-cloudflare, tailwind, base dependencies
 - Implement auth callback route + secure session cookie
 - Port homepage (index.html → marketing route group)
@@ -227,7 +227,7 @@ apps/heiwa_web/app/
 - Point `heiwa.ltd` to same project (marketing routes)
 - Update hub's `HEIWA_WEB_ORIGIN` to confirm auth redirect target
 - Remove static HTML routes from `mcp_server.py`
-- Delete `apps/heiwa_web/clients/web/` (old static shell)
+- Delete `apps/heiwa_app/clients/web/` (old static shell)
 - Update CI to deploy SvelteKit build
 
 ### Phase 4 — Enhancements (post-migration)
@@ -254,10 +254,10 @@ deploy-web:
   steps:
     - uses: actions/checkout@v4
     - uses: pnpm/action-setup@v4
-    - run: cd apps/heiwa_web/app && pnpm install && pnpm build
+    - run: cd apps/heiwa_app/app && pnpm install && pnpm build
     - uses: cloudflare/wrangler-action@v3
       with:
-        workingDirectory: apps/heiwa_web/app
+        workingDirectory: apps/heiwa_app/app
         command: pages deploy
 ```
 

@@ -20,7 +20,7 @@ python apps/heiwa_hub/tests/test_risk_scorer.py
 python apps/heiwa_hub/tests/test_compute_router.py
 python -m pip install -r docs/requirements.txt
 mkdocs build --strict
-python apps/heiwa_web/scripts/check_static_surface.py
+python apps/heiwa_app/scripts/check_static_surface.py
 ```
 
 ## Public surface rule

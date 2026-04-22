@@ -8,7 +8,7 @@ from pathlib import Path
 
 
 ROOT = Path(__file__).resolve().parents[3]
-WEB_ROOT = ROOT / "apps" / "heiwa_web" / "clients" / "web"
+WEB_ROOT = ROOT / "apps" / "heiwa_app" / "clients" / "web"
 
 
 def read_text(path: Path) -> str:

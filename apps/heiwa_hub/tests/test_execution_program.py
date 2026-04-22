@@ -25,7 +25,7 @@ class TestExecutionProgram:
             objective="deploy status page",
             steps=["build", "test", "deploy"],
             constraints={"no_downtime": True},
-            scope={"files": ["apps/heiwa_web/"]},
+            scope={"files": ["apps/heiwa_app/"]},
             tools_allowed=["heiwa_ops", "heiwa_claw"],
             budget={"max_turns": 5, "max_seconds": 300},
             acceptance=["health endpoint 200", "tests pass"],

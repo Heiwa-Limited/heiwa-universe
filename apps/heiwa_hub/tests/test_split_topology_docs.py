@@ -5,8 +5,8 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[3]
 DOMAIN_PLAN = ROOT / "config" / "swarm" / "domain_plan.md"
-DOMAIN_MANIFEST = ROOT / "apps" / "heiwa_web" / "clients" / "web" / "assets" / "domains.bootstrap.json"
-STATIC_SURFACE_GUARD = ROOT / "apps" / "heiwa_web" / "scripts" / "check_static_surface.py"
+DOMAIN_MANIFEST = ROOT / "apps" / "heiwa_app" / "clients" / "web" / "assets" / "domains.bootstrap.json"
+STATIC_SURFACE_GUARD = ROOT / "apps" / "heiwa_app" / "scripts" / "check_static_surface.py"
 
 
 def _load_guard_module():
@@ -27,7 +27,7 @@ def test_domain_plan_describes_split_service_topology():
 
 
 def test_public_index_points_get_started_at_live_oauth_entry():
-    index_text = (ROOT / "apps" / "heiwa_web" / "clients" / "web" / "index.html").read_text(encoding="utf-8")
+    index_text = (ROOT / "apps" / "heiwa_app" / "clients" / "web" / "index.html").read_text(encoding="utf-8")
 
     assert 'href="https://api.heiwa.ltd/auth/discord"' in index_text
 

@@ -23,7 +23,7 @@ test-trading:
     cd apps/heiwa_trading && PYTHONPATH=src ../../{{python}} -m pytest tests -q
 
 check-web:
-    {{python}} apps/heiwa_web/scripts/check_static_surface.py
+    {{python}} apps/heiwa_app/scripts/check_static_surface.py
 
 check-docs:
     {{python}} -m mkdocs build --strict
