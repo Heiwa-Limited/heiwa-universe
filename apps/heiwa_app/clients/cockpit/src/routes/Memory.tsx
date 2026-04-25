@@ -9,12 +9,25 @@ export default function MemoryRoute(): JSX.Element {
       <div class="hero compact">
         <p class="eyebrow">Memory</p>
         <h1>Durable operator memory</h1>
-        <p class="lede">User, project, and session scopes. Heiwa's long-term memory lives here — separate from any model's working context.</p>
+        <p class="lede">
+          User, project, and session scopes. Heiwa's long-term memory lives here
+          — separate from any model's working context.
+        </p>
       </div>
 
       <RemoteShell loader={() => v1.memory()}>
         {(data) => (
-          <Show when={data.entries.length > 0} fallback={<div class="empty-state"><strong>Memory is empty.</strong><p class="muted">Run <code>heiwa memory ingest</code> or save from a session.</p></div>}>
+          <Show
+            when={data.entries.length > 0}
+            fallback={
+              <div class="empty-state">
+                <strong>Memory is empty.</strong>
+                <p class="muted">
+                  Run <code>heiwa memory ingest</code> or save from a session.
+                </p>
+              </div>
+            }
+          >
             <div class="card-list">
               <For each={data.entries}>
                 {(e) => (
@@ -24,7 +37,9 @@ export default function MemoryRoute(): JSX.Element {
                       <span class="pill">{e.scope}</span>
                     </div>
                     <p class="muted">{e.summary ?? "—"}</p>
-                    <p class="mono muted">{e.source ?? "unknown source"} · updated {e.updated_at}</p>
+                    <p class="mono muted">
+                      {e.source ?? "unknown source"} · updated {e.updated_at}
+                    </p>
                   </article>
                 )}
               </For>

@@ -54,12 +54,56 @@ async def op_shutdown(req: Request) -> OkResponse | ErrResponse:
     return ok(req.id, {"shutting_down": True})
 
 
+async def op_vault_resolve(req: Request) -> OkResponse | ErrResponse:
+    """Resolve a credential from the UserVault in SpacetimeDB."""
+    owner_id = req.args.get("owner_id")
+    provider_id = req.args.get("provider_id")
+    db_identity = req.args.get("db_identity")
+
+    if not all([owner_id, provider_id, db_identity]):
+        return err(
+            req.id,
+            code="missing_args",
+            message="owner_id, provider_id, and db_identity are required",
+        )
+
+    try:
+        from heiwa_sdk.spacetimedb import SpacetimeDB
+        from heiwa_sdk.vault import UserVault
+
+        stdb = SpacetimeDB(db_identity=db_identity)
+        vault = UserVault(stdb)
+        plaintext = vault.resolve_credential(owner_id, provider_id)
+
+        return ok(req.id, {"plaintext": plaintext})
+    except Exception as exc:
+        return err(req.id, code="vault_error", message=repr(exc))
+
+
+async def op_vault_decrypt(req: Request) -> OkResponse | ErrResponse:
+    """Decrypt a ciphertext string using the InstanceVault."""
+    ciphertext = req.args.get("ciphertext")
+    if not ciphertext:
+        return err(req.id, code="missing_args", message="ciphertext is required")
+
+    try:
+        from heiwa_sdk.vault import InstanceVault
+
+        vault = InstanceVault()
+        plaintext = vault.decrypt(ciphertext)
+        return ok(req.id, {"plaintext": plaintext})
+    except Exception as exc:
+        return err(req.id, code="vault_error", message=repr(exc))
+
+
 HANDLERS: dict[str, Handler] = {
     "health": op_health,
     "version": op_version,
     "check_deps": op_check_deps,
     "echo": op_echo,
     "shutdown": op_shutdown,
+    "vault_resolve": op_vault_resolve,
+    "vault_decrypt": op_vault_decrypt,
 }
 
 

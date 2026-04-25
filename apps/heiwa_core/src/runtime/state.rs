@@ -2,7 +2,7 @@ use std::{collections::HashMap, sync::Arc};
 
 use axum::extract::ws::Message;
 use serde_json::Value;
-use tokio::sync::{RwLock, mpsc};
+use tokio::sync::{mpsc, RwLock};
 
 use crate::config::RuntimeConfig;
 use crate::stdb::{
@@ -277,7 +277,9 @@ impl WorkerRegistry {
             session.capabilities = capabilities;
         }
         let persisted = session.clone();
-        let _ = stdb.transport.upsert_worker_session(persisted.to_persisted());
+        let _ = stdb
+            .transport
+            .upsert_worker_session(persisted.to_persisted());
         Ok(persisted)
     }
 
@@ -290,18 +292,15 @@ impl WorkerRegistry {
         issued_at_ms: u64,
         expires_at_ms: u64,
     ) -> Option<(WorkerSessionRecord, WorkerLeaseRecord)> {
-        let selected_session_id = self
-            .sessions
-            .iter()
-            .find_map(|(session_id, session)| {
-                let capacity_ok = session.active_tasks < session.max_concurrency as u32;
-                let capability_ok = session.capabilities.iter().any(|item| item == capability);
-                if capacity_ok && capability_ok && session.session_expires_at_ms > issued_at_ms {
-                    Some(session_id.clone())
-                } else {
-                    None
-                }
-            })?;
+        let selected_session_id = self.sessions.iter().find_map(|(session_id, session)| {
+            let capacity_ok = session.active_tasks < session.max_concurrency as u32;
+            let capability_ok = session.capabilities.iter().any(|item| item == capability);
+            if capacity_ok && capability_ok && session.session_expires_at_ms > issued_at_ms {
+                Some(session_id.clone())
+            } else {
+                None
+            }
+        })?;
 
         let session = self.sessions.get_mut(&selected_session_id)?;
         session.active_tasks += 1;
@@ -329,7 +328,9 @@ impl WorkerRegistry {
         self.task_index.insert(task_id, lease_id.clone());
         self.task_leases.insert(lease_id, lease.clone());
         let _ = stdb.transport.upsert_worker_lease(lease.to_persisted());
-        let _ = stdb.transport.upsert_worker_session(session.clone().to_persisted());
+        let _ = stdb
+            .transport
+            .upsert_worker_session(session.clone().to_persisted());
         Some((session.clone(), lease))
     }
 
@@ -383,7 +384,9 @@ impl WorkerRegistry {
                 session.last_seen_at_ms = now_ms;
                 session.current_task_id = None;
                 session.lease_id = None;
-                let _ = stdb.transport.upsert_worker_session(session.clone().to_persisted());
+                let _ = stdb
+                    .transport
+                    .upsert_worker_session(session.clone().to_persisted());
             }
             self.task_index.remove(task_id);
             self.task_leases.remove(lease_id);
@@ -395,11 +398,15 @@ impl WorkerRegistry {
         stored.status = "acked".to_string();
         stored.acked_at_ms = Some(now_ms);
         let accepted_record = stored.clone();
-        let _ = stdb.transport.upsert_worker_lease(accepted_record.to_persisted());
+        let _ = stdb
+            .transport
+            .upsert_worker_lease(accepted_record.to_persisted());
         let _ = stdb.transport.record_dispatch_ack(ack);
         if let Some(session) = self.sessions.get_mut(session_id) {
             session.last_seen_at_ms = now_ms;
-            let _ = stdb.transport.upsert_worker_session(session.clone().to_persisted());
+            let _ = stdb
+                .transport
+                .upsert_worker_session(session.clone().to_persisted());
         }
         Ok(accepted_record)
     }
@@ -448,7 +455,9 @@ impl WorkerRegistry {
         lease.completed_at_ms = Some(now_ms);
         lease.failure_code = failure_code;
         lease.reason = reason;
-        let _ = stdb.transport.upsert_worker_lease(lease.clone().to_persisted());
+        let _ = stdb
+            .transport
+            .upsert_worker_lease(lease.clone().to_persisted());
         if let Some(session) = self.sessions.get_mut(&lease.session_id) {
             session.active_tasks = session.active_tasks.saturating_sub(1);
             session.last_seen_at_ms = now_ms;
@@ -458,7 +467,9 @@ impl WorkerRegistry {
                 session.status = "idle".to_string();
                 session.load = 0.0;
             }
-            let _ = stdb.transport.upsert_worker_session(session.clone().to_persisted());
+            let _ = stdb
+                .transport
+                .upsert_worker_session(session.clone().to_persisted());
         }
         Some(lease)
     }

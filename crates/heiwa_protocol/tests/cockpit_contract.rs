@@ -1,6 +1,4 @@
-use heiwa_protocol::{
-    CockpitCommand, CockpitEvent, RoutingState, SessionState, TranscriptBlock,
-};
+use heiwa_protocol::{CockpitCommand, CockpitEvent, RoutingState, SessionState, TranscriptBlock};
 use tokio::sync::mpsc;
 
 fn test_session() -> SessionState {
@@ -75,10 +73,7 @@ async fn events_round_trip_through_channel() {
     assert!(matches!(received[1], CockpitEvent::StreamToken(_)));
     assert!(matches!(
         received[2],
-        CockpitEvent::StreamDone {
-            tokens_in: 10,
-            ..
-        }
+        CockpitEvent::StreamDone { tokens_in: 10, .. }
     ));
 }
 
@@ -134,46 +129,91 @@ fn parse_turn_intent_defaults_to_chat() {
 #[test]
 fn parse_turn_intent_build_variants() {
     use heiwa_protocol::Intent;
-    assert_eq!(heiwa_protocol::parse_turn_intent("refactor the router module").intent, Intent::Build);
-    assert_eq!(heiwa_protocol::parse_turn_intent("fix the failing cargo test").intent, Intent::Build);
-    assert_eq!(heiwa_protocol::parse_turn_intent("implement the new adapter").intent, Intent::Build);
-    assert_eq!(heiwa_protocol::parse_turn_intent("patch main.rs").intent, Intent::Build);
+    assert_eq!(
+        heiwa_protocol::parse_turn_intent("refactor the router module").intent,
+        Intent::Build
+    );
+    assert_eq!(
+        heiwa_protocol::parse_turn_intent("fix the failing cargo test").intent,
+        Intent::Build
+    );
+    assert_eq!(
+        heiwa_protocol::parse_turn_intent("implement the new adapter").intent,
+        Intent::Build
+    );
+    assert_eq!(
+        heiwa_protocol::parse_turn_intent("patch main.rs").intent,
+        Intent::Build
+    );
 }
 
 #[test]
 fn parse_turn_intent_deploy() {
     use heiwa_protocol::Intent;
-    assert_eq!(heiwa_protocol::parse_turn_intent("deploy to railway").intent, Intent::Deploy);
-    assert_eq!(heiwa_protocol::parse_turn_intent("ship the release").intent, Intent::Deploy);
-    assert_eq!(heiwa_protocol::parse_turn_intent("publish the docker image").intent, Intent::Deploy);
+    assert_eq!(
+        heiwa_protocol::parse_turn_intent("deploy to railway").intent,
+        Intent::Deploy
+    );
+    assert_eq!(
+        heiwa_protocol::parse_turn_intent("ship the release").intent,
+        Intent::Deploy
+    );
+    assert_eq!(
+        heiwa_protocol::parse_turn_intent("publish the docker image").intent,
+        Intent::Deploy
+    );
 }
 
 #[test]
 fn parse_turn_intent_audit() {
     use heiwa_protocol::Intent;
-    assert_eq!(heiwa_protocol::parse_turn_intent("review the PR").intent, Intent::Audit);
-    assert_eq!(heiwa_protocol::parse_turn_intent("lint this file").intent, Intent::Audit);
+    assert_eq!(
+        heiwa_protocol::parse_turn_intent("review the PR").intent,
+        Intent::Audit
+    );
+    assert_eq!(
+        heiwa_protocol::parse_turn_intent("lint this file").intent,
+        Intent::Audit
+    );
 }
 
 #[test]
 fn parse_turn_intent_research() {
     use heiwa_protocol::Intent;
-    assert_eq!(heiwa_protocol::parse_turn_intent("explain how DREX works").intent, Intent::Research);
-    assert_eq!(heiwa_protocol::parse_turn_intent("what is the difference between X and Y").intent, Intent::Research);
-    assert_eq!(heiwa_protocol::parse_turn_intent("summarize the last meeting").intent, Intent::Research);
+    assert_eq!(
+        heiwa_protocol::parse_turn_intent("explain how DREX works").intent,
+        Intent::Research
+    );
+    assert_eq!(
+        heiwa_protocol::parse_turn_intent("what is the difference between X and Y").intent,
+        Intent::Research
+    );
+    assert_eq!(
+        heiwa_protocol::parse_turn_intent("summarize the last meeting").intent,
+        Intent::Research
+    );
 }
 
 #[test]
 fn parse_turn_intent_strategy() {
     use heiwa_protocol::Intent;
-    assert_eq!(heiwa_protocol::parse_turn_intent("plan the roadmap").intent, Intent::Strategy);
-    assert_eq!(heiwa_protocol::parse_turn_intent("design the architecture").intent, Intent::Strategy);
+    assert_eq!(
+        heiwa_protocol::parse_turn_intent("plan the roadmap").intent,
+        Intent::Strategy
+    );
+    assert_eq!(
+        heiwa_protocol::parse_turn_intent("design the architecture").intent,
+        Intent::Strategy
+    );
 }
 
 #[test]
 fn parse_turn_intent_status_check() {
     use heiwa_protocol::Intent;
-    assert_eq!(heiwa_protocol::parse_turn_intent("check the system status").intent, Intent::StatusCheck);
+    assert_eq!(
+        heiwa_protocol::parse_turn_intent("check the system status").intent,
+        Intent::StatusCheck
+    );
 }
 
 #[test]

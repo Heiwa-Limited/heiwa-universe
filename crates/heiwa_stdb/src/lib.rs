@@ -67,9 +67,7 @@ impl StdbConfig {
         let database = env_database
             .or(file_cfg.database)
             .unwrap_or_else(|| DEFAULT_DATABASE.to_string());
-        let token = env_token
-            .or(file_cfg.token)
-            .unwrap_or_default();
+        let token = env_token.or(file_cfg.token).unwrap_or_default();
 
         // ── 4. Gate: any reason to connect? ─────────────────────────────
         let has_identity = heiwa_dir.join("identity.json").exists();

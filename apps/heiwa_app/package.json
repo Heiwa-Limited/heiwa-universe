@@ -1,5 +1,5 @@
 {
-  "name": "@heiwa/web-static",
+  "name": "@heiwa/app",
   "version": "0.1.0",
   "private": true,
   "type": "module",

@@ -5,20 +5,20 @@
 
 use anyhow::{anyhow, Result};
 
+use heiwa_bindings::record_route_decision_reducer::record_route_decision;
+use heiwa_bindings::record_run_reducer::record_run;
 use heiwa_bindings::register_device_reducer::register_device;
 use heiwa_bindings::update_device_heartbeat_reducer::update_device_heartbeat;
 use heiwa_bindings::upsert_provider_account_status_reducer::upsert_provider_account_status;
-use heiwa_bindings::record_route_decision_reducer::record_route_decision;
-use heiwa_bindings::record_run_reducer::record_run;
 // Doctrine Phase 1 reducer imports
-use heiwa_bindings::ingest_source_reducer::ingest_source;
 use heiwa_bindings::create_page_reducer::create_page;
-use heiwa_bindings::recompile_page_reducer::recompile_page;
 use heiwa_bindings::extract_belief_candidate_reducer::extract_belief_candidate;
-use heiwa_bindings::promote_belief_reducer::promote_belief;
-use heiwa_bindings::record_spend_reducer::record_spend;
-use heiwa_bindings::record_novelty_vector_reducer::record_novelty_vector;
+use heiwa_bindings::ingest_source_reducer::ingest_source;
 use heiwa_bindings::plan_mission_doctrine_reducer::plan_mission_doctrine;
+use heiwa_bindings::promote_belief_reducer::promote_belief;
+use heiwa_bindings::recompile_page_reducer::recompile_page;
+use heiwa_bindings::record_novelty_vector_reducer::record_novelty_vector;
+use heiwa_bindings::record_spend_reducer::record_spend;
 
 use crate::StdbClient;
 
@@ -84,14 +84,14 @@ impl StdbClient {
                 status.to_string(),
                 display_name,
                 default_model,
-                "local".to_string(),              // rate_group
+                "local".to_string(), // rate_group
                 available_models_json.to_string(),
-                None,                             // last_validated_at
-                None,                             // last_error
-                now,                              // updated_at
-                None,                             // user_id
-                None,                             // owner_id
-                None,                             // principal_id
+                None, // last_validated_at
+                None, // last_error
+                now,  // updated_at
+                None, // user_id
+                None, // owner_id
+                None, // principal_id
             )
             .map_err(|e| anyhow!(e.to_string()))
     }
@@ -121,27 +121,27 @@ impl StdbClient {
             .record_route_decision(
                 request_id.to_string(),
                 task_id.to_string(),
-                "v1".to_string(),                 // envelope_version
+                "v1".to_string(), // envelope_version
                 raw_text.to_string(),
-                "terminal".to_string(),           // source_surface
+                "terminal".to_string(), // source_surface
                 intent_class.to_string(),
                 risk_level.to_string(),
                 privacy_level.to_string(),
-                0,                                // compute_class
+                0, // compute_class
                 assigned_worker.to_string(),
                 target_tool.to_string(),
                 target_model.to_string(),
                 target_runtime.to_string(),
-                "auto".to_string(),               // target_tier
-                false,                            // requires_approval
+                "auto".to_string(), // target_tier
+                false,              // requires_approval
                 rationale.to_string(),
                 confidence,
-                "local".to_string(),              // gateway_transport
-                now,                              // created_at
-                None,                             // user_id
-                None,                             // owner_id
-                None,                             // principal_id
-                None,                             // drex_decision_id
+                "local".to_string(), // gateway_transport
+                now,                 // created_at
+                None,                // user_id
+                None,                // owner_id
+                None,                // principal_id
+                None,                // drex_decision_id
             )
             .map_err(|e| anyhow!(e.to_string()))
     }
@@ -172,24 +172,24 @@ impl StdbClient {
                 run_id.to_string(),
                 user_id.to_string(),
                 proposal_id.to_string(),
-                "local-lease".to_string(),        // lease_id
+                "local-lease".to_string(), // lease_id
                 session_id,
                 started_at.to_string(),
                 ended_at.to_string(),
                 status.to_string(),
-                "{}".to_string(),                 // chain_result_json
-                "{}".to_string(),                 // signals_json
-                "[]".to_string(),                 // artifact_index_json
-                "local".to_string(),              // node_id
-                "{}".to_string(),                 // replay_receipt_json
-                "terminal".to_string(),           // mode
+                "{}".to_string(),       // chain_result_json
+                "{}".to_string(),       // signals_json
+                "[]".to_string(),       // artifact_index_json
+                "local".to_string(),    // node_id
+                "{}".to_string(),       // replay_receipt_json
+                "terminal".to_string(), // mode
                 model_id.to_string(),
                 tokens_input,
                 tokens_output,
-                tokens_input + tokens_output,     // tokens_total
+                tokens_input + tokens_output, // tokens_total
                 cost,
-                None,                             // owner_id
-                None,                             // principal_id
+                None, // owner_id
+                None, // principal_id
                 failure_code,
                 failure_message,
             )
@@ -220,13 +220,13 @@ impl StdbClient {
                 content_hash.to_string(),
                 title.to_string(),
                 author.to_string(),
-                now.clone(),                        // captured_at
-                String::new(),                      // published_at
-                "heiwa".to_string(),                // retrieved_by
+                now.clone(),         // captured_at
+                String::new(),       // published_at
+                "heiwa".to_string(), // retrieved_by
                 owner_scope.to_string(),
-                "default".to_string(),              // trust_class
-                String::new(),                      // raw_storage_ref
-                None,                               // supersedes_source_id
+                "default".to_string(), // trust_class
+                String::new(),         // raw_storage_ref
+                None,                  // supersedes_source_id
             )
             .map_err(|e| anyhow!(e.to_string()))
     }
@@ -406,12 +406,12 @@ impl StdbClient {
                 task_class.to_string(),
                 budget_class.to_string(),
                 treasury_id,
-                None,   // novelty_policy_json
-                None,   // termination_policy_json
-                None,   // required_belief_query
-                None,   // allowed_tools_json
-                None,   // allowed_side_effects_json
-                None,   // target_outputs_json
+                None, // novelty_policy_json
+                None, // termination_policy_json
+                None, // required_belief_query
+                None, // allowed_tools_json
+                None, // allowed_side_effects_json
+                None, // target_outputs_json
             )
             .map_err(|e| anyhow!(e.to_string()))
     }

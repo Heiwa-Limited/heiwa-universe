@@ -9,16 +9,33 @@ export default function RoutesRoute(): JSX.Element {
       <div class="hero compact">
         <p class="eyebrow">Routes</p>
         <h1>Routing config</h1>
-        <p class="lede">Live route policy from <code>/api/v1/routes</code>. Fallbacks and offline capability stay explicit.</p>
+        <p class="lede">
+          Live route policy from <code>/api/v1/routes</code>. Fallbacks and
+          offline capability stay explicit.
+        </p>
       </div>
 
       <RemoteShell loader={() => v1.routes()}>
         {(data) => (
-          <Show when={data.routes.length > 0} fallback={<div class="empty-state"><strong>No routes yet.</strong></div>}>
+          <Show
+            when={data.routes.length > 0}
+            fallback={
+              <div class="empty-state">
+                <strong>No routes yet.</strong>
+              </div>
+            }
+          >
             <div class="data-table-wrap">
               <table class="data-table">
                 <thead>
-                  <tr><th>Role</th><th>Provider</th><th>Model</th><th>Source</th><th>Fallbacks</th><th>Offline</th></tr>
+                  <tr>
+                    <th>Role</th>
+                    <th>Provider</th>
+                    <th>Model</th>
+                    <th>Source</th>
+                    <th>Fallbacks</th>
+                    <th>Offline</th>
+                  </tr>
                 </thead>
                 <tbody>
                   <For each={data.routes}>
@@ -26,7 +43,9 @@ export default function RoutesRoute(): JSX.Element {
                       <tr>
                         <td>{route.role}</td>
                         <td>{route.provider}</td>
-                        <td><code>{route.model}</code></td>
+                        <td>
+                          <code>{route.model}</code>
+                        </td>
                         <td>{route.source}</td>
                         <td>{route.fallbacks.join(", ") || "—"}</td>
                         <td>{route.offline_capable ? "yes" : "no"}</td>

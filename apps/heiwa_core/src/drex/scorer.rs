@@ -1,6 +1,4 @@
-use super::policy::{
-    DrexAuthorityGate, DrexDecision, DrexPolicy, DrexScoreCard, ResolutionTier,
-};
+use super::policy::{DrexAuthorityGate, DrexDecision, DrexPolicy, DrexScoreCard, ResolutionTier};
 use super::vector::DrexVector;
 
 pub fn evaluate_drex(
@@ -15,7 +13,8 @@ pub fn evaluate_drex(
         + (history_confidence * policy.history_confidence_multiplier);
     let meso_score = dot(policy.meso_weights, vector.axes())
         + policy.meso_bias
-        + (((runtime_fit + history_confidence) / 2.0) * (policy.history_confidence_multiplier / 2.0));
+        + (((runtime_fit + history_confidence) / 2.0)
+            * (policy.history_confidence_multiplier / 2.0));
     let micro_score = dot(policy.micro_weights, vector.axes())
         + policy.micro_bias
         + (runtime_fit * policy.runtime_fit_multiplier)
@@ -63,7 +62,10 @@ fn authority_gate(vector: &DrexVector) -> DrexAuthorityGate {
         DrexAuthorityGate {
             authority_required: "operator_review".to_string(),
             requires_approval: true,
-            reasons: vec!["enterprise_scope".to_string(), "coordination_load".to_string()],
+            reasons: vec![
+                "enterprise_scope".to_string(),
+                "coordination_load".to_string(),
+            ],
         }
     } else {
         DrexAuthorityGate {

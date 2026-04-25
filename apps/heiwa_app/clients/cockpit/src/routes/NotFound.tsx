@@ -1,5 +1,5 @@
-import type { JSX } from "solid-js";
 import { A } from "@solidjs/router";
+import type { JSX } from "solid-js";
 
 export default function NotFound(): JSX.Element {
   return (
@@ -8,7 +8,9 @@ export default function NotFound(): JSX.Element {
       <h1>Not found.</h1>
       <p class="lede">This cockpit route doesn't exist.</p>
       <div class="hero-actions">
-        <A class="btn btn-outline" href="/">Back to dashboard</A>
+        <A class="btn btn-outline" href="/">
+          Back to dashboard
+        </A>
       </div>
     </section>
   );

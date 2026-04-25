@@ -27,9 +27,7 @@ pub fn store_secret(account_id: &str, secret: &str) -> Result<()> {
 pub fn load_secret(account_id: &str) -> Result<String> {
     match vault().load(account_id) {
         Ok(s) => Ok(s),
-        Err(VaultError::NotFound { .. }) => {
-            Err(anyhow!("no secret found for {account_id}"))
-        }
+        Err(VaultError::NotFound { .. }) => Err(anyhow!("no secret found for {account_id}")),
         Err(e) => Err(anyhow!("keyring error for {account_id}: {e}")),
     }
 }

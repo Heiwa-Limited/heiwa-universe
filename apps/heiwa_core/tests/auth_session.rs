@@ -63,19 +63,16 @@ fn extract_auth_subject_accepts_cookie_and_machine_token() {
     let user_token = sign_jwt(&test_claims(), "auth-secret").expect("token");
     let cfg = test_config();
 
-    let user = extract_auth_subject(
-        Some(&format!("heiwa_session={user_token}")),
-        None,
-        &cfg,
-    )
-    .expect("user auth");
+    let user = extract_auth_subject(Some(&format!("heiwa_session={user_token}")), None, &cfg)
+        .expect("user auth");
 
     match user {
         AuthSubject::User(claims) => assert_eq!(claims.owner_id, "user-alpha"),
         AuthSubject::Operator => panic!("expected user auth subject"),
     }
 
-    let operator = extract_auth_subject(None, Some("Bearer operator-token"), &cfg).expect("operator");
+    let operator =
+        extract_auth_subject(None, Some("Bearer operator-token"), &cfg).expect("operator");
     assert!(matches!(operator, AuthSubject::Operator));
 }
 
@@ -96,11 +93,8 @@ fn auth_me_from_headers_accepts_signed_session_cookie() {
     let user_token = sign_jwt(&test_claims(), "auth-secret").expect("token");
     let cfg = test_config();
 
-    let (status, payload) = auth_me_from_headers(
-        Some(&format!("heiwa_session={user_token}")),
-        None,
-        &cfg,
-    );
+    let (status, payload) =
+        auth_me_from_headers(Some(&format!("heiwa_session={user_token}")), None, &cfg);
 
     assert_eq!(status, 200);
     assert_eq!(payload["authenticated"], true);

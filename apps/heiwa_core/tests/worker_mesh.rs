@@ -1,3 +1,4 @@
+use anyhow::Result;
 use heiwa_core::runtime::{
     gateway::{
         parse_worker_envelope, DispatchAckPayload, DispatchPolicy, RegisterPayload, WorkerEnvelope,
@@ -8,10 +9,8 @@ use heiwa_core::runtime::{
 use heiwa_core::stdb::{
     NoopTransport, PersistedArtifact, PersistedDispatchAck, PersistedDrexDecision,
     PersistedDrexFailure, PersistedRunFailure, PersistedRunReceipt, PersistedWorkerLease,
- PersistedWorkerSession,
-    StdbRuntime, StdbTransport,
+    PersistedWorkerSession, StdbRuntime, StdbTransport,
 };
-use anyhow::Result;
 use serde_json::json;
 use std::sync::{Arc, Mutex};
 
@@ -125,20 +124,23 @@ fn canonical_worker_envelope_accepts_register_shape() {
 fn worker_registry_tracks_session_dispatch_and_completion() {
     let mut registry = WorkerRegistry::default();
     let stdb = StdbRuntime::new(NoopTransport);
-    let session = registry.register_session(&stdb, WorkerSessionRegistration {
-        session_id: "session-1".to_string(),
-        node_id: "node-123".to_string(),
-        instance_id: "instance-1".to_string(),
-        runtime: "python".to_string(),
-        runtime_version: "3.12.0".to_string(),
-        worker_version: "0.9.0".to_string(),
-        protocol: WorkerProtocolFlavor::V1,
-        capabilities: vec!["llm".to_string(), "fs".to_string()],
-        metadata: json!({"platform":"darwin-arm64"}),
-        max_concurrency: 2,
-        session_expires_at_ms: 10_000,
-        last_seen_at_ms: 1_000,
-    });
+    let session = registry.register_session(
+        &stdb,
+        WorkerSessionRegistration {
+            session_id: "session-1".to_string(),
+            node_id: "node-123".to_string(),
+            instance_id: "instance-1".to_string(),
+            runtime: "python".to_string(),
+            runtime_version: "3.12.0".to_string(),
+            worker_version: "0.9.0".to_string(),
+            protocol: WorkerProtocolFlavor::V1,
+            capabilities: vec!["llm".to_string(), "fs".to_string()],
+            metadata: json!({"platform":"darwin-arm64"}),
+            max_concurrency: 2,
+            session_expires_at_ms: 10_000,
+            last_seen_at_ms: 1_000,
+        },
+    );
 
     assert_eq!(session.session_id, "session-1");
     let (chosen_session, lease) = registry
@@ -167,7 +169,10 @@ fn worker_registry_tracks_session_dispatch_and_completion() {
         .expect("completion should remove lease");
     assert_eq!(completed.session_id, "session-1");
     assert!(registry.resolve_lease_for_task("task-1").is_none());
-    assert_eq!(registry.session("session-1").expect("session").active_tasks, 0);
+    assert_eq!(
+        registry.session("session-1").expect("session").active_tasks,
+        0
+    );
 }
 
 #[test]
@@ -176,20 +181,23 @@ fn worker_registry_persists_session_lease_and_ack_events() {
     let transport = RecordingTransport::default();
     let stdb = StdbRuntime::new(transport.clone());
 
-    registry.register_session(&stdb, WorkerSessionRegistration {
-        session_id: "session-persist".to_string(),
-        node_id: "node-persist".to_string(),
-        instance_id: "instance-persist".to_string(),
-        runtime: "python".to_string(),
-        runtime_version: "3.14.0".to_string(),
-        worker_version: "1.0.0".to_string(),
-        protocol: WorkerProtocolFlavor::V1,
-        capabilities: vec!["llm".to_string()],
-        metadata: json!({"platform":"darwin-arm64"}),
-        max_concurrency: 1,
-        session_expires_at_ms: 10_000,
-        last_seen_at_ms: 1_000,
-    });
+    registry.register_session(
+        &stdb,
+        WorkerSessionRegistration {
+            session_id: "session-persist".to_string(),
+            node_id: "node-persist".to_string(),
+            instance_id: "instance-persist".to_string(),
+            runtime: "python".to_string(),
+            runtime_version: "3.14.0".to_string(),
+            worker_version: "1.0.0".to_string(),
+            protocol: WorkerProtocolFlavor::V1,
+            capabilities: vec!["llm".to_string()],
+            metadata: json!({"platform":"darwin-arm64"}),
+            max_concurrency: 1,
+            session_expires_at_ms: 10_000,
+            last_seen_at_ms: 1_000,
+        },
+    );
 
     registry
         .reserve_dispatch(
@@ -236,20 +244,23 @@ fn worker_registry_persists_session_lease_and_ack_events() {
 fn worker_registry_rejects_expired_or_mismatched_leases() {
     let mut registry = WorkerRegistry::default();
     let stdb = StdbRuntime::new(NoopTransport);
-    registry.register_session(&stdb, WorkerSessionRegistration {
-        session_id: "session-2".to_string(),
-        node_id: "node-456".to_string(),
-        instance_id: "instance-2".to_string(),
-        runtime: "python".to_string(),
-        runtime_version: "3.12.0".to_string(),
-        worker_version: "0.9.0".to_string(),
-        protocol: WorkerProtocolFlavor::Legacy,
-        capabilities: vec!["llm".to_string()],
-        metadata: json!({"platform":"darwin-arm64"}),
-        max_concurrency: 1,
-        session_expires_at_ms: 10_000,
-        last_seen_at_ms: 1_000,
-    });
+    registry.register_session(
+        &stdb,
+        WorkerSessionRegistration {
+            session_id: "session-2".to_string(),
+            node_id: "node-456".to_string(),
+            instance_id: "instance-2".to_string(),
+            runtime: "python".to_string(),
+            runtime_version: "3.12.0".to_string(),
+            worker_version: "0.9.0".to_string(),
+            protocol: WorkerProtocolFlavor::Legacy,
+            capabilities: vec!["llm".to_string()],
+            metadata: json!({"platform":"darwin-arm64"}),
+            max_concurrency: 1,
+            session_expires_at_ms: 10_000,
+            last_seen_at_ms: 1_000,
+        },
+    );
     registry
         .reserve_dispatch(
             &stdb,

@@ -1,5 +1,6 @@
 use serde::{Deserialize, Serialize};
 use std::fmt;
+use std::path::{Path, PathBuf};
 use std::str::FromStr;
 
 // ---------------------------------------------------------------------------
@@ -272,6 +273,113 @@ pub struct RunReceipt {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub enum NetworkPolicy {
+    Deny,
+    LocalOnly,
+    Allow,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub enum SandboxMode {
+    Host,
+    Worktree,
+    External,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct ToolLease {
+    pub name: String,
+    pub risk_class: String,
+    pub allowed: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct ExecutionScope {
+    pub working_dir: PathBuf,
+    pub allowed_dirs: Vec<PathBuf>,
+    pub writable_dirs: Vec<PathBuf>,
+    pub network_policy: NetworkPolicy,
+    pub sandbox_mode: SandboxMode,
+    pub tool_leases: Vec<ToolLease>,
+}
+
+impl ExecutionScope {
+    pub fn local_default(working_dir: PathBuf) -> Self {
+        let working_dir = canonicalize_existing_dir(&working_dir).unwrap_or(working_dir);
+        Self {
+            working_dir: working_dir.clone(),
+            allowed_dirs: vec![working_dir.clone()],
+            writable_dirs: vec![working_dir],
+            network_policy: NetworkPolicy::Deny,
+            sandbox_mode: SandboxMode::Host,
+            tool_leases: Vec::new(),
+        }
+    }
+
+    pub fn set_working_dir(&mut self, path: PathBuf) {
+        let path = canonicalize_existing_dir(&path).unwrap_or(path);
+        self.working_dir = path.clone();
+        self.add_allowed_dir(path.clone());
+        self.add_writable_dir(path);
+    }
+
+    pub fn add_allowed_dir(&mut self, path: PathBuf) -> bool {
+        add_unique_dir(&mut self.allowed_dirs, path)
+    }
+
+    pub fn add_writable_dir(&mut self, path: PathBuf) -> bool {
+        add_unique_dir(&mut self.writable_dirs, path)
+    }
+
+    pub fn allows_path(&self, path: &Path) -> bool {
+        path_within_roots(path, &self.allowed_dirs)
+    }
+
+    pub fn allows_write_path(&self, path: &Path) -> bool {
+        path_within_roots(path, &self.writable_dirs)
+    }
+
+    pub fn allows_tool(&self, name: &str) -> bool {
+        self.tool_leases
+            .iter()
+            .any(|lease| lease.allowed && lease.name == name)
+    }
+}
+
+fn add_unique_dir(roots: &mut Vec<PathBuf>, path: PathBuf) -> bool {
+    let path = canonicalize_existing_dir(&path).unwrap_or(path);
+    if roots.iter().any(|root| root == &path) {
+        return false;
+    }
+    roots.push(path);
+    true
+}
+
+fn path_within_roots(path: &Path, roots: &[PathBuf]) -> bool {
+    let Some(path) = canonicalize_for_scope_check(path) else {
+        return false;
+    };
+    roots.iter().any(|root| path.starts_with(root))
+}
+
+fn canonicalize_existing_dir(path: &Path) -> Option<PathBuf> {
+    path.canonicalize().ok().filter(|path| path.is_dir())
+}
+
+fn canonicalize_for_scope_check(path: &Path) -> Option<PathBuf> {
+    if path.exists() {
+        return path.canonicalize().ok();
+    }
+
+    let parent = path.parent()?;
+    let file_name = path.file_name()?;
+    parent
+        .canonicalize()
+        .ok()
+        .map(|parent| parent.join(file_name))
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub enum Intent {
     Chat,
     Build,
@@ -307,8 +415,14 @@ pub struct TurnRequest {
 
 /// Known provider names for pin extraction.
 const KNOWN_PROVIDERS: &[&str] = &[
-    "claude", "ollama", "anthropic", "openai", "google", "gemini",
-    "codex", "antigravity",
+    "claude",
+    "ollama",
+    "anthropic",
+    "openai",
+    "google",
+    "gemini",
+    "codex",
+    "antigravity",
 ];
 
 pub fn parse_turn_intent(input: &str) -> TurnRequest {
@@ -359,10 +473,33 @@ fn classify_intent(lowercase: &str) -> Intent {
     // Build / code — file-level, repo-level, or tool-level coding work.
     // Only include words strongly associated with programming tasks.
     let build_keywords = [
-        "refactor", "function", "crate", "cargo", "rust", "python", "typescript",
-        "javascript", "code", "bug", "test", "repo", "implement", "fix",
-        "patch", "compile", "build", "cli", "adapter", "pytest", "bash", "npm",
-        "struct", "enum", "trait", "dependency", "module",
+        "refactor",
+        "function",
+        "crate",
+        "cargo",
+        "rust",
+        "python",
+        "typescript",
+        "javascript",
+        "code",
+        "bug",
+        "test",
+        "repo",
+        "implement",
+        "fix",
+        "patch",
+        "compile",
+        "build",
+        "cli",
+        "adapter",
+        "pytest",
+        "bash",
+        "npm",
+        "struct",
+        "enum",
+        "trait",
+        "dependency",
+        "module",
     ];
     // Check for code-like sigils (but not bare `/` which is ambiguous)
     let has_code_sigil = lowercase.contains("::")
@@ -372,18 +509,31 @@ fn classify_intent(lowercase: &str) -> Intent {
         || lowercase.contains(".ts")
         || lowercase.contains(".js");
 
-    if has_code_sigil || build_keywords.iter().any(|kw| {
-        // Match whole words to avoid substring collisions.
-        lowercase.split(|c: char| !c.is_alphanumeric() && c != '_')
-            .any(|word| word == *kw)
-    }) {
+    if has_code_sigil
+        || build_keywords.iter().any(|kw| {
+            // Match whole words to avoid substring collisions.
+            lowercase
+                .split(|c: char| !c.is_alphanumeric() && c != '_')
+                .any(|word| word == *kw)
+        })
+    {
         return Intent::Build;
     }
 
     // Deploy — shipping, infrastructure, ops
     let deploy_keywords = [
-        "deploy", "ship", "release", "publish", "railway", "docker",
-        "dockerfile", "ci", "cd", "pipeline", "prod", "staging",
+        "deploy",
+        "ship",
+        "release",
+        "publish",
+        "railway",
+        "docker",
+        "dockerfile",
+        "ci",
+        "cd",
+        "pipeline",
+        "prod",
+        "staging",
     ];
     if deploy_keywords.iter().any(|kw| lowercase.contains(kw)) {
         return Intent::Deploy;
@@ -398,7 +548,8 @@ fn classify_intent(lowercase: &str) -> Intent {
     // Audit — review, inspection, checking
     let audit_keywords = ["audit", "lint", "review", "scan", "inspect"];
     if audit_keywords.iter().any(|kw| {
-        lowercase.split(|c: char| !c.is_alphanumeric() && c != '_')
+        lowercase
+            .split(|c: char| !c.is_alphanumeric() && c != '_')
             .any(|word| word == *kw)
     }) {
         return Intent::Audit;
@@ -406,8 +557,15 @@ fn classify_intent(lowercase: &str) -> Intent {
 
     // Strategy — high-level planning
     let strategy_keywords = [
-        "strategy", "roadmap", "plan", "architecture", "design",
-        "priority", "governance", "enterprise", "portfolio",
+        "strategy",
+        "roadmap",
+        "plan",
+        "architecture",
+        "design",
+        "priority",
+        "governance",
+        "enterprise",
+        "portfolio",
     ];
     if strategy_keywords.iter().any(|kw| lowercase.contains(kw)) {
         return Intent::Strategy;
@@ -415,8 +573,16 @@ fn classify_intent(lowercase: &str) -> Intent {
 
     // Research — exploration, understanding
     let research_keywords = [
-        "research", "explore", "explain", "summarize", "analyze",
-        "understand", "how does", "what is", "why does", "compare",
+        "research",
+        "explore",
+        "explain",
+        "summarize",
+        "analyze",
+        "understand",
+        "how does",
+        "what is",
+        "why does",
+        "compare",
     ];
     if research_keywords.iter().any(|kw| lowercase.contains(kw)) {
         return Intent::Research;
@@ -425,3 +591,43 @@ fn classify_intent(lowercase: &str) -> Intent {
     Intent::Chat
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::fs;
+
+    #[test]
+    fn execution_scope_allows_paths_inside_registered_roots() {
+        let root = std::env::temp_dir().join(format!(
+            "heiwa-scope-{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        let child = root.join("child");
+        fs::create_dir_all(&child).unwrap();
+
+        let scope = ExecutionScope::local_default(root.clone());
+
+        assert!(scope.allows_path(&child));
+        assert!(scope.allows_write_path(&root.join("new.txt")));
+        assert!(!scope.allows_path(Path::new("/")));
+
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn execution_scope_tracks_tool_leases() {
+        let root = std::env::current_dir().unwrap();
+        let mut scope = ExecutionScope::local_default(root);
+        scope.tool_leases.push(ToolLease {
+            name: "shell".into(),
+            risk_class: "host".into(),
+            allowed: true,
+        });
+
+        assert!(scope.allows_tool("shell"));
+        assert!(!scope.allows_tool("network"));
+    }
+}

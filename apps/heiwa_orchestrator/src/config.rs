@@ -17,9 +17,11 @@ impl RuntimeConfig {
                 .ok()
                 .and_then(|value| value.parse().ok())
                 .unwrap_or(8080),
-            state_backend: env::var("HEIWA_STATE_BACKEND").unwrap_or_else(|_| "spacetimedb".to_string()),
+            state_backend: env::var("HEIWA_STATE_BACKEND")
+                .unwrap_or_else(|_| "spacetimedb".to_string()),
             stdb_server: env::var("STDB_SERVER").unwrap_or_else(|_| "local".to_string()),
-            stdb_identity: env::var("STDB_IDENTITY").unwrap_or_else(|_| "heiwaproductiondb".to_string()),
+            stdb_identity: env::var("STDB_IDENTITY")
+                .unwrap_or_else(|_| "heiwaproductiondb".to_string()),
             log_level: env::var("LOG_LEVEL").unwrap_or_else(|_| "INFO".to_string()),
         }
     }

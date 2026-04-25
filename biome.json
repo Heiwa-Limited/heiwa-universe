@@ -1,0 +1,43 @@
+{
+  "$schema": "https://biomejs.dev/schemas/2.4.10/schema.json",
+  "vcs": {
+    "enabled": true,
+    "clientKind": "git",
+    "useIgnoreFile": true
+  },
+  "files": {
+    "ignoreUnknown": true,
+    "includes": [
+      ".mcp.json",
+      "apps/heiwa_app/clients/cockpit/src/**/*.{css,ts,tsx}",
+      "apps/heiwa_app/clients/cockpit/*.{json,ts}",
+      "apps/heiwa_app/package.json",
+      "package.json",
+      "package-lock.json",
+      "packages/heiwa_bindings/typescript/package.json",
+      "packages/heiwa_bindings/typescript/tsconfig.json"
+    ]
+  },
+  "formatter": {
+    "enabled": true,
+    "indentStyle": "space",
+    "indentWidth": 2
+  },
+  "linter": {
+    "enabled": true,
+    "rules": {
+      "recommended": true
+    }
+  },
+  "javascript": {
+    "formatter": {
+      "quoteStyle": "double",
+      "semicolons": "always"
+    }
+  },
+  "json": {
+    "formatter": {
+      "trailingCommas": "none"
+    }
+  }
+}

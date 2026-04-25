@@ -10,7 +10,7 @@ fn test_render_footer() {
         turn_count: 5,
         loop_info: None,
     };
-    
+
     let footer = render_footer(&state);
     assert!(footer.contains("ready"));
     assert!(footer.contains("claude"));

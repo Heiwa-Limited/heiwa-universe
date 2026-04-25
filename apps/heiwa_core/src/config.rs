@@ -33,9 +33,11 @@ impl RuntimeConfig {
                 .ok()
                 .and_then(|value| value.parse().ok())
                 .unwrap_or(8080),
-            state_backend: env::var("HEIWA_STATE_BACKEND").unwrap_or_else(|_| "spacetimedb".to_string()),
+            state_backend: env::var("HEIWA_STATE_BACKEND")
+                .unwrap_or_else(|_| "spacetimedb".to_string()),
             stdb_server,
-            stdb_identity: env::var("STDB_IDENTITY").unwrap_or_else(|_| "heiwaproductiondb".to_string()),
+            stdb_identity: env::var("STDB_IDENTITY")
+                .unwrap_or_else(|_| "heiwaproductiondb".to_string()),
             stdb_url,
             stdb_token: env::var("STDB_TOKEN")
                 .or_else(|_| env::var("STDB_AUTH_TOKEN"))

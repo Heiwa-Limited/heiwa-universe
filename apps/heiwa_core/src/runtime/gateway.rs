@@ -28,7 +28,8 @@ use crate::{
     stdb::{PersistedArtifact, PersistedRunReceipt},
 };
 use heiwa_bindings::{
-    create_task_dispatch_reducer::create_task_dispatch, issue_capability_lease_reducer::issue_capability_lease,
+    create_task_dispatch_reducer::create_task_dispatch,
+    issue_capability_lease_reducer::issue_capability_lease,
     revoke_capability_lease_reducer::revoke_capability_lease,
     update_task_dispatch_status_reducer::update_task_dispatch_status,
     upsert_battlefield_reducer::upsert_battlefield,
@@ -221,14 +222,9 @@ enum LegacyWorkerMessage {
         status: Option<String>,
     },
     #[serde(rename = "result")]
-    Result {
-        data: LegacyResultPayload,
-    },
+    Result { data: LegacyResultPayload },
     #[serde(rename = "llm_response")]
-    LlmResponse {
-        request_id: String,
-        text: String,
-    },
+    LlmResponse { request_id: String, text: String },
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -414,11 +410,13 @@ pub async fn task_handler(
             "session_id": session.session_id,
         })
         .to_string(),
-        Some(json!({
-            "task_id": task_id,
-            "capability": capability,
-        })
-        .to_string()),
+        Some(
+            json!({
+                "task_id": task_id,
+                "capability": capability,
+            })
+            .to_string(),
+        ),
         "ACTIVE".to_string(),
         issued_at,
         expires_at.clone(),
@@ -769,22 +767,32 @@ async fn handle_worker_socket(socket: WebSocket, state: SharedState) {
                         };
                         match result {
                             Ok(_) => {
-                                let _ = state.stdb.transport.conn.reducers.update_task_dispatch_status(
-                                    ack.task_id,
-                                    "running".to_string(),
-                                    "worker accepted dispatch".to_string(),
-                                    0,
-                                    0,
-                                );
+                                let _ = state
+                                    .stdb
+                                    .transport
+                                    .conn
+                                    .reducers
+                                    .update_task_dispatch_status(
+                                        ack.task_id,
+                                        "running".to_string(),
+                                        "worker accepted dispatch".to_string(),
+                                        0,
+                                        0,
+                                    );
                             }
                             Err(error) => {
-                                let _ = state.stdb.transport.conn.reducers.update_task_dispatch_status(
-                                    ack.task_id.clone(),
-                                    "failed".to_string(),
-                                    error.message.clone(),
-                                    0,
-                                    0,
-                                );
+                                let _ = state
+                                    .stdb
+                                    .transport
+                                    .conn
+                                    .reducers
+                                    .update_task_dispatch_status(
+                                        ack.task_id.clone(),
+                                        "failed".to_string(),
+                                        error.message.clone(),
+                                        0,
+                                        0,
+                                    );
                                 let _ = state.stdb.transport.conn.reducers.revoke_capability_lease(
                                     ack.lease_id.clone(),
                                     now_iso(),
@@ -816,13 +824,9 @@ async fn handle_worker_socket(socket: WebSocket, state: SharedState) {
             WorkerEnvelopeType::Result => {
                 match serde_json::from_value::<ResultPayload>(envelope.payload.clone()) {
                     Ok(payload) => {
-                        if let Err(error) = finalize_result(
-                            &state,
-                            &current_session_id,
-                            &envelope.node_id,
-                            payload,
-                        )
-                        .await
+                        if let Err(error) =
+                            finalize_result(&state, &current_session_id, &envelope.node_id, payload)
+                                .await
                         {
                             let _ = sender.send(worker_error(
                                 &envelope.node_id,
@@ -893,7 +897,11 @@ async fn handle_worker_socket(socket: WebSocket, state: SharedState) {
 
     if let Some(session_id) = session_id {
         state.worker_senders.write().await.remove(&session_id);
-        state.worker_registry.write().await.remove_session(&state.stdb, &session_id);
+        state
+            .worker_registry
+            .write()
+            .await
+            .remove_session(&state.stdb, &session_id);
     }
     writer.abort();
 }
@@ -948,20 +956,23 @@ async fn handle_legacy_worker_socket(socket: WebSocket, state: SharedState) {
                 let expires_at_ms = now_ms + WORKER_SESSION_TTL_MS;
                 let session = {
                     let mut registry = state.worker_registry.write().await;
-                    registry.register_session(&state.stdb, WorkerSessionRegistration {
-                        session_id: created_session_id.clone(),
-                        node_id: node.clone(),
-                        instance_id: format!("legacy-{created_session_id}"),
-                        runtime: "python".to_string(),
-                        runtime_version: "legacy".to_string(),
-                        worker_version: "legacy".to_string(),
-                        protocol: WorkerProtocolFlavor::Legacy,
-                        capabilities: capabilities_vec,
-                        metadata: meta,
-                        max_concurrency,
-                        session_expires_at_ms: expires_at_ms,
-                        last_seen_at_ms: now_ms,
-                    })
+                    registry.register_session(
+                        &state.stdb,
+                        WorkerSessionRegistration {
+                            session_id: created_session_id.clone(),
+                            node_id: node.clone(),
+                            instance_id: format!("legacy-{created_session_id}"),
+                            runtime: "python".to_string(),
+                            runtime_version: "legacy".to_string(),
+                            worker_version: "legacy".to_string(),
+                            protocol: WorkerProtocolFlavor::Legacy,
+                            capabilities: capabilities_vec,
+                            metadata: meta,
+                            max_concurrency,
+                            session_expires_at_ms: expires_at_ms,
+                            last_seen_at_ms: now_ms,
+                        },
+                    )
                 };
                 state
                     .worker_senders
@@ -980,7 +991,10 @@ async fn handle_legacy_worker_socket(socket: WebSocket, state: SharedState) {
                     .to_string(),
                 ));
             }
-            Ok(LegacyWorkerMessage::Heartbeat { capabilities, status }) => {
+            Ok(LegacyWorkerMessage::Heartbeat {
+                capabilities,
+                status,
+            }) => {
                 let Some(current_session_id) = session_id.clone() else {
                     continue;
                 };
@@ -1029,7 +1043,13 @@ async fn handle_legacy_worker_socket(socket: WebSocket, state: SharedState) {
                             tokens_out: 0,
                         },
                     };
-                    let _ = finalize_result(&state, &current_session_id, node_id.as_deref().unwrap_or("legacy"), payload).await;
+                    let _ = finalize_result(
+                        &state,
+                        &current_session_id,
+                        node_id.as_deref().unwrap_or("legacy"),
+                        payload,
+                    )
+                    .await;
                 }
             }
             Ok(LegacyWorkerMessage::LlmResponse { request_id, text }) => {
@@ -1050,7 +1070,11 @@ async fn handle_legacy_worker_socket(socket: WebSocket, state: SharedState) {
 
     if let Some(session_id) = session_id {
         state.worker_senders.write().await.remove(&session_id);
-        state.worker_registry.write().await.remove_session(&state.stdb, &session_id);
+        state
+            .worker_registry
+            .write()
+            .await
+            .remove_session(&state.stdb, &session_id);
     }
     writer.abort();
 }
@@ -1088,10 +1112,7 @@ pub fn parse_worker_envelope(text: &str) -> Result<WorkerEnvelope, ProtocolError
     if envelope.version != WORKER_PROTOCOL_VERSION {
         return Err(ProtocolError {
             code: "VERSION_MISMATCH",
-            message: format!(
-                "unsupported worker protocol version: {}",
-                envelope.version
-            ),
+            message: format!("unsupported worker protocol version: {}", envelope.version),
         });
     }
     if envelope.node_id.trim().is_empty() {
@@ -1166,10 +1187,13 @@ async fn persist_worker_presence(
         "worker_metadata": session.metadata,
     });
     let tags = json!([
-        format!("protocol:{}", match session.protocol {
-            WorkerProtocolFlavor::V1 => "v1",
-            WorkerProtocolFlavor::Legacy => "legacy",
-        }),
+        format!(
+            "protocol:{}",
+            match session.protocol {
+                WorkerProtocolFlavor::V1 => "v1",
+                WorkerProtocolFlavor::Legacy => "legacy",
+            }
+        ),
         format!("runtime:{}", session.runtime),
     ]);
     let _ = state.stdb.transport.conn.reducers.upsert_node_heartbeat(
@@ -1181,11 +1205,11 @@ async fn persist_worker_presence(
         session.worker_version.clone(),
         tags.to_string(),
         session.max_concurrency,
-        0, // vram_mb
+        0,                   // vram_mb
         "local".to_string(), // locality
-        10, // trust_tier
-        "[]".to_string(), // provider_keys
-        "[]".to_string(), // model_inventory
+        10,                  // trust_tier
+        "[]".to_string(),    // provider_keys
+        "[]".to_string(),    // model_inventory
     );
 }
 
@@ -1255,7 +1279,10 @@ async fn finalize_result(
                 "failed".to_string()
             },
             summary.clone(),
-            payload.metrics.tokens_in.saturating_add(payload.metrics.tokens_out),
+            payload
+                .metrics
+                .tokens_in
+                .saturating_add(payload.metrics.tokens_out),
             payload.metrics.duration_ms,
         );
     let _ = state
@@ -1298,28 +1325,19 @@ async fn finalize_result(
             artifacts,
         )
         .await;
-    let _ = state
-        .stdb
-        .transport
-        .conn
-        .reducers
-        .revoke_capability_lease(
-            payload.lease_id.clone(),
-            now_iso(),
-            Some("completed".to_string()),
-        );
-    state
-        .worker_registry
-        .write()
-        .await
-        .complete_dispatch(
-            &state.stdb,
-            &payload.lease_id,
-            "completed",
-            None,
-            Some(payload.status.clone()),
-            now_ms(),
-        );
+    let _ = state.stdb.transport.conn.reducers.revoke_capability_lease(
+        payload.lease_id.clone(),
+        now_iso(),
+        Some("completed".to_string()),
+    );
+    state.worker_registry.write().await.complete_dispatch(
+        &state.stdb,
+        &payload.lease_id,
+        "completed",
+        None,
+        Some(payload.status.clone()),
+        now_ms(),
+    );
     Ok(())
 }
 
@@ -1452,18 +1470,14 @@ async fn finalize_error(
         now_iso(),
         Some(payload.code.clone()),
     );
-    state
-        .worker_registry
-        .write()
-        .await
-        .complete_dispatch(
-            &state.stdb,
-            &lease_id,
-            "failed",
-            Some(payload.code.clone()),
-            Some(payload.message.clone()),
-            now_ms(),
-        );
+    state.worker_registry.write().await.complete_dispatch(
+        &state.stdb,
+        &lease_id,
+        "failed",
+        Some(payload.code.clone()),
+        Some(payload.message.clone()),
+        now_ms(),
+    );
     Ok(())
 }
 

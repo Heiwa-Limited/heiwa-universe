@@ -1,6 +1,6 @@
+use std::io::Write;
 use std::process::Command;
 use std::process::Stdio;
-use std::io::Write;
 
 #[test]
 fn test_heiwa_help() {
@@ -17,18 +17,34 @@ fn test_heiwa_help() {
 #[test]
 fn test_heiwa_providers_lists_wrapped_and_loop_capable_surfaces_honestly() {
     let output = Command::new("cargo")
-        .args(&["run", "-p", "heiwa-shell", "--bin", "heiwa", "--", "providers"])
+        .args(&[
+            "run",
+            "-p",
+            "heiwa-shell",
+            "--bin",
+            "heiwa",
+            "--",
+            "providers",
+        ])
         .output()
         .expect("failed to execute process");
 
     assert!(output.status.success());
     let stdout = String::from_utf8_lossy(&output.stdout);
     // Registry auto-discovers ollama; CLI discovery shows known providers
-    assert!(stdout.contains("ollama"), "expected ollama in provider list: {stdout}");
-    assert!(stdout.contains("[loop]"), "expected explicit loop capability marker: {stdout}");
+    assert!(
+        stdout.contains("ollama"),
+        "expected ollama in provider list: {stdout}"
+    );
+    assert!(
+        stdout.contains("[loop]"),
+        "expected explicit loop capability marker: {stdout}"
+    );
     // CLI discovery should surface known providers not yet in the registry
     assert!(
-        stdout.contains("claude") || stdout.contains("antigravity") || stdout.contains("CLI Discovery"),
+        stdout.contains("claude")
+            || stdout.contains("antigravity")
+            || stdout.contains("CLI Discovery"),
         "expected CLI discovery section or known providers: {stdout}"
     );
 }
@@ -85,6 +101,30 @@ fn test_shell_supports_route_status_and_clear_slash_commands() {
     assert!(
         !stdout.contains("Unknown slash command: /clear"),
         "expected /clear to be handled: {stdout}"
+    );
+}
+
+#[test]
+fn test_shell_supports_cwd_and_directory_scope_commands() {
+    let output = run_shell_script("/cwd\n/add-dir ~/*\n/dirs\nquit\n");
+
+    assert!(output.status.success());
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        stdout.contains("cwd:"),
+        "expected /cwd to report the working directory: {stdout}"
+    );
+    assert!(
+        stdout.contains("allowed dirs:"),
+        "expected /dirs to report allowed directories: {stdout}"
+    );
+    assert!(
+        !stdout.contains("unknown command: /cwd"),
+        "expected /cwd to be handled: {stdout}"
+    );
+    assert!(
+        !stdout.contains("unknown command: /add-dir"),
+        "expected /add-dir to be handled: {stdout}"
     );
 }
 

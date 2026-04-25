@@ -55,7 +55,6 @@ jobs:
       - name: Cargo clippy
         run: >
           cargo clippy --workspace --locked --all-targets --
-          -A dead_code
           -A clippy::too_many_arguments
           -A clippy::new_without_default
           -A clippy::unnecessary_to_owned
@@ -67,6 +66,45 @@ jobs:
           -A clippy::needless_borrows_for_generic_args
           -A clippy::unnecessary_unwrap
           -D warnings
+      - name: Install cargo-machete
+        if: matrix.os == 'ubuntu-latest'
+        run: cargo install cargo-machete --locked
+      - name: Check unused Rust dependencies
+        if: matrix.os == 'ubuntu-latest'
+        run: >
+          cargo machete
+          apps/heiwa_core
+          apps/heiwa_orchestrator
+          apps/heiwa_shell
+          crates/heiwa_config
+          crates/heiwa_embed
+          crates/heiwa_install
+          crates/heiwa_loop
+          crates/heiwa_mcp
+          crates/heiwa_protocol
+          crates/heiwa_provider
+          crates/heiwa_repl
+          crates/heiwa_session
+          crates/heiwa_stdb
+          crates/heiwa_tui
+          crates/heiwa_vault
+          packages/heiwa_bindings/rust
+
+  lint:
+    name: TypeScript and Web Lint
+    runs-on: ubuntu-latest
+    needs: security-scan
+    steps:
+      - uses: actions/checkout@v5
+      - name: Set up Node
+        uses: actions/setup-node@v6
+        with:
+          node-version: 24
+          cache: npm
+      - name: Install Node dependencies
+        run: npm ci
+      - name: Run Biome
+        run: npm run lint
 
   docs-build:
     name: Docs Build

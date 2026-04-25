@@ -142,7 +142,9 @@ impl Tool for GetQuotaStatus {
             })?;
         match self.quota.status(&input.provider, &input.rate_group) {
             Some(s) => Ok(serde_json::to_value(s).expect("serialize quota snapshot")),
-            None => Ok(json!({ "provider": input.provider, "rate_group": input.rate_group, "state": null })),
+            None => Ok(
+                json!({ "provider": input.provider, "rate_group": input.rate_group, "state": null }),
+            ),
         }
     }
 }

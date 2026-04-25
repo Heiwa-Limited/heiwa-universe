@@ -1,0 +1,16 @@
+[package]
+name = "heiwa_config"
+version = "0.1.0"
+edition = "2021"
+description = "Local config and state-path resolution for Heiwa"
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+documentation.workspace = true
+readme.workspace = true
+keywords.workspace = true
+categories.workspace = true
+
+[dependencies]
+serde = { version = "1", features = ["derive"] }
+toml = "0.8"
