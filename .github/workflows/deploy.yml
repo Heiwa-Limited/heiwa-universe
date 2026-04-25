@@ -62,6 +62,8 @@ jobs:
         run: bash scripts/check_heiwa_core_dockerfile.sh
       - name: Verify runtime baseline pins
         run: bash scripts/check_runtime_baseline.sh
+      - name: Verify release metadata
+        run: bash scripts/check_release_metadata.sh
 
   core-release-preflight:
     name: Core Rust Release Preflight

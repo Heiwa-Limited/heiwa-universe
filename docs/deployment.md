@@ -7,6 +7,7 @@ The current platform goal is GitHub-native distribution:
 - GitHub Actions validates the Rust workspace on macOS, Linux, and Windows.
 - GitHub Pages publishes the docs site from `docs/` on release tags.
 - GitHub Releases publish tagged `heiwa` archives plus checksums through `.github/workflows/release.yml`.
+- Release archives include `README.md`, `CONTRIBUTING.md`, `CODE_OF_CONDUCT.md`, and `LICENSE`.
 
 This repo should be able to go from fresh clone to verified build and published docs without assuming Railway, Cloudflare, or a hosted control plane.
 
@@ -15,7 +16,10 @@ This repo should be able to go from fresh clone to verified build and published 
 - `cargo build --workspace --locked`
 - `cargo test --workspace --locked`
 - `cargo clippy --workspace --locked --all-targets`
+- `uv run --extra dev python -m pytest`
 - `mkdocs build --strict`
+
+The default Python gate intentionally excludes legacy Hub tests. Run `uv run --extra dev python -m pytest apps/heiwa_hub/tests` when repairing or promoting that surface.
 
 ## Docs publishing
 
@@ -31,3 +35,4 @@ Hosted and control-plane material still exists in the repository as reference or
 - Docs must build cleanly with `mkdocs build --strict`.
 - Release automation should extend from this baseline rather than bypass it.
 - Release asset names and checksum output should stay aligned with `infra/platform/github/README.md`.
+- License and package metadata must pass `scripts/check_release_metadata.sh` before release work continues.

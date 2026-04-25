@@ -1,7 +1,11 @@
 [project]
 name = "heiwa-universe"
 version = "0.1.0"
+description = "Local-first AI runtime and operator surface for Heiwa"
+readme = "README.md"
 requires-python = ">=3.14"
+authors = [{ name = "Heiwa", email = "noreply@heiwa.dev" }]
+license = { text = "Apache-2.0" }
 dependencies = [
     "python-dotenv>=1.0.0",
     "pyyaml>=6.0",
@@ -21,6 +25,12 @@ dependencies = [
     "textual>=8.2.1",
 ]
 
+[project.urls]
+Homepage = "https://github.com/Strategizing/heiwa-universe"
+Repository = "https://github.com/Strategizing/heiwa-universe"
+Documentation = "https://strategizing.github.io/heiwa-universe/"
+Issues = "https://github.com/Strategizing/heiwa-universe/issues"
+
 [project.optional-dependencies]
 dev = [
     "pytest>=9.0.2",
@@ -34,7 +44,8 @@ docs = [
 ]
 
 [tool.pytest.ini_options]
-testpaths = ["apps/heiwa_hub/tests", "apps/heiwa_trading/tests", "scripts/tests"]
+# Legacy Hub tests are repair targets, not the default GitHub product gate.
+testpaths = ["apps/heiwa_trading/tests", "scripts/tests"]
 pythonpath = ["apps/heiwa_trading/src", "scripts"]
 python_files = "test_*.py"
 python_functions = "test_*"

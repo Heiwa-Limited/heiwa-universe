@@ -22,6 +22,7 @@ Each platform archive contains:
 - `README.md`
 - `CONTRIBUTING.md`
 - `CODE_OF_CONDUCT.md`
+- `LICENSE`
 
 ## Downstream Use
 

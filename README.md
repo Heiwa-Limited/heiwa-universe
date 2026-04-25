@@ -1,5 +1,9 @@
 # Heiwa
 
+[![CI](https://github.com/Strategizing/heiwa-universe/actions/workflows/ci.yml/badge.svg)](https://github.com/Strategizing/heiwa-universe/actions/workflows/ci.yml)
+[![Docs](https://github.com/Strategizing/heiwa-universe/actions/workflows/pages.yml/badge.svg)](https://github.com/Strategizing/heiwa-universe/actions/workflows/pages.yml)
+[![License](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE)
+
 Heiwa is a local-first AI operating layer. The installed `heiwa` runtime is the product center, Rust owns the execution path, and this repository is being hardened for GitHub-native distribution rather than hosted-platform theater.
 
 ## One-Sentence Truth
@@ -50,11 +54,13 @@ cargo run -p heiwa-shell --bin heiwa -- auth status
 - CI runs Rust build/test/clippy across macOS, Linux, and Windows.
 - Docs publish through GitHub Pages on release tags.
 - Cargo manifests now carry shared package metadata for release readiness.
-- Contributor docs and issue templates live under `.github/`.
+- Release archives include the Apache-2.0 license and contributor materials.
+- Contributor, security, pull request, and issue templates live under `.github/` and `SECURITY.md`.
 
 ## Read First
 
 - [`HEIWA.md`](HEIWA.md)
 - [`AGENTS.md`](AGENTS.md)
 - [`BUILD_MATRIX.md`](BUILD_MATRIX.md)
+- [`SECURITY.md`](SECURITY.md)
 - [`docs/`](docs/)

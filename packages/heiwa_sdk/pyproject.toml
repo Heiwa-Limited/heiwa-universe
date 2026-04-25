@@ -5,11 +5,17 @@ description = "Heiwa Python SDK"
 readme = "README.md"
 requires-python = ">=3.11"
 authors = [{ name = "Heiwa", email = "noreply@heiwa.dev" }]
-license = { text = "UNLICENSED" }
+license = { text = "Apache-2.0" }
 dependencies = [
     "pydantic>=2.9.0",
     "cryptography>=43.0.0",
 ]
+
+[project.urls]
+Homepage = "https://github.com/Strategizing/heiwa-universe"
+Repository = "https://github.com/Strategizing/heiwa-universe"
+Documentation = "https://strategizing.github.io/heiwa-universe/"
+Issues = "https://github.com/Strategizing/heiwa-universe/issues"
 
 [build-system]
 requires = ["hatchling"]

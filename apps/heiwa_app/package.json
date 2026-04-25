@@ -2,6 +2,12 @@
   "name": "@heiwa/app",
   "version": "0.1.0",
   "private": true,
+  "license": "Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Strategizing/heiwa-universe.git",
+    "directory": "apps/heiwa_app"
+  },
   "type": "module",
   "scripts": {
     "typecheck": "tsc -p tsconfig.json --noEmit"

@@ -2,6 +2,10 @@
 name = "iclaw-rust-limb"
 version = "0.1.0"
 edition = "2021"
+license = "Apache-2.0"
+repository = "https://github.com/Strategizing/heiwa-universe"
+homepage = "https://github.com/Strategizing/heiwa-universe"
+documentation = "https://strategizing.github.io/heiwa-universe/"
 
 [dependencies]
 spacetimedb-sdk = "2.0.2"

@@ -10,5 +10,14 @@
     "test": "echo \"Error: no test specified\" && exit 1"
   },
   "author": "Heiwa Collective",
-  "license": "ISC"
+  "license": "Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Strategizing/heiwa-universe.git",
+    "directory": "apps/heiwa_cli"
+  },
+  "homepage": "https://github.com/Strategizing/heiwa-universe",
+  "bugs": {
+    "url": "https://github.com/Strategizing/heiwa-universe/issues"
+  }
 }
