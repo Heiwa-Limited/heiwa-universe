@@ -40,7 +40,7 @@ Longest prefix wins. Put narrower paths above broader parents when a child has a
 | `packages/heiwa_protocol` | product |
 | `packages/heiwa_cli` | product |
 | `packages/heiwa_identity` | product |
-| `packages/heiwa_skills` | legacy |
+| `legacy/packages/heiwa_skills` | legacy |
 | `packages/heiwa_cognition` | legacy |
 | `packages/heiwa_ui` | legacy |
 | `packages/heiwa_knowledge` | legacy |
@@ -115,7 +115,7 @@ Longest prefix wins. Put narrower paths above broader parents when a child has a
 ## Notes
 
 - `apps/heiwa_trading` is an active sub-product, not slop.
-- `packages/heiwa_skills` is the largest legacy surface. The quarantine plan moves it under `legacy/` without deletion.
+- `legacy/packages/heiwa_skills` is the largest legacy surface, quarantined under `legacy/` per the slop quarantine plan.
 - `legacy/apps/heiwa_hub` is the legacy Python ops surface. It remains present but is not the current public operator path.
 - `runtime/python` is source and remains product for now. Runtime spools, logs, and fleet start artifacts are `runtime-artifact`.
 - `docs/audit` is reference but contains operational baselines. Do not delete entries without replacing their evidence.
