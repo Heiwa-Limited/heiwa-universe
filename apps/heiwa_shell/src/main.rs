@@ -1832,6 +1832,26 @@ fn route_task(
     let final_provider_pin = provider_pin.as_deref().or(pins.pinned_provider.as_deref());
     let final_model_pin = model_pin.as_deref().or(pins.pinned_model.as_deref());
 
+    let ingress = DrexIngress {
+        intent: turn_request.intent.as_drex_key().to_string(),
+        risk: "low".to_string(),
+        raw_text: task.to_string(),
+        privacy: "standard".to_string(),
+        runtime: runtime_for_route_preference(pins.route_preference).to_string(),
+        available_vram_mb: 8192,
+        required_context_tokens: 1024,
+    };
+    let policy = default_policy();
+
+    let early_preflight = preflight_execution(&ingress, &[], &policy);
+    match early_preflight.execution_mode {
+        ExecutionMode::Deterministic | ExecutionMode::Clarify => {
+            let response = early_preflight.response_text.unwrap_or_default();
+            return Ok(RouteOutcome::Deterministic(response));
+        }
+        _ => {}
+    }
+
     // Filter to providers with working adapters before DREX ever sees them.
     let adapter_capable: Vec<heiwa_bindings::ModelTier> = model_tiers
         .iter()
@@ -1874,17 +1894,6 @@ fn route_task(
         return Err(format!("Routing failed: {}", reason));
     }
 
-    let ingress = DrexIngress {
-        intent: turn_request.intent.as_drex_key().to_string(),
-        risk: "low".to_string(),
-        raw_text: task.to_string(),
-        privacy: "standard".to_string(),
-        runtime: runtime_for_route_preference(pins.route_preference).to_string(),
-        available_vram_mb: 8192,
-        required_context_tokens: 1024,
-    };
-
-    let policy = default_policy();
     let preflight = preflight_execution(&ingress, &routed_tiers, &policy);
 
     match preflight.execution_mode {
