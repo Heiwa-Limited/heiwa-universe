@@ -41,7 +41,7 @@ Longest prefix wins. Put narrower paths above broader parents when a child has a
 | `packages/heiwa_cli` | product |
 | `packages/heiwa_identity` | product |
 | `legacy/packages/heiwa_skills` | legacy |
-| `packages/heiwa_cognition` | legacy |
+| `legacy/packages/heiwa_cognition` | legacy |
 | `packages/heiwa_ui` | legacy |
 | `packages/heiwa_knowledge` | legacy |
 | `packages/__init__.py` | product |
