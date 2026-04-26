@@ -1,7 +1,14 @@
 use heiwa_core::config::RuntimeConfig;
+use std::sync::{Mutex, OnceLock};
+
+fn env_lock() -> std::sync::MutexGuard<'static, ()> {
+    static ENV_LOCK: OnceLock<Mutex<()>> = OnceLock::new();
+    ENV_LOCK.get_or_init(|| Mutex::new(())).lock().unwrap()
+}
 
 #[test]
 fn runtime_config_reads_expected_defaults() {
+    let _guard = env_lock();
     let vars = [
         "PORT",
         "HEIWA_STATE_BACKEND",
@@ -47,6 +54,7 @@ fn runtime_config_reads_expected_defaults() {
 
 #[test]
 fn runtime_config_prefers_split_tokens_with_legacy_fallbacks() {
+    let _guard = env_lock();
     let vars = [
         ("STDB_SERVER", Some("maincloud")),
         ("STDB_URL", Some("https://stdb.example")),

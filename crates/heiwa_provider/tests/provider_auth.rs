@@ -1,4 +1,6 @@
 use heiwa_provider::{get_auth_status, AuthKind};
+use std::path::PathBuf;
+use std::process::Command;
 
 #[test]
 fn test_provider_status_discovery() {
@@ -27,8 +29,21 @@ fn test_gemini_discovery() {
     let gemini = get_auth_status("gemini").expect("gemini provider should be known");
     assert_eq!(gemini.provider_id, "gemini");
     assert_eq!(gemini.auth_kind, AuthKind::OauthCli);
-    // On this machine, it should be connected since we have oauth_creds.json
-    assert_eq!(gemini.status, "connected");
+    assert!(
+        matches!(
+            gemini.status.as_str(),
+            "connected" | "installed_unverified" | "not_installed"
+        ),
+        "unexpected Gemini auth status: {}",
+        gemini.status
+    );
+
+    let gemini_oauth = PathBuf::from(std::env::var("HOME").unwrap_or_default())
+        .join(".gemini")
+        .join("oauth_creds.json");
+    if has_command("gemini") && gemini_oauth.exists() {
+        assert_eq!(gemini.status, "connected");
+    }
 }
 
 #[test]
@@ -59,4 +74,12 @@ fn test_antigravity_native_auth_discovery() {
     if gemini_oauth.exists() && ag_init.exists() {
         assert_eq!(ag.status, "connected");
     }
+}
+
+fn has_command(cmd: &str) -> bool {
+    Command::new("which")
+        .arg(cmd)
+        .output()
+        .map(|output| output.status.success())
+        .unwrap_or(false)
 }
