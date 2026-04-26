@@ -31,7 +31,7 @@ Longest prefix wins. Put narrower paths above broader parents when a child has a
 | `apps/heiwa_trading` | product |
 | `legacy/apps/heiwa_hub` | legacy |
 | `legacy/apps/heiwa_cli` | legacy |
-| `apps/heiwa_limbs` | legacy |
+| `legacy/apps/heiwa_limbs` | legacy |
 | `apps/heiwa_dj` | archive |
 | `apps/__init__.py` | legacy |
 | `crates` | product |
