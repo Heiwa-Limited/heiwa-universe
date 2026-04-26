@@ -128,6 +128,8 @@ As of 2026-04-22, `heiwa-universe` has already landed meaningful local runtime s
 | **Rust runtime** | Volatile execution plane: provider supervision, candidate generation, shell/process control |
 | **Web surfaces** | Later attached or hosted surfaces over the same kernel |
 
+> See [`PRODUCT_SURFACE.md`](PRODUCT_SURFACE.md) for the path-by-path class table that feeds repo hygiene and LOC audits.
+
 Compression:
 
 > Rust proposes, SpacetimeDB adjudicates, `heiwa` presents.
