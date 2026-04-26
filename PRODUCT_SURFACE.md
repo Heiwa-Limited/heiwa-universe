@@ -24,6 +24,8 @@ Longest prefix wins. Put narrower paths above broader parents when a child has a
 | Path | Class |
 | --- | --- |
 | `legacy/apps/heiwa_cli/runtime/logs` | runtime-artifact |
+| `legacy` | legacy |
+| `archive` | archive |
 | `apps/heiwa_shell` | product |
 | `apps/heiwa_core` | product |
 | `apps/heiwa_app` | product |
