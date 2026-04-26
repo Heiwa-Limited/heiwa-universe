@@ -29,7 +29,7 @@ Longest prefix wins. Put narrower paths above broader parents when a child has a
 | `apps/heiwa_app` | product |
 | `apps/heiwa_orchestrator` | product |
 | `apps/heiwa_trading` | product |
-| `apps/heiwa_hub` | legacy |
+| `legacy/apps/heiwa_hub` | legacy |
 | `apps/heiwa_cli` | legacy |
 | `apps/heiwa_limbs` | legacy |
 | `apps/heiwa_dj` | archive |
@@ -116,7 +116,7 @@ Longest prefix wins. Put narrower paths above broader parents when a child has a
 
 - `apps/heiwa_trading` is an active sub-product, not slop.
 - `packages/heiwa_skills` is the largest legacy surface. The quarantine plan moves it under `legacy/` without deletion.
-- `apps/heiwa_hub` is the legacy Python ops surface. It remains present but is not the current public operator path.
+- `legacy/apps/heiwa_hub` is the legacy Python ops surface. It remains present but is not the current public operator path.
 - `runtime/python` is source and remains product for now. Runtime spools, logs, and fleet start artifacts are `runtime-artifact`.
 - `docs/audit` is reference but contains operational baselines. Do not delete entries without replacing their evidence.
 - Generated bindings and lockfiles are not slop by default, but their LOC should stay reproducible from a source schema or package manifest.
