@@ -69,9 +69,12 @@ Those rules exist because the STDB tier table is global, but runtime availabilit
 Use these checks after the next deploy:
 
 ```bash
-uv run pytest apps/heiwa_hub/tests/test_cloud_hq_start_script.py
-PYTHONPATH=/Users/dmcgregsauce/heiwa-universe/packages/heiwa_cli:/Users/dmcgregsauce/heiwa-universe/packages/heiwa_cognition:/Users/dmcgregsauce/heiwa-universe/packages/heiwa_sdk:/Users/dmcgregsauce/heiwa-universe/packages/heiwa_protocol:/Users/dmcgregsauce/heiwa-universe/packages/heiwa_identity:/Users/dmcgregsauce/heiwa-universe/packages/heiwa_ui:/Users/dmcgregsauce/heiwa-universe/apps uv run pytest apps/heiwa_hub/tests/test_compute_router_stdb.py
-PYTHONPATH=/Users/dmcgregsauce/heiwa-universe/packages/heiwa_cli:/Users/dmcgregsauce/heiwa-universe/packages/heiwa_cognition:/Users/dmcgregsauce/heiwa-universe/packages/heiwa_sdk:/Users/dmcgregsauce/heiwa-universe/packages/heiwa_protocol:/Users/dmcgregsauce/heiwa-universe/packages/heiwa_identity:/Users/dmcgregsauce/heiwa-universe/packages/heiwa_ui:/Users/dmcgregsauce/heiwa-universe/apps uv run pytest apps/heiwa_hub/tests/test_phase1_integration.py
+# NOTE: hub and several legacy packages were quarantined to legacy/ in the slop
+# quarantine refactor; if you intend to run these checks against the legacy
+# tree, prefix the paths accordingly.
+uv run pytest legacy/apps/heiwa_hub/tests/test_cloud_hq_start_script.py
+PYTHONPATH=/Users/dmcgregsauce/heiwa-universe/packages/heiwa_cli:/Users/dmcgregsauce/heiwa-universe/legacy/packages/heiwa_cognition:/Users/dmcgregsauce/heiwa-universe/packages/heiwa_sdk:/Users/dmcgregsauce/heiwa-universe/packages/heiwa_protocol:/Users/dmcgregsauce/heiwa-universe/packages/heiwa_identity:/Users/dmcgregsauce/heiwa-universe/legacy/packages/heiwa_ui:/Users/dmcgregsauce/heiwa-universe/apps uv run pytest legacy/apps/heiwa_hub/tests/test_compute_router_stdb.py
+PYTHONPATH=/Users/dmcgregsauce/heiwa-universe/packages/heiwa_cli:/Users/dmcgregsauce/heiwa-universe/legacy/packages/heiwa_cognition:/Users/dmcgregsauce/heiwa-universe/packages/heiwa_sdk:/Users/dmcgregsauce/heiwa-universe/packages/heiwa_protocol:/Users/dmcgregsauce/heiwa-universe/packages/heiwa_identity:/Users/dmcgregsauce/heiwa-universe/legacy/packages/heiwa_ui:/Users/dmcgregsauce/heiwa-universe/apps uv run pytest legacy/apps/heiwa_hub/tests/test_phase1_integration.py
 railway logs --service heiwa-core
 ```
 

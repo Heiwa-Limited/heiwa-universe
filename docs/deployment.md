@@ -19,7 +19,7 @@ This repo should be able to go from fresh clone to verified build and published 
 - `uv run --extra dev python -m pytest`
 - `mkdocs build --strict`
 
-The default Python gate intentionally excludes legacy Hub tests. Run `uv run --extra dev python -m pytest apps/heiwa_hub/tests` when repairing or promoting that surface.
+The default Python gate intentionally excludes legacy Hub tests. Run `uv run --extra dev python -m pytest legacy/apps/heiwa_hub/tests` when repairing or promoting that surface (the hub was quarantined under `legacy/`).
 
 ## Docs publishing
 

@@ -27,6 +27,6 @@ The canonical repo is `/Users/dmcgregsauce/heiwa`.
 
 ## State bindings
 
-- `apps/heiwa_hub/spacetimedb/` is the Rust SpacetimeDB module.
+- `legacy/apps/heiwa_hub/spacetimedb/` is the Rust SpacetimeDB module (quarantined under `legacy/`).
 - `packages/heiwa_bindings/rust/` and `packages/heiwa_bindings/typescript/` are generated from that module.
 - Python currently uses the typed bridge in `packages/heiwa_sdk/heiwa_sdk/spacetimedb.py` until a stable generator path is adopted.
