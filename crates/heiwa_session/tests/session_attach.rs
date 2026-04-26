@@ -1,5 +1,9 @@
-use heiwa_session::{get_session_dir, start_daemon};
+use heiwa_session::get_session_dir;
+#[cfg(unix)]
+use heiwa_session::start_daemon;
+#[cfg(unix)]
 use std::fs;
+#[cfg(unix)]
 use std::time::Duration;
 
 #[test]
