@@ -178,24 +178,15 @@ fn block_text(block: &TranscriptBlock) -> &str {
     }
 }
 
+#[cfg(unix)]
 pub fn start_daemon() -> Result<SessionInfo> {
     let session_id = Uuid::new_v4().to_string();
     let session_dir = get_session_dir();
     fs::create_dir_all(&session_dir)?;
 
     let socket_path = session_dir.join(format!("{}.sock", session_id));
-
-    #[cfg(not(unix))]
-    {
-        return Err(anyhow::anyhow!(
-            "session daemon sockets are not supported on this platform yet"
-        ));
-    }
-
-    #[cfg(unix)]
     let socket_path_clone = socket_path.clone();
 
-    #[cfg(unix)]
     tokio::spawn(async move {
         let listener = UnixListener::bind(&socket_path_clone).expect("failed to bind socket");
         loop {
@@ -212,6 +203,13 @@ pub fn start_daemon() -> Result<SessionInfo> {
         session_id,
         socket_path,
     })
+}
+
+#[cfg(not(unix))]
+pub fn start_daemon() -> Result<SessionInfo> {
+    Err(anyhow::anyhow!(
+        "session daemon sockets are not supported on this platform yet"
+    ))
 }
 
 pub fn attach_session(_session_id: &str) -> Result<()> {
