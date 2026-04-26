@@ -63,7 +63,6 @@ Longest prefix wins. Put narrower paths above broader parents when a child has a
 | `infra` | product |
 | `config` | product |
 | `bin` | product |
-| `node` | legacy |
 | `policies` | product |
 | `memory` | reference |
 | `plans` | reference |
