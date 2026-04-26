@@ -33,7 +33,7 @@ require_match ".github/workflows/release.yml" 'cp README\.md CONTRIBUTING\.md CO
 python_projects=(
   "pyproject.toml"
   "packages/heiwa_cli/pyproject.toml"
-  "packages/heiwa_cognition/pyproject.toml"
+  "legacy/packages/heiwa_cognition/pyproject.toml"
   "packages/heiwa_sdk/pyproject.toml"
   "apps/heiwa_trading/pyproject.toml"
   "runtime/python/pyproject.toml"
@@ -47,7 +47,7 @@ node_projects=(
   "package.json"
   "apps/heiwa_app/package.json"
   "apps/heiwa_app/clients/cockpit/package.json"
-  "apps/heiwa_cli/package.json"
+  "legacy/apps/heiwa_cli/package.json"
   "packages/heiwa_bindings/typescript/package.json"
 )
 
