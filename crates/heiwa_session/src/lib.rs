@@ -9,6 +9,7 @@ use std::path::PathBuf;
 use std::time::{SystemTime, UNIX_EPOCH};
 #[cfg(unix)]
 use tokio::net::UnixListener;
+#[cfg(unix)]
 use uuid::Uuid;
 
 pub mod migration;
