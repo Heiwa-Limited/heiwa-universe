@@ -23,14 +23,14 @@ Longest prefix wins. Put narrower paths above broader parents when a child has a
 
 | Path | Class |
 | --- | --- |
-| `apps/heiwa_cli/runtime/logs` | runtime-artifact |
+| `legacy/apps/heiwa_cli/runtime/logs` | runtime-artifact |
 | `apps/heiwa_shell` | product |
 | `apps/heiwa_core` | product |
 | `apps/heiwa_app` | product |
 | `apps/heiwa_orchestrator` | product |
 | `apps/heiwa_trading` | product |
 | `legacy/apps/heiwa_hub` | legacy |
-| `apps/heiwa_cli` | legacy |
+| `legacy/apps/heiwa_cli` | legacy |
 | `apps/heiwa_limbs` | legacy |
 | `apps/heiwa_dj` | archive |
 | `apps/__init__.py` | legacy |
