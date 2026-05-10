@@ -66,13 +66,13 @@ while IFS= read -r file; do
   esac
 
   case "$file" in
-    Cargo.toml|Cargo.lock|rust-toolchain.toml|apps/heiwa_core/*|apps/heiwa_hub/spacetimedb/*|apps/heiwa_shell/*|crates/*|packages/heiwa_bindings/rust/*|scripts/check_heiwa_core_dockerfile.sh|scripts/check_runtime_baseline.sh)
+    Cargo.toml|Cargo.lock|rust-toolchain.toml|apps/heiwa_core/*|apps/heiwa_orchestrator/*|apps/heiwa_shell/*|crates/*|packages/heiwa_bindings/rust/*|scripts/check_heiwa_core_dockerfile.sh|scripts/check_runtime_baseline.sh)
       rust_terminal=true
       ;;
   esac
 
   case "$file" in
-    apps/heiwa_core/*|apps/heiwa_hub/spacetimedb/*|railway.toml|infra/*|config/*)
+    apps/heiwa_core/*|apps/heiwa_orchestrator/*|crates/heiwa_stdb/*|railway.toml|infra/*|config/*)
       deploy_core=true
       ;;
   esac
@@ -98,7 +98,7 @@ while IFS= read -r file; do
   esac
 
   case "$file" in
-    requirements.txt|pyproject.toml|uv.lock|conftest.py|packages/heiwa_cli/*|packages/heiwa_cognition/*|packages/heiwa_identity/*|packages/heiwa_protocol/*|packages/heiwa_sdk/*|packages/heiwa_ui/*|scripts/*|tests/*)
+    requirements.txt|pyproject.toml|uv.lock|conftest.py|packages/heiwa_cli/*|packages/heiwa_identity/*|packages/heiwa_protocol/*|packages/heiwa_sdk/*|legacy/packages/heiwa_cognition/*|legacy/packages/heiwa_ui/*|scripts/*|tests/*)
       python_reference=true
       legacy_hub=true
       deploy_trading=true
@@ -113,7 +113,7 @@ while IFS= read -r file; do
   esac
 
   case "$file" in
-    apps/heiwa_hub/*)
+    legacy/apps/heiwa_cli/*|legacy/apps/heiwa_hub/*)
       python_reference=true
       legacy_hub=true
       ;;

@@ -16,18 +16,20 @@ Load this room for:
 
 ## Live Surfaces
 
+- Rust routing and execution kernel in `apps/heiwa_core/`
+- DREX orchestration and STDB-facing runtime work in `apps/heiwa_orchestrator/`
 - Typed route contracts in `packages/heiwa_protocol/heiwa_protocol/routing.py`
-- Broker enrichment in `apps/heiwa_hub/cognition/enrichment.py`
 - Gateway dispatch in `packages/heiwa_sdk/heiwa_sdk/heiwaclaw.py`
-- MCP/HTTP surface in `apps/heiwa_hub/mcp_server.py`
-- STDB module in `apps/heiwa_hub/spacetimedb/src/lib.rs`
+- Compatibility MCP/HTTP reference in `legacy/apps/heiwa_hub/mcp_server.py`
+- Quarantined STDB module reference in `legacy/apps/heiwa_hub/spacetimedb/src/lib.rs`
+- STDB evidence and fallback crate in `crates/heiwa_stdb/`
 
 ## Current Reality
 
 - STDB now owns route decisions, runs, nodes, liveness state, proposal lifecycle state, approval records, and capability lease records.
 - `HeiwaBench` now gates route and cell behavior through checked-in suites under `config/swarm/benchmarks/`.
 - `HeiwaCells` now materializes identity profiles into a real catalog surface.
-- The hub proposal HTTP surface now writes through the STDB bridge for create / claim / consent / heartbeat flows when `HEIWA_STATE_BACKEND=spacetimedb`.
+- The legacy Hub proposal HTTP surface is quarantined; use it as migration/reference unless explicitly promoting that path.
 
 ## Transitional Boundary
 
@@ -39,7 +41,7 @@ Today:
 - `packages/heiwa_sdk/heiwa_sdk/db.py` now routes proposal assignment, claim, consent, heartbeat, routing queries, and lease issuance through STDB fast paths when enabled.
 - Routing and assignment selection still runs in `packages/heiwa_sdk/heiwa_sdk/tick.py`, but STDB is now the state authority underneath that scheduler.
 - Public WebSockets currently stream status, not proposal lifecycle events.
-- Approval state also exists in-memory in `apps/heiwa_hub/cognition/approval.py`.
+- Legacy approval state also exists in-memory in `legacy/apps/heiwa_hub/cognition/approval.py`.
 
 ## Next Mandatory Cut
 

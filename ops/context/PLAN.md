@@ -1,5 +1,7 @@
 # Heiwa Product Roadmap
 
+Status: historical roadmap snapshot. Repo-root `HEIWA.md`, `AGENTS.md`, and `PRODUCT_SURFACE.md` are the active product doctrine when this file conflicts with current local-first/runtime truth.
+
 ## Summary
 
 Ship a multi-tenant BYOK orchestration platform. Users sign in via Discord, connect their AI provider keys, and run agent workflows through web and Discord interfaces. Trading and Autoresearch are the launch verticals.

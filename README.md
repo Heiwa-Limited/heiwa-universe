@@ -16,7 +16,8 @@ Heiwa is a local-first AI operating layer. The installed `heiwa` runtime is the 
 - Core execution and routing: `apps/heiwa_core/`, `crates/heiwa_loop/`, `crates/heiwa_session/`
 - Provider normalization: `crates/heiwa_provider/`
 - Terminal UX: `crates/heiwa_tui/`, `crates/heiwa_repl/`
-- Reference state plane: `apps/heiwa_hub/spacetimedb/`
+- STDB-facing Rust surfaces: `apps/heiwa_core/src/stdb/`, `apps/heiwa_orchestrator/src/stdb/`, `crates/heiwa_stdb/`
+- Legacy STDB module reference: `legacy/apps/heiwa_hub/spacetimedb/`
 - GitHub distribution surfaces: Actions, Pages, and release metadata
 
 ## Architecture
@@ -26,7 +27,7 @@ Heiwa is a local-first AI operating layer. The installed `heiwa` runtime is the 
 | **Heiwa** | Company and product identity | Repo root |
 | **`heiwa`** | Primary installed runtime and operator surface | `apps/heiwa_shell/` |
 | **DREX** | Internal execution kernel and routing substrate | `apps/heiwa_core/` |
-| **SpacetimeDB** | Adjudication, canonical state, and evidence plane | `apps/heiwa_hub/spacetimedb/` |
+| **SpacetimeDB** | Adjudication, canonical state, and evidence plane | `apps/heiwa_core/src/stdb/`, `apps/heiwa_orchestrator/src/stdb/`, `crates/heiwa_stdb/` |
 | **Rust runtime** | Volatile execution: provider supervision and candidate generation | `crates/` |
 
 > Rust proposes, SpacetimeDB adjudicates, `heiwa` presents.

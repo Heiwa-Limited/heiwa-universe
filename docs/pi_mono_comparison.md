@@ -29,7 +29,7 @@ To elevate Heiwa to the next level of agentic maturity, the following layers sho
 ### A. High-Fidelity TUI/UX Layer
 Pi-Mono's `@mariozechner/pi-tui` provides a differential rendering engine that makes the CLI feel like a modern application.
 - **Heiwa Gap:** The `heiwa` CLI is functional but lacks the "fluidity" of a dedicated TUI library.
-- **Recommendation:** Implement a `packages/heiwa_ui` (likely Rust-based with Python bindings) to provide a rich TUI experience for the operator.
+- **Recommendation:** Historical notes referenced a proposed `packages/heiwa_ui`; that surface is now legacy/quarantined unless promoted under current product doctrine.
 
 ### B. Agentic Development Hygiene (Class 3 Standards)
 Pi-Mono has a very strict `AGENTS.md` that governs how AI agents (Claude Code, Gemini CLI, etc.) interact with the codebase.

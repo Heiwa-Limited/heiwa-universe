@@ -63,7 +63,7 @@ Add a sub-bullet clarifying enforcement: "The standard is loaded as agent contex
 ## Section 3: Operator UI Subsystem
 
 ### Strengths
-- "Do not start with Rust" is the right decision. The pi-mono comparison doc (`docs/pi_mono_comparison.md`) recommends a Rust-based `packages/heiwa_ui` — this plan correctly overrides that with Python-first.
+- "Do not start with Rust" is the right decision. The pi-mono comparison doc (`docs/pi_mono_comparison.md`) referenced a proposed UI package that is now legacy/quarantined unless promoted under current product doctrine.
 - The pi-tui concepts to borrow are well-chosen: differential redraw, overlay interaction, focus/input handling, event/render separation.
 - "Shared UI data model, not one renderer for every surface" is the correct abstraction — Discord and terminal renderers consume the same state model.
 - The milestone targets (route/runtime/model, lease status, approval state, worker availability, task events) are the actual operator needs.

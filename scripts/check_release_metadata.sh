@@ -56,7 +56,7 @@ for project in "${node_projects[@]}"; do
 done
 
 if git ls-files 'Cargo.toml' '*Cargo.toml' '*pyproject.toml' '*package.json' \
-  | grep -v '^packages/heiwa_skills/' \
+  | grep -v '^legacy/packages/heiwa_skills/' \
   | xargs grep -n 'UNLICENSED' >/tmp/heiwa-release-metadata-unlicensed.$$ 2>/dev/null; then
   echo "UNLICENSED metadata remains in tracked releasable manifests:" >&2
   cat /tmp/heiwa-release-metadata-unlicensed.$$ >&2

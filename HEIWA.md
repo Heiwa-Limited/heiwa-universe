@@ -90,8 +90,9 @@ As of 2026-04-22, `heiwa-universe` has already landed meaningful local runtime s
 
 - The Rust workspace now includes:
   - [`apps/heiwa_core/`](apps/heiwa_core/)
-  - [`apps/heiwa_hub/spacetimedb/`](apps/heiwa_hub/spacetimedb/)
+  - [`apps/heiwa_orchestrator/`](apps/heiwa_orchestrator/)
   - [`apps/heiwa_shell/`](apps/heiwa_shell/)
+  - [`crates/heiwa_stdb/`](crates/heiwa_stdb/)
   - [`crates/heiwa_session/`](crates/heiwa_session/)
   - [`crates/heiwa_repl/`](crates/heiwa_repl/)
   - [`crates/heiwa_provider/`](crates/heiwa_provider/)
@@ -110,6 +111,7 @@ As of 2026-04-22, `heiwa-universe` has already landed meaningful local runtime s
 - The Heiwa account/provider plane exists in a narrow but real form, with local identity and wrapped provider status discovery.
 - Bounded loop execution is now a real workflow in [`crates/heiwa_loop/`](crates/heiwa_loop/) rather than a stub.
 - Python remains in the repo as a compatibility and migration surface. It is not the long-term product center.
+- The old Hub module under [`legacy/apps/heiwa_hub/`](legacy/apps/heiwa_hub/) is quarantined for migration/reference. It is not a current product spine or default mutation target.
 - Provider execution parity is still uneven:
   - Ollama, Claude Code, and Gemini CLI are live shell adapters in the current Rust runtime.
   - Codex is now wired into the same shell adapter path, but broader execution parity and evidence/tool depth still lag.

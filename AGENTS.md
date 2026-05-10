@@ -21,7 +21,8 @@ Compression:
 | `apps/heiwa_shell/` | Installed `heiwa` runtime and shell surface |
 | `apps/heiwa_app/` | Companion visual shell for the same runtime; web client today, native wrapper later |
 | `apps/heiwa_core/` | Rust execution kernel and hosted runtime path |
-| `apps/heiwa_hub/spacetimedb/` | Canonical STDB module and reducers |
+| `apps/heiwa_orchestrator/` | DREX orchestration, scoring, and STDB-facing runtime work |
+| `crates/heiwa_stdb/` | STDB evidence and offline fallback crate |
 | `crates/heiwa_provider/` | Provider normalization and adapter surfaces |
 | `crates/heiwa_install/` | Install and doctor flows |
 | `crates/heiwa_session/` | Local session daemon primitives |
@@ -29,6 +30,7 @@ Compression:
 | `crates/heiwa_loop/` | Bounded loop workflow |
 | `packages/heiwa_sdk/` | Python compatibility and migration surface |
 | `packages/heiwa_bindings/` | Generated bindings for STDB types |
+| `legacy/apps/heiwa_hub/` | Quarantined legacy Hub reference, not current product spine |
 
 ## Architecture Direction (April 2026)
 
