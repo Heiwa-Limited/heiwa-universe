@@ -1,0 +1,40 @@
+{
+  "$schema": "./schema/connector.schema.json",
+  "id": "github",
+  "name": "GitHub",
+  "vendor": "GitHub, Inc.",
+  "summary": "Reference connector. Read-only repository metadata access via fine-grained PAT or GitHub App. Source of truth for the Heiwa connector contract.",
+  "support_level": "official_api",
+  "auth": ["fine_grained_pat", "github_app"],
+  "revocation_path": "Revoke fine-grained PAT at https://github.com/settings/tokens or uninstall the GitHub App from https://github.com/settings/installations. App owners can also revoke installation tokens via the REST API.",
+  "receipt_required": true,
+  "claim_aliases": ["GitHub"],
+  "source_notes": [
+    {
+      "title": "GitHub REST API permissions for fine-grained PATs",
+      "url": "https://docs.github.com/en/rest/authentication/permissions-required-for-fine-grained-personal-access-tokens"
+    },
+    {
+      "title": "Creating a fine-grained personal access token",
+      "url": "https://docs.github.com/en/authentication/keeping-your-account-and-data-secure/managing-your-personal-access-tokens"
+    },
+    {
+      "title": "About authentication with a GitHub App",
+      "url": "https://docs.github.com/en/apps/creating-github-apps/authenticating-with-a-github-app/about-authentication-with-a-github-app"
+    }
+  ],
+  "capabilities": [
+    {
+      "id": "github.repo.metadata.read",
+      "description": "Read repository metadata (name, description, default branch, visibility, topics, archived state). No code, issues, PRs, or Actions data.",
+      "risk_class": "silent",
+      "receipt_required": true,
+      "support_status": "target",
+      "side_effect": "read",
+      "permissions": ["Metadata: Read-only"],
+      "permission_notes": "Fine-grained PAT scope 'Repository permissions -> Metadata: Read-only', which is the minimum scope required by GET /repos/{owner}/{repo}.",
+      "scopes": ["repo:metadata:read"],
+      "rate_hint": "Authenticated REST primary rate limit applies."
+    }
+  ]
+}

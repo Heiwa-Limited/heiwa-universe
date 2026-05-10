@@ -51,6 +51,7 @@ Longest prefix wins. Put narrower paths above broader parents when a child has a
 | `runtime/fleets` | runtime-artifact |
 | `runtime/spool` | runtime-artifact |
 | `runtime/logs` | runtime-artifact |
+| `connectors` | product |
 | `docs/superpowers` | reference |
 | `docs/design` | reference |
 | `docs/audit` | reference |
