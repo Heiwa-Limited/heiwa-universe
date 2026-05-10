@@ -105,7 +105,7 @@ jobs:
 
           mkdir -p "${release_root}"
           cp "${binary_path}" "${release_root}/"
-          cp README.md CONTRIBUTING.md CODE_OF_CONDUCT.md "${release_root}/"
+          cp README.md CONTRIBUTING.md CODE_OF_CONDUCT.md LICENSE "${release_root}/"
 
           if [[ "${ARCHIVE_EXT}" == "zip" ]]; then
             7z a "${archive_path}" "${release_root}" >/dev/null

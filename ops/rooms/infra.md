@@ -17,9 +17,12 @@ Load this room for:
 ## Important Files
 
 - `.github/workflows/deploy.yml`
-- `apps/heiwa_hub/main.py`
-- `apps/heiwa_hub/mcp_server.py`
-- `apps/heiwa_hub/scripts/generate_spacetimedb_bindings.sh`
+- `apps/heiwa_core/`
+- `apps/heiwa_orchestrator/`
+- `crates/heiwa_stdb/`
+- `legacy/apps/heiwa_hub/main.py` when repairing/promoting legacy Hub only
+- `legacy/apps/heiwa_hub/mcp_server.py` when repairing/promoting legacy Hub only
+- `legacy/apps/heiwa_hub/scripts/generate_spacetimedb_bindings.sh` when regenerating legacy bindings only
 - `packages/heiwa_bindings/*`
 
 ## Current CI Expectations

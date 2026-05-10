@@ -51,10 +51,12 @@ Dispatch chain:
 
 ## Important Files
 
-- `apps/heiwa_cli/scripts/agents/worker_manager.py` — GPU detection, capability reporting, worker lifecycle
-- `apps/heiwa_hub/transport.py` — `WorkerSessionManager`, registration, `get_worker_for_capabilities()`
-- `apps/heiwa_hub/agents/spine.py` — dispatch with `execution_requires`
-- `packages/heiwa_cognition/heiwa_cognition/router.py` — `ComputeRoute` with `execution_requires`
+- `legacy/apps/heiwa_cli/scripts/agents/worker_manager.py` — legacy GPU detection, capability reporting, worker lifecycle reference
+- `legacy/apps/heiwa_hub/transport.py` — legacy `WorkerSessionManager`, registration, `get_worker_for_capabilities()` reference
+- `legacy/apps/heiwa_hub/agents/spine.py` — legacy dispatch with `execution_requires` reference
+- `apps/heiwa_core/` — active Rust execution kernel and hosted runtime path
+- `apps/heiwa_orchestrator/` — active DREX scoring, persistence, and STDB-facing orchestration path
+- `legacy/packages/heiwa_cognition/heiwa_cognition/router.py` — legacy `ComputeRoute` with `execution_requires` reference
 - `packages/heiwa_protocol/heiwa_protocol/routing.py` — `BrokerRouteResult` with `execution_requires`
 - `packages/heiwa_sdk/heiwa_sdk/heiwaclaw.py` — execution adapter resolution
 - `packages/heiwa_sdk/heiwa_sdk/tool_mesh.py` — tool execution under lease

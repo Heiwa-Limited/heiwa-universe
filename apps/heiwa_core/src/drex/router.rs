@@ -81,7 +81,11 @@ pub fn preflight_execution(
         &ingress.runtime,
     );
     let runtime_hint = runtime_hint(ingress, &vector);
-    let runtime_fit = if is_local_runtime(&runtime_hint) { 1.0 } else { 0.8 };
+    let runtime_fit = if is_local_runtime(&runtime_hint) {
+        1.0
+    } else {
+        0.8
+    };
     let decision = evaluate_drex(&vector, policy, 0.95, runtime_fit, 0.65);
     let local_candidates: Vec<&ModelTier> = model_tiers
         .iter()
@@ -125,7 +129,11 @@ pub fn plan_route(
         &ingress.runtime,
     );
     let initial_runtime_hint = runtime_hint(ingress, &vector);
-    let runtime_fit = if is_local_runtime(&initial_runtime_hint) { 1.0 } else { 0.8 };
+    let runtime_fit = if is_local_runtime(&initial_runtime_hint) {
+        1.0
+    } else {
+        0.8
+    };
     let decision = evaluate_drex(&vector, policy, 0.95, runtime_fit, 0.65);
     let selected_model = select_model_tier(ingress, &initial_runtime_hint, &decision, model_tiers);
 
@@ -243,9 +251,15 @@ fn build_drex_vector(
         vector.execution_proximity = clamp(vector.execution_proximity + 0.10);
     }
 
-    if ["portfolio", "enterprise", "roadmap", "priority", "governance"]
-        .iter()
-        .any(|needle| lowercase.contains(needle))
+    if [
+        "portfolio",
+        "enterprise",
+        "roadmap",
+        "priority",
+        "governance",
+    ]
+    .iter()
+    .any(|needle| lowercase.contains(needle))
     {
         vector.scope = clamp(vector.scope + 0.10);
         vector.abstraction = clamp(vector.abstraction + 0.10);
@@ -363,8 +377,7 @@ fn best_tier(
     candidates
         .iter()
         .max_by(|left, right| {
-            model_score(left, ingress, decision)
-                .total_cmp(&model_score(right, ingress, decision))
+            model_score(left, ingress, decision).total_cmp(&model_score(right, ingress, decision))
         })
         .map(|tier| (*tier).clone())
 }
@@ -426,7 +439,13 @@ fn clamp(value: f64) -> f64 {
 fn is_greeting(lowercase: &str) -> bool {
     matches!(
         lowercase.trim(),
-        "hi" | "hello" | "hey" | "yo" | "sup" | "gm" | "good morning" | "good afternoon"
+        "hi" | "hello"
+            | "hey"
+            | "yo"
+            | "sup"
+            | "gm"
+            | "good morning"
+            | "good afternoon"
             | "good evening"
     )
 }
@@ -437,7 +456,6 @@ fn is_underspecified(lowercase: &str) -> bool {
     token_count <= 2
         && matches!(
             trimmed,
-            "help" | "what" | "why" | "huh" | "okay" | "ok" | "sure" | "go" | "start"
-                | "continue"
+            "help" | "what" | "why" | "huh" | "okay" | "ok" | "sure" | "go" | "start" | "continue"
         )
 }

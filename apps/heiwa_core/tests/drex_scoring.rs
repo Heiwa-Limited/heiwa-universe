@@ -81,7 +81,14 @@ fn route_plan_prefers_vram_fit_and_kv_strategy_for_local_execution() {
     };
 
     let tiers = vec![
-        local_model("ollama/qwen3.5:4b", 2, 32_768, 4_096, "q4_k_m", "turboquant"),
+        local_model(
+            "ollama/qwen3.5:4b",
+            2,
+            32_768,
+            4_096,
+            "q4_k_m",
+            "turboquant",
+        ),
         local_model("ollama/qwen3.5:14b", 3, 32_768, 12_288, "q4_k_m", "q8_0"),
     ];
 
@@ -110,7 +117,11 @@ fn preflight_handles_greeting_without_model_spend() {
     let result = preflight_execution(&ingress, &[], &default_policy());
     assert_eq!(result.execution_mode, ExecutionMode::Deterministic);
     assert!(
-        result.response_text.as_deref().unwrap_or_default().contains("Ready"),
+        result
+            .response_text
+            .as_deref()
+            .unwrap_or_default()
+            .contains("Ready"),
         "expected deterministic greeting response, got {:?}",
         result.response_text
     );
@@ -131,7 +142,11 @@ fn preflight_asks_for_clarification_on_underspecified_prompt() {
     let result = preflight_execution(&ingress, &[], &default_policy());
     assert_eq!(result.execution_mode, ExecutionMode::Clarify);
     assert!(
-        result.response_text.as_deref().unwrap_or_default().contains("Tell me"),
+        result
+            .response_text
+            .as_deref()
+            .unwrap_or_default()
+            .contains("Tell me"),
         "expected clarify response, got {:?}",
         result.response_text
     );

@@ -1,0 +1,23 @@
+{
+  "name": "@heiwa/cli",
+  "version": "2.1.0",
+  "description": "State-Of-The-Art Enterprise CLI for the Heiwa Swarm",
+  "main": "heiwa",
+  "bin": {
+    "heiwa": "bin/heiwa"
+  },
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "author": "Heiwa Collective",
+  "license": "Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Strategizing/heiwa-universe.git",
+    "directory": "apps/heiwa_cli"
+  },
+  "homepage": "https://github.com/Strategizing/heiwa-universe",
+  "bugs": {
+    "url": "https://github.com/Strategizing/heiwa-universe/issues"
+  }
+}

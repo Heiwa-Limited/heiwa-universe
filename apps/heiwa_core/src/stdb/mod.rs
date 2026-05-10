@@ -1,22 +1,21 @@
-use std::time::{SystemTime, UNIX_EPOCH};
 use std::sync::Arc;
+use std::time::{SystemTime, UNIX_EPOCH};
 
 use anyhow::{anyhow, Result};
 use heiwa_bindings::{
-    close_session_reducer::close_session as CloseSessionReducer,
     attach_drex_decision_to_route_reducer::attach_drex_decision_to_route as AttachDrexDecisionToRouteReducer,
+    close_session_reducer::close_session as CloseSessionReducer,
     record_dispatch_ack_reducer::record_dispatch_ack as RecordDispatchAckReducer,
     record_drex_decision_reducer::record_drex_decision as RecordDrexDecisionReducer,
     record_drex_failure_reducer::record_drex_failure as RecordDrexFailureReducer,
     record_run_reducer::record_run as RecordRunReducer,
     register_artifact_reducer::register_artifact as RegisterArtifactReducer,
     upsert_lease_reducer::upsert_lease as UpsertLeaseReducer,
-    upsert_session_reducer::upsert_session as UpsertSessionReducer,
-    DbConnection,
+    upsert_session_reducer::upsert_session as UpsertSessionReducer, DbConnection,
 };
 use serde_json::json;
 
-use crate::drex::{RoutePlan, ResolutionTier, DEFAULT_POLICY_VERSION};
+use crate::drex::{ResolutionTier, RoutePlan, DEFAULT_POLICY_VERSION};
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct PersistedDrexDecision {
@@ -197,7 +196,8 @@ impl ReducerTransport {
 
 impl StdbTransport for ReducerTransport {
     fn upsert_worker_session(&self, session: PersistedWorkerSession) -> Result<()> {
-        self.conn.reducers
+        self.conn
+            .reducers
             .upsert_session(
                 session.session_id,
                 session.node_id,
@@ -224,13 +224,15 @@ impl StdbTransport for ReducerTransport {
     }
 
     fn close_session(&self, session_id: String) -> Result<()> {
-        self.conn.reducers
+        self.conn
+            .reducers
             .close_session(session_id)
             .map_err(|error| anyhow!(error.to_string()))
     }
 
     fn upsert_worker_lease(&self, lease: PersistedWorkerLease) -> Result<()> {
-        self.conn.reducers
+        self.conn
+            .reducers
             .upsert_lease(
                 lease.lease_id,
                 lease.task_id,
@@ -250,7 +252,8 @@ impl StdbTransport for ReducerTransport {
     }
 
     fn record_dispatch_ack(&self, ack: PersistedDispatchAck) -> Result<()> {
-        self.conn.reducers
+        self.conn
+            .reducers
             .record_dispatch_ack(
                 ack.ack_id,
                 ack.lease_id,
@@ -265,7 +268,8 @@ impl StdbTransport for ReducerTransport {
     }
 
     fn register_artifact(&self, artifact: PersistedArtifact) -> Result<()> {
-        self.conn.reducers
+        self.conn
+            .reducers
             .register_artifact(
                 artifact.artifact_id,
                 artifact.lease_id,
@@ -287,7 +291,8 @@ impl StdbTransport for ReducerTransport {
     }
 
     fn record_run_receipt(&self, receipt: PersistedRunReceipt) -> Result<()> {
-        self.conn.reducers
+        self.conn
+            .reducers
             .record_run(
                 receipt.run_id,
                 receipt.user_id,
@@ -318,7 +323,8 @@ impl StdbTransport for ReducerTransport {
 
     fn record_run_failure(&self, failure: PersistedRunFailure) -> Result<()> {
         use heiwa_bindings::record_run_failure_reducer::record_run_failure;
-        self.conn.reducers
+        self.conn
+            .reducers
             .record_run_failure(
                 failure.failure_id,
                 failure.run_id,
@@ -334,7 +340,8 @@ impl StdbTransport for ReducerTransport {
     }
 
     fn upsert_drex_decision(&self, decision: PersistedDrexDecision) -> Result<()> {
-        self.conn.reducers
+        self.conn
+            .reducers
             .record_drex_decision(
                 decision.drex_decision_id,
                 decision.request_id,
@@ -366,7 +373,8 @@ impl StdbTransport for ReducerTransport {
     }
 
     fn insert_drex_failure(&self, failure: PersistedDrexFailure) -> Result<()> {
-        self.conn.reducers
+        self.conn
+            .reducers
             .record_drex_failure(
                 failure.drex_decision_id,
                 failure.request_id,
@@ -384,11 +392,9 @@ impl StdbTransport for ReducerTransport {
         request_id: &str,
         drex_decision_id: &str,
     ) -> Result<()> {
-        self.conn.reducers
-            .attach_drex_decision_to_route(
-                request_id.to_string(),
-                drex_decision_id.to_string(),
-            )
+        self.conn
+            .reducers
+            .attach_drex_decision_to_route(request_id.to_string(), drex_decision_id.to_string())
             .map_err(|error| anyhow!(error.to_string()))
     }
 }

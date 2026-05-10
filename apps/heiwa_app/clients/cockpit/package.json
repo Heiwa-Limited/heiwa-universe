@@ -3,6 +3,12 @@
   "private": true,
   "version": "0.1.0",
   "description": "Heiwa operator cockpit — localhost SPA served by the installed heiwa_core runtime. Vite + Solid + TypeScript.",
+  "license": "Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Strategizing/heiwa-universe.git",
+    "directory": "apps/heiwa_app/clients/cockpit"
+  },
   "type": "module",
   "scripts": {
     "dev": "vite",

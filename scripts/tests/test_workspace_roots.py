@@ -52,7 +52,7 @@ def test_heiwa_360_check_prefers_home_heiwa_universe(monkeypatch, tmp_path):
 
     module = _load_module(
         "test_heiwa_360_workspace",
-        REPO_ROOT / "apps/heiwa_cli/scripts/ops/heiwa_360_check.py",
+        REPO_ROOT / "legacy/apps/heiwa_cli/scripts/ops/heiwa_360_check.py",
     )
 
     assert module.find_monorepo_root(outside) == workspace_root

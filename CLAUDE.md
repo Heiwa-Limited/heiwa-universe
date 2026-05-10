@@ -23,7 +23,8 @@ Before touching runtime or architecture work, read in this order:
 - The installed `heiwa` runtime is the current product center.
 - `apps/heiwa_shell/` is the primary operator surface in this repo.
 - `apps/heiwa_core/` contains the Rust execution kernel and hosted runtime path.
-- `apps/heiwa_hub/spacetimedb/` is the backend authority plane.
+- STDB-facing active work lives in `apps/heiwa_core/src/stdb/`, `apps/heiwa_orchestrator/src/stdb/`, and `crates/heiwa_stdb/`.
+- `legacy/apps/heiwa_hub/` is quarantined migration/reference material, not a current mutation target.
 - Web and `/code` surfaces are later work. Do not overstate them.
 
 ## Provider Truth

@@ -20,6 +20,27 @@ pub struct DoctorReport {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AiOpsReport {
+    pub mcp_notion_http: bool,
+    pub biome_configured: bool,
+    pub npm_lint_uses_biome: bool,
+    pub ci_lint_uses_biome: bool,
+    pub ci_clippy_dead_code_enforced: bool,
+    pub ci_unused_deps_uses_cargo_machete: bool,
+}
+
+impl AiOpsReport {
+    pub fn is_clean(&self) -> bool {
+        self.mcp_notion_http
+            && self.biome_configured
+            && self.npm_lint_uses_biome
+            && self.ci_lint_uses_biome
+            && self.ci_clippy_dead_code_enforced
+            && self.ci_unused_deps_uses_cargo_machete
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct MachineManifest {
     pub device_id: String,
     pub hostname: String,
@@ -66,7 +87,7 @@ pub struct InstalledPlugin {
 #[derive(Debug, Clone)]
 pub enum InstallOutcome {
     RuntimeBootstrap,
-    Plugin(InstalledPlugin),
+    Plugin(Box<InstalledPlugin>),
 }
 
 pub fn get_heiwa_dir() -> PathBuf {
@@ -90,6 +111,28 @@ pub fn check_installation() -> Result<DoctorReport> {
         gemini_installed: has_command("gemini"),
         antigravity_installed: has_command("antigravity"),
         ollama_installed: has_command("ollama"),
+    })
+}
+
+pub fn check_ai_ops() -> Result<AiOpsReport> {
+    check_ai_ops_at(&get_repo_root())
+}
+
+pub fn check_ai_ops_at(repo_root: &Path) -> Result<AiOpsReport> {
+    let mcp_notion_http = mcp_notion_has_http_type(&repo_root.join(".mcp.json"));
+    let biome_configured = repo_root.join("biome.json").is_file();
+    let npm_lint_uses_biome = package_lint_uses_biome(&repo_root.join("package.json"));
+    let ci = fs::read_to_string(repo_root.join(".github/workflows/ci.yml")).unwrap_or_default();
+
+    Ok(AiOpsReport {
+        mcp_notion_http,
+        biome_configured,
+        npm_lint_uses_biome,
+        ci_lint_uses_biome: ci.contains("npm run lint") && ci.contains("Run Biome"),
+        ci_clippy_dead_code_enforced: ci.contains("cargo clippy")
+            && ci.contains("-D warnings")
+            && !ci.contains("-A dead_code"),
+        ci_unused_deps_uses_cargo_machete: ci.contains("cargo machete"),
     })
 }
 
@@ -141,7 +184,9 @@ pub fn run_install() -> Result<()> {
 
 pub fn run_install_target(target: Option<&str>) -> Result<InstallOutcome> {
     match target {
-        Some(raw) => install_plugin(raw).map(InstallOutcome::Plugin),
+        Some(raw) => install_plugin(raw)
+            .map(Box::new)
+            .map(InstallOutcome::Plugin),
         None => {
             run_install()?;
             Ok(InstallOutcome::RuntimeBootstrap)
@@ -155,7 +200,7 @@ pub fn parse_plugin_source(raw: &str) -> Result<PluginSource> {
         .ok_or_else(|| anyhow!("plugin source must start with gh:"))?;
 
     let (repo_path, reference) = match repo_spec.split_once('@') {
-        Some((path, reference)) if reference.is_empty() => {
+        Some((_, "")) => {
             return Err(anyhow!("plugin reference cannot be empty"));
         }
         Some((path, reference)) => (path, Some(reference.to_string())),
@@ -239,6 +284,30 @@ pub fn install_plugin(raw: &str) -> Result<InstalledPlugin> {
     Ok(plugin)
 }
 
+fn mcp_notion_has_http_type(path: &Path) -> bool {
+    fs::read_to_string(path)
+        .ok()
+        .and_then(|raw| serde_json::from_str::<serde_json::Value>(&raw).ok())
+        .and_then(|json| {
+            json.pointer("/mcpServers/notion/type")
+                .and_then(|value| value.as_str())
+                .map(|value| value == "http")
+        })
+        .unwrap_or(false)
+}
+
+fn package_lint_uses_biome(path: &Path) -> bool {
+    fs::read_to_string(path)
+        .ok()
+        .and_then(|raw| serde_json::from_str::<serde_json::Value>(&raw).ok())
+        .and_then(|json| {
+            json.pointer("/scripts/lint")
+                .and_then(|value| value.as_str())
+                .map(|value| value.contains("biome ci"))
+        })
+        .unwrap_or(false)
+}
+
 fn ensure_runtime_layout(heiwa_dir: &Path) -> Result<()> {
     fs::create_dir_all(heiwa_dir)?;
     for dirname in [
@@ -250,8 +319,30 @@ fn ensure_runtime_layout(heiwa_dir: &Path) -> Result<()> {
 }
 
 fn write_canonical_launcher(heiwa_dir: &Path) -> Result<()> {
-    let launcher_path = heiwa_dir.join("bin").join("heiwa");
+    let current_exe = env::current_exe().unwrap_or_default();
     let repo_root = get_repo_root();
+    write_canonical_launcher_internal(heiwa_dir, &current_exe, &repo_root)
+}
+
+fn write_canonical_launcher_internal(
+    heiwa_dir: &Path,
+    current_exe: &Path,
+    repo_root: &Path,
+) -> Result<()> {
+    let launcher_path = heiwa_dir.join("bin").join("heiwa");
+
+    // Robust dev-env check: Does Cargo.toml exist where we expect it in the monorepo?
+    let is_dev_env = repo_root.join("Cargo.toml").exists();
+
+    if !is_dev_env && current_exe.exists() {
+        if current_exe != launcher_path {
+            fs::copy(current_exe, &launcher_path)?;
+            #[cfg(unix)]
+            fs::set_permissions(&launcher_path, fs::Permissions::from_mode(0o755))?;
+        }
+        return Ok(());
+    }
+
     let launcher = format!(
         r#"#!/bin/zsh
 set -euo pipefail
@@ -404,4 +495,58 @@ fn get_hostname() -> Option<String> {
             None
         }
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tempfile::tempdir;
+
+    #[test]
+    fn test_write_canonical_launcher_portable() -> Result<()> {
+        let tmp = tempdir()?;
+        let heiwa_dir = tmp.path().join(".heiwa");
+        fs::create_dir_all(heiwa_dir.join("bin"))?;
+
+        let mock_exe = tmp.path().join("heiwa-portable");
+        fs::write(&mock_exe, "binary content")?;
+
+        let mock_repo = tmp.path().join("not-a-repo");
+        fs::create_dir_all(&mock_repo)?;
+        // No Cargo.toml here
+
+        write_canonical_launcher_internal(&heiwa_dir, &mock_exe, &mock_repo)?;
+
+        let target = heiwa_dir.join("bin").join("heiwa");
+        assert!(target.exists());
+        let content = fs::read_to_string(target)?;
+        assert_eq!(content, "binary content");
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_write_canonical_launcher_dev() -> Result<()> {
+        let tmp = tempdir()?;
+        let heiwa_dir = tmp.path().join(".heiwa");
+        fs::create_dir_all(heiwa_dir.join("bin"))?;
+
+        let mock_exe = tmp.path().join("target/debug/heiwa");
+        fs::create_dir_all(mock_exe.parent().unwrap())?;
+        fs::write(&mock_exe, "binary content")?;
+
+        let mock_repo = tmp.path().join("heiwa-universe");
+        fs::create_dir_all(&mock_repo)?;
+        fs::write(mock_repo.join("Cargo.toml"), "")?;
+
+        write_canonical_launcher_internal(&heiwa_dir, &mock_exe, &mock_repo)?;
+
+        let target = heiwa_dir.join("bin").join("heiwa");
+        assert!(target.exists());
+        let content = fs::read_to_string(target)?;
+        assert!(content.starts_with("#!/bin/zsh"));
+        assert!(content.contains("REPO_ROOT=\"${HEIWA_ROOT:-"));
+
+        Ok(())
+    }
 }

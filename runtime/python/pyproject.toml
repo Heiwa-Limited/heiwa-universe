@@ -5,14 +5,24 @@ description = "Heiwa Python sidecar: LangGraph/LlamaIndex/Ragas IPC over stdio J
 requires-python = ">=3.11"
 readme = "README.md"
 authors = [{ name = "Heiwa", email = "noreply@heiwa.dev" }]
-license = { text = "UNLICENSED" }
+license = { text = "Apache-2.0" }
 
 dependencies = [
     "langgraph>=0.2.0",
     "llama-index-core>=0.12.0",
     "ragas>=0.2.0",
     "pydantic>=2.9.0",
+    "heiwa-sdk",
 ]
+
+[project.urls]
+Homepage = "https://github.com/Strategizing/heiwa-universe"
+Repository = "https://github.com/Strategizing/heiwa-universe"
+Documentation = "https://strategizing.github.io/heiwa-universe/"
+Issues = "https://github.com/Strategizing/heiwa-universe/issues"
+
+[tool.uv.sources]
+heiwa-sdk = { path = "../../packages/heiwa_sdk", editable = true }
 
 [project.scripts]
 heiwa-sidecar = "heiwa_sidecar.__main__:main"

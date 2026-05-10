@@ -1,13 +1,22 @@
 # HEIWA
 
-Updated: 2026-04-04  
+Updated: 2026-04-22
 Status: Canonical truth for `heiwa-universe`
 
 This file replaces the old repo-root compatibility shim. When `README.md`, legacy plans, or older architecture notes conflict with this document, this document wins.
 
 ## One-Sentence Truth
 
-Heiwa is a local-first AI operating layer for consumer and edge hardware: `heiwa` is the installed product surface, DREX is the internal execution kernel, SpacetimeDB is the backend adjudication and evidence plane, Rust proposes and executes, providers still own their own inference internals, and `heiwa` turns the user’s local models and connected providers into one coherent operator experience.
+Heiwa is the operating layer that turns one user intent into governed, routed, verified, multi-tool AI execution.
+
+Current shape:
+
+- `heiwa` is the installed product surface.
+- DREX is the internal execution kernel.
+- SpacetimeDB is the backend adjudication and evidence plane.
+- Rust proposes and executes.
+- Providers still own their own inference internals.
+- Heiwa turns the user’s local models and connected providers into one coherent operator experience.
 
 ## Optimization Doctrine
 
@@ -24,6 +33,8 @@ That means:
 Compression:
 
 > Smallest sufficient model, shortest sufficient context, richest sufficient evidence.
+
+Routing and intent classification must not add a provider-token tax to every task. Preflight classification should be deterministic, rule-based, or local-model by default, with any remote escalation guarded by an explicit budget assertion at the call site.
 
 ## Working Context vs Harness Memory
 
@@ -56,6 +67,7 @@ Heiwa is a system with three distinct layers:
 
 1. **User surface**
    - `heiwa` on the machine is the primary product surface.
+   - `Heiwa.app` is the companion visual shell over the same runtime, currently implemented as a web-based client path in this repo rather than a full native desktop runtime.
    - Web surfaces exist, but they are not the current center of gravity.
 
 2. **Execution kernel**
@@ -74,12 +86,13 @@ Heiwa is a system with three distinct layers:
 
 ## Current Repo Truth on `main`
 
-As of 2026-04-04, `heiwa-universe` has already landed meaningful local runtime substrate and narrow terminal productization work:
+As of 2026-04-22, `heiwa-universe` has already landed meaningful local runtime substrate and narrow terminal productization work:
 
 - The Rust workspace now includes:
   - [`apps/heiwa_core/`](apps/heiwa_core/)
-  - [`apps/heiwa_hub/spacetimedb/`](apps/heiwa_hub/spacetimedb/)
+  - [`apps/heiwa_orchestrator/`](apps/heiwa_orchestrator/)
   - [`apps/heiwa_shell/`](apps/heiwa_shell/)
+  - [`crates/heiwa_stdb/`](crates/heiwa_stdb/)
   - [`crates/heiwa_session/`](crates/heiwa_session/)
   - [`crates/heiwa_repl/`](crates/heiwa_repl/)
   - [`crates/heiwa_provider/`](crates/heiwa_provider/)
@@ -94,12 +107,15 @@ As of 2026-04-04, `heiwa-universe` has already landed meaningful local runtime s
   - `session attach`
   via [`apps/heiwa_shell/src/main.rs`](apps/heiwa_shell/src/main.rs).
 - The Rust shell/session/repl/telemetry surface is real enough to test, but it is not the same thing as final product maturity.
+- `apps/heiwa_app/` is the companion visual shell path, but it is still a web client surface in this repo and not yet a true native desktop wrapper.
 - The Heiwa account/provider plane exists in a narrow but real form, with local identity and wrapped provider status discovery.
 - Bounded loop execution is now a real workflow in [`crates/heiwa_loop/`](crates/heiwa_loop/) rather than a stub.
 - Python remains in the repo as a compatibility and migration surface. It is not the long-term product center.
+- The old Hub module under [`legacy/apps/heiwa_hub/`](legacy/apps/heiwa_hub/) is quarantined for migration/reference. It is not a current product spine or default mutation target.
 - Provider execution parity is still uneven:
-  - Claude Code and Ollama are the real loop-capable adapters today.
-  - Codex, Gemini CLI, and Antigravity are discovered and wrapped, but not yet at the same execution depth.
+  - Ollama, Claude Code, and Gemini CLI are live shell adapters in the current Rust runtime.
+  - Codex is now wired into the same shell adapter path, but broader execution parity and evidence/tool depth still lag.
+  - Antigravity is discovered and normalized, but not yet at the same execution depth.
 - Online-local backend sync is still less mature than the local shell/runtime path.
 - `/code` and broader remote product surfaces remain later work.
 
@@ -113,6 +129,8 @@ As of 2026-04-04, `heiwa-universe` has already landed meaningful local runtime s
 | **SpacetimeDB** | Backend adjudication, canonical state, subscriptions, evidence |
 | **Rust runtime** | Volatile execution plane: provider supervision, candidate generation, shell/process control |
 | **Web surfaces** | Later attached or hosted surfaces over the same kernel |
+
+> See [`PRODUCT_SURFACE.md`](PRODUCT_SURFACE.md) for the path-by-path class table that feeds repo hygiene and LOC audits.
 
 Compression:
 
@@ -324,31 +342,6 @@ Heiwa implication:
 - Cloudflare is an edge and public-surface layer, not the definition of the product.
 - The local `heiwa` runtime still matters even if hosted surfaces grow.
 
-## Current Repo Drift That Must Be Named Honestly
-
-This repo contains real progress and real drift.
-
-### Canonical current deployment truth
-
-- Root [`railway.toml`](railway.toml) currently uses:
-  - `builder = "DOCKERFILE"`
-  - `dockerfilePath = "apps/heiwa_core/Dockerfile"`
-  - `healthcheckPath = "/health"`
-- The main deploy workflow checks:
-  - `https://api.heiwa.ltd/health`
-  - `https://api.heiwa.ltd/status`
-  in [`.github/workflows/deploy.yml`](.github/workflows/deploy.yml).
-
-### Drift that still exists
-
-- [`docs/standards/runtime-baseline.md`](docs/standards/runtime-baseline.md) still says Railway must use `/ready`.
-- [`infra/cloud/railway/README.md`](infra/cloud/railway/README.md) still says healthcheck `/ready`.
-- The root [`README.md`](README.md) is still more web/dashboard/BYOK-first than the current local-runtime-first direction.
-
-So the canonical truth as of 2026-04-04 is:
-
-> The live repo deployment surface points at `/health`, not `/ready`, and the root docs need harmonization.
-
 ## What Makes Heiwa Come Alive
 
 Heiwa is alive when a user can:
@@ -426,6 +419,14 @@ Build the minimum real product:
 
 This is the first meaningful product threshold.
 
+Near-term execution stays inside this threshold:
+
+1. Tighten repo hygiene and doctor correctness.
+2. Extend existing `heiwa doctor` checks before adding new command nouns.
+3. Add doctrine lint only where it protects existing authority boundaries.
+4. Extend `~/.heiwa/config.toml` for local profile and BYOX registration defaults rather than adding another profile file.
+5. Persist useful routing and execution evidence through the SpacetimeDB plane.
+
 ### Stage 2: Heiwa becomes compelling
 
 Strengthen the local and online-local experience:
@@ -447,6 +448,8 @@ Expose the kernel progressively:
 4. later hooks and reducer-authoring surfaces
 
 This is where Heiwa stops being only a tool and becomes a substrate.
+
+Defer named platform surfaces such as `heiwa task`, `heiwa rules`, `heiwa registry`, and `heiwa optimize` until `heiwa doctor`, bounded local execution, and STDB-backed evidence are trustworthy on one machine.
 
 ### Stage 4: Heiwa becomes a team product
 
@@ -519,6 +522,25 @@ Do not collapse everything into “plugins.”
 | **Reducers / policies** | Highest-trust canonical logic in SpacetimeDB |
 
 This separation is necessary for security, determinism, and platform clarity.
+
+## BYOX Boundary
+
+BYOX is a user-facing procurement and registration vocabulary, not an internal trust or execution taxonomy.
+
+Useful product vocabulary:
+
+| Term | Meaning |
+| --- | --- |
+| **BYOM** | Bring your own model |
+| **BYOK** | Bring your own key or provider credential |
+| **BYOT** | Bring your own tool |
+| **BYOA** | Bring your own agent or provider account |
+| **BYOD** | Bring your own data source |
+| **BYOP** | Bring your own policy |
+
+Internal execution must still branch on the extension classes above: provider adapters, tools, hooks, and reducers or policies. A registered BYOX resource must be mapped into one of those classes before it can affect execution.
+
+Do not let reducers, provider adapters, or routing policy branch directly on broad BYOX labels. BYOX belongs at the registration and operator UX edge; extension classes belong in the runtime, security, and evidence core.
 
 ## Security and Secret Boundaries
 

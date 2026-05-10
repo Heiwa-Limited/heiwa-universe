@@ -25,7 +25,7 @@ use schemars::schema::RootSchema;
 use serde_json::Value;
 use thiserror::Error;
 
-pub use tools::{GetQuotaStatus, ListProviders, QuotaProvider, ProviderSource, RouteRequest};
+pub use tools::{GetQuotaStatus, ListProviders, ProviderSource, QuotaProvider, RouteRequest};
 
 #[derive(Debug, Error)]
 pub enum McpError {
@@ -116,15 +116,15 @@ mod tests {
     async fn registry_lists_and_dispatches() {
         let reg = default_registry(
             Arc::new(FakeProviders::default()),
-            Arc::new(FakeQuota::default()),
-            Arc::new(FakeRouter::default()),
+            Arc::new(FakeQuota),
+            Arc::new(FakeRouter),
         );
         assert_eq!(
             reg.names(),
             vec!["get_quota_status", "list_providers", "route_request"]
         );
         assert!(reg.schema("list_providers").is_some());
-        assert!(reg.description("list_providers").unwrap().len() > 0);
+        assert!(!reg.description("list_providers").unwrap().is_empty());
     }
 
     #[tokio::test]

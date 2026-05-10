@@ -198,7 +198,7 @@ pub fn get_auth_status(provider_id: &str) -> Option<LegacyProviderAccount> {
         }
         "codex" => {
             let status = if has_command("codex") {
-                if connected {
+                if connected || codex_has_native_auth() {
                     "connected".to_string()
                 } else {
                     "installed_unverified".to_string()
@@ -218,7 +218,7 @@ pub fn get_auth_status(provider_id: &str) -> Option<LegacyProviderAccount> {
         }
         "gemini" => {
             let status = if has_command("gemini") {
-                if connected {
+                if connected || gemini_has_native_auth() {
                     "connected".to_string()
                 } else {
                     "installed_unverified".to_string()
@@ -238,7 +238,7 @@ pub fn get_auth_status(provider_id: &str) -> Option<LegacyProviderAccount> {
         }
         "antigravity" => {
             let status = if has_command("antigravity") {
-                if connected {
+                if connected || antigravity_has_native_auth() {
                     "connected".to_string()
                 } else {
                     "installed_unverified".to_string()
@@ -322,4 +322,47 @@ fn has_command(cmd: &str) -> bool {
 
 fn is_ollama_running() -> bool {
     std::net::TcpStream::connect("127.0.0.1:11434").is_ok()
+}
+
+fn gemini_has_native_auth() -> bool {
+    let home = env::var("HOME")
+        .or_else(|_| env::var("USERPROFILE"))
+        .unwrap_or_default();
+    if home.is_empty() {
+        return false;
+    }
+    PathBuf::from(home)
+        .join(".gemini")
+        .join("oauth_creds.json")
+        .exists()
+}
+
+fn codex_has_native_auth() -> bool {
+    let home = env::var("HOME")
+        .or_else(|_| env::var("USERPROFILE"))
+        .unwrap_or_default();
+    if home.is_empty() {
+        return false;
+    }
+    PathBuf::from(home)
+        .join(".codex")
+        .join("auth.json")
+        .exists()
+}
+
+// Antigravity is a VS Code fork that shares Google OAuth with Gemini CLI.
+// We consider it "connected" when the Gemini OAuth creds exist AND the
+// Antigravity user-data dir has been initialized.
+fn antigravity_has_native_auth() -> bool {
+    let home = env::var("HOME")
+        .or_else(|_| env::var("USERPROFILE"))
+        .unwrap_or_default();
+    if home.is_empty() {
+        return false;
+    }
+    let gemini_oauth = PathBuf::from(&home)
+        .join(".gemini")
+        .join("oauth_creds.json");
+    let ag_initialized = PathBuf::from(&home).join(".antigravity").join("argv.json");
+    gemini_oauth.exists() && ag_initialized.exists()
 }

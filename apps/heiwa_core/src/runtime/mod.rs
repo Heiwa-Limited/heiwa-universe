@@ -1,32 +1,29 @@
-use std::net::SocketAddr;
-use std::sync::Arc;
-use std::time::Duration;
 use anyhow::{anyhow, Result};
 use axum::{
-    routing::{get, post},
-    Router,
     response::IntoResponse,
-    Json,
+    routing::{get, post},
+    Json, Router,
 };
 use serde::{Deserialize, Serialize};
 use serde_json::json;
-use tower_http::trace::TraceLayer;
-use tracing::{info, error, warn};
+use std::net::SocketAddr;
+use std::sync::Arc;
+use std::time::Duration;
 use tokio::time::sleep;
+use tower_http::trace::TraceLayer;
+use tracing::{error, info, warn};
 
-pub mod state;
 pub mod gateway;
+pub mod state;
 
+use self::state::{CoreState, SharedState, SystemStatus};
+use crate::auth;
 use crate::config::RuntimeConfig;
 use crate::drex::{default_policy, plan_route, DrexIngress, RoutePlan};
-use crate::stdb::{StdbRuntime, ReducerTransport};
-use crate::auth;
-use self::state::{CoreState, SharedState, SystemStatus};
+use crate::stdb::{ReducerTransport, StdbRuntime};
 use heiwa_bindings::{
-    DbConnection,
     upsert_model_tier_reducer::upsert_model_tier,
-    upsert_node_heartbeat_reducer::upsert_node_heartbeat,
-    ModelTier,
+    upsert_node_heartbeat_reducer::upsert_node_heartbeat, DbConnection, ModelTier,
 };
 
 #[derive(Debug, Deserialize, Serialize, Clone)]
@@ -49,9 +46,12 @@ struct ModelTierSeed {
 
 pub async fn run(cfg: RuntimeConfig) -> Result<()> {
     info!("Initializing Heiwa Core Runtime...");
-    
+
     // 1. Initialize STDB connection
-    info!("Connecting to SpacetimeDB at {}/{}", cfg.stdb_url, cfg.stdb_identity);
+    info!(
+        "Connecting to SpacetimeDB at {}/{}",
+        cfg.stdb_url, cfg.stdb_identity
+    );
     let conn = DbConnection::builder()
         .with_uri(&cfg.stdb_url)
         .with_database_name(&cfg.stdb_identity)
@@ -79,23 +79,23 @@ pub async fn run(cfg: RuntimeConfig) -> Result<()> {
     let transport = ReducerTransport::new(conn_arc.clone());
     let stdb_runtime = StdbRuntime::new(transport);
     let state = Arc::new(CoreState::new(cfg.clone(), stdb_runtime));
-    
+
     // 3. Seed runtime catalogs and register node
     let state_clone = state.clone();
     let conn_heartbeat = conn_arc.clone();
     tokio::spawn(async move {
         // Wait for connection to be ready
         sleep(Duration::from_secs(2)).await;
-        
+
         match seed_catalogs(&conn_heartbeat, state_clone.clone()).await {
             Ok(_) => {
                 info!("Runtime catalogs seeded successfully");
                 let mut seeded = state_clone.seeded.write().await;
                 *seeded = true;
-            },
+            }
             Err(e) => {
                 error!("Failed to seed runtime catalogs: {:?}", e);
-            },
+            }
         }
 
         loop {
@@ -123,7 +123,7 @@ pub async fn run(cfg: RuntimeConfig) -> Result<()> {
 
     let addr = SocketAddr::from(([0, 0, 0, 0], cfg.port));
     info!("Heiwa Core listening on {}", addr);
-    
+
     let listener = tokio::net::TcpListener::bind(addr).await?;
     axum::serve(listener, app).await?;
 
@@ -148,7 +148,10 @@ pub fn build_router(state: SharedState) -> Router {
 async fn seed_catalogs(conn: &DbConnection, state: SharedState) -> Result<()> {
     let path = std::path::Path::new(&state.config.model_tiers_seed_path);
     if !path.exists() {
-        warn!("Model tiers seed file not found: {}", state.config.model_tiers_seed_path);
+        warn!(
+            "Model tiers seed file not found: {}",
+            state.config.model_tiers_seed_path
+        );
         return Ok(());
     }
 
@@ -209,33 +212,37 @@ async fn seed_catalogs(conn: &DbConnection, state: SharedState) -> Result<()> {
 
 async fn heartbeat(conn: &DbConnection, cfg: &RuntimeConfig) -> Result<()> {
     // TODO: Use sysinfo crate to gather real VRAM info
-    let vram_mb = 0; 
+    let vram_mb = 0;
     let locality = "cloud".to_string(); // Default for Railway
     let trust_tier = 5; // Standard cloud trust
     let provider_keys = "[]".to_string();
     let model_inventory = "[]".to_string();
 
-    conn.reducers.upsert_node_heartbeat(
-        cfg.node_id.clone(),
-        "heiwa-core".to_string(),
-        "ready".to_string(),
-        "{}".to_string(),
-        "{}".to_string(),
-        env!("CARGO_PKG_VERSION").to_string(),
-        "[]".to_string(),
-        10,
-        vram_mb,
-        locality,
-        trust_tier,
-        provider_keys,
-        model_inventory,
-    ).map_err(|e| anyhow!(e.to_string()))
+    conn.reducers
+        .upsert_node_heartbeat(
+            cfg.node_id.clone(),
+            "heiwa-core".to_string(),
+            "ready".to_string(),
+            "{}".to_string(),
+            "{}".to_string(),
+            env!("CARGO_PKG_VERSION").to_string(),
+            "[]".to_string(),
+            10,
+            vram_mb,
+            locality,
+            trust_tier,
+            provider_keys,
+            model_inventory,
+        )
+        .map_err(|e| anyhow!(e.to_string()))
 }
 
-async fn health_handler(axum::extract::State(state): axum::extract::State<SharedState>) -> impl IntoResponse {
+async fn health_handler(
+    axum::extract::State(state): axum::extract::State<SharedState>,
+) -> impl IntoResponse {
     let status = state.status.read().await;
     let is_ready = *status == SystemStatus::Ready;
-    
+
     let body = Json(json!({
         "status": status.as_str(),
         "service": "heiwa-core",
@@ -250,7 +257,9 @@ async fn health_handler(axum::extract::State(state): axum::extract::State<Shared
     }
 }
 
-async fn status_handler(axum::extract::State(state): axum::extract::State<SharedState>) -> impl IntoResponse {
+async fn status_handler(
+    axum::extract::State(state): axum::extract::State<SharedState>,
+) -> impl IntoResponse {
     let status = state.status.read().await;
     Json(json!({
         "node_id": state.config.node_id,
@@ -259,6 +268,9 @@ async fn status_handler(axum::extract::State(state): axum::extract::State<Shared
     }))
 }
 
-pub fn plan_ingress(ingress: &DrexIngress, model_tiers: &[heiwa_bindings::ModelTier]) -> Result<RoutePlan> {
+pub fn plan_ingress(
+    ingress: &DrexIngress,
+    model_tiers: &[heiwa_bindings::ModelTier],
+) -> Result<RoutePlan> {
     plan_route(ingress, model_tiers, &default_policy())
 }

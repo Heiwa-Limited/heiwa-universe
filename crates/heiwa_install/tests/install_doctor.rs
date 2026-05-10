@@ -1,5 +1,6 @@
 use heiwa_install::{
-    check_installation, get_heiwa_dir, parse_plugin_source, plan_plugin_install, run_install,
+    check_ai_ops_at, check_installation, get_heiwa_dir, parse_plugin_source, plan_plugin_install,
+    run_install,
 };
 use std::env;
 use std::fs;
@@ -22,8 +23,7 @@ fn with_temp_home<T>(f: impl FnOnce(&PathBuf) -> T) -> T {
             .parent()
             .expect("crate parent")
             .parent()
-            .expect("repo root")
-            .to_path_buf(),
+            .expect("repo root"),
     );
 
     let result = f(&tmp);
@@ -48,6 +48,31 @@ fn test_doctor_discovery() {
     // In this environment, we expect at least Rust and Python to be present
     assert!(report.rust_version.is_some(), "Rust should be detected");
     assert!(report.python_version.is_some(), "Python should be detected");
+}
+
+#[test]
+fn test_ai_ops_doctor_checks_repo_hygiene_gates() {
+    let repo_root = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .parent()
+        .expect("crate parent")
+        .parent()
+        .expect("repo root")
+        .to_path_buf();
+    let report = check_ai_ops_at(&repo_root).expect("ai ops check should run");
+
+    assert!(report.mcp_notion_http, "Notion MCP must be typed as http");
+    assert!(report.biome_configured, "Biome config must exist");
+    assert!(report.npm_lint_uses_biome, "npm lint must run Biome");
+    assert!(report.ci_lint_uses_biome, "CI must run the Biome gate");
+    assert!(
+        report.ci_clippy_dead_code_enforced,
+        "CI Clippy must not suppress dead_code"
+    );
+    assert!(
+        report.ci_unused_deps_uses_cargo_machete,
+        "CI must run cargo machete for unused Rust dependencies"
+    );
+    assert!(report.is_clean(), "all ai ops checks should be clean");
 }
 
 #[test]

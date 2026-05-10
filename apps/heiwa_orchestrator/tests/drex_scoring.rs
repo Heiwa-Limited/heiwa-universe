@@ -80,7 +80,14 @@ fn route_plan_prefers_vram_fit_and_kv_strategy_for_local_execution() {
     };
 
     let tiers = vec![
-        local_model("ollama/qwen3.5:4b", 2, 32_768, 4_096, "q4_k_m", "turboquant"),
+        local_model(
+            "ollama/qwen3.5:4b",
+            2,
+            32_768,
+            4_096,
+            "q4_k_m",
+            "turboquant",
+        ),
         local_model("ollama/qwen3.5:14b", 3, 32_768, 12_288, "q4_k_m", "q8_0"),
     ];
 

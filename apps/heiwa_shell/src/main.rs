@@ -4,18 +4,22 @@ use heiwa_core::drex::{
     default_policy, plan_route, preflight_execution, DrexIngress, ExecutionMode,
 };
 use heiwa_protocol::{
-    parse_turn_intent, CockpitCommand, CockpitEvent, RoutingState, SessionState, TranscriptBlock,
+    parse_turn_intent, CockpitCommand, CockpitEvent, ExecutionScope, RoutingState, SessionState,
+    ToolLease, TranscriptBlock,
 };
 use heiwa_provider::adapter::{Message, ProviderAdapter, Role, StreamEvent, TokenUsage};
 use heiwa_provider::providers::claude_code::ClaudeCodeCliAdapter;
+use heiwa_provider::providers::codex_cli::CodexCliAdapter;
+use heiwa_provider::providers::gemini_cli::GeminiCliAdapter;
 use heiwa_provider::providers::ollama::OllamaCliAdapter;
 use heiwa_repl::{parse_input, render_footer, ReplCommand, TelemetryState};
 use std::env;
 use std::io::{self, IsTerminal, Write};
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 fn provider_supports_loop_adapter(provider: &str) -> bool {
-    matches!(provider, "claude" | "ollama")
+    matches!(provider, "claude" | "codex" | "ollama" | "gemini")
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -35,16 +39,25 @@ struct SessionPins {
     route_preference: RoutePreference,
     current_provider: String,
     current_model: String,
+    scope: ExecutionScope,
 }
 
 impl SessionPins {
     fn new() -> Self {
+        let working_dir = env::current_dir().unwrap_or_else(|_| heiwa_install::get_heiwa_dir());
+        let mut scope = ExecutionScope::local_default(working_dir);
+        scope.tool_leases.push(ToolLease {
+            name: "shell".to_string(),
+            risk_class: "host".to_string(),
+            allowed: true,
+        });
         Self {
             pinned_provider: None,
             pinned_model: None,
             route_preference: RoutePreference::Auto,
             current_provider: String::new(),
             current_model: String::new(),
+            scope,
         }
     }
 }
@@ -68,6 +81,9 @@ enum RouteOutcome {
     /// DREX returned a deterministic response (no model needed).
     Deterministic(String),
 }
+
+const DEFAULT_SESSION_ID: &str = "default";
+const TRANSCRIPT_CHAR_BUDGET: usize = 16_000;
 
 #[tokio::main]
 async fn main() -> Result<()> {
@@ -180,6 +196,7 @@ async fn main() -> Result<()> {
         }
         "doctor" => {
             let report = heiwa_install::check_installation()?;
+            let include_ai_ops = args.iter().any(|arg| arg == "--ai-ops");
             println!("Heiwa Doctor Report:");
             println!(
                 "  Rust:   {}",
@@ -252,6 +269,32 @@ async fn main() -> Result<()> {
                     "Not found"
                 }
             );
+
+            if include_ai_ops {
+                let ai_ops = heiwa_install::check_ai_ops()?;
+                println!();
+                println!("AI Ops:");
+                print_ai_ops_check("MCP Notion HTTP config", ai_ops.mcp_notion_http);
+                print_ai_ops_check("Biome config", ai_ops.biome_configured);
+                print_ai_ops_check("npm lint -> Biome", ai_ops.npm_lint_uses_biome);
+                print_ai_ops_check("CI Biome gate", ai_ops.ci_lint_uses_biome);
+                print_ai_ops_check(
+                    "CI Clippy dead_code gate",
+                    ai_ops.ci_clippy_dead_code_enforced,
+                );
+                print_ai_ops_check(
+                    "CI unused Rust deps gate",
+                    ai_ops.ci_unused_deps_uses_cargo_machete,
+                );
+                println!(
+                    "  Overall: {}",
+                    if ai_ops.is_clean() {
+                        "Clean"
+                    } else {
+                        "Needs work"
+                    }
+                );
+            }
         }
         "auth" => {
             if args.len() < 3 {
@@ -543,6 +586,12 @@ async fn main() -> Result<()> {
                         "claude" => {
                             Some(Arc::new(ClaudeCodeCliAdapter::new()) as Arc<dyn ProviderAdapter>)
                         }
+                        "codex" => {
+                            Some(Arc::new(CodexCliAdapter::new()) as Arc<dyn ProviderAdapter>)
+                        }
+                        "gemini" => {
+                            Some(Arc::new(GeminiCliAdapter::new()) as Arc<dyn ProviderAdapter>)
+                        }
                         _ => None,
                     });
 
@@ -574,6 +623,9 @@ async fn main() -> Result<()> {
         "--help" | "-h" | "help" => {
             print_help();
         }
+        "--version" | "-V" | "version" => {
+            println!("heiwa {}", env!("CARGO_PKG_VERSION"));
+        }
         _ => {
             println!("Heiwa AI runtime and shell");
             println!("Unknown command: {}", args[1]);
@@ -593,7 +645,7 @@ fn print_help() {
     println!("  install [gh:owner/repo[@ref]] Bootstrap Heiwa or install a GitHub plugin");
     println!("  login [token]                 Sign in to Heiwa");
     println!("  logout                        Sign out from Heiwa");
-    println!("  doctor                        Check the status of the Heiwa installation");
+    println!("  doctor [--ai-ops]             Check installation and optional AI ops gates");
     println!("  register                      Register the current device");
     println!("  receipts                      Show run receipt status");
     println!("  devices                       Show registered devices");
@@ -607,6 +659,10 @@ fn print_help() {
     println!("  loop [turns] <objective>      Run a bounded execution loop");
     println!("  shell                         Enter interactive mode");
     println!("  help                          Print this message");
+}
+
+fn print_ai_ops_check(label: &str, ok: bool) {
+    println!("  {:<30} {}", label, if ok { "ok" } else { "missing" });
 }
 
 fn format_context(tokens: u32) -> String {
@@ -745,11 +801,44 @@ async fn attempt_stdb_connection() -> heiwa_stdb::StdbClient {
     }
 }
 
+fn print_boot_provider_matrix() {
+    // At-a-glance provider sync panel shown on shell boot. This is what a
+    // premium CLI looks like — the user sees *what's connected* without
+    // having to type anything first.
+    const GREEN: &str = "\x1b[32m";
+    const YELLOW: &str = "\x1b[33m";
+    const DIM: &str = "\x1b[2m";
+    const RESET: &str = "\x1b[0m";
+
+    println!("{}Provider sync{}", DIM, RESET);
+    let providers = ["ollama", "claude", "gemini", "antigravity", "codex"];
+    for pid in providers {
+        let Some(acc) = heiwa_provider::get_auth_status(pid) else {
+            continue;
+        };
+        let (glyph, colour) = match acc.status.as_str() {
+            "connected" | "running" => ("●", GREEN),
+            "installed_unverified" | "installed_stopped" => ("○", YELLOW),
+            _ => ("·", DIM),
+        };
+        println!(
+            "  {}{}{} {:<12} {}  {}[{}]{}",
+            colour, glyph, RESET, pid, acc.status, DIM, acc.rate_group, RESET
+        );
+    }
+    println!(
+        "{}  Use /providers to re-sync, /models to list, /help for commands.{}",
+        DIM, RESET
+    );
+    println!();
+}
+
 async fn run_repl(use_cockpit: bool) -> Result<()> {
     if !use_cockpit {
         println!("Heiwa Interactive Shell");
         println!("Type /help for commands, !command for shell escape, or enter a task.");
         println!();
+        print_boot_provider_matrix();
     }
 
     let stdb_client = attempt_stdb_connection().await;
@@ -797,9 +886,12 @@ async fn run_repl(use_cockpit: bool) -> Result<()> {
         println!("No loop-capable models available. Run 'heiwa providers' or 'heiwa auth add-key' to connect.");
     }
 
+    let persisted = heiwa_session::load_transcript(DEFAULT_SESSION_ID)
+        .unwrap_or_else(|_| heiwa_session::PersistedTranscript::empty(DEFAULT_SESSION_ID));
+
     let mut state = SessionState {
-        session_id: "default".to_string(),
-        transcript: vec![],
+        session_id: persisted.session_id.clone(),
+        transcript: persisted.blocks(),
         routing: RoutingState {
             current_provider: "none".to_string(),
             current_model: "none".to_string(),
@@ -827,8 +919,18 @@ async fn run_repl(use_cockpit: bool) -> Result<()> {
         // Spawn the async controller — it owns routing, execution, evidence
         let ctrl_stdb = stdb_client.clone();
         let ctrl_tiers = model_tiers.clone();
+        let ctrl_session_id = state.session_id.clone();
+        let ctrl_transcript = state.transcript.clone();
         tokio::spawn(async move {
-            run_cockpit_controller(cmd_rx, event_tx, ctrl_stdb, ctrl_tiers).await;
+            run_cockpit_controller(
+                cmd_rx,
+                event_tx,
+                ctrl_stdb,
+                ctrl_tiers,
+                ctrl_session_id,
+                ctrl_transcript,
+            )
+            .await;
         });
 
         // Run TUI on the main thread (blocking) — it owns terminal I/O
@@ -865,7 +967,13 @@ async fn run_repl(use_cockpit: bool) -> Result<()> {
         io::stdout().flush()?;
 
         let mut input = String::new();
-        io::stdin().read_line(&mut input)?;
+        let bytes_read = io::stdin().read_line(&mut input)?;
+        if bytes_read == 0 {
+            // EOF (Ctrl-D or non-TTY stdin closed). Exit cleanly instead of
+            // spinning on zero-byte reads forever.
+            println!();
+            break;
+        }
         let input = input.trim();
 
         if input == "exit" || input == "quit" {
@@ -885,6 +993,11 @@ async fn run_repl(use_cockpit: bool) -> Result<()> {
                         continue;
                     }
                     Ok(RouteOutcome::Deterministic(response)) => {
+                        append_state_block(&mut state, TranscriptBlock::User(t.clone()));
+                        append_state_block(
+                            &mut state,
+                            TranscriptBlock::Assistant(response.clone()),
+                        );
                         println!("{}", response);
                         turn_count += 1;
                         continue;
@@ -894,12 +1007,8 @@ async fn run_repl(use_cockpit: bool) -> Result<()> {
                         pins.current_model = route.model_id.clone();
                         record_route_evidence(&stdb_client, &route, &t);
 
-                        state.transcript.push(TranscriptBlock::User(t.clone()));
-
-                        let messages = vec![Message {
-                            role: Role::User,
-                            content: t,
-                        }];
+                        let messages = build_messages_from_transcript(&state.transcript, &t, &pins);
+                        append_state_block(&mut state, TranscriptBlock::User(t.clone()));
                         let (stream_tx, mut stream_rx) = tokio::sync::mpsc::channel(32);
                         let model_id = route.provider_model_id.clone();
 
@@ -932,16 +1041,15 @@ async fn run_repl(use_cockpit: bool) -> Result<()> {
                                 }
                                 StreamEvent::ToolUse { name, .. } => {
                                     println!("\n[tool: {}]", name);
-                                    state
-                                        .transcript
-                                        .push(TranscriptBlock::Tool(name, "executed".to_string()));
+                                    append_state_block(
+                                        &mut state,
+                                        TranscriptBlock::Tool(name, "executed".to_string()),
+                                    );
                                 }
                             }
                         }
                         println!();
-                        state
-                            .transcript
-                            .push(TranscriptBlock::Assistant(full_response));
+                        append_state_block(&mut state, TranscriptBlock::Assistant(full_response));
 
                         if let Some(ref u) = usage {
                             if u.input_tokens > 0 || u.cost_usd > 0.0 {
@@ -958,8 +1066,7 @@ async fn run_repl(use_cockpit: bool) -> Result<()> {
             }
             ReplCommand::Shell(s) => {
                 println!("Escaping to shell: {}", s);
-                let output = std::process::Command::new("sh").arg("-c").arg(s).output();
-                match output {
+                match run_scoped_shell(&s, &pins.scope) {
                     Ok(o) => {
                         io::stdout().write_all(&o.stdout)?;
                         io::stderr().write_all(&o.stderr)?;
@@ -1036,6 +1143,12 @@ async fn run_repl(use_cockpit: bool) -> Result<()> {
                                 Some(Arc::new(ClaudeCodeCliAdapter::new())
                                     as Arc<dyn ProviderAdapter>)
                             }
+                            "codex" => {
+                                Some(Arc::new(CodexCliAdapter::new()) as Arc<dyn ProviderAdapter>)
+                            }
+                            "gemini" => {
+                                Some(Arc::new(GeminiCliAdapter::new()) as Arc<dyn ProviderAdapter>)
+                            }
                             _ => None,
                         });
 
@@ -1069,11 +1182,10 @@ async fn run_repl(use_cockpit: bool) -> Result<()> {
                         }
                     }
                     // All other slash commands use shared handler
-                    _ => {
-                        if let Some(text) = handle_slash(&c, &args, &model_tiers, &mut pins) {
-                            println!("{}", text);
-                        }
-                    }
+                    _ => match handle_slash(&c, &args, &model_tiers, &mut pins) {
+                        Some(text) => println!("{}", text),
+                        None => break,
+                    },
                 }
             }
         }
@@ -1091,6 +1203,8 @@ async fn run_cockpit_controller(
     event_tx: tokio::sync::mpsc::UnboundedSender<CockpitEvent>,
     stdb_client: heiwa_stdb::StdbClient,
     model_tiers: Vec<heiwa_bindings::ModelTier>,
+    session_id: String,
+    mut transcript: Vec<TranscriptBlock>,
 ) {
     let mut pins = SessionPins::new();
 
@@ -1120,6 +1234,18 @@ async fn run_cockpit_controller(
                                 continue;
                             }
                             Ok(RouteOutcome::Deterministic(response)) => {
+                                append_controller_block(
+                                    &session_id,
+                                    &mut transcript,
+                                    TranscriptBlock::User(t.clone()),
+                                    &event_tx,
+                                );
+                                append_controller_block(
+                                    &session_id,
+                                    &mut transcript,
+                                    TranscriptBlock::Assistant(response.clone()),
+                                    &event_tx,
+                                );
                                 let _ = event_tx.send(CockpitEvent::TranscriptAppend(
                                     TranscriptBlock::Assistant(response),
                                 ));
@@ -1147,10 +1273,14 @@ async fn run_cockpit_controller(
                                     .send(CockpitEvent::StatusUpdate("streaming...".into()));
 
                                 // Stream response
-                                let messages = vec![Message {
-                                    role: Role::User,
-                                    content: t,
-                                }];
+                                let messages =
+                                    build_messages_from_transcript(&transcript, &t, &pins);
+                                append_controller_block(
+                                    &session_id,
+                                    &mut transcript,
+                                    TranscriptBlock::User(t.clone()),
+                                    &event_tx,
+                                );
                                 let (stream_tx, mut stream_rx) = tokio::sync::mpsc::channel(32);
                                 let model_id = route.provider_model_id.clone();
 
@@ -1169,9 +1299,11 @@ async fn run_cockpit_controller(
                                 });
 
                                 let mut usage = None;
+                                let mut full_response = String::new();
                                 while let Some(ev) = stream_rx.recv().await {
                                     match ev {
                                         StreamEvent::Token(text) => {
+                                            full_response.push_str(&text);
                                             let _ = event_tx.send(CockpitEvent::StreamToken(text));
                                         }
                                         StreamEvent::Done(u) => {
@@ -1183,12 +1315,28 @@ async fn run_cockpit_controller(
                                             break;
                                         }
                                         StreamEvent::ToolUse { name, .. } => {
+                                            append_controller_block(
+                                                &session_id,
+                                                &mut transcript,
+                                                TranscriptBlock::Tool(
+                                                    name.clone(),
+                                                    "executed".to_string(),
+                                                ),
+                                                &event_tx,
+                                            );
                                             let _ = event_tx.send(CockpitEvent::TranscriptAppend(
                                                 TranscriptBlock::Tool(name, "executed".to_string()),
                                             ));
                                         }
                                     }
                                 }
+
+                                append_controller_block(
+                                    &session_id,
+                                    &mut transcript,
+                                    TranscriptBlock::Assistant(full_response),
+                                    &event_tx,
+                                );
 
                                 if let Some(ref u) = usage {
                                     let _ = event_tx.send(CockpitEvent::StreamDone {
@@ -1208,28 +1356,25 @@ async fn run_cockpit_controller(
                             }
                         }
                     }
-                    ReplCommand::Shell(s) => {
-                        let output = std::process::Command::new("sh").arg("-c").arg(&s).output();
-                        match output {
-                            Ok(o) => {
-                                let stdout_str = String::from_utf8_lossy(&o.stdout).to_string();
-                                let stderr_str = String::from_utf8_lossy(&o.stderr).to_string();
-                                let combined = if stderr_str.is_empty() {
-                                    stdout_str
-                                } else {
-                                    format!("{}\n{}", stdout_str, stderr_str)
-                                };
-                                let _ = event_tx.send(CockpitEvent::TranscriptAppend(
-                                    TranscriptBlock::Tool(format!("shell: {}", s), combined),
-                                ));
-                            }
-                            Err(e) => {
-                                let _ = event_tx.send(CockpitEvent::TranscriptAppend(
-                                    TranscriptBlock::Evidence(format!("shell error: {}", e)),
-                                ));
-                            }
+                    ReplCommand::Shell(s) => match run_scoped_shell(&s, &pins.scope) {
+                        Ok(o) => {
+                            let stdout_str = String::from_utf8_lossy(&o.stdout).to_string();
+                            let stderr_str = String::from_utf8_lossy(&o.stderr).to_string();
+                            let combined = if stderr_str.is_empty() {
+                                stdout_str
+                            } else {
+                                format!("{}\n{}", stdout_str, stderr_str)
+                            };
+                            let _ = event_tx.send(CockpitEvent::TranscriptAppend(
+                                TranscriptBlock::Tool(format!("shell: {}", s), combined),
+                            ));
                         }
-                    }
+                        Err(e) => {
+                            let _ = event_tx.send(CockpitEvent::TranscriptAppend(
+                                TranscriptBlock::Evidence(format!("shell error: {}", e)),
+                            ));
+                        }
+                    },
                     ReplCommand::Slash(c, args) => {
                         let msg = handle_slash(&c, &args, &model_tiers, &mut pins);
                         if let Some(text) = msg {
@@ -1264,9 +1409,67 @@ fn handle_slash(
 ) -> Option<String> {
     match cmd {
         "help" => Some(
-            "commands: /provider [name|auto] /providers /model [name|auto] /models /route [auto|local|remote] /status /clear /loop /exit"
+            "commands: /cwd [folder] /add-dir <folder|glob> /dirs /provider [name|auto] /providers /model [name|auto] /models /route [auto|local|remote] /status /clear /loop /exit"
                 .to_string(),
         ),
+        "cwd" => match args.first() {
+            None => Some(format!("cwd: {}", pins.scope.working_dir.display())),
+            Some(raw) => match resolve_existing_dir(raw, Some(&pins.scope.working_dir)) {
+                Ok(path) => {
+                    pins.scope.set_working_dir(path.clone());
+                    Some(format!("cwd: {}", path.display()))
+                }
+                Err(error) => Some(error),
+            },
+        },
+        "add-dir" | "adddir" => {
+            if args.is_empty() {
+                return Some("usage: /add-dir <folder|glob> [more...]".into());
+            }
+            let mut added = Vec::new();
+            let mut errors = Vec::new();
+            for raw in args {
+                match expand_dir_arg(raw, Some(&pins.scope.working_dir)) {
+                    Ok(paths) if paths.is_empty() => errors.push(format!("no matches: {}", raw)),
+                    Ok(paths) => {
+                        for path in paths {
+                            if pins.scope.add_allowed_dir(path.clone()) {
+                                added.push(path);
+                            }
+                        }
+                    }
+                    Err(error) => errors.push(error),
+                }
+            }
+            let mut lines = Vec::new();
+            if !added.is_empty() {
+                lines.push(format!(
+                    "added dirs:\n{}",
+                    added
+                        .iter()
+                        .map(|path| format!("  {}", path.display()))
+                        .collect::<Vec<_>>()
+                        .join("\n")
+                ));
+            }
+            if !errors.is_empty() {
+                lines.push(format!("errors:\n  {}", errors.join("\n  ")));
+            }
+            if lines.is_empty() {
+                lines.push("no new dirs".to_string());
+            }
+            Some(lines.join("\n"))
+        }
+        "dirs" => Some(format!(
+            "cwd: {}\nallowed dirs:\n{}",
+            pins.scope.working_dir.display(),
+            pins.scope
+                .allowed_dirs
+                .iter()
+                .map(|path| format!("  {}", path.display()))
+                .collect::<Vec<_>>()
+                .join("\n")
+        )),
         "providers" => {
             if model_tiers.is_empty() {
                 Some("no loop-capable providers available".into())
@@ -1383,7 +1586,7 @@ fn handle_slash(
             Some(other) => Some(format!("unknown route preference '{}'", other)),
         },
         "status" => Some(format!(
-            "provider: {} | model: {} | route: {} | pinned_provider: {} | pinned_model: {}",
+            "provider: {} | model: {} | route: {} | pinned_provider: {} | pinned_model: {} | cwd: {} | dirs: {} | sandbox: {:?}",
             if pins.current_provider.is_empty() {
                 "none"
             } else {
@@ -1397,6 +1600,9 @@ fn handle_slash(
             route_preference_label(pins.route_preference),
             pins.pinned_provider.as_deref().unwrap_or("auto"),
             pins.pinned_model.as_deref().unwrap_or("auto"),
+            pins.scope.working_dir.display(),
+            pins.scope.allowed_dirs.len(),
+            pins.scope.sandbox_mode,
         )),
         "clear" => {
             pins.pinned_provider = None;
@@ -1409,12 +1615,201 @@ fn handle_slash(
     }
 }
 
+fn resolve_existing_dir(raw: &str, base: Option<&Path>) -> Result<PathBuf, String> {
+    let path = expand_home(raw);
+    let path = if path.is_absolute() {
+        path
+    } else {
+        base.unwrap_or_else(|| Path::new(".")).join(path)
+    };
+    let canonical = path
+        .canonicalize()
+        .map_err(|error| format!("invalid directory '{}': {}", raw, error))?;
+    if !canonical.is_dir() {
+        return Err(format!("not a directory: {}", canonical.display()));
+    }
+    Ok(canonical)
+}
+
+fn expand_dir_arg(raw: &str, base: Option<&Path>) -> Result<Vec<PathBuf>, String> {
+    if let Some(parent_raw) = raw.strip_suffix("/*") {
+        let parent = resolve_existing_dir(parent_raw, base)?;
+        let mut dirs = Vec::new();
+        let entries = std::fs::read_dir(&parent)
+            .map_err(|error| format!("cannot read '{}': {}", parent.display(), error))?;
+        for entry in entries {
+            let entry = entry.map_err(|error| error.to_string())?;
+            let file_type = entry.file_type().map_err(|error| error.to_string())?;
+            if file_type.is_dir() {
+                dirs.push(
+                    entry
+                        .path()
+                        .canonicalize()
+                        .map_err(|error| error.to_string())?,
+                );
+            }
+        }
+        dirs.sort();
+        return Ok(dirs);
+    }
+
+    resolve_existing_dir(raw, base).map(|path| vec![path])
+}
+
+fn expand_home(raw: &str) -> PathBuf {
+    if raw == "~" {
+        return dirs::home_dir().unwrap_or_else(|| PathBuf::from(raw));
+    }
+    if let Some(rest) = raw.strip_prefix("~/") {
+        if let Some(home) = dirs::home_dir() {
+            return home.join(rest);
+        }
+    }
+    PathBuf::from(raw)
+}
+
+fn run_scoped_shell(command: &str, scope: &ExecutionScope) -> Result<std::process::Output, String> {
+    if !scope.allows_tool("shell") {
+        return Err("shell tool lease is not active for this run".to_string());
+    }
+    if !scope.allows_path(&scope.working_dir) {
+        return Err(format!(
+            "cwd is outside execution scope: {}",
+            scope.working_dir.display()
+        ));
+    }
+    if let Some(path) = first_disallowed_path_reference(command, scope) {
+        return Err(format!(
+            "shell command references path outside execution scope: {}",
+            path.display()
+        ));
+    }
+
+    std::process::Command::new("sh")
+        .arg("-c")
+        .arg(command)
+        .current_dir(&scope.working_dir)
+        .output()
+        .map_err(|error| error.to_string())
+}
+
+fn first_disallowed_path_reference(command: &str, scope: &ExecutionScope) -> Option<PathBuf> {
+    command
+        .split(|c: char| c.is_whitespace() || matches!(c, ';' | '&' | '|' | '<' | '>' | '(' | ')'))
+        .filter_map(normalize_shell_path_token)
+        .find(|path| !scope.allows_path(path))
+}
+
+fn normalize_shell_path_token(token: &str) -> Option<PathBuf> {
+    let token = token
+        .trim_matches(|c| matches!(c, '\'' | '"' | '`' | ',' | ':'))
+        .trim();
+    if token.is_empty() || token.starts_with('-') {
+        return None;
+    }
+    if token.starts_with('/') || token == "~" || token.starts_with("~/") {
+        return Some(expand_home(token));
+    }
+    None
+}
+
+fn build_messages_from_transcript(
+    transcript: &[TranscriptBlock],
+    current_input: &str,
+    pins: &SessionPins,
+) -> Vec<Message> {
+    let mut transcript_messages = Vec::new();
+    let mut used_chars = current_input.len();
+
+    for block in transcript.iter().rev() {
+        let Some((role, content)) = transcript_block_to_message(block) else {
+            continue;
+        };
+        let content_len = content.len();
+        if used_chars + content_len > TRANSCRIPT_CHAR_BUDGET && !transcript_messages.is_empty() {
+            break;
+        }
+        used_chars += content_len;
+        transcript_messages.push(Message { role, content });
+    }
+
+    transcript_messages.reverse();
+    let mut messages = vec![Message {
+        role: Role::System,
+        content: working_context_prompt(pins),
+    }];
+    messages.extend(transcript_messages);
+    messages.push(Message {
+        role: Role::User,
+        content: current_input.to_string(),
+    });
+    messages
+}
+
+fn working_context_prompt(pins: &SessionPins) -> String {
+    let dirs = pins
+        .scope
+        .allowed_dirs
+        .iter()
+        .map(|path| format!("  - {}", path.display()))
+        .collect::<Vec<_>>()
+        .join("\n");
+    let tools = pins
+        .scope
+        .tool_leases
+        .iter()
+        .filter(|lease| lease.allowed)
+        .map(|lease| format!("  - {} ({})", lease.name, lease.risk_class))
+        .collect::<Vec<_>>()
+        .join("\n");
+    format!(
+        "Heiwa working context:\ncurrent directory: {}\nallowed directories:\n{}\nsandbox: {:?}\nnetwork: {:?}\nactive tool leases:\n{}",
+        pins.scope.working_dir.display(),
+        dirs,
+        pins.scope.sandbox_mode,
+        pins.scope.network_policy,
+        tools
+    )
+}
+
+fn transcript_block_to_message(block: &TranscriptBlock) -> Option<(Role, String)> {
+    match block {
+        TranscriptBlock::User(text) => Some((Role::User, text.clone())),
+        TranscriptBlock::Assistant(text) => Some((Role::Assistant, text.clone())),
+        TranscriptBlock::Tool(name, output) => {
+            Some((Role::System, format!("Tool {} output:\n{}", name, output)))
+        }
+        TranscriptBlock::Evidence(text) => Some((Role::System, format!("Evidence:\n{}", text))),
+    }
+}
+
+fn append_state_block(state: &mut SessionState, block: TranscriptBlock) {
+    if let Err(error) = heiwa_session::append_entry(&state.session_id, block.clone()) {
+        eprintln!("Failed to append transcript entry: {}", error);
+    }
+    state.transcript.push(block);
+}
+
+fn append_controller_block(
+    session_id: &str,
+    transcript: &mut Vec<TranscriptBlock>,
+    block: TranscriptBlock,
+    event_tx: &tokio::sync::mpsc::UnboundedSender<CockpitEvent>,
+) {
+    if let Err(error) = heiwa_session::append_entry(session_id, block.clone()) {
+        let _ = event_tx.send(CockpitEvent::TranscriptAppend(TranscriptBlock::Evidence(
+            format!("transcript persistence error: {}", error),
+        )));
+    }
+    transcript.push(block);
+}
+
 // ---------------------------------------------------------------------------
 // Shared execution core — used by both plain REPL and cockpit controller
 // ---------------------------------------------------------------------------
 
 /// Providers that have a working adapter in `resolve_adapter()`.
-const SUPPORTED_ADAPTER_PROVIDERS: &[&str] = &["ollama", "claude"];
+const SUPPORTED_ADAPTER_PROVIDERS: &[&str] = &["ollama", "claude", "codex", "gemini"];
 
 /// Returns true if the provider has a working adapter in this binary.
 fn has_adapter(provider: &str) -> bool {
@@ -1436,6 +1831,26 @@ fn route_task(
 
     let final_provider_pin = provider_pin.as_deref().or(pins.pinned_provider.as_deref());
     let final_model_pin = model_pin.as_deref().or(pins.pinned_model.as_deref());
+
+    let ingress = DrexIngress {
+        intent: turn_request.intent.as_drex_key().to_string(),
+        risk: "low".to_string(),
+        raw_text: task.to_string(),
+        privacy: "standard".to_string(),
+        runtime: runtime_for_route_preference(pins.route_preference).to_string(),
+        available_vram_mb: 8192,
+        required_context_tokens: 1024,
+    };
+    let policy = default_policy();
+
+    let early_preflight = preflight_execution(&ingress, &[], &policy);
+    match early_preflight.execution_mode {
+        ExecutionMode::Deterministic | ExecutionMode::Clarify => {
+            let response = early_preflight.response_text.unwrap_or_default();
+            return Ok(RouteOutcome::Deterministic(response));
+        }
+        _ => {}
+    }
 
     // Filter to providers with working adapters before DREX ever sees them.
     let adapter_capable: Vec<heiwa_bindings::ModelTier> = model_tiers
@@ -1479,17 +1894,6 @@ fn route_task(
         return Err(format!("Routing failed: {}", reason));
     }
 
-    let ingress = DrexIngress {
-        intent: turn_request.intent.as_drex_key().to_string(),
-        risk: "low".to_string(),
-        raw_text: task.to_string(),
-        privacy: "standard".to_string(),
-        runtime: runtime_for_route_preference(pins.route_preference).to_string(),
-        available_vram_mb: 8192,
-        required_context_tokens: 1024,
-    };
-
-    let policy = default_policy();
     let preflight = preflight_execution(&ingress, &routed_tiers, &policy);
 
     match preflight.execution_mode {
@@ -1548,6 +1952,8 @@ fn resolve_adapter(provider: &str, model_id: &str) -> Result<Arc<dyn ProviderAda
     match provider {
         "ollama" => Ok(Arc::new(OllamaCliAdapter::with_model(model_id))),
         "claude" => Ok(Arc::new(ClaudeCodeCliAdapter::new())),
+        "codex" => Ok(Arc::new(CodexCliAdapter::new())),
+        "gemini" => Ok(Arc::new(GeminiCliAdapter::new())),
         _ => Err(format!("No adapter for provider '{}' yet.", provider)),
     }
 }
@@ -1784,7 +2190,70 @@ mod tests {
     fn has_adapter_filters_known_providers() {
         assert!(super::has_adapter("ollama"));
         assert!(super::has_adapter("claude"));
+        assert!(super::has_adapter("codex"));
+        assert!(super::has_adapter("gemini"));
         assert!(!super::has_adapter("anthropic"));
         assert!(!super::has_adapter("openai"));
+    }
+
+    #[test]
+    fn exit_slash_returns_none() {
+        let mut pins = super::SessionPins::new();
+        assert!(super::handle_slash("exit", &[], &[], &mut pins).is_none());
+        assert!(super::handle_slash("quit", &[], &[], &mut pins).is_none());
+    }
+
+    #[test]
+    fn cwd_slash_tracks_current_working_directory() {
+        let mut pins = super::SessionPins::new();
+        let current = std::env::current_dir().unwrap().canonicalize().unwrap();
+
+        let response = super::handle_slash("cwd", &[], &[], &mut pins).unwrap();
+        assert!(response.contains(&current.display().to_string()));
+
+        let response = super::handle_slash("cwd", &[".".to_string()], &[], &mut pins).unwrap();
+        assert_eq!(pins.scope.working_dir, current);
+        assert!(response.contains(&current.display().to_string()));
+        assert!(pins.scope.allowed_dirs.iter().any(|path| path == &current));
+    }
+
+    #[test]
+    fn add_dir_expands_home_children_glob() {
+        let mut pins = super::SessionPins::new();
+        let response = super::handle_slash("add-dir", &["~/*".to_string()], &[], &mut pins)
+            .expect("add-dir should respond");
+
+        assert!(
+            response.contains("added dirs") || response.contains("no new dirs"),
+            "unexpected response: {response}"
+        );
+        assert!(!pins.scope.allowed_dirs.is_empty());
+    }
+
+    #[test]
+    fn model_context_includes_working_dirs() {
+        let pins = super::SessionPins::new();
+        let messages = super::build_messages_from_transcript(
+            &[heiwa_protocol::TranscriptBlock::User("prior".into())],
+            "status",
+            &pins,
+        );
+        assert!(matches!(
+            messages.first().unwrap().role,
+            heiwa_provider::adapter::Role::System
+        ));
+        assert!(messages
+            .first()
+            .unwrap()
+            .content
+            .contains("current directory:"));
+        assert_eq!(messages.last().unwrap().content, "status");
+    }
+
+    #[test]
+    fn scoped_shell_blocks_paths_outside_execution_scope() {
+        let pins = super::SessionPins::new();
+        let error = super::run_scoped_shell("cat /etc/passwd", &pins.scope).unwrap_err();
+        assert!(error.contains("outside execution scope"));
     }
 }

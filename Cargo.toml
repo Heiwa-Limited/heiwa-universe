@@ -1,15 +1,16 @@
 [workspace]
 members = [
     "apps/heiwa_core",
-    "apps/heiwa_hub/heiwaproductiondb/spacetimedb",
-    "apps/heiwa_hub/spacetimedb",
     "apps/heiwa_orchestrator",
     "apps/heiwa_shell",
+    "crates/heiwa_config",
+    "crates/heiwa_embed",
     "crates/heiwa_install",
     "crates/heiwa_loop",
     "crates/heiwa_mcp",
     "crates/heiwa_protocol",
     "crates/heiwa_provider",
+    "crates/heiwa_quota",
     "crates/heiwa_repl",
     "crates/heiwa_session",
     "crates/heiwa_stdb",
@@ -20,7 +21,7 @@ members = [
 resolver = "2"
 
 [workspace.package]
-license = "UNLICENSED"
+license = "Apache-2.0"
 repository = "https://github.com/Strategizing/heiwa-universe"
 homepage = "https://github.com/Strategizing/heiwa-universe"
 documentation = "https://strategizing.github.io/heiwa-universe/"

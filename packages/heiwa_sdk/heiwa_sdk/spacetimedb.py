@@ -1375,9 +1375,6 @@ class SpacetimeDB:
         quantization_type: str,
         kv_cache_strategy: str,
         strengths: list[str],
-        vram_requirement_mb: int,
-        quantization_type: str,
-        kv_cache_strategy: str,
         enabled: bool,
     ) -> bool:
         """Insert or update a model tier."""

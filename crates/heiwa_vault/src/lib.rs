@@ -47,10 +47,6 @@ impl Vault {
         }
     }
 
-    pub fn default() -> Self {
-        Self::new(DEFAULT_SERVICE)
-    }
-
     fn entry(&self, account: &str) -> Result<keyring::Entry> {
         Ok(keyring::Entry::new(&self.service, account)?)
     }
@@ -90,6 +86,12 @@ impl Vault {
     pub fn load_oauth(&self, account: &str) -> Result<OAuthSecret> {
         let raw = self.load(account)?;
         Ok(serde_json::from_str(&raw)?)
+    }
+}
+
+impl Default for Vault {
+    fn default() -> Self {
+        Self::new(DEFAULT_SERVICE)
     }
 }
 

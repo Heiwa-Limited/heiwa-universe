@@ -21,12 +21,13 @@ Heiwa uses a narrow split between runtime and public presentation:
 
 ## Repo boundaries
 
-The canonical repo is `/Users/dmcgregsauce/heiwa`.
+The canonical repo is `/Users/dmcgregsauce/heiwa-universe`.
 
 `heiwa-limited` is no longer treated as an active source-of-truth repo in this documentation set.
 
 ## State bindings
 
-- `apps/heiwa_hub/spacetimedb/` is the Rust SpacetimeDB module.
+- Current STDB-facing Rust work lives in `apps/heiwa_core/src/stdb/`, `apps/heiwa_orchestrator/src/stdb/`, and `crates/heiwa_stdb/`.
+- `legacy/apps/heiwa_hub/spacetimedb/` is quarantined migration/reference material. Do not treat it as the active product spine.
 - `packages/heiwa_bindings/rust/` and `packages/heiwa_bindings/typescript/` are generated from that module.
 - Python currently uses the typed bridge in `packages/heiwa_sdk/heiwa_sdk/spacetimedb.py` until a stable generator path is adopted.

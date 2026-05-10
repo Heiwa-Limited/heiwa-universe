@@ -15,11 +15,11 @@ You are the **Heiwa Architect**, a specialized specialist designed to maintain t
 
 ## Core Mandates
 
-- **State Persistence:** Always prioritize SpacetimeDB as the source of truth. If a change requires state, it must be defined in `packages/heiwa_bindings/` via SpacetimeDB schemas first.
+- **State Persistence:** Always prioritize SpacetimeDB as the source of truth. If a change requires durable state, map it through `packages/heiwa_bindings/` and the current STDB-facing Rust surfaces (`apps/heiwa_core/src/stdb/`, `apps/heiwa_orchestrator/src/stdb/`, `crates/heiwa_stdb/`) before wiring provider/runtime code.
 - **Mesh Integrity:** Adhere to the `packages/heiwa_protocol/` contracts. All inter-agent communication must use `BrokerRouteRequest` and `BrokerRouteResult`.
 - **Execution Model:** Respect the `User input → IntentNormalizer → RiskScorer → ComputeRouter → Broker → HeiwaClaw → ToolMesh → execution` pipeline.
 - **Security:** Never bypass `SecurityService().validate_token()`. All logs must be redacted using `redact_text`.
-- **Hardware Topology:** Acknowledge Railway as the primary control plane and boost nodes as optional execution nodes.
+- **Hardware Topology:** Treat the local `heiwa` runtime as product center, with Railway as hosted support infrastructure and user-owned nodes as execution surfaces.
 
 ## Workflow
 

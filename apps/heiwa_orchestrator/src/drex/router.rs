@@ -36,7 +36,11 @@ pub fn plan_route(
         &ingress.runtime,
     );
     let runtime_hint = runtime_hint(ingress, &vector);
-    let runtime_fit = if is_local_runtime(&runtime_hint) { 1.0 } else { 0.8 };
+    let runtime_fit = if is_local_runtime(&runtime_hint) {
+        1.0
+    } else {
+        0.8
+    };
     let decision = evaluate_drex(&vector, policy, 0.95, runtime_fit, 0.65);
     let selected_model = select_model_tier(ingress, &runtime_hint, &decision, model_tiers);
 
@@ -141,9 +145,15 @@ fn build_drex_vector(
         vector.execution_proximity = clamp(vector.execution_proximity + 0.10);
     }
 
-    if ["portfolio", "enterprise", "roadmap", "priority", "governance"]
-        .iter()
-        .any(|needle| lowercase.contains(needle))
+    if [
+        "portfolio",
+        "enterprise",
+        "roadmap",
+        "priority",
+        "governance",
+    ]
+    .iter()
+    .any(|needle| lowercase.contains(needle))
     {
         vector.scope = clamp(vector.scope + 0.10);
         vector.abstraction = clamp(vector.abstraction + 0.10);
@@ -188,8 +198,7 @@ fn select_model_tier(
         .filter(|tier| tier.vram_requirement_mb <= ingress.available_vram_mb || !local_only)
         .filter(|tier| !local_only || is_local_provider(&tier.provider))
         .max_by(|left, right| {
-            model_score(left, ingress, decision)
-                .total_cmp(&model_score(right, ingress, decision))
+            model_score(left, ingress, decision).total_cmp(&model_score(right, ingress, decision))
         })
         .cloned()
 }

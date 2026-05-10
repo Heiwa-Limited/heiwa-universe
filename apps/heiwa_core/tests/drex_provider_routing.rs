@@ -1,5 +1,5 @@
-use heiwa_core::drex::{DrexIngress, plan_route, default_policy};
 use heiwa_bindings::ModelTier;
+use heiwa_core::drex::{default_policy, plan_route, DrexIngress};
 
 fn get_mock_model_tiers() -> Vec<ModelTier> {
     vec![
@@ -59,11 +59,11 @@ fn test_drex_routing_allows_cloud_for_standard_privacy() {
         available_vram_mb: 8192,
         required_context_tokens: 1024,
     };
-    
+
     let model_tiers = get_mock_model_tiers();
     let policy = default_policy();
     let plan = plan_route(&ingress, &model_tiers, &policy).expect("should plan route");
-    
+
     let selected = plan.selected_model.expect("should select a model");
     assert_eq!(selected.model_id, "claude-3-5-sonnet");
     assert!(plan.routing_metadata.contains("claude-3-5-sonnet"));
@@ -80,11 +80,11 @@ fn test_drex_routing_forces_local_for_sovereign_privacy() {
         available_vram_mb: 8192,
         required_context_tokens: 1024,
     };
-    
+
     let model_tiers = get_mock_model_tiers();
     let policy = default_policy();
     let plan = plan_route(&ingress, &model_tiers, &policy).expect("should plan route");
-    
+
     let selected = plan.selected_model.expect("should select a model");
     assert_eq!(selected.model_id, "llama3");
     assert_eq!(selected.provider, "ollama");

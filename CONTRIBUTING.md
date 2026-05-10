@@ -2,6 +2,8 @@
 
 Heiwa is being consolidated around a smaller public contract: installed runtime first, honest docs, reproducible builds, and explicit release surfaces.
 
+Unless explicitly stated otherwise, contributions are submitted under the Apache License, Version 2.0. Do not include code, docs, generated assets, or dependency snapshots that cannot be distributed under that repository license.
+
 ## Start here
 
 Read these first:
@@ -18,6 +20,7 @@ Use the smallest loop that proves your change:
 bash scripts/check_runtime_baseline.sh
 cargo build --workspace --locked
 cargo test --workspace --locked
+uv run --extra dev python -m pytest
 python -m venv .venv
 source .venv/bin/activate
 pip install -r docs/requirements.txt
@@ -25,6 +28,8 @@ mkdocs build --strict
 ```
 
 If you change only a specific crate or docs page, run the targeted command first, then widen the check before merge.
+
+The default Python gate covers maintained product/support tests. Legacy Hub tests under `apps/heiwa_hub/tests` are explicit repair targets and should be run by path when a change touches that legacy surface.
 
 ## Branch and worktree convention
 

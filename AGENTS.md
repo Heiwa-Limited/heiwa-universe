@@ -19,8 +19,10 @@ Compression:
 | Path | Role |
 | --- | --- |
 | `apps/heiwa_shell/` | Installed `heiwa` runtime and shell surface |
+| `apps/heiwa_app/` | Companion visual shell for the same runtime; web client today, native wrapper later |
 | `apps/heiwa_core/` | Rust execution kernel and hosted runtime path |
-| `apps/heiwa_hub/spacetimedb/` | Canonical STDB module and reducers |
+| `apps/heiwa_orchestrator/` | DREX orchestration, scoring, and STDB-facing runtime work |
+| `crates/heiwa_stdb/` | STDB evidence and offline fallback crate |
 | `crates/heiwa_provider/` | Provider normalization and adapter surfaces |
 | `crates/heiwa_install/` | Install and doctor flows |
 | `crates/heiwa_session/` | Local session daemon primitives |
@@ -28,13 +30,14 @@ Compression:
 | `crates/heiwa_loop/` | Bounded loop workflow |
 | `packages/heiwa_sdk/` | Python compatibility and migration surface |
 | `packages/heiwa_bindings/` | Generated bindings for STDB types |
+| `legacy/apps/heiwa_hub/` | Quarantined legacy Hub reference, not current product spine |
 
 ## Architecture Direction (April 2026)
 
 - Production target stack is **Rust + TypeScript + Shell**.
 - **Rust** owns the authoritative state layer, orchestration, routing, and future DREX execution logic.
-- **TypeScript** owns operator-facing web surfaces and typed client contracts.
-- **Shell** remains the bootstrap and operator glue layer for Railway, Linux, and WSL execution.
+- **TypeScript** owns companion visual surfaces and typed client contracts.
+- **Shell** remains the bootstrap and operator glue layer for the local runtime plus hosted Linux/WSL execution.
 - The Python Hub and cognition packages are still live in the repo, but they are prototype and compatibility surfaces, not the long-term control plane.
 
 ## Provider Truth
@@ -51,6 +54,7 @@ Be honest about maturity:
 - discovery and wrapping may exist before parity does
 - a provider may be known before it is fully loop-capable
 - hosted surfaces exist in the repo, but they are not the current product center
+- `apps/heiwa_app` is the companion visual shell path today, not a fully native desktop runtime yet
 
 ## Operator and Infra Truth
 

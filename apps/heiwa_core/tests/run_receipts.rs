@@ -4,7 +4,7 @@ use anyhow::Result;
 use heiwa_core::stdb::{
     PersistedArtifact, PersistedDispatchAck, PersistedDrexDecision, PersistedDrexFailure,
     PersistedRunFailure, PersistedRunReceipt, PersistedWorkerLease, PersistedWorkerSession,
- StdbRuntime, StdbTransport,
+    StdbRuntime, StdbTransport,
 };
 
 #[derive(Clone, Default)]
@@ -173,13 +173,13 @@ async fn failure_receipt_persists_structured_code_and_log_artifact() {
         started_at: "2026-04-03T07:21:00Z".to_string(),
         ended_at: "2026-04-03T07:22:00Z".to_string(),
         status: "FAILED".to_string(),
-        chain_result_json:
-            r#"{"task_id":"task-2","message":"tool subprocess exited 1"}"#.to_string(),
+        chain_result_json: r#"{"task_id":"task-2","message":"tool subprocess exited 1"}"#
+            .to_string(),
         signals_json: r#"{"node_id":"node-456","session_id":"session-2"}"#.to_string(),
         artifact_index_json: r#"["artifact-error-1"]"#.to_string(),
         node_id: "node-456".to_string(),
-        replay_receipt_json:
-            r#"{"task_id":"task-2","lease_id":"lease-2","retryable":false}"#.to_string(),
+        replay_receipt_json: r#"{"task_id":"task-2","lease_id":"lease-2","retryable":false}"#
+            .to_string(),
         mode: "worker_mesh".to_string(),
         model_id: "error".to_string(),
         tokens_input: 0,
@@ -200,12 +200,15 @@ async fn failure_receipt_persists_structured_code_and_log_artifact() {
 
     let stored = client.last_receipt().expect("receipt");
     assert_eq!(stored.failure_code.as_deref(), Some("EXEC_ERROR"));
-    assert_eq!(stored.failure_message.as_deref(), Some("tool subprocess exited 1"));
+    assert_eq!(
+        stored.failure_message.as_deref(),
+        Some("tool subprocess exited 1")
+    );
     assert_eq!(client.artifacts(), vec![artifact]);
-    }
+}
 
-    #[tokio::test]
-    async fn record_run_failure_persists_explicit_failure_event() {
+#[tokio::test]
+async fn record_run_failure_persists_explicit_failure_event() {
     let client = TestStdbClient::new();
     let failure = client
         .runtime
@@ -227,8 +230,7 @@ async fn failure_receipt_persists_structured_code_and_log_artifact() {
     assert_eq!(failure.failure_type, "system");
     assert!(failure.retryable);
     assert_eq!(client.last_failure(), Some(failure));
-    }
-
+}
 
 #[tokio::test]
 async fn receipt_bundle_requires_at_least_one_artifact() {

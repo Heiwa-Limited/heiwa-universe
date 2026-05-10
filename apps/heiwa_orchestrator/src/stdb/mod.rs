@@ -8,7 +8,7 @@ use heiwa_bindings::{
 };
 use serde_json::json;
 
-use crate::drex::{RoutePlan, ResolutionTier, DEFAULT_POLICY_VERSION};
+use crate::drex::{ResolutionTier, RoutePlan, DEFAULT_POLICY_VERSION};
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct PersistedDrexDecision {
@@ -129,10 +129,7 @@ where
         drex_decision_id: &str,
     ) -> Result<()> {
         self.reducers
-            .attach_drex_decision_to_route(
-                request_id.to_string(),
-                drex_decision_id.to_string(),
-            )
+            .attach_drex_decision_to_route(request_id.to_string(), drex_decision_id.to_string())
             .map_err(|error| anyhow!(error.to_string()))
     }
 }

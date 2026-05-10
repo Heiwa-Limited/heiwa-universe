@@ -1,6 +1,12 @@
 {
   "name": "@heiwa/bindings",
   "private": true,
+  "license": "Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Strategizing/heiwa-universe.git",
+    "directory": "packages/heiwa_bindings/typescript"
+  },
   "type": "module",
   "types": "./generated/index.ts",
   "exports": {

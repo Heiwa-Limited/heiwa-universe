@@ -15,9 +15,9 @@ Read these before runtime changes:
 
 ```bash
 source .venv/bin/activate
-python apps/heiwa_hub/tests/test_intent_classifier.py
-python apps/heiwa_hub/tests/test_risk_scorer.py
-python apps/heiwa_hub/tests/test_compute_router.py
+python legacy/apps/heiwa_hub/tests/test_intent_classifier.py
+python legacy/apps/heiwa_hub/tests/test_risk_scorer.py
+python legacy/apps/heiwa_hub/tests/test_compute_router.py
 python -m pip install -r docs/requirements.txt
 mkdocs build --strict
 python apps/heiwa_app/scripts/check_static_surface.py

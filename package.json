@@ -1,6 +1,15 @@
 {
   "name": "heiwa-universe",
   "private": true,
+  "license": "Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Strategizing/heiwa-universe.git"
+  },
+  "homepage": "https://github.com/Strategizing/heiwa-universe",
+  "bugs": {
+    "url": "https://github.com/Strategizing/heiwa-universe/issues"
+  },
   "engines": {
     "node": "24.x"
   },
@@ -10,12 +19,11 @@
   ],
   "scripts": {
     "check:runtime": "bash scripts/check_runtime_baseline.sh",
+    "lint": "biome ci .",
     "typecheck": "tsc -p packages/heiwa_bindings/typescript/tsconfig.json --noEmit && tsc -p apps/heiwa_app/tsconfig.json --noEmit && npm --prefix apps/heiwa_app/clients/cockpit run typecheck"
   },
   "devDependencies": {
     "@biomejs/biome": "^2.4.10",
-    "eslint": "^10.2.0",
-    "prettier": "^3.8.1",
     "typescript": "5.9.3",
     "typescript-language-server": "^5.1.3"
   }

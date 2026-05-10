@@ -7,12 +7,20 @@ name = "heiwa-cli"
 version = "0.1.0"
 description = "Heiwa CLI — agent OS for terminal"
 requires-python = ">=3.11"
+authors = [{ name = "Heiwa", email = "noreply@heiwa.dev" }]
+license = { text = "Apache-2.0" }
 dependencies = [
     "heiwa-cognition",
     "rich>=13.0.0",
     "prompt_toolkit>=3.0.43",
     "requests>=2.32.0",
 ]
+
+[project.urls]
+Homepage = "https://github.com/Strategizing/heiwa-universe"
+Repository = "https://github.com/Strategizing/heiwa-universe"
+Documentation = "https://strategizing.github.io/heiwa-universe/"
+Issues = "https://github.com/Strategizing/heiwa-universe/issues"
 
 [project.scripts]
 heiwa = "heiwa_cli.__main__:main"

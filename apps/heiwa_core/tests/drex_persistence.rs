@@ -3,13 +3,13 @@ use std::sync::{Arc, Mutex};
 use anyhow::Result;
 use heiwa_bindings::ModelTier;
 use heiwa_core::drex::{
-    DrexAuthorityGate, DrexDecision, DrexScoreCard, DrexVector, ExecutionMode,
-    ResolutionTier, RoutePlan,
+    DrexAuthorityGate, DrexDecision, DrexScoreCard, DrexVector, ExecutionMode, ResolutionTier,
+    RoutePlan,
 };
 use heiwa_core::stdb::{
     PersistedArtifact, PersistedDispatchAck, PersistedDrexDecision, PersistedDrexFailure,
     PersistedRunFailure, PersistedRunReceipt, PersistedWorkerLease, PersistedWorkerSession,
- StdbRuntime, StdbTransport,
+    StdbRuntime, StdbTransport,
 };
 
 #[derive(Clone, Default)]
@@ -30,7 +30,11 @@ impl StdbTransport for MemoryTransport {
         Ok(())
     }
 
-    fn attach_drex_decision_to_route(&self, request_id: &str, drex_decision_id: &str) -> Result<()> {
+    fn attach_drex_decision_to_route(
+        &self,
+        request_id: &str,
+        drex_decision_id: &str,
+    ) -> Result<()> {
         self.route_links
             .lock()
             .unwrap()
@@ -137,7 +141,10 @@ async fn record_drex_decision_writes_scores_and_axes() {
 
     assert_eq!(persisted.active_tier, "micro");
     assert_eq!(persisted.scope, route_plan.decision.vector.scope);
-    assert_eq!(persisted.micro_score, route_plan.decision.scorecard.micro_score);
+    assert_eq!(
+        persisted.micro_score,
+        route_plan.decision.scorecard.micro_score
+    );
     assert_eq!(persisted.route_model, "ollama/qwen3.5:4b");
     assert_eq!(
         client.last_route_link(),

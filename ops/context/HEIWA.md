@@ -58,7 +58,7 @@ The system is anchored by machine-readable files that persist across agent sessi
 | `deploy` / `operate` / `automate` | local `heiwa` runtime + GitHub Actions | control-plane services | `ops/rooms/infra.md` |
 | `audit` / `files` | local-first | deterministic ops / local execution | `ops/rooms/sdk.md` |
 
-Routing details live in `config/swarm/ai_router.json`, `packages/heiwa_cognition/heiwa_cognition/intent.py`, and `packages/heiwa_cognition/heiwa_cognition/router.py`. Use the room files as the human-readable map before changing runtime behavior.
+Routing details live in `config/swarm/ai_router.json`, current Rust runtime crates, and legacy references under `legacy/packages/heiwa_cognition/` when migrating older Python routing behavior. Use the room files as the human-readable map before changing runtime behavior.
 
 ## Transitional Boundaries
 
@@ -82,14 +82,15 @@ Each major directory has a `CONTEXT.md` that agents should read when working in 
 
 | Directory | Context File | What It Covers |
 | --- | --- | --- |
-| `apps/heiwa_hub/` | `CONTEXT.md` | Hub runtime, boot sequence, key files |
-| `apps/heiwa_hub/agents/` | `CONTEXT.md` | Agent roster, BaseAgent contract, how to add agents |
-| `apps/heiwa_hub/cognition/` | `CONTEXT.md` | Intent/risk/compute pipeline, compute classes |
-| `apps/heiwa_cli/` | `CONTEXT.md` | CLI commands, operator surface |
+| `apps/heiwa_core/` | `CONTEXT.md` | Rust execution kernel, routing, receipts, hosted runtime path |
+| `apps/heiwa_orchestrator/` | `CONTEXT.md` | DREX orchestration, scoring, persistence, STDB-facing runtime work |
+| `apps/heiwa_shell/` | `CONTEXT.md` | Installed `heiwa` runtime and shell surface |
+| `legacy/apps/heiwa_hub/` | `CONTEXT.md` | Quarantined legacy Hub reference; repair only when promoting or migrating |
+| `legacy/apps/heiwa_cli/` | `CONTEXT.md` | Legacy CLI reference |
 | `apps/heiwa_trading/` | `CONTEXT.md` | Trading cockpit, supervisor, strategy engine |
 | `apps/heiwa_dj/` | `CONTEXT.md` | Archived — shipped v1.7.0 standalone app |
 | `packages/heiwa_sdk/` | `CONTEXT.md` | DB, routing, security, transport, state layer |
 | `packages/heiwa_protocol/` | `CONTEXT.md` | Subject enum, envelope contracts |
-| `packages/heiwa_cognition/` | `CONTEXT.md` | LLM engine, tier routing |
+| `legacy/packages/heiwa_cognition/` | `CONTEXT.md` | Legacy LLM engine, tier routing reference |
 | `config/` | `CONTEXT.md` | Configuration layer overview |
 | `infra/` | `CONTEXT.md` | Local vs platform ops split, per-machine bootstrap |

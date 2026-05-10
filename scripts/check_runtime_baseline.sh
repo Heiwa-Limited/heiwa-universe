@@ -77,12 +77,12 @@ if ! grep -q '"node": "24.x"' package.json; then
   exit 1
 fi
 
-if ! grep -q "actions/setup-node@v4" .github/workflows/deploy.yml; then
+if ! grep -Eq "actions/setup-node@v[0-9]+" .github/workflows/deploy.yml; then
   echo "deploy workflow must set up Node explicitly" >&2
   exit 1
 fi
 
-if ! grep -q "node-version-file: '.nvmrc'" .github/workflows/deploy.yml; then
+if ! grep -Eq "node-version-file: ['\"]?\\.nvmrc['\"]?" .github/workflows/deploy.yml; then
   echo "deploy workflow must source Node from .nvmrc" >&2
   exit 1
 fi
