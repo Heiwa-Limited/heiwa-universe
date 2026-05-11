@@ -15,6 +15,10 @@ categories.workspace = true
 name = "heiwa"
 path = "src/main.rs"
 
+[lib]
+name = "heiwa_shell"
+path = "src/lib.rs"
+
 [dependencies]
 anyhow = "1.0"
 heiwa-bindings = { path = "../../packages/heiwa_bindings/rust" }
@@ -26,6 +30,7 @@ heiwa-install = { path = "../../crates/heiwa_install" }
 heiwa-loop = { path = "../../crates/heiwa_loop" }
 heiwa-stdb = { path = "../../crates/heiwa_stdb" }
 heiwa-protocol = { path = "../../crates/heiwa_protocol" }
+heiwa_mcp = { path = "../../crates/heiwa_mcp" }
 heiwa-tui = { path = "../../crates/heiwa_tui" }
 uuid = { version = "1.0", features = ["v4"] }
 hostname = "0.4"

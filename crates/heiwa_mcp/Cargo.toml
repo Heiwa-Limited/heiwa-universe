@@ -13,6 +13,7 @@ description = "Model Context Protocol server and client scaffold for Heiwa."
 
 [dependencies]
 async-trait = "0.1"
+heiwa-protocol = { path = "../heiwa_protocol" }
 schemars = { version = "0.8", features = ["preserve_order"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"

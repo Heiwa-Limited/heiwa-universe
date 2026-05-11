@@ -5,7 +5,7 @@ use heiwa_core::drex::{
 };
 use heiwa_protocol::{
     parse_turn_intent, CockpitCommand, CockpitEvent, ExecutionScope, RoutingState, SessionState,
-    ToolLease, TranscriptBlock,
+    ToolCallReceipt, ToolLease, TranscriptBlock,
 };
 use heiwa_provider::adapter::{Message, ProviderAdapter, Role, StreamEvent, TokenUsage};
 use heiwa_provider::providers::claude_code::ClaudeCodeCliAdapter;
@@ -13,6 +13,7 @@ use heiwa_provider::providers::codex_cli::CodexCliAdapter;
 use heiwa_provider::providers::gemini_cli::GeminiCliAdapter;
 use heiwa_provider::providers::ollama::OllamaCliAdapter;
 use heiwa_repl::{parse_input, render_footer, ReplCommand, TelemetryState};
+use heiwa_shell::agentic;
 use std::env;
 use std::io::{self, IsTerminal, Write};
 use std::path::{Path, PathBuf};
@@ -29,6 +30,21 @@ enum RoutePreference {
     RemoteOnly,
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum CockpitMode {
+    Direct,
+    Agentic,
+}
+
+impl CockpitMode {
+    fn label(self) -> &'static str {
+        match self {
+            Self::Direct => "direct",
+            Self::Agentic => "agentic",
+        }
+    }
+}
+
 // ---------------------------------------------------------------------------
 // Shared session state — used by both plain REPL and cockpit controller
 // ---------------------------------------------------------------------------
@@ -37,6 +53,7 @@ struct SessionPins {
     pinned_provider: Option<String>,
     pinned_model: Option<String>,
     route_preference: RoutePreference,
+    cockpit_mode: CockpitMode,
     current_provider: String,
     current_model: String,
     scope: ExecutionScope,
@@ -46,19 +63,29 @@ impl SessionPins {
     fn new() -> Self {
         let working_dir = env::current_dir().unwrap_or_else(|_| heiwa_install::get_heiwa_dir());
         let mut scope = ExecutionScope::local_default(working_dir);
-        scope.tool_leases.push(ToolLease {
-            name: "shell".to_string(),
-            risk_class: "host".to_string(),
-            allowed: true,
-        });
+        grant_tool_lease(&mut scope, "shell", "host");
+        grant_tool_lease(&mut scope, "fs.read", "host_safe_readonly");
+        grant_tool_lease(&mut scope, "fs.list", "host_safe_readonly");
+        grant_tool_lease(&mut scope, "repo.grep", "host_safe_readonly");
         Self {
             pinned_provider: None,
             pinned_model: None,
             route_preference: RoutePreference::Auto,
+            cockpit_mode: CockpitMode::Direct,
             current_provider: String::new(),
             current_model: String::new(),
             scope,
         }
+    }
+}
+
+fn grant_tool_lease(scope: &mut ExecutionScope, name: &str, risk_class: &str) {
+    if !scope.tool_leases.iter().any(|lease| lease.name == name) {
+        scope.tool_leases.push(ToolLease {
+            name: name.to_string(),
+            risk_class: risk_class.to_string(),
+            allowed: true,
+        });
     }
 }
 
@@ -895,7 +922,7 @@ async fn run_repl(use_cockpit: bool) -> Result<()> {
         routing: RoutingState {
             current_provider: "none".to_string(),
             current_model: "none".to_string(),
-            mode: "Auto".to_string(),
+            mode: CockpitMode::Direct.label().to_string(),
             explanation: None,
         },
         devices: vec![],
@@ -1259,15 +1286,171 @@ async fn run_cockpit_controller(
                                 let _ = event_tx.send(CockpitEvent::RoutingUpdate(RoutingState {
                                     current_provider: pins.current_provider.clone(),
                                     current_model: pins.current_model.clone(),
-                                    mode: current_route_label(
-                                        pins.route_preference,
-                                        pins.pinned_provider.as_deref(),
-                                        pins.pinned_model.as_deref(),
-                                    ),
+                                    mode: pins.cockpit_mode.label().to_string(),
                                     explanation: Some(route.routing_metadata.clone()),
                                 }));
 
                                 record_route_evidence(&stdb_client, &route, &t);
+
+                                if pins.cockpit_mode == CockpitMode::Agentic {
+                                    if route.provider != "ollama" {
+                                        let _ = event_tx.send(CockpitEvent::TranscriptAppend(
+                                            TranscriptBlock::Evidence(
+                                                "agentic mode currently supports ollama only"
+                                                    .to_string(),
+                                            ),
+                                        ));
+                                        let _ = event_tx
+                                            .send(CockpitEvent::StatusUpdate("ready".into()));
+                                        continue;
+                                    }
+
+                                    let _ = event_tx.send(CockpitEvent::StatusUpdate(
+                                        "agentic: planning tools...".into(),
+                                    ));
+
+                                    let mut messages =
+                                        build_messages_from_transcript(&transcript, &t, &pins);
+                                    messages.insert(
+                                        1,
+                                        Message {
+                                            role: Role::System,
+                                            content: agentic::tool_instruction_prompt(),
+                                        },
+                                    );
+                                    append_controller_block(
+                                        &session_id,
+                                        &mut transcript,
+                                        TranscriptBlock::User(t.clone()),
+                                        &event_tx,
+                                    );
+
+                                    let (first_response, first_usage, first_error) =
+                                        collect_adapter_response(
+                                            route.adapter.clone(),
+                                            route.provider_model_id.clone(),
+                                            messages.clone(),
+                                        )
+                                        .await;
+
+                                    if let Some(error) = first_error {
+                                        let _ = event_tx.send(CockpitEvent::StreamError(error));
+                                        let _ = event_tx
+                                            .send(CockpitEvent::StatusUpdate("ready".into()));
+                                        continue;
+                                    }
+
+                                    let tool_calls = agentic::parse_tool_calls(&first_response);
+                                    if tool_calls.is_empty() {
+                                        let _ = event_tx.send(CockpitEvent::StreamToken(
+                                            first_response.clone(),
+                                        ));
+                                        append_controller_block(
+                                            &session_id,
+                                            &mut transcript,
+                                            TranscriptBlock::Assistant(first_response),
+                                            &event_tx,
+                                        );
+                                        send_done_event(&event_tx, first_usage.as_ref());
+                                        record_run_evidence(
+                                            &stdb_client,
+                                            &route,
+                                            first_usage.as_ref(),
+                                        );
+                                        let _ = event_tx
+                                            .send(CockpitEvent::StatusUpdate("ready".into()));
+                                        continue;
+                                    }
+
+                                    let _ = event_tx.send(CockpitEvent::StatusUpdate(
+                                        "agentic: running tools...".into(),
+                                    ));
+                                    match agentic::execute_tool_calls(
+                                        pins.scope.clone(),
+                                        tool_calls,
+                                        &route.provider,
+                                        &route.model_id,
+                                    )
+                                    .await
+                                    {
+                                        Ok((receipts, tool_entries)) => {
+                                            for receipt in &receipts {
+                                                record_tool_call_evidence(
+                                                    &stdb_client,
+                                                    receipt,
+                                                    &session_id,
+                                                );
+                                            }
+                                            for entry in &tool_entries {
+                                                append_controller_block(
+                                                    &session_id,
+                                                    &mut transcript,
+                                                    TranscriptBlock::Tool(
+                                                        entry.name.clone(),
+                                                        entry.output.clone(),
+                                                    ),
+                                                    &event_tx,
+                                                );
+                                                let _ =
+                                                    event_tx.send(CockpitEvent::TranscriptAppend(
+                                                        TranscriptBlock::Tool(
+                                                            entry.name.clone(),
+                                                            entry.output.clone(),
+                                                        ),
+                                                    ));
+                                            }
+
+                                            let _ = event_tx.send(CockpitEvent::StatusUpdate(
+                                                "agentic: finalizing...".into(),
+                                            ));
+                                            messages.push(Message {
+                                                role: Role::Assistant,
+                                                content: first_response,
+                                            });
+                                            messages.push(Message {
+                                                role: Role::System,
+                                                content: agentic::tool_result_prompt(&tool_entries),
+                                            });
+
+                                            let (final_response, final_usage, final_error) =
+                                                collect_adapter_response(
+                                                    route.adapter.clone(),
+                                                    route.provider_model_id.clone(),
+                                                    messages,
+                                                )
+                                                .await;
+                                            if let Some(error) = final_error {
+                                                let _ =
+                                                    event_tx.send(CockpitEvent::StreamError(error));
+                                            } else {
+                                                let _ = event_tx.send(CockpitEvent::StreamToken(
+                                                    final_response.clone(),
+                                                ));
+                                                append_controller_block(
+                                                    &session_id,
+                                                    &mut transcript,
+                                                    TranscriptBlock::Assistant(final_response),
+                                                    &event_tx,
+                                                );
+                                                let usage = merge_usage(first_usage, final_usage);
+                                                send_done_event(&event_tx, usage.as_ref());
+                                                record_run_evidence(
+                                                    &stdb_client,
+                                                    &route,
+                                                    usage.as_ref(),
+                                                );
+                                            }
+                                        }
+                                        Err(error) => {
+                                            let _ = event_tx.send(CockpitEvent::StreamError(
+                                                format!("tool loop error: {error}"),
+                                            ));
+                                        }
+                                    }
+                                    let _ =
+                                        event_tx.send(CockpitEvent::StatusUpdate("ready".into()));
+                                    continue;
+                                }
 
                                 let _ = event_tx
                                     .send(CockpitEvent::StatusUpdate("streaming...".into()));
@@ -1385,11 +1568,7 @@ async fn run_cockpit_controller(
                         let _ = event_tx.send(CockpitEvent::RoutingUpdate(RoutingState {
                             current_provider: pins.current_provider.clone(),
                             current_model: pins.current_model.clone(),
-                            mode: current_route_label(
-                                pins.route_preference,
-                                pins.pinned_provider.as_deref(),
-                                pins.pinned_model.as_deref(),
-                            ),
+                            mode: pins.cockpit_mode.label().to_string(),
                             explanation: None,
                         }));
                         let _ = event_tx.send(CockpitEvent::StatusUpdate("ready".into()));
@@ -1409,7 +1588,7 @@ fn handle_slash(
 ) -> Option<String> {
     match cmd {
         "help" => Some(
-            "commands: /cwd [folder] /add-dir <folder|glob> /dirs /provider [name|auto] /providers /model [name|auto] /models /route [auto|local|remote] /status /clear /loop /exit"
+            "commands: /cwd [folder] /add-dir <folder|glob> /dirs /provider [name|auto] /providers /model [name|auto] /models /route [auto|local|remote] /mode [direct|agentic] /status /clear /loop /exit"
                 .to_string(),
         ),
         "cwd" => match args.first() {
@@ -1585,8 +1764,20 @@ fn handle_slash(
             }
             Some(other) => Some(format!("unknown route preference '{}'", other)),
         },
+        "mode" => match args.first().map(|s| s.as_str()) {
+            None => Some(format!("mode: {}", pins.cockpit_mode.label())),
+            Some("direct") => {
+                pins.cockpit_mode = CockpitMode::Direct;
+                Some("mode: direct".into())
+            }
+            Some("agentic") => {
+                pins.cockpit_mode = CockpitMode::Agentic;
+                Some("mode: agentic".into())
+            }
+            Some(other) => Some(format!("unknown mode '{}'", other)),
+        },
         "status" => Some(format!(
-            "provider: {} | model: {} | route: {} | pinned_provider: {} | pinned_model: {} | cwd: {} | dirs: {} | sandbox: {:?}",
+            "provider: {} | model: {} | mode: {} | route: {} | pinned_provider: {} | pinned_model: {} | cwd: {} | dirs: {} | sandbox: {:?}",
             if pins.current_provider.is_empty() {
                 "none"
             } else {
@@ -1597,6 +1788,7 @@ fn handle_slash(
             } else {
                 &pins.current_model
             },
+            pins.cockpit_mode.label(),
             route_preference_label(pins.route_preference),
             pins.pinned_provider.as_deref().unwrap_or("auto"),
             pins.pinned_model.as_deref().unwrap_or("auto"),
@@ -1608,6 +1800,7 @@ fn handle_slash(
             pins.pinned_provider = None;
             pins.pinned_model = None;
             pins.route_preference = RoutePreference::Auto;
+            pins.cockpit_mode = CockpitMode::Direct;
             Some("cleared route, provider, and model pins".into())
         }
         "exit" | "quit" => None,
@@ -2026,6 +2219,99 @@ fn record_run_evidence(
     }
 }
 
+fn record_tool_call_evidence(
+    stdb: &heiwa_stdb::StdbClient,
+    receipt: &ToolCallReceipt,
+    session_id: &str,
+) {
+    let user_id = heiwa_provider::load_identity()
+        .map(|id| id.user_id)
+        .unwrap_or_else(|| "anonymous".to_string());
+    let receipt_json = serde_json::to_string(receipt).unwrap_or_else(|_| "{}".to_string());
+    let _ = stdb.record_tool_call_receipt(
+        &receipt.id,
+        &user_id,
+        &receipt.call_id,
+        Some(session_id.to_string()),
+        &receipt.tool_name,
+        receipt.status.as_str(),
+        &receipt.started_at,
+        &receipt.completed_at,
+        &receipt_json,
+        receipt.error.clone(),
+    );
+}
+
+async fn collect_adapter_response(
+    adapter: Arc<dyn ProviderAdapter>,
+    model_id: String,
+    messages: Vec<Message>,
+) -> (String, Option<TokenUsage>, Option<String>) {
+    let (stream_tx, mut stream_rx) = tokio::sync::mpsc::channel(32);
+    tokio::spawn(async move {
+        if let Err(error) = adapter.send(&model_id, &messages, stream_tx.clone()).await {
+            let _ = stream_tx
+                .send(StreamEvent::Error(format!("adapter error: {error}")))
+                .await;
+        }
+    });
+
+    let mut full_response = String::new();
+    let mut usage = None;
+    let mut error = None;
+    while let Some(event) = stream_rx.recv().await {
+        match event {
+            StreamEvent::Token(text) => full_response.push_str(&text),
+            StreamEvent::Done(u) => {
+                usage = Some(u);
+                break;
+            }
+            StreamEvent::Error(e) => {
+                error = Some(e);
+                break;
+            }
+            StreamEvent::ToolUse { name, input } => {
+                full_response.push_str(
+                    &serde_json::json!({
+                        "tool_calls": [{
+                            "name": name,
+                            "arguments": input,
+                        }]
+                    })
+                    .to_string(),
+                );
+            }
+        }
+    }
+    (full_response, usage, error)
+}
+
+fn merge_usage(first: Option<TokenUsage>, second: Option<TokenUsage>) -> Option<TokenUsage> {
+    match (first, second) {
+        (None, None) => None,
+        (Some(usage), None) | (None, Some(usage)) => Some(usage),
+        (Some(a), Some(b)) => Some(TokenUsage {
+            input_tokens: a.input_tokens + b.input_tokens,
+            output_tokens: a.output_tokens + b.output_tokens,
+            cache_read_tokens: a.cache_read_tokens + b.cache_read_tokens,
+            cache_write_tokens: a.cache_write_tokens + b.cache_write_tokens,
+            cost_usd: a.cost_usd + b.cost_usd,
+        }),
+    }
+}
+
+fn send_done_event(
+    event_tx: &tokio::sync::mpsc::UnboundedSender<CockpitEvent>,
+    usage: Option<&TokenUsage>,
+) {
+    let usage = usage.cloned().unwrap_or_default();
+    let _ = event_tx.send(CockpitEvent::StreamDone {
+        tokens_in: usage.input_tokens as i64,
+        tokens_out: usage.output_tokens as i64,
+        cost: usage.cost_usd,
+    });
+}
+
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
@@ -2248,6 +2534,22 @@ mod tests {
             .content
             .contains("current directory:"));
         assert_eq!(messages.last().unwrap().content, "status");
+    }
+
+    #[test]
+    fn mode_slash_switches_between_direct_and_agentic() {
+        let mut pins = super::SessionPins::new();
+        assert_eq!(pins.cockpit_mode, super::CockpitMode::Direct);
+
+        let response = super::handle_slash("mode", &["agentic".to_string()], &[], &mut pins)
+            .expect("mode response");
+        assert_eq!(response, "mode: agentic");
+        assert_eq!(pins.cockpit_mode, super::CockpitMode::Agentic);
+
+        let response = super::handle_slash("mode", &["direct".to_string()], &[], &mut pins)
+            .expect("mode response");
+        assert_eq!(response, "mode: direct");
+        assert_eq!(pins.cockpit_mode, super::CockpitMode::Direct);
     }
 
     #[test]
