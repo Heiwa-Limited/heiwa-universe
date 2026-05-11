@@ -15,6 +15,7 @@
 //! plain JSON values for now; when we wire `rmcp`, these become `Content`
 //! payloads.
 
+pub mod local_tools;
 pub mod tools;
 
 use std::collections::HashMap;
@@ -25,6 +26,7 @@ use schemars::schema::RootSchema;
 use serde_json::Value;
 use thiserror::Error;
 
+pub use local_tools::{local_repo_registry, FsList, FsRead, RepoGrep};
 pub use tools::{GetQuotaStatus, ListProviders, ProviderSource, QuotaProvider, RouteRequest};
 
 #[derive(Debug, Error)]

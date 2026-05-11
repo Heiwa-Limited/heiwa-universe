@@ -196,6 +196,58 @@ impl StdbClient {
             .map_err(|e| anyhow!(e.to_string()))
     }
 
+    pub fn record_tool_call_receipt(
+        &self,
+        receipt_id: &str,
+        user_id: &str,
+        call_id: &str,
+        session_id: Option<String>,
+        tool_name: &str,
+        status: &str,
+        started_at: &str,
+        completed_at: &str,
+        receipt_json: &str,
+        failure_message: Option<String>,
+    ) -> Result<()> {
+        let Some(conn) = self.connection() else {
+            return Ok(());
+        };
+        let status = match status {
+            "success" => "TOOL_SUCCESS",
+            "denied" => "TOOL_DENIED",
+            _ => "TOOL_FAILURE",
+        };
+        conn.reducers
+            .record_run(
+                receipt_id.to_string(),
+                user_id.to_string(),
+                call_id.to_string(),
+                "local-tool-lease".to_string(),
+                session_id,
+                started_at.to_string(),
+                completed_at.to_string(),
+                status.to_string(),
+                serde_json::json!({ "tool": tool_name, "call_id": call_id }).to_string(),
+                "{}".to_string(),
+                "[]".to_string(),
+                "local".to_string(),
+                receipt_json.to_string(),
+                "tool".to_string(),
+                tool_name.to_string(),
+                0,
+                0,
+                0,
+                0.0,
+                None,
+                None,
+                failure_message
+                    .as_ref()
+                    .map(|_| "TOOL_CALL_FAILED".to_string()),
+                failure_message,
+            )
+            .map_err(|e| anyhow!(e.to_string()))
+    }
+
     // ── Doctrine Phase 1: Knowledge Plane ────────────────────────────────
 
     pub fn emit_source_ingested(

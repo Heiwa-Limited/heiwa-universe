@@ -272,6 +272,46 @@ pub struct RunReceipt {
     pub tokens: u32,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct ToolCall {
+    pub id: String,
+    pub name: String,
+    pub arguments: serde_json::Value,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum ToolCallStatus {
+    Success,
+    Failure,
+    Denied,
+}
+
+impl ToolCallStatus {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Success => "success",
+            Self::Failure => "failure",
+            Self::Denied => "denied",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct ToolCallReceipt {
+    pub id: String,
+    pub call_id: String,
+    pub provider: String,
+    pub model_id: String,
+    pub tool_name: String,
+    pub status: ToolCallStatus,
+    pub started_at: String,
+    pub completed_at: String,
+    pub arguments: serde_json::Value,
+    pub result: Option<serde_json::Value>,
+    pub error: Option<String>,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub enum NetworkPolicy {
     Deny,
@@ -629,5 +669,12 @@ mod tests {
 
         assert!(scope.allows_tool("shell"));
         assert!(!scope.allows_tool("network"));
+    }
+
+    #[test]
+    fn tool_call_status_has_stable_wire_values() {
+        assert_eq!(ToolCallStatus::Success.as_str(), "success");
+        assert_eq!(ToolCallStatus::Failure.as_str(), "failure");
+        assert_eq!(ToolCallStatus::Denied.as_str(), "denied");
     }
 }
