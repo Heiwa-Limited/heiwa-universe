@@ -194,6 +194,18 @@ doctrine_enum! {
     }
 }
 
+doctrine_enum! {
+    /// Risk class for a `ToolLease`. Drives DREX policy routing:
+    /// `HostSafeReadonly` runs on the host without sandboxing,
+    /// `HostMutating` runs on the host but writes to scope-permitted paths,
+    /// `SandboxRequired` must be dispatched to an E2B (or equivalent) sandbox.
+    pub enum RiskClass {
+        HostSafeReadonly => "host_safe_readonly",
+        HostMutating => "host_mutating",
+        SandboxRequired => "sandbox_required",
+    }
+}
+
 // ---------------------------------------------------------------------------
 // Cockpit event contract — controller <-> TUI communication
 // ---------------------------------------------------------------------------
@@ -329,7 +341,7 @@ pub enum SandboxMode {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct ToolLease {
     pub name: String,
-    pub risk_class: String,
+    pub risk_class: RiskClass,
     pub allowed: bool,
 }
 
@@ -803,7 +815,7 @@ mod tests {
         let mut scope = ExecutionScope::local_default(root);
         scope.tool_leases.push(ToolLease {
             name: "shell".into(),
-            risk_class: "host".into(),
+            risk_class: RiskClass::HostMutating,
             allowed: true,
         });
 

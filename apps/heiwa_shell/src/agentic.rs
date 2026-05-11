@@ -104,7 +104,7 @@ pub async fn execute_tool_calls(
                 });
             }
             Err(error) => {
-                let status = if is_policy_denial(&error.to_string()) {
+                let status = if error.is_policy_denial() {
                     ToolCallStatus::Denied
                 } else {
                     ToolCallStatus::Failure
@@ -131,10 +131,6 @@ pub async fn execute_tool_calls(
     }
 
     Ok((tool_receipts, tool_transcript))
-}
-
-fn is_policy_denial(error: &str) -> bool {
-    error.contains("lease") || error.contains("outside execution scope")
 }
 
 pub fn tool_instruction_prompt() -> String {
