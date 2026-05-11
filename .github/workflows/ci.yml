@@ -168,3 +168,11 @@ jobs:
         run: bash scripts/check_runtime_baseline.sh
       - name: Verify release metadata
         run: bash scripts/check_release_metadata.sh
+      - name: Install audit tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y bats ripgrep
+      - name: Run audit gates
+        run: |
+          python3 scripts/validate_connector_manifests.py
+          bats tests/audit/*.bats

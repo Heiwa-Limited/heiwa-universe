@@ -1,0 +1,160 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://heiwa.ltd/schemas/connector.schema.json",
+  "title": "HeiwaConnectorManifest",
+  "description": "Heiwa connector manifest. Declares scoped capabilities, auth modes, risk classes, and revocation paths so doctor/audit can fail closed when docs claim support that the manifest does not back.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "id",
+    "name",
+    "support_level",
+    "auth",
+    "capabilities",
+    "receipt_required"
+  ],
+  "properties": {
+    "id": {
+      "type": "string",
+      "pattern": "^[a-z0-9][a-z0-9_.-]*$",
+      "description": "Stable connector identifier, lowercase, used as a key in receipts and leases."
+    },
+    "name": {
+      "type": "string",
+      "minLength": 1
+    },
+    "vendor": {
+      "type": "string"
+    },
+    "summary": {
+      "type": "string"
+    },
+    "support_level": {
+      "type": "string",
+      "enum": [
+        "official_api",
+        "local_os_bridge",
+        "user_mediated",
+        "webhook",
+        "polling",
+        "third_party_bridge",
+        "unsupported",
+        "target"
+      ],
+      "description": "How this connector reaches the external system. Doctor/audit fails closed when product docs claim a higher support level than this manifest declares."
+    },
+    "auth": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "string",
+        "enum": [
+          "fine_grained_pat",
+          "classic_pat",
+          "github_app",
+          "oauth_cli",
+          "oauth_device",
+          "oauth_authcode",
+          "api_key",
+          "local_runtime",
+          "local_os_bridge",
+          "webhook_signature"
+        ]
+      },
+      "uniqueItems": true
+    },
+    "revocation_path": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Human-followable instruction or URL for revoking this connector's access."
+    },
+    "receipt_required": {
+      "type": "boolean",
+      "description": "When true, every action through this connector must produce a receipt artifact."
+    },
+    "risk_classes": {
+      "type": "object",
+      "description": "Optional per-capability override map. Capability id -> risk_class.",
+      "additionalProperties": {
+        "$ref": "#/$defs/risk_class"
+      }
+    },
+    "source_notes": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["title", "url"],
+        "properties": {
+          "title": { "type": "string" },
+          "url": { "type": "string", "format": "uri" }
+        }
+      }
+    },
+    "capabilities": {
+      "type": "array",
+      "minItems": 1,
+      "items": { "$ref": "#/$defs/capability" }
+    },
+    "claim_aliases": {
+      "type": "array",
+      "description": "Strings that, if found in product/capability docs, count as a claim of this connector. Used by the docs claim guard.",
+      "items": { "type": "string", "minLength": 1 },
+      "uniqueItems": true
+    }
+  },
+  "$defs": {
+    "risk_class": {
+      "type": "string",
+      "enum": ["silent", "notify", "approve", "forbidden"]
+    },
+    "capability": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "description",
+        "risk_class",
+        "receipt_required",
+        "support_status"
+      ],
+      "properties": {
+        "id": {
+          "type": "string",
+          "pattern": "^[a-z0-9][a-z0-9_.-]*$"
+        },
+        "description": {
+          "type": "string",
+          "minLength": 1
+        },
+        "risk_class": { "$ref": "#/$defs/risk_class" },
+        "receipt_required": { "type": "boolean" },
+        "support_status": {
+          "type": "string",
+          "enum": ["live", "target", "unsupported"]
+        },
+        "side_effect": {
+          "type": "string",
+          "enum": ["read", "write", "destructive"],
+          "default": "read"
+        },
+        "permissions": {
+          "type": "array",
+          "items": { "type": "string", "minLength": 1 },
+          "uniqueItems": true
+        },
+        "permission_notes": { "type": "string" },
+        "scopes": {
+          "type": "array",
+          "items": { "type": "string", "minLength": 1 },
+          "uniqueItems": true
+        },
+        "rate_hint": { "type": "string" }
+      },
+      "anyOf": [
+        { "required": ["permissions"] },
+        { "required": ["permission_notes"] }
+      ]
+    }
+  }
+}
