@@ -1,25 +1,21 @@
 # Provider Registry
 
-## Public/runtime providers
+## Runtime and infrastructure providers
 
 | Role | Provider | Status | Notes |
 |:-----|:---------|:-------|:------|
-| Source control / CI | GitHub | Active | Repo, pull requests, Actions |
-| Release distribution | GitHub | Active target | Releases, install artifacts, public repo front page |
-| Public marketing | Cloudflare Pages | Active target | `heiwa.ltd` shell |
-| Companion client | Cloudflare Pages | Active target | `app.heiwa.ltd` safe client shell, not a privileged control plane |
-| Public status | Cloudflare Pages | Active target | `status.heiwa.ltd` read-only shell |
-| Public docs | Cloudflare Pages | Active target | `docs.heiwa.ltd` from MkDocs Material |
-| State/evidence layer | SpacetimeDB Maincloud | Active target | Authoritative state ledger on `maincloud.spacetimedb.com` |
-| Local runtime | User device | Active | Installed `heiwa` owns local side effects, provider subprocesses, local secrets, and local models |
-| External account connectors | Apple / Google / Microsoft / GitHub | Target | OAuth/API/local-bridge capability lanes with explicit scopes, leases, and revocation |
-| Hosted Rust runtime | None in v0.1 | Deferred | No cloud Rust service tier sits in the inference/shell hot path |
-| Internal vertical runtime | Local/private preview | Internal preview | `heiwa-trading` stays isolated until it graduates into a first-class surface |
+| Installed operator runtime | `heiwa` on the user's machine | Active | Primary cockpit, routing, bounded execution, and provider-wrapping surface |
+| Local/provider runtimes | Ollama, provider CLIs, API providers | Wrapped | Provider-owned auth, quota, inference, and native tooling remain provider-owned |
+| Backend evidence plane | SpacetimeDB maincloud | Active target | Backend adjudication, subscription, and evidence ledger on `maincloud.spacetimedb.com` |
+| Source control / CI / release | GitHub | Active | Repo, pull requests, Actions, Releases, and release evidence |
+| Public docs | GitHub Pages | Active | MkDocs Material documentation from this repository |
+| Hosted services | Railway | Support infrastructure | Supported Heiwa services may run here when always-on hosting is required |
+| Public edge | Cloudflare | Support infrastructure | DNS, edge, and proxy surface where needed |
+| Internal vertical runtimes | Isolated service providers | Internal preview | Surfaces such as trading stay isolated until they graduate into first-class product surfaces |
 
 ## Public-safe posture
 
-- Cloudflare Pages should serve marketing, the authenticated app shell, docs, and read-only status views while deferring privileged decisions to the runtime/API boundary and SpacetimeDB reducers.
-- `app.heiwa.ltd` is a safe companion client over runtime/STDB-backed state, not a second privileged control plane.
-- External account providers are product-grade only after auth, resource listing, bounded action execution, evidence, and revocation are implemented.
-- Hosted Rust services are deferred until a later control-plane stage proves they are needed.
+- Public shells should defer privileged decisions to the installed runtime or hosted runtime API.
+- `app.heiwa.ltd` stays the canonical user home for the visual shell; it is not a second control plane.
+- Hosted services must remain scoped support surfaces, not the default operator story.
 - New providers should not be added to the public story until they are verified and necessary.
