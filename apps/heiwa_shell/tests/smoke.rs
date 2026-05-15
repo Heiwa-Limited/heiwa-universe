@@ -416,12 +416,13 @@ fn test_approvals_list_json_reports_dispatch_paths() {
         stdout.contains("\"command\":\"approvals list\""),
         "expected approvals list json marker: {stdout}"
     );
+    let normalized_stdout = stdout.replace('\\', "/");
     assert!(
-        stdout.contains("dispatch/requests"),
+        normalized_stdout.contains("dispatch/requests"),
         "expected dispatch/requests directory in approvals list: {stdout}"
     );
     assert!(
-        stdout.contains("dispatch/approvals/decisions"),
+        normalized_stdout.contains("dispatch/approvals/decisions"),
         "expected dispatch/approvals/decisions directory in approvals list: {stdout}"
     );
 }
