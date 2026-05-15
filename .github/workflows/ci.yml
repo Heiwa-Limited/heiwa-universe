@@ -48,6 +48,8 @@ jobs:
         with:
           workspaces: |
             .
+          prefix-key: v1-rust
+          cache-bin: false
       - name: Cargo build
         run: cargo build --workspace --locked
       - name: Cargo test

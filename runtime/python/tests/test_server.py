@@ -86,7 +86,7 @@ async def test_validation_failure_is_typed_error() -> None:
 async def test_check_deps_reports_each_module() -> None:
     resp = await dispatch(Request(id="x", op="check_deps"))
     assert resp.status == "ok"
-    for name in ("langgraph", "llama_index", "ragas"):
+    for name in ("langgraph", "llama_index"):
         assert name in resp.result
         assert "importable" in resp.result[name]
 

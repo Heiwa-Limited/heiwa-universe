@@ -187,7 +187,7 @@ fn render(f: &mut Frame, state: &AppState) {
             Constraint::Length(ch), // Composer (dynamic)
             Constraint::Length(1),  // Footer
         ])
-        .split(f.size());
+        .split(f.area());
 
     render_header(f, state, outer[0]);
     render_middle(f, state, outer[1]);
