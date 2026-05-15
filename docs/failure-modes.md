@@ -6,7 +6,7 @@ If the static site advertises surfaces or providers that the docs and CI do not 
 
 ## Runtime unavailable
 
-If Railway runtime endpoints are unavailable, status pages should degrade to an explicit warning state. Public docs and marketing should continue serving from Cloudflare Pages.
+If hosted runtime/API endpoints are unavailable, status pages should degrade to an explicit warning state. Installed `heiwa` workflows, public docs, and release artifacts should remain understandable without depending on a live hosted control plane.
 
 ## WebSocket unavailable
 

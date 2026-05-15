@@ -2,19 +2,20 @@
 
 ## Supported now
 
-- **CLI**: supported operator surface through the installed `heiwa` runtime
-- **Provider discovery/adapters**: real but uneven across local, OAuth CLI, and API-key modes
-- **MCP/tool contracts**: supported integration direction with explicit lease boundaries
-- **Static public shell/docs**: supported public-safe presentation surface
-- **Rust runtime substrate**: active product path for routing, sessions, providers, and loops
+- **Installed `heiwa` CLI/cockpit**: supported operator surface
+- **MCP/tool registry**: supported integration surface with scoped local tools
+- **Connector manifests**: validated manifest surface with negative audit coverage
+- **HTTP API**: supported public-safe runtime ingress where hosted services are deployed
+- **Docs and release artifacts**: supported GitHub-native publication surfaces
 
 ## Supported architecture claims
 
-- GitHub is the source, CI, release, and public repo front-page layer.
-- Cloudflare is the target public edge for marketing, docs, static clients, status, and later Workers.
-- SpacetimeDB Maincloud is the intended authoritative state, reducer, subscription, and evidence layer.
-- Local `heiwa` runtimes own local side effects, provider subprocesses, local secrets, and local model calls.
-- No hosted Rust service tier is required for the v0.1 topology; the installed runtime owns the inference/shell hot path.
+- The installed runtime is the current product center of gravity.
+- DREX routing, provider/session/protocol crates, execution scopes, tool leases, and receipts are the live runtime spine.
+- SpacetimeDB is the backend adjudication, subscription, and evidence plane.
+- GitHub Actions, Pages, and Releases are the current repo-native validation and publication path.
+- Railway and Cloudflare are support infrastructure for hosted services and public edge needs; they do not define the default operator experience.
+- Public status is event-first when exposed, with HTTP diagnostics as fallback.
 
 ## Not presented as complete
 
@@ -26,6 +27,8 @@
 - `heiwa-limited` as an active product target
 - experimental canvases as part of the supported stack
 - placeholder agent personas as productized capabilities
+- full provider-normalized multi-turn tool calling across every provider
+- executable connector capability truth beyond manifest validation
 
 ## Evidence rule
 

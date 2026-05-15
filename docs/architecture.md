@@ -2,14 +2,14 @@
 
 ## Product Stack
 
-Heiwa uses a narrow split between local execution, public presentation, and canonical state:
+Heiwa uses a narrow split between installed execution, backend state, hosted support, and public presentation:
 
-- **Local runtime**: installed `heiwa` owns provider subprocesses, local model calls, shell/browser/computer-use side effects, local secrets, and local approvals.
-- **SpacetimeDB Maincloud**: authoritative state layer on `maincloud.spacetimedb.com`; owns reducers, subscriptions, leases, runs, artifacts, and evidence.
-- **Cloudflare**: public edge for marketing, docs, status, static clients, WAF, DNS, and later Workers/remote attach.
-- **GitHub**: source, CI, release artifacts, installer distribution, and professional public repo front page.
-
-The target enterprise backbone is GitHub + Cloudflare + SpacetimeDB. The local runtime still owns the hot path for provider streams, shell work, local models, approvals, and side effects; hosted availability does not mean every user action runs remotely.
+- **Installed `heiwa` runtime** is the primary operator surface. It owns local routing, cockpit, bounded execution, provider wrapping, and operator UX.
+- **Rust workspace services** own the current execution kernel, DREX routing, provider/session/protocol crates, connector gates, and release artifacts.
+- **SpacetimeDB** is the backend adjudication, subscription, and evidence plane on `maincloud.spacetimedb.com`.
+- **Railway** may host supported Heiwa services where always-on infrastructure is needed, but it is support infrastructure, not the product center.
+- **GitHub and public edge infrastructure** publish docs, releases, CI evidence, and public shells. Public surfaces should not duplicate privileged runtime behavior.
+- **WebSockets** carry live status/event transport when a runtime exposes them.
 
 ## Capability Fabric
 
@@ -24,7 +24,7 @@ connector contract, subagent delegation model, and value gate.
 - `api.heiwa.ltd` is the public HTTP/MCP/status ingress where deployed.
 - `status.heiwa.ltd` is a read-only status shell backed by runtime health/status data.
 - `docs.heiwa.ltd` is the documentation site.
-- Internal vertical runtimes such as trading are not part of the supported public surface until they graduate into first-class product surfaces.
+- Internal vertical runtimes such as trading can stay isolated from the supported public surface until they graduate into first-class product surfaces.
 - The public web surface should not duplicate privileged runtime behavior.
 
 ## Repo boundaries
@@ -37,5 +37,5 @@ The canonical active repo is `/Users/dmcgregsauce/heiwa-universe`.
 
 - Current STDB-facing Rust work lives in `apps/heiwa_core/src/stdb/`, `apps/heiwa_orchestrator/src/stdb/`, and `crates/heiwa_stdb/`.
 - `legacy/apps/heiwa_hub/spacetimedb/` is quarantined migration/reference material. Do not treat it as the active product spine.
-- `packages/heiwa_bindings/rust/` and `packages/heiwa_bindings/typescript/` are generated from that module.
+- `packages/heiwa_bindings/rust/` and `packages/heiwa_bindings/typescript/` are generated bindings for STDB-facing contracts.
 - Python currently uses the typed bridge in `packages/heiwa_sdk/heiwa_sdk/spacetimedb.py` until a stable generator path is adopted.
