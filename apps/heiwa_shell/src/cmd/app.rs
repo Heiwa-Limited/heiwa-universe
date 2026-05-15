@@ -726,7 +726,7 @@ fn which(bin: &str) -> Option<PathBuf> {
     }
 }
 
-fn workers_summary(state_dir: &PathBuf) -> Value {
+fn workers_summary(state_dir: &Path) -> Value {
     let workers_path = state_dir.join("workers.json");
     let raw = fs::read_to_string(&workers_path).ok();
     let parsed: Value = raw
@@ -766,7 +766,7 @@ fn workers_summary(state_dir: &PathBuf) -> Value {
     })
 }
 
-fn approvals_summary(state_dir: &PathBuf) -> Value {
+fn approvals_summary(state_dir: &Path) -> Value {
     let requests = state_dir.join("dispatch").join("requests");
     let decisions = state_dir
         .join("dispatch")
@@ -782,7 +782,7 @@ fn approvals_summary(state_dir: &PathBuf) -> Value {
     })
 }
 
-fn count_json(dir: &PathBuf) -> i64 {
+fn count_json(dir: &Path) -> i64 {
     let Ok(entries) = fs::read_dir(dir) else {
         return 0;
     };
