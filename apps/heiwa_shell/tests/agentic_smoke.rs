@@ -2,7 +2,7 @@ use std::fs;
 use std::path::PathBuf;
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use heiwa_protocol::{ExecutionScope, ToolLease};
+use heiwa_protocol::{ExecutionScope, RiskClass, ToolLease};
 use heiwa_shell::agentic::{run_agentic_turn_with_responses, AgenticTurnInput};
 
 fn test_root() -> PathBuf {
@@ -18,7 +18,7 @@ fn leased_scope(root: PathBuf) -> ExecutionScope {
     for name in ["fs.read", "fs.list", "repo.grep"] {
         scope.tool_leases.push(ToolLease {
             name: name.to_string(),
-            risk_class: "host_safe_readonly".to_string(),
+            risk_class: RiskClass::HostSafeReadonly,
             allowed: true,
         });
     }

@@ -19,6 +19,7 @@ pub mod local_tools;
 pub mod tools;
 
 use std::collections::HashMap;
+use std::path::PathBuf;
 use std::sync::Arc;
 
 use async_trait::async_trait;
@@ -28,6 +29,28 @@ use thiserror::Error;
 
 pub use local_tools::{local_repo_registry, FsList, FsRead, RepoGrep};
 pub use tools::{GetQuotaStatus, ListProviders, ProviderSource, QuotaProvider, RouteRequest};
+
+/// Typed reason for a policy denial. Driven by `ExecutionScope` checks in
+/// `heiwa_protocol`. Each variant maps to a distinct operator-visible
+/// failure mode so the audit trail can tell why a tool was blocked.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum PolicyDenial {
+    /// No matching allowed `ToolLease` for this tool name.
+    MissingLease { tool: String },
+    /// Resolved path is outside the active `allowed_dirs`.
+    OutsideExecutionScope { path: PathBuf },
+}
+
+impl std::fmt::Display for PolicyDenial {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::MissingLease { tool } => write!(f, "tool lease missing for {tool}"),
+            Self::OutsideExecutionScope { path } => {
+                write!(f, "outside execution scope: {}", path.display())
+            }
+        }
+    }
+}
 
 #[derive(Debug, Error)]
 pub enum McpError {
@@ -39,8 +62,18 @@ pub enum McpError {
         #[source]
         source: serde_json::Error,
     },
+    #[error("policy denied: {0}")]
+    PolicyDenied(PolicyDenial),
     #[error("tool call failed: {0}")]
     Tool(String),
+}
+
+impl McpError {
+    /// True if this is a policy gate rejection (lease missing or scope
+    /// violation), as opposed to a tool-level failure.
+    pub fn is_policy_denial(&self) -> bool {
+        matches!(self, Self::PolicyDenied(_))
+    }
 }
 
 pub type Result<T> = std::result::Result<T, McpError>;

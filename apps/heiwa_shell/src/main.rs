@@ -8,8 +8,8 @@ use heiwa_core::drex::{
 };
 use heiwa_protocol::{
     parse_turn_intent, CockpitCommand, CockpitEvent, ExecutionRole, ExecutionScope, Permission,
-    PrincipalKind, RoutingState, SessionPrincipal, SessionState, ToolCallReceipt, ToolLease,
-    TranscriptBlock,
+    PrincipalKind, RiskClass, RoutingState, SessionPrincipal, SessionState, ToolCallReceipt,
+    ToolLease, TranscriptBlock,
 };
 use heiwa_provider::adapter::{Message, ProviderAdapter, Role, StreamEvent, TokenUsage};
 use heiwa_provider::providers::claude_code::ClaudeCodeCliAdapter;
@@ -68,10 +68,10 @@ impl SessionPins {
     fn new() -> Self {
         let working_dir = env::current_dir().unwrap_or_else(|_| heiwa_install::get_heiwa_dir());
         let mut scope = ExecutionScope::local_default(working_dir);
-        grant_tool_lease(&mut scope, "shell", "host");
-        grant_tool_lease(&mut scope, "fs.read", "host_safe_readonly");
-        grant_tool_lease(&mut scope, "fs.list", "host_safe_readonly");
-        grant_tool_lease(&mut scope, "repo.grep", "host_safe_readonly");
+        grant_tool_lease(&mut scope, "shell", RiskClass::HostMutating);
+        grant_tool_lease(&mut scope, "fs.read", RiskClass::HostSafeReadonly);
+        grant_tool_lease(&mut scope, "fs.list", RiskClass::HostSafeReadonly);
+        grant_tool_lease(&mut scope, "repo.grep", RiskClass::HostSafeReadonly);
         Self {
             pinned_provider: None,
             pinned_model: None,
@@ -89,11 +89,11 @@ impl SessionPins {
     }
 }
 
-fn grant_tool_lease(scope: &mut ExecutionScope, name: &str, risk_class: &str) {
+fn grant_tool_lease(scope: &mut ExecutionScope, name: &str, risk_class: RiskClass) {
     if !scope.tool_leases.iter().any(|lease| lease.name == name) {
         scope.tool_leases.push(ToolLease {
             name: name.to_string(),
-            risk_class: risk_class.to_string(),
+            risk_class,
             allowed: true,
         });
     }
