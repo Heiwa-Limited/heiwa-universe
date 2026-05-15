@@ -16,7 +16,15 @@ parse_product_surface() {
   fi
 
   awk -F'|' '
-    /^\| `/ {
+    /^## Path To Class[[:space:]]*$/ {
+      in_path_table = 1
+      next
+    }
+    in_path_table && /^## / {
+      in_path_table = 0
+      next
+    }
+    in_path_table && /^\| `/ {
       path = $2
       class = $3
       gsub(/`/, "", path)

@@ -178,6 +178,169 @@ pub struct ApprovalDecision {
     pub metadata_json: String,
 }
 
+#[table(accessor = life_sources, private)]
+pub struct LifeSource {
+    #[primary_key]
+    pub source_id: String,
+    #[index(btree)]
+    pub source_kind: String,
+    #[index(btree)]
+    pub uri: String,
+    pub title: String,
+    pub content_hash: Option<String>,
+    pub captured_by: String,
+    pub freshness_at: Option<String>,
+    #[index(btree)]
+    pub privacy_level: String,
+    #[index(btree)]
+    pub approval_tier: String,
+    pub raw_storage_ref: Option<String>,
+    pub created_at: String,
+    #[index(btree)]
+    pub updated_at: String,
+}
+
+#[table(accessor = life_memory_events, private)]
+pub struct LifeMemoryEvent {
+    #[primary_key]
+    pub event_id: String,
+    #[index(btree)]
+    pub occurred_at: String,
+    pub recorded_at: String,
+    #[index(btree)]
+    pub domain: String,
+    #[index(btree)]
+    pub event_type: String,
+    pub fields_json: String,
+    #[index(btree)]
+    pub source_id: Option<String>,
+    pub source_json: String,
+    pub confidence: f64,
+    #[index(btree)]
+    pub approval_tier: String,
+    #[index(btree)]
+    pub privacy_level: String,
+    #[index(btree)]
+    pub owner_scope: Option<String>,
+    pub source_ids_json: String,
+    #[index(btree)]
+    pub status: String,
+    pub supersedes_event_id: Option<String>,
+    pub created_at: String,
+}
+
+#[table(accessor = life_schedule_windows, private)]
+pub struct LifeScheduleWindow {
+    #[primary_key]
+    pub window_id: String,
+    #[index(btree)]
+    pub start_at: String,
+    #[index(btree)]
+    pub end_at: String,
+    #[index(btree)]
+    pub kind: String,
+    pub title: String,
+    pub source_ids_json: String,
+    pub prep_flags_json: String,
+    #[index(btree)]
+    pub approval_tier: String,
+    #[index(btree)]
+    pub privacy_level: String,
+    #[index(btree)]
+    pub status: String,
+    pub created_at: String,
+    pub updated_at: String,
+}
+
+#[table(accessor = life_briefs, private)]
+pub struct LifeBrief {
+    #[primary_key]
+    pub brief_id: String,
+    #[index(btree)]
+    pub brief_type: String,
+    #[index(btree)]
+    pub window_start: String,
+    #[index(btree)]
+    pub window_end: String,
+    pub generated_at: String,
+    pub generated_by: String,
+    pub summary: String,
+    pub source_freshness_json: String,
+    pub top_actions_json: String,
+    pub risks_json: String,
+    pub approval_request_ids_json: String,
+    #[index(btree)]
+    pub readmodel_snapshot_id: Option<String>,
+    #[index(btree)]
+    pub privacy_level: String,
+    #[index(btree)]
+    pub status: String,
+    pub created_at: String,
+    pub updated_at: String,
+}
+
+#[table(accessor = life_action_items, private)]
+pub struct LifeActionItem {
+    #[primary_key]
+    pub action_id: String,
+    #[index(btree)]
+    pub domain: String,
+    pub title: String,
+    #[index(btree)]
+    pub roi_rank: i64,
+    #[index(btree)]
+    pub approval_tier: String,
+    #[index(btree)]
+    pub status: String,
+    pub source_ids_json: String,
+    #[index(btree)]
+    pub due_at: Option<String>,
+    pub payload_json: String,
+    pub created_by: String,
+    pub created_at: String,
+    pub updated_at: String,
+}
+
+#[table(accessor = life_readmodel_snapshots, public)]
+pub struct LifeReadmodelSnapshot {
+    #[primary_key]
+    pub snapshot_id: String,
+    #[index(btree)]
+    pub generated_at: String,
+    pub timezone: String,
+    pub snapshot_json: String,
+    pub source_freshness_json: String,
+    pub materialized_from_event_ids_json: String,
+    #[index(btree)]
+    pub privacy_level: String,
+    #[index(btree)]
+    pub status: String,
+    pub created_at: String,
+}
+
+#[table(accessor = life_automation_sources, private)]
+pub struct LifeAutomationSource {
+    #[primary_key]
+    pub automation_id: String,
+    #[index(btree)]
+    pub surface: String,
+    #[index(btree)]
+    pub external_id: String,
+    pub name: String,
+    #[index(btree)]
+    pub status: String,
+    pub schedule: String,
+    pub source_uri: String,
+    pub last_verified_at: Option<String>,
+    pub payload_json: String,
+    #[index(btree)]
+    pub approval_tier: String,
+    #[index(btree)]
+    pub privacy_level: String,
+    pub created_at: String,
+    pub updated_at: String,
+}
+
 #[table(accessor = route_decisions, public)]
 pub struct RouteDecision {
     #[primary_key]
@@ -1134,6 +1297,409 @@ pub fn record_approval_decision(
 }
 
 #[reducer]
+pub fn upsert_life_source(
+    ctx: &ReducerContext,
+    source_id: String,
+    source_kind: String,
+    uri: String,
+    title: String,
+    content_hash: Option<String>,
+    captured_by: String,
+    freshness_at: Option<String>,
+    privacy_level: String,
+    approval_tier: String,
+    raw_storage_ref: Option<String>,
+) -> Result<(), String> {
+    validate_enum(&source_kind, LIFE_SOURCE_KINDS, "source_kind")?;
+    validate_enum(&privacy_level, LIFE_PRIVACY_LEVELS, "privacy_level")?;
+    validate_enum(&approval_tier, LIFE_APPROVAL_TIERS, "approval_tier")?;
+    let now = now_string(ctx);
+
+    if let Some(mut source) = ctx.db.life_sources().source_id().find(source_id.clone()) {
+        source.source_kind = source_kind;
+        source.uri = uri;
+        source.title = title;
+        source.content_hash = content_hash;
+        source.captured_by = captured_by;
+        source.freshness_at = freshness_at;
+        source.privacy_level = privacy_level;
+        source.approval_tier = approval_tier;
+        source.raw_storage_ref = raw_storage_ref;
+        source.updated_at = now;
+        ctx.db.life_sources().source_id().update(source);
+    } else {
+        ctx.db.life_sources().insert(LifeSource {
+            source_id,
+            source_kind,
+            uri,
+            title,
+            content_hash,
+            captured_by,
+            freshness_at,
+            privacy_level,
+            approval_tier,
+            raw_storage_ref,
+            created_at: now.clone(),
+            updated_at: now,
+        });
+    }
+    Ok(())
+}
+
+#[reducer]
+pub fn insert_life_memory_event(
+    ctx: &ReducerContext,
+    event_id: String,
+    occurred_at: String,
+    recorded_at: String,
+    domain: String,
+    event_type: String,
+    fields_json: String,
+    source_id: Option<String>,
+    source_json: String,
+    confidence: f64,
+    approval_tier: String,
+    privacy_level: String,
+    owner_scope: Option<String>,
+    source_ids_json: String,
+    status: String,
+    supersedes_event_id: Option<String>,
+) -> Result<(), String> {
+    validate_enum(&domain, LIFE_DOMAINS, "domain")?;
+    validate_enum(&approval_tier, LIFE_APPROVAL_TIERS, "approval_tier")?;
+    validate_enum(&privacy_level, LIFE_PRIVACY_LEVELS, "privacy_level")?;
+    validate_enum(&status, LIFE_EVENT_STATUSES, "status")?;
+    if !(0.0..=1.0).contains(&confidence) {
+        return Err("confidence must be between 0 and 1".to_string());
+    }
+    if ctx
+        .db
+        .life_memory_events()
+        .event_id()
+        .find(event_id.clone())
+        .is_some()
+    {
+        return Err(format!("life memory event already exists: {}", event_id));
+    }
+
+    ctx.db.life_memory_events().insert(LifeMemoryEvent {
+        event_id,
+        occurred_at,
+        recorded_at,
+        domain,
+        event_type,
+        fields_json,
+        source_id,
+        source_json,
+        confidence,
+        approval_tier,
+        privacy_level,
+        owner_scope,
+        source_ids_json,
+        status,
+        supersedes_event_id,
+        created_at: now_string(ctx),
+    });
+    Ok(())
+}
+
+#[reducer]
+pub fn update_life_memory_event_status(
+    ctx: &ReducerContext,
+    event_id: String,
+    status: String,
+    supersedes_event_id: Option<String>,
+) -> Result<(), String> {
+    validate_enum(&status, LIFE_EVENT_STATUSES, "status")?;
+    let mut event = ctx
+        .db
+        .life_memory_events()
+        .event_id()
+        .find(event_id.clone())
+        .ok_or_else(|| format!("life memory event not found: {}", event_id))?;
+    event.status = status;
+    event.supersedes_event_id = supersedes_event_id;
+    ctx.db.life_memory_events().event_id().update(event);
+    Ok(())
+}
+
+#[reducer]
+pub fn upsert_life_schedule_window(
+    ctx: &ReducerContext,
+    window_id: String,
+    start_at: String,
+    end_at: String,
+    kind: String,
+    title: String,
+    source_ids_json: String,
+    prep_flags_json: String,
+    approval_tier: String,
+    privacy_level: String,
+    status: String,
+) -> Result<(), String> {
+    validate_enum(&approval_tier, LIFE_APPROVAL_TIERS, "approval_tier")?;
+    validate_enum(&privacy_level, LIFE_PRIVACY_LEVELS, "privacy_level")?;
+    let now = now_string(ctx);
+    let row = LifeScheduleWindow {
+        window_id: window_id.clone(),
+        start_at,
+        end_at,
+        kind,
+        title,
+        source_ids_json,
+        prep_flags_json,
+        approval_tier,
+        privacy_level,
+        status,
+        created_at: now.clone(),
+        updated_at: now,
+    };
+    if let Some(mut existing) = ctx.db.life_schedule_windows().window_id().find(window_id) {
+        existing.start_at = row.start_at;
+        existing.end_at = row.end_at;
+        existing.kind = row.kind;
+        existing.title = row.title;
+        existing.source_ids_json = row.source_ids_json;
+        existing.prep_flags_json = row.prep_flags_json;
+        existing.approval_tier = row.approval_tier;
+        existing.privacy_level = row.privacy_level;
+        existing.status = row.status;
+        existing.updated_at = row.updated_at;
+        ctx.db.life_schedule_windows().window_id().update(existing);
+    } else {
+        ctx.db.life_schedule_windows().insert(row);
+    }
+    Ok(())
+}
+
+#[reducer]
+pub fn upsert_life_brief(
+    ctx: &ReducerContext,
+    brief_id: String,
+    brief_type: String,
+    window_start: String,
+    window_end: String,
+    generated_at: String,
+    generated_by: String,
+    summary: String,
+    source_freshness_json: String,
+    top_actions_json: String,
+    risks_json: String,
+    approval_request_ids_json: String,
+    readmodel_snapshot_id: Option<String>,
+    privacy_level: String,
+    status: String,
+) -> Result<(), String> {
+    validate_enum(&brief_type, LIFE_BRIEF_TYPES, "brief_type")?;
+    validate_enum(&privacy_level, LIFE_PRIVACY_LEVELS, "privacy_level")?;
+    let now = now_string(ctx);
+    if let Some(mut brief) = ctx.db.life_briefs().brief_id().find(brief_id.clone()) {
+        brief.brief_type = brief_type;
+        brief.window_start = window_start;
+        brief.window_end = window_end;
+        brief.generated_at = generated_at;
+        brief.generated_by = generated_by;
+        brief.summary = summary;
+        brief.source_freshness_json = source_freshness_json;
+        brief.top_actions_json = top_actions_json;
+        brief.risks_json = risks_json;
+        brief.approval_request_ids_json = approval_request_ids_json;
+        brief.readmodel_snapshot_id = readmodel_snapshot_id;
+        brief.privacy_level = privacy_level;
+        brief.status = status;
+        brief.updated_at = now;
+        ctx.db.life_briefs().brief_id().update(brief);
+    } else {
+        ctx.db.life_briefs().insert(LifeBrief {
+            brief_id,
+            brief_type,
+            window_start,
+            window_end,
+            generated_at,
+            generated_by,
+            summary,
+            source_freshness_json,
+            top_actions_json,
+            risks_json,
+            approval_request_ids_json,
+            readmodel_snapshot_id,
+            privacy_level,
+            status,
+            created_at: now.clone(),
+            updated_at: now,
+        });
+    }
+    Ok(())
+}
+
+#[reducer]
+pub fn upsert_life_action_item(
+    ctx: &ReducerContext,
+    action_id: String,
+    domain: String,
+    title: String,
+    roi_rank: i64,
+    approval_tier: String,
+    status: String,
+    source_ids_json: String,
+    due_at: Option<String>,
+    payload_json: String,
+    created_by: String,
+) -> Result<(), String> {
+    validate_enum(&domain, LIFE_DOMAINS, "domain")?;
+    validate_enum(&approval_tier, LIFE_APPROVAL_TIERS, "approval_tier")?;
+    validate_enum(&status, LIFE_ACTION_STATUSES, "status")?;
+    let now = now_string(ctx);
+    if let Some(mut item) = ctx
+        .db
+        .life_action_items()
+        .action_id()
+        .find(action_id.clone())
+    {
+        item.domain = domain;
+        item.title = title;
+        item.roi_rank = roi_rank;
+        item.approval_tier = approval_tier;
+        item.status = status;
+        item.source_ids_json = source_ids_json;
+        item.due_at = due_at;
+        item.payload_json = payload_json;
+        item.updated_at = now;
+        ctx.db.life_action_items().action_id().update(item);
+    } else {
+        ctx.db.life_action_items().insert(LifeActionItem {
+            action_id,
+            domain,
+            title,
+            roi_rank,
+            approval_tier,
+            status,
+            source_ids_json,
+            due_at,
+            payload_json,
+            created_by,
+            created_at: now.clone(),
+            updated_at: now,
+        });
+    }
+    Ok(())
+}
+
+#[reducer]
+pub fn upsert_life_readmodel_snapshot(
+    ctx: &ReducerContext,
+    snapshot_id: String,
+    generated_at: String,
+    timezone: String,
+    snapshot_json: String,
+    source_freshness_json: String,
+    materialized_from_event_ids_json: String,
+    privacy_level: String,
+    status: String,
+) -> Result<(), String> {
+    validate_enum(&privacy_level, LIFE_PRIVACY_LEVELS, "privacy_level")?;
+    if privacy_level != "public_safe" {
+        return Err("life readmodel snapshots must be public_safe".to_string());
+    }
+    if let Some(mut snapshot) = ctx
+        .db
+        .life_readmodel_snapshots()
+        .snapshot_id()
+        .find(snapshot_id.clone())
+    {
+        snapshot.generated_at = generated_at;
+        snapshot.timezone = timezone;
+        snapshot.snapshot_json = snapshot_json;
+        snapshot.source_freshness_json = source_freshness_json;
+        snapshot.materialized_from_event_ids_json = materialized_from_event_ids_json;
+        snapshot.privacy_level = privacy_level;
+        snapshot.status = status;
+        ctx.db
+            .life_readmodel_snapshots()
+            .snapshot_id()
+            .update(snapshot);
+    } else {
+        ctx.db
+            .life_readmodel_snapshots()
+            .insert(LifeReadmodelSnapshot {
+                snapshot_id,
+                generated_at,
+                timezone,
+                snapshot_json,
+                source_freshness_json,
+                materialized_from_event_ids_json,
+                privacy_level,
+                status,
+                created_at: now_string(ctx),
+            });
+    }
+    Ok(())
+}
+
+#[reducer]
+pub fn upsert_life_automation_source(
+    ctx: &ReducerContext,
+    automation_id: String,
+    surface: String,
+    external_id: String,
+    name: String,
+    status: String,
+    schedule: String,
+    source_uri: String,
+    last_verified_at: Option<String>,
+    payload_json: String,
+    approval_tier: String,
+    privacy_level: String,
+) -> Result<(), String> {
+    validate_enum(&surface, LIFE_AUTOMATION_SURFACES, "surface")?;
+    validate_enum(&status, LIFE_AUTOMATION_STATUSES, "status")?;
+    validate_enum(&approval_tier, LIFE_APPROVAL_TIERS, "approval_tier")?;
+    validate_enum(&privacy_level, LIFE_PRIVACY_LEVELS, "privacy_level")?;
+    let now = now_string(ctx);
+    if let Some(mut source) = ctx
+        .db
+        .life_automation_sources()
+        .automation_id()
+        .find(automation_id.clone())
+    {
+        source.surface = surface;
+        source.external_id = external_id;
+        source.name = name;
+        source.status = status;
+        source.schedule = schedule;
+        source.source_uri = source_uri;
+        source.last_verified_at = last_verified_at;
+        source.payload_json = payload_json;
+        source.approval_tier = approval_tier;
+        source.privacy_level = privacy_level;
+        source.updated_at = now;
+        ctx.db
+            .life_automation_sources()
+            .automation_id()
+            .update(source);
+    } else {
+        ctx.db
+            .life_automation_sources()
+            .insert(LifeAutomationSource {
+                automation_id,
+                surface,
+                external_id,
+                name,
+                status,
+                schedule,
+                source_uri,
+                last_verified_at,
+                payload_json,
+                approval_tier,
+                privacy_level,
+                created_at: now.clone(),
+                updated_at: now,
+            });
+    }
+    Ok(())
+}
+
+#[reducer]
 pub fn upsert_pod(
     ctx: &ReducerContext,
     pod_id: String,
@@ -1435,7 +2001,12 @@ pub fn revoke_capability_chain(
         }
         seen.push(current_id.clone());
 
-        let Some(mut lease) = ctx.db.capability_leases().lease_id().find(current_id.clone()) else {
+        let Some(mut lease) = ctx
+            .db
+            .capability_leases()
+            .lease_id()
+            .find(current_id.clone())
+        else {
             continue;
         };
 
@@ -2114,7 +2685,14 @@ pub fn pause_mission(
     updated_at: String,
     summary: Option<String>,
 ) -> Result<(), String> {
-    upsert_mission_status(ctx, mission_id, "paused".to_string(), updated_at, summary, None)
+    upsert_mission_status(
+        ctx,
+        mission_id,
+        "paused".to_string(),
+        updated_at,
+        summary,
+        None,
+    )
 }
 
 #[reducer]
@@ -2124,7 +2702,14 @@ pub fn resume_mission(
     updated_at: String,
     summary: Option<String>,
 ) -> Result<(), String> {
-    upsert_mission_status(ctx, mission_id, "running".to_string(), updated_at, summary, None)
+    upsert_mission_status(
+        ctx,
+        mission_id,
+        "running".to_string(),
+        updated_at,
+        summary,
+        None,
+    )
 }
 
 #[reducer]
@@ -2134,7 +2719,14 @@ pub fn complete_mission(
     updated_at: String,
     summary: Option<String>,
 ) -> Result<(), String> {
-    upsert_mission_status(ctx, mission_id, "completed".to_string(), updated_at, summary, None)
+    upsert_mission_status(
+        ctx,
+        mission_id,
+        "completed".to_string(),
+        updated_at,
+        summary,
+        None,
+    )
 }
 
 #[reducer]
@@ -2144,7 +2736,14 @@ pub fn fail_mission(
     updated_at: String,
     error: Option<String>,
 ) -> Result<(), String> {
-    upsert_mission_status(ctx, mission_id, "failed".to_string(), updated_at, None, error)
+    upsert_mission_status(
+        ctx,
+        mission_id,
+        "failed".to_string(),
+        updated_at,
+        None,
+        error,
+    )
 }
 
 #[reducer]
@@ -2394,24 +2993,24 @@ pub struct ModelTier {
     #[primary_key]
     pub id: u64,
     #[unique]
-    pub model_id: String,           // "ollama/qwen3.5:4b"
-    pub provider_model_id: String,  // "qwen3.5:4b" (actual API string)
-    pub provider: String,           // "ollama"
-    pub rate_group: String,         // "local_ollama"
-    pub capability_class: u8,       // 1=light, 2=medium, 3=heavy
-    pub effort_knob: String,        // "thinking:off", "effort:medium", "reasoning:xhigh"
-    pub effort_level: u8,           // normalized 1-5
-    pub cost_per_turn: f64,         // 0.0 for local/free
+    pub model_id: String, // "ollama/qwen3.5:4b"
+    pub provider_model_id: String, // "qwen3.5:4b" (actual API string)
+    pub provider: String,          // "ollama"
+    pub rate_group: String,        // "local_ollama"
+    pub capability_class: u8,      // 1=light, 2=medium, 3=heavy
+    pub effort_knob: String,       // "thinking:off", "effort:medium", "reasoning:xhigh"
+    pub effort_level: u8,          // normalized 1-5
+    pub cost_per_turn: f64,        // 0.0 for local/free
     pub max_context_tokens: u32,
     pub vram_requirement_mb: u32,
     pub quantization_type: String,
     pub kv_cache_strategy: String,
-    pub strengths_json: String,     // JSON array: ["code_generation", "research"]
+    pub strengths_json: String, // JSON array: ["code_generation", "research"]
     pub enabled: bool,
-    pub last_success_rate: f64,     // rolling 20-execution window
+    pub last_success_rate: f64, // rolling 20-execution window
     pub avg_latency_ms: u64,
     pub latency_p95_ms: u64,
-    pub updated_at: String,         // ISO 8601
+    pub updated_at: String, // ISO 8601
 }
 
 #[table(accessor = devices, public)]
@@ -2463,7 +3062,7 @@ pub struct LoopIteration {
     pub turn_number: u32,
     pub input_summary: String,
     pub output_summary: String,
-    pub score: f64, // 0.0 to 1.0 (success/completion probability)
+    pub score: f64,             // 0.0 to 1.0 (success/completion probability)
     pub run_id: Option<String>, // Link to RunRecord
     pub created_at: String,
 }
@@ -2696,7 +3295,7 @@ pub struct TaskDispatch {
     pub parent_task_id: Option<String>, // None for top-level
     pub intent_class: String,
     pub risk_level: String,
-    pub assigned_model: String,     // FK to model_tiers.model_id
+    pub assigned_model: String, // FK to model_tiers.model_id
     pub effort_knob: String,
     pub assigned_cell: String,
     pub budget_max_turns: u8,
@@ -2706,7 +3305,7 @@ pub struct TaskDispatch {
     pub tools_allowed_json: String, // JSON array
     pub context_files_json: String, // JSON array
     #[index(btree)]
-    pub status: String,             // "queued"|"running"|"complete"|"failed"|"budget_exceeded"
+    pub status: String, // "queued"|"running"|"complete"|"failed"|"budget_exceeded"
     pub result_summary: String,
     pub tokens_used: u32,
     pub latency_ms: u64,
@@ -2979,7 +3578,13 @@ fn load_worker_session(ctx: &ReducerContext, session_id: &str) -> Result<WorkerS
 }
 
 fn upsert_lease_row(ctx: &ReducerContext, row: Lease) {
-    if ctx.db.leases().lease_id().find(row.lease_id.clone()).is_some() {
+    if ctx
+        .db
+        .leases()
+        .lease_id()
+        .find(row.lease_id.clone())
+        .is_some()
+    {
         ctx.db.leases().lease_id().update(row);
     } else {
         ctx.db.leases().insert(row);
@@ -3225,7 +3830,13 @@ pub fn upsert_rate_group_state(
         current_tpm,
         reset_at,
     };
-    if ctx.db.rate_group_state().group_id().find(group_id).is_some() {
+    if ctx
+        .db
+        .rate_group_state()
+        .group_id()
+        .find(group_id)
+        .is_some()
+    {
         ctx.db.rate_group_state().group_id().update(row);
     } else {
         ctx.db.rate_group_state().insert(row);
@@ -3241,7 +3852,7 @@ pub struct ExecutionMemory {
     #[index(btree)]
     pub task_dispatch_id: String,
     pub model_used: String,
-    pub outcome: String,             // "success" | "fail" | "timeout"
+    pub outcome: String, // "success" | "fail" | "timeout"
     pub duration_ms: u64,
     pub error_summary: Option<String>,
     pub feedback_score: Option<f64>,
@@ -3607,10 +4218,7 @@ pub fn resolve_captain_focus(
 }
 
 #[reducer]
-pub fn prune_captain_messages(
-    ctx: &ReducerContext,
-    before_timestamp: u64,
-) -> Result<(), String> {
+pub fn prune_captain_messages(ctx: &ReducerContext, before_timestamp: u64) -> Result<(), String> {
     let old: Vec<String> = ctx
         .db
         .captain_messages()
@@ -3652,11 +4260,13 @@ pub fn create_user(
 }
 
 #[reducer]
-pub fn update_user_seen(
-    ctx: &ReducerContext,
-    user_id: String,
-) -> Result<(), String> {
-    let mut user = ctx.db.users().user_id().find(user_id).ok_or("User not found")?;
+pub fn update_user_seen(ctx: &ReducerContext, user_id: String) -> Result<(), String> {
+    let mut user = ctx
+        .db
+        .users()
+        .user_id()
+        .find(user_id)
+        .ok_or("User not found")?;
     user.last_seen_at = now_string(ctx);
     ctx.db.users().user_id().update(user);
     Ok(())
@@ -3689,7 +4299,13 @@ pub fn link_oauth_identity(
         created_at: now.clone(),
         updated_at: now,
     };
-    if ctx.db.oauth_identities().identity_id().find(identity_id).is_some() {
+    if ctx
+        .db
+        .oauth_identities()
+        .identity_id()
+        .find(identity_id)
+        .is_some()
+    {
         ctx.db.oauth_identities().identity_id().update(row);
     } else {
         ctx.db.oauth_identities().insert(row);
@@ -3723,7 +4339,13 @@ pub fn store_provider_credential(
         created_at: now.clone(),
         updated_at: now,
     };
-    if ctx.db.provider_credentials().credential_id().find(credential_id).is_some() {
+    if ctx
+        .db
+        .provider_credentials()
+        .credential_id()
+        .find(credential_id)
+        .is_some()
+    {
         ctx.db.provider_credentials().credential_id().update(row);
     } else {
         ctx.db.provider_credentials().insert(row);
@@ -3736,7 +4358,12 @@ pub fn revoke_provider_credential(
     ctx: &ReducerContext,
     credential_id: String,
 ) -> Result<(), String> {
-    let mut cred = ctx.db.provider_credentials().credential_id().find(credential_id).ok_or("Credential not found")?;
+    let mut cred = ctx
+        .db
+        .provider_credentials()
+        .credential_id()
+        .find(credential_id)
+        .ok_or("Credential not found")?;
     cred.status = "revoked".to_string();
     cred.updated_at = now_string(ctx);
     ctx.db.provider_credentials().credential_id().update(cred);
@@ -3786,25 +4413,85 @@ fn validate_enum(value: &str, allowed: &[&str], enum_name: &str) -> Result<(), S
     if allowed.contains(&value) {
         Ok(())
     } else {
-        Err(format!("invalid {}: '{}' (allowed: {:?})", enum_name, value, allowed))
+        Err(format!(
+            "invalid {}: '{}' (allowed: {:?})",
+            enum_name, value, allowed
+        ))
     }
 }
 
-const SOURCE_KINDS: &[&str] = &["web", "pdf", "repo_file", "conversation", "api", "note", "dataset"];
+const SOURCE_KINDS: &[&str] = &[
+    "web",
+    "pdf",
+    "repo_file",
+    "conversation",
+    "api",
+    "note",
+    "dataset",
+];
 const PARSE_STATUSES: &[&str] = &["pending", "parsed", "failed"];
 const PAGE_STATUSES: &[&str] = &["draft", "active", "stale", "superseded", "retired"];
-const BELIEF_STATUSES: &[&str] = &["candidate", "supported", "durable", "contested", "stale", "retired", "false"];
+const BELIEF_STATUSES: &[&str] = &[
+    "candidate",
+    "supported",
+    "durable",
+    "contested",
+    "stale",
+    "retired",
+    "false",
+];
 const EVIDENCE_LINK_TYPES: &[&str] = &["supports", "contradicts", "derived_from", "verified_by"];
-const CONTRADICTION_RESOLUTIONS: &[&str] = &["open", "resolved_primary_wins", "resolved_challenger_wins", "both_retired", "merged"];
+const CONTRADICTION_RESOLUTIONS: &[&str] = &[
+    "open",
+    "resolved_primary_wins",
+    "resolved_challenger_wins",
+    "both_retired",
+    "merged",
+];
 const TREASURY_SCOPES: &[&str] = &["user", "org", "device", "provider_account"];
 const BUDGET_WINDOW_KINDS: &[&str] = &["hour", "day", "month", "rolling"];
 const RESERVE_POLICIES: &[&str] = &["strict", "soft", "none"];
-const TREASURY_HEALTH_STATES: &[&str] = &["healthy", "guarded", "degraded", "cooldown", "exhausted"];
+const TREASURY_HEALTH_STATES: &[&str] =
+    &["healthy", "guarded", "degraded", "cooldown", "exhausted"];
 const RESERVATION_STATUSES: &[&str] = &["held", "consumed", "released", "expired"];
-const TREASURY_DECISIONS: &[&str] = &["allow", "allow_downgraded", "defer", "deny", "require_approval"];
+const TREASURY_DECISIONS: &[&str] = &[
+    "allow",
+    "allow_downgraded",
+    "defer",
+    "deny",
+    "require_approval",
+];
 const TASK_CLASSES: &[&str] = &["compile", "consolidate", "act"];
 const BUDGET_CLASSES: &[&str] = &["cheap", "standard", "premium"];
 const APPROVAL_STATES: &[&str] = &["none_needed", "pending", "granted", "denied"];
+const LIFE_SOURCE_KINDS: &[&str] = &[
+    "user_entry",
+    "local_doc",
+    "calendar",
+    "automation",
+    "agent_brief",
+    "shell",
+    "connector",
+    "importer",
+];
+const LIFE_DOMAINS: &[&str] = &[
+    "body", "work", "social", "money", "mind", "stack", "schedule", "brief",
+];
+const LIFE_APPROVAL_TIERS: &[&str] = &["T0", "T1", "T2", "T3", "Never"];
+const LIFE_PRIVACY_LEVELS: &[&str] = &["private", "local_only", "sync_allowed", "public_safe"];
+const LIFE_EVENT_STATUSES: &[&str] = &["active", "corrected", "superseded", "retired"];
+const LIFE_ACTION_STATUSES: &[&str] = &["queued", "blocked", "done", "dismissed"];
+const LIFE_BRIEF_TYPES: &[&str] = &[
+    "am",
+    "pm",
+    "weekly",
+    "money_huddle",
+    "stack_health",
+    "custom",
+];
+const LIFE_AUTOMATION_SURFACES: &[&str] =
+    &["claude", "codex", "launchd", "heiwa", "calendar", "manual"];
+const LIFE_AUTOMATION_STATUSES: &[&str] = &["active", "paused", "disabled", "unknown"];
 
 // ---------------------------------------------------------------------------
 // Step 1: Knowledge Plane tables
@@ -4158,7 +4845,11 @@ pub fn mark_source_parsed(
     parse_status: String,
 ) -> Result<(), String> {
     validate_enum(&parse_status, PARSE_STATUSES, "parse_status")?;
-    let mut row = ctx.db.sources().source_id().find(&source_id)
+    let mut row = ctx
+        .db
+        .sources()
+        .source_id()
+        .find(&source_id)
         .ok_or_else(|| format!("source not found: {}", source_id))?;
     row.parse_status = parse_status;
     ctx.db.sources().source_id().update(row);
@@ -4184,7 +4875,10 @@ pub fn create_source_version(
 ) -> Result<(), String> {
     validate_enum(&source_kind, SOURCE_KINDS, "source_kind")?;
     // Verify the superseded source exists
-    ctx.db.sources().source_id().find(&supersedes_source_id)
+    ctx.db
+        .sources()
+        .source_id()
+        .find(&supersedes_source_id)
         .ok_or_else(|| format!("superseded source not found: {}", supersedes_source_id))?;
     let now = now_string(ctx);
     ctx.db.sources().insert(Source {
@@ -4263,7 +4957,11 @@ pub fn recompile_page(
     source_set_hash: String,
     novelty_score: f64,
 ) -> Result<(), String> {
-    let mut row = ctx.db.pages().page_id().find(&page_id)
+    let mut row = ctx
+        .db
+        .pages()
+        .page_id()
+        .find(&page_id)
         .ok_or_else(|| format!("page not found: {}", page_id))?;
     let now = now_string(ctx);
     row.body_markdown = body_markdown;
@@ -4280,11 +4978,12 @@ pub fn recompile_page(
 }
 
 #[reducer]
-pub fn mark_page_stale(
-    ctx: &ReducerContext,
-    page_id: String,
-) -> Result<(), String> {
-    let mut row = ctx.db.pages().page_id().find(&page_id)
+pub fn mark_page_stale(ctx: &ReducerContext, page_id: String) -> Result<(), String> {
+    let mut row = ctx
+        .db
+        .pages()
+        .page_id()
+        .find(&page_id)
         .ok_or_else(|| format!("page not found: {}", page_id))?;
     row.status = "stale".to_string();
     row.updated_at = now_string(ctx);
@@ -4293,11 +4992,12 @@ pub fn mark_page_stale(
 }
 
 #[reducer]
-pub fn retire_page(
-    ctx: &ReducerContext,
-    page_id: String,
-) -> Result<(), String> {
-    let mut row = ctx.db.pages().page_id().find(&page_id)
+pub fn retire_page(ctx: &ReducerContext, page_id: String) -> Result<(), String> {
+    let mut row = ctx
+        .db
+        .pages()
+        .page_id()
+        .find(&page_id)
         .ok_or_else(|| format!("page not found: {}", page_id))?;
     row.status = "retired".to_string();
     row.updated_at = now_string(ctx);
@@ -4356,7 +5056,13 @@ pub fn upsert_decay_profile(
         created_at: now.clone(),
         updated_at: now,
     };
-    if ctx.db.decay_profiles().decay_profile_id().find(&decay_profile_id).is_some() {
+    if ctx
+        .db
+        .decay_profiles()
+        .decay_profile_id()
+        .find(&decay_profile_id)
+        .is_some()
+    {
         ctx.db.decay_profiles().decay_profile_id().update(row);
     } else {
         ctx.db.decay_profiles().insert(row);
@@ -4383,7 +5089,10 @@ pub fn extract_belief_candidate(
     generated_by_run_id: Option<String>,
 ) -> Result<(), String> {
     // Verify decay profile exists
-    ctx.db.decay_profiles().decay_profile_id().find(&decay_profile_id)
+    ctx.db
+        .decay_profiles()
+        .decay_profile_id()
+        .find(&decay_profile_id)
         .ok_or_else(|| format!("decay profile not found: {}", decay_profile_id))?;
     // Clamp initial confidence to [0, 1]
     let confidence = initial_confidence.clamp(0.0, 1.0);
@@ -4429,7 +5138,10 @@ pub fn link_belief_evidence(
 ) -> Result<(), String> {
     validate_enum(&link_type, EVIDENCE_LINK_TYPES, "link_type")?;
     // Verify belief exists
-    ctx.db.beliefs().belief_id().find(&belief_id)
+    ctx.db
+        .beliefs()
+        .belief_id()
+        .find(&belief_id)
         .ok_or_else(|| format!("belief not found: {}", belief_id))?;
     let now = now_string(ctx);
     ctx.db.belief_evidence_links().insert(BeliefEvidenceLink {
@@ -4452,11 +5164,18 @@ pub fn corroborate_belief(
     evidence_source_id: String,
     evidence_weight: f64,
 ) -> Result<(), String> {
-    let mut row = ctx.db.beliefs().belief_id().find(&belief_id)
+    let mut row = ctx
+        .db
+        .beliefs()
+        .belief_id()
+        .find(&belief_id)
         .ok_or_else(|| format!("belief not found: {}", belief_id))?;
     // Must be in an active status to corroborate
     if row.status == "retired" || row.status == "false" {
-        return Err(format!("cannot corroborate belief in status '{}'", row.status));
+        return Err(format!(
+            "cannot corroborate belief in status '{}'",
+            row.status
+        ));
     }
     row.corroboration_count += 1;
     row.source_count += 1;
@@ -4491,12 +5210,24 @@ pub fn contradict_belief(
     // Invariant: exactly one challenger
     match (&challenger_belief_id, &challenger_source_id) {
         (Some(_), None) | (None, Some(_)) => {}
-        _ => return Err("exactly one of challenger_belief_id or challenger_source_id must be set".to_string()),
+        _ => {
+            return Err(
+                "exactly one of challenger_belief_id or challenger_source_id must be set"
+                    .to_string(),
+            )
+        }
     }
-    let mut row = ctx.db.beliefs().belief_id().find(&belief_id)
+    let mut row = ctx
+        .db
+        .beliefs()
+        .belief_id()
+        .find(&belief_id)
         .ok_or_else(|| format!("belief not found: {}", belief_id))?;
     if row.status == "retired" || row.status == "false" {
-        return Err(format!("cannot contradict belief in status '{}'", row.status));
+        return Err(format!(
+            "cannot contradict belief in status '{}'",
+            row.status
+        ));
     }
     row.contradiction_count += 1;
     row.contradicting_evidence_weight += severity;
@@ -4530,27 +5261,44 @@ pub fn contradict_belief(
 
 /// Promote a belief from supported -> durable. Reducer owns threshold computation.
 #[reducer]
-pub fn promote_belief(
-    ctx: &ReducerContext,
-    belief_id: String,
-) -> Result<(), String> {
-    let mut row = ctx.db.beliefs().belief_id().find(&belief_id)
+pub fn promote_belief(ctx: &ReducerContext, belief_id: String) -> Result<(), String> {
+    let mut row = ctx
+        .db
+        .beliefs()
+        .belief_id()
+        .find(&belief_id)
         .ok_or_else(|| format!("belief not found: {}", belief_id))?;
     if row.status != "supported" {
-        return Err(format!("can only promote 'supported' beliefs, got '{}'", row.status));
+        return Err(format!(
+            "can only promote 'supported' beliefs, got '{}'",
+            row.status
+        ));
     }
     // Load decay profile for domain-specific floor
-    let profile = ctx.db.decay_profiles().decay_profile_id().find(&row.decay_profile_id)
+    let profile = ctx
+        .db
+        .decay_profiles()
+        .decay_profile_id()
+        .find(&row.decay_profile_id)
         .ok_or_else(|| format!("decay profile not found: {}", row.decay_profile_id))?;
     // Doctrine durability thresholds (fail closed)
     if row.confidence < 0.80 {
-        return Err(format!("confidence {:.2} below threshold 0.80", row.confidence));
+        return Err(format!(
+            "confidence {:.2} below threshold 0.80",
+            row.confidence
+        ));
     }
     if row.corroboration_count < 2 {
-        return Err(format!("corroboration_count {} below threshold 2", row.corroboration_count));
+        return Err(format!(
+            "corroboration_count {} below threshold 2",
+            row.corroboration_count
+        ));
     }
     if row.freshness_score < profile.floor_freshness {
-        return Err(format!("freshness {:.2} below domain floor {:.2}", row.freshness_score, profile.floor_freshness));
+        return Err(format!(
+            "freshness {:.2} below domain floor {:.2}",
+            row.freshness_score, profile.floor_freshness
+        ));
     }
     let total_weight = row.supporting_evidence_weight + row.contradicting_evidence_weight;
     if total_weight > 0.0 && (row.contradicting_evidence_weight / total_weight) > 0.20 {
@@ -4569,21 +5317,25 @@ pub fn promote_belief(
 
 /// Reducer-owned freshness decay. Computes new freshness from decay profile.
 #[reducer]
-pub fn decay_belief_tick(
-    ctx: &ReducerContext,
-    belief_id: String,
-) -> Result<(), String> {
-    let mut row = ctx.db.beliefs().belief_id().find(&belief_id)
+pub fn decay_belief_tick(ctx: &ReducerContext, belief_id: String) -> Result<(), String> {
+    let mut row = ctx
+        .db
+        .beliefs()
+        .belief_id()
+        .find(&belief_id)
         .ok_or_else(|| format!("belief not found: {}", belief_id))?;
     // Only decay active beliefs
     if row.status == "retired" || row.status == "false" {
         return Ok(());
     }
-    let profile = ctx.db.decay_profiles().decay_profile_id().find(&row.decay_profile_id)
+    let profile = ctx
+        .db
+        .decay_profiles()
+        .decay_profile_id()
+        .find(&row.decay_profile_id)
         .ok_or_else(|| format!("decay profile not found: {}", row.decay_profile_id))?;
     // Compute elapsed seconds since last verification (or creation)
-    let reference_time = row.last_verified_at.as_deref()
-        .unwrap_or(&row.created_at);
+    let reference_time = row.last_verified_at.as_deref().unwrap_or(&row.created_at);
     let ref_secs: u64 = reference_time.parse().unwrap_or(0);
     let now_secs = (ctx.timestamp.to_micros_since_unix_epoch() / 1_000_000) as u64;
     let elapsed = now_secs.saturating_sub(ref_secs);
@@ -4598,16 +5350,18 @@ pub fn decay_belief_tick(
         if row.status != "stale" {
             row.status = "stale".to_string();
             // Enqueue verification
-            ctx.db.belief_verification_schedule().insert(BeliefVerificationSchedule {
-                schedule_id: format!("bvs-{}-{}", belief_id, now),
-                belief_id: belief_id.clone(),
-                reason: "freshness_decay".to_string(),
-                priority: 0,
-                scheduled_at: now.clone(),
-                claimed_by_run_id: None,
-                completed_at: None,
-                created_at: now.clone(),
-            });
+            ctx.db
+                .belief_verification_schedule()
+                .insert(BeliefVerificationSchedule {
+                    schedule_id: format!("bvs-{}-{}", belief_id, now),
+                    belief_id: belief_id.clone(),
+                    reason: "freshness_decay".to_string(),
+                    priority: 0,
+                    scheduled_at: now.clone(),
+                    claimed_by_run_id: None,
+                    completed_at: None,
+                    created_at: now.clone(),
+                });
         }
     }
     row.updated_at = now;
@@ -4622,7 +5376,11 @@ pub fn reverify_belief(
     belief_id: String,
     verification_evidence_refs_json: String,
 ) -> Result<(), String> {
-    let mut row = ctx.db.beliefs().belief_id().find(&belief_id)
+    let mut row = ctx
+        .db
+        .beliefs()
+        .belief_id()
+        .find(&belief_id)
         .ok_or_else(|| format!("belief not found: {}", belief_id))?;
     if row.status == "retired" || row.status == "false" {
         return Err(format!("cannot reverify belief in status '{}'", row.status));
@@ -4650,11 +5408,12 @@ pub fn reverify_belief(
 }
 
 #[reducer]
-pub fn retire_belief(
-    ctx: &ReducerContext,
-    belief_id: String,
-) -> Result<(), String> {
-    let mut row = ctx.db.beliefs().belief_id().find(&belief_id)
+pub fn retire_belief(ctx: &ReducerContext, belief_id: String) -> Result<(), String> {
+    let mut row = ctx
+        .db
+        .beliefs()
+        .belief_id()
+        .find(&belief_id)
         .ok_or_else(|| format!("belief not found: {}", belief_id))?;
     let now = now_string(ctx);
     row.status = "retired".to_string();
@@ -4665,11 +5424,12 @@ pub fn retire_belief(
 }
 
 #[reducer]
-pub fn disprove_belief(
-    ctx: &ReducerContext,
-    belief_id: String,
-) -> Result<(), String> {
-    let mut row = ctx.db.beliefs().belief_id().find(&belief_id)
+pub fn disprove_belief(ctx: &ReducerContext, belief_id: String) -> Result<(), String> {
+    let mut row = ctx
+        .db
+        .beliefs()
+        .belief_id()
+        .find(&belief_id)
         .ok_or_else(|| format!("belief not found: {}", belief_id))?;
     let now = now_string(ctx);
     row.status = "false".to_string();
@@ -4685,20 +5445,34 @@ pub fn resolve_contradiction(
     contradiction_id: String,
     resolution_status: String,
 ) -> Result<(), String> {
-    validate_enum(&resolution_status, CONTRADICTION_RESOLUTIONS, "resolution_status")?;
+    validate_enum(
+        &resolution_status,
+        CONTRADICTION_RESOLUTIONS,
+        "resolution_status",
+    )?;
     if resolution_status == "open" {
         return Err("cannot resolve contradiction to 'open'".to_string());
     }
-    let mut row = ctx.db.belief_contradictions().contradiction_id().find(&contradiction_id)
+    let mut row = ctx
+        .db
+        .belief_contradictions()
+        .contradiction_id()
+        .find(&contradiction_id)
         .ok_or_else(|| format!("contradiction not found: {}", contradiction_id))?;
     if row.resolution_status != "open" {
-        return Err(format!("contradiction already resolved: {}", row.resolution_status));
+        return Err(format!(
+            "contradiction already resolved: {}",
+            row.resolution_status
+        ));
     }
     let now = now_string(ctx);
     row.resolution_status = resolution_status;
     row.resolved_at = Some(now.clone());
     row.updated_at = now;
-    ctx.db.belief_contradictions().contradiction_id().update(row);
+    ctx.db
+        .belief_contradictions()
+        .contradiction_id()
+        .update(row);
     Ok(())
 }
 
@@ -4752,7 +5526,11 @@ pub fn create_treasury(
     degraded_mode_threshold: f64,
 ) -> Result<(), String> {
     validate_enum(&scope, TREASURY_SCOPES, "scope")?;
-    validate_enum(&budget_window_kind, BUDGET_WINDOW_KINDS, "budget_window_kind")?;
+    validate_enum(
+        &budget_window_kind,
+        BUDGET_WINDOW_KINDS,
+        "budget_window_kind",
+    )?;
     validate_enum(&reserve_policy, RESERVE_POLICIES, "reserve_policy")?;
     // Enforce uniqueness: (scope, provider, account_ref, budget_window_kind)
     for existing in ctx.db.treasuries().scope().filter(&scope) {
@@ -4808,7 +5586,11 @@ pub fn reserve_budget(
     reserved_cost_millicents: i64,
     expires_at: String,
 ) -> Result<(), String> {
-    let treasury = ctx.db.treasuries().treasury_id().find(&treasury_id)
+    let treasury = ctx
+        .db
+        .treasuries()
+        .treasury_id()
+        .find(&treasury_id)
         .ok_or_else(|| format!("treasury not found: {}", treasury_id))?;
     // Compute decision based on treasury state
     let available_requests = treasury.max_requests - treasury.spend_so_far_requests;
@@ -4819,9 +5601,14 @@ pub fn reserve_budget(
     let decision = match treasury.health_state.as_str() {
         "exhausted" => "deny",
         "cooldown" => "defer",
-        _ if reserved_requests > available_requests || reserved_cost_millicents > available_cost => "deny",
+        _ if reserved_requests > available_requests
+            || reserved_cost_millicents > available_cost =>
+        {
+            "deny"
+        }
         _ if reserved_requests > (available_requests - reserve_requests)
-            || reserved_cost_millicents > (available_cost - reserve_cost) => {
+            || reserved_cost_millicents > (available_cost - reserve_cost) =>
+        {
             match treasury.reserve_policy.as_str() {
                 "strict" => "require_approval",
                 "soft" => "allow_downgraded",
@@ -4855,14 +5642,18 @@ pub fn reserve_budget(
 }
 
 #[reducer]
-pub fn release_budget(
-    ctx: &ReducerContext,
-    reservation_id: String,
-) -> Result<(), String> {
-    let mut row = ctx.db.treasury_reservations().reservation_id().find(&reservation_id)
+pub fn release_budget(ctx: &ReducerContext, reservation_id: String) -> Result<(), String> {
+    let mut row = ctx
+        .db
+        .treasury_reservations()
+        .reservation_id()
+        .find(&reservation_id)
         .ok_or_else(|| format!("reservation not found: {}", reservation_id))?;
     if row.status != "held" {
-        return Err(format!("can only release 'held' reservations, got '{}'", row.status));
+        return Err(format!(
+            "can only release 'held' reservations, got '{}'",
+            row.status
+        ));
     }
     let now = now_string(ctx);
     row.status = "released".to_string();
@@ -4873,14 +5664,18 @@ pub fn release_budget(
 }
 
 #[reducer]
-pub fn consume_reservation(
-    ctx: &ReducerContext,
-    reservation_id: String,
-) -> Result<(), String> {
-    let mut row = ctx.db.treasury_reservations().reservation_id().find(&reservation_id)
+pub fn consume_reservation(ctx: &ReducerContext, reservation_id: String) -> Result<(), String> {
+    let mut row = ctx
+        .db
+        .treasury_reservations()
+        .reservation_id()
+        .find(&reservation_id)
         .ok_or_else(|| format!("reservation not found: {}", reservation_id))?;
     if row.status != "held" {
-        return Err(format!("can only consume 'held' reservations, got '{}'", row.status));
+        return Err(format!(
+            "can only consume 'held' reservations, got '{}'",
+            row.status
+        ));
     }
     let now = now_string(ctx);
     row.status = "consumed".to_string();
@@ -4891,11 +5686,12 @@ pub fn consume_reservation(
 }
 
 #[reducer]
-pub fn expire_reservation(
-    ctx: &ReducerContext,
-    reservation_id: String,
-) -> Result<(), String> {
-    let mut row = ctx.db.treasury_reservations().reservation_id().find(&reservation_id)
+pub fn expire_reservation(ctx: &ReducerContext, reservation_id: String) -> Result<(), String> {
+    let mut row = ctx
+        .db
+        .treasury_reservations()
+        .reservation_id()
+        .find(&reservation_id)
         .ok_or_else(|| format!("reservation not found: {}", reservation_id))?;
     if row.status == "consumed" || row.status == "released" || row.status == "expired" {
         return Ok(()); // already terminal
@@ -4916,7 +5712,11 @@ pub fn record_spend(
     tokens_out: i64,
     cost_millicents: i64,
 ) -> Result<(), String> {
-    let mut row = ctx.db.treasuries().treasury_id().find(&treasury_id)
+    let mut row = ctx
+        .db
+        .treasuries()
+        .treasury_id()
+        .find(&treasury_id)
         .ok_or_else(|| format!("treasury not found: {}", treasury_id))?;
     row.spend_so_far_requests += requests;
     row.spend_so_far_tokens_in += tokens_in;
@@ -4936,7 +5736,11 @@ pub fn record_provider_failure(
     treasury_id: String,
     failure_type: String,
 ) -> Result<(), String> {
-    let mut row = ctx.db.treasuries().treasury_id().find(&treasury_id)
+    let mut row = ctx
+        .db
+        .treasuries()
+        .treasury_id()
+        .find(&treasury_id)
         .ok_or_else(|| format!("treasury not found: {}", treasury_id))?;
     let now = now_string(ctx);
     row.failure_streak += 1;
@@ -4960,11 +5764,12 @@ pub fn record_provider_failure(
 }
 
 #[reducer]
-pub fn rebalance_treasury(
-    ctx: &ReducerContext,
-    treasury_id: String,
-) -> Result<(), String> {
-    let mut row = ctx.db.treasuries().treasury_id().find(&treasury_id)
+pub fn rebalance_treasury(ctx: &ReducerContext, treasury_id: String) -> Result<(), String> {
+    let mut row = ctx
+        .db
+        .treasuries()
+        .treasury_id()
+        .find(&treasury_id)
         .ok_or_else(|| format!("treasury not found: {}", treasury_id))?;
     let now = now_string(ctx);
     // Clear expired cooldown
@@ -4986,11 +5791,12 @@ pub fn rebalance_treasury(
 }
 
 #[reducer]
-pub fn reset_treasury_window(
-    ctx: &ReducerContext,
-    treasury_id: String,
-) -> Result<(), String> {
-    let mut row = ctx.db.treasuries().treasury_id().find(&treasury_id)
+pub fn reset_treasury_window(ctx: &ReducerContext, treasury_id: String) -> Result<(), String> {
+    let mut row = ctx
+        .db
+        .treasuries()
+        .treasury_id()
+        .find(&treasury_id)
         .ok_or_else(|| format!("treasury not found: {}", treasury_id))?;
     let now = now_string(ctx);
     row.spend_so_far_requests = 0;
@@ -5032,7 +5838,11 @@ pub fn plan_mission_doctrine(
 ) -> Result<(), String> {
     validate_enum(&task_class, TASK_CLASSES, "task_class")?;
     validate_enum(&budget_class, BUDGET_CLASSES, "budget_class")?;
-    let mut row = ctx.db.missions().mission_id().find(&mission_id)
+    let mut row = ctx
+        .db
+        .missions()
+        .mission_id()
+        .find(&mission_id)
         .ok_or_else(|| format!("mission not found: {}", mission_id))?;
     row.task_class = Some(task_class);
     row.budget_class = Some(budget_class);
@@ -5053,24 +5863,29 @@ pub fn plan_mission_doctrine(
 }
 
 #[reducer]
-pub fn gate_mission_treasury(
-    ctx: &ReducerContext,
-    mission_id: String,
-) -> Result<(), String> {
-    let mut mission = ctx.db.missions().mission_id().find(&mission_id)
+pub fn gate_mission_treasury(ctx: &ReducerContext, mission_id: String) -> Result<(), String> {
+    let mut mission = ctx
+        .db
+        .missions()
+        .mission_id()
+        .find(&mission_id)
         .ok_or_else(|| format!("mission not found: {}", mission_id))?;
-    let treasury_id = mission.treasury_id.as_ref()
+    let treasury_id = mission
+        .treasury_id
+        .as_ref()
         .ok_or_else(|| "mission has no treasury_id set".to_string())?;
-    let treasury = ctx.db.treasuries().treasury_id().find(treasury_id)
+    let treasury = ctx
+        .db
+        .treasuries()
+        .treasury_id()
+        .find(treasury_id)
         .ok_or_else(|| format!("treasury not found: {}", treasury_id))?;
     let new_state = match treasury.health_state.as_str() {
         "healthy" | "guarded" => "granted",
-        "degraded" => {
-            match mission.budget_class.as_deref() {
-                Some("cheap") => "granted",
-                _ => "pending",
-            }
-        }
+        "degraded" => match mission.budget_class.as_deref() {
+            Some("cheap") => "granted",
+            _ => "pending",
+        },
         "cooldown" | "exhausted" => "denied",
         _ => "pending",
     };
@@ -5162,16 +5977,18 @@ pub fn schedule_belief_verification(
     scheduled_at: String,
 ) -> Result<(), String> {
     let now = now_string(ctx);
-    ctx.db.belief_verification_schedule().insert(BeliefVerificationSchedule {
-        schedule_id,
-        belief_id,
-        reason,
-        priority,
-        scheduled_at,
-        claimed_by_run_id: None,
-        completed_at: None,
-        created_at: now,
-    });
+    ctx.db
+        .belief_verification_schedule()
+        .insert(BeliefVerificationSchedule {
+            schedule_id,
+            belief_id,
+            reason,
+            priority,
+            scheduled_at,
+            claimed_by_run_id: None,
+            completed_at: None,
+            created_at: now,
+        });
     Ok(())
 }
 
@@ -5181,7 +5998,11 @@ pub fn claim_belief_verification(
     schedule_id: String,
     run_id: String,
 ) -> Result<(), String> {
-    let mut row = ctx.db.belief_verification_schedule().schedule_id().find(&schedule_id)
+    let mut row = ctx
+        .db
+        .belief_verification_schedule()
+        .schedule_id()
+        .find(&schedule_id)
         .ok_or_else(|| format!("schedule not found: {}", schedule_id))?;
     if row.claimed_by_run_id.is_some() {
         return Err(format!("schedule {} already claimed", schedule_id));
@@ -5190,7 +6011,10 @@ pub fn claim_belief_verification(
         return Err(format!("schedule {} already completed", schedule_id));
     }
     row.claimed_by_run_id = Some(run_id);
-    ctx.db.belief_verification_schedule().schedule_id().update(row);
+    ctx.db
+        .belief_verification_schedule()
+        .schedule_id()
+        .update(row);
     Ok(())
 }
 
@@ -5199,10 +6023,17 @@ pub fn complete_belief_verification(
     ctx: &ReducerContext,
     schedule_id: String,
 ) -> Result<(), String> {
-    let mut row = ctx.db.belief_verification_schedule().schedule_id().find(&schedule_id)
+    let mut row = ctx
+        .db
+        .belief_verification_schedule()
+        .schedule_id()
+        .find(&schedule_id)
         .ok_or_else(|| format!("schedule not found: {}", schedule_id))?;
     row.completed_at = Some(now_string(ctx));
-    ctx.db.belief_verification_schedule().schedule_id().update(row);
+    ctx.db
+        .belief_verification_schedule()
+        .schedule_id()
+        .update(row);
     Ok(())
 }
 
@@ -5216,16 +6047,18 @@ pub fn schedule_treasury_rebalance(
     scheduled_at: String,
 ) -> Result<(), String> {
     let now = now_string(ctx);
-    ctx.db.treasury_rebalance_schedule().insert(TreasuryRebalanceSchedule {
-        schedule_id,
-        treasury_id,
-        reason,
-        priority,
-        scheduled_at,
-        claimed_by_run_id: None,
-        completed_at: None,
-        created_at: now,
-    });
+    ctx.db
+        .treasury_rebalance_schedule()
+        .insert(TreasuryRebalanceSchedule {
+            schedule_id,
+            treasury_id,
+            reason,
+            priority,
+            scheduled_at,
+            claimed_by_run_id: None,
+            completed_at: None,
+            created_at: now,
+        });
     Ok(())
 }
 
@@ -5235,7 +6068,11 @@ pub fn claim_treasury_rebalance(
     schedule_id: String,
     run_id: String,
 ) -> Result<(), String> {
-    let mut row = ctx.db.treasury_rebalance_schedule().schedule_id().find(&schedule_id)
+    let mut row = ctx
+        .db
+        .treasury_rebalance_schedule()
+        .schedule_id()
+        .find(&schedule_id)
         .ok_or_else(|| format!("schedule not found: {}", schedule_id))?;
     if row.claimed_by_run_id.is_some() {
         return Err(format!("schedule {} already claimed", schedule_id));
@@ -5244,7 +6081,10 @@ pub fn claim_treasury_rebalance(
         return Err(format!("schedule {} already completed", schedule_id));
     }
     row.claimed_by_run_id = Some(run_id);
-    ctx.db.treasury_rebalance_schedule().schedule_id().update(row);
+    ctx.db
+        .treasury_rebalance_schedule()
+        .schedule_id()
+        .update(row);
     Ok(())
 }
 
@@ -5253,9 +6093,16 @@ pub fn complete_treasury_rebalance(
     ctx: &ReducerContext,
     schedule_id: String,
 ) -> Result<(), String> {
-    let mut row = ctx.db.treasury_rebalance_schedule().schedule_id().find(&schedule_id)
+    let mut row = ctx
+        .db
+        .treasury_rebalance_schedule()
+        .schedule_id()
+        .find(&schedule_id)
         .ok_or_else(|| format!("schedule not found: {}", schedule_id))?;
     row.completed_at = Some(now_string(ctx));
-    ctx.db.treasury_rebalance_schedule().schedule_id().update(row);
+    ctx.db
+        .treasury_rebalance_schedule()
+        .schedule_id()
+        .update(row);
     Ok(())
 }

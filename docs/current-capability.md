@@ -2,21 +2,27 @@
 
 ## Supported now
 
-- **CLI**: supported operator surface
-- **MCP**: supported integration surface
-- **HTTP API**: supported public-safe runtime surface
-- **Docs**: supported public documentation surface
+- **CLI**: supported operator surface through the installed `heiwa` runtime
+- **Provider discovery/adapters**: real but uneven across local, OAuth CLI, and API-key modes
+- **MCP/tool contracts**: supported integration direction with explicit lease boundaries
+- **Static public shell/docs**: supported public-safe presentation surface
+- **Rust runtime substrate**: active product path for routing, sessions, providers, and loops
 
 ## Supported architecture claims
 
-- Railway is the runtime host for the hub service.
-- SpacetimeDB is the intended authoritative state layer.
-- Cloudflare Pages hosts the public marketing and docs shell.
-- Public status is WebSocket-first with HTTP fallback for diagnostics.
+- GitHub is the source, CI, release, and public repo front-page layer.
+- Cloudflare is the target public edge for marketing, docs, static clients, status, and later Workers.
+- SpacetimeDB Maincloud is the intended authoritative state, reducer, subscription, and evidence layer.
+- Local `heiwa` runtimes own local side effects, provider subprocesses, local secrets, and local model calls.
+- No hosted Rust service tier is required for the v0.1 topology; the installed runtime owns the inference/shell hot path.
 
 ## Not presented as complete
 
 - Discord as a required ingress surface
+- iMessage as a productized ingress surface
+- broad computer-use automation
+- `Heiwa.app` as a fully native desktop runtime
+- a Cloudflare/STDB/GitHub backbone with local runtime hot-path execution
 - `heiwa-limited` as an active product target
 - experimental canvases as part of the supported stack
 - placeholder agent personas as productized capabilities

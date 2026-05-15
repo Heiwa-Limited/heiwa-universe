@@ -1,0 +1,85 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://heiwa.ltd/schemas/heiwa_life_brief_v1.json",
+  "title": "Heiwa Life Brief",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "brief_id",
+    "brief_type",
+    "window_start",
+    "window_end",
+    "generated_at",
+    "generated_by",
+    "source_freshness",
+    "top_actions",
+    "risks",
+    "approval_request_ids"
+  ],
+  "properties": {
+    "schema_version": { "const": "heiwa_life_brief_v1" },
+    "brief_id": { "type": "string", "minLength": 1 },
+    "brief_type": {
+      "type": "string",
+      "enum": ["am", "pm", "weekly", "money_huddle", "stack_health", "custom"]
+    },
+    "window_start": { "type": "string", "format": "date-time" },
+    "window_end": { "type": "string", "format": "date-time" },
+    "generated_at": { "type": "string", "format": "date-time" },
+    "generated_by": { "type": "string", "minLength": 1 },
+    "summary": { "type": "string" },
+    "source_freshness": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["source_id", "fresh_at", "status"],
+        "properties": {
+          "source_id": { "type": "string", "minLength": 1 },
+          "fresh_at": { "type": "string", "format": "date-time" },
+          "status": { "type": "string", "enum": ["fresh", "stale", "missing", "unverified"] }
+        }
+      }
+    },
+    "top_actions": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/action_item" }
+    },
+    "risks": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["risk_id", "severity", "text"],
+        "properties": {
+          "risk_id": { "type": "string" },
+          "severity": { "type": "string", "enum": ["low", "medium", "high", "critical"] },
+          "text": { "type": "string" },
+          "source_ids": { "type": "array", "items": { "type": "string" } }
+        }
+      }
+    },
+    "approval_request_ids": { "type": "array", "items": { "type": "string" } },
+    "readmodel_snapshot_id": { "type": "string" }
+  },
+  "$defs": {
+    "action_item": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["action_id", "domain", "title", "approval_tier", "status"],
+      "properties": {
+        "action_id": { "type": "string" },
+        "domain": {
+          "type": "string",
+          "enum": ["body", "work", "social", "money", "mind", "stack", "schedule", "brief"]
+        },
+        "title": { "type": "string" },
+        "roi_rank": { "type": "integer", "minimum": 1 },
+        "approval_tier": { "type": "string", "enum": ["T0", "T1", "T2", "T3", "Never"] },
+        "status": { "type": "string", "enum": ["queued", "blocked", "done", "dismissed"] },
+        "source_ids": { "type": "array", "items": { "type": "string" } }
+      }
+    }
+  }
+}

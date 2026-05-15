@@ -42,6 +42,8 @@ validation:
 nav:
   - Home: index.md
   - Current Capability: current-capability.md
+  - Product Contract: product-contract.md
+  - Capability Fabric: capability-fabric.md
   - Architecture: architecture.md
   - Provider Registry: provider-registry.md
   - Routing Policy: routing.md

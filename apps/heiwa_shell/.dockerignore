@@ -1,0 +1,14 @@
+target/
+**/target/
+node_modules/
+**/node_modules/
+.git/
+.github/
+docs/
+site/
+legacy/
+archive/
+ops/docs_and_deps/
+**/__pycache__/
+*.log
+.DS_Store

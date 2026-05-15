@@ -61,6 +61,8 @@ cargo run -p heiwa-shell --bin heiwa -- auth status
 ## Read First
 
 - [`HEIWA.md`](HEIWA.md)
+- [`docs/product-contract.md`](docs/product-contract.md)
+- [`docs/capability-fabric.md`](docs/capability-fabric.md)
 - [`AGENTS.md`](AGENTS.md)
 - [`BUILD_MATRIX.md`](BUILD_MATRIX.md)
 - [`SECURITY.md`](SECURITY.md)

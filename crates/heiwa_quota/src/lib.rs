@@ -48,6 +48,19 @@ pub struct QuotaState {
     pub updated_at_unix: i64,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct RemainingBudget {
+    pub provider: String,
+    pub rate_group: String,
+    pub window_seconds: i64,
+    pub token_limit: i64,
+    pub tokens_used: i64,
+    pub tokens_remaining: i64,
+    pub requests: i64,
+    pub window_resets_at_unix: i64,
+    pub exhausted: bool,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct RunRecord {
     pub id: String,
@@ -281,6 +294,47 @@ impl QuotaLedger {
         Ok(state)
     }
 
+    pub fn remaining_budget(
+        &self,
+        provider: &str,
+        rate_group: &str,
+        window_seconds: i64,
+        token_limit: i64,
+        now_unix: i64,
+    ) -> Result<RemainingBudget> {
+        let existing = self.get_quota(provider, rate_group)?;
+        let (tokens_used, requests, window_resets_at_unix) = match existing {
+            Some(state)
+                if now_unix < state.window_start_unix.saturating_add(state.window_seconds) =>
+            {
+                (
+                    state.tokens_used.max(0),
+                    state.requests.max(0),
+                    state.window_start_unix.saturating_add(state.window_seconds),
+                )
+            }
+            _ => (0, 0, now_unix.saturating_add(window_seconds)),
+        };
+
+        let tokens_remaining = if token_limit <= 0 {
+            0
+        } else {
+            token_limit.saturating_sub(tokens_used).max(0)
+        };
+
+        Ok(RemainingBudget {
+            provider: provider.to_string(),
+            rate_group: rate_group.to_string(),
+            window_seconds,
+            token_limit,
+            tokens_used,
+            tokens_remaining,
+            requests,
+            window_resets_at_unix,
+            exhausted: token_limit > 0 && tokens_remaining == 0,
+        })
+    }
+
     pub fn list_quotas(&self) -> Result<Vec<QuotaState>> {
         let conn = self.conn.lock().expect("lock");
         let mut stmt = conn.prepare(
@@ -430,6 +484,40 @@ mod tests {
         assert_eq!(state.window_start_unix, 1_200);
         assert_eq!(state.tokens_used, 25);
         assert_eq!(state.requests, 1);
+    }
+
+    #[test]
+    fn remaining_budget_marks_active_window_exhausted() {
+        let l = ledger();
+        l.record_use("claude-code", "anthropic", 60, 100, 2, 1_000)
+            .unwrap();
+
+        let budget = l
+            .remaining_budget("claude-code", "anthropic", 60, 100, 1_010)
+            .unwrap();
+
+        assert_eq!(budget.tokens_used, 100);
+        assert_eq!(budget.tokens_remaining, 0);
+        assert_eq!(budget.requests, 2);
+        assert_eq!(budget.window_resets_at_unix, 1_060);
+        assert!(budget.exhausted);
+    }
+
+    #[test]
+    fn remaining_budget_resets_after_window_expires() {
+        let l = ledger();
+        l.record_use("claude-code", "anthropic", 60, 100, 1, 1_000)
+            .unwrap();
+
+        let budget = l
+            .remaining_budget("claude-code", "anthropic", 60, 100, 1_200)
+            .unwrap();
+
+        assert_eq!(budget.tokens_used, 0);
+        assert_eq!(budget.tokens_remaining, 100);
+        assert_eq!(budget.requests, 0);
+        assert_eq!(budget.window_resets_at_unix, 1_260);
+        assert!(!budget.exhausted);
     }
 
     #[test]

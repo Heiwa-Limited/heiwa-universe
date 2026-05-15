@@ -75,6 +75,7 @@ import InsertCaptainMessageReducer from "./insert_captain_message_reducer";
 import InsertCaptainSummaryReducer from "./insert_captain_summary_reducer";
 import InsertExecutionMemoryReducer from "./insert_execution_memory_reducer";
 import InsertKnowledgeEmbeddingReducer from "./insert_knowledge_embedding_reducer";
+import InsertLifeMemoryEventReducer from "./insert_life_memory_event_reducer";
 import IssueCapabilityLeaseReducer from "./issue_capability_lease_reducer";
 import LinkBeliefEvidenceReducer from "./link_belief_evidence_reducer";
 import LinkOauthIdentityReducer from "./link_oauth_identity_reducer";
@@ -131,6 +132,7 @@ import StartCellRunReducer from "./start_cell_run_reducer";
 import StartLoopSessionReducer from "./start_loop_session_reducer";
 import StoreProviderCredentialReducer from "./store_provider_credential_reducer";
 import UpdateDeviceHeartbeatReducer from "./update_device_heartbeat_reducer";
+import UpdateLifeMemoryEventStatusReducer from "./update_life_memory_event_status_reducer";
 import UpdateModelTierStatsReducer from "./update_model_tier_stats_reducer";
 import UpdatePodHeartbeatReducer from "./update_pod_heartbeat_reducer";
 import UpdateTaskDispatchStatusReducer from "./update_task_dispatch_status_reducer";
@@ -142,6 +144,12 @@ import UpsertDecayProfileReducer from "./upsert_decay_profile_reducer";
 import UpsertDiscordUserReducer from "./upsert_discord_user_reducer";
 import UpsertGpuSlotReducer from "./upsert_gpu_slot_reducer";
 import UpsertLeaseReducer from "./upsert_lease_reducer";
+import UpsertLifeActionItemReducer from "./upsert_life_action_item_reducer";
+import UpsertLifeAutomationSourceReducer from "./upsert_life_automation_source_reducer";
+import UpsertLifeBriefReducer from "./upsert_life_brief_reducer";
+import UpsertLifeReadmodelSnapshotReducer from "./upsert_life_readmodel_snapshot_reducer";
+import UpsertLifeScheduleWindowReducer from "./upsert_life_schedule_window_reducer";
+import UpsertLifeSourceReducer from "./upsert_life_source_reducer";
 import UpsertLivenessStateReducer from "./upsert_liveness_state_reducer";
 import UpsertModelTierReducer from "./upsert_model_tier_reducer";
 import UpsertNodeHeartbeatReducer from "./upsert_node_heartbeat_reducer";
@@ -183,6 +191,7 @@ import ExecutionMemoryRow from "./execution_memory_table";
 import GpuSlotsRow from "./gpu_slots_table";
 import KnowledgeEmbeddingsRow from "./knowledge_embeddings_table";
 import LeasesRow from "./leases_table";
+import LifeReadmodelSnapshotsRow from "./life_readmodel_snapshots_table";
 import LivenessStateRow from "./liveness_state_table";
 import LoopIterationsRow from "./loop_iterations_table";
 import LoopSessionsRow from "./loop_sessions_table";
@@ -762,6 +771,26 @@ const tablesSchema = __schema({
       { name: 'leases_lease_id_key', constraint: 'unique', columns: ['leaseId'] },
     ],
   }, LeasesRow),
+  life_readmodel_snapshots: __table({
+    name: 'life_readmodel_snapshots',
+    indexes: [
+      { name: 'generated_at', algorithm: 'btree', columns: [
+        'generatedAt',
+      ] },
+      { name: 'privacy_level', algorithm: 'btree', columns: [
+        'privacyLevel',
+      ] },
+      { name: 'snapshot_id', algorithm: 'btree', columns: [
+        'snapshotId',
+      ] },
+      { name: 'status', algorithm: 'btree', columns: [
+        'status',
+      ] },
+    ],
+    constraints: [
+      { name: 'life_readmodel_snapshots_snapshot_id_key', constraint: 'unique', columns: ['snapshotId'] },
+    ],
+  }, LifeReadmodelSnapshotsRow),
   liveness_state: __table({
     name: 'liveness_state',
     indexes: [
@@ -1397,6 +1426,7 @@ const reducersSchema = __reducers(
   __reducerSchema("insert_captain_summary", InsertCaptainSummaryReducer),
   __reducerSchema("insert_execution_memory", InsertExecutionMemoryReducer),
   __reducerSchema("insert_knowledge_embedding", InsertKnowledgeEmbeddingReducer),
+  __reducerSchema("insert_life_memory_event", InsertLifeMemoryEventReducer),
   __reducerSchema("issue_capability_lease", IssueCapabilityLeaseReducer),
   __reducerSchema("link_belief_evidence", LinkBeliefEvidenceReducer),
   __reducerSchema("link_oauth_identity", LinkOauthIdentityReducer),
@@ -1453,6 +1483,7 @@ const reducersSchema = __reducers(
   __reducerSchema("start_loop_session", StartLoopSessionReducer),
   __reducerSchema("store_provider_credential", StoreProviderCredentialReducer),
   __reducerSchema("update_device_heartbeat", UpdateDeviceHeartbeatReducer),
+  __reducerSchema("update_life_memory_event_status", UpdateLifeMemoryEventStatusReducer),
   __reducerSchema("update_model_tier_stats", UpdateModelTierStatsReducer),
   __reducerSchema("update_pod_heartbeat", UpdatePodHeartbeatReducer),
   __reducerSchema("update_task_dispatch_status", UpdateTaskDispatchStatusReducer),
@@ -1464,6 +1495,12 @@ const reducersSchema = __reducers(
   __reducerSchema("upsert_discord_user", UpsertDiscordUserReducer),
   __reducerSchema("upsert_gpu_slot", UpsertGpuSlotReducer),
   __reducerSchema("upsert_lease", UpsertLeaseReducer),
+  __reducerSchema("upsert_life_action_item", UpsertLifeActionItemReducer),
+  __reducerSchema("upsert_life_automation_source", UpsertLifeAutomationSourceReducer),
+  __reducerSchema("upsert_life_brief", UpsertLifeBriefReducer),
+  __reducerSchema("upsert_life_readmodel_snapshot", UpsertLifeReadmodelSnapshotReducer),
+  __reducerSchema("upsert_life_schedule_window", UpsertLifeScheduleWindowReducer),
+  __reducerSchema("upsert_life_source", UpsertLifeSourceReducer),
   __reducerSchema("upsert_liveness_state", UpsertLivenessStateReducer),
   __reducerSchema("upsert_model_tier", UpsertModelTierReducer),
   __reducerSchema("upsert_node_heartbeat", UpsertNodeHeartbeatReducer),

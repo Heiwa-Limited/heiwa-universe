@@ -1,0 +1,128 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://heiwa.ltd/schemas/heiwa_life_readmodel_v1.json",
+  "title": "Heiwa Life Readmodel",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "snapshot_id",
+    "generated_at",
+    "timezone",
+    "domains",
+    "schedule_window",
+    "today_queue",
+    "live_signals",
+    "source_freshness",
+    "approval_request_ids"
+  ],
+  "properties": {
+    "schema_version": { "const": "heiwa_life_readmodel_v1" },
+    "snapshot_id": { "type": "string", "minLength": 1 },
+    "generated_at": { "type": "string", "format": "date-time" },
+    "timezone": { "type": "string", "minLength": 1 },
+    "domains": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["body", "work", "social", "money", "mind", "stack"],
+      "properties": {
+        "body": { "$ref": "#/$defs/domain_state" },
+        "work": { "$ref": "#/$defs/domain_state" },
+        "social": { "$ref": "#/$defs/domain_state" },
+        "money": { "$ref": "#/$defs/domain_state" },
+        "mind": { "$ref": "#/$defs/domain_state" },
+        "stack": { "$ref": "#/$defs/domain_state" }
+      }
+    },
+    "schedule_window": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["window_start", "window_end", "items"],
+      "properties": {
+        "window_start": { "type": "string", "format": "date-time" },
+        "window_end": { "type": "string", "format": "date-time" },
+        "items": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["item_id", "start_at", "end_at", "kind", "title"],
+            "properties": {
+              "item_id": { "type": "string" },
+              "start_at": { "type": "string", "format": "date-time" },
+              "end_at": { "type": "string", "format": "date-time" },
+              "kind": { "type": "string" },
+              "title": { "type": "string" },
+              "approval_tier": { "type": "string", "enum": ["T0", "T1", "T2", "T3", "Never"] },
+              "source_ids": { "type": "array", "items": { "type": "string" } }
+            }
+          }
+        }
+      }
+    },
+    "today_queue": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/action_item" }
+    },
+    "live_signals": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["signal_id", "kind", "severity", "title", "status"],
+        "properties": {
+          "signal_id": { "type": "string" },
+          "kind": { "type": "string" },
+          "severity": { "type": "string", "enum": ["info", "low", "medium", "high", "critical"] },
+          "title": { "type": "string" },
+          "status": { "type": "string", "enum": ["active", "stale", "resolved"] },
+          "source_ids": { "type": "array", "items": { "type": "string" } }
+        }
+      }
+    },
+    "source_freshness": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["source_id", "fresh_at", "status"],
+        "properties": {
+          "source_id": { "type": "string" },
+          "fresh_at": { "type": "string", "format": "date-time" },
+          "status": { "type": "string", "enum": ["fresh", "stale", "missing", "unverified"] }
+        }
+      }
+    },
+    "approval_request_ids": { "type": "array", "items": { "type": "string" } },
+    "materialized_from_event_ids": { "type": "array", "items": { "type": "string" } }
+  },
+  "$defs": {
+    "domain_state": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["status", "summary", "source_ids"],
+      "properties": {
+        "status": { "type": "string", "enum": ["ok", "watch", "blocked", "unknown"] },
+        "summary": { "type": "string" },
+        "source_ids": { "type": "array", "items": { "type": "string" } }
+      }
+    },
+    "action_item": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["action_id", "domain", "title", "approval_tier", "status"],
+      "properties": {
+        "action_id": { "type": "string" },
+        "domain": {
+          "type": "string",
+          "enum": ["body", "work", "social", "money", "mind", "stack", "schedule", "brief"]
+        },
+        "title": { "type": "string" },
+        "roi_rank": { "type": "integer", "minimum": 1 },
+        "approval_tier": { "type": "string", "enum": ["T0", "T1", "T2", "T3", "Never"] },
+        "status": { "type": "string", "enum": ["queued", "blocked", "done", "dismissed"] },
+        "source_ids": { "type": "array", "items": { "type": "string" } }
+      }
+    }
+  }
+}

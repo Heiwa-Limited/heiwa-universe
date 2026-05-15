@@ -35,6 +35,30 @@ fn local_model(
     }
 }
 
+fn remote_model(model_id: &str, capability_class: u8, strengths: &[&str]) -> ModelTier {
+    ModelTier {
+        id: 0,
+        model_id: model_id.to_string(),
+        provider_model_id: model_id.to_string(),
+        provider: "claude".to_string(),
+        rate_group: "anthropic".to_string(),
+        capability_class,
+        effort_knob: "default".to_string(),
+        effort_level: capability_class,
+        cost_per_turn: 0.05,
+        max_context_tokens: 128_000,
+        vram_requirement_mb: 0,
+        quantization_type: "none".to_string(),
+        kv_cache_strategy: "standard".to_string(),
+        strengths_json: serde_json::to_string(strengths).unwrap(),
+        enabled: true,
+        last_success_rate: 0.99,
+        avg_latency_ms: 800,
+        latency_p_95_ms: 1600,
+        updated_at: "2026-05-08T00:00:00Z".to_string(),
+    }
+}
+
 #[test]
 fn code_edit_task_scores_micro_highest() {
     let vector = DrexVector {
@@ -100,6 +124,53 @@ fn route_plan_prefers_vram_fit_and_kv_strategy_for_local_execution() {
     assert_eq!(route.runtime_hint, "local");
     assert_eq!(selected.model_id, "ollama/qwen3.5:4b");
     assert_eq!(selected.kv_cache_strategy, "turboquant");
+}
+
+#[test]
+fn tool_using_route_requires_tool_capable_model() {
+    let ingress = DrexIngress {
+        intent: "operate".to_string(),
+        risk: "low".to_string(),
+        raw_text: "use the GitHub MCP server to open an issue from this summary".to_string(),
+        privacy: "standard".to_string(),
+        runtime: "any".to_string(),
+        available_vram_mb: 8_192,
+        required_context_tokens: 4_096,
+    };
+
+    let tiers = vec![
+        remote_model("claude-high-no-tools", 5, &["chat", "research"]),
+        remote_model("claude-tool-capable", 3, &["chat", "tool_use"]),
+    ];
+
+    let route = plan_route(&ingress, &tiers, &default_policy()).expect("route plan");
+    let selected = route.selected_model.expect("selected model");
+
+    assert_eq!(selected.model_id, "claude-tool-capable");
+    assert!(route.routing_metadata.contains("tool_use"));
+}
+
+#[test]
+fn api_design_prompt_does_not_require_tool_capability() {
+    let ingress = DrexIngress {
+        intent: "strategy".to_string(),
+        risk: "low".to_string(),
+        raw_text: "design the public API architecture for the cockpit".to_string(),
+        privacy: "standard".to_string(),
+        runtime: "any".to_string(),
+        available_vram_mb: 8_192,
+        required_context_tokens: 4_096,
+    };
+
+    let tiers = vec![remote_model("claude-no-tools", 4, &["chat", "research"])];
+
+    let route = plan_route(&ingress, &tiers, &default_policy()).expect("route plan");
+    let selected = route.selected_model.expect("selected model");
+
+    assert_eq!(selected.model_id, "claude-no-tools");
+    assert!(route
+        .routing_metadata
+        .contains("\"required_capabilities\":[]"));
 }
 
 #[test]

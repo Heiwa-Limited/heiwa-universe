@@ -1,0 +1,75 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://heiwa.ltd/schemas/heiwa_life_memory_event_v1.json",
+  "title": "Heiwa Life Memory Event",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "event_id",
+    "occurred_at",
+    "recorded_at",
+    "domain",
+    "event_type",
+    "fields",
+    "source",
+    "confidence",
+    "approval_tier",
+    "privacy_level"
+  ],
+  "properties": {
+    "schema_version": { "const": "heiwa_life_memory_event_v1" },
+    "event_id": { "type": "string", "minLength": 1 },
+    "occurred_at": { "type": "string", "format": "date-time" },
+    "recorded_at": { "type": "string", "format": "date-time" },
+    "domain": {
+      "type": "string",
+      "enum": ["body", "work", "social", "money", "mind", "stack", "schedule", "brief"]
+    },
+    "event_type": { "type": "string", "minLength": 1 },
+    "fields": {
+      "type": "object",
+      "additionalProperties": {
+        "type": ["string", "number", "integer", "boolean", "null", "array", "object"]
+      }
+    },
+    "source": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "uri", "captured_by"],
+      "properties": {
+        "kind": {
+          "type": "string",
+          "enum": [
+            "user_entry",
+            "local_doc",
+            "calendar",
+            "automation",
+            "agent_brief",
+            "shell",
+            "connector",
+            "importer"
+          ]
+        },
+        "uri": { "type": "string", "minLength": 1 },
+        "content_hash": { "type": "string" },
+        "captured_by": { "type": "string", "minLength": 1 },
+        "source_event_id": { "type": "string" }
+      }
+    },
+    "confidence": { "type": "number", "minimum": 0, "maximum": 1 },
+    "approval_tier": { "type": "string", "enum": ["T0", "T1", "T2", "T3", "Never"] },
+    "privacy_level": {
+      "type": "string",
+      "enum": ["private", "local_only", "sync_allowed", "public_safe"]
+    },
+    "owner_scope": { "type": "string" },
+    "source_ids": { "type": "array", "items": { "type": "string" } },
+    "supersedes_event_id": { "type": "string" },
+    "status": {
+      "type": "string",
+      "enum": ["active", "corrected", "superseded", "retired"],
+      "default": "active"
+    }
+  }
+}
