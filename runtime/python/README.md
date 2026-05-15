@@ -26,7 +26,7 @@ Add new ops in `src/heiwa_sidecar/handlers.py` and register in `HANDLERS`.
 cd runtime/python
 uv sync --extra dev
 uv run python -m heiwa_sidecar   # serves on stdin/stdout
-uv run pytest                    # run tests
+uv run --extra dev python -m pytest # run tests
 ```
 
 The Rust side launches this module via `python -m heiwa_sidecar`. No entry-point script is required for the spawn path, but one is provided (`heiwa-sidecar`) for interactive debugging.

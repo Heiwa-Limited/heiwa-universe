@@ -3780,7 +3780,7 @@ impl __sdk::Reducer for Reducer {
     }
 }
 
-#[derive(Default)]
+#[derive(Default, Debug)]
 #[allow(non_snake_case)]
 #[doc(hidden)]
 pub struct DbUpdate {
@@ -4885,6 +4885,7 @@ impl<'r> __sdk::AppliedDiff<'r> for AppliedDiff<'r> {
     }
 }
 
+#[derive(Debug)]
 #[doc(hidden)]
 pub struct RemoteModule;
 
