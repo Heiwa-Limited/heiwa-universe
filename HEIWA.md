@@ -1,6 +1,6 @@
 # HEIWA
 
-Updated: 2026-04-22
+Updated: 2026-05-15
 Status: Canonical truth for `heiwa-universe`
 
 This file replaces the old repo-root compatibility shim. When `README.md`, legacy plans, or older architecture notes conflict with this document, this document wins.
@@ -76,6 +76,8 @@ Heiwa is a system with three distinct layers:
 
 3. **Enterprise platform**
    - Heiwa normalizes access to provider subscriptions, API keys, local models, device capabilities, evidence, routing policy, and later org governance.
+
+The product, service, and feature boundary is defined in [`docs/product-contract.md`](docs/product-contract.md). If a surface does not advance that contract, treat it as support infrastructure, reference material, legacy, or slop until proven otherwise.
 
 ## What Heiwa Is Not
 
@@ -196,12 +198,15 @@ If there is no internet connection, Claude Code, Codex cloud, Gemini cloud, or o
 - Heiwa account state, settings, routing preferences, receipts, and history can sync.
 - Local models remain first-class and may be preferred for privacy or cost.
 
-### 3. Hosted
+### 3. Cloud-backed local
 
-- Hosted Heiwa services run on Railway and related infra.
-- Web and other clients can attach to hosted sessions or hosted control surfaces.
-- Same kernel model, different deployment topology.
-- This is not the first thing that must be perfect for Heiwa to come alive.
+- User still runs `heiwa` locally.
+- The local runtime owns the hot path: provider streams, PTY/shell work, local models, device resources, local approvals, and side effects.
+- SpacetimeDB Cloud owns durable truth: reducers, subscriptions, session/routing tables, leases, evidence, and audit state.
+- Cloudflare owns edge/public surfaces: DNS, docs, app shell, status pages, and later remote attach.
+- GitHub owns source, CI, release artifacts, installer distribution, and public repo trust once the secure publish gate passes.
+
+No hosted Rust service tier is required in this topology. If Stage 4+ adds a hosted control plane later, it must not become a hidden inference middleman for the local runtime path.
 
 ## Provider, Auth, Model, and Limit Truth
 
@@ -295,31 +300,28 @@ That is how Heiwa scales from “my machine” to “my fleet” without changin
 
 ## Infrastructure Contract
 
-Heiwa is local-first, but hostable on the chosen infra.
+Heiwa is local-first. Hosted infrastructure exists to provide durable truth, public surfaces, and distribution without moving the inference/shell hot path off the operator device.
 
 | Surface | Role in Heiwa |
 | --- | --- |
 | **GitHub** | Source of truth, CI, release artifacts, install/update distribution |
-| **Railway** | Hosted Rust services and private service networking |
 | **SpacetimeDB Cloud** | Canonical state, reducers, subscriptions, evidence |
 | **Cloudflare** | Public edge, DNS, docs/app surfaces, later remote access surfaces |
 | **Local machine** | Primary `heiwa` runtime, provider CLIs, local models, operator control |
 
-### Railway
+| Layer | Host | Role |
+| --- | --- | --- |
+| Canonical state / evidence | SpacetimeDB Cloud | Reducers, subscriptions, session/routing tables, adjudication |
+| Local inference + streaming | `heiwa` app runtime on the device | Provider streams, PTY/shell, local models, local approvals, side effects |
+| Edge / public surfaces | Cloudflare Workers + Pages | DNS, docs, web shell, status, later remote attach |
+| Source / CI / distribution | GitHub | Releases, install artifacts, binaries, checksums, source trust |
 
-As of current Railway docs:
+Architectural implication:
 
-- Railpack is the default builder.
-- New services default to Railpack.
-- Nixpacks is deprecated and in maintenance mode.
-- Dockerfiles are fully supported, and Railway will use them when present.
-- Config-as-code supports explicit `RAILPACK` and `DOCKERFILE` builders. [4][5][6][7]
-
-Heiwa implication:
-
-- Prefer **Dockerfile-first** deployment for critical hosted Rust services.
-- Use Railpack only where zero-config speed is worth the trade.
-- Do not architect new production surfaces around Nixpacks.
+- There is no hosted Rust service tier in the v0.1 topology.
+- Rust runtime is device-local until a later hosted control plane has a verified need.
+- SpacetimeDB Cloud is the hosted backend authority, not an operator surface.
+- No cloud hop belongs in the inference loop unless the selected provider itself is cloud-hosted.
 
 ### SpacetimeDB
 
@@ -334,8 +336,8 @@ Heiwa implication:
 
 Cloudflare Workers and Pages are strong fits for Heiwa’s edge and public surfaces:
 
-- Workers Custom Domains are the right model when the Worker is the application origin. [8]
-- Pages is appropriate for the public web shell and static/full-stack edge delivery later. [9]
+- Workers Custom Domains are the right model when the Worker is the application origin. [4]
+- Pages is appropriate for the public web shell and static/full-stack edge delivery later. [5]
 
 Heiwa implication:
 
@@ -675,14 +677,10 @@ The repo-root files `IDENTITY.md` and `SOUL.md` are compatibility shims that for
 1. [SpacetimeDB reducers overview](https://spacetimedb.com/docs/functions/reducers/)
 2. [SpacetimeDB functions overview](https://spacetimedb.com/docs/functions/)
 3. [SpacetimeDB subscriptions](https://spacetimedb.com/docs/subscriptions/)
-4. [Railway build configuration](https://docs.railway.com/builds/build-configuration)
-5. [Railway builds overview](https://docs.railway.com/builds)
-6. [Railway config as code](https://docs.railway.com/reference/config-as-code)
-7. [Railway Railpack docs](https://docs.railway.com/builds/railpack)
-8. [Cloudflare Workers routes and domains](https://developers.cloudflare.com/workers/configuration/routing/)
-9. [Cloudflare Pages overview](https://developers.cloudflare.com/pages/)
-10. [Junie BYOK](https://junie.jetbrains.com/docs/byok.html)
-11. [Junie terminal usage](https://junie.jetbrains.com/docs/junie-cli-usage.html)
+4. [Cloudflare Workers routes and domains](https://developers.cloudflare.com/workers/configuration/routing/)
+5. [Cloudflare Pages overview](https://developers.cloudflare.com/pages/)
+6. [Junie BYOK](https://junie.jetbrains.com/docs/byok.html)
+7. [Junie terminal usage](https://junie.jetbrains.com/docs/junie-cli-usage.html)
 12. [Junie quickstart](https://junie.jetbrains.com/docs/junie-cli.html)
 13. [Junie CLI reference](https://junie.jetbrains.com/docs/parameters.html)
 14. [Junie environment variables](https://junie.jetbrains.com/docs/environment-variables.html)

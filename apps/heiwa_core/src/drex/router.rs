@@ -6,6 +6,7 @@ use super::scorer::evaluate_drex;
 use super::vector::DrexVector;
 
 use serde::Deserialize;
+use serde_json::json;
 
 #[derive(Clone, Debug, PartialEq, Deserialize)]
 pub struct DrexIngress {
@@ -137,6 +138,7 @@ pub fn plan_route(
     let decision = evaluate_drex(&vector, policy, 0.95, runtime_fit, 0.65);
     let selected_model = select_model_tier(ingress, &initial_runtime_hint, &decision, model_tiers);
 
+    let required_capabilities = required_model_capabilities(ingress);
     let (execution_mode, runtime_hint, routing_metadata) = if let Some(ref tier) = selected_model {
         let execution_mode = execution_mode_for_tier(tier);
         let runtime_hint = if matches!(execution_mode, ExecutionMode::LocalModel) {
@@ -144,10 +146,18 @@ pub fn plan_route(
         } else {
             initial_runtime_hint.clone()
         };
-        (execution_mode, runtime_hint, format!(
-            "{{\"reason\": \"best_score\", \"mode\": \"{}\", \"model_id\": \"{}\", \"provider\": \"{}\"}}",
-            execution_mode_label(execution_mode), tier.model_id, tier.provider
-        ))
+        (
+            execution_mode,
+            runtime_hint,
+            json!({
+                "reason": "best_score",
+                "mode": execution_mode_label(execution_mode),
+                "model_id": tier.model_id,
+                "provider": tier.provider,
+                "required_capabilities": required_capabilities,
+            })
+            .to_string(),
+        )
     } else {
         return Err(anyhow!("no compatible model tier found for route"));
     };
@@ -291,6 +301,7 @@ fn select_model_tier(
         "medium" => 2,
         _ => 1,
     };
+    let required_capabilities = required_model_capabilities(ingress);
     let local_only = ingress.privacy == "sovereign" || is_local_runtime(runtime_hint);
     let compatible: Vec<&ModelTier> = model_tiers
         .iter()
@@ -303,10 +314,13 @@ fn select_model_tier(
         .filter(|tier| tier.vram_requirement_mb <= ingress.available_vram_mb || !local_only)
         .filter(|tier| !local_only || is_local_provider(&tier.provider))
         .filter(|tier| {
+            required_capabilities
+                .iter()
+                .all(|capability| tier_has_strength(tier, capability))
+        })
+        .filter(|tier| {
             if ingress.intent == "code" {
-                let strengths: Vec<String> =
-                    serde_json::from_str(&tier.strengths_json).unwrap_or_default();
-                strengths.contains(&"advanced_coding".to_string()) || tier.capability_class >= 3
+                tier_has_strength(tier, "advanced_coding") || tier.capability_class >= 3
             } else {
                 true
             }
@@ -353,12 +367,60 @@ fn model_score(tier: &ModelTier, ingress: &DrexIngress, decision: &DrexDecision)
     score += (tier.capability_class as f64) * 2.0;
 
     // Strength bonuses
-    let strengths: Vec<String> = serde_json::from_str(&tier.strengths_json).unwrap_or_default();
-    if ingress.intent == "code" && strengths.contains(&"advanced_coding".to_string()) {
+    if ingress.intent == "code" && tier_has_strength(tier, "advanced_coding") {
         score += 2.0;
     }
 
     score - (tier.cost_per_turn * 0.1) - ((tier.vram_requirement_mb as f64) / 32_768.0)
+}
+
+fn required_model_capabilities(ingress: &DrexIngress) -> Vec<&'static str> {
+    let lowercase = ingress.raw_text.to_ascii_lowercase();
+    let phrase_needles = [
+        "mcp server",
+        "mcp tool",
+        "tool use",
+        "use github",
+        "github",
+        "pull request",
+        "open an issue",
+        "create an issue",
+        "notion",
+        "slack",
+        "gmail",
+        "send email",
+        "calendar",
+        "google drive",
+        "google sheet",
+        "browser",
+        "webhook",
+        "jira",
+        "linear",
+    ];
+    let word_needles = ["mcp"];
+    let needs_external_tool = phrase_needles
+        .iter()
+        .any(|needle| lowercase.contains(needle))
+        || word_needles
+            .iter()
+            .any(|needle| contains_word(&lowercase, needle));
+
+    if needs_external_tool {
+        vec!["tool_use"]
+    } else {
+        Vec::new()
+    }
+}
+
+fn tier_has_strength(tier: &ModelTier, capability: &str) -> bool {
+    serde_json::from_str::<Vec<String>>(&tier.strengths_json)
+        .map(|strengths| strengths.iter().any(|strength| strength == capability))
+        .unwrap_or(false)
+}
+
+fn contains_word(text: &str, word: &str) -> bool {
+    text.split(|c: char| !c.is_ascii_alphanumeric() && c != '_')
+        .any(|token| token == word)
 }
 
 fn is_local_provider(provider: &str) -> bool {

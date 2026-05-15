@@ -1,0 +1,196 @@
+# Product Contract
+
+**Status:** Personal-first product contract for the enterprise-grade Heiwa stack.
+
+This document defines what Heiwa is allowed to present as product. `HEIWA.md`
+remains the architecture authority. `PRODUCT_SURFACE.md` remains the tracked-path
+classification authority. This file names the real products, services, and feature
+families.
+
+The modular resource model is defined in [`capability-fabric.md`](capability-fabric.md).
+
+## First Customer
+
+The first customer is Devon.
+
+The first winning product is not a generic public AI dashboard. It is the operator
+system that lets one person safely use local models, provider CLIs, hosted models,
+computer use, messaging surfaces, files, and personal workflows through one
+governed runtime.
+
+Personal-first does not mean hobby-grade. It means the system must work for one
+high-trust operator before it claims team or enterprise maturity.
+
+## Product Set
+
+### 1. Heiwa Runtime
+
+The installed `heiwa` runtime is the primary product.
+
+It owns:
+
+- local install, doctor, auth, provider, and session UX
+- provider and local-model discovery
+- routing policy and budget-aware execution
+- session history, receipts, artifacts, and evidence
+- local process supervision and side-effect execution
+- approval classes for shell, browser, computer-use, messaging, and file actions
+- offline-local and online-local modes
+
+This is the product that turns Codex, Claude Code, Gemini CLI, Antigravity, Ollama,
+MCP tools, and future agents into one operator surface. Those providers remain
+provider-owned; Heiwa owns routing, evidence, policy, and local UX.
+
+### 2. Heiwa.app
+
+`Heiwa.app` is the companion visual client for the same runtime.
+
+Today this is represented by the web client path in `apps/heiwa_app/`. The target
+is a safe client, not a privileged second control plane.
+
+It should expose:
+
+- account and provider connection state
+- devices and runtime health
+- task, run, and receipt history
+- approvals and risk classes
+- routing policy visibility
+- public-safe status and diagnostics
+
+It must not hold raw provider secrets, bypass runtime policy, or become the place
+where privileged automation logic lives.
+
+### 3. Heiwa Cloud Backbone
+
+The target posture is a 99.99%-grade hosted backbone. That is a product target,
+not a current SLA claim until uptime, alerting, failover, and incident evidence
+exist.
+
+The enterprise-grade hosted backbone target is:
+
+| Service | Product role |
+| --- | --- |
+| GitHub | source, CI, release artifacts, installer, public repo front page |
+| Cloudflare | public edge, DNS, Pages/Workers, WAF, static clients, status/docs |
+| SpacetimeDB Maincloud | canonical state, reducers, subscriptions, evidence ledger |
+
+The target is a highly available control and evidence backbone, not a hosted
+agent that performs all user actions remotely. Local runtimes still execute
+local side effects and hold local trust.
+
+Current boundary: there is no hosted Rust service tier in the v0.1 topology.
+The local runtime owns provider streams, shell work, local models, approvals,
+and side effects. A hosted control plane can be reconsidered only after a later
+stage proves the need and does not add a hidden inference middleman.
+
+### 4. Heiwa Integration Registry
+
+Integrations are capability lanes, not separate products by default.
+
+pi-mono, Hermes-style agents, provider coding agents, and computer-use agents are
+reference classes for what Heiwa coordinates. They are not brands Heiwa copies.
+
+Initial lanes:
+
+- major account providers: Apple, Google, Microsoft, GitHub
+- provider CLIs: Claude Code, Codex, Gemini CLI, Antigravity
+- local model runtimes: Ollama and later local/sovereign runners
+- direct APIs and routers: OpenAI, Anthropic, Google, OpenRouter, LiteLLM-style adapters
+- messaging ingress: Discord first where already present, iMessage only through a safe local bridge
+- computer use: browser, desktop, files, shell, and app control through explicit approval classes
+- MCP and local tools: registered tools with evidence and lease boundaries
+
+Every integration must map into a trust class: provider adapter, tool, hook, or
+reducer/policy. "BYOX" is only registration vocabulary.
+
+Each account/tool/model integration must declare scopes, auth mode, resource map,
+action schemas, lease rules, evidence hooks, and revocation behavior before it is
+treated as product-grade.
+
+## Service Boundaries
+
+| Service boundary | Runs where | Owns | Must not own |
+| --- | --- | --- | --- |
+| Local runtime | Devon/user device | side effects, provider subprocesses, local secrets, local model calls | canonical multi-device truth |
+| Cloudflare edge | Cloudflare | static/public clients, routing, WAF, status/docs edge | raw provider secrets or privileged automation |
+| SpacetimeDB | Maincloud | canonical state transitions, subscriptions, evidence, leases | shell/browser/computer-use side effects |
+| GitHub | GitHub | source, CI, releases, install distribution | live user state or private runtime memory |
+| Public website | Cloudflare/GitHub | marketing, docs, install, public repo trust | privileged control-plane mutations |
+
+## Feature Families
+
+### P0: Devon-Useful Core
+
+- install and doctor that reflect real local machine state
+- provider connect/status for local, OAuth CLI, and API-key modes
+- connector manifests for Apple, Google, Microsoft, GitHub, messaging, and computer-use lanes
+- local-first routing that avoids provider-token tax when deterministic handling is enough
+- durable sessions, receipts, and evidence
+- bounded loops with clear keep/discard behavior
+- approval-gated shell, browser, file, and computer-use actions
+- Heiwa.app dashboard over the same state, not a separate brain
+- public install/docs/GitHub surface that does not overstate maturity
+
+### P1: Personal Life Integration
+
+- Discord and iMessage ingress as optional clients
+- account-aware workflows across mail, calendar, files, repos, messages, browser, and desktop apps
+- local reminders, recurring tasks, and monitors through explicit automations
+- computer-use actions with previews, approvals, and receipts
+- file, browser, app, and communication workflows routed through the same runtime
+- per-surface trust policy: local CLI is higher trust than public chat ingress
+
+### P2: Team/Enterprise Expansion
+
+- org identity and policy
+- device and fleet governance
+- shared evidence and approvals
+- tenant-scoped provider inventory and budgets
+- compliance-ready audit exports
+- hosted assist flows that do not bypass local/runtime trust rules
+
+## Public Surface Contract
+
+Safe public surfaces:
+
+- `heiwa.ltd`: marketing, install, docs pointers
+- GitHub repo front page: source, release, trust, issue/PR intake
+- `docs.heiwa.ltd`: public docs
+- `status.heiwa.ltd`: read-only health/status
+- `app.heiwa.ltd`: safe client shell when authenticated and policy-backed
+
+Unsafe as public product claims until proven:
+
+- arbitrary remote computer-use execution
+- raw Discord/iMessage command execution without trust policy
+- provider-secret handling in browser or edge code
+- equal execution parity across every provider
+- team/enterprise governance before single-operator evidence works
+
+## Non-Products
+
+These are not standalone products right now:
+
+- DREX as a public brand
+- SpacetimeDB as an operator surface
+- any hosted Rust service tier as the v0.1 product center
+- Discord as the only interface
+- a generic web IDE
+- a giant research archive
+- ungoverned "agent marketplace" surfaces
+
+## Success Gate
+
+Heiwa becomes real when Devon can ask for work through `heiwa`, Heiwa.app, or a
+safe messaging ingress, and the system can:
+
+1. classify the intent and risk
+2. resolve the required account, data, tool, model, device, and agent material
+3. pick the cheapest acceptable route
+4. execute locally or through connected providers/subagents
+5. ask for approval before risky side effects
+6. record evidence and receipts
+7. expose the result through the same runtime/app state
+
+Anything that does not move this gate forward is support infrastructure,
+reference material, or slop until proven otherwise.

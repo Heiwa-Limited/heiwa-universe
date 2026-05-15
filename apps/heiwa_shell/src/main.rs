@@ -1,11 +1,15 @@
+mod cli;
+mod cmd;
+
 use anyhow::{anyhow, Result};
 use chrono::Utc;
 use heiwa_core::drex::{
     default_policy, plan_route, preflight_execution, DrexIngress, ExecutionMode,
 };
 use heiwa_protocol::{
-    parse_turn_intent, CockpitCommand, CockpitEvent, ExecutionScope, RoutingState, SessionState,
-    ToolCallReceipt, ToolLease, TranscriptBlock,
+    parse_turn_intent, CockpitCommand, CockpitEvent, ExecutionRole, ExecutionScope, Permission,
+    PrincipalKind, RoutingState, SessionPrincipal, SessionState, ToolCallReceipt, ToolLease,
+    TranscriptBlock,
 };
 use heiwa_provider::adapter::{Message, ProviderAdapter, Role, StreamEvent, TokenUsage};
 use heiwa_provider::providers::claude_code::ClaudeCodeCliAdapter;
@@ -56,6 +60,7 @@ struct SessionPins {
     cockpit_mode: CockpitMode,
     current_provider: String,
     current_model: String,
+    principal: SessionPrincipal,
     scope: ExecutionScope,
 }
 
@@ -74,6 +79,11 @@ impl SessionPins {
             cockpit_mode: CockpitMode::Direct,
             current_provider: String::new(),
             current_model: String::new(),
+            principal: SessionPrincipal::new(
+                "agent:local-shell",
+                PrincipalKind::Agent,
+                ExecutionRole::Agent,
+            ),
             scope,
         }
     }
@@ -95,6 +105,7 @@ struct RouteResult {
     model_id: String,
     provider: String,
     provider_model_id: String,
+    rate_group: String,
     routing_metadata: String,
     intent_key: String,
     request_id: String,
@@ -122,6 +133,10 @@ async fn main() -> Result<()> {
 
     if args.len() < 2 || (args.len() == 2 && args[1] == "--plain") {
         run_repl(use_cockpit).await?;
+        return Ok(());
+    }
+
+    if cli::try_handle(&args).await? {
         return Ok(());
     }
 
@@ -540,6 +555,9 @@ async fn main() -> Result<()> {
                 println!();
             }
         }
+        "route" => {
+            run_route_command(&args).await?;
+        }
         "session" => {
             if args.len() >= 3 && args[2] == "attach" {
                 println!("Running session attach...");
@@ -682,10 +700,84 @@ fn print_help() {
     println!("  auth logout <provider>        Logout from a provider CLI");
     println!("  providers                     List connected accounts and models");
     println!("  models                        List all detected models by rate group");
+    println!("  life <command>                Inspect/import life readmodel data");
+    println!("  app [runtime status]          Probe local Heiwa.app runtime readiness");
+    println!("  workers heartbeat             Register local worker liveness");
+    println!("  workers status                Show worker registry");
+    println!("  approvals list|show|decide    Manage local approval packets");
+    println!("  mail status|accounts          Mail.app metadata-only bridge probe");
+    println!("  route preview <prompt>        Preview DREX routing without execution");
     println!("  session attach                Attach to a Heiwa session");
     println!("  loop [turns] <objective>      Run a bounded execution loop");
     println!("  shell                         Enter interactive mode");
     println!("  help                          Print this message");
+}
+
+async fn run_route_command(args: &[String]) -> Result<()> {
+    match args.get(2).map(String::as_str) {
+        Some("preview") => {
+            let prompt = args
+                .get(3..)
+                .map(|parts| parts.join(" "))
+                .unwrap_or_default();
+            if prompt.trim().is_empty() {
+                println!("Usage: heiwa route preview <prompt>");
+                return Ok(());
+            }
+
+            let mut registry = heiwa_provider::AccountRegistry::load();
+            heiwa_provider::detect::auto_discover(&mut registry).await;
+            let model_tiers = get_live_model_tiers(&registry);
+            let pins = SessionPins::new();
+            let now_unix = Utc::now().timestamp();
+            let quota_ledger = open_default_quota_ledger();
+
+            println!("route preview");
+            let quota_lines =
+                quota_budget_preview_lines(&model_tiers, quota_ledger.as_ref(), now_unix);
+            if !quota_lines.is_empty() {
+                println!("  quota:");
+                for line in quota_lines {
+                    println!("    {line}");
+                }
+            }
+
+            match route_task_with_quota(
+                &prompt,
+                &pins,
+                &model_tiers,
+                quota_ledger.as_ref(),
+                now_unix,
+            ) {
+                Ok(RouteOutcome::Deterministic(response)) => {
+                    println!("  mode: deterministic");
+                    println!("  response: {}", response);
+                }
+                Ok(RouteOutcome::Routed(route)) => {
+                    let mode = if is_local_provider(&route.provider) {
+                        "local_model"
+                    } else {
+                        "remote_model"
+                    };
+                    println!("  mode: {}", mode);
+                    println!("  intent: {}", route.intent_key);
+                    println!("  provider: {}", route.provider);
+                    println!("  model: {}", route.model_id);
+                    println!("  provider_model: {}", route.provider_model_id);
+                    println!("  rate_group: {}", route.rate_group);
+                    println!("  metadata: {}", route.routing_metadata);
+                }
+                Err(error) => {
+                    println!("  mode: unavailable");
+                    println!("  error: {}", error);
+                }
+            }
+        }
+        _ => {
+            println!("Usage: heiwa route preview <prompt>");
+        }
+    }
+    Ok(())
 }
 
 fn print_ai_ops_check(label: &str, ok: bool) {
@@ -1093,7 +1185,7 @@ async fn run_repl(use_cockpit: bool) -> Result<()> {
             }
             ReplCommand::Shell(s) => {
                 println!("Escaping to shell: {}", s);
-                match run_scoped_shell(&s, &pins.scope) {
+                match run_scoped_shell(&s, &pins.scope, &pins.principal) {
                     Ok(o) => {
                         io::stdout().write_all(&o.stdout)?;
                         io::stderr().write_all(&o.stderr)?;
@@ -1539,25 +1631,27 @@ async fn run_cockpit_controller(
                             }
                         }
                     }
-                    ReplCommand::Shell(s) => match run_scoped_shell(&s, &pins.scope) {
-                        Ok(o) => {
-                            let stdout_str = String::from_utf8_lossy(&o.stdout).to_string();
-                            let stderr_str = String::from_utf8_lossy(&o.stderr).to_string();
-                            let combined = if stderr_str.is_empty() {
-                                stdout_str
-                            } else {
-                                format!("{}\n{}", stdout_str, stderr_str)
-                            };
-                            let _ = event_tx.send(CockpitEvent::TranscriptAppend(
-                                TranscriptBlock::Tool(format!("shell: {}", s), combined),
-                            ));
+                    ReplCommand::Shell(s) => {
+                        match run_scoped_shell(&s, &pins.scope, &pins.principal) {
+                            Ok(o) => {
+                                let stdout_str = String::from_utf8_lossy(&o.stdout).to_string();
+                                let stderr_str = String::from_utf8_lossy(&o.stderr).to_string();
+                                let combined = if stderr_str.is_empty() {
+                                    stdout_str
+                                } else {
+                                    format!("{}\n{}", stdout_str, stderr_str)
+                                };
+                                let _ = event_tx.send(CockpitEvent::TranscriptAppend(
+                                    TranscriptBlock::Tool(format!("shell: {}", s), combined),
+                                ));
+                            }
+                            Err(e) => {
+                                let _ = event_tx.send(CockpitEvent::TranscriptAppend(
+                                    TranscriptBlock::Evidence(format!("shell error: {}", e)),
+                                ));
+                            }
                         }
-                        Err(e) => {
-                            let _ = event_tx.send(CockpitEvent::TranscriptAppend(
-                                TranscriptBlock::Evidence(format!("shell error: {}", e)),
-                            ));
-                        }
-                    },
+                    }
                     ReplCommand::Slash(c, args) => {
                         let msg = handle_slash(&c, &args, &model_tiers, &mut pins);
                         if let Some(text) = msg {
@@ -1861,9 +1955,14 @@ fn expand_home(raw: &str) -> PathBuf {
     PathBuf::from(raw)
 }
 
-fn run_scoped_shell(command: &str, scope: &ExecutionScope) -> Result<std::process::Output, String> {
-    if !scope.allows_tool("shell") {
-        return Err("shell tool lease is not active for this run".to_string());
+fn run_scoped_shell(
+    command: &str,
+    scope: &ExecutionScope,
+    principal: &SessionPrincipal,
+) -> Result<std::process::Output, String> {
+    let shell_gate = scope.authorize_tool(principal, "shell", Permission::RunShell);
+    if !shell_gate.is_allowed() {
+        return Err(shell_gate.reason().to_string());
     }
     if !scope.allows_path(&scope.working_dir) {
         return Err(format!(
@@ -1956,7 +2055,10 @@ fn working_context_prompt(pins: &SessionPins) -> String {
         .collect::<Vec<_>>()
         .join("\n");
     format!(
-        "Heiwa working context:\ncurrent directory: {}\nallowed directories:\n{}\nsandbox: {:?}\nnetwork: {:?}\nactive tool leases:\n{}",
+        "Heiwa working context:\nprincipal: {} ({:?}/{:?})\ncurrent directory: {}\nallowed directories:\n{}\nsandbox: {:?}\nnetwork: {:?}\nactive tool leases:\n{}",
+        pins.principal.id,
+        pins.principal.kind,
+        pins.principal.role,
         pins.scope.working_dir.display(),
         dirs,
         pins.scope.sandbox_mode,
@@ -2014,6 +2116,27 @@ fn route_task(
     task: &str,
     pins: &SessionPins,
     model_tiers: &[heiwa_bindings::ModelTier],
+) -> Result<RouteOutcome, String> {
+    route_task_inner(task, pins, model_tiers, None, Utc::now().timestamp(), true)
+}
+
+fn route_task_with_quota(
+    task: &str,
+    pins: &SessionPins,
+    model_tiers: &[heiwa_bindings::ModelTier],
+    quota_ledger: Option<&heiwa_quota::QuotaLedger>,
+    now_unix: i64,
+) -> Result<RouteOutcome, String> {
+    route_task_inner(task, pins, model_tiers, quota_ledger, now_unix, false)
+}
+
+fn route_task_inner(
+    task: &str,
+    pins: &SessionPins,
+    model_tiers: &[heiwa_bindings::ModelTier],
+    quota_ledger: Option<&heiwa_quota::QuotaLedger>,
+    now_unix: i64,
+    use_default_quota_ledger: bool,
 ) -> Result<RouteOutcome, String> {
     let turn_request = parse_turn_intent(task);
     let (provider_pin, model_pin) = match (turn_request.provider_pin, turn_request.model_pin) {
@@ -2087,7 +2210,26 @@ fn route_task(
         return Err(format!("Routing failed: {}", reason));
     }
 
-    let preflight = preflight_execution(&ingress, &routed_tiers, &policy);
+    let default_quota_ledger = if quota_ledger.is_none() && use_default_quota_ledger {
+        open_default_quota_ledger()
+    } else {
+        None
+    };
+    let active_quota_ledger = quota_ledger.or(default_quota_ledger.as_ref());
+    let quota_admission = quota_admitted_model_tiers(&routed_tiers, active_quota_ledger, now_unix);
+    if quota_admission.admitted.is_empty() {
+        let groups = if quota_admission.exhausted_groups.is_empty() {
+            "none".to_string()
+        } else {
+            quota_admission.exhausted_groups.join(", ")
+        };
+        return Err(format!(
+            "Routing failed: quota exhausted for candidate rate groups: {}.",
+            groups
+        ));
+    }
+
+    let preflight = preflight_execution(&ingress, &quota_admission.admitted, &policy);
 
     match preflight.execution_mode {
         ExecutionMode::Deterministic | ExecutionMode::Clarify => {
@@ -2108,7 +2250,7 @@ fn route_task(
     };
 
     let effective_tiers = filtered_model_tiers(
-        &routed_tiers,
+        &quota_admission.admitted,
         effective_route_preference,
         final_provider_pin,
         final_model_pin,
@@ -2133,6 +2275,7 @@ fn route_task(
         model_id: selected.model_id.clone(),
         provider: selected.provider.clone(),
         provider_model_id: selected.provider_model_id.clone(),
+        rate_group: selected.rate_group.clone(),
         routing_metadata: route.routing_metadata,
         intent_key: turn_request.intent.as_drex_key().to_string(),
         request_id: uuid::Uuid::new_v4().to_string(),
@@ -2179,18 +2322,20 @@ fn record_run_evidence(
     route: &RouteResult,
     usage: Option<&TokenUsage>,
 ) {
-    let turn_ended_at = Utc::now().to_rfc3339();
+    let run_id = format!("run-{}", uuid::Uuid::new_v4());
+    let turn_ended_at = Utc::now();
+    let turn_ended_at_rfc3339 = turn_ended_at.to_rfc3339();
     let user_id = heiwa_provider::load_identity()
         .map(|id| id.user_id)
         .unwrap_or_else(|| "anonymous".to_string());
 
     if let Some(u) = usage {
         let _ = stdb.record_run(
-            &format!("run-{}", uuid::Uuid::new_v4()),
+            &run_id,
             &user_id,
             &route.request_id,
             &route.turn_started_at,
-            &turn_ended_at,
+            &turn_ended_at_rfc3339,
             "SUCCESS",
             &route.model_id,
             u.input_tokens as i64,
@@ -2202,11 +2347,11 @@ fn record_run_evidence(
         );
     } else {
         let _ = stdb.record_run(
-            &format!("run-{}", uuid::Uuid::new_v4()),
+            &run_id,
             &user_id,
             &route.request_id,
             &route.turn_started_at,
-            &turn_ended_at,
+            &turn_ended_at_rfc3339,
             "COMPLETED_NO_USAGE",
             &route.model_id,
             0,
@@ -2216,6 +2361,215 @@ fn record_run_evidence(
             None,
             None,
         );
+    }
+
+    if let Some(ledger) = open_default_quota_ledger() {
+        if let Err(error) =
+            record_local_quota_run(&ledger, &run_id, route, usage, turn_ended_at.timestamp())
+        {
+            debug_log(format_args!("quota ledger write failed: {error}"));
+        }
+    }
+}
+
+const QUOTA_ADMISSION_WINDOW_SECONDS: i64 = 86_400;
+const REMOTE_RATE_GROUP_TOKEN_LIMIT: i64 = 200_000;
+const LOCAL_QUOTA_WINDOW_SECONDS: i64 = QUOTA_ADMISSION_WINDOW_SECONDS;
+
+fn record_local_quota_run(
+    ledger: &heiwa_quota::QuotaLedger,
+    run_id: &str,
+    route: &RouteResult,
+    usage: Option<&TokenUsage>,
+    ended_at_unix: i64,
+) -> heiwa_quota::Result<()> {
+    let (tokens_input, tokens_output, cost, status) = match usage {
+        Some(u) => (
+            u.input_tokens as i64,
+            u.output_tokens as i64,
+            u.cost_usd,
+            "SUCCESS",
+        ),
+        None => (0, 0, 0.0, "COMPLETED_NO_USAGE"),
+    };
+    let started_at_unix = chrono::DateTime::parse_from_rfc3339(&route.turn_started_at)
+        .map(|dt| dt.timestamp())
+        .unwrap_or(ended_at_unix);
+    let tokens = tokens_input.saturating_add(tokens_output);
+
+    ledger.record_use(
+        &route.provider,
+        &route.rate_group,
+        LOCAL_QUOTA_WINDOW_SECONDS,
+        tokens,
+        1,
+        ended_at_unix,
+    )?;
+    ledger.record_run(&heiwa_quota::RunRecord {
+        id: run_id.to_string(),
+        provider: route.provider.clone(),
+        model_id: route.model_id.clone(),
+        started_at_unix,
+        ended_at_unix,
+        tokens_input,
+        tokens_output,
+        cost,
+        status: status.to_string(),
+        meta: serde_json::json!({
+            "request_id": route.request_id,
+            "intent": route.intent_key,
+            "provider_model_id": route.provider_model_id,
+            "rate_group": route.rate_group,
+            "routing_metadata": route.routing_metadata,
+        }),
+    })?;
+    Ok(())
+}
+
+#[derive(Debug)]
+struct QuotaAdmission {
+    admitted: Vec<heiwa_bindings::ModelTier>,
+    exhausted_groups: Vec<String>,
+}
+
+fn quota_admitted_model_tiers(
+    model_tiers: &[heiwa_bindings::ModelTier],
+    ledger: Option<&heiwa_quota::QuotaLedger>,
+    now_unix: i64,
+) -> QuotaAdmission {
+    let mut admitted = Vec::new();
+    let mut exhausted_groups = Vec::new();
+    let mut seen_exhausted = std::collections::HashSet::new();
+
+    for tier in model_tiers {
+        let Some(token_limit) = quota_token_limit_for_tier(tier) else {
+            admitted.push(tier.clone());
+            continue;
+        };
+        let Some(ledger) = ledger else {
+            let label = format!("{} (ledger unavailable)", quota_group_label(tier));
+            if seen_exhausted.insert(label.clone()) {
+                exhausted_groups.push(label);
+            }
+            continue;
+        };
+
+        match ledger.remaining_budget(
+            &tier.provider,
+            &tier.rate_group,
+            QUOTA_ADMISSION_WINDOW_SECONDS,
+            token_limit,
+            now_unix,
+        ) {
+            Ok(budget) if budget.exhausted => {
+                let label = quota_group_label(tier);
+                if seen_exhausted.insert(label.clone()) {
+                    exhausted_groups.push(label);
+                }
+            }
+            Ok(_) => admitted.push(tier.clone()),
+            Err(error) => {
+                let label = format!("{} (ledger error)", quota_group_label(tier));
+                debug_log(format_args!(
+                    "quota admission read failed for {}: {}",
+                    quota_group_label(tier),
+                    error
+                ));
+                if seen_exhausted.insert(label.clone()) {
+                    exhausted_groups.push(label);
+                }
+            }
+        }
+    }
+
+    QuotaAdmission {
+        admitted,
+        exhausted_groups,
+    }
+}
+
+fn quota_budget_preview_lines(
+    model_tiers: &[heiwa_bindings::ModelTier],
+    ledger: Option<&heiwa_quota::QuotaLedger>,
+    now_unix: i64,
+) -> Vec<String> {
+    let mut lines = Vec::new();
+    let mut seen = std::collections::HashSet::new();
+
+    for tier in model_tiers
+        .iter()
+        .filter(|tier| has_adapter(&tier.provider))
+    {
+        let label = quota_group_label(tier);
+        if !seen.insert(label.clone()) {
+            continue;
+        }
+
+        let Some(token_limit) = quota_token_limit_for_tier(tier) else {
+            lines.push(format!("{label}: unmetered"));
+            continue;
+        };
+        let Some(ledger) = ledger else {
+            lines.push(format!("{label}: ledger unavailable"));
+            continue;
+        };
+
+        match ledger.remaining_budget(
+            &tier.provider,
+            &tier.rate_group,
+            QUOTA_ADMISSION_WINDOW_SECONDS,
+            token_limit,
+            now_unix,
+        ) {
+            Ok(budget) => lines.push(format!(
+                "{}: {}/{} tokens remaining, resets {}",
+                label,
+                budget.tokens_remaining,
+                budget.token_limit,
+                format_unix_timestamp(budget.window_resets_at_unix)
+            )),
+            Err(error) => lines.push(format!("{label}: ledger error ({error})")),
+        }
+    }
+
+    lines
+}
+
+fn quota_token_limit_for_tier(tier: &heiwa_bindings::ModelTier) -> Option<i64> {
+    if is_local_provider(&tier.provider) || tier.rate_group == "local" {
+        return None;
+    }
+
+    env::var("HEIWA_REMOTE_RATE_GROUP_TOKEN_LIMIT")
+        .ok()
+        .and_then(|raw| raw.parse::<i64>().ok())
+        .filter(|limit| *limit > 0)
+        .or(Some(REMOTE_RATE_GROUP_TOKEN_LIMIT))
+}
+
+fn quota_group_label(tier: &heiwa_bindings::ModelTier) -> String {
+    format!("{}/{}", tier.provider, tier.rate_group)
+}
+
+fn open_default_quota_ledger() -> Option<heiwa_quota::QuotaLedger> {
+    match heiwa_quota::QuotaLedger::open(heiwa_quota::QuotaLedger::default_path()) {
+        Ok(ledger) => Some(ledger),
+        Err(error) => {
+            debug_log(format_args!("quota ledger open failed: {error}"));
+            None
+        }
+    }
+}
+
+fn format_unix_timestamp(timestamp: i64) -> String {
+    chrono::DateTime::<Utc>::from_timestamp(timestamp, 0)
+        .map(|dt| dt.to_rfc3339())
+        .unwrap_or_else(|| timestamp.to_string())
+}
+
+fn debug_log(args: std::fmt::Arguments<'_>) {
+    if env::var_os("HEIWA_DEBUG").is_some() {
+        eprintln!("debug: {args}");
     }
 }
 
@@ -2483,6 +2837,147 @@ mod tests {
     }
 
     #[test]
+    fn route_task_handles_greeting_without_models() {
+        let pins = super::SessionPins::new();
+        let outcome = super::route_task("hi", &pins, &[]).expect("greeting should route");
+
+        match outcome {
+            super::RouteOutcome::Deterministic(response) => {
+                assert!(
+                    response.contains("Ready"),
+                    "unexpected response: {response}"
+                );
+            }
+            super::RouteOutcome::Routed(_) => panic!("greeting should not route to a model"),
+        }
+    }
+
+    #[test]
+    fn route_task_skips_remote_group_when_quota_exhausted() {
+        let ledger = heiwa_quota::QuotaLedger::open_in_memory().expect("ledger");
+        let now = 1_777_000_000;
+        ledger
+            .record_use(
+                "claude",
+                "anthropic",
+                super::QUOTA_ADMISSION_WINDOW_SECONDS,
+                super::REMOTE_RATE_GROUP_TOKEN_LIMIT,
+                1,
+                now,
+            )
+            .expect("seed quota");
+        let pins = super::SessionPins::new();
+        let tiers = vec![
+            test_model_tier("claude", "claude-sonnet", "anthropic", 4, 0.20),
+            test_model_tier("ollama", "qwen3.5:9b", "local", 3, 0.0),
+        ];
+
+        let outcome = super::route_task_with_quota(
+            "explain the product strategy tradeoff",
+            &pins,
+            &tiers,
+            Some(&ledger),
+            now + 10,
+        )
+        .expect("route should fall back");
+
+        match outcome {
+            super::RouteOutcome::Routed(route) => {
+                assert_eq!(route.provider, "ollama");
+                assert_eq!(route.rate_group, "local");
+            }
+            super::RouteOutcome::Deterministic(_) => panic!("strategy task should route"),
+        }
+    }
+
+    #[test]
+    fn quota_admission_fails_remote_closed_without_ledger() {
+        let tiers = vec![
+            test_model_tier("claude", "claude-sonnet", "anthropic", 4, 0.20),
+            test_model_tier("ollama", "qwen3.5:9b", "local", 3, 0.0),
+        ];
+
+        let admission = super::quota_admitted_model_tiers(&tiers, None, 1_777_000_000);
+
+        assert_eq!(admission.admitted.len(), 1);
+        assert_eq!(admission.admitted[0].provider, "ollama");
+        assert!(admission
+            .exhausted_groups
+            .iter()
+            .any(|group| group.contains("claude/anthropic")));
+    }
+
+    #[test]
+    fn local_quota_record_persists_usage_by_rate_group() {
+        let ledger = heiwa_quota::QuotaLedger::open_in_memory().expect("ledger");
+        let route = super::RouteResult {
+            adapter: std::sync::Arc::new(super::OllamaCliAdapter::new()),
+            model_id: "gemma4".to_string(),
+            provider: "ollama".to_string(),
+            provider_model_id: "gemma4".to_string(),
+            rate_group: "local".to_string(),
+            routing_metadata: "{\"reason\":\"test\"}".to_string(),
+            intent_key: "chat".to_string(),
+            request_id: "req-test".to_string(),
+            turn_started_at: "2026-05-07T00:00:00Z".to_string(),
+        };
+        let usage = heiwa_provider::adapter::TokenUsage {
+            input_tokens: 12,
+            output_tokens: 7,
+            cache_read_tokens: 0,
+            cache_write_tokens: 0,
+            cost_usd: 0.03,
+        };
+
+        super::record_local_quota_run(&ledger, "run-test", &route, Some(&usage), 1_777_000_000)
+            .expect("quota write");
+
+        let quota = ledger
+            .get_quota("ollama", "local")
+            .expect("quota read")
+            .expect("quota row");
+        assert_eq!(quota.tokens_used, 19);
+        assert_eq!(quota.requests, 1);
+
+        let runs = ledger.recent_runs(1).expect("runs");
+        assert_eq!(runs[0].id, "run-test");
+        assert_eq!(runs[0].tokens_input, 12);
+        assert_eq!(runs[0].tokens_output, 7);
+        assert_eq!(runs[0].cost, 0.03);
+        assert_eq!(runs[0].meta["request_id"], "req-test");
+    }
+
+    fn test_model_tier(
+        provider: &str,
+        model_id: &str,
+        rate_group: &str,
+        capability_class: u8,
+        cost_per_turn: f64,
+    ) -> heiwa_bindings::ModelTier {
+        heiwa_bindings::ModelTier {
+            id: 0,
+            model_id: model_id.to_string(),
+            provider_model_id: model_id.to_string(),
+            provider: provider.to_string(),
+            rate_group: rate_group.to_string(),
+            capability_class,
+            effort_knob: "default".to_string(),
+            effort_level: 1,
+            cost_per_turn,
+            max_context_tokens: 32_768,
+            vram_requirement_mb: 0,
+            quantization_type: "none".to_string(),
+            kv_cache_strategy: "standard".to_string(),
+            strengths_json: serde_json::json!(["chat", "advanced_coding"]).to_string(),
+            enabled: true,
+            last_success_rate: 1.0,
+            avg_latency_ms: 100,
+            latency_p_95_ms: 200,
+            updated_at: "2026-05-08T00:00:00Z".to_string(),
+        }
+    }
+
+    #[test]
     fn exit_slash_returns_none() {
         let mut pins = super::SessionPins::new();
         assert!(super::handle_slash("exit", &[], &[], &mut pins).is_none());
@@ -2555,7 +3050,21 @@ mod tests {
     #[test]
     fn scoped_shell_blocks_paths_outside_execution_scope() {
         let pins = super::SessionPins::new();
-        let error = super::run_scoped_shell("cat /etc/passwd", &pins.scope).unwrap_err();
+        let error =
+            super::run_scoped_shell("cat /etc/passwd", &pins.scope, &pins.principal).unwrap_err();
         assert!(error.contains("outside execution scope"));
+    }
+
+    #[test]
+    fn scoped_shell_denies_viewer_even_with_shell_lease() {
+        let mut pins = super::SessionPins::new();
+        pins.principal = heiwa_protocol::SessionPrincipal::new(
+            "viewer",
+            heiwa_protocol::PrincipalKind::HumanUser,
+            heiwa_protocol::ExecutionRole::Viewer,
+        );
+
+        let error = super::run_scoped_shell("echo ok", &pins.scope, &pins.principal).unwrap_err();
+        assert!(error.contains("lacks permission"));
     }
 }

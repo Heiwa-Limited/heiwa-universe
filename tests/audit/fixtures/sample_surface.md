@@ -1,5 +1,14 @@
 # Sample Product Surface
 
+## Classes
+
+| Class | Meaning |
+| --- | --- |
+| `product` | Active surface |
+| `legacy` | Old surface |
+
+## Path To Class
+
 | Path | Class |
 | --- | --- |
 | `crates/example` | product |

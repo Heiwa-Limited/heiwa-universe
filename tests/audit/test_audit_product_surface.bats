@@ -13,6 +13,8 @@ setup() {
     [[ "$output" == *"apps/example_legacy legacy"* ]]
     [[ "$output" == *"packages/example_gen generated"* ]]
     [[ "$output" == *"docs/example_ref reference"* ]]
+    [[ "$output" != *"product Active surface"* ]]
+    [[ "$output" != *"legacy Old surface"* ]]
 }
 
 @test "parse_product_surface emits one path per line" {

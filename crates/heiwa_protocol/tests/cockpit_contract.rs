@@ -248,3 +248,64 @@ fn parse_turn_intent_as_drex_key_round_trip() {
     assert_eq!(Intent::Strategy.as_drex_key(), "strategy");
     assert_eq!(Intent::StatusCheck.as_drex_key(), "status_check");
 }
+
+#[test]
+fn session_agent_can_use_leased_tool_but_cannot_manage_permissions() {
+    let root = std::env::current_dir().unwrap();
+    let mut scope = heiwa_protocol::ExecutionScope::local_default(root);
+    scope.tool_leases.push(heiwa_protocol::ToolLease {
+        name: "shell".into(),
+        risk_class: "host".into(),
+        allowed: true,
+    });
+    let agent = heiwa_protocol::SessionPrincipal::new(
+        "agent:builder",
+        heiwa_protocol::PrincipalKind::Agent,
+        heiwa_protocol::ExecutionRole::Agent,
+    );
+
+    assert!(scope
+        .authorize_tool(&agent, "shell", heiwa_protocol::Permission::RunShell)
+        .is_allowed());
+    assert!(!scope
+        .authorize(&agent, heiwa_protocol::Permission::ManageSession)
+        .is_allowed());
+}
+
+#[test]
+fn leased_tool_still_fails_closed_when_lease_missing() {
+    let root = std::env::current_dir().unwrap();
+    let scope = heiwa_protocol::ExecutionScope::local_default(root);
+    let agent = heiwa_protocol::SessionPrincipal::new(
+        "agent:builder",
+        heiwa_protocol::PrincipalKind::Agent,
+        heiwa_protocol::ExecutionRole::Agent,
+    );
+
+    let decision = scope.authorize_tool(&agent, "shell", heiwa_protocol::Permission::RunShell);
+    assert!(!decision.is_allowed());
+    assert!(decision.reason().contains("lease"));
+}
+
+#[test]
+fn viewer_is_read_only_even_with_tool_lease() {
+    let root = std::env::current_dir().unwrap();
+    let mut scope = heiwa_protocol::ExecutionScope::local_default(root);
+    scope.tool_leases.push(heiwa_protocol::ToolLease {
+        name: "shell".into(),
+        risk_class: "host".into(),
+        allowed: true,
+    });
+    let viewer = heiwa_protocol::SessionPrincipal::new(
+        "user:viewer",
+        heiwa_protocol::PrincipalKind::HumanUser,
+        heiwa_protocol::ExecutionRole::Viewer,
+    );
+
+    assert!(scope
+        .authorize(&viewer, heiwa_protocol::Permission::ReadSessionContext)
+        .is_allowed());
+    assert!(!scope
+        .authorize_tool(&viewer, "shell", heiwa_protocol::Permission::RunShell)
+        .is_allowed());
+}

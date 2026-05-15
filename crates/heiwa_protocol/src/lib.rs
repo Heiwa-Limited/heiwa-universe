@@ -333,6 +333,103 @@ pub struct ToolLease {
     pub allowed: bool,
 }
 
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+pub enum PrincipalKind {
+    HumanUser,
+    Agent,
+    System,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+pub enum ExecutionRole {
+    Owner,
+    Operator,
+    Agent,
+    Auditor,
+    Viewer,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+pub enum Permission {
+    ReadSessionContext,
+    WriteTranscript,
+    RouteModel,
+    ExecuteModel,
+    UseTool,
+    RunShell,
+    WriteFilesystem,
+    NetworkAccess,
+    ManageSession,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct SessionPrincipal {
+    pub id: String,
+    pub kind: PrincipalKind,
+    pub role: ExecutionRole,
+}
+
+impl SessionPrincipal {
+    pub fn new(id: impl Into<String>, kind: PrincipalKind, role: ExecutionRole) -> Self {
+        Self {
+            id: id.into(),
+            kind,
+            role,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub enum PermissionDecision {
+    Allow,
+    Deny { reason: String },
+}
+
+impl PermissionDecision {
+    pub fn deny(reason: impl Into<String>) -> Self {
+        Self::Deny {
+            reason: reason.into(),
+        }
+    }
+
+    pub fn is_allowed(&self) -> bool {
+        matches!(self, PermissionDecision::Allow)
+    }
+
+    pub fn reason(&self) -> &str {
+        match self {
+            PermissionDecision::Allow => "allow",
+            PermissionDecision::Deny { reason } => reason,
+        }
+    }
+}
+
+impl ExecutionRole {
+    pub fn allows(self, permission: Permission) -> bool {
+        match self {
+            ExecutionRole::Owner => true,
+            ExecutionRole::Operator => !matches!(permission, Permission::ManageSession),
+            ExecutionRole::Agent => matches!(
+                permission,
+                Permission::ReadSessionContext
+                    | Permission::WriteTranscript
+                    | Permission::RouteModel
+                    | Permission::ExecuteModel
+                    | Permission::UseTool
+                    | Permission::RunShell
+                    | Permission::WriteFilesystem
+            ),
+            ExecutionRole::Auditor => {
+                matches!(
+                    permission,
+                    Permission::ReadSessionContext | Permission::RouteModel
+                )
+            }
+            ExecutionRole::Viewer => matches!(permission, Permission::ReadSessionContext),
+        }
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct ExecutionScope {
     pub working_dir: PathBuf,
@@ -383,6 +480,49 @@ impl ExecutionScope {
         self.tool_leases
             .iter()
             .any(|lease| lease.allowed && lease.name == name)
+    }
+
+    pub fn authorize(
+        &self,
+        principal: &SessionPrincipal,
+        permission: Permission,
+    ) -> PermissionDecision {
+        if !principal.role.allows(permission) {
+            return PermissionDecision::deny(format!(
+                "role {:?} lacks permission {:?}",
+                principal.role, permission
+            ));
+        }
+
+        match permission {
+            Permission::NetworkAccess if self.network_policy == NetworkPolicy::Deny => {
+                PermissionDecision::deny("network policy denies access")
+            }
+            _ => PermissionDecision::Allow,
+        }
+    }
+
+    pub fn authorize_tool(
+        &self,
+        principal: &SessionPrincipal,
+        tool_name: &str,
+        permission: Permission,
+    ) -> PermissionDecision {
+        let tool_gate = self.authorize(principal, Permission::UseTool);
+        if !tool_gate.is_allowed() {
+            return tool_gate;
+        }
+
+        let permission_gate = self.authorize(principal, permission);
+        if !permission_gate.is_allowed() {
+            return permission_gate;
+        }
+
+        if !self.allows_tool(tool_name) {
+            return PermissionDecision::deny(format!("tool lease missing or denied: {tool_name}"));
+        }
+
+        PermissionDecision::Allow
     }
 }
 

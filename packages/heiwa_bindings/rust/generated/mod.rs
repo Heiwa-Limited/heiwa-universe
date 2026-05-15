@@ -99,11 +99,20 @@ pub mod insert_captain_message_reducer;
 pub mod insert_captain_summary_reducer;
 pub mod insert_execution_memory_reducer;
 pub mod insert_knowledge_embedding_reducer;
+pub mod insert_life_memory_event_reducer;
 pub mod issue_capability_lease_reducer;
 pub mod knowledge_embedding_type;
 pub mod knowledge_embeddings_table;
 pub mod lease_type;
 pub mod leases_table;
+pub mod life_action_item_type;
+pub mod life_automation_source_type;
+pub mod life_brief_type;
+pub mod life_memory_event_type;
+pub mod life_readmodel_snapshot_type;
+pub mod life_readmodel_snapshots_table;
+pub mod life_schedule_window_type;
+pub mod life_source_type;
 pub mod link_belief_evidence_reducer;
 pub mod link_oauth_identity_reducer;
 pub mod liveness_state_table;
@@ -214,6 +223,7 @@ pub mod treasury_rebalance_schedule_type;
 pub mod treasury_reservation_type;
 pub mod treasury_type;
 pub mod update_device_heartbeat_reducer;
+pub mod update_life_memory_event_status_reducer;
 pub mod update_model_tier_stats_reducer;
 pub mod update_pod_heartbeat_reducer;
 pub mod update_task_dispatch_status_reducer;
@@ -225,6 +235,12 @@ pub mod upsert_decay_profile_reducer;
 pub mod upsert_discord_user_reducer;
 pub mod upsert_gpu_slot_reducer;
 pub mod upsert_lease_reducer;
+pub mod upsert_life_action_item_reducer;
+pub mod upsert_life_automation_source_reducer;
+pub mod upsert_life_brief_reducer;
+pub mod upsert_life_readmodel_snapshot_reducer;
+pub mod upsert_life_schedule_window_reducer;
+pub mod upsert_life_source_reducer;
 pub mod upsert_liveness_state_reducer;
 pub mod upsert_model_tier_reducer;
 pub mod upsert_node_heartbeat_reducer;
@@ -333,11 +349,20 @@ pub use insert_captain_message_reducer::insert_captain_message;
 pub use insert_captain_summary_reducer::insert_captain_summary;
 pub use insert_execution_memory_reducer::insert_execution_memory;
 pub use insert_knowledge_embedding_reducer::insert_knowledge_embedding;
+pub use insert_life_memory_event_reducer::insert_life_memory_event;
 pub use issue_capability_lease_reducer::issue_capability_lease;
 pub use knowledge_embedding_type::KnowledgeEmbedding;
 pub use knowledge_embeddings_table::*;
 pub use lease_type::Lease;
 pub use leases_table::*;
+pub use life_action_item_type::LifeActionItem;
+pub use life_automation_source_type::LifeAutomationSource;
+pub use life_brief_type::LifeBrief;
+pub use life_memory_event_type::LifeMemoryEvent;
+pub use life_readmodel_snapshot_type::LifeReadmodelSnapshot;
+pub use life_readmodel_snapshots_table::*;
+pub use life_schedule_window_type::LifeScheduleWindow;
+pub use life_source_type::LifeSource;
 pub use link_belief_evidence_reducer::link_belief_evidence;
 pub use link_oauth_identity_reducer::link_oauth_identity;
 pub use liveness_state_table::*;
@@ -448,6 +473,7 @@ pub use treasury_rebalance_schedule_type::TreasuryRebalanceSchedule;
 pub use treasury_reservation_type::TreasuryReservation;
 pub use treasury_type::Treasury;
 pub use update_device_heartbeat_reducer::update_device_heartbeat;
+pub use update_life_memory_event_status_reducer::update_life_memory_event_status;
 pub use update_model_tier_stats_reducer::update_model_tier_stats;
 pub use update_pod_heartbeat_reducer::update_pod_heartbeat;
 pub use update_task_dispatch_status_reducer::update_task_dispatch_status;
@@ -459,6 +485,12 @@ pub use upsert_decay_profile_reducer::upsert_decay_profile;
 pub use upsert_discord_user_reducer::upsert_discord_user;
 pub use upsert_gpu_slot_reducer::upsert_gpu_slot;
 pub use upsert_lease_reducer::upsert_lease;
+pub use upsert_life_action_item_reducer::upsert_life_action_item;
+pub use upsert_life_automation_source_reducer::upsert_life_automation_source;
+pub use upsert_life_brief_reducer::upsert_life_brief;
+pub use upsert_life_readmodel_snapshot_reducer::upsert_life_readmodel_snapshot;
+pub use upsert_life_schedule_window_reducer::upsert_life_schedule_window;
+pub use upsert_life_source_reducer::upsert_life_source;
 pub use upsert_liveness_state_reducer::upsert_liveness_state;
 pub use upsert_model_tier_reducer::upsert_model_tier;
 pub use upsert_node_heartbeat_reducer::upsert_node_heartbeat;
@@ -799,6 +831,23 @@ pub enum Reducer {
         content_hash: String,
         embedding_json: String,
         ttl_hours: u32,
+    },
+    InsertLifeMemoryEvent {
+        event_id: String,
+        occurred_at: String,
+        recorded_at: String,
+        domain: String,
+        event_type: String,
+        fields_json: String,
+        source_id: Option<String>,
+        source_json: String,
+        confidence: f64,
+        approval_tier: String,
+        privacy_level: String,
+        owner_scope: Option<String>,
+        source_ids_json: String,
+        status: String,
+        supersedes_event_id: Option<String>,
     },
     IssueCapabilityLease {
         lease_id: String,
@@ -1244,6 +1293,11 @@ pub enum Reducer {
     UpdateDeviceHeartbeat {
         device_id: String,
     },
+    UpdateLifeMemoryEventStatus {
+        event_id: String,
+        status: String,
+        supersedes_event_id: Option<String>,
+    },
     UpdateModelTierStats {
         model_id: String,
         success_rate: f64,
@@ -1326,6 +1380,81 @@ pub enum Reducer {
         completed_at: Option<String>,
         failure_code: Option<String>,
         reason: Option<String>,
+    },
+    UpsertLifeActionItem {
+        action_id: String,
+        domain: String,
+        title: String,
+        roi_rank: i64,
+        approval_tier: String,
+        status: String,
+        source_ids_json: String,
+        due_at: Option<String>,
+        payload_json: String,
+        created_by: String,
+    },
+    UpsertLifeAutomationSource {
+        automation_id: String,
+        surface: String,
+        external_id: String,
+        name: String,
+        status: String,
+        schedule: String,
+        source_uri: String,
+        last_verified_at: Option<String>,
+        payload_json: String,
+        approval_tier: String,
+        privacy_level: String,
+    },
+    UpsertLifeBrief {
+        brief_id: String,
+        brief_type: String,
+        window_start: String,
+        window_end: String,
+        generated_at: String,
+        generated_by: String,
+        summary: String,
+        source_freshness_json: String,
+        top_actions_json: String,
+        risks_json: String,
+        approval_request_ids_json: String,
+        readmodel_snapshot_id: Option<String>,
+        privacy_level: String,
+        status: String,
+    },
+    UpsertLifeReadmodelSnapshot {
+        snapshot_id: String,
+        generated_at: String,
+        timezone: String,
+        snapshot_json: String,
+        source_freshness_json: String,
+        materialized_from_event_ids_json: String,
+        privacy_level: String,
+        status: String,
+    },
+    UpsertLifeScheduleWindow {
+        window_id: String,
+        start_at: String,
+        end_at: String,
+        kind: String,
+        title: String,
+        source_ids_json: String,
+        prep_flags_json: String,
+        approval_tier: String,
+        privacy_level: String,
+        status: String,
+    },
+    UpsertLifeSource {
+        source_id: String,
+        source_kind: String,
+        uri: String,
+        title: String,
+        content_hash: Option<String>,
+        captured_by: String,
+        freshness_at: Option<String>,
+        privacy_level: String,
+        approval_tier: String,
+        raw_storage_ref: Option<String>,
     },
     UpsertLivenessState {
         key: String,
@@ -1499,6 +1628,7 @@ impl __sdk::Reducer for Reducer {
             Reducer::InsertCaptainSummary { .. } => "insert_captain_summary",
             Reducer::InsertExecutionMemory { .. } => "insert_execution_memory",
             Reducer::InsertKnowledgeEmbedding { .. } => "insert_knowledge_embedding",
+            Reducer::InsertLifeMemoryEvent { .. } => "insert_life_memory_event",
             Reducer::IssueCapabilityLease { .. } => "issue_capability_lease",
             Reducer::LinkBeliefEvidence { .. } => "link_belief_evidence",
             Reducer::LinkOauthIdentity { .. } => "link_oauth_identity",
@@ -1555,6 +1685,7 @@ impl __sdk::Reducer for Reducer {
             Reducer::StartLoopSession { .. } => "start_loop_session",
             Reducer::StoreProviderCredential { .. } => "store_provider_credential",
             Reducer::UpdateDeviceHeartbeat { .. } => "update_device_heartbeat",
+            Reducer::UpdateLifeMemoryEventStatus { .. } => "update_life_memory_event_status",
             Reducer::UpdateModelTierStats { .. } => "update_model_tier_stats",
             Reducer::UpdatePodHeartbeat { .. } => "update_pod_heartbeat",
             Reducer::UpdateTaskDispatchStatus { .. } => "update_task_dispatch_status",
@@ -1566,6 +1697,12 @@ impl __sdk::Reducer for Reducer {
             Reducer::UpsertDiscordUser { .. } => "upsert_discord_user",
             Reducer::UpsertGpuSlot { .. } => "upsert_gpu_slot",
             Reducer::UpsertLease { .. } => "upsert_lease",
+            Reducer::UpsertLifeActionItem { .. } => "upsert_life_action_item",
+            Reducer::UpsertLifeAutomationSource { .. } => "upsert_life_automation_source",
+            Reducer::UpsertLifeBrief { .. } => "upsert_life_brief",
+            Reducer::UpsertLifeReadmodelSnapshot { .. } => "upsert_life_readmodel_snapshot",
+            Reducer::UpsertLifeScheduleWindow { .. } => "upsert_life_schedule_window",
+            Reducer::UpsertLifeSource { .. } => "upsert_life_source",
             Reducer::UpsertLivenessState { .. } => "upsert_liveness_state",
             Reducer::UpsertModelTier { .. } => "upsert_model_tier",
             Reducer::UpsertNodeHeartbeat { .. } => "upsert_node_heartbeat",
@@ -2188,6 +2325,41 @@ impl __sdk::Reducer for Reducer {
                     content_hash: content_hash.clone(),
                     embedding_json: embedding_json.clone(),
                     ttl_hours: ttl_hours.clone(),
+                },
+            ),
+            Reducer::InsertLifeMemoryEvent {
+                event_id,
+                occurred_at,
+                recorded_at,
+                domain,
+                event_type,
+                fields_json,
+                source_id,
+                source_json,
+                confidence,
+                approval_tier,
+                privacy_level,
+                owner_scope,
+                source_ids_json,
+                status,
+                supersedes_event_id,
+            } => __sats::bsatn::to_vec(
+                &insert_life_memory_event_reducer::InsertLifeMemoryEventArgs {
+                    event_id: event_id.clone(),
+                    occurred_at: occurred_at.clone(),
+                    recorded_at: recorded_at.clone(),
+                    domain: domain.clone(),
+                    event_type: event_type.clone(),
+                    fields_json: fields_json.clone(),
+                    source_id: source_id.clone(),
+                    source_json: source_json.clone(),
+                    confidence: confidence.clone(),
+                    approval_tier: approval_tier.clone(),
+                    privacy_level: privacy_level.clone(),
+                    owner_scope: owner_scope.clone(),
+                    source_ids_json: source_ids_json.clone(),
+                    status: status.clone(),
+                    supersedes_event_id: supersedes_event_id.clone(),
                 },
             ),
             Reducer::IssueCapabilityLease {
@@ -3041,6 +3213,17 @@ impl __sdk::Reducer for Reducer {
                     device_id: device_id.clone(),
                 },
             ),
+            Reducer::UpdateLifeMemoryEventStatus {
+                event_id,
+                status,
+                supersedes_event_id,
+            } => __sats::bsatn::to_vec(
+                &update_life_memory_event_status_reducer::UpdateLifeMemoryEventStatusArgs {
+                    event_id: event_id.clone(),
+                    status: status.clone(),
+                    supersedes_event_id: supersedes_event_id.clone(),
+                },
+            ),
             Reducer::UpdateModelTierStats {
                 model_id,
                 success_rate,
@@ -3199,6 +3382,158 @@ impl __sdk::Reducer for Reducer {
                 completed_at: completed_at.clone(),
                 failure_code: failure_code.clone(),
                 reason: reason.clone(),
+            }),
+            Reducer::UpsertLifeActionItem {
+                action_id,
+                domain,
+                title,
+                roi_rank,
+                approval_tier,
+                status,
+                source_ids_json,
+                due_at,
+                payload_json,
+                created_by,
+            } => {
+                __sats::bsatn::to_vec(&upsert_life_action_item_reducer::UpsertLifeActionItemArgs {
+                    action_id: action_id.clone(),
+                    domain: domain.clone(),
+                    title: title.clone(),
+                    roi_rank: roi_rank.clone(),
+                    approval_tier: approval_tier.clone(),
+                    status: status.clone(),
+                    source_ids_json: source_ids_json.clone(),
+                    due_at: due_at.clone(),
+                    payload_json: payload_json.clone(),
+                    created_by: created_by.clone(),
+                })
+            }
+            Reducer::UpsertLifeAutomationSource {
+                automation_id,
+                surface,
+                external_id,
+                name,
+                status,
+                schedule,
+                source_uri,
+                last_verified_at,
+                payload_json,
+                approval_tier,
+                privacy_level,
+            } => __sats::bsatn::to_vec(
+                &upsert_life_automation_source_reducer::UpsertLifeAutomationSourceArgs {
+                    automation_id: automation_id.clone(),
+                    surface: surface.clone(),
+                    external_id: external_id.clone(),
+                    name: name.clone(),
+                    status: status.clone(),
+                    schedule: schedule.clone(),
+                    source_uri: source_uri.clone(),
+                    last_verified_at: last_verified_at.clone(),
+                    payload_json: payload_json.clone(),
+                    approval_tier: approval_tier.clone(),
+                    privacy_level: privacy_level.clone(),
+                },
+            ),
+            Reducer::UpsertLifeBrief {
+                brief_id,
+                brief_type,
+                window_start,
+                window_end,
+                generated_at,
+                generated_by,
+                summary,
+                source_freshness_json,
+                top_actions_json,
+                risks_json,
+                approval_request_ids_json,
+                readmodel_snapshot_id,
+                privacy_level,
+                status,
+            } => __sats::bsatn::to_vec(&upsert_life_brief_reducer::UpsertLifeBriefArgs {
+                brief_id: brief_id.clone(),
+                brief_type: brief_type.clone(),
+                window_start: window_start.clone(),
+                window_end: window_end.clone(),
+                generated_at: generated_at.clone(),
+                generated_by: generated_by.clone(),
+                summary: summary.clone(),
+                source_freshness_json: source_freshness_json.clone(),
+                top_actions_json: top_actions_json.clone(),
+                risks_json: risks_json.clone(),
+                approval_request_ids_json: approval_request_ids_json.clone(),
+                readmodel_snapshot_id: readmodel_snapshot_id.clone(),
+                privacy_level: privacy_level.clone(),
+                status: status.clone(),
+            }),
+            Reducer::UpsertLifeReadmodelSnapshot {
+                snapshot_id,
+                generated_at,
+                timezone,
+                snapshot_json,
+                source_freshness_json,
+                materialized_from_event_ids_json,
+                privacy_level,
+                status,
+            } => __sats::bsatn::to_vec(
+                &upsert_life_readmodel_snapshot_reducer::UpsertLifeReadmodelSnapshotArgs {
+                    snapshot_id: snapshot_id.clone(),
+                    generated_at: generated_at.clone(),
+                    timezone: timezone.clone(),
+                    snapshot_json: snapshot_json.clone(),
+                    source_freshness_json: source_freshness_json.clone(),
+                    materialized_from_event_ids_json: materialized_from_event_ids_json.clone(),
+                    privacy_level: privacy_level.clone(),
+                    status: status.clone(),
+                },
+            ),
+            Reducer::UpsertLifeScheduleWindow {
+                window_id,
+                start_at,
+                end_at,
+                kind,
+                title,
+                source_ids_json,
+                prep_flags_json,
+                approval_tier,
+                privacy_level,
+                status,
+            } => __sats::bsatn::to_vec(
+                &upsert_life_schedule_window_reducer::UpsertLifeScheduleWindowArgs {
+                    window_id: window_id.clone(),
+                    start_at: start_at.clone(),
+                    end_at: end_at.clone(),
+                    kind: kind.clone(),
+                    title: title.clone(),
+                    source_ids_json: source_ids_json.clone(),
+                    prep_flags_json: prep_flags_json.clone(),
+                    approval_tier: approval_tier.clone(),
+                    privacy_level: privacy_level.clone(),
+                    status: status.clone(),
+                },
+            ),
+            Reducer::UpsertLifeSource {
+                source_id,
+                source_kind,
+                uri,
+                title,
+                content_hash,
+                captured_by,
+                freshness_at,
+                privacy_level,
+                approval_tier,
+                raw_storage_ref,
+            } => __sats::bsatn::to_vec(&upsert_life_source_reducer::UpsertLifeSourceArgs {
+                source_id: source_id.clone(),
+                source_kind: source_kind.clone(),
+                uri: uri.clone(),
+                title: title.clone(),
+                content_hash: content_hash.clone(),
+                captured_by: captured_by.clone(),
+                freshness_at: freshness_at.clone(),
+                privacy_level: privacy_level.clone(),
+                approval_tier: approval_tier.clone(),
+                raw_storage_ref: raw_storage_ref.clone(),
             }),
             Reducer::UpsertLivenessState {
                 key,
@@ -3445,7 +3780,7 @@ impl __sdk::Reducer for Reducer {
     }
 }
 
-#[derive(Default)]
+#[derive(Default, Debug)]
 #[allow(non_snake_case)]
 #[doc(hidden)]
 pub struct DbUpdate {
@@ -3476,6 +3811,7 @@ pub struct DbUpdate {
     gpu_slots: __sdk::TableUpdate<GpuSlot>,
     knowledge_embeddings: __sdk::TableUpdate<KnowledgeEmbedding>,
     leases: __sdk::TableUpdate<Lease>,
+    life_readmodel_snapshots: __sdk::TableUpdate<LifeReadmodelSnapshot>,
     liveness_state: __sdk::TableUpdate<LivenessState>,
     loop_iterations: __sdk::TableUpdate<LoopIteration>,
     loop_sessions: __sdk::TableUpdate<LoopSession>,
@@ -3593,6 +3929,9 @@ impl TryFrom<__ws::v2::TransactionUpdate> for DbUpdate {
                 "leases" => db_update
                     .leases
                     .append(leases_table::parse_table_update(table_update)?),
+                "life_readmodel_snapshots" => db_update.life_readmodel_snapshots.append(
+                    life_readmodel_snapshots_table::parse_table_update(table_update)?,
+                ),
                 "liveness_state" => db_update
                     .liveness_state
                     .append(liveness_state_table::parse_table_update(table_update)?),
@@ -3793,6 +4132,12 @@ impl __sdk::DbUpdate for DbUpdate {
         diff.leases = cache
             .apply_diff_to_table::<Lease>("leases", &self.leases)
             .with_updates_by_pk(|row| &row.lease_id);
+        diff.life_readmodel_snapshots = cache
+            .apply_diff_to_table::<LifeReadmodelSnapshot>(
+                "life_readmodel_snapshots",
+                &self.life_readmodel_snapshots,
+            )
+            .with_updates_by_pk(|row| &row.snapshot_id);
         diff.liveness_state = cache
             .apply_diff_to_table::<LivenessState>("liveness_state", &self.liveness_state)
             .with_updates_by_pk(|row| &row.key);
@@ -3973,6 +4318,9 @@ impl __sdk::DbUpdate for DbUpdate {
                 "leases" => db_update
                     .leases
                     .append(__sdk::parse_row_list_as_inserts(table_rows.rows)?),
+                "life_readmodel_snapshots" => db_update
+                    .life_readmodel_snapshots
+                    .append(__sdk::parse_row_list_as_inserts(table_rows.rows)?),
                 "liveness_state" => db_update
                     .liveness_state
                     .append(__sdk::parse_row_list_as_inserts(table_rows.rows)?),
@@ -4151,6 +4499,9 @@ impl __sdk::DbUpdate for DbUpdate {
                 "leases" => db_update
                     .leases
                     .append(__sdk::parse_row_list_as_deletes(table_rows.rows)?),
+                "life_readmodel_snapshots" => db_update
+                    .life_readmodel_snapshots
+                    .append(__sdk::parse_row_list_as_deletes(table_rows.rows)?),
                 "liveness_state" => db_update
                     .liveness_state
                     .append(__sdk::parse_row_list_as_deletes(table_rows.rows)?),
@@ -4277,6 +4628,7 @@ pub struct AppliedDiff<'r> {
     gpu_slots: __sdk::TableAppliedDiff<'r, GpuSlot>,
     knowledge_embeddings: __sdk::TableAppliedDiff<'r, KnowledgeEmbedding>,
     leases: __sdk::TableAppliedDiff<'r, Lease>,
+    life_readmodel_snapshots: __sdk::TableAppliedDiff<'r, LifeReadmodelSnapshot>,
     liveness_state: __sdk::TableAppliedDiff<'r, LivenessState>,
     loop_iterations: __sdk::TableAppliedDiff<'r, LoopIteration>,
     loop_sessions: __sdk::TableAppliedDiff<'r, LoopSession>,
@@ -4425,6 +4777,11 @@ impl<'r> __sdk::AppliedDiff<'r> for AppliedDiff<'r> {
             event,
         );
         callbacks.invoke_table_row_callbacks::<Lease>("leases", &self.leases, event);
+        callbacks.invoke_table_row_callbacks::<LifeReadmodelSnapshot>(
+            "life_readmodel_snapshots",
+            &self.life_readmodel_snapshots,
+            event,
+        );
         callbacks.invoke_table_row_callbacks::<LivenessState>(
             "liveness_state",
             &self.liveness_state,
@@ -4528,6 +4885,7 @@ impl<'r> __sdk::AppliedDiff<'r> for AppliedDiff<'r> {
     }
 }
 
+#[derive(Debug)]
 #[doc(hidden)]
 pub struct RemoteModule;
 
@@ -5196,6 +5554,7 @@ impl __sdk::SpacetimeModule for RemoteModule {
         gpu_slots_table::register_table(client_cache);
         knowledge_embeddings_table::register_table(client_cache);
         leases_table::register_table(client_cache);
+        life_readmodel_snapshots_table::register_table(client_cache);
         liveness_state_table::register_table(client_cache);
         loop_iterations_table::register_table(client_cache);
         loop_sessions_table::register_table(client_cache);
@@ -5253,6 +5612,7 @@ impl __sdk::SpacetimeModule for RemoteModule {
         "gpu_slots",
         "knowledge_embeddings",
         "leases",
+        "life_readmodel_snapshots",
         "liveness_state",
         "loop_iterations",
         "loop_sessions",

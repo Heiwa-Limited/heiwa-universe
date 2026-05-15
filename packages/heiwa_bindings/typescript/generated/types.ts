@@ -419,6 +419,124 @@ export const Lease = __t.object("Lease", {
 });
 export type Lease = __Infer<typeof Lease>;
 
+export const LifeActionItem = __t.object("LifeActionItem", {
+  actionId: __t.string(),
+  domain: __t.string(),
+  title: __t.string(),
+  roiRank: __t.i64(),
+  approvalTier: __t.string(),
+  status: __t.string(),
+  sourceIdsJson: __t.string(),
+  dueAt: __t.option(__t.string()),
+  payloadJson: __t.string(),
+  createdBy: __t.string(),
+  createdAt: __t.string(),
+  updatedAt: __t.string(),
+});
+export type LifeActionItem = __Infer<typeof LifeActionItem>;
+
+export const LifeAutomationSource = __t.object("LifeAutomationSource", {
+  automationId: __t.string(),
+  surface: __t.string(),
+  externalId: __t.string(),
+  name: __t.string(),
+  status: __t.string(),
+  schedule: __t.string(),
+  sourceUri: __t.string(),
+  lastVerifiedAt: __t.option(__t.string()),
+  payloadJson: __t.string(),
+  approvalTier: __t.string(),
+  privacyLevel: __t.string(),
+  createdAt: __t.string(),
+  updatedAt: __t.string(),
+});
+export type LifeAutomationSource = __Infer<typeof LifeAutomationSource>;
+
+export const LifeBrief = __t.object("LifeBrief", {
+  briefId: __t.string(),
+  briefType: __t.string(),
+  windowStart: __t.string(),
+  windowEnd: __t.string(),
+  generatedAt: __t.string(),
+  generatedBy: __t.string(),
+  summary: __t.string(),
+  sourceFreshnessJson: __t.string(),
+  topActionsJson: __t.string(),
+  risksJson: __t.string(),
+  approvalRequestIdsJson: __t.string(),
+  readmodelSnapshotId: __t.option(__t.string()),
+  privacyLevel: __t.string(),
+  status: __t.string(),
+  createdAt: __t.string(),
+  updatedAt: __t.string(),
+});
+export type LifeBrief = __Infer<typeof LifeBrief>;
+
+export const LifeMemoryEvent = __t.object("LifeMemoryEvent", {
+  eventId: __t.string(),
+  occurredAt: __t.string(),
+  recordedAt: __t.string(),
+  domain: __t.string(),
+  eventType: __t.string(),
+  fieldsJson: __t.string(),
+  sourceId: __t.option(__t.string()),
+  sourceJson: __t.string(),
+  confidence: __t.f64(),
+  approvalTier: __t.string(),
+  privacyLevel: __t.string(),
+  ownerScope: __t.option(__t.string()),
+  sourceIdsJson: __t.string(),
+  status: __t.string(),
+  supersedesEventId: __t.option(__t.string()),
+  createdAt: __t.string(),
+});
+export type LifeMemoryEvent = __Infer<typeof LifeMemoryEvent>;
+
+export const LifeReadmodelSnapshot = __t.object("LifeReadmodelSnapshot", {
+  snapshotId: __t.string(),
+  generatedAt: __t.string(),
+  timezone: __t.string(),
+  snapshotJson: __t.string(),
+  sourceFreshnessJson: __t.string(),
+  materializedFromEventIdsJson: __t.string(),
+  privacyLevel: __t.string(),
+  status: __t.string(),
+  createdAt: __t.string(),
+});
+export type LifeReadmodelSnapshot = __Infer<typeof LifeReadmodelSnapshot>;
+
+export const LifeScheduleWindow = __t.object("LifeScheduleWindow", {
+  windowId: __t.string(),
+  startAt: __t.string(),
+  endAt: __t.string(),
+  kind: __t.string(),
+  title: __t.string(),
+  sourceIdsJson: __t.string(),
+  prepFlagsJson: __t.string(),
+  approvalTier: __t.string(),
+  privacyLevel: __t.string(),
+  status: __t.string(),
+  createdAt: __t.string(),
+  updatedAt: __t.string(),
+});
+export type LifeScheduleWindow = __Infer<typeof LifeScheduleWindow>;
+
+export const LifeSource = __t.object("LifeSource", {
+  sourceId: __t.string(),
+  sourceKind: __t.string(),
+  uri: __t.string(),
+  title: __t.string(),
+  contentHash: __t.option(__t.string()),
+  capturedBy: __t.string(),
+  freshnessAt: __t.option(__t.string()),
+  privacyLevel: __t.string(),
+  approvalTier: __t.string(),
+  rawStorageRef: __t.option(__t.string()),
+  createdAt: __t.string(),
+  updatedAt: __t.string(),
+});
+export type LifeSource = __Infer<typeof LifeSource>;
+
 export const LivenessState = __t.object("LivenessState", {
   key: __t.string(),
   lastState: __t.string(),
