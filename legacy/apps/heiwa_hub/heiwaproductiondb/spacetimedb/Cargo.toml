@@ -13,5 +13,5 @@ documentation = "https://strategizing.github.io/heiwa-universe/"
 crate-type = ["cdylib"]
 
 [dependencies]
-spacetimedb = { version = "2.0.3" }
+spacetimedb = { version = "2.2.0" }
 log = "0.4"

@@ -1,6 +1,6 @@
 """Op handlers dispatched from the stdio server.
 
-Each op is a small async function. The real LangGraph/LlamaIndex/Ragas work
+Each op is a small async function. The real LangGraph/LlamaIndex work
 lives behind lazy imports so `health` + `version` stay fast even before the
 heavy ML deps resolve in an install.
 """
@@ -36,7 +36,7 @@ async def op_version(req: Request) -> OkResponse | ErrResponse:
 async def op_check_deps(req: Request) -> OkResponse | ErrResponse:
     """Probe importability of each ML dep without actually running them."""
     results: dict[str, Any] = {}
-    for name in ("langgraph", "llama_index", "ragas"):
+    for name in ("langgraph", "llama_index"):
         try:
             mod = importlib.import_module(name)
             version = getattr(mod, "__version__", None)
