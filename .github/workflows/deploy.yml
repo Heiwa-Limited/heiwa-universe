@@ -135,17 +135,23 @@ jobs:
       - repo-hygiene
     if: needs.changes.outputs.deploy_web == 'true'
     env:
+      ENABLE_CLOUDFLARE_DEPLOY: ${{ vars.ENABLE_CLOUDFLARE_DEPLOY }}
       CF_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
       CF_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
     steps:
       - uses: actions/checkout@v5
+      - name: Skip Cloudflare deploy (disabled)
+        if: env.ENABLE_CLOUDFLARE_DEPLOY != 'true'
+        run: echo "Cloudflare deploy disabled; set ENABLE_CLOUDFLARE_DEPLOY=true after public publish credentials are verified."
+      - name: Require Cloudflare credentials
+        if: env.ENABLE_CLOUDFLARE_DEPLOY == 'true' && (env.CF_API_TOKEN == '' || env.CF_ACCOUNT_ID == '')
+        run: |
+          echo "ENABLE_CLOUDFLARE_DEPLOY=true but Cloudflare credentials are missing." >&2
+          exit 1
       - name: Deploy to Cloudflare Pages
-        if: env.CF_API_TOKEN != '' && env.CF_ACCOUNT_ID != ''
+        if: env.ENABLE_CLOUDFLARE_DEPLOY == 'true' && env.CF_API_TOKEN != '' && env.CF_ACCOUNT_ID != ''
         uses: cloudflare/wrangler-action@v3
         with:
           apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
           command: pages deploy apps/heiwa_app/clients/web --project-name=heiwa-clients
-      - name: Skip (no Cloudflare secrets)
-        if: env.CF_API_TOKEN == '' || env.CF_ACCOUNT_ID == ''
-        run: echo "Cloudflare secrets not configured — skipping web deploy"
