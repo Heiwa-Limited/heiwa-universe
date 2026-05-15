@@ -84,6 +84,8 @@ jobs:
         with:
           workspaces: |
             .
+          prefix-key: v1-rust
+          cache-bin: false
 
       - name: Build release binary
         run: cargo build --locked --release -p heiwa-shell --bin heiwa --target ${{ matrix.target }}
