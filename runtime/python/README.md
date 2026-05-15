@@ -14,7 +14,7 @@ Python sidecar that the Rust Heiwa runtime spawns as a subprocess and talks to o
 | ------------ | ------------------------------------------------- |
 | `health`     | Liveness probe. Returns `{"status": "ok"}`.       |
 | `version`    | Sidecar, Python, and platform versions.           |
-| `check_deps` | Probe importability of langgraph/llama_index/ragas. |
+| `check_deps` | Probe importability of langgraph/llama_index. |
 | `echo`       | Return `args` verbatim (wire-test helper).        |
 | `shutdown`   | Reply and exit loop cleanly.                      |
 
