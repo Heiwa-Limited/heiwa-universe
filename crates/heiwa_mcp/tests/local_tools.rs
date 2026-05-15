@@ -2,8 +2,8 @@ use std::fs;
 use std::path::PathBuf;
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use heiwa_mcp::local_repo_registry;
-use heiwa_protocol::{ExecutionScope, ToolLease};
+use heiwa_mcp::{local_repo_registry, McpError, PolicyDenial};
+use heiwa_protocol::{ExecutionScope, RiskClass, ToolLease};
 use serde_json::json;
 
 fn test_root(name: &str) -> PathBuf {
@@ -19,7 +19,7 @@ fn leased_scope(root: PathBuf) -> ExecutionScope {
     for name in ["fs.read", "fs.list", "repo.grep"] {
         scope.tool_leases.push(ToolLease {
             name: name.to_string(),
-            risk_class: "host_safe_readonly".to_string(),
+            risk_class: RiskClass::HostSafeReadonly,
             allowed: true,
         });
     }
@@ -86,7 +86,11 @@ async fn local_repo_tools_fail_closed_without_lease_or_scope() {
         .call("fs.read", json!({ "path": "README.md" }))
         .await
         .expect_err("missing lease must fail");
-    assert!(denied.to_string().contains("lease"));
+    assert!(denied.is_policy_denial(), "expected typed policy denial");
+    assert!(matches!(
+        denied,
+        McpError::PolicyDenied(PolicyDenial::MissingLease { ref tool }) if tool == "fs.read"
+    ));
 
     let leased = local_repo_registry(leased_scope(root.clone()));
     let outside = leased
@@ -96,7 +100,11 @@ async fn local_repo_tools_fail_closed_without_lease_or_scope() {
         )
         .await
         .expect_err("outside scope must fail");
-    assert!(outside.to_string().contains("outside execution scope"));
+    assert!(outside.is_policy_denial(), "expected typed policy denial");
+    assert!(matches!(
+        outside,
+        McpError::PolicyDenied(PolicyDenial::OutsideExecutionScope { .. })
+    ));
 
     fs::remove_dir_all(root).ok();
     fs::remove_dir_all(outside_root).ok();

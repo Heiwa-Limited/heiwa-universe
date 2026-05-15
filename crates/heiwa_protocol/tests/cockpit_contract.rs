@@ -255,7 +255,7 @@ fn session_agent_can_use_leased_tool_but_cannot_manage_permissions() {
     let mut scope = heiwa_protocol::ExecutionScope::local_default(root);
     scope.tool_leases.push(heiwa_protocol::ToolLease {
         name: "shell".into(),
-        risk_class: "host".into(),
+        risk_class: heiwa_protocol::RiskClass::HostMutating,
         allowed: true,
     });
     let agent = heiwa_protocol::SessionPrincipal::new(
@@ -293,7 +293,7 @@ fn viewer_is_read_only_even_with_tool_lease() {
     let mut scope = heiwa_protocol::ExecutionScope::local_default(root);
     scope.tool_leases.push(heiwa_protocol::ToolLease {
         name: "shell".into(),
-        risk_class: "host".into(),
+        risk_class: heiwa_protocol::RiskClass::HostMutating,
         allowed: true,
     });
     let viewer = heiwa_protocol::SessionPrincipal::new(

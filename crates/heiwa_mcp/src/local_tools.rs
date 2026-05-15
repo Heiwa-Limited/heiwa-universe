@@ -7,7 +7,7 @@ use schemars::{schema::RootSchema, schema_for, JsonSchema};
 use serde::Deserialize;
 use serde_json::{json, Value};
 
-use crate::{McpError, Result, Tool, ToolRegistry};
+use crate::{McpError, PolicyDenial, Result, Tool, ToolRegistry};
 
 pub fn local_repo_registry(scope: ExecutionScope) -> ToolRegistry {
     let mut registry = ToolRegistry::new();
@@ -238,7 +238,9 @@ fn ensure_lease(scope: &ExecutionScope, tool: &str) -> Result<()> {
     if scope.allows_tool(tool) {
         Ok(())
     } else {
-        Err(McpError::Tool(format!("tool lease missing for {tool}")))
+        Err(McpError::PolicyDenied(PolicyDenial::MissingLease {
+            tool: tool.to_string(),
+        }))
     }
 }
 
@@ -252,10 +254,9 @@ fn resolve_existing_path(scope: &ExecutionScope, raw: &str) -> Result<ResolvedPa
     let absolute = fs::canonicalize(&candidate)
         .map_err(|error| McpError::Tool(format!("path resolve failed: {error}")))?;
     if !scope.allows_path(&absolute) {
-        return Err(McpError::Tool(format!(
-            "outside execution scope: {}",
-            absolute.display()
-        )));
+        return Err(McpError::PolicyDenied(PolicyDenial::OutsideExecutionScope {
+            path: absolute,
+        }));
     }
     Ok(ResolvedPath {
         relative: relative_to_scope(scope, &absolute),
@@ -285,10 +286,9 @@ fn grep_path(
     let path = fs::canonicalize(path)
         .map_err(|error| McpError::Tool(format!("grep path resolve failed: {error}")))?;
     if !scope.allows_path(&path) {
-        return Err(McpError::Tool(format!(
-            "outside execution scope: {}",
-            path.display()
-        )));
+        return Err(McpError::PolicyDenied(PolicyDenial::OutsideExecutionScope {
+            path,
+        }));
     }
     if path.is_dir() {
         let Some(name) = path.file_name().and_then(|s| s.to_str()) else {
