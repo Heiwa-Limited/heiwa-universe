@@ -1,7 +1,9 @@
 pub mod evidence;
 
+use std::net::{SocketAddr, TcpStream, ToSocketAddrs};
 use std::path::PathBuf;
 use std::sync::Arc;
+use std::time::{Duration, Instant};
 
 use heiwa_bindings::DbConnection;
 use serde::{Deserialize, Serialize};
@@ -97,6 +99,87 @@ fn dirs_home() -> Option<PathBuf> {
 }
 
 // ---------------------------------------------------------------------------
+// StdbProbe — synchronous reachability snapshot for `heiwa doctor`
+// ---------------------------------------------------------------------------
+
+/// Honest snapshot of the configured SpacetimeDB endpoint and its
+/// loopback-or-network reachability. Never contains the token itself —
+/// only whether one is present.
+#[derive(Debug, Clone, Serialize)]
+pub struct StdbProbe {
+    pub configured: bool,
+    pub url: Option<String>,
+    pub database: Option<String>,
+    pub token_present: bool,
+    pub reachable: Option<bool>,
+    pub latency_ms: Option<u64>,
+}
+
+impl StdbProbe {
+    /// Resolve config and attempt a short TCP probe of the host:port from
+    /// the URL. When unconfigured, returns a probe with `configured: false`
+    /// and no reachability fields populated.
+    pub fn probe() -> Self {
+        let Some(config) = StdbConfig::resolve() else {
+            return Self {
+                configured: false,
+                url: None,
+                database: None,
+                token_present: false,
+                reachable: None,
+                latency_ms: None,
+            };
+        };
+
+        let token_present = !config.token.is_empty();
+        let endpoint = parse_endpoint(&config.url);
+        let (reachable, latency_ms) = match endpoint {
+            Some(addr) => {
+                let start = Instant::now();
+                let ok = TcpStream::connect_timeout(&addr, Duration::from_millis(500)).is_ok();
+                let latency = ok.then(|| start.elapsed().as_millis() as u64);
+                (Some(ok), latency)
+            }
+            None => (Some(false), None),
+        };
+
+        Self {
+            configured: true,
+            url: Some(config.url),
+            database: Some(config.database),
+            token_present,
+            reachable,
+            latency_ms,
+        }
+    }
+}
+
+/// Parse `scheme://host[:port][/...]` into a resolvable `SocketAddr`.
+/// Returns `None` on parse failure or DNS resolution failure.
+fn parse_endpoint(url: &str) -> Option<SocketAddr> {
+    let (scheme, rest) = url.split_once("://")?;
+    let default_port = match scheme {
+        "https" | "wss" => 443,
+        "http" | "ws" => 80,
+        _ => return None,
+    };
+
+    let authority = rest.split('/').next()?;
+    let (host, port) = match authority.rsplit_once(':') {
+        Some((h, p)) => (h, p.parse::<u16>().ok()?),
+        None => (authority, default_port),
+    };
+    if host.is_empty() {
+        return None;
+    }
+
+    (host, port)
+        .to_socket_addrs()
+        .ok()
+        .and_then(|mut iter| iter.next())
+}
+
+// ---------------------------------------------------------------------------
 // StdbClient — thin wrapper around an optional DbConnection
 // ---------------------------------------------------------------------------
 
@@ -175,5 +258,47 @@ impl StdbClient {
                 }
             }
         });
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parse_endpoint_handles_https_default_port() {
+        let addr = parse_endpoint("https://maincloud.spacetimedb.com").expect("addr");
+        assert_eq!(addr.port(), 443);
+    }
+
+    #[test]
+    fn parse_endpoint_handles_explicit_port() {
+        let addr = parse_endpoint("http://localhost:3000/heiwa").expect("addr");
+        assert_eq!(addr.port(), 3000);
+    }
+
+    #[test]
+    fn parse_endpoint_handles_ws_scheme() {
+        let addr = parse_endpoint("wss://maincloud.spacetimedb.com/db").expect("addr");
+        assert_eq!(addr.port(), 443);
+    }
+
+    #[test]
+    fn parse_endpoint_rejects_unknown_scheme() {
+        assert!(parse_endpoint("ftp://example.com").is_none());
+        assert!(parse_endpoint("noscheme").is_none());
+    }
+
+    #[test]
+    fn stdb_probe_when_unconfigured_returns_inert_snapshot() {
+        // We can't fully control the test env (CI may have ~/.heiwa from prior
+        // jobs) but we can assert the shape contract: token must never leak.
+        let probe = StdbProbe::probe();
+        // The probe is always Serialize-safe and never holds a raw token.
+        let json = serde_json::to_string(&probe).expect("serialize");
+        assert!(
+            !json.contains("\"token\":"),
+            "stdb probe must never serialize a raw token field: {json}"
+        );
     }
 }

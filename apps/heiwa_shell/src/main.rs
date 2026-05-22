@@ -254,6 +254,7 @@ async fn main() -> Result<()> {
             let identity = heiwa_provider::load_identity();
             let app_probe = crate::cmd::app::probe_local_app(crate::cmd::app::DEFAULT_PORT);
             let layout = heiwa_install::check_runtime_layout();
+            let stdb = heiwa_stdb::StdbProbe::probe();
             let ai_ops = if include_ai_ops {
                 Some(heiwa_install::check_ai_ops()?)
             } else {
@@ -276,6 +277,7 @@ async fn main() -> Result<()> {
                         "identity": identity_json,
                         "heiwa_app": app_probe,
                         "layout": layout,
+                        "stdb": stdb,
                         "ai_ops": ai_ops,
                     })
                 );
@@ -387,6 +389,38 @@ async fn main() -> Result<()> {
             }
             if !layout.is_complete() {
                 println!("  Next: heiwa install");
+            }
+
+            println!();
+            println!("SpacetimeDB:");
+            if stdb.configured {
+                println!("  URL:           {}", stdb.url.as_deref().unwrap_or("?"));
+                println!(
+                    "  Database:      {}",
+                    stdb.database.as_deref().unwrap_or("?")
+                );
+                println!(
+                    "  Token:         {}",
+                    if stdb.token_present {
+                        "present"
+                    } else {
+                        "missing"
+                    }
+                );
+                match stdb.reachable {
+                    Some(true) => println!(
+                        "  Reachable:     yes ({}ms)",
+                        stdb.latency_ms.unwrap_or_default()
+                    ),
+                    Some(false) => println!("  Reachable:     no"),
+                    None => println!("  Reachable:     unknown"),
+                }
+                if !stdb.token_present {
+                    println!("  Next:          heiwa login");
+                }
+            } else {
+                println!("  Configured:    no");
+                println!("  Next:          heiwa login (writes ~/.heiwa/connection.json)");
             }
 
             if let Some(ai_ops) = ai_ops {
