@@ -370,6 +370,22 @@ fn test_doctor_json_reports_runtimes_providers_and_app_probe() {
             "expected {name} in doctor layout: {stdout}"
         );
     }
+    assert!(
+        stdout.contains("\"stdb\""),
+        "expected stdb probe block in doctor json: {stdout}"
+    );
+    assert!(
+        stdout.contains("\"configured\""),
+        "expected configured field in doctor stdb: {stdout}"
+    );
+    assert!(
+        stdout.contains("\"token_present\""),
+        "expected token_present field in doctor stdb (token must never appear raw): {stdout}"
+    );
+    assert!(
+        !stdout.contains("\"token\":\""),
+        "doctor json must never contain a raw STDB token: {stdout}"
+    );
 }
 
 #[test]
