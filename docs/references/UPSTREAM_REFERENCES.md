@@ -1,6 +1,6 @@
 # Upstream References
 
-> These replace the full repo clones formerly in `docs_and_deps/`.  
+> These replace the full repo clones formerly in `docs_and_deps/`.
 > Fetch docs on-demand instead of cloning ~900 MB of upstream repos.
 
 ## Core Dependencies
@@ -19,7 +19,6 @@
 
 | Service | Dashboard | Docs |
 |:--------|:----------|:-----|
-| **Railway** | [railway.app](https://railway.app) | [docs.railway.app](https://docs.railway.app) |
 | **Cloudflare** | [dash.cloudflare.com](https://dash.cloudflare.com) | [developers.cloudflare.com](https://developers.cloudflare.com) |
 | **NATS** | — | [docs.nats.io](https://docs.nats.io) |
 | **E2B** | [e2b.dev](https://e2b.dev) | [e2b.dev/docs](https://e2b.dev/docs) |
