@@ -1284,6 +1284,7 @@ dependencies = [
  "heiwa_mcp",
  "heiwa_quota",
  "hostname",
+ "serde",
  "serde_json",
  "sha1",
  "tokio",

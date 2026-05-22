@@ -307,6 +307,50 @@ fn test_app_update_dry_run_reports_install_target() {
 }
 
 #[test]
+fn test_doctor_json_reports_runtimes_providers_and_app_probe() {
+    let output = Command::new("cargo")
+        .args(&[
+            "run",
+            "-p",
+            "heiwa-shell",
+            "--bin",
+            "heiwa",
+            "--",
+            "doctor",
+            "--json",
+        ])
+        .output()
+        .expect("failed to execute doctor --json");
+
+    assert!(output.status.success());
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        stdout.contains("\"command\":\"doctor\""),
+        "expected doctor json command marker: {stdout}"
+    );
+    assert!(
+        stdout.contains("\"runtimes\""),
+        "expected runtimes block in doctor json: {stdout}"
+    );
+    assert!(
+        stdout.contains("\"heiwa_app\""),
+        "expected heiwa_app probe block in doctor json: {stdout}"
+    );
+    assert!(
+        stdout.contains("\"reachable\""),
+        "expected reachable field in doctor json: {stdout}"
+    );
+    assert!(
+        stdout.contains("\"port\":7474"),
+        "expected default 7474 port in doctor json: {stdout}"
+    );
+    assert!(
+        !stdout.contains("\"auth_token\""),
+        "doctor json must not leak auth_token: {stdout}"
+    );
+}
+
+#[test]
 fn test_app_runtime_status_json_reports_local_probe() {
     let output = Command::new("cargo")
         .args(&[
@@ -357,6 +401,10 @@ fn test_app_runtime_status_json_reports_local_probe() {
     assert!(
         stdout.contains("\"keep_awake\""),
         "expected keep_awake probe in runtime status: {stdout}"
+    );
+    assert!(
+        stdout.contains("\"local_app\""),
+        "expected local_app reachability probe in runtime status: {stdout}"
     );
 }
 
