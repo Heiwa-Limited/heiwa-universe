@@ -130,7 +130,7 @@ class TestBYOKRouting(unittest.TestCase):
             "assigned_worker": "google-worker",
             "target_tool": "heiwa_claw",
             "target_model": "google/gemini-2.0-flash",
-            "target_runtime": "railway",
+            "target_runtime": "macbook",
             "target_tier": "tier1",
             "compute_class": 2,
             "rationale": "Test",

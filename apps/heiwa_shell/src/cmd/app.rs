@@ -21,6 +21,7 @@ const WS_GUID: &str = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11";
 pub async fn run(args: &[String]) -> Result<()> {
     match args.first().map(String::as_str) {
         Some("start") => start(&args[1..]).await,
+        Some("update") => update(&args[1..]),
         Some("runtime") => runtime(&args[1..]),
         Some("status") => runtime_status(args),
         Some("--help") | Some("-h") | None => {
@@ -34,6 +35,72 @@ pub async fn run(args: &[String]) -> Result<()> {
         Some(flag) if flag.starts_with("--") => runtime_status(args),
         Some(other) => Err(anyhow!("unknown app command: {other}")),
     }
+}
+
+fn update(args: &[String]) -> Result<()> {
+    if has_flag(args, "--help") || has_flag(args, "-h") {
+        print_update_help();
+        return Ok(());
+    }
+
+    let dry_run = has_flag(args, "--dry-run");
+    let repo_root = find_repo_root(env::current_dir()?)
+        .ok_or_else(|| anyhow!("heiwa app update must run from a heiwa-universe checkout"))?;
+    let shell_manifest = repo_root
+        .join("apps")
+        .join("heiwa_shell")
+        .join("Cargo.toml");
+    if !shell_manifest.is_file() {
+        return Err(anyhow!(
+            "heiwa app update could not find apps/heiwa_shell/Cargo.toml under {}",
+            repo_root.display()
+        ));
+    }
+
+    let install_root = heiwa_install::get_heiwa_dir();
+    let mut command = Command::new("cargo");
+    command
+        .arg("install")
+        .arg("--path")
+        .arg(repo_root.join("apps").join("heiwa_shell"))
+        .arg("--root")
+        .arg(&install_root)
+        .arg("--locked")
+        .arg("--force");
+
+    println!("heiwa app update");
+    println!("  source: {}", repo_root.display());
+    println!(
+        "  target: {}",
+        install_root.join("bin").join("heiwa").display()
+    );
+    println!("  command: cargo install --path apps/heiwa_shell --root ~/.heiwa --locked --force");
+    if dry_run {
+        println!("  dry_run: true");
+        return Ok(());
+    }
+
+    let status = command.status()?;
+    if !status.success() {
+        return Err(anyhow!("cargo install failed with status {status}"));
+    }
+    println!("  status: updated");
+    Ok(())
+}
+
+fn find_repo_root(start: PathBuf) -> Option<PathBuf> {
+    for candidate in start.ancestors() {
+        if candidate.join("HEIWA.md").is_file()
+            && candidate
+                .join("apps")
+                .join("heiwa_shell")
+                .join("Cargo.toml")
+                .is_file()
+        {
+            return Some(candidate.to_path_buf());
+        }
+    }
+    None
 }
 
 fn runtime(args: &[String]) -> Result<()> {
@@ -159,6 +226,7 @@ fn runtime_status(args: &[String]) -> Result<()> {
                 "sidecar": status.sidecar,
                 "keep_awake": status.keep_awake,
                 "policy": status.policy,
+                "hooks": status.hooks_summary,
                 "workers": status.workers_summary,
                 "approvals": status.approvals_summary,
                 "mail": status.mail_summary,
@@ -177,6 +245,24 @@ fn runtime_status(args: &[String]) -> Result<()> {
     println!("  sidecar: {}", status.sidecar);
     println!("  keep_awake: {}", status.keep_awake);
     println!("  policy: {}", status.policy);
+    println!(
+        "  hooks: {} active / {} degraded / {} unconfigured",
+        status
+            .hooks_summary
+            .get("active")
+            .and_then(Value::as_i64)
+            .unwrap_or(0),
+        status
+            .hooks_summary
+            .get("degraded")
+            .and_then(Value::as_i64)
+            .unwrap_or(0),
+        status
+            .hooks_summary
+            .get("unconfigured")
+            .and_then(Value::as_i64)
+            .unwrap_or(0),
+    );
     println!(
         "  workers: {} live / {} stale",
         status
@@ -225,6 +311,7 @@ struct RuntimeStatus {
     keep_awake: String,
     policy: &'static str,
     next: &'static str,
+    hooks_summary: Value,
     workers_summary: Value,
     approvals_summary: Value,
     mail_summary: Value,
@@ -243,6 +330,7 @@ impl RuntimeStatus {
             keep_awake: detect_keep_awake(),
             policy: "local-only-no-side-effects",
             next: "run heiwa app start --port 7474",
+            hooks_summary: hooks_summary(),
             workers_summary: workers_summary(&state_dir),
             approvals_summary: approvals_summary(&state_dir),
             mail_summary: mail_summary(),
@@ -436,6 +524,7 @@ fn api_payload(path: &str, started_at: &str) -> Option<Value> {
         }),
         "/api/v1/providers" => json!({ "providers": provider_rows() }),
         "/api/v1/routes" => json!({ "routes": route_rows() }),
+        "/api/v1/hooks" => json!({ "providers": hook_provider_rows(), "summary": hooks_summary() }),
         "/api/v1/missions" => json!({ "missions": [], "cursor": null }),
         "/api/v1/approvals" => json!({ "approvals": approval_rows() }),
         "/api/v1/rate-groups" => json!({ "rate_groups": rate_group_rows() }),
@@ -469,6 +558,7 @@ fn snapshot(started_at: &str) -> Value {
         "workers": status.workers_summary,
         "approvals": status.approvals_summary,
         "mail": status.mail_summary,
+        "hooks": status.hooks_summary,
         "providers": provider_rows(),
     })
 }
@@ -636,6 +726,287 @@ fn worker_agent_rows() -> Vec<Value> {
             })
         })
         .collect()
+}
+
+fn hook_provider_rows() -> Vec<Value> {
+    let home = dirs::home_dir().unwrap_or_else(|| PathBuf::from("."));
+    vec![
+        json_hook_provider_row(
+            "claude",
+            "Claude Code",
+            &home.join(".claude").join("settings.json"),
+            Some(
+                home.join(".heiwa")
+                    .join("generated")
+                    .join("claude")
+                    .join("settings.json"),
+            ),
+            &["PreToolUse", "UserPromptSubmit"],
+            Some(
+                home.join(".heiwa")
+                    .join("logs")
+                    .join("policy")
+                    .join("claude-runtime-safety.jsonl"),
+            ),
+            vec![
+                "provider-owned-hook-api",
+                "schema-requires-hookEventName",
+                "heiwa-observes-and-hardens",
+            ],
+        ),
+        json_hook_provider_row(
+            "gemini",
+            "Gemini CLI",
+            &home.join(".gemini").join("settings.json"),
+            Some(
+                home.join(".heiwa")
+                    .join("generated")
+                    .join("gemini")
+                    .join("settings.json"),
+            ),
+            &["BeforeTool", "SessionStart"],
+            Some(
+                home.join(".heiwa")
+                    .join("logs")
+                    .join("policy")
+                    .join("gemini-runtime-policy.jsonl"),
+            ),
+            vec![
+                "provider-owned-hook-api",
+                "before-tool-policy",
+                "session-bootstrap",
+            ],
+        ),
+        codex_hook_provider_row(&home),
+        json!({
+            "provider_id": "antigravity",
+            "display_name": "Antigravity",
+            "status": "delegated",
+            "config_path": home.join(".gemini").join("antigravity").display().to_string(),
+            "generated_config_status": generated_file_status(&home.join(".heiwa").join("generated").join("antigravity").join("settings.json")),
+            "audit_file": Value::Null,
+            "events": [],
+            "notes": [
+                "inherits-gemini-posture",
+                "separate-live-hook-registry-not-detected",
+            ],
+        }),
+    ]
+}
+
+fn json_hook_provider_row(
+    provider_id: &str,
+    display_name: &str,
+    config_path: &Path,
+    generated_config_path: Option<PathBuf>,
+    event_names: &[&str],
+    audit_file: Option<PathBuf>,
+    notes: Vec<&str>,
+) -> Value {
+    let events = hook_events_from_json_config(config_path, event_names);
+    let command_count = events
+        .iter()
+        .filter_map(|event| event.get("hooks").and_then(Value::as_array))
+        .map(Vec::len)
+        .sum::<usize>();
+    let missing_command = events
+        .iter()
+        .filter_map(|event| event.get("hooks").and_then(Value::as_array))
+        .flatten()
+        .any(|hook| {
+            hook.get("command_exists")
+                .and_then(Value::as_bool)
+                .is_some_and(|exists| !exists)
+        });
+    let status = if !config_path.exists() {
+        "unconfigured"
+    } else if command_count == 0 || missing_command {
+        "degraded"
+    } else {
+        "active"
+    };
+    let generated_config_status = generated_config_path
+        .as_deref()
+        .map(|path| generated_hook_status(config_path, path))
+        .unwrap_or_else(|| "not_applicable".to_string());
+
+    json!({
+        "provider_id": provider_id,
+        "display_name": display_name,
+        "status": status,
+        "config_path": config_path.display().to_string(),
+        "generated_config_status": generated_config_status,
+        "audit_file": audit_file.map(|path| Value::String(path.display().to_string())).unwrap_or(Value::Null),
+        "events": events,
+        "notes": notes,
+    })
+}
+
+fn codex_hook_provider_row(home: &Path) -> Value {
+    let config_path = home.join(".codex").join("config.toml");
+    json!({
+        "provider_id": "codex",
+        "display_name": "Codex",
+        "status": "unsupported",
+        "config_path": config_path.display().to_string(),
+        "generated_config_status": generated_file_status(&home.join(".heiwa").join("generated").join("codex").join("config.toml")),
+        "audit_file": Value::Null,
+        "events": [],
+        "notes": [
+            "native-hook-parity-not-detected",
+            "phase-1-safety-launcher-only",
+            "app-should-show-boundary-not-fake-parity",
+        ],
+    })
+}
+
+fn hooks_summary() -> Value {
+    let rows = hook_provider_rows();
+    let mut active = 0i64;
+    let mut degraded = 0i64;
+    let mut unconfigured = 0i64;
+    let mut unsupported = 0i64;
+    let mut delegated = 0i64;
+    let mut event_count = 0i64;
+    let mut command_count = 0i64;
+
+    for row in &rows {
+        match row
+            .get("status")
+            .and_then(Value::as_str)
+            .unwrap_or("unknown")
+        {
+            "active" => active += 1,
+            "degraded" => degraded += 1,
+            "unconfigured" => unconfigured += 1,
+            "unsupported" => unsupported += 1,
+            "delegated" => delegated += 1,
+            _ => {}
+        }
+        if let Some(events) = row.get("events").and_then(Value::as_array) {
+            event_count += events.len() as i64;
+            command_count += events
+                .iter()
+                .filter_map(|event| event.get("hooks").and_then(Value::as_array))
+                .map(|hooks| hooks.len() as i64)
+                .sum::<i64>();
+        }
+    }
+
+    json!({
+        "source": "live-home-config",
+        "providers": rows.len(),
+        "active": active,
+        "degraded": degraded,
+        "unconfigured": unconfigured,
+        "unsupported": unsupported,
+        "delegated": delegated,
+        "events": event_count,
+        "commands": command_count,
+    })
+}
+
+fn hook_events_from_json_config(config_path: &Path, event_names: &[&str]) -> Vec<Value> {
+    let Some(config) = fs::read_to_string(config_path)
+        .ok()
+        .and_then(|raw| serde_json::from_str::<Value>(&raw).ok())
+    else {
+        return Vec::new();
+    };
+    let Some(hooks) = config.get("hooks").and_then(Value::as_object) else {
+        return Vec::new();
+    };
+
+    let mut events = Vec::new();
+    for event_name in event_names {
+        let Some(entries) = hooks.get(*event_name).and_then(Value::as_array) else {
+            continue;
+        };
+        for entry in entries {
+            let matcher = entry
+                .get("matcher")
+                .and_then(Value::as_str)
+                .unwrap_or("*")
+                .to_string();
+            let hook_commands = entry
+                .get("hooks")
+                .and_then(Value::as_array)
+                .map(|hooks| {
+                    hooks
+                        .iter()
+                        .map(|hook| {
+                            let command = hook
+                                .get("command")
+                                .and_then(Value::as_str)
+                                .unwrap_or("")
+                                .to_string();
+                            let command_path = hook_command_path(&command);
+                            let command_exists =
+                                command_path.as_deref().map(Path::new).map(Path::exists);
+                            json!({
+                                "name": hook.get("name").and_then(Value::as_str),
+                                "kind": hook.get("type").and_then(Value::as_str),
+                                "command": command,
+                                "command_path": command_path,
+                                "command_exists": command_exists,
+                                "timeout_ms": hook.get("timeout").and_then(Value::as_i64),
+                            })
+                        })
+                        .collect::<Vec<_>>()
+                })
+                .unwrap_or_default();
+            events.push(json!({
+                "event": event_name,
+                "matcher": matcher,
+                "hooks": hook_commands,
+            }));
+        }
+    }
+    events
+}
+
+fn hook_command_path(command: &str) -> Option<String> {
+    let home = dirs::home_dir().unwrap_or_else(|| PathBuf::from("."));
+    command
+        .split_whitespace()
+        .rev()
+        .map(|token| token.trim_matches('"').trim_matches('\''))
+        .find(|token| token.starts_with('/') || token.starts_with("~/"))
+        .map(|token| {
+            if let Some(rest) = token.strip_prefix("~/") {
+                home.join(rest).display().to_string()
+            } else {
+                token.to_string()
+            }
+        })
+}
+
+fn generated_hook_status(live_path: &Path, generated_path: &Path) -> String {
+    match (
+        json_hook_fingerprint(live_path),
+        json_hook_fingerprint(generated_path),
+    ) {
+        (Some(live), Some(generated)) if live == generated => "matches_hooks".to_string(),
+        (Some(_), Some(_)) => "drift".to_string(),
+        (Some(_), None) if generated_path.exists() => "unreadable_generated_hooks".to_string(),
+        (Some(_), None) => "no_generated_config".to_string(),
+        _ => generated_file_status(generated_path),
+    }
+}
+
+fn json_hook_fingerprint(path: &Path) -> Option<String> {
+    let parsed = fs::read_to_string(path)
+        .ok()
+        .and_then(|raw| serde_json::from_str::<Value>(&raw).ok())?;
+    serde_json::to_string(parsed.get("hooks")?).ok()
+}
+
+fn generated_file_status(path: &Path) -> String {
+    if path.exists() {
+        "present-not-live-source".to_string()
+    } else {
+        "missing".to_string()
+    }
 }
 
 fn write_app_heartbeat(worker_id: &str) -> Result<()> {
@@ -995,11 +1366,21 @@ fn print_help() {
     println!();
     println!("Usage:");
     println!("  heiwa app start [--port N] [--no-open]");
+    println!("  heiwa app update [--dry-run]");
     println!("  heiwa app runtime status [--json]");
     println!("  heiwa app status [--json]");
     println!("  heiwa app [--json]");
     println!();
     println!("Starts or probes the local Heiwa.app cockpit runtime.");
+}
+
+fn print_update_help() {
+    println!("heiwa app update");
+    println!();
+    println!("Usage:");
+    println!("  heiwa app update [--dry-run]");
+    println!();
+    println!("Reinstalls the local heiwa binary from the current heiwa-universe checkout.");
 }
 
 fn print_start_help() {

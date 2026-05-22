@@ -10,6 +10,7 @@ import Dashboard from "./routes/Dashboard";
 import Domains from "./routes/Domains";
 import Governance from "./routes/Governance";
 import History from "./routes/History";
+import Hooks from "./routes/Hooks";
 import Live from "./routes/Live";
 import Memory from "./routes/Memory";
 import Missions from "./routes/Missions";
@@ -39,6 +40,7 @@ render(
       <Route path="/traces" component={Traces} />
       <Route path="/memory" component={Memory} />
       <Route path="/agents" component={Agents} />
+      <Route path="/hooks" component={Hooks} />
       <Route path="/crons" component={Crons} />
       <Route path="/rate-groups" component={RateGroups} />
       <Route path="/cells" component={Cells} />

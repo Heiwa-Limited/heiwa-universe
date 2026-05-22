@@ -46,7 +46,7 @@ class ACPAdapter(BaseClawAdapter):
                 )
                 registration = {
                     "type": "register",
-                    "worker_id": f"acp-proxy-{settings.RAILWAY_ENVIRONMENT_NAME}",
+                    "worker_id": f"acp-proxy-{settings.HEIWA_RUNTIME_ENV}",
                     "auth_token": auth_token,
                     "capabilities": {"role": "proxy", "acp": True}
                 }

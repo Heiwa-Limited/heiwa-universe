@@ -1,105 +1,57 @@
 # Heiwa Build Matrix
 
-Updated 2026-04-21. Client-only architecture. Parallel lanes for Claude + Codex dispatch.
+Updated 2026-05-22. Canonical repo shape: MacBook-first runtime, local `~/.heiwa` state, GitHub-native distribution, paused Cloudflare public edge, optional SpacetimeDB evidence sync.
 
-## Architecture (client-only)
+## Architecture
 
-| Layer | Component | Crate/Path |
+| Layer | Owner | Current path | Status |
+| --- | --- | --- | --- |
+| Installed runtime | Rust + Shell | `apps/heiwa_shell/` | Active product surface |
+| Execution kernel | Rust | `apps/heiwa_core/`, `apps/heiwa_orchestrator/`, `crates/heiwa_loop/` | Active substrate |
+| Provider/auth normalization | Rust | `crates/heiwa_provider/`, `crates/heiwa_vault/`, `crates/heiwa_quota/` | Active, uneven by provider |
+| Session and local memory | Rust + SQLite mirror | `crates/heiwa_session/`, `crates/heiwa_memory/` | Active local substrate |
+| Companion app | TypeScript public shell + cockpit SPA | `apps/heiwa_app/clients/web/`, `apps/heiwa_app/clients/cockpit/` | Web client today; native wrapper later |
+| STDB evidence/state | SpacetimeDB + generated bindings | `legacy/apps/heiwa_hub/spacetimedb/`, `crates/heiwa_stdb/`, `packages/heiwa_bindings/` | Evidence sync/adjudication plane; legacy module is schema reference |
+| Python sidecar/reference | Python | `runtime/python/`, `packages/heiwa_sdk/`, `apps/heiwa_trading/` | Compatibility/R&D sidecars, not product center |
+| Distribution | GitHub | `.github/workflows/{ci,release,pages}.yml` | CI, release archives, GHCR image, docs |
+| Public edge | Cloudflare | `apps/heiwa_app/wrangler.toml`, `infra/platform/cloudflare/` | Paused until user functionality is solid; no local runtime authority |
+
+## Product Contract
+
+Rust proposes and executes. Local `~/.heiwa` state records current owner truth. SpacetimeDB syncs evidence and adjudication when enabled. `heiwa` presents. TypeScript renders public and cockpit surfaces. Python remains sidecar/reference until promoted behind explicit Rust-owned contracts.
+
+## Current Work Lanes
+
+| Lane | Goal | Gate |
 | --- | --- | --- |
-| L1 Runtime | `heiwa` CLI (Ratatui TUI) | `apps/heiwa_cli`, `crates/heiwa_tui`, `crates/heiwa_repl` |
-| L1 Runtime | Heiwa.app companion shell (web client today, native wrapper later) | `apps/heiwa_app` |
-| L2 Secrets | OS keychain vault | `crates/heiwa_vault` (NEW) |
-| L2 Providers | OAuth bridges — claude/gemini/codex/ollama | `crates/heiwa_provider` |
-| L3 Routing | DREX kernel | `crates/heiwa_loop`, `crates/heiwa_session` |
-| L4 Tools | MCP server + client | `crates/heiwa_mcp` (NEW) |
-| L5 Sidecars | Python: LangGraph, LlamaIndex, Ragas | `runtime/python/` (NEW) |
-| L6 State | SQLite ledger, quota, history | `crates/heiwa_session` (extend) |
-| L7 Distribution | GitHub Releases + homebrew tap | `infra/platform/github/` |
-| L7 Distribution | Landing + docs | GitHub Pages via `mkdocs` |
+| Runtime | Keep `heiwa` local runtime installable, updateable, and honest about provider maturity | `cargo test -p heiwa-shell --test smoke`, `heiwa doctor --ai-ops`, `heiwa app runtime status --json` |
+| State | Keep local SQLite/files as current owner truth while STDB stays optional evidence sync/adjudication | `cargo test -p heiwa-session --test transcript_migration`, `cargo test -p heiwa-stdb` |
+| Web | Keep public shell static/safe and cockpit local-runtime oriented | `npm run typecheck`, `python apps/heiwa_app/scripts/check_static_surface.py` |
+| Python | Keep sidecars dependency-clean and non-authoritative | `uv run --extra dev python -m pytest` where relevant; lockfiles must have no open Dependabot alerts |
+| Distribution | Publish through GitHub Releases/GHCR and docs through GitHub Pages | `.github/workflows/release.yml`, `.github/workflows/pages.yml`, `scripts/check_release_metadata.sh` |
+| Edge | Keep Cloudflare DNS/Pages/WAF declarations aligned with public shell reality | `apps/heiwa_app/wrangler.toml`, `infra/platform/cloudflare/main.tf`, live Cloudflare auth before mutation |
 
-Frozen: `apps/heiwa_hub/spacetimedb/` — reference schema only, no new work.
+## Active Baseline
 
-## Lanes
+- `main` is trunk and branch-protected.
+- GitHub CI requires security scan, Rust matrix, TypeScript lint, docs build, agent sync, and repo hygiene.
+- GitHub Releases build `heiwa` archives for Linux, macOS arm64, and Windows plus checksums and GHCR image.
+- GitHub Pages publishes docs on release tags and manual dispatch.
+- Cloudflare Pages is not active public access yet; when re-enabled it should host the public web shell from `apps/heiwa_app/clients/web`.
+- The cockpit SPA under `apps/heiwa_app/clients/cockpit` is served by `heiwa app start` on localhost, not assumed to be a privileged hosted runtime.
+- SpacetimeDB maincloud / `heiwaproductiondb` is an evidence sync/adjudication target; local runtime must work without it.
 
-Two lanes run in parallel. Claude owns **LOCAL**, Codex owns **PLATFORM**, plus a shared **CLEANUP** backlog either picks up.
+## Retired Assumptions
 
-### Lane A — LOCAL (Claude)
+- Do not use `apps/heiwa_cli` as the installed runtime path; current runtime is `apps/heiwa_shell`.
+- Do not describe a hosted control plane as the default product center.
+- Do not describe Python Hub/cognition as the long-term control plane.
+- Do not treat `apps/heiwa_app/clients/web` and `clients/cockpit` as the same thing: public shell is static and safe; cockpit is the local operator UI.
+- Do not list `auth.heiwa.ltd` or `trade.heiwa.ltd` as active public surfaces until they have a verified hosted target.
 
-Build the client runtime and routing.
+## Branch / Worktree Policy
 
-| ID | Task | Crate/Path | Depends |
-| --- | --- | --- | --- |
-| L1 | Scaffold `heiwa_vault` crate (macOS Keychain / Secret Service / Win Credential Manager) | `crates/heiwa_vault` | — |
-| L2 | OAuth credential bridge: `get_oauth_session_for_user(provider)` | `crates/heiwa_provider` | L1 |
-| L3 | Local SQLite quota ledger (replaces STDB cross-device) | `crates/heiwa_session` | — |
-| L4 | DREX → vault wiring: route selects session, checks local quota | `crates/heiwa_loop` | L2, L3 |
-| L5 | `heiwa_mcp` server + client scaffold | `crates/heiwa_mcp` (NEW) | — |
-| L6 | Port `~/bin/ai` routing table into DREX as reference implementation | `crates/heiwa_loop` | L4 |
-| L7 | `heiwa init` flow (first-run: detect providers, prompt OAuth, write config) | `apps/heiwa_cli` | L1, L2 |
-| L8 | Python sidecar scaffold (`uv` + pyproject, LangGraph+Ragas health checks) | `runtime/python/` | — |
-
-### Lane B — PLATFORM (Codex)
-
-Make the repo publishable and distributable via GitHub.
-
-| ID | Task | Path | Depends |
-| --- | --- | --- | --- |
-| P1 | GitHub Actions: cargo build matrix (macOS+Linux+Windows), test, clippy | `.github/workflows/ci.yml` | — |
-| P2 | GitHub Actions: release workflow (cargo-dist or cross-build → Releases) | `.github/workflows/release.yml` | P1 |
-| P3 | Homebrew tap repo `Strategizing/homebrew-heiwa` with auto-update formula | external + `infra/platform/github/` | P2 |
-| P4 | GitHub Pages: mkdocs site (landing + docs) under `docs/`, publish on tag | `.github/workflows/pages.yml`, `mkdocs.yml` | — |
-| P5 | Repo hygiene: strip Railway refs from docs, agents, policies | `docs/`, `.claude/`, `.gemini/`, `ops/` | — |
-| P6 | `heiwa` crate metadata for cargo publish (license, README, keywords) | `Cargo.toml` manifests | — |
-| P7 | Plugin install protocol spec: `heiwa install gh:owner/repo` | `docs/plugins.md`, `crates/heiwa_install` | — |
-| P8 | CONTRIBUTING.md + issue templates + CODE_OF_CONDUCT.md | `.github/` | — |
-
-### Lane C — CLEANUP (shared backlog)
-
-Either agent claims. Keeps main repo portable.
-
-| ID | Task |
-| --- | --- |
-| C1 | Delete `apps/heiwa_orchestrator/`, `apps/heiwa_limbs/` if Railway-only; confirm before delete |
-| C2 | Audit `apps/heiwa_shell/` vs `apps/heiwa_cli/` — merge or split cleanly |
-| C3 | Rename `apps/heiwa_web/` → `apps/heiwa_app/` and keep it honest as the companion app shell path |
-| C4 | Purge `railway` strings from `crates/heiwa_protocol/`, agent policies, swarm docs |
-| C5 | Delete or archive `apps/heiwa_trading/` from main tree if not MVP scope |
-| C6 | Unify `HEIWA.md`, `IDENTITY.md`, `SOUL.md` into one canonical `HEIWA.md` |
-| C7 | Prune `docs/superpowers/plans/` of obsolete Railway plans |
-
-## Dispatch Status (2026-04-21)
-
-- Platform on `main`: `P1`, `P4`, `P6`, `P8`
-- Open Codex PRs: `#7` (`P5`), `#9` (`P2`), `#11` (`P7`)
-- Open Claude PRs: `#5` (`L1`), `#6` (`L3`), `#8` (`L5`), `#10` (`L8`)
-- Current cleanup claim: `C3` path rename in progress
-
-## Build order
-
-1. Lane A starts L1, L3, L5 in parallel (no deps).
-2. Lane B starts P1, P4, P5, P6, P8 in parallel (no deps).
-3. Cleanup C1–C7 ride along where they unblock specific lane tasks.
-4. Merge point: L7 `heiwa init` + P3 homebrew tap → first shippable alpha.
-
-## Worktree convention
-
-- Claude works in `.worktrees/claude/<task-id>/`
-- Codex works in `.worktrees/codex/<task-id>/`
-- Branch name mirrors path: `claude/<task-id>` or `codex/<task-id>`
-- All worktrees ignored by git (`.worktrees/` in `.gitignore`)
-- Short-lived: delete worktree + branch after PR merge
-
-## Git state (2026-04-21 consolidation)
-
-- `main` is trunk; all other local branches deleted
-- Pre-consolidation branches preserved as `backup/*-20260421` tags (pushed to origin)
-- Lost origin branches: `feat/heiwa-terminal-v1-cockpit`, `phase2-auth-plane` — left intact on remote as extra backup
-- Known CVE: GitHub flagged 6 dependabot alerts on `main` — audit during P5
-
-## Non-goals (deferred)
-
-- VPS or hosted backend
-- Cross-device sync
-- Plugin marketplace (use `gh:` URLs instead)
-- STDB cloud authority plane
-- Heiwa identity service (GitHub device-flow is enough)
+- Work directly on root `main` for owner-local consolidation unless Devon asks for branch isolation.
+- Branches/worktrees are temporary only; commit promoted work to `main` or scrap it.
+- Preserve dirty worktrees until their local changes are promoted, archived, or explicitly discarded.
+- Delete merged/superseded remote branches only after checking live PR state and attached worktrees.

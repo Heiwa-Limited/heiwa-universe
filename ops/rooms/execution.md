@@ -18,11 +18,12 @@ Every decision in this room must satisfy: works for Devon's current topology AND
 
 Heiwa is a sovereign control mesh with asymmetric roles, not an active-active cluster.
 
-- **Railway (Control Plane):** Public ingress, auth, routing, approvals, state coordination, remote premium reasoning. Records intent and authority in STDB. Does not execute GPU workloads.
-- **WSL (Primary Execution Server):** Static, always-on. RTX 3060, 12GB VRAM. Fast inference for ≤8B models. GPU, embeddings, media, sovereign workloads.
-- **MacBook (Operator Node):** Ephemeral, roaming. M4 Pro, 24GB unified memory (~18GB usable). 14B–32B large models. Operator terminal, ad-hoc high-trust execution.
+- **MacBook (Owner Runtime / Current Server):** M4 Pro, 24GB unified memory. Owns `~/.heiwa/`, the installed `heiwa` runtime, cockpit localhost server, provider auth posture, local SQLite/files, operator terminal, and high-trust execution.
+- **WSL (Future Primary Execution Server):** Static, always-on. RTX 3060, 12GB VRAM. Fast inference for <=8B models. GPU, embeddings, media, sovereign workloads.
+- **Cloudflare (Paused Public Edge):** Later public DNS/Pages/WAF only. It must not become runtime authority.
+- **SpacetimeDB:** Evidence sync/adjudication plane when enabled. Local user functionality must keep working offline.
 
-Nodes dial out to Railway via `/ws/worker`. Railway does not push through a broker. STDB is the durable work ledger, not an external message queue.
+Nodes dial out to the owner runtime or STDB when online. STDB is the durable work ledger, not an external message queue.
 
 ## Dynamic Capability Dispatch
 
@@ -44,7 +45,7 @@ Dispatch chain:
 ## Live Runtime Path
 
 - Broker decides route → `ComputeRoute` with `execution_requires`
-- Spine dispatches to matching worker via `/ws/worker` or local executor
+- Spine dispatches to matching worker via local executor or future `/ws/worker`
 - `HeiwaClaw` resolves execution adapter and transport
 - `ToolMesh` executes the selected adapter/tool under lease enforcement
 - Results written back through the state layer
@@ -66,7 +67,7 @@ Dispatch chain:
 ## Degraded Mode
 
 When an execution node goes offline:
-- WebSocket drops → hub marks node offline in STDB
+- WebSocket drops → runtime marks node offline in local state and mirrors to STDB when online
 - Pending proposals requiring that node's capabilities stay in `pending` state
 - Other nodes pick up work they can satisfy
 - Work requiring the offline node waits until it reconnects — no unsafe rerouting
@@ -77,7 +78,7 @@ When an execution node goes offline:
 - Do not add external message brokers (NATS, Redis) for task queuing. STDB proposal/lease state machine is the queue.
 - Do not add mesh VPNs (Tailscale) for node connectivity. `/ws/worker` outbound dial handles all networks.
 - Do not call execution nodes "boost nodes." WSL is the primary execution server. MacBook is the operator node.
-- Do not route GPU workloads to Railway. Railway is the control plane.
+- Do not route GPU workloads to public edge or remote support services. MacBook/WSL own execution.
 - Every meaningful execution should run under a lease.
 - `HeiwaClaw` / `ToolMesh` should reject execution without a valid lease.
 - Deny-first applies to both external provider calls and internal tool execution.

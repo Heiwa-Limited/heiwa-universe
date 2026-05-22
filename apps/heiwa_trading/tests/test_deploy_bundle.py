@@ -6,8 +6,8 @@ from heiwa_trading.cockpit import resolve_agent_root
 ROOT = Path(__file__).resolve().parents[1]
 
 
-def test_railway_manifest_uses_local_paths():
-    text = (ROOT / "railway.toml").read_text(encoding="utf-8")
+def test_local_deploy_manifest_uses_local_paths():
+    text = (ROOT / "local_deploy.toml").read_text(encoding="utf-8")
 
     assert 'dockerfilePath = "Dockerfile"' in text
     assert 'startCommand = "bash start.sh"' in text

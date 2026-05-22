@@ -107,7 +107,7 @@ def main() -> int:
             WEB_ROOT / "index.html",
             "https://api.heiwa.ltd/auth/discord",
             "Every AI provider. One orchestration layer. Your keys.",
-            "Railway",
+            "hosted control plane",
         )
     )
     problems.extend(

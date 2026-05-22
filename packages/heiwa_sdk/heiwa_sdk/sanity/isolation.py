@@ -125,16 +125,16 @@ async def main():
         (
             "Client Agent",
             CLIENT_CONFIG,
-            "Check railway status",
+            "Check local runtime status",
             None,
-            "I do not have the 'railway' tool.",
+            "I do not have direct host-admin tools.",
         ),
         (
-            "Heiwa Cloud HQ",
+            "Heiwa Owner Runtime",
             INTERNAL_CONFIG,
-            "Check railway status",
+            "Check local runtime status",
             None,
-            "Executing Railway tool...",
+            "Executing local runtime tool...",
         ),
         (
             "Heiwa Field Op",

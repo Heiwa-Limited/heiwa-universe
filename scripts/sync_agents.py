@@ -136,7 +136,7 @@ import tomllib
 # -- Config parity constants --
 
 REQUIRED_CODEX_MCP = {
-    "MCP_DOCKER", "playwright", "railway", "figma", "notion", "codebase-retrieval",
+    "MCP_DOCKER", "playwright", "figma", "notion", "codebase-retrieval",
 }
 REQUIRED_CODEX_PLUGINS = {"github", "cloudflare", "google-drive", "hugging-face"}
 REQUIRED_CODEX_FEATURES = {"multi_agent", "prevent_idle_sleep"}

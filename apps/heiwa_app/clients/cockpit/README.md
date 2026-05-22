@@ -27,6 +27,10 @@ src/
     providers.ts  # typed loader for web/assets/providers.json
 ```
 
+The `/hooks` route is read-only. It shows live local hook posture from provider
+config files plus Heiwa audit paths; it does not mutate provider-owned hook
+registries.
+
 ## Styles
 
 Reuses tokens and component CSS from the marketing surface via `@import` of

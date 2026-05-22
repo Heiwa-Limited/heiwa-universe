@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "railway_post_deploy_verify_result_v1",
-  "title": "Railway Post Deploy Verify Result V1",
+  "$id": "remote_post_deploy_verify_result_v1",
+  "title": "Remote Post Deploy Verify Result V1",
   "type": "object",
   "additionalProperties": true,
   "required": [
@@ -19,7 +19,7 @@
     "artifact_paths"
   ],
   "properties": {
-    "schema_version": {"type": "string", "const": "railway_post_deploy_verify_result_v1"},
+    "schema_version": {"type": "string", "const": "remote_post_deploy_verify_result_v1"},
     "generated_at": {"type": "string"},
     "ok": {"type": "boolean"},
     "environment": {"type": "string"},

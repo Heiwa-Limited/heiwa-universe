@@ -9,7 +9,7 @@ use crate::{
 /// Parse a persisted transcript file, migrating from v0 if needed.
 ///
 /// v0 shape: `{ "session_id": ..., "transcript": [TranscriptBlock, ...] }`
-/// v1 shape: `{ "version": 1, "session_id": ..., "next_entry_id": N, "entries": [...] }`
+/// v1 shape: `{ "version": 1, "session_id": ..., "parent_session_id": optional, "next_entry_id": N, "entries": [...] }`
 pub fn parse_persisted(session_id: &str, value: Value) -> Result<PersistedTranscript> {
     if value.get("version").is_some() && value.get("entries").is_some() {
         let persisted: PersistedTranscript = serde_json::from_value(value)?;
@@ -45,6 +45,7 @@ fn migrate_v0(session_id: &str, value: Value) -> Result<PersistedTranscript> {
     Ok(PersistedTranscript {
         version: PERSISTED_TRANSCRIPT_VERSION,
         session_id: sid,
+        parent_session_id: None,
         next_entry_id: entries.len() as u64,
         entries,
     })

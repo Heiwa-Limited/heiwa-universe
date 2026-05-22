@@ -112,7 +112,7 @@
     "response_thread_id": { "oneOf": [{ "type": "integer" }, { "type": "string" }, { "type": "null" }] },
     "target_runtime": {
       "type": "string",
-      "enum": ["railway", "macbook", "pc", "cloud", "both", "any"]
+      "enum": ["macbook", "pc", "cloud", "both", "any"]
     },
     "target_tool": {
       "type": "string",
@@ -148,7 +148,7 @@
           "subject": { "type": "string", "minLength": 1 },
           "target_runtime": {
             "type": "string",
-            "enum": ["railway", "macbook", "pc", "cloud", "both", "any"]
+            "enum": ["macbook", "pc", "cloud", "both", "any"]
           },
           "target_tool": {
             "type": "string",

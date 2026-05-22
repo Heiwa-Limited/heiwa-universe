@@ -1,6 +1,6 @@
 id: heiwa-operator
 name: Heiwa Operator
-description: Operator for Heiwa deployment, infrastructure health, and telemetry. Expert in Railway environments, node diagnostics, and release gates.
+description: Operator for Heiwa deployment, infrastructure health, and telemetry. Expert in MacBook-local runtime, node diagnostics, and release gates.
 status: active
 prompt_file: prompt.md
 tags: [deployment, infra, telemetry]

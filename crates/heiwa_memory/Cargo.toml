@@ -1,0 +1,20 @@
+[package]
+name = "heiwa-memory"
+version = "0.1.0"
+edition = "2021"
+description = "Memory provider seam and context fencing for Heiwa"
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+documentation.workspace = true
+readme.workspace = true
+keywords.workspace = true
+categories.workspace = true
+
+[lib]
+name = "heiwa_memory"
+path = "src/lib.rs"
+
+[dependencies]
+anyhow = "1.0"
+serde = { version = "1.0", features = ["derive"] }

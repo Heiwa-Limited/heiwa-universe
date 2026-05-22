@@ -213,8 +213,8 @@ async fn seed_catalogs(conn: &DbConnection, state: SharedState) -> Result<()> {
 async fn heartbeat(conn: &DbConnection, cfg: &RuntimeConfig) -> Result<()> {
     // TODO: Use sysinfo crate to gather real VRAM info
     let vram_mb = 0;
-    let locality = "cloud".to_string(); // Default for Railway
-    let trust_tier = 5; // Standard cloud trust
+    let locality = "macbook".to_string();
+    let trust_tier = 9; // Owner-local runtime trust.
     let provider_keys = "[]".to_string();
     let model_inventory = "[]".to_string();
 

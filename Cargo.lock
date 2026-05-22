@@ -1200,6 +1200,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "heiwa-memory"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "serde",
+]
+
+[[package]]
 name = "heiwa-orchestrator"
 version = "0.1.0"
 dependencies = [
@@ -1248,6 +1256,7 @@ dependencies = [
  "heiwa_config",
  "heiwa_embed",
  "portable-pty",
+ "rusqlite",
  "serde",
  "serde_json",
  "tokio",
@@ -1312,6 +1321,21 @@ version = "0.1.0"
 dependencies = [
  "serde",
  "toml",
+]
+
+[[package]]
+name = "heiwa_drex"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "heiwa-provider",
+ "heiwa_mcp",
+ "heiwa_quota",
+ "heiwa_vault",
+ "tempfile",
+ "thiserror 1.0.69",
+ "time",
+ "tokio",
 ]
 
 [[package]]

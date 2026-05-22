@@ -151,7 +151,7 @@ fn parse_turn_intent_build_variants() {
 fn parse_turn_intent_deploy() {
     use heiwa_protocol::Intent;
     assert_eq!(
-        heiwa_protocol::parse_turn_intent("deploy to railway").intent,
+        heiwa_protocol::parse_turn_intent("deploy to cloudflare").intent,
         Intent::Deploy
     );
     assert_eq!(

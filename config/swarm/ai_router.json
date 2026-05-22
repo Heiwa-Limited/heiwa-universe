@@ -3,8 +3,8 @@
   "source_report": "ops/research/heiwa_build_report.docx",
   "blueprint": "config/swarm/BUILD_BLUEPRINT_2026-03-06.md",
   "foundation": {
-    "state_layer": "spacetimedb",
-    "cloud_host": "railway",
+    "state_layer": "local_heiwa_state",
+    "cloud_host": "none",
     "messaging_bus": "local_bus",
     "cloud_gpu_rental": "banned"
   },
@@ -82,35 +82,35 @@
       "class_3_research": {
         "id": "gemini-cli/gemini-3.1-pro",
         "provider": "google-gemini-cli",
-        "host_node": "railway@heiwa-core",
+        "host_node": "macbook@heiwa-agile",
         "compute_class": 3,
         "role": "research_long_context"
       },
       "heiwa_agent_routine": {
         "id": "google-antigravity/gemini-3-flash",
         "provider": "google-antigravity",
-        "host_node": "railway@heiwa-core",
+        "host_node": "macbook@heiwa-agile",
         "compute_class": 2,
         "role": "heiwa_agent_routine_reasoning"
       },
       "class_3_strategy": {
         "id": "google-antigravity/gemini-3.1-pro",
         "provider": "google-antigravity",
-        "host_node": "railway@heiwa-core",
+        "host_node": "macbook@heiwa-agile",
         "compute_class": 3,
         "role": "strategy_adversarial_review"
       },
       "class_3_review": {
         "id": "claude/opus-4-6",
         "provider": "claude-code",
-        "host_node": "railway@heiwa-core",
+        "host_node": "macbook@heiwa-agile",
         "compute_class": 3,
         "role": "adversarial_review"
       },
       "class_3_build": {
         "id": "codex/gpt-4.1",
         "provider": "codex",
-        "host_node": "railway@heiwa-core",
+        "host_node": "macbook@heiwa-agile",
         "compute_class": 3,
         "role": "build_codegen"
       }
@@ -325,7 +325,7 @@
     },
     "hard_rules": [
       "privacy_level=sovereign forces local_execution_node_only",
-      "railway_is_control_plane",
+      "macbook_is_owner_runtime",
       "execution_nodes_are_ephemeral_not_required",
       "no_cloud_gpu_rental",
       "no_paid_api_credits_only_subscription_and_free",
@@ -352,8 +352,8 @@
     }
   },
   "control_plane": {
-    "railway_project_name": "heiwa-core",
-    "primary_plane": "railway",
+    "project_name": "heiwa-universe",
+    "primary_plane": "macbook",
     "always_on_services": [
       "heiwa-core",
       "spacetimedb"

@@ -7,6 +7,8 @@ import type {
   Envelope,
   Health,
   HistorySummary,
+  HookProvider,
+  HookSummary,
   MemoryEntry,
   Mission,
   ProviderLive,
@@ -54,6 +56,12 @@ export const v1 = {
   agents: () =>
     unwrap(api.get<Envelope<{ agents: Agent[] }>>("/api/v1/agents")),
   crons: () => unwrap(api.get<Envelope<{ crons: Cron[] }>>("/api/v1/crons")),
+  hooks: () =>
+    unwrap(
+      api.get<Envelope<{ providers: HookProvider[]; summary: HookSummary }>>(
+        "/api/v1/hooks",
+      ),
+    ),
   cells: () =>
     unwrap(
       api.get<Envelope<{ cells: CellsCatalogEntry[] }>>(

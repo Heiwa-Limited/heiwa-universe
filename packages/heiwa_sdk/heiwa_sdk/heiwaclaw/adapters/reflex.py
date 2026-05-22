@@ -70,7 +70,7 @@ class ReflexAdapter(BaseClawAdapter):
     def _runtime_engine_allowed(self, route: BrokerRouteResult) -> bool:
         runtime = str(route.target_runtime or "").strip().lower()
         intent = str(route.intent_class or "").strip().lower()
-        return runtime in {"railway", "cloud"} and intent in _RUNTIME_ENGINE_INTENTS
+        return runtime in {"macbook", "local", "cloud"} and intent in _RUNTIME_ENGINE_INTENTS
 
     def _execute_via_runtime_engine(
         self,
@@ -89,7 +89,7 @@ class ReflexAdapter(BaseClawAdapter):
             intent=str(route.intent_class or "general"),
             risk=self._runtime_engine_risk(route),
             system=system_prompt or None,
-            runtime=route.target_runtime or "railway",
+            runtime=route.target_runtime or "macbook",
         )
         return result.strip() if result else ""
 

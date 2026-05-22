@@ -294,7 +294,7 @@ def _run_mac_agent_command(root_dir: Path, *args: str) -> str:
 
 
 def load_market_supervisor_status(root_dir: Path) -> dict[str, object]:
-    # On Railway (or any env without mac-agent binary), skip the subprocess call
+    # In any env without mac-agent binary, skip the subprocess call.
     if not (root_dir / "bin" / "mac-agent").exists():
         return {"running": False, "mode": "on-demand"}
     try:
@@ -412,7 +412,7 @@ def run_cockpit_action(root_dir: Path, *, action: str, payload: dict[str, object
         return {
             "action": action,
             "dashboard_url": None,
-            "result": "OpenClaw is not available on Railway",
+            "result": "OpenClaw is not available in this runtime",
             "openclaw": load_openclaw_status(),
         }
     if action == "submit_chat":

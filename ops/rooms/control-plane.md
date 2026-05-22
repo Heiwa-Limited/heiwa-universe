@@ -9,8 +9,8 @@ Load this room for:
 
 ## What This Room Owns
 
-- Railway as the control-plane host
-- SpacetimeDB as the authoritative state layer
+- MacBook `heiwa` runtime as the current control-plane host
+- local state as current owner truth, with SpacetimeDB as sync/adjudication plane
 - proposal, assignment, consent, approval, and lease state
 - `HeiwaCells` and `HeiwaBench` as control-plane surfaces
 
@@ -26,7 +26,7 @@ Load this room for:
 
 ## Current Reality
 
-- STDB now owns route decisions, runs, nodes, liveness state, proposal lifecycle state, approval records, and capability lease records.
+- Local Heiwa state now owns current user functionality; STDB mirrors/adjudicates route decisions, runs, nodes, liveness state, proposal lifecycle state, approval records, and capability lease records when enabled.
 - `HeiwaBench` now gates route and cell behavior through checked-in suites under `config/swarm/benchmarks/`.
 - `HeiwaCells` now materializes identity profiles into a real catalog surface.
 - The legacy Hub proposal HTTP surface is quarantined; use it as migration/reference unless explicitly promoting that path.

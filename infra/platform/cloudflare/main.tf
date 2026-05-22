@@ -16,16 +16,22 @@ variable "zone_id" {
   type        = string
 }
 
-variable "railway_cname_target" {
-  description = "The Railway domain target for API/Auth"
-  type        = string
-  default     = "heiwa-cloud-hq-brain.up.railway.app"
+variable "enable_public_dns" {
+  description = "Create public DNS records. Keep false while MacBook-local user functionality is the only active surface."
+  type        = bool
+  default     = false
 }
 
 variable "web_cname_target" {
-  description = "Primary web target for root/status/docs"
+  description = "Primary web target for root/status/docs when public access is enabled"
   type        = string
-  default     = "heiwa-cloud-hq-brain.up.railway.app"
+  default     = ""
+}
+
+variable "api_cname_target" {
+  description = "API/Auth target when public access is enabled"
+  type        = string
+  default     = ""
 }
 
 # -------------------------------------------------------------------------
@@ -33,6 +39,7 @@ variable "web_cname_target" {
 # -------------------------------------------------------------------------
 
 resource "cloudflare_record" "root" {
+  count   = var.enable_public_dns ? 1 : 0
   zone_id = var.zone_id
   name    = "@"
   value   = var.web_cname_target
@@ -41,6 +48,7 @@ resource "cloudflare_record" "root" {
 }
 
 resource "cloudflare_record" "status" {
+  count   = var.enable_public_dns ? 1 : 0
   zone_id = var.zone_id
   name    = "status"
   value   = var.web_cname_target
@@ -49,6 +57,7 @@ resource "cloudflare_record" "status" {
 }
 
 resource "cloudflare_record" "docs" {
+  count   = var.enable_public_dns ? 1 : 0
   zone_id = var.zone_id
   name    = "docs"
   value   = var.web_cname_target
@@ -57,17 +66,19 @@ resource "cloudflare_record" "docs" {
 }
 
 resource "cloudflare_record" "auth" {
+  count   = var.enable_public_dns ? 1 : 0
   zone_id = var.zone_id
   name    = "auth"
-  value   = var.railway_cname_target
+  value   = var.api_cname_target
   type    = "CNAME"
   proxied = true
 }
 
 resource "cloudflare_record" "api" {
+  count   = var.enable_public_dns ? 1 : 0
   zone_id = var.zone_id
   name    = "api"
-  value   = var.railway_cname_target
+  value   = var.api_cname_target
   type    = "CNAME"
   proxied = true
 }
@@ -108,7 +119,7 @@ resource "cloudflare_ruleset" "heiwa_waf" {
 resource "cloudflare_ruleset" "rate_limiting" {
   zone_id     = var.zone_id
   name        = "Heiwa API Rate Limiting"
-  description = "Prevent abuse of Cloud HQ compute"
+  description = "Prevent abuse of public API compute"
   kind        = "zone"
   phase       = "http_ratelimit"
 

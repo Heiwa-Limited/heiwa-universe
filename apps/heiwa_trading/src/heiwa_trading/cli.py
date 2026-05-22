@@ -15,7 +15,7 @@ from heiwa_trading.cockpit import (
     serve_cockpit,
 )
 
-# cockpit_service is a mac-agent-only module (not available on Railway)
+# cockpit_service is a Mac-local module.
 try:
     from heiwa_trading.cockpit_service import (
         install_service as install_cockpit_service,
@@ -34,7 +34,7 @@ except ImportError:
 from heiwa_trading.coinmarketcap import fetch_coinmarketcap_summary
 from heiwa_trading.config import CHEAP_POLICY, DEFAULT_TOURNAMENT_LIMIT, DEFAULT_TOURNAMENT_SLEEP_SECONDS
 
-# live_dashboard is a mac-agent-only module (not available on Railway)
+# live_dashboard is a Mac-local module.
 try:
     from heiwa_trading.live_dashboard import build_live_dashboard_text, build_supervisor_dashboard_text
 except ImportError:

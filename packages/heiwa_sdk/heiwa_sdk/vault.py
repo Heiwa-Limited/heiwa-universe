@@ -114,34 +114,13 @@ class VaultStore:
         data = self._read_all()
         return "\n".join(f"{k}={v}" for k, v in sorted(data.items()))
 
-    def sync_to_railway(self, service: str | None = None) -> tuple[int, str]:
-        """Push all vault secrets to Railway via CLI. Returns (exit_code, message)."""
-        import shutil
-        import subprocess
-        import tempfile
-
-        if not shutil.which("railway"):
-            return 1, "railway CLI not found. Install: npm i -g @railway/cli"
-
+    def export_for_remote_env(self, service: str | None = None) -> tuple[int, str]:
+        """Return a clear boundary for remote env sync; local files remain authority."""
         data = self._read_all()
         if not data:
-            return 1, "Vault is empty — nothing to sync."
-
-        with tempfile.NamedTemporaryFile(mode="w", suffix=".env", delete=False) as f:
-            for k, v in data.items():
-                f.write(f"{k}={v}\n")
-            tmp = f.name
-
-        try:
-            cmd = ["railway", "variables", "import", tmp]
-            if service:
-                cmd += ["--service", service]
-            result = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
-            if result.returncode == 0:
-                return 0, f"Synced {len(data)} secret(s) to Railway."
-            return 1, result.stderr.strip() or "railway import failed"
-        finally:
-            os.unlink(tmp)
+            return 1, "Vault is empty -- nothing to export."
+        target = f" for {service}" if service else ""
+        return 0, f"Prepared {len(data)} secret(s){target}; remote mutation requires explicit platform approval."
 
 
 class UserVault:

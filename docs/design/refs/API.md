@@ -174,6 +174,32 @@ Mutation endpoints:
 - `POST /api/v1/providers/{provider_id}/unlink`
 - `POST /api/v1/providers/{provider_id}/test`
 
+### Hooks
+
+`GET /api/v1/hooks`
+
+Returns local provider hook posture from live home config. This is read-only:
+Heiwa observes provider-owned hook surfaces and reports drift, command presence,
+audit paths, and unsupported parity instead of pretending every provider exposes
+the same hook API.
+
+Response fields:
+
+- `summary.source`
+- `summary.active`
+- `summary.degraded`
+- `summary.unconfigured`
+- `summary.unsupported`
+- `summary.delegated`
+- `providers[].provider_id`
+- `providers[].status`
+- `providers[].config_path`
+- `providers[].generated_config_status`
+- `providers[].audit_file`
+- `providers[].events[].event`
+- `providers[].events[].matcher`
+- `providers[].events[].hooks[].command_path`
+
 ### Routes
 
 `GET /api/v1/routes`
@@ -504,6 +530,7 @@ Rules:
 | --- | --- |
 | `GET /auth/me` | `GET /api/v1/session` |
 | `GET /auth/providers` | `GET /api/v1/providers` |
+| none | `GET /api/v1/hooks` |
 | `GET /missions` | `GET /api/v1/missions` |
 | `GET /approvals` | `GET /api/v1/approvals` |
 | `GET /rate-groups` | `GET /api/v1/rate-groups` |
@@ -520,6 +547,7 @@ Rules:
 | `/` | `GET /api/v1/session`, `GET /api/v1/providers` |
 | `/providers` | `GET /api/v1/providers` plus bundled `providers.json` for descriptive metadata |
 | `/routes` | `GET /api/v1/routes`, `WS /ws/v1/events` |
+| `/hooks` | `GET /api/v1/hooks` |
 | `/repl` | `WS /ws/v1/repl` |
 | future `/missions` | `GET /api/v1/missions`, `WS /ws/v1/events` |
 | future `/approvals` | `GET /api/v1/approvals`, `WS /ws/v1/events` |

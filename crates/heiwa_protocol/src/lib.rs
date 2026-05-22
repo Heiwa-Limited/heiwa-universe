@@ -718,7 +718,7 @@ fn classify_intent(lowercase: &str) -> Intent {
         "ship",
         "release",
         "publish",
-        "railway",
+        "cloudflare",
         "docker",
         "dockerfile",
         "ci",

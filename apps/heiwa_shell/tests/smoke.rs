@@ -268,8 +268,41 @@ fn test_app_help_exposes_boot_command_boundary() {
         "expected app help to include runtime status command: {stdout}"
     );
     assert!(
+        stdout.contains("app update"),
+        "expected app help to include local update command: {stdout}"
+    );
+    assert!(
         stdout.contains("--json"),
         "expected app help to include --json flag: {stdout}"
+    );
+}
+
+#[test]
+fn test_app_update_dry_run_reports_install_target() {
+    let output = Command::new("cargo")
+        .args(&[
+            "run",
+            "-p",
+            "heiwa-shell",
+            "--bin",
+            "heiwa",
+            "--",
+            "app",
+            "update",
+            "--dry-run",
+        ])
+        .output()
+        .expect("failed to execute app update dry-run");
+
+    assert!(output.status.success());
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        stdout.contains("cargo install --path apps/heiwa_shell --root ~/.heiwa --locked --force"),
+        "expected update dry-run to expose install command: {stdout}"
+    );
+    assert!(
+        stdout.contains("dry_run: true"),
+        "expected dry-run marker: {stdout}"
     );
 }
 
@@ -300,6 +333,14 @@ fn test_app_runtime_status_json_reports_local_probe() {
     assert!(
         stdout.contains("\"policy\":\"local-only-no-side-effects\""),
         "expected local-only policy marker: {stdout}"
+    );
+    assert!(
+        stdout.contains("\"hooks\""),
+        "expected hooks summary in runtime status: {stdout}"
+    );
+    assert!(
+        stdout.contains("\"source\":\"live-home-config\""),
+        "expected live home hook source marker: {stdout}"
     );
     assert!(
         stdout.contains("\"workers\""),

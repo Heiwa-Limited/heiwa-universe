@@ -42,6 +42,9 @@ export default function App(props: ParentProps): JSX.Element {
           <A href="/agents" activeClass="is-active">
             Agents
           </A>
+          <A href="/hooks" activeClass="is-active">
+            Hooks
+          </A>
           <A href="/crons" activeClass="is-active">
             Crons
           </A>

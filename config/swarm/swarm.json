@@ -82,17 +82,17 @@
       "compute_class": 3
     },
     {
-      "model_id": "service/railway-heiwa-hub",
-      "host_node": "railway@heiwa-cloud",
-      "role": "cloud-persistence",
-      "capability": "public_ingress",
-      "cost_tier": "fixed_infra",
+      "model_id": "service/heiwa-local-app",
+      "host_node": "macbook@heiwa-agile",
+      "role": "owner-runtime",
+      "capability": "local_ingress",
+      "cost_tier": "owned_hardware",
       "compute_class": 4
     },
     {
       "model_id": "service/spacetimedb",
-      "host_node": "railway@heiwa-cloud",
-      "role": "state-layer",
+      "host_node": "maincloud@spacetimedb",
+      "role": "evidence-sync-adjudication",
       "capability": "real_time_state",
       "cost_tier": "fixed_infra",
       "compute_class": 4

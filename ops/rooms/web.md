@@ -32,7 +32,7 @@ maintenance. Browser auth now belongs to the SvelteKit shell, not `dashboard.htm
 | `heiwa.ltd` | `apps/heiwa_app/app/` (marketing routes) | Cloudflare Pages | Homepage, pricing, signup CTA |
 | `app.heiwa.ltd` | `apps/heiwa_app/app/` (auth'd routes) | Cloudflare Pages | Dashboard, missions, tools, etc. |
 | `status.heiwa.ltd` | Same app or keep static | Cloudflare Pages | Could be a SvelteKit route or stay static |
-| `api.heiwa.ltd` | `apps/heiwa_core/` hosted runtime path; `legacy/apps/heiwa_hub/` only as migration reference | Railway | API, MCP, WebSockets |
+| `api.heiwa.ltd` | paused; local API is `heiwa app start` on `127.0.0.1:7474` | none yet | API, MCP, WebSockets |
 | `docs.heiwa.ltd` | `docs/` (unchanged) | Cloudflare Pages | MkDocs Material |
 
 ### Domain Routing Strategy

@@ -130,6 +130,50 @@ export interface Cron {
   next_run_at: string | null;
 }
 
+export interface HookCommand {
+  name: string | null;
+  kind: string | null;
+  command: string;
+  command_path: string | null;
+  command_exists: boolean | null;
+  timeout_ms: number | null;
+}
+
+export interface HookEvent {
+  event: string;
+  matcher: string;
+  hooks: HookCommand[];
+}
+
+export interface HookProvider {
+  provider_id: string;
+  display_name: string;
+  status:
+    | "active"
+    | "degraded"
+    | "unconfigured"
+    | "unsupported"
+    | "delegated"
+    | string;
+  config_path: string;
+  generated_config_status: string;
+  audit_file: string | null;
+  events: HookEvent[];
+  notes: string[];
+}
+
+export interface HookSummary {
+  source: string;
+  providers: number;
+  active: number;
+  degraded: number;
+  unconfigured: number;
+  unsupported: number;
+  delegated: number;
+  events: number;
+  commands: number;
+}
+
 export interface CellsCatalogEntry {
   id: string;
   label: string;

@@ -1,12 +1,12 @@
 {
-    "schema_version": "cloud_hq_repo_contract_v1",
+    "schema_version": "local_owner_runtime_contract_v1",
     "repo_identity": {
         "repo_name": "heiwa",
         "github_repo": "Strategizing/heiwa-universe",
-        "role": "cloud_hq"
+        "role": "owner_runtime"
     },
     "runtime": {
-        "target": "railway_python"
+        "target": "macbook_rust_shell"
     },
     "boundaries": {},
     "cli_surface": {
@@ -17,14 +17,14 @@
         ]
     },
     "command_refs": {
-        "railway_services": {
-            "command": "railway status",
+        "local_runtime_status": {
+            "command": "heiwa app runtime status --json",
             "cwd": ".",
             "mode": "exec",
             "read_only": true
         },
-        "railway-deploy-readiness": {
-            "command": "railway up --dry-run",
+        "local_app_update_dry_run": {
+            "command": "heiwa app update --dry-run",
             "cwd": ".",
             "mode": "exec",
             "read_only": true
