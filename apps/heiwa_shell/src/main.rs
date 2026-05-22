@@ -250,27 +250,60 @@ async fn main() -> Result<()> {
         "doctor" => {
             let report = heiwa_install::check_installation()?;
             let include_ai_ops = args.iter().any(|arg| arg == "--ai-ops");
+            let json_output = args.iter().any(|arg| arg == "--json");
+            let identity = heiwa_provider::load_identity();
+            let app_probe = crate::cmd::app::probe_local_app(crate::cmd::app::DEFAULT_PORT);
+            let ai_ops = if include_ai_ops {
+                Some(heiwa_install::check_ai_ops()?)
+            } else {
+                None
+            };
+
+            if json_output {
+                let identity_json = identity.as_ref().map(|id| {
+                    serde_json::json!({
+                        "user_id": id.user_id,
+                        "email": id.email,
+                        "display_name": id.display_name,
+                    })
+                });
+                println!(
+                    "{}",
+                    serde_json::json!({
+                        "command": "doctor",
+                        "runtimes": report,
+                        "identity": identity_json,
+                        "heiwa_app": app_probe,
+                        "ai_ops": ai_ops,
+                    })
+                );
+                return Ok(());
+            }
+
             println!("Heiwa Doctor Report:");
             println!(
                 "  Rust:   {}",
                 report
                     .rust_version
+                    .clone()
                     .unwrap_or_else(|| "Not found".to_string())
             );
             println!(
                 "  Node:   {}",
                 report
                     .node_version
+                    .clone()
                     .unwrap_or_else(|| "Not found".to_string())
             );
             println!(
                 "  Python: {}",
                 report
                     .python_version
+                    .clone()
                     .unwrap_or_else(|| "Not found".to_string())
             );
             println!();
-            if let Some(identity) = heiwa_provider::load_identity() {
+            if let Some(identity) = identity {
                 println!("Heiwa Identity:");
                 println!("  User ID: {}", identity.user_id);
                 println!(
@@ -323,8 +356,20 @@ async fn main() -> Result<()> {
                 }
             );
 
-            if include_ai_ops {
-                let ai_ops = heiwa_install::check_ai_ops()?;
+            println!();
+            println!("Heiwa App:");
+            println!("  URL:       {}", app_probe.url);
+            println!(
+                "  Reachable: {}",
+                if app_probe.reachable { "yes" } else { "no" }
+            );
+            if let Some(ms) = app_probe.latency_ms {
+                println!("  Latency:   {ms}ms");
+            } else {
+                println!("  Next:      heiwa app start --port {}", app_probe.port);
+            }
+
+            if let Some(ai_ops) = ai_ops {
                 println!();
                 println!("AI Ops:");
                 print_ai_ops_check("MCP Notion HTTP config", ai_ops.mcp_notion_http);
@@ -701,7 +746,7 @@ fn print_help() {
     println!("  install [gh:owner/repo[@ref]] Bootstrap Heiwa or install a GitHub plugin");
     println!("  login [token]                 Sign in to Heiwa");
     println!("  logout                        Sign out from Heiwa");
-    println!("  doctor [--ai-ops]             Check installation and optional AI ops gates");
+    println!("  doctor [--ai-ops] [--json]    Check installation, identity, providers, local app reachability");
     println!("  register                      Register the current device");
     println!("  receipts                      Show run receipt status");
     println!("  devices                       Show registered devices");

@@ -1,6 +1,7 @@
 use anyhow::{anyhow, Result};
 use base64::engine::general_purpose::STANDARD as BASE64;
 use base64::Engine;
+use serde::Serialize;
 use serde_json::{json, Value};
 use sha1::{Digest, Sha1};
 use std::env;
@@ -9,14 +10,36 @@ use std::net::SocketAddr;
 use std::path::{Component, Path, PathBuf};
 use std::process::{Child, Command, Stdio};
 use std::sync::Arc;
+use std::time::Instant;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::watch;
 use tokio::time::{self, Duration};
 
-const DEFAULT_PORT: u16 = 7474;
+pub(crate) const DEFAULT_PORT: u16 = 7474;
 const HEARTBEAT_TTL_SECS: i64 = 120;
 const WS_GUID: &str = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11";
+
+#[derive(Debug, Clone, Serialize)]
+pub(crate) struct LocalAppProbe {
+    pub port: u16,
+    pub url: String,
+    pub reachable: bool,
+    pub latency_ms: Option<u64>,
+}
+
+pub(crate) fn probe_local_app(port: u16) -> LocalAppProbe {
+    let addr: SocketAddr = ([127, 0, 0, 1], port).into();
+    let start = Instant::now();
+    let reachable =
+        std::net::TcpStream::connect_timeout(&addr, Duration::from_millis(200)).is_ok();
+    LocalAppProbe {
+        port,
+        url: format!("http://127.0.0.1:{port}/"),
+        reachable,
+        latency_ms: reachable.then(|| start.elapsed().as_millis() as u64),
+    }
+}
 
 pub async fn run(args: &[String]) -> Result<()> {
     match args.first().map(String::as_str) {
@@ -230,6 +253,7 @@ fn runtime_status(args: &[String]) -> Result<()> {
                 "workers": status.workers_summary,
                 "approvals": status.approvals_summary,
                 "mail": status.mail_summary,
+                "local_app": status.local_app,
                 "next": status.next,
             })
         );
@@ -297,6 +321,20 @@ fn runtime_status(args: &[String]) -> Result<()> {
             .and_then(Value::as_str)
             .unwrap_or("metadata-only-no-body"),
     );
+    println!(
+        "  local_app: {} on {} ({})",
+        if status.local_app.reachable {
+            "reachable"
+        } else {
+            "unreachable"
+        },
+        status.local_app.url,
+        status
+            .local_app
+            .latency_ms
+            .map(|ms| format!("{ms}ms"))
+            .unwrap_or_else(|| "not running".to_string()),
+    );
     println!("  next: {}", status.next);
     Ok(())
 }
@@ -315,6 +353,7 @@ struct RuntimeStatus {
     workers_summary: Value,
     approvals_summary: Value,
     mail_summary: Value,
+    local_app: LocalAppProbe,
 }
 
 impl RuntimeStatus {
@@ -334,6 +373,7 @@ impl RuntimeStatus {
             workers_summary: workers_summary(&state_dir),
             approvals_summary: approvals_summary(&state_dir),
             mail_summary: mail_summary(),
+            local_app: probe_local_app(DEFAULT_PORT),
         }
     }
 }
