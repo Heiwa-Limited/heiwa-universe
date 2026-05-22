@@ -386,6 +386,24 @@ fn test_doctor_json_reports_runtimes_providers_and_app_probe() {
         !stdout.contains("\"token\":\""),
         "doctor json must never contain a raw STDB token: {stdout}"
     );
+    assert!(
+        stdout.contains("\"providers\":["),
+        "expected providers array in doctor json: {stdout}"
+    );
+    assert!(
+        stdout.contains("\"provider_id\":\"ollama\""),
+        "expected ollama in providers array: {stdout}"
+    );
+    assert!(
+        stdout.contains("\"auth_kind\":\"local_runtime\""),
+        "expected ollama auth_kind=local_runtime: {stdout}"
+    );
+    // status values come from heiwa_provider; just assert the field exists
+    // on at least one entry (avoid coupling tests to a specific status)
+    assert!(
+        stdout.matches("\"status\":\"").count() >= 1,
+        "expected at least one provider status string: {stdout}"
+    );
 }
 
 #[test]

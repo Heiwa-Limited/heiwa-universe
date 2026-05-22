@@ -255,6 +255,11 @@ async fn main() -> Result<()> {
             let app_probe = crate::cmd::app::probe_local_app(crate::cmd::app::DEFAULT_PORT);
             let layout = heiwa_install::check_runtime_layout();
             let stdb = heiwa_stdb::StdbProbe::probe();
+            let provider_statuses: Vec<heiwa_provider::LegacyProviderAccount> =
+                ["claude", "codex", "gemini", "antigravity", "ollama"]
+                    .iter()
+                    .filter_map(|p| heiwa_provider::get_auth_status(p))
+                    .collect();
             let ai_ops = if include_ai_ops {
                 Some(heiwa_install::check_ai_ops()?)
             } else {
@@ -275,6 +280,7 @@ async fn main() -> Result<()> {
                         "command": "doctor",
                         "runtimes": report,
                         "identity": identity_json,
+                        "providers": provider_statuses,
                         "heiwa_app": app_probe,
                         "layout": layout,
                         "stdb": stdb,
@@ -319,46 +325,36 @@ async fn main() -> Result<()> {
             }
             println!();
             println!("Providers:");
-            println!(
-                "  Claude: {}",
-                if report.claude_installed {
-                    "Installed"
-                } else {
-                    "Not found"
+            for status in &provider_statuses {
+                let kind = match status.auth_kind {
+                    heiwa_provider::AuthKind::OauthCli => "oauth_cli",
+                    heiwa_provider::AuthKind::ApiKey => "api_key",
+                    heiwa_provider::AuthKind::RouterApi => "router_api",
+                    heiwa_provider::AuthKind::LocalRuntime => "local_runtime",
+                    heiwa_provider::AuthKind::CustomProfile => "custom_profile",
+                };
+                let label = format!("{}:", status.provider_id);
+                println!("  {:<12} {} ({})", label, status.status, kind);
+                let hint = match status.status.as_str() {
+                    "installed_unverified" => {
+                        Some(format!("heiwa auth login {}", status.provider_id))
+                    }
+                    "installed_stopped" if status.provider_id == "ollama" => {
+                        Some("ollama serve".to_string())
+                    }
+                    "not_installed" => match status.provider_id.as_str() {
+                        "ollama" => Some("brew install ollama".to_string()),
+                        _ => Some(format!(
+                            "install {} CLI (see provider docs)",
+                            status.provider_id
+                        )),
+                    },
+                    _ => None,
+                };
+                if let Some(hint) = hint {
+                    println!("               Next: {hint}");
                 }
-            );
-            println!(
-                "  Codex:  {}",
-                if report.codex_installed {
-                    "Installed"
-                } else {
-                    "Not found"
-                }
-            );
-            println!(
-                "  Gemini: {}",
-                if report.gemini_installed {
-                    "Installed"
-                } else {
-                    "Not found"
-                }
-            );
-            println!(
-                "  Antigravity: {}",
-                if report.antigravity_installed {
-                    "Installed"
-                } else {
-                    "Not found"
-                }
-            );
-            println!(
-                "  Ollama: {}",
-                if report.ollama_installed {
-                    "Installed"
-                } else {
-                    "Not found"
-                }
-            );
+            }
 
             println!();
             println!("Heiwa App:");
