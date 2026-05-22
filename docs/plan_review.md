@@ -149,7 +149,7 @@ All five assumptions are valid and match the current architecture. One addition:
    - Section 3 (UI) depends on Section 2 for state to render, but widget infrastructure can start early.
 2. **Milestone definitions.** Each section should have a "done when" definition. Currently the plan describes *what* but not *when it's done*.
 3. **Migration path.** Sections 2 and 4 change how execution works. What's the migration path? Big bang switchover to lease-gated execution, or gradual rollout with a feature flag? The plan should specify.
-4. **Rollback strategy.** If lease-gated execution breaks production, how do you revert? Feature flags? Runtime config? This is especially important because Railway auto-deploys on push.
+4. **Rollback strategy.** If lease-gated execution breaks production, how do you revert? Feature flags? Runtime config? This is especially important because GitHub Actions and hosted deploy jobs may run after merge.
 5. **Observability.** The plan adds hooks and enforcement but doesn't mention how operators observe hook activity. Add a "hook execution log" to the UI subsystem requirements.
 
 ---
