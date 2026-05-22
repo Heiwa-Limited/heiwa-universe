@@ -22,7 +22,7 @@ print_version "python3" python3
 print_version "uv" uv
 print_version "brew" brew
 print_version "gh" gh
-print_version "railway" railway
+print_version "spacetime" spacetime
 print_version "wrangler" wrangler
 print_version "pnpm" pnpm
 print_version "ollama" ollama
@@ -34,7 +34,7 @@ echo "-------------------------"
 echo "Rust toolchain : 1.93.1"
 echo "Node runtime   : 24.14.1 (LTS lane for repo work)"
 echo "Python         : 3.14.x"
-echo "Required CLIs  : gh, railway, wrangler, uv"
+echo "Required CLIs  : gh, spacetime, wrangler, uv"
 echo "Optional CLIs  : pnpm, ollama, tailscale"
 
 if command -v brew >/dev/null 2>&1; then

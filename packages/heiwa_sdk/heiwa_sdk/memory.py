@@ -22,16 +22,16 @@ class MemoryService:
 
     def __init__(self, stdb: SpacetimeDB, ollama_url: str | None = None) -> None:
         self.stdb = stdb
-        # On Railway, Ollama is OFF by default unless HEIWA_OLLAMA_URL is provided.
-        # On Boost nodes, it defaults to localhost.
+        # On remote/cloud mode, Ollama is OFF unless HEIWA_OLLAMA_URL is provided.
+        # On local owner nodes, it defaults to localhost.
         host_runtime = os.getenv("HEIWA_RUNTIME", "local").lower()
-        default_url = "http://127.0.0.1:11434" if host_runtime != "railway" else None
+        default_url = "http://127.0.0.1:11434" if host_runtime not in {"remote", "cloud"} else None
         
         self.ollama_url = ollama_url or os.getenv("HEIWA_OLLAMA_URL") or default_url
         self.model = "qwen3-embedding:0.6b"
         
         if not self.ollama_url:
-            logger.info("MemoryService: Ollama disabled (Railway/Cloud mode). Using degraded embedding path.")
+            logger.info("MemoryService: Ollama disabled (remote/cloud mode). Using degraded embedding path.")
 
     async def generate_embedding(self, text: str) -> List[float]:
         """Generate vector embedding for the given text using Ollama with Cloud Fallback."""

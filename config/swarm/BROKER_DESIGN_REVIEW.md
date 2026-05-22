@@ -83,7 +83,7 @@ Broker adds these fields and publishes the enriched execution envelope:
   "intent_class": "operate",
   "risk_level": "high",
   "compute_class": 4,
-  "assigned_worker": "railway",
+  "assigned_worker": "macbook",
   "requires_approval": true,
   "steps": [...],
   "normalization": {...}

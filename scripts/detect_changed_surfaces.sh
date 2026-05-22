@@ -72,7 +72,7 @@ while IFS= read -r file; do
   esac
 
   case "$file" in
-    apps/heiwa_core/*|apps/heiwa_orchestrator/*|crates/heiwa_stdb/*|railway.toml|infra/*|config/*)
+    apps/heiwa_core/*|apps/heiwa_orchestrator/*|crates/heiwa_stdb/*|infra/*|config/*)
       deploy_core=true
       ;;
   esac

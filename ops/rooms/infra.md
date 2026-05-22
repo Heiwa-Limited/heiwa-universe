@@ -2,17 +2,17 @@
 
 Load this room for:
 
-- Railway and Cloudflare changes
+- Cloudflare changes
 - CI / deployment work
 - runtime topology validation
 - build and verification workflows
 
 ## Runtime Topology
 
-- Railway hosts the hub runtime and always-on control plane
-- SpacetimeDB is the state plane
-- Cloudflare serves docs / marketing shell
-- WebSockets are the live transport for public status and future event subscriptions
+- The MacBook checkout plus `~/.heiwa/` host current user functionality.
+- SpacetimeDB is the optional evidence sync/adjudication plane.
+- Cloudflare serves docs / marketing shell only after public access is re-enabled.
+- WebSockets are the live transport for local cockpit status and future event subscriptions.
 
 ## Important Files
 

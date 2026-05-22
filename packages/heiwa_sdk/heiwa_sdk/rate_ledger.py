@@ -5,7 +5,7 @@ Tracks usage per rate_group in sliding windows. Heiwa routes through
 subscription-tier CLI tools (Claude Code, Gemini CLI, Codex, Antigravity,
 Ollama) — rate limits are "turns per window", not tokens per minute.
 
-The ledger is process-local. On Railway, Spine and Executor share it
+The ledger is process-local. In a single local runtime, Spine and Executor share it
 via import. Remote workers track their own local groups.
 """
 

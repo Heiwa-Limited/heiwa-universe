@@ -9,10 +9,9 @@
     "repo_root",
     "github_repo",
     "default_branch",
-    "railway_project_name",
-    "railway_project_id",
-    "railway_environments",
-    "railway_services",
+    "runtime_project_name",
+    "runtime_environments",
+    "runtime_services",
     "health_urls",
     "figma",
     "skills_overrides",
@@ -22,79 +21,36 @@
     "secrets_refs"
   ],
   "properties": {
-    "profile_id": {
-      "type": "string"
-    },
-    "brand": {
-      "type": "string"
-    },
-    "project_slug": {
-      "type": "string"
-    },
-    "repo_root": {
-      "type": "string"
-    },
-    "github_repo": {
-      "type": "string"
-    },
-    "default_branch": {
-      "type": "string"
-    },
-    "railway_project_name": {
-      "type": "string"
-    },
-    "railway_project_id": {
-      "type": [
-        "string",
-        "null"
-      ]
-    },
-    "railway_environments": {
-      "type": "object",
-      "required": [
-        "brain",
-        "staging",
-        "production"
-      ]
-    },
-    "railway_services": {
-      "type": "object"
-    },
-    "health_urls": {
-      "type": "object"
-    },
+    "profile_id": { "type": "string" },
+    "brand": { "type": "string" },
+    "project_slug": { "type": "string" },
+    "repo_root": { "type": "string" },
+    "github_repo": { "type": "string" },
+    "default_branch": { "type": "string" },
+    "runtime_project_name": { "type": "string" },
+    "runtime_project_id": { "type": ["string", "null"] },
+    "runtime_environments": { "type": "object" },
+    "runtime_services": { "type": "object" },
+    "health_urls": { "type": "object" },
     "figma": {
       "type": "object",
-      "required": [
-        "make_file_key",
-        "node_id",
-        "mode"
-      ]
+      "required": ["make_file_key", "node_id", "mode"]
     },
-    "skills_overrides": {
-      "type": "object"
-    },
+    "skills_overrides": { "type": "object" },
     "policy_defaults": {
       "type": "object",
       "required": [
         "write_gated_autonomy",
-        "prod_deploy_requires_approval"
-      ]
+        "prod_deploy_requires_approval",
+        "default_write_mode",
+        "secrets_redaction_required"
+      ],
+      "additionalProperties": true
     },
-    "observability_tags": {
-      "type": "array",
-      "items": {
-        "type": "string"
-      }
-    },
-    "runbooks": {
-      "type": "array",
-      "items": {
-        "type": "string"
-      }
-    },
-    "secrets_refs": {
-      "type": "object"
-    }
-  }
+    "observability_tags": { "type": "array", "items": { "type": "string" } },
+    "runbooks": { "type": "array", "items": { "type": "string" } },
+    "secrets_refs": { "type": "object" },
+    "aliases": { "type": "object" }
+  },
+  "additionalProperties": true
 }

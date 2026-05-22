@@ -1,5 +1,5 @@
 # apps/heiwa_core/Dockerfile
-# Heiwa AI Operating System — Railway Primary Plane (Rust Core)
+# Heiwa AI Operating System — Local-first Rust core container
 
 # -----------------------------------------------------
 # STAGE 1: RUST BUILDER

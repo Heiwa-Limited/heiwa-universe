@@ -9,7 +9,7 @@ The current platform goal is GitHub-native distribution:
 - GitHub Releases publish tagged `heiwa` archives plus checksums through `.github/workflows/release.yml`.
 - Release archives include `README.md`, `CONTRIBUTING.md`, `CODE_OF_CONDUCT.md`, and `LICENSE`.
 
-This repo should be able to go from fresh clone to verified build and published docs without assuming Railway, Cloudflare, or a hosted control plane.
+This repo should be able to go from fresh clone to verified build and published docs without assuming Cloudflare or a hosted control plane.
 
 ## CI contract
 

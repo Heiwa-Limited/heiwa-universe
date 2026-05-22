@@ -52,7 +52,7 @@
       "request": {
         "request_id": "bench-route-strategy",
         "task_id": "bench-task-strategy",
-        "raw_text": "architect a long-term Railway-first roadmap and adversarially review the tradeoffs",
+        "raw_text": "architect a long-term local-first roadmap and adversarially review the tradeoffs",
         "source_surface": "cli",
         "privacy_level": "local",
         "auth_validated": true

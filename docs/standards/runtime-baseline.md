@@ -2,7 +2,7 @@
 
 Heiwa has two distinct upgrade surfaces:
 
-1. **Repo/release baseline** for reproducible CI, release, docs, and hosted-support builds.
+1. **Repo/release baseline** for reproducible CI, release, docs, and optional remote-support builds.
 2. **Operator baseline** for Devon's local machine and boost-node workflows.
 
 The deploy baseline is pinned and conservative. The operator baseline can move faster, but only around the pinned repo contract.
@@ -14,7 +14,7 @@ These versions are the canonical floor for `heiwa-universe`:
 | Surface | Baseline | Reason |
 | --- | --- | --- |
 | Rust | `1.93.1` | Required by `heiwa-core` and SpacetimeDB crates. |
-| Docker rust-builder | `rust:1.93-slim` | Matches the workspace toolchain floor used in CI and hosted-support builds. |
+| Docker rust-builder | `rust:1.93-slim` | Matches the workspace toolchain floor used in CI and optional remote-support builds. |
 | Node | `24.14.1` | Stable LTS lane for TypeScript workspace and deploy tooling. |
 | npm | bundled with Node 24 | Repo installs should follow the pinned Node lane. |
 | Python | `3.14.x` | Current repo pytest/docs/runtime compatibility lane. |
@@ -47,7 +47,6 @@ Devon's machine is the operator and boost-node plane. It needs a wider tool surf
 - `pnpm`
 - `ollama`
 - `tailscale`
-- `railway` for hosted-support operations
 - `wrangler` for Cloudflare/edge operations
 
 ### Recommended practice
@@ -74,8 +73,8 @@ bash scripts/check_runtime_baseline.sh
 bash scripts/audit_operator_machine.sh
 ```
 
-## Hosted Railway Notes
+## Local Runtime Notes
 
-- `heiwa-core` is the only canonical Railway runtime service for the Rust control plane when Railway hosting is used.
-- Production should use remote STDB (`maincloud`) by default.
-- No production boot path should start local STDB or depend on local operator tooling.
+- `heiwa app start` is the canonical current user runtime server.
+- Local `~/.heiwa` state must be enough for user functionality.
+- STDB (`local` or `maincloud`) is sync/adjudication, not required for the local cockpit hot path.

@@ -23,8 +23,19 @@ use std::io::{self, IsTerminal, Write};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
+fn canonical_provider_id(provider: &str) -> &str {
+    match provider {
+        "claude-code" => "claude",
+        "google-gemini-cli" => "gemini",
+        other => other,
+    }
+}
+
 fn provider_supports_loop_adapter(provider: &str) -> bool {
-    matches!(provider, "claude" | "codex" | "ollama" | "gemini")
+    matches!(
+        canonical_provider_id(provider),
+        "claude" | "codex" | "ollama" | "gemini"
+    )
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -624,7 +635,7 @@ async fn main() -> Result<()> {
                 println!("Loop initiated: {}", controller.get_id());
 
                 let adapters: Arc<dyn Fn(&str) -> Option<Arc<dyn ProviderAdapter>> + Send + Sync> =
-                    Arc::new(|provider: &str| match provider {
+                    Arc::new(|provider: &str| match canonical_provider_id(provider) {
                         "ollama" => {
                             Some(Arc::new(OllamaCliAdapter::new()) as Arc<dyn ProviderAdapter>)
                         }
@@ -888,7 +899,7 @@ fn get_live_model_tiers(
                 id: 0,
                 model_id: m.model_id.clone(),
                 provider_model_id: m.provider_model_id.clone(),
-                provider: m.provider.clone(),
+                provider: canonical_provider_id(&m.provider).to_string(),
                 rate_group: m.rate_group.clone(),
                 capability_class: m.capability_class,
                 effort_knob: "default".to_string(),
@@ -1254,7 +1265,7 @@ async fn run_repl(use_cockpit: bool) -> Result<()> {
 
                         let adapters: Arc<
                             dyn Fn(&str) -> Option<Arc<dyn ProviderAdapter>> + Send + Sync,
-                        > = Arc::new(|provider: &str| match provider {
+                        > = Arc::new(|provider: &str| match canonical_provider_id(provider) {
                             "ollama" => {
                                 Some(Arc::new(OllamaCliAdapter::new()) as Arc<dyn ProviderAdapter>)
                             }
@@ -2108,7 +2119,7 @@ const SUPPORTED_ADAPTER_PROVIDERS: &[&str] = &["ollama", "claude", "codex", "gem
 
 /// Returns true if the provider has a working adapter in this binary.
 fn has_adapter(provider: &str) -> bool {
-    SUPPORTED_ADAPTER_PROVIDERS.contains(&provider)
+    SUPPORTED_ADAPTER_PROVIDERS.contains(&canonical_provider_id(provider))
 }
 
 /// Route a task through DREX, returning the adapter + metadata needed to stream.
@@ -2285,7 +2296,7 @@ fn route_task_inner(
 
 /// Resolve a provider adapter by name.
 fn resolve_adapter(provider: &str, model_id: &str) -> Result<Arc<dyn ProviderAdapter>, String> {
-    match provider {
+    match canonical_provider_id(provider) {
         "ollama" => Ok(Arc::new(OllamaCliAdapter::with_model(model_id))),
         "claude" => Ok(Arc::new(ClaudeCodeCliAdapter::new())),
         "codex" => Ok(Arc::new(CodexCliAdapter::new())),
@@ -2779,7 +2790,7 @@ mod tests {
     #[test]
     fn deploy_input_uses_deploy_intent() {
         assert_eq!(
-            parse_turn_intent("deploy this to railway").intent,
+            parse_turn_intent("deploy this to cloudflare").intent,
             Intent::Deploy
         );
         assert_eq!(
@@ -2834,6 +2845,50 @@ mod tests {
         assert!(super::has_adapter("gemini"));
         assert!(!super::has_adapter("anthropic"));
         assert!(!super::has_adapter("openai"));
+    }
+
+    #[test]
+    fn provider_adapter_checks_accept_cli_provider_ids() {
+        assert!(super::provider_supports_loop_adapter("claude-code"));
+        assert!(super::provider_supports_loop_adapter("google-gemini-cli"));
+        assert!(super::has_adapter("claude-code"));
+        assert!(super::has_adapter("google-gemini-cli"));
+    }
+
+    #[test]
+    fn live_model_tiers_canonicalize_cli_provider_ids() {
+        let registry = heiwa_provider::AccountRegistry {
+            accounts: vec![heiwa_provider::ProviderAccount {
+                account_id: "anthropic-cli".to_string(),
+                provider: "claude-code".to_string(),
+                credential: heiwa_provider::Credential::OauthCli {
+                    binary: "claude".to_string(),
+                },
+                rate_group: "claude_code".to_string(),
+                status: heiwa_provider::AccountStatus::Connected,
+                models: vec![heiwa_provider::DetectedModel {
+                    model_id: "claude/sonnet-4-6".to_string(),
+                    provider_model_id: "claude-sonnet-4-6".to_string(),
+                    provider: "claude-code".to_string(),
+                    account_id: "anthropic-cli".to_string(),
+                    rate_group: "claude_code".to_string(),
+                    capability_class: 4,
+                    context_window: 200_000,
+                    supports_streaming: true,
+                    supports_tools: true,
+                    supports_vision: false,
+                    supports_audio: false,
+                    cost_per_1k_input: 0.003,
+                    cost_per_1k_output: 0.015,
+                    inventory_truth: heiwa_provider::InventoryTruth::Inferred,
+                }],
+            }],
+        };
+
+        let tiers = super::get_live_model_tiers(&registry);
+
+        assert_eq!(tiers.len(), 1);
+        assert_eq!(tiers[0].provider, "claude");
     }
 
     #[test]

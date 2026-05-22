@@ -17,7 +17,7 @@ To finalize the integration, the human operator must perform the following:
 
 1.  **Open WSL terminal.**
 2.  **Verify local environment:** `cat ~/heiwa-universe/.env.worker.local`
-3.  **Configure auth:** Set `HEIWA_MACHINE_AUTH_TOKEN` in `.env.worker.local` (value from Railway env vars).
+3.  **Configure auth:** Set `HEIWA_MACHINE_AUTH_TOKEN` in `.env.worker.local` (value from the MacBook `~/.heiwa` runtime config).
 4.  **Restart service:** `sudo systemctl restart heiwa-worker`
 
 > **Note:** NATS has been removed from Heiwa. Transport is now LocalBusTransport (co-located) + WebSocket (remote workers).

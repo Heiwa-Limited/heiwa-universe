@@ -34,7 +34,7 @@ def get_env(key, default=None, required=True):
     val = os.getenv(key, default)
     if required and not val:
         # Only crash in production or if explicitly requested
-        if os.getenv("RAILWAY_ENVIRONMENT_NAME") == "production":
+        if os.getenv("HEIWA_RUNTIME_ENV") == "production":
             print(f"\n[FATAL] 🚨 SDK Configuration Error")
             print(f"[FATAL] Missing required environment variable: {key}")
             sys.exit(1)
@@ -80,7 +80,7 @@ def _profile_hub_fallbacks() -> list[str]:
     except Exception:
         return []
     matches = re.findall(r"https://[A-Za-z0-9._-]+", text)
-    return [url for url in matches if "up.railway.app" in url or url.endswith("api.heiwa.ltd")]
+    return [url for url in matches if url.endswith("api.heiwa.ltd") or "127.0.0.1" in url]
 
 
 def hub_url_candidates() -> list[str]:
@@ -172,7 +172,7 @@ class Settings:
 
     @property
     def STDB_IDENTITY(self):
-        # On local server (Railway primary), always use the module name to avoid stale hash overrides
+        # On local server, always use the module name to avoid stale hash overrides.
         if self.STDB_SERVER == "local":
             return "heiwaproductiondb"
         return get_env("STDB_IDENTITY", default="heiwaproductiondb", required=False)
@@ -231,10 +231,10 @@ class Settings:
     
     # --- INFRA ---
     @property
-    def RAILWAY_ENVIRONMENT_NAME(self): return get_env("RAILWAY_ENVIRONMENT_NAME", default="development", required=False)
+    def HEIWA_RUNTIME_ENV(self): return get_env("HEIWA_RUNTIME_ENV", default="development", required=False)
     
     @property
-    def IS_PROD(self): return (self.RAILWAY_ENVIRONMENT_NAME == "production")
+    def IS_PROD(self): return (self.HEIWA_RUNTIME_ENV == "production")
     
     # --- HARVESTED CONFIGS ---
     @property

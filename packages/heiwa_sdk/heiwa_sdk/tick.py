@@ -1,7 +1,7 @@
 """
-Hub Tick Service — Cron-triggered detection and notification loop.
+Hub Tick Service — local detection and notification loop.
 
-This script is designed to be run by Railway's cron job feature.
+This script is designed to be run by a local scheduler or future Heiwa cron.
 It executes a single tick cycle:
 1. Scan for alerts (detection engine)
 2. Generate proposals from alerts (auto proposal generator)
@@ -15,7 +15,6 @@ Environment Variables:
     DISCORD_WEBHOOK_URL: Discord webhook for notifications
     TICK_MODE: 'production' or 'simulation' (default: production)
 
-See: https://docs.railway.com/reference/cron-jobs
 """
 
 import os
@@ -25,7 +24,7 @@ import datetime
 import uuid
 from pathlib import Path
 
-# Lazy imports to avoid DB connection at import time (Railway build phase issue)
+# Lazy imports to avoid DB connection at import time.
 # These are imported inside functions that need them
 from heiwa_sdk.config import settings
 from heiwa_sdk.notifier import send_tick_summary, reset_dedup
@@ -38,7 +37,7 @@ def run_tick() -> dict:
     Returns:
         dict with tick results
     """
-    # Lazy import to avoid DB connection during Railway build phase
+    # Lazy import to avoid DB connection during import/startup.
     from heiwa_sdk.db import db
     import time
 

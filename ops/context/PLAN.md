@@ -6,7 +6,7 @@ Status: historical roadmap snapshot. Repo-root `HEIWA.md`, `AGENTS.md`, and `PRO
 
 Ship a multi-tenant BYOK orchestration platform. Users sign in via Discord, connect their AI provider keys, and run agent workflows through web and Discord interfaces. Trading and Autoresearch are the launch verticals.
 
-SpacetimeDB remains the authoritative state layer. Railway remains the primary runtime. The cognition pipeline (intent, risk, routing, compilation) is retained and extended with per-user key routing.
+Local `~/.heiwa` state remains the current owner truth. SpacetimeDB remains the evidence sync/adjudication layer when enabled. The cognition pipeline (intent, risk, routing, compilation) is retained and extended with per-user key routing.
 
 ## Phase 1: Multi-Tenant Foundation
 
@@ -133,7 +133,7 @@ These items from the previous roadmap are folded into the phases above:
 ## Assumptions
 
 - SpacetimeDB remains the authoritative state layer
-- Railway remains the primary runtime with auto-deploy on main
+- MacBook `heiwa` remains the primary runtime while public access is paused
 - Python-first for all user-facing and operator-facing code
 - STDB lookup latency is acceptable for lease checks in v1; cache with subscription-based invalidation planned when needed
 - Discord is the primary auth provider at launch; additional OAuth providers (Google, GitHub) are future work

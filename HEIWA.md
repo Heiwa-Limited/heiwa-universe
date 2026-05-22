@@ -1,6 +1,6 @@
 # HEIWA
 
-Updated: 2026-05-15
+Updated: 2026-05-22
 Status: Canonical truth for `heiwa-universe`
 
 This file replaces the old repo-root compatibility shim. When `README.md`, legacy plans, or older architecture notes conflict with this document, this document wins.
@@ -13,7 +13,8 @@ Current shape:
 
 - `heiwa` is the installed product surface.
 - DREX is the internal execution kernel.
-- SpacetimeDB is the backend adjudication and evidence plane.
+- Devon's MacBook checkout plus `~/.heiwa/` are the current source-of-truth/server for user functionality.
+- SpacetimeDB is the adjudication, subscription, and evidence sync plane when enabled.
 - Rust proposes and executes.
 - Providers still own their own inference internals.
 - Heiwa turns the user’s local models and connected providers into one coherent operator experience.
@@ -55,8 +56,9 @@ Per task, Heiwa should:
 
 Compression:
 
-> Native context window = working memory.  
-> Heiwa memory = durable external memory.  
+> Native context window = working memory.
+> Heiwa local state = current durable owner memory.
+> SpacetimeDB = evidence sync/adjudication plane.
 > Harness job = decide what enters working memory, when, and why.
 
 ## What Heiwa Is
@@ -72,7 +74,7 @@ Heiwa is a system with three distinct layers:
 
 2. **Execution kernel**
    - DREX is the routing, policy, and evidence kernel.
-   - It spans Rust runtime behavior and SpacetimeDB reducers/subscriptions.
+   - It spans Rust runtime behavior, local state, and SpacetimeDB reducers/subscriptions where online.
 
 3. **Enterprise platform**
    - Heiwa normalizes access to provider subscriptions, API keys, local models, device capabilities, evidence, routing policy, and later org governance.

@@ -47,9 +47,9 @@ if [[ ! -f "$HEIWA_NET_POLICY_TARGET" && -f "$HEIWA_NET_POLICY_BOOTSTRAP_PATH" ]
     echo "[HEIWA] Bootstrapped net policy."
 fi
 
-# 4. Inject CLI tool credentials from Railway env vars
-# These tokens are set as Railway secrets and injected into the credential
-# files/env vars that each CLI tool expects on headless Linux.
+# 4. Inject CLI tool credentials from environment variables.
+# These values are provided by the operator/runtime shell and are translated
+# into the files/env vars that each CLI tool expects on headless Linux.
 
 # Claude Code: uses env vars directly
 if [[ -n "${CLAUDE_CODE_OAUTH_TOKEN:-}" ]]; then
@@ -119,12 +119,6 @@ if [[ -n "${HEIWA_GPG_KEY:-}" ]]; then
         git config --global commit.gpgsign true
         echo "[HEIWA] GPG signing configured for key $GPG_KEY_ID."
     fi
-fi
-
-# Railway CLI: uses RAILWAY_TOKEN env var directly.
-if [[ -n "${RAILWAY_TOKEN:-}" ]]; then
-    export RAILWAY_TOKEN
-    echo "[HEIWA] Railway CLI token injected."
 fi
 
 # Wrangler: uses CLOUDFLARE_API_TOKEN directly.

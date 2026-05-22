@@ -3,6 +3,7 @@ use heiwa_config::load as load_config;
 use heiwa_embed::embed_and_store;
 use heiwa_protocol::TranscriptBlock;
 use portable_pty::{native_pty_system, CommandBuilder, PtySize};
+use rusqlite::{params, Connection};
 use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::PathBuf;
@@ -43,8 +44,18 @@ pub struct TranscriptEntry {
 pub struct PersistedTranscript {
     pub version: u32,
     pub session_id: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub parent_session_id: Option<String>,
     pub next_entry_id: u64,
     pub entries: Vec<TranscriptEntry>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct SessionSearchHit {
+    pub session_id: String,
+    pub entry_id: u64,
+    pub role: String,
+    pub content: String,
 }
 
 impl PersistedTranscript {
@@ -52,6 +63,7 @@ impl PersistedTranscript {
         Self {
             version: PERSISTED_TRANSCRIPT_VERSION,
             session_id: session_id.to_string(),
+            parent_session_id: None,
             next_entry_id: 0,
             entries: Vec::new(),
         }
@@ -68,6 +80,14 @@ pub fn get_session_dir() -> PathBuf {
 
 fn get_transcript_path(session_id: &str) -> PathBuf {
     get_session_dir().join(format!("{}.json", session_id))
+}
+
+pub fn get_session_index_path() -> PathBuf {
+    load_config()
+        .paths
+        .state_dir
+        .join("state")
+        .join("sessions.sqlite3")
 }
 
 pub fn block_raw_char_len(block: &TranscriptBlock) -> usize {
@@ -100,7 +120,162 @@ pub fn save_entries(persisted: &PersistedTranscript) -> Result<()> {
     fs::create_dir_all(get_session_dir())?;
     let content = serde_json::to_string_pretty(persisted)?;
     fs::write(get_transcript_path(&persisted.session_id), content)?;
+    if let Err(error) = sync_session_index(persisted) {
+        eprintln!("session index sync skipped: {}", error);
+    }
     Ok(())
+}
+
+pub fn set_parent_session_id(session_id: &str, parent_session_id: Option<String>) -> Result<()> {
+    let mut persisted = load_transcript(session_id)?;
+    persisted.parent_session_id = parent_session_id;
+    save_entries(&persisted)
+}
+
+pub fn rebuild_session_index(session_id: &str) -> Result<()> {
+    let persisted = load_transcript(session_id)?;
+    sync_session_index(&persisted)
+}
+
+pub fn search_session_messages(
+    session_id: Option<&str>,
+    query: &str,
+    limit: usize,
+) -> Result<Vec<SessionSearchHit>> {
+    let conn = open_session_index()?;
+    ensure_session_index_schema(&conn)?;
+
+    let limit = limit.clamp(1, 100) as i64;
+    let mut hits = Vec::new();
+    if let Some(session_id) = session_id {
+        let mut stmt = conn.prepare(
+            "SELECT session_id, entry_id, role, content
+             FROM messages_fts
+             WHERE messages_fts MATCH ?1 AND session_id = ?2
+             ORDER BY rank
+             LIMIT ?3",
+        )?;
+        let rows = stmt.query_map(params![query, session_id, limit], row_to_search_hit)?;
+        for row in rows {
+            hits.push(row?);
+        }
+    } else {
+        let mut stmt = conn.prepare(
+            "SELECT session_id, entry_id, role, content
+             FROM messages_fts
+             WHERE messages_fts MATCH ?1
+             ORDER BY rank
+             LIMIT ?2",
+        )?;
+        let rows = stmt.query_map(params![query, limit], row_to_search_hit)?;
+        for row in rows {
+            hits.push(row?);
+        }
+    }
+    Ok(hits)
+}
+
+fn row_to_search_hit(row: &rusqlite::Row<'_>) -> rusqlite::Result<SessionSearchHit> {
+    Ok(SessionSearchHit {
+        session_id: row.get(0)?,
+        entry_id: row.get::<_, i64>(1)? as u64,
+        role: row.get(2)?,
+        content: row.get(3)?,
+    })
+}
+
+fn open_session_index() -> Result<Connection> {
+    let path = get_session_index_path();
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent)?;
+    }
+    Ok(Connection::open(path)?)
+}
+
+fn ensure_session_index_schema(conn: &Connection) -> Result<()> {
+    conn.execute_batch(
+        "PRAGMA journal_mode=WAL;
+         CREATE TABLE IF NOT EXISTS sessions (
+             id TEXT PRIMARY KEY,
+             parent_session_id TEXT,
+             updated_at_ms INTEGER NOT NULL,
+             entry_count INTEGER NOT NULL
+         );
+         CREATE TABLE IF NOT EXISTS messages (
+             session_id TEXT NOT NULL,
+             entry_id INTEGER NOT NULL,
+             role TEXT NOT NULL,
+             content TEXT NOT NULL,
+             ts_unix_ms INTEGER NOT NULL,
+             char_len INTEGER NOT NULL,
+             PRIMARY KEY(session_id, entry_id)
+         );
+         CREATE INDEX IF NOT EXISTS idx_messages_session
+             ON messages(session_id);
+         CREATE VIRTUAL TABLE IF NOT EXISTS messages_fts
+             USING fts5(session_id UNINDEXED, entry_id UNINDEXED, role, content);",
+    )?;
+    Ok(())
+}
+
+fn sync_session_index(persisted: &PersistedTranscript) -> Result<()> {
+    let mut conn = open_session_index()?;
+    ensure_session_index_schema(&conn)?;
+    let tx = conn.transaction()?;
+    tx.execute(
+        "INSERT INTO sessions (id, parent_session_id, updated_at_ms, entry_count)
+         VALUES (?1, ?2, ?3, ?4)
+         ON CONFLICT(id) DO UPDATE SET
+             parent_session_id = excluded.parent_session_id,
+             updated_at_ms = excluded.updated_at_ms,
+             entry_count = excluded.entry_count",
+        params![
+            persisted.session_id,
+            persisted.parent_session_id,
+            now_unix_ms(),
+            persisted.entries.len() as i64,
+        ],
+    )?;
+    tx.execute(
+        "DELETE FROM messages WHERE session_id = ?1",
+        params![persisted.session_id],
+    )?;
+    tx.execute(
+        "DELETE FROM messages_fts WHERE session_id = ?1",
+        params![persisted.session_id],
+    )?;
+    for entry in &persisted.entries {
+        let (role, content) = block_index_text(&entry.block);
+        tx.execute(
+            "INSERT INTO messages
+             (session_id, entry_id, role, content, ts_unix_ms, char_len)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+            params![
+                persisted.session_id,
+                entry.id as i64,
+                role,
+                content,
+                entry.ts_unix_ms,
+                entry.char_len as i64,
+            ],
+        )?;
+        tx.execute(
+            "INSERT INTO messages_fts (session_id, entry_id, role, content)
+             VALUES (?1, ?2, ?3, ?4)",
+            params![persisted.session_id, entry.id as i64, role, content],
+        )?;
+    }
+    tx.commit()?;
+    Ok(())
+}
+
+fn block_index_text(block: &TranscriptBlock) -> (&'static str, String) {
+    match block {
+        TranscriptBlock::User(text) => ("user", text.clone()),
+        TranscriptBlock::Assistant(text) => ("assistant", text.clone()),
+        TranscriptBlock::Evidence(text) => ("evidence", text.clone()),
+        TranscriptBlock::Tool(name, output) => ("tool", format!("{name}\n{output}")),
+    }
 }
 
 /// Compat shim for callers that still pass `&[TranscriptBlock]`.

@@ -122,7 +122,7 @@ class BrokerRouteResult:
             assigned_worker=str(payload.get("assigned_worker") or ""),
             target_tool=str(payload.get("target_tool") or "heiwa_claw"),
             target_model=str(payload.get("target_model") or ""),
-            target_runtime=str(payload.get("target_runtime") or "railway"),
+            target_runtime=str(payload.get("target_runtime") or "macbook"),
             target_tier=str(payload.get("target_tier") or "tier1_local"),
             requires_approval=bool(payload.get("requires_approval")),
             rationale=str(payload.get("rationale") or ""),

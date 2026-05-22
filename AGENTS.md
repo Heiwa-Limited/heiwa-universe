@@ -7,12 +7,13 @@ This repository builds the Heiwa full stack. The current product center of gravi
 - **Heiwa** is the company and product identity.
 - **`heiwa`** is the primary installed operator surface.
 - **DREX** is the internal execution kernel.
-- **SpacetimeDB** is the backend adjudication, subscription, and evidence plane.
-- **Railway, GitHub, and Cloudflare** are support infrastructure for hosted, deployment, edge, and enterprise needs.
+- **Local MacBook state** under `~/.heiwa/` plus this checkout is the current owner runtime truth.
+- **SpacetimeDB** is the adjudication, subscription, and evidence sync plane when enabled.
+- **GitHub and Cloudflare** are support infrastructure for distribution, docs, edge, and later remote surfaces.
 
 Compression:
 
-> Rust proposes and executes, SpacetimeDB adjudicates and records, `heiwa` presents.
+> Rust proposes and executes, local Heiwa state records current user truth, SpacetimeDB syncs evidence, `heiwa` presents.
 
 ## Current Repo Spine
 
@@ -34,10 +35,10 @@ Compression:
 
 ## Architecture Direction (April 2026)
 
-- Production target stack is **Rust + TypeScript + Shell**.
+- User-functionality stack is **Rust + TypeScript + Shell** on Devon's MacBook first.
 - **Rust** owns the authoritative state layer, orchestration, routing, and future DREX execution logic.
 - **TypeScript** owns companion visual surfaces and typed client contracts.
-- **Shell** remains the bootstrap and operator glue layer for the local runtime plus hosted Linux/WSL execution.
+- **Shell** remains the bootstrap and operator glue layer for the local runtime plus future Linux/WSL execution.
 - The Python Hub and cognition packages are still live in the repo, but they are prototype and compatibility surfaces, not the long-term control plane.
 
 ## Provider Truth
@@ -59,10 +60,10 @@ Be honest about maturity:
 ## Operator and Infra Truth
 
 - `~/.heiwa/` is the owner-local runtime root on Devon's machine.
+- This checkout plus `~/.heiwa/` are the current source-of-truth/server for user functionality.
 - Users/operators should not have to think about SpacetimeDB directly.
-- Railway hosts supported Heiwa services; it does not define the product.
 - GitHub is source, CI, and release distribution.
-- Cloudflare is public edge and later remote-surface infrastructure.
+- Cloudflare is paused public edge and later remote-surface infrastructure.
 
 ## Working Priorities
 
@@ -71,14 +72,14 @@ Prioritize this order:
 1. local runtime truth
 2. provider/account normalization
 3. evidence and bounded execution
-4. internal backend sync and hosted support paths
+4. internal backend sync and optional remote support paths
 5. remote surfaces such as `/code`
 
 Do not optimize for maturity theater first:
 
 - do not overstate `/code`
 - do not over-rotate into web-console-first language
-- do not treat Railway as the product center
+- do not introduce a hosted control plane as the product center
 - do not pretend every wrapped provider is equally integrated
 
 ## Required Reading

@@ -1,7 +1,8 @@
 use heiwa_protocol::TranscriptBlock;
 use heiwa_session::{
-    append_entry, load_transcript, save_entries, save_transcript, PersistedTranscript,
-    TranscriptEntry, PERSISTED_TRANSCRIPT_VERSION,
+    append_entry, get_session_index_path, load_transcript, save_entries, save_transcript,
+    search_session_messages, set_parent_session_id, PersistedTranscript, TranscriptEntry,
+    PERSISTED_TRANSCRIPT_VERSION,
 };
 use std::env;
 use std::fs;
@@ -53,6 +54,7 @@ fn loads_v0_transcript_and_assigns_monotonic_ids() {
         let persisted = load_transcript("default").expect("load");
         assert_eq!(persisted.version, PERSISTED_TRANSCRIPT_VERSION);
         assert_eq!(persisted.session_id, "default");
+        assert_eq!(persisted.parent_session_id, None);
         assert_eq!(persisted.entries.len(), 4);
         assert_eq!(persisted.next_entry_id, 4);
 
@@ -92,6 +94,7 @@ fn empty_file_returns_empty_transcript() {
 fn round_trips_v1_transcript() {
     with_temp_home(|_home| {
         let mut t = PersistedTranscript::empty("default");
+        t.parent_session_id = Some("root-session".into());
         for (i, text) in ["one", "two", "three"].iter().enumerate() {
             t.entries.push(TranscriptEntry {
                 id: i as u64,
@@ -106,6 +109,7 @@ fn round_trips_v1_transcript() {
 
         let reloaded = load_transcript("default").expect("load");
         assert_eq!(reloaded.version, PERSISTED_TRANSCRIPT_VERSION);
+        assert_eq!(reloaded.parent_session_id.as_deref(), Some("root-session"));
         assert_eq!(reloaded.entries.len(), 3);
         assert_eq!(reloaded.next_entry_id, 3);
         let texts: Vec<String> = reloaded
@@ -117,6 +121,43 @@ fn round_trips_v1_transcript() {
             })
             .collect();
         assert_eq!(texts, vec!["one", "two", "three"]);
+    });
+}
+
+#[test]
+fn parent_session_id_can_be_set_without_touching_entries() {
+    with_temp_home(|_home| {
+        append_entry("child", TranscriptBlock::User("child work".into())).unwrap();
+        set_parent_session_id("child", Some("parent".into())).unwrap();
+
+        let reloaded = load_transcript("child").unwrap();
+        assert_eq!(reloaded.parent_session_id.as_deref(), Some("parent"));
+        assert_eq!(reloaded.entries.len(), 1);
+        assert_eq!(reloaded.next_entry_id, 1);
+    });
+}
+
+#[test]
+fn save_entries_updates_sqlite_fts_mirror() {
+    with_temp_home(|_home| {
+        save_transcript(
+            "default",
+            &[
+                TranscriptBlock::User("searchable operator memory".into()),
+                TranscriptBlock::Tool("shell".into(), "cargo test passed".into()),
+            ],
+        )
+        .unwrap();
+
+        assert!(get_session_index_path().exists());
+        let hits = search_session_messages(Some("default"), "operator", 10).unwrap();
+        assert_eq!(hits.len(), 1);
+        assert_eq!(hits[0].entry_id, 0);
+        assert_eq!(hits[0].role, "user");
+
+        let tool_hits = search_session_messages(None, "cargo", 10).unwrap();
+        assert_eq!(tool_hits.len(), 1);
+        assert_eq!(tool_hits[0].role, "tool");
     });
 }
 

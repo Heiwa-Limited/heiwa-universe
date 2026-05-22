@@ -1,0 +1,25 @@
+[package]
+name = "heiwa_drex"
+version = "0.1.0"
+edition = "2021"
+description = "DREX routing: binds heiwa_vault + heiwa_quota + heiwa_provider into a routing decision"
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+documentation.workspace = true
+readme.workspace = true
+keywords.workspace = true
+categories.workspace = true
+
+[dependencies]
+async-trait = "0.1"
+heiwa-provider = { path = "../heiwa_provider" }
+heiwa_mcp = { path = "../heiwa_mcp" }
+heiwa_quota = { path = "../heiwa_quota" }
+heiwa_vault = { path = "../heiwa_vault" }
+thiserror = "1.0"
+time = { version = "0.3", features = ["std"] }
+
+[dev-dependencies]
+tempfile = "3"
+tokio = { version = "1", features = ["macros", "rt-multi-thread"] }

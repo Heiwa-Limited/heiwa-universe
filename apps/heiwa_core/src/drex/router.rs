@@ -287,7 +287,7 @@ fn runtime_hint(ingress: &DrexIngress, vector: &DrexVector) -> String {
         return ingress.runtime.clone();
     }
 
-    "railway".to_string()
+    "cloud".to_string()
 }
 
 fn select_model_tier(

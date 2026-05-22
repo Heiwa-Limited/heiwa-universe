@@ -51,7 +51,7 @@ async def verify_propagation():
             intent_class="build",
             risk_level="low",
             requires_approval=False,
-            preferred_runtime="railway",
+            preferred_runtime="macbook",
             preferred_tool="ollama",
             preferred_tier="tier1_local",
             brief="Mock brief",

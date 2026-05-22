@@ -66,7 +66,7 @@ pub fn load() -> AppConfig {
         .to_ascii_lowercase()
         .as_str()
     {
-        "railway" => None,
+        "remote" | "cloud" => None,
         _ => Some("http://127.0.0.1:11434".to_string()),
     };
 
