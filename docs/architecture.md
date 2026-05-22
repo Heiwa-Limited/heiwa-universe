@@ -7,8 +7,8 @@ Heiwa uses a narrow split between installed execution, backend state, hosted sup
 - **Installed `heiwa` runtime** is the primary operator surface. It owns local routing, cockpit, bounded execution, provider wrapping, and operator UX.
 - **Rust workspace services** own the current execution kernel, DREX routing, provider/session/protocol crates, connector gates, and release artifacts.
 - **SpacetimeDB** is the backend adjudication, subscription, and evidence plane on `maincloud.spacetimedb.com`.
-- **Railway** may host supported Heiwa services where always-on infrastructure is needed, but it is support infrastructure, not the product center.
-- **GitHub and public edge infrastructure** publish docs, releases, CI evidence, and public shells. Public surfaces should not duplicate privileged runtime behavior.
+- **Owner-managed local and approved hosted support** may run specific Heiwa services where always-on infrastructure is needed, but support hosts are not the product center.
+- **GitHub and Cloudflare edge infrastructure** publish docs, releases, CI evidence, and public shells. Public surfaces should not duplicate privileged runtime behavior.
 - **WebSockets** carry live status/event transport when a runtime exposes them.
 
 ## Capability Fabric

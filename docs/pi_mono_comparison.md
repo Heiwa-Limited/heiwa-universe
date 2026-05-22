@@ -17,7 +17,7 @@ While **Heiwa** is a distributed AI Operating System focused on sovereignty and 
 | **State** | **SpacetimeDB** (Authoritative Ledger). | In-memory `Agent` state + Local DBs. |
 | **LLM Layer** | **Tiered/Routed** (Cheapest/Free first). | **Unified API** (Multi-provider abstraction). |
 | **UI Surface** | CLI + Web Status + Discord Hub. | High-fidelity **TUI** + Web Components. |
-| **Deployment** | Railway + Local Boost Nodes. | **vLLM Pods** on GPU providers. |
+| **Deployment** | MacBook-first local runtime + optional remote compute leases. | **vLLM Pods** on GPU providers. |
 | **Hygiene** | Session-based `HEIWA.md` rules. | Strict `AGENTS.md` for Class 3 agents. |
 
 ---
@@ -52,7 +52,7 @@ Pi-Mono's `pi-pods` provides a CLI for managing vLLM deployments on GPU pods.
 
 Heiwa's use of **SpacetimeDB** is its greatest differentiator. Unlike Pi-Mono, which is primarily focused on the interaction loop, Heiwa's architecture allows for:
 - **Resilient Memory:** State survives agent crashes and network partitions.
-- **Multi-Node Sync:** The "MacBook" and "Railway" nodes are always in sync regarding the system's "Soul" and "Intent."
+- **Multi-Node Sync:** The MacBook owner runtime and any approved remote nodes stay in sync regarding the system's "Soul" and "Intent."
 - **Auditability:** Every system state change is recorded in the ledger.
 
 ## Conclusion

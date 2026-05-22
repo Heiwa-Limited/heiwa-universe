@@ -14,7 +14,7 @@
 - DREX routing, provider/session/protocol crates, execution scopes, tool leases, and receipts are the live runtime spine.
 - SpacetimeDB is the backend adjudication, subscription, and evidence plane.
 - GitHub Actions, Pages, and Releases are the current repo-native validation and publication path.
-- Railway and Cloudflare are support infrastructure for hosted services and public edge needs; they do not define the default operator experience.
+- Cloudflare is optional support infrastructure for public edge needs; hosted services do not define the default operator experience.
 - Public status is event-first when exposed, with HTTP diagnostics as fallback.
 
 ## Not presented as complete
