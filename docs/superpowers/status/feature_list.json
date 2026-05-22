@@ -26,7 +26,7 @@
   {
     "category": "infra",
     "feature": "Ephemeral Tailscale Networking",
-    "description": "Automatic node pruning and ephemeral auth key usage in Railway.",
+    "description": "Automatic node pruning and ephemeral auth key usage for local and remote mesh nodes.",
     "passes": true
   }
 ]

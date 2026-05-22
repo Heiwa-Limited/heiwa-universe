@@ -89,10 +89,10 @@ def gather_device_capabilities() -> Dict[str, Any]:
     except: pass
 
     # 2. Locality detection
-    locality = "local"
-    if os.getenv("RAILWAY_SERVICE_ID"):
-        locality = "cloud"
-    elif os.getenv("TAILSCALE_IP"): # Or presence of tailscale
+    locality = os.getenv("HEIWA_NODE_LOCALITY", "local").lower()
+    if locality not in {"local", "mesh", "cloud"}:
+        locality = "local"
+    if locality == "local" and os.getenv("TAILSCALE_IP"):  # Or presence of tailscale
         locality = "mesh"
 
     # 3. Model Inventory (Ollama check)
@@ -130,7 +130,7 @@ def get_tailscale_ip() -> str:
         result = subprocess.run(["tailscale", "ip", "-4"], capture_output=True, text=True, timeout=2)
         if result.returncode == 0:
             return result.stdout.strip()
-        # Try Railway socket
+        # Try managed sidecar socket
         result = subprocess.run(["tailscale", "--socket=/tmp/tailscaled.sock", "ip", "-4"], capture_output=True, text=True, timeout=2)
         if result.returncode == 0:
             return result.stdout.strip()

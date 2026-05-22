@@ -12,7 +12,7 @@ This paper assumes the current Heiwa substrate:
 - TypeScript for web surfaces, operator-facing clients, and protocol adapters
 - Shell on Linux/WSL for high-detail execution against live environments
 - SpacetimeDB for authoritative durable state
-- Railway for the persistent control-plane runtime
+- MacBook-first local runtime for the persistent owner control plane
 - Cloudflare for edge ingress and public presentation surfaces
 
 ## 1. Core Thesis
@@ -165,8 +165,8 @@ This model maps directly onto the existing Heiwa stack.
 
 - **SpacetimeDB** is the authoritative state lattice.
   It stores the durable objects that all tiers operate over.
-- **Railway** is the persistent control plane.
-  It hosts the always-on supervisory and coordination surfaces.
+- **The MacBook-first local runtime** is the persistent control plane.
+  It hosts the owner-facing supervisory and coordination surfaces.
 - **Cloudflare** is the edge boundary.
   It provides stable ingress, public surfaces, and controlled exposure.
 - **Rust** is the right substrate for reducers, protocol invariants, typed routing logic, and stateful coordination.
@@ -318,7 +318,7 @@ This section ties the control model back to the current stack:
 - **SpacetimeDB** should remain the authoritative state engine.
   Typed reducers and append-only event patterns are what make deterministic reduction possible.
 - **Rust** should own the critical folding, projection, and invariant-preserving logic.
-- **Railway** should host the persistent supervisory runtime and predictive coordination loop.
+- **The MacBook-first local runtime** should host the persistent supervisory runtime and predictive coordination loop.
 - **Cloudflare** should expose reduced and policy-safe public views, not privileged internal state.
 - **TypeScript** should render projections for operators and clients.
 - **Shell/Linux/WSL workers** should emit rich enough traces that higher layers can fold and project them without losing operational truth.
@@ -335,10 +335,10 @@ Second, **Heiwa must remain state-first**. Any feature that cannot be grounded i
 
 Third, **Heiwa must remain resolution-native**. The system should not flatten strategic planning, domain coordination, and tactical execution into one generic chat loop. Its advantage comes from selecting the correct execution resolution through DREX and moving between tiers with explicit transforms.
 
-Fourth, **Heiwa must remain substrate-aware**. Rust, SpacetimeDB, TypeScript, Railway, Cloudflare, Linux, and WSL are not incidental implementation details. They correspond to distinct layers of enterprise function:
+Fourth, **Heiwa must remain substrate-aware**. Rust, SpacetimeDB, TypeScript, the MacBook-first local runtime, Cloudflare, Linux, and WSL are not incidental implementation details. They correspond to distinct layers of enterprise function:
 
 - Rust and SpacetimeDB preserve invariants and durable coordination
-- Railway preserves continuous supervisory runtime
+- The MacBook-first local runtime preserves continuous supervisory runtime
 - Cloudflare preserves stable public ingress and edge reduction
 - TypeScript preserves human-operable visibility and control surfaces
 - Linux, shell, and WSL preserve real execution against live environments

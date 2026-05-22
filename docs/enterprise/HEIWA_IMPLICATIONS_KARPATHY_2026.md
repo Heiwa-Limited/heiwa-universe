@@ -62,7 +62,7 @@ The current repo surface already treats machine-readable operating files as firs
 The canonical routing and runtime posture is also already explicit:
 
 - SpacetimeDB is the state layer
-- Railway is the target runtime
+- The MacBook-first local runtime is the target runtime
 - `HeiwaClaw / MCP` is the execution surface
 
 Sources:

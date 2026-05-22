@@ -187,7 +187,7 @@ async def cmd_cost(ctx: CLIContext, args: str = "") -> None:
     console.print(table)
 
 
-@command("/doctor", "Diagnose hub, Ollama, STDB, Railway, provider auth (--fix to auto-repair)")
+@command("/doctor", "Diagnose hub, Ollama, STDB, local runtime, provider auth (--fix to auto-repair)")
 async def cmd_doctor(ctx: CLIContext, args: str = "") -> None:
     from heiwa_cli.auth import ProviderAuthManager
     from pathlib import Path
@@ -677,13 +677,13 @@ async def cmd_vault(ctx: CLIContext, args: str = "") -> None:
             console.print(content)
 
     elif sub == "sync":
-        # /vault sync --to railway [--service <name>]
+        # /vault sync [--service <name>]
         service = None
         if "--service" in args:
             idx = parts.index("--service") if "--service" in parts else -1
             if idx >= 0 and idx + 1 < len(parts):
                 service = parts[idx + 1]
-        code, msg = store.sync_to_railway(service=service)
+        code, msg = store.export_for_remote_env(service=service)
         style = "green" if code == 0 else "red"
         console.print(f"[{style}]vault sync:[/{style}] {msg}")
 
@@ -695,7 +695,7 @@ async def cmd_vault(ctx: CLIContext, args: str = "") -> None:
             "  [cyan]/vault delete KEY[/cyan]        — remove a secret\n"
             "  [cyan]/vault list[/cyan]              — show all key names\n"
             "  [cyan]/vault export[/cyan]            — print KEY=VALUE (pipe to scp/node-b)\n"
-            "  [cyan]/vault sync[/cyan]              — push to Railway via railway CLI\n"
+            "  [cyan]/vault sync[/cyan]              — prepare remote env sync; no external mutation\n"
         )
 
 

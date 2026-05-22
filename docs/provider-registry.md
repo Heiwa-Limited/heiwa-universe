@@ -9,7 +9,7 @@
 | Backend evidence plane | SpacetimeDB maincloud | Active target | Backend adjudication, subscription, and evidence ledger on `maincloud.spacetimedb.com` |
 | Source control / CI / release | GitHub | Active | Repo, pull requests, Actions, Releases, and release evidence |
 | Public docs | GitHub Pages | Active | MkDocs Material documentation from this repository |
-| Hosted services | Railway | Support infrastructure | Supported Heiwa services may run here when always-on hosting is required |
+| Hosted services | Owner-managed local or Cloudflare-backed hosts | Optional support infrastructure | Disabled for the owner-first phase unless a specific service graduates with approval |
 | Public edge | Cloudflare | Support infrastructure | DNS, edge, and proxy surface where needed |
 | Internal vertical runtimes | Isolated service providers | Internal preview | Surfaces such as trading stay isolated until they graduate into first-class product surfaces |
 
