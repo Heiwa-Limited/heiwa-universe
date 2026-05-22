@@ -20,6 +20,36 @@ pub struct DoctorReport {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DirectoryProbe {
+    pub name: String,
+    pub path: PathBuf,
+    pub exists: bool,
+    pub writable: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct LayoutReport {
+    pub root: PathBuf,
+    pub directories: Vec<DirectoryProbe>,
+}
+
+impl LayoutReport {
+    pub fn is_complete(&self) -> bool {
+        self.directories
+            .iter()
+            .all(|dir| dir.exists && dir.writable)
+    }
+
+    pub fn missing(&self) -> Vec<&str> {
+        self.directories
+            .iter()
+            .filter(|dir| !dir.exists)
+            .map(|dir| dir.name.as_str())
+            .collect()
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AiOpsReport {
     pub mcp_notion_http: bool,
     pub biome_configured: bool,
@@ -99,6 +129,41 @@ pub fn get_heiwa_dir() -> PathBuf {
 
 pub fn get_plugins_dir() -> PathBuf {
     get_heiwa_dir().join("plugins")
+}
+
+const RUNTIME_LAYOUT_DIRS: &[&str] = &[
+    "bin", "logs", "sessions", "cache", "state", "secrets", "plugins",
+];
+
+pub fn check_runtime_layout() -> LayoutReport {
+    check_runtime_layout_at(&get_heiwa_dir())
+}
+
+pub fn check_runtime_layout_at(root: &Path) -> LayoutReport {
+    let directories = RUNTIME_LAYOUT_DIRS
+        .iter()
+        .map(|name| {
+            let path = root.join(name);
+            let exists = path.is_dir();
+            let writable = if exists {
+                fs::metadata(&path)
+                    .map(|meta| !meta.permissions().readonly())
+                    .unwrap_or(false)
+            } else {
+                false
+            };
+            DirectoryProbe {
+                name: (*name).to_string(),
+                path,
+                exists,
+                writable,
+            }
+        })
+        .collect();
+    LayoutReport {
+        root: root.to_path_buf(),
+        directories,
+    }
 }
 
 pub fn check_installation() -> Result<DoctorReport> {
@@ -522,6 +587,58 @@ mod tests {
         let content = fs::read_to_string(target)?;
         assert_eq!(content, "binary content");
 
+        Ok(())
+    }
+
+    #[test]
+    fn test_check_runtime_layout_reports_missing_dirs() -> Result<()> {
+        let tmp = tempdir()?;
+        let root = tmp.path().join(".heiwa");
+        fs::create_dir_all(&root)?;
+        // Only create some of the expected dirs
+        fs::create_dir_all(root.join("bin"))?;
+        fs::create_dir_all(root.join("logs"))?;
+
+        let report = check_runtime_layout_at(&root);
+        assert_eq!(report.root, root);
+        assert_eq!(report.directories.len(), RUNTIME_LAYOUT_DIRS.len());
+
+        let bin = report
+            .directories
+            .iter()
+            .find(|d| d.name == "bin")
+            .expect("bin probe present");
+        assert!(bin.exists, "bin should be present");
+        assert!(bin.writable, "bin should be writable on a tempdir");
+
+        let sessions = report
+            .directories
+            .iter()
+            .find(|d| d.name == "sessions")
+            .expect("sessions probe present");
+        assert!(!sessions.exists, "sessions was never created");
+        assert!(!sessions.writable);
+
+        assert!(!report.is_complete());
+        let missing = report.missing();
+        assert!(missing.contains(&"sessions"));
+        assert!(missing.contains(&"plugins"));
+        assert!(!missing.contains(&"bin"));
+        Ok(())
+    }
+
+    #[test]
+    fn test_check_runtime_layout_complete_after_ensure() -> Result<()> {
+        let tmp = tempdir()?;
+        let root = tmp.path().join(".heiwa");
+        ensure_runtime_layout(&root)?;
+        let report = check_runtime_layout_at(&root);
+        assert!(
+            report.is_complete(),
+            "ensure_runtime_layout should yield a complete layout: missing={:?}",
+            report.missing()
+        );
+        assert!(report.missing().is_empty());
         Ok(())
     }
 
