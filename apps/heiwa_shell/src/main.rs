@@ -253,6 +253,7 @@ async fn main() -> Result<()> {
             let json_output = args.iter().any(|arg| arg == "--json");
             let identity = heiwa_provider::load_identity();
             let app_probe = crate::cmd::app::probe_local_app(crate::cmd::app::DEFAULT_PORT);
+            let layout = heiwa_install::check_runtime_layout();
             let ai_ops = if include_ai_ops {
                 Some(heiwa_install::check_ai_ops()?)
             } else {
@@ -274,6 +275,7 @@ async fn main() -> Result<()> {
                         "runtimes": report,
                         "identity": identity_json,
                         "heiwa_app": app_probe,
+                        "layout": layout,
                         "ai_ops": ai_ops,
                     })
                 );
@@ -367,6 +369,24 @@ async fn main() -> Result<()> {
                 println!("  Latency:   {ms}ms");
             } else {
                 println!("  Next:      heiwa app start --port {}", app_probe.port);
+            }
+
+            println!();
+            println!("Runtime Layout ({}):", layout.root.display());
+            for dir in &layout.directories {
+                let status = if dir.exists {
+                    if dir.writable {
+                        "ok"
+                    } else {
+                        "read-only"
+                    }
+                } else {
+                    "missing"
+                };
+                println!("  {:<9} {}", format!("{}:", dir.name), status);
+            }
+            if !layout.is_complete() {
+                println!("  Next: heiwa install");
             }
 
             if let Some(ai_ops) = ai_ops {

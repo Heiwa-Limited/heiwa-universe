@@ -348,6 +348,28 @@ fn test_doctor_json_reports_runtimes_providers_and_app_probe() {
         !stdout.contains("\"auth_token\""),
         "doctor json must not leak auth_token: {stdout}"
     );
+    assert!(
+        stdout.contains("\"layout\""),
+        "expected layout block in doctor json: {stdout}"
+    );
+    assert!(
+        stdout.contains("\"directories\""),
+        "expected directories array in doctor layout: {stdout}"
+    );
+    for name in [
+        "\"name\":\"bin\"",
+        "\"name\":\"logs\"",
+        "\"name\":\"sessions\"",
+        "\"name\":\"cache\"",
+        "\"name\":\"state\"",
+        "\"name\":\"secrets\"",
+        "\"name\":\"plugins\"",
+    ] {
+        assert!(
+            stdout.contains(name),
+            "expected {name} in doctor layout: {stdout}"
+        );
+    }
 }
 
 #[test]
