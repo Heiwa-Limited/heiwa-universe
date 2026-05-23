@@ -70,10 +70,7 @@ impl ProviderAdapter for OllamaCliAdapter {
             carry.push_str(&String::from_utf8_lossy(&buf[..n]));
 
             // Emit complete segments (split on newline, keep the newline).
-            loop {
-                let Some(nl) = carry.find('\n') else {
-                    break;
-                };
+            while let Some(nl) = carry.find('\n') {
                 let mut line: String = carry.drain(..=nl).collect();
                 // Normalise carriage returns that Ollama uses for spinner wipe.
                 line = line.replace('\r', "");

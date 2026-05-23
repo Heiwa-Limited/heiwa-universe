@@ -52,7 +52,7 @@ async fn test_session_daemon_socket_creation() {
     let stream = loop {
         match UnixStream::connect(&info.socket_path).await {
             Ok(s) => break Ok(s),
-            Err(e) if retry < 5 => {
+            Err(_) if retry < 5 => {
                 tokio::time::sleep(Duration::from_millis(100)).await;
                 retry += 1;
                 continue;
