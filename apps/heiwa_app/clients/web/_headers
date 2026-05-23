@@ -6,3 +6,7 @@
   Content-Security-Policy: default-src 'self'; script-src 'self'; style-src 'self' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; img-src 'self' data: https:; connect-src 'self' https://api.heiwa.ltd wss://api.heiwa.ltd; base-uri 'self'; frame-ancestors 'none'; form-action 'none'
   Strict-Transport-Security: max-age=31536000; includeSubDomains; preload
   Cache-Control: public, max-age=300
+
+/install
+  Content-Type: text/x-shellscript; charset=utf-8
+  Cache-Control: public, max-age=300
