@@ -71,8 +71,24 @@ fn test_antigravity_native_auth_discovery() {
     let ag_init = std::path::PathBuf::from(&home)
         .join(".antigravity")
         .join("argv.json");
-    if gemini_oauth.exists() && ag_init.exists() {
+    if has_command("antigravity") && gemini_oauth.exists() && ag_init.exists() {
         assert_eq!(ag.status, "connected");
+    }
+}
+
+#[test]
+fn test_claude_native_auth_discovery() {
+    let claude = get_auth_status("claude").expect("claude provider should be known");
+    assert_eq!(claude.provider_id, "claude");
+    assert_eq!(claude.auth_kind, AuthKind::OauthCli);
+    let home = std::env::var("HOME").unwrap_or_default();
+    let claude_dir = PathBuf::from(&home).join(".claude");
+    let settings = claude_dir.join("settings.json");
+    if settings.exists() {
+        assert_eq!(
+            claude.status, "connected",
+            "settings.json present => connected"
+        );
     }
 }
 
