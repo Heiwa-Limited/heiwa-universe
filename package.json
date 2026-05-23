@@ -11,7 +11,7 @@
     "url": "https://github.com/Strategizing/heiwa-universe/issues"
   },
   "engines": {
-    "node": "24.x"
+    "node": "26.x"
   },
   "workspaces": [
     "apps/heiwa_app",
@@ -24,7 +24,7 @@
     "typecheck": "tsc -p packages/heiwa_bindings/typescript/tsconfig.json --noEmit && tsc -p apps/heiwa_app/tsconfig.json --noEmit && npm --prefix apps/heiwa_app/clients/cockpit run typecheck"
   },
   "devDependencies": {
-    "@biomejs/biome": "^2.4.10",
+    "@biomejs/biome": "^2.4.15",
     "typescript": "5.9.3",
     "typescript-language-server": "^5.1.3"
   }

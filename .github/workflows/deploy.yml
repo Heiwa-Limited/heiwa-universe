@@ -80,7 +80,7 @@ jobs:
         if: needs.changes.outputs.deploy_core == 'true'
         uses: dtolnay/rust-toolchain@stable
         with:
-          toolchain: 1.93.1
+          toolchain: 1.95.0
       - name: Rust Cache
         if: needs.changes.outputs.deploy_core == 'true'
         uses: Swatinem/rust-cache@v2

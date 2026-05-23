@@ -4,7 +4,7 @@
 # -----------------------------------------------------
 # STAGE 1: RUST BUILDER
 # -----------------------------------------------------
-FROM rust:1.93-slim AS rust-builder
+FROM rust:1.95-slim AS rust-builder
 WORKDIR /app
 
 RUN apt-get update && apt-get install -y git build-essential curl ca-certificates zstd libpq-dev pkg-config && rm -rf /var/lib/apt/lists/*

@@ -20,8 +20,8 @@ expect_file ".env.example"
 expect_file ".github/workflows/deploy.yml"
 expect_file "apps/heiwa_core/Dockerfile"
 
-required_rust_channel="1.93.1"
-required_node_version="24.14.1"
+required_rust_channel="1.95.0"
+required_node_version="26.0.0"
 
 rust_channel="$(awk -F'"' '/channel = / { print $2 }' rust-toolchain.toml)"
 if [[ -z "$rust_channel" ]]; then
@@ -72,8 +72,9 @@ if ! grep -q '"workspaces"' package.json; then
   exit 1
 fi
 
-if ! grep -q '"node": "24.x"' package.json; then
-  echo "package.json engines must pin Node 24.x" >&2
+required_node_major="${required_node_version%%.*}.x"
+if ! grep -q "\"node\": \"${required_node_major}\"" package.json; then
+  echo "package.json engines must pin Node ${required_node_major}" >&2
   exit 1
 fi
 
