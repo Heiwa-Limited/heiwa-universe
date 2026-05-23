@@ -1,6 +1,6 @@
 use anyhow::{anyhow, Result};
 use axum::{
-    response::IntoResponse,
+    response::{IntoResponse, Redirect},
     routing::{get, post},
     Json, Router,
 };
@@ -132,6 +132,7 @@ pub async fn run(cfg: RuntimeConfig) -> Result<()> {
 
 pub fn build_router(state: SharedState) -> Router {
     Router::new()
+        .route("/install", get(install_handler))
         .route("/health", get(health_handler))
         .route("/status", get(status_handler))
         .route("/auth/me", get(auth::auth_me_handler))
@@ -235,6 +236,10 @@ async fn heartbeat(conn: &DbConnection, cfg: &RuntimeConfig) -> Result<()> {
             model_inventory,
         )
         .map_err(|e| anyhow!(e.to_string()))
+}
+
+async fn install_handler() -> impl IntoResponse {
+    Redirect::permanent("https://heiwa-clients.pages.dev/install.sh")
 }
 
 async fn health_handler(

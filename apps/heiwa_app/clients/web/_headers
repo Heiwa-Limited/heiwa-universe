@@ -10,3 +10,7 @@
 /install
   Content-Type: text/x-shellscript; charset=utf-8
   Cache-Control: public, max-age=300
+
+/install.sh
+  Content-Type: text/x-shellscript; charset=utf-8
+  Cache-Control: public, max-age=300
