@@ -77,6 +77,7 @@ def main() -> int:
         WEB_ROOT / "status.html",
         WEB_ROOT / "domains.html",
         WEB_ROOT / "governance.html",
+        WEB_ROOT / "install",
         WEB_ROOT / "_headers",
         WEB_ROOT / "assets" / "status.js",
         WEB_ROOT / "assets" / "domains.bootstrap.json",
@@ -128,6 +129,14 @@ def main() -> int:
     )
     problems.extend(
         require_contains(
+            WEB_ROOT / "install",
+            "HEIWA_REPO_URL",
+            "cargo install --path",
+            "heiwa app start --no-open",
+        )
+    )
+    problems.extend(
+        require_contains(
             WEB_ROOT / "governance.html",
             "installed local runtime",
             "Cloudflare Pages",
@@ -148,6 +157,7 @@ def main() -> int:
             WEB_ROOT / "_headers",
             "Content-Security-Policy",
             "Strict-Transport-Security",
+            "Content-Type: text/x-shellscript; charset=utf-8",
             "wss://api.heiwa.ltd",
         )
     )
