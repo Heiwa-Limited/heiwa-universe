@@ -17,6 +17,7 @@ expect_file ".nvmrc"
 expect_file ".node-version"
 expect_file "package.json"
 expect_file ".env.example"
+expect_file ".github/workflows/ci.yml"
 expect_file ".github/workflows/deploy.yml"
 expect_file "apps/heiwa_core/Dockerfile"
 
@@ -78,15 +79,24 @@ if ! grep -q "\"node\": \"${required_node_major}\"" package.json; then
   exit 1
 fi
 
-if ! grep -Eq "actions/setup-node@v[0-9]+" .github/workflows/deploy.yml; then
-  echo "deploy workflow must set up Node explicitly" >&2
-  exit 1
-fi
+for workflow in .github/workflows/ci.yml .github/workflows/deploy.yml; do
+  if ! grep -Eq "actions/setup-node@v[0-9]+" "$workflow"; then
+    echo "$workflow must set up Node explicitly" >&2
+    exit 1
+  fi
 
-if ! grep -Eq "node-version-file: ['\"]?\\.nvmrc['\"]?" .github/workflows/deploy.yml; then
-  echo "deploy workflow must source Node from .nvmrc" >&2
-  exit 1
-fi
+  if ! grep -Eq "node-version-file: ['\"]?\\.nvmrc['\"]?" "$workflow"; then
+    echo "$workflow must source Node from .nvmrc" >&2
+    exit 1
+  fi
+done
+
+for workflow in .github/workflows/ci.yml .github/workflows/deploy.yml; do
+  if ! grep -Eq "toolchain: ${required_rust_channel}" "$workflow"; then
+    echo "$workflow must install Rust $required_rust_channel" >&2
+    exit 1
+  fi
+done
 
 for required_env in STDB_TOKEN HEIWA_MACHINE_AUTH_TOKEN HEIWA_JWT_SIGNING_SECRET; do
   if ! grep -q "^${required_env}=" .env.example; then
