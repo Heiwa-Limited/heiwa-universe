@@ -160,7 +160,7 @@ pub fn get_auth_status(provider_id: &str) -> Option<LegacyProviderAccount> {
     match provider_id {
         "claude" => {
             let status = if has_command("claude") {
-                if connected {
+                if connected || claude_has_native_auth() {
                     "connected".to_string()
                 } else {
                     "installed_unverified".to_string()
@@ -350,9 +350,18 @@ fn codex_has_native_auth() -> bool {
         .exists()
 }
 
-// Antigravity is a VS Code fork that shares Google OAuth with Gemini CLI.
-// We consider it "connected" when the Gemini OAuth creds exist AND the
-// Antigravity user-data dir has been initialized.
+fn claude_has_native_auth() -> bool {
+    let home = env::var("HOME")
+        .or_else(|_| env::var("USERPROFILE"))
+        .unwrap_or_default();
+    if home.is_empty() {
+        return false;
+    }
+    let claude_dir = PathBuf::from(&home).join(".claude");
+    // settings.json is written only after the OAuth flow completes.
+    claude_dir.join("settings.json").exists()
+}
+
 fn antigravity_has_native_auth() -> bool {
     let home = env::var("HOME")
         .or_else(|_| env::var("USERPROFILE"))
