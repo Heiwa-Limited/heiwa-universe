@@ -301,6 +301,14 @@ fn test_app_update_dry_run_reports_install_target() {
         "expected update dry-run to expose install command: {stdout}"
     );
     assert!(
+        stdout.contains("source_mode: checkout-dev"),
+        "expected update dry-run to identify checkout-dev source mode: {stdout}"
+    );
+    assert!(
+        stdout.contains("official_source: GitHub Releases"),
+        "expected update dry-run to identify official GitHub release source: {stdout}"
+    );
+    assert!(
         stdout.contains("dry_run: true"),
         "expected dry-run marker: {stdout}"
     );

@@ -91,7 +91,9 @@ fn update(args: &[String]) -> Result<()> {
         .arg("--force");
 
     println!("heiwa app update");
+    println!("  source_mode: checkout-dev");
     println!("  source: {}", repo_root.display());
+    println!("  official_source: GitHub Releases");
     println!(
         "  target: {}",
         install_root.join("bin").join("heiwa").display()
