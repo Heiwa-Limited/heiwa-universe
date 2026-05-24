@@ -79,7 +79,68 @@ pub async fn execute_tool_calls(
 
     for call in tool_calls {
         let started_at = Utc::now().to_rfc3339();
-        let result = registry.call(&call.name, call.arguments.clone()).await;
+
+        let risk = match call.name.as_str() {
+            "deploy" | "app.deploy" => heiwa_drex::drex_gate::RiskLevel::Critical,
+            name if name.contains("write") || name.contains("delete") => heiwa_drex::drex_gate::RiskLevel::High,
+            name if name.contains("net") || name.contains("http") => heiwa_drex::drex_gate::RiskLevel::Medium,
+            _ => heiwa_drex::drex_gate::RiskLevel::Low,
+        };
+
+        let surface = std::env::var("HEIWA_SURFACE").unwrap_or_else(|_| "cli".to_string());
+        let verdict = heiwa_drex::drex_gate::evaluate_approval_policy(
+            &call.name,
+            &serde_json::to_string(&call.arguments).unwrap_or_default(),
+            risk,
+            &surface,
+        );
+
+        let mut approved = true;
+        let mut denied_reason = None;
+
+        if let heiwa_drex::drex_gate::ApprovalVerdict::AwaitingApproval { request_id, request_path } = verdict {
+            if let Err(err) = heiwa_drex::drex_gate::stage_approval_request(
+                &request_id,
+                &request_path,
+                &call.name,
+                &serde_json::to_string(&call.arguments).unwrap_or_default(),
+                risk,
+                &surface,
+                &call.arguments,
+            ) {
+                eprintln!("Failed to stage approval request: {}", err);
+            }
+
+            println!("\n[HOLD] Action requires operator approval: {} | ID: {}", call.name, request_id);
+            println!("Run: heiwa approvals decide {} --approve", request_id);
+
+            match heiwa_drex::drex_gate::wait_for_decision(&request_id, std::time::Duration::from_secs(300)) {
+                Ok(outcome) if outcome == "approved" => {
+                    println!("\n[APPROVED] Resuming execution for {} | ID: {}", call.name, request_id);
+                }
+                Ok(outcome) => {
+                    println!("\n[DENIED] Halting execution for {} | ID: {} | Outcome: {}", call.name, request_id, outcome);
+                    approved = false;
+                    denied_reason = Some(format!("denied: {}", outcome));
+                }
+                Err(err) => {
+                    println!("\n[TIMEOUT] Halting execution for {} | ID: {} | Reason: {}", call.name, request_id, err);
+                    approved = false;
+                    denied_reason = Some(format!("timeout: {}", err));
+                }
+            }
+        }
+
+        let result = if approved {
+            registry.call(&call.name, call.arguments.clone()).await
+        } else {
+            Err(heiwa_mcp::McpError::PolicyDenied(
+                heiwa_mcp::PolicyDenial::MissingLease {
+                    tool: format!("{} (gated, approval: {})", call.name, denied_reason.unwrap_or_default()),
+                }
+            ))
+        };
+
         let completed_at = Utc::now().to_rfc3339();
 
         match result {

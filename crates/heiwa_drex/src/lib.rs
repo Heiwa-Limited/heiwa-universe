@@ -29,6 +29,8 @@
 //! - It does not cost-optimize across providers. The priority ladder is
 //!   operator-intent-first: "use what the user already pays for."
 
+pub mod drex_gate;
+
 use std::sync::Arc;
 
 use async_trait::async_trait;

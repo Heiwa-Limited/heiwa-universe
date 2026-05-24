@@ -1281,12 +1281,14 @@ dependencies = [
  "heiwa-session",
  "heiwa-stdb",
  "heiwa-tui",
+ "heiwa_drex",
  "heiwa_mcp",
  "heiwa_quota",
  "hostname",
  "serde",
  "serde_json",
  "sha1",
+ "tempfile",
  "tokio",
  "uuid",
 ]
@@ -1328,15 +1330,21 @@ dependencies = [
 name = "heiwa_drex"
 version = "0.1.0"
 dependencies = [
+ "anyhow",
  "async-trait",
+ "chrono",
+ "dirs 5.0.1",
  "heiwa-provider",
  "heiwa_mcp",
  "heiwa_quota",
  "heiwa_vault",
+ "serde",
+ "serde_json",
  "tempfile",
  "thiserror 1.0.69",
  "time",
  "tokio",
+ "uuid",
 ]
 
 [[package]]
