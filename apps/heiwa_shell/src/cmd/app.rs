@@ -19,6 +19,9 @@ use tokio::time::{self, Duration};
 pub(crate) const DEFAULT_PORT: u16 = 7474;
 const HEARTBEAT_TTL_SECS: i64 = 120;
 const WS_GUID: &str = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11";
+const GITHUB_RELEASES_URL: &str = "https://github.com/Strategizing/heiwa-universe/releases";
+const GITHUB_LATEST_RELEASE_API: &str =
+    "https://api.github.com/repos/Strategizing/heiwa-universe/releases/latest";
 
 #[derive(Debug, Clone, Serialize)]
 pub(crate) struct LocalAppProbe {
@@ -66,6 +69,40 @@ fn update(args: &[String]) -> Result<()> {
     }
 
     let dry_run = has_flag(args, "--dry-run");
+    let source = flag_value(args, "--source").unwrap_or_else(|| "github".to_string());
+
+    match source.as_str() {
+        "github" => update_from_github_release(dry_run),
+        "checkout" => update_from_checkout(dry_run),
+        other => Err(anyhow!(
+            "invalid --source value: {other} (expected github or checkout)"
+        )),
+    }
+}
+
+fn update_from_github_release(dry_run: bool) -> Result<()> {
+    let install_root = heiwa_install::get_heiwa_dir();
+    println!("heiwa app update");
+    println!("  source_mode: github-release");
+    println!("  source: {GITHUB_RELEASES_URL}");
+    println!("  release_api: {GITHUB_LATEST_RELEASE_API}");
+    println!("  platform: {}", github_release_platform());
+    println!(
+        "  target: {}",
+        install_root.join("bin").join("heiwa").display()
+    );
+    println!("  restart_policy: prompt-before-restart");
+    if dry_run {
+        println!("  dry_run: true");
+        return Ok(());
+    }
+
+    Err(anyhow!(
+        "GitHub release update is not implemented until release asset verification is wired; use --dry-run or --source checkout for dev-only reinstall"
+    ))
+}
+
+fn update_from_checkout(dry_run: bool) -> Result<()> {
     let repo_root = find_repo_root(env::current_dir()?)
         .ok_or_else(|| anyhow!("heiwa app update must run from a heiwa-universe checkout"))?;
     let shell_manifest = repo_root
@@ -110,6 +147,15 @@ fn update(args: &[String]) -> Result<()> {
     }
     println!("  status: updated");
     Ok(())
+}
+
+fn github_release_platform() -> &'static str {
+    match (env::consts::OS, env::consts::ARCH) {
+        ("macos", "aarch64") => "macos-aarch64",
+        ("linux", "x86_64") => "linux-x86_64",
+        ("windows", "x86_64") => "windows-x86_64",
+        _ => "unsupported",
+    }
 }
 
 fn find_repo_root(start: PathBuf) -> Option<PathBuf> {
@@ -1640,7 +1686,7 @@ fn print_help() {
     println!();
     println!("Usage:");
     println!("  heiwa app start [--port N] [--no-open]");
-    println!("  heiwa app update [--dry-run]");
+    println!("  heiwa app update [--source github|checkout] [--dry-run]");
     println!("  heiwa app runtime status [--json]");
     println!("  heiwa app status [--json]");
     println!("  heiwa app [--json]");
@@ -1652,9 +1698,12 @@ fn print_update_help() {
     println!("heiwa app update");
     println!();
     println!("Usage:");
-    println!("  heiwa app update [--dry-run]");
+    println!("  heiwa app update [--source github|checkout] [--dry-run]");
     println!();
-    println!("Reinstalls the local heiwa binary from the current heiwa-universe checkout.");
+    println!("Defaults to GitHub Releases for user/runtime updates.");
+    println!(
+        "Use --source checkout only for explicit developer reinstall from the current checkout."
+    );
 }
 
 fn print_start_help() {

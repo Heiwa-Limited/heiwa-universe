@@ -56,7 +56,8 @@ officially installed and updated from the GitHub-backed install path. Local
 checkout runs are temporary verification processes and should not become the
 default product runtime.
 
-`heiwa app update --dry-run` is the safe probe. It should report:
+`heiwa app update --dry-run` is the safe probe for the installed runtime and
+defaults to GitHub Releases. It should report:
 
 - installed version and path
 - target version, channel, and release URL
@@ -155,6 +156,7 @@ When working from the checkout instead of the installed binary, prefer:
 
 ```bash
 cargo run -q -p heiwa-shell --bin heiwa -- app runtime status --json
+cargo run -q -p heiwa-shell --bin heiwa -- app update --source checkout --dry-run
 ```
 
 Check the reported `cli_path`, `state_dir`, `local_app.url`, and
@@ -186,7 +188,9 @@ SPA serving. Assume you are probing the wrong runtime, an old runtime, or an
 unimplemented route until proven otherwise.
 
 Only run `heiwa app update` when the operator explicitly wants the installed
-runtime changed. `--dry-run` is the default probe.
+runtime changed. `--dry-run` is the default probe. Use
+`heiwa app update --source checkout` only for developer reinstall from the
+current checkout.
 
 ### 4. Start safely
 

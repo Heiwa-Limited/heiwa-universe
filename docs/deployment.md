@@ -46,6 +46,12 @@ branch can serve the endpoint. It does not prove the installed product runtime o
 `7474` has been updated. The installed runtime becomes current only after the
 source is promoted and the machine updates through the install/update path.
 
+CLI contract:
+
+- `heiwa app update --dry-run` describes the GitHub Releases update path.
+- `heiwa app update --source checkout --dry-run` describes developer reinstall
+  from the current checkout.
+
 ## Protected Backend Workflow
 
 GitHub, Cloudflare, and SpacetimeDB are protected company backends with separate
