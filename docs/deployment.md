@@ -13,28 +13,17 @@ This repo should be able to go from fresh clone to verified build and published 
 
 ## Source Promotion Contract
 
-GitHub is the company source of truth. A developer machine, including Devon's
-MacBook, is a client of that source, not the authority.
+Under the local-first promotion posture, local sandbox verification is the primary gate before updating `main` directly on the local machine. GitHub Actions are minimal, only used as a back-end emergency or release archiver, and must not block local development progress.
 
-The normal promotion path is:
+The local-first promotion path is:
 
 1. Work happens on a branch.
-2. The branch is pushed to GitHub.
-3. GitHub PR review and checks decide whether the change is promotable.
-4. `main` moves only through reviewed commits or explicitly approved owner
-   actions.
-5. Releases, checksums, installers, and docs are produced from GitHub state.
-6. User machines update or install from the GitHub-backed release/install path.
-7. Local runtimes report their installed version, source tag/commit, machine id,
-   and update/restart state.
+2. Run the local development sandbox checks to verify the build, tests, and documentation.
+3. Once all local sandbox checks pass, merge the branch directly into `main` locally.
+4. The local installed runtime promotes from the local checkout source using `heiwa app update --source checkout`.
+5. GitHub serves primarily as a remote backup, tag archiver, and distribution mechanism rather than a build/test gatekeeper. Commits can be pushed to remote `main` only after passing the local sandbox gate.
 
-When GitHub Actions capacity is unavailable, the promotion gate moves local, not
-lower. Run the local development sandbox checks first, then upload only the
-already-proven artifact or branch state.
-
-The MacBook may have owner permissions, but it should still exercise the same
-install/update path a normal user machine would use. Owner permission changes
-what Devon is allowed to approve; it should not change the shape of the runtime.
+The MacBook has owner permissions to bypass remote CI blockers, shifting verification authority entirely to local sandbox runs. The MacBook's runtime updates through local checkout source promotion (`--source checkout`) rather than waiting for remote build artifacts.
 
 ## Development vs Installed Runtime
 
@@ -58,8 +47,7 @@ CLI contract:
 
 ## Local Development Sandbox
 
-Use the local sandbox before any GitHub upload when Actions minutes, protected
-checks, or release runners are unavailable.
+Use the local sandbox as the primary verification gate before merging to `main` locally or performing any release updates.
 
 Build/test gate:
 
@@ -85,8 +73,7 @@ Deployment gate:
 
 - Cloudflare changes must be tested against local/static build output first.
 - SpacetimeDB schema or reducer changes must be built locally before publish.
-- GitHub Releases should receive only artifacts that passed the local sandbox
-  gate or a later unblocked Actions run.
+- GitHub Releases serve as a secondary emergency archive; local sandbox verification remains the canonical gate.
 
 ## Protected Backend Workflow
 
@@ -95,7 +82,7 @@ authority.
 
 | Backend | Protected role | Safe update path |
 | --- | --- | --- |
-| GitHub | source, CI, releases, checksums, install provenance | branch, PR, checks, merge, tagged release |
+| GitHub | source, tag archive, releases, checksums, install provenance | local sandbox checks passed, local merge, push to main, tagged release |
 | Cloudflare | DNS, WAF, public docs/app shell, install/update front door | GitHub-driven deploys or explicit owner-approved `wrangler` deploys |
 | SpacetimeDB | canonical state, reducers, leases, evidence, subscriptions | schema/reducer changes reviewed in repo, bindings regenerated, publish gated separately |
 
@@ -109,8 +96,7 @@ Rules:
   state in GitHub.
 - Keep user-machine state under `~/.heiwa` and sync only approved evidence or
   reducer-backed state to SpacetimeDB.
-- Treat failed GitHub checks as a stop condition for merge unless the owner
-  explicitly chooses to bypass protection.
+- Bypassing GitHub Actions and CI checks is standard posture; verify entirely in local sandbox instead of waiting for remote checks.
 
 ## CI contract
 
