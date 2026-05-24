@@ -28,6 +28,10 @@ The normal promotion path is:
 7. Local runtimes report their installed version, source tag/commit, machine id,
    and update/restart state.
 
+When GitHub Actions capacity is unavailable, the promotion gate moves local, not
+lower. Run the local development sandbox checks first, then upload only the
+already-proven artifact or branch state.
+
 The MacBook may have owner permissions, but it should still exercise the same
 install/update path a normal user machine would use. Owner permission changes
 what Devon is allowed to approve; it should not change the shape of the runtime.
@@ -51,6 +55,38 @@ CLI contract:
 - `heiwa app update --dry-run` describes the GitHub Releases update path.
 - `heiwa app update --source checkout --dry-run` describes developer reinstall
   from the current checkout.
+
+## Local Development Sandbox
+
+Use the local sandbox before any GitHub upload when Actions minutes, protected
+checks, or release runners are unavailable.
+
+Build/test gate:
+
+```bash
+cargo test -p heiwa-shell
+uv run --extra docs mkdocs build --strict
+bash scripts/check_release_metadata.sh
+```
+
+Release gate:
+
+```bash
+bash scripts/package_release_sandbox.sh --version dev-local
+```
+
+The sandbox script builds the host-platform release binary, packages the same
+runtime files as the GitHub release workflow, writes a checksum manifest, and
+smokes the packaged `heiwa` binary with `app update --dry-run`. It writes under
+`/tmp/heiwa-release-sandbox` by default and does not install, upload, tag, or
+mutate `~/.heiwa`.
+
+Deployment gate:
+
+- Cloudflare changes must be tested against local/static build output first.
+- SpacetimeDB schema or reducer changes must be built locally before publish.
+- GitHub Releases should receive only artifacts that passed the local sandbox
+  gate or a later unblocked Actions run.
 
 ## Protected Backend Workflow
 
