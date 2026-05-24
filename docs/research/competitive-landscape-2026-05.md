@@ -38,6 +38,22 @@ Peer products that overlap Heiwa on at least one axis: routing fabric, agent run
 5. **Cloud-account requirement is the trap.** Warp's biggest churn driver is "must sign in to Warp Cloud." Heiwa should make every paid feature available against local state alone, with cloud as opt-in evidence sync.
 6. **Anti-pattern: power without leases.** Open Interpreter is a useful contrast — same intent surface, no policy plane. Heiwa's capability fabric (`docs/capability-fabric.md`) is the differentiator; protect it.
 
+## 2026-05-24 Agentic Assistant Mining
+
+Credits and source posture: these notes mine public positioning and repository
+docs for product patterns. They are not claims that Heiwa has these features.
+
+| Source | Useful pattern | Heiwa implication |
+|---|---|---|
+| [Clerk AI](https://clerk.ai/product) | Voice, RCS, SMS, WhatsApp, warm transfer, unified inbox, cross-channel memory, and compliance are treated as one conversation workflow. | Heiwa intake should normalize channel events into one typed `InboxItem` stream instead of building separate product silos for calls, messages, and email. |
+| [NousResearch/hermes-agent](https://github.com/NousResearch/hermes-agent) | Self-improving skills, FTS recall, scheduled automations, messaging gateway, multiple terminal backends, `doctor`, `update`, and provider switching are first-class runtime surfaces. | Heiwa should treat learned skills as evidence-backed procedural memory, keep gateway adapters isolated, and make `doctor`/`update` prove runtime authority before action. |
+| [Sim / Ema](https://workflow.ema.ms/) | Agent templates, workflow logs, audit trails, access control, BYOK, self-hosting, and 1,000+ integrations are packaged as an agent workspace. | Heiwa should ship a small set of typed workflow templates only after the state spine exists; audit/event evidence must precede template sprawl. |
+
+Pattern to preserve: the best peers make the agent reachable where the user
+already works, but the durable differentiator is still typed memory,
+authorization, evidence, and update provenance. For Heiwa, that means channel
+breadth comes after the Intake/Execution/Evidence spine is deterministic.
+
 ## What Heiwa needs to ingest to keep deciding well
 
 These are concrete data dependencies the router and operator surface need. None are speculative.

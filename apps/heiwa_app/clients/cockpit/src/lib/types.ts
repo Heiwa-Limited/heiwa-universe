@@ -70,6 +70,33 @@ export interface RateGroup {
   notes: string | null;
 }
 
+export interface SourceRef {
+  source_id: string;
+  source_type: "dispatch_result" | "event_log" | string;
+  label: string;
+  uri: string;
+}
+
+export interface ReceiptRef {
+  kind: string;
+  ref: string;
+}
+
+export interface InboxItem {
+  item_id: string;
+  kind: "dispatch_result" | "event" | string;
+  plane: "intake" | "execution" | "evidence" | string;
+  priority: "low" | "normal" | "high" | string;
+  pinned: boolean;
+  status: string;
+  title: string;
+  summary: string;
+  occurred_at: string;
+  source: SourceRef;
+  subject_ref: string;
+  receipt_refs: ReceiptRef[];
+}
+
 export interface HistorySummary {
   sessions: Array<{
     id: string;

@@ -278,7 +278,7 @@ fn test_app_help_exposes_boot_command_boundary() {
 }
 
 #[test]
-fn test_app_update_dry_run_reports_install_target() {
+fn test_app_update_dry_run_defaults_to_github_release_source() {
     let output = Command::new("cargo")
         .args(&[
             "run",
@@ -297,8 +297,61 @@ fn test_app_update_dry_run_reports_install_target() {
     assert!(output.status.success());
     let stdout = String::from_utf8_lossy(&output.stdout);
     assert!(
+        stdout.contains("source_mode: github-release"),
+        "expected update dry-run to identify GitHub release source mode: {stdout}"
+    );
+    assert!(
+        stdout.contains("source: https://github.com/Strategizing/heiwa-universe/releases"),
+        "expected update dry-run to identify GitHub Releases as source: {stdout}"
+    );
+    assert!(
+        stdout.contains(
+            "release_api: https://api.github.com/repos/Strategizing/heiwa-universe/releases/latest"
+        ),
+        "expected update dry-run to expose latest release API: {stdout}"
+    );
+    assert!(
+        stdout.contains("restart_policy: prompt-before-restart"),
+        "expected update dry-run to expose restart policy: {stdout}"
+    );
+    assert!(
+        stdout.contains("dry_run: true"),
+        "expected dry-run marker: {stdout}"
+    );
+}
+
+#[test]
+fn test_app_update_checkout_source_reports_dev_reinstall_target() {
+    let output = Command::new("cargo")
+        .args(&[
+            "run",
+            "-p",
+            "heiwa-shell",
+            "--bin",
+            "heiwa",
+            "--",
+            "app",
+            "update",
+            "--source",
+            "checkout",
+            "--dry-run",
+        ])
+        .output()
+        .expect("failed to execute app update checkout dry-run");
+
+    assert!(output.status.success());
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
         stdout.contains("cargo install --path apps/heiwa_shell --root ~/.heiwa --locked --force"),
-        "expected update dry-run to expose install command: {stdout}"
+        "expected checkout update dry-run to expose install command: {stdout}"
+    );
+    assert!(
+        stdout.contains("source_mode: checkout-dev"),
+        "expected checkout update dry-run to identify checkout-dev source mode: {stdout}"
+    );
+    assert!(
+        stdout.contains("official_source: GitHub Releases"),
+        "expected checkout update dry-run to identify official GitHub release source: {stdout}"
     );
     assert!(
         stdout.contains("dry_run: true"),

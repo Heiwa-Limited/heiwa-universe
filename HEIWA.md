@@ -19,6 +19,39 @@ Current shape:
 - Providers still own their own inference internals.
 - Heiwa turns the user’s local models and connected providers into one coherent operator experience.
 
+## The Three Planes
+
+Heiwa is taught to operators as three planes that compose one flow.
+
+**User-facing one-liner:**
+
+> Heiwa watches what matters, summarizes what changed, stages what needs action, executes what is safe, and proves what happened.
+
+| Plane | What it does | Current repo surfaces |
+| --- | --- | --- |
+| **Intake** | One command bar plus passive feeds. Captures intent and signal from operator commands, mail, calendar, messages, forums, GitHub, files, and runtime alerts. | `apps/heiwa_shell/` REPL and `session attach` are the current intake surface. Passive feeds are target work. |
+| **Execution** | DREX routes work to local models, provider CLIs, tools, workers, or connectors under leases, budgets, and approval gates. | `apps/heiwa_core/` (DREX), `apps/heiwa_orchestrator/`, `crates/heiwa_loop/`, `crates/heiwa_provider/`, `crates/heiwa_session/`. |
+| **Evidence** | Every useful read or action emits a source-linked receipt visible locally, and mirrored to SpacetimeDB when online. | `crates/heiwa_stdb/`, `apps/heiwa_core/src/stdb/`, `apps/heiwa_orchestrator/src/stdb/`. Receipt schema and source-span syntax are still partial. |
+
+The planes are a flow lens. They sit alongside the layer anatomy in [What Heiwa Is](#what-heiwa-is) (user surface, execution kernel, enterprise platform), which is an ownership lens. Both are correct: planes describe **how a task flows**, layers describe **who owns what**.
+
+### Classification rule
+
+Every feature, connector, doc change, and release item must classify as one of:
+
+- **Intake** — captures intent or external signal
+- **Execution** — routes, runs, or stages work
+- **Evidence** — records, exposes, or proves what happened
+- **Out of scope** — does not advance any plane and should be deferred or rejected
+
+### Current vs target maturity per plane
+
+| Plane | Current (2026-05) | Target |
+| --- | --- | --- |
+| Intake | `heiwa` REPL plus `session attach`. No passive feeds wired. | Command bar plus calendar, mail, messages, forums, GitHub, files, and runtime alerts as governed feeds. |
+| Execution | DREX kernel plus provider adapters: Claude Code, Codex, Gemini CLI, and Ollama are wired in the shell adapter path; Antigravity is discovered and normalized; Codex execution depth and evidence still lag. Bounded loops are real in `crates/heiwa_loop/`. No staged-approval outbox yet. | Approval-staged outbox for every risky write action. Honest per-provider execution depth surfaced at routing time. |
+| Evidence | Local state under `~/.heiwa/` plus partial STDB mirror. Receipt schema not fully canonical. Source-span syntax (`file:line-line`, `message_id`, `event_id`, `thread_id`, `receipt_id`) not implemented. | Source-spanned receipts on every action. Canonical STDB evidence schema. Local-first; mirrors when online. |
+
 ## Optimization Doctrine
 
 Heiwa does not optimize for “most frontier model calls.” It optimizes for `quality + accuracy + efficiency`.
@@ -659,7 +692,7 @@ References:
 - device-aware routing
 - Rust as primary product implementation
 - Python as bounded compatibility surface
-- SpacetimeDB as canonical adjudication and evidence plane
+- SpacetimeDB as canonical adjudication and evidence sync backend (the Evidence plane is the flow; STDB is the backend that materializes it)
 - progressive exposure of internals, not opaque platform behavior
 
 ## Companion Context Files
