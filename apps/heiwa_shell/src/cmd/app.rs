@@ -426,7 +426,7 @@ impl RuntimeStatus {
 }
 
 async fn handle_connection(mut stream: TcpStream, started_at: Arc<String>) -> Result<()> {
-    let request = read_http_request(&mut stream).await?;
+    let (request, body) = read_http_request_and_body(&mut stream).await?;
     if request.is_empty() {
         return Ok(());
     }
@@ -441,6 +441,42 @@ async fn handle_connection(mut stream: TcpStream, started_at: Arc<String>) -> Re
         return write_response(&mut stream, 204, "text/plain", Vec::new(), false).await;
     }
     let head_only = method == "HEAD";
+
+    if method == "POST" && path == "/api/v1/repl" {
+        let parsed_body: Value = serde_json::from_str(&body).unwrap_or_else(|_| json!({}));
+        let prompt = parsed_body.get("prompt").and_then(Value::as_str).unwrap_or("").to_string();
+
+        let payload = match crate::execute_repl_turn(&prompt).await {
+            Ok((response, trace)) => {
+                json!({
+                    "ok": true,
+                    "data": {
+                        "response": response,
+                        "trace": trace,
+                    }
+                })
+            }
+            Err(err) => {
+                json!({
+                    "ok": false,
+                    "error": {
+                        "code": "execution_failed",
+                        "message": err,
+                    }
+                })
+            }
+        };
+
+        return write_response(
+            &mut stream,
+            200,
+            "application/json",
+            payload.to_string().into_bytes(),
+            false,
+        )
+        .await;
+    }
+
     if method != "GET" && !head_only {
         return write_response(
             &mut stream,
@@ -468,23 +504,54 @@ async fn handle_connection(mut stream: TcpStream, started_at: Arc<String>) -> Re
     serve_static(&mut stream, path, head_only).await
 }
 
-async fn read_http_request(stream: &mut TcpStream) -> Result<String> {
+async fn read_http_request_and_body(stream: &mut TcpStream) -> Result<(String, String)> {
     let mut data = Vec::new();
     let mut buf = [0u8; 1024];
+    let mut headers_len = None;
+
     loop {
         let n = stream.read(&mut buf).await?;
         if n == 0 {
             break;
         }
         data.extend_from_slice(&buf[..n]);
-        if data.windows(4).any(|w| w == b"\r\n\r\n") {
+        if let Some(pos) = data.windows(4).position(|w| w == b"\r\n\r\n") {
+            headers_len = Some(pos + 4);
             break;
         }
         if data.len() > 64 * 1024 {
             return Err(anyhow!("request headers too large"));
         }
     }
-    Ok(String::from_utf8_lossy(&data).to_string())
+
+    let headers_len = match headers_len {
+        Some(len) => len,
+        None => return Err(anyhow!("missing http headers separator")),
+    };
+
+    let headers_str = String::from_utf8_lossy(&data[..headers_len]).to_string();
+
+    let mut content_length = 0;
+    if let Some(cl_str) = header_value(&headers_str, "content-length") {
+        if let Ok(len) = cl_str.trim().parse::<usize>() {
+            content_length = len;
+        }
+    }
+
+    let total_len = headers_len + content_length;
+    while data.len() < total_len {
+        let n = stream.read(&mut buf).await?;
+        if n == 0 {
+            break;
+        }
+        data.extend_from_slice(&buf[..n]);
+        if data.len() > 10 * 1024 * 1024 {
+            return Err(anyhow!("request body too large"));
+        }
+    }
+
+    let body_str = String::from_utf8_lossy(&data[headers_len..total_len]).to_string();
+    Ok((headers_str, body_str))
 }
 
 async fn handle_websocket(
@@ -580,7 +647,7 @@ async fn write_response(
          Cache-Control: no-store\r\n\
          Access-Control-Allow-Origin: *\r\n\
          Access-Control-Allow-Headers: content-type, authorization\r\n\
-         Access-Control-Allow-Methods: GET, OPTIONS\r\n\
+         Access-Control-Allow-Methods: GET, POST, OPTIONS\r\n\
          Connection: close\r\n\
          \r\n",
         body.len()

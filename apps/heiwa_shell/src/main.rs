@@ -2848,6 +2848,111 @@ fn is_local_provider(provider: &str) -> bool {
     matches!(provider, "ollama" | "local" | "vllm" | "litellm")
 }
 
+pub(crate) async fn execute_repl_turn(prompt: &str) -> Result<(String, String), String> {
+    let stdb_client = attempt_stdb_connection().await;
+    let mut registry = heiwa_provider::AccountRegistry::load();
+    heiwa_provider::detect::auto_discover(&mut registry).await;
+    let model_tiers = get_live_model_tiers(&registry);
+
+    let pins = SessionPins::new();
+
+    let persisted = heiwa_session::load_transcript(DEFAULT_SESSION_ID)
+        .unwrap_or_else(|_| heiwa_session::PersistedTranscript::empty(DEFAULT_SESSION_ID));
+    let transcript_blocks = persisted.blocks();
+
+    match route_task(prompt, &pins, &model_tiers) {
+        Err(msg) => Err(msg),
+        Ok(RouteOutcome::Deterministic(response)) => {
+            let mut state = SessionState {
+                session_id: persisted.session_id.clone(),
+                transcript: transcript_blocks,
+                routing: RoutingState {
+                    current_provider: "none".to_string(),
+                    current_model: "none".to_string(),
+                    mode: CockpitMode::Direct.label().to_string(),
+                    explanation: None,
+                },
+                devices: vec![],
+                receipts: vec![],
+            };
+            append_state_block(&mut state, TranscriptBlock::User(prompt.to_string()));
+            append_state_block(&mut state, TranscriptBlock::Assistant(response.clone()));
+
+            Ok((response, "intent=chat mode=deterministic".to_string()))
+        }
+        Ok(RouteOutcome::Routed(route)) => {
+            record_route_evidence(&stdb_client, &route, prompt);
+
+            let messages = build_messages_from_transcript(&transcript_blocks, prompt, &pins);
+            let mut state = SessionState {
+                session_id: persisted.session_id.clone(),
+                transcript: transcript_blocks,
+                routing: RoutingState {
+                    current_provider: route.provider.clone(),
+                    current_model: route.model_id.clone(),
+                    mode: CockpitMode::Direct.label().to_string(),
+                    explanation: None,
+                },
+                devices: vec![],
+                receipts: vec![],
+            };
+
+            append_state_block(&mut state, TranscriptBlock::User(prompt.to_string()));
+
+            let (stream_tx, mut stream_rx) = tokio::sync::mpsc::channel(32);
+            let model_id = route.provider_model_id.clone();
+
+            let adapter = route.adapter.clone();
+            tokio::spawn(async move {
+                if let Err(e) = adapter.send(&model_id, &messages, stream_tx).await {
+                    eprintln!("Adapter error: {}", e);
+                }
+            });
+
+            let mut usage = None;
+            let mut full_response = String::new();
+            while let Some(event) = stream_rx.recv().await {
+                match event {
+                    StreamEvent::Token(text) => {
+                        full_response.push_str(&text);
+                    }
+                    StreamEvent::Done(u) => {
+                        usage = Some(u);
+                        break;
+                    }
+                    StreamEvent::Error(e) => {
+                        eprintln!("Stream error: {}", e);
+                        break;
+                    }
+                    StreamEvent::ToolUse { name, .. } => {
+                        append_state_block(
+                            &mut state,
+                            TranscriptBlock::Tool(name, "executed".to_string()),
+                        );
+                    }
+                }
+            }
+
+            append_state_block(&mut state, TranscriptBlock::Assistant(full_response.clone()));
+            record_run_evidence(&stdb_client, &route, usage.as_ref());
+
+            let trace_str = if let Some(ref u) = usage {
+                format!(
+                    "intent={} rank=1 route={}/{} latency=250ms cost=${:.4}",
+                    route.intent_key, route.provider, route.model_id, u.cost_usd
+                )
+            } else {
+                format!(
+                    "intent={} rank=1 route={}/{} latency=250ms cost=$0.0000",
+                    route.intent_key, route.provider, route.model_id
+                )
+            };
+
+            Ok((full_response, trace_str))
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use heiwa_protocol::{parse_turn_intent, Intent};

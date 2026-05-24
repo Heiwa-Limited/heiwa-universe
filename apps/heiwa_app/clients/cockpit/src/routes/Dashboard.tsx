@@ -104,32 +104,41 @@ export default function Dashboard(): JSX.Element {
     setInputText("");
     clearMedia();
 
-    // Simulated Agentic processing & routing evaluation
-    setTimeout(() => {
-      const isDeploy = cleanPrompt.toLowerCase().includes("deploy");
-      const isCode = cleanPrompt.toLowerCase().includes("code") || cleanPrompt.toLowerCase().includes("build") || cleanPrompt.toLowerCase().includes("audit");
-      
-      let answer = "";
-      let trace = "";
-
-      if (isDeploy) {
-        answer = "Gated action initiated. Task 'Production Deploy' classified as CRITICAL risk. Halting loop and staging approval JSON under ~/.heiwa/state/dispatch/requests/. Run 'heiwa approvals decide <id> --approve' to proceed.";
-        trace = "intent=deploy risk=critical surface=cockpit-app -> [HOLD] staged req_a7c8b9";
-      } else if (isCode) {
-        answer = "Analyzing workspace and local checkouts. Sandbox compiled successfully. Local Qwen 3.5 (9B) completed the pre-flight checks and routed the high-level refactoring to the cloud cache lane (100% hits).";
-        trace = "intent=build rank=1 route=google/gemini-pro prompt-cache=HIT latency=280ms cost=$0.0003";
-      } else {
-        answer = "Prompt received. Successfully queried local Ollama repository with 0ms egress latency. All vaults and secrets remain strictly isolated within ~/.heiwa on this machine.";
-        trace = "intent=general rank=0 route=local/ollama-qwen-3.5 latency=180ms cost=$0.0000";
-      }
-
-      setMessages(prev => [...prev, {
-        id: `assist-${Date.now()}`,
-        role: "assistant",
-        text: answer,
-        trace
-      }]);
-    }, 1500);
+    // Call real backend execution engine
+    fetch("/api/v1/repl", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ prompt: cleanPrompt })
+    })
+      .then(res => {
+        if (!res.ok) throw new Error(`HTTP error: ${res.status}`);
+        return res.json();
+      })
+      .then(data => {
+        if (data.ok) {
+          setMessages(prev => [...prev, {
+            id: `assist-${Date.now()}`,
+            role: "assistant",
+            text: data.data.response,
+            trace: data.data.trace
+          }]);
+        } else {
+          setMessages(prev => [...prev, {
+            id: `assist-${Date.now()}`,
+            role: "assistant",
+            text: `Error: ${data.error?.message || "Execution engine failed"}`,
+            trace: "status=failed"
+          }]);
+        }
+      })
+      .catch(err => {
+        setMessages(prev => [...prev, {
+          id: `assist-${Date.now()}`,
+          role: "assistant",
+          text: `Egress failed: ${err.message || "Is the local heiwa server running?"}`,
+          trace: "status=offline"
+        }]);
+      });
   };
 
   // Simulated Benchmarks Runner
