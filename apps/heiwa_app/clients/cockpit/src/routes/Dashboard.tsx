@@ -1,385 +1,355 @@
 import type { JSX } from "solid-js";
-import { For, createSignal, onCleanup, Show } from "solid-js";
-import { providers } from "../lib/providers";
+import { For, Show, createMemo, createSignal, onCleanup } from "solid-js";
+
+type InputMode = "text" | "voice" | "image" | "video";
+
+interface Artifact {
+  title: string;
+  file: string;
+  badge: "review" | "verified";
+  summary: string;
+}
 
 interface Message {
   id: string;
   role: "user" | "assistant";
   text: string;
-  media?: string;
-  mediaType?: "image" | "video";
   trace?: string;
+  media?: string;
+  artifacts?: Artifact[];
+  diff?: {
+    files: number;
+    additions: number;
+    deletions: number;
+  };
 }
 
+const initialArtifacts: Artifact[] = [
+  {
+    title: "Local Release Sandbox",
+    file: "scripts/package_release_sandbox.sh",
+    badge: "verified",
+    summary:
+      "Builds the host release binary, packages the archive, writes checksums, and smokes the packaged heiwa binary without upload.",
+  },
+  {
+    title: "Runtime Authority Contract",
+    file: "docs/deployment.md",
+    badge: "review",
+    summary:
+      "Separates installed GitHub-release runtime from checkout development mode and keeps Cloudflare/STDB as protected backends.",
+  },
+];
+
+const starterMessages: Message[] = [
+  {
+    id: "assistant-boot",
+    role: "assistant",
+    text:
+      "Heiwa.app is in checkout verification mode. The installed user path points at GitHub Releases; local checkout reinstall stays explicit developer mode.",
+    trace: "source_mode=github-release; workspace=~/heiwa-universe",
+    artifacts: initialArtifacts,
+    diff: { files: 3, additions: 198, deletions: 0 },
+  },
+];
+
 export default function Dashboard(): JSX.Element {
-  const [inputMode, setInputMode] = createSignal<"text" | "voice" | "image" | "video">("text");
+  const [inputMode, setInputMode] = createSignal<InputMode>("text");
   const [inputText, setInputText] = createSignal("");
   const [isRecording, setIsRecording] = createSignal(false);
   const [isAnalyzing, setIsAnalyzing] = createSignal(false);
   const [uploadedMedia, setUploadedMedia] = createSignal<string | null>(null);
-  const [mediaType, setMediaType] = createSignal<"image" | "video" | null>(null);
-  
   const [voiceWave, setVoiceWave] = createSignal<number[]>([]);
-  const [messages, setMessages] = createSignal<Message[]>([
-    {
-      id: "init",
-      role: "assistant",
-      text: "Heiwa is active and compiled. I'm connected to your local CPU/RAM pipeline, local GPU VRAM via Ollama, and cloud prompt-cached API lanes. Ask me anything, drop a media file, or activate voice mode.",
-    }
-  ]);
+  const [messages, setMessages] = createSignal<Message[]>(starterMessages);
+  let waveInterval: ReturnType<typeof setInterval> | undefined;
 
-  // Live Resource Compiled Indicators (dynamically changing slightly to feel alive)
-  const [vram, setVram] = createSignal(5.8);
-  const [cpu, setCpu] = createSignal(14);
-  const [ram, setRam] = createSignal(44);
-  
-  const resourceTimer = setInterval(() => {
-    setVram(+(5.8 + (Math.random() * 0.4 - 0.2)).toFixed(1));
-    setCpu(Math.floor(12 + Math.random() * 6));
-    setRam(Math.floor(43 + Math.random() * 3));
-  }, 3000);
+  const modeLabel = createMemo(() => {
+    switch (inputMode()) {
+      case "voice":
+        return "Voice";
+      case "image":
+        return "Image";
+      case "video":
+        return "Video";
+      default:
+        return "Text";
+    }
+  });
 
   onCleanup(() => {
-    clearInterval(resourceTimer);
     if (waveInterval) clearInterval(waveInterval);
   });
 
-  // Simulated Voice waveform
-  let waveInterval: any;
-  const toggleVoiceRecording = () => {
-    if (isRecording()) {
-      setIsRecording(false);
+  const setMode = (mode: InputMode) => {
+    setInputMode(mode);
+    if (mode !== "voice" && waveInterval) {
       clearInterval(waveInterval);
+      setIsRecording(false);
       setVoiceWave([]);
-      
-      // Simulate voice submission
-      submitPrompt("Process this voice instruction to audit release sandbox", true);
-    } else {
-      setIsRecording(true);
-      setInputMode("voice");
-      waveInterval = setInterval(() => {
-        setVoiceWave(Array.from({ length: 24 }, () => Math.floor(Math.random() * 30) + 4));
-      }, 100);
     }
   };
 
-  // Drag and drop mock uploads
-  const handleMediaUpload = (type: "image" | "video") => {
+  const toggleVoiceRecording = () => {
+    if (isRecording()) {
+      setIsRecording(false);
+      if (waveInterval) clearInterval(waveInterval);
+      setVoiceWave([]);
+      setInputText("Voice instruction captured for local review.");
+      return;
+    }
+
+    setInputMode("voice");
+    setIsRecording(true);
+    waveInterval = setInterval(() => {
+      setVoiceWave(Array.from({ length: 22 }, () => Math.floor(Math.random() * 26) + 6));
+    }, 120);
+  };
+
+  const stageMedia = (type: "image" | "video") => {
+    setInputMode(type);
     setIsAnalyzing(true);
     setTimeout(() => {
       setIsAnalyzing(false);
-      setMediaType(type);
-      if (type === "image") {
-        setUploadedMedia("📸 mock_system_architecture_diagram.png");
-      } else {
-        setUploadedMedia("🎥 mock_ci_build_error_recording.mp4");
-      }
-    }, 1000);
+      setUploadedMedia(
+        type === "image" ? "runtime-screenshot.png" : "browser-verification.mov",
+      );
+    }, 500);
   };
 
   const clearMedia = () => {
     setUploadedMedia(null);
-    setMediaType(null);
   };
 
-  const handleSubmit = (e: Event) => {
+  const submitPrompt = (e: Event) => {
     e.preventDefault();
-    if (!inputText().trim() && !uploadedMedia()) return;
-    submitPrompt(inputText(), false);
-  };
+    const prompt = inputText().trim();
+    const media = uploadedMedia();
+    if (!prompt && !media) return;
 
-  const submitPrompt = (promptText: string, isVoice: boolean) => {
-    const userMsgId = `user-${Date.now()}`;
-    const cleanPrompt = promptText.trim() || (isVoice ? "🎤 Voice Command Input" : "Uploaded Multimodal Attachment");
-    
-    // Append user message
-    setMessages(prev => [...prev, {
-      id: userMsgId,
+    const userText = prompt || `Review attached ${inputMode()} evidence.`;
+    const userMessage: Message = {
+      id: `user-${Date.now()}`,
       role: "user",
-      text: cleanPrompt,
-      media: uploadedMedia() || undefined,
-      mediaType: mediaType() || undefined
-    }]);
-
+      text: userText,
+    };
+    if (media) userMessage.media = media;
+    setMessages((prev) => [...prev, userMessage]);
     setInputText("");
     clearMedia();
 
-    // Call real backend execution engine
     fetch("/api/v1/repl", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ prompt: cleanPrompt })
+      body: JSON.stringify({ prompt: userText }),
     })
-      .then(res => {
-        if (!res.ok) throw new Error(`HTTP error: ${res.status}`);
+      .then((res) => {
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
         return res.json();
       })
-      .then(data => {
-        if (data.ok) {
-          setMessages(prev => [...prev, {
-            id: `assist-${Date.now()}`,
+      .then((data) => {
+        setMessages((prev) => [
+          ...prev,
+          {
+            id: `assistant-${Date.now()}`,
             role: "assistant",
-            text: data.data.response,
-            trace: data.data.trace
-          }]);
-        } else {
-          setMessages(prev => [...prev, {
-            id: `assist-${Date.now()}`,
-            role: "assistant",
-            text: `Error: ${data.error?.message || "Execution engine failed"}`,
-            trace: "status=failed"
-          }]);
-        }
+            text: data.ok
+              ? data.data.response
+              : `Execution failed: ${data.error?.message ?? "unknown error"}`,
+            trace: data.ok ? data.data.trace : "status=failed",
+          },
+        ]);
       })
-      .catch(err => {
-        setMessages(prev => [...prev, {
-          id: `assist-${Date.now()}`,
-          role: "assistant",
-          text: `Egress failed: ${err.message || "Is the local heiwa server running?"}`,
-          trace: "status=offline"
-        }]);
+      .catch((err) => {
+        setMessages((prev) => [
+          ...prev,
+          {
+            id: `assistant-${Date.now()}`,
+            role: "assistant",
+            text: `Local runtime request failed: ${err.message ?? "unknown error"}`,
+            trace: "status=offline",
+          },
+        ]);
       });
   };
-
-  // Simulated Benchmarks Runner
-  const [runningBenchmarks, setRunningBenchmarks] = createSignal(false);
-  const [benchmarkResults, setBenchmarkResults] = createSignal<any>(null);
-
-  const runLocalBenchmarks = () => {
-    setRunningBenchmarks(true);
-    setBenchmarkResults(null);
-    setTimeout(() => {
-      setRunningBenchmarks(false);
-      setBenchmarkResults({
-        ttftCloud: "290ms",
-        ttftStandard: "1,450ms",
-        costSaving: "90%",
-        localVram: "5.8 GB",
-        latencyLocal: "180ms",
-        cachedRatio: "94.2%",
-        totalSavings: "$12.45 / 100K prompt runs"
-      });
-    }, 2000);
-  };
-
-  const connected = () =>
-    providers.providers.filter((p) => p.maturity === "stable").length;
-  const totalLanes = () => Object.keys(providers.lanes).length;
 
   return (
-    <section class="hero compact">
-      <p class="eyebrow">Local Cockpit</p>
-      <h1>Heiwa Consolidated Console</h1>
-      <p class="lede" style={{ "margin-bottom": "2rem" }}>
-        Your single local-first intake and execution layer. Speak, upload, or write to your compiled hardware and model pipelines.
-      </p>
+    <section class="workspace-dashboard">
+      <header class="session-hero">
+        <div>
+          <p class="session-kicker">Active workspace</p>
+          <h1>Local-first agent cockpit</h1>
+          <p class="session-copy">
+            One dense surface for intake, execution, evidence, update posture, and
+            provider routing.
+          </p>
+        </div>
+        <div class="session-status-strip" aria-label="Runtime status">
+          <span>GitHub release source</span>
+          <span>Checkout verification</span>
+          <span>Evidence preserved</span>
+        </div>
+      </header>
 
-      {/* 1. Compiled Resource Indicators */}
-      <div class="resource-grid">
-        <div class="glass-card resource-card gpu">
-          <span>Local GPU VRAM (Ollama)</span>
-          <strong>{vram()} GB</strong>
-          <div class="resource-progress">
-            <div class="resource-progress-bar" style={{ width: `${(vram() / 16) * 100}%`, background: "var(--text-gradient)" }}></div>
+      <div class="workspace-chat-panel">
+        <div class="chat-panel-header">
+          <div>
+            <span class="panel-label">Conversation</span>
+            <h2>Runtime alignment thread</h2>
           </div>
-          <small style={{ display: "block", "margin-top": "0.5rem", color: "#64748b", "font-size": "0.75rem" }}>Allocated: Qwen 3.5 9B (Quantized)</small>
-        </div>
-
-        <div class="glass-card resource-card cpu">
-          <span>Local CPU Load</span>
-          <strong>{cpu()}%</strong>
-          <div class="resource-progress">
-            <div class="resource-progress-bar" style={{ width: `${cpu()}%`, background: "var(--gold-gradient)" }}></div>
+          <div class="panel-meta">
+            <span>{messages().length} messages</span>
+            <span>{modeLabel()} mode</span>
           </div>
-          <small style={{ display: "block", "margin-top": "0.5rem", color: "#64748b", "font-size": "0.75rem" }}>Active workers: 2 live</small>
         </div>
 
-        <div class="glass-card resource-card ram">
-          <span>Local RAM Usage</span>
-          <strong>{ram()}%</strong>
-          <div class="resource-progress">
-            <div class="resource-progress-bar" style={{ width: `${ram()}%`, background: "var(--magenta-gradient)" }}></div>
-          </div>
-          <small style={{ display: "block", "margin-top": "0.5rem", color: "#64748b", "font-size": "0.75rem" }}>Sovereign memory isolated</small>
-        </div>
-
-        <div class="glass-card resource-card quota">
-          <span>Cloud Cache savings</span>
-          <strong>90% cost</strong>
-          <div class="resource-progress">
-            <div class="resource-progress-bar" style={{ width: "90%", background: "var(--success-gradient)" }}></div>
-          </div>
-          <small style={{ display: "block", "margin-top": "0.5rem", color: "#64748b", "font-size": "0.75rem" }}>Prompt-Cache aligned</small>
-        </div>
-      </div>
-
-      {/* 2. Interactive Omni-Input Layer */}
-      <div class="glass-card" style={{ "margin-bottom": "2rem" }}>
-        <div class="input-modes-bar">
-          <button class="mode-btn" classList={{ active: inputMode() === "text" }} onClick={() => setInputMode("text")}>
-            ⌨️ Text Prompt
-          </button>
-          <button class="mode-btn" classList={{ active: inputMode() === "voice" }} onClick={() => setInputMode("voice")}>
-            🎤 Voice Instruction
-          </button>
-          <button class="mode-btn" classList={{ active: inputMode() === "image" }} onClick={() => setInputMode("image")}>
-            📸 Image Attach
-          </button>
-          <button class="mode-btn" classList={{ active: inputMode() === "video" }} onClick={() => setInputMode("video")}>
-            🎥 Video Clip
-          </button>
-        </div>
-
-        <div class="omni-input-container">
-          {/* Voice Mode View */}
-          <Show when={inputMode() === "voice"}>
-            <div style={{ text: "center", padding: "1rem" }}>
-              <p style={{ color: "#94a3b8", "font-size": "0.9rem", "margin-bottom": "0.5rem" }}>
-                {isRecording() ? "🔴 Recording your instruction... Tap microphone to finalize." : "Tap microphone button to start voice instruction."}
-              </p>
-              <button 
-                onClick={toggleVoiceRecording} 
-                style={{ 
-                  background: isRecording() ? "red" : "var(--text-gradient)", 
-                  border: "none", 
-                  color: "#000", 
-                  width: "60px", 
-                  height: "60px", 
-                  "border-radius": "50%", 
-                  cursor: "pointer",
-                  display: "inline-flex",
-                  "align-items": "center",
-                  "justify-content": "center",
-                  "font-size": "1.5rem"
-                }}
-              >
-                🎤
-              </button>
-              
-              <Show when={isRecording() && voiceWave().length > 0}>
-                <div class="voice-wave-container">
-                  <For each={voiceWave()}>
-                    {(height) => <div class="wave-bar" style={{ height: `${height}px` }}></div>}
-                  </For>
-                </div>
-              </Show>
-            </div>
-          </Show>
-
-          {/* Image Mode View */}
-          <Show when={inputMode() === "image"}>
-            <Show when={!uploadedMedia()} fallback={
-              <div style={{ padding: "1rem", background: "rgba(0,0,0,0.2)", "border-radius": "12px", display: "flex", "justify-content": "space-between", "align-items": "center" }}>
-                <span>{uploadedMedia()}</span>
-                <button onClick={clearMedia} style={{ background: "transparent", border: "none", color: "red", cursor: "pointer" }}>Delete</button>
-              </div>
-            }>
-              <div class="drag-zone" onClick={() => handleMediaUpload("image")}>
-                <p>Drag & Drop or **Click to Upload system architecture diagram** (Mock PNG)</p>
-                <small style={{ color: "#64748b" }}>Supports PNG, JPEG up to 10MB</small>
-              </div>
-            </Show>
-          </Show>
-
-          {/* Video Mode View */}
-          <Show when={inputMode() === "video"}>
-            <Show when={!uploadedMedia()} fallback={
-              <div style={{ padding: "1rem", background: "rgba(0,0,0,0.2)", "border-radius": "12px", display: "flex", "justify-content": "space-between", "align-items": "center" }}>
-                <span>{uploadedMedia()}</span>
-                <button onClick={clearMedia} style={{ background: "transparent", border: "none", color: "red", cursor: "pointer" }}>Delete</button>
-              </div>
-            }>
-              <div class="drag-zone" onClick={() => handleMediaUpload("video")}>
-                <p>Drag & Drop or **Click to Upload screen error recording** (Mock MP4)</p>
-                <small style={{ color: "#64748b" }}>Supports MP4, MOV up to 50MB</small>
-              </div>
-            </Show>
-          </Show>
-
-          {/* Analyzing loader */}
-          <Show when={isAnalyzing()}>
-            <div style={{ text: "center", color: "#00f2fe", padding: "1rem" }}>
-              ⏳ Analyzing file contents and compiling token footprint...
-            </div>
-          </Show>
-
-          {/* Form Text Submission */}
-          <form onSubmit={handleSubmit} class="input-field-wrapper">
-            <input 
-              type="text" 
-              class="input-field" 
-              placeholder={uploadedMedia() ? `Loaded file: ${uploadedMedia()} | Add follow-up query...` : "Auditing sandbox build, deploying release, or querying memories..."}
-              value={inputText()}
-              onInput={(e) => setInputText(e.currentTarget.value)}
-            />
-            <button type="submit" class="submit-btn">Send ⚡</button>
-          </form>
-        </div>
-
-        {/* Live Chat Stream */}
-        <div class="chat-console">
+        <div class="workspace-message-list" aria-live="polite">
           <For each={messages()}>
-            {(msg) => (
-              <div class={`message-bubble ${msg.role}`}>
-                <Show when={msg.media}>
-                  <div style={{ "font-size": "0.8rem", color: "#00f2fe", "margin-bottom": "0.5rem", background: "rgba(0,242,254,0.05)", padding: "0.25rem 0.5rem", "border-radius": "4px", display: "inline-block" }}>
-                    Attached: {msg.media}
-                  </div>
-                </Show>
-                <p>{msg.text}</p>
-                <Show when={msg.trace}>
-                  <div class="trace-details">
-                    🔍 DREX Core Trace: {msg.trace}
-                  </div>
-                </Show>
-              </div>
+            {(message) => (
+              <article class={`workspace-message ${message.role}`}>
+                <div class="message-avatar" aria-hidden="true">
+                  {message.role === "assistant" ? "H" : "D"}
+                </div>
+                <div class="message-stack">
+                  <p>{message.text}</p>
+
+                  <Show when={message.media}>
+                    <div class="attachment-pill">Attached: {message.media}</div>
+                  </Show>
+
+                  <Show when={message.artifacts?.length}>
+                    <div class="artifact-grid">
+                      <For each={message.artifacts}>
+                        {(artifact) => (
+                          <div class="artifact-card">
+                            <div class="artifact-header-row">
+                              <div class="artifact-icon" aria-hidden="true">
+                                {artifact.badge === "verified" ? "✓" : "!"}
+                              </div>
+                              <div class="artifact-meta">
+                                <span class="artifact-title">{artifact.title}</span>
+                                <a class="artifact-file-ref" href="#">
+                                  {artifact.file}
+                                </a>
+                              </div>
+                              <span class={`artifact-badge ${artifact.badge}`}>
+                                {artifact.badge}
+                              </span>
+                            </div>
+                            <p class="artifact-summary">{artifact.summary}</p>
+                            <div class="artifact-actions">
+                              <button class="btn-artifact primary" type="button">
+                                Open artifact
+                              </button>
+                              <button class="btn-artifact" type="button">
+                                Pin evidence
+                              </button>
+                            </div>
+                          </div>
+                        )}
+                      </For>
+                    </div>
+                  </Show>
+
+                  <Show when={message.diff}>
+                    {(diff) => (
+                      <div class="diff-capsule">
+                        <span class="diff-count">{diff().files} files changed</span>
+                        <span class="diff-additions">+{diff().additions}</span>
+                        <span class="diff-deletions">-{diff().deletions}</span>
+                        <button class="btn-review-diff" type="button">
+                          Review diff
+                        </button>
+                      </div>
+                    )}
+                  </Show>
+
+                  <Show when={message.trace}>
+                    <div class="trace-details">DREX trace: {message.trace}</div>
+                  </Show>
+                </div>
+              </article>
             )}
           </For>
         </div>
-      </div>
 
-      {/* 3. Interactive Developer Benchmarks Panel */}
-      <div class="glass-card callout">
-        <div style={{ display: "flex", "justify-content": "space-between", "align-items": "center" }}>
-          <div>
-            <h2>Interactive Performance Benchmarks</h2>
-            <p style={{ color: "#94a3b8", "font-size": "0.9rem" }}>
-              Run latency and cost-efficiency benchmark tests across local and cloud resource tiers.
-            </p>
+        <form class="workspace-omni-console" onSubmit={submitPrompt}>
+          <div class="input-modes-bar compact">
+            <button
+              type="button"
+              class="mode-btn"
+              classList={{ active: inputMode() === "text" }}
+              onClick={() => setMode("text")}
+            >
+              Text
+            </button>
+            <button
+              type="button"
+              class="mode-btn"
+              classList={{ active: inputMode() === "voice" }}
+              onClick={toggleVoiceRecording}
+            >
+              {isRecording() ? "Stop voice" : "Voice"}
+            </button>
+            <button
+              type="button"
+              class="mode-btn"
+              classList={{ active: inputMode() === "image" }}
+              onClick={() => stageMedia("image")}
+            >
+              Image
+            </button>
+            <button
+              type="button"
+              class="mode-btn"
+              classList={{ active: inputMode() === "video" }}
+              onClick={() => stageMedia("video")}
+            >
+              Video
+            </button>
           </div>
-          <button class="btn-bench" onClick={runLocalBenchmarks} disabled={runningBenchmarks()}>
-            {runningBenchmarks() ? "⏳ Testing..." : "🚀 Run Dev Benchmarks"}
-          </button>
-        </div>
 
-        <Show when={benchmarkResults()}>
-          <div class="bench-grid">
-            <div class="bench-card">
-              <strong>{benchmarkResults().ttftCloud}</strong>
-              <span>Cached TTFT (Gemini)</span>
+          <Show when={isRecording() && voiceWave().length > 0}>
+            <div class="voice-wave-container compact">
+              <For each={voiceWave()}>
+                {(height) => <div class="wave-bar" style={{ height: `${height}px` }} />}
+              </For>
             </div>
-            <div class="bench-card">
-              <strong>{benchmarkResults().ttftStandard}</strong>
-              <span>Standard TTFT (Claude)</span>
+          </Show>
+
+          <Show when={isAnalyzing()}>
+            <div class="analysis-strip">Preparing local attachment evidence...</div>
+          </Show>
+
+          <Show when={uploadedMedia()}>
+            <div class="queued-attachment">
+              <span>{uploadedMedia()}</span>
+              <button type="button" onClick={clearMedia}>
+                Clear
+              </button>
             </div>
-            <div class="bench-card">
-              <strong>{benchmarkResults().costSaving}</strong>
-              <span>Egress cost saving</span>
-            </div>
-            <div class="bench-card">
-              <strong>{benchmarkResults().latencyLocal}</strong>
-              <span>Local TTFT (Ollama)</span>
-            </div>
-            <div class="bench-card">
-              <strong>{benchmarkResults().cachedRatio}</strong>
-              <span>Prompt Cache Hits</span>
-            </div>
-            <div class="bench-card">
-              <strong>{benchmarkResults().totalSavings}</strong>
-              <span>Sovereign savings</span>
+          </Show>
+
+          <div class="omni-input-bar">
+            <button class="omni-action-btn" type="button" aria-label="Attach evidence">
+              +
+            </button>
+            <textarea
+              class="omni-textarea"
+              rows="1"
+              placeholder="Ask Heiwa to inspect, execute, summarize, or verify..."
+              value={inputText()}
+              onInput={(e) => setInputText(e.currentTarget.value)}
+            />
+            <div class="omni-actions-row">
+              <div class="omni-model-selector" aria-label="Selected routing lane">
+                local-first
+              </div>
+              <button class="omni-send-btn" type="submit" aria-label="Send prompt">
+                →
+              </button>
             </div>
           </div>
-        </Show>
+        </form>
       </div>
     </section>
   );
