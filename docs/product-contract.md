@@ -182,13 +182,22 @@ These are not standalone products right now:
 ## Success Gate
 
 Heiwa becomes real when Devon can ask for work through `heiwa`, Heiwa.app, or a
-safe messaging ingress, and the system can:
+safe messaging ingress, and the system can move that work cleanly across all
+three planes (see [Three Planes in `HEIWA.md`](../HEIWA.md#the-three-planes)):
+
+**Intake**
 
 1. classify the intent and risk
 2. resolve the required account, data, tool, model, device, and agent material
+
+**Execution**
+
 3. pick the cheapest acceptable route
 4. execute locally or through connected providers/subagents
 5. ask for approval before risky side effects
+
+**Evidence**
+
 6. record evidence and receipts
 7. expose the result through the same runtime/app state
 

@@ -4,6 +4,18 @@ Heiwa is a local-first AI runtime and operator surface. The installed `heiwa` CL
 
 The first customer is Devon. The first product is the personal operator system that safely joins local models, provider CLIs, computer use, messaging surfaces, files, and personal workflows through one governed runtime.
 
+## What Heiwa does
+
+> Heiwa watches what matters, summarizes what changed, stages what needs action, executes what is safe, and proves what happened.
+
+Three planes compose one flow:
+
+- **Intake** — operator command bar and passive feeds (mail, calendar, messages, files, runtime alerts).
+- **Execution** — DREX routes work to local models, provider CLIs, tools, and connectors under leases and approval gates.
+- **Evidence** — every read or action emits a source-linked receipt, mirrored to SpacetimeDB when online.
+
+Maturity is uneven across planes today; see [`HEIWA.md`](https://github.com/Strategizing/heiwa-universe/blob/main/HEIWA.md#the-three-planes) for current vs target.
+
 ## Supported surfaces
 
 - Installed CLI runtime

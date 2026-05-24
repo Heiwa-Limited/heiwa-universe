@@ -9,6 +9,7 @@ import type {
   HistorySummary,
   HookProvider,
   HookSummary,
+  InboxItem,
   MemoryEntry,
   Mission,
   ProviderLive,
@@ -44,6 +45,12 @@ export const v1 = {
   },
   approvals: () =>
     unwrap(api.get<Envelope<{ approvals: Approval[] }>>("/api/v1/approvals")),
+  inbox: () =>
+    unwrap(
+      api.get<Envelope<{ items: InboxItem[]; cursor: string | null }>>(
+        "/api/v1/inbox",
+      ),
+    ),
   rateGroups: () =>
     unwrap(
       api.get<Envelope<{ rate_groups: RateGroup[] }>>("/api/v1/rate-groups"),

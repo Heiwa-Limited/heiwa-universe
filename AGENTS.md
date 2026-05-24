@@ -65,7 +65,26 @@ Be honest about maturity:
 - GitHub is source, CI, and release distribution.
 - Cloudflare is paused public edge and later remote-surface infrastructure.
 
+## Agentic Runtime Workflow
+
+Use [`docs/local-self-operation.md`](docs/local-self-operation.md#agentic-runtime-workflow) before starting, stopping, probing, or changing the local app runtime.
+
+- Treat `7474` as the installed product runtime; after code edits, verify the current checkout on a temporary alternate port such as `7475`.
+- Never assume a reachable localhost app is the binary you just changed; check `cli_path`, port, and endpoint behavior.
+- If a new API endpoint returns `index.html`, assume stale or wrong runtime until proven otherwise.
+- Prompt for update/restart when runtime, cockpit assets, or schema boundaries require it; auto-restart only when explicitly enabled and no active work or only safely paused work exists.
+- Stop every runtime process you started before final reporting unless Devon asked to keep it running.
+- Remove temporary probe files and fixtures as you go; never delete durable `~/.heiwa/state` evidence without explicit approval.
+
+GitHub plus Cloudflare are the public install source: GitHub owns source, releases, checksums, and CI evidence; Cloudflare may front docs, install pages, update manifests, and status, but must not become a second binary authority.
+
+Heiwa must initialize and adapt per machine through `~/.heiwa/machine.json`; do not hardcode one-user or one-device assumptions into runtime behavior.
+
+Promotion rule: local checkout success is not product success. Push source to GitHub, let PR/check/release state become authority, then update the installed `heiwa` runtime from that GitHub-backed source. The MacBook is an owner machine, but it should still exercise the same installed-client path as a normal user machine.
+
 ## Working Priorities
+
+Every work item must classify as Intake, Execution, Evidence, or out-of-scope (see [Three Planes in `HEIWA.md`](HEIWA.md#the-three-planes)). If it does not advance a plane, defer or reject.
 
 Prioritize this order:
 
@@ -88,6 +107,7 @@ Before making architecture or runtime changes, read:
 
 1. `HEIWA.md`
 2. this file
-3. `CLAUDE.md` or `GEMINI.md` when working through that provider surface
+3. `docs/local-self-operation.md`
+4. `CLAUDE.md` or `GEMINI.md` when working through that provider surface
 
 If repo docs drift, `HEIWA.md` is the canonical architecture file.

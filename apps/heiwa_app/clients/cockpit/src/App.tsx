@@ -18,6 +18,9 @@ export default function App(props: ParentProps): JSX.Element {
           <A href="/connections" activeClass="is-active">
             Connections
           </A>
+          <A href="/inbox" activeClass="is-active">
+            Inbox
+          </A>
           <A href="/routes" activeClass="is-active">
             Routes
           </A>

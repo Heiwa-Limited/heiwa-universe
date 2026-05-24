@@ -47,6 +47,7 @@ nav:
   - Architecture: architecture.md
   - Provider Registry: provider-registry.md
   - Routing Policy: routing.md
+  - Local Operation: local-self-operation.md
   - Plugins: plugins.md
   - Deployment: deployment.md
   - Security: security.md

@@ -31,8 +31,7 @@ pub(crate) struct LocalAppProbe {
 pub(crate) fn probe_local_app(port: u16) -> LocalAppProbe {
     let addr: SocketAddr = ([127, 0, 0, 1], port).into();
     let start = Instant::now();
-    let reachable =
-        std::net::TcpStream::connect_timeout(&addr, Duration::from_millis(200)).is_ok();
+    let reachable = std::net::TcpStream::connect_timeout(&addr, Duration::from_millis(200)).is_ok();
     LocalAppProbe {
         port,
         url: format!("http://127.0.0.1:{port}/"),
@@ -568,12 +567,14 @@ fn api_payload(path: &str, started_at: &str) -> Option<Value> {
         "/api/v1/missions" => json!({ "missions": [], "cursor": null }),
         "/api/v1/approvals" => json!({ "approvals": approval_rows() }),
         "/api/v1/rate-groups" => json!({ "rate_groups": rate_group_rows() }),
-        "/api/v1/history" => json!({
-            "sessions": [],
-            "recent_runs": [],
-            "artifacts": [],
-            "cursor": null,
-        }),
+        "/api/v1/inbox" => {
+            let state_dir = state_dir();
+            json!({ "items": inbox_items_for_state_dir(&state_dir), "cursor": null })
+        }
+        "/api/v1/history" => {
+            let state_dir = state_dir();
+            history_summary_for_state_dir(&state_dir)
+        }
         "/api/v1/traces" => json!({ "traces": [] }),
         "/api/v1/memory" => json!({ "entries": [] }),
         "/api/v1/agents" => json!({ "agents": worker_agent_rows() }),
@@ -694,6 +695,237 @@ fn approval_rows() -> Vec<Value> {
         }));
     }
     rows
+}
+
+fn history_summary_for_state_dir(state_dir: &Path) -> Value {
+    let dispatch_results = dispatch_result_values_for_state_dir(state_dir);
+    let mut recent_runs = dispatch_results
+        .iter()
+        .map(|(_, value)| {
+            let request_id = string_field(value, &["request_id", "mission_id", "task_id"])
+                .unwrap_or("local-dispatch");
+            json!({
+                "mission_id": request_id,
+                "status": string_field(value, &["status"]).unwrap_or("unknown"),
+                "updated_at": string_field(value, &["completed_at", "updated_at", "created_at"]).unwrap_or("unknown"),
+                "summary": string_field(value, &["summary"]),
+            })
+        })
+        .collect::<Vec<_>>();
+    sort_values_by_time_desc(&mut recent_runs, "updated_at");
+    recent_runs.truncate(40);
+
+    let mut artifacts = Vec::new();
+    for (_, result) in &dispatch_results {
+        let updated_at = string_field(result, &["completed_at", "updated_at", "created_at"])
+            .unwrap_or("unknown");
+        if let Some(refs) = result.get("evidence_refs").and_then(Value::as_array) {
+            for evidence_ref in refs.iter().filter_map(Value::as_str) {
+                artifacts.push(json!({
+                    "id": evidence_ref,
+                    "kind": "evidence_ref",
+                    "label": evidence_ref,
+                    "updated_at": updated_at,
+                }));
+            }
+        }
+    }
+    sort_values_by_time_desc(&mut artifacts, "updated_at");
+    artifacts.truncate(80);
+
+    json!({
+        "sessions": [],
+        "recent_runs": recent_runs,
+        "artifacts": artifacts,
+        "cursor": null,
+    })
+}
+
+fn inbox_items_for_state_dir(state_dir: &Path) -> Vec<Value> {
+    let mut items = Vec::new();
+    items.extend(event_log_items_for_state_dir(state_dir));
+    items.extend(
+        dispatch_result_values_for_state_dir(state_dir)
+            .into_iter()
+            .map(|(path, value)| dispatch_result_inbox_item(&path, &value)),
+    );
+    sort_values_by_time_desc(&mut items, "occurred_at");
+    items.truncate(80);
+    items
+}
+
+fn dispatch_result_inbox_item(path: &Path, result: &Value) -> Value {
+    let result_id = string_field(result, &["result_id"])
+        .or_else(|| path.file_stem().and_then(|stem| stem.to_str()))
+        .unwrap_or("dispatch-result");
+    let request_id =
+        string_field(result, &["request_id", "mission_id", "task_id"]).unwrap_or("local-dispatch");
+    let occurred_at =
+        string_field(result, &["completed_at", "updated_at", "created_at"]).unwrap_or("unknown");
+    let adapter = string_field(result, &["adapter"]).unwrap_or("dispatch");
+    let status = string_field(result, &["status"]).unwrap_or("unknown");
+    let summary = string_field(result, &["summary"]).unwrap_or("Dispatch result recorded");
+    let receipt_refs = result
+        .get("evidence_refs")
+        .and_then(Value::as_array)
+        .cloned()
+        .unwrap_or_default()
+        .into_iter()
+        .filter_map(|evidence_ref| evidence_ref.as_str().map(str::to_string))
+        .map(|evidence_ref| {
+            json!({
+                "kind": "evidence_ref",
+                "ref": evidence_ref,
+            })
+        })
+        .collect::<Vec<_>>();
+
+    json!({
+        "item_id": format!("receipt:{result_id}"),
+        "kind": "dispatch_result",
+        "plane": "evidence",
+        "priority": priority_for_status(status),
+        "pinned": false,
+        "status": status,
+        "title": format!("{adapter} {status}"),
+        "summary": summary,
+        "occurred_at": occurred_at,
+        "source": source_ref(result_id, "dispatch_result", adapter, path),
+        "subject_ref": request_id,
+        "receipt_refs": receipt_refs,
+    })
+}
+
+fn event_log_items_for_state_dir(state_dir: &Path) -> Vec<Value> {
+    let events_path = state_dir.join("events").join("events.jsonl");
+    let Ok(raw) = fs::read_to_string(&events_path) else {
+        return Vec::new();
+    };
+    raw.lines()
+        .rev()
+        .filter_map(|line| serde_json::from_str::<Value>(line).ok())
+        .take(40)
+        .map(|event| event_log_inbox_item(&events_path, &event))
+        .collect()
+}
+
+fn event_log_inbox_item(path: &Path, event: &Value) -> Value {
+    let event_id = string_field(event, &["event_id"]).unwrap_or("event");
+    let event_type = string_field(event, &["event_type"]).unwrap_or("event");
+    let source = string_field(event, &["source"]).unwrap_or("local-state");
+    let subject = string_field(event, &["subject"]).unwrap_or(event_type);
+    let occurred_at = string_field(event, &["ts", "created_at", "updated_at"]).unwrap_or("unknown");
+    let payload_ref = string_field(event, &["payload_ref"]);
+    let receipt_refs = payload_ref
+        .map(|payload_ref| {
+            vec![json!({
+                "kind": "payload_ref",
+                "ref": payload_ref,
+            })]
+        })
+        .unwrap_or_default();
+
+    json!({
+        "item_id": format!("event:{event_id}"),
+        "kind": "event",
+        "plane": plane_for_event_type(event_type),
+        "priority": priority_for_severity(string_field(event, &["severity"]).unwrap_or("info")),
+        "pinned": false,
+        "status": string_field(event, &["severity"]).unwrap_or("info"),
+        "title": event_type,
+        "summary": subject,
+        "occurred_at": occurred_at,
+        "source": source_ref(event_id, "event_log", source, path),
+        "subject_ref": subject,
+        "receipt_refs": receipt_refs,
+    })
+}
+
+fn dispatch_result_values_for_state_dir(state_dir: &Path) -> Vec<(PathBuf, Value)> {
+    let results = state_dir.join("dispatch").join("results");
+    let Ok(entries) = fs::read_dir(results) else {
+        return Vec::new();
+    };
+    let mut values = entries
+        .flatten()
+        .filter_map(|entry| {
+            let path = entry.path();
+            if path.extension().and_then(|ext| ext.to_str()) != Some("json") {
+                return None;
+            }
+            let value = fs::read_to_string(&path)
+                .ok()
+                .and_then(|raw| serde_json::from_str::<Value>(&raw).ok())?;
+            Some((path, value))
+        })
+        .collect::<Vec<_>>();
+    values.sort_by(|(_, a), (_, b)| {
+        string_field(b, &["completed_at", "updated_at", "created_at"])
+            .unwrap_or("")
+            .cmp(string_field(a, &["completed_at", "updated_at", "created_at"]).unwrap_or(""))
+    });
+    values.truncate(80);
+    values
+}
+
+fn source_ref(source_id: &str, source_type: &str, label: &str, path: &Path) -> Value {
+    json!({
+        "source_id": source_id,
+        "source_type": source_type,
+        "label": label,
+        "uri": path.display().to_string(),
+    })
+}
+
+fn string_field<'a>(value: &'a Value, keys: &[&str]) -> Option<&'a str> {
+    keys.iter()
+        .find_map(|key| value.get(*key).and_then(Value::as_str))
+}
+
+fn sort_values_by_time_desc(values: &mut [Value], field: &str) {
+    values.sort_by(|a, b| {
+        b.get(field)
+            .and_then(Value::as_str)
+            .unwrap_or("")
+            .cmp(a.get(field).and_then(Value::as_str).unwrap_or(""))
+    });
+}
+
+fn plane_for_event_type(event_type: &str) -> &'static str {
+    if event_type.contains("result") || event_type.contains("evidence") {
+        "evidence"
+    } else if event_type.contains("request.created")
+        || event_type.contains("message")
+        || event_type.contains("mail")
+        || event_type.contains("calendar")
+        || event_type.contains("forum")
+    {
+        "intake"
+    } else if event_type.contains("policy")
+        || event_type.contains("worker")
+        || event_type.contains("doctor")
+        || event_type.contains("dispatch.")
+    {
+        "execution"
+    } else {
+        "intake"
+    }
+}
+
+fn priority_for_status(status: &str) -> &'static str {
+    match status {
+        "failed" | "denied" | "error" => "high",
+        "pending" | "running" => "normal",
+        _ => "low",
+    }
+}
+
+fn priority_for_severity(severity: &str) -> &'static str {
+    match severity {
+        "error" => "high",
+        "warn" => "normal",
+        _ => "low",
+    }
 }
 
 fn rate_group_rows() -> Vec<Value> {
@@ -1431,4 +1663,158 @@ fn print_start_help() {
     println!();
     println!("Binds 127.0.0.1, serves the cockpit, opens the browser by default,");
     println!("starts caffeinate while running, and writes a worker heartbeat.");
+}
+
+#[cfg(test)]
+mod app_readmodel_tests {
+    use super::*;
+
+    fn temp_state_dir(name: &str) -> PathBuf {
+        let dir = env::temp_dir().join(format!("heiwa-shell-{name}-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).expect("create temp state dir");
+        dir
+    }
+
+    #[test]
+    fn dispatch_results_populate_history_runs_and_artifacts() {
+        let state = temp_state_dir("history-readmodel");
+        let results = state.join("dispatch").join("results");
+        fs::create_dir_all(&results).expect("create results dir");
+        fs::write(
+            results.join("res_demo.json"),
+            json!({
+                "schema_version": "operator_dispatch_result_v1",
+                "request_id": "req_demo",
+                "result_id": "res_demo",
+                "completed_at": "2026-05-24T12:00:00Z",
+                "status": "denied",
+                "executed_mode": "none",
+                "adapter": "filesystem",
+                "summary": "Denied unsafe filesystem write",
+                "evidence_refs": ["evidence/2026-05-24/receipt.json"],
+                "redaction_applied": true
+            })
+            .to_string(),
+        )
+        .expect("write dispatch result");
+
+        let history = history_summary_for_state_dir(&state);
+        let runs = history
+            .get("recent_runs")
+            .and_then(Value::as_array)
+            .expect("recent_runs array");
+        assert_eq!(runs.len(), 1);
+        assert_eq!(
+            runs[0].get("mission_id").and_then(Value::as_str),
+            Some("req_demo")
+        );
+        assert_eq!(
+            runs[0].get("status").and_then(Value::as_str),
+            Some("denied")
+        );
+        assert_eq!(
+            runs[0].get("summary").and_then(Value::as_str),
+            Some("Denied unsafe filesystem write")
+        );
+        let artifacts = history
+            .get("artifacts")
+            .and_then(Value::as_array)
+            .expect("artifacts array");
+        assert_eq!(artifacts.len(), 1);
+        assert_eq!(
+            artifacts[0].get("id").and_then(Value::as_str),
+            Some("evidence/2026-05-24/receipt.json")
+        );
+
+        let _ = fs::remove_dir_all(&state);
+    }
+
+    #[test]
+    fn dispatch_results_and_events_populate_inbox_items_with_sources() {
+        let state = temp_state_dir("inbox-readmodel");
+        let results = state.join("dispatch").join("results");
+        let events = state.join("events");
+        fs::create_dir_all(&results).expect("create results dir");
+        fs::create_dir_all(&events).expect("create events dir");
+        fs::write(
+            results.join("res_demo.json"),
+            json!({
+                "schema_version": "operator_dispatch_result_v1",
+                "request_id": "req_demo",
+                "result_id": "res_demo",
+                "completed_at": "2026-05-24T12:00:00Z",
+                "status": "denied",
+                "executed_mode": "none",
+                "adapter": "network",
+                "summary": "Blocked external network request",
+                "evidence_refs": ["evidence/2026-05-24/network.json"],
+                "redaction_applied": true
+            })
+            .to_string(),
+        )
+        .expect("write dispatch result");
+        fs::write(
+            events.join("events.jsonl"),
+            format!(
+                "{}\n",
+                json!({
+                    "schema_version": "operator_event_envelope_v1",
+                    "event_id": "evt_demo",
+                    "ts": "2026-05-24T12:01:00Z",
+                    "event_type": "dispatch.policy.classified",
+                    "severity": "warn",
+                    "source": "devonx",
+                    "subject": "network request",
+                    "redaction_applied": true,
+                    "payload_ref": "dispatch/results/res_demo.json"
+                })
+            ),
+        )
+        .expect("write events log");
+
+        let inbox = inbox_items_for_state_dir(&state);
+        assert_eq!(inbox.len(), 2);
+        assert_eq!(
+            inbox[0]
+                .get("source")
+                .and_then(|s| s.get("source_type"))
+                .and_then(Value::as_str),
+            Some("event_log")
+        );
+        assert_eq!(
+            inbox[0].get("plane").and_then(Value::as_str),
+            Some("execution")
+        );
+        assert_eq!(
+            inbox[1]
+                .get("source")
+                .and_then(|s| s.get("source_type"))
+                .and_then(Value::as_str),
+            Some("dispatch_result")
+        );
+        assert_eq!(
+            inbox[1].get("plane").and_then(Value::as_str),
+            Some("evidence")
+        );
+        assert_eq!(
+            inbox[1]
+                .get("receipt_refs")
+                .and_then(Value::as_array)
+                .map(Vec::len),
+            Some(1)
+        );
+
+        let _ = fs::remove_dir_all(&state);
+    }
+
+    #[test]
+    fn event_type_mapping_preserves_iee_flow_planes() {
+        assert_eq!(plane_for_event_type("dispatch.request.created"), "intake");
+        assert_eq!(
+            plane_for_event_type("dispatch.policy.classified"),
+            "execution"
+        );
+        assert_eq!(plane_for_event_type("dispatch.result.written"), "evidence");
+    }
 }

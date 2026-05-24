@@ -11,6 +11,7 @@ import Domains from "./routes/Domains";
 import Governance from "./routes/Governance";
 import History from "./routes/History";
 import Hooks from "./routes/Hooks";
+import Inbox from "./routes/Inbox";
 import Live from "./routes/Live";
 import Memory from "./routes/Memory";
 import Missions from "./routes/Missions";
@@ -31,6 +32,7 @@ render(
       <Route path="/" component={Dashboard} />
       <Route path="/providers" component={Providers} />
       <Route path="/connections" component={Connections} />
+      <Route path="/inbox" component={Inbox} />
       <Route path="/routes" component={Routes} />
       <Route path="/live" component={Live} />
       <Route path="/repl" component={Repl} />

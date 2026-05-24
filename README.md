@@ -6,9 +6,21 @@
 
 Heiwa is a local-first AI operating layer. The installed `heiwa` runtime is the product center, Rust owns the execution path, and this repository is being hardened for GitHub-native distribution rather than hosted-platform theater.
 
+## What Heiwa Does
+
+> Heiwa watches what matters, summarizes what changed, stages what needs action, executes what is safe, and proves what happened.
+
+Three planes compose one flow:
+
+- **Intake** — operator command bar and passive feeds (mail, calendar, messages, files, runtime alerts).
+- **Execution** — DREX routes work to local models, provider CLIs, tools, and connectors under leases and approval gates.
+- **Evidence** — every read or action emits a source-linked receipt, mirrored to SpacetimeDB when online.
+
+Maturity is uneven across planes today; see [`HEIWA.md`](HEIWA.md#the-three-planes) for current vs target.
+
 ## One-Sentence Truth
 
-`heiwa` is the installed product surface, DREX is the internal execution kernel, SpacetimeDB is the adjudication and evidence plane, Rust proposes and executes, and `heiwa` presents.
+`heiwa` is the installed product surface, DREX is the internal execution kernel, SpacetimeDB is the adjudication and evidence sync backend, Rust proposes and executes, and `heiwa` presents.
 
 ## Current Repo Focus
 
@@ -27,7 +39,7 @@ Heiwa is a local-first AI operating layer. The installed `heiwa` runtime is the 
 | **Heiwa** | Company and product identity | Repo root |
 | **`heiwa`** | Primary installed runtime and operator surface | `apps/heiwa_shell/` |
 | **DREX** | Internal execution kernel and routing substrate | `apps/heiwa_core/` |
-| **SpacetimeDB** | Adjudication, canonical state, and evidence plane | `apps/heiwa_core/src/stdb/`, `apps/heiwa_orchestrator/src/stdb/`, `crates/heiwa_stdb/` |
+| **SpacetimeDB** | Adjudication, canonical state, and evidence sync backend (materializes the Evidence plane) | `apps/heiwa_core/src/stdb/`, `apps/heiwa_orchestrator/src/stdb/`, `crates/heiwa_stdb/` |
 | **Rust runtime** | Volatile execution: provider supervision and candidate generation | `crates/` |
 
 > Rust proposes, SpacetimeDB adjudicates, `heiwa` presents.
@@ -63,6 +75,7 @@ cargo run -p heiwa-shell --bin heiwa -- auth status
 - [`HEIWA.md`](HEIWA.md)
 - [`docs/product-contract.md`](docs/product-contract.md)
 - [`docs/capability-fabric.md`](docs/capability-fabric.md)
+- [`docs/local-self-operation.md`](docs/local-self-operation.md)
 - [`AGENTS.md`](AGENTS.md)
 - [`BUILD_MATRIX.md`](BUILD_MATRIX.md)
 - [`SECURITY.md`](SECURITY.md)
