@@ -25,7 +25,7 @@ high-trust operator before it claims team or enterprise maturity.
 
 ### 1. Heiwa Runtime
 
-The installed `heiwa` runtime is the primary product.
+The installed `heiwa` runtime is the primary execution product.
 
 It owns:
 
@@ -43,10 +43,15 @@ provider-owned; Heiwa owns routing, evidence, policy, and local UX.
 
 ### 2. Heiwa.app
 
-`Heiwa.app` is the companion visual client for the same runtime.
+`Heiwa.app` is the primary user input/display application for the same runtime.
+It is the place where the user sees Heiwa thinking, asking, doing, staging, and
+returning evidence.
 
-Today this is represented by the web client path in `apps/heiwa_app/`. The target
-is a safe client, not a privileged second control plane.
+Normal installs must place it under the user's HOME-local Heiwa root:
+`~/.heiwa/app/Heiwa.app` on macOS, or the platform-equivalent app path on other
+machines. Today that path is a launcher bridge over the local app runtime. The
+target is a native wrapper over the same client/runtime contract, not a
+privileged second control plane or a disconnected admin site.
 
 The primary user experience is a single input/output conversation with Heiwa.
 Pages such as Inbox, Providers, History, Traces, Memory, and Status are
@@ -58,7 +63,11 @@ actions, receipts, and blockers back through that thread.
 It should expose:
 
 - the main Heiwa/user conversation stream
+- the current dashboard/home state for what Heiwa is doing now
 - account and provider connection state
+- personalization for skills, rules, preferences, connectors, and notification
+  behavior
+- auto-managed projects that Heiwa infers from durable work, not manual ticketing
 - devices and runtime health
 - task, run, and receipt history
 - approvals and risk classes
@@ -66,6 +75,11 @@ It should expose:
 - public-safe status and diagnostics
 - connected-surface context from browser, mail, calendar, messages, machine
   resources, computer use, and third-party integrations
+
+The browser console is secondary and user-scoped. It is a pseudo-backend/admin
+surface for the specific user/machine: advanced settings, personalization,
+projects, telemetry overview, connector setup, and links into dashboard/app
+settings. It should not become the everyday operator path.
 
 It must not hold raw provider secrets, bypass runtime policy, or become the place
 where privileged automation logic lives.

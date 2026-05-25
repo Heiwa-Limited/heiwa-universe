@@ -1779,7 +1779,7 @@ fn print_start_help() {
     println!("Usage:");
     println!("  heiwa app start [--port N] [--no-open]");
     println!();
-    println!("Binds 127.0.0.1, serves the cockpit, opens the browser by default,");
+    println!("Binds 127.0.0.1, serves the per-user browser console by default,");
     println!("starts caffeinate while running, and writes a worker heartbeat.");
 }
 

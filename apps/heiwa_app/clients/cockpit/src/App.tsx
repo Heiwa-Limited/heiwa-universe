@@ -8,13 +8,19 @@ type NavItem = {
   mark: string;
 };
 
-type InspectorTab = "telemetry" | "safety" | "checklist" | "trace";
+type InspectorTab = "telemetry" | "personalize" | "projects" | "advanced" | "settings";
 
 type SurfaceSignal = {
   name: string;
   status: string;
   detail: string;
   tone: "online" | "active" | "secure";
+};
+
+type ConsoleItem = {
+  name: string;
+  detail: string;
+  status: string;
 };
 
 const primaryNav: NavItem[] = [
@@ -53,19 +59,11 @@ const threadList = [
   { title: "Cloudflare install source", time: "1h", active: false },
 ];
 
-const checklist = [
-  { text: "Local runtime source labeled", done: true },
-  { text: "GitHub release path dry-run", done: true },
-  { text: "Cockpit shell active", done: true },
-  { text: "Visual build verified", done: false },
-  { text: "Browser proof captured", done: false },
-];
-
 const traceLines = [
   { kind: "system", text: "runtime: ~/.heiwa state detected" },
-  { kind: "drex", text: "plane: intake -> execution -> evidence" },
+  { kind: "drex", text: "plane: intake/execution/evidence" },
   { kind: "api", text: "source: GitHub Releases preferred" },
-  { kind: "system", text: "mode: checkout-dev visual verification" },
+  { kind: "system", text: "mode: checkout-dev visual QA" },
 ];
 
 const surfaceSignals: SurfaceSignal[] = [
@@ -98,6 +96,65 @@ const surfaceSignals: SurfaceSignal[] = [
     status: "staged",
     detail: "GitHub, Cloudflare, STDB",
     tone: "secure",
+  },
+];
+
+const personalizationItems: ConsoleItem[] = [
+  {
+    name: "Skills",
+    detail: "User-approved reusable behaviors and task modes",
+    status: "curated",
+  },
+  {
+    name: "Rules",
+    detail: "Autonomy boundaries, safety gates, and style defaults",
+    status: "enforced",
+  },
+  {
+    name: "Preferences",
+    detail: "Communication, routing, notification, and UI defaults",
+    status: "local",
+  },
+  {
+    name: "Connectors",
+    detail: "OAuth, CLI, local, and API surfaces with revocation state",
+    status: "gated",
+  },
+];
+
+const projectItems: ConsoleItem[] = [
+  {
+    name: "Heiwa universe",
+    detail: "Source, releases, docs, app client, and local runtime work",
+    status: "active",
+  },
+  {
+    name: "Runtime install",
+    detail: "GitHub release source, local sandbox, update receipts",
+    status: "managed",
+  },
+  {
+    name: "Read model spine",
+    detail: "Inbox, history, traces, memory, approvals, telemetry",
+    status: "queued",
+  },
+];
+
+const advancedItems: ConsoleItem[] = [
+  {
+    name: "Routing policy",
+    detail: "Local-first provider selection, quotas, and fallbacks",
+    status: "inspect",
+  },
+  {
+    name: "Evidence sync",
+    detail: "Local receipts first; STDB sync when enabled",
+    status: "secure",
+  },
+  {
+    name: "Runtime bridge",
+    detail: "Codex, Claude, Gemini, Antigravity, Ollama, MCP tools",
+    status: "bridge",
   },
 ];
 
@@ -203,25 +260,34 @@ export default function App(props: ParentProps): JSX.Element {
             <span class="bc-active">{currentTitle()}</span>
           </div>
           <div class="header-actions">
-            <button class="btn-workspace-action" type="button">
-              Local runtime
-            </button>
-            <button class="btn-workspace-action glow" type="button">
-              Evidence view
-            </button>
+            <A class="btn-workspace-action" href="/">
+              Browser console
+            </A>
+            <A class="btn-workspace-action glow" href="/status">
+              App settings
+            </A>
           </div>
         </header>
         <div class="workspace-viewport">{props.children}</div>
       </main>
 
-      <aside class="heiwa-sidecar" aria-label="Runtime inspector">
+      <aside class="heiwa-sidecar" aria-label="Browser console and runtime inspector">
+        <div class="sidecar-console-header">
+          <div>
+            <span class="console-eyebrow">Browser console</span>
+            <strong>Configuration and ops</strong>
+          </div>
+          <span class="status-pill secure">secondary</span>
+        </div>
+
         <div class="sidecar-tabs">
           <For
             each={[
               ["telemetry", "Telemetry"],
-              ["safety", "Safety"],
-              ["checklist", "Tasks"],
-              ["trace", "Trace"],
+              ["personalize", "Personalize"],
+              ["projects", "Projects"],
+              ["advanced", "Advanced"],
+              ["settings", "Settings"],
             ] as const}
           >
             {([id, label]) => (
@@ -299,62 +365,93 @@ export default function App(props: ParentProps): JSX.Element {
             </section>
           </Show>
 
-          <Show when={inspectorTab() === "safety"}>
-            <section class="safety-panel">
-              <div class="policy-card">
-                <span class="policy-header">Autonomy boundary</span>
-                <p class="policy-text">
-                  Local analysis and drafts can run; external side effects stay approval-gated.
-                </p>
-                <span class="policy-badge enforced">enforced</span>
+          <Show when={inspectorTab() === "personalize"}>
+            <section class="console-panel">
+              <div class="console-panel-copy">
+                <span class="widget-label">Personalization</span>
+                <p>Customize how Heiwa understands, routes, and presents work.</p>
               </div>
-              <div class="policy-card">
-                <span class="policy-header">Install authority</span>
-                <p class="policy-text">
-                  GitHub Releases are the user update source. Checkout reinstall is developer-only.
-                </p>
-                <span class="policy-badge active">active</span>
-              </div>
-              <div class="policy-card">
-                <span class="policy-header">Evidence sync</span>
-                <p class="policy-text">
-                  Local state records current truth; STDB sync is a backend path when enabled.
-                </p>
-                <span class="policy-badge enforced">local-first</span>
-              </div>
+              <For each={personalizationItems}>
+                {(item) => (
+                  <div class="policy-card console-card">
+                    <span class="policy-header">{item.name}</span>
+                    <p class="policy-text">{item.detail}</p>
+                    <span class="policy-badge active">{item.status}</span>
+                  </div>
+                )}
+              </For>
             </section>
           </Show>
 
-          <Show when={inspectorTab() === "checklist"}>
-            <section class="progress-panel">
-              <div class="progress-header-row">
-                <span class="progress-title">Execution checklist</span>
-                <span class="progress-pct">60%</span>
+          <Show when={inspectorTab() === "projects"}>
+            <section class="console-panel">
+              <div class="console-panel-copy">
+                <span class="widget-label">Auto-managed projects</span>
+                <p>Heiwa should group work by durable projects without making the user file tickets.</p>
               </div>
-              <div class="progress-list">
-                <For each={checklist}>
-                  {(item) => (
-                    <div class="checklist-item" classList={{ done: item.done }}>
-                      <span class="checkbox-box" aria-hidden="true">
-                        {item.done ? "✓" : ""}
-                      </span>
-                      <span class="checklist-text">{item.text}</span>
-                    </div>
-                  )}
-                </For>
-              </div>
+              <For each={projectItems}>
+                {(item) => (
+                  <div class="policy-card console-card">
+                    <span class="policy-header">{item.name}</span>
+                    <p class="policy-text">{item.detail}</p>
+                    <span class="policy-badge enforced">{item.status}</span>
+                  </div>
+                )}
+              </For>
             </section>
           </Show>
 
-          <Show when={inspectorTab() === "trace"}>
-            <section class="trace-panel">
-              <span class="trace-header">Runtime trace</span>
-              <div class="trace-log-viewport">
-                <For each={traceLines}>
-                  {(line) => (
-                    <div class={`trace-log-line ${line.kind}`}>{line.text}</div>
-                  )}
-                </For>
+          <Show when={inspectorTab() === "advanced"}>
+            <section class="console-panel">
+              <div class="console-panel-copy">
+                <span class="widget-label">Advanced settings</span>
+                <p>Low-level controls stay here so the main app remains one clean conversation.</p>
+              </div>
+              <For each={advancedItems}>
+                {(item) => (
+                  <div class="policy-card console-card">
+                    <span class="policy-header">{item.name}</span>
+                    <p class="policy-text">{item.detail}</p>
+                    <span class="policy-badge enforced">{item.status}</span>
+                  </div>
+                )}
+              </For>
+            </section>
+          </Show>
+
+          <Show when={inspectorTab() === "settings"}>
+            <section class="console-panel">
+              <div class="console-panel-copy">
+                <span class="widget-label">Open surfaces</span>
+                <p>Jump between the app dashboard, browser view, and runtime settings.</p>
+              </div>
+              <div class="console-link-grid">
+                <A class="console-link-card" href="/">
+                  <span>Browser console</span>
+                  <small>Per-user support dashboard</small>
+                </A>
+                <A class="console-link-card" href="/status">
+                  <span>App settings</span>
+                  <small>Runtime health and install state</small>
+                </A>
+                <A class="console-link-card" href="/connections">
+                  <span>Connectors</span>
+                  <small>Provider and account surfaces</small>
+                </A>
+                <A class="console-link-card" href="/governance">
+                  <span>Governance</span>
+                  <small>Policy and public truth</small>
+                </A>
+              </div>
+              <div class="trace-panel compact">
+                <span class="trace-header">Runtime trace</span>
+                <div class="trace-log-viewport">
+                  <For each={traceLines}>
+                    {(line) => (
+                      <div class={`trace-log-line ${line.kind}`}>{line.text}</div>
+                    )}
+                  </For>
+                </div>
               </div>
             </section>
           </Show>

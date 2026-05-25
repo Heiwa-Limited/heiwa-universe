@@ -50,6 +50,11 @@ const contextSignals = [
     state: "gated",
     detail: "Computer use and writes require approval",
   },
+  {
+    label: "Projects",
+    state: "managed",
+    detail: "Durable work grouped without manual ticketing",
+  },
 ];
 
 const initialArtifacts: Artifact[] = [
@@ -74,6 +79,20 @@ const initialArtifacts: Artifact[] = [
     summary:
       "Normalizes browser, mail, messages, machine telemetry, and integration alerts into one chat-readable context stream.",
   },
+  {
+    title: "Human/Machine Ops Bridge",
+    file: "HEIWA.md#interaction-contract",
+    badge: "verified",
+    summary:
+      "Keeps the user in one executive-assistant conversation while Heiwa coordinates AI providers, local machines, browser state, and approval-gated actions.",
+  },
+  {
+    title: "HOME App Launcher",
+    file: "~/.heiwa/app/Heiwa.app",
+    badge: "review",
+    summary:
+      "Makes the primary display an installed executable app path while the browser console stays user-scoped support infrastructure.",
+  },
 ];
 
 const starterMessages: Message[] = [
@@ -81,7 +100,7 @@ const starterMessages: Message[] = [
     id: "assistant-boot",
     role: "assistant",
     text:
-      "This thread is the primary input/output contract. Talk to Heiwa here; the runtime watches connected surfaces in the background, explains what changed, stages risky actions, and returns receipts in this same stream.",
+      "Heiwa.app is the primary installed input/display surface. Talk to Heiwa here; the runtime watches connected surfaces in the background, explains what changed, stages risky actions, auto-groups projects, and returns receipts in this same stream.",
     trace:
       "io=single-thread; surfaces=browser,mail,machine,computer-use,integrations; writes=approval-gated",
     artifacts: initialArtifacts,
@@ -216,10 +235,12 @@ export default function Dashboard(): JSX.Element {
           <h1>One conversation with Heiwa</h1>
           <p class="session-copy">
             Ask once, then let the runtime gather context from connected surfaces,
-            execute safe work, and explain the state back through this thread.
+            execute safe work, manage projects, and explain AI/Machine Ops back
+            through this thread.
           </p>
         </div>
         <div class="session-status-strip" aria-label="Runtime status">
+          <span>HOME-installed app</span>
           <span>Single I/O thread</span>
           <span>Background telemetry</span>
           <span>Approval-gated writes</span>

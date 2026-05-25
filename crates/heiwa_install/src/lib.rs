@@ -132,7 +132,7 @@ pub fn get_plugins_dir() -> PathBuf {
 }
 
 const RUNTIME_LAYOUT_DIRS: &[&str] = &[
-    "bin", "logs", "sessions", "cache", "state", "secrets", "plugins",
+    "app", "bin", "logs", "sessions", "cache", "state", "secrets", "plugins",
 ];
 
 pub fn check_runtime_layout() -> LayoutReport {
@@ -208,6 +208,7 @@ pub fn run_install() -> Result<()> {
     let heiwa_dir = get_heiwa_dir();
     ensure_runtime_layout(&heiwa_dir)?;
     write_canonical_launcher(&heiwa_dir)?;
+    write_home_app_launcher(&heiwa_dir)?;
 
     let manifest_path = heiwa_dir.join("machine.json");
     let manifest = load_existing_manifest(&manifest_path).unwrap_or_else(|| MachineManifest {
@@ -241,6 +242,10 @@ pub fn run_install() -> Result<()> {
     println!(
         "Installed canonical launcher at {:?}",
         heiwa_dir.join("bin").join("heiwa")
+    );
+    println!(
+        "Installed Heiwa.app launcher at {:?}",
+        heiwa_dir.join("app").join("Heiwa.app")
     );
     println!("Installation check complete.");
 
@@ -376,7 +381,7 @@ fn package_lint_uses_biome(path: &Path) -> bool {
 fn ensure_runtime_layout(heiwa_dir: &Path) -> Result<()> {
     fs::create_dir_all(heiwa_dir)?;
     for dirname in [
-        "bin", "logs", "sessions", "cache", "state", "secrets", "plugins",
+        "app", "bin", "logs", "sessions", "cache", "state", "secrets", "plugins",
     ] {
         fs::create_dir_all(heiwa_dir.join(dirname))?;
     }
@@ -450,6 +455,84 @@ exit 1
     fs::write(&launcher_path, launcher)?;
     #[cfg(unix)]
     fs::set_permissions(&launcher_path, fs::Permissions::from_mode(0o755))?;
+    Ok(())
+}
+
+fn write_home_app_launcher(heiwa_dir: &Path) -> Result<()> {
+    write_home_app_launcher_internal(heiwa_dir)
+}
+
+fn write_home_app_launcher_internal(heiwa_dir: &Path) -> Result<()> {
+    let bundle_root = heiwa_dir.join("app").join("Heiwa.app");
+    let contents_dir = bundle_root.join("Contents");
+    let macos_dir = contents_dir.join("MacOS");
+    let resources_dir = contents_dir.join("Resources");
+    fs::create_dir_all(&macos_dir)?;
+    fs::create_dir_all(&resources_dir)?;
+
+    let executable_path = macos_dir.join("Heiwa");
+    let launcher = format!(
+        r#"#!/bin/zsh
+set -euo pipefail
+
+HEIWA_HOME="${{HEIWA_HOME:-{heiwa_dir}}}"
+HEIWA_BIN="${{HEIWA_BIN:-$HEIWA_HOME/bin/heiwa}}"
+
+if [[ ! -x "$HEIWA_BIN" ]]; then
+  echo "[FATAL] Heiwa runtime launcher is missing: $HEIWA_BIN" >&2
+  exit 1
+fi
+
+exec "$HEIWA_BIN" app start "$@"
+"#,
+        heiwa_dir = heiwa_dir.display()
+    );
+    fs::write(&executable_path, launcher)?;
+    #[cfg(unix)]
+    fs::set_permissions(&executable_path, fs::Permissions::from_mode(0o755))?;
+
+    let plist = r#"<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>CFBundleDevelopmentRegion</key>
+  <string>en</string>
+  <key>CFBundleDisplayName</key>
+  <string>Heiwa</string>
+  <key>CFBundleExecutable</key>
+  <string>Heiwa</string>
+  <key>CFBundleIdentifier</key>
+  <string>ltd.heiwa.app.local</string>
+  <key>CFBundleName</key>
+  <string>Heiwa</string>
+  <key>CFBundlePackageType</key>
+  <string>APPL</string>
+  <key>CFBundleShortVersionString</key>
+  <string>0.1.0-local</string>
+  <key>CFBundleVersion</key>
+  <string>1</string>
+  <key>LSMinimumSystemVersion</key>
+  <string>14.0</string>
+  <key>NSPrincipalClass</key>
+  <string>NSApplication</string>
+</dict>
+</plist>
+"#;
+    fs::write(contents_dir.join("Info.plist"), plist)?;
+
+    let bin_launcher_path = heiwa_dir.join("bin").join("heiwa-app");
+    let bin_launcher = format!(
+        r#"#!/bin/zsh
+set -euo pipefail
+
+exec "{app_executable}" "$@"
+"#,
+        app_executable = executable_path.display()
+    );
+    fs::write(&bin_launcher_path, bin_launcher)?;
+    #[cfg(unix)]
+    fs::set_permissions(&bin_launcher_path, fs::Permissions::from_mode(0o755))?;
+
     Ok(())
 }
 

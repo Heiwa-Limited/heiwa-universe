@@ -591,6 +591,7 @@ body {
   font-weight: 600;
   cursor: pointer;
   transition: all 0.2s ease;
+  text-decoration: none;
 }
 
 .btn-workspace-action:hover {
@@ -628,15 +629,44 @@ body {
   flex-shrink: 0;
 }
 
+.sidecar-console-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 1rem;
+  padding: 1rem 1rem 0.8rem;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+}
+
+.sidecar-console-header strong,
+.console-eyebrow {
+  display: block;
+}
+
+.sidecar-console-header strong {
+  margin-top: 0.18rem;
+  color: #e2e8f0;
+  font-size: 0.92rem;
+}
+
+.console-eyebrow {
+  color: #64748b;
+  font-size: 0.68rem;
+  font-weight: 800;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+
 .sidecar-tabs {
   display: flex;
+  flex-wrap: wrap;
   border-bottom: 1px solid rgba(255, 255, 255, 0.05);
   background-color: rgba(0, 0, 0, 0.1);
   padding: 0.25rem 0.25rem 0;
 }
 
 .sidecar-tab-btn {
-  flex: 1;
+  flex: 1 1 33%;
   background: transparent;
   border: none;
   border-bottom: 2px solid transparent;
@@ -671,6 +701,24 @@ body {
   display: flex;
   flex-direction: column;
   gap: 1.25rem;
+}
+
+.console-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 0.85rem;
+}
+
+.console-panel-copy {
+  display: grid;
+  gap: 0.35rem;
+}
+
+.console-panel-copy p {
+  margin: 0;
+  color: #7e8ca1;
+  font-size: 0.78rem;
+  line-height: 1.45;
 }
 
 .surface-watch-panel {
@@ -816,6 +864,43 @@ body {
   position: relative;
 }
 
+.console-card {
+  border-color: rgba(255, 255, 255, 0.055);
+}
+
+.console-link-grid {
+  display: grid;
+  gap: 0.65rem;
+}
+
+.console-link-card {
+  display: grid;
+  gap: 0.22rem;
+  padding: 0.85rem;
+  border: 1px solid rgba(255, 255, 255, 0.055);
+  border-radius: 10px;
+  background: rgba(0, 0, 0, 0.16);
+  color: #dbeafe;
+  text-decoration: none;
+  transition: all 0.2s ease;
+}
+
+.console-link-card:hover {
+  border-color: rgba(0, 242, 254, 0.22);
+  background: rgba(0, 242, 254, 0.06);
+}
+
+.console-link-card span {
+  font-size: 0.82rem;
+  font-weight: 800;
+}
+
+.console-link-card small {
+  color: #64748b;
+  font-size: 0.72rem;
+  line-height: 1.35;
+}
+
 .policy-header {
   font-size: 0.85rem;
   font-weight: 700;
@@ -928,6 +1013,12 @@ body {
   height: 100%;
 }
 
+.trace-panel.compact {
+  min-height: 180px;
+  height: 180px;
+  margin-top: 0.25rem;
+}
+
 .trace-header {
   font-size: 0.75rem;
   font-weight: 700;
@@ -953,7 +1044,8 @@ body {
 
 .trace-log-line {
   line-height: 1.4;
-  word-break: break-all;
+  word-break: normal;
+  overflow-wrap: anywhere;
 }
 
 .trace-log-line.api { color: #f093fb; }
@@ -1300,9 +1392,9 @@ body {
 
 .session-hero {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
+  grid-template-columns: minmax(0, 1fr);
   gap: 1rem;
-  align-items: end;
+  align-items: start;
   padding: 0.25rem 0 0.75rem;
 }
 
@@ -1335,9 +1427,9 @@ body {
 .session-status-strip {
   display: flex;
   flex-wrap: wrap;
-  justify-content: flex-end;
+  justify-content: flex-start;
   gap: 0.45rem;
-  max-width: 420px;
+  max-width: none;
 }
 
 .session-status-strip span {
@@ -1352,7 +1444,7 @@ body {
 
 .context-signal-band {
   display: grid;
-  grid-template-columns: minmax(220px, 0.48fr) minmax(0, 1fr);
+  grid-template-columns: minmax(0, 1fr);
   gap: 1rem;
   align-items: stretch;
   padding: 1rem;
@@ -1379,7 +1471,7 @@ body {
 
 .context-signal-grid {
   display: grid;
-  grid-template-columns: repeat(5, minmax(0, 1fr));
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 0.65rem;
 }
 

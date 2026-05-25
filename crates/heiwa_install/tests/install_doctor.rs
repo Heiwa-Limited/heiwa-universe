@@ -103,7 +103,7 @@ fn test_install_creates_runtime_layout_and_canonical_launcher() {
         );
 
         for dirname in [
-            "bin", "logs", "sessions", "cache", "state", "secrets", "plugins",
+            "app", "bin", "logs", "sessions", "cache", "state", "secrets", "plugins",
         ] {
             assert!(
                 runtime_root.join(dirname).is_dir(),
@@ -128,6 +128,31 @@ fn test_install_creates_runtime_layout_and_canonical_launcher() {
             launcher.contains("apps/heiwa_cli/bin/heiwa"),
             "launcher should still support repo/dev wrapper fallback: {}",
             launcher
+        );
+
+        let app_bundle = runtime_root.join("app").join("Heiwa.app");
+        assert!(
+            app_bundle.join("Contents").join("Info.plist").exists(),
+            "expected HOME-local Heiwa.app bundle metadata"
+        );
+
+        let app_executable = app_bundle.join("Contents").join("MacOS").join("Heiwa");
+        assert!(
+            app_executable.exists(),
+            "expected HOME-local Heiwa.app executable launcher"
+        );
+
+        let app_launcher = fs::read_to_string(&app_executable).expect("read app executable");
+        assert!(
+            app_launcher.contains("app start"),
+            "Heiwa.app launcher should start the local app runtime: {}",
+            app_launcher
+        );
+
+        let bin_app = runtime_root.join("bin").join("heiwa-app");
+        assert!(
+            bin_app.exists(),
+            "expected CLI shim at ~/.heiwa/bin/heiwa-app"
         );
     });
 }

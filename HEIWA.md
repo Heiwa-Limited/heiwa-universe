@@ -11,7 +11,8 @@ Heiwa is the operating layer that turns one user intent into governed, routed, v
 
 Current shape:
 
-- `heiwa` is the installed product surface.
+- `heiwa` is the installed runtime and CLI control surface.
+- `Heiwa.app` is the installed primary user input/display surface.
 - DREX is the internal execution kernel.
 - GitHub is the source and install authority. The installed local runtime plus
   `~/.heiwa/` are the current user-functionality truth on each machine.
@@ -40,9 +41,18 @@ Primary loop:
 5. Results, blockers, receipts, and follow-up questions return through the same
    thread and are inspectable in the app/runtime state.
 
-Heiwa.app may show panels for Inbox, Providers, History, Traces, Memory,
-Approvals, Status, and other surfaces, but those panels are inspectors over the
-same runtime truth. They do not replace the single Heiwa/user conversation.
+Heiwa.app is the everyday executable client/display for this loop. Normal
+installs must place the local runtime under `~/.heiwa/` and the user-facing app
+under `~/.heiwa/app/Heiwa.app` or the platform-equivalent HOME-local app path.
+It may show panels for Inbox, Providers, History, Traces, Memory, Approvals,
+Status, and other surfaces, but those panels are inspectors over the same
+runtime truth. They do not replace the single Heiwa/user conversation.
+
+The browser console is a per-user pseudo-backend and secondary operations
+surface. It belongs to advanced controls, personalization, skills, rules,
+preferences, connectors, auto-managed projects, telemetry overview, and links
+into dashboard/app settings. It should help power users tune Heiwa without
+turning routine use into manual console work.
 
 ## The Three Planes
 
@@ -127,7 +137,7 @@ Heiwa is a system with three distinct layers:
 
 1. **User surface**
    - `heiwa` on the machine is the primary product surface.
-   - `Heiwa.app` is the companion visual shell over the same runtime, currently implemented as a web-based client path in this repo rather than a full native desktop runtime.
+   - `Heiwa.app` is the real executable client/display shell over the same runtime. Current installs create a HOME-local launcher bundle; the next packaging step replaces that bridge with the native wrapper without changing runtime authority.
    - Web surfaces exist, but they are not the current center of gravity.
 
 2. **Execution kernel**
@@ -623,7 +633,7 @@ Do not mistake maturity theater for leverage.
 These are important, but should not outrun substrate truth:
 
 - `/code` as a polished remote coding surface
-- a large web console
+- a large browser console masquerading as the product
 - pretty telemetry for its own sake
 - team fleet dashboards before device truth is solid
 - WASM reducer marketplaces before config, SDK, and subscriptions exist
