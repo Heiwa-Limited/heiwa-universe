@@ -1,0 +1,226 @@
+<!doctype html>
+<html lang="en-CA">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Heiwa Support &middot; Help, Issues, Security Disclosure</title>
+    <meta
+      name="description"
+      content="How to get help with Heiwa: documentation, GitHub Issues, security disclosure, governance contact. Honest response-time fiducials."
+    />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
+    <link rel="stylesheet" href="./assets/instrument.css" />
+  </head>
+  <body data-page="support">
+    <div class="bg-grid" aria-hidden="true"></div>
+
+    <header class="topbar">
+      <div class="brand-group">
+        <a class="brand-wordmark" href="/index.html">HEIWA</a>
+        <span class="stamp"><span class="tick"></span>SUPPORT &middot; v1.0</span>
+      </div>
+      <nav class="nav" aria-label="Primary">
+        <a href="/index.html">Home</a>
+        <a href="/providers.html">Providers</a>
+        <a href="/download.html">Install</a>
+        <a href="https://docs.heiwa.ltd">Docs</a>
+        <a class="is-active" href="/support.html">Support</a>
+        <a href="https://github.com/Strategizing/heiwa-universe">Source</a>
+      </nav>
+    </header>
+
+    <main>
+      <section class="hero compact">
+        <p class="eyebrow">Support &middot; Help &amp; Disclosure</p>
+        <h1>How to get help. How to report. What to expect.</h1>
+        <p class="lede">
+          Heiwa is local-first software. Support runs through the public source tree, the documentation site,
+          and a small set of disclosure channels. Response-time fiducials are honest, not aspirational.
+        </p>
+        <div class="hero-actions" style="margin-top:1.2rem;">
+          <a class="ig-btn" data-intent="active" href="https://docs.heiwa.ltd">Read Docs</a>
+          <a class="ig-btn" href="https://github.com/Strategizing/heiwa-universe/issues/new/choose">Open Issue</a>
+          <a class="ig-btn" data-intent="critical" href="mailto:security@heiwa.ltd?subject=Security%20disclosure">Security Disclosure</a>
+        </div>
+      </section>
+
+      <!-- ============== CHANNELS ============== -->
+      <section class="section">
+        <div class="section-head">
+          <h2>01 &middot; Channels</h2>
+          <span class="idx">PUBLIC FIRST &middot; PRIVATE FOR SECURITY</span>
+        </div>
+        <div class="grid-3">
+          <div class="tile corner">
+            <div class="t-h"><h3>Documentation</h3><span class="k">FIRST STOP</span></div>
+            <p>Runbooks, doctrine, provider lanes, install path, and the publishing pipeline.</p>
+            <a class="ig-btn" href="https://docs.heiwa.ltd">docs.heiwa.ltd</a>
+          </div>
+          <div class="tile corner">
+            <div class="t-h"><h3>GitHub Issues</h3><span class="k">PUBLIC TRACKER</span></div>
+            <p>Bug reports, feature requests, runtime questions, and CLI behaviour. Templates wired for each.</p>
+            <a class="ig-btn" href="https://github.com/Strategizing/heiwa-universe/issues">Open tracker</a>
+          </div>
+          <div class="tile corner is-critical">
+            <div class="t-h"><h3>Security</h3><span class="k" style="color:var(--critical);">PRIVATE CHANNEL</span></div>
+            <p>Suspected vulnerabilities, credential leakage, or sandbox escapes go to <code>security@heiwa.ltd</code> first &mdash; not the public tracker.</p>
+            <a class="ig-btn" data-intent="critical" href="mailto:security@heiwa.ltd?subject=Security%20disclosure">Disclose</a>
+          </div>
+        </div>
+      </section>
+
+      <!-- ============== RESPONSE TIMES ============== -->
+      <section class="section">
+        <div class="section-head">
+          <h2>02 &middot; Response-Time Fiducials</h2>
+          <span class="idx">HONEST &middot; NOT ASPIRATIONAL</span>
+        </div>
+        <div class="readout" style="margin-bottom:1rem;">
+          <div><span class="k">Docs</span><span class="v active">SELF-SERVE</span></div>
+          <div><span class="k">Issue triage</span><span class="v">72H</span></div>
+          <div><span class="k">Security ack</span><span class="v system">24H</span></div>
+          <div><span class="k">Security fix</span><span class="v">7&ndash;30D</span></div>
+          <div><span class="k">Office hours</span><span class="v">UTC</span></div>
+        </div>
+        <p class="muted" style="font-family:var(--ff-mono);font-size:0.78rem;letter-spacing:0.04em;">
+          Heiwa is operated by a small team on the operator's primary machine. SLAs are honest fiducials, not
+          contractual. Paid enterprise support is not offered today &mdash; if that changes, it will land here first.
+        </p>
+      </section>
+
+      <!-- ============== DISCLOSURE POLICY ============== -->
+      <section class="section">
+        <div class="section-head">
+          <h2>03 &middot; Disclosure Policy</h2>
+          <span class="idx">COORDINATED &middot; PRIVATE FIRST</span>
+        </div>
+        <div class="grid-2">
+          <div class="tile">
+            <span class="k">REPORT INCLUDES</span>
+            <ul style="margin:0;padding-left:1rem;color:var(--ink-2);line-height:1.6;font-size:0.9rem;">
+              <li>Affected component (runtime, CLI, web shell, STDB)</li>
+              <li>Heiwa version &middot; <code>heiwa --version</code></li>
+              <li>Reproduction steps or proof-of-concept</li>
+              <li>Suspected impact &middot; severity estimate</li>
+              <li>Disclosure preferences &middot; embargo window</li>
+            </ul>
+          </div>
+          <div class="tile">
+            <span class="k">WE COMMIT TO</span>
+            <ul style="margin:0;padding-left:1rem;color:var(--ink-2);line-height:1.6;font-size:0.9rem;">
+              <li>Acknowledge within 24h</li>
+              <li>Triage within 72h</li>
+              <li>Coordinate a disclosure window &mdash; default 30 days</li>
+              <li>Credit researchers in <code>SECURITY.md</code> unless asked not to</li>
+              <li>Publish a postmortem in <code>docs/security/</code> after fix lands</li>
+            </ul>
+          </div>
+        </div>
+      </section>
+
+      <!-- ============== GOVERNANCE ============== -->
+      <section class="section">
+        <div class="section-head">
+          <h2>04 &middot; Governance &amp; Boundaries</h2>
+          <span class="idx">PUBLIC SURFACE &middot; PRIVATE RUNTIME</span>
+        </div>
+        <div class="tile" style="background:var(--bg);padding:0;">
+          <table class="ledger">
+            <thead>
+              <tr><th>Channel</th><th>For</th><th>Latency target</th><th>Status</th></tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td>GitHub Issues</td>
+                <td>Public bugs, feature requests, runtime questions</td>
+                <td class="num">72h</td>
+                <td><span class="pill active">open</span></td>
+              </tr>
+              <tr>
+                <td>GitHub Discussions</td>
+                <td>Architecture, doctrine, lane proposals</td>
+                <td class="num">&mdash;</td>
+                <td><span class="pill neutral">community-paced</span></td>
+              </tr>
+              <tr>
+                <td><code>security@heiwa.ltd</code></td>
+                <td>Coordinated vulnerability disclosure</td>
+                <td class="num">24h</td>
+                <td><span class="pill system">private</span></td>
+              </tr>
+              <tr>
+                <td><code>governance@heiwa.ltd</code></td>
+                <td>Policy, contributor licence, enterprise enquiry</td>
+                <td class="num">5d</td>
+                <td><span class="pill neutral">slow channel</span></td>
+              </tr>
+              <tr>
+                <td>Status surface</td>
+                <td>Hosted backbone health &middot; read-only</td>
+                <td class="num">live</td>
+                <td><span class="pill active">websocket</span></td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <!-- ============== WHAT WE DON'T DO ============== -->
+      <section class="section">
+        <div class="section-head">
+          <h2>05 &middot; What This Channel Does Not Cover</h2>
+          <span class="idx">PROVIDER BOUNDARIES</span>
+        </div>
+        <div class="grid-2">
+          <div class="tile">
+            <span class="k">PROVIDER RUNTIMES</span>
+            <p>Claude Code, Codex, Gemini CLI, Antigravity, Ollama, and OpenRouter own their inference, auth,
+              quotas, and model inventory. Heiwa wraps; it does not adjudicate provider behaviour.</p>
+            <p class="muted">Provider issues route to the provider's own support.</p>
+          </div>
+          <div class="tile">
+            <span class="k">OPERATOR DATA</span>
+            <p>Memory, sessions, evidence, and provider secrets live on the operator's machine. Heiwa support
+              cannot read, recover, or restore that data &mdash; by design.</p>
+            <p class="muted">Backups remain the operator's responsibility.</p>
+          </div>
+        </div>
+      </section>
+
+      <div class="page-foot">
+        <p>Heiwa Support &middot;
+          <a href="https://docs.heiwa.ltd">docs</a> &middot;
+          <a href="https://github.com/Strategizing/heiwa-universe/issues">issues</a> &middot;
+          <a href="mailto:security@heiwa.ltd">security</a>
+        </p>
+        <p>Honest fiducials &middot; Public-first &middot; Local runtime sovereignty preserved</p>
+      </div>
+    </main>
+
+    <script>
+      document.querySelectorAll(".ig-btn").forEach((btn) => {
+        btn.addEventListener("click", () => {
+          const intent = btn.dataset.intent;
+          const colour =
+            intent === "active" ? "var(--active)" :
+            intent === "system" ? "var(--system)" :
+            intent === "critical" ? "var(--critical)" :
+            "var(--ink-2)";
+          const prevBg = btn.style.background;
+          const prevCol = btn.style.color;
+          const prevBd = btn.style.borderColor;
+          btn.style.background = colour;
+          btn.style.color = "var(--bg)";
+          btn.style.borderColor = colour;
+          setTimeout(() => {
+            btn.style.background = prevBg;
+            btn.style.color = prevCol;
+            btn.style.borderColor = prevBd;
+          }, 80);
+        });
+      });
+    </script>
+  </body>
+</html>

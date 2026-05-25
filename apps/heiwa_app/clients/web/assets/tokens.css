@@ -1,0 +1,101 @@
+/* =========================================================================
+   Heiwa Design System — Instrument-Grade tokens
+   Monochrome substrate. Accents as state, never decoration. Dark-only.
+   Canadian English in copy. Currency rendered as $CAD.
+
+   Public surfaces (heiwa.ltd marketing/install/support) link this file.
+   Operator pages continue to link styles.css until they migrate.
+   ========================================================================= */
+
+@import url("https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=Space+Grotesk:wght@400;500;700&display=swap");
+
+:root {
+  /* ---------- Surface palette (monochrome only) ---------- */
+  --bg:        #050505;   /* page substrate */
+  --bg-2:      #0a0a0a;   /* inset / panel fill */
+  --bg-3:      #0f0f0f;   /* raised surface, code block */
+  --ink:       #f2f2f2;   /* primary — near-white */
+  --ink-2:     #c8c8c8;   /* silver — secondary */
+  --ink-3:     #6b6b6b;   /* dimmed grey — labels, meta */
+  --ink-4:     #3a3a3a;   /* deep grey — disabled */
+
+  /* ---------- Dividers — sharp hairlines, never shadows ---------- */
+  --rule:      rgba(255, 255, 255, 0.09);
+  --rule-hi:   rgba(255, 255, 255, 0.18);
+  --rule-lo:   rgba(255, 255, 255, 0.04);
+
+  /* ---------- Functional accents (state only) ---------- */
+  --active:       #31c5a8;
+  --active-wk:    rgba(49, 197, 168, 0.24);
+  --system:       #f28c28;
+  --system-wk:    rgba(242, 140, 40, 0.24);
+  --critical:     #e05d5d;
+  --critical-wk:  rgba(224, 93, 93, 0.24);
+
+  /* ---------- Legacy aliases (kept so older selectors don't break) ---------- */
+  --accent:    var(--system);
+  --accent2:   var(--active);
+  --accent3:   var(--active);
+  --good:      var(--active);
+  --warn:      var(--system);
+  --bad:       var(--critical);
+  --bg2:       var(--bg-2);
+  --bg3:       var(--bg-3);
+  --muted:     var(--ink-3);
+  --line:      var(--rule);
+  --card:      var(--bg-2);
+  --shadow:    none;
+
+  /* ---------- Elevation — hairlines replace shadows ---------- */
+  --hairline:       0 0 0 0.5px var(--rule);
+  --ring-active:    inset 0 0 0 1px var(--active);
+  --ring-system:    inset 0 0 0 1px var(--system);
+  --ring-critical:  inset 0 0 0 1px var(--critical);
+  --ring-muted:     inset 0 0 0 1px var(--rule-hi);
+
+  /* ---------- Geometry — sharp by default ---------- */
+  --r-0: 0px;
+  --r-1: 2px;
+  --r-2: 4px;
+  --r-3: 6px;
+
+  /* ---------- Spacing ---------- */
+  --s-1: 0.35rem;
+  --s-2: 0.55rem;
+  --s-3: 0.7rem;
+  --s-4: 0.8rem;
+  --s-5: 1rem;
+  --s-6: 1.2rem;
+  --s-7: 1.6rem;
+  --s-8: 2rem;
+  --s-9: 3rem;
+
+  /* ---------- Typography primitives ---------- */
+  --ff-ui:   "Space Grotesk", system-ui, sans-serif;
+  --ff-mono: "IBM Plex Mono", ui-monospace, monospace;
+
+  --tr-brand:    0.24em;
+  --tr-eyebrow:  0.14em;
+  --tr-th:       0.10em;
+  --tr-mono:     0.02em;
+
+  --fs-eyebrow: 0.72rem;
+  --fs-meta:    0.75rem;
+  --fs-ui:      0.92rem;
+  --fs-body:    1.00rem;
+  --fs-lede:    1.05rem;
+  --fs-h3:      1.00rem;
+  --fs-h2:      1.10rem;
+
+  --fs-hero-lg: clamp(2rem, 6vw, 4.4rem);
+  --fs-hero-md: clamp(1.8rem, 5vw, 3rem);
+
+  /* ---------- Substrate coordinate grid ---------- */
+  --heiwa-grid:
+    linear-gradient(to right,  var(--rule-lo) 1px, transparent 1px),
+    linear-gradient(to bottom, var(--rule-lo) 1px, transparent 1px);
+
+  /* ---------- Motion ---------- */
+  --t-strike: 80ms linear;
+  --t-ring:   120ms linear;
+}
