@@ -13,7 +13,7 @@ How the `heiwa-universe` repository becomes the public Heiwa surface. Cloudflare
 | **Releases** | GitHub Releases | `apps/heiwa_core/`, `apps/heiwa_shell/` | GitHub Releases |
 | **Evidence + licence state** | (internal) | `apps/heiwa_orchestrator/src/stdb/`, `crates/heiwa_stdb/` | SpacetimeDB |
 
-Each plane has a single source of truth in the repo and a single deploy path. There are no manual upload steps.
+Each plane has a single source of truth in the repo and a single deploy path. Automated workflows are the normal channel; a [manual fallback](#manual-fallback-when-actions-are-paused) exists for the periods when GitHub Actions are paused.
 
 ## Cloudflare — the static shop window
 
@@ -43,6 +43,74 @@ GitHub is the source of truth. Every public artifact is built from a tagged comm
 | [`pages.yml`](https://github.com/Strategizing/heiwa-universe/blob/main/.github/workflows/pages.yml) | tag push `v*` | MkDocs build → GitHub Pages → `docs.heiwa.ltd` |
 | [`release.yml`](https://github.com/Strategizing/heiwa-universe/blob/main/.github/workflows/release.yml) | tag push `v*` | Cross-platform binaries → GitHub Releases |
 | [`deploy.yml`](https://github.com/Strategizing/heiwa-universe/blob/main/.github/workflows/deploy.yml) | manual / push to `main` | Cloudflare Pages publish for `clients/web/` |
+
+### Current pipeline status (2026-05-25)
+
+The four workflows above are **runner-billed-out, not code-broken**. The GitHub account's spending-limit annotation blocks the runners; a `v*` tag push queues but does not execute. The code paths in `.github/workflows/*.yml` remain valid — restoring runner budget re-enables them with no code change required.
+
+Until that resolves, ship from the manual fallback below. Remove the fallback section once at least one tagged release flows cleanly through the automated path again — doctrine pages stay honest.
+
+### Manual fallback (when Actions are paused)
+
+**Docs → `docs.heiwa.ltd`**
+
+```bash
+uv run --extra docs mkdocs build --strict
+uv run --extra docs mkdocs gh-deploy --force
+```
+
+`gh-deploy` pushes the built site to the `gh-pages` branch, which GitHub Pages serves. `--force` is appropriate because `gh-pages` is generated state, not source.
+
+**Binary releases → GitHub Releases**
+
+Build each target locally (or in a clean sandbox), assemble the archive, generate the checksums manifest, and create the release with `gh`:
+
+```bash
+TAG=v0.1.0
+mkdir -p dist
+
+# macOS · Apple Silicon
+cargo build --release --target aarch64-apple-darwin -p heiwa-shell
+tar -czf dist/heiwa-${TAG}-macos-aarch64.tar.gz \
+  -C target/aarch64-apple-darwin/release heiwa
+
+# Linux · x86_64  (cross-build via Docker or build on a Linux host)
+cargo build --release --target x86_64-unknown-linux-gnu -p heiwa-shell
+tar -czf dist/heiwa-${TAG}-linux-x86_64.tar.gz \
+  -C target/x86_64-unknown-linux-gnu/release heiwa
+
+# Windows · x86_64  (cross-build via cargo-xwin or build on a Windows host)
+cargo build --release --target x86_64-pc-windows-msvc -p heiwa-shell
+zip -j dist/heiwa-${TAG}-windows-x86_64.zip \
+  target/x86_64-pc-windows-msvc/release/heiwa.exe
+
+# Checksums manifest — authoritative for mirrors and the installer
+( cd dist && shasum -a 256 heiwa-${TAG}-* > heiwa-${TAG}-checksums.txt )
+
+# Cut the release
+gh release create ${TAG} dist/heiwa-${TAG}-* \
+  --title "Heiwa ${TAG}" \
+  --notes-file CHANGELOG.md
+```
+
+The result is byte-identical to what `release.yml` produces. The checksums manifest stays authoritative.
+
+**Cloudflare Pages → `heiwa.ltd`**
+
+```bash
+npx wrangler pages deploy apps/heiwa_app/clients/web --project-name=heiwa-clients
+```
+
+Functionally identical to the `deploy.yml` workflow path.
+
+**Python package publish → PyPI**
+
+```bash
+uv build
+uv publish --token "$PYPI_TOKEN"
+```
+
+Functionally identical to the blocked `submit-pypi` runner path. Use only from a clean tag checkout after the docs and release artifacts above have been verified.
 
 ### Release tagging conventions
 

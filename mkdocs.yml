@@ -54,6 +54,7 @@ nav:
   - Product Contract: product-contract.md
   - Capability Fabric: capability-fabric.md
   - Architecture: architecture.md
+  - Receipts: architecture/receipts.md
   - Provider Registry: provider-registry.md
   - Routing Policy: routing.md
   - Local Operation: local-self-operation.md
