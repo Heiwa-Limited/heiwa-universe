@@ -10,6 +10,13 @@ type NavItem = {
 
 type InspectorTab = "telemetry" | "safety" | "checklist" | "trace";
 
+type SurfaceSignal = {
+  name: string;
+  status: string;
+  detail: string;
+  tone: "online" | "active" | "secure";
+};
+
 const primaryNav: NavItem[] = [
   { href: "/", label: "Dashboard", mark: "D" },
   { href: "/inbox", label: "Inbox", mark: "I" },
@@ -59,6 +66,39 @@ const traceLines = [
   { kind: "drex", text: "plane: intake -> execution -> evidence" },
   { kind: "api", text: "source: GitHub Releases preferred" },
   { kind: "system", text: "mode: checkout-dev visual verification" },
+];
+
+const surfaceSignals: SurfaceSignal[] = [
+  {
+    name: "Browser",
+    status: "attached",
+    detail: "Dev browser evidence stream",
+    tone: "online",
+  },
+  {
+    name: "Mail + calendar",
+    status: "metadata",
+    detail: "Priority summaries only",
+    tone: "secure",
+  },
+  {
+    name: "Machine",
+    status: "live",
+    detail: "CPU, memory, local runtime",
+    tone: "online",
+  },
+  {
+    name: "Computer use",
+    status: "approval",
+    detail: "Staged before side effects",
+    tone: "active",
+  },
+  {
+    name: "Integrations",
+    status: "staged",
+    detail: "GitHub, Cloudflare, STDB",
+    tone: "secure",
+  },
 ];
 
 function routeTitle(pathname: string): string {
@@ -201,6 +241,26 @@ export default function App(props: ParentProps): JSX.Element {
         <div class="sidecar-body">
           <Show when={inspectorTab() === "telemetry"}>
             <section class="telemetry-panel">
+              <div class="surface-watch-panel">
+                <div class="surface-watch-header">
+                  <span class="widget-label">Connected surfaces</span>
+                  <span class="status-pill online">watching</span>
+                </div>
+                <div class="surface-signal-list">
+                  <For each={surfaceSignals}>
+                    {(surface) => (
+                      <div class="surface-signal-row">
+                        <div>
+                          <span class="surface-name">{surface.name}</span>
+                          <span class="surface-detail">{surface.detail}</span>
+                        </div>
+                        <span class={`status-pill ${surface.tone}`}>{surface.status}</span>
+                      </div>
+                    )}
+                  </For>
+                </div>
+              </div>
+
               <div class="telemetry-widget">
                 <span class="widget-label">CPU</span>
                 <div class="widget-value-row">

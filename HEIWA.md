@@ -13,11 +13,36 @@ Current shape:
 
 - `heiwa` is the installed product surface.
 - DREX is the internal execution kernel.
-- Devon's MacBook checkout plus `~/.heiwa/` are the current source-of-truth/server for user functionality.
+- GitHub is the source and install authority. The installed local runtime plus
+  `~/.heiwa/` are the current user-functionality truth on each machine.
 - SpacetimeDB is the adjudication, subscription, and evidence sync plane when enabled.
 - Rust proposes and executes.
 - Providers still own their own inference internals.
-- Heiwa turns the user’s local models and connected providers into one coherent operator experience.
+- Heiwa turns the user's local models and connected providers into one coherent operator experience.
+
+## Interaction Contract
+
+The user should experience Heiwa as one conversation, not a collection of tools
+they must manually coordinate.
+
+Primary loop:
+
+1. The user asks, answers, approves, or corrects Heiwa in one input/output
+   thread.
+2. Heiwa watches connected surfaces in the background: browser, mail, calendar,
+   messages, forums, files, machines, provider CLIs, local models, computer-use
+   surfaces, GitHub, Cloudflare, STDB, and other approved integrations.
+3. Heiwa compresses that background state into context the user can understand:
+   what changed, why it matters, what Heiwa is doing, what needs approval, and
+   what evidence exists.
+4. Safe work can proceed in the background. Risky writes become staged actions
+   with target, payload, cost/risk, and expected receipt.
+5. Results, blockers, receipts, and follow-up questions return through the same
+   thread and are inspectable in the app/runtime state.
+
+Heiwa.app may show panels for Inbox, Providers, History, Traces, Memory,
+Approvals, Status, and other surfaces, but those panels are inspectors over the
+same runtime truth. They do not replace the single Heiwa/user conversation.
 
 ## The Three Planes
 

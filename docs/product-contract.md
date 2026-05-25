@@ -48,14 +48,24 @@ provider-owned; Heiwa owns routing, evidence, policy, and local UX.
 Today this is represented by the web client path in `apps/heiwa_app/`. The target
 is a safe client, not a privileged second control plane.
 
+The primary user experience is a single input/output conversation with Heiwa.
+Pages such as Inbox, Providers, History, Traces, Memory, and Status are
+inspectors for the same runtime state; they are not separate places the user
+must mentally route work. The user asks or responds in one thread. Heiwa uses
+background context from connected surfaces, then reports decisions, staged
+actions, receipts, and blockers back through that thread.
+
 It should expose:
 
+- the main Heiwa/user conversation stream
 - account and provider connection state
 - devices and runtime health
 - task, run, and receipt history
 - approvals and risk classes
 - routing policy visibility
 - public-safe status and diagnostics
+- connected-surface context from browser, mail, calendar, messages, machine
+  resources, computer use, and third-party integrations
 
 It must not hold raw provider secrets, bypass runtime policy, or become the place
 where privileged automation logic lives.

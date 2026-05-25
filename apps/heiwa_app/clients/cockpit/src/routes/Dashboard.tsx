@@ -24,6 +24,34 @@ interface Message {
   };
 }
 
+const contextSignals = [
+  {
+    label: "Browser",
+    state: "attached",
+    detail: "Visible page, console health, screenshots",
+  },
+  {
+    label: "Email",
+    state: "priority",
+    detail: "Metadata summaries and pinned asks",
+  },
+  {
+    label: "Messages",
+    state: "planned",
+    detail: "Discord, Telegram, iMessage, SMS",
+  },
+  {
+    label: "Machine",
+    state: "live",
+    detail: "CPU, RAM, local model availability",
+  },
+  {
+    label: "Actions",
+    state: "gated",
+    detail: "Computer use and writes require approval",
+  },
+];
+
 const initialArtifacts: Artifact[] = [
   {
     title: "Local Release Sandbox",
@@ -39,6 +67,13 @@ const initialArtifacts: Artifact[] = [
     summary:
       "Separates installed GitHub-release runtime from checkout development mode and keeps Cloudflare/STDB as protected backends.",
   },
+  {
+    title: "Surface Context Packet",
+    file: "~/.heiwa/state/inbox",
+    badge: "review",
+    summary:
+      "Normalizes browser, mail, messages, machine telemetry, and integration alerts into one chat-readable context stream.",
+  },
 ];
 
 const starterMessages: Message[] = [
@@ -46,10 +81,11 @@ const starterMessages: Message[] = [
     id: "assistant-boot",
     role: "assistant",
     text:
-      "Heiwa.app is in checkout verification mode. The installed user path points at GitHub Releases; local checkout reinstall stays explicit developer mode.",
-    trace: "source_mode=github-release; workspace=~/heiwa-universe",
+      "This thread is the primary input/output contract. Talk to Heiwa here; the runtime watches connected surfaces in the background, explains what changed, stages risky actions, and returns receipts in this same stream.",
+    trace:
+      "io=single-thread; surfaces=browser,mail,machine,computer-use,integrations; writes=approval-gated",
     artifacts: initialArtifacts,
-    diff: { files: 3, additions: 198, deletions: 0 },
+    diff: { files: 4, additions: 198, deletions: 0 },
   },
 ];
 
@@ -176,25 +212,48 @@ export default function Dashboard(): JSX.Element {
     <section class="workspace-dashboard">
       <header class="session-hero">
         <div>
-          <p class="session-kicker">Active workspace</p>
-          <h1>Local-first agent cockpit</h1>
+          <p class="session-kicker">Primary interface</p>
+          <h1>One conversation with Heiwa</h1>
           <p class="session-copy">
-            One dense surface for intake, execution, evidence, update posture, and
-            provider routing.
+            Ask once, then let the runtime gather context from connected surfaces,
+            execute safe work, and explain the state back through this thread.
           </p>
         </div>
         <div class="session-status-strip" aria-label="Runtime status">
-          <span>GitHub release source</span>
-          <span>Checkout verification</span>
-          <span>Evidence preserved</span>
+          <span>Single I/O thread</span>
+          <span>Background telemetry</span>
+          <span>Approval-gated writes</span>
         </div>
       </header>
+
+      <section class="context-signal-band" aria-label="Connected surface context">
+        <div class="context-band-copy">
+          <span class="panel-label">Now context</span>
+          <p>
+            Heiwa should keep surface details in the background and interrupt only
+            when intent, risk, or evidence needs the user.
+          </p>
+        </div>
+        <div class="context-signal-grid">
+          <For each={contextSignals}>
+            {(signal) => (
+              <div class="context-signal-card">
+                <div class="context-signal-topline">
+                  <span>{signal.label}</span>
+                  <strong>{signal.state}</strong>
+                </div>
+                <p>{signal.detail}</p>
+              </div>
+            )}
+          </For>
+        </div>
+      </section>
 
       <div class="workspace-chat-panel">
         <div class="chat-panel-header">
           <div>
-            <span class="panel-label">Conversation</span>
-            <h2>Runtime alignment thread</h2>
+            <span class="panel-label">Heiwa output</span>
+            <h2>Unified context and action stream</h2>
           </div>
           <div class="panel-meta">
             <span>{messages().length} messages</span>
