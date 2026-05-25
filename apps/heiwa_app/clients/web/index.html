@@ -29,6 +29,17 @@
         <a href="/support.html">Support</a>
         <a href="https://github.com/Strategizing/heiwa-universe">Source</a>
       </nav>
+      <label class="ccy-wrap" title="Currency overlay — tokens are counted locally, this only changes how cost is displayed">
+        <span class="ccy-k">CCY</span>
+        <select id="ccy-select" class="ccy-select" aria-label="Currency overlay">
+          <option value="CAD" selected>CAD</option>
+          <option value="USD">USD</option>
+          <option value="EUR">EUR</option>
+          <option value="GBP">GBP</option>
+          <option value="JPY">JPY</option>
+          <option value="OFF">&mdash; off</option>
+        </select>
+      </label>
     </header>
 
     <main>
@@ -39,8 +50,9 @@
           <p class="lede">
             You host everything. Heiwa ships software, not a hosted operator app. Claude Max, ChatGPT Plus,
             Google AI Pro, API-key providers, and local Ollama all unify under one self-hosted operator
-            surface. Routing, receipts, approvals, and evidence stay on the machine you install on. Spend and
-            telemetry are rendered in <code>$CAD</code>.
+            surface. Routing, receipts, approvals, and evidence stay on the machine you install on.
+            <strong style="color:var(--ink);">Tokens are counted locally.</strong> Currency conversion is a
+            presentation overlay you choose &mdash; CAD, USD, off, anything.
           </p>
           <div class="command-band">
             <span class="k">Canonical install path</span>
@@ -54,13 +66,31 @@
           </div>
         </div>
 
-        <aside class="hero-fiducials" aria-label="Runtime fiducials">
-          <div class="fiducial"><span class="k">Runtime</span><span class="v active">LOCAL</span></div>
-          <div class="fiducial"><span class="k">Lanes &middot; supported</span><span class="v">3</span></div>
-          <div class="fiducial"><span class="k">State authority</span><span class="v">STDB</span></div>
-          <div class="fiducial"><span class="k">Distribution</span><span class="v">GITHUB</span></div>
-          <div class="fiducial"><span class="k">Public shell</span><span class="v">CLOUDFLARE</span></div>
-          <div class="fiducial"><span class="k">Telemetry</span><span class="v">$CAD</span></div>
+        <aside class="hero-fiducials" aria-label="Operator readout">
+          <div class="fiducial">
+            <span class="k">Tokens &middot; today</span>
+            <span class="v" data-tokens="184600">184.6k</span>
+          </div>
+          <div class="fiducial">
+            <span class="k">Cost &middot; today</span>
+            <span class="v"><span class="cost-num" data-cost-base-cad="1.84">1.84</span> <span class="ccy-suffix">CAD</span></span>
+          </div>
+          <div class="fiducial">
+            <span class="k">OAuth &middot; headroom</span>
+            <span class="v system">47%</span>
+          </div>
+          <div class="fiducial">
+            <span class="k">Lanes &middot; live</span>
+            <span class="v active">3 / 4</span>
+          </div>
+          <div class="fiducial">
+            <span class="k">Latency &middot; p50</span>
+            <span class="v">38ms</span>
+          </div>
+          <div class="fiducial">
+            <span class="k">Rates &middot; synced</span>
+            <span class="v">6h ago</span>
+          </div>
         </aside>
       </section>
 
@@ -109,10 +139,98 @@
         </div>
       </section>
 
+      <!-- ============== COST ATTRIBUTION ============== -->
+      <section class="section">
+        <div class="section-head">
+          <h2>03 &middot; Cost Attribution</h2>
+          <span class="idx">ENV &middot; PROVIDER &middot; MODEL &middot; AGENT</span>
+        </div>
+        <p class="muted" style="margin-bottom:1rem;font-family:var(--ff-mono);font-size:0.82rem;letter-spacing:0.03em;max-width:62ch;">
+          Every receipt carries four facts: where it ran, who served it, which model, and which agent requested
+          it. Most of the daily token count is free &mdash; sub-backed or local. The metered API lane is the
+          only one that turns tokens into currency.
+        </p>
+        <div class="tile" style="background:var(--bg);padding:0;">
+          <table class="ledger" id="cost-ledger">
+            <thead>
+              <tr>
+                <th>Env</th>
+                <th>Provider</th>
+                <th>Model</th>
+                <th>Agent</th>
+                <th>Tokens</th>
+                <th>Cost</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td><span class="pill active">local</span></td>
+                <td><code>ollama</code></td>
+                <td><code>qwen3.5:9b</code></td>
+                <td>coding</td>
+                <td class="num">92.4k</td>
+                <td class="num"><span class="cost-num" data-cost-base-cad="0">0.00</span> <span class="ccy-suffix">CAD</span></td>
+              </tr>
+              <tr>
+                <td><span class="pill active">oauth</span></td>
+                <td><code>claude-code</code></td>
+                <td><code>claude-sonnet-4-6</code></td>
+                <td>strategy</td>
+                <td class="num">47.1k</td>
+                <td class="num"><span class="cost-num" data-cost-base-cad="0">0.00</span> <span class="ccy-suffix">CAD</span></td>
+              </tr>
+              <tr>
+                <td><span class="pill active">oauth</span></td>
+                <td><code>codex</code></td>
+                <td><code>gpt-5-codex</code></td>
+                <td>refactor</td>
+                <td class="num">28.9k</td>
+                <td class="num"><span class="cost-num" data-cost-base-cad="0">0.00</span> <span class="ccy-suffix">CAD</span></td>
+              </tr>
+              <tr>
+                <td><span class="pill system">api</span></td>
+                <td><code>openrouter</code></td>
+                <td><code>claude-3.7-sonnet</code></td>
+                <td>trading</td>
+                <td class="num">12.0k</td>
+                <td class="num"><span class="cost-num" data-cost-base-cad="1.84">1.84</span> <span class="ccy-suffix">CAD</span></td>
+              </tr>
+              <tr>
+                <td><span class="pill active">local</span></td>
+                <td><code>ollama</code></td>
+                <td><code>qwen3.5:4b</code></td>
+                <td>summarise</td>
+                <td class="num">4.2k</td>
+                <td class="num"><span class="cost-num" data-cost-base-cad="0">0.00</span> <span class="ccy-suffix">CAD</span></td>
+              </tr>
+            </tbody>
+            <tfoot>
+              <tr>
+                <td colspan="4" style="color:var(--ink-3);font-family:var(--ff-mono);font-size:0.72rem;text-transform:uppercase;letter-spacing:0.1em;">Total &middot; today</td>
+                <td class="num" style="color:var(--ink);">184.6k</td>
+                <td class="num" style="color:var(--ink);"><span class="cost-num" data-cost-base-cad="1.84" style="font-weight:500;">1.84</span> <span class="ccy-suffix">CAD</span></td>
+              </tr>
+            </tfoot>
+          </table>
+        </div>
+        <div class="grid-2" style="margin-top:1rem;">
+          <div class="tile">
+            <span class="k">COUNTERFACTUAL</span>
+            <p style="color:var(--ink-2);">If the same 184.6k tokens had run entirely on the metered API lane, the workload would have cost
+              <strong style="color:var(--system);font-weight:500;font-family:var(--ff-mono);"><span class="cost-num" data-cost-base-cad="28.34">28.34</span> <span class="ccy-suffix">CAD</span></strong>.
+              Sub-backed routing kept it at <code>1.84 CAD</code>. The delta is the value of Heiwa.</p>
+          </div>
+          <div class="tile">
+            <span class="k">HEADROOM &middot; NOT JUST COST</span>
+            <p style="color:var(--ink-2);">OAuth lanes have rate windows, not bills. <code>Claude Max</code> sits at 47% of its 5-hour window with 47 minutes to reset. When a window pinches, Heiwa escalates to API only with your approval.</p>
+          </div>
+        </div>
+      </section>
+
       <!-- ============== OPERATOR FLOW ============== -->
       <section class="section">
         <div class="section-head">
-          <h2>03 &middot; Operator Flow</h2>
+          <h2>04 &middot; Operator Flow</h2>
           <span class="idx">INSTALL &middot; CONNECT &middot; RUN</span>
         </div>
         <div class="readout" style="margin-bottom:1rem;">
@@ -144,7 +262,7 @@
       <!-- ============== BACKBONE ============== -->
       <section class="section">
         <div class="section-head">
-          <h2>04 &middot; Public Backbone</h2>
+          <h2>05 &middot; Public Backbone</h2>
           <span class="idx">CLOUDFLARE &middot; GITHUB &middot; SPACETIMEDB</span>
         </div>
         <div class="grid-3">
@@ -172,7 +290,7 @@
       <!-- ============== COMPRESSION / DOCTRINE ============== -->
       <section class="section">
         <div class="section-head">
-          <h2>05 &middot; Doctrine</h2>
+          <h2>06 &middot; Doctrine</h2>
           <span class="idx">NON-NEGOTIABLES</span>
         </div>
         <div class="grid-3">
@@ -194,7 +312,7 @@
       <!-- ============== FINAL BAND ============== -->
       <section class="section">
         <div class="section-head">
-          <h2>06 &middot; Shop Window Only</h2>
+          <h2>07 &middot; Shop Window Only</h2>
           <span class="idx"><code>heiwa.ltd</code> DELIVERS SOFTWARE</span>
         </div>
         <div class="grid-2">
@@ -237,6 +355,46 @@
     </main>
 
     <script>
+      // ---------- Currency overlay ----------
+      // Tokens are counted locally. Cost is a derived function (rate-table × token-count).
+      // Currency is a presentation preference — this only changes how cost displays.
+      // Marketing rates are illustrative; the real runtime reads ~/.heiwa/rates.toml.
+      const RATES = {
+        CAD: { mult: 1.00,  sym: "CAD", decimals: 2 },
+        USD: { mult: 0.73,  sym: "USD", decimals: 2 },
+        EUR: { mult: 0.67,  sym: "EUR", decimals: 2 },
+        GBP: { mult: 0.58,  sym: "GBP", decimals: 2 },
+        JPY: { mult: 105.0, sym: "JPY", decimals: 0 },
+      };
+      const STORAGE_KEY = "heiwa.ccy";
+      function applyCurrency(code) {
+        const isOff = code === "OFF";
+        const r = isOff ? null : RATES[code];
+        document.querySelectorAll(".cost-num[data-cost-base-cad]").forEach((el) => {
+          if (isOff) {
+            el.textContent = "—";
+          } else {
+            const base = parseFloat(el.dataset.costBaseCad);
+            el.textContent = (base * r.mult).toFixed(r.decimals);
+          }
+        });
+        document.querySelectorAll(".ccy-suffix").forEach((el) => {
+          el.textContent = isOff ? "" : r.sym;
+        });
+      }
+      const ccySelect = document.getElementById("ccy-select");
+      if (ccySelect) {
+        const stored = localStorage.getItem(STORAGE_KEY);
+        if (stored && (RATES[stored] || stored === "OFF")) {
+          ccySelect.value = stored;
+          applyCurrency(stored);
+        }
+        ccySelect.addEventListener("change", (e) => {
+          localStorage.setItem(STORAGE_KEY, e.target.value);
+          applyCurrency(e.target.value);
+        });
+      }
+
       // Copy-to-clipboard for the install command
       document.querySelectorAll("[data-copy]").forEach((btn) => {
         btn.addEventListener("click", async () => {
