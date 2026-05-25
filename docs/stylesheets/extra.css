@@ -1,0 +1,275 @@
+/* =========================================================================
+   Heiwa docs.heiwa.ltd — Instrument-Grade overlay for MkDocs Material
+   Monochrome substrate, hairline rules, teal/orange as state only.
+   Pairs with theme.palette.scheme: slate.
+   ========================================================================= */
+
+@import url("https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=Space+Grotesk:wght@400;500;700&display=swap");
+
+/* ---------- Material variable overrides (slate scheme) ---------- */
+:root,
+[data-md-color-scheme="slate"] {
+  /* Surface */
+  --md-default-bg-color:           #050505;
+  --md-default-bg-color--light:    #0a0a0a;
+  --md-default-bg-color--lighter:  #0f0f0f;
+  --md-default-bg-color--lightest: #141414;
+
+  /* Ink steps */
+  --md-default-fg-color:           #f2f2f2;
+  --md-default-fg-color--light:    #c8c8c8;
+  --md-default-fg-color--lighter:  #6b6b6b;
+  --md-default-fg-color--lightest: #3a3a3a;
+
+  /* Primary header / hero — flat substrate, no gradients */
+  --md-primary-fg-color:           #050505;
+  --md-primary-fg-color--light:    #0a0a0a;
+  --md-primary-fg-color--dark:     #050505;
+  --md-primary-bg-color:           #f2f2f2;
+  --md-primary-bg-color--light:    #c8c8c8;
+
+  /* Accent — state only. We use TEAL as the accent for links/active state. */
+  --md-accent-fg-color:            #31c5a8;
+  --md-accent-fg-color--transparent: rgba(49, 197, 168, 0.12);
+  --md-accent-bg-color:            #050505;
+  --md-accent-bg-color--light:     #0a0a0a;
+
+  /* Code surfaces */
+  --md-code-bg-color:              #0f0f0f;
+  --md-code-fg-color:              #c8c8c8;
+
+  /* Footer */
+  --md-footer-bg-color:            #050505;
+  --md-footer-bg-color--dark:      #050505;
+  --md-footer-fg-color:            #c8c8c8;
+  --md-footer-fg-color--light:     #6b6b6b;
+  --md-footer-fg-color--lighter:   #3a3a3a;
+
+  /* Type */
+  --md-text-font:  "Space Grotesk", system-ui, sans-serif;
+  --md-code-font:  "IBM Plex Mono", ui-monospace, monospace;
+
+  /* Heiwa palette echoes */
+  --heiwa-active:   #31c5a8;
+  --heiwa-system:   #f28c28;
+  --heiwa-critical: #e05d5d;
+  --heiwa-rule:     rgba(255, 255, 255, 0.09);
+  --heiwa-rule-lo:  rgba(255, 255, 255, 0.04);
+}
+
+/* ---------- Apply fonts globally ---------- */
+body, .md-typeset {
+  font-family: "Space Grotesk", system-ui, sans-serif;
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+code, pre, kbd, samp, .md-typeset code {
+  font-family: "IBM Plex Mono", ui-monospace, monospace;
+}
+
+/* ---------- Substrate + coordinate grid behind content ---------- */
+.md-main, .md-container, .md-content {
+  background: transparent;
+}
+body::before {
+  content: "";
+  position: fixed; inset: 0;
+  pointer-events: none;
+  z-index: 0;
+  background:
+    linear-gradient(to right,  var(--heiwa-rule-lo) 1px, transparent 1px) 0 0 / 48px 48px,
+    linear-gradient(to bottom, var(--heiwa-rule-lo) 1px, transparent 1px) 0 0 / 48px 48px;
+}
+.md-grid, .md-main__inner, .md-content { position: relative; z-index: 1; }
+
+/* ---------- Header — sharp hairline, no shadow ---------- */
+.md-header {
+  background: var(--md-default-bg-color);
+  box-shadow: none;
+  border-bottom: 0.5px solid var(--heiwa-rule);
+}
+.md-header__title { font-weight: 700; letter-spacing: 0.04em; }
+.md-header__topic > .md-ellipsis:first-child {
+  font-family: "Space Grotesk", system-ui, sans-serif;
+  font-weight: 700;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  font-size: 0.92rem;
+}
+
+/* ---------- Tabs ---------- */
+.md-tabs {
+  background: var(--md-default-bg-color);
+  border-bottom: 0.5px solid var(--heiwa-rule);
+}
+.md-tabs__link { opacity: 1; color: var(--md-default-fg-color--lighter); }
+.md-tabs__link--active,
+.md-tabs__link:focus,
+.md-tabs__link:hover { color: var(--md-default-fg-color); }
+
+/* ---------- Sidebar nav ---------- */
+.md-sidebar { background: transparent; }
+.md-nav__title { color: var(--md-default-fg-color--lighter); font-family: "IBM Plex Mono", ui-monospace, monospace; font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.14em; font-weight: 500; }
+.md-nav__link { color: var(--md-default-fg-color--light); border-left: 0.5px solid transparent; padding-left: 0.6rem; }
+.md-nav__link:hover { color: var(--md-default-fg-color); }
+.md-nav__link--active { color: var(--md-default-fg-color); border-left-color: var(--heiwa-active); }
+
+/* ---------- Headings ---------- */
+.md-typeset h1, .md-typeset h2, .md-typeset h3, .md-typeset h4 {
+  font-family: "Space Grotesk", system-ui, sans-serif;
+  letter-spacing: -0.01em;
+  font-weight: 700;
+  color: var(--md-default-fg-color);
+}
+.md-typeset h1 { font-size: clamp(1.8rem, 4vw, 2.4rem); border-bottom: 0.5px solid var(--heiwa-rule); padding-bottom: 0.4rem; }
+.md-typeset h2 { font-size: 1.25rem; margin-top: 2.2rem; padding-top: 0.6rem; border-top: 0.5px solid var(--heiwa-rule); }
+.md-typeset h3 { font-size: 1rem; color: var(--md-default-fg-color--light); }
+
+/* ---------- Links — teal, hairline underline ---------- */
+.md-typeset a {
+  color: var(--heiwa-active);
+  text-decoration: none;
+  border-bottom: 0.5px solid var(--heiwa-rule);
+  transition: border-color 120ms linear, color 120ms linear;
+}
+.md-typeset a:hover { border-bottom-color: var(--heiwa-active); }
+.md-typeset a:focus-visible { outline: 1px solid var(--heiwa-active); outline-offset: 2px; }
+
+/* ---------- Code blocks ---------- */
+.md-typeset code {
+  background: var(--md-code-bg-color);
+  border: 0.5px solid var(--heiwa-rule);
+  border-radius: 2px;
+  color: var(--md-default-fg-color--light);
+  padding: 0.05rem 0.35rem;
+  font-size: 0.85em;
+}
+.md-typeset pre > code {
+  background: transparent;
+  border: 0;
+  padding: 0;
+  font-size: 0.84rem;
+}
+.md-typeset .highlight,
+.md-typeset pre {
+  background: var(--md-code-bg-color);
+  border: 0.5px solid var(--heiwa-rule);
+  border-radius: 4px;
+  box-shadow: none;
+}
+
+/* ---------- Tables — instrument ledger ---------- */
+.md-typeset table:not([class]) {
+  border: 0.5px solid var(--heiwa-rule);
+  border-radius: 4px;
+  box-shadow: none;
+  background: var(--md-default-bg-color--light);
+  font-size: 0.88rem;
+}
+.md-typeset table:not([class]) th {
+  background: transparent;
+  color: var(--md-default-fg-color--lighter);
+  font-family: "IBM Plex Mono", ui-monospace, monospace;
+  font-size: 0.72rem;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  font-weight: 500;
+  border-bottom: 0.5px solid var(--heiwa-rule);
+}
+.md-typeset table:not([class]) td {
+  border-bottom: 0.5px solid var(--heiwa-rule);
+  color: var(--md-default-fg-color--light);
+}
+.md-typeset table:not([class]) tr:hover {
+  background: rgba(255, 255, 255, 0.02);
+}
+
+/* ---------- Admonitions — hairline + state ring ---------- */
+.md-typeset .admonition,
+.md-typeset details {
+  background: var(--md-default-bg-color--light);
+  border: 0.5px solid var(--heiwa-rule);
+  border-left-width: 1px;
+  border-radius: 4px;
+  box-shadow: none;
+  font-size: 0.92rem;
+}
+.md-typeset .admonition.note,
+.md-typeset details.note { border-left-color: var(--heiwa-active); }
+.md-typeset .admonition.warning,
+.md-typeset details.warning { border-left-color: var(--heiwa-system); }
+.md-typeset .admonition.danger,
+.md-typeset details.danger { border-left-color: var(--heiwa-critical); }
+.md-typeset .admonition-title,
+.md-typeset summary {
+  background: transparent;
+  font-family: "IBM Plex Mono", ui-monospace, monospace;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  font-size: 0.74rem;
+  color: var(--md-default-fg-color--lighter);
+  border-bottom: 0.5px solid var(--heiwa-rule);
+}
+.md-typeset .admonition-title::before,
+.md-typeset summary::before { display: none; }
+
+/* ---------- Footer ---------- */
+.md-footer {
+  background: var(--md-default-bg-color);
+  border-top: 0.5px solid var(--heiwa-rule);
+}
+.md-footer-meta { background: var(--md-default-bg-color); }
+.md-footer__inner, .md-footer-meta__inner { padding-top: 1rem; padding-bottom: 1rem; }
+
+/* ---------- Search ---------- */
+.md-search__form {
+  background: var(--md-default-bg-color--light);
+  border: 0.5px solid var(--heiwa-rule);
+  border-radius: 2px;
+  box-shadow: none;
+}
+.md-search__input { color: var(--md-default-fg-color); }
+.md-search__input::placeholder { color: var(--md-default-fg-color--lighter); }
+
+/* ---------- Buttons (Material `.md-button`) ---------- */
+.md-typeset .md-button {
+  background: transparent;
+  color: var(--md-default-fg-color);
+  border: 1px solid var(--heiwa-rule);
+  border-radius: 4px;
+  font-family: "Space Grotesk", system-ui, sans-serif;
+  font-weight: 500;
+  letter-spacing: 0.01em;
+  padding: 0.55rem 0.95rem;
+  text-transform: none;
+  transition: border-color 120ms linear, color 120ms linear, background 80ms linear;
+}
+.md-typeset .md-button:hover {
+  background: transparent;
+  border-color: var(--heiwa-active);
+  color: var(--md-default-fg-color);
+}
+.md-typeset .md-button--primary {
+  background: transparent;
+  border-color: var(--md-default-fg-color--light);
+}
+.md-typeset .md-button--primary:hover {
+  background: var(--heiwa-active);
+  color: var(--md-default-bg-color);
+  border-color: var(--heiwa-active);
+}
+
+/* ---------- Misc cleanup ---------- */
+.md-typeset hr { border-color: var(--heiwa-rule); }
+.md-typeset blockquote {
+  border-left: 1px solid var(--heiwa-active);
+  color: var(--md-default-fg-color--light);
+  background: rgba(49, 197, 168, 0.04);
+  padding: 0.6rem 1rem;
+}
+.md-typeset kbd {
+  background: var(--md-code-bg-color);
+  border: 0.5px solid var(--heiwa-rule);
+  box-shadow: none;
+  color: var(--md-default-fg-color);
+}

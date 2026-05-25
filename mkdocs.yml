@@ -6,14 +6,23 @@ repo_name: Strategizing/heiwa-universe
 
 theme:
   name: material
+  language: en
   features:
     - navigation.sections
     - navigation.expand
+    - navigation.top
     - content.code.copy
+    - content.code.annotate
   palette:
-    - scheme: default
+    - scheme: slate
       primary: black
-      accent: deep orange
+      accent: teal
+  font:
+    text: Space Grotesk
+    code: IBM Plex Mono
+
+extra_css:
+  - stylesheets/extra.css
 
 exclude_docs: |
   audit/**
@@ -53,5 +62,6 @@ nav:
   - Security: security.md
   - Failure Modes: failure-modes.md
   - Operator Runbook: operator-runbook.md
+  - Publishing Pipeline: publishing.md
   - References:
       - Upstream References: references/UPSTREAM_REFERENCES.md

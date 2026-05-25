@@ -1,6 +1,9 @@
 # Heiwa
 
-Heiwa is a local-first AI runtime and operator surface. The installed `heiwa` CLI is the current product center, and this repository is being prepared for GitHub-native distribution, documentation, and contributor intake.
+Heiwa is a local-first AI runtime and operator surface. The installed `heiwa`
+runtime and HOME-local `Heiwa.app` are the current product center, and this
+repository is being prepared for GitHub-native distribution, documentation, and
+contributor intake.
 
 The first customer is Devon. The first product is the personal operator system that safely joins local models, provider CLIs, computer use, messaging surfaces, files, and personal workflows through one governed runtime.
 
@@ -18,8 +21,8 @@ Maturity is uneven across planes today; see [`HEIWA.md`](https://github.com/Stra
 
 ## Supported surfaces
 
-- Installed CLI runtime
-- Heiwa.app companion client over the same runtime
+- Installed `heiwa` runtime
+- HOME-local Heiwa.app primary input/display surface over the same runtime
 - Rust execution kernel
 - Provider discovery and routing
 - Account/tool/model capability fabric

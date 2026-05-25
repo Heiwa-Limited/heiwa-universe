@@ -1,9 +1,13 @@
 # Heiwa Cockpit
 
-Local operator cockpit. SPA served on `localhost` by the installed `heiwa` runtime.
+Local Heiwa.app client. The installed user path is the HOME-local
+`~/.heiwa/app/Heiwa.app` launcher over the installed `heiwa` runtime. The
+localhost/browser surface is a per-user support console and development view, not
+the target primary display.
 
 - **Framework:** Vite + Solid + TypeScript
-- **Served by:** `heiwa app` → `heiwa_core` HTTP server (default `:8787`)
+- **Installed by:** `heiwa install` → `~/.heiwa/app/Heiwa.app`
+- **Served by:** `heiwa app` → local HTTP server (default `:8787`)
 - **Not served by:** `heiwa.ltd` or any hosted Heiwa surface
 
 ## Dev

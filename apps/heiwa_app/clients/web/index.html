@@ -1,162 +1,445 @@
 <!doctype html>
-<html lang="en">
+<html lang="en-CA">
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Heiwa | Reuse The AI Subscriptions You Already Pay For</title>
+    <title>Heiwa — Sovereign Local AI Runtime</title>
     <meta
       name="description"
-      content="Heiwa is the self-hosted local AI runtime that unifies local models, OAuth CLI subscriptions, and API-key providers under one operator surface."
+      content="Heiwa is the self-hosted local AI runtime that unifies OAuth CLI subscriptions, API-key providers, and local models under one operator surface. Routing, receipts, approvals, evidence."
     />
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-    <link
-      href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=Space+Grotesk:wght@400;500;700&display=swap"
-      rel="stylesheet"
-    />
-    <link rel="stylesheet" href="./assets/styles.css" />
+    <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
+    <link rel="stylesheet" href="./assets/instrument.css" />
   </head>
   <body data-page="home">
     <div class="bg-grid" aria-hidden="true"></div>
+
     <header class="topbar">
-      <a class="brand" href="/index.html">HEIWA</a>
-      <nav class="nav">
-        <a href="/index.html">Home</a>
+      <div class="brand-group">
+        <a class="brand-wordmark" href="/index.html">HEIWA</a>
+        <span class="stamp"><span class="tick"></span>RUNTIME &middot; LOCAL-FIRST</span>
+      </div>
+      <nav class="nav" aria-label="Primary">
+        <a class="is-active" href="/index.html">Home</a>
         <a href="/providers.html">Providers</a>
-        <a href="/download.html">Download</a>
+        <a href="/download.html">Install</a>
         <a href="https://docs.heiwa.ltd">Docs</a>
-        <a href="https://github.com/Strategizing/heiwa-universe">GitHub</a>
+        <a href="/support.html">Support</a>
+        <a href="https://github.com/Strategizing/heiwa-universe">Source</a>
       </nav>
+      <label class="ccy-wrap" title="Currency overlay — tokens are counted locally, this only changes how cost is displayed">
+        <span class="ccy-k">CCY</span>
+        <select id="ccy-select" class="ccy-select" aria-label="Currency overlay">
+          <option value="CAD" selected>CAD</option>
+          <option value="USD">USD</option>
+          <option value="EUR">EUR</option>
+          <option value="GBP">GBP</option>
+          <option value="JPY">JPY</option>
+          <option value="OFF">&mdash; off</option>
+        </select>
+      </label>
     </header>
 
-    <main class="marketing-main">
-      <section class="hero hero-grid">
-        <div class="hero-copy">
-          <p class="eyebrow">Self-hosted local AI runtime</p>
-          <p class="hero-kicker">You host everything. Heiwa ships software, not a hosted operator app.</p>
+    <main>
+      <section class="hero">
+        <div>
+          <p class="eyebrow">Self-hosted local AI runtime &middot; Sovereign Operating Layer</p>
           <h1>Reuse the AI subscriptions you already pay for.</h1>
           <p class="lede">
-            Heiwa turns Claude Max, ChatGPT Plus, Google AI Pro, API-key providers, and local Ollama
-            into one operator runtime you host yourself, with routing, receipts, approvals, and evidence.
+            You host everything. Heiwa ships software, not a hosted operator app. Claude Max, ChatGPT Plus,
+            Google AI Pro, API-key providers, and local Ollama all unify under one self-hosted operator
+            surface. Routing, receipts, approvals, and evidence stay on the machine you install on.
+            <strong style="color:var(--ink);">Tokens are counted locally.</strong> Currency conversion is a
+            presentation overlay you choose &mdash; CAD, USD, off, anything.
           </p>
           <div class="command-band">
-            <span class="command-label">Canonical install path</span>
-            <code>curl -fsSL https://heiwa.ltd/install | sh</code>
+            <span class="k">Canonical install path</span>
+            <code id="install-cmd">curl -fsSL https://heiwa.ltd/install | sh</code>
+            <button type="button" class="copy-btn" data-copy="install-cmd">Copy</button>
           </div>
           <div class="hero-actions">
-            <a class="btn btn-solid" href="/download.html">Install Heiwa</a>
-            <a class="btn btn-outline" href="/providers.html">See Provider Lanes</a>
-            <a class="btn btn-outline" href="https://docs.heiwa.ltd">Read Docs</a>
+            <a class="ig-btn" data-intent="active" href="/download.html">Install Heiwa</a>
+            <a class="ig-btn" href="/providers.html">Provider Lanes</a>
+            <a class="ig-btn" href="https://docs.heiwa.ltd">Read Doctrine</a>
           </div>
         </div>
 
-        <aside class="hero-rail">
-          <div class="hero-stat">
-            <span>Runtime</span>
-            <strong>Local-first</strong>
-            <p><code>heiwa</code> is the installed center of gravity. The operator runs the system locally.</p>
+        <aside class="hero-fiducials" aria-label="Operator readout">
+          <div class="fiducial">
+            <span class="k">Tokens &middot; today</span>
+            <span class="v" data-tokens="184600">184.6k</span>
           </div>
-          <div class="hero-stat">
-            <span>Provider lanes</span>
-            <strong>OAuth CLI + API key + local</strong>
-            <p>OAuth-backed subscriptions, key-based providers, and local Ollama fit under one surface.</p>
+          <div class="fiducial">
+            <span class="k">Cost &middot; today</span>
+            <span class="v"><span class="cost-num" data-cost-base-cad="1.84">1.84</span> <span class="ccy-suffix">CAD</span></span>
           </div>
-          <div class="hero-stat">
-            <span>Control</span>
-            <strong>Receipts and approvals built in</strong>
-            <p>Heiwa owns routing, sessions, sandboxes, and evidence. Providers still own inference internals.</p>
+          <div class="fiducial">
+            <span class="k">OAuth &middot; headroom</span>
+            <span class="v system">47%</span>
+          </div>
+          <div class="fiducial">
+            <span class="k">Lanes &middot; live</span>
+            <span class="v active">3 / 4</span>
+          </div>
+          <div class="fiducial">
+            <span class="k">Latency &middot; p50</span>
+            <span class="v">38ms</span>
+          </div>
+          <div class="fiducial">
+            <span class="k">Rates &middot; synced</span>
+            <span class="v">6h ago</span>
           </div>
         </aside>
       </section>
 
-      <section class="section-block section-split">
-        <div>
-          <p class="eyebrow">Why Heiwa exists</p>
-          <h2>Not another hosted router.</h2>
-          <p class="section-copy">
-            Heiwa is for operators who want one runtime across local models, provider CLIs, and API-key
-            providers without handing the runtime, app, memory, or secrets to someone else's hosted surface.
-          </p>
+      <!-- ============== WHY ============== -->
+      <section class="section">
+        <div class="section-head">
+          <h2>01 &middot; Why Heiwa</h2>
+          <span class="idx">NOT A HOSTED ROUTER &middot; A LOCAL OPERATING LAYER</span>
         </div>
-        <div class="story-grid">
-          <article>
-            <span>Hosted gateways</span>
-            <strong>Centralize traffic</strong>
-            <p>Useful for remote model access, but they are not the same thing as a self-hosted operator runtime.</p>
-          </article>
-          <article>
-            <span>Heiwa</span>
-            <strong>Centralizes operator control</strong>
-            <p>The website delivers software. The operator machine runs the runtime, app, REPL, and secrets.</p>
-          </article>
+        <div class="grid-2">
+          <div class="tile">
+            <span class="k">HOSTED GATEWAY</span>
+            <p>Centralises traffic, secrets, and inference behind a vendor surface. Useful for remote model access, not a sovereign runtime.</p>
+            <p class="muted">Your data, memory, and operator state live on the vendor's machine.</p>
+          </div>
+          <div class="tile is-active">
+            <span class="k" style="color:var(--active);">HEIWA &middot; LOCAL</span>
+            <p>Centralises operator control on the machine you host. Routing, sandboxes, evidence, and approvals run locally; provider runtimes stay provider-owned.</p>
+            <p class="muted">The public site ships software. Your machine runs the runtime.</p>
+          </div>
         </div>
       </section>
 
-      <section class="section-block">
-        <p class="eyebrow">Three provider lanes</p>
-        <div class="lane-grid">
-          <article class="lane">
-            <span class="lane-pill lane-local">Local</span>
-            <h3>Ollama and machine-owned models</h3>
-            <p>Private, fast, and cheap by default. Local inference stays on the operator's machine.</p>
-          </article>
-          <article class="lane">
-            <span class="lane-pill lane-oauth">OAuth CLI</span>
-            <h3>Claude Max, ChatGPT Plus, Google AI Pro</h3>
-            <p>Reuse subscriptions you already pay for through provider-owned CLIs under one routing surface.</p>
-          </article>
-          <article class="lane">
-            <span class="lane-pill lane-api">API key</span>
-            <h3>OpenAI, Anthropic, Google, OpenRouter, and more</h3>
-            <p>Bring keyed providers into the same runtime when remote APIs are the right escalation path.</p>
-          </article>
+      <!-- ============== LANES ============== -->
+      <section class="section">
+        <div class="section-head">
+          <h2>02 &middot; Three Provider Lanes</h2>
+          <span class="idx">OAUTH CLI &middot; API KEY &middot; LOCAL</span>
+        </div>
+        <div class="grid-3">
+          <div class="tile corner">
+            <div class="t-h"><h3>Local</h3><span class="k">PRIVATE &middot; CHEAP</span></div>
+            <p>Ollama and machine-owned models. Inference stays on the operator machine. Default for sovereign work.</p>
+            <span class="pill active">recommended</span>
+          </div>
+          <div class="tile corner">
+            <div class="t-h"><h3>OAuth CLI</h3><span class="k">SUB-BACKED</span></div>
+            <p>Claude Max, ChatGPT Plus, Google AI Pro &mdash; reuse subscriptions you already pay for through provider-owned CLIs.</p>
+            <span class="pill neutral">no extra spend</span>
+          </div>
+          <div class="tile corner">
+            <div class="t-h"><h3>API Key</h3><span class="k">METERED</span></div>
+            <p>OpenAI, Anthropic, Google, OpenRouter, and more. Brought into the same runtime when remote APIs are the right escalation path.</p>
+            <span class="pill system">metered &middot; $CAD</span>
+          </div>
         </div>
       </section>
 
-      <section class="section-block">
-        <p class="eyebrow">Operator flow</p>
-        <div class="sequence-grid">
-          <article>
-            <strong>1. Install</strong>
-            <p>Start from a one-line install or GitHub Release. The runtime lands on the operator machine.</p>
-          </article>
-          <article>
-            <strong>2. Connect providers</strong>
-            <p>Authenticate provider CLIs, add keys, and discover local models. Heiwa normalizes the lanes.</p>
-          </article>
-          <article>
-            <strong>3. Run with receipts</strong>
-            <p>Use the REPL, open the local app with <code>heiwa app</code>, and keep evidence on the machine.</p>
-          </article>
+      <!-- ============== COST ATTRIBUTION ============== -->
+      <section class="section">
+        <div class="section-head">
+          <h2>03 &middot; Cost Attribution</h2>
+          <span class="idx">ENV &middot; PROVIDER &middot; MODEL &middot; AGENT</span>
+        </div>
+        <p class="muted" style="margin-bottom:1rem;font-family:var(--ff-mono);font-size:0.82rem;letter-spacing:0.03em;max-width:62ch;">
+          Every receipt carries four facts: where it ran, who served it, which model, and which agent requested
+          it. Most of the daily token count is free &mdash; sub-backed or local. The metered API lane is the
+          only one that turns tokens into currency.
+        </p>
+        <div class="tile" style="background:var(--bg);padding:0;">
+          <table class="ledger" id="cost-ledger">
+            <thead>
+              <tr>
+                <th>Env</th>
+                <th>Provider</th>
+                <th>Model</th>
+                <th>Agent</th>
+                <th>Tokens</th>
+                <th>Cost</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td><span class="pill active">local</span></td>
+                <td><code>ollama</code></td>
+                <td><code>qwen3.5:9b</code></td>
+                <td>coding</td>
+                <td class="num">92.4k</td>
+                <td class="num"><span class="cost-num" data-cost-base-cad="0">0.00</span> <span class="ccy-suffix">CAD</span></td>
+              </tr>
+              <tr>
+                <td><span class="pill active">oauth</span></td>
+                <td><code>claude-code</code></td>
+                <td><code>claude-sonnet-4-6</code></td>
+                <td>strategy</td>
+                <td class="num">47.1k</td>
+                <td class="num"><span class="cost-num" data-cost-base-cad="0">0.00</span> <span class="ccy-suffix">CAD</span></td>
+              </tr>
+              <tr>
+                <td><span class="pill active">oauth</span></td>
+                <td><code>codex</code></td>
+                <td><code>gpt-5-codex</code></td>
+                <td>refactor</td>
+                <td class="num">28.9k</td>
+                <td class="num"><span class="cost-num" data-cost-base-cad="0">0.00</span> <span class="ccy-suffix">CAD</span></td>
+              </tr>
+              <tr>
+                <td><span class="pill system">api</span></td>
+                <td><code>openrouter</code></td>
+                <td><code>claude-3.7-sonnet</code></td>
+                <td>trading</td>
+                <td class="num">12.0k</td>
+                <td class="num"><span class="cost-num" data-cost-base-cad="1.84">1.84</span> <span class="ccy-suffix">CAD</span></td>
+              </tr>
+              <tr>
+                <td><span class="pill active">local</span></td>
+                <td><code>ollama</code></td>
+                <td><code>qwen3.5:4b</code></td>
+                <td>summarise</td>
+                <td class="num">4.2k</td>
+                <td class="num"><span class="cost-num" data-cost-base-cad="0">0.00</span> <span class="ccy-suffix">CAD</span></td>
+              </tr>
+            </tbody>
+            <tfoot>
+              <tr>
+                <td colspan="4" style="color:var(--ink-3);font-family:var(--ff-mono);font-size:0.72rem;text-transform:uppercase;letter-spacing:0.1em;">Total &middot; today</td>
+                <td class="num" style="color:var(--ink);">184.6k</td>
+                <td class="num" style="color:var(--ink);"><span class="cost-num" data-cost-base-cad="1.84" style="font-weight:500;">1.84</span> <span class="ccy-suffix">CAD</span></td>
+              </tr>
+            </tfoot>
+          </table>
+        </div>
+        <div class="grid-2" style="margin-top:1rem;">
+          <div class="tile">
+            <span class="k">COUNTERFACTUAL</span>
+            <p style="color:var(--ink-2);">If the same 184.6k tokens had run entirely on the metered API lane, the workload would have cost
+              <strong style="color:var(--system);font-weight:500;font-family:var(--ff-mono);"><span class="cost-num" data-cost-base-cad="28.34">28.34</span> <span class="ccy-suffix">CAD</span></strong>.
+              Sub-backed routing kept it at <code>1.84 CAD</code>. The delta is the value of Heiwa.</p>
+          </div>
+          <div class="tile">
+            <span class="k">HEADROOM &middot; NOT JUST COST</span>
+            <p style="color:var(--ink-2);">OAuth lanes have rate windows, not bills. <code>Claude Max</code> sits at 47% of its 5-hour window with 47 minutes to reset. When a window pinches, Heiwa escalates to API only with your approval.</p>
+          </div>
         </div>
       </section>
 
-      <section class="section-block final-band">
-        <div>
-          <p class="eyebrow">Shop window only</p>
-          <h2><code>heiwa.ltd</code> delivers software. Your machine runs Heiwa.</h2>
-          <p class="section-copy">
-            The public site is for install, docs, release delivery, and identity exchange. Operator work, memory,
-            sessions, and provider secrets stay with the runtime you host yourself.
-          </p>
+      <!-- ============== OPERATOR FLOW ============== -->
+      <section class="section">
+        <div class="section-head">
+          <h2>04 &middot; Operator Flow</h2>
+          <span class="idx">INSTALL &middot; CONNECT &middot; RUN</span>
         </div>
-        <div class="hero-actions">
-          <a class="btn btn-solid" href="/download.html">Open Download Guide</a>
-          <a class="btn btn-outline" href="https://github.com/Strategizing/heiwa-universe/releases">GitHub Releases</a>
+        <div class="readout" style="margin-bottom:1rem;">
+          <div><span class="k">Step 01</span><span class="v">INSTALL</span></div>
+          <div><span class="k">Step 02</span><span class="v">CONNECT</span></div>
+          <div><span class="k">Step 03</span><span class="v">VERIFY</span></div>
+          <div><span class="k">Step 04</span><span class="v">RUN</span></div>
+          <div><span class="k">Step 05</span><span class="v active">RECEIPT</span></div>
+        </div>
+        <div class="grid-3">
+          <div class="tile">
+            <span class="k">1 &middot; INSTALL</span>
+            <p>One-line installer or tagged GitHub Release. Runtime lands at <code>~/.heiwa/</code>.</p>
+            <code class="mono">curl -fsSL https://heiwa.ltd/install | sh</code>
+          </div>
+          <div class="tile">
+            <span class="k">2 &middot; CONNECT</span>
+            <p>Authorise provider CLIs, add API keys, discover local runtimes. Heiwa normalises the lanes.</p>
+            <code class="mono">heiwa auth</code>
+          </div>
+          <div class="tile">
+            <span class="k">3 &middot; RUN</span>
+            <p>Use the REPL or open the local app with <code>heiwa app</code>. Receipts written to local evidence + STDB.</p>
+            <code class="mono">heiwa doctor</code>
+          </div>
         </div>
       </section>
+
+      <!-- ============== BACKBONE ============== -->
+      <section class="section">
+        <div class="section-head">
+          <h2>05 &middot; Public Backbone</h2>
+          <span class="idx">CLOUDFLARE &middot; GITHUB &middot; SPACETIMEDB</span>
+        </div>
+        <div class="grid-3">
+          <div class="tile">
+            <span class="k">CLOUDFLARE PAGES</span>
+            <p>Static shell for <code>heiwa.ltd</code> &mdash; install path, docs front, identity exchange. Zero operator work runs here.</p>
+            <span class="pill neutral">edge static</span>
+          </div>
+          <div class="tile">
+            <span class="k">GITHUB</span>
+            <p>Source of truth for the repo, tagged Releases for binaries, Actions for build, Pages for <code>docs.heiwa.ltd</code>.</p>
+            <span class="pill neutral">authoritative</span>
+          </div>
+          <div class="tile">
+            <span class="k">SPACETIMEDB</span>
+            <p>WASM-reducer adjudication plane. Receipts, leases, and licence state mirror here when the runtime is online.</p>
+            <span class="pill active">backend authority</span>
+          </div>
+        </div>
+        <p class="muted" style="margin-top:1rem;font-family:var(--ff-mono);font-size:0.78rem;letter-spacing:0.04em;">
+          See <a href="https://docs.heiwa.ltd/publishing" style="color:var(--ink-2);border-bottom:0.5px solid var(--rule);">docs.heiwa.ltd/publishing</a> for the full pipeline.
+        </p>
+      </section>
+
+      <!-- ============== COMPRESSION / DOCTRINE ============== -->
+      <section class="section">
+        <div class="section-head">
+          <h2>06 &middot; Doctrine</h2>
+          <span class="idx">NON-NEGOTIABLES</span>
+        </div>
+        <div class="grid-3">
+          <div class="tile">
+            <span class="k">LOCAL-FIRST</span>
+            <p>Smallest sufficient model. Shortest sufficient context. Richest sufficient evidence. The runtime runs where the operator runs.</p>
+          </div>
+          <div class="tile">
+            <span class="k">HONEST MATURITY</span>
+            <p>No completeness theatre. Where a lane is partial, the surface says so. Maturity is described, never implied.</p>
+          </div>
+          <div class="tile">
+            <span class="k">COMPRESSION</span>
+            <p style="color:var(--ink-2);">"Rust proposes, SpacetimeDB adjudicates, <code>heiwa</code> presents."</p>
+          </div>
+        </div>
+      </section>
+
+      <!-- ============== FINAL BAND ============== -->
+      <section class="section">
+        <div class="section-head">
+          <h2>07 &middot; Shop Window Only</h2>
+          <span class="idx"><code>heiwa.ltd</code> DELIVERS SOFTWARE</span>
+        </div>
+        <div class="grid-2">
+          <div>
+            <h2 class="h-hero-sm" style="font-size:clamp(1.4rem,3.4vw,2rem);max-width:24ch;">
+              The public site ships software. Your machine runs Heiwa.
+            </h2>
+            <p class="lede" style="margin-top:0.8rem;">
+              The public surface exists for install, docs, release delivery, and identity exchange. Operator work,
+              memory, sessions, and provider secrets stay with the runtime you host.
+            </p>
+            <div class="hero-actions">
+              <a class="ig-btn" data-intent="active" href="/download.html">Open Install Guide</a>
+              <a class="ig-btn" href="https://github.com/Strategizing/heiwa-universe/releases">GitHub Releases</a>
+            </div>
+          </div>
+          <div class="tile">
+            <span class="k">PUBLIC SURFACE &middot; SCOPE</span>
+            <table class="ledger" style="font-size:0.84rem;">
+              <thead><tr><th>Surface</th><th>Role</th></tr></thead>
+              <tbody>
+                <tr><td><code>heiwa.ltd</code></td><td>install, marketing, identity exchange</td></tr>
+                <tr><td><code>docs.heiwa.ltd</code></td><td>doctrine, runbooks, references</td></tr>
+                <tr><td><code>~/.heiwa/app/Heiwa.app</code></td><td>installed user input/display</td></tr>
+                <tr><td><code>status.heiwa.ltd</code></td><td>read-only WebSocket health</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </section>
+
+      <div class="page-foot">
+        <p>Heiwa &middot; Instrument-Grade &middot; v1.0 &middot;
+          <a href="https://github.com/Strategizing/heiwa-universe">source</a>
+          &middot;
+          <a href="/support.html">support</a>
+        </p>
+        <p>Local-first &middot; Centre of operator control &middot; Built in Toronto</p>
+      </div>
     </main>
 
-    <footer class="footer">
-      <p>Heiwa is the self-hosted local AI runtime for sovereign operators.</p>
-      <p class="footer-links">
-        <a href="/providers.html">Providers</a>
-        <a href="/download.html">Download</a>
-        <a href="https://docs.heiwa.ltd">Docs</a>
-        <a href="https://github.com/Strategizing/heiwa-universe">GitHub</a>
-      </p>
-    </footer>
+    <script>
+      // ---------- Currency overlay ----------
+      // Tokens are counted locally. Cost is a derived function (rate-table × token-count).
+      // Currency is a presentation preference — this only changes how cost displays.
+      // Marketing rates are illustrative; the real runtime reads ~/.heiwa/rates.toml.
+      const RATES = {
+        CAD: { mult: 1.00,  sym: "CAD", decimals: 2 },
+        USD: { mult: 0.73,  sym: "USD", decimals: 2 },
+        EUR: { mult: 0.67,  sym: "EUR", decimals: 2 },
+        GBP: { mult: 0.58,  sym: "GBP", decimals: 2 },
+        JPY: { mult: 105.0, sym: "JPY", decimals: 0 },
+      };
+      const STORAGE_KEY = "heiwa.ccy";
+      function applyCurrency(code) {
+        const isOff = code === "OFF";
+        const r = isOff ? null : RATES[code];
+        document.querySelectorAll(".cost-num[data-cost-base-cad]").forEach((el) => {
+          if (isOff) {
+            el.textContent = "—";
+          } else {
+            const base = parseFloat(el.dataset.costBaseCad);
+            el.textContent = (base * r.mult).toFixed(r.decimals);
+          }
+        });
+        document.querySelectorAll(".ccy-suffix").forEach((el) => {
+          el.textContent = isOff ? "" : r.sym;
+        });
+      }
+      const ccySelect = document.getElementById("ccy-select");
+      if (ccySelect) {
+        const stored = localStorage.getItem(STORAGE_KEY);
+        if (stored && (RATES[stored] || stored === "OFF")) {
+          ccySelect.value = stored;
+          applyCurrency(stored);
+        }
+        ccySelect.addEventListener("change", (e) => {
+          localStorage.setItem(STORAGE_KEY, e.target.value);
+          applyCurrency(e.target.value);
+        });
+      }
 
-    <script src="./assets/site.js"></script>
+      // Copy-to-clipboard for the install command
+      document.querySelectorAll("[data-copy]").forEach((btn) => {
+        btn.addEventListener("click", async () => {
+          const target = document.getElementById(btn.dataset.copy);
+          if (!target) return;
+          try {
+            await navigator.clipboard.writeText(target.textContent.trim());
+            const prev = btn.textContent;
+            btn.textContent = "Copied";
+            btn.style.color = "var(--active)";
+            btn.style.borderColor = "var(--active)";
+            setTimeout(() => {
+              btn.textContent = prev;
+              btn.style.color = "";
+              btn.style.borderColor = "";
+            }, 1200);
+          } catch (err) {
+            btn.textContent = "Copy failed";
+            setTimeout(() => (btn.textContent = "Copy"), 1200);
+          }
+        });
+      });
+
+      // 80ms strike on .ig-btn click
+      document.querySelectorAll(".ig-btn").forEach((btn) => {
+        btn.addEventListener("click", () => {
+          const intent = btn.dataset.intent;
+          const colour =
+            intent === "active" ? "var(--active)" :
+            intent === "system" ? "var(--system)" :
+            intent === "critical" ? "var(--critical)" :
+            "var(--ink-2)";
+          const prevBg = btn.style.background;
+          const prevCol = btn.style.color;
+          const prevBd = btn.style.borderColor;
+          btn.style.background = colour;
+          btn.style.color = "var(--bg)";
+          btn.style.borderColor = colour;
+          setTimeout(() => {
+            btn.style.background = prevBg;
+            btn.style.color = prevCol;
+            btn.style.borderColor = prevBd;
+          }, 80);
+        });
+      });
+    </script>
   </body>
 </html>

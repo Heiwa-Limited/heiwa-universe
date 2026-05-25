@@ -1,127 +1,251 @@
 <!doctype html>
-<html lang="en">
+<html lang="en-CA">
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Download Heiwa | Install and Releases</title>
+    <title>Install Heiwa &middot; Tagged Releases</title>
     <meta
       name="description"
-      content="Install Heiwa from the canonical one-line path or use GitHub Releases for tagged archives and checksums."
+      content="Install Heiwa from the canonical one-line path or use GitHub Releases for tagged archives and checksums. Localhost-first."
     />
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-    <link
-      href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=Space+Grotesk:wght@400;500;700&display=swap"
-      rel="stylesheet"
-    />
-    <link rel="stylesheet" href="./assets/styles.css" />
+    <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
+    <link rel="stylesheet" href="./assets/instrument.css" />
   </head>
   <body data-page="download">
     <div class="bg-grid" aria-hidden="true"></div>
+
     <header class="topbar">
-      <a class="brand" href="/index.html">HEIWA</a>
-      <nav class="nav">
+      <div class="brand-group">
+        <a class="brand-wordmark" href="/index.html">HEIWA</a>
+        <span class="stamp"><span class="tick"></span>INSTALL &middot; v1.0</span>
+      </div>
+      <nav class="nav" aria-label="Primary">
         <a href="/index.html">Home</a>
         <a href="/providers.html">Providers</a>
-        <a href="/download.html">Download</a>
+        <a class="is-active" href="/download.html">Install</a>
         <a href="https://docs.heiwa.ltd">Docs</a>
-        <a href="https://github.com/Strategizing/heiwa-universe">GitHub</a>
+        <a href="/support.html">Support</a>
+        <a href="https://github.com/Strategizing/heiwa-universe">Source</a>
       </nav>
     </header>
 
-    <main class="marketing-main">
+    <main>
       <section class="hero compact">
-        <p class="eyebrow">Install and releases</p>
-        <h1>Install locally. Run locally. Keep the operator surface local.</h1>
+        <p class="eyebrow">Install &amp; Releases</p>
+        <h1>Install locally. Run locally. Keep the surface local.</h1>
         <p class="lede">
-          The canonical public path is a one-line installer. Tagged GitHub Releases remain the source of truth for
-          platform archives and checksums.
+          The canonical public path is a one-line installer. Tagged GitHub Releases stay the source of truth for
+          platform archives and checksums. The web surface here only hands you software &mdash; it does not run
+          operator work.
         </p>
-        <div class="command-band">
-          <span class="command-label">Canonical install path</span>
-          <code>curl -fsSL https://heiwa.ltd/install | sh</code>
+        <div class="command-band" style="margin-top:1.4rem;">
+          <span class="k">Canonical install path</span>
+          <code id="install-cmd">curl -fsSL https://heiwa.ltd/install | sh</code>
+          <button type="button" class="copy-btn" data-copy="install-cmd">Copy</button>
         </div>
-        <div class="hero-actions">
-          <a class="btn btn-solid" href="https://github.com/Strategizing/heiwa-universe/releases">Open Releases</a>
-          <a class="btn btn-outline" href="https://docs.heiwa.ltd">Install Docs</a>
-        </div>
-      </section>
-
-      <section class="section-block download-grid">
-        <article>
-          <span>macOS (Apple Silicon)</span>
-          <strong><code>heiwa-&lt;version&gt;-macos-aarch64.tar.gz</code></strong>
-          <p>Tagged release archive built by the release workflow for <code>aarch64-apple-darwin</code>.</p>
-        </article>
-        <article>
-          <span>Linux x86_64</span>
-          <strong><code>heiwa-&lt;version&gt;-linux-x86_64.tar.gz</code></strong>
-          <p>Tagged release archive built by the release workflow for <code>x86_64-unknown-linux-gnu</code>.</p>
-        </article>
-        <article>
-          <span>Windows x86_64</span>
-          <strong><code>heiwa-&lt;version&gt;-windows-x86_64.zip</code></strong>
-          <p>Tagged release archive built by the release workflow for <code>x86_64-pc-windows-msvc</code>.</p>
-        </article>
-        <article>
-          <span>Checksums</span>
-          <strong><code>heiwa-&lt;version&gt;-checksums.txt</code></strong>
-          <p>Published beside the release archives so installs can be verified and mirrored cleanly.</p>
-        </article>
-      </section>
-
-      <section class="section-block">
-        <p class="eyebrow">First run</p>
-        <div class="sequence-grid">
-          <article>
-            <strong>1. Bootstrap</strong>
-            <p>Run the install path or unpack a tagged release. The runtime writes its local state under <code>~/.heiwa/</code>.</p>
-          </article>
-          <article>
-            <strong>2. Verify</strong>
-            <p>Run <code>heiwa doctor</code> to confirm local runtimes and provider CLIs are discoverable.</p>
-          </article>
-          <article>
-            <strong>3. Open the local app</strong>
-            <p>Run <code>heiwa app</code> when the local operator app lands. The web surface belongs on <code>localhost</code>, not a hosted dashboard.</p>
-          </article>
+        <div class="hero-actions" style="margin-top:1.2rem;">
+          <a class="ig-btn" data-intent="active" href="https://github.com/Strategizing/heiwa-universe/releases">Open Releases</a>
+          <a class="ig-btn" href="https://docs.heiwa.ltd/local-self-operation">Install Doctrine</a>
+          <a class="ig-btn" href="/support.html">Need Help</a>
         </div>
       </section>
 
-      <section class="section-block section-split">
-        <div>
-          <p class="eyebrow">Source of truth</p>
-          <h2>GitHub Releases stay authoritative.</h2>
-          <p class="section-copy">
-            The installer is a convenience path. Tagged GitHub Releases are where archives, checksums, release notes,
-            and platform build outputs live.
-          </p>
+      <!-- ============== RELEASE LEDGER ============== -->
+      <section class="section">
+        <div class="section-head">
+          <h2>01 &middot; Release Ledger</h2>
+          <span class="idx">GITHUB RELEASES &middot; AUTHORITATIVE</span>
         </div>
-        <div class="story-grid">
-          <article>
-            <span>Public site</span>
-            <strong>Delivery and docs</strong>
-            <p><code>heiwa.ltd</code> exists to deliver software, docs, and identity exchange. It does not execute operator work.</p>
-          </article>
-          <article>
-            <span>Operator machine</span>
-            <strong>Runtime and data</strong>
-            <p>The runtime, app, memory, and provider secrets live where the operator hosts them.</p>
-          </article>
+        <div class="tile" style="background:var(--bg);padding:0;">
+          <table class="ledger">
+            <thead>
+              <tr>
+                <th>Platform</th>
+                <th>Target triple</th>
+                <th>Artifact</th>
+                <th>Format</th>
+                <th>Verify</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td>macOS &middot; Apple Silicon</td>
+                <td><code>aarch64-apple-darwin</code></td>
+                <td><code>heiwa-&lt;version&gt;-macos-aarch64.tar.gz</code></td>
+                <td><code>tar.gz</code></td>
+                <td><span class="pill active">checksum</span></td>
+              </tr>
+              <tr>
+                <td>Linux &middot; x86_64</td>
+                <td><code>x86_64-unknown-linux-gnu</code></td>
+                <td><code>heiwa-&lt;version&gt;-linux-x86_64.tar.gz</code></td>
+                <td><code>tar.gz</code></td>
+                <td><span class="pill active">checksum</span></td>
+              </tr>
+              <tr>
+                <td>Windows &middot; x86_64</td>
+                <td><code>x86_64-pc-windows-msvc</code></td>
+                <td><code>heiwa-&lt;version&gt;-windows-x86_64.zip</code></td>
+                <td><code>zip</code></td>
+                <td><span class="pill active">checksum</span></td>
+              </tr>
+              <tr>
+                <td>Checksums manifest</td>
+                <td><code>&mdash;</code></td>
+                <td><code>heiwa-&lt;version&gt;-checksums.txt</code></td>
+                <td><code>txt</code></td>
+                <td><span class="pill neutral">authoritative</span></td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+        <p class="muted" style="margin-top:0.8rem;font-family:var(--ff-mono);font-size:0.74rem;letter-spacing:0.04em;">
+          The installer pulls the appropriate archive for the host and verifies the checksum. The manifest stays
+          authoritative for mirrors and offline verification.
+        </p>
+      </section>
+
+      <!-- ============== FIRST RUN ============== -->
+      <section class="section">
+        <div class="section-head">
+          <h2>02 &middot; First Run</h2>
+          <span class="idx">BOOTSTRAP &middot; VERIFY &middot; OPEN</span>
+        </div>
+        <div class="readout" style="margin-bottom:1rem;">
+          <div><span class="k">Step 01</span><span class="v">BOOTSTRAP</span></div>
+          <div><span class="k">Step 02</span><span class="v">VERIFY</span></div>
+          <div><span class="k">Step 03</span><span class="v">CONNECT</span></div>
+          <div><span class="k">Step 04</span><span class="v">RECEIPT</span></div>
+          <div><span class="k">State</span><span class="v active">LOCAL</span></div>
+        </div>
+        <div class="grid-3">
+          <div class="tile">
+            <span class="k">1 &middot; BOOTSTRAP</span>
+            <p>Run the install path or unpack a tagged release. State lands under <code>~/.heiwa/</code>.</p>
+            <code class="mono">curl -fsSL https://heiwa.ltd/install | sh</code>
+          </div>
+          <div class="tile">
+            <span class="k">2 &middot; VERIFY</span>
+            <p>Run <code>heiwa doctor</code> to confirm local runtimes, provider CLIs, and STDB connectivity.</p>
+            <code class="mono">heiwa doctor</code>
+          </div>
+          <div class="tile">
+            <span class="k">3 &middot; OPEN</span>
+            <p>Open the local operator surface with <code>heiwa app</code>. The web sits on <code>localhost</code>, never on a hosted dashboard.</p>
+            <code class="mono">heiwa app</code>
+          </div>
         </div>
       </section>
+
+      <!-- ============== SOURCE OF TRUTH ============== -->
+      <section class="section">
+        <div class="section-head">
+          <h2>03 &middot; Source of Truth</h2>
+          <span class="idx">GITHUB &middot; CLOUDFLARE &middot; LOCAL</span>
+        </div>
+        <div class="grid-2">
+          <div>
+            <h2 class="h-hero-sm" style="font-size:clamp(1.4rem,3.4vw,2rem);max-width:24ch;">
+              GitHub Releases remain the source of truth.
+            </h2>
+            <p class="lede" style="margin-top:0.8rem;">
+              The installer is a convenience path. Tagged GitHub Releases are where archives, checksums, release
+              notes, and platform build outputs live. The public site is a shop window &mdash; it delivers
+              software, never operator state.
+            </p>
+            <div class="hero-actions">
+              <a class="ig-btn" data-intent="active" href="https://github.com/Strategizing/heiwa-universe/releases">Browse Releases</a>
+              <a class="ig-btn" href="https://docs.heiwa.ltd/publishing">Publishing Pipeline</a>
+            </div>
+          </div>
+          <div class="tile">
+            <span class="k">SURFACE &middot; ROLE</span>
+            <table class="ledger" style="font-size:0.84rem;">
+              <thead><tr><th>Surface</th><th>Role</th></tr></thead>
+              <tbody>
+                <tr><td><code>heiwa.ltd</code></td><td>install path, marketing</td></tr>
+                <tr><td><code>github.com/Strategizing/heiwa-universe</code></td><td>source, Releases</td></tr>
+                <tr><td><code>docs.heiwa.ltd</code></td><td>doctrine, runbooks</td></tr>
+                <tr><td><code>localhost</code></td><td>runtime, app, memory, secrets</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </section>
+
+      <!-- ============== ENVIRONMENT FIDUCIALS ============== -->
+      <section class="section">
+        <div class="section-head">
+          <h2>04 &middot; Environment Fiducials</h2>
+          <span class="idx">WHAT THE INSTALLER WILL TOUCH</span>
+        </div>
+        <div class="grid-4">
+          <div class="fiducial"><span class="k">State root</span><span class="v"><code>~/.heiwa</code></span></div>
+          <div class="fiducial"><span class="k">Config</span><span class="v"><code>config.toml</code></span></div>
+          <div class="fiducial"><span class="k">Accounts</span><span class="v"><code>accounts.json</code></span></div>
+          <div class="fiducial"><span class="k">Logs</span><span class="v"><code>logs/</code></span></div>
+        </div>
+        <p class="muted" style="margin-top:0.8rem;font-family:var(--ff-mono);font-size:0.74rem;letter-spacing:0.04em;">
+          Nothing else is written. Uninstalling is <code>rm -rf ~/.heiwa</code> plus removing the binary.
+        </p>
+      </section>
+
+      <div class="page-foot">
+        <p>Heiwa &middot; Install Guide &middot;
+          <a href="https://github.com/Strategizing/heiwa-universe/releases">releases</a>
+          &middot;
+          <a href="/support.html">support</a>
+        </p>
+        <p>Install path for software &middot; GitHub Releases for archives &middot; Localhost for the app</p>
+      </div>
     </main>
 
-    <footer class="footer">
-      <p>Install path for software. GitHub Releases for tagged artifacts. Localhost for the app.</p>
-      <p class="footer-links">
-        <a href="/index.html">Home</a>
-        <a href="/providers.html">Providers</a>
-        <a href="https://docs.heiwa.ltd">Docs</a>
-        <a href="https://github.com/Strategizing/heiwa-universe/releases">Releases</a>
-      </p>
-    </footer>
+    <script>
+      document.querySelectorAll("[data-copy]").forEach((btn) => {
+        btn.addEventListener("click", async () => {
+          const target = document.getElementById(btn.dataset.copy);
+          if (!target) return;
+          try {
+            await navigator.clipboard.writeText(target.textContent.trim());
+            const prev = btn.textContent;
+            btn.textContent = "Copied";
+            btn.style.color = "var(--active)";
+            btn.style.borderColor = "var(--active)";
+            setTimeout(() => {
+              btn.textContent = prev;
+              btn.style.color = "";
+              btn.style.borderColor = "";
+            }, 1200);
+          } catch (err) {
+            btn.textContent = "Copy failed";
+            setTimeout(() => (btn.textContent = "Copy"), 1200);
+          }
+        });
+      });
 
-    <script src="./assets/site.js"></script>
+      document.querySelectorAll(".ig-btn").forEach((btn) => {
+        btn.addEventListener("click", () => {
+          const intent = btn.dataset.intent;
+          const colour =
+            intent === "active" ? "var(--active)" :
+            intent === "system" ? "var(--system)" :
+            intent === "critical" ? "var(--critical)" :
+            "var(--ink-2)";
+          const prevBg = btn.style.background;
+          const prevCol = btn.style.color;
+          const prevBd = btn.style.borderColor;
+          btn.style.background = colour;
+          btn.style.color = "var(--bg)";
+          btn.style.borderColor = colour;
+          setTimeout(() => {
+            btn.style.background = prevBg;
+            btn.style.color = prevCol;
+            btn.style.borderColor = prevBd;
+          }, 80);
+        });
+      });
+    </script>
   </body>
 </html>

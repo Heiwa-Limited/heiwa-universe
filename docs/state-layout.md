@@ -19,6 +19,7 @@ Default location: `~/.heiwa/` (override via `HEIWA_HOME`).
 | `~/.heiwa/logs/` | runtime | Rotating runtime logs |
 | `~/.heiwa/cache/` | runtime | Provider response caches, model lists, expensive lookups |
 | `~/.heiwa/bin/` | install | Helper binaries (`heiwa-route`, etc.) |
+| `~/.heiwa/app/Heiwa.app` | install | HOME-local primary user input/display launcher for Heiwa.app |
 | `~/.heiwa/state.db` | runtime | Optional SQLite ledger (quotas, evidence) |
 
 ## `~/.heiwa/state/` Subtree
