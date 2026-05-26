@@ -562,6 +562,141 @@ fn row_to_receipt(row: &rusqlite::Row<'_>) -> rusqlite::Result<Receipt> {
     })
 }
 
+// ============================================================================
+// Runtime helpers — what callers at the shell/runtime boundary use
+// ============================================================================
+
+/// Convenience module so callers don't reinvent the rates loader + env mapping.
+pub mod runtime {
+    use super::*;
+
+    /// Built-in fallback rates matching the marketing-demo conventions on
+    /// heiwa.ltd. Operators override by writing `~/.heiwa/rates.toml`.
+    pub fn default_rates() -> RateTable {
+        const DEFAULT_TOML: &str = r#"
+synced_at = "2026-05-25T00:00:00Z"
+
+[rates.local.ollama."qwen3.5:9b"]
+input_per_mtok_cad  = 0.0
+output_per_mtok_cad = 0.0
+[rates.local.ollama."qwen3.5:9b".counterfactual]
+input_per_mtok_cad  = 0.27
+output_per_mtok_cad = 0.81
+note = "Mistral 7B tier as fairness proxy"
+
+[rates.local.ollama."qwen3.5:4b"]
+input_per_mtok_cad  = 0.0
+output_per_mtok_cad = 0.0
+[rates.local.ollama."qwen3.5:4b".counterfactual]
+input_per_mtok_cad  = 0.14
+output_per_mtok_cad = 0.42
+
+[rates.local.ollama."gemma4"]
+input_per_mtok_cad  = 0.0
+output_per_mtok_cad = 0.0
+[rates.local.ollama."gemma4".counterfactual]
+input_per_mtok_cad  = 0.27
+output_per_mtok_cad = 0.81
+
+[rates.oauth."claude-code"."claude-sonnet-4-6"]
+input_per_mtok_cad  = 0.0
+output_per_mtok_cad = 0.0
+[rates.oauth."claude-code"."claude-sonnet-4-6".counterfactual]
+input_per_mtok_cad  = 4.05
+output_per_mtok_cad = 20.25
+
+[rates.oauth."claude-code"."claude-opus-4-7"]
+input_per_mtok_cad  = 0.0
+output_per_mtok_cad = 0.0
+[rates.oauth."claude-code"."claude-opus-4-7".counterfactual]
+input_per_mtok_cad  = 20.25
+output_per_mtok_cad = 101.25
+
+[rates.oauth.codex."gpt-5-codex"]
+input_per_mtok_cad  = 0.0
+output_per_mtok_cad = 0.0
+[rates.oauth.codex."gpt-5-codex".counterfactual]
+input_per_mtok_cad  = 2.75
+output_per_mtok_cad = 11.00
+
+[rates.oauth.gemini."gemini-3.1-pro"]
+input_per_mtok_cad  = 0.0
+output_per_mtok_cad = 0.0
+[rates.oauth.gemini."gemini-3.1-pro".counterfactual]
+input_per_mtok_cad  = 1.69
+output_per_mtok_cad = 6.75
+
+[rates.api.openrouter."claude-3.7-sonnet"]
+input_per_mtok_cad  = 4.05
+output_per_mtok_cad = 20.25
+"#;
+        RateTable::from_toml_str(DEFAULT_TOML).expect("default rates parse")
+    }
+
+    /// Read `~/.heiwa/rates.toml` if present; otherwise return defaults.
+    /// Parse failures silently fall back too — corrupt rate files should not
+    /// stop the runtime from writing receipts.
+    pub fn load_rates_or_default(heiwa_home: &std::path::Path) -> RateTable {
+        let path = heiwa_home.join("rates.toml");
+        if !path.exists() {
+            return default_rates();
+        }
+        match RateTable::from_path(&path) {
+            Ok(t) => t,
+            Err(_) => default_rates(),
+        }
+    }
+
+    /// Convention map: provider id -> environment lane.
+    /// New providers default to `Api` (metered) so cost is never silently
+    /// underreported.
+    pub fn env_for_provider(provider: &str) -> Env {
+        match provider {
+            "ollama" | "local" => Env::Local,
+            "claude-code" | "claude_code" | "codex-cli" | "codex_cli" | "codex" | "gemini-cli"
+            | "gemini_cli" | "gemini" | "antigravity" => Env::Oauth,
+            _ => Env::Api,
+        }
+    }
+
+    /// Rough token estimator for adapters that don't report counts
+    /// (the Ollama CLI subprocess being the main case today). ~3.7 chars/token
+    /// is a common English approximation. **Best-effort.** Real implementation
+    /// should call Ollama's HTTP API which reports `prompt_eval_count` and
+    /// `eval_count` exactly.
+    pub fn estimate_tokens(text: &str) -> i64 {
+        let chars = text.chars().count() as f64;
+        if chars == 0.0 {
+            0
+        } else {
+            (chars / 3.7).ceil() as i64
+        }
+    }
+
+    /// Compute costs with graceful zero-fallback when the rate entry is missing.
+    /// Returns `(costs, found)` so callers can log unknown-rate cases without
+    /// dropping the receipt.
+    pub fn compute_or_zero(
+        rates: &RateTable,
+        env: Env,
+        provider: &str,
+        model: &str,
+        tokens_in: i64,
+        tokens_out: i64,
+    ) -> (Costs, bool) {
+        match rates.compute(env, provider, model, tokens_in, tokens_out) {
+            Ok(c) => (c, true),
+            Err(_) => (
+                Costs {
+                    actual_cad: 0.0,
+                    counterfactual_cad: 0.0,
+                },
+                false,
+            ),
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

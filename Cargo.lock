@@ -1284,6 +1284,7 @@ dependencies = [
  "heiwa_drex",
  "heiwa_mcp",
  "heiwa_quota",
+ "heiwa_receipts",
  "hostname",
  "serde",
  "serde_json",
