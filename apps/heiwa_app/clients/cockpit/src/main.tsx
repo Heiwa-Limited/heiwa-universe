@@ -21,6 +21,7 @@ import RateGroups from "./routes/RateGroups";
 import Repl from "./routes/Repl";
 import Routes from "./routes/Routes";
 import Status from "./routes/Status";
+import Today from "./routes/Today";
 import Traces from "./routes/Traces";
 
 const root = document.getElementById("root");
@@ -30,6 +31,7 @@ render(
   () => (
     <Router root={App}>
       <Route path="/" component={Dashboard} />
+      <Route path="/today" component={Today} />
       <Route path="/providers" component={Providers} />
       <Route path="/connections" component={Connections} />
       <Route path="/inbox" component={Inbox} />

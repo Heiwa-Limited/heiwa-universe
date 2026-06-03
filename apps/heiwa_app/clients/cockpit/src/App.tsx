@@ -25,6 +25,7 @@ type ConsoleItem = {
 
 const primaryNav: NavItem[] = [
   { href: "/", label: "Dashboard", mark: "D" },
+  { href: "/today", label: "Today", mark: "Y" },
   { href: "/inbox", label: "Inbox", mark: "I" },
   { href: "/routes", label: "Routes", mark: "R" },
   { href: "/live", label: "Live", mark: "L" },

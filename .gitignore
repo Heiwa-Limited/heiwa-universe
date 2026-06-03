@@ -87,6 +87,7 @@ Cargo.lock
 
 # Memory / scratch
 memory/
+repos/
 
 # Root-level local context files (not repo artifacts)
 /HEARTBEAT.md

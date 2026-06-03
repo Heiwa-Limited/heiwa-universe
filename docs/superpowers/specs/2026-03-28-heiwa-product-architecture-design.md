@@ -1,7 +1,9 @@
 # Heiwa Product Architecture Design
 
 **Date:** 2026-03-28
-**Status:** Approved design, pending implementation plan
+**Status:** Historical design snapshot. Superseded by `HEIWA.md`,
+`AGENTS.md`, and `docs/local-self-operation.md` for current product center,
+naming, provider inventory, and local-first runtime truth.
 **Supersedes:** `config/swarm/END_STATE_2026-03.md` on Captain model identity (no longer Gemini Flash-specific), ACP scope (deferred), and Skill execution engine (deferred). END_STATE should be updated to match this spec before implementation begins.
 
 ## Positioning

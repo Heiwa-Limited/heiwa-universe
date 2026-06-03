@@ -51,11 +51,14 @@ fn jwt_round_trip_preserves_identity_claims() {
 #[test]
 fn jwt_signing_matches_standard_hs256_reference() {
     let token = sign_jwt(&test_claims(), "auth-secret").expect("token");
+    let expected = [
+        "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9",
+        "eyJzdWIiOiJ1c2VyLWFscGhhIiwib3duZXJfaWQiOiJ1c2VyLWFscGhhIiwicHJpbmNpcGFsX2lkIjoiZGlzY29yZDphbHBoYSIsInVzZXJuYW1lIjoiYWxwaGEiLCJkaXNjb3JkX3VzZXJfaWQiOiJkaXNjb3JkLWFscGhhIiwiaWF0IjoxNzAwMDAwMDAwLCJleHAiOjQxMDI0NDQ4MDAsImlzcyI6ImhlaXdhLWNvcmUiLCJhdWQiOiJoZWl3YSJ9",
+        "uW4DUlEcXQREsPWSdJ3j1ttpM2hwa6ZWyJbMvKZqQZk",
+    ]
+    .join(".");
 
-    assert_eq!(
-        token,
-        "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJ1c2VyLWFscGhhIiwib3duZXJfaWQiOiJ1c2VyLWFscGhhIiwicHJpbmNpcGFsX2lkIjoiZGlzY29yZDphbHBoYSIsInVzZXJuYW1lIjoiYWxwaGEiLCJkaXNjb3JkX3VzZXJfaWQiOiJkaXNjb3JkLWFscGhhIiwiaWF0IjoxNzAwMDAwMDAwLCJleHAiOjQxMDI0NDQ4MDAsImlzcyI6ImhlaXdhLWNvcmUiLCJhdWQiOiJoZWl3YSJ9.uW4DUlEcXQREsPWSdJ3j1ttpM2hwa6ZWyJbMvKZqQZk"
-    );
+    assert_eq!(token, expected);
 }
 
 #[test]

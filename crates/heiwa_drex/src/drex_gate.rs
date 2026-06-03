@@ -1,7 +1,7 @@
+use anyhow::{anyhow, Result};
+use serde_json::json;
 use std::fs;
 use std::path::{Path, PathBuf};
-use serde_json::json;
-use anyhow::{anyhow, Result};
 use std::time::{Duration, Instant};
 
 /// Target risk levels for action routing
@@ -51,7 +51,8 @@ pub fn evaluate_approval_policy(
     surface: &str,
 ) -> ApprovalVerdict {
     // Read override env variable
-    let auto_approve_env = std::env::var("HEIWA_AUTO_APPROVE").unwrap_or_else(|_| "cli".to_string());
+    let auto_approve_env =
+        std::env::var("HEIWA_AUTO_APPROVE").unwrap_or_else(|_| "cli".to_string());
     if auto_approve_env == "all" {
         return ApprovalVerdict::AutoApproved;
     }
@@ -115,10 +116,7 @@ pub fn stage_approval_request(
 }
 
 /// Block and watch for an operator decision on a request, with a timeout
-pub fn wait_for_decision(
-    request_id: &str,
-    timeout: Duration,
-) -> Result<String> {
+pub fn wait_for_decision(request_id: &str, timeout: Duration) -> Result<String> {
     let home = get_home_dir();
     let decision_path = home
         .join(".heiwa")
@@ -133,7 +131,6 @@ pub fn wait_for_decision(
     let start = Instant::now();
     let poll_interval = Duration::from_millis(100);
 
-
     while start.elapsed() < timeout {
         if decision_path.exists() {
             let raw = fs::read_to_string(&decision_path)?;
@@ -145,14 +142,17 @@ pub fn wait_for_decision(
         std::thread::sleep(poll_interval);
     }
 
-    Err(anyhow!("Timeout waiting for approval decision for {}", request_id))
+    Err(anyhow!(
+        "Timeout waiting for approval decision for {}",
+        request_id
+    ))
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use tempfile::tempdir;
     use std::sync::Mutex;
+    use tempfile::tempdir;
 
     static ENV_MUTEX: Mutex<()> = Mutex::new(());
 
@@ -207,10 +207,23 @@ mod tests {
 
         std::env::set_var("HEIWA_AUTO_APPROVE", "none");
         let verdict = evaluate_approval_policy("deploy", "production", RiskLevel::Critical, "cli");
-        
-        if let ApprovalVerdict::AwaitingApproval { request_id, request_path } = verdict {
+
+        if let ApprovalVerdict::AwaitingApproval {
+            request_id,
+            request_path,
+        } = verdict
+        {
             let payload = json!({"cmd": "git push production"});
-            stage_approval_request(&request_id, &request_path, "deploy", "production", RiskLevel::Critical, "cli", &payload).unwrap();
+            stage_approval_request(
+                &request_id,
+                &request_path,
+                "deploy",
+                "production",
+                RiskLevel::Critical,
+                "cli",
+                &payload,
+            )
+            .unwrap();
 
             assert!(request_path.exists());
             let file_content = fs::read_to_string(&request_path).unwrap();
@@ -218,7 +231,13 @@ mod tests {
             assert_eq!(parsed["action"], "deploy");
             assert_eq!(parsed["target"], "production");
 
-            let decision_dir = temp.path().join(".heiwa").join("state").join("dispatch").join("approvals").join("decisions");
+            let decision_dir = temp
+                .path()
+                .join(".heiwa")
+                .join("state")
+                .join("dispatch")
+                .join("approvals")
+                .join("decisions");
             fs::create_dir_all(&decision_dir).unwrap();
             let decision_path = decision_dir.join(format!("{}.json", request_id));
 
@@ -227,7 +246,11 @@ mod tests {
                 "outcome": "approved",
                 "decided_at_utc": chrono::Utc::now().to_rfc3339()
             });
-            fs::write(&decision_path, serde_json::to_string_pretty(&decision_json).unwrap()).unwrap();
+            fs::write(
+                &decision_path,
+                serde_json::to_string_pretty(&decision_json).unwrap(),
+            )
+            .unwrap();
 
             let outcome = wait_for_decision(&request_id, Duration::from_secs(2)).unwrap();
             assert_eq!(outcome, "approved");
@@ -236,4 +259,3 @@ mod tests {
         }
     }
 }
-

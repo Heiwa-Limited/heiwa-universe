@@ -214,3 +214,64 @@ export interface Health {
   started_at: string;
   notes: string[];
 }
+
+export interface Appointment {
+  kind: string;
+  date: string;
+  note: string;
+}
+
+export interface StaleFact {
+  label: string;
+  source: string;
+  age_days: number;
+  sla_days: number;
+}
+
+export interface PendingApproval {
+  id: string;
+  action: string;
+  target: string;
+  risk: string;
+  requested_at: string | null;
+}
+
+export interface TodaySnapshot {
+  command: string;
+  date: string;
+  timezone: string;
+  day_type: "off" | "work" | "unknown" | string;
+  work_shifts: string[];
+  appointments: Appointment[];
+  proof_target: string | null;
+  scorecard_notes: string | null;
+  stale_facts: StaleFact[];
+  pending_approvals: PendingApproval[];
+  runtime: { stdb_mode: string };
+  next: string[];
+}
+
+export interface FreshnessSource {
+  group: string;
+  label: string;
+  path: string;
+  present: boolean;
+  modified_unix: number | null;
+  age_days: number | null;
+  sla_days: number;
+  stale: boolean;
+}
+
+export interface FreshnessReport {
+  command: string;
+  date: string;
+  stale_sources: number;
+  sources: FreshnessSource[];
+}
+
+export interface ApprovalsSummary {
+  pending_count: number;
+  pending: PendingApproval[];
+  requests_dir: string;
+  decisions_dir: string;
+}

@@ -79,7 +79,7 @@ const response = await fetch('https://api.example.com', {
 **Never commit secrets:**
 ```jsonc
 // ❌ NEVER
-{ "vars": { "API_KEY": "sk_live_abc123" } }
+{ "vars": { "API_KEY": "${API_KEY}" } }
 ```
 
 ## Testing with Mock Bindings
@@ -179,7 +179,7 @@ await stub.fetch(new Request('https://fake/increment'));
 
 ## Anti-Patterns
 
-**❌ Hardcoding credentials:** `const apiKey = 'sk_live_abc123'`  
+**❌ Hardcoding credentials:** `const apiKey = "REPLACE_WITH_REAL_SECRET"`
 **✅** `npx wrangler secret put API_KEY`
 
 **❌ Using REST API:** `fetch('https://api.cloudflare.com/.../kv/...')`  

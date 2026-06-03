@@ -10,7 +10,8 @@ echo "🏗️  Preparing Heiwa Node Package for: $NODE_ID ($NODE_TYPE)"
 # 1. Generate local env overrides
 HEIWA_TOKEN=$(grep HEIWA_AUTH_TOKEN .env | cut -d'=' -f2- | tr -d '"' | tr -d "'")
 if [[ -z "$HEIWA_TOKEN" ]]; then
-    HEIWA_TOKEN="faab5ce53c496715150d6aa96b5082b2"
+    echo "HEIWA_AUTH_TOKEN is required in .env for node provisioning" >&2
+    exit 1
 fi
 
 HEIWA_HUB_URL=$(grep '^HEIWA_HUB_URL=' .env.worker.local 2>/dev/null | cut -d'=' -f2- || true)

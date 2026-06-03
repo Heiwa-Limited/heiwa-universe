@@ -53,8 +53,8 @@ When the user provides a Figma URL, extract the file key and node ID to pass as 
 
 **Example:**
 
-- URL: `https://figma.com/design/kL9xQn2VwM8pYrTb4ZcHjF/DesignSystem?node-id=42-15`
-- File key: `kL9xQn2VwM8pYrTb4ZcHjF`
+- URL: `https://figma.com/design/FIGMA_FILE_KEY_EXAMPLE/DesignSystem?node-id=42-15`
+- File key: `FIGMA_FILE_KEY_EXAMPLE`
 - Node ID: `42-15`
 
 #### Option B: Use Current Selection from Figma Desktop App (figma-desktop MCP only)
@@ -170,13 +170,13 @@ Before marking complete, validate the final UI against the Figma screenshot.
 
 ### Example 1: Implementing a Button Component
 
-User says: "Implement this Figma button component: https://figma.com/design/kL9xQn2VwM8pYrTb4ZcHjF/DesignSystem?node-id=42-15"
+User says: "Implement this Figma button component: https://figma.com/design/FIGMA_FILE_KEY_EXAMPLE/DesignSystem?node-id=42-15"
 
 **Actions:**
 
-1. Parse URL to extract fileKey=`kL9xQn2VwM8pYrTb4ZcHjF` and nodeId=`42-15`
-2. Run `get_design_context(fileKey="kL9xQn2VwM8pYrTb4ZcHjF", nodeId="42-15")`
-3. Run `get_screenshot(fileKey="kL9xQn2VwM8pYrTb4ZcHjF", nodeId="42-15")` for visual reference
+1. Parse URL to extract fileKey=`FIGMA_FILE_KEY_EXAMPLE` and nodeId=`42-15`
+2. Run `get_design_context(fileKey="FIGMA_FILE_KEY_EXAMPLE", nodeId="42-15")`
+3. Run `get_screenshot(fileKey="FIGMA_FILE_KEY_EXAMPLE", nodeId="42-15")` for visual reference
 4. Download any button icons from the assets endpoint
 5. Check if project has existing button component
 6. If yes, extend it with new variant; if no, create new component using project conventions
@@ -187,15 +187,15 @@ User says: "Implement this Figma button component: https://figma.com/design/kL9x
 
 ### Example 2: Building a Dashboard Layout
 
-User says: "Build this dashboard: https://figma.com/design/pR8mNv5KqXzGwY2JtCfL4D/Dashboard?node-id=10-5"
+User says: "Build this dashboard: https://figma.com/design/FIGMA_FILE_KEY_EXAMPLE/Dashboard?node-id=10-5"
 
 **Actions:**
 
-1. Parse URL to extract fileKey=`pR8mNv5KqXzGwY2JtCfL4D` and nodeId=`10-5`
-2. Run `get_metadata(fileKey="pR8mNv5KqXzGwY2JtCfL4D", nodeId="10-5")` to understand the page structure
+1. Parse URL to extract fileKey=`FIGMA_FILE_KEY_EXAMPLE` and nodeId=`10-5`
+2. Run `get_metadata(fileKey="FIGMA_FILE_KEY_EXAMPLE", nodeId="10-5")` to understand the page structure
 3. Identify main sections from metadata (header, sidebar, content area, cards) and their child node IDs
-4. Run `get_design_context(fileKey="pR8mNv5KqXzGwY2JtCfL4D", nodeId=":childNodeId")` for each major section
-5. Run `get_screenshot(fileKey="pR8mNv5KqXzGwY2JtCfL4D", nodeId="10-5")` for the full page
+4. Run `get_design_context(fileKey="FIGMA_FILE_KEY_EXAMPLE", nodeId=":childNodeId")` for each major section
+5. Run `get_screenshot(fileKey="FIGMA_FILE_KEY_EXAMPLE", nodeId="10-5")` for the full page
 6. Download all assets (logos, icons, charts)
 7. Build layout using project's layout primitives
 8. Implement each section using existing components where possible

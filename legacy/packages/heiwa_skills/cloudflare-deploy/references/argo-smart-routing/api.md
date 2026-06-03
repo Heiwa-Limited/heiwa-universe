@@ -25,7 +25,7 @@ Authorization: Bearer YOUR_API_TOKEN
 **cURL Example:**
 ```bash
 curl -X GET "https://api.cloudflare.com/client/v4/zones/{zone_id}/argo/smart_routing" \
-  -H "Authorization: Bearer YOUR_API_TOKEN" \
+  -H "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}" \
   -H "Content-Type: application/json"
 ```
 
@@ -82,7 +82,7 @@ print(f"Argo status: {status.value}, editable: {status.editable}")
 **cURL Example:**
 ```bash
 curl -X PATCH "https://api.cloudflare.com/client/v4/zones/{zone_id}/argo/smart_routing" \
-  -H "Authorization: Bearer YOUR_API_TOKEN" \
+  -H "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}" \
   -H "Content-Type: application/json" \
   -d '{"value": "on"}'
 ```

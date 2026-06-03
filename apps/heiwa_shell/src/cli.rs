@@ -8,6 +8,14 @@ pub async fn try_handle(args: &[String]) -> Result<bool> {
             cmd::life::run(&args[2..])?;
             Ok(true)
         }
+        Some("goal") => {
+            cmd::goal::run(&args[2..])?;
+            Ok(true)
+        }
+        Some("compress") => {
+            cmd::compress::run(&args[2..])?;
+            Ok(true)
+        }
         Some("app") => {
             cmd::app::run(&args[2..]).await?;
             Ok(true)

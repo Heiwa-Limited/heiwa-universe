@@ -2,9 +2,11 @@ import { api } from "./api";
 import type {
   Agent,
   Approval,
+  ApprovalsSummary,
   CellsCatalogEntry,
   Cron,
   Envelope,
+  FreshnessReport,
   Health,
   HistorySummary,
   HookProvider,
@@ -16,6 +18,7 @@ import type {
   RateGroup,
   Route,
   Session,
+  TodaySnapshot,
   Trace,
 } from "./types";
 
@@ -45,6 +48,12 @@ export const v1 = {
   },
   approvals: () =>
     unwrap(api.get<Envelope<{ approvals: Approval[] }>>("/api/v1/approvals")),
+  approvalsSummary: () =>
+    unwrap(api.get<Envelope<ApprovalsSummary>>("/api/v1/approvals/summary")),
+  lifeToday: () =>
+    unwrap(api.get<Envelope<TodaySnapshot>>("/api/v1/life/today")),
+  lifeFreshness: () =>
+    unwrap(api.get<Envelope<FreshnessReport>>("/api/v1/life/freshness")),
   inbox: () =>
     unwrap(
       api.get<Envelope<{ items: InboxItem[]; cursor: string | null }>>(

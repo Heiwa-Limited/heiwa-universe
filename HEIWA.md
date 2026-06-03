@@ -193,9 +193,11 @@ As of 2026-04-22, `heiwa-universe` has already landed meaningful local runtime s
 
 ## Canonical Product Identity
 
-| Layer | Canonical meaning |
+| Name | Canonical meaning |
 | --- | --- |
-| **Heiwa** | Company and product identity |
+| **Heiwa** | Product identity: app, runtime, CLI, packages, docs, and user-visible system |
+| **Heiwa Limited** | Company, publisher, employer, legal/commercial identity |
+| **Heiwa Universe** | Open-source repository and project workspace: `Strategizing/heiwa-universe` |
 | **`heiwa`** | Primary installed runtime and operator surface |
 | **DREX** | Internal execution kernel and routing substrate |
 | **SpacetimeDB** | Backend adjudication, canonical state, subscriptions, evidence |
@@ -560,6 +562,29 @@ That end state looks like:
 
 The target is not “own all models.”  
 The target is “own the layer users trust to use all models, all devices, and all enterprise controls coherently.”
+
+## Peer-Verified Reality Check
+
+Use this when comparing Heiwa to OpenHuman, Hermes, Claude Code, Codex, Gemini
+CLI, and similar agent surfaces.
+
+- Hermes should be mined for learning loop, skills, FTS5 recall, Honcho user
+  modeling, messaging gateway, cron delivery, MCP, provider/model switching, and
+  terminal backends. Do not call it a worker mesh.
+- OpenHuman should be mined for desktop onboarding, local Memory Tree,
+  Obsidian-style Markdown vault, Composio/OAuth connector breadth, TokenJuice,
+  and voice/meeting surface. Do not call it pure local-first; its README states
+  default managed services for sign-in, model routing, search proxying, OAuth,
+  and Composio-backed integrations.
+- Tauri 2 is Heiwa's chosen app foundation because it fits Rust + Solid/Vite +
+  local runtime authority. Do not claim OpenHuman proves plain Tauri 2; it uses
+  vendored Tauri/CEF sources.
+- Heiwa's defensible distinction is provider-peer local ownership: Claude Code,
+  Codex, Gemini CLI, Antigravity, Ollama, APIs, local models, machines,
+  approvals, receipts, and STDB evidence sync under one operator seat.
+- Current gap: Heiwa does not yet match OpenHuman connector breadth or
+  TokenJuice, nor Hermes skill self-improvement, gateway delivery, or cron
+  breadth. Say "target" until runtime code proves parity.
 
 ## Progressive Exposure Model
 

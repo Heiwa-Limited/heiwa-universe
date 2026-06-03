@@ -4,6 +4,7 @@ use base64::Engine;
 use serde::Serialize;
 use serde_json::{json, Value};
 use sha1::{Digest, Sha1};
+use std::collections::HashSet;
 use std::env;
 use std::fs;
 use std::net::SocketAddr;
@@ -432,7 +433,8 @@ async fn handle_connection(mut stream: TcpStream, started_at: Arc<String>) -> Re
     }
 
     if is_websocket_request(&request) {
-        return handle_websocket(stream, &request, started_at).await;
+        let path = request_path(&request).unwrap_or("/").to_string();
+        return handle_websocket(stream, &request, started_at, &path).await;
     }
 
     let method = request_method(&request).unwrap_or("GET");
@@ -444,7 +446,11 @@ async fn handle_connection(mut stream: TcpStream, started_at: Arc<String>) -> Re
 
     if method == "POST" && path == "/api/v1/repl" {
         let parsed_body: Value = serde_json::from_str(&body).unwrap_or_else(|_| json!({}));
-        let prompt = parsed_body.get("prompt").and_then(Value::as_str).unwrap_or("").to_string();
+        let prompt = parsed_body
+            .get("prompt")
+            .and_then(Value::as_str)
+            .unwrap_or("")
+            .to_string();
 
         let payload = match crate::execute_repl_turn(&prompt).await {
             Ok((response, trace)) => {
@@ -558,6 +564,7 @@ async fn handle_websocket(
     mut stream: TcpStream,
     request: &str,
     started_at: Arc<String>,
+    path: &str,
 ) -> Result<()> {
     let key = header_value(request, "sec-websocket-key")
         .ok_or_else(|| anyhow!("missing websocket key"))?;
@@ -570,6 +577,10 @@ async fn handle_websocket(
          \r\n"
     );
     stream.write_all(response.as_bytes()).await?;
+
+    if path == "/ws/v1/events" {
+        return events_loop(stream).await;
+    }
 
     let mut ticker = time::interval(Duration::from_secs(5));
     loop {
@@ -586,6 +597,163 @@ async fn handle_websocket(
         }
     }
     Ok(())
+}
+
+async fn events_loop(mut stream: TcpStream) -> Result<()> {
+    let mut last_pending: HashSet<String> = HashSet::new();
+    let mut last_decided: HashSet<String> = HashSet::new();
+    let mut last_goals_fingerprint: HashSet<(String, u64)> = HashSet::new();
+    let mut first = true;
+    let mut heartbeat_counter: u32 = 0;
+    let mut ticker = time::interval(Duration::from_secs(2));
+
+    loop {
+        ticker.tick().await;
+        let pending = scan_dispatch_ids("requests");
+        let decided = scan_dispatch_ids("approvals/decisions");
+        let goals_fp = scan_goals_fingerprint();
+        let ts = chrono::Utc::now().to_rfc3339();
+
+        if first {
+            let payload = json!({
+                "event": "events_initial",
+                "ts_utc": ts,
+                "scope": "approvals",
+                "payload": {
+                    "pending_count": pending.len(),
+                    "decided_count": decided.len(),
+                    "goals_count": goals_fp.len(),
+                }
+            });
+            if write_ws_text(&mut stream, &payload.to_string())
+                .await
+                .is_err()
+            {
+                return Ok(());
+            }
+            first = false;
+        } else {
+            let mut emitted = false;
+            for id in pending.difference(&last_pending) {
+                let payload = json!({
+                    "event": "dispatch_request_appeared",
+                    "ts_utc": ts,
+                    "scope": "approvals",
+                    "payload": { "id": id }
+                });
+                if write_ws_text(&mut stream, &payload.to_string())
+                    .await
+                    .is_err()
+                {
+                    return Ok(());
+                }
+                emitted = true;
+            }
+            for id in decided.difference(&last_decided) {
+                let payload = json!({
+                    "event": "dispatch_request_decided",
+                    "ts_utc": ts,
+                    "scope": "approvals",
+                    "payload": { "id": id }
+                });
+                if write_ws_text(&mut stream, &payload.to_string())
+                    .await
+                    .is_err()
+                {
+                    return Ok(());
+                }
+                emitted = true;
+            }
+            if goals_fp != last_goals_fingerprint {
+                let payload = json!({
+                    "event": "goal_updated",
+                    "ts_utc": ts,
+                    "scope": "goals",
+                    "payload": { "count": goals_fp.len() }
+                });
+                if write_ws_text(&mut stream, &payload.to_string())
+                    .await
+                    .is_err()
+                {
+                    return Ok(());
+                }
+                emitted = true;
+            }
+            heartbeat_counter += 1;
+            if !emitted && heartbeat_counter >= 15 {
+                let payload = json!({ "event": "heartbeat", "ts_utc": ts });
+                if write_ws_text(&mut stream, &payload.to_string())
+                    .await
+                    .is_err()
+                {
+                    return Ok(());
+                }
+                heartbeat_counter = 0;
+            } else if emitted {
+                heartbeat_counter = 0;
+            }
+        }
+
+        last_pending = pending;
+        last_decided = decided;
+        last_goals_fingerprint = goals_fp;
+    }
+}
+
+fn scan_goals_fingerprint() -> HashSet<(String, u64)> {
+    let dir = crate::cmd::goal::goals_dir();
+    let mut out = HashSet::new();
+    let Ok(entries) = fs::read_dir(dir) else {
+        return out;
+    };
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if path.extension().and_then(|e| e.to_str()) != Some("json") {
+            continue;
+        }
+        let Some(stem) = path.file_stem().and_then(|s| s.to_str()) else {
+            continue;
+        };
+        let mtime = fs::metadata(&path)
+            .ok()
+            .and_then(|m| m.modified().ok())
+            .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+            .map(|d| d.as_secs())
+            .unwrap_or(0);
+        out.insert((stem.to_string(), mtime));
+    }
+    out
+}
+
+fn scan_dispatch_ids(subdir: &str) -> HashSet<String> {
+    let home = env::var("HOME")
+        .map(PathBuf::from)
+        .ok()
+        .or_else(|| dirs::home_dir())
+        .unwrap_or_else(|| PathBuf::from("."));
+    let dir = home
+        .join(".heiwa")
+        .join("state")
+        .join("dispatch")
+        .join(subdir);
+    scan_dispatch_ids_in(&dir)
+}
+
+fn scan_dispatch_ids_in(dir: &Path) -> HashSet<String> {
+    let mut ids = HashSet::new();
+    let Ok(entries) = fs::read_dir(dir) else {
+        return ids;
+    };
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if path.extension().and_then(|e| e.to_str()) != Some("json") {
+            continue;
+        }
+        if let Some(stem) = path.file_stem().and_then(|s| s.to_str()) {
+            ids.insert(stem.to_string());
+        }
+    }
+    ids
 }
 
 async fn write_ws_text(stream: &mut TcpStream, text: &str) -> Result<()> {
@@ -681,6 +849,11 @@ fn api_payload(path: &str, started_at: &str) -> Option<Value> {
         "/api/v1/hooks" => json!({ "providers": hook_provider_rows(), "summary": hooks_summary() }),
         "/api/v1/missions" => json!({ "missions": [], "cursor": null }),
         "/api/v1/approvals" => json!({ "approvals": approval_rows() }),
+        "/api/v1/approvals/summary" => crate::cmd::approvals::pending_approvals_summary_payload(),
+        "/api/v1/life/today" => crate::cmd::life::today_payload(),
+        "/api/v1/life/freshness" => crate::cmd::life::freshness_payload(),
+        "/api/v1/goals" => crate::cmd::goal::goals_payload(),
+        "/api/v1/compress/summary" => crate::cmd::compress::compress_summary_payload(),
         "/api/v1/rate-groups" => json!({ "rate_groups": rate_group_rows() }),
         "/api/v1/inbox" => {
             let state_dir = state_dir();
@@ -1795,6 +1968,52 @@ mod app_readmodel_tests {
     }
 
     #[test]
+    fn api_payload_exposes_life_today_for_cockpit() {
+        let payload =
+            api_payload("/api/v1/life/today", "2026-05-26T00:00:00Z").expect("life today endpoint");
+        assert_eq!(payload.get("ok").and_then(Value::as_bool), Some(true));
+        let data = payload.get("data").expect("data envelope");
+        assert_eq!(
+            data.get("command").and_then(Value::as_str),
+            Some("life today")
+        );
+        assert_eq!(
+            data.get("timezone").and_then(Value::as_str),
+            Some("America/Vancouver")
+        );
+        assert!(data.get("pending_approvals").is_some_and(Value::is_array));
+        assert!(data
+            .get("runtime")
+            .and_then(|runtime| runtime.get("stdb_mode"))
+            .is_some_and(Value::is_string));
+    }
+
+    #[test]
+    fn api_payload_exposes_life_freshness_for_cockpit() {
+        let payload = api_payload("/api/v1/life/freshness", "2026-05-26T00:00:00Z")
+            .expect("life freshness endpoint");
+        assert_eq!(payload.get("ok").and_then(Value::as_bool), Some(true));
+        let data = payload.get("data").expect("data envelope");
+        assert_eq!(
+            data.get("command").and_then(Value::as_str),
+            Some("life freshness")
+        );
+        assert!(data.get("stale_sources").is_some_and(Value::is_number));
+        assert!(data.get("sources").is_some_and(Value::is_array));
+    }
+
+    #[test]
+    fn api_payload_exposes_approvals_summary_for_cockpit() {
+        let payload = api_payload("/api/v1/approvals/summary", "2026-05-26T00:00:00Z")
+            .expect("approvals summary endpoint");
+        assert_eq!(payload.get("ok").and_then(Value::as_bool), Some(true));
+        let data = payload.get("data").expect("data envelope");
+        assert!(data.get("pending_count").is_some_and(Value::is_number));
+        assert!(data.get("pending").is_some_and(Value::is_array));
+        assert!(data.get("requests_dir").is_some_and(Value::is_string));
+    }
+
+    #[test]
     fn dispatch_results_populate_history_runs_and_artifacts() {
         let state = temp_state_dir("history-readmodel");
         let results = state.join("dispatch").join("results");
@@ -1934,5 +2153,56 @@ mod app_readmodel_tests {
             "execution"
         );
         assert_eq!(plane_for_event_type("dispatch.result.written"), "evidence");
+    }
+
+    #[test]
+    fn scan_dispatch_ids_in_returns_json_file_stems() {
+        let dir = temp_state_dir("dispatch-scan");
+        fs::write(dir.join("req_alpha.json"), "{}").expect("write alpha");
+        fs::write(dir.join("req_beta.json"), "{}").expect("write beta");
+        fs::write(dir.join("ignore.txt"), "noop").expect("write decoy");
+
+        let ids = scan_dispatch_ids_in(&dir);
+        assert_eq!(ids.len(), 2);
+        assert!(ids.contains("req_alpha"));
+        assert!(ids.contains("req_beta"));
+        assert!(!ids.contains("ignore"));
+
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn scan_dispatch_ids_in_returns_empty_on_missing_dir() {
+        let missing = env::temp_dir().join("heiwa-shell-dispatch-missing-{nope}");
+        let ids = scan_dispatch_ids_in(&missing);
+        assert!(ids.is_empty());
+    }
+
+    #[test]
+    fn api_payload_exposes_goals_for_cockpit() {
+        let payload = api_payload("/api/v1/goals", "2026-05-26T00:00:00Z").expect("goals endpoint");
+        assert_eq!(payload.get("ok").and_then(Value::as_bool), Some(true));
+        let data = payload.get("data").expect("data envelope");
+        assert!(data.get("goals_dir").is_some_and(Value::is_string));
+        assert!(data.get("goals").is_some_and(Value::is_array));
+        assert!(data
+            .get("counts")
+            .and_then(|c| c.get("open"))
+            .is_some_and(Value::is_number));
+    }
+
+    #[test]
+    fn api_payload_exposes_compress_summary_for_cockpit() {
+        let payload = api_payload("/api/v1/compress/summary", "2026-05-26T00:00:00Z")
+            .expect("compress summary endpoint");
+        assert_eq!(payload.get("ok").and_then(Value::as_bool), Some(true));
+        let data = payload.get("data").expect("data envelope");
+        assert!(data.get("receipts_dir").is_some_and(Value::is_string));
+        assert!(data.get("count").is_some_and(Value::is_number));
+        assert!(data
+            .get("totals")
+            .and_then(|t| t.get("cumulative_ratio"))
+            .is_some_and(Value::is_number));
+        assert!(data.get("recent").is_some_and(Value::is_array));
     }
 }

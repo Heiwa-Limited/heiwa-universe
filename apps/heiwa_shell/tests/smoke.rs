@@ -1,6 +1,7 @@
 use std::io::Write;
 use std::process::Command;
 use std::process::Stdio;
+use tempfile::tempdir;
 
 #[test]
 fn test_heiwa_help() {
@@ -204,6 +205,82 @@ fn test_life_status_json_reports_sources_and_stdb_mode() {
         stdout.contains("\"home\""),
         "expected home source group in life status json: {stdout}"
     );
+}
+
+#[test]
+fn test_life_today_json_reports_local_read_model_keys() {
+    let output = Command::new("cargo")
+        .args(&[
+            "run",
+            "-p",
+            "heiwa-shell",
+            "--bin",
+            "heiwa",
+            "--",
+            "life",
+            "today",
+            "--json",
+        ])
+        .output()
+        .expect("failed to execute life today");
+
+    assert!(output.status.success());
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let parsed: serde_json::Value =
+        serde_json::from_str(stdout.trim()).expect("life today --json must be valid JSON");
+
+    assert_eq!(parsed["command"], "life today");
+    assert_eq!(parsed["timezone"], "America/Vancouver");
+    let date = parsed["date"].as_str().expect("date string");
+    assert_eq!(date.len(), 10, "date must be YYYY-MM-DD: {date}");
+    assert!(parsed["day_type"].is_string());
+    assert!(parsed["work_shifts"].is_array());
+    assert!(parsed["appointments"].is_array());
+    assert!(parsed["stale_facts"].is_array());
+    assert!(parsed["pending_approvals"].is_array());
+    assert!(parsed["runtime"]["stdb_mode"].is_string());
+}
+
+#[test]
+fn test_life_freshness_json_reports_source_slas() {
+    let output = Command::new("cargo")
+        .args(&[
+            "run",
+            "-p",
+            "heiwa-shell",
+            "--bin",
+            "heiwa",
+            "--",
+            "life",
+            "freshness",
+            "--json",
+        ])
+        .output()
+        .expect("failed to execute life freshness");
+
+    assert!(output.status.success());
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let parsed: serde_json::Value =
+        serde_json::from_str(stdout.trim()).expect("life freshness --json must be valid JSON");
+
+    assert_eq!(parsed["command"], "life freshness");
+    assert!(parsed["stale_sources"].is_number());
+    let sources = parsed["sources"]
+        .as_array()
+        .expect("life freshness sources must be an array");
+    let scorecard = sources
+        .iter()
+        .find(|source| source["label"] == "daily_scorecard.md")
+        .expect("daily scorecard source must be reported");
+    assert_eq!(scorecard["sla_days"], 1);
+    assert!(scorecard["age_days"].is_number() || scorecard["age_days"].is_null());
+    assert!(scorecard["stale"].is_boolean());
+
+    let register = sources
+        .iter()
+        .find(|source| source["label"] == "current_state_register.md")
+        .expect("current state register source must be reported");
+    assert_eq!(register["sla_days"], 7);
 }
 
 #[test]
@@ -623,6 +700,57 @@ fn test_approvals_list_json_reports_dispatch_paths() {
         normalized_stdout.contains("dispatch/approvals/decisions"),
         "expected dispatch/approvals/decisions directory in approvals list: {stdout}"
     );
+}
+
+#[test]
+fn test_approvals_list_json_reports_dispatch_v1_summary() {
+    let temp = tempdir().expect("temp home");
+    let requests_dir = temp.path().join(".heiwa/state/dispatch/requests");
+    std::fs::create_dir_all(&requests_dir).expect("create requests dir");
+    std::fs::write(
+        requests_dir.join("req_123.json"),
+        serde_json::to_string_pretty(&serde_json::json!({
+            "schema_version": "operator_dispatch_request_v1",
+            "request_id": "req_123",
+            "created_at": "2026-03-30T18:20:22.112520Z",
+            "action": "write-file",
+            "target_surface": "filesystem",
+            "target_scope": "/tmp/example.txt",
+            "requested_mode": "write"
+        }))
+        .expect("serialize request"),
+    )
+    .expect("write request");
+
+    let output = Command::new("cargo")
+        .env("HOME", temp.path())
+        .args(&[
+            "run",
+            "-p",
+            "heiwa-shell",
+            "--bin",
+            "heiwa",
+            "--",
+            "approvals",
+            "list",
+            "--json",
+        ])
+        .output()
+        .expect("failed to execute approvals list");
+
+    assert!(output.status.success());
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let parsed: serde_json::Value =
+        serde_json::from_str(stdout.trim()).expect("approvals list --json must be valid JSON");
+    let summary = parsed["pending_summary"]
+        .as_array()
+        .and_then(|items| items.first())
+        .expect("pending_summary must include request");
+    assert_eq!(summary["id"], "req_123");
+    assert_eq!(summary["action"], "write-file");
+    assert_eq!(summary["target"], "filesystem:/tmp/example.txt");
+    assert_eq!(summary["risk"], "write");
+    assert_eq!(summary["requested_at"], "2026-03-30T18:20:22.112520Z");
 }
 
 #[test]

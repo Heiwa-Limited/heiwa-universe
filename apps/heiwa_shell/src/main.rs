@@ -123,6 +123,37 @@ struct RouteResult {
     turn_started_at: String,
 }
 
+#[derive(Debug, Clone)]
+struct PreparedRoutePrompt {
+    model_prompt: String,
+    compression: Option<RouteCompressionMetadata>,
+}
+
+#[derive(Debug, Clone)]
+struct RouteCompressionMetadata {
+    applied: bool,
+    reason: String,
+    receipt_path: Option<String>,
+    input_chars: usize,
+    output_chars: usize,
+    ratio: f64,
+    input_tokens: usize,
+    output_tokens: usize,
+    estimated_usd_saved: f64,
+}
+
+#[derive(Debug, Clone)]
+struct RouteCompressionResult {
+    compressed: String,
+    receipt_path: String,
+    input_chars: usize,
+    output_chars: usize,
+    ratio: f64,
+    input_tokens: usize,
+    output_tokens: usize,
+    estimated_usd_saved: f64,
+}
+
 /// Outcome of the routing pipeline.
 enum RouteOutcome {
     /// Task routed to a model, ready to stream.
@@ -133,6 +164,8 @@ enum RouteOutcome {
 
 const DEFAULT_SESSION_ID: &str = "default";
 const TRANSCRIPT_CHAR_BUDGET: usize = 16_000;
+const ROUTE_COMPRESSION_BYTE_THRESHOLD: usize = 4096;
+const ROUTE_COMPRESSION_MODEL: &str = "ollama/qwen3.5:4b";
 
 #[tokio::main]
 async fn main() -> Result<()> {
@@ -1232,7 +1265,12 @@ async fn run_repl(use_cockpit: bool) -> Result<()> {
                         pins.current_model = route.model_id.clone();
                         record_route_evidence(&stdb_client, &route, &t);
 
-                        let messages = build_messages_from_transcript(&state.transcript, &t, &pins);
+                        let prepared = prepare_outbound_prompt_for_route(&route, &t);
+                        let messages = build_messages_from_transcript(
+                            &state.transcript,
+                            &prepared.model_prompt,
+                            &pins,
+                        );
                         append_state_block(&mut state, TranscriptBlock::User(t.clone()));
                         let (stream_tx, mut stream_rx) = tokio::sync::mpsc::channel(32);
                         let model_id = route.provider_model_id.clone();
@@ -1507,8 +1545,12 @@ async fn run_cockpit_controller(
                                         "agentic: planning tools...".into(),
                                     ));
 
-                                    let mut messages =
-                                        build_messages_from_transcript(&transcript, &t, &pins);
+                                    let prepared = prepare_outbound_prompt_for_route(&route, &t);
+                                    let mut messages = build_messages_from_transcript(
+                                        &transcript,
+                                        &prepared.model_prompt,
+                                        &pins,
+                                    );
                                     messages.insert(
                                         1,
                                         Message {
@@ -1654,8 +1696,12 @@ async fn run_cockpit_controller(
                                     .send(CockpitEvent::StatusUpdate("streaming...".into()));
 
                                 // Stream response
-                                let messages =
-                                    build_messages_from_transcript(&transcript, &t, &pins);
+                                let prepared = prepare_outbound_prompt_for_route(&route, &t);
+                                let messages = build_messages_from_transcript(
+                                    &transcript,
+                                    &prepared.model_prompt,
+                                    &pins,
+                                );
                                 append_controller_block(
                                     &session_id,
                                     &mut transcript,
@@ -2142,6 +2188,167 @@ fn build_messages_from_transcript(
         content: current_input.to_string(),
     });
     messages
+}
+
+fn prepare_outbound_prompt_for_route(route: &RouteResult, input: &str) -> PreparedRoutePrompt {
+    let pricing = pricing_for_provider(&route.provider);
+    prepare_outbound_prompt_for_route_with(route, input, |body, source| {
+        let receipt = cmd::compress::compress_text_for_source_with_pricing(
+            body,
+            source,
+            ROUTE_COMPRESSION_MODEL,
+            Some(pricing.clone()),
+        )
+        .map_err(|error| error.to_string())?;
+        Ok(RouteCompressionResult {
+            compressed: receipt.compressed,
+            receipt_path: receipt.receipt_path,
+            input_chars: receipt.input_chars,
+            output_chars: receipt.output_chars,
+            ratio: receipt.ratio,
+            input_tokens: receipt.input_tokens,
+            output_tokens: receipt.output_tokens,
+            estimated_usd_saved: receipt.estimated_usd_saved,
+        })
+    })
+}
+
+fn pricing_for_provider(provider: &str) -> cmd::compress::PricingInputs {
+    // USD per million tokens, sourced from public 2026-05 list pricing.
+    // Defaults bias toward the operator's typical lane (Sonnet 4.6 / GPT-5 / Gemini 3.1).
+    // Override via env later if needed. Local providers cost zero.
+    let (input_rate, output_rate, token_count_kind, exact_count_source) = match provider {
+        "claude" => (
+            3.0,
+            15.0,
+            "proxy_estimate",
+            Some("anthropic_messages_count_tokens_api"),
+        ),
+        "codex" => (3.0, 15.0, "proxy_estimate", None),
+        "gemini" => (1.25, 10.0, "proxy_estimate", None),
+        "antigravity" => (1.25, 10.0, "proxy_estimate", None),
+        "ollama" => (0.0, 0.0, "local_zero_cost", None),
+        _ => (5.0, 15.0, "proxy_estimate", None),
+    };
+    cmd::compress::PricingInputs {
+        target_provider: provider.to_string(),
+        usd_per_million_input_tokens: input_rate,
+        usd_per_million_output_tokens: output_rate,
+        tokenizer_id: "cl100k_base".to_string(),
+        token_count_kind: token_count_kind.to_string(),
+        exact_count_source: exact_count_source.map(str::to_string),
+    }
+}
+
+fn prepare_outbound_prompt_for_route_with<F>(
+    route: &RouteResult,
+    input: &str,
+    compressor: F,
+) -> PreparedRoutePrompt
+where
+    F: FnOnce(&str, &str) -> Result<RouteCompressionResult, String>,
+{
+    if !route_should_compress(route, input) {
+        return PreparedRoutePrompt {
+            model_prompt: input.to_string(),
+            compression: None,
+        };
+    }
+
+    let source = format!(
+        "route:{}:{}:{}",
+        route.request_id, route.provider, route.intent_key
+    );
+    match compressor(input, &source) {
+        Ok(result) if result.compressed.trim().is_empty() => PreparedRoutePrompt {
+            model_prompt: input.to_string(),
+            compression: Some(RouteCompressionMetadata {
+                applied: false,
+                reason: "empty_output".to_string(),
+                receipt_path: Some(result.receipt_path),
+                input_chars: result.input_chars,
+                output_chars: result.output_chars,
+                ratio: result.ratio,
+                input_tokens: result.input_tokens,
+                output_tokens: result.output_tokens,
+                estimated_usd_saved: 0.0,
+            }),
+        },
+        Ok(result) if result.output_chars >= result.input_chars => PreparedRoutePrompt {
+            model_prompt: input.to_string(),
+            compression: Some(RouteCompressionMetadata {
+                applied: false,
+                reason: "not_smaller".to_string(),
+                receipt_path: Some(result.receipt_path),
+                input_chars: result.input_chars,
+                output_chars: result.output_chars,
+                ratio: result.ratio,
+                input_tokens: result.input_tokens,
+                output_tokens: result.output_tokens,
+                estimated_usd_saved: 0.0,
+            }),
+        },
+        Ok(result) => PreparedRoutePrompt {
+            model_prompt: result.compressed,
+            compression: Some(RouteCompressionMetadata {
+                applied: true,
+                reason: "compressed".to_string(),
+                receipt_path: Some(result.receipt_path),
+                input_chars: result.input_chars,
+                output_chars: result.output_chars,
+                ratio: result.ratio,
+                input_tokens: result.input_tokens,
+                output_tokens: result.output_tokens,
+                estimated_usd_saved: result.estimated_usd_saved,
+            }),
+        },
+        Err(error) => PreparedRoutePrompt {
+            model_prompt: input.to_string(),
+            compression: Some(RouteCompressionMetadata {
+                applied: false,
+                reason: format!("failed:{error}"),
+                receipt_path: None,
+                input_chars: input.chars().count(),
+                output_chars: input.chars().count(),
+                ratio: 1.0,
+                input_tokens: 0,
+                output_tokens: 0,
+                estimated_usd_saved: 0.0,
+            }),
+        },
+    }
+}
+
+fn route_should_compress(route: &RouteResult, input: &str) -> bool {
+    !is_local_provider(&route.provider)
+        && input.len() > ROUTE_COMPRESSION_BYTE_THRESHOLD
+        && route_intent_allows_compression(&route.intent_key)
+}
+
+fn route_intent_allows_compression(intent_key: &str) -> bool {
+    matches!(intent_key, "chat" | "build" | "research" | "strategy")
+}
+
+fn compression_trace_suffix(compression: Option<&RouteCompressionMetadata>) -> String {
+    let Some(compression) = compression else {
+        return String::new();
+    };
+    if compression.applied {
+        let tokens_saved = compression.input_tokens as i64 - compression.output_tokens as i64;
+        format!(
+            " compression=applied ratio={:.3} chars={}->{} tokens={}->{} saved={} usd_saved={:.6} receipt={}",
+            compression.ratio,
+            compression.input_chars,
+            compression.output_chars,
+            compression.input_tokens,
+            compression.output_tokens,
+            tokens_saved,
+            compression.estimated_usd_saved,
+            compression.receipt_path.as_deref().unwrap_or("none")
+        )
+    } else {
+        format!(" compression=skipped reason={}", compression.reason)
+    }
 }
 
 fn working_context_prompt(pins: &SessionPins) -> String {
@@ -2883,7 +3090,9 @@ pub(crate) async fn execute_repl_turn(prompt: &str) -> Result<(String, String), 
         Ok(RouteOutcome::Routed(route)) => {
             record_route_evidence(&stdb_client, &route, prompt);
 
-            let messages = build_messages_from_transcript(&transcript_blocks, prompt, &pins);
+            let prepared = prepare_outbound_prompt_for_route(&route, prompt);
+            let messages =
+                build_messages_from_transcript(&transcript_blocks, &prepared.model_prompt, &pins);
             let mut state = SessionState {
                 session_id: persisted.session_id.clone(),
                 transcript: transcript_blocks,
@@ -2933,18 +3142,28 @@ pub(crate) async fn execute_repl_turn(prompt: &str) -> Result<(String, String), 
                 }
             }
 
-            append_state_block(&mut state, TranscriptBlock::Assistant(full_response.clone()));
+            append_state_block(
+                &mut state,
+                TranscriptBlock::Assistant(full_response.clone()),
+            );
             record_run_evidence(&stdb_client, &route, usage.as_ref());
 
             let trace_str = if let Some(ref u) = usage {
                 format!(
-                    "intent={} rank=1 route={}/{} latency=250ms cost=${:.4}",
-                    route.intent_key, route.provider, route.model_id, u.cost_usd
+                    "intent={} rank=1 route={}/{} latency=250ms cost=${:.4}{}",
+                    route.intent_key,
+                    route.provider,
+                    route.model_id,
+                    u.cost_usd,
+                    compression_trace_suffix(prepared.compression.as_ref())
                 )
             } else {
                 format!(
-                    "intent={} rank=1 route={}/{} latency=250ms cost=$0.0000",
-                    route.intent_key, route.provider, route.model_id
+                    "intent={} rank=1 route={}/{} latency=250ms cost=$0.0000{}",
+                    route.intent_key,
+                    route.provider,
+                    route.model_id,
+                    compression_trace_suffix(prepared.compression.as_ref())
                 )
             };
 
@@ -3143,6 +3362,153 @@ mod tests {
             }
             super::RouteOutcome::Deterministic(_) => panic!("strategy task should route"),
         }
+    }
+
+    #[test]
+    fn remote_large_chat_prompt_is_compressed_before_model_send() {
+        let route = super::RouteResult {
+            adapter: std::sync::Arc::new(super::ClaudeCodeCliAdapter::new()),
+            model_id: "claude-sonnet".to_string(),
+            provider: "claude".to_string(),
+            provider_model_id: "claude-sonnet".to_string(),
+            rate_group: "anthropic".to_string(),
+            routing_metadata: "{}".to_string(),
+            intent_key: "chat".to_string(),
+            request_id: "req-compress".to_string(),
+            turn_started_at: "2026-05-26T00:00:00Z".to_string(),
+        };
+        let input = "x".repeat(super::ROUTE_COMPRESSION_BYTE_THRESHOLD + 1);
+
+        let prepared =
+            super::prepare_outbound_prompt_for_route_with(&route, &input, |body, source| {
+                assert_eq!(body, input);
+                assert_eq!(source, "route:req-compress:claude:chat");
+                Ok(super::RouteCompressionResult {
+                    compressed: "compressed payload".to_string(),
+                    receipt_path: "/tmp/cmp.json".to_string(),
+                    input_chars: body.chars().count(),
+                    output_chars: 18,
+                    ratio: 18.0 / body.chars().count() as f64,
+                    input_tokens: 1024,
+                    output_tokens: 6,
+                    estimated_usd_saved: 0.003054,
+                })
+            });
+
+        assert_eq!(prepared.model_prompt, "compressed payload");
+        let compression = prepared.compression.expect("compression metadata");
+        assert!(compression.applied);
+        assert_eq!(compression.receipt_path.as_deref(), Some("/tmp/cmp.json"));
+    }
+
+    #[test]
+    fn compression_trace_suffix_includes_tokens_and_usd_when_applied() {
+        let meta = super::RouteCompressionMetadata {
+            applied: true,
+            reason: "compressed".to_string(),
+            receipt_path: Some("/tmp/cmp_test.json".to_string()),
+            input_chars: 4096,
+            output_chars: 1024,
+            ratio: 0.25,
+            input_tokens: 1024,
+            output_tokens: 256,
+            estimated_usd_saved: 0.002304,
+        };
+        let suffix = super::compression_trace_suffix(Some(&meta));
+        assert!(suffix.contains("compression=applied"), "got: {suffix}");
+        assert!(suffix.contains("tokens=1024->256"), "got: {suffix}");
+        assert!(suffix.contains("saved=768"), "got: {suffix}");
+        assert!(suffix.contains("usd_saved=0.002304"), "got: {suffix}");
+        assert!(suffix.contains("ratio=0.250"), "got: {suffix}");
+    }
+
+    #[test]
+    fn compression_trace_suffix_is_empty_when_none() {
+        assert_eq!(super::compression_trace_suffix(None), "");
+    }
+
+    #[test]
+    fn compression_trace_suffix_reports_reason_when_skipped() {
+        let meta = super::RouteCompressionMetadata {
+            applied: false,
+            reason: "empty_output".to_string(),
+            receipt_path: None,
+            input_chars: 100,
+            output_chars: 100,
+            ratio: 1.0,
+            input_tokens: 0,
+            output_tokens: 0,
+            estimated_usd_saved: 0.0,
+        };
+        let suffix = super::compression_trace_suffix(Some(&meta));
+        assert!(suffix.contains("compression=skipped"), "got: {suffix}");
+        assert!(suffix.contains("empty_output"), "got: {suffix}");
+    }
+
+    #[test]
+    fn pricing_for_provider_known_providers() {
+        assert_eq!(
+            super::pricing_for_provider("claude").usd_per_million_input_tokens,
+            3.0
+        );
+        assert_eq!(
+            super::pricing_for_provider("gemini").usd_per_million_input_tokens,
+            1.25
+        );
+        assert_eq!(
+            super::pricing_for_provider("ollama").usd_per_million_input_tokens,
+            0.0
+        );
+        // Unknown providers fall back to conservative middle.
+        assert_eq!(
+            super::pricing_for_provider("mystery").usd_per_million_input_tokens,
+            5.0
+        );
+    }
+
+    #[test]
+    fn pricing_for_provider_labels_token_count_basis() {
+        let claude = super::pricing_for_provider("claude");
+        assert_eq!(claude.tokenizer_id, "cl100k_base");
+        assert_eq!(claude.token_count_kind, "proxy_estimate");
+        assert_eq!(
+            claude.exact_count_source.as_deref(),
+            Some("anthropic_messages_count_tokens_api")
+        );
+
+        let ollama = super::pricing_for_provider("ollama");
+        assert_eq!(ollama.token_count_kind, "local_zero_cost");
+        assert_eq!(ollama.exact_count_source, None);
+    }
+
+    #[test]
+    fn local_or_small_prompts_skip_route_compression() {
+        let mut route = super::RouteResult {
+            adapter: std::sync::Arc::new(super::OllamaCliAdapter::new()),
+            model_id: "qwen3.5:4b".to_string(),
+            provider: "ollama".to_string(),
+            provider_model_id: "qwen3.5:4b".to_string(),
+            rate_group: "local".to_string(),
+            routing_metadata: "{}".to_string(),
+            intent_key: "chat".to_string(),
+            request_id: "req-local".to_string(),
+            turn_started_at: "2026-05-26T00:00:00Z".to_string(),
+        };
+        let large_input = "x".repeat(super::ROUTE_COMPRESSION_BYTE_THRESHOLD + 1);
+
+        let local = super::prepare_outbound_prompt_for_route_with(&route, &large_input, |_, _| {
+            panic!("local routes must not compress");
+        });
+        assert_eq!(local.model_prompt, large_input);
+        assert!(local.compression.is_none());
+
+        route.provider = "claude".to_string();
+        route.rate_group = "anthropic".to_string();
+        let small = super::prepare_outbound_prompt_for_route_with(&route, "small", |_, _| {
+            panic!("small prompts must not compress");
+        });
+        assert_eq!(small.model_prompt, "small");
+        assert!(small.compression.is_none());
     }
 
     #[test]

@@ -20,6 +20,7 @@ pub fn run(args: &[String]) -> Result<()> {
 fn list(args: &[String]) -> Result<()> {
     let pending = scan_pending_requests();
     let decisions = scan_decisions();
+    let pending_summary: Vec<Value> = pending.iter().map(approval_request_summary).collect();
     if has_flag(args, "--json") {
         println!(
             "{}",
@@ -28,6 +29,7 @@ fn list(args: &[String]) -> Result<()> {
                 "requests_dir": requests_dir().display().to_string(),
                 "decisions_dir": decisions_dir().display().to_string(),
                 "pending": pending,
+                "pending_summary": pending_summary,
                 "decided": decisions,
             })
         );
@@ -39,10 +41,11 @@ fn list(args: &[String]) -> Result<()> {
     println!("  requests dir: {}", requests_dir().display());
     println!("  decisions dir: {}", decisions_dir().display());
     for req in pending.iter().take(10) {
-        let id = req.get("id").and_then(Value::as_str).unwrap_or("?");
-        let action = req.get("action").and_then(Value::as_str).unwrap_or("?");
-        let target = req.get("target").and_then(Value::as_str).unwrap_or("?");
-        let risk = req.get("risk").and_then(Value::as_str).unwrap_or("?");
+        let summary = approval_request_summary(req);
+        let id = summary.get("id").and_then(Value::as_str).unwrap_or("?");
+        let action = summary.get("action").and_then(Value::as_str).unwrap_or("?");
+        let target = summary.get("target").and_then(Value::as_str).unwrap_or("?");
+        let risk = summary.get("risk").and_then(Value::as_str).unwrap_or("?");
         println!("    {id}  {action} -> {target}  risk={risk}");
     }
     if pending.len() > 10 {
@@ -128,7 +131,7 @@ fn decide(args: &[String]) -> Result<()> {
     Ok(())
 }
 
-fn scan_pending_requests() -> Vec<Value> {
+pub(crate) fn scan_pending_requests() -> Vec<Value> {
     let mut out = Vec::new();
     let Ok(entries) = fs::read_dir(requests_dir()) else {
         return out;
@@ -160,6 +163,52 @@ fn scan_pending_requests() -> Vec<Value> {
         out.push(value);
     }
     out
+}
+
+pub(crate) fn approval_request_summary(req: &Value) -> Value {
+    let id = string_field(req, &["id", "request_id"]).unwrap_or_else(|| "?".to_string());
+    let action = string_field(req, &["action"]).unwrap_or_else(|| "?".to_string());
+    let target = string_field(req, &["target"]).unwrap_or_else(|| {
+        match (
+            string_field(req, &["target_surface"]),
+            string_field(req, &["target_scope"]),
+        ) {
+            (Some(surface), Some(scope)) => format!("{surface}:{scope}"),
+            (Some(surface), None) => surface,
+            (None, Some(scope)) => scope,
+            (None, None) => "?".to_string(),
+        }
+    });
+    let risk = string_field(req, &["risk", "requested_mode"]).unwrap_or_else(|| "?".to_string());
+    let requested_at = string_field(req, &["requested_at", "requested_at_utc", "created_at"]);
+
+    json!({
+        "id": id,
+        "action": action,
+        "target": target,
+        "risk": risk,
+        "requested_at": requested_at,
+    })
+}
+
+pub(crate) fn pending_approvals_summary_payload() -> Value {
+    let pending = scan_pending_requests();
+    let pending_summary: Vec<Value> = pending.iter().map(approval_request_summary).collect();
+    json!({
+        "pending_count": pending_summary.len(),
+        "pending": pending_summary,
+        "requests_dir": requests_dir().display().to_string(),
+        "decisions_dir": decisions_dir().display().to_string(),
+    })
+}
+
+fn string_field(value: &Value, fields: &[&str]) -> Option<String> {
+    fields.iter().find_map(|field| {
+        value
+            .get(*field)
+            .and_then(Value::as_str)
+            .map(str::to_string)
+    })
 }
 
 fn scan_decisions() -> Vec<Value> {
@@ -221,4 +270,33 @@ fn print_help() {
     println!();
     println!("Reads from ~/.heiwa/state/dispatch/requests/ and writes decisions to");
     println!("~/.heiwa/state/dispatch/approvals/decisions/.");
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn approval_summary_maps_dispatch_v1_schema() {
+        let request = json!({
+            "schema_version": "operator_dispatch_request_v1",
+            "request_id": "req_123",
+            "created_at": "2026-03-30T18:20:22.112520Z",
+            "action": "write-file",
+            "target_surface": "filesystem",
+            "target_scope": "/Users/dmcgregsauce/.gemini/settings.json",
+            "requested_mode": "write"
+        });
+
+        let summary = approval_request_summary(&request);
+
+        assert_eq!(summary["id"], "req_123");
+        assert_eq!(summary["action"], "write-file");
+        assert_eq!(
+            summary["target"],
+            "filesystem:/Users/dmcgregsauce/.gemini/settings.json"
+        );
+        assert_eq!(summary["risk"], "write");
+        assert_eq!(summary["requested_at"], "2026-03-30T18:20:22.112520Z");
+    }
 }

@@ -2,6 +2,12 @@
 
 This repository builds Heiwa, a local-first AI runtime and enterprise platform. Gemini CLI is one wrapped provider surface inside Heiwa, not the product itself.
 
+Naming:
+
+- **Heiwa** = product/app/runtime/CLI/packages/docs.
+- **Heiwa Limited** = company/publisher/legal identity.
+- **Heiwa Universe** = this open-source repo, `Strategizing/heiwa-universe`.
+
 ## Gemini's Role Here
 
 - Gemini CLI is a peer executor alongside Claude Code, Codex, Antigravity, and local model runtimes.
@@ -38,6 +44,23 @@ Heiwa wraps provider-owned runtimes:
 - Ollama and later local runtimes
 
 Integration maturity differs across those providers. Discovery is not the same as full execution parity.
+
+## Shared Peer Truth
+
+Use corrected peer framing before architecture or parity work:
+
+- Hermes is Python, server/VPS-friendly, terminal-first. It proves learning loop,
+  skills, FTS5 recall, Honcho user modeling, messaging gateway, cron delivery,
+  MCP, provider switching, and terminal backends. Do not call it a worker mesh.
+- OpenHuman is Rust + Tauri/CEF with local memory plus managed default services.
+  It proves consumer desktop onboarding, Memory Tree, Obsidian vault,
+  Composio/OAuth integrations, TokenJuice, and voice/meeting surface. Do not
+  call it pure local-first.
+- Heiwa's defensible difference: provider-peer MacBook owner seat, local runtime
+  authority, approvals, receipts, STDB evidence sync, and provider-owned runtime
+  truth.
+- Biggest current gap: connector/tool breadth and compression/learning loop.
+  Do not imply parity until code proves it.
 
 ## Engineering Standards (2026-03 BYOK Update)
 
