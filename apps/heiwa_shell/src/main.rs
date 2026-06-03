@@ -2503,9 +2503,9 @@ fn route_task_inner(
     );
 
     if routed_tiers.is_empty() {
-        let reason = if final_model_pin.is_some() {
-            format!("Model '{}' not available.", final_model_pin.unwrap())
-        } else if final_provider_pin.is_some() {
+        let reason = if let Some(model) = final_model_pin {
+            format!("Model '{model}' not available.")
+        } else if let Some(provider) = final_provider_pin {
             let supported: Vec<&str> = adapter_capable
                 .iter()
                 .map(|t| t.provider.as_str())
@@ -2513,8 +2513,7 @@ fn route_task_inner(
                 .into_iter()
                 .collect();
             format!(
-                "Provider '{}' not available. Supported: {}.",
-                final_provider_pin.unwrap(),
+                "Provider '{provider}' not available. Supported: {}.",
                 supported.join(", "),
             )
         } else {
