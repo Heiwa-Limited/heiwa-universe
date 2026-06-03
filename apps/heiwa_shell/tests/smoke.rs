@@ -6,7 +6,7 @@ use tempfile::tempdir;
 #[test]
 fn test_heiwa_help() {
     let output = Command::new("cargo")
-        .args(&["run", "-p", "heiwa-shell", "--bin", "heiwa", "--", "--help"])
+        .args(["run", "-p", "heiwa-shell", "--bin", "heiwa", "--", "--help"])
         .output()
         .expect("failed to execute process");
 
@@ -18,7 +18,7 @@ fn test_heiwa_help() {
 #[test]
 fn test_heiwa_providers_lists_wrapped_and_loop_capable_surfaces_honestly() {
     let output = Command::new("cargo")
-        .args(&[
+        .args([
             "run",
             "-p",
             "heiwa-shell",
@@ -52,7 +52,7 @@ fn test_heiwa_providers_lists_wrapped_and_loop_capable_surfaces_honestly() {
 
 fn run_shell_script(script: &str) -> std::process::Output {
     let mut child = Command::new("cargo")
-        .args(&["run", "-p", "heiwa-shell", "--bin", "heiwa", "--", "shell"])
+        .args(["run", "-p", "heiwa-shell", "--bin", "heiwa", "--", "shell"])
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
@@ -148,7 +148,7 @@ fn test_shell_greeting_is_handled_without_model_requirement() {
 #[test]
 fn test_route_preview_greeting_does_not_execute_model() {
     let output = Command::new("cargo")
-        .args(&[
+        .args([
             "run",
             "-p",
             "heiwa-shell",
@@ -177,7 +177,7 @@ fn test_route_preview_greeting_does_not_execute_model() {
 #[test]
 fn test_life_status_json_reports_sources_and_stdb_mode() {
     let output = Command::new("cargo")
-        .args(&[
+        .args([
             "run",
             "-p",
             "heiwa-shell",
@@ -210,7 +210,7 @@ fn test_life_status_json_reports_sources_and_stdb_mode() {
 #[test]
 fn test_life_today_json_reports_local_read_model_keys() {
     let output = Command::new("cargo")
-        .args(&[
+        .args([
             "run",
             "-p",
             "heiwa-shell",
@@ -244,7 +244,7 @@ fn test_life_today_json_reports_local_read_model_keys() {
 #[test]
 fn test_life_freshness_json_reports_source_slas() {
     let output = Command::new("cargo")
-        .args(&[
+        .args([
             "run",
             "-p",
             "heiwa-shell",
@@ -286,7 +286,7 @@ fn test_life_freshness_json_reports_source_slas() {
 #[test]
 fn test_life_import_home_dry_run_jsonl_counts_stdb_rows() {
     let output = Command::new("cargo")
-        .args(&[
+        .args([
             "run",
             "-p",
             "heiwa-shell",
@@ -321,7 +321,7 @@ fn test_life_import_home_dry_run_jsonl_counts_stdb_rows() {
 #[test]
 fn test_app_help_exposes_boot_command_boundary() {
     let output = Command::new("cargo")
-        .args(&[
+        .args([
             "run",
             "-p",
             "heiwa-shell",
@@ -357,7 +357,7 @@ fn test_app_help_exposes_boot_command_boundary() {
 #[test]
 fn test_app_update_dry_run_defaults_to_github_release_source() {
     let output = Command::new("cargo")
-        .args(&[
+        .args([
             "run",
             "-p",
             "heiwa-shell",
@@ -400,7 +400,7 @@ fn test_app_update_dry_run_defaults_to_github_release_source() {
 #[test]
 fn test_app_update_checkout_source_reports_dev_reinstall_target() {
     let output = Command::new("cargo")
-        .args(&[
+        .args([
             "run",
             "-p",
             "heiwa-shell",
@@ -439,7 +439,7 @@ fn test_app_update_checkout_source_reports_dev_reinstall_target() {
 #[test]
 fn test_doctor_json_reports_runtimes_providers_and_app_probe() {
     let output = Command::new("cargo")
-        .args(&[
+        .args([
             "run",
             "-p",
             "heiwa-shell",
@@ -539,7 +539,7 @@ fn test_doctor_json_reports_runtimes_providers_and_app_probe() {
 #[test]
 fn test_app_runtime_status_json_reports_local_probe() {
     let output = Command::new("cargo")
-        .args(&[
+        .args([
             "run",
             "-p",
             "heiwa-shell",
@@ -597,7 +597,7 @@ fn test_app_runtime_status_json_reports_local_probe() {
 #[test]
 fn test_workers_heartbeat_dry_run_emits_local_envelope() {
     let output = Command::new("cargo")
-        .args(&[
+        .args([
             "run",
             "-p",
             "heiwa-shell",
@@ -642,7 +642,7 @@ fn test_workers_heartbeat_dry_run_emits_local_envelope() {
 #[test]
 fn test_workers_status_json_reports_registry_path() {
     let output = Command::new("cargo")
-        .args(&[
+        .args([
             "run",
             "-p",
             "heiwa-shell",
@@ -671,7 +671,7 @@ fn test_workers_status_json_reports_registry_path() {
 #[test]
 fn test_approvals_list_json_reports_dispatch_paths() {
     let output = Command::new("cargo")
-        .args(&[
+        .args([
             "run",
             "-p",
             "heiwa-shell",
@@ -724,7 +724,7 @@ fn test_approvals_list_json_reports_dispatch_v1_summary() {
 
     let output = Command::new("cargo")
         .env("HOME", temp.path())
-        .args(&[
+        .args([
             "run",
             "-p",
             "heiwa-shell",
@@ -756,7 +756,7 @@ fn test_approvals_list_json_reports_dispatch_v1_summary() {
 #[test]
 fn test_mail_status_json_enforces_metadata_only_policy() {
     let output = Command::new("cargo")
-        .args(&[
+        .args([
             "run",
             "-p",
             "heiwa-shell",
@@ -789,7 +789,7 @@ fn test_mail_status_json_enforces_metadata_only_policy() {
 #[test]
 fn test_capabilities_refresh_dry_run_reports_bounded_redacted_json() {
     let output = Command::new("cargo")
-        .args(&[
+        .args([
             "run",
             "-p",
             "heiwa-shell",
@@ -834,7 +834,7 @@ fn test_capabilities_refresh_dry_run_reports_bounded_redacted_json() {
 #[test]
 fn test_capabilities_status_json_reports_catalog_counts() {
     let output = Command::new("cargo")
-        .args(&[
+        .args([
             "run",
             "-p",
             "heiwa-shell",

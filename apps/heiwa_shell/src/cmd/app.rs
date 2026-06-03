@@ -730,7 +730,7 @@ fn scan_dispatch_ids(subdir: &str) -> HashSet<String> {
     let home = env::var("HOME")
         .map(PathBuf::from)
         .ok()
-        .or_else(|| dirs::home_dir())
+        .or_else(dirs::home_dir)
         .unwrap_or_else(|| PathBuf::from("."));
     let dir = home
         .join(".heiwa")

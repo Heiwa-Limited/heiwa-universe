@@ -12,6 +12,12 @@ use tokio::sync::mpsc;
 /// This adapter is for users who have Gemini CLI installed and authenticated.
 pub struct GeminiCliAdapter;
 
+impl Default for GeminiCliAdapter {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl GeminiCliAdapter {
     pub fn new() -> Self {
         Self

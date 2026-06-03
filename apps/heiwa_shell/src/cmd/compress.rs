@@ -390,7 +390,7 @@ pub(crate) fn receipts_dir() -> PathBuf {
     let home = std::env::var("HOME")
         .map(PathBuf::from)
         .ok()
-        .or_else(|| dirs::home_dir())
+        .or_else(dirs::home_dir)
         .unwrap_or_else(|| PathBuf::from("."));
     home.join(".heiwa")
         .join("state")

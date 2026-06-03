@@ -299,7 +299,7 @@ fn dispatch_ack_payload_round_trips() {
     };
     let encoded = serde_json::to_value(&payload).expect("serialize");
     let decoded: DispatchAckPayload = serde_json::from_value(encoded).expect("deserialize");
-    assert_eq!(decoded.accepted, true);
+    assert!(decoded.accepted);
 }
 
 #[test]

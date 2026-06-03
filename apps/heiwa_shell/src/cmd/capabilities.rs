@@ -707,7 +707,7 @@ mod tests {
         // Non-app entries must be ignored.
         fs::write(dir.join("note.txt"), "ignore me").unwrap();
 
-        let apps = scan_installed_apps(&[dir.clone()], &["Foo"]);
+        let apps = scan_installed_apps(std::slice::from_ref(&dir), &["Foo"]);
 
         assert!(
             apps.iter().any(|a| a.bundle_id == "com.example.foo"),

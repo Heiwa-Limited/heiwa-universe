@@ -12,6 +12,12 @@ use tokio::sync::mpsc;
 /// For ChatGPT-Plus subscription users authenticated via `codex login`.
 pub struct CodexCliAdapter;
 
+impl Default for CodexCliAdapter {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl CodexCliAdapter {
     pub fn new() -> Self {
         Self

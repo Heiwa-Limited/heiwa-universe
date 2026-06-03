@@ -15,6 +15,12 @@ pub struct OllamaCliAdapter {
     default_model: String,
 }
 
+impl Default for OllamaCliAdapter {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl OllamaCliAdapter {
     pub fn new() -> Self {
         Self {

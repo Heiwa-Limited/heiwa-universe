@@ -40,7 +40,7 @@ fn get_home_dir() -> PathBuf {
     std::env::var("HOME")
         .map(PathBuf::from)
         .ok()
-        .or_else(|| dirs::home_dir())
+        .or_else(dirs::home_dir)
         .unwrap_or_else(|| PathBuf::from("."))
 }
 

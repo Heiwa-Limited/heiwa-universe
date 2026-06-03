@@ -13,6 +13,12 @@ use tokio::sync::mpsc;
 /// This adapter is for subscription users who have Claude Code installed.
 pub struct ClaudeCodeCliAdapter;
 
+impl Default for ClaudeCodeCliAdapter {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl ClaudeCodeCliAdapter {
     pub fn new() -> Self {
         Self

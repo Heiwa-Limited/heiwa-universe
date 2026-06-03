@@ -20,6 +20,9 @@ fn leased_scope(root: PathBuf) -> ExecutionScope {
     scope
 }
 
+// ENV_MUTEX serializes tests that mutate global env vars; holding it across the
+// sleep().await is safe because each #[tokio::test] runs on its own runtime.
+#[allow(clippy::await_holding_lock)]
 #[tokio::test]
 async fn test_approval_gate_approve_flow() {
     let _lock = ENV_MUTEX.lock().unwrap();
@@ -112,6 +115,7 @@ async fn test_approval_gate_approve_flow() {
     assert!(transcript[0].output.contains("unknown tool: deploy"));
 }
 
+#[allow(clippy::await_holding_lock)]
 #[tokio::test]
 async fn test_approval_gate_deny_flow() {
     let _lock = ENV_MUTEX.lock().unwrap();
