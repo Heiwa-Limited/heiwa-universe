@@ -785,3 +785,81 @@ fn test_mail_status_json_enforces_metadata_only_policy() {
         "expected fields whitelist (account/mailbox/sender/subject/date/unread): {stdout}"
     );
 }
+
+#[test]
+fn test_capabilities_refresh_dry_run_reports_bounded_redacted_json() {
+    let output = Command::new("cargo")
+        .args(&[
+            "run",
+            "-p",
+            "heiwa-shell",
+            "--bin",
+            "heiwa",
+            "--",
+            "capabilities",
+            "refresh",
+            "--json",
+            "--dry-run",
+        ])
+        .output()
+        .expect("failed to execute capabilities refresh");
+
+    assert!(output.status.success());
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        stdout.contains("\"command\":\"capabilities refresh\""),
+        "expected capabilities refresh json marker: {stdout}"
+    );
+    assert!(
+        stdout.contains("\"dry_run\":true"),
+        "dry-run must be reported and write nothing: {stdout}"
+    );
+    assert!(
+        stdout.contains("\"redaction_applied\":true"),
+        "expected redaction guarantee: {stdout}"
+    );
+    assert!(
+        stdout.contains("\"counts\""),
+        "expected bounded counts (not raw catalog body): {stdout}"
+    );
+    // Redaction: credential paths and live token shapes must never surface.
+    for marker in ["auth.json", "ghp_", "Bearer ", "xoxb-", ".codex/auth"] {
+        assert!(
+            !stdout.contains(marker),
+            "sensitive marker {marker:?} leaked into refresh output: {stdout}"
+        );
+    }
+}
+
+#[test]
+fn test_capabilities_status_json_reports_catalog_counts() {
+    let output = Command::new("cargo")
+        .args(&[
+            "run",
+            "-p",
+            "heiwa-shell",
+            "--bin",
+            "heiwa",
+            "--",
+            "capabilities",
+            "status",
+            "--json",
+        ])
+        .output()
+        .expect("failed to execute capabilities status");
+
+    assert!(output.status.success());
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        stdout.contains("\"command\":\"capabilities status\""),
+        "expected capabilities status json marker: {stdout}"
+    );
+    assert!(
+        stdout.contains("\"path\":"),
+        "expected capabilities state path in status: {stdout}"
+    );
+    assert!(
+        stdout.contains("\"counts\""),
+        "expected bounded counts object in status: {stdout}"
+    );
+}

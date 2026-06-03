@@ -1270,6 +1270,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "heiwa-resource"
+version = "0.1.0"
+dependencies = [
+ "serde",
+]
+
+[[package]]
 name = "heiwa-session"
 version = "0.1.0"
 dependencies = [
@@ -1300,6 +1307,7 @@ dependencies = [
  "heiwa-protocol",
  "heiwa-provider",
  "heiwa-repl",
+ "heiwa-resource",
  "heiwa-session",
  "heiwa-stdb",
  "heiwa-tui",
@@ -1307,6 +1315,7 @@ dependencies = [
  "heiwa_mcp",
  "heiwa_quota",
  "hostname",
+ "libc",
  "serde",
  "serde_json",
  "sha1",

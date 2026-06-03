@@ -32,7 +32,7 @@ impl ProviderAdapter for CodexCliAdapter {
             .collect::<Vec<_>>()
             .join("\n");
 
-        let mut cmd = Command::new("codex");
+        let mut cmd = Command::new(crate::resolve_command_or_name("codex"));
         cmd.arg("exec")
             .arg("--json")
             .stdout(Stdio::piped())

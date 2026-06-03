@@ -1,7 +1,7 @@
 use serde::{Deserialize, Serialize};
 use std::env;
 use std::fs;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::Command;
 
 pub mod adapter;
@@ -264,11 +264,16 @@ pub fn login(provider_id: &str) -> anyhow::Result<()> {
     println!("Initiating real login for {}...", provider_id);
     match provider_id {
         "claude" => {
-            Command::new("claude").arg("auth").arg("login").status()?;
+            Command::new(resolve_command_or_name("claude"))
+                .arg("auth")
+                .arg("login")
+                .status()?;
             mark_provider_connected(provider_id)?;
         }
         "codex" => {
-            Command::new("codex").arg("login").status()?;
+            Command::new(resolve_command_or_name("codex"))
+                .arg("login")
+                .status()?;
             mark_provider_connected(provider_id)?;
         }
         "gemini" => {
@@ -291,11 +296,16 @@ pub fn logout(provider_id: &str) -> anyhow::Result<()> {
     println!("Logging out from {}...", provider_id);
     match provider_id {
         "claude" => {
-            Command::new("claude").arg("auth").arg("logout").status()?;
+            Command::new(resolve_command_or_name("claude"))
+                .arg("auth")
+                .arg("logout")
+                .status()?;
             clear_provider_connection(provider_id)?;
         }
         "codex" => {
-            Command::new("codex").arg("logout").status()?;
+            Command::new(resolve_command_or_name("codex"))
+                .arg("logout")
+                .status()?;
             clear_provider_connection(provider_id)?;
         }
         "gemini" | "antigravity" => {
@@ -312,12 +322,51 @@ pub fn logout(provider_id: &str) -> anyhow::Result<()> {
     Ok(())
 }
 
+fn provider_search_paths_for_home(home: &Path) -> Vec<PathBuf> {
+    vec![
+        home.join(".heiwa").join("bin"),
+        home.join(".local").join("bin"),
+        home.join(".npm-global").join("bin"),
+        home.join(".cargo").join("bin"),
+        PathBuf::from("/opt/homebrew/bin"),
+        PathBuf::from("/usr/local/bin"),
+        PathBuf::from("/usr/bin"),
+        PathBuf::from("/bin"),
+    ]
+}
+
+fn resolve_command_with_home_and_path(cmd: &str, home: &Path, path: &str) -> Option<PathBuf> {
+    let mut dirs = env::split_paths(path).collect::<Vec<_>>();
+    dirs.extend(provider_search_paths_for_home(home));
+    dirs.into_iter()
+        .map(|dir| dir.join(cmd))
+        .find(|candidate| candidate.is_file())
+}
+
+pub fn resolve_command(cmd: &str) -> Option<PathBuf> {
+    let home = env::var("HOME")
+        .or_else(|_| env::var("USERPROFILE"))
+        .map(PathBuf::from)
+        .unwrap_or_else(|_| PathBuf::from("."));
+    let path = env::var("PATH").unwrap_or_default();
+    resolve_command_with_home_and_path(cmd, &home, &path)
+}
+
+fn resolve_command_or_name_with_home_and_path(cmd: &str, home: &Path, path: &str) -> PathBuf {
+    resolve_command_with_home_and_path(cmd, home, path).unwrap_or_else(|| PathBuf::from(cmd))
+}
+
+pub fn resolve_command_or_name(cmd: &str) -> PathBuf {
+    let home = env::var("HOME")
+        .or_else(|_| env::var("USERPROFILE"))
+        .map(PathBuf::from)
+        .unwrap_or_else(|_| PathBuf::from("."));
+    let path = env::var("PATH").unwrap_or_default();
+    resolve_command_or_name_with_home_and_path(cmd, &home, &path)
+}
+
 fn has_command(cmd: &str) -> bool {
-    Command::new("which")
-        .arg(cmd)
-        .output()
-        .map(|output| output.status.success())
-        .unwrap_or(false)
+    resolve_command(cmd).is_some()
 }
 
 fn is_ollama_running() -> bool {
@@ -374,4 +423,46 @@ fn antigravity_has_native_auth() -> bool {
         .join("oauth_creds.json");
     let ag_initialized = PathBuf::from(&home).join(".antigravity").join("argv.json");
     gemini_oauth.exists() && ag_initialized.exists()
+}
+
+#[cfg(test)]
+mod command_resolution_tests {
+    use super::*;
+
+    #[test]
+    fn provider_search_paths_include_user_local_bins() {
+        let home = PathBuf::from("/Users/devon");
+        let paths = provider_search_paths_for_home(&home);
+
+        assert!(paths.contains(&home.join(".heiwa").join("bin")));
+        assert!(paths.contains(&home.join(".local").join("bin")));
+        assert!(paths.contains(&home.join(".npm-global").join("bin")));
+        assert!(paths.contains(&home.join(".cargo").join("bin")));
+    }
+
+    #[test]
+    fn resolve_command_prefers_path_then_known_user_bins() {
+        let temp = env::temp_dir().join(format!(
+            "heiwa-provider-command-resolution-{}",
+            std::process::id()
+        ));
+        let _ = fs::remove_dir_all(&temp);
+        let bin = temp.join(".npm-global").join("bin");
+        fs::create_dir_all(&bin).expect("create bin");
+        let exe = bin.join("codex");
+        fs::write(&exe, "#!/bin/sh\n").expect("write fake codex");
+
+        let resolved = resolve_command_with_home_and_path("codex", &temp, "");
+
+        assert_eq!(resolved.as_deref(), Some(exe.as_path()));
+        let _ = fs::remove_dir_all(temp);
+    }
+
+    #[test]
+    fn resolve_command_or_name_falls_back_to_command_name() {
+        let resolved =
+            resolve_command_or_name_with_home_and_path("missing-heiwa-cli", Path::new("/nope"), "");
+
+        assert_eq!(resolved, PathBuf::from("missing-heiwa-cli"));
+    }
 }

@@ -1,6 +1,7 @@
 use anyhow::{anyhow, Result};
 use base64::engine::general_purpose::STANDARD as BASE64;
 use base64::Engine;
+use heiwa_resource::{ResourcePolicy, ResourceSnapshot, ThermalPressure, WorkClass};
 use serde::Serialize;
 use serde_json::{json, Value};
 use sha1::{Digest, Sha1};
@@ -836,6 +837,7 @@ fn api_payload(path: &str, started_at: &str) -> Option<Value> {
             "notes": ["heiwa-shell local app runtime"],
         }),
         "/api/runtime/snapshot" | "/api/v1/runtime/snapshot" => snapshot(started_at),
+        "/api/v1/resource" => resource_payload(),
         "/api/v1/session" => json!({
             "operator_id": env::var("USER").unwrap_or_else(|_| "local-operator".to_string()),
             "hostname": hostname_string(),
@@ -866,6 +868,7 @@ fn api_payload(path: &str, started_at: &str) -> Option<Value> {
         "/api/v1/traces" => json!({ "traces": [] }),
         "/api/v1/memory" => json!({ "entries": [] }),
         "/api/v1/agents" => json!({ "agents": worker_agent_rows() }),
+        "/api/v1/capabilities" => capabilities_payload(),
         "/api/v1/crons" => json!({ "crons": [] }),
         "/api/v1/cells/catalog" => json!({ "cells": [] }),
         _ => return None,
@@ -889,7 +892,220 @@ fn snapshot(started_at: &str) -> Value {
         "mail": status.mail_summary,
         "hooks": status.hooks_summary,
         "providers": provider_rows(),
+        "resource": resource_payload(),
     })
+}
+
+fn resource_payload() -> Value {
+    let policy = ResourcePolicy::default();
+    let (free_memory_bytes, free_memory_source) = free_memory_bytes();
+    let (load_1m, load_source) = load_1m();
+    let snapshot = ResourceSnapshot {
+        cpu_count: std::thread::available_parallelism()
+            .map(|count| count.get() as u32)
+            .unwrap_or(1),
+        load_1m,
+        free_memory_bytes,
+        battery_percent: None,
+        on_battery: false,
+        thermal_pressure: ThermalPressure::Unknown,
+    };
+    let admissions = json!({
+        "foreground_interactive": policy.admit(&snapshot, WorkClass::ForegroundInteractive),
+        "background_watch": policy.admit(&snapshot, WorkClass::BackgroundWatch),
+        "local_summary": policy.admit(&snapshot, WorkClass::LocalSummary),
+        "local_model_small": policy.admit(&snapshot, WorkClass::LocalModelSmall),
+        "local_model_large": policy.admit(&snapshot, WorkClass::LocalModelLarge),
+        "provider_escalation": policy.admit(&snapshot, WorkClass::ProviderEscalation),
+    });
+
+    json!({
+        "snapshot": snapshot,
+        "policy": policy,
+        "admissions": admissions,
+        "sources": {
+            "cpu_count": "std::thread::available_parallelism",
+            "load_1m": load_source,
+            "free_memory_bytes": free_memory_source,
+            "battery_percent": "not_probed_v0",
+            "thermal_pressure": "unknown_v0",
+        },
+        "notes": [
+            "read_only_local_probe",
+            "resource policy gates local always-on work before provider routing"
+        ],
+    })
+}
+
+fn capabilities_payload() -> Value {
+    capabilities_payload_for_state_dir(&state_dir())
+}
+
+fn capabilities_payload_for_state_dir(state_dir: &Path) -> Value {
+    let capabilities_dir = state_dir.join("capabilities");
+    let mut catalogs = Vec::new();
+    let Ok(entries) = fs::read_dir(&capabilities_dir) else {
+        return json!({
+            "catalogs": [],
+            "latest": Value::Null,
+            "path": capabilities_dir.display().to_string(),
+        });
+    };
+
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if path.extension().and_then(|ext| ext.to_str()) != Some("json") {
+            continue;
+        }
+        let Ok(raw) = fs::read_to_string(&path) else {
+            continue;
+        };
+        let Ok(value) = serde_json::from_str::<Value>(&raw) else {
+            continue;
+        };
+        let catalog_id = path
+            .file_stem()
+            .and_then(|stem| stem.to_str())
+            .unwrap_or("capability-catalog")
+            .to_string();
+        catalogs.push(json!({
+            "catalog_id": catalog_id,
+            "path": path.display().to_string(),
+            "schema_version": value.get("schema_version").and_then(Value::as_str).unwrap_or("unknown"),
+            "generated_at": value.get("generated_at").and_then(Value::as_str),
+            "providers": value.get("providers").and_then(Value::as_array).map(Vec::len).unwrap_or(0),
+            "gemini_extensions": value.get("gemini_extensions").and_then(Value::as_array).map(Vec::len).unwrap_or(0),
+            "codex_plugins_observed": value.get("codex_plugins_observed").and_then(Value::as_array).map(Vec::len).unwrap_or(0),
+            "codex_mcp_servers": value.get("codex_mcp_servers").and_then(Value::as_array).map(Vec::len).unwrap_or(0),
+            "claude_plugins_observed": value.get("claude_plugins_observed").and_then(Value::as_array).map(Vec::len).unwrap_or(0),
+            "gemini_skills_observed": value.get("gemini_skills_observed").and_then(Value::as_array).map(Vec::len).unwrap_or(0),
+            "installed_apps_observed": value.get("installed_apps_observed").and_then(Value::as_array).map(Vec::len).unwrap_or(0),
+            "peer_handoff_findings": value.get("peer_handoff_findings").and_then(Value::as_array).map(Vec::len).unwrap_or(0),
+            "reference_sources": value.get("reference_sources").and_then(Value::as_array).map(Vec::len).unwrap_or(0),
+            "integration_families": value.get("integration_families").and_then(Value::as_array).map(Vec::len).unwrap_or(0),
+            "runtime_targets": value.get("runtime_targets").and_then(Value::as_array).map(Vec::len).unwrap_or(0),
+            "performance_targets": value.get("performance_targets").and_then(Value::as_array).map(Vec::len).unwrap_or(0),
+            "next_runtime_targets": value.get("next_runtime_targets").cloned().unwrap_or_else(|| json!([])),
+        }));
+    }
+
+    catalogs.sort_by(|a, b| {
+        let a_id = a.get("catalog_id").and_then(Value::as_str).unwrap_or("");
+        let b_id = b.get("catalog_id").and_then(Value::as_str).unwrap_or("");
+        b_id.cmp(a_id)
+    });
+    let latest = catalogs.first().cloned().unwrap_or(Value::Null);
+
+    json!({
+        "catalogs": catalogs,
+        "latest": latest,
+        "path": capabilities_dir.display().to_string(),
+    })
+}
+
+fn load_1m() -> (f32, &'static str) {
+    #[cfg(unix)]
+    {
+        let mut loads = [0.0_f64; 3];
+        let count = unsafe { libc::getloadavg(loads.as_mut_ptr(), 1) };
+        if count == 1 {
+            return (loads[0] as f32, "libc_getloadavg");
+        }
+    }
+    (0.0, "unavailable_default_zero")
+}
+
+fn free_memory_bytes() -> (u64, &'static str) {
+    if let Some(bytes) = linux_mem_available_bytes() {
+        return (bytes, "linux_proc_meminfo_memavailable");
+    }
+    if let Some(bytes) = macos_memory_pressure_available_bytes() {
+        return (bytes, "macos_memory_pressure_free_percentage");
+    }
+    if let Some(bytes) = macos_vm_stat_available_bytes() {
+        return (bytes, "macos_vm_stat_free_inactive_speculative");
+    }
+    (u64::MAX, "unavailable_assumed_unconstrained")
+}
+
+#[cfg(target_os = "linux")]
+fn linux_mem_available_bytes() -> Option<u64> {
+    let raw = fs::read_to_string("/proc/meminfo").ok()?;
+    raw.lines().find_map(|line| {
+        let rest = line.strip_prefix("MemAvailable:")?;
+        let kb = rest.split_whitespace().next()?.parse::<u64>().ok()?;
+        Some(kb * 1024)
+    })
+}
+
+#[cfg(not(target_os = "linux"))]
+fn linux_mem_available_bytes() -> Option<u64> {
+    None
+}
+
+#[cfg(target_os = "macos")]
+fn macos_memory_pressure_available_bytes() -> Option<u64> {
+    let output = Command::new("/usr/bin/memory_pressure").output().ok()?;
+    if !output.status.success() {
+        return None;
+    }
+    let raw = String::from_utf8_lossy(&output.stdout);
+    parse_macos_memory_pressure_available_bytes(&raw)
+}
+
+#[cfg(not(target_os = "macos"))]
+fn macos_memory_pressure_available_bytes() -> Option<u64> {
+    None
+}
+
+#[cfg(target_os = "macos")]
+fn parse_macos_memory_pressure_available_bytes(raw: &str) -> Option<u64> {
+    let total_bytes = raw.lines().find_map(|line| {
+        let rest = line.strip_prefix("The system has ")?;
+        rest.split_whitespace().next()?.parse::<u64>().ok()
+    })?;
+    let free_percent = raw.lines().find_map(|line| {
+        let rest = line.strip_prefix("System-wide memory free percentage: ")?;
+        rest.trim_end_matches('%').trim().parse::<u64>().ok()
+    })?;
+    Some(total_bytes.saturating_mul(free_percent) / 100)
+}
+
+#[cfg(target_os = "macos")]
+fn macos_vm_stat_available_bytes() -> Option<u64> {
+    let output = Command::new("/usr/bin/vm_stat").output().ok()?;
+    if !output.status.success() {
+        return None;
+    }
+    let raw = String::from_utf8_lossy(&output.stdout);
+    let page_size = parse_vm_stat_page_size(&raw)?;
+    let pages = parse_vm_stat_pages(&raw, "Pages free")
+        + parse_vm_stat_pages(&raw, "Pages inactive")
+        + parse_vm_stat_pages(&raw, "Pages speculative");
+    Some(pages * page_size)
+}
+
+#[cfg(not(target_os = "macos"))]
+fn macos_vm_stat_available_bytes() -> Option<u64> {
+    None
+}
+
+#[cfg(target_os = "macos")]
+fn parse_vm_stat_page_size(raw: &str) -> Option<u64> {
+    let marker = "page size of ";
+    let (_, rest) = raw.lines().next()?.split_once(marker)?;
+    let bytes = rest.split_whitespace().next()?.parse::<u64>().ok()?;
+    Some(bytes)
+}
+
+#[cfg(target_os = "macos")]
+fn parse_vm_stat_pages(raw: &str, label: &str) -> u64 {
+    raw.lines()
+        .find_map(|line| {
+            let rest = line.trim().strip_prefix(label)?.trim_start_matches(':').trim();
+            rest.trim_end_matches('.').replace('.', "").parse::<u64>().ok()
+        })
+        .unwrap_or(0)
 }
 
 fn provider_rows() -> Vec<Value> {
@@ -2204,5 +2420,148 @@ mod app_readmodel_tests {
             .and_then(|t| t.get("cumulative_ratio"))
             .is_some_and(Value::is_number));
         assert!(data.get("recent").is_some_and(Value::is_array));
+    }
+
+    #[test]
+    fn resource_api_payload_reports_snapshot_policy_and_admissions() {
+        let payload = api_payload("/api/v1/resource", "2026-06-02T00:00:00Z")
+            .expect("resource endpoint");
+        let data = payload.get("data").expect("data");
+
+        assert!(
+            data.get("snapshot")
+                .and_then(|snapshot| snapshot.get("cpu_count"))
+                .and_then(Value::as_u64)
+                .is_some_and(|count| count > 0),
+            "resource snapshot should include cpu_count: {payload}"
+        );
+        assert!(
+            data.get("policy")
+                .and_then(|policy| policy.get("hard_load_ratio"))
+                .and_then(Value::as_f64)
+                .is_some_and(|hard| hard > 0.0),
+            "resource policy should include load thresholds: {payload}"
+        );
+        assert!(
+            data.get("admissions")
+                .and_then(|admissions| admissions.get("local_model_large"))
+                .is_some(),
+            "resource admissions should include local_model_large: {payload}"
+        );
+    }
+
+    #[test]
+    fn runtime_snapshot_includes_resource_state() {
+        let payload =
+            api_payload("/api/v1/runtime/snapshot", "2026-06-02T00:00:00Z").expect("snapshot");
+        let data = payload.get("data").expect("data");
+
+        assert!(
+            data.get("resource").is_some(),
+            "runtime snapshot should include resource state: {payload}"
+        );
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn parses_macos_memory_pressure_free_percentage_as_available_bytes() {
+        let raw = "\
+The system has 25769803776 (1572864 pages with a page size of 16384).
+
+System-wide memory free percentage: 53%
+";
+
+        let bytes = parse_macos_memory_pressure_available_bytes(raw)
+            .expect("parse memory_pressure output");
+
+        assert_eq!(bytes, 13_657_996_001);
+    }
+
+    #[test]
+    fn capability_catalogs_read_sanitized_local_state() {
+        let state = temp_state_dir("capability-catalogs");
+        let dir = state.join("capabilities");
+        fs::create_dir_all(&dir).expect("create capabilities dir");
+        fs::write(
+            dir.join("local-capability-inventory-2026-06-03.json"),
+            json!({
+                "schema_version": "heiwa_local_capability_inventory_v1",
+                "providers": [
+                    {"provider": "gemini", "version": "0.38.2"}
+                ],
+                "codex_plugins_observed": ["Browser", "Chrome"],
+                "codex_mcp_servers": ["figma", "notion", "node_repl"],
+                "installed_apps_observed": ["Codex.app", "Claude.app", "Gemini.app"],
+                "reference_sources": ["official.openai.agents-sdk", "official.ollama.api"],
+                "integration_families": ["provider_apps", "mcp_servers", "local_models"],
+                "runtime_targets": ["rust", "typescript", "wasm"],
+                "performance_targets": ["microsecond_readmodel", "bounded_local_worker"],
+                "next_runtime_targets": ["api_v1_capabilities_read_model"]
+            })
+            .to_string(),
+        )
+        .expect("write capability catalog");
+
+        let payload = capabilities_payload_for_state_dir(&state);
+
+        let catalogs = payload
+            .get("catalogs")
+            .and_then(Value::as_array)
+            .expect("catalogs array");
+        assert_eq!(catalogs.len(), 1);
+        assert_eq!(
+            catalogs[0].get("catalog_id").and_then(Value::as_str),
+            Some("local-capability-inventory-2026-06-03")
+        );
+        assert_eq!(
+            catalogs[0]
+                .get("schema_version")
+                .and_then(Value::as_str),
+            Some("heiwa_local_capability_inventory_v1")
+        );
+        assert_eq!(
+            catalogs[0]
+                .get("codex_plugins_observed")
+                .and_then(Value::as_u64),
+            Some(2)
+        );
+        assert_eq!(
+            catalogs[0]
+                .get("codex_mcp_servers")
+                .and_then(Value::as_u64),
+            Some(3)
+        );
+        assert_eq!(
+            catalogs[0]
+                .get("installed_apps_observed")
+                .and_then(Value::as_u64),
+            Some(3)
+        );
+        assert_eq!(
+            catalogs[0]
+                .get("reference_sources")
+                .and_then(Value::as_u64),
+            Some(2)
+        );
+        assert_eq!(
+            catalogs[0]
+                .get("integration_families")
+                .and_then(Value::as_u64),
+            Some(3)
+        );
+        assert_eq!(
+            catalogs[0]
+                .get("runtime_targets")
+                .and_then(Value::as_u64),
+            Some(3)
+        );
+        assert_eq!(
+            catalogs[0]
+                .get("performance_targets")
+                .and_then(Value::as_u64),
+            Some(2)
+        );
+
+        let _ = fs::remove_dir_all(&state);
     }
 }

@@ -32,7 +32,7 @@ impl ProviderAdapter for GeminiCliAdapter {
             .collect::<Vec<_>>()
             .join("\n");
 
-        let mut cmd = Command::new("gemini");
+        let mut cmd = Command::new(crate::resolve_command_or_name("gemini"));
         cmd.arg("-p")
             .arg(&prompt)
             .arg("--output-format")

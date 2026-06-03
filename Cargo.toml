@@ -15,6 +15,7 @@ members = [
     "crates/heiwa_provider",
     "crates/heiwa_quota",
     "crates/heiwa_receipts",
+    "crates/heiwa_resource",
     "crates/heiwa_repl",
     "crates/heiwa_session",
     "crates/heiwa_stdb",

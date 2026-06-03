@@ -33,7 +33,7 @@ impl ProviderAdapter for ClaudeCodeCliAdapter {
             .collect::<Vec<_>>()
             .join("\n");
 
-        let mut cmd = Command::new("claude");
+        let mut cmd = Command::new(crate::resolve_command_or_name("claude"));
         cmd.arg("-p")
             .arg(&prompt)
             .arg("--output-format")

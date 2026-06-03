@@ -20,6 +20,10 @@ pub async fn try_handle(args: &[String]) -> Result<bool> {
             cmd::app::run(&args[2..]).await?;
             Ok(true)
         }
+        Some("capabilities") => {
+            cmd::capabilities::run(&args[2..])?;
+            Ok(true)
+        }
         Some("workers") => {
             cmd::workers::run(&args[2..])?;
             Ok(true)

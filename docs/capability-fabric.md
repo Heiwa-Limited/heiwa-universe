@@ -21,6 +21,7 @@ Every useful thing Heiwa can do is materialized as one of these resources:
 | Agents | provider agents, local loops, computer-use workers, review workers | worker lease with role, authority, budget, and evidence stream |
 | Policies | approvals, data boundaries, budgets, retention, org rules | reducer/policy record enforced before execution |
 | Evidence | receipts, transcripts, artifacts, diffs, screenshots, logs | append-only run evidence with source and verifier |
+| References | official docs, OSS repos, SDKs, specs, examples, model cards | source pack with authority, license, freshness, risk, and promotion path |
 
 The user gives one intent. Heiwa turns it into capability-aware work.
 
@@ -55,6 +56,40 @@ Required files or equivalent declarations:
 
 No connector is product-grade until it can authenticate, list real resources,
 execute at least one bounded useful action, record evidence, and revoke access.
+
+## Source Pack Contract
+
+Heiwa must be able to learn from official sources and OSS repositories without
+turning every reference into a privileged integration. A source pack is read-only
+Intake/Evidence material until promoted.
+
+Required source-pack fields:
+
+| Field | Purpose |
+| --- | --- |
+| source id | stable name such as `official.openai.agents-sdk.tools` |
+| authority | official, official OSS, community OSS, internal, or user-private |
+| source locator | URL, GitHub repo, local mirror path, package name, or docs index |
+| ingest mode | web snapshot, Git mirror, package metadata, local file, or manual note |
+| license / terms | public license, docs terms, unknown, or private-use-only |
+| freshness | fetched timestamp, version, release tag, commit SHA, or stale marker |
+| capability map | which tools, schemas, APIs, models, or examples it teaches Heiwa |
+| risk tier | T0 reference, T1 draft helper, T2 staged tool, T3 external side effect |
+| evidence ref | receipt, source URL, file path, commit, or checksum proving the ingest |
+
+Promotion path:
+
+1. **Reference pack** — readable docs/code/examples only.
+2. **Capability manifest** — extracted capabilities with schemas and risk
+   labels, still not executable.
+3. **Adapter or connector** — code can read/list resources under policy.
+4. **Tool lease** — execution allowed only through scoped leases and approvals.
+5. **Product-grade integration** — auth, revocation, tests, receipts, and
+   rollback/undo posture are proven.
+
+This applies equally to OpenAI, Anthropic, Google, Ollama, GitHub, Rust, Python,
+TypeScript, SpacetimeDB, WebAssembly, and future OSS/SOTA runtimes. The source
+pack may be broad; the executable integration must stay narrow.
 
 ## First Connector Lanes
 
@@ -131,6 +166,30 @@ connectors and leases, not ambient access.
 - Each connector must have a manifest and tests before public claims.
 - Each external dependency must justify itself with concrete user value.
 - Generated code is acceptable only when reproducible from a source schema.
+- Reference packs may be mirrored under ignored `repos/` or local Heiwa state,
+  but runtime APIs expose only redacted manifests, counts, source refs, and
+  evidence pointers by default.
+- OSS repo code is never executable just because it was indexed. It becomes
+  executable only after a connector/tool manifest defines its trust boundary.
+
+## Runtime Modularity Targets
+
+Heiwa should decompose capability execution by runtime fit:
+
+| Runtime target | Heiwa role |
+| --- | --- |
+| Rust authority layer | local API, leases, provider supervision, resource admission, fast read models |
+| TypeScript client contracts | Heiwa.app, typed cockpit clients, connector setup UX, generated bindings |
+| Shell bootstrap glue | install, update, doctor, provider CLI resolution, operator probes |
+| Python compatibility workers | document/R&D tasks and existing Python package compatibility when isolated |
+| SpacetimeDB reducers/clients | deterministic sync, subscriptions, evidence, type-safe cross-device state |
+| WebAssembly plugin sandbox | portable low-level modules with embedder-controlled imports |
+| Ollama/local model lane | cheap private inference, embeddings, summaries, local classification |
+| Provider-owned agent runtimes | Codex, Claude Code, Gemini CLI, Antigravity, and future peers as delegated workers |
+
+The performance target is not "everything in microseconds." Cached local read
+models and routing metadata should be microsecond-class. Network, model, GUI, and
+provider work should be asynchronous, leased, observable, and resource-gated.
 
 ## Value Gate
 

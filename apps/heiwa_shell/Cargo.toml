@@ -28,6 +28,7 @@ heiwa-session = { path = "../../crates/heiwa_session" }
 heiwa-repl = { path = "../../crates/heiwa_repl" }
 heiwa-provider = { path = "../../crates/heiwa_provider" }
 heiwa_quota = { path = "../../crates/heiwa_quota" }
+heiwa-resource = { path = "../../crates/heiwa_resource" }
 heiwa-install = { path = "../../crates/heiwa_install" }
 heiwa-loop = { path = "../../crates/heiwa_loop" }
 heiwa-stdb = { path = "../../crates/heiwa_stdb" }
@@ -38,6 +39,7 @@ heiwa_drex = { path = "../../crates/heiwa_drex" }
 uuid = { version = "1.0", features = ["v4"] }
 hostname = "0.4"
 dirs = "5.0"
+libc = "0.2"
 tokio = { version = "1.50.0", features = ["full"] }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
@@ -47,4 +49,3 @@ tiktoken-rs = "0.6"
 
 [dev-dependencies]
 tempfile = "3"
-
