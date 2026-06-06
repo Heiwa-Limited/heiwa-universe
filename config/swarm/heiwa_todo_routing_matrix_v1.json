@@ -1,0 +1,310 @@
+{
+  "schema_version": 1,
+  "name": "heiwa_todo_routing_matrix",
+  "generated_at": "2026-06-06",
+  "status": "operator_private",
+  "doctrine": {
+    "product": "local-first governed operator runtime",
+    "moat": [
+      "DREX routing and policy",
+      "approval-gated execution",
+      "hash-chained receipts and source-linked evidence",
+      "provider-peer routing across local and provider-owned runtimes",
+      "SpacetimeDB as company backend and evidence sync plane"
+    ],
+    "routing_rule": "Repo/runtime truth is authority. Agent assignment only chooses first-pass worker."
+  },
+  "agents": {
+    "claude": {
+      "fit": "architecture, policy, schema, product tradeoffs, adversarial review",
+      "risk": "can over-design or treat design as decision without repo proof"
+    },
+    "codex": {
+      "fit": "implementation, tests, CLI/runtime work, exact verification",
+      "risk": "can miss broad context if task needs long synthesis"
+    },
+    "gemini": {
+      "fit": "long-context sweeps, broad source refresh, UI and multimodal review",
+      "risk": "not the first choice for tight repo edits"
+    },
+    "antigravity": {
+      "fit": "long background jobs, soak tests, queueable async checks",
+      "risk": "must prove provider availability before routing blockers there"
+    },
+    "local": {
+      "fit": "naming, tagging, classification, summarization, cheap offline draft iteration",
+      "risk": "not sufficient for high-stakes external facts, deep repo edits, or nuanced architecture decisions"
+    }
+  },
+  "review_findings": [
+    "Claude drafts decisions; repo/runtime truth and verification decide.",
+    "Local/Ollama should be used for cheap classification, tagging, summarization, and offline iteration.",
+    "Antigravity is availability-gated before blockers route there.",
+    "Privacy/DPA output is scaffold only until legal review.",
+    "STDB remains company backend; SQLite remains local/internal app ops where useful."
+  ],
+  "proof_gates": [
+    "E3",
+    "E9",
+    "E10"
+  ],
+  "items": [
+    {
+      "id": "H1",
+      "priority": 2,
+      "plane": "evidence",
+      "title": "Release/install truth",
+      "primary_agent": "codex",
+      "secondary_agent": "claude",
+      "acceptance": "Public/private-alpha install state is exact; release/checksum path proven or explicitly blocked."
+    },
+    {
+      "id": "H2",
+      "priority": 3,
+      "plane": "intake",
+      "title": "App/runtime API truth",
+      "primary_agent": "codex",
+      "secondary_agent": "gemini",
+      "acceptance": "/api/v1 routes return typed JSON or explicit 404; no SPA fallback on API miss."
+    },
+    {
+      "id": "H3",
+      "priority": 4,
+      "plane": "evidence",
+      "title": "Remove Devon-only leakage from product views",
+      "primary_agent": "codex",
+      "secondary_agent": "gemini",
+      "acceptance": "Inbox/history expose portable SourceRef and ReceiptRef records, not old local archive paths."
+    },
+    {
+      "id": "H4",
+      "priority": 7,
+      "plane": "execution",
+      "title": "One full loop with approvals and receipt",
+      "primary_agent": "codex",
+      "secondary_agent": "claude",
+      "acceptance": "Ask -> classify -> route -> execute or stage -> receipt -> app display works end to end."
+    },
+    {
+      "id": "H5",
+      "priority": 8,
+      "plane": "execution",
+      "title": "Approval surfaces",
+      "primary_agent": "codex",
+      "secondary_agent": "claude",
+      "acceptance": "Risky action packet can be approved or denied from CLI and app with receipt."
+    },
+    {
+      "id": "H6",
+      "priority": 10,
+      "plane": "intake",
+      "title": "Native-feeling Heiwa.app wrapper",
+      "primary_agent": "codex",
+      "secondary_agent": "gemini",
+      "acceptance": "macOS local app launches runtime and cockpit over same state."
+    },
+    {
+      "id": "H7",
+      "priority": 11,
+      "plane": "intake",
+      "title": "Desktop basics",
+      "primary_agent": "codex",
+      "secondary_agent": "gemini",
+      "acceptance": "Chat, provider setup, live activity, artifact preview, settings, and diagnostics are visible."
+    },
+    {
+      "id": "H8",
+      "priority": 12,
+      "plane": "evidence",
+      "title": "Durable memory/read model",
+      "primary_agent": "codex",
+      "secondary_agent": "claude",
+      "acceptance": "Readable local records include source spans, freshness, and safe export."
+    },
+    {
+      "id": "H9",
+      "priority": 19,
+      "plane": "evidence",
+      "title": "Skill/procedure loop",
+      "primary_agent": "claude",
+      "secondary_agent": "codex",
+      "acceptance": "Completed work can propose a reviewed evidence-backed procedure."
+    },
+    {
+      "id": "H10",
+      "priority": 20,
+      "plane": "execution",
+      "title": "Scheduler",
+      "primary_agent": "codex",
+      "secondary_agent": "claude",
+      "acceptance": "Scheduled job runs under policy and emits receipt."
+    },
+    {
+      "id": "H11",
+      "priority": 15,
+      "plane": "intake",
+      "title": "First product-grade connector",
+      "primary_agent": "codex",
+      "secondary_agent": "claude",
+      "acceptance": "Connector has auth, list, bounded action, revoke, tests, and receipts."
+    },
+    {
+      "id": "H12",
+      "priority": 16,
+      "plane": "intake",
+      "title": "First gateway intake",
+      "primary_agent": "codex",
+      "secondary_agent": "gemini",
+      "acceptance": "One external channel normalizes into InboxItem; outbound is staged draft."
+    },
+    {
+      "id": "H13",
+      "priority": 17,
+      "plane": "execution",
+      "title": "Model cookbook-lite",
+      "primary_agent": "codex",
+      "secondary_agent": "gemini",
+      "acceptance": "Hardware and model probe recommends and verifies local model routes."
+    },
+    {
+      "id": "H14",
+      "priority": 18,
+      "plane": "evidence",
+      "title": "Compare/research minimum",
+      "primary_agent": "codex",
+      "secondary_agent": "gemini",
+      "acceptance": "Model compare or research flow produces source-linked report."
+    },
+    {
+      "id": "H15",
+      "priority": 21,
+      "plane": "execution",
+      "title": "MCP/tool catalog",
+      "primary_agent": "codex",
+      "secondary_agent": "claude",
+      "acceptance": "Tool manifests define scopes, trust class, leases, and tests."
+    },
+    {
+      "id": "H16",
+      "priority": 22,
+      "plane": "execution",
+      "title": "Sandboxed computer use",
+      "primary_agent": "codex",
+      "secondary_agent": "gemini",
+      "acceptance": "Browser/file/computer actions carry screenshot or action trace and approval gates."
+    },
+    {
+      "id": "H17",
+      "priority": 23,
+      "plane": "evidence",
+      "title": "Billing/entitlement",
+      "primary_agent": "claude",
+      "secondary_agent": "codex",
+      "acceptance": "Local entitlement readout and STDB mirror path exist without browser-secret leakage."
+    },
+    {
+      "id": "H18",
+      "priority": 27,
+      "plane": "evidence",
+      "title": "Multi-device/team groundwork",
+      "primary_agent": "claude",
+      "secondary_agent": "codex",
+      "acceptance": "Shared evidence and approval schema has local-first boundary and migration plan."
+    },
+    {
+      "id": "E1",
+      "priority": 1,
+      "plane": "evidence",
+      "title": "Pre-public-push hygiene gate",
+      "primary_agent": "codex",
+      "secondary_agent": "gemini",
+      "acceptance": "Tracked-tree secret scan, public-surface audit, and release sandbox proof are captured."
+    },
+    {
+      "id": "E2",
+      "priority": 4,
+      "plane": "evidence",
+      "title": "Runtime observability",
+      "primary_agent": "codex",
+      "secondary_agent": "claude",
+      "acceptance": "Runtime status includes workers, providers, app, hooks, receipts, STDB, and update channel."
+    },
+    {
+      "id": "E3",
+      "priority": 5,
+      "plane": "execution",
+      "title": "DREX eval harness",
+      "primary_agent": "codex",
+      "secondary_agent": "claude",
+      "acceptance": "Golden evals prove intent, risk, and route decisions and fail on regressions."
+    },
+    {
+      "id": "E4",
+      "priority": 13,
+      "plane": "evidence",
+      "title": "STDB schema versioning",
+      "primary_agent": "claude",
+      "secondary_agent": "codex",
+      "acceptance": "Reducer/table versions, migration notes, and generated binding compatibility gate exist."
+    },
+    {
+      "id": "E5",
+      "priority": 14,
+      "plane": "evidence",
+      "title": "Backup/restore plus Maincloud sync",
+      "primary_agent": "codex",
+      "secondary_agent": "claude",
+      "acceptance": "Local restore drill and STDB narrow-sync receipt proof pass."
+    },
+    {
+      "id": "E6",
+      "priority": 24,
+      "plane": "evidence",
+      "title": "Update channels",
+      "primary_agent": "codex",
+      "secondary_agent": "claude",
+      "acceptance": "Stable/beta/dev channel semantics and rollback proof exist."
+    },
+    {
+      "id": "E7",
+      "priority": 25,
+      "plane": "evidence",
+      "title": "Privacy/DPA scaffold",
+      "primary_agent": "claude",
+      "secondary_agent": "gemini",
+      "acceptance": "Public-safe privacy boundary, DPA draft, data inventory, and provider ownership map exist."
+    },
+    {
+      "id": "E8",
+      "priority": 26,
+      "plane": "intake",
+      "title": "Telemetry consent UX",
+      "primary_agent": "gemini",
+      "secondary_agent": "codex",
+      "acceptance": "Opt-in/off UI plus local-only default and evidence of no hidden home-call."
+    },
+    {
+      "id": "E9",
+      "priority": 9,
+      "plane": "evidence",
+      "title": "Receipt schema/read ergonomics",
+      "primary_agent": "codex",
+      "secondary_agent": "claude",
+      "acceptance": "Receipts are queryable by run, source, provider, approval, artifact, and chain status."
+    },
+    {
+      "id": "E10",
+      "priority": 6,
+      "plane": "execution",
+      "title": "Provider-peer routing harness",
+      "primary_agent": "codex",
+      "secondary_agent": "gemini",
+      "acceptance": "Tests cover provider down, quota low, local-only, cost-first, and model unavailable cases."
+    }
+  ],
+  "immediate_slice": [
+    "E3",
+    "E9",
+    "E10"
+  ]
+}
