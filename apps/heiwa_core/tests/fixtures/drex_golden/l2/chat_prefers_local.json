@@ -1,0 +1,22 @@
+{
+  "schema_version": 1,
+  "layer": "l2_route",
+  "id": "chat_prefers_local",
+  "description": "Cost-first: cheap chat prefers a local model even when cloud is available and runtime is not pinned local.",
+  "status": "active",
+  "registry": "default",
+  "ingress": {
+    "intent": "chat",
+    "risk": "low",
+    "privacy": "standard",
+    "runtime": "cloud",
+    "available_vram_mb": 18000,
+    "required_context_tokens": 1000,
+    "raw_text": "what's a good name for this feature"
+  },
+  "expect": {
+    "outcome": "routed",
+    "provider_is_local": true,
+    "mode": "local_model"
+  }
+}

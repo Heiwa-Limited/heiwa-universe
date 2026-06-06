@@ -1,0 +1,9 @@
+{
+  "schema_version": 1,
+  "layer": "l1_classify",
+  "id": "intent_audit_from_review",
+  "description": "Inspection/review work classifies as audit (whole-word 'review').",
+  "status": "active",
+  "input": { "prompt": "review the connector manifest for problems" },
+  "expect": { "intent": "audit" }
+}

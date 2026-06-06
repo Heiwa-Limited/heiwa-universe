@@ -1,0 +1,9 @@
+{
+  "schema_version": 1,
+  "layer": "l1_classify",
+  "id": "intent_strategy_from_roadmap",
+  "description": "High-level planning classifies as strategy (wins over research for 'roadmap'/'priority').",
+  "status": "active",
+  "input": { "prompt": "what should our enterprise roadmap priority be" },
+  "expect": { "intent": "strategy" }
+}

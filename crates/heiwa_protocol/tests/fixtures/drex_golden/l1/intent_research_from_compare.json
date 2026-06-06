@@ -1,0 +1,9 @@
+{
+  "schema_version": 1,
+  "layer": "l1_classify",
+  "id": "intent_research_from_compare",
+  "description": "Exploration/comparison classifies as research.",
+  "status": "active",
+  "input": { "prompt": "compare our approach to competitor runtimes" },
+  "expect": { "intent": "research" }
+}

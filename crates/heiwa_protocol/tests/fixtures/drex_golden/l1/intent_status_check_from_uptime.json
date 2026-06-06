@@ -1,0 +1,9 @@
+{
+  "schema_version": 1,
+  "layer": "l1_classify",
+  "id": "intent_status_check_from_uptime",
+  "description": "System-health queries classify as status_check (wins over audit).",
+  "status": "active",
+  "input": { "prompt": "show the runtime status and uptime" },
+  "expect": { "intent": "status_check" }
+}

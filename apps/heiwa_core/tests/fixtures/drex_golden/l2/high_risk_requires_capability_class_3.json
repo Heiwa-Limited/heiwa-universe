@@ -1,0 +1,21 @@
+{
+  "schema_version": 1,
+  "layer": "l2_route",
+  "id": "high_risk_requires_capability_class_3",
+  "description": "Risk gate: high-risk work must route to a capability-class-3 model (router min_capability_class).",
+  "status": "active",
+  "registry": "default",
+  "ingress": {
+    "intent": "build",
+    "risk": "high",
+    "privacy": "standard",
+    "runtime": "cloud",
+    "available_vram_mb": 0,
+    "required_context_tokens": 2000,
+    "raw_text": "patch the auth token refresh path"
+  },
+  "expect": {
+    "outcome": "routed",
+    "min_capability_class": 3
+  }
+}

@@ -1,0 +1,21 @@
+{
+  "schema_version": 1,
+  "layer": "l2_route",
+  "id": "empty_registry_errors",
+  "description": "Fallback exhaustion: no models available routes to an error, never a silent default.",
+  "status": "active",
+  "registry": "empty",
+  "ingress": {
+    "intent": "chat",
+    "risk": "low",
+    "privacy": "standard",
+    "runtime": "cloud",
+    "available_vram_mb": 0,
+    "required_context_tokens": 1000,
+    "raw_text": "hello there, what can you do"
+  },
+  "expect": {
+    "outcome": "error",
+    "error_contains": "no compatible model tier"
+  }
+}
