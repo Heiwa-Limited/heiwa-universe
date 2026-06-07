@@ -1,7 +1,7 @@
 # Heiwa Desktop Skeleton (S0) — Design
 
 **Date:** 2026-06-06
-**Status:** Approved design — pre-implementation
+**Status:** Revision candidate — user review required before implementation plan
 **Scope:** Foundation slice (S0) of the Heiwa Desktop App. Shell + runtime
 bridge + navigation only. Verticals (Chat, Calendar, Trading, Agents,
 Dashboard contents) are later slices, each with its own spec.
@@ -25,16 +25,26 @@ the mid-quality cockpit code.
 - Porting cockpit code/components.
 - Packaging/installer work that replaces the HOME-local launcher bundle.
 - Auth/login UI.
+- Choosing or building a new Python background server.
+- New memory, context, or dashboard storage mechanics.
+- Direct app-to-SQLite or app-to-SpacetimeDB writes from the renderer.
 - Any backend/runtime changes (e.g. a trading endpoint). The skeleton consumes
   the contract as-is.
 
 ## Context
 
-### Canon (already decided — not re-litigated here)
+### Canon vs decision point
 
-- **Stack:** Tauri 2 + Solid + Vite. *"Tauri 2 is Heiwa's chosen app foundation
-  because it fits Rust + Solid/Vite + local runtime authority."* (`HEIWA.md:579`,
-  `AGENTS.md:179`). Do not cite OpenHuman as proof — it uses vendored Tauri/CEF.
+- **Canonical app foundation:** Tauri 2 remains the native wrapper direction:
+  it fits Rust runtime authority and can host the same local client contract
+  without moving control into a hosted dashboard. Do not cite OpenHuman as
+  proof — it uses vendored Tauri/CEF.
+- **Renderer choice is not canonical:** the current cockpit is Solid/Vite, and
+  `HEIWA.md` currently names that pairing, but this spec must not treat
+  Solid/Vite as settled if Devon wants to revisit the desktop/dashboard stack.
+  Tauri is frontend-agnostic enough that S0 can use Solid/Vite, vanilla
+  TypeScript, Svelte, React, Leptos/Yew, or another renderer. The implementation
+  plan must lock one deliberately.
 - **Runtime authority:** `Heiwa.app` is the display/input shell over the runtime;
   the native wrapper replaces today's launcher bundle *"without changing runtime
   authority"* (`HEIWA.md:140`, installed at `~/.heiwa/app/Heiwa.app`).
@@ -53,7 +63,7 @@ Read endpoints today (`apps/heiwa_shell/src/cmd/app.rs`):
 | `GET /api/v1/resource` | Dashboard → model scorecard (machine resources) |
 | `GET /api/v1/providers` | Dashboard → 3rd-party accounts |
 | `GET /api/v1/routes`, `/rate-groups`, `/capabilities` | Dashboard → DREX routing |
-| `GET /api/v1/memory` | Dashboard → memory access |
+| `GET /api/v1/memory` | Dashboard → memory access (currently empty read model) |
 | `GET /api/v1/agents`, `/approvals`, `/approvals/summary`, `/missions` | Agents & sandboxes |
 | `GET /api/v1/life/today`, `/life/freshness` | Calendar / Today |
 | `GET /api/v1/goals`, `/history`, `/traces`, `/hooks`, `/crons`, `/inbox`, `/session`, `/compress/summary`, `/cells/catalog` | various |
@@ -75,20 +85,32 @@ apps/heiwa_app/desktop/
     src/proxy.rs        # api_get / api_post commands -> :7474; health
     tauri.conf.json     # window, dev/prod frontend URLs, minimal capabilities
     Cargo.toml
-  src/                  # Solid + Vite frontend
-    main.tsx
-    app.tsx             # nav shell (two tiers) + header status canary
+  src/                  # renderer client (choice locked before implementation)
+    main.ts(x)
+    app.ts(x)           # nav shell (two tiers) + header status canary
     lib/runtime.ts      # typed client over the proxy commands
     lib/types.ts        # types for consumed payloads (hand-written for S0)
     views/
       Chat.tsx Calendar.tsx Trading.tsx Agents.tsx
       Dashboard.tsx     # placeholder tier entry
-  index.html, package.json, vite.config.ts, tsconfig.json
+  index.html, package.json, frontend config, tsconfig.json
 ```
 
 Tauri 2 is cross-platform, so this retires the empty per-platform
 `clients/{macos,windows}` dirs for desktop purposes (left in place for now;
 removal is a later cleanup, not S0).
+
+Renderer options before implementation:
+
+1. **Tauri + existing Solid/Vite client** — fastest path because the cockpit
+   already uses Solid/Vite + TypeScript. This is the recommended S0 if the goal
+   is only to prove the native shell/runtime bridge now. It does not decide the
+   background server or memory architecture.
+2. **Tauri + vanilla TypeScript** — smallest dependency surface and keeps S0
+   honest as a shell/canary, but gives up reusable cockpit components.
+3. **Tauri + Rust/WASM renderer (Leptos/Yew/Sycamore)** — maximizes Rust sharing,
+   but is heavier and riskier for S0. It should be chosen only if the desktop UI
+   needs Rust-first rendering now, not just because the backend is Rust.
 
 ### 2. Runtime bridge — Rust proxy
 
@@ -108,7 +130,50 @@ two commands. Runtime authority stays in the runtime; the app is pure display.
 Port override: read `HEIWA_APP_PORT` env (fallback `7474`) so the proxy tracks a
 non-default runtime port.
 
-### 3. Information architecture (two tiers)
+### 3. On-device state and queryable memory
+
+S0 must keep a single write authority:
+
+```
+CLI or app input -> heiwa runtime API -> Rust services/read models
+                 -> local state / SQLite stores / optional STDB reducers
+```
+
+The app must not mutate the local memory store, receipts DB, provider config, or
+SpacetimeDB directly. The CLI and desktop app should call the same runtime
+commands/endpoints so programmatic usage and in-app changes converge on one
+state machine.
+
+Current local storage truth:
+
+- `~/.heiwa/state/` holds local runtime read models, worker heartbeats, dispatch
+  requests/results, events, capabilities, approvals, and similar operational
+  state.
+- SQLite is already a valid local read/write store where it has a bounded
+  runtime role: receipts use `~/.heiwa/receipts.db`, quota uses local SQLite,
+  and sessions keep transcript JSON plus an FTS-backed `sessions.sqlite3` index.
+- `/api/v1/memory` exists but currently returns an empty read model. A real
+  Memory/Dashboard slice needs its own spec for local memory tables, FTS/vector
+  indices, sensitivity labels, source refs, retention, and STDB mirror headers.
+
+Target storage shape for future memory/context work:
+
+- **Rust + SQLite locally:** fast local read models, FTS, embedding refs, receipt
+  lookup, source refs, and redacted context selection live under `~/.heiwa/`.
+- **Rust + SpacetimeDB online:** canonical reducer-governed sync/adjudication for
+  sessions, leases, runs, artifacts, failures, policy, and evidence when
+  configured.
+- **Python workers:** allowed as isolated compatibility/R&D workers or promoted
+  product modules, but they should read/write through Heiwa runtime APIs or a
+  declared worker store. Python should not become the hidden desktop server or
+  privileged memory owner by default.
+- **WASM:** STDB publish/build flows can use compiled WASM modules, and reducers
+  may execute in fresh WASM/JS module instances on the database side. Future
+  local WASM plugin sandboxes can run deterministic modules inside the Rust
+  runtime. Those are related portability tools, not the same thing as putting
+  the desktop app's memory database in the WebView.
+
+### 4. Information architecture (two tiers)
 
 Nav shell with a persistent sidebar:
 
@@ -120,7 +185,7 @@ Nav shell with a persistent sidebar:
 Each view is a placeholder that names its backing endpoint(s) as an on-screen
 TODO, so the IA and wiring contract are visible without implementing verticals.
 
-### 4. Data flow
+### 5. Data flow
 
 ```
 view -> lib/runtime.ts (typed) -> tauri.invoke("api_get", {path})
@@ -128,7 +193,7 @@ view -> lib/runtime.ts (typed) -> tauri.invoke("api_get", {path})
      -> typed -> render
 ```
 
-### 5. Error handling
+### 6. Error handling
 
 `ApiError::Offline` (runtime not reachable) → shell header renders an "offline"
 state; views render an empty/offline placeholder rather than throwing. No retry
@@ -152,6 +217,9 @@ test.
 - **Recipe:** `just desktop-check` runs typecheck + `cargo test` for `src-tauri`.
 - **Manual:** `just desktop-dev` (→ `tauri dev`) shows the window with live
   runtime status against a running `heiwa app start`.
+- **Storage guard:** S0 tests assert the renderer only calls Tauri proxy/runtime
+  helpers. It must not open SQLite, STDB, provider config, or local state files
+  directly.
 
 ## Build / dev workflow
 
@@ -162,19 +230,26 @@ Add to `Justfile`:
 
 ## Future verticals (forward context — out of S0)
 
-Each becomes its own slice/spec, plugging into the established client:
+Each becomes its own slice/spec, plugging into the established client and adding
+runtime read models/endpoints where they do not already exist:
 Chat (`/api/v1/repl` + WS), Calendar (`/life/*`), Agents (`/agents`,
 `/approvals`, `/missions`), Dashboard contents (`/providers`, `/resource`,
 `/routes`, `/rate-groups`, `/capabilities`, `/memory`), Trading (needs a new
-endpoint). The skeleton's value is that these need UI + types only.
+endpoint). The skeleton's value is that these do not need a new desktop bridge.
 
 ## Open questions / risks
 
 - **Tauri 2 toolchain** must be installed (`cargo install tauri-cli` / `@tauri-apps/cli`).
   Verify before implementation; document in the plan.
+- **Renderer choice** must be confirmed before implementation. Default
+  recommendation is Solid/Vite only if Devon accepts reusing the current cockpit
+  stack for S0.
 - **Snapshot payload shape** for the canary types must be confirmed against
   `runtime/snapshot` output during implementation (hand-write `types.ts` from the
   real payload).
+- **Memory/Dashboard expectations** must stay scoped. `/api/v1/memory` is an
+  empty read model today, so S0 can show only runtime status plus placeholders
+  unless a separate memory read-model slice is approved.
 - **Per-platform client dirs** (`clients/macos`, `clients/windows`) cleanup is
   deferred.
 
