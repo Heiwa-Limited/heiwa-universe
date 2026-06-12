@@ -3,6 +3,7 @@ members = [
     "apps/heiwa_core",
     "apps/heiwa_orchestrator",
     "apps/heiwa_shell",
+    "apps/heiwa_app/desktop/src-tauri",
     "crates/heiwa_a2a",
     "crates/heiwa_config",
     "crates/heiwa_drex",

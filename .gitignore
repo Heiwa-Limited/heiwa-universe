@@ -134,6 +134,14 @@ oauth_creds.json
 # Standalone apps (live outside monorepo)
 apps/heiwa_dj/
 
+# Heiwa desktop package (repo source). Overrides user-global `Desktop/` ignore.
+!apps/heiwa_app/desktop/
+!apps/heiwa_app/desktop/**
+apps/heiwa_app/desktop/node_modules/
+apps/heiwa_app/desktop/dist/
+apps/heiwa_app/desktop/src-tauri/gen/
+apps/heiwa_app/desktop/src-tauri/target/
+
 # Windows/WSL artifacts
 **/D:\\cache\\cargo/
 **/*.bak
