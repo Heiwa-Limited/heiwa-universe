@@ -18,6 +18,7 @@ pub fn run(args: &[String]) -> Result<()> {
             Ok(())
         }
         Some("scan") => scan(&args[1..]),
+        Some("triage") => triage(&args[1..]),
         Some("--help") | Some("-h") => {
             print_help();
             Ok(())
@@ -604,6 +605,321 @@ fn write_scan_receipt(sources: &[Value], fetched: usize, appended: usize) -> Res
     Ok(receipt_id)
 }
 
+// ---------------------------------------------------------------------------
+// Triage: summaries + suggested actions, reply drafts staged behind approvals
+// ---------------------------------------------------------------------------
+
+/// `heiwa mail triage` — turn the priority read model into suggestions the
+/// user can act on. Draft-tier rows get a suggested reply (local Ollama,
+/// deterministic template fallback) staged as a pending approval in the same
+/// dispatch lane the schedule command uses. Delete/archive is suggested but
+/// never staged: no write bridge exists (Gmail scope is read-only, Apple
+/// bridge is metadata-only), and pretending otherwise would be theater.
+fn triage(args: &[String]) -> Result<()> {
+    let dry_run = has_flag(args, "--dry-run");
+    let json_output = has_flag(args, "--json");
+    let no_draft = has_flag(args, "--no-draft");
+    let limit = flag_value(args, "--limit")
+        .and_then(|raw| raw.parse::<usize>().ok())
+        .unwrap_or(PRIORITY_LIMIT)
+        .clamp(1, 50);
+
+    let rows = priority_rows();
+    if rows.is_empty() {
+        println!("mail triage: snapshot is empty — run `heiwa mail scan` first");
+        return Ok(());
+    }
+
+    let mut items: Vec<Value> = Vec::new();
+    let mut staged = 0usize;
+    let mut skipped_existing = 0usize;
+
+    for row in rows.iter().take(limit) {
+        let action = row.get("action").and_then(Value::as_str).unwrap_or("digest");
+        let suggestion = suggested_action(row);
+        let mut item = json!({
+            "message": row,
+            "summary": message_summary(row),
+            "suggestion": suggestion,
+        });
+
+        if action == "draft" {
+            let request_id = triage_request_id(row);
+            let already = crate::cmd::approvals::requests_dir().join(format!("{request_id}.json")).exists()
+                || crate::cmd::approvals::decisions_dir().join(format!("{request_id}.json")).exists();
+            if already {
+                skipped_existing += 1;
+                item["staged"] = json!({"request_id": request_id, "status": "already_staged"});
+            } else {
+                let (draft, draft_source) = if no_draft {
+                    (template_draft(row), "template".to_string())
+                } else {
+                    generate_draft(row)
+                };
+                let request = build_triage_request(&request_id, row, &draft, &draft_source);
+                if dry_run {
+                    item["staged"] = json!({
+                        "request_id": request_id,
+                        "status": "dry_run",
+                        "request": request,
+                    });
+                } else {
+                    let dir = crate::cmd::approvals::requests_dir();
+                    std::fs::create_dir_all(&dir)?;
+                    std::fs::write(
+                        dir.join(format!("{request_id}.json")),
+                        serde_json::to_string_pretty(&request)?,
+                    )?;
+                    staged += 1;
+                    item["staged"] = json!({"request_id": request_id, "status": "pending"});
+                }
+            }
+        }
+        items.push(item);
+    }
+
+    let payload = json!({
+        "command": "mail triage",
+        "policy": POLICY,
+        "dry_run": dry_run,
+        "items": items,
+        "counts": {
+            "reviewed": items.len(),
+            "staged": staged,
+            "already_staged": skipped_existing,
+        },
+        "next": "heiwa approvals list — decide staged reply drafts",
+    });
+    if json_output {
+        println!("{payload}");
+        return Ok(());
+    }
+    println!("mail triage ({} messages)", items.len());
+    for item in &items {
+        let msg = &item["message"];
+        let sender = msg.get("sender").and_then(Value::as_str).unwrap_or("?");
+        let subject = msg.get("subject").and_then(Value::as_str).unwrap_or("?");
+        let action = item["suggestion"]["action"].as_str().unwrap_or("?");
+        println!("  [{action}] {sender} — {subject}");
+        if let Some(reason) = item["suggestion"]["reason"].as_str() {
+            println!("        {reason}");
+        }
+        if let Some(staged_info) = item.get("staged") {
+            println!(
+                "        approval: {} ({})",
+                staged_info["request_id"].as_str().unwrap_or("?"),
+                staged_info["status"].as_str().unwrap_or("?")
+            );
+        }
+    }
+    if staged > 0 {
+        println!("  staged {staged} reply draft(s): heiwa approvals list");
+    }
+    Ok(())
+}
+
+/// One-line metadata-only summary. Honest about what we know: bodies are
+/// never read, so the summary is sender + subject + age, not content.
+fn message_summary(row: &Value) -> String {
+    let sender = row.get("sender").and_then(Value::as_str).unwrap_or("?");
+    let subject = row.get("subject").and_then(Value::as_str).unwrap_or("?");
+    let date = row
+        .get("date")
+        .and_then(Value::as_str)
+        .map(|d| &d[..d.len().min(10)])
+        .unwrap_or("?");
+    let unread = if row.get("unread").and_then(Value::as_bool).unwrap_or(false) {
+        "unread"
+    } else {
+        "read"
+    };
+    format!("{sender}: \"{subject}\" ({date}, {unread})")
+}
+
+fn suggested_action(row: &Value) -> Value {
+    let action = row.get("action").and_then(Value::as_str).unwrap_or("digest");
+    let score = row.get("score").and_then(Value::as_i64).unwrap_or(0);
+    match action {
+        "draft" => json!({
+            "action": "reply",
+            "reason": "high priority — reply draft staged for approval",
+        }),
+        "report" => json!({
+            "action": "review",
+            "reason": "worth a look; no action staged",
+        }),
+        _ if score < 0 => json!({
+            "action": "delete",
+            "reason": "bulk sender — suggest delete/archive (not staged: no write bridge; Gmail scope is read-only, Apple bridge is metadata-only)",
+        }),
+        _ => json!({
+            "action": "digest",
+            "reason": "low priority — leave for the daily digest",
+        }),
+    }
+}
+
+/// Deterministic request id per message so repeated triage runs never
+/// duplicate pending approvals.
+pub(crate) fn triage_request_id(row: &Value) -> String {
+    use sha1::{Digest, Sha1};
+    let key = snapshot_dedupe_key(row);
+    let digest = Sha1::digest(key.as_bytes());
+    let hex: String = digest.iter().map(|b| format!("{b:02x}")).collect();
+    format!("req_mail_{}", &hex[..12])
+}
+
+fn build_triage_request(request_id: &str, row: &Value, draft: &str, draft_source: &str) -> Value {
+    json!({
+        "schema_version": "operator_dispatch_request_v1",
+        "request_id": request_id,
+        "created_at": chrono::Utc::now().to_rfc3339(),
+        "action": "mail-reply-draft",
+        "target_surface": "mail",
+        "target_scope": snapshot_dedupe_key(row),
+        "requested_mode": "draft",
+        "intent": {
+            "message": row,
+            "draft": draft,
+            "draft_source": draft_source,
+            "policy": POLICY,
+            "note": "draft-never-send: approval stages the draft to the local outbox; sending stays manual until a send scope exists",
+        },
+        "source": "heiwa mail triage",
+    })
+}
+
+/// Suggested reply text. Tries local Ollama first (metadata only — the
+/// prompt carries sender + subject, never a body, and never leaves the
+/// machine); falls back to a deterministic template when Ollama is down.
+fn generate_draft(row: &Value) -> (String, String) {
+    let base = std::env::var("HEIWA_OLLAMA_BASE")
+        .unwrap_or_else(|_| "http://localhost:11434".to_string());
+    let model =
+        std::env::var("HEIWA_OLLAMA_MODEL").unwrap_or_else(|_| "gemma4:latest".to_string());
+    let sender = row.get("sender").and_then(Value::as_str).unwrap_or("");
+    let subject = row.get("subject").and_then(Value::as_str).unwrap_or("");
+    let prompt = format!(
+        "Draft a short email reply (2-3 sentences) on behalf of Devon. \
+         You only know the metadata — sender: {sender}, subject: \"{subject}\" — \
+         the body was not read for privacy reasons. Acknowledge the email and \
+         promise a fuller response where appropriate. Plain text only, no \
+         subject line, no placeholders. Sign as Devon."
+    );
+    let body = json!({"model": model, "prompt": prompt, "stream": false});
+    let output = std::process::Command::new("curl")
+        .args(["-s", "-m", "45", "-X", "POST"])
+        .arg(format!("{base}/api/generate"))
+        .arg("-d")
+        .arg(body.to_string())
+        .output();
+    if let Ok(output) = output {
+        if output.status.success() {
+            if let Ok(parsed) = serde_json::from_slice::<Value>(&output.stdout) {
+                if let Some(text) = parsed.get("response").and_then(Value::as_str) {
+                    let text = text.trim();
+                    if !text.is_empty() {
+                        return (text.to_string(), format!("ollama:{model}"));
+                    }
+                }
+            }
+        }
+    }
+    (template_draft(row), "template".to_string())
+}
+
+pub(crate) fn template_draft(row: &Value) -> String {
+    let subject = row.get("subject").and_then(Value::as_str).unwrap_or("your email");
+    format!(
+        "Hi — thanks for your note about \"{subject}\". I've seen it and will \
+         follow up with a proper reply shortly. — Devon"
+    )
+}
+
+// ---------------------------------------------------------------------------
+// Approval effects: outbox staging + dismissal receipts
+// ---------------------------------------------------------------------------
+
+fn outbox_dir() -> PathBuf {
+    headers_snapshot_path()
+        .parent()
+        .map(|p| p.join("outbox"))
+        .unwrap_or_else(|| PathBuf::from("."))
+}
+
+fn mail_receipts_dir() -> PathBuf {
+    headers_snapshot_path()
+        .parent()
+        .map(|p| p.join("receipts"))
+        .unwrap_or_else(|| PathBuf::from("."))
+}
+
+/// Approve effect for a mail-reply-draft request: materialize the draft in
+/// the local outbox (manual send) and record a receipt. Never sends.
+pub(crate) fn stage_outbox_draft(request_id: &str, intent: &Value) -> Result<Value> {
+    let message = intent.get("message").cloned().unwrap_or_else(|| json!({}));
+    let draft = intent
+        .get("draft")
+        .and_then(Value::as_str)
+        .ok_or_else(|| anyhow!("request {request_id} has no draft text"))?;
+    let subject = message.get("subject").and_then(Value::as_str).unwrap_or("");
+    let entry = json!({
+        "id": request_id,
+        "to": message.get("sender"),
+        "subject": format!("Re: {subject}"),
+        "body": draft,
+        "draft_source": intent.get("draft_source"),
+        "status": "ready_for_manual_send",
+        "staged_at": chrono::Utc::now().to_rfc3339(),
+        "approved_by_decision": request_id,
+        "external_writes": [],
+    });
+    let dir = outbox_dir();
+    std::fs::create_dir_all(&dir)?;
+    std::fs::write(
+        dir.join(format!("{request_id}.json")),
+        serde_json::to_string_pretty(&entry)?,
+    )?;
+
+    let receipt = json!({
+        "receipt_id": format!("rcpt-{request_id}-outbox"),
+        "kind": "mail_reply_draft_staged",
+        "request_id": request_id,
+        "to": message.get("sender"),
+        "subject": entry["subject"],
+        "created_at": chrono::Utc::now().to_rfc3339(),
+        "external_writes": [],
+    });
+    let receipts = mail_receipts_dir();
+    std::fs::create_dir_all(&receipts)?;
+    std::fs::write(
+        receipts.join(format!("rcpt-{request_id}-outbox.json")),
+        receipt.to_string(),
+    )?;
+    Ok(entry)
+}
+
+/// Deny effect: record that the suggestion was dismissed so triage never
+/// re-stages it (the decision file already blocks re-staging; the receipt
+/// makes the dismissal visible in the evidence lane).
+pub(crate) fn dismiss_suggestion(request_id: &str, target_scope: &str) -> Result<()> {
+    let receipt = json!({
+        "receipt_id": format!("rcpt-{request_id}-dismissed"),
+        "kind": "mail_suggestion_dismissed",
+        "request_id": request_id,
+        "message_key": target_scope,
+        "created_at": chrono::Utc::now().to_rfc3339(),
+        "external_writes": [],
+    });
+    let receipts = mail_receipts_dir();
+    std::fs::create_dir_all(&receipts)?;
+    std::fs::write(
+        receipts.join(format!("rcpt-{request_id}-dismissed.json")),
+        receipt.to_string(),
+    )?;
+    Ok(())
+}
+
 fn flag_value(args: &[String], flag: &str) -> Option<String> {
     let idx = args.iter().position(|arg| arg == flag)?;
     args.get(idx + 1).cloned()
@@ -782,10 +1098,13 @@ fn print_help() {
     println!("  heiwa mail accounts [--json]");
     println!("  heiwa mail summary");
     println!("  heiwa mail scan [--source apple|gmail|all] [--limit N] [--dry-run] [--json]");
+    println!("  heiwa mail triage [--limit N] [--no-draft] [--dry-run] [--json]");
     println!();
     println!("Policy: {POLICY}.");
     println!("Scan writes metadata rows to ~/.heiwa/state/mail/headers.jsonl with a receipt;");
-    println!("message bodies are never read.");
+    println!("message bodies are never read. Triage stages reply drafts (local Ollama or");
+    println!("template) as pending approvals; approve moves the draft to the local outbox —");
+    println!("nothing is ever sent automatically.");
 }
 
 #[cfg(test)]
@@ -870,6 +1189,55 @@ mod tests {
             "newest rows are kept"
         );
         assert!(!raw.contains("\"subject 0\""), "oldest rows are dropped");
+    }
+
+    #[test]
+    fn triage_request_id_is_deterministic_per_message() {
+        let row = json!({
+            "account": "a", "sender": "s@example.com", "subject": "Invoice", "date": "2026-06-12",
+        });
+        let id1 = triage_request_id(&row);
+        let id2 = triage_request_id(&row);
+        assert_eq!(id1, id2);
+        assert!(id1.starts_with("req_mail_"));
+        let other = json!({
+            "account": "a", "sender": "s@example.com", "subject": "Other", "date": "2026-06-12",
+        });
+        assert_ne!(id1, triage_request_id(&other));
+    }
+
+    #[test]
+    fn template_draft_mentions_subject() {
+        let row = json!({"subject": "Invoice follow-up"});
+        let draft = template_draft(&row);
+        assert!(draft.contains("Invoice follow-up"));
+        assert!(draft.contains("Devon"));
+    }
+
+    #[test]
+    fn triage_request_shape_matches_dispatch_v1() {
+        let row = json!({
+            "account": "a", "mailbox": "INBOX", "sender": "vendor@example.com",
+            "subject": "Invoice overdue", "date": "2026-06-11", "unread": true,
+            "score": 5, "action": "draft",
+        });
+        let req = build_triage_request("req_mail_abc", &row, "draft text", "template");
+        assert_eq!(req["schema_version"], "operator_dispatch_request_v1");
+        assert_eq!(req["action"], "mail-reply-draft");
+        assert_eq!(req["target_surface"], "mail");
+        assert_eq!(req["requested_mode"], "draft");
+        assert_eq!(req["intent"]["draft"], "draft text");
+        let summary = crate::cmd::approvals::approval_request_summary(&req);
+        assert_eq!(summary["action"], "mail-reply-draft");
+        assert_eq!(summary["risk"], "draft");
+    }
+
+    #[test]
+    fn bulk_sender_suggestion_is_delete_and_honest_about_no_bridge() {
+        let row = json!({"sender": "noreply@x.com", "subject": "w", "score": -2, "action": "digest"});
+        let suggestion = suggested_action(&row);
+        assert_eq!(suggestion["action"], "delete");
+        assert!(suggestion["reason"].as_str().unwrap().contains("not staged"));
     }
 
     #[test]

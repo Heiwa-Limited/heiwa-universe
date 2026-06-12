@@ -197,6 +197,23 @@ fn compute_effects(id: &str, approve: bool) -> Result<Value> {
                 "kind": "hold_drop",
             }));
         }
+        ("mail", message_key, true) if !message_key.is_empty() => {
+            effects.push(json!({
+                "surface": "mail",
+                "target": message_key,
+                "change": "reply draft -> local outbox (manual send; nothing is sent)",
+                "kind": "mail_outbox_stage",
+                "intent": request.get("intent").cloned().unwrap_or(Value::Null),
+            }));
+        }
+        ("mail", message_key, false) if !message_key.is_empty() => {
+            effects.push(json!({
+                "surface": "mail",
+                "target": message_key,
+                "change": "suggestion dismissed (dismissal receipt)",
+                "kind": "mail_suggestion_dismiss",
+            }));
+        }
         _ => {}
     }
     Ok(json!(effects))
@@ -223,6 +240,25 @@ fn apply_effects(id: &str, plan: &Value, approve: bool) -> Result<Value> {
                 applied.push(json!({
                     "kind": "hold_drop",
                     "summary": format!("{} dropped (was draft)", target),
+                }));
+            }
+            ("mail_outbox_stage", true) => {
+                let intent = effect.get("intent").cloned().unwrap_or(Value::Null);
+                let entry = crate::cmd::mail::stage_outbox_draft(id, &intent)?;
+                applied.push(json!({
+                    "kind": "mail_outbox_stage",
+                    "summary": format!(
+                        "reply draft staged to outbox for {} (manual send)",
+                        entry.get("to").and_then(Value::as_str).unwrap_or("?")
+                    ),
+                    "outbox_entry": entry,
+                }));
+            }
+            ("mail_suggestion_dismiss", false) => {
+                crate::cmd::mail::dismiss_suggestion(id, target)?;
+                applied.push(json!({
+                    "kind": "mail_suggestion_dismiss",
+                    "summary": format!("suggestion for {} dismissed", target),
                 }));
             }
             _ => {}
@@ -347,11 +383,11 @@ fn dispatch_dir() -> PathBuf {
     home.join(".heiwa").join("state").join("dispatch")
 }
 
-fn requests_dir() -> PathBuf {
+pub(crate) fn requests_dir() -> PathBuf {
     dispatch_dir().join("requests")
 }
 
-fn decisions_dir() -> PathBuf {
+pub(crate) fn decisions_dir() -> PathBuf {
     dispatch_dir().join("approvals").join("decisions")
 }
 

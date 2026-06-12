@@ -194,3 +194,21 @@ Evidence: 7 Python tests + 7 Rust unit tests + 3 integration tests pass; hand-ru
 
 - The `external_promotion: "approval_required"` field on confirmed holds is a future placeholder for the Google/Apple write-back lane (per the cockpit's `lanes` block in `calendar::summary_payload`). When that lane lands, the field becomes meaningful; right now it's documentation. **Should the next commit set `external_promotion` to a more specific value like `"approved_no_external_write"` on confirm, or keep it as `"approval_required"` until the write-back lane exists?**
 - The drop-on-deny path is destructive (deletes the hold file). For confirmed holds we route through `update_hold_status(.., "cancelled", ..)` instead. **Should there be a confirmation step ("deny will drop the draft hold; continue?") or is the dry-run preview enough?**
+
+
+## Commit 3 — EXECUTED 2026-06-12
+
+`heiwa mail triage`: metadata-only summaries + suggested actions over the
+priority read model. Draft-tier messages get a suggested reply (local Ollama
+gemma4, deterministic template fallback — prompt carries sender+subject only,
+never a body, never leaves the machine) staged as `mail-reply-draft` approvals
+with deterministic per-message request ids (idempotent re-runs; denied
+suggestions never re-stage). approve -> draft lands in
+`~/.heiwa/state/mail/outbox/` as `ready_for_manual_send` + receipt; deny ->
+dismissal receipt. Delete/archive is *suggested* for bulk senders but never
+staged — no write bridge exists (Gmail scope is read-only, Apple bridge is
+metadata-only) and pretending otherwise would be theater.
+
+Real-machine blocker surfaced: no mail source is actually connected on this
+Mac (Apple Mail unconfigured, Gmail connector `needs_auth`). Unblock with:
+`heiwa connect gmail --client-secret <path>` then `--authorize` (user step).
