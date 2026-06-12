@@ -212,3 +212,16 @@ metadata-only) and pretending otherwise would be theater.
 Real-machine blocker surfaced: no mail source is actually connected on this
 Mac (Apple Mail unconfigured, Gmail connector `needs_auth`). Unblock with:
 `heiwa connect gmail --client-secret <path>` then `--authorize` (user step).
+
+
+## Commit 4 — EXECUTED 2026-06-12
+
+Mail draft generation now asks the same DREX + quota router the REPL uses
+(`route_task_with_quota`) instead of hardcoding a model. Only local routes are
+accepted for mail (metadata is personal; sovereign stays local-first) — remote
+winners are declined and the default local model is used. Successful
+generations feed real token usage back into the quota ledger
+(`record_local_quota_run` -> `~/.heiwa/state.db` quota_state + run_history),
+so "auto" routing's budget view includes background mail work, not just REPL
+turns. Verified in sandbox: draft_source `ollama:gemma4:latest (drex-routed)`,
+ledger row `mail-triage-* | ollama | 100 in / 279 out | SUCCESS`.

@@ -789,14 +789,45 @@ fn build_triage_request(request_id: &str, row: &Value, draft: &str, draft_source
     })
 }
 
+/// Ask the same DREX + quota router the REPL uses for a model choice.
+/// Mail metadata is personal, so only local routes are accepted — a remote
+/// winner is declined and we fall back to the default local model. Returns
+/// None when routing is unavailable (empty tiers, route error).
+fn route_for_draft() -> Option<crate::RouteResult> {
+    let registry = heiwa_provider::AccountRegistry::load();
+    let tiers = crate::get_live_model_tiers(&registry);
+    if tiers.is_empty() {
+        return None;
+    }
+    let ledger = crate::open_default_quota_ledger();
+    let pins = crate::SessionPins::new();
+    let now = chrono::Utc::now().timestamp();
+    match crate::route_task_with_quota(
+        "draft a short personal email reply from mail metadata",
+        &pins,
+        &tiers,
+        ledger.as_ref(),
+        now,
+    ) {
+        Ok(crate::RouteOutcome::Routed(route)) if route.provider == "ollama" => Some(route),
+        _ => None,
+    }
+}
+
 /// Suggested reply text. Tries local Ollama first (metadata only — the
 /// prompt carries sender + subject, never a body, and never leaves the
 /// machine); falls back to a deterministic template when Ollama is down.
+/// Model choice comes from the quota-aware DREX route when available, and
+/// successful generations are recorded in the quota ledger so "auto"
+/// routing sees real local usage.
 fn generate_draft(row: &Value) -> (String, String) {
     let base = std::env::var("HEIWA_OLLAMA_BASE")
         .unwrap_or_else(|_| "http://localhost:11434".to_string());
-    let model =
-        std::env::var("HEIWA_OLLAMA_MODEL").unwrap_or_else(|_| "gemma4:latest".to_string());
+    let route = route_for_draft();
+    let model = std::env::var("HEIWA_OLLAMA_MODEL")
+        .ok()
+        .or_else(|| route.as_ref().map(|r| r.provider_model_id.clone()))
+        .unwrap_or_else(|| "gemma4:latest".to_string());
     let sender = row.get("sender").and_then(Value::as_str).unwrap_or("");
     let subject = row.get("subject").and_then(Value::as_str).unwrap_or("");
     let prompt = format!(
@@ -819,13 +850,52 @@ fn generate_draft(row: &Value) -> (String, String) {
                 if let Some(text) = parsed.get("response").and_then(Value::as_str) {
                     let text = text.trim();
                     if !text.is_empty() {
-                        return (text.to_string(), format!("ollama:{model}"));
+                        let source = match &route {
+                            Some(route) => {
+                                record_draft_usage(route, &parsed);
+                                format!("ollama:{model} (drex-routed)")
+                            }
+                            None => format!("ollama:{model}"),
+                        };
+                        return (text.to_string(), source);
                     }
                 }
             }
         }
     }
     (template_draft(row), "template".to_string())
+}
+
+/// Feed real local usage back into the quota ledger so the auto router's
+/// budget view reflects mail-triage generations like any REPL turn.
+fn record_draft_usage(route: &crate::RouteResult, ollama_response: &Value) {
+    let Some(ledger) = crate::open_default_quota_ledger() else {
+        return;
+    };
+    let count = |key: &str| {
+        ollama_response
+            .get(key)
+            .and_then(Value::as_u64)
+            .unwrap_or(0) as u32
+    };
+    let usage = heiwa_provider::adapter::TokenUsage {
+        input_tokens: count("prompt_eval_count"),
+        output_tokens: count("eval_count"),
+        cache_read_tokens: 0,
+        cache_write_tokens: 0,
+        cost_usd: 0.0,
+    };
+    let run_id = format!(
+        "mail-triage-{}",
+        &uuid::Uuid::new_v4().simple().to_string()[..8]
+    );
+    let _ = crate::record_local_quota_run(
+        &ledger,
+        &run_id,
+        route,
+        Some(&usage),
+        chrono::Utc::now().timestamp(),
+    );
 }
 
 pub(crate) fn template_draft(row: &Value) -> String {
