@@ -3,7 +3,10 @@ import type {
   Agent,
   Approval,
   ApprovalsSummary,
+  CalendarHold,
+  CalendarSummary,
   CellsCatalogEntry,
+  ConnectorsSummary,
   Cron,
   Envelope,
   FreshnessReport,
@@ -12,11 +15,14 @@ import type {
   HookProvider,
   HookSummary,
   InboxItem,
+  MailSummary,
   MemoryEntry,
   Mission,
   ProviderLive,
   RateGroup,
+  ResourceSnapshotPayload,
   Route,
+  RoutePreview,
   Session,
   TodaySnapshot,
   Trace,
@@ -54,6 +60,29 @@ export const v1 = {
     unwrap(api.get<Envelope<TodaySnapshot>>("/api/v1/life/today")),
   lifeFreshness: () =>
     unwrap(api.get<Envelope<FreshnessReport>>("/api/v1/life/freshness")),
+  calendarSummary: () =>
+    unwrap(api.get<Envelope<CalendarSummary>>("/api/v1/calendar/summary")),
+  createHold: (hold: {
+    title: string;
+    date?: string | undefined;
+    start?: string | undefined;
+    end?: string | undefined;
+    kind?: string | undefined;
+    note?: string | undefined;
+  }) =>
+    unwrap(
+      api.post<Envelope<{ hold: CalendarHold }>>("/api/v1/calendar/holds", hold),
+    ),
+  mailSummary: () =>
+    unwrap(api.get<Envelope<MailSummary>>("/api/v1/mail/summary")),
+  connectors: () =>
+    unwrap(api.get<Envelope<ConnectorsSummary>>("/api/v1/connectors")),
+  routePreview: (prompt: string) =>
+    unwrap(
+      api.post<Envelope<RoutePreview>>("/api/v1/route/preview", { prompt }),
+    ),
+  resource: () =>
+    unwrap(api.get<Envelope<ResourceSnapshotPayload>>("/api/v1/resource")),
   inbox: () =>
     unwrap(
       api.get<Envelope<{ items: InboxItem[]; cursor: string | null }>>(

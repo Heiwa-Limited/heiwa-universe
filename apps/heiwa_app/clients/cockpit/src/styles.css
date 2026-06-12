@@ -1985,3 +1985,56 @@ body {
   opacity: 0.45;
   cursor: not-allowed;
 }
+
+/* --- Life surfaces: holds form, route preview, connector groups --- */
+
+.hold-form {
+  margin-top: 14px;
+  display: grid;
+  gap: 8px;
+}
+
+.hold-form-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+}
+
+.hold-form-row input,
+.hold-form-row select {
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid rgba(164, 197, 255, 0.22);
+  border-radius: 8px;
+  color: #f5ead8;
+  font-family: inherit;
+  font-size: 0.92rem;
+  padding: 8px 10px;
+  outline: none;
+}
+
+.hold-form-row input[type="text"] {
+  flex: 1 1 220px;
+  min-width: 180px;
+}
+
+.hold-form-row input:focus,
+.hold-form-row select:focus {
+  border-color: var(--border-glow);
+}
+
+.hold-form-row select option {
+  color: #08183a;
+}
+
+.route-preview-result {
+  margin-top: 12px;
+  display: grid;
+  gap: 10px;
+}
+
+.connector-group {
+  margin-top: 18px;
+  display: grid;
+  gap: 10px;
+}

@@ -812,6 +812,80 @@ async fn handle_connection(mut stream: TcpStream, started_at: Arc<String>) -> Re
         .await;
     }
 
+    if method == "POST" && path == "/api/v1/repl/stream" {
+        let parsed_body: Value = serde_json::from_str(&body).unwrap_or_else(|_| json!({}));
+        let prompt = parsed_body
+            .get("prompt")
+            .and_then(Value::as_str)
+            .unwrap_or("")
+            .to_string();
+        if prompt.trim().is_empty() {
+            return write_response(
+                &mut stream,
+                400,
+                "application/json",
+                json!({"ok": false, "error": {"code": "empty_prompt"}})
+                    .to_string()
+                    .into_bytes(),
+                false,
+            )
+            .await;
+        }
+        return serve_repl_stream(stream, prompt).await;
+    }
+
+    if method == "POST" && path == "/api/v1/calendar/holds" {
+        let parsed_body: Value = serde_json::from_str(&body).unwrap_or_else(|_| json!({}));
+        let (status, payload) = match crate::cmd::calendar::create_hold(&parsed_body) {
+            Ok(hold) => (201, json!({"ok": true, "data": {"hold": hold}})),
+            Err(error) => (
+                400,
+                json!({"ok": false, "error": {"code": "invalid_hold", "message": error.to_string()}}),
+            ),
+        };
+        return write_response(
+            &mut stream,
+            status,
+            "application/json",
+            payload.to_string().into_bytes(),
+            false,
+        )
+        .await;
+    }
+
+    if method == "POST" && path == "/api/v1/route/preview" {
+        let parsed_body: Value = serde_json::from_str(&body).unwrap_or_else(|_| json!({}));
+        let prompt = parsed_body
+            .get("prompt")
+            .and_then(Value::as_str)
+            .unwrap_or("")
+            .trim()
+            .to_string();
+        if prompt.is_empty() {
+            return write_response(
+                &mut stream,
+                400,
+                "application/json",
+                json!({"ok": false, "error": {"code": "empty_prompt"}})
+                    .to_string()
+                    .into_bytes(),
+                false,
+            )
+            .await;
+        }
+        let payload = crate::preview_route_payload(&prompt).await;
+        return write_response(
+            &mut stream,
+            200,
+            "application/json",
+            json!({"ok": true, "data": payload})
+                .to_string()
+                .into_bytes(),
+            false,
+        )
+        .await;
+    }
+
     if method != "GET" && !head_only {
         return write_response(
             &mut stream,
@@ -1123,6 +1197,48 @@ async fn serve_static(stream: &mut TcpStream, path: &str, head_only: bool) -> Re
     write_response(stream, 200, content_type(&file), bytes, head_only).await
 }
 
+/// Serve one REPL turn as Server-Sent Events over the raw socket.
+///
+/// The hand-rolled server closes every connection after one exchange, so the
+/// body is EOF-terminated: no Content-Length, no chunked framing needed.
+async fn serve_repl_stream(mut stream: TcpStream, prompt: String) -> Result<()> {
+    let header = "HTTP/1.1 200 OK\r\n\
+         Content-Type: text/event-stream\r\n\
+         Cache-Control: no-store\r\n\
+         Access-Control-Allow-Origin: *\r\n\
+         Access-Control-Allow-Headers: content-type, authorization\r\n\
+         Connection: close\r\n\
+         \r\n";
+    stream.write_all(header.as_bytes()).await?;
+
+    let (tx, mut rx) = tokio::sync::mpsc::channel::<crate::ReplStreamEvent>(64);
+    tokio::spawn(async move {
+        crate::execute_repl_turn_streaming(&prompt, tx).await;
+    });
+
+    while let Some(event) = rx.recv().await {
+        let (name, data, terminal) = match event {
+            crate::ReplStreamEvent::Route(value) => ("route", value.to_string(), false),
+            crate::ReplStreamEvent::Token(text) => {
+                ("token", json!({ "text": text }).to_string(), false)
+            }
+            crate::ReplStreamEvent::Done(value) => ("done", value.to_string(), true),
+            crate::ReplStreamEvent::Error(message) => {
+                ("error", json!({ "message": message }).to_string(), true)
+            }
+        };
+        let frame = format!("event: {name}\ndata: {data}\n\n");
+        if stream.write_all(frame.as_bytes()).await.is_err() {
+            break;
+        }
+        if terminal {
+            break;
+        }
+    }
+    let _ = stream.flush().await;
+    Ok(())
+}
+
 async fn write_response(
     stream: &mut TcpStream,
     status: u16,
@@ -1132,7 +1248,9 @@ async fn write_response(
 ) -> Result<()> {
     let status_text = match status {
         200 => "OK",
+        201 => "Created",
         204 => "No Content",
+        400 => "Bad Request",
         404 => "Not Found",
         405 => "Method Not Allowed",
         _ => "OK",
@@ -1182,12 +1300,19 @@ fn api_payload(path: &str, started_at: &str) -> Option<Value> {
         "/api/v1/approvals/summary" => crate::cmd::approvals::pending_approvals_summary_payload(),
         "/api/v1/life/today" => crate::cmd::life::today_payload(),
         "/api/v1/life/freshness" => crate::cmd::life::freshness_payload(),
+        "/api/v1/calendar/summary" => crate::cmd::calendar::summary_payload(),
+        "/api/v1/mail/summary" => crate::cmd::mail::summary_payload(),
+        "/api/v1/connectors" => crate::cmd::connectors::connectors_payload(),
         "/api/v1/goals" => crate::cmd::goal::goals_payload(),
         "/api/v1/compress/summary" => crate::cmd::compress::compress_summary_payload(),
         "/api/v1/rate-groups" => json!({ "rate_groups": rate_group_rows() }),
         "/api/v1/inbox" => {
             let state_dir = state_dir();
-            json!({ "items": inbox_items_for_state_dir(&state_dir), "cursor": null })
+            let mut items = inbox_items_for_state_dir(&state_dir);
+            items.extend(life_inbox_items());
+            sort_values_by_time_desc(&mut items, "occurred_at");
+            items.truncate(80);
+            json!({ "items": items, "cursor": null })
         }
         "/api/v1/history" => {
             let state_dir = state_dir();
@@ -1569,33 +1694,167 @@ fn provider_rows() -> Vec<Value> {
         .collect()
 }
 
+/// Live route table: ask DREX what it would pick today for each intent,
+/// using the cached account registry (no CLI probing on the GET path).
 fn route_rows() -> Vec<Value> {
-    vec![
-        json!({
+    use heiwa_core::drex::{default_policy, plan_route, DrexIngress};
+
+    let registry = heiwa_provider::AccountRegistry::load();
+    let tiers = crate::get_live_model_tiers(&registry);
+    if tiers.is_empty() {
+        return vec![json!({
             "role": "chat",
-            "provider": "ollama",
-            "model": "local-default",
-            "source": "default",
-            "fallbacks": ["gemini", "claude", "codex"],
-            "offline_capable": true,
-        }),
-        json!({
-            "role": "code",
-            "provider": "codex",
-            "model": "provider-default",
-            "source": "default",
-            "fallbacks": ["claude", "gemini", "ollama"],
+            "provider": Value::Null,
+            "model": Value::Null,
+            "source": "no_model_tiers",
+            "fallbacks": [],
             "offline_capable": false,
-        }),
-        json!({
-            "role": "research",
-            "provider": "gemini",
-            "model": "provider-default",
-            "source": "default",
-            "fallbacks": ["codex", "claude"],
-            "offline_capable": false,
-        }),
-    ]
+        })];
+    }
+
+    let policy = default_policy();
+    ["chat", "build", "research", "audit"]
+        .iter()
+        .map(|intent| {
+            let ingress = DrexIngress {
+                intent: (*intent).to_string(),
+                risk: "low".to_string(),
+                raw_text: format!("route table preview for {intent}"),
+                privacy: "standard".to_string(),
+                runtime: "any".to_string(),
+                available_vram_mb: 8192,
+                required_context_tokens: 1024,
+            };
+            match plan_route(&ingress, &tiers, &policy) {
+                Ok(route) => match route.selected_model {
+                    Some(selected) => {
+                        let fallbacks: Vec<String> = {
+                            let mut seen = vec![selected.provider.clone()];
+                            tiers
+                                .iter()
+                                .filter_map(|tier| {
+                                    if seen.contains(&tier.provider) {
+                                        None
+                                    } else {
+                                        seen.push(tier.provider.clone());
+                                        Some(tier.provider.clone())
+                                    }
+                                })
+                                .collect()
+                        };
+                        json!({
+                            "role": intent,
+                            "provider": selected.provider,
+                            "model": selected.model_id,
+                            "rate_group": selected.rate_group,
+                            "source": "drex_live",
+                            "fallbacks": fallbacks,
+                            "offline_capable": selected.provider == "ollama",
+                        })
+                    }
+                    None => json!({
+                        "role": intent,
+                        "provider": Value::Null,
+                        "model": Value::Null,
+                        "source": "drex_no_match",
+                        "fallbacks": [],
+                        "offline_capable": false,
+                    }),
+                },
+                Err(error) => json!({
+                    "role": intent,
+                    "provider": Value::Null,
+                    "model": Value::Null,
+                    "source": format!("drex_error: {error}"),
+                    "fallbacks": [],
+                    "offline_capable": false,
+                }),
+            }
+        })
+        .collect()
+}
+
+/// Calendar holds and priority mail as inbox items, merged with dispatch
+/// receipts and event-log rows on /api/v1/inbox.
+fn life_inbox_items() -> Vec<Value> {
+    let mut items = Vec::new();
+    let today = chrono::Local::now()
+        .date_naive()
+        .format("%Y-%m-%d")
+        .to_string();
+
+    for hold in crate::cmd::calendar::holds_for_date(&today) {
+        let hold_id = hold.get("id").and_then(Value::as_str).unwrap_or("hold");
+        let title = hold.get("title").and_then(Value::as_str).unwrap_or("Hold");
+        let start = hold.get("start").and_then(Value::as_str).unwrap_or("--:--");
+        items.push(json!({
+            "item_id": format!("calendar:{hold_id}"),
+            "kind": "calendar_hold",
+            "plane": "intake",
+            "priority": "normal",
+            "pinned": false,
+            "status": hold.get("status").and_then(Value::as_str).unwrap_or("draft"),
+            "title": format!("{start} {title}"),
+            "summary": hold.get("note").and_then(Value::as_str).unwrap_or("Local hold; external promotion is approval-gated."),
+            "occurred_at": hold.get("created_at").and_then(Value::as_str).unwrap_or("unknown"),
+            "source": {
+                "source_id": hold_id,
+                "source_type": "calendar_hold",
+                "label": "Heiwa Calendar",
+                "path": format!("~/.heiwa/state/calendar/holds/{hold_id}.json"),
+            },
+            "subject_ref": hold_id,
+            "receipt_refs": [{ "kind": "receipt", "ref": format!("rcpt-{hold_id}") }],
+        }));
+    }
+
+    for row in crate::cmd::mail::priority_rows() {
+        let action = row
+            .get("action")
+            .and_then(Value::as_str)
+            .unwrap_or("digest");
+        if action == "digest" {
+            continue;
+        }
+        let subject = row
+            .get("subject")
+            .and_then(Value::as_str)
+            .unwrap_or("(no subject)");
+        let sender = row
+            .get("sender")
+            .and_then(Value::as_str)
+            .unwrap_or("unknown sender");
+        items.push(json!({
+            "item_id": format!("mail:{}", stable_hash(&format!("{sender}|{subject}"))),
+            "kind": "mail_priority",
+            "plane": "intake",
+            "priority": if action == "draft" { "high" } else { "normal" },
+            "pinned": false,
+            "status": action,
+            "title": subject,
+            "summary": format!("{sender} · staged action: {action}"),
+            "occurred_at": row.get("date").and_then(Value::as_str).unwrap_or("unknown"),
+            "source": {
+                "source_id": "mail_priority_scan",
+                "source_type": "mail_metadata",
+                "label": "Mail priority scan",
+                "path": "~/.heiwa/state/mail/headers.jsonl",
+            },
+            "subject_ref": subject,
+            "receipt_refs": [],
+        }));
+    }
+
+    items
+}
+
+fn stable_hash(input: &str) -> String {
+    use sha1::{Digest, Sha1};
+    let digest = Sha1::digest(input.as_bytes());
+    digest[..6]
+        .iter()
+        .map(|byte| format!("{byte:02x}"))
+        .collect()
 }
 
 fn approval_rows() -> Vec<Value> {
@@ -2551,7 +2810,7 @@ fn provider_display_name(provider: &str) -> &'static str {
     }
 }
 
-fn auth_kind_label(kind: &heiwa_provider::AuthKind) -> &'static str {
+pub(crate) fn auth_kind_label(kind: &heiwa_provider::AuthKind) -> &'static str {
     match kind {
         heiwa_provider::AuthKind::OauthCli => "oauth_cli",
         heiwa_provider::AuthKind::ApiKey => "api_key",

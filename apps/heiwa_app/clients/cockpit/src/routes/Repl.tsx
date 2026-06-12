@@ -1,33 +1,15 @@
 import { For, Show, createSignal } from "solid-js";
 import type { JSX } from "solid-js";
-import { api } from "../lib/api";
-
-type ReplTrace = {
-  route?: string;
-  provider?: string;
-  model?: string;
-  mode?: string;
-  receipts?: string[];
-  [key: string]: unknown;
-};
-
-type ReplResponse = {
-  ok: boolean;
-  data?: {
-    response?: string;
-    trace?: ReplTrace | undefined;
-  };
-  error?: {
-    code?: string;
-    message?: string;
-  };
-};
+import { postSse } from "../lib/api";
+import type { ReplRouteEvent, ReplTrace } from "../lib/types";
 
 type Message = {
   id: string;
   role: "user" | "assistant" | "system";
   content: string;
-  trace?: ReplTrace | undefined;
+  route?: ReplRouteEvent;
+  trace?: ReplTrace;
+  streaming?: boolean;
   ts: string;
 };
 
@@ -42,39 +24,67 @@ const starterMessages: Message[] = [
 ];
 
 function nowLabel(): string {
-  return new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+  return new Date().toLocaleTimeString([], {
+    hour: "2-digit",
+    minute: "2-digit",
+  });
 }
 
 function codeLike(content: string): boolean {
   const trimmed = content.trim();
-  return trimmed.startsWith("{") || trimmed.startsWith("[") || trimmed.includes("```json");
+  return (
+    trimmed.startsWith("{") ||
+    trimmed.startsWith("[") ||
+    trimmed.includes("```json")
+  );
 }
 
-function TracePills(props: { trace?: ReplTrace | undefined }): JSX.Element {
-  const trace = () => props.trace;
+function TracePills(props: {
+  route?: ReplRouteEvent | undefined;
+  trace?: ReplTrace | undefined;
+}): JSX.Element {
+  const provider = () => props.trace?.provider ?? props.route?.provider;
+  const model = () => props.trace?.model ?? props.route?.model;
+  const mode = () => props.trace?.mode ?? props.route?.mode;
   return (
-    <Show when={trace()}>
-      {(value) => (
-        <div class="trace-pills" aria-label="Execution trace">
-          <span>route: {String(value().route ?? value().mode ?? "local")}</span>
-          <span>provider: {String(value().provider ?? "heiwa")}</span>
-          <span>model: {String(value().model ?? "deterministic")}</span>
-        </div>
-      )}
+    <Show when={mode()}>
+      <div class="trace-pills" aria-label="Execution trace">
+        <span>mode: {mode()}</span>
+        <Show when={provider()}>
+          <span>
+            route: {provider()}/{model()}
+          </span>
+        </Show>
+        <Show when={props.trace?.cost_usd !== undefined}>
+          <span>cost: ${props.trace?.cost_usd?.toFixed(4)}</span>
+        </Show>
+        <Show when={props.trace?.compression?.applied}>
+          <span>compressed ×{props.trace?.compression?.ratio.toFixed(2)}</span>
+        </Show>
+      </div>
     </Show>
   );
 }
 
 function MessageCard(props: { message: Message }): JSX.Element {
   return (
-    <article class={`repl-message ${props.message.role}`}>
+    <article
+      class={`repl-message ${props.message.role}`}
+      classList={{ thinking: props.message.streaming === true }}
+    >
       <div class="repl-message-meta">
         <span>{props.message.role === "assistant" ? "Heiwa" : props.message.role}</span>
-        <span>{props.message.ts}</span>
+        <span>
+          {props.message.streaming
+            ? (props.message.route
+                ? `${props.message.route.provider ?? "routing"}…`
+                : "routing…")
+            : props.message.ts}
+        </span>
       </div>
       <Show
         when={codeLike(props.message.content)}
-        fallback={<p>{props.message.content}</p>}
+        fallback={<p>{props.message.content || "…"}</p>}
       >
         <div class="code-card repl-code-card">
           <div class="code-card-header">
@@ -85,7 +95,7 @@ function MessageCard(props: { message: Message }): JSX.Element {
           <pre>{props.message.content}</pre>
         </div>
       </Show>
-      <TracePills trace={props.message.trace} />
+      <TracePills route={props.message.route} trace={props.message.trace} />
     </article>
   );
 }
@@ -95,6 +105,20 @@ export default function ReplRoute(): JSX.Element {
   const [prompt, setPrompt] = createSignal("");
   const [busy, setBusy] = createSignal(false);
   const [error, setError] = createSignal<string | null>(null);
+
+  function patchMessage(id: string, patch: Partial<Message>): void {
+    setMessages((items) =>
+      items.map((item) => (item.id === id ? { ...item, ...patch } : item)),
+    );
+  }
+
+  function appendToMessage(id: string, text: string): void {
+    setMessages((items) =>
+      items.map((item) =>
+        item.id === id ? { ...item, content: item.content + text } : item,
+      ),
+    );
+  }
 
   async function submit(): Promise<void> {
     const text = prompt().trim();
@@ -106,29 +130,56 @@ export default function ReplRoute(): JSX.Element {
       content: text,
       ts: nowLabel(),
     };
-    setMessages((items) => [...items, userMessage]);
+    const assistantId = `assistant-${Date.now()}`;
+    setMessages((items) => [
+      ...items,
+      userMessage,
+      {
+        id: assistantId,
+        role: "assistant",
+        content: "",
+        streaming: true,
+        ts: nowLabel(),
+      },
+    ]);
     setPrompt("");
     setBusy(true);
     setError(null);
 
     try {
-      const result = await api.post<ReplResponse>("/api/v1/repl", { prompt: text });
-      if (!result.ok) {
-        throw new Error(result.error?.message || result.error?.code || "REPL request failed");
-      }
-      setMessages((items) => [
-        ...items,
-        {
-          id: `assistant-${Date.now()}`,
-          role: "assistant",
-          content: result.data?.response || "Done.",
-          trace: result.data?.trace,
-          ts: nowLabel(),
-        },
-      ]);
+      await postSse("/api/v1/repl/stream", { prompt: text }, (event) => {
+        if (event.event === "route") {
+          patchMessage(assistantId, { route: event.data as ReplRouteEvent });
+        } else if (event.event === "token") {
+          const token = (event.data as { text?: string }).text ?? "";
+          appendToMessage(assistantId, token);
+        } else if (event.event === "done") {
+          patchMessage(assistantId, {
+            trace: event.data as ReplTrace,
+            streaming: false,
+            ts: nowLabel(),
+          });
+        } else if (event.event === "error") {
+          const message =
+            (event.data as { message?: string }).message ?? "stream failed";
+          throw new Error(message);
+        }
+      });
+      // Guard: if the stream ended without a done event, settle the bubble.
+      patchMessage(assistantId, { streaming: false });
     } catch (err) {
-      const message = err instanceof Error ? err.message : String(err);
+      const message =
+        err instanceof Error
+          ? err.message
+          : ((err as { message?: string }).message ?? String(err));
       setError(message);
+      setMessages((items) =>
+        items
+          .filter((item) => !(item.id === assistantId && !item.content))
+          .map((item) =>
+            item.id === assistantId ? { ...item, streaming: false } : item,
+          ),
+      );
       setMessages((items) => [
         ...items,
         {
@@ -166,16 +217,6 @@ export default function ReplRoute(): JSX.Element {
         </div>
 
         <For each={messages()}>{(message) => <MessageCard message={message} />}</For>
-
-        <Show when={busy()}>
-          <article class="repl-message assistant thinking">
-            <div class="repl-message-meta">
-              <span>Heiwa</span>
-              <span>routing…</span>
-            </div>
-            <p>Checking local policy, route, and evidence lane.</p>
-          </article>
-        </Show>
       </div>
 
       <Show when={error()}>
@@ -200,7 +241,11 @@ export default function ReplRoute(): JSX.Element {
           onInput={(event) => setPrompt(event.currentTarget.value)}
           onKeyDown={onKeyDown}
         />
-        <button class="composer-submit" type="submit" disabled={busy() || !prompt().trim()}>
+        <button
+          class="composer-submit"
+          type="submit"
+          disabled={busy() || !prompt().trim()}
+        >
           ↑
         </button>
       </form>

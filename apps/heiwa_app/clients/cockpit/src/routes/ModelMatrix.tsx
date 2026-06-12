@@ -1,127 +1,189 @@
 import type { JSX } from "solid-js";
-import { For } from "solid-js";
+import { For, Show, createSignal } from "solid-js";
+import { v1 } from "../lib/endpoints";
+import { RemoteShell } from "../lib/resource";
+import { PageHero, Panel, StatusBadge, statusTone } from "../lib/ui";
+import type { RoutePreview } from "../lib/types";
 
-type MatrixLane = {
-  lane: string;
-  status: "healthy" | "watch" | "offline";
-  bestFor: string;
-  userCopy: string;
+const ROLE_COPY: Record<string, string> = {
+  chat: "conversation, summaries, life briefs",
+  build: "coding agents, repo work, implementation loops",
+  research: "long reasoning, comparisons, external synthesis",
+  audit: "review, verification, risk checks",
 };
 
-type EvalAxis = {
-  task: string;
-  decisionInputs: string;
-  visibleRationale: string;
-};
+function RoutePreviewTester(): JSX.Element {
+  const [prompt, setPrompt] = createSignal("");
+  const [busy, setBusy] = createSignal(false);
+  const [preview, setPreview] = createSignal<RoutePreview | null>(null);
+  const [error, setError] = createSignal<string | null>(null);
 
-const lanes: MatrixLane[] = [
-  {
-    lane: "Local/private",
-    status: "healthy",
-    bestFor: "calendar extraction, mail triage, short summaries, private context",
-    userCopy: "Used local/private lane; no model choice needed.",
-  },
-  {
-    lane: "Subscription CLI",
-    status: "watch",
-    bestFor: "coding agents, long reasoning, provider-owned specialist loops",
-    userCopy: "Escalated to specialist lane because the task needed stronger reasoning.",
-  },
-  {
-    lane: "Metered API",
-    status: "watch",
-    bestFor: "structured output, high-reliability drafting, overflow when subscriptions throttle",
-    userCopy: "Used metered lane only because cheaper sufficient lanes were unavailable or lower quality.",
-  },
-  {
-    lane: "Offline fallback",
-    status: "offline",
-    bestFor: "deterministic reads, receipts, cached state, no-network mode",
-    userCopy: "Answered from local state; sync is stale or unavailable.",
-  },
-];
+  async function submit(event: Event): Promise<void> {
+    event.preventDefault();
+    const text = prompt().trim();
+    if (!text || busy()) return;
+    setBusy(true);
+    setError(null);
+    try {
+      setPreview(await v1.routePreview(text));
+    } catch (err) {
+      const message =
+        err instanceof Error
+          ? err.message
+          : ((err as { message?: string }).message ?? String(err));
+      setError(message);
+      setPreview(null);
+    } finally {
+      setBusy(false);
+    }
+  }
 
-const axes: EvalAxis[] = [
-  {
-    task: "Priority mail scan",
-    decisionInputs: "sensitivity, thread length, urgency, local model quality, send risk",
-    visibleRationale: "Private triage lane; replies staged for approval.",
-  },
-  {
-    task: "Calendar conflict resolution",
-    decisionInputs: "event certainty, attendees, write risk, source freshness, undo posture",
-    visibleRationale: "Read model sufficient; external edits require approval.",
-  },
-  {
-    task: "Code/runtime work",
-    decisionInputs: "repo state, tests, provider CLI auth, context size, eval history",
-    visibleRationale: "Specialist code lane with receipts and verification output.",
-  },
-  {
-    task: "Life brief",
-    decisionInputs: "calendar/mail freshness, local facts, privacy, cost, latency",
-    visibleRationale: "Local state first; cite stale sources before advising.",
-  },
-];
-
-function statusClass(status: MatrixLane["status"]): string {
-  if (status === "healthy") return "ok";
-  if (status === "watch") return "warn";
-  return "fail";
+  return (
+    <Panel title="Route preview" status="no execution" tone="ok">
+      <p class="muted">
+        Ask DREX where a task would route right now — capability, quota,
+        privacy, and cost decide; no model runs.
+      </p>
+      <form class="hold-form-row" onSubmit={(event) => void submit(event)}>
+        <input
+          type="text"
+          placeholder="e.g. refactor the auth module and add tests"
+          value={prompt()}
+          onInput={(event) => setPrompt(event.currentTarget.value)}
+        />
+        <button
+          type="submit"
+          class="btn btn-outline"
+          disabled={busy() || !prompt().trim()}
+        >
+          {busy() ? "Routing…" : "Preview route"}
+        </button>
+      </form>
+      <Show when={error()}>
+        {(message) => <p class="repl-error">{message()}</p>}
+      </Show>
+      <Show when={preview()}>
+        {(result) => (
+          <div class="route-preview-result">
+            <p>
+              <StatusBadge status={result().mode} />{" "}
+              <Show when={result().provider}>
+                <strong>
+                  {result().provider}/{result().model}
+                </strong>{" "}
+                <span class="muted">
+                  intent {result().intent} · rate group {result().rate_group}
+                </span>
+              </Show>
+              <Show when={result().mode === "deterministic"}>
+                <span class="muted">
+                  answered locally without any model: “{result().response}”
+                </span>
+              </Show>
+              <Show when={result().error}>
+                <span class="muted">{result().error}</span>
+              </Show>
+            </p>
+            <Show when={result().quota.length > 0}>
+              <div class="trace-panel compact">
+                <span class="trace-header">Quota lanes</span>
+                <div class="trace-log-viewport">
+                  <For each={result().quota}>
+                    {(line) => <div class="trace-log-line system">{line}</div>}
+                  </For>
+                </div>
+              </div>
+            </Show>
+          </div>
+        )}
+      </Show>
+    </Panel>
+  );
 }
 
 export default function ModelMatrixRoute(): JSX.Element {
   return (
     <section>
-      <div class="hero compact">
-        <p class="eyebrow">Model Matrix</p>
-        <h1>Routing intelligence, not model picking</h1>
-        <p class="lede">
-          Heiwa chooses provider/model/device lanes through capability probes,
-          evals, quota, privacy, cost, and evidence. Users see the reason and
-          receipt, not a model dropdown.
-        </p>
-      </div>
+      <PageHero
+        eyebrow="Model Matrix"
+        title="Routing intelligence, not model picking"
+        lede="Heiwa chooses provider/model/device lanes through capability probes, evals, quota, privacy, cost, and evidence. Users see the reason and receipt, not a model dropdown."
+      />
 
-      <div class="card-list">
-        <For each={lanes}>
-          {(lane) => (
-            <article>
-              <div class="status-card-head">
-                <h3>{lane.lane}</h3>
-                <span class={`status-badge ${statusClass(lane.status)}`}>
-                  {lane.status}
-                </span>
-              </div>
-              <p><strong>Best for:</strong> {lane.bestFor}</p>
-              <p class="muted"><strong>User copy:</strong> {lane.userCopy}</p>
-            </article>
-          )}
-        </For>
-      </div>
+      <RemoteShell loader={() => v1.routes()}>
+        {(data) => (
+          <>
+            <div class="panels">
+              <RoutePreviewTester />
 
-      <div class="data-table-wrap">
-        <table class="data-table">
-          <thead>
-            <tr>
-              <th>Task class</th>
-              <th>Matrix inputs</th>
-              <th>What the user sees</th>
-            </tr>
-          </thead>
-          <tbody>
-            <For each={axes}>
-              {(axis) => (
-                <tr>
-                  <td>{axis.task}</td>
-                  <td>{axis.decisionInputs}</td>
-                  <td>{axis.visibleRationale}</td>
-                </tr>
-              )}
-            </For>
-          </tbody>
-        </table>
-      </div>
+              <Panel
+                title="Live route table"
+                status={
+                  data.routes.some((route) => route.source === "drex_live")
+                    ? "drex_live"
+                    : "degraded"
+                }
+                tone={
+                  data.routes.some((route) => route.source === "drex_live")
+                    ? "ok"
+                    : "warn"
+                }
+              >
+                <p class="muted">
+                  What DREX would pick per intent right now, from the cached
+                  account registry. No dropdown — pin a provider per turn via
+                  the REPL if you must override.
+                </p>
+                <div class="data-table-wrap">
+                  <table class="data-table">
+                    <thead>
+                      <tr>
+                        <th>Intent</th>
+                        <th>Lane today</th>
+                        <th>Fallbacks</th>
+                        <th>Offline</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      <For each={data.routes}>
+                        {(route) => (
+                          <tr>
+                            <td>
+                              <strong>{route.role}</strong>
+                              <p class="muted">{ROLE_COPY[route.role] ?? ""}</p>
+                            </td>
+                            <td>
+                              <Show
+                                when={route.provider}
+                                fallback={<StatusBadge status="unavailable" />}
+                              >
+                                <code>
+                                  {route.provider}/{route.model}
+                                </code>
+                                <Show when={route.rate_group}>
+                                  <p class="muted">{route.rate_group}</p>
+                                </Show>
+                              </Show>
+                            </td>
+                            <td>{route.fallbacks.join(" → ") || "—"}</td>
+                            <td>
+                              <span
+                                class={`status-badge ${statusTone(route.offline_capable ? "ok" : "planned")}`}
+                              >
+                                {route.offline_capable ? "yes" : "no"}
+                              </span>
+                            </td>
+                          </tr>
+                        )}
+                      </For>
+                    </tbody>
+                  </table>
+                </div>
+              </Panel>
+            </div>
+          </>
+        )}
+      </RemoteShell>
     </section>
   );
 }

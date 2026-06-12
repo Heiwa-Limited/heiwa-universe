@@ -32,12 +32,171 @@ export interface ProviderLive {
 }
 
 export interface Route {
-  role: "code" | "chat" | "reason" | "review" | string;
-  provider: string;
-  model: string;
-  source: "default" | "override" | "env";
+  role: "chat" | "build" | "research" | "audit" | string;
+  provider: string | null;
+  model: string | null;
+  rate_group?: string;
+  source: "drex_live" | "drex_no_match" | "no_model_tiers" | string;
   fallbacks: string[];
   offline_capable: boolean;
+}
+
+export interface RoutePreview {
+  mode: "deterministic" | "local_model" | "remote_model" | "unavailable";
+  response?: string;
+  error?: string;
+  intent?: string;
+  provider?: string;
+  model?: string;
+  provider_model?: string;
+  rate_group?: string;
+  metadata?: unknown;
+  quota: string[];
+}
+
+export interface CalendarLaneLive {
+  id: string;
+  name: string;
+  status: "ready" | "connected" | "staged" | "needs_auth" | "planned" | string;
+  sync: string;
+  write: string;
+  evidence: string;
+}
+
+export interface CalendarHold {
+  id: string;
+  title: string;
+  date: string;
+  start: string | null;
+  end: string | null;
+  kind: "focus" | "travel" | "soft" | string;
+  status: "draft" | "committed" | string;
+  note: string | null;
+  source: string;
+  created_at: string;
+  external_promotion: string;
+}
+
+export interface CalendarMoment {
+  time: string;
+  title: string;
+  source: string;
+  pressure: "fixed" | "soft" | "draft" | string;
+  detail: string;
+}
+
+export interface CalendarSummary {
+  command: string;
+  date: string;
+  timezone: string;
+  lanes: CalendarLaneLive[];
+  holds: CalendarHold[];
+  today: CalendarMoment[];
+  counts: {
+    holds_total: number;
+    holds_today: number;
+    moments_today: number;
+  };
+}
+
+export interface MailLaneLive {
+  id: string;
+  name: string;
+  status: "connected" | "staged" | "needs_auth" | "metadata" | "planned" | string;
+  read: string;
+  reply: string;
+  guardrail: string;
+}
+
+export interface MailPriorityRow {
+  account: string | null;
+  mailbox: string | null;
+  sender: string | null;
+  subject: string | null;
+  date: string | null;
+  unread: boolean | null;
+  score: number;
+  action: "draft" | "report" | "digest" | string;
+}
+
+export interface MailSummary {
+  command: string;
+  policy: string;
+  lanes: MailLaneLive[];
+  accounts: string[];
+  snapshot: { path: string; present: boolean; scanned: number };
+  priority: MailPriorityRow[];
+  counts: {
+    priority: number;
+    unread_in_priority: number;
+    accounts: number;
+  };
+}
+
+export interface Connector {
+  id: string;
+  kind: "provider" | "calendar" | "mail" | string;
+  display_name: string;
+  status:
+    | "connected"
+    | "staged"
+    | "needs_auth"
+    | "metadata"
+    | "planned"
+    | "error"
+    | string;
+  auth_kind: string;
+  rate_group?: string | null;
+  scopes?: string | null;
+  detail: string;
+  next_action: string | null;
+}
+
+export interface ConnectorsSummary {
+  connectors: Connector[];
+  counts: Record<string, number>;
+  policy: string[];
+}
+
+export interface ReplTrace {
+  intent: string;
+  mode: string;
+  provider: string;
+  model: string;
+  rate_group?: string;
+  cost_usd?: number;
+  compression?: {
+    applied: boolean;
+    reason: string;
+    ratio: number;
+    estimated_usd_saved: number;
+  } | null;
+  summary?: string;
+}
+
+export interface ReplRouteEvent {
+  mode: string;
+  intent?: string;
+  provider?: string;
+  model?: string;
+  provider_model?: string;
+  rate_group?: string;
+  request_id?: string;
+}
+
+export interface ResourceSnapshotPayload {
+  snapshot: {
+    cpu_count: number;
+    load_1m: number;
+    free_memory_bytes: number;
+    battery_percent: number | null;
+    on_battery: boolean;
+    thermal_pressure: string;
+  };
+  policy: Record<string, unknown>;
+  admissions: Record<string, boolean>;
+  sources: Record<string, string>;
+  notes: string[];
 }
 
 export interface Mission {
@@ -249,6 +408,8 @@ export interface TodaySnapshot {
   pending_approvals: PendingApproval[];
   runtime: { stdb_mode: string };
   next: string[];
+  calendar?: { holds_today: number; holds: CalendarHold[] };
+  mail?: { priority_count: number; draft_tier: number; top: MailPriorityRow[] };
 }
 
 export interface FreshnessSource {

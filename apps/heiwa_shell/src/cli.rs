@@ -36,6 +36,14 @@ pub async fn try_handle(args: &[String]) -> Result<bool> {
             cmd::mail::run(&args[2..])?;
             Ok(true)
         }
+        Some("calendar") => {
+            cmd::calendar::run(&args[2..])?;
+            Ok(true)
+        }
+        Some("connect") => {
+            cmd::connectors::run(&args[2..]).await?;
+            Ok(true)
+        }
         _ => Ok(false),
     }
 }

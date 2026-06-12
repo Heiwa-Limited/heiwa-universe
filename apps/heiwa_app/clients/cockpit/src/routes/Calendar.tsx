@@ -1,154 +1,213 @@
 import type { JSX } from "solid-js";
-import { For } from "solid-js";
+import { For, Show, createSignal } from "solid-js";
+import { v1 } from "../lib/endpoints";
+import { RemoteShell } from "../lib/resource";
+import { EmptyState, PageHero, Panel, StatusBadge } from "../lib/ui";
+import type { CalendarSummary } from "../lib/types";
 
-type CalendarLane = {
-  name: string;
-  status: "ready" | "planned" | "gated";
-  sync: string;
-  write: string;
-  evidence: string;
-};
+function HoldForm(props: { onCreated: () => void }): JSX.Element {
+  const [title, setTitle] = createSignal("");
+  const [date, setDate] = createSignal("");
+  const [start, setStart] = createSignal("");
+  const [end, setEnd] = createSignal("");
+  const [kind, setKind] = createSignal("focus");
+  const [busy, setBusy] = createSignal(false);
+  const [error, setError] = createSignal<string | null>(null);
 
-type CalendarMoment = {
-  time: string;
-  title: string;
-  source: string;
-  pressure: "fixed" | "soft" | "draft";
-  detail: string;
-};
+  async function submit(event: Event): Promise<void> {
+    event.preventDefault();
+    if (!title().trim() || busy()) return;
+    setBusy(true);
+    setError(null);
+    try {
+      await v1.createHold({
+        title: title().trim(),
+        date: date() || undefined,
+        start: start() || undefined,
+        end: end() || undefined,
+        kind: kind(),
+      });
+      setTitle("");
+      setStart("");
+      setEnd("");
+      props.onCreated();
+    } catch (err) {
+      const message =
+        err instanceof Error
+          ? err.message
+          : ((err as { message?: string }).message ?? String(err));
+      setError(message);
+    } finally {
+      setBusy(false);
+    }
+  }
 
-const lanes: CalendarLane[] = [
-  {
-    name: "Apple Calendar",
-    status: "planned",
-    sync: "Device-local EventKit bridge with Calendar permission and change notifications.",
-    write: "Create/update events only after an approval lease is granted.",
-    evidence: "Local receipt for permission, sync, source calendar, and before/after writes.",
-  },
-  {
-    name: "Google Calendar",
-    status: "gated",
-    sync: "OAuth full sync + per-calendar incremental sync tokens; 410 recovery forces scoped resync.",
-    write: "Draft focus holds, scheduling blocks, and event edits before external writes.",
-    evidence: "Sync token, external event id, etag/version, approval id, and undo posture.",
-  },
-  {
-    name: "Heiwa Holds",
-    status: "ready",
-    sync: "Local runtime state for focus blocks, travel buffers, and tentative commitments.",
-    write: "Promote holds to Apple or Google only after user approval.",
-    evidence: "Local hold receipt linked to the mission, mail thread, or planning request.",
-  },
-];
-
-const moments: CalendarMoment[] = [
-  {
-    time: "08:30",
-    title: "Daily operating brief",
-    source: "Heiwa Hold",
-    pressure: "soft",
-    detail: "Summarize schedule, stale facts, priority mail, and pending approvals.",
-  },
-  {
-    time: "10:00",
-    title: "External appointment placeholder",
-    source: "Apple/Google pending",
-    pressure: "fixed",
-    detail: "Connector disabled; reserved slot shows where synced obligations land.",
-  },
-  {
-    time: "14:00",
-    title: "Focus block draft",
-    source: "Heiwa Hold",
-    pressure: "draft",
-    detail: "Can be promoted to an external calendar after approval.",
-  },
-];
-
-function statusClass(status: CalendarLane["status"]): string {
-  if (status === "ready") return "ok";
-  if (status === "gated") return "warn";
-  return "fail";
+  return (
+    <form class="hold-form" onSubmit={(event) => void submit(event)}>
+      <div class="hold-form-row">
+        <input
+          type="text"
+          placeholder="Hold title (e.g. Focus block)"
+          value={title()}
+          onInput={(event) => setTitle(event.currentTarget.value)}
+        />
+        <input
+          type="date"
+          value={date()}
+          onInput={(event) => setDate(event.currentTarget.value)}
+          aria-label="Date"
+        />
+        <input
+          type="time"
+          value={start()}
+          onInput={(event) => setStart(event.currentTarget.value)}
+          aria-label="Start time"
+        />
+        <input
+          type="time"
+          value={end()}
+          onInput={(event) => setEnd(event.currentTarget.value)}
+          aria-label="End time"
+        />
+        <select
+          value={kind()}
+          onInput={(event) => setKind(event.currentTarget.value)}
+          aria-label="Hold kind"
+        >
+          <option value="focus">focus</option>
+          <option value="travel">travel</option>
+          <option value="soft">soft</option>
+        </select>
+        <button
+          type="submit"
+          class="btn btn-outline"
+          disabled={busy() || !title().trim()}
+        >
+          {busy() ? "Saving…" : "Add hold"}
+        </button>
+      </div>
+      <Show when={error()}>
+        {(message) => <p class="repl-error">{message()}</p>}
+      </Show>
+      <p class="muted">
+        Holds stay local under <code>~/.heiwa/state/calendar</code> with a
+        receipt; promotion to Apple/Google is approval-gated.
+      </p>
+    </form>
+  );
 }
 
-function pressureClass(pressure: CalendarMoment["pressure"]): string {
-  if (pressure === "fixed") return "fail";
-  if (pressure === "draft") return "warn";
-  return "ok";
+function TodayPanel(props: {
+  data: CalendarSummary;
+  refetch: () => void;
+}): JSX.Element {
+  return (
+    <Panel
+      title={`Today pressure · ${props.data.date}`}
+      status={`${props.data.counts.moments_today} moments`}
+      tone="ok"
+    >
+      <Show
+        when={props.data.today.length > 0}
+        fallback={
+          <p class="muted">
+            No holds or dated appointments today. Add a hold below or sync an
+            external calendar lane.
+          </p>
+        }
+      >
+        <ul>
+          <For each={props.data.today}>
+            {(moment) => (
+              <li>
+                <code>{moment.time}</code> <strong>{moment.title}</strong>{" "}
+                <StatusBadge status={moment.pressure} />
+                <p class="muted">
+                  {moment.source} · {moment.detail}
+                </p>
+              </li>
+            )}
+          </For>
+        </ul>
+      </Show>
+      <HoldForm onCreated={props.refetch} />
+    </Panel>
+  );
 }
 
 export default function CalendarRoute(): JSX.Element {
   return (
     <section>
-      <div class="hero compact">
-        <p class="eyebrow">Calendar</p>
-        <h1>Heiwa Calendar</h1>
-        <p class="lede">
-          One local commitment map for Apple Calendar, Google Calendar, and
-          Heiwa-owned holds. Syncs become read models first; external writes are
-          staged through approvals and receipts.
-        </p>
-      </div>
+      <PageHero
+        eyebrow="Calendar"
+        title="Heiwa Calendar"
+        lede="One local commitment map for Apple Calendar, Google Calendar, and Heiwa-owned holds. Syncs become read models first; external writes are staged through approvals and receipts."
+      />
 
-      <div class="panels">
-        <article class="panel">
-          <div class="status-card-head">
-            <h2>Today pressure</h2>
-            <span class="status-badge warn">design slice</span>
-          </div>
-          <p class="muted">
-            Calendar connectors are not enabled in this UI yet. This surface now
-            reserves the product shape for schedule pressure, conflicts, and
-            external write approvals.
-          </p>
-          <ul>
-            <For each={moments}>
-              {(moment) => (
-                <li>
-                  <code>{moment.time}</code> <strong>{moment.title}</strong>{" "}
-                  <span class={`status-badge ${pressureClass(moment.pressure)}`}>
-                    {moment.pressure}
-                  </span>
-                  <p class="muted">
-                    {moment.source} · {moment.detail}
-                  </p>
-                </li>
-              )}
-            </For>
-          </ul>
-        </article>
+      <RemoteShell loader={() => v1.calendarSummary()}>
+        {(data, refetch) => (
+          <>
+            <div class="panels">
+              <TodayPanel data={data} refetch={refetch} />
 
-        <article class="panel">
-          <div class="status-card-head">
-            <h2>Calendar UX contract</h2>
-            <span class="status-badge ok">local-first</span>
-          </div>
-          <ul>
-            <li>Show fixed obligations, soft holds, conflicts, and stale inputs in one timeline.</li>
-            <li>Draft schedule changes before writing to Apple or Google.</li>
-            <li>Attach receipts to every sync and external calendar mutation.</li>
-            <li>Explain source freshness without exposing raw account secrets.</li>
-          </ul>
-        </article>
-      </div>
+              <Panel title="Holds" status={`${data.counts.holds_total} total`} tone="ok">
+                <Show
+                  when={data.holds.length > 0}
+                  fallback={
+                    <EmptyState title="No holds yet.">
+                      <p class="muted">
+                        Create one here or via{" "}
+                        <code>heiwa calendar hold add</code>.
+                      </p>
+                    </EmptyState>
+                  }
+                >
+                  <ul>
+                    <For each={data.holds}>
+                      {(hold) => (
+                        <li>
+                          <code>
+                            {hold.date} {hold.start ?? "--:--"}
+                            {hold.end ? `–${hold.end}` : ""}
+                          </code>{" "}
+                          <strong>{hold.title}</strong>{" "}
+                          <StatusBadge status={hold.kind} tone="ok" />{" "}
+                          <StatusBadge status={hold.status} />
+                          <Show when={hold.note}>
+                            <p class="muted">{hold.note}</p>
+                          </Show>
+                        </li>
+                      )}
+                    </For>
+                  </ul>
+                </Show>
+              </Panel>
+            </div>
 
-      <div class="card-list">
-        <For each={lanes}>
-          {(lane) => (
-            <article>
-              <div class="status-card-head">
-                <h3>{lane.name}</h3>
-                <span class={`status-badge ${statusClass(lane.status)}`}>
-                  {lane.status}
-                </span>
-              </div>
-              <p><strong>Sync:</strong> {lane.sync}</p>
-              <p><strong>Writes:</strong> {lane.write}</p>
-              <p class="muted"><strong>Evidence:</strong> {lane.evidence}</p>
-            </article>
-          )}
-        </For>
-      </div>
+            <div class="card-list">
+              <For each={data.lanes}>
+                {(lane) => (
+                  <article>
+                    <div class="status-card-head">
+                      <h3>{lane.name}</h3>
+                      <StatusBadge status={lane.status} />
+                    </div>
+                    <p>
+                      <strong>Sync:</strong> {lane.sync}
+                    </p>
+                    <p>
+                      <strong>Writes:</strong> {lane.write}
+                    </p>
+                    <p class="muted">
+                      <strong>Evidence:</strong> {lane.evidence}
+                    </p>
+                  </article>
+                )}
+              </For>
+            </div>
+          </>
+        )}
+      </RemoteShell>
     </section>
   );
 }

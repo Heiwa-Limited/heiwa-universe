@@ -1,6 +1,15 @@
 import { A, useLocation } from "@solidjs/router";
-import { For, Show, createMemo, createSignal } from "solid-js";
+import {
+  For,
+  Show,
+  createMemo,
+  createResource,
+  createSignal,
+  onCleanup,
+  onMount,
+} from "solid-js";
 import type { JSX, ParentProps } from "solid-js";
+import { v1 } from "./lib/endpoints";
 
 type NavItem = {
   href: string;
@@ -170,6 +179,126 @@ function routeTitle(pathname: string): string {
   return match?.label ?? "Workspace";
 }
 
+const TELEMETRY_POLL_MS = 5000;
+
+/** Live runtime telemetry from /api/v1/resource, polled while visible. */
+function LiveTelemetryPanel(): JSX.Element {
+  const [resource, { refetch }] = createResource(() => v1.resource());
+
+  onMount(() => {
+    const timer = setInterval(() => void refetch(), TELEMETRY_POLL_MS);
+    onCleanup(() => clearInterval(timer));
+  });
+
+  const loadPercent = createMemo(() => {
+    const snapshot = resource()?.snapshot;
+    if (!snapshot || snapshot.cpu_count === 0) return null;
+    return Math.min(
+      100,
+      Math.round((snapshot.load_1m / snapshot.cpu_count) * 100),
+    );
+  });
+
+  const freeGb = createMemo(() => {
+    const snapshot = resource()?.snapshot;
+    if (!snapshot) return null;
+    return snapshot.free_memory_bytes / 1024 ** 3;
+  });
+
+  const localLane = createMemo(() => {
+    const admissions = resource()?.admissions;
+    if (!admissions) return null;
+    if (admissions.local_model_large) return "large + small";
+    if (admissions.local_model_small) return "small only";
+    return "blocked";
+  });
+
+  return (
+    <section class="telemetry-panel">
+      <div class="surface-watch-panel">
+        <div class="surface-watch-header">
+          <span class="widget-label">Connected surfaces</span>
+          <span class="status-pill online">watching</span>
+        </div>
+        <div class="surface-signal-list">
+          <For each={surfaceSignals}>
+            {(surface) => (
+              <div class="surface-signal-row">
+                <div>
+                  <span class="surface-name">{surface.name}</span>
+                  <span class="surface-detail">{surface.detail}</span>
+                </div>
+                <span class={`status-pill ${surface.tone}`}>{surface.status}</span>
+              </div>
+            )}
+          </For>
+        </div>
+      </div>
+
+      <Show
+        when={resource()}
+        fallback={<span class="widget-desc">Probing local runtime…</span>}
+      >
+        <div class="telemetry-widget">
+          <span class="widget-label">CPU load (1m)</span>
+          <div class="widget-value-row">
+            <strong>
+              {resource()?.snapshot.load_1m.toFixed(2)} /{" "}
+              {resource()?.snapshot.cpu_count} cores
+            </strong>
+            <span class={`status-pill ${(loadPercent() ?? 0) > 80 ? "active" : "online"}`}>
+              {(loadPercent() ?? 0) > 80 ? "hot" : "steady"}
+            </span>
+          </div>
+          <div class="telemetry-bar">
+            <div
+              class="telemetry-bar-fill cyan"
+              style={{ width: `${loadPercent() ?? 0}%` }}
+            />
+          </div>
+          <span class="widget-desc">
+            source: {resource()?.sources.load_1m}
+          </span>
+        </div>
+
+        <div class="telemetry-widget">
+          <span class="widget-label">Free memory</span>
+          <div class="widget-value-row">
+            <strong>{freeGb()?.toFixed(1)} GB</strong>
+            <span class="status-pill active">local</span>
+          </div>
+          <div class="telemetry-bar">
+            <div
+              class="telemetry-bar-fill gold"
+              style={{
+                width: `${Math.min(100, Math.round(((freeGb() ?? 0) / 24) * 100))}%`,
+              }}
+            />
+          </div>
+          <span class="widget-desc">
+            source: {resource()?.sources.free_memory_bytes}
+          </span>
+        </div>
+
+        <div class="telemetry-widget">
+          <span class="widget-label">Local model lane</span>
+          <div class="widget-value-row">
+            <strong>{localLane()}</strong>
+            <span
+              class={`status-pill ${localLane() === "blocked" ? "active" : "online"}`}
+            >
+              {localLane() === "blocked" ? "gated" : "admitted"}
+            </span>
+          </div>
+          <span class="widget-desc">
+            resource policy gates always-on local work
+          </span>
+        </div>
+      </Show>
+    </section>
+  );
+}
+
 function SidebarSection(props: { title: string; items: NavItem[] }): JSX.Element {
   return (
     <section class="sidebar-section">
@@ -310,63 +439,7 @@ export default function App(props: ParentProps): JSX.Element {
 
         <div class="sidecar-body">
           <Show when={inspectorTab() === "telemetry"}>
-            <section class="telemetry-panel">
-              <div class="surface-watch-panel">
-                <div class="surface-watch-header">
-                  <span class="widget-label">Connected surfaces</span>
-                  <span class="status-pill online">watching</span>
-                </div>
-                <div class="surface-signal-list">
-                  <For each={surfaceSignals}>
-                    {(surface) => (
-                      <div class="surface-signal-row">
-                        <div>
-                          <span class="surface-name">{surface.name}</span>
-                          <span class="surface-detail">{surface.detail}</span>
-                        </div>
-                        <span class={`status-pill ${surface.tone}`}>{surface.status}</span>
-                      </div>
-                    )}
-                  </For>
-                </div>
-              </div>
-
-              <div class="telemetry-widget">
-                <span class="widget-label">CPU</span>
-                <div class="widget-value-row">
-                  <strong>14%</strong>
-                  <span class="status-pill online">steady</span>
-                </div>
-                <div class="telemetry-bar">
-                  <div class="telemetry-bar-fill cyan" style={{ width: "14%" }} />
-                </div>
-                <span class="widget-desc">Background loop under budget</span>
-              </div>
-
-              <div class="telemetry-widget">
-                <span class="widget-label">Memory</span>
-                <div class="widget-value-row">
-                  <strong>44%</strong>
-                  <span class="status-pill active">local</span>
-                </div>
-                <div class="telemetry-bar">
-                  <div class="telemetry-bar-fill gold" style={{ width: "44%" }} />
-                </div>
-                <span class="widget-desc">State root: ~/.heiwa/state</span>
-              </div>
-
-              <div class="telemetry-widget">
-                <span class="widget-label">VRAM</span>
-                <div class="widget-value-row">
-                  <strong>5.8 GB</strong>
-                  <span class="status-pill online">Ollama</span>
-                </div>
-                <div class="telemetry-bar">
-                  <div class="telemetry-bar-fill magenta" style={{ width: "36%" }} />
-                </div>
-                <span class="widget-desc">Local model lane available</span>
-              </div>
-            </section>
+            <LiveTelemetryPanel />
           </Show>
 
           <Show when={inspectorTab() === "personalize"}>

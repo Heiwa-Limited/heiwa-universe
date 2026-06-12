@@ -585,7 +585,55 @@ impl TodaySnapshot {
 }
 
 pub(crate) fn today_payload() -> Value {
-    build_today_snapshot().to_value()
+    let mut payload = build_today_snapshot().to_value();
+
+    // Merge the calendar and mail read models so /api/v1/life/today is the
+    // one-call morning brief: schedule pressure + priority mail + approvals.
+    if let Value::Object(ref mut map) = payload {
+        let date = Local::now().date_naive().format("%Y-%m-%d").to_string();
+        let holds = crate::cmd::calendar::holds_for_date(&date);
+        map.insert(
+            "calendar".to_string(),
+            json!({
+                "holds_today": holds.len(),
+                "holds": holds,
+            }),
+        );
+
+        let priority = crate::cmd::mail::priority_rows();
+        let draft_tier = priority
+            .iter()
+            .filter(|row| row.get("action").and_then(Value::as_str) == Some("draft"))
+            .count();
+        map.insert(
+            "mail".to_string(),
+            json!({
+                "priority_count": priority.len(),
+                "draft_tier": draft_tier,
+                "top": priority.into_iter().take(3).collect::<Vec<_>>(),
+            }),
+        );
+    }
+
+    payload
+}
+
+/// Today's dated appointments from the life register, as JSON rows.
+/// Shared with the calendar read model.
+pub(crate) fn appointments_for_today() -> Vec<Value> {
+    let date = Local::now().date_naive().format("%Y-%m-%d").to_string();
+    let register_path = plan_path("current_state_register.md");
+    parse_appointments(&register_path, &date)
+        .into_iter()
+        .filter(|appointment| appointment.date == date)
+        .map(|appointment| {
+            json!({
+                "kind": appointment.kind,
+                "date": appointment.date,
+                "note": appointment.note,
+            })
+        })
+        .collect()
 }
 
 pub(crate) fn freshness_payload() -> Value {

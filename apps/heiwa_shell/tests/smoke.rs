@@ -997,3 +997,113 @@ fn test_capabilities_status_json_reports_catalog_counts() {
         "expected bounded counts object in status: {stdout}"
     );
 }
+
+#[test]
+fn test_calendar_status_json_reports_lanes_and_holds() {
+    let output = Command::new("cargo")
+        .args([
+            "run",
+            "-p",
+            "heiwa-shell",
+            "--bin",
+            "heiwa",
+            "--",
+            "calendar",
+            "status",
+            "--json",
+        ])
+        .output()
+        .expect("failed to execute calendar status");
+
+    assert!(output.status.success());
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        stdout.contains("\"command\":\"calendar summary\""),
+        "expected calendar summary json marker: {stdout}"
+    );
+    assert!(
+        stdout.contains("\"lanes\""),
+        "expected connector lanes in calendar summary: {stdout}"
+    );
+    assert!(
+        stdout.contains("\"holds\""),
+        "expected holds read model in calendar summary: {stdout}"
+    );
+    assert!(
+        stdout.contains("\"heiwa_holds\""),
+        "expected local-first heiwa_holds lane: {stdout}"
+    );
+}
+
+#[test]
+fn test_mail_summary_json_reports_priority_read_model() {
+    let output = Command::new("cargo")
+        .args([
+            "run",
+            "-p",
+            "heiwa-shell",
+            "--bin",
+            "heiwa",
+            "--",
+            "mail",
+            "summary",
+        ])
+        .output()
+        .expect("failed to execute mail summary");
+
+    assert!(output.status.success());
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        stdout.contains("\"command\":\"mail summary\""),
+        "expected mail summary json marker: {stdout}"
+    );
+    assert!(
+        stdout.contains("\"policy\":\"metadata-only-no-body\""),
+        "expected metadata-only policy on summary: {stdout}"
+    );
+    assert!(
+        stdout.contains("\"priority\""),
+        "expected priority rows in mail summary: {stdout}"
+    );
+    assert!(
+        stdout.contains("\"snapshot\""),
+        "expected snapshot probe in mail summary: {stdout}"
+    );
+}
+
+#[test]
+fn test_connect_status_json_reports_unified_registry() {
+    let output = Command::new("cargo")
+        .args([
+            "run",
+            "-p",
+            "heiwa-shell",
+            "--bin",
+            "heiwa",
+            "--",
+            "connect",
+            "status",
+            "--json",
+        ])
+        .output()
+        .expect("failed to execute connect status");
+
+    assert!(output.status.success());
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        stdout.contains("\"connectors\""),
+        "expected connectors array: {stdout}"
+    );
+    assert!(
+        stdout.contains("\"google_calendar\""),
+        "expected google_calendar connector row: {stdout}"
+    );
+    assert!(
+        stdout.contains("\"apple_mail\""),
+        "expected apple_mail connector row: {stdout}"
+    );
+    assert!(
+        stdout.contains("read models before external writes"),
+        "expected read-model-first policy line: {stdout}"
+    );
+}

@@ -1004,7 +1004,7 @@ async fn register_current_device(stdb_client: &heiwa_stdb::StdbClient) -> Result
     Ok(())
 }
 
-fn get_live_model_tiers(
+pub(crate) fn get_live_model_tiers(
     registry: &heiwa_provider::AccountRegistry,
 ) -> Vec<heiwa_bindings::ModelTier> {
     registry
@@ -3054,7 +3054,76 @@ fn is_local_provider(provider: &str) -> bool {
     matches!(provider, "ollama" | "local" | "vllm" | "litellm")
 }
 
-pub(crate) async fn execute_repl_turn(prompt: &str) -> Result<(String, String), String> {
+/// Events emitted by the streaming REPL pipeline, consumed by the SSE
+/// endpoint and collected by the blocking endpoint.
+pub(crate) enum ReplStreamEvent {
+    /// Route decision metadata, sent before any tokens.
+    Route(serde_json::Value),
+    /// One incremental model token.
+    Token(String),
+    /// Terminal event with the structured trace.
+    Done(serde_json::Value),
+    /// Terminal failure.
+    Error(String),
+}
+
+fn route_event_payload(mode: &str, route: Option<&RouteResult>) -> serde_json::Value {
+    match route {
+        Some(route) => serde_json::json!({
+            "mode": mode,
+            "intent": route.intent_key,
+            "provider": route.provider,
+            "model": route.model_id,
+            "provider_model": route.provider_model_id,
+            "rate_group": route.rate_group,
+            "request_id": route.request_id,
+        }),
+        None => serde_json::json!({ "mode": mode }),
+    }
+}
+
+fn repl_trace_payload(
+    mode: &str,
+    route: Option<&RouteResult>,
+    usage: Option<&TokenUsage>,
+    compression: Option<&RouteCompressionMetadata>,
+) -> serde_json::Value {
+    let cost_usd = usage.map(|u| u.cost_usd).unwrap_or(0.0);
+    let (intent, provider, model, rate_group) = match route {
+        Some(route) => (
+            route.intent_key.as_str(),
+            route.provider.as_str(),
+            route.model_id.as_str(),
+            route.rate_group.as_str(),
+        ),
+        None => ("chat", "heiwa", "deterministic", "local"),
+    };
+    serde_json::json!({
+        "intent": intent,
+        "mode": mode,
+        "provider": provider,
+        "model": model,
+        "rate_group": rate_group,
+        "cost_usd": cost_usd,
+        "compression": compression.map(|c| serde_json::json!({
+            "applied": c.applied,
+            "reason": c.reason,
+            "ratio": c.ratio,
+            "estimated_usd_saved": c.estimated_usd_saved,
+        })),
+        "summary": format!(
+            "intent={intent} route={provider}/{model} cost=${cost_usd:.4}{}",
+            compression_trace_suffix(compression)
+        ),
+    })
+}
+
+/// Streaming REPL turn: routes through DREX, persists the transcript exactly
+/// like the blocking path, and emits Route → Token* → Done/Error events.
+pub(crate) async fn execute_repl_turn_streaming(
+    prompt: &str,
+    events: tokio::sync::mpsc::Sender<ReplStreamEvent>,
+) {
     let stdb_client = attempt_stdb_connection().await;
     let mut registry = heiwa_provider::AccountRegistry::load();
     heiwa_provider::detect::auto_discover(&mut registry).await;
@@ -3067,7 +3136,9 @@ pub(crate) async fn execute_repl_turn(prompt: &str) -> Result<(String, String), 
     let transcript_blocks = persisted.blocks();
 
     match route_task(prompt, &pins, &model_tiers) {
-        Err(msg) => Err(msg),
+        Err(msg) => {
+            let _ = events.send(ReplStreamEvent::Error(msg)).await;
+        }
         Ok(RouteOutcome::Deterministic(response)) => {
             let mut state = SessionState {
                 session_id: persisted.session_id.clone(),
@@ -3084,10 +3155,36 @@ pub(crate) async fn execute_repl_turn(prompt: &str) -> Result<(String, String), 
             append_state_block(&mut state, TranscriptBlock::User(prompt.to_string()));
             append_state_block(&mut state, TranscriptBlock::Assistant(response.clone()));
 
-            Ok((response, "intent=chat mode=deterministic".to_string()))
+            let _ = events
+                .send(ReplStreamEvent::Route(route_event_payload(
+                    "deterministic",
+                    None,
+                )))
+                .await;
+            let _ = events.send(ReplStreamEvent::Token(response)).await;
+            let _ = events
+                .send(ReplStreamEvent::Done(repl_trace_payload(
+                    "deterministic",
+                    None,
+                    None,
+                    None,
+                )))
+                .await;
         }
         Ok(RouteOutcome::Routed(route)) => {
             record_route_evidence(&stdb_client, &route, prompt);
+
+            let mode = if is_local_provider(&route.provider) {
+                "local_model"
+            } else {
+                "remote_model"
+            };
+            let _ = events
+                .send(ReplStreamEvent::Route(route_event_payload(
+                    mode,
+                    Some(&route),
+                )))
+                .await;
 
             let prepared = prepare_outbound_prompt_for_route(&route, prompt);
             let messages =
@@ -3119,10 +3216,12 @@ pub(crate) async fn execute_repl_turn(prompt: &str) -> Result<(String, String), 
 
             let mut usage = None;
             let mut full_response = String::new();
+            let mut stream_error: Option<String> = None;
             while let Some(event) = stream_rx.recv().await {
                 match event {
                     StreamEvent::Token(text) => {
                         full_response.push_str(&text);
+                        let _ = events.send(ReplStreamEvent::Token(text)).await;
                     }
                     StreamEvent::Done(u) => {
                         usage = Some(u);
@@ -3130,6 +3229,7 @@ pub(crate) async fn execute_repl_turn(prompt: &str) -> Result<(String, String), 
                     }
                     StreamEvent::Error(e) => {
                         eprintln!("Stream error: {}", e);
+                        stream_error = Some(e);
                         break;
                     }
                     StreamEvent::ToolUse { name, .. } => {
@@ -3147,27 +3247,85 @@ pub(crate) async fn execute_repl_turn(prompt: &str) -> Result<(String, String), 
             );
             record_run_evidence(&stdb_client, &route, usage.as_ref());
 
-            let trace_str = if let Some(ref u) = usage {
-                format!(
-                    "intent={} rank=1 route={}/{} latency=250ms cost=${:.4}{}",
-                    route.intent_key,
-                    route.provider,
-                    route.model_id,
-                    u.cost_usd,
-                    compression_trace_suffix(prepared.compression.as_ref())
-                )
-            } else {
-                format!(
-                    "intent={} rank=1 route={}/{} latency=250ms cost=$0.0000{}",
-                    route.intent_key,
-                    route.provider,
-                    route.model_id,
-                    compression_trace_suffix(prepared.compression.as_ref())
-                )
-            };
-
-            Ok((full_response, trace_str))
+            if let Some(error) = stream_error {
+                if full_response.is_empty() {
+                    let _ = events.send(ReplStreamEvent::Error(error)).await;
+                    return;
+                }
+            }
+            let _ = events
+                .send(ReplStreamEvent::Done(repl_trace_payload(
+                    mode,
+                    Some(&route),
+                    usage.as_ref(),
+                    prepared.compression.as_ref(),
+                )))
+                .await;
         }
+    }
+}
+
+/// Blocking REPL turn used by /api/v1/repl: collects the streaming pipeline
+/// into a single response plus structured trace.
+pub(crate) async fn execute_repl_turn(prompt: &str) -> Result<(String, serde_json::Value), String> {
+    let (tx, mut rx) = tokio::sync::mpsc::channel(64);
+    let prompt_owned = prompt.to_string();
+    tokio::spawn(async move {
+        execute_repl_turn_streaming(&prompt_owned, tx).await;
+    });
+
+    let mut response = String::new();
+    let mut trace = serde_json::Value::Null;
+    while let Some(event) = rx.recv().await {
+        match event {
+            ReplStreamEvent::Route(_) => {}
+            ReplStreamEvent::Token(text) => response.push_str(&text),
+            ReplStreamEvent::Done(value) => {
+                trace = value;
+                break;
+            }
+            ReplStreamEvent::Error(message) => return Err(message),
+        }
+    }
+    Ok((response, trace))
+}
+
+/// JSON route preview for POST /api/v1/route/preview: full auto-discovery,
+/// quota admission, and the DREX decision without executing anything.
+pub(crate) async fn preview_route_payload(prompt: &str) -> serde_json::Value {
+    let mut registry = heiwa_provider::AccountRegistry::load();
+    heiwa_provider::detect::auto_discover(&mut registry).await;
+    let model_tiers = get_live_model_tiers(&registry);
+    let pins = SessionPins::new();
+    let now_unix = Utc::now().timestamp();
+    let quota_ledger = open_default_quota_ledger();
+    let quota = quota_budget_preview_lines(&model_tiers, quota_ledger.as_ref(), now_unix);
+
+    match route_task_with_quota(prompt, &pins, &model_tiers, quota_ledger.as_ref(), now_unix) {
+        Ok(RouteOutcome::Deterministic(response)) => serde_json::json!({
+            "mode": "deterministic",
+            "response": response,
+            "quota": quota,
+        }),
+        Ok(RouteOutcome::Routed(route)) => {
+            let metadata = serde_json::from_str::<serde_json::Value>(&route.routing_metadata)
+                .unwrap_or(serde_json::Value::String(route.routing_metadata.clone()));
+            serde_json::json!({
+                "mode": if is_local_provider(&route.provider) { "local_model" } else { "remote_model" },
+                "intent": route.intent_key,
+                "provider": route.provider,
+                "model": route.model_id,
+                "provider_model": route.provider_model_id,
+                "rate_group": route.rate_group,
+                "metadata": metadata,
+                "quota": quota,
+            })
+        }
+        Err(error) => serde_json::json!({
+            "mode": "unavailable",
+            "error": error,
+            "quota": quota,
+        }),
     }
 }
 
