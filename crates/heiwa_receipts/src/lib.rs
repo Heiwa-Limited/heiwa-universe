@@ -34,8 +34,7 @@ const MIGRATION_0002_SQL: &str = include_str!("../migrations/0002_hash_chain.sql
 
 /// Genesis predecessor for the first receipt in a chain: SHA-256's width in
 /// zero bytes, hex-encoded.
-pub const GENESIS_HASH: &str =
-    "0000000000000000000000000000000000000000000000000000000000000000";
+pub const GENESIS_HASH: &str = "0000000000000000000000000000000000000000000000000000000000000000";
 
 #[derive(Debug, Error)]
 pub enum ReceiptError {
@@ -50,7 +49,11 @@ pub enum ReceiptError {
     #[error("invalid env: {0}")]
     InvalidEnv(String),
     #[error("rate not found: env={env:?} provider={provider} model={model}")]
-    RateNotFound { env: Env, provider: String, model: String },
+    RateNotFound {
+        env: Env,
+        provider: String,
+        model: String,
+    },
     #[error("invalid schema version: found {found}, expected {expected}")]
     SchemaVersion { found: i64, expected: i64 },
     #[error("store lock poisoned")]
@@ -247,7 +250,11 @@ pub fn entry_hash(r: &Receipt, prev_hash: &str) -> String {
     let _ = writeln!(p, "tokens_out={}", r.tokens_out);
     let _ = writeln!(p, "latency_ms={}", r.latency_ms);
     let _ = writeln!(p, "actual_cost_cad={:.6}", r.actual_cost_cad);
-    let _ = writeln!(p, "counterfactual_cost_cad={:.6}", r.counterfactual_cost_cad);
+    let _ = writeln!(
+        p,
+        "counterfactual_cost_cad={:.6}",
+        r.counterfactual_cost_cad
+    );
     lp(&mut p, "session_id", &r.session_id);
     lp(&mut p, "parent_id", r.parent_id.as_deref().unwrap_or(""));
 
@@ -506,7 +513,11 @@ impl ReceiptStore {
     pub fn get(&self, id: &str) -> Result<Option<Receipt>> {
         let conn = self.lock()?;
         let row = conn
-            .query_row("SELECT * FROM receipts WHERE id = ?1", params![id], row_to_receipt)
+            .query_row(
+                "SELECT * FROM receipts WHERE id = ?1",
+                params![id],
+                row_to_receipt,
+            )
             .optional()?;
         Ok(row)
     }
@@ -825,7 +836,10 @@ mod tests {
         for e in [Env::Local, Env::Oauth, Env::Api] {
             assert_eq!(Env::parse(e.as_str()).unwrap(), e);
         }
-        assert!(matches!(Env::parse("invalid"), Err(ReceiptError::InvalidEnv(_))));
+        assert!(matches!(
+            Env::parse("invalid"),
+            Err(ReceiptError::InvalidEnv(_))
+        ));
     }
 
     #[test]
@@ -841,7 +855,13 @@ mod tests {
         "#;
         let table = RateTable::from_toml_str(rates).unwrap();
         let costs = table
-            .compute(Env::Oauth, "claude-code", "claude-sonnet-4-6", 1_000_000, 200_000)
+            .compute(
+                Env::Oauth,
+                "claude-code",
+                "claude-sonnet-4-6",
+                1_000_000,
+                200_000,
+            )
             .unwrap();
         // 1M input @ 0 + 200k output @ 0 = 0 actual
         assert!((costs.actual_cad - 0.0).abs() < 1e-9);
@@ -897,7 +917,11 @@ mod tests {
     fn entry_hash_is_deterministic_prev_sensitive_and_hex256() {
         let r = chain_sample(7);
         let h = entry_hash(&r, GENESIS_HASH);
-        assert_eq!(h, entry_hash(&r, GENESIS_HASH), "pure: same inputs, same digest");
+        assert_eq!(
+            h,
+            entry_hash(&r, GENESIS_HASH),
+            "pure: same inputs, same digest"
+        );
         assert_eq!(h.len(), 64, "sha-256 is 32 bytes = 64 hex chars");
         assert!(h.chars().all(|c| c.is_ascii_hexdigit()));
         assert_ne!(

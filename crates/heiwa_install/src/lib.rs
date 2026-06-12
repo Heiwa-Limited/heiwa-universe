@@ -463,6 +463,10 @@ fn write_home_app_launcher(heiwa_dir: &Path) -> Result<()> {
 }
 
 fn write_home_app_launcher_internal(heiwa_dir: &Path) -> Result<()> {
+    if let Some(desktop_bundle) = find_built_desktop_app_bundle() {
+        return install_built_desktop_app_bundle(heiwa_dir, &desktop_bundle);
+    }
+
     let bundle_root = heiwa_dir.join("app").join("Heiwa.app");
     let contents_dir = bundle_root.join("Contents");
     let macos_dir = contents_dir.join("MacOS");
@@ -533,6 +537,87 @@ exec "{app_executable}" "$@"
     #[cfg(unix)]
     fs::set_permissions(&bin_launcher_path, fs::Permissions::from_mode(0o755))?;
 
+    Ok(())
+}
+
+fn find_built_desktop_app_bundle() -> Option<PathBuf> {
+    let repo_root = get_repo_root();
+    let candidate = repo_root
+        .join("target")
+        .join("release")
+        .join("bundle")
+        .join("macos")
+        .join("Heiwa.app");
+    if candidate
+        .join("Contents")
+        .join("MacOS")
+        .join("Heiwa")
+        .is_file()
+    {
+        Some(candidate)
+    } else {
+        None
+    }
+}
+
+fn install_built_desktop_app_bundle(heiwa_dir: &Path, desktop_bundle: &Path) -> Result<()> {
+    let app_root = heiwa_dir.join("app");
+    let target_bundle = app_root.join("Heiwa.app");
+    if target_bundle.exists() {
+        fs::remove_dir_all(&target_bundle).with_context(|| {
+            format!("remove old Heiwa.app bundle at {}", target_bundle.display())
+        })?;
+    }
+    fs::create_dir_all(&app_root)?;
+    copy_dir_all(desktop_bundle, &target_bundle).with_context(|| {
+        format!(
+            "install Tauri Heiwa.app from {} to {}",
+            desktop_bundle.display(),
+            target_bundle.display()
+        )
+    })?;
+
+    let executable_path = target_bundle.join("Contents").join("MacOS").join("Heiwa");
+    if !executable_path.is_file() {
+        return Err(anyhow!(
+            "Tauri Heiwa.app bundle missing executable: {}",
+            executable_path.display()
+        ));
+    }
+    #[cfg(unix)]
+    fs::set_permissions(&executable_path, fs::Permissions::from_mode(0o755))?;
+
+    let bin_launcher_path = heiwa_dir.join("bin").join("heiwa-app");
+    fs::create_dir_all(bin_launcher_path.parent().expect("launcher parent"))?;
+    let bin_launcher = format!(
+        r#"#!/bin/zsh
+set -euo pipefail
+
+exec "{app_executable}" "$@"
+"#,
+        app_executable = executable_path.display()
+    );
+    fs::write(&bin_launcher_path, bin_launcher)?;
+    #[cfg(unix)]
+    fs::set_permissions(&bin_launcher_path, fs::Permissions::from_mode(0o755))?;
+    Ok(())
+}
+
+fn copy_dir_all(source: &Path, target: &Path) -> Result<()> {
+    fs::create_dir_all(target)?;
+    for entry in fs::read_dir(source)? {
+        let entry = entry?;
+        let file_type = entry.file_type()?;
+        let source_path = entry.path();
+        let target_path = target.join(entry.file_name());
+        if file_type.is_dir() {
+            copy_dir_all(&source_path, &target_path)?;
+        } else if file_type.is_file() {
+            fs::copy(&source_path, &target_path)?;
+            #[cfg(unix)]
+            fs::set_permissions(&target_path, entry.metadata()?.permissions())?;
+        }
+    }
     Ok(())
 }
 
@@ -722,6 +807,47 @@ mod tests {
             report.missing()
         );
         assert!(report.missing().is_empty());
+        Ok(())
+    }
+
+    #[test]
+    fn test_install_built_desktop_app_bundle_copies_tauri_bundle_and_shim() -> Result<()> {
+        let tmp = tempdir()?;
+        let heiwa_dir = tmp.path().join(".heiwa");
+        fs::create_dir_all(heiwa_dir.join("bin"))?;
+
+        let source_bundle = tmp.path().join("target/release/bundle/macos/Heiwa.app");
+        let source_macos = source_bundle.join("Contents").join("MacOS");
+        fs::create_dir_all(&source_macos)?;
+        fs::write(
+            source_bundle.join("Contents").join("Info.plist"),
+            "tauri plist",
+        )?;
+        fs::write(source_macos.join("Heiwa"), "tauri binary")?;
+
+        install_built_desktop_app_bundle(&heiwa_dir, &source_bundle)?;
+
+        let installed_bundle = heiwa_dir.join("app").join("Heiwa.app");
+        assert_eq!(
+            fs::read_to_string(installed_bundle.join("Contents").join("Info.plist"))?,
+            "tauri plist"
+        );
+        assert_eq!(
+            fs::read_to_string(
+                installed_bundle
+                    .join("Contents")
+                    .join("MacOS")
+                    .join("Heiwa")
+            )?,
+            "tauri binary"
+        );
+
+        let shim = fs::read_to_string(heiwa_dir.join("bin").join("heiwa-app"))?;
+        assert!(
+            shim.contains("Contents/MacOS/Heiwa"),
+            "shim launches Tauri app: {shim}"
+        );
+        assert!(shim.starts_with("#!/bin/zsh"));
         Ok(())
     }
 

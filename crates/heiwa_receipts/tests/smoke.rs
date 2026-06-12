@@ -51,15 +51,46 @@ output_per_mtok_cad = 20.25
 /// Build the marketing-demo dataset as actual Receipts in the store.
 fn seed(store: &ReceiptStore, rates: &RateTable, session: &str) {
     let entries = [
-        (Env::Local, "ollama", "qwen3.5:9b", "coding", 80_000_i64, 12_400_i64),
-        (Env::Oauth, "claude-code", "claude-sonnet-4-6", "strategy", 40_000, 7_100),
-        (Env::Oauth, "codex", "gpt-5-codex", "refactor", 24_000, 4_900),
-        (Env::Api, "openrouter", "claude-3.7-sonnet", "trading", 9_000, 3_000),
+        (
+            Env::Local,
+            "ollama",
+            "qwen3.5:9b",
+            "coding",
+            80_000_i64,
+            12_400_i64,
+        ),
+        (
+            Env::Oauth,
+            "claude-code",
+            "claude-sonnet-4-6",
+            "strategy",
+            40_000,
+            7_100,
+        ),
+        (
+            Env::Oauth,
+            "codex",
+            "gpt-5-codex",
+            "refactor",
+            24_000,
+            4_900,
+        ),
+        (
+            Env::Api,
+            "openrouter",
+            "claude-3.7-sonnet",
+            "trading",
+            9_000,
+            3_000,
+        ),
         (Env::Local, "ollama", "qwen3.5:4b", "summarise", 3_500, 700),
     ];
 
     for (i, (env, provider, model, agent, tin, tout)) in entries.iter().enumerate() {
-        let Costs { actual_cad, counterfactual_cad } = rates
+        let Costs {
+            actual_cad,
+            counterfactual_cad,
+        } = rates
             .compute(*env, provider, model, *tin, *tout)
             .expect("rate lookup");
         let r = Receipt::new(

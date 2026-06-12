@@ -437,6 +437,98 @@ fn test_app_update_checkout_source_reports_dev_reinstall_target() {
 }
 
 #[test]
+fn test_app_update_checkout_dry_run_json_reports_promotion_contract() {
+    let output = Command::new("cargo")
+        .args([
+            "run",
+            "-p",
+            "heiwa-shell",
+            "--bin",
+            "heiwa",
+            "--",
+            "app",
+            "update",
+            "--source",
+            "checkout",
+            "--dry-run",
+            "--json",
+        ])
+        .output()
+        .expect("failed to execute app update checkout dry-run json");
+
+    assert!(output.status.success());
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let payload: serde_json::Value = serde_json::from_str(&stdout)
+        .unwrap_or_else(|err| panic!("expected JSON update plan, got {err}: {stdout}"));
+
+    assert_eq!(
+        payload.get("command").and_then(serde_json::Value::as_str),
+        Some("app update")
+    );
+    assert_eq!(
+        payload
+            .get("source_mode")
+            .and_then(serde_json::Value::as_str),
+        Some("checkout-dev")
+    );
+    assert_eq!(
+        payload.get("dry_run").and_then(serde_json::Value::as_bool),
+        Some(true)
+    );
+    assert_eq!(
+        payload
+            .get("restart_policy")
+            .and_then(serde_json::Value::as_str),
+        Some("prompt-before-restart")
+    );
+    assert!(payload
+        .get("source")
+        .and_then(serde_json::Value::as_str)
+        .is_some_and(|source| source.ends_with("heiwa-universe")));
+    assert!(payload
+        .get("source_branch")
+        .and_then(serde_json::Value::as_str)
+        .is_some());
+    assert!(payload
+        .get("source_commit")
+        .and_then(serde_json::Value::as_str)
+        .is_some());
+    assert!(payload
+        .get("source_dirty")
+        .and_then(serde_json::Value::as_bool)
+        .is_some());
+    assert!(payload
+        .get("installed_bin")
+        .and_then(serde_json::Value::as_str)
+        .is_some_and(|path| path.ends_with("/.heiwa/bin/heiwa")));
+    assert!(payload
+        .get("installed_app")
+        .and_then(serde_json::Value::as_str)
+        .is_some_and(|path| path.ends_with("/.heiwa/app/Heiwa.app")));
+    assert!(payload
+        .get("app_bundle_update")
+        .and_then(serde_json::Value::as_object)
+        .and_then(|update| update.get("wired").and_then(serde_json::Value::as_bool))
+        .is_some());
+    assert!(payload
+        .get("install_command")
+        .and_then(serde_json::Value::as_array)
+        .is_some());
+    assert!(payload
+        .get("verification_commands")
+        .and_then(serde_json::Value::as_array)
+        .is_some());
+    assert!(payload
+        .get("active_work")
+        .and_then(serde_json::Value::as_object)
+        .is_some());
+    assert!(payload
+        .get("receipt_preview")
+        .and_then(serde_json::Value::as_object)
+        .is_some());
+}
+
+#[test]
 fn test_doctor_json_reports_runtimes_providers_and_app_probe() {
     let output = Command::new("cargo")
         .args([

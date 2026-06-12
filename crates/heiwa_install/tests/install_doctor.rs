@@ -142,12 +142,20 @@ fn test_install_creates_runtime_layout_and_canonical_launcher() {
             "expected HOME-local Heiwa.app executable launcher"
         );
 
-        let app_launcher = fs::read_to_string(&app_executable).expect("read app executable");
-        assert!(
-            app_launcher.contains("app start"),
-            "Heiwa.app launcher should start the local app runtime: {}",
-            app_launcher
-        );
+        let app_executable_bytes = fs::read(&app_executable).expect("read app executable");
+        if let Ok(app_launcher) = String::from_utf8(app_executable_bytes.clone()) {
+            assert!(
+                app_launcher.contains("app start"),
+                "Heiwa.app launcher should start the local app runtime: {}",
+                app_launcher
+            );
+        } else {
+            assert!(
+                app_executable_bytes.starts_with(&[0xcf, 0xfa, 0xed, 0xfe])
+                    || app_executable_bytes.starts_with(&[0xca, 0xfe, 0xba, 0xbe]),
+                "Tauri Heiwa.app executable should be a Mach-O binary"
+            );
+        }
 
         let bin_app = runtime_root.join("bin").join("heiwa-app");
         assert!(

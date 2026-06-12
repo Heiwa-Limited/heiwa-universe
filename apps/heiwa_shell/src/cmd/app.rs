@@ -1,6 +1,7 @@
 use anyhow::{anyhow, Result};
 use base64::engine::general_purpose::STANDARD as BASE64;
 use base64::Engine;
+use heiwa_protocol::{ExecutionScope, RiskClass, ToolLease};
 use heiwa_resource::{ResourcePolicy, ResourceSnapshot, ThermalPressure, WorkClass};
 use serde::Serialize;
 use serde_json::{json, Value};
@@ -71,32 +72,52 @@ fn update(args: &[String]) -> Result<()> {
     }
 
     let dry_run = has_flag(args, "--dry-run");
+    let json_output = has_flag(args, "--json");
     let source = flag_value(args, "--source").unwrap_or_else(|| "github".to_string());
 
     match source.as_str() {
-        "github" => update_from_github_release(dry_run),
-        "checkout" => update_from_checkout(dry_run),
+        "github" => update_from_github_release(dry_run, json_output),
+        "checkout" => update_from_checkout(dry_run, json_output),
         other => Err(anyhow!(
             "invalid --source value: {other} (expected github or checkout)"
         )),
     }
 }
 
-fn update_from_github_release(dry_run: bool) -> Result<()> {
+fn update_from_github_release(dry_run: bool, json_output: bool) -> Result<()> {
     let install_root = heiwa_install::get_heiwa_dir();
-    println!("heiwa app update");
-    println!("  source_mode: github-release");
-    println!("  source: {GITHUB_RELEASES_URL}");
-    println!("  release_api: {GITHUB_LATEST_RELEASE_API}");
-    println!("  platform: {}", github_release_platform());
-    println!(
-        "  target: {}",
-        install_root.join("bin").join("heiwa").display()
-    );
-    println!("  restart_policy: prompt-before-restart");
-    if dry_run {
-        println!("  dry_run: true");
-        return Ok(());
+    let installed_bin = install_root.join("bin").join("heiwa");
+    if json_output {
+        println!(
+            "{}",
+            json!({
+                "command": "app update",
+                "source_mode": "github-release",
+                "source": GITHUB_RELEASES_URL,
+                "release_api": GITHUB_LATEST_RELEASE_API,
+                "platform": github_release_platform(),
+                "installed_bin": installed_bin.display().to_string(),
+                "restart_policy": "prompt-before-restart",
+                "dry_run": dry_run,
+                "implemented": false,
+                "blocker": "GitHub release update awaits release asset verification",
+            })
+        );
+        if dry_run {
+            return Ok(());
+        }
+    } else {
+        println!("heiwa app update");
+        println!("  source_mode: github-release");
+        println!("  source: {GITHUB_RELEASES_URL}");
+        println!("  release_api: {GITHUB_LATEST_RELEASE_API}");
+        println!("  platform: {}", github_release_platform());
+        println!("  target: {}", installed_bin.display());
+        println!("  restart_policy: prompt-before-restart");
+        if dry_run {
+            println!("  dry_run: true");
+            return Ok(());
+        }
     }
 
     Err(anyhow!(
@@ -104,7 +125,7 @@ fn update_from_github_release(dry_run: bool) -> Result<()> {
     ))
 }
 
-fn update_from_checkout(dry_run: bool) -> Result<()> {
+fn update_from_checkout(dry_run: bool, json_output: bool) -> Result<()> {
     let repo_root = find_repo_root(env::current_dir()?)
         .ok_or_else(|| anyhow!("heiwa app update must run from a heiwa-universe checkout"))?;
     let shell_manifest = repo_root
@@ -119,35 +140,79 @@ fn update_from_checkout(dry_run: bool) -> Result<()> {
     }
 
     let install_root = heiwa_install::get_heiwa_dir();
-    let mut command = Command::new("cargo");
-    command
+    let installed_bin = install_root.join("bin").join("heiwa");
+    let installed_app = install_root.join("app").join("Heiwa.app");
+    let install_command = vec![
+        "cargo".to_string(),
+        "install".to_string(),
+        "--path".to_string(),
+        repo_root
+            .join("apps")
+            .join("heiwa_shell")
+            .display()
+            .to_string(),
+        "--root".to_string(),
+        install_root.display().to_string(),
+        "--locked".to_string(),
+        "--force".to_string(),
+    ];
+    let plan = checkout_update_plan(
+        &repo_root,
+        &installed_bin,
+        &installed_app,
+        dry_run,
+        &install_command,
+    );
+
+    if json_output {
+        println!("{}", serde_json::to_string(&plan)?);
+    } else {
+        println!("heiwa app update");
+        println!("  source_mode: checkout-dev");
+        println!("  source: {}", repo_root.display());
+        println!(
+            "  source_branch: {}",
+            plan["source_branch"].as_str().unwrap_or("unknown")
+        );
+        println!(
+            "  source_commit: {}",
+            plan["source_commit"].as_str().unwrap_or("unknown")
+        );
+        println!(
+            "  source_dirty: {}",
+            plan["source_dirty"].as_bool().unwrap_or(false)
+        );
+        println!("  official_source: GitHub Releases");
+        println!("  target: {}", installed_bin.display());
+        println!("  restart_policy: prompt-before-restart");
+        println!(
+            "  command: cargo install --path apps/heiwa_shell --root ~/.heiwa --locked --force"
+        );
+        if dry_run {
+            println!("  dry_run: true");
+            return Ok(());
+        }
+    }
+
+    if dry_run {
+        return Ok(());
+    }
+
+    let status = Command::new("cargo")
         .arg("install")
         .arg("--path")
         .arg(repo_root.join("apps").join("heiwa_shell"))
         .arg("--root")
         .arg(&install_root)
         .arg("--locked")
-        .arg("--force");
-
-    println!("heiwa app update");
-    println!("  source_mode: checkout-dev");
-    println!("  source: {}", repo_root.display());
-    println!("  official_source: GitHub Releases");
-    println!(
-        "  target: {}",
-        install_root.join("bin").join("heiwa").display()
-    );
-    println!("  command: cargo install --path apps/heiwa_shell --root ~/.heiwa --locked --force");
-    if dry_run {
-        println!("  dry_run: true");
-        return Ok(());
-    }
-
-    let status = command.status()?;
+        .arg("--force")
+        .status()?;
     if !status.success() {
         return Err(anyhow!("cargo install failed with status {status}"));
     }
-    println!("  status: updated");
+    if !json_output {
+        println!("  status: updated");
+    }
     Ok(())
 }
 
@@ -157,6 +222,129 @@ fn github_release_platform() -> &'static str {
         ("linux", "x86_64") => "linux-x86_64",
         ("windows", "x86_64") => "windows-x86_64",
         _ => "unsupported",
+    }
+}
+
+fn checkout_update_plan(
+    repo_root: &Path,
+    installed_bin: &Path,
+    installed_app: &Path,
+    dry_run: bool,
+    install_command: &[String],
+) -> Value {
+    let state = RuntimeStatus::detect();
+    let pending_approvals = state
+        .approvals_summary
+        .get("pending")
+        .and_then(Value::as_i64)
+        .unwrap_or(0);
+    let live_workers = state
+        .workers_summary
+        .get("live")
+        .and_then(Value::as_i64)
+        .unwrap_or(0);
+    let blocking = pending_approvals > 0;
+    let receipt_id = format!(
+        "heiwa-app-update-{}",
+        chrono::Utc::now().format("%Y%m%dT%H%M%SZ")
+    );
+
+    json!({
+        "command": "app update",
+        "source_mode": "checkout-dev",
+        "source": repo_root.display().to_string(),
+        "source_branch": git_output(repo_root, &["branch", "--show-current"])
+            .unwrap_or_else(|| "unknown".to_string()),
+        "source_commit": git_output(repo_root, &["rev-parse", "--short", "HEAD"])
+            .unwrap_or_else(|| "unknown".to_string()),
+        "source_dirty": git_is_dirty(repo_root),
+        "official_source": "GitHub Releases",
+        "installed_bin": installed_bin.display().to_string(),
+        "installed_version": installed_heiwa_version(installed_bin),
+        "installed_app": installed_app.display().to_string(),
+        "installed_app_present": installed_app.join("Contents").join("MacOS").join("Heiwa").is_file(),
+        "desktop_bundle_source": desktop_bundle_source(repo_root),
+        "app_bundle_update": {
+            "wired": false,
+            "blocker": "checkout update currently installs ~/.heiwa/bin/heiwa only; Heiwa.app bundle promotion is still handled by install/app-bundle logic and needs explicit update wiring plus receipt",
+        },
+        "install_command": install_command,
+        "restart_policy": "prompt-before-restart",
+        "restart_required": true,
+        "dry_run": dry_run,
+        "active_work": {
+            "pending_approvals": pending_approvals,
+            "live_workers": live_workers,
+            "blocking_restart": blocking,
+            "classification": if blocking { "blocking" } else { "none_or_pausable" },
+        },
+        "verification_commands": [
+            "heiwa doctor",
+            "heiwa app runtime status --json",
+            "curl -fsS http://127.0.0.1:7474/status/health",
+        ],
+        "receipt_preview": {
+            "receipt_id": receipt_id,
+            "plane": "evidence",
+            "event": "heiwa.app.update.checkout",
+            "source": repo_root.display().to_string(),
+            "target": installed_bin.display().to_string(),
+            "would_write": !dry_run,
+        },
+    })
+}
+
+fn desktop_bundle_source(repo_root: &Path) -> Value {
+    let bundle = repo_root
+        .join("target")
+        .join("release")
+        .join("bundle")
+        .join("macos")
+        .join("Heiwa.app");
+    let executable = bundle.join("Contents").join("MacOS").join("Heiwa");
+    json!({
+        "path": bundle.display().to_string(),
+        "present": executable.is_file(),
+        "executable": executable.display().to_string(),
+    })
+}
+
+fn git_output(repo_root: &Path, args: &[&str]) -> Option<String> {
+    let output = Command::new("git")
+        .args(args)
+        .current_dir(repo_root)
+        .output()
+        .ok()?;
+    if !output.status.success() {
+        return None;
+    }
+    let value = String::from_utf8_lossy(&output.stdout).trim().to_string();
+    if value.is_empty() {
+        None
+    } else {
+        Some(value)
+    }
+}
+
+fn git_is_dirty(repo_root: &Path) -> bool {
+    git_output(repo_root, &["status", "--porcelain=v1"])
+        .is_some_and(|status| !status.trim().is_empty())
+}
+
+fn installed_heiwa_version(installed_bin: &Path) -> Value {
+    let output = Command::new(installed_bin).arg("--version").output();
+    match output {
+        Ok(output) if output.status.success() => {
+            json!(String::from_utf8_lossy(&output.stdout).trim())
+        }
+        Ok(output) => json!({
+            "status": "error",
+            "stderr": String::from_utf8_lossy(&output.stderr).trim(),
+        }),
+        Err(err) => json!({
+            "status": "unavailable",
+            "error": err.to_string(),
+        }),
     }
 }
 
@@ -945,11 +1133,7 @@ fn capabilities_payload_for_state_dir(state_dir: &Path) -> Value {
     let capabilities_dir = state_dir.join("capabilities");
     let mut catalogs = Vec::new();
     let Ok(entries) = fs::read_dir(&capabilities_dir) else {
-        return json!({
-            "catalogs": [],
-            "latest": Value::Null,
-            "path": capabilities_dir.display().to_string(),
-        });
+        return capabilities_payload_with_catalogs(&capabilities_dir, catalogs);
     };
 
     for entry in entries.flatten() {
@@ -994,13 +1178,123 @@ fn capabilities_payload_for_state_dir(state_dir: &Path) -> Value {
         let b_id = b.get("catalog_id").and_then(Value::as_str).unwrap_or("");
         b_id.cmp(a_id)
     });
+    capabilities_payload_with_catalogs(&capabilities_dir, catalogs)
+}
+
+fn capabilities_payload_with_catalogs(capabilities_dir: &Path, catalogs: Vec<Value>) -> Value {
     let latest = catalogs.first().cloned().unwrap_or(Value::Null);
+    let tools = tool_call_contracts();
+    let executable_tools = tools
+        .iter()
+        .filter(|tool| tool.get("execution_state").and_then(Value::as_str) == Some("executable"))
+        .count();
 
     json!({
         "catalogs": catalogs,
         "latest": latest,
         "path": capabilities_dir.display().to_string(),
+        "tool_call_contract_version": "heiwa_tool_call_contract_v1",
+        "tools": tools,
+        "tool_counts": {
+            "total": tools.len(),
+            "executable": executable_tools,
+            "target_only": tools.len().saturating_sub(executable_tools),
+        },
     })
+}
+
+fn tool_call_contracts() -> Vec<Value> {
+    let mut scope =
+        ExecutionScope::local_default(env::current_dir().unwrap_or_else(|_| PathBuf::from(".")));
+    for name in ["fs.list", "fs.read", "repo.grep"] {
+        scope.tool_leases.push(ToolLease {
+            name: name.to_string(),
+            risk_class: RiskClass::HostSafeReadonly,
+            allowed: true,
+        });
+    }
+
+    let registry = heiwa_mcp::local_repo_registry(scope);
+    let mut tools: Vec<Value> = registry
+        .names()
+        .into_iter()
+        .map(|name| {
+            json!({
+                "id": name,
+                "name": name,
+                "plane": "evidence",
+                "kind": "local_mcp_tool",
+                "execution_state": "executable",
+                "risk_class": "host_safe_readonly",
+                "lease_required": true,
+                "approval_class": "auto_allowed_readonly",
+                "adapter": "heiwa_mcp::local_repo_registry",
+                "description": registry.description(name).unwrap_or(""),
+                "input_schema": registry
+                    .schema(name)
+                    .and_then(|schema| serde_json::to_value(schema).ok())
+                    .unwrap_or_else(|| json!({})),
+                "evidence": {
+                    "receipt": "ToolCallReceipt",
+                    "status_values": ["success", "failure", "denied"],
+                },
+            })
+        })
+        .collect();
+
+    tools.extend([
+        json!({
+            "id": "shell.run",
+            "name": "shell.run",
+            "plane": "execution",
+            "kind": "shell_tool",
+            "execution_state": "declared_no_adapter",
+            "risk_class": "host_mutating",
+            "lease_required": true,
+            "approval_class": "approval_required",
+            "adapter": null,
+            "description": "Shell work is a product target and a REPL lease exists, but no agentic local MCP shell adapter is wired yet.",
+            "next": "Add bounded shell capability registry before exposing model-initiated shell calls.",
+        }),
+        json!({
+            "id": "browser.isolated",
+            "name": "browser.isolated",
+            "plane": "intake",
+            "kind": "browser_tool",
+            "execution_state": "target_only",
+            "risk_class": "sandbox_required",
+            "lease_required": true,
+            "approval_class": "approval_required_for_logged_in_or_form_submit",
+            "adapter": null,
+            "description": "Isolated browser task lane is required for product parity but is not wired in this runtime API yet.",
+        }),
+        json!({
+            "id": "computer.use",
+            "name": "computer.use",
+            "plane": "execution",
+            "kind": "computer_use_tool",
+            "execution_state": "target_only",
+            "risk_class": "sandbox_required",
+            "lease_required": true,
+            "approval_class": "approval_required",
+            "adapter": null,
+            "description": "Full computer use is target work and must stage side effects before execution.",
+        }),
+        json!({
+            "id": "calendar.read",
+            "name": "calendar.read",
+            "plane": "intake",
+            "kind": "connector_tool",
+            "execution_state": "target_only",
+            "risk_class": "host_safe_readonly",
+            "lease_required": true,
+            "approval_class": "connector_auth_required",
+            "adapter": null,
+            "description": "Calendar/scheduling is target Intake work; no product-grade connector adapter is wired here yet.",
+        }),
+    ]);
+
+    tools
 }
 
 fn load_1m() -> (f32, &'static str) {
@@ -1102,8 +1396,15 @@ fn parse_vm_stat_page_size(raw: &str) -> Option<u64> {
 fn parse_vm_stat_pages(raw: &str, label: &str) -> u64 {
     raw.lines()
         .find_map(|line| {
-            let rest = line.trim().strip_prefix(label)?.trim_start_matches(':').trim();
-            rest.trim_end_matches('.').replace('.', "").parse::<u64>().ok()
+            let rest = line
+                .trim()
+                .strip_prefix(label)?
+                .trim_start_matches(':')
+                .trim();
+            rest.trim_end_matches('.')
+                .replace('.', "")
+                .parse::<u64>()
+                .ok()
         })
         .unwrap_or(0)
 }
@@ -2424,8 +2725,8 @@ mod app_readmodel_tests {
 
     #[test]
     fn resource_api_payload_reports_snapshot_policy_and_admissions() {
-        let payload = api_payload("/api/v1/resource", "2026-06-02T00:00:00Z")
-            .expect("resource endpoint");
+        let payload =
+            api_payload("/api/v1/resource", "2026-06-02T00:00:00Z").expect("resource endpoint");
         let data = payload.get("data").expect("data");
 
         assert!(
@@ -2471,8 +2772,8 @@ The system has 25769803776 (1572864 pages with a page size of 16384).
 System-wide memory free percentage: 53%
 ";
 
-        let bytes = parse_macos_memory_pressure_available_bytes(raw)
-            .expect("parse memory_pressure output");
+        let bytes =
+            parse_macos_memory_pressure_available_bytes(raw).expect("parse memory_pressure output");
 
         assert_eq!(bytes, 13_657_996_001);
     }
@@ -2514,9 +2815,7 @@ System-wide memory free percentage: 53%
             Some("local-capability-inventory-2026-06-03")
         );
         assert_eq!(
-            catalogs[0]
-                .get("schema_version")
-                .and_then(Value::as_str),
+            catalogs[0].get("schema_version").and_then(Value::as_str),
             Some("heiwa_local_capability_inventory_v1")
         );
         assert_eq!(
@@ -2526,9 +2825,7 @@ System-wide memory free percentage: 53%
             Some(2)
         );
         assert_eq!(
-            catalogs[0]
-                .get("codex_mcp_servers")
-                .and_then(Value::as_u64),
+            catalogs[0].get("codex_mcp_servers").and_then(Value::as_u64),
             Some(3)
         );
         assert_eq!(
@@ -2538,9 +2835,7 @@ System-wide memory free percentage: 53%
             Some(3)
         );
         assert_eq!(
-            catalogs[0]
-                .get("reference_sources")
-                .and_then(Value::as_u64),
+            catalogs[0].get("reference_sources").and_then(Value::as_u64),
             Some(2)
         );
         assert_eq!(
@@ -2550,9 +2845,7 @@ System-wide memory free percentage: 53%
             Some(3)
         );
         assert_eq!(
-            catalogs[0]
-                .get("runtime_targets")
-                .and_then(Value::as_u64),
+            catalogs[0].get("runtime_targets").and_then(Value::as_u64),
             Some(3)
         );
         assert_eq!(
@@ -2560,6 +2853,53 @@ System-wide memory free percentage: 53%
                 .get("performance_targets")
                 .and_then(Value::as_u64),
             Some(2)
+        );
+
+        let _ = fs::remove_dir_all(&state);
+    }
+
+    #[test]
+    fn capability_payload_exposes_tool_call_contract() {
+        let state = temp_state_dir("capability-tools");
+        let payload = capabilities_payload_for_state_dir(&state);
+
+        let tools = payload
+            .get("tools")
+            .and_then(Value::as_array)
+            .expect("capabilities payload must expose tool contracts");
+
+        let fs_read = tools
+            .iter()
+            .find(|tool| tool.get("id").and_then(Value::as_str) == Some("fs.read"))
+            .expect("fs.read tool contract");
+        assert_eq!(
+            fs_read.get("execution_state").and_then(Value::as_str),
+            Some("executable")
+        );
+        assert_eq!(
+            fs_read.get("risk_class").and_then(Value::as_str),
+            Some("host_safe_readonly")
+        );
+        assert_eq!(
+            fs_read.get("plane").and_then(Value::as_str),
+            Some("evidence")
+        );
+        assert_eq!(
+            fs_read.get("lease_required").and_then(Value::as_bool),
+            Some(true)
+        );
+
+        let computer_use = tools
+            .iter()
+            .find(|tool| tool.get("id").and_then(Value::as_str) == Some("computer.use"))
+            .expect("computer-use target contract");
+        assert_eq!(
+            computer_use.get("execution_state").and_then(Value::as_str),
+            Some("target_only")
+        );
+        assert_eq!(
+            computer_use.get("approval_class").and_then(Value::as_str),
+            Some("approval_required")
         );
 
         let _ = fs::remove_dir_all(&state);
