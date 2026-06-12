@@ -103,9 +103,9 @@ pack may be broad; the executable integration must stay narrow.
 | Computer use | browser, desktop apps, local files, remote sandboxes | navigate, extract, edit, screenshot, verify result |
 | Model/provider | Ollama, Claude Code, Codex, Gemini, Antigravity, direct APIs | route model work, delegate agent tasks, stream evidence |
 
-Apple/iMessage integration should start local and consent-heavy. Google,
-Microsoft, and GitHub should start with OAuth scopes that are narrow enough to
-explain to a normal user.
+Apple/iMessage integration should start local and consent-heavy. Apple Calendar should use a device-local EventKit bridge; Apple Mail should start with metadata/draft safety and only later earn MailKit extension depth. Google Calendar/Gmail should use narrow OAuth scopes, local read models, staged writes, and receipts. Google Calendar sync should preserve per-calendar sync tokens; Gmail should default to local pull/scheduled scan because Heiwa does not provide a hosted webhook runtime.
+
+Google, Microsoft, and GitHub should start with OAuth scopes that are narrow enough to explain to a normal user.
 
 ## Subagent Delegation
 

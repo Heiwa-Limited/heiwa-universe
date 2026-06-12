@@ -71,10 +71,11 @@ It should expose:
 - devices and runtime health
 - task, run, and receipt history
 - approvals and risk classes
-- routing policy visibility
+- routing policy visibility without forcing normal users to pick models manually
 - public-safe status and diagnostics
 - connected-surface context from browser, mail, calendar, messages, machine
   resources, computer use, and third-party integrations
+- unified Calendar and Communications surfaces that stage external writes/replies through approvals and receipts
 
 The browser console is secondary and user-scoped. It is a pseudo-backend/admin
 surface for the specific user/machine: advanced settings, personalization,
@@ -149,6 +150,7 @@ treated as product-grade.
 - provider connect/status for local, OAuth CLI, and API-key modes
 - connector manifests for Apple, Google, Microsoft, GitHub, messaging, and computer-use lanes
 - local-first routing that avoids provider-token tax when deterministic handling is enough
+- invisible model/provider selection through an evolving capability/eval matrix rather than a normal-user model picker
 - durable sessions, receipts, and evidence
 - bounded loops with clear keep/discard behavior
 - approval-gated shell, browser, file, and computer-use actions
