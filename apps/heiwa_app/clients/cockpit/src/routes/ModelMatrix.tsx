@@ -67,6 +67,9 @@ function RoutePreviewTester(): JSX.Element {
           <div class="route-preview-result">
             <p>
               <StatusBadge status={result().mode} />{" "}
+              <Show when={result().privacy === "sovereign"}>
+                <StatusBadge status="sovereign · local-only" tone="ok" />{" "}
+              </Show>
               <Show when={result().provider}>
                 <strong>
                   {result().provider}/{result().model}

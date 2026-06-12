@@ -29,12 +29,12 @@ export default function MailRoute(): JSX.Element {
                 <Show
                   when={data.priority.length > 0}
                   fallback={
-                    <EmptyState title="No metadata snapshot yet.">
+                    <EmptyState title="No mail metadata rows yet.">
                       <p class="muted">
-                        The deterministic scan reads{" "}
-                        <code>{data.snapshot.path}</code>. Wire the
-                        AppleScript/Gmail pull to populate it; bodies are never
-                        read.
+                        Populate <code>{data.snapshot.path}</code> with{" "}
+                        <code>heiwa mail scan</code> (Apple Mail or Gmail
+                        lanes). Bodies are never read; each scan writes a
+                        receipt.
                       </p>
                     </EmptyState>
                   }

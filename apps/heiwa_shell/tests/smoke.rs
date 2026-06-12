@@ -175,6 +175,35 @@ fn test_route_preview_greeting_does_not_execute_model() {
 }
 
 #[test]
+fn test_route_preview_surfaces_privacy_lane() {
+    let output = Command::new("cargo")
+        .args([
+            "run",
+            "-p",
+            "heiwa-shell",
+            "--bin",
+            "heiwa",
+            "--",
+            "route",
+            "preview",
+            "summarize my priority mail privately",
+        ])
+        .output()
+        .expect("failed to execute route preview");
+
+    assert!(output.status.success());
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        stdout.contains("privacy: sovereign"),
+        "expected privacy-aware route preview: {stdout}"
+    );
+    assert!(
+        stdout.contains("mode: local_model"),
+        "private prompt should force the local model lane: {stdout}"
+    );
+}
+
+#[test]
 fn test_life_status_json_reports_sources_and_stdb_mode() {
     let output = Command::new("cargo")
         .args([
@@ -1105,5 +1134,43 @@ fn test_connect_status_json_reports_unified_registry() {
     assert!(
         stdout.contains("read models before external writes"),
         "expected read-model-first policy line: {stdout}"
+    );
+}
+
+#[test]
+fn test_mail_scan_dry_run_reports_source_readiness() {
+    let output = Command::new("cargo")
+        .args([
+            "run",
+            "-p",
+            "heiwa-shell",
+            "--bin",
+            "heiwa",
+            "--",
+            "mail",
+            "scan",
+            "--dry-run",
+            "--json",
+        ])
+        .output()
+        .expect("failed to execute mail scan dry run");
+
+    assert!(output.status.success());
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        stdout.contains("\"command\":\"mail scan\""),
+        "expected mail scan json marker: {stdout}"
+    );
+    assert!(
+        stdout.contains("\"dry_run\":true"),
+        "expected dry run flag: {stdout}"
+    );
+    assert!(
+        stdout.contains("\"apple\"") && stdout.contains("\"gmail\""),
+        "expected apple and gmail source readiness probes: {stdout}"
+    );
+    assert!(
+        stdout.contains("\"policy\":\"metadata-only-no-body\""),
+        "expected metadata-only policy on scan: {stdout}"
     );
 }

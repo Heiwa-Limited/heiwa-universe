@@ -119,6 +119,7 @@ struct RouteResult {
     rate_group: String,
     routing_metadata: String,
     intent_key: String,
+    privacy: String,
     request_id: String,
     turn_started_at: String,
 }
@@ -904,6 +905,7 @@ async fn run_route_command(args: &[String]) -> Result<()> {
                     println!("  model: {}", route.model_id);
                     println!("  provider_model: {}", route.provider_model_id);
                     println!("  rate_group: {}", route.rate_group);
+                    println!("  privacy: {}", route.privacy);
                     println!("  metadata: {}", route.routing_metadata);
                 }
                 Err(error) => {
@@ -2461,11 +2463,12 @@ fn route_task_inner(
     let final_provider_pin = provider_pin.as_deref().or(pins.pinned_provider.as_deref());
     let final_model_pin = model_pin.as_deref().or(pins.pinned_model.as_deref());
 
+    let privacy = privacy_for_task(task);
     let ingress = DrexIngress {
         intent: turn_request.intent.as_drex_key().to_string(),
         risk: "low".to_string(),
         raw_text: task.to_string(),
-        privacy: "standard".to_string(),
+        privacy: privacy.to_string(),
         runtime: runtime_for_route_preference(pins.route_preference).to_string(),
         available_vram_mb: 8192,
         required_context_tokens: 1024,
@@ -2590,9 +2593,32 @@ fn route_task_inner(
         rate_group: selected.rate_group.clone(),
         routing_metadata: route.routing_metadata,
         intent_key: turn_request.intent.as_drex_key().to_string(),
+        privacy: privacy.to_string(),
         request_id: uuid::Uuid::new_v4().to_string(),
         turn_started_at: Utc::now().to_rfc3339(),
     }))
+}
+
+/// Detect privacy cues that force the sovereign (local-only) lane.
+///
+/// Hard rule: sovereign work stays local-first. A false positive only costs
+/// remote quality on a task the operator framed as private; a false negative
+/// leaks framing the operator marked sensitive — so match generously.
+pub(crate) fn privacy_for_task(task: &str) -> &'static str {
+    let lower = task.to_lowercase();
+    const SOVEREIGN_HINTS: [&str; 6] = [
+        "privat", // private, privately, privacy
+        "confidential",
+        "sensitive",
+        "sovereign",
+        "personal",
+        "do not share",
+    ];
+    if SOVEREIGN_HINTS.iter().any(|hint| lower.contains(hint)) {
+        "sovereign"
+    } else {
+        "standard"
+    }
 }
 
 /// Resolve a provider adapter by name.
@@ -2614,7 +2640,7 @@ fn record_route_evidence(stdb: &heiwa_stdb::StdbClient, route: &RouteResult, tas
         task,
         &route.intent_key,
         "low",
-        "standard",
+        &route.privacy,
         &route.provider,
         &route.provider,
         &route.model_id,
@@ -3076,6 +3102,7 @@ fn route_event_payload(mode: &str, route: Option<&RouteResult>) -> serde_json::V
             "model": route.model_id,
             "provider_model": route.provider_model_id,
             "rate_group": route.rate_group,
+            "privacy": route.privacy,
             "request_id": route.request_id,
         }),
         None => serde_json::json!({ "mode": mode }),
@@ -3089,14 +3116,15 @@ fn repl_trace_payload(
     compression: Option<&RouteCompressionMetadata>,
 ) -> serde_json::Value {
     let cost_usd = usage.map(|u| u.cost_usd).unwrap_or(0.0);
-    let (intent, provider, model, rate_group) = match route {
+    let (intent, provider, model, rate_group, privacy) = match route {
         Some(route) => (
             route.intent_key.as_str(),
             route.provider.as_str(),
             route.model_id.as_str(),
             route.rate_group.as_str(),
+            route.privacy.as_str(),
         ),
-        None => ("chat", "heiwa", "deterministic", "local"),
+        None => ("chat", "heiwa", "deterministic", "local", "standard"),
     };
     serde_json::json!({
         "intent": intent,
@@ -3104,6 +3132,7 @@ fn repl_trace_payload(
         "provider": provider,
         "model": model,
         "rate_group": rate_group,
+        "privacy": privacy,
         "cost_usd": cost_usd,
         "compression": compression.map(|c| serde_json::json!({
             "applied": c.applied,
@@ -3317,6 +3346,7 @@ pub(crate) async fn preview_route_payload(prompt: &str) -> serde_json::Value {
                 "model": route.model_id,
                 "provider_model": route.provider_model_id,
                 "rate_group": route.rate_group,
+                "privacy": route.privacy,
                 "metadata": metadata,
                 "quota": quota,
             })
@@ -3332,6 +3362,35 @@ pub(crate) async fn preview_route_payload(prompt: &str) -> serde_json::Value {
 #[cfg(test)]
 mod tests {
     use heiwa_protocol::{parse_turn_intent, Intent};
+
+    #[test]
+    fn privacy_cues_force_sovereign_lane() {
+        assert_eq!(
+            super::privacy_for_task("summarize my priority mail privately"),
+            "sovereign"
+        );
+        assert_eq!(
+            super::privacy_for_task("draft a CONFIDENTIAL reply"),
+            "sovereign"
+        );
+        assert_eq!(
+            super::privacy_for_task("this is sensitive — do not share"),
+            "sovereign"
+        );
+        assert_eq!(
+            super::privacy_for_task("review my personal finances plan"),
+            "sovereign"
+        );
+    }
+
+    #[test]
+    fn privacy_defaults_to_standard() {
+        assert_eq!(
+            super::privacy_for_task("refactor the auth module and add tests"),
+            "standard"
+        );
+        assert_eq!(super::privacy_for_task("hi"), "standard");
+    }
 
     #[test]
     fn greeting_input_defaults_to_chat_intent() {
@@ -3531,6 +3590,7 @@ mod tests {
             rate_group: "anthropic".to_string(),
             routing_metadata: "{}".to_string(),
             intent_key: "chat".to_string(),
+            privacy: "standard".to_string(),
             request_id: "req-compress".to_string(),
             turn_started_at: "2026-05-26T00:00:00Z".to_string(),
         };
@@ -3648,6 +3708,7 @@ mod tests {
             rate_group: "local".to_string(),
             routing_metadata: "{}".to_string(),
             intent_key: "chat".to_string(),
+            privacy: "standard".to_string(),
             request_id: "req-local".to_string(),
             turn_started_at: "2026-05-26T00:00:00Z".to_string(),
         };
@@ -3696,6 +3757,7 @@ mod tests {
             rate_group: "local".to_string(),
             routing_metadata: "{\"reason\":\"test\"}".to_string(),
             intent_key: "chat".to_string(),
+            privacy: "standard".to_string(),
             request_id: "req-test".to_string(),
             turn_started_at: "2026-05-07T00:00:00Z".to_string(),
         };

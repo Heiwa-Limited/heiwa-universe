@@ -50,6 +50,7 @@ export interface RoutePreview {
   model?: string;
   provider_model?: string;
   rate_group?: string;
+  privacy?: "standard" | "sovereign" | string;
   metadata?: unknown;
   quota: string[];
 }
@@ -164,6 +165,7 @@ export interface ReplTrace {
   provider: string;
   model: string;
   rate_group?: string;
+  privacy?: string;
   cost_usd?: number;
   compression?: {
     applied: boolean;
@@ -181,6 +183,7 @@ export interface ReplRouteEvent {
   model?: string;
   provider_model?: string;
   rate_group?: string;
+  privacy?: string;
   request_id?: string;
 }
 

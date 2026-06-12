@@ -149,11 +149,9 @@ fn stage_client_secret(source: &str) -> Result<()> {
     Ok(())
 }
 
-/// Run the loopback PKCE consent flow: open browser, catch the redirect on
-/// 127.0.0.1, exchange the code via curl, store the token read-only for owner.
-async fn google_authorize(connector: &str) -> Result<()> {
-    let scope = google_scopes(connector)
-        .ok_or_else(|| anyhow!("no Google scope mapped for connector {connector}"))?;
+/// Read the staged Google OAuth client credentials (client_id, client_secret).
+/// Shared by the consent flow and token refresh in the mail/calendar scanners.
+pub(crate) fn google_client_credentials() -> Result<(String, String)> {
     let raw = fs::read_to_string(client_secret_path()).context(
         "no staged client secret; run: heiwa connect google-calendar --client-secret <path>",
     )?;
@@ -172,6 +170,57 @@ async fn google_authorize(connector: &str) -> Result<()> {
         .and_then(Value::as_str)
         .unwrap_or_default()
         .to_string();
+    Ok((client_id, client_secret))
+}
+
+/// POST a refresh_token grant via curl; returns the raw token-endpoint JSON.
+pub(crate) fn refresh_google_token(refresh_token: &str) -> Result<String> {
+    let (client_id, client_secret) = google_client_credentials()?;
+    let token_url =
+        std::env::var("HEIWA_GOOGLE_TOKEN_URL").unwrap_or_else(|_| GOOGLE_TOKEN_URL.to_string());
+    let mut cmd = Command::new("curl");
+    cmd.arg("-s")
+        .arg("-X")
+        .arg("POST")
+        .arg(token_url)
+        .arg("--data-urlencode")
+        .arg(format!("client_id={client_id}"))
+        .arg("--data-urlencode")
+        .arg("grant_type=refresh_token")
+        .arg("--data-urlencode")
+        .arg(format!("refresh_token={refresh_token}"));
+    if !client_secret.is_empty() {
+        cmd.arg("--data-urlencode")
+            .arg(format!("client_secret={client_secret}"));
+    }
+    let output = cmd
+        .output()
+        .context("failed to run curl for token refresh")?;
+    if !output.status.success() {
+        return Err(anyhow!(
+            "curl token refresh failed: {}",
+            String::from_utf8_lossy(&output.stderr)
+        ));
+    }
+    Ok(String::from_utf8_lossy(&output.stdout).to_string())
+}
+
+/// Path of a connector's stored token file (shared with scanners).
+pub(crate) fn connector_token_path(connector: &str) -> PathBuf {
+    token_path(connector)
+}
+
+/// Persist an updated token payload for a connector with owner-only perms.
+pub(crate) fn store_connector_token(connector: &str, payload: &Value) -> Result<()> {
+    write_secret_file(&token_path(connector), payload.to_string().as_bytes())
+}
+
+/// Run the loopback PKCE consent flow: open browser, catch the redirect on
+/// 127.0.0.1, exchange the code via curl, store the token read-only for owner.
+async fn google_authorize(connector: &str) -> Result<()> {
+    let scope = google_scopes(connector)
+        .ok_or_else(|| anyhow!("no Google scope mapped for connector {connector}"))?;
+    let (client_id, client_secret) = google_client_credentials()?;
 
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await?;
     let port = listener.local_addr()?.port();
@@ -443,19 +492,24 @@ pub(crate) fn connectors_payload() -> Value {
         "next_action": match gmail {
             "needs_auth" => Value::String("heiwa connect gmail --client-secret <path>".into()),
             "staged" => Value::String("heiwa connect gmail --authorize".into()),
+            "connected" => Value::String("heiwa mail scan --source gmail".into()),
             _ => Value::Null,
         },
     }));
 
-    let mail_probe = crate::cmd::mail::mail_data_present();
+    let apple_mail_ready = crate::cmd::mail::apple_mail_accounts_present();
     rows.push(json!({
         "id": "apple_mail",
         "kind": "mail",
         "display_name": "Apple Mail",
-        "status": if mail_probe { "metadata" } else { "planned" },
+        "status": if apple_mail_ready { "metadata" } else { "planned" },
         "auth_kind": "local_metadata",
         "detail": "Metadata-only lane (account, mailbox, sender, subject, date, unread); no body reads.",
-        "next_action": Value::Null,
+        "next_action": if apple_mail_ready {
+            Value::String("heiwa mail scan --source apple".into())
+        } else {
+            Value::Null
+        },
     }));
 
     rows.push(json!({

@@ -46,10 +46,14 @@ function TracePills(props: {
   const provider = () => props.trace?.provider ?? props.route?.provider;
   const model = () => props.trace?.model ?? props.route?.model;
   const mode = () => props.trace?.mode ?? props.route?.mode;
+  const privacy = () => props.trace?.privacy ?? props.route?.privacy;
   return (
     <Show when={mode()}>
       <div class="trace-pills" aria-label="Execution trace">
         <span>mode: {mode()}</span>
+        <Show when={privacy() === "sovereign"}>
+          <span>sovereign · local-only</span>
+        </Show>
         <Show when={provider()}>
           <span>
             route: {provider()}/{model()}
