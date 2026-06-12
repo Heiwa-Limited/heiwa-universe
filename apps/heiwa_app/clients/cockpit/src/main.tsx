@@ -3,6 +3,7 @@ import { render } from "solid-js/web";
 import App from "./App";
 import Agents from "./routes/Agents";
 import Approvals from "./routes/Approvals";
+import Calendar from "./routes/Calendar";
 import Cells from "./routes/Cells";
 import Connections from "./routes/Connections";
 import Crons from "./routes/Crons";
@@ -13,8 +14,10 @@ import History from "./routes/History";
 import Hooks from "./routes/Hooks";
 import Inbox from "./routes/Inbox";
 import Live from "./routes/Live";
+import Mail from "./routes/Mail";
 import Memory from "./routes/Memory";
 import Missions from "./routes/Missions";
+import ModelMatrix from "./routes/ModelMatrix";
 import NotFound from "./routes/NotFound";
 import Providers from "./routes/Providers";
 import RateGroups from "./routes/RateGroups";
@@ -32,10 +35,13 @@ render(
     <Router root={App}>
       <Route path="/" component={Dashboard} />
       <Route path="/today" component={Today} />
+      <Route path="/calendar" component={Calendar} />
+      <Route path="/mail" component={Mail} />
       <Route path="/providers" component={Providers} />
       <Route path="/connections" component={Connections} />
       <Route path="/inbox" component={Inbox} />
       <Route path="/routes" component={Routes} />
+      <Route path="/model-matrix" component={ModelMatrix} />
       <Route path="/live" component={Live} />
       <Route path="/repl" component={Repl} />
       <Route path="/missions" component={Missions} />
