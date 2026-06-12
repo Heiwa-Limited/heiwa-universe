@@ -203,6 +203,110 @@ pub(crate) fn create_hold(request: &Value) -> Result<Value> {
     Ok(hold)
 }
 
+/// Flip a hold's status and write a status-change receipt. Idempotent on
+/// the same target status: a re-approval of an already-confirmed hold
+/// overwrites the same fields and re-emits the receipt (so the audit trail
+/// records each decision, not just the latest one).
+///
+/// This is the on-approval wire for the schedule→approvals→calendar loop.
+/// Both the cockpit POST lane and `heiwa schedule` produce holds with
+/// `status: "draft"`; `heiwa approvals decide --approve` is the only caller
+/// that flips it to `confirmed`. `--deny` is the only caller that removes
+/// the draft.
+pub(crate) fn update_hold_status(
+    hold_id: &str,
+    new_status: &str,
+    by_decision: &str,
+) -> Result<Value> {
+    if !["draft", "confirmed", "cancelled"].contains(&new_status) {
+        return Err(anyhow!(
+            "hold status must be one of: draft, confirmed, cancelled"
+        ));
+    }
+
+    let path = holds_dir().join(format!("{hold_id}.json"));
+    if !path.exists() {
+        return Err(anyhow!(
+            "hold {hold_id} not found in {}/",
+            holds_dir().display()
+        ));
+    }
+    let raw = fs::read_to_string(&path)?;
+    let mut hold: Value = serde_json::from_str(&raw)
+        .map_err(|e| anyhow!("hold {hold_id} is malformed: {e}"))?;
+
+    let now = chrono::Utc::now().to_rfc3339();
+    hold["status"] = json!(new_status);
+    if new_status == "confirmed" {
+        hold["confirmed_at"] = json!(now);
+        hold["confirmed_by_decision"] = json!(by_decision);
+    } else if new_status == "cancelled" {
+        hold["cancelled_at"] = json!(now);
+        hold["cancelled_by_decision"] = json!(by_decision);
+    } else {
+        hold["reverted_at"] = json!(now);
+        hold["reverted_by_decision"] = json!(by_decision);
+    }
+
+    fs::write(&path, serde_json::to_string_pretty(&hold)?)?;
+
+    let receipt = json!({
+        "receipt_id": format!("rcpt-{hold_id}-status-{new_status}"),
+        "kind": "calendar_hold_status_changed",
+        "hold_id": hold_id,
+        "new_status": new_status,
+        "by_decision": by_decision,
+        "created_at": now,
+        "external_writes": [],
+    });
+    let receipts = receipts_dir();
+    fs::create_dir_all(&receipts)?;
+    fs::write(
+        receipts.join(format!("rcpt-{hold_id}-status-{new_status}.json")),
+        receipt.to_string(),
+    )?;
+
+    Ok(hold)
+}
+
+/// Drop a draft hold and emit a removal receipt. Used on `--deny` so the
+/// spine doesn't accumulate orphaned drafts. Confirmed holds are not
+/// removable this way — cancellation goes through `update_hold_status`
+/// with `cancelled` so the audit trail stays intact.
+pub(crate) fn drop_draft_hold(hold_id: &str, by_decision: &str) -> Result<()> {
+    let path = holds_dir().join(format!("{hold_id}.json"));
+    if !path.exists() {
+        return Err(anyhow!("hold {hold_id} not found"));
+    }
+    let raw = fs::read_to_string(&path)?;
+    let hold: Value = serde_json::from_str(&raw)
+        .map_err(|e| anyhow!("hold {hold_id} is malformed: {e}"))?;
+    if hold.get("status").and_then(Value::as_str) != Some("draft") {
+        return Err(anyhow!(
+            "hold {hold_id} is not a draft (status={}); use --status cancelled instead",
+            hold.get("status").and_then(Value::as_str).unwrap_or("?")
+        ));
+    }
+    fs::remove_file(&path)?;
+
+    let now = chrono::Utc::now().to_rfc3339();
+    let receipt = json!({
+        "receipt_id": format!("rcpt-{hold_id}-dropped"),
+        "kind": "calendar_hold_dropped",
+        "hold_id": hold_id,
+        "by_decision": by_decision,
+        "created_at": now,
+        "external_writes": [],
+    });
+    let receipts = receipts_dir();
+    fs::create_dir_all(&receipts)?;
+    fs::write(
+        receipts.join(format!("rcpt-{hold_id}-dropped.json")),
+        receipt.to_string(),
+    )?;
+    Ok(())
+}
+
 fn optional_time(request: &Value, key: &str) -> Result<Option<String>> {
     let Some(raw) = request.get(key).and_then(Value::as_str).map(str::trim) else {
         return Ok(None);

@@ -83,12 +83,15 @@ fn decide(args: &[String]) -> Result<()> {
         return Err(anyhow!("must pass exactly one of --approve or --deny"));
     }
     let dry_run = has_flag(args, "--dry-run");
+
+    let plan = compute_effects(id, approve)?;
     let decision = json!({
         "id": id,
         "outcome": if approve { "approved" } else { "denied" },
         "decided_at_utc": Utc::now().to_rfc3339(),
         "operator": "local-cli",
         "note": flag_value(args, "--note"),
+        "effects": plan,
     });
     let path = decisions_dir().join(format!("{id}.json"));
     if dry_run {
@@ -106,12 +109,25 @@ fn decide(args: &[String]) -> Result<()> {
             println!("approvals decide (dry-run)");
             println!("  id: {id}");
             println!("  outcome: {}", decision["outcome"]);
+            println!("  effects: {}", summarize_effects(&plan));
+            for effect in plan.as_array().into_iter().flatten() {
+                println!(
+                    "    - {}: {} -> {}",
+                    effect.get("surface").and_then(Value::as_str).unwrap_or("?"),
+                    effect.get("target").and_then(Value::as_str).unwrap_or("?"),
+                    effect.get("change").and_then(Value::as_str).unwrap_or("?")
+                );
+            }
             println!("  would write: {}", path.display());
         }
         return Ok(());
     }
+
+    let applied = apply_effects(id, &plan, approve)?;
     fs::create_dir_all(decisions_dir())?;
-    fs::write(&path, serde_json::to_string_pretty(&decision)?)?;
+    let mut decision_out = decision.clone();
+    decision_out["applied_effects"] = applied.clone();
+    fs::write(&path, serde_json::to_string_pretty(&decision_out)?)?;
     if has_flag(args, "--json") {
         println!(
             "{}",
@@ -119,16 +135,109 @@ fn decide(args: &[String]) -> Result<()> {
                 "command": "approvals decide",
                 "dry_run": false,
                 "path": path.display().to_string(),
-                "decision": decision,
+                "decision": decision_out,
             })
         );
     } else {
         println!("approvals decide");
         println!("  id: {id}");
-        println!("  outcome: {}", decision["outcome"]);
+        println!("  outcome: {}", decision_out["outcome"]);
+        if let Some(applied_arr) = applied.as_array() {
+            if !applied_arr.is_empty() {
+                println!("  applied:");
+                for effect in applied_arr {
+                    println!(
+                        "    - {}",
+                        effect.get("summary").and_then(Value::as_str).unwrap_or("?")
+                    );
+                }
+            }
+        }
         println!("  wrote: {}", path.display());
     }
     Ok(())
+}
+
+/// Inspect a pending request and return the effects an approve/deny decision
+/// would have on the spine. Pure read; no writes.
+fn compute_effects(id: &str, approve: bool) -> Result<Value> {
+    let request_path = requests_dir().join(format!("{id}.json"));
+    if !request_path.exists() {
+        return Err(anyhow!(
+            "request {id} not found in {}/",
+            requests_dir().display()
+        ));
+    }
+    let raw = fs::read_to_string(&request_path)?;
+    let request: Value = serde_json::from_str(&raw)
+        .map_err(|e| anyhow!("request {id} is malformed: {e}"))?;
+    let mut effects: Vec<Value> = Vec::new();
+    let surface = request
+        .get("target_surface")
+        .and_then(Value::as_str)
+        .unwrap_or("");
+    let target = request
+        .get("target_scope")
+        .and_then(Value::as_str)
+        .unwrap_or("");
+    match (surface, target, approve) {
+        ("calendar", hold_id, true) if !hold_id.is_empty() => {
+            effects.push(json!({
+                "surface": "calendar",
+                "target": hold_id,
+                "change": "hold.status: draft -> confirmed",
+                "kind": "hold_confirm",
+            }));
+        }
+        ("calendar", hold_id, false) if !hold_id.is_empty() => {
+            effects.push(json!({
+                "surface": "calendar",
+                "target": hold_id,
+                "change": "hold dropped (was draft)",
+                "kind": "hold_drop",
+            }));
+        }
+        _ => {}
+    }
+    Ok(json!(effects))
+}
+
+/// Apply the planned effects. Returns a per-effect summary of what
+/// actually happened (used for the JSON and human output).
+fn apply_effects(id: &str, plan: &Value, approve: bool) -> Result<Value> {
+    let mut applied: Vec<Value> = Vec::new();
+    for effect in plan.as_array().into_iter().flatten() {
+        let kind = effect.get("kind").and_then(Value::as_str).unwrap_or("");
+        let target = effect.get("target").and_then(Value::as_str).unwrap_or("");
+        match (kind, approve) {
+            ("hold_confirm", true) => {
+                let hold = crate::cmd::calendar::update_hold_status(target, "confirmed", id)?;
+                applied.push(json!({
+                    "kind": "hold_confirm",
+                    "summary": format!("{} -> status=confirmed", target),
+                    "hold": hold,
+                }));
+            }
+            ("hold_drop", false) => {
+                crate::cmd::calendar::drop_draft_hold(target, id)?;
+                applied.push(json!({
+                    "kind": "hold_drop",
+                    "summary": format!("{} dropped (was draft)", target),
+                }));
+            }
+            _ => {}
+        }
+    }
+    Ok(json!(applied))
+}
+
+fn summarize_effects(plan: &Value) -> String {
+    let n = plan.as_array().map(|a| a.len()).unwrap_or(0);
+    match n {
+        0 => "none".to_string(),
+        1 => "1 effect".to_string(),
+        _ => format!("{n} effects"),
+    }
 }
 
 pub(crate) fn scan_pending_requests() -> Vec<Value> {

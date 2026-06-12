@@ -157,3 +157,40 @@ Amendments vs. the plan as written:
 - `recurrent` drops the time-of-day unless the text says "at" ("every monday 9am" vs "at 9am"); parse_time repairs the RRULE with a regex-extracted BYHOUR/BYMINUTE.
 
 Evidence: 7 Python tests + 7 Rust unit tests + 3 integration tests pass; hand-run produced `req_…  schedule-intent -> calendar:hold-…  risk=stage` in `heiwa approvals list` and the hold in `heiwa calendar hold list`.
+
+---
+
+## Commit 2 — `heiwa approvals decide` closes the schedule loop (2026-06-12)
+
+**Wire closed:** `heiwa schedule` stages a draft hold + a pending approval. `heiwa approvals decide --approve|deny` now reads the request, computes the effects it *would* have, and applies them. Approve flips the hold `draft → confirmed` (with `confirmed_at` + `confirmed_by_decision` provenance) and writes a `calendar_hold_status_changed` receipt. Deny drops the draft hold (only drafts — confirmed holds require explicit cancellation to preserve the audit trail) and writes a `calendar_hold_dropped` receipt.
+
+**Files changed:**
+- `apps/heiwa_shell/src/cmd/calendar.rs` — added `update_hold_status(hold_id, new_status, by_decision)` and `drop_draft_hold(hold_id, by_decision)`. Both mirror the `create_hold` write pattern: validate → mutate JSON → write to `~/.heiwa/state/calendar/holds/` → emit a `calendar/receipts/rcpt-…-status-….json` or `rcpt-…-dropped.json` receipt.
+- `apps/heiwa_shell/src/cmd/approvals.rs` — `decide` now calls `compute_effects(id, approve)` (pure read) and `apply_effects(id, plan, approve)` (writes via the new `calendar` functions). The decision JSON gets two new additive fields: `effects` (the plan) and `applied_effects` (the per-effect results, with the new hold JSON inlined for `hold_confirm`). `--dry-run` previews without writing.
+- `apps/heiwa_shell/tests/approvals_decide.rs` — 3 hermetic integration tests: dry-run preview, approve flow, deny flow. All use a temp `HOME` and `heiwa schedule --at` for hermetic staging.
+
+**What this commit does NOT do:**
+- ❌ Does not touch `crates/heiwa_receipts` (its schema is for cost-bearing model calls; approval decisions are not model calls).
+- ❌ Does not call a provider / DREX / HeiwaClawGateway — pure state mutation in the local spine.
+- ❌ Does not introduce a new package, schema migration, or a new top-level subcommand.
+- ❌ Does not change the existing decision JSON shape consumed by `approvals list` / `approvals show` — `effects` and `applied_effects` are additive.
+
+**Discovery during the commit:** the actual decisions path is `~/.heiwa/state/dispatch/approvals/decisions/` (one level deeper than the plan said, and one level deeper than the original commit-1 plan-doc claim). `requests_dir()` returns `dispatch/requests/` and `decisions_dir()` returns `dispatch/approvals/decisions/`. Both helpers in `approvals.rs` are the source of truth; the test path constants now reference them via comment so future readers find the right place.
+
+**Evidence:** 3 new integration tests + 29 pre-existing shell tests all pass. Hand-run on the live `~/.heiwa/state/`: dry-run previewed the effect, then real approve flipped `hold-20260619-31cc2263` to `status: "confirmed"`, wrote the decision with both `effects` and `applied_effects`, and emitted the `calendar_hold_status_changed` receipt. The schedule→approvals→calendar loop is now closed end-to-end with the same evidence the cockpit POST lane produces.
+
+## Next commit (predicted, not committed)
+
+**Goal:** DREX escalation when `parse_time` confidence is low. Right now `heiwa schedule` errors out below the confidence floor (0.5) and tells the user to use `--at`. The next commit lowers that error to a *fallback* — if confidence is below threshold, the schedule command should ask DREX (via HeiwaClawGateway) to clarify or pick a default, and the user can confirm the slot before any state is written.
+
+**Files this will touch:**
+- `apps/heiwa_shell/src/cmd/schedule.rs` — change the `confidence < MIN_CONFIDENCE` branch to call into the HeiwaClawGateway clarify path
+- `apps/heiwa_shell/src/main.rs` (or wherever the gateway is initialized) — ensure the gateway handle is reachable from `cmd::schedule`
+- `apps/heiwa_core/src/drex/` — extend `plan_route` with a `Clarify` outcome that returns a slot suggestion, not an error
+
+**Why not commit it now:** the user explicitly said commit 2 is "approval→receipt on `decide --approve`, which is where the `heiwa_receipts` chain joins the loop." That join is now in the calendar-receipt lane (the local spine), not the `heiwa_receipts` SQLite chain. The two are separate by design. DREX escalation is the next logical wire but it's a larger surface — defer to its own commit when we have a real use case (the user's first ambiguous schedule request) to drive the design.
+
+## Open questions
+
+- The `external_promotion: "approval_required"` field on confirmed holds is a future placeholder for the Google/Apple write-back lane (per the cockpit's `lanes` block in `calendar::summary_payload`). When that lane lands, the field becomes meaningful; right now it's documentation. **Should the next commit set `external_promotion` to a more specific value like `"approved_no_external_write"` on confirm, or keep it as `"approval_required"` until the write-back lane exists?**
+- The drop-on-deny path is destructive (deletes the hold file). For confirmed holds we route through `update_hold_status(.., "cancelled", ..)` instead. **Should there be a confirmation step ("deny will drop the draft hold; continue?") or is the dry-run preview enough?**
