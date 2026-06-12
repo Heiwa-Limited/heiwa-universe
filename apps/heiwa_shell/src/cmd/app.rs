@@ -210,8 +210,10 @@ fn update_from_checkout(dry_run: bool, json_output: bool) -> Result<()> {
     if !status.success() {
         return Err(anyhow!("cargo install failed with status {status}"));
     }
+    let receipt_path = write_promotion_receipt(&plan)?;
     if !json_output {
         println!("  status: updated");
+        println!("  promotion_receipt: {}", receipt_path.display());
     }
     Ok(())
 }
@@ -248,22 +250,39 @@ fn checkout_update_plan(
         "heiwa-app-update-{}",
         chrono::Utc::now().format("%Y%m%dT%H%M%SZ")
     );
+    let source_branch = git_output(repo_root, &["branch", "--show-current"])
+        .unwrap_or_else(|| "unknown".to_string());
+    let source_commit = git_output(repo_root, &["rev-parse", "--short", "HEAD"])
+        .unwrap_or_else(|| "unknown".to_string());
+    let source_dirty = git_is_dirty(repo_root);
+    let installed_version = installed_heiwa_version(installed_bin);
+    let desktop_bundle = desktop_bundle_source(repo_root);
+    let promotion_receipt = promotion_receipt_plan(
+        &receipt_id,
+        repo_root,
+        &source_branch,
+        &source_commit,
+        source_dirty,
+        installed_bin,
+        &installed_version,
+        installed_app,
+        &desktop_bundle,
+        dry_run,
+    );
 
     json!({
         "command": "app update",
         "source_mode": "checkout-dev",
         "source": repo_root.display().to_string(),
-        "source_branch": git_output(repo_root, &["branch", "--show-current"])
-            .unwrap_or_else(|| "unknown".to_string()),
-        "source_commit": git_output(repo_root, &["rev-parse", "--short", "HEAD"])
-            .unwrap_or_else(|| "unknown".to_string()),
-        "source_dirty": git_is_dirty(repo_root),
+        "source_branch": source_branch,
+        "source_commit": source_commit,
+        "source_dirty": source_dirty,
         "official_source": "GitHub Releases",
         "installed_bin": installed_bin.display().to_string(),
-        "installed_version": installed_heiwa_version(installed_bin),
+        "installed_version": installed_version,
         "installed_app": installed_app.display().to_string(),
         "installed_app_present": installed_app.join("Contents").join("MacOS").join("Heiwa").is_file(),
-        "desktop_bundle_source": desktop_bundle_source(repo_root),
+        "desktop_bundle_source": desktop_bundle,
         "app_bundle_update": {
             "wired": false,
             "blocker": "checkout update currently installs ~/.heiwa/bin/heiwa only; Heiwa.app bundle promotion is still handled by install/app-bundle logic and needs explicit update wiring plus receipt",
@@ -282,15 +301,9 @@ fn checkout_update_plan(
             "heiwa doctor",
             "heiwa app runtime status --json",
             "curl -fsS http://127.0.0.1:7474/status/health",
+            "curl -fsS http://127.0.0.1:7474/api/v1/capabilities",
         ],
-        "receipt_preview": {
-            "receipt_id": receipt_id,
-            "plane": "evidence",
-            "event": "heiwa.app.update.checkout",
-            "source": repo_root.display().to_string(),
-            "target": installed_bin.display().to_string(),
-            "would_write": !dry_run,
-        },
+        "promotion_receipt": promotion_receipt,
     })
 }
 
@@ -307,6 +320,127 @@ fn desktop_bundle_source(repo_root: &Path) -> Value {
         "present": executable.is_file(),
         "executable": executable.display().to_string(),
     })
+}
+
+#[allow(clippy::too_many_arguments)]
+fn promotion_receipt_plan(
+    receipt_id: &str,
+    repo_root: &Path,
+    source_branch: &str,
+    source_commit: &str,
+    source_dirty: bool,
+    installed_bin: &Path,
+    installed_version: &Value,
+    installed_app: &Path,
+    desktop_bundle: &Value,
+    dry_run: bool,
+) -> Value {
+    let receipt_path = heiwa_install::get_heiwa_dir()
+        .join("state")
+        .join("evidence")
+        .join("promotion")
+        .join(format!("{receipt_id}.json"));
+
+    json!({
+        "schema_version": "heiwa_promotion_receipt_v1",
+        "receipt_id": receipt_id,
+        "event": "heiwa.app.update.checkout",
+        "plane": "evidence",
+        "created_at": chrono::Utc::now().to_rfc3339(),
+        "would_write": !dry_run,
+        "receipt_path": receipt_path.display().to_string(),
+        "source": {
+            "kind": "checkout",
+            "path": repo_root.display().to_string(),
+            "branch": source_branch,
+            "commit": source_commit,
+            "dirty": source_dirty,
+        },
+        "target": {
+            "installed_bin": installed_bin.display().to_string(),
+            "installed_version_before": installed_version,
+            "installed_app": installed_app.display().to_string(),
+            "desktop_bundle_source": desktop_bundle,
+        },
+        "codesign": codesign_probe(desktop_bundle),
+        "runtime_probes": runtime_probe_contracts(),
+        "stdb_mirror": {
+            "configured": true,
+            "token_present": env::var("STDB_TOKEN").is_ok(),
+            "status": if env::var("STDB_TOKEN").is_ok() { "ready" } else { "local_only_token_missing" },
+        },
+        "restart_policy": "prompt-before-restart",
+    })
+}
+
+fn runtime_probe_contracts() -> Value {
+    json!([
+        {
+            "name": "health",
+            "method": "GET",
+            "endpoint": "/status/health",
+            "expected_content_type": "application/json",
+            "expected_json": true,
+        },
+        {
+            "name": "capabilities_contract",
+            "method": "GET",
+            "endpoint": "/api/v1/capabilities",
+            "expected_content_type": "application/json",
+            "expected_json": true,
+        },
+        {
+            "name": "runtime_snapshot",
+            "method": "GET",
+            "endpoint": "/api/v1/runtime/snapshot",
+            "expected_content_type": "application/json",
+            "expected_json": true,
+        },
+    ])
+}
+
+fn codesign_probe(desktop_bundle: &Value) -> Value {
+    let Some(path) = desktop_bundle.get("path").and_then(Value::as_str) else {
+        return json!({"status":"unknown","reason":"desktop bundle path missing"});
+    };
+    if !Path::new(path).exists() {
+        return json!({"status":"not_present","path":path});
+    }
+    if env::consts::OS != "macos" {
+        return json!({"status":"skipped","path":path,"reason":"codesign probe is macOS-only"});
+    }
+    match Command::new("codesign")
+        .args(["--verify", "--deep", "--strict", path])
+        .output()
+    {
+        Ok(output) => json!({
+            "status": if output.status.success() { "verified" } else { "failed" },
+            "path": path,
+            "stdout": String::from_utf8_lossy(&output.stdout).trim(),
+            "stderr": String::from_utf8_lossy(&output.stderr).trim(),
+        }),
+        Err(error) => json!({
+            "status": "unavailable",
+            "path": path,
+            "error": error.to_string(),
+        }),
+    }
+}
+
+fn write_promotion_receipt(plan: &Value) -> Result<PathBuf> {
+    let receipt = plan
+        .get("promotion_receipt")
+        .ok_or_else(|| anyhow!("promotion receipt missing from update plan"))?;
+    let path = receipt
+        .get("receipt_path")
+        .and_then(Value::as_str)
+        .ok_or_else(|| anyhow!("promotion receipt path missing from update plan"))?;
+    let path = PathBuf::from(path);
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent)?;
+    }
+    fs::write(&path, serde_json::to_vec_pretty(receipt)?)?;
+    Ok(path)
 }
 
 fn git_output(repo_root: &Path, args: &[&str]) -> Option<String> {

@@ -522,10 +522,38 @@ fn test_app_update_checkout_dry_run_json_reports_promotion_contract() {
         .get("active_work")
         .and_then(serde_json::Value::as_object)
         .is_some());
-    assert!(payload
-        .get("receipt_preview")
+    let promotion_receipt = payload
+        .get("promotion_receipt")
         .and_then(serde_json::Value::as_object)
-        .is_some());
+        .expect("promotion receipt contract object");
+    assert_eq!(
+        promotion_receipt
+            .get("schema_version")
+            .and_then(serde_json::Value::as_str),
+        Some("heiwa_promotion_receipt_v1")
+    );
+    assert!(promotion_receipt
+        .get("source")
+        .is_some_and(serde_json::Value::is_object));
+    assert!(promotion_receipt
+        .get("target")
+        .is_some_and(serde_json::Value::is_object));
+    assert!(promotion_receipt
+        .get("runtime_probes")
+        .and_then(serde_json::Value::as_array)
+        .is_some_and(|probes| probes.iter().any(|probe| probe
+            .get("endpoint")
+            .and_then(serde_json::Value::as_str)
+            == Some("/api/v1/capabilities"))));
+    assert!(promotion_receipt
+        .get("codesign")
+        .is_some_and(serde_json::Value::is_object));
+    assert_eq!(
+        promotion_receipt
+            .get("would_write")
+            .and_then(serde_json::Value::as_bool),
+        Some(false)
+    );
 }
 
 #[test]
