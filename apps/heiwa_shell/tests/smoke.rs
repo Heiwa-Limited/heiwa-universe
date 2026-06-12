@@ -554,6 +554,20 @@ fn test_app_update_checkout_dry_run_json_reports_promotion_contract() {
             .and_then(serde_json::Value::as_bool),
         Some(false)
     );
+    let stdb_mirror = promotion_receipt
+        .get("stdb_mirror")
+        .and_then(serde_json::Value::as_object)
+        .expect("stdb mirror contract");
+    assert_eq!(
+        stdb_mirror
+            .get("auth_mode")
+            .and_then(serde_json::Value::as_str),
+        Some("spacetime_cli_login")
+    );
+    assert!(stdb_mirror
+        .get("shell_authenticated")
+        .and_then(serde_json::Value::as_bool)
+        .is_some());
 }
 
 #[test]

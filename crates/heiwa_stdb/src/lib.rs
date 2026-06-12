@@ -2,6 +2,7 @@ pub mod evidence;
 
 use std::net::{SocketAddr, TcpStream, ToSocketAddrs};
 use std::path::PathBuf;
+use std::process::Command;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
@@ -103,14 +104,17 @@ fn dirs_home() -> Option<PathBuf> {
 // ---------------------------------------------------------------------------
 
 /// Honest snapshot of the configured SpacetimeDB endpoint and its
-/// loopback-or-network reachability. Never contains the token itself —
-/// only whether one is present.
+/// loopback-or-network reachability. Never contains auth secrets — only whether
+/// the official `spacetime login show` shell identity or a legacy token is
+/// present.
 #[derive(Debug, Clone, Serialize)]
 pub struct StdbProbe {
     pub configured: bool,
     pub url: Option<String>,
     pub database: Option<String>,
     pub token_present: bool,
+    pub auth_mode: Option<String>,
+    pub auth_source: Option<String>,
     pub reachable: Option<bool>,
     pub latency_ms: Option<u64>,
 }
@@ -120,18 +124,43 @@ impl StdbProbe {
     /// the URL. When unconfigured, returns a probe with `configured: false`
     /// and no reachability fields populated.
     pub fn probe() -> Self {
-        let Some(config) = StdbConfig::resolve() else {
+        let shell_identity = spacetime_shell_identity();
+        let config = StdbConfig::resolve().or_else(|| {
+            shell_identity.as_ref().map(|_| StdbConfig {
+                url: DEFAULT_URL.to_string(),
+                database: DEFAULT_DATABASE.to_string(),
+                token: String::new(),
+            })
+        });
+        let Some(config) = config else {
             return Self {
                 configured: false,
                 url: None,
                 database: None,
                 token_present: false,
+                auth_mode: None,
+                auth_source: None,
                 reachable: None,
                 latency_ms: None,
             };
         };
 
-        let token_present = !config.token.is_empty();
+        let legacy_token_present = !config.token.is_empty();
+        let shell_auth_present = shell_identity.is_some();
+        let token_present = shell_auth_present || legacy_token_present;
+        let (auth_mode, auth_source) = if shell_auth_present {
+            (
+                Some("spacetime_cli_login".to_string()),
+                Some("spacetime login show".to_string()),
+            )
+        } else if legacy_token_present {
+            (
+                Some("legacy_token".to_string()),
+                Some("STDB_TOKEN_or_connection_json".to_string()),
+            )
+        } else {
+            (None, None)
+        };
         let endpoint = parse_endpoint(&config.url);
         let (reachable, latency_ms) = match endpoint {
             Some(addr) => {
@@ -148,10 +177,39 @@ impl StdbProbe {
             url: Some(config.url),
             database: Some(config.database),
             token_present,
+            auth_mode,
+            auth_source,
             reachable,
             latency_ms,
         }
     }
+}
+
+/// True when the official SpacetimeDB CLI has an authenticated shell identity.
+/// This is Heiwa's preferred Maincloud publisher/operator auth probe: no raw API
+/// token is required or serialized.
+pub fn spacetime_shell_auth_present() -> bool {
+    spacetime_shell_identity().is_some()
+}
+
+/// Return the `spacetime login show` identity line if the CLI is authenticated.
+/// The output is identity-only status text, never a token.
+pub fn spacetime_shell_identity() -> Option<String> {
+    let bin = std::env::var("HEIWA_SPACETIME_BIN").unwrap_or_else(|_| "spacetime".to_string());
+    spacetime_shell_identity_with_bin(&bin)
+}
+
+fn spacetime_shell_identity_with_bin(bin: &str) -> Option<String> {
+    let output = Command::new(bin).args(["login", "show"]).output().ok()?;
+    if !output.status.success() {
+        return None;
+    }
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    stdout
+        .lines()
+        .map(str::trim)
+        .find(|line| !line.is_empty())
+        .map(str::to_string)
 }
 
 /// Parse `scheme://host[:port][/...]` into a resolvable `SocketAddr`.
@@ -292,7 +350,7 @@ mod tests {
     #[test]
     fn stdb_probe_when_unconfigured_returns_inert_snapshot() {
         // We can't fully control the test env (CI may have ~/.heiwa from prior
-        // jobs) but we can assert the shape contract: token must never leak.
+        // jobs) but we can assert the shape contract: auth material must never leak.
         let probe = StdbProbe::probe();
         // The probe is always Serialize-safe and never holds a raw token.
         let json = serde_json::to_string(&probe).expect("serialize");
@@ -300,5 +358,32 @@ mod tests {
             !json.contains("\"token\":"),
             "stdb probe must never serialize a raw token field: {json}"
         );
+    }
+
+    #[test]
+    fn spacetime_shell_identity_uses_login_show_without_token_material() {
+        let dir = std::env::temp_dir().join(format!("heiwa-fake-spacetime-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).expect("fake spacetime dir");
+        let bin = dir.join("spacetime");
+        std::fs::write(
+            &bin,
+            "#!/usr/bin/env sh\nif [ \"$1 $2\" = \"login show\" ]; then echo 'You are logged in as c200abc'; exit 0; fi\nexit 1\n",
+        )
+        .expect("write fake spacetime");
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let mut perms = std::fs::metadata(&bin).expect("metadata").permissions();
+            perms.set_mode(0o755);
+            std::fs::set_permissions(&bin, perms).expect("chmod fake spacetime");
+        }
+
+        let identity = spacetime_shell_identity_with_bin(bin.to_str().expect("utf8 path"))
+            .expect("fake spacetime login show should authenticate");
+        assert_eq!(identity, "You are logged in as c200abc");
+        assert!(!identity.contains("token"));
+
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }

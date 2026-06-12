@@ -18,7 +18,8 @@ only when that path is configured.
 | `~/.heiwa/machine.json` | Local machine identity and capability manifest |
 | `~/.heiwa/state/` | Local runtime state, approvals, worker heartbeats |
 | `~/.claude/`, `~/.codex/`, `~/.gemini/` | Provider-owned auth and hook posture |
-| `STDB_TOKEN` | Optional SpacetimeDB sync/adjudication auth |
+| `spacetime login` shell identity | Optional SpacetimeDB Maincloud sync/adjudication auth; canonical publisher/operator path |
+| `STDB_TOKEN` | Legacy/compat SpacetimeDB token material only; not the preferred Heiwa operator auth boundary |
 | `CLOUDFLARE_API_TOKEN` | Optional edge work only; not needed for local user functionality |
 
 ## Boot Contract

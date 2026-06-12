@@ -391,6 +391,7 @@ Heiwa is local-first. Hosted infrastructure exists to provide durable truth, pub
 Architectural implication:
 
 - There is no hosted Rust service tier in the v0.1 topology.
+- Heiwa.app and the installed `heiwa` runtime run solely on user devices; Heiwa does not provide a hosted app/runtime service.
 - Rust runtime is device-local until a later hosted control plane has a verified need.
 - SpacetimeDB Cloud is the hosted backend authority, not an operator surface.
 - No cloud hop belongs in the inference loop unless the selected provider itself is cloud-hosted.

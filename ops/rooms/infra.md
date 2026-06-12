@@ -11,7 +11,8 @@ Load this room for:
 
 - The MacBook checkout plus `~/.heiwa/` host current user functionality.
 - SpacetimeDB is the optional evidence sync/adjudication plane.
-- Cloudflare serves docs / marketing shell only after public access is re-enabled.
+- Cloudflare serves docs / marketing shell / install and update-manifest edge only after public access is re-enabled.
+- Heiwa.app and the installed `heiwa` runtime run solely on user devices; Heiwa does not provide a hosted app/runtime service.
 - WebSockets are the live transport for local cockpit status and future event subscriptions.
 
 ## Important Files

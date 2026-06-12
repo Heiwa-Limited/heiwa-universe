@@ -341,6 +341,7 @@ fn promotion_receipt_plan(
         .join("promotion")
         .join(format!("{receipt_id}.json"));
 
+    let shell_authenticated = heiwa_stdb::spacetime_shell_auth_present();
     json!({
         "schema_version": "heiwa_promotion_receipt_v1",
         "receipt_id": receipt_id,
@@ -366,8 +367,13 @@ fn promotion_receipt_plan(
         "runtime_probes": runtime_probe_contracts(),
         "stdb_mirror": {
             "configured": true,
-            "token_present": env::var("STDB_TOKEN").is_ok(),
-            "status": if env::var("STDB_TOKEN").is_ok() { "ready" } else { "local_only_token_missing" },
+            "server": "maincloud",
+            "url": "https://maincloud.spacetimedb.com",
+            "auth_mode": "spacetime_cli_login",
+            "auth_source": "spacetime login show",
+            "shell_authenticated": shell_authenticated,
+            "token_present": shell_authenticated,
+            "status": if shell_authenticated { "ready_via_spacetime_cli" } else { "local_only_shell_login_missing" },
         },
         "restart_policy": "prompt-before-restart",
     })
