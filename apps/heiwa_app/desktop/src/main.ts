@@ -1,145 +1,678 @@
 import "./styles.css";
-import { apiPost, runtimeHealth, runtimeStatus, runtimeVersion, type RuntimeHealth } from "./runtime";
+import {
+  apiGet,
+  apiPost,
+  runtimeHealth,
+  runtimeStatus,
+  runtimeVersion,
+  providersFromSnapshot,
+  dispatchSubagent,
+  type RuntimeHealth,
+  type AgentRow,
+} from "./runtime";
 
-type Message = {
-  role: "user" | "assistant" | "system";
+// ═══════════════════════════════════════════════════════════════════════════
+// Types
+// ═══════════════════════════════════════════════════════════════════════════
+
+type View = "chat" | "calendar" | "agents" | "skills" | "artifacts" | "browser" | "files";
+
+type ChatMessage = {
+  id: string;
+  role: "user" | "assistant" | "system" | "subagent";
   body: string;
-  meta?: string;
+  meta?: string;       // provider/model or subagent name
+  ts: number;
+  compacted?: boolean; // true if this is a summary of older messages
 };
 
-const appElement = document.querySelector<HTMLDivElement>("#app");
-if (!appElement) throw new Error("#app missing");
-const app = appElement;
+type CalendarEvent = {
+  id?: string;
+  title?: string;
+  start?: string;
+  end?: string;
+  date?: string;
+  kind?: string;
+  status?: string;
+  source?: string;
+  note?: string;
+};
 
+type SubagentTask = {
+  id: string;
+  task: string;
+  provider?: string;
+  model?: string;
+  route?: string;
+  status: "queued" | "running" | "accepted" | "done" | "error";
+  output?: string;
+  started_at?: number;
+  ended_at?: number;
+};
+
+type InboxItem = {
+  title?: string;
+  detail?: string;
+  occurred_at?: string;
+  kind?: string;
+  source?: string;
+  [key: string]: unknown;
+};
+
+// ═══════════════════════════════════════════════════════════════════════════
+// State
+// ═══════════════════════════════════════════════════════════════════════════
+
+const app = document.querySelector<HTMLDivElement>("#app")!;
 let health: RuntimeHealth | null = null;
 let busy = false;
-const messages: Message[] = [
-  {
-    role: "system",
-    body: "Heiwa Desktop is a native Tauri 2 shell over the local runtime. One output layer; Intake, Execution, Evidence underneath.",
-    meta: "local-first",
-  },
-];
+let view: View = "chat";
+let messages: ChatMessage[] = [];
+let calendarEvents: CalendarEvent[] = [];
+let subagents: SubagentTask[] = [];
+let inbox: InboxItem[] = [];
+let agents: AgentRow[] = [];
+let ws: WebSocket | null = null;
+let calendarDate = new Date();
 
-const nav = [
-  ["New session", "⌘N"],
-  ["Skills & Tools", ""],
-  ["Messaging", ""],
-  ["Artifacts", ""],
-  ["Today", "life"],
-  ["Providers", "route"],
-  ["Approvals", "gate"],
-  ["Receipts", "proof"],
-  ["Crons", "time"],
-];
+// ═══════════════════════════════════════════════════════════════════════════
+// Helpers
+// ═══════════════════════════════════════════════════════════════════════════
 
-function escapeHtml(value: string): string {
-  return value.replace(/[&<>"]/g, (char) => ({
-    "&": "&amp;",
-    "<": "&lt;",
-    ">": "&gt;",
-    '"': "&quot;",
-  })[char] ?? char);
+let _idCounter = 0;
+function uid(): string { return `m${++_idCounter}_${Date.now().toString(36)}`; }
+
+function esc(s: string): string {
+  return s.replace(/[&<>"']/g, (c) =>
+    ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c] ?? c
+  );
 }
+
+function timeFmt(ts?: number): string {
+  if (!ts) return "";
+  return new Date(ts).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Data loading
+// ═══════════════════════════════════════════════════════════════════════════
+
+async function loadHealth(): Promise<void> {
+  health = await runtimeHealth().catch(() => ({ reachable: false, error: null, snapshot: null }));
+}
+
+async function loadCalendar(): Promise<void> {
+  try {
+    const [summary, today] = await Promise.all([
+      apiGet<{ data?: { holds?: CalendarEvent[]; events?: CalendarEvent[] } }>("/api/v1/calendar/summary"),
+      apiGet<{ data?: { calendar?: { holds?: CalendarEvent[] }; appointments?: CalendarEvent[] } }>("/api/v1/life/today"),
+    ]);
+    const holds = [
+      ...(summary?.data?.holds ?? []),
+      ...(summary?.data?.events ?? []),
+      ...(today?.data?.calendar?.holds ?? []),
+      ...(today?.data?.appointments ?? []),
+    ];
+    // Deduplicate by id
+    const seen = new Set<string>();
+    calendarEvents = holds.filter(e => {
+      const k = e.id || `${e.title}-${e.start}-${e.date}`;
+      if (seen.has(k)) return false;
+      seen.add(k);
+      return true;
+    });
+  } catch { calendarEvents = []; }
+}
+
+async function loadInbox(): Promise<void> {
+  try {
+    const resp = await apiGet<{ data?: { items?: InboxItem[] } }>("/api/v1/inbox");
+    inbox = resp?.data?.items ?? [];
+  } catch { inbox = []; }
+}
+
+async function loadAgents(): Promise<void> {
+  try {
+    const resp = await apiGet<{ data?: { agents?: AgentRow[] } }>("/api/v1/agents");
+    agents = resp?.data?.agents ?? [];
+  } catch { agents = []; }
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// WebSocket — live subagent + dispatch events
+// ═══════════════════════════════════════════════════════════════════════════
+
+function connectWS(): void {
+  const proto = location.protocol === "https:" ? "wss:" : "ws:";
+  const port = location.port || (location.protocol === "https:" ? "443" : "7474");
+  ws = new WebSocket(`${proto}//127.0.0.1:${port}/ws/v1/events`);
+
+  ws.onopen = () => { /* connected */ };
+
+  ws.onmessage = (ev) => {
+    try {
+      const data = JSON.parse(ev.data);
+      const event = data.event as string;
+
+      if (event === "dispatch_request_appeared" || event === "dispatch_request_decided") {
+        // Refresh inbox/approvals in background
+        loadInbox();
+      }
+
+      if (event === "subagent_update") {
+        const sa = data.payload as SubagentTask;
+        const idx = subagents.findIndex(s => s.id === sa.id);
+        if (idx >= 0) subagents[idx] = { ...subagents[idx], ...sa };
+        else subagents.unshift(sa);
+        if (view === "agents" || view === "chat") render();
+      }
+
+      if (event === "subagent_output") {
+        const { task_id, text } = data.payload;
+        const sa = subagents.find(s => s.id === task_id);
+        if (sa) {
+          sa.output = (sa.output || "") + text;
+          if (view === "agents") render();
+        }
+      }
+    } catch { /* ignore malformed */ }
+  };
+
+  ws.onclose = () => {
+    // Reconnect after 3s
+    setTimeout(connectWS, 3000);
+  };
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Chat: send message via SSE streaming
+// ═══════════════════════════════════════════════════════════════════════════
+
+async function sendChat(text: string): Promise<void> {
+  const userMsg: ChatMessage = { id: uid(), role: "user", body: text, ts: Date.now() };
+  messages.push(userMsg);
+
+  const assistantId = uid();
+  const assistantMsg: ChatMessage = { id: assistantId, role: "assistant", body: "", meta: "…", ts: Date.now() };
+  messages.push(assistantMsg);
+  busy = true;
+  render();
+
+  try {
+    const resp = await apiPost<{
+      ok?: boolean;
+      data?: { response?: string; trace?: { provider?: string; model?: string; intent?: string; mode?: string } };
+      error?: { message?: string; code?: string };
+    }>("/api/v1/repl", { prompt: text });
+
+    if (resp?.ok === false) {
+      assistantMsg.body = `Error: ${resp.error?.message || resp.error?.code || "request failed"}`;
+      assistantMsg.meta = "error";
+    } else {
+      assistantMsg.body = resp?.data?.response || "No response.";
+      const trace = resp?.data?.trace;
+      const route = trace?.provider || trace?.mode || "heiwa";
+      const model = trace?.model || trace?.intent || "";
+      assistantMsg.meta = model ? `${route}/${model}` : route;
+    }
+  } catch (e) {
+    assistantMsg.body = `Connection error: ${e instanceof Error ? e.message : String(e)}`;
+    assistantMsg.meta = "error";
+  } finally {
+    busy = false;
+    render();
+  }
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Subagent dispatch
+// ═══════════════════════════════════════════════════════════════════════════
+
+async function dispatchTask(text: string): Promise<void> {
+  const task: SubagentTask = {
+    id: uid(),
+    task: text,
+    provider: "auto",
+    model: "router-selected",
+    route: "auto",
+    status: "queued",
+    started_at: Date.now(),
+  };
+  subagents.unshift(task);
+  view = "agents";
+  render();
+
+  try {
+    task.status = "running";
+    render();
+
+    const resp = await dispatchSubagent({ task: text, lane: "auto", approval_policy: "ask" });
+    task.status = resp?.data?.status === "accepted" ? "accepted" : "done";
+    task.provider = resp?.data?.provider || "auto";
+    task.model = resp?.data?.model || "router-selected";
+    task.route = `${task.provider}/${task.model}`;
+    task.output = resp?.data?.response || resp?.data?.error || "Accepted by Heiwa router. Results will stream back when available.";
+    task.ended_at = Date.now();
+
+    // Inject summary into chat without exposing model choice as a user control.
+    const route = task.route || "auto";
+    const summary = `[${route}] ${task.output.slice(0, 300)}${task.output.length > 300 ? "…" : ""}`;
+    messages.push({ id: uid(), role: "subagent", body: summary, meta: route, ts: Date.now() });
+  } catch (e) {
+    task.status = "error";
+    task.output = e instanceof Error ? e.message : String(e);
+    task.ended_at = Date.now();
+  }
+  render();
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Auto-compaction: summarize old messages into a single compacted block
+// ═══════════════════════════════════════════════════════════════════════════
+
+function autoCompact(): void {
+  const COMPACT_THRESHOLD = 30; // compact when > 30 messages
+  if (messages.length <= COMPACT_THRESHOLD) return;
+
+  // Keep last 15 messages intact, compact everything before
+  const keepFrom = messages.length - 15;
+  const toCompact = messages.slice(0, keepFrom);
+  const kept = messages.slice(keepFrom);
+
+  // Build a simple summary
+  const userMsgs = toCompact.filter(m => m.role === "user").map(m => m.body).join(" | ");
+  const summary = `[${toCompact.length} earlier messages compacted: ${userMsgs.slice(0, 200)}${userMsgs.length > 200 ? "…" : ""}]`;
+
+  const compacted: ChatMessage = {
+    id: uid(),
+    role: "system",
+    body: summary,
+    meta: "auto-compacted",
+    ts: toCompact[toCompact.length - 1].ts,
+    compacted: true,
+  };
+
+  messages = [compacted, ...kept];
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Render: icon rail (left sidebar)
+// ═══════════════════════════════════════════════════════════════════════════
+
+const VIEWS: Array<[View, string, string]> = [
+  ["chat", "Chat", "💬"],
+  ["calendar", "Calendar", "📅"],
+  ["agents", "Agents", "🤖"],
+  ["skills", "Skills", "⚡"],
+  ["artifacts", "Artifacts", "📦"],
+  ["browser", "Browser", "🌐"],
+  ["files", "Files", "📁"],
+];
+
+function renderRail(): string {
+  return `
+    <nav class="icon-rail">
+      <div class="rail-logo">H</div>
+      ${VIEWS.map(([id, label, icon]) =>
+        `<button class="rail-btn ${view === id ? "active" : ""}" data-view="${id}" title="${label}">${icon}</button>`
+      ).join("")}
+      <div class="rail-spacer"></div>
+      <div class="rail-status ${health?.reachable ? "online" : "offline"}" title="${runtimeStatus(health)}"></div>
+    </nav>
+  `;
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Render: chat view (main area)
+// ═══════════════════════════════════════════════════════════════════════════
 
 function renderMessages(): string {
-  return messages.map((message) => `
-    <article class="message ${message.role}">
-      <div class="message-meta"><span>${message.role}</span><span>${message.meta ?? new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}</span></div>
-      <p>${escapeHtml(message.body)}</p>
-    </article>
-  `).join("");
+  if (messages.length === 0) {
+    return `<div class="chat-empty">
+      <div class="chat-empty-icon">💬</div>
+      <p>Ask Heiwa anything. Subagents run in the background and stream results here.</p>
+    </div>`;
+  }
+
+  return messages.map(m => {
+    if (m.compacted) {
+      return `<div class="chat-compacted" title="${esc(m.body)}">📎 ${esc(m.body)}</div>`;
+    }
+    const isSubagent = m.role === "subagent";
+    return `
+      <article class="chat-msg ${m.role}">
+        <div class="chat-msg-header">
+          <span class="chat-role">${isSubagent ? "↳ subagent" : m.role}</span>
+          <span class="chat-meta">${esc(m.meta || "")}</span>
+          <span class="chat-time">${timeFmt(m.ts)}</span>
+        </div>
+        <div class="chat-body">${esc(m.body)}</div>
+      </article>
+    `;
+  }).join("");
 }
 
-function render(): void {
-  const status = runtimeStatus(health);
-  const reachable = health?.reachable ?? false;
-  app.innerHTML = `
-    <div class="desktop-shell">
-      <aside class="sidebar">
-        <div class="window-dots"><i></i><i></i><i></i></div>
-        <div class="brand"><strong>Heiwa</strong><span>.app</span></div>
-        <div class="project-chip"><b></b> ~/heiwa-universe</div>
-        <nav class="primary-nav">
-          ${nav.map(([label, hint], index) => `<button class="${index === 0 ? "primary" : ""}"><span>${label}</span><em>${hint}</em></button>`).join("")}
-        </nav>
-        <section class="rail-section"><h3>Pinned</h3><p>Shift-click a thread to pin</p></section>
-        <section class="rail-section sessions"><h3>Sessions 1</h3><button class="active-dot">Heiwa Desktop Package</button></section>
-      </aside>
+function renderChat(): string {
+  return `
+    <div class="view chat-view">
+      <div class="chat-messages" id="chat-messages">
+        ${renderMessages()}
+      </div>
+    </div>
+  `;
+}
 
-      <main class="workspace">
-        <header class="topbar">
-          <div><strong>Heiwa Desktop</strong><span> native Tauri 2 package</span></div>
-          <div class="top-actions"><button>Voice</button><button>Settings</button><button>Inspector</button></div>
-        </header>
+// ═══════════════════════════════════════════════════════════════════════════
+// Render: calendar view
+// ═══════════════════════════════════════════════════════════════════════════
 
-        <section class="conversation">
-          <div class="hero-line">
-            <div><p>ONE OUTPUT LAYER</p><h1>Think bigger than Hermes.</h1></div>
-            <div class="plane-pills"><span>Intake</span><span>Execution</span><span>Evidence</span></div>
+function renderCalendar(): string {
+  const today = new Date();
+  const year = calendarDate.getFullYear();
+  const month = calendarDate.getMonth();
+  const firstDay = new Date(year, month, 1).getDay();
+  const daysInMonth = new Date(year, month + 1, 0).getDate();
+  const monthName = calendarDate.toLocaleDateString("en-US", { month: "long", year: "numeric" });
+
+  const prevMonth = () => { calendarDate = new Date(year, month - 1, 1); render(); };
+  const nextMonth = () => { calendarDate = new Date(year, month + 1, 1); render(); };
+  const goToday = () => { calendarDate = new Date(); render(); };
+
+  // Build day cells
+  let cells = "";
+  // Empty cells before first day
+  for (let i = 0; i < firstDay; i++) {
+    cells += `<div class="cal-cell empty"></div>`;
+  }
+  // Day cells
+  for (let d = 1; d <= daysInMonth; d++) {
+    const dateStr = `${year}-${String(month + 1).padStart(2, "0")}-${String(d).padStart(2, "0")}`;
+    const isToday = today.getFullYear() === year && today.getMonth() === month && today.getDate() === d;
+    const dayEvents = calendarEvents.filter(e => e.date === dateStr);
+    const eventDots = dayEvents.slice(0, 3).map(e =>
+      `<span class="cal-dot ${e.kind || "event"}"></span>`
+    ).join("");
+    cells += `<div class="cal-cell ${isToday ? "today" : ""}">
+      <span class="cal-day">${d}</span>
+      <div class="cal-dots">${eventDots}</div>
+    </div>`;
+  }
+
+  // Upcoming events list
+  const upcoming = calendarEvents
+    .filter(e => e.date && e.date >= `${year}-${String(month + 1).padStart(2, "0")}-01`)
+    .slice(0, 10);
+
+  return `
+    <div class="view calendar-view">
+      <div class="cal-header">
+        <div class="cal-nav">
+          <button onclick="(${prevMonth.toString()})()">‹</button>
+          <h2>${esc(monthName)}</h2>
+          <button onclick="(${nextMonth.toString()})()">›</button>
+          <button class="cal-today" onclick="(${goToday.toString()})()">Today</button>
+        </div>
+      </div>
+      <div class="cal-grid">
+        <div class="cal-header-row">Sun Mon Tue Wed Thu Fri Sat</div>
+        ${cells}
+      </div>
+      <div class="cal-upcoming">
+        <h3>Upcoming</h3>
+        ${upcoming.length === 0 ? '<p class="muted">No events this month.</p>' :
+          upcoming.map(e => `
+            <div class="cal-event-row">
+              <span class="cal-event-date">${e.date}</span>
+              <span class="cal-event-title">${esc(e.title || "Untitled")}</span>
+              <span class="cal-event-kind">${esc(e.kind || "")}</span>
+            </div>
+          `).join("")
+        }
+      </div>
+    </div>
+  `;
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Render: agents view
+// ═══════════════════════════════════════════════════════════════════════════
+
+function renderAgents(): string {
+  return `
+    <div class="view agents-view">
+      <div class="view-header">
+        <h2>Subagents</h2>
+        <p class="muted">Background tasks dispatched to local or cloud models. Results stream into chat.</p>
+      </div>
+
+      <div class="dispatch-quick">
+        <textarea id="dispatch-input" rows="2" placeholder="Describe a task for Heiwa to route to the right local/provider-owned executor…"></textarea>
+        <div class="dispatch-controls auto-route-controls">
+          <div class="route-note">
+            <strong>Auto-routed</strong>
+            <span>Heiwa chooses the smallest sufficient route by task, privacy, quota, device state, and evidence quality.</span>
           </div>
-          ${renderMessages()}
-        </section>
+          <button id="dispatch-btn" class="btn-primary">Dispatch</button>
+        </div>
+      </div>
 
-        <form class="composer" id="composer">
-          <button type="button" aria-label="attach">+</button>
-          <textarea id="prompt" rows="2" placeholder="Ask Heiwa to inspect, plan, execute, brief, or optimize your day…"></textarea>
-          <button type="submit" ${busy ? "disabled" : ""}>↑</button>
-        </form>
+      <div class="subagent-list">
+        ${subagents.length === 0 ? '<p class="muted">No subagents dispatched yet.</p>' :
+          subagents.map(sa => `
+            <div class="subagent-card ${sa.status}">
+              <div class="sa-header">
+                <span class="sa-status-dot ${sa.status}"></span>
+                <span class="sa-task">${esc(sa.task.slice(0, 80))}${sa.task.length > 80 ? "…" : ""}</span>
+                <span class="sa-meta">${esc(sa.route || [sa.provider, sa.model].filter(Boolean).join("/") || "auto")}</span>
+                <span class="sa-time">${sa.ended_at ? timeFmt(sa.ended_at) : sa.started_at ? timeFmt(sa.started_at) : ""}</span>
+              </div>
+              ${sa.output ? `<div class="sa-output">${esc(sa.output)}</div>` : ""}
+            </div>
+          `).join("")
+        }
+      </div>
+    </div>
+  `;
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Render: skills view
+// ═══════════════════════════════════════════════════════════════════════════
+
+function renderSkills(): string {
+  return `
+    <div class="view skills-view">
+      <div class="view-header">
+        <h2>Skills & Tools</h2>
+        <p class="muted">Auto-discovered capabilities from connected providers and local tools.</p>
+      </div>
+      <div class="skills-grid">
+        <div class="skill-card">
+          <h3>📁 Files</h3>
+          <p>Read, search, and list files in the active workspace.</p>
+        </div>
+        <div class="skill-card">
+          <h3>🌐 Browser</h3>
+          <p>Navigate and extract web content.</p>
+        </div>
+        <div class="skill-card">
+          <h3>📅 Calendar</h3>
+          <p>View holds and events. Sync with Google Calendar when authorized.</p>
+        </div>
+        <div class="skill-card">
+          <h3>📧 Mail</h3>
+          <p>Scan and draft replies. Gmail sync when authorized.</p>
+        </div>
+        <div class="skill-card">
+          <h3>🔍 Search</h3>
+          <p>Web search and local grep.</p>
+        </div>
+        <div class="skill-card">
+          <h3>💻 Shell</h3>
+          <p>Run commands in sandboxed terminal sessions.</p>
+        </div>
+      </div>
+    </div>
+  `;
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Render: artifacts view
+// ═══════════════════════════════════════════════════════════════════════════
+
+function renderArtifacts(): string {
+  return `
+    <div class="view artifacts-view">
+      <div class="view-header">
+        <h2>Artifacts</h2>
+        <p class="muted">Files, documents, and outputs generated by Heiwa and subagents.</p>
+      </div>
+      <p class="muted">Artifacts will appear here as they are generated.</p>
+    </div>
+  `;
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Render: browser view
+// ═══════════════════════════════════════════════════════════════════════════
+
+function renderBrowser(): string {
+  return `
+    <div class="view browser-view">
+      <div class="browser-bar">
+        <input id="browser-url" type="text" value="https://example.com" placeholder="Enter URL…" />
+        <button id="browser-go" class="btn-primary">Go</button>
+      </div>
+      <div class="browser-frame">
+        <iframe title="Heiwa browser" src="https://example.com" sandbox="allow-forms allow-same-origin allow-scripts allow-popups"></iframe>
+      </div>
+    </div>
+  `;
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Render: files view
+// ═══════════════════════════════════════════════════════════════════════════
+
+function renderFiles(): string {
+  return `
+    <div class="view files-view">
+      <div class="view-header">
+        <h2>Files</h2>
+        <p class="muted">Browse the local filesystem.</p>
+      </div>
+      <div class="files-placeholder">
+        <p class="muted">File browser loads from <code>/api/v1/files/tree</code>.</p>
+      </div>
+    </div>
+  `;
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Main render
+// ═══════════════════════════════════════════════════════════════════════════
+
+function render(): void {
+  const main =
+    view === "chat" ? renderChat() :
+    view === "calendar" ? renderCalendar() :
+    view === "agents" ? renderAgents() :
+    view === "skills" ? renderSkills() :
+    view === "artifacts" ? renderArtifacts() :
+    view === "browser" ? renderBrowser() :
+    renderFiles();
+
+  app.innerHTML = `
+    <div class="app-shell">
+      ${renderRail()}
+      <main class="main-area">
+        ${main}
+        <div class="composer-area">
+          <div class="composer-wrap">
+            <textarea id="chat-input" rows="1" placeholder="Message Heiwa… (Enter to send, Shift+Enter for newline)"></textarea>
+            <button id="send-btn" ${busy ? "disabled" : ""}>${busy ? "…" : "↑"}</button>
+          </div>
+          <div class="composer-hint">
+            ${view !== "chat" ? `<span class="hint">Switch to 💬 Chat to see full conversation</span>` : ""}
+            <span class="hint">${esc(runtimeVersion(health))} · ${providersFromSnapshot(health).filter(p => p.status === "connected").length} providers</span>
+          </div>
+        </div>
       </main>
-
-      <aside class="inspector">
-        <h2>Runtime</h2>
-        <span class="status ${reachable ? "online" : "offline"}">${status}</span>
-        <dl>
-          <div><dt>Version</dt><dd>${runtimeVersion(health)}</dd></div>
-          <div><dt>App port</dt><dd>${reachable ? "7474" : "offline"}</dd></div>
-          <div><dt>Package</dt><dd>Tauri 2 · DMG/App</dd></div>
-        </dl>
-        <h2>Heiwa differences</h2>
-        <ul>
-          <li>Life brief, calendar, automations, crons</li>
-          <li>Per-device model/resource scoring</li>
-          <li>Local model lanes for cheap/token-heavy work</li>
-          <li>Receipts and citations for completed tasks</li>
-        </ul>
-      </aside>
-
-      <footer class="statusbar">
-        <span>⌘ Gateway ${reachable ? "ready" : "offline"}</span>
-        <span>✦ Agents</span>
-        <span>◷ Cron</span>
-        <span>Context local-first</span>
-        <span>⚡ Heiwa v0.1.0 · Tauri 2</span>
-      </footer>
     </div>
   `;
 
-  const form = document.querySelector<HTMLFormElement>("#composer");
-  const prompt = document.querySelector<HTMLTextAreaElement>("#prompt");
-  form?.addEventListener("submit", async (event) => {
-    event.preventDefault();
-    const text = prompt?.value.trim() ?? "";
-    if (!text || busy) return;
-    messages.push({ role: "user", body: text });
-    if (prompt) prompt.value = "";
-    busy = true;
-    render();
-    try {
-      const response = await apiPost<{ ok?: boolean; data?: { response?: string } }>("/api/v1/repl", { prompt: text });
-      messages.push({ role: "assistant", body: response.data?.response ?? "Done.", meta: "runtime" });
-    } catch (error) {
-      messages.push({ role: "system", body: `Runtime blocked: ${error instanceof Error ? error.message : JSON.stringify(error)}`, meta: "offline" });
-    } finally {
-      busy = false;
+  // Rail navigation
+  document.querySelectorAll<HTMLButtonElement>(".rail-btn").forEach(btn => {
+    btn.addEventListener("click", () => {
+      view = btn.dataset.view as View;
+      if (view === "calendar") loadCalendar();
+      if (view === "agents") loadAgents();
       render();
+    });
+  });
+
+  // Chat input
+  const input = document.querySelector<HTMLTextAreaElement>("#chat-input");
+  const sendBtn = document.querySelector<HTMLButtonElement>("#send-btn");
+
+  const doSend = async () => {
+    const text = input?.value.trim() ?? "";
+    if (!text || busy) return;
+    if (input) input.value = "";
+    view = "chat";
+    render();
+    await sendChat(text);
+    autoCompact();
+    render();
+  };
+
+  input?.addEventListener("keydown", (e) => {
+    if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); doSend(); }
+  });
+  sendBtn?.addEventListener("click", doSend);
+
+  // Auto-resize textarea
+  input?.addEventListener("input", () => {
+    if (input) {
+      input.style.height = "auto";
+      input.style.height = Math.min(input.scrollHeight, 120) + "px";
     }
   });
+
+  // Dispatch form (agents view)
+  const dispatchBtn = document.querySelector<HTMLButtonElement>("#dispatch-btn");
+  dispatchBtn?.addEventListener("click", async () => {
+    const task = document.querySelector<HTMLTextAreaElement>("#dispatch-input")?.value.trim() ?? "";
+    if (!task) return;
+    await dispatchTask(task);
+  });
+
+  // Browser bar
+  const browserGo = document.querySelector<HTMLButtonElement>("#browser-go");
+  const browserUrl = document.querySelector<HTMLInputElement>("#browser-url");
+  browserGo?.addEventListener("click", () => {
+    const url = browserUrl?.value.trim() || "https://example.com";
+    const iframe = document.querySelector<HTMLIFrameElement>(".browser-frame iframe");
+    if (iframe) iframe.src = url;
+  });
+  browserUrl?.addEventListener("keydown", (e) => {
+    if (e.key === "Enter") browserGo?.click();
+  });
+
+  // Scroll chat to bottom
+  const chatMsgs = document.querySelector("#chat-messages");
+  if (chatMsgs) chatMsgs.scrollTop = chatMsgs.scrollHeight;
 }
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Boot
+// ═══════════════════════════════════════════════════════════════════════════
 
 async function boot(): Promise<void> {
   render();
-  health = await runtimeHealth().catch((error) => ({ reachable: false, error, snapshot: null }));
+  await loadHealth();
+  await Promise.all([loadCalendar(), loadInbox(), loadAgents()]);
+  connectWS();
   render();
 }
 

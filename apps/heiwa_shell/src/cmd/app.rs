@@ -756,6 +756,10 @@ impl RuntimeStatus {
 }
 
 async fn handle_connection(mut stream: TcpStream, started_at: Arc<String>) -> Result<()> {
+    let local_port = stream
+        .local_addr()
+        .map(|addr| addr.port())
+        .unwrap_or(DEFAULT_PORT);
     let (request, body) = read_http_request_and_body(&mut stream).await?;
     if request.is_empty() {
         return Ok(());
@@ -910,12 +914,12 @@ async fn handle_connection(mut stream: TcpStream, started_at: Arc<String>) -> Re
         let provider = parsed_body
             .get("provider")
             .and_then(Value::as_str)
-            .unwrap_or("ollama")
+            .unwrap_or("auto")
             .to_string();
         let model = parsed_body
             .get("model")
             .and_then(Value::as_str)
-            .unwrap_or("qwen3.5:4b")
+            .unwrap_or("router-selected")
             .to_string();
         let task_id = format!("sa-{}", std::process::id());
 
@@ -1020,7 +1024,7 @@ async fn handle_connection(mut stream: TcpStream, started_at: Arc<String>) -> Re
         .await;
     }
 
-    if let Some(payload) = api_payload(path, &started_at) {
+    if let Some(payload) = api_payload_for_port(path, &started_at, local_port) {
         return write_response(
             &mut stream,
             200,
@@ -1395,7 +1399,12 @@ async fn write_response(
     Ok(())
 }
 
+#[cfg(test)]
 fn api_payload(path: &str, started_at: &str) -> Option<Value> {
+    api_payload_for_port(path, started_at, DEFAULT_PORT)
+}
+
+fn api_payload_for_port(path: &str, started_at: &str, app_port: u16) -> Option<Value> {
     let data = match path {
         "/status/health" => json!({
             "status": "ok",
@@ -1411,7 +1420,7 @@ fn api_payload(path: &str, started_at: &str) -> Option<Value> {
             "runtime_version": env!("CARGO_PKG_VERSION"),
             "channel": "stable",
             "default_route_role": "local_first",
-            "app_url": format!("http://127.0.0.1:{DEFAULT_PORT}/"),
+            "app_url": format!("http://127.0.0.1:{app_port}/"),
         }),
         "/api/v1/providers" => json!({ "providers": provider_rows() }),
         "/api/v1/routes" => json!({ "routes": route_rows() }),
@@ -3808,6 +3817,17 @@ mod app_readmodel_tests {
                 .and_then(|admissions| admissions.get("local_model_large"))
                 .is_some(),
             "resource admissions should include local_model_large: {payload}"
+        );
+    }
+
+    #[test]
+    fn session_api_payload_reports_serving_port() {
+        let payload = api_payload_for_port("/api/v1/session", "2026-06-02T00:00:00Z", 7475)
+            .expect("session endpoint");
+        let data = payload.get("data").expect("data");
+        assert_eq!(
+            data.get("app_url").and_then(Value::as_str),
+            Some("http://127.0.0.1:7475/")
         );
     }
 
