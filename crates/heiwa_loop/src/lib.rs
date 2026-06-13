@@ -1,3 +1,10 @@
+pub mod fanout;
+
+pub use fanout::{
+    plan_recursive_harness, ChildHarnessTask, RecursiveHarnessConstraints, RecursiveHarnessEntry,
+    RecursiveHarnessPlan, RecursiveHarnessStrategy,
+};
+
 use anyhow::{anyhow, Result};
 use chrono::Utc;
 use heiwa_bindings::{
