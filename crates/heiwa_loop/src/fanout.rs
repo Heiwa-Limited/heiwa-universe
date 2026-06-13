@@ -1,5 +1,6 @@
 use anyhow::{anyhow, Result};
 use serde::{Deserialize, Serialize};
+use std::collections::{BTreeMap, BTreeSet};
 
 /// Deterministic strategy for recursive harness fan-out.
 ///
@@ -65,6 +66,106 @@ pub struct RecursiveHarnessPlan {
     pub child_tasks: Vec<ChildHarnessTask>,
     pub aggregate_receipt_path: String,
     pub reason: String,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ChildHarnessStatus {
+    Succeeded,
+    Failed,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ChildHarnessReceipt {
+    pub task_id: String,
+    pub parent_task_id: String,
+    pub depth: u8,
+    pub entry_ids: Vec<String>,
+    pub status: ChildHarnessStatus,
+    pub output_summary: String,
+    #[serde(default)]
+    pub source_spans: Vec<String>,
+    pub error: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct AggregatedHarnessReceipt {
+    pub parent_task_id: String,
+    pub depth: u8,
+    pub status: ChildHarnessStatus,
+    pub total_children: usize,
+    pub succeeded_children: usize,
+    pub failed_children: usize,
+    pub total_entries: usize,
+    pub aggregate_receipt_path: String,
+    pub child_receipts: Vec<ChildHarnessReceipt>,
+}
+
+pub fn aggregate_child_harness_receipts(
+    plan: &RecursiveHarnessPlan,
+    receipts: Vec<ChildHarnessReceipt>,
+) -> Result<AggregatedHarnessReceipt> {
+    let expected_ids: BTreeSet<&str> = plan
+        .child_tasks
+        .iter()
+        .map(|task| task.task_id.as_str())
+        .collect();
+    let mut by_task_id: BTreeMap<String, ChildHarnessReceipt> = BTreeMap::new();
+
+    for receipt in receipts {
+        if !expected_ids.contains(receipt.task_id.as_str()) {
+            return Err(anyhow!("unexpected child receipt: {}", receipt.task_id));
+        }
+        if receipt.parent_task_id != plan.parent_task_id {
+            return Err(anyhow!(
+                "child receipt {} has parent {}, expected {}",
+                receipt.task_id,
+                receipt.parent_task_id,
+                plan.parent_task_id
+            ));
+        }
+        if by_task_id
+            .insert(receipt.task_id.clone(), receipt)
+            .is_some()
+        {
+            return Err(anyhow!("duplicate child receipt"));
+        }
+    }
+
+    let mut ordered = Vec::with_capacity(plan.child_tasks.len());
+    for task in &plan.child_tasks {
+        let receipt = by_task_id
+            .remove(&task.task_id)
+            .ok_or_else(|| anyhow!("missing child receipt: {}", task.task_id))?;
+        ordered.push(receipt);
+    }
+
+    let succeeded_children = ordered
+        .iter()
+        .filter(|receipt| receipt.status == ChildHarnessStatus::Succeeded)
+        .count();
+    let failed_children = ordered
+        .iter()
+        .filter(|receipt| receipt.status == ChildHarnessStatus::Failed)
+        .count();
+    let total_entries = ordered.iter().map(|receipt| receipt.entry_ids.len()).sum();
+    let status = if failed_children > 0 {
+        ChildHarnessStatus::Failed
+    } else {
+        ChildHarnessStatus::Succeeded
+    };
+
+    Ok(AggregatedHarnessReceipt {
+        parent_task_id: plan.parent_task_id.clone(),
+        depth: plan.depth,
+        status,
+        total_children: ordered.len(),
+        succeeded_children,
+        failed_children,
+        total_entries,
+        aggregate_receipt_path: plan.aggregate_receipt_path.clone(),
+        child_receipts: ordered,
+    })
 }
 
 pub fn plan_recursive_harness(
@@ -290,5 +391,94 @@ mod tests {
             .expect_err("fan-out should exceed child budget");
 
         assert!(err.to_string().contains("fan-out budget exceeded"));
+    }
+
+    fn child_receipt(task: &ChildHarnessTask, status: ChildHarnessStatus) -> ChildHarnessReceipt {
+        ChildHarnessReceipt {
+            task_id: task.task_id.clone(),
+            parent_task_id: task.parent_task_id.clone(),
+            depth: task.depth,
+            entry_ids: task.entry_ids.clone(),
+            status,
+            output_summary: format!("processed {} entries", task.entry_ids.len()),
+            source_spans: vec!["input.json:1-2".to_string()],
+            error: None,
+        }
+    }
+
+    #[test]
+    fn aggregate_receipts_preserves_plan_order_and_status_counts() {
+        let entries = vec![entry("a"), entry("b"), entry("c")];
+        let plan = plan_recursive_harness(
+            "parent",
+            &entries,
+            0,
+            RecursiveHarnessConstraints::default(),
+        )
+        .expect("plan");
+        let receipts = vec![
+            child_receipt(&plan.child_tasks[2], ChildHarnessStatus::Succeeded),
+            child_receipt(&plan.child_tasks[0], ChildHarnessStatus::Succeeded),
+            child_receipt(&plan.child_tasks[1], ChildHarnessStatus::Failed),
+        ];
+
+        let aggregate = aggregate_child_harness_receipts(&plan, receipts).expect("aggregate");
+
+        assert_eq!(aggregate.parent_task_id, "parent");
+        assert_eq!(aggregate.status, ChildHarnessStatus::Failed);
+        assert_eq!(aggregate.total_children, 3);
+        assert_eq!(aggregate.succeeded_children, 2);
+        assert_eq!(aggregate.failed_children, 1);
+        assert_eq!(
+            aggregate
+                .child_receipts
+                .iter()
+                .map(|r| r.task_id.as_str())
+                .collect::<Vec<_>>(),
+            plan.child_tasks
+                .iter()
+                .map(|t| t.task_id.as_str())
+                .collect::<Vec<_>>()
+        );
+    }
+
+    #[test]
+    fn aggregate_receipts_rejects_missing_or_extra_children() {
+        let entries = vec![entry("a"), entry("b")];
+        let plan = plan_recursive_harness(
+            "parent",
+            &entries,
+            0,
+            RecursiveHarnessConstraints::default(),
+        )
+        .expect("plan");
+
+        let missing = vec![child_receipt(
+            &plan.child_tasks[0],
+            ChildHarnessStatus::Succeeded,
+        )];
+        let missing_err = aggregate_child_harness_receipts(&plan, missing)
+            .expect_err("missing child receipt should fail");
+        assert!(missing_err.to_string().contains("missing child receipt"));
+
+        let mut extra = plan
+            .child_tasks
+            .iter()
+            .map(|task| child_receipt(task, ChildHarnessStatus::Succeeded))
+            .collect::<Vec<_>>();
+        extra.push(ChildHarnessReceipt {
+            task_id: "extra-child".to_string(),
+            parent_task_id: "parent".to_string(),
+            depth: 1,
+            entry_ids: vec!["z".to_string()],
+            status: ChildHarnessStatus::Succeeded,
+            output_summary: "unexpected".to_string(),
+            source_spans: Vec::new(),
+            error: None,
+        });
+
+        let extra_err = aggregate_child_harness_receipts(&plan, extra)
+            .expect_err("extra child receipt should fail");
+        assert!(extra_err.to_string().contains("unexpected child receipt"));
     }
 }

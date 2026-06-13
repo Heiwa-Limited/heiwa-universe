@@ -1,8 +1,9 @@
 pub mod fanout;
 
 pub use fanout::{
-    plan_recursive_harness, ChildHarnessTask, RecursiveHarnessConstraints, RecursiveHarnessEntry,
-    RecursiveHarnessPlan, RecursiveHarnessStrategy,
+    aggregate_child_harness_receipts, plan_recursive_harness, AggregatedHarnessReceipt,
+    ChildHarnessReceipt, ChildHarnessStatus, ChildHarnessTask, RecursiveHarnessConstraints,
+    RecursiveHarnessEntry, RecursiveHarnessPlan, RecursiveHarnessStrategy,
 };
 
 use anyhow::{anyhow, Result};
