@@ -3,12 +3,16 @@ import type {
   Agent,
   Approval,
   ApprovalsSummary,
+  AutomationsSummary,
+  BrowserProbePayload,
   CalendarHold,
   CalendarSummary,
   CellsCatalogEntry,
   ConnectorsSummary,
   Cron,
   Envelope,
+  FilePreviewPayload,
+  FileTreePayload,
   FreshnessReport,
   Health,
   HistorySummary,
@@ -20,6 +24,7 @@ import type {
   Mission,
   ProviderLive,
   RateGroup,
+  ReceiptsSummary,
   ResourceSnapshotPayload,
   Route,
   RoutePreview,
@@ -101,6 +106,10 @@ export const v1 = {
   agents: () =>
     unwrap(api.get<Envelope<{ agents: Agent[] }>>("/api/v1/agents")),
   crons: () => unwrap(api.get<Envelope<{ crons: Cron[] }>>("/api/v1/crons")),
+  automations: () =>
+    unwrap(api.get<Envelope<AutomationsSummary>>("/api/v1/automations")),
+  receipts: () =>
+    unwrap(api.get<Envelope<ReceiptsSummary>>("/api/v1/receipts")),
   hooks: () =>
     unwrap(
       api.get<Envelope<{ providers: HookProvider[]; summary: HookSummary }>>(
@@ -114,4 +123,24 @@ export const v1 = {
       ),
     ),
   health: () => unwrap(api.get<Envelope<Health>>("/status/health")),
+  filesTree: (path?: string) => {
+    const qs = new URLSearchParams();
+    if (path) qs.set("path", path);
+    const suffix = qs.toString() ? `?${qs.toString()}` : "";
+    return unwrap(api.get<Envelope<FileTreePayload>>(`/api/v1/files/tree${suffix}`));
+  },
+  filePreview: (path: string) => {
+    const qs = new URLSearchParams({ path });
+    return unwrap(
+      api.get<Envelope<FilePreviewPayload>>(`/api/v1/files/preview?${qs.toString()}`),
+    );
+  },
+  browserProbe: (url: string) => {
+    const qs = new URLSearchParams({ url });
+    return unwrap(
+      api.get<Envelope<BrowserProbePayload>>(
+        `/api/v1/browser/probe?${qs.toString()}`,
+      ),
+    );
+  },
 };

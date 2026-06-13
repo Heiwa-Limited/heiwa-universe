@@ -767,6 +767,7 @@ async fn handle_connection(mut stream: TcpStream, started_at: Arc<String>) -> Re
     }
 
     let method = request_method(&request).unwrap_or("GET");
+    let target = request_target(&request).unwrap_or("/");
     let path = request_path(&request).unwrap_or("/");
     if method == "OPTIONS" {
         return write_response(&mut stream, 204, "text/plain", Vec::new(), false).await;
@@ -886,6 +887,63 @@ async fn handle_connection(mut stream: TcpStream, started_at: Arc<String>) -> Re
         .await;
     }
 
+    if method == "POST" && path == "/api/v1/agents/dispatch" {
+        let parsed_body: Value = serde_json::from_str(&body).unwrap_or_else(|_| json!({}));
+        let task_prompt = parsed_body
+            .get("task")
+            .and_then(Value::as_str)
+            .unwrap_or("")
+            .trim()
+            .to_string();
+        if task_prompt.is_empty() {
+            return write_response(
+                &mut stream,
+                400,
+                "application/json",
+                json!({"ok": false, "error": {"code": "empty_task"}})
+                    .to_string()
+                    .into_bytes(),
+                false,
+            )
+            .await;
+        }
+        let provider = parsed_body
+            .get("provider")
+            .and_then(Value::as_str)
+            .unwrap_or("ollama")
+            .to_string();
+        let model = parsed_body
+            .get("model")
+            .and_then(Value::as_str)
+            .unwrap_or("qwen3.5:4b")
+            .to_string();
+        let task_id = format!("sa-{}", std::process::id());
+
+        // Spawn background task
+        tokio::spawn(async move {
+            let _ = crate::execute_repl_turn(&task_prompt).await;
+        });
+
+        return write_response(
+            &mut stream,
+            202,
+            "application/json",
+            json!( {
+                "ok": true,
+                "data": {
+                    "task_id": task_id,
+                    "provider": provider,
+                    "model": model,
+                    "status": "accepted",
+                }
+            })
+            .to_string()
+            .into_bytes(),
+            false,
+        )
+        .await;
+    }
+
     if method != "GET" && !head_only {
         return write_response(
             &mut stream,
@@ -895,6 +953,69 @@ async fn handle_connection(mut stream: TcpStream, started_at: Arc<String>) -> Re
                 .to_string()
                 .into_bytes(),
             false,
+        )
+        .await;
+    }
+
+    if path == "/api/v1/files/tree" {
+        let payload = match files_tree_payload_from_target(target) {
+            Ok(data) => json!({"ok": true, "data": data}),
+            Err(error) => {
+                json!({"ok": false, "error": {"code": "files_tree_failed", "message": error.to_string()}})
+            }
+        };
+        return write_response(
+            &mut stream,
+            if payload.get("ok").and_then(Value::as_bool) == Some(true) {
+                200
+            } else {
+                400
+            },
+            "application/json",
+            payload.to_string().into_bytes(),
+            head_only,
+        )
+        .await;
+    }
+
+    if path == "/api/v1/files/preview" {
+        let payload = match file_preview_payload_from_target(target) {
+            Ok(data) => json!({"ok": true, "data": data}),
+            Err(error) => {
+                json!({"ok": false, "error": {"code": "file_preview_failed", "message": error.to_string()}})
+            }
+        };
+        return write_response(
+            &mut stream,
+            if payload.get("ok").and_then(Value::as_bool) == Some(true) {
+                200
+            } else {
+                400
+            },
+            "application/json",
+            payload.to_string().into_bytes(),
+            head_only,
+        )
+        .await;
+    }
+
+    if path == "/api/v1/browser/probe" {
+        let payload = match browser_probe_payload_from_target(target) {
+            Ok(data) => json!({"ok": true, "data": data}),
+            Err(error) => {
+                json!({"ok": false, "error": {"code": "browser_probe_failed", "message": error.to_string()}})
+            }
+        };
+        return write_response(
+            &mut stream,
+            if payload.get("ok").and_then(Value::as_bool) == Some(true) {
+                200
+            } else {
+                400
+            },
+            "application/json",
+            payload.to_string().into_bytes(),
+            head_only,
         )
         .await;
     }
@@ -1302,6 +1423,8 @@ fn api_payload(path: &str, started_at: &str) -> Option<Value> {
         "/api/v1/life/freshness" => crate::cmd::life::freshness_payload(),
         "/api/v1/calendar/summary" => crate::cmd::calendar::summary_payload(),
         "/api/v1/mail/summary" => crate::cmd::mail::summary_payload(),
+        "/api/v1/automations" => crate::cmd::auto::automations_payload(),
+        "/api/v1/receipts" => receipts_payload_for_state_dir(&state_dir()),
         "/api/v1/connectors" => crate::cmd::connectors::connectors_payload(),
         "/api/v1/goals" => crate::cmd::goal::goals_payload(),
         "/api/v1/compress/summary" => crate::cmd::compress::compress_summary_payload(),
@@ -1321,12 +1444,339 @@ fn api_payload(path: &str, started_at: &str) -> Option<Value> {
         "/api/v1/traces" => json!({ "traces": [] }),
         "/api/v1/memory" => json!({ "entries": [] }),
         "/api/v1/agents" => json!({ "agents": worker_agent_rows() }),
+        "/api/v1/agents/active" => json!({ "tasks": [] }),
         "/api/v1/capabilities" => capabilities_payload(),
         "/api/v1/crons" => json!({ "crons": [] }),
         "/api/v1/cells/catalog" => json!({ "cells": [] }),
+        "/api/v1/providers/ollama/models" => ollama_models_payload(),
         _ => return None,
     };
     Some(json!({ "ok": true, "data": data }))
+}
+
+const RECEIPT_SCAN_LIMIT: usize = 120;
+
+fn receipts_payload_for_state_dir(state_dir: &Path) -> Value {
+    let mut counts = serde_json::Map::new();
+    let mut receipts = Vec::new();
+
+    for (lane, dir) in receipt_lanes(state_dir) {
+        let lane_receipts = scan_receipt_lane(state_dir, lane, &dir);
+        counts.insert(lane.to_string(), json!(lane_receipts.len()));
+        receipts.extend(lane_receipts);
+    }
+
+    receipts.sort_by(|a, b| {
+        b.get("created_at")
+            .and_then(Value::as_str)
+            .unwrap_or("")
+            .cmp(a.get("created_at").and_then(Value::as_str).unwrap_or(""))
+            .then_with(|| {
+                b.get("modified_unix")
+                    .and_then(Value::as_u64)
+                    .cmp(&a.get("modified_unix").and_then(Value::as_u64))
+            })
+    });
+    let total = receipts.len();
+    let truncated = receipts.len() > RECEIPT_SCAN_LIMIT;
+    receipts.truncate(RECEIPT_SCAN_LIMIT);
+    counts.insert("total".to_string(), json!(total));
+
+    json!({
+        "command": "receipts summary",
+        "state_dir": state_dir.display().to_string(),
+        "counts": counts,
+        "receipts": receipts,
+        "truncated": truncated,
+        "limit": RECEIPT_SCAN_LIMIT,
+        "next": [
+            "heiwa calendar status --json",
+            "heiwa auto status --json",
+            "heiwa mail status --json"
+        ],
+    })
+}
+
+fn receipt_lanes(state_dir: &Path) -> Vec<(&'static str, PathBuf)> {
+    vec![
+        ("calendar", state_dir.join("calendar").join("receipts")),
+        (
+            "automations",
+            state_dir.join("automations").join("receipts"),
+        ),
+        ("mail", state_dir.join("mail").join("receipts")),
+        ("promotion", state_dir.join("evidence").join("promotion")),
+        ("compress", state_dir.join("evidence").join("compress")),
+        ("models", state_dir.join("models").join("receipts")),
+        ("model", state_dir.join("model").join("receipts")),
+    ]
+}
+
+fn scan_receipt_lane(state_dir: &Path, lane: &str, dir: &Path) -> Vec<Value> {
+    let Ok(entries) = fs::read_dir(dir) else {
+        return Vec::new();
+    };
+    let mut rows = Vec::new();
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if path.extension().and_then(|ext| ext.to_str()) != Some("json") {
+            continue;
+        }
+        let metadata = entry.metadata().ok();
+        let modified_unix = metadata
+            .as_ref()
+            .and_then(|m| m.modified().ok())
+            .and_then(|time| time.duration_since(std::time::UNIX_EPOCH).ok())
+            .map(|duration| duration.as_secs());
+        let modified_at = metadata
+            .as_ref()
+            .and_then(|m| m.modified().ok())
+            .map(|time| chrono::DateTime::<chrono::Utc>::from(time).to_rfc3339());
+        let size_bytes = metadata.as_ref().map(|m| m.len());
+        let relative_path = path
+            .strip_prefix(state_dir)
+            .ok()
+            .map(|p| p.display().to_string())
+            .unwrap_or_else(|| path.display().to_string());
+        let raw = fs::read_to_string(&path);
+        let (data, parse_error) = match raw {
+            Ok(raw) => match serde_json::from_str::<Value>(&raw) {
+                Ok(value) => (value, None),
+                Err(error) => (json!({}), Some(error.to_string())),
+            },
+            Err(error) => (json!({}), Some(error.to_string())),
+        };
+        let created_at = receipt_created_at(&data)
+            .or(modified_at.as_deref())
+            .unwrap_or("unknown")
+            .to_string();
+        rows.push(json!({
+            "lane": lane,
+            "receipt_id": receipt_id_from_value(&data, &path),
+            "kind": data.get("kind").and_then(Value::as_str)
+                .or_else(|| data.get("schema_version").and_then(Value::as_str))
+                .unwrap_or("unknown"),
+            "event": data.get("event").and_then(Value::as_str),
+            "created_at": created_at,
+            "path": path.display().to_string(),
+            "relative_path": relative_path,
+            "size_bytes": size_bytes,
+            "modified_unix": modified_unix,
+            "parse_error": parse_error,
+            "data": data,
+        }));
+    }
+    rows
+}
+
+fn receipt_created_at(value: &Value) -> Option<&str> {
+    [
+        "created_at",
+        "scanned_at",
+        "completed_at",
+        "started_at",
+        "ts",
+        "timestamp",
+    ]
+    .iter()
+    .find_map(|field| value.get(*field).and_then(Value::as_str))
+}
+
+fn receipt_id_from_value(value: &Value, path: &Path) -> String {
+    value
+        .get("receipt_id")
+        .and_then(Value::as_str)
+        .or_else(|| value.get("id").and_then(Value::as_str))
+        .or_else(|| value.get("execution_id").and_then(Value::as_str))
+        .map(str::to_string)
+        .unwrap_or_else(|| {
+            path.file_stem()
+                .and_then(|stem| stem.to_str())
+                .unwrap_or("unknown-receipt")
+                .to_string()
+        })
+}
+
+const FILE_TREE_LIMIT: usize = 160;
+const FILE_PREVIEW_LIMIT: usize = 96 * 1024;
+
+fn files_tree_payload_from_target(target: &str) -> Result<Value> {
+    let requested = query_param(target, "path").unwrap_or_else(default_workspace_path);
+    let path = resolve_readonly_user_path(&requested)?;
+    if !path.is_dir() {
+        return Err(anyhow!("not a directory: {}", path.display()));
+    }
+
+    let mut entries = Vec::new();
+    for entry in fs::read_dir(&path)? {
+        let Ok(entry) = entry else { continue };
+        let entry_path = entry.path();
+        let Ok(metadata) = entry.metadata() else {
+            continue;
+        };
+        let name = entry.file_name().to_string_lossy().to_string();
+        entries.push(json!({
+            "name": name,
+            "path": entry_path.display().to_string(),
+            "kind": if metadata.is_dir() { "directory" } else if metadata.is_file() { "file" } else { "other" },
+            "size_bytes": if metadata.is_file() { Some(metadata.len()) } else { None },
+            "modified_unix": metadata.modified().ok()
+                .and_then(|time| time.duration_since(std::time::UNIX_EPOCH).ok())
+                .map(|duration| duration.as_secs()),
+            "hidden": name.starts_with('.'),
+        }));
+    }
+    entries.sort_by(|a, b| {
+        let a_dir = a.get("kind").and_then(Value::as_str) == Some("directory");
+        let b_dir = b.get("kind").and_then(Value::as_str) == Some("directory");
+        b_dir.cmp(&a_dir).then_with(|| {
+            a.get("name")
+                .and_then(Value::as_str)
+                .unwrap_or("")
+                .to_ascii_lowercase()
+                .cmp(
+                    &b.get("name")
+                        .and_then(Value::as_str)
+                        .unwrap_or("")
+                        .to_ascii_lowercase(),
+                )
+        })
+    });
+    let truncated = entries.len() > FILE_TREE_LIMIT;
+    entries.truncate(FILE_TREE_LIMIT);
+
+    Ok(json!({
+        "command": "files tree",
+        "root": default_workspace_path(),
+        "path": path.display().to_string(),
+        "parent": path.parent().map(|parent| parent.display().to_string()),
+        "entries": entries,
+        "truncated": truncated,
+        "limit": FILE_TREE_LIMIT,
+        "policy": "read_only_user_home_or_temp",
+    }))
+}
+
+fn file_preview_payload_from_target(target: &str) -> Result<Value> {
+    let requested = query_param(target, "path").ok_or_else(|| anyhow!("missing path"))?;
+    let path = resolve_readonly_user_path(&requested)?;
+    let metadata = fs::metadata(&path)?;
+    if metadata.is_dir() {
+        return Ok(json!({
+            "command": "files preview",
+            "path": path.display().to_string(),
+            "kind": "directory",
+            "size_bytes": null,
+            "truncated": false,
+            "content": null,
+            "message": "Directory selected. Open it in the tree to inspect children.",
+        }));
+    }
+    if !metadata.is_file() {
+        return Err(anyhow!("not a regular file: {}", path.display()));
+    }
+
+    let bytes = fs::read(&path)?;
+    let truncated = bytes.len() > FILE_PREVIEW_LIMIT;
+    let sample = &bytes[..bytes.len().min(FILE_PREVIEW_LIMIT)];
+    let (content, binary) = match std::str::from_utf8(sample) {
+        Ok(text) => (Some(text.to_string()), false),
+        Err(_) => (None, true),
+    };
+
+    Ok(json!({
+        "command": "files preview",
+        "path": path.display().to_string(),
+        "name": path.file_name().and_then(|name| name.to_str()).unwrap_or(""),
+        "extension": path.extension().and_then(|ext| ext.to_str()),
+        "kind": "file",
+        "size_bytes": metadata.len(),
+        "modified_unix": metadata.modified().ok()
+            .and_then(|time| time.duration_since(std::time::UNIX_EPOCH).ok())
+            .map(|duration| duration.as_secs()),
+        "truncated": truncated,
+        "limit": FILE_PREVIEW_LIMIT,
+        "binary": binary,
+        "content": content,
+        "policy": "read_only_text_preview",
+    }))
+}
+
+fn browser_probe_payload_from_target(target: &str) -> Result<Value> {
+    let raw = query_param(target, "url")
+        .unwrap_or_else(|| "https://www.google.com/search?q=Heiwa".to_string());
+    let normalized = normalize_browser_url(&raw)?;
+    let host = normalized
+        .split_once("://")
+        .map(|(_, rest)| rest.split('/').next().unwrap_or(rest))
+        .unwrap_or(&normalized)
+        .to_string();
+    Ok(json!({
+        "command": "browser probe",
+        "url": normalized,
+        "host": host,
+        "mode": "embedded_webview",
+        "policy": "user_navigated_no_credentials_exfiltration",
+        "notes": [
+            "Some sites block iframe embedding with X-Frame-Options or CSP.",
+            "Tauri builds render this as an app WebView surface, not a server-side fetch."
+        ]
+    }))
+}
+
+fn default_workspace_path() -> String {
+    env::current_dir()
+        .unwrap_or_else(|_| dirs::home_dir().unwrap_or_else(|| PathBuf::from(".")))
+        .display()
+        .to_string()
+}
+
+fn resolve_readonly_user_path(raw: &str) -> Result<PathBuf> {
+    let expanded = if raw == "~" {
+        dirs::home_dir().ok_or_else(|| anyhow!("home directory unavailable"))?
+    } else if let Some(rest) = raw.strip_prefix("~/") {
+        dirs::home_dir()
+            .ok_or_else(|| anyhow!("home directory unavailable"))?
+            .join(rest)
+    } else {
+        PathBuf::from(raw)
+    };
+    let candidate = if expanded.is_absolute() {
+        expanded
+    } else {
+        env::current_dir()?.join(expanded)
+    };
+    let canonical = candidate.canonicalize()?;
+    let home = dirs::home_dir()
+        .and_then(|home| home.canonicalize().ok())
+        .unwrap_or_else(|| PathBuf::from("/"));
+    let temp = env::temp_dir()
+        .canonicalize()
+        .unwrap_or_else(|_| env::temp_dir());
+    if canonical.starts_with(&home) || canonical.starts_with(&temp) {
+        Ok(canonical)
+    } else {
+        Err(anyhow!(
+            "path outside read-only Heiwa scope: {}",
+            canonical.display()
+        ))
+    }
+}
+
+fn normalize_browser_url(raw: &str) -> Result<String> {
+    let trimmed = raw.trim();
+    if trimmed.is_empty() {
+        return Err(anyhow!("empty url"));
+    }
+    let with_scheme = if trimmed.starts_with("http://") || trimmed.starts_with("https://") {
+        trimmed.to_string()
+    } else {
+        format!("https://{trimmed}")
+    };
+    if with_scheme.contains(char::is_whitespace) {
+        return Err(anyhow!("url cannot contain whitespace"));
+    }
+    Ok(with_scheme)
 }
 
 fn snapshot(started_at: &str) -> Value {
@@ -2204,6 +2654,21 @@ fn worker_agent_rows() -> Vec<Value> {
         .collect()
 }
 
+fn ollama_models_payload() -> Value {
+    let ollama_url =
+        std::env::var("OLLAMA_URL").unwrap_or_else(|_| "http://127.0.0.1:11434".to_string());
+    let url = format!("{}/api/tags", ollama_url.trim_end_matches('/'));
+    let models: Vec<Value> = tokio::task::block_in_place(|| {
+        reqwest::blocking::get(&url)
+            .ok()
+            .and_then(|resp| resp.json::<Value>().ok())
+            .and_then(|val| val.get("models").cloned())
+            .and_then(|val| serde_json::from_value(val).ok())
+            .unwrap_or_default()
+    });
+    json!({ "models": models })
+}
+
 fn hook_provider_rows() -> Vec<Value> {
     let home = dirs::home_dir().unwrap_or_else(|| PathBuf::from("."));
     vec![
@@ -2726,14 +3191,62 @@ fn request_method(request: &str) -> Option<&str> {
     request.lines().next()?.split_whitespace().next()
 }
 
+fn request_target(request: &str) -> Option<&str> {
+    request.lines().next()?.split_whitespace().nth(1)
+}
+
 fn request_path(request: &str) -> Option<&str> {
-    request
-        .lines()
-        .next()?
-        .split_whitespace()
-        .nth(1)?
-        .split('?')
-        .next()
+    request_target(request)?.split('?').next()
+}
+
+fn query_param(target: &str, name: &str) -> Option<String> {
+    let query = target.split_once('?')?.1;
+    for pair in query.split('&') {
+        let (key, value) = pair.split_once('=').unwrap_or((pair, ""));
+        if percent_decode(key) == name {
+            return Some(percent_decode(value));
+        }
+    }
+    None
+}
+
+fn percent_decode(value: &str) -> String {
+    let mut out = Vec::with_capacity(value.len());
+    let bytes = value.as_bytes();
+    let mut index = 0;
+    while index < bytes.len() {
+        match bytes[index] {
+            b'+' => {
+                out.push(b' ');
+                index += 1;
+            }
+            b'%' if index + 2 < bytes.len() => {
+                let hi = hex_value(bytes[index + 1]);
+                let lo = hex_value(bytes[index + 2]);
+                if let (Some(hi), Some(lo)) = (hi, lo) {
+                    out.push((hi << 4) | lo);
+                    index += 3;
+                } else {
+                    out.push(bytes[index]);
+                    index += 1;
+                }
+            }
+            byte => {
+                out.push(byte);
+                index += 1;
+            }
+        }
+    }
+    String::from_utf8_lossy(&out).to_string()
+}
+
+fn hex_value(byte: u8) -> Option<u8> {
+    match byte {
+        b'0'..=b'9' => Some(byte - b'0'),
+        b'a'..=b'f' => Some(byte - b'a' + 10),
+        b'A'..=b'F' => Some(byte - b'A' + 10),
+        _ => None,
+    }
 }
 
 fn is_websocket_request(request: &str) -> bool {
@@ -2919,6 +3432,64 @@ mod app_readmodel_tests {
     }
 
     #[test]
+    fn files_tree_and_preview_are_read_only_text_surfaces() {
+        let dir = temp_state_dir("files-readmodel");
+        let file = dir.join("note.md");
+        fs::write(&file, "# Heiwa\nfile preview works\n").expect("write preview file");
+
+        let tree =
+            files_tree_payload_from_target(&format!("/api/v1/files/tree?path={}", dir.display()))
+                .expect("tree payload");
+        assert_eq!(
+            tree.get("command").and_then(Value::as_str),
+            Some("files tree")
+        );
+        let entries = tree
+            .get("entries")
+            .and_then(Value::as_array)
+            .expect("entries array");
+        assert!(entries
+            .iter()
+            .any(|entry| entry.get("name").and_then(Value::as_str) == Some("note.md")));
+
+        let preview = file_preview_payload_from_target(&format!(
+            "/api/v1/files/preview?path={}",
+            file.display()
+        ))
+        .expect("preview payload");
+        assert_eq!(preview.get("kind").and_then(Value::as_str), Some("file"));
+        assert_eq!(preview.get("binary").and_then(Value::as_bool), Some(false));
+        assert!(preview
+            .get("content")
+            .and_then(Value::as_str)
+            .is_some_and(|content| content.contains("file preview works")));
+
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn browser_probe_normalizes_urls_without_fetching() {
+        let probe = browser_probe_payload_from_target("/api/v1/browser/probe?url=example.com/docs")
+            .expect("browser probe");
+        assert_eq!(
+            probe.get("url").and_then(Value::as_str),
+            Some("https://example.com/docs")
+        );
+        assert_eq!(
+            probe.get("mode").and_then(Value::as_str),
+            Some("embedded_webview")
+        );
+    }
+
+    #[test]
+    fn query_param_percent_decodes_values() {
+        assert_eq!(
+            query_param("/api/v1/files/preview?path=%2Ftmp%2Fhello+world.md", "path"),
+            Some("/tmp/hello world.md".to_string())
+        );
+    }
+
+    #[test]
     fn api_payload_exposes_approvals_summary_for_cockpit() {
         let payload = api_payload("/api/v1/approvals/summary", "2026-05-26T00:00:00Z")
             .expect("approvals summary endpoint");
@@ -2927,6 +3498,96 @@ mod app_readmodel_tests {
         assert!(data.get("pending_count").is_some_and(Value::is_number));
         assert!(data.get("pending").is_some_and(Value::is_array));
         assert!(data.get("requests_dir").is_some_and(Value::is_string));
+    }
+
+    #[test]
+    fn receipts_payload_scans_known_local_receipt_lanes() {
+        let state = temp_state_dir("receipt-readmodel");
+        let calendar = state.join("calendar").join("receipts");
+        let automations = state.join("automations").join("receipts");
+        let promotion = state.join("evidence").join("promotion");
+        fs::create_dir_all(&calendar).expect("create calendar receipts");
+        fs::create_dir_all(&automations).expect("create automation receipts");
+        fs::create_dir_all(&promotion).expect("create promotion receipts");
+        fs::write(
+            calendar.join("rcpt-calendar.json"),
+            json!({
+                "receipt_id": "rcpt-calendar",
+                "kind": "calendar_hold_created",
+                "created_at": "2026-06-12T09:00:00Z"
+            })
+            .to_string(),
+        )
+        .expect("write calendar receipt");
+        fs::write(
+            automations.join("rcpt-auto.json"),
+            json!({
+                "kind": "automation_execution_event",
+                "event": "queued",
+                "execution_id": "exec-1",
+                "created_at": "2026-06-12T10:00:00Z"
+            })
+            .to_string(),
+        )
+        .expect("write automation receipt");
+        fs::write(
+            promotion.join("heiwa-app-update.json"),
+            json!({
+                "schema_version": "heiwa_promotion_receipt_v1",
+                "receipt_id": "heiwa-app-update",
+                "created_at": "2026-06-12T08:00:00Z"
+            })
+            .to_string(),
+        )
+        .expect("write promotion receipt");
+
+        let payload = receipts_payload_for_state_dir(&state);
+        assert_eq!(
+            payload.get("command").and_then(Value::as_str),
+            Some("receipts summary")
+        );
+        let counts = payload.get("counts").expect("counts");
+        assert_eq!(counts.get("total").and_then(Value::as_u64), Some(3));
+        assert_eq!(counts.get("calendar").and_then(Value::as_u64), Some(1));
+        assert_eq!(counts.get("automations").and_then(Value::as_u64), Some(1));
+        assert_eq!(counts.get("promotion").and_then(Value::as_u64), Some(1));
+        let receipts = payload
+            .get("receipts")
+            .and_then(Value::as_array)
+            .expect("receipts array");
+        assert_eq!(receipts.len(), 3);
+        assert_eq!(
+            receipts[0].get("lane").and_then(Value::as_str),
+            Some("automations")
+        );
+        assert_eq!(
+            receipts[0].get("receipt_id").and_then(Value::as_str),
+            Some("exec-1")
+        );
+        assert_eq!(
+            receipts[1].get("lane").and_then(Value::as_str),
+            Some("calendar")
+        );
+        assert_eq!(
+            receipts[2].get("lane").and_then(Value::as_str),
+            Some("promotion")
+        );
+
+        let _ = fs::remove_dir_all(&state);
+    }
+
+    #[test]
+    fn api_payload_exposes_receipts_for_cockpit() {
+        let payload =
+            api_payload("/api/v1/receipts", "2026-05-26T00:00:00Z").expect("receipts endpoint");
+        assert_eq!(payload.get("ok").and_then(Value::as_bool), Some(true));
+        let data = payload.get("data").expect("data envelope");
+        assert_eq!(
+            data.get("command").and_then(Value::as_str),
+            Some("receipts summary")
+        );
+        assert!(data.get("counts").is_some_and(Value::is_object));
+        assert!(data.get("receipts").is_some_and(Value::is_array));
     }
 
     #[test]

@@ -187,6 +187,51 @@ export interface ReplRouteEvent {
   request_id?: string;
 }
 
+export interface FileTreeEntry {
+  name: string;
+  path: string;
+  kind: "directory" | "file" | "other" | string;
+  size_bytes: number | null;
+  modified_unix: number | null;
+  hidden: boolean;
+}
+
+export interface FileTreePayload {
+  command: string;
+  root: string;
+  path: string;
+  parent: string | null;
+  entries: FileTreeEntry[];
+  truncated: boolean;
+  limit: number;
+  policy: string;
+}
+
+export interface FilePreviewPayload {
+  command: string;
+  path: string;
+  name?: string;
+  extension?: string | null;
+  kind: "directory" | "file" | string;
+  size_bytes: number | null;
+  modified_unix?: number | null;
+  truncated: boolean;
+  limit?: number;
+  binary?: boolean;
+  content: string | null;
+  message?: string;
+  policy?: string;
+}
+
+export interface BrowserProbePayload {
+  command: string;
+  url: string;
+  host: string;
+  mode: string;
+  policy: string;
+  notes: string[];
+}
+
 export interface ResourceSnapshotPayload {
   snapshot: {
     cpu_count: number;
@@ -317,6 +362,95 @@ export interface Cron {
   status: "enabled" | "disabled" | "running" | string;
   last_run_at: string | null;
   next_run_at: string | null;
+}
+
+export type AutomationTriggerConfig =
+  | {
+      type: "cron";
+      schedule: string;
+      timezone: string | null;
+    }
+  | {
+      type: "file_watch";
+      paths: string[];
+      events: string[];
+      pattern: string | null;
+      debounce_ms: number | null;
+    }
+  | Record<string, unknown>;
+
+export interface Automation {
+  id: string;
+  name: string;
+  description: string | null;
+  prompt: string;
+  trigger_config: AutomationTriggerConfig | null;
+  status: "active" | "paused" | "disabled" | string;
+  max_iterations: number;
+  max_executions_per_day: number | null;
+  max_executions_per_hour: number | null;
+  last_executed_at: string | null;
+  next_scheduled_at: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface AutomationExecution {
+  id: string;
+  automation_id: string;
+  status:
+    | "pending"
+    | "running"
+    | "awaiting_confirmation"
+    | "completed"
+    | "failed"
+    | "cancelled"
+    | string;
+  created_at: string;
+  started_at: string | null;
+  completed_at: string | null;
+  error_message: string | null;
+}
+
+export interface AutomationsSummary {
+  command: string;
+  state_dir: string;
+  db_path?: string;
+  automation_count: number;
+  active_count: number;
+  scheduler: {
+    active_cron: number;
+    active_file_watch: number;
+    next_scheduled_at: string | null;
+  };
+  automations: Automation[];
+  recent_executions: AutomationExecution[];
+  next?: string[];
+  error?: string;
+}
+
+export interface Receipt {
+  lane: string;
+  receipt_id: string;
+  kind: string;
+  event: string | null;
+  created_at: string;
+  path: string;
+  relative_path: string;
+  size_bytes: number | null;
+  modified_unix: number | null;
+  parse_error: string | null;
+  data: Record<string, unknown>;
+}
+
+export interface ReceiptsSummary {
+  command: string;
+  state_dir: string;
+  counts: Record<string, number>;
+  receipts: Receipt[];
+  truncated: boolean;
+  limit: number;
+  next?: string[];
 }
 
 export interface HookCommand {

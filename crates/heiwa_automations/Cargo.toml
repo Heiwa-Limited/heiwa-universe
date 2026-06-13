@@ -1,0 +1,33 @@
+[package]
+name = "heiwa_automations"
+version = "0.1.0"
+edition = "2021"
+description = "Heiwa automation engine: cron schedules, file watchers, execution queue"
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+documentation.workspace = true
+readme.workspace = true
+keywords.workspace = true
+categories.workspace = true
+
+[dependencies]
+anyhow = "1.0"
+chrono = { version = "0.4", features = ["serde"] }
+chrono-tz = "0.10"
+cron = "0.12"
+notify = "6"
+rusqlite = { version = "0.31", features = ["bundled"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+thiserror = "2"
+tokio = { version = "1", features = ["full", "macros", "rt-multi-thread"] }
+tracing = "0.1"
+uuid = { version = "1", features = ["v4", "serde"] }
+
+# Heiwa internal deps
+heiwa_receipts = { path = "../heiwa_receipts" }
+heiwa-protocol = { path = "../heiwa_protocol" }
+
+[dev-dependencies]
+tempfile = "3"

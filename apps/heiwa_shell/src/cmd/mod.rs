@@ -1,5 +1,6 @@
 pub mod app;
 pub mod approvals;
+pub mod auto;
 pub mod calendar;
 pub mod capabilities;
 pub mod compress;

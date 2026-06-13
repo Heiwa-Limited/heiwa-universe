@@ -33,36 +33,30 @@ type ConsoleItem = {
 };
 
 const primaryNav: NavItem[] = [
-  { href: "/", label: "Dashboard", mark: "D" },
-  { href: "/today", label: "Today", mark: "Y" },
-  { href: "/calendar", label: "Calendar", mark: "C" },
+  { href: "/", label: "Run", mark: "▶" },
+  { href: "/today", label: "Today", mark: "☀" },
+  { href: "/inbox", label: "Inbox", mark: "↯" },
+  { href: "/calendar", label: "Calendar", mark: "◷" },
   { href: "/mail", label: "Mail", mark: "@" },
-  { href: "/inbox", label: "Inbox", mark: "I" },
-  { href: "/routes", label: "Routes", mark: "R" },
-  { href: "/model-matrix", label: "Model Matrix", mark: "X" },
-  { href: "/live", label: "Live", mark: "L" },
-  { href: "/repl", label: "REPL", mark: ">" },
-  { href: "/providers", label: "Providers", mark: "P" },
-  { href: "/connections", label: "Connections", mark: "K" },
-  { href: "/status", label: "Status", mark: "S" },
 ];
 
 const evidenceNav: NavItem[] = [
-  { href: "/missions", label: "Missions", mark: "M" },
-  { href: "/approvals", label: "Approvals", mark: "A" },
+  { href: "/approvals", label: "Approvals", mark: "✓" },
+  { href: "/receipts", label: "Receipts", mark: "≡" },
   { href: "/history", label: "History", mark: "H" },
   { href: "/traces", label: "Traces", mark: "T" },
-  { href: "/memory", label: "Memory", mark: "K" },
+  { href: "/memory", label: "Memory", mark: "M" },
 ];
 
 const systemNav: NavItem[] = [
-  { href: "/agents", label: "Agents", mark: "G" },
-  { href: "/hooks", label: "Hooks", mark: "U" },
-  { href: "/crons", label: "Crons", mark: "Q" },
-  { href: "/rate-groups", label: "Rate groups", mark: "$" },
-  { href: "/cells", label: "Cells", mark: "#" },
-  { href: "/domains", label: "Domains", mark: "N" },
-  { href: "/governance", label: "Governance", mark: "V" },
+  { href: "/automations", label: "Automations", mark: "⟳" },
+  { href: "/advanced", label: "Dashboard", mark: "⌘" },
+  { href: "/connections", label: "Connections", mark: "K" },
+  { href: "/providers", label: "Providers", mark: "P" },
+  { href: "/routes", label: "Routes", mark: "R" },
+  { href: "/model-matrix", label: "Model Matrix", mark: "X" },
+  { href: "/repl", label: "REPL", mark: ">" },
+  { href: "/status", label: "Status", mark: "S" },
 ];
 
 const threadList = [
@@ -172,7 +166,8 @@ const advancedItems: ConsoleItem[] = [
 ];
 
 function routeTitle(pathname: string): string {
-  if (pathname === "/") return "Dashboard";
+  if (pathname === "/") return "Run";
+  if (pathname === "/advanced" || pathname === "/dashboard") return "Dashboard · Advanced settings";
   const match = [...primaryNav, ...evidenceNav, ...systemNav].find(
     (item) => item.href === pathname,
   );
@@ -332,7 +327,7 @@ export default function App(props: ParentProps): JSX.Element {
   const currentTitle = createMemo(() => routeTitle(location.pathname));
 
   return (
-    <div class="heiwa-app-layout">
+    <div class="heiwa-app-layout" classList={{ "main-app-view": location.pathname === "/" }}>
       <aside class="heiwa-sidebar" aria-label="Heiwa workspace navigation">
         <div class="sidebar-header">
           <A class="brand-logo" href="/">
@@ -394,10 +389,10 @@ export default function App(props: ParentProps): JSX.Element {
           </div>
           <div class="header-actions">
             <A class="btn-workspace-action" href="/">
-              Browser console
+              Run workspace
             </A>
-            <A class="btn-workspace-action glow" href="/status">
-              App settings
+            <A class="btn-workspace-action glow" href="/advanced">
+              Advanced dashboard
             </A>
           </div>
         </header>

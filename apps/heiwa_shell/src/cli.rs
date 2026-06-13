@@ -32,6 +32,10 @@ pub async fn try_handle(args: &[String]) -> Result<bool> {
             cmd::approvals::run(&args[2..])?;
             Ok(true)
         }
+        Some("auto") | Some("automations") => {
+            cmd::auto::run(&args[2..])?;
+            Ok(true)
+        }
         Some("mail") => {
             cmd::mail::run(&args[2..])?;
             Ok(true)
