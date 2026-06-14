@@ -31,8 +31,8 @@ print_version "tailscale" tailscale
 echo
 echo "Recommended repo baseline"
 echo "-------------------------"
-echo "Rust toolchain : 1.93.1"
-echo "Node runtime   : 24.14.1 (LTS lane for repo work)"
+echo "Rust toolchain : 1.95.0"
+echo "Node runtime   : 26.0.0"
 echo "Python         : 3.14.x"
 echo "Required CLIs  : gh, spacetime, wrangler, uv"
 echo "Optional CLIs  : pnpm, ollama, tailscale"

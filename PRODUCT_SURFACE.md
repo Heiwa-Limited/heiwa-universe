@@ -26,6 +26,7 @@ Longest prefix wins. Put narrower paths above broader parents when a child has a
 | `legacy/apps/heiwa_cli/runtime/logs` | runtime-artifact |
 | `legacy` | legacy |
 | `archive` | archive |
+| `vendor` | vendored |
 | `apps/heiwa_shell` | product |
 | `apps/heiwa_core` | product |
 | `apps/heiwa_app` | product |
@@ -37,6 +38,7 @@ Longest prefix wins. Put narrower paths above broader parents when a child has a
 | `archive/apps/heiwa_dj` | archive |
 | `apps/__init__.py` | legacy |
 | `crates` | product |
+| `packages/heiwa_skills` | product |
 | `packages/heiwa_bindings` | generated |
 | `packages/heiwa_sdk` | product |
 | `packages/heiwa_protocol` | product |
@@ -88,6 +90,7 @@ Longest prefix wins. Put narrower paths above broader parents when a child has a
 | `README.md` | product |
 | `LICENSE` | product |
 | `HEIWA.md` | product |
+| `HEIWA_LTD_BLUEPRINT.md` | reference |
 | `AGENTS.md` | product |
 | `CLAUDE.md` | product |
 | `GEMINI.md` | product |
@@ -121,6 +124,8 @@ Longest prefix wins. Put narrower paths above broader parents when a child has a
 - `legacy/apps/heiwa_hub` is the legacy Python ops surface. It remains present but is not the current public operator path.
 - `runtime/python` is source and remains product for now. Runtime spools, logs, and fleet start artifacts are `runtime-artifact`.
 - `docs/audit` is reference but contains operational baselines. Do not delete entries without replacing their evidence.
+- `vendor/` is reserved for intentionally tracked third-party code. Current untracked `vendor/oss-lifts` research material is quarantine and must not be added or removed without an explicit vendor-policy assignment.
+- `packages/heiwa_skills` is product because it installs provider/runtime behavior used by current Heiwa operator surfaces.
 - Generated bindings and lockfiles are not slop by default, but their LOC should stay reproducible from a source schema or package manifest.
 
 ## Audit Rule

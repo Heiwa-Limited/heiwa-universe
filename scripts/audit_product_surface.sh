@@ -11,20 +11,18 @@ if [[ ! -f "$SURFACE_FILE" ]]; then
   exit 2
 fi
 
-# shellcheck source=lib/parse_product_surface.sh
+# shellcheck source=scripts/lib/parse_product_surface.sh
 source "$REPO_ROOT/scripts/lib/parse_product_surface.sh"
 
-mapping="$(
-  parse_product_surface "$SURFACE_FILE" \
-    | awk '{ print length($1), $0 }' \
-    | sort -rn \
-    | cut -d' ' -f2-
-)"
+mapping_file="$(mktemp "${TMPDIR:-/tmp}/heiwa-product-surface-mapping.XXXXXX")"
+counts_file="$(mktemp "${TMPDIR:-/tmp}/heiwa-product-surface-counts.XXXXXX")"
+trap 'rm -f "$mapping_file" "$counts_file"' EXIT
 
-declare -A class_loc=()
-declare -A class_files=()
-declare -i unclassified_loc=0
-declare -i unclassified_files=0
+parse_product_surface "$SURFACE_FILE" \
+  | awk '{ print length($1), $0 }' \
+  | sort -rn \
+  | cut -d' ' -f2- \
+  > "$mapping_file"
 
 matches_prefix() {
   local file="$1"
@@ -32,6 +30,7 @@ matches_prefix() {
   [[ "$file" == "$path" || "$file" == "$path/"* ]]
 }
 
+: > "$counts_file"
 while IFS= read -r file; do
   [[ -z "$file" ]] && continue
   [[ ! -f "$REPO_ROOT/$file" ]] && continue
@@ -46,14 +45,12 @@ while IFS= read -r file; do
       matched_class="$class"
       break
     fi
-  done <<< "$mapping"
+  done < "$mapping_file"
 
   if [[ -n "$matched_class" ]]; then
-    class_loc[$matched_class]=$((${class_loc[$matched_class]:-0} + loc))
-    class_files[$matched_class]=$((${class_files[$matched_class]:-0} + 1))
+    printf '%s %s\n' "$matched_class" "$loc" >> "$counts_file"
   else
-    unclassified_loc=$((unclassified_loc + loc))
-    unclassified_files=$((unclassified_files + 1))
+    printf 'unclassified %s\n' "$loc" >> "$counts_file"
   fi
 done < <(cd "$REPO_ROOT" && git ls-files)
 
@@ -62,7 +59,18 @@ echo "Surface file: $SURFACE_FILE"
 echo ""
 printf "%-20s %12s %12s\n" "CLASS" "FILES" "LOC"
 printf "%-20s %12s %12s\n" "-----" "-----" "---"
-for class in product generated legacy reference archive vendored runtime-artifact; do
-  printf "%-20s %12s %12s\n" "$class" "${class_files[$class]:-0}" "${class_loc[$class]:-0}"
-done
-printf "%-20s %12s %12s\n" "unclassified" "$unclassified_files" "$unclassified_loc"
+
+awk '
+  {
+    files[$1] += 1
+    loc[$1] += $2
+  }
+  END {
+    class_count = split("product generated legacy reference archive vendored runtime-artifact", classes, " ")
+    for (i = 1; i <= class_count; i++) {
+      class = classes[i]
+      printf "%-20s %12d %12d\n", class, files[class] + 0, loc[class] + 0
+    }
+    printf "%-20s %12d %12d\n", "unclassified", files["unclassified"] + 0, loc["unclassified"] + 0
+  }
+' "$counts_file"

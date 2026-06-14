@@ -66,7 +66,7 @@ while IFS= read -r file; do
   esac
 
   case "$file" in
-    Cargo.toml|Cargo.lock|rust-toolchain.toml|apps/heiwa_core/*|apps/heiwa_orchestrator/*|apps/heiwa_shell/*|crates/*|packages/heiwa_bindings/rust/*|scripts/check_heiwa_core_dockerfile.sh|scripts/check_runtime_baseline.sh)
+    Cargo.toml|Cargo.lock|rust-toolchain.toml|apps/heiwa_core/*|apps/heiwa_orchestrator/*|apps/heiwa_shell/*|crates/*|packages/heiwa_bindings/rust/*|scripts/check_agent_baseline.sh|scripts/check_heiwa_core_dockerfile.sh|scripts/check_runtime_baseline.sh)
       rust_terminal=true
       ;;
   esac

@@ -84,6 +84,10 @@ Heiwa must initialize and adapt per machine through `~/.heiwa/machine.json`; do 
 
 Promotion rule (Local-first bypass posture): Local sandbox verification is the canonical gate. Verify the checkout with the sandbox release checks, merge to `main` locally, and then promote to the installed `heiwa` runtime via local checkout updates (`heiwa app update --source checkout`). Bypassing GitHub Actions and PR checks is standard to prevent remote blockers from stopping operator progress.
 
+Agent baseline gate: before closing repo-health work, local promotion, or peer-agent handoff, run `bash scripts/check_agent_baseline.sh`. The gate is local-only and must not be treated as remote health. Remote operations (`git fetch/pull/push`, `gh run`, releases, `spacetime publish`, `wrangler deploy`) require an explicit assignment and the remote pre-flight in `docs/agent-baseline-workflow.md`.
+
+Vendor quarantine: untracked `vendor/oss-lifts` material may remain as reference only. Do not add, remove, import from, or cite `vendor/` as product evidence unless Devon assigns a vendor-policy slice.
+
 ## Working Priorities
 
 Every work item must classify as Intake, Execution, Evidence, or out-of-scope (see [Three Planes in `HEIWA.md`](HEIWA.md#the-three-planes)). If it does not advance a plane, defer or reject.

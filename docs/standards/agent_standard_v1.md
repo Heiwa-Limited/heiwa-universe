@@ -1,6 +1,6 @@
 # Heiwa Canonical Agent Standard
 
-- **Version**: 1.1.0
+- **Version**: 1.2.0
 - **Authors**: Class 3 AI Peers (Gemini CLI, Claude Code, Codex, Antigravity)
 - **Status**: Canonical Runtime Contract
 
@@ -46,12 +46,19 @@ To close a cycle, the active execution frame must validate current truth instead
 
 - **Clean state mandate**: Sub-tasks or partial updates should be followed by explicit git commits or a deliberate staged checkpoint.
 - **Primary verification**: Run the narrowest affected test or lint command first, then the broader repo gate if the narrow command passes.
+- **Local agent baseline**: Final repo-health handoffs must run the local-only baseline gate:
+  ```bash
+  bash scripts/check_agent_baseline.sh
+  ```
 - **Runtime baseline verification**: Repo and operator checks should stay green:
   ```bash
   bash scripts/check_runtime_baseline.sh
   bash scripts/check_heiwa_core_dockerfile.sh
-  bash scripts/audit_operator_machine.sh
+  bash scripts/check_release_metadata.sh
+  bash scripts/audit_product_surface.sh
   ```
+- **Remote pre-flight separation**: Remote health is not implied by local green checks. `git fetch`, `git pull`, `git push`, `gh run`, `gh release`, `spacetime publish`, `wrangler deploy`, and equivalent network-promotion operations require explicit assignment and the checklist in `docs/agent-baseline-workflow.md`.
+- **Vendor quarantine**: Untracked `vendor/oss-lifts` is reference material only until Devon assigns a vendor-policy slice. Do not add, delete, import from, or cite it as product evidence.
 
 ---
 
@@ -66,6 +73,6 @@ To close a cycle, the active execution frame must validate current truth instead
 
 When executing, the loaded operator surface must contain:
 1. Version check validation.
-2. Context anchors loaded from `ops/context/HEIWA.md`, `AGENTS.md`, and the relevant room files.
+2. Context anchors loaded from `HEIWA.md`, `AGENTS.md`, `docs/local-self-operation.md`, and the relevant room files.
 3. Provider-local config active for the current repo.
 4. Verification command sequence executed locally on the worker or operator node.
