@@ -78,7 +78,7 @@ Then verify network auth, fresh refs, and CI/release evidence for the exact remo
 
 ## Vendor quarantine
 
-`vendor/oss-lifts` is allowed as untracked research quarantine only. Until a vendor-policy assignment exists, do not add, delete, import from, or cite it as product evidence.
+`vendor/oss-lifts` is ignored local research quarantine only. Until a tracked-vendor assignment exists, do not add, delete, import from, or cite it as product evidence.
 
 ## Public surface rule
 

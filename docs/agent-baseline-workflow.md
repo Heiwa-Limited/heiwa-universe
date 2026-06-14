@@ -12,7 +12,7 @@ Plane: Evidence — this workflow keeps repo truth inspectable before Execution 
 4. **Small execution slices.** Every slice must classify as Intake, Execution, Evidence, or out-of-scope. If it cannot be reviewed as one slice, split it.
 5. **Runtime split-brain is a blocker.** Port `7474` is installed product runtime. Checkout verification uses `7475` or another temporary port and the agent stops what it starts.
 6. **Handoffs use the repo house style.** Include: `$caveman; repo truth first; execute smallest real-value slice; verify; report blocker.`
-7. **Do not mutate `vendor/` by accident.** Current `vendor/oss-lifts` material is untracked quarantine/reference. Do not add, remove, depend on, or promote it without an explicit vendor-policy assignment.
+7. **Do not mutate `vendor/` by accident.** Current `vendor/oss-lifts` material is ignored local quarantine/reference. Do not add, remove, depend on, or promote it without an explicit tracked-vendor assignment.
 
 ## Local baseline gate
 
@@ -27,7 +27,7 @@ The gate is intentionally local-only. It does not fetch, push, call GitHub, or v
 - branch is the expected integration branch (`main` by default)
 - cached `origin/main` ref exists and local ahead/behind can be reported
 - tracked tree is clean
-- untracked files are absent except `vendor/` quarantine entries
+- untracked files are absent except ignored or explicit `vendor/` quarantine entries
 - no duplicate linked worktree owns `main`
 - runtime baseline pins, Dockerfile baseline, release metadata, and product-surface classification pass
 
@@ -82,15 +82,15 @@ Do not substitute local green checks for remote health. Local checks answer “i
 
 ## Vendor quarantine policy
 
-Current state: `vendor/oss-lifts` may exist as untracked research lift material. It is allowed to remain untracked so it does not pollute the integration baseline.
+Decision for the current checkpoint: root `vendor/` is ignored local quarantine. `vendor/oss-lifts` can stay on this machine as research lift material, but it is not part of the production remote checkpoint and should not appear in normal `git status`.
 
-Until a vendor-policy assignment is made:
+Tracked vendor code remains possible later, but only as an explicit slice:
 
-- do not `git add vendor/`
-- do not delete `vendor/`
-- do not import from `vendor/` in product code
-- do not cite `vendor/` as product maturity evidence
-- if any third-party code is intentionally tracked later, classify it under `PRODUCT_SURFACE.md` as `vendored` and include license/provenance notes
+- use `git add -f vendor/...` only after Devon assigns the tracked-vendor slice
+- add/verify license and provenance notes
+- classify the tracked path under `PRODUCT_SURFACE.md` as `vendored`
+- add tests or docs proving why product code depends on the vendored material
+- do not cite ignored `vendor/` as product maturity evidence
 
 ## Agent-to-agent handoff shape
 

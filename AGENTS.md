@@ -86,7 +86,7 @@ Promotion rule (Local-first bypass posture): Local sandbox verification is the c
 
 Agent baseline gate: before closing repo-health work, local promotion, or peer-agent handoff, run `bash scripts/check_agent_baseline.sh`. The gate is local-only and must not be treated as remote health. Remote operations (`git fetch/pull/push`, `gh run`, releases, `spacetime publish`, `wrangler deploy`) require an explicit assignment and the remote pre-flight in `docs/agent-baseline-workflow.md`.
 
-Vendor quarantine: untracked `vendor/oss-lifts` material may remain as reference only. Do not add, remove, import from, or cite `vendor/` as product evidence unless Devon assigns a vendor-policy slice.
+Vendor quarantine: root `vendor/` is ignored local research quarantine. `vendor/oss-lifts` is not part of the production remote checkpoint. Do not add, remove, import from, or cite `vendor/` as product evidence unless Devon assigns a tracked-vendor slice with license/provenance and `PRODUCT_SURFACE.md` updates.
 
 ## Working Priorities
 

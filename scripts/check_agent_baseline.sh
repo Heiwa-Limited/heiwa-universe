@@ -19,7 +19,7 @@ Checks:
   - current checkout is on the expected integration branch (default: main)
   - cached origin/<branch> ref exists and local ahead/behind is reportable
   - no tracked dirty files unless --allow-dirty is passed
-  - untracked files are absent except vendor/ quarantine material
+  - untracked files are absent except ignored or explicit vendor/ quarantine material
   - no duplicate worktree owns the integration branch
   - repo baseline, release metadata, Dockerfile, and product-surface checks pass
 EOF
