@@ -103,7 +103,13 @@ export interface CalendarSummary {
 export interface MailLaneLive {
   id: string;
   name: string;
-  status: "connected" | "staged" | "needs_auth" | "metadata" | "planned" | string;
+  status:
+    | "connected"
+    | "staged"
+    | "needs_auth"
+    | "metadata"
+    | "planned"
+    | string;
   read: string;
   reply: string;
   guardrail: string;

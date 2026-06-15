@@ -2,7 +2,9 @@
 
 /* Premium Color System overrides (HSL Tailored) */
 :root {
-  --font-sans: 'Outfit', 'Inter', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  --font-sans:
+    "Outfit", "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto,
+    sans-serif;
   --bg-primary: #07090e;
   --bg-secondary: rgba(13, 17, 26, 0.7);
   --border-glow: rgba(0, 242, 254, 0.15);
@@ -16,7 +18,7 @@
 body {
   font-family: var(--font-sans);
   background-color: var(--bg-primary);
-  background-image: 
+  background-image:
     radial-gradient(at 0% 0%, rgba(79, 172, 254, 0.08) 0px, transparent 50%),
     radial-gradient(at 100% 100%, rgba(245, 87, 108, 0.05) 0px, transparent 50%);
   color: #e2e8f0;
@@ -54,7 +56,7 @@ body {
 }
 
 .resource-card::before {
-  content: '';
+  content: "";
   position: absolute;
   top: 0;
   left: 0;
@@ -62,10 +64,18 @@ body {
   height: 4px;
 }
 
-.resource-card.gpu::before { background: var(--text-gradient); }
-.resource-card.cpu::before { background: var(--gold-gradient); }
-.resource-card.ram::before { background: var(--magenta-gradient); }
-.resource-card.quota::before { background: var(--success-gradient); }
+.resource-card.gpu::before {
+  background: var(--text-gradient);
+}
+.resource-card.cpu::before {
+  background: var(--gold-gradient);
+}
+.resource-card.ram::before {
+  background: var(--magenta-gradient);
+}
+.resource-card.quota::before {
+  background: var(--success-gradient);
+}
 
 .resource-card span {
   font-size: 0.85rem;
@@ -85,9 +95,18 @@ body {
   font-weight: 800;
 }
 
-.resource-card.cpu strong { background: var(--gold-gradient); -webkit-background-clip: text; }
-.resource-card.ram strong { background: var(--magenta-gradient); -webkit-background-clip: text; }
-.resource-card.quota strong { background: var(--success-gradient); -webkit-background-clip: text; }
+.resource-card.cpu strong {
+  background: var(--gold-gradient);
+  -webkit-background-clip: text;
+}
+.resource-card.ram strong {
+  background: var(--magenta-gradient);
+  -webkit-background-clip: text;
+}
+.resource-card.quota strong {
+  background: var(--success-gradient);
+  -webkit-background-clip: text;
+}
 
 .resource-progress {
   width: 100%;
@@ -437,7 +456,8 @@ body {
   gap: 0.5rem;
 }
 
-.nav-item:hover, .nav-item.active {
+.nav-item:hover,
+.nav-item.active {
   color: #f1f5f9;
   background-color: rgba(255, 255, 255, 0.04);
 }
@@ -1048,9 +1068,15 @@ body {
   overflow-wrap: anywhere;
 }
 
-.trace-log-line.api { color: #f093fb; }
-.trace-log-line.drex { color: #00f2fe; }
-.trace-log-line.system { color: #94a3b8; }
+.trace-log-line.api {
+  color: #f093fb;
+}
+.trace-log-line.drex {
+  color: #00f2fe;
+}
+.trace-log-line.system {
+  color: #94a3b8;
+}
 
 /* Artifact Cards & Change capsules inside chat */
 .artifact-card {
@@ -1181,8 +1207,14 @@ body {
   font-family: monospace;
 }
 
-.diff-additions { color: #38f9d7; font-weight: 600; }
-.diff-deletions { color: #f5576c; font-weight: 600; }
+.diff-additions {
+  color: #38f9d7;
+  font-weight: 600;
+}
+.diff-deletions {
+  color: #f5576c;
+  font-weight: 600;
+}
 
 .btn-review-diff {
   background: transparent;
@@ -1518,7 +1550,11 @@ body {
   border: 1px solid rgba(255, 255, 255, 0.06);
   border-radius: 12px;
   background:
-    linear-gradient(180deg, rgba(255, 255, 255, 0.035), rgba(255, 255, 255, 0.015)),
+    linear-gradient(
+      180deg,
+      rgba(255, 255, 255, 0.035),
+      rgba(255, 255, 255, 0.015)
+    ),
     rgba(5, 7, 10, 0.54);
   box-shadow: 0 20px 60px rgba(0, 0, 0, 0.28);
   overflow: hidden;
@@ -2039,7 +2075,6 @@ body {
   gap: 10px;
 }
 
-
 /* Main Heiwa.app workspace: browser + filesystem + preview. */
 .heiwa-app-layout.main-app-view .heiwa-sidecar {
   display: none;
@@ -2084,7 +2119,10 @@ body {
 
 .run-grid {
   display: grid;
-  grid-template-columns: minmax(380px, 1.15fr) minmax(260px, 0.72fr) minmax(320px, 0.9fr);
+  grid-template-columns: minmax(380px, 1.15fr) minmax(260px, 0.72fr) minmax(
+      320px,
+      0.9fr
+    );
   grid-template-rows: minmax(520px, calc(100vh - 245px));
   gap: 1rem;
   min-height: 0;

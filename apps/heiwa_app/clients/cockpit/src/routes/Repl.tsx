@@ -1,5 +1,5 @@
-import { For, Show, createSignal } from "solid-js";
 import type { JSX } from "solid-js";
+import { createSignal, For, Show } from "solid-js";
 import { postSse } from "../lib/api";
 import type { ReplRouteEvent, ReplTrace } from "../lib/types";
 
@@ -49,7 +49,7 @@ function TracePills(props: {
   const privacy = () => props.trace?.privacy ?? props.route?.privacy;
   return (
     <Show when={mode()}>
-      <div class="trace-pills" aria-label="Execution trace">
+      <div class="trace-pills">
         <span>mode: {mode()}</span>
         <Show when={privacy() === "sovereign"}>
           <span>sovereign · local-only</span>
@@ -77,12 +77,14 @@ function MessageCard(props: { message: Message }): JSX.Element {
       classList={{ thinking: props.message.streaming === true }}
     >
       <div class="repl-message-meta">
-        <span>{props.message.role === "assistant" ? "Heiwa" : props.message.role}</span>
+        <span>
+          {props.message.role === "assistant" ? "Heiwa" : props.message.role}
+        </span>
         <span>
           {props.message.streaming
-            ? (props.message.route
-                ? `${props.message.route.provider ?? "routing"}…`
-                : "routing…")
+            ? props.message.route
+              ? `${props.message.route.provider ?? "routing"}…`
+              : "routing…"
             : props.message.ts}
         </span>
       </div>
@@ -220,7 +222,9 @@ export default function ReplRoute(): JSX.Element {
           </div>
         </div>
 
-        <For each={messages()}>{(message) => <MessageCard message={message} />}</For>
+        <For each={messages()}>
+          {(message) => <MessageCard message={message} />}
+        </For>
       </div>
 
       <Show when={error()}>

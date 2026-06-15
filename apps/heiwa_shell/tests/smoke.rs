@@ -198,8 +198,12 @@ fn test_route_preview_surfaces_privacy_lane() {
         "expected privacy-aware route preview: {stdout}"
     );
     assert!(
-        stdout.contains("mode: local_model"),
-        "private prompt should force the local model lane: {stdout}"
+        stdout.contains("mode: local_model") || stdout.contains("mode: unavailable"),
+        "private prompt should use a local model when available or honestly report unavailable: {stdout}"
+    );
+    assert!(
+        !stdout.contains("mode: remote_model"),
+        "private prompt must not route to a remote model: {stdout}"
     );
 }
 

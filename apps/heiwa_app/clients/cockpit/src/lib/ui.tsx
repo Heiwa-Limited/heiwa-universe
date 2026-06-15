@@ -94,9 +94,7 @@ export function Panel(
   );
 }
 
-export function EmptyState(
-  props: ParentProps<{ title: string }>,
-): JSX.Element {
+export function EmptyState(props: ParentProps<{ title: string }>): JSX.Element {
   return (
     <div class="empty-state">
       <strong>{props.title}</strong>

@@ -44,10 +44,7 @@ export default function TodayRoute(): JSX.Element {
         </p>
       </div>
 
-      <RemoteShell
-        loader={loadTodayBundle}
-        liveEventFilter={isApprovalEvent}
-      >
+      <RemoteShell loader={loadTodayBundle} liveEventFilter={isApprovalEvent}>
         {(data) => {
           const { snapshot, freshness } = data;
           return (
@@ -58,7 +55,9 @@ export default function TodayRoute(): JSX.Element {
                     {snapshot.date}{" "}
                     <span class="muted mono">({snapshot.timezone})</span>
                   </h3>
-                  <span class={`status-badge ${dayTypeBadge(snapshot.day_type)}`}>
+                  <span
+                    class={`status-badge ${dayTypeBadge(snapshot.day_type)}`}
+                  >
                     {snapshot.day_type}
                   </span>
                 </div>
@@ -173,7 +172,8 @@ export default function TodayRoute(): JSX.Element {
                           </code>{" "}
                           <span class="muted">
                             age=
-                            {src.age_days === null ? "?" : `${src.age_days}d`} sla=
+                            {src.age_days === null ? "?" : `${src.age_days}d`}{" "}
+                            sla=
                             {src.sla_days}d {src.stale ? "stale" : "fresh"}
                           </span>
                         </li>

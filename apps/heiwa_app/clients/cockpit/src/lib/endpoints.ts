@@ -76,7 +76,10 @@ export const v1 = {
     note?: string | undefined;
   }) =>
     unwrap(
-      api.post<Envelope<{ hold: CalendarHold }>>("/api/v1/calendar/holds", hold),
+      api.post<Envelope<{ hold: CalendarHold }>>(
+        "/api/v1/calendar/holds",
+        hold,
+      ),
     ),
   mailSummary: () =>
     unwrap(api.get<Envelope<MailSummary>>("/api/v1/mail/summary")),
@@ -127,12 +130,16 @@ export const v1 = {
     const qs = new URLSearchParams();
     if (path) qs.set("path", path);
     const suffix = qs.toString() ? `?${qs.toString()}` : "";
-    return unwrap(api.get<Envelope<FileTreePayload>>(`/api/v1/files/tree${suffix}`));
+    return unwrap(
+      api.get<Envelope<FileTreePayload>>(`/api/v1/files/tree${suffix}`),
+    );
   },
   filePreview: (path: string) => {
     const qs = new URLSearchParams({ path });
     return unwrap(
-      api.get<Envelope<FilePreviewPayload>>(`/api/v1/files/preview?${qs.toString()}`),
+      api.get<Envelope<FilePreviewPayload>>(
+        `/api/v1/files/preview?${qs.toString()}`,
+      ),
     );
   },
   browserProbe: (url: string) => {

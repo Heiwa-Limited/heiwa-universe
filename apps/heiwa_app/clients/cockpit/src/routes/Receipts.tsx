@@ -2,8 +2,8 @@ import type { JSX } from "solid-js";
 import { For, Show } from "solid-js";
 import { v1 } from "../lib/endpoints";
 import { RemoteShell } from "../lib/resource";
-import { EmptyState, PageHero, Panel, StatusBadge } from "../lib/ui";
 import type { Receipt } from "../lib/types";
+import { EmptyState, PageHero, Panel, StatusBadge } from "../lib/ui";
 
 const preferredCountLanes = [
   "calendar",
@@ -49,7 +49,8 @@ export default function ReceiptsRoute(): JSX.Element {
                   State: <code>{data.state_dir}</code>
                 </p>
                 <p class="muted">
-                  Showing latest {data.receipts.length} of {data.counts.total ?? data.receipts.length}
+                  Showing latest {data.receipts.length} of{" "}
+                  {data.counts.total ?? data.receipts.length}
                   {data.truncated ? ` (capped at ${data.limit})` : ""}.
                 </p>
               </Panel>
@@ -72,7 +73,10 @@ export default function ReceiptsRoute(): JSX.Element {
               fallback={
                 <EmptyState title="No receipts found in known lanes.">
                   <p class="muted">
-                    Create evidence through <code>heiwa calendar hold add</code>, <code>heiwa auto trigger</code>, <code>heiwa mail scan</code>, or <code>heiwa app update --source checkout</code>.
+                    Create evidence through <code>heiwa calendar hold add</code>
+                    , <code>heiwa auto trigger</code>,{" "}
+                    <code>heiwa mail scan</code>, or{" "}
+                    <code>heiwa app update --source checkout</code>.
                   </p>
                 </EmptyState>
               }
@@ -96,16 +100,26 @@ export default function ReceiptsRoute(): JSX.Element {
                           <td>
                             <strong class="mono">{receipt.receipt_id}</strong>
                             <Show when={receipt.event}>
-                              {(event) => <div class="muted mono">event: {event()}</div>}
+                              {(event) => (
+                                <div class="muted mono">event: {event()}</div>
+                              )}
                             </Show>
                           </td>
                           <td>
-                            <StatusBadge status={receipt.lane} tone={receiptTone(receipt)} />
+                            <StatusBadge
+                              status={receipt.lane}
+                              tone={receiptTone(receipt)}
+                            />
                           </td>
                           <td>
-                            <StatusBadge status={receipt.kind} tone={receiptTone(receipt)} />
+                            <StatusBadge
+                              status={receipt.kind}
+                              tone={receiptTone(receipt)}
+                            />
                             <Show when={receipt.parse_error}>
-                              {(error) => <p class="repl-error">parse error: {error()}</p>}
+                              {(error) => (
+                                <p class="repl-error">parse error: {error()}</p>
+                              )}
                             </Show>
                           </td>
                           <td class="mono">{receipt.created_at}</td>

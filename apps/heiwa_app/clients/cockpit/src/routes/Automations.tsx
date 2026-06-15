@@ -2,8 +2,8 @@ import type { JSX } from "solid-js";
 import { For, Show } from "solid-js";
 import { v1 } from "../lib/endpoints";
 import { RemoteShell } from "../lib/resource";
-import { EmptyState, PageHero, Panel, StatusBadge } from "../lib/ui";
 import type { Automation } from "../lib/types";
+import { EmptyState, PageHero, Panel, StatusBadge } from "../lib/ui";
 
 function triggerSummary(trigger: Automation["trigger_config"]): string {
   if (!trigger) return "manual";
@@ -65,13 +65,16 @@ export default function AutomationsRoute(): JSX.Element {
               >
                 <ul>
                   <li>
-                    <strong>{data.scheduler.active_cron}</strong> active cron trigger(s)
+                    <strong>{data.scheduler.active_cron}</strong> active cron
+                    trigger(s)
                   </li>
                   <li>
-                    <strong>{data.scheduler.active_file_watch}</strong> active file watcher(s)
+                    <strong>{data.scheduler.active_file_watch}</strong> active
+                    file watcher(s)
                   </li>
                   <li>
-                    next run: <code>{data.scheduler.next_scheduled_at ?? "none"}</code>
+                    next run:{" "}
+                    <code>{data.scheduler.next_scheduled_at ?? "none"}</code>
                   </li>
                 </ul>
               </Panel>
@@ -83,7 +86,12 @@ export default function AutomationsRoute(): JSX.Element {
               fallback={
                 <EmptyState title="No automations yet.">
                   <p class="muted">
-                    Create one with <code>heiwa auto create --name NAME --prompt PROMPT --cron '0 9 * * *' --active</code>.
+                    Create one with{" "}
+                    <code>
+                      heiwa auto create --name NAME --prompt PROMPT --cron '0 9
+                      * * *' --active
+                    </code>
+                    .
                   </p>
                 </EmptyState>
               }
@@ -108,14 +116,23 @@ export default function AutomationsRoute(): JSX.Element {
                             <div class="muted mono">{automation.id}</div>
                             <p class="muted">{automation.prompt}</p>
                           </td>
-                          <td class="mono">{triggerSummary(automation.trigger_config)}</td>
-                          <td>
-                            <StatusBadge status={automation.status} tone={automation.status === "active" ? "ok" : "warn"} />
-                          </td>
-                          <td class="mono">{automation.next_scheduled_at ?? "—"}</td>
                           <td class="mono">
-                            hour {automation.max_executions_per_hour ?? "∞"} · day{" "}
-                            {automation.max_executions_per_day ?? "∞"}
+                            {triggerSummary(automation.trigger_config)}
+                          </td>
+                          <td>
+                            <StatusBadge
+                              status={automation.status}
+                              tone={
+                                automation.status === "active" ? "ok" : "warn"
+                              }
+                            />
+                          </td>
+                          <td class="mono">
+                            {automation.next_scheduled_at ?? "—"}
+                          </td>
+                          <td class="mono">
+                            hour {automation.max_executions_per_hour ?? "∞"} ·
+                            day {automation.max_executions_per_day ?? "∞"}
                           </td>
                         </tr>
                       )}
@@ -131,7 +148,9 @@ export default function AutomationsRoute(): JSX.Element {
               fallback={
                 <EmptyState title="No executions queued yet.">
                   <p class="muted">
-                    Queue one with <code>heiwa auto trigger &lt;automation-id&gt; --json</code> or run <code>heiwa auto tick --json</code>.
+                    Queue one with{" "}
+                    <code>heiwa auto trigger &lt;automation-id&gt; --json</code>{" "}
+                    or run <code>heiwa auto tick --json</code>.
                   </p>
                 </EmptyState>
               }
@@ -154,9 +173,14 @@ export default function AutomationsRoute(): JSX.Element {
                           <td class="mono">{execution.id}</td>
                           <td class="mono">{execution.automation_id}</td>
                           <td>
-                            <StatusBadge status={execution.status} tone={executionTone(execution.status)} />
+                            <StatusBadge
+                              status={execution.status}
+                              tone={executionTone(execution.status)}
+                            />
                             <Show when={execution.error_message}>
-                              {(message) => <p class="repl-error">{message()}</p>}
+                              {(message) => (
+                                <p class="repl-error">{message()}</p>
+                              )}
                             </Show>
                           </td>
                           <td class="mono">{execution.created_at}</td>

@@ -873,7 +873,9 @@ async fn run_route_command(args: &[String]) -> Result<()> {
             let now_unix = Utc::now().timestamp();
             let quota_ledger = open_default_quota_ledger();
 
+            let privacy = privacy_for_task(&prompt);
             println!("route preview");
+            println!("  privacy: {}", privacy);
             let quota_lines =
                 quota_budget_preview_lines(&model_tiers, quota_ledger.as_ref(), now_unix);
             if !quota_lines.is_empty() {
@@ -906,7 +908,6 @@ async fn run_route_command(args: &[String]) -> Result<()> {
                     println!("  model: {}", route.model_id);
                     println!("  provider_model: {}", route.provider_model_id);
                     println!("  rate_group: {}", route.rate_group);
-                    println!("  privacy: {}", route.privacy);
                     println!("  metadata: {}", route.routing_metadata);
                 }
                 Err(error) => {
@@ -3330,10 +3331,12 @@ pub(crate) async fn preview_route_payload(prompt: &str) -> serde_json::Value {
     let now_unix = Utc::now().timestamp();
     let quota_ledger = open_default_quota_ledger();
     let quota = quota_budget_preview_lines(&model_tiers, quota_ledger.as_ref(), now_unix);
+    let privacy = privacy_for_task(prompt);
 
     match route_task_with_quota(prompt, &pins, &model_tiers, quota_ledger.as_ref(), now_unix) {
         Ok(RouteOutcome::Deterministic(response)) => serde_json::json!({
             "mode": "deterministic",
+            "privacy": privacy,
             "response": response,
             "quota": quota,
         }),
@@ -3354,6 +3357,7 @@ pub(crate) async fn preview_route_payload(prompt: &str) -> serde_json::Value {
         }
         Err(error) => serde_json::json!({
             "mode": "unavailable",
+            "privacy": privacy,
             "error": error,
             "quota": quota,
         }),
@@ -3578,6 +3582,35 @@ mod tests {
                 assert_eq!(route.rate_group, "local");
             }
             super::RouteOutcome::Deterministic(_) => panic!("strategy task should route"),
+        }
+    }
+
+    #[test]
+    fn route_task_private_prompt_uses_local_model_when_available() {
+        let pins = super::SessionPins::new();
+        let tiers = vec![
+            test_model_tier("claude", "claude-sonnet", "anthropic", 4, 0.20),
+            test_model_tier("ollama", "qwen3.5:9b", "local", 3, 0.0),
+        ];
+
+        let outcome = super::route_task_with_quota(
+            "summarize my priority mail privately",
+            &pins,
+            &tiers,
+            None,
+            1_777_000_000,
+        )
+        .expect("private prompt should route when a local model is available");
+
+        match outcome {
+            super::RouteOutcome::Routed(route) => {
+                assert_eq!(route.privacy, "sovereign");
+                assert_eq!(route.provider, "ollama");
+                assert_eq!(route.rate_group, "local");
+            }
+            super::RouteOutcome::Deterministic(_) => {
+                panic!("private prompt should route to a local model")
+            }
         }
     }
 

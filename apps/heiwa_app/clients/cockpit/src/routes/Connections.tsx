@@ -3,8 +3,8 @@ import { For, Show } from "solid-js";
 import { v1 } from "../lib/endpoints";
 import { type Lane, providers } from "../lib/providers";
 import { RemoteShell } from "../lib/resource";
-import { EmptyState, PageHero, StatusBadge } from "../lib/ui";
 import type { Connector } from "../lib/types";
+import { EmptyState, PageHero, StatusBadge } from "../lib/ui";
 
 function providerMeta(providerId: string): {
   label: string;
@@ -91,8 +91,8 @@ export default function ConnectionsRoute(): JSX.Element {
             fallback={
               <EmptyState title="No connector metadata yet.">
                 <p class="muted">
-                  Link a provider with <code>heiwa providers link &lt;id&gt;</code>
-                  .
+                  Link a provider with{" "}
+                  <code>heiwa providers link &lt;id&gt;</code>.
                 </p>
               </EmptyState>
             }
@@ -121,9 +121,7 @@ export default function ConnectionsRoute(): JSX.Element {
                 );
               }}
             </For>
-            <p class="mono muted">
-              policy: {data.policy.join(" · ")}
-            </p>
+            <p class="mono muted">policy: {data.policy.join(" · ")}</p>
           </Show>
         )}
       </RemoteShell>

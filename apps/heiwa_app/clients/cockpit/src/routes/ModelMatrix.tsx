@@ -1,9 +1,9 @@
 import type { JSX } from "solid-js";
-import { For, Show, createSignal } from "solid-js";
+import { createSignal, For, Show } from "solid-js";
 import { v1 } from "../lib/endpoints";
 import { RemoteShell } from "../lib/resource";
-import { PageHero, Panel, StatusBadge, statusTone } from "../lib/ui";
 import type { RoutePreview } from "../lib/types";
+import { PageHero, Panel, StatusBadge, statusTone } from "../lib/ui";
 
 const ROLE_COPY: Record<string, string> = {
   chat: "conversation, summaries, life briefs",

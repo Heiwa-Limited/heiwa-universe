@@ -92,14 +92,18 @@ export default function ApprovalsRoute(): JSX.Element {
                       <div class="hero-actions">
                         <button
                           class="btn btn-solid"
-                          onClick={() => resolve(a.approval_id, "grant", refetch)}
+                          onClick={() =>
+                            resolve(a.approval_id, "grant", refetch)
+                          }
                           type="button"
                         >
                           Grant
                         </button>
                         <button
                           class="btn btn-outline"
-                          onClick={() => resolve(a.approval_id, "deny", refetch)}
+                          onClick={() =>
+                            resolve(a.approval_id, "deny", refetch)
+                          }
                           type="button"
                         >
                           Deny
@@ -113,8 +117,9 @@ export default function ApprovalsRoute(): JSX.Element {
 
             <h2>Dispatch requests</h2>
             <p class="muted">
-              Local dispatch v1 queue at <code>{data.summary.requests_dir}</code>.
-              Decide with <code>heiwa approvals decide &lt;id&gt;</code>.
+              Local dispatch v1 queue at{" "}
+              <code>{data.summary.requests_dir}</code>. Decide with{" "}
+              <code>heiwa approvals decide &lt;id&gt;</code>.
             </p>
             <Show
               when={data.summary.pending.length > 0}

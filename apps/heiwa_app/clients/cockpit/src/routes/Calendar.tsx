@@ -1,9 +1,9 @@
 import type { JSX } from "solid-js";
-import { For, Show, createSignal } from "solid-js";
+import { createSignal, For, Show } from "solid-js";
 import { v1 } from "../lib/endpoints";
 import { RemoteShell } from "../lib/resource";
-import { EmptyState, PageHero, Panel, StatusBadge } from "../lib/ui";
 import type { CalendarSummary } from "../lib/types";
+import { EmptyState, PageHero, Panel, StatusBadge } from "../lib/ui";
 
 function HoldForm(props: { onCreated: () => void }): JSX.Element {
   const [title, setTitle] = createSignal("");
@@ -150,7 +150,11 @@ export default function CalendarRoute(): JSX.Element {
             <div class="panels">
               <TodayPanel data={data} refetch={refetch} />
 
-              <Panel title="Holds" status={`${data.counts.holds_total} total`} tone="ok">
+              <Panel
+                title="Holds"
+                status={`${data.counts.holds_total} total`}
+                tone="ok"
+              >
                 <Show
                   when={data.holds.length > 0}
                   fallback={

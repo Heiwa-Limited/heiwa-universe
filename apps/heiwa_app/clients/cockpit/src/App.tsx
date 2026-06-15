@@ -1,14 +1,14 @@
 import { A, useLocation } from "@solidjs/router";
+import type { JSX, ParentProps } from "solid-js";
 import {
-  For,
-  Show,
   createMemo,
   createResource,
   createSignal,
+  For,
   onCleanup,
   onMount,
+  Show,
 } from "solid-js";
-import type { JSX, ParentProps } from "solid-js";
 import { v1 } from "./lib/endpoints";
 
 type NavItem = {
@@ -17,7 +17,12 @@ type NavItem = {
   mark: string;
 };
 
-type InspectorTab = "telemetry" | "personalize" | "projects" | "advanced" | "settings";
+type InspectorTab =
+  | "telemetry"
+  | "personalize"
+  | "projects"
+  | "advanced"
+  | "settings";
 
 type SurfaceSignal = {
   name: string;
@@ -167,7 +172,8 @@ const advancedItems: ConsoleItem[] = [
 
 function routeTitle(pathname: string): string {
   if (pathname === "/") return "Run";
-  if (pathname === "/advanced" || pathname === "/dashboard") return "Dashboard · Advanced settings";
+  if (pathname === "/advanced" || pathname === "/dashboard")
+    return "Dashboard · Advanced settings";
   const match = [...primaryNav, ...evidenceNav, ...systemNav].find(
     (item) => item.href === pathname,
   );
@@ -223,7 +229,9 @@ function LiveTelemetryPanel(): JSX.Element {
                   <span class="surface-name">{surface.name}</span>
                   <span class="surface-detail">{surface.detail}</span>
                 </div>
-                <span class={`status-pill ${surface.tone}`}>{surface.status}</span>
+                <span class={`status-pill ${surface.tone}`}>
+                  {surface.status}
+                </span>
               </div>
             )}
           </For>
@@ -241,7 +249,9 @@ function LiveTelemetryPanel(): JSX.Element {
               {resource()?.snapshot.load_1m.toFixed(2)} /{" "}
               {resource()?.snapshot.cpu_count} cores
             </strong>
-            <span class={`status-pill ${(loadPercent() ?? 0) > 80 ? "active" : "online"}`}>
+            <span
+              class={`status-pill ${(loadPercent() ?? 0) > 80 ? "active" : "online"}`}
+            >
               {(loadPercent() ?? 0) > 80 ? "hot" : "steady"}
             </span>
           </div>
@@ -251,9 +261,7 @@ function LiveTelemetryPanel(): JSX.Element {
               style={{ width: `${loadPercent() ?? 0}%` }}
             />
           </div>
-          <span class="widget-desc">
-            source: {resource()?.sources.load_1m}
-          </span>
+          <span class="widget-desc">source: {resource()?.sources.load_1m}</span>
         </div>
 
         <div class="telemetry-widget">
@@ -294,7 +302,10 @@ function LiveTelemetryPanel(): JSX.Element {
   );
 }
 
-function SidebarSection(props: { title: string; items: NavItem[] }): JSX.Element {
+function SidebarSection(props: {
+  title: string;
+  items: NavItem[];
+}): JSX.Element {
   return (
     <section class="sidebar-section">
       <div class="section-header-row">
@@ -323,11 +334,15 @@ function SidebarSection(props: { title: string; items: NavItem[] }): JSX.Element
 
 export default function App(props: ParentProps): JSX.Element {
   const location = useLocation();
-  const [inspectorTab, setInspectorTab] = createSignal<InspectorTab>("telemetry");
+  const [inspectorTab, setInspectorTab] =
+    createSignal<InspectorTab>("telemetry");
   const currentTitle = createMemo(() => routeTitle(location.pathname));
 
   return (
-    <div class="heiwa-app-layout" classList={{ "main-app-view": location.pathname === "/" }}>
+    <div
+      class="heiwa-app-layout"
+      classList={{ "main-app-view": location.pathname === "/" }}
+    >
       <aside class="heiwa-sidebar" aria-label="Heiwa workspace navigation">
         <div class="sidebar-header">
           <A class="brand-logo" href="/">
@@ -347,7 +362,11 @@ export default function App(props: ParentProps): JSX.Element {
         <section class="sidebar-section session-section">
           <div class="section-header-row">
             <span class="section-title">Threads</span>
-            <button class="btn-new-thread" type="button" aria-label="New thread">
+            <button
+              class="btn-new-thread"
+              type="button"
+              aria-label="New thread"
+            >
               +
             </button>
           </div>
@@ -382,11 +401,11 @@ export default function App(props: ParentProps): JSX.Element {
 
       <main class="heiwa-main-content">
         <header class="workspace-header">
-          <div class="header-breadcrumb" aria-label="Current workspace">
+          <nav class="header-breadcrumb" aria-label="Current workspace">
             <span class="bc-root">Heiwa</span>
             <span class="bc-sep">/</span>
             <span class="bc-active">{currentTitle()}</span>
-          </div>
+          </nav>
           <div class="header-actions">
             <A class="btn-workspace-action" href="/">
               Run workspace
@@ -399,7 +418,10 @@ export default function App(props: ParentProps): JSX.Element {
         <div class="workspace-viewport">{props.children}</div>
       </main>
 
-      <aside class="heiwa-sidecar" aria-label="Browser console and runtime inspector">
+      <aside
+        class="heiwa-sidecar"
+        aria-label="Browser console and runtime inspector"
+      >
         <div class="sidecar-console-header">
           <div>
             <span class="console-eyebrow">Browser console</span>
@@ -410,13 +432,15 @@ export default function App(props: ParentProps): JSX.Element {
 
         <div class="sidecar-tabs">
           <For
-            each={[
-              ["telemetry", "Telemetry"],
-              ["personalize", "Personalize"],
-              ["projects", "Projects"],
-              ["advanced", "Advanced"],
-              ["settings", "Settings"],
-            ] as const}
+            each={
+              [
+                ["telemetry", "Telemetry"],
+                ["personalize", "Personalize"],
+                ["projects", "Projects"],
+                ["advanced", "Advanced"],
+                ["settings", "Settings"],
+              ] as const
+            }
           >
             {([id, label]) => (
               <button
@@ -441,7 +465,9 @@ export default function App(props: ParentProps): JSX.Element {
             <section class="console-panel">
               <div class="console-panel-copy">
                 <span class="widget-label">Personalization</span>
-                <p>Customize how Heiwa understands, routes, and presents work.</p>
+                <p>
+                  Customize how Heiwa understands, routes, and presents work.
+                </p>
               </div>
               <For each={personalizationItems}>
                 {(item) => (
@@ -459,7 +485,10 @@ export default function App(props: ParentProps): JSX.Element {
             <section class="console-panel">
               <div class="console-panel-copy">
                 <span class="widget-label">Auto-managed projects</span>
-                <p>Heiwa should group work by durable projects without making the user file tickets.</p>
+                <p>
+                  Heiwa should group work by durable projects without making the
+                  user file tickets.
+                </p>
               </div>
               <For each={projectItems}>
                 {(item) => (
@@ -477,7 +506,10 @@ export default function App(props: ParentProps): JSX.Element {
             <section class="console-panel">
               <div class="console-panel-copy">
                 <span class="widget-label">Advanced settings</span>
-                <p>Low-level controls stay here so the main app remains one clean conversation.</p>
+                <p>
+                  Low-level controls stay here so the main app remains one clean
+                  conversation.
+                </p>
               </div>
               <For each={advancedItems}>
                 {(item) => (
@@ -495,7 +527,10 @@ export default function App(props: ParentProps): JSX.Element {
             <section class="console-panel">
               <div class="console-panel-copy">
                 <span class="widget-label">Open surfaces</span>
-                <p>Jump between the app dashboard, browser view, and runtime settings.</p>
+                <p>
+                  Jump between the app dashboard, browser view, and runtime
+                  settings.
+                </p>
               </div>
               <div class="console-link-grid">
                 <A class="console-link-card" href="/">
@@ -520,7 +555,9 @@ export default function App(props: ParentProps): JSX.Element {
                 <div class="trace-log-viewport">
                   <For each={traceLines}>
                     {(line) => (
-                      <div class={`trace-log-line ${line.kind}`}>{line.text}</div>
+                      <div class={`trace-log-line ${line.kind}`}>
+                        {line.text}
+                      </div>
                     )}
                   </For>
                 </div>
