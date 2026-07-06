@@ -16,6 +16,7 @@ use heiwa_provider::providers::claude_code::ClaudeCodeCliAdapter;
 use heiwa_provider::providers::codex_cli::CodexCliAdapter;
 use heiwa_provider::providers::gemini_cli::GeminiCliAdapter;
 use heiwa_provider::providers::ollama::OllamaCliAdapter;
+use heiwa_provider::providers::openrouter::OpenRouterAdapter;
 use heiwa_repl::{parse_input, render_footer, ReplCommand, TelemetryState};
 use heiwa_shell::agentic;
 use std::env;
@@ -34,7 +35,7 @@ fn canonical_provider_id(provider: &str) -> &str {
 fn provider_supports_loop_adapter(provider: &str) -> bool {
     matches!(
         canonical_provider_id(provider),
-        "claude" | "codex" | "ollama" | "gemini"
+        "claude" | "codex" | "ollama" | "gemini" | "openrouter"
     )
 }
 
@@ -777,6 +778,8 @@ async fn main() -> Result<()> {
                         "gemini" => {
                             Some(Arc::new(GeminiCliAdapter::new()) as Arc<dyn ProviderAdapter>)
                         }
+                        "openrouter" => OpenRouterAdapter::from_registry()
+                            .map(|a| Arc::new(a) as Arc<dyn ProviderAdapter>),
                         _ => None,
                     });
 
@@ -1416,6 +1419,8 @@ async fn run_repl(use_cockpit: bool) -> Result<()> {
                             "gemini" => {
                                 Some(Arc::new(GeminiCliAdapter::new()) as Arc<dyn ProviderAdapter>)
                             }
+                            "openrouter" => OpenRouterAdapter::from_registry()
+                                .map(|a| Arc::new(a) as Arc<dyn ProviderAdapter>),
                             _ => None,
                         });
 
@@ -2421,7 +2426,7 @@ fn append_controller_block(
 // ---------------------------------------------------------------------------
 
 /// Providers that have a working adapter in `resolve_adapter()`.
-const SUPPORTED_ADAPTER_PROVIDERS: &[&str] = &["ollama", "claude", "codex", "gemini"];
+const SUPPORTED_ADAPTER_PROVIDERS: &[&str] = &["ollama", "claude", "codex", "gemini", "openrouter"];
 
 /// Returns true if the provider has a working adapter in this binary.
 fn has_adapter(provider: &str) -> bool {
@@ -2630,6 +2635,9 @@ fn resolve_adapter(provider: &str, model_id: &str) -> Result<Arc<dyn ProviderAda
         "claude" => Ok(Arc::new(ClaudeCodeCliAdapter::new())),
         "codex" => Ok(Arc::new(CodexCliAdapter::new())),
         "gemini" => Ok(Arc::new(GeminiCliAdapter::new())),
+        "openrouter" => OpenRouterAdapter::from_registry()
+            .map(|a| Arc::new(a) as Arc<dyn ProviderAdapter>)
+            .ok_or_else(|| "No OpenRouter account registered (heiwa auth add-key openrouter <key>).".to_string()),
         _ => Err(format!("No adapter for provider '{}' yet.", provider)),
     }
 }
@@ -3455,6 +3463,18 @@ mod tests {
     fn audit_input_uses_audit_intent() {
         assert_eq!(parse_turn_intent("review the PR").intent, Intent::Audit);
         assert_eq!(parse_turn_intent("lint the codebase").intent, Intent::Audit);
+    }
+
+    #[test]
+    fn openrouter_passes_every_adapter_gate() {
+        // Three gates stand between an accounts.json entry and DREX routing;
+        // a provider missing from any one of them silently drops out.
+        assert!(super::has_adapter("openrouter"));
+        assert!(super::provider_supports_loop_adapter("openrouter"));
+        assert!(
+            !super::is_local_provider("openrouter"),
+            "openrouter is a remote tier — must not slip into the sovereign lane"
+        );
     }
 
     #[test]
