@@ -33,7 +33,6 @@ require_match ".github/workflows/release.yml" 'cp README\.md CONTRIBUTING\.md CO
 python_projects=(
   "pyproject.toml"
   "packages/heiwa_cli/pyproject.toml"
-  "legacy/packages/heiwa_cognition/pyproject.toml"
   "packages/heiwa_sdk/pyproject.toml"
   "apps/heiwa_trading/pyproject.toml"
   "runtime/python/pyproject.toml"
@@ -47,7 +46,6 @@ node_projects=(
   "package.json"
   "apps/heiwa_app/package.json"
   "apps/heiwa_app/clients/cockpit/package.json"
-  "legacy/apps/heiwa_cli/package.json"
   "packages/heiwa_bindings/typescript/package.json"
 )
 
@@ -56,7 +54,6 @@ for project in "${node_projects[@]}"; do
 done
 
 if git ls-files 'Cargo.toml' '*Cargo.toml' '*pyproject.toml' '*package.json' \
-  | grep -v '^legacy/packages/heiwa_skills/' \
   | xargs grep -n 'UNLICENSED' >/tmp/heiwa-release-metadata-unlicensed.$$ 2>/dev/null; then
   echo "UNLICENSED metadata remains in tracked releasable manifests:" >&2
   cat /tmp/heiwa-release-metadata-unlicensed.$$ >&2

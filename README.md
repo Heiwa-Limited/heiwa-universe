@@ -29,7 +29,6 @@ Maturity is uneven across planes today; see [`HEIWA.md`](HEIWA.md#the-three-plan
 - Provider normalization: `crates/heiwa_provider/`
 - Terminal UX: `crates/heiwa_tui/`, `crates/heiwa_repl/`
 - STDB-facing Rust surfaces: `apps/heiwa_core/src/stdb/`, `apps/heiwa_orchestrator/src/stdb/`, `crates/heiwa_stdb/`
-- Legacy STDB module reference: `legacy/apps/heiwa_hub/spacetimedb/`
 - GitHub distribution surfaces: Actions, Pages, and release metadata
 
 ## Architecture

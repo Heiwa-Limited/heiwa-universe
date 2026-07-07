@@ -1,8 +1,8 @@
 # Product Surface
 
-> Canonical map of tracked repo paths to surface classes. This file is read by `scripts/audit_product_surface.sh`. Update it when a path changes class; do not move class boundaries without checking `HEIWA.md` and `docs/audit/2026-04-25-slop-budget.md`.
+> Canonical map of tracked repo paths to surface classes. This file is read by `scripts/audit_product_surface.sh`. Update it when a path changes class; do not move class boundaries without checking `HEIWA.md`.
 
-**Last updated:** 2026-04-25
+**Last updated:** 2026-07-06
 **Authority:** `HEIWA.md` defines what is product. This file labels tracked paths for repo hygiene and LOC accounting.
 
 ## Classes
@@ -23,8 +23,6 @@ Longest prefix wins. Put narrower paths above broader parents when a child has a
 
 | Path                                 | Class            |
 | ------------------------------------ | ---------------- |
-| `legacy/apps/heiwa_cli/runtime/logs` | runtime-artifact |
-| `legacy`                             | legacy           |
 | `archive`                            | archive          |
 | `vendor`                             | vendored         |
 | `apps/heiwa_shell`                   | product          |
@@ -32,9 +30,6 @@ Longest prefix wins. Put narrower paths above broader parents when a child has a
 | `apps/heiwa_app`                     | product          |
 | `apps/heiwa_orchestrator`            | product          |
 | `apps/heiwa_trading`                 | product          |
-| `legacy/apps/heiwa_hub`              | legacy           |
-| `legacy/apps/heiwa_cli`              | legacy           |
-| `legacy/apps/heiwa_limbs`            | legacy           |
 | `archive/apps/heiwa_dj`              | archive          |
 | `apps/__init__.py`                   | legacy           |
 | `crates`                             | product          |
@@ -44,9 +39,6 @@ Longest prefix wins. Put narrower paths above broader parents when a child has a
 | `packages/heiwa_protocol`            | product          |
 | `packages/heiwa_cli`                 | product          |
 | `packages/heiwa_identity`            | product          |
-| `legacy/packages/heiwa_skills`       | legacy           |
-| `legacy/packages/heiwa_cognition`    | legacy           |
-| `legacy/packages/heiwa_ui`           | legacy           |
 | `packages/heiwa_knowledge`           | legacy           |
 | `packages/__init__.py`               | product          |
 | `runtime/python`                     | product          |
@@ -57,9 +49,10 @@ Longest prefix wins. Put narrower paths above broader parents when a child has a
 | `docs/superpowers`                   | reference        |
 | `docs/design`                        | reference        |
 | `docs/audit`                         | reference        |
-| `docs/enterprise`                    | reference        |
 | `docs/standards`                     | product          |
 | `docs`                               | product          |
+| `oss-lifts`                          | reference        |
+| `prototypes`                         | reference        |
 | `ops/research`                       | reference        |
 | `ops/docs_and_deps`                  | vendored         |
 | `ops`                                | product          |
@@ -104,6 +97,7 @@ Longest prefix wins. Put narrower paths above broader parents when a child has a
 | `PRODUCT_SURFACE.md`                 | product          |
 | `mkdocs.yml`                         | product          |
 | `biome.json`                         | product          |
+| `deno.json`                          | product          |
 | `tsconfig.base.json`                 | product          |
 | `rust-toolchain.toml`                | product          |
 | `conftest.py`                        | product          |
@@ -120,8 +114,7 @@ Longest prefix wins. Put narrower paths above broader parents when a child has a
 ## Notes
 
 - `apps/heiwa_trading` is an active sub-product, not slop.
-- `legacy/packages/heiwa_skills` is the largest legacy surface, quarantined under `legacy/` per the slop quarantine plan.
-- `legacy/apps/heiwa_hub` is the legacy Python ops surface. It remains present but is not the current public operator path.
+- `legacy/` was removed from the tracked tree on 2026-07-06. Legacy surfaces (heiwa_hub, heiwa_cli, heiwa_limbs, legacy packages) live in git history and in the local operator archive (`~/heiwa_archive/heiwa-universe-pruned-2026-07-06/`).
 - `runtime/python` is source and remains product for now. Runtime spools, logs, and fleet start artifacts are `runtime-artifact`.
 - `docs/audit` is reference but contains operational baselines. Do not delete entries without replacing their evidence.
 - `vendor/` is reserved for intentionally tracked third-party code. Current untracked `vendor/oss-lifts` research material is quarantine and must not be added or removed without an explicit vendor-policy assignment.

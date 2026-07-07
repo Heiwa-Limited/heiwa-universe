@@ -20,8 +20,6 @@ Load this room for:
 - DREX orchestration and STDB-facing runtime work in `apps/heiwa_orchestrator/`
 - Typed route contracts in `packages/heiwa_protocol/heiwa_protocol/routing.py`
 - Gateway dispatch in `packages/heiwa_sdk/heiwa_sdk/heiwaclaw.py`
-- Compatibility MCP/HTTP reference in `legacy/apps/heiwa_hub/mcp_server.py`
-- Quarantined STDB module reference in `legacy/apps/heiwa_hub/spacetimedb/src/lib.rs`
 - STDB evidence and fallback crate in `crates/heiwa_stdb/`
 
 ## Current Reality
@@ -41,7 +39,6 @@ Today:
 - `packages/heiwa_sdk/heiwa_sdk/db.py` now routes proposal assignment, claim, consent, heartbeat, routing queries, and lease issuance through STDB fast paths when enabled.
 - Routing and assignment selection still runs in `packages/heiwa_sdk/heiwa_sdk/tick.py`, but STDB is now the state authority underneath that scheduler.
 - Public WebSockets currently stream status, not proposal lifecycle events.
-- Legacy approval state also exists in-memory in `legacy/apps/heiwa_hub/cognition/approval.py`.
 
 ## Next Mandatory Cut
 

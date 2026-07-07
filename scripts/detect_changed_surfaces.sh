@@ -98,7 +98,7 @@ while IFS= read -r file; do
   esac
 
   case "$file" in
-    requirements.txt|pyproject.toml|uv.lock|conftest.py|packages/heiwa_cli/*|packages/heiwa_identity/*|packages/heiwa_protocol/*|packages/heiwa_sdk/*|legacy/packages/heiwa_cognition/*|legacy/packages/heiwa_ui/*|scripts/*|tests/*)
+    requirements.txt|pyproject.toml|uv.lock|conftest.py|packages/heiwa_cli/*|packages/heiwa_identity/*|packages/heiwa_protocol/*|packages/heiwa_sdk/*|scripts/*|tests/*)
       python_reference=true
       legacy_hub=true
       deploy_trading=true
@@ -109,13 +109,6 @@ while IFS= read -r file; do
     apps/heiwa_trading/*)
       python_reference=true
       deploy_trading=true
-      ;;
-  esac
-
-  case "$file" in
-    legacy/apps/heiwa_cli/*|legacy/apps/heiwa_hub/*)
-      python_reference=true
-      legacy_hub=true
       ;;
   esac
 done < <(git -C "$repo_root" diff --name-only "$base_sha" "$head_sha" || true)

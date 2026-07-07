@@ -33,7 +33,6 @@ Compression:
 | `crates/heiwa_loop/`       | Bounded loop workflow                                                               |
 | `packages/heiwa_sdk/`      | Python compatibility and migration surface                                          |
 | `packages/heiwa_bindings/` | Generated bindings for STDB types                                                   |
-| `legacy/apps/heiwa_hub/`   | Quarantined legacy Hub reference, not current product spine                         |
 
 ## Architecture Direction (April 2026)
 

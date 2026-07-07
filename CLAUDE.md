@@ -30,7 +30,7 @@ Before touching runtime or architecture work, read in this order:
 - `apps/heiwa_shell/` is the primary operator surface in this repo.
 - `apps/heiwa_core/` contains the Rust execution kernel and hosted runtime path.
 - STDB-facing active work lives in `apps/heiwa_core/src/stdb/`, `apps/heiwa_orchestrator/src/stdb/`, and `crates/heiwa_stdb/`.
-- `legacy/apps/heiwa_hub/` is quarantined migration/reference material, not a current mutation target.
+- Legacy surfaces (old Hub, CLI, limbs) were removed from the tree on 2026-07-06; they live in git history and `~/heiwa_archive/`. Do not treat them as work targets.
 - Web and `/code` surfaces are later work. Do not overstate them.
 
 ## Provider Truth

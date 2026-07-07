@@ -10,7 +10,7 @@ cd "$PROJECT_ROOT"
 echo "  - Root: $PROJECT_ROOT"
 
 # 2. PYTHONPATH Alignment (Progressive Disclosure Map)
-export PYTHONPATH="$PROJECT_ROOT/packages/heiwa_cli:$PROJECT_ROOT/legacy/packages/heiwa_cognition:$PROJECT_ROOT/packages/heiwa_sdk:$PROJECT_ROOT/packages/heiwa_protocol:$PROJECT_ROOT/packages/heiwa_identity:$PROJECT_ROOT/legacy/packages/heiwa_ui:$PROJECT_ROOT/apps"
+export PYTHONPATH="$PROJECT_ROOT/packages/heiwa_cli:$PROJECT_ROOT/packages/heiwa_sdk:$PROJECT_ROOT/packages/heiwa_protocol:$PROJECT_ROOT/packages/heiwa_identity:$PROJECT_ROOT/apps"
 echo "  - PYTHONPATH established."
 
 # 3. Virtual Environment Check

@@ -21,9 +21,6 @@ Load this room for:
 - `apps/heiwa_core/`
 - `apps/heiwa_orchestrator/`
 - `crates/heiwa_stdb/`
-- `legacy/apps/heiwa_hub/main.py` when repairing/promoting legacy Hub only
-- `legacy/apps/heiwa_hub/mcp_server.py` when repairing/promoting legacy Hub only
-- `legacy/apps/heiwa_hub/scripts/generate_spacetimedb_bindings.sh` when regenerating legacy bindings only
 - `packages/heiwa_bindings/*`
 
 ## Current CI Expectations

@@ -1,7 +1,0 @@
-name: railway
-version: 1.0.0
-description: Mock Railway CLI
-tools:
-  status:
-    description: Check deployment status
-    parameters: {}
