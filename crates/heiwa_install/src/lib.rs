@@ -810,7 +810,11 @@ mod tests {
         Ok(())
     }
 
+    // The desktop bundle install writes a zsh shim with POSIX paths; on
+    // Windows the joined paths render with backslashes and the flow itself
+    // is macOS-only, so keep the test off Windows.
     #[test]
+    #[cfg(not(windows))]
     fn test_install_built_desktop_app_bundle_copies_tauri_bundle_and_shim() -> Result<()> {
         let tmp = tempdir()?;
         let heiwa_dir = tmp.path().join(".heiwa");
