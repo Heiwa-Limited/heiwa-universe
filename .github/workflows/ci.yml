@@ -54,6 +54,13 @@ jobs:
             .
           prefix-key: v2-rust
           cache-bin: true
+      # keyring's sync-secret-service backend links libdbus; that is the only
+      # system dependency the non-desktop workspace needs on Linux.
+      - name: Install Linux system dependencies
+        if: matrix.os == 'ubuntu-latest'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends libdbus-1-dev pkg-config
       # heiwa-desktop (Tauri shell) is excluded here: its wry/webkit dep tree
       # dominates compile time and needs OS GUI packages. The desktop-check
       # job covers it on macOS when its files change; releases build it fully.
