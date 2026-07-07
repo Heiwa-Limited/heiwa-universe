@@ -612,7 +612,7 @@ async fn call_local_app_api(
     let request = if method == "POST" {
         format!(
             "POST {path} HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\nAccept: application/json\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
-            body.as_bytes().len()
+            body.len()
         )
     } else {
         format!(
