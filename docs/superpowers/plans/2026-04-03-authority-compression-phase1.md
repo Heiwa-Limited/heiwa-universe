@@ -13,6 +13,7 @@
 ### Task 1: Update STDB Schema
 
 **Files:**
+
 - Modify: `apps/heiwa_hub/spacetimedb/src/lib.rs`
 
 - [ ] **Step 1: Update `NodeStatus` struct**
@@ -44,35 +45,37 @@ pub struct NodeStatus {
 ```
 
 - [ ] **Step 2: Update `upsert_node_heartbeat` reducer**
-Update signature and logic to handle new fields.
+      Update signature and logic to handle new fields.
 
 - [ ] **Step 3: Run `cargo build` in STDB module**
-`cd apps/heiwa_hub/spacetimedb && cargo build`
+      `cd apps/heiwa_hub/spacetimedb && cargo build`
 
 ### Task 2: Update heiwa-core Advertising (Rust)
 
 **Files:**
+
 - Modify: `apps/heiwa_core/src/runtime/mod.rs`
 - Modify: `packages/heiwa_bindings/rust/src/lib.rs` (if manually maintained, or regenerate)
 
 - [ ] **Step 1: Update `heartbeat` function in `heiwa-core`**
-Update the call to `upsert_node_heartbeat` with real/mocked hardware data (e.g., from env or `sysinfo`).
+      Update the call to `upsert_node_heartbeat` with real/mocked hardware data (e.g., from env or `sysinfo`).
 
 - [ ] **Step 2: Commit core changes**
 
 ### Task 3: Update Python SDK & Workers (Python)
 
 **Files:**
+
 - Modify: `packages/heiwa_sdk/heiwa_sdk/spacetimedb.py`
 - Modify: `packages/heiwa_identity/heiwa_identity/node.py`
 
 - [ ] **Step 1: Update Python binding for `upsert_node_heartbeat`**
 
 - [ ] **Step 2: Update `NodeIdentity` to gather rich hardware info**
-Update `load_node_identity()` to detect VRAM (via `nvidia-smi` or similar) and local models.
+      Update `load_node_identity()` to detect VRAM (via `nvidia-smi` or similar) and local models.
 
 - [ ] **Step 3: Verify with integration test**
-`uv run pytest scripts/tests/test_device_advertising.py` (New test)
+      `uv run pytest scripts/tests/test_device_advertising.py` (New test)
 
 ---
 
@@ -81,4 +84,4 @@ Update `load_node_identity()` to detect VRAM (via `nvidia-smi` or similar) and l
 - [ ] **Step 1: Start local STDB**
 - [ ] **Step 2: Run heiwa-core**
 - [ ] **Step 3: Check STDB tables for rich device data**
-`spacetime sql "SELECT * FROM nodes"`
+      `spacetime sql "SELECT * FROM nodes"`

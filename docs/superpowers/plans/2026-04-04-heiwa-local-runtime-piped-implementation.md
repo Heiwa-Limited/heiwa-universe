@@ -13,6 +13,7 @@
 **Strategic Frame:** Heiwa is not a browser-first coding app. It is a machine-installed AI runtime with unified provider/auth, DREX routing, and evidence/receipt truth. The first 80/20 is the substrate, not the polished terminal app.
 
 **Non-Goals For This Plan:**
+
 - Do not build `app.heiwa.ltd/code` yet.
 - Do not replace every Python package immediately.
 - Do not introduce browser- or Railway-only execution as the primary product mode.
@@ -31,6 +32,7 @@ Each phase must land as a working, testable slice before the next becomes author
 Only **Phase A: Foundation** should be executed now.
 
 Phase A contains the true 80/20:
+
 - repo and crate spine
 - install/doctor baseline
 - provider account and auth normalization
@@ -177,6 +179,7 @@ Use these terms consistently:
 **Phase:** A — Foundation
 
 **Files:**
+
 - Modify: `Cargo.toml`
 - Create: `apps/heiwa_shell/Cargo.toml`
 - Create: `apps/heiwa_shell/src/main.rs`
@@ -196,6 +199,7 @@ Use these terms consistently:
 - [ ] **Step 1: Add a failing workspace smoke test**
 
 Create a small test under `apps/heiwa_shell/tests/` that expects:
+
 - the `heiwa` binary parses `--help`
 - the binary can start without web dependencies
 
@@ -212,6 +216,7 @@ Expected: FAIL because the crate does not exist yet.
 - [ ] **Step 3: Add the new Rust workspace members**
 
 Update `Cargo.toml` to include:
+
 - `apps/heiwa_shell`
 - `crates/heiwa_session`
 - `crates/heiwa_repl`
@@ -222,6 +227,7 @@ Update `Cargo.toml` to include:
 - [ ] **Step 4: Create minimal crates and a stub `heiwa` binary**
 
 Implement the smallest compileable binary that prints a product-correct help surface:
+
 - `heiwa`
 - `heiwa install`
 - `heiwa doctor`
@@ -251,6 +257,7 @@ git commit -m "feat: scaffold rust heiwa runtime workspace"
 **Phase:** A — Foundation
 
 **Files:**
+
 - Modify: `apps/heiwa_shell/src/main.rs`
 - Modify: `crates/heiwa_install/src/lib.rs`
 - Create: `crates/heiwa_install/src/install.rs`
@@ -265,6 +272,7 @@ git commit -m "feat: scaffold rust heiwa runtime workspace"
 - [ ] **Step 1: Write failing tests for install/doctor discovery**
 
 Cover:
+
 - Rust/Node/Python runtime detection
 - provider CLI discovery for `claude`, `codex`, `gemini`, `openclaw`, `ollama`
 - graceful reporting when tools are missing
@@ -282,6 +290,7 @@ Expected: FAIL because discovery/reporting does not exist.
 - [ ] **Step 3: Implement `heiwa install`**
 
 `heiwa install` must:
+
 - verify repo/machine prerequisites
 - install or guide installation for runtimes and CLIs
 - write a local machine manifest under `~/.heiwa/`
@@ -290,6 +299,7 @@ Expected: FAIL because discovery/reporting does not exist.
 - [ ] **Step 4: Implement `heiwa doctor`**
 
 `heiwa doctor` must report:
+
 - runtime versions
 - provider install status
 - auth status
@@ -323,6 +333,7 @@ git commit -m "feat: add heiwa install and doctor flows"
 **Phase:** A — Foundation
 
 **Files:**
+
 - Modify: `apps/heiwa_hub/spacetimedb/src/lib.rs`
 - Modify: `apps/heiwa_core/src/stdb/mod.rs`
 - Modify: `apps/heiwa_core/src/auth.rs`
@@ -338,6 +349,7 @@ git commit -m "feat: add heiwa install and doctor flows"
 - [ ] **Step 1: Write failing tests for canonical provider accounts**
 
 Cover these provider kinds:
+
 - `oauth_cli`
 - `api_key`
 - `router_api`
@@ -345,6 +357,7 @@ Cover these provider kinds:
 - `custom_profile`
 
 And these fields:
+
 - provider id
 - account id
 - auth kind
@@ -366,6 +379,7 @@ Expected: FAIL because the account/auth plane is not canonical yet.
 - [ ] **Step 3: Add STDB tables for provider accounts and rate state**
 
 In `apps/heiwa_hub/spacetimedb/src/lib.rs`, add the minimal canonical records for:
+
 - provider accounts
 - provider entitlements
 - provider rate state
@@ -376,6 +390,7 @@ Do not overbuild billing or team policy here.
 - [ ] **Step 4: Implement local auth flows**
 
 Support:
+
 - Claude Code OAuth-backed status/login/logout
 - Codex login/status/logout
 - Gemini CLI auth surface
@@ -387,6 +402,7 @@ Use OS keychain or local secure storage for handles and references, not raw plai
 - [ ] **Step 5: Expose `heiwa auth` and `heiwa providers`**
 
 The local product must provide:
+
 - auth status summary
 - provider login
 - provider logout
@@ -415,6 +431,7 @@ git commit -m "feat: add canonical provider account and auth plane"
 **Phase:** B — Terminal Productization
 
 **Files:**
+
 - Modify: `apps/heiwa_shell/src/main.rs`
 - Modify: `crates/heiwa_session/src/lib.rs`
 - Create: `crates/heiwa_session/src/daemon.rs`
@@ -429,6 +446,7 @@ git commit -m "feat: add canonical provider account and auth plane"
 - [ ] **Step 1: Write a failing attach/resume test**
 
 Cover:
+
 - start daemon
 - attach to existing session
 - resume a session after terminal restart
@@ -446,6 +464,7 @@ Expected: FAIL because the daemon/PTY surface does not exist.
 - [ ] **Step 3: Implement the local daemon and Unix-socket control path**
 
 Support:
+
 - one primary session
 - attach/detach
 - persistent session id
@@ -454,6 +473,7 @@ Support:
 - [ ] **Step 4: Implement PTY-backed session hosting**
 
 The daemon must host a real PTY session for:
+
 - shell passthrough
 - Heiwa REPL interaction
 - provider subprocess streaming
@@ -485,6 +505,7 @@ git commit -m "feat: add persistent local heiwa session daemon"
 **Phase:** B — Terminal Productization
 
 **Files:**
+
 - Modify: `crates/heiwa_repl/src/lib.rs`
 - Create: `crates/heiwa_repl/src/commands.rs`
 - Create: `crates/heiwa_repl/src/shell.rs`
@@ -501,6 +522,7 @@ git commit -m "feat: add persistent local heiwa session daemon"
 - [ ] **Step 1: Write failing parser tests**
 
 Cover:
+
 - plain text routes as task input
 - `!git status` routes as direct shell
 - `/help`, `/doctor`, `/auth`, `/providers`, `/models`, `/device`, `/telemetry`, `/loop`, `/exit`
@@ -518,6 +540,7 @@ Expected: FAIL because the parser and command registry do not exist.
 - [ ] **Step 3: Implement the REPL parser and command registry**
 
 Preserve current product semantics:
+
 - `!` = direct shell
 - `/command` = Heiwa-native command
 - all other text = routed task
@@ -525,6 +548,7 @@ Preserve current product semantics:
 - [ ] **Step 4: Implement a statusline/footer telemetry surface**
 
 Include:
+
 - provider
 - model
 - current route
@@ -559,6 +583,7 @@ git commit -m "feat: add heiwa repl, commands, and shell escape"
 **Phase:** A — Foundation
 
 **Files:**
+
 - Modify: `crates/heiwa_provider/src/lib.rs`
 - Create: `crates/heiwa_provider/src/adapter.rs`
 - Create: `crates/heiwa_provider/src/process.rs`
@@ -576,6 +601,7 @@ git commit -m "feat: add heiwa repl, commands, and shell escape"
 - [ ] **Step 1: Write failing adapter tests**
 
 Cover:
+
 - provider process start
 - send input
 - collect output
@@ -595,6 +621,7 @@ Expected: FAIL because provider adapters do not exist.
 - [ ] **Step 3: Define a single adapter trait**
 
 The trait must support:
+
 - start session
 - send input
 - read events
@@ -605,6 +632,7 @@ The trait must support:
 - [ ] **Step 4: Implement the initial adapters**
 
 Adapters to land in this task:
+
 - Claude Code
 - Codex
 - Gemini CLI
@@ -640,6 +668,7 @@ git commit -m "feat: add local provider adapter layer"
 **Phase:** A — Foundation
 
 **Files:**
+
 - Modify: `apps/heiwa_core/src/drex/mod.rs`
 - Modify: `apps/heiwa_core/src/drex/router.rs`
 - Modify: `apps/heiwa_core/src/drex/scorer.rs`
@@ -654,6 +683,7 @@ git commit -m "feat: add local provider adapter layer"
 - [ ] **Step 1: Write failing routing tests**
 
 Cover:
+
 - local-only session
 - best compatible provider chosen
 - no compatible provider
@@ -675,6 +705,7 @@ Expected: FAIL because provider/device routing is not yet canonical.
 - [ ] **Step 3: Add canonical device and provider capability records**
 
 Extend STDB with the minimum fields needed to route by:
+
 - device
 - provider kind
 - model inventory
@@ -687,6 +718,7 @@ Extend STDB with the minimum fields needed to route by:
 - [ ] **Step 4: Update DREX scoring**
 
 Make DREX capability-aware across:
+
 - installed provider CLIs
 - BYOK/API providers
 - router providers
@@ -719,6 +751,7 @@ git commit -m "feat: add device-aware provider routing"
 **Phase:** B — Terminal Productization
 
 **Files:**
+
 - Modify: `crates/heiwa_repl/src/status_line.rs`
 - Create: `crates/heiwa_repl/src/telemetry.rs`
 - Create: `crates/heiwa_repl/tests/telemetry_pane.rs`
@@ -731,6 +764,7 @@ git commit -m "feat: add device-aware provider routing"
 - [ ] **Step 1: Write failing telemetry tests**
 
 Cover:
+
 - footer rendering
 - live counters
 - provider/model display
@@ -750,6 +784,7 @@ Expected: FAIL because the telemetry pane does not exist.
 - [ ] **Step 3: Implement the footer and `/telemetry` pane**
 
 Support configurable views for:
+
 - session
 - provider
 - model
@@ -784,6 +819,7 @@ git commit -m "feat: add heiwa telemetry pane"
 **Phase:** C — Compounding Workflows
 
 **Files:**
+
 - Modify: `crates/heiwa_loop/src/lib.rs`
 - Create: `crates/heiwa_loop/src/engine.rs`
 - Create: `crates/heiwa_loop/src/policy.rs`
@@ -798,6 +834,7 @@ git commit -m "feat: add heiwa telemetry pane"
 - [ ] **Step 1: Write failing loop tests**
 
 Cover:
+
 - bounded iteration count
 - budget stop
 - provider/device retargeting
@@ -817,6 +854,7 @@ Expected: FAIL because the loop engine does not exist.
 - [ ] **Step 3: Implement the bounded loop engine**
 
 The engine must support:
+
 - plan
 - execute
 - critique
@@ -851,6 +889,7 @@ git commit -m "feat: add bounded heiwa loop workflow"
 **Phase:** C — Compounding Workflows
 
 **Files:**
+
 - Create: `crates/heiwa_knowledge/Cargo.toml`
 - Create: `crates/heiwa_knowledge/src/lib.rs`
 - Create: `crates/heiwa_knowledge/src/source.rs`
@@ -866,6 +905,7 @@ git commit -m "feat: add bounded heiwa loop workflow"
 - [ ] **Step 1: Write failing knowledge-pipe tests**
 
 Model the Karpathy-inspired pipe:
+
 - sources
 - raw evidence
 - wiki knowledge layer
@@ -885,6 +925,7 @@ Expected: FAIL because the crate and flow do not exist.
 - [ ] **Step 3: Implement the minimal knowledge pipe**
 
 Start with:
+
 - source capture
 - raw evidence store
 - wiki/article synthesis
@@ -895,6 +936,7 @@ Keep this local-first and artifact-backed.
 - [ ] **Step 4: Wire the loop engine to the knowledge pipe**
 
 The loop should be able to compound knowledge safely:
+
 - read sources
 - store evidence
 - synthesize wiki nodes
@@ -922,6 +964,7 @@ git commit -m "feat: add heiwa knowledge pipe"
 **Phase:** B — Terminal Productization
 
 **Files:**
+
 - Modify: `apps/heiwa_cli/bin/heiwa`
 - Modify: `packages/heiwa_cli/heiwa_cli/__main__.py`
 - Modify: `packages/heiwa_cli/heiwa_cli/repl.py`
@@ -936,6 +979,7 @@ git commit -m "feat: add heiwa knowledge pipe"
 - [ ] **Step 1: Write a failing product smoke test**
 
 Cover:
+
 - `heiwa` launches the Rust shell by default
 - Python CLI remains invokable only as a compatibility path
 - current install/auth/doctor/repl flows still work
@@ -953,6 +997,7 @@ Make `heiwa` invoke the new Rust product surface by default.
 - [ ] **Step 4: Bound Python to compatibility roles**
 
 Python may remain for:
+
 - compatibility wrappers
 - migration helpers
 - specific package lanes not yet migrated
@@ -962,6 +1007,7 @@ Python must stop being the primary CLI authority.
 - [ ] **Step 5: Update docs and product framing**
 
 Make repo docs reflect the truth:
+
 - `heiwa` is the product
 - `/code` is deferred
 - web is not required for core product use
@@ -1035,6 +1081,7 @@ rg -n "prompt_toolkit|rich|heiwa_cli\\.repl|heiwa_cli\\.commands|heiwa_cli\\.sta
 ```
 
 Expected:
+
 - all Rust tests pass
 - Python compatibility tests pass
 - TypeScript workspace still typechecks
@@ -1045,6 +1092,7 @@ Expected:
 Start with **Task 1**, then continue through **Task 2**, **Task 3**, **Task 6**, and **Task 7** only.
 
 Do not begin:
+
 - PTY/session daemon UX
 - REPL polish
 - telemetry pane

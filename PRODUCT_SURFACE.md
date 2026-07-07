@@ -7,115 +7,115 @@
 
 ## Classes
 
-| Class | Meaning |
-| --- | --- |
-| `product` | Active surfaces shipping in `heiwa`, companion runtime UX, repo release, or maintained sub-products |
-| `generated` | Code or lockfiles emitted from a registered generator, package manager, or schema source |
-| `legacy` | Old surfaces kept for migration/reference; not part of the public product contract |
-| `reference` | Plans, design docs, audits, ADRs, continuity notes, or historical context |
-| `archive` | Frozen snapshots or pointers to work no longer active in this repo |
-| `vendored` | Third-party code copied into the repo |
-| `runtime-artifact` | Logs, caches, spools, tmp data, local run output; should trend to zero tracked LOC |
+| Class              | Meaning                                                                                             |
+| ------------------ | --------------------------------------------------------------------------------------------------- |
+| `product`          | Active surfaces shipping in `heiwa`, companion runtime UX, repo release, or maintained sub-products |
+| `generated`        | Code or lockfiles emitted from a registered generator, package manager, or schema source            |
+| `legacy`           | Old surfaces kept for migration/reference; not part of the public product contract                  |
+| `reference`        | Plans, design docs, audits, ADRs, continuity notes, or historical context                           |
+| `archive`          | Frozen snapshots or pointers to work no longer active in this repo                                  |
+| `vendored`         | Third-party code copied into the repo                                                               |
+| `runtime-artifact` | Logs, caches, spools, tmp data, local run output; should trend to zero tracked LOC                  |
 
 ## Path To Class
 
 Longest prefix wins. Put narrower paths above broader parents when a child has a different class.
 
-| Path | Class |
-| --- | --- |
+| Path                                 | Class            |
+| ------------------------------------ | ---------------- |
 | `legacy/apps/heiwa_cli/runtime/logs` | runtime-artifact |
-| `legacy` | legacy |
-| `archive` | archive |
-| `vendor` | vendored |
-| `apps/heiwa_shell` | product |
-| `apps/heiwa_core` | product |
-| `apps/heiwa_app` | product |
-| `apps/heiwa_orchestrator` | product |
-| `apps/heiwa_trading` | product |
-| `legacy/apps/heiwa_hub` | legacy |
-| `legacy/apps/heiwa_cli` | legacy |
-| `legacy/apps/heiwa_limbs` | legacy |
-| `archive/apps/heiwa_dj` | archive |
-| `apps/__init__.py` | legacy |
-| `crates` | product |
-| `packages/heiwa_skills` | product |
-| `packages/heiwa_bindings` | generated |
-| `packages/heiwa_sdk` | product |
-| `packages/heiwa_protocol` | product |
-| `packages/heiwa_cli` | product |
-| `packages/heiwa_identity` | product |
-| `legacy/packages/heiwa_skills` | legacy |
-| `legacy/packages/heiwa_cognition` | legacy |
-| `legacy/packages/heiwa_ui` | legacy |
-| `packages/heiwa_knowledge` | legacy |
-| `packages/__init__.py` | product |
-| `runtime/python` | product |
-| `runtime/fleets` | runtime-artifact |
-| `runtime/spool` | runtime-artifact |
-| `runtime/logs` | runtime-artifact |
-| `connectors` | product |
-| `docs/superpowers` | reference |
-| `docs/design` | reference |
-| `docs/audit` | reference |
-| `docs/enterprise` | reference |
-| `docs/standards` | product |
-| `docs` | product |
-| `ops/research` | reference |
-| `ops/docs_and_deps` | vendored |
-| `ops` | product |
-| `scripts` | product |
-| `tests` | product |
-| `infra` | product |
-| `config` | product |
-| `bin` | product |
-| `policies` | product |
-| `memory` | reference |
-| `plans` | reference |
-| `.claude/agents` | generated |
-| `.claude` | product |
-| `.codex` | product |
-| `.gemini/agents` | generated |
-| `.gemini` | product |
-| `.github` | product |
-| `.ollama` | product |
-| `.openclaw` | legacy |
-| `.wrangler` | runtime-artifact |
-| `Cargo.lock` | generated |
-| `Cargo.toml` | product |
-| `package-lock.json` | generated |
-| `package.json` | product |
-| `uv.lock` | generated |
-| `pyproject.toml` | product |
-| `requirements.txt` | product |
-| `README.md` | product |
-| `LICENSE` | product |
-| `HEIWA.md` | product |
-| `HEIWA_LTD_BLUEPRINT.md` | reference |
-| `AGENTS.md` | product |
-| `CLAUDE.md` | product |
-| `GEMINI.md` | product |
-| `IDENTITY.md` | reference |
-| `SOUL.md` | reference |
-| `SECURITY.md` | product |
-| `CONTRIBUTING.md` | product |
-| `CONTRIBUTORS.md` | product |
-| `CODE_OF_CONDUCT.md` | product |
-| `BUILD_MATRIX.md` | reference |
-| `PRODUCT_SURFACE.md` | product |
-| `mkdocs.yml` | product |
-| `biome.json` | product |
-| `tsconfig.base.json` | product |
-| `rust-toolchain.toml` | product |
-| `conftest.py` | product |
-| `justfile` | product |
-| `.dockerignore` | product |
-| `.env.example` | product |
-| `.geminiignore` | product |
-| `.gitignore` | product |
-| `.mcp.json` | product |
-| `.node-version` | product |
-| `.nvmrc` | product |
-| `.pyre_configuration` | product |
+| `legacy`                             | legacy           |
+| `archive`                            | archive          |
+| `vendor`                             | vendored         |
+| `apps/heiwa_shell`                   | product          |
+| `apps/heiwa_core`                    | product          |
+| `apps/heiwa_app`                     | product          |
+| `apps/heiwa_orchestrator`            | product          |
+| `apps/heiwa_trading`                 | product          |
+| `legacy/apps/heiwa_hub`              | legacy           |
+| `legacy/apps/heiwa_cli`              | legacy           |
+| `legacy/apps/heiwa_limbs`            | legacy           |
+| `archive/apps/heiwa_dj`              | archive          |
+| `apps/__init__.py`                   | legacy           |
+| `crates`                             | product          |
+| `packages/heiwa_skills`              | product          |
+| `packages/heiwa_bindings`            | generated        |
+| `packages/heiwa_sdk`                 | product          |
+| `packages/heiwa_protocol`            | product          |
+| `packages/heiwa_cli`                 | product          |
+| `packages/heiwa_identity`            | product          |
+| `legacy/packages/heiwa_skills`       | legacy           |
+| `legacy/packages/heiwa_cognition`    | legacy           |
+| `legacy/packages/heiwa_ui`           | legacy           |
+| `packages/heiwa_knowledge`           | legacy           |
+| `packages/__init__.py`               | product          |
+| `runtime/python`                     | product          |
+| `runtime/fleets`                     | runtime-artifact |
+| `runtime/spool`                      | runtime-artifact |
+| `runtime/logs`                       | runtime-artifact |
+| `connectors`                         | product          |
+| `docs/superpowers`                   | reference        |
+| `docs/design`                        | reference        |
+| `docs/audit`                         | reference        |
+| `docs/enterprise`                    | reference        |
+| `docs/standards`                     | product          |
+| `docs`                               | product          |
+| `ops/research`                       | reference        |
+| `ops/docs_and_deps`                  | vendored         |
+| `ops`                                | product          |
+| `scripts`                            | product          |
+| `tests`                              | product          |
+| `infra`                              | product          |
+| `config`                             | product          |
+| `bin`                                | product          |
+| `policies`                           | product          |
+| `memory`                             | reference        |
+| `plans`                              | reference        |
+| `.claude/agents`                     | generated        |
+| `.claude`                            | product          |
+| `.codex`                             | product          |
+| `.gemini/agents`                     | generated        |
+| `.gemini`                            | product          |
+| `.github`                            | product          |
+| `.ollama`                            | product          |
+| `.openclaw`                          | legacy           |
+| `.wrangler`                          | runtime-artifact |
+| `Cargo.lock`                         | generated        |
+| `Cargo.toml`                         | product          |
+| `package-lock.json`                  | generated        |
+| `package.json`                       | product          |
+| `uv.lock`                            | generated        |
+| `pyproject.toml`                     | product          |
+| `requirements.txt`                   | product          |
+| `README.md`                          | product          |
+| `LICENSE`                            | product          |
+| `HEIWA.md`                           | product          |
+| `HEIWA_LTD_BLUEPRINT.md`             | reference        |
+| `AGENTS.md`                          | product          |
+| `CLAUDE.md`                          | product          |
+| `GEMINI.md`                          | product          |
+| `IDENTITY.md`                        | reference        |
+| `SOUL.md`                            | reference        |
+| `SECURITY.md`                        | product          |
+| `CONTRIBUTING.md`                    | product          |
+| `CONTRIBUTORS.md`                    | product          |
+| `CODE_OF_CONDUCT.md`                 | product          |
+| `BUILD_MATRIX.md`                    | reference        |
+| `PRODUCT_SURFACE.md`                 | product          |
+| `mkdocs.yml`                         | product          |
+| `biome.json`                         | product          |
+| `tsconfig.base.json`                 | product          |
+| `rust-toolchain.toml`                | product          |
+| `conftest.py`                        | product          |
+| `justfile`                           | product          |
+| `.dockerignore`                      | product          |
+| `.env.example`                       | product          |
+| `.geminiignore`                      | product          |
+| `.gitignore`                         | product          |
+| `.mcp.json`                          | product          |
+| `.node-version`                      | product          |
+| `.nvmrc`                             | product          |
+| `.pyre_configuration`                | product          |
 
 ## Notes
 

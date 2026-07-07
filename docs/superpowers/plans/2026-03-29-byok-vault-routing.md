@@ -13,6 +13,7 @@
 ### Task 1: Protocol & Ingress Ownership
 
 **Files:**
+
 - Modify: `packages/heiwa_protocol/heiwa_protocol/routing.py`
 - Modify: `apps/heiwa_hub/mcp_server.py`
 - Test: `tests/test_byok_routing.py`
@@ -54,6 +55,7 @@ def test_mcp_task_ingress_carries_owner_id():
 ### Task 2: Identity Model & Relink Path
 
 **Files:**
+
 - Modify: `apps/heiwa_hub/auth.py`
 - Modify: `packages/heiwa_cognition/heiwa_cognition/router.py`
 - Modify: `packages/heiwa_cognition/heiwa_cognition/llm.py`
@@ -87,6 +89,7 @@ def is_system_operator(owner_id: str) -> bool:
 ### Task 3: Environment Scrubbing
 
 **Files:**
+
 - Modify: `packages/heiwa_sdk/heiwa_sdk/tool_mesh.py`
 
 - [ ] **Step 1: Define `SAFE_ENV_ALLOWLIST`.**
@@ -111,6 +114,7 @@ SAFE_ENV_ALLOWLIST = ['PATH', 'HOME', 'USER', 'LANG', 'LC_ALL', 'TERM', 'PYTHONP
 ### Task 4: BLOCKED_AUTH Propagation
 
 **Files:**
+
 - Modify: `packages/heiwa_sdk/heiwa_sdk/heiwaclaw/gateway.py`
 - Modify: `apps/heiwa_hub/agents/heiwaclaw.py`
 

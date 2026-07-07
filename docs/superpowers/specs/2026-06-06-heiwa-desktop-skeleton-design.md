@@ -46,8 +46,8 @@ the mid-quality cockpit code.
   TypeScript, Svelte, React, Leptos/Yew, or another renderer. The implementation
   plan must lock one deliberately.
 - **Runtime authority:** `Heiwa.app` is the display/input shell over the runtime;
-  the native wrapper replaces today's launcher bundle *"without changing runtime
-  authority"* (`HEIWA.md:140`, installed at `~/.heiwa/app/Heiwa.app`).
+  the native wrapper replaces today's launcher bundle _"without changing runtime
+  authority"_ (`HEIWA.md:140`, installed at `~/.heiwa/app/Heiwa.app`).
 - **Bridge target:** the runtime app server binds `127.0.0.1:7474`
   (`apps/heiwa_shell/src/cmd/app.rs:21`, `DEFAULT_PORT = 7474`) and serves a
   JSON `/api/v1/*` surface over plain HTTP (a hand-rolled method+path match loop,
@@ -57,17 +57,17 @@ the mid-quality cockpit code.
 
 Read endpoints today (`apps/heiwa_shell/src/cmd/app.rs`):
 
-| Endpoint | Feeds (future vertical) |
-| --- | --- |
-| `GET /api/v1/runtime/snapshot` | shell status canary |
-| `GET /api/v1/resource` | Dashboard → model scorecard (machine resources) |
-| `GET /api/v1/providers` | Dashboard → 3rd-party accounts |
-| `GET /api/v1/routes`, `/rate-groups`, `/capabilities` | Dashboard → DREX routing |
-| `GET /api/v1/memory` | Dashboard → memory access (currently empty read model) |
-| `GET /api/v1/agents`, `/approvals`, `/approvals/summary`, `/missions` | Agents & sandboxes |
-| `GET /api/v1/life/today`, `/life/freshness` | Calendar / Today |
-| `GET /api/v1/goals`, `/history`, `/traces`, `/hooks`, `/crons`, `/inbox`, `/session`, `/compress/summary`, `/cells/catalog` | various |
-| `POST /api/v1/repl` | Chat (execute a turn) |
+| Endpoint                                                                                                                    | Feeds (future vertical)                                |
+| --------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------ |
+| `GET /api/v1/runtime/snapshot`                                                                                              | shell status canary                                    |
+| `GET /api/v1/resource`                                                                                                      | Dashboard → model scorecard (machine resources)        |
+| `GET /api/v1/providers`                                                                                                     | Dashboard → 3rd-party accounts                         |
+| `GET /api/v1/routes`, `/rate-groups`, `/capabilities`                                                                       | Dashboard → DREX routing                               |
+| `GET /api/v1/memory`                                                                                                        | Dashboard → memory access (currently empty read model) |
+| `GET /api/v1/agents`, `/approvals`, `/approvals/summary`, `/missions`                                                       | Agents & sandboxes                                     |
+| `GET /api/v1/life/today`, `/life/freshness`                                                                                 | Calendar / Today                                       |
+| `GET /api/v1/goals`, `/history`, `/traces`, `/hooks`, `/crons`, `/inbox`, `/session`, `/compress/summary`, `/cells/catalog` | various                                                |
+| `POST /api/v1/repl`                                                                                                         | Chat (execute a turn)                                  |
 
 **Gap:** no `/api/v1/trading`. `heiwa_trading` is a separate app; the Trading
 tier is a placeholder until a trading endpoint exists. Noted, not solved here.

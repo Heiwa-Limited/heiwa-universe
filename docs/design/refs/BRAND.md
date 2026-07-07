@@ -39,9 +39,9 @@ Heiwa is a local-first operator runtime with four attached capabilities:
 
 Public compression:
 
-> `heiwa` is the installed operator surface.  
-> DREX is the kernel.  
-> SpacetimeDB adjudicates and records.  
+> `heiwa` is the installed operator surface.\
+> DREX is the kernel.\
+> SpacetimeDB adjudicates and records.\
 > Providers still own inference.
 
 ## What Heiwa Is Not

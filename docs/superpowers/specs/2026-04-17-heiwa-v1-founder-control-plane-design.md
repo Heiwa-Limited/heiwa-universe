@@ -30,15 +30,15 @@ Heiwa v1 is secure personal AI gateway for founders and operators: `SvelteKit` o
 
 ## 3. Stack Call
 
-| Layer | Decision | Reason |
-| --- | --- | --- |
-| Web app | `SvelteKit` | Matches current web migration direction and avoids React/Next split-brain. |
-| Human auth | `WorkOS AuthKit` | Official SvelteKit SDK, passkeys, hosted auth, enterprise slope. |
-| Runtime authority | `SpacetimeDB` | Already canonical Heiwa authority/evidence plane. |
-| Control/gateway/policy | `Rust` | Best fit for token verification, provider adapters, routing, worker registration, and STDB integration. |
-| System secrets | `Infisical` | Better machine identity and audit model than config-only secret distribution. |
-| Operator-local secrets | macOS Keychain | Existing Heiwa path on MacBook already present. |
-| Compatibility layer | Python | Freeze core expansion; maintain only where migration not yet landed. |
+| Layer                  | Decision         | Reason                                                                                                  |
+| ---------------------- | ---------------- | ------------------------------------------------------------------------------------------------------- |
+| Web app                | `SvelteKit`      | Matches current web migration direction and avoids React/Next split-brain.                              |
+| Human auth             | `WorkOS AuthKit` | Official SvelteKit SDK, passkeys, hosted auth, enterprise slope.                                        |
+| Runtime authority      | `SpacetimeDB`    | Already canonical Heiwa authority/evidence plane.                                                       |
+| Control/gateway/policy | `Rust`           | Best fit for token verification, provider adapters, routing, worker registration, and STDB integration. |
+| System secrets         | `Infisical`      | Better machine identity and audit model than config-only secret distribution.                           |
+| Operator-local secrets | macOS Keychain   | Existing Heiwa path on MacBook already present.                                                         |
+| Compatibility layer    | Python           | Freeze core expansion; maintain only where migration not yet landed.                                    |
 
 ## 4. Trust Boundary Model
 
@@ -83,14 +83,14 @@ Telemetry plane only:
 
 ## 5. Authority Map
 
-| System | Owns |
-| --- | --- |
-| `WorkOS` | Human identity, passkeys, OIDC, auth source-of-truth |
-| `SvelteKit` | Auth callback handling, secure human session cookie, dashboard/admin UX |
-| `Rust` | Machine registration, token mint/verify, provider adapters, routing, policy enforcement |
-| `SpacetimeDB` | Canonical Heiwa state, audit records, routing records, worker records, usage records |
-| `Infisical` | System secrets, machine identity auth into secret plane, secret access audit |
-| macOS Keychain | Operator-local secrets on MacBook |
+| System         | Owns                                                                                    |
+| -------------- | --------------------------------------------------------------------------------------- |
+| `WorkOS`       | Human identity, passkeys, OIDC, auth source-of-truth                                    |
+| `SvelteKit`    | Auth callback handling, secure human session cookie, dashboard/admin UX                 |
+| `Rust`         | Machine registration, token mint/verify, provider adapters, routing, policy enforcement |
+| `SpacetimeDB`  | Canonical Heiwa state, audit records, routing records, worker records, usage records    |
+| `Infisical`    | System secrets, machine identity auth into secret plane, secret access audit            |
+| macOS Keychain | Operator-local secrets on MacBook                                                       |
 
 Rule: one concern, one authority. No dual-write auth truth. No browser-visible privileged tokens.
 
@@ -401,16 +401,16 @@ Why first:
 
 ### 15.3 ASVS L2 Baseline Mapping
 
-| Area | v1 control |
-| --- | --- |
-| Authentication | WorkOS passkeys/OIDC, secure callback, step-up auth |
+| Area               | v1 control                                                                  |
+| ------------------ | --------------------------------------------------------------------------- |
+| Authentication     | WorkOS passkeys/OIDC, secure callback, step-up auth                         |
 | Session management | server-issued secure cookies, short TTL, no fragment/localStorage authority |
-| Access control | workspace membership + role checks in Rust and SvelteKit server layer |
-| Cryptography | encrypted credential storage, Keychain for local operator secrets |
-| Secrets management | Infisical for system secrets, vault path for tenant creds |
-| Logging | append-only auth/admin/credential/routing events in STDB |
-| Data protection | provider keys never exposed to frontend |
-| Architecture | separate human auth and machine auth trust paths |
+| Access control     | workspace membership + role checks in Rust and SvelteKit server layer       |
+| Cryptography       | encrypted credential storage, Keychain for local operator secrets           |
+| Secrets management | Infisical for system secrets, vault path for tenant creds                   |
+| Logging            | append-only auth/admin/credential/routing events in STDB                    |
+| Data protection    | provider keys never exposed to frontend                                     |
+| Architecture       | separate human auth and machine auth trust paths                            |
 
 ## 16. Rollout Plan
 

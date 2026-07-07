@@ -12,14 +12,14 @@
 
 ## File Structure
 
-| Path | Action | Responsibility |
-| --- | --- | --- |
-| `PRODUCT_SURFACE.md` | Create (repo root) | Canonical class table; referenced from `HEIWA.md` |
-| `scripts/audit_product_surface.sh` | Create | Reads class table, walks tracked files, emits per-class LOC |
-| `scripts/lib/parse_product_surface.sh` | Create | Pure parser fn; sourced by audit + tests |
-| `tests/audit/test_audit_product_surface.bats` | Create | Bats tests for parser + script behavior |
-| `tests/audit/fixtures/sample_surface.md` | Create | Minimal fixture for parser tests |
-| `HEIWA.md` | Modify (`apps/heiwa_shell` table area) | Add 1-line link to `PRODUCT_SURFACE.md` |
+| Path                                          | Action                                 | Responsibility                                              |
+| --------------------------------------------- | -------------------------------------- | ----------------------------------------------------------- |
+| `PRODUCT_SURFACE.md`                          | Create (repo root)                     | Canonical class table; referenced from `HEIWA.md`           |
+| `scripts/audit_product_surface.sh`            | Create                                 | Reads class table, walks tracked files, emits per-class LOC |
+| `scripts/lib/parse_product_surface.sh`        | Create                                 | Pure parser fn; sourced by audit + tests                    |
+| `tests/audit/test_audit_product_surface.bats` | Create                                 | Bats tests for parser + script behavior                     |
+| `tests/audit/fixtures/sample_surface.md`      | Create                                 | Minimal fixture for parser tests                            |
+| `HEIWA.md`                                    | Modify (`apps/heiwa_shell` table area) | Add 1-line link to `PRODUCT_SURFACE.md`                     |
 
 Five new files plus one small `HEIWA.md` edit. Self-contained, no Cargo/Python dep changes.
 
@@ -28,6 +28,7 @@ Five new files plus one small `HEIWA.md` edit. Self-contained, no Cargo/Python d
 ### Task 1: Create the fixture for parser tests
 
 **Files:**
+
 - Create: `tests/audit/fixtures/sample_surface.md`
 
 - [ ] **Step 1: Write the fixture file**
@@ -35,12 +36,12 @@ Five new files plus one small `HEIWA.md` edit. Self-contained, no Cargo/Python d
 ```markdown
 # Sample Product Surface
 
-| Path | Class |
-| --- | --- |
-| `crates/example` | product |
-| `apps/example_legacy` | legacy |
+| Path                   | Class     |
+| ---------------------- | --------- |
+| `crates/example`       | product   |
+| `apps/example_legacy`  | legacy    |
 | `packages/example_gen` | generated |
-| `docs/example_ref` | reference |
+| `docs/example_ref`     | reference |
 ```
 
 - [ ] **Step 2: Verify the file exists**
@@ -60,6 +61,7 @@ git commit -m "test: add product-surface parser fixture"
 ### Task 2: Write the failing parser test
 
 **Files:**
+
 - Create: `tests/audit/test_audit_product_surface.bats`
 
 - [ ] **Step 1: Install bats-core if missing**
@@ -112,6 +114,7 @@ git commit -m "test: add failing parser tests for product surface"
 ### Task 3: Implement the parser to pass tests
 
 **Files:**
+
 - Create: `scripts/lib/parse_product_surface.sh`
 
 - [ ] **Step 1: Implement minimal parser**
@@ -159,6 +162,7 @@ git commit -m "feat: implement product-surface markdown parser"
 ### Task 4: Write the failing audit-script test
 
 **Files:**
+
 - Modify: `tests/audit/test_audit_product_surface.bats:end`
 
 - [ ] **Step 1: Append the audit-script test**
@@ -195,6 +199,7 @@ git commit -m "test: add failing audit-script integration tests"
 ### Task 5: Create the canonical PRODUCT_SURFACE.md
 
 **Files:**
+
 - Create: `PRODUCT_SURFACE.md` (repo root)
 
 - [ ] **Step 1: Write the surface document**
@@ -209,56 +214,56 @@ git commit -m "test: add failing audit-script integration tests"
 
 ## Classes
 
-| Class | Meaning |
-| --- | --- |
-| `product` | Active surfaces shipping in `heiwa` binary, companion app, or sub-products |
-| `generated` | Code emitted from a registered generator (bindings, schema-derived) |
-| `legacy` | Old surfaces kept for migration/reference; not in product contract |
-| `reference` | Plans, design docs, audits, ADRs |
-| `archive` | Frozen snapshots of removed work |
-| `vendored` | Third-party code copied in (rare) |
-| `runtime-artifact` | Logs, caches, tmp data — must not be tracked |
+| Class              | Meaning                                                                    |
+| ------------------ | -------------------------------------------------------------------------- |
+| `product`          | Active surfaces shipping in `heiwa` binary, companion app, or sub-products |
+| `generated`        | Code emitted from a registered generator (bindings, schema-derived)        |
+| `legacy`           | Old surfaces kept for migration/reference; not in product contract         |
+| `reference`        | Plans, design docs, audits, ADRs                                           |
+| `archive`          | Frozen snapshots of removed work                                           |
+| `vendored`         | Third-party code copied in (rare)                                          |
+| `runtime-artifact` | Logs, caches, tmp data — must not be tracked                               |
 
 ## Path → class table
 
-| Path | Class |
-| --- | --- |
-| `crates` | product |
-| `apps/heiwa_shell` | product |
-| `apps/heiwa_core` | product |
-| `apps/heiwa_app` | product |
-| `apps/heiwa_orchestrator` | product |
-| `apps/heiwa_trading` | product |
-| `apps/heiwa_hub` | legacy |
-| `apps/heiwa_cli` | legacy |
-| `apps/heiwa_limbs` | legacy |
-| `apps/heiwa_dj` | archive |
-| `packages/heiwa_sdk` | product |
-| `packages/heiwa_protocol` | product |
-| `packages/heiwa_cli` | product |
-| `packages/heiwa_identity` | product |
-| `packages/heiwa_bindings` | generated |
-| `packages/heiwa_skills` | legacy |
-| `packages/heiwa_cognition` | legacy |
-| `packages/heiwa_ui` | legacy |
-| `docs/superpowers` | reference |
-| `docs/design` | reference |
-| `docs/audit` | reference |
-| `docs/enterprise` | product |
-| `docs/standards` | product |
-| `docs` | product |
-| `ops` | product |
-| `scripts` | product |
-| `infra` | product |
-| `config` | product |
-| `runtime` | runtime-artifact |
-| `bin` | product |
-| `node` | legacy |
-| `policies` | product |
-| `tests` | product |
-| `memory` | reference |
-| `plans` | reference |
-| `site` | generated |
+| Path                       | Class            |
+| -------------------------- | ---------------- |
+| `crates`                   | product          |
+| `apps/heiwa_shell`         | product          |
+| `apps/heiwa_core`          | product          |
+| `apps/heiwa_app`           | product          |
+| `apps/heiwa_orchestrator`  | product          |
+| `apps/heiwa_trading`       | product          |
+| `apps/heiwa_hub`           | legacy           |
+| `apps/heiwa_cli`           | legacy           |
+| `apps/heiwa_limbs`         | legacy           |
+| `apps/heiwa_dj`            | archive          |
+| `packages/heiwa_sdk`       | product          |
+| `packages/heiwa_protocol`  | product          |
+| `packages/heiwa_cli`       | product          |
+| `packages/heiwa_identity`  | product          |
+| `packages/heiwa_bindings`  | generated        |
+| `packages/heiwa_skills`    | legacy           |
+| `packages/heiwa_cognition` | legacy           |
+| `packages/heiwa_ui`        | legacy           |
+| `docs/superpowers`         | reference        |
+| `docs/design`              | reference        |
+| `docs/audit`               | reference        |
+| `docs/enterprise`          | product          |
+| `docs/standards`           | product          |
+| `docs`                     | product          |
+| `ops`                      | product          |
+| `scripts`                  | product          |
+| `infra`                    | product          |
+| `config`                   | product          |
+| `runtime`                  | runtime-artifact |
+| `bin`                      | product          |
+| `node`                     | legacy           |
+| `policies`                 | product          |
+| `tests`                    | product          |
+| `memory`                   | reference        |
+| `plans`                    | reference        |
+| `site`                     | generated        |
 
 ## Notes on specific paths
 
@@ -290,6 +295,7 @@ git commit -m "docs: add canonical PRODUCT_SURFACE.md class table"
 ### Task 6: Implement the audit script to pass tests
 
 **Files:**
+
 - Create: `scripts/audit_product_surface.sh`
 
 - [ ] **Step 1: Write the audit script**
@@ -381,6 +387,7 @@ git commit -m "feat: add audit_product_surface.sh"
 ### Task 7: Triage `unclassified` LOC down to zero
 
 **Files:**
+
 - Modify: `PRODUCT_SURFACE.md` (add missing prefixes as needed)
 
 - [ ] **Step 1: Identify unclassified files**
@@ -408,6 +415,7 @@ Expected: A list of files not covered by any prefix. Common candidates: top-leve
 Edit `PRODUCT_SURFACE.md` and add (in the table) any missing top-level `*.md`, `*.toml`, `*.json`, `*.lock` entries with class `product` (these are workspace metadata) or `reference` (READMEs). Add specific paths only — no wildcard fallback.
 
 Example additions:
+
 ```markdown
 | `Cargo.toml` | product |
 | `Cargo.lock` | generated |
@@ -455,6 +463,7 @@ git commit -m "docs: classify all tracked top-level files in PRODUCT_SURFACE.md"
 ### Task 8: Link from HEIWA.md
 
 **Files:**
+
 - Modify: `HEIWA.md` (around the "Canonical Product Identity" section, ~line 120)
 
 - [ ] **Step 1: Read current section**
@@ -467,7 +476,6 @@ Expected: Line ~120.
 Edit `HEIWA.md` to add immediately after the canonical-identity table closing line:
 
 ```markdown
-
 > See [`PRODUCT_SURFACE.md`](PRODUCT_SURFACE.md) for the path-by-path class table that is the input to repo-hygiene CI.
 ```
 

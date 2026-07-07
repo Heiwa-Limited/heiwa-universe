@@ -5,6 +5,7 @@
 **Goal:** Refactor the `heiwaclaw.py` gateway into a modular package with specialized adapters for each provider, improving maintainability and making it easier to add new execution engines (like ACP).
 
 **Architecture:**
+
 - `packages/heiwa_sdk/heiwa_sdk/heiwaclaw/`: New package directory.
 - `gateway.py`: Main entry point (the dispatcher).
 - `adapters/base.py`: Abstract Base Class for all adapters.

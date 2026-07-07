@@ -38,44 +38,44 @@
 
 ### New files
 
-| File | Responsibility |
-|------|---------------|
-| `packages/heiwa_protocol/heiwa_protocol/drex.py` | Shared DREX protocol objects, enums, serialization helpers |
-| `packages/heiwa_cognition/heiwa_cognition/drex.py` | DREX vector construction, score calculation, tie handling, and failure classification |
-| `config/swarm/drex_policy.json` | Versioned default DREX axes, weights, modifiers, thresholds, and calibration mode |
-| `apps/heiwa_hub/tests/test_drex_protocol.py` | Protocol-level tests for DREX dataclasses and serialization |
-| `apps/heiwa_hub/tests/test_drex_scoring.py` | Unit tests for DREX vector construction, modifiers, and tier scoring |
+| File                                                 | Responsibility                                                                          |
+| ---------------------------------------------------- | --------------------------------------------------------------------------------------- |
+| `packages/heiwa_protocol/heiwa_protocol/drex.py`     | Shared DREX protocol objects, enums, serialization helpers                              |
+| `packages/heiwa_cognition/heiwa_cognition/drex.py`   | DREX vector construction, score calculation, tie handling, and failure classification   |
+| `config/swarm/drex_policy.json`                      | Versioned default DREX axes, weights, modifiers, thresholds, and calibration mode       |
+| `apps/heiwa_hub/tests/test_drex_protocol.py`         | Protocol-level tests for DREX dataclasses and serialization                             |
+| `apps/heiwa_hub/tests/test_drex_scoring.py`          | Unit tests for DREX vector construction, modifiers, and tier scoring                    |
 | `apps/heiwa_hub/tests/test_drex_failure_taxonomy.py` | Unit tests for DREX failure modes, router fallback behavior, and STDB persistence calls |
 
 ### Modified files
 
-| File | Change |
-|------|--------|
-| `packages/heiwa_protocol/heiwa_protocol/__init__.py` | Export DREX protocol objects |
-| `packages/heiwa_protocol/heiwa_protocol/routing.py` | Add DREX payload fields to `BrokerRouteResult` |
-| `packages/heiwa_cognition/heiwa_cognition/__init__.py` | Export DREX scorer APIs |
-| `packages/heiwa_cognition/heiwa_cognition/router.py` | Attach DREX to `ComputeRoute` / `RoutedPlan`, run score evaluation, enforce DREX-tier application, and record DREX telemetry/failures |
-| `apps/heiwa_hub/cognition/__init__.py` | Re-export DREX objects through the hub compatibility surface |
-| `apps/heiwa_hub/spacetimedb/src/lib.rs` | Add `drex_decisions` and `drex_failures` tables plus reducers |
-| `packages/heiwa_sdk/heiwa_sdk/spacetimedb.py` | Add DREX decision/failure reducer helpers and query helpers |
-| `apps/heiwa_hub/tests/test_compute_router.py` | Assert DREX tiering does not break existing deterministic route expectations |
-| `apps/heiwa_hub/tests/test_compute_router_stdb.py` | Assert DREX fields are attached when STDB-backed tiers are used |
-| `apps/heiwa_hub/tests/test_phase3_integration.py` | Assert DREX decisions persist and failure records are emitted on fallback/escalation paths |
+| File                                                   | Change                                                                                                                                |
+| ------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------- |
+| `packages/heiwa_protocol/heiwa_protocol/__init__.py`   | Export DREX protocol objects                                                                                                          |
+| `packages/heiwa_protocol/heiwa_protocol/routing.py`    | Add DREX payload fields to `BrokerRouteResult`                                                                                        |
+| `packages/heiwa_cognition/heiwa_cognition/__init__.py` | Export DREX scorer APIs                                                                                                               |
+| `packages/heiwa_cognition/heiwa_cognition/router.py`   | Attach DREX to `ComputeRoute` / `RoutedPlan`, run score evaluation, enforce DREX-tier application, and record DREX telemetry/failures |
+| `apps/heiwa_hub/cognition/__init__.py`                 | Re-export DREX objects through the hub compatibility surface                                                                          |
+| `apps/heiwa_hub/spacetimedb/src/lib.rs`                | Add `drex_decisions` and `drex_failures` tables plus reducers                                                                         |
+| `packages/heiwa_sdk/heiwa_sdk/spacetimedb.py`          | Add DREX decision/failure reducer helpers and query helpers                                                                           |
+| `apps/heiwa_hub/tests/test_compute_router.py`          | Assert DREX tiering does not break existing deterministic route expectations                                                          |
+| `apps/heiwa_hub/tests/test_compute_router_stdb.py`     | Assert DREX fields are attached when STDB-backed tiers are used                                                                       |
+| `apps/heiwa_hub/tests/test_phase3_integration.py`      | Assert DREX decisions persist and failure records are emitted on fallback/escalation paths                                            |
 
 ### Deferred follow-on spec
 
-| File | Why it is deferred |
-|------|--------------------|
+| File                                                             | Why it is deferred                                                                              |
+| ---------------------------------------------------------------- | ----------------------------------------------------------------------------------------------- |
 | `docs/superpowers/specs/2026-04-01-drex-memory-policy-design.md` | Needed for `retain/fold/compact/project/discard`, but not required to make routing load-bearing |
 
 ### Deferred follow-on infrastructure work
 
-| Area | Why it is deferred |
-|------|--------------------|
+| Area                                                                                  | Why it is deferred                                                                                                                              |
+| ------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------- |
 | Rust-native scorer in `apps/heiwa_hub/spacetimedb/src/lib.rs` or a Rust routing layer | The first slice keeps scoring in Python to attach to the live router quickly; moving invariant-preserving DREX math into Rust is a second slice |
-| TypeScript/web exposure in `apps/heiwa_web/` | Current web surface is not yet the DREX inspection surface; typed dashboard objects can follow once routing decisions are stable |
-| Railway policy bundling and deployment docs | The first slice uses env/config fallback for policy loading; packaging the policy into deploy images is follow-on hardening |
-| Cloudflare/public reduction surfaces | Public edge projection should consume already-reduced state, not raw routing internals; not part of v1 |
+| TypeScript/web exposure in `apps/heiwa_web/`                                          | Current web surface is not yet the DREX inspection surface; typed dashboard objects can follow once routing decisions are stable                |
+| Railway policy bundling and deployment docs                                           | The first slice uses env/config fallback for policy loading; packaging the policy into deploy images is follow-on hardening                     |
+| Cloudflare/public reduction surfaces                                                  | Public edge projection should consume already-reduced state, not raw routing internals; not part of v1                                          |
 
 ### Rust port note
 
@@ -92,6 +92,7 @@ This is what allows Rust DREX routing to reason about TurboQuant-style KV compre
 ### Task 1: Add shared DREX protocol objects
 
 **Files:**
+
 - Create: `packages/heiwa_protocol/heiwa_protocol/drex.py`
 - Modify: `packages/heiwa_protocol/heiwa_protocol/__init__.py`
 - Test: `apps/heiwa_hub/tests/test_drex_protocol.py`
@@ -340,6 +341,7 @@ git commit -m "feat: add shared drex protocol types"
 ### Task 2: Add config-backed DREX scoring and calibration hooks
 
 **Files:**
+
 - Create: `packages/heiwa_cognition/heiwa_cognition/drex.py`
 - Create: `config/swarm/drex_policy.json`
 - Modify: `packages/heiwa_cognition/heiwa_cognition/__init__.py`
@@ -499,14 +501,14 @@ Heuristic guidance for `build_drex_vector()`:
 
 - Start from a deterministic preset table keyed by intent:
 
-| Intent family | scope | abstraction | context_span | execution_proximity | blast_radius | coordination_load | latency_pressure |
-|--------------|------:|------------:|-------------:|--------------------:|-------------:|------------------:|-----------------:|
-| `build`, `files` | 0.35 | 0.35 | 0.55 | 0.90 | 0.55 | 0.30 | 0.75 |
-| `audit`, `status_check` | 0.45 | 0.40 | 0.60 | 0.30 | 0.45 | 0.25 | 0.60 |
-| `research` | 0.70 | 0.80 | 0.85 | 0.20 | 0.40 | 0.65 | 0.30 |
-| `strategy` | 0.90 | 0.95 | 0.80 | 0.10 | 0.75 | 0.85 | 0.20 |
-| `deploy`, `operate`, `automate` | 0.75 | 0.60 | 0.65 | 0.65 | 0.90 | 0.70 | 0.70 |
-| default | 0.50 | 0.50 | 0.50 | 0.50 | 0.50 | 0.50 | 0.50 |
+| Intent family                   | scope | abstraction | context_span | execution_proximity | blast_radius | coordination_load | latency_pressure |
+| ------------------------------- | ----: | ----------: | -----------: | ------------------: | -----------: | ----------------: | ---------------: |
+| `build`, `files`                |  0.35 |        0.35 |         0.55 |                0.90 |         0.55 |              0.30 |             0.75 |
+| `audit`, `status_check`         |  0.45 |        0.40 |         0.60 |                0.30 |         0.45 |              0.25 |             0.60 |
+| `research`                      |  0.70 |        0.80 |         0.85 |                0.20 |         0.40 |              0.65 |             0.30 |
+| `strategy`                      |  0.90 |        0.95 |         0.80 |                0.10 |         0.75 |              0.85 |             0.20 |
+| `deploy`, `operate`, `automate` |  0.75 |        0.60 |         0.65 |                0.65 |         0.90 |              0.70 |             0.70 |
+| default                         |  0.50 |        0.50 |         0.50 |                0.50 |         0.50 |              0.50 |             0.50 |
 
 - Then apply bounded adjustments:
   - `risk=high|critical` increases `blast_radius` and `scope` by `+0.15`, capped at `1.0`
@@ -561,6 +563,7 @@ git commit -m "feat: add drex scoring policy"
 ### Task 3: Integrate DREX into the active router and route envelope
 
 **Files:**
+
 - Modify: `packages/heiwa_cognition/heiwa_cognition/router.py`
 - Modify: `packages/heiwa_protocol/heiwa_protocol/routing.py`
 - Modify: `apps/heiwa_hub/cognition/__init__.py`
@@ -700,6 +703,7 @@ git commit -m "feat: attach drex decisions to routing"
 ### Task 4: Persist DREX decisions and failures to STDB
 
 **Files:**
+
 - Modify: `apps/heiwa_hub/spacetimedb/src/lib.rs`
 - Modify: `packages/heiwa_sdk/heiwa_sdk/spacetimedb.py`
 - Modify: `packages/heiwa_sdk/heiwa_sdk/spacetimedb.py:record_route_decision`
@@ -894,6 +898,7 @@ git commit -m "feat: persist drex routing telemetry"
 ### Task 5: Verify DREX stays bounded and does not regress the current router
 
 **Files:**
+
 - Modify: `apps/heiwa_hub/tests/test_phase3_integration.py`
 - Test: `apps/heiwa_hub/tests/test_phase3_integration.py`
 - Test: `apps/heiwa_hub/tests/test_compute_router_stdb.py`

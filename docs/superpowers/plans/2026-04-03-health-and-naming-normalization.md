@@ -13,6 +13,7 @@
 ### Task 1: Normalize heiwa-core (Rust)
 
 **Files:**
+
 - Modify: `apps/heiwa_core/src/runtime/mod.rs`
 - Modify: `apps/heiwa_core/src/config.rs`
 - Modify: `apps/heiwa_core/src/runtime/state.rs`
@@ -20,6 +21,7 @@
 - [ ] **Step 1: Update `SystemStatus` to include `as_str` method**
 
 Modify `apps/heiwa_core/src/runtime/state.rs`:
+
 ```rust
 impl SystemStatus {
     pub fn as_str(&self) -> &'static str {
@@ -57,16 +59,17 @@ async fn health_handler(axum::extract::State(state): axum::extract::State<Shared
 - [ ] **Step 3: Remove `/ready` route and update `build_router` in `apps/heiwa_core/src/runtime/mod.rs`**
 
 - [ ] **Step 4: Update `heartbeat` function and `config.rs` defaults**
-Change `"cloud-hq"` to `"heiwa-core"`.
+      Change `"cloud-hq"` to `"heiwa-core"`.
 
 - [ ] **Step 5: Run `cargo test -p heiwa-core` and verify**
 
 - [ ] **Step 6: Commit**
-`git add apps/heiwa_core && git commit -m "feat(core): normalize health endpoint and naming"`
+      `git add apps/heiwa_core && git commit -m "feat(core): normalize health endpoint and naming"`
 
 ### Task 2: Normalize heiwa-hub (Python)
 
 **Files:**
+
 - Modify: `apps/heiwa_hub/mcp_server.py`
 
 - [ ] **Step 1: Update `/health` endpoint**
@@ -94,14 +97,15 @@ async def health():
 ```
 
 - [ ] **Step 2: Update tests for heiwa-hub**
-Update `apps/heiwa_hub/tests/test_phase5_integration.py` and others that check for `"alive"`.
+      Update `apps/heiwa_hub/tests/test_phase5_integration.py` and others that check for `"alive"`.
 
 - [ ] **Step 3: Commit**
-`git add apps/heiwa_hub && git commit -m "feat(hub): normalize health endpoint and naming"`
+      `git add apps/heiwa_hub && git commit -m "feat(hub): normalize health endpoint and naming"`
 
 ### Task 3: Normalize heiwa-trading and heiwa-sdk (Python)
 
 **Files:**
+
 - Modify: `apps/heiwa_trading/src/heiwa_trading/app.py`
 - Modify: `packages/heiwa_sdk/heiwa_sdk/main.py`
 
@@ -112,11 +116,12 @@ Update `apps/heiwa_hub/tests/test_phase5_integration.py` and others that check f
 - [ ] **Step 3: Run `pytest apps/heiwa_trading` and `pytest packages/heiwa_sdk`**
 
 - [ ] **Step 4: Commit**
-`git add apps/heiwa_trading packages/heiwa_sdk && git commit -m "feat(trading,sdk): normalize health endpoints"`
+      `git add apps/heiwa_trading packages/heiwa_sdk && git commit -m "feat(trading,sdk): normalize health endpoints"`
 
 ### Task 4: Infrastructure Alignment
 
 **Files:**
+
 - Modify: `railway.toml`
 - Modify: `apps/heiwa_trading/railway.toml`
 - Modify: `apps/heiwa_web/clients/web/assets/domains.bootstrap.json`
@@ -130,4 +135,4 @@ Update `apps/heiwa_hub/tests/test_phase5_integration.py` and others that check f
 - [ ] **Step 4: Verify overall system status with a mock check**
 
 - [ ] **Step 5: Commit**
-`git add . && git commit -m "chore(infra): align health checks and service names"`
+      `git add . && git commit -m "chore(infra): align health checks and service names"`

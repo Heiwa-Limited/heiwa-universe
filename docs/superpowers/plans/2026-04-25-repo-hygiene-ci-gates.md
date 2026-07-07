@@ -9,6 +9,7 @@
 **Tech Stack:** GitHub Actions, bash, `pre-commit` framework (Python). No new runtime deps.
 
 **Prerequisites:**
+
 - Plan 1 merged (`PRODUCT_SURFACE.md` and `scripts/audit_product_surface.sh` exist).
 - Plan 2 substantially merged (slop quarantined so the budget check has any chance of passing).
 
@@ -16,21 +17,22 @@
 
 ## File Structure
 
-| Path | Action | Responsibility |
-| --- | --- | --- |
-| `scripts/audit_product_surface.sh` | Modify | Add `--check` flag with hard-cap exit logic |
-| `tests/audit/test_audit_product_surface.bats` | Modify | Add `--check` mode tests |
-| `.github/workflows/repo-hygiene.yml` | Create | CI job running audit on every PR |
-| `.gitignore` | Modify | Add explicit blocks for `__pycache__`, `.pytest_cache`, etc. |
-| `.pre-commit-config.yaml` | Create | Pre-commit framework config |
-| `scripts/check_no_runtime_artifacts.sh` | Create | Hook target script |
-| `docs/standards/repo-hygiene.md` | Create | Reference doc explaining the gates |
+| Path                                          | Action | Responsibility                                               |
+| --------------------------------------------- | ------ | ------------------------------------------------------------ |
+| `scripts/audit_product_surface.sh`            | Modify | Add `--check` flag with hard-cap exit logic                  |
+| `tests/audit/test_audit_product_surface.bats` | Modify | Add `--check` mode tests                                     |
+| `.github/workflows/repo-hygiene.yml`          | Create | CI job running audit on every PR                             |
+| `.gitignore`                                  | Modify | Add explicit blocks for `__pycache__`, `.pytest_cache`, etc. |
+| `.pre-commit-config.yaml`                     | Create | Pre-commit framework config                                  |
+| `scripts/check_no_runtime_artifacts.sh`       | Create | Hook target script                                           |
+| `docs/standards/repo-hygiene.md`              | Create | Reference doc explaining the gates                           |
 
 ---
 
 ### Task 1: Add `--check` mode to audit script (TDD)
 
 **Files:**
+
 - Modify: `tests/audit/test_audit_product_surface.bats`
 - Modify: `scripts/audit_product_surface.sh`
 
@@ -121,6 +123,7 @@ git commit -m "feat: add --check mode to audit script with hard-cap budgets"
 ### Task 2: Add the GitHub Actions workflow
 
 **Files:**
+
 - Create: `.github/workflows/repo-hygiene.yml`
 
 - [ ] **Step 1: Inspect existing workflow style**
@@ -191,6 +194,7 @@ git commit -m "ci: add repo-hygiene workflow that enforces slop budget"
 ### Task 3: Expand `.gitignore` to block runtime artifacts
 
 **Files:**
+
 - Modify: `.gitignore`
 
 - [ ] **Step 1: Read current .gitignore**
@@ -203,7 +207,6 @@ Expected: Existing entries.
 Append the following block (do not duplicate entries that already exist):
 
 ```gitignore
-
 # === Repo hygiene: runtime artifacts must not be tracked ===
 # Python
 __pycache__/
@@ -246,10 +249,13 @@ logs/
 - [ ] **Step 3: Identify and untrack any matching files currently tracked**
 
 Run:
+
 ```bash
 git ls-files | grep -E '__pycache__|\.pytest_cache|\.DS_Store|\.pyc$' | head -20
 ```
+
 Expected: A list (possibly empty after Plan 2). For each, run:
+
 ```bash
 git rm -r --cached <path>
 ```
@@ -277,6 +283,7 @@ git commit -m "chore: untrack accidentally-committed runtime artifacts"
 ### Task 4: Add the pre-commit hook
 
 **Files:**
+
 - Create: `.pre-commit-config.yaml`
 - Create: `scripts/check_no_runtime_artifacts.sh`
 
@@ -353,14 +360,17 @@ repos:
 - [ ] **Step 4: Test the hook manually**
 
 Run:
+
 ```bash
 mkdir -p /tmp/hooktest && touch /tmp/hooktest/foo.pyc
 git add /tmp/hooktest/foo.pyc 2>/dev/null || cp /tmp/hooktest/foo.pyc ./test_foo.pyc && git add test_foo.pyc
 ./scripts/check_no_runtime_artifacts.sh
 ```
+
 Expected: `ERROR: Staged files match runtime-artifact patterns: test_foo.pyc`
 
 Cleanup:
+
 ```bash
 git reset HEAD test_foo.pyc 2>/dev/null
 rm -f test_foo.pyc
@@ -378,11 +388,12 @@ git commit -m "chore: add pre-commit hooks for runtime-artifact blocking"
 ### Task 5: Add the standards reference doc
 
 **Files:**
+
 - Create: `docs/standards/repo-hygiene.md`
 
 - [ ] **Step 1: Write the reference doc**
 
-```markdown
+````markdown
 # Repo Hygiene Standards
 
 > **Authority:** `PRODUCT_SURFACE.md` defines what is what; this doc explains how the gates work.
@@ -415,6 +426,7 @@ Override parsing is currently manual (reviewer reads PR body). Automation is a l
 ./scripts/audit_product_surface.sh           # report
 ./scripts/audit_product_surface.sh --check   # exit 1 on breach
 ```
+````
 
 ## How to install pre-commit hooks
 
@@ -433,14 +445,14 @@ After install, `.pre-commit-config.yaml` runs on every `git commit`.
 4. Add a one-line entry to `docs/audit/` describing why the budget moved
 
 The budget should ratchet **down** over time as legacy is deleted, never up without explicit doctrine change.
-```
 
+````
 - [ ] **Step 2: Commit**
 
 ```bash
 git add docs/standards/repo-hygiene.md
 git commit -m "docs: document repo hygiene gates and override flow"
-```
+````
 
 ---
 
@@ -476,6 +488,7 @@ Expected: `repo-hygiene / audit-product-surface` job passes.
 - [ ] **Step 3: If gate fails because legacy still over cap**
 
 Two options:
+
 - (a) Bump `LEGACY_HARD_CAP` in the workflow temporarily to the current actual + 1, file an issue to ratchet down
 - (b) Push more quarantine commits to reduce active legacy LOC
 

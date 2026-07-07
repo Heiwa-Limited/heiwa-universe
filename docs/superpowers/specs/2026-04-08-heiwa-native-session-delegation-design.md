@@ -35,14 +35,14 @@ That means:
 
 Current role doctrine:
 
-| Surface | Default role |
-| --- | --- |
-| `ollama/qwen3.5:4b` | cheap classification, step shaping, summaries, routing prep |
-| `ollama/qwen3.5:9b` | local coding, diff inspection, bounded verification |
+| Surface                | Default role                                                          |
+| ---------------------- | --------------------------------------------------------------------- |
+| `ollama/qwen3.5:4b`    | cheap classification, step shaping, summaries, routing prep           |
+| `ollama/qwen3.5:9b`    | local coding, diff inspection, bounded verification                   |
 | `ollama/gemma4:latest` | local general chat, explanation, rewriting, operator-facing summaries |
-| `google-gemini-cli` | hard reasoning, broad context synthesis, cheap remote escalation |
-| `claude-code` | highest-value native coding session surface for scoped write tasks |
-| `codex` | secondary native coding/review surface and alternate execution path |
+| `google-gemini-cli`    | hard reasoning, broad context synthesis, cheap remote escalation      |
+| `claude-code`          | highest-value native coding session surface for scoped write tasks    |
+| `codex`                | secondary native coding/review surface and alternate execution path   |
 
 End-state rule:
 
@@ -66,12 +66,12 @@ That wastes the strongest surfaces already available on this machine.
 
 These capabilities were verified locally on 2026-04-08 via `--help`, not inferred from memory.
 
-| Surface | Headless | Structured output | Resume/fork | Native tool controls | Notes |
-| --- | --- | --- | --- | --- | --- |
-| `claude-code` | yes (`-p`) | yes (`json`, `stream-json`) | yes (`--resume`, `--continue`, `--session-id`, `--fork-session`) | yes (`--allowedTools`, `--add-dir`, `--permission-mode`, `--max-budget-usd`) | richest first pilot |
-| `codex` | yes (`exec`) | yes (`--json`) | yes (`resume`, `exec resume`, `fork`) | sandbox/approval controls, no explicit tool allowlist | better than earlier assumption |
-| `google-gemini-cli` | yes (`-p`) | yes (`json`, `stream-json`) | yes (`--resume`) | approval mode, include-directories, policy files | better than earlier assumption |
-| `ollama` | stateless | HTTP/CLI | none | none | remains `ProviderAdapter` only |
+| Surface             | Headless     | Structured output           | Resume/fork                                                      | Native tool controls                                                         | Notes                          |
+| ------------------- | ------------ | --------------------------- | ---------------------------------------------------------------- | ---------------------------------------------------------------------------- | ------------------------------ |
+| `claude-code`       | yes (`-p`)   | yes (`json`, `stream-json`) | yes (`--resume`, `--continue`, `--session-id`, `--fork-session`) | yes (`--allowedTools`, `--add-dir`, `--permission-mode`, `--max-budget-usd`) | richest first pilot            |
+| `codex`             | yes (`exec`) | yes (`--json`)              | yes (`resume`, `exec resume`, `fork`)                            | sandbox/approval controls, no explicit tool allowlist                        | better than earlier assumption |
+| `google-gemini-cli` | yes (`-p`)   | yes (`json`, `stream-json`) | yes (`--resume`)                                                 | approval mode, include-directories, policy files                             | better than earlier assumption |
+| `ollama`            | stateless    | HTTP/CLI                    | none                                                             | none                                                                         | remains `ProviderAdapter` only |
 
 Two implications are locked:
 

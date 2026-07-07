@@ -20,20 +20,21 @@ Per `HEIWA.md`: "The minimum living system is: account plane, provider connectio
 
 ## File Structure
 
-| Path | Action | Responsibility |
-| --- | --- | --- |
-| `scripts/demo_oss_path.sh` | Create | End-to-end smoke runner; exits 0 when path works |
-| `tests/demo/test_demo_oss_path.bats` | Create | Bats tests for the smoke runner's individual phases |
-| `docs/quickstart-oss.md` | Create | Human-readable quickstart matching the smoke script |
-| `.github/workflows/oss-demo-smoke.yml` | Create | CI job running the smoke on every relevant PR |
-| `apps/heiwa_shell/src/main.rs` | Modify (light) | Ensure `--json` output exists on `doctor` and `providers` for parseable assertions |
-| `README.md` | Modify | Add a "Try it locally" section pointing at the quickstart |
+| Path                                   | Action         | Responsibility                                                                     |
+| -------------------------------------- | -------------- | ---------------------------------------------------------------------------------- |
+| `scripts/demo_oss_path.sh`             | Create         | End-to-end smoke runner; exits 0 when path works                                   |
+| `tests/demo/test_demo_oss_path.bats`   | Create         | Bats tests for the smoke runner's individual phases                                |
+| `docs/quickstart-oss.md`               | Create         | Human-readable quickstart matching the smoke script                                |
+| `.github/workflows/oss-demo-smoke.yml` | Create         | CI job running the smoke on every relevant PR                                      |
+| `apps/heiwa_shell/src/main.rs`         | Modify (light) | Ensure `--json` output exists on `doctor` and `providers` for parseable assertions |
+| `README.md`                            | Modify         | Add a "Try it locally" section pointing at the quickstart                          |
 
 ---
 
 ### Task 1: Verify and lock the existing `heiwa doctor` and `heiwa providers` JSON output
 
 **Files:**
+
 - Modify: `apps/heiwa_shell/src/main.rs` (only if `--json` is missing)
 
 - [ ] **Step 1: Check whether `--json` already exists**
@@ -119,6 +120,7 @@ If `--json` already existed, skip the commit.
 ### Task 2: Write the smoke script (TDD)
 
 **Files:**
+
 - Create: `tests/demo/test_demo_oss_path.bats`
 
 - [ ] **Step 1: Write failing tests for each phase**
@@ -189,6 +191,7 @@ git commit -m "test: add failing bats tests for OSS demo path"
 ### Task 3: Implement the smoke script
 
 **Files:**
+
 - Create: `scripts/demo_oss_path.sh`
 
 - [ ] **Step 1: Write the script**
@@ -305,11 +308,12 @@ git commit -m "feat: add scripts/demo_oss_path.sh end-to-end smoke runner"
 ### Task 4: Write the human quickstart doc
 
 **Files:**
+
 - Create: `docs/quickstart-oss.md`
 
 - [ ] **Step 1: Write the quickstart**
 
-```markdown
+````markdown
 # Heiwa Quickstart (OSS Path)
 
 > **5 minutes. Local only. No remote provider auth required.**
@@ -345,6 +349,7 @@ cargo build --workspace --release
 # 6. (Optional) Attach a session
 ./target/release/heiwa session attach --intent demo
 ```
+````
 
 Or run the same path as a single smoke script:
 
@@ -356,12 +361,12 @@ Expected output ends with: `OSS demo path: PASS`
 
 ## What just happened
 
-| Step | What it proves |
-| --- | --- |
-| `doctor` | Heiwa can audit its own install + config and tell you what it sees |
-| `providers` | Heiwa discovered Claude Code / Codex / Gemini CLI / Antigravity / Ollama based on what is installed on your machine |
-| `route --dry-run` | The routing kernel chose a provider for your intent without actually calling it (good for inspecting policy) |
-| `session attach` | The runtime opens a session against the chosen provider and writes evidence as the session unfolds |
+| Step              | What it proves                                                                                                      |
+| ----------------- | ------------------------------------------------------------------------------------------------------------------- |
+| `doctor`          | Heiwa can audit its own install + config and tell you what it sees                                                  |
+| `providers`       | Heiwa discovered Claude Code / Codex / Gemini CLI / Antigravity / Ollama based on what is installed on your machine |
+| `route --dry-run` | The routing kernel chose a provider for your intent without actually calling it (good for inspecting policy)        |
+| `session attach`  | The runtime opens a session against the chosen provider and writes evidence as the session unfolds                  |
 
 ## What is NOT in this quickstart
 
@@ -384,8 +389,8 @@ Expected output ends with: `OSS demo path: PASS`
 ```
 
 For the architecture truth behind these surfaces, read [`HEIWA.md`](../HEIWA.md).
-```
 
+````
 - [ ] **Step 2: Verify markdown renders cleanly**
 
 Run: `head -40 docs/quickstart-oss.md`
@@ -396,13 +401,14 @@ Expected: First lines render correctly.
 ```bash
 git add docs/quickstart-oss.md
 git commit -m "docs: add OSS quickstart matching demo_oss_path.sh"
-```
+````
 
 ---
 
 ### Task 5: Add `--dry-run` to `heiwa route` (if not present)
 
 **Files:**
+
 - Modify: `apps/heiwa_shell/src/main.rs`
 - Modify: routing crate (likely `crates/heiwa_loop` or a `crates/heiwa_route` if it exists)
 
@@ -420,7 +426,7 @@ The smoke script's fallback preview keeps the demo runnable. Open a follow-up is
 Add a flag that runs routing logic but skips the provider call. Output should be the JSON shape the smoke fallback already produces:
 
 ```json
-{"intent": "...", "chosen_provider": "...", "reason": "..."}
+{ "intent": "...", "chosen_provider": "...", "reason": "..." }
 ```
 
 Add a unit test in the routing crate verifying the dry-run path returns a deterministic provider for a known intent given a known config.
@@ -451,6 +457,7 @@ git commit -m "feat: heiwa route --dry-run for OSS demo path"
 ### Task 6: Add the CI workflow
 
 **Files:**
+
 - Create: `.github/workflows/oss-demo-smoke.yml`
 
 - [ ] **Step 1: Write the workflow**
@@ -461,11 +468,11 @@ name: OSS Demo Smoke
 on:
   pull_request:
     paths:
-      - 'apps/heiwa_shell/**'
-      - 'crates/heiwa_*/**'
-      - 'scripts/demo_oss_path.sh'
-      - 'tests/demo/**'
-      - '.github/workflows/oss-demo-smoke.yml'
+      - "apps/heiwa_shell/**"
+      - "crates/heiwa_*/**"
+      - "scripts/demo_oss_path.sh"
+      - "tests/demo/**"
+      - ".github/workflows/oss-demo-smoke.yml"
   push:
     branches: [main]
 
@@ -529,6 +536,7 @@ git commit -m "ci: add oss-demo-smoke workflow gating the OSS demo path"
 ### Task 7: Wire from README.md
 
 **Files:**
+
 - Modify: `README.md`
 
 - [ ] **Step 1: Read current README structure**
@@ -540,7 +548,7 @@ Expected: Existing structure.
 
 Insert near the top (after the project tagline):
 
-```markdown
+````markdown
 ## Try it locally (5 minutes)
 
 ```bash
@@ -549,10 +557,11 @@ cd heiwa-universe
 cargo build --workspace --release
 ./scripts/demo_oss_path.sh
 ```
+````
 
 See [`docs/quickstart-oss.md`](docs/quickstart-oss.md) for what each step does and how to extend with cloud providers.
-```
 
+````
 Replace `<heiwa-org>` with the actual GitHub org name when known.
 
 - [ ] **Step 3: Commit**
@@ -560,7 +569,7 @@ Replace `<heiwa-org>` with the actual GitHub org name when known.
 ```bash
 git add README.md
 git commit -m "docs: add 'Try it locally' link to OSS quickstart"
-```
+````
 
 ---
 

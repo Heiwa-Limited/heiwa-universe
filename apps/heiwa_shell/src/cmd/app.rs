@@ -51,6 +51,7 @@ pub async fn run(args: &[String]) -> Result<()> {
         Some("start") => start(&args[1..]).await,
         Some("update") => update(&args[1..]),
         Some("runtime") => runtime(&args[1..]),
+        Some("api") => api(&args[1..]).await,
         Some("status") => runtime_status(args),
         Some("--help") | Some("-h") | None => {
             if args.iter().any(|arg| arg == "--json") {
@@ -512,6 +513,131 @@ fn runtime(args: &[String]) -> Result<()> {
         }
         Some(other) => Err(anyhow!("unknown app runtime command: {other}")),
     }
+}
+
+async fn api(args: &[String]) -> Result<()> {
+    if has_flag(args, "--help") || has_flag(args, "-h") {
+        print_api_help();
+        return Ok(());
+    }
+    let method = args
+        .first()
+        .map(|raw| raw.to_ascii_uppercase())
+        .ok_or_else(|| anyhow!("usage: heiwa app api get|post <path> [--port N] [--body JSON]"))?;
+    if method != "GET" && method != "POST" {
+        return Err(anyhow!(
+            "unknown app api method: {method} (expected get or post)"
+        ));
+    }
+    let path = args
+        .get(1)
+        .filter(|path| path.starts_with('/'))
+        .ok_or_else(|| anyhow!("app api path must start with /, e.g. /api/v1/session"))?;
+    let port = parse_port(args)?;
+    let dry_run = has_flag(args, "--dry-run");
+    let json_output = has_flag(args, "--json");
+    let body_raw = flag_value(args, "--body");
+    let body_value = match body_raw.as_deref() {
+        Some(raw) => read_api_body(raw)?,
+        None => Value::Null,
+    };
+    let body_payload = if method == "POST" {
+        Some(serde_json::to_string(&body_value)?)
+    } else {
+        None
+    };
+    let url = format!("http://127.0.0.1:{port}{path}");
+
+    if dry_run {
+        let payload = json!({
+            "command": "app api",
+            "method": method,
+            "path": path,
+            "url": url,
+            "dry_run": true,
+            "body": body_value,
+            "next": "drop --dry-run to call the running local Heiwa.app runtime",
+        });
+        if json_output {
+            println!("{payload}");
+        } else {
+            println!("heiwa app api");
+            println!("  method: {}", payload["method"].as_str().unwrap_or("?"));
+            println!("  url: {url}");
+            println!("  dry_run: true");
+        }
+        return Ok(());
+    }
+
+    let response = call_local_app_api(&method, path, port, body_payload.as_deref()).await?;
+    if response.status >= 400 {
+        return Err(anyhow!(
+            "app api {} {} returned HTTP {}: {}",
+            method,
+            path,
+            response.status,
+            response.body
+        ));
+    }
+    println!("{}", response.body);
+    Ok(())
+}
+
+fn read_api_body(raw: &str) -> Result<Value> {
+    let body = if let Some(path) = raw.strip_prefix('@') {
+        fs::read_to_string(path).map_err(|error| anyhow!("cannot read --body {raw}: {error}"))?
+    } else {
+        raw.to_string()
+    };
+    serde_json::from_str(&body).map_err(|error| anyhow!("--body must be JSON: {error}"))
+}
+
+struct ApiResponse {
+    status: u16,
+    body: String,
+}
+
+async fn call_local_app_api(
+    method: &str,
+    path: &str,
+    port: u16,
+    body: Option<&str>,
+) -> Result<ApiResponse> {
+    let mut stream = TcpStream::connect(("127.0.0.1", port))
+        .await
+        .map_err(|error| {
+            anyhow!("cannot connect to Heiwa.app runtime on 127.0.0.1:{port}: {error}")
+        })?;
+    let body = body.unwrap_or("");
+    let request = if method == "POST" {
+        format!(
+            "POST {path} HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\nAccept: application/json\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+            body.as_bytes().len()
+        )
+    } else {
+        format!(
+            "GET {path} HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\nAccept: application/json\r\nConnection: close\r\n\r\n"
+        )
+    };
+    stream.write_all(request.as_bytes()).await?;
+    let mut raw = Vec::new();
+    stream.read_to_end(&mut raw).await?;
+    parse_api_response(&raw)
+}
+
+fn parse_api_response(raw: &[u8]) -> Result<ApiResponse> {
+    let Some(split) = raw.windows(4).position(|window| window == b"\r\n\r\n") else {
+        return Err(anyhow!("app api response missing HTTP header separator"));
+    };
+    let head = String::from_utf8_lossy(&raw[..split]);
+    let status = head
+        .lines()
+        .next()
+        .and_then(|line| line.split_whitespace().nth(1))
+        .and_then(|code| code.parse::<u16>().ok())
+        .ok_or_else(|| anyhow!("app api response missing HTTP status"))?;
+    let body = String::from_utf8_lossy(&raw[split + 4..]).to_string();
+    Ok(ApiResponse { status, body })
 }
 
 async fn start(args: &[String]) -> Result<()> {
@@ -3364,6 +3490,8 @@ fn print_help() {
     println!();
     println!("Usage:");
     println!("  heiwa app start [--port N] [--no-open]");
+    println!("  heiwa app api get <path> [--port N]");
+    println!("  heiwa app api post <path> --body JSON [--port N]");
     println!("  heiwa app update [--source github|checkout] [--dry-run]");
     println!("  heiwa app runtime status [--json]");
     println!("  heiwa app status [--json]");
@@ -3382,6 +3510,16 @@ fn print_update_help() {
     println!(
         "Use --source checkout only for explicit developer reinstall from the current checkout."
     );
+}
+
+fn print_api_help() {
+    println!("heiwa app api");
+    println!();
+    println!("Usage:");
+    println!("  heiwa app api get <path> [--port N] [--json]");
+    println!("  heiwa app api post <path> --body JSON [--port N] [--json]");
+    println!();
+    println!("Programmatic bridge to the local Heiwa.app runtime APIs for sessions, calendar, capabilities, and subagent dispatch.");
 }
 
 fn print_start_help() {

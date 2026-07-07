@@ -5,6 +5,7 @@
 **Goal:** Ensure the system is portable, efficient, and free of dead code. Finalize the boot sequence and provide a clean handover.
 
 **Architecture:**
+
 - **Environment Parity**: Single `start.sh` that works on local Mac, Linux, and Railway.
 - **Cleanup**: Remove remaining multi-backend logic and dead NATS configuration.
 - **Pruning**: Implement TTL-based pruning for memory and execution logs in STDB.

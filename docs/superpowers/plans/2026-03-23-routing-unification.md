@@ -13,6 +13,7 @@
 ### Task 1: Register Gemini API in the runtime seed data
 
 **Files:**
+
 - Modify: `config/swarm/ai_router.json`
 - Modify: `config/seeds/model_tiers.json`
 - Create: `apps/heiwa_hub/tests/test_llm_routing_unification.py`
@@ -58,6 +59,7 @@ git commit -m "feat: register gemini api routing seed data"
 ### Task 2: Add the shared routing contracts and facade
 
 **Files:**
+
 - Modify: `packages/heiwa_cognition/heiwa_cognition/router.py`
 - Modify: `packages/heiwa_cognition/heiwa_cognition/llm.py`
 - Modify: `packages/heiwa_cognition/heiwa_cognition/__init__.py`
@@ -130,6 +132,7 @@ git commit -m "feat: add unified llm routing facade"
 ### Task 3: Migrate the lightweight internal consumers
 
 **Files:**
+
 - Modify: `packages/heiwa_cognition/heiwa_cognition/intent.py`
 - Modify: `packages/heiwa_cognition/heiwa_cognition/planner.py`
 - Modify: `apps/heiwa_hub/agents/messenger.py`
@@ -180,6 +183,7 @@ git commit -m "feat: migrate internal callers to llm facade"
 ### Task 4: Migrate the remaining inference callers
 
 **Files:**
+
 - Modify: `packages/heiwa_sdk/heiwa_sdk/audit.py`
 - Modify: `packages/heiwa_sdk/heiwa_sdk/heiwaclaw/adapters/reflex.py`
 - Modify: `apps/heiwa_hub/agents/heiwaclaw.py`
@@ -233,6 +237,7 @@ git commit -m "feat: migrate remaining llm consumers"
 ### Task 5: Remove legacy routing code and finalize compatibility cleanup
 
 **Files:**
+
 - Modify: `packages/heiwa_cognition/heiwa_cognition/llm.py`
 - Modify: `packages/heiwa_cognition/heiwa_cognition/__init__.py`
 - Modify: `apps/heiwa_hub/cognition/llm_local.py`
@@ -285,6 +290,7 @@ git commit -m "refactor: remove legacy llm routing path"
 ### Task 6: Run the regression sweep and close out
 
 **Files:**
+
 - Test: `apps/heiwa_hub/tests/test_llm_routing_unification.py`
 - Test: `apps/heiwa_hub/tests/test_llm_routing_migration.py`
 - Test: `apps/heiwa_hub/tests/test_llm_routing_external_consumers.py`

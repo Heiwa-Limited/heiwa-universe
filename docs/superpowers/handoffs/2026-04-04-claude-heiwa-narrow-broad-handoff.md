@@ -233,6 +233,7 @@ High-value reference for:
 - normalized event surfaces
 
 Heiwa should mirror the **concept**:
+
 - session start
 - pre/post tool use
 - approval boundaries
@@ -345,4 +346,3 @@ Heiwa is building a machine-installed, provider-neutral, evidence-first AI runti
 ## One-Sentence Compression
 
 Heiwa should feel like one local runtime that can unify Claude Code, Codex, Gemini CLI, Antigravity, Ollama, and later BYOK/router providers under one authoritative session, routing, and evidence model, while deferring web surfaces until that substrate is unquestionably real.
-

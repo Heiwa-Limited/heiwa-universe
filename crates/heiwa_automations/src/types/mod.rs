@@ -45,6 +45,12 @@ impl ExecutionId {
     }
 }
 
+impl Default for ExecutionId {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl std::fmt::Display for ExecutionId {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         self.0.fmt(f)

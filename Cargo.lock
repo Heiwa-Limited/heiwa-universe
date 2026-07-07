@@ -2079,6 +2079,7 @@ dependencies = [
  "heiwa_drex",
  "heiwa_mcp",
  "heiwa_quota",
+ "heiwa_receipts",
  "hostname",
  "libc",
  "reqwest 0.12.28",

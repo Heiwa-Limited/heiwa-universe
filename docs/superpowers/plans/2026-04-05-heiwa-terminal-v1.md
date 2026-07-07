@@ -14,32 +14,33 @@
 
 ### New files
 
-| File | Responsibility |
-|------|---------------|
-| `crates/heiwa_stdb/Cargo.toml` | New crate: STDB connection lifecycle + evidence API for the local shell |
-| `crates/heiwa_stdb/src/lib.rs` | `StdbClient` struct: connect, heartbeat, device registration, evidence emission |
-| `crates/heiwa_stdb/src/evidence.rs` | Typed helpers for recording route decisions, runs, failures, provider status |
-| `crates/heiwa_stdb/tests/offline_fallback.rs` | Tests that all evidence methods degrade gracefully when disconnected |
-| `apps/heiwa_shell/tests/stdb_connection.rs` | Integration test: shell boots with and without STDB env vars |
+| File                                          | Responsibility                                                                  |
+| --------------------------------------------- | ------------------------------------------------------------------------------- |
+| `crates/heiwa_stdb/Cargo.toml`                | New crate: STDB connection lifecycle + evidence API for the local shell         |
+| `crates/heiwa_stdb/src/lib.rs`                | `StdbClient` struct: connect, heartbeat, device registration, evidence emission |
+| `crates/heiwa_stdb/src/evidence.rs`           | Typed helpers for recording route decisions, runs, failures, provider status    |
+| `crates/heiwa_stdb/tests/offline_fallback.rs` | Tests that all evidence methods degrade gracefully when disconnected            |
+| `apps/heiwa_shell/tests/stdb_connection.rs`   | Integration test: shell boots with and without STDB env vars                    |
 
 ### Modified files
 
-| File | What changes |
-|------|-------------|
-| `Cargo.toml` (workspace root) | Add `crates/heiwa_stdb` to workspace members |
-| `apps/heiwa_shell/Cargo.toml` | Add `heiwa-stdb` dependency |
-| `apps/heiwa_shell/src/main.rs` | Replace `attempt_stdb_connection()` with real `StdbClient`; wire device registration, heartbeat, REPL evidence emission; remove hardcoded HOME fallback |
-| `crates/heiwa_provider/src/lib.rs` | Remove hardcoded `/Users/dmcgregsauce` HOME fallback |
-| `crates/heiwa_install/src/lib.rs` | Remove hardcoded `/Users/dmcgregsauce` HOME fallback |
-| `crates/heiwa_session/src/lib.rs` | Remove hardcoded `/Users/dmcgregsauce` HOME fallback |
-| `crates/heiwa_loop/Cargo.toml` | Add `heiwa-stdb` dependency |
-| `crates/heiwa_loop/src/lib.rs` | Accept `StdbClient` instead of raw `Option<Arc<DbConnection>>` |
+| File                               | What changes                                                                                                                                            |
+| ---------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `Cargo.toml` (workspace root)      | Add `crates/heiwa_stdb` to workspace members                                                                                                            |
+| `apps/heiwa_shell/Cargo.toml`      | Add `heiwa-stdb` dependency                                                                                                                             |
+| `apps/heiwa_shell/src/main.rs`     | Replace `attempt_stdb_connection()` with real `StdbClient`; wire device registration, heartbeat, REPL evidence emission; remove hardcoded HOME fallback |
+| `crates/heiwa_provider/src/lib.rs` | Remove hardcoded `/Users/dmcgregsauce` HOME fallback                                                                                                    |
+| `crates/heiwa_install/src/lib.rs`  | Remove hardcoded `/Users/dmcgregsauce` HOME fallback                                                                                                    |
+| `crates/heiwa_session/src/lib.rs`  | Remove hardcoded `/Users/dmcgregsauce` HOME fallback                                                                                                    |
+| `crates/heiwa_loop/Cargo.toml`     | Add `heiwa-stdb` dependency                                                                                                                             |
+| `crates/heiwa_loop/src/lib.rs`     | Accept `StdbClient` instead of raw `Option<Arc<DbConnection>>`                                                                                          |
 
 ---
 
 ## Task 1: Remove hardcoded HOME fallbacks
 
 **Files:**
+
 - Modify: `crates/heiwa_provider/src/lib.rs:34`
 - Modify: `crates/heiwa_install/src/lib.rs:33`
 - Modify: `crates/heiwa_session/src/lib.rs:17`
@@ -105,6 +106,7 @@ git commit -m "fix: remove hardcoded /Users/dmcgregsauce HOME fallback from all 
 This crate owns the STDB connection for the local shell. It reads the same env vars as `heiwa_core::config.rs` (`STDB_URL`, `STDB_IDENTITY`, `STDB_TOKEN`) so configuration is consistent between the hosted runtime and the local shell.
 
 **Files:**
+
 - Create: `crates/heiwa_stdb/Cargo.toml`
 - Create: `crates/heiwa_stdb/src/lib.rs`
 - Modify: `Cargo.toml` (workspace root)
@@ -269,6 +271,7 @@ git commit -m "feat: add heiwa_stdb crate — STDB connection lifecycle for loca
 ## Task 3: Add evidence emission helpers to `heiwa_stdb`
 
 **Files:**
+
 - Create: `crates/heiwa_stdb/src/evidence.rs`
 
 These are typed helpers that call STDB reducers. Every method is a no-op when disconnected, so callers never need to check connection state.
@@ -495,6 +498,7 @@ git commit -m "feat: add evidence emission helpers to heiwa_stdb with offline fa
 Replace `attempt_stdb_connection()` in `main.rs` with real `StdbClient`. Add `heiwa-stdb` dependency.
 
 **Files:**
+
 - Modify: `apps/heiwa_shell/Cargo.toml`
 - Modify: `apps/heiwa_shell/src/main.rs`
 
@@ -591,6 +595,7 @@ git commit -m "feat: wire real STDB connection into heiwa_shell via StdbClient"
 Make `register_current_device()` actually call the `register_device` reducer, and start a heartbeat loop.
 
 **Files:**
+
 - Modify: `apps/heiwa_shell/src/main.rs`
 
 - [ ] **Step 1: Rewrite `register_current_device()`**
@@ -740,6 +745,7 @@ git commit -m "feat: wire real device registration and heartbeat to STDB"
 Every task execution in the REPL should record a route decision and a run receipt.
 
 **Files:**
+
 - Modify: `apps/heiwa_shell/src/main.rs`
 
 - [ ] **Step 1: Add evidence emission after DREX routing in the REPL**
@@ -847,6 +853,7 @@ git commit -m "feat: emit route decision and run receipt evidence from REPL"
 The loop crate currently takes `Option<Arc<DbConnection>>`. Migrate it to accept `StdbClient` so it gets the same offline-graceful behavior and evidence API.
 
 **Files:**
+
 - Modify: `crates/heiwa_loop/Cargo.toml`
 - Modify: `crates/heiwa_loop/src/lib.rs`
 - Modify: `apps/heiwa_shell/src/main.rs` (remove bridge)
@@ -890,6 +897,7 @@ pub fn new(config: LoopConfig, stdb: heiwa_stdb::StdbClient, model_tiers: Vec<Mo
 In `run()`, replace all `if let Some(ref stdb) = self.stdb { stdb.reducers.* }` blocks with direct calls through the connection:
 
 Replace the loop session start (~line 76-84):
+
 ```rust
 if let Some(conn) = self.stdb.connection() {
     conn.reducers.start_loop_session(
@@ -903,6 +911,7 @@ if let Some(conn) = self.stdb.connection() {
 ```
 
 Replace the cancellation handler (~line 93-99):
+
 ```rust
 if let Some(conn) = self.stdb.connection() {
     conn.reducers.complete_loop_session(
@@ -914,6 +923,7 @@ if let Some(conn) = self.stdb.connection() {
 ```
 
 Replace the run recording block (~line 179-214):
+
 ```rust
 if let Some(conn) = self.stdb.connection() {
     conn.reducers.record_run(
@@ -955,6 +965,7 @@ if let Some(conn) = self.stdb.connection() {
 ```
 
 Replace the completion block (~line 231-237):
+
 ```rust
 if let Some(conn) = self.stdb.connection() {
     conn.reducers.complete_loop_session(
@@ -994,6 +1005,7 @@ git commit -m "refactor: migrate loop crate from raw DbConnection to StdbClient"
 This is the first user-visible proof that evidence is being recorded. Show recent runs from local state (and later from STDB).
 
 **Files:**
+
 - Modify: `apps/heiwa_shell/src/main.rs`
 
 - [ ] **Step 1: Add the command handler**
@@ -1040,6 +1052,7 @@ git commit -m "feat: add 'heiwa receipts' command to show evidence status"
 Show registered devices from the local machine manifest, indicating sync status.
 
 **Files:**
+
 - Modify: `apps/heiwa_shell/src/main.rs`
 
 - [ ] **Step 1: Add the command handler**

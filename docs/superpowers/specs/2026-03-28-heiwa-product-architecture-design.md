@@ -43,16 +43,16 @@ If Heiwa Limited later offers managed hosting, `owner_id` becomes the tenant bou
 
 ### Captain is Heiwa
 
-The Captain is not powered by one model. The Captain *is* Heiwa — the entire fleet. Its reasoning and execution draw from all available models across all providers, selected by the rate cascade. There is no "internal reasoning model" vs "execution model." The Captain picks the best available model with capacity for whatever it needs to do right now.
+The Captain is not powered by one model. The Captain _is_ Heiwa — the entire fleet. Its reasoning and execution draw from all available models across all providers, selected by the rate cascade. There is no "internal reasoning model" vs "execution model." The Captain picks the best available model with capacity for whatever it needs to do right now.
 
 ### Provider/model inventory
 
-| Provider | Models | Rate Groups | Auth |
-|----------|--------|-------------|------|
-| Claude Code | Opus 4.6, Sonnet 4.6, Haiku 4.5/6 | 1 (Anthropic) | Claude Pro subscription |
-| Codex | GPT-5.4, GPT-5.4-Mini | 1 (OpenAI) | ChatGPT Plus subscription |
-| Gemini CLI | Gemini 3.1 Pro, Gemini 3 Flash | 1 (Google) | Google AI Pro subscription |
-| Antigravity | Gemini 3.1 Pro (High), Gemini 3.1 Pro (Low), Gemini 3 Flash, Claude Opus 4.6, Sonnet 4.6 | 3 | Google AI Pro subscription |
+| Provider    | Models                                                                                   | Rate Groups   | Auth                       |
+| ----------- | ---------------------------------------------------------------------------------------- | ------------- | -------------------------- |
+| Claude Code | Opus 4.6, Sonnet 4.6, Haiku 4.5/6                                                        | 1 (Anthropic) | Claude Pro subscription    |
+| Codex       | GPT-5.4, GPT-5.4-Mini                                                                    | 1 (OpenAI)    | ChatGPT Plus subscription  |
+| Gemini CLI  | Gemini 3.1 Pro, Gemini 3 Flash                                                           | 1 (Google)    | Google AI Pro subscription |
+| Antigravity | Gemini 3.1 Pro (High), Gemini 3.1 Pro (Low), Gemini 3 Flash, Claude Opus 4.6, Sonnet 4.6 | 3             | Google AI Pro subscription |
 
 Each model/provider/rate group is fully monitored by Pulse: rate limit state, request history, latency, cost, availability, capacity.
 
@@ -60,38 +60,38 @@ Each model/provider/rate group is fully monitored by Pulse: rate limit state, re
 
 ### Products
 
-| Name | Type | What it is |
-|------|------|-----------|
-| **Heiwa Hub** | Core product | The autonomous agent OS. Railway-native control plane. Owns Captain, rate cascade, leases, events, provider monitoring. Each owner deploys their own instance. |
-| **Heiwa CLI** | Client product | Local REPL and cockpit. `cd myproject && heiwa` boots a session, connects to Hub via Wire, registers a Battlefield. Primary operator surface. |
-| **Heiwa Web** | Client product | Dashboard. Credential vault UI, session history, approval surface, Pulse monitoring. Equal client over Wire. |
-| **Heiwa Trading** | Vertical product | Financial strategy / paper-trading vertical built on Hub. First proof that the platform supports domain-specific autonomous work. |
+| Name              | Type             | What it is                                                                                                                                                     |
+| ----------------- | ---------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Heiwa Hub**     | Core product     | The autonomous agent OS. Railway-native control plane. Owns Captain, rate cascade, leases, events, provider monitoring. Each owner deploys their own instance. |
+| **Heiwa CLI**     | Client product   | Local REPL and cockpit. `cd myproject && heiwa` boots a session, connects to Hub via Wire, registers a Battlefield. Primary operator surface.                  |
+| **Heiwa Web**     | Client product   | Dashboard. Credential vault UI, session history, approval surface, Pulse monitoring. Equal client over Wire.                                                   |
+| **Heiwa Trading** | Vertical product | Financial strategy / paper-trading vertical built on Hub. First proof that the platform supports domain-specific autonomous work.                              |
 
 ### Named subsystems (inside Hub)
 
-| Name | What it is |
-|------|-----------|
+| Name        | What it is                                                                                                                                                      |
+| ----------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | **Captain** | The autonomous agent brain. Observes, decides, acts, communicates. Uses whatever model the cascade selects. Captain is Heiwa. Merges current Spine + HeiwaClaw. |
-| **Vault** | BYOK credential store. Encrypted at rest. Trust boundary where owners deposit their API keys. |
-| **Pulse** | Provider monitoring and telemetry. Rate limit state, health, cost metering, capacity across all rate groups. Absorbs current Telemetry agent. |
-| **Wire** | The WebSocket event protocol between Hub and all clients. CLI, Web, Discord adapter — they all speak Wire. The public contract that makes Hub client-agnostic. |
+| **Vault**   | BYOK credential store. Encrypted at rest. Trust boundary where owners deposit their API keys.                                                                   |
+| **Pulse**   | Provider monitoring and telemetry. Rate limit state, health, cost metering, capacity across all rate groups. Absorbs current Telemetry agent.                   |
+| **Wire**    | The WebSocket event protocol between Hub and all clients. CLI, Web, Discord adapter — they all speak Wire. The public contract that makes Hub client-agnostic.  |
 
 ### First-class concepts
 
-| Name | What it is |
-|------|-----------|
-| **Node** | A reachable runtime endpoint. Railway container, MacBook boost node, future GPU boxes. Has health, heartbeat, and availability tracked by Pulse. Nodes are where execution physically happens — they are not providers or models. A Node hosts one or more Executors. |
-| **Executor** | A provider/model surface available on a Node. "Claude Code on Railway", "Ollama qwen3.5 on MacBook", "Codex on Railway". Has a provider account (credentials in Vault) and rate group state (capacity, limits). The Captain's rate cascade selects an Executor, not a Node — the Node is the physical host, the Executor is the capability. |
-| **Session** | The authenticated client transport context. Created when a client connects over Wire. Carries history, active tasks, and Battlefield context. Ephemeral — ends when the client disconnects or times out. Sessions do not own leases or authorization scope; they are an interaction channel, not an execution boundary. |
-| **Mission** | The durable unit of work the Captain executes. Owns its own leases. May outlive or span Sessions — when a client disconnects, active Missions continue executing. Has steps, status, leases, and artifacts. The Captain is the execution authority, not the Session. |
-| **Battlefield** | A workspace the Hub is focused on. Registered when CLI connects from a repo. Hub scopes context, tasks, file access, and history per Battlefield. An owner can have multiple Battlefields. See Battlefield data model below. |
-| **Lease** | Permission grant with scope, chain state, and routing lock. The authority mechanism — nothing executes without one. |
-| **Rate Cascade** | The routing algorithm. Spreads work across all available providers, cheapest-with-capacity first. Monitored by Pulse, executed by Captain. |
+| Name             | What it is                                                                                                                                                                                                                                                                                                                                  |
+| ---------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Node**         | A reachable runtime endpoint. Railway container, MacBook boost node, future GPU boxes. Has health, heartbeat, and availability tracked by Pulse. Nodes are where execution physically happens — they are not providers or models. A Node hosts one or more Executors.                                                                       |
+| **Executor**     | A provider/model surface available on a Node. "Claude Code on Railway", "Ollama qwen3.5 on MacBook", "Codex on Railway". Has a provider account (credentials in Vault) and rate group state (capacity, limits). The Captain's rate cascade selects an Executor, not a Node — the Node is the physical host, the Executor is the capability. |
+| **Session**      | The authenticated client transport context. Created when a client connects over Wire. Carries history, active tasks, and Battlefield context. Ephemeral — ends when the client disconnects or times out. Sessions do not own leases or authorization scope; they are an interaction channel, not an execution boundary.                     |
+| **Mission**      | The durable unit of work the Captain executes. Owns its own leases. May outlive or span Sessions — when a client disconnects, active Missions continue executing. Has steps, status, leases, and artifacts. The Captain is the execution authority, not the Session.                                                                        |
+| **Battlefield**  | A workspace the Hub is focused on. Registered when CLI connects from a repo. Hub scopes context, tasks, file access, and history per Battlefield. An owner can have multiple Battlefields. See Battlefield data model below.                                                                                                                |
+| **Lease**        | Permission grant with scope, chain state, and routing lock. The authority mechanism — nothing executes without one.                                                                                                                                                                                                                         |
+| **Rate Cascade** | The routing algorithm. Spreads work across all available providers, cheapest-with-capacity first. Monitored by Pulse, executed by Captain.                                                                                                                                                                                                  |
 
 ### Clients/adapters (not standalone products)
 
-| Name | What it is |
-|------|-----------|
+| Name                  | What it is                                                                                                                            |
+| --------------------- | ------------------------------------------------------------------------------------------------------------------------------------- |
 | **Heiwa for Discord** | Adapter that renders Hub events as DMs/embeds/buttons. Translates Discord interactions into Hub API calls. Runs in the Hub container. |
 
 ### Internal infrastructure (no product names)
@@ -106,16 +106,16 @@ Each model/provider/rate group is fully monitored by Pulse: rate limit state, re
 
 ### Core resources
 
-| Resource | What it represents |
-|----------|--------------------|
-| **Session** | Authenticated client transport context. Has history, active tasks, Battlefield context. Does not own leases — it is an interaction channel, not an execution boundary. |
-| **Mission** | Durable work unit. Owns its leases. Steps, status, artifacts. May outlive or span Sessions. The Captain continues executing Missions after client disconnect. |
-| **Event** | Something that happened — immutable, append-only. Task lifecycle, Captain observations, approvals, errors. |
-| **Lease** | Permission grant with scope, chain state, routing lock. |
-| **Credential** | Owner's BYOK keys. Encrypted at rest in Vault. |
-| **Node** | Reachable runtime endpoint with health and heartbeat. |
-| **Executor** | Provider/model surface on a Node with rate group state and credentials. |
-| **Battlefield** | Workspace with scoped context and history. |
+| Resource        | What it represents                                                                                                                                                     |
+| --------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Session**     | Authenticated client transport context. Has history, active tasks, Battlefield context. Does not own leases — it is an interaction channel, not an execution boundary. |
+| **Mission**     | Durable work unit. Owns its leases. Steps, status, artifacts. May outlive or span Sessions. The Captain continues executing Missions after client disconnect.          |
+| **Event**       | Something that happened — immutable, append-only. Task lifecycle, Captain observations, approvals, errors.                                                             |
+| **Lease**       | Permission grant with scope, chain state, routing lock.                                                                                                                |
+| **Credential**  | Owner's BYOK keys. Encrypted at rest in Vault.                                                                                                                         |
+| **Node**        | Reachable runtime endpoint with health and heartbeat.                                                                                                                  |
+| **Executor**    | Provider/model surface on a Node with rate group state and credentials.                                                                                                |
+| **Battlefield** | Workspace with scoped context and history.                                                                                                                             |
 
 ### Client protocol
 
@@ -231,16 +231,16 @@ Tenant zero. No special-casing. Same template, same Hub, same Captain.
 
 ## What This Design Kills
 
-| Current name | Fate |
-|-------------|------|
-| Messenger agent | Becomes Heiwa for Discord client adapter |
-| Spine agent | Absorbed into Captain |
-| HeiwaClaw agent | Absorbed into Captain |
-| Telemetry agent | Becomes Pulse subsystem |
-| HeiwaBench | Becomes a Captain capability (self-evaluation) |
-| HeiwaCells | Becomes Captain's persona/identity catalog |
-| Multi-tenant user_id isolation | Reframed as ownership and audit scoping |
-| Discord-first assumption | Hub-first, Discord is an equal client |
+| Current name                   | Fate                                           |
+| ------------------------------ | ---------------------------------------------- |
+| Messenger agent                | Becomes Heiwa for Discord client adapter       |
+| Spine agent                    | Absorbed into Captain                          |
+| HeiwaClaw agent                | Absorbed into Captain                          |
+| Telemetry agent                | Becomes Pulse subsystem                        |
+| HeiwaBench                     | Becomes a Captain capability (self-evaluation) |
+| HeiwaCells                     | Becomes Captain's persona/identity catalog     |
+| Multi-tenant user_id isolation | Reframed as ownership and audit scoping        |
+| Discord-first assumption       | Hub-first, Discord is an equal client          |
 
 ## Object Hierarchy
 
@@ -277,6 +277,7 @@ Three distinct concepts, layered:
 - **Provider account** — an authenticated relationship with a provider: "my Claude Pro subscription", "my Google AI Pro account". Tracked in STDB `provider_accounts` table. Has credentials in Vault, rate group state in `rate_group_state` table.
 
 Relationships:
+
 - One Node hosts many Executors (Railway hosts Claude Code, Codex, Gemini CLI, Antigravity)
 - One provider account backs many Executors (Google AI Pro backs Gemini CLI + Antigravity rate groups)
 - Some Executors have no provider account (MacBook Ollama — local, no auth)
@@ -303,12 +304,12 @@ The "observe to enforce" flip (step 8) refers specifically to Lease enforcement:
 ## Critical Path (implementation order)
 
 1. App-layer ownership and audit scoping (migrate `user_id` → `owner_id` + `principal_id`)
-2. BYOK Vault routing integration (per-owner credentials feed the rate cascade) — *parallelizable with step 3*
-3. Wire protocol (WebSocket client endpoint, event schema, catch-up) — *parallelizable with step 2*
-4. Captain merge (Spine + HeiwaClaw into captain.py) — *depends on step 3 for event delivery testing*
+2. BYOK Vault routing integration (per-owner credentials feed the rate cascade) — _parallelizable with step 3_
+3. Wire protocol (WebSocket client endpoint, event schema, catch-up) — _parallelizable with step 2_
+4. Captain merge (Spine + HeiwaClaw into captain.py) — _depends on step 3 for event delivery testing_
 5. Pulse subsystem (absorb Telemetry, per-model/provider/rate-group monitoring)
-6. Heiwa CLI battlefield registration and Wire client — *primary operator surface, built before Discord adapter*
-7. Heiwa for Discord adapter (decompose Messenger) — *parallelizable with step 6*
+6. Heiwa CLI battlefield registration and Wire client — _primary operator surface, built before Discord adapter_
+7. Heiwa for Discord adapter (decompose Messenger) — _parallelizable with step 6_
 8. Scope enforcement flip (observe to enforce mode)
 9. Railway template packaging
 

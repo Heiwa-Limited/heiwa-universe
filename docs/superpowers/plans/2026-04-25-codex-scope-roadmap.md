@@ -12,15 +12,15 @@
 
 Codex audited the tracked repo on 2026-04-25 and found ~245k LOC tracked vs an estimated ~40k LOC of real product. Empirical recount on `main` confirms:
 
-| Zone | Tracked LOC | Class |
-| --- | --- | --- |
-| `packages/heiwa_skills` | 86,477 | legacy / reference |
-| `packages/heiwa_bindings` | 51,046 | generated |
-| `apps/heiwa_hub` | 24,793 | legacy Python surface |
-| `docs/superpowers` + `docs/design` | ~28k | reference / planning |
-| `crates/*` | 8,771 | **product** |
-| `apps/heiwa_shell` + `heiwa_core` + `heiwa_app` + `heiwa_orchestrator` | 17,462 | **product** |
-| `packages/heiwa_sdk` + `heiwa_protocol` + `heiwa_cli` | 14,103 | **product (mostly)** |
+| Zone                                                                   | Tracked LOC | Class                 |
+| ---------------------------------------------------------------------- | ----------- | --------------------- |
+| `packages/heiwa_skills`                                                | 86,477      | legacy / reference    |
+| `packages/heiwa_bindings`                                              | 51,046      | generated             |
+| `apps/heiwa_hub`                                                       | 24,793      | legacy Python surface |
+| `docs/superpowers` + `docs/design`                                     | ~28k        | reference / planning  |
+| `crates/*`                                                             | 8,771       | **product**           |
+| `apps/heiwa_shell` + `heiwa_core` + `heiwa_app` + `heiwa_orchestrator` | 17,462      | **product**           |
+| `packages/heiwa_sdk` + `heiwa_protocol` + `heiwa_cli`                  | 14,103      | **product (mostly)**  |
 
 Real product surface: ~40k LOC. Slop ratio: ~80%. Without a defined boundary and CI enforcement, contributor attention dilutes, builds slow, and "is X production?" gets answered by guess.
 
@@ -58,14 +58,14 @@ Operationalize Codex's 5-step scope as concrete, sequenced work. Each plan produ
 ## Dependency graph
 
 ```
-                  Plan 1 (Surface)
-                  /       |        \
-                 v        v         v
-         Plan 2          Plan 3    Plan 4
-       (Quarantine)    (CI Gates) (OSS Demo)
-                          ^
-                          |
-                  needs Plan 2 done
+           Plan 1 (Surface)
+           /       |        \
+          v        v         v
+  Plan 2          Plan 3    Plan 4
+(Quarantine)    (CI Gates) (OSS Demo)
+                   ^
+                   |
+           needs Plan 2 done
 ```
 
 - **Plan 1** must land first. Its taxonomy and audit script are inputs to everything else.

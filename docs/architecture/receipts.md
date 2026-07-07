@@ -14,21 +14,21 @@ The schema is small on purpose. Twelve fields. Everything else is a function ove
 
 ## Schema
 
-| Field | Type | Source | Notes |
-| --- | --- | --- | --- |
-| `id` | ULID | runtime | sortable, monotonic |
-| `at` | timestamp | runtime | UTC, ISO-8601 |
-| `env` | enum | runtime | `local` / `oauth` / `api` |
-| `provider` | string | runtime | `ollama` / `claude-code` / `codex` / `gemini` / `openrouter` / ... |
-| `model` | string | runtime | provider-namespaced model id (e.g. `claude-sonnet-4-6`) |
-| `agent` | string | caller | which operator agent invoked this — `coding`, `strategy`, `trading`, `summarise`, ... |
-| `tokens_in` | int | provider | prompt tokens |
-| `tokens_out` | int | provider | completion tokens |
-| `latency_ms` | int | runtime | end-to-end including queue + network |
-| `actual_cost_cad` | decimal | rate-table × tokens | always CAD as base unit; presentation in other currencies is a divide-at-read-time overlay |
-| `counterfactual_cost_cad` | decimal | api-rate-table × tokens | what the same tokens would cost on the metered API lane for this model |
-| `session_id` | ULID | runtime | groups related receipts |
-| `parent_id` | ULID? | runtime | optional — for sub-call attribution (agent-spawned receipts point at the parent receipt) |
+| Field                     | Type      | Source                  | Notes                                                                                      |
+| ------------------------- | --------- | ----------------------- | ------------------------------------------------------------------------------------------ |
+| `id`                      | ULID      | runtime                 | sortable, monotonic                                                                        |
+| `at`                      | timestamp | runtime                 | UTC, ISO-8601                                                                              |
+| `env`                     | enum      | runtime                 | `local` / `oauth` / `api`                                                                  |
+| `provider`                | string    | runtime                 | `ollama` / `claude-code` / `codex` / `gemini` / `openrouter` / ...                         |
+| `model`                   | string    | runtime                 | provider-namespaced model id (e.g. `claude-sonnet-4-6`)                                    |
+| `agent`                   | string    | caller                  | which operator agent invoked this — `coding`, `strategy`, `trading`, `summarise`, ...      |
+| `tokens_in`               | int       | provider                | prompt tokens                                                                              |
+| `tokens_out`              | int       | provider                | completion tokens                                                                          |
+| `latency_ms`              | int       | runtime                 | end-to-end including queue + network                                                       |
+| `actual_cost_cad`         | decimal   | rate-table × tokens     | always CAD as base unit; presentation in other currencies is a divide-at-read-time overlay |
+| `counterfactual_cost_cad` | decimal   | api-rate-table × tokens | what the same tokens would cost on the metered API lane for this model                     |
+| `session_id`              | ULID      | runtime                 | groups related receipts                                                                    |
+| `parent_id`               | ULID?     | runtime                 | optional — for sub-call attribution (agent-spawned receipts point at the parent receipt)   |
 
 ### Why `env × provider × model × agent`
 
@@ -37,7 +37,7 @@ Four dimensions, each independently meaningful:
 - **`env`** — where it ran. Determines whether incremental cost is zero (local, oauth) or metered (api).
 - **`provider`** — who served it. Provider-level rollups answer "is Claude Code worth the sub?" or "is OpenRouter still our cheapest API gateway?"
 - **`model`** — which variant. Per-model rollups expose unused capability ("we paid for opus but rarely call it") or unexpected escalation ("trading agent kept hitting gpt-4o because Sonnet was rate-limited").
-- **`agent`** — what asked for it. Per-agent rollups attribute spend to the operator's *intent* rather than the routing decision.
+- **`agent`** — what asked for it. Per-agent rollups attribute spend to the operator's _intent_ rather than the routing decision.
 
 Removing any one dimension collapses a question the operator can already ask today. Adding more (region, sandbox, lease) is reserved for when a real use case demands it.
 
@@ -178,13 +178,13 @@ Default presentation reads the operator's locale; `~/.heiwa/config.toml` sets a 
 
 ## Privacy boundary
 
-| Surface | What is visible |
-| --- | --- |
-| Local SQLite (`~/.heiwa/receipts.db`) | full record |
-| Local prompts (`~/.heiwa/prompts/<id>.txt`) | prompt body (gzip) |
-| STDB cloud (receipt headers) | id, at, env, provider, model, optional-redacted agent, tokens, latency, both cost columns |
-| `heiwa receipts export` (default) | full record minus prompt body |
-| `heiwa receipts export --redact` | tokens + cost only; no agent, no model, no provider — useful for audit attestation without disclosure |
+| Surface                                     | What is visible                                                                                       |
+| ------------------------------------------- | ----------------------------------------------------------------------------------------------------- |
+| Local SQLite (`~/.heiwa/receipts.db`)       | full record                                                                                           |
+| Local prompts (`~/.heiwa/prompts/<id>.txt`) | prompt body (gzip)                                                                                    |
+| STDB cloud (receipt headers)                | id, at, env, provider, model, optional-redacted agent, tokens, latency, both cost columns             |
+| `heiwa receipts export` (default)           | full record minus prompt body                                                                         |
+| `heiwa receipts export --redact`            | tokens + cost only; no agent, no model, no provider — useful for audit attestation without disclosure |
 
 ## Schema versioning
 

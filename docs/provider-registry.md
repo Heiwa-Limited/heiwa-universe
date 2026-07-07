@@ -2,16 +2,16 @@
 
 ## Runtime and infrastructure providers
 
-| Role | Provider | Status | Notes |
-|:-----|:---------|:-------|:------|
-| Installed operator runtime | `heiwa` on the user's machine | Active | Primary cockpit, routing, bounded execution, and provider-wrapping surface |
-| Local/provider runtimes | Ollama, provider CLIs, API providers | Wrapped | Provider-owned auth, quota, inference, and native tooling remain provider-owned |
-| Backend evidence plane | SpacetimeDB maincloud | Active target | Backend adjudication, subscription, and evidence ledger on `maincloud.spacetimedb.com` |
-| Source control / CI / release | GitHub | Active | Repo, pull requests, Actions, Releases, and release evidence |
-| Public docs | GitHub Pages | Active | MkDocs Material documentation from this repository |
-| Hosted services | Owner-managed local or Cloudflare-backed hosts | Optional support infrastructure | Disabled for the owner-first phase unless a specific service graduates with approval |
-| Public edge | Cloudflare | Support infrastructure | DNS, edge, and proxy surface where needed |
-| Internal vertical runtimes | Isolated service providers | Internal preview | Surfaces such as trading stay isolated until they graduate into first-class product surfaces |
+| Role                          | Provider                                       | Status                          | Notes                                                                                        |
+| :---------------------------- | :--------------------------------------------- | :------------------------------ | :------------------------------------------------------------------------------------------- |
+| Installed operator runtime    | `heiwa` on the user's machine                  | Active                          | Primary cockpit, routing, bounded execution, and provider-wrapping surface                   |
+| Local/provider runtimes       | Ollama, provider CLIs, API providers           | Wrapped                         | Provider-owned auth, quota, inference, and native tooling remain provider-owned              |
+| Backend evidence plane        | SpacetimeDB maincloud                          | Active target                   | Backend adjudication, subscription, and evidence ledger on `maincloud.spacetimedb.com`       |
+| Source control / CI / release | GitHub                                         | Active                          | Repo, pull requests, Actions, Releases, and release evidence                                 |
+| Public docs                   | GitHub Pages                                   | Active                          | MkDocs Material documentation from this repository                                           |
+| Hosted services               | Owner-managed local or Cloudflare-backed hosts | Optional support infrastructure | Disabled for the owner-first phase unless a specific service graduates with approval         |
+| Public edge                   | Cloudflare                                     | Support infrastructure          | DNS, edge, and proxy surface where needed                                                    |
+| Internal vertical runtimes    | Isolated service providers                     | Internal preview                | Surfaces such as trading stay isolated until they graduate into first-class product surfaces |
 
 ## Public-safe posture
 

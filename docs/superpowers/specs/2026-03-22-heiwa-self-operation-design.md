@@ -83,20 +83,20 @@ Heiwa needs one authoritative lane registry in SpacetimeDB. Git-visible manifest
 
 Each lane record should include:
 
-| Field | Purpose |
-| --- | --- |
-| `lane_id` | Stable identity for the lane |
-| `lane_type` | `research`, `build`, `ops`, `review` |
-| `branch_name` | Git branch |
-| `worktree_path` | Filesystem location if checked out |
-| `origin_trigger` | DM, incident, autoresearch finding, CI failure, deploy drift, etc. |
-| `owning_agent` | Which agent/workflow is responsible |
-| `target_surface` | App, package, doc set, infra surface, provider layer |
-| `target_environment` | `dev`, `staging`, `prod` |
-| `provider_plan` | Which providers are expected for planning, build, review, and ops |
-| `status` | `active`, `blocked`, `verifying`, `merged`, `cleanup_pending`, `archived` |
-| `pr_url` / `deploy_ref` | Remote reconciliation pointers |
-| `rollback_context` | Recovery notes for risky mutations |
+| Field                   | Purpose                                                                   |
+| ----------------------- | ------------------------------------------------------------------------- |
+| `lane_id`               | Stable identity for the lane                                              |
+| `lane_type`             | `research`, `build`, `ops`, `review`                                      |
+| `branch_name`           | Git branch                                                                |
+| `worktree_path`         | Filesystem location if checked out                                        |
+| `origin_trigger`        | DM, incident, autoresearch finding, CI failure, deploy drift, etc.        |
+| `owning_agent`          | Which agent/workflow is responsible                                       |
+| `target_surface`        | App, package, doc set, infra surface, provider layer                      |
+| `target_environment`    | `dev`, `staging`, `prod`                                                  |
+| `provider_plan`         | Which providers are expected for planning, build, review, and ops         |
+| `status`                | `active`, `blocked`, `verifying`, `merged`, `cleanup_pending`, `archived` |
+| `pr_url` / `deploy_ref` | Remote reconciliation pointers                                            |
+| `rollback_context`      | Recovery notes for risky mutations                                        |
 
 The STDB-backed registry is the source of truth for “what Heiwa is doing” and “what can be safely cleaned up.”
 

@@ -4,7 +4,8 @@
 
 **Goal:** Implement a self-improving memory layer that indexes the repository, records execution outcomes, and enriches future task dispatches with relevant context.
 
-**Architecture:** 
+**Architecture:**
+
 - **Knowledge Embeddings**: Use `qwen3-embedding:0.6b` via Ollama to index code and docs.
 - **Execution Memory**: Record every task's intent, model, effort, and outcome (PASS/FAIL).
 - **Context Enrichment**: Semantic search over `knowledge_embeddings` during dispatch to provide relevant context files.

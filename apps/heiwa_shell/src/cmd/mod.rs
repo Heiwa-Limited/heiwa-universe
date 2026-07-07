@@ -5,6 +5,7 @@ pub mod calendar;
 pub mod capabilities;
 pub mod compress;
 pub mod connectors;
+pub mod cost;
 pub mod goal;
 pub mod life;
 pub mod mail;

@@ -1,6 +1,7 @@
 # Design Spec: Routing Unification (2026-03-23)
 
 ## Status: DRAFT (post-review revision)
+
 **Date:** Sunday, March 23, 2026
 **Author:** Claude Code (Heiwa Class 3 Executor)
 **Reviewed by:** Gemini CLI (peer review during brainstorming)
@@ -48,13 +49,13 @@ Caller -> llm_generate(prompt, intent, risk)
 
 ### Responsibilities After Unification
 
-| Component | Decides | Executes |
-|---|---|---|
-| ComputeRouter | Which model, provider, fallback chain | Nothing |
-| LocalLLMEngine | Nothing | Provider API calls, retries, response normalization |
-| ProviderRegistry | Nothing | Nothing (metadata lookup only) |
-| Facade (`llm_generate`) | Nothing | Wires router -> executor, manages fallback/re-query loop |
-| ai_router.json | Nothing | Nothing (bootstrap seed for STDB, not a live override) |
+| Component               | Decides                               | Executes                                                 |
+| ----------------------- | ------------------------------------- | -------------------------------------------------------- |
+| ComputeRouter           | Which model, provider, fallback chain | Nothing                                                  |
+| LocalLLMEngine          | Nothing                               | Provider API calls, retries, response normalization      |
+| ProviderRegistry        | Nothing                               | Nothing (metadata lookup only)                           |
+| Facade (`llm_generate`) | Nothing                               | Wires router -> executor, manages fallback/re-query loop |
+| ai_router.json          | Nothing                               | Nothing (bootstrap seed for STDB, not a live override)   |
 
 ### What Changes
 
@@ -91,6 +92,7 @@ class RoutedPlan:
 ```
 
 `retry_policy` controls behavior on chain exhaustion:
+
 - `exhaust_then_reroute`: walk primary + fallbacks locally, then re-query ComputeRouter with updated availability. This is the default.
 - `reroute_immediately`: skip fallbacks and re-query immediately. Reserved for cases where the primary failure indicates systemic provider issues.
 
@@ -188,6 +190,7 @@ Fallbacks are selected from the same filtered tier set, ordered by cost (cheapes
 ### Runtime Parameter Contract
 
 `route_inference()` accepts an optional `runtime` parameter with the same semantics as `_select_model_from_tiers()`:
+
 - `"sovereign"` or `"boost"` / `"macbook"`: only local providers (ollama, local, vllm, litellm)
 - `"railway"`: exclude local providers
 - `"both"`: allow both local and remote providers

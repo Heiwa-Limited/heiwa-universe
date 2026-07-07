@@ -13,6 +13,7 @@
 ### Task 1: Create `heiwa_protocol` Crate
 
 **Files:**
+
 - Create: `crates/heiwa_protocol/Cargo.toml`
 - Create: `crates/heiwa_protocol/src/lib.rs`
 - Modify: `Cargo.toml` (workspace members)
@@ -92,6 +93,7 @@ git commit -m "feat: initial heiwa_protocol crate for cockpit state"
 ### Task 2: Create `heiwa_tui` Crate
 
 **Files:**
+
 - Create: `crates/heiwa_tui/Cargo.toml`
 - Create: `crates/heiwa_tui/src/lib.rs`
 
@@ -164,6 +166,7 @@ git commit -m "feat: scaffold native cockpit TUI with ratatui"
 ### Task 3: Refactor `apps/heiwa_shell` to use Protocol
 
 **Files:**
+
 - Modify: `apps/heiwa_shell/Cargo.toml`
 - Modify: `apps/heiwa_shell/src/main.rs`
 
@@ -206,6 +209,7 @@ git commit -m "refactor: wire protocol state and TUI scaffold into heiwa_shell"
 ### Task 4: Implement Deterministic Routing Logic
 
 **Files:**
+
 - Modify: `apps/heiwa_shell/src/main.rs`
 - Modify: `crates/heiwa_protocol/src/lib.rs`
 
@@ -232,6 +236,7 @@ git commit -m "feat: implement deterministic routing precedence and intent parsi
 ### Task 5: Migrate REPL to Event Model
 
 **Files:**
+
 - Modify: `apps/heiwa_shell/src/main.rs`
 - Modify: `crates/heiwa_loop/src/lib.rs`
 
@@ -254,6 +259,7 @@ git commit -m "refactor: migrate REPL execution to protocol-driven event model"
 ### Task 6: Boot Posture & Fallback
 
 **Files:**
+
 - Modify: `apps/heiwa_shell/src/main.rs`
 
 - [ ] **Step 1: Implement TTY detection**

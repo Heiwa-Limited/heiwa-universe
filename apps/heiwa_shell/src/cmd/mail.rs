@@ -435,7 +435,7 @@ fn gmail_message_to_row(message: &Value, account: &str) -> Option<Value> {
         .get("internalDate")
         .and_then(Value::as_str)
         .and_then(|ms| ms.parse::<i64>().ok())
-        .and_then(|ms| chrono::DateTime::from_timestamp_millis(ms))
+        .and_then(chrono::DateTime::from_timestamp_millis)
         .map(|dt| dt.to_rfc3339())
         .unwrap_or_default();
 
@@ -635,7 +635,10 @@ fn triage(args: &[String]) -> Result<()> {
     let mut skipped_existing = 0usize;
 
     for row in rows.iter().take(limit) {
-        let action = row.get("action").and_then(Value::as_str).unwrap_or("digest");
+        let action = row
+            .get("action")
+            .and_then(Value::as_str)
+            .unwrap_or("digest");
         let suggestion = suggested_action(row);
         let mut item = json!({
             "message": row,
@@ -645,8 +648,12 @@ fn triage(args: &[String]) -> Result<()> {
 
         if action == "draft" {
             let request_id = triage_request_id(row);
-            let already = crate::cmd::approvals::requests_dir().join(format!("{request_id}.json")).exists()
-                || crate::cmd::approvals::decisions_dir().join(format!("{request_id}.json")).exists();
+            let already = crate::cmd::approvals::requests_dir()
+                .join(format!("{request_id}.json"))
+                .exists()
+                || crate::cmd::approvals::decisions_dir()
+                    .join(format!("{request_id}.json"))
+                    .exists();
             if already {
                 skipped_existing += 1;
                 item["staged"] = json!({"request_id": request_id, "status": "already_staged"});
@@ -737,7 +744,10 @@ fn message_summary(row: &Value) -> String {
 }
 
 fn suggested_action(row: &Value) -> Value {
-    let action = row.get("action").and_then(Value::as_str).unwrap_or("digest");
+    let action = row
+        .get("action")
+        .and_then(Value::as_str)
+        .unwrap_or("digest");
     let score = row.get("score").and_then(Value::as_i64).unwrap_or(0);
     match action {
         "draft" => json!({
@@ -809,7 +819,7 @@ fn route_for_draft() -> Option<crate::RouteResult> {
         ledger.as_ref(),
         now,
     ) {
-        Ok(crate::RouteOutcome::Routed(route)) if route.provider == "ollama" => Some(route),
+        Ok(crate::RouteOutcome::Routed(route)) if route.provider == "ollama" => Some(*route),
         _ => None,
     }
 }
@@ -821,8 +831,8 @@ fn route_for_draft() -> Option<crate::RouteResult> {
 /// successful generations are recorded in the quota ledger so "auto"
 /// routing sees real local usage.
 fn generate_draft(row: &Value) -> (String, String) {
-    let base = std::env::var("HEIWA_OLLAMA_BASE")
-        .unwrap_or_else(|_| "http://localhost:11434".to_string());
+    let base =
+        std::env::var("HEIWA_OLLAMA_BASE").unwrap_or_else(|_| "http://localhost:11434".to_string());
     let route = route_for_draft();
     let model = std::env::var("HEIWA_OLLAMA_MODEL")
         .ok()
@@ -899,7 +909,10 @@ fn record_draft_usage(route: &crate::RouteResult, ollama_response: &Value) {
 }
 
 pub(crate) fn template_draft(row: &Value) -> String {
-    let subject = row.get("subject").and_then(Value::as_str).unwrap_or("your email");
+    let subject = row
+        .get("subject")
+        .and_then(Value::as_str)
+        .unwrap_or("your email");
     format!(
         "Hi — thanks for your note about \"{subject}\". I've seen it and will \
          follow up with a proper reply shortly. — Devon"
@@ -1079,7 +1092,7 @@ pub(crate) fn priority_rows() -> Vec<Value> {
         .into_iter()
         .map(|row| (priority_score(&row, today), row))
         .collect();
-    scored.sort_by(|a, b| b.0.cmp(&a.0));
+    scored.sort_by_key(|row| std::cmp::Reverse(row.0));
     scored
         .into_iter()
         .take(PRIORITY_LIMIT)
@@ -1304,10 +1317,14 @@ mod tests {
 
     #[test]
     fn bulk_sender_suggestion_is_delete_and_honest_about_no_bridge() {
-        let row = json!({"sender": "noreply@x.com", "subject": "w", "score": -2, "action": "digest"});
+        let row =
+            json!({"sender": "noreply@x.com", "subject": "w", "score": -2, "action": "digest"});
         let suggestion = suggested_action(&row);
         assert_eq!(suggestion["action"], "delete");
-        assert!(suggestion["reason"].as_str().unwrap().contains("not staged"));
+        assert!(suggestion["reason"]
+            .as_str()
+            .unwrap()
+            .contains("not staged"));
     }
 
     #[test]

@@ -11,16 +11,16 @@ only when that path is configured.
 
 ## Required Local Inputs
 
-| Input | Purpose |
-| --- | --- |
-| `~/.heiwa/config.toml` | Runtime configuration |
-| `~/.heiwa/accounts.json` | Provider/account registry |
-| `~/.heiwa/machine.json` | Local machine identity and capability manifest |
-| `~/.heiwa/state/` | Local runtime state, approvals, worker heartbeats |
-| `~/.claude/`, `~/.codex/`, `~/.gemini/` | Provider-owned auth and hook posture |
-| `spacetime login` shell identity | Optional SpacetimeDB Maincloud sync/adjudication auth; canonical publisher/operator path |
-| `STDB_TOKEN` | Legacy/compat SpacetimeDB token material only; not the preferred Heiwa operator auth boundary |
-| `CLOUDFLARE_API_TOKEN` | Optional edge work only; not needed for local user functionality |
+| Input                                   | Purpose                                                                                       |
+| --------------------------------------- | --------------------------------------------------------------------------------------------- |
+| `~/.heiwa/config.toml`                  | Runtime configuration                                                                         |
+| `~/.heiwa/accounts.json`                | Provider/account registry                                                                     |
+| `~/.heiwa/machine.json`                 | Local machine identity and capability manifest                                                |
+| `~/.heiwa/state/`                       | Local runtime state, approvals, worker heartbeats                                             |
+| `~/.claude/`, `~/.codex/`, `~/.gemini/` | Provider-owned auth and hook posture                                                          |
+| `spacetime login` shell identity        | Optional SpacetimeDB Maincloud sync/adjudication auth; canonical publisher/operator path      |
+| `STDB_TOKEN`                            | Legacy/compat SpacetimeDB token material only; not the preferred Heiwa operator auth boundary |
+| `CLOUDFLARE_API_TOKEN`                  | Optional edge work only; not needed for local user functionality                              |
 
 ## Boot Contract
 
@@ -40,12 +40,12 @@ only when that path is configured.
 GitHub and Cloudflare form the public install source, but they do not have the
 same authority.
 
-| Surface | Authority |
-| --- | --- |
-| GitHub repository | Canonical source code, tags, CI evidence, release artifacts, checksums, and install scripts |
-| GitHub Releases | Canonical binary/archive distribution and version provenance |
-| Cloudflare | Public edge, docs, install landing pages, update manifest cache, status, and future remote attach |
-| Local machine | Installed binary, local config, provider auth, local state, and user-approved side effects |
+| Surface           | Authority                                                                                         |
+| ----------------- | ------------------------------------------------------------------------------------------------- |
+| GitHub repository | Canonical source code, tags, CI evidence, release artifacts, checksums, and install scripts       |
+| GitHub Releases   | Canonical binary/archive distribution and version provenance                                      |
+| Cloudflare        | Public edge, docs, install landing pages, update manifest cache, status, and future remote attach |
+| Local machine     | Installed binary, local config, provider auth, local state, and user-approved side effects        |
 
 Cloudflare may front or cache install/update material, but it must point back to
 GitHub release identity and checksums. Cloudflare must not become a second
@@ -255,14 +255,14 @@ pre-existing or peer-agent changes.
 
 ## Model Tier Matrix
 
-| Lane | Primary | Secondary | Notes |
-| --- | --- | --- | --- |
-| Routine chat/status/audit | `ollama/*` where sufficient | Gemini CLI / Antigravity | Cheapest acceptable route first |
-| Build/code | Codex CLI | Claude Code, Gemini CLI, Ollama coding model | Provider CLIs own their auth and quota semantics |
-| Research/long context | Gemini CLI | Antigravity, Claude Code | Escalate only when local context is insufficient |
-| Review/strategy | Claude Code / Gemini | Codex | Use premium lanes intentionally |
-| Sovereign work | local `ollama/*` tiers | none | Local-only providers only |
-| Embeddings | `ollama/qwen3-embedding:0.6b` | none | Local runtime default |
+| Lane                      | Primary                       | Secondary                                    | Notes                                            |
+| ------------------------- | ----------------------------- | -------------------------------------------- | ------------------------------------------------ |
+| Routine chat/status/audit | `ollama/*` where sufficient   | Gemini CLI / Antigravity                     | Cheapest acceptable route first                  |
+| Build/code                | Codex CLI                     | Claude Code, Gemini CLI, Ollama coding model | Provider CLIs own their auth and quota semantics |
+| Research/long context     | Gemini CLI                    | Antigravity, Claude Code                     | Escalate only when local context is insufficient |
+| Review/strategy           | Claude Code / Gemini          | Codex                                        | Use premium lanes intentionally                  |
+| Sovereign work            | local `ollama/*` tiers        | none                                         | Local-only providers only                        |
+| Embeddings                | `ollama/qwen3-embedding:0.6b` | none                                         | Local runtime default                            |
 
 ## Verification
 

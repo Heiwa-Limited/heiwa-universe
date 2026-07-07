@@ -9,6 +9,7 @@
 **Tech Stack:** Rust (tokio, serde, reqwest, tracing), SpacetimeDB, TypeScript (SvelteKit + generated STDB SDK), npm, bash, Railway, Cloudflare Pages
 
 **Reference Docs:**
+
 - `docs/enterprise/HEIWA_AGENTIC_DIGITAL_ENTITY_DREX_2026-04-01.md`
 - `docs/superpowers/plans/2026-04-01-drex-runtime-routing.md`
 - `config/swarm/END_STATE_2026-03.md`
@@ -39,53 +40,55 @@ Each track must leave the repo in a working state. Do not delete Python runtime 
 ## File Structure
 
 ### New Files
-| File | Responsibility |
-|------|----------------|
-| `apps/heiwa_orchestrator/Cargo.toml` | Rust orchestration binary crate manifest |
-| `apps/heiwa_orchestrator/src/lib.rs` | Shared orchestration modules exposed to tests and `main.rs` |
-| `apps/heiwa_orchestrator/src/main.rs` | Production Rust control-plane entrypoint |
-| `apps/heiwa_orchestrator/src/config.rs` | Environment/config parsing now spread across `start.sh` + Python boot |
-| `apps/heiwa_orchestrator/src/stdb/mod.rs` | STDB connection, subscription, reducer bridge layer |
-| `apps/heiwa_orchestrator/src/runtime/mod.rs` | Runtime supervisor, task loops, worker orchestration |
-| `apps/heiwa_orchestrator/src/drex/mod.rs` | DREX module root |
-| `apps/heiwa_orchestrator/src/drex/vector.rs` | Rust `DrexVector` and supporting types |
-| `apps/heiwa_orchestrator/src/drex/policy.rs` | Policy loading, weight matrices, authority gates |
-| `apps/heiwa_orchestrator/src/drex/scorer.rs` | DREX scoring and route evaluation |
-| `apps/heiwa_orchestrator/src/drex/router.rs` | Macro/meso/micro selection and route decision assembly |
-| `apps/heiwa_orchestrator/tests/bootstrap_smoke.rs` | Crate-level boot/config smoke tests |
-| `apps/heiwa_orchestrator/tests/drex_scoring.rs` | DREX axis/scoring parity tests |
-| `apps/heiwa_orchestrator/tests/drex_persistence.rs` | DREX decision/failure persistence tests |
-| `packages/heiwa_bindings/rust/Cargo.toml` | Make generated Rust bindings importable as a crate |
-| `packages/heiwa_bindings/rust/src/lib.rs` | Stable crate entrypoint over generated Rust bindings |
-| `packages/heiwa_bindings/typescript/package.json` | Make generated TS bindings importable from the web app |
-| `packages/heiwa_bindings/typescript/tsconfig.json` | Local TS compiler settings for generated bindings |
-| `apps/heiwa_web/package.json` | TypeScript web app manifest |
-| `apps/heiwa_web/tsconfig.json` | TypeScript compiler configuration |
-| `apps/heiwa_web/svelte.config.js` | SvelteKit configuration |
-| `apps/heiwa_web/vite.config.ts` | Vite/SvelteKit build configuration |
-| `apps/heiwa_web/src/routes/+page.svelte` | Initial operator landing page |
-| `apps/heiwa_web/src/routes/routing/+page.svelte` | Route/DREX decision view |
-| `apps/heiwa_web/src/lib/stdb/client.ts` | TS STDB client wrapper over generated bindings |
-| `apps/heiwa_web/src/lib/types/drex.ts` | TS mirror types for DREX decision records |
-| `apps/heiwa_hub/scripts/run_legacy_python_hub.sh` | Explicit fallback launcher during cutover |
+
+| File                                                | Responsibility                                                        |
+| --------------------------------------------------- | --------------------------------------------------------------------- |
+| `apps/heiwa_orchestrator/Cargo.toml`                | Rust orchestration binary crate manifest                              |
+| `apps/heiwa_orchestrator/src/lib.rs`                | Shared orchestration modules exposed to tests and `main.rs`           |
+| `apps/heiwa_orchestrator/src/main.rs`               | Production Rust control-plane entrypoint                              |
+| `apps/heiwa_orchestrator/src/config.rs`             | Environment/config parsing now spread across `start.sh` + Python boot |
+| `apps/heiwa_orchestrator/src/stdb/mod.rs`           | STDB connection, subscription, reducer bridge layer                   |
+| `apps/heiwa_orchestrator/src/runtime/mod.rs`        | Runtime supervisor, task loops, worker orchestration                  |
+| `apps/heiwa_orchestrator/src/drex/mod.rs`           | DREX module root                                                      |
+| `apps/heiwa_orchestrator/src/drex/vector.rs`        | Rust `DrexVector` and supporting types                                |
+| `apps/heiwa_orchestrator/src/drex/policy.rs`        | Policy loading, weight matrices, authority gates                      |
+| `apps/heiwa_orchestrator/src/drex/scorer.rs`        | DREX scoring and route evaluation                                     |
+| `apps/heiwa_orchestrator/src/drex/router.rs`        | Macro/meso/micro selection and route decision assembly                |
+| `apps/heiwa_orchestrator/tests/bootstrap_smoke.rs`  | Crate-level boot/config smoke tests                                   |
+| `apps/heiwa_orchestrator/tests/drex_scoring.rs`     | DREX axis/scoring parity tests                                        |
+| `apps/heiwa_orchestrator/tests/drex_persistence.rs` | DREX decision/failure persistence tests                               |
+| `packages/heiwa_bindings/rust/Cargo.toml`           | Make generated Rust bindings importable as a crate                    |
+| `packages/heiwa_bindings/rust/src/lib.rs`           | Stable crate entrypoint over generated Rust bindings                  |
+| `packages/heiwa_bindings/typescript/package.json`   | Make generated TS bindings importable from the web app                |
+| `packages/heiwa_bindings/typescript/tsconfig.json`  | Local TS compiler settings for generated bindings                     |
+| `apps/heiwa_web/package.json`                       | TypeScript web app manifest                                           |
+| `apps/heiwa_web/tsconfig.json`                      | TypeScript compiler configuration                                     |
+| `apps/heiwa_web/svelte.config.js`                   | SvelteKit configuration                                               |
+| `apps/heiwa_web/vite.config.ts`                     | Vite/SvelteKit build configuration                                    |
+| `apps/heiwa_web/src/routes/+page.svelte`            | Initial operator landing page                                         |
+| `apps/heiwa_web/src/routes/routing/+page.svelte`    | Route/DREX decision view                                              |
+| `apps/heiwa_web/src/lib/stdb/client.ts`             | TS STDB client wrapper over generated bindings                        |
+| `apps/heiwa_web/src/lib/types/drex.ts`              | TS mirror types for DREX decision records                             |
+| `apps/heiwa_hub/scripts/run_legacy_python_hub.sh`   | Explicit fallback launcher during cutover                             |
 
 ### Modified Files
-| File | Changes |
-|------|---------|
-| `Cargo.toml` | Add new Rust workspace members (`apps/heiwa_orchestrator`, `packages/heiwa_bindings/rust`) |
-| `apps/heiwa_hub/spacetimedb/src/lib.rs` | Add DREX decision/failure tables and reducer extensions needed by the Rust router |
-| `apps/heiwa_hub/scripts/generate_spacetimedb_bindings.sh` | Generate bindings into package/crate-friendly layouts |
-| `apps/heiwa_hub/start.sh` | Switch from `python apps/heiwa_hub/main.py` boot to Rust orchestrator boot, keep shell env/bootstrap logic |
-| `apps/heiwa_hub/Dockerfile` | Build and ship the Rust orchestrator binary alongside the STDB CLI and shell scripts |
-| `apps/heiwa_hub/main.py` | Demote to compatibility shim / explicit legacy runtime |
-| `railway.toml` | Point Railway deploy to the Rust orchestrator path once parity is proven |
-| `justfile` | Add Rust/TS verification targets and separate legacy Python regression targets |
-| `config/swarm/END_STATE_2026-03.md` | Replace Python-era architecture language with Rust + TypeScript + Shell end-state |
-| `apps/heiwa_web/wrangler.toml` | Align Pages build output with the TypeScript app build |
-| `apps/heiwa_hub/tests/test_cloud_hq_start_script.py` | Assert shell boot now targets the Rust binary |
-| `apps/heiwa_hub/tests/test_hub_bootstrap_imports.py` | Convert from "Python imports boot" to "legacy Python shim remains available" |
-| `apps/heiwa_hub/tests/test_compute_router.py` | Keep as Python regression only until retirement |
-| `apps/heiwa_hub/tests/test_compute_router_stdb.py` | Keep as Python regression only until retirement |
+
+| File                                                      | Changes                                                                                                    |
+| --------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------- |
+| `Cargo.toml`                                              | Add new Rust workspace members (`apps/heiwa_orchestrator`, `packages/heiwa_bindings/rust`)                 |
+| `apps/heiwa_hub/spacetimedb/src/lib.rs`                   | Add DREX decision/failure tables and reducer extensions needed by the Rust router                          |
+| `apps/heiwa_hub/scripts/generate_spacetimedb_bindings.sh` | Generate bindings into package/crate-friendly layouts                                                      |
+| `apps/heiwa_hub/start.sh`                                 | Switch from `python apps/heiwa_hub/main.py` boot to Rust orchestrator boot, keep shell env/bootstrap logic |
+| `apps/heiwa_hub/Dockerfile`                               | Build and ship the Rust orchestrator binary alongside the STDB CLI and shell scripts                       |
+| `apps/heiwa_hub/main.py`                                  | Demote to compatibility shim / explicit legacy runtime                                                     |
+| `railway.toml`                                            | Point Railway deploy to the Rust orchestrator path once parity is proven                                   |
+| `justfile`                                                | Add Rust/TS verification targets and separate legacy Python regression targets                             |
+| `config/swarm/END_STATE_2026-03.md`                       | Replace Python-era architecture language with Rust + TypeScript + Shell end-state                          |
+| `apps/heiwa_web/wrangler.toml`                            | Align Pages build output with the TypeScript app build                                                     |
+| `apps/heiwa_hub/tests/test_cloud_hq_start_script.py`      | Assert shell boot now targets the Rust binary                                                              |
+| `apps/heiwa_hub/tests/test_hub_bootstrap_imports.py`      | Convert from "Python imports boot" to "legacy Python shim remains available"                               |
+| `apps/heiwa_hub/tests/test_compute_router.py`             | Keep as Python regression only until retirement                                                            |
+| `apps/heiwa_hub/tests/test_compute_router_stdb.py`        | Keep as Python regression only until retirement                                                            |
 
 ---
 
@@ -94,6 +97,7 @@ Each track must leave the repo in a working state. Do not delete Python runtime 
 ### Task 1: Promote generated STDB bindings into first-class Rust and TypeScript packages
 
 **Files:**
+
 - Modify: `Cargo.toml`
 - Modify: `apps/heiwa_hub/scripts/generate_spacetimedb_bindings.sh`
 - Create: `packages/heiwa_bindings/rust/Cargo.toml`
@@ -174,6 +178,7 @@ Create:
 - [ ] **Step 6: Regenerate bindings and run both smoke checks**
 
 Run:
+
 - `bash apps/heiwa_hub/scripts/generate_spacetimedb_bindings.sh`
 - `cargo test -p heiwa-bindings generated_route_decision_type_is_importable -- --exact`
 - `npm --prefix packages/heiwa_bindings/typescript run typecheck`
@@ -193,6 +198,7 @@ git commit -m "feat(bindings): package STDB bindings for Rust and TypeScript"
 ### Task 2: Scaffold the Rust orchestrator crate beside the Python Hub
 
 **Files:**
+
 - Modify: `Cargo.toml`
 - Create: `apps/heiwa_orchestrator/Cargo.toml`
 - Create: `apps/heiwa_orchestrator/src/lib.rs`
@@ -239,6 +245,7 @@ async fn main() -> anyhow::Result<()> {
 - [ ] **Step 5: Implement the first-pass config contract from current shell/Python defaults**
 
 Capture at least:
+
 - `PORT`
 - `HEIWA_STATE_BACKEND`
 - `STDB_SERVER`
@@ -248,6 +255,7 @@ Capture at least:
 - [ ] **Step 6: Re-run the focused smoke test and a full crate check**
 
 Run:
+
 - `cargo test -p heiwa-orchestrator runtime_config_reads_expected_defaults -- --exact`
 - `cargo check -p heiwa-orchestrator`
 
@@ -267,6 +275,7 @@ git commit -m "feat(rust): scaffold orchestrator crate"
 ### Task 3: Port DREX scoring and routing into Rust
 
 **Files:**
+
 - Create: `apps/heiwa_orchestrator/src/drex/mod.rs`
 - Create: `apps/heiwa_orchestrator/src/drex/vector.rs`
 - Create: `apps/heiwa_orchestrator/src/drex/policy.rs`
@@ -318,6 +327,7 @@ Expected: FAIL because DREX types/scoring are not implemented
 - [ ] **Step 3: Implement Rust DREX types and policy loading**
 
 Create:
+
 - `DrexVector`
 - `DrexModifiers`
 - `DrexAuthorityGate`
@@ -351,6 +361,7 @@ Keep `cost_per_turn` as `f64`, and keep the existing `max_context_tokens: u32` f
 - [ ] **Step 6: Wire the scorer into a route-decision assembly path**
 
 The orchestrator runtime should be able to turn task ingress into:
+
 - DREX vector
 - active tier
 - scorecard
@@ -366,6 +377,7 @@ Expected: PASS
 - [ ] **Step 8: Rebuild bindings and verify model-tier coverage**
 
 Run:
+
 - `CARGO_NET_OFFLINE=true bash apps/heiwa_hub/scripts/generate_spacetimedb_bindings.sh`
 - `cargo test --offline -p heiwa-orchestrator --test drex_scoring`
 - `.venv/bin/python -m pytest apps/heiwa_hub/tests/test_model_tiers_stdb.py -q`
@@ -388,6 +400,7 @@ git commit -m "feat(rust): port drex scoring and routing"
 ### Task 4: Extend the STDB module for DREX persistence and consume it from Rust
 
 **Files:**
+
 - Modify: `apps/heiwa_hub/spacetimedb/src/lib.rs`
 - Modify: `apps/heiwa_hub/scripts/generate_spacetimedb_bindings.sh`
 - Modify: `packages/heiwa_bindings/rust`
@@ -418,10 +431,12 @@ Expected: FAIL because the STDB contract does not exist yet
 - [ ] **Step 3: Add DREX tables and reducer/query hooks to the STDB module**
 
 At minimum:
+
 - `drex_decisions`
 - `drex_failures`
 
 Each decision row must store:
+
 - typed scalar axes
 - macro/meso/micro scores
 - confidence
@@ -435,6 +450,7 @@ Do not create disconnected audit trails. Extend the routing reducer flow so a ro
 - [ ] **Step 5: Rebuild the STDB module and regenerate bindings**
 
 Run:
+
 - `cd apps/heiwa_hub/spacetimedb && spacetime build`
 - `bash apps/heiwa_hub/scripts/generate_spacetimedb_bindings.sh`
 
@@ -464,6 +480,7 @@ git commit -m "feat(stdb): persist drex decisions and failures"
 ### Task 5: Replace Python boot with the Rust orchestrator while preserving shell glue
 
 **Files:**
+
 - Modify: `apps/heiwa_hub/start.sh`
 - Modify: `apps/heiwa_hub/Dockerfile`
 - Modify: `railway.toml`
@@ -483,6 +500,7 @@ Expected: FAIL because the shell script still targets Python
 - [ ] **Step 3: Keep shell responsible only for environment/bootstrap concerns**
 
 `apps/heiwa_hub/start.sh` should continue to own:
+
 - Tailscale setup
 - optional Ollama boot
 - STDB local boot/publish
@@ -507,6 +525,7 @@ Add a Rust builder stage or install Rust in the current builder stage. Do not re
 - [ ] **Step 6: Add product verification commands for the new stack**
 
 Add to `justfile`:
+
 - `test-rust`
 - `check-web-ts`
 - `verify-rust-stack`
@@ -515,6 +534,7 @@ Add to `justfile`:
 - [ ] **Step 7: Re-run the shell test plus a Rust build**
 
 Run:
+
 - `.venv/bin/python -m pytest apps/heiwa_hub/tests/test_cloud_hq_start_script.py -q`
 - `cargo test -p heiwa-orchestrator`
 
@@ -539,6 +559,7 @@ git commit -m "feat(runtime): boot rust orchestrator from shell"
 ### Task 6: Introduce the TypeScript operator app on top of generated STDB bindings
 
 **Files:**
+
 - Create: `apps/heiwa_web/package.json`
 - Create: `apps/heiwa_web/tsconfig.json`
 - Create: `apps/heiwa_web/svelte.config.js`
@@ -565,6 +586,7 @@ Expected: FAIL because the app does not exist yet
 - [ ] **Step 3: Scaffold the SvelteKit app with local package imports**
 
 The app should start with:
+
 - status page
 - route decisions page
 - DREX decision details view
@@ -600,6 +622,7 @@ export type DrexDecisionView = {
 - [ ] **Step 6: Run typecheck and production build**
 
 Run:
+
 - `npm --prefix apps/heiwa_web install`
 - `npm --prefix apps/heiwa_web run check`
 - `npm --prefix apps/heiwa_web run build`
@@ -616,6 +639,7 @@ git commit -m "feat(web): add typed operator app"
 ### Task 7: Freeze Python to regression-only status and update the repo's declared architecture
 
 **Files:**
+
 - Modify: `apps/heiwa_hub/main.py`
 - Modify: `config/swarm/END_STATE_2026-03.md`
 - Modify: `justfile`
@@ -630,6 +654,7 @@ Add an assertion that Python runtime files are marked as legacy/compatibility su
 - [ ] **Step 2: Run the focused docs/bootstrap tests**
 
 Run:
+
 - `.venv/bin/python -m pytest apps/heiwa_hub/tests/test_hub_bootstrap_imports.py -q`
 - `.venv/bin/python -m pytest apps/heiwa_hub/tests/test_compute_router.py apps/heiwa_hub/tests/test_compute_router_stdb.py -q`
 
@@ -638,6 +663,7 @@ Expected: FAIL because the current architecture docs and boot assumptions still 
 - [ ] **Step 3: Convert `apps/heiwa_hub/main.py` into an explicit legacy shim**
 
 It should:
+
 - keep working if invoked directly
 - log that Rust is the primary runtime
 - delegate only to legacy paths
@@ -657,12 +683,14 @@ Shell remains the bootstrap/operator layer, not the cognitive layer.
 - [ ] **Step 5: Split verification into primary vs legacy lanes**
 
 `justfile` should make the distinction explicit:
+
 - primary: Rust + STDB + TypeScript
 - legacy: Python regression only
 
 - [ ] **Step 6: Re-run the focused regression/docs tests**
 
 Run:
+
 - `.venv/bin/python -m pytest apps/heiwa_hub/tests/test_hub_bootstrap_imports.py -q`
 - `.venv/bin/python -m pytest apps/heiwa_hub/tests/test_compute_router.py apps/heiwa_hub/tests/test_compute_router_stdb.py -q`
 

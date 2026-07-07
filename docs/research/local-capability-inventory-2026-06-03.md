@@ -45,29 +45,29 @@ Skipped on purpose:
 These surfaces should land in Heiwa as a local capability catalog, not as raw
 provider control:
 
-| Heiwa field | Meaning |
-| --- | --- |
-| `source_provider` | `codex`, `claude`, `gemini`, `antigravity`, `ollama`, or `heiwa` |
-| `surface_type` | `plugin`, `skill`, `mcp_server`, `cli_command`, `policy`, `handoff`, `local_model` |
-| `capability_id` | Stable local name such as `gemini.chrome-devtools-mcp` |
-| `intake_use` | What signal it can ingest: browser, file, media, repo, issue, design, docs |
-| `execution_use` | What work it can safely perform: code, review, browser debug, design, docs |
-| `evidence_use` | What proof it can emit: diff, screenshot, transcript, test output, receipt |
-| `risk_tier` | Heiwa T0-T3 boundary before executing through this surface |
-| `secret_policy` | `no_secret`, `provider_owned_secret`, or `approval_required_secret` |
-| `enabled_state` | `enabled`, `disabled`, `available`, `missing`, or `unknown` |
+| Heiwa field       | Meaning                                                                            |
+| ----------------- | ---------------------------------------------------------------------------------- |
+| `source_provider` | `codex`, `claude`, `gemini`, `antigravity`, `ollama`, or `heiwa`                   |
+| `surface_type`    | `plugin`, `skill`, `mcp_server`, `cli_command`, `policy`, `handoff`, `local_model` |
+| `capability_id`   | Stable local name such as `gemini.chrome-devtools-mcp`                             |
+| `intake_use`      | What signal it can ingest: browser, file, media, repo, issue, design, docs         |
+| `execution_use`   | What work it can safely perform: code, review, browser debug, design, docs         |
+| `evidence_use`    | What proof it can emit: diff, screenshot, transcript, test output, receipt         |
+| `risk_tier`       | Heiwa T0-T3 boundary before executing through this surface                         |
+| `secret_policy`   | `no_secret`, `provider_owned_secret`, or `approval_required_secret`                |
+| `enabled_state`   | `enabled`, `disabled`, `available`, `missing`, or `unknown`                        |
 
 Source/reference packs use the same Intake/Evidence posture but are not
 executable by default:
 
-| Heiwa field | Meaning |
-| --- | --- |
-| `reference_source.id` | Stable source id such as `official.openai.agents-sdk.tools` |
-| `authority` | `official`, `official_oss`, `official_standard`, `community_oss`, `private` |
-| `source_url` | Canonical URL or local mirror path |
-| `use` | What the source teaches: tool schema, SDK, runtime, model, integration, spec |
-| `refresh_mode` | `web_snapshot_then_local_cache`, `git_mirror_then_manifest`, or `manual_note` |
-| `risk_tier` | Always T0 until promoted into a connector/tool manifest |
+| Heiwa field           | Meaning                                                                       |
+| --------------------- | ----------------------------------------------------------------------------- |
+| `reference_source.id` | Stable source id such as `official.openai.agents-sdk.tools`                   |
+| `authority`           | `official`, `official_oss`, `official_standard`, `community_oss`, `private`   |
+| `source_url`          | Canonical URL or local mirror path                                            |
+| `use`                 | What the source teaches: tool schema, SDK, runtime, model, integration, spec  |
+| `refresh_mode`        | `web_snapshot_then_local_cache`, `git_mirror_then_manifest`, or `manual_note` |
+| `risk_tier`           | Always T0 until promoted into a connector/tool manifest                       |
 
 Promotion rule: source packs can inform Heiwa, but only connector/tool manifests
 can execute.
@@ -183,15 +183,15 @@ Heiwa implication:
 
 Observed local app bundles:
 
-| App | Bundle id | Heiwa use |
-| --- | --- | --- |
-| `Codex.app` | `com.openai.codex` | Codex app capability, tool, MCP, and session surface |
-| `Claude.app` | `com.anthropic.claudefordesktop` | Claude desktop capability and handoff surface |
-| `Gemini.app` | `com.google.GeminiMacOS` | Gemini desktop capability and handoff surface |
-| `Antigravity.app` | `com.google.antigravity` | Antigravity desktop capability surface; CLI currently missing |
-| `ChatGPT.app` | `com.openai.chat` | ChatGPT desktop capability surface |
-| `ChatGPT Atlas.app` | `com.openai.atlas` | Browser/app capability surface |
-| `Claude Code URL Handler.app` | `com.anthropic.claude-code-url-handler` | Claude Code URL handoff surface |
+| App                           | Bundle id                               | Heiwa use                                                     |
+| ----------------------------- | --------------------------------------- | ------------------------------------------------------------- |
+| `Codex.app`                   | `com.openai.codex`                      | Codex app capability, tool, MCP, and session surface          |
+| `Claude.app`                  | `com.anthropic.claudefordesktop`        | Claude desktop capability and handoff surface                 |
+| `Gemini.app`                  | `com.google.GeminiMacOS`                | Gemini desktop capability and handoff surface                 |
+| `Antigravity.app`             | `com.google.antigravity`                | Antigravity desktop capability surface; CLI currently missing |
+| `ChatGPT.app`                 | `com.openai.chat`                       | ChatGPT desktop capability surface                            |
+| `ChatGPT Atlas.app`           | `com.openai.atlas`                      | Browser/app capability surface                                |
+| `Claude Code URL Handler.app` | `com.anthropic.claude-code-url-handler` | Claude Code URL handoff surface                               |
 
 Heiwa implication:
 

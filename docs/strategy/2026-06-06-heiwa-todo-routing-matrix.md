@@ -1,7 +1,7 @@
 # Heiwa Todo Routing Matrix
 
-**Date:** 2026-06-06  
-**Status:** Operator-private execution map  
+**Date:** 2026-06-06\
+**Status:** Operator-private execution map\
 **Source:** Review of the 18-item Odysseus/Hermes competitiveness backlog plus
 Claude's E1-E10 inserts and routed subtask matrix.
 
@@ -62,13 +62,13 @@ Every routed item must return:
 
 ## Agent Fit Rules
 
-| Agent | Primary fit | Avoid as primary when |
-| --- | --- | --- |
-| Claude | architecture, policy, schema, product tradeoffs, adversarial review | code requires many precise repo edits or local build iteration |
-| Codex | implementation, tests, CLI/runtime work, JSON/schema/doc patches, verification | task mainly needs long synthesis or visual inspection |
-| Gemini | long-context sweeps, broad source review, UI/visual checks, multimodal review | task needs narrow code edits under local repo conventions |
-| Antigravity | long background runs, soak tests, queueable async checks | provider availability is unverified or result needs tight interactive judgment |
-| Local/Ollama | naming, tagging, classification, summarization, cheap offline draft iteration | task needs external current facts, deep code edits, or high-stakes judgment |
+| Agent        | Primary fit                                                                    | Avoid as primary when                                                          |
+| ------------ | ------------------------------------------------------------------------------ | ------------------------------------------------------------------------------ |
+| Claude       | architecture, policy, schema, product tradeoffs, adversarial review            | code requires many precise repo edits or local build iteration                 |
+| Codex        | implementation, tests, CLI/runtime work, JSON/schema/doc patches, verification | task mainly needs long synthesis or visual inspection                          |
+| Gemini       | long-context sweeps, broad source review, UI/visual checks, multimodal review  | task needs narrow code edits under local repo conventions                      |
+| Antigravity  | long background runs, soak tests, queueable async checks                       | provider availability is unverified or result needs tight interactive judgment |
+| Local/Ollama | naming, tagging, classification, summarization, cheap offline draft iteration  | task needs external current facts, deep code edits, or high-stakes judgment    |
 
 ## Priority Build Order
 
@@ -105,36 +105,36 @@ Every routed item must return:
 
 Machine-readable source of truth: [`config/swarm/heiwa_todo_routing_matrix_v1.json`](../../config/swarm/heiwa_todo_routing_matrix_v1.json).
 
-| ID | Plane | Item | Primary | Secondary | Acceptance Proof |
-| --- | --- | --- | --- | --- | --- |
-| H1 | Evidence | Release/install truth | Codex | Claude | public/private-alpha install state is exact; release/checksum path proven or explicitly blocked |
-| H2 | Intake | App/runtime API truth | Codex | Gemini | `/api/v1/*` returns typed JSON or explicit 404; no SPA fallback on API miss |
-| H3 | Evidence | Remove Devon-only leakage from product views | Codex | Gemini | inbox/history expose portable `SourceRef`/`ReceiptRef`, not old local archive paths |
-| H4 | Execution | One full loop with approvals and receipt | Codex | Claude | ask -> classify -> route -> execute/stage -> receipt -> app display works end to end |
-| H5 | Execution | Approval surfaces | Codex | Claude | risky action packet can be approved/denied from CLI and app with receipt |
-| H6 | Intake | Native-feeling Heiwa.app wrapper | Codex | Gemini | macOS local app launches runtime and cockpit over same state |
-| H7 | Intake | Desktop basics | Codex | Gemini | chat, provider setup, live activity, artifact preview, settings, diagnostics |
-| H8 | Evidence | Durable memory/read model | Codex | Claude | readable local records with source spans, freshness, and safe export |
-| H9 | Evidence | Skill/procedure loop | Claude | Codex | completed work can propose a reviewed, evidence-backed procedure |
-| H10 | Execution | Scheduler | Codex | Claude | scheduled job runs under policy and emits receipt |
-| H11 | Intake | First product-grade connector | Codex | Claude | auth, list, bounded action, revoke, tests, receipts |
-| H12 | Intake | First gateway intake | Codex | Gemini | one external channel normalizes into `InboxItem`; outbound is staged draft |
-| H13 | Execution | Model cookbook-lite | Codex | Gemini | hardware/model probe recommends and verifies local model routes |
-| H14 | Evidence | Compare/research minimum | Codex | Gemini | model compare or research flow produces source-linked report |
-| H15 | Execution | MCP/tool catalog | Codex | Claude | manifests define scopes, trust class, leases, tests |
-| H16 | Execution | Sandboxed computer use | Codex | Gemini | browser/file/computer actions carry screenshot/action trace and approval gates |
-| H17 | Evidence | Billing/entitlement | Claude | Codex | local entitlement readout and STDB mirror path exist without browser-secret leakage |
-| H18 | Evidence | Multi-device/team groundwork | Claude | Codex | shared evidence/approval schema has local-first boundary and migration plan |
-| E1 | Evidence | Pre-public-push hygiene gate | Codex | Gemini | tracked-tree secret scan, public-surface audit, release sandbox proof |
-| E2 | Evidence | Runtime observability | Codex | Claude | local runtime status includes workers, providers, app, hooks, receipts, STDB, update channel |
-| E3 | Execution | DREX eval harness | Codex | Claude | golden evals prove intent/risk/route decisions and fail on regressions |
-| E4 | Evidence | STDB schema versioning | Claude | Codex | reducer/table versions, migration notes, generated binding compatibility gate |
-| E5 | Evidence | Backup/restore plus Maincloud sync | Codex | Claude | local restore drill and STDB narrow-sync receipt proof |
-| E6 | Evidence | Update channels | Codex | Claude | stable/beta/dev channel semantics and rollback proof |
-| E7 | Evidence | Privacy/DPA scaffold | Claude | Gemini | public-safe privacy boundary, DPA draft, data inventory, subprocess/provider ownership map |
-| E8 | Intake | Telemetry consent UX | Gemini | Codex | opt-in/off UI plus local-only default and evidence of no hidden home-call |
-| E9 | Evidence | Receipt schema/read ergonomics | Codex | Claude | receipts are queryable by run, source, provider, approval, artifact, and chain status |
-| E10 | Execution | Provider-peer routing harness | Codex | Gemini | tests cover provider down, quota low, local-only, cost-first, and model unavailable cases |
+| ID  | Plane     | Item                                         | Primary | Secondary | Acceptance Proof                                                                                |
+| --- | --------- | -------------------------------------------- | ------- | --------- | ----------------------------------------------------------------------------------------------- |
+| H1  | Evidence  | Release/install truth                        | Codex   | Claude    | public/private-alpha install state is exact; release/checksum path proven or explicitly blocked |
+| H2  | Intake    | App/runtime API truth                        | Codex   | Gemini    | `/api/v1/*` returns typed JSON or explicit 404; no SPA fallback on API miss                     |
+| H3  | Evidence  | Remove Devon-only leakage from product views | Codex   | Gemini    | inbox/history expose portable `SourceRef`/`ReceiptRef`, not old local archive paths             |
+| H4  | Execution | One full loop with approvals and receipt     | Codex   | Claude    | ask -> classify -> route -> execute/stage -> receipt -> app display works end to end            |
+| H5  | Execution | Approval surfaces                            | Codex   | Claude    | risky action packet can be approved/denied from CLI and app with receipt                        |
+| H6  | Intake    | Native-feeling Heiwa.app wrapper             | Codex   | Gemini    | macOS local app launches runtime and cockpit over same state                                    |
+| H7  | Intake    | Desktop basics                               | Codex   | Gemini    | chat, provider setup, live activity, artifact preview, settings, diagnostics                    |
+| H8  | Evidence  | Durable memory/read model                    | Codex   | Claude    | readable local records with source spans, freshness, and safe export                            |
+| H9  | Evidence  | Skill/procedure loop                         | Claude  | Codex     | completed work can propose a reviewed, evidence-backed procedure                                |
+| H10 | Execution | Scheduler                                    | Codex   | Claude    | scheduled job runs under policy and emits receipt                                               |
+| H11 | Intake    | First product-grade connector                | Codex   | Claude    | auth, list, bounded action, revoke, tests, receipts                                             |
+| H12 | Intake    | First gateway intake                         | Codex   | Gemini    | one external channel normalizes into `InboxItem`; outbound is staged draft                      |
+| H13 | Execution | Model cookbook-lite                          | Codex   | Gemini    | hardware/model probe recommends and verifies local model routes                                 |
+| H14 | Evidence  | Compare/research minimum                     | Codex   | Gemini    | model compare or research flow produces source-linked report                                    |
+| H15 | Execution | MCP/tool catalog                             | Codex   | Claude    | manifests define scopes, trust class, leases, tests                                             |
+| H16 | Execution | Sandboxed computer use                       | Codex   | Gemini    | browser/file/computer actions carry screenshot/action trace and approval gates                  |
+| H17 | Evidence  | Billing/entitlement                          | Claude  | Codex     | local entitlement readout and STDB mirror path exist without browser-secret leakage             |
+| H18 | Evidence  | Multi-device/team groundwork                 | Claude  | Codex     | shared evidence/approval schema has local-first boundary and migration plan                     |
+| E1  | Evidence  | Pre-public-push hygiene gate                 | Codex   | Gemini    | tracked-tree secret scan, public-surface audit, release sandbox proof                           |
+| E2  | Evidence  | Runtime observability                        | Codex   | Claude    | local runtime status includes workers, providers, app, hooks, receipts, STDB, update channel    |
+| E3  | Execution | DREX eval harness                            | Codex   | Claude    | golden evals prove intent/risk/route decisions and fail on regressions                          |
+| E4  | Evidence  | STDB schema versioning                       | Claude  | Codex     | reducer/table versions, migration notes, generated binding compatibility gate                   |
+| E5  | Evidence  | Backup/restore plus Maincloud sync           | Codex   | Claude    | local restore drill and STDB narrow-sync receipt proof                                          |
+| E6  | Evidence  | Update channels                              | Codex   | Claude    | stable/beta/dev channel semantics and rollback proof                                            |
+| E7  | Evidence  | Privacy/DPA scaffold                         | Claude  | Gemini    | public-safe privacy boundary, DPA draft, data inventory, subprocess/provider ownership map      |
+| E8  | Intake    | Telemetry consent UX                         | Gemini  | Codex     | opt-in/off UI plus local-only default and evidence of no hidden home-call                       |
+| E9  | Evidence  | Receipt schema/read ergonomics               | Codex   | Claude    | receipts are queryable by run, source, provider, approval, artifact, and chain status           |
+| E10 | Execution | Provider-peer routing harness                | Codex   | Gemini    | tests cover provider down, quota low, local-only, cost-first, and model unavailable cases       |
 
 ## Immediate Implementation Slice
 

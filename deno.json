@@ -1,0 +1,21 @@
+{
+  "tasks": {
+    "herd": "deno run --allow-run=herdr --allow-env=HOME scripts/herd.ts",
+    "desk": "deno run --allow-run=herdr --allow-net=127.0.0.1:7480 prototypes/heiwa-desk/main.ts"
+  },
+  "fmt": {
+    "include": ["*.md", "docs/", "scripts/", "prototypes/"],
+    "exclude": [
+      "ops/",
+      ".worktrees/",
+      "legacy/",
+      "vendor/",
+      "archive/",
+      "node_modules/",
+      ".venv/",
+      "target/"
+    ],
+    "lineWidth": 100,
+    "proseWrap": "preserve"
+  }
+}

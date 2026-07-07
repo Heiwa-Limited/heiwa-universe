@@ -10,21 +10,21 @@ Heiwa's target user E2E: Discord OAuth signup, BYOK providers, 24/7 Discord agen
 
 ## Architectural Razor
 
-*Works for one, doesn't block N.*
+_Works for one, doesn't block N._
 
 Every decision here must work for Devon's single-operator proving ground AND not block multi-operator scaling.
 
 ## Existing Infrastructure (No Changes Needed)
 
-| Component | Location | State |
-|---|---|---|
-| Discord OAuth2 + JWT | `auth.py` | Full flow implemented |
-| `ensure_user()` | `auth.py:240` | Creates `users` + `oauth_identities` rows |
-| BYOK vault | `vault.py`, `mcp_server.py` | Fernet encryption, per-user STDB storage |
-| ChatEngine | `chat.py` | In-memory sessions, 20 msg limit |
-| AgentMemory | `agent_memory.py` | STDB persistent, rolling compression at 8K tokens |
-| Terminal REPL | `heiwa_cli/__main__.py` | Interactive mode, auth commands |
-| Capability dispatch | `transport.py`, `spine.py` | Dynamic GPU detection, set intersection matching |
+| Component            | Location                    | State                                             |
+| -------------------- | --------------------------- | ------------------------------------------------- |
+| Discord OAuth2 + JWT | `auth.py`                   | Full flow implemented                             |
+| `ensure_user()`      | `auth.py:240`               | Creates `users` + `oauth_identities` rows         |
+| BYOK vault           | `vault.py`, `mcp_server.py` | Fernet encryption, per-user STDB storage          |
+| ChatEngine           | `chat.py`                   | In-memory sessions, 20 msg limit                  |
+| AgentMemory          | `agent_memory.py`           | STDB persistent, rolling compression at 8K tokens |
+| Terminal REPL        | `heiwa_cli/__main__.py`     | Interactive mode, auth commands                   |
+| Capability dispatch  | `transport.py`, `spine.py`  | Dynamic GPU detection, set intersection matching  |
 
 ## Changes Required
 
@@ -63,6 +63,7 @@ No OAuth token is available from DMs. `ensure_user()` already handles this — i
 **Problem:** No `projects` table. The E2E flow requires a project as the organizational unit.
 
 **Fix:** Add `projects` table to STDB:
+
 - `project_id: String` (PK)
 - `owner_id: String` (FK to users)
 - `name: String`
@@ -70,6 +71,7 @@ No OAuth token is available from DMs. `ensure_user()` already handles this — i
 - `settings_json: String`
 
 Auto-create a default project in `ensure_user()` when creating a new user:
+
 ```python
 project_id = f"proj-{uuid.uuid4().hex[:12]}"
 stdb.call("create_project", project_id, user_id, "default", "{}")
@@ -82,6 +84,7 @@ stdb.call("create_project", project_id, user_id, "default", "{}")
 **Problem:** `session_id = f"discord-session-{author.id}-{int(time.time())}"` — timestamp makes every message a new session, breaking conversation context.
 
 **Fix:**
+
 ```python
 # Before
 session_id = f"discord-session-{author.id}-{int(time.time())}"
@@ -91,6 +94,7 @@ session_id = f"discord-dm-{author.id}"
 ```
 
 Both context layers start working correctly:
+
 - ChatEngine: in-memory history persists across messages (20 msg limit, last 10 for LLM prompt)
 - AgentMemory: STDB rolling compression accumulates real conversation history
 
@@ -103,6 +107,7 @@ Both context layers start working correctly:
 **Problem:** Session isolation depends on `owner_id` being a real `user_id`. After Steps 1-3, the IDs are real but we need to verify the downstream chain scopes correctly.
 
 **Fix:** Thread `owner_id` verification through:
+
 1. ChatEngine session lookup — already keyed by `session_id`, which is now per-user stable
 2. AgentMemory STDB queries — already accept `owner_id` parameter
 3. BYOK vault resolution — `UserVault` already scoped by `user_id`
@@ -116,11 +121,13 @@ Add integration test: two synthetic users DM simultaneously, verify their sessio
 **Problem:** No way to manage providers from Discord DMs.
 
 **Fix:** Add DM command handler for `/providers` or `!providers`:
+
 1. Query `UserVault.list_credentials(user_id)` for current provider status
 2. Return status summary: which providers are configured, which are available
 3. Route to setup: "Run `heiwa auth <provider>` in your terminal" or future web magic link
 
 **Security constraint:** NEVER accept API keys in Discord DMs. Discord logs all messages on their servers. The chat interface is for execution and status, not credential injection. Keys go through:
+
 - Terminal: `heiwa auth <provider>` (secure local input)
 - Web (future): single-use HTTPS magic link to Railway control plane
 

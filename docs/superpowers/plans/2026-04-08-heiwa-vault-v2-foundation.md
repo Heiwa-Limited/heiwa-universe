@@ -13,6 +13,7 @@
 ### Task 1: Normalize Live Provider Truth
 
 **Files:**
+
 - Modify: `config/seeds/model_tiers.json`
 - Modify: `config/swarm/ai_router.json`
 - Modify: `crates/heiwa_provider/src/registry.rs`
@@ -73,6 +74,7 @@ Expected: PASS
 ### Task 2: Land Canonical Vault Schema in STDB
 
 **Files:**
+
 - Modify: `apps/heiwa_hub/spacetimedb/src/lib.rs`
 - Modify: `packages/heiwa_sdk/heiwa_sdk/spacetimedb.py`
 - Test: `apps/heiwa_hub/tests/test_vault_stdb.py`
@@ -130,6 +132,7 @@ Expected: PASS
 ### Task 3: Create a Rust-First Local Vault Workspace and Read Model
 
 **Files:**
+
 - Create: `crates/heiwa_vault/Cargo.toml`
 - Create: `crates/heiwa_vault/src/lib.rs`
 - Create: `crates/heiwa_vault/src/workspace.rs`
@@ -177,6 +180,7 @@ Expected: PASS
 ### Task 4: Ingest Conversations and Filesystem From Day One
 
 **Files:**
+
 - Create: `crates/heiwa_vault/src/ingest/conversations.rs`
 - Create: `crates/heiwa_vault/src/ingest/filesystem.rs`
 - Create: `crates/heiwa_vault/tests/conversation_ingest.rs`
@@ -234,6 +238,7 @@ Expected: PASS
 ### Task 5: Bridge Existing Heiwa Memory Surfaces Onto the Vault
 
 **Files:**
+
 - Modify: `packages/heiwa_sdk/heiwa_sdk/agent_memory.py`
 - Modify: `packages/heiwa_sdk/heiwa_sdk/memory.py`
 - Modify: `apps/heiwa_hub/agents/heiwaclaw.py`
@@ -281,6 +286,7 @@ Expected: PASS
 ### Task 6: Expose the Vault Through `heiwa`
 
 **Files:**
+
 - Modify: `apps/heiwa_shell/src/main.rs`
 - Modify: `crates/heiwa_loop/src/lib.rs`
 - Create: `crates/heiwa_vault/tests/shell_vault_commands.rs`

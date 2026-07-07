@@ -8,16 +8,17 @@ Spine currently receives `requires_approval`, but the live HTTP/WebSocket runtim
 
 ### Threshold Matrix
 
-| Risk | CLI (operator) | API/Web | Discord |
-| --- | --- | --- | --- |
-| low | auto-approve | auto-approve | auto-approve |
-| medium | auto-approve | auto-approve | hold |
-| high | auto-approve | hold | hold |
-| critical | hold | hold | hold |
+| Risk     | CLI (operator) | API/Web      | Discord      |
+| -------- | -------------- | ------------ | ------------ |
+| low      | auto-approve   | auto-approve | auto-approve |
+| medium   | auto-approve   | auto-approve | hold         |
+| high     | auto-approve   | hold         | hold         |
+| critical | hold           | hold         | hold         |
 
 CLI means Devon has physical access. That is the highest-trust surface.
 
 Environment override:
+
 - `HEIWA_AUTO_APPROVE=all`: auto-approve everything for development
 - `HEIWA_AUTO_APPROVE=cli`: default, keeps the CLI high-risk override
 
@@ -45,6 +46,7 @@ async def handle_approval_decision(data):
 ### Approval Surfaces
 
 All surfaces should converge on the same approval registry and decision path:
+
 - CLI: `heiwa approve <task_id>` / `heiwa reject <task_id>`
 - HTTP: `POST /tasks/{id}/approve` / `POST /tasks/{id}/reject`
 - Discord: approval buttons in Messenger
@@ -94,6 +96,7 @@ Only two cases should introduce parallel or multi-lane work:
    High-risk `build` or `deploy` work should append a cheaper review step after execution.
 
 What not to build:
+
 - no autonomous agent spawning
 - no speculative parallel provider fan-out
 - no hidden inter-task coordination
@@ -101,6 +104,7 @@ What not to build:
 ## 4. App Right Rail UX
 
 Top to bottom:
+
 - Plan: current steps, route, risk, status
 - Approvals: pending queue with approve/reject actions
 - Artifacts: produced files and outputs

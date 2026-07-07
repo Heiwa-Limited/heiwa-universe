@@ -65,13 +65,14 @@ To close a cycle, the active execution frame must validate current truth instead
 ## 5. Economic & Privacy Guardrails
 
 - **Cheapest acceptable route first**: Match the execution tier correctly. Direct simple prompts or status queries to free endpoint tiers or local nodes.
-- **State Sovereignty**: Write to SpacetimeDB *first*. All logical decision buffers evaluate downstream. 
+- **State Sovereignty**: Write to SpacetimeDB _first_. All logical decision buffers evaluate downstream.
 
 ---
 
 ## 6. Implementation Checklist (Operator / Exec Contexts)
 
 When executing, the loaded operator surface must contain:
+
 1. Version check validation.
 2. Context anchors loaded from `HEIWA.md`, `AGENTS.md`, `docs/local-self-operation.md`, and the relevant room files.
 3. Provider-local config active for the current repo.

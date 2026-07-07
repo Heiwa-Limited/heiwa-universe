@@ -9,6 +9,7 @@
 Heiwa currently has repo-local Gemini agent wrappers in `.gemini/agents/`, but no equivalent canonical source for cross-runtime specialists. Claude and Codex behavior depend on separate runtime surfaces, and Codex in particular discovers reusable specialists from the machine-global `~/.agents/skills/` path rather than a repo-local agent directory.
 
 This creates four problems:
+
 - Heiwa specialist definitions drift across tools because there is no single authoring surface
 - Repo behavior is not portable; Heiwa still depends on Devon's machine-global config for parts of Codex and Claude runtime behavior
 - Generated or copied wrappers can become stale or orphaned without a single drift gate
@@ -32,6 +33,7 @@ The first implementation plan derived from this spec should cover the immediate 
 ### Initial Shared Specialists
 
 The initial canonical migration includes all five existing Heiwa Gemini specialists:
+
 - `heiwa-architect`
 - `heiwa-security`
 - `heiwa-builder`
@@ -39,6 +41,7 @@ The initial canonical migration includes all five existing Heiwa Gemini speciali
 - `heiwa-researcher`
 
 Authoritative migration source files:
+
 - `.gemini/agents/heiwa-architect.md`
 - `.gemini/agents/heiwa-security.md`
 - `.gemini/agents/heiwa-builder.md`
@@ -84,6 +87,7 @@ ops/agents/
 ```
 
 Contract:
+
 - `registry.yaml` is the catalog of canonical agents and managed targets
 - `agent.yaml` is the structured manifest for one specialist
 - `prompt.md` is the canonical prompt body for one specialist
@@ -124,6 +128,7 @@ targets:
 ```
 
 Recommended fields:
+
 - `id`
 - `name`
 - `description`
@@ -144,16 +149,19 @@ Generated outputs are committed for reviewability, but they are never hand-autho
 #### Gemini
 
 Managed wrappers live in:
+
 - `.gemini/agents/<id>.md`
 
 #### Claude
 
 Managed wrappers live in:
+
 - `.claude/agents/<id>.md`
 
 #### Codex
 
 Managed generated wrappers live alongside the canonical agent:
+
 - `ops/agents/<id>/generated/codex/<install_name>/SKILL.md`
 
 Codex does not treat this repo path as native discovery. It is only the repo-owned generated source for installation into the real discovery path.
@@ -179,6 +187,7 @@ max_turns: 15
 ```
 
 Gemini field mapping:
+
 - `agent.yaml.id` → `name`
 - `agent.yaml.description` → `description`
 - `targets.gemini.model` → `model`
@@ -202,6 +211,7 @@ maxTurns: 15
 ```
 
 Claude field mapping:
+
 - `agent.yaml.id` → `name`
 - `agent.yaml.description` → `description`
 - `targets.claude.model` → `model`
@@ -225,6 +235,7 @@ description: Specialized architect for Heiwa state, mesh, and protocol changes.
 ```
 
 Codex field mapping:
+
 - `agent.yaml.id` → `name`
 - `agent.yaml.description` → `description`
 - `prompt.md` body → `SKILL.md` body after the generated banner
@@ -234,6 +245,7 @@ Codex skill files do not carry a runtime model override in the same way Gemini a
 ### 5. Generated Wrapper Contract
 
 Every generated wrapper must:
+
 - start with a generated banner
 - reference its canonical sources under `ops/agents/<id>/agent.yaml` and `ops/agents/<id>/prompt.md`
 - declare that manual edits are forbidden
@@ -251,6 +263,7 @@ uv run scripts/sync_agents.py
 ```
 
 Behavior:
+
 1. read `ops/agents/registry.yaml`
 2. load each canonical `agent.yaml` and `prompt.md`
 3. regenerate Gemini wrappers in `.gemini/agents/`
@@ -268,9 +281,11 @@ uv run scripts/sync_agents.py --install-codex
 ```
 
 Default behavior on Devon's Mac:
+
 - install by symlink from `ops/agents/<id>/generated/codex/<install_name>/` to `~/.agents/skills/<install_name>/`
 
 Alternate behavior:
+
 - `--copy` mode for environments where symlinks are not desired
 
 ### 3. Check Mode
@@ -282,6 +297,7 @@ uv run scripts/sync_agents.py --check
 ```
 
 This command fails if any of the following are false:
+
 1. generated Gemini wrappers are current
 2. generated Claude wrappers are current
 3. generated Codex wrappers are current
@@ -297,11 +313,11 @@ This is the future CI candidate. The validation surface is one command, not a ma
 
 The checker must implement explicit pass/fail assertions per runtime:
 
-| Runtime | Required assertions |
-| --- | --- |
-| Gemini | wrapper exists for every enabled Gemini target; no orphan `.gemini/agents/*.md`; frontmatter `name`, `description`, `model`, `max_turns`, and `tools` match canonical manifest; wrapper body matches generated banner + canonical `prompt.md` |
-| Claude | wrapper exists for every enabled Claude target; no orphan `.claude/agents/*.md`; frontmatter `name`, `description`, `model`, and `maxTurns` match canonical manifest; restrictive agents include the generated Claude-native tool restriction field; wrapper body matches generated banner + canonical `prompt.md` |
-| Codex | generated `SKILL.md` exists for every enabled Codex target; no orphan generated Codex wrapper trees; `SKILL.md` frontmatter `name` and `description` match canonical manifest; generated banner references canonical source; required install target exists and either resolves to the expected generated wrapper when symlink-installed or is byte-equal to the generated wrapper when copy-installed |
+| Runtime       | Required assertions                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            |
+| ------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Gemini        | wrapper exists for every enabled Gemini target; no orphan `.gemini/agents/*.md`; frontmatter `name`, `description`, `model`, `max_turns`, and `tools` match canonical manifest; wrapper body matches generated banner + canonical `prompt.md`                                                                                                                                                                                                                                                                                                                                  |
+| Claude        | wrapper exists for every enabled Claude target; no orphan `.claude/agents/*.md`; frontmatter `name`, `description`, `model`, and `maxTurns` match canonical manifest; restrictive agents include the generated Claude-native tool restriction field; wrapper body matches generated banner + canonical `prompt.md`                                                                                                                                                                                                                                                             |
+| Codex         | generated `SKILL.md` exists for every enabled Codex target; no orphan generated Codex wrapper trees; `SKILL.md` frontmatter `name` and `description` match canonical manifest; generated banner references canonical source; required install target exists and either resolves to the expected generated wrapper when symlink-installed or is byte-equal to the generated wrapper when copy-installed                                                                                                                                                                         |
 | Config parity | `.codex/config.toml` declares all Heiwa-required MCP servers (`MCP_DOCKER`, `playwright`, `railway`, `figma`, `notion`, `codebase-retrieval`), plugins (`github`, `cloudflare`, `google-drive`, `hugging-face`), and features (`multi_agent`, `guardian_approval`, `prevent_idle_sleep`); `.claude/settings.json` exists and contains `enableAllProjectMcpServers: true` plus all Heiwa-required `enabledPlugins`; `.gemini/settings.json` exists and contains `defaultApprovalMode`, `environmentVariableRedaction.enabled: true`, and `fileFiltering.respectGitIgnore: true` |
 
 ## Runtime Parity and Config Layering
@@ -313,11 +329,13 @@ Heiwa project config must be sufficient for work in this repo even if Devon's gl
 > If Devon's global config disappeared, would Heiwa's project config alone supply everything needed to work in this repo?
 
 The answer must be **yes** for:
+
 - required MCP servers
 - required plugins
 - required runtime features
 
 The answer does **not** need to be yes for:
+
 - Devon-global model preferences
 - Devon-global approval policy preferences
 - Devon-global sandbox preferences
@@ -327,6 +345,7 @@ The answer does **not** need to be yes for:
 When a runtime supports inheritance, project config should be additive, not duplicative.
 
 That means:
+
 - project config declares what Heiwa needs
 - project config does not copy non-Heiwa global defaults such as `model = "gpt-5.4"` or `sandbox_mode`
 
@@ -335,11 +354,13 @@ That means:
 `/Users/dmcgregsauce/heiwa/.codex/config.toml` must explicitly declare the Heiwa-required surfaces currently inherited from Devon's machine-global Codex config.
 
 Required Heiwa project-level Codex declarations:
+
 - MCP servers: `MCP_DOCKER`, `playwright`, `railway`, `figma`, `notion`, `codebase-retrieval`
 - plugins: `github`, `cloudflare`, `google-drive`, `hugging-face`
 - features: `multi_agent`, `guardian_approval`, `prevent_idle_sleep`
 
 Non-goals for project Codex config:
+
 - duplicating global `model`
 - duplicating global `approval_policy`
 - duplicating global `sandbox_mode`
@@ -349,12 +370,14 @@ Non-goals for project Codex config:
 Claude discovers project agents natively from `.claude/agents/*.md` — no install bridge needed.
 
 `.claude/settings.json` is the repo-authoritative Heiwa configuration surface. Required keys:
+
 - `enableAllProjectMcpServers: true` — ensures all project-declared MCP servers are available
 - `enabledPlugins` — declares Heiwa-required Claude plugins by name
 - `worktree.symlinkDirectories` — repo-specific worktree behavior (e.g., `.venv`)
 - `permissions` — repo-level permission defaults
 
 Claude agent wrapper frontmatter fields (emitted by the generator):
+
 - `name` (string, required) — maps from `agent.yaml.id`
 - `description` (string, required) — maps from `agent.yaml.description`
 - `model` (string, optional) — maps from `targets.claude.model`; valid values: `opus`, `sonnet`, `haiku`
@@ -362,6 +385,7 @@ Claude agent wrapper frontmatter fields (emitted by the generator):
 - `disallowedTools` (string array, optional) — emitted only for restrictive agents; maps from `tool_profile`
 
 Heiwa must not require:
+
 - secrets committed to project config
 - machine-global Claude agent files for core Heiwa specialists
 - user-level `~/.claude/settings.json` for any Heiwa-specific behavior
@@ -369,6 +393,7 @@ Heiwa must not require:
 ### 5. Gemini Parity Contract
 
 `/Users/dmcgregsauce/heiwa/.gemini/settings.json` remains the project authority for:
+
 - project agent wrappers in `.gemini/agents/`
 - repo-local filtering and context behavior
 - repo-local safety settings relevant to Heiwa work
@@ -378,6 +403,7 @@ Heiwa must not require:
 ### 1. Shared Specialist Migration
 
 Initial migration is exactly the five existing Heiwa Gemini specialists sourced from the current repo-local Gemini wrappers:
+
 - `heiwa-architect`
 - `heiwa-security`
 - `heiwa-builder`
@@ -385,6 +411,7 @@ Initial migration is exactly the five existing Heiwa Gemini specialists sourced 
 - `heiwa-researcher`
 
 Each is migrated into:
+
 - `ops/agents/<id>/agent.yaml`
 - `ops/agents/<id>/prompt.md`
 - generated Gemini wrapper
@@ -396,6 +423,7 @@ Each is migrated into:
 Existing Heiwa Codex-only skills are **not** automatically promoted into the shared registry.
 
 Promotion is manual and intentional:
+
 - if something is a reusable specialist identity, it may be promoted into `ops/agents/`
 - if something is workflow guidance, process glue, or an operational playbook, it remains a skill or automation
 
@@ -416,6 +444,7 @@ ops/automations/
 ```
 
 Rules:
+
 - `ops/agents/` defines specialist identities
 - `ops/automations/` defines recurring tasks
 - an automation may reference an agent id, but it is not itself an agent
@@ -424,6 +453,7 @@ Rules:
 ## Success Criteria
 
 The immediate implementation target is complete when all of the following are true:
+
 1. all five shared Heiwa specialists are authored only in `ops/agents/`
 2. `.gemini/agents/` and `.claude/agents/` are fully generated and contain no orphans
 3. Codex generated wrappers exist under `ops/agents/*/generated/codex/` and can be installed into `~/.agents/skills/`
@@ -431,6 +461,7 @@ The immediate implementation target is complete when all of the following are tr
 5. one command, `uv run scripts/sync_agents.py --check`, verifies drift, orphan detection, Codex install state, and project config self-sufficiency
 
 Deferred follow-on success criteria:
+
 1. automations have an explicit canonical home outside the agent tree
 2. agent sync/install and automation sync/install remain separate workflows
 
@@ -465,21 +496,23 @@ Deferred follow-on success criteria:
 ### Canonical `tool_profile`
 
 Allowed v1 values:
+
 - `full_access`
 - `read_only`
 
 Translation rules:
 
-| `tool_profile` | Gemini emit | Claude emit | Codex emit |
-| --- | --- | --- | --- |
-| `full_access` | `tools: ["*"]` | omit `disallowedTools` | no wrapper-level restriction; rely on prompt contract |
-| `read_only` | `tools: ["read_file", "grep_search", "glob", "list_directory", "google_web_search"]` | `disallowedTools: ["Write", "Edit", "MultiEdit", "Bash"]` | no wrapper-level restriction; generator adds a read-only policy section to the `SKILL.md` body |
+| `tool_profile` | Gemini emit                                                                          | Claude emit                                               | Codex emit                                                                                     |
+| -------------- | ------------------------------------------------------------------------------------ | --------------------------------------------------------- | ---------------------------------------------------------------------------------------------- |
+| `full_access`  | `tools: ["*"]`                                                                       | omit `disallowedTools`                                    | no wrapper-level restriction; rely on prompt contract                                          |
+| `read_only`    | `tools: ["read_file", "grep_search", "glob", "list_directory", "google_web_search"]` | `disallowedTools: ["Write", "Edit", "MultiEdit", "Bash"]` | no wrapper-level restriction; generator adds a read-only policy section to the `SKILL.md` body |
 
 In v1, `heiwa-researcher` is the only restrictive shared specialist and uses `tool_profile: read_only`. The other four shared specialists use `tool_profile: full_access`.
 
 ### Generated Banner Format
 
 Every generated wrapper must start with a short banner that includes:
+
 - `GENERATED FILE - DO NOT EDIT`
 - canonical manifest path
 - canonical prompt path

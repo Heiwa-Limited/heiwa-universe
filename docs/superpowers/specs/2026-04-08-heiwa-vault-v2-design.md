@@ -126,14 +126,14 @@ This interface feeds `heiwa`, Heiwa agents, and later remote workers and MCP-sty
 
 MemPalace terms translate into Heiwa terms as follows:
 
-| MemPalace | Heiwa Vault V2 |
-| --- | --- |
-| wing | domain scope such as user, project, device, or person |
-| room | topic slug within a domain |
-| closet | generated compact context or materialized note |
-| drawer | raw chunk payload |
-| hall | relationship class or retrieval facet |
-| tunnel | cross-domain link |
+| MemPalace | Heiwa Vault V2                                        |
+| --------- | ----------------------------------------------------- |
+| wing      | domain scope such as user, project, device, or person |
+| room      | topic slug within a domain                            |
+| closet    | generated compact context or materialized note        |
+| drawer    | raw chunk payload                                     |
+| hall      | relationship class or retrieval facet                 |
+| tunnel    | cross-domain link                                     |
 
 Heiwa may still expose "wing" and "room" in user-facing search or note metadata because the concept is useful, but the canonical storage model stays Heiwa-native.
 
@@ -405,13 +405,13 @@ Vault V2 planning assumes Heiwa is normalized around the providers Devon actuall
 
 ### Canonical live-only provider set
 
-| Canonical provider id | Account/auth shape | Canonical rate group(s) | Canonical models |
-| --- | --- | --- | --- |
-| `ollama` | local runtime | `local_ollama` | `qwen3.5:9b`, `qwen3.5:4b`, `gemma4`, `qwen3-embedding:0.6b` |
-| `google-gemini-cli` | OAuth CLI via `gemini` | `google_gemini_cli` | `gemini-cli/gemini-3.1-pro` |
-| `google-antigravity` | OAuth CLI / wrapped Antigravity surface | `antigravity_flash`, `antigravity_pro` | `google-antigravity/gemini-3-flash`, `google-antigravity/gemini-3.1-pro` |
-| `claude-code` | OAuth CLI via `claude` | `claude_code` | `claude/haiku-4-5`, `claude/sonnet-4-6`, `claude/opus-4-6` |
-| `codex` | OAuth CLI via `codex` | `openai_codex` | `codex/gpt-5.4` |
+| Canonical provider id | Account/auth shape                      | Canonical rate group(s)                | Canonical models                                                         |
+| --------------------- | --------------------------------------- | -------------------------------------- | ------------------------------------------------------------------------ |
+| `ollama`              | local runtime                           | `local_ollama`                         | `qwen3.5:9b`, `qwen3.5:4b`, `gemma4`, `qwen3-embedding:0.6b`             |
+| `google-gemini-cli`   | OAuth CLI via `gemini`                  | `google_gemini_cli`                    | `gemini-cli/gemini-3.1-pro`                                              |
+| `google-antigravity`  | OAuth CLI / wrapped Antigravity surface | `antigravity_flash`, `antigravity_pro` | `google-antigravity/gemini-3-flash`, `google-antigravity/gemini-3.1-pro` |
+| `claude-code`         | OAuth CLI via `claude`                  | `claude_code`                          | `claude/haiku-4-5`, `claude/sonnet-4-6`, `claude/opus-4-6`               |
+| `codex`               | OAuth CLI via `codex`                   | `openai_codex`                         | `codex/gpt-5.4`                                                          |
 
 ### Normalization rules
 

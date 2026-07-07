@@ -159,7 +159,7 @@ struct RouteCompressionResult {
 /// Outcome of the routing pipeline.
 enum RouteOutcome {
     /// Task routed to a model, ready to stream.
-    Routed(RouteResult),
+    Routed(Box<RouteResult>),
     /// DREX returned a deterministic response (no model needed).
     Deterministic(String),
 }
@@ -1151,6 +1151,17 @@ async fn run_repl(use_cockpit: bool) -> Result<()> {
         println!("No loop-capable models available. Run 'heiwa providers' or 'heiwa auth add-key' to connect.");
     }
 
+    // Receipt store: env × provider × model × agent × tokens × latency ×
+    // actual_cost × counterfactual_cost. See docs/architecture/receipts.md.
+    let heiwa_home = heiwa_install::get_heiwa_dir();
+    let receipts = heiwa_receipts::ReceiptStore::open(heiwa_home.join("receipts.db")).ok();
+    let rates = heiwa_receipts::runtime::load_rates_or_default(&heiwa_home);
+    if receipts.is_none() {
+        debug_log(format_args!(
+            "receipts store unavailable; runs will not be recorded"
+        ));
+    }
+
     let persisted = heiwa_session::load_transcript(DEFAULT_SESSION_ID)
         .unwrap_or_else(|_| heiwa_session::PersistedTranscript::empty(DEFAULT_SESSION_ID));
 
@@ -1279,6 +1290,12 @@ async fn run_repl(use_cockpit: bool) -> Result<()> {
                             &pins,
                         );
                         append_state_block(&mut state, TranscriptBlock::User(t.clone()));
+                        let input_text: String = messages
+                            .iter()
+                            .map(|m| m.content.clone())
+                            .collect::<Vec<_>>()
+                            .join("\n");
+                        let receipt_started = std::time::Instant::now();
                         let (stream_tx, mut stream_rx) = tokio::sync::mpsc::channel(32);
                         let model_id = route.provider_model_id.clone();
 
@@ -1319,6 +1336,7 @@ async fn run_repl(use_cockpit: bool) -> Result<()> {
                             }
                         }
                         println!();
+                        let response_for_receipt = full_response.clone();
                         append_state_block(&mut state, TranscriptBlock::Assistant(full_response));
 
                         if let Some(ref u) = usage {
@@ -1330,6 +1348,19 @@ async fn run_repl(use_cockpit: bool) -> Result<()> {
                             }
                         }
                         record_run_evidence(&stdb_client, &route, usage.as_ref());
+                        let receipt_latency_ms = receipt_started.elapsed().as_millis() as i64;
+                        if let Some(ref receipts) = receipts {
+                            record_call_receipt(
+                                receipts,
+                                &rates,
+                                &route,
+                                usage.as_ref(),
+                                &state.session_id,
+                                &input_text,
+                                &response_for_receipt,
+                                receipt_latency_ms,
+                            );
+                        }
                         turn_count += 1;
                     }
                 }
@@ -2592,7 +2623,7 @@ fn route_task_inner(
 
     let adapter = resolve_adapter(&selected.provider, &selected.model_id)?;
 
-    Ok(RouteOutcome::Routed(RouteResult {
+    Ok(RouteOutcome::Routed(Box::new(RouteResult {
         adapter,
         model_id: selected.model_id.clone(),
         provider: selected.provider.clone(),
@@ -2603,7 +2634,7 @@ fn route_task_inner(
         privacy: privacy.to_string(),
         request_id: uuid::Uuid::new_v4().to_string(),
         turn_started_at: Utc::now().to_rfc3339(),
-    }))
+    })))
 }
 
 /// Detect privacy cues that force the sovereign (local-only) lane.
@@ -2662,6 +2693,58 @@ fn record_route_evidence(stdb: &heiwa_stdb::StdbClient, route: &RouteResult, tas
         &route.routing_metadata,
         0.9,
     );
+}
+
+/// Record a completed run in the local receipt store.
+fn record_call_receipt(
+    receipts: &heiwa_receipts::ReceiptStore,
+    rates: &heiwa_receipts::RateTable,
+    route: &RouteResult,
+    usage: Option<&TokenUsage>,
+    session_id: &str,
+    input_text: &str,
+    output_text: &str,
+    latency_ms: i64,
+) {
+    use heiwa_receipts::{runtime, Receipt};
+
+    let env = runtime::env_for_provider(&route.provider);
+    let tokens_in = usage
+        .map(|u| u.input_tokens as i64)
+        .filter(|&n| n > 0)
+        .unwrap_or_else(|| runtime::estimate_tokens(input_text));
+    let tokens_out = usage
+        .map(|u| u.output_tokens as i64)
+        .filter(|&n| n > 0)
+        .unwrap_or_else(|| runtime::estimate_tokens(output_text));
+
+    let (costs, _found) = runtime::compute_or_zero(
+        rates,
+        env,
+        &route.provider,
+        &route.model_id,
+        tokens_in,
+        tokens_out,
+    );
+
+    let receipt = Receipt::new(
+        Utc::now().timestamp(),
+        env,
+        route.provider.clone(),
+        route.model_id.clone(),
+        "repl",
+        tokens_in,
+        tokens_out,
+        latency_ms,
+        costs.actual_cad,
+        costs.counterfactual_cad,
+        session_id,
+        None,
+    );
+
+    if let Err(error) = receipts.insert(&receipt) {
+        debug_log(format_args!("receipt insert failed: {error}"));
+    }
 }
 
 /// Record a completed run in SpacetimeDB.

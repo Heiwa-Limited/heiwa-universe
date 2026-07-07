@@ -6,41 +6,41 @@ Default location: `~/.heiwa/` (override via `HEIWA_HOME`).
 
 ## Top-Level
 
-| Path | Owner | Purpose |
-| --- | --- | --- |
-| `~/.heiwa/config.toml` | operator | Local profile, route prefs, BYOX registration defaults |
-| `~/.heiwa/accounts.json` | runtime | Connected provider accounts (status, models, expiry refs) |
-| `~/.heiwa/identity.json` | runtime | Operator identity bound to this machine |
-| `~/.heiwa/machine.json` | runtime | Device manifest (id, hostname, os, arch, installed_at) |
-| `~/.heiwa/connection.json` | runtime | SpacetimeDB sync endpoint + token reference |
-| `~/.heiwa/secrets/` | runtime | OS-keychain-backed secret refs; never raw secrets in plain JSON |
-| `~/.heiwa/state/` | runtime | Mutable runtime state (see below) |
-| `~/.heiwa/sessions/` | runtime | Session transcripts and per-session metadata |
-| `~/.heiwa/logs/` | runtime | Rotating runtime logs |
-| `~/.heiwa/cache/` | runtime | Provider response caches, model lists, expensive lookups |
-| `~/.heiwa/bin/` | install | Helper binaries (`heiwa-route`, etc.) |
-| `~/.heiwa/app/Heiwa.app` | install | HOME-local primary user input/display launcher for Heiwa.app |
-| `~/.heiwa/state.db` | runtime | Optional SQLite ledger (quotas, evidence) |
+| Path                       | Owner    | Purpose                                                         |
+| -------------------------- | -------- | --------------------------------------------------------------- |
+| `~/.heiwa/config.toml`     | operator | Local profile, route prefs, BYOX registration defaults          |
+| `~/.heiwa/accounts.json`   | runtime  | Connected provider accounts (status, models, expiry refs)       |
+| `~/.heiwa/identity.json`   | runtime  | Operator identity bound to this machine                         |
+| `~/.heiwa/machine.json`    | runtime  | Device manifest (id, hostname, os, arch, installed_at)          |
+| `~/.heiwa/connection.json` | runtime  | SpacetimeDB sync endpoint + token reference                     |
+| `~/.heiwa/secrets/`        | runtime  | OS-keychain-backed secret refs; never raw secrets in plain JSON |
+| `~/.heiwa/state/`          | runtime  | Mutable runtime state (see below)                               |
+| `~/.heiwa/sessions/`       | runtime  | Session transcripts and per-session metadata                    |
+| `~/.heiwa/logs/`           | runtime  | Rotating runtime logs                                           |
+| `~/.heiwa/cache/`          | runtime  | Provider response caches, model lists, expensive lookups        |
+| `~/.heiwa/bin/`            | install  | Helper binaries (`heiwa-route`, etc.)                           |
+| `~/.heiwa/app/Heiwa.app`   | install  | HOME-local primary user input/display launcher for Heiwa.app    |
+| `~/.heiwa/state.db`        | runtime  | Optional SQLite ledger (quotas, evidence)                       |
 
 ## `~/.heiwa/state/` Subtree
 
 This subtree is the only place runtime mutation happens for life/workers/approvals/evidence.
 
-| Path | Writer | Reader |
-| --- | --- | --- |
-| `state/workers.json` | `heiwa workers heartbeat` | `heiwa workers status`, `heiwa app runtime status` |
-| `state/dispatch/requests/` | runtime, brokers | `heiwa approvals list`, `heiwa approvals show` |
-| `state/dispatch/approvals/decisions/` | `heiwa approvals decide` | runtime brokers, audit |
-| `state/dispatch/results/` | runtime | audit |
-| `state/evidence/<utc-date>/` | runtime, brokers | audit |
-| `state/health/doctor_latest.json` | `heiwa doctor` | UI, CI |
-| `state/inventory/` | runtime | `heiwa providers`, `heiwa models` |
-| `state/schedulers/` | scheduler | audit |
-| `state/life/readmodel.json` | `heiwa life import` (when wired) | `heiwa life today`, `heiwa life status` |
-| `state/mail/headers.jsonl` | mail bridge (planned) | `heiwa life today`, urgency triage |
-| `state/locks/` | runtime | runtime |
-| `state/net/` | runtime | telemetry |
-| `state/resources/` | runtime | scheduler |
+| Path                                  | Writer                           | Reader                                             |
+| ------------------------------------- | -------------------------------- | -------------------------------------------------- |
+| `state/workers.json`                  | `heiwa workers heartbeat`        | `heiwa workers status`, `heiwa app runtime status` |
+| `state/dispatch/requests/`            | runtime, brokers                 | `heiwa approvals list`, `heiwa approvals show`     |
+| `state/dispatch/approvals/decisions/` | `heiwa approvals decide`         | runtime brokers, audit                             |
+| `state/dispatch/results/`             | runtime                          | audit                                              |
+| `state/evidence/<utc-date>/`          | runtime, brokers                 | audit                                              |
+| `state/health/doctor_latest.json`     | `heiwa doctor`                   | UI, CI                                             |
+| `state/inventory/`                    | runtime                          | `heiwa providers`, `heiwa models`                  |
+| `state/schedulers/`                   | scheduler                        | audit                                              |
+| `state/life/readmodel.json`           | `heiwa life import` (when wired) | `heiwa life today`, `heiwa life status`            |
+| `state/mail/headers.jsonl`            | mail bridge (planned)            | `heiwa life today`, urgency triage                 |
+| `state/locks/`                        | runtime                          | runtime                                            |
+| `state/net/`                          | runtime                          | telemetry                                          |
+| `state/resources/`                    | runtime                          | scheduler                                          |
 
 ## Hard Rules
 

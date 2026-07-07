@@ -169,8 +169,8 @@ fn compute_effects(id: &str, approve: bool) -> Result<Value> {
         ));
     }
     let raw = fs::read_to_string(&request_path)?;
-    let request: Value = serde_json::from_str(&raw)
-        .map_err(|e| anyhow!("request {id} is malformed: {e}"))?;
+    let request: Value =
+        serde_json::from_str(&raw).map_err(|e| anyhow!("request {id} is malformed: {e}"))?;
     let mut effects: Vec<Value> = Vec::new();
     let surface = request
         .get("target_surface")

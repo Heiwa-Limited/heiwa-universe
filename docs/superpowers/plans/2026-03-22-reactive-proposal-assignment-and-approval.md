@@ -13,6 +13,7 @@
 ### Task 1: Add the failing reactive assignment test
 
 **Files:**
+
 - Create: `apps/heiwa_hub/tests/test_reactive_assignment.py`
 - Modify: `packages/heiwa_sdk/heiwa_sdk/proposal_dispatch.py`
 
@@ -46,6 +47,7 @@ Expected: PASS
 ### Task 2: Wire reactive assignment into proposal and node events
 
 **Files:**
+
 - Modify: `packages/heiwa_sdk/heiwa_sdk/main.py`
 - Modify: `packages/heiwa_sdk/heiwa_sdk/tick.py`
 - Modify: `apps/heiwa_hub/mcp_server.py`
@@ -78,6 +80,7 @@ Expected: PASS
 ### Task 3: Add the failing STDB-backed approval view test
 
 **Files:**
+
 - Create: `apps/heiwa_hub/tests/test_operator_approval_source.py`
 - Modify: `apps/heiwa_hub/mcp_server.py`
 - Modify: `apps/heiwa_hub/agents/spine.py`
@@ -107,6 +110,7 @@ Expected: PASS
 ### Task 4: Replace operator websocket polling with event-driven pushes
 
 **Files:**
+
 - Modify: `apps/heiwa_hub/mcp_server.py`
 
 - [ ] **Step 1: Write the failing test or narrow assertion**
@@ -130,6 +134,7 @@ Expected: PASS
 ### Task 5: Regression verification
 
 **Files:**
+
 - Test: `apps/heiwa_hub/tests/test_stdb_proposal_lifecycle.py`
 - Test: `apps/heiwa_hub/tests/test_approval_gate_e2e.py`
 - Test: `apps/heiwa_hub/tests/test_task_ingress_e2e.py`

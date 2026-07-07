@@ -26,58 +26,60 @@ Each track should leave the repo in a working, testable state before the next be
 ## File Structure
 
 ### New Files
-| File | Responsibility |
-|------|----------------|
-| `apps/heiwa_hub/agents/captain.py` | Unified Captain runtime replacing Spine + HeiwaClaw behavior |
-| `apps/heiwa_hub/agents/pulse.py` | Pulse subsystem replacing Telemetry agent responsibilities |
-| `apps/heiwa_hub/adapters/discord.py` | Discord client adapter over Wire and REST approval endpoints |
-| `packages/heiwa_cli/heiwa_cli/wire.py` | Shared CLI Wire client: connect/auth/catch-up/battlefield registration |
+
+| File                                                | Responsibility                                                          |
+| --------------------------------------------------- | ----------------------------------------------------------------------- |
+| `apps/heiwa_hub/agents/captain.py`                  | Unified Captain runtime replacing Spine + HeiwaClaw behavior            |
+| `apps/heiwa_hub/agents/pulse.py`                    | Pulse subsystem replacing Telemetry agent responsibilities              |
+| `apps/heiwa_hub/adapters/discord.py`                | Discord client adapter over Wire and REST approval endpoints            |
+| `packages/heiwa_cli/heiwa_cli/wire.py`              | Shared CLI Wire client: connect/auth/catch-up/battlefield registration  |
 | `apps/heiwa_hub/tests/test_wire_client_protocol.py` | Wire replay, auth, catch-up, battlefield registration integration tests |
-| `apps/heiwa_hub/tests/test_stdb_wire_events.py` | STDB event append/replay tests |
-| `apps/heiwa_hub/tests/test_stdb_battlefields.py` | Battlefield lifecycle tests |
-| `apps/heiwa_hub/tests/test_captain_runtime.py` | Captain event-loop and lease/mission persistence tests |
+| `apps/heiwa_hub/tests/test_stdb_wire_events.py`     | STDB event append/replay tests                                          |
+| `apps/heiwa_hub/tests/test_stdb_battlefields.py`    | Battlefield lifecycle tests                                             |
+| `apps/heiwa_hub/tests/test_captain_runtime.py`      | Captain event-loop and lease/mission persistence tests                  |
 
 ### Modified Files
-| File | Changes |
-|------|---------|
-| `apps/heiwa_hub/spacetimedb/src/lib.rs` | Add `owner_id`/`principal_id`, `events`, `battlefields`, and Executor-related contract updates |
-| `packages/heiwa_sdk/heiwa_sdk/spacetimedb.py` | Add bridge methods for new reducers/queries; migrate `user_id` calls to `owner_id`/`principal_id` |
-| `packages/heiwa_sdk/heiwa_sdk/db.py` | Expose new identity-aware helpers, Wire event persistence, battlefield accessors |
-| `packages/heiwa_sdk/heiwa_sdk/state.py` | Identity-aware reads for missions/history/providers and new battlefield/event lookups |
-| `packages/heiwa_sdk/heiwa_sdk/main.py` | Align REST control endpoints with owner/principal and Node/Executor vocabulary |
-| `packages/heiwa_sdk/heiwa_sdk/provider_registry.py` | Surface Executor metadata separately from provider accounts |
-| `packages/heiwa_sdk/heiwa_sdk/tool_mesh.py` | Execute against Executors hosted on Nodes |
-| `packages/heiwa_sdk/heiwa_sdk/heiwaclaw/gateway.py` | Resolve routes to Executors, not Nodes |
-| `packages/heiwa_sdk/heiwa_sdk/proposal_dispatch.py` | Sync Node and Executor state into STDB/Pulse |
-| `packages/heiwa_sdk/heiwa_sdk/hooks.py` | Continue lease enforcement against mission-owned leases |
-| `packages/heiwa_sdk/heiwa_sdk/vault.py` | Hub-owned BYOK handling and Railway sync refinements |
-| `apps/heiwa_hub/mcp_server.py` | Add `/ws/client`, event replay, battlefield/session plumbing, owner/principal extraction |
-| `apps/heiwa_hub/auth.py` | Make owner/principal identity explicit in auth/session claims |
-| `apps/heiwa_hub/main.py` | Boot Captain + Pulse + Discord adapter instead of Spine/HeiwaClaw/Telemetry/Messenger |
-| `apps/heiwa_hub/transport.py` | Runtime Node registration + capability advertisement feeding Executor selection |
-| `apps/heiwa_hub/agents/spine.py` | Convert to compatibility shim or retire after Captain lands |
-| `apps/heiwa_hub/agents/heiwaclaw.py` | Convert to compatibility shim or retire after Captain lands |
-| `apps/heiwa_hub/agents/telemetry.py` | Convert to compatibility shim or retire after Pulse lands |
-| `apps/heiwa_hub/agents/messenger.py` | Convert to compatibility shim or retire after Discord adapter lands |
-| `packages/heiwa_cli/heiwa_cli/context.py` | Track Session/Battlefield identity and hub auth context |
-| `packages/heiwa_cli/heiwa_cli/repl.py` | Use Wire stream and battlefield registration instead of ad hoc task-only hub calls |
-| `packages/heiwa_cli/heiwa_cli/oneshot.py` | Submit via mission/session contract and stream via Wire |
-| `packages/heiwa_cli/heiwa_cli/auth.py` | Align provider status with owner/principal and Vault-backed credentials |
-| `packages/heiwa_protocol/heiwa_protocol/protocol.py` | Update topology language if required by Captain/Pulse/Discord adapter merge |
-| `apps/heiwa_hub/tests/test_stdb_user_scoping.py` | Replace `user_id` assertions with owner/principal coverage |
-| `apps/heiwa_hub/tests/test_stdb_option_encoding.py` | Cover new bridge argument ordering and optional identity fields |
-| `apps/heiwa_hub/tests/test_mcp_server_surface.py` | Add `/ws/client` and replay endpoint coverage |
-| `apps/heiwa_hub/tests/test_user_auth_dashboard.py` | Cover owner/principal claim extraction and provider filtering |
-| `apps/heiwa_hub/tests/test_rate_group_routing.py` | Assert Executor-first routing semantics |
-| `apps/heiwa_hub/tests/test_reactive_assignment.py` | Assert Node reachability vs Executor capacity selection |
-| `apps/heiwa_hub/tests/test_discord_smoke_imports.py` | Point imports at adapter module or compatibility shim |
-| `apps/heiwa_hub/tests/test_discord_smoke_payload.py` | Assert Discord adapter event rendering against Wire events |
-| `config/swarm/END_STATE_2026-03.md` | Update product topology to Captain/Pulse/Executor/Hub-first model |
-| `ops/context/HEIWA.md` | Update operator guidance and routing assumptions |
-| `CLAUDE.md` | Update agent inventory and Railway-primary operating model |
-| `apps/heiwa_hub/Dockerfile` | Boot new runtime modules and required env defaults |
-| `railway.toml` | Reflect deployment/runtime assumptions from the new architecture |
-| `infra/cloud/railway/README.md` | Document template boot and owner-provided infra model |
+
+| File                                                 | Changes                                                                                           |
+| ---------------------------------------------------- | ------------------------------------------------------------------------------------------------- |
+| `apps/heiwa_hub/spacetimedb/src/lib.rs`              | Add `owner_id`/`principal_id`, `events`, `battlefields`, and Executor-related contract updates    |
+| `packages/heiwa_sdk/heiwa_sdk/spacetimedb.py`        | Add bridge methods for new reducers/queries; migrate `user_id` calls to `owner_id`/`principal_id` |
+| `packages/heiwa_sdk/heiwa_sdk/db.py`                 | Expose new identity-aware helpers, Wire event persistence, battlefield accessors                  |
+| `packages/heiwa_sdk/heiwa_sdk/state.py`              | Identity-aware reads for missions/history/providers and new battlefield/event lookups             |
+| `packages/heiwa_sdk/heiwa_sdk/main.py`               | Align REST control endpoints with owner/principal and Node/Executor vocabulary                    |
+| `packages/heiwa_sdk/heiwa_sdk/provider_registry.py`  | Surface Executor metadata separately from provider accounts                                       |
+| `packages/heiwa_sdk/heiwa_sdk/tool_mesh.py`          | Execute against Executors hosted on Nodes                                                         |
+| `packages/heiwa_sdk/heiwa_sdk/heiwaclaw/gateway.py`  | Resolve routes to Executors, not Nodes                                                            |
+| `packages/heiwa_sdk/heiwa_sdk/proposal_dispatch.py`  | Sync Node and Executor state into STDB/Pulse                                                      |
+| `packages/heiwa_sdk/heiwa_sdk/hooks.py`              | Continue lease enforcement against mission-owned leases                                           |
+| `packages/heiwa_sdk/heiwa_sdk/vault.py`              | Hub-owned BYOK handling and Railway sync refinements                                              |
+| `apps/heiwa_hub/mcp_server.py`                       | Add `/ws/client`, event replay, battlefield/session plumbing, owner/principal extraction          |
+| `apps/heiwa_hub/auth.py`                             | Make owner/principal identity explicit in auth/session claims                                     |
+| `apps/heiwa_hub/main.py`                             | Boot Captain + Pulse + Discord adapter instead of Spine/HeiwaClaw/Telemetry/Messenger             |
+| `apps/heiwa_hub/transport.py`                        | Runtime Node registration + capability advertisement feeding Executor selection                   |
+| `apps/heiwa_hub/agents/spine.py`                     | Convert to compatibility shim or retire after Captain lands                                       |
+| `apps/heiwa_hub/agents/heiwaclaw.py`                 | Convert to compatibility shim or retire after Captain lands                                       |
+| `apps/heiwa_hub/agents/telemetry.py`                 | Convert to compatibility shim or retire after Pulse lands                                         |
+| `apps/heiwa_hub/agents/messenger.py`                 | Convert to compatibility shim or retire after Discord adapter lands                               |
+| `packages/heiwa_cli/heiwa_cli/context.py`            | Track Session/Battlefield identity and hub auth context                                           |
+| `packages/heiwa_cli/heiwa_cli/repl.py`               | Use Wire stream and battlefield registration instead of ad hoc task-only hub calls                |
+| `packages/heiwa_cli/heiwa_cli/oneshot.py`            | Submit via mission/session contract and stream via Wire                                           |
+| `packages/heiwa_cli/heiwa_cli/auth.py`               | Align provider status with owner/principal and Vault-backed credentials                           |
+| `packages/heiwa_protocol/heiwa_protocol/protocol.py` | Update topology language if required by Captain/Pulse/Discord adapter merge                       |
+| `apps/heiwa_hub/tests/test_stdb_user_scoping.py`     | Replace `user_id` assertions with owner/principal coverage                                        |
+| `apps/heiwa_hub/tests/test_stdb_option_encoding.py`  | Cover new bridge argument ordering and optional identity fields                                   |
+| `apps/heiwa_hub/tests/test_mcp_server_surface.py`    | Add `/ws/client` and replay endpoint coverage                                                     |
+| `apps/heiwa_hub/tests/test_user_auth_dashboard.py`   | Cover owner/principal claim extraction and provider filtering                                     |
+| `apps/heiwa_hub/tests/test_rate_group_routing.py`    | Assert Executor-first routing semantics                                                           |
+| `apps/heiwa_hub/tests/test_reactive_assignment.py`   | Assert Node reachability vs Executor capacity selection                                           |
+| `apps/heiwa_hub/tests/test_discord_smoke_imports.py` | Point imports at adapter module or compatibility shim                                             |
+| `apps/heiwa_hub/tests/test_discord_smoke_payload.py` | Assert Discord adapter event rendering against Wire events                                        |
+| `config/swarm/END_STATE_2026-03.md`                  | Update product topology to Captain/Pulse/Executor/Hub-first model                                 |
+| `ops/context/HEIWA.md`                               | Update operator guidance and routing assumptions                                                  |
+| `CLAUDE.md`                                          | Update agent inventory and Railway-primary operating model                                        |
+| `apps/heiwa_hub/Dockerfile`                          | Boot new runtime modules and required env defaults                                                |
+| `railway.toml`                                       | Reflect deployment/runtime assumptions from the new architecture                                  |
+| `infra/cloud/railway/README.md`                      | Document template boot and owner-provided infra model                                             |
 
 ---
 
@@ -86,6 +88,7 @@ Each track should leave the repo in a working, testable state before the next be
 ### Task 1: Migrate identity from `user_id` to `owner_id` + `principal_id`
 
 **Files:**
+
 - Modify: `apps/heiwa_hub/spacetimedb/src/lib.rs`
 - Modify: `packages/heiwa_sdk/heiwa_sdk/spacetimedb.py`
 - Modify: `packages/heiwa_sdk/heiwa_sdk/db.py`
@@ -180,6 +183,7 @@ git commit -m "feat(identity): split owner and principal scoping"
 ### Task 2: Add event log and battlefield contracts to STDB + SDK
 
 **Files:**
+
 - Modify: `apps/heiwa_hub/spacetimedb/src/lib.rs`
 - Modify: `packages/heiwa_sdk/heiwa_sdk/spacetimedb.py`
 - Modify: `packages/heiwa_sdk/heiwa_sdk/db.py`
@@ -230,6 +234,7 @@ pub struct BattlefieldRecord { /* battlefield_id, owner_id, principal_id, name, 
 - [ ] **Step 4: Add Python bridge/db/state helpers**
 
 Required methods:
+
 - `append_event(...)`
 - `list_events(after_event_id=None, owner_id=..., limit=...)`
 - `upsert_battlefield(...)`
@@ -265,6 +270,7 @@ git commit -m "feat(stdb): add event log and battlefields"
 ### Task 3: Implement `/ws/client` Wire stream with replay/catch-up
 
 **Files:**
+
 - Modify: `apps/heiwa_hub/mcp_server.py`
 - Modify: `apps/heiwa_hub/auth.py`
 - Modify: `packages/heiwa_sdk/heiwa_sdk/state.py`
@@ -288,6 +294,7 @@ Expected: FAIL on missing `/ws/client` endpoint or replay behavior
 - [ ] **Step 3: Implement authenticated `/ws/client` in `mcp_server.py`**
 
 Behavior:
+
 - validate bearer/session token on connect
 - resolve `owner_id` + `principal_id`
 - accept `last_seen_event_id`
@@ -328,6 +335,7 @@ git commit -m "feat(wire): add authenticated client websocket replay"
 ### Task 4: Connect Heiwa CLI to Wire and battlefield registration
 
 **Files:**
+
 - Create: `packages/heiwa_cli/heiwa_cli/wire.py`
 - Modify: `packages/heiwa_cli/heiwa_cli/context.py`
 - Modify: `packages/heiwa_cli/heiwa_cli/repl.py`
@@ -354,6 +362,7 @@ Expected: FAIL because CLI still posts tasks directly and has no Wire client
 - [ ] **Step 3: Add a reusable `WireClient`**
 
 Implement `packages/heiwa_cli/heiwa_cli/wire.py` with:
+
 - auth handshake
 - battlefield registration/reattachment
 - event replay cursor
@@ -366,6 +375,7 @@ Replace the current task-specific websocket polling path with `WireClient.submit
 - [ ] **Step 5: Record battlefield metadata from the current repo**
 
 `CLIContext` should derive:
+
 - repo root
 - repo remote URL if available
 - root path on current node
@@ -396,6 +406,7 @@ git commit -m "feat(cli): add Wire client and battlefield registration"
 ### Task 5: Introduce Executor-first routing on top of Nodes
 
 **Files:**
+
 - Modify: `packages/heiwa_sdk/heiwa_sdk/provider_registry.py`
 - Modify: `packages/heiwa_sdk/heiwa_sdk/tool_mesh.py`
 - Modify: `packages/heiwa_sdk/heiwa_sdk/heiwaclaw/gateway.py`
@@ -459,6 +470,7 @@ git commit -m "refactor(routing): separate nodes from executors"
 ### Task 6: Merge Spine + HeiwaClaw into Captain and extract Pulse
 
 **Files:**
+
 - Create: `apps/heiwa_hub/agents/captain.py`
 - Create: `apps/heiwa_hub/agents/pulse.py`
 - Modify: `apps/heiwa_hub/main.py`
@@ -486,6 +498,7 @@ Expected: FAIL because boot still instantiates Spine/HeiwaClaw/Telemetry
 - [ ] **Step 3: Create `captain.py` by moving the durable control loop into one runtime**
 
 Captain owns:
+
 - event intake
 - mission planning
 - approval escalation
@@ -495,6 +508,7 @@ Captain owns:
 - [ ] **Step 4: Create `pulse.py` for health/rate monitoring**
 
 Pulse owns:
+
 - node liveness snapshots
 - executor capacity snapshots
 - periodic monitoring and event emission
@@ -526,6 +540,7 @@ git commit -m "refactor(hub): merge captain runtime and extract pulse"
 ### Task 7: Decompose Messenger into a Discord adapter
 
 **Files:**
+
 - Create: `apps/heiwa_hub/adapters/discord.py`
 - Modify: `apps/heiwa_hub/agents/messenger.py`
 - Modify: `apps/heiwa_hub/main.py`
@@ -550,6 +565,7 @@ Expected: FAIL because Discord behavior still lives in `MessengerAgent`
 - [ ] **Step 3: Create a thin adapter that consumes Wire/REST**
 
 `DiscordAdapter` should:
+
 - subscribe to Wire events
 - render embeds/buttons
 - translate button presses/slash commands to hub REST calls
@@ -583,6 +599,7 @@ git commit -m "refactor(discord): replace messenger agent with adapter"
 ### Task 8: Connect BYOK Vault and provider auth to owner/principal and Executors
 
 **Files:**
+
 - Modify: `packages/heiwa_sdk/heiwa_sdk/vault.py`
 - Modify: `packages/heiwa_sdk/heiwa_sdk/provider_registry.py`
 - Modify: `packages/heiwa_sdk/heiwa_sdk/main.py`
@@ -633,6 +650,7 @@ git commit -m "feat(vault): scope provider credentials by owner and executor"
 ### Task 9: Package the runtime and update companion documents
 
 **Files:**
+
 - Modify: `apps/heiwa_hub/Dockerfile`
 - Modify: `railway.toml`
 - Modify: `infra/cloud/railway/README.md`
@@ -658,6 +676,7 @@ Make sure Docker/Railway boot the new modules and required env defaults.
 - [ ] **Step 4: Update the three companion documents called out in the spec**
 
 Required docs:
+
 - `config/swarm/END_STATE_2026-03.md`
 - `ops/context/HEIWA.md`
 - `CLAUDE.md`
@@ -717,4 +736,3 @@ Before execution, verify this plan still matches the approved spec:
 - Nodes are runtime endpoints; Executors are provider/model surfaces
 - Hub is the product; Discord/Web/CLI are clients over Wire
 - Captain + Pulse replace Spine/HeiwaClaw/Telemetry as runtime concepts
-

@@ -5,6 +5,7 @@
 **Goal:** Transform the Captain from a monitor into a proactive orchestrator that audits the repository, tunes model selection based on real-world performance, and dispatches fixing directives.
 
 **Architecture:**
+
 - **Repo Audit**: Captain triggers lint/test runs on boot and on git-related events.
 - **Model Tuning**: Captain periodically aggregates `execution_memory` to update `model_tiers.last_success_rate`.
 - **Directives**: Captain creates `captain_directives` in STDB for automated repairs (e.g., "fix lint").

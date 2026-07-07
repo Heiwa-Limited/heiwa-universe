@@ -6,12 +6,12 @@ How the `heiwa-universe` repository becomes the public Heiwa surface. Cloudflare
 
 ## Three publishing planes
 
-| Plane | Surface | Source in repo | Authority |
-| --- | --- | --- | --- |
-| **Marketing shell** | `heiwa.ltd` | `apps/heiwa_app/clients/web/` | Cloudflare Pages |
-| **Documentation** | `docs.heiwa.ltd` | `docs/` + `mkdocs.yml` | GitHub Pages |
-| **Releases** | GitHub Releases | `apps/heiwa_core/`, `apps/heiwa_shell/` | GitHub Releases |
-| **Evidence + licence state** | (internal) | `apps/heiwa_orchestrator/src/stdb/`, `crates/heiwa_stdb/` | SpacetimeDB |
+| Plane                        | Surface          | Source in repo                                            | Authority        |
+| ---------------------------- | ---------------- | --------------------------------------------------------- | ---------------- |
+| **Marketing shell**          | `heiwa.ltd`      | `apps/heiwa_app/clients/web/`                             | Cloudflare Pages |
+| **Documentation**            | `docs.heiwa.ltd` | `docs/` + `mkdocs.yml`                                    | GitHub Pages     |
+| **Releases**                 | GitHub Releases  | `apps/heiwa_core/`, `apps/heiwa_shell/`                   | GitHub Releases  |
+| **Evidence + licence state** | (internal)       | `apps/heiwa_orchestrator/src/stdb/`, `crates/heiwa_stdb/` | SpacetimeDB      |
 
 Each plane has a single source of truth in the repo and a single deploy path. Automated workflows are the normal channel; a [manual fallback](#manual-fallback-when-actions-are-paused) exists for the periods when GitHub Actions are paused.
 
@@ -37,12 +37,12 @@ If a future feature appears to need any of the above on Cloudflare, treat it as 
 
 GitHub is the source of truth. Every public artifact is built from a tagged commit on `main`.
 
-| Workflow | Trigger | Output |
-| --- | --- | --- |
-| [`ci.yml`](https://github.com/Strategizing/heiwa-universe/blob/main/.github/workflows/ci.yml) | every push + PR | `cargo build --workspace`, smoke tests, lint |
-| [`pages.yml`](https://github.com/Strategizing/heiwa-universe/blob/main/.github/workflows/pages.yml) | tag push `v*` | MkDocs build → GitHub Pages → `docs.heiwa.ltd` |
-| [`release.yml`](https://github.com/Strategizing/heiwa-universe/blob/main/.github/workflows/release.yml) | tag push `v*` | Cross-platform binaries → GitHub Releases |
-| [`deploy.yml`](https://github.com/Strategizing/heiwa-universe/blob/main/.github/workflows/deploy.yml) | manual / push to `main` | Cloudflare Pages publish for `clients/web/` |
+| Workflow                                                                                                | Trigger                 | Output                                         |
+| ------------------------------------------------------------------------------------------------------- | ----------------------- | ---------------------------------------------- |
+| [`ci.yml`](https://github.com/Strategizing/heiwa-universe/blob/main/.github/workflows/ci.yml)           | every push + PR         | `cargo build --workspace`, smoke tests, lint   |
+| [`pages.yml`](https://github.com/Strategizing/heiwa-universe/blob/main/.github/workflows/pages.yml)     | tag push `v*`           | MkDocs build → GitHub Pages → `docs.heiwa.ltd` |
+| [`release.yml`](https://github.com/Strategizing/heiwa-universe/blob/main/.github/workflows/release.yml) | tag push `v*`           | Cross-platform binaries → GitHub Releases      |
+| [`deploy.yml`](https://github.com/Strategizing/heiwa-universe/blob/main/.github/workflows/deploy.yml)   | manual / push to `main` | Cloudflare Pages publish for `clients/web/`    |
 
 ### Current pipeline status (2026-05-25)
 

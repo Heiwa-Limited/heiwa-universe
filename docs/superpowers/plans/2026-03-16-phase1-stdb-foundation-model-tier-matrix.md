@@ -17,6 +17,7 @@
 ### Task 1: Add `model_tiers` table to STDB Rust module
 
 **Files:**
+
 - Modify: `apps/heiwa_hub/spacetimedb/src/lib.rs`
 
 - [ ] **Step 1: Add the ModelTier struct and table**
@@ -129,9 +130,11 @@ pub fn update_model_tier_stats(
 - [ ] **Step 4: Compile the Rust module**
 
 Run:
+
 ```bash
 cd /Users/dmcgregsauce/heiwa/apps/heiwa_hub/spacetimedb && cargo build
 ```
+
 Expected: Compiles without errors.
 
 - [ ] **Step 5: Commit**
@@ -144,6 +147,7 @@ git commit -m "feat(stdb): add model_tiers table with upsert and stats reducers"
 ### Task 2: Add `task_dispatches` table
 
 **Files:**
+
 - Modify: `apps/heiwa_hub/spacetimedb/src/lib.rs`
 
 - [ ] **Step 1: Add TaskDispatch struct**
@@ -259,6 +263,7 @@ git commit -m "feat(stdb): add task_dispatches table with create and status upda
 ### Task 3: Add `rate_group_state` table
 
 **Files:**
+
 - Modify: `apps/heiwa_hub/spacetimedb/src/lib.rs`
 
 - [ ] **Step 1: Add RateGroupState struct and reducers**
@@ -324,6 +329,7 @@ git commit -m "feat(stdb): add rate_group_state table with upsert reducer"
 ### Task 4: Add remaining 5 spec tables (Rust-only scaffolds)
 
 **Files:**
+
 - Modify: `apps/heiwa_hub/spacetimedb/src/lib.rs`
 
 > These tables complete the spec's 8-table requirement. Phase 1 adds Rust structs + basic insert/query reducers only — no Python bridge, no seeds, no CLI integration.
@@ -559,6 +565,7 @@ git commit -m "feat(stdb): add 5 scaffold tables (execution_memory, knowledge_em
 sleep 3
 ~/.local/bin/spacetime server list
 ```
+
 Expected: `local` server shows as running on 127.0.0.1:3000.
 
 - [ ] **Step 2: Publish the module**
@@ -567,6 +574,7 @@ Expected: `local` server shows as running on 127.0.0.1:3000.
 cd /Users/dmcgregsauce/heiwa/apps/heiwa_hub/spacetimedb
 ~/.local/bin/spacetime publish --server local heiwa-hub-dev
 ```
+
 Expected: Module published successfully with new tables registered.
 
 - [ ] **Step 3: Verify tables exist**
@@ -581,6 +589,7 @@ Expected: Module published successfully with new tables registered.
 ~/.local/bin/spacetime sql --server local heiwa-hub-dev "SELECT * FROM node_registry LIMIT 1"
 ~/.local/bin/spacetime sql --server local heiwa-hub-dev "SELECT * FROM captain_directives LIMIT 1"
 ```
+
 Expected: Empty result sets (all 8 tables exist but no data yet).
 
 - [ ] **Step 4: Regenerate bindings**
@@ -589,6 +598,7 @@ Expected: Empty result sets (all 8 tables exist but no data yet).
 cd /Users/dmcgregsauce/heiwa
 bash apps/heiwa_hub/scripts/generate_spacetimedb_bindings.sh
 ```
+
 Expected: Python, Rust, and TypeScript bindings regenerated.
 
 - [ ] **Step 5: Commit**
@@ -605,6 +615,7 @@ git commit -m "feat(stdb): publish module with 8 tables (3 primary + 5 scaffolds
 ### Task 6: Extend spacetimedb.py with model_tiers operations
 
 **Files:**
+
 - Modify: `packages/heiwa_sdk/heiwa_sdk/spacetimedb.py`
 - Test: `apps/heiwa_hub/tests/test_model_tiers_stdb.py`
 
@@ -803,6 +814,7 @@ git commit -m "feat(sdk): add model_tiers STDB bridge operations with tests"
 ### Task 7: Create seed loader for model_tiers
 
 **Files:**
+
 - Create: `packages/heiwa_sdk/heiwa_sdk/seed.py`
 - Test: `apps/heiwa_hub/tests/test_seed_loader.py`
 - Create: `config/seeds/model_tiers.json`
@@ -1116,6 +1128,7 @@ git commit -m "feat(sdk): add seed loader for model_tiers and rate_group_state"
 ### Task 8: Integrate seed loading into hub boot sequence
 
 **Files:**
+
 - Modify: `apps/heiwa_hub/main.py`
 
 - [ ] **Step 1: Add seed loading after STDB initialization**
@@ -1147,6 +1160,7 @@ git commit -m "feat(hub): seed model_tiers and rate_groups on STDB boot"
 ### Task 9: Update ComputeRouter to read model_tiers from STDB
 
 **Files:**
+
 - Modify: `packages/heiwa_cognition/heiwa_cognition/router.py`
 - Test: `apps/heiwa_hub/tests/test_compute_router_stdb.py`
 
@@ -1234,7 +1248,7 @@ In `packages/heiwa_cognition/heiwa_cognition/router.py`, find the `ComputeRoute`
 effort_knob: str = ""  # provider-specific effort setting
 ```
 
-- [ ] **Step 4: Update ComputeRouter.__init__ to accept stdb**
+- [ ] **Step 4: Update ComputeRouter.**init** to accept stdb**
 
 Modify the constructor to accept an optional STDB instance:
 
@@ -1352,6 +1366,7 @@ git commit -m "feat(router): ComputeRouter reads model_tiers from STDB with JSON
 ### Task 10: Add `heiwa inspect` command
 
 **Files:**
+
 - Modify: `packages/heiwa_cli/heiwa_cli/commands.py`
 - Test: `apps/heiwa_hub/tests/test_cli_inspect.py`
 
@@ -1451,6 +1466,7 @@ git commit -m "feat(cli): add /inspect command for STDB table debugging"
 ### Task 11: Add `heiwa start` command
 
 **Files:**
+
 - Modify: `packages/heiwa_cli/heiwa_cli/commands.py`
 - Test: `apps/heiwa_hub/tests/test_cli_start.py`
 
@@ -1554,6 +1570,7 @@ git commit -m "feat(cli): add /start command for one-command local boot"
 ### Task 12: End-to-end integration test
 
 **Files:**
+
 - Test: `apps/heiwa_hub/tests/test_phase1_integration.py`
 
 - [ ] **Step 1: Write integration test**

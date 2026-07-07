@@ -225,7 +225,17 @@ TOOLS = {
 }
 
 def invoke_tool(name: str, **kwargs) -> Dict[str, Any]:
-    """Invoke a tool by name with keyword arguments."""
+    """Invoke a tool by name with keyword arguments.
+
+    Set ``HEIWA_TOOLS_POLICY=1`` to route calls through the sandbox policy
+    wrapper. This keeps the legacy SDK surface backward-compatible by default
+    while giving agent hosts a one-env-var hardening path.
+    """
+    if os.environ.get("HEIWA_TOOLS_POLICY", "0") == "1":
+        from .tools_policy import guarded_invoke
+
+        return guarded_invoke(name, **kwargs)
+
     if name not in TOOLS:
         return {"error": f"Unknown tool: {name}"}
     

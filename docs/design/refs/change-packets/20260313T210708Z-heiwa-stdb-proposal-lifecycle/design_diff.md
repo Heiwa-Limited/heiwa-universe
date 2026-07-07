@@ -12,7 +12,7 @@
   - hub HTTP `/proposals*`
   - router tick assignment
   - node heartbeat / claim flow
-  into STDB
+    into STDB
 - A lease artifact between proposal claim and execution
 
 ## Change

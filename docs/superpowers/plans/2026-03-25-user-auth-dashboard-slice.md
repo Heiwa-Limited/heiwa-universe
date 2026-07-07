@@ -13,12 +13,14 @@
 ### Task 1: Add failing coverage for the user-auth dashboard slice
 
 **Files:**
+
 - Create: `apps/heiwa_hub/tests/test_user_auth_dashboard.py`
 - Test: `apps/heiwa_hub/tests/test_user_auth_dashboard.py`
 
 - [ ] **Step 1: Write the failing tests**
 
 Add pytest coverage for:
+
 - `GET /dashboard.html` returns `200`
 - `GET /auth/me` accepts a valid JWT and returns the matching user
 - `GET /auth/providers`, `GET /missions`, `GET /missions/{id}`, and `GET /history` reject missing JWTs
@@ -32,6 +34,7 @@ Expected: FAIL because `dashboard.html` does not exist and the read-only endpoin
 ### Task 2: Add the dashboard landing page
 
 **Files:**
+
 - Create: `apps/heiwa_web/clients/web/dashboard.html`
 - Modify: `apps/heiwa_web/clients/web/assets/operator.js`
 - Test: `apps/heiwa_hub/tests/test_user_auth_dashboard.py`
@@ -39,6 +42,7 @@ Expected: FAIL because `dashboard.html` does not exist and the read-only endpoin
 - [ ] **Step 1: Add the minimal page**
 
 Create `dashboard.html` using the existing static web styling. The page should:
+
 - load `site.js` and `operator.js` so `#token=` is captured automatically
 - present itself as the authenticated dashboard landing page
 - link to `connections.html`, `missions.html`, and `history.html`
@@ -56,6 +60,7 @@ Expected: still FAIL because the user-facing API routes are not JWT-scoped yet.
 ### Task 3: Convert the first read-only user-facing routes to JWT auth
 
 **Files:**
+
 - Modify: `apps/heiwa_hub/mcp_server.py`
 - Modify: `packages/heiwa_sdk/heiwa_sdk/state.py`
 - Test: `apps/heiwa_hub/tests/test_user_auth_dashboard.py`
@@ -63,6 +68,7 @@ Expected: still FAIL because the user-facing API routes are not JWT-scoped yet.
 - [ ] **Step 1: Thread `user_id` through the route layer**
 
 Update these endpoints in `mcp_server.py` to use `require_user(request)` instead of `_validate_auth_token(...)`:
+
 - `/auth/providers`
 - `/auth/providers/{provider_id}/status`
 - `/missions`
@@ -74,6 +80,7 @@ Each route should extract `claims["sub"]` and pass it as `user_id` into the stat
 - [ ] **Step 2: Add user-scoped state facade methods**
 
 Update `HubStateService` to accept `user_id` for:
+
 - `get_provider_accounts`
 - `get_provider_status`
 - `get_missions`
@@ -90,6 +97,7 @@ Expected: still FAIL because the database/STDB facade methods still return unsco
 ### Task 4: Add user-scoped database and STDB query filters
 
 **Files:**
+
 - Modify: `packages/heiwa_sdk/heiwa_sdk/db.py`
 - Modify: `packages/heiwa_sdk/heiwa_sdk/spacetimedb.py`
 - Test: `apps/heiwa_hub/tests/test_user_auth_dashboard.py`
@@ -98,6 +106,7 @@ Expected: still FAIL because the database/STDB facade methods still return unsco
 - [ ] **Step 1: Extend the Database facade**
 
 Add optional `user_id` parameters and delegate them through to STDB for:
+
 - `get_mission`
 - `get_missions`
 - `get_runs`
@@ -122,6 +131,7 @@ Expected: PASS
 ### Task 5: Verify the auth slice end-to-end
 
 **Files:**
+
 - Modify: `apps/heiwa_hub/tests/test_mcp_server_surface.py` (only if existing surface coverage needs updates)
 - Test: `apps/heiwa_hub/tests/test_user_auth_dashboard.py`
 - Test: `apps/heiwa_hub/tests/test_stdb_mission_facade.py`
@@ -147,6 +157,7 @@ Expected: `200` and `False`
 - [ ] **Step 3: Document remaining follow-ups**
 
 Record the known next steps:
+
 - move user/profile lookup off raw SQL where practical
 - encrypt stored Discord OAuth tokens in `link_oauth_identity`
 - convert the next write-capable user workflows after the read-only slice is stable

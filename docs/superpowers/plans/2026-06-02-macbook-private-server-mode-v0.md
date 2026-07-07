@@ -59,6 +59,7 @@ Do not touch:
 ### Task 1: Provider Command Resolution Parity
 
 **Files:**
+
 - Modify: `crates/heiwa_provider/src/lib.rs:315`
 - Modify: `crates/heiwa_provider/src/providers/claude_code.rs:35`
 - Modify: `crates/heiwa_provider/src/providers/codex_cli.rs:35`
@@ -193,6 +194,7 @@ git commit -m "fix: resolve provider CLIs in private server runtime"
 ### Task 2: Local Resource Policy Crate
 
 **Files:**
+
 - Create: `crates/heiwa_resource/Cargo.toml`
 - Create: `crates/heiwa_resource/src/lib.rs`
 - Create: `crates/heiwa_resource/tests/policy.rs`
@@ -387,6 +389,7 @@ git commit -m "feat: add local resource admission policy"
 ### Task 3: Runtime Resource Snapshot and API
 
 **Files:**
+
 - Modify: `apps/heiwa_shell/Cargo.toml`
 - Modify: `apps/heiwa_shell/src/cmd/app.rs`
 - Modify: `apps/heiwa_shell/src/main.rs`
@@ -506,6 +509,7 @@ git commit -m "feat: surface private server resource policy"
 ### Task 4: Local Agent Bus
 
 **Files:**
+
 - Create: `crates/heiwa_agent_bus/Cargo.toml`
 - Create: `crates/heiwa_agent_bus/src/lib.rs`
 - Create: `crates/heiwa_agent_bus/tests/spool.rs`
@@ -598,6 +602,7 @@ git commit -m "feat: add local agent coordination bus"
 ### Task 5: `heiwa agents` CLI
 
 **Files:**
+
 - Create: `apps/heiwa_shell/src/cmd/agents.rs`
 - Modify: `apps/heiwa_shell/src/cmd/mod.rs`
 - Modify: `apps/heiwa_shell/src/cli.rs`
@@ -684,6 +689,7 @@ git commit -m "feat: add local agent bus CLI"
 ### Task 6: Private Server API and Cockpit State
 
 **Files:**
+
 - Modify: `apps/heiwa_shell/src/cmd/app.rs`
 - Modify: `apps/heiwa_shell/tests/smoke.rs`
 - Modify: `apps/heiwa_app/clients/cockpit/src/lib/types.ts`
@@ -736,14 +742,14 @@ Add TypeScript types:
 
 ```ts
 export type PrivateServerState = {
-  mode: 'private_localhost'
-  bind: string
-  external_exposure: boolean
-  providers: { connected: number; missing: string[] }
-  local_models: { provider: string; admission: string; reason: string }
-  agents: { registered: number; pending_tasks: number }
-  approvals: { pending: number }
-}
+  mode: "private_localhost";
+  bind: string;
+  external_exposure: boolean;
+  providers: { connected: number; missing: string[] };
+  local_models: { provider: string; admission: string; reason: string };
+  agents: { registered: number; pending_tasks: number };
+  approvals: { pending: number };
+};
 ```
 
 Add endpoint constant for `/api/v1/private-server`.
@@ -787,6 +793,7 @@ git commit -m "feat: show private server status in cockpit"
 ### Task 7: Orchestrator Resource-Aware Agent Heartbeats
 
 **Files:**
+
 - Modify: `apps/heiwa_orchestrator/Cargo.toml`
 - Modify: `apps/heiwa_orchestrator/src/runtime/mod.rs`
 - Modify: `apps/heiwa_orchestrator/src/config.rs`
@@ -883,6 +890,7 @@ git commit -m "feat: make orchestrator resource-aware"
 ### Task 8: Private Server Operator Contract
 
 **Files:**
+
 - Create: `docs/local-private-server.md`
 - Modify: `docs/local-self-operation.md`
 - Modify: `HEIWA.md`
@@ -891,7 +899,7 @@ git commit -m "feat: make orchestrator resource-aware"
 
 Create `docs/local-private-server.md` with:
 
-```markdown
+````markdown
 # Local Private Server Mode
 
 Heiwa runs as Devon's private localhost AI server on the MacBook.
@@ -915,8 +923,9 @@ heiwa route preview "status check" --json
 heiwa agents list --json
 /usr/bin/curl -fsS http://127.0.0.1:7474/api/v1/private-server | jq .
 ```
-```
+````
 
+````
 - [ ] **Step 2: Link it**
 
 Add links from:
@@ -930,7 +939,7 @@ Run:
 
 ```bash
 .venv/bin/mkdocs build --strict
-```
+````
 
 If the local docs venv is unavailable, report that and run:
 
@@ -950,6 +959,7 @@ git commit -m "docs: define local private server mode"
 ### Task 9: Checkout Runtime Verification and Installed Promotion
 
 **Files:**
+
 - No source edits unless verification reveals defects.
 
 - [ ] **Step 1: Run focused tests**

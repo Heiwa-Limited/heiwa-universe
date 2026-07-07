@@ -17,18 +17,11 @@ fn heiwa() -> Command {
 fn stage(home: &Path) -> (String, String) {
     let out = heiwa()
         .env("HOME", home)
-        .args([
-            "schedule",
-            "call mom",
-            "--at",
-            "2026-06-19T15:00",
-            "--json",
-        ])
+        .args(["schedule", "call mom", "--at", "2026-06-19T15:00", "--json"])
         .output()
         .expect("schedule runs");
     assert!(out.status.success(), "schedule failed: {:?}", out.stderr);
-    let payload: serde_json::Value =
-        serde_json::from_slice(&out.stdout).expect("schedule json");
+    let payload: serde_json::Value = serde_json::from_slice(&out.stdout).expect("schedule json");
     let request_id = payload["approval_request"]["request_id"]
         .as_str()
         .expect("request id")
@@ -65,7 +58,9 @@ fn dry_run_previews_hold_confirm_effect() {
     // `~/.heiwa/state/dispatch/approvals/decisions/` — see approvals.rs
     // `decisions_dir()`. Approval requests live one level up under
     // `dispatch/requests/`.)
-    let decisions = home.path().join(".heiwa/state/dispatch/approvals/decisions");
+    let decisions = home
+        .path()
+        .join(".heiwa/state/dispatch/approvals/decisions");
     assert!(!decisions.exists(), "dry-run must not write a decision");
     let hold: serde_json::Value = serde_json::from_str(
         &fs::read_to_string(

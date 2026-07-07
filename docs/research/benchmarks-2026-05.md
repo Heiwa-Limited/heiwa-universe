@@ -8,11 +8,11 @@ This document establishes the developer benchmarks for the **Heiwa Execution & O
 
 The following benchmarks were observed under a simulated test suite representing common developer intents (Codebase Research, Multi-step Refactoring, Build Gates, and Infrastructure Deployment).
 
-| Run Mode | Avg Latency (TTFT) | Cost per 1M Tokens (Input) | Cost per 1M Tokens (Output) | Effectiveness (SWE-Bench Lite) | Usability Rating (Operator UX) |
-|---|---|---|---|---|---|
-| **Standard Cloud (episodic API)** | 1,450 ms | $3.00 (standard) | $15.00 | 79.4% | **Medium** (High latency, high cost fatigue) |
-| **Quantized Local (Qwen-3.5-9B)** | 180 ms | **$0.00** (sovereign) | **$0.00** | 58.2% | **High** (Local fast autocomplete, weak on complex loops) |
-| **Pipelined Cloud + Prompt Cache** | **290 ms** | **$0.30** (90% cache save) | $15.00 | **82.1%** | **Exceptional** (Ultra-responsive, cheapest enterprise reasoning) |
+| Run Mode                           | Avg Latency (TTFT) | Cost per 1M Tokens (Input) | Cost per 1M Tokens (Output) | Effectiveness (SWE-Bench Lite) | Usability Rating (Operator UX)                                    |
+| ---------------------------------- | ------------------ | -------------------------- | --------------------------- | ------------------------------ | ----------------------------------------------------------------- |
+| **Standard Cloud (episodic API)**  | 1,450 ms           | $3.00 (standard)           | $15.00                      | 79.4%                          | **Medium** (High latency, high cost fatigue)                      |
+| **Quantized Local (Qwen-3.5-9B)**  | 180 ms             | **$0.00** (sovereign)      | **$0.00**                   | 58.2%                          | **High** (Local fast autocomplete, weak on complex loops)         |
+| **Pipelined Cloud + Prompt Cache** | **290 ms**         | **$0.30** (90% cache save) | $15.00                      | **82.1%**                      | **Exceptional** (Ultra-responsive, cheapest enterprise reasoning) |
 
 ---
 
@@ -21,18 +21,21 @@ The following benchmarks were observed under a simulated test suite representing
 By implementing key architectural patterns mined from Clerk, Hermes, and Obsidian, we measured the following actual improvements to efficiency and usability:
 
 ### A. Prompt-Cache Alignment (Context Segmentation)
-* **Optimization**: Separating the context into a cached **Static Prefix** (system prompts, tool definitions) and **Dynamic Suffix** (fresh prompts).
-* **Usability Impact**: Reducing Time-To-First-Token (TTFT) from 1.4s to 290ms completely eliminates agent hesitation, keeping the operator in a continuous "flow state."
-* **Efficiency Impact**: 90% reduction in raw token ingress costs for repetitive prompts in long-lived agent turns.
+
+- **Optimization**: Separating the context into a cached **Static Prefix** (system prompts, tool definitions) and **Dynamic Suffix** (fresh prompts).
+- **Usability Impact**: Reducing Time-To-First-Token (TTFT) from 1.4s to 290ms completely eliminates agent hesitation, keeping the operator in a continuous "flow state."
+- **Efficiency Impact**: 90% reduction in raw token ingress costs for repetitive prompts in long-lived agent turns.
 
 ### B. Multi-Threaded Native OS Spawns (`std::thread::spawn`)
-* **Optimization**: Offloading synchronous file-watching, bash operations, and approval decision polling to native threads instead of standard tokio async workers.
-* **Usability Impact**: Zero UI/REPL freezes. The keyboard buffer and cockpit web client remain fully interactive even when a complex release gate is waiting on operator approval.
-* **Efficiency Impact**: Eliminates tokio single-thread starvation deadlocks, driving resource utilization close to 100% of MacBook physical CPU cores.
+
+- **Optimization**: Offloading synchronous file-watching, bash operations, and approval decision polling to native threads instead of standard tokio async workers.
+- **Usability Impact**: Zero UI/REPL freezes. The keyboard buffer and cockpit web client remain fully interactive even when a complex release gate is waiting on operator approval.
+- **Efficiency Impact**: Eliminates tokio single-thread starvation deadlocks, driving resource utilization close to 100% of MacBook physical CPU cores.
 
 ### C. Unified Input Layer (Multi-modal Omni-Chat)
-* **Optimization**: Providing a single, high-aesthetic console in the Cockpit app supporting Text, simulated Voice, Image, and Video dropzones.
-* **Usability Impact**: Transitioning from fragmented, siloed screens into a single visual cockpit. Voice triggers allow the developer to instruct changes hands-free while visually auditing logs, boosting task intake speed.
+
+- **Optimization**: Providing a single, high-aesthetic console in the Cockpit app supporting Text, simulated Voice, Image, and Video dropzones.
+- **Usability Impact**: Transitioning from fragmented, siloed screens into a single visual cockpit. Voice triggers allow the developer to instruct changes hands-free while visually auditing logs, boosting task intake speed.
 
 ---
 

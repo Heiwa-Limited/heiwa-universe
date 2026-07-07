@@ -13,6 +13,7 @@
 ### Task 1: Update pyproject.toml
 
 **Files:**
+
 - Modify: `pyproject.toml`
 
 - [ ] **Step 1: Update `pyproject.toml` with dependencies**
@@ -62,12 +63,12 @@ addopts = "--tb=short -q"
 ```
 
 - [ ] **Step 2: Commit change**
-`git add pyproject.toml && git commit -m "chore: make pyproject.toml dependency authority"`
+      `git add pyproject.toml && git commit -m "chore: make pyproject.toml dependency authority"`
 
 ### Task 2: Verify and Sync
 
 - [ ] **Step 1: Run `uv sync`**
-Note: This might fail in sandbox if network is needed for resolution, but we can try to resolve from cache if possible.
+      Note: This might fail in sandbox if network is needed for resolution, but we can try to resolve from cache if possible.
 
 - [ ] **Step 2: Run a smoke test**
-`uv run pytest scripts/tests/test_workspace_roots.py`
+      `uv run pytest scripts/tests/test_workspace_roots.py`

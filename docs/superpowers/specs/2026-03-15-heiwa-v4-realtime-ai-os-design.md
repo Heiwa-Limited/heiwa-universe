@@ -17,6 +17,7 @@ Heiwa is a self-hosted, self-improving AI operating system. It routes work acros
 ## 2. What Exists Today (v3)
 
 Working:
+
 - Cognition pipeline: IntentNormalizer (regex-first, 0.95 confidence) → RiskScorer (deterministic keyword escalation) → ComputeRouter (4 compute classes, rate-group-aware fallback)
 - Hub agents: Spine (fleet orchestration), Executor (task execution), Captain (health monitor), Telemetry, Messenger (Discord)
 - HeiwaClaw gateway: resolves BrokerRouteResult → dispatch via ToolMesh subprocess
@@ -25,6 +26,7 @@ Working:
 - SQLite/Postgres/STDB multi-backend abstraction
 
 Problems:
+
 - heiwaclaw.py is 95KB — monolith hiding in a module
 - Agents are stateless — no memory across executions
 - Embedding model (qwen3-embedding:0.6b) pulled but unused
@@ -46,6 +48,7 @@ Everything that can change at runtime lives in STDB. No SQLite. No Postgres. No 
 #### STDB Tables
 
 **Model Tier Matrix**
+
 ```
 table model_tiers {
     model_id: String,           // internal alias: "ollama/qwen3.5:4b"
@@ -67,6 +70,7 @@ table model_tiers {
 ```
 
 **Task Dispatch Envelope**
+
 ```
 table task_dispatches {
     task_id: String,
@@ -92,6 +96,7 @@ table task_dispatches {
 ```
 
 **Memory: Execution History + Feedback**
+
 ```
 table execution_memory {
     execution_id: String,
@@ -109,6 +114,7 @@ table execution_memory {
 ```
 
 **Memory: Knowledge Embeddings**
+
 ```
 table knowledge_embeddings {
     embedding_id: String,
@@ -122,6 +128,7 @@ table knowledge_embeddings {
 ```
 
 **Agent Registry**
+
 ```
 table agent_registry {
     agent_id: String,
@@ -139,6 +146,7 @@ table agent_registry {
 ```
 
 **Node Registry**
+
 ```
 table node_registry {
     node_id: String,            // "macbook@heiwa-node-a", "railway@heiwa-cloud-hq"
@@ -153,6 +161,7 @@ table node_registry {
 ```
 
 **Rate Group State**
+
 ```
 table rate_group_state {
     rate_group: String,         // "claude_code", "google_gemini_cli", etc.
@@ -166,6 +175,7 @@ table rate_group_state {
 ```
 
 **Captain Directives**
+
 ```
 table captain_directives {
     directive_id: String,
@@ -184,14 +194,14 @@ Every model from every provider gets a row in `model_tiers` with its effort knob
 
 #### Provider Effort Mapping
 
-| Provider | Control Name | Values | Normalized |
-|----------|-------------|--------|------------|
-| Claude (Opus/Sonnet) | `effort` | low, medium, high, auto | 1, 3, 5, auto |
-| Codex/OpenAI (gpt-4.1, gpt-5.4) | `reasoning_effort` | low, medium, high, xhigh | 1, 3, 4, 5 |
-| Ollama (Qwen 3.5 MoE) | `/think` toggle | off, on | 1, 4 |
-| Gemini CLI (Gemini 3 Flash) | thinking toggle | off, on | 1, 4 |
-| Gemini CLI (Gemini 3.1 Pro) | thinking level | low, high | 2, 5 |
-| Antigravity (all models) | always thinking | always on | 4 (fixed) |
+| Provider                        | Control Name       | Values                   | Normalized    |
+| ------------------------------- | ------------------ | ------------------------ | ------------- |
+| Claude (Opus/Sonnet)            | `effort`           | low, medium, high, auto  | 1, 3, 5, auto |
+| Codex/OpenAI (gpt-4.1, gpt-5.4) | `reasoning_effort` | low, medium, high, xhigh | 1, 3, 4, 5    |
+| Ollama (Qwen 3.5 MoE)           | `/think` toggle    | off, on                  | 1, 4          |
+| Gemini CLI (Gemini 3 Flash)     | thinking toggle    | off, on                  | 1, 4          |
+| Gemini CLI (Gemini 3.1 Pro)     | thinking level     | low, high                | 2, 5          |
+| Antigravity (all models)        | always thinking    | always on                | 4 (fixed)     |
 
 #### Seed Configuration (loaded on first boot)
 
@@ -220,6 +230,7 @@ Three components, all backed by STDB:
 **Execution Memory** — every task dispatch records its outcome, quality score, and learnings. The Captain reads this to detect patterns: "research tasks on Gemini Flash at thinking:off fail 60% of the time" → auto-tune.
 
 **Knowledge Embeddings** — the embedding pipeline runs on `qwen3-embedding:0.6b` (local, unlimited). Sources:
+
 - Code files in the repo (re-indexed on git push)
 - Execution results (what the agent produced)
 - Commit messages and PR descriptions
@@ -231,6 +242,7 @@ Retrieval: when an agent is dispatched, the context_files in the dispatch envelo
 **Pruning strategy**: Embeddings carry a `created_at` timestamp and an implicit relevance score (how often they're retrieved). A Captain directive runs weekly to prune: code file embeddings are re-indexed on every git push (stale chunks deleted); execution result embeddings older than 30 days with zero retrievals are pruned; document embeddings are re-indexed when source files change (hash comparison).
 
 **Feedback Collector** — three input channels:
+
 1. **Automated**: test pass/fail after code changes, lint scores, PR merge/reject
 2. **Captain review**: Captain spot-checks execution results using a cheap model
 3. **Human**: operator thumbs-up/down via CLI or Discord reaction
@@ -240,17 +252,20 @@ Retrieval: when an agent is dispatched, the context_files in the dispatch envelo
 The Captain is not a monitor — it's the brain. It runs on Railway (always-on) and orchestrates via STDB subscriptions.
 
 **Core loop** (subscription-driven, not polling):
+
 1. Subscribe to `captain_directives` — when `next_run` passes, execute the directive
 2. Subscribe to `task_dispatches` where status = "failed" or "budget_exceeded" — auto-retry with escalated model/effort
 3. Subscribe to `rate_group_state` — when a rate group recovers from cooldown, drain any queued tasks
 4. Subscribe to `execution_memory` — when quality_score patterns degrade, update `model_tiers`
 
 **Captain trust boundaries**:
+
 - **Autonomous (no approval)**: read-only audits, test runs, status checks, model tier tuning, embedding re-indexing
 - **Auto-fix with guard rails**: code changes on non-main branches only, PR creation (never direct push to main), max 50 lines changed per fix
 - **Requires human approval**: dependency changes, config changes affecting production, any risk_level >= "high" task, Dockerfile modifications, STDB schema migrations
 
 **Self-check directive** (runs every 30 minutes):
+
 1. `git diff HEAD~1` — what changed since last check?
 2. `pytest --tb=short` — do tests pass?
 3. Scan for TODOs, FIXMEs, files >50KB (like heiwaclaw.py)
@@ -258,6 +273,7 @@ The Captain is not a monitor — it's the brain. It runs on Railway (always-on) 
 5. If issues found → create task_dispatch → route through cognition pipeline → execute fix → open PR
 
 **Model tuning directive** (runs hourly):
+
 1. Query `execution_memory` for last 50 executions
 2. Group by model + intent_class + effort_level
 3. Calculate success rates, avg latency
@@ -291,18 +307,19 @@ The Executor reads this from STDB (subscription), invokes the model with the cor
 
 The 95KB heiwaclaw.py splits into:
 
-| Module | Responsibility | Size Target |
-|--------|---------------|-------------|
-| `heiwaclaw/resolve.py` | BrokerRouteResult → model + effort selection | <500 lines |
-| `heiwaclaw/dispatch.py` | Construct TaskDispatch envelope, write to STDB | <300 lines |
-| `heiwaclaw/execute.py` | Read dispatch from STDB, invoke model, enforce budget | <500 lines |
-| `heiwaclaw/adapters/` | Per-provider adapters (ollama, gemini, codex, claude, openclaw) | <200 lines each |
-| `heiwaclaw/acp.py` | ACP protocol adapter for OpenClaw interop | <300 lines |
-| `heiwaclaw/mcp.py` | Heiwa's own MCP server (expose capabilities to other tools) | <400 lines |
+| Module                  | Responsibility                                                  | Size Target     |
+| ----------------------- | --------------------------------------------------------------- | --------------- |
+| `heiwaclaw/resolve.py`  | BrokerRouteResult → model + effort selection                    | <500 lines      |
+| `heiwaclaw/dispatch.py` | Construct TaskDispatch envelope, write to STDB                  | <300 lines      |
+| `heiwaclaw/execute.py`  | Read dispatch from STDB, invoke model, enforce budget           | <500 lines      |
+| `heiwaclaw/adapters/`   | Per-provider adapters (ollama, gemini, codex, claude, openclaw) | <200 lines each |
+| `heiwaclaw/acp.py`      | ACP protocol adapter for OpenClaw interop                       | <300 lines      |
+| `heiwaclaw/mcp.py`      | Heiwa's own MCP server (expose capabilities to other tools)     | <400 lines      |
 
 ### 3.7 Protocol Integration
 
 **MCP (Model Context Protocol)**: Heiwa exposes its own MCP server so any Class 3 executor (Claude Code, Gemini CLI, Codex) can call Heiwa directly:
+
 - `heiwa.submit_task(raw_text, identity, surface)` → returns task_id
 - `heiwa.get_status(task_id)` → returns dispatch state
 - `heiwa.approve(task_id)` → approve pending task
@@ -314,6 +331,7 @@ The 95KB heiwaclaw.py splits into:
 ### 3.8 Cell Catalog (HeiwaCells)
 
 Specialist agent personalities from The Agency (120+ agents) are imported as HeiwaCells. Each cell maps to:
+
 - Intent classes it handles (build → senior-backend-engineer, research → research-scout)
 - Minimum capability_class required
 - Default model preference
@@ -324,6 +342,7 @@ Cells are stored in STDB (`agent_registry` table) so the Captain can deploy, upd
 ### 3.9 Portability
 
 **One codebase, two targets:**
+
 - **Local (Mac/Linux)**: `heiwa start` boots the hub, connects to local STDB (`spacetime start local`), discovers Ollama models, registers as boost node
 - **Railway (cloud)**: Dockerfile boots the hub, connects to maincloud STDB, CLI tools installed in Docker, Captain runs always-on
 
@@ -335,37 +354,38 @@ Cells are stored in STDB (`agent_registry` table) so the Captain can deploy, upd
 
 ## 4. What Gets Deleted
 
-| Current | Replacement |
-|---------|------------|
-| `db.py` multi-backend abstraction | Direct STDB client only |
-| `ai_router.json` (static config) | `model_tiers` STDB table (seed file for bootstrap) |
-| SQLite/Postgres deps in requirements.txt | Remove `psycopg2-binary`, SQLite stdlib |
-| `tool_mesh.py` subprocess map | `heiwaclaw/adapters/` per-provider modules |
-| 95KB `heiwaclaw.py` monolith | `heiwaclaw/` package (6 focused modules) |
-| Static HeiwaCells markdown | STDB `agent_registry` + ClawHub sync |
-| Polling-based Captain health checks | STDB subscription-driven directives |
+| Current                                  | Replacement                                        |
+| ---------------------------------------- | -------------------------------------------------- |
+| `db.py` multi-backend abstraction        | Direct STDB client only                            |
+| `ai_router.json` (static config)         | `model_tiers` STDB table (seed file for bootstrap) |
+| SQLite/Postgres deps in requirements.txt | Remove `psycopg2-binary`, SQLite stdlib            |
+| `tool_mesh.py` subprocess map            | `heiwaclaw/adapters/` per-provider modules         |
+| 95KB `heiwaclaw.py` monolith             | `heiwaclaw/` package (6 focused modules)           |
+| Static HeiwaCells markdown               | STDB `agent_registry` + ClawHub sync               |
+| Polling-based Captain health checks      | STDB subscription-driven directives                |
 
 ---
 
 ## 5. What Gets Added
 
-| Component | Purpose |
-|-----------|---------|
-| STDB Rust module tables (8 tables) | Single state substrate for everything |
-| Embedding pipeline | Index code, docs, execution results into `knowledge_embeddings` |
-| Feedback collector | Automated + Captain + human quality signals |
-| Model auto-tuner | Captain directive that adjusts effort levels based on outcomes |
-| Self-check directive | Captain cron: audit repo, run tests, dispatch fixes, open PRs |
-| Heiwa MCP server | Expose Heiwa capabilities to external agents |
-| ACP adapter | OpenClaw interop for agent dispatch |
-| Seed file loader | Bootstrap STDB tables from checked-in config on first boot |
-| `heiwa start` command | One-command local boot (STDB + hub + Ollama discovery) |
+| Component                          | Purpose                                                         |
+| ---------------------------------- | --------------------------------------------------------------- |
+| STDB Rust module tables (8 tables) | Single state substrate for everything                           |
+| Embedding pipeline                 | Index code, docs, execution results into `knowledge_embeddings` |
+| Feedback collector                 | Automated + Captain + human quality signals                     |
+| Model auto-tuner                   | Captain directive that adjusts effort levels based on outcomes  |
+| Self-check directive               | Captain cron: audit repo, run tests, dispatch fixes, open PRs   |
+| Heiwa MCP server                   | Expose Heiwa capabilities to external agents                    |
+| ACP adapter                        | OpenClaw interop for agent dispatch                             |
+| Seed file loader                   | Bootstrap STDB tables from checked-in config on first boot      |
+| `heiwa start` command              | One-command local boot (STDB + hub + Ollama discovery)          |
 
 ---
 
 ## 6. Implementation Phases
 
 **Phase 1: STDB Foundation + Model Tier Matrix** (~2 days)
+
 - Write STDB Rust module with all 8 tables
 - Seed file loader for model_tiers
 - Update ComputeRouter to read from STDB subscription instead of ai_router.json
@@ -374,6 +394,7 @@ Cells are stored in STDB (`agent_registry` table) so the Captain can deploy, upd
 - `heiwa inspect [table]` CLI command — dump any STDB table as formatted output for debugging during development
 
 **Phase 2: Memory Layer + Feedback** (~2 days)
+
 - Embedding pipeline using qwen3-embedding:0.6b
 - Index repo code files and docs on boot
 - execution_memory writes on every task completion
@@ -381,24 +402,28 @@ Cells are stored in STDB (`agent_registry` table) so the Captain can deploy, upd
 - Context enrichment in dispatch envelope
 
 **Phase 3: Captain Autonomy** (~2 days)
+
 - Self-check directive (repo audit, test runner, PR creator)
 - Model auto-tuner directive (reads execution_memory, updates model_tiers)
 - Rate group recovery queue drain
 - Failed task auto-retry with escalation
 
 **Phase 4: HeiwaClaw Decomposition + Protocols** (~2 days)
+
 - Split heiwaclaw.py into package
 - Per-provider adapters with effort knob support
 - Heiwa MCP server
 - ACP adapter for OpenClaw
 
 **Phase 5: Cell Catalog + Agency Import** (~1 day)
+
 - Import Agency agent definitions as HeiwaCells
 - Cell-to-intent mapping in STDB
 - CellSelector in dispatch pipeline
 - ClawHub sync for skill distribution
 
 **Phase 6: Railway Deploy** (~1 day)
+
 - Update Dockerfile for STDB client + CLI tools
 - Railway 3-service setup (hub + STDB + scheduler)
 - Private networking configuration
@@ -409,6 +434,7 @@ Cells are stored in STDB (`agent_registry` table) so the Captain can deploy, upd
 ## 7. Success Criteria
 
 The system is working when:
+
 1. `heiwa start` boots everything locally in under 10 seconds
 2. A task submitted via CLI flows through intent → risk → routing → model selection (with correct effort knob) → cell assignment → execution → result stored in STDB — all observable in realtime
 3. Captain runs a self-check, finds an issue, dispatches a fix to the cheapest capable model, and opens a PR — without human intervention

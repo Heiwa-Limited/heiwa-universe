@@ -102,7 +102,7 @@ fn automations_payload_result() -> Result<serde_json::Value> {
     let mut recent_executions = Vec::new();
     for automation in &automations {
         let mut rows = store.list_executions(automation.id)?;
-        rows.sort_by(|a, b| b.created_at.cmp(&a.created_at));
+        rows.sort_by_key(|row| std::cmp::Reverse(row.created_at));
         recent_executions.extend(rows.into_iter().take(3).map(|execution| {
             json!({
                 "id": execution.id,

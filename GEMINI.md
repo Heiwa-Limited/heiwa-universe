@@ -65,17 +65,20 @@ Use corrected peer framing before architecture or parity work:
 ## Engineering Standards (2026-03 BYOK Update)
 
 ### 1. Identity & Multi-tenancy
+
 - **Primary human operator (Devon)**: `owner_id="0"`.
 - **System identities**: `operator` and `local-operator` are equivalent to `0` for system-wide key access.
 - **Helper**: Always use `is_system_operator(owner_id)` from `heiwa_protocol.routing` to check privileges.
 - **Auth**: `HEIWA_ADMIN_ID_MAPPINGS` (e.g., `discord:123456789=0`) handles admin promotion and relinking.
 
 ### 2. Security & Credentials
+
 - **Vault First**: All provider keys MUST be resolved via `UserVault` in SpacetimeDB for `owner_id != system`.
 - **Scrubbing**: `ToolMesh` uses `SAFE_ENV_ALLOWLIST`. Never expose `HEIWA_MASTER_KEY` or `RAILWAY_AUTH_TOKEN` to child processes.
 - **BYOK**: Strict enforcement. If a user key is missing, return `BLOCKED_AUTH`.
 
 ### 3. Execution Patterns
+
 - **Propagation**: `owner_id` must be carried in `BrokerRouteRequest` and `BrokerRouteResult`.
 - **Status Mapping**: Map authentication failures to `BLOCKED_AUTH` in `OpenClaw` and narrate specifically in `HeiwaClawAgent`.
 

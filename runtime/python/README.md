@@ -14,7 +14,7 @@ Python sidecar that the Rust Heiwa runtime spawns as a subprocess and talks to o
 | ------------ | ------------------------------------------------- |
 | `health`     | Liveness probe. Returns `{"status": "ok"}`.       |
 | `version`    | Sidecar, Python, and platform versions.           |
-| `check_deps` | Probe importability of langgraph/llama_index. |
+| `check_deps` | Probe importability of langgraph/optional llama_index. |
 | `echo`       | Return `args` verbatim (wire-test helper).        |
 | `shutdown`   | Reply and exit loop cleanly.                      |
 
@@ -25,6 +25,7 @@ Add new ops in `src/heiwa_sidecar/handlers.py` and register in `HANDLERS`.
 ```bash
 cd runtime/python
 uv sync --extra dev
+uv sync --extra dev --extra llama   # optional LlamaIndex probe surface
 uv run python -m heiwa_sidecar   # serves on stdin/stdout
 uv run --extra dev python -m pytest # run tests
 ```

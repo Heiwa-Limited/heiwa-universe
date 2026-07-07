@@ -5,6 +5,7 @@
 **Goal:** Integrate the Agentic Control Protocol (ACP) for multi-agent coordination and expand MCP support to allow Heiwa to act as both a client and a server.
 
 **Architecture:**
+
 - **ACP Adapter**: New `heiwaclaw` adapter for cross-node agent communication.
 - **MCP Server**: Expose Heiwa's core tools (routing, state, memory) as an MCP-compliant server.
 - **Mission Layer**: Track complex, multi-step goals in STDB `missions` table.

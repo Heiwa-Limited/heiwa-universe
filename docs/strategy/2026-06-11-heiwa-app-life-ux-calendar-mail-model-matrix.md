@@ -61,16 +61,16 @@ Heiwa implication: Apple Mail should start as metadata/read-model and draft/appr
 
 The current nav has `Dashboard`, `Today`, `Inbox`, `Routes`, `Live`, `REPL`, `Providers`, `Connections`, `Status`. For normal-user UX, promote these concepts:
 
-| Surface | Purpose | Current mapping |
-| --- | --- | --- |
-| `Today` | Human daily brief: schedule, commitments, priority mail, approvals, stale facts, next blocks | Existing `Today.tsx`, needs real calendar/mail cards |
-| `Calendar` | Unified Google + Apple event timeline, conflicts, holds, travel/lead-time, scheduling drafts | New route/read model |
-| `Mail` | Priority email scan, thread summaries, draft replies, send approvals, receipts | New route/read model; current `mail.rs` is metadata-only |
-| `Intake` | One stream of mail/calendar/messages/files/runtime alerts that need attention | Evolves existing `Inbox.tsx` |
-| `Work` | Current mission/conversation stream, execution status, artifacts | Dashboard/Live/Repl converge here |
-| `Approvals` | Calendar writes, replies, messages, file/publish actions staged by risk | Existing Approvals route |
-| `Receipts` | Evidence/citations/source refs for all reads/writes | History/Traces merge visually |
-| `Model Matrix` | Inspector-only: route health, eval scores, privacy/cost lanes; not a picker | Replace user-facing model choice language |
+| Surface        | Purpose                                                                                      | Current mapping                                          |
+| -------------- | -------------------------------------------------------------------------------------------- | -------------------------------------------------------- |
+| `Today`        | Human daily brief: schedule, commitments, priority mail, approvals, stale facts, next blocks | Existing `Today.tsx`, needs real calendar/mail cards     |
+| `Calendar`     | Unified Google + Apple event timeline, conflicts, holds, travel/lead-time, scheduling drafts | New route/read model                                     |
+| `Mail`         | Priority email scan, thread summaries, draft replies, send approvals, receipts               | New route/read model; current `mail.rs` is metadata-only |
+| `Intake`       | One stream of mail/calendar/messages/files/runtime alerts that need attention                | Evolves existing `Inbox.tsx`                             |
+| `Work`         | Current mission/conversation stream, execution status, artifacts                             | Dashboard/Live/Repl converge here                        |
+| `Approvals`    | Calendar writes, replies, messages, file/publish actions staged by risk                      | Existing Approvals route                                 |
+| `Receipts`     | Evidence/citations/source refs for all reads/writes                                          | History/Traces merge visually                            |
+| `Model Matrix` | Inspector-only: route health, eval scores, privacy/cost lanes; not a picker                  | Replace user-facing model choice language                |
 
 ### Interaction contract
 
@@ -133,11 +133,11 @@ Add a local read model shaped like:
 
 ### Connector lanes
 
-| Lane | Auth | Sync | Writes | First product action |
-| --- | --- | --- | --- | --- |
-| Google Calendar | OAuth desktop flow, narrow Calendar scopes | full + incremental sync token; recover 410 by scoped wipe/full sync | create/update/delete after approval | `calendar.list` + draft focus hold |
-| Apple Calendar | EventKit local permission | EventKit fetch + change notification | create/update via EventKit after approval | local day/week read model |
-| Heiwa Holds | local runtime state | immediate local | promote to provider after approval | focus blocks / travel buffers |
+| Lane            | Auth                                       | Sync                                                                | Writes                                    | First product action               |
+| --------------- | ------------------------------------------ | ------------------------------------------------------------------- | ----------------------------------------- | ---------------------------------- |
+| Google Calendar | OAuth desktop flow, narrow Calendar scopes | full + incremental sync token; recover 410 by scoped wipe/full sync | create/update/delete after approval       | `calendar.list` + draft focus hold |
+| Apple Calendar  | EventKit local permission                  | EventKit fetch + change notification                                | create/update via EventKit after approval | local day/week read model          |
+| Heiwa Holds     | local runtime state                        | immediate local                                                     | promote to provider after approval        | focus blocks / travel buffers      |
 
 ### UX innovation
 
@@ -181,11 +181,11 @@ Add a message/thread read model shaped like:
 
 ### Connector lanes
 
-| Lane | Auth | Sync/read | Writes | First product action |
-| --- | --- | --- | --- | --- |
-| Gmail | OAuth desktop flow, Gmail read/send scopes split | local scheduled search/list/get/history where possible | draft reply + approval send via Gmail API | daily priority scan |
-| Apple Mail | local metadata probe now; MailKit extension later for compose/session safety | metadata first; body only after explicit connector permission | open/stage draft locally; MailKit later | inbox report from headers |
-| IMAP/Himalaya | user-owned IMAP/SMTP config | folder/envelope/message read | template reply/send after approval | fallback non-Gmail lane |
+| Lane          | Auth                                                                         | Sync/read                                                     | Writes                                    | First product action      |
+| ------------- | ---------------------------------------------------------------------------- | ------------------------------------------------------------- | ----------------------------------------- | ------------------------- |
+| Gmail         | OAuth desktop flow, Gmail read/send scopes split                             | local scheduled search/list/get/history where possible        | draft reply + approval send via Gmail API | daily priority scan       |
+| Apple Mail    | local metadata probe now; MailKit extension later for compose/session safety | metadata first; body only after explicit connector permission | open/stage draft locally; MailKit later   | inbox report from headers |
+| IMAP/Himalaya | user-owned IMAP/SMTP config                                                  | folder/envelope/message read                                  | template reply/send after approval        | fallback non-Gmail lane   |
 
 ### Reply safety
 
@@ -220,17 +220,17 @@ It should not ask:
 
 ### Internal matrix inputs
 
-| Input | Examples |
-| --- | --- |
-| Task class | summarize thread, draft reply, schedule conflict, code edit, UI design |
-| Risk class | read-only, draft-only, external send, calendar write, destructive |
-| Data sensitivity | local-only, personal, private, restricted |
-| Context shape | short, long, tabular, code, calendar, thread, attachment |
-| Device state | battery, CPU, memory, local model availability |
-| Provider state | connected, quota, latency, errors, auth mode |
-| Eval score | own regression fixtures per task class |
-| Cost | local/free/subscription/metered |
-| Evidence quality | can cite source spans, message IDs, event IDs, receipts |
+| Input            | Examples                                                               |
+| ---------------- | ---------------------------------------------------------------------- |
+| Task class       | summarize thread, draft reply, schedule conflict, code edit, UI design |
+| Risk class       | read-only, draft-only, external send, calendar write, destructive      |
+| Data sensitivity | local-only, personal, private, restricted                              |
+| Context shape    | short, long, tabular, code, calendar, thread, attachment               |
+| Device state     | battery, CPU, memory, local model availability                         |
+| Provider state   | connected, quota, latency, errors, auth mode                           |
+| Eval score       | own regression fixtures per task class                                 |
+| Cost             | local/free/subscription/metered                                        |
+| Evidence quality | can cite source spans, message IDs, event IDs, receipts                |
 
 ### Matrix UI
 

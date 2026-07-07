@@ -33,7 +33,10 @@ fn dry_run_writes_nothing_and_emits_payload_shape() {
         payload["approval_request"]["schema_version"],
         "operator_dispatch_request_v1"
     );
-    assert!(!home.path().join(".heiwa").exists(), "dry-run must not write state");
+    assert!(
+        !home.path().join(".heiwa").exists(),
+        "dry-run must not write state"
+    );
 }
 
 #[test]
@@ -71,9 +74,10 @@ fn real_run_stages_approval_and_hold_under_home() {
         .args(["approvals", "list", "--json"])
         .output()
         .expect("approvals list runs");
-    let listing: serde_json::Value =
-        serde_json::from_slice(&out.stdout).expect("approvals json");
-    let pending = listing["pending_summary"].as_array().expect("pending array");
+    let listing: serde_json::Value = serde_json::from_slice(&out.stdout).expect("approvals json");
+    let pending = listing["pending_summary"]
+        .as_array()
+        .expect("pending array");
     assert!(
         pending.iter().any(|p| p["id"] == request_id),
         "schedule request not visible in approvals list"

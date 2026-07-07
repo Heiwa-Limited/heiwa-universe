@@ -29,13 +29,13 @@ The loop is not a tight spin. When idle, it sleeps longer. When intent arrives (
 
 Five sources feed one priority queue. Everything becomes a `WorkItem` in SpacetimeDB.
 
-| Source | Trigger | Default Priority |
-|--------|---------|-----------------|
-| Discord | DM or mention from Devon | 0.7 (human spoke) |
-| GitHub Issues | new/updated issue | 0.5 (structured work) |
-| goals.md | file changed since last read | 0.6 (Devon updated priorities) |
-| Cron | scheduled interval (market tick, health) | 0.3 (routine) |
-| System | alert/event (deploy fail, rate limit, health) | 0.9 (something broke) |
+| Source        | Trigger                                       | Default Priority               |
+| ------------- | --------------------------------------------- | ------------------------------ |
+| Discord       | DM or mention from Devon                      | 0.7 (human spoke)              |
+| GitHub Issues | new/updated issue                             | 0.5 (structured work)          |
+| goals.md      | file changed since last read                  | 0.6 (Devon updated priorities) |
+| Cron          | scheduled interval (market tick, health)      | 0.3 (routine)                  |
+| System        | alert/event (deploy fail, rate limit, health) | 0.9 (something broke)          |
 
 ### WorkItem Schema
 
@@ -147,15 +147,15 @@ async def pick_agent_and_model(self, work_item: WorkItem) -> Dispatch:
 
 ### What Gets Replaced
 
-| Old Agent | Replacement |
-|-----------|------------|
-| Captain (`heiwa_agent.py`) | Heiwa orchestrator (the work loop) |
-| Spine (`spine.py`) | Node registry → SpacetimeDB table + health cron |
-| Executor (`executor.py`) | Provider-scoped agents (Claude, Gemini, etc.) |
-| Telemetry (`telemetry.py`) | Cron function Heiwa calls |
-| Messenger (`messenger.py`) | Discord I/O in Heiwa's loop |
-| OrchestrationService (stub) | Deleted — Heiwa IS the orchestration |
-| DeliveryManager (stub) | Deleted — dispatch IS the delivery |
+| Old Agent                   | Replacement                                     |
+| --------------------------- | ----------------------------------------------- |
+| Captain (`heiwa_agent.py`)  | Heiwa orchestrator (the work loop)              |
+| Spine (`spine.py`)          | Node registry → SpacetimeDB table + health cron |
+| Executor (`executor.py`)    | Provider-scoped agents (Claude, Gemini, etc.)   |
+| Telemetry (`telemetry.py`)  | Cron function Heiwa calls                       |
+| Messenger (`messenger.py`)  | Discord I/O in Heiwa's loop                     |
+| OrchestrationService (stub) | Deleted — Heiwa IS the orchestration            |
+| DeliveryManager (stub)      | Deleted — dispatch IS the delivery              |
 
 ### Autoresearch Model (Karpathy)
 
@@ -175,11 +175,11 @@ For each WorkItem:
 
 Evaluation metrics vary by app:
 
-| App | Metric |
-|-----|--------|
+| App             | Metric                                                      |
+| --------------- | ----------------------------------------------------------- |
 | `heiwa_trading` | Tests pass + paper PnL improves + no risk policy violations |
-| `heiwa_hub` | Tests pass + smoke tests pass + no regressions |
-| `heiwa_web` | Build succeeds + lighthouse score maintained |
+| `heiwa_hub`     | Tests pass + smoke tests pass + no regressions              |
+| `heiwa_web`     | Build succeeds + lighthouse score maintained                |
 
 ## Decision Memos
 
@@ -217,7 +217,7 @@ Located at `config/goals.md`. Devon's steering wheel. Heiwa reads, decomposes, a
   horizon: long-term
   confidence: theory
   notes: >
-    Initial hypothesis. No experiment data yet.
+  Initial hypothesis. No experiment data yet.
   - Mutate probability_bias and momentum_weight parameters
   - Evaluate against 24hr simulated PnL
   - Stack improvements that beat baseline
@@ -231,21 +231,21 @@ Located at `config/goals.md`. Devon's steering wheel. Heiwa reads, decomposes, a
 
 ### Three Axes
 
-| Axis | Values | Meaning |
-|------|--------|---------|
-| **Scope** | `definitive` · `adaptive` | Can agents adjust sub-goals and approach? |
-| **Horizon** | `short-term` · `long-term` | Days vs weeks/ongoing |
-| **Confidence** | `theory` · `reality` | Hypothesis vs validated by execution |
+| Axis           | Values                     | Meaning                                   |
+| -------------- | -------------------------- | ----------------------------------------- |
+| **Scope**      | `definitive` · `adaptive`  | Can agents adjust sub-goals and approach? |
+| **Horizon**    | `short-term` · `long-term` | Days vs weeks/ongoing                     |
+| **Confidence** | `theory` · `reality`       | Hypothesis vs validated by execution      |
 
 ### Agent Permissions on Goals
 
-| Agents CAN | Agents CANNOT |
-|------------|---------------|
-| Add/remove/reword sub-goals under `adaptive` goals | Change a goal's top-level intent |
-| Update `confidence` from `theory` → `reality` (with evidence) | Delete or Pause a goal |
-| Append to `notes` with execution findings | Change `scope` from `definitive` → `adaptive` |
-| Narrow scope based on experiment results | Widen scope beyond original intent |
-| Propose new goals (appended to `## Proposed`) | Add directly to `## Active` |
+| Agents CAN                                                    | Agents CANNOT                                 |
+| ------------------------------------------------------------- | --------------------------------------------- |
+| Add/remove/reword sub-goals under `adaptive` goals            | Change a goal's top-level intent              |
+| Update `confidence` from `theory` → `reality` (with evidence) | Delete or Pause a goal                        |
+| Append to `notes` with execution findings                     | Change `scope` from `definitive` → `adaptive` |
+| Narrow scope based on experiment results                      | Widen scope beyond original intent            |
+| Propose new goals (appended to `## Proposed`)                 | Add directly to `## Active`                   |
 
 ### Goal Lifecycle
 
@@ -289,6 +289,7 @@ apps/heiwa_trading/
 ```
 
 **Key changes:**
+
 - Supervisor → cron-triggered function (not launchd daemon)
 - Cockpit → routes on Hub's FastAPI (`/trading/*`)
 - State → SpacetimeDB (JSON files become fallback/cache)
@@ -307,13 +308,13 @@ apps/heiwa_dj/
 
 ### Home Directory Cleanup
 
-| Action | Target |
-|--------|--------|
-| Delete | `~/mac-agent/`, `~/.mac-agent/` |
-| Delete | `~/hub.db`, `~/bitcrap/`, `~/R&D/` |
-| Keep | `~/ai-dj/` (standalone shipped app) |
-| Keep | `~/heiwa_archive/` (historical reference) |
-| Already deleted | `~/heiwa-limited/` |
+| Action          | Target                                    |
+| --------------- | ----------------------------------------- |
+| Delete          | `~/mac-agent/`, `~/.mac-agent/`           |
+| Delete          | `~/hub.db`, `~/bitcrap/`, `~/R&D/`        |
+| Keep            | `~/ai-dj/` (standalone shipped app)       |
+| Keep            | `~/heiwa_archive/` (historical reference) |
+| Already deleted | `~/heiwa-limited/`                        |
 
 **After cleanup, `~/` contains:** `heiwa`, `ai-dj`, `heiwa_archive`.
 
@@ -322,6 +323,7 @@ apps/heiwa_dj/
 ### Hub Integration Points
 
 **1. Cockpit routes on FastAPI:**
+
 ```
 /trading/cockpit     → cockpit.html (static)
 /trading/api/state   → supervisor state
@@ -330,6 +332,7 @@ apps/heiwa_dj/
 ```
 
 **2. Market supervisor as cron WorkItem:**
+
 ```
 Every 60s → WorkItem {
   source: "cron",
@@ -339,6 +342,7 @@ Every 60s → WorkItem {
 ```
 
 **3. SpacetimeDB tables:**
+
 - `trading_cohorts` — cohort state
 - `trading_wallets` — wallet equity, trades, strategy params
 - `trading_markets` — normalized market data
@@ -363,26 +367,26 @@ Pure simulation — no rate limits consumed, no LLM needed for mutations. LLM in
 
 ## Error Handling
 
-| Failure | Response |
-|---------|----------|
-| All rate groups exhausted | Defer work, sleep until reset, notify Devon via Discord |
-| Agent subprocess crash | Record failure, git revert partials, re-queue (max 3 retries) |
-| Railway restart | Resume from SpacetimeDB. Re-queue any `active` WorkItems |
-| SpacetimeDB unreachable | In-memory queue, retry connection every 30s, no execution without state |
-| Market API down | Skip tick, retry next cycle, notify after 5 consecutive failures |
-| Git conflict | Discard experiment branch, record failure, continue |
-| Boost node offline mid-task | Re-route to Railway agent, WorkItem stays active |
+| Failure                     | Response                                                                |
+| --------------------------- | ----------------------------------------------------------------------- |
+| All rate groups exhausted   | Defer work, sleep until reset, notify Devon via Discord                 |
+| Agent subprocess crash      | Record failure, git revert partials, re-queue (max 3 retries)           |
+| Railway restart             | Resume from SpacetimeDB. Re-queue any `active` WorkItems                |
+| SpacetimeDB unreachable     | In-memory queue, retry connection every 30s, no execution without state |
+| Market API down             | Skip tick, retry next cycle, notify after 5 consecutive failures        |
+| Git conflict                | Discard experiment branch, record failure, continue                     |
+| Boost node offline mid-task | Re-route to Railway agent, WorkItem stays active                        |
 
 ## Approval Gates
 
-| Action | Requires Devon |
-|--------|---------------|
-| Push to `main` | Always — Heiwa works in branches, opens PRs |
-| Deploy to Railway | PR merge triggers CI auto-deploy |
-| Spend real money | Never — paper trading only |
-| Promote Proposed → Active goal | Always |
-| Delete/Pause an Active goal | Always |
-| Widen goal scope | Always |
+| Action                         | Requires Devon                              |
+| ------------------------------ | ------------------------------------------- |
+| Push to `main`                 | Always — Heiwa works in branches, opens PRs |
+| Deploy to Railway              | PR merge triggers CI auto-deploy            |
+| Spend real money               | Never — paper trading only                  |
+| Promote Proposed → Active goal | Always                                      |
+| Delete/Pause an Active goal    | Always                                      |
+| Widen goal scope               | Always                                      |
 
 ## Observability
 
@@ -409,33 +413,33 @@ Proposed: 1 new goal suggested — review in goals.md
 
 ### Preserve & Extend
 
-| Component | Action |
-|-----------|--------|
-| `rate_ledger.py` | Extend with STDB persistence and API exposure — already has correct limits |
-| Cognition pipeline (intent/risk/router) | Rewire from Spine into Heiwa's work loop |
-| `cognition/approval.py` | Preserve — Discord approval workflow stays |
-| `SecurityService` | Preserve — centralized auth + secret redaction unchanged |
-| `HeiwaClaw` + `ToolMesh` | Preserve — execution gateway unchanged |
-| `heiwa_skills/` (30+ YAML templates) | Wire into agent dispatch — agents can execute skills |
-| `mcp_server.py` (FastAPI app) | Extend with trading routes and hub dashboard |
+| Component                               | Action                                                                     |
+| --------------------------------------- | -------------------------------------------------------------------------- |
+| `rate_ledger.py`                        | Extend with STDB persistence and API exposure — already has correct limits |
+| Cognition pipeline (intent/risk/router) | Rewire from Spine into Heiwa's work loop                                   |
+| `cognition/approval.py`                 | Preserve — Discord approval workflow stays                                 |
+| `SecurityService`                       | Preserve — centralized auth + secret redaction unchanged                   |
+| `HeiwaClaw` + `ToolMesh`                | Preserve — execution gateway unchanged                                     |
+| `heiwa_skills/` (30+ YAML templates)    | Wire into agent dispatch — agents can execute skills                       |
+| `mcp_server.py` (FastAPI app)           | Extend with trading routes and hub dashboard                               |
 
 ### Delete
 
-| Component | Reason |
-|-----------|--------|
-| `OrchestrationService` (stub) | Heiwa's loop replaces it |
-| `DeliveryManager` (stub) | Dispatch replaces it |
+| Component                        | Reason                             |
+| -------------------------------- | ---------------------------------- |
+| `OrchestrationService` (stub)    | Heiwa's loop replaces it           |
+| `DeliveryManager` (stub)         | Dispatch replaces it               |
 | Role-based agent files (Phase 4) | Replaced by provider-scoped agents |
 
 ### Rewrite
 
-| Component | Reason |
-|-----------|--------|
-| `ai_router.json` | Reflect agent roster, not node-based model assignments |
-| `profiles.json` (HeiwaCells) | Personas agents adopt, not routing targets |
-| `HEIWA.md`, `AGENTS.md`, `CLAUDE.md` | Reflect new architecture |
-| `END_STATE_2026-03.md` | Update target to match this design |
-| `deploy.yml` | Add smoke tests for work loop, trading, autoresearch |
+| Component                            | Reason                                                 |
+| ------------------------------------ | ------------------------------------------------------ |
+| `ai_router.json`                     | Reflect agent roster, not node-based model assignments |
+| `profiles.json` (HeiwaCells)         | Personas agents adopt, not routing targets             |
+| `HEIWA.md`, `AGENTS.md`, `CLAUDE.md` | Reflect new architecture                               |
+| `END_STATE_2026-03.md`               | Update target to match this design                     |
+| `deploy.yml`                         | Add smoke tests for work loop, trading, autoresearch   |
 
 ## Implementation Phases
 
@@ -521,6 +525,7 @@ WorkItem replaces the existing Proposal table. MissionRecord/MissionStepRecord/C
 The orchestrator's core loop (ingest, score priorities, dispatch) is **entirely deterministic** — no LLM calls. Priority scoring is formulaic. Rate budget checks are arithmetic. Cron scheduling is clock-based.
 
 LLM calls are only needed for:
+
 - **Goal decomposition** (reading goals.md, creating GitHub Issues) — happens on goals.md change, not every tick
 - **Experiment analysis** (interpreting autoresearch results) — happens after batches of experiments, not per-experiment
 - **Discord interpretation** (understanding natural language intent from Devon) — happens on message receipt
@@ -534,6 +539,7 @@ When all rate groups are exhausted, the deterministic loop continues running: it
 The work loop is **single-threaded and sequential** in Phase 3. One WorkItem executes at a time. The loop blocks while an agent subprocess runs.
 
 **Agent subprocess constraints:**
+
 - Maximum 1 concurrent subprocess (Phase 3-4 baseline)
 - Timeout: 15 minutes for standard tasks, 30 minutes for complex code tasks (configurable per intent_class)
 - Memory: Railway container limit (512MB base, scales to 2GB under Pro)
@@ -567,6 +573,7 @@ The orchestrator receives this result, validates the update against the agent pe
 The existing `LocalBusTransport` (in-process pub/sub) is removed in Phase 4. Provider-scoped agents are subprocesses — they cannot share an in-process bus.
 
 **Replacement:** Direct subprocess invocation and result capture. The orchestrator:
+
 1. Creates a git branch for the task
 2. Writes a task brief to a temp file (the "program.md" equivalent)
 3. Spawns the CLI subprocess (e.g., `claude --task-file /tmp/task-brief.md`)
@@ -588,6 +595,7 @@ The cascade diagram is accurate as written. Qwen is listed with "(boost node onl
 ### Skill Execution Integration
 
 Provider-scoped agents receive skill templates as part of their task brief. The orchestrator:
+
 1. Matches the WorkItem's intent_class to available skills in `heiwa_skills/`
 2. If a matching skill exists, includes the YAML template in the task brief
 3. The agent follows the skill template (tool calls, MCP invocations, validation steps)
@@ -606,11 +614,13 @@ END_STATE_2026-03.md should be updated to reflect this change.
 ### Phase Dependency Chain (Agent Transition)
 
 Phase 3 extracts business logic from Spine and Executor into the Heiwa orchestrator:
+
 - Spine's request routing → orchestrator's dispatch function
 - Spine's node registry → SpacetimeDB table + health cron function
 - Executor's HeiwaClaw invocation → extracted into a shared utility the orchestrator and future agents both call
 
 Phase 4 then:
+
 - Creates new provider-scoped agent subprocess wrappers that use the extracted HeiwaClaw utility
 - Deletes the now-empty Spine, Executor, Telemetry, Messenger shells
 

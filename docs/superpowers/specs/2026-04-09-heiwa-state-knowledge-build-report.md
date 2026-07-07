@@ -68,19 +68,19 @@ The most important product doctrines now are:
 
 ### State matrix
 
-| Area | State | Notes |
-| --- | --- | --- |
-| Canonical architecture identity | **Real** | [`HEIWA.md`](../../../HEIWA.md) now reflects local-first operating-layer truth |
-| DREX routing core | **Real but incomplete** | scoring and route planning exist; success-rate feedback is not yet truly fed by native-session outcomes |
-| SpacetimeDB authority plane | **Real and useful** | good substrate for runs, artifacts, loops, task dispatches, leases, worker sessions |
-| `heiwa` shell/runtime surface | **Real but narrow** | install/doctor/auth/providers/session attach exist; provider semantics are still uneven on `main` |
-| Provider normalization doctrine | **Designed and partially executed** | implemented in a separate worktree and local `~/.heiwa` state, but not yet merged to `main` |
-| Local model-first routing doctrine | **Designed** | reflected in docs and live local routing, not fully reflected in `main` runtime behavior |
-| Current memory layer | **Weak** | Python helpers over `captain_*` and embeddings are transitional, not product-grade memory |
-| Vault V2 | **Designed** | not implemented yet |
-| Native session delegation A1/A2 | **Designed** | not implemented yet |
-| `crates/heiwa_session` | **Real but primitive** | existing crate is PTY/socket substrate, not yet the full delegated-session manager described in the A1/A2 plan |
-| Meta-harness / trace optimizer | **Not built** | should come later, after traces actually exist at scale |
+| Area                               | State                               | Notes                                                                                                          |
+| ---------------------------------- | ----------------------------------- | -------------------------------------------------------------------------------------------------------------- |
+| Canonical architecture identity    | **Real**                            | [`HEIWA.md`](../../../HEIWA.md) now reflects local-first operating-layer truth                                 |
+| DREX routing core                  | **Real but incomplete**             | scoring and route planning exist; success-rate feedback is not yet truly fed by native-session outcomes        |
+| SpacetimeDB authority plane        | **Real and useful**                 | good substrate for runs, artifacts, loops, task dispatches, leases, worker sessions                            |
+| `heiwa` shell/runtime surface      | **Real but narrow**                 | install/doctor/auth/providers/session attach exist; provider semantics are still uneven on `main`              |
+| Provider normalization doctrine    | **Designed and partially executed** | implemented in a separate worktree and local `~/.heiwa` state, but not yet merged to `main`                    |
+| Local model-first routing doctrine | **Designed**                        | reflected in docs and live local routing, not fully reflected in `main` runtime behavior                       |
+| Current memory layer               | **Weak**                            | Python helpers over `captain_*` and embeddings are transitional, not product-grade memory                      |
+| Vault V2                           | **Designed**                        | not implemented yet                                                                                            |
+| Native session delegation A1/A2    | **Designed**                        | not implemented yet                                                                                            |
+| `crates/heiwa_session`             | **Real but primitive**              | existing crate is PTY/socket substrate, not yet the full delegated-session manager described in the A1/A2 plan |
+| Meta-harness / trace optimizer     | **Not built**                       | should come later, after traces actually exist at scale                                                        |
 
 ### What is real in `main`
 

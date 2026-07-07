@@ -4,21 +4,63 @@ Date: 2026-05-26
 
 ## Decision
 
-Use **Tauri 2 + existing Solid/Vite cockpit + `heiwa_shell` local API/runtime**.
+Use **Tauri 2 + a minimal TypeScript/Vite desktop shell + `heiwa_shell`
+local API/runtime**.
 
 Do not choose Electron for the primary app. Do not move local owner state into
 the frontend. Do not make `apps/heiwa_core` read Devon-local files.
+Do not canonize Solid, router libraries, component libraries, or dashboard kits
+as product dependencies. The current web cockpit can remain a support surface,
+but the app stack is runtime-first and multiplexer-first.
 Do not claim this choice is peer-validated by OpenHuman. It is a Heiwa
-toolchain decision that must be proved against the local cockpit.
+toolchain decision that must be proved against local runtime use.
 
 Compression:
 
-> Tauri displays. `heiwa` thinks, routes, runs, records, and serves.
+> Tauri displays. tmux hosts panes. `heiwa` thinks, routes, runs, records, and serves.
+
+## Stack Critique
+
+Keep:
+
+- Rust runtime authority in `heiwa_shell`, DREX, receipts, sessions, providers,
+  approvals, and local state.
+- Tauri 2 as the native app wrapper over the same local API/runtime.
+- TypeScript/Vite as a small app build layer, not as the owner of policy or state.
+- tmux as the local multiplexer substrate for panes, windows, worker terminals,
+  attach/read/write boundaries, and future remote attach.
+- STDB as optional sync/adjudication/evidence plane, not the operator surface.
+
+Drop or defer:
+
+- extra app UI libraries until a concrete pane/window API proves the need
+- feature-specific mini-apps that make Calendar, Mail, Finance, Social, AI, and
+  Files feel like separate products
+- dashboard-first routing where users manually choose models, tools, or backends
+- direct frontend reads of `~/.heiwa` state
+- hosted-control-plane assumptions for local user work
+
+Selected app shape:
+
+- default Home is the pinned ops board: visible terminal instances, workers,
+  sub-app servers, approvals, receipts, and live run state
+- left dock is secondary navigation: hover previews are useful, but Home must
+  show the active panes without forcing hover
+- primary work happens in pinned multiplexer windows/panes: conversation,
+  workers, terminal instances, calendar/mail/file context, approvals, receipts,
+  and ops queues
+- feature surfaces are connected sub-apps with their own agent profile, tools,
+  skills, and personalization, but they still route through Heiwa's runtime
+  brain/evidence policy
+- `herdr` plus Deno are valid spike/runtime adapters for pane visibility and
+  sub-app servers; the product path must still converge on Heiwa-owned runtime
+  contracts rather than a loose collection of servers
 
 ## Why
 
 - Tauri matches Heiwa's Rust-first runtime and should keep desktop bundle weight low.
-- Existing cockpit is already Solid/Vite/TypeScript and can be wrapped without a UI rewrite.
+- The desktop client can stay dependency-light: Tauri API plus code-native
+  TypeScript views, with Vite/TypeScript as dev/build tools.
 - Existing `heiwa app start` already binds localhost, serves cockpit assets, writes worker heartbeats, and exposes `/api/v1/*`.
 - OpenHuman is adjacent evidence: Rust desktop app, Tauri/CEF shell, local memory, managed OAuth/integration path, UI-first onboarding.
 - Hermes is adjacent evidence: terminal-first personal agent, skills, memory, messaging gateway, cron, MCP, provider switching, and remote/server execution. It is not a worker mesh reference.
@@ -71,10 +113,50 @@ Runtime:
 
 Desktop:
 
-- `Heiwa.app` is a Tauri wrapper over the cockpit.
-- Cockpit consumes local `/api/v1/*` and later `/ws/v1/*`.
+- `Heiwa.app` is a Tauri wrapper over the app shell.
+- The app shell consumes local `/api/v1/*` and later `/ws/v1/*`.
 - Tauri commands are for OS integration only: tray, notifications, secure storage, file picker, login items, and local process supervision.
 - UI does not own policy or state.
+- Home is the pinned ops view: live terminal/herd panes first, then compact
+  widgets for sub-app servers, agent skills/tools, personalization, approvals,
+  receipts, and provider posture.
+- Feature icons are dock entries with hover previews, but they are not the main
+  visibility model. Opening a feature focuses its pinned sub-app/window.
+- Calendar, Mail, Finance, Social, AI, Files, Browser, and terminals are
+  sub-app panes inside the multiplexer model, not separate app silos.
+- Each sub-app has an app-local agent profile: relevant skills, allowed tools,
+  risk posture, and personalization rules for the operator's current context.
+- Deno/herdr can host spike sub-app servers and pane APIs today. The app should
+  read those surfaces when available, while keeping Rust runtime authority,
+  approvals, and evidence as the durable contract.
+
+Packaged app format:
+
+- Browser preview is only a development convenience. Product use is packaged
+  `Heiwa.app` with bundled assets and Tauri commands over local runtime APIs.
+- The app should not rely on browser-open tabs for core ops. It should call
+  native commands for local-only bridges such as herd/pane state, and those
+  commands should read the Rust runtime API, a packaged Deno sidecar, or
+  provider-owned local CLIs.
+- Deno belongs as a lightweight packaged sidecar/server lane for sub-apps and
+  spike iteration, especially where TypeScript-native app logic is useful.
+  It must not become a second policy/evidence authority.
+- `herdr`/Deno pane visibility can feed the app today. The durable target is a
+  Heiwa terminal daemon contract that exposes the same shape to app, TUI, and
+  REPL.
+
+Terminal surfaces:
+
+- `heiwa` REPL remains the fastest operator surface and must share session,
+  routing, approval, and receipt state with the app.
+- `heiwa_tui` is the terminal-native visual cockpit for the same event stream:
+  transcript, inspector, composer, status, approvals, workers, and eventually
+  pinned panes.
+- `heiwa_session` is the daemon/PTY foundation. Its socket/daemon path should
+  evolve into the local terminal daemon behind pane state, attach, send/read,
+  pause/resume, and receipt events.
+- App, TUI, and REPL are three displays over one state machine. They must not
+  fork write paths or invent separate automation authority.
 
 Remote/N machines:
 
@@ -103,14 +185,21 @@ log, not the source of truth.
 ## Build Order
 
 1. Local API read models: Today, Freshness, ApprovalSummary.
-2. SSE/WebSocket event stream for run/tool/worker/receipt events.
-3. Cockpit Today/Approvals surface over those local APIs.
-4. Tauri wrapper around existing cockpit and runtime start/attach.
-5. Local multiplexer: sessions, workers, PTY/log tail, pause/resume.
-6. Machine registry and remote attach.
-7. Connector sync lane: auth, list, one bounded action, evidence receipt, revoke.
-8. Compression and learning loop: source-chunk compression, skill/procedure evolution, review gates.
-9. Memory tree and Markdown export/import.
+2. Local multiplexer: tmux/herdr-backed sessions, pinned panes, workers,
+   PTY/log tail, pause/resume, and receipt hooks.
+3. Home pinned ops board fed by herd/terminal state, approvals, receipts,
+   runtime status, and sub-app server status.
+4. Sub-app server contract: Calendar, Mail, Finance, Social, AI, Files, Browser
+   expose skills, allowed tools, personalization, and evidence hooks.
+5. Native app bridge: Tauri commands for runtime health/API, herd/pane state,
+   packaged Deno sidecars, and terminal daemon attach/read/send.
+6. SSE/WebSocket event stream for run/tool/worker/terminal/sub-app/receipt events.
+7. TUI/REPL parity: same session, approval, receipt, and terminal daemon state
+   visible in `heiwa shell`, `session attach`, and `heiwa_tui`.
+8. Connector sync lane: auth, list, one bounded action, evidence receipt, revoke.
+9. Machine registry and remote attach.
+10. Compression and learning loop: source-chunk compression, skill/procedure evolution, review gates.
+11. Memory tree and Markdown export/import.
 
 ## Sources
 

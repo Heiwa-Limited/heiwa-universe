@@ -15,6 +15,7 @@
 ### Task 1: Add Session Traits and Surface Capability Metadata
 
 **Files:**
+
 - Modify: `crates/heiwa_provider/src/adapter.rs`
 - Modify: `crates/heiwa_provider/src/registry.rs`
 - Modify: `crates/heiwa_provider/src/lib.rs`
@@ -76,6 +77,7 @@ Expected: PASS
 ### Task 2: Create a Local-First Session Manager Crate
 
 **Files:**
+
 - Create: `crates/heiwa_session/Cargo.toml`
 - Create: `crates/heiwa_session/src/lib.rs`
 - Create: `crates/heiwa_session/src/spec.rs`
@@ -142,6 +144,7 @@ Expected: PASS
 ### Task 3: Align STDB Projection With Delegated Sessions
 
 **Files:**
+
 - Modify: `apps/heiwa_hub/spacetimedb/src/lib.rs`
 - Modify: `apps/heiwa_core/src/stdb/mod.rs`
 - Modify: `apps/heiwa_hub/tests/test_phase3_integration.py`
@@ -186,6 +189,7 @@ Expected: PASS
 ### Task 4: Implement the Claude Code Session Provider
 
 **Files:**
+
 - Modify: `crates/heiwa_provider/src/providers/claude_code.rs`
 - Modify: `crates/heiwa_provider/src/providers/mod.rs`
 - Create: `crates/heiwa_provider/tests/claude_session_provider.rs`
@@ -237,6 +241,7 @@ Expected: PASS
 ### Task 5: Add Minimal Worktree Isolation For Claude Write Sessions
 
 **Files:**
+
 - Modify: `crates/heiwa_session/src/manager.rs`
 - Create: `crates/heiwa_session/src/worktree.rs`
 - Create: `crates/heiwa_session/tests/worktree_isolation.rs`
@@ -283,6 +288,7 @@ Expected: PASS
 ### Task 6: Add a Pilot `heiwa` Entry Point For Delegated Claude Sessions
 
 **Files:**
+
 - Modify: `apps/heiwa_shell/src/main.rs`
 - Modify: `crates/heiwa_loop/src/lib.rs`
 - Create: `crates/heiwa_loop/tests/native_session_routing.rs`

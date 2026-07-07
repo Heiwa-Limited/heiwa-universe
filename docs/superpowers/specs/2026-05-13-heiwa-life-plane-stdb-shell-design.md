@@ -47,15 +47,15 @@ STDB owns durable rows.
 
 Minimum tables:
 
-| Table | Visibility | Purpose |
-| --- | --- | --- |
-| `life_sources` | private | Source metadata, hashes, freshness, local raw refs |
-| `life_memory_events` | private | Append-only structured events across body/work/social/money/mind/stack |
-| `life_schedule_windows` | private | Calendar and shift windows with prep/travel/sleep flags |
-| `life_briefs` | private | AM/PM/weekly/money/stack briefs with cited freshness |
-| `life_action_items` | private | Today queue, ROI rank, approval tier, source links |
-| `life_readmodel_snapshots` | public-safe | Sanitized current state for `heiwa` and Heiwa.app |
-| `life_automation_sources` | private | Claude/Codex/launchd/Heiwa scheduler jobs and status |
+| Table                      | Visibility  | Purpose                                                                |
+| -------------------------- | ----------- | ---------------------------------------------------------------------- |
+| `life_sources`             | private     | Source metadata, hashes, freshness, local raw refs                     |
+| `life_memory_events`       | private     | Append-only structured events across body/work/social/money/mind/stack |
+| `life_schedule_windows`    | private     | Calendar and shift windows with prep/travel/sleep flags                |
+| `life_briefs`              | private     | AM/PM/weekly/money/stack briefs with cited freshness                   |
+| `life_action_items`        | private     | Today queue, ROI rank, approval tier, source links                     |
+| `life_readmodel_snapshots` | public-safe | Sanitized current state for `heiwa` and Heiwa.app                      |
+| `life_automation_sources`  | private     | Claude/Codex/launchd/Heiwa scheduler jobs and status                   |
 
 Existing STDB tables remain reused:
 

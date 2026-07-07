@@ -148,3 +148,4 @@ apps/heiwa_app/desktop/src-tauri/target/
 **/*.bak
 .worktrees/
 apps/heiwa_trading/runtime/
+/heiwa-desk.app/

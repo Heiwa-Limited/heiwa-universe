@@ -88,6 +88,7 @@
 ## Task 1: Create One Shared Runtime Path Contract
 
 **Files:**
+
 - Create: `crates/heiwa_paths/Cargo.toml`
 - Create: `crates/heiwa_paths/src/lib.rs`
 - Modify: `Cargo.toml`
@@ -169,6 +170,7 @@ git commit -m "feat: add shared heiwa runtime path contract"
 ## Task 2: Make `heiwa install` Create Structured Runtime Root and Safe Migration
 
 **Files:**
+
 - Modify: `crates/heiwa_install/src/lib.rs`
 - Modify: `crates/heiwa_install/tests/install_doctor.rs`
 - Create: `crates/heiwa_install/tests/runtime_owned_install.rs`
@@ -284,6 +286,7 @@ git commit -m "feat: make heiwa install own structured runtime root"
 ## Task 3: Seed Native Modes, Capabilities, Inventory, and Policy
 
 **Files:**
+
 - Create: `crates/heiwa_install/src/runtime_seed.rs`
 - Modify: `crates/heiwa_install/src/lib.rs`
 - Modify: `crates/heiwa_install/tests/runtime_owned_install.rs`
@@ -352,6 +355,7 @@ git commit -m "feat: seed native heiwa modes and capabilities"
 ## Task 4: Move Provider and STDB State to Structured Runtime Paths With Fallback
 
 **Files:**
+
 - Modify: `crates/heiwa_provider/src/lib.rs`
 - Modify: `crates/heiwa_provider/src/registry.rs`
 - Modify: `crates/heiwa_provider/src/detect/mod.rs`
@@ -446,6 +450,7 @@ git commit -m "feat: move provider and stdb state under structured heiwa runtime
 ## Task 5: Generate Provider Projections and Expose Runtime-Owned CLI UX
 
 **Files:**
+
 - Create: `crates/heiwa_install/src/runtime_projection.rs`
 - Modify: `crates/heiwa_install/src/lib.rs`
 - Modify: `crates/heiwa_install/tests/runtime_owned_install.rs`
@@ -532,6 +537,7 @@ git commit -m "feat: generate provider projections and add heiwa repair"
 ## Task 6: Add Honest Hosted Installer Payload
 
 **Files:**
+
 - Create: `apps/heiwa_cli/scripts/install_heiwa.sh`
 - Modify: `README.md`
 - Modify: `docs/runtime-owned-heiwa.md`
@@ -600,6 +606,7 @@ git commit -m "feat: add hosted installer payload and runtime docs"
 ## Task 7: Shrink Repo-Local Configs to Overlay Status and Clean Public Story
 
 **Files:**
+
 - Modify: `.codex/config.toml`
 - Modify: `.claude/settings.json`
 - Modify: `.gemini/settings.json`

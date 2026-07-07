@@ -73,57 +73,57 @@ No implementation starts until git state is clean enough to isolate auth work.
 
 ### New files
 
-| File | Responsibility |
-| --- | --- |
-| `apps/heiwa_web/app/src/lib/server/auth/workos.ts` | WorkOS client, callback handling, session helper wiring |
-| `apps/heiwa_web/app/src/lib/server/auth/session.ts` | Cookie issuance, auth age, reauth checks, CSRF helpers |
-| `apps/heiwa_web/app/src/routes/auth/callback/+server.ts` | Human auth callback route |
-| `apps/heiwa_web/app/src/routes/auth/logout/+server.ts` | Session destroy route |
-| `apps/heiwa_web/app/src/routes/app/+layout.server.ts` | SSR auth gate and workspace load |
-| `apps/heiwa_web/app/src/routes/app/settings/+page.server.ts` | Sensitive action reauth gate |
-| `apps/heiwa_web/app/src/routes/app/machines/+page.server.ts` | Machine enrollment admin page load/actions |
-| `apps/heiwa_web/app/src/routes/app/providers/+page.server.ts` | Provider vault management UI load/actions |
-| `apps/heiwa_web/app/src/routes/api/internal/me/+server.ts` | SvelteKit BFF endpoint to Rust identity bridge |
-| `apps/heiwa_web/app/src/routes/api/internal/provider-credentials/+server.ts` | BFF credential create/rotate proxy |
-| `apps/heiwa_web/app/src/routes/api/internal/machines/+server.ts` | BFF machine enrollment proxy |
-| `apps/heiwa_web/app/src/routes/api/internal/usage/+server.ts` | BFF usage/audit proxy |
-| `apps/heiwa_web/app/src/hooks.server.ts` | Cookie/session parse and request-local auth context |
-| `apps/heiwa_web/app/tests/auth/session.test.ts` | Session TTL / CSRF / reauth tests |
-| `apps/heiwa_web/app/tests/auth/callback.test.ts` | Callback + cookie issuance tests |
-| `apps/heiwa_web/app/tests/app/machines.test.ts` | Machine admin route tests |
-| `apps/heiwa_web/app/tests/app/providers.test.ts` | Provider management route tests |
-| `apps/heiwa_orchestrator/src/http/mod.rs` | Rust HTTP router for control endpoints |
-| `apps/heiwa_orchestrator/src/http/auth.rs` | SvelteKit-to-Rust identity bridge handlers |
-| `apps/heiwa_orchestrator/src/http/machines.rs` | Machine enrollment/register/token handlers |
-| `apps/heiwa_orchestrator/src/http/providers.rs` | Provider credential CRUD + rotate handlers |
-| `apps/heiwa_orchestrator/src/http/audit.rs` | Usage, audit, security event handlers |
-| `apps/heiwa_orchestrator/src/identity/mod.rs` | User/workspace mirror and RBAC helpers |
-| `apps/heiwa_orchestrator/src/machines/mod.rs` | Machine enrollment, verification, revocation |
-| `apps/heiwa_orchestrator/src/vault/mod.rs` | Vault interface, envelope versioning, STDB backing |
-| `apps/heiwa_orchestrator/src/policy/mod.rs` | Routing policy load/eval and decision record writer |
-| `apps/heiwa_orchestrator/src/secrets/infisical.rs` | Infisical client for system secrets |
-| `apps/heiwa_orchestrator/tests/http_auth.rs` | Rust control auth endpoint tests |
-| `apps/heiwa_orchestrator/tests/machine_enrollment.rs` | Machine auth flow tests |
-| `apps/heiwa_orchestrator/tests/provider_vault.rs` | Vault + rotation + audit tests |
-| `apps/heiwa_orchestrator/tests/policy_decisions.rs` | Policy decision record tests |
-| `apps/heiwa_hub/spacetimedb/src/founder_control_plane.rs` | STDB table/reducer additions for v1 spine |
-| `apps/heiwa_hub/tests/test_legacy_fragment_auth_removed.py` | Legacy fragment path kill test |
+| File                                                                         | Responsibility                                          |
+| ---------------------------------------------------------------------------- | ------------------------------------------------------- |
+| `apps/heiwa_web/app/src/lib/server/auth/workos.ts`                           | WorkOS client, callback handling, session helper wiring |
+| `apps/heiwa_web/app/src/lib/server/auth/session.ts`                          | Cookie issuance, auth age, reauth checks, CSRF helpers  |
+| `apps/heiwa_web/app/src/routes/auth/callback/+server.ts`                     | Human auth callback route                               |
+| `apps/heiwa_web/app/src/routes/auth/logout/+server.ts`                       | Session destroy route                                   |
+| `apps/heiwa_web/app/src/routes/app/+layout.server.ts`                        | SSR auth gate and workspace load                        |
+| `apps/heiwa_web/app/src/routes/app/settings/+page.server.ts`                 | Sensitive action reauth gate                            |
+| `apps/heiwa_web/app/src/routes/app/machines/+page.server.ts`                 | Machine enrollment admin page load/actions              |
+| `apps/heiwa_web/app/src/routes/app/providers/+page.server.ts`                | Provider vault management UI load/actions               |
+| `apps/heiwa_web/app/src/routes/api/internal/me/+server.ts`                   | SvelteKit BFF endpoint to Rust identity bridge          |
+| `apps/heiwa_web/app/src/routes/api/internal/provider-credentials/+server.ts` | BFF credential create/rotate proxy                      |
+| `apps/heiwa_web/app/src/routes/api/internal/machines/+server.ts`             | BFF machine enrollment proxy                            |
+| `apps/heiwa_web/app/src/routes/api/internal/usage/+server.ts`                | BFF usage/audit proxy                                   |
+| `apps/heiwa_web/app/src/hooks.server.ts`                                     | Cookie/session parse and request-local auth context     |
+| `apps/heiwa_web/app/tests/auth/session.test.ts`                              | Session TTL / CSRF / reauth tests                       |
+| `apps/heiwa_web/app/tests/auth/callback.test.ts`                             | Callback + cookie issuance tests                        |
+| `apps/heiwa_web/app/tests/app/machines.test.ts`                              | Machine admin route tests                               |
+| `apps/heiwa_web/app/tests/app/providers.test.ts`                             | Provider management route tests                         |
+| `apps/heiwa_orchestrator/src/http/mod.rs`                                    | Rust HTTP router for control endpoints                  |
+| `apps/heiwa_orchestrator/src/http/auth.rs`                                   | SvelteKit-to-Rust identity bridge handlers              |
+| `apps/heiwa_orchestrator/src/http/machines.rs`                               | Machine enrollment/register/token handlers              |
+| `apps/heiwa_orchestrator/src/http/providers.rs`                              | Provider credential CRUD + rotate handlers              |
+| `apps/heiwa_orchestrator/src/http/audit.rs`                                  | Usage, audit, security event handlers                   |
+| `apps/heiwa_orchestrator/src/identity/mod.rs`                                | User/workspace mirror and RBAC helpers                  |
+| `apps/heiwa_orchestrator/src/machines/mod.rs`                                | Machine enrollment, verification, revocation            |
+| `apps/heiwa_orchestrator/src/vault/mod.rs`                                   | Vault interface, envelope versioning, STDB backing      |
+| `apps/heiwa_orchestrator/src/policy/mod.rs`                                  | Routing policy load/eval and decision record writer     |
+| `apps/heiwa_orchestrator/src/secrets/infisical.rs`                           | Infisical client for system secrets                     |
+| `apps/heiwa_orchestrator/tests/http_auth.rs`                                 | Rust control auth endpoint tests                        |
+| `apps/heiwa_orchestrator/tests/machine_enrollment.rs`                        | Machine auth flow tests                                 |
+| `apps/heiwa_orchestrator/tests/provider_vault.rs`                            | Vault + rotation + audit tests                          |
+| `apps/heiwa_orchestrator/tests/policy_decisions.rs`                          | Policy decision record tests                            |
+| `apps/heiwa_hub/spacetimedb/src/founder_control_plane.rs`                    | STDB table/reducer additions for v1 spine               |
+| `apps/heiwa_hub/tests/test_legacy_fragment_auth_removed.py`                  | Legacy fragment path kill test                          |
 
 ### Modified files
 
-| File | Change |
-| --- | --- |
-| `apps/heiwa_web/package.json` | Add SvelteKit app dependencies/scripts if missing |
-| `apps/heiwa_web/wrangler.toml` | Align web deploy to SvelteKit auth surface |
-| `apps/heiwa_hub/auth.py` | Freeze legacy auth path, add redirect or deprecation guards only |
-| `apps/heiwa_hub/mcp_server.py` | Remove browser-fragment auth assumptions, keep compatibility only |
-| `apps/heiwa_hub/spacetimedb/src/lib.rs` | Add founder v1 tables/reducers if not split to module |
-| `apps/heiwa_orchestrator/src/main.rs` | Mount new Rust control HTTP routes |
-| `apps/heiwa_orchestrator/src/lib.rs` | Export new modules |
-| `crates/heiwa_provider/src/keychain.rs` | Reuse or extend local operator secret helpers if needed |
-| `.env.example` | Shrink env surface, point system secrets to Infisical-managed values |
-| `ops/rooms/web.md` | Update auth flow to SvelteKit BFF + secure cookie |
-| `docs/superpowers/specs/2026-04-17-heiwa-v1-founder-control-plane-design.md` | Lock clarified decisions above |
+| File                                                                         | Change                                                               |
+| ---------------------------------------------------------------------------- | -------------------------------------------------------------------- |
+| `apps/heiwa_web/package.json`                                                | Add SvelteKit app dependencies/scripts if missing                    |
+| `apps/heiwa_web/wrangler.toml`                                               | Align web deploy to SvelteKit auth surface                           |
+| `apps/heiwa_hub/auth.py`                                                     | Freeze legacy auth path, add redirect or deprecation guards only     |
+| `apps/heiwa_hub/mcp_server.py`                                               | Remove browser-fragment auth assumptions, keep compatibility only    |
+| `apps/heiwa_hub/spacetimedb/src/lib.rs`                                      | Add founder v1 tables/reducers if not split to module                |
+| `apps/heiwa_orchestrator/src/main.rs`                                        | Mount new Rust control HTTP routes                                   |
+| `apps/heiwa_orchestrator/src/lib.rs`                                         | Export new modules                                                   |
+| `crates/heiwa_provider/src/keychain.rs`                                      | Reuse or extend local operator secret helpers if needed              |
+| `.env.example`                                                               | Shrink env surface, point system secrets to Infisical-managed values |
+| `ops/rooms/web.md`                                                           | Update auth flow to SvelteKit BFF + secure cookie                    |
+| `docs/superpowers/specs/2026-04-17-heiwa-v1-founder-control-plane-design.md` | Lock clarified decisions above                                       |
 
 ### STDB entities to add or extend
 
@@ -154,6 +154,7 @@ No implementation starts until git state is clean enough to isolate auth work.
 ### Task 1: Clean branch and lock scope
 
 **Files:**
+
 - Modify: `docs/superpowers/specs/2026-04-17-heiwa-v1-founder-control-plane-design.md`
 - Reference: `.git status`, conflicted workspace files
 
@@ -207,6 +208,7 @@ git commit -m "docs: lock founder control plane execution assumptions"
 ### Task 2: Scaffold SvelteKit auth shell and BFF boundary
 
 **Files:**
+
 - Create: `apps/heiwa_web/app/src/hooks.server.ts`
 - Create: `apps/heiwa_web/app/src/lib/server/auth/workos.ts`
 - Create: `apps/heiwa_web/app/src/lib/server/auth/session.ts`
@@ -281,6 +283,7 @@ git commit -m "feat: add sveltekit auth shell and session boundary"
 ### Task 3: Replace legacy browser fragment auth path
 
 **Files:**
+
 - Modify: `apps/heiwa_hub/auth.py`
 - Modify: `apps/heiwa_hub/mcp_server.py`
 - Modify: `ops/rooms/web.md`
@@ -330,6 +333,7 @@ git commit -m "refactor: remove legacy browser fragment auth flow"
 ### Task 4: Add Rust identity bridge and STDB identity mirror
 
 **Files:**
+
 - Create: `apps/heiwa_orchestrator/src/http/mod.rs`
 - Create: `apps/heiwa_orchestrator/src/http/auth.rs`
 - Create: `apps/heiwa_orchestrator/src/identity/mod.rs`
@@ -388,6 +392,7 @@ git commit -m "feat: add rust identity bridge and stdb auth mirror"
 ### Task 5: Integrate Infisical system-secret flow
 
 **Files:**
+
 - Create: `apps/heiwa_orchestrator/src/secrets/infisical.rs`
 - Modify: `.env.example`
 - Modify: `apps/heiwa_orchestrator/src/main.rs`
@@ -430,6 +435,7 @@ git commit -m "feat: add infisical-backed system secret provider"
 ### Task 6: Implement machine enrollment and worker token flow
 
 **Files:**
+
 - Create: `apps/heiwa_orchestrator/src/http/machines.rs`
 - Create: `apps/heiwa_orchestrator/src/machines/mod.rs`
 - Modify: `apps/heiwa_orchestrator/src/http/mod.rs`
@@ -504,6 +510,7 @@ git commit -m "feat: add machine enrollment and worker token flow"
 ### Task 7: Build provider credential vault with audit
 
 **Files:**
+
 - Create: `apps/heiwa_orchestrator/src/http/providers.rs`
 - Create: `apps/heiwa_orchestrator/src/vault/mod.rs`
 - Modify: `apps/heiwa_hub/spacetimedb/src/lib.rs`
@@ -568,6 +575,7 @@ git commit -m "feat: add provider credential vault and audit events"
 ### Task 8: Add minimal RBAC and sensitive-action reauth
 
 **Files:**
+
 - Modify: `apps/heiwa_orchestrator/src/identity/mod.rs`
 - Modify: `apps/heiwa_web/app/src/lib/server/auth/session.ts`
 - Modify: `apps/heiwa_web/app/src/routes/app/settings/+page.server.ts`
@@ -617,6 +625,7 @@ git commit -m "feat: add minimal founder rbac and reauth gates"
 ### Task 9: Add routing policy engine and policy decision records
 
 **Files:**
+
 - Create: `apps/heiwa_orchestrator/src/policy/mod.rs`
 - Modify: `apps/heiwa_orchestrator/src/http/audit.rs`
 - Modify: `apps/heiwa_orchestrator/src/http/providers.rs`
@@ -675,6 +684,7 @@ git commit -m "feat: add routing policy engine and decision records"
 ### Task 10: Add usage and audit surfaces in SvelteKit
 
 **Files:**
+
 - Create: `apps/heiwa_web/app/src/routes/app/usage/+page.server.ts`
 - Create: `apps/heiwa_web/app/src/routes/app/audit/+page.server.ts`
 - Create: `apps/heiwa_web/app/src/routes/api/internal/usage/+server.ts`
@@ -719,6 +729,7 @@ git commit -m "feat: add usage and audit surfaces"
 ### Task 11: Build first paid workflow end-to-end
 
 **Files:**
+
 - Create: `apps/heiwa_web/app/src/routes/app/workflows/operator-research/+page.server.ts`
 - Modify: `apps/heiwa_orchestrator/src/http/mod.rs`
 - Modify: `apps/heiwa_orchestrator/src/policy/mod.rs`
@@ -769,6 +780,7 @@ git commit -m "feat: add operator research proposal workflow"
 ### Task 12: Pilot hardening and founder-offer prep
 
 **Files:**
+
 - Modify: `docs/superpowers/specs/2026-04-17-heiwa-v1-founder-control-plane-design.md`
 - Create: `docs/superpowers/status/2026-04-17-founder-v1-pilot-readiness.md`
 - Create: `apps/heiwa_web/app/src/routes/pricing/+page.svelte`

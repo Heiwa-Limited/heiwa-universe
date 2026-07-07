@@ -16,51 +16,51 @@
 
 ### New files (created)
 
-| File | Responsibility |
-|------|---------------|
-| `apps/heiwa_trading/__init__.py` | Package init |
-| `apps/heiwa_trading/src/heiwa_trading/__init__.py` | Module init |
-| `apps/heiwa_trading/src/heiwa_trading/cli.py` | CLI dispatcher (copied from polymarket_foundation, renamed imports) |
-| `apps/heiwa_trading/src/heiwa_trading/cockpit.py` | Cockpit state builder + SSE (copied, renamed imports) |
-| `apps/heiwa_trading/src/heiwa_trading/coinmarketcap.py` | CoinMarketCap data source (copied, renamed imports) |
-| `apps/heiwa_trading/src/heiwa_trading/config.py` | Paths, URLs, constants (copied, updated paths) |
-| `apps/heiwa_trading/src/heiwa_trading/formulas.py` | Pure math functions (copied unchanged) |
-| `apps/heiwa_trading/src/heiwa_trading/market_data.py` | Polymarket API ingestion (copied, renamed imports) |
-| `apps/heiwa_trading/src/heiwa_trading/paper_trader.py` | Portfolio simulation (copied, renamed imports) |
-| `apps/heiwa_trading/src/heiwa_trading/scan.py` | Market scanning (copied, renamed imports) |
-| `apps/heiwa_trading/src/heiwa_trading/strategy.py` | Scoring engine (copied, renamed imports) |
-| `apps/heiwa_trading/src/heiwa_trading/supervisor.py` | Supervisor logic (copied, renamed imports) |
-| `apps/heiwa_trading/src/heiwa_trading/tournament.py` | Cohort + variant management (copied, renamed imports) |
-| `apps/heiwa_trading/src/heiwa_trading/types.py` | Frozen dataclasses (copied unchanged) |
-| `apps/heiwa_trading/src/heiwa_trading/web/cockpit.html` | Cockpit UI (copied, rebranded) |
-| `apps/heiwa_trading/src/heiwa_trading/web/cockpit.css` | Cockpit styles (copied unchanged) |
-| `apps/heiwa_trading/src/heiwa_trading/web/cockpit.js` | Cockpit JS (copied, rebranded) |
-| `apps/heiwa_trading/src/heiwa_trading/routes.py` | FastAPI router for trading endpoints |
-| `apps/heiwa_trading/pyproject.toml` | Package metadata |
-| `apps/heiwa_trading/CONTEXT.md` | Agent context for this app |
-| `apps/heiwa_trading/tests/__init__.py` | Test package init |
-| `apps/heiwa_trading/tests/test_formulas.py` | Unit tests for formulas |
-| `apps/heiwa_trading/tests/test_strategy.py` | Unit tests for scoring engine |
-| `apps/heiwa_trading/tests/test_routes.py` | Integration tests for FastAPI routes |
-| `apps/heiwa_dj/README.md` | Archive pointer for shipped AI-DJ |
-| `apps/heiwa_dj/CONTEXT.md` | Agent context for archived app |
+| File                                                    | Responsibility                                                      |
+| ------------------------------------------------------- | ------------------------------------------------------------------- |
+| `apps/heiwa_trading/__init__.py`                        | Package init                                                        |
+| `apps/heiwa_trading/src/heiwa_trading/__init__.py`      | Module init                                                         |
+| `apps/heiwa_trading/src/heiwa_trading/cli.py`           | CLI dispatcher (copied from polymarket_foundation, renamed imports) |
+| `apps/heiwa_trading/src/heiwa_trading/cockpit.py`       | Cockpit state builder + SSE (copied, renamed imports)               |
+| `apps/heiwa_trading/src/heiwa_trading/coinmarketcap.py` | CoinMarketCap data source (copied, renamed imports)                 |
+| `apps/heiwa_trading/src/heiwa_trading/config.py`        | Paths, URLs, constants (copied, updated paths)                      |
+| `apps/heiwa_trading/src/heiwa_trading/formulas.py`      | Pure math functions (copied unchanged)                              |
+| `apps/heiwa_trading/src/heiwa_trading/market_data.py`   | Polymarket API ingestion (copied, renamed imports)                  |
+| `apps/heiwa_trading/src/heiwa_trading/paper_trader.py`  | Portfolio simulation (copied, renamed imports)                      |
+| `apps/heiwa_trading/src/heiwa_trading/scan.py`          | Market scanning (copied, renamed imports)                           |
+| `apps/heiwa_trading/src/heiwa_trading/strategy.py`      | Scoring engine (copied, renamed imports)                            |
+| `apps/heiwa_trading/src/heiwa_trading/supervisor.py`    | Supervisor logic (copied, renamed imports)                          |
+| `apps/heiwa_trading/src/heiwa_trading/tournament.py`    | Cohort + variant management (copied, renamed imports)               |
+| `apps/heiwa_trading/src/heiwa_trading/types.py`         | Frozen dataclasses (copied unchanged)                               |
+| `apps/heiwa_trading/src/heiwa_trading/web/cockpit.html` | Cockpit UI (copied, rebranded)                                      |
+| `apps/heiwa_trading/src/heiwa_trading/web/cockpit.css`  | Cockpit styles (copied unchanged)                                   |
+| `apps/heiwa_trading/src/heiwa_trading/web/cockpit.js`   | Cockpit JS (copied, rebranded)                                      |
+| `apps/heiwa_trading/src/heiwa_trading/routes.py`        | FastAPI router for trading endpoints                                |
+| `apps/heiwa_trading/pyproject.toml`                     | Package metadata                                                    |
+| `apps/heiwa_trading/CONTEXT.md`                         | Agent context for this app                                          |
+| `apps/heiwa_trading/tests/__init__.py`                  | Test package init                                                   |
+| `apps/heiwa_trading/tests/test_formulas.py`             | Unit tests for formulas                                             |
+| `apps/heiwa_trading/tests/test_strategy.py`             | Unit tests for scoring engine                                       |
+| `apps/heiwa_trading/tests/test_routes.py`               | Integration tests for FastAPI routes                                |
+| `apps/heiwa_dj/README.md`                               | Archive pointer for shipped AI-DJ                                   |
+| `apps/heiwa_dj/CONTEXT.md`                              | Agent context for archived app                                      |
 
 ### Modified files
 
-| File | Change |
-|------|--------|
-| `apps/heiwa_hub/mcp_server.py` | Mount trading router |
-| `HEIWA.md` | Update app directory table |
-| `requirements.txt` | No new deps needed (FastAPI already present) |
+| File                           | Change                                       |
+| ------------------------------ | -------------------------------------------- |
+| `apps/heiwa_hub/mcp_server.py` | Mount trading router                         |
+| `HEIWA.md`                     | Update app directory table                   |
+| `requirements.txt`             | No new deps needed (FastAPI already present) |
 
 ### Files NOT copied (mac-agent specific, not needed)
 
-| File | Reason |
-|------|--------|
+| File                 | Reason                                              |
+| -------------------- | --------------------------------------------------- |
 | `cockpit_service.py` | LaunchAgent installer — Railway doesn't use launchd |
-| `cron_jobs.py` | Will be replaced by work loop cron in Phase 3 |
-| `live_dashboard.py` | Terminal UI — replaced by web cockpit |
-| `evolution.py` | Deferred to Phase 5 (autoresearch for trading) |
+| `cron_jobs.py`       | Will be replaced by work loop cron in Phase 3       |
+| `live_dashboard.py`  | Terminal UI — replaced by web cockpit               |
+| `evolution.py`       | Deferred to Phase 5 (autoresearch for trading)      |
 
 **Note on `web/` location:** The spec shows `web/` at `apps/heiwa_trading/web/`, but this plan nests it at `apps/heiwa_trading/src/heiwa_trading/web/` so that `Path(__file__).parent / "web"` resolves correctly in `routes.py`. This is an intentional deviation for practical import reasons.
 
@@ -71,6 +71,7 @@
 ### Task 1: Create heiwa_trading package structure
 
 **Files:**
+
 - Create: `apps/heiwa_trading/__init__.py`
 - Create: `apps/heiwa_trading/pyproject.toml`
 - Create: `apps/heiwa_trading/src/heiwa_trading/__init__.py`
@@ -86,21 +87,25 @@ mkdir -p apps/heiwa_trading/runtime
 - [ ] **Step 2: Create package init files**
 
 `apps/heiwa_trading/__init__.py`:
+
 ```python
 ```
 
 `apps/heiwa_trading/src/heiwa_trading/__init__.py`:
+
 ```python
 """Heiwa Trading — Polymarket paper-trading tournament engine."""
 ```
 
 `apps/heiwa_trading/tests/__init__.py`:
+
 ```python
 ```
 
 - [ ] **Step 3: Create pyproject.toml**
 
 `apps/heiwa_trading/pyproject.toml`:
+
 ```toml
 [project]
 name = "heiwa-trading"
@@ -115,6 +120,7 @@ testpaths = ["tests"]
 - [ ] **Step 4: Add runtime/ to .gitignore**
 
 Append to the repo's `.gitignore`:
+
 ```
 apps/heiwa_trading/runtime/
 ```
@@ -129,6 +135,7 @@ git commit -m "feat(trading): scaffold heiwa_trading package structure"
 ### Task 2: Copy and rename core modules
 
 **Files:**
+
 - Create: `apps/heiwa_trading/src/heiwa_trading/types.py` (from `polymarket_foundation/types.py`)
 - Create: `apps/heiwa_trading/src/heiwa_trading/formulas.py` (from `polymarket_foundation/formulas.py`)
 - Create: `apps/heiwa_trading/src/heiwa_trading/config.py` (from `polymarket_foundation/config.py`)
@@ -163,28 +170,37 @@ cp ~/mac-agent/workspace/polymarket_foundation/src/polymarket_foundation/config.
 Then edit `apps/heiwa_trading/src/heiwa_trading/config.py`:
 
 Replace:
+
 ```python
 from polymarket_foundation.types import RiskPolicy
 ```
+
 With:
+
 ```python
 from heiwa_trading.types import RiskPolicy
 ```
 
 Replace:
+
 ```python
 USER_AGENT = "mac-agent-polymarket/0.1"
 ```
+
 With:
+
 ```python
 USER_AGENT = "heiwa-trading/0.1"
 ```
 
 Replace:
+
 ```python
 COINMARKETCAP_API_KEY_PATH = Path(environ.get("HOME", str(Path.home()))) / ".mac-agent" / "home" / "secrets" / "coinmarketcap_api_key"
 ```
+
 With:
+
 ```python
 COINMARKETCAP_API_KEY_PATH = Path(environ.get(
     "COINMARKETCAP_API_KEY_FILE",
@@ -215,6 +231,7 @@ git commit -m "feat(trading): add core modules (types, formulas, config)"
 ### Task 3: Copy and rename remaining modules
 
 **Files:**
+
 - Create: all remaining `.py` files in `apps/heiwa_trading/src/heiwa_trading/`
 
 - [ ] **Step 1: Copy all remaining source files**
@@ -230,19 +247,25 @@ done
 - [ ] **Step 2: Rename all imports from polymarket_foundation → heiwa_trading**
 
 In every `.py` file in `apps/heiwa_trading/src/heiwa_trading/`, replace:
+
 ```python
 from polymarket_foundation.
 ```
+
 With:
+
 ```python
 from heiwa_trading.
 ```
 
 And replace:
+
 ```python
 import polymarket_foundation.
 ```
+
 With:
+
 ```python
 import heiwa_trading.
 ```
@@ -254,11 +277,14 @@ Use sed or manual edit — verify every file.
 In `apps/heiwa_trading/src/heiwa_trading/cockpit.py`, update these constants:
 
 Replace:
+
 ```python
 LOG_DIR = Path.home() / ".mac-agent" / "openclaw" / "logs"
 OPENCLAW_STATE_DIR = Path.home() / ".mac-agent" / "openclaw"
 ```
+
 With:
+
 ```python
 LOG_DIR = Path.home() / ".heiwa" / "logs"
 OPENCLAW_STATE_DIR = Path.home() / ".heiwa" / "openclaw"
@@ -304,6 +330,7 @@ git commit -m "feat(trading): copy and rename all modules from mac-agent"
 ### Task 4: Rebrand cockpit UI
 
 **Files:**
+
 - Modify: `apps/heiwa_trading/src/heiwa_trading/web/cockpit.html`
 - Modify: `apps/heiwa_trading/src/heiwa_trading/web/cockpit.js`
 
@@ -312,11 +339,13 @@ git commit -m "feat(trading): copy and rename all modules from mac-agent"
 In `apps/heiwa_trading/src/heiwa_trading/web/cockpit.html`:
 
 Replace all occurrences of:
+
 - `Mac Agent` → `Heiwa Trading`
 - `mac-agent` → `heiwa-trading`
 - `Mac-Agent` → `Heiwa-Trading`
 
 Update the `<title>` tag:
+
 ```html
 <title>Heiwa Trading</title>
 ```
@@ -326,12 +355,14 @@ Update the `<title>` tag:
 In `apps/heiwa_trading/src/heiwa_trading/web/cockpit.js`:
 
 Replace all occurrences of:
+
 - `Mac Agent` → `Heiwa Trading`
 - `mac-agent` → `heiwa-trading`
 
 - [ ] **Step 3: Visual verification (local)**
 
 Open `apps/heiwa_trading/src/heiwa_trading/web/cockpit.html` in a browser. Verify:
+
 - Title says "Heiwa Trading"
 - Hero banner says "Heiwa Trading"
 - No remaining "Mac Agent" text visible
@@ -346,12 +377,14 @@ git commit -m "feat(trading): rebrand cockpit UI to Heiwa Trading"
 ### Task 5: Write unit tests for formulas and strategy
 
 **Files:**
+
 - Create: `apps/heiwa_trading/tests/test_formulas.py`
 - Create: `apps/heiwa_trading/tests/test_strategy.py`
 
 - [ ] **Step 1: Write formulas tests**
 
 `apps/heiwa_trading/tests/test_formulas.py`:
+
 ```python
 """Tests for heiwa_trading.formulas — pure math, no side effects."""
 import pytest
@@ -399,6 +432,7 @@ Expected: All tests pass. If any function names are wrong, check `formulas.py` a
 - [ ] **Step 3: Write strategy tests**
 
 `apps/heiwa_trading/tests/test_strategy.py`:
+
 ```python
 """Tests for heiwa_trading.strategy — scoring engine."""
 import pytest
@@ -470,11 +504,13 @@ git commit -m "test(trading): add unit tests for formulas and strategy"
 ### Task 6: Create FastAPI trading router
 
 **Files:**
+
 - Create: `apps/heiwa_trading/src/heiwa_trading/routes.py`
 
 - [ ] **Step 1: Write the routes module**
 
 `apps/heiwa_trading/src/heiwa_trading/routes.py`:
+
 ```python
 """FastAPI routes for Heiwa Trading cockpit.
 
@@ -583,6 +619,7 @@ git commit -m "feat(trading): add FastAPI trading router"
 ### Task 7: Mount trading router on Hub
 
 **Files:**
+
 - Modify: `apps/heiwa_hub/mcp_server.py`
 
 - [ ] **Step 1: Add trading router import and mount**
@@ -609,10 +646,13 @@ Add `$(pwd)/apps/heiwa_trading/src` to the existing PYTHONPATH line.
 - [ ] **Step 3: Update PYTHONPATH in start.sh**
 
 In `apps/heiwa_hub/start.sh` (line 187), replace:
+
 ```bash
 export PYTHONPATH="/app/packages/heiwa_cli:/app/packages/heiwa_cognition:/app/packages/heiwa_sdk:/app/packages/heiwa_protocol:/app/packages/heiwa_identity:/app/packages/heiwa_ui:/app/apps:${PYTHONPATH:-}"
 ```
+
 With:
+
 ```bash
 export PYTHONPATH="/app/packages/heiwa_cli:/app/packages/heiwa_cognition:/app/packages/heiwa_sdk:/app/packages/heiwa_protocol:/app/packages/heiwa_identity:/app/packages/heiwa_ui:/app/apps:/app/apps/heiwa_trading/src:${PYTHONPATH:-}"
 ```
@@ -636,11 +676,13 @@ git commit -m "feat(hub): mount trading router on Hub FastAPI"
 ### Task 8: Write integration tests for trading routes
 
 **Files:**
+
 - Create: `apps/heiwa_trading/tests/test_routes.py`
 
 - [ ] **Step 1: Write route tests**
 
 `apps/heiwa_trading/tests/test_routes.py`:
+
 ```python
 """Integration tests for heiwa_trading FastAPI routes."""
 import pytest
@@ -712,12 +754,14 @@ git commit -m "test(trading): add integration tests for FastAPI routes"
 ### Task 9: Write CONTEXT.md for heiwa_trading
 
 **Files:**
+
 - Create: `apps/heiwa_trading/CONTEXT.md`
 
 - [ ] **Step 1: Write CONTEXT.md**
 
 `apps/heiwa_trading/CONTEXT.md`:
-```markdown
+
+````markdown
 # Heiwa Trading — Context
 
 ## What This Is
@@ -726,20 +770,20 @@ Polymarket paper-trading tournament engine. Scans prediction markets, scores opp
 
 ## Key Files
 
-| File | Purpose |
-|------|---------|
-| `routes.py` | FastAPI router mounted on Hub at `/trading/*` |
-| `supervisor.py` | Market supervisor — called as a function, not a daemon |
-| `cockpit.py` | State builder, SSE helper functions |
-| `strategy.py` | Scoring engine (EV, Kelly, Bayes, log-odds) |
-| `formulas.py` | Pure math functions |
-| `market_data.py` | Polymarket public API ingestion |
-| `paper_trader.py` | Paper portfolio simulation with risk policy |
-| `tournament.py` | Cohort + strategy variant management |
-| `coinmarketcap.py` | CoinMarketCap movers data (cached) |
-| `types.py` | Frozen dataclasses (RiskPolicy, NormalizedMarket, etc.) |
-| `config.py` | Paths, URLs, constants |
-| `web/` | Static cockpit UI (HTML/CSS/JS) |
+| File               | Purpose                                                 |
+| ------------------ | ------------------------------------------------------- |
+| `routes.py`        | FastAPI router mounted on Hub at `/trading/*`           |
+| `supervisor.py`    | Market supervisor — called as a function, not a daemon  |
+| `cockpit.py`       | State builder, SSE helper functions                     |
+| `strategy.py`      | Scoring engine (EV, Kelly, Bayes, log-odds)             |
+| `formulas.py`      | Pure math functions                                     |
+| `market_data.py`   | Polymarket public API ingestion                         |
+| `paper_trader.py`  | Paper portfolio simulation with risk policy             |
+| `tournament.py`    | Cohort + strategy variant management                    |
+| `coinmarketcap.py` | CoinMarketCap movers data (cached)                      |
+| `types.py`         | Frozen dataclasses (RiskPolicy, NormalizedMarket, etc.) |
+| `config.py`        | Paths, URLs, constants                                  |
+| `web/`             | Static cockpit UI (HTML/CSS/JS)                         |
 
 ## How It Runs
 
@@ -756,18 +800,20 @@ Phase 2: Migrates to SpacetimeDB tables.
 cd apps/heiwa_trading
 PYTHONPATH=src pytest tests/ -v
 ```
-```
+````
 
+````
 - [ ] **Step 2: Commit**
 
 ```bash
 git add apps/heiwa_trading/CONTEXT.md
 git commit -m "docs(trading): add CONTEXT.md for heiwa_trading"
-```
+````
 
 ### Task 10: Create AI-DJ archive pointer
 
 **Files:**
+
 - Create: `apps/heiwa_dj/README.md`
 - Create: `apps/heiwa_dj/CONTEXT.md`
 
@@ -780,6 +826,7 @@ mkdir -p apps/heiwa_dj
 - [ ] **Step 2: Write README.md**
 
 `apps/heiwa_dj/README.md`:
+
 ```markdown
 # Heiwa DJ — Archived
 
@@ -798,6 +845,7 @@ This directory is an archive pointer only — no code lives here. If the Captain
 - [ ] **Step 3: Write CONTEXT.md**
 
 `apps/heiwa_dj/CONTEXT.md`:
+
 ```markdown
 # Heiwa DJ — Context
 
@@ -816,6 +864,7 @@ git commit -m "docs: add heiwa_dj archive pointer"
 ### Task 11: Update HEIWA.md app directory table
 
 **Files:**
+
 - Modify: `HEIWA.md`
 
 - [ ] **Step 1: Update the Directory Context Files table**
@@ -837,6 +886,7 @@ git commit -m "docs: add heiwa_trading and heiwa_dj to HEIWA.md directory table"
 ### Task 12: Update home directory configs
 
 **Files:**
+
 - Modify: `~/CLAUDE.md`
 - Modify: `~/.gemini/GEMINI.md`
 - Modify: `~/.codex/AGENTS.md`
@@ -846,10 +896,13 @@ git commit -m "docs: add heiwa_trading and heiwa_dj to HEIWA.md directory table"
 In all three files, update the mac-agent row to reflect it has been absorbed:
 
 Change:
+
 ```
 | `~/mac-agent/` | Polymarket paper-trading tournament — ...  | **Active, running** |
 ```
+
 To:
+
 ```
 | `~/heiwa/apps/heiwa_trading/` | Polymarket paper-trading tournament — absorbed into monorepo | **Active, in monorepo** |
 ```

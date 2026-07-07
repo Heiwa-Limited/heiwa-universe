@@ -44,7 +44,10 @@ fn triage_stages_reply_draft_and_is_idempotent() {
     let (ok, stdout, stderr) = heiwa(home.path(), &["mail", "triage", "--json"]);
     assert!(ok, "stderr: {stderr}");
     let payload: serde_json::Value = serde_json::from_str(stdout.trim()).unwrap();
-    assert_eq!(payload["counts"]["staged"], 1, "one draft-tier message staged");
+    assert_eq!(
+        payload["counts"]["staged"], 1,
+        "one draft-tier message staged"
+    );
 
     // The urgent message produced a pending request with a template draft.
     let item = payload["items"]
@@ -63,7 +66,10 @@ fn triage_stages_reply_draft_and_is_idempotent() {
         serde_json::from_str(&std::fs::read_to_string(&request_path).unwrap()).unwrap();
     assert_eq!(request["action"], "mail-reply-draft");
     assert_eq!(request["intent"]["draft_source"], "template");
-    assert!(request["intent"]["draft"].as_str().unwrap().contains("Devon"));
+    assert!(request["intent"]["draft"]
+        .as_str()
+        .unwrap()
+        .contains("Devon"));
 
     // The bulk sender is suggested for delete but never staged.
     let bulk = payload["items"]

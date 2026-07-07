@@ -13,6 +13,7 @@ This note captures the operational implications for Heiwa from Andrej Karpathy's
 Karpathy says December was the point where his workflow flipped from mostly writing code himself to mostly delegating to agents, and by March 2026 he says he likely had not typed a line of code since December. He also frames many failures as a problem of instructions, memory, and orchestration rather than raw model incapability.
 
 Sources:
+
 - [No Priors transcript](https://podscripts.co/podcasts/no-priors-artificial-intelligence-technology-startups/andrej-karpathy-on-code-agents-autoresearch-and-the-loopy-era-of-ai)
 
 ### 2. The unit of work is shifting from line edits to macro actions
@@ -20,6 +21,7 @@ Sources:
 Karpathy describes multiple agents working in parallel on non-conflicting functionality, with the operator moving at the level of repository-scale actions instead of line-level implementation.
 
 Sources:
+
 - [No Priors transcript](https://podscripts.co/podcasts/no-priors-artificial-intelligence-technology-startups/andrej-karpathy-on-code-agents-autoresearch-and-the-loopy-era-of-ai)
 
 ### 3. `program.md` is the human-controlled surface in AutoResearch
@@ -27,6 +29,7 @@ Sources:
 The `autoresearch` README is explicit: the point is not that the human edits Python files directly, but that the human edits `program.md`, which defines the agent instructions and research-organization behavior.
 
 Sources:
+
 - [karpathy/autoresearch README](https://github.com/karpathy/autoresearch)
 
 ### 4. AutoResearch is a closed-loop search pattern, not just an "overnight agent"
@@ -42,6 +45,7 @@ The reusable structure is:
 The README describes a five-minute fixed budget, agent edits to `train.py`, and a keep-or-discard loop against a measurable validation metric.
 
 Sources:
+
 - [karpathy/autoresearch README](https://github.com/karpathy/autoresearch)
 
 ### 5. MicroGPT matters because it compresses the primitive artifact
@@ -49,6 +53,7 @@ Sources:
 Karpathy's blog describes MicroGPT as a single file with 200 lines of pure Python and no dependencies. The strategic lesson is not the exact line count. The lesson is that the core artifact is tiny, inspectable, and fully legible.
 
 Sources:
+
 - [microgpt writeup](https://karpathy.github.io/2026/02/12/microgpt/)
 
 ### 6. Heiwa already has the right raw substrate
@@ -66,6 +71,7 @@ The canonical routing and runtime posture is also already explicit:
 - `HeiwaClaw / MCP` is the execution surface
 
 Sources:
+
 - [HEIWA.md](https://github.com/Strategizing/heiwa-universe/blob/main/HEIWA.md)
 
 ## What This Means For Heiwa

@@ -18,18 +18,19 @@ Per `HEIWA.md` non-negotiable: "honesty over completeness theater." Deletion nee
 
 ## File Structure
 
-| Source path | Destination | Class |
-| --- | --- | --- |
-| `apps/heiwa_hub` | `legacy/apps/heiwa_hub` | legacy |
-| `apps/heiwa_cli` | `legacy/apps/heiwa_cli` | legacy |
-| `apps/heiwa_limbs` | `legacy/apps/heiwa_limbs` | legacy |
-| `apps/heiwa_dj` | `archive/apps/heiwa_dj` | archive |
-| `packages/heiwa_skills` | `legacy/packages/heiwa_skills` | legacy |
-| `packages/heiwa_cognition` | `legacy/packages/heiwa_cognition` | legacy |
-| `packages/heiwa_ui` | `legacy/packages/heiwa_ui` | legacy |
-| `node` | `legacy/node` | legacy |
+| Source path                | Destination                       | Class   |
+| -------------------------- | --------------------------------- | ------- |
+| `apps/heiwa_hub`           | `legacy/apps/heiwa_hub`           | legacy  |
+| `apps/heiwa_cli`           | `legacy/apps/heiwa_cli`           | legacy  |
+| `apps/heiwa_limbs`         | `legacy/apps/heiwa_limbs`         | legacy  |
+| `apps/heiwa_dj`            | `archive/apps/heiwa_dj`           | archive |
+| `packages/heiwa_skills`    | `legacy/packages/heiwa_skills`    | legacy  |
+| `packages/heiwa_cognition` | `legacy/packages/heiwa_cognition` | legacy  |
+| `packages/heiwa_ui`        | `legacy/packages/heiwa_ui`        | legacy  |
+| `node`                     | `legacy/node`                     | legacy  |
 
 8 moves. Each is one task. After each move:
+
 1. Update workspace manifests
 2. Update `PRODUCT_SURFACE.md`
 3. Verify build
@@ -72,6 +73,7 @@ git commit -m "chore: add legacy/ and archive/ destination subtrees"
 ### Task 1: Quarantine `apps/heiwa_hub` (largest, 24,793 LOC)
 
 **Files:**
+
 - Move: `apps/heiwa_hub/` → `legacy/apps/heiwa_hub/`
 - Modify: `Cargo.toml` (workspace members)
 - Modify: `pyproject.toml` (workspace members if applicable)
@@ -100,7 +102,7 @@ If present, edit to either retarget the path or remove the entry depending on wh
 
 - [ ] **Step 5: Update PRODUCT_SURFACE.md**
 
-Edit the table — change `| \`apps/heiwa_hub\` | legacy |` to `| \`legacy/apps/heiwa_hub\` | legacy |`.
+Edit the table — change `| \`apps/heiwa_hub\` | legacy |`to`| \`legacy/apps/heiwa_hub\` | legacy |`.
 
 - [ ] **Step 6: Verify the build still works**
 
@@ -124,6 +126,7 @@ git commit -m "refactor: quarantine apps/heiwa_hub under legacy/"
 ### Task 2: Quarantine `packages/heiwa_skills` (largest single subtree, 86,477 LOC)
 
 **Files:**
+
 - Move: `packages/heiwa_skills/` → `legacy/packages/heiwa_skills/`
 - Modify: `Cargo.toml`, `pyproject.toml`, `package.json` (any references)
 - Modify: `PRODUCT_SURFACE.md`
@@ -144,7 +147,7 @@ For each match from Step 1, either retarget the path or remove the entry. Prefer
 
 - [ ] **Step 4: Update PRODUCT_SURFACE.md**
 
-Replace `| \`packages/heiwa_skills\` | legacy |` with `| \`legacy/packages/heiwa_skills\` | legacy |`.
+Replace `| \`packages/heiwa_skills\` | legacy |`with`| \`legacy/packages/heiwa_skills\` | legacy |`.
 
 - [ ] **Step 5: Verify build**
 
@@ -168,6 +171,7 @@ git commit -m "refactor: quarantine packages/heiwa_skills under legacy/"
 ### Task 3: Quarantine `apps/heiwa_cli` (3,512 LOC, Python shim)
 
 **Files:**
+
 - Move: `apps/heiwa_cli/` → `legacy/apps/heiwa_cli/`
 - Modify: workspace manifests, `PRODUCT_SURFACE.md`
 
@@ -205,6 +209,7 @@ git commit -m "refactor: quarantine apps/heiwa_cli (Python shim) under legacy/"
 ### Task 4: Quarantine `apps/heiwa_limbs` (2,446 LOC, experimental)
 
 **Files:**
+
 - Move: `apps/heiwa_limbs/` → `legacy/apps/heiwa_limbs/`
 - Modify: workspace manifests, `PRODUCT_SURFACE.md`
 
@@ -240,6 +245,7 @@ git commit -m "refactor: quarantine apps/heiwa_limbs under legacy/"
 ### Task 5: Quarantine `apps/heiwa_dj` (17 LOC stub → archive)
 
 **Files:**
+
 - Move: `apps/heiwa_dj/` → `archive/apps/heiwa_dj/`
 - Modify: `PRODUCT_SURFACE.md`
 
@@ -249,7 +255,7 @@ Run: `git mv apps/heiwa_dj archive/apps/heiwa_dj`
 
 - [ ] **Step 2: Update PRODUCT_SURFACE.md**
 
-Change `| \`apps/heiwa_dj\` | archive |` to `| \`archive/apps/heiwa_dj\` | archive |`.
+Change `| \`apps/heiwa_dj\` | archive |`to`| \`archive/apps/heiwa_dj\` | archive |`.
 
 - [ ] **Step 3: Verify build**
 
@@ -273,6 +279,7 @@ git commit -m "chore: archive apps/heiwa_dj stub"
 ### Task 6: Quarantine `packages/heiwa_cognition` (3,031 LOC)
 
 **Files:**
+
 - Move: `packages/heiwa_cognition/` → `legacy/packages/heiwa_cognition/`
 - Modify: workspace manifests, `PRODUCT_SURFACE.md`
 
@@ -308,6 +315,7 @@ git commit -m "refactor: quarantine packages/heiwa_cognition under legacy/"
 ### Task 7: Quarantine `packages/heiwa_ui` (306 LOC)
 
 **Files:**
+
 - Move: `packages/heiwa_ui/` → `legacy/packages/heiwa_ui/`
 - Modify: workspace manifests, `PRODUCT_SURFACE.md`
 
@@ -343,6 +351,7 @@ git commit -m "refactor: quarantine packages/heiwa_ui under legacy/"
 ### Task 8: Quarantine `node/` (legacy node helpers)
 
 **Files:**
+
 - Move: `node/` → `legacy/node/`
 - Modify: `PRODUCT_SURFACE.md`
 
@@ -383,6 +392,7 @@ git commit -m "refactor: quarantine top-level node/ helpers under legacy/"
 ### Task 9: Add legacy README signposts
 
 **Files:**
+
 - Create: `legacy/README.md`
 - Create: `archive/README.md`
 

@@ -7,15 +7,47 @@ import {
   runtimeVersion,
   providersFromSnapshot,
   dispatchSubagent,
+  herdPanes as loadHerdSnapshot,
+  herdCommandCatalog,
+  readHerdPane,
+  sendHerdPane,
+  runHerdPane,
+  focusHerdPane,
+  splitHerdPane,
   type RuntimeHealth,
   type AgentRow,
+  type HerdPane,
+  type HerdActionResult,
+  type HerdCommandSpec,
 } from "./runtime";
 
 // ═══════════════════════════════════════════════════════════════════════════
 // Types
 // ═══════════════════════════════════════════════════════════════════════════
 
-type View = "chat" | "calendar" | "agents" | "skills" | "artifacts" | "browser" | "files";
+type View =
+  | "home"
+  | "chat"
+  | "windows"
+  | "calendar"
+  | "mail"
+  | "finance"
+  | "social"
+  | "agents"
+  | "browser"
+  | "files";
+
+type DockPreview = {
+  title: string;
+  lines: string[];
+};
+
+type DockItem = {
+  id: View;
+  label: string;
+  glyph: string;
+  preview: () => DockPreview;
+};
 
 type ChatMessage = {
   id: string;
@@ -59,6 +91,18 @@ type InboxItem = {
   [key: string]: unknown;
 };
 
+type SubApp = {
+  id: View;
+  title: string;
+  agent: string;
+  server: string;
+  state: string;
+  pinnedPane: string;
+  skills: string[];
+  tools: string[];
+  personalization: string[];
+};
+
 // ═══════════════════════════════════════════════════════════════════════════
 // State
 // ═══════════════════════════════════════════════════════════════════════════
@@ -66,12 +110,21 @@ type InboxItem = {
 const app = document.querySelector<HTMLDivElement>("#app")!;
 let health: RuntimeHealth | null = null;
 let busy = false;
-let view: View = "chat";
+let view: View = "home";
 let messages: ChatMessage[] = [];
 let calendarEvents: CalendarEvent[] = [];
 let subagents: SubagentTask[] = [];
 let inbox: InboxItem[] = [];
 let agents: AgentRow[] = [];
+let herdPanes: HerdPane[] = [];
+let herdCommands: HerdCommandSpec[] = [];
+let herdStatus: "checking" | "online" | "offline" = "checking";
+let herdSource = "none";
+let selectedPane: string | null = null;
+let selectedPaneText = "";
+let selectedPaneSource = "none";
+let selectedPaneStatus = "";
+let paneMode: "send" | "run" = "send";
 let ws: WebSocket | null = null;
 let calendarDate = new Date();
 
@@ -91,6 +144,181 @@ function esc(s: string): string {
 function timeFmt(ts?: number): string {
   if (!ts) return "";
   return new Date(ts).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+}
+
+function shortDate(raw?: string): string {
+  if (!raw) return "";
+  const parsed = new Date(raw);
+  if (Number.isNaN(parsed.getTime())) return raw;
+  return parsed.toLocaleDateString([], { month: "short", day: "numeric" });
+}
+
+function connectedProviderCount(): number {
+  return providersFromSnapshot(health).filter((p) => p.status === "connected").length;
+}
+
+function pendingApprovalCount(): number {
+  return health?.snapshot?.data?.approvals?.pending ?? inbox.length;
+}
+
+function liveWorkerCount(): number {
+  const activeSubagents = subagents.filter((s) => s.status === "queued" || s.status === "running" || s.status === "accepted").length;
+  return activeSubagents + herdPanes.length + (health?.snapshot?.data?.workers?.live ?? 0);
+}
+
+function nextCalendarItems(limit = 3): CalendarEvent[] {
+  return calendarEvents
+    .filter((event) => event.date || event.start)
+    .sort((a, b) => String(a.start || a.date).localeCompare(String(b.start || b.date)))
+    .slice(0, limit);
+}
+
+function emptyState(label: string): string {
+  return `<span class="quiet">${esc(label)}</span>`;
+}
+
+function viewCaption(activeView: View): string {
+  if (activeView === "home") return "pinned ops";
+  if (activeView === "chat") return "conversation";
+  return `${activeView} window`;
+}
+
+function shortenPath(raw: string): string {
+  return raw.replace(/^\/Users\/[^/]+/, "~");
+}
+
+function cssToken(raw: string): string {
+  return raw.toLowerCase().replace(/[^a-z0-9_-]+/g, "-");
+}
+
+function subApps(): SubApp[] {
+  return [
+    {
+      id: "chat",
+      title: "AI Ops",
+      agent: "router-persona",
+      server: "heiwa runtime",
+      state: runtimeStatus(health),
+      pinnedPane: herdPanes[0]?.pane ?? "heiwa:ops",
+      skills: ["route", "summarize", "delegate"],
+      tools: ["provider CLIs", "local models", "receipts"],
+      personalization: ["cheapest acceptable route", "repo truth first"],
+    },
+    {
+      id: "calendar",
+      title: "Calendar",
+      agent: "scheduler",
+      server: "calendar sub-app",
+      state: `${calendarEvents.length} items`,
+      pinnedPane: "calendar:today",
+      skills: ["schedule", "conflict check", "draft holds"],
+      tools: ["calendar.read", "calendar.draft", "life state"],
+      personalization: ["dental/sleep/training floor", "no-overlap days"],
+    },
+    {
+      id: "mail",
+      title: "Mail",
+      agent: "communications",
+      server: "mail sub-app",
+      state: `${inbox.length} inbox rows`,
+      pinnedPane: "mail:triage",
+      skills: ["triage", "draft replies", "extract asks"],
+      tools: ["mail.search", "mail.draft", "approval outbox"],
+      personalization: ["draft first", "no external send without approval"],
+    },
+    {
+      id: "finance",
+      title: "Finance",
+      agent: "cashflow",
+      server: "finance sub-app",
+      state: "read model pending",
+      pinnedPane: "finance:ledger",
+      skills: ["cashflow", "debt plan", "receipt audit"],
+      tools: ["local docs", "calculators", "approval ledger"],
+      personalization: ["debt-paydown phase", "no money movement"],
+    },
+    {
+      id: "social",
+      title: "Social",
+      agent: "boundary",
+      server: "social sub-app",
+      state: "ingress pending",
+      pinnedPane: "social:review",
+      skills: ["context read", "draft", "boundary check"],
+      tools: ["message read models", "draft outbox", "receipts"],
+      personalization: ["floor before networking", "respect non-reciprocity"],
+    },
+    {
+      id: "files",
+      title: "Files",
+      agent: "librarian",
+      server: "files sub-app",
+      state: "workspace",
+      pinnedPane: "files:workspace",
+      skills: ["search", "index", "source cite"],
+      tools: ["repo.grep", "fs.read", "artifact log"],
+      personalization: ["smallest source slice", "evidence before claim"],
+    },
+  ];
+}
+
+function fallbackPanes(): HerdPane[] {
+  const apps = subApps();
+  return [
+    {
+      workspace: "heiwa",
+      pane: "herdr",
+      agent: "multiplexer",
+      state: herdStatus,
+      cwd: "Heiwa.app native herd command",
+      message: "live herd feed not connected",
+    },
+    ...apps.slice(0, 5).map((app) => ({
+      workspace: app.title.toLowerCase(),
+      pane: app.pinnedPane,
+      agent: app.agent,
+      state: "planned",
+      cwd: app.server,
+      message: app.skills.join(" · "),
+    })),
+  ];
+}
+
+function visiblePanes(): HerdPane[] {
+  return herdPanes.length ? herdPanes : fallbackPanes();
+}
+
+function livePaneIds(): Set<string> {
+  return new Set(herdPanes.map((pane) => pane.pane));
+}
+
+function selectedPaneRow(): HerdPane | null {
+  const panes = visiblePanes();
+  return panes.find((pane) => pane.pane === selectedPane) ?? panes[0] ?? null;
+}
+
+function ensureSelectedPane(): void {
+  const panes = visiblePanes();
+  if (!panes.length) {
+    selectedPane = null;
+    selectedPaneText = "";
+    return;
+  }
+  if (!selectedPane || !panes.some((pane) => pane.pane === selectedPane)) {
+    selectedPane = panes[0].pane;
+  }
+}
+
+function appViewForPane(pane: HerdPane): View {
+  const haystack = `${pane.workspace} ${pane.pane} ${pane.agent} ${pane.cwd}`.toLowerCase();
+  if (haystack.includes("calendar")) return "calendar";
+  if (haystack.includes("mail")) return "mail";
+  if (haystack.includes("finance")) return "finance";
+  if (haystack.includes("social")) return "social";
+  if (haystack.includes("file")) return "files";
+  if (haystack.includes("browser")) return "browser";
+  if (haystack.includes("qwen") || haystack.includes("agent")) return "agents";
+  return "windows";
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -136,6 +364,69 @@ async function loadAgents(): Promise<void> {
     const resp = await apiGet<{ data?: { agents?: AgentRow[] } }>("/api/v1/agents");
     agents = resp?.data?.agents ?? [];
   } catch { agents = []; }
+}
+
+async function loadHerd(): Promise<void> {
+  try {
+    const snapshot = await loadHerdSnapshot();
+    herdPanes = snapshot.panes.map((row) => ({
+      workspace: String(row.workspace ?? "heiwa"),
+      pane: String(row.pane ?? "pane"),
+      agent: String(row.agent ?? "-"),
+      state: String(row.state ?? "unknown"),
+      cwd: String(row.cwd ?? "-"),
+      message: row.message ? String(row.message) : "",
+    }));
+    herdStatus = snapshot.status === "online" ? "online" : "offline";
+    herdSource = snapshot.source || "none";
+  } catch {
+    herdPanes = [];
+    herdStatus = "offline";
+    herdSource = "none";
+  }
+  ensureSelectedPane();
+}
+
+async function loadHerdCommands(): Promise<void> {
+  try {
+    herdCommands = await herdCommandCatalog();
+  } catch {
+    herdCommands = [];
+  }
+}
+
+function renderHerdRunControl(canControl: boolean): string {
+  if (herdCommands.length) {
+    return `<select id="pane-command" ${canControl ? "" : "disabled"}>
+      ${herdCommands.map((command) => `<option value="${esc(command.id)}">${esc(command.label)} · ${esc(command.id)}</option>`).join("")}
+    </select>`;
+  }
+  return `<input id="pane-command" type="text" ${canControl ? "" : "disabled"} placeholder="command id: git.status" />`;
+}
+
+async function loadSelectedPaneText(): Promise<void> {
+  const pane = selectedPaneRow();
+  if (!pane || !livePaneIds().has(pane.pane)) {
+    selectedPaneText = "No live herdr pane selected. Start or attach panes through herdr, then refresh.";
+    selectedPaneSource = "none";
+    selectedPaneStatus = "offline";
+    return;
+  }
+
+  selectedPaneStatus = "reading";
+  const resp = await readHerdPane(pane.pane);
+  selectedPaneText = resp.ok ? resp.text : `Read failed: ${resp.error || "unknown error"}`;
+  selectedPaneSource = resp.source;
+  selectedPaneStatus = resp.ok ? "ready" : "error";
+}
+
+async function runPaneAction(action: () => Promise<HerdActionResult>): Promise<void> {
+  selectedPaneStatus = "working";
+  render();
+  const result = await action();
+  selectedPaneStatus = result.ok ? result.message : `Error: ${result.error || result.message}`;
+  await Promise.all([loadHerd(), loadSelectedPaneText()]);
+  render();
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -299,26 +590,298 @@ function autoCompact(): void {
 // Render: icon rail (left sidebar)
 // ═══════════════════════════════════════════════════════════════════════════
 
-const VIEWS: Array<[View, string, string]> = [
-  ["chat", "Chat", "💬"],
-  ["calendar", "Calendar", "📅"],
-  ["agents", "Agents", "🤖"],
-  ["skills", "Skills", "⚡"],
-  ["artifacts", "Artifacts", "📦"],
-  ["browser", "Browser", "🌐"],
-  ["files", "Files", "📁"],
-];
+function dockItems(): DockItem[] {
+  const next = nextCalendarItems(1)[0];
+  return [
+    {
+      id: "home",
+      label: "Home",
+      glyph: "⌂",
+      preview: () => ({
+        title: "Pinned Ops",
+        lines: [
+          `${visiblePanes().length} panes`,
+          `herd ${herdStatus}`,
+          `source ${herdSource}`,
+          `${subApps().length} sub-app agents`,
+        ],
+      }),
+    },
+    {
+      id: "chat",
+      label: "AI",
+      glyph: "✦",
+      preview: () => ({
+        title: "AI Console",
+        lines: [
+          `${messages.length} messages`,
+          `${connectedProviderCount()} connected providers`,
+          busy ? "route in flight" : "ready",
+        ],
+      }),
+    },
+    {
+      id: "windows",
+      label: "Windows",
+      glyph: "▥",
+      preview: () => ({
+        title: "Multiplexer",
+        lines: [
+          `${herdPanes.length || 0} live herdr panes`,
+          "pinned ops windows",
+          "terminal + sub-app servers",
+        ],
+      }),
+    },
+    {
+      id: "calendar",
+      label: "Calendar",
+      glyph: "◷",
+      preview: () => ({
+        title: "Calendar",
+        lines: [
+          next ? `${shortDate(next.start || next.date)} ${next.title || "Untitled"}` : "no loaded events",
+          `${calendarEvents.length} local items`,
+        ],
+      }),
+    },
+    {
+      id: "mail",
+      label: "Mail",
+      glyph: "✉",
+      preview: () => ({
+        title: "Mail",
+        lines: [`${inbox.length} inbox items`, "draft/write gated"],
+      }),
+    },
+    {
+      id: "finance",
+      label: "Finance",
+      glyph: "$",
+      preview: () => ({
+        title: "Finance",
+        lines: ["read model pending", "writes approval-gated"],
+      }),
+    },
+    {
+      id: "social",
+      label: "Social",
+      glyph: "@",
+      preview: () => ({
+        title: "Social",
+        lines: ["ingress pending", "sends approval-gated"],
+      }),
+    },
+    {
+      id: "agents",
+      label: "Workers",
+      glyph: "◇",
+      preview: () => ({
+        title: "Workers",
+        lines: [
+          `${liveWorkerCount()} live`,
+          `${subagents.length || agents.length} known tasks`,
+        ],
+      }),
+    },
+    {
+      id: "browser",
+      label: "Browser",
+      glyph: "⌕",
+      preview: () => ({
+        title: "Browser",
+        lines: ["local view", "actions approval-gated"],
+      }),
+    },
+    {
+      id: "files",
+      label: "Files",
+      glyph: "□",
+      preview: () => ({
+        title: "Files",
+        lines: ["workspace read model", "mutations receipt-gated"],
+      }),
+    },
+  ];
+}
 
 function renderRail(): string {
   return `
     <nav class="icon-rail">
       <div class="rail-logo">H</div>
-      ${VIEWS.map(([id, label, icon]) =>
-        `<button class="rail-btn ${view === id ? "active" : ""}" data-view="${id}" title="${label}">${icon}</button>`
+      ${dockItems().map((item) => {
+        const preview = item.preview();
+        return `<button class="rail-btn ${view === item.id ? "active" : ""}" data-view="${item.id}" aria-label="${item.label}" title="${item.label}">
+          <span class="rail-glyph">${item.glyph}</span>
+          <span class="dock-preview" role="tooltip">
+            <strong>${esc(preview.title)}</strong>
+            ${preview.lines.map((line) => `<span>${esc(line)}</span>`).join("")}
+          </span>
+        </button>`;
+      }
       ).join("")}
       <div class="rail-spacer"></div>
       <div class="rail-status ${health?.reachable ? "online" : "offline"}" title="${runtimeStatus(health)}"></div>
     </nav>
+  `;
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Render: home / window surface
+// ═══════════════════════════════════════════════════════════════════════════
+
+function renderHome(): string {
+  const panes = visiblePanes().slice(0, 8);
+  const apps = subApps();
+
+  return `
+    <div class="view home-view">
+      <section class="home-command">
+        <div>
+          <h1>Heiwa Ops</h1>
+          <p>${panes.length} pinned panes · herd ${herdStatus} via ${herdSource} · ${apps.length} sub-app agents</p>
+        </div>
+        <button class="home-jump primary-action" data-view="windows">Open Windows</button>
+      </section>
+
+      <section class="pinned-pane-board" aria-label="Pinned terminal and ops panes">
+        ${panes.map((pane, index) => `
+          <button class="pinned-pane ${index === 0 ? "primary-pane" : ""} home-jump" data-view="${livePaneIds().has(pane.pane) ? "windows" : appViewForPane(pane)}" data-pane="${esc(pane.pane)}">
+            <span class="pane-topline">
+              <span>${esc(pane.workspace)}</span>
+              <span class="state-chip ${cssToken(pane.state)}">${esc(pane.state)}</span>
+            </span>
+            <strong>${esc(pane.agent === "-" ? pane.pane : pane.agent)}</strong>
+            <span>${esc(pane.pane)} · ${esc(shortenPath(pane.cwd))}</span>
+            ${pane.message ? `<small>${esc(pane.message)}</small>` : ""}
+          </button>
+        `).join("")}
+      </section>
+
+      <section class="quick-grid">
+        <article class="quick-widget">
+          <header><span>Sub-app servers</span><strong>${apps.length}</strong></header>
+          ${apps.slice(0, 4).map((app) => `
+            <div class="widget-row">
+              <span>${esc(app.title)}</span>
+              <strong>${esc(app.server)}</strong>
+            </div>
+          `).join("")}
+        </article>
+
+        <article class="quick-widget">
+          <header><span>Agent skills</span><strong>${apps.length}</strong></header>
+          ${apps.slice(0, 4).map((app) => `
+            <div class="widget-row">
+              <span>${esc(app.agent)}</span>
+              <strong>${esc(app.skills.join(" · "))}</strong>
+            </div>
+          `).join("")}
+        </article>
+
+        <article class="quick-widget">
+          <header><span>Tools</span><strong>${apps.reduce((sum, app) => sum + app.tools.length, 0)}</strong></header>
+          ${apps.slice(0, 4).map((app) => `
+            <div class="widget-row">
+              <span>${esc(app.title)}</span>
+              <strong>${esc(app.tools.join(" · "))}</strong>
+            </div>
+          `).join("")}
+        </article>
+
+        <article class="quick-widget">
+          <header><span>Personalization</span><strong>local</strong></header>
+          ${apps.slice(0, 4).map((app) => `
+            <div class="widget-row">
+              <span>${esc(app.title)}</span>
+              <strong>${esc(app.personalization.join(" · "))}</strong>
+            </div>
+          `).join("")}
+        </article>
+      </section>
+    </div>
+  `;
+}
+
+function renderWindows(): string {
+  const panes = visiblePanes();
+  const apps = subApps();
+  const liveIds = livePaneIds();
+  const active = selectedPaneRow();
+  const canControl = Boolean(active && liveIds.has(active.pane));
+  return `
+    <div class="view windows-view">
+      <div class="view-header compact-header">
+        <h2>Windows</h2>
+        <p class="muted">Pinned terminal panes, ops servers, and app agents over one runtime state.</p>
+      </div>
+      <div class="terminal-cockpit">
+        <section class="mux-pane pane-list-panel">
+          <header><span>Terminal panes</span><strong>${panes.length}</strong></header>
+          <div class="pane-list">${panes.map((pane) => {
+            const live = liveIds.has(pane.pane);
+            const selected = active?.pane === pane.pane;
+            return `
+              <button class="pane-row ${selected ? "selected" : ""}" data-pane="${esc(pane.pane)}">
+                <span class="pane-row-main">
+                  <strong>${esc(pane.agent === "-" ? pane.workspace : pane.agent)}</strong>
+                  <span>${esc(pane.pane)} · ${esc(shortenPath(pane.cwd))}</span>
+                </span>
+                <span class="state-chip ${cssToken(pane.state)}">${esc(live ? pane.state : "planned")}</span>
+              </button>
+            `;
+          }).join("")}</div>
+          <button class="small-action" id="refresh-herd">Refresh</button>
+        </section>
+
+        <section class="mux-pane terminal-panel">
+          <header>
+            <span>${active ? esc(active.pane) : "No pane"}</span>
+            <strong>${esc(selectedPaneStatus || (canControl ? "ready" : "no live pane"))}</strong>
+          </header>
+          <pre class="terminal-output">${esc(selectedPaneText || (canControl ? "Select refresh to read pane output." : "No live pane output. Planned panes are placeholders until herdr reports real panes."))}</pre>
+          <div class="pane-controls">
+            <select id="pane-mode" ${canControl ? "" : "disabled"}>
+              <option value="send" ${paneMode === "send" ? "selected" : ""}>send</option>
+              <option value="run" ${paneMode === "run" ? "selected" : ""}>run catalog</option>
+            </select>
+            ${paneMode === "run" ? renderHerdRunControl(canControl) : `<input id="pane-command" type="text" ${canControl ? "" : "disabled"} placeholder="prompt text…" />`}
+            <button id="pane-submit" class="small-action primary-mini" ${canControl ? "" : "disabled"}>${paneMode === "run" ? "Run" : "Send"}</button>
+          </div>
+          <div class="pane-actions">
+            <button id="pane-read" class="small-action" ${canControl ? "" : "disabled"}>Read</button>
+            <button id="pane-focus" class="small-action" ${canControl ? "" : "disabled"}>Focus</button>
+            <button id="pane-split-right" class="small-action" ${canControl ? "" : "disabled"}>Split →</button>
+            <button id="pane-split-down" class="small-action" ${canControl ? "" : "disabled"}>Split ↓</button>
+          </div>
+          <p class="pane-source">source ${esc(selectedPaneSource || herdSource)} · herd ${esc(herdStatus)} via ${esc(herdSource)}</p>
+        </section>
+      </div>
+
+      <div class="multiplexer-grid compact-mux-grid">
+        <section class="mux-pane">
+          <header><span>Deno / herdr</span><strong>${herdStatus}</strong></header>
+          <div class="mux-body">
+            <div class="mux-line"><span>source</span><strong>${esc(herdSource)}</strong></div>
+            <div class="mux-line"><span>desk</span><strong>packaged Deno bridge or dev http://127.0.0.1:7480</strong></div>
+            <div class="mux-line"><span>cli</span><strong>herdr read/send/split/focus; run is catalog-only unless operator env opt-in</strong></div>
+            <div class="mux-line"><span>mode</span><strong>native Tauri commands; terminal daemon remains authority target</strong></div>
+          </div>
+        </section>
+        <section class="mux-pane">
+          <header><span>Sub-app agents</span><strong>${apps.length}</strong></header>
+          <div class="mux-body">${apps.slice(0, 5).map((app) => `
+            <div class="mux-line"><span>${esc(app.title)}</span><strong>${esc(app.agent)} · ${esc(app.skills.join(" · "))}</strong></div>
+          `).join("")}</div>
+        </section>
+        <section class="mux-pane">
+          <header><span>Ops personalization</span><strong>${pendingApprovalCount()}</strong></header>
+          <div class="mux-body">${apps.slice(0, 5).map((app) => `
+            <div class="mux-line"><span>${esc(app.title)}</span><strong>${esc(app.personalization.join(" · "))}</strong></div>
+          `).join("")}</div>
+        </section>
+      </div>
+    </div>
   `;
 }
 
@@ -329,8 +892,8 @@ function renderRail(): string {
 function renderMessages(): string {
   if (messages.length === 0) {
     return `<div class="chat-empty">
-      <div class="chat-empty-icon">💬</div>
-      <p>Ask Heiwa anything. Subagents run in the background and stream results here.</p>
+      <div class="chat-empty-icon">✦</div>
+      <p>No messages yet.</p>
     </div>`;
   }
 
@@ -374,10 +937,6 @@ function renderCalendar(): string {
   const daysInMonth = new Date(year, month + 1, 0).getDate();
   const monthName = calendarDate.toLocaleDateString("en-US", { month: "long", year: "numeric" });
 
-  const prevMonth = () => { calendarDate = new Date(year, month - 1, 1); render(); };
-  const nextMonth = () => { calendarDate = new Date(year, month + 1, 1); render(); };
-  const goToday = () => { calendarDate = new Date(); render(); };
-
   // Build day cells
   let cells = "";
   // Empty cells before first day
@@ -407,10 +966,10 @@ function renderCalendar(): string {
     <div class="view calendar-view">
       <div class="cal-header">
         <div class="cal-nav">
-          <button onclick="(${prevMonth.toString()})()">‹</button>
+          <button data-cal-nav="prev" aria-label="Previous month">‹</button>
           <h2>${esc(monthName)}</h2>
-          <button onclick="(${nextMonth.toString()})()">›</button>
-          <button class="cal-today" onclick="(${goToday.toString()})()">Today</button>
+          <button data-cal-nav="next" aria-label="Next month">›</button>
+          <button class="cal-today" data-cal-nav="today">Today</button>
         </div>
       </div>
       <div class="cal-grid">
@@ -476,63 +1035,6 @@ function renderAgents(): string {
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
-// Render: skills view
-// ═══════════════════════════════════════════════════════════════════════════
-
-function renderSkills(): string {
-  return `
-    <div class="view skills-view">
-      <div class="view-header">
-        <h2>Skills & Tools</h2>
-        <p class="muted">Auto-discovered capabilities from connected providers and local tools.</p>
-      </div>
-      <div class="skills-grid">
-        <div class="skill-card">
-          <h3>📁 Files</h3>
-          <p>Read, search, and list files in the active workspace.</p>
-        </div>
-        <div class="skill-card">
-          <h3>🌐 Browser</h3>
-          <p>Navigate and extract web content.</p>
-        </div>
-        <div class="skill-card">
-          <h3>📅 Calendar</h3>
-          <p>View holds and events. Sync with Google Calendar when authorized.</p>
-        </div>
-        <div class="skill-card">
-          <h3>📧 Mail</h3>
-          <p>Scan and draft replies. Gmail sync when authorized.</p>
-        </div>
-        <div class="skill-card">
-          <h3>🔍 Search</h3>
-          <p>Web search and local grep.</p>
-        </div>
-        <div class="skill-card">
-          <h3>💻 Shell</h3>
-          <p>Run commands in sandboxed terminal sessions.</p>
-        </div>
-      </div>
-    </div>
-  `;
-}
-
-// ═══════════════════════════════════════════════════════════════════════════
-// Render: artifacts view
-// ═══════════════════════════════════════════════════════════════════════════
-
-function renderArtifacts(): string {
-  return `
-    <div class="view artifacts-view">
-      <div class="view-header">
-        <h2>Artifacts</h2>
-        <p class="muted">Files, documents, and outputs generated by Heiwa and subagents.</p>
-      </div>
-      <p class="muted">Artifacts will appear here as they are generated.</p>
-    </div>
-  `;
-}
-
-// ═══════════════════════════════════════════════════════════════════════════
 // Render: browser view
 // ═══════════════════════════════════════════════════════════════════════════
 
@@ -568,17 +1070,59 @@ function renderFiles(): string {
   `;
 }
 
+function renderFeatureWindow(kind: "mail" | "finance" | "social"): string {
+  const copy = subApps().find((app) => app.id === kind)!;
+  const rows = [
+    ["agent", copy.agent],
+    ["server", copy.server],
+    ["pane", copy.pinnedPane],
+    ["skills", copy.skills.join(" · ")],
+    ["tools", copy.tools.join(" · ")],
+    ["personal", copy.personalization.join(" · ")],
+  ];
+
+  return `
+    <div class="view feature-window">
+      <section class="feature-panel">
+        <header>
+          <span>${copy.title}</span>
+          <strong>${copy.state}</strong>
+        </header>
+        ${rows.map(([label, value]) => `
+          <div class="feature-row">
+            <span>${label}</span>
+            <strong>${value}</strong>
+          </div>
+        `).join("")}
+      </section>
+    </div>
+  `;
+}
+
+async function loadForView(nextView: View): Promise<void> {
+  if (nextView === "home" || nextView === "windows") {
+    await Promise.all([loadCalendar(), loadInbox(), loadAgents(), loadHerd(), loadHerdCommands()]);
+    if (nextView === "windows") await loadSelectedPaneText();
+  }
+  if (nextView === "calendar") await loadCalendar();
+  if (nextView === "agents") await loadAgents();
+  if (nextView === "mail") await loadInbox();
+}
+
 // ═══════════════════════════════════════════════════════════════════════════
 // Main render
 // ═══════════════════════════════════════════════════════════════════════════
 
 function render(): void {
   const main =
+    view === "home" ? renderHome() :
     view === "chat" ? renderChat() :
+    view === "windows" ? renderWindows() :
     view === "calendar" ? renderCalendar() :
     view === "agents" ? renderAgents() :
-    view === "skills" ? renderSkills() :
-    view === "artifacts" ? renderArtifacts() :
+    view === "mail" ? renderFeatureWindow("mail") :
+    view === "finance" ? renderFeatureWindow("finance") :
+    view === "social" ? renderFeatureWindow("social") :
     view === "browser" ? renderBrowser() :
     renderFiles();
 
@@ -589,11 +1133,11 @@ function render(): void {
         ${main}
         <div class="composer-area">
           <div class="composer-wrap">
-            <textarea id="chat-input" rows="1" placeholder="Message Heiwa… (Enter to send, Shift+Enter for newline)"></textarea>
+            <textarea id="chat-input" rows="1" placeholder="Message Heiwa…"></textarea>
             <button id="send-btn" ${busy ? "disabled" : ""}>${busy ? "…" : "↑"}</button>
           </div>
           <div class="composer-hint">
-            ${view !== "chat" ? `<span class="hint">Switch to 💬 Chat to see full conversation</span>` : ""}
+            <span class="hint">${esc(viewCaption(view))}</span>
             <span class="hint">${esc(runtimeVersion(health))} · ${providersFromSnapshot(health).filter(p => p.status === "connected").length} providers</span>
           </div>
         </div>
@@ -603,10 +1147,91 @@ function render(): void {
 
   // Rail navigation
   document.querySelectorAll<HTMLButtonElement>(".rail-btn").forEach(btn => {
+    btn.addEventListener("click", async () => {
+      const nextView = btn.dataset.view as View;
+      view = nextView;
+      await loadForView(nextView);
+      render();
+    });
+  });
+
+  document.querySelectorAll<HTMLButtonElement>(".home-jump").forEach(btn => {
+    btn.addEventListener("click", async () => {
+      const nextView = btn.dataset.view as View;
+      if (btn.dataset.pane && livePaneIds().has(btn.dataset.pane)) {
+        selectedPane = btn.dataset.pane;
+      }
+      view = nextView;
+      await loadForView(nextView);
+      render();
+    });
+  });
+
+  document.querySelectorAll<HTMLButtonElement>(".pane-row").forEach(btn => {
+    btn.addEventListener("click", async () => {
+      selectedPane = btn.dataset.pane ?? selectedPane;
+      await loadSelectedPaneText();
+      render();
+    });
+  });
+
+  document.querySelector<HTMLButtonElement>("#refresh-herd")?.addEventListener("click", async () => {
+    await loadHerd();
+    await loadSelectedPaneText();
+    render();
+  });
+
+  const paneModeSelect = document.querySelector<HTMLSelectElement>("#pane-mode");
+  paneModeSelect?.addEventListener("change", () => {
+    paneMode = paneModeSelect.value === "run" ? "run" : "send";
+    render();
+  });
+
+  const submitPaneCommand = async () => {
+    const pane = selectedPaneRow();
+    const input = document.querySelector<HTMLInputElement | HTMLSelectElement>("#pane-command");
+    const text = input?.value.trim() ?? "";
+    if (!pane || !livePaneIds().has(pane.pane) || !text) return;
+    if (input instanceof HTMLInputElement) input.value = "";
+    await runPaneAction(() => paneMode === "run"
+      ? runHerdPane(pane.pane, text)
+      : sendHerdPane(pane.pane, text)
+    );
+  };
+
+  document.querySelector<HTMLButtonElement>("#pane-submit")?.addEventListener("click", submitPaneCommand);
+  document.querySelector<HTMLInputElement>("#pane-command")?.addEventListener("keydown", (e) => {
+    if (e.key === "Enter") {
+      e.preventDefault();
+      submitPaneCommand();
+    }
+  });
+
+  document.querySelector<HTMLButtonElement>("#pane-read")?.addEventListener("click", async () => {
+    await loadSelectedPaneText();
+    render();
+  });
+  document.querySelector<HTMLButtonElement>("#pane-focus")?.addEventListener("click", async () => {
+    const pane = selectedPaneRow();
+    if (pane) await runPaneAction(() => focusHerdPane(pane.pane));
+  });
+  document.querySelector<HTMLButtonElement>("#pane-split-right")?.addEventListener("click", async () => {
+    const pane = selectedPaneRow();
+    if (pane) await runPaneAction(() => splitHerdPane(pane.pane, "right", pane.cwd));
+  });
+  document.querySelector<HTMLButtonElement>("#pane-split-down")?.addEventListener("click", async () => {
+    const pane = selectedPaneRow();
+    if (pane) await runPaneAction(() => splitHerdPane(pane.pane, "down", pane.cwd));
+  });
+
+  document.querySelectorAll<HTMLButtonElement>("[data-cal-nav]").forEach(btn => {
     btn.addEventListener("click", () => {
-      view = btn.dataset.view as View;
-      if (view === "calendar") loadCalendar();
-      if (view === "agents") loadAgents();
+      const year = calendarDate.getFullYear();
+      const month = calendarDate.getMonth();
+      const action = btn.dataset.calNav;
+      if (action === "prev") calendarDate = new Date(year, month - 1, 1);
+      if (action === "next") calendarDate = new Date(year, month + 1, 1);
+      if (action === "today") calendarDate = new Date();
       render();
     });
   });
@@ -671,7 +1296,7 @@ function render(): void {
 async function boot(): Promise<void> {
   render();
   await loadHealth();
-  await Promise.all([loadCalendar(), loadInbox(), loadAgents()]);
+  await Promise.all([loadCalendar(), loadInbox(), loadAgents(), loadHerd(), loadHerdCommands()]);
   connectWS();
   render();
 }

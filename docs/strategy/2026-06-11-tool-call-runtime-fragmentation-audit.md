@@ -112,8 +112,9 @@ Heiwa does not yet have product-grade shell, isolated browser, full computer-use
 ### P2 - Cleanup and Product Coherence
 
 10. Reconcile docs to one app maturity statement.
-   - Installed `Heiwa.app` target is primary input/display.
-   - Tauri package is emerging foundation, not product-complete until tracked, signed/notarized, and runtime-start UX exists.
+
+- Installed `Heiwa.app` target is primary input/display.
+- Tauri package is emerging foundation, not product-complete until tracked, signed/notarized, and runtime-start UX exists.
 
 11. Retire or rename fragmented app clients.
     - `clients/web`: public/static web surface.

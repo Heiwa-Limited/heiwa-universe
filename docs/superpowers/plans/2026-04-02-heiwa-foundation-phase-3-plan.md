@@ -75,6 +75,7 @@ Only after that gate is met should a follow-up plan remove or demote deprecated 
 ## Task 1: Formalize Worker Sessions and Leases in STDB
 
 **Files:**
+
 - Modify: `apps/heiwa_hub/spacetimedb/src/lib.rs`
 - Test: existing STDB reducer tests or a new reducer-focused test file under `apps/heiwa_hub/tests/`
 
@@ -83,11 +84,13 @@ Only after that gate is met should a follow-up plan remove or demote deprecated 
 - [ ] **Step 1: Write the failing reducer tests for explicit worker-session records**
 
 Add tests that expect STDB to support:
+
 - `worker_sessions`
 - `leases`
 - `dispatch_acks`
 
 Required behaviors:
+
 - register a worker session without a lease
 - issue one task-bound lease to a session
 - reject lease lookup when session/task mismatch occurs
@@ -101,6 +104,7 @@ Expected: failures because `worker_sessions`, `dispatch_acks`, or equivalent red
 - [ ] **Step 3: Add minimal STDB tables and reducers**
 
 In `apps/heiwa_hub/spacetimedb/src/lib.rs`, add explicit canonical records:
+
 - `worker_sessions`
 - `leases`
 - `dispatch_acks`
@@ -110,6 +114,7 @@ Do not remove existing `nodes`, `capability_leases`, or `task_dispatches` yet. F
 - [ ] **Step 4: Add reducers for lifecycle changes**
 
 Add the minimum reducers needed for:
+
 - session create/update/expire
 - lease issue/revoke/expire
 - dispatch ack accept/reject
@@ -132,6 +137,7 @@ git commit -m "feat: add explicit worker session and lease records"
 ## Task 2: Add Run Receipts and Replayable Failure Records
 
 **Files:**
+
 - Modify: `apps/heiwa_hub/spacetimedb/src/lib.rs`
 - Modify: `apps/heiwa_core/src/stdb/mod.rs`
 - Test: `apps/heiwa_core/tests/run_receipts.rs`
@@ -141,6 +147,7 @@ git commit -m "feat: add explicit worker session and lease records"
 - [ ] **Step 1: Write the failing runtime test for run receipts**
 
 Add a failing test in `apps/heiwa_core/tests/run_receipts.rs` that expects:
+
 - every successful result creates a receipt-like persisted run record
 - every error creates a failure record with a structured code
 - every run links to at least one artifact location or failure log artifact
@@ -158,6 +165,7 @@ Expected: FAIL because receipt/failure persistence is incomplete or inferred ind
 - [ ] **Step 3: Add explicit receipt/failure state to STDB**
 
 In `apps/heiwa_hub/spacetimedb/src/lib.rs`, add the minimum explicit structures necessary for:
+
 - run receipts
 - failure classification
 - replay metadata
@@ -167,6 +175,7 @@ Keep this minimal and evidence-first. Do not build a full replay engine yet.
 - [ ] **Step 4: Update Rust STDB access layer**
 
 In `apps/heiwa_core/src/stdb/mod.rs`, expose narrow helpers for:
+
 - writing run receipts
 - writing structured failures
 - attaching artifact metadata
@@ -196,6 +205,7 @@ git commit -m "feat: persist run receipts and structured failures"
 ## Task 3: Move `heiwa-core` Runtime to the Explicit STDB Session/Lease Model
 
 **Files:**
+
 - Modify: `apps/heiwa_core/src/runtime/state.rs`
 - Modify: `apps/heiwa_core/src/runtime/gateway.rs`
 - Modify: `apps/heiwa_core/tests/worker_mesh.rs`
@@ -205,6 +215,7 @@ git commit -m "feat: persist run receipts and structured failures"
 - [ ] **Step 1: Write a failing runtime test for canonical dispatch against persisted session/lease state**
 
 Extend `apps/heiwa_core/tests/worker_mesh.rs` so it expects:
+
 - `REGISTER` creates a persisted session
 - `DISPATCH` creates a persisted lease
 - `DISPATCH_ACK` updates explicit dispatch ack state
@@ -223,6 +234,7 @@ Expected: FAIL because runtime still depends partly on in-memory lease/session t
 - [ ] **Step 3: Narrow in-memory registry responsibilities**
 
 In `apps/heiwa_core/src/runtime/state.rs`, keep the in-memory registry only for:
+
 - connected websocket senders
 - transient scheduling choices
 - short-lived liveness cache
@@ -232,6 +244,7 @@ Move canonical session/lease truth to STDB-backed reads/writes.
 - [ ] **Step 4: Update gateway lifecycle**
 
 In `apps/heiwa_core/src/runtime/gateway.rs`, change:
+
 - `REGISTER`
 - `DISPATCH`
 - `DISPATCH_ACK`
@@ -271,6 +284,7 @@ git commit -m "feat: move runtime session and lease truth into STDB"
 ## Task 4: Bound Python to the Legacy Bridge Only
 
 **Files:**
+
 - Modify: `apps/heiwa_cli/scripts/agents/worker_manager.py`
 - Modify: `packages/heiwa_sdk/heiwa_sdk/heiwaclaw/adapters/acp.py`
 - Modify: `packages/heiwa_sdk/heiwa_sdk/config.py`
@@ -281,6 +295,7 @@ git commit -m "feat: move runtime session and lease truth into STDB"
 - [ ] **Step 1: Write the failing legacy bridge test**
 
 Add `apps/heiwa_core/tests/legacy_bridge.rs` that proves:
+
 - `/ws/worker/legacy` accepts the bounded old frames
 - the adapter translates them into canonical v1 runtime behavior
 - Python does not need to own lease/session truth
@@ -298,6 +313,7 @@ Expected: FAIL until the legacy boundary is fully explicit.
 - [ ] **Step 3: Remove remaining authority assumptions from Python**
 
 Change the Python bridge files so they only:
+
 - connect
 - translate
 - surface errors
@@ -329,6 +345,7 @@ git commit -m "refactor: reduce python worker surfaces to legacy bridge"
 ## Task 5: Make the TypeScript Workspace the Real Web Foundation
 
 **Files:**
+
 - Modify: `package.json`
 - Modify: `apps/heiwa_web/package.json`
 - Modify: `apps/heiwa_web/tsconfig.json`
@@ -370,6 +387,7 @@ git commit -m "feat: establish typed web surface on npm workspace"
 ## Task 6: Tighten Operator and CI Trust Around the New Spine
 
 **Files:**
+
 - Modify: `.github/workflows/deploy.yml`
 - Modify: `scripts/audit_operator_machine.sh`
 - Modify: `docs/standards/runtime-baseline.md`
@@ -380,6 +398,7 @@ git commit -m "feat: establish typed web surface on npm workspace"
 - [ ] **Step 1: Write the failing baseline expectation**
 
 Add or extend a CI/runtime-baseline check so it fails if:
+
 - Node 24 pin drifts
 - Rust 1.93.1 pin drifts
 - Python 3.14 pin drifts from the already-live baseline
@@ -392,6 +411,7 @@ Run the narrowest affected script or workflow lint command first.
 - [ ] **Step 3: Add dependency-audit hooks**
 
 Wire in the minimum practical checks for:
+
 - `cargo audit` when available in CI
 - npm workspace install/typecheck once the lockfile is real
 
@@ -400,6 +420,7 @@ Do not add flaky network-heavy jobs blindly.
 - [ ] **Step 4: Update docs to match the trust model**
 
 Make sure runtime and operator docs say:
+
 - Rust authority
 - STDB truth
 - Python bridge only

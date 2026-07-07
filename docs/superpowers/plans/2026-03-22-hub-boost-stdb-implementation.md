@@ -13,15 +13,18 @@
 ### Phase 1: STDB Dialect & Bridge Resilience
 
 **Files:**
+
 - Modify: `packages/heiwa_sdk/heiwa_sdk/spacetimedb.py`
 - Test: `apps/heiwa_hub/tests/test_stdb_dialect_cleanup.py`
 
 - [ ] **Step 1: Write failing test for `IN` clause cleanup**
 - [ ] **Step 2: Implement `get_routable_proposals` using compatible SQL**
+
 ```python
 # Replace status IN ('APPROVED', 'QUEUED') with:
 "WHERE (status = 'APPROVED' OR status = 'QUEUED') "
 ```
+
 - [ ] **Step 3: Add `call_with_retry` helper with exponential backoff (1s, 2s, 4s)**
 - [ ] **Step 4: Wrap `upsert_node_heartbeat` and `finish_cell_run` in retry logic**
 - [ ] **Step 5: Verify tests pass and commit**
@@ -29,16 +32,19 @@
 ### Phase 2: Durable Spooling & Railway Volume Binding
 
 **Files:**
+
 - Create: `runtime/spool/.gitkeep`
 - Modify: `apps/heiwa_hub/mcp_server.py`
 - Modify: `apps/heiwa_hub/main.py`
 
 - [ ] **Step 1: Initialize `runtime/spool/` directory at startup in `main.py`**
 - [ ] **Step 2: Implement `_spool_to_dead_letter(task_data)` in `mcp_server.py`**
+
 ```python
 with open("runtime/spool/dead_letter_proposals.jsonl", "a") as f:
     f.write(json.dumps(task_data) + "\n")
 ```
+
 - [ ] **Step 3: Modify `db.add_proposal` calls to spool on retry exhaustion**
 - [ ] **Step 4: Test durability by simulating STDB 502 and checking disk**
 - [ ] **Step 5: Commit**
@@ -46,6 +52,7 @@ with open("runtime/spool/dead_letter_proposals.jsonl", "a") as f:
 ### Phase 3: Proposal/Cell-Run State Machine & Watchdog
 
 **Files:**
+
 - Modify: `apps/heiwa_hub/agents/spine.py`
 - Modify: `apps/heiwa_hub/orchestrator.py`
 
@@ -58,6 +65,7 @@ with open("runtime/spool/dead_letter_proposals.jsonl", "a") as f:
 ### Phase 4: Capability-Based Routing (Registry-Linked)
 
 **Files:**
+
 - Modify: `apps/heiwa_hub/orchestrator.py`
 - Modify: `packages/heiwa_sdk/heiwa_sdk/main.py`
 
@@ -70,6 +78,7 @@ with open("runtime/spool/dead_letter_proposals.jsonl", "a") as f:
 ### Phase 5: Full-Modal Discord & Signed Footers
 
 **Files:**
+
 - Modify: `apps/heiwa_hub/agents/messenger.py`
 
 - [ ] **Step 1: Implement HMAC-based footer signing in `Messenger`**
@@ -81,6 +90,7 @@ with open("runtime/spool/dead_letter_proposals.jsonl", "a") as f:
 ### Phase 6: Railway Environment & Memory Gating
 
 **Files:**
+
 - Modify: `packages/heiwa_sdk/heiwa_sdk/memory.py`
 - Modify: `apps/heiwa_hub/start.sh`
 
@@ -93,6 +103,7 @@ with open("runtime/spool/dead_letter_proposals.jsonl", "a") as f:
 ### Phase 7: Orphaned Cell-Run Recovery
 
 **Files:**
+
 - Modify: `apps/heiwa_hub/mcp_server.py`
 
 - [ ] **Step 1: Wrap `finish_cell_run` in 404/530 check**

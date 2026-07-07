@@ -9,6 +9,7 @@
 **Tech Stack:** Rust routing/evidence, local LiteLLM proxy, Redis or local cache backend, OpenRouter free-router optional, existing `~/.heiwa/config.toml`.
 
 **Current-source checks, 2026-04-26:**
+
 - LiteLLM docs advertise an OpenAI-compatible proxy with auth hooks, logging hooks, cost tracking, rate limiting, and OpenAI SDK base-url compatibility: <https://docs.litellm.ai/>
 - LiteLLM routing supports deployment fallback/cooldown after 429s, high failure rate, and selected non-retryable errors: <https://docs.litellm.ai/docs/routing>
 - LiteLLM proxy caching supports `ttl`, `s-maxage`, `no-cache`, `no-store`, and `namespace`: <https://docs.litellm.ai/docs/proxy/caching>
@@ -28,14 +29,14 @@
 
 ## File Structure
 
-| Path | Action | Responsibility |
-| --- | --- | --- |
-| `~/.heiwa/config.toml` | Modify | Add disabled-by-default sidecar settings |
-| `crates/heiwa_provider/src/providers/litellm.rs` | Create | Local sidecar adapter |
-| `crates/heiwa_provider/src/registry.rs` | Modify | Register `litellm_sidecar` account kind |
-| `apps/heiwa_shell/src/main.rs` | Modify | Show sidecar health in `heiwa providers` / `heiwa doctor` |
-| `apps/heiwa_core/src/drex/router.rs` | Modify | Permit sidecar only for eligible API-key/free tiers |
-| `docs/standards/inference-sidecars.md` | Create | Policy and operator notes |
+| Path                                             | Action | Responsibility                                            |
+| ------------------------------------------------ | ------ | --------------------------------------------------------- |
+| `~/.heiwa/config.toml`                           | Modify | Add disabled-by-default sidecar settings                  |
+| `crates/heiwa_provider/src/providers/litellm.rs` | Create | Local sidecar adapter                                     |
+| `crates/heiwa_provider/src/registry.rs`          | Modify | Register `litellm_sidecar` account kind                   |
+| `apps/heiwa_shell/src/main.rs`                   | Modify | Show sidecar health in `heiwa providers` / `heiwa doctor` |
+| `apps/heiwa_core/src/drex/router.rs`             | Modify | Permit sidecar only for eligible API-key/free tiers       |
+| `docs/standards/inference-sidecars.md`           | Create | Policy and operator notes                                 |
 
 ---
 
@@ -141,12 +142,14 @@ Expected: no behavior change when sidecar disabled; measurable cost/cache eviden
 OmniRoute is useful as a reference, not a runtime dependency.
 
 **Adopt as patterns:**
+
 - Subscription quota dashboards and reset-aware routing shape
 - Multi-account round-robin per provider/rate group
 - Explicit fallback chain vocabulary: subscription -> API key -> cheap -> free
 - MCP/tool inventory ideas for operator visibility
 
 **Skip as dependency:**
+
 - TypeScript runtime control plane
 - Unknown subscription proxy semantics
 - Provider/star-count marketing as capability evidence

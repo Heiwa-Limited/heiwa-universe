@@ -14,19 +14,19 @@
 
 ## File Map
 
-| Action | File | Responsibility |
-|--------|------|---------------|
-| Create | `packages/heiwa_protocol/heiwa_protocol/program.py` | `ExecutionProgram` dataclass + serialization + validation |
-| Modify | `packages/heiwa_protocol/heiwa_protocol/routing.py:69-131` | Add optional `execution_program` field to `BrokerRouteResult` |
-| Modify | `packages/heiwa_protocol/heiwa_protocol/__init__.py` | Export `ExecutionProgram` |
-| Create | `packages/heiwa_cognition/heiwa_cognition/program_compiler.py` | Compile `IntentProfile` + `ComputeRoute` + raw_text into `ExecutionProgram` |
-| Modify | `packages/heiwa_cognition/heiwa_cognition/enrichment.py:50-116` | Call compiler with profile + route, attach program to `BrokerRouteResult` |
-| Modify | `apps/heiwa_hub/agents/spine.py:270-292` | Forward `execution_program` in `exec_payload` |
-| Modify | `apps/heiwa_hub/agents/heiwaclaw.py:249-363` | Advisory acceptance validation + persist program to execution memory |
-| Modify | `packages/heiwa_sdk/heiwa_sdk/memory.py:102-109` | Accept optional `execution_program_json` in `record_execution()` |
-| Create | `apps/heiwa_hub/tests/test_execution_program.py` | Unit tests for program dataclass |
-| Create | `apps/heiwa_hub/tests/test_program_compiler.py` | Unit tests for compiler |
-| Create | `apps/heiwa_hub/tests/test_program_validation.py` | Integration tests for HeiwaClaw advisory validation |
+| Action | File                                                            | Responsibility                                                              |
+| ------ | --------------------------------------------------------------- | --------------------------------------------------------------------------- |
+| Create | `packages/heiwa_protocol/heiwa_protocol/program.py`             | `ExecutionProgram` dataclass + serialization + validation                   |
+| Modify | `packages/heiwa_protocol/heiwa_protocol/routing.py:69-131`      | Add optional `execution_program` field to `BrokerRouteResult`               |
+| Modify | `packages/heiwa_protocol/heiwa_protocol/__init__.py`            | Export `ExecutionProgram`                                                   |
+| Create | `packages/heiwa_cognition/heiwa_cognition/program_compiler.py`  | Compile `IntentProfile` + `ComputeRoute` + raw_text into `ExecutionProgram` |
+| Modify | `packages/heiwa_cognition/heiwa_cognition/enrichment.py:50-116` | Call compiler with profile + route, attach program to `BrokerRouteResult`   |
+| Modify | `apps/heiwa_hub/agents/spine.py:270-292`                        | Forward `execution_program` in `exec_payload`                               |
+| Modify | `apps/heiwa_hub/agents/heiwaclaw.py:249-363`                    | Advisory acceptance validation + persist program to execution memory        |
+| Modify | `packages/heiwa_sdk/heiwa_sdk/memory.py:102-109`                | Accept optional `execution_program_json` in `record_execution()`            |
+| Create | `apps/heiwa_hub/tests/test_execution_program.py`                | Unit tests for program dataclass                                            |
+| Create | `apps/heiwa_hub/tests/test_program_compiler.py`                 | Unit tests for compiler                                                     |
+| Create | `apps/heiwa_hub/tests/test_program_validation.py`               | Integration tests for HeiwaClaw advisory validation                         |
 
 ---
 
@@ -35,6 +35,7 @@
 ### Task 1: Define ExecutionProgram
 
 **Files:**
+
 - Create: `packages/heiwa_protocol/heiwa_protocol/program.py`
 - Create: `apps/heiwa_hub/tests/test_execution_program.py`
 
@@ -223,6 +224,7 @@ git commit -m "feat: add ExecutionProgram typed contract to protocol layer"
 ### Task 2: Wire ExecutionProgram into BrokerRouteResult
 
 **Files:**
+
 - Modify: `packages/heiwa_protocol/heiwa_protocol/routing.py:69-131`
 - Modify: `packages/heiwa_protocol/heiwa_protocol/__init__.py`
 
@@ -303,33 +305,38 @@ Expected: FAIL — `TypeError: __init__() got an unexpected keyword argument 'ex
 In `packages/heiwa_protocol/heiwa_protocol/routing.py`:
 
 Add import at top:
+
 ```python
 from heiwa_protocol.program import ExecutionProgram
 ```
 
 Add field to `BrokerRouteResult` (after line 95, before `@classmethod`):
+
 ```python
-    execution_program: ExecutionProgram | None = None
+execution_program: ExecutionProgram | None = None
 ```
 
 In `from_payload()` (after `message=` line), add:
+
 ```python
-            execution_program=ExecutionProgram.from_dict(payload.get("execution_program")) if payload.get("execution_program") else None,
+execution_program=ExecutionProgram.from_dict(payload.get("execution_program")) if payload.get("execution_program") else None,
 ```
 
 In `to_dict()`, add after `payload["privacy_level"]` line:
+
 ```python
-        if self.execution_program:
-            payload["execution_program"] = self.execution_program.to_dict()
-        else:
-            payload.pop("execution_program", None)
+if self.execution_program:
+    payload["execution_program"] = self.execution_program.to_dict()
+else:
+    payload.pop("execution_program", None)
 ```
 
 **Note:** `BrokerRouteResult` uses `slots=True`. The new field must be added to the dataclass field list (the decorator handles slot creation). No manual `__slots__` needed.
 
-- [ ] **Step 4: Update protocol __init__.py**
+- [ ] **Step 4: Update protocol **init**.py**
 
 In `packages/heiwa_protocol/heiwa_protocol/__init__.py`, add:
+
 ```python
 from .program import ExecutionProgram
 ```
@@ -358,6 +365,7 @@ git commit -m "feat: wire ExecutionProgram into BrokerRouteResult as optional fi
 The compiler takes `IntentProfile` + `ComputeRoute` + raw text and produces an `ExecutionProgram`. This is deterministic (no LLM calls) — intent-to-program mapping with sensible defaults per intent class.
 
 **Files:**
+
 - Create: `packages/heiwa_cognition/heiwa_cognition/program_compiler.py`
 - Create: `apps/heiwa_hub/tests/test_program_compiler.py`
 
@@ -687,6 +695,7 @@ git commit -m "feat: add ProgramCompiler — deterministic intent-to-program map
 ### Task 4: Wire compiler into enrichment pipeline
 
 **Files:**
+
 - Modify: `packages/heiwa_cognition/heiwa_cognition/enrichment.py:50-116`
 
 - [ ] **Step 1: Write failing test**
@@ -746,28 +755,32 @@ Expected: FAIL — `execution_program` is None (not attached yet)
 In `packages/heiwa_cognition/heiwa_cognition/enrichment.py`:
 
 Add import at top (after existing imports):
+
 ```python
 from heiwa_cognition.program_compiler import ProgramCompiler
 ```
 
 Add to `BrokerEnrichmentService.__init__()`:
+
 ```python
-        self.program_compiler = ProgramCompiler()
+self.program_compiler = ProgramCompiler()
 ```
 
 In `enrich()`, after the `normalization["identity_id"] = identity.id` line (line 91) and before the `return BrokerRouteResult(` line (line 93), add:
+
 ```python
-        # Compile typed execution program from intent + route + raw text
-        execution_program = self.program_compiler.compile(
-            profile=profile,
-            route=route,
-            raw_text=request.raw_text,
-        )
+# Compile typed execution program from intent + route + raw text
+execution_program = self.program_compiler.compile(
+    profile=profile,
+    route=route,
+    raw_text=request.raw_text,
+)
 ```
 
 Add to the `BrokerRouteResult(` constructor call (after `context_files_json=` line):
+
 ```python
-            execution_program=execution_program,
+execution_program=execution_program,
 ```
 
 - [ ] **Step 4: Run test to verify it passes**
@@ -794,6 +807,7 @@ git commit -m "feat: wire ProgramCompiler into enrichment pipeline"
 **Critical context:** In `spine.py:handle_request()`, line 97 merges enrichment onto `payload` via `payload.update(route.to_dict())`, which includes `execution_program`. But line 120 does `payload = task_plan.to_dict()`, which **replaces the entire payload** with `TaskPlan` fields — and `TaskPlan` has no `execution_program` field. The compiled program is lost before `_dispatch_steps()` runs. Fix: save and restore across the planner boundary.
 
 **Files:**
+
 - Modify: `apps/heiwa_hub/agents/spine.py:102-131` (planner boundary)
 - Modify: `apps/heiwa_hub/agents/spine.py:270-292` (dispatch)
 
@@ -802,16 +816,16 @@ git commit -m "feat: wire ProgramCompiler into enrichment pipeline"
 In `apps/heiwa_hub/agents/spine.py`, in `handle_request()`, before the planner section (before line 103 `if not payload.get("steps")`), add:
 
 ```python
-        # Save enrichment fields that TaskPlan.to_dict() would overwrite
-        _saved_execution_program = payload.get("execution_program")
+# Save enrichment fields that TaskPlan.to_dict() would overwrite
+_saved_execution_program = payload.get("execution_program")
 ```
 
 After line 120 `payload = task_plan.to_dict()`, add:
 
 ```python
-                # Restore execution_program lost by TaskPlan.to_dict() overwrite
-                if _saved_execution_program:
-                    payload["execution_program"] = _saved_execution_program
+# Restore execution_program lost by TaskPlan.to_dict() overwrite
+if _saved_execution_program:
+    payload["execution_program"] = _saved_execution_program
 ```
 
 - [ ] **Step 2: Add execution_program to exec_payload in _dispatch_steps()**
@@ -819,7 +833,7 @@ After line 120 `payload = task_plan.to_dict()`, add:
 In `_dispatch_steps()`, in the `exec_payload` dict (after `"envelope_version"` line ~291), add:
 
 ```python
-                "execution_program": payload.get("execution_program"),
+"execution_program": payload.get("execution_program"),
 ```
 
 - [ ] **Step 3: Run existing tests to verify no breakage**
@@ -841,6 +855,7 @@ git commit -m "feat: carry execution_program across planner boundary + forward t
 HeiwaClaw checks `acceptance` criteria after execution completes and reports validation results. **V1 is explicitly advisory** — validation does NOT override `exec_status`. Status remains based on execution exit code. Validation is reported separately in the result payload and logged. The program is also persisted to execution memory for future optimization loops.
 
 **Files:**
+
 - Modify: `apps/heiwa_hub/agents/heiwaclaw.py:249-363`
 - Create: `apps/heiwa_hub/tests/test_program_validation.py`
 
@@ -941,6 +956,7 @@ In `apps/heiwa_hub/agents/heiwaclaw.py`, in the Utilities section (before `_reso
 ```
 
 Add import at top of heiwaclaw.py (won't cause issues — protocol is a dependency):
+
 ```python
 from heiwa_protocol.program import ExecutionProgram
 ```
@@ -955,48 +971,53 @@ Expected: 4/4 PASS
 In `apps/heiwa_hub/agents/heiwaclaw.py`, in `_handle_exec()`:
 
 After the `BrokerRouteResult.from_payload()` call (~line 281), extract the program:
+
 ```python
-        execution_program = None
-        prog_data = payload.get("execution_program")
-        if prog_data:
-            execution_program = ExecutionProgram.from_dict(prog_data)
+execution_program = None
+prog_data = payload.get("execution_program")
+if prog_data:
+    execution_program = ExecutionProgram.from_dict(prog_data)
 ```
 
 After execution completes and `exec_status` is set (~line 318, after `elapsed = round(...)`), add advisory validation:
+
 ```python
-        # Advisory: validate against execution program acceptance criteria
-        # V1: does NOT override exec_status — reported separately
-        program_validation = self._validate_acceptance(execution_program, full_result)
-        if execution_program and execution_program.is_bounded() and not program_validation["passed"]:
-            logger.warning(
-                "Task %s: advisory acceptance unmet: %s",
-                task_id, program_validation["unmatched"],
-            )
+# Advisory: validate against execution program acceptance criteria
+# V1: does NOT override exec_status — reported separately
+program_validation = self._validate_acceptance(execution_program, full_result)
+if execution_program and execution_program.is_bounded() and not program_validation["passed"]:
+    logger.warning(
+        "Task %s: advisory acceptance unmet: %s",
+        task_id, program_validation["unmatched"],
+    )
 ```
 
 Add `program_validation` to `result_payload` dict (advisory, does not affect status):
+
 ```python
-            "program_validation": program_validation,
-            "execution_program": execution_program.to_dict() if execution_program else None,
+"program_validation": program_validation,
+"execution_program": execution_program.to_dict() if execution_program else None,
 ```
 
 - [ ] **Step 6: Persist program to execution memory**
 
 In `_handle_exec()`, in the existing `if self.memory:` block that calls `record_execution()`, add the program JSON:
+
 ```python
-                self.memory.record_execution(
-                    task_id=task_id,
-                    model=route.target_model,
-                    outcome=exec_status.lower(),
-                    duration_ms=int(elapsed * 1000),
-                    error=full_result if exec_status == "FAIL" else None,
-                    execution_program_json=json.dumps(execution_program.to_dict()) if execution_program else None,
-                )
+self.memory.record_execution(
+    task_id=task_id,
+    model=route.target_model,
+    outcome=exec_status.lower(),
+    duration_ms=int(elapsed * 1000),
+    error=full_result if exec_status == "FAIL" else None,
+    execution_program_json=json.dumps(execution_program.to_dict()) if execution_program else None,
+)
 ```
 
 Add `import json` at top of heiwaclaw.py if not already present.
 
 In `packages/heiwa_sdk/heiwa_sdk/memory.py`, update `record_execution()` to accept but NOT forward the program to STDB (the reducer has fixed arity):
+
 ```python
     def record_execution(
         self,
@@ -1048,6 +1069,7 @@ git commit -m "feat: advisory acceptance validation + persist ExecutionProgram t
 ### Task 7: End-to-end verification and docs
 
 **Files:**
+
 - Modify: `CLAUDE.md` (execution gateway section)
 - Modify: `apps/heiwa_hub/agents/CONTEXT.md`
 
@@ -1083,13 +1105,13 @@ Expected: All print OK, program is bounded with rollback for deploy intent.
 In the `Execution gateway (packages/heiwa_sdk/)` section, add after the `heiwaclaw/` line:
 
 ```
-  - program.py (heiwa_protocol) — ExecutionProgram typed contract: objective, steps, constraints, acceptance, budget, rollback
+- program.py (heiwa_protocol) — ExecutionProgram typed contract: objective, steps, constraints, acceptance, budget, rollback
 ```
 
 In the `Cognition pipeline` section, add:
 
 ```
-  - program_compiler.py — compiles IntentProfile + ComputeRoute + raw text into typed ExecutionProgram (deterministic, no LLM)
+- program_compiler.py — compiles IntentProfile + ComputeRoute + raw text into typed ExecutionProgram (deterministic, no LLM)
 ```
 
 - [ ] **Step 4: Final commit**
@@ -1125,19 +1147,20 @@ This creates the authoring surface for Software 3.0 — programs written in natu
 
 ## Summary
 
-| What | Where | Lines |
-|------|-------|-------|
-| `ExecutionProgram` dataclass | `heiwa_protocol/program.py` | ~70 |
-| Optional field on `BrokerRouteResult` | `heiwa_protocol/routing.py` | ~8 delta |
-| `ProgramCompiler` rules engine | `heiwa_cognition/program_compiler.py` | ~140 |
-| Enrichment wiring | `heiwa_cognition/enrichment.py` | ~6 delta |
-| Spine pass-through | `spine.py` | ~1 delta |
-| HeiwaClaw advisory validation + persistence | `heiwaclaw.py` | ~35 delta |
-| Execution memory signature | `memory.py` | ~2 delta |
-| Tests | 3 new test files | ~220 |
-| **Total new code** | | **~480 lines** |
+| What                                        | Where                                 | Lines          |
+| ------------------------------------------- | ------------------------------------- | -------------- |
+| `ExecutionProgram` dataclass                | `heiwa_protocol/program.py`           | ~70            |
+| Optional field on `BrokerRouteResult`       | `heiwa_protocol/routing.py`           | ~8 delta       |
+| `ProgramCompiler` rules engine              | `heiwa_cognition/program_compiler.py` | ~140           |
+| Enrichment wiring                           | `heiwa_cognition/enrichment.py`       | ~6 delta       |
+| Spine pass-through                          | `spine.py`                            | ~1 delta       |
+| HeiwaClaw advisory validation + persistence | `heiwaclaw.py`                        | ~35 delta      |
+| Execution memory signature                  | `memory.py`                           | ~2 delta       |
+| Tests                                       | 3 new test files                      | ~220           |
+| **Total new code**                          |                                       | **~480 lines** |
 
 **Design constraints:**
+
 - Backward compatible throughout. Old payloads without `execution_program` work unchanged.
 - No LLM calls added. No new dependencies.
 - Acceptance validation is advisory in v1 — does not override execution status.

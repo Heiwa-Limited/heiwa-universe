@@ -16,49 +16,50 @@
 
 ### New files (authored)
 
-| File | Responsibility |
-|------|---------------|
-| `ops/agents/README.md` | Docs for canonical agent system |
-| `ops/agents/registry.yaml` | Agent catalog: IDs and status |
-| `ops/agents/heiwa-architect/agent.yaml` | Manifest: metadata + runtime targets |
-| `ops/agents/heiwa-architect/prompt.md` | Canonical prompt body |
-| `ops/agents/heiwa-security/agent.yaml` | Manifest |
-| `ops/agents/heiwa-security/prompt.md` | Canonical prompt body |
-| `ops/agents/heiwa-builder/agent.yaml` | Manifest |
-| `ops/agents/heiwa-builder/prompt.md` | Canonical prompt body |
-| `ops/agents/heiwa-operator/agent.yaml` | Manifest |
-| `ops/agents/heiwa-operator/prompt.md` | Canonical prompt body |
-| `ops/agents/heiwa-researcher/agent.yaml` | Manifest |
-| `ops/agents/heiwa-researcher/prompt.md` | Canonical prompt body |
-| `scripts/sync_agents.py` | Sync tool: generate, check, install-codex |
-| `scripts/tests/test_sync_agents.py` | Tests for the sync tool |
+| File                                     | Responsibility                            |
+| ---------------------------------------- | ----------------------------------------- |
+| `ops/agents/README.md`                   | Docs for canonical agent system           |
+| `ops/agents/registry.yaml`               | Agent catalog: IDs and status             |
+| `ops/agents/heiwa-architect/agent.yaml`  | Manifest: metadata + runtime targets      |
+| `ops/agents/heiwa-architect/prompt.md`   | Canonical prompt body                     |
+| `ops/agents/heiwa-security/agent.yaml`   | Manifest                                  |
+| `ops/agents/heiwa-security/prompt.md`    | Canonical prompt body                     |
+| `ops/agents/heiwa-builder/agent.yaml`    | Manifest                                  |
+| `ops/agents/heiwa-builder/prompt.md`     | Canonical prompt body                     |
+| `ops/agents/heiwa-operator/agent.yaml`   | Manifest                                  |
+| `ops/agents/heiwa-operator/prompt.md`    | Canonical prompt body                     |
+| `ops/agents/heiwa-researcher/agent.yaml` | Manifest                                  |
+| `ops/agents/heiwa-researcher/prompt.md`  | Canonical prompt body                     |
+| `scripts/sync_agents.py`                 | Sync tool: generate, check, install-codex |
+| `scripts/tests/test_sync_agents.py`      | Tests for the sync tool                   |
 
 ### Modified files
 
-| File | Change |
-|------|--------|
-| `pyproject.toml` | Add `scripts/tests` to testpaths, `scripts` to pythonpath |
+| File                 | Change                                                                                                         |
+| -------------------- | -------------------------------------------------------------------------------------------------------------- |
+| `pyproject.toml`     | Add `scripts/tests` to testpaths, `scripts` to pythonpath                                                      |
 | `.codex/config.toml` | Add missing MCP servers (`figma`, `notion`, `codebase-retrieval`) and plugins (`google-drive`, `hugging-face`) |
 
 ### Generated files (committed, never hand-edited)
 
-| File | Generator |
-|------|-----------|
-| `.gemini/agents/heiwa-*.md` (5 files) | `sync_agents.py` — replaces current hand-authored |
-| `.claude/agents/heiwa-*.md` (5 files) | `sync_agents.py` — new |
-| `ops/agents/*/generated/codex/*/SKILL.md` (5 files) | `sync_agents.py` — new |
+| File                                                | Generator                                         |
+| --------------------------------------------------- | ------------------------------------------------- |
+| `.gemini/agents/heiwa-*.md` (5 files)               | `sync_agents.py` — replaces current hand-authored |
+| `.claude/agents/heiwa-*.md` (5 files)               | `sync_agents.py` — new                            |
+| `ops/agents/*/generated/codex/*/SKILL.md` (5 files) | `sync_agents.py` — new                            |
 
 ---
 
 ### Task 1: Scaffold canonical registry
 
 **Files:**
+
 - Create: `ops/agents/README.md`
 - Create: `ops/agents/registry.yaml`
 
 - [ ] **Step 1: Create `ops/agents/README.md`**
 
-```markdown
+````markdown
 # Canonical Heiwa Agents
 
 Single authoring surface for shared Heiwa specialists.
@@ -67,6 +68,7 @@ See `docs/superpowers/specs/2026-03-29-cross-runtime-agent-canonicalization-desi
 ## Structure
 
 Each agent lives in its own folder:
+
 - `agent.yaml` — structured manifest with runtime targets
 - `prompt.md` — canonical prompt body
 
@@ -82,14 +84,15 @@ uv run scripts/sync_agents.py --check
 # Install Codex wrappers into ~/.agents/skills/
 uv run scripts/sync_agents.py --install-codex
 ```
+````
 
 ## Rules
 
 - Author prompts only in `ops/agents/<id>/prompt.md`
 - Never hand-edit generated wrappers in `.gemini/agents/`, `.claude/agents/`, or `generated/codex/`
 - Run `--check` before committing wrapper changes
-```
 
+````
 - [ ] **Step 2: Create `ops/agents/registry.yaml`**
 
 ```yaml
@@ -105,7 +108,7 @@ agents:
     status: active
   - id: heiwa-researcher
     status: active
-```
+````
 
 - [ ] **Step 3: Commit**
 
@@ -119,6 +122,7 @@ git commit -m "feat: scaffold canonical agent registry"
 ### Task 2: Migrate five agents to canonical form
 
 **Files:**
+
 - Create: `ops/agents/heiwa-architect/agent.yaml`
 - Create: `ops/agents/heiwa-architect/prompt.md`
 - Create: `ops/agents/heiwa-security/agent.yaml`
@@ -417,6 +421,7 @@ git commit -m "feat: migrate five Heiwa specialists to canonical form"
 ### Task 3: TDD wrapper generators — banner, Gemini, Claude, Codex
 
 **Files:**
+
 - Create: `scripts/sync_agents.py`
 - Create: `scripts/tests/test_sync_agents.py`
 - Modify: `pyproject.toml`
@@ -748,6 +753,7 @@ git commit -m "feat: TDD wrapper generators for Gemini, Claude, and Codex"
 ### Task 4: TDD registry loading + CLI generate mode
 
 **Files:**
+
 - Modify: `scripts/sync_agents.py`
 - Modify: `scripts/tests/test_sync_agents.py`
 
@@ -900,6 +906,7 @@ git commit -m "feat: registry loading and CLI generate mode"
 ### Task 5: Run sync + commit generated wrappers
 
 **Files:**
+
 - Generated: `.gemini/agents/heiwa-*.md` (5 files, replaced)
 - Generated: `.claude/agents/heiwa-*.md` (5 files, new)
 - Generated: `ops/agents/*/generated/codex/*/SKILL.md` (5 files, new)
@@ -908,6 +915,7 @@ git commit -m "feat: registry loading and CLI generate mode"
 
 Run: `uv run scripts/sync_agents.py`
 Expected output:
+
 ```
   Generated .gemini/agents/heiwa-architect.md
   Generated .claude/agents/heiwa-architect.md
@@ -954,6 +962,7 @@ git commit -m "feat: generate cross-runtime wrappers from canonical sources"
 ### Task 6: TDD --check mode
 
 **Files:**
+
 - Modify: `scripts/sync_agents.py`
 - Modify: `scripts/tests/test_sync_agents.py`
 
@@ -1176,9 +1185,9 @@ def cmd_check(agents: list[dict]) -> bool:
 Update the `main()` function's check branch:
 
 ```python
-    if args.check:
-        ok = cmd_check(agents)
-        return 0 if ok else 1
+if args.check:
+    ok = cmd_check(agents)
+    return 0 if ok else 1
 ```
 
 - [ ] **Step 4: Run tests to verify they pass**
@@ -1203,6 +1212,7 @@ git commit -m "feat: --check mode with drift, orphan, and config parity"
 ### Task 7: TDD --install-codex mode
 
 **Files:**
+
 - Modify: `scripts/sync_agents.py`
 - Modify: `scripts/tests/test_sync_agents.py`
 
@@ -1299,10 +1309,10 @@ def cmd_install_codex(
 Update `main()`:
 
 ```python
-    if args.install_codex:
-        cmd_install_codex(agents, copy_mode=args.copy)
-        print("Done.")
-        return 0
+if args.install_codex:
+    cmd_install_codex(agents, copy_mode=args.copy)
+    print("Done.")
+    return 0
 ```
 
 - [ ] **Step 4: Run tests to verify they pass**
@@ -1322,6 +1332,7 @@ git commit -m "feat: --install-codex with symlink and copy modes"
 ### Task 8: Close config parity gaps + final verification
 
 **Files:**
+
 - Modify: `.codex/config.toml`
 - Modify: `scripts/tests/test_sync_agents.py`
 

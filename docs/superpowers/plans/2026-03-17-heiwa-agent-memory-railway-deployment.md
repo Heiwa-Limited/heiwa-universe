@@ -15,24 +15,26 @@
 ## File Structure
 
 ### New Files
-| File | Responsibility |
-|------|---------------|
-| `packages/heiwa_sdk/heiwa_sdk/agent_memory.py` | Python bridge for captain_messages/summaries/focus STDB operations |
-| `apps/heiwa_hub/agents/heiwa_agent.py` | Renamed from `captain.py` — adds memory loop, compression, boot hydration |
-| `apps/heiwa_hub/tests/test_agent_memory.py` | Unit tests for AgentMemory service |
-| `apps/heiwa_hub/tests/test_heiwa_agent.py` | Unit tests for HeiwaAgent runtime (memory loop, compression, boot) |
+
+| File                                           | Responsibility                                                            |
+| ---------------------------------------------- | ------------------------------------------------------------------------- |
+| `packages/heiwa_sdk/heiwa_sdk/agent_memory.py` | Python bridge for captain_messages/summaries/focus STDB operations        |
+| `apps/heiwa_hub/agents/heiwa_agent.py`         | Renamed from `captain.py` — adds memory loop, compression, boot hydration |
+| `apps/heiwa_hub/tests/test_agent_memory.py`    | Unit tests for AgentMemory service                                        |
+| `apps/heiwa_hub/tests/test_heiwa_agent.py`     | Unit tests for HeiwaAgent runtime (memory loop, compression, boot)        |
 
 ### Modified Files
-| File | Changes |
-|------|---------|
-| `apps/heiwa_hub/spacetimedb/src/lib.rs` | Add 3 tables + 6 reducers (~120 lines at end of file) |
-| `packages/heiwa_sdk/heiwa_sdk/spacetimedb.py` | Add 6 STDB bridge methods for captain memory tables |
-| `apps/heiwa_hub/main.py` | Update import `CaptainAgent` → `HeiwaAgent` |
-| `apps/heiwa_hub/tests/test_phase3_integration.py` | Update import path |
-| `packages/heiwa_protocol/heiwa_protocol/protocol.py` | Add `HEIWA_AGENT_DM` subject (keep `CAPTAIN_DM` as alias) |
-| `apps/heiwa_hub/mcp_server.py:216-225` | Harden `/health` with STDB ping + 2s timeout |
-| `config/swarm/ai_router.json` | Split `google_antigravity` rate group into flash + pro |
-| `config/seeds/model_tiers.json` | Replace `antigravity/gemini-3-auto` with flash + pro entries |
+
+| File                                                 | Changes                                                      |
+| ---------------------------------------------------- | ------------------------------------------------------------ |
+| `apps/heiwa_hub/spacetimedb/src/lib.rs`              | Add 3 tables + 6 reducers (~120 lines at end of file)        |
+| `packages/heiwa_sdk/heiwa_sdk/spacetimedb.py`        | Add 6 STDB bridge methods for captain memory tables          |
+| `apps/heiwa_hub/main.py`                             | Update import `CaptainAgent` → `HeiwaAgent`                  |
+| `apps/heiwa_hub/tests/test_phase3_integration.py`    | Update import path                                           |
+| `packages/heiwa_protocol/heiwa_protocol/protocol.py` | Add `HEIWA_AGENT_DM` subject (keep `CAPTAIN_DM` as alias)    |
+| `apps/heiwa_hub/mcp_server.py:216-225`               | Harden `/health` with STDB ping + 2s timeout                 |
+| `config/swarm/ai_router.json`                        | Split `google_antigravity` rate group into flash + pro       |
+| `config/seeds/model_tiers.json`                      | Replace `antigravity/gemini-3-auto` with flash + pro entries |
 
 ---
 
@@ -41,6 +43,7 @@
 ### Task 1: Add STDB Tables (Rust)
 
 **Files:**
+
 - Modify: `apps/heiwa_hub/spacetimedb/src/lib.rs:1984-1988` (append after last line)
 
 - [ ] **Step 1: Add `captain_messages` table**
@@ -259,6 +262,7 @@ git commit -m "feat(stdb): add captain_messages, captain_summaries, captain_focu
 ### Task 2: STDB Python Bridge Methods
 
 **Files:**
+
 - Modify: `packages/heiwa_sdk/heiwa_sdk/spacetimedb.py` (append after `insert_captain_directive` method, ~line 957)
 
 - [ ] **Step 1: Write the failing test for bridge methods**
@@ -467,6 +471,7 @@ git commit -m "feat(sdk): add STDB bridge methods for captain memory tables"
 ### Task 3: AgentMemory Service
 
 **Files:**
+
 - Create: `packages/heiwa_sdk/heiwa_sdk/agent_memory.py`
 - Test: `apps/heiwa_hub/tests/test_agent_memory.py` (append to existing)
 
@@ -694,6 +699,7 @@ git commit -m "feat(sdk): add AgentMemory service for persistent conversation me
 ### Task 4: Rename Captain → Heiwa Agent
 
 **Files:**
+
 - Create: `apps/heiwa_hub/agents/heiwa_agent.py` (copy from `captain.py`, rename internals)
 - Modify: `apps/heiwa_hub/main.py:25,86,96`
 - Modify: `apps/heiwa_hub/tests/test_phase3_integration.py:5,24,38`
@@ -703,6 +709,7 @@ git commit -m "feat(sdk): add AgentMemory service for persistent conversation me
 - [ ] **Step 1: Create `heiwa_agent.py` from `captain.py`**
 
 Copy `captain.py` to `heiwa_agent.py` and apply these renames:
+
 - Class: `CaptainAgent` → `HeiwaAgent`
 - Constructor: `name="heiwa-captain"` → `name="heiwa-agent"`
 - Logger: `logging.getLogger("Captain")` → `logging.getLogger("HeiwaAgent")`
@@ -713,6 +720,7 @@ cp apps/heiwa_hub/agents/captain.py apps/heiwa_hub/agents/heiwa_agent.py
 ```
 
 Then edit `heiwa_agent.py`:
+
 - Line 2: `"""Heiwa Agent — Machine-Perspective Collaborator`
 - Line 29: `logger = logging.getLogger("HeiwaAgent")`
 - Line 38: `class HeiwaAgent(BaseAgent):`
@@ -725,7 +733,7 @@ Then edit `heiwa_agent.py`:
 In `packages/heiwa_protocol/heiwa_protocol/protocol.py`, after the `CAPTAIN_DM` line, add:
 
 ```python
-    HEIWA_AGENT_DM = "heiwa.agent.dm"              # Heiwa Agent -> Operator DM
+HEIWA_AGENT_DM = "heiwa.agent.dm"              # Heiwa Agent -> Operator DM
 ```
 
 Keep `CAPTAIN_DM` in the enum (other code like `CAPTAIN_DIRECTIVE` still uses the captain prefix). Update `heiwa_agent.py` `_dm()` method to use `Subject.HEIWA_AGENT_DM` instead of `Subject.CAPTAIN_DM`.
@@ -733,12 +741,14 @@ Keep `CAPTAIN_DM` in the enum (other code like `CAPTAIN_DIRECTIVE` still uses th
 - [ ] **Step 3: Update main.py import**
 
 In `apps/heiwa_hub/main.py`:
+
 - Line 25: `from heiwa_hub.agents.heiwa_agent import HeiwaAgent`
 - Line 86: `captain = HeiwaAgent()`
 
 - [ ] **Step 4: Update test import**
 
 In `apps/heiwa_hub/tests/test_phase3_integration.py`:
+
 - Line 5: `from heiwa_hub.agents.heiwa_agent import HeiwaAgent`
 - Lines 24, 38: `agent = HeiwaAgent()`
 
@@ -779,6 +789,7 @@ This task implements the full 7-step memory cycle from the spec:
 RECEIVE → STORE → LOAD → RETRIEVE → REASON → RESPOND → FOCUS
 
 **Files:**
+
 - Modify: `apps/heiwa_hub/agents/heiwa_agent.py`
 - Create: `apps/heiwa_hub/tests/test_heiwa_agent.py`
 
@@ -950,25 +961,29 @@ Expected: FAIL — `agent_memory` attribute doesn't exist on HeiwaAgent
 In `apps/heiwa_hub/agents/heiwa_agent.py`, add these changes:
 
 **Imports** (add at top):
+
 ```python
 from heiwa_sdk.agent_memory import AgentMemory
 ```
 
 **Constructor** (add after `self._errors_seen = 0`):
+
 ```python
-        self.agent_memory = AgentMemory(stdb=self.db.stdb) if self.db.stdb else None
-        self._boot_context: dict | None = None
+self.agent_memory = AgentMemory(stdb=self.db.stdb) if self.db.stdb else None
+self._boot_context: dict | None = None
 ```
 
 **Rename `_captain_tick` → `_agent_tick`** (and update the call in `run()`):
+
 ```python
-    # In run():
-    while self.running:
-        await self._agent_tick()
-        await asyncio.sleep(CAPTAIN_TICK_SEC)
+# In run():
+while self.running:
+    await self._agent_tick()
+    await asyncio.sleep(CAPTAIN_TICK_SEC)
 ```
 
 **Wire boot hydration into `run()`** (after the 15s sleep, before the boot DM):
+
 ```python
         # Boot hydration: load last session's memory
         self._boot_context = self._hydrate_boot_context()
@@ -983,6 +998,7 @@ from heiwa_sdk.agent_memory import AgentMemory
 ```
 
 **Wire STORE into event handlers** — update `_on_task_ingress` to store:
+
 ```python
     async def _on_task_ingress(self, data: dict[str, Any]):
         payload = data.get("data", data)
@@ -1009,6 +1025,7 @@ from heiwa_sdk.agent_memory import AgentMemory
 ```
 
 **New methods** (add after `_on_error`):
+
 ```python
     # ── Memory Loop Methods ──────────────────────────────────
 
@@ -1105,17 +1122,19 @@ from heiwa_sdk.agent_memory import AgentMemory
 ```
 
 **Update `_dm` method** to also store agent responses:
+
 ```python
-    async def _dm(self, content: str):
-        """Send DM to operator and persist in memory."""
-        self._store_agent_response(content)
-        await self.speak(Subject.HEIWA_AGENT_DM, {
-            "agent": "heiwa-agent",
-            "content": content,
-        })
+async def _dm(self, content: str):
+    """Send DM to operator and persist in memory."""
+    self._store_agent_response(content)
+    await self.speak(Subject.HEIWA_AGENT_DM, {
+        "agent": "heiwa-agent",
+        "content": content,
+    })
 ```
 
 **Update `_agent_tick`** (renamed from `_captain_tick`) to call compression:
+
 ```python
     async def _agent_tick(self):
         now = time.time()
@@ -1157,6 +1176,7 @@ git commit -m "feat(agent): add full 7-step memory loop, boot hydration, focus t
 ### Task 6: Split Antigravity Rate Group
 
 **Files:**
+
 - Modify: `config/swarm/ai_router.json`
 - Modify: `config/seeds/model_tiers.json`
 
@@ -1165,26 +1185,28 @@ git commit -m "feat(agent): add full 7-step memory loop, boot hydration, focus t
 In `config/swarm/ai_router.json`, replace the `google_antigravity` rate limit entry:
 
 Old (line 226-230):
+
 ```json
-    "google_antigravity": {
-      "max_turns": 35,
-      "window_sec": 3600,
-      "cooldown_sec": 60
-    },
+"google_antigravity": {
+  "max_turns": 35,
+  "window_sec": 3600,
+  "cooldown_sec": 60
+},
 ```
 
 New:
+
 ```json
-    "antigravity_flash": {
-      "max_turns": 20,
-      "window_sec": 3600,
-      "cooldown_sec": 60
-    },
-    "antigravity_pro": {
-      "max_turns": 15,
-      "window_sec": 3600,
-      "cooldown_sec": 60
-    },
+"antigravity_flash": {
+  "max_turns": 20,
+  "window_sec": 3600,
+  "cooldown_sec": 60
+},
+"antigravity_pro": {
+  "max_turns": 15,
+  "window_sec": 3600,
+  "cooldown_sec": 60
+},
 ```
 
 Also update the `google-antigravity` provider block (line 150-156) `rate_group` to `"antigravity_pro"` (the cascade default). **Note:** The per-model `rate_group` in `model_tiers.json` takes precedence over the provider-level default — the routing code resolves rate groups from the model tier entry, not the provider block. The provider-level value is a fallback for models not in the tier matrix.
@@ -1196,32 +1218,32 @@ Also update the `fallbacks` array (line 21): replace `"antigravity/gemini-3-auto
 Replace the single `antigravity/gemini-3-auto` entry with two entries:
 
 ```json
-  {
-    "model_id": "google-antigravity/gemini-3-flash",
-    "provider_model_id": "gemini-3-flash",
-    "provider": "google-antigravity",
-    "rate_group": "antigravity_flash",
-    "capability_class": 2,
-    "effort_knob": "thinking:on",
-    "effort_level": 3,
-    "cost_per_turn": 0.0,
-    "max_context_tokens": 1000000,
-    "strengths": ["chat", "status", "observation"],
-    "enabled": true
-  },
-  {
-    "model_id": "google-antigravity/gemini-3.1-pro",
-    "provider_model_id": "gemini-3.1-pro",
-    "provider": "google-antigravity",
-    "rate_group": "antigravity_pro",
-    "capability_class": 3,
-    "effort_knob": "thinking:always",
-    "effort_level": 5,
-    "cost_per_turn": 0.0,
-    "max_context_tokens": 1000000,
-    "strengths": ["strategy", "review", "research", "architecture"],
-    "enabled": true
-  },
+{
+  "model_id": "google-antigravity/gemini-3-flash",
+  "provider_model_id": "gemini-3-flash",
+  "provider": "google-antigravity",
+  "rate_group": "antigravity_flash",
+  "capability_class": 2,
+  "effort_knob": "thinking:on",
+  "effort_level": 3,
+  "cost_per_turn": 0.0,
+  "max_context_tokens": 1000000,
+  "strengths": ["chat", "status", "observation"],
+  "enabled": true
+},
+{
+  "model_id": "google-antigravity/gemini-3.1-pro",
+  "provider_model_id": "gemini-3.1-pro",
+  "provider": "google-antigravity",
+  "rate_group": "antigravity_pro",
+  "capability_class": 3,
+  "effort_knob": "thinking:always",
+  "effort_level": 5,
+  "cost_per_turn": 0.0,
+  "max_context_tokens": 1000000,
+  "strengths": ["strategy", "review", "research", "architecture"],
+  "enabled": true
+},
 ```
 
 - [ ] **Step 3: Update model registry in ai_router.json**
@@ -1229,33 +1251,36 @@ Replace the single `antigravity/gemini-3-auto` entry with two entries:
 Replace `class_3_strategy` entry:
 
 Old:
+
 ```json
-      "class_3_strategy": {
-        "id": "google-antigravity/gemini-3-auto",
-        "provider": "google-antigravity",
-        ...
-      }
+"class_3_strategy": {
+  "id": "google-antigravity/gemini-3-auto",
+  "provider": "google-antigravity",
+  ...
+}
 ```
 
 New — split into two entries:
+
 ```json
-      "heiwa_agent_routine": {
-        "id": "google-antigravity/gemini-3-flash",
-        "provider": "google-antigravity",
-        "host_node": "railway@heiwa-cloud-hq",
-        "compute_class": 2,
-        "role": "heiwa_agent_routine_reasoning"
-      },
-      "class_3_strategy": {
-        "id": "google-antigravity/gemini-3.1-pro",
-        "provider": "google-antigravity",
-        "host_node": "railway@heiwa-cloud-hq",
-        "compute_class": 3,
-        "role": "strategy_adversarial_review"
-      }
+"heiwa_agent_routine": {
+  "id": "google-antigravity/gemini-3-flash",
+  "provider": "google-antigravity",
+  "host_node": "railway@heiwa-cloud-hq",
+  "compute_class": 2,
+  "role": "heiwa_agent_routine_reasoning"
+},
+"class_3_strategy": {
+  "id": "google-antigravity/gemini-3.1-pro",
+  "provider": "google-antigravity",
+  "host_node": "railway@heiwa-cloud-hq",
+  "compute_class": 3,
+  "role": "strategy_adversarial_review"
+}
 ```
 
 Also update `provider_rotation` references — replace `google-antigravity/gemini-3-auto` with `google-antigravity/gemini-3.1-pro` in all four locations:
+
 - `premium_remote` array (line 278)
 - `by_intent.research` array (line 285)
 - `by_intent.strategy` array (line 291)
@@ -1273,6 +1298,7 @@ git commit -m "feat(config): split antigravity rate group into flash (20/hr) and
 ### Task 7: Harden Health Check
 
 **Files:**
+
 - Modify: `apps/heiwa_hub/mcp_server.py:216-225`
 - Test: `apps/heiwa_hub/tests/test_heiwa_agent.py` (append)
 
@@ -1383,6 +1409,7 @@ git commit -m "feat(health): STDB-aware health check with 2s timeout, returns 50
 ### Task 8: STDB Data Directory for Railway
 
 **Files:**
+
 - Modify: `apps/heiwa_hub/start.sh:125-131`
 
 - [ ] **Step 1: Add STDB data directory config**
@@ -1401,12 +1428,12 @@ fi
 Update the `spacetime start` line to use the data directory:
 
 ```bash
-        if [[ -n "$STDB_DATA_DIR" ]]; then
-            echo "[HEIWA] Starting local SpacetimeDB with persistent volume at $STDB_DATA_DIR..."
-            spacetime start --listen-addr 127.0.0.1:3000 --data-dir "$STDB_DATA_DIR" &
-        else
-            spacetime start --listen-addr 127.0.0.1:3000 &
-        fi
+if [[ -n "$STDB_DATA_DIR" ]]; then
+    echo "[HEIWA] Starting local SpacetimeDB with persistent volume at $STDB_DATA_DIR..."
+    spacetime start --listen-addr 127.0.0.1:3000 --data-dir "$STDB_DATA_DIR" &
+else
+    spacetime start --listen-addr 127.0.0.1:3000 &
+fi
 ```
 
 - [ ] **Step 2: Commit**

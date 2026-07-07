@@ -71,6 +71,46 @@ export type AgentRow = {
   [key: string]: unknown;
 };
 
+export type HerdPane = {
+  workspace: string;
+  pane: string;
+  agent: string;
+  state: string;
+  cwd: string;
+  message?: string;
+};
+
+export type HerdSnapshot = {
+  status: "checking" | "online" | "offline" | string;
+  source: string;
+  panes: HerdPane[];
+  error?: string | null;
+};
+
+export type HerdPaneRead = {
+  ok: boolean;
+  pane: string;
+  text: string;
+  source: string;
+  error?: string | null;
+};
+
+export type HerdActionResult = {
+  ok: boolean;
+  message: string;
+  source: string;
+  error?: string | null;
+};
+
+export type HerdCommandSpec = {
+  id: string;
+  label: string;
+  command: string;
+  risk: string;
+  approval: string;
+  description: string;
+};
+
 export type SubagentDispatchRequest = {
   task: string;
   provider?: string;
@@ -119,6 +159,129 @@ export async function dispatchSubagent(req: SubagentDispatchRequest): Promise<Su
 
 export async function listOllamaModels(): Promise<{ models: OllamaModel[] }> {
   return apiGet<{ models: OllamaModel[] }>("/api/v1/providers/ollama/models");
+}
+
+export async function herdPanes(): Promise<HerdSnapshot> {
+  try {
+    return await invoke<HerdSnapshot>("herd_panes");
+  } catch {
+    try {
+      const resp = await fetch("http://127.0.0.1:7480/api/herd", { cache: "no-store" });
+      if (!resp.ok) throw new Error(`herd ${resp.status}`);
+      const panes = await resp.json() as HerdPane[];
+      return { status: "online", source: "deno-bridge-dev", panes, error: null };
+    } catch (error) {
+      return {
+        status: "offline",
+        source: "none",
+        panes: [],
+        error: error instanceof Error ? error.message : String(error),
+      };
+    }
+  }
+}
+
+export async function herdCommandCatalog(): Promise<HerdCommandSpec[]> {
+  try {
+    return await invoke<HerdCommandSpec[]>("herd_command_catalog");
+  } catch {
+    return [
+      {
+        id: "git.status",
+        label: "Git status",
+        command: "git status --short --branch",
+        risk: "host_safe_readonly",
+        approval: "auto",
+        description: "Show the current branch and dirty worktree without mutating files.",
+      },
+      {
+        id: "git.diff.stat",
+        label: "Git diff stat",
+        command: "git diff --stat",
+        risk: "host_safe_readonly",
+        approval: "auto",
+        description: "Summarize unstaged file changes without printing full diff contents.",
+      },
+    ];
+  }
+}
+
+export async function readHerdPane(pane: string): Promise<HerdPaneRead> {
+  try {
+    return await invoke<HerdPaneRead>("herd_pane_read", { pane });
+  } catch {
+    try {
+      const resp = await fetch(`http://127.0.0.1:7480/api/pane/${encodeURIComponent(pane)}?format=text`, {
+        cache: "no-store",
+      });
+      const text = await resp.text();
+      if (!resp.ok) throw new Error(text || `pane read ${resp.status}`);
+      return { ok: true, pane, text, source: "deno-bridge-dev", error: null };
+    } catch (error) {
+      return {
+        ok: false,
+        pane,
+        text: "",
+        source: "none",
+        error: error instanceof Error ? error.message : String(error),
+      };
+    }
+  }
+}
+
+export async function sendHerdPane(pane: string, text: string): Promise<HerdActionResult> {
+  try {
+    return await invoke<HerdActionResult>("herd_pane_send", { pane, text });
+  } catch {
+    return postHerdPaneAction(pane, "send", text);
+  }
+}
+
+export async function runHerdPane(pane: string, command: string): Promise<HerdActionResult> {
+  try {
+    return await invoke<HerdActionResult>("herd_pane_run", { pane, command });
+  } catch {
+    return postHerdPaneAction(pane, "run", command);
+  }
+}
+
+export async function focusHerdPane(pane: string): Promise<HerdActionResult> {
+  try {
+    return await invoke<HerdActionResult>("herd_pane_focus", { pane });
+  } catch {
+    return postHerdPaneAction(pane, "focus", "");
+  }
+}
+
+export async function splitHerdPane(
+  pane: string,
+  direction: "right" | "down" = "right",
+  cwd?: string,
+): Promise<HerdActionResult> {
+  try {
+    return await invoke<HerdActionResult>("herd_pane_split", { pane, direction, cwd });
+  } catch {
+    return postHerdPaneAction(pane, "split", JSON.stringify({ direction, cwd }));
+  }
+}
+
+async function postHerdPaneAction(
+  pane: string,
+  action: "send" | "run" | "focus" | "split",
+  body: string,
+): Promise<HerdActionResult> {
+  try {
+    const resp = await fetch(
+      `http://127.0.0.1:7480/api/pane/${encodeURIComponent(pane)}/${action}`,
+      { method: "POST", body },
+    );
+    const text = await resp.text();
+    if (!resp.ok) throw new Error(text || `${action} ${resp.status}`);
+    return { ok: true, message: text || `${action} ok`, source: "deno-bridge-dev", error: null };
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    return { ok: false, message, source: "none", error: message };
+  }
 }
 
 export function runtimeVersion(health: RuntimeHealth | null): string {

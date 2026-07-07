@@ -62,11 +62,11 @@ Heiwa is taught to operators as three planes that compose one flow.
 
 > Heiwa watches what matters, summarizes what changed, stages what needs action, executes what is safe, and proves what happened.
 
-| Plane | What it does | Current repo surfaces |
-| --- | --- | --- |
-| **Intake** | One command bar plus passive feeds. Captures intent and signal from operator commands, mail, calendar, messages, forums, GitHub, files, and runtime alerts. | `apps/heiwa_shell/` REPL and `session attach` are the current intake surface. Passive feeds are target work. |
-| **Execution** | DREX routes work to local models, provider CLIs, tools, workers, or connectors under leases, budgets, and approval gates. | `apps/heiwa_core/` (DREX), `apps/heiwa_orchestrator/`, `crates/heiwa_loop/`, `crates/heiwa_provider/`, `crates/heiwa_session/`. |
-| **Evidence** | Every useful read or action emits a source-linked receipt visible locally, and mirrored to SpacetimeDB when online. | `crates/heiwa_stdb/`, `apps/heiwa_core/src/stdb/`, `apps/heiwa_orchestrator/src/stdb/`. Receipt schema and source-span syntax are still partial. |
+| Plane         | What it does                                                                                                                                                | Current repo surfaces                                                                                                                            |
+| ------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------ |
+| **Intake**    | One command bar plus passive feeds. Captures intent and signal from operator commands, mail, calendar, messages, forums, GitHub, files, and runtime alerts. | `apps/heiwa_shell/` REPL and `session attach` are the current intake surface. Passive feeds are target work.                                     |
+| **Execution** | DREX routes work to local models, provider CLIs, tools, workers, or connectors under leases, budgets, and approval gates.                                   | `apps/heiwa_core/` (DREX), `apps/heiwa_orchestrator/`, `crates/heiwa_loop/`, `crates/heiwa_provider/`, `crates/heiwa_session/`.                  |
+| **Evidence**  | Every useful read or action emits a source-linked receipt visible locally, and mirrored to SpacetimeDB when online.                                         | `crates/heiwa_stdb/`, `apps/heiwa_core/src/stdb/`, `apps/heiwa_orchestrator/src/stdb/`. Receipt schema and source-span syntax are still partial. |
 
 The planes are a flow lens. They sit alongside the layer anatomy in [What Heiwa Is](#what-heiwa-is) (user surface, execution kernel, enterprise platform), which is an ownership lens. Both are correct: planes describe **how a task flows**, layers describe **who owns what**.
 
@@ -81,11 +81,11 @@ Every feature, connector, doc change, and release item must classify as one of:
 
 ### Current vs target maturity per plane
 
-| Plane | Current (2026-05) | Target |
-| --- | --- | --- |
-| Intake | `heiwa` REPL plus `session attach`. No passive feeds wired. | Command bar plus calendar, mail, messages, forums, GitHub, files, and runtime alerts as governed feeds. |
+| Plane     | Current (2026-05)                                                                                                                                                                                                                                                                          | Target                                                                                                             |
+| --------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------ |
+| Intake    | `heiwa` REPL plus `session attach`. No passive feeds wired.                                                                                                                                                                                                                                | Command bar plus calendar, mail, messages, forums, GitHub, files, and runtime alerts as governed feeds.            |
 | Execution | DREX kernel plus provider adapters: Claude Code, Codex, Gemini CLI, and Ollama are wired in the shell adapter path; Antigravity is discovered and normalized; Codex execution depth and evidence still lag. Bounded loops are real in `crates/heiwa_loop/`. No staged-approval outbox yet. | Approval-staged outbox for every risky write action. Honest per-provider execution depth surfaced at routing time. |
-| Evidence | Local state under `~/.heiwa/` plus partial STDB mirror. Receipt schema not fully canonical. Source-span syntax (`file:line-line`, `message_id`, `event_id`, `thread_id`, `receipt_id`) not implemented. | Source-spanned receipts on every action. Canonical STDB evidence schema. Local-first; mirrors when online. |
+| Evidence  | Local state under `~/.heiwa/` plus partial STDB mirror. Receipt schema not fully canonical. Source-span syntax (`file:line-line`, `message_id`, `event_id`, `thread_id`, `receipt_id`) not implemented.                                                                                    | Source-spanned receipts on every action. Canonical STDB evidence schema. Local-first; mirrors when online.         |
 
 ## Optimization Doctrine
 
@@ -177,7 +177,7 @@ As of 2026-04-22, `heiwa-universe` has already landed meaningful local runtime s
   - `auth`
   - `providers`
   - `session attach`
-  via [`apps/heiwa_shell/src/main.rs`](apps/heiwa_shell/src/main.rs).
+    via [`apps/heiwa_shell/src/main.rs`](apps/heiwa_shell/src/main.rs).
 - The Rust shell/session/repl/telemetry surface is real enough to test, but it is not the same thing as final product maturity.
 - `apps/heiwa_app/` is the companion visual shell path, but it is still a web client surface in this repo and not yet a true native desktop wrapper.
 - The Heiwa account/provider plane exists in a narrow but real form, with local identity and wrapped provider status discovery.
@@ -193,16 +193,16 @@ As of 2026-04-22, `heiwa-universe` has already landed meaningful local runtime s
 
 ## Canonical Product Identity
 
-| Name | Canonical meaning |
-| --- | --- |
-| **Heiwa** | Product identity: app, runtime, CLI, packages, docs, and user-visible system |
-| **Heiwa Limited** | Company, publisher, employer, legal/commercial identity |
-| **Heiwa Universe** | Open-source repository and project workspace: `Strategizing/heiwa-universe` |
-| **`heiwa`** | Primary installed runtime and operator surface |
-| **DREX** | Internal execution kernel and routing substrate |
-| **SpacetimeDB** | Backend adjudication, canonical state, subscriptions, evidence |
-| **Rust runtime** | Volatile execution plane: provider supervision, candidate generation, shell/process control |
-| **Web surfaces** | Later attached or hosted surfaces over the same kernel |
+| Name               | Canonical meaning                                                                           |
+| ------------------ | ------------------------------------------------------------------------------------------- |
+| **Heiwa**          | Product identity: app, runtime, CLI, packages, docs, and user-visible system                |
+| **Heiwa Limited**  | Company, publisher, employer, legal/commercial identity                                     |
+| **Heiwa Universe** | Open-source repository and project workspace: `Strategizing/heiwa-universe`                 |
+| **`heiwa`**        | Primary installed runtime and operator surface                                              |
+| **DREX**           | Internal execution kernel and routing substrate                                             |
+| **SpacetimeDB**    | Backend adjudication, canonical state, subscriptions, evidence                              |
+| **Rust runtime**   | Volatile execution plane: provider supervision, candidate generation, shell/process control |
+| **Web surfaces**   | Later attached or hosted surfaces over the same kernel                                      |
 
 > See [`PRODUCT_SURFACE.md`](PRODUCT_SURFACE.md) for the path-by-path class table that feeds repo hygiene and LOC audits.
 
@@ -317,12 +317,12 @@ A task is eligible only if it satisfies both the provider-side constraint set an
 
 Heiwa should normalize provider integrations through explicit auth modes rather than pretending every provider works the same way:
 
-| Auth mode | Typical use |
-| --- | --- |
-| `oauth_cli` | Installed provider CLIs and subscription-backed terminal tools |
-| `oauth_device` | Browser/device-code or hosted account linking flows |
-| `api_key` | Direct provider APIs or router providers |
-| `local_runtime` | Ollama, GGUF runners, future 1-bit / sovereign model runtimes |
+| Auth mode       | Typical use                                                    |
+| --------------- | -------------------------------------------------------------- |
+| `oauth_cli`     | Installed provider CLIs and subscription-backed terminal tools |
+| `oauth_device`  | Browser/device-code or hosted account linking flows            |
+| `api_key`       | Direct provider APIs or router providers                       |
+| `local_runtime` | Ollama, GGUF runners, future 1-bit / sovereign model runtimes  |
 
 ### Model ownership is not Heiwa-owned
 
@@ -374,19 +374,19 @@ That is how Heiwa scales from “my machine” to “my fleet” without changin
 
 Heiwa is local-first. Hosted infrastructure exists to provide durable truth, public surfaces, and distribution without moving the inference/shell hot path off the operator device.
 
-| Surface | Role in Heiwa |
-| --- | --- |
-| **GitHub** | Source of truth, CI, release artifacts, install/update distribution |
-| **SpacetimeDB Cloud** | Canonical state, reducers, subscriptions, evidence |
-| **Cloudflare** | Public edge, DNS, docs/app surfaces, later remote access surfaces |
-| **Local machine** | Primary `heiwa` runtime, provider CLIs, local models, operator control |
+| Surface               | Role in Heiwa                                                          |
+| --------------------- | ---------------------------------------------------------------------- |
+| **GitHub**            | Source of truth, CI, release artifacts, install/update distribution    |
+| **SpacetimeDB Cloud** | Canonical state, reducers, subscriptions, evidence                     |
+| **Cloudflare**        | Public edge, DNS, docs/app surfaces, later remote access surfaces      |
+| **Local machine**     | Primary `heiwa` runtime, provider CLIs, local models, operator control |
 
-| Layer | Host | Role |
-| --- | --- | --- |
-| Canonical state / evidence | SpacetimeDB Cloud | Reducers, subscriptions, session/routing tables, adjudication |
+| Layer                       | Host                              | Role                                                                     |
+| --------------------------- | --------------------------------- | ------------------------------------------------------------------------ |
+| Canonical state / evidence  | SpacetimeDB Cloud                 | Reducers, subscriptions, session/routing tables, adjudication            |
 | Local inference + streaming | `heiwa` app runtime on the device | Provider streams, PTY/shell, local models, local approvals, side effects |
-| Edge / public surfaces | Cloudflare Workers + Pages | DNS, docs, web shell, status, later remote attach |
-| Source / CI / distribution | GitHub | Releases, install artifacts, binaries, checksums, source trust |
+| Edge / public surfaces      | Cloudflare Workers + Pages        | DNS, docs, web shell, status, later remote attach                        |
+| Source / CI / distribution  | GitHub                            | Releases, install artifacts, binaries, checksums, source trust           |
 
 Architectural implication:
 
@@ -561,7 +561,7 @@ That end state looks like:
 - one policy substrate
 - one extension model
 
-The target is not “own all models.”  
+The target is not “own all models.”\
 The target is “own the layer users trust to use all models, all devices, and all enterprise controls coherently.”
 
 ## Peer-Verified Reality Check
@@ -612,12 +612,12 @@ Heiwa should expose its kernel in this order:
 
 Do not collapse everything into “plugins.”
 
-| Class | Meaning |
-| --- | --- |
-| **Provider adapters** | Trusted system code that starts/stops providers and normalizes their streams |
-| **Tools** | Callable actions such as shell, MCP, or local services |
-| **Hooks** | User-facing block/modify/observe logic over event streams |
-| **Reducers / policies** | Highest-trust canonical logic in SpacetimeDB |
+| Class                   | Meaning                                                                      |
+| ----------------------- | ---------------------------------------------------------------------------- |
+| **Provider adapters**   | Trusted system code that starts/stops providers and normalizes their streams |
+| **Tools**               | Callable actions such as shell, MCP, or local services                       |
+| **Hooks**               | User-facing block/modify/observe logic over event streams                    |
+| **Reducers / policies** | Highest-trust canonical logic in SpacetimeDB                                 |
 
 This separation is necessary for security, determinism, and platform clarity.
 
@@ -627,14 +627,14 @@ BYOX is a user-facing procurement and registration vocabulary, not an internal t
 
 Useful product vocabulary:
 
-| Term | Meaning |
-| --- | --- |
-| **BYOM** | Bring your own model |
+| Term     | Meaning                                   |
+| -------- | ----------------------------------------- |
+| **BYOM** | Bring your own model                      |
 | **BYOK** | Bring your own key or provider credential |
-| **BYOT** | Bring your own tool |
-| **BYOA** | Bring your own agent or provider account |
-| **BYOD** | Bring your own data source |
-| **BYOP** | Bring your own policy |
+| **BYOT** | Bring your own tool                       |
+| **BYOA** | Bring your own agent or provider account  |
+| **BYOD** | Bring your own data source                |
+| **BYOP** | Bring your own policy                     |
 
 Internal execution must still branch on the extension classes above: provider adapters, tools, hooks, and reducers or policies. A registered BYOX resource must be mapped into one of those classes before it can affect execution.
 
@@ -760,11 +760,11 @@ References:
 
 This document is the canonical architecture truth. Two short companion files at `ops/context/` carry navigational and continuity context:
 
-| File | Purpose |
-| --- | --- |
-| [`ops/context/HEIWA.md`](ops/context/HEIWA.md) | Task routing map and ops/rooms index for agents |
+| File                                                 | Purpose                                                   |
+| ---------------------------------------------------- | --------------------------------------------------------- |
+| [`ops/context/HEIWA.md`](ops/context/HEIWA.md)       | Task routing map and ops/rooms index for agents           |
 | [`ops/context/IDENTITY.md`](ops/context/IDENTITY.md) | Operator identity note (referenced by `IDENTITY.md` shim) |
-| [`ops/context/SOUL.md`](ops/context/SOUL.md) | Continuity / persona layer (referenced by `SOUL.md` shim) |
+| [`ops/context/SOUL.md`](ops/context/SOUL.md)         | Continuity / persona layer (referenced by `SOUL.md` shim) |
 
 The repo-root files `IDENTITY.md` and `SOUL.md` are compatibility shims that forward to the `ops/context/` counterparts; legacy boot sequences still open them at repo root.
 
@@ -777,11 +777,11 @@ The repo-root files `IDENTITY.md` and `SOUL.md` are compatibility shims that for
 5. [Cloudflare Pages overview](https://developers.cloudflare.com/pages/)
 6. [Junie BYOK](https://junie.jetbrains.com/docs/byok.html)
 7. [Junie terminal usage](https://junie.jetbrains.com/docs/junie-cli-usage.html)
-12. [Junie quickstart](https://junie.jetbrains.com/docs/junie-cli.html)
-13. [Junie CLI reference](https://junie.jetbrains.com/docs/parameters.html)
-14. [Junie environment variables](https://junie.jetbrains.com/docs/environment-variables.html)
-15. [Claude Code hooks reference](https://code.claude.com/docs/en/hooks)
-16. [OpenRouter provider routing](https://openrouter.ai/docs/guides/routing/provider-selection)
-17. [OpenAI code generation / Codex overview](https://platform.openai.com/docs/guides/code-generation)
-18. [OpenAI Codex agent internet access](https://platform.openai.com/docs/codex/agent-network)
-19. [Ollama launch](https://ollama.com/blog/launch)
+8. [Junie quickstart](https://junie.jetbrains.com/docs/junie-cli.html)
+9. [Junie CLI reference](https://junie.jetbrains.com/docs/parameters.html)
+10. [Junie environment variables](https://junie.jetbrains.com/docs/environment-variables.html)
+11. [Claude Code hooks reference](https://code.claude.com/docs/en/hooks)
+12. [OpenRouter provider routing](https://openrouter.ai/docs/guides/routing/provider-selection)
+13. [OpenAI code generation / Codex overview](https://platform.openai.com/docs/guides/code-generation)
+14. [OpenAI Codex agent internet access](https://platform.openai.com/docs/codex/agent-network)
+15. [Ollama launch](https://ollama.com/blog/launch)

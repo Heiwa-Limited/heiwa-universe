@@ -24,45 +24,46 @@
 
 ### New files (authored)
 
-| File | Responsibility |
-|------|---------------|
-| `scripts/tests/test_class3_runtime_safety.py` | Repo-tracked verification harness for Gemini, Claude, Codex, and Antigravity safety smoke tests |
-| `/Users/dmcgregsauce/.gemini/hooks/runtime_policy.js` | Gemini policy evaluator for shell, network, and file-mutation tools |
-| `/Users/dmcgregsauce/.gemini/hooks/query_capability_lease.py` | Gemini helper that calls Heiwa's existing SpacetimeDB lease lookup |
-| `/Users/dmcgregsauce/.claude/plugins/devon-runtime-safety/README.md` | Local plugin-style packaging notes for Claude safety hooks |
-| `/Users/dmcgregsauce/.claude/plugins/devon-runtime-safety/hooks/hooks.json` | Source-of-truth Claude `PreToolUse` matcher layout |
-| `/Users/dmcgregsauce/.claude/plugins/devon-runtime-safety/hooks/pretool_policy.py` | Claude `PreToolUse` policy evaluator |
-| `/Users/dmcgregsauce/.claude/plugins/devon-runtime-safety/hooks/query_capability_lease.py` | Claude helper that calls Heiwa's existing SpacetimeDB lease lookup |
-| `/Users/dmcgregsauce/.codex/bin/codex-safe` | Safe Codex launcher that blocks unsafe CLI flags, writes audits, and applies safer defaults |
+| File                                                                                       | Responsibility                                                                                  |
+| ------------------------------------------------------------------------------------------ | ----------------------------------------------------------------------------------------------- |
+| `scripts/tests/test_class3_runtime_safety.py`                                              | Repo-tracked verification harness for Gemini, Claude, Codex, and Antigravity safety smoke tests |
+| `/Users/dmcgregsauce/.gemini/hooks/runtime_policy.js`                                      | Gemini policy evaluator for shell, network, and file-mutation tools                             |
+| `/Users/dmcgregsauce/.gemini/hooks/query_capability_lease.py`                              | Gemini helper that calls Heiwa's existing SpacetimeDB lease lookup                              |
+| `/Users/dmcgregsauce/.claude/plugins/devon-runtime-safety/README.md`                       | Local plugin-style packaging notes for Claude safety hooks                                      |
+| `/Users/dmcgregsauce/.claude/plugins/devon-runtime-safety/hooks/hooks.json`                | Source-of-truth Claude `PreToolUse` matcher layout                                              |
+| `/Users/dmcgregsauce/.claude/plugins/devon-runtime-safety/hooks/pretool_policy.py`         | Claude `PreToolUse` policy evaluator                                                            |
+| `/Users/dmcgregsauce/.claude/plugins/devon-runtime-safety/hooks/query_capability_lease.py` | Claude helper that calls Heiwa's existing SpacetimeDB lease lookup                              |
+| `/Users/dmcgregsauce/.codex/bin/codex-safe`                                                | Safe Codex launcher that blocks unsafe CLI flags, writes audits, and applies safer defaults     |
 
 ### Modified files
 
-| File | Change |
-|------|--------|
-| `/Users/dmcgregsauce/.gemini/settings.json` | Expand `BeforeTool` matchers from shell-only to the actual high-risk Gemini tools |
-| `/Users/dmcgregsauce/.gemini/hooks/dangerous_check.js` | Reduce to a compatibility shim or delegate to `runtime_policy.js` |
-| `/Users/dmcgregsauce/.claude/settings.local.json` | Register `PreToolUse` hooks and narrow machine-local safety posture without breaking existing plugin installs |
-| `/Users/dmcgregsauce/.codex/config.toml` | Harden launch defaults for future Codex sessions |
-| `/Users/dmcgregsauce/.codex/AGENTS.md` | Document the safe-launch requirement and the honest limits of Codex Phase 1 mediation |
-| `/Users/dmcgregsauce/Library/Application Support/Antigravity/User/settings.json` | Point Antigravity explicitly at the archived operator root and `devonx` binary |
-| `/Users/dmcgregsauce/heiwa_archive/heiwa-core/bin/heiwa_devonx_legacy.py` | Add Phase 1 safety classification, lease checks where possible, and audit logging in the actual broker path |
-| `/Users/dmcgregsauce/heiwa_archive/heiwa-core/legacy/devonx_operator/config/policies/read_only_default.json` | Tighten the documented operator safety posture only if `devonx doctor` confirms this file is consumed |
+| File                                                                                                         | Change                                                                                                        |
+| ------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------- |
+| `/Users/dmcgregsauce/.gemini/settings.json`                                                                  | Expand `BeforeTool` matchers from shell-only to the actual high-risk Gemini tools                             |
+| `/Users/dmcgregsauce/.gemini/hooks/dangerous_check.js`                                                       | Reduce to a compatibility shim or delegate to `runtime_policy.js`                                             |
+| `/Users/dmcgregsauce/.claude/settings.local.json`                                                            | Register `PreToolUse` hooks and narrow machine-local safety posture without breaking existing plugin installs |
+| `/Users/dmcgregsauce/.codex/config.toml`                                                                     | Harden launch defaults for future Codex sessions                                                              |
+| `/Users/dmcgregsauce/.codex/AGENTS.md`                                                                       | Document the safe-launch requirement and the honest limits of Codex Phase 1 mediation                         |
+| `/Users/dmcgregsauce/Library/Application Support/Antigravity/User/settings.json`                             | Point Antigravity explicitly at the archived operator root and `devonx` binary                                |
+| `/Users/dmcgregsauce/heiwa_archive/heiwa-core/bin/heiwa_devonx_legacy.py`                                    | Add Phase 1 safety classification, lease checks where possible, and audit logging in the actual broker path   |
+| `/Users/dmcgregsauce/heiwa_archive/heiwa-core/legacy/devonx_operator/config/policies/read_only_default.json` | Tighten the documented operator safety posture only if `devonx doctor` confirms this file is consumed         |
 
 ### Reference files (read-only)
 
-| File | Why it matters |
-|------|----------------|
-| `packages/heiwa_sdk/heiwa_sdk/hooks.py` | Existing execution-hook semantics and audit behavior |
-| `packages/heiwa_sdk/heiwa_sdk/spacetimedb.py` | Authoritative `get_active_capability_lease()` lookup |
-| `/Users/dmcgregsauce/.antigravity/extensions/heiwa.devon-operator-v1-1.0.0/src/extension.ts` | Confirms Antigravity resolves `operatorRoot`, `devonxPath`, and state paths from settings |
-| `/Users/dmcgregsauce/.claude/plugins/cache/claude-plugins-official/security-guidance/15268f03d2f5/hooks/hooks.json` | Known-good Claude plugin hook packaging example |
-| `/Users/dmcgregsauce/.gemini/extensions/superpowers/skills/using-superpowers/references/gemini-tools.md` | Gemini tool-name map for `run_shell_command`, `write_file`, `replace`, `web_fetch`, and `google_web_search` |
+| File                                                                                                                | Why it matters                                                                                              |
+| ------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------- |
+| `packages/heiwa_sdk/heiwa_sdk/hooks.py`                                                                             | Existing execution-hook semantics and audit behavior                                                        |
+| `packages/heiwa_sdk/heiwa_sdk/spacetimedb.py`                                                                       | Authoritative `get_active_capability_lease()` lookup                                                        |
+| `/Users/dmcgregsauce/.antigravity/extensions/heiwa.devon-operator-v1-1.0.0/src/extension.ts`                        | Confirms Antigravity resolves `operatorRoot`, `devonxPath`, and state paths from settings                   |
+| `/Users/dmcgregsauce/.claude/plugins/cache/claude-plugins-official/security-guidance/15268f03d2f5/hooks/hooks.json` | Known-good Claude plugin hook packaging example                                                             |
+| `/Users/dmcgregsauce/.gemini/extensions/superpowers/skills/using-superpowers/references/gemini-tools.md`            | Gemini tool-name map for `run_shell_command`, `write_file`, `replace`, `web_fetch`, and `google_web_search` |
 
 ---
 
 ### Task 1: Capture baselines and write the failing verification harness
 
 **Files:**
+
 - Create: `scripts/tests/test_class3_runtime_safety.py`
 - Backup target files into: `/Users/dmcgregsauce/tmp/class3-runtime-safety/`
 
@@ -197,6 +198,7 @@ Expected: a short handoff note listing which tests failed because of missing fil
 ### Task 2: Expand Gemini from shell regex blocking to a real tool-family policy evaluator
 
 **Files:**
+
 - Create: `/Users/dmcgregsauce/.gemini/hooks/runtime_policy.js`
 - Create: `/Users/dmcgregsauce/.gemini/hooks/query_capability_lease.py`
 - Modify: `/Users/dmcgregsauce/.gemini/settings.json`
@@ -261,8 +263,12 @@ const SENSITIVE_PREFIXES = [
 
 function classify(toolName, input) {
   if (toolName === "run_shell_command") return { surface: "shell", target: input.command || "" };
-  if (toolName === "write_file" || toolName === "replace") return { surface: "file", target: input.path || "" };
-  if (toolName === "web_fetch" || toolName === "google_web_search") return { surface: "network", target: input.url || input.query || "" };
+  if (toolName === "write_file" || toolName === "replace") {
+    return { surface: "file", target: input.path || "" };
+  }
+  if (toolName === "web_fetch" || toolName === "google_web_search") {
+    return { surface: "network", target: input.url || input.query || "" };
+  }
   return { surface: "other", target: "" };
 }
 ```
@@ -315,6 +321,7 @@ Expected: all three manual samples return `decision: "deny"` and the pytest Gemi
 ### Task 3: Package Claude safety as a local plugin-style `PreToolUse` implementation
 
 **Files:**
+
 - Create: `/Users/dmcgregsauce/.claude/plugins/devon-runtime-safety/README.md`
 - Create: `/Users/dmcgregsauce/.claude/plugins/devon-runtime-safety/hooks/hooks.json`
 - Create: `/Users/dmcgregsauce/.claude/plugins/devon-runtime-safety/hooks/pretool_policy.py`
@@ -351,15 +358,30 @@ Local Claude safety package for `PreToolUse` enforcement.
     "PreToolUse": [
       {
         "matcher": "Bash",
-        "hooks": [{ "type": "command", "command": "python3 /Users/dmcgregsauce/.claude/plugins/devon-runtime-safety/hooks/pretool_policy.py" }]
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 /Users/dmcgregsauce/.claude/plugins/devon-runtime-safety/hooks/pretool_policy.py"
+          }
+        ]
       },
       {
         "matcher": "Write|Edit|MultiEdit",
-        "hooks": [{ "type": "command", "command": "python3 /Users/dmcgregsauce/.claude/plugins/devon-runtime-safety/hooks/pretool_policy.py" }]
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 /Users/dmcgregsauce/.claude/plugins/devon-runtime-safety/hooks/pretool_policy.py"
+          }
+        ]
       },
       {
         "matcher": "WebFetch|WebSearch",
-        "hooks": [{ "type": "command", "command": "python3 /Users/dmcgregsauce/.claude/plugins/devon-runtime-safety/hooks/pretool_policy.py" }]
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 /Users/dmcgregsauce/.claude/plugins/devon-runtime-safety/hooks/pretool_policy.py"
+          }
+        ]
       }
     ]
   }
@@ -420,6 +442,7 @@ Expected: Claude smoke tests return `deny` and the Claude pytest cases pass.
 ### Task 4: Harden Codex honestly through launch posture, config, and operator guidance
 
 **Files:**
+
 - Create: `/Users/dmcgregsauce/.codex/bin/codex-safe`
 - Modify: `/Users/dmcgregsauce/.codex/config.toml`
 - Modify: `/Users/dmcgregsauce/.codex/AGENTS.md`
@@ -529,6 +552,7 @@ Expected:
 ### Task 5: Rebind Antigravity to the real `devonx` broker and harden dispatch safety there
 
 **Files:**
+
 - Modify: `/Users/dmcgregsauce/Library/Application Support/Antigravity/User/settings.json`
 - Modify: `/Users/dmcgregsauce/heiwa_archive/heiwa-core/bin/heiwa_devonx_legacy.py`
 - Modify if consumed: `/Users/dmcgregsauce/heiwa_archive/heiwa-core/legacy/devonx_operator/config/policies/read_only_default.json`
@@ -610,6 +634,7 @@ Expected: both dispatch submissions return a denied or approval-required result,
 ### Task 6: Run the full verification matrix and publish the honest Phase 1 outcome
 
 **Files:**
+
 - Modify: `scripts/tests/test_class3_runtime_safety.py`
 - Update task notes / handoff summary with results
 

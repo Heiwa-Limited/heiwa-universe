@@ -20,7 +20,12 @@ const MIN_CONFIDENCE: f64 = 0.5;
 const DEFAULT_HOLD_MINUTES: i64 = 30;
 
 pub fn run(args: &[String]) -> Result<()> {
-    if args.is_empty() || matches!(args.first().map(String::as_str), Some("--help") | Some("-h")) {
+    if args.is_empty()
+        || matches!(
+            args.first().map(String::as_str),
+            Some("--help") | Some("-h")
+        )
+    {
         print_help();
         return Ok(());
     }
@@ -48,10 +53,7 @@ pub fn run(args: &[String]) -> Result<()> {
 
     let kind = flag_value(args, "--kind").unwrap_or_else(|| "soft".to_string());
     let hold_request = build_hold_request(&text, &parsed, &kind)?;
-    let request_id = format!(
-        "req_{}",
-        &uuid::Uuid::new_v4().simple().to_string()[..12]
-    );
+    let request_id = format!("req_{}", &uuid::Uuid::new_v4().simple().to_string()[..12]);
 
     if has_flag(args, "--dry-run") {
         let approval = build_approval_request(&request_id, &text, &parsed, "(dry-run)");
@@ -175,9 +177,7 @@ fn parse_via_sdk(text: &str) -> Result<Value> {
             dev.exists().then_some(dev)
         })
         .ok_or_else(|| {
-            anyhow!(
-                "parse_time.py not found; set HEIWA_PARSE_TIME or pass --at YYYY-MM-DDTHH:MM"
-            )
+            anyhow!("parse_time.py not found; set HEIWA_PARSE_TIME or pass --at YYYY-MM-DDTHH:MM")
         })?;
     let python = std::env::var("HEIWA_PYTHON")
         .map(PathBuf::from)
@@ -232,7 +232,12 @@ pub fn build_hold_request(text: &str, parsed: &Value, kind: &str) -> Result<Valu
 }
 
 /// Shape consumed by `approvals list/show/decide` (operator_dispatch_request_v1).
-pub fn build_approval_request(request_id: &str, text: &str, parsed: &Value, hold_id: &str) -> Value {
+pub fn build_approval_request(
+    request_id: &str,
+    text: &str,
+    parsed: &Value,
+    hold_id: &str,
+) -> Value {
     json!({
         "schema_version": "operator_dispatch_request_v1",
         "request_id": request_id,
@@ -293,7 +298,15 @@ mod tests {
 
     #[test]
     fn free_text_strips_flags_and_their_values() {
-        let argv = args(&["call", "mom", "--at", "2026-06-19T15:00", "--json", "--kind", "soft"]);
+        let argv = args(&[
+            "call",
+            "mom",
+            "--at",
+            "2026-06-19T15:00",
+            "--json",
+            "--kind",
+            "soft",
+        ]);
         assert_eq!(free_text(&argv), "call mom");
     }
 

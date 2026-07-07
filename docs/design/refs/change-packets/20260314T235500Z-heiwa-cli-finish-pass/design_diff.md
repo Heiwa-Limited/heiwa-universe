@@ -1,6 +1,7 @@
 # Heiwa Finish Pass Design Diff
 
 ## What changed
+
 - The CLI now has first-class provider auth orchestration for `gemini`, `codex`, `claude`, and `antigravity`, with provider metadata persisted into the Heiwa state layer.
 - Inline approval is now part of the REPL and one-shot execution path. Risky tasks can pause in `waiting_approval`, resume the same run, or remain pending when interrupted.
 - The state model now includes:
@@ -21,6 +22,7 @@
   - `History`
 
 ## Visual implications
+
 - Add a dedicated operator information architecture distinct from the public shell.
 - Reflect mission state progression explicitly:
   - `draft`
@@ -41,6 +43,7 @@
   - last error
 
 ## Runtime truth to mirror in Figma
+
 - The app is hub-served and browser-based, not a native desktop shell.
 - Operator pages require the per-install hub token for data access.
 - The operator websocket is snapshot-driven and reads:
