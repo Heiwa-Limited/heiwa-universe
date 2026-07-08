@@ -530,14 +530,15 @@ fn test_app_update_checkout_dry_run_json_reports_promotion_contract() {
         .get("source_dirty")
         .and_then(serde_json::Value::as_bool)
         .is_some());
+    // Normalize separators: Windows joins with backslashes.
     assert!(payload
         .get("installed_bin")
         .and_then(serde_json::Value::as_str)
-        .is_some_and(|path| path.ends_with("/.heiwa/bin/heiwa")));
+        .is_some_and(|path| path.replace('\\', "/").ends_with("/.heiwa/bin/heiwa")));
     assert!(payload
         .get("installed_app")
         .and_then(serde_json::Value::as_str)
-        .is_some_and(|path| path.ends_with("/.heiwa/app/Heiwa.app")));
+        .is_some_and(|path| path.replace('\\', "/").ends_with("/.heiwa/app/Heiwa.app")));
     assert!(payload
         .get("app_bundle_update")
         .and_then(serde_json::Value::as_object)
