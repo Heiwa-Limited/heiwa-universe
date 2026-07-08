@@ -316,7 +316,7 @@ fn open_store() -> Result<AutomationStore> {
 }
 
 fn state_dir() -> PathBuf {
-    let home = dirs::home_dir().unwrap_or_else(|| PathBuf::from("."));
+    let home = crate::home::heiwa_home().unwrap_or_else(|| PathBuf::from("."));
     home.join(".heiwa").join("state")
 }
 

@@ -1,4 +1,5 @@
 mod cli;
+mod home;
 mod cmd;
 
 use anyhow::{anyhow, Result};
@@ -214,7 +215,7 @@ async fn main() -> Result<()> {
                 );
 
                 // Write ~/.heiwa/connection.json with default STDB endpoint
-                let heiwa_dir = dirs::home_dir()
+                let heiwa_dir = crate::home::heiwa_home()
                     .map(|h| h.join(".heiwa"))
                     .expect("HOME must be set");
                 let conn_path = heiwa_dir.join("connection.json");
@@ -2137,10 +2138,10 @@ fn expand_dir_arg(raw: &str, base: Option<&Path>) -> Result<Vec<PathBuf>, String
 
 fn expand_home(raw: &str) -> PathBuf {
     if raw == "~" {
-        return dirs::home_dir().unwrap_or_else(|| PathBuf::from(raw));
+        return crate::home::heiwa_home().unwrap_or_else(|| PathBuf::from(raw));
     }
     if let Some(rest) = raw.strip_prefix("~/") {
-        if let Some(home) = dirs::home_dir() {
+        if let Some(home) = crate::home::heiwa_home() {
             return home.join(rest);
         }
     }

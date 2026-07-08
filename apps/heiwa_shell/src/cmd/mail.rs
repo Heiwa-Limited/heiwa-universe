@@ -101,7 +101,7 @@ impl MailProbe {
     fn detect() -> Self {
         let app_path = PathBuf::from("/System/Applications/Mail.app");
         let app_present = app_path.exists() || PathBuf::from("/Applications/Mail.app").exists();
-        let data_dir = dirs::home_dir()
+        let data_dir = crate::home::heiwa_home()
             .unwrap_or_else(|| PathBuf::from("."))
             .join("Library")
             .join("Mail");
@@ -1009,7 +1009,7 @@ fn flag_value(args: &[String], flag: &str) -> Option<String> {
 }
 
 fn headers_snapshot_path() -> PathBuf {
-    dirs::home_dir()
+    crate::home::heiwa_home()
         .unwrap_or_else(|| PathBuf::from("."))
         .join(".heiwa")
         .join("state")

@@ -477,7 +477,7 @@ fn print_help() {
 
 fn default_app_dirs() -> Vec<PathBuf> {
     let mut dirs_v = vec![PathBuf::from("/Applications")];
-    if let Some(home) = dirs::home_dir() {
+    if let Some(home) = crate::home::heiwa_home() {
         dirs_v.push(home.join("Applications"));
     }
     dirs_v
@@ -498,7 +498,7 @@ fn detect_provider_clis() -> Vec<String> {
 }
 
 fn state_dir() -> PathBuf {
-    let home = dirs::home_dir().unwrap_or_else(|| PathBuf::from("."));
+    let home = crate::home::heiwa_home().unwrap_or_else(|| PathBuf::from("."));
     home.join(".heiwa").join("state")
 }
 

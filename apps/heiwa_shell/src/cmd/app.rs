@@ -1380,10 +1380,7 @@ fn scan_goals_fingerprint() -> HashSet<(String, u64)> {
 }
 
 fn scan_dispatch_ids(subdir: &str) -> HashSet<String> {
-    let home = env::var("HOME")
-        .map(PathBuf::from)
-        .ok()
-        .or_else(dirs::home_dir)
+    let home = crate::home::heiwa_home()
         .unwrap_or_else(|| PathBuf::from("."));
     let dir = home
         .join(".heiwa")
@@ -1861,16 +1858,16 @@ fn browser_probe_payload_from_target(target: &str) -> Result<Value> {
 
 fn default_workspace_path() -> String {
     env::current_dir()
-        .unwrap_or_else(|_| dirs::home_dir().unwrap_or_else(|| PathBuf::from(".")))
+        .unwrap_or_else(|_| crate::home::heiwa_home().unwrap_or_else(|| PathBuf::from(".")))
         .display()
         .to_string()
 }
 
 fn resolve_readonly_user_path(raw: &str) -> Result<PathBuf> {
     let expanded = if raw == "~" {
-        dirs::home_dir().ok_or_else(|| anyhow!("home directory unavailable"))?
+        crate::home::heiwa_home().ok_or_else(|| anyhow!("home directory unavailable"))?
     } else if let Some(rest) = raw.strip_prefix("~/") {
-        dirs::home_dir()
+        crate::home::heiwa_home()
             .ok_or_else(|| anyhow!("home directory unavailable"))?
             .join(rest)
     } else {
@@ -1882,7 +1879,7 @@ fn resolve_readonly_user_path(raw: &str) -> Result<PathBuf> {
         env::current_dir()?.join(expanded)
     };
     let canonical = candidate.canonicalize()?;
-    let home = dirs::home_dir()
+    let home = crate::home::heiwa_home()
         .and_then(|home| home.canonicalize().ok())
         .unwrap_or_else(|| PathBuf::from("/"));
     let temp = env::temp_dir()
@@ -2805,7 +2802,7 @@ fn ollama_models_payload() -> Value {
 }
 
 fn hook_provider_rows() -> Vec<Value> {
-    let home = dirs::home_dir().unwrap_or_else(|| PathBuf::from("."));
+    let home = crate::home::heiwa_home().unwrap_or_else(|| PathBuf::from("."));
     vec![
         json_hook_provider_row(
             "claude",
@@ -3042,7 +3039,7 @@ fn hook_events_from_json_config(config_path: &Path, event_names: &[&str]) -> Vec
 }
 
 fn hook_command_path(command: &str) -> Option<String> {
-    let home = dirs::home_dir().unwrap_or_else(|| PathBuf::from("."));
+    let home = crate::home::heiwa_home().unwrap_or_else(|| PathBuf::from("."));
     command
         .split_whitespace()
         .rev()
@@ -3244,7 +3241,7 @@ fn count_json(dir: &Path) -> i64 {
 }
 
 fn mail_summary() -> Value {
-    let home = dirs::home_dir().unwrap_or_else(|| PathBuf::from("."));
+    let home = crate::home::heiwa_home().unwrap_or_else(|| PathBuf::from("."));
     let data_dir = home.join("Library").join("Mail");
     let data_present = data_dir.exists();
     json!({
@@ -3436,7 +3433,7 @@ fn flag_value(args: &[String], flag: &str) -> Option<String> {
 }
 
 fn state_dir() -> PathBuf {
-    let home = dirs::home_dir().unwrap_or_else(|| PathBuf::from("."));
+    let home = crate::home::heiwa_home().unwrap_or_else(|| PathBuf::from("."));
     home.join(".heiwa").join("state")
 }
 

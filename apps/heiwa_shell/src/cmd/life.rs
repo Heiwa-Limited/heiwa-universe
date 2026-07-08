@@ -382,7 +382,7 @@ fn all_source_probes() -> Vec<SourceProbe> {
 }
 
 fn home_source_probes() -> Vec<SourceProbe> {
-    let Some(home) = dirs::home_dir() else {
+    let Some(home) = crate::home::heiwa_home() else {
         return Vec::new();
     };
     [
@@ -406,7 +406,7 @@ fn home_source_probes() -> Vec<SourceProbe> {
 }
 
 fn claude_source_probes() -> Vec<SourceProbe> {
-    let Some(home) = dirs::home_dir() else {
+    let Some(home) = crate::home::heiwa_home() else {
         return Vec::new();
     };
     let root = home
@@ -421,7 +421,7 @@ fn claude_source_probes() -> Vec<SourceProbe> {
 }
 
 fn codex_source_probes() -> Vec<SourceProbe> {
-    let Some(home) = dirs::home_dir() else {
+    let Some(home) = crate::home::heiwa_home() else {
         return Vec::new();
     };
     let root = home.join(".codex").join("automations");
@@ -705,7 +705,7 @@ fn pending_approvals_summary() -> Vec<Value> {
 }
 
 fn plan_path(name: &str) -> Option<PathBuf> {
-    dirs::home_dir().map(|home| home.join("plans").join("ultimate_devon").join(name))
+    crate::home::heiwa_home().map(|home| home.join("plans").join("ultimate_devon").join(name))
 }
 
 fn parse_work_schedule_row(path: &Option<PathBuf>, date: &str) -> (String, Vec<String>) {

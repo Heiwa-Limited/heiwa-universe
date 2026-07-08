@@ -172,7 +172,7 @@ fn parse_via_sdk(text: &str) -> Result<Value> {
         .ok()
         .filter(|p| p.exists())
         .or_else(|| {
-            let dev = dirs::home_dir()?
+            let dev = crate::home::heiwa_home()?
                 .join("heiwa-universe/packages/heiwa_sdk/heiwa_sdk/intent/parse_time.py");
             dev.exists().then_some(dev)
         })
@@ -184,7 +184,7 @@ fn parse_via_sdk(text: &str) -> Result<Value> {
         .ok()
         .filter(|p| p.exists())
         .or_else(|| {
-            let venv = dirs::home_dir()?.join("heiwa-universe/.venv/bin/python");
+            let venv = crate::home::heiwa_home()?.join("heiwa-universe/.venv/bin/python");
             venv.exists().then_some(venv)
         })
         .unwrap_or_else(|| PathBuf::from("python3"));
@@ -256,10 +256,7 @@ pub fn build_approval_request(
 }
 
 fn requests_dir() -> PathBuf {
-    let home = std::env::var("HOME")
-        .map(PathBuf::from)
-        .ok()
-        .or_else(dirs::home_dir)
+    let home = crate::home::heiwa_home()
         .unwrap_or_else(|| PathBuf::from("."));
     home.join(".heiwa")
         .join("state")

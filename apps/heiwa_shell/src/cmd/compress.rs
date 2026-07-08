@@ -387,10 +387,7 @@ fn sha1_hex(s: &str) -> String {
 }
 
 pub(crate) fn receipts_dir() -> PathBuf {
-    let home = std::env::var("HOME")
-        .map(PathBuf::from)
-        .ok()
-        .or_else(dirs::home_dir)
+    let home = crate::home::heiwa_home()
         .unwrap_or_else(|| PathBuf::from("."));
     home.join(".heiwa")
         .join("state")

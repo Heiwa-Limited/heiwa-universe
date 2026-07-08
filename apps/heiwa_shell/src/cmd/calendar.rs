@@ -20,14 +20,11 @@ const GOOGLE_SYNC_SEMANTICS: &str =
     "full sync stores nextSyncToken; incremental sync handles 410 Gone with scoped wipe + full resync";
 
 fn calendar_state_dir() -> PathBuf {
-    // Honor HOME before dirs::home_dir() (same as approvals::dispatch_dir):
-    // hermetic tests point HOME at a temp dir, and on Windows dirs ignores it.
-    let home = std::env::var("HOME")
-        .map(PathBuf::from)
-        .ok()
-        .or_else(dirs::home_dir)
-        .unwrap_or_else(|| PathBuf::from("."));
-    home.join(".heiwa").join("state").join("calendar")
+    crate::home::heiwa_home()
+        .unwrap_or_else(|| PathBuf::from("."))
+        .join(".heiwa")
+        .join("state")
+        .join("calendar")
 }
 
 fn holds_dir() -> PathBuf {

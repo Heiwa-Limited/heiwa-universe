@@ -30,7 +30,7 @@ fn google_scopes(connector: &str) -> Option<&'static str> {
 }
 
 pub fn secrets_dir() -> PathBuf {
-    dirs::home_dir()
+    crate::home::heiwa_home()
         .unwrap_or_else(|| PathBuf::from("."))
         .join(".heiwa")
         .join("secrets")
@@ -410,7 +410,7 @@ pub(crate) fn google_lane_status(connector: &str) -> &'static str {
 }
 
 pub(crate) fn imap_configured() -> bool {
-    dirs::home_dir()
+    crate::home::heiwa_home()
         .map(|home| home.join(".config").join("himalaya").join("config.toml"))
         .is_some_and(|path| path.exists())
 }
