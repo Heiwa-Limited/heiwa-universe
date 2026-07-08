@@ -1,6 +1,12 @@
 # **The Heiwa Universe: 0-100% Engineering Blueprint & Architecture Master Plan**
 
-> **Objective:** To build a fully autonomous, decentralized, and sovereign AI agent mesh. This document serves as the ultimate source of truth, compiling verified code patterns, deeply researched architectural reasoning, and a sequential implementation plan to build the Heiwa Universe from 0 to 100%.
+> **Status:** Historical swarm blueprint. Superseded by `HEIWA.md`, `AGENTS.md`,
+> `docs/local-self-operation.md`, and `docs/research/competitive-landscape-2026-05.md`
+> for current product, naming, provider, and runtime truth. Do not treat this
+> file as current source of truth.
+>
+> **Original objective:** Build a fully autonomous, decentralized, and sovereign
+> AI agent mesh. Current work should mine this file for historical context only.
 
 ---
 

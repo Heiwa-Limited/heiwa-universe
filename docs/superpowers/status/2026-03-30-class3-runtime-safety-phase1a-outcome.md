@@ -10,22 +10,22 @@ Phase 1A of the Class 3 runtime safety rollout is complete. All four executive a
 
 ## Enforcement Matrix
 
-| Agent | Surface | Posture | Audit Trail |
-| :--- | :--- | :--- | :--- |
-| **Gemini CLI** | `BeforeTool` Hook | Fail-closed, Regex-based | `~/.gemini/runtime-safety/audit.jsonl` |
+| Agent           | Surface           | Posture                      | Audit Trail                                         |
+| :-------------- | :---------------- | :--------------------------- | :-------------------------------------------------- |
+| **Gemini CLI**  | `BeforeTool` Hook | Fail-closed, Regex-based     | `~/.gemini/runtime-safety/audit.jsonl`              |
 | **Claude Code** | `PreToolUse` Hook | Fail-closed, Allowlist-based | `~/.claude/runtime-safety/pretool-YYYY-MM-DD.jsonl` |
-| **Codex** | Config + Wrapper | Launch-hardened | Local session logs |
-| **Antigravity** | Broker Policy | Explicit Deny-by-default | Broker dispatch logs |
+| **Codex**       | Config + Wrapper  | Launch-hardened              | Local session logs                                  |
+| **Antigravity** | Broker Policy     | Explicit Deny-by-default     | Broker dispatch logs                                |
 
 ## Key Achievements
 
-1.  **Fail-Closed Baseline**: Gemini and Claude hooks verified to deny on malformed JSON, checker timeout, or internal policy errors.
-2.  **Surface Coverage**:
-    *   **Shell**: Destructive `rm`, `mkfs`, `dd` patterns blocked.
-    *   **Network**: Outbound mutation (POST/PUT/PATCH) and ambiguous `WebFetch` calls denied by default.
-    *   **File**: Sensitive paths (`~/.ssh`, `~/.gemini`, etc.) protected against unauthorized writes/edits.
-3.  **Honest Posture**: Codex and Antigravity are hardened through their actual runtime surfaces (wrapper/broker) rather than simulated hook parity.
-4.  **Auditability**: Every agent produces a local audit trail documenting block decisions.
+1. **Fail-Closed Baseline**: Gemini and Claude hooks verified to deny on malformed JSON, checker timeout, or internal policy errors.
+2. **Surface Coverage**:
+   - **Shell**: Destructive `rm`, `mkfs`, `dd` patterns blocked.
+   - **Network**: Outbound mutation (POST/PUT/PATCH) and ambiguous `WebFetch` calls denied by default.
+   - **File**: Sensitive paths (`~/.ssh`, `~/.gemini`, etc.) protected against unauthorized writes/edits.
+3. **Honest Posture**: Codex and Antigravity are hardened through their actual runtime surfaces (wrapper/broker) rather than simulated hook parity.
+4. **Auditability**: Every agent produces a local audit trail documenting block decisions.
 
 ## Known Limits (Phase 1A)
 

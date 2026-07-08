@@ -37,7 +37,9 @@ export default function InboxRoute(): JSX.Element {
                   <article>
                     <div class="status-card-head">
                       <h3>{item.title}</h3>
-                      <span class={`status-badge ${priorityClass(item.priority)}`}>
+                      <span
+                        class={`status-badge ${priorityClass(item.priority)}`}
+                      >
                         {item.plane}
                       </span>
                     </div>

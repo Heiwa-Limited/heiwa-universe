@@ -38,26 +38,6 @@ def test_sdk_config_prefers_workspace_root_env(monkeypatch, tmp_path):
     assert module.MONOREPO_ROOT == workspace_root
 
 
-def test_heiwa_360_check_prefers_home_heiwa_universe(monkeypatch, tmp_path):
-    home = tmp_path / "home"
-    workspace_root = _make_repo(home / "heiwa-universe")
-    _make_repo(home / "heiwa")
-    outside = tmp_path / "outside"
-    outside.mkdir()
-
-    monkeypatch.delenv("HEIWA_WORKSPACE_ROOT", raising=False)
-    monkeypatch.delenv("HEIWA_ROOT", raising=False)
-    monkeypatch.delenv("HEIWA_ROOT_DIR", raising=False)
-    monkeypatch.setenv("HOME", str(home))
-
-    module = _load_module(
-        "test_heiwa_360_workspace",
-        REPO_ROOT / "legacy/apps/heiwa_cli/scripts/ops/heiwa_360_check.py",
-    )
-
-    assert module.find_monorepo_root(outside) == workspace_root
-
-
 def test_identity_root_prefers_home_heiwa_universe(monkeypatch, tmp_path):
     home = tmp_path / "home"
     workspace_root = _make_repo(home / "heiwa-universe")

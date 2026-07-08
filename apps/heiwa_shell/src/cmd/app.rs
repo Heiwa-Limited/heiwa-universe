@@ -1,9 +1,12 @@
 use anyhow::{anyhow, Result};
 use base64::engine::general_purpose::STANDARD as BASE64;
 use base64::Engine;
+use heiwa_protocol::{ExecutionScope, RiskClass, ToolLease};
+use heiwa_resource::{ResourcePolicy, ResourceSnapshot, ThermalPressure, WorkClass};
 use serde::Serialize;
 use serde_json::{json, Value};
 use sha1::{Digest, Sha1};
+use std::collections::HashSet;
 use std::env;
 use std::fs;
 use std::net::SocketAddr;
@@ -48,6 +51,7 @@ pub async fn run(args: &[String]) -> Result<()> {
         Some("start") => start(&args[1..]).await,
         Some("update") => update(&args[1..]),
         Some("runtime") => runtime(&args[1..]),
+        Some("api") => api(&args[1..]).await,
         Some("status") => runtime_status(args),
         Some("--help") | Some("-h") | None => {
             if args.iter().any(|arg| arg == "--json") {
@@ -69,32 +73,52 @@ fn update(args: &[String]) -> Result<()> {
     }
 
     let dry_run = has_flag(args, "--dry-run");
+    let json_output = has_flag(args, "--json");
     let source = flag_value(args, "--source").unwrap_or_else(|| "github".to_string());
 
     match source.as_str() {
-        "github" => update_from_github_release(dry_run),
-        "checkout" => update_from_checkout(dry_run),
+        "github" => update_from_github_release(dry_run, json_output),
+        "checkout" => update_from_checkout(dry_run, json_output),
         other => Err(anyhow!(
             "invalid --source value: {other} (expected github or checkout)"
         )),
     }
 }
 
-fn update_from_github_release(dry_run: bool) -> Result<()> {
+fn update_from_github_release(dry_run: bool, json_output: bool) -> Result<()> {
     let install_root = heiwa_install::get_heiwa_dir();
-    println!("heiwa app update");
-    println!("  source_mode: github-release");
-    println!("  source: {GITHUB_RELEASES_URL}");
-    println!("  release_api: {GITHUB_LATEST_RELEASE_API}");
-    println!("  platform: {}", github_release_platform());
-    println!(
-        "  target: {}",
-        install_root.join("bin").join("heiwa").display()
-    );
-    println!("  restart_policy: prompt-before-restart");
-    if dry_run {
-        println!("  dry_run: true");
-        return Ok(());
+    let installed_bin = install_root.join("bin").join("heiwa");
+    if json_output {
+        println!(
+            "{}",
+            json!({
+                "command": "app update",
+                "source_mode": "github-release",
+                "source": GITHUB_RELEASES_URL,
+                "release_api": GITHUB_LATEST_RELEASE_API,
+                "platform": github_release_platform(),
+                "installed_bin": installed_bin.display().to_string(),
+                "restart_policy": "prompt-before-restart",
+                "dry_run": dry_run,
+                "implemented": false,
+                "blocker": "GitHub release update awaits release asset verification",
+            })
+        );
+        if dry_run {
+            return Ok(());
+        }
+    } else {
+        println!("heiwa app update");
+        println!("  source_mode: github-release");
+        println!("  source: {GITHUB_RELEASES_URL}");
+        println!("  release_api: {GITHUB_LATEST_RELEASE_API}");
+        println!("  platform: {}", github_release_platform());
+        println!("  target: {}", installed_bin.display());
+        println!("  restart_policy: prompt-before-restart");
+        if dry_run {
+            println!("  dry_run: true");
+            return Ok(());
+        }
     }
 
     Err(anyhow!(
@@ -102,7 +126,7 @@ fn update_from_github_release(dry_run: bool) -> Result<()> {
     ))
 }
 
-fn update_from_checkout(dry_run: bool) -> Result<()> {
+fn update_from_checkout(dry_run: bool, json_output: bool) -> Result<()> {
     let repo_root = find_repo_root(env::current_dir()?)
         .ok_or_else(|| anyhow!("heiwa app update must run from a heiwa-universe checkout"))?;
     let shell_manifest = repo_root
@@ -117,35 +141,81 @@ fn update_from_checkout(dry_run: bool) -> Result<()> {
     }
 
     let install_root = heiwa_install::get_heiwa_dir();
-    let mut command = Command::new("cargo");
-    command
+    let installed_bin = install_root.join("bin").join("heiwa");
+    let installed_app = install_root.join("app").join("Heiwa.app");
+    let install_command = vec![
+        "cargo".to_string(),
+        "install".to_string(),
+        "--path".to_string(),
+        repo_root
+            .join("apps")
+            .join("heiwa_shell")
+            .display()
+            .to_string(),
+        "--root".to_string(),
+        install_root.display().to_string(),
+        "--locked".to_string(),
+        "--force".to_string(),
+    ];
+    let plan = checkout_update_plan(
+        &repo_root,
+        &installed_bin,
+        &installed_app,
+        dry_run,
+        &install_command,
+    );
+
+    if json_output {
+        println!("{}", serde_json::to_string(&plan)?);
+    } else {
+        println!("heiwa app update");
+        println!("  source_mode: checkout-dev");
+        println!("  source: {}", repo_root.display());
+        println!(
+            "  source_branch: {}",
+            plan["source_branch"].as_str().unwrap_or("unknown")
+        );
+        println!(
+            "  source_commit: {}",
+            plan["source_commit"].as_str().unwrap_or("unknown")
+        );
+        println!(
+            "  source_dirty: {}",
+            plan["source_dirty"].as_bool().unwrap_or(false)
+        );
+        println!("  official_source: GitHub Releases");
+        println!("  target: {}", installed_bin.display());
+        println!("  restart_policy: prompt-before-restart");
+        println!(
+            "  command: cargo install --path apps/heiwa_shell --root ~/.heiwa --locked --force"
+        );
+        if dry_run {
+            println!("  dry_run: true");
+            return Ok(());
+        }
+    }
+
+    if dry_run {
+        return Ok(());
+    }
+
+    let status = Command::new("cargo")
         .arg("install")
         .arg("--path")
         .arg(repo_root.join("apps").join("heiwa_shell"))
         .arg("--root")
         .arg(&install_root)
         .arg("--locked")
-        .arg("--force");
-
-    println!("heiwa app update");
-    println!("  source_mode: checkout-dev");
-    println!("  source: {}", repo_root.display());
-    println!("  official_source: GitHub Releases");
-    println!(
-        "  target: {}",
-        install_root.join("bin").join("heiwa").display()
-    );
-    println!("  command: cargo install --path apps/heiwa_shell --root ~/.heiwa --locked --force");
-    if dry_run {
-        println!("  dry_run: true");
-        return Ok(());
-    }
-
-    let status = command.status()?;
+        .arg("--force")
+        .status()?;
     if !status.success() {
         return Err(anyhow!("cargo install failed with status {status}"));
     }
-    println!("  status: updated");
+    let receipt_path = write_promotion_receipt(&plan)?;
+    if !json_output {
+        println!("  status: updated");
+        println!("  promotion_receipt: {}", receipt_path.display());
+    }
     Ok(())
 }
 
@@ -155,6 +225,267 @@ fn github_release_platform() -> &'static str {
         ("linux", "x86_64") => "linux-x86_64",
         ("windows", "x86_64") => "windows-x86_64",
         _ => "unsupported",
+    }
+}
+
+fn checkout_update_plan(
+    repo_root: &Path,
+    installed_bin: &Path,
+    installed_app: &Path,
+    dry_run: bool,
+    install_command: &[String],
+) -> Value {
+    let state = RuntimeStatus::detect();
+    let pending_approvals = state
+        .approvals_summary
+        .get("pending")
+        .and_then(Value::as_i64)
+        .unwrap_or(0);
+    let live_workers = state
+        .workers_summary
+        .get("live")
+        .and_then(Value::as_i64)
+        .unwrap_or(0);
+    let blocking = pending_approvals > 0;
+    let receipt_id = format!(
+        "heiwa-app-update-{}",
+        chrono::Utc::now().format("%Y%m%dT%H%M%SZ")
+    );
+    let source_branch = git_output(repo_root, &["branch", "--show-current"])
+        .unwrap_or_else(|| "unknown".to_string());
+    let source_commit = git_output(repo_root, &["rev-parse", "--short", "HEAD"])
+        .unwrap_or_else(|| "unknown".to_string());
+    let source_dirty = git_is_dirty(repo_root);
+    let installed_version = installed_heiwa_version(installed_bin);
+    let desktop_bundle = desktop_bundle_source(repo_root);
+    let promotion_receipt = promotion_receipt_plan(
+        &receipt_id,
+        repo_root,
+        &source_branch,
+        &source_commit,
+        source_dirty,
+        installed_bin,
+        &installed_version,
+        installed_app,
+        &desktop_bundle,
+        dry_run,
+    );
+
+    json!({
+        "command": "app update",
+        "source_mode": "checkout-dev",
+        "source": repo_root.display().to_string(),
+        "source_branch": source_branch,
+        "source_commit": source_commit,
+        "source_dirty": source_dirty,
+        "official_source": "GitHub Releases",
+        "installed_bin": installed_bin.display().to_string(),
+        "installed_version": installed_version,
+        "installed_app": installed_app.display().to_string(),
+        "installed_app_present": installed_app.join("Contents").join("MacOS").join("Heiwa").is_file(),
+        "desktop_bundle_source": desktop_bundle,
+        "app_bundle_update": {
+            "wired": false,
+            "blocker": "checkout update currently installs ~/.heiwa/bin/heiwa only; Heiwa.app bundle promotion is still handled by install/app-bundle logic and needs explicit update wiring plus receipt",
+        },
+        "install_command": install_command,
+        "restart_policy": "prompt-before-restart",
+        "restart_required": true,
+        "dry_run": dry_run,
+        "active_work": {
+            "pending_approvals": pending_approvals,
+            "live_workers": live_workers,
+            "blocking_restart": blocking,
+            "classification": if blocking { "blocking" } else { "none_or_pausable" },
+        },
+        "verification_commands": [
+            "heiwa doctor",
+            "heiwa app runtime status --json",
+            "curl -fsS http://127.0.0.1:7474/status/health",
+            "curl -fsS http://127.0.0.1:7474/api/v1/capabilities",
+        ],
+        "promotion_receipt": promotion_receipt,
+    })
+}
+
+fn desktop_bundle_source(repo_root: &Path) -> Value {
+    let bundle = repo_root
+        .join("target")
+        .join("release")
+        .join("bundle")
+        .join("macos")
+        .join("Heiwa.app");
+    let executable = bundle.join("Contents").join("MacOS").join("Heiwa");
+    json!({
+        "path": bundle.display().to_string(),
+        "present": executable.is_file(),
+        "executable": executable.display().to_string(),
+    })
+}
+
+#[allow(clippy::too_many_arguments)]
+fn promotion_receipt_plan(
+    receipt_id: &str,
+    repo_root: &Path,
+    source_branch: &str,
+    source_commit: &str,
+    source_dirty: bool,
+    installed_bin: &Path,
+    installed_version: &Value,
+    installed_app: &Path,
+    desktop_bundle: &Value,
+    dry_run: bool,
+) -> Value {
+    let receipt_path = heiwa_install::get_heiwa_dir()
+        .join("state")
+        .join("evidence")
+        .join("promotion")
+        .join(format!("{receipt_id}.json"));
+
+    let shell_authenticated = heiwa_stdb::spacetime_shell_auth_present();
+    json!({
+        "schema_version": "heiwa_promotion_receipt_v1",
+        "receipt_id": receipt_id,
+        "event": "heiwa.app.update.checkout",
+        "plane": "evidence",
+        "created_at": chrono::Utc::now().to_rfc3339(),
+        "would_write": !dry_run,
+        "receipt_path": receipt_path.display().to_string(),
+        "source": {
+            "kind": "checkout",
+            "path": repo_root.display().to_string(),
+            "branch": source_branch,
+            "commit": source_commit,
+            "dirty": source_dirty,
+        },
+        "target": {
+            "installed_bin": installed_bin.display().to_string(),
+            "installed_version_before": installed_version,
+            "installed_app": installed_app.display().to_string(),
+            "desktop_bundle_source": desktop_bundle,
+        },
+        "codesign": codesign_probe(desktop_bundle),
+        "runtime_probes": runtime_probe_contracts(),
+        "stdb_mirror": {
+            "configured": true,
+            "server": "maincloud",
+            "url": "https://maincloud.spacetimedb.com",
+            "auth_mode": "spacetime_cli_login",
+            "auth_source": "spacetime login show",
+            "shell_authenticated": shell_authenticated,
+            "token_present": shell_authenticated,
+            "status": if shell_authenticated { "ready_via_spacetime_cli" } else { "local_only_shell_login_missing" },
+        },
+        "restart_policy": "prompt-before-restart",
+    })
+}
+
+fn runtime_probe_contracts() -> Value {
+    json!([
+        {
+            "name": "health",
+            "method": "GET",
+            "endpoint": "/status/health",
+            "expected_content_type": "application/json",
+            "expected_json": true,
+        },
+        {
+            "name": "capabilities_contract",
+            "method": "GET",
+            "endpoint": "/api/v1/capabilities",
+            "expected_content_type": "application/json",
+            "expected_json": true,
+        },
+        {
+            "name": "runtime_snapshot",
+            "method": "GET",
+            "endpoint": "/api/v1/runtime/snapshot",
+            "expected_content_type": "application/json",
+            "expected_json": true,
+        },
+    ])
+}
+
+fn codesign_probe(desktop_bundle: &Value) -> Value {
+    let Some(path) = desktop_bundle.get("path").and_then(Value::as_str) else {
+        return json!({"status":"unknown","reason":"desktop bundle path missing"});
+    };
+    if !Path::new(path).exists() {
+        return json!({"status":"not_present","path":path});
+    }
+    if env::consts::OS != "macos" {
+        return json!({"status":"skipped","path":path,"reason":"codesign probe is macOS-only"});
+    }
+    match Command::new("codesign")
+        .args(["--verify", "--deep", "--strict", path])
+        .output()
+    {
+        Ok(output) => json!({
+            "status": if output.status.success() { "verified" } else { "failed" },
+            "path": path,
+            "stdout": String::from_utf8_lossy(&output.stdout).trim(),
+            "stderr": String::from_utf8_lossy(&output.stderr).trim(),
+        }),
+        Err(error) => json!({
+            "status": "unavailable",
+            "path": path,
+            "error": error.to_string(),
+        }),
+    }
+}
+
+fn write_promotion_receipt(plan: &Value) -> Result<PathBuf> {
+    let receipt = plan
+        .get("promotion_receipt")
+        .ok_or_else(|| anyhow!("promotion receipt missing from update plan"))?;
+    let path = receipt
+        .get("receipt_path")
+        .and_then(Value::as_str)
+        .ok_or_else(|| anyhow!("promotion receipt path missing from update plan"))?;
+    let path = PathBuf::from(path);
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent)?;
+    }
+    fs::write(&path, serde_json::to_vec_pretty(receipt)?)?;
+    Ok(path)
+}
+
+fn git_output(repo_root: &Path, args: &[&str]) -> Option<String> {
+    let output = Command::new("git")
+        .args(args)
+        .current_dir(repo_root)
+        .output()
+        .ok()?;
+    if !output.status.success() {
+        return None;
+    }
+    let value = String::from_utf8_lossy(&output.stdout).trim().to_string();
+    if value.is_empty() {
+        None
+    } else {
+        Some(value)
+    }
+}
+
+fn git_is_dirty(repo_root: &Path) -> bool {
+    git_output(repo_root, &["status", "--porcelain=v1"])
+        .is_some_and(|status| !status.trim().is_empty())
+}
+
+fn installed_heiwa_version(installed_bin: &Path) -> Value {
+    let output = Command::new(installed_bin).arg("--version").output();
+    match output {
+        Ok(output) if output.status.success() => {
+            json!(String::from_utf8_lossy(&output.stdout).trim())
+        }
+        Ok(output) => json!({
+            "status": "error",
+            "stderr": String::from_utf8_lossy(&output.stderr).trim(),
+        }),
+        Err(err) => json!({
+            "status": "unavailable",
+            "error": err.to_string(),
+        }),
     }
 }
 
@@ -182,6 +513,131 @@ fn runtime(args: &[String]) -> Result<()> {
         }
         Some(other) => Err(anyhow!("unknown app runtime command: {other}")),
     }
+}
+
+async fn api(args: &[String]) -> Result<()> {
+    if has_flag(args, "--help") || has_flag(args, "-h") {
+        print_api_help();
+        return Ok(());
+    }
+    let method = args
+        .first()
+        .map(|raw| raw.to_ascii_uppercase())
+        .ok_or_else(|| anyhow!("usage: heiwa app api get|post <path> [--port N] [--body JSON]"))?;
+    if method != "GET" && method != "POST" {
+        return Err(anyhow!(
+            "unknown app api method: {method} (expected get or post)"
+        ));
+    }
+    let path = args
+        .get(1)
+        .filter(|path| path.starts_with('/'))
+        .ok_or_else(|| anyhow!("app api path must start with /, e.g. /api/v1/session"))?;
+    let port = parse_port(args)?;
+    let dry_run = has_flag(args, "--dry-run");
+    let json_output = has_flag(args, "--json");
+    let body_raw = flag_value(args, "--body");
+    let body_value = match body_raw.as_deref() {
+        Some(raw) => read_api_body(raw)?,
+        None => Value::Null,
+    };
+    let body_payload = if method == "POST" {
+        Some(serde_json::to_string(&body_value)?)
+    } else {
+        None
+    };
+    let url = format!("http://127.0.0.1:{port}{path}");
+
+    if dry_run {
+        let payload = json!({
+            "command": "app api",
+            "method": method,
+            "path": path,
+            "url": url,
+            "dry_run": true,
+            "body": body_value,
+            "next": "drop --dry-run to call the running local Heiwa.app runtime",
+        });
+        if json_output {
+            println!("{payload}");
+        } else {
+            println!("heiwa app api");
+            println!("  method: {}", payload["method"].as_str().unwrap_or("?"));
+            println!("  url: {url}");
+            println!("  dry_run: true");
+        }
+        return Ok(());
+    }
+
+    let response = call_local_app_api(&method, path, port, body_payload.as_deref()).await?;
+    if response.status >= 400 {
+        return Err(anyhow!(
+            "app api {} {} returned HTTP {}: {}",
+            method,
+            path,
+            response.status,
+            response.body
+        ));
+    }
+    println!("{}", response.body);
+    Ok(())
+}
+
+fn read_api_body(raw: &str) -> Result<Value> {
+    let body = if let Some(path) = raw.strip_prefix('@') {
+        fs::read_to_string(path).map_err(|error| anyhow!("cannot read --body {raw}: {error}"))?
+    } else {
+        raw.to_string()
+    };
+    serde_json::from_str(&body).map_err(|error| anyhow!("--body must be JSON: {error}"))
+}
+
+struct ApiResponse {
+    status: u16,
+    body: String,
+}
+
+async fn call_local_app_api(
+    method: &str,
+    path: &str,
+    port: u16,
+    body: Option<&str>,
+) -> Result<ApiResponse> {
+    let mut stream = TcpStream::connect(("127.0.0.1", port))
+        .await
+        .map_err(|error| {
+            anyhow!("cannot connect to Heiwa.app runtime on 127.0.0.1:{port}: {error}")
+        })?;
+    let body = body.unwrap_or("");
+    let request = if method == "POST" {
+        format!(
+            "POST {path} HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\nAccept: application/json\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+            body.len()
+        )
+    } else {
+        format!(
+            "GET {path} HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\nAccept: application/json\r\nConnection: close\r\n\r\n"
+        )
+    };
+    stream.write_all(request.as_bytes()).await?;
+    let mut raw = Vec::new();
+    stream.read_to_end(&mut raw).await?;
+    parse_api_response(&raw)
+}
+
+fn parse_api_response(raw: &[u8]) -> Result<ApiResponse> {
+    let Some(split) = raw.windows(4).position(|window| window == b"\r\n\r\n") else {
+        return Err(anyhow!("app api response missing HTTP header separator"));
+    };
+    let head = String::from_utf8_lossy(&raw[..split]);
+    let status = head
+        .lines()
+        .next()
+        .and_then(|line| line.split_whitespace().nth(1))
+        .and_then(|code| code.parse::<u16>().ok())
+        .ok_or_else(|| anyhow!("app api response missing HTTP status"))?;
+    let body = String::from_utf8_lossy(&raw[split + 4..]).to_string();
+    Ok(ApiResponse { status, body })
 }
 
 async fn start(args: &[String]) -> Result<()> {
@@ -426,16 +882,22 @@ impl RuntimeStatus {
 }
 
 async fn handle_connection(mut stream: TcpStream, started_at: Arc<String>) -> Result<()> {
+    let local_port = stream
+        .local_addr()
+        .map(|addr| addr.port())
+        .unwrap_or(DEFAULT_PORT);
     let (request, body) = read_http_request_and_body(&mut stream).await?;
     if request.is_empty() {
         return Ok(());
     }
 
     if is_websocket_request(&request) {
-        return handle_websocket(stream, &request, started_at).await;
+        let path = request_path(&request).unwrap_or("/").to_string();
+        return handle_websocket(stream, &request, started_at, &path).await;
     }
 
     let method = request_method(&request).unwrap_or("GET");
+    let target = request_target(&request).unwrap_or("/");
     let path = request_path(&request).unwrap_or("/");
     if method == "OPTIONS" {
         return write_response(&mut stream, 204, "text/plain", Vec::new(), false).await;
@@ -444,7 +906,11 @@ async fn handle_connection(mut stream: TcpStream, started_at: Arc<String>) -> Re
 
     if method == "POST" && path == "/api/v1/repl" {
         let parsed_body: Value = serde_json::from_str(&body).unwrap_or_else(|_| json!({}));
-        let prompt = parsed_body.get("prompt").and_then(Value::as_str).unwrap_or("").to_string();
+        let prompt = parsed_body
+            .get("prompt")
+            .and_then(Value::as_str)
+            .unwrap_or("")
+            .to_string();
 
         let payload = match crate::execute_repl_turn(&prompt).await {
             Ok((response, trace)) => {
@@ -477,6 +943,137 @@ async fn handle_connection(mut stream: TcpStream, started_at: Arc<String>) -> Re
         .await;
     }
 
+    if method == "POST" && path == "/api/v1/repl/stream" {
+        let parsed_body: Value = serde_json::from_str(&body).unwrap_or_else(|_| json!({}));
+        let prompt = parsed_body
+            .get("prompt")
+            .and_then(Value::as_str)
+            .unwrap_or("")
+            .to_string();
+        if prompt.trim().is_empty() {
+            return write_response(
+                &mut stream,
+                400,
+                "application/json",
+                json!({"ok": false, "error": {"code": "empty_prompt"}})
+                    .to_string()
+                    .into_bytes(),
+                false,
+            )
+            .await;
+        }
+        return serve_repl_stream(stream, prompt).await;
+    }
+
+    if method == "POST" && path == "/api/v1/calendar/holds" {
+        let parsed_body: Value = serde_json::from_str(&body).unwrap_or_else(|_| json!({}));
+        let (status, payload) = match crate::cmd::calendar::create_hold(&parsed_body) {
+            Ok(hold) => (201, json!({"ok": true, "data": {"hold": hold}})),
+            Err(error) => (
+                400,
+                json!({"ok": false, "error": {"code": "invalid_hold", "message": error.to_string()}}),
+            ),
+        };
+        return write_response(
+            &mut stream,
+            status,
+            "application/json",
+            payload.to_string().into_bytes(),
+            false,
+        )
+        .await;
+    }
+
+    if method == "POST" && path == "/api/v1/route/preview" {
+        let parsed_body: Value = serde_json::from_str(&body).unwrap_or_else(|_| json!({}));
+        let prompt = parsed_body
+            .get("prompt")
+            .and_then(Value::as_str)
+            .unwrap_or("")
+            .trim()
+            .to_string();
+        if prompt.is_empty() {
+            return write_response(
+                &mut stream,
+                400,
+                "application/json",
+                json!({"ok": false, "error": {"code": "empty_prompt"}})
+                    .to_string()
+                    .into_bytes(),
+                false,
+            )
+            .await;
+        }
+        let payload = crate::preview_route_payload(&prompt).await;
+        return write_response(
+            &mut stream,
+            200,
+            "application/json",
+            json!({"ok": true, "data": payload})
+                .to_string()
+                .into_bytes(),
+            false,
+        )
+        .await;
+    }
+
+    if method == "POST" && path == "/api/v1/agents/dispatch" {
+        let parsed_body: Value = serde_json::from_str(&body).unwrap_or_else(|_| json!({}));
+        let task_prompt = parsed_body
+            .get("task")
+            .and_then(Value::as_str)
+            .unwrap_or("")
+            .trim()
+            .to_string();
+        if task_prompt.is_empty() {
+            return write_response(
+                &mut stream,
+                400,
+                "application/json",
+                json!({"ok": false, "error": {"code": "empty_task"}})
+                    .to_string()
+                    .into_bytes(),
+                false,
+            )
+            .await;
+        }
+        let provider = parsed_body
+            .get("provider")
+            .and_then(Value::as_str)
+            .unwrap_or("auto")
+            .to_string();
+        let model = parsed_body
+            .get("model")
+            .and_then(Value::as_str)
+            .unwrap_or("router-selected")
+            .to_string();
+        let task_id = format!("sa-{}", std::process::id());
+
+        // Spawn background task
+        tokio::spawn(async move {
+            let _ = crate::execute_repl_turn(&task_prompt).await;
+        });
+
+        return write_response(
+            &mut stream,
+            202,
+            "application/json",
+            json!( {
+                "ok": true,
+                "data": {
+                    "task_id": task_id,
+                    "provider": provider,
+                    "model": model,
+                    "status": "accepted",
+                }
+            })
+            .to_string()
+            .into_bytes(),
+            false,
+        )
+        .await;
+    }
+
     if method != "GET" && !head_only {
         return write_response(
             &mut stream,
@@ -490,7 +1087,70 @@ async fn handle_connection(mut stream: TcpStream, started_at: Arc<String>) -> Re
         .await;
     }
 
-    if let Some(payload) = api_payload(path, &started_at) {
+    if path == "/api/v1/files/tree" {
+        let payload = match files_tree_payload_from_target(target) {
+            Ok(data) => json!({"ok": true, "data": data}),
+            Err(error) => {
+                json!({"ok": false, "error": {"code": "files_tree_failed", "message": error.to_string()}})
+            }
+        };
+        return write_response(
+            &mut stream,
+            if payload.get("ok").and_then(Value::as_bool) == Some(true) {
+                200
+            } else {
+                400
+            },
+            "application/json",
+            payload.to_string().into_bytes(),
+            head_only,
+        )
+        .await;
+    }
+
+    if path == "/api/v1/files/preview" {
+        let payload = match file_preview_payload_from_target(target) {
+            Ok(data) => json!({"ok": true, "data": data}),
+            Err(error) => {
+                json!({"ok": false, "error": {"code": "file_preview_failed", "message": error.to_string()}})
+            }
+        };
+        return write_response(
+            &mut stream,
+            if payload.get("ok").and_then(Value::as_bool) == Some(true) {
+                200
+            } else {
+                400
+            },
+            "application/json",
+            payload.to_string().into_bytes(),
+            head_only,
+        )
+        .await;
+    }
+
+    if path == "/api/v1/browser/probe" {
+        let payload = match browser_probe_payload_from_target(target) {
+            Ok(data) => json!({"ok": true, "data": data}),
+            Err(error) => {
+                json!({"ok": false, "error": {"code": "browser_probe_failed", "message": error.to_string()}})
+            }
+        };
+        return write_response(
+            &mut stream,
+            if payload.get("ok").and_then(Value::as_bool) == Some(true) {
+                200
+            } else {
+                400
+            },
+            "application/json",
+            payload.to_string().into_bytes(),
+            head_only,
+        )
+        .await;
+    }
+
+    if let Some(payload) = api_payload_for_port(path, &started_at, local_port) {
         return write_response(
             &mut stream,
             200,
@@ -558,6 +1218,7 @@ async fn handle_websocket(
     mut stream: TcpStream,
     request: &str,
     started_at: Arc<String>,
+    path: &str,
 ) -> Result<()> {
     let key = header_value(request, "sec-websocket-key")
         .ok_or_else(|| anyhow!("missing websocket key"))?;
@@ -570,6 +1231,10 @@ async fn handle_websocket(
          \r\n"
     );
     stream.write_all(response.as_bytes()).await?;
+
+    if path == "/ws/v1/events" {
+        return events_loop(stream).await;
+    }
 
     let mut ticker = time::interval(Duration::from_secs(5));
     loop {
@@ -586,6 +1251,160 @@ async fn handle_websocket(
         }
     }
     Ok(())
+}
+
+async fn events_loop(mut stream: TcpStream) -> Result<()> {
+    let mut last_pending: HashSet<String> = HashSet::new();
+    let mut last_decided: HashSet<String> = HashSet::new();
+    let mut last_goals_fingerprint: HashSet<(String, u64)> = HashSet::new();
+    let mut first = true;
+    let mut heartbeat_counter: u32 = 0;
+    let mut ticker = time::interval(Duration::from_secs(2));
+
+    loop {
+        ticker.tick().await;
+        let pending = scan_dispatch_ids("requests");
+        let decided = scan_dispatch_ids("approvals/decisions");
+        let goals_fp = scan_goals_fingerprint();
+        let ts = chrono::Utc::now().to_rfc3339();
+
+        if first {
+            let payload = json!({
+                "event": "events_initial",
+                "ts_utc": ts,
+                "scope": "approvals",
+                "payload": {
+                    "pending_count": pending.len(),
+                    "decided_count": decided.len(),
+                    "goals_count": goals_fp.len(),
+                }
+            });
+            if write_ws_text(&mut stream, &payload.to_string())
+                .await
+                .is_err()
+            {
+                return Ok(());
+            }
+            first = false;
+        } else {
+            let mut emitted = false;
+            for id in pending.difference(&last_pending) {
+                let payload = json!({
+                    "event": "dispatch_request_appeared",
+                    "ts_utc": ts,
+                    "scope": "approvals",
+                    "payload": { "id": id }
+                });
+                if write_ws_text(&mut stream, &payload.to_string())
+                    .await
+                    .is_err()
+                {
+                    return Ok(());
+                }
+                emitted = true;
+            }
+            for id in decided.difference(&last_decided) {
+                let payload = json!({
+                    "event": "dispatch_request_decided",
+                    "ts_utc": ts,
+                    "scope": "approvals",
+                    "payload": { "id": id }
+                });
+                if write_ws_text(&mut stream, &payload.to_string())
+                    .await
+                    .is_err()
+                {
+                    return Ok(());
+                }
+                emitted = true;
+            }
+            if goals_fp != last_goals_fingerprint {
+                let payload = json!({
+                    "event": "goal_updated",
+                    "ts_utc": ts,
+                    "scope": "goals",
+                    "payload": { "count": goals_fp.len() }
+                });
+                if write_ws_text(&mut stream, &payload.to_string())
+                    .await
+                    .is_err()
+                {
+                    return Ok(());
+                }
+                emitted = true;
+            }
+            heartbeat_counter += 1;
+            if !emitted && heartbeat_counter >= 15 {
+                let payload = json!({ "event": "heartbeat", "ts_utc": ts });
+                if write_ws_text(&mut stream, &payload.to_string())
+                    .await
+                    .is_err()
+                {
+                    return Ok(());
+                }
+                heartbeat_counter = 0;
+            } else if emitted {
+                heartbeat_counter = 0;
+            }
+        }
+
+        last_pending = pending;
+        last_decided = decided;
+        last_goals_fingerprint = goals_fp;
+    }
+}
+
+fn scan_goals_fingerprint() -> HashSet<(String, u64)> {
+    let dir = crate::cmd::goal::goals_dir();
+    let mut out = HashSet::new();
+    let Ok(entries) = fs::read_dir(dir) else {
+        return out;
+    };
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if path.extension().and_then(|e| e.to_str()) != Some("json") {
+            continue;
+        }
+        let Some(stem) = path.file_stem().and_then(|s| s.to_str()) else {
+            continue;
+        };
+        let mtime = fs::metadata(&path)
+            .ok()
+            .and_then(|m| m.modified().ok())
+            .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+            .map(|d| d.as_secs())
+            .unwrap_or(0);
+        out.insert((stem.to_string(), mtime));
+    }
+    out
+}
+
+fn scan_dispatch_ids(subdir: &str) -> HashSet<String> {
+    let home = crate::home::heiwa_home()
+        .unwrap_or_else(|| PathBuf::from("."));
+    let dir = home
+        .join(".heiwa")
+        .join("state")
+        .join("dispatch")
+        .join(subdir);
+    scan_dispatch_ids_in(&dir)
+}
+
+fn scan_dispatch_ids_in(dir: &Path) -> HashSet<String> {
+    let mut ids = HashSet::new();
+    let Ok(entries) = fs::read_dir(dir) else {
+        return ids;
+    };
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if path.extension().and_then(|e| e.to_str()) != Some("json") {
+            continue;
+        }
+        if let Some(stem) = path.file_stem().and_then(|s| s.to_str()) {
+            ids.insert(stem.to_string());
+        }
+    }
+    ids
 }
 
 async fn write_ws_text(stream: &mut TcpStream, text: &str) -> Result<()> {
@@ -626,6 +1445,48 @@ async fn serve_static(stream: &mut TcpStream, path: &str, head_only: bool) -> Re
     write_response(stream, 200, content_type(&file), bytes, head_only).await
 }
 
+/// Serve one REPL turn as Server-Sent Events over the raw socket.
+///
+/// The hand-rolled server closes every connection after one exchange, so the
+/// body is EOF-terminated: no Content-Length, no chunked framing needed.
+async fn serve_repl_stream(mut stream: TcpStream, prompt: String) -> Result<()> {
+    let header = "HTTP/1.1 200 OK\r\n\
+         Content-Type: text/event-stream\r\n\
+         Cache-Control: no-store\r\n\
+         Access-Control-Allow-Origin: *\r\n\
+         Access-Control-Allow-Headers: content-type, authorization\r\n\
+         Connection: close\r\n\
+         \r\n";
+    stream.write_all(header.as_bytes()).await?;
+
+    let (tx, mut rx) = tokio::sync::mpsc::channel::<crate::ReplStreamEvent>(64);
+    tokio::spawn(async move {
+        crate::execute_repl_turn_streaming(&prompt, tx).await;
+    });
+
+    while let Some(event) = rx.recv().await {
+        let (name, data, terminal) = match event {
+            crate::ReplStreamEvent::Route(value) => ("route", value.to_string(), false),
+            crate::ReplStreamEvent::Token(text) => {
+                ("token", json!({ "text": text }).to_string(), false)
+            }
+            crate::ReplStreamEvent::Done(value) => ("done", value.to_string(), true),
+            crate::ReplStreamEvent::Error(message) => {
+                ("error", json!({ "message": message }).to_string(), true)
+            }
+        };
+        let frame = format!("event: {name}\ndata: {data}\n\n");
+        if stream.write_all(frame.as_bytes()).await.is_err() {
+            break;
+        }
+        if terminal {
+            break;
+        }
+    }
+    let _ = stream.flush().await;
+    Ok(())
+}
+
 async fn write_response(
     stream: &mut TcpStream,
     status: u16,
@@ -635,7 +1496,9 @@ async fn write_response(
 ) -> Result<()> {
     let status_text = match status {
         200 => "OK",
+        201 => "Created",
         204 => "No Content",
+        400 => "Bad Request",
         404 => "Not Found",
         405 => "Method Not Allowed",
         _ => "OK",
@@ -659,7 +1522,12 @@ async fn write_response(
     Ok(())
 }
 
+#[cfg(test)]
 fn api_payload(path: &str, started_at: &str) -> Option<Value> {
+    api_payload_for_port(path, started_at, DEFAULT_PORT)
+}
+
+fn api_payload_for_port(path: &str, started_at: &str, app_port: u16) -> Option<Value> {
     let data = match path {
         "/status/health" => json!({
             "status": "ok",
@@ -668,23 +1536,38 @@ fn api_payload(path: &str, started_at: &str) -> Option<Value> {
             "notes": ["heiwa-shell local app runtime"],
         }),
         "/api/runtime/snapshot" | "/api/v1/runtime/snapshot" => snapshot(started_at),
+        "/api/v1/resource" => resource_payload(),
         "/api/v1/session" => json!({
             "operator_id": env::var("USER").unwrap_or_else(|_| "local-operator".to_string()),
             "hostname": hostname_string(),
             "runtime_version": env!("CARGO_PKG_VERSION"),
             "channel": "stable",
             "default_route_role": "local_first",
-            "app_url": format!("http://127.0.0.1:{DEFAULT_PORT}/"),
+            "app_url": format!("http://127.0.0.1:{app_port}/"),
         }),
         "/api/v1/providers" => json!({ "providers": provider_rows() }),
         "/api/v1/routes" => json!({ "routes": route_rows() }),
         "/api/v1/hooks" => json!({ "providers": hook_provider_rows(), "summary": hooks_summary() }),
         "/api/v1/missions" => json!({ "missions": [], "cursor": null }),
         "/api/v1/approvals" => json!({ "approvals": approval_rows() }),
+        "/api/v1/approvals/summary" => crate::cmd::approvals::pending_approvals_summary_payload(),
+        "/api/v1/life/today" => crate::cmd::life::today_payload(),
+        "/api/v1/life/freshness" => crate::cmd::life::freshness_payload(),
+        "/api/v1/calendar/summary" => crate::cmd::calendar::summary_payload(),
+        "/api/v1/mail/summary" => crate::cmd::mail::summary_payload(),
+        "/api/v1/automations" => crate::cmd::auto::automations_payload(),
+        "/api/v1/receipts" => receipts_payload_for_state_dir(&state_dir()),
+        "/api/v1/connectors" => crate::cmd::connectors::connectors_payload(),
+        "/api/v1/goals" => crate::cmd::goal::goals_payload(),
+        "/api/v1/compress/summary" => crate::cmd::compress::compress_summary_payload(),
         "/api/v1/rate-groups" => json!({ "rate_groups": rate_group_rows() }),
         "/api/v1/inbox" => {
             let state_dir = state_dir();
-            json!({ "items": inbox_items_for_state_dir(&state_dir), "cursor": null })
+            let mut items = inbox_items_for_state_dir(&state_dir);
+            items.extend(life_inbox_items());
+            sort_values_by_time_desc(&mut items, "occurred_at");
+            items.truncate(80);
+            json!({ "items": items, "cursor": null })
         }
         "/api/v1/history" => {
             let state_dir = state_dir();
@@ -693,11 +1576,339 @@ fn api_payload(path: &str, started_at: &str) -> Option<Value> {
         "/api/v1/traces" => json!({ "traces": [] }),
         "/api/v1/memory" => json!({ "entries": [] }),
         "/api/v1/agents" => json!({ "agents": worker_agent_rows() }),
+        "/api/v1/agents/active" => json!({ "tasks": [] }),
+        "/api/v1/capabilities" => capabilities_payload(),
         "/api/v1/crons" => json!({ "crons": [] }),
         "/api/v1/cells/catalog" => json!({ "cells": [] }),
+        "/api/v1/providers/ollama/models" => ollama_models_payload(),
         _ => return None,
     };
     Some(json!({ "ok": true, "data": data }))
+}
+
+const RECEIPT_SCAN_LIMIT: usize = 120;
+
+fn receipts_payload_for_state_dir(state_dir: &Path) -> Value {
+    let mut counts = serde_json::Map::new();
+    let mut receipts = Vec::new();
+
+    for (lane, dir) in receipt_lanes(state_dir) {
+        let lane_receipts = scan_receipt_lane(state_dir, lane, &dir);
+        counts.insert(lane.to_string(), json!(lane_receipts.len()));
+        receipts.extend(lane_receipts);
+    }
+
+    receipts.sort_by(|a, b| {
+        b.get("created_at")
+            .and_then(Value::as_str)
+            .unwrap_or("")
+            .cmp(a.get("created_at").and_then(Value::as_str).unwrap_or(""))
+            .then_with(|| {
+                b.get("modified_unix")
+                    .and_then(Value::as_u64)
+                    .cmp(&a.get("modified_unix").and_then(Value::as_u64))
+            })
+    });
+    let total = receipts.len();
+    let truncated = receipts.len() > RECEIPT_SCAN_LIMIT;
+    receipts.truncate(RECEIPT_SCAN_LIMIT);
+    counts.insert("total".to_string(), json!(total));
+
+    json!({
+        "command": "receipts summary",
+        "state_dir": state_dir.display().to_string(),
+        "counts": counts,
+        "receipts": receipts,
+        "truncated": truncated,
+        "limit": RECEIPT_SCAN_LIMIT,
+        "next": [
+            "heiwa calendar status --json",
+            "heiwa auto status --json",
+            "heiwa mail status --json"
+        ],
+    })
+}
+
+fn receipt_lanes(state_dir: &Path) -> Vec<(&'static str, PathBuf)> {
+    vec![
+        ("calendar", state_dir.join("calendar").join("receipts")),
+        (
+            "automations",
+            state_dir.join("automations").join("receipts"),
+        ),
+        ("mail", state_dir.join("mail").join("receipts")),
+        ("promotion", state_dir.join("evidence").join("promotion")),
+        ("compress", state_dir.join("evidence").join("compress")),
+        ("models", state_dir.join("models").join("receipts")),
+        ("model", state_dir.join("model").join("receipts")),
+    ]
+}
+
+fn scan_receipt_lane(state_dir: &Path, lane: &str, dir: &Path) -> Vec<Value> {
+    let Ok(entries) = fs::read_dir(dir) else {
+        return Vec::new();
+    };
+    let mut rows = Vec::new();
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if path.extension().and_then(|ext| ext.to_str()) != Some("json") {
+            continue;
+        }
+        let metadata = entry.metadata().ok();
+        let modified_unix = metadata
+            .as_ref()
+            .and_then(|m| m.modified().ok())
+            .and_then(|time| time.duration_since(std::time::UNIX_EPOCH).ok())
+            .map(|duration| duration.as_secs());
+        let modified_at = metadata
+            .as_ref()
+            .and_then(|m| m.modified().ok())
+            .map(|time| chrono::DateTime::<chrono::Utc>::from(time).to_rfc3339());
+        let size_bytes = metadata.as_ref().map(|m| m.len());
+        let relative_path = path
+            .strip_prefix(state_dir)
+            .ok()
+            .map(|p| p.display().to_string())
+            .unwrap_or_else(|| path.display().to_string());
+        let raw = fs::read_to_string(&path);
+        let (data, parse_error) = match raw {
+            Ok(raw) => match serde_json::from_str::<Value>(&raw) {
+                Ok(value) => (value, None),
+                Err(error) => (json!({}), Some(error.to_string())),
+            },
+            Err(error) => (json!({}), Some(error.to_string())),
+        };
+        let created_at = receipt_created_at(&data)
+            .or(modified_at.as_deref())
+            .unwrap_or("unknown")
+            .to_string();
+        rows.push(json!({
+            "lane": lane,
+            "receipt_id": receipt_id_from_value(&data, &path),
+            "kind": data.get("kind").and_then(Value::as_str)
+                .or_else(|| data.get("schema_version").and_then(Value::as_str))
+                .unwrap_or("unknown"),
+            "event": data.get("event").and_then(Value::as_str),
+            "created_at": created_at,
+            "path": path.display().to_string(),
+            "relative_path": relative_path,
+            "size_bytes": size_bytes,
+            "modified_unix": modified_unix,
+            "parse_error": parse_error,
+            "data": data,
+        }));
+    }
+    rows
+}
+
+fn receipt_created_at(value: &Value) -> Option<&str> {
+    [
+        "created_at",
+        "scanned_at",
+        "completed_at",
+        "started_at",
+        "ts",
+        "timestamp",
+    ]
+    .iter()
+    .find_map(|field| value.get(*field).and_then(Value::as_str))
+}
+
+fn receipt_id_from_value(value: &Value, path: &Path) -> String {
+    value
+        .get("receipt_id")
+        .and_then(Value::as_str)
+        .or_else(|| value.get("id").and_then(Value::as_str))
+        .or_else(|| value.get("execution_id").and_then(Value::as_str))
+        .map(str::to_string)
+        .unwrap_or_else(|| {
+            path.file_stem()
+                .and_then(|stem| stem.to_str())
+                .unwrap_or("unknown-receipt")
+                .to_string()
+        })
+}
+
+const FILE_TREE_LIMIT: usize = 160;
+const FILE_PREVIEW_LIMIT: usize = 96 * 1024;
+
+fn files_tree_payload_from_target(target: &str) -> Result<Value> {
+    let requested = query_param(target, "path").unwrap_or_else(default_workspace_path);
+    let path = resolve_readonly_user_path(&requested)?;
+    if !path.is_dir() {
+        return Err(anyhow!("not a directory: {}", path.display()));
+    }
+
+    let mut entries = Vec::new();
+    for entry in fs::read_dir(&path)? {
+        let Ok(entry) = entry else { continue };
+        let entry_path = entry.path();
+        let Ok(metadata) = entry.metadata() else {
+            continue;
+        };
+        let name = entry.file_name().to_string_lossy().to_string();
+        entries.push(json!({
+            "name": name,
+            "path": entry_path.display().to_string(),
+            "kind": if metadata.is_dir() { "directory" } else if metadata.is_file() { "file" } else { "other" },
+            "size_bytes": if metadata.is_file() { Some(metadata.len()) } else { None },
+            "modified_unix": metadata.modified().ok()
+                .and_then(|time| time.duration_since(std::time::UNIX_EPOCH).ok())
+                .map(|duration| duration.as_secs()),
+            "hidden": name.starts_with('.'),
+        }));
+    }
+    entries.sort_by(|a, b| {
+        let a_dir = a.get("kind").and_then(Value::as_str) == Some("directory");
+        let b_dir = b.get("kind").and_then(Value::as_str) == Some("directory");
+        b_dir.cmp(&a_dir).then_with(|| {
+            a.get("name")
+                .and_then(Value::as_str)
+                .unwrap_or("")
+                .to_ascii_lowercase()
+                .cmp(
+                    &b.get("name")
+                        .and_then(Value::as_str)
+                        .unwrap_or("")
+                        .to_ascii_lowercase(),
+                )
+        })
+    });
+    let truncated = entries.len() > FILE_TREE_LIMIT;
+    entries.truncate(FILE_TREE_LIMIT);
+
+    Ok(json!({
+        "command": "files tree",
+        "root": default_workspace_path(),
+        "path": path.display().to_string(),
+        "parent": path.parent().map(|parent| parent.display().to_string()),
+        "entries": entries,
+        "truncated": truncated,
+        "limit": FILE_TREE_LIMIT,
+        "policy": "read_only_user_home_or_temp",
+    }))
+}
+
+fn file_preview_payload_from_target(target: &str) -> Result<Value> {
+    let requested = query_param(target, "path").ok_or_else(|| anyhow!("missing path"))?;
+    let path = resolve_readonly_user_path(&requested)?;
+    let metadata = fs::metadata(&path)?;
+    if metadata.is_dir() {
+        return Ok(json!({
+            "command": "files preview",
+            "path": path.display().to_string(),
+            "kind": "directory",
+            "size_bytes": null,
+            "truncated": false,
+            "content": null,
+            "message": "Directory selected. Open it in the tree to inspect children.",
+        }));
+    }
+    if !metadata.is_file() {
+        return Err(anyhow!("not a regular file: {}", path.display()));
+    }
+
+    let bytes = fs::read(&path)?;
+    let truncated = bytes.len() > FILE_PREVIEW_LIMIT;
+    let sample = &bytes[..bytes.len().min(FILE_PREVIEW_LIMIT)];
+    let (content, binary) = match std::str::from_utf8(sample) {
+        Ok(text) => (Some(text.to_string()), false),
+        Err(_) => (None, true),
+    };
+
+    Ok(json!({
+        "command": "files preview",
+        "path": path.display().to_string(),
+        "name": path.file_name().and_then(|name| name.to_str()).unwrap_or(""),
+        "extension": path.extension().and_then(|ext| ext.to_str()),
+        "kind": "file",
+        "size_bytes": metadata.len(),
+        "modified_unix": metadata.modified().ok()
+            .and_then(|time| time.duration_since(std::time::UNIX_EPOCH).ok())
+            .map(|duration| duration.as_secs()),
+        "truncated": truncated,
+        "limit": FILE_PREVIEW_LIMIT,
+        "binary": binary,
+        "content": content,
+        "policy": "read_only_text_preview",
+    }))
+}
+
+fn browser_probe_payload_from_target(target: &str) -> Result<Value> {
+    let raw = query_param(target, "url")
+        .unwrap_or_else(|| "https://www.google.com/search?q=Heiwa".to_string());
+    let normalized = normalize_browser_url(&raw)?;
+    let host = normalized
+        .split_once("://")
+        .map(|(_, rest)| rest.split('/').next().unwrap_or(rest))
+        .unwrap_or(&normalized)
+        .to_string();
+    Ok(json!({
+        "command": "browser probe",
+        "url": normalized,
+        "host": host,
+        "mode": "embedded_webview",
+        "policy": "user_navigated_no_credentials_exfiltration",
+        "notes": [
+            "Some sites block iframe embedding with X-Frame-Options or CSP.",
+            "Tauri builds render this as an app WebView surface, not a server-side fetch."
+        ]
+    }))
+}
+
+fn default_workspace_path() -> String {
+    env::current_dir()
+        .unwrap_or_else(|_| crate::home::heiwa_home().unwrap_or_else(|| PathBuf::from(".")))
+        .display()
+        .to_string()
+}
+
+fn resolve_readonly_user_path(raw: &str) -> Result<PathBuf> {
+    let expanded = if raw == "~" {
+        crate::home::heiwa_home().ok_or_else(|| anyhow!("home directory unavailable"))?
+    } else if let Some(rest) = raw.strip_prefix("~/") {
+        crate::home::heiwa_home()
+            .ok_or_else(|| anyhow!("home directory unavailable"))?
+            .join(rest)
+    } else {
+        PathBuf::from(raw)
+    };
+    let candidate = if expanded.is_absolute() {
+        expanded
+    } else {
+        env::current_dir()?.join(expanded)
+    };
+    let canonical = candidate.canonicalize()?;
+    let home = crate::home::heiwa_home()
+        .and_then(|home| home.canonicalize().ok())
+        .unwrap_or_else(|| PathBuf::from("/"));
+    let temp = env::temp_dir()
+        .canonicalize()
+        .unwrap_or_else(|_| env::temp_dir());
+    if canonical.starts_with(&home) || canonical.starts_with(&temp) {
+        Ok(canonical)
+    } else {
+        Err(anyhow!(
+            "path outside read-only Heiwa scope: {}",
+            canonical.display()
+        ))
+    }
+}
+
+fn normalize_browser_url(raw: &str) -> Result<String> {
+    let trimmed = raw.trim();
+    if trimmed.is_empty() {
+        return Err(anyhow!("empty url"));
+    }
+    let with_scheme = if trimmed.starts_with("http://") || trimmed.starts_with("https://") {
+        trimmed.to_string()
+    } else {
+        format!("https://{trimmed}")
+    };
+    if with_scheme.contains(char::is_whitespace) {
+        return Err(anyhow!("url cannot contain whitespace"));
+    }
+    Ok(with_scheme)
 }
 
 fn snapshot(started_at: &str) -> Value {
@@ -716,7 +1927,333 @@ fn snapshot(started_at: &str) -> Value {
         "mail": status.mail_summary,
         "hooks": status.hooks_summary,
         "providers": provider_rows(),
+        "resource": resource_payload(),
     })
+}
+
+fn resource_payload() -> Value {
+    let policy = ResourcePolicy::default();
+    let (free_memory_bytes, free_memory_source) = free_memory_bytes();
+    let (load_1m, load_source) = load_1m();
+    let snapshot = ResourceSnapshot {
+        cpu_count: std::thread::available_parallelism()
+            .map(|count| count.get() as u32)
+            .unwrap_or(1),
+        load_1m,
+        free_memory_bytes,
+        battery_percent: None,
+        on_battery: false,
+        thermal_pressure: ThermalPressure::Unknown,
+    };
+    let admissions = json!({
+        "foreground_interactive": policy.admit(&snapshot, WorkClass::ForegroundInteractive),
+        "background_watch": policy.admit(&snapshot, WorkClass::BackgroundWatch),
+        "local_summary": policy.admit(&snapshot, WorkClass::LocalSummary),
+        "local_model_small": policy.admit(&snapshot, WorkClass::LocalModelSmall),
+        "local_model_large": policy.admit(&snapshot, WorkClass::LocalModelLarge),
+        "provider_escalation": policy.admit(&snapshot, WorkClass::ProviderEscalation),
+    });
+
+    json!({
+        "snapshot": snapshot,
+        "policy": policy,
+        "admissions": admissions,
+        "sources": {
+            "cpu_count": "std::thread::available_parallelism",
+            "load_1m": load_source,
+            "free_memory_bytes": free_memory_source,
+            "battery_percent": "not_probed_v0",
+            "thermal_pressure": "unknown_v0",
+        },
+        "notes": [
+            "read_only_local_probe",
+            "resource policy gates local always-on work before provider routing"
+        ],
+    })
+}
+
+fn capabilities_payload() -> Value {
+    capabilities_payload_for_state_dir(&state_dir())
+}
+
+fn capabilities_payload_for_state_dir(state_dir: &Path) -> Value {
+    let capabilities_dir = state_dir.join("capabilities");
+    let mut catalogs = Vec::new();
+    let Ok(entries) = fs::read_dir(&capabilities_dir) else {
+        return capabilities_payload_with_catalogs(&capabilities_dir, catalogs);
+    };
+
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if path.extension().and_then(|ext| ext.to_str()) != Some("json") {
+            continue;
+        }
+        let Ok(raw) = fs::read_to_string(&path) else {
+            continue;
+        };
+        let Ok(value) = serde_json::from_str::<Value>(&raw) else {
+            continue;
+        };
+        let catalog_id = path
+            .file_stem()
+            .and_then(|stem| stem.to_str())
+            .unwrap_or("capability-catalog")
+            .to_string();
+        catalogs.push(json!({
+            "catalog_id": catalog_id,
+            "path": path.display().to_string(),
+            "schema_version": value.get("schema_version").and_then(Value::as_str).unwrap_or("unknown"),
+            "generated_at": value.get("generated_at").and_then(Value::as_str),
+            "providers": value.get("providers").and_then(Value::as_array).map(Vec::len).unwrap_or(0),
+            "gemini_extensions": value.get("gemini_extensions").and_then(Value::as_array).map(Vec::len).unwrap_or(0),
+            "codex_plugins_observed": value.get("codex_plugins_observed").and_then(Value::as_array).map(Vec::len).unwrap_or(0),
+            "codex_mcp_servers": value.get("codex_mcp_servers").and_then(Value::as_array).map(Vec::len).unwrap_or(0),
+            "claude_plugins_observed": value.get("claude_plugins_observed").and_then(Value::as_array).map(Vec::len).unwrap_or(0),
+            "gemini_skills_observed": value.get("gemini_skills_observed").and_then(Value::as_array).map(Vec::len).unwrap_or(0),
+            "installed_apps_observed": value.get("installed_apps_observed").and_then(Value::as_array).map(Vec::len).unwrap_or(0),
+            "peer_handoff_findings": value.get("peer_handoff_findings").and_then(Value::as_array).map(Vec::len).unwrap_or(0),
+            "reference_sources": value.get("reference_sources").and_then(Value::as_array).map(Vec::len).unwrap_or(0),
+            "integration_families": value.get("integration_families").and_then(Value::as_array).map(Vec::len).unwrap_or(0),
+            "runtime_targets": value.get("runtime_targets").and_then(Value::as_array).map(Vec::len).unwrap_or(0),
+            "performance_targets": value.get("performance_targets").and_then(Value::as_array).map(Vec::len).unwrap_or(0),
+            "next_runtime_targets": value.get("next_runtime_targets").cloned().unwrap_or_else(|| json!([])),
+        }));
+    }
+
+    catalogs.sort_by(|a, b| {
+        let a_id = a.get("catalog_id").and_then(Value::as_str).unwrap_or("");
+        let b_id = b.get("catalog_id").and_then(Value::as_str).unwrap_or("");
+        b_id.cmp(a_id)
+    });
+    capabilities_payload_with_catalogs(&capabilities_dir, catalogs)
+}
+
+fn capabilities_payload_with_catalogs(capabilities_dir: &Path, catalogs: Vec<Value>) -> Value {
+    let latest = catalogs.first().cloned().unwrap_or(Value::Null);
+    let tools = tool_call_contracts();
+    let executable_tools = tools
+        .iter()
+        .filter(|tool| tool.get("execution_state").and_then(Value::as_str) == Some("executable"))
+        .count();
+
+    json!({
+        "catalogs": catalogs,
+        "latest": latest,
+        "path": capabilities_dir.display().to_string(),
+        "tool_call_contract_version": "heiwa_tool_call_contract_v1",
+        "tools": tools,
+        "tool_counts": {
+            "total": tools.len(),
+            "executable": executable_tools,
+            "target_only": tools.len().saturating_sub(executable_tools),
+        },
+    })
+}
+
+fn tool_call_contracts() -> Vec<Value> {
+    let mut scope =
+        ExecutionScope::local_default(env::current_dir().unwrap_or_else(|_| PathBuf::from(".")));
+    for name in ["fs.list", "fs.read", "repo.grep"] {
+        scope.tool_leases.push(ToolLease {
+            name: name.to_string(),
+            risk_class: RiskClass::HostSafeReadonly,
+            allowed: true,
+        });
+    }
+
+    let registry = heiwa_mcp::local_repo_registry(scope);
+    let mut tools: Vec<Value> = registry
+        .names()
+        .into_iter()
+        .map(|name| {
+            json!({
+                "id": name,
+                "name": name,
+                "plane": "evidence",
+                "kind": "local_mcp_tool",
+                "execution_state": "executable",
+                "risk_class": "host_safe_readonly",
+                "lease_required": true,
+                "approval_class": "auto_allowed_readonly",
+                "adapter": "heiwa_mcp::local_repo_registry",
+                "description": registry.description(name).unwrap_or(""),
+                "input_schema": registry
+                    .schema(name)
+                    .and_then(|schema| serde_json::to_value(schema).ok())
+                    .unwrap_or_else(|| json!({})),
+                "evidence": {
+                    "receipt": "ToolCallReceipt",
+                    "status_values": ["success", "failure", "denied"],
+                },
+            })
+        })
+        .collect();
+
+    tools.extend([
+        json!({
+            "id": "shell.run",
+            "name": "shell.run",
+            "plane": "execution",
+            "kind": "shell_tool",
+            "execution_state": "declared_no_adapter",
+            "risk_class": "host_mutating",
+            "lease_required": true,
+            "approval_class": "approval_required",
+            "adapter": null,
+            "description": "Shell work is a product target and a REPL lease exists, but no agentic local MCP shell adapter is wired yet.",
+            "next": "Add bounded shell capability registry before exposing model-initiated shell calls.",
+        }),
+        json!({
+            "id": "browser.isolated",
+            "name": "browser.isolated",
+            "plane": "intake",
+            "kind": "browser_tool",
+            "execution_state": "target_only",
+            "risk_class": "sandbox_required",
+            "lease_required": true,
+            "approval_class": "approval_required_for_logged_in_or_form_submit",
+            "adapter": null,
+            "description": "Isolated browser task lane is required for product parity but is not wired in this runtime API yet.",
+        }),
+        json!({
+            "id": "computer.use",
+            "name": "computer.use",
+            "plane": "execution",
+            "kind": "computer_use_tool",
+            "execution_state": "target_only",
+            "risk_class": "sandbox_required",
+            "lease_required": true,
+            "approval_class": "approval_required",
+            "adapter": null,
+            "description": "Full computer use is target work and must stage side effects before execution.",
+        }),
+        json!({
+            "id": "calendar.read",
+            "name": "calendar.read",
+            "plane": "intake",
+            "kind": "connector_tool",
+            "execution_state": "target_only",
+            "risk_class": "host_safe_readonly",
+            "lease_required": true,
+            "approval_class": "connector_auth_required",
+            "adapter": null,
+            "description": "Calendar/scheduling is target Intake work; no product-grade connector adapter is wired here yet.",
+        }),
+    ]);
+
+    tools
+}
+
+fn load_1m() -> (f32, &'static str) {
+    #[cfg(unix)]
+    {
+        let mut loads = [0.0_f64; 3];
+        let count = unsafe { libc::getloadavg(loads.as_mut_ptr(), 1) };
+        if count == 1 {
+            return (loads[0] as f32, "libc_getloadavg");
+        }
+    }
+    (0.0, "unavailable_default_zero")
+}
+
+fn free_memory_bytes() -> (u64, &'static str) {
+    if let Some(bytes) = linux_mem_available_bytes() {
+        return (bytes, "linux_proc_meminfo_memavailable");
+    }
+    if let Some(bytes) = macos_memory_pressure_available_bytes() {
+        return (bytes, "macos_memory_pressure_free_percentage");
+    }
+    if let Some(bytes) = macos_vm_stat_available_bytes() {
+        return (bytes, "macos_vm_stat_free_inactive_speculative");
+    }
+    (u64::MAX, "unavailable_assumed_unconstrained")
+}
+
+#[cfg(target_os = "linux")]
+fn linux_mem_available_bytes() -> Option<u64> {
+    let raw = fs::read_to_string("/proc/meminfo").ok()?;
+    raw.lines().find_map(|line| {
+        let rest = line.strip_prefix("MemAvailable:")?;
+        let kb = rest.split_whitespace().next()?.parse::<u64>().ok()?;
+        Some(kb * 1024)
+    })
+}
+
+#[cfg(not(target_os = "linux"))]
+fn linux_mem_available_bytes() -> Option<u64> {
+    None
+}
+
+#[cfg(target_os = "macos")]
+fn macos_memory_pressure_available_bytes() -> Option<u64> {
+    let output = Command::new("/usr/bin/memory_pressure").output().ok()?;
+    if !output.status.success() {
+        return None;
+    }
+    let raw = String::from_utf8_lossy(&output.stdout);
+    parse_macos_memory_pressure_available_bytes(&raw)
+}
+
+#[cfg(not(target_os = "macos"))]
+fn macos_memory_pressure_available_bytes() -> Option<u64> {
+    None
+}
+
+#[cfg(target_os = "macos")]
+fn parse_macos_memory_pressure_available_bytes(raw: &str) -> Option<u64> {
+    let total_bytes = raw.lines().find_map(|line| {
+        let rest = line.strip_prefix("The system has ")?;
+        rest.split_whitespace().next()?.parse::<u64>().ok()
+    })?;
+    let free_percent = raw.lines().find_map(|line| {
+        let rest = line.strip_prefix("System-wide memory free percentage: ")?;
+        rest.trim_end_matches('%').trim().parse::<u64>().ok()
+    })?;
+    Some(total_bytes.saturating_mul(free_percent) / 100)
+}
+
+#[cfg(target_os = "macos")]
+fn macos_vm_stat_available_bytes() -> Option<u64> {
+    let output = Command::new("/usr/bin/vm_stat").output().ok()?;
+    if !output.status.success() {
+        return None;
+    }
+    let raw = String::from_utf8_lossy(&output.stdout);
+    let page_size = parse_vm_stat_page_size(&raw)?;
+    let pages = parse_vm_stat_pages(&raw, "Pages free")
+        + parse_vm_stat_pages(&raw, "Pages inactive")
+        + parse_vm_stat_pages(&raw, "Pages speculative");
+    Some(pages * page_size)
+}
+
+#[cfg(not(target_os = "macos"))]
+fn macos_vm_stat_available_bytes() -> Option<u64> {
+    None
+}
+
+#[cfg(target_os = "macos")]
+fn parse_vm_stat_page_size(raw: &str) -> Option<u64> {
+    let marker = "page size of ";
+    let (_, rest) = raw.lines().next()?.split_once(marker)?;
+    let bytes = rest.split_whitespace().next()?.parse::<u64>().ok()?;
+    Some(bytes)
+}
+
+#[cfg(target_os = "macos")]
+fn parse_vm_stat_pages(raw: &str, label: &str) -> u64 {
+    raw.lines()
+        .find_map(|line| {
+            let rest = line
+                .trim()
+                .strip_prefix(label)?
+                .trim_start_matches(':')
+                .trim();
+            rest.trim_end_matches('.')
+                .replace('.', "")
+                .parse::<u64>()
+                .ok()
+        })
+        .unwrap_or(0)
 }
 
 fn provider_rows() -> Vec<Value> {
@@ -739,33 +2276,167 @@ fn provider_rows() -> Vec<Value> {
         .collect()
 }
 
+/// Live route table: ask DREX what it would pick today for each intent,
+/// using the cached account registry (no CLI probing on the GET path).
 fn route_rows() -> Vec<Value> {
-    vec![
-        json!({
+    use heiwa_core::drex::{default_policy, plan_route, DrexIngress};
+
+    let registry = heiwa_provider::AccountRegistry::load();
+    let tiers = crate::get_live_model_tiers(&registry);
+    if tiers.is_empty() {
+        return vec![json!({
             "role": "chat",
-            "provider": "ollama",
-            "model": "local-default",
-            "source": "default",
-            "fallbacks": ["gemini", "claude", "codex"],
-            "offline_capable": true,
-        }),
-        json!({
-            "role": "code",
-            "provider": "codex",
-            "model": "provider-default",
-            "source": "default",
-            "fallbacks": ["claude", "gemini", "ollama"],
+            "provider": Value::Null,
+            "model": Value::Null,
+            "source": "no_model_tiers",
+            "fallbacks": [],
             "offline_capable": false,
-        }),
-        json!({
-            "role": "research",
-            "provider": "gemini",
-            "model": "provider-default",
-            "source": "default",
-            "fallbacks": ["codex", "claude"],
-            "offline_capable": false,
-        }),
-    ]
+        })];
+    }
+
+    let policy = default_policy();
+    ["chat", "build", "research", "audit"]
+        .iter()
+        .map(|intent| {
+            let ingress = DrexIngress {
+                intent: (*intent).to_string(),
+                risk: "low".to_string(),
+                raw_text: format!("route table preview for {intent}"),
+                privacy: "standard".to_string(),
+                runtime: "any".to_string(),
+                available_vram_mb: 8192,
+                required_context_tokens: 1024,
+            };
+            match plan_route(&ingress, &tiers, &policy) {
+                Ok(route) => match route.selected_model {
+                    Some(selected) => {
+                        let fallbacks: Vec<String> = {
+                            let mut seen = vec![selected.provider.clone()];
+                            tiers
+                                .iter()
+                                .filter_map(|tier| {
+                                    if seen.contains(&tier.provider) {
+                                        None
+                                    } else {
+                                        seen.push(tier.provider.clone());
+                                        Some(tier.provider.clone())
+                                    }
+                                })
+                                .collect()
+                        };
+                        json!({
+                            "role": intent,
+                            "provider": selected.provider,
+                            "model": selected.model_id,
+                            "rate_group": selected.rate_group,
+                            "source": "drex_live",
+                            "fallbacks": fallbacks,
+                            "offline_capable": selected.provider == "ollama",
+                        })
+                    }
+                    None => json!({
+                        "role": intent,
+                        "provider": Value::Null,
+                        "model": Value::Null,
+                        "source": "drex_no_match",
+                        "fallbacks": [],
+                        "offline_capable": false,
+                    }),
+                },
+                Err(error) => json!({
+                    "role": intent,
+                    "provider": Value::Null,
+                    "model": Value::Null,
+                    "source": format!("drex_error: {error}"),
+                    "fallbacks": [],
+                    "offline_capable": false,
+                }),
+            }
+        })
+        .collect()
+}
+
+/// Calendar holds and priority mail as inbox items, merged with dispatch
+/// receipts and event-log rows on /api/v1/inbox.
+fn life_inbox_items() -> Vec<Value> {
+    let mut items = Vec::new();
+    let today = chrono::Local::now()
+        .date_naive()
+        .format("%Y-%m-%d")
+        .to_string();
+
+    for hold in crate::cmd::calendar::holds_for_date(&today) {
+        let hold_id = hold.get("id").and_then(Value::as_str).unwrap_or("hold");
+        let title = hold.get("title").and_then(Value::as_str).unwrap_or("Hold");
+        let start = hold.get("start").and_then(Value::as_str).unwrap_or("--:--");
+        items.push(json!({
+            "item_id": format!("calendar:{hold_id}"),
+            "kind": "calendar_hold",
+            "plane": "intake",
+            "priority": "normal",
+            "pinned": false,
+            "status": hold.get("status").and_then(Value::as_str).unwrap_or("draft"),
+            "title": format!("{start} {title}"),
+            "summary": hold.get("note").and_then(Value::as_str).unwrap_or("Local hold; external promotion is approval-gated."),
+            "occurred_at": hold.get("created_at").and_then(Value::as_str).unwrap_or("unknown"),
+            "source": {
+                "source_id": hold_id,
+                "source_type": "calendar_hold",
+                "label": "Heiwa Calendar",
+                "path": format!("~/.heiwa/state/calendar/holds/{hold_id}.json"),
+            },
+            "subject_ref": hold_id,
+            "receipt_refs": [{ "kind": "receipt", "ref": format!("rcpt-{hold_id}") }],
+        }));
+    }
+
+    for row in crate::cmd::mail::priority_rows() {
+        let action = row
+            .get("action")
+            .and_then(Value::as_str)
+            .unwrap_or("digest");
+        if action == "digest" {
+            continue;
+        }
+        let subject = row
+            .get("subject")
+            .and_then(Value::as_str)
+            .unwrap_or("(no subject)");
+        let sender = row
+            .get("sender")
+            .and_then(Value::as_str)
+            .unwrap_or("unknown sender");
+        items.push(json!({
+            "item_id": format!("mail:{}", stable_hash(&format!("{sender}|{subject}"))),
+            "kind": "mail_priority",
+            "plane": "intake",
+            "priority": if action == "draft" { "high" } else { "normal" },
+            "pinned": false,
+            "status": action,
+            "title": subject,
+            "summary": format!("{sender} · staged action: {action}"),
+            "occurred_at": row.get("date").and_then(Value::as_str).unwrap_or("unknown"),
+            "source": {
+                "source_id": "mail_priority_scan",
+                "source_type": "mail_metadata",
+                "label": "Mail priority scan",
+                "path": "~/.heiwa/state/mail/headers.jsonl",
+            },
+            "subject_ref": subject,
+            "receipt_refs": [],
+        }));
+    }
+
+    items
+}
+
+fn stable_hash(input: &str) -> String {
+    use sha1::{Digest, Sha1};
+    let digest = Sha1::digest(input.as_bytes());
+    digest[..6]
+        .iter()
+        .map(|byte| format!("{byte:02x}"))
+        .collect()
 }
 
 fn approval_rows() -> Vec<Value> {
@@ -1115,8 +2786,23 @@ fn worker_agent_rows() -> Vec<Value> {
         .collect()
 }
 
+fn ollama_models_payload() -> Value {
+    let ollama_url =
+        std::env::var("OLLAMA_URL").unwrap_or_else(|_| "http://127.0.0.1:11434".to_string());
+    let url = format!("{}/api/tags", ollama_url.trim_end_matches('/'));
+    let models: Vec<Value> = tokio::task::block_in_place(|| {
+        reqwest::blocking::get(&url)
+            .ok()
+            .and_then(|resp| resp.json::<Value>().ok())
+            .and_then(|val| val.get("models").cloned())
+            .and_then(|val| serde_json::from_value(val).ok())
+            .unwrap_or_default()
+    });
+    json!({ "models": models })
+}
+
 fn hook_provider_rows() -> Vec<Value> {
-    let home = dirs::home_dir().unwrap_or_else(|| PathBuf::from("."));
+    let home = crate::home::heiwa_home().unwrap_or_else(|| PathBuf::from("."));
     vec![
         json_hook_provider_row(
             "claude",
@@ -1353,7 +3039,7 @@ fn hook_events_from_json_config(config_path: &Path, event_names: &[&str]) -> Vec
 }
 
 fn hook_command_path(command: &str) -> Option<String> {
-    let home = dirs::home_dir().unwrap_or_else(|| PathBuf::from("."));
+    let home = crate::home::heiwa_home().unwrap_or_else(|| PathBuf::from("."));
     command
         .split_whitespace()
         .rev()
@@ -1555,7 +3241,7 @@ fn count_json(dir: &Path) -> i64 {
 }
 
 fn mail_summary() -> Value {
-    let home = dirs::home_dir().unwrap_or_else(|| PathBuf::from("."));
+    let home = crate::home::heiwa_home().unwrap_or_else(|| PathBuf::from("."));
     let data_dir = home.join("Library").join("Mail");
     let data_present = data_dir.exists();
     json!({
@@ -1637,14 +3323,62 @@ fn request_method(request: &str) -> Option<&str> {
     request.lines().next()?.split_whitespace().next()
 }
 
+fn request_target(request: &str) -> Option<&str> {
+    request.lines().next()?.split_whitespace().nth(1)
+}
+
 fn request_path(request: &str) -> Option<&str> {
-    request
-        .lines()
-        .next()?
-        .split_whitespace()
-        .nth(1)?
-        .split('?')
-        .next()
+    request_target(request)?.split('?').next()
+}
+
+fn query_param(target: &str, name: &str) -> Option<String> {
+    let query = target.split_once('?')?.1;
+    for pair in query.split('&') {
+        let (key, value) = pair.split_once('=').unwrap_or((pair, ""));
+        if percent_decode(key) == name {
+            return Some(percent_decode(value));
+        }
+    }
+    None
+}
+
+fn percent_decode(value: &str) -> String {
+    let mut out = Vec::with_capacity(value.len());
+    let bytes = value.as_bytes();
+    let mut index = 0;
+    while index < bytes.len() {
+        match bytes[index] {
+            b'+' => {
+                out.push(b' ');
+                index += 1;
+            }
+            b'%' if index + 2 < bytes.len() => {
+                let hi = hex_value(bytes[index + 1]);
+                let lo = hex_value(bytes[index + 2]);
+                if let (Some(hi), Some(lo)) = (hi, lo) {
+                    out.push((hi << 4) | lo);
+                    index += 3;
+                } else {
+                    out.push(bytes[index]);
+                    index += 1;
+                }
+            }
+            byte => {
+                out.push(byte);
+                index += 1;
+            }
+        }
+    }
+    String::from_utf8_lossy(&out).to_string()
+}
+
+fn hex_value(byte: u8) -> Option<u8> {
+    match byte {
+        b'0'..=b'9' => Some(byte - b'0'),
+        b'a'..=b'f' => Some(byte - b'a' + 10),
+        b'A'..=b'F' => Some(byte - b'A' + 10),
+        _ => None,
+    }
 }
 
 fn is_websocket_request(request: &str) -> bool {
@@ -1699,7 +3433,7 @@ fn flag_value(args: &[String], flag: &str) -> Option<String> {
 }
 
 fn state_dir() -> PathBuf {
-    let home = dirs::home_dir().unwrap_or_else(|| PathBuf::from("."));
+    let home = crate::home::heiwa_home().unwrap_or_else(|| PathBuf::from("."));
     home.join(".heiwa").join("state")
 }
 
@@ -1721,7 +3455,7 @@ fn provider_display_name(provider: &str) -> &'static str {
     }
 }
 
-fn auth_kind_label(kind: &heiwa_provider::AuthKind) -> &'static str {
+pub(crate) fn auth_kind_label(kind: &heiwa_provider::AuthKind) -> &'static str {
     match kind {
         heiwa_provider::AuthKind::OauthCli => "oauth_cli",
         heiwa_provider::AuthKind::ApiKey => "api_key",
@@ -1753,6 +3487,8 @@ fn print_help() {
     println!();
     println!("Usage:");
     println!("  heiwa app start [--port N] [--no-open]");
+    println!("  heiwa app api get <path> [--port N]");
+    println!("  heiwa app api post <path> --body JSON [--port N]");
     println!("  heiwa app update [--source github|checkout] [--dry-run]");
     println!("  heiwa app runtime status [--json]");
     println!("  heiwa app status [--json]");
@@ -1771,6 +3507,16 @@ fn print_update_help() {
     println!(
         "Use --source checkout only for explicit developer reinstall from the current checkout."
     );
+}
+
+fn print_api_help() {
+    println!("heiwa app api");
+    println!();
+    println!("Usage:");
+    println!("  heiwa app api get <path> [--port N] [--json]");
+    println!("  heiwa app api post <path> --body JSON [--port N] [--json]");
+    println!();
+    println!("Programmatic bridge to the local Heiwa.app runtime APIs for sessions, calendar, capabilities, and subagent dispatch.");
 }
 
 fn print_start_help() {
@@ -1792,6 +3538,200 @@ mod app_readmodel_tests {
         let _ = fs::remove_dir_all(&dir);
         fs::create_dir_all(&dir).expect("create temp state dir");
         dir
+    }
+
+    #[test]
+    fn api_payload_exposes_life_today_for_cockpit() {
+        let payload =
+            api_payload("/api/v1/life/today", "2026-05-26T00:00:00Z").expect("life today endpoint");
+        assert_eq!(payload.get("ok").and_then(Value::as_bool), Some(true));
+        let data = payload.get("data").expect("data envelope");
+        assert_eq!(
+            data.get("command").and_then(Value::as_str),
+            Some("life today")
+        );
+        assert_eq!(
+            data.get("timezone").and_then(Value::as_str),
+            Some("America/Vancouver")
+        );
+        assert!(data.get("pending_approvals").is_some_and(Value::is_array));
+        assert!(data
+            .get("runtime")
+            .and_then(|runtime| runtime.get("stdb_mode"))
+            .is_some_and(Value::is_string));
+    }
+
+    #[test]
+    fn api_payload_exposes_life_freshness_for_cockpit() {
+        let payload = api_payload("/api/v1/life/freshness", "2026-05-26T00:00:00Z")
+            .expect("life freshness endpoint");
+        assert_eq!(payload.get("ok").and_then(Value::as_bool), Some(true));
+        let data = payload.get("data").expect("data envelope");
+        assert_eq!(
+            data.get("command").and_then(Value::as_str),
+            Some("life freshness")
+        );
+        assert!(data.get("stale_sources").is_some_and(Value::is_number));
+        assert!(data.get("sources").is_some_and(Value::is_array));
+    }
+
+    #[test]
+    fn files_tree_and_preview_are_read_only_text_surfaces() {
+        let dir = temp_state_dir("files-readmodel");
+        let file = dir.join("note.md");
+        fs::write(&file, "# Heiwa\nfile preview works\n").expect("write preview file");
+
+        let tree =
+            files_tree_payload_from_target(&format!("/api/v1/files/tree?path={}", dir.display()))
+                .expect("tree payload");
+        assert_eq!(
+            tree.get("command").and_then(Value::as_str),
+            Some("files tree")
+        );
+        let entries = tree
+            .get("entries")
+            .and_then(Value::as_array)
+            .expect("entries array");
+        assert!(entries
+            .iter()
+            .any(|entry| entry.get("name").and_then(Value::as_str) == Some("note.md")));
+
+        let preview = file_preview_payload_from_target(&format!(
+            "/api/v1/files/preview?path={}",
+            file.display()
+        ))
+        .expect("preview payload");
+        assert_eq!(preview.get("kind").and_then(Value::as_str), Some("file"));
+        assert_eq!(preview.get("binary").and_then(Value::as_bool), Some(false));
+        assert!(preview
+            .get("content")
+            .and_then(Value::as_str)
+            .is_some_and(|content| content.contains("file preview works")));
+
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn browser_probe_normalizes_urls_without_fetching() {
+        let probe = browser_probe_payload_from_target("/api/v1/browser/probe?url=example.com/docs")
+            .expect("browser probe");
+        assert_eq!(
+            probe.get("url").and_then(Value::as_str),
+            Some("https://example.com/docs")
+        );
+        assert_eq!(
+            probe.get("mode").and_then(Value::as_str),
+            Some("embedded_webview")
+        );
+    }
+
+    #[test]
+    fn query_param_percent_decodes_values() {
+        assert_eq!(
+            query_param("/api/v1/files/preview?path=%2Ftmp%2Fhello+world.md", "path"),
+            Some("/tmp/hello world.md".to_string())
+        );
+    }
+
+    #[test]
+    fn api_payload_exposes_approvals_summary_for_cockpit() {
+        let payload = api_payload("/api/v1/approvals/summary", "2026-05-26T00:00:00Z")
+            .expect("approvals summary endpoint");
+        assert_eq!(payload.get("ok").and_then(Value::as_bool), Some(true));
+        let data = payload.get("data").expect("data envelope");
+        assert!(data.get("pending_count").is_some_and(Value::is_number));
+        assert!(data.get("pending").is_some_and(Value::is_array));
+        assert!(data.get("requests_dir").is_some_and(Value::is_string));
+    }
+
+    #[test]
+    fn receipts_payload_scans_known_local_receipt_lanes() {
+        let state = temp_state_dir("receipt-readmodel");
+        let calendar = state.join("calendar").join("receipts");
+        let automations = state.join("automations").join("receipts");
+        let promotion = state.join("evidence").join("promotion");
+        fs::create_dir_all(&calendar).expect("create calendar receipts");
+        fs::create_dir_all(&automations).expect("create automation receipts");
+        fs::create_dir_all(&promotion).expect("create promotion receipts");
+        fs::write(
+            calendar.join("rcpt-calendar.json"),
+            json!({
+                "receipt_id": "rcpt-calendar",
+                "kind": "calendar_hold_created",
+                "created_at": "2026-06-12T09:00:00Z"
+            })
+            .to_string(),
+        )
+        .expect("write calendar receipt");
+        fs::write(
+            automations.join("rcpt-auto.json"),
+            json!({
+                "kind": "automation_execution_event",
+                "event": "queued",
+                "execution_id": "exec-1",
+                "created_at": "2026-06-12T10:00:00Z"
+            })
+            .to_string(),
+        )
+        .expect("write automation receipt");
+        fs::write(
+            promotion.join("heiwa-app-update.json"),
+            json!({
+                "schema_version": "heiwa_promotion_receipt_v1",
+                "receipt_id": "heiwa-app-update",
+                "created_at": "2026-06-12T08:00:00Z"
+            })
+            .to_string(),
+        )
+        .expect("write promotion receipt");
+
+        let payload = receipts_payload_for_state_dir(&state);
+        assert_eq!(
+            payload.get("command").and_then(Value::as_str),
+            Some("receipts summary")
+        );
+        let counts = payload.get("counts").expect("counts");
+        assert_eq!(counts.get("total").and_then(Value::as_u64), Some(3));
+        assert_eq!(counts.get("calendar").and_then(Value::as_u64), Some(1));
+        assert_eq!(counts.get("automations").and_then(Value::as_u64), Some(1));
+        assert_eq!(counts.get("promotion").and_then(Value::as_u64), Some(1));
+        let receipts = payload
+            .get("receipts")
+            .and_then(Value::as_array)
+            .expect("receipts array");
+        assert_eq!(receipts.len(), 3);
+        assert_eq!(
+            receipts[0].get("lane").and_then(Value::as_str),
+            Some("automations")
+        );
+        assert_eq!(
+            receipts[0].get("receipt_id").and_then(Value::as_str),
+            Some("exec-1")
+        );
+        assert_eq!(
+            receipts[1].get("lane").and_then(Value::as_str),
+            Some("calendar")
+        );
+        assert_eq!(
+            receipts[2].get("lane").and_then(Value::as_str),
+            Some("promotion")
+        );
+
+        let _ = fs::remove_dir_all(&state);
+    }
+
+    #[test]
+    fn api_payload_exposes_receipts_for_cockpit() {
+        let payload =
+            api_payload("/api/v1/receipts", "2026-05-26T00:00:00Z").expect("receipts endpoint");
+        assert_eq!(payload.get("ok").and_then(Value::as_bool), Some(true));
+        let data = payload.get("data").expect("data envelope");
+        assert_eq!(
+            data.get("command").and_then(Value::as_str),
+            Some("receipts summary")
+        );
+        assert!(data.get("counts").is_some_and(Value::is_object));
+        assert!(data.get("receipts").is_some_and(Value::is_array));
     }
 
     #[test]
@@ -1934,5 +3874,249 @@ mod app_readmodel_tests {
             "execution"
         );
         assert_eq!(plane_for_event_type("dispatch.result.written"), "evidence");
+    }
+
+    #[test]
+    fn scan_dispatch_ids_in_returns_json_file_stems() {
+        let dir = temp_state_dir("dispatch-scan");
+        fs::write(dir.join("req_alpha.json"), "{}").expect("write alpha");
+        fs::write(dir.join("req_beta.json"), "{}").expect("write beta");
+        fs::write(dir.join("ignore.txt"), "noop").expect("write decoy");
+
+        let ids = scan_dispatch_ids_in(&dir);
+        assert_eq!(ids.len(), 2);
+        assert!(ids.contains("req_alpha"));
+        assert!(ids.contains("req_beta"));
+        assert!(!ids.contains("ignore"));
+
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn scan_dispatch_ids_in_returns_empty_on_missing_dir() {
+        let missing = env::temp_dir().join("heiwa-shell-dispatch-missing-{nope}");
+        let ids = scan_dispatch_ids_in(&missing);
+        assert!(ids.is_empty());
+    }
+
+    #[test]
+    fn api_payload_exposes_goals_for_cockpit() {
+        let payload = api_payload("/api/v1/goals", "2026-05-26T00:00:00Z").expect("goals endpoint");
+        assert_eq!(payload.get("ok").and_then(Value::as_bool), Some(true));
+        let data = payload.get("data").expect("data envelope");
+        assert!(data.get("goals_dir").is_some_and(Value::is_string));
+        assert!(data.get("goals").is_some_and(Value::is_array));
+        assert!(data
+            .get("counts")
+            .and_then(|c| c.get("open"))
+            .is_some_and(Value::is_number));
+    }
+
+    #[test]
+    fn api_payload_exposes_compress_summary_for_cockpit() {
+        let payload = api_payload("/api/v1/compress/summary", "2026-05-26T00:00:00Z")
+            .expect("compress summary endpoint");
+        assert_eq!(payload.get("ok").and_then(Value::as_bool), Some(true));
+        let data = payload.get("data").expect("data envelope");
+        assert!(data.get("receipts_dir").is_some_and(Value::is_string));
+        assert!(data.get("count").is_some_and(Value::is_number));
+        assert!(data
+            .get("totals")
+            .and_then(|t| t.get("cumulative_ratio"))
+            .is_some_and(Value::is_number));
+        assert!(data.get("recent").is_some_and(Value::is_array));
+    }
+
+    #[test]
+    fn resource_api_payload_reports_snapshot_policy_and_admissions() {
+        let payload =
+            api_payload("/api/v1/resource", "2026-06-02T00:00:00Z").expect("resource endpoint");
+        let data = payload.get("data").expect("data");
+
+        assert!(
+            data.get("snapshot")
+                .and_then(|snapshot| snapshot.get("cpu_count"))
+                .and_then(Value::as_u64)
+                .is_some_and(|count| count > 0),
+            "resource snapshot should include cpu_count: {payload}"
+        );
+        assert!(
+            data.get("policy")
+                .and_then(|policy| policy.get("hard_load_ratio"))
+                .and_then(Value::as_f64)
+                .is_some_and(|hard| hard > 0.0),
+            "resource policy should include load thresholds: {payload}"
+        );
+        assert!(
+            data.get("admissions")
+                .and_then(|admissions| admissions.get("local_model_large"))
+                .is_some(),
+            "resource admissions should include local_model_large: {payload}"
+        );
+    }
+
+    #[test]
+    fn session_api_payload_reports_serving_port() {
+        let payload = api_payload_for_port("/api/v1/session", "2026-06-02T00:00:00Z", 7475)
+            .expect("session endpoint");
+        let data = payload.get("data").expect("data");
+        assert_eq!(
+            data.get("app_url").and_then(Value::as_str),
+            Some("http://127.0.0.1:7475/")
+        );
+    }
+
+    #[test]
+    fn runtime_snapshot_includes_resource_state() {
+        let payload =
+            api_payload("/api/v1/runtime/snapshot", "2026-06-02T00:00:00Z").expect("snapshot");
+        let data = payload.get("data").expect("data");
+
+        assert!(
+            data.get("resource").is_some(),
+            "runtime snapshot should include resource state: {payload}"
+        );
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn parses_macos_memory_pressure_free_percentage_as_available_bytes() {
+        let raw = "\
+The system has 25769803776 (1572864 pages with a page size of 16384).
+
+System-wide memory free percentage: 53%
+";
+
+        let bytes =
+            parse_macos_memory_pressure_available_bytes(raw).expect("parse memory_pressure output");
+
+        assert_eq!(bytes, 13_657_996_001);
+    }
+
+    #[test]
+    fn capability_catalogs_read_sanitized_local_state() {
+        let state = temp_state_dir("capability-catalogs");
+        let dir = state.join("capabilities");
+        fs::create_dir_all(&dir).expect("create capabilities dir");
+        fs::write(
+            dir.join("local-capability-inventory-2026-06-03.json"),
+            json!({
+                "schema_version": "heiwa_local_capability_inventory_v1",
+                "providers": [
+                    {"provider": "gemini", "version": "0.38.2"}
+                ],
+                "codex_plugins_observed": ["Browser", "Chrome"],
+                "codex_mcp_servers": ["figma", "notion", "node_repl"],
+                "installed_apps_observed": ["Codex.app", "Claude.app", "Gemini.app"],
+                "reference_sources": ["official.openai.agents-sdk", "official.ollama.api"],
+                "integration_families": ["provider_apps", "mcp_servers", "local_models"],
+                "runtime_targets": ["rust", "typescript", "wasm"],
+                "performance_targets": ["microsecond_readmodel", "bounded_local_worker"],
+                "next_runtime_targets": ["api_v1_capabilities_read_model"]
+            })
+            .to_string(),
+        )
+        .expect("write capability catalog");
+
+        let payload = capabilities_payload_for_state_dir(&state);
+
+        let catalogs = payload
+            .get("catalogs")
+            .and_then(Value::as_array)
+            .expect("catalogs array");
+        assert_eq!(catalogs.len(), 1);
+        assert_eq!(
+            catalogs[0].get("catalog_id").and_then(Value::as_str),
+            Some("local-capability-inventory-2026-06-03")
+        );
+        assert_eq!(
+            catalogs[0].get("schema_version").and_then(Value::as_str),
+            Some("heiwa_local_capability_inventory_v1")
+        );
+        assert_eq!(
+            catalogs[0]
+                .get("codex_plugins_observed")
+                .and_then(Value::as_u64),
+            Some(2)
+        );
+        assert_eq!(
+            catalogs[0].get("codex_mcp_servers").and_then(Value::as_u64),
+            Some(3)
+        );
+        assert_eq!(
+            catalogs[0]
+                .get("installed_apps_observed")
+                .and_then(Value::as_u64),
+            Some(3)
+        );
+        assert_eq!(
+            catalogs[0].get("reference_sources").and_then(Value::as_u64),
+            Some(2)
+        );
+        assert_eq!(
+            catalogs[0]
+                .get("integration_families")
+                .and_then(Value::as_u64),
+            Some(3)
+        );
+        assert_eq!(
+            catalogs[0].get("runtime_targets").and_then(Value::as_u64),
+            Some(3)
+        );
+        assert_eq!(
+            catalogs[0]
+                .get("performance_targets")
+                .and_then(Value::as_u64),
+            Some(2)
+        );
+
+        let _ = fs::remove_dir_all(&state);
+    }
+
+    #[test]
+    fn capability_payload_exposes_tool_call_contract() {
+        let state = temp_state_dir("capability-tools");
+        let payload = capabilities_payload_for_state_dir(&state);
+
+        let tools = payload
+            .get("tools")
+            .and_then(Value::as_array)
+            .expect("capabilities payload must expose tool contracts");
+
+        let fs_read = tools
+            .iter()
+            .find(|tool| tool.get("id").and_then(Value::as_str) == Some("fs.read"))
+            .expect("fs.read tool contract");
+        assert_eq!(
+            fs_read.get("execution_state").and_then(Value::as_str),
+            Some("executable")
+        );
+        assert_eq!(
+            fs_read.get("risk_class").and_then(Value::as_str),
+            Some("host_safe_readonly")
+        );
+        assert_eq!(
+            fs_read.get("plane").and_then(Value::as_str),
+            Some("evidence")
+        );
+        assert_eq!(
+            fs_read.get("lease_required").and_then(Value::as_bool),
+            Some(true)
+        );
+
+        let computer_use = tools
+            .iter()
+            .find(|tool| tool.get("id").and_then(Value::as_str) == Some("computer.use"))
+            .expect("computer-use target contract");
+        assert_eq!(
+            computer_use.get("execution_state").and_then(Value::as_str),
+            Some("target_only")
+        );
+        assert_eq!(
+            computer_use.get("approval_class").and_then(Value::as_str),
+            Some("approval_required")
+        );
+
+        let _ = fs::remove_dir_all(&state);
     }
 }

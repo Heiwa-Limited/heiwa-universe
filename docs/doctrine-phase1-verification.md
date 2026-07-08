@@ -137,10 +137,10 @@ spacetime publish -s local       # module deployed to local instance
 
 ## Summary
 
-| Lifecycle | States observed | Enforcement verified |
-|---|---|---|
-| Belief | candidate → supported → durable → contested | promotion thresholds, contradiction invariant |
-| Treasury | healthy (score=1.0 → 0.876) | spend tracking, failure recording, health recomputation |
-| Reservation | held, decision=allow | budget gating persisted as row |
-| Page | created, uniqueness enforced | (namespace, slug) rejection |
-| Source | created, parsed | enum validation fail-closed |
+| Lifecycle   | States observed                             | Enforcement verified                                    |
+| ----------- | ------------------------------------------- | ------------------------------------------------------- |
+| Belief      | candidate → supported → durable → contested | promotion thresholds, contradiction invariant           |
+| Treasury    | healthy (score=1.0 → 0.876)                 | spend tracking, failure recording, health recomputation |
+| Reservation | held, decision=allow                        | budget gating persisted as row                          |
+| Page        | created, uniqueness enforced                | (namespace, slug) rejection                             |
+| Source      | created, parsed                             | enum validation fail-closed                             |

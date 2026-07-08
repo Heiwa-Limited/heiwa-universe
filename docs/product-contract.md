@@ -54,7 +54,12 @@ target is a native wrapper over the same client/runtime contract, not a
 privileged second control plane or a disconnected admin site.
 
 The primary user experience is a single input/output conversation with Heiwa.
-Pages such as Inbox, Providers, History, Traces, Memory, and Status are
+The primary visual experience is Home as a pinned ops board: live terminal
+instances, worker panes, sub-app servers, approvals, receipts, and local run
+state are visible without hover. Feature icons behave like a dock for quick
+preview/focus, but Calendar, Mail, Finance, Social, AI, Files, Browser, and
+terminal work are in-app panes connected to the same runtime brain and evidence
+policy. Pages such as Inbox, Providers, History, Traces, Memory, and Status are
 inspectors for the same runtime state; they are not separate places the user
 must mentally route work. The user asks or responds in one thread. Heiwa uses
 background context from connected surfaces, then reports decisions, staged
@@ -63,7 +68,14 @@ actions, receipts, and blockers back through that thread.
 It should expose:
 
 - the main Heiwa/user conversation stream
-- the current dashboard/home state for what Heiwa is doing now
+- Home pinned ops state for what Heiwa is doing now
+- multiplexer panes/windows for conversation, workers, terminals, approvals,
+  receipts, sub-app servers, and connected-surface context
+- per-sub-app agent profiles: relevant skills, allowed tools, personalization,
+  risk class, and evidence behavior
+- packaged app bridges for local-only pane/herd state, Deno sub-app sidecars,
+  and terminal daemon state; browser preview is development support, not the
+  product runtime
 - account and provider connection state
 - personalization for skills, rules, preferences, connectors, and notification
   behavior
@@ -71,10 +83,11 @@ It should expose:
 - devices and runtime health
 - task, run, and receipt history
 - approvals and risk classes
-- routing policy visibility
+- routing policy visibility without forcing normal users to pick models manually
 - public-safe status and diagnostics
 - connected-surface context from browser, mail, calendar, messages, machine
   resources, computer use, and third-party integrations
+- unified Calendar and Communications surfaces that stage external writes/replies through approvals and receipts
 
 The browser console is secondary and user-scoped. It is a pseudo-backend/admin
 surface for the specific user/machine: advanced settings, personalization,
@@ -92,11 +105,11 @@ exist.
 
 The enterprise-grade hosted backbone target is:
 
-| Service | Product role |
-| --- | --- |
-| GitHub | source, CI, release artifacts, installer, public repo front page |
-| Cloudflare | public edge, DNS, Pages/Workers, WAF, static clients, status/docs |
-| SpacetimeDB Maincloud | canonical state, reducers, subscriptions, evidence ledger |
+| Service               | Product role                                                      |
+| --------------------- | ----------------------------------------------------------------- |
+| GitHub                | source, CI, release artifacts, installer, public repo front page  |
+| Cloudflare            | public edge, DNS, Pages/Workers, WAF, static clients, status/docs |
+| SpacetimeDB Maincloud | canonical state, reducers, subscriptions, evidence ledger         |
 
 The target is a highly available control and evidence backbone, not a hosted
 agent that performs all user actions remotely. Local runtimes still execute
@@ -133,13 +146,13 @@ treated as product-grade.
 
 ## Service Boundaries
 
-| Service boundary | Runs where | Owns | Must not own |
-| --- | --- | --- | --- |
-| Local runtime | Devon/user device | side effects, provider subprocesses, local secrets, local model calls | canonical multi-device truth |
-| Cloudflare edge | Cloudflare | static/public clients, routing, WAF, status/docs edge | raw provider secrets or privileged automation |
-| SpacetimeDB | Maincloud | canonical state transitions, subscriptions, evidence, leases | shell/browser/computer-use side effects |
-| GitHub | GitHub | source, CI, releases, install distribution | live user state or private runtime memory |
-| Public website | Cloudflare/GitHub | marketing, docs, install, public repo trust | privileged control-plane mutations |
+| Service boundary | Runs where        | Owns                                                                  | Must not own                                  |
+| ---------------- | ----------------- | --------------------------------------------------------------------- | --------------------------------------------- |
+| Local runtime    | Devon/user device | side effects, provider subprocesses, local secrets, local model calls | canonical multi-device truth                  |
+| Cloudflare edge  | Cloudflare        | static/public clients, routing, WAF, status/docs edge                 | raw provider secrets or privileged automation |
+| SpacetimeDB      | Maincloud         | canonical state transitions, subscriptions, evidence, leases          | shell/browser/computer-use side effects       |
+| GitHub           | GitHub            | source, CI, releases, install distribution                            | live user state or private runtime memory     |
+| Public website   | Cloudflare/GitHub | marketing, docs, install, public repo trust                           | privileged control-plane mutations            |
 
 ## Feature Families
 
@@ -149,6 +162,7 @@ treated as product-grade.
 - provider connect/status for local, OAuth CLI, and API-key modes
 - connector manifests for Apple, Google, Microsoft, GitHub, messaging, and computer-use lanes
 - local-first routing that avoids provider-token tax when deterministic handling is enough
+- invisible model/provider selection through an evolving capability/eval matrix rather than a normal-user model picker
 - durable sessions, receipts, and evidence
 - bounded loops with clear keep/discard behavior
 - approval-gated shell, browser, file, and computer-use actions

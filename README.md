@@ -29,18 +29,17 @@ Maturity is uneven across planes today; see [`HEIWA.md`](HEIWA.md#the-three-plan
 - Provider normalization: `crates/heiwa_provider/`
 - Terminal UX: `crates/heiwa_tui/`, `crates/heiwa_repl/`
 - STDB-facing Rust surfaces: `apps/heiwa_core/src/stdb/`, `apps/heiwa_orchestrator/src/stdb/`, `crates/heiwa_stdb/`
-- Legacy STDB module reference: `legacy/apps/heiwa_hub/spacetimedb/`
 - GitHub distribution surfaces: Actions, Pages, and release metadata
 
 ## Architecture
 
-| Layer | Canonical meaning | Location |
-| --- | --- | --- |
-| **Heiwa** | Company and product identity | Repo root |
-| **`heiwa`** | Primary installed runtime and operator surface | `apps/heiwa_shell/` |
-| **DREX** | Internal execution kernel and routing substrate | `apps/heiwa_core/` |
-| **SpacetimeDB** | Adjudication, canonical state, and evidence sync backend (materializes the Evidence plane) | `apps/heiwa_core/src/stdb/`, `apps/heiwa_orchestrator/src/stdb/`, `crates/heiwa_stdb/` |
-| **Rust runtime** | Volatile execution: provider supervision and candidate generation | `crates/` |
+| Layer            | Canonical meaning                                                                          | Location                                                                               |
+| ---------------- | ------------------------------------------------------------------------------------------ | -------------------------------------------------------------------------------------- |
+| **Heiwa**        | Company and product identity                                                               | Repo root                                                                              |
+| **`heiwa`**      | Primary installed runtime and operator surface                                             | `apps/heiwa_shell/`                                                                    |
+| **DREX**         | Internal execution kernel and routing substrate                                            | `apps/heiwa_core/`                                                                     |
+| **SpacetimeDB**  | Adjudication, canonical state, and evidence sync backend (materializes the Evidence plane) | `apps/heiwa_core/src/stdb/`, `apps/heiwa_orchestrator/src/stdb/`, `crates/heiwa_stdb/` |
+| **Rust runtime** | Volatile execution: provider supervision and candidate generation                          | `crates/`                                                                              |
 
 > Rust proposes, SpacetimeDB adjudicates, `heiwa` presents.
 

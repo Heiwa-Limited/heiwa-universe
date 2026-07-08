@@ -1,6 +1,15 @@
 import { A, useLocation } from "@solidjs/router";
-import { For, Show, createMemo, createSignal } from "solid-js";
 import type { JSX, ParentProps } from "solid-js";
+import {
+  createMemo,
+  createResource,
+  createSignal,
+  For,
+  onCleanup,
+  onMount,
+  Show,
+} from "solid-js";
+import { v1 } from "./lib/endpoints";
 
 type NavItem = {
   href: string;
@@ -8,7 +17,12 @@ type NavItem = {
   mark: string;
 };
 
-type InspectorTab = "telemetry" | "personalize" | "projects" | "advanced" | "settings";
+type InspectorTab =
+  | "telemetry"
+  | "personalize"
+  | "projects"
+  | "advanced"
+  | "settings";
 
 type SurfaceSignal = {
   name: string;
@@ -24,32 +38,30 @@ type ConsoleItem = {
 };
 
 const primaryNav: NavItem[] = [
-  { href: "/", label: "Dashboard", mark: "D" },
-  { href: "/inbox", label: "Inbox", mark: "I" },
-  { href: "/routes", label: "Routes", mark: "R" },
-  { href: "/live", label: "Live", mark: "L" },
-  { href: "/repl", label: "REPL", mark: ">" },
-  { href: "/providers", label: "Providers", mark: "P" },
-  { href: "/connections", label: "Connections", mark: "C" },
-  { href: "/status", label: "Status", mark: "S" },
+  { href: "/", label: "Run", mark: "▶" },
+  { href: "/today", label: "Today", mark: "☀" },
+  { href: "/inbox", label: "Inbox", mark: "↯" },
+  { href: "/calendar", label: "Calendar", mark: "◷" },
+  { href: "/mail", label: "Mail", mark: "@" },
 ];
 
 const evidenceNav: NavItem[] = [
-  { href: "/missions", label: "Missions", mark: "M" },
-  { href: "/approvals", label: "Approvals", mark: "A" },
+  { href: "/approvals", label: "Approvals", mark: "✓" },
+  { href: "/receipts", label: "Receipts", mark: "≡" },
   { href: "/history", label: "History", mark: "H" },
   { href: "/traces", label: "Traces", mark: "T" },
-  { href: "/memory", label: "Memory", mark: "K" },
+  { href: "/memory", label: "Memory", mark: "M" },
 ];
 
 const systemNav: NavItem[] = [
-  { href: "/agents", label: "Agents", mark: "G" },
-  { href: "/hooks", label: "Hooks", mark: "U" },
-  { href: "/crons", label: "Crons", mark: "Q" },
-  { href: "/rate-groups", label: "Rate groups", mark: "$" },
-  { href: "/cells", label: "Cells", mark: "#" },
-  { href: "/domains", label: "Domains", mark: "N" },
-  { href: "/governance", label: "Governance", mark: "V" },
+  { href: "/automations", label: "Automations", mark: "⟳" },
+  { href: "/advanced", label: "Dashboard", mark: "⌘" },
+  { href: "/connections", label: "Connections", mark: "K" },
+  { href: "/providers", label: "Providers", mark: "P" },
+  { href: "/routes", label: "Routes", mark: "R" },
+  { href: "/model-matrix", label: "Model Matrix", mark: "X" },
+  { href: "/repl", label: "REPL", mark: ">" },
+  { href: "/status", label: "Status", mark: "S" },
 ];
 
 const threadList = [
@@ -159,14 +171,141 @@ const advancedItems: ConsoleItem[] = [
 ];
 
 function routeTitle(pathname: string): string {
-  if (pathname === "/") return "Dashboard";
+  if (pathname === "/") return "Run";
+  if (pathname === "/advanced" || pathname === "/dashboard")
+    return "Dashboard · Advanced settings";
   const match = [...primaryNav, ...evidenceNav, ...systemNav].find(
     (item) => item.href === pathname,
   );
   return match?.label ?? "Workspace";
 }
 
-function SidebarSection(props: { title: string; items: NavItem[] }): JSX.Element {
+const TELEMETRY_POLL_MS = 5000;
+
+/** Live runtime telemetry from /api/v1/resource, polled while visible. */
+function LiveTelemetryPanel(): JSX.Element {
+  const [resource, { refetch }] = createResource(() => v1.resource());
+
+  onMount(() => {
+    const timer = setInterval(() => void refetch(), TELEMETRY_POLL_MS);
+    onCleanup(() => clearInterval(timer));
+  });
+
+  const loadPercent = createMemo(() => {
+    const snapshot = resource()?.snapshot;
+    if (!snapshot || snapshot.cpu_count === 0) return null;
+    return Math.min(
+      100,
+      Math.round((snapshot.load_1m / snapshot.cpu_count) * 100),
+    );
+  });
+
+  const freeGb = createMemo(() => {
+    const snapshot = resource()?.snapshot;
+    if (!snapshot) return null;
+    return snapshot.free_memory_bytes / 1024 ** 3;
+  });
+
+  const localLane = createMemo(() => {
+    const admissions = resource()?.admissions;
+    if (!admissions) return null;
+    if (admissions.local_model_large) return "large + small";
+    if (admissions.local_model_small) return "small only";
+    return "blocked";
+  });
+
+  return (
+    <section class="telemetry-panel">
+      <div class="surface-watch-panel">
+        <div class="surface-watch-header">
+          <span class="widget-label">Connected surfaces</span>
+          <span class="status-pill online">watching</span>
+        </div>
+        <div class="surface-signal-list">
+          <For each={surfaceSignals}>
+            {(surface) => (
+              <div class="surface-signal-row">
+                <div>
+                  <span class="surface-name">{surface.name}</span>
+                  <span class="surface-detail">{surface.detail}</span>
+                </div>
+                <span class={`status-pill ${surface.tone}`}>
+                  {surface.status}
+                </span>
+              </div>
+            )}
+          </For>
+        </div>
+      </div>
+
+      <Show
+        when={resource()}
+        fallback={<span class="widget-desc">Probing local runtime…</span>}
+      >
+        <div class="telemetry-widget">
+          <span class="widget-label">CPU load (1m)</span>
+          <div class="widget-value-row">
+            <strong>
+              {resource()?.snapshot.load_1m.toFixed(2)} /{" "}
+              {resource()?.snapshot.cpu_count} cores
+            </strong>
+            <span
+              class={`status-pill ${(loadPercent() ?? 0) > 80 ? "active" : "online"}`}
+            >
+              {(loadPercent() ?? 0) > 80 ? "hot" : "steady"}
+            </span>
+          </div>
+          <div class="telemetry-bar">
+            <div
+              class="telemetry-bar-fill cyan"
+              style={{ width: `${loadPercent() ?? 0}%` }}
+            />
+          </div>
+          <span class="widget-desc">source: {resource()?.sources.load_1m}</span>
+        </div>
+
+        <div class="telemetry-widget">
+          <span class="widget-label">Free memory</span>
+          <div class="widget-value-row">
+            <strong>{freeGb()?.toFixed(1)} GB</strong>
+            <span class="status-pill active">local</span>
+          </div>
+          <div class="telemetry-bar">
+            <div
+              class="telemetry-bar-fill gold"
+              style={{
+                width: `${Math.min(100, Math.round(((freeGb() ?? 0) / 24) * 100))}%`,
+              }}
+            />
+          </div>
+          <span class="widget-desc">
+            source: {resource()?.sources.free_memory_bytes}
+          </span>
+        </div>
+
+        <div class="telemetry-widget">
+          <span class="widget-label">Local model lane</span>
+          <div class="widget-value-row">
+            <strong>{localLane()}</strong>
+            <span
+              class={`status-pill ${localLane() === "blocked" ? "active" : "online"}`}
+            >
+              {localLane() === "blocked" ? "gated" : "admitted"}
+            </span>
+          </div>
+          <span class="widget-desc">
+            resource policy gates always-on local work
+          </span>
+        </div>
+      </Show>
+    </section>
+  );
+}
+
+function SidebarSection(props: {
+  title: string;
+  items: NavItem[];
+}): JSX.Element {
   return (
     <section class="sidebar-section">
       <div class="section-header-row">
@@ -195,11 +334,15 @@ function SidebarSection(props: { title: string; items: NavItem[] }): JSX.Element
 
 export default function App(props: ParentProps): JSX.Element {
   const location = useLocation();
-  const [inspectorTab, setInspectorTab] = createSignal<InspectorTab>("telemetry");
+  const [inspectorTab, setInspectorTab] =
+    createSignal<InspectorTab>("telemetry");
   const currentTitle = createMemo(() => routeTitle(location.pathname));
 
   return (
-    <div class="heiwa-app-layout">
+    <div
+      class="heiwa-app-layout"
+      classList={{ "main-app-view": location.pathname === "/" }}
+    >
       <aside class="heiwa-sidebar" aria-label="Heiwa workspace navigation">
         <div class="sidebar-header">
           <A class="brand-logo" href="/">
@@ -219,7 +362,11 @@ export default function App(props: ParentProps): JSX.Element {
         <section class="sidebar-section session-section">
           <div class="section-header-row">
             <span class="section-title">Threads</span>
-            <button class="btn-new-thread" type="button" aria-label="New thread">
+            <button
+              class="btn-new-thread"
+              type="button"
+              aria-label="New thread"
+            >
               +
             </button>
           </div>
@@ -254,24 +401,27 @@ export default function App(props: ParentProps): JSX.Element {
 
       <main class="heiwa-main-content">
         <header class="workspace-header">
-          <div class="header-breadcrumb" aria-label="Current workspace">
+          <nav class="header-breadcrumb" aria-label="Current workspace">
             <span class="bc-root">Heiwa</span>
             <span class="bc-sep">/</span>
             <span class="bc-active">{currentTitle()}</span>
-          </div>
+          </nav>
           <div class="header-actions">
             <A class="btn-workspace-action" href="/">
-              Browser console
+              Run workspace
             </A>
-            <A class="btn-workspace-action glow" href="/status">
-              App settings
+            <A class="btn-workspace-action glow" href="/advanced">
+              Advanced dashboard
             </A>
           </div>
         </header>
         <div class="workspace-viewport">{props.children}</div>
       </main>
 
-      <aside class="heiwa-sidecar" aria-label="Browser console and runtime inspector">
+      <aside
+        class="heiwa-sidecar"
+        aria-label="Browser console and runtime inspector"
+      >
         <div class="sidecar-console-header">
           <div>
             <span class="console-eyebrow">Browser console</span>
@@ -282,13 +432,15 @@ export default function App(props: ParentProps): JSX.Element {
 
         <div class="sidecar-tabs">
           <For
-            each={[
-              ["telemetry", "Telemetry"],
-              ["personalize", "Personalize"],
-              ["projects", "Projects"],
-              ["advanced", "Advanced"],
-              ["settings", "Settings"],
-            ] as const}
+            each={
+              [
+                ["telemetry", "Telemetry"],
+                ["personalize", "Personalize"],
+                ["projects", "Projects"],
+                ["advanced", "Advanced"],
+                ["settings", "Settings"],
+              ] as const
+            }
           >
             {([id, label]) => (
               <button
@@ -306,70 +458,16 @@ export default function App(props: ParentProps): JSX.Element {
 
         <div class="sidecar-body">
           <Show when={inspectorTab() === "telemetry"}>
-            <section class="telemetry-panel">
-              <div class="surface-watch-panel">
-                <div class="surface-watch-header">
-                  <span class="widget-label">Connected surfaces</span>
-                  <span class="status-pill online">watching</span>
-                </div>
-                <div class="surface-signal-list">
-                  <For each={surfaceSignals}>
-                    {(surface) => (
-                      <div class="surface-signal-row">
-                        <div>
-                          <span class="surface-name">{surface.name}</span>
-                          <span class="surface-detail">{surface.detail}</span>
-                        </div>
-                        <span class={`status-pill ${surface.tone}`}>{surface.status}</span>
-                      </div>
-                    )}
-                  </For>
-                </div>
-              </div>
-
-              <div class="telemetry-widget">
-                <span class="widget-label">CPU</span>
-                <div class="widget-value-row">
-                  <strong>14%</strong>
-                  <span class="status-pill online">steady</span>
-                </div>
-                <div class="telemetry-bar">
-                  <div class="telemetry-bar-fill cyan" style={{ width: "14%" }} />
-                </div>
-                <span class="widget-desc">Background loop under budget</span>
-              </div>
-
-              <div class="telemetry-widget">
-                <span class="widget-label">Memory</span>
-                <div class="widget-value-row">
-                  <strong>44%</strong>
-                  <span class="status-pill active">local</span>
-                </div>
-                <div class="telemetry-bar">
-                  <div class="telemetry-bar-fill gold" style={{ width: "44%" }} />
-                </div>
-                <span class="widget-desc">State root: ~/.heiwa/state</span>
-              </div>
-
-              <div class="telemetry-widget">
-                <span class="widget-label">VRAM</span>
-                <div class="widget-value-row">
-                  <strong>5.8 GB</strong>
-                  <span class="status-pill online">Ollama</span>
-                </div>
-                <div class="telemetry-bar">
-                  <div class="telemetry-bar-fill magenta" style={{ width: "36%" }} />
-                </div>
-                <span class="widget-desc">Local model lane available</span>
-              </div>
-            </section>
+            <LiveTelemetryPanel />
           </Show>
 
           <Show when={inspectorTab() === "personalize"}>
             <section class="console-panel">
               <div class="console-panel-copy">
                 <span class="widget-label">Personalization</span>
-                <p>Customize how Heiwa understands, routes, and presents work.</p>
+                <p>
+                  Customize how Heiwa understands, routes, and presents work.
+                </p>
               </div>
               <For each={personalizationItems}>
                 {(item) => (
@@ -387,7 +485,10 @@ export default function App(props: ParentProps): JSX.Element {
             <section class="console-panel">
               <div class="console-panel-copy">
                 <span class="widget-label">Auto-managed projects</span>
-                <p>Heiwa should group work by durable projects without making the user file tickets.</p>
+                <p>
+                  Heiwa should group work by durable projects without making the
+                  user file tickets.
+                </p>
               </div>
               <For each={projectItems}>
                 {(item) => (
@@ -405,7 +506,10 @@ export default function App(props: ParentProps): JSX.Element {
             <section class="console-panel">
               <div class="console-panel-copy">
                 <span class="widget-label">Advanced settings</span>
-                <p>Low-level controls stay here so the main app remains one clean conversation.</p>
+                <p>
+                  Low-level controls stay here so the main app remains one clean
+                  conversation.
+                </p>
               </div>
               <For each={advancedItems}>
                 {(item) => (
@@ -423,7 +527,10 @@ export default function App(props: ParentProps): JSX.Element {
             <section class="console-panel">
               <div class="console-panel-copy">
                 <span class="widget-label">Open surfaces</span>
-                <p>Jump between the app dashboard, browser view, and runtime settings.</p>
+                <p>
+                  Jump between the app dashboard, browser view, and runtime
+                  settings.
+                </p>
               </div>
               <div class="console-link-grid">
                 <A class="console-link-card" href="/">
@@ -448,7 +555,9 @@ export default function App(props: ParentProps): JSX.Element {
                 <div class="trace-log-viewport">
                   <For each={traceLines}>
                     {(line) => (
-                      <div class={`trace-log-line ${line.kind}`}>{line.text}</div>
+                      <div class={`trace-log-line ${line.kind}`}>
+                        {line.text}
+                      </div>
                     )}
                   </For>
                 </div>

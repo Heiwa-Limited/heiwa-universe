@@ -17,28 +17,28 @@ Define one coherent verb surface for the installed `heiwa` runtime. Operators le
 
 ## Verb Table
 
-| Verb        | Shape                               | What it does                                                                 |
-|-------------|-------------------------------------|------------------------------------------------------------------------------|
-| `heiwa`     | no args → REPL                      | Open the interactive operator REPL.                                          |
-| `run`       | `heiwa run <prompt\|@file>`         | One-shot execution. Streams to stdout. Exits when done.                      |
-| `repl`      | `heiwa repl`                        | Explicit alias for `heiwa` with no args. Useful inside scripts.              |
-| `loop`      | `heiwa loop <spec>`                 | Fast feedback flow — run a spec in a loop with stop conditions.              |
-| `cron`      | `heiwa cron {add\|ls\|rm\|run}`     | Schedule a verb to run on cron/rrule. Runs under the local scheduler.        |
-| `agent`     | `heiwa agent {spawn\|ls\|kill\|attach}` | Manage subagent sessions. Parent sessions own their children.            |
-| `route`     | `heiwa route {status\|show\|test}`  | Inspect routing decisions. No side effects in `status`/`show`.               |
-| `providers` | `heiwa providers {ls\|link\|unlink\|test}` | Manage connected providers (OAuth CLIs, API keys, local runtimes).    |
-| `memory`    | `heiwa memory {ls\|show\|rm\|ingest}` | Operate on durable Heiwa memory (user, project, session).                  |
-| `trace`     | `heiwa trace {ls\|show\|export}`    | Inspect evidence and receipts for prior work.                                |
-| `approvals` | `heiwa approvals {ls\|grant\|deny}` | Resolve pending approvals from running sessions.                             |
-| `app`       | `heiwa app [--port N] [--open]`     | Start the local cockpit HTTP server; open browser if `--open`.               |
-| `install`   | `heiwa install`                     | Idempotent runtime bootstrap. Safe to re-run.                                |
-| `update`    | `heiwa update [--channel stable\|nightly]` | Self-update via GitHub Releases. Verifies signature.                  |
-| `doctor`    | `heiwa doctor`                      | Diagnose the local install; print a redactable report.                        |
-| `config`    | `heiwa config {get\|set\|path}`     | Read or modify `~/.heiwa/config.toml`.                                       |
-| `plugin`    | `heiwa plugin {install\|ls\|rm}`    | Install plugins/skills. `gh:` scheme supported.                              |
-| `browse`    | `heiwa browse <task>`               | (Planned) browser automation via local vision model, escalation on failure.  |
-| `help`      | `heiwa help [verb]`                 | Built-in help. Short, example-led.                                           |
-| `version`   | `heiwa version`                     | Semver + git hash + channel.                                                 |
+| Verb        | Shape                                      | What it does                                                                |
+| ----------- | ------------------------------------------ | --------------------------------------------------------------------------- |
+| `heiwa`     | no args → REPL                             | Open the interactive operator REPL.                                         |
+| `run`       | `heiwa run <prompt\|@file>`                | One-shot execution. Streams to stdout. Exits when done.                     |
+| `repl`      | `heiwa repl`                               | Explicit alias for `heiwa` with no args. Useful inside scripts.             |
+| `loop`      | `heiwa loop <spec>`                        | Fast feedback flow — run a spec in a loop with stop conditions.             |
+| `cron`      | `heiwa cron {add\|ls\|rm\|run}`            | Schedule a verb to run on cron/rrule. Runs under the local scheduler.       |
+| `agent`     | `heiwa agent {spawn\|ls\|kill\|attach}`    | Manage subagent sessions. Parent sessions own their children.               |
+| `route`     | `heiwa route {status\|show\|test}`         | Inspect routing decisions. No side effects in `status`/`show`.              |
+| `providers` | `heiwa providers {ls\|link\|unlink\|test}` | Manage connected providers (OAuth CLIs, API keys, local runtimes).          |
+| `memory`    | `heiwa memory {ls\|show\|rm\|ingest}`      | Operate on durable Heiwa memory (user, project, session).                   |
+| `trace`     | `heiwa trace {ls\|show\|export}`           | Inspect evidence and receipts for prior work.                               |
+| `approvals` | `heiwa approvals {ls\|grant\|deny}`        | Resolve pending approvals from running sessions.                            |
+| `app`       | `heiwa app [--port N] [--open]`            | Start the local cockpit HTTP server; open browser if `--open`.              |
+| `install`   | `heiwa install`                            | Idempotent runtime bootstrap. Safe to re-run.                               |
+| `update`    | `heiwa update [--channel stable\|nightly]` | Self-update via GitHub Releases. Verifies signature.                        |
+| `doctor`    | `heiwa doctor`                             | Diagnose the local install; print a redactable report.                      |
+| `config`    | `heiwa config {get\|set\|path}`            | Read or modify `~/.heiwa/config.toml`.                                      |
+| `plugin`    | `heiwa plugin {install\|ls\|rm}`           | Install plugins/skills. `gh:` scheme supported.                             |
+| `browse`    | `heiwa browse <task>`                      | (Planned) browser automation via local vision model, escalation on failure. |
+| `help`      | `heiwa help [verb]`                        | Built-in help. Short, example-led.                                          |
+| `version`   | `heiwa version`                            | Semver + git hash + channel.                                                |
 
 ## Command Conventions
 
@@ -54,17 +54,17 @@ Define one coherent verb surface for the installed `heiwa` runtime. Operators le
 
 Shared flags that behave identically across verbs:
 
-| Flag              | Meaning                                                                    |
-|-------------------|----------------------------------------------------------------------------|
-| `--json`          | Emit stable JSON instead of human output.                                  |
-| `--verbose` / `-v`| Verbose output. Stacks: `-vv`, `-vvv`.                                     |
-| `--quiet` / `-q`  | Suppress non-error output.                                                 |
-| `--yes` / `-y`    | Bypass interactive confirmation for destructive actions.                   |
-| `--detach` / `-d` | Return a session id, release the terminal, keep running in the background.|
-| `--provider <id>` | Force a specific provider lane.                                            |
-| `--model <id>`    | Force a specific model (provider-scoped).                                  |
-| `--route <role>`  | Pick a routing role: `code`, `chat`, `reason`, `review`.                   |
-| `--project <path>`| Operate against a specific project root, not cwd.                          |
+| Flag               | Meaning                                                                    |
+| ------------------ | -------------------------------------------------------------------------- |
+| `--json`           | Emit stable JSON instead of human output.                                  |
+| `--verbose` / `-v` | Verbose output. Stacks: `-vv`, `-vvv`.                                     |
+| `--quiet` / `-q`   | Suppress non-error output.                                                 |
+| `--yes` / `-y`     | Bypass interactive confirmation for destructive actions.                   |
+| `--detach` / `-d`  | Return a session id, release the terminal, keep running in the background. |
+| `--provider <id>`  | Force a specific provider lane.                                            |
+| `--model <id>`     | Force a specific model (provider-scoped).                                  |
+| `--route <role>`   | Pick a routing role: `code`, `chat`, `reason`, `review`.                   |
+| `--project <path>` | Operate against a specific project root, not cwd.                          |
 
 ## Exit Codes
 

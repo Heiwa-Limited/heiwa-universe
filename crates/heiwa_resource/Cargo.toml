@@ -1,0 +1,16 @@
+[package]
+name = "heiwa-resource"
+version = "0.1.0"
+edition = "2021"
+description = "Local machine resource snapshots and admission policy for Heiwa"
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+documentation.workspace = true
+readme.workspace = true
+keywords.workspace = true
+categories.workspace = true
+
+[dependencies]
+serde = { version = "1.0", features = ["derive"] }
+

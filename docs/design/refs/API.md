@@ -526,36 +526,36 @@ Rules:
 
 ## Compatibility Map
 
-| Legacy path | New contract |
-| --- | --- |
-| `GET /auth/me` | `GET /api/v1/session` |
-| `GET /auth/providers` | `GET /api/v1/providers` |
-| none | `GET /api/v1/hooks` |
-| `GET /missions` | `GET /api/v1/missions` |
-| `GET /approvals` | `GET /api/v1/approvals` |
-| `GET /rate-groups` | `GET /api/v1/rate-groups` |
-| `GET /history` | `GET /api/v1/history` |
+| Legacy path                          | New contract                |
+| ------------------------------------ | --------------------------- |
+| `GET /auth/me`                       | `GET /api/v1/session`       |
+| `GET /auth/providers`                | `GET /api/v1/providers`     |
+| none                                 | `GET /api/v1/hooks`         |
+| `GET /missions`                      | `GET /api/v1/missions`      |
+| `GET /approvals`                     | `GET /api/v1/approvals`     |
+| `GET /rate-groups`                   | `GET /api/v1/rate-groups`   |
+| `GET /history`                       | `GET /api/v1/history`       |
 | `POST /call/heiwa_get_cells_catalog` | `GET /api/v1/cells/catalog` |
-| `WS /ws/operator` | `WS /ws/v1/events` |
-| placeholder `/api/routes` | `GET /api/v1/routes` |
-| placeholder `/ws/repl` | `WS /ws/v1/repl` |
+| `WS /ws/operator`                    | `WS /ws/v1/events`          |
+| placeholder `/api/routes`            | `GET /api/v1/routes`        |
+| placeholder `/ws/repl`               | `WS /ws/v1/repl`            |
 
 ## Cockpit Route Mapping
 
-| Cockpit route | HTTP / WS dependency |
-| --- | --- |
-| `/` | `GET /api/v1/session`, `GET /api/v1/providers` |
-| `/providers` | `GET /api/v1/providers` plus bundled `providers.json` for descriptive metadata |
-| `/routes` | `GET /api/v1/routes`, `WS /ws/v1/events` |
-| `/hooks` | `GET /api/v1/hooks` |
-| `/repl` | `WS /ws/v1/repl` |
-| future `/missions` | `GET /api/v1/missions`, `WS /ws/v1/events` |
-| future `/approvals` | `GET /api/v1/approvals`, `WS /ws/v1/events` |
-| future `/history` | `GET /api/v1/history` |
-| future `/memory` | `GET /api/v1/memory` |
-| future `/trace` | `GET /api/v1/traces` |
-| future `/agents` | `GET /api/v1/agents`, `WS /ws/v1/events` |
-| future `/cron` | `GET /api/v1/crons`, `WS /ws/v1/events` |
+| Cockpit route       | HTTP / WS dependency                                                           |
+| ------------------- | ------------------------------------------------------------------------------ |
+| `/`                 | `GET /api/v1/session`, `GET /api/v1/providers`                                 |
+| `/providers`        | `GET /api/v1/providers` plus bundled `providers.json` for descriptive metadata |
+| `/routes`           | `GET /api/v1/routes`, `WS /ws/v1/events`                                       |
+| `/hooks`            | `GET /api/v1/hooks`                                                            |
+| `/repl`             | `WS /ws/v1/repl`                                                               |
+| future `/missions`  | `GET /api/v1/missions`, `WS /ws/v1/events`                                     |
+| future `/approvals` | `GET /api/v1/approvals`, `WS /ws/v1/events`                                    |
+| future `/history`   | `GET /api/v1/history`                                                          |
+| future `/memory`    | `GET /api/v1/memory`                                                           |
+| future `/trace`     | `GET /api/v1/traces`                                                           |
+| future `/agents`    | `GET /api/v1/agents`, `WS /ws/v1/events`                                       |
+| future `/cron`      | `GET /api/v1/crons`, `WS /ws/v1/events`                                        |
 
 ## Implementation Notes
 

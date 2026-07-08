@@ -28,6 +28,8 @@ heiwa-session = { path = "../../crates/heiwa_session" }
 heiwa-repl = { path = "../../crates/heiwa_repl" }
 heiwa-provider = { path = "../../crates/heiwa_provider" }
 heiwa_quota = { path = "../../crates/heiwa_quota" }
+heiwa-resource = { path = "../../crates/heiwa_resource" }
+heiwa_receipts = { path = "../../crates/heiwa_receipts" }
 heiwa-install = { path = "../../crates/heiwa_install" }
 heiwa-loop = { path = "../../crates/heiwa_loop" }
 heiwa-stdb = { path = "../../crates/heiwa_stdb" }
@@ -35,15 +37,19 @@ heiwa-protocol = { path = "../../crates/heiwa_protocol" }
 heiwa_mcp = { path = "../../crates/heiwa_mcp" }
 heiwa-tui = { path = "../../crates/heiwa_tui" }
 heiwa_drex = { path = "../../crates/heiwa_drex" }
+heiwa_automations = { path = "../../crates/heiwa_automations" }
 uuid = { version = "1.0", features = ["v4"] }
 hostname = "0.4"
 dirs = "5.0"
+libc = "0.2"
 tokio = { version = "1.50.0", features = ["full"] }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 chrono = { version = "0.4", features = ["serde"] }
 sha1 = "0.10"
+sha2 = "0.10"
+tiktoken-rs = "0.6"
+reqwest = { version = "0.12", default-features = false, features = ["blocking", "json", "rustls-tls"] }
 
 [dev-dependencies]
 tempfile = "3"
-

@@ -11,16 +11,17 @@ The deploy baseline is pinned and conservative. The operator baseline can move f
 
 These versions are the canonical floor for `heiwa-universe`:
 
-| Surface | Baseline | Reason |
-| --- | --- | --- |
-| Rust | `1.93.1` | Required by `heiwa-core` and SpacetimeDB crates. |
-| Docker rust-builder | `rust:1.93-slim` | Matches the workspace toolchain floor used in CI and optional remote-support builds. |
-| Node | `24.14.1` | Stable LTS lane for TypeScript workspace and deploy tooling. |
-| npm | bundled with Node 24 | Repo installs should follow the pinned Node lane. |
-| Python | `3.14.x` | Current repo pytest/docs/runtime compatibility lane. |
-| STDB auth | `STDB_TOKEN` | Canonical state auth boundary. |
-| Machine auth | `HEIWA_MACHINE_AUTH_TOKEN` | Canonical worker and operator machine auth boundary. |
-| Session auth | `HEIWA_JWT_SIGNING_SECRET` | Canonical user session signing boundary. |
+| Surface             | Baseline                                             | Reason                                                                               |
+| ------------------- | ---------------------------------------------------- | ------------------------------------------------------------------------------------ |
+| Rust                | `1.93.1`                                             | Required by `heiwa-core` and SpacetimeDB crates.                                     |
+| Docker rust-builder | `rust:1.93-slim`                                     | Matches the workspace toolchain floor used in CI and optional remote-support builds. |
+| Node                | `24.14.1`                                            | Stable LTS lane for TypeScript workspace and deploy tooling.                         |
+| npm                 | bundled with Node 24                                 | Repo installs should follow the pinned Node lane.                                    |
+| Python              | `3.14.x`                                             | Current repo pytest/docs/runtime compatibility lane.                                 |
+| STDB auth           | `spacetime login` shell identity targeting Maincloud | Canonical SpacetimeDB publisher/operator auth. No Heiwa-owned API key plane.         |
+| STDB token compat   | `STDB_TOKEN`                                         | Legacy/compat only for code paths that still require token-shaped material.          |
+| Machine auth        | `HEIWA_MACHINE_AUTH_TOKEN`                           | Canonical worker and operator machine auth boundary.                                 |
+| Session auth        | `HEIWA_JWT_SIGNING_SECRET`                           | Canonical user session signing boundary.                                             |
 
 ### Non-negotiables
 

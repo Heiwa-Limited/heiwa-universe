@@ -23,6 +23,8 @@ dependencies = [
     "rich>=14.3.3",
     "prompt_toolkit>=3.0.52",
     "textual>=8.2.1",
+    "dateparser>=1.4.0",
+    "recurrent>=0.4.1",
 ]
 
 [project.urls]

@@ -1,0 +1,46 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "Heiwa",
+  "version": "0.1.0",
+  "identifier": "ltd.heiwa.desktop",
+  "mainBinaryName": "Heiwa",
+  "build": {
+    "beforeDevCommand": "npm run dev",
+    "beforeBuildCommand": "npm run build",
+    "devUrl": "http://127.0.0.1:1420",
+    "frontendDist": "../dist"
+  },
+  "app": {
+    "windows": [
+      {
+        "title": "Heiwa",
+        "label": "main",
+        "width": 1440,
+        "height": 960,
+        "minWidth": 1100,
+        "minHeight": 720,
+        "resizable": true,
+        "fullscreen": false,
+        "center": true,
+        "decorations": true,
+        "transparent": false
+      }
+    ],
+    "security": {
+      "csp": "default-src 'self'; connect-src ipc: http://127.0.0.1:* ws://127.0.0.1:* https:; frame-src http: https:; img-src 'self' asset: data: http: https:; style-src 'self' 'unsafe-inline'; script-src 'self' 'wasm-unsafe-eval'"
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": ["app", "dmg"],
+    "category": "Productivity",
+    "shortDescription": "Local-first AI operator runtime",
+    "longDescription": "Heiwa is a local-first AI operating layer for intake, execution, evidence, and human life optimization.",
+    "copyright": "Copyright © 2026 Heiwa Limited",
+    "macOS": {
+      "minimumSystemVersion": "14.0",
+      "signingIdentity": null,
+      "hardenedRuntime": false
+    }
+  }
+}

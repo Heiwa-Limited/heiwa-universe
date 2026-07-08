@@ -24,7 +24,7 @@ async def test_health_and_version_round_trip() -> None:
     code = await serve(inp, out)
     assert code == 0
 
-    lines = [json.loads(l) for l in out.getvalue().splitlines()]
+    lines = [json.loads(line) for line in out.getvalue().splitlines()]
     assert lines[0] == {"id": "1", "status": "ok", "result": {"status": "ok"}}
     assert lines[1]["id"] == "2"
     assert lines[1]["status"] == "ok"
@@ -66,7 +66,7 @@ async def test_shutdown_stops_loop() -> None:
     out = io.StringIO()
     await serve(inp, out)
 
-    lines = [json.loads(l) for l in out.getvalue().splitlines()]
+    lines = [json.loads(line) for line in out.getvalue().splitlines()]
     assert len(lines) == 2
     assert lines[0]["result"] == {"x": 1}
     assert lines[1]["result"] == {"shutting_down": True}

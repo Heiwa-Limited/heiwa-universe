@@ -3,7 +3,7 @@ use std::process::Command;
 #[test]
 fn shell_boots_without_stdb_env_vars() {
     let output = Command::new("cargo")
-        .args(&["run", "-p", "heiwa-shell", "--bin", "heiwa", "--", "doctor"])
+        .args(["run", "-p", "heiwa-shell", "--bin", "heiwa", "--", "doctor"])
         .env_remove("STDB_URL")
         .env_remove("STDB_TOKEN")
         .output()

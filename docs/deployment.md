@@ -29,10 +29,10 @@ The MacBook has owner permissions to bypass remote CI blockers, shifting verific
 
 There are two legitimate local modes:
 
-| Mode | Source | Purpose | Port guidance |
-| --- | --- | --- | --- |
-| Installed user mode | GitHub-backed installed `heiwa` binary under `~/.heiwa` | Real operator use | `7474` |
-| Checkout development mode | local branch in this checkout | Verify code before GitHub promotion | temporary alternate port such as `7475` |
+| Mode                      | Source                                                  | Purpose                             | Port guidance                           |
+| ------------------------- | ------------------------------------------------------- | ----------------------------------- | --------------------------------------- |
+| Installed user mode       | GitHub-backed installed `heiwa` binary under `~/.heiwa` | Real operator use                   | `7474`                                  |
+| Checkout development mode | local branch in this checkout                           | Verify code before GitHub promotion | temporary alternate port such as `7475` |
 
 Do not blur these modes. If a checkout runtime works on `7475`, that proves the
 branch can serve the endpoint. It does not prove the installed product runtime on
@@ -80,11 +80,11 @@ Deployment gate:
 GitHub, Cloudflare, and SpacetimeDB are protected company backends with separate
 authority.
 
-| Backend | Protected role | Safe update path |
-| --- | --- | --- |
-| GitHub | source, tag archive, releases, checksums, install provenance | local sandbox checks passed, local merge, push to main, tagged release |
-| Cloudflare | DNS, WAF, public docs/app shell, install/update front door | GitHub-driven deploys or explicit owner-approved `wrangler` deploys |
-| SpacetimeDB | canonical state, reducers, leases, evidence, subscriptions | schema/reducer changes reviewed in repo, bindings regenerated, publish gated separately |
+| Backend     | Protected role                                               | Safe update path                                                                        |
+| ----------- | ------------------------------------------------------------ | --------------------------------------------------------------------------------------- |
+| GitHub      | source, tag archive, releases, checksums, install provenance | local sandbox checks passed, local merge, push to main, tagged release                  |
+| Cloudflare  | DNS, WAF, public docs/app shell, install/update front door   | GitHub-driven deploys or explicit owner-approved `wrangler` deploys                     |
+| SpacetimeDB | canonical state, reducers, leases, evidence, subscriptions   | schema/reducer changes reviewed in repo, bindings regenerated, publish gated separately |
 
 Rules:
 

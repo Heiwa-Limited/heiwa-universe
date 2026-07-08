@@ -2,7 +2,7 @@ use std::fs;
 use std::path::PathBuf;
 use std::time::Duration;
 
-use heiwa_protocol::{ExecutionScope, ToolCall, ToolLease, RiskClass};
+use heiwa_protocol::{ExecutionScope, RiskClass, ToolCall, ToolLease};
 use heiwa_shell::agentic::execute_tool_calls;
 use tempfile::tempdir;
 
@@ -20,13 +20,16 @@ fn leased_scope(root: PathBuf) -> ExecutionScope {
     scope
 }
 
+// ENV_MUTEX serializes tests that mutate global env vars; holding it across the
+// sleep().await is safe because each #[tokio::test] runs on its own runtime.
+#[allow(clippy::await_holding_lock)]
 #[tokio::test]
 async fn test_approval_gate_approve_flow() {
     let _lock = ENV_MUTEX.lock().unwrap();
 
     let temp = tempdir().unwrap();
     let root = temp.path().to_path_buf();
-    
+
     // Set environment overrides
     std::env::set_var("HOME", &root);
     std::env::set_var("HEIWA_AUTO_APPROVE", "none");
@@ -44,18 +47,19 @@ async fn test_approval_gate_approve_flow() {
         let scope = leased_scope(root.clone());
         let rt = tokio::runtime::Handle::current();
         move || {
-            rt.block_on(async move {
-                execute_tool_calls(scope, tool_calls, "test", "test").await
-            })
+            rt.block_on(async move { execute_tool_calls(scope, tool_calls, "test", "test").await })
         }
     });
 
-
     // Wait and find the request id
-    let requests_dir = root.join(".heiwa").join("state").join("dispatch").join("requests");
+    let requests_dir = root
+        .join(".heiwa")
+        .join("state")
+        .join("dispatch")
+        .join("requests");
     let mut request_id = None;
     let start = std::time::Instant::now();
-    
+
     while start.elapsed() < Duration::from_secs(5) {
         if let Ok(entries) = fs::read_dir(&requests_dir) {
             let files: Vec<_> = entries.flatten().collect();
@@ -74,10 +78,15 @@ async fn test_approval_gate_approve_flow() {
     println!("TEST: root path is {:?}", root);
 
     // Write the approved decision file
-    let decisions_dir = root.join(".heiwa").join("state").join("dispatch").join("approvals").join("decisions");
+    let decisions_dir = root
+        .join(".heiwa")
+        .join("state")
+        .join("dispatch")
+        .join("approvals")
+        .join("decisions");
     fs::create_dir_all(&decisions_dir).unwrap();
     let decision_path = decisions_dir.join(format!("{}.json", id));
-    
+
     println!("TEST: decision_path is {:?}", decision_path);
 
     let decision_json = serde_json::json!({
@@ -86,7 +95,11 @@ async fn test_approval_gate_approve_flow() {
         "decided_at_utc": chrono::Utc::now().to_rfc3339(),
         "operator": "test-decider"
     });
-    fs::write(&decision_path, serde_json::to_string_pretty(&decision_json).unwrap()).unwrap();
+    fs::write(
+        &decision_path,
+        serde_json::to_string_pretty(&decision_json).unwrap(),
+    )
+    .unwrap();
 
     // Await execution receipt by joining the thread
     let (receipts, transcript) = execute_handle.join().unwrap().unwrap();
@@ -94,17 +107,22 @@ async fn test_approval_gate_approve_flow() {
     assert_eq!(receipts.len(), 1);
     // Since "deploy" is not in the registry, it should proceed to call the registry, returning UnknownTool error
     assert_eq!(receipts[0].status.as_str(), "failure");
-    assert!(receipts[0].error.as_ref().unwrap().contains("unknown tool: deploy"));
+    assert!(receipts[0]
+        .error
+        .as_ref()
+        .unwrap()
+        .contains("unknown tool: deploy"));
     assert!(transcript[0].output.contains("unknown tool: deploy"));
 }
 
+#[allow(clippy::await_holding_lock)]
 #[tokio::test]
 async fn test_approval_gate_deny_flow() {
     let _lock = ENV_MUTEX.lock().unwrap();
 
     let temp = tempdir().unwrap();
     let root = temp.path().to_path_buf();
-    
+
     std::env::set_var("HOME", &root);
     std::env::set_var("HEIWA_AUTO_APPROVE", "none");
     std::env::set_var("HEIWA_SURFACE", "discord");
@@ -119,16 +137,18 @@ async fn test_approval_gate_deny_flow() {
         let scope = leased_scope(root.clone());
         let rt = tokio::runtime::Handle::current();
         move || {
-            rt.block_on(async move {
-                execute_tool_calls(scope, tool_calls, "test", "test").await
-            })
+            rt.block_on(async move { execute_tool_calls(scope, tool_calls, "test", "test").await })
         }
     });
 
-    let requests_dir = root.join(".heiwa").join("state").join("dispatch").join("requests");
+    let requests_dir = root
+        .join(".heiwa")
+        .join("state")
+        .join("dispatch")
+        .join("requests");
     let mut request_id = None;
     let start = std::time::Instant::now();
-    
+
     while start.elapsed() < Duration::from_secs(5) {
         if let Ok(entries) = fs::read_dir(&requests_dir) {
             let files: Vec<_> = entries.flatten().collect();
@@ -147,26 +167,40 @@ async fn test_approval_gate_deny_flow() {
     println!("TEST DENY: root path is {:?}", root);
 
     // Write the denied decision file
-    let decisions_dir = root.join(".heiwa").join("state").join("dispatch").join("approvals").join("decisions");
+    let decisions_dir = root
+        .join(".heiwa")
+        .join("state")
+        .join("dispatch")
+        .join("approvals")
+        .join("decisions");
     fs::create_dir_all(&decisions_dir).unwrap();
     let decision_path = decisions_dir.join(format!("{}.json", id));
-    
+
     println!("TEST DENY: decision_path is {:?}", decision_path);
 
-    
     let decision_json = serde_json::json!({
         "id": id,
         "outcome": "denied",
         "decided_at_utc": chrono::Utc::now().to_rfc3339(),
         "operator": "test-decider"
     });
-    fs::write(&decision_path, serde_json::to_string_pretty(&decision_json).unwrap()).unwrap();
+    fs::write(
+        &decision_path,
+        serde_json::to_string_pretty(&decision_json).unwrap(),
+    )
+    .unwrap();
 
     // Await execution receipt by joining the thread
     let (receipts, transcript) = execute_handle.join().unwrap().unwrap();
     assert_eq!(receipts.len(), 1);
     // Should be gated and returned as denied policy error
     assert_eq!(receipts[0].status.as_str(), "denied");
-    assert!(receipts[0].error.as_ref().unwrap().contains("gated, approval: denied: denied"));
-    assert!(transcript[0].output.contains("gated, approval: denied: denied"));
+    assert!(receipts[0]
+        .error
+        .as_ref()
+        .unwrap()
+        .contains("gated, approval: denied: denied"));
+    assert!(transcript[0]
+        .output
+        .contains("gated, approval: denied: denied"));
 }

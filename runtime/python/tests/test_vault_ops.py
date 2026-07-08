@@ -1,6 +1,6 @@
 import pytest
 from heiwa_sidecar.handlers import op_vault_decrypt, op_vault_resolve
-from heiwa_sidecar.protocol import Request, OkResponse, ErrResponse
+from heiwa_sidecar.protocol import ErrResponse, Request
 
 @pytest.mark.asyncio
 async def test_vault_decrypt_missing_args():

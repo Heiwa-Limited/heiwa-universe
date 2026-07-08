@@ -15,7 +15,6 @@ Load this room for:
 - `packages/heiwa_sdk/heiwa_sdk/spacetimedb.py`
 - `packages/heiwa_sdk/heiwa_sdk/db.py`
 - `packages/heiwa_protocol/heiwa_protocol/routing.py`
-- `legacy/apps/heiwa_hub/mcp_server.py` for legacy MCP/HTTP reference only
 
 ## Design Rules
 

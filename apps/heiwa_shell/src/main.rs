@@ -1,4 +1,5 @@
 mod cli;
+mod home;
 mod cmd;
 
 use anyhow::{anyhow, Result};
@@ -16,6 +17,7 @@ use heiwa_provider::providers::claude_code::ClaudeCodeCliAdapter;
 use heiwa_provider::providers::codex_cli::CodexCliAdapter;
 use heiwa_provider::providers::gemini_cli::GeminiCliAdapter;
 use heiwa_provider::providers::ollama::OllamaCliAdapter;
+use heiwa_provider::providers::openrouter::OpenRouterAdapter;
 use heiwa_repl::{parse_input, render_footer, ReplCommand, TelemetryState};
 use heiwa_shell::agentic;
 use std::env;
@@ -34,7 +36,7 @@ fn canonical_provider_id(provider: &str) -> &str {
 fn provider_supports_loop_adapter(provider: &str) -> bool {
     matches!(
         canonical_provider_id(provider),
-        "claude" | "codex" | "ollama" | "gemini"
+        "claude" | "codex" | "ollama" | "gemini" | "openrouter"
     )
 }
 
@@ -119,20 +121,54 @@ struct RouteResult {
     rate_group: String,
     routing_metadata: String,
     intent_key: String,
+    privacy: String,
     request_id: String,
     turn_started_at: String,
+}
+
+#[derive(Debug, Clone)]
+struct PreparedRoutePrompt {
+    model_prompt: String,
+    compression: Option<RouteCompressionMetadata>,
+}
+
+#[derive(Debug, Clone)]
+struct RouteCompressionMetadata {
+    applied: bool,
+    reason: String,
+    receipt_path: Option<String>,
+    input_chars: usize,
+    output_chars: usize,
+    ratio: f64,
+    input_tokens: usize,
+    output_tokens: usize,
+    estimated_usd_saved: f64,
+}
+
+#[derive(Debug, Clone)]
+struct RouteCompressionResult {
+    compressed: String,
+    receipt_path: String,
+    input_chars: usize,
+    output_chars: usize,
+    ratio: f64,
+    input_tokens: usize,
+    output_tokens: usize,
+    estimated_usd_saved: f64,
 }
 
 /// Outcome of the routing pipeline.
 enum RouteOutcome {
     /// Task routed to a model, ready to stream.
-    Routed(RouteResult),
+    Routed(Box<RouteResult>),
     /// DREX returned a deterministic response (no model needed).
     Deterministic(String),
 }
 
 const DEFAULT_SESSION_ID: &str = "default";
 const TRANSCRIPT_CHAR_BUDGET: usize = 16_000;
+const ROUTE_COMPRESSION_BYTE_THRESHOLD: usize = 4096;
+const ROUTE_COMPRESSION_MODEL: &str = "ollama/qwen3.5:4b";
 
 #[tokio::main]
 async fn main() -> Result<()> {
@@ -179,7 +215,7 @@ async fn main() -> Result<()> {
                 );
 
                 // Write ~/.heiwa/connection.json with default STDB endpoint
-                let heiwa_dir = dirs::home_dir()
+                let heiwa_dir = crate::home::heiwa_home()
                     .map(|h| h.join(".heiwa"))
                     .expect("HOME must be set");
                 let conn_path = heiwa_dir.join("connection.json");
@@ -743,6 +779,8 @@ async fn main() -> Result<()> {
                         "gemini" => {
                             Some(Arc::new(GeminiCliAdapter::new()) as Arc<dyn ProviderAdapter>)
                         }
+                        "openrouter" => OpenRouterAdapter::from_registry()
+                            .map(|a| Arc::new(a) as Arc<dyn ProviderAdapter>),
                         _ => None,
                     });
 
@@ -810,6 +848,7 @@ fn print_help() {
     println!("  app [runtime status]          Probe local Heiwa.app runtime readiness");
     println!("  workers heartbeat             Register local worker liveness");
     println!("  workers status                Show worker registry");
+    println!("  auto status|create|tick       Manage local background automations");
     println!("  approvals list|show|decide    Manage local approval packets");
     println!("  mail status|accounts          Mail.app metadata-only bridge probe");
     println!("  route preview <prompt>        Preview DREX routing without execution");
@@ -838,7 +877,9 @@ async fn run_route_command(args: &[String]) -> Result<()> {
             let now_unix = Utc::now().timestamp();
             let quota_ledger = open_default_quota_ledger();
 
+            let privacy = privacy_for_task(&prompt);
             println!("route preview");
+            println!("  privacy: {}", privacy);
             let quota_lines =
                 quota_budget_preview_lines(&model_tiers, quota_ledger.as_ref(), now_unix);
             if !quota_lines.is_empty() {
@@ -971,7 +1012,7 @@ async fn register_current_device(stdb_client: &heiwa_stdb::StdbClient) -> Result
     Ok(())
 }
 
-fn get_live_model_tiers(
+pub(crate) fn get_live_model_tiers(
     registry: &heiwa_provider::AccountRegistry,
 ) -> Vec<heiwa_bindings::ModelTier> {
     registry
@@ -1111,6 +1152,17 @@ async fn run_repl(use_cockpit: bool) -> Result<()> {
         println!("No loop-capable models available. Run 'heiwa providers' or 'heiwa auth add-key' to connect.");
     }
 
+    // Receipt store: env × provider × model × agent × tokens × latency ×
+    // actual_cost × counterfactual_cost. See docs/architecture/receipts.md.
+    let heiwa_home = heiwa_install::get_heiwa_dir();
+    let receipts = heiwa_receipts::ReceiptStore::open(heiwa_home.join("receipts.db")).ok();
+    let rates = heiwa_receipts::runtime::load_rates_or_default(&heiwa_home);
+    if receipts.is_none() {
+        debug_log(format_args!(
+            "receipts store unavailable; runs will not be recorded"
+        ));
+    }
+
     let persisted = heiwa_session::load_transcript(DEFAULT_SESSION_ID)
         .unwrap_or_else(|_| heiwa_session::PersistedTranscript::empty(DEFAULT_SESSION_ID));
 
@@ -1232,8 +1284,19 @@ async fn run_repl(use_cockpit: bool) -> Result<()> {
                         pins.current_model = route.model_id.clone();
                         record_route_evidence(&stdb_client, &route, &t);
 
-                        let messages = build_messages_from_transcript(&state.transcript, &t, &pins);
+                        let prepared = prepare_outbound_prompt_for_route(&route, &t);
+                        let messages = build_messages_from_transcript(
+                            &state.transcript,
+                            &prepared.model_prompt,
+                            &pins,
+                        );
                         append_state_block(&mut state, TranscriptBlock::User(t.clone()));
+                        let input_text: String = messages
+                            .iter()
+                            .map(|m| m.content.clone())
+                            .collect::<Vec<_>>()
+                            .join("\n");
+                        let receipt_started = std::time::Instant::now();
                         let (stream_tx, mut stream_rx) = tokio::sync::mpsc::channel(32);
                         let model_id = route.provider_model_id.clone();
 
@@ -1274,6 +1337,7 @@ async fn run_repl(use_cockpit: bool) -> Result<()> {
                             }
                         }
                         println!();
+                        let response_for_receipt = full_response.clone();
                         append_state_block(&mut state, TranscriptBlock::Assistant(full_response));
 
                         if let Some(ref u) = usage {
@@ -1285,6 +1349,19 @@ async fn run_repl(use_cockpit: bool) -> Result<()> {
                             }
                         }
                         record_run_evidence(&stdb_client, &route, usage.as_ref());
+                        let receipt_latency_ms = receipt_started.elapsed().as_millis() as i64;
+                        if let Some(ref receipts) = receipts {
+                            record_call_receipt(
+                                receipts,
+                                &rates,
+                                &route,
+                                usage.as_ref(),
+                                &state.session_id,
+                                &input_text,
+                                &response_for_receipt,
+                                receipt_latency_ms,
+                            );
+                        }
                         turn_count += 1;
                     }
                 }
@@ -1374,6 +1451,8 @@ async fn run_repl(use_cockpit: bool) -> Result<()> {
                             "gemini" => {
                                 Some(Arc::new(GeminiCliAdapter::new()) as Arc<dyn ProviderAdapter>)
                             }
+                            "openrouter" => OpenRouterAdapter::from_registry()
+                                .map(|a| Arc::new(a) as Arc<dyn ProviderAdapter>),
                             _ => None,
                         });
 
@@ -1507,8 +1586,12 @@ async fn run_cockpit_controller(
                                         "agentic: planning tools...".into(),
                                     ));
 
-                                    let mut messages =
-                                        build_messages_from_transcript(&transcript, &t, &pins);
+                                    let prepared = prepare_outbound_prompt_for_route(&route, &t);
+                                    let mut messages = build_messages_from_transcript(
+                                        &transcript,
+                                        &prepared.model_prompt,
+                                        &pins,
+                                    );
                                     messages.insert(
                                         1,
                                         Message {
@@ -1654,8 +1737,12 @@ async fn run_cockpit_controller(
                                     .send(CockpitEvent::StatusUpdate("streaming...".into()));
 
                                 // Stream response
-                                let messages =
-                                    build_messages_from_transcript(&transcript, &t, &pins);
+                                let prepared = prepare_outbound_prompt_for_route(&route, &t);
+                                let messages = build_messages_from_transcript(
+                                    &transcript,
+                                    &prepared.model_prompt,
+                                    &pins,
+                                );
                                 append_controller_block(
                                     &session_id,
                                     &mut transcript,
@@ -2051,10 +2138,10 @@ fn expand_dir_arg(raw: &str, base: Option<&Path>) -> Result<Vec<PathBuf>, String
 
 fn expand_home(raw: &str) -> PathBuf {
     if raw == "~" {
-        return dirs::home_dir().unwrap_or_else(|| PathBuf::from(raw));
+        return crate::home::heiwa_home().unwrap_or_else(|| PathBuf::from(raw));
     }
     if let Some(rest) = raw.strip_prefix("~/") {
-        if let Some(home) = dirs::home_dir() {
+        if let Some(home) = crate::home::heiwa_home() {
             return home.join(rest);
         }
     }
@@ -2144,6 +2231,167 @@ fn build_messages_from_transcript(
     messages
 }
 
+fn prepare_outbound_prompt_for_route(route: &RouteResult, input: &str) -> PreparedRoutePrompt {
+    let pricing = pricing_for_provider(&route.provider);
+    prepare_outbound_prompt_for_route_with(route, input, |body, source| {
+        let receipt = cmd::compress::compress_text_for_source_with_pricing(
+            body,
+            source,
+            ROUTE_COMPRESSION_MODEL,
+            Some(pricing.clone()),
+        )
+        .map_err(|error| error.to_string())?;
+        Ok(RouteCompressionResult {
+            compressed: receipt.compressed,
+            receipt_path: receipt.receipt_path,
+            input_chars: receipt.input_chars,
+            output_chars: receipt.output_chars,
+            ratio: receipt.ratio,
+            input_tokens: receipt.input_tokens,
+            output_tokens: receipt.output_tokens,
+            estimated_usd_saved: receipt.estimated_usd_saved,
+        })
+    })
+}
+
+fn pricing_for_provider(provider: &str) -> cmd::compress::PricingInputs {
+    // USD per million tokens, sourced from public 2026-05 list pricing.
+    // Defaults bias toward the operator's typical lane (Sonnet 4.6 / GPT-5 / Gemini 3.1).
+    // Override via env later if needed. Local providers cost zero.
+    let (input_rate, output_rate, token_count_kind, exact_count_source) = match provider {
+        "claude" => (
+            3.0,
+            15.0,
+            "proxy_estimate",
+            Some("anthropic_messages_count_tokens_api"),
+        ),
+        "codex" => (3.0, 15.0, "proxy_estimate", None),
+        "gemini" => (1.25, 10.0, "proxy_estimate", None),
+        "antigravity" => (1.25, 10.0, "proxy_estimate", None),
+        "ollama" => (0.0, 0.0, "local_zero_cost", None),
+        _ => (5.0, 15.0, "proxy_estimate", None),
+    };
+    cmd::compress::PricingInputs {
+        target_provider: provider.to_string(),
+        usd_per_million_input_tokens: input_rate,
+        usd_per_million_output_tokens: output_rate,
+        tokenizer_id: "cl100k_base".to_string(),
+        token_count_kind: token_count_kind.to_string(),
+        exact_count_source: exact_count_source.map(str::to_string),
+    }
+}
+
+fn prepare_outbound_prompt_for_route_with<F>(
+    route: &RouteResult,
+    input: &str,
+    compressor: F,
+) -> PreparedRoutePrompt
+where
+    F: FnOnce(&str, &str) -> Result<RouteCompressionResult, String>,
+{
+    if !route_should_compress(route, input) {
+        return PreparedRoutePrompt {
+            model_prompt: input.to_string(),
+            compression: None,
+        };
+    }
+
+    let source = format!(
+        "route:{}:{}:{}",
+        route.request_id, route.provider, route.intent_key
+    );
+    match compressor(input, &source) {
+        Ok(result) if result.compressed.trim().is_empty() => PreparedRoutePrompt {
+            model_prompt: input.to_string(),
+            compression: Some(RouteCompressionMetadata {
+                applied: false,
+                reason: "empty_output".to_string(),
+                receipt_path: Some(result.receipt_path),
+                input_chars: result.input_chars,
+                output_chars: result.output_chars,
+                ratio: result.ratio,
+                input_tokens: result.input_tokens,
+                output_tokens: result.output_tokens,
+                estimated_usd_saved: 0.0,
+            }),
+        },
+        Ok(result) if result.output_chars >= result.input_chars => PreparedRoutePrompt {
+            model_prompt: input.to_string(),
+            compression: Some(RouteCompressionMetadata {
+                applied: false,
+                reason: "not_smaller".to_string(),
+                receipt_path: Some(result.receipt_path),
+                input_chars: result.input_chars,
+                output_chars: result.output_chars,
+                ratio: result.ratio,
+                input_tokens: result.input_tokens,
+                output_tokens: result.output_tokens,
+                estimated_usd_saved: 0.0,
+            }),
+        },
+        Ok(result) => PreparedRoutePrompt {
+            model_prompt: result.compressed,
+            compression: Some(RouteCompressionMetadata {
+                applied: true,
+                reason: "compressed".to_string(),
+                receipt_path: Some(result.receipt_path),
+                input_chars: result.input_chars,
+                output_chars: result.output_chars,
+                ratio: result.ratio,
+                input_tokens: result.input_tokens,
+                output_tokens: result.output_tokens,
+                estimated_usd_saved: result.estimated_usd_saved,
+            }),
+        },
+        Err(error) => PreparedRoutePrompt {
+            model_prompt: input.to_string(),
+            compression: Some(RouteCompressionMetadata {
+                applied: false,
+                reason: format!("failed:{error}"),
+                receipt_path: None,
+                input_chars: input.chars().count(),
+                output_chars: input.chars().count(),
+                ratio: 1.0,
+                input_tokens: 0,
+                output_tokens: 0,
+                estimated_usd_saved: 0.0,
+            }),
+        },
+    }
+}
+
+fn route_should_compress(route: &RouteResult, input: &str) -> bool {
+    !is_local_provider(&route.provider)
+        && input.len() > ROUTE_COMPRESSION_BYTE_THRESHOLD
+        && route_intent_allows_compression(&route.intent_key)
+}
+
+fn route_intent_allows_compression(intent_key: &str) -> bool {
+    matches!(intent_key, "chat" | "build" | "research" | "strategy")
+}
+
+fn compression_trace_suffix(compression: Option<&RouteCompressionMetadata>) -> String {
+    let Some(compression) = compression else {
+        return String::new();
+    };
+    if compression.applied {
+        let tokens_saved = compression.input_tokens as i64 - compression.output_tokens as i64;
+        format!(
+            " compression=applied ratio={:.3} chars={}->{} tokens={}->{} saved={} usd_saved={:.6} receipt={}",
+            compression.ratio,
+            compression.input_chars,
+            compression.output_chars,
+            compression.input_tokens,
+            compression.output_tokens,
+            tokens_saved,
+            compression.estimated_usd_saved,
+            compression.receipt_path.as_deref().unwrap_or("none")
+        )
+    } else {
+        format!(" compression=skipped reason={}", compression.reason)
+    }
+}
+
 fn working_context_prompt(pins: &SessionPins) -> String {
     let dirs = pins
         .scope
@@ -2210,7 +2458,7 @@ fn append_controller_block(
 // ---------------------------------------------------------------------------
 
 /// Providers that have a working adapter in `resolve_adapter()`.
-const SUPPORTED_ADAPTER_PROVIDERS: &[&str] = &["ollama", "claude", "codex", "gemini"];
+const SUPPORTED_ADAPTER_PROVIDERS: &[&str] = &["ollama", "claude", "codex", "gemini", "openrouter"];
 
 /// Returns true if the provider has a working adapter in this binary.
 fn has_adapter(provider: &str) -> bool {
@@ -2254,11 +2502,12 @@ fn route_task_inner(
     let final_provider_pin = provider_pin.as_deref().or(pins.pinned_provider.as_deref());
     let final_model_pin = model_pin.as_deref().or(pins.pinned_model.as_deref());
 
+    let privacy = privacy_for_task(task);
     let ingress = DrexIngress {
         intent: turn_request.intent.as_drex_key().to_string(),
         risk: "low".to_string(),
         raw_text: task.to_string(),
-        privacy: "standard".to_string(),
+        privacy: privacy.to_string(),
         runtime: runtime_for_route_preference(pins.route_preference).to_string(),
         available_vram_mb: 8192,
         required_context_tokens: 1024,
@@ -2296,9 +2545,9 @@ fn route_task_inner(
     );
 
     if routed_tiers.is_empty() {
-        let reason = if final_model_pin.is_some() {
-            format!("Model '{}' not available.", final_model_pin.unwrap())
-        } else if final_provider_pin.is_some() {
+        let reason = if let Some(model) = final_model_pin {
+            format!("Model '{model}' not available.")
+        } else if let Some(provider) = final_provider_pin {
             let supported: Vec<&str> = adapter_capable
                 .iter()
                 .map(|t| t.provider.as_str())
@@ -2306,8 +2555,7 @@ fn route_task_inner(
                 .into_iter()
                 .collect();
             format!(
-                "Provider '{}' not available. Supported: {}.",
-                final_provider_pin.unwrap(),
+                "Provider '{provider}' not available. Supported: {}.",
                 supported.join(", "),
             )
         } else {
@@ -2376,7 +2624,7 @@ fn route_task_inner(
 
     let adapter = resolve_adapter(&selected.provider, &selected.model_id)?;
 
-    Ok(RouteOutcome::Routed(RouteResult {
+    Ok(RouteOutcome::Routed(Box::new(RouteResult {
         adapter,
         model_id: selected.model_id.clone(),
         provider: selected.provider.clone(),
@@ -2384,9 +2632,32 @@ fn route_task_inner(
         rate_group: selected.rate_group.clone(),
         routing_metadata: route.routing_metadata,
         intent_key: turn_request.intent.as_drex_key().to_string(),
+        privacy: privacy.to_string(),
         request_id: uuid::Uuid::new_v4().to_string(),
         turn_started_at: Utc::now().to_rfc3339(),
-    }))
+    })))
+}
+
+/// Detect privacy cues that force the sovereign (local-only) lane.
+///
+/// Hard rule: sovereign work stays local-first. A false positive only costs
+/// remote quality on a task the operator framed as private; a false negative
+/// leaks framing the operator marked sensitive — so match generously.
+pub(crate) fn privacy_for_task(task: &str) -> &'static str {
+    let lower = task.to_lowercase();
+    const SOVEREIGN_HINTS: [&str; 6] = [
+        "privat", // private, privately, privacy
+        "confidential",
+        "sensitive",
+        "sovereign",
+        "personal",
+        "do not share",
+    ];
+    if SOVEREIGN_HINTS.iter().any(|hint| lower.contains(hint)) {
+        "sovereign"
+    } else {
+        "standard"
+    }
 }
 
 /// Resolve a provider adapter by name.
@@ -2396,6 +2667,9 @@ fn resolve_adapter(provider: &str, model_id: &str) -> Result<Arc<dyn ProviderAda
         "claude" => Ok(Arc::new(ClaudeCodeCliAdapter::new())),
         "codex" => Ok(Arc::new(CodexCliAdapter::new())),
         "gemini" => Ok(Arc::new(GeminiCliAdapter::new())),
+        "openrouter" => OpenRouterAdapter::from_registry()
+            .map(|a| Arc::new(a) as Arc<dyn ProviderAdapter>)
+            .ok_or_else(|| "No OpenRouter account registered (heiwa auth add-key openrouter <key>).".to_string()),
         _ => Err(format!("No adapter for provider '{}' yet.", provider)),
     }
 }
@@ -2408,7 +2682,7 @@ fn record_route_evidence(stdb: &heiwa_stdb::StdbClient, route: &RouteResult, tas
         task,
         &route.intent_key,
         "low",
-        "standard",
+        &route.privacy,
         &route.provider,
         &route.provider,
         &route.model_id,
@@ -2420,6 +2694,58 @@ fn record_route_evidence(stdb: &heiwa_stdb::StdbClient, route: &RouteResult, tas
         &route.routing_metadata,
         0.9,
     );
+}
+
+/// Record a completed run in the local receipt store.
+fn record_call_receipt(
+    receipts: &heiwa_receipts::ReceiptStore,
+    rates: &heiwa_receipts::RateTable,
+    route: &RouteResult,
+    usage: Option<&TokenUsage>,
+    session_id: &str,
+    input_text: &str,
+    output_text: &str,
+    latency_ms: i64,
+) {
+    use heiwa_receipts::{runtime, Receipt};
+
+    let env = runtime::env_for_provider(&route.provider);
+    let tokens_in = usage
+        .map(|u| u.input_tokens as i64)
+        .filter(|&n| n > 0)
+        .unwrap_or_else(|| runtime::estimate_tokens(input_text));
+    let tokens_out = usage
+        .map(|u| u.output_tokens as i64)
+        .filter(|&n| n > 0)
+        .unwrap_or_else(|| runtime::estimate_tokens(output_text));
+
+    let (costs, _found) = runtime::compute_or_zero(
+        rates,
+        env,
+        &route.provider,
+        &route.model_id,
+        tokens_in,
+        tokens_out,
+    );
+
+    let receipt = Receipt::new(
+        Utc::now().timestamp(),
+        env,
+        route.provider.clone(),
+        route.model_id.clone(),
+        "repl",
+        tokens_in,
+        tokens_out,
+        latency_ms,
+        costs.actual_cad,
+        costs.counterfactual_cad,
+        session_id,
+        None,
+    );
+
+    if let Err(error) = receipts.insert(&receipt) {
+        debug_log(format_args!("receipt insert failed: {error}"));
+    }
 }
 
 /// Record a completed run in SpacetimeDB.
@@ -2848,7 +3174,79 @@ fn is_local_provider(provider: &str) -> bool {
     matches!(provider, "ollama" | "local" | "vllm" | "litellm")
 }
 
-pub(crate) async fn execute_repl_turn(prompt: &str) -> Result<(String, String), String> {
+/// Events emitted by the streaming REPL pipeline, consumed by the SSE
+/// endpoint and collected by the blocking endpoint.
+pub(crate) enum ReplStreamEvent {
+    /// Route decision metadata, sent before any tokens.
+    Route(serde_json::Value),
+    /// One incremental model token.
+    Token(String),
+    /// Terminal event with the structured trace.
+    Done(serde_json::Value),
+    /// Terminal failure.
+    Error(String),
+}
+
+fn route_event_payload(mode: &str, route: Option<&RouteResult>) -> serde_json::Value {
+    match route {
+        Some(route) => serde_json::json!({
+            "mode": mode,
+            "intent": route.intent_key,
+            "provider": route.provider,
+            "model": route.model_id,
+            "provider_model": route.provider_model_id,
+            "rate_group": route.rate_group,
+            "privacy": route.privacy,
+            "request_id": route.request_id,
+        }),
+        None => serde_json::json!({ "mode": mode }),
+    }
+}
+
+fn repl_trace_payload(
+    mode: &str,
+    route: Option<&RouteResult>,
+    usage: Option<&TokenUsage>,
+    compression: Option<&RouteCompressionMetadata>,
+) -> serde_json::Value {
+    let cost_usd = usage.map(|u| u.cost_usd).unwrap_or(0.0);
+    let (intent, provider, model, rate_group, privacy) = match route {
+        Some(route) => (
+            route.intent_key.as_str(),
+            route.provider.as_str(),
+            route.model_id.as_str(),
+            route.rate_group.as_str(),
+            route.privacy.as_str(),
+        ),
+        None => ("chat", "heiwa", "deterministic", "local", "standard"),
+    };
+    serde_json::json!({
+        "intent": intent,
+        "mode": mode,
+        "provider": provider,
+        "model": model,
+        "rate_group": rate_group,
+        "privacy": privacy,
+        "cost_usd": cost_usd,
+        "compression": compression.map(|c| serde_json::json!({
+            "applied": c.applied,
+            "reason": c.reason,
+            "ratio": c.ratio,
+            "estimated_usd_saved": c.estimated_usd_saved,
+        })),
+        "summary": format!(
+            "intent={intent} route={provider}/{model} cost=${cost_usd:.4}{}",
+            compression_trace_suffix(compression)
+        ),
+    })
+}
+
+/// Streaming REPL turn: routes through DREX, persists the transcript exactly
+/// like the blocking path, and emits Route → Token* → Done/Error events.
+pub(crate) async fn execute_repl_turn_streaming(
+    prompt: &str,
+    events: tokio::sync::mpsc::Sender<ReplStreamEvent>,
+) {
     let stdb_client = attempt_stdb_connection().await;
     let mut registry = heiwa_provider::AccountRegistry::load();
     heiwa_provider::detect::auto_discover(&mut registry).await;
@@ -2861,7 +3259,9 @@ pub(crate) async fn execute_repl_turn(prompt: &str) -> Result<(String, String), 
     let transcript_blocks = persisted.blocks();
 
     match route_task(prompt, &pins, &model_tiers) {
-        Err(msg) => Err(msg),
+        Err(msg) => {
+            let _ = events.send(ReplStreamEvent::Error(msg)).await;
+        }
         Ok(RouteOutcome::Deterministic(response)) => {
             let mut state = SessionState {
                 session_id: persisted.session_id.clone(),
@@ -2878,12 +3278,40 @@ pub(crate) async fn execute_repl_turn(prompt: &str) -> Result<(String, String), 
             append_state_block(&mut state, TranscriptBlock::User(prompt.to_string()));
             append_state_block(&mut state, TranscriptBlock::Assistant(response.clone()));
 
-            Ok((response, "intent=chat mode=deterministic".to_string()))
+            let _ = events
+                .send(ReplStreamEvent::Route(route_event_payload(
+                    "deterministic",
+                    None,
+                )))
+                .await;
+            let _ = events.send(ReplStreamEvent::Token(response)).await;
+            let _ = events
+                .send(ReplStreamEvent::Done(repl_trace_payload(
+                    "deterministic",
+                    None,
+                    None,
+                    None,
+                )))
+                .await;
         }
         Ok(RouteOutcome::Routed(route)) => {
             record_route_evidence(&stdb_client, &route, prompt);
 
-            let messages = build_messages_from_transcript(&transcript_blocks, prompt, &pins);
+            let mode = if is_local_provider(&route.provider) {
+                "local_model"
+            } else {
+                "remote_model"
+            };
+            let _ = events
+                .send(ReplStreamEvent::Route(route_event_payload(
+                    mode,
+                    Some(&route),
+                )))
+                .await;
+
+            let prepared = prepare_outbound_prompt_for_route(&route, prompt);
+            let messages =
+                build_messages_from_transcript(&transcript_blocks, &prepared.model_prompt, &pins);
             let mut state = SessionState {
                 session_id: persisted.session_id.clone(),
                 transcript: transcript_blocks,
@@ -2911,10 +3339,12 @@ pub(crate) async fn execute_repl_turn(prompt: &str) -> Result<(String, String), 
 
             let mut usage = None;
             let mut full_response = String::new();
+            let mut stream_error: Option<String> = None;
             while let Some(event) = stream_rx.recv().await {
                 match event {
                     StreamEvent::Token(text) => {
                         full_response.push_str(&text);
+                        let _ = events.send(ReplStreamEvent::Token(text)).await;
                     }
                     StreamEvent::Done(u) => {
                         usage = Some(u);
@@ -2922,6 +3352,7 @@ pub(crate) async fn execute_repl_turn(prompt: &str) -> Result<(String, String), 
                     }
                     StreamEvent::Error(e) => {
                         eprintln!("Stream error: {}", e);
+                        stream_error = Some(e);
                         break;
                     }
                     StreamEvent::ToolUse { name, .. } => {
@@ -2933,29 +3364,130 @@ pub(crate) async fn execute_repl_turn(prompt: &str) -> Result<(String, String), 
                 }
             }
 
-            append_state_block(&mut state, TranscriptBlock::Assistant(full_response.clone()));
+            append_state_block(
+                &mut state,
+                TranscriptBlock::Assistant(full_response.clone()),
+            );
             record_run_evidence(&stdb_client, &route, usage.as_ref());
 
-            let trace_str = if let Some(ref u) = usage {
-                format!(
-                    "intent={} rank=1 route={}/{} latency=250ms cost=${:.4}",
-                    route.intent_key, route.provider, route.model_id, u.cost_usd
-                )
-            } else {
-                format!(
-                    "intent={} rank=1 route={}/{} latency=250ms cost=$0.0000",
-                    route.intent_key, route.provider, route.model_id
-                )
-            };
-
-            Ok((full_response, trace_str))
+            if let Some(error) = stream_error {
+                if full_response.is_empty() {
+                    let _ = events.send(ReplStreamEvent::Error(error)).await;
+                    return;
+                }
+            }
+            let _ = events
+                .send(ReplStreamEvent::Done(repl_trace_payload(
+                    mode,
+                    Some(&route),
+                    usage.as_ref(),
+                    prepared.compression.as_ref(),
+                )))
+                .await;
         }
+    }
+}
+
+/// Blocking REPL turn used by /api/v1/repl: collects the streaming pipeline
+/// into a single response plus structured trace.
+pub(crate) async fn execute_repl_turn(prompt: &str) -> Result<(String, serde_json::Value), String> {
+    let (tx, mut rx) = tokio::sync::mpsc::channel(64);
+    let prompt_owned = prompt.to_string();
+    tokio::spawn(async move {
+        execute_repl_turn_streaming(&prompt_owned, tx).await;
+    });
+
+    let mut response = String::new();
+    let mut trace = serde_json::Value::Null;
+    while let Some(event) = rx.recv().await {
+        match event {
+            ReplStreamEvent::Route(_) => {}
+            ReplStreamEvent::Token(text) => response.push_str(&text),
+            ReplStreamEvent::Done(value) => {
+                trace = value;
+                break;
+            }
+            ReplStreamEvent::Error(message) => return Err(message),
+        }
+    }
+    Ok((response, trace))
+}
+
+/// JSON route preview for POST /api/v1/route/preview: full auto-discovery,
+/// quota admission, and the DREX decision without executing anything.
+pub(crate) async fn preview_route_payload(prompt: &str) -> serde_json::Value {
+    let mut registry = heiwa_provider::AccountRegistry::load();
+    heiwa_provider::detect::auto_discover(&mut registry).await;
+    let model_tiers = get_live_model_tiers(&registry);
+    let pins = SessionPins::new();
+    let now_unix = Utc::now().timestamp();
+    let quota_ledger = open_default_quota_ledger();
+    let quota = quota_budget_preview_lines(&model_tiers, quota_ledger.as_ref(), now_unix);
+    let privacy = privacy_for_task(prompt);
+
+    match route_task_with_quota(prompt, &pins, &model_tiers, quota_ledger.as_ref(), now_unix) {
+        Ok(RouteOutcome::Deterministic(response)) => serde_json::json!({
+            "mode": "deterministic",
+            "privacy": privacy,
+            "response": response,
+            "quota": quota,
+        }),
+        Ok(RouteOutcome::Routed(route)) => {
+            let metadata = serde_json::from_str::<serde_json::Value>(&route.routing_metadata)
+                .unwrap_or(serde_json::Value::String(route.routing_metadata.clone()));
+            serde_json::json!({
+                "mode": if is_local_provider(&route.provider) { "local_model" } else { "remote_model" },
+                "intent": route.intent_key,
+                "provider": route.provider,
+                "model": route.model_id,
+                "provider_model": route.provider_model_id,
+                "rate_group": route.rate_group,
+                "privacy": route.privacy,
+                "metadata": metadata,
+                "quota": quota,
+            })
+        }
+        Err(error) => serde_json::json!({
+            "mode": "unavailable",
+            "privacy": privacy,
+            "error": error,
+            "quota": quota,
+        }),
     }
 }
 
 #[cfg(test)]
 mod tests {
     use heiwa_protocol::{parse_turn_intent, Intent};
+
+    #[test]
+    fn privacy_cues_force_sovereign_lane() {
+        assert_eq!(
+            super::privacy_for_task("summarize my priority mail privately"),
+            "sovereign"
+        );
+        assert_eq!(
+            super::privacy_for_task("draft a CONFIDENTIAL reply"),
+            "sovereign"
+        );
+        assert_eq!(
+            super::privacy_for_task("this is sensitive — do not share"),
+            "sovereign"
+        );
+        assert_eq!(
+            super::privacy_for_task("review my personal finances plan"),
+            "sovereign"
+        );
+    }
+
+    #[test]
+    fn privacy_defaults_to_standard() {
+        assert_eq!(
+            super::privacy_for_task("refactor the auth module and add tests"),
+            "standard"
+        );
+        assert_eq!(super::privacy_for_task("hi"), "standard");
+    }
 
     #[test]
     fn greeting_input_defaults_to_chat_intent() {
@@ -3015,6 +3547,18 @@ mod tests {
     fn audit_input_uses_audit_intent() {
         assert_eq!(parse_turn_intent("review the PR").intent, Intent::Audit);
         assert_eq!(parse_turn_intent("lint the codebase").intent, Intent::Audit);
+    }
+
+    #[test]
+    fn openrouter_passes_every_adapter_gate() {
+        // Three gates stand between an accounts.json entry and DREX routing;
+        // a provider missing from any one of them silently drops out.
+        assert!(super::has_adapter("openrouter"));
+        assert!(super::provider_supports_loop_adapter("openrouter"));
+        assert!(
+            !super::is_local_provider("openrouter"),
+            "openrouter is a remote tier — must not slip into the sovereign lane"
+        );
     }
 
     #[test]
@@ -3146,6 +3690,184 @@ mod tests {
     }
 
     #[test]
+    fn route_task_private_prompt_uses_local_model_when_available() {
+        let pins = super::SessionPins::new();
+        let tiers = vec![
+            test_model_tier("claude", "claude-sonnet", "anthropic", 4, 0.20),
+            test_model_tier("ollama", "qwen3.5:9b", "local", 3, 0.0),
+        ];
+
+        let outcome = super::route_task_with_quota(
+            "summarize my priority mail privately",
+            &pins,
+            &tiers,
+            None,
+            1_777_000_000,
+        )
+        .expect("private prompt should route when a local model is available");
+
+        match outcome {
+            super::RouteOutcome::Routed(route) => {
+                assert_eq!(route.privacy, "sovereign");
+                assert_eq!(route.provider, "ollama");
+                assert_eq!(route.rate_group, "local");
+            }
+            super::RouteOutcome::Deterministic(_) => {
+                panic!("private prompt should route to a local model")
+            }
+        }
+    }
+
+    #[test]
+    fn remote_large_chat_prompt_is_compressed_before_model_send() {
+        let route = super::RouteResult {
+            adapter: std::sync::Arc::new(super::ClaudeCodeCliAdapter::new()),
+            model_id: "claude-sonnet".to_string(),
+            provider: "claude".to_string(),
+            provider_model_id: "claude-sonnet".to_string(),
+            rate_group: "anthropic".to_string(),
+            routing_metadata: "{}".to_string(),
+            intent_key: "chat".to_string(),
+            privacy: "standard".to_string(),
+            request_id: "req-compress".to_string(),
+            turn_started_at: "2026-05-26T00:00:00Z".to_string(),
+        };
+        let input = "x".repeat(super::ROUTE_COMPRESSION_BYTE_THRESHOLD + 1);
+
+        let prepared =
+            super::prepare_outbound_prompt_for_route_with(&route, &input, |body, source| {
+                assert_eq!(body, input);
+                assert_eq!(source, "route:req-compress:claude:chat");
+                Ok(super::RouteCompressionResult {
+                    compressed: "compressed payload".to_string(),
+                    receipt_path: "/tmp/cmp.json".to_string(),
+                    input_chars: body.chars().count(),
+                    output_chars: 18,
+                    ratio: 18.0 / body.chars().count() as f64,
+                    input_tokens: 1024,
+                    output_tokens: 6,
+                    estimated_usd_saved: 0.003054,
+                })
+            });
+
+        assert_eq!(prepared.model_prompt, "compressed payload");
+        let compression = prepared.compression.expect("compression metadata");
+        assert!(compression.applied);
+        assert_eq!(compression.receipt_path.as_deref(), Some("/tmp/cmp.json"));
+    }
+
+    #[test]
+    fn compression_trace_suffix_includes_tokens_and_usd_when_applied() {
+        let meta = super::RouteCompressionMetadata {
+            applied: true,
+            reason: "compressed".to_string(),
+            receipt_path: Some("/tmp/cmp_test.json".to_string()),
+            input_chars: 4096,
+            output_chars: 1024,
+            ratio: 0.25,
+            input_tokens: 1024,
+            output_tokens: 256,
+            estimated_usd_saved: 0.002304,
+        };
+        let suffix = super::compression_trace_suffix(Some(&meta));
+        assert!(suffix.contains("compression=applied"), "got: {suffix}");
+        assert!(suffix.contains("tokens=1024->256"), "got: {suffix}");
+        assert!(suffix.contains("saved=768"), "got: {suffix}");
+        assert!(suffix.contains("usd_saved=0.002304"), "got: {suffix}");
+        assert!(suffix.contains("ratio=0.250"), "got: {suffix}");
+    }
+
+    #[test]
+    fn compression_trace_suffix_is_empty_when_none() {
+        assert_eq!(super::compression_trace_suffix(None), "");
+    }
+
+    #[test]
+    fn compression_trace_suffix_reports_reason_when_skipped() {
+        let meta = super::RouteCompressionMetadata {
+            applied: false,
+            reason: "empty_output".to_string(),
+            receipt_path: None,
+            input_chars: 100,
+            output_chars: 100,
+            ratio: 1.0,
+            input_tokens: 0,
+            output_tokens: 0,
+            estimated_usd_saved: 0.0,
+        };
+        let suffix = super::compression_trace_suffix(Some(&meta));
+        assert!(suffix.contains("compression=skipped"), "got: {suffix}");
+        assert!(suffix.contains("empty_output"), "got: {suffix}");
+    }
+
+    #[test]
+    fn pricing_for_provider_known_providers() {
+        assert_eq!(
+            super::pricing_for_provider("claude").usd_per_million_input_tokens,
+            3.0
+        );
+        assert_eq!(
+            super::pricing_for_provider("gemini").usd_per_million_input_tokens,
+            1.25
+        );
+        assert_eq!(
+            super::pricing_for_provider("ollama").usd_per_million_input_tokens,
+            0.0
+        );
+        // Unknown providers fall back to conservative middle.
+        assert_eq!(
+            super::pricing_for_provider("mystery").usd_per_million_input_tokens,
+            5.0
+        );
+    }
+
+    #[test]
+    fn pricing_for_provider_labels_token_count_basis() {
+        let claude = super::pricing_for_provider("claude");
+        assert_eq!(claude.tokenizer_id, "cl100k_base");
+        assert_eq!(claude.token_count_kind, "proxy_estimate");
+        assert_eq!(
+            claude.exact_count_source.as_deref(),
+            Some("anthropic_messages_count_tokens_api")
+        );
+
+        let ollama = super::pricing_for_provider("ollama");
+        assert_eq!(ollama.token_count_kind, "local_zero_cost");
+        assert_eq!(ollama.exact_count_source, None);
+    }
+
+    #[test]
+    fn local_or_small_prompts_skip_route_compression() {
+        let mut route = super::RouteResult {
+            adapter: std::sync::Arc::new(super::OllamaCliAdapter::new()),
+            model_id: "qwen3.5:4b".to_string(),
+            provider: "ollama".to_string(),
+            provider_model_id: "qwen3.5:4b".to_string(),
+            rate_group: "local".to_string(),
+            routing_metadata: "{}".to_string(),
+            intent_key: "chat".to_string(),
+            privacy: "standard".to_string(),
+            request_id: "req-local".to_string(),
+            turn_started_at: "2026-05-26T00:00:00Z".to_string(),
+        };
+        let large_input = "x".repeat(super::ROUTE_COMPRESSION_BYTE_THRESHOLD + 1);
+
+        let local = super::prepare_outbound_prompt_for_route_with(&route, &large_input, |_, _| {
+            panic!("local routes must not compress");
+        });
+        assert_eq!(local.model_prompt, large_input);
+        assert!(local.compression.is_none());
+
+        route.provider = "claude".to_string();
+        route.rate_group = "anthropic".to_string();
+        let small = super::prepare_outbound_prompt_for_route_with(&route, "small", |_, _| {
+            panic!("small prompts must not compress");
+        });
+        assert_eq!(small.model_prompt, "small");
+        assert!(small.compression.is_none());
+    }
+
+    #[test]
     fn quota_admission_fails_remote_closed_without_ledger() {
         let tiers = vec![
             test_model_tier("claude", "claude-sonnet", "anthropic", 4, 0.20),
@@ -3173,6 +3895,7 @@ mod tests {
             rate_group: "local".to_string(),
             routing_metadata: "{\"reason\":\"test\"}".to_string(),
             intent_key: "chat".to_string(),
+            privacy: "standard".to_string(),
             request_id: "req-test".to_string(),
             turn_started_at: "2026-05-07T00:00:00Z".to_string(),
         };

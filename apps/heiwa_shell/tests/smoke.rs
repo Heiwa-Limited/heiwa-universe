@@ -1,11 +1,12 @@
 use std::io::Write;
 use std::process::Command;
 use std::process::Stdio;
+use tempfile::tempdir;
 
 #[test]
 fn test_heiwa_help() {
     let output = Command::new("cargo")
-        .args(&["run", "-p", "heiwa-shell", "--bin", "heiwa", "--", "--help"])
+        .args(["run", "-p", "heiwa-shell", "--bin", "heiwa", "--", "--help"])
         .output()
         .expect("failed to execute process");
 
@@ -17,7 +18,7 @@ fn test_heiwa_help() {
 #[test]
 fn test_heiwa_providers_lists_wrapped_and_loop_capable_surfaces_honestly() {
     let output = Command::new("cargo")
-        .args(&[
+        .args([
             "run",
             "-p",
             "heiwa-shell",
@@ -51,7 +52,7 @@ fn test_heiwa_providers_lists_wrapped_and_loop_capable_surfaces_honestly() {
 
 fn run_shell_script(script: &str) -> std::process::Output {
     let mut child = Command::new("cargo")
-        .args(&["run", "-p", "heiwa-shell", "--bin", "heiwa", "--", "shell"])
+        .args(["run", "-p", "heiwa-shell", "--bin", "heiwa", "--", "shell"])
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
@@ -147,7 +148,7 @@ fn test_shell_greeting_is_handled_without_model_requirement() {
 #[test]
 fn test_route_preview_greeting_does_not_execute_model() {
     let output = Command::new("cargo")
-        .args(&[
+        .args([
             "run",
             "-p",
             "heiwa-shell",
@@ -174,9 +175,42 @@ fn test_route_preview_greeting_does_not_execute_model() {
 }
 
 #[test]
+fn test_route_preview_surfaces_privacy_lane() {
+    let output = Command::new("cargo")
+        .args([
+            "run",
+            "-p",
+            "heiwa-shell",
+            "--bin",
+            "heiwa",
+            "--",
+            "route",
+            "preview",
+            "summarize my priority mail privately",
+        ])
+        .output()
+        .expect("failed to execute route preview");
+
+    assert!(output.status.success());
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        stdout.contains("privacy: sovereign"),
+        "expected privacy-aware route preview: {stdout}"
+    );
+    assert!(
+        stdout.contains("mode: local_model") || stdout.contains("mode: unavailable"),
+        "private prompt should use a local model when available or honestly report unavailable: {stdout}"
+    );
+    assert!(
+        !stdout.contains("mode: remote_model"),
+        "private prompt must not route to a remote model: {stdout}"
+    );
+}
+
+#[test]
 fn test_life_status_json_reports_sources_and_stdb_mode() {
     let output = Command::new("cargo")
-        .args(&[
+        .args([
             "run",
             "-p",
             "heiwa-shell",
@@ -207,9 +241,85 @@ fn test_life_status_json_reports_sources_and_stdb_mode() {
 }
 
 #[test]
+fn test_life_today_json_reports_local_read_model_keys() {
+    let output = Command::new("cargo")
+        .args([
+            "run",
+            "-p",
+            "heiwa-shell",
+            "--bin",
+            "heiwa",
+            "--",
+            "life",
+            "today",
+            "--json",
+        ])
+        .output()
+        .expect("failed to execute life today");
+
+    assert!(output.status.success());
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let parsed: serde_json::Value =
+        serde_json::from_str(stdout.trim()).expect("life today --json must be valid JSON");
+
+    assert_eq!(parsed["command"], "life today");
+    assert_eq!(parsed["timezone"], "America/Vancouver");
+    let date = parsed["date"].as_str().expect("date string");
+    assert_eq!(date.len(), 10, "date must be YYYY-MM-DD: {date}");
+    assert!(parsed["day_type"].is_string());
+    assert!(parsed["work_shifts"].is_array());
+    assert!(parsed["appointments"].is_array());
+    assert!(parsed["stale_facts"].is_array());
+    assert!(parsed["pending_approvals"].is_array());
+    assert!(parsed["runtime"]["stdb_mode"].is_string());
+}
+
+#[test]
+fn test_life_freshness_json_reports_source_slas() {
+    let output = Command::new("cargo")
+        .args([
+            "run",
+            "-p",
+            "heiwa-shell",
+            "--bin",
+            "heiwa",
+            "--",
+            "life",
+            "freshness",
+            "--json",
+        ])
+        .output()
+        .expect("failed to execute life freshness");
+
+    assert!(output.status.success());
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let parsed: serde_json::Value =
+        serde_json::from_str(stdout.trim()).expect("life freshness --json must be valid JSON");
+
+    assert_eq!(parsed["command"], "life freshness");
+    assert!(parsed["stale_sources"].is_number());
+    let sources = parsed["sources"]
+        .as_array()
+        .expect("life freshness sources must be an array");
+    let scorecard = sources
+        .iter()
+        .find(|source| source["label"] == "daily_scorecard.md")
+        .expect("daily scorecard source must be reported");
+    assert_eq!(scorecard["sla_days"], 1);
+    assert!(scorecard["age_days"].is_number() || scorecard["age_days"].is_null());
+    assert!(scorecard["stale"].is_boolean());
+
+    let register = sources
+        .iter()
+        .find(|source| source["label"] == "current_state_register.md")
+        .expect("current state register source must be reported");
+    assert_eq!(register["sla_days"], 7);
+}
+
+#[test]
 fn test_life_import_home_dry_run_jsonl_counts_stdb_rows() {
     let output = Command::new("cargo")
-        .args(&[
+        .args([
             "run",
             "-p",
             "heiwa-shell",
@@ -244,7 +354,7 @@ fn test_life_import_home_dry_run_jsonl_counts_stdb_rows() {
 #[test]
 fn test_app_help_exposes_boot_command_boundary() {
     let output = Command::new("cargo")
-        .args(&[
+        .args([
             "run",
             "-p",
             "heiwa-shell",
@@ -280,7 +390,7 @@ fn test_app_help_exposes_boot_command_boundary() {
 #[test]
 fn test_app_update_dry_run_defaults_to_github_release_source() {
     let output = Command::new("cargo")
-        .args(&[
+        .args([
             "run",
             "-p",
             "heiwa-shell",
@@ -323,7 +433,7 @@ fn test_app_update_dry_run_defaults_to_github_release_source() {
 #[test]
 fn test_app_update_checkout_source_reports_dev_reinstall_target() {
     let output = Command::new("cargo")
-        .args(&[
+        .args([
             "run",
             "-p",
             "heiwa-shell",
@@ -360,9 +470,144 @@ fn test_app_update_checkout_source_reports_dev_reinstall_target() {
 }
 
 #[test]
+fn test_app_update_checkout_dry_run_json_reports_promotion_contract() {
+    let output = Command::new("cargo")
+        .args([
+            "run",
+            "-p",
+            "heiwa-shell",
+            "--bin",
+            "heiwa",
+            "--",
+            "app",
+            "update",
+            "--source",
+            "checkout",
+            "--dry-run",
+            "--json",
+        ])
+        .output()
+        .expect("failed to execute app update checkout dry-run json");
+
+    assert!(output.status.success());
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let payload: serde_json::Value = serde_json::from_str(&stdout)
+        .unwrap_or_else(|err| panic!("expected JSON update plan, got {err}: {stdout}"));
+
+    assert_eq!(
+        payload.get("command").and_then(serde_json::Value::as_str),
+        Some("app update")
+    );
+    assert_eq!(
+        payload
+            .get("source_mode")
+            .and_then(serde_json::Value::as_str),
+        Some("checkout-dev")
+    );
+    assert_eq!(
+        payload.get("dry_run").and_then(serde_json::Value::as_bool),
+        Some(true)
+    );
+    assert_eq!(
+        payload
+            .get("restart_policy")
+            .and_then(serde_json::Value::as_str),
+        Some("prompt-before-restart")
+    );
+    assert!(payload
+        .get("source")
+        .and_then(serde_json::Value::as_str)
+        .is_some_and(|source| source.ends_with("heiwa-universe")));
+    assert!(payload
+        .get("source_branch")
+        .and_then(serde_json::Value::as_str)
+        .is_some());
+    assert!(payload
+        .get("source_commit")
+        .and_then(serde_json::Value::as_str)
+        .is_some());
+    assert!(payload
+        .get("source_dirty")
+        .and_then(serde_json::Value::as_bool)
+        .is_some());
+    // Normalize separators: Windows joins with backslashes.
+    assert!(payload
+        .get("installed_bin")
+        .and_then(serde_json::Value::as_str)
+        .is_some_and(|path| path.replace('\\', "/").ends_with("/.heiwa/bin/heiwa")));
+    assert!(payload
+        .get("installed_app")
+        .and_then(serde_json::Value::as_str)
+        .is_some_and(|path| path.replace('\\', "/").ends_with("/.heiwa/app/Heiwa.app")));
+    assert!(payload
+        .get("app_bundle_update")
+        .and_then(serde_json::Value::as_object)
+        .and_then(|update| update.get("wired").and_then(serde_json::Value::as_bool))
+        .is_some());
+    assert!(payload
+        .get("install_command")
+        .and_then(serde_json::Value::as_array)
+        .is_some());
+    assert!(payload
+        .get("verification_commands")
+        .and_then(serde_json::Value::as_array)
+        .is_some());
+    assert!(payload
+        .get("active_work")
+        .and_then(serde_json::Value::as_object)
+        .is_some());
+    let promotion_receipt = payload
+        .get("promotion_receipt")
+        .and_then(serde_json::Value::as_object)
+        .expect("promotion receipt contract object");
+    assert_eq!(
+        promotion_receipt
+            .get("schema_version")
+            .and_then(serde_json::Value::as_str),
+        Some("heiwa_promotion_receipt_v1")
+    );
+    assert!(promotion_receipt
+        .get("source")
+        .is_some_and(serde_json::Value::is_object));
+    assert!(promotion_receipt
+        .get("target")
+        .is_some_and(serde_json::Value::is_object));
+    assert!(promotion_receipt
+        .get("runtime_probes")
+        .and_then(serde_json::Value::as_array)
+        .is_some_and(|probes| probes.iter().any(|probe| probe
+            .get("endpoint")
+            .and_then(serde_json::Value::as_str)
+            == Some("/api/v1/capabilities"))));
+    assert!(promotion_receipt
+        .get("codesign")
+        .is_some_and(serde_json::Value::is_object));
+    assert_eq!(
+        promotion_receipt
+            .get("would_write")
+            .and_then(serde_json::Value::as_bool),
+        Some(false)
+    );
+    let stdb_mirror = promotion_receipt
+        .get("stdb_mirror")
+        .and_then(serde_json::Value::as_object)
+        .expect("stdb mirror contract");
+    assert_eq!(
+        stdb_mirror
+            .get("auth_mode")
+            .and_then(serde_json::Value::as_str),
+        Some("spacetime_cli_login")
+    );
+    assert!(stdb_mirror
+        .get("shell_authenticated")
+        .and_then(serde_json::Value::as_bool)
+        .is_some());
+}
+
+#[test]
 fn test_doctor_json_reports_runtimes_providers_and_app_probe() {
     let output = Command::new("cargo")
-        .args(&[
+        .args([
             "run",
             "-p",
             "heiwa-shell",
@@ -462,7 +707,7 @@ fn test_doctor_json_reports_runtimes_providers_and_app_probe() {
 #[test]
 fn test_app_runtime_status_json_reports_local_probe() {
     let output = Command::new("cargo")
-        .args(&[
+        .args([
             "run",
             "-p",
             "heiwa-shell",
@@ -520,7 +765,7 @@ fn test_app_runtime_status_json_reports_local_probe() {
 #[test]
 fn test_workers_heartbeat_dry_run_emits_local_envelope() {
     let output = Command::new("cargo")
-        .args(&[
+        .args([
             "run",
             "-p",
             "heiwa-shell",
@@ -565,7 +810,7 @@ fn test_workers_heartbeat_dry_run_emits_local_envelope() {
 #[test]
 fn test_workers_status_json_reports_registry_path() {
     let output = Command::new("cargo")
-        .args(&[
+        .args([
             "run",
             "-p",
             "heiwa-shell",
@@ -594,7 +839,7 @@ fn test_workers_status_json_reports_registry_path() {
 #[test]
 fn test_approvals_list_json_reports_dispatch_paths() {
     let output = Command::new("cargo")
-        .args(&[
+        .args([
             "run",
             "-p",
             "heiwa-shell",
@@ -626,9 +871,60 @@ fn test_approvals_list_json_reports_dispatch_paths() {
 }
 
 #[test]
+fn test_approvals_list_json_reports_dispatch_v1_summary() {
+    let temp = tempdir().expect("temp home");
+    let requests_dir = temp.path().join(".heiwa/state/dispatch/requests");
+    std::fs::create_dir_all(&requests_dir).expect("create requests dir");
+    std::fs::write(
+        requests_dir.join("req_123.json"),
+        serde_json::to_string_pretty(&serde_json::json!({
+            "schema_version": "operator_dispatch_request_v1",
+            "request_id": "req_123",
+            "created_at": "2026-03-30T18:20:22.112520Z",
+            "action": "write-file",
+            "target_surface": "filesystem",
+            "target_scope": "/tmp/example.txt",
+            "requested_mode": "write"
+        }))
+        .expect("serialize request"),
+    )
+    .expect("write request");
+
+    let output = Command::new("cargo")
+        .env("HOME", temp.path())
+        .args([
+            "run",
+            "-p",
+            "heiwa-shell",
+            "--bin",
+            "heiwa",
+            "--",
+            "approvals",
+            "list",
+            "--json",
+        ])
+        .output()
+        .expect("failed to execute approvals list");
+
+    assert!(output.status.success());
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let parsed: serde_json::Value =
+        serde_json::from_str(stdout.trim()).expect("approvals list --json must be valid JSON");
+    let summary = parsed["pending_summary"]
+        .as_array()
+        .and_then(|items| items.first())
+        .expect("pending_summary must include request");
+    assert_eq!(summary["id"], "req_123");
+    assert_eq!(summary["action"], "write-file");
+    assert_eq!(summary["target"], "filesystem:/tmp/example.txt");
+    assert_eq!(summary["risk"], "write");
+    assert_eq!(summary["requested_at"], "2026-03-30T18:20:22.112520Z");
+}
+
+#[test]
 fn test_mail_status_json_enforces_metadata_only_policy() {
     let output = Command::new("cargo")
-        .args(&[
+        .args([
             "run",
             "-p",
             "heiwa-shell",
@@ -655,5 +951,231 @@ fn test_mail_status_json_enforces_metadata_only_policy() {
     assert!(
         stdout.contains("\"fields\""),
         "expected fields whitelist (account/mailbox/sender/subject/date/unread): {stdout}"
+    );
+}
+
+#[test]
+fn test_capabilities_refresh_dry_run_reports_bounded_redacted_json() {
+    let output = Command::new("cargo")
+        .args([
+            "run",
+            "-p",
+            "heiwa-shell",
+            "--bin",
+            "heiwa",
+            "--",
+            "capabilities",
+            "refresh",
+            "--json",
+            "--dry-run",
+        ])
+        .output()
+        .expect("failed to execute capabilities refresh");
+
+    assert!(output.status.success());
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        stdout.contains("\"command\":\"capabilities refresh\""),
+        "expected capabilities refresh json marker: {stdout}"
+    );
+    assert!(
+        stdout.contains("\"dry_run\":true"),
+        "dry-run must be reported and write nothing: {stdout}"
+    );
+    assert!(
+        stdout.contains("\"redaction_applied\":true"),
+        "expected redaction guarantee: {stdout}"
+    );
+    assert!(
+        stdout.contains("\"counts\""),
+        "expected bounded counts (not raw catalog body): {stdout}"
+    );
+    // Redaction: credential paths and live token shapes must never surface.
+    for marker in ["auth.json", "ghp_", "Bearer ", "xoxb-", ".codex/auth"] {
+        assert!(
+            !stdout.contains(marker),
+            "sensitive marker {marker:?} leaked into refresh output: {stdout}"
+        );
+    }
+}
+
+#[test]
+fn test_capabilities_status_json_reports_catalog_counts() {
+    let output = Command::new("cargo")
+        .args([
+            "run",
+            "-p",
+            "heiwa-shell",
+            "--bin",
+            "heiwa",
+            "--",
+            "capabilities",
+            "status",
+            "--json",
+        ])
+        .output()
+        .expect("failed to execute capabilities status");
+
+    assert!(output.status.success());
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        stdout.contains("\"command\":\"capabilities status\""),
+        "expected capabilities status json marker: {stdout}"
+    );
+    assert!(
+        stdout.contains("\"path\":"),
+        "expected capabilities state path in status: {stdout}"
+    );
+    assert!(
+        stdout.contains("\"counts\""),
+        "expected bounded counts object in status: {stdout}"
+    );
+}
+
+#[test]
+fn test_calendar_status_json_reports_lanes_and_holds() {
+    let output = Command::new("cargo")
+        .args([
+            "run",
+            "-p",
+            "heiwa-shell",
+            "--bin",
+            "heiwa",
+            "--",
+            "calendar",
+            "status",
+            "--json",
+        ])
+        .output()
+        .expect("failed to execute calendar status");
+
+    assert!(output.status.success());
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        stdout.contains("\"command\":\"calendar summary\""),
+        "expected calendar summary json marker: {stdout}"
+    );
+    assert!(
+        stdout.contains("\"lanes\""),
+        "expected connector lanes in calendar summary: {stdout}"
+    );
+    assert!(
+        stdout.contains("\"holds\""),
+        "expected holds read model in calendar summary: {stdout}"
+    );
+    assert!(
+        stdout.contains("\"heiwa_holds\""),
+        "expected local-first heiwa_holds lane: {stdout}"
+    );
+}
+
+#[test]
+fn test_mail_summary_json_reports_priority_read_model() {
+    let output = Command::new("cargo")
+        .args([
+            "run",
+            "-p",
+            "heiwa-shell",
+            "--bin",
+            "heiwa",
+            "--",
+            "mail",
+            "summary",
+        ])
+        .output()
+        .expect("failed to execute mail summary");
+
+    assert!(output.status.success());
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        stdout.contains("\"command\":\"mail summary\""),
+        "expected mail summary json marker: {stdout}"
+    );
+    assert!(
+        stdout.contains("\"policy\":\"metadata-only-no-body\""),
+        "expected metadata-only policy on summary: {stdout}"
+    );
+    assert!(
+        stdout.contains("\"priority\""),
+        "expected priority rows in mail summary: {stdout}"
+    );
+    assert!(
+        stdout.contains("\"snapshot\""),
+        "expected snapshot probe in mail summary: {stdout}"
+    );
+}
+
+#[test]
+fn test_connect_status_json_reports_unified_registry() {
+    let output = Command::new("cargo")
+        .args([
+            "run",
+            "-p",
+            "heiwa-shell",
+            "--bin",
+            "heiwa",
+            "--",
+            "connect",
+            "status",
+            "--json",
+        ])
+        .output()
+        .expect("failed to execute connect status");
+
+    assert!(output.status.success());
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        stdout.contains("\"connectors\""),
+        "expected connectors array: {stdout}"
+    );
+    assert!(
+        stdout.contains("\"google_calendar\""),
+        "expected google_calendar connector row: {stdout}"
+    );
+    assert!(
+        stdout.contains("\"apple_mail\""),
+        "expected apple_mail connector row: {stdout}"
+    );
+    assert!(
+        stdout.contains("read models before external writes"),
+        "expected read-model-first policy line: {stdout}"
+    );
+}
+
+#[test]
+fn test_mail_scan_dry_run_reports_source_readiness() {
+    let output = Command::new("cargo")
+        .args([
+            "run",
+            "-p",
+            "heiwa-shell",
+            "--bin",
+            "heiwa",
+            "--",
+            "mail",
+            "scan",
+            "--dry-run",
+            "--json",
+        ])
+        .output()
+        .expect("failed to execute mail scan dry run");
+
+    assert!(output.status.success());
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        stdout.contains("\"command\":\"mail scan\""),
+        "expected mail scan json marker: {stdout}"
+    );
+    assert!(
+        stdout.contains("\"dry_run\":true"),
+        "expected dry run flag: {stdout}"
+    );
+    assert!(
+        stdout.contains("\"apple\"") && stdout.contains("\"gmail\""),
+        "expected apple and gmail source readiness probes: {stdout}"
+    );
+    assert!(
+        stdout.contains("\"policy\":\"metadata-only-no-body\""),
+        "expected metadata-only policy on scan: {stdout}"
     );
 }

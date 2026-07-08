@@ -39,11 +39,11 @@
   },
   "figma": {
     "provider": "figma-make",
-    "make_file_key": "fPJJRH5I9RJd4zaIM1LfOI",
+    "make_file_key": "REPLACE_WITH_FIGMA_MAKE_FILE_KEY",
     "node_id": "0:1",
     "mode": "read_only_sync",
     "display_name": "Enterprise AI-Dentity-Design",
-    "source_url": "https://www.figma.com/make/fPJJRH5I9RJd4zaIM1LfOI/Enterprise-AI-Dentity-Design"
+    "source_url": "https://www.figma.com/make/REPLACE_WITH_FIGMA_MAKE_FILE_KEY/Enterprise-AI-Dentity-Design"
   },
   "skills_overrides": {
     "platform_ops_skill": "heiwa-platform-ops",

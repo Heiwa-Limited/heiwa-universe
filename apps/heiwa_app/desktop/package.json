@@ -1,0 +1,25 @@
+{
+  "name": "@heiwa/desktop",
+  "private": true,
+  "version": "0.1.0",
+  "description": "Heiwa native desktop shell — Tauri 2 + Vite over the local Heiwa runtime.",
+  "license": "Apache-2.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite --host 127.0.0.1",
+    "build": "tsc --noEmit && vite build",
+    "typecheck": "tsc --noEmit",
+    "tauri": "tauri",
+    "tauri:dev": "tauri dev",
+    "tauri:build": "tauri build",
+    "tauri:build:app": "tauri build --bundles app"
+  },
+  "dependencies": {
+    "@tauri-apps/api": "^2.8.0"
+  },
+  "devDependencies": {
+    "@tauri-apps/cli": "^2.8.4",
+    "typescript": "^5.7.0",
+    "vite": "^6.0.0"
+  }
+}

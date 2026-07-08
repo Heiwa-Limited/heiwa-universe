@@ -13,6 +13,12 @@ use tokio::sync::mpsc;
 /// This adapter is for subscription users who have Claude Code installed.
 pub struct ClaudeCodeCliAdapter;
 
+impl Default for ClaudeCodeCliAdapter {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl ClaudeCodeCliAdapter {
     pub fn new() -> Self {
         Self
@@ -33,7 +39,7 @@ impl ProviderAdapter for ClaudeCodeCliAdapter {
             .collect::<Vec<_>>()
             .join("\n");
 
-        let mut cmd = Command::new("claude");
+        let mut cmd = Command::new(crate::resolve_command_or_name("claude"));
         cmd.arg("-p")
             .arg(&prompt)
             .arg("--output-format")

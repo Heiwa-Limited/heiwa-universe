@@ -18,8 +18,7 @@ These should be treated as typed cells, not interchangeable generic AI.
 
 ## Human Surfaces
 
-- CLI (`heiwa` via `apps/heiwa_shell/`; legacy reference at `legacy/apps/heiwa_cli/heiwa`)
-- MCP/HTTP API compatibility reference (`legacy/apps/heiwa_hub/mcp_server.py`)
+- CLI (`heiwa` via `apps/heiwa_shell/`)
 - Discord (notification + human-facing query/approval UX)
 
 Discord is useful for notification and human-facing query/approval UX, but not as a trust boundary or state authority.

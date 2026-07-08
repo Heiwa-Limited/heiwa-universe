@@ -12,6 +12,12 @@ use tokio::sync::mpsc;
 /// For ChatGPT-Plus subscription users authenticated via `codex login`.
 pub struct CodexCliAdapter;
 
+impl Default for CodexCliAdapter {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl CodexCliAdapter {
     pub fn new() -> Self {
         Self
@@ -32,7 +38,7 @@ impl ProviderAdapter for CodexCliAdapter {
             .collect::<Vec<_>>()
             .join("\n");
 
-        let mut cmd = Command::new("codex");
+        let mut cmd = Command::new(crate::resolve_command_or_name("codex"));
         cmd.arg("exec")
             .arg("--json")
             .stdout(Stdio::piped())

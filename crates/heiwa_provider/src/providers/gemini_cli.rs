@@ -12,6 +12,12 @@ use tokio::sync::mpsc;
 /// This adapter is for users who have Gemini CLI installed and authenticated.
 pub struct GeminiCliAdapter;
 
+impl Default for GeminiCliAdapter {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl GeminiCliAdapter {
     pub fn new() -> Self {
         Self
@@ -32,7 +38,7 @@ impl ProviderAdapter for GeminiCliAdapter {
             .collect::<Vec<_>>()
             .join("\n");
 
-        let mut cmd = Command::new("gemini");
+        let mut cmd = Command::new(crate::resolve_command_or_name("gemini"));
         cmd.arg("-p")
             .arg(&prompt)
             .arg("--output-format")

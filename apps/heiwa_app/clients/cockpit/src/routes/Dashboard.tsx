@@ -1,5 +1,5 @@
 import type { JSX } from "solid-js";
-import { For, Show, createMemo, createSignal, onCleanup } from "solid-js";
+import { createMemo, createSignal, For, onCleanup, Show } from "solid-js";
 
 type InputMode = "text" | "voice" | "image" | "video";
 
@@ -99,8 +99,7 @@ const starterMessages: Message[] = [
   {
     id: "assistant-boot",
     role: "assistant",
-    text:
-      "Heiwa.app is the primary installed input/display surface. Talk to Heiwa here; the runtime watches connected surfaces in the background, explains what changed, stages risky actions, auto-groups projects, and returns receipts in this same stream.",
+    text: "Heiwa.app is the primary installed input/display surface. Talk to Heiwa here; the runtime watches connected surfaces in the background, explains what changed, stages risky actions, auto-groups projects, and returns receipts in this same stream.",
     trace:
       "io=single-thread; surfaces=browser,mail,machine,computer-use,integrations; writes=approval-gated",
     artifacts: initialArtifacts,
@@ -156,7 +155,9 @@ export default function Dashboard(): JSX.Element {
     setInputMode("voice");
     setIsRecording(true);
     waveInterval = setInterval(() => {
-      setVoiceWave(Array.from({ length: 22 }, () => Math.floor(Math.random() * 26) + 6));
+      setVoiceWave(
+        Array.from({ length: 22 }, () => Math.floor(Math.random() * 26) + 6),
+      );
     }, 120);
   };
 
@@ -166,7 +167,9 @@ export default function Dashboard(): JSX.Element {
     setTimeout(() => {
       setIsAnalyzing(false);
       setUploadedMedia(
-        type === "image" ? "runtime-screenshot.png" : "browser-verification.mov",
+        type === "image"
+          ? "runtime-screenshot.png"
+          : "browser-verification.mov",
       );
     }, 500);
   };
@@ -234,12 +237,12 @@ export default function Dashboard(): JSX.Element {
           <p class="session-kicker">Primary interface</p>
           <h1>One conversation with Heiwa</h1>
           <p class="session-copy">
-            Ask once, then let the runtime gather context from connected surfaces,
-            execute safe work, manage projects, and explain AI/Machine Ops back
-            through this thread.
+            Ask once, then let the runtime gather context from connected
+            surfaces, execute safe work, manage projects, and explain AI/Machine
+            Ops back through this thread.
           </p>
         </div>
-        <div class="session-status-strip" aria-label="Runtime status">
+        <div class="session-status-strip">
           <span>HOME-installed app</span>
           <span>Single I/O thread</span>
           <span>Background telemetry</span>
@@ -247,12 +250,15 @@ export default function Dashboard(): JSX.Element {
         </div>
       </header>
 
-      <section class="context-signal-band" aria-label="Connected surface context">
+      <section
+        class="context-signal-band"
+        aria-label="Connected surface context"
+      >
         <div class="context-band-copy">
           <span class="panel-label">Now context</span>
           <p>
-            Heiwa should keep surface details in the background and interrupt only
-            when intent, risk, or evidence needs the user.
+            Heiwa should keep surface details in the background and interrupt
+            only when intent, risk, or evidence needs the user.
           </p>
         </div>
         <div class="context-signal-grid">
@@ -306,10 +312,12 @@ export default function Dashboard(): JSX.Element {
                                 {artifact.badge === "verified" ? "✓" : "!"}
                               </div>
                               <div class="artifact-meta">
-                                <span class="artifact-title">{artifact.title}</span>
-                                <a class="artifact-file-ref" href="#">
+                                <span class="artifact-title">
+                                  {artifact.title}
+                                </span>
+                                <span class="artifact-file-ref">
                                   {artifact.file}
-                                </a>
+                                </span>
                               </div>
                               <span class={`artifact-badge ${artifact.badge}`}>
                                 {artifact.badge}
@@ -317,7 +325,10 @@ export default function Dashboard(): JSX.Element {
                             </div>
                             <p class="artifact-summary">{artifact.summary}</p>
                             <div class="artifact-actions">
-                              <button class="btn-artifact primary" type="button">
+                              <button
+                                class="btn-artifact primary"
+                                type="button"
+                              >
                                 Open artifact
                               </button>
                               <button class="btn-artifact" type="button">
@@ -333,7 +344,9 @@ export default function Dashboard(): JSX.Element {
                   <Show when={message.diff}>
                     {(diff) => (
                       <div class="diff-capsule">
-                        <span class="diff-count">{diff().files} files changed</span>
+                        <span class="diff-count">
+                          {diff().files} files changed
+                        </span>
                         <span class="diff-additions">+{diff().additions}</span>
                         <span class="diff-deletions">-{diff().deletions}</span>
                         <button class="btn-review-diff" type="button">
@@ -391,13 +404,17 @@ export default function Dashboard(): JSX.Element {
           <Show when={isRecording() && voiceWave().length > 0}>
             <div class="voice-wave-container compact">
               <For each={voiceWave()}>
-                {(height) => <div class="wave-bar" style={{ height: `${height}px` }} />}
+                {(height) => (
+                  <div class="wave-bar" style={{ height: `${height}px` }} />
+                )}
               </For>
             </div>
           </Show>
 
           <Show when={isAnalyzing()}>
-            <div class="analysis-strip">Preparing local attachment evidence...</div>
+            <div class="analysis-strip">
+              Preparing local attachment evidence...
+            </div>
           </Show>
 
           <Show when={uploadedMedia()}>
@@ -410,7 +427,11 @@ export default function Dashboard(): JSX.Element {
           </Show>
 
           <div class="omni-input-bar">
-            <button class="omni-action-btn" type="button" aria-label="Attach evidence">
+            <button
+              class="omni-action-btn"
+              type="button"
+              aria-label="Attach evidence"
+            >
               +
             </button>
             <textarea
@@ -421,10 +442,12 @@ export default function Dashboard(): JSX.Element {
               onInput={(e) => setInputText(e.currentTarget.value)}
             />
             <div class="omni-actions-row">
-              <div class="omni-model-selector" aria-label="Selected routing lane">
-                local-first
-              </div>
-              <button class="omni-send-btn" type="submit" aria-label="Send prompt">
+              <div class="omni-model-selector">local-first</div>
+              <button
+                class="omni-send-btn"
+                type="submit"
+                aria-label="Send prompt"
+              >
                 →
               </button>
             </div>

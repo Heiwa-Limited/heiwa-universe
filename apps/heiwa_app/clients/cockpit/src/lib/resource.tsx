@@ -1,10 +1,12 @@
 import type { JSX, Resource } from "solid-js";
-import { createResource, Show } from "solid-js";
+import { createResource, onCleanup, onMount, Show } from "solid-js";
+import { openWs } from "./api";
 
 export interface RemoteShellProps<T> {
   loader: () => Promise<T>;
   fallback?: JSX.Element;
   children: (data: T, refetch: () => void) => JSX.Element;
+  liveEventFilter?: (event: unknown) => boolean;
 }
 
 export function useRemote<T>(
@@ -23,6 +25,27 @@ export function useRemote<T>(
 
 export function RemoteShell<T>(props: RemoteShellProps<T>): JSX.Element {
   const [data, ctl] = useRemote(props.loader);
+
+  onMount(() => {
+    if (!props.liveEventFilter) return;
+    const ws = openWs("/ws/v1/events");
+    const onMessage = (event: MessageEvent) => {
+      try {
+        const msg: unknown = JSON.parse(event.data);
+        if (props.liveEventFilter && props.liveEventFilter(msg)) {
+          ctl.refetch();
+        }
+      } catch {
+        // ignore malformed frames
+      }
+    };
+    ws.addEventListener("message", onMessage);
+    onCleanup(() => {
+      ws.removeEventListener("message", onMessage);
+      ws.close();
+    });
+  });
+
   return (
     <Show
       when={!data.loading && !data.error && data() !== undefined}
