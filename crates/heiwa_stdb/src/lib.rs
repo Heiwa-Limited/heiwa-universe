@@ -360,6 +360,8 @@ mod tests {
         );
     }
 
+    // The fake `spacetime` is a shebang shell script — unix-only by nature.
+    #[cfg(unix)]
     #[test]
     fn spacetime_shell_identity_uses_login_show_without_token_material() {
         let dir = std::env::temp_dir().join(format!("heiwa-fake-spacetime-{}", std::process::id()));
@@ -371,7 +373,6 @@ mod tests {
             "#!/usr/bin/env sh\nif [ \"$1 $2\" = \"login show\" ]; then echo 'You are logged in as c200abc'; exit 0; fi\nexit 1\n",
         )
         .expect("write fake spacetime");
-        #[cfg(unix)]
         {
             use std::os::unix::fs::PermissionsExt;
             let mut perms = std::fs::metadata(&bin).expect("metadata").permissions();
@@ -379,8 +380,17 @@ mod tests {
             std::fs::set_permissions(&bin, perms).expect("chmod fake spacetime");
         }
 
-        let identity = spacetime_shell_identity_with_bin(bin.to_str().expect("utf8 path"))
-            .expect("fake spacetime login show should authenticate");
+        // Retry: a concurrent test in this harness can fork while the script's
+        // write fd is briefly held, making the first exec fail with ETXTBSY.
+        let mut identity = None;
+        for _ in 0..50 {
+            identity = spacetime_shell_identity_with_bin(bin.to_str().expect("utf8 path"));
+            if identity.is_some() {
+                break;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(20));
+        }
+        let identity = identity.expect("fake spacetime login show should authenticate");
         assert_eq!(identity, "You are logged in as c200abc");
         assert!(!identity.contains("token"));
 
