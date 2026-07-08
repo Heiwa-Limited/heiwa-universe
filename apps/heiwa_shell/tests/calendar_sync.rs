@@ -29,10 +29,12 @@ fn calendar_sync_dry_run_reports_apple_google_read_model_plan_without_writing_st
         payload["sources"]["google"]["sync_semantics"],
         "full sync stores nextSyncToken; incremental sync handles 410 Gone with scoped wipe + full resync"
     );
-    assert!(payload["snapshot"]
+    // Normalize separators: Windows joins with backslashes.
+    let snapshot = payload["snapshot"]
         .as_str()
         .expect("snapshot path")
-        .ends_with(".heiwa/state/calendar/events.jsonl"));
+        .replace('\\', "/");
+    assert!(snapshot.ends_with(".heiwa/state/calendar/events.jsonl"));
     assert!(
         !home.path().join(".heiwa").exists(),
         "dry-run must not write Heiwa state"
