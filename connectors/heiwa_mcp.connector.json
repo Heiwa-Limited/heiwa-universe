@@ -1,0 +1,44 @@
+{
+  "$schema": "./schema/connector.schema.json",
+  "id": "heiwa_mcp",
+  "name": "Heiwa MCP Gateway",
+  "vendor": "Heiwa, PBC",
+  "summary": "Expose Heiwa multi-provider routing over MCP to Grok, Claude, Codex, and OpenAI-compatible clients.",
+  "support_level": "local_os_bridge",
+  "auth": ["api_key", "local_runtime"],
+  "revocation_path": "Remove keys from ~/heiwa/.env; disable MCP server entries; stop HTTP gateway.",
+  "receipt_required": true,
+  "claim_aliases": ["Heiwa MCP", "Heiwa gateway"],
+  "capabilities": [
+    {
+      "id": "heiwa.mcp.status",
+      "description": "Report Heiwa node health and enabled providers.",
+      "risk_class": "silent",
+      "receipt_required": true,
+      "support_status": "live",
+      "side_effect": "read",
+      "permissions": ["local runtime status"],
+      "permission_notes": "Reads local process/env state only."
+    },
+    {
+      "id": "heiwa.mcp.chat",
+      "description": "Route a chat completion through configured providers.",
+      "risk_class": "notify",
+      "receipt_required": true,
+      "support_status": "live",
+      "side_effect": "write",
+      "permissions": ["provider inference"],
+      "permission_notes": "Spends user API quota or local compute."
+    },
+    {
+      "id": "heiwa.mcp.route_plan",
+      "description": "Dry-run provider selection without calling a model.",
+      "risk_class": "silent",
+      "receipt_required": true,
+      "support_status": "live",
+      "side_effect": "read",
+      "permissions": ["local routing policy"],
+      "permission_notes": "No external side effects."
+    }
+  ]
+}

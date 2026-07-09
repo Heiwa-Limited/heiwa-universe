@@ -1956,6 +1956,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "heiwa-graph"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "heiwa-protocol",
+ "rusqlite",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "thiserror 2.0.18",
+ "uuid",
+]
+
+[[package]]
 name = "heiwa-install"
 version = "0.1.0"
 dependencies = [

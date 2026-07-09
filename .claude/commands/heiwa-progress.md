@@ -1,0 +1,1 @@
+Advance Heiwa product development efficiently. Follow repo HEIWA.md and AGENTS.md. Prefer local/free inference for small work; escalate to Claude/Codex/Grok for hard tasks. Classify work as Intake/Execution/Evidence. Fail closed on policy. Work only on Linux FS path ~/heiwa in WSL. Ship the smallest vertical slice with tests.

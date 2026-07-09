@@ -9,6 +9,7 @@ members = [
     "crates/heiwa_config",
     "crates/heiwa_drex",
     "crates/heiwa_embed",
+    "crates/heiwa_graph",
     "crates/heiwa_install",
     "crates/heiwa_loop",
     "crates/heiwa_memory",

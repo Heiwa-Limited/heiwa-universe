@@ -2,23 +2,42 @@
   "mcpServers": {
     "docker": {
       "command": "docker",
-      "args": ["mcp", "gateway", "run"]
+      "args": [
+        "mcp",
+        "gateway",
+        "run"
+      ]
     },
     "playwright": {
       "command": "npx",
-      "args": ["-y", "@playwright/mcp@latest"]
+      "args": [
+        "-y",
+        "@playwright/mcp@latest"
+      ]
     },
     "figma": {
       "command": "npx",
-      "args": ["-y", "@modelcontextprotocol/server-figma"]
+      "args": [
+        "-y",
+        "@modelcontextprotocol/server-figma"
+      ]
     },
     "git": {
       "command": "npx",
-      "args": ["-y", "@modelcontextprotocol/server-git"]
+      "args": [
+        "-y",
+        "@modelcontextprotocol/server-git"
+      ]
     },
     "notion": {
       "type": "http",
       "url": "https://mcp.notion.com/mcp"
+    },
+    "heiwa": {
+      "command": "bash",
+      "args": [
+        "/home/devon/heiwa/services/mcp-gateway/run-stdio.sh"
+      ]
     }
   }
 }

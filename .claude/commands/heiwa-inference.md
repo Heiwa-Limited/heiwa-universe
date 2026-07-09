@@ -1,0 +1,1 @@
+Help route builder and end-user inference across Ollama, OpenRouter/Nous free keys, Claude Pro, ChatGPT/Codex, SuperGrok, and paid APIs. Keys in ~/heiwa/.env. Product must remain BYOK-first; Heiwa does not own provider internals.

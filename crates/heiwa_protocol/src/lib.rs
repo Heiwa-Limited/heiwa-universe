@@ -3,6 +3,15 @@ use std::fmt;
 use std::path::{Path, PathBuf};
 use std::str::FromStr;
 
+pub mod sandbox_policy;
+pub mod sovereign_graph;
+
+pub use sandbox_policy::{PolicyVerdict, SandboxPolicy, SandboxTier};
+pub use sovereign_graph::{
+    CalendarProposal, GraphEdge, GraphEdgeKind, GraphEntityKind, GraphNode,
+    ProposalStatus, Sensitivity, SourceSpan, SOVEREIGN_GRAPH_SCHEMA_VERSION,
+};
+
 // ---------------------------------------------------------------------------
 // Doctrine enums — canonical string representations for STDB fields
 // ---------------------------------------------------------------------------
