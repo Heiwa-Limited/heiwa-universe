@@ -10,7 +10,7 @@ Naming:
 
 ## Claude's Role Here
 
-- Claude Code is a peer executor alongside Codex, Gemini CLI, Antigravity, and local model runtimes.
+- Claude Code is a peer executor alongside Codex, Gemini CLI, Grok, Antigravity, and local model runtimes.
 - Claude owns its own native tools, system prompts, auth semantics, model availability, and quota behavior.
 - Heiwa adds repo-local context, routing, evidence, shell ergonomics, and cross-provider normalization.
 - Do not write docs or code that implies Heiwa owns Claude's inference internals.
@@ -40,6 +40,7 @@ Heiwa wraps provider-owned runtimes:
 - Claude Code
 - Codex
 - Gemini CLI
+- Grok
 - Antigravity
 - Ollama and later local runtimes
 
@@ -68,9 +69,11 @@ Use corrected peer framing before architecture or parity work:
 cargo build --workspace
 cargo test -p heiwa-shell --test smoke -- --nocapture
 cargo test -p heiwa-loop -- --nocapture
+bash scripts/check_agent_baseline.sh
 ```
 
-Use targeted crate tests before claiming runtime progress.
+Use targeted crate tests before claiming runtime progress. Run the baseline gate
+before closing repo-health, promotion, or peer-agent handoff work.
 
 ## Hard Rules
 

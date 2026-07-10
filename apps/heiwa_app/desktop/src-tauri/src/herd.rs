@@ -162,6 +162,33 @@ fn command_catalog() -> Vec<HerdCommandSpec> {
             approval: "auto".to_string(),
             description: "Typecheck least-privilege herdr/Deno glue.".to_string(),
         },
+        HerdCommandSpec {
+            id: "monitor.ops".to_string(),
+            label: "Monitor ops".to_string(),
+            command: "heiwa app api get /api/v1/monitor --json".to_string(),
+            risk: "host_safe_readonly".to_string(),
+            approval: "auto".to_string(),
+            description:
+                "Read combined user and machine ops state from the local Heiwa.app runtime."
+                    .to_string(),
+        },
+        HerdCommandSpec {
+            id: "monitor.machine".to_string(),
+            label: "Monitor machine".to_string(),
+            command: "heiwa app api get /api/v1/resource --json".to_string(),
+            risk: "host_safe_readonly".to_string(),
+            approval: "auto".to_string(),
+            description: "Read CPU, memory, thermal, and admission state.".to_string(),
+        },
+        HerdCommandSpec {
+            id: "monitor.inbox".to_string(),
+            label: "Monitor inbox".to_string(),
+            command: "heiwa app api get /api/v1/inbox --json".to_string(),
+            risk: "host_safe_readonly".to_string(),
+            approval: "auto".to_string(),
+            description: "Read the local intake inbox for receipts and operator-facing items."
+                .to_string(),
+        },
     ]
 }
 
@@ -481,6 +508,9 @@ mod tests {
         assert!(ids.contains(&"git.diff.stat".to_string()));
         assert!(ids.contains(&"npm.typecheck".to_string()));
         assert!(ids.contains(&"deno.herd.check".to_string()));
+        assert!(ids.contains(&"monitor.ops".to_string()));
+        assert!(ids.contains(&"monitor.machine".to_string()));
+        assert!(ids.contains(&"monitor.inbox".to_string()));
     }
 
     #[test]

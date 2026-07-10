@@ -119,6 +119,10 @@ oauth_creds.json
 .codex/*
 !.codex/config.toml
 
+# Grok — allow project config, ignore local state
+.grok/*
+!.grok/config.toml
+
 # Gemini CLI — allow project config + agents, ignore local state
 .gemini/*
 !.gemini/settings.json

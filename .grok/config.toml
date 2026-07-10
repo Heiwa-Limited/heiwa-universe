@@ -1,0 +1,29 @@
+# Project-scoped Grok config for heiwa-universe.
+# Keep only Heiwa-specific MCP/plugin/permission rules here. Personal defaults
+# belong in ~/.grok/config.toml.
+
+[permission]
+deny = [
+  "Bash(rm -rf *)",
+  "Bash(git reset --hard *)",
+  "Bash(git checkout -- *)",
+  "Bash(git clean *)",
+  "Bash(wrangler deploy *)",
+  "Bash(spacetime publish *)",
+  "Bash(gh release create *)",
+]
+ask = [
+  "Bash(git push *)",
+  "Bash(gh pr merge *)",
+  "Bash(heiwa app update *)",
+]
+allow = [
+  "Bash(git status *)",
+  "Bash(git diff *)",
+  "Bash(rg *)",
+  "Bash(cargo build *)",
+  "Bash(cargo test *)",
+  "Bash(bash scripts/check_agent_baseline.sh)",
+  "Read(**)",
+  "Grep",
+]

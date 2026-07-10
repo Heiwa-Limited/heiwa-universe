@@ -1536,6 +1536,7 @@ fn api_payload_for_port(path: &str, started_at: &str, app_port: u16) -> Option<V
             "notes": ["heiwa-shell local app runtime"],
         }),
         "/api/runtime/snapshot" | "/api/v1/runtime/snapshot" => snapshot(started_at),
+        "/api/v1/monitor" => monitor_payload(started_at, app_port),
         "/api/v1/resource" => resource_payload(),
         "/api/v1/session" => json!({
             "operator_id": env::var("USER").unwrap_or_else(|_| "local-operator".to_string()),
@@ -1584,6 +1585,56 @@ fn api_payload_for_port(path: &str, started_at: &str, app_port: u16) -> Option<V
         _ => return None,
     };
     Some(json!({ "ok": true, "data": data }))
+}
+
+fn monitor_payload(started_at: &str, app_port: u16) -> Value {
+    let state_dir = state_dir();
+    let mut inbox_items = inbox_items_for_state_dir(&state_dir);
+    inbox_items.extend(life_inbox_items());
+    sort_values_by_time_desc(&mut inbox_items, "occurred_at");
+    inbox_items.truncate(20);
+
+    json!({
+        "schema_version": "heiwa_monitor_v1",
+        "generated_at": chrono::Utc::now().to_rfc3339(),
+        "intent": "read-only operator and machine monitor for agents",
+        "runtime": {
+            "snapshot": snapshot(started_at),
+            "session": {
+                "operator_id": env::var("USER").unwrap_or_else(|_| "local-operator".to_string()),
+                "hostname": hostname_string(),
+                "runtime_version": env!("CARGO_PKG_VERSION"),
+                "app_url": format!("http://127.0.0.1:{app_port}/"),
+            },
+        },
+        "machine_ops": {
+            "resource": resource_payload(),
+            "providers": provider_rows(),
+            "workers": worker_agent_rows(),
+            "capabilities": capabilities_payload(),
+            "rate_groups": rate_group_rows(),
+        },
+        "user_ops": {
+            "today": crate::cmd::life::today_payload(),
+            "freshness": crate::cmd::life::freshness_payload(),
+            "calendar": crate::cmd::calendar::summary_payload(),
+            "mail": crate::cmd::mail::summary_payload(),
+            "approvals": crate::cmd::approvals::pending_approvals_summary_payload(),
+            "connectors": crate::cmd::connectors::connectors_payload(),
+            "goals": crate::cmd::goal::goals_payload(),
+            "inbox": {
+                "items": inbox_items,
+                "truncated": true,
+                "limit": 20,
+            },
+        },
+        "receipts": receipts_payload_for_state_dir(&state_dir),
+        "safety": {
+            "mode": "read_only",
+            "external_side_effects": false,
+            "approval_required_for_writes": true,
+        },
+    })
 }
 
 const RECEIPT_SCAN_LIMIT: usize = 120;
@@ -3975,6 +4026,36 @@ mod app_readmodel_tests {
         assert!(
             data.get("resource").is_some(),
             "runtime snapshot should include resource state: {payload}"
+        );
+    }
+
+    #[test]
+    fn monitor_api_payload_combines_user_and_machine_ops() {
+        let payload =
+            api_payload("/api/v1/monitor", "2026-06-02T00:00:00Z").expect("monitor endpoint");
+        let data = payload.get("data").expect("data");
+
+        assert_eq!(
+            data.get("schema_version").and_then(Value::as_str),
+            Some("heiwa_monitor_v1")
+        );
+        assert!(
+            data.get("machine_ops")
+                .and_then(|machine| machine.get("resource"))
+                .is_some(),
+            "monitor payload should include machine resource state: {payload}"
+        );
+        assert!(
+            data.get("user_ops")
+                .and_then(|user| user.get("approvals"))
+                .is_some(),
+            "monitor payload should include user approval state: {payload}"
+        );
+        assert_eq!(
+            data.get("safety")
+                .and_then(|safety| safety.get("mode"))
+                .and_then(Value::as_str),
+            Some("read_only")
         );
     }
 
