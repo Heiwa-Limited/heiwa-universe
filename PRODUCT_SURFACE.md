@@ -67,6 +67,7 @@ Longest prefix wins. Put narrower paths above broader parents when a child has a
 | `.claude/agents`                     | generated        |
 | `.claude`                            | product          |
 | `.codex`                             | product          |
+| `.grok`                              | product          |
 | `.gemini/agents`                     | generated        |
 | `.gemini`                            | product          |
 | `.github`                            | product          |

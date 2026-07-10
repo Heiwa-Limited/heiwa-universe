@@ -202,6 +202,30 @@ export async function herdCommandCatalog(): Promise<HerdCommandSpec[]> {
         approval: "auto",
         description: "Summarize unstaged file changes without printing full diff contents.",
       },
+      {
+        id: "monitor.ops",
+        label: "Monitor ops",
+        command: "heiwa app api get /api/v1/monitor --json",
+        risk: "host_safe_readonly",
+        approval: "auto",
+        description: "Read combined user and machine ops state from the local Heiwa.app runtime.",
+      },
+      {
+        id: "monitor.machine",
+        label: "Monitor machine",
+        command: "heiwa app api get /api/v1/resource --json",
+        risk: "host_safe_readonly",
+        approval: "auto",
+        description: "Read CPU, memory, thermal, and admission state.",
+      },
+      {
+        id: "monitor.inbox",
+        label: "Monitor inbox",
+        command: "heiwa app api get /api/v1/inbox --json",
+        risk: "host_safe_readonly",
+        approval: "auto",
+        description: "Read the local intake inbox for receipts and operator-facing items.",
+      },
     ];
   }
 }

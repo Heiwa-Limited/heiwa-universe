@@ -46,7 +46,7 @@ Compression:
 
 Heiwa wraps provider-owned runtimes. It does not own their internals.
 
-- Claude Code, Codex, Gemini CLI, and Antigravity remain provider-owned CLI surfaces.
+- Claude Code, Codex, Gemini CLI, Antigravity, and Grok remain provider-owned CLI surfaces.
 - Providers own their own system prompts, auth semantics, session behavior, cloud model inventory, and native quotas.
 - Ollama and other local runtimes remain local-model providers, not Heiwa-native models.
 - Heiwa adds local install/auth UX, routing, evidence, bounded loops, and operator coherence across those surfaces.
@@ -171,7 +171,7 @@ counts, or feature parity.
 
 ## Shared Peer Truth
 
-Apply this across Codex, Claude, Gemini, and Heiwa docs:
+Apply this across Codex, Claude, Gemini, Grok, and Heiwa docs:
 
 - Do not cite Hermes as a worker mesh. Cite it for learning loop, skills,
   FTS5 recall, Honcho user modeling, messaging gateway, cron delivery, MCP,
