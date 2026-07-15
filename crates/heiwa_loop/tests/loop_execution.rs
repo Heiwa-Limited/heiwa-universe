@@ -35,6 +35,10 @@ impl ProviderAdapter for MockAdapter {
 
 #[tokio::test]
 async fn test_loop_turn_budget() {
+    // Keep test evidence out of the operator's real ~/.heiwa/evidence/.
+    let evidence_dir = std::env::temp_dir().join("heiwa-loop-test-evidence");
+    std::env::set_var("HEIWA_EVIDENCE_DIR", &evidence_dir);
+
     let config = LoopConfig {
         user_id: "test-user".to_string(),
         objective: "count to 2".to_string(),

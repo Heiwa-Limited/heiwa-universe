@@ -79,8 +79,13 @@ impl JsonlTransport {
         })
     }
 
-    /// Default location: `~/.heiwa/evidence/`.
+    /// Default location: `~/.heiwa/evidence/`, overridable via
+    /// `HEIWA_EVIDENCE_DIR` (tests and sandboxes must set it so they never
+    /// write into the operator's real evidence corpus).
     pub fn default_local() -> Result<Self> {
+        if let Some(dir) = std::env::var_os("HEIWA_EVIDENCE_DIR") {
+            return Self::new(std::path::PathBuf::from(dir));
+        }
         let dir = dirs::home_dir()
             .ok_or_else(|| anyhow!("cannot resolve home directory"))?
             .join(".heiwa")
