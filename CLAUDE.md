@@ -29,7 +29,7 @@ Before touching runtime or architecture work, read in this order:
 - The installed `heiwa` runtime is the current product center.
 - `apps/heiwa_shell/` is the primary operator surface in this repo.
 - `apps/heiwa_core/` contains the Rust execution kernel and hosted runtime path.
-- STDB-facing active work lives in `apps/heiwa_core/src/stdb/`, `apps/heiwa_orchestrator/src/stdb/`, and `crates/heiwa_stdb/`.
+- Evidence-plane work lives in `apps/heiwa_core/src/evidence/` and `apps/heiwa_orchestrator/src/evidence/` (JSONL truth; Lance index is the next target). STDB was extracted 2026-07-15.
 - Legacy surfaces (old Hub, CLI, limbs) were removed from the tree on 2026-07-06; they live in git history and `~/heiwa_archive/`. Do not treat them as work targets.
 - Web and `/code` surfaces are later work. Do not overstate them.
 
@@ -58,7 +58,7 @@ Use corrected peer framing before architecture or parity work:
   Composio/OAuth integrations, TokenJuice, and voice/meeting surface. Do not
   call it pure local-first.
 - Heiwa's defensible difference: provider-peer MacBook owner seat, local runtime
-  authority, approvals, receipts, STDB evidence sync, and provider-owned runtime
+  authority, approvals, receipts, git-synced local evidence, and provider-owned runtime
   truth.
 - Biggest current gap: connector/tool breadth and compression/learning loop.
   Do not imply parity until code proves it.
@@ -79,6 +79,6 @@ before closing repo-health, promotion, or peer-agent handoff work.
 
 - local-first truth over web-first framing
 - provider-owned semantics stay provider-owned
-- SpacetimeDB is backend authority, not a normal operator surface
+- Backend is Lance + GitHub: text truth in git, Lance derived recall index, SQLite hot state. No hosted authority plane.
 - GitHub is the distribution surface; a cloud/VPS plane is deferred until traction warrants it
 - honesty over completeness theater

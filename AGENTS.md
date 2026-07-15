@@ -10,12 +10,12 @@ This repository builds the Heiwa full stack. The current product center of gravi
 - **`heiwa`** is the primary installed operator surface.
 - **DREX** is the internal execution kernel.
 - **Local MacBook state** under `~/.heiwa/` plus this checkout is the current owner runtime truth.
-- **SpacetimeDB** is the adjudication, subscription, and evidence sync plane when enabled.
-- **GitHub and Cloudflare** are support infrastructure for distribution, docs, edge, and later remote surfaces.
+- **Lance + GitHub** are the backend (pivot 2026-07-15): text truth (JSONL/markdown) git-synced, Lance derived local recall index. SpacetimeDB is retired; code extracted from the tree.
+- **GitHub** is distribution, sync, and CI. **Cloudflare** is DNS utility only.
 
 Compression:
 
-> Rust proposes and executes, local Heiwa state records current user truth, SpacetimeDB syncs evidence, `heiwa` presents.
+> Rust proposes and executes, local text truth records, GitHub syncs, Lance recalls, `heiwa` presents.
 
 ## Current Repo Spine
 
@@ -24,15 +24,13 @@ Compression:
 | `apps/heiwa_shell/`        | Installed `heiwa` runtime and shell surface                                         |
 | `apps/heiwa_app/`          | Companion visual shell for the same runtime; web client today, native wrapper later |
 | `apps/heiwa_core/`         | Rust execution kernel and hosted runtime path                                       |
-| `apps/heiwa_orchestrator/` | DREX orchestration, scoring, and STDB-facing runtime work                           |
-| `crates/heiwa_stdb/`       | STDB evidence and offline fallback crate                                            |
+| `apps/heiwa_orchestrator/` | DREX orchestration, scoring, and local evidence runtime work                        |
 | `crates/heiwa_provider/`   | Provider normalization and adapter surfaces                                         |
 | `crates/heiwa_install/`    | Install and doctor flows                                                            |
 | `crates/heiwa_session/`    | Local session daemon primitives                                                     |
 | `crates/heiwa_repl/`       | REPL parsing and footer telemetry                                                   |
 | `crates/heiwa_loop/`       | Bounded loop workflow                                                               |
 | `packages/heiwa_sdk/`      | Python compatibility and migration surface                                          |
-| `packages/heiwa_bindings/` | Generated bindings for STDB types                                                   |
 
 ## Architecture Direction (April 2026)
 
@@ -62,7 +60,7 @@ Be honest about maturity:
 
 - `~/.heiwa/` is the owner-local runtime root on Devon's machine.
 - This checkout plus `~/.heiwa/` are the current source-of-truth/server for user functionality.
-- Users/operators should not have to think about SpacetimeDB directly.
+- Users/operators should not have to think about the evidence backend directly.
 - GitHub is source, CI, and release distribution.
 - Cloudflare is paused public edge and later remote-surface infrastructure.
 
@@ -83,7 +81,7 @@ Heiwa must initialize and adapt per machine through `~/.heiwa/machine.json`; do 
 
 Promotion rule (Local-first bypass posture): Local sandbox verification is the canonical gate. Verify the checkout with the sandbox release checks, merge to `main` locally, and then promote to the installed `heiwa` runtime via local checkout updates (`heiwa app update --source checkout`). Bypassing GitHub Actions and PR checks is standard to prevent remote blockers from stopping operator progress.
 
-Agent baseline gate: before closing repo-health work, local promotion, or peer-agent handoff, run `bash scripts/check_agent_baseline.sh`. The gate is local-only and must not be treated as remote health. Remote operations (`git fetch/pull/push`, `gh run`, releases, `spacetime publish`, `wrangler deploy`) require an explicit assignment and the remote pre-flight in `docs/agent-baseline-workflow.md`.
+Agent baseline gate: before closing repo-health work, local promotion, or peer-agent handoff, run `bash scripts/check_agent_baseline.sh`. The gate is local-only and must not be treated as remote health. Remote operations (`git fetch/pull/push`, `gh run`, releases, `wrangler deploy`) require an explicit assignment and the remote pre-flight in `docs/agent-baseline-workflow.md`.
 
 Vendor quarantine: root `vendor/` is ignored local research quarantine. `vendor/oss-lifts` is not part of the production remote checkpoint. Do not add, remove, import from, or cite `vendor/` as product evidence unless Devon assigns a tracked-vendor slice with license/provenance and `PRODUCT_SURFACE.md` updates.
 
@@ -148,7 +146,7 @@ For Heiwa, this currently means:
 
 - Rust for runtime authority, provider supervision, local execution, leases, and
   evidence.
-- SpacetimeDB for reducer-governed sync/adjudication when online.
+- GitHub for text-truth sync; Lance for local recall over the evidence corpus.
 - TypeScript for client contracts and companion app surfaces.
 - Shell for install, bootstrap, and operator glue.
 

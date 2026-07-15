@@ -8,16 +8,12 @@ pub use fanout::{
 
 use anyhow::{anyhow, Result};
 use chrono::Utc;
-use heiwa_bindings::{
-    complete_loop_session_reducer::complete_loop_session,
-    record_loop_iteration_reducer::record_loop_iteration, record_run_reducer::record_run,
-    start_loop_session_reducer::start_loop_session, ModelTier,
-};
 use heiwa_core::drex::{default_policy, plan_route, DrexIngress};
-use heiwa_protocol::TranscriptBlock;
+use heiwa_core::evidence::{EvidenceTransport, JsonlTransport};
+use heiwa_protocol::{ModelTier, TranscriptBlock};
 use heiwa_provider::adapter::{Message, ProviderAdapter, Role, StreamEvent};
-use heiwa_stdb::StdbClient;
 use serde::{Deserialize, Serialize};
+use serde_json::json;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use tokio::sync::mpsc;
@@ -48,18 +44,24 @@ pub struct LoopController {
     config: LoopConfig,
     loop_id: String,
     cancelled: Arc<AtomicBool>,
-    stdb: StdbClient,
+    evidence: Option<JsonlTransport>,
     model_tiers: Vec<ModelTier>,
 }
 
 impl LoopController {
-    pub fn new(config: LoopConfig, stdb: StdbClient, model_tiers: Vec<ModelTier>) -> Self {
+    pub fn new(config: LoopConfig, model_tiers: Vec<ModelTier>) -> Self {
         Self {
             config,
             loop_id: Uuid::new_v4().to_string(),
             cancelled: Arc::new(AtomicBool::new(false)),
-            stdb,
+            evidence: JsonlTransport::default_local().ok(),
             model_tiers,
+        }
+    }
+
+    fn journal(&self, kind: &str, payload: serde_json::Value) {
+        if let Some(evidence) = &self.evidence {
+            let _ = evidence.journal(kind, payload);
         }
     }
 
@@ -81,18 +83,18 @@ impl LoopController {
             self.loop_id, self.config.objective
         );
 
-        // 1. Initialize Loop Session in STDB
-        if let Some(conn) = self.stdb.connection() {
-            conn.reducers
-                .start_loop_session(
-                    self.loop_id.clone(),
-                    self.config.user_id.clone(),
-                    self.config.objective.clone(),
-                    self.config.max_turns,
-                    self.config.max_cost_usd,
-                )
-                .map_err(|e| anyhow!(e.to_string()))?;
-        }
+        // 1. Journal loop session start
+        self.journal(
+            "loop_sessions",
+            json!({
+                "loop_id": self.loop_id,
+                "user_id": self.config.user_id,
+                "objective": self.config.objective,
+                "max_turns": self.config.max_turns,
+                "max_cost_usd": self.config.max_cost_usd,
+                "status": "STARTED",
+            }),
+        );
 
         let mut current_turn = 0;
         let mut total_cost = 0.0;
@@ -101,15 +103,14 @@ impl LoopController {
         while current_turn < self.config.max_turns {
             if self.cancelled.load(Ordering::SeqCst) {
                 println!("Loop {} cancelled.", self.loop_id);
-                if let Some(conn) = self.stdb.connection() {
-                    conn.reducers
-                        .complete_loop_session(
-                            self.loop_id.clone(),
-                            "CANCELLED".to_string(),
-                            "User requested cancellation".to_string(),
-                        )
-                        .map_err(|e| anyhow!(e.to_string()))?;
-                }
+                self.journal(
+                    "loop_sessions",
+                    json!({
+                        "loop_id": self.loop_id,
+                        "status": "CANCELLED",
+                        "reason": "User requested cancellation",
+                    }),
+                );
 
                 let _ = status_tx
                     .send(LoopStatus {
@@ -200,49 +201,35 @@ impl LoopController {
             };
             total_cost += turn_cost;
 
-            if let Some(conn) = self.stdb.connection() {
-                conn.reducers
-                    .record_run(
-                        run_id.clone(),
-                        self.config.user_id.clone(),
-                        format!("loop-{}", self.loop_id),
-                        "loop-lease".to_string(),
-                        Some(self.loop_id.clone()),
-                        turn_started_at,
-                        turn_ended_at,
-                        "SUCCESS".to_string(),
-                        "{}".to_string(),
-                        "{}".to_string(),
-                        "[]".to_string(),
-                        "local-node".to_string(),
-                        "{}".to_string(),
-                        "loop".to_string(),
-                        selected_tier.model_id.clone(),
-                        turn_usage.input_tokens as i64,
-                        turn_usage.output_tokens as i64,
-                        0,
-                        turn_cost,
-                        None,
-                        None,
-                        None,
-                        None,
-                    )
-                    .map_err(|e| anyhow!(e.to_string()))?;
-
-                let iteration_id = Uuid::new_v4().to_string();
-                conn.reducers
-                    .record_loop_iteration(
-                        iteration_id,
-                        self.loop_id.clone(),
-                        current_turn,
-                        ingress.raw_text.clone(),
-                        output_summary.clone(),
-                        0.5,
-                        Some(run_id),
-                        turn_cost,
-                    )
-                    .map_err(|e| anyhow!(e.to_string()))?;
-            }
+            self.journal(
+                "runs",
+                json!({
+                    "run_id": run_id,
+                    "user_id": self.config.user_id,
+                    "proposal_id": format!("loop-{}", self.loop_id),
+                    "loop_id": self.loop_id,
+                    "started_at": turn_started_at,
+                    "ended_at": turn_ended_at,
+                    "status": "SUCCESS",
+                    "mode": "loop",
+                    "model_id": selected_tier.model_id,
+                    "tokens_input": turn_usage.input_tokens,
+                    "tokens_output": turn_usage.output_tokens,
+                    "cost": turn_cost,
+                }),
+            );
+            self.journal(
+                "loop_iterations",
+                json!({
+                    "iteration_id": Uuid::new_v4().to_string(),
+                    "loop_id": self.loop_id,
+                    "turn": current_turn,
+                    "input": ingress.raw_text,
+                    "output_summary": output_summary,
+                    "run_id": run_id,
+                    "cost": turn_cost,
+                }),
+            );
 
             let _ = status_tx
                 .send(LoopStatus {
@@ -260,16 +247,15 @@ impl LoopController {
             }
         }
 
-        // 5. Finalize Session in STDB
-        if let Some(conn) = self.stdb.connection() {
-            conn.reducers
-                .complete_loop_session(
-                    self.loop_id.clone(),
-                    "COMPLETED".to_string(),
-                    "Max turns reached or objective met".to_string(),
-                )
-                .map_err(|e| anyhow!(e.to_string()))?;
-        }
+        // 5. Journal session completion
+        self.journal(
+            "loop_sessions",
+            json!({
+                "loop_id": self.loop_id,
+                "status": "COMPLETED",
+                "reason": "Max turns reached or objective met",
+            }),
+        );
 
         let _ = status_tx
             .send(LoopStatus {

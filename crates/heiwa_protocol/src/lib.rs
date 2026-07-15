@@ -783,6 +783,34 @@ fn classify_intent(lowercase: &str) -> Intent {
     Intent::Chat
 }
 
+/// A routable model tier known to DREX.
+///
+/// First-party successor to the SpacetimeDB-generated `ModelTier` binding
+/// (backend pivot 2026-07-15: Lance + GitHub, no STDB). Field set is kept
+/// identical so existing routing/scoring code migrates by import swap only.
+#[derive(Clone, Debug, Default, PartialEq, serde::Serialize, serde::Deserialize)]
+pub struct ModelTier {
+    pub id: u64,
+    pub model_id: String,
+    pub provider_model_id: String,
+    pub provider: String,
+    pub rate_group: String,
+    pub capability_class: u8,
+    pub effort_knob: String,
+    pub effort_level: u8,
+    pub cost_per_turn: f64,
+    pub max_context_tokens: u32,
+    pub vram_requirement_mb: u32,
+    pub quantization_type: String,
+    pub kv_cache_strategy: String,
+    pub strengths_json: String,
+    pub enabled: bool,
+    pub last_success_rate: f64,
+    pub avg_latency_ms: u64,
+    pub latency_p_95_ms: u64,
+    pub updated_at: String,
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

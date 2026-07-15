@@ -9,11 +9,7 @@ use heiwa_core::{
 fn test_config() -> RuntimeConfig {
     RuntimeConfig {
         port: 8080,
-        state_backend: "spacetimedb".to_string(),
-        stdb_server: "maincloud".to_string(),
-        stdb_identity: "heiwaproductiondb".to_string(),
-        stdb_url: "https://maincloud.spacetimedb.com".to_string(),
-        stdb_token: "stdb-token".to_string(),
+        state_backend: "local-jsonl".to_string(),
         log_level: "INFO".to_string(),
         machine_auth_token: "operator-token".to_string(),
         jwt_signing_secret: "auth-secret".to_string(),

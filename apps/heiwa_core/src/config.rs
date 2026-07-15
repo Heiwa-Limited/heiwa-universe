@@ -4,10 +4,6 @@ use std::env;
 pub struct RuntimeConfig {
     pub port: u16,
     pub state_backend: String,
-    pub stdb_server: String,
-    pub stdb_identity: String,
-    pub stdb_url: String,
-    pub stdb_token: String,
     pub log_level: String,
     pub machine_auth_token: String,
     pub jwt_signing_secret: String,
@@ -19,30 +15,13 @@ pub struct RuntimeConfig {
 impl RuntimeConfig {
     #[must_use]
     pub fn from_env() -> Self {
-        let stdb_server = env::var("STDB_SERVER").unwrap_or_else(|_| "maincloud".to_string());
-        let stdb_url = env::var("STDB_URL").unwrap_or_else(|_| {
-            if stdb_server == "local" {
-                "http://localhost:3000".to_string()
-            } else {
-                "https://maincloud.spacetimedb.com".to_string()
-            }
-        });
-
         Self {
             port: env::var("PORT")
                 .ok()
                 .and_then(|value| value.parse().ok())
                 .unwrap_or(8080),
             state_backend: env::var("HEIWA_STATE_BACKEND")
-                .unwrap_or_else(|_| "spacetimedb".to_string()),
-            stdb_server,
-            stdb_identity: env::var("STDB_IDENTITY")
-                .unwrap_or_else(|_| "heiwaproductiondb".to_string()),
-            stdb_url,
-            stdb_token: env::var("STDB_TOKEN")
-                .or_else(|_| env::var("STDB_AUTH_TOKEN"))
-                .or_else(|_| env::var("SPACETIMEDB_TOKEN"))
-                .unwrap_or_default(),
+                .unwrap_or_else(|_| "local-jsonl".to_string()),
             log_level: env::var("LOG_LEVEL").unwrap_or_else(|_| "INFO".to_string()),
             machine_auth_token: env::var("HEIWA_MACHINE_AUTH_TOKEN")
                 .or_else(|_| env::var("HEIWA_AUTH_TOKEN"))

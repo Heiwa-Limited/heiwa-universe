@@ -33,11 +33,11 @@ struct AppState {
     /// Whether the right inspector pane is visible.
     show_inspector: bool,
     /// STDB connectivity state for display.
-    stdb_status: String,
+    evidence_status: String,
 }
 
 impl AppState {
-    fn new(session: SessionState, stdb_connected: bool) -> Self {
+    fn new(session: SessionState, evidence_available: bool) -> Self {
         Self {
             session,
             composer: String::new(),
@@ -46,10 +46,10 @@ impl AppState {
             status: "ready".into(),
             scroll: 0,
             show_inspector: false,
-            stdb_status: if stdb_connected {
-                "connected".into()
+            evidence_status: if evidence_available {
+                "local-jsonl".into()
             } else {
-                "offline".into()
+                "unavailable".into()
             },
         }
     }
@@ -537,13 +537,13 @@ fn render_inspector(f: &mut Frame, state: &AppState, area: Rect) {
             .fg(Color::White)
             .add_modifier(Modifier::BOLD),
     )));
-    let sync_color = if state.stdb_status == "connected" {
+    let sync_color = if state.evidence_status == "local-jsonl" {
         Color::Green
     } else {
         Color::Yellow
     };
     lines.push(Line::from(Span::styled(
-        format!("  stdb: {}", state.stdb_status),
+        format!("  evidence: {}", state.evidence_status),
         Style::default().fg(sync_color),
     )));
 
@@ -618,7 +618,7 @@ pub fn run_cockpit(
     mut event_rx: mpsc::UnboundedReceiver<CockpitEvent>,
     cmd_tx: mpsc::UnboundedSender<CockpitCommand>,
     initial_session: SessionState,
-    stdb_connected: bool,
+    evidence_available: bool,
 ) -> Result<()> {
     terminal::enable_raw_mode()?;
     let mut stdout = io::stdout();
@@ -626,7 +626,7 @@ pub fn run_cockpit(
     let backend = CrosstermBackend::new(stdout);
     let mut terminal = Terminal::new(backend)?;
 
-    let mut state = AppState::new(initial_session, stdb_connected);
+    let mut state = AppState::new(initial_session, evidence_available);
 
     loop {
         // 1. Drain controller events

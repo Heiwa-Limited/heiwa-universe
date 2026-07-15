@@ -1,4 +1,4 @@
-use heiwa_bindings::ModelTier;
+use heiwa_protocol::ModelTier;
 use heiwa_core::drex::{
     default_policy, evaluate_drex, plan_route, preflight_execution, DrexIngress, DrexVector,
     ExecutionMode, ResolutionTier,

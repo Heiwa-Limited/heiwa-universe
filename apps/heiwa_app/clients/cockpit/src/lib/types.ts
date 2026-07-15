@@ -549,7 +549,7 @@ export interface TodaySnapshot {
   scorecard_notes: string | null;
   stale_facts: StaleFact[];
   pending_approvals: PendingApproval[];
-  runtime: { stdb_mode: string };
+  runtime: { evidence_mode: string };
   next: string[];
   calendar?: { holds_today: number; holds: CalendarHold[] };
   mail?: { priority_count: number; draft_tier: number; top: MailPriorityRow[] };

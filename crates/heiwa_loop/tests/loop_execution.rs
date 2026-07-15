@@ -47,7 +47,7 @@ async fn test_loop_turn_budget() {
     };
 
     // We pass None for stdb to use offline mode
-    let model_tiers = vec![heiwa_bindings::ModelTier {
+    let model_tiers = vec![heiwa_protocol::ModelTier {
         id: 1,
         model_id: "mock-model".to_string(),
         provider_model_id: "mock".to_string(),
@@ -69,7 +69,7 @@ async fn test_loop_turn_budget() {
         updated_at: "".to_string(),
     }];
 
-    let controller = LoopController::new(config, heiwa_stdb::StdbClient::offline(), model_tiers);
+    let controller = LoopController::new(config, model_tiers);
     let (tx, mut rx) = mpsc::channel(10);
 
     let adapters: Arc<dyn Fn(&str) -> Option<Arc<dyn ProviderAdapter>> + Send + Sync> =

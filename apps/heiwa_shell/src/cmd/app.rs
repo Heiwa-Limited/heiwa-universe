@@ -342,7 +342,6 @@ fn promotion_receipt_plan(
         .join("promotion")
         .join(format!("{receipt_id}.json"));
 
-    let shell_authenticated = heiwa_stdb::spacetime_shell_auth_present();
     json!({
         "schema_version": "heiwa_promotion_receipt_v1",
         "receipt_id": receipt_id,
@@ -366,15 +365,11 @@ fn promotion_receipt_plan(
         },
         "codesign": codesign_probe(desktop_bundle),
         "runtime_probes": runtime_probe_contracts(),
-        "stdb_mirror": {
-            "configured": true,
-            "server": "maincloud",
-            "url": "https://maincloud.spacetimedb.com",
-            "auth_mode": "spacetime_cli_login",
-            "auth_source": "spacetime login show",
-            "shell_authenticated": shell_authenticated,
-            "token_present": shell_authenticated,
-            "status": if shell_authenticated { "ready_via_spacetime_cli" } else { "local_only_shell_login_missing" },
+        "evidence_plane": {
+            "backend": "local-jsonl",
+            "truth": "git-synced text (JSONL/markdown)",
+            "index": "lance (derived, rebuildable)",
+            "status": "local_only",
         },
         "restart_policy": "prompt-before-restart",
     })
@@ -3608,7 +3603,7 @@ mod app_readmodel_tests {
         assert!(data.get("pending_approvals").is_some_and(Value::is_array));
         assert!(data
             .get("runtime")
-            .and_then(|runtime| runtime.get("stdb_mode"))
+            .and_then(|runtime| runtime.get("evidence_mode"))
             .is_some_and(Value::is_string));
     }
 

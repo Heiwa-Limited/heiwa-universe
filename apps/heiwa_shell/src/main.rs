@@ -191,8 +191,7 @@ async fn main() -> Result<()> {
         "install" => match heiwa_install::run_install_target(args.get(2).map(String::as_str))? {
             heiwa_install::InstallOutcome::RuntimeBootstrap => {
                 println!("Registering device...");
-                let stdb_client = attempt_stdb_connection().await;
-                register_current_device(&stdb_client).await?;
+                register_current_device().await?;
             }
             heiwa_install::InstallOutcome::Plugin(plugin) => {
                 println!("Plugin installed: {}", plugin.canonical);
@@ -214,18 +213,7 @@ async fn main() -> Result<()> {
                     identity.user_id
                 );
 
-                // Write ~/.heiwa/connection.json with default STDB endpoint
-                let heiwa_dir = crate::home::heiwa_home()
-                    .map(|h| h.join(".heiwa"))
-                    .expect("HOME must be set");
-                let conn_path = heiwa_dir.join("connection.json");
-                let conn_json = serde_json::json!({
-                    "url": "https://maincloud.spacetimedb.com",
-                    "database": "heiwaproductiondb",
-                    "token": ""
-                });
-                std::fs::write(conn_path, serde_json::to_string_pretty(&conn_json)?)?;
-                println!("Sync connection initialized. Run 'heiwa register' to sync this device.");
+                println!("Run 'heiwa register' to record this device locally.");
             }
         }
         "logout" => {
@@ -233,18 +221,22 @@ async fn main() -> Result<()> {
             println!("Successfully logged out from Heiwa.");
         }
         "register" => {
-            let stdb_client = attempt_stdb_connection().await;
-            register_current_device(&stdb_client).await?;
+            register_current_device().await?;
         }
         "receipts" => {
-            let stdb_client = attempt_stdb_connection().await;
-            if !stdb_client.is_connected() {
-                println!("Not connected to SpacetimeDB. Receipts require a live connection.");
-                println!("Set STDB_URL and STDB_TOKEN environment variables to enable.");
-            } else {
-                println!("Connected to SpacetimeDB — run receipts are being recorded.");
-                println!("Query receipts via: spacetime sql heiwaproductiondb \"SELECT * FROM runs ORDER BY ended_at DESC LIMIT 10\"");
-            }
+            let receipts_db = heiwa_install::get_heiwa_dir().join("receipts.db");
+            let evidence_dir = heiwa_install::get_heiwa_dir().join("evidence");
+            println!("Receipts are recorded locally:");
+            println!(
+                "  SQLite: {} ({})",
+                receipts_db.display(),
+                if receipts_db.exists() { "present" } else { "not created yet" }
+            );
+            println!(
+                "  JSONL:  {} ({})",
+                evidence_dir.display(),
+                if evidence_dir.exists() { "present" } else { "not created yet" }
+            );
         }
         "devices" => {
             let manifest_path = heiwa_install::get_heiwa_dir().join("machine.json");
@@ -273,12 +265,7 @@ async fn main() -> Result<()> {
                     manifest["installed_at"].as_str().unwrap_or("unknown")
                 );
 
-                let stdb_client = attempt_stdb_connection().await;
-                if stdb_client.is_connected() {
-                    println!("  Sync:     Connected to SpacetimeDB");
-                } else {
-                    println!("  Sync:     Offline (local only)");
-                }
+                println!("  Sync:     local-first (evidence under ~/.heiwa/evidence/, git-synced)");
             } else {
                 println!("No device registered. Run 'heiwa install' first.");
             }
@@ -290,7 +277,12 @@ async fn main() -> Result<()> {
             let identity = heiwa_provider::load_identity();
             let app_probe = crate::cmd::app::probe_local_app(crate::cmd::app::DEFAULT_PORT);
             let layout = heiwa_install::check_runtime_layout();
-            let stdb = heiwa_stdb::StdbProbe::probe();
+            let evidence_dir = heiwa_install::get_heiwa_dir().join("evidence");
+            let evidence_status = serde_json::json!({
+                "backend": "local-jsonl",
+                "dir": evidence_dir.display().to_string(),
+                "present": evidence_dir.exists(),
+            });
             let provider_statuses: Vec<heiwa_provider::LegacyProviderAccount> =
                 ["claude", "codex", "gemini", "antigravity", "ollama"]
                     .iter()
@@ -319,7 +311,7 @@ async fn main() -> Result<()> {
                         "providers": provider_statuses,
                         "heiwa_app": app_probe,
                         "layout": layout,
-                        "stdb": stdb,
+                        "evidence": evidence_status,
                         "ai_ops": ai_ops,
                     })
                 );
@@ -424,36 +416,13 @@ async fn main() -> Result<()> {
             }
 
             println!();
-            println!("SpacetimeDB:");
-            if stdb.configured {
-                println!("  URL:           {}", stdb.url.as_deref().unwrap_or("?"));
-                println!(
-                    "  Database:      {}",
-                    stdb.database.as_deref().unwrap_or("?")
-                );
-                println!(
-                    "  Token:         {}",
-                    if stdb.token_present {
-                        "present"
-                    } else {
-                        "missing"
-                    }
-                );
-                match stdb.reachable {
-                    Some(true) => println!(
-                        "  Reachable:     yes ({}ms)",
-                        stdb.latency_ms.unwrap_or_default()
-                    ),
-                    Some(false) => println!("  Reachable:     no"),
-                    None => println!("  Reachable:     unknown"),
-                }
-                if !stdb.token_present {
-                    println!("  Next:          heiwa login");
-                }
-            } else {
-                println!("  Configured:    no");
-                println!("  Next:          heiwa login (writes ~/.heiwa/connection.json)");
-            }
+            println!("Evidence:");
+            println!("  Backend:       local-jsonl (+ derived Lance index, git-synced truth)");
+            println!("  Dir:           {}", evidence_dir.display());
+            println!(
+                "  Present:       {}",
+                if evidence_dir.exists() { "yes" } else { "not created yet" }
+            );
 
             if let Some(ai_ops) = ai_ops {
                 println!();
@@ -757,10 +726,7 @@ async fn main() -> Result<()> {
                     ));
                 }
 
-                // Try to connect to STDB if environment allows
-                let stdb_client = attempt_stdb_connection().await;
-
-                let controller = heiwa_loop::LoopController::new(config, stdb_client, model_tiers);
+                let controller = heiwa_loop::LoopController::new(config, model_tiers);
                 let (tx, mut rx) = tokio::sync::mpsc::channel(10);
 
                 println!("Loop initiated: {}", controller.get_id());
@@ -941,7 +907,7 @@ fn format_context(tokens: u32) -> String {
     }
 }
 
-async fn register_current_device(stdb_client: &heiwa_stdb::StdbClient) -> Result<()> {
+async fn register_current_device() -> Result<()> {
     let identity = match heiwa_provider::load_identity() {
         Some(id) => id,
         None => {
@@ -973,48 +939,46 @@ async fn register_current_device(stdb_client: &heiwa_stdb::StdbClient) -> Result
         device_id, identity.user_id
     );
 
-    stdb_client.register_device(
-        &device_id,
-        &identity.user_id,
-        &hostname,
-        std::env::consts::OS,
-        std::env::consts::ARCH,
-    )?;
+    let evidence = EvidenceClient::local();
+    evidence.journal(
+        "devices",
+        serde_json::json!({
+            "device_id": device_id,
+            "user_id": identity.user_id,
+            "hostname": hostname,
+            "os": std::env::consts::OS,
+            "arch": std::env::consts::ARCH,
+        }),
+    );
 
-    // Sync provider statuses
+    // Journal provider statuses
     let mut registry = heiwa_provider::AccountRegistry::load();
     heiwa_provider::detect::auto_discover(&mut registry).await;
     for account in &registry.accounts {
-        let models_json =
-            serde_json::to_string(&account.models).unwrap_or_else(|_| "[]".to_string());
-        stdb_client.sync_provider_status(
-            &account.account_id,
-            &account.provider,
-            &device_id,
-            account.credential.kind_label(),
-            &account.account_id, // local_handle_ref
-            &format!("{:?}", account.status),
-            None,
-            None,
-            &models_json,
-        )?;
+        evidence.journal(
+            "provider_status",
+            serde_json::json!({
+                "account_id": account.account_id,
+                "provider": account.provider,
+                "device_id": device_id,
+                "credential_kind": account.credential.kind_label(),
+                "status": format!("{:?}", account.status),
+                "models": account.models,
+            }),
+        );
         println!(
-            "  Synced provider {} status: {:?}",
+            "  Recorded provider {} status: {:?}",
             account.provider, account.status
         );
     }
 
-    if stdb_client.is_connected() {
-        println!("Device and capabilities synced to SpacetimeDB.");
-    } else {
-        println!("Device registered locally (STDB offline — will sync when connected).");
-    }
+    println!("Device and provider statuses recorded to ~/.heiwa/evidence/.");
     Ok(())
 }
 
 pub(crate) fn get_live_model_tiers(
     registry: &heiwa_provider::AccountRegistry,
-) -> Vec<heiwa_bindings::ModelTier> {
+) -> Vec<heiwa_protocol::ModelTier> {
     registry
         .all_models()
         .into_iter()
@@ -1031,7 +995,7 @@ pub(crate) fn get_live_model_tiers(
                 strengths.push("advanced_coding");
             }
 
-            heiwa_bindings::ModelTier {
+            heiwa_protocol::ModelTier {
                 id: 0,
                 model_id: m.model_id.clone(),
                 provider_model_id: m.provider_model_id.clone(),
@@ -1056,14 +1020,30 @@ pub(crate) fn get_live_model_tiers(
         .collect()
 }
 
-async fn attempt_stdb_connection() -> heiwa_stdb::StdbClient {
-    match heiwa_stdb::StdbConfig::resolve() {
-        Some(config) => {
-            let client = heiwa_stdb::StdbClient::connect(&config);
-            client.spawn_advance_loop();
-            client
+/// Local evidence appender (backend pivot 2026-07-15: Lance + GitHub, no STDB).
+/// Journals to `~/.heiwa/evidence/<kind>.jsonl`; silently no-ops if the
+/// evidence directory cannot be created.
+#[derive(Clone)]
+pub(crate) struct EvidenceClient(Option<Arc<heiwa_core::evidence::JsonlTransport>>);
+
+impl EvidenceClient {
+    pub(crate) fn local() -> Self {
+        Self(
+            heiwa_core::evidence::JsonlTransport::default_local()
+                .ok()
+                .map(Arc::new),
+        )
+    }
+
+    pub(crate) fn is_available(&self) -> bool {
+        self.0.is_some()
+    }
+
+    pub(crate) fn journal(&self, kind: &str, payload: serde_json::Value) {
+        use heiwa_core::evidence::EvidenceTransport;
+        if let Some(transport) = &self.0 {
+            let _ = transport.journal(kind, payload);
         }
-        None => heiwa_stdb::StdbClient::offline(),
     }
 }
 
@@ -1107,19 +1087,13 @@ async fn run_repl(use_cockpit: bool) -> Result<()> {
         print_boot_provider_matrix();
     }
 
-    let stdb_client = attempt_stdb_connection().await;
+    let evidence_client = EvidenceClient::local();
     if !use_cockpit {
-        if stdb_client.is_connected() {
-            println!("  Connected to SpacetimeDB");
-        } else if heiwa_provider::load_identity().is_some() {
-            println!("  SpacetimeDB unreachable — running offline");
-        } else {
-            println!("  Not logged in — run 'heiwa login' to enable sync");
-        }
+        println!("  Evidence: local-first (~/.heiwa/evidence/)");
     }
 
     // Start device heartbeat if connected
-    let heartbeat_device_id = {
+    let _heartbeat_device_id = {
         let manifest_path = heiwa_install::get_heiwa_dir().join("machine.json");
         if manifest_path.exists() {
             std::fs::read_to_string(&manifest_path)
@@ -1130,18 +1104,6 @@ async fn run_repl(use_cockpit: bool) -> Result<()> {
             None
         }
     };
-
-    if let Some(ref dev_id) = heartbeat_device_id {
-        let stdb_hb = stdb_client.clone();
-        let dev_id_clone = dev_id.clone();
-        tokio::spawn(async move {
-            let mut interval = tokio::time::interval(tokio::time::Duration::from_secs(30));
-            loop {
-                interval.tick().await;
-                let _ = stdb_hb.heartbeat_device(&dev_id_clone);
-            }
-        });
-    }
 
     // Load registry once at REPL start
     let mut registry = heiwa_provider::AccountRegistry::load();
@@ -1194,7 +1156,7 @@ async fn run_repl(use_cockpit: bool) -> Result<()> {
         let (cmd_tx, cmd_rx) = tokio::sync::mpsc::unbounded_channel::<CockpitCommand>();
 
         // Spawn the async controller — it owns routing, execution, evidence
-        let ctrl_stdb = stdb_client.clone();
+        let ctrl_evidence = evidence_client.clone();
         let ctrl_tiers = model_tiers.clone();
         let ctrl_session_id = state.session_id.clone();
         let ctrl_transcript = state.transcript.clone();
@@ -1202,7 +1164,7 @@ async fn run_repl(use_cockpit: bool) -> Result<()> {
             run_cockpit_controller(
                 cmd_rx,
                 event_tx,
-                ctrl_stdb,
+                ctrl_evidence,
                 ctrl_tiers,
                 ctrl_session_id,
                 ctrl_transcript,
@@ -1211,8 +1173,8 @@ async fn run_repl(use_cockpit: bool) -> Result<()> {
         });
 
         // Run TUI on the main thread (blocking) — it owns terminal I/O
-        let stdb_connected = stdb_client.is_connected();
-        heiwa_tui::run_cockpit(event_rx, cmd_tx, state, stdb_connected)?;
+        let evidence_available = evidence_client.is_available();
+        heiwa_tui::run_cockpit(event_rx, cmd_tx, state, evidence_available)?;
 
         return Ok(());
     }
@@ -1282,7 +1244,7 @@ async fn run_repl(use_cockpit: bool) -> Result<()> {
                     Ok(RouteOutcome::Routed(route)) => {
                         pins.current_provider = route.provider.clone();
                         pins.current_model = route.model_id.clone();
-                        record_route_evidence(&stdb_client, &route, &t);
+                        record_route_evidence(&evidence_client, &route, &t);
 
                         let prepared = prepare_outbound_prompt_for_route(&route, &t);
                         let messages = build_messages_from_transcript(
@@ -1348,7 +1310,7 @@ async fn run_repl(use_cockpit: bool) -> Result<()> {
                                 );
                             }
                         }
-                        record_run_evidence(&stdb_client, &route, usage.as_ref());
+                        record_run_evidence(&evidence_client, &route, usage.as_ref());
                         let receipt_latency_ms = receipt_started.elapsed().as_millis() as i64;
                         if let Some(ref receipts) = receipts {
                             record_call_receipt(
@@ -1428,11 +1390,8 @@ async fn run_repl(use_cockpit: bool) -> Result<()> {
                         heiwa_provider::detect::auto_discover(&mut reg).await;
                         let loop_tiers = get_live_model_tiers(&reg);
 
-                        let controller = heiwa_loop::LoopController::new(
-                            config,
-                            stdb_client.clone(),
-                            loop_tiers,
-                        );
+                        let controller =
+                            heiwa_loop::LoopController::new(config, loop_tiers);
                         let (tx, mut rx) = tokio::sync::mpsc::channel(10);
 
                         let adapters: Arc<
@@ -1505,8 +1464,8 @@ async fn run_repl(use_cockpit: bool) -> Result<()> {
 async fn run_cockpit_controller(
     mut cmd_rx: tokio::sync::mpsc::UnboundedReceiver<CockpitCommand>,
     event_tx: tokio::sync::mpsc::UnboundedSender<CockpitEvent>,
-    stdb_client: heiwa_stdb::StdbClient,
-    model_tiers: Vec<heiwa_bindings::ModelTier>,
+    evidence_client: EvidenceClient,
+    model_tiers: Vec<heiwa_protocol::ModelTier>,
     session_id: String,
     mut transcript: Vec<TranscriptBlock>,
 ) {
@@ -1567,7 +1526,7 @@ async fn run_cockpit_controller(
                                     explanation: Some(route.routing_metadata.clone()),
                                 }));
 
-                                record_route_evidence(&stdb_client, &route, &t);
+                                record_route_evidence(&evidence_client, &route, &t);
 
                                 if pins.cockpit_mode == CockpitMode::Agentic {
                                     if route.provider != "ollama" {
@@ -1634,7 +1593,7 @@ async fn run_cockpit_controller(
                                         );
                                         send_done_event(&event_tx, first_usage.as_ref());
                                         record_run_evidence(
-                                            &stdb_client,
+                                            &evidence_client,
                                             &route,
                                             first_usage.as_ref(),
                                         );
@@ -1657,7 +1616,7 @@ async fn run_cockpit_controller(
                                         Ok((receipts, tool_entries)) => {
                                             for receipt in &receipts {
                                                 record_tool_call_evidence(
-                                                    &stdb_client,
+                                                    &evidence_client,
                                                     receipt,
                                                     &session_id,
                                                 );
@@ -1716,7 +1675,7 @@ async fn run_cockpit_controller(
                                                 let usage = merge_usage(first_usage, final_usage);
                                                 send_done_event(&event_tx, usage.as_ref());
                                                 record_run_evidence(
-                                                    &stdb_client,
+                                                    &evidence_client,
                                                     &route,
                                                     usage.as_ref(),
                                                 );
@@ -1819,7 +1778,7 @@ async fn run_cockpit_controller(
                                         cost: 0.0,
                                     });
                                 }
-                                record_run_evidence(&stdb_client, &route, usage.as_ref());
+                                record_run_evidence(&evidence_client, &route, usage.as_ref());
                                 let _ = event_tx.send(CockpitEvent::StatusUpdate("ready".into()));
                             }
                         }
@@ -1870,7 +1829,7 @@ async fn run_cockpit_controller(
 fn handle_slash(
     cmd: &str,
     args: &[String],
-    model_tiers: &[heiwa_bindings::ModelTier],
+    model_tiers: &[heiwa_protocol::ModelTier],
     pins: &mut SessionPins,
 ) -> Option<String> {
     match cmd {
@@ -2469,7 +2428,7 @@ fn has_adapter(provider: &str) -> bool {
 fn route_task(
     task: &str,
     pins: &SessionPins,
-    model_tiers: &[heiwa_bindings::ModelTier],
+    model_tiers: &[heiwa_protocol::ModelTier],
 ) -> Result<RouteOutcome, String> {
     route_task_inner(task, pins, model_tiers, None, Utc::now().timestamp(), true)
 }
@@ -2477,7 +2436,7 @@ fn route_task(
 fn route_task_with_quota(
     task: &str,
     pins: &SessionPins,
-    model_tiers: &[heiwa_bindings::ModelTier],
+    model_tiers: &[heiwa_protocol::ModelTier],
     quota_ledger: Option<&heiwa_quota::QuotaLedger>,
     now_unix: i64,
 ) -> Result<RouteOutcome, String> {
@@ -2487,7 +2446,7 @@ fn route_task_with_quota(
 fn route_task_inner(
     task: &str,
     pins: &SessionPins,
-    model_tiers: &[heiwa_bindings::ModelTier],
+    model_tiers: &[heiwa_protocol::ModelTier],
     quota_ledger: Option<&heiwa_quota::QuotaLedger>,
     now_unix: i64,
     use_default_quota_ledger: bool,
@@ -2524,7 +2483,7 @@ fn route_task_inner(
     }
 
     // Filter to providers with working adapters before DREX ever sees them.
-    let adapter_capable: Vec<heiwa_bindings::ModelTier> = model_tiers
+    let adapter_capable: Vec<heiwa_protocol::ModelTier> = model_tiers
         .iter()
         .filter(|t| has_adapter(&t.provider))
         .cloned()
@@ -2675,24 +2634,21 @@ fn resolve_adapter(provider: &str, model_id: &str) -> Result<Arc<dyn ProviderAda
 }
 
 /// Record a DREX route decision in SpacetimeDB.
-fn record_route_evidence(stdb: &heiwa_stdb::StdbClient, route: &RouteResult, task: &str) {
-    let _ = stdb.record_route_decision(
-        &route.request_id,
-        &route.request_id,
-        task,
-        &route.intent_key,
-        "low",
-        &route.privacy,
-        &route.provider,
-        &route.provider,
-        &route.model_id,
-        if is_local_provider(&route.provider) {
-            "local"
-        } else {
-            "remote"
-        },
-        &route.routing_metadata,
-        0.9,
+fn record_route_evidence(evidence: &EvidenceClient, route: &RouteResult, task: &str) {
+    evidence.journal(
+        "route_decisions",
+        serde_json::json!({
+            "request_id": route.request_id,
+            "task": task,
+            "intent": route.intent_key,
+            "risk": "low",
+            "privacy": route.privacy,
+            "provider": route.provider,
+            "model_id": route.model_id,
+            "locality": if is_local_provider(&route.provider) { "local" } else { "remote" },
+            "routing_metadata": route.routing_metadata,
+            "confidence": 0.9,
+        }),
     );
 }
 
@@ -2748,9 +2704,9 @@ fn record_call_receipt(
     }
 }
 
-/// Record a completed run in SpacetimeDB.
+/// Journal a completed run to local evidence.
 fn record_run_evidence(
-    stdb: &heiwa_stdb::StdbClient,
+    evidence: &EvidenceClient,
     route: &RouteResult,
     usage: Option<&TokenUsage>,
 ) {
@@ -2761,39 +2717,21 @@ fn record_run_evidence(
         .map(|id| id.user_id)
         .unwrap_or_else(|| "anonymous".to_string());
 
-    if let Some(u) = usage {
-        let _ = stdb.record_run(
-            &run_id,
-            &user_id,
-            &route.request_id,
-            &route.turn_started_at,
-            &turn_ended_at_rfc3339,
-            "SUCCESS",
-            &route.model_id,
-            u.input_tokens as i64,
-            u.output_tokens as i64,
-            u.cost_usd,
-            None,
-            None,
-            None,
-        );
-    } else {
-        let _ = stdb.record_run(
-            &run_id,
-            &user_id,
-            &route.request_id,
-            &route.turn_started_at,
-            &turn_ended_at_rfc3339,
-            "COMPLETED_NO_USAGE",
-            &route.model_id,
-            0,
-            0,
-            0.0,
-            None,
-            None,
-            None,
-        );
-    }
+    evidence.journal(
+        "runs",
+        serde_json::json!({
+            "run_id": run_id,
+            "user_id": user_id,
+            "request_id": route.request_id,
+            "started_at": route.turn_started_at,
+            "ended_at": turn_ended_at_rfc3339,
+            "status": if usage.is_some() { "SUCCESS" } else { "COMPLETED_NO_USAGE" },
+            "model_id": route.model_id,
+            "tokens_input": usage.map(|u| u.input_tokens as i64).unwrap_or(0),
+            "tokens_output": usage.map(|u| u.output_tokens as i64).unwrap_or(0),
+            "cost_usd": usage.map(|u| u.cost_usd).unwrap_or(0.0),
+        }),
+    );
 
     if let Some(ledger) = open_default_quota_ledger() {
         if let Err(error) =
@@ -2860,12 +2798,12 @@ fn record_local_quota_run(
 
 #[derive(Debug)]
 struct QuotaAdmission {
-    admitted: Vec<heiwa_bindings::ModelTier>,
+    admitted: Vec<heiwa_protocol::ModelTier>,
     exhausted_groups: Vec<String>,
 }
 
 fn quota_admitted_model_tiers(
-    model_tiers: &[heiwa_bindings::ModelTier],
+    model_tiers: &[heiwa_protocol::ModelTier],
     ledger: Option<&heiwa_quota::QuotaLedger>,
     now_unix: i64,
 ) -> QuotaAdmission {
@@ -2921,7 +2859,7 @@ fn quota_admitted_model_tiers(
 }
 
 fn quota_budget_preview_lines(
-    model_tiers: &[heiwa_bindings::ModelTier],
+    model_tiers: &[heiwa_protocol::ModelTier],
     ledger: Option<&heiwa_quota::QuotaLedger>,
     now_unix: i64,
 ) -> Vec<String> {
@@ -2967,7 +2905,7 @@ fn quota_budget_preview_lines(
     lines
 }
 
-fn quota_token_limit_for_tier(tier: &heiwa_bindings::ModelTier) -> Option<i64> {
+fn quota_token_limit_for_tier(tier: &heiwa_protocol::ModelTier) -> Option<i64> {
     if is_local_provider(&tier.provider) || tier.rate_group == "local" {
         return None;
     }
@@ -2979,7 +2917,7 @@ fn quota_token_limit_for_tier(tier: &heiwa_bindings::ModelTier) -> Option<i64> {
         .or(Some(REMOTE_RATE_GROUP_TOKEN_LIMIT))
 }
 
-fn quota_group_label(tier: &heiwa_bindings::ModelTier) -> String {
+fn quota_group_label(tier: &heiwa_protocol::ModelTier) -> String {
     format!("{}/{}", tier.provider, tier.rate_group)
 }
 
@@ -3006,25 +2944,27 @@ fn debug_log(args: std::fmt::Arguments<'_>) {
 }
 
 fn record_tool_call_evidence(
-    stdb: &heiwa_stdb::StdbClient,
+    evidence: &EvidenceClient,
     receipt: &ToolCallReceipt,
     session_id: &str,
 ) {
     let user_id = heiwa_provider::load_identity()
         .map(|id| id.user_id)
         .unwrap_or_else(|| "anonymous".to_string());
-    let receipt_json = serde_json::to_string(receipt).unwrap_or_else(|_| "{}".to_string());
-    let _ = stdb.record_tool_call_receipt(
-        &receipt.id,
-        &user_id,
-        &receipt.call_id,
-        Some(session_id.to_string()),
-        &receipt.tool_name,
-        receipt.status.as_str(),
-        &receipt.started_at,
-        &receipt.completed_at,
-        &receipt_json,
-        receipt.error.clone(),
+    evidence.journal(
+        "tool_calls",
+        serde_json::json!({
+            "receipt_id": receipt.id,
+            "user_id": user_id,
+            "call_id": receipt.call_id,
+            "session_id": session_id,
+            "tool_name": receipt.tool_name,
+            "status": receipt.status.as_str(),
+            "started_at": receipt.started_at,
+            "completed_at": receipt.completed_at,
+            "receipt": receipt,
+            "error": receipt.error,
+        }),
     );
 }
 
@@ -3103,11 +3043,11 @@ fn send_done_event(
 // ---------------------------------------------------------------------------
 
 fn filtered_model_tiers(
-    model_tiers: &[heiwa_bindings::ModelTier],
+    model_tiers: &[heiwa_protocol::ModelTier],
     route_preference: RoutePreference,
     pinned_provider: Option<&str>,
     pinned_model: Option<&str>,
-) -> Vec<heiwa_bindings::ModelTier> {
+) -> Vec<heiwa_protocol::ModelTier> {
     model_tiers
         .iter()
         .filter(|tier| match route_preference {
@@ -3129,7 +3069,7 @@ fn filtered_model_tiers(
         .collect()
 }
 
-fn available_providers(model_tiers: &[heiwa_bindings::ModelTier]) -> Vec<String> {
+fn available_providers(model_tiers: &[heiwa_protocol::ModelTier]) -> Vec<String> {
     let mut providers = Vec::new();
     for tier in model_tiers {
         if !providers.contains(&tier.provider) {
@@ -3247,7 +3187,7 @@ pub(crate) async fn execute_repl_turn_streaming(
     prompt: &str,
     events: tokio::sync::mpsc::Sender<ReplStreamEvent>,
 ) {
-    let stdb_client = attempt_stdb_connection().await;
+    let evidence_client = EvidenceClient::local();
     let mut registry = heiwa_provider::AccountRegistry::load();
     heiwa_provider::detect::auto_discover(&mut registry).await;
     let model_tiers = get_live_model_tiers(&registry);
@@ -3295,7 +3235,7 @@ pub(crate) async fn execute_repl_turn_streaming(
                 .await;
         }
         Ok(RouteOutcome::Routed(route)) => {
-            record_route_evidence(&stdb_client, &route, prompt);
+            record_route_evidence(&evidence_client, &route, prompt);
 
             let mode = if is_local_provider(&route.provider) {
                 "local_model"
@@ -3368,7 +3308,7 @@ pub(crate) async fn execute_repl_turn_streaming(
                 &mut state,
                 TranscriptBlock::Assistant(full_response.clone()),
             );
-            record_run_evidence(&stdb_client, &route, usage.as_ref());
+            record_run_evidence(&evidence_client, &route, usage.as_ref());
 
             if let Some(error) = stream_error {
                 if full_response.is_empty() {
@@ -3931,8 +3871,8 @@ mod tests {
         rate_group: &str,
         capability_class: u8,
         cost_per_turn: f64,
-    ) -> heiwa_bindings::ModelTier {
-        heiwa_bindings::ModelTier {
+    ) -> heiwa_protocol::ModelTier {
+        heiwa_protocol::ModelTier {
             id: 0,
             model_id: model_id.to_string(),
             provider_model_id: model_id.to_string(),
