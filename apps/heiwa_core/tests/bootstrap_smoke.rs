@@ -12,11 +12,6 @@ fn runtime_config_reads_expected_defaults() {
     let vars = [
         "PORT",
         "HEIWA_STATE_BACKEND",
-        "STDB_SERVER",
-        "STDB_URL",
-        "STDB_IDENTITY",
-        "STDB_TOKEN",
-        "SPACETIMEDB_TOKEN",
         "HEIWA_AUTH_TOKEN",
         "HEIWA_MACHINE_AUTH_TOKEN",
         "HEIWA_AUTH_SECRET",
@@ -44,10 +39,7 @@ fn runtime_config_reads_expected_defaults() {
     }
 
     assert_eq!(cfg.port, 8080);
-    assert_eq!(cfg.state_backend, "spacetimedb");
-    assert_eq!(cfg.stdb_server, "maincloud");
-    assert_eq!(cfg.stdb_url, "https://maincloud.spacetimedb.com");
-    assert!(cfg.stdb_token.is_empty());
+    assert_eq!(cfg.state_backend, "local-jsonl");
     assert!(cfg.machine_auth_token.is_empty());
     assert!(cfg.jwt_signing_secret.is_empty());
 }
@@ -56,10 +48,6 @@ fn runtime_config_reads_expected_defaults() {
 fn runtime_config_prefers_split_tokens_with_legacy_fallbacks() {
     let _guard = env_lock();
     let vars = [
-        ("STDB_SERVER", Some("maincloud")),
-        ("STDB_URL", Some("https://stdb.example")),
-        ("STDB_TOKEN", Some("stdb-new")),
-        ("SPACETIMEDB_TOKEN", Some("stdb-legacy")),
         ("HEIWA_MACHINE_AUTH_TOKEN", Some("machine-new")),
         ("HEIWA_AUTH_TOKEN", Some("machine-legacy")),
         ("HEIWA_JWT_SIGNING_SECRET", Some("jwt-new")),
@@ -82,9 +70,6 @@ fn runtime_config_prefers_split_tokens_with_legacy_fallbacks() {
         }
     }
 
-    assert_eq!(cfg.stdb_server, "maincloud");
-    assert_eq!(cfg.stdb_url, "https://stdb.example");
-    assert_eq!(cfg.stdb_token, "stdb-new");
     assert_eq!(cfg.machine_auth_token, "machine-new");
     assert_eq!(cfg.jwt_signing_secret, "jwt-new");
 }

@@ -5,18 +5,18 @@ use serde_json::Value;
 use tokio::sync::{mpsc, RwLock};
 
 use crate::config::RuntimeConfig;
-use crate::stdb::{
-    PersistedDispatchAck, PersistedWorkerLease, PersistedWorkerSession, ReducerTransport,
-    StdbRuntime, StdbTransport,
+use crate::evidence::{
+    PersistedDispatchAck, PersistedWorkerLease, PersistedWorkerSession, JsonlTransport,
+    EvidenceRuntime, EvidenceTransport,
 };
-use heiwa_bindings::ModelTier;
+use heiwa_protocol::ModelTier;
 
-pub struct CoreState<T: StdbTransport = ReducerTransport> {
+pub struct CoreState<T: EvidenceTransport = JsonlTransport> {
     pub config: RuntimeConfig,
     pub model_tiers: RwLock<Vec<ModelTier>>,
     pub status: RwLock<SystemStatus>,
     pub seeded: RwLock<bool>,
-    pub stdb: StdbRuntime<T>,
+    pub evidence: EvidenceRuntime<T>,
     pub worker_registry: RwLock<WorkerRegistry>,
     pub worker_senders: RwLock<HashMap<String, mpsc::UnboundedSender<Message>>>,
 }
@@ -38,14 +38,14 @@ impl SystemStatus {
     }
 }
 
-impl<T: StdbTransport> CoreState<T> {
-    pub fn new(config: RuntimeConfig, stdb: StdbRuntime<T>) -> Self {
+impl<T: EvidenceTransport> CoreState<T> {
+    pub fn new(config: RuntimeConfig, evidence: EvidenceRuntime<T>) -> Self {
         Self {
             config,
             model_tiers: RwLock::new(Vec::new()),
             status: RwLock::new(SystemStatus::Starting),
             seeded: RwLock::new(false),
-            stdb,
+            evidence,
             worker_registry: RwLock::new(WorkerRegistry::default()),
             worker_senders: RwLock::new(HashMap::new()),
         }
@@ -213,9 +213,9 @@ impl WorkerLeaseRecord {
 }
 
 impl WorkerRegistry {
-    pub fn register_session<T: StdbTransport>(
+    pub fn register_session<T: EvidenceTransport>(
         &mut self,
-        stdb: &StdbRuntime<T>,
+        evidence: &EvidenceRuntime<T>,
         registration: WorkerSessionRegistration,
     ) -> WorkerSessionRecord {
         let session = WorkerSessionRecord {
@@ -241,14 +241,14 @@ impl WorkerRegistry {
         self.sessions
             .insert(session.session_id.clone(), session.clone());
 
-        let _ = stdb.transport.upsert_worker_session(session.to_persisted());
+        let _ = evidence.transport.upsert_worker_session(session.to_persisted());
 
         session
     }
 
-    pub fn update_heartbeat<T: StdbTransport>(
+    pub fn update_heartbeat<T: EvidenceTransport>(
         &mut self,
-        stdb: &StdbRuntime<T>,
+        evidence: &EvidenceRuntime<T>,
         session_id: &str,
         now_ms: u64,
         status: String,
@@ -277,15 +277,15 @@ impl WorkerRegistry {
             session.capabilities = capabilities;
         }
         let persisted = session.clone();
-        let _ = stdb
+        let _ = evidence
             .transport
             .upsert_worker_session(persisted.to_persisted());
         Ok(persisted)
     }
 
-    pub fn reserve_dispatch<T: StdbTransport>(
+    pub fn reserve_dispatch<T: EvidenceTransport>(
         &mut self,
-        stdb: &StdbRuntime<T>,
+        evidence: &EvidenceRuntime<T>,
         capability: &str,
         task_id: String,
         lease_id: String,
@@ -327,8 +327,8 @@ impl WorkerRegistry {
 
         self.task_index.insert(task_id, lease_id.clone());
         self.task_leases.insert(lease_id, lease.clone());
-        let _ = stdb.transport.upsert_worker_lease(lease.to_persisted());
-        let _ = stdb
+        let _ = evidence.transport.upsert_worker_lease(lease.to_persisted());
+        let _ = evidence
             .transport
             .upsert_worker_session(session.clone().to_persisted());
         Some((session.clone(), lease))
@@ -339,9 +339,9 @@ impl WorkerRegistry {
         self.task_leases.get(lease_id).cloned()
     }
 
-    pub fn record_dispatch_ack<T: StdbTransport>(
+    pub fn record_dispatch_ack<T: EvidenceTransport>(
         &mut self,
-        stdb: &StdbRuntime<T>,
+        evidence: &EvidenceRuntime<T>,
         session_id: &str,
         task_id: &str,
         lease_id: &str,
@@ -375,8 +375,8 @@ impl WorkerRegistry {
             stored.completed_at_ms = Some(now_ms);
             stored.failure_code = Some("DISPATCH_REJECTED".to_string());
             let rejected = stored.clone();
-            let _ = stdb.transport.upsert_worker_lease(rejected.to_persisted());
-            let _ = stdb.transport.record_dispatch_ack(ack);
+            let _ = evidence.transport.upsert_worker_lease(rejected.to_persisted());
+            let _ = evidence.transport.record_dispatch_ack(ack);
             if let Some(session) = self.sessions.get_mut(session_id) {
                 session.active_tasks = session.active_tasks.saturating_sub(1);
                 session.status = "idle".to_string();
@@ -384,7 +384,7 @@ impl WorkerRegistry {
                 session.last_seen_at_ms = now_ms;
                 session.current_task_id = None;
                 session.lease_id = None;
-                let _ = stdb
+                let _ = evidence
                     .transport
                     .upsert_worker_session(session.clone().to_persisted());
             }
@@ -398,13 +398,13 @@ impl WorkerRegistry {
         stored.status = "acked".to_string();
         stored.acked_at_ms = Some(now_ms);
         let accepted_record = stored.clone();
-        let _ = stdb
+        let _ = evidence
             .transport
             .upsert_worker_lease(accepted_record.to_persisted());
-        let _ = stdb.transport.record_dispatch_ack(ack);
+        let _ = evidence.transport.record_dispatch_ack(ack);
         if let Some(session) = self.sessions.get_mut(session_id) {
             session.last_seen_at_ms = now_ms;
-            let _ = stdb
+            let _ = evidence
                 .transport
                 .upsert_worker_session(session.clone().to_persisted());
         }
@@ -440,9 +440,9 @@ impl WorkerRegistry {
         Ok(lease.clone())
     }
 
-    pub fn complete_dispatch<T: StdbTransport>(
+    pub fn complete_dispatch<T: EvidenceTransport>(
         &mut self,
-        stdb: &StdbRuntime<T>,
+        evidence: &EvidenceRuntime<T>,
         lease_id: &str,
         status: &str,
         failure_code: Option<String>,
@@ -455,7 +455,7 @@ impl WorkerRegistry {
         lease.completed_at_ms = Some(now_ms);
         lease.failure_code = failure_code;
         lease.reason = reason;
-        let _ = stdb
+        let _ = evidence
             .transport
             .upsert_worker_lease(lease.clone().to_persisted());
         if let Some(session) = self.sessions.get_mut(&lease.session_id) {
@@ -467,14 +467,14 @@ impl WorkerRegistry {
                 session.status = "idle".to_string();
                 session.load = 0.0;
             }
-            let _ = stdb
+            let _ = evidence
                 .transport
                 .upsert_worker_session(session.clone().to_persisted());
         }
         Some(lease)
     }
 
-    pub fn remove_session<T: StdbTransport>(&mut self, stdb: &StdbRuntime<T>, session_id: &str) {
+    pub fn remove_session<T: EvidenceTransport>(&mut self, evidence: &EvidenceRuntime<T>, session_id: &str) {
         let mut closed_at_ms = 0;
         if let Some(session) = self.sessions.remove(session_id) {
             let mut closed = session;
@@ -482,8 +482,8 @@ impl WorkerRegistry {
             closed.status = "closed".to_string();
             closed.active_tasks = 0;
             closed.load = 0.0;
-            let _ = stdb.transport.upsert_worker_session(closed.to_persisted());
-            let _ = stdb.transport.close_session(session_id.to_string());
+            let _ = evidence.transport.upsert_worker_session(closed.to_persisted());
+            let _ = evidence.transport.close_session(session_id.to_string());
         }
 
         let orphaned: Vec<String> = self
@@ -494,7 +494,7 @@ impl WorkerRegistry {
             .collect();
         for lease_id in orphaned {
             let _ = self.complete_dispatch(
-                stdb,
+                evidence,
                 &lease_id,
                 "revoked",
                 Some("SESSION_CLOSED".to_string()),
@@ -509,4 +509,4 @@ impl WorkerRegistry {
     }
 }
 
-pub type SharedState = Arc<CoreState<ReducerTransport>>;
+pub type SharedState = Arc<CoreState<JsonlTransport>>;

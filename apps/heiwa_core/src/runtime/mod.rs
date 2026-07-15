@@ -1,4 +1,4 @@
-use anyhow::{anyhow, Result};
+use anyhow::Result;
 use axum::{
     response::IntoResponse,
     routing::{get, post},
@@ -20,11 +20,8 @@ use self::state::{CoreState, SharedState, SystemStatus};
 use crate::auth;
 use crate::config::RuntimeConfig;
 use crate::drex::{default_policy, plan_route, DrexIngress, RoutePlan};
-use crate::stdb::{ReducerTransport, StdbRuntime};
-use heiwa_bindings::{
-    upsert_model_tier_reducer::upsert_model_tier,
-    upsert_node_heartbeat_reducer::upsert_node_heartbeat, DbConnection, ModelTier,
-};
+use crate::evidence::{EvidenceRuntime, EvidenceTransport, JsonlTransport};
+use heiwa_protocol::ModelTier;
 
 #[derive(Debug, Deserialize, Serialize, Clone)]
 struct ModelTierSeed {
@@ -47,47 +44,15 @@ struct ModelTierSeed {
 pub async fn run(cfg: RuntimeConfig) -> Result<()> {
     info!("Initializing Heiwa Core Runtime...");
 
-    // 1. Initialize STDB connection
-    info!(
-        "Connecting to SpacetimeDB at {}/{}",
-        cfg.stdb_url, cfg.stdb_identity
-    );
-    let conn = DbConnection::builder()
-        .with_uri(&cfg.stdb_url)
-        .with_database_name(&cfg.stdb_identity)
-        .with_token(if cfg.stdb_token.is_empty() {
-            None
-        } else {
-            Some(&cfg.stdb_token)
-        })
-        .build()?;
+    // 1. Local evidence plane (JSONL under ~/.heiwa/evidence/)
+    let transport = JsonlTransport::default_local()?;
+    let evidence_runtime = EvidenceRuntime::new(transport);
+    let state = Arc::new(CoreState::new(cfg.clone(), evidence_runtime));
 
-    let conn_arc = Arc::new(conn);
-    let conn_clone = conn_arc.clone();
-
-    // 2. Start STDB background task
-    tokio::spawn(async move {
-        loop {
-            if let Err(e) = conn_clone.advance_one_message_async().await {
-                error!("STDB connection error: {:?}", e);
-                sleep(Duration::from_secs(5)).await;
-                continue;
-            }
-        }
-    });
-
-    let transport = ReducerTransport::new(conn_arc.clone());
-    let stdb_runtime = StdbRuntime::new(transport);
-    let state = Arc::new(CoreState::new(cfg.clone(), stdb_runtime));
-
-    // 3. Seed runtime catalogs and register node
+    // 2. Seed runtime catalogs and start heartbeat journal
     let state_clone = state.clone();
-    let conn_heartbeat = conn_arc.clone();
     tokio::spawn(async move {
-        // Wait for connection to be ready
-        sleep(Duration::from_secs(2)).await;
-
-        match seed_catalogs(&conn_heartbeat, state_clone.clone()).await {
+        match seed_catalogs(state_clone.clone()).await {
             Ok(_) => {
                 info!("Runtime catalogs seeded successfully");
                 let mut seeded = state_clone.seeded.write().await;
@@ -99,7 +64,7 @@ pub async fn run(cfg: RuntimeConfig) -> Result<()> {
         }
 
         loop {
-            if let Err(e) = heartbeat(&conn_heartbeat, &state_clone.config).await {
+            if let Err(e) = heartbeat(&state_clone).await {
                 error!("Node heartbeat failed: {:?}", e);
                 let mut status = state_clone.status.write().await;
                 *status = SystemStatus::Degraded;
@@ -145,7 +110,7 @@ pub fn build_router(state: SharedState) -> Router {
         .with_state(state)
 }
 
-async fn seed_catalogs(conn: &DbConnection, state: SharedState) -> Result<()> {
+async fn seed_catalogs(state: SharedState) -> Result<()> {
     let path = std::path::Path::new(&state.config.model_tiers_seed_path);
     if !path.exists() {
         warn!(
@@ -162,23 +127,6 @@ async fn seed_catalogs(conn: &DbConnection, state: SharedState) -> Result<()> {
     let mut model_tiers = Vec::new();
     for seed in seeds {
         let strengths_json = serde_json::to_string(&seed.strengths)?;
-        conn.reducers.upsert_model_tier(
-            seed.model_id.clone(),
-            seed.provider_model_id.clone(),
-            seed.provider.clone(),
-            seed.rate_group.clone(),
-            seed.capability_class,
-            seed.effort_knob.clone(),
-            seed.effort_level,
-            seed.cost_per_turn,
-            seed.max_context_tokens,
-            seed.vram_requirement_mb,
-            seed.quantization_type.clone(),
-            seed.kv_cache_strategy.clone(),
-            strengths_json.clone(),
-            seed.enabled,
-        )?;
-
         model_tiers.push(ModelTier {
             id: 0,
             model_id: seed.model_id,
@@ -202,6 +150,11 @@ async fn seed_catalogs(conn: &DbConnection, state: SharedState) -> Result<()> {
         });
     }
 
+    let _ = state.evidence.transport.journal(
+        "model_tier_seeds",
+        json!({ "count": model_tiers.len(), "tiers": &model_tiers }),
+    );
+
     {
         let mut state_tiers = state.model_tiers.write().await;
         *state_tiers = model_tiers;
@@ -210,31 +163,24 @@ async fn seed_catalogs(conn: &DbConnection, state: SharedState) -> Result<()> {
     Ok(())
 }
 
-async fn heartbeat(conn: &DbConnection, cfg: &RuntimeConfig) -> Result<()> {
+async fn heartbeat(state: &SharedState) -> Result<()> {
     // TODO: Use sysinfo crate to gather real VRAM info
     let vram_mb = 0;
     let locality = "macbook".to_string();
     let trust_tier = 9; // Owner-local runtime trust.
-    let provider_keys = "[]".to_string();
-    let model_inventory = "[]".to_string();
 
-    conn.reducers
-        .upsert_node_heartbeat(
-            cfg.node_id.clone(),
-            "heiwa-core".to_string(),
-            "ready".to_string(),
-            "{}".to_string(),
-            "{}".to_string(),
-            env!("CARGO_PKG_VERSION").to_string(),
-            "[]".to_string(),
-            10,
-            vram_mb,
-            locality,
-            trust_tier,
-            provider_keys,
-            model_inventory,
-        )
-        .map_err(|e| anyhow!(e.to_string()))
+    state.evidence.transport.journal(
+        "node_heartbeats",
+        json!({
+            "node_id": state.config.node_id,
+            "service": "heiwa-core",
+            "status": "ready",
+            "version": env!("CARGO_PKG_VERSION"),
+            "vram_mb": vram_mb,
+            "locality": locality,
+            "trust_tier": trust_tier,
+        }),
+    )
 }
 
 async fn health_handler(
@@ -268,9 +214,6 @@ async fn status_handler(
     }))
 }
 
-pub fn plan_ingress(
-    ingress: &DrexIngress,
-    model_tiers: &[heiwa_bindings::ModelTier],
-) -> Result<RoutePlan> {
+pub fn plan_ingress(ingress: &DrexIngress, model_tiers: &[ModelTier]) -> Result<RoutePlan> {
     plan_route(ingress, model_tiers, &default_policy())
 }

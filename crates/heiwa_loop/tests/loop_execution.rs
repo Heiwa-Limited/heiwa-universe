@@ -35,6 +35,10 @@ impl ProviderAdapter for MockAdapter {
 
 #[tokio::test]
 async fn test_loop_turn_budget() {
+    // Keep test evidence out of the operator's real ~/.heiwa/evidence/.
+    let evidence_dir = std::env::temp_dir().join("heiwa-loop-test-evidence");
+    std::env::set_var("HEIWA_EVIDENCE_DIR", &evidence_dir);
+
     let config = LoopConfig {
         user_id: "test-user".to_string(),
         objective: "count to 2".to_string(),
@@ -47,7 +51,7 @@ async fn test_loop_turn_budget() {
     };
 
     // We pass None for stdb to use offline mode
-    let model_tiers = vec![heiwa_bindings::ModelTier {
+    let model_tiers = vec![heiwa_protocol::ModelTier {
         id: 1,
         model_id: "mock-model".to_string(),
         provider_model_id: "mock".to_string(),
@@ -69,7 +73,7 @@ async fn test_loop_turn_budget() {
         updated_at: "".to_string(),
     }];
 
-    let controller = LoopController::new(config, heiwa_stdb::StdbClient::offline(), model_tiers);
+    let controller = LoopController::new(config, model_tiers);
     let (tx, mut rx) = mpsc::channel(10);
 
     let adapters: Arc<dyn Fn(&str) -> Option<Arc<dyn ProviderAdapter>> + Send + Sync> =

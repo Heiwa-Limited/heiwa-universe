@@ -22,8 +22,9 @@ path = "src/main.rs"
 anyhow = "1.0"
 axum = { version = "0.7.5", features = ["ws"] }
 base64 = "0.22"
+dirs = "6"
 futures-util = "0.3"
-heiwa-bindings = { path = "../../packages/heiwa_bindings/rust" }
+heiwa-protocol = { path = "../../crates/heiwa_protocol" }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 tokio = { version = "1.50.0", features = ["full"] }

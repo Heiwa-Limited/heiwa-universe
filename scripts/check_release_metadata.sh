@@ -46,7 +46,6 @@ node_projects=(
   "package.json"
   "apps/heiwa_app/package.json"
   "apps/heiwa_app/clients/cockpit/package.json"
-  "packages/heiwa_bindings/typescript/package.json"
 )
 
 for project in "${node_projects[@]}"; do

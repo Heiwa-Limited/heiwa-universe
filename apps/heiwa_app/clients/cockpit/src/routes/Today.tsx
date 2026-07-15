@@ -70,7 +70,7 @@ export default function TodayRoute(): JSX.Element {
                   <p class="muted">{snapshot.scorecard_notes}</p>
                 </Show>
                 <p class="mono muted">
-                  runtime stdb={snapshot.runtime.stdb_mode}
+                  runtime evidence={snapshot.runtime.evidence_mode}
                 </p>
               </article>
 

@@ -6,10 +6,10 @@ use heiwa_core::runtime::{
     },
     state::{WorkerProtocolFlavor, WorkerRegistry, WorkerSessionRegistration},
 };
-use heiwa_core::stdb::{
+use heiwa_core::evidence::{
     NoopTransport, PersistedArtifact, PersistedDispatchAck, PersistedDrexDecision,
     PersistedDrexFailure, PersistedRunFailure, PersistedRunReceipt, PersistedWorkerLease,
-    PersistedWorkerSession, StdbRuntime, StdbTransport,
+    PersistedWorkerSession, EvidenceRuntime, EvidenceTransport,
 };
 use serde_json::json;
 use std::sync::{Arc, Mutex};
@@ -22,7 +22,7 @@ struct RecordingTransport {
     closed_sessions: Arc<Mutex<Vec<String>>>,
 }
 
-impl StdbTransport for RecordingTransport {
+impl EvidenceTransport for RecordingTransport {
     fn upsert_drex_decision(&self, _decision: PersistedDrexDecision) -> Result<()> {
         Ok(())
     }
@@ -123,7 +123,7 @@ fn canonical_worker_envelope_accepts_register_shape() {
 #[test]
 fn worker_registry_tracks_session_dispatch_and_completion() {
     let mut registry = WorkerRegistry::default();
-    let stdb = StdbRuntime::new(NoopTransport);
+    let stdb = EvidenceRuntime::new(NoopTransport);
     let session = registry.register_session(
         &stdb,
         WorkerSessionRegistration {
@@ -179,7 +179,7 @@ fn worker_registry_tracks_session_dispatch_and_completion() {
 fn worker_registry_persists_session_lease_and_ack_events() {
     let mut registry = WorkerRegistry::default();
     let transport = RecordingTransport::default();
-    let stdb = StdbRuntime::new(transport.clone());
+    let stdb = EvidenceRuntime::new(transport.clone());
 
     registry.register_session(
         &stdb,
@@ -243,7 +243,7 @@ fn worker_registry_persists_session_lease_and_ack_events() {
 #[test]
 fn worker_registry_rejects_expired_or_mismatched_leases() {
     let mut registry = WorkerRegistry::default();
-    let stdb = StdbRuntime::new(NoopTransport);
+    let stdb = EvidenceRuntime::new(NoopTransport);
     registry.register_session(
         &stdb,
         WorkerSessionRegistration {

@@ -5,6 +5,15 @@ Status: Canonical truth for `heiwa-universe`
 
 This file replaces the old repo-root compatibility shim. When `README.md`, legacy plans, or older architecture notes conflict with this document, this document wins.
 
+> **Backend pivot (2026-07-15): Lance + GitHub only.** SpacetimeDB, Railway, and
+> Cloudflare-as-infra are retired. Durable truth is text (JSONL/markdown) in this
+> repo and `~/.heiwa/`, synced via GitHub; Lance is the derived local vector/FTS
+> index (rebuildable, never git-synced); SQLite (`heiwa_receipts`, `heiwa_vault`)
+> keeps hot operational state. Any section below that still describes SpacetimeDB
+> as a live plane is historical context superseded by this note. Cloudflare
+> remains DNS utility only. The STDB code paths were extracted from the tree on
+> 2026-07-15 (see `apps/heiwa_core/src/evidence/`, git history has the rest).
+
 ## One-Sentence Truth
 
 Heiwa is the operating layer that turns one user intent into governed, routed, verified, multi-tool AI execution.
@@ -16,7 +25,7 @@ Current shape:
 - DREX is the internal execution kernel.
 - GitHub is the source and install authority. The installed local runtime plus
   `~/.heiwa/` are the current user-functionality truth on each machine.
-- SpacetimeDB is the adjudication, subscription, and evidence sync plane when enabled.
+- Evidence is local-first: JSONL truth under `~/.heiwa/evidence/`, git-synced; Lance is the derived recall index.
 - Rust proposes and executes.
 - Providers still own their own inference internals.
 - Heiwa turns the user's local models and connected providers into one coherent operator experience.
@@ -32,7 +41,7 @@ Primary loop:
    thread.
 2. Heiwa watches connected surfaces in the background: browser, mail, calendar,
    messages, forums, files, machines, provider CLIs, local models, computer-use
-   surfaces, GitHub, Cloudflare, STDB, and other approved integrations.
+   surfaces, GitHub, and other approved integrations.
 3. Heiwa compresses that background state into context the user can understand:
    what changed, why it matters, what Heiwa is doing, what needs approval, and
    what evidence exists.
@@ -66,7 +75,7 @@ Heiwa is taught to operators as three planes that compose one flow.
 | ------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------ |
 | **Intake**    | One command bar plus passive feeds. Captures intent and signal from operator commands, mail, calendar, messages, forums, GitHub, files, and runtime alerts. | `apps/heiwa_shell/` REPL and `session attach` are the current intake surface. Passive feeds are target work.                                     |
 | **Execution** | DREX routes work to local models, provider CLIs, tools, workers, or connectors under leases, budgets, and approval gates.                                   | `apps/heiwa_core/` (DREX), `apps/heiwa_orchestrator/`, `crates/heiwa_loop/`, `crates/heiwa_provider/`, `crates/heiwa_session/`.                  |
-| **Evidence**  | Every useful read or action emits a source-linked receipt visible locally, and mirrored to SpacetimeDB when online.                                         | `crates/heiwa_stdb/`, `apps/heiwa_core/src/stdb/`, `apps/heiwa_orchestrator/src/stdb/`. Receipt schema and source-span syntax are still partial. |
+| **Evidence**  | Every useful read or action emits a source-linked receipt appended locally as JSONL; Lance indexes the corpus for recall.                                   | `apps/heiwa_core/src/evidence/`, `apps/heiwa_orchestrator/src/evidence/`, `crates/heiwa_receipts/`. Receipt schema and source-span syntax are still partial. |
 
 The planes are a flow lens. They sit alongside the layer anatomy in [What Heiwa Is](#what-heiwa-is) (user surface, execution kernel, enterprise platform), which is an ownership lens. Both are correct: planes describe **how a task flows**, layers describe **who owns what**.
 
@@ -85,7 +94,7 @@ Every feature, connector, doc change, and release item must classify as one of:
 | --------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------ |
 | Intake    | `heiwa` REPL plus `session attach`. No passive feeds wired.                                                                                                                                                                                                                                | Command bar plus calendar, mail, messages, forums, GitHub, files, and runtime alerts as governed feeds.            |
 | Execution | DREX kernel plus provider adapters: Claude Code, Codex, Gemini CLI, and Ollama are wired in the shell adapter path; Antigravity is discovered and normalized; Codex execution depth and evidence still lag. Bounded loops are real in `crates/heiwa_loop/`. No staged-approval outbox yet. | Approval-staged outbox for every risky write action. Honest per-provider execution depth surfaced at routing time. |
-| Evidence  | Local state under `~/.heiwa/` plus partial STDB mirror. Receipt schema not fully canonical. Source-span syntax (`file:line-line`, `message_id`, `event_id`, `thread_id`, `receipt_id`) not implemented.                                                                                    | Source-spanned receipts on every action. Canonical STDB evidence schema. Local-first; mirrors when online.         |
+| Evidence  | Local JSONL under `~/.heiwa/evidence/` plus SQLite receipts. Receipt schema not fully canonical. Source-span syntax (`file:line-line`, `message_id`, `event_id`, `thread_id`, `receipt_id`) not implemented.                                                                               | Source-spanned receipts on every action. Canonical JSONL evidence schema, git-synced; Lance recall index derived from it. |
 
 ## Optimization Doctrine
 
@@ -126,7 +135,7 @@ Compression:
 
 > Native context window = working memory.
 > Heiwa local state = current durable owner memory.
-> SpacetimeDB = evidence sync/adjudication plane.
+> Lance + GitHub = evidence truth and sync plane (text truth in git, Lance recall index derived locally).
 > Harness job = decide what enters working memory, when, and why.
 
 ## What Heiwa Is
@@ -164,7 +173,6 @@ As of 2026-04-22, `heiwa-universe` has already landed meaningful local runtime s
   - [`apps/heiwa_core/`](apps/heiwa_core/)
   - [`apps/heiwa_orchestrator/`](apps/heiwa_orchestrator/)
   - [`apps/heiwa_shell/`](apps/heiwa_shell/)
-  - [`crates/heiwa_stdb/`](crates/heiwa_stdb/)
   - [`crates/heiwa_session/`](crates/heiwa_session/)
   - [`crates/heiwa_repl/`](crates/heiwa_repl/)
   - [`crates/heiwa_provider/`](crates/heiwa_provider/)
@@ -208,7 +216,7 @@ As of 2026-04-22, `heiwa-universe` has already landed meaningful local runtime s
 
 Compression:
 
-> Rust proposes, SpacetimeDB adjudicates, `heiwa` presents.
+> Rust proposes and executes, local text truth records, Lance recalls, `heiwa` presents.
 
 That is the architecture. DREX is not the public brand. It is the kernel inside the Heiwa product.
 

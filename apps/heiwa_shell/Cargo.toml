@@ -22,7 +22,6 @@ path = "src/lib.rs"
 [dependencies]
 anyhow = "1.0"
 base64 = "0.22"
-heiwa-bindings = { path = "../../packages/heiwa_bindings/rust" }
 heiwa-core = { path = "../../apps/heiwa_core" }
 heiwa-session = { path = "../../crates/heiwa_session" }
 heiwa-repl = { path = "../../crates/heiwa_repl" }
@@ -32,7 +31,6 @@ heiwa-resource = { path = "../../crates/heiwa_resource" }
 heiwa_receipts = { path = "../../crates/heiwa_receipts" }
 heiwa-install = { path = "../../crates/heiwa_install" }
 heiwa-loop = { path = "../../crates/heiwa_loop" }
-heiwa-stdb = { path = "../../crates/heiwa_stdb" }
 heiwa-protocol = { path = "../../crates/heiwa_protocol" }
 heiwa_mcp = { path = "../../crates/heiwa_mcp" }
 heiwa-tui = { path = "../../crates/heiwa_tui" }

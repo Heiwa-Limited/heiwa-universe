@@ -1,4 +1,4 @@
-use heiwa_bindings::ModelTier;
+use heiwa_protocol::ModelTier;
 use heiwa_core::drex::{default_policy, plan_route, DrexIngress};
 
 fn get_mock_model_tiers() -> Vec<ModelTier> {

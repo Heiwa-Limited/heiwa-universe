@@ -39,7 +39,7 @@ struct FreshnessProbe {
 struct ImportPlan {
     target: String,
     dry_run: bool,
-    stdb_mode: String,
+    evidence_mode: String,
     row_counts: Vec<RowCount>,
 }
 
@@ -67,7 +67,7 @@ pub fn run(args: &[String]) -> Result<()> {
 fn status(args: &[String]) -> Result<()> {
     let json_output = has_flag(args, "--json");
     let groups = source_group_summaries(&all_source_probes());
-    let stdb_mode = stdb_mode();
+    let evidence_mode = evidence_mode();
 
     if json_output {
         let groups_json = groups
@@ -86,7 +86,7 @@ fn status(args: &[String]) -> Result<()> {
             "{}",
             json!({
                 "command": "life status",
-                "stdb_mode": stdb_mode,
+                "evidence_mode": evidence_mode,
                 "sources": groups_json,
                 "next": [
                     "heiwa life import home --dry-run",
@@ -99,7 +99,7 @@ fn status(args: &[String]) -> Result<()> {
     }
 
     println!("life status");
-    println!("  stdb: {stdb_mode}");
+    println!("  evidence: {evidence_mode}");
     println!("  sources:");
     for group in groups {
         println!(
@@ -165,7 +165,7 @@ fn today(args: &[String]) -> Result<()> {
             println!("    ... {} more", snapshot.pending_approvals.len() - 5);
         }
     }
-    println!("  provider_runtime: stdb={}", snapshot.runtime.stdb_mode);
+    println!("  provider_runtime: evidence={}", snapshot.runtime.evidence_mode);
     println!("  next: heiwa life freshness --json | heiwa approvals list");
     Ok(())
 }
@@ -237,7 +237,7 @@ fn import(args: &[String]) -> Result<()> {
                 "command": "life import",
                 "target": plan.target,
                 "dry_run": plan.dry_run,
-                "stdb_mode": plan.stdb_mode,
+                "evidence_mode": plan.evidence_mode,
                 "row_counts": rows
             })
         );
@@ -252,7 +252,7 @@ fn import(args: &[String]) -> Result<()> {
                     "command": "life import",
                     "target": plan.target,
                     "dry_run": plan.dry_run,
-                    "stdb_mode": plan.stdb_mode,
+                    "evidence_mode": plan.evidence_mode,
                     "table": row.table,
                     "rows": row.rows
                 })
@@ -263,7 +263,7 @@ fn import(args: &[String]) -> Result<()> {
 
     println!("life import {}", plan.target);
     println!("  dry_run: {}", plan.dry_run);
-    println!("  stdb: {}", plan.stdb_mode);
+    println!("  evidence: {}", plan.evidence_mode);
     for row in plan.row_counts {
         println!("  {}: {} rows", row.table, row.rows);
     }
@@ -346,7 +346,7 @@ fn import_plan(target: &str) -> Result<ImportPlan> {
     Ok(ImportPlan {
         target: target.to_string(),
         dry_run: true,
-        stdb_mode: stdb_mode(),
+        evidence_mode: evidence_mode(),
         row_counts,
     })
 }
@@ -484,12 +484,8 @@ fn claude_scheduled_task_count() -> Option<usize> {
     json.get("scheduledTasks")?.as_array().map(Vec::len)
 }
 
-fn stdb_mode() -> String {
-    if heiwa_stdb::StdbConfig::resolve().is_some() {
-        "configured-offline-spool".to_string()
-    } else {
-        "offline-spool".to_string()
-    }
+fn evidence_mode() -> String {
+    "local-jsonl".to_string()
 }
 
 fn has_flag(args: &[String], flag: &str) -> bool {
@@ -526,7 +522,7 @@ struct StaleFact {
 
 #[derive(Clone, Debug)]
 struct RuntimeStatus {
-    stdb_mode: String,
+    evidence_mode: String,
 }
 
 #[derive(Clone, Debug)]
@@ -574,7 +570,7 @@ impl TodaySnapshot {
             "stale_facts": stale,
             "pending_approvals": self.pending_approvals,
             "runtime": {
-                "stdb_mode": self.runtime.stdb_mode
+                "evidence_mode": self.runtime.evidence_mode
             },
             "next": [
                 "heiwa life freshness --json",
@@ -692,7 +688,7 @@ fn build_today_snapshot() -> TodaySnapshot {
         stale_facts,
         pending_approvals,
         runtime: RuntimeStatus {
-            stdb_mode: stdb_mode(),
+            evidence_mode: evidence_mode(),
         },
     }
 }
