@@ -102,10 +102,8 @@ jobs:
           crates/heiwa_quota
           crates/heiwa_repl
           crates/heiwa_session
-          crates/heiwa_stdb
           crates/heiwa_tui
           crates/heiwa_vault
-          packages/heiwa_bindings/rust
 
   lint:
     name: TypeScript and Web Lint
