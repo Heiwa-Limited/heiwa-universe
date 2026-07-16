@@ -1,3 +1,8 @@
+#[cfg(feature = "lance")]
+pub mod lance_store;
+#[cfg(feature = "lance")]
+pub use lance_store::LanceVectorStore;
+
 use anyhow::{Context, Result};
 use heiwa_config::load as load_config;
 use reqwest::blocking::Client;

@@ -1,5 +1,5 @@
 use anyhow::Result;
-use heiwa_bindings::ModelTier;
+use heiwa_protocol::ModelTier;
 
 use crate::config::RuntimeConfig;
 use crate::drex::{default_policy, plan_route, DrexIngress, RoutePlan};

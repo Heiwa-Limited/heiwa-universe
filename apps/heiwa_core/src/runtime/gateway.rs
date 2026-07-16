@@ -25,17 +25,8 @@ use crate::{
     runtime::state::{
         RegistryErrorCode, SharedState, WorkerProtocolFlavor, WorkerSessionRegistration,
     },
-    stdb::{PersistedArtifact, PersistedRunReceipt},
+    evidence::{EvidenceTransport, PersistedArtifact, PersistedRunReceipt},
 };
-use heiwa_bindings::{
-    create_task_dispatch_reducer::create_task_dispatch,
-    issue_capability_lease_reducer::issue_capability_lease,
-    revoke_capability_lease_reducer::revoke_capability_lease,
-    update_task_dispatch_status_reducer::update_task_dispatch_status,
-    upsert_battlefield_reducer::upsert_battlefield,
-    upsert_node_heartbeat_reducer::upsert_node_heartbeat,
-};
-
 const WORKER_PROTOCOL_VERSION: &str = "v1";
 const HEARTBEAT_INTERVAL_MS: u64 = 30_000;
 const WORKER_SESSION_TTL_MS: u64 = 6 * 60 * 60 * 1000;
@@ -292,17 +283,15 @@ pub async fn battlefield_handler(
     let battlefield_id = format!("bf-{}", uuid::Uuid::new_v4());
     let name = payload["name"].as_str().unwrap_or("unnamed").to_string();
 
-    let _ = state.stdb.transport.conn.reducers.upsert_battlefield(
-        battlefield_id.clone(),
-        None,
-        None,
-        name,
-        None,
-        None,
-        None,
-        "active".to_string(),
-        Some(now_iso()),
-        Some(now_iso()),
+    let _ = state.evidence.transport.journal(
+        "battlefields",
+        json!({
+            "battlefield_id": battlefield_id,
+            "name": name,
+            "status": "active",
+            "created_at": now_iso(),
+            "updated_at": now_iso(),
+        }),
     );
 
     Json(json!({ "status": "ok", "battlefield_id": battlefield_id }))
@@ -340,7 +329,7 @@ pub async fn task_handler(
     let selected = {
         let mut registry = state.worker_registry.write().await;
         registry.reserve_dispatch(
-            &state.stdb,
+            &state.evidence,
             &capability,
             task_id.clone(),
             lease_id.clone(),
@@ -350,20 +339,16 @@ pub async fn task_handler(
     };
 
     let Some((session, lease)) = selected else {
-        let _ = state.stdb.transport.conn.reducers.create_task_dispatch(
-            task_id.clone(),
-            None,
-            capability.clone(),
-            "medium".to_string(),
-            capability.clone(),
-            "normal".to_string(),
-            "unassigned".to_string(),
-            10,
-            300,
-            capability.clone(),
-            "trusted".to_string(),
-            "[]".to_string(),
-            "[]".to_string(),
+        let _ = state.evidence.transport.journal(
+            "task_dispatches",
+            json!({
+                "task_id": task_id,
+                "capability": capability,
+                "priority": "medium",
+                "queue": "normal",
+                "assigned_node": "unassigned",
+                "sandbox_mode": "trusted",
+            }),
         );
         return Json(json!({
             "status": "queued",
@@ -372,57 +357,37 @@ pub async fn task_handler(
         }));
     };
 
-    let _ = state.stdb.transport.conn.reducers.create_task_dispatch(
-        task_id.clone(),
-        None,
-        capability.clone(),
-        "medium".to_string(),
-        capability.clone(),
-        "normal".to_string(),
-        session.node_id.clone(),
-        10,
-        300,
-        capability.clone(),
-        if policy.side_effects == "allow" {
-            "trusted".to_string()
-        } else {
-            "sandbox".to_string()
-        },
-        "[]".to_string(),
-        "[]".to_string(),
-    );
-    let _ = state.stdb.transport.conn.reducers.issue_capability_lease(
-        lease_id.clone(),
-        task_id.clone(),
-        None,
-        None,
-        "worker_session".to_string(),
-        session.session_id.clone(),
-        json!([capability.clone()]).to_string(),
-        "[]".to_string(),
-        "[]".to_string(),
-        "[]".to_string(),
-        "mesh".to_string(),
-        "fail_closed".to_string(),
+    let _ = state.evidence.transport.journal(
+        "task_dispatches",
         json!({
             "task_id": task_id,
+            "capability": capability,
+            "priority": "medium",
+            "queue": "normal",
+            "assigned_node": session.node_id,
+            "sandbox_mode": if policy.side_effects == "allow" {
+                "trusted"
+            } else {
+                "sandbox"
+            },
+        }),
+    );
+    let _ = state.evidence.transport.journal(
+        "capability_leases",
+        json!({
+            "lease_id": lease_id,
+            "task_id": task_id,
+            "holder_type": "worker_session",
+            "holder_id": session.session_id,
+            "capabilities": [capability],
+            "policy": "fail_closed",
+            "scope": "mesh",
+            "status": "ACTIVE",
+            "issued_at": issued_at,
+            "expires_at": expires_at,
+            "issuer": "heiwa-core",
             "node_id": session.node_id,
-            "session_id": session.session_id,
-        })
-        .to_string(),
-        Some(
-            json!({
-                "task_id": task_id,
-                "capability": capability,
-            })
-            .to_string(),
-        ),
-        "ACTIVE".to_string(),
-        issued_at,
-        expires_at.clone(),
-        "heiwa-core".to_string(),
-        None,
-        Some(session.session_id.clone()),
+        }),
     );
 
     let outbound = if session.protocol == WorkerProtocolFlavor::Legacy {
@@ -453,7 +418,7 @@ pub async fn task_handler(
         if sender.send(outbound).is_err() {
             let mut registry = state.worker_registry.write().await;
             registry.complete_dispatch(
-                &state.stdb,
+                &state.evidence,
                 &lease.lease_id,
                 "failed",
                 Some("DISPATCH_UNAVAILABLE".to_string()),
@@ -657,7 +622,7 @@ async fn handle_worker_socket(socket: WebSocket, state: SharedState) {
                     };
                     let session = {
                         let mut registry = state.worker_registry.write().await;
-                        registry.register_session(&state.stdb, registration)
+                        registry.register_session(&state.evidence, registration)
                     };
                     state
                         .worker_senders
@@ -713,7 +678,7 @@ async fn handle_worker_socket(socket: WebSocket, state: SharedState) {
                         let session = {
                             let mut registry = state.worker_registry.write().await;
                             registry.update_heartbeat(
-                                &state.stdb,
+                                &state.evidence,
                                 &current_session_id,
                                 now_ms(),
                                 heartbeat.status,
@@ -756,7 +721,7 @@ async fn handle_worker_socket(socket: WebSocket, state: SharedState) {
                         let result = {
                             let mut registry = state.worker_registry.write().await;
                             registry.record_dispatch_ack(
-                                &state.stdb,
+                                &state.evidence,
                                 &current_session_id,
                                 &ack.task_id,
                                 &ack.lease_id,
@@ -767,36 +732,31 @@ async fn handle_worker_socket(socket: WebSocket, state: SharedState) {
                         };
                         match result {
                             Ok(_) => {
-                                let _ = state
-                                    .stdb
-                                    .transport
-                                    .conn
-                                    .reducers
-                                    .update_task_dispatch_status(
-                                        ack.task_id,
-                                        "running".to_string(),
-                                        "worker accepted dispatch".to_string(),
-                                        0,
-                                        0,
-                                    );
+                                let _ = state.evidence.transport.journal(
+                                    "task_dispatch_status",
+                                    json!({
+                                        "task_id": ack.task_id,
+                                        "status": "running",
+                                        "detail": "worker accepted dispatch",
+                                    }),
+                                );
                             }
                             Err(error) => {
-                                let _ = state
-                                    .stdb
-                                    .transport
-                                    .conn
-                                    .reducers
-                                    .update_task_dispatch_status(
-                                        ack.task_id.clone(),
-                                        "failed".to_string(),
-                                        error.message.clone(),
-                                        0,
-                                        0,
-                                    );
-                                let _ = state.stdb.transport.conn.reducers.revoke_capability_lease(
-                                    ack.lease_id.clone(),
-                                    now_iso(),
-                                    Some("dispatch_rejected".to_string()),
+                                let _ = state.evidence.transport.journal(
+                                    "task_dispatch_status",
+                                    json!({
+                                        "task_id": ack.task_id.clone(),
+                                        "status": "failed",
+                                        "detail": error.message.clone(),
+                                    }),
+                                );
+                                let _ = state.evidence.transport.journal(
+                                    "capability_lease_revocations",
+                                    json!({
+                                        "lease_id": ack.lease_id.clone(),
+                                        "revoked_at": now_iso(),
+                                        "reason": "dispatch_rejected",
+                                    }),
                                 );
                                 let _ = sender.send(worker_error(
                                     &envelope.node_id,
@@ -901,7 +861,7 @@ async fn handle_worker_socket(socket: WebSocket, state: SharedState) {
             .worker_registry
             .write()
             .await
-            .remove_session(&state.stdb, &session_id);
+            .remove_session(&state.evidence, &session_id);
     }
     writer.abort();
 }
@@ -957,7 +917,7 @@ async fn handle_legacy_worker_socket(socket: WebSocket, state: SharedState) {
                 let session = {
                     let mut registry = state.worker_registry.write().await;
                     registry.register_session(
-                        &state.stdb,
+                        &state.evidence,
                         WorkerSessionRegistration {
                             session_id: created_session_id.clone(),
                             node_id: node.clone(),
@@ -1004,7 +964,7 @@ async fn handle_legacy_worker_socket(socket: WebSocket, state: SharedState) {
                 let updated = {
                     let mut registry = state.worker_registry.write().await;
                     registry.update_heartbeat(
-                        &state.stdb,
+                        &state.evidence,
                         &current_session_id,
                         now_ms(),
                         status.unwrap_or_else(|| "idle".to_string()),
@@ -1074,7 +1034,7 @@ async fn handle_legacy_worker_socket(socket: WebSocket, state: SharedState) {
             .worker_registry
             .write()
             .await
-            .remove_session(&state.stdb, &session_id);
+            .remove_session(&state.evidence, &session_id);
     }
     writer.abort();
 }
@@ -1090,7 +1050,7 @@ async fn handle_route_preview(
 
     let task_id = format!("task-preview-{}", uuid::Uuid::new_v4());
     let _ = state
-        .stdb
+        .evidence
         .record_drex_decision(&request_id, &task_id, &plan)
         .await?;
 
@@ -1196,20 +1156,20 @@ async fn persist_worker_presence(
         ),
         format!("runtime:{}", session.runtime),
     ]);
-    let _ = state.stdb.transport.conn.reducers.upsert_node_heartbeat(
-        session.node_id.clone(),
-        now_iso(),
-        now_iso(),
-        meta.to_string(),
-        json!(session.capabilities).to_string(),
-        session.worker_version.clone(),
-        tags.to_string(),
-        session.max_concurrency,
-        0,                   // vram_mb
-        "local".to_string(), // locality
-        10,                  // trust_tier
-        "[]".to_string(),    // provider_keys
-        "[]".to_string(),    // model_inventory
+    let _ = state.evidence.transport.journal(
+        "node_heartbeats",
+        json!({
+            "node_id": session.node_id.clone(),
+            "seen_at": now_iso(),
+            "meta": meta,
+            "capabilities": session.capabilities.clone(),
+            "worker_version": session.worker_version.clone(),
+            "tags": tags,
+            "max_concurrency": session.max_concurrency,
+            "vram_mb": 0,
+            "locality": "local",
+            "trust_tier": 10,
+        }),
     );
 }
 
@@ -1266,27 +1226,25 @@ async fn finalize_result(
         "worker result {} for task {}",
         payload.status, payload.task_id
     );
-    let _ = state
-        .stdb
-        .transport
-        .conn
-        .reducers
-        .update_task_dispatch_status(
-            payload.task_id.clone(),
-            if payload.status.eq_ignore_ascii_case("success") {
-                "complete".to_string()
+    let _ = state.evidence.transport.journal(
+        "task_dispatch_status",
+        json!({
+            "task_id": payload.task_id.clone(),
+            "status": if payload.status.eq_ignore_ascii_case("success") {
+                "complete"
             } else {
-                "failed".to_string()
+                "failed"
             },
-            summary.clone(),
-            payload
+            "detail": summary.clone(),
+            "tokens_total": payload
                 .metrics
                 .tokens_in
                 .saturating_add(payload.metrics.tokens_out),
-            payload.metrics.duration_ms,
-        );
+            "duration_ms": payload.metrics.duration_ms,
+        }),
+    );
     let _ = state
-        .stdb
+        .evidence
         .record_receipt_bundle(
             PersistedRunReceipt {
                 run_id,
@@ -1325,13 +1283,16 @@ async fn finalize_result(
             artifacts,
         )
         .await;
-    let _ = state.stdb.transport.conn.reducers.revoke_capability_lease(
-        payload.lease_id.clone(),
-        now_iso(),
-        Some("completed".to_string()),
+    let _ = state.evidence.transport.journal(
+        "capability_lease_revocations",
+        json!({
+            "lease_id": payload.lease_id.clone(),
+            "revoked_at": now_iso(),
+            "reason": "completed",
+        }),
     );
     state.worker_registry.write().await.complete_dispatch(
-        &state.stdb,
+        &state.evidence,
         &payload.lease_id,
         "completed",
         None,
@@ -1369,20 +1330,16 @@ async fn finalize_error(
     let run_id = format!("run-{task_id}");
     let artifact_id = format!("artifact-{}", uuid::Uuid::new_v4());
     let completed_at = now_iso();
+    let _ = state.evidence.transport.journal(
+        "task_dispatch_status",
+        json!({
+            "task_id": task_id.clone(),
+            "status": "failed",
+            "detail": payload.message.clone(),
+        }),
+    );
     let _ = state
-        .stdb
-        .transport
-        .conn
-        .reducers
-        .update_task_dispatch_status(
-            task_id.clone(),
-            "failed".to_string(),
-            payload.message.clone(),
-            0,
-            0,
-        );
-    let _ = state
-        .stdb
+        .evidence
         .record_receipt_bundle(
             PersistedRunReceipt {
                 run_id: run_id.clone(),
@@ -1453,7 +1410,7 @@ async fn finalize_error(
     };
 
     let _ = state
-        .stdb
+        .evidence
         .record_run_failure(
             &run_id,
             &lease_id,
@@ -1465,13 +1422,16 @@ async fn finalize_error(
             &json!(payload).to_string(),
         )
         .await;
-    let _ = state.stdb.transport.conn.reducers.revoke_capability_lease(
-        lease_id.clone(),
-        now_iso(),
-        Some(payload.code.clone()),
+    let _ = state.evidence.transport.journal(
+        "capability_lease_revocations",
+        json!({
+            "lease_id": lease_id.clone(),
+            "revoked_at": now_iso(),
+            "reason": payload.code.clone(),
+        }),
     );
     state.worker_registry.write().await.complete_dispatch(
-        &state.stdb,
+        &state.evidence,
         &lease_id,
         "failed",
         Some(payload.code.clone()),

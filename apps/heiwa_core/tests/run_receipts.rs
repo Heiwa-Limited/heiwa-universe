@@ -1,10 +1,10 @@
 use std::sync::{Arc, Mutex};
 
 use anyhow::Result;
-use heiwa_core::stdb::{
+use heiwa_core::evidence::{
     PersistedArtifact, PersistedDispatchAck, PersistedDrexDecision, PersistedDrexFailure,
     PersistedRunFailure, PersistedRunReceipt, PersistedWorkerLease, PersistedWorkerSession,
-    StdbRuntime, StdbTransport,
+    EvidenceRuntime, EvidenceTransport,
 };
 
 #[derive(Clone, Default)]
@@ -14,7 +14,7 @@ struct MemoryTransport {
     failures: Arc<Mutex<Vec<PersistedRunFailure>>>,
 }
 
-impl StdbTransport for MemoryTransport {
+impl EvidenceTransport for MemoryTransport {
     fn upsert_drex_decision(&self, _decision: PersistedDrexDecision) -> Result<()> {
         Ok(())
     }
@@ -64,14 +64,14 @@ impl StdbTransport for MemoryTransport {
 }
 
 struct TestStdbClient {
-    runtime: StdbRuntime<MemoryTransport>,
+    runtime: EvidenceRuntime<MemoryTransport>,
     transport: MemoryTransport,
 }
 
 impl TestStdbClient {
     fn new() -> Self {
         let transport = MemoryTransport::default();
-        let runtime = StdbRuntime::new(transport.clone());
+        let runtime = EvidenceRuntime::new(transport.clone());
         Self { runtime, transport }
     }
 

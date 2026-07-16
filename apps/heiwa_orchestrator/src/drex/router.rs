@@ -1,5 +1,5 @@
 use anyhow::{anyhow, Result};
-use heiwa_bindings::ModelTier;
+use heiwa_protocol::ModelTier;
 
 use super::policy::{DrexDecision, DrexPolicy, ResolutionTier};
 use super::scorer::evaluate_drex;

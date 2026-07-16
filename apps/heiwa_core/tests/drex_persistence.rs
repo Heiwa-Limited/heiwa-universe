@@ -1,15 +1,15 @@
 use std::sync::{Arc, Mutex};
 
 use anyhow::Result;
-use heiwa_bindings::ModelTier;
+use heiwa_protocol::ModelTier;
 use heiwa_core::drex::{
     DrexAuthorityGate, DrexDecision, DrexScoreCard, DrexVector, ExecutionMode, ResolutionTier,
     RoutePlan,
 };
-use heiwa_core::stdb::{
+use heiwa_core::evidence::{
     PersistedArtifact, PersistedDispatchAck, PersistedDrexDecision, PersistedDrexFailure,
     PersistedRunFailure, PersistedRunReceipt, PersistedWorkerLease, PersistedWorkerSession,
-    StdbRuntime, StdbTransport,
+    EvidenceRuntime, EvidenceTransport,
 };
 
 #[derive(Clone, Default)]
@@ -19,7 +19,7 @@ struct MemoryTransport {
     route_links: Arc<Mutex<Vec<(String, String)>>>,
 }
 
-impl StdbTransport for MemoryTransport {
+impl EvidenceTransport for MemoryTransport {
     fn upsert_drex_decision(&self, decision: PersistedDrexDecision) -> Result<()> {
         self.decisions.lock().unwrap().push(decision);
         Ok(())
@@ -71,15 +71,15 @@ impl StdbTransport for MemoryTransport {
     }
 }
 
-struct TestStdbClient {
-    runtime: StdbRuntime<MemoryTransport>,
+struct TestEvidenceClient {
+    runtime: EvidenceRuntime<MemoryTransport>,
     transport: MemoryTransport,
 }
 
-impl TestStdbClient {
+impl TestEvidenceClient {
     fn new() -> Self {
         let transport = MemoryTransport::default();
-        let runtime = StdbRuntime::new(transport.clone());
+        let runtime = EvidenceRuntime::new(transport.clone());
         Self { runtime, transport }
     }
 
@@ -131,7 +131,7 @@ impl TestStdbClient {
 #[tokio::test]
 async fn record_drex_decision_writes_scores_and_axes() {
     let route_plan = sample_route_plan();
-    let client = TestStdbClient::new();
+    let client = TestEvidenceClient::new();
 
     let stored = client
         .record_drex_decision("req-drex-1", "task-drex-1", &route_plan)
@@ -155,7 +155,7 @@ async fn record_drex_decision_writes_scores_and_axes() {
 #[tokio::test]
 async fn record_drex_failure_preserves_decision_linkage() {
     let route_plan = sample_route_plan();
-    let client = TestStdbClient::new();
+    let client = TestEvidenceClient::new();
     let decision = client
         .record_drex_decision("req-drex-2", "task-drex-2", &route_plan)
         .await

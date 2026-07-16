@@ -208,7 +208,7 @@ fn test_route_preview_surfaces_privacy_lane() {
 }
 
 #[test]
-fn test_life_status_json_reports_sources_and_stdb_mode() {
+fn test_life_status_json_reports_sources_and_evidence_mode() {
     let output = Command::new("cargo")
         .args([
             "run",
@@ -231,8 +231,8 @@ fn test_life_status_json_reports_sources_and_stdb_mode() {
         "expected life status json command marker: {stdout}"
     );
     assert!(
-        stdout.contains("\"stdb_mode\":"),
-        "expected STDB mode in life status json: {stdout}"
+        stdout.contains("\"evidence_mode\":"),
+        "expected evidence mode in life status json: {stdout}"
     );
     assert!(
         stdout.contains("\"home\""),
@@ -271,7 +271,7 @@ fn test_life_today_json_reports_local_read_model_keys() {
     assert!(parsed["appointments"].is_array());
     assert!(parsed["stale_facts"].is_array());
     assert!(parsed["pending_approvals"].is_array());
-    assert!(parsed["runtime"]["stdb_mode"].is_string());
+    assert!(parsed["runtime"]["evidence_mode"].is_string());
 }
 
 #[test]
@@ -317,7 +317,7 @@ fn test_life_freshness_json_reports_source_slas() {
 }
 
 #[test]
-fn test_life_import_home_dry_run_jsonl_counts_stdb_rows() {
+fn test_life_import_home_dry_run_jsonl_counts_rows() {
     let output = Command::new("cargo")
         .args([
             "run",
@@ -588,19 +588,19 @@ fn test_app_update_checkout_dry_run_json_reports_promotion_contract() {
             .and_then(serde_json::Value::as_bool),
         Some(false)
     );
-    let stdb_mirror = promotion_receipt
-        .get("stdb_mirror")
+    let evidence_plane = promotion_receipt
+        .get("evidence_plane")
         .and_then(serde_json::Value::as_object)
-        .expect("stdb mirror contract");
+        .expect("evidence plane contract");
     assert_eq!(
-        stdb_mirror
-            .get("auth_mode")
+        evidence_plane
+            .get("backend")
             .and_then(serde_json::Value::as_str),
-        Some("spacetime_cli_login")
+        Some("local-jsonl")
     );
-    assert!(stdb_mirror
-        .get("shell_authenticated")
-        .and_then(serde_json::Value::as_bool)
+    assert!(evidence_plane
+        .get("status")
+        .and_then(serde_json::Value::as_str)
         .is_some());
 }
 
@@ -669,20 +669,16 @@ fn test_doctor_json_reports_runtimes_providers_and_app_probe() {
         );
     }
     assert!(
-        stdout.contains("\"stdb\""),
-        "expected stdb probe block in doctor json: {stdout}"
+        stdout.contains("\"evidence\""),
+        "expected evidence block in doctor json: {stdout}"
     );
     assert!(
-        stdout.contains("\"configured\""),
-        "expected configured field in doctor stdb: {stdout}"
-    );
-    assert!(
-        stdout.contains("\"token_present\""),
-        "expected token_present field in doctor stdb (token must never appear raw): {stdout}"
+        stdout.contains("\"backend\":\"local-jsonl\""),
+        "expected local-jsonl backend in doctor evidence: {stdout}"
     );
     assert!(
         !stdout.contains("\"token\":\""),
-        "doctor json must never contain a raw STDB token: {stdout}"
+        "doctor json must never contain a raw token: {stdout}"
     );
     assert!(
         stdout.contains("\"providers\":["),
