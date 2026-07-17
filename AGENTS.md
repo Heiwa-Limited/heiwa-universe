@@ -10,7 +10,7 @@ This repository builds the Heiwa full stack. The current product center of gravi
 - **`heiwa`** is the primary installed operator surface.
 - **DREX** is the internal execution kernel.
 - **Local MacBook state** under `~/.heiwa/` plus this checkout is the current owner runtime truth.
-- **Lance + GitHub** are the backend (pivot 2026-07-15): text truth (JSONL/markdown) git-synced, Lance derived local recall index. SpacetimeDB is retired; code extracted from the tree.
+- **Lance + GitHub** are the backend (pivot 2026-07-15): text truth (JSONL/markdown) local-first — GitHub sync planned, redaction-gated — with Lance as the derived local recall index. SpacetimeDB is retired; code extracted from the tree. Journal service: `crates/heiwa_evidence/`.
 - **GitHub** is distribution, sync, and CI. **Cloudflare** is DNS utility only.
 
 Compression:

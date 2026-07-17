@@ -1,18 +1,20 @@
 # HEIWA
 
-Updated: 2026-05-22
+Updated: 2026-07-16
 Status: Canonical truth for `heiwa-universe`
 
 This file replaces the old repo-root compatibility shim. When `README.md`, legacy plans, or older architecture notes conflict with this document, this document wins.
 
-> **Backend pivot (2026-07-15): Lance + GitHub only.** SpacetimeDB, Railway, and
-> Cloudflare-as-infra are retired. Durable truth is text (JSONL/markdown) in this
-> repo and `~/.heiwa/`, synced via GitHub; Lance is the derived local vector/FTS
-> index (rebuildable, never git-synced); SQLite (`heiwa_receipts`, `heiwa_vault`)
-> keeps hot operational state. Any section below that still describes SpacetimeDB
-> as a live plane is historical context superseded by this note. Cloudflare
-> remains DNS utility only. The STDB code paths were extracted from the tree on
-> 2026-07-15 (see `apps/heiwa_core/src/evidence/`, git history has the rest).
+> **Backend (since the 2026-07-15 pivot): Lance + GitHub.** SpacetimeDB,
+> Railway, and Cloudflare-as-infra are retired; the STDB code paths were
+> extracted from the tree on 2026-07-15 (git history has the rest). Durable
+> truth is text: JSONL journal streams under `~/.heiwa/evidence/` plus
+> markdown/receipts, owned by `crates/heiwa_evidence`. Lance is the derived
+> local vector index (rebuildable, never git-synced). SQLite
+> (`heiwa_receipts`, `heiwa_vault`, embedding hot state) keeps hot
+> operational state. GitHub owns source, CI, and distribution; evidence sync
+> to GitHub is planned but gated — nothing syncs until an explicit redaction
+> and privacy boundary exists. Cloudflare remains DNS utility only.
 
 ## One-Sentence Truth
 
@@ -25,7 +27,7 @@ Current shape:
 - DREX is the internal execution kernel.
 - GitHub is the source and install authority. The installed local runtime plus
   `~/.heiwa/` are the current user-functionality truth on each machine.
-- Evidence is local-first: JSONL truth under `~/.heiwa/evidence/`, git-synced; Lance is the derived recall index.
+- Evidence is local-first: JSONL truth under `~/.heiwa/evidence/`; Lance is the derived recall index. GitHub sync of evidence is planned and redaction-gated — local-only today.
 - Rust proposes and executes.
 - Providers still own their own inference internals.
 - Heiwa turns the user's local models and connected providers into one coherent operator experience.
@@ -75,7 +77,7 @@ Heiwa is taught to operators as three planes that compose one flow.
 | ------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------ |
 | **Intake**    | One command bar plus passive feeds. Captures intent and signal from operator commands, mail, calendar, messages, forums, GitHub, files, and runtime alerts. | `apps/heiwa_shell/` REPL and `session attach` are the current intake surface. Passive feeds are target work.                                     |
 | **Execution** | DREX routes work to local models, provider CLIs, tools, workers, or connectors under leases, budgets, and approval gates.                                   | `apps/heiwa_core/` (DREX), `apps/heiwa_orchestrator/`, `crates/heiwa_loop/`, `crates/heiwa_provider/`, `crates/heiwa_session/`.                  |
-| **Evidence**  | Every useful read or action emits a source-linked receipt appended locally as JSONL; Lance indexes the corpus for recall.                                   | `apps/heiwa_core/src/evidence/`, `apps/heiwa_orchestrator/src/evidence/`, `crates/heiwa_receipts/`. Receipt schema and source-span syntax are still partial. |
+| **Evidence**  | Every useful read or action emits a source-linked receipt appended locally as JSONL; Lance indexes the corpus for recall.                                   | `crates/heiwa_evidence/` (journal service; core and orchestrator consume it), `crates/heiwa_embed/` (Lance index), `crates/heiwa_receipts/`. Receipt schema and source-span syntax are still partial. |
 
 The planes are a flow lens. They sit alongside the layer anatomy in [What Heiwa Is](#what-heiwa-is) (user surface, execution kernel, enterprise platform), which is an ownership lens. Both are correct: planes describe **how a task flows**, layers describe **who owns what**.
 
@@ -151,7 +153,7 @@ Heiwa is a system with three distinct layers:
 
 2. **Execution kernel**
    - DREX is the routing, policy, and evidence kernel.
-   - It spans Rust runtime behavior, local state, and SpacetimeDB reducers/subscriptions where online.
+   - It spans Rust runtime behavior, local state, and the local JSONL evidence journal.
 
 3. **Enterprise platform**
    - Heiwa normalizes access to provider subscriptions, API keys, local models, device capabilities, evidence, routing policy, and later org governance.
@@ -178,7 +180,7 @@ As of 2026-04-22, `heiwa-universe` has already landed meaningful local runtime s
   - [`crates/heiwa_provider/`](crates/heiwa_provider/)
   - [`crates/heiwa_install/`](crates/heiwa_install/)
   - [`crates/heiwa_loop/`](crates/heiwa_loop/)
-  - [`packages/heiwa_bindings/rust/`](packages/heiwa_bindings/rust/)
+  - [`crates/heiwa_evidence/`](crates/heiwa_evidence/)
 - The current `heiwa` binary already exposes:
   - `install`
   - `doctor`
@@ -208,7 +210,7 @@ As of 2026-04-22, `heiwa-universe` has already landed meaningful local runtime s
 | **Heiwa Universe** | Open-source repository and project workspace: `Strategizing/heiwa-universe`                 |
 | **`heiwa`**        | Primary installed runtime and operator surface                                              |
 | **DREX**           | Internal execution kernel and routing substrate                                             |
-| **SpacetimeDB**    | Backend adjudication, canonical state, subscriptions, evidence                              |
+| **Evidence plane** | Canonical durable record: local JSONL journal (truth), Lance (derived recall), SQLite (hot state) |
 | **Rust runtime**   | Volatile execution plane: provider supervision, candidate generation, shell/process control |
 | **Web surfaces**   | Later attached or hosted surfaces over the same kernel                                      |
 
@@ -232,14 +234,18 @@ That is the architecture. DREX is not the public brand. It is the kernel inside 
 - Local spool/buffer behavior
 - Interacting with external systems and side effects
 
-### SpacetimeDB owns
+### Evidence plane owns
 
-- Canonical state transitions
-- Reducer-enforced mutations
-- Adjudicated routing and evidence records
-- Session, lease, run, artifact, failure, and routing tables
-- Real-time subscriptions
+- The canonical durable record of state transitions (full-row snapshots per mutation)
+- Append-only JSONL journal streams: sessions, leases, runs, artifacts, failures, DREX decisions
+- Versioned envelopes, cross-process append locking, corruption-tolerant replay
+- Materialized read models rebuilt from the journal, and restart recovery
+  (interrupted sessions/leases are closed out, never silently resurrected)
 - The durable system-of-record view of execution
+
+Lance is derived from this truth and rebuildable at any time; it is never the
+record. SQLite (`receipts.db`, vault, embedding hot state) is hot operational
+state, not the record either.
 
 ### `heiwa` owns
 
@@ -251,11 +257,11 @@ That is the architecture. DREX is not the public brand. It is the kernel inside 
 
 ### Important user-facing boundary
 
-Normal users and operators should not have to think about SpacetimeDB directly. They interact with Heiwa surfaces; Heiwa services and runtimes own the backend connection path on their behalf.
+Normal users and operators should not have to think about journal mechanics directly. They interact with Heiwa surfaces (`heiwa receipts`, `heiwa doctor`, the app); the runtime owns the evidence plane on their behalf.
 
 ### Important nuance
 
-SpacetimeDB is where Heiwa keeps and adjudicates truth. Rust is not a dumb pipe, and SpacetimeDB is not a process supervisor. Reducers should remain deterministic and canonical. Rust should continue to own process reality, provider supervision, and external I/O. [1][2][3]
+The journal is where Heiwa keeps truth. Rust is not a dumb pipe, and the journal is not a process supervisor. Journal writes are append-only and deterministic to replay. Rust continues to own process reality, provider supervision, and external I/O; its in-memory registries are materialized views over the journal, reconciled on restart.
 
 ## Topology Modes
 
@@ -278,15 +284,15 @@ If there is no internet connection, Claude Code, Codex cloud, Gemini cloud, or o
 - Heiwa account state, settings, routing preferences, receipts, and history can sync.
 - Local models remain first-class and may be preferred for privacy or cost.
 
-### 3. Cloud-backed local
+### 3. GitHub-backed local
 
 - User still runs `heiwa` locally.
 - The local runtime owns the hot path: provider streams, PTY/shell work, local models, device resources, local approvals, and side effects.
-- SpacetimeDB Cloud owns durable truth: reducers, subscriptions, session/routing tables, leases, evidence, and audit state.
-- Cloudflare owns edge/public surfaces: DNS, docs, app shell, status pages, and later remote attach.
-- GitHub owns source, CI, release artifacts, installer distribution, and public repo trust once the secure publish gate passes.
+- Durable truth stays on the device: the JSONL journal, receipts, and markdown state under `~/.heiwa/`.
+- GitHub owns source, CI, release artifacts, installer distribution, and public repo trust once the secure publish gate passes. Redaction-gated evidence sync through GitHub is the planned (not yet built) multi-device path.
+- Cloudflare is DNS utility only.
 
-No hosted Rust service tier is required in this topology. If Stage 4+ adds a hosted control plane later, it must not become a hidden inference middleman for the local runtime path.
+No hosted backend authority plane exists in this topology. If a later stage adds a hosted control plane, it must not become a hidden inference middleman for the local runtime path.
 
 ## Provider, Auth, Model, and Limit Truth
 
@@ -382,35 +388,40 @@ That is how Heiwa scales from “my machine” to “my fleet” without changin
 
 Heiwa is local-first. Hosted infrastructure exists to provide durable truth, public surfaces, and distribution without moving the inference/shell hot path off the operator device.
 
-| Surface               | Role in Heiwa                                                          |
-| --------------------- | ---------------------------------------------------------------------- |
-| **GitHub**            | Source of truth, CI, release artifacts, install/update distribution    |
-| **SpacetimeDB Cloud** | Canonical state, reducers, subscriptions, evidence                     |
-| **Cloudflare**        | Public edge, DNS, docs/app surfaces, later remote access surfaces      |
-| **Local machine**     | Primary `heiwa` runtime, provider CLIs, local models, operator control |
+| Surface           | Role in Heiwa                                                           |
+| ----------------- | ----------------------------------------------------------------------- |
+| **Local machine** | Primary `heiwa` runtime, provider CLIs, local models, operator control, canonical evidence truth |
+| **GitHub**        | Source of truth for code, CI, release artifacts, install/update distribution; planned (redaction-gated) evidence sync |
+| **Cloudflare**    | DNS utility only                                                        |
 
 | Layer                       | Host                              | Role                                                                     |
 | --------------------------- | --------------------------------- | ------------------------------------------------------------------------ |
-| Canonical state / evidence  | SpacetimeDB Cloud                 | Reducers, subscriptions, session/routing tables, adjudication            |
+| Canonical state / evidence  | Local device (`~/.heiwa/`)        | JSONL journal truth, replay/materialized read models, receipts, Lance derived index, SQLite hot state |
 | Local inference + streaming | `heiwa` app runtime on the device | Provider streams, PTY/shell, local models, local approvals, side effects |
-| Edge / public surfaces      | Cloudflare Workers + Pages        | DNS, docs, web shell, status, later remote attach                        |
 | Source / CI / distribution  | GitHub                            | Releases, install artifacts, binaries, checksums, source trust           |
+| DNS                         | Cloudflare                        | Domain records only                                                      |
 
 Architectural implication:
 
-- There is no hosted Rust service tier in the v0.1 topology.
+- There is no hosted Rust service tier and no hosted backend authority plane in this topology.
 - Heiwa.app and the installed `heiwa` runtime run solely on user devices; Heiwa does not provide a hosted app/runtime service.
 - Rust runtime is device-local until a later hosted control plane has a verified need.
-- SpacetimeDB Cloud is the hosted backend authority, not an operator surface.
 - No cloud hop belongs in the inference loop unless the selected provider itself is cloud-hosted.
 
-### SpacetimeDB
+### Evidence plane (Lance + GitHub backend)
 
-SpacetimeDB reducers are the only way to mutate tables. Reducers run transactionally, are deterministic, and cannot do external I/O. Subscriptions replicate rows to clients in real time. Public/private table visibility is explicit. [1][2][3]
+The journal mechanics live in [`crates/heiwa_evidence/`](crates/heiwa_evidence/), one service shared by core, orchestrator, and operator surfaces:
+
+- **JSONL journal** under `~/.heiwa/evidence/` (env-overridable via `HEIWA_EVIDENCE_DIR`): one append-only stream per record kind, versioned envelopes (`v`, `at_ms`, `kind`, `record`), cross-process append locking, fsync on append.
+- **Replay and materialization**: corruption-tolerant replay (bad lines skipped and counted, never fatal), last-write-wins folds into read models (`WorkerStateView`), keyed-stream compaction.
+- **Restart recovery**: on boot, sessions and leases the journal shows live are closed out with `RUNTIME_RESTART` closure events — the journal never lies about liveness across restarts.
+- **Redacted receipts** under `~/.heiwa/state/evidence/<date>/`: individually written operator receipts (capabilities, promotion, compress) with `redaction_applied` enforced by their writers.
+- **Lance** (feature-gated in [`crates/heiwa_embed/`](crates/heiwa_embed/)): derived vector recall over embedding rows, selected via `embedding.backend` in `~/.heiwa/config.toml` (`HEIWA_EMBED_BACKEND`); rebuildable from source rows and migratable from the SQLite store. Never git-synced.
+- **GitHub sync**: planned, not built. Raw journal streams must not sync until an explicit redaction pass, privacy boundary, conflict handling, and promotion rules exist.
 
 Heiwa implication:
 
-- Canonical routing decisions, session state, leases, runs, artifacts, failures, and later policy/state subscriptions belong here.
+- Canonical routing decisions, session state, leases, runs, artifacts, and failures belong in the journal.
 - Provider subprocess control, shell access, and networked side effects stay in Rust runtime.
 
 ### Cloudflare
@@ -449,7 +460,7 @@ The minimum living system is:
 
 The repo has been moving in the right order:
 
-1. tighten the Rust/STDB authority substrate
+1. tighten the Rust runtime and evidence authority substrate
 2. land the local `heiwa` shell/runtime
 3. normalize provider accounts and auth status
 4. make bounded loop execution real
@@ -508,7 +519,7 @@ Near-term execution stays inside this threshold:
 2. Extend existing `heiwa doctor` checks before adding new command nouns.
 3. Add doctrine lint only where it protects existing authority boundaries.
 4. Extend `~/.heiwa/config.toml` for local profile and BYOX registration defaults rather than adding another profile file.
-5. Persist useful routing and execution evidence through the SpacetimeDB plane.
+5. Persist useful routing and execution evidence through the local JSONL journal.
 
 ### Stage 2: Heiwa becomes compelling
 
@@ -532,7 +543,7 @@ Expose the kernel progressively:
 
 This is where Heiwa stops being only a tool and becomes a substrate.
 
-Defer named platform surfaces such as `heiwa task`, `heiwa rules`, `heiwa registry`, and `heiwa optimize` until `heiwa doctor`, bounded local execution, and STDB-backed evidence are trustworthy on one machine.
+Defer named platform surfaces such as `heiwa task`, `heiwa rules`, `heiwa registry`, and `heiwa optimize` until `heiwa doctor`, bounded local execution, and journal-backed evidence are trustworthy on one machine.
 
 ### Stage 4: Heiwa becomes a team product
 
@@ -590,7 +601,7 @@ CLI, and similar agent surfaces.
   vendored Tauri/CEF sources.
 - Heiwa's defensible distinction is provider-peer local ownership: Claude Code,
   Codex, Gemini CLI, Antigravity, Ollama, APIs, local models, machines,
-  approvals, receipts, and STDB evidence sync under one operator seat.
+  approvals, receipts, and local evidence under one operator seat (GitHub evidence sync planned, redaction-gated).
 - Current gap: Heiwa does not yet match OpenHuman connector breadth or
   TokenJuice, nor Hermes skill self-improvement, gateway delivery, or cron
   breadth. Say "target" until runtime code proves parity.
@@ -625,7 +636,7 @@ Do not collapse everything into “plugins.”
 | **Provider adapters**   | Trusted system code that starts/stops providers and normalizes their streams |
 | **Tools**               | Callable actions such as shell, MCP, or local services                       |
 | **Hooks**               | User-facing block/modify/observe logic over event streams                    |
-| **Reducers / policies** | Highest-trust canonical logic in SpacetimeDB                                 |
+| **Policies**            | Highest-trust canonical routing/authority logic in the local runtime         |
 
 This separation is necessary for security, determinism, and platform clarity.
 
@@ -644,17 +655,17 @@ Useful product vocabulary:
 | **BYOD** | Bring your own data source                |
 | **BYOP** | Bring your own policy                     |
 
-Internal execution must still branch on the extension classes above: provider adapters, tools, hooks, and reducers or policies. A registered BYOX resource must be mapped into one of those classes before it can affect execution.
+Internal execution must still branch on the extension classes above: provider adapters, tools, hooks, and policies. A registered BYOX resource must be mapped into one of those classes before it can affect execution.
 
-Do not let reducers, provider adapters, or routing policy branch directly on broad BYOX labels. BYOX belongs at the registration and operator UX edge; extension classes belong in the runtime, security, and evidence core.
+Do not let policies, provider adapters, or routing logic branch directly on broad BYOX labels. BYOX belongs at the registration and operator UX edge; extension classes belong in the runtime, security, and evidence core.
 
 ## Security and Secret Boundaries
 
 The following rules are canonical:
 
-- Raw provider secrets should prefer local secure storage or another secure boundary, not casual STDB storage.
-- SpacetimeDB may store auth metadata, references, status, expiry, and audit/evidence facts.
-- Reducers and hooks should not receive unrestricted raw secrets.
+- Raw provider secrets should prefer local secure storage (Keychain, vault) — never the evidence journal, receipts, or any git-synced text.
+- The evidence journal may record auth metadata, references, status, expiry, and audit facts — never raw secrets.
+- Policies and hooks should not receive unrestricted raw secrets.
 - Local operator/runtime concerns must remain separate from tenant user auth.
 - Public web surfaces are not privileged control planes.
 
@@ -761,7 +772,7 @@ References:
 - device-aware routing
 - Rust as primary product implementation
 - Python as bounded compatibility surface
-- SpacetimeDB as canonical adjudication and evidence sync backend (the Evidence plane is the flow; STDB is the backend that materializes it)
+- Local JSONL journal as canonical evidence truth; Lance as derived recall; GitHub as the planned, redaction-gated sync path
 - progressive exposure of internals, not opaque platform behavior
 
 ## Companion Context Files
@@ -778,9 +789,9 @@ The repo-root files `IDENTITY.md` and `SOUL.md` are compatibility shims that for
 
 ## References
 
-1. [SpacetimeDB reducers overview](https://spacetimedb.com/docs/functions/reducers/)
-2. [SpacetimeDB functions overview](https://spacetimedb.com/docs/functions/)
-3. [SpacetimeDB subscriptions](https://spacetimedb.com/docs/subscriptions/)
+1. [SpacetimeDB reducers overview](https://spacetimedb.com/docs/functions/reducers/) — historical; STDB retired 2026-07-15
+2. [SpacetimeDB functions overview](https://spacetimedb.com/docs/functions/) — historical; STDB retired 2026-07-15
+3. [SpacetimeDB subscriptions](https://spacetimedb.com/docs/subscriptions/) — historical; STDB retired 2026-07-15
 4. [Cloudflare Workers routes and domains](https://developers.cloudflare.com/workers/configuration/routing/)
 5. [Cloudflare Pages overview](https://developers.cloudflare.com/pages/)
 6. [Junie BYOK](https://junie.jetbrains.com/docs/byok.html)
