@@ -1,6 +1,6 @@
 # Security
 
-Heiwa is a local-first operator runtime with a public-safe client and hosted state/evidence backbone. The platform boundary is intentionally narrow: public users see `heiwa.ltd`, `app.heiwa.ltd`, `status.heiwa.ltd`, `docs.heiwa.ltd`, and hosted runtime/API ingress at `api.heiwa.ltd` when deployed. Internal preview runtimes such as trading can remain isolated, but they are not part of the supported public surface until their isolation and operational posture are ready.
+Heiwa is a local-first operator runtime with a public-safe client. Durable user evidence stays on the owner machine; there is no hosted evidence authority. Public domains are support surfaces only when deployed. Internal preview runtimes such as trading remain isolated until their security posture is proven.
 
 ## Public surfaces
 
@@ -24,10 +24,11 @@ Heiwa is a local-first operator runtime with a public-safe client and hosted sta
 - The app shell should never hold platform secrets or make privileged decisions locally.
 - All user reads and mutations must be enforced by the installed or hosted runtime with tenant-scoped authorization.
 
-### Runtime API -> SpacetimeDB
+### Runtime API -> local evidence plane
 
-- SpacetimeDB is the authoritative ledger for users, OAuth identity metadata, credential references/status, runs, routes, missions, and billing events.
-- Multi-tenant data separation is enforced by `user_id` scoping throughout the route, state, database, and STDB layers.
+- Versioned JSONL under `~/.heiwa/evidence/` is canonical execution evidence; SQLite holds bounded hot state and Lance is a rebuildable recall index.
+- Raw journal streams never sync to GitHub until explicit redaction, privacy, conflict, and promotion rules exist.
+- User boundaries remain explicit throughout routes, state, receipts, and any future sync projection.
 - User auth and operator auth remain separate so operator tooling does not inherit user-facing trust.
 
 ### Runtime API -> provider APIs

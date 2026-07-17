@@ -280,8 +280,7 @@ async fn verify_openrouter(account: &mut ProviderAccount, api_key: &str) -> anyh
 
     if resp.status().is_success() {
         let body: serde_json::Value = resp.json().await?;
-        account.models =
-            openrouter_free_models(&body, &account.account_id, &account.rate_group);
+        account.models = openrouter_free_models(&body, &account.account_id, &account.rate_group);
         account.status = AccountStatus::Connected;
     } else {
         // Transient upstream error — key may still be valid.
@@ -350,9 +349,17 @@ fn openrouter_free_models(
 /// intents — class >= 4 is what earns the `advanced_coding` strength.
 fn openrouter_capability_class(id: &str) -> u8 {
     let lower = id.to_lowercase();
-    let big = ["70b", "72b", "235b", "405b", "671b", "deepseek-r1", "deepseek-v3"]
-        .iter()
-        .any(|hint| lower.contains(hint));
+    let big = [
+        "70b",
+        "72b",
+        "235b",
+        "405b",
+        "671b",
+        "deepseek-r1",
+        "deepseek-v3",
+    ]
+    .iter()
+    .any(|hint| lower.contains(hint));
     if big {
         3
     } else {
@@ -392,15 +399,19 @@ mod tests {
 
     #[test]
     fn openrouter_keeps_only_free_suffix_models() {
-        let models = openrouter_free_models(&sample_models_body(), "openrouter-api-3", "openrouter");
+        let models =
+            openrouter_free_models(&sample_models_body(), "openrouter-api-3", "openrouter");
         assert_eq!(models.len(), 2);
-        assert!(models.iter().all(|m| m.provider_model_id.ends_with(":free")));
+        assert!(models
+            .iter()
+            .all(|m| m.provider_model_id.ends_with(":free")));
         assert!(models.iter().all(|m| m.provider == "openrouter"));
     }
 
     #[test]
     fn openrouter_models_are_zero_cost_verified_in_account_rate_group() {
-        let models = openrouter_free_models(&sample_models_body(), "openrouter-api-3", "openrouter");
+        let models =
+            openrouter_free_models(&sample_models_body(), "openrouter-api-3", "openrouter");
         for m in &models {
             assert_eq!(m.account_id, "openrouter-api-3");
             assert_eq!(m.rate_group, "openrouter");

@@ -11,6 +11,10 @@ readme.workspace = true
 keywords.workspace = true
 categories.workspace = true
 
+[features]
+default = ["lance"]
+lance = ["heiwa-session/lance"]
+
 [[bin]]
 name = "heiwa"
 path = "src/main.rs"

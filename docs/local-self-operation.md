@@ -6,8 +6,9 @@ model.
 
 The goal is simple: the installed `heiwa` runtime should authenticate provider
 CLIs through their owner-managed configs, read/write local state under
-`~/.heiwa`, expose the cockpit on localhost, and sync evidence to SpacetimeDB
-only when that path is configured.
+`~/.heiwa`, expose the cockpit on localhost, append durable JSONL evidence, and
+derive local recall through Lance. Evidence sync to GitHub is planned but
+disabled until a redaction and privacy boundary exists.
 
 ## Required Local Inputs
 
@@ -17,10 +18,8 @@ only when that path is configured.
 | `~/.heiwa/accounts.json`                | Provider/account registry                                                                     |
 | `~/.heiwa/machine.json`                 | Local machine identity and capability manifest                                                |
 | `~/.heiwa/state/`                       | Local runtime state, approvals, worker heartbeats                                             |
+| `~/.heiwa/evidence/`                    | Canonical local JSONL evidence journal                                                        |
 | `~/.claude/`, `~/.codex/`, `~/.gemini/` | Provider-owned auth and hook posture                                                          |
-| `spacetime login` shell identity        | Optional SpacetimeDB Maincloud sync/adjudication auth; canonical publisher/operator path      |
-| `STDB_TOKEN`                            | Legacy/compat SpacetimeDB token material only; not the preferred Heiwa operator auth boundary |
-| `CLOUDFLARE_API_TOKEN`                  | Optional edge work only; not needed for local user functionality                              |
 
 ## Boot Contract
 
@@ -30,7 +29,7 @@ only when that path is configured.
 2. Report health at `/status/health`.
 3. Write local app worker heartbeats under `~/.heiwa/state`.
 4. Report provider, route, approval, worker, and hook posture without mutating provider-owned configs.
-5. Keep running without public DNS, Cloudflare auth, or SpacetimeDB connectivity.
+5. Keep running without public DNS, GitHub connectivity, or evidence sync.
 6. Refresh `~/.heiwa/machine.json` with current host, OS, arch, install path, runtime version, and capability probes.
 7. Adapt worker concurrency, polling cadence, and local-model use to machine load, battery, thermal state, and available runtimes.
 8. Surface pending update or restart requirements without interrupting active work.
@@ -109,7 +108,7 @@ On first boot or install, the runtime should:
 2. Record stable machine id, hostname, OS, arch, CPU/GPU class, memory, battery/thermal availability, install path, and runtime channel.
 3. Discover local providers and CLIs without mutating provider-owned configs.
 4. Discover local model runtimes such as Ollama.
-5. Register or sync machine identity with SpacetimeDB only when configured.
+5. Record machine identity locally; future cross-machine sync must be explicitly redaction-gated.
 6. Write a boot receipt under local evidence state.
 
 Adaptation rules:
@@ -119,7 +118,7 @@ Adaptation rules:
 - Machines with strong local models should take cheap sovereign work first.
 - Machines without local models should route through approved provider lanes.
 - Machine-specific provider auth stays local and provider-owned.
-- Cross-machine truth is synchronized through evidence and machine identity, not by sharing raw secrets.
+- Cross-machine sync is planned through redacted evidence and machine identity; raw secrets never participate.
 
 ## Agentic Runtime Workflow
 

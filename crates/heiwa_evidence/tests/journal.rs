@@ -4,8 +4,7 @@ use std::fs::OpenOptions;
 use std::io::Write;
 
 use heiwa_evidence::{
-    read_stream, EvidenceTransport, JsonlTransport, PersistedWorkerSession,
-    EVIDENCE_SCHEMA_VERSION,
+    read_stream, EvidenceTransport, JsonlTransport, PersistedWorkerSession, EVIDENCE_SCHEMA_VERSION,
 };
 
 fn sample_session(id: &str) -> PersistedWorkerSession {
@@ -81,7 +80,10 @@ fn replay_skips_corrupt_and_truncated_lines() {
 
     let stream = read_stream(dir.path(), "worker_sessions").expect("replay");
     assert_eq!(stream.events.len(), 2, "valid events survive corruption");
-    assert_eq!(stream.skipped_lines, 2, "corrupt + truncated lines are counted");
+    assert_eq!(
+        stream.skipped_lines, 2,
+        "corrupt + truncated lines are counted"
+    );
 }
 
 #[test]
@@ -95,7 +97,10 @@ fn replay_accepts_legacy_unversioned_lines() {
 
     let stream = read_stream(dir.path(), "worker_sessions").expect("replay");
     assert_eq!(stream.events.len(), 1);
-    assert_eq!(stream.events[0].v, 0, "legacy lines report schema version 0");
+    assert_eq!(
+        stream.events[0].v, 0,
+        "legacy lines report schema version 0"
+    );
     assert_eq!(
         stream.events[0].record["session_id"].as_str(),
         Some("legacy")
@@ -134,9 +139,15 @@ fn concurrent_appends_from_independent_transports_do_not_tear_lines() {
 fn journal_summary_reports_stream_counts_and_skips() {
     let dir = tempfile::tempdir().expect("tempdir");
     let transport = JsonlTransport::new(dir.path().to_path_buf()).expect("transport");
-    transport.upsert_worker_session(sample_session("s1")).unwrap();
-    transport.upsert_worker_session(sample_session("s2")).unwrap();
-    transport.journal("node_heartbeats", serde_json::json!({"node": "n1"})).unwrap();
+    transport
+        .upsert_worker_session(sample_session("s1"))
+        .unwrap();
+    transport
+        .upsert_worker_session(sample_session("s2"))
+        .unwrap();
+    transport
+        .journal("node_heartbeats", serde_json::json!({"node": "n1"}))
+        .unwrap();
     let mut file = OpenOptions::new()
         .append(true)
         .open(dir.path().join("worker_sessions.jsonl"))

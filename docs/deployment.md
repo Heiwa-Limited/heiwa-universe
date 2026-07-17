@@ -72,30 +72,25 @@ mutate `~/.heiwa`.
 Deployment gate:
 
 - Cloudflare changes must be tested against local/static build output first.
-- SpacetimeDB schema or reducer changes must be built locally before publish.
+- Evidence schema and Lance migration changes must be tested locally before promotion.
 - GitHub Releases serve as a secondary emergency archive; local sandbox verification remains the canonical gate.
 
 ## Protected Backend Workflow
 
-GitHub, Cloudflare, and SpacetimeDB are protected company backends with separate
-authority.
+GitHub and Cloudflare are protected company services with separate authority.
 
 | Backend     | Protected role                                               | Safe update path                                                                        |
 | ----------- | ------------------------------------------------------------ | --------------------------------------------------------------------------------------- |
 | GitHub      | source, tag archive, releases, checksums, install provenance | local sandbox checks passed, local merge, push to main, tagged release                  |
 | Cloudflare  | DNS, WAF, public docs/app shell, install/update front door   | GitHub-driven deploys or explicit owner-approved `wrangler` deploys                     |
-| SpacetimeDB | canonical state, reducers, leases, evidence, subscriptions   | schema/reducer changes reviewed in repo, bindings regenerated, publish gated separately |
 
 Rules:
 
 - Do not use Cloudflare as a second binary/source authority. It may front
   GitHub-backed install and update metadata.
-- Do not mutate SpacetimeDB production schema or reducers directly from an agent
-  session unless the operator explicitly approves a production publish.
-- Do not put provider secrets, Cloudflare tokens, STDB tokens, or user runtime
+- Do not put provider secrets, Cloudflare tokens, or user runtime
   state in GitHub.
-- Keep user-machine state under `~/.heiwa` and sync only approved evidence or
-  reducer-backed state to SpacetimeDB.
+- Keep user-machine state under `~/.heiwa`; any future GitHub evidence projection must be redacted and explicitly enabled.
 - Bypassing GitHub Actions and CI checks is standard posture; verify entirely in local sandbox instead of waiting for remote checks.
 
 ## CI contract

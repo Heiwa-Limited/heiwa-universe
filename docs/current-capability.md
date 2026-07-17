@@ -12,7 +12,7 @@
 
 - The installed runtime is the current product center of gravity.
 - DREX routing, provider/session/protocol crates, execution scopes, tool leases, and receipts are the live runtime spine.
-- SpacetimeDB is the backend adjudication, subscription, and evidence plane.
+- Local JSONL is the canonical evidence plane; Lance is the derived local recall index.
 - GitHub Actions, Pages, and Releases are the current repo-native validation and publication path.
 - Cloudflare is optional support infrastructure for public edge needs; hosted services do not define the default operator experience.
 - Public status is event-first when exposed, with HTTP diagnostics as fallback.
@@ -23,7 +23,7 @@
 - iMessage as a productized ingress surface
 - broad computer-use automation
 - `Heiwa.app` as a fully native desktop runtime
-- a Cloudflare/STDB/GitHub backbone with local runtime hot-path execution
+- cross-device evidence sync or a hosted state backbone
 - `heiwa-limited` as an active product target
 - experimental canvases as part of the supported stack
 - placeholder agent personas as productized capabilities

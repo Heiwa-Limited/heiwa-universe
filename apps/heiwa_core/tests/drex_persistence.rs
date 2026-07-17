@@ -1,16 +1,16 @@
 use std::sync::{Arc, Mutex};
 
 use anyhow::Result;
-use heiwa_protocol::ModelTier;
 use heiwa_core::drex::{
     DrexAuthorityGate, DrexDecision, DrexScoreCard, DrexVector, ExecutionMode, ResolutionTier,
     RoutePlan,
 };
 use heiwa_core::evidence::{
-    PersistedArtifact, PersistedDispatchAck, PersistedDrexDecision, PersistedDrexFailure,
-    PersistedRunFailure, PersistedRunReceipt, PersistedWorkerLease, PersistedWorkerSession,
-    EvidenceRuntime, EvidenceTransport,
+    EvidenceRuntime, EvidenceTransport, PersistedArtifact, PersistedDispatchAck,
+    PersistedDrexDecision, PersistedDrexFailure, PersistedRunFailure, PersistedRunReceipt,
+    PersistedWorkerLease, PersistedWorkerSession,
 };
+use heiwa_protocol::ModelTier;
 
 #[derive(Clone, Default)]
 struct MemoryTransport {

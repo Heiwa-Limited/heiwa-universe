@@ -53,11 +53,21 @@ fn worker_state_view_folds_last_record_per_key() {
     let dir = tempfile::tempdir().expect("tempdir");
     let transport = JsonlTransport::new(dir.path().to_path_buf()).expect("transport");
 
-    transport.upsert_worker_session(session("s1", "active")).unwrap();
-    transport.upsert_worker_session(session("s2", "active")).unwrap();
-    transport.upsert_worker_session(session("s1", "busy")).unwrap();
-    transport.upsert_worker_lease(lease("l1", "s1", "issued")).unwrap();
-    transport.upsert_worker_lease(lease("l1", "s1", "completed")).unwrap();
+    transport
+        .upsert_worker_session(session("s1", "active"))
+        .unwrap();
+    transport
+        .upsert_worker_session(session("s2", "active"))
+        .unwrap();
+    transport
+        .upsert_worker_session(session("s1", "busy"))
+        .unwrap();
+    transport
+        .upsert_worker_lease(lease("l1", "s1", "issued"))
+        .unwrap();
+    transport
+        .upsert_worker_lease(lease("l1", "s1", "completed"))
+        .unwrap();
 
     let view = WorkerStateView::replay(dir.path()).expect("replay");
     assert_eq!(view.sessions.len(), 2);
@@ -72,7 +82,9 @@ fn worker_state_view_applies_session_close_tombstones() {
     let dir = tempfile::tempdir().expect("tempdir");
     let transport = JsonlTransport::new(dir.path().to_path_buf()).expect("transport");
 
-    transport.upsert_worker_session(session("s1", "active")).unwrap();
+    transport
+        .upsert_worker_session(session("s1", "active"))
+        .unwrap();
     transport.close_session("s1".to_string()).unwrap();
 
     let view = WorkerStateView::replay(dir.path()).expect("replay");
@@ -84,10 +96,18 @@ fn recover_interrupted_closes_live_sessions_and_revokes_open_leases() {
     let dir = tempfile::tempdir().expect("tempdir");
     let transport = JsonlTransport::new(dir.path().to_path_buf()).expect("transport");
 
-    transport.upsert_worker_session(session("live", "active")).unwrap();
-    transport.upsert_worker_session(session("done", "closed")).unwrap();
-    transport.upsert_worker_lease(lease("open", "live", "acked")).unwrap();
-    transport.upsert_worker_lease(lease("finished", "live", "completed")).unwrap();
+    transport
+        .upsert_worker_session(session("live", "active"))
+        .unwrap();
+    transport
+        .upsert_worker_session(session("done", "closed"))
+        .unwrap();
+    transport
+        .upsert_worker_lease(lease("open", "live", "acked"))
+        .unwrap();
+    transport
+        .upsert_worker_lease(lease("finished", "live", "completed"))
+        .unwrap();
 
     let report = recover_interrupted(dir.path(), &transport).expect("recover");
     assert_eq!(report.sessions_closed, 1);
@@ -96,7 +116,10 @@ fn recover_interrupted_closes_live_sessions_and_revokes_open_leases() {
     let view = WorkerStateView::replay(dir.path()).expect("replay after recovery");
     assert_eq!(view.sessions["live"].status, "closed");
     assert!(view.sessions["live"].closed_at.is_some());
-    assert_eq!(view.sessions["done"].status, "closed", "already closed untouched");
+    assert_eq!(
+        view.sessions["done"].status, "closed",
+        "already closed untouched"
+    );
     assert_eq!(view.leases["open"].status, "revoked");
     assert_eq!(
         view.leases["open"].failure_code.as_deref(),
@@ -115,10 +138,18 @@ fn compact_stream_keeps_only_last_record_per_key() {
     let dir = tempfile::tempdir().expect("tempdir");
     let transport = JsonlTransport::new(dir.path().to_path_buf()).expect("transport");
 
-    transport.upsert_worker_session(session("s1", "active")).unwrap();
-    transport.upsert_worker_session(session("s1", "busy")).unwrap();
-    transport.upsert_worker_session(session("s1", "closed")).unwrap();
-    transport.upsert_worker_session(session("s2", "active")).unwrap();
+    transport
+        .upsert_worker_session(session("s1", "active"))
+        .unwrap();
+    transport
+        .upsert_worker_session(session("s1", "busy"))
+        .unwrap();
+    transport
+        .upsert_worker_session(session("s1", "closed"))
+        .unwrap();
+    transport
+        .upsert_worker_session(session("s2", "active"))
+        .unwrap();
 
     let report = compact_stream(dir.path(), "worker_sessions", "session_id").expect("compact");
     assert_eq!(report.records_before, 4);

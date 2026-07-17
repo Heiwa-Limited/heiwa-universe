@@ -6,8 +6,8 @@
 use anyhow::{anyhow, Result};
 
 use crate::journal::{EvidenceTransport, NoopTransport};
-use crate::records::*;
 use crate::now_ms;
+use crate::records::*;
 
 #[derive(Debug)]
 pub struct EvidenceRuntime<T: EvidenceTransport = NoopTransport> {

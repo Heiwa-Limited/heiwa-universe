@@ -2,8 +2,8 @@ use std::process::Command;
 
 #[test]
 fn shell_boots_local_first() {
-    let output = Command::new("cargo")
-        .args(["run", "-p", "heiwa-shell", "--bin", "heiwa", "--", "doctor"])
+    let output = Command::new(env!("CARGO_BIN_EXE_heiwa"))
+        .arg("doctor")
         .output()
         .expect("failed to execute");
 

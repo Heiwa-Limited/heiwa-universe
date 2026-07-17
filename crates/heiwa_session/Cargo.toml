@@ -11,6 +11,10 @@ readme.workspace = true
 keywords.workspace = true
 categories.workspace = true
 
+[features]
+default = []
+lance = ["heiwa-embed/lance"]
+
 [dependencies]
 anyhow = "1.0"
 heiwa-config = { path = "../heiwa_config", package = "heiwa_config" }

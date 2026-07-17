@@ -1375,8 +1375,7 @@ fn scan_goals_fingerprint() -> HashSet<(String, u64)> {
 }
 
 fn scan_dispatch_ids(subdir: &str) -> HashSet<String> {
-    let home = crate::home::heiwa_home()
-        .unwrap_or_else(|| PathBuf::from("."));
+    let home = crate::home::heiwa_home().unwrap_or_else(|| PathBuf::from("."));
     let dir = home
         .join(".heiwa")
         .join("state")

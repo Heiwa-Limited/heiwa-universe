@@ -15,9 +15,9 @@ use anyhow::Result;
 use serde_json::Value;
 
 use crate::journal::{lock_stream, stream_path, EvidenceTransport};
+use crate::now_iso;
 use crate::records::{PersistedWorkerLease, PersistedWorkerSession};
 use crate::replay::read_stream;
-use crate::now_iso;
 
 /// Read model over the worker journal streams: latest snapshot per session
 /// and lease, with `session_closes` tombstones applied.

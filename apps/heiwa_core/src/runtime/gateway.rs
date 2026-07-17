@@ -22,10 +22,10 @@ use tracing::{info, warn};
 use crate::{
     auth::verify_jwt,
     drex::{default_policy, plan_route, DrexIngress},
+    evidence::{EvidenceTransport, PersistedArtifact, PersistedRunReceipt},
     runtime::state::{
         RegistryErrorCode, SharedState, WorkerProtocolFlavor, WorkerSessionRegistration,
     },
-    evidence::{EvidenceTransport, PersistedArtifact, PersistedRunReceipt},
 };
 const WORKER_PROTOCOL_VERSION: &str = "v1";
 const HEARTBEAT_INTERVAL_MS: u64 = 30_000;

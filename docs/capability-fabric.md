@@ -34,7 +34,7 @@ flowchart LR
     leases --> workers["Subagents + providers + containers"]
     workers --> evidence["Receipts + artifacts + status"]
     evidence --> user["Clear user updates"]
-    evidence --> state["SpacetimeDB state/evidence"]
+    evidence --> state["Local JSONL truth + Lance recall"]
 ```
 
 ## Connector Contract
@@ -88,7 +88,7 @@ Promotion path:
    rollback/undo posture are proven.
 
 This applies equally to OpenAI, Anthropic, Google, Ollama, GitHub, Rust, Python,
-TypeScript, SpacetimeDB, WebAssembly, and future OSS/SOTA runtimes. The source
+TypeScript, Lance, WebAssembly, and future OSS/SOTA runtimes. The source
 pack may be broad; the executable integration must stay narrow.
 
 ## First Connector Lanes
@@ -147,7 +147,7 @@ Heiwa's trust model is capability-first:
 
 - least-privilege scopes by default
 - local Keychain or equivalent for raw user secrets
-- SpacetimeDB stores metadata, references, leases, and evidence, not casual raw secrets
+- local JSONL stores canonical metadata, leases, and evidence; Lance stores derived vectors, never raw secrets
 - short-lived leases for write-capable tools
 - approval gates for money, messaging, deletion, publishing, production, and computer control
 - revocation must be visible and testable per connector
@@ -182,7 +182,7 @@ Heiwa should decompose capability execution by runtime fit:
 | TypeScript client contracts   | Heiwa.app, typed cockpit clients, connector setup UX, generated bindings           |
 | Shell bootstrap glue          | install, update, doctor, provider CLI resolution, operator probes                  |
 | Python compatibility workers  | document/R&D tasks and existing Python package compatibility when isolated         |
-| SpacetimeDB reducers/clients  | deterministic sync, subscriptions, evidence, type-safe cross-device state          |
+| Local JSONL + Lance           | durable evidence, deterministic replay, recovery, and derived local recall          |
 | WebAssembly plugin sandbox    | portable low-level modules with embedder-controlled imports                        |
 | Ollama/local model lane       | cheap private inference, embeddings, summaries, local classification               |
 | Provider-owned agent runtimes | Codex, Claude Code, Gemini CLI, Antigravity, and future peers as delegated workers |

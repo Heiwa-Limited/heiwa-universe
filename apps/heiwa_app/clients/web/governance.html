@@ -59,7 +59,7 @@
           <h2>Execution Boundaries</h2>
           <ul>
             <li>The operator hosts the runtime, app, and REPL locally.</li>
-            <li>Cloudflare Pages hosts marketing, docs, and the read-only status shell.</li>
+            <li>GitHub Pages hosts public static shells; Cloudflare supplies DNS only.</li>
             <li>Public edge paths exist for delivery, status, and identity exchange only.</li>
           </ul>
         </article>
@@ -75,9 +75,10 @@
           </p>
         </div>
         <div class="callout-metrics">
-          <div><span>Public docs</span><strong>Cloudflare Pages</strong></div>
+          <div><span>Public docs</span><strong>GitHub Pages</strong></div>
+          <div><span>DNS</span><strong>Cloudflare DNS</strong></div>
           <div><span>Runtime host</span><strong>Installed local runtime</strong></div>
-          <div><span>State direction</span><strong>SpacetimeDB</strong></div>
+          <div><span>State direction</span><strong>Local JSONL + Lance</strong></div>
         </div>
       </section>
     </main>

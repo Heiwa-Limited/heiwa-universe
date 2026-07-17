@@ -192,7 +192,7 @@ impl LoopController {
             let turn_ended_at = Utc::now().to_rfc3339();
             last_summary = output_summary.clone();
 
-            // 4. Record Evidence in STDB
+            // 4. Record evidence in the local journal.
             let run_id = format!("run-{}", Uuid::new_v4());
             let turn_cost = if turn_usage.cost_usd > 0.0 {
                 turn_usage.cost_usd

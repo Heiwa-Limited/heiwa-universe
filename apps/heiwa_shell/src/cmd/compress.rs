@@ -387,8 +387,7 @@ fn sha1_hex(s: &str) -> String {
 }
 
 pub(crate) fn receipts_dir() -> PathBuf {
-    let home = crate::home::heiwa_home()
-        .unwrap_or_else(|| PathBuf::from("."));
+    let home = crate::home::heiwa_home().unwrap_or_else(|| PathBuf::from("."));
     home.join(".heiwa")
         .join("state")
         .join("evidence")

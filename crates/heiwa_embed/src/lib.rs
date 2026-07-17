@@ -43,9 +43,7 @@ pub enum VectorBackend {
 impl VectorBackend {
     pub fn open_from_config(config: &EmbeddingConfig) -> Result<Self> {
         match config.backend {
-            EmbedBackend::Sqlite => Ok(Self::Sqlite(SqliteVectorStore::open(
-                &config.sqlite_path,
-            )?)),
+            EmbedBackend::Sqlite => Ok(Self::Sqlite(SqliteVectorStore::open(&config.sqlite_path)?)),
             #[cfg(feature = "lance")]
             EmbedBackend::Lance => Ok(Self::Lance(LanceVectorStore::open(
                 &config.lance_path,
@@ -418,7 +416,10 @@ mod tests {
 
         let rows = store.all_embeddings().expect("dump");
         assert_eq!(rows.len(), 2);
-        let entry = rows.iter().find(|row| row.session_id == "a").expect("row a");
+        let entry = rows
+            .iter()
+            .find(|row| row.session_id == "a")
+            .expect("row a");
         assert_eq!(entry.entry_id, 1);
         assert_eq!(entry.model, "m");
         assert_eq!(entry.vector, vec![1.0, 0.0]);
@@ -443,7 +444,9 @@ mod tests {
         let config = test_config(dir.path(), EmbedBackend::Sqlite);
         let store = VectorBackend::open_from_config(&config).expect("open");
         assert_eq!(store.backend_name(), "sqlite");
-        store.upsert("s", 1, "test-model", &[1.0, 0.0, 0.0]).expect("upsert");
+        store
+            .upsert("s", 1, "test-model", &[1.0, 0.0, 0.0])
+            .expect("upsert");
         let results = store
             .top_k_similar("s", &[1.0, 0.0, 0.0], 1)
             .expect("query");
@@ -467,7 +470,9 @@ mod tests {
         let config = test_config(dir.path(), EmbedBackend::Lance);
         let store = VectorBackend::open_from_config(&config).expect("open");
         assert_eq!(store.backend_name(), "lance");
-        store.upsert("s", 1, "test-model", &[1.0, 0.0, 0.0]).expect("upsert");
+        store
+            .upsert("s", 1, "test-model", &[1.0, 0.0, 0.0])
+            .expect("upsert");
         let results = store
             .top_k_similar("s", &[1.0, 0.0, 0.0], 1)
             .expect("query");
@@ -482,7 +487,9 @@ mod tests {
         let sqlite = SqliteVectorStore::open(&dir.path().join("memory.sqlite3")).expect("sqlite");
         sqlite.upsert("s", 1, "m", &[1.0, 0.0, 0.0]).expect("row 1");
         sqlite.upsert("s", 2, "m", &[0.0, 1.0, 0.0]).expect("row 2");
-        sqlite.upsert("other", 3, "m", &[0.0, 0.0, 1.0]).expect("row 3");
+        sqlite
+            .upsert("other", 3, "m", &[0.0, 0.0, 1.0])
+            .expect("row 3");
 
         let lance = LanceVectorStore::open(&dir.path().join("lance"), 3).expect("lance");
         let migrated = migrate_sqlite_embeddings(&sqlite, &lance).expect("migrate");

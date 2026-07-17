@@ -137,7 +137,7 @@ Compression:
 
 > Native context window = working memory.
 > Heiwa local state = current durable owner memory.
-> Lance + GitHub = evidence truth and sync plane (text truth in git, Lance recall index derived locally).
+> Local JSONL = evidence truth. Lance = derived recall. GitHub = planned, redaction-gated sync path.
 > Harness job = decide what enters working memory, when, and why.
 
 ## What Heiwa Is

@@ -6,7 +6,7 @@
 | :---------------------------- | :--------------------------------------------- | :------------------------------ | :------------------------------------------------------------------------------------------- |
 | Installed operator runtime    | `heiwa` on the user's machine                  | Active                          | Primary cockpit, routing, bounded execution, and provider-wrapping surface                   |
 | Local/provider runtimes       | Ollama, provider CLIs, API providers           | Wrapped                         | Provider-owned auth, quota, inference, and native tooling remain provider-owned              |
-| Backend evidence plane        | SpacetimeDB maincloud                          | Active target                   | Backend adjudication, subscription, and evidence ledger on `maincloud.spacetimedb.com`       |
+| Evidence and recall           | Local JSONL + Lance                            | Active                          | JSONL is canonical evidence; Lance is a derived, rebuildable local recall index               |
 | Source control / CI / release | GitHub                                         | Active                          | Repo, pull requests, Actions, Releases, and release evidence                                 |
 | Public docs                   | GitHub Pages                                   | Active                          | MkDocs Material documentation from this repository                                           |
 | Hosted services               | Owner-managed local or Cloudflare-backed hosts | Optional support infrastructure | Disabled for the owner-first phase unless a specific service graduates with approval         |

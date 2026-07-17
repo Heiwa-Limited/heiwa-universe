@@ -87,9 +87,7 @@ impl LanceVectorStore {
             .to_str()
             .ok_or_else(|| anyhow!("non-utf8 lance dataset path"))?
             .to_string();
-        let conn = run_blocking(&runtime, async {
-            lancedb::connect(&uri).execute().await
-        })?;
+        let conn = run_blocking(&runtime, async { lancedb::connect(&uri).execute().await })?;
         Ok(Self {
             conn,
             runtime: Some(runtime),
@@ -98,9 +96,7 @@ impl LanceVectorStore {
     }
 
     fn runtime(&self) -> &tokio::runtime::Runtime {
-        self.runtime
-            .as_ref()
-            .expect("runtime present until drop")
+        self.runtime.as_ref().expect("runtime present until drop")
     }
 
     fn schema(&self) -> Arc<Schema> {
@@ -156,9 +152,10 @@ impl LanceVectorStore {
             // (corruption, permissions, version skew) must surface as-is —
             // masking it behind a create attempt would hide real damage.
             Err(lancedb::Error::TableNotFound { .. }) => {
-                let empty: Box<dyn RecordBatchReader + Send> = Box::new(
-                    RecordBatchIterator::new(std::iter::empty::<Result<RecordBatch, ArrowError>>(), self.schema()),
-                );
+                let empty: Box<dyn RecordBatchReader + Send> = Box::new(RecordBatchIterator::new(
+                    std::iter::empty::<Result<RecordBatch, ArrowError>>(),
+                    self.schema(),
+                ));
                 self.conn
                     .create_table(TABLE_NAME, empty)
                     .execute()
@@ -203,7 +200,9 @@ impl LanceVectorStore {
         run_blocking(self.runtime(), async {
             let table = self.table().await?;
             let mut merge = table.merge_insert(&["session_id", "entry_id"]);
-            merge.when_matched_update_all(None).when_not_matched_insert_all();
+            merge
+                .when_matched_update_all(None)
+                .when_not_matched_insert_all();
             let reader: Box<dyn RecordBatchReader + Send> = Box::new(RecordBatchIterator::new(
                 vec![Ok::<RecordBatch, ArrowError>(batch)].into_iter(),
                 schema,

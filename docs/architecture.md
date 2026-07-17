@@ -2,14 +2,14 @@
 
 ## Product Stack
 
-Heiwa uses a narrow split between installed execution, backend state, hosted support, and public presentation:
+Heiwa uses a narrow split between installed execution, local durable state, and repository-backed distribution:
 
 - **Installed `heiwa` runtime** is the primary execution surface. It owns local routing, bounded execution, provider wrapping, and operator UX.
 - **Installed Heiwa.app** is the primary user input/display surface. It lives under the user's HOME-local Heiwa root and renders the runtime state without becoming a second authority.
 - **Rust workspace services** own the current execution kernel, DREX routing, provider/session/protocol crates, connector gates, and release artifacts.
-- **SpacetimeDB** is the backend adjudication, subscription, and evidence plane on `maincloud.spacetimedb.com`.
+- **Local JSONL journals** are canonical evidence truth; **Lance** is a derived, rebuildable local recall index.
 - **Owner-managed local and approved hosted support** may run specific Heiwa services where always-on infrastructure is needed, but support hosts are not the product center.
-- **GitHub and Cloudflare edge infrastructure** publish docs, releases, CI evidence, and public shells. Public surfaces should not duplicate privileged runtime behavior.
+- **GitHub** publishes source, docs, releases, and CI evidence. **Cloudflare** is DNS utility only.
 - **WebSockets** carry live status/event transport when a runtime exposes them.
 
 ## Capability Fabric
@@ -39,7 +39,6 @@ The canonical active repo is `/Users/dmcgregsauce/heiwa-universe`.
 
 ## State bindings
 
-- Current STDB-facing Rust work lives in `apps/heiwa_core/src/stdb/`, `apps/heiwa_orchestrator/src/stdb/`, and `crates/heiwa_stdb/`.
-- `legacy/apps/heiwa_hub/spacetimedb/` is quarantined migration/reference material. Do not treat it as the active product spine.
-- `packages/heiwa_bindings/rust/` and `packages/heiwa_bindings/typescript/` are generated bindings for STDB-facing contracts.
-- Python currently uses the typed bridge in `packages/heiwa_sdk/heiwa_sdk/spacetimedb.py` until a stable generator path is adopted.
+- `crates/heiwa_evidence/` owns versioned JSONL journals, replay, compaction, and recovery.
+- `crates/heiwa_embed/` owns SQLite/Lance vector backends; Lance data is derived and rebuildable.
+- Python SDK adapters that mention the retired backend are compatibility-only and are not runtime authority.

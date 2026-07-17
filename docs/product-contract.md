@@ -97,23 +97,19 @@ settings. It should not become the everyday operator path.
 It must not hold raw provider secrets, bypass runtime policy, or become the place
 where privileged automation logic lives.
 
-### 3. Heiwa Cloud Backbone
+### 3. Heiwa Distribution Backbone
 
-The target posture is a 99.99%-grade hosted backbone. That is a product target,
-not a current SLA claim until uptime, alerting, failover, and incident evidence
-exist.
-
-The enterprise-grade hosted backbone target is:
+The current backbone keeps runtime authority on the operator machine:
 
 | Service               | Product role                                                      |
 | --------------------- | ----------------------------------------------------------------- |
 | GitHub                | source, CI, release artifacts, installer, public repo front page  |
-| Cloudflare            | public edge, DNS, Pages/Workers, WAF, static clients, status/docs |
-| SpacetimeDB Maincloud | canonical state, reducers, subscriptions, evidence ledger         |
+| Cloudflare            | DNS utility only                                                   |
+| Local JSONL + Lance   | canonical evidence plus derived local recall                       |
 
-The target is a highly available control and evidence backbone, not a hosted
-agent that performs all user actions remotely. Local runtimes still execute
-local side effects and hold local trust.
+This is not a hosted control plane. Local runtimes execute side effects, hold
+trust, and own durable state. GitHub evidence sync is planned and must remain
+redaction-gated.
 
 Current boundary: there is no hosted Rust service tier in the v0.1 topology.
 The local runtime owns provider streams, shell work, local models, approvals,
@@ -148,11 +144,10 @@ treated as product-grade.
 
 | Service boundary | Runs where        | Owns                                                                  | Must not own                                  |
 | ---------------- | ----------------- | --------------------------------------------------------------------- | --------------------------------------------- |
-| Local runtime    | Devon/user device | side effects, provider subprocesses, local secrets, local model calls | canonical multi-device truth                  |
-| Cloudflare edge  | Cloudflare        | static/public clients, routing, WAF, status/docs edge                 | raw provider secrets or privileged automation |
-| SpacetimeDB      | Maincloud         | canonical state transitions, subscriptions, evidence, leases          | shell/browser/computer-use side effects       |
-| GitHub           | GitHub            | source, CI, releases, install distribution                            | live user state or private runtime memory     |
-| Public website   | Cloudflare/GitHub | marketing, docs, install, public repo trust                           | privileged control-plane mutations            |
+| Local runtime    | Devon/user device | side effects, provider subprocesses, secrets, JSONL evidence, Lance recall | hosted authority or unredacted sync        |
+| Cloudflare DNS   | Cloudflare        | DNS records                                                           | state, application hosting, or automation  |
+| GitHub           | GitHub            | source, CI, releases, install distribution                             | live user state or private runtime memory  |
+| Public website   | GitHub Pages      | marketing, docs, install, public repo trust                            | privileged control-plane mutations         |
 
 ## Feature Families
 
@@ -210,7 +205,7 @@ Unsafe as public product claims until proven:
 These are not standalone products right now:
 
 - DREX as a public brand
-- SpacetimeDB as an operator surface
+- Lance or GitHub as an operator surface
 - any hosted Rust service tier as the v0.1 product center
 - Discord as the only interface
 - a generic web IDE

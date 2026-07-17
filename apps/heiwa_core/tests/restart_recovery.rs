@@ -57,7 +57,9 @@ fn startup_closes_sessions_and_leases_left_live_by_previous_runtime() {
     // Previous runtime: registered a session, dispatched a lease, then died.
     let previous = JsonlTransport::new(dir.path().to_path_buf()).expect("transport");
     previous.upsert_worker_session(live_session("s1")).unwrap();
-    previous.upsert_worker_lease(open_lease("lease-1", "s1")).unwrap();
+    previous
+        .upsert_worker_lease(open_lease("lease-1", "s1"))
+        .unwrap();
     drop(previous);
 
     // New runtime boots against the same journal.

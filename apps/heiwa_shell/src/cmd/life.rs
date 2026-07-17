@@ -165,7 +165,10 @@ fn today(args: &[String]) -> Result<()> {
             println!("    ... {} more", snapshot.pending_approvals.len() - 5);
         }
     }
-    println!("  provider_runtime: evidence={}", snapshot.runtime.evidence_mode);
+    println!(
+        "  provider_runtime: evidence={}",
+        snapshot.runtime.evidence_mode
+    );
     println!("  next: heiwa life freshness --json | heiwa approvals list");
     Ok(())
 }

@@ -5,39 +5,10 @@
 echo "[HEIWA] Initializing Core Runtime..."
 
 # 1. Environment Defaults
-export HEIWA_STATE_BACKEND="${HEIWA_STATE_BACKEND:-spacetimedb}"
-export STDB_SERVER="${STDB_SERVER:-maincloud}"
-export STDB_IDENTITY="${STDB_IDENTITY:-heiwaproductiondb}"
+export HEIWA_STATE_BACKEND="${HEIWA_STATE_BACKEND:-local-jsonl}"
 export PATH=$PATH:/usr/local/bin:/root/.local/bin
 
-# 2. Optional Local State Management (Dev Only)
-if [[ "$HEIWA_STATE_BACKEND" == "spacetimedb" && "$STDB_SERVER" == "local" ]]; then
-    echo "[HEIWA] Verifying local SpacetimeDB..."
-    if command -v spacetime &>/dev/null; then
-        if ! curl -s http://127.0.0.1:3000/v1/health >/dev/null; then
-            echo "[HEIWA] Starting local SpacetimeDB instance..."
-            STDB_DATA_DIR="${STDB_DATA_DIR:-}"
-            if [[ -n "$STDB_DATA_DIR" ]]; then
-                mkdir -p "$STDB_DATA_DIR"
-                spacetime start --listen-addr 127.0.0.1:3000 --data-dir "$STDB_DATA_DIR" &
-            else
-                spacetime start --listen-addr 127.0.0.1:3000 &
-            fi
-            sleep 5
-        fi
-        
-        # Publish module locally if in dev
-        STDB_PROJECT_DIR="apps/heiwa_hub/spacetimedb"
-        if [[ -d "$STDB_PROJECT_DIR" ]]; then
-            echo "[HEIWA] Publishing local module..."
-            (cd "$STDB_PROJECT_DIR" && spacetime publish --server "$STDB_SERVER" "$STDB_IDENTITY") || true
-        fi
-    else
-        echo "[HEIWA] WARN: local STDB requested but spacetime CLI is unavailable."
-    fi
-fi
-
-# 3. Net Policy Bootstrap
+# 2. Net Policy Bootstrap
 HEIWA_HOME_DIR="${HEIWA_HOME:-/root/.heiwa}"
 HEIWA_NET_POLICY_TARGET="$HEIWA_HOME_DIR/policy/internet/net_policy_v2.json"
 HEIWA_NET_POLICY_BOOTSTRAP_PATH="${HEIWA_NET_POLICY_BOOTSTRAP_PATH:-/app/policies/net_policy_v2.cloud_hq.json}"
@@ -47,7 +18,7 @@ if [[ ! -f "$HEIWA_NET_POLICY_TARGET" && -f "$HEIWA_NET_POLICY_BOOTSTRAP_PATH" ]
     echo "[HEIWA] Bootstrapped net policy."
 fi
 
-# 4. Inject CLI tool credentials from environment variables.
+# 3. Inject CLI tool credentials from environment variables.
 # These values are provided by the operator/runtime shell and are translated
 # into the files/env vars that each CLI tool expects on headless Linux.
 
@@ -127,7 +98,7 @@ if [[ -n "${CLOUDFLARE_API_TOKEN:-}" ]]; then
     echo "[HEIWA] Cloudflare API token injected."
 fi
 
-# 5. Verify CLI tool availability and auth
+# 4. Verify CLI tool availability and auth
 echo "[HEIWA] CLI tools:"
 if command -v claude &>/dev/null; then
     CLAUDE_VER=$(claude --version 2>/dev/null | head -1)
@@ -184,7 +155,7 @@ if command -v gpg &>/dev/null; then
     fi
 fi
 
-# 6. Launch the Rust Core
+# 5. Launch the Rust Core
 if [[ ! -f "/usr/local/bin/heiwa-core" ]]; then
     echo "[HEIWA] ERROR: /usr/local/bin/heiwa-core not found." >&2
     exit 1

@@ -51,7 +51,10 @@ pub fn read_stream(dir: &Path, kind: &str) -> Result<ReplayedStream> {
             continue;
         }
         let line = String::from_utf8_lossy(chunk);
-        match serde_json::from_str::<Value>(&line).ok().and_then(parse_event) {
+        match serde_json::from_str::<Value>(&line)
+            .ok()
+            .and_then(parse_event)
+        {
             Some(event) => stream.events.push(event),
             None => stream.skipped_lines += 1,
         }

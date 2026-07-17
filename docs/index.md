@@ -15,7 +15,7 @@ Three planes compose one flow:
 
 - **Intake** — operator command bar and passive feeds (mail, calendar, messages, files, runtime alerts).
 - **Execution** — DREX routes work to local models, provider CLIs, tools, and connectors under leases and approval gates.
-- **Evidence** — every read or action emits a source-linked receipt, mirrored to SpacetimeDB when online.
+- **Evidence** — every read or action emits a source-linked receipt into local JSONL; Lance provides derived recall.
 
 Maturity is uneven across planes today; see [`HEIWA.md`](https://github.com/Strategizing/heiwa-universe/blob/main/HEIWA.md#the-three-planes) for current vs target.
 
@@ -26,7 +26,7 @@ Maturity is uneven across planes today; see [`HEIWA.md`](https://github.com/Stra
 - Rust execution kernel
 - Provider discovery and routing
 - Account/tool/model capability fabric
-- SpacetimeDB-backed evidence and state direction
+- Local JSONL evidence authority with Lance-backed recall
 - Documentation published from this repository
 
 Legacy hub, hosted, and experimental surfaces may still exist in the tree, but they should not be presented as equally mature public product surfaces.
@@ -37,7 +37,7 @@ Legacy hub, hosted, and experimental surfaces may still exist in the tree, but t
 - **Execution stack**: Rust + TypeScript + Shell
 - **Published docs**: GitHub Pages
 - **Release channel**: GitHub Actions + Releases
-- **Hosted backbone target**: GitHub + Cloudflare + SpacetimeDB
+- **Repository/distribution backbone**: GitHub; Cloudflare is DNS utility only
 - **Operator node**: MacBook M4 Pro 24GB
 
 ## Design intent
@@ -46,7 +46,7 @@ Heiwa is being hardened toward a cleaner, smaller public contract:
 
 - keep the installed runtime as the product center
 - prefer local execution and provider-owned runtimes over hosted abstractions
-- use hosted infrastructure for public clients, releases, state, subscriptions, and evidence
+- use GitHub for public docs, releases, and future redaction-gated evidence projections
 - turn external accounts and tools into modular capability lanes with explicit scopes and leases
 - make docs, CI, and releases coherent from a cold clone
 - stop overstating legacy hosted/control-plane paths

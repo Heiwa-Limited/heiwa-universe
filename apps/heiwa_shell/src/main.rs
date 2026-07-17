@@ -1,6 +1,6 @@
 mod cli;
-mod home;
 mod cmd;
+mod home;
 
 use anyhow::{anyhow, Result};
 use chrono::Utc;
@@ -231,17 +231,29 @@ async fn main() -> Result<()> {
             println!(
                 "  SQLite:   {} ({})",
                 receipts_db.display(),
-                if receipts_db.exists() { "present" } else { "not created yet" }
+                if receipts_db.exists() {
+                    "present"
+                } else {
+                    "not created yet"
+                }
             );
             println!(
                 "  Journal:  {} ({})",
                 evidence_dir.display(),
-                if evidence_dir.exists() { "present" } else { "not created yet" }
+                if evidence_dir.exists() {
+                    "present"
+                } else {
+                    "not created yet"
+                }
             );
             println!(
                 "  Receipts: {} ({})",
                 receipts_dir.display(),
-                if receipts_dir.exists() { "present" } else { "not created yet" }
+                if receipts_dir.exists() {
+                    "present"
+                } else {
+                    "not created yet"
+                }
             );
             let streams = heiwa_evidence::journal_summary(&evidence_dir)?;
             if !streams.is_empty() {
@@ -454,7 +466,11 @@ async fn main() -> Result<()> {
             println!("  Dir:           {}", evidence_dir.display());
             println!(
                 "  Present:       {}",
-                if evidence_dir.exists() { "yes" } else { "not created yet" }
+                if evidence_dir.exists() {
+                    "yes"
+                } else {
+                    "not created yet"
+                }
             );
 
             if let Some(ai_ops) = ai_ops {
@@ -1423,8 +1439,7 @@ async fn run_repl(use_cockpit: bool) -> Result<()> {
                         heiwa_provider::detect::auto_discover(&mut reg).await;
                         let loop_tiers = get_live_model_tiers(&reg);
 
-                        let controller =
-                            heiwa_loop::LoopController::new(config, loop_tiers);
+                        let controller = heiwa_loop::LoopController::new(config, loop_tiers);
                         let (tx, mut rx) = tokio::sync::mpsc::channel(10);
 
                         let adapters: Arc<
@@ -2661,12 +2676,15 @@ fn resolve_adapter(provider: &str, model_id: &str) -> Result<Arc<dyn ProviderAda
         "gemini" => Ok(Arc::new(GeminiCliAdapter::new())),
         "openrouter" => OpenRouterAdapter::from_registry()
             .map(|a| Arc::new(a) as Arc<dyn ProviderAdapter>)
-            .ok_or_else(|| "No OpenRouter account registered (heiwa auth add-key openrouter <key>).".to_string()),
+            .ok_or_else(|| {
+                "No OpenRouter account registered (heiwa auth add-key openrouter <key>)."
+                    .to_string()
+            }),
         _ => Err(format!("No adapter for provider '{}' yet.", provider)),
     }
 }
 
-/// Record a DREX route decision in SpacetimeDB.
+/// Record a DREX route decision in the local evidence journal.
 fn record_route_evidence(evidence: &EvidenceClient, route: &RouteResult, task: &str) {
     evidence.journal(
         "route_decisions",
@@ -2738,11 +2756,7 @@ fn record_call_receipt(
 }
 
 /// Journal a completed run to local evidence.
-fn record_run_evidence(
-    evidence: &EvidenceClient,
-    route: &RouteResult,
-    usage: Option<&TokenUsage>,
-) {
+fn record_run_evidence(evidence: &EvidenceClient, route: &RouteResult, usage: Option<&TokenUsage>) {
     let run_id = format!("run-{}", uuid::Uuid::new_v4());
     let turn_ended_at = Utc::now();
     let turn_ended_at_rfc3339 = turn_ended_at.to_rfc3339();

@@ -1,9 +1,9 @@
 id: heiwa-architect
 name: Heiwa Architect
-description: Specialized architect for Heiwa state, mesh connectivity, and protocol changes. Expert in SpacetimeDB, execution model, and architectural compliance.
+description: Specialized architect for Heiwa state, mesh connectivity, and protocol changes. Expert in local evidence, Lance recall, execution model, and architectural compliance.
 status: active
 prompt_file: prompt.md
-tags: [architecture, protocol, spacetimedb]
+tags: [architecture, protocol, lance, evidence]
 tool_profile: full_access
 
 targets:
