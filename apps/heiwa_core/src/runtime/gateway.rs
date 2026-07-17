@@ -1049,10 +1049,8 @@ async fn handle_route_preview(
     let plan = plan_route(&ingress, &model_tiers, &default_policy())?;
 
     let task_id = format!("task-preview-{}", uuid::Uuid::new_v4());
-    let _ = state
-        .evidence
-        .record_drex_decision(&request_id, &task_id, &plan)
-        .await?;
+    let decision = crate::evidence::build_drex_decision(&request_id, &task_id, &plan);
+    let _ = state.evidence.record_drex_decision(decision).await?;
 
     Ok(json!({
         "target_tier": format!("{:?}", plan.decision.active_tier),

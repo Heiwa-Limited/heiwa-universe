@@ -225,18 +225,38 @@ async fn main() -> Result<()> {
         }
         "receipts" => {
             let receipts_db = heiwa_install::get_heiwa_dir().join("receipts.db");
-            let evidence_dir = heiwa_install::get_heiwa_dir().join("evidence");
+            let evidence_dir = heiwa_evidence::journal_root()?;
+            let receipts_dir = heiwa_evidence::receipts_root()?;
             println!("Receipts are recorded locally:");
             println!(
-                "  SQLite: {} ({})",
+                "  SQLite:   {} ({})",
                 receipts_db.display(),
                 if receipts_db.exists() { "present" } else { "not created yet" }
             );
             println!(
-                "  JSONL:  {} ({})",
+                "  Journal:  {} ({})",
                 evidence_dir.display(),
                 if evidence_dir.exists() { "present" } else { "not created yet" }
             );
+            println!(
+                "  Receipts: {} ({})",
+                receipts_dir.display(),
+                if receipts_dir.exists() { "present" } else { "not created yet" }
+            );
+            let streams = heiwa_evidence::journal_summary(&evidence_dir)?;
+            if !streams.is_empty() {
+                println!("  Journal streams:");
+                for stream in streams {
+                    if stream.skipped_lines > 0 {
+                        println!(
+                            "    {:<24} {} event(s), {} unreadable line(s)",
+                            stream.kind, stream.events, stream.skipped_lines
+                        );
+                    } else {
+                        println!("    {:<24} {} event(s)", stream.kind, stream.events);
+                    }
+                }
+            }
         }
         "devices" => {
             let manifest_path = heiwa_install::get_heiwa_dir().join("machine.json");
@@ -265,7 +285,7 @@ async fn main() -> Result<()> {
                     manifest["installed_at"].as_str().unwrap_or("unknown")
                 );
 
-                println!("  Sync:     local-first (evidence under ~/.heiwa/evidence/, git-synced)");
+                println!("  Sync:     local-first (evidence under ~/.heiwa/evidence/; GitHub sync planned, gated on redaction — local-only today)");
             } else {
                 println!("No device registered. Run 'heiwa install' first.");
             }
@@ -277,11 +297,24 @@ async fn main() -> Result<()> {
             let identity = heiwa_provider::load_identity();
             let app_probe = crate::cmd::app::probe_local_app(crate::cmd::app::DEFAULT_PORT);
             let layout = heiwa_install::check_runtime_layout();
-            let evidence_dir = heiwa_install::get_heiwa_dir().join("evidence");
+            let evidence_dir = heiwa_evidence::journal_root()?;
+            let evidence_streams = heiwa_evidence::journal_summary(&evidence_dir)
+                .unwrap_or_default()
+                .into_iter()
+                .map(|stream| {
+                    serde_json::json!({
+                        "kind": stream.kind,
+                        "events": stream.events,
+                        "skipped_lines": stream.skipped_lines,
+                    })
+                })
+                .collect::<Vec<_>>();
             let evidence_status = serde_json::json!({
                 "backend": "local-jsonl",
                 "dir": evidence_dir.display().to_string(),
                 "present": evidence_dir.exists(),
+                "receipts_dir": heiwa_evidence::receipts_root()?.display().to_string(),
+                "streams": evidence_streams,
             });
             let provider_statuses: Vec<heiwa_provider::LegacyProviderAccount> =
                 ["claude", "codex", "gemini", "antigravity", "ollama"]
@@ -417,7 +450,7 @@ async fn main() -> Result<()> {
 
             println!();
             println!("Evidence:");
-            println!("  Backend:       local-jsonl (+ derived Lance index, git-synced truth)");
+            println!("  Backend:       local-jsonl (+ derived Lance index; GitHub sync planned, redaction-gated)");
             println!("  Dir:           {}", evidence_dir.display());
             println!(
                 "  Present:       {}",

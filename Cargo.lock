@@ -3315,11 +3315,12 @@ dependencies = [
  "anyhow",
  "axum",
  "base64 0.22.1",
- "dirs 6.0.0",
  "futures-util",
  "heiwa-protocol",
+ "heiwa_evidence",
  "serde",
  "serde_json",
+ "tempfile",
  "time",
  "tokio",
  "tower-http 0.5.2",
@@ -3382,8 +3383,8 @@ name = "heiwa-orchestrator"
 version = "0.1.0"
 dependencies = [
  "anyhow",
- "dirs 6.0.0",
  "heiwa-protocol",
+ "heiwa_evidence",
  "serde",
  "serde_json",
  "tokio",
@@ -3462,6 +3463,7 @@ dependencies = [
  "heiwa-tui",
  "heiwa_automations",
  "heiwa_drex",
+ "heiwa_evidence",
  "heiwa_mcp",
  "heiwa_quota",
  "heiwa_receipts",
@@ -3553,6 +3555,19 @@ dependencies = [
  "serde_json",
  "tempfile",
  "tokio",
+]
+
+[[package]]
+name = "heiwa_evidence"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "dirs 6.0.0",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "time",
+ "uuid",
 ]
 
 [[package]]

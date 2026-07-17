@@ -89,9 +89,8 @@ impl TestEvidenceClient {
         task_id: &str,
         route_plan: &RoutePlan,
     ) -> Result<PersistedDrexDecision> {
-        self.runtime
-            .record_drex_decision(request_id, task_id, route_plan)
-            .await
+        let decision = heiwa_core::evidence::build_drex_decision(request_id, task_id, route_plan);
+        self.runtime.record_drex_decision(decision).await
     }
 
     async fn record_drex_failure(

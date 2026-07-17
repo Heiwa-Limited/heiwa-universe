@@ -30,6 +30,7 @@ heiwa_quota = { path = "../../crates/heiwa_quota" }
 heiwa-resource = { path = "../../crates/heiwa_resource" }
 heiwa_receipts = { path = "../../crates/heiwa_receipts" }
 heiwa-install = { path = "../../crates/heiwa_install" }
+heiwa_evidence = { path = "../../crates/heiwa_evidence" }
 heiwa-loop = { path = "../../crates/heiwa_loop" }
 heiwa-protocol = { path = "../../crates/heiwa_protocol" }
 heiwa_mcp = { path = "../../crates/heiwa_mcp" }

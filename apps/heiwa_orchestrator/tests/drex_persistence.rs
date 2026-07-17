@@ -38,6 +38,52 @@ impl EvidenceTransport for MemoryTransport {
             .push((request_id.to_string(), drex_decision_id.to_string()));
         Ok(())
     }
+
+    fn upsert_worker_session(
+        &self,
+        _session: heiwa_orchestrator::evidence::PersistedWorkerSession,
+    ) -> Result<()> {
+        Ok(())
+    }
+
+    fn close_session(&self, _session_id: String) -> Result<()> {
+        Ok(())
+    }
+
+    fn upsert_worker_lease(
+        &self,
+        _lease: heiwa_orchestrator::evidence::PersistedWorkerLease,
+    ) -> Result<()> {
+        Ok(())
+    }
+
+    fn record_dispatch_ack(
+        &self,
+        _ack: heiwa_orchestrator::evidence::PersistedDispatchAck,
+    ) -> Result<()> {
+        Ok(())
+    }
+
+    fn register_artifact(
+        &self,
+        _artifact: heiwa_orchestrator::evidence::PersistedArtifact,
+    ) -> Result<()> {
+        Ok(())
+    }
+
+    fn record_run_receipt(
+        &self,
+        _receipt: heiwa_orchestrator::evidence::PersistedRunReceipt,
+    ) -> Result<()> {
+        Ok(())
+    }
+
+    fn record_run_failure(
+        &self,
+        _failure: heiwa_orchestrator::evidence::PersistedRunFailure,
+    ) -> Result<()> {
+        Ok(())
+    }
 }
 
 struct TestEvidenceClient {
@@ -58,9 +104,9 @@ impl TestEvidenceClient {
         task_id: &str,
         route_plan: &RoutePlan,
     ) -> Result<PersistedDrexDecision> {
-        self.runtime
-            .record_drex_decision(request_id, task_id, route_plan)
-            .await
+        let decision =
+            heiwa_orchestrator::evidence::build_drex_decision(request_id, task_id, route_plan);
+        self.runtime.record_drex_decision(decision).await
     }
 
     async fn record_drex_failure(

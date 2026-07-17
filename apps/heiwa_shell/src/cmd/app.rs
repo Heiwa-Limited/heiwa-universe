@@ -367,7 +367,7 @@ fn promotion_receipt_plan(
         "runtime_probes": runtime_probe_contracts(),
         "evidence_plane": {
             "backend": "local-jsonl",
-            "truth": "git-synced text (JSONL/markdown)",
+            "truth": "local text (JSONL/markdown); GitHub sync planned, redaction-gated",
             "index": "lance (derived, rebuildable)",
             "status": "local_only",
         },
