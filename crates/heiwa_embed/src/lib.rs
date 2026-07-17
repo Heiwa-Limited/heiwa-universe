@@ -4,7 +4,7 @@ pub mod lance_store;
 pub use lance_store::LanceVectorStore;
 
 use anyhow::{Context, Result};
-use heiwa_config::load as load_config;
+use heiwa_config::{load as load_config, EmbedBackend, EmbeddingConfig};
 use reqwest::blocking::Client;
 use rusqlite::{params, Connection, OptionalExtension};
 use serde::Deserialize;
@@ -17,6 +17,106 @@ pub struct StoredEmbeddingRef {
     pub row_id: u64,
     pub model: String,
     pub dim: u16,
+}
+
+/// One stored embedding, the unit of rebuild and migration. The vector index
+/// is derived state: any backend can be rebuilt from a stream of these.
+#[derive(Debug, Clone, PartialEq)]
+pub struct EmbeddingRow {
+    pub session_id: String,
+    pub entry_id: u64,
+    pub model: String,
+    pub vector: Vec<f32>,
+}
+
+/// Config-selected vector store. SQLite is the default hot-state store;
+/// Lance (feature `"lance"`) is the derived recall index. If the config asks
+/// for Lance but the binary was built without the feature, we fall back to
+/// SQLite rather than dropping embeddings — the index is rebuildable, so
+/// availability wins over backend fidelity.
+pub enum VectorBackend {
+    Sqlite(SqliteVectorStore),
+    #[cfg(feature = "lance")]
+    Lance(LanceVectorStore),
+}
+
+impl VectorBackend {
+    pub fn open_from_config(config: &EmbeddingConfig) -> Result<Self> {
+        match config.backend {
+            EmbedBackend::Sqlite => Ok(Self::Sqlite(SqliteVectorStore::open(
+                &config.sqlite_path,
+            )?)),
+            #[cfg(feature = "lance")]
+            EmbedBackend::Lance => Ok(Self::Lance(LanceVectorStore::open(
+                &config.lance_path,
+                config.dim,
+            )?)),
+            #[cfg(not(feature = "lance"))]
+            EmbedBackend::Lance => {
+                eprintln!(
+                    "heiwa_embed: config requests lance backend but this build lacks the \
+                     'lance' feature; falling back to sqlite at {}",
+                    config.sqlite_path.display()
+                );
+                Ok(Self::Sqlite(SqliteVectorStore::open(&config.sqlite_path)?))
+            }
+        }
+    }
+
+    pub fn backend_name(&self) -> &'static str {
+        match self {
+            Self::Sqlite(_) => "sqlite",
+            #[cfg(feature = "lance")]
+            Self::Lance(_) => "lance",
+        }
+    }
+
+    pub fn upsert(
+        &self,
+        session_id: &str,
+        entry_id: u64,
+        model: &str,
+        vector: &[f32],
+    ) -> Result<u64> {
+        match self {
+            Self::Sqlite(store) => store.upsert(session_id, entry_id, model, vector),
+            #[cfg(feature = "lance")]
+            Self::Lance(store) => {
+                store.upsert(session_id, entry_id, model, vector)?;
+                // Lance has no rowid; the (session, entry) key is the stable
+                // reference, mirroring what `top_k_similar` reports back.
+                Ok(entry_id)
+            }
+        }
+    }
+
+    pub fn top_k_similar(
+        &self,
+        session_id: &str,
+        query: &[f32],
+        limit: usize,
+    ) -> Result<Vec<SimilarEntry>> {
+        match self {
+            Self::Sqlite(store) => store.top_k_similar(session_id, query, limit),
+            #[cfg(feature = "lance")]
+            Self::Lance(store) => store.top_k_similar(session_id, query, limit),
+        }
+    }
+}
+
+/// Copy every SQLite-stored embedding into a Lance store. One-way, additive:
+/// rows already in Lance under the same (session, entry) key are replaced.
+#[cfg(feature = "lance")]
+pub fn migrate_sqlite_embeddings(
+    sqlite: &SqliteVectorStore,
+    lance: &LanceVectorStore,
+) -> Result<usize> {
+    let rows = sqlite.all_embeddings()?;
+    let count = rows.len();
+    for row in rows {
+        lance.upsert(&row.session_id, row.entry_id, &row.model, &row.vector)?;
+    }
+    Ok(count)
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -57,7 +157,7 @@ pub fn embed_and_store(
         return Ok(None);
     }
 
-    let store = SqliteVectorStore::open(&config.embedding.sqlite_path)?;
+    let store = VectorBackend::open_from_config(&config.embedding)?;
     let row_id = store.upsert(session_id, entry_id, &config.embedding.model, &vector)?;
     Ok(Some(StoredEmbeddingRef {
         row_id,
@@ -180,6 +280,35 @@ impl SqliteVectorStore {
         Ok(row_id as u64)
     }
 
+    /// Dump every stored embedding, for backend rebuilds and migrations.
+    pub fn all_embeddings(&self) -> Result<Vec<EmbeddingRow>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT session_id, entry_id, model, vector_json
+             FROM transcript_embeddings
+             ORDER BY id",
+        )?;
+        let rows = stmt.query_map([], |row| {
+            Ok((
+                row.get::<_, String>(0)?,
+                row.get::<_, i64>(1)?,
+                row.get::<_, String>(2)?,
+                row.get::<_, String>(3)?,
+            ))
+        })?;
+
+        let mut results = Vec::new();
+        for row in rows {
+            let (session_id, entry_id, model, vector_json) = row?;
+            results.push(EmbeddingRow {
+                session_id,
+                entry_id: entry_id as u64,
+                model,
+                vector: serde_json::from_str(&vector_json)?,
+            });
+        }
+        Ok(results)
+    }
+
     pub fn top_k_similar(
         &self,
         session_id: &str,
@@ -279,5 +408,90 @@ mod tests {
         assert_eq!(results.len(), 2);
         assert_eq!(results[0].entry_id, 0);
         assert!(results[0].score >= results[1].score);
+    }
+
+    #[test]
+    fn sqlite_store_dumps_all_embeddings_for_rebuild_and_migration() {
+        let (_dir, store, _path) = temp_store();
+        store.upsert("a", 1, "m", &[1.0, 0.0]).expect("upsert 1");
+        store.upsert("b", 2, "m", &[0.0, 1.0]).expect("upsert 2");
+
+        let rows = store.all_embeddings().expect("dump");
+        assert_eq!(rows.len(), 2);
+        let entry = rows.iter().find(|row| row.session_id == "a").expect("row a");
+        assert_eq!(entry.entry_id, 1);
+        assert_eq!(entry.model, "m");
+        assert_eq!(entry.vector, vec![1.0, 0.0]);
+    }
+
+    fn test_config(dir: &Path, backend: EmbedBackend) -> heiwa_config::EmbeddingConfig {
+        heiwa_config::EmbeddingConfig {
+            enabled: true,
+            model: "test-model".to_string(),
+            ollama_url: None,
+            backend,
+            sqlite_path: dir.join("memory.sqlite3"),
+            lance_path: dir.join("lance"),
+            dim: 3,
+            request_timeout_ms: 100,
+        }
+    }
+
+    #[test]
+    fn vector_backend_dispatches_to_sqlite_from_config() {
+        let dir = TempDir::new().expect("tempdir");
+        let config = test_config(dir.path(), EmbedBackend::Sqlite);
+        let store = VectorBackend::open_from_config(&config).expect("open");
+        assert_eq!(store.backend_name(), "sqlite");
+        store.upsert("s", 1, "test-model", &[1.0, 0.0, 0.0]).expect("upsert");
+        let results = store
+            .top_k_similar("s", &[1.0, 0.0, 0.0], 1)
+            .expect("query");
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].entry_id, 1);
+    }
+
+    #[cfg(not(feature = "lance"))]
+    #[test]
+    fn lance_backend_without_feature_falls_back_to_sqlite() {
+        let dir = TempDir::new().expect("tempdir");
+        let config = test_config(dir.path(), EmbedBackend::Lance);
+        let store = VectorBackend::open_from_config(&config).expect("open");
+        assert_eq!(store.backend_name(), "sqlite");
+    }
+
+    #[cfg(feature = "lance")]
+    #[test]
+    fn lance_backend_with_feature_opens_lance_store() {
+        let dir = TempDir::new().expect("tempdir");
+        let config = test_config(dir.path(), EmbedBackend::Lance);
+        let store = VectorBackend::open_from_config(&config).expect("open");
+        assert_eq!(store.backend_name(), "lance");
+        store.upsert("s", 1, "test-model", &[1.0, 0.0, 0.0]).expect("upsert");
+        let results = store
+            .top_k_similar("s", &[1.0, 0.0, 0.0], 1)
+            .expect("query");
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].entry_id, 1);
+    }
+
+    #[cfg(feature = "lance")]
+    #[test]
+    fn migrate_sqlite_embeddings_moves_all_rows_into_lance() {
+        let dir = TempDir::new().expect("tempdir");
+        let sqlite = SqliteVectorStore::open(&dir.path().join("memory.sqlite3")).expect("sqlite");
+        sqlite.upsert("s", 1, "m", &[1.0, 0.0, 0.0]).expect("row 1");
+        sqlite.upsert("s", 2, "m", &[0.0, 1.0, 0.0]).expect("row 2");
+        sqlite.upsert("other", 3, "m", &[0.0, 0.0, 1.0]).expect("row 3");
+
+        let lance = LanceVectorStore::open(&dir.path().join("lance"), 3).expect("lance");
+        let migrated = migrate_sqlite_embeddings(&sqlite, &lance).expect("migrate");
+        assert_eq!(migrated, 3);
+
+        let results = lance
+            .top_k_similar("s", &[1.0, 0.0, 0.0], 10)
+            .expect("query");
+        assert_eq!(results.len(), 2, "session filter respected after migration");
+        assert_eq!(results[0].entry_id, 1);
     }
 }

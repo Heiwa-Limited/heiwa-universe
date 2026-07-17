@@ -27,12 +27,37 @@ impl HeiwaPaths {
     }
 }
 
+/// Vector store backing the embedding index. The index is derived and
+/// rebuildable from transcript truth; switching backends is a re-embed, not
+/// a migration of authority.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum EmbedBackend {
+    #[default]
+    Sqlite,
+    Lance,
+}
+
+impl EmbedBackend {
+    pub fn parse(value: &str) -> Option<Self> {
+        match value.trim().to_ascii_lowercase().as_str() {
+            "sqlite" => Some(Self::Sqlite),
+            "lance" => Some(Self::Lance),
+            _ => None,
+        }
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct EmbeddingConfig {
     pub enabled: bool,
     pub model: String,
     pub ollama_url: Option<String>,
+    pub backend: EmbedBackend,
     pub sqlite_path: PathBuf,
+    pub lance_path: PathBuf,
+    /// Embedding dimensionality; fixed per store (1024 for
+    /// qwen3-embedding:0.6b).
+    pub dim: usize,
     pub request_timeout_ms: u64,
 }
 
@@ -53,7 +78,10 @@ struct EmbeddingFileConfig {
     enabled: Option<bool>,
     model: Option<String>,
     ollama_url: Option<String>,
+    backend: Option<String>,
     sqlite_path: Option<PathBuf>,
+    lance_path: Option<PathBuf>,
+    dim: Option<usize>,
     request_timeout_ms: Option<u64>,
 }
 
@@ -81,11 +109,27 @@ pub fn load() -> AppConfig {
             .ok()
             .or_else(|| file.embedding.ollama_url.clone())
             .or(default_ollama),
+        backend: env::var("HEIWA_EMBED_BACKEND")
+            .ok()
+            .as_deref()
+            .or(file.embedding.backend.as_deref())
+            .and_then(EmbedBackend::parse)
+            .unwrap_or_default(),
         sqlite_path: env::var("HEIWA_EMBED_SQLITE_PATH")
             .ok()
             .map(PathBuf::from)
             .or_else(|| file.embedding.sqlite_path.clone())
             .unwrap_or_else(|| paths.state_dir.join("state").join("memory.sqlite3")),
+        lance_path: env::var("HEIWA_EMBED_LANCE_PATH")
+            .ok()
+            .map(PathBuf::from)
+            .or_else(|| file.embedding.lance_path.clone())
+            .unwrap_or_else(|| paths.state_dir.join("state").join("lance")),
+        dim: env::var("HEIWA_EMBED_DIM")
+            .ok()
+            .and_then(|value| value.parse::<usize>().ok())
+            .or(file.embedding.dim)
+            .unwrap_or(1024),
         request_timeout_ms: env::var("HEIWA_EMBED_TIMEOUT_MS")
             .ok()
             .and_then(|v| v.parse::<u64>().ok())
@@ -121,5 +165,15 @@ mod tests {
         let config = load();
         assert_eq!(config.embedding.model, "qwen3-embedding:0.6b");
         assert!(config.embedding.sqlite_path.ends_with("memory.sqlite3"));
+        assert_eq!(config.embedding.backend, EmbedBackend::Sqlite);
+        assert!(config.embedding.lance_path.ends_with("lance"));
+        assert_eq!(config.embedding.dim, 1024);
+    }
+
+    #[test]
+    fn embed_backend_parses_known_values_and_rejects_unknown() {
+        assert_eq!(EmbedBackend::parse("sqlite"), Some(EmbedBackend::Sqlite));
+        assert_eq!(EmbedBackend::parse("Lance"), Some(EmbedBackend::Lance));
+        assert_eq!(EmbedBackend::parse("stdb"), None);
     }
 }
