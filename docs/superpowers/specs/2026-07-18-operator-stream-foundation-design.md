@@ -87,23 +87,31 @@ The stream uses the existing `heiwa_evidence` versioned envelope and
 cross-process append lock. It is append-forever and must never pass through
 keyed compaction.
 
-The append order provides total ordering. Replay cursors are opaque byte
-offsets returned by the evidence reader. Byte offsets stay stable because the
-operator stream is never rewritten. Clients must treat a cursor as an opaque
-string and must not derive business meaning from it.
+The append order provides total ordering. The initial replay cursor contains a
+versioned, server-owned encoding of the stream fingerprint and byte offset.
+Byte offsets stay stable because the operator stream is never rewritten.
+Clients must treat a cursor as an opaque string and must not derive business
+meaning from it.
+
+On an unknown cursor version, stream-fingerprint mismatch, or offset that does
+not land on a valid event boundary, the server returns a structured
+`invalid_cursor` error. The client then replays that thread from its start.
+This lifecycle keeps the contract compatible with a later move to segmented
+files or a different cursor encoding.
 
 ### Service ownership
 
 `crates/heiwa_evidence/` owns:
 
 - typed `OperatorEvent` persistence
-- fsynced append and event-id idempotency checks
+- dumb, fsynced envelope append after domain validation
 - replay after an opaque cursor
 - skipped/corrupt-line accounting
 - startup recovery inputs
 
 `crates/heiwa_session/` owns:
 
+- sole domain-writer authority for `operator_events.jsonl`
 - operator-thread domain validation
 - thread and turn materialization
 - legacy transcript import
@@ -128,6 +136,11 @@ string and must not derive business meaning from it.
 
 The Desktop does not write `~/.heiwa` files, open SQLite/Lance directly, or
 route models independently from the runtime.
+
+Only `heiwa_session` may ask `heiwa_evidence` to append an operator event.
+`heiwa_evidence` does not scan the stream or own an event-id index. Turn
+idempotency uses `client_request_id` in the session service; event IDs provide
+reader-side delivery deduplication.
 
 ### Derived indexes
 
@@ -164,6 +177,10 @@ evidence_refs        list
 payload              tagged, event-specific value
 ```
 
+Journal-envelope `v` and operator-event `schema_version` are distinct. Envelope
+`v` versions JSONL framing (currently `1`); `schema_version` versions the typed
+operator contract carried inside `record`.
+
 `event_id` is the delivery idempotency key. `turn_id` groups one operator turn.
 `call_id` identifies one model or tool call inside that turn. Source and
 evidence references point to durable records; large output belongs in an
@@ -199,6 +216,13 @@ recovery appends `turn_interrupted` rather than inventing a completion.
 Tool output above the inline limit becomes a referenced artifact. The event
 stores tool identity, target, mode, risk, status, bounded preview, and artifact
 or receipt references.
+
+Every typed payload passes a sensitive-material gate before append, using the
+same policy semantics as the existing receipts/capability `find_sensitive`
+gate. Raw secrets, bearer tokens, credential-file contents, and provider auth
+material are rejected rather than classified and persisted. The `sensitivity`
+field controls handling of safe persisted material; it is not secret
+protection.
 
 ## Per-Call Routing Contract
 
@@ -334,6 +358,12 @@ identity instead of appending a duplicate.
 The turn request body contains `client_request_id`, `prompt`, and optional
 `route_policy`. Omitting `route_policy` selects automatic per-call routing.
 
+All operator HTTP endpoints require the existing local runtime authentication
+implemented by `heiwa_core::auth`: either the machine bearer token or a valid
+signed Heiwa session. Unauthenticated reads, turn submission, and cancellation
+return `401`. The native Desktop bridge supplies credentials without embedding
+the machine token in renderer assets.
+
 ### WebSocket
 
 ```text
@@ -348,6 +378,10 @@ Frames are:
 - heartbeat
 - structured error
 
+The WebSocket authenticates with the same machine-token or signed-session
+contract before replay or live delivery. Localhost reachability alone grants no
+operator authority.
+
 Disconnect does not cancel execution. On reconnect, the client requests events
 after its last durable cursor. Duplicate delivery is safe because the reducer
 deduplicates by `event_id`.
@@ -356,7 +390,9 @@ Separate shell processes append through the same session service and evidence
 transport. The app runtime tails the journal and broadcasts new events. A
 simple bounded polling tailer is preferred initially over a filesystem-watcher
 dependency; cursor replay preserves correctness regardless of notification
-latency.
+latency. The polling reader stays lock-free: newline framing makes an
+incomplete tail detectable, while the sidecar lock remains write-only so
+pollers do not contend with appenders.
 
 ### Compatibility
 
@@ -463,7 +499,7 @@ No frontend router, state framework, or component library is added.
 ### Repository gates
 
 - Desktop TypeScript typecheck and build
-- `cargo test -p heiwa-evidence`
+- `cargo test -p heiwa_evidence`
 - `cargo test -p heiwa-session`
 - `cargo test -p heiwa-desktop --all-targets`
 - focused `heiwa-shell` API/routing tests
