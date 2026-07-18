@@ -1,7 +1,7 @@
 # Operator Stream Foundation Design
 
 Date: 2026-07-18
-Status: Design approved; written spec awaiting operator review
+Status: Approved for implementation
 Plane: Intake + Execution + Evidence
 
 ## Summary
@@ -206,6 +206,7 @@ artifact rather than inline event JSON.
 - `receipt_linked`
 - `blocker`
 - `turn_completed`
+- `turn_cancel_requested`
 - `turn_interrupted`
 - `legacy_session_imported`
 
