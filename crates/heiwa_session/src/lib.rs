@@ -14,6 +14,7 @@ use tokio::net::UnixListener;
 use uuid::Uuid;
 
 pub mod migration;
+pub mod operator;
 
 pub const PERSISTED_TRANSCRIPT_VERSION: u32 = 1;
 
