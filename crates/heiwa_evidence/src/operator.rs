@@ -242,9 +242,24 @@ impl OperatorJournal {
     /// lock: opens the data file directly and trusts newline framing,
     /// tolerating a torn tail the same way [`crate::replay::read_stream`]
     /// tolerates corruption elsewhere in the journal.
-    pub fn read_after(&self, cursor: Option<&str>, limit: usize) -> Result<OperatorPage, CursorError> {
+    ///
+    /// The read is bounded by `limit`, not by stream length: lines are
+    /// consumed incrementally through a fixed-size buffer and scanning stops
+    /// as soon as `limit` complete records have been parsed, so resuming a
+    /// stale cursor against an append-forever stream never pulls the whole
+    /// remainder into memory. Lines past the cutoff are never inspected and
+    /// so never counted in `skipped_lines`.
+    pub fn read_after(
+        &self,
+        cursor: Option<&str>,
+        limit: usize,
+    ) -> Result<OperatorPage, CursorError> {
         let path = stream_path(&self.dir, OPERATOR_STREAM_KIND);
-        let file_len = std::fs::metadata(&path).map(|meta| meta.len()).unwrap_or(0);
+        let file_len = match std::fs::metadata(&path) {
+            Ok(meta) => meta.len(),
+            Err(err) if err.kind() == std::io::ErrorKind::NotFound => 0,
+            Err(err) => return Err(CursorError::Storage(err.into())),
+        };
         let current_fingerprint = first_line_fingerprint(&path)?;
 
         let start_offset = match cursor {
@@ -278,49 +293,54 @@ impl OperatorJournal {
             }
         };
 
-        let mut bytes = Vec::new();
+        let mut events = Vec::new();
+        let mut skipped_lines = 0usize;
         match OpenOptions::new().read(true).open(&path) {
             Ok(mut file) => {
                 file.seek(SeekFrom::Start(start_offset))
                     .map_err(|err| CursorError::Storage(err.into()))?;
-                file.read_to_end(&mut bytes)
-                    .map_err(|err| CursorError::Storage(err.into()))?;
+                let mut reader = std::io::BufReader::new(file);
+                let mut offset = start_offset;
+                let mut line = Vec::new();
+                while events.len() < limit {
+                    line.clear();
+                    let read = reader
+                        .read_until(b'\n', &mut line)
+                        .map_err(|err| CursorError::Storage(err.into()))?;
+                    if read == 0 {
+                        // Clean EOF on a line boundary.
+                        break;
+                    }
+                    if line.last() != Some(&b'\n') {
+                        // Torn/incomplete tail: no trailing newline yet, so
+                        // this is not a complete record. Never fatal, just
+                        // uncounted.
+                        skipped_lines += 1;
+                        break;
+                    }
+                    offset += read as u64;
+                    let content = &line[..line.len() - 1];
+                    if content.is_empty() {
+                        continue;
+                    }
+                    match parse_operator_line(content) {
+                        Some(event) => {
+                            let event_cursor = encode_cursor(&OperatorCursor {
+                                version: OPERATOR_CURSOR_VERSION,
+                                fingerprint: current_fingerprint.clone(),
+                                offset,
+                            });
+                            events.push(CursorEvent {
+                                cursor: event_cursor,
+                                event,
+                            });
+                        }
+                        None => skipped_lines += 1,
+                    }
+                }
             }
             Err(err) if err.kind() == std::io::ErrorKind::NotFound => {}
             Err(err) => return Err(CursorError::Storage(err.into())),
-        }
-
-        let mut events = Vec::new();
-        let mut skipped_lines = 0usize;
-        let mut idx = 0usize;
-        while idx < bytes.len() && events.len() < limit {
-            let Some(rel_newline) = bytes[idx..].iter().position(|&b| b == b'\n') else {
-                // Torn/incomplete tail: no trailing newline yet, so this is
-                // not a complete record. Never fatal, just uncounted.
-                skipped_lines += 1;
-                break;
-            };
-            let line = &bytes[idx..idx + rel_newline];
-            let next_offset = start_offset + (idx + rel_newline + 1) as u64;
-            idx += rel_newline + 1;
-
-            if line.is_empty() {
-                continue;
-            }
-            match parse_operator_line(line) {
-                Some(event) => {
-                    let event_cursor = encode_cursor(&OperatorCursor {
-                        version: OPERATOR_CURSOR_VERSION,
-                        fingerprint: current_fingerprint.clone(),
-                        offset: next_offset,
-                    });
-                    events.push(CursorEvent {
-                        cursor: event_cursor,
-                        event,
-                    });
-                }
-                None => skipped_lines += 1,
-            }
         }
 
         let next_cursor = match events.last() {
