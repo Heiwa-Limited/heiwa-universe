@@ -24,24 +24,36 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use anyhow::{anyhow, Result};
 
 mod journal;
+mod operator;
 mod records;
 mod replay;
 mod runtime;
+mod sensitive;
 mod state;
 
 pub use journal::{EvidenceTransport, JsonlTransport, NoopTransport};
+pub use operator::{
+    CursorError, CursorEvent, OperatorActor, OperatorEvent, OperatorEventType, OperatorJournal,
+    OperatorPage, OperatorRisk, OperatorSensitivity, OPERATOR_CURSOR_VERSION,
+    OPERATOR_EVENT_SCHEMA_VERSION, OPERATOR_STREAM_KIND,
+};
 pub use records::{
     PersistedArtifact, PersistedDispatchAck, PersistedDrexDecision, PersistedDrexFailure,
     PersistedRunFailure, PersistedRunReceipt, PersistedWorkerLease, PersistedWorkerSession,
 };
 pub use replay::{journal_summary, read_stream, EvidenceEvent, ReplayedStream, StreamSummary};
 pub use runtime::EvidenceRuntime;
+pub use sensitive::{find_sensitive, SensitiveMatch};
 pub use state::{
     compact_stream, recover_interrupted, CompactionReport, RecoveryReport, WorkerStateView,
 };
 
-/// Version stamped into every journal envelope as `v`. Bump on any change to
-/// envelope or record shape that a replayer must distinguish; replay reports
+/// Version stamped into every journal envelope as `v`. This is the JOURNAL
+/// ENVELOPE version — the outer `{v, at_ms, kind, record}` wrapper shared by
+/// every stream in this crate — distinct from [`OPERATOR_EVENT_SCHEMA_VERSION`],
+/// which versions the `OperatorEvent` contract carried inside `record` for
+/// the operator stream specifically. Bump this on any change to envelope or
+/// record shape that a replayer must distinguish; replay reports
 /// pre-versioned legacy lines as `v = 0`.
 pub const EVIDENCE_SCHEMA_VERSION: u32 = 1;
 
