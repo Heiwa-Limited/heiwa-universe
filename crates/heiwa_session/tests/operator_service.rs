@@ -372,6 +372,39 @@ fn list_threads_bounds_output_and_orders_most_recent_first() {
 }
 
 // ---------------------------------------------------------------------
+// thread(): journal-level damage surfaced distinctly from event-level
+// rejects.
+// ---------------------------------------------------------------------
+
+#[test]
+fn thread_view_surfaces_journal_damage_as_skipped_lines() {
+    let dir = tempfile::tempdir().unwrap();
+    let service = test_service(dir.path());
+    service
+        .start_turn("default", StartTurnRequest::auto("req-1", "hello"))
+        .unwrap();
+
+    // Journal-level damage: a complete but unparseable line appended
+    // directly to the stream file, as a crashed or foreign writer might
+    // leave behind. This is below the event contract entirely — no
+    // event_id, no thread_id — so it must surface as `skipped_lines`
+    // (journal damage), never as `skipped_events` (schema/state rejects).
+    use std::io::Write;
+    let mut file = std::fs::OpenOptions::new()
+        .append(true)
+        .open(dir.path().join("operator_events.jsonl"))
+        .unwrap();
+    writeln!(file, "this is not a journal envelope").unwrap();
+    drop(file);
+
+    let view = service.thread("default").unwrap();
+    assert_eq!(view.skipped_lines, 1, "journal damage is surfaced, counted once");
+    assert_eq!(view.skipped_events, 0, "no schema/state-level rejects occurred");
+    assert_eq!(view.turns.len(), 1, "valid events still project");
+    assert_eq!(view.turns[0].prompt.as_deref(), Some("hello"));
+}
+
+// ---------------------------------------------------------------------
 // thread(): materialized turn status transitions.
 // ---------------------------------------------------------------------
 

@@ -20,6 +20,15 @@
 //! until then, two processes racing `start_turn` against the same journal
 //! could both observe "no existing turn" and each append one. Single
 //! in-process callers are race-free.
+//!
+//! Cancellation contract: operator cancellation makes intent durable
+//! FIRST — a `turn_cancel_requested` event is appended *before* the runner
+//! is signalled — and the cancelled turn then terminates as
+//! `turn_interrupted` with payload reason `OPERATOR_CANCELLED`.
+//! `turn_cancel_requested` is therefore never terminal itself: it records
+//! intent, and the follow-up `turn_interrupted` is the closing record —
+//! the same closure shape [`OperatorSessionService::recover_interrupted`]
+//! appends with reason `RUNTIME_RESTART`.
 
 use std::collections::{HashMap, HashSet};
 use std::sync::Mutex;
@@ -128,18 +137,27 @@ pub struct OperatorTurnView {
     pub route_policy: Option<TurnRoutePolicy>,
 }
 
-/// Materialized view of one thread: its turns in creation order, plus a
-/// tolerance counter for lines that could not be projected.
+/// Materialized view of one thread: its turns in creation order, plus two
+/// tolerance counters — one per damage domain — for anything that could
+/// not be projected. Neither counter ever fails a read (write-side is
+/// strict via [`OperatorSessionService::append_event`], read-side is
+/// tolerant).
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct OperatorThreadView {
     pub thread_id: String,
     pub turns: Vec<OperatorTurnView>,
-    /// Events skipped during materialization: unsupported schema versions,
-    /// or nonterminal events addressed to a turn that was already terminal.
-    /// Never fails a read; always counted here instead (write-side is
-    /// strict via [`OperatorSessionService::append_event`], read-side is
-    /// tolerant).
+    /// Schema/state-level rejects: events whose line parsed fine but that
+    /// could not be projected — unsupported schema versions, or
+    /// nonterminal events addressed to a turn that was already terminal.
+    /// Thread-scoped, because a parsed event carries its `thread_id`.
     pub skipped_events: usize,
+    /// Journal-level damage: lines in the underlying stream that never
+    /// parsed as operator events at all — torn tails, garbage bytes, or
+    /// envelopes whose `event_type` string is unknown to this build. A
+    /// damaged line has no readable `thread_id`, so this count is
+    /// stream-wide, not thread-scoped: every thread view (including views
+    /// of threads with no events yet) reports the same number.
+    pub skipped_lines: usize,
 }
 
 /// Lightweight summary of one thread for [`OperatorSessionService::list_threads`].
@@ -175,7 +193,7 @@ impl OperatorSessionService {
     /// what is already on disk, per the module docs.
     pub fn start_turn(&self, thread_id: &str, request: StartTurnRequest) -> Result<TurnSubmission> {
         let journal = self.lock_journal()?;
-        let threads = materialize_all(&journal)?;
+        let threads = materialize_all(&journal)?.threads;
 
         if let Some(folded) = threads.get(thread_id) {
             if let Some(turn) = folded
@@ -258,7 +276,7 @@ impl OperatorSessionService {
     /// rejected event never reaches the journal.
     pub fn append_event(&self, event: OperatorEvent) -> Result<CursorEvent> {
         let journal = self.lock_journal()?;
-        let threads = materialize_all(&journal)?;
+        let threads = materialize_all(&journal)?.threads;
         validate_event(&threads, &event)?;
         journal.append(&event)
     }
@@ -350,16 +368,19 @@ impl OperatorSessionService {
     }
 
     /// Materialized view of one thread. Threads with no events yet return
-    /// an empty view rather than an error.
+    /// an empty view rather than an error. `skipped_lines` on the view is
+    /// stream-wide journal damage (see [`OperatorThreadView::skipped_lines`])
+    /// and is reported even on the empty-thread branch.
     pub fn thread(&self, thread_id: &str) -> Result<OperatorThreadView> {
         let journal = self.lock_journal()?;
-        let threads = materialize_all(&journal)?;
-        Ok(match threads.get(thread_id) {
-            Some(folded) => folded.to_view(),
+        let materialized = materialize_all(&journal)?;
+        Ok(match materialized.threads.get(thread_id) {
+            Some(folded) => folded.to_view(materialized.skipped_lines),
             None => OperatorThreadView {
                 thread_id: thread_id.to_string(),
                 turns: Vec::new(),
                 skipped_events: 0,
+                skipped_lines: materialized.skipped_lines,
             },
         })
     }
@@ -368,7 +389,7 @@ impl OperatorSessionService {
     /// bounded to `limit`.
     pub fn list_threads(&self, limit: usize) -> Result<Vec<OperatorThreadSummary>> {
         let journal = self.lock_journal()?;
-        let threads = materialize_all(&journal)?;
+        let threads = materialize_all(&journal)?.threads;
         let mut folded: Vec<&FoldedThread> = threads.values().collect();
         folded.sort_by_key(|thread| std::cmp::Reverse(thread.last_order));
         Ok(folded
@@ -384,7 +405,7 @@ impl OperatorSessionService {
     /// `0` and append nothing.
     pub fn recover_interrupted(&self) -> Result<usize> {
         let journal = self.lock_journal()?;
-        let threads = materialize_all(&journal)?;
+        let threads = materialize_all(&journal)?.threads;
         let runtime_actor = OperatorActor {
             kind: "runtime".to_string(),
             id: "heiwa-core".to_string(),
@@ -578,6 +599,12 @@ fn requires_call_id(event_type: &OperatorEventType) -> bool {
 /// carry a `turn_id` (it is not in [`requires_turn_id`]'s list, since a
 /// blocker can be thread-scoped); when it does target a turn, that turn
 /// becomes terminal in status `"blocked"`.
+///
+/// `TurnCancelRequested` is deliberately absent: per the cancellation
+/// contract (module docs), it is appended before the runner is signalled
+/// and only records operator *intent* — the turn stays open until the
+/// resulting `turn_interrupted` (payload reason `OPERATOR_CANCELLED`)
+/// lands as the actual closing record.
 fn is_terminal_event(event_type: &OperatorEventType) -> bool {
     matches!(
         event_type,
@@ -625,7 +652,9 @@ impl FoldedThread {
         }
     }
 
-    fn to_view(&self) -> OperatorThreadView {
+    /// `skipped_lines` is passed in rather than stored: it is stream-wide
+    /// (owned by [`MaterializedJournal`]), not per-thread state.
+    fn to_view(&self, skipped_lines: usize) -> OperatorThreadView {
         OperatorThreadView {
             thread_id: self.thread_id.clone(),
             turns: self
@@ -642,6 +671,7 @@ impl FoldedThread {
                 })
                 .collect(),
             skipped_events: self.skipped_events,
+            skipped_lines,
         }
     }
 
@@ -655,25 +685,51 @@ impl FoldedThread {
     }
 }
 
+/// Result of folding the whole journal: per-thread projections plus the
+/// stream-wide count of journal-level damage encountered along the way.
+#[derive(Debug)]
+struct MaterializedJournal {
+    threads: HashMap<String, FoldedThread>,
+    /// Deduplicated count of damaged journal lines (see
+    /// [`OperatorThreadView::skipped_lines`] for what qualifies).
+    skipped_lines: usize,
+}
+
 /// Fold the entire operator journal into per-thread state.
 ///
 /// Applies, in append order: reader-side dedup of repeated `event_id`
 /// values, skip-and-count for unsupported schema versions, and skip-and-
 /// count for nonterminal events addressed to a turn that is already
-/// terminal. Never fails on content — only a genuine I/O/storage error from
-/// the underlying journal propagates.
-fn materialize_all(journal: &OperatorJournal) -> Result<HashMap<String, FoldedThread>> {
+/// terminal. Journal-level damage (lines that never parse as events) is
+/// accumulated separately into `skipped_lines`. Never fails on content —
+/// only a genuine I/O/storage error from the underlying journal
+/// propagates.
+fn materialize_all(journal: &OperatorJournal) -> Result<MaterializedJournal> {
     const PAGE_SIZE: usize = 256;
     let mut threads: HashMap<String, FoldedThread> = HashMap::new();
     let mut seen_event_ids: HashSet<String> = HashSet::new();
     let mut cursor: Option<String> = None;
     let mut order = 0usize;
+    let mut skipped_lines = 0usize;
+    // Whether the previous page returned events but fewer than PAGE_SIZE.
+    // Such a page stopped at end-of-stream (or a torn tail), meaning it
+    // already inspected — and counted — every damaged line between its
+    // last event and the end of the file. The journal cursor only advances
+    // to the last *event*, so the follow-up read that terminates this loop
+    // re-inspects exactly that trailing span; folding its count in again
+    // would double-count the same damage.
+    let mut prev_page_was_short = false;
 
     loop {
         let page = journal.read_after(cursor.as_deref(), PAGE_SIZE)?;
         if page.events.is_empty() {
+            if !prev_page_was_short {
+                skipped_lines += page.skipped_lines;
+            }
             break;
         }
+        skipped_lines += page.skipped_lines;
+        prev_page_was_short = page.events.len() < PAGE_SIZE;
         for row in &page.events {
             order += 1;
             apply_event(&mut threads, &mut seen_event_ids, row, order);
@@ -681,7 +737,10 @@ fn materialize_all(journal: &OperatorJournal) -> Result<HashMap<String, FoldedTh
         cursor = page.next_cursor.clone();
     }
 
-    Ok(threads)
+    Ok(MaterializedJournal {
+        threads,
+        skipped_lines,
+    })
 }
 
 fn apply_event(
@@ -712,6 +771,10 @@ fn apply_event(
         OperatorEventType::TurnCompleted => apply_terminal(entry, event, "completed"),
         OperatorEventType::TurnInterrupted => apply_terminal(entry, event, "interrupted"),
         OperatorEventType::Blocker => apply_terminal(entry, event, "blocked"),
+        // `TurnCancelRequested` is intent, not closure: per the
+        // cancellation contract (module docs) the turn stays open until
+        // the follow-up `turn_interrupted` (reason `OPERATOR_CANCELLED`)
+        // arrives, so it folds like any other nonterminal touch.
         OperatorEventType::TurnCancelRequested
         | OperatorEventType::RoutePlanned
         | OperatorEventType::RouteAttempted
