@@ -25,6 +25,8 @@ enum OperatorStreamError {
     Unavailable,
     #[error("operator stream returned an invalid frame")]
     InvalidFrame,
+    #[error("operator stream handshake rejected with HTTP {status}")]
+    HandshakeRejected { status: u16 },
     #[error("operator stream receiver closed")]
     ReceiverClosed,
 }
@@ -44,9 +46,8 @@ fn operator_stream_url(
     {
         return Err(OperatorStreamError::InvalidThread);
     }
-    if !base_url.starts_with("ws://") && !base_url.starts_with("wss://") {
-        return Err(OperatorStreamError::InvalidEndpoint);
-    }
+    crate::proxy::validate_loopback_url(base_url, "ws")
+        .map_err(|_| OperatorStreamError::InvalidEndpoint)?;
     if after.is_some_and(|cursor| cursor.len() > 8 * 1024 || cursor.chars().any(char::is_control)) {
         return Err(OperatorStreamError::InvalidEndpoint);
     }
@@ -59,6 +60,8 @@ fn operator_stream_url(
         url.push_str("&after=");
         url.push_str(&percent_encode_query_component(after));
     }
+    crate::proxy::validate_loopback_url(&url, "ws")
+        .map_err(|_| OperatorStreamError::InvalidEndpoint)?;
     Ok(url)
 }
 
@@ -73,14 +76,6 @@ fn percent_encode_query_component(value: &str) -> String {
         }
     }
     encoded
-}
-
-fn reconnect_delay(backoffs: &[Duration], attempt: usize) -> Duration {
-    backoffs
-        .get(attempt)
-        .copied()
-        .or_else(|| backoffs.last().copied())
-        .unwrap_or(Duration::from_secs(3))
 }
 
 async fn subscribe_with_auth_and_backoff<F>(
@@ -115,11 +110,13 @@ where
                 while let Some(message) = websocket.next().await {
                     match message {
                         Ok(Message::Text(text)) => {
-                            if text.contains(token) {
-                                return Err(OperatorStreamError::InvalidFrame);
-                            }
                             let frame: Value = serde_json::from_str(&text)
                                 .map_err(|_| OperatorStreamError::InvalidFrame)?;
+                            if text.contains(token)
+                                || crate::proxy::value_contains_secret(&frame, token)
+                            {
+                                return Err(OperatorStreamError::InvalidFrame);
+                            }
                             if frame.get("type").and_then(Value::as_str) == Some("event") {
                                 let next_cursor = frame
                                     .get("cursor")
@@ -152,10 +149,23 @@ where
                     }
                 }
             }
+            Err(tokio_tungstenite::tungstenite::Error::Http(response)) => {
+                return Err(OperatorStreamError::HandshakeRejected {
+                    status: response.status().as_u16(),
+                });
+            }
+            Err(
+                tokio_tungstenite::tungstenite::Error::Url(_)
+                | tokio_tungstenite::tungstenite::Error::HttpFormat(_),
+            ) => {
+                return Err(OperatorStreamError::InvalidEndpoint);
+            }
             Err(_) => {}
         }
 
-        let delay = reconnect_delay(backoffs, reconnect_attempt);
+        let Some(delay) = backoffs.get(reconnect_attempt).copied() else {
+            return Err(OperatorStreamError::Unavailable);
+        };
         reconnect_attempt = reconnect_attempt.saturating_add(1);
         tokio::time::sleep(delay).await;
     }
@@ -173,6 +183,10 @@ fn stream_api_error(error: OperatorStreamError) -> crate::proxy::ApiErrorPayload
         OperatorStreamError::Unavailable | OperatorStreamError::InvalidFrame => {
             crate::proxy::ApiErrorPayload::Offline("operator stream unavailable".to_string())
         }
+        OperatorStreamError::HandshakeRejected { status } => crate::proxy::ApiErrorPayload::Http {
+            status,
+            body: "operator websocket handshake rejected".to_string(),
+        },
     }
 }
 
@@ -184,7 +198,7 @@ pub async fn operator_subscribe(
 ) -> Result<(), crate::proxy::ApiErrorPayload> {
     let token = crate::proxy::machine_auth_token().map_err(crate::proxy::ApiErrorPayload::from)?;
     subscribe_with_auth_and_backoff(
-        &crate::proxy::runtime_websocket_base_url(),
+        &crate::proxy::runtime_websocket_base_url().map_err(crate::proxy::ApiErrorPayload::from)?,
         &thread_id,
         after.as_deref(),
         &token,
@@ -204,6 +218,7 @@ mod tests {
     use super::*;
     use futures_util::SinkExt;
     use serde_json::{json, Value};
+    use std::sync::atomic::{AtomicUsize, Ordering};
     use std::sync::{Arc, Mutex};
     use std::time::Duration;
     use tokio::net::TcpListener;
@@ -348,5 +363,117 @@ mod tests {
             url,
             "ws://127.0.0.1:7474/ws/v1/operator?thread_id=team%26special&after=opaque%2B%2F%3D%26cursor"
         );
+        assert!(operator_stream_url("ws://evil.example:7474", "default", None).is_err());
+    }
+
+    #[tokio::test]
+    async fn native_operator_handshake_rejection_is_terminal_and_safe() {
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        let attempts = Arc::new(AtomicUsize::new(0));
+        let server_attempts = attempts.clone();
+        let server = tokio::spawn(async move {
+            let (mut stream, _) = listener.accept().await.unwrap();
+            server_attempts.fetch_add(1, Ordering::SeqCst);
+            let mut request = [0_u8; 4096];
+            let _ = stream.read(&mut request).await.unwrap();
+            let body = r#"{"error":"native-secret-token"}"#;
+            let response = format!(
+                "HTTP/1.1 401 Unauthorized\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+                body.len()
+            );
+            stream.write_all(response.as_bytes()).await.unwrap();
+        });
+        let error = tokio::time::timeout(
+            Duration::from_millis(100),
+            subscribe_with_auth_and_backoff(
+                &format!("ws://{address}"),
+                "default",
+                None,
+                "native-secret-token",
+                |_| Ok(()),
+                &[Duration::from_millis(1)],
+            ),
+        )
+        .await
+        .expect("handshake rejection must not retry")
+        .expect_err("401 is terminal");
+        server.await.unwrap();
+        assert!(matches!(
+            error,
+            OperatorStreamError::HandshakeRejected { status: 401 }
+        ));
+        assert_eq!(attempts.load(Ordering::SeqCst), 1);
+        assert!(!error.to_string().contains("native-secret-token"));
+    }
+
+    #[tokio::test]
+    async fn native_operator_offline_retries_are_bounded() {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        let attempts = Arc::new(AtomicUsize::new(0));
+        let server_attempts = attempts.clone();
+        let server = tokio::spawn(async move {
+            for _ in 0..3 {
+                let (stream, _) = listener.accept().await.unwrap();
+                server_attempts.fetch_add(1, Ordering::SeqCst);
+                drop(stream);
+            }
+        });
+        let error = tokio::time::timeout(
+            Duration::from_millis(100),
+            subscribe_with_auth_and_backoff(
+                &format!("ws://{address}"),
+                "default",
+                None,
+                "native-token",
+                |_| Ok(()),
+                &[Duration::from_millis(1), Duration::from_millis(1)],
+            ),
+        )
+        .await
+        .expect("retry lifecycle is bounded")
+        .expect_err("offline retries exhaust");
+        server.await.unwrap();
+        assert!(matches!(error, OperatorStreamError::Unavailable));
+        assert_eq!(attempts.load(Ordering::SeqCst), 3);
+    }
+
+    #[tokio::test]
+    async fn native_operator_scans_decoded_json_before_channel_delivery() {
+        let token = "native\\token\"quote";
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        let server = tokio::spawn(async move {
+            let (stream, _) = listener.accept().await.unwrap();
+            let mut websocket = tokio_tungstenite::accept_async(stream).await.unwrap();
+            websocket
+                .send(Message::Text(
+                    serde_json::to_string(&json!({"type":"error","nested":{"value":token}}))
+                        .unwrap(),
+                ))
+                .await
+                .unwrap();
+        });
+        let forwarded = Arc::new(Mutex::new(Vec::<Value>::new()));
+        let sink = forwarded.clone();
+        let error = subscribe_with_auth_and_backoff(
+            &format!("ws://{address}"),
+            "default",
+            None,
+            token,
+            move |frame| {
+                sink.lock().unwrap().push(frame);
+                Ok(())
+            },
+            &[Duration::from_millis(1)],
+        )
+        .await
+        .expect_err("decoded token echo rejected");
+        server.await.unwrap();
+        assert!(matches!(error, OperatorStreamError::InvalidFrame));
+        assert!(forwarded.lock().unwrap().is_empty());
     }
 }

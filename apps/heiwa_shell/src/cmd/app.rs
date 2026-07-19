@@ -14,9 +14,9 @@ use std::path::{Component, Path, PathBuf};
 use std::process::{Child, Command, Stdio};
 use std::sync::Arc;
 use std::time::Instant;
-use tokio::io::{AsyncReadExt, AsyncWriteExt};
+use tokio::io::{AsyncReadExt, AsyncWrite, AsyncWriteExt};
 use tokio::net::{TcpListener, TcpStream};
-use tokio::sync::{broadcast, watch};
+use tokio::sync::{broadcast, mpsc, watch};
 use tokio::time::{self, Duration};
 
 pub(crate) const DEFAULT_PORT: u16 = 7474;
@@ -1850,13 +1850,18 @@ fn strict_percent_decode_query(raw: &str) -> std::result::Result<String, ()> {
 }
 
 async fn operator_events_loop(
-    mut stream: TcpStream,
+    stream: TcpStream,
     sessions: Arc<heiwa_session::operator::OperatorSessionService>,
     mut transient: broadcast::Receiver<heiwa_shell::operator::OperatorStreamFrame>,
     thread_id: String,
     mut cursor: Option<String>,
     intervals: OperatorWebsocketIntervals,
 ) -> Result<()> {
+    let (reader, mut writer) = stream.into_split();
+    let (control_tx, mut control_rx) = mpsc::channel(8);
+    let _reader = AbortTask(tokio::spawn(read_operator_websocket_controls(
+        reader, control_tx,
+    )));
     let mut poll = time::interval(intervals.poll);
     poll.set_missed_tick_behavior(time::MissedTickBehavior::Skip);
     let mut heartbeat = time::interval(intervals.heartbeat);
@@ -1878,12 +1883,12 @@ async fn operator_events_loop(
                             "code": "invalid_cursor",
                             "action": "replay_from_start",
                         });
-                        let _ = write_ws_text(&mut stream, &payload.to_string()).await;
+                        let _ = write_ws_text(&mut writer, &payload.to_string()).await;
                         return Ok(());
                     }
                     Err(heiwa_evidence::CursorError::Storage(_)) => {
                         let payload = json!({"type":"error","code":"operator_unavailable"});
-                        let _ = write_ws_text(&mut stream, &payload.to_string()).await;
+                        let _ = write_ws_text(&mut writer, &payload.to_string()).await;
                         return Ok(());
                     }
                 };
@@ -1895,7 +1900,7 @@ async fn operator_events_loop(
                         "cursor": row.cursor,
                         "event": row.event,
                     });
-                    if write_ws_text(&mut stream, &payload.to_string()).await.is_err() {
+                    if write_ws_text(&mut writer, &payload.to_string()).await.is_err() {
                         return Ok(());
                     }
                 }
@@ -1903,7 +1908,7 @@ async fn operator_events_loop(
                     cursor = Some(next_cursor);
                 }
                 if !caught_up && event_count < 100 {
-                    if write_ws_text(&mut stream, &json!({"type":"caught_up"}).to_string()).await.is_err() {
+                    if write_ws_text(&mut writer, &json!({"type":"caught_up"}).to_string()).await.is_err() {
                         return Ok(());
                     }
                     caught_up = true;
@@ -1922,7 +1927,7 @@ async fn operator_events_loop(
                             "turn_id": turn_id,
                             "text": text,
                         });
-                        if write_ws_text(&mut stream, &payload.to_string()).await.is_err() {
+                        if write_ws_text(&mut writer, &payload.to_string()).await.is_err() {
                             return Ok(());
                         }
                     }
@@ -1937,7 +1942,7 @@ async fn operator_events_loop(
                             "thread_id": frame_thread,
                             "turn_id": turn_id,
                         });
-                        if write_ws_text(&mut stream, &payload.to_string()).await.is_err() {
+                        if write_ws_text(&mut writer, &payload.to_string()).await.is_err() {
                             return Ok(());
                         }
                     }
@@ -1950,10 +1955,124 @@ async fn operator_events_loop(
                     "type":"heartbeat",
                     "occurred_at": chrono::Utc::now().to_rfc3339(),
                 });
-                if write_ws_text(&mut stream, &payload.to_string()).await.is_err() {
+                if write_ws_text(&mut writer, &payload.to_string()).await.is_err() {
                     return Ok(());
                 }
             }
+            control = control_rx.recv() => {
+                match control {
+                    Some(OperatorWebsocketControl::Ping(payload)) => {
+                        if write_ws_control(&mut writer, 0xA, &payload).await.is_err() {
+                            return Ok(());
+                        }
+                    }
+                    Some(OperatorWebsocketControl::Close(payload)) => {
+                        let _ = write_ws_control(&mut writer, 0x8, &payload).await;
+                        return Ok(());
+                    }
+                    Some(OperatorWebsocketControl::ProtocolError) => {
+                        let _ = write_ws_control(&mut writer, 0x8, &1002_u16.to_be_bytes()).await;
+                        return Ok(());
+                    }
+                    None => return Ok(()),
+                }
+            }
+        }
+    }
+}
+
+enum OperatorWebsocketControl {
+    Ping(Vec<u8>),
+    Close(Vec<u8>),
+    ProtocolError,
+}
+
+struct AbortTask(tokio::task::JoinHandle<()>);
+
+impl Drop for AbortTask {
+    fn drop(&mut self) {
+        self.0.abort();
+    }
+}
+
+async fn read_operator_websocket_controls(
+    mut reader: tokio::net::tcp::OwnedReadHalf,
+    controls: mpsc::Sender<OperatorWebsocketControl>,
+) {
+    const MAX_CLIENT_FRAME_BYTES: usize = 64 * 1024;
+
+    loop {
+        let mut header = [0_u8; 2];
+        if reader.read_exact(&mut header).await.is_err() {
+            let _ = controls
+                .send(OperatorWebsocketControl::Close(Vec::new()))
+                .await;
+            return;
+        }
+        let fin = header[0] & 0x80 != 0;
+        let reserved = header[0] & 0x70;
+        let opcode = header[0] & 0x0f;
+        let masked = header[1] & 0x80 != 0;
+        let short_len = header[1] & 0x7f;
+        let is_control = opcode & 0x08 != 0;
+        if reserved != 0 || !masked || (is_control && (!fin || short_len > 125)) {
+            let _ = controls.send(OperatorWebsocketControl::ProtocolError).await;
+            return;
+        }
+
+        let payload_len = match short_len {
+            value @ 0..=125 => value as usize,
+            126 => {
+                let mut bytes = [0_u8; 2];
+                if reader.read_exact(&mut bytes).await.is_err() {
+                    return;
+                }
+                u16::from_be_bytes(bytes) as usize
+            }
+            127 => {
+                let mut bytes = [0_u8; 8];
+                if reader.read_exact(&mut bytes).await.is_err() {
+                    return;
+                }
+                match usize::try_from(u64::from_be_bytes(bytes)) {
+                    Ok(length) => length,
+                    Err(_) => {
+                        let _ = controls.send(OperatorWebsocketControl::ProtocolError).await;
+                        return;
+                    }
+                }
+            }
+            _ => unreachable!(),
+        };
+        if payload_len > MAX_CLIENT_FRAME_BYTES {
+            let _ = controls.send(OperatorWebsocketControl::ProtocolError).await;
+            return;
+        }
+
+        let mut mask = [0_u8; 4];
+        if reader.read_exact(&mut mask).await.is_err() {
+            return;
+        }
+        let mut payload = vec![0_u8; payload_len];
+        if reader.read_exact(&mut payload).await.is_err() {
+            return;
+        }
+        for (index, byte) in payload.iter_mut().enumerate() {
+            *byte ^= mask[index % mask.len()];
+        }
+
+        let control = match opcode {
+            0x8 if payload.len() != 1 => OperatorWebsocketControl::Close(payload),
+            0x9 => OperatorWebsocketControl::Ping(payload),
+            0xA | 0x0 | 0x1 | 0x2 => continue,
+            _ => OperatorWebsocketControl::ProtocolError,
+        };
+        let terminal = matches!(
+            control,
+            OperatorWebsocketControl::Close(_) | OperatorWebsocketControl::ProtocolError
+        );
+        if controls.send(control).await.is_err() || terminal {
+            return;
         }
     }
 }
@@ -2111,10 +2230,29 @@ fn scan_dispatch_ids_in(dir: &Path) -> HashSet<String> {
     ids
 }
 
-async fn write_ws_text(stream: &mut TcpStream, text: &str) -> Result<()> {
-    let bytes = text.as_bytes();
+async fn write_ws_text<W>(stream: &mut W, text: &str) -> Result<()>
+where
+    W: AsyncWrite + Unpin,
+{
+    write_ws_frame(stream, 0x1, text.as_bytes()).await
+}
+
+async fn write_ws_control<W>(stream: &mut W, opcode: u8, payload: &[u8]) -> Result<()>
+where
+    W: AsyncWrite + Unpin,
+{
+    if payload.len() > 125 || !matches!(opcode, 0x8..=0xA) {
+        return Err(anyhow!("invalid websocket control frame"));
+    }
+    write_ws_frame(stream, opcode, payload).await
+}
+
+async fn write_ws_frame<W>(stream: &mut W, opcode: u8, bytes: &[u8]) -> Result<()>
+where
+    W: AsyncWrite + Unpin,
+{
     let mut frame = Vec::with_capacity(bytes.len() + 10);
-    frame.push(0x81);
+    frame.push(0x80 | opcode);
     match bytes.len() {
         len if len < 126 => frame.push(len as u8),
         len if len <= u16::MAX as usize => {
@@ -4359,9 +4497,15 @@ mod app_readmodel_tests {
     }
 
     async fn read_server_ws_json(stream: &mut TcpStream) -> Value {
+        let (opcode, payload) = read_server_ws_frame(stream).await;
+        assert_eq!(opcode, 0x1, "server frame must be text");
+        serde_json::from_slice(&payload).expect("JSON websocket frame")
+    }
+
+    async fn read_server_ws_frame(stream: &mut TcpStream) -> (u8, Vec<u8>) {
         let mut header = [0_u8; 2];
         stream.read_exact(&mut header).await.expect("frame header");
-        assert_eq!(header[0], 0x81, "server frame must be final text");
+        assert_eq!(header[0] & 0x80, 0x80, "server frame must be final");
         assert_eq!(header[1] & 0x80, 0, "server frame must not be masked");
         let length = match header[1] & 0x7f {
             value @ 0..=125 => value as usize,
@@ -4382,7 +4526,21 @@ mod app_readmodel_tests {
             .read_exact(&mut payload)
             .await
             .expect("frame payload");
-        serde_json::from_slice(&payload).expect("JSON websocket frame")
+        (header[0] & 0x0f, payload)
+    }
+
+    async fn write_masked_client_frame(stream: &mut TcpStream, opcode: u8, payload: &[u8]) {
+        assert!(payload.len() <= 125);
+        let mask = [0x11_u8, 0x22, 0x33, 0x44];
+        let mut frame = vec![0x80 | opcode, 0x80 | payload.len() as u8];
+        frame.extend_from_slice(&mask);
+        frame.extend(
+            payload
+                .iter()
+                .enumerate()
+                .map(|(index, byte)| byte ^ mask[index % mask.len()]),
+        );
+        stream.write_all(&frame).await.unwrap();
     }
 
     fn test_ws_intervals() -> OperatorWebsocketIntervals {
@@ -4586,6 +4744,91 @@ mod app_readmodel_tests {
         let next = read_server_ws_json(&mut client).await;
         assert_eq!(next["type"], "heartbeat", "unrelated delta leaked: {next}");
         task.abort();
+    }
+
+    #[tokio::test]
+    async fn operator_websocket_masked_close_terminates_promptly() {
+        let root = tempfile::tempdir().unwrap();
+        let sessions = test_operator_sessions(root.path());
+        let (_sender, receiver) = broadcast::channel(8);
+        let (server, mut client) = tcp_pair().await;
+        let task = tokio::spawn(async move {
+            operator_events_loop(
+                server,
+                sessions,
+                receiver,
+                "close-thread".to_string(),
+                None,
+                test_ws_intervals(),
+            )
+            .await
+        });
+        assert_eq!(read_server_ws_json(&mut client).await["type"], "caught_up");
+        write_masked_client_frame(&mut client, 0x8, &1000_u16.to_be_bytes()).await;
+        tokio::time::timeout(Duration::from_millis(50), task)
+            .await
+            .expect("close terminates without waiting for poll")
+            .unwrap()
+            .unwrap();
+    }
+
+    #[tokio::test]
+    async fn operator_websocket_masked_ping_receives_pong() {
+        let root = tempfile::tempdir().unwrap();
+        let sessions = test_operator_sessions(root.path());
+        let (_sender, receiver) = broadcast::channel(8);
+        let (server, mut client) = tcp_pair().await;
+        let task = tokio::spawn(async move {
+            operator_events_loop(
+                server,
+                sessions,
+                receiver,
+                "ping-thread".to_string(),
+                None,
+                OperatorWebsocketIntervals {
+                    poll: Duration::from_millis(50),
+                    heartbeat: Duration::from_secs(10),
+                },
+            )
+            .await
+        });
+        assert_eq!(read_server_ws_json(&mut client).await["type"], "caught_up");
+        write_masked_client_frame(&mut client, 0x9, b"probe").await;
+        let (opcode, payload) =
+            tokio::time::timeout(Duration::from_millis(50), read_server_ws_frame(&mut client))
+                .await
+                .expect("pong is prompt");
+        assert_eq!(opcode, 0xA);
+        assert_eq!(payload, b"probe");
+        task.abort();
+    }
+
+    #[tokio::test]
+    async fn operator_websocket_oversized_control_frame_closes_safely() {
+        let root = tempfile::tempdir().unwrap();
+        let sessions = test_operator_sessions(root.path());
+        let (_sender, receiver) = broadcast::channel(8);
+        let (server, mut client) = tcp_pair().await;
+        let task = tokio::spawn(async move {
+            operator_events_loop(
+                server,
+                sessions,
+                receiver,
+                "invalid-control-thread".to_string(),
+                None,
+                test_ws_intervals(),
+            )
+            .await
+        });
+        assert_eq!(read_server_ws_json(&mut client).await["type"], "caught_up");
+        // Control frames may never use extended lengths. The reader must
+        // reject this header without waiting for the declared payload.
+        client.write_all(&[0x89, 0xFE, 0x00, 0x7E]).await.unwrap();
+        tokio::time::timeout(Duration::from_millis(50), task)
+            .await
+            .expect("invalid control closes promptly")
+            .unwrap()
+            .unwrap();
     }
 
     #[tokio::test]
