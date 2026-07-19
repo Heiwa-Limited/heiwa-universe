@@ -18,6 +18,14 @@ struct TestRuntime {
 
 impl TestRuntime {
     fn start(configured_auth: bool) -> Self {
+        Self::start_with_provider_path(configured_auth, true)
+    }
+
+    fn start_without_providers() -> Self {
+        Self::start_with_provider_path(true, false)
+    }
+
+    fn start_with_provider_path(configured_auth: bool, provider_path: bool) -> Self {
         let port = reserve_port();
         let home = tempfile::tempdir().unwrap();
         let evidence = tempfile::tempdir().unwrap();
@@ -34,6 +42,11 @@ impl TestRuntime {
             .stderr(Stdio::null());
         if configured_auth {
             command.env("HEIWA_MACHINE_AUTH_TOKEN", TOKEN);
+        }
+        if !provider_path {
+            let empty_path = home.path().join("empty-path");
+            std::fs::create_dir(&empty_path).unwrap();
+            command.env("PATH", empty_path);
         }
         let child = command.spawn().expect("start test runtime");
         wait_for_port(port);
@@ -64,6 +77,12 @@ impl Drop for TestRuntime {
 
 struct Response {
     status: u16,
+    body: Value,
+}
+
+struct HandshakeResponse {
+    status: u16,
+    head: String,
     body: Value,
 }
 
@@ -110,6 +129,26 @@ fn missing_operator_auth_configuration_is_distinct_from_bad_credentials() {
     assert_eq!(bad.status, 401);
     assert_eq!(bad.body["error"]["code"], "unauthorized");
     assert!(!bad.body.to_string().contains(TOKEN));
+}
+
+#[test]
+fn operator_websocket_authenticates_before_any_upgrade() {
+    let unconfigured = TestRuntime::start(false);
+    let missing_config = websocket_handshake(unconfigured.port, None);
+    assert_eq!(missing_config.status, 500, "{}", missing_config.head);
+    assert!(!missing_config.head.contains("101 Switching Protocols"));
+    assert_eq!(missing_config.body["error"]["code"], "auth_not_configured");
+
+    let configured = TestRuntime::start(true);
+    for token in [None, Some("wrong-token")] {
+        let unauthorized = websocket_handshake(configured.port, token);
+        assert_eq!(unauthorized.status, 401, "{}", unauthorized.head);
+        assert!(!unauthorized.head.contains("101 Switching Protocols"));
+        assert_eq!(unauthorized.body["error"]["code"], "unauthorized");
+    }
+
+    let authorized = websocket_handshake(configured.port, Some(TOKEN));
+    assert_eq!(authorized.status, 101, "{}", authorized.head);
 }
 
 #[test]
@@ -262,6 +301,8 @@ fn operator_boundary_rejects_bad_cursor_ids_and_turn_policy() {
         json!({"client_request_id": "", "prompt": "hi"}),
         json!({"client_request_id": "request-1", "prompt": ""}),
         json!({"client_request_id": "request-1", "prompt": "hi", "route_policy": {"mode": "cheapest"}}),
+        json!({"client_request_id": "request-1", "prompt": "hi", "route_policy": {"mode": 7}}),
+        json!({"client_request_id": "request-1", "prompt": "hi", "route_policy": {"privacy": false}}),
         json!({"client_request_id": "request-1", "prompt": "hi", "route_policy": {"mode": "auto", "minimum_quality_class": 0}}),
         json!({"client_request_id": "request-1", "prompt": "hi", "route_policy": {"mode": "auto", "maximum_marginal_cost_usd": -0.01}}),
         json!({"client_request_id": "request-1", "prompt": "hi", "route_policy": {"mode": "auto", "turn_budget_usd": -0.01}}),
@@ -301,6 +342,70 @@ fn operator_stream_url_encodes_valid_reserved_thread_characters() {
         .as_str()
         .unwrap()
         .contains("thread_id=team%26special&"));
+}
+
+#[test]
+fn model_submission_is_accepted_before_provider_preparation_and_fails_durably() {
+    let runtime = TestRuntime::start_without_providers();
+    let submitted = runtime.request(
+        "POST",
+        "/api/v1/operator/threads/default/turns",
+        Some(TOKEN),
+        json!({
+            "client_request_id": "deferred-provider-preparation-1",
+            "prompt": "Develop a detailed strategy for migrating a distributed database safely",
+            "route_policy": {
+                "mode": "explicit",
+                "preferred_provider": "unavailable-test-provider"
+            }
+        }),
+    );
+    assert_eq!(submitted.status, 202, "{}", submitted.body);
+    let turn_id = submitted.body["data"]["turn_id"].as_str().unwrap();
+
+    let deadline = Instant::now() + Duration::from_secs(10);
+    loop {
+        let events = runtime.request(
+            "GET",
+            "/api/v1/operator/threads/default/events?limit=100",
+            Some(TOKEN),
+            json!(null),
+        );
+        assert_eq!(events.status, 200, "{}", events.body);
+        let turn_events = events.body["data"]["events"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter(|row| row["event"]["turn_id"].as_str() == Some(turn_id))
+            .collect::<Vec<_>>();
+        let event_types = turn_events
+            .iter()
+            .filter_map(|row| row["event"]["event_type"].as_str())
+            .collect::<Vec<_>>();
+        assert_eq!(
+            event_types.get(..2),
+            Some(&["turn_started", "user_message"][..])
+        );
+        if let Some(terminal) = turn_events
+            .iter()
+            .find(|row| row["event"]["event_type"] == "turn_interrupted")
+        {
+            assert_eq!(terminal["event"]["payload"]["reason"], "EXECUTION_FAILED");
+            assert!(
+                terminal["event"]["payload"]["message"]
+                    .as_str()
+                    .unwrap_or_default()
+                    .contains("not available"),
+                "{terminal}"
+            );
+            break;
+        }
+        assert!(
+            Instant::now() < deadline,
+            "turn did not terminate: {event_types:?}"
+        );
+        thread::sleep(Duration::from_millis(25));
+    }
 }
 
 fn reserve_port() -> u16 {
@@ -356,4 +461,68 @@ fn request(port: u16, method: &str, target: &str, token: Option<&str>, body: &st
         )
     });
     Response { status, body }
+}
+
+fn websocket_handshake(port: u16, token: Option<&str>) -> HandshakeResponse {
+    let mut stream = TcpStream::connect(("127.0.0.1", port)).unwrap();
+    stream
+        .set_read_timeout(Some(Duration::from_secs(2)))
+        .unwrap();
+    let authorization = token
+        .map(|token| format!("Authorization: Bearer {token}\r\n"))
+        .unwrap_or_default();
+    let request = format!(
+        "GET /ws/v1/operator HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Version: 13\r\nSec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\n{authorization}\r\n"
+    );
+    stream.write_all(request.as_bytes()).unwrap();
+
+    let mut raw = Vec::new();
+    let mut buffer = [0_u8; 1024];
+    loop {
+        match stream.read(&mut buffer) {
+            Ok(0) => break,
+            Ok(read) => {
+                raw.extend_from_slice(&buffer[..read]);
+                if let Some(split) = raw.windows(4).position(|window| window == b"\r\n\r\n") {
+                    let head = String::from_utf8_lossy(&raw[..split]);
+                    let status = head
+                        .lines()
+                        .next()
+                        .and_then(|line| line.split_whitespace().nth(1));
+                    let content_length = head.lines().find_map(|line| {
+                        let (name, value) = line.split_once(':')?;
+                        name.eq_ignore_ascii_case("content-length")
+                            .then(|| value.trim().parse::<usize>().ok())
+                            .flatten()
+                    });
+                    if status == Some("101")
+                        || content_length.is_some_and(|length| raw.len() >= split + 4 + length)
+                    {
+                        break;
+                    }
+                }
+            }
+            Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => break,
+            Err(error) if error.kind() == std::io::ErrorKind::TimedOut => break,
+            Err(error) => panic!("websocket handshake read failed: {error}"),
+        }
+    }
+    let split = raw
+        .windows(4)
+        .position(|window| window == b"\r\n\r\n")
+        .expect("websocket response headers");
+    let head = String::from_utf8_lossy(&raw[..split]).to_string();
+    let status = head
+        .lines()
+        .next()
+        .and_then(|line| line.split_whitespace().nth(1))
+        .unwrap()
+        .parse()
+        .unwrap();
+    let body = if raw[split + 4..].is_empty() {
+        Value::Null
+    } else {
+        serde_json::from_slice(&raw[split + 4..]).unwrap()
+    };
+    HandshakeResponse { status, head, body }
 }

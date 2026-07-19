@@ -909,6 +909,21 @@ async fn handle_connection(mut stream: TcpStream, started_at: Arc<String>) -> Re
 
     if is_websocket_request(&request) {
         let path = request_path(&request).unwrap_or("/").to_string();
+        if path == "/ws/v1/operator" {
+            if let Err(error) = operator_auth_subject(&request) {
+                let (status, code) = operator_auth_response(error);
+                return write_response(
+                    &mut stream,
+                    status,
+                    "application/json",
+                    json!({"ok": false, "error": {"code": code}})
+                        .to_string()
+                        .into_bytes(),
+                    false,
+                )
+                .await;
+            }
+        }
         return handle_websocket(stream, &request, started_at, &path).await;
     }
 
@@ -922,10 +937,7 @@ async fn handle_connection(mut stream: TcpStream, started_at: Arc<String>) -> Re
 
     if is_operator_authenticated_path(path) {
         if let Err(error) = operator_auth_subject(&request) {
-            let (status, code) = match error {
-                OperatorAuthError::NotConfigured => (500, "auth_not_configured"),
-                OperatorAuthError::Unauthorized => (401, "unauthorized"),
-            };
+            let (status, code) = operator_auth_response(error);
             return write_response(
                 &mut stream,
                 status,
@@ -1217,6 +1229,13 @@ enum OperatorAuthError {
     Unauthorized,
 }
 
+fn operator_auth_response(error: OperatorAuthError) -> (u16, &'static str) {
+    match error {
+        OperatorAuthError::NotConfigured => (500, "auth_not_configured"),
+        OperatorAuthError::Unauthorized => (401, "unauthorized"),
+    }
+}
+
 fn is_operator_api_path(path: &str) -> bool {
     path == "/api/v1/operator" || path.starts_with("/api/v1/operator/")
 }
@@ -1494,12 +1513,16 @@ fn parse_route_policy(
     use heiwa_session::operator::{RouteMode, TurnRoutePolicy};
 
     let object = value.as_object().ok_or(())?;
-    let mode = match object.get("mode").and_then(Value::as_str).unwrap_or("auto") {
-        "auto" => RouteMode::Auto,
-        "local_only" => RouteMode::LocalOnly,
-        "remote_only" => RouteMode::RemoteOnly,
-        "explicit" => RouteMode::Explicit,
-        _ => return Err(()),
+    let mode = match object.get("mode") {
+        None => RouteMode::Auto,
+        Some(Value::String(mode)) => match mode.as_str() {
+            "auto" => RouteMode::Auto,
+            "local_only" => RouteMode::LocalOnly,
+            "remote_only" => RouteMode::RemoteOnly,
+            "explicit" => RouteMode::Explicit,
+            _ => return Err(()),
+        },
+        Some(_) => return Err(()),
     };
     let preferred_provider = parse_optional_policy_string(object.get("preferred_provider"))?;
     let preferred_model = parse_optional_policy_string(object.get("preferred_model"))?;
@@ -1518,10 +1541,11 @@ fn parse_route_policy(
     let maximum_marginal_cost_usd =
         parse_nonnegative_budget(object.get("maximum_marginal_cost_usd"))?;
     let turn_budget_usd = parse_nonnegative_budget(object.get("turn_budget_usd"))?;
-    let privacy = object
-        .get("privacy")
-        .and_then(Value::as_str)
-        .unwrap_or("standard");
+    let privacy = match object.get("privacy") {
+        None => "standard",
+        Some(Value::String(privacy)) => privacy.as_str(),
+        Some(_) => return Err(()),
+    };
     heiwa_core::drex::PrivacyClass::parse(privacy).map_err(|_| ())?;
     if mode == RouteMode::Explicit && preferred_provider.is_none() && preferred_model.is_none() {
         return Err(());

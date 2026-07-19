@@ -187,7 +187,7 @@ impl ModelCallExecutor {
                 &execution.request,
                 OperatorEventType::RoutePlanned,
                 "route_planned",
-                planned_payload(&plan, selected.as_ref(), attempts + 1),
+                planned_payload(&execution.request, &plan, selected.as_ref(), attempts + 1),
             )?;
 
             let Some(candidate) = selected else {
@@ -564,15 +564,20 @@ impl heiwa_loop::LoopModelCaller for ExecutorLoopCaller {
 }
 
 fn planned_payload(
+    request: &ModelCallRequest,
     plan: &ModelCallPlan,
     selected: Option<&ModelCallCandidate>,
     attempt: usize,
 ) -> serde_json::Value {
     json!({
         "attempt": attempt,
+        "intent": request.intent,
         "provider": selected.map(|candidate| candidate.tier.provider.as_str()),
         "model": selected.map(|candidate| candidate.tier.model_id.as_str()),
         "provider_model": selected.map(|candidate| candidate.tier.provider_model_id.as_str()),
+        "rate_group": selected.map(|candidate| candidate.tier.rate_group.as_str()),
+        "privacy": request.privacy.as_str(),
+        "request_id": request.call_id,
         "stage": plan.stage,
         "selected_id": plan.selected_id,
         "cost_truth": plan.selected_cost_truth,

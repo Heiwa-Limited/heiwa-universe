@@ -1,7 +1,9 @@
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::fs::{self, OpenOptions};
+use std::future::Future;
 use std::io::Write;
 use std::path::PathBuf;
+use std::pin::Pin;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 
@@ -452,6 +454,50 @@ pub enum OperatorTurnWork {
     Model(Box<OperatorModelTurn>),
 }
 
+type OperatorPreparationFuture =
+    Pin<Box<dyn Future<Output = Result<OperatorTurnWork>> + Send + 'static>>;
+
+/// One-shot work preparation owned by the runner. The session intake is
+/// durable before this closure can run, and duplicate submissions discard it
+/// without polling provider discovery, routing, or compression.
+pub struct OperatorTurnPreparation {
+    prepare: Box<dyn FnOnce() -> OperatorPreparationFuture + Send + 'static>,
+    cancelled: Arc<AtomicBool>,
+}
+
+impl OperatorTurnPreparation {
+    pub fn deferred<F, Fut>(prepare: F) -> Self
+    where
+        F: FnOnce() -> Fut + Send + 'static,
+        Fut: Future<Output = Result<OperatorTurnWork>> + Send + 'static,
+    {
+        Self::cancellable(move |_| prepare())
+    }
+
+    pub fn cancellable<F, Fut>(prepare: F) -> Self
+    where
+        F: FnOnce(Arc<AtomicBool>) -> Fut + Send + 'static,
+        Fut: Future<Output = Result<OperatorTurnWork>> + Send + 'static,
+    {
+        let cancelled = Arc::new(AtomicBool::new(false));
+        let preparation_cancelled = cancelled.clone();
+        Self {
+            prepare: Box::new(move || Box::pin(prepare(preparation_cancelled))),
+            cancelled,
+        }
+    }
+
+    async fn run(self) -> Result<OperatorTurnWork> {
+        (self.prepare)().await
+    }
+}
+
+impl From<OperatorTurnWork> for OperatorTurnPreparation {
+    fn from(work: OperatorTurnWork) -> Self {
+        Self::deferred(move || async move { Ok(work) })
+    }
+}
+
 pub struct OperatorTurnHandle {
     pub thread_id: String,
     pub turn_id: String,
@@ -670,12 +716,16 @@ impl OperatorTurnRunner {
         self.frames.subscribe()
     }
 
-    pub fn submit(
+    pub fn submit<P>(
         &self,
         thread_id: &str,
         request: StartTurnRequest,
-        work: OperatorTurnWork,
-    ) -> Result<OperatorTurnHandle> {
+        preparation: P,
+    ) -> Result<OperatorTurnHandle>
+    where
+        P: Into<OperatorTurnPreparation>,
+    {
+        let preparation = preparation.into();
         let _submission = self
             .submissions
             .lock()
@@ -717,7 +767,14 @@ impl OperatorTurnRunner {
             let turn_id = submission.turn_id.clone();
             tokio::spawn(async move {
                 runner
-                    .run_and_close(thread_id, turn_id, route_policy, work, cancel, direct_tx)
+                    .run_and_close(
+                        thread_id,
+                        turn_id,
+                        route_policy,
+                        preparation,
+                        cancel,
+                        direct_tx,
+                    )
                     .await;
             });
         } else if !self.active.contains(&submission.turn_id) {
@@ -813,20 +870,45 @@ impl OperatorTurnRunner {
         thread_id: String,
         turn_id: String,
         route_policy: TurnRoutePolicy,
-        work: OperatorTurnWork,
+        preparation: OperatorTurnPreparation,
         cancel: watch::Receiver<bool>,
         direct_frames: mpsc::Sender<OperatorStreamFrame>,
     ) {
-        let result = self
-            .run_turn(
-                &thread_id,
-                &turn_id,
-                &route_policy,
-                work,
-                cancel.clone(),
-                &direct_frames,
-            )
-            .await;
+        let preparation_cancelled = preparation.cancelled.clone();
+        let prepared = if *cancel.borrow() {
+            preparation_cancelled.store(true, Ordering::Release);
+            Err(anyhow!("operator turn cancelled during preparation"))
+        } else {
+            let mut preparation_cancel = cancel.clone();
+            let preparation = preparation.run();
+            tokio::pin!(preparation);
+            tokio::select! {
+                biased;
+                changed = preparation_cancel.changed() => match changed {
+                    Ok(()) if *preparation_cancel.borrow() => {
+                        preparation_cancelled.store(true, Ordering::Release);
+                        Err(anyhow!("operator turn cancelled during preparation"))
+                    }
+                    Ok(()) => Err(anyhow!("operator cancellation changed without cancellation")),
+                    Err(_) => Err(anyhow!("operator cancellation channel closed during preparation")),
+                },
+                prepared = &mut preparation => prepared,
+            }
+        };
+        let result = match prepared {
+            Ok(work) => {
+                self.run_turn(
+                    &thread_id,
+                    &turn_id,
+                    &route_policy,
+                    work,
+                    cancel.clone(),
+                    &direct_frames,
+                )
+                .await
+            }
+            Err(error) => Err(error),
+        };
         if let Err(error) = result {
             let cancelled = *cancel.borrow();
             let payload = if cancelled {
@@ -1532,10 +1614,11 @@ fn apply_route_policy(request: &mut ModelCallRequest, policy: &TurnRoutePolicy) 
     request.excluded_models = policy.excluded_models.clone();
     request.minimum_quality_class = policy.minimum_quality_class;
     request.maximum_marginal_cost_usd = policy.maximum_marginal_cost_usd;
-    request.privacy = PrivacyClass::parse(&policy.privacy).map_err(|error| anyhow!(error))?;
+    let mut durable_privacy =
+        PrivacyClass::parse(&policy.privacy).map_err(|error| anyhow!(error))?;
     match policy.mode {
         RouteMode::Auto => {}
-        RouteMode::LocalOnly => request.privacy = PrivacyClass::LocalOnly,
+        RouteMode::LocalOnly => durable_privacy = PrivacyClass::LocalOnly,
         RouteMode::RemoteOnly => {}
         RouteMode::Explicit => {
             if request.preferred_provider.is_none() && request.preferred_model.is_none() {
@@ -1545,7 +1628,16 @@ fn apply_route_policy(request: &mut ModelCallRequest, policy: &TurnRoutePolicy) 
             }
         }
     }
+    request.privacy = stricter_privacy(request.privacy.clone(), durable_privacy);
     Ok(())
+}
+
+fn stricter_privacy(left: PrivacyClass, right: PrivacyClass) -> PrivacyClass {
+    match (left, right) {
+        (PrivacyClass::LocalOnly, _) | (_, PrivacyClass::LocalOnly) => PrivacyClass::LocalOnly,
+        (PrivacyClass::Sovereign, _) | (_, PrivacyClass::Sovereign) => PrivacyClass::Sovereign,
+        _ => PrivacyClass::Standard,
+    }
 }
 
 fn apply_candidate_policy(candidates: &mut Vec<ModelCallCandidate>, policy: &TurnRoutePolicy) {
@@ -1643,7 +1735,7 @@ mod tests {
     use super::{
         ActiveTurnRegistry, CommittedOperatorArtifact, LocalArtifactStore, OperatorApprovalService,
         OperatorArtifactStore, OperatorModelExecutor, OperatorModelTurn, OperatorStreamFrame,
-        OperatorToolExecutor, OperatorTurnRunner, OperatorTurnWork,
+        OperatorToolExecutor, OperatorTurnPreparation, OperatorTurnRunner, OperatorTurnWork,
     };
     use crate::model_calls::{
         ModelCallError, ModelCallExecution, ModelCallExecutor, ModelCallResult,
@@ -2236,6 +2328,154 @@ mod tests {
         assert!(error.to_string().contains("mutex poisoned"));
         let thread = sessions.thread("default").unwrap();
         assert_eq!(thread.turns[0].status, "interrupted");
+    }
+
+    #[tokio::test]
+    async fn operator_defers_preparation_until_after_intake_and_skips_it_for_duplicates() {
+        let dir = tempfile::tempdir().unwrap();
+        let sessions = service(dir.path());
+        let runner =
+            OperatorTurnRunner::new(sessions.clone(), Arc::new(RecordingExecutor::default()));
+        let preparations = Arc::new(AtomicUsize::new(0));
+        let prepared_after = Arc::new(Mutex::new(Vec::new()));
+        let request = StartTurnRequest::auto("deferred-once", "hello");
+
+        let preparation = {
+            let preparations = preparations.clone();
+            let prepared_after = prepared_after.clone();
+            let sessions = sessions.clone();
+            OperatorTurnPreparation::deferred(move || async move {
+                preparations.fetch_add(1, Ordering::SeqCst);
+                *prepared_after.lock().unwrap() = sessions
+                    .events_after("default", None, 16)?
+                    .events
+                    .into_iter()
+                    .filter(|row| row.event.turn_id.is_some())
+                    .map(|row| row.event.event_type)
+                    .collect();
+                Ok(OperatorTurnWork::Deterministic {
+                    response: "prepared".to_string(),
+                    route: json!({"mode": "deterministic"}),
+                    done: json!({"mode": "deterministic"}),
+                })
+            })
+        };
+        let mut first = runner
+            .submit("default", request.clone(), preparation)
+            .unwrap();
+        wait_for_terminal(&mut first).await;
+
+        let duplicate_preparations = preparations.clone();
+        let duplicate_preparation = OperatorTurnPreparation::deferred(move || async move {
+            duplicate_preparations.fetch_add(100, Ordering::SeqCst);
+            anyhow::bail!("duplicate preparation must not execute")
+        });
+        let mut duplicate = runner
+            .submit("default", request, duplicate_preparation)
+            .unwrap();
+        assert!(duplicate.duplicate);
+        wait_for_terminal(&mut duplicate).await;
+
+        assert_eq!(preparations.load(Ordering::SeqCst), 1);
+        assert_eq!(
+            prepared_after.lock().unwrap().get(..2),
+            Some(
+                &[
+                    OperatorEventType::TurnStarted,
+                    OperatorEventType::UserMessage
+                ][..]
+            )
+        );
+    }
+
+    #[tokio::test]
+    async fn operator_cancellation_drops_inflight_preparation_before_terminal() {
+        struct PreparationDropFlag {
+            dropped: Arc<AtomicBool>,
+            cancelled: Arc<AtomicBool>,
+            observed_cancel: Arc<AtomicBool>,
+        }
+
+        impl Drop for PreparationDropFlag {
+            fn drop(&mut self) {
+                self.observed_cancel
+                    .store(self.cancelled.load(Ordering::SeqCst), Ordering::SeqCst);
+                self.dropped.store(true, Ordering::SeqCst);
+            }
+        }
+
+        let dir = tempfile::tempdir().unwrap();
+        let sessions = service(dir.path());
+        let runner =
+            OperatorTurnRunner::new(sessions.clone(), Arc::new(RecordingExecutor::default()));
+        let entered = Arc::new(Notify::new());
+        let dropped = Arc::new(AtomicBool::new(false));
+        let observed_cancel = Arc::new(AtomicBool::new(false));
+        let preparation = {
+            let entered = entered.clone();
+            let dropped = dropped.clone();
+            let observed_cancel = observed_cancel.clone();
+            OperatorTurnPreparation::cancellable(move |cancelled| async move {
+                let _drop_flag = PreparationDropFlag {
+                    dropped,
+                    cancelled,
+                    observed_cancel,
+                };
+                entered.notify_one();
+                std::future::pending::<()>().await;
+                unreachable!("cancelled preparation must be dropped")
+            })
+        };
+        let mut handle = runner
+            .submit(
+                "default",
+                StartTurnRequest::auto("cancel-preparation", "hello"),
+                preparation,
+            )
+            .unwrap();
+        tokio::time::timeout(std::time::Duration::from_secs(2), entered.notified())
+            .await
+            .expect("preparation did not start");
+        assert!(runner.request_cancel(&handle.turn_id).unwrap());
+        let frames = wait_for_terminal(&mut handle).await;
+
+        assert!(dropped.load(Ordering::SeqCst));
+        assert!(observed_cancel.load(Ordering::SeqCst));
+        assert!(frames.iter().any(|frame| matches!(
+            frame,
+            OperatorStreamFrame::Durable(row)
+                if row.event.event_type == OperatorEventType::TurnInterrupted
+                    && row.event.payload["reason"] == "OPERATOR_CANCELLED"
+        )));
+        assert!(!sessions
+            .events_after("default", None, 32)
+            .unwrap()
+            .events
+            .iter()
+            .any(|row| row.event.event_type == OperatorEventType::AssistantStarted));
+    }
+
+    #[test]
+    fn durable_route_policy_never_weakens_prepared_privacy() {
+        let mut turn = model_turn();
+        turn.request.privacy = PrivacyClass::Sovereign;
+        let policy = StartTurnRequest::auto("privacy-floor", "private").route_policy;
+
+        super::apply_route_policy(&mut turn.request, &policy).unwrap();
+
+        assert_eq!(turn.request.privacy, PrivacyClass::Sovereign);
+        assert_eq!(
+            super::stricter_privacy(PrivacyClass::Sovereign, PrivacyClass::LocalOnly),
+            PrivacyClass::LocalOnly
+        );
+        assert_eq!(
+            super::stricter_privacy(PrivacyClass::LocalOnly, PrivacyClass::Sovereign),
+            PrivacyClass::LocalOnly
+        );
+        assert_eq!(
+            super::stricter_privacy(PrivacyClass::Standard, PrivacyClass::Sovereign),
+            PrivacyClass::Sovereign
+        );
     }
 
     #[tokio::test]

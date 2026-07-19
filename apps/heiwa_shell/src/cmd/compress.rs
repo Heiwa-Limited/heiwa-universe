@@ -6,7 +6,8 @@ use std::fs;
 use std::io::{Read, Write};
 use std::path::PathBuf;
 use std::process::{Command, Stdio};
-use std::sync::OnceLock;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, OnceLock};
 use std::time::Instant;
 use tiktoken_rs::{cl100k_base, CoreBPE};
 use uuid::Uuid;
@@ -165,6 +166,44 @@ pub(crate) fn compress_text_for_source_with_pricing(
     let compressed = run_ollama(model_id, COMPRESSION_PROMPT, body)?;
     let duration_ms = started.elapsed().as_millis() as u64;
 
+    finish_compression_receipt(body, source, model, pricing, compressed, duration_ms)
+}
+
+pub(crate) async fn compress_text_for_source_with_pricing_cancellable(
+    body: &str,
+    source: &str,
+    model: &str,
+    pricing: Option<PricingInputs>,
+    cancelled: Arc<AtomicBool>,
+) -> Result<CompressionReceipt> {
+    if cancelled.load(Ordering::Acquire) {
+        return Err(anyhow!("compression cancelled before provider spawn"));
+    }
+    let started = Instant::now();
+    let compressed = run_ollama_cancellable(
+        strip_provider_prefix(model),
+        COMPRESSION_PROMPT,
+        body,
+        cancelled.clone(),
+    )
+    .await?;
+    if cancelled.load(Ordering::Acquire) {
+        return Err(anyhow!("compression cancelled before receipt append"));
+    }
+    let duration_ms = started.elapsed().as_millis() as u64;
+    finish_compression_receipt(body, source, model, pricing, compressed, duration_ms)
+}
+
+fn finish_compression_receipt(
+    body: &str,
+    source: &str,
+    model: &str,
+    pricing: Option<PricingInputs>,
+    compressed: String,
+    duration_ms: u64,
+) -> Result<CompressionReceipt> {
+    let model_id = strip_provider_prefix(model);
+
     let receipt_id = format!("cmp_{}", Uuid::new_v4().simple());
     let ts = Utc::now().to_rfc3339();
     let input_stats = string_stats(body);
@@ -314,7 +353,65 @@ fn run_ollama(model: &str, prompt: &str, body: &str) -> Result<String> {
             .context("write request body to curl stdin")?;
     }
 
-    let output = child.wait_with_output().context("wait curl")?;
+    parse_ollama_output(child.wait_with_output().context("wait curl")?)
+}
+
+async fn run_ollama_cancellable(
+    model: &str,
+    prompt: &str,
+    body: &str,
+    cancelled: Arc<AtomicBool>,
+) -> Result<String> {
+    if cancelled.load(Ordering::Acquire) {
+        return Err(anyhow!("compression cancelled before provider spawn"));
+    }
+    let request_body = json!({
+        "model": model,
+        "prompt": format!("{prompt}\n\n{body}"),
+        "stream": false,
+        "think": false,
+    });
+    let mut child = tokio::process::Command::new("curl");
+    child
+        .args([
+            "-sS",
+            "--max-time",
+            "300",
+            "-H",
+            "Content-Type: application/json",
+            "-d",
+            "@-",
+            "http://localhost:11434/api/generate",
+        ])
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .kill_on_drop(true);
+    let mut child = child
+        .spawn()
+        .with_context(|| "spawn curl for cancellable ollama compression")?;
+    {
+        use tokio::io::AsyncWriteExt;
+        let mut stdin = child
+            .stdin
+            .take()
+            .ok_or_else(|| anyhow!("curl stdin missing"))?;
+        stdin
+            .write_all(request_body.to_string().as_bytes())
+            .await
+            .context("write cancellable compression request")?;
+    }
+    let output = child
+        .wait_with_output()
+        .await
+        .context("wait cancellable compression curl")?;
+    if cancelled.load(Ordering::Acquire) {
+        return Err(anyhow!("compression cancelled after provider response"));
+    }
+    parse_ollama_output(output)
+}
+
+fn parse_ollama_output(output: std::process::Output) -> Result<String> {
     if !output.status.success() {
         let stderr = String::from_utf8_lossy(&output.stderr);
         return Err(anyhow!(
@@ -330,8 +427,8 @@ fn run_ollama(model: &str, prompt: &str, body: &str) -> Result<String> {
             body.chars().take(200).collect::<String>()
         )
     })?;
-    if let Some(err) = parsed.get("error").and_then(Value::as_str) {
-        return Err(anyhow!("ollama error: {err}"));
+    if let Some(error) = parsed.get("error").and_then(Value::as_str) {
+        return Err(anyhow!("ollama error: {error}"));
     }
     let response = parsed
         .get("response")
@@ -519,6 +616,21 @@ fn print_help() {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[tokio::test]
+    async fn cancellable_compression_stops_before_spawn_when_already_cancelled() {
+        let cancelled = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(true));
+        let error = compress_text_for_source_with_pricing_cancellable(
+            "large body",
+            "test",
+            "ollama/test",
+            None,
+            cancelled,
+        )
+        .await
+        .unwrap_err();
+        assert!(error.to_string().contains("cancelled"));
+    }
 
     #[test]
     fn string_stats_counts_chars_words_lines() {

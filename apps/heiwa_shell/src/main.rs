@@ -26,7 +26,8 @@ use heiwa_shell::model_calls::{
     ExecutorLoopCaller, ModelCallExecution, ModelCallExecutor, ModelCallResult,
 };
 use heiwa_shell::operator::{
-    OperatorModelTurn, OperatorStreamFrame, OperatorTurnRunner, OperatorTurnWork,
+    OperatorModelTurn, OperatorStreamFrame, OperatorTurnPreparation, OperatorTurnRunner,
+    OperatorTurnWork,
 };
 use std::env;
 use std::io::{self, IsTerminal, Write};
@@ -2363,6 +2364,50 @@ fn prepare_outbound_prompt_for_route(route: &RouteResult, input: &str) -> Prepar
     })
 }
 
+async fn prepare_outbound_prompt_for_route_cancellable(
+    route: &RouteResult,
+    input: &str,
+    cancelled: Arc<std::sync::atomic::AtomicBool>,
+) -> Result<PreparedRoutePrompt, String> {
+    if !route_should_compress(route, input) {
+        return Ok(PreparedRoutePrompt {
+            model_prompt: input.to_string(),
+            compression: None,
+        });
+    }
+    let source = format!(
+        "route:{}:{}:{}",
+        route.request_id, route.provider, route.intent_key
+    );
+    let result = cmd::compress::compress_text_for_source_with_pricing_cancellable(
+        input,
+        &source,
+        ROUTE_COMPRESSION_MODEL,
+        Some(pricing_for_provider(&route.provider)),
+        cancelled.clone(),
+    )
+    .await
+    .map(|receipt| RouteCompressionResult {
+        compressed: receipt.compressed,
+        receipt_path: receipt.receipt_path,
+        input_chars: receipt.input_chars,
+        output_chars: receipt.output_chars,
+        ratio: receipt.ratio,
+        input_tokens: receipt.input_tokens,
+        output_tokens: receipt.output_tokens,
+        estimated_usd_saved: receipt.estimated_usd_saved,
+    })
+    .map_err(|error| error.to_string());
+    if cancelled.load(std::sync::atomic::Ordering::Acquire) {
+        return Err("operator preparation cancelled during compression".to_string());
+    }
+    Ok(prepare_outbound_prompt_for_route_with(
+        route,
+        input,
+        move |_, _| result,
+    ))
+}
+
 fn pricing_for_provider(provider: &str) -> cmd::compress::PricingInputs {
     // USD per million tokens, sourced from public 2026-05 list pricing.
     // Defaults bias toward the operator's typical lane (Sonnet 4.6 / GPT-5 / Gemini 3.1).
@@ -3521,49 +3566,18 @@ fn repl_trace_payload(
     })
 }
 
-/// Prepare one caller-supplied turn against live route inventory, then submit
-/// it through the process-wide durable operator runner.
-async fn submit_operator_turn_with_route(
-    thread_id: &str,
+/// Prepare model work only after the runner has made intake durable.
+async fn prepare_operator_turn_work(
+    thread_id: String,
     mut start_request: heiwa_session::operator::StartTurnRequest,
-) -> Result<
-    (
-        heiwa_shell::operator::OperatorTurnHandle,
-        Option<RouteResult>,
-    ),
-    String,
-> {
-    let (_, sessions, runner) = default_model_call_runtime()?;
-
-    // An idempotent retry must not depend on provider discovery still being
-    // available. The runner remains authoritative: this read only lets us
-    // supply ignored placeholder work for a turn it will prove is duplicate.
-    let existing = sessions
-        .thread(thread_id)
-        .map_err(|error| error.to_string())?
-        .turns
-        .iter()
-        .any(|turn| {
-            turn.client_request_id.as_deref() == Some(start_request.client_request_id.as_str())
-        });
-    if existing {
-        let handle = runner
-            .submit(
-                thread_id,
-                start_request,
-                OperatorTurnWork::Deterministic {
-                    response: String::new(),
-                    route: serde_json::json!({"mode": "duplicate"}),
-                    done: serde_json::json!({"mode": "duplicate"}),
-                },
-            )
-            .map_err(|error| error.to_string())?;
-        return Ok((handle, None));
+    cancelled: Arc<std::sync::atomic::AtomicBool>,
+) -> Result<OperatorTurnWork, String> {
+    if cancelled.load(std::sync::atomic::Ordering::Acquire) {
+        return Err("operator preparation cancelled before routing".to_string());
     }
-
     let prompt = start_request.prompt.clone();
-    let persisted = heiwa_session::load_transcript(thread_id)
-        .unwrap_or_else(|_| heiwa_session::PersistedTranscript::empty(thread_id));
+    let persisted = heiwa_session::load_transcript(&thread_id)
+        .unwrap_or_else(|_| heiwa_session::PersistedTranscript::empty(&thread_id));
     let transcript_blocks = persisted.blocks();
     let mut pins = SessionPins::new();
     pins.pinned_provider = start_request.route_policy.preferred_provider.clone();
@@ -3583,26 +3597,27 @@ async fn submit_operator_turn_with_route(
         _ => {
             let mut registry = heiwa_provider::AccountRegistry::load();
             heiwa_provider::detect::auto_discover(&mut registry).await;
+            if cancelled.load(std::sync::atomic::Ordering::Acquire) {
+                return Err("operator preparation cancelled during discovery".to_string());
+            }
             let model_tiers = get_live_model_tiers(&registry);
             route_task(&prompt, &pins, &model_tiers)?
         }
     };
 
-    let (work, planned_route) = match route_outcome {
+    let work = match route_outcome {
         RouteOutcome::Deterministic(response) => {
             let route = route_event_payload("deterministic", None);
             let done = repl_trace_payload("deterministic", None, None, None, None);
-            (
-                OperatorTurnWork::Deterministic {
-                    response,
-                    route,
-                    done,
-                },
-                None,
-            )
+            OperatorTurnWork::Deterministic {
+                response,
+                route,
+                done,
+            }
         }
         RouteOutcome::Routed(route) => {
-            let prepared = prepare_outbound_prompt_for_route(&route, &prompt);
+            let prepared =
+                prepare_outbound_prompt_for_route_cancellable(&route, &prompt, cancelled).await?;
             let messages =
                 build_messages_from_transcript(&transcript_blocks, &prepared.model_prompt, &pins);
             if start_request.route_policy.privacy == "standard" && route.privacy != "standard" {
@@ -3627,7 +3642,7 @@ async fn submit_operator_turn_with_route(
                     compression.as_ref(),
                 )
             });
-            let work = OperatorTurnWork::Model(Box::new(OperatorModelTurn {
+            OperatorTurnWork::Model(Box::new(OperatorModelTurn {
                 request: ModelCallRequest {
                     thread_id: String::new(),
                     turn_id: String::new(),
@@ -3654,24 +3669,36 @@ async fn submit_operator_turn_with_route(
                 max_attempts: 3,
                 tool_scope: None,
                 done_payload,
-            }));
-            (work, Some(*route))
+            }))
         }
     };
+    Ok(work)
+}
 
-    let handle = runner
-        .submit(thread_id, start_request, work)
-        .map_err(|error| error.to_string())?;
-    Ok((handle, planned_route))
+/// Persist caller intake immediately, then let the process-wide runner own
+/// deferred discovery, routing, compression, execution, and termination.
+async fn submit_operator_turn_with_route(
+    thread_id: &str,
+    start_request: heiwa_session::operator::StartTurnRequest,
+) -> Result<heiwa_shell::operator::OperatorTurnHandle, String> {
+    let (_, _, runner) = default_model_call_runtime()?;
+    let preparation_thread_id = thread_id.to_string();
+    let preparation_request = start_request.clone();
+    let preparation = OperatorTurnPreparation::cancellable(move |cancelled| async move {
+        prepare_operator_turn_work(preparation_thread_id, preparation_request, cancelled)
+            .await
+            .map_err(anyhow::Error::msg)
+    });
+    runner
+        .submit(thread_id, start_request, preparation)
+        .map_err(|error| error.to_string())
 }
 
 pub(crate) async fn submit_operator_turn(
     thread_id: &str,
     request: heiwa_session::operator::StartTurnRequest,
 ) -> Result<heiwa_shell::operator::OperatorTurnHandle, String> {
-    submit_operator_turn_with_route(thread_id, request)
-        .await
-        .map(|(handle, _)| handle)
+    submit_operator_turn_with_route(thread_id, request).await
 }
 
 /// Streaming REPL compatibility surface over the durable operator runner.
@@ -3683,14 +3710,14 @@ pub(crate) async fn execute_repl_turn_streaming(
 ) {
     let client_request_id = format!("repl-{}", uuid::Uuid::new_v4());
     let start_request = heiwa_session::operator::StartTurnRequest::auto(client_request_id, prompt);
-    let (mut handle, planned_route) =
-        match submit_operator_turn_with_route(DEFAULT_SESSION_ID, start_request).await {
-            Ok(handle) => handle,
-            Err(error) => {
-                let _ = events.send(ReplStreamEvent::Error(error)).await;
-                return;
-            }
-        };
+    let mut handle = match submit_operator_turn_with_route(DEFAULT_SESSION_ID, start_request).await
+    {
+        Ok(handle) => handle,
+        Err(error) => {
+            let _ = events.send(ReplStreamEvent::Error(error)).await;
+            return;
+        }
+    };
     while let Ok(frame) = handle.recv().await {
         match frame {
             OperatorStreamFrame::Error {
@@ -3709,8 +3736,7 @@ pub(crate) async fn execute_repl_turn_streaming(
             {
                 match row.event.event_type {
                     heiwa_evidence::OperatorEventType::RoutePlanned => {
-                        let payload =
-                            operator_repl_route_payload(&row.event.payload, planned_route.as_ref());
+                        let payload = operator_repl_route_payload(&row.event.payload);
                         let _ = events.send(ReplStreamEvent::Route(payload)).await;
                     }
                     heiwa_evidence::OperatorEventType::TurnCompleted => {
@@ -3744,32 +3770,26 @@ pub(crate) async fn execute_repl_turn_streaming(
     }
 }
 
-fn operator_repl_route_payload(
-    payload: &serde_json::Value,
-    planned: Option<&RouteResult>,
-) -> serde_json::Value {
-    let provider = payload
-        .get("provider")
+fn operator_repl_route_payload(payload: &serde_json::Value) -> serde_json::Value {
+    let provider = payload.get("provider").and_then(serde_json::Value::as_str);
+    let model = payload.get("model").and_then(serde_json::Value::as_str);
+    let mode = payload
+        .get("mode")
         .and_then(serde_json::Value::as_str)
-        .or_else(|| planned.map(|route| route.provider.as_str()));
-    let model = payload
-        .get("model")
-        .and_then(serde_json::Value::as_str)
-        .or_else(|| planned.map(|route| route.model_id.as_str()));
-    let mode = match provider {
-        None => "deterministic",
-        Some(provider) if is_local_provider(provider) => "local_model",
-        Some(_) => "remote_model",
-    };
+        .unwrap_or_else(|| match provider {
+            None => "deterministic",
+            Some(provider) if is_local_provider(provider) => "local_model",
+            Some(_) => "remote_model",
+        });
     serde_json::json!({
         "mode": mode,
-        "intent": planned.map(|route| route.intent_key.as_str()),
+        "intent": payload.get("intent").cloned(),
         "provider": provider,
         "model": model,
-        "provider_model": payload.get("provider_model").cloned().or_else(|| planned.map(|route| serde_json::Value::String(route.provider_model_id.clone()))),
-        "rate_group": planned.map(|route| route.rate_group.as_str()),
-        "privacy": planned.map(|route| route.privacy.as_str()),
-        "request_id": planned.map(|route| route.request_id.as_str()),
+        "provider_model": payload.get("provider_model").cloned(),
+        "rate_group": payload.get("rate_group").cloned(),
+        "privacy": payload.get("privacy").cloned(),
+        "request_id": payload.get("request_id").cloned(),
     })
 }
 
@@ -3847,26 +3867,15 @@ mod tests {
 
     #[test]
     fn operator_route_frame_keeps_repl_route_shape() {
-        let planned = super::RouteResult {
-            candidates: vec![],
-            model_id: "qwen3.5:9b".into(),
-            provider: "ollama".into(),
-            provider_model_id: "qwen3.5:9b".into(),
-            rate_group: "local".into(),
-            routing_metadata: "{}".into(),
-            intent_key: "chat".into(),
-            privacy: "standard".into(),
-            request_id: "request-1".into(),
-            turn_started_at: "2026-07-19T00:00:00Z".into(),
-        };
-        let payload = super::operator_repl_route_payload(
-            &serde_json::json!({
-                "provider": "ollama",
-                "model": "qwen3.5:9b",
-                "provider_model": "qwen3.5:9b",
-            }),
-            Some(&planned),
-        );
+        let payload = super::operator_repl_route_payload(&serde_json::json!({
+            "intent": "chat",
+            "provider": "ollama",
+            "model": "qwen3.5:9b",
+            "provider_model": "qwen3.5:9b",
+            "rate_group": "local",
+            "privacy": "standard",
+            "request_id": "request-1",
+        }));
         assert_eq!(payload["mode"], "local_model");
         assert_eq!(payload["intent"], "chat");
         assert_eq!(payload["provider"], "ollama");
