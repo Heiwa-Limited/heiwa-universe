@@ -196,17 +196,30 @@ impl OperatorSessionService {
     /// Holds the service mutex for the whole read-modify-write: materialize
     /// the thread, check for a duplicate, and (if none) append
     /// `thread_created` (only the first time a thread is used), then
-    /// `turn_started`, then `user_message`. Idempotency is decided purely by
+    /// `turn_started`, then `user_message`. Every prospective payload is
+    /// screened before the first append. Idempotency is decided purely by
     /// what is already on disk, per the module docs.
     pub fn start_turn(&self, thread_id: &str, request: StartTurnRequest) -> Result<TurnSubmission> {
-        // Use the exact evidence-journal sensitive-material gate before any
-        // append. Otherwise a rejected user message could leave durable
-        // thread/turn scaffolding behind it.
+        // Screen every payload this submission could append with the exact
+        // evidence-journal gate before any write. Otherwise a rejected
+        // later payload could leave durable scaffolding behind it.
+        let thread_created_payload = json!({});
         let user_message_payload = json!({ "text": request.prompt });
-        if find_sensitive(&user_message_payload).is_some() {
-            bail!("refused to start turn: user message payload contains sensitive material");
-        }
         let prompt_fingerprint = prompt_fingerprint(&request.prompt);
+        let turn_started_payload = json!({
+            "client_request_id": request.client_request_id.clone(),
+            "prompt_fingerprint": prompt_fingerprint,
+            "route_policy": request.route_policy.clone(),
+        });
+        for (event_type, payload) in [
+            ("thread_created", &thread_created_payload),
+            ("turn_started", &turn_started_payload),
+            ("user_message", &user_message_payload),
+        ] {
+            if find_sensitive(payload).is_some() {
+                bail!("refused to start turn: {event_type} payload contains sensitive material");
+            }
+        }
 
         let _write_transaction = self.lock_write_transaction()?;
         let threads = materialize_all(&self.journal)?.threads;
@@ -272,7 +285,7 @@ impl OperatorSessionService {
                 OperatorEventType::ThreadCreated,
                 now.clone(),
                 operator_actor.clone(),
-                json!({}),
+                thread_created_payload,
             );
             self.journal.append(&created)?;
         }
@@ -286,11 +299,7 @@ impl OperatorSessionService {
             OperatorEventType::TurnStarted,
             now.clone(),
             operator_actor.clone(),
-            json!({
-                "client_request_id": request.client_request_id.clone(),
-                "prompt_fingerprint": prompt_fingerprint,
-                "route_policy": request.route_policy.clone(),
-            }),
+            turn_started_payload,
         );
         self.journal.append(&turn_started)?;
 
@@ -411,11 +420,22 @@ impl OperatorSessionService {
     pub fn thread(&self, thread_id: &str) -> Result<OperatorThreadView> {
         let materialized = materialize_all(&self.journal)?;
         Ok(match materialized.threads.get(thread_id) {
-            Some(folded) => folded.to_view(materialized.skipped_lines),
+            Some(folded) => folded.to_view(
+                materialized.skipped_lines,
+                materialized
+                    .unsupported_schema_events
+                    .get(thread_id)
+                    .copied()
+                    .unwrap_or(0),
+            ),
             None => OperatorThreadView {
                 thread_id: thread_id.to_string(),
                 turns: Vec::new(),
-                skipped_events: 0,
+                skipped_events: materialized
+                    .unsupported_schema_events
+                    .get(thread_id)
+                    .copied()
+                    .unwrap_or(0),
                 skipped_lines: materialized.skipped_lines,
             },
         })
@@ -434,8 +454,10 @@ impl OperatorSessionService {
             .collect())
     }
 
-    /// Close out every nonterminal turn with a `turn_interrupted` event
-    /// (`reason: RUNTIME_RESTART`), as if the runtime had just restarted.
+    /// Close out every nonterminal turn with a `turn_interrupted` event, as
+    /// if the runtime had just restarted. Pending cancellation closes with
+    /// `OPERATOR_CANCELLED`; every other open turn closes with
+    /// `RUNTIME_RESTART`.
     /// Idempotent: once every turn is terminal, subsequent calls return
     /// `0` and append nothing.
     pub fn recover_interrupted(&self) -> Result<usize> {
@@ -795,7 +817,11 @@ impl FoldedThread {
 
     /// `skipped_lines` is passed in rather than stored: it is stream-wide
     /// (owned by [`MaterializedJournal`]), not per-thread state.
-    fn to_view(&self, skipped_lines: usize) -> OperatorThreadView {
+    fn to_view(
+        &self,
+        skipped_lines: usize,
+        unsupported_schema_events: usize,
+    ) -> OperatorThreadView {
         OperatorThreadView {
             thread_id: self.thread_id.clone(),
             turns: self
@@ -811,7 +837,7 @@ impl FoldedThread {
                     route_policy: turn.route_policy.clone(),
                 })
                 .collect(),
-            skipped_events: self.skipped_events,
+            skipped_events: self.skipped_events + unsupported_schema_events,
             skipped_lines,
         }
     }
@@ -831,6 +857,10 @@ impl FoldedThread {
 #[derive(Debug)]
 struct MaterializedJournal {
     threads: HashMap<String, FoldedThread>,
+    /// Parsed but unsupported-schema events, tracked by their declared
+    /// thread without creating a valid thread projection or affecting
+    /// recency. `thread()` may surface this diagnostic count.
+    unsupported_schema_events: HashMap<String, usize>,
     /// Deduplicated count of damaged journal lines (see
     /// [`OperatorThreadView::skipped_lines`] for what qualifies).
     skipped_lines: usize,
@@ -848,6 +878,7 @@ struct MaterializedJournal {
 fn materialize_all(journal: &OperatorJournal) -> Result<MaterializedJournal> {
     const PAGE_SIZE: usize = 256;
     let mut threads: HashMap<String, FoldedThread> = HashMap::new();
+    let mut unsupported_schema_events: HashMap<String, usize> = HashMap::new();
     let mut seen_event_ids: HashSet<String> = HashSet::new();
     let mut cursor: Option<String> = None;
     let mut order = 0usize;
@@ -873,19 +904,27 @@ fn materialize_all(journal: &OperatorJournal) -> Result<MaterializedJournal> {
         prev_page_was_short = page.events.len() < PAGE_SIZE;
         for row in &page.events {
             order += 1;
-            apply_event(&mut threads, &mut seen_event_ids, row, order);
+            apply_event(
+                &mut threads,
+                &mut unsupported_schema_events,
+                &mut seen_event_ids,
+                row,
+                order,
+            );
         }
         cursor = page.next_cursor.clone();
     }
 
     Ok(MaterializedJournal {
         threads,
+        unsupported_schema_events,
         skipped_lines,
     })
 }
 
 fn apply_event(
     threads: &mut HashMap<String, FoldedThread>,
+    unsupported_schema_events: &mut HashMap<String, usize>,
     seen_event_ids: &mut HashSet<String>,
     row: &CursorEvent,
     order: usize,
@@ -895,15 +934,17 @@ fn apply_event(
         return; // Reader-side dedup of a repeated event_id.
     }
 
+    if event.schema_version != OPERATOR_EVENT_SCHEMA_VERSION {
+        *unsupported_schema_events
+            .entry(event.thread_id.clone())
+            .or_default() += 1;
+        return;
+    }
+
     let entry = threads
         .entry(event.thread_id.clone())
         .or_insert_with(|| FoldedThread::new(&event.thread_id));
     entry.last_order = order;
-
-    if event.schema_version != OPERATOR_EVENT_SCHEMA_VERSION {
-        entry.skipped_events += 1;
-        return;
-    }
 
     match event.event_type {
         OperatorEventType::ThreadCreated => {}

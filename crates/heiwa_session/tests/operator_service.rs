@@ -107,6 +107,38 @@ fn start_turn_rejects_sensitive_prompt_before_creating_operator_events() {
 }
 
 #[test]
+fn start_turn_rejects_sensitive_client_request_id_before_creating_operator_events() {
+    let dir = tempfile::tempdir().unwrap();
+    let service = test_service(dir.path());
+
+    assert!(service
+        .start_turn("default", StartTurnRequest::auto("ghp_live-token", "hello"))
+        .is_err());
+    assert!(service
+        .events_after("default", None, 100)
+        .unwrap()
+        .events
+        .is_empty());
+    assert!(!dir.path().join("operator_events.jsonl").exists());
+}
+
+#[test]
+fn start_turn_rejects_sensitive_route_policy_before_creating_operator_events() {
+    let dir = tempfile::tempdir().unwrap();
+    let service = test_service(dir.path());
+    let mut request = StartTurnRequest::auto("req-1", "hello");
+    request.route_policy.preferred_provider = Some("ghp_live-token".to_string());
+
+    assert!(service.start_turn("default", request).is_err());
+    assert!(service
+        .events_after("default", None, 100)
+        .unwrap()
+        .events
+        .is_empty());
+    assert!(!dir.path().join("operator_events.jsonl").exists());
+}
+
+#[test]
 fn orphaned_turn_retry_appends_the_missing_user_message() {
     let dir = tempfile::tempdir().unwrap();
     let service = test_service(dir.path());
@@ -180,6 +212,47 @@ fn append_event_rejects_unsupported_schema_version() {
     assert!(
         message.contains("schema_version") || message.contains("schema version"),
         "error should name the schema version violation: {message}"
+    );
+}
+
+#[test]
+fn unknown_schema_events_do_not_materialize_threads_or_suppress_later_creation() {
+    let dir = tempfile::tempdir().unwrap();
+    let journal = OperatorJournal::new(dir.path().to_path_buf()).unwrap();
+    let mut unknown = base_event("unknown-only", None, None, OperatorEventType::ThreadCreated);
+    unknown.schema_version = 99;
+    journal.append(&unknown).unwrap();
+    let service = OperatorSessionService::new(journal);
+
+    assert!(service.list_threads(10).unwrap().is_empty());
+    let diagnostic = service.thread("unknown-only").unwrap();
+    assert!(diagnostic.turns.is_empty());
+    assert_eq!(diagnostic.skipped_events, 1);
+
+    service
+        .start_turn("other", StartTurnRequest::auto("other-1", "hi"))
+        .unwrap();
+    service
+        .start_turn("unknown-only", StartTurnRequest::auto("unknown-1", "hi"))
+        .unwrap();
+
+    let summaries = service.list_threads(10).unwrap();
+    assert_eq!(summaries[0].thread_id, "unknown-only");
+    assert_eq!(summaries[1].thread_id, "other");
+    let events = service
+        .events_after("unknown-only", None, 100)
+        .unwrap()
+        .events;
+    assert_eq!(
+        events
+            .iter()
+            .filter(|row| {
+                row.event.schema_version == OPERATOR_EVENT_SCHEMA_VERSION
+                    && row.event.event_type == OperatorEventType::ThreadCreated
+            })
+            .count(),
+        1,
+        "the later valid start must create the thread despite the unknown-schema record"
     );
 }
 
