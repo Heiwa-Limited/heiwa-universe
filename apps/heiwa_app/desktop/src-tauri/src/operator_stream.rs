@@ -13,6 +13,19 @@ const RECONNECT_BACKOFF: [Duration; 3] = [
     Duration::from_secs(3),
 ];
 
+#[derive(Clone, Copy)]
+struct OperatorStreamTimeouts {
+    connect: Duration,
+    read_idle: Duration,
+    pong_write: Duration,
+}
+
+const OPERATOR_STREAM_TIMEOUTS: OperatorStreamTimeouts = OperatorStreamTimeouts {
+    connect: Duration::from_secs(10),
+    read_idle: Duration::from_secs(45),
+    pong_write: Duration::from_secs(10),
+};
+
 #[derive(Debug, Error)]
 enum OperatorStreamError {
     #[error("runtime authentication is not configured")]
@@ -83,8 +96,32 @@ async fn subscribe_with_auth_and_backoff<F>(
     thread_id: &str,
     after: Option<&str>,
     token: &str,
+    forward: F,
+    backoffs: &[Duration],
+) -> Result<(), OperatorStreamError>
+where
+    F: FnMut(Value) -> Result<(), OperatorStreamError>,
+{
+    subscribe_with_auth_and_policy(
+        base_url,
+        thread_id,
+        after,
+        token,
+        forward,
+        backoffs,
+        OPERATOR_STREAM_TIMEOUTS,
+    )
+    .await
+}
+
+async fn subscribe_with_auth_and_policy<F>(
+    base_url: &str,
+    thread_id: &str,
+    after: Option<&str>,
+    token: &str,
     mut forward: F,
     backoffs: &[Duration],
+    timeouts: OperatorStreamTimeouts,
 ) -> Result<(), OperatorStreamError>
 where
     F: FnMut(Value) -> Result<(), OperatorStreamError>,
@@ -105,62 +142,73 @@ where
         authorization.set_sensitive(true);
         request.headers_mut().insert(AUTHORIZATION, authorization);
 
-        match tokio_tungstenite::connect_async(request).await {
-            Ok((mut websocket, _)) => {
-                while let Some(message) = websocket.next().await {
-                    match message {
-                        Ok(Message::Text(text)) => {
-                            let frame: Value = serde_json::from_str(&text)
-                                .map_err(|_| OperatorStreamError::InvalidFrame)?;
-                            if text.contains(token)
-                                || crate::proxy::value_contains_secret(&frame, token)
-                            {
-                                return Err(OperatorStreamError::InvalidFrame);
-                            }
-                            if frame.get("type").and_then(Value::as_str) == Some("event") {
-                                let next_cursor = frame
-                                    .get("cursor")
-                                    .and_then(Value::as_str)
-                                    .filter(|cursor| !cursor.is_empty())
-                                    .ok_or(OperatorStreamError::InvalidFrame)?;
-                                cursor = Some(next_cursor.to_string());
-                            }
-                            let invalid_cursor =
-                                frame.get("type").and_then(Value::as_str) == Some("invalid_cursor");
-                            let caught_up =
-                                frame.get("type").and_then(Value::as_str) == Some("caught_up");
-                            forward(frame)?;
-                            if invalid_cursor {
-                                return Ok(());
-                            }
-                            if caught_up {
-                                reconnect_attempt = 0;
-                            }
+        match tokio::time::timeout(timeouts.connect, tokio_tungstenite::connect_async(request))
+            .await
+        {
+            Ok(Ok((mut websocket, _))) => 'connection: loop {
+                let message = match tokio::time::timeout(timeouts.read_idle, websocket.next()).await
+                {
+                    Ok(Some(message)) => message,
+                    Ok(None) | Err(_) => break,
+                };
+                match message {
+                    Ok(Message::Text(text)) => {
+                        let frame: Value = serde_json::from_str(&text)
+                            .map_err(|_| OperatorStreamError::InvalidFrame)?;
+                        if text.contains(token)
+                            || crate::proxy::value_contains_secret(&frame, token)
+                        {
+                            return Err(OperatorStreamError::InvalidFrame);
                         }
-                        Ok(Message::Ping(payload)) => {
-                            websocket
-                                .send(Message::Pong(payload))
-                                .await
-                                .map_err(|_| OperatorStreamError::Unavailable)?;
+                        if frame.get("type").and_then(Value::as_str) == Some("event") {
+                            let next_cursor = frame
+                                .get("cursor")
+                                .and_then(Value::as_str)
+                                .filter(|cursor| !cursor.is_empty())
+                                .ok_or(OperatorStreamError::InvalidFrame)?;
+                            cursor = Some(next_cursor.to_string());
                         }
-                        Ok(Message::Close(_)) => break,
-                        Ok(_) => {}
-                        Err(_) => break,
+                        let invalid_cursor =
+                            frame.get("type").and_then(Value::as_str) == Some("invalid_cursor");
+                        let caught_up =
+                            frame.get("type").and_then(Value::as_str) == Some("caught_up");
+                        forward(frame)?;
+                        if invalid_cursor {
+                            return Ok(());
+                        }
+                        if caught_up {
+                            reconnect_attempt = 0;
+                        }
                     }
+                    Ok(Message::Ping(payload)) => {
+                        if !matches!(
+                            tokio::time::timeout(
+                                timeouts.pong_write,
+                                websocket.send(Message::Pong(payload)),
+                            )
+                            .await,
+                            Ok(Ok(()))
+                        ) {
+                            break 'connection;
+                        }
+                    }
+                    Ok(Message::Close(_)) => break,
+                    Ok(_) => {}
+                    Err(_) => break,
                 }
-            }
-            Err(tokio_tungstenite::tungstenite::Error::Http(response)) => {
+            },
+            Ok(Err(tokio_tungstenite::tungstenite::Error::Http(response))) => {
                 return Err(OperatorStreamError::HandshakeRejected {
                     status: response.status().as_u16(),
                 });
             }
-            Err(
+            Ok(Err(
                 tokio_tungstenite::tungstenite::Error::Url(_)
                 | tokio_tungstenite::tungstenite::Error::HttpFormat(_),
-            ) => {
+            )) => {
                 return Err(OperatorStreamError::InvalidEndpoint);
             }
-            Err(_) => {}
+            Ok(Err(_)) | Err(_) => {}
         }
 
         let Some(delay) = backoffs.get(reconnect_attempt).copied() else {
@@ -475,5 +523,93 @@ mod tests {
         server.await.unwrap();
         assert!(matches!(error, OperatorStreamError::InvalidFrame));
         assert!(forwarded.lock().unwrap().is_empty());
+    }
+
+    #[tokio::test]
+    async fn native_operator_stalled_handshakes_exhaust_finite_budget() {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        let attempts = Arc::new(AtomicUsize::new(0));
+        let server_attempts = attempts.clone();
+        let server = tokio::spawn(async move {
+            let mut held = Vec::new();
+            for _ in 0..3 {
+                let (stream, _) = listener.accept().await.unwrap();
+                server_attempts.fetch_add(1, Ordering::SeqCst);
+                held.push(stream);
+            }
+            tokio::time::sleep(Duration::from_millis(30)).await;
+        });
+        let token = "stalled-handshake-secret";
+        let error = tokio::time::timeout(
+            Duration::from_millis(100),
+            subscribe_with_auth_and_policy(
+                &format!("ws://{address}"),
+                "default",
+                None,
+                token,
+                |_| Ok(()),
+                &[Duration::from_millis(1), Duration::from_millis(1)],
+                OperatorStreamTimeouts {
+                    connect: Duration::from_millis(5),
+                    read_idle: Duration::from_millis(20),
+                    pong_write: Duration::from_millis(5),
+                },
+            ),
+        )
+        .await
+        .expect("stalled handshakes terminate")
+        .expect_err("connect budget exhausts");
+        server.await.unwrap();
+        assert!(matches!(error, OperatorStreamError::Unavailable));
+        assert_eq!(attempts.load(Ordering::SeqCst), 3);
+        assert!(!error.to_string().contains(token));
+    }
+
+    #[tokio::test]
+    async fn native_operator_idle_connection_reconnects() {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        let attempts = Arc::new(AtomicUsize::new(0));
+        let server_attempts = attempts.clone();
+        let server = tokio::spawn(async move {
+            let (first, _) = listener.accept().await.unwrap();
+            server_attempts.fetch_add(1, Ordering::SeqCst);
+            let first = tokio_tungstenite::accept_async(first).await.unwrap();
+            let held = tokio::spawn(async move {
+                let _first = first;
+                tokio::time::sleep(Duration::from_millis(30)).await;
+            });
+
+            let (second, _) = listener.accept().await.unwrap();
+            server_attempts.fetch_add(1, Ordering::SeqCst);
+            let mut second = tokio_tungstenite::accept_async(second).await.unwrap();
+            second
+                .send(Message::Text(json!({"type":"invalid_cursor"}).to_string()))
+                .await
+                .unwrap();
+            held.await.unwrap();
+        });
+        tokio::time::timeout(
+            Duration::from_millis(100),
+            subscribe_with_auth_and_policy(
+                &format!("ws://{address}"),
+                "default",
+                None,
+                "idle-secret",
+                |_| Ok(()),
+                &[Duration::from_millis(1)],
+                OperatorStreamTimeouts {
+                    connect: Duration::from_millis(20),
+                    read_idle: Duration::from_millis(5),
+                    pong_write: Duration::from_millis(5),
+                },
+            ),
+        )
+        .await
+        .expect("idle reconnect terminates")
+        .expect("invalid cursor ends subscription safely");
+        server.await.unwrap();
+        assert_eq!(attempts.load(Ordering::SeqCst), 2);
     }
 }

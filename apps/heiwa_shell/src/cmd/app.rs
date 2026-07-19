@@ -1780,6 +1780,7 @@ struct OperatorWebsocketRequest {
 struct OperatorWebsocketIntervals {
     poll: Duration,
     heartbeat: Duration,
+    write_timeout: Duration,
 }
 
 impl Default for OperatorWebsocketIntervals {
@@ -1787,6 +1788,7 @@ impl Default for OperatorWebsocketIntervals {
         Self {
             poll: Duration::from_millis(200),
             heartbeat: Duration::from_secs(30),
+            write_timeout: Duration::from_secs(10),
         }
     }
 }
@@ -1883,12 +1885,22 @@ async fn operator_events_loop(
                             "code": "invalid_cursor",
                             "action": "replay_from_start",
                         });
-                        let _ = write_ws_text(&mut writer, &payload.to_string()).await;
+                        let _ = write_operator_ws_text(
+                            &mut writer,
+                            &payload.to_string(),
+                            intervals.write_timeout,
+                        )
+                        .await;
                         return Ok(());
                     }
                     Err(heiwa_evidence::CursorError::Storage(_)) => {
                         let payload = json!({"type":"error","code":"operator_unavailable"});
-                        let _ = write_ws_text(&mut writer, &payload.to_string()).await;
+                        let _ = write_operator_ws_text(
+                            &mut writer,
+                            &payload.to_string(),
+                            intervals.write_timeout,
+                        )
+                        .await;
                         return Ok(());
                     }
                 };
@@ -1900,7 +1912,7 @@ async fn operator_events_loop(
                         "cursor": row.cursor,
                         "event": row.event,
                     });
-                    if write_ws_text(&mut writer, &payload.to_string()).await.is_err() {
+                    if write_operator_ws_text(&mut writer, &payload.to_string(), intervals.write_timeout).await.is_err() {
                         return Ok(());
                     }
                 }
@@ -1908,7 +1920,7 @@ async fn operator_events_loop(
                     cursor = Some(next_cursor);
                 }
                 if !caught_up && event_count < 100 {
-                    if write_ws_text(&mut writer, &json!({"type":"caught_up"}).to_string()).await.is_err() {
+                    if write_operator_ws_text(&mut writer, &json!({"type":"caught_up"}).to_string(), intervals.write_timeout).await.is_err() {
                         return Ok(());
                     }
                     caught_up = true;
@@ -1927,7 +1939,7 @@ async fn operator_events_loop(
                             "turn_id": turn_id,
                             "text": text,
                         });
-                        if write_ws_text(&mut writer, &payload.to_string()).await.is_err() {
+                        if write_operator_ws_text(&mut writer, &payload.to_string(), intervals.write_timeout).await.is_err() {
                             return Ok(());
                         }
                     }
@@ -1942,7 +1954,7 @@ async fn operator_events_loop(
                             "thread_id": frame_thread,
                             "turn_id": turn_id,
                         });
-                        if write_ws_text(&mut writer, &payload.to_string()).await.is_err() {
+                        if write_operator_ws_text(&mut writer, &payload.to_string(), intervals.write_timeout).await.is_err() {
                             return Ok(());
                         }
                     }
@@ -1955,23 +1967,29 @@ async fn operator_events_loop(
                     "type":"heartbeat",
                     "occurred_at": chrono::Utc::now().to_rfc3339(),
                 });
-                if write_ws_text(&mut writer, &payload.to_string()).await.is_err() {
+                if write_operator_ws_text(&mut writer, &payload.to_string(), intervals.write_timeout).await.is_err() {
                     return Ok(());
                 }
             }
             control = control_rx.recv() => {
                 match control {
                     Some(OperatorWebsocketControl::Ping(payload)) => {
-                        if write_ws_control(&mut writer, 0xA, &payload).await.is_err() {
+                        if write_operator_ws_control(&mut writer, 0xA, &payload, intervals.write_timeout).await.is_err() {
                             return Ok(());
                         }
                     }
                     Some(OperatorWebsocketControl::Close(payload)) => {
-                        let _ = write_ws_control(&mut writer, 0x8, &payload).await;
+                        let _ = write_operator_ws_control(&mut writer, 0x8, &payload, intervals.write_timeout).await;
                         return Ok(());
                     }
                     Some(OperatorWebsocketControl::ProtocolError) => {
-                        let _ = write_ws_control(&mut writer, 0x8, &1002_u16.to_be_bytes()).await;
+                        let _ = write_operator_ws_control(
+                            &mut writer,
+                            0x8,
+                            &1002_u16.to_be_bytes(),
+                            intervals.write_timeout,
+                        )
+                        .await;
                         return Ok(());
                     }
                     None => return Ok(()),
@@ -2228,6 +2246,33 @@ fn scan_dispatch_ids_in(dir: &Path) -> HashSet<String> {
         }
     }
     ids
+}
+
+async fn write_operator_ws_text<W>(
+    stream: &mut W,
+    text: &str,
+    write_timeout: Duration,
+) -> Result<()>
+where
+    W: AsyncWrite + Unpin,
+{
+    time::timeout(write_timeout, write_ws_text(stream, text))
+        .await
+        .map_err(|_| anyhow!("operator websocket write timed out"))?
+}
+
+async fn write_operator_ws_control<W>(
+    stream: &mut W,
+    opcode: u8,
+    payload: &[u8],
+    write_timeout: Duration,
+) -> Result<()>
+where
+    W: AsyncWrite + Unpin,
+{
+    time::timeout(write_timeout, write_ws_control(stream, opcode, payload))
+        .await
+        .map_err(|_| anyhow!("operator websocket write timed out"))?
 }
 
 async fn write_ws_text<W>(stream: &mut W, text: &str) -> Result<()>
@@ -4547,6 +4592,7 @@ mod app_readmodel_tests {
         OperatorWebsocketIntervals {
             poll: Duration::from_millis(5),
             heartbeat: Duration::from_millis(80),
+            write_timeout: Duration::from_secs(1),
         }
     }
 
@@ -4649,6 +4695,7 @@ mod app_readmodel_tests {
                 OperatorWebsocketIntervals {
                     poll: Duration::from_millis(5),
                     heartbeat: Duration::from_millis(10),
+                    write_timeout: Duration::from_secs(1),
                 },
             )
             .await
@@ -4718,6 +4765,7 @@ mod app_readmodel_tests {
                 OperatorWebsocketIntervals {
                     poll: Duration::from_millis(5),
                     heartbeat: Duration::from_millis(30),
+                    write_timeout: Duration::from_secs(1),
                 },
             )
             .await
@@ -4788,6 +4836,7 @@ mod app_readmodel_tests {
                 OperatorWebsocketIntervals {
                     poll: Duration::from_millis(50),
                     heartbeat: Duration::from_secs(10),
+                    write_timeout: Duration::from_secs(1),
                 },
             )
             .await
@@ -4829,6 +4878,18 @@ mod app_readmodel_tests {
             .expect("invalid control closes promptly")
             .unwrap()
             .unwrap();
+    }
+
+    #[tokio::test]
+    async fn operator_websocket_write_timeout_bounds_backpressure() {
+        let (mut writer, _unread_peer) = tokio::io::duplex(64);
+        let payload = "x".repeat(128 * 1024);
+        let started = std::time::Instant::now();
+        let error = write_operator_ws_text(&mut writer, &payload, Duration::from_millis(5))
+            .await
+            .expect_err("unread peer must time out");
+        assert!(error.to_string().contains("timed out"));
+        assert!(started.elapsed() < Duration::from_millis(100));
     }
 
     #[tokio::test]

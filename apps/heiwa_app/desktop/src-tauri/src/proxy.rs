@@ -157,6 +157,14 @@ fn reject_protected_response(
     Ok(())
 }
 
+fn authenticated_http_client() -> Result<reqwest::Client, ProxyError> {
+    reqwest::Client::builder()
+        .no_proxy()
+        .redirect(reqwest::redirect::Policy::none())
+        .build()
+        .map_err(|_| ProxyError::Offline("runtime client unavailable".to_string()))
+}
+
 pub(crate) async fn api_get_with_auth(
     base_url: &str,
     path: &str,
@@ -164,7 +172,7 @@ pub(crate) async fn api_get_with_auth(
 ) -> Result<Value, ProxyError> {
     validate_auth_token(token)?;
     let url = endpoint_url(base_url, path)?;
-    let response = reqwest::Client::new()
+    let response = authenticated_http_client()?
         .get(&url)
         .bearer_auth(token)
         .send()
@@ -194,8 +202,7 @@ pub(crate) async fn api_post_with_auth(
 ) -> Result<Value, ProxyError> {
     validate_auth_token(token)?;
     let url = endpoint_url(base_url, path)?;
-    let client = reqwest::Client::new();
-    let response = client
+    let response = authenticated_http_client()?
         .post(&url)
         .bearer_auth(token)
         .json(&body)
@@ -479,5 +486,116 @@ mod tests {
             assert!(matches!(error, ProxyError::ProtectedMaterial));
             assert!(!error.to_string().contains(token));
         }
+    }
+
+    #[tokio::test]
+    async fn authenticated_http_never_follows_redirects_with_bearer_token() {
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+        use tokio::net::TcpListener as TokioTcpListener;
+
+        for method in ["GET", "POST"] {
+            let decoy = TokioTcpListener::bind("127.0.0.1:0").await.unwrap();
+            let decoy_address = decoy.local_addr().unwrap();
+            let decoy_task = tokio::spawn(async move {
+                tokio::time::timeout(std::time::Duration::from_millis(100), decoy.accept())
+                    .await
+                    .is_ok()
+            });
+
+            let origin = TokioTcpListener::bind("127.0.0.1:0").await.unwrap();
+            let origin_address = origin.local_addr().unwrap();
+            let origin_task = tokio::spawn(async move {
+                let (mut stream, _) = origin.accept().await.unwrap();
+                let mut request = [0_u8; 4096];
+                let _ = stream.read(&mut request).await.unwrap();
+                let response = format!(
+                    "HTTP/1.1 302 Found\r\nLocation: http://{decoy_address}/capture\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
+                );
+                stream.write_all(response.as_bytes()).await.unwrap();
+            });
+
+            let base = format!("http://{origin_address}");
+            let error = if method == "GET" {
+                api_get_with_auth(&base, "/api/v1/operator/threads", "redirect-secret")
+                    .await
+                    .expect_err("302 is terminal")
+            } else {
+                api_post_with_auth(
+                    &base,
+                    "/api/v1/operator/threads",
+                    json!({"thread_id":"default"}),
+                    "redirect-secret",
+                )
+                .await
+                .expect_err("302 is terminal")
+            };
+            origin_task.await.unwrap();
+            assert!(matches!(error, ProxyError::Http { status: 302, .. }));
+            assert!(!decoy_task.await.unwrap(), "{method} redirect was followed");
+        }
+    }
+
+    #[tokio::test]
+    async fn authenticated_http_ignores_system_proxy_in_isolated_child() {
+        const CHILD_FLAG: &str = "HEIWA_DESKTOP_PROXY_TEST_CHILD";
+        const BASE_ENV: &str = "HEIWA_DESKTOP_PROXY_TEST_BASE";
+
+        if env::var_os(CHILD_FLAG).is_some() {
+            let base = env::var(BASE_ENV).expect("child direct base");
+            let value = api_get_with_auth(&base, "/api/v1/operator/threads", "proxy-secret")
+                .await
+                .expect("child connects directly");
+            assert_eq!(value["ok"], json!(true));
+            return;
+        }
+
+        let (base, direct_request) = inspecting_stub_server("200 OK", r#"{"ok":true}"#);
+        let decoy = TcpListener::bind("127.0.0.1:0").expect("bind proxy decoy");
+        decoy.set_nonblocking(true).unwrap();
+        let decoy_address = decoy.local_addr().unwrap();
+        let (decoy_tx, decoy_rx) = std::sync::mpsc::channel();
+        thread::spawn(move || {
+            let deadline = std::time::Instant::now() + std::time::Duration::from_millis(500);
+            loop {
+                match decoy.accept() {
+                    Ok(_) => {
+                        decoy_tx.send(true).unwrap();
+                        return;
+                    }
+                    Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
+                        if std::time::Instant::now() >= deadline {
+                            decoy_tx.send(false).unwrap();
+                            return;
+                        }
+                        thread::sleep(std::time::Duration::from_millis(2));
+                    }
+                    Err(error) => panic!("proxy decoy accept failed: {error}"),
+                }
+            }
+        });
+
+        let status = std::process::Command::new(std::env::current_exe().unwrap())
+            .arg("--exact")
+            .arg("proxy::tests::authenticated_http_ignores_system_proxy_in_isolated_child")
+            .arg("--nocapture")
+            .env(CHILD_FLAG, "1")
+            .env(BASE_ENV, &base)
+            .env("HTTP_PROXY", format!("http://{decoy_address}"))
+            .env("HTTPS_PROXY", format!("http://{decoy_address}"))
+            .env("http_proxy", format!("http://{decoy_address}"))
+            .env("https_proxy", format!("http://{decoy_address}"))
+            .env_remove("NO_PROXY")
+            .env_remove("no_proxy")
+            .status()
+            .expect("run isolated proxy child");
+        assert!(status.success(), "isolated proxy child failed");
+        assert!(direct_request
+            .recv_timeout(std::time::Duration::from_secs(1))
+            .expect("direct server request")
+            .contains("authorization: Bearer proxy-secret"));
+        assert!(
+            !decoy_rx.recv().unwrap(),
+            "system proxy received a connection"
+        );
     }
 }
