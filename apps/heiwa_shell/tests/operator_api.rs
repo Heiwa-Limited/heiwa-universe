@@ -1,5 +1,7 @@
 //! Integration tests for the authenticated operator HTTP contract.
 
+use heiwa_evidence::OperatorJournal;
+use heiwa_session::operator::{OperatorSessionService, StartTurnRequest};
 use serde_json::{json, Value};
 use std::io::{Read, Write};
 use std::net::{TcpListener, TcpStream};
@@ -13,7 +15,7 @@ struct TestRuntime {
     child: Child,
     port: u16,
     _home: tempfile::TempDir,
-    _evidence: tempfile::TempDir,
+    evidence: tempfile::TempDir,
 }
 
 impl TestRuntime {
@@ -54,8 +56,14 @@ impl TestRuntime {
             child,
             port,
             _home: home,
-            _evidence: evidence,
+            evidence,
         }
+    }
+
+    fn external_sessions(&self) -> OperatorSessionService {
+        OperatorSessionService::new(
+            OperatorJournal::new(self.evidence.path().to_path_buf()).expect("operator journal"),
+        )
     }
 
     fn request(&self, method: &str, target: &str, token: Option<&str>, body: Value) -> Response {
@@ -149,6 +157,50 @@ fn operator_websocket_authenticates_before_any_upgrade() {
 
     let authorized = websocket_handshake(configured.port, Some(TOKEN));
     assert_eq!(authorized.status, 101, "{}", authorized.head);
+}
+
+#[test]
+fn operator_websocket_contract_replays_resumes_and_tails_shared_journal() {
+    let runtime = TestRuntime::start(true);
+    let external = runtime.external_sessions();
+    external.ensure_thread("contract-thread").unwrap();
+
+    let (mut first, status) = connect_operator_websocket(
+        runtime.port,
+        "/ws/v1/operator?thread_id=contract-thread",
+        TOKEN,
+    );
+    assert_eq!(status, 101);
+    let created = read_websocket_json(&mut first);
+    assert_eq!(created["type"], "event");
+    assert_eq!(created["event"]["event_type"], "thread_created");
+    let created_cursor = created["cursor"].as_str().unwrap().to_string();
+    assert_eq!(read_websocket_json(&mut first)["type"], "caught_up");
+
+    external
+        .start_turn(
+            "contract-thread",
+            StartTurnRequest::auto("contract-live-1", "shared journal append"),
+        )
+        .unwrap();
+    for expected in ["turn_started", "user_message"] {
+        let frame = read_websocket_json(&mut first);
+        assert_eq!(frame["type"], "event");
+        assert_eq!(frame["event"]["event_type"], expected);
+    }
+    drop(first);
+
+    let (mut resumed, status) = connect_operator_websocket(
+        runtime.port,
+        &format!("/ws/v1/operator?thread_id=contract-thread&after={created_cursor}"),
+        TOKEN,
+    );
+    assert_eq!(status, 101);
+    for expected in ["turn_started", "user_message"] {
+        let frame = read_websocket_json(&mut resumed);
+        assert_eq!(frame["event"]["event_type"], expected);
+    }
+    assert_eq!(read_websocket_json(&mut resumed)["type"], "caught_up");
 }
 
 #[test]
@@ -663,10 +715,60 @@ fn websocket_handshake(port: u16, token: Option<&str>) -> HandshakeResponse {
         .unwrap()
         .parse()
         .unwrap();
-    let body = if raw[split + 4..].is_empty() {
+    let body = if status == 101 || raw[split + 4..].is_empty() {
         Value::Null
     } else {
         serde_json::from_slice(&raw[split + 4..]).unwrap()
     };
     HandshakeResponse { status, head, body }
+}
+
+fn connect_operator_websocket(port: u16, target: &str, token: &str) -> (TcpStream, u16) {
+    let mut stream = TcpStream::connect(("127.0.0.1", port)).unwrap();
+    stream
+        .set_read_timeout(Some(Duration::from_secs(5)))
+        .unwrap();
+    let request = format!(
+        "GET {target} HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Version: 13\r\nSec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\nAuthorization: Bearer {token}\r\n\r\n"
+    );
+    stream.write_all(request.as_bytes()).unwrap();
+    let mut head = Vec::new();
+    while !head.ends_with(b"\r\n\r\n") {
+        let mut byte = [0_u8; 1];
+        stream.read_exact(&mut byte).unwrap();
+        head.push(byte[0]);
+    }
+    let status = String::from_utf8(head)
+        .unwrap()
+        .lines()
+        .next()
+        .and_then(|line| line.split_whitespace().nth(1))
+        .unwrap()
+        .parse()
+        .unwrap();
+    (stream, status)
+}
+
+fn read_websocket_json(stream: &mut TcpStream) -> Value {
+    let mut header = [0_u8; 2];
+    stream.read_exact(&mut header).unwrap();
+    assert_eq!(header[0], 0x81);
+    assert_eq!(header[1] & 0x80, 0);
+    let length = match header[1] & 0x7f {
+        value @ 0..=125 => value as usize,
+        126 => {
+            let mut bytes = [0_u8; 2];
+            stream.read_exact(&mut bytes).unwrap();
+            u16::from_be_bytes(bytes) as usize
+        }
+        127 => {
+            let mut bytes = [0_u8; 8];
+            stream.read_exact(&mut bytes).unwrap();
+            usize::try_from(u64::from_be_bytes(bytes)).unwrap()
+        }
+        _ => unreachable!(),
+    };
+    let mut payload = vec![0_u8; length];
+    stream.read_exact(&mut payload).unwrap();
+    serde_json::from_slice(&payload).unwrap()
 }

@@ -16,7 +16,7 @@ use std::sync::Arc;
 use std::time::Instant;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::{TcpListener, TcpStream};
-use tokio::sync::watch;
+use tokio::sync::{broadcast, watch};
 use tokio::time::{self, Duration};
 
 pub(crate) const DEFAULT_PORT: u16 = 7474;
@@ -908,6 +908,7 @@ async fn handle_connection(mut stream: TcpStream, started_at: Arc<String>) -> Re
     }
 
     if is_websocket_request(&request) {
+        let target = request_target(&request).unwrap_or("/").to_string();
         let path = request_path(&request).unwrap_or("/").to_string();
         if path == "/ws/v1/operator" {
             if let Err(error) = operator_auth_subject(&request) {
@@ -924,7 +925,7 @@ async fn handle_connection(mut stream: TcpStream, started_at: Arc<String>) -> Re
                 .await;
             }
         }
-        return handle_websocket(stream, &request, started_at, &path).await;
+        return handle_websocket(stream, &request, started_at, &path, &target).await;
     }
 
     let method = request_method(&request).unwrap_or("GET");
@@ -1707,6 +1708,7 @@ async fn handle_websocket(
     request: &str,
     started_at: Arc<String>,
     path: &str,
+    target: &str,
 ) -> Result<()> {
     let key = header_value(request, "sec-websocket-key")
         .ok_or_else(|| anyhow!("missing websocket key"))?;
@@ -1724,6 +1726,34 @@ async fn handle_websocket(
         return events_loop(stream).await;
     }
 
+    if path == "/ws/v1/operator" {
+        let params = match parse_operator_websocket_request(target) {
+            Ok(params) => params,
+            Err(()) => {
+                let payload = json!({"type":"error","code":"invalid_request"});
+                let _ = write_ws_text(&mut stream, &payload.to_string()).await;
+                return Ok(());
+            }
+        };
+        let (_, sessions, runner) = match crate::default_model_call_runtime() {
+            Ok(runtime) => runtime,
+            Err(_) => {
+                let payload = json!({"type":"error","code":"operator_unavailable"});
+                let _ = write_ws_text(&mut stream, &payload.to_string()).await;
+                return Ok(());
+            }
+        };
+        return operator_events_loop(
+            stream,
+            sessions,
+            runner.subscribe(),
+            params.thread_id,
+            params.after,
+            OperatorWebsocketIntervals::default(),
+        )
+        .await;
+    }
+
     let mut ticker = time::interval(Duration::from_secs(5));
     loop {
         ticker.tick().await;
@@ -1739,6 +1769,193 @@ async fn handle_websocket(
         }
     }
     Ok(())
+}
+
+struct OperatorWebsocketRequest {
+    thread_id: String,
+    after: Option<String>,
+}
+
+#[derive(Clone, Copy)]
+struct OperatorWebsocketIntervals {
+    poll: Duration,
+    heartbeat: Duration,
+}
+
+impl Default for OperatorWebsocketIntervals {
+    fn default() -> Self {
+        Self {
+            poll: Duration::from_millis(200),
+            heartbeat: Duration::from_secs(30),
+        }
+    }
+}
+
+fn parse_operator_websocket_request(
+    target: &str,
+) -> std::result::Result<OperatorWebsocketRequest, ()> {
+    let (path, query) = target.split_once('?').ok_or(())?;
+    if path != "/ws/v1/operator" {
+        return Err(());
+    }
+    let mut thread_id = None;
+    let mut after = None;
+    for pair in query.split('&').filter(|pair| !pair.is_empty()) {
+        let (raw_key, raw_value) = pair.split_once('=').unwrap_or((pair, ""));
+        let key = strict_percent_decode_query(raw_key)?;
+        let value = strict_percent_decode_query(raw_value)?;
+        match key.as_str() {
+            "thread_id" if thread_id.is_none() => thread_id = Some(value),
+            "after" if after.is_none() => after = Some(value),
+            _ => return Err(()),
+        }
+    }
+    let thread_id = validate_operator_identifier(&thread_id.ok_or(())?)?;
+    let after = after.filter(|cursor| !cursor.is_empty());
+    if after
+        .as_ref()
+        .is_some_and(|cursor| cursor.len() > 8 * 1024 || cursor.chars().any(char::is_control))
+    {
+        return Err(());
+    }
+    Ok(OperatorWebsocketRequest { thread_id, after })
+}
+
+fn strict_percent_decode_query(raw: &str) -> std::result::Result<String, ()> {
+    let bytes = raw.as_bytes();
+    let mut decoded = Vec::with_capacity(bytes.len());
+    let mut index = 0;
+    while index < bytes.len() {
+        match bytes[index] {
+            b'+' => {
+                decoded.push(b' ');
+                index += 1;
+            }
+            b'%' => {
+                if index + 2 >= bytes.len() {
+                    return Err(());
+                }
+                let hi = hex_value(bytes[index + 1]).ok_or(())?;
+                let lo = hex_value(bytes[index + 2]).ok_or(())?;
+                decoded.push((hi << 4) | lo);
+                index += 3;
+            }
+            byte => {
+                decoded.push(byte);
+                index += 1;
+            }
+        }
+    }
+    String::from_utf8(decoded).map_err(|_| ())
+}
+
+async fn operator_events_loop(
+    mut stream: TcpStream,
+    sessions: Arc<heiwa_session::operator::OperatorSessionService>,
+    mut transient: broadcast::Receiver<heiwa_shell::operator::OperatorStreamFrame>,
+    thread_id: String,
+    mut cursor: Option<String>,
+    intervals: OperatorWebsocketIntervals,
+) -> Result<()> {
+    let mut poll = time::interval(intervals.poll);
+    poll.set_missed_tick_behavior(time::MissedTickBehavior::Skip);
+    let mut heartbeat = time::interval(intervals.heartbeat);
+    heartbeat.set_missed_tick_behavior(time::MissedTickBehavior::Skip);
+    // `interval` ticks immediately. Consume that heartbeat tick so the first
+    // heartbeat observes the configured delay while replay starts at once.
+    heartbeat.tick().await;
+    let mut caught_up = false;
+    let mut transient_open = true;
+
+    loop {
+        tokio::select! {
+            _ = poll.tick() => {
+                let page = match sessions.events_after(&thread_id, cursor.as_deref(), 100) {
+                    Ok(page) => page,
+                    Err(heiwa_evidence::CursorError::InvalidCursor { .. }) => {
+                        let payload = json!({
+                            "type": "invalid_cursor",
+                            "code": "invalid_cursor",
+                            "action": "replay_from_start",
+                        });
+                        let _ = write_ws_text(&mut stream, &payload.to_string()).await;
+                        return Ok(());
+                    }
+                    Err(heiwa_evidence::CursorError::Storage(_)) => {
+                        let payload = json!({"type":"error","code":"operator_unavailable"});
+                        let _ = write_ws_text(&mut stream, &payload.to_string()).await;
+                        return Ok(());
+                    }
+                };
+                let event_count = page.events.len();
+                for row in page.events {
+                    cursor = Some(row.cursor.clone());
+                    let payload = json!({
+                        "type": "event",
+                        "cursor": row.cursor,
+                        "event": row.event,
+                    });
+                    if write_ws_text(&mut stream, &payload.to_string()).await.is_err() {
+                        return Ok(());
+                    }
+                }
+                if let Some(next_cursor) = page.next_cursor {
+                    cursor = Some(next_cursor);
+                }
+                if !caught_up && event_count < 100 {
+                    if write_ws_text(&mut stream, &json!({"type":"caught_up"}).to_string()).await.is_err() {
+                        return Ok(());
+                    }
+                    caught_up = true;
+                }
+            }
+            frame = transient.recv(), if transient_open => {
+                match frame {
+                    Ok(heiwa_shell::operator::OperatorStreamFrame::AssistantDelta {
+                        thread_id: frame_thread,
+                        turn_id,
+                        text,
+                    }) if frame_thread == thread_id => {
+                        let payload = json!({
+                            "type":"assistant_delta",
+                            "thread_id": frame_thread,
+                            "turn_id": turn_id,
+                            "text": text,
+                        });
+                        if write_ws_text(&mut stream, &payload.to_string()).await.is_err() {
+                            return Ok(());
+                        }
+                    }
+                    Ok(heiwa_shell::operator::OperatorStreamFrame::Error {
+                        thread_id: frame_thread,
+                        turn_id,
+                        ..
+                    }) if frame_thread == thread_id => {
+                        let payload = json!({
+                            "type":"error",
+                            "code":"execution_failed",
+                            "thread_id": frame_thread,
+                            "turn_id": turn_id,
+                        });
+                        if write_ws_text(&mut stream, &payload.to_string()).await.is_err() {
+                            return Ok(());
+                        }
+                    }
+                    Ok(_) | Err(broadcast::error::RecvError::Lagged(_)) => {}
+                    Err(broadcast::error::RecvError::Closed) => transient_open = false,
+                }
+            }
+            _ = heartbeat.tick() => {
+                let payload = json!({
+                    "type":"heartbeat",
+                    "occurred_at": chrono::Utc::now().to_rfc3339(),
+                });
+                if write_ws_text(&mut stream, &payload.to_string()).await.is_err() {
+                    return Ok(());
+                }
+            }
+        }
+    }
 }
 
 async fn events_loop(mut stream: TcpStream) -> Result<()> {
@@ -4075,6 +4292,9 @@ fn print_start_help() {
 #[cfg(test)]
 mod app_readmodel_tests {
     use super::*;
+    use heiwa_evidence::OperatorJournal;
+    use heiwa_session::operator::{OperatorSessionService, StartTurnRequest};
+    use tokio::sync::broadcast;
 
     async fn written_status_line(status: u16) -> String {
         let listener = TcpListener::bind(("127.0.0.1", 0)).await.unwrap();
@@ -4122,6 +4342,250 @@ mod app_readmodel_tests {
         let _ = fs::remove_dir_all(&dir);
         fs::create_dir_all(&dir).expect("create temp state dir");
         dir
+    }
+
+    fn test_operator_sessions(root: &Path) -> Arc<OperatorSessionService> {
+        Arc::new(OperatorSessionService::new(
+            OperatorJournal::new(root.to_path_buf()).expect("operator journal"),
+        ))
+    }
+
+    async fn tcp_pair() -> (TcpStream, TcpStream) {
+        let listener = TcpListener::bind(("127.0.0.1", 0)).await.unwrap();
+        let address = listener.local_addr().unwrap();
+        let client = tokio::spawn(async move { TcpStream::connect(address).await.unwrap() });
+        let (server, _) = listener.accept().await.unwrap();
+        (server, client.await.unwrap())
+    }
+
+    async fn read_server_ws_json(stream: &mut TcpStream) -> Value {
+        let mut header = [0_u8; 2];
+        stream.read_exact(&mut header).await.expect("frame header");
+        assert_eq!(header[0], 0x81, "server frame must be final text");
+        assert_eq!(header[1] & 0x80, 0, "server frame must not be masked");
+        let length = match header[1] & 0x7f {
+            value @ 0..=125 => value as usize,
+            126 => {
+                let mut bytes = [0_u8; 2];
+                stream.read_exact(&mut bytes).await.unwrap();
+                u16::from_be_bytes(bytes) as usize
+            }
+            127 => {
+                let mut bytes = [0_u8; 8];
+                stream.read_exact(&mut bytes).await.unwrap();
+                usize::try_from(u64::from_be_bytes(bytes)).unwrap()
+            }
+            _ => unreachable!(),
+        };
+        let mut payload = vec![0_u8; length];
+        stream
+            .read_exact(&mut payload)
+            .await
+            .expect("frame payload");
+        serde_json::from_slice(&payload).expect("JSON websocket frame")
+    }
+
+    fn test_ws_intervals() -> OperatorWebsocketIntervals {
+        OperatorWebsocketIntervals {
+            poll: Duration::from_millis(5),
+            heartbeat: Duration::from_millis(80),
+        }
+    }
+
+    #[tokio::test]
+    async fn operator_websocket_replays_resumes_and_polls_external_appends() {
+        let root = tempfile::tempdir().unwrap();
+        let sessions = test_operator_sessions(root.path());
+        sessions
+            .start_turn("ws-thread", StartTurnRequest::auto("request-1", "hello"))
+            .expect("seed turn");
+        let seeded = sessions.events_after("ws-thread", None, 100).unwrap();
+        assert_eq!(seeded.events.len(), 3);
+
+        let (_sender, receiver) = broadcast::channel(8);
+        let (server, mut client) = tcp_pair().await;
+        let loop_sessions = sessions.clone();
+        let first = tokio::spawn(async move {
+            operator_events_loop(
+                server,
+                loop_sessions,
+                receiver,
+                "ws-thread".to_string(),
+                None,
+                test_ws_intervals(),
+            )
+            .await
+        });
+        let mut cursors = Vec::new();
+        for expected in ["thread_created", "turn_started", "user_message"] {
+            let frame = read_server_ws_json(&mut client).await;
+            assert_eq!(frame["type"], "event");
+            assert_eq!(frame["event"]["event_type"], expected);
+            cursors.push(frame["cursor"].as_str().unwrap().to_string());
+        }
+        assert_eq!(read_server_ws_json(&mut client).await["type"], "caught_up");
+        first.abort();
+
+        let (_sender, receiver) = broadcast::channel(8);
+        let (server, mut resumed_client) = tcp_pair().await;
+        let loop_sessions = sessions.clone();
+        let after = cursors[0].clone();
+        let resumed = tokio::spawn(async move {
+            operator_events_loop(
+                server,
+                loop_sessions,
+                receiver,
+                "ws-thread".to_string(),
+                Some(after),
+                test_ws_intervals(),
+            )
+            .await
+        });
+        for expected in ["turn_started", "user_message"] {
+            let frame = read_server_ws_json(&mut resumed_client).await;
+            assert_eq!(frame["event"]["event_type"], expected);
+        }
+        assert_eq!(
+            read_server_ws_json(&mut resumed_client).await["type"],
+            "caught_up"
+        );
+
+        let external = test_operator_sessions(root.path());
+        external
+            .start_turn(
+                "ws-thread",
+                StartTurnRequest::auto("request-2", "from peer"),
+            )
+            .expect("external append");
+        for expected in ["turn_started", "user_message"] {
+            let frame = tokio::time::timeout(
+                Duration::from_millis(100),
+                read_server_ws_json(&mut resumed_client),
+            )
+            .await
+            .expect("external event became visible");
+            assert_eq!(frame["event"]["event_type"], expected);
+        }
+        let next = tokio::time::timeout(
+            Duration::from_millis(40),
+            read_server_ws_json(&mut resumed_client),
+        )
+        .await;
+        assert!(next.is_err(), "caught_up must be emitted exactly once");
+        resumed.abort();
+    }
+
+    #[tokio::test]
+    async fn operator_websocket_emits_injected_heartbeat_without_advancing_cursor() {
+        let root = tempfile::tempdir().unwrap();
+        let sessions = test_operator_sessions(root.path());
+        let (_sender, receiver) = broadcast::channel(8);
+        let (server, mut client) = tcp_pair().await;
+        let task = tokio::spawn(async move {
+            operator_events_loop(
+                server,
+                sessions,
+                receiver,
+                "heartbeat-thread".to_string(),
+                None,
+                OperatorWebsocketIntervals {
+                    poll: Duration::from_millis(5),
+                    heartbeat: Duration::from_millis(10),
+                },
+            )
+            .await
+        });
+        assert_eq!(read_server_ws_json(&mut client).await["type"], "caught_up");
+        let heartbeat = read_server_ws_json(&mut client).await;
+        assert_eq!(heartbeat["type"], "heartbeat");
+        assert!(heartbeat.get("cursor").is_none());
+        task.abort();
+    }
+
+    #[tokio::test]
+    async fn operator_websocket_reports_replaced_stream_cursor_then_closes() {
+        let root = tempfile::tempdir().unwrap();
+        let sessions = test_operator_sessions(root.path());
+        sessions.ensure_thread("original-thread").unwrap();
+        let old_cursor = sessions
+            .events_after("original-thread", None, 10)
+            .unwrap()
+            .next_cursor
+            .unwrap();
+
+        let replacement_root = tempfile::tempdir().unwrap();
+        let replacement = test_operator_sessions(replacement_root.path());
+        replacement.ensure_thread("replacement-thread").unwrap();
+        fs::copy(
+            replacement_root.path().join("operator_events.jsonl"),
+            root.path().join("operator_events.jsonl"),
+        )
+        .unwrap();
+
+        let (_sender, receiver) = broadcast::channel(8);
+        let (server, mut client) = tcp_pair().await;
+        let task = tokio::spawn(async move {
+            operator_events_loop(
+                server,
+                sessions,
+                receiver,
+                "original-thread".to_string(),
+                Some(old_cursor),
+                test_ws_intervals(),
+            )
+            .await
+        });
+        let frame = read_server_ws_json(&mut client).await;
+        assert_eq!(frame["type"], "invalid_cursor");
+        assert_eq!(frame["code"], "invalid_cursor");
+        assert_eq!(frame["action"], "replay_from_start");
+        assert!(task.await.unwrap().is_ok());
+        let mut trailing = [0_u8; 1];
+        assert_eq!(client.read(&mut trailing).await.unwrap(), 0);
+    }
+
+    #[tokio::test]
+    async fn operator_websocket_forwards_only_matching_transient_frames() {
+        let root = tempfile::tempdir().unwrap();
+        let sessions = test_operator_sessions(root.path());
+        let (sender, receiver) = broadcast::channel(8);
+        let (server, mut client) = tcp_pair().await;
+        let task = tokio::spawn(async move {
+            operator_events_loop(
+                server,
+                sessions,
+                receiver,
+                "wanted-thread".to_string(),
+                None,
+                OperatorWebsocketIntervals {
+                    poll: Duration::from_millis(5),
+                    heartbeat: Duration::from_millis(30),
+                },
+            )
+            .await
+        });
+        assert_eq!(read_server_ws_json(&mut client).await["type"], "caught_up");
+        sender
+            .send(heiwa_shell::operator::OperatorStreamFrame::AssistantDelta {
+                thread_id: "other-thread".to_string(),
+                turn_id: "other-turn".to_string(),
+                text: "do not forward".to_string(),
+            })
+            .unwrap();
+        sender
+            .send(heiwa_shell::operator::OperatorStreamFrame::AssistantDelta {
+                thread_id: "wanted-thread".to_string(),
+                turn_id: "wanted-turn".to_string(),
+                text: "forward me".to_string(),
+            })
+            .unwrap();
+        let frame = read_server_ws_json(&mut client).await;
+        assert_eq!(frame["type"], "assistant_delta");
+        assert_eq!(frame["turn_id"], "wanted-turn");
+        assert_eq!(frame["text"], "forward me");
+        let next = read_server_ws_json(&mut client).await;
+        assert_eq!(next["type"], "heartbeat", "unrelated delta leaked: {next}");
+        task.abort();
     }
 
     #[tokio::test]
