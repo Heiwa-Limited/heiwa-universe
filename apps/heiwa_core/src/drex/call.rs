@@ -82,6 +82,19 @@ pub enum SafetyClass {
     Blocked,
 }
 
+impl SafetyClass {
+    /// Explicit policy outcome for inference that has been classified as
+    /// low-risk. Higher-risk work remains unapproved until its own approval
+    /// flow records a decision.
+    pub fn low_risk_auto_approval(risk: &CallRisk) -> Self {
+        if risk == &CallRisk::Low {
+            Self::Approved
+        } else {
+            Self::Unapproved
+        }
+    }
+}
+
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum ModelCallStage {
@@ -540,4 +553,21 @@ fn valid_cost(cost: Option<f64>) -> bool {
 
 fn valid_probability(value: f64) -> bool {
     value.is_finite() && (0.0..=1.0).contains(&value)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{CallRisk, SafetyClass};
+
+    #[test]
+    fn low_risk_auto_approval_fails_closed_for_higher_risk() {
+        assert_eq!(
+            SafetyClass::low_risk_auto_approval(&CallRisk::Low),
+            SafetyClass::Approved
+        );
+        assert_eq!(
+            SafetyClass::low_risk_auto_approval(&CallRisk::High),
+            SafetyClass::Unapproved
+        );
+    }
 }

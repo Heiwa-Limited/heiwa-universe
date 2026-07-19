@@ -2879,7 +2879,7 @@ async fn execute_routed_model_call(
                 raw_text: raw_text.to_string(),
                 privacy,
                 risk: CallRisk::Low,
-                safety: SafetyClass::Approved,
+                safety: SafetyClass::low_risk_auto_approval(&CallRisk::Low),
                 required_capabilities: vec![],
                 required_context_tokens: 1,
                 minimum_quality_class: 1,
@@ -3333,6 +3333,7 @@ fn aggregate_model_call_results(
         .unwrap_or_default();
     usage.cost_usd = cost_usd;
     ModelCallResult {
+        route_receipt_ref: final_result.route_receipt_ref.clone(),
         provider: final_result.provider.clone(),
         model_id: final_result.model_id.clone(),
         provider_model_id: final_result.provider_model_id.clone(),
@@ -3609,7 +3610,7 @@ pub(crate) async fn execute_repl_turn_streaming(
                     raw_text: prompt.to_string(),
                     privacy,
                     risk: CallRisk::Low,
-                    safety: SafetyClass::Approved,
+                    safety: SafetyClass::low_risk_auto_approval(&CallRisk::Low),
                     required_capabilities: vec![],
                     required_context_tokens: 1,
                     minimum_quality_class: 1,
@@ -3638,7 +3639,7 @@ pub(crate) async fn execute_repl_turn_streaming(
             return;
         }
     };
-    while let Ok(frame) = handle.frames.recv().await {
+    while let Ok(frame) = handle.recv().await {
         match frame {
             OperatorStreamFrame::Error {
                 turn_id, message, ..
@@ -4092,7 +4093,9 @@ mod tests {
                 raw_text: "local work".to_string(),
                 privacy: heiwa_core::drex::PrivacyClass::Sovereign,
                 risk: heiwa_core::drex::CallRisk::Low,
-                safety: heiwa_core::drex::SafetyClass::Approved,
+                safety: heiwa_core::drex::SafetyClass::low_risk_auto_approval(
+                    &heiwa_core::drex::CallRisk::Low,
+                ),
                 required_capabilities: vec![],
                 required_context_tokens: 1,
                 minimum_quality_class: 1,
@@ -4247,6 +4250,7 @@ mod tests {
             turn_started_at: "2026-05-26T00:00:00Z".to_string(),
         };
         let result = heiwa_shell::model_calls::ModelCallResult {
+            route_receipt_ref: "test-route-receipt".to_string(),
             provider: "secondary".to_string(),
             model_id: "secondary-model".to_string(),
             provider_model_id: "secondary-provider-model".to_string(),
@@ -4285,6 +4289,7 @@ mod tests {
         let receipts = heiwa_receipts::ReceiptStore::open_in_memory().unwrap();
         let rates = heiwa_receipts::RateTable::default();
         let result = heiwa_shell::model_calls::ModelCallResult {
+            route_receipt_ref: "test-route-receipt".to_string(),
             provider: "secondary".to_string(),
             model_id: "secondary-model".to_string(),
             provider_model_id: "secondary-provider-model".to_string(),

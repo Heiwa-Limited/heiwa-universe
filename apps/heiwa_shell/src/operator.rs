@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet, VecDeque};
 use std::sync::{Arc, Mutex};
 
 use anyhow::{anyhow, Result};
@@ -101,6 +101,40 @@ pub trait OperatorArtifactStore: Send + Sync {
     fn store(&self, artifact: PersistedArtifact) -> Result<()>;
 }
 
+/// Injectable boundary around the existing DREX approval policy, staging, and
+/// blocking decision watcher. The runner can race only the watcher against a
+/// cancellation signal; it never moves a blocking filesystem poll onto Tokio.
+pub trait OperatorApprovalService: Send + Sync {
+    fn plan(&self, call: &heiwa_protocol::ToolCall) -> crate::agentic::ToolApproval;
+    fn stage(
+        &self,
+        call: &heiwa_protocol::ToolCall,
+        approval: &crate::agentic::ToolApproval,
+    ) -> Result<()>;
+    fn wait(&self, approval: &crate::agentic::ToolApproval) -> Result<String>;
+}
+
+#[derive(Default)]
+struct DrexApprovalService;
+
+impl OperatorApprovalService for DrexApprovalService {
+    fn plan(&self, call: &heiwa_protocol::ToolCall) -> crate::agentic::ToolApproval {
+        crate::agentic::plan_tool_approval(call)
+    }
+
+    fn stage(
+        &self,
+        call: &heiwa_protocol::ToolCall,
+        approval: &crate::agentic::ToolApproval,
+    ) -> Result<()> {
+        crate::agentic::stage_tool_approval(call, approval)
+    }
+
+    fn wait(&self, approval: &crate::agentic::ToolApproval) -> Result<String> {
+        crate::agentic::wait_for_tool_approval(approval)
+    }
+}
+
 #[derive(Default)]
 struct LocalArtifactStore;
 
@@ -134,7 +168,83 @@ pub struct OperatorTurnHandle {
     pub turn_id: String,
     pub cursor: String,
     pub duplicate: bool,
-    pub frames: broadcast::Receiver<OperatorStreamFrame>,
+    sessions: Arc<OperatorSessionService>,
+    replay: VecDeque<OperatorStreamFrame>,
+    replay_complete: bool,
+    seen_event_ids: HashSet<String>,
+    frames: broadcast::Receiver<OperatorStreamFrame>,
+}
+
+impl OperatorTurnHandle {
+    pub async fn recv(
+        &mut self,
+    ) -> std::result::Result<OperatorStreamFrame, broadcast::error::RecvError> {
+        loop {
+            if let Some(frame) = self.replay.pop_front() {
+                if self.accept_frame(&frame) {
+                    return Ok(frame);
+                }
+                continue;
+            }
+            if !self.replay_complete {
+                self.refill_replay()
+                    .map_err(|_| broadcast::error::RecvError::Closed)?;
+                continue;
+            }
+            match self.frames.recv().await {
+                Ok(frame) if self.accept_frame(&frame) => return Ok(frame),
+                Ok(_) => continue,
+                Err(broadcast::error::RecvError::Lagged(_)) => {
+                    self.refill_replay()
+                        .map_err(|_| broadcast::error::RecvError::Closed)?;
+                }
+                Err(error) => return Err(error),
+            }
+        }
+    }
+
+    fn accept_frame(&mut self, frame: &OperatorStreamFrame) -> bool {
+        match frame {
+            OperatorStreamFrame::Durable(row) => {
+                if row.event.turn_id.as_deref() != Some(self.turn_id.as_str()) {
+                    return false;
+                }
+                self.cursor = row.cursor.clone();
+                self.seen_event_ids.insert(row.event.event_id.clone())
+            }
+            OperatorStreamFrame::AssistantDelta { turn_id, .. }
+            | OperatorStreamFrame::Error { turn_id, .. } => turn_id == &self.turn_id,
+        }
+    }
+
+    fn refill_replay(&mut self) -> Result<()> {
+        let page = self.sessions.events_after(
+            &self.thread_id,
+            (!self.cursor.is_empty()).then_some(self.cursor.as_str()),
+            256,
+        )?;
+        let caught_up = page.events.len() < 256;
+        let reached_terminal = page.events.iter().any(|row| {
+            row.event.turn_id.as_deref() == Some(self.turn_id.as_str())
+                && matches!(
+                    row.event.event_type,
+                    OperatorEventType::TurnCompleted
+                        | OperatorEventType::TurnInterrupted
+                        | OperatorEventType::Blocker
+                )
+        });
+        if let Some(cursor) = page.next_cursor {
+            self.cursor = cursor;
+        }
+        self.replay.extend(
+            page.events
+                .into_iter()
+                .filter(|row| row.event.turn_id.as_deref() == Some(self.turn_id.as_str()))
+                .map(|row| OperatorStreamFrame::Durable(Box::new(row))),
+        );
+        self.replay_complete = caught_up || reached_terminal;
+        Ok(())
+    }
 }
 
 #[derive(Clone)]
@@ -145,6 +255,7 @@ pub struct OperatorTurnRunner {
     active_threads: Arc<Mutex<HashMap<String, String>>>,
     frames: broadcast::Sender<OperatorStreamFrame>,
     artifacts: Arc<dyn OperatorArtifactStore>,
+    approvals: Arc<dyn OperatorApprovalService>,
 }
 
 impl OperatorTurnRunner {
@@ -160,11 +271,17 @@ impl OperatorTurnRunner {
             active_threads: Arc::new(Mutex::new(HashMap::new())),
             frames,
             artifacts: Arc::new(LocalArtifactStore),
+            approvals: Arc::new(DrexApprovalService),
         }
     }
 
     pub fn with_artifact_store(mut self, artifacts: Arc<dyn OperatorArtifactStore>) -> Self {
         self.artifacts = artifacts;
+        self
+    }
+
+    pub fn with_approval_service(mut self, approvals: Arc<dyn OperatorApprovalService>) -> Self {
+        self.approvals = approvals;
         self
     }
 
@@ -200,11 +317,20 @@ impl OperatorTurnRunner {
                     .await;
             });
         }
+        let (cursor, replay_complete) = if submission.duplicate {
+            (String::new(), false)
+        } else {
+            (submission.cursor.clone(), true)
+        };
         Ok(OperatorTurnHandle {
             thread_id: submission.thread_id,
             turn_id: submission.turn_id,
-            cursor: submission.cursor,
+            cursor,
             duplicate: submission.duplicate,
+            sessions: self.sessions.clone(),
+            replay: VecDeque::new(),
+            replay_complete,
+            seen_event_ids: HashSet::new(),
             frames,
         })
     }
@@ -291,26 +417,40 @@ impl OperatorTurnRunner {
                 done,
             } => {
                 let call_id = format!("call-{}", Uuid::new_v4());
-                self.append_and_publish(runtime_event(
-                    thread_id,
-                    turn_id,
-                    Some(&call_id),
-                    OperatorEventType::RoutePlanned,
-                    route.clone(),
-                ))?;
-                self.append_and_publish(runtime_event(
-                    thread_id,
-                    turn_id,
-                    Some(&call_id),
-                    OperatorEventType::RouteCompleted,
-                    route,
-                ))?;
+                self.append_and_publish_at(
+                    &mut cursor,
+                    runtime_event(
+                        thread_id,
+                        turn_id,
+                        Some(&call_id),
+                        OperatorEventType::RoutePlanned,
+                        route.clone(),
+                    ),
+                )?;
+                let route_completed = self.append_and_publish_at(
+                    &mut cursor,
+                    runtime_event(
+                        thread_id,
+                        turn_id,
+                        Some(&call_id),
+                        OperatorEventType::RouteCompleted,
+                        route,
+                    ),
+                )?;
                 let _ = self.frames.send(OperatorStreamFrame::AssistantDelta {
                     thread_id: thread_id.to_string(),
                     turn_id: turn_id.to_string(),
                     text: response.clone(),
                 });
-                self.finish_turn(thread_id, turn_id, response, done, None, Some(call_id))?;
+                self.finish_turn(
+                    &mut cursor,
+                    thread_id,
+                    turn_id,
+                    response,
+                    done,
+                    None,
+                    Some(route_completed.event.event_id),
+                )?;
             }
             OperatorTurnWork::Model(mut model) => {
                 apply_route_policy(&mut model.request, route_policy)?;
@@ -323,6 +463,7 @@ impl OperatorTurnRunner {
                 let done = (result.done_payload)(&result.result);
                 let response = result.result.text.clone();
                 self.finish_turn(
+                    &mut cursor,
                     thread_id,
                     turn_id,
                     response,
@@ -344,7 +485,6 @@ impl OperatorTurnRunner {
         cancel: watch::Receiver<bool>,
     ) -> Result<CompletedModelTurn> {
         let request_template = model.request.clone();
-        let mut receipt_ref = request_template.call_id.clone();
         let candidates = model.candidates.clone();
         let mut messages = model.messages.clone();
         let remaining_budget_usd = model.remaining_budget_usd;
@@ -366,6 +506,7 @@ impl OperatorTurnRunner {
 
         let tool_calls = crate::agentic::parse_tool_calls(&first.text);
         let Some(scope) = model.tool_scope else {
+            let receipt_ref = first.route_receipt_ref.clone();
             return Ok(CompletedModelTurn {
                 result: first,
                 done_payload,
@@ -373,6 +514,7 @@ impl OperatorTurnRunner {
             });
         };
         if tool_calls.is_empty() {
+            let receipt_ref = first.route_receipt_ref.clone();
             return Ok(CompletedModelTurn {
                 result: first,
                 done_payload,
@@ -385,15 +527,96 @@ impl OperatorTurnRunner {
             if *cancel.borrow() {
                 return Err(anyhow!("operator turn cancelled"));
             }
-            self.append_and_publish(runtime_event(
+            *cursor = self
+                .append_and_publish(runtime_event(
+                    thread_id,
+                    turn_id,
+                    Some(&call.id),
+                    OperatorEventType::ToolCallStarted,
+                    json!({"name": call.name, "arguments": call.arguments}),
+                ))?
+                .cursor;
+            // DREX owns the approval policy and packet format. We own the
+            // ordered durable audit trail around it, so an append failure
+            // prevents staging, waiting, and the side effect.
+            let approval = self.approvals.plan(&call);
+            let request_id = approval.request_id.clone();
+            *cursor = self.append_and_publish(runtime_event(
                 thread_id,
                 turn_id,
                 Some(&call.id),
-                OperatorEventType::ToolCallStarted,
-                json!({"name": call.name, "arguments": call.arguments}),
-            ))?;
+                OperatorEventType::ApprovalRequested,
+                json!({
+                    "request_id": request_id,
+                    "tool": call.name,
+                    "call_id": call.id,
+                    "risk": approval.risk.as_str(),
+                    "surface": approval.surface,
+                    "outcome": if approval.request_id.is_some() { "pending" } else { "auto_approved" },
+                }),
+            ))?.cursor;
+            let outcome = if approval.request_id.is_some() {
+                self.approvals.stage(&call, &approval)?;
+                let wait_approval = approval.clone();
+                let approvals = self.approvals.clone();
+                let wait = tokio::task::spawn_blocking(move || approvals.wait(&wait_approval));
+                let mut approval_cancel = cancel.clone();
+                tokio::select! {
+                    waited = wait => match waited {
+                        Ok(Ok(outcome)) => outcome,
+                        Ok(Err(error)) => format!("timeout: {error}"),
+                        Err(error) => return Err(anyhow!("approval waiter failed: {error}")),
+                    },
+                    changed = approval_cancel.changed() => {
+                        match changed {
+                            Ok(()) if *approval_cancel.borrow() => {
+                                *cursor = self.append_and_publish(runtime_event(
+                                    thread_id,
+                                    turn_id,
+                                    Some(&call.id),
+                                    OperatorEventType::ApprovalDecided,
+                                    json!({
+                                        "request_id": approval.request_id,
+                                        "tool": call.name,
+                                        "call_id": call.id,
+                                        "risk": approval.risk.as_str(),
+                                        "surface": approval.surface,
+                                        "outcome": "cancelled",
+                                        "reason": "OPERATOR_CANCELLED",
+                                    }),
+                                ))?.cursor;
+                                return Err(anyhow!("operator turn cancelled"));
+                            }
+                            _ => return Err(anyhow!("operator cancellation channel closed")),
+                        }
+                    }
+                }
+            } else {
+                "auto_approved".to_string()
+            };
+            *cursor = self.append_and_publish(runtime_event(
+                thread_id,
+                turn_id,
+                Some(&call.id),
+                OperatorEventType::ApprovalDecided,
+                json!({
+                    "request_id": approval.request_id,
+                    "tool": call.name,
+                    "call_id": call.id,
+                    "risk": approval.risk.as_str(),
+                    "surface": approval.surface,
+                    "outcome": outcome,
+                    "reason": if outcome == "approved" || outcome == "auto_approved" { serde_json::Value::Null } else { json!("policy_denied_or_timeout") },
+                }),
+            ))?.cursor;
+            if outcome != "approved" && outcome != "auto_approved" {
+                return Err(anyhow!("tool approval did not permit execution: {outcome}"));
+            }
+            if *cancel.borrow() {
+                return Err(anyhow!("operator turn cancelled"));
+            }
             let mut tool_cancel = cancel.clone();
-            let tool_execution = crate::agentic::execute_tool_call(
+            let tool_execution = crate::agentic::execute_approved_tool_call(
                 scope.clone(),
                 call.clone(),
                 &first.provider,
@@ -413,27 +636,30 @@ impl OperatorTurnRunner {
                 return Err(anyhow!("operator turn cancelled"));
             }
             let (preview, artifact_ref) = self.persist_large_tool_output(
+                cursor,
                 thread_id,
                 turn_id,
                 &call.id,
                 &call.name,
                 &entry.output,
             )?;
-            self.append_and_publish(runtime_event(
-                thread_id,
-                turn_id,
-                Some(&call.id),
-                OperatorEventType::ToolCallCompleted,
-                json!({
-                    "name": call.name,
-                    "status": receipt.status.as_str(),
-                    "output": preview.clone(),
-                    "output_preview": preview,
-                    "artifact_ref": artifact_ref,
-                    "receipt_id": receipt.id,
-                    "error": receipt.error,
-                }),
-            ))?;
+            *cursor = self
+                .append_and_publish(runtime_event(
+                    thread_id,
+                    turn_id,
+                    Some(&call.id),
+                    OperatorEventType::ToolCallCompleted,
+                    json!({
+                        "name": call.name,
+                        "status": receipt.status.as_str(),
+                        "output": preview.clone(),
+                        "output_preview": preview,
+                        "artifact_ref": artifact_ref,
+                        "receipt_id": receipt.id,
+                        "error": receipt.error,
+                    }),
+                ))?
+                .cursor;
             tool_entries.push(entry);
         }
 
@@ -450,7 +676,6 @@ impl OperatorTurnRunner {
         });
         let mut follow_up = request_template;
         follow_up.call_id = format!("call-{}", Uuid::new_v4());
-        receipt_ref = follow_up.call_id.clone();
         follow_up.raw_text = crate::agentic::tool_result_prompt(&tool_entries);
         let result = self
             .execute_model_stage(
@@ -465,6 +690,7 @@ impl OperatorTurnRunner {
                 cancel,
             )
             .await?;
+        let receipt_ref = result.route_receipt_ref.clone();
         Ok(CompletedModelTurn {
             result,
             done_payload,
@@ -528,6 +754,7 @@ impl OperatorTurnRunner {
 
     fn persist_large_tool_output(
         &self,
+        cursor: &mut String,
         thread_id: &str,
         turn_id: &str,
         call_id: &str,
@@ -556,18 +783,20 @@ impl OperatorTurnRunner {
             owner_id: Some("local-operator".to_string()),
             principal_id: Some("operator-turn-runner".to_string()),
         })?;
-        self.append_and_publish(runtime_event(
-            thread_id,
-            turn_id,
-            Some(call_id),
-            OperatorEventType::ArtifactCreated,
-            json!({
-                "artifact_id": artifact_id,
-                "kind": "tool_output",
-                "tool_name": tool_name,
-                "byte_len": output.len(),
-            }),
-        ))?;
+        *cursor = self
+            .append_and_publish(runtime_event(
+                thread_id,
+                turn_id,
+                Some(call_id),
+                OperatorEventType::ArtifactCreated,
+                json!({
+                    "artifact_id": artifact_id,
+                    "kind": "tool_output",
+                    "tool_name": tool_name,
+                    "byte_len": output.len(),
+                }),
+            ))?
+            .cursor;
         Ok((
             bounded_text(output, MAX_OPERATOR_TOOL_OUTPUT_BYTES),
             Some(artifact_id),
@@ -576,6 +805,7 @@ impl OperatorTurnRunner {
 
     fn finish_turn(
         &self,
+        cursor: &mut String,
         thread_id: &str,
         turn_id: &str,
         response: String,
@@ -583,14 +813,16 @@ impl OperatorTurnRunner {
         model: Option<ModelCallResult>,
         receipt_ref: Option<String>,
     ) -> Result<()> {
-        self.append_and_publish(runtime_event(
-            thread_id,
-            turn_id,
-            None,
-            OperatorEventType::AssistantCompleted,
-            json!({"text": response}),
-        ))?;
-        self.append_and_publish(runtime_event(
+        *cursor = self
+            .append_and_publish(runtime_event(
+                thread_id,
+                turn_id,
+                None,
+                OperatorEventType::AssistantCompleted,
+                json!({"text": response}),
+            ))?
+            .cursor;
+        *cursor = self.append_and_publish(runtime_event(
             thread_id,
             turn_id,
             None,
@@ -604,14 +836,16 @@ impl OperatorTurnRunner {
                 "cost_usd": model.as_ref().map(|result| result.cost_usd),
                 "cost_truth": model.as_ref().map(|result| &result.cost_truth),
             }),
-        ))?;
-        self.append_and_publish(runtime_event(
-            thread_id,
-            turn_id,
-            None,
-            OperatorEventType::TurnCompleted,
-            json!({"trace": done}),
-        ))?;
+        ))?.cursor;
+        *cursor = self
+            .append_and_publish(runtime_event(
+                thread_id,
+                turn_id,
+                None,
+                OperatorEventType::TurnCompleted,
+                json!({"trace": done}),
+            ))?
+            .cursor;
         Ok(())
     }
 
@@ -620,6 +854,16 @@ impl OperatorTurnRunner {
         let _ = self
             .frames
             .send(OperatorStreamFrame::Durable(Box::new(row.clone())));
+        Ok(row)
+    }
+
+    fn append_and_publish_at(
+        &self,
+        cursor: &mut String,
+        event: OperatorEvent,
+    ) -> Result<CursorEvent> {
+        let row = self.append_and_publish(event)?;
+        *cursor = row.cursor.clone();
         Ok(row)
     }
 
@@ -732,8 +976,8 @@ mod tests {
     use tokio::sync::Notify;
 
     use super::{
-        ActiveTurnRegistry, OperatorArtifactStore, OperatorModelExecutor, OperatorModelTurn,
-        OperatorStreamFrame, OperatorTurnRunner, OperatorTurnWork,
+        ActiveTurnRegistry, OperatorApprovalService, OperatorArtifactStore, OperatorModelExecutor,
+        OperatorModelTurn, OperatorStreamFrame, OperatorTurnRunner, OperatorTurnWork,
     };
     use crate::model_calls::{
         ModelCallError, ModelCallExecution, ModelCallExecutor, ModelCallResult,
@@ -751,6 +995,100 @@ mod tests {
     struct SequencedExecutor {
         calls: AtomicUsize,
         responses: Vec<String>,
+    }
+
+    struct DelayedApproval;
+
+    impl OperatorApprovalService for DelayedApproval {
+        fn plan(&self, _call: &heiwa_protocol::ToolCall) -> crate::agentic::ToolApproval {
+            crate::agentic::ToolApproval {
+                request_id: Some("approval-test".to_string()),
+                request_path: Some(std::path::PathBuf::from("/tmp/approval-test")),
+                risk: heiwa_drex::drex_gate::RiskLevel::Critical,
+                surface: "test".to_string(),
+            }
+        }
+
+        fn stage(
+            &self,
+            _call: &heiwa_protocol::ToolCall,
+            _approval: &crate::agentic::ToolApproval,
+        ) -> anyhow::Result<()> {
+            Ok(())
+        }
+
+        fn wait(&self, _approval: &crate::agentic::ToolApproval) -> anyhow::Result<String> {
+            std::thread::sleep(std::time::Duration::from_millis(200));
+            Ok("approved".to_string())
+        }
+    }
+
+    struct CorruptingApproval {
+        stream: std::path::PathBuf,
+        backup: std::path::PathBuf,
+        stage_calls: AtomicUsize,
+        wait_calls: AtomicUsize,
+    }
+
+    impl OperatorApprovalService for CorruptingApproval {
+        fn plan(&self, _call: &heiwa_protocol::ToolCall) -> crate::agentic::ToolApproval {
+            std::fs::rename(&self.stream, &self.backup).unwrap();
+            std::fs::create_dir(&self.stream).unwrap();
+            crate::agentic::ToolApproval {
+                request_id: Some("approval-corrupt".to_string()),
+                request_path: Some(std::path::PathBuf::from("/tmp/approval-corrupt")),
+                risk: heiwa_drex::drex_gate::RiskLevel::Critical,
+                surface: "test".to_string(),
+            }
+        }
+
+        fn stage(
+            &self,
+            _call: &heiwa_protocol::ToolCall,
+            _approval: &crate::agentic::ToolApproval,
+        ) -> anyhow::Result<()> {
+            self.stage_calls.fetch_add(1, Ordering::SeqCst);
+            Ok(())
+        }
+
+        fn wait(&self, _approval: &crate::agentic::ToolApproval) -> anyhow::Result<String> {
+            self.wait_calls.fetch_add(1, Ordering::SeqCst);
+            Ok("approved".to_string())
+        }
+    }
+
+    struct CorruptingDecisionApproval {
+        stream: std::path::PathBuf,
+        backup: std::path::PathBuf,
+        stage_calls: AtomicUsize,
+        wait_calls: AtomicUsize,
+    }
+
+    impl OperatorApprovalService for CorruptingDecisionApproval {
+        fn plan(&self, _call: &heiwa_protocol::ToolCall) -> crate::agentic::ToolApproval {
+            crate::agentic::ToolApproval {
+                request_id: Some("approval-decision-corrupt".to_string()),
+                request_path: Some(std::path::PathBuf::from("/tmp/approval-decision-corrupt")),
+                risk: heiwa_drex::drex_gate::RiskLevel::Critical,
+                surface: "test".to_string(),
+            }
+        }
+
+        fn stage(
+            &self,
+            _call: &heiwa_protocol::ToolCall,
+            _approval: &crate::agentic::ToolApproval,
+        ) -> anyhow::Result<()> {
+            self.stage_calls.fetch_add(1, Ordering::SeqCst);
+            std::fs::rename(&self.stream, &self.backup).unwrap();
+            std::fs::create_dir(&self.stream).unwrap();
+            Ok(())
+        }
+
+        fn wait(&self, _approval: &crate::agentic::ToolApproval) -> anyhow::Result<String> {
+            self.wait_calls.fetch_add(1, Ordering::SeqCst);
+            Ok("approved".to_string())
+        }
     }
 
     struct CompletingAdapter;
@@ -789,6 +1127,7 @@ mod tests {
         ) -> Result<ModelCallResult, ModelCallError> {
             let index = self.calls.fetch_add(1, Ordering::SeqCst);
             Ok(ModelCallResult {
+                route_receipt_ref: "mock-route-receipt".to_string(),
                 provider: "fake".into(),
                 model_id: "fake-model".into(),
                 provider_model_id: "fake-model".into(),
@@ -852,6 +1191,7 @@ mod tests {
                 }
             }
             Ok(ModelCallResult {
+                route_receipt_ref: execution.request.call_id.clone(),
                 provider: "fake".into(),
                 model_id: "fake-model".into(),
                 provider_model_id: "fake-model".into(),
@@ -889,7 +1229,7 @@ mod tests {
                 raw_text: "hello".into(),
                 privacy: PrivacyClass::Standard,
                 risk: CallRisk::Low,
-                safety: SafetyClass::Approved,
+                safety: SafetyClass::low_risk_auto_approval(&CallRisk::Low),
                 required_capabilities: vec![],
                 required_context_tokens: 1,
                 minimum_quality_class: 1,
@@ -912,17 +1252,18 @@ mod tests {
         }
     }
 
-    async fn wait_for_terminal(
-        receiver: &mut tokio::sync::broadcast::Receiver<OperatorStreamFrame>,
-    ) {
+    async fn wait_for_terminal(handle: &mut super::OperatorTurnHandle) -> Vec<OperatorStreamFrame> {
+        let mut frames = Vec::new();
         loop {
-            let frame = tokio::time::timeout(std::time::Duration::from_secs(2), receiver.recv())
+            let frame = tokio::time::timeout(std::time::Duration::from_secs(2), handle.recv())
                 .await
                 .expect("runner timed out")
                 .expect("runner stream closed");
             if frame.is_terminal() {
-                return;
+                frames.push(frame);
+                return frames;
             }
+            frames.push(frame);
         }
     }
 
@@ -955,7 +1296,7 @@ mod tests {
                 },
             )
             .unwrap();
-        wait_for_terminal(&mut handle.frames).await;
+        wait_for_terminal(&mut handle).await;
 
         let events = sessions.events_after("default", None, 64).unwrap();
         let types = events
@@ -993,7 +1334,7 @@ mod tests {
                 OperatorTurnWork::Model(Box::new(model_turn())),
             )
             .unwrap();
-        wait_for_terminal(&mut handle.frames).await;
+        wait_for_terminal(&mut handle).await;
 
         assert_eq!(executor.calls.load(Ordering::SeqCst), 1);
         assert_eq!(
@@ -1052,14 +1393,12 @@ mod tests {
                 OperatorTurnWork::Model(Box::new(turn)),
             )
             .unwrap();
-        wait_for_terminal(&mut handle.frames).await;
+        wait_for_terminal(&mut handle).await;
 
-        let types = sessions
-            .events_after("default", None, 64)
-            .unwrap()
-            .events
-            .into_iter()
-            .map(|row| row.event.event_type)
+        let rows = sessions.events_after("default", None, 64).unwrap().events;
+        let types = rows
+            .iter()
+            .map(|row| row.event.event_type.clone())
             .collect::<Vec<_>>();
         assert!(types.windows(3).any(|events| {
             events
@@ -1075,6 +1414,13 @@ mod tests {
         );
         assert_eq!(types[types.len() - 2], OperatorEventType::ReceiptLinked);
         assert_eq!(types[types.len() - 1], OperatorEventType::TurnCompleted);
+        let receipt_ref = rows[rows.len() - 2].event.payload["receipt_ref"]
+            .as_str()
+            .unwrap();
+        assert!(rows.iter().any(|row| {
+            row.event.event_id == receipt_ref
+                && row.event.event_type == OperatorEventType::RouteCompleted
+        }));
     }
 
     #[tokio::test]
@@ -1154,7 +1500,21 @@ mod tests {
         .await
         .unwrap();
         assert!(runner.request_cancel(&handle.turn_id).unwrap());
-        wait_for_terminal(&mut handle.frames).await;
+        let frames = wait_for_terminal(&mut handle).await;
+
+        let event_ids = frames
+            .iter()
+            .filter_map(|frame| match frame {
+                OperatorStreamFrame::Durable(row) => Some(row.event.event_id.clone()),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        let unique = event_ids.iter().collect::<std::collections::HashSet<_>>();
+        assert_eq!(
+            event_ids.len(),
+            unique.len(),
+            "durable frames must be unique"
+        );
 
         let events = sessions.events_after("default", None, 64).unwrap();
         let tail = &events.events[events.events.len() - 2..];
@@ -1199,7 +1559,7 @@ mod tests {
         std::fs::remove_dir(&stream).unwrap();
         std::fs::rename(&backup, &stream).unwrap();
         assert!(runner.request_cancel(&handle.turn_id).unwrap());
-        wait_for_terminal(&mut handle.frames).await;
+        wait_for_terminal(&mut handle).await;
     }
 
     #[tokio::test]
@@ -1234,7 +1594,7 @@ mod tests {
                 OperatorTurnWork::Model(Box::new(turn)),
             )
             .unwrap();
-        wait_for_terminal(&mut handle.frames).await;
+        let frames = wait_for_terminal(&mut handle).await;
 
         assert_eq!(executor.calls.load(Ordering::SeqCst), 2);
         let events = sessions.events_after("default", None, 64).unwrap();
@@ -1248,12 +1608,311 @@ mod tests {
             .iter()
             .position(|row| row.event.event_type == OperatorEventType::ToolCallCompleted)
             .unwrap();
+        let approval_requested = events
+            .events
+            .iter()
+            .position(|row| row.event.event_type == OperatorEventType::ApprovalRequested)
+            .unwrap();
+        let approval_decided = events
+            .events
+            .iter()
+            .position(|row| row.event.event_type == OperatorEventType::ApprovalDecided)
+            .unwrap();
         assert!(started < completed);
+        assert!(started < approval_requested);
+        assert!(approval_requested < approval_decided && approval_decided < completed);
+        assert_eq!(
+            events.events[approval_requested].event.payload["outcome"],
+            "auto_approved"
+        );
+        assert_eq!(
+            events.events[approval_decided].event.payload["outcome"],
+            "auto_approved"
+        );
         let completed_payload = &events.events[completed].event.payload;
         assert!(completed_payload["output_preview"].as_str().unwrap().len() <= 16 * 1024);
         assert!(completed_payload["artifact_ref"].as_str().is_some());
         let stored = artifacts.artifacts.lock().unwrap();
         assert_eq!(stored.len(), 1);
         assert!(stored[0].content_json.len() > 16 * 1024);
+
+        let streamed_ids = frames
+            .iter()
+            .filter_map(|frame| match frame {
+                OperatorStreamFrame::Durable(row) => Some(row.event.event_id.clone()),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        for row in events.events.iter().filter(|row| {
+            row.event.turn_id.as_deref() == Some(handle.turn_id.as_str())
+                && !matches!(
+                    row.event.event_type,
+                    OperatorEventType::TurnStarted | OperatorEventType::UserMessage
+                )
+        }) {
+            assert_eq!(
+                streamed_ids
+                    .iter()
+                    .filter(|id| *id == &row.event.event_id)
+                    .count(),
+                1,
+                "durable event {} must broadcast exactly once",
+                row.event.event_id
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn operator_completed_duplicate_replays_terminal_without_hanging() {
+        let dir = tempfile::tempdir().unwrap();
+        let sessions = service(dir.path());
+        let executor = Arc::new(RecordingExecutor::with_sessions(sessions.clone()));
+        let runner = OperatorTurnRunner::new(sessions, executor);
+        let request = StartTurnRequest::auto("same-request", "hello");
+        let mut first = runner
+            .submit(
+                "default",
+                request.clone(),
+                OperatorTurnWork::Deterministic {
+                    response: "done".into(),
+                    route: json!({"mode": "deterministic"}),
+                    done: json!({"mode": "deterministic"}),
+                },
+            )
+            .unwrap();
+        wait_for_terminal(&mut first).await;
+
+        let mut duplicate = runner
+            .submit(
+                "default",
+                request,
+                OperatorTurnWork::Deterministic {
+                    response: "must not run".into(),
+                    route: json!({}),
+                    done: json!({}),
+                },
+            )
+            .unwrap();
+        assert!(duplicate.duplicate);
+        let frames = wait_for_terminal(&mut duplicate).await;
+        assert!(frames.iter().any(OperatorStreamFrame::is_terminal));
+    }
+
+    #[tokio::test]
+    async fn operator_completed_duplicate_pages_bounded_replay_to_old_terminal() {
+        let dir = tempfile::tempdir().unwrap();
+        let sessions = service(dir.path());
+        let executor = Arc::new(RecordingExecutor::with_sessions(sessions.clone()));
+        let runner = OperatorTurnRunner::new(sessions, executor);
+
+        for index in 0..30 {
+            let mut handle = runner
+                .submit(
+                    "default",
+                    StartTurnRequest::auto(format!("old-{index}"), "hello"),
+                    OperatorTurnWork::Deterministic {
+                        response: format!("done-{index}"),
+                        route: json!({"mode": "deterministic"}),
+                        done: json!({"mode": "deterministic"}),
+                    },
+                )
+                .unwrap();
+            wait_for_terminal(&mut handle).await;
+        }
+
+        let request = StartTurnRequest::auto("paged-target", "hello");
+        let mut first = runner
+            .submit(
+                "default",
+                request.clone(),
+                OperatorTurnWork::Deterministic {
+                    response: "target done".into(),
+                    route: json!({"mode": "deterministic"}),
+                    done: json!({"mode": "deterministic"}),
+                },
+            )
+            .unwrap();
+        wait_for_terminal(&mut first).await;
+
+        let mut duplicate = runner
+            .submit(
+                "default",
+                request,
+                OperatorTurnWork::Deterministic {
+                    response: "must not run".into(),
+                    route: json!({}),
+                    done: json!({}),
+                },
+            )
+            .unwrap();
+        let frames = wait_for_terminal(&mut duplicate).await;
+        assert!(duplicate.duplicate);
+        assert!(frames.iter().any(OperatorStreamFrame::is_terminal));
+    }
+
+    #[tokio::test]
+    async fn operator_active_duplicate_follows_live_terminal_without_hanging() {
+        let dir = tempfile::tempdir().unwrap();
+        let sessions = service(dir.path());
+        let executor = Arc::new(RecordingExecutor::with_sessions(sessions.clone()));
+        executor.block.store(true, Ordering::SeqCst);
+        let runner = OperatorTurnRunner::new(sessions, executor.clone());
+        let request = StartTurnRequest::auto("same-request", "hello");
+        let first = runner
+            .submit(
+                "default",
+                request.clone(),
+                OperatorTurnWork::Model(Box::new(model_turn())),
+            )
+            .unwrap();
+        tokio::time::timeout(
+            std::time::Duration::from_secs(2),
+            executor.started.notified(),
+        )
+        .await
+        .unwrap();
+        let mut duplicate = runner
+            .submit(
+                "default",
+                request,
+                OperatorTurnWork::Model(Box::new(model_turn())),
+            )
+            .unwrap();
+        assert!(duplicate.duplicate);
+        runner.request_cancel(&first.turn_id).unwrap();
+        let frames = wait_for_terminal(&mut duplicate).await;
+        assert!(frames.iter().any(|frame| matches!(
+            frame,
+            OperatorStreamFrame::Durable(row)
+                if row.event.event_type == OperatorEventType::TurnInterrupted
+        )));
+    }
+
+    #[tokio::test]
+    async fn operator_cancelled_gated_approval_returns_promptly_without_tool_completion() {
+        let dir = tempfile::tempdir().unwrap();
+        let sessions = service(dir.path());
+        let executor = Arc::new(SequencedExecutor {
+            calls: AtomicUsize::new(0),
+            responses: vec![
+                r#"{"tool_calls":[{"id":"deploy-1","name":"app.deploy","arguments":{}}]}"#
+                    .to_string(),
+            ],
+        });
+        let runner = OperatorTurnRunner::new(sessions.clone(), executor)
+            .with_approval_service(Arc::new(DelayedApproval));
+        let mut turn = model_turn();
+        turn.tool_scope = Some(ExecutionScope::local_default(dir.path().to_path_buf()));
+        let mut handle = runner
+            .submit(
+                "default",
+                StartTurnRequest::auto("gated-cancel", "deploy"),
+                OperatorTurnWork::Model(Box::new(turn)),
+            )
+            .unwrap();
+
+        loop {
+            let frame = tokio::time::timeout(std::time::Duration::from_millis(300), handle.recv())
+                .await
+                .expect("approval request was not observable")
+                .expect("runner stream closed");
+            if matches!(frame, OperatorStreamFrame::Durable(row) if row.event.event_type == OperatorEventType::ApprovalRequested)
+            {
+                break;
+            }
+        }
+        assert!(runner.request_cancel(&handle.turn_id).unwrap());
+        let frames = wait_for_terminal(&mut handle).await;
+        assert!(frames.iter().any(|frame| matches!(
+            frame,
+            OperatorStreamFrame::Durable(row)
+                if row.event.event_type == OperatorEventType::ApprovalDecided
+                    && row.event.payload["outcome"] == "cancelled"
+        )));
+        let rows = sessions.events_after("default", None, 64).unwrap().events;
+        assert!(!rows
+            .iter()
+            .any(|row| row.event.event_type == OperatorEventType::ToolCallCompleted));
+        tokio::time::sleep(std::time::Duration::from_millis(250)).await;
+        let rows = sessions.events_after("default", None, 64).unwrap().events;
+        assert!(!rows
+            .iter()
+            .any(|row| row.event.event_type == OperatorEventType::ToolCallCompleted));
+    }
+
+    #[tokio::test]
+    async fn operator_approval_requested_append_failure_prevents_stage_wait_and_tool() {
+        let dir = tempfile::tempdir().unwrap();
+        let sessions = service(dir.path());
+        let stream = dir.path().join("operator_events.jsonl");
+        let backup = dir.path().join("operator_events.backup");
+        let probe = Arc::new(CorruptingApproval {
+            stream: stream.clone(),
+            backup: backup.clone(),
+            stage_calls: AtomicUsize::new(0),
+            wait_calls: AtomicUsize::new(0),
+        });
+        let executor = Arc::new(SequencedExecutor {
+            calls: AtomicUsize::new(0),
+            responses: vec![
+                r#"{"tool_calls":[{"id":"deploy-1","name":"app.deploy","arguments":{}}]}"#
+                    .to_string(),
+            ],
+        });
+        let runner = OperatorTurnRunner::new(sessions, executor.clone())
+            .with_approval_service(probe.clone());
+        let mut turn = model_turn();
+        turn.tool_scope = Some(ExecutionScope::local_default(dir.path().to_path_buf()));
+        let mut handle = runner
+            .submit(
+                "default",
+                StartTurnRequest::auto("approval-request-append-failure", "deploy"),
+                OperatorTurnWork::Model(Box::new(turn)),
+            )
+            .unwrap();
+        wait_for_terminal(&mut handle).await;
+        assert_eq!(probe.stage_calls.load(Ordering::SeqCst), 0);
+        assert_eq!(probe.wait_calls.load(Ordering::SeqCst), 0);
+        assert_eq!(executor.calls.load(Ordering::SeqCst), 1);
+        std::fs::remove_dir(&stream).unwrap();
+        std::fs::rename(&backup, &stream).unwrap();
+    }
+
+    #[tokio::test]
+    async fn operator_approval_decided_append_failure_prevents_tool() {
+        let dir = tempfile::tempdir().unwrap();
+        let sessions = service(dir.path());
+        let stream = dir.path().join("operator_events.jsonl");
+        let backup = dir.path().join("operator_events.backup");
+        let probe = Arc::new(CorruptingDecisionApproval {
+            stream: stream.clone(),
+            backup: backup.clone(),
+            stage_calls: AtomicUsize::new(0),
+            wait_calls: AtomicUsize::new(0),
+        });
+        let executor = Arc::new(SequencedExecutor {
+            calls: AtomicUsize::new(0),
+            responses: vec![
+                r#"{"tool_calls":[{"id":"deploy-1","name":"app.deploy","arguments":{}}]}"#
+                    .to_string(),
+            ],
+        });
+        let runner = OperatorTurnRunner::new(sessions, executor.clone())
+            .with_approval_service(probe.clone());
+        let mut turn = model_turn();
+        turn.tool_scope = Some(ExecutionScope::local_default(dir.path().to_path_buf()));
+        let mut handle = runner
+            .submit(
+                "default",
+                StartTurnRequest::auto("approval-decision-append-failure", "deploy"),
+                OperatorTurnWork::Model(Box::new(turn)),
+            )
+            .unwrap();
+        wait_for_terminal(&mut handle).await;
+        assert_eq!(probe.stage_calls.load(Ordering::SeqCst), 1);
+        assert_eq!(probe.wait_calls.load(Ordering::SeqCst), 1);
+        assert_eq!(executor.calls.load(Ordering::SeqCst), 1);
+        std::fs::remove_dir(&stream).unwrap();
+        std::fs::rename(&backup, &stream).unwrap();
     }
 }

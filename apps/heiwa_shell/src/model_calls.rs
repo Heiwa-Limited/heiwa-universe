@@ -7,8 +7,8 @@ use heiwa_core::drex::{
     default_policy, plan_model_call, CostTruth, ModelCallCandidate, ModelCallPlan, ModelCallRequest,
 };
 use heiwa_evidence::{
-    now_iso, OperatorActor, OperatorEvent, OperatorEventType, OperatorRisk, OperatorSensitivity,
-    OPERATOR_EVENT_SCHEMA_VERSION,
+    now_iso, CursorEvent, OperatorActor, OperatorEvent, OperatorEventType, OperatorRisk,
+    OperatorSensitivity, OPERATOR_EVENT_SCHEMA_VERSION,
 };
 use heiwa_provider::adapter::{Message, ProviderAdapter, StreamEvent, TokenUsage};
 use heiwa_session::operator::{OperatorSessionService, StartTurnRequest};
@@ -51,6 +51,8 @@ pub struct ModelCallAttemptRecord {
 
 #[derive(Debug, Clone)]
 pub struct ModelCallResult {
+    /// Durable `route_completed` event id for this model-call stage.
+    pub route_receipt_ref: String,
     pub provider: String,
     pub model_id: String,
     pub provider_model_id: String,
@@ -331,7 +333,7 @@ impl ModelCallExecutor {
                     if *execution.cancel.borrow() {
                         return Err(ModelCallError::Cancelled);
                     }
-                    self.append_route_event(
+                    let route_receipt = self.append_route_event(
                         &execution.request,
                         OperatorEventType::RouteCompleted,
                         "route_completed",
@@ -351,6 +353,7 @@ impl ModelCallExecutor {
                         }),
                     )?;
                     return Ok(ModelCallResult {
+                        route_receipt_ref: route_receipt.event.event_id,
                         provider,
                         model_id,
                         provider_model_id,
@@ -433,7 +436,7 @@ impl ModelCallExecutor {
         cost_usd: Option<f64>,
         cost_truth: &CostTruth,
         remaining_budget_usd: Option<f64>,
-    ) -> Result<(), ModelCallError> {
+    ) -> Result<CursorEvent, ModelCallError> {
         self.append_route_event(
             request,
             OperatorEventType::RouteFailed,
@@ -458,7 +461,7 @@ impl ModelCallExecutor {
         event_type: OperatorEventType,
         phase: &'static str,
         payload: serde_json::Value,
-    ) -> Result<(), ModelCallError> {
+    ) -> Result<CursorEvent, ModelCallError> {
         let risk_class = match request.risk {
             heiwa_core::drex::CallRisk::Low => OperatorRisk::Low,
             heiwa_core::drex::CallRisk::Medium => OperatorRisk::Medium,
@@ -487,7 +490,6 @@ impl ModelCallExecutor {
                 evidence_refs: vec![],
                 payload,
             })
-            .map(|_| ())
             .map_err(|source| ModelCallError::EvidenceAppend { phase, source })
     }
 }

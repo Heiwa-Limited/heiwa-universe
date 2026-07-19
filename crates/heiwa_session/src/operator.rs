@@ -665,8 +665,10 @@ fn validate_event(threads: &HashMap<String, FoldedThread>, event: &OperatorEvent
         }
 
         if turn.cancel_requested {
-            if event.event_type != OperatorEventType::TurnInterrupted
-                || interruption_reason(event) != Some("OPERATOR_CANCELLED")
+            let is_cancel_audit = is_cancellation_approval_audit(event);
+            if !is_cancel_audit
+                && (event.event_type != OperatorEventType::TurnInterrupted
+                    || interruption_reason(event) != Some("OPERATOR_CANCELLED"))
             {
                 bail!(
                     "rejected operator event {}: turn {turn_id} has a pending cancellation and must close with turn_interrupted reason OPERATOR_CANCELLED",
@@ -785,6 +787,32 @@ fn is_turn_terminal(status: &str) -> bool {
 
 fn interruption_reason(event: &OperatorEvent) -> Option<&str> {
     event.payload.get("reason").and_then(|value| value.as_str())
+}
+
+fn is_cancellation_approval_audit(event: &OperatorEvent) -> bool {
+    event.event_type == OperatorEventType::ApprovalDecided
+        && event
+            .payload
+            .get("outcome")
+            .and_then(|value| value.as_str())
+            == Some("cancelled")
+        && event.payload.get("reason").and_then(|value| value.as_str())
+            == Some("OPERATOR_CANCELLED")
+        && event
+            .payload
+            .get("request_id")
+            .and_then(|value| value.as_str())
+            .is_some_and(|value| !value.is_empty())
+        && event
+            .payload
+            .get("tool")
+            .and_then(|value| value.as_str())
+            .is_some_and(|value| !value.is_empty())
+        && event.call_id.as_deref()
+            == event
+                .payload
+                .get("call_id")
+                .and_then(|value| value.as_str())
 }
 
 // ---------------------------------------------------------------------
@@ -1124,7 +1152,12 @@ fn apply_nonterminal_touch(entry: &mut FoldedThread, event: &OperatorEvent) -> b
         return true; // A valid thread-scoped note.
     };
     match entry.turns.iter_mut().find(|turn| &turn.turn_id == turn_id) {
-        Some(turn) if is_turn_terminal(&turn.status) || turn.cancel_requested => false,
+        Some(turn)
+            if is_turn_terminal(&turn.status)
+                || (turn.cancel_requested && !is_cancellation_approval_audit(event)) =>
+        {
+            false
+        }
         Some(_) => true,
         None => false,
     }
@@ -1135,9 +1168,10 @@ mod tests {
     use std::sync::mpsc;
     use std::time::Duration;
 
-    use heiwa_evidence::OperatorJournal;
+    use heiwa_evidence::{OperatorActor, OperatorEventType, OperatorJournal};
+    use serde_json::json;
 
-    use super::OperatorSessionService;
+    use super::{new_event, now_iso, OperatorSessionService, StartTurnRequest};
 
     #[test]
     fn read_only_replay_does_not_wait_for_a_write_transaction() {
@@ -1157,5 +1191,50 @@ mod tests {
                 .unwrap();
             assert!(view.turns.is_empty());
         });
+    }
+
+    #[test]
+    fn pending_cancel_rejects_non_cancellation_approval_decision() {
+        let dir = tempfile::tempdir().unwrap();
+        let service =
+            OperatorSessionService::new(OperatorJournal::new(dir.path().to_path_buf()).unwrap());
+        let submission = service
+            .start_turn("default", StartTurnRequest::auto("cancel-audit", "hello"))
+            .unwrap();
+        service
+            .append_event(new_event(
+                "default",
+                Some(submission.turn_id.clone()),
+                None,
+                OperatorEventType::TurnCancelRequested,
+                now_iso(),
+                OperatorActor {
+                    kind: "operator".into(),
+                    id: "test".into(),
+                },
+                json!({"reason": "OPERATOR_REQUEST"}),
+            ))
+            .unwrap();
+        let error = service
+            .append_event(new_event(
+                "default",
+                Some(submission.turn_id),
+                Some("call-1".into()),
+                OperatorEventType::ApprovalDecided,
+                now_iso(),
+                OperatorActor {
+                    kind: "runtime".into(),
+                    id: "test".into(),
+                },
+                json!({
+                    "request_id": "request-1",
+                    "tool": "app.deploy",
+                    "call_id": "call-1",
+                    "outcome": "approved",
+                    "reason": "operator approved",
+                }),
+            ))
+            .unwrap_err();
+        assert!(error.to_string().contains("pending cancellation"));
     }
 }
