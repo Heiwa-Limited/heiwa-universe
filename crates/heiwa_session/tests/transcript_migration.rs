@@ -255,6 +255,10 @@ fn round_trips_v1_transcript() {
         t.next_entry_id = 42;
         save_entries(&t).expect("save");
 
+        let hits = search_session_messages(Some("default"), "one", 10).expect("fts projection");
+        assert_eq!(hits.len(), 1);
+        assert_eq!(hits[0].content, "one");
+
         let reloaded = load_transcript("default").expect("load");
         assert_eq!(reloaded.version, PERSISTED_TRANSCRIPT_VERSION);
         assert_eq!(reloaded.parent_session_id.as_deref(), Some("root-session"));

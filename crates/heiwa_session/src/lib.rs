@@ -284,7 +284,9 @@ pub fn save_entries(persisted: &PersistedTranscript) -> Result<()> {
         &persisted.session_id,
         persisted.parent_session_id.clone(),
         Some(persisted.next_entry_id),
-    )
+    )?;
+    let _ = rebuild_operator_indexes(&default_operator_service()?, &ProductionEmbeddingSink)?;
+    Ok(())
 }
 
 pub fn set_parent_session_id(session_id: &str, parent_session_id: Option<String>) -> Result<()> {

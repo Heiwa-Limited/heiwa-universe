@@ -144,7 +144,7 @@ pub fn replace_embeddings_from_texts(
                 model: config.embedding.model.clone(),
                 vector,
             }),
-            Ok(_) => {}
+            Ok(_) => failures += 1,
             Err(_) => failures += 1,
         }
     }
