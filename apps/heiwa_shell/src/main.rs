@@ -25,6 +25,9 @@ use heiwa_shell::agentic;
 use heiwa_shell::model_calls::{
     ExecutorLoopCaller, ModelCallExecution, ModelCallExecutor, ModelCallResult,
 };
+use heiwa_shell::operator::{
+    OperatorModelTurn, OperatorStreamFrame, OperatorTurnRunner, OperatorTurnWork,
+};
 use std::env;
 use std::io::{self, IsTerminal, Write};
 use std::path::{Path, PathBuf};
@@ -2816,12 +2819,14 @@ fn default_model_call_runtime() -> Result<
     (
         Arc<ModelCallExecutor>,
         Arc<heiwa_session::operator::OperatorSessionService>,
+        Arc<OperatorTurnRunner>,
     ),
     String,
 > {
     type Runtime = (
         Arc<ModelCallExecutor>,
         Arc<heiwa_session::operator::OperatorSessionService>,
+        Arc<OperatorTurnRunner>,
     );
     static RUNTIME: OnceLock<Result<Runtime, String>> = OnceLock::new();
     RUNTIME
@@ -2835,13 +2840,14 @@ fn default_model_call_runtime() -> Result<
             let resolver =
                 Arc::new(|provider: &str, model: &str| resolve_adapter(provider, model).ok());
             let executor = Arc::new(ModelCallExecutor::new(resolver, sessions.clone()));
-            Ok((executor, sessions))
+            let runner = Arc::new(OperatorTurnRunner::new(sessions.clone(), executor.clone()));
+            Ok((executor, sessions, runner))
         })
         .clone()
 }
 
 fn default_loop_model_caller() -> Result<Arc<dyn heiwa_loop::LoopModelCaller>, String> {
-    let (executor, _) = default_model_call_runtime()?;
+    let (executor, _, _) = default_model_call_runtime()?;
     Ok(Arc::new(ExecutorLoopCaller::new(executor)))
 }
 
@@ -2852,7 +2858,7 @@ async fn execute_routed_model_call(
     raw_text: &str,
     delta_tx: Option<tokio::sync::mpsc::Sender<heiwa_provider::adapter::StreamEvent>>,
 ) -> Result<ModelCallResult, String> {
-    let (executor, sessions) = default_model_call_runtime()?;
+    let (executor, sessions, _) = default_model_call_runtime()?;
     let call_id = format!("call-{}", uuid::Uuid::new_v4());
     let turn = sessions
         .start_turn(
@@ -3514,13 +3520,13 @@ fn repl_trace_payload(
     })
 }
 
-/// Streaming REPL turn: routes through DREX, persists the transcript exactly
-/// like the blocking path, and emits Route → Token* → Done/Error events.
+/// Streaming REPL compatibility surface over the durable operator runner.
+/// The runner owns operator-event persistence; this wrapper only maps its
+/// route/delta/terminal frames into the established SSE response shape.
 pub(crate) async fn execute_repl_turn_streaming(
     prompt: &str,
     events: tokio::sync::mpsc::Sender<ReplStreamEvent>,
 ) {
-    let evidence_client = EvidenceClient::local();
     let mut registry = heiwa_provider::AccountRegistry::load();
     heiwa_provider::detect::auto_discover(&mut registry).await;
     let model_tiers = get_live_model_tiers(&registry);
@@ -3531,134 +3537,187 @@ pub(crate) async fn execute_repl_turn_streaming(
         .unwrap_or_else(|_| heiwa_session::PersistedTranscript::empty(DEFAULT_SESSION_ID));
     let transcript_blocks = persisted.blocks();
 
-    match route_task(prompt, &pins, &model_tiers) {
+    let (_, _, runner) = match default_model_call_runtime() {
+        Ok(runtime) => runtime,
+        Err(error) => {
+            let _ = events.send(ReplStreamEvent::Error(error)).await;
+            return;
+        }
+    };
+
+    let route_outcome = match route_task(prompt, &pins, &model_tiers) {
         Err(msg) => {
             let _ = events.send(ReplStreamEvent::Error(msg)).await;
+            return;
         }
-        Ok(RouteOutcome::Deterministic(response)) => {
-            let mut state = SessionState {
-                session_id: persisted.session_id.clone(),
-                transcript: transcript_blocks,
-                routing: RoutingState {
-                    current_provider: "none".to_string(),
-                    current_model: "none".to_string(),
-                    mode: CockpitMode::Direct.label().to_string(),
-                    explanation: None,
+        Ok(outcome) => outcome,
+    };
+
+    let client_request_id = format!("repl-{}", uuid::Uuid::new_v4());
+    let mut start_request =
+        heiwa_session::operator::StartTurnRequest::auto(client_request_id, prompt);
+    let (work, planned_route) = match route_outcome {
+        RouteOutcome::Deterministic(response) => {
+            let route = route_event_payload("deterministic", None);
+            let done = repl_trace_payload("deterministic", None, None, None, None);
+            (
+                OperatorTurnWork::Deterministic {
+                    response,
+                    route,
+                    done,
                 },
-                devices: vec![],
-                receipts: vec![],
-            };
-            append_state_block(&mut state, TranscriptBlock::User(prompt.to_string()));
-            append_state_block(&mut state, TranscriptBlock::Assistant(response.clone()));
-
-            let _ = events
-                .send(ReplStreamEvent::Route(route_event_payload(
-                    "deterministic",
-                    None,
-                )))
-                .await;
-            let _ = events.send(ReplStreamEvent::Token(response)).await;
-            let _ = events
-                .send(ReplStreamEvent::Done(repl_trace_payload(
-                    "deterministic",
-                    None,
-                    None,
-                    None,
-                    None,
-                )))
-                .await;
+                None,
+            )
         }
-        Ok(RouteOutcome::Routed(route)) => {
-            let _ = events
-                .send(ReplStreamEvent::Route(route_event_payload(
-                    "routed_pending",
-                    None,
-                )))
-                .await;
-
+        RouteOutcome::Routed(route) => {
             let prepared = prepare_outbound_prompt_for_route(&route, prompt);
             let messages =
                 build_messages_from_transcript(&transcript_blocks, &prepared.model_prompt, &pins);
-            let mut state = SessionState {
-                session_id: persisted.session_id.clone(),
-                transcript: transcript_blocks,
-                routing: RoutingState {
-                    current_provider: String::new(),
-                    current_model: String::new(),
-                    mode: CockpitMode::Direct.label().to_string(),
-                    explanation: None,
-                },
-                devices: vec![],
-                receipts: vec![],
-            };
-
-            append_state_block(&mut state, TranscriptBlock::User(prompt.to_string()));
-
-            let (delta_tx, mut delta_rx) = tokio::sync::mpsc::channel(32);
-            let delta_events = events.clone();
-            let delta_task = tokio::spawn(async move {
-                while let Some(delta) = delta_rx.recv().await {
-                    if let heiwa_provider::adapter::StreamEvent::Token(text) = delta {
-                        let _ = delta_events.send(ReplStreamEvent::Token(text)).await;
-                    }
-                }
-            });
-            let result = match execute_routed_model_call(
-                &route,
-                messages,
-                &persisted.session_id,
-                prompt,
-                Some(delta_tx),
-            )
-            .await
-            {
-                Ok(result) => result,
+            start_request.route_policy.privacy = route.privacy.clone();
+            let privacy = match PrivacyClass::parse(&route.privacy) {
+                Ok(privacy) => privacy,
                 Err(error) => {
-                    let _ = events.send(ReplStreamEvent::Error(error)).await;
+                    let _ = events.send(ReplStreamEvent::Error(error.to_string())).await;
                     return;
                 }
             };
-            let _ = delta_task.await;
-            let resolved_route = resolved_route_after_model_call(&route, &result);
-            let mode = if is_local_provider(&resolved_route.provider) {
-                "local_model"
-            } else {
-                "remote_model"
-            };
-            state.routing.current_provider = resolved_route.provider.clone();
-            state.routing.current_model = resolved_route.model_id.clone();
-            record_route_evidence(&evidence_client, &resolved_route, prompt);
-            let _ = events
-                .send(ReplStreamEvent::Route(route_event_payload(
+            let route_for_done = route.clone();
+            let compression = prepared.compression.clone();
+            let done_payload = Arc::new(move |result: &ModelCallResult| {
+                let resolved = resolved_route_after_model_call(&route_for_done, result);
+                let mode = if is_local_provider(&resolved.provider) {
+                    "local_model"
+                } else {
+                    "remote_model"
+                };
+                let usage = usage_for_model_call(result);
+                repl_trace_payload(
                     mode,
-                    Some(&resolved_route),
-                )))
-                .await;
-            let usage = Some(usage_for_model_call(&result));
-            let full_response = result.text.clone();
+                    Some(&resolved),
+                    Some(&usage),
+                    Some(result),
+                    compression.as_ref(),
+                )
+            });
+            let work = OperatorTurnWork::Model(Box::new(OperatorModelTurn {
+                request: ModelCallRequest {
+                    thread_id: String::new(),
+                    turn_id: String::new(),
+                    call_id: format!("call-{}", uuid::Uuid::new_v4()),
+                    intent: route.intent_key.clone(),
+                    stage: ModelCallStage::Execution,
+                    raw_text: prompt.to_string(),
+                    privacy,
+                    risk: CallRisk::Low,
+                    safety: SafetyClass::Approved,
+                    required_capabilities: vec![],
+                    required_context_tokens: 1,
+                    minimum_quality_class: 1,
+                    minimum_success_rate: 0.0,
+                    maximum_marginal_cost_usd: None,
+                    preferred_provider: None,
+                    preferred_model: None,
+                    allowed_models: vec![],
+                    excluded_models: vec![],
+                },
+                candidates: route.candidates.clone(),
+                messages,
+                remaining_budget_usd: start_request.route_policy.turn_budget_usd,
+                max_attempts: 3,
+                tool_scope: None,
+                done_payload,
+            }));
+            (work, Some(*route))
+        }
+    };
 
-            append_state_block(
-                &mut state,
-                TranscriptBlock::Assistant(full_response.clone()),
-            );
-            record_run_evidence(
-                &evidence_client,
-                &resolved_route,
-                usage.as_ref(),
-                Some(&result),
-            );
-
-            let _ = events
-                .send(ReplStreamEvent::Done(repl_trace_payload(
-                    mode,
-                    Some(&resolved_route),
-                    usage.as_ref(),
-                    Some(&result),
-                    prepared.compression.as_ref(),
-                )))
-                .await;
+    let mut handle = match runner.submit(&persisted.session_id, start_request, work) {
+        Ok(handle) => handle,
+        Err(error) => {
+            let _ = events.send(ReplStreamEvent::Error(error.to_string())).await;
+            return;
+        }
+    };
+    while let Ok(frame) = handle.frames.recv().await {
+        match frame {
+            OperatorStreamFrame::Error {
+                turn_id, message, ..
+            } if turn_id == handle.turn_id => {
+                let _ = events.send(ReplStreamEvent::Error(message)).await;
+                break;
+            }
+            OperatorStreamFrame::AssistantDelta { turn_id, text, .. }
+                if turn_id == handle.turn_id =>
+            {
+                let _ = events.send(ReplStreamEvent::Token(text)).await;
+            }
+            OperatorStreamFrame::Durable(row)
+                if row.event.turn_id.as_deref() == Some(handle.turn_id.as_str()) =>
+            {
+                match row.event.event_type {
+                    heiwa_evidence::OperatorEventType::RoutePlanned => {
+                        let payload =
+                            operator_repl_route_payload(&row.event.payload, planned_route.as_ref());
+                        let _ = events.send(ReplStreamEvent::Route(payload)).await;
+                    }
+                    heiwa_evidence::OperatorEventType::TurnCompleted => {
+                        let done = row
+                            .event
+                            .payload
+                            .get("trace")
+                            .cloned()
+                            .unwrap_or_else(|| row.event.payload.clone());
+                        let _ = events.send(ReplStreamEvent::Done(done)).await;
+                        break;
+                    }
+                    heiwa_evidence::OperatorEventType::TurnInterrupted
+                    | heiwa_evidence::OperatorEventType::Blocker => {
+                        let message = row
+                            .event
+                            .payload
+                            .get("message")
+                            .or_else(|| row.event.payload.get("reason"))
+                            .and_then(serde_json::Value::as_str)
+                            .unwrap_or("operator turn interrupted")
+                            .to_string();
+                        let _ = events.send(ReplStreamEvent::Error(message)).await;
+                        break;
+                    }
+                    _ => {}
+                }
+            }
+            _ => {}
         }
     }
+}
+
+fn operator_repl_route_payload(
+    payload: &serde_json::Value,
+    planned: Option<&RouteResult>,
+) -> serde_json::Value {
+    let provider = payload
+        .get("provider")
+        .and_then(serde_json::Value::as_str)
+        .or_else(|| planned.map(|route| route.provider.as_str()));
+    let model = payload
+        .get("model")
+        .and_then(serde_json::Value::as_str)
+        .or_else(|| planned.map(|route| route.model_id.as_str()));
+    let mode = match provider {
+        None => "deterministic",
+        Some(provider) if is_local_provider(provider) => "local_model",
+        Some(_) => "remote_model",
+    };
+    serde_json::json!({
+        "mode": mode,
+        "intent": planned.map(|route| route.intent_key.as_str()),
+        "provider": provider,
+        "model": model,
+        "provider_model": payload.get("provider_model").cloned().or_else(|| planned.map(|route| serde_json::Value::String(route.provider_model_id.clone()))),
+        "rate_group": planned.map(|route| route.rate_group.as_str()),
+        "privacy": planned.map(|route| route.privacy.as_str()),
+        "request_id": planned.map(|route| route.request_id.as_str()),
+    })
 }
 
 /// Blocking REPL turn used by /api/v1/repl: collects the streaming pipeline
@@ -3732,6 +3791,37 @@ pub(crate) async fn preview_route_payload(prompt: &str) -> serde_json::Value {
 #[cfg(test)]
 mod tests {
     use heiwa_protocol::{parse_turn_intent, Intent};
+
+    #[test]
+    fn operator_route_frame_keeps_repl_route_shape() {
+        let planned = super::RouteResult {
+            candidates: vec![],
+            model_id: "qwen3.5:9b".into(),
+            provider: "ollama".into(),
+            provider_model_id: "qwen3.5:9b".into(),
+            rate_group: "local".into(),
+            routing_metadata: "{}".into(),
+            intent_key: "chat".into(),
+            privacy: "standard".into(),
+            request_id: "request-1".into(),
+            turn_started_at: "2026-07-19T00:00:00Z".into(),
+        };
+        let payload = super::operator_repl_route_payload(
+            &serde_json::json!({
+                "provider": "ollama",
+                "model": "qwen3.5:9b",
+                "provider_model": "qwen3.5:9b",
+            }),
+            Some(&planned),
+        );
+        assert_eq!(payload["mode"], "local_model");
+        assert_eq!(payload["intent"], "chat");
+        assert_eq!(payload["provider"], "ollama");
+        assert_eq!(payload["model"], "qwen3.5:9b");
+        assert_eq!(payload["rate_group"], "local");
+        assert_eq!(payload["privacy"], "standard");
+        assert_eq!(payload["request_id"], "request-1");
+    }
 
     #[test]
     fn privacy_cues_force_sovereign_lane() {

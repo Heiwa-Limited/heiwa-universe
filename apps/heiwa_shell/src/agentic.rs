@@ -221,6 +221,26 @@ pub async fn execute_tool_calls(
     Ok((tool_receipts, tool_transcript))
 }
 
+/// Execute exactly one tool through the existing approval/MCP/evidence path.
+/// Turn runners use this narrow adapter so they can persist `tool_call_started`
+/// before the side effect and `tool_call_completed` immediately after it.
+pub async fn execute_tool_call(
+    scope: ExecutionScope,
+    call: ToolCall,
+    provider: &str,
+    model_id: &str,
+) -> Result<(ToolCallReceipt, ToolTranscriptEntry)> {
+    let (mut receipts, mut transcript) =
+        execute_tool_calls(scope, vec![call], provider, model_id).await?;
+    let receipt = receipts
+        .pop()
+        .ok_or_else(|| anyhow::anyhow!("tool execution returned no receipt"))?;
+    let entry = transcript
+        .pop()
+        .ok_or_else(|| anyhow::anyhow!("tool execution returned no transcript entry"))?;
+    Ok((receipt, entry))
+}
+
 pub fn tool_instruction_prompt() -> String {
     "Agentic mode is active. If repo/file context is needed, respond only with JSON: {\"tool_calls\":[{\"name\":\"fs.list|fs.read|repo.grep\",\"arguments\":{...}}]}. Available tools: fs.list {path}, fs.read {path,max_bytes}, repo.grep {pattern,path,max_matches}. Use paths relative to current directory. If no tool is needed, answer normally.".to_string()
 }
