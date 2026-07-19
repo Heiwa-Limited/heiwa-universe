@@ -214,7 +214,13 @@ impl OperatorJournal {
         let _stream_lock = lock_stream(&self.dir, OPERATOR_STREAM_KIND)?;
         let path = stream_path(&self.dir, OPERATOR_STREAM_KIND);
 
-        let mut file = OpenOptions::new().create(true).append(true).open(&path)?;
+        let mut file = OpenOptions::new()
+            .create(true)
+            .read(true)
+            .write(true)
+            .open(&path)?;
+        repair_unterminated_tail(&mut file)?;
+        file.seek(SeekFrom::End(0))?;
         file.write_all(&bytes)?;
         file.sync_data()?;
         let offset = file.metadata()?.len();
@@ -354,6 +360,28 @@ impl OperatorJournal {
             skipped_lines,
         })
     }
+}
+
+/// Under the writer locks, remove only bytes after the last complete newline.
+/// A crash can leave an unterminated JSON line; appending to it would join two
+/// envelopes into one permanently skipped record.
+fn repair_unterminated_tail(file: &mut std::fs::File) -> Result<()> {
+    let len = file.metadata()?.len();
+    if len == 0 {
+        return Ok(());
+    }
+    file.seek(SeekFrom::Start(0))?;
+    let mut bytes = Vec::with_capacity(len as usize);
+    file.read_to_end(&mut bytes)?;
+    if bytes.last() == Some(&b'\n') {
+        return Ok(());
+    }
+    let complete_len = bytes
+        .iter()
+        .rposition(|byte| *byte == b'\n')
+        .map_or(0, |index| index + 1);
+    file.set_len(complete_len as u64)?;
+    Ok(())
 }
 
 /// Parse one envelope line as an operator event. Any structural mismatch —

@@ -101,6 +101,87 @@ fn legacy_import_rejects_sensitive_material_before_appending_a_marker() {
 }
 
 #[test]
+fn legacy_import_scans_sensitive_ignored_fields_before_marker_lookup() {
+    let source = tempfile::tempdir().unwrap();
+    let evidence = tempfile::tempdir().unwrap();
+    let path = source.path().join("ignored-sensitive.json");
+    let body = r#"{"session_id":"ignored-sensitive","transcript":[{"User":"safe"}],"ignored":{"token":"ghp_live-token"}}"#;
+    fs::write(&path, body).unwrap();
+    let service =
+        OperatorSessionService::new(OperatorJournal::new(evidence.path().to_path_buf()).unwrap());
+    assert!(import_legacy_sessions_with_service(&service, source.path()).is_err());
+    assert_eq!(fs::read(&path).unwrap(), body.as_bytes());
+    assert!(service
+        .events_after("ignored-sensitive", None, 100)
+        .unwrap()
+        .events
+        .is_empty());
+}
+
+#[test]
+fn legacy_v1_metadata_round_trips_exactly_through_operator_events() {
+    with_temp_home(|home| {
+        let body = r#"{"version":1,"session_id":"exact","parent_session_id":"parent","next_entry_id":42,"entries":[{"id":7,"ts_unix_ms":1234,"char_len":5,"block":{"User":"hello"},"embedding_ref":{"model":"m","dim":3,"row_id":9}},{"id":19,"ts_unix_ms":5678,"char_len":2,"block":{"Assistant":"ok"}}]}"#;
+        write_legacy_v0(home, "exact", body);
+        let transcript = load_transcript("exact").unwrap();
+        assert_eq!(transcript.parent_session_id.as_deref(), Some("parent"));
+        assert_eq!(transcript.next_entry_id, 42);
+        assert_eq!(
+            transcript
+                .entries
+                .iter()
+                .map(|entry| entry.id)
+                .collect::<Vec<_>>(),
+            vec![7, 19]
+        );
+        assert_eq!(
+            transcript
+                .entries
+                .iter()
+                .map(|entry| entry.ts_unix_ms)
+                .collect::<Vec<_>>(),
+            vec![1234, 5678]
+        );
+        assert_eq!(
+            transcript.entries[0].embedding_ref.as_ref().unwrap().row_id,
+            9
+        );
+    });
+}
+
+#[test]
+fn changed_legacy_source_with_same_deterministic_ids_is_rejected() {
+    let source = tempfile::tempdir().unwrap();
+    let evidence = tempfile::tempdir().unwrap();
+    let path = source.path().join("conflict.json");
+    fs::write(
+        &path,
+        r#"{"session_id":"conflict","transcript":[{"User":"first"}]}"#,
+    )
+    .unwrap();
+    let service =
+        OperatorSessionService::new(OperatorJournal::new(evidence.path().to_path_buf()).unwrap());
+    import_legacy_sessions_with_service(&service, source.path()).unwrap();
+    fs::write(
+        &path,
+        r#"{"session_id":"conflict","transcript":[{"User":"changed"}]}"#,
+    )
+    .unwrap();
+    let error = import_legacy_sessions_with_service(&service, source.path()).unwrap_err();
+    assert!(error.to_string().contains("conflicts"));
+    assert_eq!(
+        service
+            .events_after("conflict", None, 100)
+            .unwrap()
+            .events
+            .iter()
+            .filter(|event| event.event.event_type == OperatorEventType::LegacySessionImported)
+            .count(),
+        1
+    );
+}
+
+#[test]
 fn loads_v0_transcript_and_assigns_monotonic_ids() {
     with_temp_home(|home| {
         let legacy = r#"{

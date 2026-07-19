@@ -23,6 +23,11 @@ struct RecordingEmbedder {
 }
 
 impl EmbeddingSink for RecordingEmbedder {
+    fn begin_replace(&self) -> anyhow::Result<()> {
+        self.rows.lock().unwrap().clear();
+        Ok(())
+    }
+
     fn upsert_text(&self, thread_id: &str, event_id: &str, text: &str) -> anyhow::Result<()> {
         self.rows.lock().unwrap().push((
             thread_id.to_string(),
@@ -76,8 +81,8 @@ fn rebuild_indexes_projects_safe_text_and_only_embeds_messages() {
     assert_eq!(second, first);
     assert_eq!(
         sink.rows.lock().unwrap().len(),
-        4,
-        "each rebuild embeds user and assistant only"
+        2,
+        "replacement removes stale embedding rows before each rebuild"
     );
 }
 

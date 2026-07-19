@@ -13,7 +13,15 @@ use crate::{get_session_index_path, SessionSearchHit};
 
 /// Optional derived-index writer. Failures are reported, never journal failures.
 pub trait EmbeddingSink: Send + Sync {
+    /// Begin replacing the complete derived semantic projection.
+    fn begin_replace(&self) -> Result<()> {
+        Ok(())
+    }
     fn upsert_text(&self, thread_id: &str, event_id: &str, text: &str) -> Result<()>;
+    /// Finalize replacement only after every eligible event was offered.
+    fn finalize_replace(&self) -> Result<()> {
+        Ok(())
+    }
 }
 
 /// Configured embedding projection used by the installed service.
@@ -99,10 +107,17 @@ pub fn rebuild_operator_indexes_at(
 
     let mut embedded_rows = 0;
     let mut embedding_failures = 0;
-    for (thread_id, event_id, text) in embeddings {
-        match sink.upsert_text(&thread_id, &event_id, &text) {
-            Ok(()) => embedded_rows += 1,
-            Err(_) => embedding_failures += 1,
+    if sink.begin_replace().is_err() {
+        embedding_failures = embeddings.len();
+    } else {
+        for (thread_id, event_id, text) in &embeddings {
+            match sink.upsert_text(thread_id, event_id, text) {
+                Ok(()) => embedded_rows += 1,
+                Err(_) => embedding_failures += 1,
+            }
+        }
+        if sink.finalize_replace().is_err() {
+            embedding_failures += 1;
         }
     }
     Ok(IndexReport {

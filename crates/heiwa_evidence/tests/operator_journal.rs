@@ -3,6 +3,7 @@ use heiwa_evidence::{
     OperatorSensitivity,
 };
 use serde_json::json;
+use std::io::Write;
 
 fn event(
     id: &str,
@@ -147,6 +148,45 @@ fn read_after_skips_a_truncated_tail_line() {
         page.skipped_lines, 1,
         "the truncated tail line is counted, not fatal"
     );
+}
+
+#[test]
+fn append_repairs_torn_tail_before_writing_the_next_framed_event() {
+    let dir = tempfile::tempdir().unwrap();
+    let journal = OperatorJournal::new(dir.path().to_path_buf()).unwrap();
+    journal
+        .append(&event(
+            "e1",
+            "thread-a",
+            OperatorEventType::UserMessage,
+            json!({"text":"hi"}),
+        ))
+        .unwrap();
+    let path = dir.path().join("operator_events.jsonl");
+    std::fs::OpenOptions::new()
+        .append(true)
+        .open(&path)
+        .unwrap()
+        .write_all(b"{\"torn\":")
+        .unwrap();
+
+    journal
+        .append(&event(
+            "e2",
+            "thread-a",
+            OperatorEventType::AssistantCompleted,
+            json!({"text":"hello"}),
+        ))
+        .unwrap();
+    let page = journal.read_after(None, 10).unwrap();
+    assert_eq!(
+        page.events
+            .iter()
+            .map(|row| row.event.event_id.as_str())
+            .collect::<Vec<_>>(),
+        vec!["e1", "e2"]
+    );
+    assert_eq!(page.skipped_lines, 0);
 }
 
 #[test]

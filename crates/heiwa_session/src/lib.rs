@@ -132,6 +132,12 @@ pub fn import_legacy_sessions_with_service(
         let raw = fs::read(&path)?;
         let fingerprint = sha256_hex(&raw);
         let value = serde_json::from_slice(&raw)?;
+        if heiwa_evidence::find_sensitive(&value).is_some() {
+            anyhow::bail!(
+                "refused to import {}: source contains sensitive material",
+                path.display()
+            );
+        }
         let fallback = path
             .file_stem()
             .and_then(|part| part.to_str())
@@ -151,6 +157,11 @@ pub fn import_legacy_sessions_with_service(
             report.skipped_files += 1;
             continue;
         }
+        let existing_by_id: std::collections::HashMap<String, OperatorEvent> = existing
+            .events
+            .iter()
+            .map(|row| (row.event.event_id.clone(), row.event.clone()))
+            .collect();
         let event_ids: std::collections::HashSet<String> = existing
             .events
             .iter()
@@ -168,7 +179,7 @@ pub fn import_legacy_sessions_with_service(
                         OperatorEventType::TurnStarted,
                         legacy_event_id(&session_id, entry.id, "turn_started"),
                         entry.ts_unix_ms,
-                        serde_json::json!({"client_request_id": format!("legacy:{fingerprint}:{}", entry.id), "legacy_ts_unix_ms": entry.ts_unix_ms}),
+                        serde_json::json!({"client_request_id": format!("legacy:{fingerprint}:{}", entry.id), "legacy_ts_unix_ms": entry.ts_unix_ms, "compat_entry": compat_entry(entry)}),
                     ));
                 current_turn = Some(turn_id);
             }
@@ -176,25 +187,25 @@ pub fn import_legacy_sessions_with_service(
                 TranscriptBlock::User(text) => (
                     OperatorEventType::UserMessage,
                     None,
-                    serde_json::json!({"text": text, "legacy_ts_unix_ms": entry.ts_unix_ms}),
+                    serde_json::json!({"text": text, "legacy_ts_unix_ms": entry.ts_unix_ms, "compat_entry": compat_entry(entry)}),
                     "user",
                 ),
                 TranscriptBlock::Assistant(text) => (
                     OperatorEventType::AssistantCompleted,
                     None,
-                    serde_json::json!({"text": text, "legacy_ts_unix_ms": entry.ts_unix_ms}),
+                    serde_json::json!({"text": text, "legacy_ts_unix_ms": entry.ts_unix_ms, "compat_entry": compat_entry(entry)}),
                     "assistant",
                 ),
                 TranscriptBlock::Tool(name, output) => (
                     OperatorEventType::ToolCallCompleted,
                     Some(legacy_event_id(&session_id, entry.id, "call")),
-                    serde_json::json!({"name": name, "output": output, "legacy_ts_unix_ms": entry.ts_unix_ms}),
+                    serde_json::json!({"name": name, "output": output, "legacy_ts_unix_ms": entry.ts_unix_ms, "compat_entry": compat_entry(entry)}),
                     "tool",
                 ),
                 TranscriptBlock::Evidence(text) => (
                     OperatorEventType::ReceiptLinked,
                     None,
-                    serde_json::json!({"text": text, "legacy_ts_unix_ms": entry.ts_unix_ms}),
+                    serde_json::json!({"text": text, "legacy_ts_unix_ms": entry.ts_unix_ms, "compat_entry": compat_entry(entry)}),
                     "evidence",
                 ),
             };
@@ -215,7 +226,7 @@ pub fn import_legacy_sessions_with_service(
             OperatorEventType::LegacySessionImported,
             legacy_event_id(&session_id, transcript.next_entry_id, "marker"),
             0,
-            serde_json::json!({"source_fingerprint": fingerprint, "source": path.file_name().and_then(|name| name.to_str()).unwrap_or("legacy")}),
+            serde_json::json!({"source_fingerprint": fingerprint, "source": path.file_name().and_then(|name| name.to_str()).unwrap_or("legacy"), "compat_transcript": {"parent_session_id": transcript.parent_session_id, "next_entry_id": transcript.next_entry_id}}),
         ));
         for event in &pending {
             if !event_ids.contains(&event.event_id)
@@ -226,6 +237,11 @@ pub fn import_legacy_sessions_with_service(
                     path.display(),
                     event.event_type
                 );
+            }
+            if let Some(existing) = existing_by_id.get(&event.event_id) {
+                if existing != event {
+                    anyhow::bail!("refused to import {}: deterministic event {} conflicts with existing journal content", path.display(), event.event_id);
+                }
             }
         }
         for event in pending {
@@ -309,12 +325,39 @@ pub fn append_entry(session_id: &str, block: TranscriptBlock) -> Result<Transcri
     let service = default_operator_service()?;
     let id = transcript_from_events(&service, session_id)?.next_entry_id;
     let timestamp = now_unix_ms();
+    let entry = TranscriptEntry {
+        id,
+        ts_unix_ms: timestamp,
+        char_len: block_raw_char_len(&block),
+        block: block.clone(),
+        embedding_ref: None,
+    };
     match &block {
         TranscriptBlock::User(text) => {
-            service.start_turn(
+            let turn_id = uuid::Uuid::new_v4().to_string();
+            let started = new_operator_event(
                 session_id,
-                operator::StartTurnRequest::auto(uuid::Uuid::new_v4().to_string(), text.clone()),
-            )?;
+                Some(turn_id.clone()),
+                None,
+                OperatorEventType::TurnStarted,
+                serde_json::json!({"client_request_id": uuid::Uuid::new_v4().to_string()}),
+            );
+            let message = new_operator_event(
+                session_id,
+                Some(turn_id),
+                None,
+                OperatorEventType::UserMessage,
+                serde_json::json!({"text": text, "compat_entry": compat_entry(&entry)}),
+            );
+            if heiwa_evidence::find_sensitive(&started.payload).is_some()
+                || heiwa_evidence::find_sensitive(&message.payload).is_some()
+            {
+                anyhow::bail!(
+                    "refused to append transcript entry: payload contains sensitive material"
+                );
+            }
+            service.append_event(started)?;
+            service.append_event(message)?;
         }
         TranscriptBlock::Assistant(text) => {
             let turn = latest_open_turn(&service, session_id)?;
@@ -323,7 +366,7 @@ pub fn append_entry(session_id: &str, block: TranscriptBlock) -> Result<Transcri
                 Some(turn),
                 None,
                 OperatorEventType::AssistantCompleted,
-                serde_json::json!({"text": text, "compat_ts_unix_ms": timestamp}),
+                serde_json::json!({"text": text, "compat_entry": compat_entry(&entry)}),
             ))?;
         }
         TranscriptBlock::Tool(name, output) => {
@@ -333,7 +376,7 @@ pub fn append_entry(session_id: &str, block: TranscriptBlock) -> Result<Transcri
                 Some(turn),
                 Some(uuid::Uuid::new_v4().to_string()),
                 OperatorEventType::ToolCallCompleted,
-                serde_json::json!({"name": name, "output": output, "compat_ts_unix_ms": timestamp}),
+                serde_json::json!({"name": name, "output": output, "compat_entry": compat_entry(&entry)}),
             ))?;
         }
         TranscriptBlock::Evidence(text) => {
@@ -343,17 +386,11 @@ pub fn append_entry(session_id: &str, block: TranscriptBlock) -> Result<Transcri
                 turn,
                 None,
                 OperatorEventType::ReceiptLinked,
-                serde_json::json!({"text": text, "compat_ts_unix_ms": timestamp}),
+                serde_json::json!({"text": text, "compat_entry": compat_entry(&entry)}),
             ))?;
         }
     }
-    Ok(TranscriptEntry {
-        id,
-        ts_unix_ms: timestamp,
-        char_len: block_raw_char_len(&block),
-        block,
-        embedding_ref: None,
-    })
+    Ok(entry)
 }
 
 fn default_operator_service() -> Result<operator::OperatorSessionService> {
@@ -391,6 +428,15 @@ fn legacy_event_id(session_id: &str, entry_id: u64, role: &str) -> String {
         format!("heiwa:legacy:{session_id}:{entry_id}:{role}").as_bytes(),
     )
     .to_string()
+}
+
+fn compat_entry(entry: &TranscriptEntry) -> serde_json::Value {
+    serde_json::json!({
+        "id": entry.id,
+        "ts_unix_ms": entry.ts_unix_ms,
+        "char_len": entry.char_len,
+        "embedding_ref": entry.embedding_ref,
+    })
 }
 
 fn legacy_event(
@@ -489,6 +535,20 @@ fn transcript_from_events(
                 transcript.parent_session_id = serde_json::from_value(parent.clone()).ok();
             }
         }
+        if event.event_type == OperatorEventType::LegacySessionImported {
+            if let Some(metadata) = event.payload.get("compat_transcript") {
+                transcript.parent_session_id = metadata
+                    .get("parent_session_id")
+                    .cloned()
+                    .and_then(|value| serde_json::from_value(value).ok());
+                if let Some(next_entry_id) = metadata
+                    .get("next_entry_id")
+                    .and_then(|value| value.as_u64())
+                {
+                    transcript.next_entry_id = next_entry_id;
+                }
+            }
+        }
         let block = match event.event_type {
             OperatorEventType::UserMessage => event
                 .payload
@@ -517,20 +577,38 @@ fn transcript_from_events(
             _ => None,
         };
         if let Some(block) = block {
-            let id = transcript.next_entry_id;
-            transcript.next_entry_id += 1;
-            let ts_unix_ms = event
-                .payload
-                .get("legacy_ts_unix_ms")
-                .or_else(|| event.payload.get("compat_ts_unix_ms"))
+            let compat = event.payload.get("compat_entry");
+            let id = compat
+                .and_then(|value| value.get("id"))
+                .and_then(|value| value.as_u64())
+                .unwrap_or(transcript.next_entry_id);
+            let ts_unix_ms = compat
+                .and_then(|value| value.get("ts_unix_ms"))
                 .and_then(|value| value.as_i64())
+                .or_else(|| {
+                    event
+                        .payload
+                        .get("legacy_ts_unix_ms")
+                        .or_else(|| event.payload.get("compat_ts_unix_ms"))
+                        .and_then(|value| value.as_i64())
+                })
                 .unwrap_or(0);
+            let embedding_ref = compat
+                .and_then(|value| value.get("embedding_ref"))
+                .cloned()
+                .and_then(|value| serde_json::from_value(value).ok());
+            let char_len = compat
+                .and_then(|value| value.get("char_len"))
+                .and_then(|value| value.as_u64())
+                .map(|value| value as usize)
+                .unwrap_or_else(|| block_raw_char_len(&block));
+            transcript.next_entry_id = transcript.next_entry_id.max(id.saturating_add(1));
             transcript.entries.push(TranscriptEntry {
                 id,
                 ts_unix_ms,
-                char_len: block_raw_char_len(&block),
+                char_len,
                 block,
-                embedding_ref: None,
+                embedding_ref,
             });
         }
     }
