@@ -3521,42 +3521,73 @@ fn repl_trace_payload(
     })
 }
 
-/// Streaming REPL compatibility surface over the durable operator runner.
-/// The runner owns operator-event persistence; this wrapper only maps its
-/// route/delta/terminal frames into the established SSE response shape.
-pub(crate) async fn execute_repl_turn_streaming(
-    prompt: &str,
-    events: tokio::sync::mpsc::Sender<ReplStreamEvent>,
-) {
-    let mut registry = heiwa_provider::AccountRegistry::load();
-    heiwa_provider::detect::auto_discover(&mut registry).await;
-    let model_tiers = get_live_model_tiers(&registry);
+/// Prepare one caller-supplied turn against live route inventory, then submit
+/// it through the process-wide durable operator runner.
+async fn submit_operator_turn_with_route(
+    thread_id: &str,
+    mut start_request: heiwa_session::operator::StartTurnRequest,
+) -> Result<
+    (
+        heiwa_shell::operator::OperatorTurnHandle,
+        Option<RouteResult>,
+    ),
+    String,
+> {
+    let (_, sessions, runner) = default_model_call_runtime()?;
 
-    let pins = SessionPins::new();
+    // An idempotent retry must not depend on provider discovery still being
+    // available. The runner remains authoritative: this read only lets us
+    // supply ignored placeholder work for a turn it will prove is duplicate.
+    let existing = sessions
+        .thread(thread_id)
+        .map_err(|error| error.to_string())?
+        .turns
+        .iter()
+        .any(|turn| {
+            turn.client_request_id.as_deref() == Some(start_request.client_request_id.as_str())
+        });
+    if existing {
+        let handle = runner
+            .submit(
+                thread_id,
+                start_request,
+                OperatorTurnWork::Deterministic {
+                    response: String::new(),
+                    route: serde_json::json!({"mode": "duplicate"}),
+                    done: serde_json::json!({"mode": "duplicate"}),
+                },
+            )
+            .map_err(|error| error.to_string())?;
+        return Ok((handle, None));
+    }
 
-    let persisted = heiwa_session::load_transcript(DEFAULT_SESSION_ID)
-        .unwrap_or_else(|_| heiwa_session::PersistedTranscript::empty(DEFAULT_SESSION_ID));
+    let prompt = start_request.prompt.clone();
+    let persisted = heiwa_session::load_transcript(thread_id)
+        .unwrap_or_else(|_| heiwa_session::PersistedTranscript::empty(thread_id));
     let transcript_blocks = persisted.blocks();
+    let mut pins = SessionPins::new();
+    pins.pinned_provider = start_request.route_policy.preferred_provider.clone();
+    pins.pinned_model = start_request.route_policy.preferred_model.clone();
+    pins.route_preference = match start_request.route_policy.mode {
+        heiwa_session::operator::RouteMode::Auto | heiwa_session::operator::RouteMode::Explicit => {
+            RoutePreference::Auto
+        }
+        heiwa_session::operator::RouteMode::LocalOnly => RoutePreference::LocalOnly,
+        heiwa_session::operator::RouteMode::RemoteOnly => RoutePreference::RemoteOnly,
+    };
 
-    let (_, _, runner) = match default_model_call_runtime() {
-        Ok(runtime) => runtime,
-        Err(error) => {
-            let _ = events.send(ReplStreamEvent::Error(error)).await;
-            return;
+    // Deterministic intents do not need provider discovery. Model-bearing
+    // turns still discover the current provider/account inventory per call.
+    let route_outcome = match route_task(&prompt, &pins, &[]) {
+        Ok(RouteOutcome::Deterministic(response)) => RouteOutcome::Deterministic(response),
+        _ => {
+            let mut registry = heiwa_provider::AccountRegistry::load();
+            heiwa_provider::detect::auto_discover(&mut registry).await;
+            let model_tiers = get_live_model_tiers(&registry);
+            route_task(&prompt, &pins, &model_tiers)?
         }
     };
 
-    let route_outcome = match route_task(prompt, &pins, &model_tiers) {
-        Err(msg) => {
-            let _ = events.send(ReplStreamEvent::Error(msg)).await;
-            return;
-        }
-        Ok(outcome) => outcome,
-    };
-
-    let client_request_id = format!("repl-{}", uuid::Uuid::new_v4());
-    let mut start_request =
-        heiwa_session::operator::StartTurnRequest::auto(client_request_id, prompt);
     let (work, planned_route) = match route_outcome {
         RouteOutcome::Deterministic(response) => {
             let route = route_event_payload("deterministic", None);
@@ -3571,17 +3602,13 @@ pub(crate) async fn execute_repl_turn_streaming(
             )
         }
         RouteOutcome::Routed(route) => {
-            let prepared = prepare_outbound_prompt_for_route(&route, prompt);
+            let prepared = prepare_outbound_prompt_for_route(&route, &prompt);
             let messages =
                 build_messages_from_transcript(&transcript_blocks, &prepared.model_prompt, &pins);
-            start_request.route_policy.privacy = route.privacy.clone();
-            let privacy = match PrivacyClass::parse(&route.privacy) {
-                Ok(privacy) => privacy,
-                Err(error) => {
-                    let _ = events.send(ReplStreamEvent::Error(error.to_string())).await;
-                    return;
-                }
-            };
+            if start_request.route_policy.privacy == "standard" && route.privacy != "standard" {
+                start_request.route_policy.privacy = route.privacy.clone();
+            }
+            let privacy = PrivacyClass::parse(&route.privacy).map_err(str::to_string)?;
             let route_for_done = route.clone();
             let compression = prepared.compression.clone();
             let done_payload = Arc::new(move |result: &ModelCallResult| {
@@ -3607,19 +3634,19 @@ pub(crate) async fn execute_repl_turn_streaming(
                     call_id: format!("call-{}", uuid::Uuid::new_v4()),
                     intent: route.intent_key.clone(),
                     stage: ModelCallStage::Execution,
-                    raw_text: prompt.to_string(),
+                    raw_text: prompt,
                     privacy,
                     risk: CallRisk::Low,
                     safety: SafetyClass::low_risk_auto_approval(&CallRisk::Low),
                     required_capabilities: vec![],
                     required_context_tokens: 1,
-                    minimum_quality_class: 1,
+                    minimum_quality_class: start_request.route_policy.minimum_quality_class,
                     minimum_success_rate: 0.0,
-                    maximum_marginal_cost_usd: None,
-                    preferred_provider: None,
-                    preferred_model: None,
-                    allowed_models: vec![],
-                    excluded_models: vec![],
+                    maximum_marginal_cost_usd: start_request.route_policy.maximum_marginal_cost_usd,
+                    preferred_provider: start_request.route_policy.preferred_provider.clone(),
+                    preferred_model: start_request.route_policy.preferred_model.clone(),
+                    allowed_models: start_request.route_policy.allowed_models.clone(),
+                    excluded_models: start_request.route_policy.excluded_models.clone(),
                 },
                 candidates: route.candidates.clone(),
                 messages,
@@ -3632,13 +3659,38 @@ pub(crate) async fn execute_repl_turn_streaming(
         }
     };
 
-    let mut handle = match runner.submit(&persisted.session_id, start_request, work) {
-        Ok(handle) => handle,
-        Err(error) => {
-            let _ = events.send(ReplStreamEvent::Error(error.to_string())).await;
-            return;
-        }
-    };
+    let handle = runner
+        .submit(thread_id, start_request, work)
+        .map_err(|error| error.to_string())?;
+    Ok((handle, planned_route))
+}
+
+pub(crate) async fn submit_operator_turn(
+    thread_id: &str,
+    request: heiwa_session::operator::StartTurnRequest,
+) -> Result<heiwa_shell::operator::OperatorTurnHandle, String> {
+    submit_operator_turn_with_route(thread_id, request)
+        .await
+        .map(|(handle, _)| handle)
+}
+
+/// Streaming REPL compatibility surface over the durable operator runner.
+/// The runner owns operator-event persistence; this wrapper only maps its
+/// route/delta/terminal frames into the established SSE response shape.
+pub(crate) async fn execute_repl_turn_streaming(
+    prompt: &str,
+    events: tokio::sync::mpsc::Sender<ReplStreamEvent>,
+) {
+    let client_request_id = format!("repl-{}", uuid::Uuid::new_v4());
+    let start_request = heiwa_session::operator::StartTurnRequest::auto(client_request_id, prompt);
+    let (mut handle, planned_route) =
+        match submit_operator_turn_with_route(DEFAULT_SESSION_ID, start_request).await {
+            Ok(handle) => handle,
+            Err(error) => {
+                let _ = events.send(ReplStreamEvent::Error(error)).await;
+                return;
+            }
+        };
     while let Ok(frame) = handle.recv().await {
         match frame {
             OperatorStreamFrame::Error {

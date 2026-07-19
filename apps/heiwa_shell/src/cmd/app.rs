@@ -542,6 +542,12 @@ async fn api(args: &[String]) -> Result<()> {
         None
     };
     let url = format!("http://127.0.0.1:{port}{path}");
+    let machine_auth_token = heiwa_core::config::RuntimeConfig::from_env().machine_auth_token;
+    let auth_state = if machine_auth_token.trim().is_empty() {
+        "missing"
+    } else {
+        "machine_token_configured"
+    };
 
     if dry_run {
         let payload = json!({
@@ -550,6 +556,7 @@ async fn api(args: &[String]) -> Result<()> {
             "path": path,
             "url": url,
             "dry_run": true,
+            "auth": auth_state,
             "body": body_value,
             "next": "drop --dry-run to call the running local Heiwa.app runtime",
         });
@@ -560,11 +567,24 @@ async fn api(args: &[String]) -> Result<()> {
             println!("  method: {}", payload["method"].as_str().unwrap_or("?"));
             println!("  url: {url}");
             println!("  dry_run: true");
+            println!("  auth: {auth_state}");
         }
         return Ok(());
     }
 
-    let response = call_local_app_api(&method, path, port, body_payload.as_deref()).await?;
+    if machine_auth_token.trim().is_empty() {
+        return Err(anyhow!(
+            "auth_not_configured: set HEIWA_MACHINE_AUTH_TOKEN before calling the local app API"
+        ));
+    }
+    let response = call_local_app_api(
+        &method,
+        path,
+        port,
+        body_payload.as_deref(),
+        &machine_auth_token,
+    )
+    .await?;
     if response.status >= 400 {
         return Err(anyhow!(
             "app api {} {} returned HTTP {}: {}",
@@ -597,6 +617,7 @@ async fn call_local_app_api(
     path: &str,
     port: u16,
     body: Option<&str>,
+    machine_auth_token: &str,
 ) -> Result<ApiResponse> {
     let mut stream = TcpStream::connect(("127.0.0.1", port))
         .await
@@ -606,12 +627,12 @@ async fn call_local_app_api(
     let body = body.unwrap_or("");
     let request = if method == "POST" {
         format!(
-            "POST {path} HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\nAccept: application/json\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+            "POST {path} HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\nAccept: application/json\r\nAuthorization: Bearer {machine_auth_token}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
             body.len()
         )
     } else {
         format!(
-            "GET {path} HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\nAccept: application/json\r\nConnection: close\r\n\r\n"
+            "GET {path} HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\nAccept: application/json\r\nAuthorization: Bearer {machine_auth_token}\r\nConnection: close\r\n\r\n"
         )
     };
     stream.write_all(request.as_bytes()).await?;
@@ -899,6 +920,37 @@ async fn handle_connection(mut stream: TcpStream, started_at: Arc<String>) -> Re
     }
     let head_only = method == "HEAD";
 
+    if is_operator_authenticated_path(path) {
+        if let Err(error) = operator_auth_subject(&request) {
+            let (status, code) = match error {
+                OperatorAuthError::NotConfigured => (500, "auth_not_configured"),
+                OperatorAuthError::Unauthorized => (401, "unauthorized"),
+            };
+            return write_response(
+                &mut stream,
+                status,
+                "application/json",
+                json!({"ok": false, "error": {"code": code}})
+                    .to_string()
+                    .into_bytes(),
+                false,
+            )
+            .await;
+        }
+    }
+
+    if is_operator_api_path(path) {
+        let (status, payload) = operator_http_response(method, target, path, &body).await;
+        return write_response(
+            &mut stream,
+            status,
+            "application/json",
+            payload.to_string().into_bytes(),
+            head_only,
+        )
+        .await;
+    }
+
     if method == "POST" && path == "/api/v1/repl" {
         let parsed_body: Value = serde_json::from_str(&body).unwrap_or_else(|_| json!({}));
         let prompt = parsed_body
@@ -1157,6 +1209,379 @@ async fn handle_connection(mut stream: TcpStream, started_at: Arc<String>) -> Re
     }
 
     serve_static(&mut stream, path, head_only).await
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum OperatorAuthError {
+    NotConfigured,
+    Unauthorized,
+}
+
+fn is_operator_api_path(path: &str) -> bool {
+    path == "/api/v1/operator" || path.starts_with("/api/v1/operator/")
+}
+
+fn is_operator_authenticated_path(path: &str) -> bool {
+    is_operator_api_path(path) || matches!(path, "/api/v1/repl" | "/api/v1/repl/stream")
+}
+
+fn operator_auth_subject(
+    request: &str,
+) -> std::result::Result<heiwa_core::auth::AuthSubject, OperatorAuthError> {
+    let config = heiwa_core::config::RuntimeConfig::from_env();
+    if config.machine_auth_token.trim().is_empty() && config.jwt_signing_secret.trim().is_empty() {
+        return Err(OperatorAuthError::NotConfigured);
+    }
+    let cookie = header_value(request, "cookie");
+    let authorization = header_value(request, "authorization");
+    heiwa_core::auth::extract_auth_subject(cookie.as_deref(), authorization.as_deref(), &config)
+        .map_err(|_| OperatorAuthError::Unauthorized)
+}
+
+enum OperatorHttpRoute {
+    Threads,
+    Thread(String),
+    Events(String),
+    Turns(String),
+    Cancel(String),
+}
+
+async fn operator_http_response(
+    method: &str,
+    target: &str,
+    path: &str,
+    body: &str,
+) -> (u16, Value) {
+    let route = match parse_operator_route(path) {
+        Ok(Some(route)) => route,
+        Ok(None) => return operator_error(404, "not_found"),
+        Err(()) => return operator_error(400, "invalid_id"),
+    };
+    let (_, sessions, runner) = match crate::default_model_call_runtime() {
+        Ok(runtime) => runtime,
+        Err(_) => return operator_error(503, "operator_unavailable"),
+    };
+
+    match (method, route) {
+        ("GET", OperatorHttpRoute::Threads) => match sessions.list_threads(100) {
+            Ok(threads) => (200, json!({"ok": true, "data": {"threads": threads}})),
+            Err(_) => operator_error(503, "operator_unavailable"),
+        },
+        ("POST", OperatorHttpRoute::Threads) => {
+            let parsed = match parse_json_body(body) {
+                Ok(parsed) => parsed,
+                Err(()) => return operator_error(400, "invalid_request"),
+            };
+            let raw_id = match parsed {
+                Value::Null => format!("thread-{}", uuid::Uuid::new_v4()),
+                Value::Object(object) => match object.get("thread_id") {
+                    None => format!("thread-{}", uuid::Uuid::new_v4()),
+                    Some(Value::String(thread_id)) => thread_id.clone(),
+                    Some(_) => return operator_error(400, "invalid_request"),
+                },
+                _ => return operator_error(400, "invalid_request"),
+            };
+            let thread_id = match validate_operator_identifier(&raw_id) {
+                Ok(thread_id) => thread_id,
+                Err(()) => return operator_error(400, "invalid_id"),
+            };
+            let created = match sessions.ensure_thread(&thread_id) {
+                Ok(created) => created,
+                Err(_) => return operator_error(503, "operator_unavailable"),
+            };
+            match sessions.thread(&thread_id) {
+                Ok(thread) => (
+                    200,
+                    json!({"ok": true, "data": {"thread_id": thread_id, "created": created, "thread": thread}}),
+                ),
+                Err(_) => operator_error(503, "operator_unavailable"),
+            }
+        }
+        ("GET", OperatorHttpRoute::Thread(thread_id)) => match sessions.thread(&thread_id) {
+            Ok(thread) => (200, json!({"ok": true, "data": {"thread": thread}})),
+            Err(_) => operator_error(503, "operator_unavailable"),
+        },
+        ("GET", OperatorHttpRoute::Events(thread_id)) => {
+            let limit = match query_param(target, "limit") {
+                Some(raw) => match raw.parse::<usize>() {
+                    Ok(limit) if (1..=500).contains(&limit) => limit,
+                    _ => return operator_error(400, "invalid_request"),
+                },
+                None => 100,
+            };
+            let after = query_param(target, "after").filter(|cursor| !cursor.is_empty());
+            match sessions.events_after(&thread_id, after.as_deref(), limit) {
+                Ok(page) => {
+                    let events = page
+                        .events
+                        .into_iter()
+                        .map(|row| json!({"cursor": row.cursor, "event": row.event}))
+                        .collect::<Vec<_>>();
+                    (
+                        200,
+                        json!({
+                            "ok": true,
+                            "data": {
+                                "events": events,
+                                "next_cursor": page.next_cursor,
+                                "skipped_lines": page.skipped_lines,
+                            }
+                        }),
+                    )
+                }
+                Err(heiwa_evidence::CursorError::InvalidCursor { .. }) => {
+                    operator_error(400, "invalid_cursor")
+                }
+                Err(heiwa_evidence::CursorError::Storage(_)) => {
+                    operator_error(503, "operator_unavailable")
+                }
+            }
+        }
+        ("POST", OperatorHttpRoute::Turns(thread_id)) => {
+            let request = match parse_turn_request(body) {
+                Ok(request) => request,
+                Err(()) => return operator_error(400, "invalid_request"),
+            };
+            match crate::submit_operator_turn(&thread_id, request).await {
+                Ok(handle) => {
+                    let stream_url = format!(
+                        "/ws/v1/operator?thread_id={}&after={}",
+                        percent_encode_query_component(&handle.thread_id),
+                        percent_encode_query_component(&handle.cursor)
+                    );
+                    (
+                        202,
+                        json!({
+                            "ok": true,
+                            "data": {
+                                "thread_id": handle.thread_id,
+                                "turn_id": handle.turn_id,
+                                "cursor": handle.cursor,
+                                "duplicate": handle.duplicate,
+                                "stream_url": stream_url,
+                            }
+                        }),
+                    )
+                }
+                Err(_) => operator_error(503, "operator_unavailable"),
+            }
+        }
+        ("POST", OperatorHttpRoute::Cancel(turn_id)) => match runner.request_cancel(&turn_id) {
+            Ok(true) => (
+                202,
+                json!({"ok": true, "data": {"turn_id": turn_id, "cancel_requested": true}}),
+            ),
+            Ok(false) => (
+                200,
+                json!({"ok": true, "data": {"turn_id": turn_id, "cancel_requested": false}}),
+            ),
+            Err(_) => operator_error(503, "operator_unavailable"),
+        },
+        _ => operator_error(405, "method_not_allowed"),
+    }
+}
+
+fn operator_error(status: u16, code: &str) -> (u16, Value) {
+    (status, json!({"ok": false, "error": {"code": code}}))
+}
+
+fn parse_operator_route(path: &str) -> std::result::Result<Option<OperatorHttpRoute>, ()> {
+    let segments = path.trim_start_matches('/').split('/').collect::<Vec<_>>();
+    if segments.get(..3) != Some(&["api", "v1", "operator"][..]) {
+        return Ok(None);
+    }
+    match segments.as_slice() {
+        ["api", "v1", "operator", "threads"] => Ok(Some(OperatorHttpRoute::Threads)),
+        ["api", "v1", "operator", "threads", thread_id] => Ok(Some(OperatorHttpRoute::Thread(
+            decode_operator_path_id(thread_id)?,
+        ))),
+        ["api", "v1", "operator", "threads", thread_id, "events"] => Ok(Some(
+            OperatorHttpRoute::Events(decode_operator_path_id(thread_id)?),
+        )),
+        ["api", "v1", "operator", "threads", thread_id, "turns"] => Ok(Some(
+            OperatorHttpRoute::Turns(decode_operator_path_id(thread_id)?),
+        )),
+        ["api", "v1", "operator", "turns", turn_id, "cancel"] => Ok(Some(
+            OperatorHttpRoute::Cancel(decode_operator_path_id(turn_id)?),
+        )),
+        _ if segments.iter().any(|segment| segment.is_empty()) => Err(()),
+        _ => Ok(None),
+    }
+}
+
+fn decode_operator_path_id(raw: &str) -> std::result::Result<String, ()> {
+    let bytes = raw.as_bytes();
+    let mut decoded = Vec::with_capacity(bytes.len());
+    let mut index = 0;
+    while index < bytes.len() {
+        if bytes[index] == b'%' {
+            if index + 2 >= bytes.len() {
+                return Err(());
+            }
+            let hi = hex_value(bytes[index + 1]).ok_or(())?;
+            let lo = hex_value(bytes[index + 2]).ok_or(())?;
+            decoded.push((hi << 4) | lo);
+            index += 3;
+        } else {
+            decoded.push(bytes[index]);
+            index += 1;
+        }
+    }
+    let decoded = String::from_utf8(decoded).map_err(|_| ())?;
+    validate_operator_identifier(&decoded)
+}
+
+fn percent_encode_query_component(value: &str) -> String {
+    let mut encoded = String::with_capacity(value.len());
+    for byte in value.bytes() {
+        if byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'.' | b'_' | b'~') {
+            encoded.push(byte as char);
+        } else {
+            encoded.push('%');
+            encoded.push_str(&format!("{byte:02X}"));
+        }
+    }
+    encoded
+}
+
+fn validate_operator_identifier(raw: &str) -> std::result::Result<String, ()> {
+    let id = raw.trim();
+    if id.is_empty()
+        || id.len() > 128
+        || id.contains("..")
+        || id.contains('/')
+        || id.contains('\\')
+        || id.chars().any(char::is_control)
+    {
+        return Err(());
+    }
+    Ok(id.to_string())
+}
+
+fn parse_json_body(body: &str) -> std::result::Result<Value, ()> {
+    if body.trim().is_empty() {
+        Ok(Value::Null)
+    } else {
+        serde_json::from_str(body).map_err(|_| ())
+    }
+}
+
+fn parse_turn_request(
+    body: &str,
+) -> std::result::Result<heiwa_session::operator::StartTurnRequest, ()> {
+    let value = parse_json_body(body)?;
+    let object = value.as_object().ok_or(())?;
+    let client_request_id = object
+        .get("client_request_id")
+        .and_then(Value::as_str)
+        .ok_or(())?;
+    let client_request_id = validate_operator_identifier(client_request_id)?;
+    let prompt = object.get("prompt").and_then(Value::as_str).ok_or(())?;
+    if prompt.trim().is_empty() || prompt.len() > 64 * 1024 {
+        return Err(());
+    }
+
+    let mut request = heiwa_session::operator::StartTurnRequest::auto(client_request_id, prompt);
+    if let Some(policy) = object.get("route_policy").filter(|value| !value.is_null()) {
+        request.route_policy = parse_route_policy(policy)?;
+    }
+    Ok(request)
+}
+
+fn parse_route_policy(
+    value: &Value,
+) -> std::result::Result<heiwa_session::operator::TurnRoutePolicy, ()> {
+    use heiwa_session::operator::{RouteMode, TurnRoutePolicy};
+
+    let object = value.as_object().ok_or(())?;
+    let mode = match object.get("mode").and_then(Value::as_str).unwrap_or("auto") {
+        "auto" => RouteMode::Auto,
+        "local_only" => RouteMode::LocalOnly,
+        "remote_only" => RouteMode::RemoteOnly,
+        "explicit" => RouteMode::Explicit,
+        _ => return Err(()),
+    };
+    let preferred_provider = parse_optional_policy_string(object.get("preferred_provider"))?;
+    let preferred_model = parse_optional_policy_string(object.get("preferred_model"))?;
+    let allowed_models = parse_policy_string_list(object.get("allowed_models"))?;
+    let excluded_models = parse_policy_string_list(object.get("excluded_models"))?;
+    let minimum_quality_class = match object.get("minimum_quality_class") {
+        Some(value) => {
+            let quality = value.as_u64().ok_or(())?;
+            if !(1..=5).contains(&quality) {
+                return Err(());
+            }
+            quality as u8
+        }
+        None => 1,
+    };
+    let maximum_marginal_cost_usd =
+        parse_nonnegative_budget(object.get("maximum_marginal_cost_usd"))?;
+    let turn_budget_usd = parse_nonnegative_budget(object.get("turn_budget_usd"))?;
+    let privacy = object
+        .get("privacy")
+        .and_then(Value::as_str)
+        .unwrap_or("standard");
+    heiwa_core::drex::PrivacyClass::parse(privacy).map_err(|_| ())?;
+    if mode == RouteMode::Explicit && preferred_provider.is_none() && preferred_model.is_none() {
+        return Err(());
+    }
+    Ok(TurnRoutePolicy {
+        mode,
+        preferred_provider,
+        preferred_model,
+        allowed_models,
+        excluded_models,
+        minimum_quality_class,
+        maximum_marginal_cost_usd,
+        turn_budget_usd,
+        privacy: privacy.to_string(),
+    })
+}
+
+fn parse_optional_policy_string(value: Option<&Value>) -> std::result::Result<Option<String>, ()> {
+    match value {
+        None | Some(Value::Null) => Ok(None),
+        Some(Value::String(value)) if !value.trim().is_empty() && value.len() <= 256 => {
+            Ok(Some(value.trim().to_string()))
+        }
+        _ => Err(()),
+    }
+}
+
+fn parse_policy_string_list(value: Option<&Value>) -> std::result::Result<Vec<String>, ()> {
+    let Some(value) = value else {
+        return Ok(Vec::new());
+    };
+    let values = value.as_array().ok_or(())?;
+    if values.len() > 64 {
+        return Err(());
+    }
+    values
+        .iter()
+        .map(|value| {
+            let value = value.as_str().ok_or(())?;
+            if value.trim().is_empty() || value.len() > 256 {
+                Err(())
+            } else {
+                Ok(value.trim().to_string())
+            }
+        })
+        .collect()
+}
+
+fn parse_nonnegative_budget(value: Option<&Value>) -> std::result::Result<Option<f64>, ()> {
+    match value {
+        None | Some(Value::Null) => Ok(None),
+        Some(value) => {
+            let value = value.as_f64().ok_or(())?;
+            if value.is_finite() && value >= 0.0 {
+                Ok(Some(value))
+            } else {
+                Err(())
+            }
+        }
+    }
 }
 
 async fn read_http_request_and_body(stream: &mut TcpStream) -> Result<(String, String)> {

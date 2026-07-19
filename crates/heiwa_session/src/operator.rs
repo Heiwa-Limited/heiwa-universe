@@ -190,6 +190,34 @@ impl OperatorSessionService {
         }
     }
 
+    /// Durably create an empty operator thread if it does not already exist.
+    ///
+    /// Returns `true` only when this call appended `thread_created`. The
+    /// read-check-append sequence shares the sole-writer transaction lock
+    /// with turn submission, so concurrent create/submit calls cannot append
+    /// duplicate lifecycle rows inside one runtime process.
+    pub fn ensure_thread(&self, thread_id: &str) -> Result<bool> {
+        let _write_transaction = self.lock_write_transaction()?;
+        let threads = materialize_all(&self.journal)?.threads;
+        if threads.contains_key(thread_id) {
+            return Ok(false);
+        }
+        let event = new_event(
+            thread_id,
+            None,
+            None,
+            OperatorEventType::ThreadCreated,
+            now_iso(),
+            OperatorActor {
+                kind: "operator".to_string(),
+                id: "local-operator".to_string(),
+            },
+            json!({}),
+        );
+        self.journal.append(&event)?;
+        Ok(true)
+    }
+
     /// Start a turn, or return the existing one if `request.client_request_id`
     /// already has a matching `turn_started` in this thread.
     ///
