@@ -169,6 +169,23 @@ pub struct TurnSubmission {
     pub duplicate: bool,
 }
 
+/// Typed admission failures for [`OperatorSessionService::start_turn`].
+/// Public callers can map operator mistakes without parsing display text;
+/// runtime/storage sources remain available internally without being exposed
+/// through the HTTP contract.
+#[derive(Debug, thiserror::Error)]
+pub enum TurnSubmissionError {
+    #[error("idempotency conflict for turn {turn_id}: {reason}")]
+    IdempotencyConflict {
+        turn_id: String,
+        reason: &'static str,
+    },
+    #[error("refused to start turn: {context} contains sensitive material")]
+    SensitiveMaterial { context: &'static str },
+    #[error(transparent)]
+    Runtime(#[from] anyhow::Error),
+}
+
 /// Materialized view of one turn, folded from the operator event stream.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct OperatorTurnView {
@@ -275,7 +292,11 @@ impl OperatorSessionService {
     /// `turn_started`, then `user_message`. Every prospective payload is
     /// screened before the first append. Idempotency is decided purely by
     /// what is already on disk, per the module docs.
-    pub fn start_turn(&self, thread_id: &str, request: StartTurnRequest) -> Result<TurnSubmission> {
+    pub fn start_turn(
+        &self,
+        thread_id: &str,
+        request: StartTurnRequest,
+    ) -> std::result::Result<TurnSubmission, TurnSubmissionError> {
         // Screen every payload this submission could append with the exact
         // evidence-journal gate before any write. Otherwise a rejected
         // later payload could leave durable scaffolding behind it.
@@ -294,7 +315,9 @@ impl OperatorSessionService {
             ("user_message", &user_message_payload),
         ] {
             if find_sensitive(payload).is_some() {
-                bail!("refused to start turn: {event_type} payload contains sensitive material");
+                return Err(TurnSubmissionError::SensitiveMaterial {
+                    context: event_type,
+                });
             }
         }
 
@@ -316,10 +339,10 @@ impl OperatorSessionService {
                 }
 
                 if turn.status != "open" || turn.cancel_requested {
-                    bail!(
-                        "cannot safely recover orphaned turn {} for thread {thread_id}: turn is no longer accepting a user message",
-                        turn.turn_id
-                    );
+                    return Err(TurnSubmissionError::IdempotencyConflict {
+                        turn_id: turn.turn_id.clone(),
+                        reason: "turn is no longer accepting a recovered user message",
+                    });
                 }
 
                 // A prior crash/error after `turn_started` but before the
@@ -744,34 +767,34 @@ fn validate_retry_binding(
     turn: &FoldedTurn,
     retry_fingerprint: &str,
     retry_route_policy: &TurnRoutePolicy,
-) -> Result<()> {
+) -> std::result::Result<(), TurnSubmissionError> {
     let stored_fingerprint = turn
         .prompt_fingerprint
         .clone()
         .or_else(|| turn.prompt.as_deref().map(prompt_fingerprint));
     let Some(stored_fingerprint) = stored_fingerprint else {
-        bail!(
-            "cannot safely recover orphaned turn {}: no prompt fingerprint is available",
-            turn.turn_id
-        );
+        return Err(TurnSubmissionError::IdempotencyConflict {
+            turn_id: turn.turn_id.clone(),
+            reason: "no durable prompt binding is available",
+        });
     };
     if stored_fingerprint != retry_fingerprint {
-        bail!(
-            "rejected retry for turn {}: client_request_id was previously submitted with a different prompt",
-            turn.turn_id
-        );
+        return Err(TurnSubmissionError::IdempotencyConflict {
+            turn_id: turn.turn_id.clone(),
+            reason: "client_request_id was previously submitted with a different prompt",
+        });
     }
     let Some(stored_route_policy) = turn.route_policy.as_ref() else {
-        bail!(
-            "cannot safely retry turn {}: no durable route policy binding is available",
-            turn.turn_id
-        );
+        return Err(TurnSubmissionError::IdempotencyConflict {
+            turn_id: turn.turn_id.clone(),
+            reason: "no durable route policy binding is available",
+        });
     };
     if stored_route_policy.normalized() != *retry_route_policy {
-        bail!(
-            "rejected retry for turn {}: client_request_id was previously submitted with a different route policy",
-            turn.turn_id
-        );
+        return Err(TurnSubmissionError::IdempotencyConflict {
+            turn_id: turn.turn_id.clone(),
+            reason: "client_request_id was previously submitted with a different route policy",
+        });
     }
     Ok(())
 }

@@ -8,7 +8,9 @@ use heiwa_evidence::{
     OperatorActor, OperatorEvent, OperatorEventType, OperatorJournal, OperatorRisk,
     OperatorSensitivity, OPERATOR_EVENT_SCHEMA_VERSION,
 };
-use heiwa_session::operator::{OperatorSessionService, RouteMode, StartTurnRequest};
+use heiwa_session::operator::{
+    OperatorSessionService, RouteMode, StartTurnRequest, TurnSubmissionError,
+};
 use heiwa_session::{rebuild_operator_indexes_at, EmbeddingSink};
 use serde_json::json;
 use std::sync::Mutex;
@@ -166,6 +168,10 @@ fn start_turn_rejects_sensitive_prompt_before_creating_operator_events() {
     let error = service
         .start_turn("default", StartTurnRequest::auto("req-1", "ghp_live-token"))
         .unwrap_err();
+    assert!(matches!(
+        &error,
+        TurnSubmissionError::SensitiveMaterial { .. }
+    ));
     assert!(
         error.to_string().to_lowercase().contains("sensitive"),
         "error should identify the preflight safety rejection: {error}"
@@ -190,9 +196,13 @@ fn start_turn_rejects_sensitive_client_request_id_before_creating_operator_event
     let dir = tempfile::tempdir().unwrap();
     let service = test_service(dir.path());
 
-    assert!(service
+    let error = service
         .start_turn("default", StartTurnRequest::auto("ghp_live-token", "hello"))
-        .is_err());
+        .unwrap_err();
+    assert!(matches!(
+        error,
+        TurnSubmissionError::SensitiveMaterial { .. }
+    ));
     assert!(service
         .events_after("default", None, 100)
         .unwrap()
@@ -208,7 +218,11 @@ fn start_turn_rejects_sensitive_route_policy_before_creating_operator_events() {
     let mut request = StartTurnRequest::auto("req-1", "hello");
     request.route_policy.preferred_provider = Some("ghp_live-token".to_string());
 
-    assert!(service.start_turn("default", request).is_err());
+    let error = service.start_turn("default", request).unwrap_err();
+    assert!(matches!(
+        error,
+        TurnSubmissionError::SensitiveMaterial { .. }
+    ));
     assert!(service
         .events_after("default", None, 100)
         .unwrap()
@@ -274,6 +288,40 @@ fn orphaned_turn_retry_without_durable_route_policy_fails_closed() {
 }
 
 #[test]
+fn orphaned_terminal_turn_retry_is_an_idempotency_conflict() {
+    let dir = tempfile::tempdir().unwrap();
+    let service = test_service(dir.path());
+    let mut orphan = base_event(
+        "default",
+        Some("terminal-orphan-turn"),
+        None,
+        OperatorEventType::TurnStarted,
+    );
+    orphan.payload = json!({
+        "client_request_id": "req-terminal",
+        "prompt_fingerprint": "2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824",
+        "route_policy": StartTurnRequest::auto("req-terminal", "hello").route_policy,
+    });
+    service.append_event(orphan).unwrap();
+    let mut terminal = base_event(
+        "default",
+        Some("terminal-orphan-turn"),
+        None,
+        OperatorEventType::TurnInterrupted,
+    );
+    terminal.payload = json!({"reason": "RUNTIME_RESTART"});
+    service.append_event(terminal).unwrap();
+
+    let error = service
+        .start_turn("default", StartTurnRequest::auto("req-terminal", "hello"))
+        .unwrap_err();
+    assert!(matches!(
+        error,
+        TurnSubmissionError::IdempotencyConflict { .. }
+    ));
+}
+
+#[test]
 fn retry_with_same_client_request_and_different_prompt_is_rejected() {
     let dir = tempfile::tempdir().unwrap();
     let service = test_service(dir.path());
@@ -287,6 +335,10 @@ fn retry_with_same_client_request_and_different_prompt_is_rejected() {
             StartTurnRequest::auto("req-1", "different prompt"),
         )
         .unwrap_err();
+    assert!(matches!(
+        &error,
+        TurnSubmissionError::IdempotencyConflict { .. }
+    ));
     assert!(
         error.to_string().to_lowercase().contains("prompt"),
         "error should identify the retry payload mismatch: {error}"
@@ -336,6 +388,10 @@ fn retry_binds_the_normalized_full_route_policy() {
 
     for (field, request) in variants {
         let error = service.start_turn("default", request).unwrap_err();
+        assert!(matches!(
+            &error,
+            TurnSubmissionError::IdempotencyConflict { .. }
+        ));
         assert!(
             error.to_string().contains("route policy"),
             "{field} mismatch must reject as a route-policy mismatch: {error}"

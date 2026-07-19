@@ -176,6 +176,8 @@ fn authenticated_operator_routes_share_one_idempotent_runner() {
         "prompt": "hi",
         "route_policy": {
             "mode": "auto",
+            "preferred_provider": " claude ",
+            "allowed_models": ["model-b", "model-a"],
             "minimum_quality_class": 1,
             "maximum_marginal_cost_usd": 0.0,
             "turn_budget_usd": 0.0,
@@ -191,16 +193,26 @@ fn authenticated_operator_routes_share_one_idempotent_runner() {
     assert_eq!(first.status, 202, "{}", first.body);
     assert_eq!(first.body["data"]["thread_id"], "default");
     assert_eq!(first.body["data"]["duplicate"], false);
+    assert!(
+        first.body["data"]["cursor"]
+            .as_str()
+            .is_some_and(|cursor| !cursor.is_empty()),
+        "first submission must expose the durable user-message cursor"
+    );
     assert!(first.body["data"]["stream_url"]
         .as_str()
         .unwrap()
         .starts_with("/ws/v1/operator?"));
 
+    let mut normalized_duplicate = request_body;
+    normalized_duplicate["route_policy"]["preferred_provider"] = json!("claude");
+    normalized_duplicate["route_policy"]["allowed_models"] =
+        json!(["model-a", "model-b", "model-a"]);
     let second = runtime.request(
         "POST",
         "/api/v1/operator/threads/default/turns",
         Some(TOKEN),
-        request_body,
+        normalized_duplicate,
     );
     assert_eq!(second.status, 202, "{}", second.body);
     assert_eq!(
@@ -208,6 +220,11 @@ fn authenticated_operator_routes_share_one_idempotent_runner() {
         first.body["data"]["turn_id"]
     );
     assert_eq!(second.body["data"]["duplicate"], true);
+    assert_eq!(second.body["data"]["cursor"], first.body["data"]["cursor"]);
+    assert_eq!(
+        second.body["data"]["stream_url"],
+        first.body["data"]["stream_url"]
+    );
 
     let turn_id = first.body["data"]["turn_id"].as_str().unwrap();
     let cancel = runtime.request(
@@ -252,6 +269,81 @@ fn authenticated_operator_routes_share_one_idempotent_runner() {
     assert_eq!(events.status, 200, "{}", events.body);
     assert!(events.body["data"]["events"].as_array().unwrap().len() >= 3);
     assert!(events.body["data"]["next_cursor"].is_string());
+}
+
+#[test]
+fn operator_maps_typed_intake_rejections_without_appending_or_reexecuting() {
+    let runtime = TestRuntime::start_without_providers();
+    let original = json!({
+        "client_request_id": "conflict-1",
+        "prompt": "Develop a detailed migration strategy",
+        "route_policy": {
+            "mode": "explicit",
+            "preferred_provider": "unavailable-test-provider"
+        }
+    });
+    let accepted = runtime.request(
+        "POST",
+        "/api/v1/operator/threads/default/turns",
+        Some(TOKEN),
+        original.clone(),
+    );
+    assert_eq!(accepted.status, 202, "{}", accepted.body);
+    let turn_id = accepted.body["data"]["turn_id"].as_str().unwrap();
+    wait_for_terminal_event(&runtime, "default", turn_id);
+    let before = operator_event_count(&runtime, "default");
+
+    let mut changed_prompt = original.clone();
+    changed_prompt["prompt"] = json!("Develop a different migration strategy");
+    let prompt_conflict = runtime.request(
+        "POST",
+        "/api/v1/operator/threads/default/turns",
+        Some(TOKEN),
+        changed_prompt,
+    );
+    assert_eq!(prompt_conflict.status, 409, "{}", prompt_conflict.body);
+    assert_eq!(
+        prompt_conflict.body["error"]["code"],
+        "idempotency_conflict"
+    );
+
+    let mut changed_policy = original;
+    changed_policy["route_policy"]["preferred_provider"] = json!("other-provider");
+    let policy_conflict = runtime.request(
+        "POST",
+        "/api/v1/operator/threads/default/turns",
+        Some(TOKEN),
+        changed_policy,
+    );
+    assert_eq!(policy_conflict.status, 409, "{}", policy_conflict.body);
+    assert_eq!(
+        policy_conflict.body["error"]["code"],
+        "idempotency_conflict"
+    );
+    assert_eq!(operator_event_count(&runtime, "default"), before);
+
+    for body in [
+        json!({"client_request_id": "safe-id", "prompt": "ghp_live-token"}),
+        json!({"client_request_id": "ghp_live-token", "prompt": "safe prompt"}),
+        json!({
+            "client_request_id": "safe-policy-id",
+            "prompt": "safe prompt",
+            "route_policy": {
+                "mode": "explicit",
+                "preferred_provider": "ghp_live-token"
+            }
+        }),
+    ] {
+        let rejected = runtime.request(
+            "POST",
+            "/api/v1/operator/threads/sensitive/turns",
+            Some(TOKEN),
+            body,
+        );
+        assert_eq!(rejected.status, 400, "{}", rejected.body);
+        assert_eq!(rejected.body["error"]["code"], "sensitive_material");
+    }
+    assert_eq!(operator_event_count(&runtime, "sensitive"), 0);
 }
 
 #[test]
@@ -423,6 +515,49 @@ fn reserve_port() -> u16 {
         .local_addr()
         .unwrap()
         .port()
+}
+
+fn operator_event_count(runtime: &TestRuntime, thread_id: &str) -> usize {
+    let response = runtime.request(
+        "GET",
+        &format!("/api/v1/operator/threads/{thread_id}/events?limit=500"),
+        Some(TOKEN),
+        json!(null),
+    );
+    assert_eq!(response.status, 200, "{}", response.body);
+    response.body["data"]["events"].as_array().unwrap().len()
+}
+
+fn wait_for_terminal_event(runtime: &TestRuntime, thread_id: &str, turn_id: &str) {
+    let deadline = Instant::now() + Duration::from_secs(10);
+    loop {
+        let response = runtime.request(
+            "GET",
+            &format!("/api/v1/operator/threads/{thread_id}/events?limit=500"),
+            Some(TOKEN),
+            json!(null),
+        );
+        assert_eq!(response.status, 200, "{}", response.body);
+        if response.body["data"]["events"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|row| {
+                row["event"]["turn_id"].as_str() == Some(turn_id)
+                    && matches!(
+                        row["event"]["event_type"].as_str(),
+                        Some("turn_completed" | "turn_interrupted" | "blocker")
+                    )
+            })
+        {
+            return;
+        }
+        assert!(
+            Instant::now() < deadline,
+            "turn {turn_id} did not terminate"
+        );
+        thread::sleep(Duration::from_millis(25));
+    }
 }
 
 fn wait_for_port(port: u16) {

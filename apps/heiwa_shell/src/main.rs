@@ -3667,8 +3667,12 @@ async fn prepare_operator_turn_work(
 async fn submit_operator_turn_with_route(
     thread_id: &str,
     start_request: heiwa_session::operator::StartTurnRequest,
-) -> Result<heiwa_shell::operator::OperatorTurnHandle, String> {
-    let (_, _, runner) = default_model_call_runtime()?;
+) -> std::result::Result<
+    heiwa_shell::operator::OperatorTurnHandle,
+    heiwa_shell::operator::OperatorSubmissionError,
+> {
+    let (_, _, runner) = default_model_call_runtime()
+        .map_err(|error| heiwa_shell::operator::OperatorSubmissionError::Runtime(anyhow!(error)))?;
     let preparation_thread_id = thread_id.to_string();
     let preparation_request = start_request.clone();
     let preparation = OperatorTurnPreparation::cancellable(move |cancelled| async move {
@@ -3676,15 +3680,16 @@ async fn submit_operator_turn_with_route(
             .await
             .map_err(anyhow::Error::msg)
     });
-    runner
-        .submit(thread_id, start_request, preparation)
-        .map_err(|error| error.to_string())
+    runner.submit(thread_id, start_request, preparation)
 }
 
 pub(crate) async fn submit_operator_turn(
     thread_id: &str,
     request: heiwa_session::operator::StartTurnRequest,
-) -> Result<heiwa_shell::operator::OperatorTurnHandle, String> {
+) -> std::result::Result<
+    heiwa_shell::operator::OperatorTurnHandle,
+    heiwa_shell::operator::OperatorSubmissionError,
+> {
     submit_operator_turn_with_route(thread_id, request).await
 }
 
@@ -3701,7 +3706,7 @@ pub(crate) async fn execute_repl_turn_streaming(
     {
         Ok(handle) => handle,
         Err(error) => {
-            let _ = events.send(ReplStreamEvent::Error(error)).await;
+            let _ = events.send(ReplStreamEvent::Error(error.to_string())).await;
             return;
         }
     };

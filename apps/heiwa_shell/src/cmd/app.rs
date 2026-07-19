@@ -1382,7 +1382,18 @@ async fn operator_http_response(
                         }),
                     )
                 }
-                Err(_) => operator_error(503, "operator_unavailable"),
+                Err(heiwa_shell::operator::OperatorSubmissionError::Rejected(
+                    heiwa_session::operator::TurnSubmissionError::IdempotencyConflict { .. },
+                )) => operator_error(409, "idempotency_conflict"),
+                Err(heiwa_shell::operator::OperatorSubmissionError::Rejected(
+                    heiwa_session::operator::TurnSubmissionError::SensitiveMaterial { .. },
+                )) => operator_error(400, "sensitive_material"),
+                Err(heiwa_shell::operator::OperatorSubmissionError::Rejected(
+                    heiwa_session::operator::TurnSubmissionError::Runtime(_),
+                ))
+                | Err(heiwa_shell::operator::OperatorSubmissionError::Runtime(_)) => {
+                    operator_error(503, "operator_unavailable")
+                }
             }
         }
         ("POST", OperatorHttpRoute::Cancel(turn_id)) => match runner.request_cancel(&turn_id) {
@@ -1464,6 +1475,14 @@ fn percent_encode_query_component(value: &str) -> String {
 }
 
 fn validate_operator_identifier(raw: &str) -> std::result::Result<String, ()> {
+    let id = validate_operator_identifier_shape(raw)?;
+    if heiwa_evidence::find_sensitive(&Value::String(id.clone())).is_some() {
+        return Err(());
+    }
+    Ok(id)
+}
+
+fn validate_operator_identifier_shape(raw: &str) -> std::result::Result<String, ()> {
     let id = raw.trim();
     if id.is_empty()
         || id.len() > 128
@@ -1471,7 +1490,6 @@ fn validate_operator_identifier(raw: &str) -> std::result::Result<String, ()> {
         || id.contains('/')
         || id.contains('\\')
         || id.chars().any(char::is_control)
-        || heiwa_evidence::find_sensitive(&Value::String(id.to_string())).is_some()
     {
         return Err(());
     }
@@ -1495,7 +1513,9 @@ fn parse_turn_request(
         .get("client_request_id")
         .and_then(Value::as_str)
         .ok_or(())?;
-    let client_request_id = validate_operator_identifier(client_request_id)?;
+    // Client request IDs are not path components. Validate their shape here,
+    // then let the typed session admission gate classify sensitive material.
+    let client_request_id = validate_operator_identifier_shape(client_request_id)?;
     let prompt = object.get("prompt").and_then(Value::as_str).ok_or(())?;
     if prompt.trim().is_empty() || prompt.len() > 64 * 1024 {
         return Err(());
@@ -4095,6 +4115,12 @@ mod app_readmodel_tests {
     async fn http_reader_rejects_overflowing_total_length() {
         let request = format!("POST / HTTP/1.1\r\nContent-Length: {}\r\n\r\n", usize::MAX);
         assert!(read_raw_http_request(request.as_bytes()).await.is_err());
+    }
+
+    #[tokio::test]
+    async fn http_reader_rejects_duplicate_content_length_headers() {
+        let request = b"POST / HTTP/1.1\r\nContent-Length: 2\r\nContent-Length: 2\r\n\r\nhi";
+        assert!(read_raw_http_request(request).await.is_err());
     }
 
     #[test]

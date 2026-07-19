@@ -18,7 +18,7 @@ use heiwa_evidence::{
 use heiwa_protocol::ExecutionScope;
 use heiwa_provider::adapter::{Message, StreamEvent};
 use heiwa_session::operator::{
-    OperatorSessionService, RouteMode, StartTurnRequest, TurnRoutePolicy,
+    OperatorSessionService, RouteMode, StartTurnRequest, TurnRoutePolicy, TurnSubmissionError,
 };
 use serde_json::json;
 use tokio::sync::{broadcast, mpsc, watch};
@@ -501,8 +501,14 @@ impl From<OperatorTurnWork> for OperatorTurnPreparation {
 pub struct OperatorTurnHandle {
     pub thread_id: String,
     pub turn_id: String,
+    /// Stable public cursor immediately after the admitted user message.
+    /// It is identical on original and duplicate submissions and never
+    /// doubles as mutable replay progress.
     pub cursor: String,
     pub duplicate: bool,
+    /// Private replay progress. Unlike the public initial submission cursor,
+    /// duplicates intentionally start replay at thread start.
+    replay_cursor: String,
     sessions: Arc<OperatorSessionService>,
     replay: VecDeque<OperatorStreamFrame>,
     replay_complete: bool,
@@ -619,7 +625,7 @@ impl OperatorTurnHandle {
                 if row.event.turn_id.as_deref() != Some(self.turn_id.as_str()) {
                     return false;
                 }
-                self.cursor = row.cursor.clone();
+                self.replay_cursor = row.cursor.clone();
                 self.seen_event_ids.insert(row.event.event_id.clone())
             }
             OperatorStreamFrame::AssistantDelta { turn_id, .. }
@@ -630,7 +636,7 @@ impl OperatorTurnHandle {
     fn refill_replay(&mut self) -> Result<()> {
         let page = self.sessions.events_after(
             &self.thread_id,
-            (!self.cursor.is_empty()).then_some(self.cursor.as_str()),
+            (!self.replay_cursor.is_empty()).then_some(self.replay_cursor.as_str()),
             256,
         )?;
         let caught_up = page.events.len() < 256;
@@ -644,7 +650,7 @@ impl OperatorTurnHandle {
                 )
         });
         if let Some(cursor) = page.next_cursor {
-            self.cursor = cursor;
+            self.replay_cursor = cursor;
         }
         self.replay.extend(
             page.events
@@ -655,6 +661,14 @@ impl OperatorTurnHandle {
         self.replay_complete = caught_up || reached_terminal;
         Ok(())
     }
+}
+
+#[derive(Debug, thiserror::Error)]
+pub enum OperatorSubmissionError {
+    #[error(transparent)]
+    Rejected(#[from] TurnSubmissionError),
+    #[error(transparent)]
+    Runtime(#[from] anyhow::Error),
 }
 
 #[derive(Clone)]
@@ -721,7 +735,7 @@ impl OperatorTurnRunner {
         thread_id: &str,
         request: StartTurnRequest,
         preparation: P,
-    ) -> Result<OperatorTurnHandle>
+    ) -> std::result::Result<OperatorTurnHandle, OperatorSubmissionError>
     where
         P: Into<OperatorTurnPreparation>,
     {
@@ -753,9 +767,10 @@ impl OperatorTurnRunner {
                     {
                         return Err(anyhow!(
                             "operator active turn registration failed: {error}; initial repair failed: {recovery_error}"
-                        ));
+                        )
+                        .into());
                     }
-                    return Err(error);
+                    return Err(error.into());
                 }
             };
             self.active_threads
@@ -808,10 +823,11 @@ impl OperatorTurnRunner {
                 return Err(anyhow!(
                     "duplicate turn {} is open and owned by another runtime",
                     submission.turn_id
-                ));
+                )
+                .into());
             }
         }
-        let (cursor, replay_complete) = if submission.duplicate {
+        let (replay_cursor, replay_complete) = if submission.duplicate {
             (String::new(), false)
         } else {
             (submission.cursor.clone(), true)
@@ -819,8 +835,9 @@ impl OperatorTurnRunner {
         Ok(OperatorTurnHandle {
             thread_id: submission.thread_id,
             turn_id: submission.turn_id,
-            cursor,
+            cursor: submission.cursor,
             duplicate: submission.duplicate,
+            replay_cursor,
             sessions: self.sessions.clone(),
             replay: VecDeque::new(),
             replay_complete,
@@ -1730,14 +1747,15 @@ mod tests {
         ExecutionScope, ModelTier, RiskClass, ToolCallReceipt, ToolCallStatus, ToolLease,
     };
     use heiwa_provider::adapter::{Message, ProviderAdapter, Role, StreamEvent, TokenUsage};
-    use heiwa_session::operator::{OperatorSessionService, StartTurnRequest};
+    use heiwa_session::operator::{OperatorSessionService, StartTurnRequest, TurnSubmissionError};
     use serde_json::json;
     use tokio::sync::{mpsc, Notify};
 
     use super::{
         ActiveTurnRegistry, CommittedOperatorArtifact, LocalArtifactStore, OperatorApprovalService,
         OperatorArtifactStore, OperatorModelExecutor, OperatorModelTurn, OperatorStreamFrame,
-        OperatorToolExecutor, OperatorTurnPreparation, OperatorTurnRunner, OperatorTurnWork,
+        OperatorSubmissionError, OperatorToolExecutor, OperatorTurnPreparation, OperatorTurnRunner,
+        OperatorTurnWork,
     };
     use crate::model_calls::{
         ModelCallError, ModelCallExecution, ModelCallExecutor, ModelCallResult,
@@ -2391,10 +2409,11 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn operator_rejects_route_policy_mismatch_before_second_preparation() {
+    async fn operator_rejects_idempotency_conflicts_before_second_preparation() {
         let dir = tempfile::tempdir().unwrap();
         let sessions = service(dir.path());
-        let runner = OperatorTurnRunner::new(sessions, Arc::new(RecordingExecutor::default()));
+        let runner =
+            OperatorTurnRunner::new(sessions.clone(), Arc::new(RecordingExecutor::default()));
         let preparations = Arc::new(AtomicUsize::new(0));
         let request = StartTurnRequest::auto("policy-bound-once", "hello");
 
@@ -2414,6 +2433,11 @@ mod tests {
             )
             .unwrap();
         wait_for_terminal(&mut first).await;
+        let event_count = sessions
+            .events_after("default", None, 100)
+            .unwrap()
+            .events
+            .len();
 
         let mut mismatched = request;
         mismatched.route_policy.minimum_quality_class = 4;
@@ -2430,8 +2454,37 @@ mod tests {
             .err()
             .expect("mismatched durable policy must reject intake");
 
-        assert!(error.to_string().contains("route policy"), "{error}");
+        assert!(matches!(
+            error,
+            OperatorSubmissionError::Rejected(TurnSubmissionError::IdempotencyConflict { .. })
+        ));
+
+        let changed_prompt = StartTurnRequest::auto("policy-bound-once", "changed prompt");
+        let prompt_preparations = preparations.clone();
+        let error = runner
+            .submit(
+                "default",
+                changed_prompt,
+                OperatorTurnPreparation::deferred(move || async move {
+                    prompt_preparations.fetch_add(1000, Ordering::SeqCst);
+                    anyhow::bail!("changed prompt preparation must not execute")
+                }),
+            )
+            .err()
+            .expect("changed prompt must reject intake");
+        assert!(matches!(
+            error,
+            OperatorSubmissionError::Rejected(TurnSubmissionError::IdempotencyConflict { .. })
+        ));
         assert_eq!(preparations.load(Ordering::SeqCst), 1);
+        assert_eq!(
+            sessions
+                .events_after("default", None, 100)
+                .unwrap()
+                .events
+                .len(),
+            event_count
+        );
     }
 
     #[tokio::test]
@@ -2895,6 +2948,7 @@ mod tests {
             turn_id,
             cursor: String::new(),
             duplicate: false,
+            replay_cursor: String::new(),
             sessions,
             replay: std::collections::VecDeque::new(),
             replay_complete: true,
