@@ -1984,10 +1984,15 @@ async fn write_response(
     let status_text = match status {
         200 => "OK",
         201 => "Created",
+        202 => "Accepted",
         204 => "No Content",
         400 => "Bad Request",
+        401 => "Unauthorized",
         404 => "Not Found",
         405 => "Method Not Allowed",
+        409 => "Conflict",
+        500 => "Internal Server Error",
+        503 => "Service Unavailable",
         _ => "OK",
     };
     let header = format!(
@@ -4071,6 +4076,32 @@ fn print_start_help() {
 mod app_readmodel_tests {
     use super::*;
 
+    async fn written_status_line(status: u16) -> String {
+        let listener = TcpListener::bind(("127.0.0.1", 0)).await.unwrap();
+        let address = listener.local_addr().unwrap();
+        let client = tokio::spawn(async move { TcpStream::connect(address).await.unwrap() });
+        let (mut server, _) = listener.accept().await.unwrap();
+        write_response(
+            &mut server,
+            status,
+            "application/json",
+            b"{}".to_vec(),
+            false,
+        )
+        .await
+        .unwrap();
+        drop(server);
+        let mut client = client.await.unwrap();
+        let mut response = Vec::new();
+        client.read_to_end(&mut response).await.unwrap();
+        String::from_utf8(response)
+            .unwrap()
+            .lines()
+            .next()
+            .unwrap()
+            .to_string()
+    }
+
     async fn read_raw_http_request(raw: &[u8]) -> Result<(String, String)> {
         let listener = TcpListener::bind(("127.0.0.1", 0)).await?;
         let address = listener.local_addr()?;
@@ -4121,6 +4152,25 @@ mod app_readmodel_tests {
     async fn http_reader_rejects_duplicate_content_length_headers() {
         let request = b"POST / HTTP/1.1\r\nContent-Length: 2\r\nContent-Length: 2\r\n\r\nhi";
         assert!(read_raw_http_request(request).await.is_err());
+    }
+
+    #[tokio::test]
+    async fn http_response_status_lines_use_standard_reason_phrases() {
+        for (status, expected) in [
+            (200, "HTTP/1.1 200 OK"),
+            (201, "HTTP/1.1 201 Created"),
+            (202, "HTTP/1.1 202 Accepted"),
+            (204, "HTTP/1.1 204 No Content"),
+            (400, "HTTP/1.1 400 Bad Request"),
+            (401, "HTTP/1.1 401 Unauthorized"),
+            (404, "HTTP/1.1 404 Not Found"),
+            (405, "HTTP/1.1 405 Method Not Allowed"),
+            (409, "HTTP/1.1 409 Conflict"),
+            (500, "HTTP/1.1 500 Internal Server Error"),
+            (503, "HTTP/1.1 503 Service Unavailable"),
+        ] {
+            assert_eq!(written_status_line(status).await, expected);
+        }
     }
 
     #[test]
