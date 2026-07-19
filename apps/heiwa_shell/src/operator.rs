@@ -726,6 +726,8 @@ impl OperatorTurnRunner {
         P: Into<OperatorTurnPreparation>,
     {
         let preparation = preparation.into();
+        let mut request = request;
+        request.route_policy = request.route_policy.normalized();
         let _submission = self
             .submissions
             .lock()
@@ -2386,6 +2388,50 @@ mod tests {
                 ][..]
             )
         );
+    }
+
+    #[tokio::test]
+    async fn operator_rejects_route_policy_mismatch_before_second_preparation() {
+        let dir = tempfile::tempdir().unwrap();
+        let sessions = service(dir.path());
+        let runner = OperatorTurnRunner::new(sessions, Arc::new(RecordingExecutor::default()));
+        let preparations = Arc::new(AtomicUsize::new(0));
+        let request = StartTurnRequest::auto("policy-bound-once", "hello");
+
+        let first_preparations = preparations.clone();
+        let mut first = runner
+            .submit(
+                "default",
+                request.clone(),
+                OperatorTurnPreparation::deferred(move || async move {
+                    first_preparations.fetch_add(1, Ordering::SeqCst);
+                    Ok(OperatorTurnWork::Deterministic {
+                        response: "prepared".to_string(),
+                        route: json!({"mode": "deterministic"}),
+                        done: json!({"mode": "deterministic"}),
+                    })
+                }),
+            )
+            .unwrap();
+        wait_for_terminal(&mut first).await;
+
+        let mut mismatched = request;
+        mismatched.route_policy.minimum_quality_class = 4;
+        let second_preparations = preparations.clone();
+        let error = runner
+            .submit(
+                "default",
+                mismatched,
+                OperatorTurnPreparation::deferred(move || async move {
+                    second_preparations.fetch_add(100, Ordering::SeqCst);
+                    anyhow::bail!("mismatched retry preparation must not execute")
+                }),
+            )
+            .err()
+            .expect("mismatched durable policy must reject intake");
+
+        assert!(error.to_string().contains("route policy"), "{error}");
+        assert_eq!(preparations.load(Ordering::SeqCst), 1);
     }
 
     #[tokio::test]

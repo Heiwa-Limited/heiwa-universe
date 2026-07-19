@@ -1471,6 +1471,7 @@ fn validate_operator_identifier(raw: &str) -> std::result::Result<String, ()> {
         || id.contains('/')
         || id.contains('\\')
         || id.chars().any(char::is_control)
+        || heiwa_evidence::find_sensitive(&Value::String(id.to_string())).is_some()
     {
         return Err(());
     }
@@ -1609,6 +1610,9 @@ fn parse_nonnegative_budget(value: Option<&Value>) -> std::result::Result<Option
 }
 
 async fn read_http_request_and_body(stream: &mut TcpStream) -> Result<(String, String)> {
+    const MAX_HTTP_HEADER_BYTES: usize = 64 * 1024;
+    const MAX_HTTP_BODY_BYTES: usize = 10 * 1024 * 1024;
+
     let mut data = Vec::new();
     let mut buf = [0u8; 1024];
     let mut headers_len = None;
@@ -1620,10 +1624,14 @@ async fn read_http_request_and_body(stream: &mut TcpStream) -> Result<(String, S
         }
         data.extend_from_slice(&buf[..n]);
         if let Some(pos) = data.windows(4).position(|w| w == b"\r\n\r\n") {
-            headers_len = Some(pos + 4);
+            let end = pos + 4;
+            if end > MAX_HTTP_HEADER_BYTES {
+                return Err(anyhow!("request headers too large"));
+            }
+            headers_len = Some(end);
             break;
         }
-        if data.len() > 64 * 1024 {
+        if data.len() > MAX_HTTP_HEADER_BYTES {
             return Err(anyhow!("request headers too large"));
         }
     }
@@ -1635,26 +1643,42 @@ async fn read_http_request_and_body(stream: &mut TcpStream) -> Result<(String, S
 
     let headers_str = String::from_utf8_lossy(&data[..headers_len]).to_string();
 
-    let mut content_length = 0;
-    if let Some(cl_str) = header_value(&headers_str, "content-length") {
-        if let Ok(len) = cl_str.trim().parse::<usize>() {
-            content_length = len;
-        }
+    let content_lengths = headers_str
+        .lines()
+        .filter_map(|line| {
+            let (name, value) = line.split_once(':')?;
+            name.eq_ignore_ascii_case("content-length")
+                .then_some(value.trim())
+        })
+        .collect::<Vec<_>>();
+    let content_length = match content_lengths.as_slice() {
+        [] => 0,
+        [raw] if !raw.is_empty() && raw.bytes().all(|byte| byte.is_ascii_digit()) => raw
+            .parse::<usize>()
+            .map_err(|_| anyhow!("invalid content-length"))?,
+        [_] => return Err(anyhow!("invalid content-length")),
+        _ => return Err(anyhow!("multiple content-length headers")),
+    };
+    let total_len = headers_len
+        .checked_add(content_length)
+        .ok_or_else(|| anyhow!("request length overflow"))?;
+    if content_length > MAX_HTTP_BODY_BYTES {
+        return Err(anyhow!("request body too large"));
     }
-
-    let total_len = headers_len + content_length;
     while data.len() < total_len {
         let n = stream.read(&mut buf).await?;
         if n == 0 {
-            break;
+            return Err(anyhow!(
+                "truncated request body: expected {content_length} bytes"
+            ));
         }
         data.extend_from_slice(&buf[..n]);
-        if data.len() > 10 * 1024 * 1024 {
-            return Err(anyhow!("request body too large"));
-        }
     }
 
-    let body_str = String::from_utf8_lossy(&data[headers_len..total_len]).to_string();
+    let body = data
+        .get(headers_len..total_len)
+        .ok_or_else(|| anyhow!("truncated request body"))?;
+    let body_str = String::from_utf8_lossy(body).to_string();
     Ok((headers_str, body_str))
 }
 
@@ -4027,11 +4051,50 @@ fn print_start_help() {
 mod app_readmodel_tests {
     use super::*;
 
+    async fn read_raw_http_request(raw: &[u8]) -> Result<(String, String)> {
+        let listener = TcpListener::bind(("127.0.0.1", 0)).await?;
+        let address = listener.local_addr()?;
+        let raw = raw.to_vec();
+        let client = tokio::spawn(async move {
+            let mut stream = TcpStream::connect(address).await.unwrap();
+            stream.write_all(&raw).await.unwrap();
+            stream.shutdown().await.unwrap();
+        });
+        let (mut server, _) = listener.accept().await?;
+        let result = read_http_request_and_body(&mut server).await;
+        client.await.unwrap();
+        result
+    }
+
     fn temp_state_dir(name: &str) -> PathBuf {
         let dir = env::temp_dir().join(format!("heiwa-shell-{name}-{}", std::process::id()));
         let _ = fs::remove_dir_all(&dir);
         fs::create_dir_all(&dir).expect("create temp state dir");
         dir
+    }
+
+    #[tokio::test]
+    async fn http_reader_rejects_truncated_declared_body() {
+        let request = b"POST / HTTP/1.1\r\nContent-Length: 10\r\n\r\nhi";
+        assert!(read_raw_http_request(request).await.is_err());
+    }
+
+    #[tokio::test]
+    async fn http_reader_rejects_invalid_content_length() {
+        let request = b"POST / HTTP/1.1\r\nContent-Length: nope\r\n\r\n";
+        assert!(read_raw_http_request(request).await.is_err());
+    }
+
+    #[tokio::test]
+    async fn http_reader_rejects_oversized_body_before_reading_it() {
+        let request = b"POST / HTTP/1.1\r\nContent-Length: 10485761\r\n\r\n";
+        assert!(read_raw_http_request(request).await.is_err());
+    }
+
+    #[tokio::test]
+    async fn http_reader_rejects_overflowing_total_length() {
+        let request = format!("POST / HTTP/1.1\r\nContent-Length: {}\r\n\r\n", usize::MAX);
+        assert!(read_raw_http_request(request.as_bytes()).await.is_err());
     }
 
     #[test]

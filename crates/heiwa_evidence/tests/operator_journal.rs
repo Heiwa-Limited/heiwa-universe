@@ -81,6 +81,95 @@ fn rejects_sensitive_payload_before_file_creation() {
 }
 
 #[test]
+fn rejects_sensitive_event_metadata_before_file_creation() {
+    let mut thread = event(
+        "thread-secret",
+        "thread-a",
+        OperatorEventType::UserMessage,
+        json!({"text": "safe"}),
+    );
+    thread.thread_id = "ghp_live-token".into();
+    let mut turn = thread.clone();
+    turn.thread_id = "thread-a".into();
+    turn.turn_id = Some("Bearer live-token".into());
+    let mut call = thread.clone();
+    call.thread_id = "thread-a".into();
+    call.call_id = Some("sk-live-token".into());
+    let mut actor = thread.clone();
+    actor.thread_id = "thread-a".into();
+    actor.actor.id = "github_pat_live-token".into();
+
+    for (field, hostile) in [
+        ("thread_id", thread),
+        ("turn_id", turn),
+        ("call_id", call),
+        ("actor.id", actor),
+    ] {
+        let dir = tempfile::tempdir().unwrap();
+        let journal = OperatorJournal::new(dir.path().to_path_buf()).unwrap();
+        let error = journal.append(&hostile).unwrap_err();
+        assert!(
+            error.to_string().contains("sensitive material"),
+            "{field} secret must be rejected: {error}"
+        );
+        assert!(
+            !dir.path().join("operator_events.jsonl").exists(),
+            "{field} rejection must precede stream creation"
+        );
+    }
+}
+
+#[test]
+fn sensitive_event_metadata_does_not_append_to_existing_stream() {
+    let dir = tempfile::tempdir().unwrap();
+    let journal = OperatorJournal::new(dir.path().to_path_buf()).unwrap();
+    journal
+        .append(&event(
+            "e1",
+            "thread-a",
+            OperatorEventType::UserMessage,
+            json!({"text": "safe"}),
+        ))
+        .unwrap();
+    let path = dir.path().join("operator_events.jsonl");
+    let before = std::fs::read(&path).unwrap();
+    let mut hostile = event(
+        "e2",
+        "thread-a",
+        OperatorEventType::AssistantCompleted,
+        json!({"text": "still safe"}),
+    );
+    hostile.call_id = Some("xoxb-live-token".into());
+
+    assert!(journal.append(&hostile).is_err());
+    assert_eq!(
+        std::fs::read(path).unwrap(),
+        before,
+        "rejected metadata must not append bytes"
+    );
+}
+
+#[test]
+fn full_event_gate_ignores_safe_policy_key_names() {
+    let dir = tempfile::tempdir().unwrap();
+    let journal = OperatorJournal::new(dir.path().to_path_buf()).unwrap();
+    journal
+        .append(&event(
+            "e1",
+            "thread-a",
+            OperatorEventType::TurnStarted,
+            json!({
+                "authorization": "operator-approved",
+                "credential_files": "disabled",
+                "preferred_provider": "claude"
+            }),
+        ))
+        .unwrap();
+
+    assert_eq!(journal.read_after(None, 10).unwrap().events.len(), 1);
+}
+
+#[test]
 fn fingerprint_or_boundary_mismatch_is_structured() {
     let dir = tempfile::tempdir().unwrap();
     let journal = OperatorJournal::new(dir.path().to_path_buf()).unwrap();

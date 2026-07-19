@@ -183,6 +183,17 @@ pub fn import_legacy_sessions_with_service(
                     ));
                 current_turn = Some(turn_id);
             }
+            if let TranscriptBlock::Tool(name, _) = &entry.block {
+                pending.push(legacy_event(
+                    &session_id,
+                    current_turn.clone(),
+                    Some(legacy_event_id(&session_id, entry.id, "call")),
+                    OperatorEventType::ToolCallStarted,
+                    legacy_event_id(&session_id, entry.id, "tool_started"),
+                    entry.ts_unix_ms,
+                    serde_json::json!({"name": name, "legacy_ts_unix_ms": entry.ts_unix_ms}),
+                ));
+            }
             let (event_type, call_id, payload, role) = match &entry.block {
                 TranscriptBlock::User(text) => (
                     OperatorEventType::UserMessage,
@@ -248,8 +259,10 @@ pub fn import_legacy_sessions_with_service(
             if event.event_type != OperatorEventType::LegacySessionImported
                 && !event_ids.contains(&event.event_id)
             {
-                report.imported_entries +=
-                    usize::from(!matches!(event.event_type, OperatorEventType::TurnStarted));
+                report.imported_entries += usize::from(!matches!(
+                    event.event_type,
+                    OperatorEventType::TurnStarted | OperatorEventType::ToolCallStarted
+                ));
             }
             if !event_ids.contains(&event.event_id) {
                 service.append_event(event)?;
@@ -402,13 +415,30 @@ fn append_exact_entry(session_id: &str, entry: TranscriptEntry) -> Result<Transc
         }
         TranscriptBlock::Tool(name, output) => {
             let turn = latest_open_turn(&service, session_id)?;
-            service.append_event(new_operator_event(
+            let call_id = uuid::Uuid::new_v4().to_string();
+            let started = new_operator_event(
+                session_id,
+                Some(turn.clone()),
+                Some(call_id.clone()),
+                OperatorEventType::ToolCallStarted,
+                serde_json::json!({"name": name}),
+            );
+            let completed = new_operator_event(
                 session_id,
                 Some(turn),
-                Some(uuid::Uuid::new_v4().to_string()),
+                Some(call_id),
                 OperatorEventType::ToolCallCompleted,
                 serde_json::json!({"name": name, "output": output, "compat_entry": compat_entry(&entry)}),
-            ))?;
+            );
+            if heiwa_evidence::find_sensitive(&serde_json::to_value(&started)?).is_some()
+                || heiwa_evidence::find_sensitive(&serde_json::to_value(&completed)?).is_some()
+            {
+                anyhow::bail!(
+                    "refused to append transcript entry: event contains sensitive material"
+                );
+            }
+            service.append_event(started)?;
+            service.append_event(completed)?;
         }
         TranscriptBlock::Evidence(text) => {
             let turn = latest_open_turn(&service, session_id).ok();

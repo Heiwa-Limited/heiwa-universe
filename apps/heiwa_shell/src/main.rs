@@ -2747,26 +2747,13 @@ fn route_task_inner(
         _ => {}
     }
 
-    let effective_route_preference = if pins.route_preference == RoutePreference::Auto {
-        match preflight.execution_mode {
-            ExecutionMode::LocalModel => RoutePreference::LocalOnly,
-            ExecutionMode::RemoteModel => RoutePreference::RemoteOnly,
-            _ => RoutePreference::Auto,
-        }
-    } else {
-        pins.route_preference
-    };
-
-    let effective_tiers = filtered_model_tiers(
-        &quota_admission.admitted,
-        effective_route_preference,
-        final_provider_pin,
-        final_model_pin,
-    );
-
-    if effective_tiers.is_empty() {
-        return Err("Routing failed: model stack unavailable for this execution mode.".to_string());
-    }
+    // Preserve the complete admitted inventory for per-call DREX planning.
+    // `routed_tiers` already enforced explicit provider/model pins and
+    // local-only/remote-only session policy. The legacy Auto preflight is a
+    // useful initial-route hint, but narrowing to that lane here would make
+    // an opposite-lane model invisible to a later call's quality floor,
+    // budget, allow/exclude set, or privacy policy.
+    let effective_tiers = quota_admission.admitted;
 
     let route = plan_route(&ingress, &effective_tiers, &policy)
         .map_err(|e| format!("Routing failed: {}", e))?;
@@ -4256,6 +4243,67 @@ mod tests {
                 panic!("private prompt should route to a local model")
             }
         }
+    }
+
+    #[test]
+    fn auto_route_preserves_remote_candidate_for_per_call_quality_floor() {
+        let ledger = heiwa_quota::QuotaLedger::open_in_memory().expect("ledger");
+        let pins = super::SessionPins::new();
+        let mut tiers = vec![
+            test_model_tier("ollama", "qwen3.5:4b", "local_ollama", 2, 0.0),
+            test_model_tier("claude", "claude-sonnet", "anthropic", 4, 0.20),
+        ];
+        tiers[0].id = 1;
+        tiers[1].id = 2;
+        let outcome = super::route_task_with_quota(
+            "compare these deployment approaches in one concise paragraph",
+            &pins,
+            &tiers,
+            Some(&ledger),
+            1_777_000_000,
+        )
+        .expect("auto route should preserve the admitted inventory");
+        let super::RouteOutcome::Routed(route) = outcome else {
+            panic!("comparison task should route to a model")
+        };
+
+        assert_eq!(
+            route.candidates.len(),
+            2,
+            "legacy local-first preflight must not discard the opposite lane"
+        );
+        let plan = heiwa_core::drex::plan_model_call(
+            &heiwa_core::drex::ModelCallRequest {
+                thread_id: "thread".to_string(),
+                turn_id: "turn".to_string(),
+                call_id: "call".to_string(),
+                intent: "chat".to_string(),
+                stage: heiwa_core::drex::ModelCallStage::Execution,
+                raw_text: "compare these deployment approaches".to_string(),
+                privacy: heiwa_core::drex::PrivacyClass::Standard,
+                risk: heiwa_core::drex::CallRisk::Low,
+                safety: heiwa_core::drex::SafetyClass::low_risk_auto_approval(
+                    &heiwa_core::drex::CallRisk::Low,
+                ),
+                required_capabilities: vec![],
+                required_context_tokens: 1,
+                minimum_quality_class: 4,
+                minimum_success_rate: 0.0,
+                maximum_marginal_cost_usd: Some(0.20),
+                preferred_provider: None,
+                preferred_model: None,
+                allowed_models: vec![],
+                excluded_models: vec![],
+            },
+            &route.candidates,
+            &heiwa_core::drex::default_policy(),
+        )
+        .unwrap();
+        let selected = plan
+            .selected
+            .expect("quality floor should admit remote model");
+        assert_eq!(selected.tier.provider, "claude");
+        assert_eq!(selected.tier.model_id, "claude-sonnet");
     }
 
     #[test]

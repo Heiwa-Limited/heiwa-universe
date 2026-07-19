@@ -8,7 +8,7 @@ use heiwa_evidence::{
     OperatorActor, OperatorEvent, OperatorEventType, OperatorJournal, OperatorRisk,
     OperatorSensitivity, OPERATOR_EVENT_SCHEMA_VERSION,
 };
-use heiwa_session::operator::{OperatorSessionService, StartTurnRequest};
+use heiwa_session::operator::{OperatorSessionService, RouteMode, StartTurnRequest};
 use heiwa_session::{rebuild_operator_indexes_at, EmbeddingSink};
 use serde_json::json;
 use std::sync::Mutex;
@@ -57,6 +57,14 @@ fn rebuild_indexes_projects_safe_text_and_only_embeds_messages() {
     );
     assistant.payload = json!({"text": "index this assistant text"});
     service.append_event(assistant).unwrap();
+    let mut tool_started = base_event(
+        "default",
+        Some(&turn.turn_id),
+        Some("call-1"),
+        OperatorEventType::ToolCallStarted,
+    );
+    tool_started.payload = json!({"name": "shell"});
+    service.append_event(tool_started).unwrap();
     let mut tool = base_event(
         "default",
         Some(&turn.turn_id),
@@ -221,7 +229,8 @@ fn orphaned_turn_retry_appends_the_missing_user_message() {
     );
     orphan.payload = json!({
         "client_request_id": "req-1",
-        "prompt_fingerprint": "2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824"
+        "prompt_fingerprint": "2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824",
+        "route_policy": StartTurnRequest::auto("req-1", "hello").route_policy,
     });
     service.append_event(orphan).unwrap();
 
@@ -236,6 +245,32 @@ fn orphaned_turn_retry_appends_the_missing_user_message() {
             .as_deref(),
         Some("hello")
     );
+}
+
+#[test]
+fn orphaned_turn_retry_without_durable_route_policy_fails_closed() {
+    let dir = tempfile::tempdir().unwrap();
+    let service = test_service(dir.path());
+    let mut orphan = base_event(
+        "default",
+        Some("legacy-orphan-turn"),
+        None,
+        OperatorEventType::TurnStarted,
+    );
+    orphan.payload = json!({
+        "client_request_id": "req-1",
+        "prompt_fingerprint": "2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824"
+    });
+    service.append_event(orphan).unwrap();
+
+    let error = service
+        .start_turn("default", StartTurnRequest::auto("req-1", "hello"))
+        .unwrap_err();
+    assert!(
+        error.to_string().contains("route policy"),
+        "missing legacy binding must be explicit: {error}"
+    );
+    assert!(service.thread("default").unwrap().turns[0].prompt.is_none());
 }
 
 #[test]
@@ -256,6 +291,89 @@ fn retry_with_same_client_request_and_different_prompt_is_rejected() {
         error.to_string().to_lowercase().contains("prompt"),
         "error should identify the retry payload mismatch: {error}"
     );
+}
+
+#[test]
+fn retry_binds_the_normalized_full_route_policy() {
+    let dir = tempfile::tempdir().unwrap();
+    let service = test_service(dir.path());
+    let original = StartTurnRequest::auto("req-1", "hello");
+    service.start_turn("default", original.clone()).unwrap();
+    let original_event_count = service
+        .events_after("default", None, 100)
+        .unwrap()
+        .events
+        .len();
+
+    let mut variants = Vec::new();
+    let mut request = original.clone();
+    request.route_policy.mode = RouteMode::LocalOnly;
+    variants.push(("mode", request));
+    let mut request = original.clone();
+    request.route_policy.privacy = "sovereign".into();
+    variants.push(("privacy", request));
+    let mut request = original.clone();
+    request.route_policy.turn_budget_usd = Some(0.5);
+    variants.push(("turn budget", request));
+    let mut request = original.clone();
+    request.route_policy.maximum_marginal_cost_usd = Some(0.1);
+    variants.push(("call budget", request));
+    let mut request = original.clone();
+    request.route_policy.minimum_quality_class = 4;
+    variants.push(("quality", request));
+    let mut request = original.clone();
+    request.route_policy.preferred_provider = Some("claude".into());
+    variants.push(("provider", request));
+    let mut request = original.clone();
+    request.route_policy.preferred_model = Some("claude-sonnet".into());
+    variants.push(("model", request));
+    let mut request = original.clone();
+    request.route_policy.allowed_models = vec!["claude-sonnet".into()];
+    variants.push(("allowed models", request));
+    let mut request = original.clone();
+    request.route_policy.excluded_models = vec!["qwen3.5:9b".into()];
+    variants.push(("excluded models", request));
+
+    for (field, request) in variants {
+        let error = service.start_turn("default", request).unwrap_err();
+        assert!(
+            error.to_string().contains("route policy"),
+            "{field} mismatch must reject as a route-policy mismatch: {error}"
+        );
+        assert_eq!(
+            service
+                .events_after("default", None, 100)
+                .unwrap()
+                .events
+                .len(),
+            original_event_count,
+            "{field} mismatch must not append"
+        );
+    }
+}
+
+#[test]
+fn retry_accepts_semantically_equivalent_normalized_route_policy() {
+    let dir = tempfile::tempdir().unwrap();
+    let service = test_service(dir.path());
+    let mut original = StartTurnRequest::auto("req-1", "hello");
+    original.route_policy.preferred_provider = Some(" claude ".into());
+    original.route_policy.preferred_model = Some(" sonnet ".into());
+    original.route_policy.allowed_models = vec!["model-b".into(), "model-a".into()];
+    original.route_policy.excluded_models = vec!["model-z".into(), "model-y".into()];
+    original.route_policy.privacy = " STANDARD ".into();
+    let first = service.start_turn("default", original).unwrap();
+
+    let mut retry = StartTurnRequest::auto("req-1", "hello");
+    retry.route_policy.preferred_provider = Some("claude".into());
+    retry.route_policy.preferred_model = Some("sonnet".into());
+    retry.route_policy.allowed_models = vec!["model-a".into(), "model-b".into(), "model-a".into()];
+    retry.route_policy.excluded_models = vec!["model-y".into(), "model-z".into()];
+    retry.route_policy.privacy = "standard".into();
+    let duplicate = service.start_turn("default", retry).unwrap();
+
+    assert!(duplicate.duplicate);
+    assert_eq!(duplicate.turn_id, first.turn_id);
 }
 
 // ---------------------------------------------------------------------

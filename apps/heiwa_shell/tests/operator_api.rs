@@ -297,6 +297,15 @@ fn operator_boundary_rejects_bad_cursor_ids_and_turn_policy() {
         assert_eq!(response.body["error"]["code"], "invalid_request");
     }
 
+    let sensitive_thread = runtime.request(
+        "POST",
+        "/api/v1/operator/threads",
+        Some(TOKEN),
+        json!({"thread_id": "ghp_live-token"}),
+    );
+    assert_eq!(sensitive_thread.status, 400, "{}", sensitive_thread.body);
+    assert_eq!(sensitive_thread.body["error"]["code"], "invalid_id");
+
     let invalid_requests = [
         json!({"client_request_id": "", "prompt": "hi"}),
         json!({"client_request_id": "request-1", "prompt": ""}),

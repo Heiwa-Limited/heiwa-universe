@@ -56,9 +56,9 @@ pub enum RouteMode {
     Explicit,
 }
 
-/// Routing constraints attached to a single turn. Carried verbatim inside
-/// the `turn_started` event payload so it is durable and replayable, and
-/// echoed back on [`OperatorTurnView`].
+/// Routing constraints attached to a single turn. The normalized policy is
+/// carried inside the `turn_started` event payload so it is durable and
+/// replayable, and echoed back on [`OperatorTurnView`].
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize, PartialEq)]
 pub struct TurnRoutePolicy {
     pub mode: RouteMode,
@@ -70,6 +70,54 @@ pub struct TurnRoutePolicy {
     pub maximum_marginal_cost_usd: Option<f64>,
     pub turn_budget_usd: Option<f64>,
     pub privacy: String,
+}
+
+impl TurnRoutePolicy {
+    /// Canonicalize set-like and operator-entered fields before durable
+    /// binding. Model allow/exclude order has no routing meaning, while
+    /// provider/model/privacy whitespace and privacy casing must not turn a
+    /// safe retry into a different request.
+    pub fn normalized(&self) -> Self {
+        fn normalized_optional(value: &Option<String>) -> Option<String> {
+            value
+                .as_deref()
+                .map(str::trim)
+                .filter(|value| !value.is_empty())
+                .map(str::to_string)
+        }
+
+        fn normalized_models(values: &[String]) -> Vec<String> {
+            let mut values = values
+                .iter()
+                .map(|value| value.trim())
+                .filter(|value| !value.is_empty())
+                .map(str::to_string)
+                .collect::<Vec<_>>();
+            values.sort_unstable();
+            values.dedup();
+            values
+        }
+
+        Self {
+            mode: self.mode.clone(),
+            preferred_provider: normalized_optional(&self.preferred_provider),
+            preferred_model: normalized_optional(&self.preferred_model),
+            allowed_models: normalized_models(&self.allowed_models),
+            excluded_models: normalized_models(&self.excluded_models),
+            minimum_quality_class: self.minimum_quality_class,
+            maximum_marginal_cost_usd: self.maximum_marginal_cost_usd.map(|value| {
+                if value == 0.0 {
+                    0.0
+                } else {
+                    value
+                }
+            }),
+            turn_budget_usd: self
+                .turn_budget_usd
+                .map(|value| if value == 0.0 { 0.0 } else { value }),
+            privacy: self.privacy.trim().to_ascii_lowercase(),
+        }
+    }
 }
 
 /// A caller's request to start (or resubmit) one turn.
@@ -234,10 +282,11 @@ impl OperatorSessionService {
         let thread_created_payload = json!({});
         let user_message_payload = json!({ "text": request.prompt });
         let prompt_fingerprint = prompt_fingerprint(&request.prompt);
+        let normalized_route_policy = request.route_policy.normalized();
         let turn_started_payload = json!({
             "client_request_id": request.client_request_id.clone(),
             "prompt_fingerprint": prompt_fingerprint,
-            "route_policy": request.route_policy.clone(),
+            "route_policy": normalized_route_policy.clone(),
         });
         for (event_type, payload) in [
             ("thread_created", &thread_created_payload),
@@ -256,7 +305,7 @@ impl OperatorSessionService {
             if let Some(turn) = folded.turns.iter().find(|turn| {
                 turn.client_request_id.as_deref() == Some(request.client_request_id.as_str())
             }) {
-                validate_retry_prompt(turn, &prompt_fingerprint)?;
+                validate_retry_binding(turn, &prompt_fingerprint, &normalized_route_policy)?;
                 if let Some(cursor) = &turn.user_message_cursor {
                     return Ok(TurnSubmission {
                         thread_id: thread_id.to_string(),
@@ -691,7 +740,11 @@ fn prompt_fingerprint(prompt: &str) -> String {
     digest.iter().map(|byte| format!("{byte:02x}")).collect()
 }
 
-fn validate_retry_prompt(turn: &FoldedTurn, retry_fingerprint: &str) -> Result<()> {
+fn validate_retry_binding(
+    turn: &FoldedTurn,
+    retry_fingerprint: &str,
+    retry_route_policy: &TurnRoutePolicy,
+) -> Result<()> {
     let stored_fingerprint = turn
         .prompt_fingerprint
         .clone()
@@ -705,6 +758,18 @@ fn validate_retry_prompt(turn: &FoldedTurn, retry_fingerprint: &str) -> Result<(
     if stored_fingerprint != retry_fingerprint {
         bail!(
             "rejected retry for turn {}: client_request_id was previously submitted with a different prompt",
+            turn.turn_id
+        );
+    }
+    let Some(stored_route_policy) = turn.route_policy.as_ref() else {
+        bail!(
+            "cannot safely retry turn {}: no durable route policy binding is available",
+            turn.turn_id
+        );
+    };
+    if stored_route_policy.normalized() != *retry_route_policy {
+        bail!(
+            "rejected retry for turn {}: client_request_id was previously submitted with a different route policy",
             turn.turn_id
         );
     }

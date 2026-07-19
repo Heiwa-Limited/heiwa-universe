@@ -95,8 +95,9 @@ pub enum OperatorEventType {
 }
 
 /// One operator-facing runtime event: the durable record type appended to
-/// the operator journal. `payload` carries event-specific detail and is
-/// screened by [`find_sensitive`] before every append.
+/// the operator journal. The complete serialized event (metadata and
+/// event-specific `payload`) is screened by [`find_sensitive`] before every
+/// append.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct OperatorEvent {
     pub schema_version: u32,
@@ -186,14 +187,16 @@ impl OperatorJournal {
     }
 
     /// Append one event and return the cursor positioned immediately after
-    /// it. Rejects sensitive-looking payloads (see [`find_sensitive`])
+    /// it. Rejects sensitive-looking event metadata or payloads (see
+    /// [`find_sensitive`])
     /// before the stream file is created or opened, so a rejected append
     /// leaves no trace on disk. Otherwise: one `write_all` of the envelope
     /// line under the cross-process sidecar lock, then `sync_data`.
     pub fn append(&self, event: &OperatorEvent) -> Result<CursorEvent> {
-        if find_sensitive(&event.payload).is_some() {
+        let serialized_event = serde_json::to_value(event)?;
+        if find_sensitive(&serialized_event).is_some() {
             return Err(anyhow!(
-                "refused to append operator event: payload contains sensitive material"
+                "refused to append operator event: event contains sensitive material"
             ));
         }
 
@@ -201,7 +204,7 @@ impl OperatorJournal {
             "v": EVIDENCE_SCHEMA_VERSION,
             "at_ms": now_ms(),
             "kind": OPERATOR_STREAM_KIND,
-            "record": event,
+            "record": serialized_event,
         })
         .to_string();
         let mut bytes = line.into_bytes();
