@@ -509,6 +509,42 @@ impl OperatorSessionService {
         Ok(closed)
     }
 
+    /// Repair one specific nonterminal turn after its owning runner has
+    /// disappeared. This is deliberately narrower than startup recovery so a
+    /// duplicate submission cannot close unrelated work.
+    pub fn recover_turn(&self, thread_id: &str, turn_id: &str) -> Result<Option<CursorEvent>> {
+        let _write_transaction = self.lock_write_transaction()?;
+        let threads = materialize_all(&self.journal)?.threads;
+        let Some(turn) = threads
+            .get(thread_id)
+            .and_then(|thread| thread.turns.iter().find(|turn| turn.turn_id == turn_id))
+        else {
+            bail!("cannot recover unknown turn {turn_id} in thread {thread_id}");
+        };
+        if is_turn_terminal(&turn.status) {
+            return Ok(None);
+        }
+        let event = new_event(
+            thread_id,
+            Some(turn_id.to_string()),
+            None,
+            OperatorEventType::TurnInterrupted,
+            now_iso(),
+            OperatorActor {
+                kind: "runtime".to_string(),
+                id: "operator-session-recovery".to_string(),
+            },
+            json!({
+                "reason": if turn.cancel_requested {
+                    "OPERATOR_CANCELLED"
+                } else {
+                    "RUNTIME_RESTART"
+                }
+            }),
+        );
+        Ok(Some(self.journal.append(&event)?))
+    }
+
     fn lock_write_transaction(&self) -> Result<std::sync::MutexGuard<'_, ()>> {
         self.write_transaction
             .lock()
@@ -664,8 +700,30 @@ fn validate_event(threads: &HashMap<String, FoldedThread>, event: &OperatorEvent
             );
         }
 
+        if event.event_type == OperatorEventType::ApprovalDecided {
+            match approval_key(event) {
+                Some(key) if turn.pending_approvals.contains(&key) => {}
+                Some(_) => bail!(
+                    "rejected operator event {}: approval decision has no matching pending request",
+                    event.event_id
+                ),
+                None if event
+                    .payload
+                    .get("outcome")
+                    .and_then(|value| value.as_str())
+                    != Some("auto_approved") =>
+                {
+                    bail!(
+                        "rejected operator event {}: approval decision has no matching pending request",
+                        event.event_id
+                    );
+                }
+                None => {}
+            }
+        }
+
         if turn.cancel_requested {
-            let is_cancel_audit = is_cancellation_approval_audit(event);
+            let is_cancel_audit = is_cancellation_approval_audit(turn, event);
             if !is_cancel_audit
                 && (event.event_type != OperatorEventType::TurnInterrupted
                     || interruption_reason(event) != Some("OPERATOR_CANCELLED"))
@@ -789,7 +847,19 @@ fn interruption_reason(event: &OperatorEvent) -> Option<&str> {
     event.payload.get("reason").and_then(|value| value.as_str())
 }
 
-fn is_cancellation_approval_audit(event: &OperatorEvent) -> bool {
+fn approval_key(event: &OperatorEvent) -> Option<ApprovalKey> {
+    let call_id = event.call_id.clone()?;
+    if event.payload.get("call_id")?.as_str()? != call_id {
+        return None;
+    }
+    Some(ApprovalKey {
+        call_id,
+        request_id: event.payload.get("request_id")?.as_str()?.to_string(),
+        tool: event.payload.get("tool")?.as_str()?.to_string(),
+    })
+}
+
+fn is_cancellation_approval_audit(turn: &FoldedTurn, event: &OperatorEvent) -> bool {
     event.event_type == OperatorEventType::ApprovalDecided
         && event
             .payload
@@ -798,21 +868,16 @@ fn is_cancellation_approval_audit(event: &OperatorEvent) -> bool {
             == Some("cancelled")
         && event.payload.get("reason").and_then(|value| value.as_str())
             == Some("OPERATOR_CANCELLED")
-        && event
-            .payload
-            .get("request_id")
-            .and_then(|value| value.as_str())
-            .is_some_and(|value| !value.is_empty())
-        && event
-            .payload
-            .get("tool")
-            .and_then(|value| value.as_str())
-            .is_some_and(|value| !value.is_empty())
-        && event.call_id.as_deref()
-            == event
-                .payload
-                .get("call_id")
-                .and_then(|value| value.as_str())
+        && approval_key(event).is_some_and(|key| {
+            !key.request_id.is_empty()
+                && !key.tool.is_empty()
+                && event
+                    .payload
+                    .get("call_id")
+                    .and_then(|value| value.as_str())
+                    == Some(key.call_id.as_str())
+                && turn.pending_approvals.contains(&key)
+        })
 }
 
 // ---------------------------------------------------------------------
@@ -830,6 +895,14 @@ struct FoldedTurn {
     user_message_cursor: Option<String>,
     started_at: String,
     route_policy: Option<TurnRoutePolicy>,
+    pending_approvals: HashSet<ApprovalKey>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+struct ApprovalKey {
+    call_id: String,
+    request_id: String,
+    tool: String,
 }
 
 #[derive(Debug, Clone)]
@@ -1026,6 +1099,8 @@ fn apply_to_existing_thread(
         OperatorEventType::TurnInterrupted => apply_terminal(entry, event, "interrupted"),
         OperatorEventType::Blocker => apply_terminal(entry, event, "blocked"),
         OperatorEventType::TurnCancelRequested => apply_turn_cancel_requested(entry, event),
+        OperatorEventType::ApprovalRequested => apply_approval_requested(entry, event),
+        OperatorEventType::ApprovalDecided => apply_approval_decided(entry, event),
         OperatorEventType::RoutePlanned
         | OperatorEventType::RouteAttempted
         | OperatorEventType::RouteCompleted
@@ -1034,8 +1109,6 @@ fn apply_to_existing_thread(
         | OperatorEventType::AssistantCompleted
         | OperatorEventType::ToolCallStarted
         | OperatorEventType::ToolCallCompleted
-        | OperatorEventType::ApprovalRequested
-        | OperatorEventType::ApprovalDecided
         | OperatorEventType::ArtifactCreated
         | OperatorEventType::TestResult
         | OperatorEventType::ReceiptLinked
@@ -1084,6 +1157,7 @@ fn apply_turn_started(entry: &mut FoldedThread, event: &OperatorEvent) -> bool {
         user_message_cursor: None,
         started_at: event.occurred_at.clone(),
         route_policy,
+        pending_approvals: HashSet::new(),
     });
     true
 }
@@ -1147,6 +1221,46 @@ fn apply_turn_cancel_requested(entry: &mut FoldedThread, event: &OperatorEvent) 
     true
 }
 
+fn apply_approval_requested(entry: &mut FoldedThread, event: &OperatorEvent) -> bool {
+    let Some(turn_id) = &event.turn_id else {
+        return false;
+    };
+    let Some(turn) = entry.turns.iter_mut().find(|turn| &turn.turn_id == turn_id) else {
+        return false;
+    };
+    if is_turn_terminal(&turn.status) || turn.cancel_requested {
+        return false;
+    }
+    approval_key(event)
+        .map(|key| turn.pending_approvals.insert(key))
+        .unwrap_or(true)
+}
+
+fn apply_approval_decided(entry: &mut FoldedThread, event: &OperatorEvent) -> bool {
+    let Some(turn_id) = &event.turn_id else {
+        return false;
+    };
+    let Some(turn) = entry.turns.iter_mut().find(|turn| &turn.turn_id == turn_id) else {
+        return false;
+    };
+    if is_turn_terminal(&turn.status) {
+        return false;
+    }
+    if turn.cancel_requested && !is_cancellation_approval_audit(turn, event) {
+        return false;
+    }
+    match approval_key(event) {
+        Some(key) => turn.pending_approvals.remove(&key),
+        None => {
+            event
+                .payload
+                .get("outcome")
+                .and_then(|value| value.as_str())
+                == Some("auto_approved")
+        }
+    }
+}
+
 fn apply_nonterminal_touch(entry: &mut FoldedThread, event: &OperatorEvent) -> bool {
     let Some(turn_id) = &event.turn_id else {
         return true; // A valid thread-scoped note.
@@ -1154,7 +1268,7 @@ fn apply_nonterminal_touch(entry: &mut FoldedThread, event: &OperatorEvent) -> b
     match entry.turns.iter_mut().find(|turn| &turn.turn_id == turn_id) {
         Some(turn)
             if is_turn_terminal(&turn.status)
-                || (turn.cancel_requested && !is_cancellation_approval_audit(event)) =>
+                || (turn.cancel_requested && !is_cancellation_approval_audit(turn, event)) =>
         {
             false
         }
@@ -1168,7 +1282,7 @@ mod tests {
     use std::sync::mpsc;
     use std::time::Duration;
 
-    use heiwa_evidence::{OperatorActor, OperatorEventType, OperatorJournal};
+    use heiwa_evidence::{OperatorActor, OperatorEvent, OperatorEventType, OperatorJournal};
     use serde_json::json;
 
     use super::{new_event, now_iso, OperatorSessionService, StartTurnRequest};
@@ -1235,6 +1349,172 @@ mod tests {
                 }),
             ))
             .unwrap_err();
-        assert!(error.to_string().contains("pending cancellation"));
+        assert!(error.to_string().contains("matching pending request"));
+    }
+
+    fn append_approval_requested(
+        service: &OperatorSessionService,
+        turn_id: &str,
+        call_id: &str,
+        request_id: &str,
+        tool: &str,
+    ) {
+        service
+            .append_event(new_event(
+                "default",
+                Some(turn_id.to_string()),
+                Some(call_id.to_string()),
+                OperatorEventType::ApprovalRequested,
+                now_iso(),
+                OperatorActor {
+                    kind: "runtime".into(),
+                    id: "test".into(),
+                },
+                json!({"request_id": request_id, "tool": tool, "call_id": call_id}),
+            ))
+            .unwrap();
+    }
+
+    fn append_cancel_requested(service: &OperatorSessionService, turn_id: &str) {
+        service
+            .append_event(new_event(
+                "default",
+                Some(turn_id.to_string()),
+                None,
+                OperatorEventType::TurnCancelRequested,
+                now_iso(),
+                OperatorActor {
+                    kind: "operator".into(),
+                    id: "test".into(),
+                },
+                json!({"reason": "OPERATOR_REQUEST"}),
+            ))
+            .unwrap();
+    }
+
+    fn cancellation_decision(
+        turn_id: &str,
+        call_id: &str,
+        request_id: &str,
+        tool: &str,
+    ) -> OperatorEvent {
+        new_event(
+            "default",
+            Some(turn_id.to_string()),
+            Some(call_id.to_string()),
+            OperatorEventType::ApprovalDecided,
+            now_iso(),
+            OperatorActor {
+                kind: "runtime".into(),
+                id: "test".into(),
+            },
+            json!({
+                "request_id": request_id,
+                "tool": tool,
+                "call_id": call_id,
+                "outcome": "cancelled",
+                "reason": "OPERATOR_CANCELLED",
+            }),
+        )
+    }
+
+    fn started_service() -> (tempfile::TempDir, OperatorSessionService, String) {
+        let dir = tempfile::tempdir().unwrap();
+        let service =
+            OperatorSessionService::new(OperatorJournal::new(dir.path().to_path_buf()).unwrap());
+        let turn_id = service
+            .start_turn(
+                "default",
+                StartTurnRequest::auto("approval-correlation", "hello"),
+            )
+            .unwrap()
+            .turn_id;
+        (dir, service, turn_id)
+    }
+
+    #[test]
+    fn pending_cancel_rejects_audit_without_prior_request() {
+        let (_dir, service, turn_id) = started_service();
+        append_cancel_requested(&service, &turn_id);
+        assert!(service
+            .append_event(cancellation_decision(
+                &turn_id,
+                "call-1",
+                "request-1",
+                "app.deploy"
+            ))
+            .is_err());
+    }
+
+    #[test]
+    fn pending_cancel_rejects_mismatched_approval_audit() {
+        let (_dir, service, turn_id) = started_service();
+        append_approval_requested(&service, &turn_id, "call-1", "request-1", "app.deploy");
+        append_cancel_requested(&service, &turn_id);
+        assert!(service
+            .append_event(cancellation_decision(
+                &turn_id,
+                "call-2",
+                "request-1",
+                "app.deploy"
+            ))
+            .is_err());
+        assert!(service
+            .append_event(cancellation_decision(
+                &turn_id,
+                "call-1",
+                "request-2",
+                "app.deploy"
+            ))
+            .is_err());
+        assert!(service
+            .append_event(cancellation_decision(
+                &turn_id,
+                "call-1",
+                "request-1",
+                "fs.write"
+            ))
+            .is_err());
+    }
+
+    #[test]
+    fn pending_cancel_rejects_already_decided_approval_audit() {
+        let (_dir, service, turn_id) = started_service();
+        append_approval_requested(&service, &turn_id, "call-1", "request-1", "app.deploy");
+        service
+            .append_event(new_event(
+                "default",
+                Some(turn_id.clone()),
+                Some("call-1".into()),
+                OperatorEventType::ApprovalDecided,
+                now_iso(),
+                OperatorActor { kind: "runtime".into(), id: "test".into() },
+                json!({"request_id": "request-1", "tool": "app.deploy", "call_id": "call-1", "outcome": "approved"}),
+            ))
+            .unwrap();
+        append_cancel_requested(&service, &turn_id);
+        assert!(service
+            .append_event(cancellation_decision(
+                &turn_id,
+                "call-1",
+                "request-1",
+                "app.deploy"
+            ))
+            .is_err());
+    }
+
+    #[test]
+    fn pending_cancel_accepts_matching_pending_approval_audit() {
+        let (_dir, service, turn_id) = started_service();
+        append_approval_requested(&service, &turn_id, "call-1", "request-1", "app.deploy");
+        append_cancel_requested(&service, &turn_id);
+        service
+            .append_event(cancellation_decision(
+                &turn_id,
+                "call-1",
+                "request-1",
+                "app.deploy",
+            ))
+            .unwrap();
     }
 }

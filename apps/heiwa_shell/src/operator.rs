@@ -45,6 +45,10 @@ impl ActiveTurnRegistry {
     pub fn remove(&self, turn_id: &str) {
         self.turns.lock().unwrap().remove(turn_id);
     }
+
+    pub fn contains(&self, turn_id: &str) -> bool {
+        self.turns.lock().unwrap().contains_key(turn_id)
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -252,6 +256,7 @@ pub struct OperatorTurnRunner {
     sessions: Arc<OperatorSessionService>,
     executor: Arc<dyn OperatorModelExecutor>,
     active: ActiveTurnRegistry,
+    submissions: Arc<Mutex<()>>,
     active_threads: Arc<Mutex<HashMap<String, String>>>,
     frames: broadcast::Sender<OperatorStreamFrame>,
     artifacts: Arc<dyn OperatorArtifactStore>,
@@ -268,6 +273,7 @@ impl OperatorTurnRunner {
             sessions,
             executor,
             active: ActiveTurnRegistry::default(),
+            submissions: Arc::new(Mutex::new(())),
             active_threads: Arc::new(Mutex::new(HashMap::new())),
             frames,
             artifacts: Arc::new(LocalArtifactStore),
@@ -299,6 +305,10 @@ impl OperatorTurnRunner {
         request: StartTurnRequest,
         work: OperatorTurnWork,
     ) -> Result<OperatorTurnHandle> {
+        let _submission = self
+            .submissions
+            .lock()
+            .map_err(|_| anyhow!("operator submission mutex poisoned"))?;
         let route_policy = request.route_policy.clone();
         let frames = self.subscribe();
         let submission = self.sessions.start_turn(thread_id, request)?;
@@ -316,6 +326,15 @@ impl OperatorTurnRunner {
                     .run_and_close(thread_id, turn_id, route_policy, work, cancel)
                     .await;
             });
+        } else if !self.active.contains(&submission.turn_id) {
+            if let Some(row) = self
+                .sessions
+                .recover_turn(&submission.thread_id, &submission.turn_id)?
+            {
+                let _ = self
+                    .frames
+                    .send(OperatorStreamFrame::Durable(Box::new(row)));
+            }
         }
         let (cursor, replay_complete) = if submission.duplicate {
             (String::new(), false)
@@ -1479,6 +1498,49 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn operator_concurrent_duplicate_does_not_recover_registering_turn() {
+        let dir = tempfile::tempdir().unwrap();
+        let sessions = service(dir.path());
+        let executor = Arc::new(RecordingExecutor::with_sessions(sessions.clone()));
+        executor.block.store(true, Ordering::SeqCst);
+        let runner = OperatorTurnRunner::new(sessions.clone(), executor.clone());
+        let request = StartTurnRequest::auto("serialized-duplicate", "hello");
+        let duplicate_request = request.clone();
+        let (first, second) = tokio::join!(
+            async {
+                runner.submit(
+                    "default",
+                    request,
+                    OperatorTurnWork::Model(Box::new(model_turn())),
+                )
+            },
+            async {
+                runner.submit(
+                    "default",
+                    duplicate_request,
+                    OperatorTurnWork::Model(Box::new(model_turn())),
+                )
+            }
+        );
+        let first = first.unwrap();
+        let second = second.unwrap();
+        tokio::time::timeout(
+            std::time::Duration::from_secs(2),
+            executor.started.notified(),
+        )
+        .await
+        .unwrap();
+        assert_eq!(executor.calls.load(Ordering::SeqCst), 1);
+        assert!(first.duplicate ^ second.duplicate);
+        let rows = sessions.events_after("default", None, 64).unwrap().events;
+        assert!(!rows.iter().any(|row| {
+            row.event.event_type == OperatorEventType::TurnInterrupted
+                && row.event.payload["reason"] == "RUNTIME_RESTART"
+        }));
+        runner.request_cancel(&first.turn_id).unwrap();
+    }
+
+    #[tokio::test]
     async fn operator_cancel_intent_is_durable_before_signal_and_runner_cleans_up() {
         let dir = tempfile::tempdir().unwrap();
         let sessions = service(dir.path());
@@ -1560,6 +1622,57 @@ mod tests {
         std::fs::rename(&backup, &stream).unwrap();
         assert!(runner.request_cancel(&handle.turn_id).unwrap());
         wait_for_terminal(&mut handle).await;
+    }
+
+    #[tokio::test]
+    async fn operator_duplicate_repairs_orphan_after_terminal_append_failure() {
+        let dir = tempfile::tempdir().unwrap();
+        let sessions = service(dir.path());
+        let executor = Arc::new(RecordingExecutor::with_sessions(sessions.clone()));
+        executor.block.store(true, Ordering::SeqCst);
+        let runner = OperatorTurnRunner::new(sessions.clone(), executor.clone());
+        let request = StartTurnRequest::auto("orphan-repair", "hello");
+        let mut original = runner
+            .submit(
+                "default",
+                request.clone(),
+                OperatorTurnWork::Model(Box::new(model_turn())),
+            )
+            .unwrap();
+        tokio::time::timeout(
+            std::time::Duration::from_secs(2),
+            executor.started.notified(),
+        )
+        .await
+        .unwrap();
+        let stream = dir.path().join("operator_events.jsonl");
+        let backup = dir.path().join("operator_events.backup");
+        std::fs::rename(&stream, &backup).unwrap();
+        std::fs::create_dir(&stream).unwrap();
+        assert!(runner.active_turns().signal_cancel(&original.turn_id));
+        let frames = wait_for_terminal(&mut original).await;
+        assert!(frames
+            .iter()
+            .any(|frame| matches!(frame, OperatorStreamFrame::Error { .. })));
+        std::fs::remove_dir(&stream).unwrap();
+        std::fs::rename(&backup, &stream).unwrap();
+
+        let mut duplicate = runner
+            .submit(
+                "default",
+                request,
+                OperatorTurnWork::Model(Box::new(model_turn())),
+            )
+            .unwrap();
+        assert!(duplicate.duplicate);
+        let frames = wait_for_terminal(&mut duplicate).await;
+        assert!(frames.iter().any(|frame| matches!(
+            frame,
+            OperatorStreamFrame::Durable(row)
+                if row.event.event_type == OperatorEventType::TurnInterrupted
+                    && row.event.payload["reason"] == "RUNTIME_RESTART"
+        )));
+        assert_eq!(executor.calls.load(Ordering::SeqCst), 1);
     }
 
     #[tokio::test]
