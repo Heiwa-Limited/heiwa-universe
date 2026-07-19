@@ -1,6 +1,7 @@
 use anyhow::{anyhow, Result};
 use heiwa_protocol::ModelTier;
 
+use super::call::{plan_model_call, CostTruth, ModelCallCandidate, ModelCallRequest};
 use super::policy::{DrexDecision, DrexPolicy, ExecutionMode, ResolutionTier};
 use super::scorer::evaluate_drex;
 use super::vector::DrexVector;
@@ -136,9 +137,44 @@ pub fn plan_route(
         0.8
     };
     let decision = evaluate_drex(&vector, policy, 0.95, runtime_fit, 0.65);
-    let selected_model = select_model_tier(ingress, &initial_runtime_hint, &decision, model_tiers);
-
     let required_capabilities = required_model_capabilities(ingress);
+    let request = ModelCallRequest {
+        thread_id: "legacy_route".to_string(),
+        turn_id: "legacy_route".to_string(),
+        call_id: "legacy_route".to_string(),
+        intent: ingress.intent.clone(),
+        stage: "legacy_route".to_string(),
+        raw_text: ingress.raw_text.clone(),
+        privacy: ingress.privacy.clone(),
+        required_capabilities: required_capabilities
+            .iter()
+            .map(|capability| (*capability).to_string())
+            .collect(),
+        required_context_tokens: ingress.required_context_tokens,
+        minimum_quality_class: minimum_quality_class(ingress),
+        minimum_success_rate: 0.0,
+        maximum_marginal_cost_usd: None,
+        preferred_provider: None,
+        preferred_model: None,
+        allowed_models: Vec::new(),
+        excluded_models: Vec::new(),
+    };
+    let candidates: Vec<ModelCallCandidate> = model_tiers
+        .iter()
+        .cloned()
+        .map(|tier| ModelCallCandidate {
+            connected: tier.enabled,
+            adapter_capable: !is_local_provider(&tier.provider)
+                || tier.vram_requirement_mb <= ingress.available_vram_mb,
+            quota_available: true,
+            marginal_cost_usd: Some(tier.cost_per_turn),
+            cost_truth: cost_truth_for_tier(&tier),
+            tier,
+        })
+        .collect();
+    let call_plan = plan_model_call(&request, &candidates, policy)?;
+    let selected_model = call_plan.selected.map(|candidate| candidate.tier);
+
     let (execution_mode, runtime_hint, routing_metadata) = if let Some(ref tier) = selected_model {
         let execution_mode = execution_mode_for_tier(tier);
         let runtime_hint = if matches!(execution_mode, ExecutionMode::LocalModel) {
@@ -150,11 +186,15 @@ pub fn plan_route(
             execution_mode,
             runtime_hint,
             json!({
-                "reason": "best_score",
+                "reason": call_plan.selection_reason,
                 "mode": execution_mode_label(execution_mode),
                 "model_id": tier.model_id,
                 "provider": tier.provider,
                 "required_capabilities": required_capabilities,
+                "cost_truth": call_plan.selected_cost_truth,
+                "admitted_ids": call_plan.admitted_ids,
+                "rejected": call_plan.rejected,
+                "policy_version": call_plan.policy_version,
             })
             .to_string(),
         )
@@ -171,7 +211,26 @@ pub fn plan_route(
     })
 }
 
-fn build_drex_vector(
+fn minimum_quality_class(ingress: &DrexIngress) -> u8 {
+    match ingress.risk.as_str() {
+        "critical" | "high" => 3,
+        "medium" => 2,
+        _ if ingress.intent == "code" && ingress.privacy != "sovereign" => 3,
+        _ => 1,
+    }
+}
+
+fn cost_truth_for_tier(tier: &ModelTier) -> CostTruth {
+    if tier.cost_per_turn == 0.0 && is_local_provider(&tier.provider) {
+        CostTruth::LocalZeroCost
+    } else if tier.cost_per_turn == 0.0 {
+        CostTruth::TargetOnly
+    } else {
+        CostTruth::ProxyEstimate
+    }
+}
+
+pub(crate) fn build_drex_vector(
     intent: &str,
     risk: &str,
     raw_text: &str,
@@ -290,90 +349,6 @@ fn runtime_hint(ingress: &DrexIngress, vector: &DrexVector) -> String {
     "cloud".to_string()
 }
 
-fn select_model_tier(
-    ingress: &DrexIngress,
-    runtime_hint: &str,
-    decision: &DrexDecision,
-    model_tiers: &[ModelTier],
-) -> Option<ModelTier> {
-    let min_capability_class = match ingress.risk.as_str() {
-        "critical" | "high" => 3,
-        "medium" => 2,
-        _ => 1,
-    };
-    let required_capabilities = required_model_capabilities(ingress);
-    let local_only = ingress.privacy == "sovereign" || is_local_runtime(runtime_hint);
-    let compatible: Vec<&ModelTier> = model_tiers
-        .iter()
-        .filter(|tier| tier.enabled)
-        .filter(|tier| tier.capability_class >= min_capability_class)
-        .filter(|tier| {
-            tier.max_context_tokens >= ingress.required_context_tokens
-                || ingress.required_context_tokens == 0
-        })
-        .filter(|tier| tier.vram_requirement_mb <= ingress.available_vram_mb || !local_only)
-        .filter(|tier| !local_only || is_local_provider(&tier.provider))
-        .filter(|tier| {
-            required_capabilities
-                .iter()
-                .all(|capability| tier_has_strength(tier, capability))
-        })
-        .filter(|tier| {
-            if ingress.intent == "code" {
-                tier_has_strength(tier, "advanced_coding") || tier.capability_class >= 3
-            } else {
-                true
-            }
-        })
-        .collect();
-
-    let local_candidates: Vec<&ModelTier> = compatible
-        .iter()
-        .copied()
-        .filter(|tier| is_local_provider(&tier.provider))
-        .collect();
-
-    if local_only {
-        return best_tier(&local_candidates, ingress, decision);
-    }
-
-    if should_prefer_local(ingress, decision, &local_candidates) {
-        if let Some(best_local) = best_tier(&local_candidates, ingress, decision) {
-            return Some(best_local);
-        }
-    }
-
-    best_tier(&compatible, ingress, decision)
-}
-
-fn model_score(tier: &ModelTier, ingress: &DrexIngress, decision: &DrexDecision) -> f64 {
-    let mut score = tier.last_success_rate;
-
-    if tier.vram_requirement_mb <= ingress.available_vram_mb {
-        score += 1.5;
-    }
-    if tier.max_context_tokens >= ingress.required_context_tokens {
-        score += 1.5;
-    }
-    if tier.kv_cache_strategy == "turboquant" && ingress.required_context_tokens >= 16_384 {
-        score += 0.75;
-    }
-    if tier.cost_per_turn == 0.0 {
-        score += 0.5;
-    }
-    if tier.capability_class == 2 && decision.active_tier == ResolutionTier::Micro {
-        score += 0.25;
-    }
-    score += (tier.capability_class as f64) * 2.0;
-
-    // Strength bonuses
-    if ingress.intent == "code" && tier_has_strength(tier, "advanced_coding") {
-        score += 2.0;
-    }
-
-    score - (tier.cost_per_turn * 0.1) - ((tier.vram_requirement_mb as f64) / 32_768.0)
-}
-
 fn required_model_capabilities(ingress: &DrexIngress) -> Vec<&'static str> {
     let lowercase = ingress.raw_text.to_ascii_lowercase();
     let phrase_needles = [
@@ -412,7 +387,7 @@ fn required_model_capabilities(ingress: &DrexIngress) -> Vec<&'static str> {
     }
 }
 
-fn tier_has_strength(tier: &ModelTier, capability: &str) -> bool {
+pub(crate) fn tier_has_strength(tier: &ModelTier, capability: &str) -> bool {
     serde_json::from_str::<Vec<String>>(&tier.strengths_json)
         .map(|strengths| strengths.iter().any(|strength| strength == capability))
         .unwrap_or(false)
@@ -423,25 +398,12 @@ fn contains_word(text: &str, word: &str) -> bool {
         .any(|token| token == word)
 }
 
-fn is_local_provider(provider: &str) -> bool {
+pub(crate) fn is_local_provider(provider: &str) -> bool {
     matches!(provider, "ollama" | "local" | "vllm" | "litellm")
 }
 
 fn is_local_runtime(runtime: &str) -> bool {
     matches!(runtime, "macbook" | "boost" | "local")
-}
-
-fn best_tier(
-    candidates: &[&ModelTier],
-    ingress: &DrexIngress,
-    decision: &DrexDecision,
-) -> Option<ModelTier> {
-    candidates
-        .iter()
-        .max_by(|left, right| {
-            model_score(left, ingress, decision).total_cmp(&model_score(right, ingress, decision))
-        })
-        .map(|tier| (*tier).clone())
 }
 
 fn should_prefer_local(
