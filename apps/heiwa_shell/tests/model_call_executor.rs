@@ -11,11 +11,13 @@ mod model_call {
         ModelCallStage, PrivacyClass, SafetyClass,
     };
     use heiwa_evidence::{OperatorEventType, OperatorJournal};
+    use heiwa_loop::{LoopCallRequest, LoopModelCaller};
     use heiwa_protocol::ModelTier;
     use heiwa_provider::adapter::{Message, ProviderAdapter, Role, StreamEvent, TokenUsage};
     use heiwa_session::operator::{OperatorSessionService, StartTurnRequest};
     use heiwa_shell::model_calls::{
-        ModelCallError, ModelCallExecution, ModelCallExecutor, ProviderFailureClass,
+        ExecutorLoopCaller, ModelCallAttemptOutcome, ModelCallError, ModelCallExecution,
+        ModelCallExecutor, ProviderFailureClass,
     };
     use tokio::sync::{mpsc, watch};
 
@@ -27,6 +29,34 @@ mod model_call {
         sends: Arc<AtomicUsize>,
         error: String,
         sabotage_stream: Option<PathBuf>,
+    }
+
+    struct CountingDoneAdapter {
+        sends: Arc<AtomicUsize>,
+    }
+
+    #[async_trait]
+    impl ProviderAdapter for CountingDoneAdapter {
+        async fn send(
+            &self,
+            _model: &str,
+            _messages: &[Message],
+            stream_tx: mpsc::Sender<StreamEvent>,
+        ) -> Result<()> {
+            self.sends.fetch_add(1, Ordering::SeqCst);
+            stream_tx
+                .send(StreamEvent::Done(TokenUsage::default()))
+                .await?;
+            Ok(())
+        }
+
+        async fn interrupt(&self) -> Result<()> {
+            Ok(())
+        }
+
+        fn supported_models(&self) -> Vec<String> {
+            vec![]
+        }
     }
 
     #[async_trait]
@@ -61,6 +91,65 @@ mod model_call {
     struct BlockingAdapter {
         started: Arc<tokio::sync::Notify>,
         interrupted: Arc<AtomicBool>,
+    }
+
+    struct TokenThenWaitAdapter {
+        release: Arc<tokio::sync::Notify>,
+    }
+
+    #[async_trait]
+    impl ProviderAdapter for TokenThenWaitAdapter {
+        async fn send(
+            &self,
+            _model: &str,
+            _messages: &[Message],
+            stream_tx: mpsc::Sender<StreamEvent>,
+        ) -> Result<()> {
+            stream_tx
+                .send(StreamEvent::Token("first".to_string()))
+                .await?;
+            self.release.notified().await;
+            stream_tx
+                .send(StreamEvent::Done(TokenUsage::default()))
+                .await?;
+            Ok(())
+        }
+
+        async fn interrupt(&self) -> Result<()> {
+            Ok(())
+        }
+
+        fn supported_models(&self) -> Vec<String> {
+            vec![]
+        }
+    }
+
+    struct DoneAndCancelAdapter {
+        cancel: watch::Sender<bool>,
+    }
+
+    #[async_trait]
+    impl ProviderAdapter for DoneAndCancelAdapter {
+        async fn send(
+            &self,
+            _model: &str,
+            _messages: &[Message],
+            stream_tx: mpsc::Sender<StreamEvent>,
+        ) -> Result<()> {
+            stream_tx
+                .send(StreamEvent::Done(TokenUsage::default()))
+                .await?;
+            self.cancel.send(true)?;
+            Ok(())
+        }
+
+        async fn interrupt(&self) -> Result<()> {
+            Ok(())
+        }
+
+        fn supported_models(&self) -> Vec<String> {
+            vec![]
+        }
     }
 
     #[async_trait]
@@ -198,6 +287,7 @@ mod model_call {
             remaining_budget_usd: Some(1.0),
             max_attempts,
             cancel,
+            delta_tx: None,
         }
     }
 
@@ -255,6 +345,7 @@ mod model_call {
                 remaining_budget_usd: Some(1.0),
                 max_attempts: 3,
                 cancel: cancel_rx,
+                delta_tx: None,
             })
             .await
             .unwrap();
@@ -263,7 +354,19 @@ mod model_call {
         assert_eq!(result.model_id, "secondary-model");
         assert_eq!(result.text, "done");
         assert_eq!(result.attempts, 2);
-        assert_eq!(result.failed_models, vec!["primary-model"]);
+        assert_eq!(result.failed_models, vec!["primary/primary-model"]);
+        assert_eq!(result.cost_usd, 0.03);
+        assert_eq!(result.cost_truth, CostTruth::ProxyEstimate);
+        assert_eq!(result.attempt_records.len(), 2);
+        assert_eq!(
+            result.attempt_records[0].outcome,
+            ModelCallAttemptOutcome::Failed
+        );
+        assert_eq!(result.attempt_records[0].cost_usd, Some(0.01));
+        assert_eq!(
+            result.attempt_records[1].outcome,
+            ModelCallAttemptOutcome::Completed
+        );
 
         let events = service
             .events_after("thread-1", Some(&submission.cursor), 20)
@@ -650,5 +753,226 @@ mod model_call {
                 ..
             }
         ));
+    }
+
+    #[tokio::test]
+    async fn provider_qualified_exclusion_keeps_same_named_secondary_eligible() {
+        let (_evidence, service, submission) = service_and_turn();
+        let adapters: HashMap<String, Arc<dyn ProviderAdapter>> = HashMap::from([
+            (
+                "primary".to_string(),
+                Arc::new(EventAdapter {
+                    events: vec![StreamEvent::Error("rate_limited".to_string())],
+                }) as Arc<dyn ProviderAdapter>,
+            ),
+            (
+                "secondary".to_string(),
+                Arc::new(EventAdapter {
+                    events: vec![StreamEvent::Done(TokenUsage::default())],
+                }) as Arc<dyn ProviderAdapter>,
+            ),
+        ]);
+        let executor = ModelCallExecutor::new(
+            Arc::new(move |provider, _| adapters.get(provider).cloned()),
+            service,
+        );
+        let (_cancel_tx, cancel_rx) = watch::channel(false);
+
+        let result = executor
+            .execute(execution(
+                request("thread-1", &submission.turn_id),
+                vec![
+                    candidate(1, "primary", "shared-name", 0.01),
+                    candidate(2, "secondary", "shared-name", 0.02),
+                ],
+                3,
+                cancel_rx,
+            ))
+            .await
+            .unwrap();
+
+        assert_eq!(result.provider, "secondary");
+        assert_eq!(result.failed_models, vec!["primary/shared-name"]);
+    }
+
+    #[tokio::test]
+    async fn estimated_success_cost_is_returned_in_usage_and_cumulative_truth() {
+        let (_evidence, service, submission) = service_and_turn();
+        let adapter = Arc::new(EventAdapter {
+            events: vec![StreamEvent::Done(TokenUsage::default())],
+        }) as Arc<dyn ProviderAdapter>;
+        let executor = ModelCallExecutor::new(Arc::new(move |_, _| Some(adapter.clone())), service);
+        let (_cancel_tx, cancel_rx) = watch::channel(false);
+
+        let result = executor
+            .execute(execution(
+                request("thread-1", &submission.turn_id),
+                vec![candidate(1, "primary", "model", 0.25)],
+                1,
+                cancel_rx,
+            ))
+            .await
+            .unwrap();
+
+        assert_eq!(result.usage.cost_usd, 0.25);
+        assert_eq!(result.cost_usd, 0.25);
+        assert_eq!(result.cost_truth, CostTruth::TargetOnly);
+    }
+
+    #[tokio::test]
+    async fn cumulative_cost_overflow_stays_finite_and_downgrades_truth() {
+        let (_evidence, service, submission) = service_and_turn();
+        let adapters: HashMap<String, Arc<dyn ProviderAdapter>> = HashMap::from([
+            (
+                "primary".to_string(),
+                Arc::new(EventAdapter {
+                    events: vec![StreamEvent::Error("unavailable".to_string())],
+                }) as Arc<dyn ProviderAdapter>,
+            ),
+            (
+                "secondary".to_string(),
+                Arc::new(EventAdapter {
+                    events: vec![StreamEvent::Done(TokenUsage::default())],
+                }) as Arc<dyn ProviderAdapter>,
+            ),
+        ]);
+        let executor = ModelCallExecutor::new(
+            Arc::new(move |provider, _| adapters.get(provider).cloned()),
+            service,
+        );
+        let (_cancel_tx, cancel_rx) = watch::channel(false);
+        let mut model_request = request("thread-1", &submission.turn_id);
+        model_request.maximum_marginal_cost_usd = None;
+        let mut call = execution(
+            model_request,
+            vec![
+                candidate(1, "primary", "primary-model", f64::MAX),
+                candidate(2, "secondary", "secondary-model", f64::MAX),
+            ],
+            2,
+            cancel_rx,
+        );
+        call.remaining_budget_usd = None;
+
+        let result = executor.execute(call).await.unwrap();
+
+        assert_eq!(result.cost_usd, f64::MAX);
+        assert!(result.cost_usd.is_finite());
+        assert_eq!(result.cost_truth, CostTruth::CannotConfirm);
+    }
+
+    #[tokio::test]
+    async fn transient_delta_is_observable_before_provider_done() {
+        let (_evidence, service, submission) = service_and_turn();
+        let release = Arc::new(tokio::sync::Notify::new());
+        let adapter = Arc::new(TokenThenWaitAdapter {
+            release: release.clone(),
+        }) as Arc<dyn ProviderAdapter>;
+        let executor = Arc::new(ModelCallExecutor::new(
+            Arc::new(move |_, _| Some(adapter.clone())),
+            service,
+        ));
+        let (_cancel_tx, cancel_rx) = watch::channel(false);
+        let (delta_tx, mut delta_rx) = mpsc::unbounded_channel();
+        let mut call = execution(
+            request("thread-1", &submission.turn_id),
+            vec![candidate(1, "primary", "model", 0.01)],
+            1,
+            cancel_rx,
+        );
+        call.delta_tx = Some(delta_tx);
+        let task = tokio::spawn(async move { executor.execute(call).await });
+
+        assert!(matches!(
+            tokio::time::timeout(std::time::Duration::from_secs(1), delta_rx.recv())
+                .await
+                .unwrap(),
+            Some(StreamEvent::Token(text)) if text == "first"
+        ));
+        assert!(!task.is_finished(), "Done must still be pending");
+        release.notify_one();
+        assert_eq!(task.await.unwrap().unwrap().text, "first");
+    }
+
+    #[tokio::test]
+    async fn simultaneous_cancel_wins_over_done_and_no_completion_is_persisted() {
+        let (_evidence, service, submission) = service_and_turn();
+        let (cancel_tx, cancel_rx) = watch::channel(false);
+        let adapter =
+            Arc::new(DoneAndCancelAdapter { cancel: cancel_tx }) as Arc<dyn ProviderAdapter>;
+        let executor =
+            ModelCallExecutor::new(Arc::new(move |_, _| Some(adapter.clone())), service.clone());
+
+        let error = executor
+            .execute(execution(
+                request("thread-1", &submission.turn_id),
+                vec![candidate(1, "primary", "model", 0.01)],
+                1,
+                cancel_rx,
+            ))
+            .await
+            .unwrap_err();
+        assert!(matches!(error, ModelCallError::Cancelled));
+        let events = service
+            .events_after("thread-1", Some(&submission.cursor), 20)
+            .unwrap()
+            .events;
+        assert!(!events
+            .iter()
+            .any(|row| row.event.event_type == OperatorEventType::RouteCompleted));
+    }
+
+    #[tokio::test]
+    async fn executor_loop_caller_fails_high_risk_closed_until_explicitly_approved() {
+        let evidence = tempfile::tempdir().unwrap();
+        let service = Arc::new(OperatorSessionService::new(
+            OperatorJournal::new(evidence.path().to_path_buf()).unwrap(),
+        ));
+        let sends = Arc::new(AtomicUsize::new(0));
+        let adapter = Arc::new(CountingDoneAdapter {
+            sends: sends.clone(),
+        }) as Arc<dyn ProviderAdapter>;
+        let executor = Arc::new(ModelCallExecutor::new(
+            Arc::new(move |_, _| Some(adapter.clone())),
+            service,
+        ));
+        let caller = ExecutorLoopCaller::new(executor);
+
+        let make_request = |call_id: &str, safety: SafetyClass| {
+            let (_cancel_tx, cancel) = watch::channel(false);
+            LoopCallRequest {
+                thread_id: "loop-thread".to_string(),
+                turn_id: "unused".to_string(),
+                call_id: call_id.to_string(),
+                stage: ModelCallStage::Execution,
+                intent: "deploy".to_string(),
+                raw_text: "perform high-risk action".to_string(),
+                privacy: PrivacyClass::Standard,
+                risk: CallRisk::High,
+                safety,
+                messages: vec![Message {
+                    role: Role::User,
+                    content: "perform high-risk action".to_string(),
+                }],
+                candidates: vec![candidate(1, "primary", "model", 0.01)],
+                remaining_budget_usd: Some(1.0),
+                prior_failed_models: vec![],
+                max_attempts: 1,
+                cancel,
+            }
+        };
+
+        let error = caller
+            .call(make_request("unapproved-call", SafetyClass::Unapproved))
+            .await
+            .unwrap_err();
+        assert!(error.to_string().contains("authority_approval_required"));
+        assert_eq!(sends.load(Ordering::SeqCst), 0);
+
+        caller
+            .call(make_request("approved-call", SafetyClass::Approved))
+            .await
+            .unwrap();
+        assert_eq!(sends.load(Ordering::SeqCst), 1);
     }
 }

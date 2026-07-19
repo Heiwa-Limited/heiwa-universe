@@ -118,6 +118,7 @@ fn grant_tool_lease(scope: &mut ExecutionScope, name: &str, risk_class: RiskClas
 }
 
 /// Result of successfully routing a task to a model.
+#[derive(Clone)]
 struct RouteResult {
     candidates: Vec<ModelCallCandidate>,
     model_id: String,
@@ -129,6 +130,34 @@ struct RouteResult {
     privacy: String,
     request_id: String,
     turn_started_at: String,
+}
+
+fn resolved_route_after_model_call(planned: &RouteResult, result: &ModelCallResult) -> RouteResult {
+    let mut resolved = planned.clone();
+    resolved.provider = result.provider.clone();
+    resolved.model_id = result.model_id.clone();
+    resolved.provider_model_id = result.provider_model_id.clone();
+    resolved.rate_group = result.rate_group.clone();
+    resolved.candidates.retain(|candidate| {
+        let identity = format!("{}/{}", candidate.tier.provider, candidate.tier.model_id);
+        !result.failed_models.contains(&identity)
+    });
+    resolved.routing_metadata = serde_json::json!({
+        "planned": serde_json::from_str::<serde_json::Value>(&planned.routing_metadata)
+            .unwrap_or_else(|_| serde_json::Value::String(planned.routing_metadata.clone())),
+        "executed": {
+            "provider": result.provider,
+            "model_id": result.model_id,
+            "provider_model_id": result.provider_model_id,
+            "rate_group": result.rate_group,
+            "attempts": result.attempts,
+            "failed_models": result.failed_models,
+            "cost_usd": result.cost_usd,
+            "cost_truth": result.cost_truth,
+        }
+    })
+    .to_string();
+    resolved
 }
 
 #[derive(Debug, Clone)]
@@ -732,7 +761,7 @@ async fn main() -> Result<()> {
         }
         "loop" => {
             if args.len() < 3 {
-                println!("Usage: heiwa loop [max_turns] \"objective\" [--intent code] [--risk low] [--privacy standard]");
+                println!("Usage: heiwa loop [max_turns] \"objective\" [--intent code] [--risk low] [--privacy standard] [--approved]");
             } else {
                 let max_turns = args[2].parse::<u32>().unwrap_or(10);
                 let objective = if args.len() >= 4 {
@@ -759,6 +788,7 @@ async fn main() -> Result<()> {
                 } else {
                     "standard".to_string()
                 };
+                let approved = args.iter().any(|arg| arg == "--approved");
 
                 let config = heiwa_loop::LoopConfig {
                     user_id: identity.user_id,
@@ -769,6 +799,7 @@ async fn main() -> Result<()> {
                     risk,
                     privacy,
                     runtime: "any".to_string(),
+                    approved,
                 };
 
                 let mut registry = heiwa_provider::AccountRegistry::load();
@@ -1016,10 +1047,16 @@ async fn register_current_device() -> Result<()> {
 pub(crate) fn get_live_model_tiers(
     registry: &heiwa_provider::AccountRegistry,
 ) -> Vec<heiwa_protocol::ModelTier> {
-    registry
+    let mut models = registry
         .all_models()
         .into_iter()
         .filter(|m| provider_supports_loop_adapter(&m.provider))
+        .collect::<Vec<_>>();
+    models.sort_by_key(|model| live_model_identity(model));
+    let mut used_ids = std::collections::HashSet::new();
+
+    models
+        .into_iter()
         .map(|m| {
             let mut strengths = vec!["chat"];
             if m.supports_tools {
@@ -1032,8 +1069,16 @@ pub(crate) fn get_live_model_tiers(
                 strengths.push("advanced_coding");
             }
 
+            let mut id = stable_live_model_id(&m);
+            while !used_ids.insert(id) {
+                id = id.wrapping_add(1);
+                if id == 0 {
+                    id = 1;
+                }
+            }
+
             heiwa_protocol::ModelTier {
-                id: 0,
+                id,
                 model_id: m.model_id.clone(),
                 provider_model_id: m.provider_model_id.clone(),
                 provider: canonical_provider_id(&m.provider).to_string(),
@@ -1055,6 +1100,30 @@ pub(crate) fn get_live_model_tiers(
             }
         })
         .collect()
+}
+
+fn live_model_identity(model: &heiwa_provider::DetectedModel) -> String {
+    format!(
+        "{}|{}|{}|{}|{}",
+        canonical_provider_id(&model.provider),
+        model.model_id,
+        model.provider_model_id,
+        model.account_id,
+        model.rate_group
+    )
+}
+
+fn stable_live_model_id(model: &heiwa_provider::DetectedModel) -> u64 {
+    let mut hash = 0xcbf29ce484222325_u64;
+    for byte in live_model_identity(model).bytes() {
+        hash ^= u64::from(byte);
+        hash = hash.wrapping_mul(0x100000001b3);
+    }
+    if hash == 0 {
+        1
+    } else {
+        hash
+    }
 }
 
 /// Local evidence appender (backend pivot 2026-07-15: Lance + GitHub, no STDB).
@@ -1279,10 +1348,6 @@ async fn run_repl(use_cockpit: bool) -> Result<()> {
                         continue;
                     }
                     Ok(RouteOutcome::Routed(route)) => {
-                        pins.current_provider = route.provider.clone();
-                        pins.current_model = route.model_id.clone();
-                        record_route_evidence(&evidence_client, &route, &t);
-
                         let prepared = prepare_outbound_prompt_for_route(&route, &t);
                         let messages = build_messages_from_transcript(
                             &state.transcript,
@@ -1296,11 +1361,29 @@ async fn run_repl(use_cockpit: bool) -> Result<()> {
                             .collect::<Vec<_>>()
                             .join("\n");
                         let receipt_started = std::time::Instant::now();
+                        let (delta_tx, mut delta_rx) = tokio::sync::mpsc::unbounded_channel();
+                        let delta_task = tokio::spawn(async move {
+                            while let Some(delta) = delta_rx.recv().await {
+                                match delta {
+                                    heiwa_provider::adapter::StreamEvent::Token(text) => {
+                                        print!("{text}");
+                                        let _ = io::stdout().flush();
+                                    }
+                                    heiwa_provider::adapter::StreamEvent::ToolUse {
+                                        name, ..
+                                    } => {
+                                        println!("\n[tool: {name}]");
+                                    }
+                                    _ => {}
+                                }
+                            }
+                        });
                         let result = match execute_routed_model_call(
                             &route,
                             messages,
                             &state.session_id,
                             &t,
+                            Some(delta_tx),
                         )
                         .await
                         {
@@ -1311,10 +1394,13 @@ async fn run_repl(use_cockpit: bool) -> Result<()> {
                                 continue;
                             }
                         };
-                        let usage = Some(result.usage);
-                        let full_response = result.text;
-                        print!("{}", full_response);
-                        io::stdout().flush()?;
+                        let _ = delta_task.await;
+                        let resolved_route = resolved_route_after_model_call(&route, &result);
+                        pins.current_provider = resolved_route.provider.clone();
+                        pins.current_model = resolved_route.model_id.clone();
+                        record_route_evidence(&evidence_client, &resolved_route, &t);
+                        let usage = Some(usage_for_model_call(&result));
+                        let full_response = result.text.clone();
                         println!();
                         let response_for_receipt = full_response.clone();
                         append_state_block(&mut state, TranscriptBlock::Assistant(full_response));
@@ -1327,13 +1413,18 @@ async fn run_repl(use_cockpit: bool) -> Result<()> {
                                 );
                             }
                         }
-                        record_run_evidence(&evidence_client, &route, usage.as_ref());
+                        record_run_evidence(
+                            &evidence_client,
+                            &resolved_route,
+                            usage.as_ref(),
+                            Some(&result),
+                        );
                         let receipt_latency_ms = receipt_started.elapsed().as_millis() as i64;
                         if let Some(ref receipts) = receipts {
                             record_call_receipt(
                                 receipts,
                                 &rates,
-                                &route,
+                                &result,
                                 usage.as_ref(),
                                 &state.session_id,
                                 &input_text,
@@ -1401,6 +1492,7 @@ async fn run_repl(use_cockpit: bool) -> Result<()> {
                             risk: "low".to_string(),
                             privacy: "standard".to_string(),
                             runtime: "any".to_string(),
+                            approved: args.iter().any(|arg| arg == "--approved"),
                         };
 
                         let mut reg = heiwa_provider::AccountRegistry::load();
@@ -1519,18 +1611,6 @@ async fn run_cockpit_controller(
                                 continue;
                             }
                             Ok(RouteOutcome::Routed(route)) => {
-                                pins.current_provider = route.provider.clone();
-                                pins.current_model = route.model_id.clone();
-
-                                let _ = event_tx.send(CockpitEvent::RoutingUpdate(RoutingState {
-                                    current_provider: pins.current_provider.clone(),
-                                    current_model: pins.current_model.clone(),
-                                    mode: pins.cockpit_mode.label().to_string(),
-                                    explanation: Some(route.routing_metadata.clone()),
-                                }));
-
-                                record_route_evidence(&evidence_client, &route, &t);
-
                                 if pins.cockpit_mode == CockpitMode::Agentic {
                                     if route.provider != "ollama" {
                                         let _ = event_tx.send(CockpitEvent::TranscriptAppend(
@@ -1568,21 +1648,36 @@ async fn run_cockpit_controller(
                                         &event_tx,
                                     );
 
-                                    let (first_response, first_usage, first_error) =
-                                        collect_adapter_response(
-                                            &route,
-                                            messages.clone(),
-                                            &session_id,
-                                            &t,
-                                        )
-                                        .await;
-
-                                    if let Some(error) = first_error {
-                                        let _ = event_tx.send(CockpitEvent::StreamError(error));
-                                        let _ = event_tx
-                                            .send(CockpitEvent::StatusUpdate("ready".into()));
-                                        continue;
-                                    }
+                                    let first_result = match collect_adapter_response(
+                                        &route,
+                                        messages.clone(),
+                                        &session_id,
+                                        &t,
+                                    )
+                                    .await
+                                    {
+                                        Ok(result) => result,
+                                        Err(error) => {
+                                            let _ = event_tx.send(CockpitEvent::StreamError(error));
+                                            let _ = event_tx
+                                                .send(CockpitEvent::StatusUpdate("ready".into()));
+                                            continue;
+                                        }
+                                    };
+                                    let first_route =
+                                        resolved_route_after_model_call(&route, &first_result);
+                                    pins.current_provider = first_route.provider.clone();
+                                    pins.current_model = first_route.model_id.clone();
+                                    let _ =
+                                        event_tx.send(CockpitEvent::RoutingUpdate(RoutingState {
+                                            current_provider: pins.current_provider.clone(),
+                                            current_model: pins.current_model.clone(),
+                                            mode: pins.cockpit_mode.label().to_string(),
+                                            explanation: Some(first_route.routing_metadata.clone()),
+                                        }));
+                                    record_route_evidence(&evidence_client, &first_route, &t);
+                                    let first_response = first_result.text.clone();
+                                    let first_usage = Some(usage_for_model_call(&first_result));
 
                                     let tool_calls = agentic::parse_tool_calls(&first_response);
                                     if tool_calls.is_empty() {
@@ -1598,8 +1693,9 @@ async fn run_cockpit_controller(
                                         send_done_event(&event_tx, first_usage.as_ref());
                                         record_run_evidence(
                                             &evidence_client,
-                                            &route,
+                                            &first_route,
                                             first_usage.as_ref(),
+                                            Some(&first_result),
                                         );
                                         let _ = event_tx
                                             .send(CockpitEvent::StatusUpdate("ready".into()));
@@ -1612,8 +1708,8 @@ async fn run_cockpit_controller(
                                     match agentic::execute_tool_calls(
                                         pins.scope.clone(),
                                         tool_calls,
-                                        &route.provider,
-                                        &route.model_id,
+                                        &first_route.provider,
+                                        &first_route.model_id,
                                     )
                                     .await
                                     {
@@ -1656,34 +1752,75 @@ async fn run_cockpit_controller(
                                                 content: agentic::tool_result_prompt(&tool_entries),
                                             });
 
-                                            let (final_response, final_usage, final_error) =
-                                                collect_adapter_response(
-                                                    &route,
-                                                    messages,
-                                                    &session_id,
-                                                    &t,
-                                                )
-                                                .await;
-                                            if let Some(error) = final_error {
-                                                let _ =
-                                                    event_tx.send(CockpitEvent::StreamError(error));
-                                            } else {
-                                                let _ = event_tx.send(CockpitEvent::StreamToken(
-                                                    final_response.clone(),
-                                                ));
-                                                append_controller_block(
-                                                    &session_id,
-                                                    &mut transcript,
-                                                    TranscriptBlock::Assistant(final_response),
-                                                    &event_tx,
-                                                );
-                                                let usage = merge_usage(first_usage, final_usage);
-                                                send_done_event(&event_tx, usage.as_ref());
-                                                record_run_evidence(
-                                                    &evidence_client,
-                                                    &route,
-                                                    usage.as_ref(),
-                                                );
+                                            match collect_adapter_response(
+                                                &first_route,
+                                                messages,
+                                                &session_id,
+                                                &t,
+                                            )
+                                            .await
+                                            {
+                                                Err(error) => {
+                                                    let _ = event_tx
+                                                        .send(CockpitEvent::StreamError(error));
+                                                }
+                                                Ok(final_result) => {
+                                                    let aggregate_result =
+                                                        aggregate_model_call_results(
+                                                            &first_result,
+                                                            &final_result,
+                                                        );
+                                                    let final_route =
+                                                        resolved_route_after_model_call(
+                                                            &first_route,
+                                                            &aggregate_result,
+                                                        );
+                                                    pins.current_provider =
+                                                        final_route.provider.clone();
+                                                    pins.current_model =
+                                                        final_route.model_id.clone();
+                                                    let _ = event_tx.send(
+                                                        CockpitEvent::RoutingUpdate(RoutingState {
+                                                            current_provider: pins
+                                                                .current_provider
+                                                                .clone(),
+                                                            current_model: pins
+                                                                .current_model
+                                                                .clone(),
+                                                            mode: pins
+                                                                .cockpit_mode
+                                                                .label()
+                                                                .to_string(),
+                                                            explanation: Some(
+                                                                final_route
+                                                                    .routing_metadata
+                                                                    .clone(),
+                                                            ),
+                                                        }),
+                                                    );
+                                                    let final_response = final_result.text.clone();
+                                                    let final_usage = Some(usage_for_model_call(
+                                                        &aggregate_result,
+                                                    ));
+                                                    let _ =
+                                                        event_tx.send(CockpitEvent::StreamToken(
+                                                            final_response.clone(),
+                                                        ));
+                                                    append_controller_block(
+                                                        &session_id,
+                                                        &mut transcript,
+                                                        TranscriptBlock::Assistant(final_response),
+                                                        &event_tx,
+                                                    );
+                                                    let usage = final_usage;
+                                                    send_done_event(&event_tx, usage.as_ref());
+                                                    record_run_evidence(
+                                                        &evidence_client,
+                                                        &final_route,
+                                                        usage.as_ref(),
+                                                        Some(&aggregate_result),
+                                                    );
+                                                }
                                             }
                                         }
                                         Err(error) => {
@@ -1713,14 +1850,65 @@ async fn run_cockpit_controller(
                                     TranscriptBlock::User(t.clone()),
                                     &event_tx,
                                 );
-                                match execute_routed_model_call(&route, messages, &session_id, &t)
-                                    .await
+                                let (delta_tx, mut delta_rx) =
+                                    tokio::sync::mpsc::unbounded_channel();
+                                let delta_events = event_tx.clone();
+                                let delta_task = tokio::spawn(async move {
+                                    while let Some(delta) = delta_rx.recv().await {
+                                        match delta {
+                                            heiwa_provider::adapter::StreamEvent::Token(text) => {
+                                                let _ = delta_events
+                                                    .send(CockpitEvent::StreamToken(text));
+                                            }
+                                            heiwa_provider::adapter::StreamEvent::ToolUse {
+                                                name,
+                                                ..
+                                            } => {
+                                                let _ = delta_events.send(
+                                                    CockpitEvent::TranscriptAppend(
+                                                        TranscriptBlock::Tool(
+                                                            name,
+                                                            "executed".to_string(),
+                                                        ),
+                                                    ),
+                                                );
+                                            }
+                                            _ => {}
+                                        }
+                                    }
+                                });
+                                match execute_routed_model_call(
+                                    &route,
+                                    messages,
+                                    &session_id,
+                                    &t,
+                                    Some(delta_tx),
+                                )
+                                .await
                                 {
                                     Ok(result) => {
-                                        let usage = result.usage;
-                                        let full_response = result.text;
-                                        let _ = event_tx
-                                            .send(CockpitEvent::StreamToken(full_response.clone()));
+                                        let _ = delta_task.await;
+                                        let resolved_route =
+                                            resolved_route_after_model_call(&route, &result);
+                                        pins.current_provider = resolved_route.provider.clone();
+                                        pins.current_model = resolved_route.model_id.clone();
+                                        let _ = event_tx.send(CockpitEvent::RoutingUpdate(
+                                            RoutingState {
+                                                current_provider: pins.current_provider.clone(),
+                                                current_model: pins.current_model.clone(),
+                                                mode: pins.cockpit_mode.label().to_string(),
+                                                explanation: Some(
+                                                    resolved_route.routing_metadata.clone(),
+                                                ),
+                                            },
+                                        ));
+                                        record_route_evidence(
+                                            &evidence_client,
+                                            &resolved_route,
+                                            &t,
+                                        );
+                                        let usage = usage_for_model_call(&result);
+                                        let full_response = result.text.clone();
                                         append_controller_block(
                                             &session_id,
                                             &mut transcript,
@@ -1728,7 +1916,12 @@ async fn run_cockpit_controller(
                                             &event_tx,
                                         );
                                         send_done_event(&event_tx, Some(&usage));
-                                        record_run_evidence(&evidence_client, &route, Some(&usage));
+                                        record_run_evidence(
+                                            &evidence_client,
+                                            &resolved_route,
+                                            Some(&usage),
+                                            Some(&result),
+                                        );
                                     }
                                     Err(error) => {
                                         let _ = event_tx.send(CockpitEvent::StreamError(error));
@@ -2590,7 +2783,8 @@ fn resolve_adapter(provider: &str, model_id: &str) -> Result<Arc<dyn ProviderAda
 }
 
 fn model_call_candidate(tier: &heiwa_protocol::ModelTier) -> ModelCallCandidate {
-    let on_device = tier.rate_group == "local_ollama" && tier.vram_requirement_mb > 0;
+    let on_device = matches!(tier.provider.as_str(), "ollama" | "local")
+        && matches!(tier.rate_group.as_str(), "local" | "local_ollama");
     let marginal_cost_usd = if tier.cost_per_turn == 0.0 && !on_device {
         None
     } else {
@@ -2657,6 +2851,7 @@ async fn execute_routed_model_call(
     messages: Vec<Message>,
     thread_id: &str,
     raw_text: &str,
+    delta_tx: Option<tokio::sync::mpsc::UnboundedSender<heiwa_provider::adapter::StreamEvent>>,
 ) -> Result<ModelCallResult, String> {
     let (executor, sessions) = default_model_call_runtime()?;
     let call_id = format!("call-{}", uuid::Uuid::new_v4());
@@ -2695,6 +2890,7 @@ async fn execute_routed_model_call(
             remaining_budget_usd: None,
             max_attempts: 3,
             cancel,
+            delta_tx,
         })
         .await
         .map_err(|error| error.to_string())
@@ -2723,7 +2919,7 @@ fn record_route_evidence(evidence: &EvidenceClient, route: &RouteResult, task: &
 fn record_call_receipt(
     receipts: &heiwa_receipts::ReceiptStore,
     rates: &heiwa_receipts::RateTable,
-    route: &RouteResult,
+    result: &ModelCallResult,
     usage: Option<&TokenUsage>,
     session_id: &str,
     input_text: &str,
@@ -2732,7 +2928,7 @@ fn record_call_receipt(
 ) {
     use heiwa_receipts::{runtime, Receipt};
 
-    let env = runtime::env_for_provider(&route.provider);
+    let env = runtime::env_for_provider(&result.provider);
     let tokens_in = usage
         .map(|u| u.input_tokens as i64)
         .filter(|&n| n > 0)
@@ -2745,8 +2941,8 @@ fn record_call_receipt(
     let (costs, _found) = runtime::compute_or_zero(
         rates,
         env,
-        &route.provider,
-        &route.model_id,
+        &result.provider,
+        &result.model_id,
         tokens_in,
         tokens_out,
     );
@@ -2754,8 +2950,8 @@ fn record_call_receipt(
     let receipt = Receipt::new(
         Utc::now().timestamp(),
         env,
-        route.provider.clone(),
-        route.model_id.clone(),
+        result.provider.clone(),
+        result.model_id.clone(),
         "repl",
         tokens_in,
         tokens_out,
@@ -2772,7 +2968,12 @@ fn record_call_receipt(
 }
 
 /// Journal a completed run to local evidence.
-fn record_run_evidence(evidence: &EvidenceClient, route: &RouteResult, usage: Option<&TokenUsage>) {
+fn record_run_evidence(
+    evidence: &EvidenceClient,
+    route: &RouteResult,
+    usage: Option<&TokenUsage>,
+    result: Option<&ModelCallResult>,
+) {
     let run_id = format!("run-{}", uuid::Uuid::new_v4());
     let turn_ended_at = Utc::now();
     let turn_ended_at_rfc3339 = turn_ended_at.to_rfc3339();
@@ -2792,14 +2993,24 @@ fn record_run_evidence(evidence: &EvidenceClient, route: &RouteResult, usage: Op
             "model_id": route.model_id,
             "tokens_input": usage.map(|u| u.input_tokens as i64).unwrap_or(0),
             "tokens_output": usage.map(|u| u.output_tokens as i64).unwrap_or(0),
-            "cost_usd": usage.map(|u| u.cost_usd).unwrap_or(0.0),
+            "cost_usd": result.map(|call| call.cost_usd)
+                .or_else(|| usage.map(|u| u.cost_usd))
+                .unwrap_or(0.0),
+            "cost_truth": result.map(|call| &call.cost_truth),
+            "attempts": result.map(|call| call.attempts),
+            "attempt_records": result.map(|call| &call.attempt_records),
         }),
     );
 
     if let Some(ledger) = open_default_quota_ledger() {
-        if let Err(error) =
-            record_local_quota_run(&ledger, &run_id, route, usage, turn_ended_at.timestamp())
-        {
+        if let Err(error) = record_local_quota_run(
+            &ledger,
+            &run_id,
+            route,
+            usage,
+            result.map(|call| call.cost_usd),
+            turn_ended_at.timestamp(),
+        ) {
             debug_log(format_args!("quota ledger write failed: {error}"));
         }
     }
@@ -2814,13 +3025,14 @@ fn record_local_quota_run(
     run_id: &str,
     route: &RouteResult,
     usage: Option<&TokenUsage>,
+    model_call_cost_usd: Option<f64>,
     ended_at_unix: i64,
 ) -> heiwa_quota::Result<()> {
     let (tokens_input, tokens_output, cost, status) = match usage {
         Some(u) => (
             u.input_tokens as i64,
             u.output_tokens as i64,
-            u.cost_usd,
+            model_call_cost_usd.unwrap_or(u.cost_usd),
             "SUCCESS",
         ),
         None => (0, 0, 0.0, "COMPLETED_NO_USAGE"),
@@ -3036,11 +3248,8 @@ async fn collect_adapter_response(
     messages: Vec<Message>,
     thread_id: &str,
     raw_text: &str,
-) -> (String, Option<TokenUsage>, Option<String>) {
-    match execute_routed_model_call(route, messages, thread_id, raw_text).await {
-        Ok(result) => (result.text, Some(result.usage), None),
-        Err(error) => (String::new(), None, Some(error)),
-    }
+) -> Result<ModelCallResult, String> {
+    execute_routed_model_call(route, messages, thread_id, raw_text, None).await
 }
 
 fn merge_usage(first: Option<TokenUsage>, second: Option<TokenUsage>) -> Option<TokenUsage> {
@@ -3054,6 +3263,62 @@ fn merge_usage(first: Option<TokenUsage>, second: Option<TokenUsage>) -> Option<
             cache_write_tokens: a.cache_write_tokens + b.cache_write_tokens,
             cost_usd: a.cost_usd + b.cost_usd,
         }),
+    }
+}
+
+fn usage_for_model_call(result: &ModelCallResult) -> TokenUsage {
+    let mut usage = result.usage.clone();
+    usage.cost_usd = result.cost_usd;
+    usage
+}
+
+fn aggregate_model_call_results(
+    first: &ModelCallResult,
+    final_result: &ModelCallResult,
+) -> ModelCallResult {
+    let raw_cost = first.cost_usd + final_result.cost_usd;
+    let (cost_usd, cost_truth) = if raw_cost.is_finite() {
+        (
+            raw_cost,
+            aggregate_cost_truth(first.cost_truth.clone(), final_result.cost_truth.clone()),
+        )
+    } else {
+        (f64::MAX, CostTruth::CannotConfirm)
+    };
+    let mut failed_models = first.failed_models.clone();
+    for model in &final_result.failed_models {
+        if !failed_models.contains(model) {
+            failed_models.push(model.clone());
+        }
+    }
+    let mut attempt_records = first.attempt_records.clone();
+    attempt_records.extend(final_result.attempt_records.clone());
+    let mut usage = merge_usage(Some(first.usage.clone()), Some(final_result.usage.clone()))
+        .unwrap_or_default();
+    usage.cost_usd = cost_usd;
+    ModelCallResult {
+        provider: final_result.provider.clone(),
+        model_id: final_result.model_id.clone(),
+        provider_model_id: final_result.provider_model_id.clone(),
+        rate_group: final_result.rate_group.clone(),
+        text: final_result.text.clone(),
+        usage,
+        attempts: first.attempts.saturating_add(final_result.attempts),
+        failed_models,
+        cost_usd,
+        cost_truth,
+        attempt_records,
+    }
+}
+
+fn aggregate_cost_truth(left: CostTruth, right: CostTruth) -> CostTruth {
+    if left == right {
+        return left;
+    }
+    match (left, right) {
+        (CostTruth::CannotConfirm, _) | (_, CostTruth::CannotConfirm) => CostTruth::CannotConfirm,
+        (CostTruth::LocalZeroCost, other) | (other, CostTruth::LocalZeroCost) => other,
+        _ => CostTruth::ProxyEstimate,
     }
 }
 
@@ -3178,9 +3443,13 @@ fn repl_trace_payload(
     mode: &str,
     route: Option<&RouteResult>,
     usage: Option<&TokenUsage>,
+    result: Option<&ModelCallResult>,
     compression: Option<&RouteCompressionMetadata>,
 ) -> serde_json::Value {
-    let cost_usd = usage.map(|u| u.cost_usd).unwrap_or(0.0);
+    let cost_usd = result
+        .map(|call| call.cost_usd)
+        .or_else(|| usage.map(|u| u.cost_usd))
+        .unwrap_or(0.0);
     let (intent, provider, model, rate_group, privacy) = match route {
         Some(route) => (
             route.intent_key.as_str(),
@@ -3199,6 +3468,9 @@ fn repl_trace_payload(
         "rate_group": rate_group,
         "privacy": privacy,
         "cost_usd": cost_usd,
+        "cost_truth": result.map(|call| &call.cost_truth),
+        "attempts": result.map(|call| call.attempts),
+        "failed_models": result.map(|call| &call.failed_models),
         "compression": compression.map(|c| serde_json::json!({
             "applied": c.applied,
             "reason": c.reason,
@@ -3262,21 +3534,15 @@ pub(crate) async fn execute_repl_turn_streaming(
                     None,
                     None,
                     None,
+                    None,
                 )))
                 .await;
         }
         Ok(RouteOutcome::Routed(route)) => {
-            record_route_evidence(&evidence_client, &route, prompt);
-
-            let mode = if is_local_provider(&route.provider) {
-                "local_model"
-            } else {
-                "remote_model"
-            };
             let _ = events
                 .send(ReplStreamEvent::Route(route_event_payload(
-                    mode,
-                    Some(&route),
+                    "routed_pending",
+                    None,
                 )))
                 .await;
 
@@ -3287,8 +3553,8 @@ pub(crate) async fn execute_repl_turn_streaming(
                 session_id: persisted.session_id.clone(),
                 transcript: transcript_blocks,
                 routing: RoutingState {
-                    current_provider: route.provider.clone(),
-                    current_model: route.model_id.clone(),
+                    current_provider: String::new(),
+                    current_model: String::new(),
                     mode: CockpitMode::Direct.label().to_string(),
                     explanation: None,
                 },
@@ -3298,33 +3564,66 @@ pub(crate) async fn execute_repl_turn_streaming(
 
             append_state_block(&mut state, TranscriptBlock::User(prompt.to_string()));
 
-            let result =
-                match execute_routed_model_call(&route, messages, &persisted.session_id, prompt)
-                    .await
-                {
-                    Ok(result) => result,
-                    Err(error) => {
-                        let _ = events.send(ReplStreamEvent::Error(error)).await;
-                        return;
+            let (delta_tx, mut delta_rx) = tokio::sync::mpsc::unbounded_channel();
+            let delta_events = events.clone();
+            let delta_task = tokio::spawn(async move {
+                while let Some(delta) = delta_rx.recv().await {
+                    if let heiwa_provider::adapter::StreamEvent::Token(text) = delta {
+                        let _ = delta_events.send(ReplStreamEvent::Token(text)).await;
                     }
-                };
-            let usage = Some(result.usage);
-            let full_response = result.text;
+                }
+            });
+            let result = match execute_routed_model_call(
+                &route,
+                messages,
+                &persisted.session_id,
+                prompt,
+                Some(delta_tx),
+            )
+            .await
+            {
+                Ok(result) => result,
+                Err(error) => {
+                    let _ = events.send(ReplStreamEvent::Error(error)).await;
+                    return;
+                }
+            };
+            let _ = delta_task.await;
+            let resolved_route = resolved_route_after_model_call(&route, &result);
+            let mode = if is_local_provider(&resolved_route.provider) {
+                "local_model"
+            } else {
+                "remote_model"
+            };
+            state.routing.current_provider = resolved_route.provider.clone();
+            state.routing.current_model = resolved_route.model_id.clone();
+            record_route_evidence(&evidence_client, &resolved_route, prompt);
             let _ = events
-                .send(ReplStreamEvent::Token(full_response.clone()))
+                .send(ReplStreamEvent::Route(route_event_payload(
+                    mode,
+                    Some(&resolved_route),
+                )))
                 .await;
+            let usage = Some(usage_for_model_call(&result));
+            let full_response = result.text.clone();
 
             append_state_block(
                 &mut state,
                 TranscriptBlock::Assistant(full_response.clone()),
             );
-            record_run_evidence(&evidence_client, &route, usage.as_ref());
+            record_run_evidence(
+                &evidence_client,
+                &resolved_route,
+                usage.as_ref(),
+                Some(&result),
+            );
 
             let _ = events
                 .send(ReplStreamEvent::Done(repl_trace_payload(
                     mode,
-                    Some(&route),
+                    Some(&resolved_route),
                     usage.as_ref(),
+                    Some(&result),
                     prepared.compression.as_ref(),
                 )))
                 .await;
@@ -3580,6 +3879,119 @@ mod tests {
     }
 
     #[test]
+    fn live_inventory_ids_are_stable_nonzero_and_unique_per_provider_model() {
+        let model = |name: &str| heiwa_provider::DetectedModel {
+            model_id: name.to_string(),
+            provider_model_id: name.to_string(),
+            provider: "ollama".to_string(),
+            account_id: "ollama-local".to_string(),
+            rate_group: "local".to_string(),
+            capability_class: 3,
+            context_window: 32_768,
+            supports_streaming: true,
+            supports_tools: true,
+            supports_vision: false,
+            supports_audio: false,
+            cost_per_1k_input: 0.0,
+            cost_per_1k_output: 0.0,
+            inventory_truth: heiwa_provider::InventoryTruth::Verified,
+        };
+        let mut registry = heiwa_provider::AccountRegistry {
+            accounts: vec![heiwa_provider::ProviderAccount {
+                account_id: "ollama-local".to_string(),
+                provider: "ollama".to_string(),
+                credential: heiwa_provider::Credential::LocalRuntime {
+                    endpoint: "http://127.0.0.1:11434".to_string(),
+                },
+                rate_group: "local".to_string(),
+                status: heiwa_provider::AccountStatus::Connected,
+                models: vec![model("gemma4"), model("qwen3.5:9b")],
+            }],
+        };
+
+        let first = super::get_live_model_tiers(&registry);
+        registry.accounts[0].models.reverse();
+        let second = super::get_live_model_tiers(&registry);
+        let first_ids = first.iter().map(|tier| tier.id).collect::<Vec<_>>();
+        let second_ids = second.iter().map(|tier| tier.id).collect::<Vec<_>>();
+
+        assert!(first_ids.iter().all(|id| *id != 0));
+        assert_ne!(first_ids[0], first_ids[1]);
+        assert_eq!(first_ids, second_ids);
+    }
+
+    #[test]
+    fn discovered_ollama_models_are_zero_cost_on_device_budget_candidates() {
+        let model = |name: &str| heiwa_provider::DetectedModel {
+            model_id: name.to_string(),
+            provider_model_id: name.to_string(),
+            provider: "ollama".to_string(),
+            account_id: "ollama-local".to_string(),
+            rate_group: "local".to_string(),
+            capability_class: 3,
+            context_window: 32_768,
+            supports_streaming: true,
+            supports_tools: true,
+            supports_vision: false,
+            supports_audio: false,
+            cost_per_1k_input: 0.0,
+            cost_per_1k_output: 0.0,
+            inventory_truth: heiwa_provider::InventoryTruth::Verified,
+        };
+        let registry = heiwa_provider::AccountRegistry {
+            accounts: vec![heiwa_provider::ProviderAccount {
+                account_id: "ollama-local".to_string(),
+                provider: "ollama".to_string(),
+                credential: heiwa_provider::Credential::LocalRuntime {
+                    endpoint: "http://127.0.0.1:11434".to_string(),
+                },
+                rate_group: "local".to_string(),
+                status: heiwa_provider::AccountStatus::Connected,
+                models: vec![model("gemma4"), model("qwen3.5:9b")],
+            }],
+        };
+        let tiers = super::get_live_model_tiers(&registry);
+        let candidates = tiers
+            .iter()
+            .map(super::model_call_candidate)
+            .collect::<Vec<_>>();
+
+        assert!(candidates.iter().all(|candidate| {
+            candidate.locality == heiwa_core::drex::ExecutionLocality::OnDevice
+                && candidate.cost_truth == heiwa_core::drex::CostTruth::LocalZeroCost
+                && candidate.marginal_cost_usd == Some(0.0)
+                && candidate.adapter_capable
+        }));
+        let plan = heiwa_core::drex::plan_model_call(
+            &heiwa_core::drex::ModelCallRequest {
+                thread_id: "thread".to_string(),
+                turn_id: "turn".to_string(),
+                call_id: "call".to_string(),
+                intent: "code".to_string(),
+                stage: heiwa_core::drex::ModelCallStage::Execution,
+                raw_text: "local work".to_string(),
+                privacy: heiwa_core::drex::PrivacyClass::Sovereign,
+                risk: heiwa_core::drex::CallRisk::Low,
+                safety: heiwa_core::drex::SafetyClass::Approved,
+                required_capabilities: vec![],
+                required_context_tokens: 1,
+                minimum_quality_class: 1,
+                minimum_success_rate: 0.0,
+                maximum_marginal_cost_usd: Some(0.0),
+                preferred_provider: None,
+                preferred_model: None,
+                allowed_models: vec![],
+                excluded_models: vec![],
+            },
+            &candidates,
+            &heiwa_core::drex::default_policy(),
+        )
+        .unwrap();
+        assert!(plan.selected.is_some());
+        assert_eq!(plan.admitted_ids.len(), 2);
+    }
+
+    #[test]
     fn route_task_handles_greeting_without_models() {
         let pins = super::SessionPins::new();
         let outcome = super::route_task("hi", &pins, &[]).expect("greeting should route");
@@ -3698,6 +4110,54 @@ mod tests {
         let compression = prepared.compression.expect("compression metadata");
         assert!(compression.applied);
         assert_eq!(compression.receipt_path.as_deref(), Some("/tmp/cmp.json"));
+    }
+
+    #[test]
+    fn fallback_result_replaces_primary_route_attribution() {
+        let route = super::RouteResult {
+            candidates: vec![],
+            model_id: "primary-model".to_string(),
+            provider: "primary".to_string(),
+            provider_model_id: "primary-model".to_string(),
+            rate_group: "primary-rate".to_string(),
+            routing_metadata: "{}".to_string(),
+            intent_key: "chat".to_string(),
+            privacy: "standard".to_string(),
+            request_id: "req-fallback".to_string(),
+            turn_started_at: "2026-05-26T00:00:00Z".to_string(),
+        };
+        let result = heiwa_shell::model_calls::ModelCallResult {
+            provider: "secondary".to_string(),
+            model_id: "secondary-model".to_string(),
+            provider_model_id: "secondary-provider-model".to_string(),
+            rate_group: "secondary-rate".to_string(),
+            text: "done".to_string(),
+            usage: heiwa_provider::adapter::TokenUsage::default(),
+            attempts: 2,
+            failed_models: vec!["primary/primary-model".to_string()],
+            cost_usd: 0.03,
+            cost_truth: heiwa_core::drex::CostTruth::ProxyEstimate,
+            attempt_records: vec![],
+        };
+
+        let resolved = super::resolved_route_after_model_call(&route, &result);
+
+        assert_eq!(resolved.provider, "secondary");
+        assert_eq!(resolved.model_id, "secondary-model");
+        assert_eq!(resolved.provider_model_id, "secondary-provider-model");
+        assert_eq!(resolved.rate_group, "secondary-rate");
+        let usage = super::usage_for_model_call(&result);
+        let trace = super::repl_trace_payload(
+            "remote_model",
+            Some(&resolved),
+            Some(&usage),
+            Some(&result),
+            None,
+        );
+        assert_eq!(trace["provider"], "secondary");
+        assert_eq!(trace["model"], "secondary-model");
+        assert_eq!(trace["cost_usd"], 0.03);
+        assert_eq!(trace["attempts"], 2);
     }
 
     #[test]
@@ -3851,8 +4311,15 @@ mod tests {
             cost_usd: 0.03,
         };
 
-        super::record_local_quota_run(&ledger, "run-test", &route, Some(&usage), 1_777_000_000)
-            .expect("quota write");
+        super::record_local_quota_run(
+            &ledger,
+            "run-test",
+            &route,
+            Some(&usage),
+            None,
+            1_777_000_000,
+        )
+        .expect("quota write");
 
         let quota = ledger
             .get_quota("ollama", "local")

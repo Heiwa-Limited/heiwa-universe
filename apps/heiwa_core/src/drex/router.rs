@@ -222,8 +222,8 @@ pub fn plan_route_for_call(
                 connected: tier.enabled,
                 locality: locality.clone(),
                 adapter_capable: locality != ExecutionLocality::OnDevice
-                    || (tier.vram_requirement_mb > 0
-                        && tier.vram_requirement_mb <= ingress.available_vram_mb),
+                    || tier.vram_requirement_mb == 0
+                    || tier.vram_requirement_mb <= ingress.available_vram_mb,
                 quota_available: true,
                 marginal_cost_usd: legacy_marginal_cost(ingress, &tier),
                 cost_truth: cost_truth_for_tier(ingress, &tier),
@@ -308,10 +308,11 @@ fn minimum_quality_class(ingress: &DrexIngress, privacy: PrivacyClass) -> u8 {
 }
 
 fn legacy_locality(_ingress: &DrexIngress, tier: &ModelTier) -> ExecutionLocality {
-    // Legacy `ModelTier` has no locality field. Only its explicit local rate-group
-    // declaration plus a fitting device-memory requirement becomes an OnDevice proof;
-    // provider names (including LiteLLM/vLLM) remain Unverified.
-    if tier.rate_group == "local_ollama" && tier.vram_requirement_mb > 0 {
+    // An Ollama/local detected inventory is direct on-device proof. Generic
+    // LiteLLM/vLLM provider names remain unverified proxy/endpoint labels.
+    if matches!(tier.provider.as_str(), "ollama" | "local")
+        && matches!(tier.rate_group.as_str(), "local" | "local_ollama")
+    {
         ExecutionLocality::OnDevice
     } else {
         ExecutionLocality::Unverified
@@ -605,7 +606,9 @@ fn should_prefer_local(
 }
 
 fn execution_mode_for_tier(tier: &ModelTier) -> ExecutionMode {
-    if is_local_provider(&tier.provider) {
+    if matches!(tier.provider.as_str(), "ollama" | "local")
+        && matches!(tier.rate_group.as_str(), "local" | "local_ollama")
+    {
         ExecutionMode::LocalModel
     } else {
         ExecutionMode::RemoteModel

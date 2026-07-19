@@ -904,6 +904,7 @@ fn record_draft_usage(route: &crate::RouteResult, ollama_response: &Value) {
         &run_id,
         route,
         Some(&usage),
+        None,
         chrono::Utc::now().timestamp(),
     );
 }

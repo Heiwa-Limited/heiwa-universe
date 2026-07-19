@@ -4,8 +4,7 @@ use std::time::{Duration, Instant};
 
 use async_trait::async_trait;
 use heiwa_core::drex::{
-    default_policy, plan_model_call, CostTruth, ModelCallCandidate, ModelCallPlan,
-    ModelCallRequest, SafetyClass,
+    default_policy, plan_model_call, CostTruth, ModelCallCandidate, ModelCallPlan, ModelCallRequest,
 };
 use heiwa_evidence::{
     now_iso, OperatorActor, OperatorEvent, OperatorEventType, OperatorRisk, OperatorSensitivity,
@@ -27,19 +26,44 @@ pub struct ModelCallExecution {
     pub remaining_budget_usd: Option<f64>,
     pub max_attempts: usize,
     pub cancel: watch::Receiver<bool>,
+    /// Transient presentation-only deltas. Durable truth is still written
+    /// exclusively through `OperatorSessionService`.
+    pub delta_tx: Option<mpsc::UnboundedSender<StreamEvent>>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
+pub enum ModelCallAttemptOutcome {
+    Failed,
+    Completed,
+}
+
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct ModelCallAttemptRecord {
+    pub candidate_id: u64,
+    pub provider: String,
+    pub model_id: String,
+    pub outcome: ModelCallAttemptOutcome,
+    pub failure_class: Option<ProviderFailureClass>,
+    pub cost_usd: Option<f64>,
+    pub cost_truth: CostTruth,
 }
 
 #[derive(Debug, Clone)]
 pub struct ModelCallResult {
     pub provider: String,
     pub model_id: String,
+    pub provider_model_id: String,
+    pub rate_group: String,
     pub text: String,
     pub usage: TokenUsage,
     pub attempts: usize,
     pub failed_models: Vec<String>,
+    pub cost_usd: f64,
+    pub cost_truth: CostTruth,
+    pub attempt_records: Vec<ModelCallAttemptRecord>,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
 pub enum ProviderFailureClass {
     RateLimited,
     Authentication,
@@ -145,6 +169,9 @@ impl ModelCallExecutor {
         let mut remaining_budget = execution.remaining_budget_usd;
         let mut last_failure = None;
         let mut failed_models = Vec::new();
+        let mut cumulative_cost = 0.0;
+        let mut cumulative_truth = None;
+        let mut attempt_records = Vec::new();
 
         while attempts < max_attempts {
             apply_remaining_budget(&mut execution.request, remaining_budget);
@@ -185,12 +212,36 @@ impl ModelCallExecutor {
                     ProviderFailureClass::Availability,
                     format!("provider resolver missing for {provider}/{provider_model_id}"),
                 );
-                self.append_failure(&execution.request, &candidate, attempts, &failure)?;
+                let (attempt_cost, attempt_truth) = attempted_cost(&candidate);
+                let next_budget = subtract_optional_budget(remaining_budget, attempt_cost);
+                self.append_failure(
+                    &execution.request,
+                    &candidate,
+                    attempts,
+                    &failure,
+                    attempt_cost,
+                    &attempt_truth,
+                    next_budget,
+                )?;
+                add_cumulative_cost(
+                    &mut cumulative_cost,
+                    &mut cumulative_truth,
+                    attempt_cost,
+                    &attempt_truth,
+                );
+                remaining_budget = next_budget;
+                attempt_records.push(failed_attempt_record(
+                    &candidate,
+                    failure.0,
+                    attempt_cost,
+                    attempt_truth,
+                ));
+                let failed_identity = qualified_model_identity(&candidate);
                 execution
                     .request
                     .excluded_models
-                    .push(candidate.tier.model_id.clone());
-                failed_models.push(candidate.tier.model_id.clone());
+                    .push(failed_identity.clone());
+                failed_models.push(failed_identity);
                 last_failure = Some(failure);
                 continue;
             };
@@ -201,10 +252,14 @@ impl ModelCallExecutor {
                 &provider_model_id,
                 &execution.messages,
                 &mut execution.cancel,
+                execution.delta_tx.as_ref(),
             )
             .await
             {
-                Ok((text, usage)) => {
+                Ok((text, mut usage)) => {
+                    if *execution.cancel.borrow() {
+                        return Err(ModelCallError::Cancelled);
+                    }
                     let charged_cost = completed_cost(&candidate, &usage).map_err(|message| {
                         ModelCallError::AttemptsExhausted {
                             attempts,
@@ -216,23 +271,62 @@ impl ModelCallExecutor {
                         Ok(cost) => cost,
                         Err(ModelCallError::AttemptsExhausted { class, message, .. }) => {
                             let failure = (class, message);
+                            let (attempt_cost, attempt_truth) = attempted_cost(&candidate);
+                            let next_budget =
+                                subtract_optional_budget(remaining_budget, attempt_cost);
                             self.append_failure(
                                 &execution.request,
                                 &candidate,
                                 attempts,
                                 &failure,
+                                attempt_cost,
+                                &attempt_truth,
+                                next_budget,
                             )?;
+                            add_cumulative_cost(
+                                &mut cumulative_cost,
+                                &mut cumulative_truth,
+                                attempt_cost,
+                                &attempt_truth,
+                            );
+                            remaining_budget = next_budget;
+                            attempt_records.push(failed_attempt_record(
+                                &candidate,
+                                failure.0,
+                                attempt_cost,
+                                attempt_truth,
+                            ));
+                            let failed_identity = qualified_model_identity(&candidate);
                             execution
                                 .request
                                 .excluded_models
-                                .push(candidate.tier.model_id.clone());
-                            failed_models.push(candidate.tier.model_id.clone());
+                                .push(failed_identity.clone());
+                            failed_models.push(failed_identity);
                             last_failure = Some(failure);
                             continue;
                         }
                         Err(other) => return Err(other),
                     };
                     remaining_budget = subtract_budget(remaining_budget, charged_cost.0);
+                    usage.cost_usd = charged_cost.0;
+                    add_cumulative_cost(
+                        &mut cumulative_cost,
+                        &mut cumulative_truth,
+                        Some(charged_cost.0),
+                        &charged_cost.1,
+                    );
+                    attempt_records.push(ModelCallAttemptRecord {
+                        candidate_id: candidate.tier.id,
+                        provider: provider.clone(),
+                        model_id: model_id.clone(),
+                        outcome: ModelCallAttemptOutcome::Completed,
+                        failure_class: None,
+                        cost_usd: Some(charged_cost.0),
+                        cost_truth: charged_cost.1.clone(),
+                    });
+                    if *execution.cancel.borrow() {
+                        return Err(ModelCallError::Cancelled);
+                    }
                     self.append_route_event(
                         &execution.request,
                         OperatorEventType::RouteCompleted,
@@ -246,6 +340,8 @@ impl ModelCallExecutor {
                             "latency_ms": started.elapsed().as_millis(),
                             "cost_usd": charged_cost.0,
                             "cost_truth": charged_cost.1,
+                            "cumulative_cost_usd": cumulative_cost,
+                            "cumulative_cost_truth": cumulative_truth.clone(),
                             "remaining_budget_usd": remaining_budget,
                             "receipt_ref": serde_json::Value::Null,
                         }),
@@ -253,21 +349,50 @@ impl ModelCallExecutor {
                     return Ok(ModelCallResult {
                         provider,
                         model_id,
+                        provider_model_id,
+                        rate_group: candidate.tier.rate_group,
                         text,
                         usage,
                         attempts,
                         failed_models,
+                        cost_usd: cumulative_cost,
+                        cost_truth: cumulative_truth.unwrap_or(CostTruth::CannotConfirm),
+                        attempt_records,
                     });
                 }
                 Err(AdapterRunError::Cancelled) => return Err(ModelCallError::Cancelled),
                 Err(AdapterRunError::Failed(message)) => {
                     let failure = (normalize_failure(&message), message);
-                    self.append_failure(&execution.request, &candidate, attempts, &failure)?;
+                    let (attempt_cost, attempt_truth) = attempted_cost(&candidate);
+                    let next_budget = subtract_optional_budget(remaining_budget, attempt_cost);
+                    self.append_failure(
+                        &execution.request,
+                        &candidate,
+                        attempts,
+                        &failure,
+                        attempt_cost,
+                        &attempt_truth,
+                        next_budget,
+                    )?;
+                    add_cumulative_cost(
+                        &mut cumulative_cost,
+                        &mut cumulative_truth,
+                        attempt_cost,
+                        &attempt_truth,
+                    );
+                    remaining_budget = next_budget;
+                    attempt_records.push(failed_attempt_record(
+                        &candidate,
+                        failure.0,
+                        attempt_cost,
+                        attempt_truth,
+                    ));
+                    let failed_identity = qualified_model_identity(&candidate);
                     execution
                         .request
                         .excluded_models
-                        .push(candidate.tier.model_id.clone());
-                    failed_models.push(candidate.tier.model_id.clone());
+                        .push(failed_identity.clone());
+                    failed_models.push(failed_identity);
                     last_failure = Some(failure);
                 }
             }
@@ -290,6 +415,9 @@ impl ModelCallExecutor {
         candidate: &ModelCallCandidate,
         attempt: usize,
         failure: &(ProviderFailureClass, String),
+        cost_usd: Option<f64>,
+        cost_truth: &CostTruth,
+        remaining_budget_usd: Option<f64>,
     ) -> Result<(), ModelCallError> {
         self.append_route_event(
             request,
@@ -302,6 +430,9 @@ impl ModelCallExecutor {
                 "provider_model": candidate.tier.provider_model_id,
                 "failure_class": failure.0.as_str(),
                 "message": failure.1,
+                "cost_usd": cost_usd,
+                "cost_truth": cost_truth,
+                "remaining_budget_usd": remaining_budget_usd,
             }),
         )
     }
@@ -371,7 +502,6 @@ impl heiwa_loop::LoopModelCaller for ExecutorLoopCaller {
             .executor
             .sessions
             .start_turn(&request.thread_id, submission)?;
-        let (_cancel_tx, cancel) = watch::channel(false);
         let result = self
             .executor
             .execute(ModelCallExecution {
@@ -384,7 +514,7 @@ impl heiwa_loop::LoopModelCaller for ExecutorLoopCaller {
                     raw_text: request.raw_text,
                     privacy: request.privacy,
                     risk: request.risk,
-                    safety: SafetyClass::Approved,
+                    safety: request.safety,
                     required_capabilities: vec![],
                     required_context_tokens: 1,
                     minimum_quality_class: 1,
@@ -399,7 +529,8 @@ impl heiwa_loop::LoopModelCaller for ExecutorLoopCaller {
                 messages: request.messages,
                 remaining_budget_usd: request.remaining_budget_usd,
                 max_attempts: request.max_attempts,
-                cancel,
+                cancel: request.cancel,
+                delta_tx: None,
             })
             .await?;
         Ok(heiwa_loop::LoopCallResult {
@@ -409,6 +540,8 @@ impl heiwa_loop::LoopModelCaller for ExecutorLoopCaller {
             usage: result.usage,
             attempts: result.attempts,
             failed_models: result.failed_models,
+            cost_usd: result.cost_usd,
+            cost_truth: result.cost_truth,
         })
     }
 }
@@ -460,8 +593,77 @@ fn completed_cost(
     }
 }
 
+fn attempted_cost(candidate: &ModelCallCandidate) -> (Option<f64>, CostTruth) {
+    match candidate.marginal_cost_usd {
+        Some(cost) if cost.is_finite() && cost >= 0.0 => (Some(cost), candidate.cost_truth.clone()),
+        _ => (None, CostTruth::CannotConfirm),
+    }
+}
+
+fn qualified_model_identity(candidate: &ModelCallCandidate) -> String {
+    format!("{}/{}", candidate.tier.provider, candidate.tier.model_id)
+}
+
+fn failed_attempt_record(
+    candidate: &ModelCallCandidate,
+    failure_class: ProviderFailureClass,
+    cost_usd: Option<f64>,
+    cost_truth: CostTruth,
+) -> ModelCallAttemptRecord {
+    ModelCallAttemptRecord {
+        candidate_id: candidate.tier.id,
+        provider: candidate.tier.provider.clone(),
+        model_id: candidate.tier.model_id.clone(),
+        outcome: ModelCallAttemptOutcome::Failed,
+        failure_class: Some(failure_class),
+        cost_usd,
+        cost_truth,
+    }
+}
+
+fn add_cumulative_cost(
+    total: &mut f64,
+    aggregate_truth: &mut Option<CostTruth>,
+    cost_usd: Option<f64>,
+    cost_truth: &CostTruth,
+) {
+    if let Some(cost) = cost_usd {
+        let next = *total + cost;
+        if next.is_finite() {
+            *total = next.max(0.0);
+        } else {
+            *total = f64::MAX;
+            *aggregate_truth = Some(CostTruth::CannotConfirm);
+            return;
+        }
+    }
+    *aggregate_truth = Some(match aggregate_truth.take() {
+        None => cost_truth.clone(),
+        Some(current) => combine_cost_truth(current, cost_truth.clone()),
+    });
+}
+
+fn combine_cost_truth(left: CostTruth, right: CostTruth) -> CostTruth {
+    use CostTruth::*;
+    match (left, right) {
+        (CannotConfirm, _) | (_, CannotConfirm) => CannotConfirm,
+        (LocalZeroCost, other) | (other, LocalZeroCost) => other,
+        (ExactProviderReport, ExactProviderReport) => ExactProviderReport,
+        (TargetOnly, TargetOnly) => TargetOnly,
+        (ProxyEstimate, _) | (_, ProxyEstimate) => ProxyEstimate,
+        (TargetOnly, ExactProviderReport) | (ExactProviderReport, TargetOnly) => ProxyEstimate,
+    }
+}
+
 fn subtract_budget(remaining: Option<f64>, cost: f64) -> Option<f64> {
     remaining.map(|budget| (budget - cost).max(0.0))
+}
+
+fn subtract_optional_budget(remaining: Option<f64>, cost: Option<f64>) -> Option<f64> {
+    match cost {
+        Some(cost) => subtract_budget(remaining, cost),
+        None => remaining,
+    }
 }
 
 fn normalize_failure(message: &str) -> ProviderFailureClass {
@@ -503,6 +705,7 @@ async fn run_adapter(
     model: &str,
     messages: &[Message],
     cancel: &mut watch::Receiver<bool>,
+    delta_tx: Option<&mpsc::UnboundedSender<StreamEvent>>,
 ) -> Result<(String, TokenUsage), AdapterRunError> {
     if *cancel.borrow() {
         return Err(AdapterRunError::Cancelled);
@@ -525,6 +728,7 @@ async fn run_adapter(
     let mut cancel_open = true;
     loop {
         tokio::select! {
+            biased;
             changed = cancel.changed(), if cancel_open => {
                 match changed {
                     Ok(()) if *cancel.borrow() => {
@@ -538,8 +742,19 @@ async fn run_adapter(
             }
             event = stream_rx.recv() => {
                 match event {
-                    Some(StreamEvent::Token(token)) => text.push_str(&token),
+                    Some(StreamEvent::Token(token)) => {
+                        text.push_str(&token);
+                        if let Some(delta_tx) = delta_tx {
+                            let _ = delta_tx.send(StreamEvent::Token(token));
+                        }
+                    }
                     Some(StreamEvent::ToolUse { name, input }) => {
+                        if let Some(delta_tx) = delta_tx {
+                            let _ = delta_tx.send(StreamEvent::ToolUse {
+                                name: name.clone(),
+                                input: input.clone(),
+                            });
+                        }
                         text.push_str(&json!({
                             "tool_calls": [{
                                 "name": name,
@@ -548,6 +763,11 @@ async fn run_adapter(
                         }).to_string());
                     }
                     Some(StreamEvent::Done(usage)) => {
+                        if *cancel.borrow() {
+                            task.abort();
+                            let _ = tokio::time::timeout(Duration::from_millis(250), adapter.interrupt()).await;
+                            return Err(AdapterRunError::Cancelled);
+                        }
                         task.abort();
                         return Ok((text, usage));
                     }
