@@ -84,6 +84,53 @@ pub enum SafetyClass {
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
+pub enum ModelCallStage {
+    Classification,
+    Planning,
+    Execution,
+    Review,
+    LoopIteration,
+    LegacyRoute,
+}
+
+impl ModelCallStage {
+    pub fn parse(value: &str) -> std::result::Result<Self, &'static str> {
+        match value {
+            "classification" => Ok(Self::Classification),
+            "planning" => Ok(Self::Planning),
+            "execution" => Ok(Self::Execution),
+            "review" => Ok(Self::Review),
+            "loop_iteration" => Ok(Self::LoopIteration),
+            "legacy_route" => Ok(Self::LegacyRoute),
+            _ => Err("invalid_model_call_stage"),
+        }
+    }
+
+    pub fn is_execution_bearing(&self) -> bool {
+        matches!(self, Self::Execution | Self::LoopIteration)
+    }
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, PartialEq, Eq)]
+pub struct ModelCallIdentity {
+    pub thread_id: String,
+    pub turn_id: String,
+    pub call_id: String,
+}
+
+impl ModelCallIdentity {
+    pub fn legacy_uuid() -> Self {
+        let id = uuid::Uuid::new_v4();
+        Self {
+            thread_id: format!("thread-{id}"),
+            turn_id: format!("turn-{id}"),
+            call_id: format!("call-{id}"),
+        }
+    }
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
 pub enum CostTruth {
     LocalZeroCost,
     TargetOnly,
@@ -98,7 +145,7 @@ pub struct ModelCallRequest {
     pub turn_id: String,
     pub call_id: String,
     pub intent: String,
-    pub stage: String,
+    pub stage: ModelCallStage,
     pub raw_text: String,
     pub privacy: PrivacyClass,
     pub risk: CallRisk,
@@ -164,7 +211,7 @@ pub struct ModelCallPlan {
     pub thread_id: String,
     pub turn_id: String,
     pub call_id: String,
-    pub stage: String,
+    pub stage: ModelCallStage,
     pub selected: Option<ModelCallCandidate>,
     pub selected_id: Option<u64>,
     pub selected_cost_truth: Option<CostTruth>,
@@ -199,7 +246,7 @@ pub fn plan_model_call(
             "safety_forbids_execution",
         ));
     }
-    if request.stage == "execution"
+    if request.stage.is_execution_bearing()
         && decision.gate.requires_approval
         && request.safety != SafetyClass::Approved
     {
@@ -299,7 +346,7 @@ fn call_decision(request: &ModelCallRequest, policy: &DrexPolicy) -> DrexDecisio
             "local"
         },
     );
-    let runtime_fit = if request.stage == "execution" {
+    let runtime_fit = if request.stage.is_execution_bearing() {
         1.0
     } else {
         0.8
@@ -365,7 +412,10 @@ fn duplicate_ids(candidates: &[ModelCallCandidate]) -> BTreeMap<u64, usize> {
 }
 
 fn valid_request(request: &ModelCallRequest) -> bool {
-    valid_probability(request.minimum_success_rate)
+    !request.thread_id.trim().is_empty()
+        && !request.turn_id.trim().is_empty()
+        && !request.call_id.trim().is_empty()
+        && valid_probability(request.minimum_success_rate)
         && request
             .maximum_marginal_cost_usd
             .is_none_or(|cost| cost.is_finite() && cost >= 0.0)

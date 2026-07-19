@@ -181,6 +181,10 @@ async fn record_drex_failure_preserves_decision_linkage() {
 
 fn sample_route_plan() -> RoutePlan {
     RoutePlan {
+        thread_id: "thread-test".to_string(),
+        turn_id: "turn-test".to_string(),
+        call_id: "call-test".to_string(),
+        stage: heiwa_core::drex::ModelCallStage::LegacyRoute,
         decision: DrexDecision {
             vector: DrexVector {
                 scope: 0.35,

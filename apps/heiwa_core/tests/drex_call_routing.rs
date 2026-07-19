@@ -1,7 +1,7 @@
 use heiwa_core::drex::{
     default_policy, plan_model_call, plan_route, CallRisk, CandidateRejectionReason, CostTruth,
-    DrexIngress, ExecutionLocality, ModelCallCandidate, ModelCallRequest, PrivacyClass,
-    SafetyClass,
+    DrexIngress, ExecutionLocality, ModelCallCandidate, ModelCallIdentity, ModelCallRequest,
+    ModelCallStage, PrivacyClass, SafetyClass,
 };
 use heiwa_protocol::ModelTier;
 
@@ -11,7 +11,7 @@ fn request() -> ModelCallRequest {
         turn_id: "turn-1".to_string(),
         call_id: "call-1".to_string(),
         intent: "code".to_string(),
-        stage: "execution".to_string(),
+        stage: ModelCallStage::Execution,
         raw_text: "edit routing".to_string(),
         privacy: PrivacyClass::Standard,
         risk: CallRisk::Low,
@@ -420,6 +420,85 @@ fn invalid_cost_truth_and_unknown_cost_never_win_known_zero() {
 }
 
 #[test]
+fn non_finite_or_negative_metrics_have_exact_rejection_reasons() {
+    let valid = candidate(
+        1,
+        "valid",
+        "provider",
+        3,
+        ExecutionLocality::Remote,
+        Some(0.01),
+        CostTruth::ProxyEstimate,
+    );
+    let nan_cost = candidate(
+        2,
+        "nan-cost",
+        "provider",
+        3,
+        ExecutionLocality::Remote,
+        Some(f64::NAN),
+        CostTruth::ProxyEstimate,
+    );
+    let negative_cost = candidate(
+        3,
+        "negative-cost",
+        "provider",
+        3,
+        ExecutionLocality::Remote,
+        Some(-0.01),
+        CostTruth::ProxyEstimate,
+    );
+    let mut nan_success = candidate(
+        4,
+        "nan-success",
+        "provider",
+        3,
+        ExecutionLocality::Remote,
+        Some(0.01),
+        CostTruth::ProxyEstimate,
+    );
+    nan_success.tier.last_success_rate = f64::NAN;
+    let mut negative_success = candidate(
+        5,
+        "negative-success",
+        "provider",
+        3,
+        ExecutionLocality::Remote,
+        Some(0.01),
+        CostTruth::ProxyEstimate,
+    );
+    negative_success.tier.last_success_rate = -0.1;
+    let plan = plan_model_call(
+        &request(),
+        &[
+            valid,
+            nan_cost,
+            negative_cost,
+            nan_success,
+            negative_success,
+        ],
+        &default_policy(),
+    )
+    .unwrap();
+    assert_eq!(
+        reason(&plan, 2),
+        CandidateRejectionReason::InvalidMarginalCostUsd
+    );
+    assert_eq!(
+        reason(&plan, 3),
+        CandidateRejectionReason::InvalidMarginalCostUsd
+    );
+    assert_eq!(
+        reason(&plan, 4),
+        CandidateRejectionReason::InvalidSuccessRate
+    );
+    assert_eq!(
+        reason(&plan, 5),
+        CandidateRejectionReason::InvalidSuccessRate
+    );
+}
+
+#[test]
 fn duplicate_ids_reject_independently_of_input_order() {
     let first = candidate(
         7,
@@ -597,4 +676,149 @@ fn legacy_sovereign_code_keeps_advanced_coding_or_quality_floor() {
         "high-quality"
     );
     assert!(route.routing_metadata.contains("\"admitted_ids\":[2,1]"));
+}
+
+#[test]
+fn execution_stages_fail_closed_and_unknown_stage_is_invalid() {
+    for stage in [ModelCallStage::Execution, ModelCallStage::LoopIteration] {
+        let mut blocked = request();
+        blocked.stage = stage.clone();
+        blocked.safety = SafetyClass::Blocked;
+        let blocked_candidate = candidate(
+            1,
+            "candidate",
+            "provider",
+            3,
+            ExecutionLocality::Remote,
+            Some(0.0),
+            CostTruth::TargetOnly,
+        );
+        let plan = plan_model_call(&blocked, &[blocked_candidate], &default_policy()).unwrap();
+        assert_eq!(
+            reason(&plan, 1),
+            CandidateRejectionReason::SafetyForbidsExecution
+        );
+
+        let mut unapproved = request();
+        unapproved.stage = stage;
+        unapproved.intent = "strategy".to_string();
+        unapproved.risk = CallRisk::High;
+        unapproved.safety = SafetyClass::Unapproved;
+        let authority_candidate = candidate(
+            2,
+            "candidate",
+            "provider",
+            3,
+            ExecutionLocality::Remote,
+            Some(0.0),
+            CostTruth::TargetOnly,
+        );
+        let plan = plan_model_call(&unapproved, &[authority_candidate], &default_policy()).unwrap();
+        assert_eq!(
+            reason(&plan, 2),
+            CandidateRejectionReason::AuthorityApprovalRequired
+        );
+    }
+    assert_eq!(
+        ModelCallStage::parse("wire_unknown"),
+        Err("invalid_model_call_stage")
+    );
+    assert!(serde_json::from_str::<ModelCallStage>("\"wire_unknown\"").is_err());
+}
+
+#[test]
+fn local_legacy_vram_gate_applies_even_when_runtime_is_any() {
+    let mut tier = candidate(
+        1,
+        "local",
+        "ollama",
+        3,
+        ExecutionLocality::OnDevice,
+        Some(0.0),
+        CostTruth::LocalZeroCost,
+    )
+    .tier;
+    tier.rate_group = "local_ollama".to_string();
+    tier.vram_requirement_mb = 32_768;
+    let ingress = DrexIngress {
+        intent: "code".to_string(),
+        risk: "low".to_string(),
+        raw_text: "edit".to_string(),
+        privacy: "sovereign".to_string(),
+        runtime: "any".to_string(),
+        available_vram_mb: 8_192,
+        required_context_tokens: 1,
+    };
+    let rejected = plan_route(&ingress, &[tier.clone()], &default_policy()).unwrap();
+    assert_eq!(rejected.selected_model, None);
+    assert!(rejected.routing_metadata.contains("adapter_incapable"));
+
+    tier.vram_requirement_mb = 4_096;
+    let accepted = plan_route(&ingress, &[tier], &default_policy()).unwrap();
+    assert_eq!(accepted.selected_model.expect("selected").model_id, "local");
+}
+
+#[test]
+fn legacy_call_identity_is_unique_or_round_trips_when_supplied() {
+    let tier = candidate(
+        1,
+        "remote",
+        "provider",
+        3,
+        ExecutionLocality::Remote,
+        Some(0.01),
+        CostTruth::ProxyEstimate,
+    )
+    .tier;
+    let ingress = DrexIngress {
+        intent: "code".to_string(),
+        risk: "low".to_string(),
+        raw_text: "edit".to_string(),
+        privacy: "standard".to_string(),
+        runtime: "any".to_string(),
+        available_vram_mb: 0,
+        required_context_tokens: 1,
+    };
+    let first = plan_route(&ingress, &[tier.clone()], &default_policy()).unwrap();
+    let second = plan_route(&ingress, &[tier.clone()], &default_policy()).unwrap();
+    assert_ne!(first.call_id, second.call_id);
+    assert_eq!(first.stage, ModelCallStage::LegacyRoute);
+
+    let identity = ModelCallIdentity {
+        thread_id: "thread-x".to_string(),
+        turn_id: "turn-y".to_string(),
+        call_id: "call-z".to_string(),
+    };
+    let routed = heiwa_core::drex::plan_route_for_call(
+        &ingress,
+        &[tier],
+        &default_policy(),
+        identity.clone(),
+    )
+    .unwrap();
+    assert_eq!(routed.thread_id, identity.thread_id);
+    assert_eq!(routed.turn_id, identity.turn_id);
+    assert_eq!(routed.call_id, identity.call_id);
+    assert!(routed.routing_metadata.contains("call-z"));
+}
+
+#[test]
+fn empty_direct_identity_returns_invalid_policy_plan() {
+    let mut request = request();
+    request.thread_id.clear();
+    let candidate = candidate(
+        1,
+        "candidate",
+        "provider",
+        3,
+        ExecutionLocality::Remote,
+        Some(0.0),
+        CostTruth::TargetOnly,
+    );
+    let plan = plan_model_call(&request, &[candidate], &default_policy()).unwrap();
+    assert_eq!(plan.selected, None);
+    assert_eq!(
+        reason(&plan, 1),
+        CandidateRejectionReason::InvalidRequestPolicy
+    );
 }

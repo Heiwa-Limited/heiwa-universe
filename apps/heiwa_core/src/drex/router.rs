@@ -3,7 +3,8 @@ use heiwa_protocol::ModelTier;
 
 use super::call::{
     plan_model_call, CallRisk, CandidateRejection, CandidateRejectionReason, CostTruth,
-    ExecutionLocality, ModelCallCandidate, ModelCallRequest, PrivacyClass, SafetyClass,
+    ExecutionLocality, ModelCallCandidate, ModelCallIdentity, ModelCallRequest, ModelCallStage,
+    PrivacyClass, SafetyClass,
 };
 use super::policy::{DrexDecision, DrexPolicy, ExecutionMode, ResolutionTier};
 use super::scorer::evaluate_drex;
@@ -25,6 +26,10 @@ pub struct DrexIngress {
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct RoutePlan {
+    pub thread_id: String,
+    pub turn_id: String,
+    pub call_id: String,
+    pub stage: ModelCallStage,
     pub decision: DrexDecision,
     pub execution_mode: ExecutionMode,
     pub runtime_hint: String,
@@ -126,13 +131,43 @@ pub fn plan_route(
     model_tiers: &[ModelTier],
     policy: &DrexPolicy,
 ) -> Result<RoutePlan> {
+    plan_route_for_call(
+        ingress,
+        model_tiers,
+        policy,
+        ModelCallIdentity::legacy_uuid(),
+    )
+}
+
+pub fn plan_route_for_call(
+    ingress: &DrexIngress,
+    model_tiers: &[ModelTier],
+    policy: &DrexPolicy,
+    identity: ModelCallIdentity,
+) -> Result<RoutePlan> {
     let privacy = match PrivacyClass::parse(&ingress.privacy) {
         Ok(privacy) => privacy,
-        Err(reason) => return Ok(legacy_no_route(ingress, model_tiers, policy, reason)),
+        Err(reason) => {
+            return Ok(legacy_no_route(
+                ingress,
+                model_tiers,
+                policy,
+                &identity,
+                reason,
+            ));
+        }
     };
     let risk = match CallRisk::parse(&ingress.risk) {
         Ok(risk) => risk,
-        Err(reason) => return Ok(legacy_no_route(ingress, model_tiers, policy, reason)),
+        Err(reason) => {
+            return Ok(legacy_no_route(
+                ingress,
+                model_tiers,
+                policy,
+                &identity,
+                reason,
+            ));
+        }
     };
     let vector = build_drex_vector(
         &ingress.intent,
@@ -153,11 +188,11 @@ pub fn plan_route(
     };
     let minimum_quality_class = minimum_quality_class(ingress, privacy);
     let request = ModelCallRequest {
-        thread_id: legacy_identity("thread", ingress),
-        turn_id: legacy_identity("turn", ingress),
-        call_id: legacy_identity("call", ingress),
+        thread_id: identity.thread_id.clone(),
+        turn_id: identity.turn_id.clone(),
+        call_id: identity.call_id.clone(),
         intent: ingress.intent.clone(),
-        stage: "legacy_route".to_string(),
+        stage: ModelCallStage::LegacyRoute,
         raw_text: ingress.raw_text.clone(),
         privacy: request_privacy,
         risk,
@@ -182,10 +217,11 @@ pub fn plan_route(
             if tier.id == 0 {
                 tier.id = legacy_model_id(&tier);
             }
+            let locality = legacy_locality(ingress, &tier);
             ModelCallCandidate {
                 connected: tier.enabled,
-                locality: legacy_locality(ingress, &tier),
-                adapter_capable: !is_local_runtime(&ingress.runtime)
+                locality: locality.clone(),
+                adapter_capable: locality != ExecutionLocality::OnDevice
                     || (tier.vram_requirement_mb > 0
                         && tier.vram_requirement_mb <= ingress.available_vram_mb),
                 quota_available: true,
@@ -218,6 +254,10 @@ pub fn plan_route(
                 "admitted_ids": call_plan.admitted_ids,
                 "rejected": call_plan.rejected,
                 "policy_version": call_plan.policy_version,
+                "thread_id": call_plan.thread_id,
+                "turn_id": call_plan.turn_id,
+                "call_id": call_plan.call_id,
+                "stage": call_plan.stage,
             })
             .to_string(),
         )
@@ -236,12 +276,20 @@ pub fn plan_route(
                 } else {
                     "none"
                 },
+                "thread_id": call_plan.thread_id,
+                "turn_id": call_plan.turn_id,
+                "call_id": call_plan.call_id,
+                "stage": call_plan.stage,
             })
             .to_string(),
         )
     };
 
     Ok(RoutePlan {
+        thread_id: call_plan.thread_id,
+        turn_id: call_plan.turn_id,
+        call_id: call_plan.call_id,
+        stage: call_plan.stage,
         decision: call_plan.decision,
         execution_mode,
         runtime_hint,
@@ -259,15 +307,11 @@ fn minimum_quality_class(ingress: &DrexIngress, privacy: PrivacyClass) -> u8 {
     }
 }
 
-fn legacy_locality(ingress: &DrexIngress, tier: &ModelTier) -> ExecutionLocality {
+fn legacy_locality(_ingress: &DrexIngress, tier: &ModelTier) -> ExecutionLocality {
     // Legacy `ModelTier` has no locality field. Only its explicit local rate-group
     // declaration plus a fitting device-memory requirement becomes an OnDevice proof;
     // provider names (including LiteLLM/vLLM) remain Unverified.
-    if tier.rate_group == "local_ollama"
-        && tier.vram_requirement_mb > 0
-        && (!is_local_runtime(&ingress.runtime)
-            || tier.vram_requirement_mb <= ingress.available_vram_mb)
-    {
+    if tier.rate_group == "local_ollama" && tier.vram_requirement_mb > 0 {
         ExecutionLocality::OnDevice
     } else {
         ExecutionLocality::Unverified
@@ -292,26 +336,6 @@ fn cost_truth_for_tier(ingress: &DrexIngress, tier: &ModelTier) -> CostTruth {
     }
 }
 
-fn legacy_identity(prefix: &str, ingress: &DrexIngress) -> String {
-    let mut hash = 0xcbf29ce484222325_u64;
-    for byte in format!(
-        "{prefix}|{}|{}|{}|{}|{}|{}|{}",
-        ingress.intent,
-        ingress.risk,
-        ingress.raw_text,
-        ingress.privacy,
-        ingress.runtime,
-        ingress.required_context_tokens,
-        ingress.available_vram_mb
-    )
-    .bytes()
-    {
-        hash ^= u64::from(byte);
-        hash = hash.wrapping_mul(0x100000001b3);
-    }
-    format!("{prefix}-{hash:016x}")
-}
-
 fn legacy_model_id(tier: &ModelTier) -> u64 {
     let mut hash = 0xcbf29ce484222325_u64;
     for byte in format!(
@@ -330,6 +354,7 @@ fn legacy_no_route(
     ingress: &DrexIngress,
     model_tiers: &[ModelTier],
     policy: &DrexPolicy,
+    identity: &ModelCallIdentity,
     reason: &str,
 ) -> RoutePlan {
     let vector = build_drex_vector(
@@ -348,6 +373,10 @@ fn legacy_no_route(
         })
         .collect();
     RoutePlan {
+        thread_id: identity.thread_id.clone(),
+        turn_id: identity.turn_id.clone(),
+        call_id: identity.call_id.clone(),
+        stage: ModelCallStage::LegacyRoute,
         decision,
         execution_mode: ExecutionMode::Clarify,
         runtime_hint: ingress.runtime.clone(),
@@ -357,10 +386,10 @@ fn legacy_no_route(
             "mode": execution_mode_label(ExecutionMode::Clarify),
             "rejected": rejected,
             "policy_version": super::policy::DEFAULT_POLICY_VERSION,
-            "thread_id": legacy_identity("thread", ingress),
-            "turn_id": legacy_identity("turn", ingress),
-            "call_id": legacy_identity("call", ingress),
-            "stage": "legacy_route",
+            "thread_id": identity.thread_id,
+            "turn_id": identity.turn_id,
+            "call_id": identity.call_id,
+            "stage": ModelCallStage::LegacyRoute,
         })
         .to_string(),
     }
