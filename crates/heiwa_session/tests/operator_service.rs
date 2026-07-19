@@ -73,7 +73,10 @@ fn restart_closes_unfinished_turn_once() {
         .unwrap();
     assert_eq!(service.recover_interrupted().unwrap(), 1);
     assert_eq!(service.recover_interrupted().unwrap(), 0);
-    assert_eq!(service.thread("default").unwrap().turns[0].status, "interrupted");
+    assert_eq!(
+        service.thread("default").unwrap().turns[0].status,
+        "interrupted"
+    );
 }
 
 // ---------------------------------------------------------------------
@@ -115,6 +118,122 @@ fn append_event_rejects_turn_event_missing_turn_id() {
     assert!(
         message.contains("turn_id"),
         "error should name the missing turn_id: {message}"
+    );
+}
+
+#[test]
+fn append_event_rejects_nonterminal_event_for_nonexistent_turn() {
+    let dir = tempfile::tempdir().unwrap();
+    let service = test_service(dir.path());
+
+    let event = base_event(
+        "default",
+        Some("missing-turn"),
+        None,
+        OperatorEventType::AssistantStarted,
+    );
+    let error = service.append_event(event).unwrap_err();
+    let message = error.to_string().to_lowercase();
+    assert!(
+        message.contains("does not exist") || message.contains("unknown turn"),
+        "error should identify the missing turn: {message}"
+    );
+}
+
+#[test]
+fn append_event_rejects_terminal_event_for_nonexistent_turn() {
+    let dir = tempfile::tempdir().unwrap();
+    let service = test_service(dir.path());
+
+    let event = base_event(
+        "default",
+        Some("missing-turn"),
+        None,
+        OperatorEventType::TurnCompleted,
+    );
+    let error = service.append_event(event).unwrap_err();
+    let message = error.to_string().to_lowercase();
+    assert!(
+        message.contains("does not exist") || message.contains("unknown turn"),
+        "error should identify the missing turn: {message}"
+    );
+}
+
+#[test]
+fn append_event_allows_turn_started_to_create_synthetic_turn() {
+    let dir = tempfile::tempdir().unwrap();
+    let service = test_service(dir.path());
+
+    service
+        .append_event(base_event(
+            "legacy-thread",
+            Some("legacy-turn"),
+            None,
+            OperatorEventType::TurnStarted,
+        ))
+        .unwrap();
+
+    let view = service.thread("legacy-thread").unwrap();
+    assert_eq!(view.turns.len(), 1);
+    assert_eq!(view.turns[0].turn_id, "legacy-turn");
+}
+
+#[test]
+fn append_event_rejects_duplicate_turn_started_turn_id() {
+    let dir = tempfile::tempdir().unwrap();
+    let service = test_service(dir.path());
+
+    service
+        .append_event(base_event(
+            "default",
+            Some("turn-1"),
+            None,
+            OperatorEventType::TurnStarted,
+        ))
+        .unwrap();
+
+    let error = service
+        .append_event(base_event(
+            "default",
+            Some("turn-1"),
+            None,
+            OperatorEventType::TurnStarted,
+        ))
+        .unwrap_err();
+    assert!(
+        error.to_string().to_lowercase().contains("already exists"),
+        "error should identify the duplicate turn id: {error}"
+    );
+}
+
+#[test]
+fn append_event_rejects_conflicting_turn_started_client_request_id() {
+    let dir = tempfile::tempdir().unwrap();
+    let service = test_service(dir.path());
+
+    let mut first = base_event(
+        "default",
+        Some("turn-1"),
+        None,
+        OperatorEventType::TurnStarted,
+    );
+    first.payload = json!({ "client_request_id": "request-1" });
+    service.append_event(first).unwrap();
+
+    let mut conflict = base_event(
+        "default",
+        Some("turn-2"),
+        None,
+        OperatorEventType::TurnStarted,
+    );
+    conflict.payload = json!({ "client_request_id": "request-1" });
+    let error = service.append_event(conflict).unwrap_err();
+    assert!(
+        error
+            .to_string()
+            .to_lowercase()
+            .contains("client_request_id"),
+        "error should identify the conflicting client request: {error}"
     );
 }
 
@@ -320,7 +439,10 @@ fn events_after_advances_cursor_past_trailing_nonmatching_events() {
 
     let page = service.events_after("thread-a", None, 100).unwrap();
     assert_eq!(page.events.len(), 5, "thread_created + 2 turns * 2 events");
-    assert!(page.events.iter().all(|row| row.event.thread_id == "thread-a"));
+    assert!(page
+        .events
+        .iter()
+        .all(|row| row.event.thread_id == "thread-a"));
 
     // Polling again from next_cursor finds nothing new: the cursor advanced
     // all the way past the trailing thread-b events instead of getting
@@ -339,8 +461,15 @@ fn events_after_advances_cursor_past_trailing_nonmatching_events() {
     let more = service
         .events_after("thread-a", page.next_cursor.as_deref(), 100)
         .unwrap();
-    assert_eq!(more.events.len(), 2, "turn_started + user_message for the new turn");
-    assert!(more.events.iter().all(|row| row.event.thread_id == "thread-a"));
+    assert_eq!(
+        more.events.len(),
+        2,
+        "turn_started + user_message for the new turn"
+    );
+    assert!(more
+        .events
+        .iter()
+        .all(|row| row.event.thread_id == "thread-a"));
 }
 
 // ---------------------------------------------------------------------
@@ -398,8 +527,14 @@ fn thread_view_surfaces_journal_damage_as_skipped_lines() {
     drop(file);
 
     let view = service.thread("default").unwrap();
-    assert_eq!(view.skipped_lines, 1, "journal damage is surfaced, counted once");
-    assert_eq!(view.skipped_events, 0, "no schema/state-level rejects occurred");
+    assert_eq!(
+        view.skipped_lines, 1,
+        "journal damage is surfaced, counted once"
+    );
+    assert_eq!(
+        view.skipped_events, 0,
+        "no schema/state-level rejects occurred"
+    );
     assert_eq!(view.turns.len(), 1, "valid events still project");
     assert_eq!(view.turns[0].prompt.as_deref(), Some("hello"));
 }

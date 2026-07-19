@@ -84,7 +84,11 @@ pub(crate) fn now_ms() -> u64 {
         .as_millis() as u64
 }
 
-pub(crate) fn now_iso() -> String {
+/// RFC3339 (UTC) timestamp for the current instant — the crate-standard
+/// format for `occurred_at` fields on operator events and other records.
+/// Public so downstream services authoring events (e.g. `heiwa_session`)
+/// stamp timestamps identically instead of duplicating the formatter.
+pub fn now_iso() -> String {
     use time::{format_description::well_known::Rfc3339, OffsetDateTime};
 
     OffsetDateTime::now_utc()

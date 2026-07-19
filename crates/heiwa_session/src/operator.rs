@@ -7,12 +7,13 @@
 //! stream.
 //!
 //! The journal itself is the *only* durable truth. Nothing here caches
-//! state across calls: every public method takes the service mutex, folds
-//! whatever is on disk right now, and (for writers) appends before
-//! releasing the lock. That keeps the service correct after a crash with no
-//! recovery step beyond [`OperatorSessionService::recover_interrupted`], at
-//! the cost of an O(stream length) fold per call — acceptable for a
-//! local-first, single-operator journal.
+//! state across calls: writers take the service transaction mutex, fold
+//! whatever is on disk right now, and append before releasing it. Reads
+//! replay the journal without that mutex; [`OperatorJournal`] already owns
+//! its append-side lock. That keeps writer read-modify-append sequences
+//! atomic after a crash with no recovery step beyond
+//! [`OperatorSessionService::recover_interrupted`], while retaining
+//! lock-free read-only replay.
 //!
 //! Cross-process duplicate submission is explicitly best-effort: the mutex
 //! here only serializes calls within one process. The sole-writer contract
@@ -40,8 +41,9 @@ use sha2::{Digest, Sha256};
 use uuid::Uuid;
 
 use heiwa_evidence::{
-    CursorError, CursorEvent, OperatorActor, OperatorEvent, OperatorEventType, OperatorJournal,
-    OperatorPage, OperatorRisk, OperatorSensitivity, OPERATOR_EVENT_SCHEMA_VERSION,
+    now_iso, CursorError, CursorEvent, OperatorActor, OperatorEvent, OperatorEventType,
+    OperatorJournal, OperatorPage, OperatorRisk, OperatorSensitivity,
+    OPERATOR_EVENT_SCHEMA_VERSION,
 };
 
 /// How a turn should be routed to a provider/model.
@@ -173,13 +175,18 @@ pub struct OperatorThreadSummary {
 /// the durability and concurrency contract.
 #[derive(Debug)]
 pub struct OperatorSessionService {
-    journal: Mutex<OperatorJournal>,
+    journal: OperatorJournal,
+    /// Serializes in-process read-modify-append writer transactions. It is
+    /// deliberately separate from the journal's own append lock, so replay
+    /// and materialization never wait behind a slow writer.
+    write_transaction: Mutex<()>,
 }
 
 impl OperatorSessionService {
     pub fn new(journal: OperatorJournal) -> Self {
         Self {
-            journal: Mutex::new(journal),
+            journal,
+            write_transaction: Mutex::new(()),
         }
     }
 
@@ -192,15 +199,13 @@ impl OperatorSessionService {
     /// `turn_started`, then `user_message`. Idempotency is decided purely by
     /// what is already on disk, per the module docs.
     pub fn start_turn(&self, thread_id: &str, request: StartTurnRequest) -> Result<TurnSubmission> {
-        let journal = self.lock_journal()?;
-        let threads = materialize_all(&journal)?.threads;
+        let _write_transaction = self.lock_write_transaction()?;
+        let threads = materialize_all(&self.journal)?.threads;
 
         if let Some(folded) = threads.get(thread_id) {
-            if let Some(turn) = folded
-                .turns
-                .iter()
-                .find(|turn| turn.client_request_id.as_deref() == Some(request.client_request_id.as_str()))
-            {
+            if let Some(turn) = folded.turns.iter().find(|turn| {
+                turn.client_request_id.as_deref() == Some(request.client_request_id.as_str())
+            }) {
                 let cursor = turn.user_message_cursor.clone().ok_or_else(|| {
                     anyhow!(
                         "duplicate turn {} for thread {thread_id} has no recorded user_message cursor",
@@ -217,7 +222,7 @@ impl OperatorSessionService {
         }
 
         let thread_exists = threads.contains_key(thread_id);
-        let now = now_rfc3339();
+        let now = now_iso();
         let operator_actor = OperatorActor {
             kind: "operator".to_string(),
             id: "local-operator".to_string(),
@@ -233,7 +238,7 @@ impl OperatorSessionService {
                 operator_actor.clone(),
                 json!({}),
             );
-            journal.append(&created)?;
+            self.journal.append(&created)?;
         }
 
         let turn_id = deterministic_turn_id(thread_id, &request.client_request_id);
@@ -250,7 +255,7 @@ impl OperatorSessionService {
                 "route_policy": request.route_policy,
             }),
         );
-        journal.append(&turn_started)?;
+        self.journal.append(&turn_started)?;
 
         let user_message = new_event(
             thread_id,
@@ -261,7 +266,7 @@ impl OperatorSessionService {
             operator_actor,
             json!({ "text": request.prompt }),
         );
-        let appended = journal.append(&user_message)?;
+        let appended = self.journal.append(&user_message)?;
 
         Ok(TurnSubmission {
             thread_id: thread_id.to_string(),
@@ -275,10 +280,10 @@ impl OperatorSessionService {
     /// [`validate_event`] for the exact rules. Write-side is strict: a
     /// rejected event never reaches the journal.
     pub fn append_event(&self, event: OperatorEvent) -> Result<CursorEvent> {
-        let journal = self.lock_journal()?;
-        let threads = materialize_all(&journal)?.threads;
+        let _write_transaction = self.lock_write_transaction()?;
+        let threads = materialize_all(&self.journal)?.threads;
         validate_event(&threads, &event)?;
-        journal.append(&event)
+        self.journal.append(&event)
     }
 
     /// Replay events for one thread starting strictly after `cursor`.
@@ -298,11 +303,6 @@ impl OperatorSessionService {
     ) -> std::result::Result<OperatorPage, CursorError> {
         const PAGE_SIZE: usize = 256;
 
-        let journal = self
-            .journal
-            .lock()
-            .map_err(|_| CursorError::Storage(anyhow!("operator session mutex poisoned")))?;
-
         let mut collected: Vec<CursorEvent> = Vec::new();
         let mut skipped_lines = 0usize;
         let mut raw_cursor: Option<String> = cursor.map(str::to_string);
@@ -317,7 +317,7 @@ impl OperatorSessionService {
         }
 
         loop {
-            let page = journal.read_after(raw_cursor.as_deref(), PAGE_SIZE)?;
+            let page = self.journal.read_after(raw_cursor.as_deref(), PAGE_SIZE)?;
             if page.events.is_empty() {
                 // EOF (or a stalled torn tail): fully consumed, safe to fold
                 // in its skip count. next_cursor echoes the input per the
@@ -372,8 +372,7 @@ impl OperatorSessionService {
     /// stream-wide journal damage (see [`OperatorThreadView::skipped_lines`])
     /// and is reported even on the empty-thread branch.
     pub fn thread(&self, thread_id: &str) -> Result<OperatorThreadView> {
-        let journal = self.lock_journal()?;
-        let materialized = materialize_all(&journal)?;
+        let materialized = materialize_all(&self.journal)?;
         Ok(match materialized.threads.get(thread_id) {
             Some(folded) => folded.to_view(materialized.skipped_lines),
             None => OperatorThreadView {
@@ -388,8 +387,7 @@ impl OperatorSessionService {
     /// Summaries of the most recently active threads, most recent first,
     /// bounded to `limit`.
     pub fn list_threads(&self, limit: usize) -> Result<Vec<OperatorThreadSummary>> {
-        let journal = self.lock_journal()?;
-        let threads = materialize_all(&journal)?.threads;
+        let threads = materialize_all(&self.journal)?.threads;
         let mut folded: Vec<&FoldedThread> = threads.values().collect();
         folded.sort_by_key(|thread| std::cmp::Reverse(thread.last_order));
         Ok(folded
@@ -404,8 +402,8 @@ impl OperatorSessionService {
     /// Idempotent: once every turn is terminal, subsequent calls return
     /// `0` and append nothing.
     pub fn recover_interrupted(&self) -> Result<usize> {
-        let journal = self.lock_journal()?;
-        let threads = materialize_all(&journal)?.threads;
+        let _write_transaction = self.lock_write_transaction()?;
+        let threads = materialize_all(&self.journal)?.threads;
         let runtime_actor = OperatorActor {
             kind: "runtime".to_string(),
             id: "heiwa-core".to_string(),
@@ -425,21 +423,21 @@ impl OperatorSessionService {
                     Some(turn.turn_id.clone()),
                     None,
                     OperatorEventType::TurnInterrupted,
-                    now_rfc3339(),
+                    now_iso(),
                     runtime_actor.clone(),
                     json!({ "reason": "RUNTIME_RESTART" }),
                 );
-                journal.append(&event)?;
+                self.journal.append(&event)?;
                 closed += 1;
             }
         }
         Ok(closed)
     }
 
-    fn lock_journal(&self) -> Result<std::sync::MutexGuard<'_, OperatorJournal>> {
-        self.journal
+    fn lock_write_transaction(&self) -> Result<std::sync::MutexGuard<'_, ()>> {
+        self.write_transaction
             .lock()
-            .map_err(|_| anyhow!("operator session mutex poisoned"))
+            .map_err(|_| anyhow!("operator session write transaction mutex poisoned"))
     }
 }
 
@@ -475,13 +473,6 @@ fn new_event(
         evidence_refs: vec![],
         payload,
     }
-}
-
-fn now_rfc3339() -> String {
-    use time::{format_description::well_known::Rfc3339, OffsetDateTime};
-    OffsetDateTime::now_utc()
-        .format(&Rfc3339)
-        .expect("RFC3339 formatting of the current time should never fail")
 }
 
 /// Deterministic turn id derived from `(thread_id, client_request_id)`.
@@ -546,19 +537,72 @@ fn validate_event(threads: &HashMap<String, FoldedThread>, event: &OperatorEvent
         );
     }
 
-    if let Some(turn_id) = &event.turn_id {
-        if let Some(turn) = threads
+    if event.event_type == OperatorEventType::TurnStarted {
+        validate_turn_started(threads, event)?;
+    } else if let Some(turn_id) = &event.turn_id {
+        let turn = threads
             .get(&event.thread_id)
             .and_then(|folded| folded.turns.iter().find(|turn| &turn.turn_id == turn_id))
-        {
-            if is_turn_terminal(&turn.status) && !is_terminal_event(&event.event_type) {
-                bail!(
-                    "rejected operator event {}: turn {turn_id} is already terminal ({}); nonterminal event {:?} rejected",
+            .ok_or_else(|| {
+                anyhow!(
+                    "rejected operator event {}: turn {turn_id} does not exist in thread {}",
                     event.event_id,
-                    turn.status,
-                    event.event_type
-                );
-            }
+                    event.thread_id
+                )
+            })?;
+
+        if is_turn_terminal(&turn.status) && !is_terminal_event(&event.event_type) {
+            bail!(
+                "rejected operator event {}: turn {turn_id} is already terminal ({}); nonterminal event {:?} rejected",
+                event.event_id,
+                turn.status,
+                event.event_type
+            );
+        }
+    }
+
+    Ok(())
+}
+
+/// A `turn_started` event is the one deliberate creation exception: legacy
+/// import may synthesize a turn before its other historical events replay.
+/// Once created, both its turn id and any supplied client request id are
+/// immutable identities within the thread.
+fn validate_turn_started(
+    threads: &HashMap<String, FoldedThread>,
+    event: &OperatorEvent,
+) -> Result<()> {
+    let turn_id = event
+        .turn_id
+        .as_deref()
+        .expect("requires_turn_id checked before turn_started validation");
+    let Some(thread) = threads.get(&event.thread_id) else {
+        return Ok(());
+    };
+
+    if thread.turns.iter().any(|turn| turn.turn_id == turn_id) {
+        bail!(
+            "rejected operator event {}: turn {turn_id} already exists in thread {}",
+            event.event_id,
+            event.thread_id
+        );
+    }
+
+    let client_request_id = event
+        .payload
+        .get("client_request_id")
+        .and_then(|value| value.as_str());
+    if let Some(client_request_id) = client_request_id {
+        if thread
+            .turns
+            .iter()
+            .any(|turn| turn.client_request_id.as_deref() == Some(client_request_id))
+        {
+            bail!(
+                "rejected operator event {}: client_request_id {client_request_id:?} already belongs to a turn in thread {}",
+                event.event_id,
+                event.thread_id
+            );
         }
     }
 
@@ -608,7 +652,9 @@ fn requires_call_id(event_type: &OperatorEventType) -> bool {
 fn is_terminal_event(event_type: &OperatorEventType) -> bool {
     matches!(
         event_type,
-        OperatorEventType::TurnCompleted | OperatorEventType::TurnInterrupted | OperatorEventType::Blocker
+        OperatorEventType::TurnCompleted
+            | OperatorEventType::TurnInterrupted
+            | OperatorEventType::Blocker
     )
 }
 
@@ -803,6 +849,19 @@ fn apply_turn_started(entry: &mut FoldedThread, event: &OperatorEvent) {
         .get("client_request_id")
         .and_then(|value| value.as_str())
         .map(str::to_string);
+    if entry.turns.iter().any(|turn| turn.turn_id == turn_id)
+        || client_request_id
+            .as_deref()
+            .is_some_and(|client_request_id| {
+                entry
+                    .turns
+                    .iter()
+                    .any(|turn| turn.client_request_id.as_deref() == Some(client_request_id))
+            })
+    {
+        entry.skipped_events += 1;
+        return;
+    }
     let route_policy = event
         .payload
         .get("route_policy")
@@ -869,5 +928,35 @@ fn apply_nonterminal_touch(entry: &mut FoldedThread, event: &OperatorEvent) {
         }
         Some(_) => {}
         None => entry.skipped_events += 1,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::sync::mpsc;
+    use std::time::Duration;
+
+    use heiwa_evidence::OperatorJournal;
+
+    use super::OperatorSessionService;
+
+    #[test]
+    fn read_only_replay_does_not_wait_for_a_write_transaction() {
+        let dir = tempfile::tempdir().unwrap();
+        let service =
+            OperatorSessionService::new(OperatorJournal::new(dir.path().to_path_buf()).unwrap());
+
+        // Hold the service's writer transaction lock. A read-only replay
+        // must still complete; the journal has its own append-side lock.
+        let _write_transaction = service.write_transaction.lock().unwrap();
+        let (sent, received) = mpsc::channel();
+        std::thread::scope(|scope| {
+            scope.spawn(|| sent.send(service.thread("default")).unwrap());
+            let view = received
+                .recv_timeout(Duration::from_secs(2))
+                .expect("read-only replay must not wait for a writer transaction")
+                .unwrap();
+            assert!(view.turns.is_empty());
+        });
     }
 }
