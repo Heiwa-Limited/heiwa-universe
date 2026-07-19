@@ -55,9 +55,11 @@ fn sensitive_basename(text: &str) -> bool {
 }
 
 fn sensitive_prefix(text: &str) -> bool {
-    SENSITIVE_VALUE_PREFIXES
-        .iter()
-        .any(|prefix| text.starts_with(prefix))
+    text.lines().any(|line| {
+        SENSITIVE_VALUE_PREFIXES
+            .iter()
+            .any(|prefix| line.starts_with(prefix))
+    })
 }
 
 /// Walk a JSON value and return the first match against the credential-path
@@ -96,6 +98,17 @@ mod tests {
     #[test]
     fn flags_token_prefix() {
         let v = json!({ "leak": "ghp_ABCDEF0123456789abcdef" });
+        assert_eq!(
+            find_sensitive(&v),
+            Some(SensitiveMatch {
+                category: "token_prefix"
+            })
+        );
+    }
+
+    #[test]
+    fn flags_token_prefix_after_a_newline_in_one_raw_value() {
+        let v = json!({ "leak": "safe transcript\nghp_ABCDEF0123456789abcdef" });
         assert_eq!(
             find_sensitive(&v),
             Some(SensitiveMatch {

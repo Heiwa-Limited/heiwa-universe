@@ -2,6 +2,7 @@ use anyhow::{anyhow, Result};
 use serde_json::json;
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
 
 /// Target risk levels for action routing
@@ -117,6 +118,17 @@ pub fn stage_approval_request(
 
 /// Block and watch for an operator decision on a request, with a timeout
 pub fn wait_for_decision(request_id: &str, timeout: Duration) -> Result<String> {
+    wait_for_decision_cancellable(request_id, timeout, &AtomicBool::new(false))
+}
+
+/// Blocking approval poll with a cooperative cancellation boundary. The
+/// caller owns the flag and waits for this function to return before
+/// declaring its turn cancelled, so no detached waiter survives a turn.
+pub fn wait_for_decision_cancellable(
+    request_id: &str,
+    timeout: Duration,
+    cancelled: &AtomicBool,
+) -> Result<String> {
     let home = get_home_dir();
     let decision_path = home
         .join(".heiwa")
@@ -132,6 +144,9 @@ pub fn wait_for_decision(request_id: &str, timeout: Duration) -> Result<String> 
     let poll_interval = Duration::from_millis(100);
 
     while start.elapsed() < timeout {
+        if cancelled.load(Ordering::Acquire) {
+            return Err(anyhow!("approval wait cancelled for {}", request_id));
+        }
         if decision_path.exists() {
             let raw = fs::read_to_string(&decision_path)?;
             let parsed: serde_json::Value = serde_json::from_str(&raw)?;
@@ -257,5 +272,17 @@ mod tests {
         } else {
             panic!("Expected AwaitingApproval verdict");
         }
+    }
+
+    #[test]
+    fn cancellable_wait_stops_before_polling_for_a_decision() {
+        let _lock = ENV_MUTEX.lock().unwrap();
+        let temp = tempdir().unwrap();
+        std::env::set_var("HOME", temp.path());
+        let cancelled = AtomicBool::new(true);
+        let error =
+            wait_for_decision_cancellable("req_cancelled", Duration::from_secs(1), &cancelled)
+                .unwrap_err();
+        assert!(error.to_string().contains("cancelled"));
     }
 }

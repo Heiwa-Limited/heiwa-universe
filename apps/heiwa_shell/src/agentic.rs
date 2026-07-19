@@ -3,6 +3,7 @@ use chrono::Utc;
 use heiwa_protocol::{ExecutionScope, ToolCall, ToolCallReceipt, ToolCallStatus};
 use serde_json::{json, Value};
 use std::path::PathBuf;
+use std::sync::atomic::AtomicBool;
 use std::time::Duration;
 
 #[derive(Debug, Clone)]
@@ -73,11 +74,22 @@ pub fn stage_tool_approval(call: &ToolCall, approval: &ToolApproval) -> Result<(
 }
 
 pub fn wait_for_tool_approval(approval: &ToolApproval) -> Result<String> {
+    wait_for_tool_approval_cancellable(approval, &AtomicBool::new(false))
+}
+
+pub fn wait_for_tool_approval_cancellable(
+    approval: &ToolApproval,
+    cancelled: &AtomicBool,
+) -> Result<String> {
     let request_id = approval
         .request_id
         .as_deref()
         .ok_or_else(|| anyhow::anyhow!("auto-approved action has no approval wait"))?;
-    heiwa_drex::drex_gate::wait_for_decision(request_id, Duration::from_secs(300))
+    heiwa_drex::drex_gate::wait_for_decision_cancellable(
+        request_id,
+        Duration::from_secs(300),
+        cancelled,
+    )
 }
 
 fn tool_risk(call: &ToolCall) -> heiwa_drex::drex_gate::RiskLevel {
@@ -329,9 +341,9 @@ pub async fn execute_approved_tool_call(
 ) -> Result<(ToolCallReceipt, ToolTranscriptEntry)> {
     let registry = heiwa_mcp::local_repo_registry(scope);
     let started_at = Utc::now().to_rfc3339();
-    let completed_at = Utc::now().to_rfc3339();
     match registry.call(&call.name, call.arguments.clone()).await {
         Ok(value) => {
+            let completed_at = Utc::now().to_rfc3339();
             let output = serde_json::to_string_pretty(&value)?;
             Ok((
                 ToolCallReceipt {
@@ -354,6 +366,7 @@ pub async fn execute_approved_tool_call(
             ))
         }
         Err(error) => {
+            let completed_at = Utc::now().to_rfc3339();
             let status = if error.is_policy_denial() {
                 ToolCallStatus::Denied
             } else {

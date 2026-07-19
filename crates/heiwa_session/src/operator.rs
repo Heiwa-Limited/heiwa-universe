@@ -509,10 +509,15 @@ impl OperatorSessionService {
         Ok(closed)
     }
 
-    /// Repair one specific nonterminal turn after its owning runner has
-    /// disappeared. This is deliberately narrower than startup recovery so a
-    /// duplicate submission cannot close unrelated work.
-    pub fn recover_turn(&self, thread_id: &str, turn_id: &str) -> Result<Option<CursorEvent>> {
+    /// Close one orphan after the caller has independently proved ownership
+    /// of the failed runner. This service cannot establish that proof from
+    /// journal state alone; callers must never use process-local absence as
+    /// evidence that another runtime is dead.
+    pub fn recover_proven_orphan(
+        &self,
+        thread_id: &str,
+        turn_id: &str,
+    ) -> Result<Option<CursorEvent>> {
         let _write_transaction = self.lock_write_transaction()?;
         let threads = materialize_all(&self.journal)?.threads;
         let Some(turn) = threads
@@ -722,9 +727,20 @@ fn validate_event(threads: &HashMap<String, FoldedThread>, event: &OperatorEvent
             }
         }
 
+        if event.event_type == OperatorEventType::ToolCallCompleted
+            && !tool_key(event).is_some_and(|key| turn.pending_tools.contains(&key))
+        {
+            bail!(
+                "rejected operator event {}: tool completion has no matching pending tool call",
+                event.event_id
+            );
+        }
+
         if turn.cancel_requested {
             let is_cancel_audit = is_cancellation_approval_audit(turn, event);
+            let is_cancel_tool_audit = is_cancellation_tool_audit(turn, event);
             if !is_cancel_audit
+                && !is_cancel_tool_audit
                 && (event.event_type != OperatorEventType::TurnInterrupted
                     || interruption_reason(event) != Some("OPERATOR_CANCELLED"))
             {
@@ -896,6 +912,7 @@ struct FoldedTurn {
     started_at: String,
     route_policy: Option<TurnRoutePolicy>,
     pending_approvals: HashSet<ApprovalKey>,
+    pending_tools: HashSet<ToolKey>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -903,6 +920,12 @@ struct ApprovalKey {
     call_id: String,
     request_id: String,
     tool: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+struct ToolKey {
+    call_id: String,
+    name: String,
 }
 
 #[derive(Debug, Clone)]
@@ -1099,6 +1122,8 @@ fn apply_to_existing_thread(
         OperatorEventType::TurnInterrupted => apply_terminal(entry, event, "interrupted"),
         OperatorEventType::Blocker => apply_terminal(entry, event, "blocked"),
         OperatorEventType::TurnCancelRequested => apply_turn_cancel_requested(entry, event),
+        OperatorEventType::ToolCallStarted => apply_tool_started(entry, event),
+        OperatorEventType::ToolCallCompleted => apply_tool_completed(entry, event),
         OperatorEventType::ApprovalRequested => apply_approval_requested(entry, event),
         OperatorEventType::ApprovalDecided => apply_approval_decided(entry, event),
         OperatorEventType::RoutePlanned
@@ -1107,8 +1132,6 @@ fn apply_to_existing_thread(
         | OperatorEventType::RouteFailed
         | OperatorEventType::AssistantStarted
         | OperatorEventType::AssistantCompleted
-        | OperatorEventType::ToolCallStarted
-        | OperatorEventType::ToolCallCompleted
         | OperatorEventType::ArtifactCreated
         | OperatorEventType::TestResult
         | OperatorEventType::ReceiptLinked
@@ -1158,6 +1181,7 @@ fn apply_turn_started(entry: &mut FoldedThread, event: &OperatorEvent) -> bool {
         started_at: event.occurred_at.clone(),
         route_policy,
         pending_approvals: HashSet::new(),
+        pending_tools: HashSet::new(),
     });
     true
 }
@@ -1219,6 +1243,53 @@ fn apply_turn_cancel_requested(entry: &mut FoldedThread, event: &OperatorEvent) 
     }
     turn.cancel_requested = true;
     true
+}
+
+fn tool_key(event: &OperatorEvent) -> Option<ToolKey> {
+    Some(ToolKey {
+        call_id: event.call_id.clone()?,
+        name: event.payload.get("name")?.as_str()?.to_string(),
+    })
+}
+
+fn is_cancellation_tool_audit(turn: &FoldedTurn, event: &OperatorEvent) -> bool {
+    event.event_type == OperatorEventType::ToolCallCompleted
+        && event.payload.get("status").and_then(|value| value.as_str()) == Some("uncertain")
+        && event.payload.get("reason").and_then(|value| value.as_str())
+            == Some("OPERATOR_CANCELLED")
+        && tool_key(event).is_some_and(|key| turn.pending_tools.contains(&key))
+}
+
+fn apply_tool_started(entry: &mut FoldedThread, event: &OperatorEvent) -> bool {
+    let Some(turn_id) = &event.turn_id else {
+        return false;
+    };
+    let Some(turn) = entry.turns.iter_mut().find(|turn| &turn.turn_id == turn_id) else {
+        return false;
+    };
+    if is_turn_terminal(&turn.status) || turn.cancel_requested {
+        return false;
+    }
+    tool_key(event)
+        .map(|key| turn.pending_tools.insert(key))
+        .unwrap_or(false)
+}
+
+fn apply_tool_completed(entry: &mut FoldedThread, event: &OperatorEvent) -> bool {
+    let Some(turn_id) = &event.turn_id else {
+        return false;
+    };
+    let Some(turn) = entry.turns.iter_mut().find(|turn| &turn.turn_id == turn_id) else {
+        return false;
+    };
+    if is_turn_terminal(&turn.status)
+        || (turn.cancel_requested && !is_cancellation_tool_audit(turn, event))
+    {
+        return false;
+    }
+    tool_key(event)
+        .map(|key| turn.pending_tools.remove(&key))
+        .unwrap_or(false)
 }
 
 fn apply_approval_requested(entry: &mut FoldedThread, event: &OperatorEvent) -> bool {
@@ -1516,5 +1587,83 @@ mod tests {
                 "app.deploy",
             ))
             .unwrap();
+    }
+
+    #[test]
+    fn pending_cancel_accepts_only_correlated_uncertain_tool_receipt_before_terminal() {
+        let (_dir, service, turn_id) = started_service();
+        service
+            .append_event(new_event(
+                "default",
+                Some(turn_id.clone()),
+                Some("call-1".into()),
+                OperatorEventType::ToolCallStarted,
+                now_iso(),
+                OperatorActor {
+                    kind: "runtime".into(),
+                    id: "test".into(),
+                },
+                json!({"name": "fs.write"}),
+            ))
+            .unwrap();
+        append_cancel_requested(&service, &turn_id);
+        service
+            .append_event(new_event(
+                "default",
+                Some(turn_id.clone()),
+                Some("call-1".into()),
+                OperatorEventType::ToolCallCompleted,
+                now_iso(),
+                OperatorActor {
+                    kind: "runtime".into(),
+                    id: "test".into(),
+                },
+                json!({
+                    "name": "fs.write",
+                    "status": "uncertain",
+                    "outcome": "uncertain",
+                    "reason": "OPERATOR_CANCELLED",
+                }),
+            ))
+            .unwrap();
+        service
+            .append_event(new_event(
+                "default",
+                Some(turn_id),
+                None,
+                OperatorEventType::TurnInterrupted,
+                now_iso(),
+                OperatorActor {
+                    kind: "runtime".into(),
+                    id: "test".into(),
+                },
+                json!({"reason": "OPERATOR_CANCELLED"}),
+            ))
+            .unwrap();
+    }
+
+    #[test]
+    fn pending_cancel_rejects_fabricated_uncertain_tool_receipt() {
+        let (_dir, service, turn_id) = started_service();
+        append_cancel_requested(&service, &turn_id);
+        assert!(service
+            .append_event(new_event(
+                "default",
+                Some(turn_id),
+                Some("call-1".into()),
+                OperatorEventType::ToolCallCompleted,
+                now_iso(),
+                OperatorActor {
+                    kind: "runtime".into(),
+                    id: "test".into()
+                },
+                json!({
+                    "name": "fs.write",
+                    "status": "uncertain",
+                    "outcome": "uncertain",
+                    "reason": "OPERATOR_CANCELLED",
+                }),
+            ))
+            .is_err());
     }
 }

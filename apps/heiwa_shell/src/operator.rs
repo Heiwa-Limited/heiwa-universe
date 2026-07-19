@@ -1,11 +1,15 @@
 use std::collections::{HashMap, HashSet, VecDeque};
+use std::fs::{self, OpenOptions};
+use std::io::Write;
+use std::path::PathBuf;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 
 use anyhow::{anyhow, Result};
 use async_trait::async_trait;
 use heiwa_core::drex::{ExecutionLocality, ModelCallCandidate, ModelCallRequest, PrivacyClass};
 use heiwa_evidence::{
-    now_iso, CursorEvent, EvidenceTransport, JsonlTransport, OperatorActor, OperatorEvent,
+    find_sensitive, journal_root, now_iso, CursorEvent, OperatorActor, OperatorEvent,
     OperatorEventType, OperatorRisk, OperatorSensitivity, PersistedArtifact,
     OPERATOR_EVENT_SCHEMA_VERSION,
 };
@@ -30,24 +34,31 @@ pub struct ActiveTurnRegistry {
 impl ActiveTurnRegistry {
     pub fn register(&self, turn_id: String) -> watch::Receiver<bool> {
         let (sender, receiver) = watch::channel(false);
-        self.turns.lock().unwrap().insert(turn_id, sender);
+        if let Ok(mut turns) = self.turns.lock() {
+            turns.insert(turn_id, sender);
+        }
         receiver
     }
 
     pub fn signal_cancel(&self, turn_id: &str) -> bool {
         self.turns
             .lock()
-            .unwrap()
-            .get(turn_id)
+            .ok()
+            .and_then(|turns| turns.get(turn_id).cloned())
             .is_some_and(|sender| sender.send(true).is_ok())
     }
 
     pub fn remove(&self, turn_id: &str) {
-        self.turns.lock().unwrap().remove(turn_id);
+        if let Ok(mut turns) = self.turns.lock() {
+            turns.remove(turn_id);
+        }
     }
 
     pub fn contains(&self, turn_id: &str) -> bool {
-        self.turns.lock().unwrap().contains_key(turn_id)
+        self.turns
+            .lock()
+            .map(|turns| turns.contains_key(turn_id))
+            .unwrap_or(false)
     }
 }
 
@@ -101,8 +112,19 @@ impl OperatorModelExecutor for ModelCallExecutor {
 
 pub type DonePayload = Arc<dyn Fn(&ModelCallResult) -> serde_json::Value + Send + Sync>;
 
+#[derive(Debug, Clone)]
+pub struct CommittedOperatorArtifact {
+    pub artifact_id: String,
+    pub artifact_ref: String,
+    path: PathBuf,
+}
+
 pub trait OperatorArtifactStore: Send + Sync {
-    fn store(&self, artifact: PersistedArtifact) -> Result<()>;
+    /// Commit raw data reversibly, then return the exact durable reference.
+    /// The runner rolls this back if its matching `artifact_created` journal
+    /// append fails, keeping both planes symmetric.
+    fn commit(&self, artifact: PersistedArtifact) -> Result<CommittedOperatorArtifact>;
+    fn rollback(&self, artifact: &CommittedOperatorArtifact) -> Result<()>;
 }
 
 /// Injectable boundary around the existing DREX approval policy, staging, and
@@ -115,7 +137,11 @@ pub trait OperatorApprovalService: Send + Sync {
         call: &heiwa_protocol::ToolCall,
         approval: &crate::agentic::ToolApproval,
     ) -> Result<()>;
-    fn wait(&self, approval: &crate::agentic::ToolApproval) -> Result<String>;
+    fn wait(
+        &self,
+        approval: &crate::agentic::ToolApproval,
+        cancelled: &AtomicBool,
+    ) -> Result<String>;
 }
 
 #[derive(Default)]
@@ -134,8 +160,12 @@ impl OperatorApprovalService for DrexApprovalService {
         crate::agentic::stage_tool_approval(call, approval)
     }
 
-    fn wait(&self, approval: &crate::agentic::ToolApproval) -> Result<String> {
-        crate::agentic::wait_for_tool_approval(approval)
+    fn wait(
+        &self,
+        approval: &crate::agentic::ToolApproval,
+        cancelled: &AtomicBool,
+    ) -> Result<String> {
+        crate::agentic::wait_for_tool_approval_cancellable(approval, cancelled)
     }
 }
 
@@ -143,8 +173,42 @@ impl OperatorApprovalService for DrexApprovalService {
 struct LocalArtifactStore;
 
 impl OperatorArtifactStore for LocalArtifactStore {
-    fn store(&self, artifact: PersistedArtifact) -> Result<()> {
-        JsonlTransport::default_local()?.register_artifact(artifact)
+    fn commit(&self, artifact: PersistedArtifact) -> Result<CommittedOperatorArtifact> {
+        let dir = journal_root()?.join("operator_artifacts");
+        fs::create_dir_all(&dir)?;
+        let path = dir.join(format!("{}.json", artifact.artifact_id));
+        let temp = dir.join(format!(".{}.{}.tmp", artifact.artifact_id, Uuid::new_v4()));
+        let write_result = (|| -> Result<()> {
+            let mut file = OpenOptions::new()
+                .write(true)
+                .create_new(true)
+                .open(&temp)?;
+            file.write_all(&serde_json::to_vec(&artifact)?)?;
+            file.sync_all()?;
+            fs::rename(&temp, &path)?;
+            // Best-effort directory durability: filesystems that permit a
+            // directory handle get the rename metadata flushed too.
+            if let Ok(directory) = OpenOptions::new().read(true).open(&dir) {
+                let _ = directory.sync_all();
+            }
+            Ok(())
+        })();
+        if write_result.is_err() {
+            let _ = fs::remove_file(&temp);
+        }
+        write_result?;
+        Ok(CommittedOperatorArtifact {
+            artifact_id: artifact.artifact_id,
+            artifact_ref: path.to_string_lossy().to_string(),
+            path,
+        })
+    }
+
+    fn rollback(&self, artifact: &CommittedOperatorArtifact) -> Result<()> {
+        if artifact.path.exists() {
+            fs::remove_file(&artifact.path)?;
+        }
+        Ok(())
     }
 }
 
@@ -177,12 +241,22 @@ pub struct OperatorTurnHandle {
     replay_complete: bool,
     seen_event_ids: HashSet<String>,
     frames: broadcast::Receiver<OperatorStreamFrame>,
+    /// New submissions get a bounded, backpressured private stream. The
+    /// global broadcast is intentionally lossy for observers and duplicates,
+    /// but never carries the original caller's only copy of answer tokens.
+    direct_frames: Option<mpsc::Receiver<OperatorStreamFrame>>,
 }
 
 impl OperatorTurnHandle {
     pub async fn recv(
         &mut self,
     ) -> std::result::Result<OperatorStreamFrame, broadcast::error::RecvError> {
+        if let Some(direct_frames) = &mut self.direct_frames {
+            return direct_frames
+                .recv()
+                .await
+                .ok_or(broadcast::error::RecvError::Closed);
+        }
         loop {
             if let Some(frame) = self.replay.pop_front() {
                 if self.accept_frame(&frame) {
@@ -257,6 +331,7 @@ pub struct OperatorTurnRunner {
     executor: Arc<dyn OperatorModelExecutor>,
     active: ActiveTurnRegistry,
     submissions: Arc<Mutex<()>>,
+    recoverable_orphans: Arc<Mutex<HashSet<String>>>,
     active_threads: Arc<Mutex<HashMap<String, String>>>,
     frames: broadcast::Sender<OperatorStreamFrame>,
     artifacts: Arc<dyn OperatorArtifactStore>,
@@ -274,6 +349,7 @@ impl OperatorTurnRunner {
             executor,
             active: ActiveTurnRegistry::default(),
             submissions: Arc::new(Mutex::new(())),
+            recoverable_orphans: Arc::new(Mutex::new(HashSet::new())),
             active_threads: Arc::new(Mutex::new(HashMap::new())),
             frames,
             artifacts: Arc::new(LocalArtifactStore),
@@ -312,28 +388,53 @@ impl OperatorTurnRunner {
         let route_policy = request.route_policy.clone();
         let frames = self.subscribe();
         let submission = self.sessions.start_turn(thread_id, request)?;
+        let mut direct_frames = None;
         if !submission.duplicate {
             let cancel = self.active.register(submission.turn_id.clone());
             self.active_threads
                 .lock()
-                .unwrap()
+                .map_err(|_| anyhow!("operator active turn mutex poisoned"))?
                 .insert(submission.turn_id.clone(), thread_id.to_string());
+            let (direct_tx, direct_rx) = mpsc::channel(OPERATOR_STREAM_CAPACITY);
+            direct_frames = Some(direct_rx);
             let runner = self.clone();
             let thread_id = thread_id.to_string();
             let turn_id = submission.turn_id.clone();
             tokio::spawn(async move {
                 runner
-                    .run_and_close(thread_id, turn_id, route_policy, work, cancel)
+                    .run_and_close(thread_id, turn_id, route_policy, work, cancel, direct_tx)
                     .await;
             });
         } else if !self.active.contains(&submission.turn_id) {
-            if let Some(row) = self
+            let owns_orphan = self
+                .recoverable_orphans
+                .lock()
+                .map_err(|_| anyhow!("operator orphan mutex poisoned"))?
+                .contains(&submission.turn_id);
+            if owns_orphan {
+                if let Some(row) = self
+                    .sessions
+                    .recover_proven_orphan(&submission.thread_id, &submission.turn_id)?
+                {
+                    let _ = self
+                        .frames
+                        .send(OperatorStreamFrame::Durable(Box::new(row)));
+                }
+                self.recoverable_orphans
+                    .lock()
+                    .map_err(|_| anyhow!("operator orphan mutex poisoned"))?
+                    .remove(&submission.turn_id);
+            } else if self
                 .sessions
-                .recover_turn(&submission.thread_id, &submission.turn_id)?
+                .thread(&submission.thread_id)?
+                .turns
+                .iter()
+                .any(|turn| turn.turn_id == submission.turn_id && turn.status == "open")
             {
-                let _ = self
-                    .frames
-                    .send(OperatorStreamFrame::Durable(Box::new(row)));
+                return Err(anyhow!(
+                    "duplicate turn {} is open and owned by another runtime",
+                    submission.turn_id
+                ));
             }
         }
         let (cursor, replay_complete) = if submission.duplicate {
@@ -351,11 +452,18 @@ impl OperatorTurnRunner {
             replay_complete,
             seen_event_ids: HashSet::new(),
             frames,
+            direct_frames,
         })
     }
 
     pub fn request_cancel(&self, turn_id: &str) -> Result<bool> {
-        let Some(thread_id) = self.active_threads.lock().unwrap().get(turn_id).cloned() else {
+        let Some(thread_id) = self
+            .active_threads
+            .lock()
+            .map_err(|_| anyhow!("operator active turn mutex poisoned"))?
+            .get(turn_id)
+            .cloned()
+        else {
             return Ok(false);
         };
         let row = self.sessions.append_event(runtime_event(
@@ -378,9 +486,17 @@ impl OperatorTurnRunner {
         route_policy: TurnRoutePolicy,
         work: OperatorTurnWork,
         cancel: watch::Receiver<bool>,
+        direct_frames: mpsc::Sender<OperatorStreamFrame>,
     ) {
         let result = self
-            .run_turn(&thread_id, &turn_id, &route_policy, work, cancel.clone())
+            .run_turn(
+                &thread_id,
+                &turn_id,
+                &route_policy,
+                work,
+                cancel.clone(),
+                &direct_frames,
+            )
             .await;
         if let Err(error) = result {
             let cancelled = *cancel.borrow();
@@ -396,19 +512,30 @@ impl OperatorTurnRunner {
                 OperatorEventType::TurnInterrupted,
                 payload,
             )) {
-                let _ = self
-                    .frames
-                    .send(OperatorStreamFrame::Durable(Box::new(row)));
+                self.publish_frame(
+                    Some(&direct_frames),
+                    OperatorStreamFrame::Durable(Box::new(row)),
+                )
+                .await;
             } else {
-                let _ = self.frames.send(OperatorStreamFrame::Error {
-                    thread_id: thread_id.clone(),
-                    turn_id: turn_id.clone(),
-                    message: error.to_string(),
-                });
+                if let Ok(mut orphans) = self.recoverable_orphans.lock() {
+                    orphans.insert(turn_id.clone());
+                }
+                self.publish_frame(
+                    Some(&direct_frames),
+                    OperatorStreamFrame::Error {
+                        thread_id: thread_id.clone(),
+                        turn_id: turn_id.clone(),
+                        message: error.to_string(),
+                    },
+                )
+                .await;
             }
         }
         self.active.remove(&turn_id);
-        self.active_threads.lock().unwrap().remove(&turn_id);
+        if let Ok(mut active_threads) = self.active_threads.lock() {
+            active_threads.remove(&turn_id);
+        }
     }
 
     async fn run_turn(
@@ -418,15 +545,20 @@ impl OperatorTurnRunner {
         route_policy: &TurnRoutePolicy,
         work: OperatorTurnWork,
         cancel: watch::Receiver<bool>,
+        direct_frames: &mpsc::Sender<OperatorStreamFrame>,
     ) -> Result<()> {
         let mut cursor = self
-            .append_and_publish(runtime_event(
-                thread_id,
-                turn_id,
-                None,
-                OperatorEventType::AssistantStarted,
-                json!({}),
-            ))?
+            .append_and_publish(
+                runtime_event(
+                    thread_id,
+                    turn_id,
+                    None,
+                    OperatorEventType::AssistantStarted,
+                    json!({}),
+                ),
+                Some(direct_frames),
+            )
+            .await?
             .cursor;
 
         match work {
@@ -445,22 +577,31 @@ impl OperatorTurnRunner {
                         OperatorEventType::RoutePlanned,
                         route.clone(),
                     ),
-                )?;
-                let route_completed = self.append_and_publish_at(
-                    &mut cursor,
-                    runtime_event(
-                        thread_id,
-                        turn_id,
-                        Some(&call_id),
-                        OperatorEventType::RouteCompleted,
-                        route,
-                    ),
-                )?;
-                let _ = self.frames.send(OperatorStreamFrame::AssistantDelta {
-                    thread_id: thread_id.to_string(),
-                    turn_id: turn_id.to_string(),
-                    text: response.clone(),
-                });
+                    Some(direct_frames),
+                )
+                .await?;
+                let route_completed = self
+                    .append_and_publish_at(
+                        &mut cursor,
+                        runtime_event(
+                            thread_id,
+                            turn_id,
+                            Some(&call_id),
+                            OperatorEventType::RouteCompleted,
+                            route,
+                        ),
+                        Some(direct_frames),
+                    )
+                    .await?;
+                self.publish_frame(
+                    Some(direct_frames),
+                    OperatorStreamFrame::AssistantDelta {
+                        thread_id: thread_id.to_string(),
+                        turn_id: turn_id.to_string(),
+                        text: response.clone(),
+                    },
+                )
+                .await;
                 self.finish_turn(
                     &mut cursor,
                     thread_id,
@@ -469,15 +610,26 @@ impl OperatorTurnRunner {
                     done,
                     None,
                     Some(route_completed.event.event_id),
-                )?;
+                    direct_frames,
+                )
+                .await?;
             }
             OperatorTurnWork::Model(mut model) => {
                 apply_route_policy(&mut model.request, route_policy)?;
                 apply_candidate_policy(&mut model.candidates, route_policy);
                 model.request.thread_id = thread_id.to_string();
                 model.request.turn_id = turn_id.to_string();
+                model.remaining_budget_usd =
+                    stricter_budget(route_policy.turn_budget_usd, model.remaining_budget_usd);
                 let result = self
-                    .execute_model(thread_id, turn_id, &mut cursor, *model, cancel)
+                    .execute_model(
+                        thread_id,
+                        turn_id,
+                        &mut cursor,
+                        *model,
+                        cancel,
+                        direct_frames,
+                    )
                     .await?;
                 let done = (result.done_payload)(&result.result);
                 let response = result.result.text.clone();
@@ -489,7 +641,9 @@ impl OperatorTurnRunner {
                     done,
                     Some(result.result),
                     Some(result.receipt_ref),
-                )?;
+                    direct_frames,
+                )
+                .await?;
             }
         }
         Ok(())
@@ -502,6 +656,7 @@ impl OperatorTurnRunner {
         cursor: &mut String,
         model: OperatorModelTurn,
         cancel: watch::Receiver<bool>,
+        direct_frames: &mpsc::Sender<OperatorStreamFrame>,
     ) -> Result<CompletedModelTurn> {
         let request_template = model.request.clone();
         let candidates = model.candidates.clone();
@@ -520,8 +675,10 @@ impl OperatorTurnRunner {
                 remaining_budget_usd,
                 max_attempts,
                 cancel.clone(),
+                direct_frames,
             )
             .await?;
+        let remaining_after_first = subtract_turn_budget(remaining_budget_usd, first.cost_usd)?;
 
         let tool_calls = crate::agentic::parse_tool_calls(&first.text);
         let Some(scope) = model.tool_scope else {
@@ -547,13 +704,17 @@ impl OperatorTurnRunner {
                 return Err(anyhow!("operator turn cancelled"));
             }
             *cursor = self
-                .append_and_publish(runtime_event(
-                    thread_id,
-                    turn_id,
-                    Some(&call.id),
-                    OperatorEventType::ToolCallStarted,
-                    json!({"name": call.name, "arguments": call.arguments}),
-                ))?
+                .append_and_publish(
+                    runtime_event(
+                        thread_id,
+                        turn_id,
+                        Some(&call.id),
+                        OperatorEventType::ToolCallStarted,
+                        json!({"name": call.name, "arguments": call.arguments}),
+                    ),
+                    Some(direct_frames),
+                )
+                .await?
                 .cursor;
             // DREX owns the approval policy and packet format. We own the
             // ordered durable audit trail around it, so an append failure
@@ -573,15 +734,19 @@ impl OperatorTurnRunner {
                     "surface": approval.surface,
                     "outcome": if approval.request_id.is_some() { "pending" } else { "auto_approved" },
                 }),
-            ))?.cursor;
+            ), Some(direct_frames)).await?.cursor;
             let outcome = if approval.request_id.is_some() {
                 self.approvals.stage(&call, &approval)?;
                 let wait_approval = approval.clone();
                 let approvals = self.approvals.clone();
-                let wait = tokio::task::spawn_blocking(move || approvals.wait(&wait_approval));
+                let approval_wait_cancelled = Arc::new(AtomicBool::new(false));
+                let waiter_cancelled = approval_wait_cancelled.clone();
+                let mut wait = tokio::task::spawn_blocking(move || {
+                    approvals.wait(&wait_approval, &waiter_cancelled)
+                });
                 let mut approval_cancel = cancel.clone();
                 tokio::select! {
-                    waited = wait => match waited {
+                    waited = &mut wait => match waited {
                         Ok(Ok(outcome)) => outcome,
                         Ok(Err(error)) => format!("timeout: {error}"),
                         Err(error) => return Err(anyhow!("approval waiter failed: {error}")),
@@ -589,6 +754,11 @@ impl OperatorTurnRunner {
                     changed = approval_cancel.changed() => {
                         match changed {
                             Ok(()) if *approval_cancel.borrow() => {
+                                approval_wait_cancelled.store(true, Ordering::Release);
+                                match wait.await {
+                                    Ok(Ok(_)) | Ok(Err(_)) => {}
+                                    Err(error) => return Err(anyhow!("approval waiter failed: {error}")),
+                                }
                                 *cursor = self.append_and_publish(runtime_event(
                                     thread_id,
                                     turn_id,
@@ -603,7 +773,7 @@ impl OperatorTurnRunner {
                                         "outcome": "cancelled",
                                         "reason": "OPERATOR_CANCELLED",
                                     }),
-                                ))?.cursor;
+                                ), Some(direct_frames)).await?.cursor;
                                 return Err(anyhow!("operator turn cancelled"));
                             }
                             _ => return Err(anyhow!("operator cancellation channel closed")),
@@ -627,7 +797,7 @@ impl OperatorTurnRunner {
                     "outcome": outcome,
                     "reason": if outcome == "approved" || outcome == "auto_approved" { serde_json::Value::Null } else { json!("policy_denied_or_timeout") },
                 }),
-            ))?.cursor;
+            ), Some(direct_frames)).await?.cursor;
             if outcome != "approved" && outcome != "auto_approved" {
                 return Err(anyhow!("tool approval did not permit execution: {outcome}"));
             }
@@ -646,7 +816,26 @@ impl OperatorTurnRunner {
                 result = &mut tool_execution => result?,
                 changed = tool_cancel.changed() => {
                     match changed {
-                        Ok(()) if *tool_cancel.borrow() => return Err(anyhow!("operator turn cancelled")),
+                        Ok(()) if *tool_cancel.borrow() => {
+                            *cursor = self.append_and_publish(runtime_event(
+                                thread_id,
+                                turn_id,
+                                Some(&call.id),
+                                OperatorEventType::ToolCallCompleted,
+                                json!({
+                                    "name": call.name,
+                                    "status": "uncertain",
+                                    "outcome": "uncertain",
+                                    "reason": "OPERATOR_CANCELLED",
+                                    "output": "",
+                                    "output_preview": "",
+                                    "artifact_ref": serde_json::Value::Null,
+                                    "receipt_id": serde_json::Value::Null,
+                                    "error": "tool outcome uncertain after cancellation",
+                                }),
+                            ), Some(direct_frames)).await?.cursor;
+                            return Err(anyhow!("operator turn cancelled"));
+                        }
                         _ => return Err(anyhow!("operator cancellation channel closed")),
                     }
                 }
@@ -654,30 +843,37 @@ impl OperatorTurnRunner {
             if *cancel.borrow() {
                 return Err(anyhow!("operator turn cancelled"));
             }
-            let (preview, artifact_ref) = self.persist_large_tool_output(
-                cursor,
-                thread_id,
-                turn_id,
-                &call.id,
-                &call.name,
-                &entry.output,
-            )?;
-            *cursor = self
-                .append_and_publish(runtime_event(
+            let (preview, artifact_ref) = self
+                .persist_large_tool_output(
+                    cursor,
                     thread_id,
                     turn_id,
-                    Some(&call.id),
-                    OperatorEventType::ToolCallCompleted,
-                    json!({
-                        "name": call.name,
-                        "status": receipt.status.as_str(),
-                        "output": preview.clone(),
-                        "output_preview": preview,
-                        "artifact_ref": artifact_ref,
-                        "receipt_id": receipt.id,
-                        "error": receipt.error,
-                    }),
-                ))?
+                    &call.id,
+                    &call.name,
+                    &entry.output,
+                    direct_frames,
+                )
+                .await?;
+            *cursor = self
+                .append_and_publish(
+                    runtime_event(
+                        thread_id,
+                        turn_id,
+                        Some(&call.id),
+                        OperatorEventType::ToolCallCompleted,
+                        json!({
+                            "name": call.name,
+                            "status": receipt.status.as_str(),
+                            "output": preview.clone(),
+                            "output_preview": preview,
+                            "artifact_ref": artifact_ref,
+                            "receipt_id": receipt.id,
+                            "error": receipt.error,
+                        }),
+                    ),
+                    Some(direct_frames),
+                )
+                .await?
                 .cursor;
             tool_entries.push(entry);
         }
@@ -704,9 +900,10 @@ impl OperatorTurnRunner {
                 follow_up,
                 candidates,
                 messages,
-                remaining_budget_usd,
+                remaining_after_first,
                 max_attempts,
                 cancel,
+                direct_frames,
             )
             .await?;
         let receipt_ref = result.route_receipt_ref.clone();
@@ -729,6 +926,7 @@ impl OperatorTurnRunner {
         remaining_budget_usd: Option<f64>,
         max_attempts: usize,
         cancel: watch::Receiver<bool>,
+        direct_frames: &mpsc::Sender<OperatorStreamFrame>,
     ) -> Result<ModelCallResult> {
         let (delta_tx, mut delta_rx) = mpsc::channel(32);
         let execution = ModelCallExecution {
@@ -747,31 +945,34 @@ impl OperatorTurnRunner {
                 result = &mut future => break result.map_err(anyhow::Error::from)?,
                 delta = delta_rx.recv() => {
                     let Some(delta) = delta else { continue; };
-                    self.publish_durable_after(thread_id, cursor)?;
+                    self.publish_durable_after(thread_id, cursor, Some(direct_frames)).await?;
                     if let StreamEvent::Token(text) = delta {
-                        let _ = self.frames.send(OperatorStreamFrame::AssistantDelta {
-                            thread_id: thread_id.to_string(),
-                            turn_id: turn_id.to_string(),
-                            text,
-                        });
+                        self.publish_frame(Some(direct_frames), OperatorStreamFrame::AssistantDelta {
+                            thread_id: thread_id.to_string(), turn_id: turn_id.to_string(), text,
+                        }).await;
                     }
                 }
             }
         };
-        self.publish_durable_after(thread_id, cursor)?;
+        self.publish_durable_after(thread_id, cursor, Some(direct_frames))
+            .await?;
         while let Ok(delta) = delta_rx.try_recv() {
             if let StreamEvent::Token(text) = delta {
-                let _ = self.frames.send(OperatorStreamFrame::AssistantDelta {
-                    thread_id: thread_id.to_string(),
-                    turn_id: turn_id.to_string(),
-                    text,
-                });
+                self.publish_frame(
+                    Some(direct_frames),
+                    OperatorStreamFrame::AssistantDelta {
+                        thread_id: thread_id.to_string(),
+                        turn_id: turn_id.to_string(),
+                        text,
+                    },
+                )
+                .await;
             }
         }
         Ok(result)
     }
 
-    fn persist_large_tool_output(
+    async fn persist_large_tool_output(
         &self,
         cursor: &mut String,
         thread_id: &str,
@@ -779,13 +980,17 @@ impl OperatorTurnRunner {
         call_id: &str,
         tool_name: &str,
         output: &str,
+        direct_frames: &mpsc::Sender<OperatorStreamFrame>,
     ) -> Result<(String, Option<String>)> {
         const MAX_OPERATOR_TOOL_OUTPUT_BYTES: usize = 16 * 1024;
+        if tool_output_is_sensitive(output) {
+            return Err(anyhow!("sensitive tool output cannot be persisted"));
+        }
         if output.len() <= MAX_OPERATOR_TOOL_OUTPUT_BYTES {
             return Ok((output.to_string(), None));
         }
         let artifact_id = format!("artifact-{}", Uuid::new_v4());
-        self.artifacts.store(PersistedArtifact {
+        let committed = self.artifacts.commit(PersistedArtifact {
             artifact_id: artifact_id.clone(),
             run_id: None,
             lease_id: None,
@@ -802,27 +1007,43 @@ impl OperatorTurnRunner {
             owner_id: Some("local-operator".to_string()),
             principal_id: Some("operator-turn-runner".to_string()),
         })?;
-        *cursor = self
-            .append_and_publish(runtime_event(
-                thread_id,
-                turn_id,
-                Some(call_id),
-                OperatorEventType::ArtifactCreated,
-                json!({
-                    "artifact_id": artifact_id,
-                    "kind": "tool_output",
-                    "tool_name": tool_name,
-                    "byte_len": output.len(),
-                }),
-            ))?
-            .cursor;
+        let row = self
+            .append_and_publish(
+                runtime_event(
+                    thread_id,
+                    turn_id,
+                    Some(call_id),
+                    OperatorEventType::ArtifactCreated,
+                    json!({
+                        "artifact_id": committed.artifact_id,
+                        "artifact_ref": committed.artifact_ref,
+                        "kind": "tool_output",
+                        "tool_name": tool_name,
+                        "byte_len": output.len(),
+                    }),
+                ),
+                Some(direct_frames),
+            )
+            .await;
+        let row = match row {
+            Ok(row) => row,
+            Err(error) => {
+                if let Err(rollback_error) = self.artifacts.rollback(&committed) {
+                    return Err(anyhow!(
+                        "artifact link append failed: {error}; rollback failed: {rollback_error}"
+                    ));
+                }
+                return Err(error);
+            }
+        };
+        *cursor = row.cursor;
         Ok((
             bounded_text(output, MAX_OPERATOR_TOOL_OUTPUT_BYTES),
             Some(artifact_id),
         ))
     }
 
-    fn finish_turn(
+    async fn finish_turn(
         &self,
         cursor: &mut String,
         thread_id: &str,
@@ -831,15 +1052,20 @@ impl OperatorTurnRunner {
         done: serde_json::Value,
         model: Option<ModelCallResult>,
         receipt_ref: Option<String>,
+        direct_frames: &mpsc::Sender<OperatorStreamFrame>,
     ) -> Result<()> {
         *cursor = self
-            .append_and_publish(runtime_event(
-                thread_id,
-                turn_id,
-                None,
-                OperatorEventType::AssistantCompleted,
-                json!({"text": response}),
-            ))?
+            .append_and_publish(
+                runtime_event(
+                    thread_id,
+                    turn_id,
+                    None,
+                    OperatorEventType::AssistantCompleted,
+                    json!({"text": response}),
+                ),
+                Some(direct_frames),
+            )
+            .await?
             .cursor;
         *cursor = self.append_and_publish(runtime_event(
             thread_id,
@@ -855,49 +1081,75 @@ impl OperatorTurnRunner {
                 "cost_usd": model.as_ref().map(|result| result.cost_usd),
                 "cost_truth": model.as_ref().map(|result| &result.cost_truth),
             }),
-        ))?.cursor;
+        ), Some(direct_frames)).await?.cursor;
         *cursor = self
-            .append_and_publish(runtime_event(
-                thread_id,
-                turn_id,
-                None,
-                OperatorEventType::TurnCompleted,
-                json!({"trace": done}),
-            ))?
+            .append_and_publish(
+                runtime_event(
+                    thread_id,
+                    turn_id,
+                    None,
+                    OperatorEventType::TurnCompleted,
+                    json!({"trace": done}),
+                ),
+                Some(direct_frames),
+            )
+            .await?
             .cursor;
         Ok(())
     }
 
-    fn append_and_publish(&self, event: OperatorEvent) -> Result<CursorEvent> {
+    async fn append_and_publish(
+        &self,
+        event: OperatorEvent,
+        direct_frames: Option<&mpsc::Sender<OperatorStreamFrame>>,
+    ) -> Result<CursorEvent> {
         let row = self.sessions.append_event(event)?;
-        let _ = self
-            .frames
-            .send(OperatorStreamFrame::Durable(Box::new(row.clone())));
+        self.publish_frame(
+            direct_frames,
+            OperatorStreamFrame::Durable(Box::new(row.clone())),
+        )
+        .await;
         Ok(row)
     }
 
-    fn append_and_publish_at(
+    async fn append_and_publish_at(
         &self,
         cursor: &mut String,
         event: OperatorEvent,
+        direct_frames: Option<&mpsc::Sender<OperatorStreamFrame>>,
     ) -> Result<CursorEvent> {
-        let row = self.append_and_publish(event)?;
+        let row = self.append_and_publish(event, direct_frames).await?;
         *cursor = row.cursor.clone();
         Ok(row)
     }
 
-    fn publish_durable_after(&self, thread_id: &str, cursor: &mut String) -> Result<()> {
+    async fn publish_durable_after(
+        &self,
+        thread_id: &str,
+        cursor: &mut String,
+        direct_frames: Option<&mpsc::Sender<OperatorStreamFrame>>,
+    ) -> Result<()> {
         let page = self.sessions.events_after(thread_id, Some(cursor), 256)?;
         for row in page.events {
             *cursor = row.cursor.clone();
-            let _ = self
-                .frames
-                .send(OperatorStreamFrame::Durable(Box::new(row)));
+            self.publish_frame(direct_frames, OperatorStreamFrame::Durable(Box::new(row)))
+                .await;
         }
         if let Some(next) = page.next_cursor {
             *cursor = next;
         }
         Ok(())
+    }
+
+    async fn publish_frame(
+        &self,
+        direct_frames: Option<&mpsc::Sender<OperatorStreamFrame>>,
+        frame: OperatorStreamFrame,
+    ) {
+        if let Some(direct_frames) = direct_frames {
+            let _ = direct_frames.send(frame.clone()).await;
+        }
+        let _ = self.frames.send(frame);
     }
 }
 
@@ -934,6 +1186,25 @@ fn apply_candidate_policy(candidates: &mut Vec<ModelCallCandidate>, policy: &Tur
     if policy.mode == RouteMode::RemoteOnly {
         candidates.retain(|candidate| candidate.locality != ExecutionLocality::OnDevice);
     }
+}
+
+fn stricter_budget(durable: Option<f64>, caller: Option<f64>) -> Option<f64> {
+    match (durable, caller) {
+        (Some(durable), Some(caller)) => Some(durable.min(caller)),
+        (Some(durable), None) => Some(durable),
+        (None, Some(caller)) => Some(caller),
+        (None, None) => None,
+    }
+}
+
+fn subtract_turn_budget(remaining: Option<f64>, spent: f64) -> Result<Option<f64>> {
+    let Some(remaining) = remaining else {
+        return Ok(None);
+    };
+    if !spent.is_finite() || spent < 0.0 {
+        return Err(anyhow!("model result returned an invalid cumulative cost"));
+    }
+    Ok(Some((remaining - spent).max(0.0)))
 }
 
 fn runtime_event(
@@ -977,6 +1248,13 @@ fn bounded_text(value: &str, max_bytes: usize) -> String {
     value[..end].to_string()
 }
 
+fn tool_output_is_sensitive(output: &str) -> bool {
+    match serde_json::from_str::<serde_json::Value>(output) {
+        Ok(value) => find_sensitive(&value).is_some(),
+        Err(_) => find_sensitive(&json!(output)).is_some(),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
@@ -992,11 +1270,12 @@ mod tests {
     use heiwa_provider::adapter::{Message, ProviderAdapter, Role, StreamEvent, TokenUsage};
     use heiwa_session::operator::{OperatorSessionService, StartTurnRequest};
     use serde_json::json;
-    use tokio::sync::Notify;
+    use tokio::sync::{mpsc, Notify};
 
     use super::{
-        ActiveTurnRegistry, OperatorApprovalService, OperatorArtifactStore, OperatorModelExecutor,
-        OperatorModelTurn, OperatorStreamFrame, OperatorTurnRunner, OperatorTurnWork,
+        ActiveTurnRegistry, CommittedOperatorArtifact, OperatorApprovalService,
+        OperatorArtifactStore, OperatorModelExecutor, OperatorModelTurn, OperatorStreamFrame,
+        OperatorTurnRunner, OperatorTurnWork,
     };
     use crate::model_calls::{
         ModelCallError, ModelCallExecution, ModelCallExecutor, ModelCallResult,
@@ -1016,7 +1295,21 @@ mod tests {
         responses: Vec<String>,
     }
 
+    struct BurstingExecutor {
+        answer: String,
+    }
+
+    struct BudgetExecutor {
+        calls: AtomicUsize,
+        remaining_budgets: Mutex<Vec<Option<f64>>>,
+    }
+
     struct DelayedApproval;
+
+    struct CancellableApproval {
+        active_waiters: AtomicUsize,
+        entered: Notify,
+    }
 
     impl OperatorApprovalService for DelayedApproval {
         fn plan(&self, _call: &heiwa_protocol::ToolCall) -> crate::agentic::ToolApproval {
@@ -1036,9 +1329,46 @@ mod tests {
             Ok(())
         }
 
-        fn wait(&self, _approval: &crate::agentic::ToolApproval) -> anyhow::Result<String> {
+        fn wait(
+            &self,
+            _approval: &crate::agentic::ToolApproval,
+            _cancelled: &AtomicBool,
+        ) -> anyhow::Result<String> {
             std::thread::sleep(std::time::Duration::from_millis(200));
             Ok("approved".to_string())
+        }
+    }
+
+    impl OperatorApprovalService for CancellableApproval {
+        fn plan(&self, _call: &heiwa_protocol::ToolCall) -> crate::agentic::ToolApproval {
+            crate::agentic::ToolApproval {
+                request_id: Some("approval-cancellable".to_string()),
+                request_path: Some(std::path::PathBuf::from("/tmp/approval-cancellable")),
+                risk: heiwa_drex::drex_gate::RiskLevel::Critical,
+                surface: "test".to_string(),
+            }
+        }
+
+        fn stage(
+            &self,
+            _call: &heiwa_protocol::ToolCall,
+            _approval: &crate::agentic::ToolApproval,
+        ) -> anyhow::Result<()> {
+            Ok(())
+        }
+
+        fn wait(
+            &self,
+            _approval: &crate::agentic::ToolApproval,
+            cancelled: &AtomicBool,
+        ) -> anyhow::Result<String> {
+            self.active_waiters.fetch_add(1, Ordering::SeqCst);
+            self.entered.notify_waiters();
+            while !cancelled.load(Ordering::Acquire) {
+                std::thread::sleep(std::time::Duration::from_millis(5));
+            }
+            self.active_waiters.fetch_sub(1, Ordering::SeqCst);
+            Err(anyhow::anyhow!("approval wait cancelled"))
         }
     }
 
@@ -1070,7 +1400,11 @@ mod tests {
             Ok(())
         }
 
-        fn wait(&self, _approval: &crate::agentic::ToolApproval) -> anyhow::Result<String> {
+        fn wait(
+            &self,
+            _approval: &crate::agentic::ToolApproval,
+            _cancelled: &AtomicBool,
+        ) -> anyhow::Result<String> {
             self.wait_calls.fetch_add(1, Ordering::SeqCst);
             Ok("approved".to_string())
         }
@@ -1104,7 +1438,11 @@ mod tests {
             Ok(())
         }
 
-        fn wait(&self, _approval: &crate::agentic::ToolApproval) -> anyhow::Result<String> {
+        fn wait(
+            &self,
+            _approval: &crate::agentic::ToolApproval,
+            _cancelled: &AtomicBool,
+        ) -> anyhow::Result<String> {
             self.wait_calls.fetch_add(1, Ordering::SeqCst);
             Ok("approved".to_string())
         }
@@ -1162,14 +1500,109 @@ mod tests {
         }
     }
 
+    #[async_trait]
+    impl OperatorModelExecutor for BurstingExecutor {
+        async fn execute(
+            &self,
+            execution: ModelCallExecution,
+        ) -> Result<ModelCallResult, ModelCallError> {
+            let deltas = execution
+                .delta_tx
+                .as_ref()
+                .expect("runner supplies a delta channel");
+            for byte in self.answer.bytes() {
+                deltas
+                    .send(StreamEvent::Token((byte as char).to_string()))
+                    .await
+                    .expect("runner remains subscribed");
+            }
+            Ok(ModelCallResult {
+                route_receipt_ref: execution.request.call_id.clone(),
+                provider: "fake".into(),
+                model_id: "fake-model".into(),
+                provider_model_id: "fake-model".into(),
+                rate_group: "test".into(),
+                text: self.answer.clone(),
+                usage: TokenUsage::default(),
+                attempts: 1,
+                failed_models: vec![],
+                cost_usd: 0.0,
+                cost_truth: CostTruth::LocalZeroCost,
+                attempt_records: vec![],
+            })
+        }
+    }
+
+    #[async_trait]
+    impl OperatorModelExecutor for BudgetExecutor {
+        async fn execute(
+            &self,
+            execution: ModelCallExecution,
+        ) -> Result<ModelCallResult, ModelCallError> {
+            self.remaining_budgets
+                .lock()
+                .unwrap()
+                .push(execution.remaining_budget_usd);
+            let index = self.calls.fetch_add(1, Ordering::SeqCst);
+            Ok(ModelCallResult {
+                route_receipt_ref: execution.request.call_id.clone(),
+                provider: "fake".into(),
+                model_id: "fake-model".into(),
+                provider_model_id: "fake-model".into(),
+                rate_group: "test".into(),
+                text: if index == 0 {
+                    r#"{"tool_calls":[{"id":"tool-1","name":"fs.list","arguments":{"path":"."}}]}"#
+                        .to_string()
+                } else {
+                    "final answer".to_string()
+                },
+                usage: TokenUsage::default(),
+                attempts: 1,
+                failed_models: vec![],
+                cost_usd: 0.6,
+                cost_truth: CostTruth::ProxyEstimate,
+                attempt_records: vec![],
+            })
+        }
+    }
+
     #[derive(Default)]
     struct RecordingArtifactStore {
         artifacts: Mutex<Vec<PersistedArtifact>>,
     }
 
+    #[derive(Default)]
+    struct FailingArtifactStore;
+
     impl OperatorArtifactStore for RecordingArtifactStore {
-        fn store(&self, artifact: PersistedArtifact) -> anyhow::Result<()> {
+        fn commit(&self, artifact: PersistedArtifact) -> anyhow::Result<CommittedOperatorArtifact> {
+            let artifact_id = artifact.artifact_id.clone();
             self.artifacts.lock().unwrap().push(artifact);
+            Ok(CommittedOperatorArtifact {
+                artifact_ref: format!("memory://{artifact_id}"),
+                path: std::path::PathBuf::from(format!("memory-{artifact_id}")),
+                artifact_id,
+            })
+        }
+
+        fn rollback(&self, artifact: &CommittedOperatorArtifact) -> anyhow::Result<()> {
+            self.artifacts
+                .lock()
+                .unwrap()
+                .retain(|stored| stored.artifact_id != artifact.artifact_id);
+            Ok(())
+        }
+    }
+
+    impl OperatorArtifactStore for FailingArtifactStore {
+        fn commit(
+            &self,
+            _artifact: PersistedArtifact,
+        ) -> anyhow::Result<CommittedOperatorArtifact> {
+            Err(anyhow::anyhow!("artifact commit failed"))
+        }
+
+        fn rollback(&self, _artifact: &CommittedOperatorArtifact) -> anyhow::Result<()> {
             Ok(())
         }
     }
@@ -1368,6 +1801,68 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn operator_original_handle_is_lossless_after_broadcast_lag() {
+        let dir = tempfile::tempdir().unwrap();
+        let sessions = service(dir.path());
+        let answer = "x".repeat(256);
+        let runner = OperatorTurnRunner::new(
+            sessions,
+            Arc::new(BurstingExecutor {
+                answer: answer.clone(),
+            }),
+        );
+        let mut handle = runner
+            .submit(
+                "default",
+                StartTurnRequest::auto("lossless-original", "hello"),
+                OperatorTurnWork::Model(Box::new(model_turn())),
+            )
+            .unwrap();
+
+        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+        let frames = wait_for_terminal(&mut handle).await;
+        let observed = frames
+            .iter()
+            .filter_map(|frame| match frame {
+                OperatorStreamFrame::AssistantDelta { text, .. } => Some(text.as_str()),
+                _ => None,
+            })
+            .collect::<String>();
+        assert_eq!(observed, answer);
+    }
+
+    #[tokio::test]
+    async fn operator_durable_budget_caps_direct_runner_and_follow_up() {
+        let dir = tempfile::tempdir().unwrap();
+        let sessions = service(dir.path());
+        let executor = Arc::new(BudgetExecutor {
+            calls: AtomicUsize::new(0),
+            remaining_budgets: Mutex::new(Vec::new()),
+        });
+        let runner = OperatorTurnRunner::new(sessions, executor.clone());
+        let mut request = StartTurnRequest::auto("durable-budget", "hello");
+        request.route_policy.turn_budget_usd = Some(0.5);
+        let mut turn = model_turn();
+        turn.remaining_budget_usd = Some(2.0);
+        let mut scope = ExecutionScope::local_default(dir.path().to_path_buf());
+        scope.tool_leases.push(ToolLease {
+            name: "fs.list".into(),
+            risk_class: RiskClass::HostSafeReadonly,
+            allowed: true,
+        });
+        turn.tool_scope = Some(scope);
+
+        let mut handle = runner
+            .submit("default", request, OperatorTurnWork::Model(Box::new(turn)))
+            .unwrap();
+        wait_for_terminal(&mut handle).await;
+        assert_eq!(
+            *executor.remaining_budgets.lock().unwrap(),
+            vec![Some(0.5), Some(0.0)]
+        );
+    }
+
+    #[tokio::test]
     async fn operator_model_backed_turn_persists_route_receipt_and_terminal_sequence() {
         let dir = tempfile::tempdir().unwrap();
         let sessions = service(dir.path());
@@ -1538,6 +2033,47 @@ mod tests {
                 && row.event.payload["reason"] == "RUNTIME_RESTART"
         }));
         runner.request_cancel(&first.turn_id).unwrap();
+    }
+
+    #[tokio::test]
+    async fn operator_second_runner_cannot_recover_a_live_foreign_turn() {
+        let dir = tempfile::tempdir().unwrap();
+        let sessions = service(dir.path());
+        let executor = Arc::new(RecordingExecutor::with_sessions(sessions.clone()));
+        executor.block.store(true, Ordering::SeqCst);
+        let first_runner = OperatorTurnRunner::new(sessions.clone(), executor.clone());
+        let second_runner = OperatorTurnRunner::new(sessions.clone(), executor.clone());
+        let request = StartTurnRequest::auto("foreign-owner", "hello");
+        let first = first_runner
+            .submit(
+                "default",
+                request.clone(),
+                OperatorTurnWork::Model(Box::new(model_turn())),
+            )
+            .unwrap();
+        tokio::time::timeout(
+            std::time::Duration::from_secs(2),
+            executor.started.notified(),
+        )
+        .await
+        .unwrap();
+
+        let error = second_runner
+            .submit(
+                "default",
+                request,
+                OperatorTurnWork::Model(Box::new(model_turn())),
+            )
+            .err()
+            .expect("foreign live turn must not receive a handle");
+        assert!(error.to_string().contains("owned by another runtime"));
+        assert!(!sessions
+            .events_after("default", None, 64)
+            .unwrap()
+            .events
+            .iter()
+            .any(|row| row.event.event_type == OperatorEventType::TurnInterrupted));
+        first_runner.request_cancel(&first.turn_id).unwrap();
     }
 
     #[tokio::test]
@@ -1776,6 +2312,147 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn operator_rejects_sensitive_raw_tool_output_before_artifact_persistence() {
+        let dir = tempfile::tempdir().unwrap();
+        let sessions = service(dir.path());
+        let submission = sessions
+            .start_turn(
+                "default",
+                StartTurnRequest::auto("sensitive-artifact", "hello"),
+            )
+            .unwrap();
+        let artifacts = Arc::new(RecordingArtifactStore::default());
+        let runner = OperatorTurnRunner::new(sessions, Arc::new(RecordingExecutor::default()))
+            .with_artifact_store(artifacts.clone());
+        let (direct, _receiver) = mpsc::channel(1);
+        let mut cursor = submission.cursor;
+        let output = format!("{}\nghp_secret-beyond-preview", "x".repeat(20 * 1024));
+
+        assert!(runner
+            .persist_large_tool_output(
+                &mut cursor,
+                "default",
+                &submission.turn_id,
+                "call-1",
+                "fs.read",
+                &output,
+                &direct,
+            )
+            .await
+            .is_err());
+        assert!(artifacts.artifacts.lock().unwrap().is_empty());
+    }
+
+    #[tokio::test]
+    async fn operator_rejects_sensitive_value_nested_in_json_tool_output() {
+        let dir = tempfile::tempdir().unwrap();
+        let sessions = service(dir.path());
+        let submission = sessions
+            .start_turn(
+                "default",
+                StartTurnRequest::auto("sensitive-json-artifact", "hello"),
+            )
+            .unwrap();
+        let artifacts = Arc::new(RecordingArtifactStore::default());
+        let runner = OperatorTurnRunner::new(sessions, Arc::new(RecordingExecutor::default()))
+            .with_artifact_store(artifacts.clone());
+        let (direct, _receiver) = mpsc::channel(1);
+        let mut cursor = submission.cursor;
+        let output = json!({
+            "padding": "x".repeat(20 * 1024),
+            "nested": {"token": "ghp_secret-beyond-preview"},
+        })
+        .to_string();
+
+        assert!(runner
+            .persist_large_tool_output(
+                &mut cursor,
+                "default",
+                &submission.turn_id,
+                "call-1",
+                "fs.read",
+                &output,
+                &direct,
+            )
+            .await
+            .is_err());
+        assert!(artifacts.artifacts.lock().unwrap().is_empty());
+    }
+
+    #[tokio::test]
+    async fn operator_artifact_append_failure_leaves_no_committed_raw_artifact() {
+        let dir = tempfile::tempdir().unwrap();
+        let sessions = service(dir.path());
+        let submission = sessions
+            .start_turn(
+                "default",
+                StartTurnRequest::auto("artifact-rollback", "hello"),
+            )
+            .unwrap();
+        let artifacts = Arc::new(RecordingArtifactStore::default());
+        let runner = OperatorTurnRunner::new(sessions, Arc::new(RecordingExecutor::default()))
+            .with_artifact_store(artifacts.clone());
+        let stream = dir.path().join("operator_events.jsonl");
+        let backup = dir.path().join("operator_events.backup");
+        std::fs::rename(&stream, &backup).unwrap();
+        std::fs::create_dir(&stream).unwrap();
+        let (direct, _receiver) = mpsc::channel(1);
+        let mut cursor = submission.cursor;
+
+        assert!(runner
+            .persist_large_tool_output(
+                &mut cursor,
+                "default",
+                &submission.turn_id,
+                "call-1",
+                "fs.read",
+                &"x".repeat(20 * 1024),
+                &direct,
+            )
+            .await
+            .is_err());
+        assert!(artifacts.artifacts.lock().unwrap().is_empty());
+        std::fs::remove_dir(&stream).unwrap();
+        std::fs::rename(&backup, &stream).unwrap();
+    }
+
+    #[tokio::test]
+    async fn operator_artifact_commit_failure_never_appends_artifact_created() {
+        let dir = tempfile::tempdir().unwrap();
+        let sessions = service(dir.path());
+        let submission = sessions
+            .start_turn(
+                "default",
+                StartTurnRequest::auto("artifact-commit-failure", "hello"),
+            )
+            .unwrap();
+        let runner =
+            OperatorTurnRunner::new(sessions.clone(), Arc::new(RecordingExecutor::default()))
+                .with_artifact_store(Arc::new(FailingArtifactStore));
+        let (direct, _receiver) = mpsc::channel(1);
+        let mut cursor = submission.cursor;
+
+        assert!(runner
+            .persist_large_tool_output(
+                &mut cursor,
+                "default",
+                &submission.turn_id,
+                "call-1",
+                "fs.read",
+                &"x".repeat(20 * 1024),
+                &direct,
+            )
+            .await
+            .is_err());
+        assert!(!sessions
+            .events_after("default", None, 64)
+            .unwrap()
+            .events
+            .iter()
+            .any(|row| row.event.event_type == OperatorEventType::ArtifactCreated));
+    }
+
+    #[tokio::test]
     async fn operator_completed_duplicate_replays_terminal_without_hanging() {
         let dir = tempfile::tempdir().unwrap();
         let sessions = service(dir.path());
@@ -1951,6 +2628,44 @@ mod tests {
         assert!(!rows
             .iter()
             .any(|row| row.event.event_type == OperatorEventType::ToolCallCompleted));
+    }
+
+    #[tokio::test]
+    async fn operator_cancelled_approval_waiter_terminates_before_turn_closes() {
+        let dir = tempfile::tempdir().unwrap();
+        let sessions = service(dir.path());
+        let approval = Arc::new(CancellableApproval {
+            active_waiters: AtomicUsize::new(0),
+            entered: Notify::new(),
+        });
+        let executor = Arc::new(SequencedExecutor {
+            calls: AtomicUsize::new(0),
+            responses: vec![
+                r#"{"tool_calls":[{"id":"deploy-1","name":"app.deploy","arguments":{}}]}"#
+                    .to_string(),
+            ],
+        });
+        let runner =
+            OperatorTurnRunner::new(sessions, executor).with_approval_service(approval.clone());
+        let mut turn = model_turn();
+        turn.tool_scope = Some(ExecutionScope::local_default(dir.path().to_path_buf()));
+        let mut handle = runner
+            .submit(
+                "default",
+                StartTurnRequest::auto("cancellable-approval", "deploy"),
+                OperatorTurnWork::Model(Box::new(turn)),
+            )
+            .unwrap();
+        tokio::time::timeout(
+            std::time::Duration::from_secs(1),
+            approval.entered.notified(),
+        )
+        .await
+        .expect("approval waiter did not start");
+        assert_eq!(approval.active_waiters.load(Ordering::SeqCst), 1);
+        assert!(runner.request_cancel(&handle.turn_id).unwrap());
+        wait_for_terminal(&mut handle).await;
+        assert_eq!(approval.active_waiters.load(Ordering::SeqCst), 0);
     }
 
     #[tokio::test]
