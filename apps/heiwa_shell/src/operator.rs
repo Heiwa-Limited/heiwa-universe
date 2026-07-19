@@ -311,6 +311,19 @@ impl OperatorArtifactStore for LocalArtifactStore {
         let artifact_links = sessions.artifact_links()?;
         for entry in fs::read_dir(&dir)? {
             let entry = entry?;
+            if !entry.file_type()?.is_file() {
+                continue;
+            }
+            let file_name = entry.file_name();
+            let Some(name) = file_name.to_str() else {
+                continue;
+            };
+            if is_protocol_owned_artifact_temp(name) {
+                fs::remove_file(entry.path())?;
+            }
+        }
+        for entry in fs::read_dir(&dir)? {
+            let entry = entry?;
             let pending_path = entry.path();
             let Some(name) = pending_path.file_name().and_then(|name| name.to_str()) else {
                 continue;
@@ -380,6 +393,27 @@ fn validate_artifact_id(artifact_id: &str) -> Result<()> {
         return Err(anyhow!("invalid operator artifact id"));
     }
     Ok(())
+}
+
+fn is_protocol_owned_artifact_temp(name: &str) -> bool {
+    let Some(stem) = name.strip_prefix('.') else {
+        return false;
+    };
+    let stem = stem
+        .strip_suffix(".pending.tmp")
+        .or_else(|| stem.strip_suffix(".tmp"));
+    let Some(stem) = stem else {
+        return false;
+    };
+    let Some((artifact_id, nonce)) = stem.rsplit_once('.') else {
+        return false;
+    };
+    let Ok(uuid) = Uuid::parse_str(nonce) else {
+        return false;
+    };
+    validate_artifact_id(artifact_id).is_ok()
+        && uuid.to_string() == nonce
+        && uuid.get_version_num() == 4
 }
 
 fn write_atomic_file(temp: &PathBuf, final_path: &PathBuf, bytes: &[u8]) -> Result<()> {
@@ -662,8 +696,13 @@ impl OperatorTurnRunner {
             let cancel = match self.active.register(submission.turn_id.clone()) {
                 Ok(cancel) => cancel,
                 Err(error) => {
-                    self.sessions
-                        .recover_proven_orphan(&submission.thread_id, &submission.turn_id)?;
+                    if let Err(recovery_error) =
+                        self.repair_failed_registration(&submission.thread_id, &submission.turn_id)
+                    {
+                        return Err(anyhow!(
+                            "operator active turn registration failed: {error}; initial repair failed: {recovery_error}"
+                        ));
+                    }
                     return Err(error);
                 }
             };
@@ -731,6 +770,19 @@ impl OperatorTurnRunner {
             global_open: true,
             direct_frames,
         })
+    }
+
+    fn repair_failed_registration(&self, thread_id: &str, turn_id: &str) -> Result<()> {
+        match self.sessions.recover_proven_orphan(thread_id, turn_id) {
+            Ok(_) => Ok(()),
+            Err(error) => {
+                self.recoverable_orphans
+                    .lock()
+                    .map_err(|_| anyhow!("operator orphan mutex poisoned"))?
+                    .insert(turn_id.to_string());
+                Err(error)
+            }
+        }
     }
 
     pub fn request_cancel(&self, turn_id: &str) -> Result<bool> {
@@ -2186,6 +2238,56 @@ mod tests {
         assert_eq!(thread.turns[0].status, "interrupted");
     }
 
+    #[tokio::test]
+    async fn operator_failed_registration_repair_remains_retryable_by_duplicate() {
+        let dir = tempfile::tempdir().unwrap();
+        let sessions = service(dir.path());
+        let request = StartTurnRequest::auto("registration-repair", "hello");
+        let submission = sessions.start_turn("default", request.clone()).unwrap();
+        let runner =
+            OperatorTurnRunner::new(sessions.clone(), Arc::new(RecordingExecutor::default()));
+        let stream = dir.path().join("operator_events.jsonl");
+        let backup = dir.path().join("operator_events.backup");
+        std::fs::rename(&stream, &backup).unwrap();
+        std::fs::create_dir(&stream).unwrap();
+
+        assert!(runner
+            .repair_failed_registration("default", &submission.turn_id)
+            .is_err());
+        assert!(runner
+            .recoverable_orphans
+            .lock()
+            .unwrap()
+            .contains(&submission.turn_id));
+
+        std::fs::remove_dir(&stream).unwrap();
+        std::fs::rename(&backup, &stream).unwrap();
+        let mut duplicate = runner
+            .submit(
+                "default",
+                request,
+                OperatorTurnWork::Deterministic {
+                    response: "must not run".to_string(),
+                    route: json!({}),
+                    done: json!({}),
+                },
+            )
+            .unwrap();
+        assert!(duplicate.duplicate);
+        let frames = wait_for_terminal(&mut duplicate).await;
+        assert!(frames.iter().any(|frame| matches!(
+            frame,
+            OperatorStreamFrame::Durable(row)
+                if row.event.event_type == OperatorEventType::TurnInterrupted
+                    && row.event.payload["reason"] == "RUNTIME_RESTART"
+        )));
+        assert!(!runner
+            .recoverable_orphans
+            .lock()
+            .unwrap()
+            .contains(&submission.turn_id));
+    }
+
     #[test]
     fn operator_artifact_reconcile_deletes_unlinked_crash_commit() {
         let dir = tempfile::tempdir().unwrap();
@@ -2251,6 +2353,41 @@ mod tests {
 
         assert!(committed.path.exists());
         assert!(!committed.pending_path.exists());
+    }
+
+    #[test]
+    fn operator_artifact_reconcile_removes_only_protocol_owned_temp_files() {
+        let dir = tempfile::tempdir().unwrap();
+        let sessions = service(dir.path());
+        let store = LocalArtifactStore::at(dir.path().to_path_buf());
+        let artifact_dir = store.artifact_dir().unwrap();
+        std::fs::create_dir_all(&artifact_dir).unwrap();
+        let raw_temp = artifact_dir.join(format!(".artifact-temp.{}.tmp", uuid::Uuid::new_v4()));
+        let pending_temp = artifact_dir.join(format!(
+            ".artifact-temp.{}.pending.tmp",
+            uuid::Uuid::new_v4()
+        ));
+        let unrelated = artifact_dir.join(".artifact-temp.not-a-uuid.tmp");
+        let unrelated_pending = artifact_dir.join(".artifact-temp.not-a-uuid.pending.tmp");
+        let unrelated_v1 =
+            artifact_dir.join(".artifact-temp.f81d4fae-7dec-11d0-a765-00a0c91e6bf6.tmp");
+        for path in [
+            &raw_temp,
+            &pending_temp,
+            &unrelated,
+            &unrelated_pending,
+            &unrelated_v1,
+        ] {
+            std::fs::write(path, b"partial").unwrap();
+        }
+
+        store.reconcile(&sessions).unwrap();
+
+        assert!(!raw_temp.exists());
+        assert!(!pending_temp.exists());
+        assert!(unrelated.exists());
+        assert!(unrelated_pending.exists());
+        assert!(unrelated_v1.exists());
     }
 
     #[tokio::test]
