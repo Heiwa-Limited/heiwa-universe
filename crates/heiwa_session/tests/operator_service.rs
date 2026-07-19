@@ -257,6 +257,112 @@ fn unknown_schema_events_do_not_materialize_threads_or_suppress_later_creation()
 }
 
 #[test]
+fn rejected_unknown_turn_events_stay_diagnostic_until_valid_lifecycle_events_arrive() {
+    let dir = tempfile::tempdir().unwrap();
+    let journal = OperatorJournal::new(dir.path().to_path_buf()).unwrap();
+    journal
+        .append(&base_event(
+            "replay-thread",
+            Some("missing-turn"),
+            None,
+            OperatorEventType::UserMessage,
+        ))
+        .unwrap();
+    journal
+        .append(&base_event(
+            "replay-thread",
+            Some("missing-turn"),
+            Some("call-1"),
+            OperatorEventType::RoutePlanned,
+        ))
+        .unwrap();
+    let service = OperatorSessionService::new(journal);
+
+    assert!(service.list_threads(10).unwrap().is_empty());
+    assert_eq!(service.thread("replay-thread").unwrap().skipped_events, 2);
+
+    // Direct-journal lifecycle records establish the thread and its turn;
+    // the earlier rejected rows remain diagnostics only.
+    let journal = OperatorJournal::new(dir.path().to_path_buf()).unwrap();
+    journal
+        .append(&base_event(
+            "replay-thread",
+            None,
+            None,
+            OperatorEventType::ThreadCreated,
+        ))
+        .unwrap();
+    journal
+        .append(&base_event(
+            "replay-thread",
+            Some("valid-turn"),
+            None,
+            OperatorEventType::TurnStarted,
+        ))
+        .unwrap();
+    let service = OperatorSessionService::new(journal);
+
+    let summaries = service.list_threads(10).unwrap();
+    assert_eq!(summaries.len(), 1);
+    assert_eq!(summaries[0].thread_id, "replay-thread");
+    let view = service.thread("replay-thread").unwrap();
+    assert_eq!(view.turns.len(), 1);
+    assert_eq!(view.skipped_events, 2);
+}
+
+#[test]
+fn rejected_late_progress_does_not_advance_thread_recency() {
+    let dir = tempfile::tempdir().unwrap();
+    let journal = OperatorJournal::new(dir.path().to_path_buf()).unwrap();
+    journal
+        .append(&base_event(
+            "closed-thread",
+            None,
+            None,
+            OperatorEventType::ThreadCreated,
+        ))
+        .unwrap();
+    journal
+        .append(&base_event(
+            "closed-thread",
+            Some("closed-turn"),
+            None,
+            OperatorEventType::TurnStarted,
+        ))
+        .unwrap();
+    journal
+        .append(&base_event(
+            "closed-thread",
+            Some("closed-turn"),
+            None,
+            OperatorEventType::TurnCompleted,
+        ))
+        .unwrap();
+    journal
+        .append(&base_event(
+            "later-thread",
+            None,
+            None,
+            OperatorEventType::ThreadCreated,
+        ))
+        .unwrap();
+    journal
+        .append(&base_event(
+            "closed-thread",
+            Some("closed-turn"),
+            None,
+            OperatorEventType::AssistantStarted,
+        ))
+        .unwrap();
+    let service = OperatorSessionService::new(journal);
+
+    let summaries = service.list_threads(10).unwrap();
+    assert_eq!(summaries[0].thread_id, "later-thread");
+    assert_eq!(summaries[1].thread_id, "closed-thread");
+    assert_eq!(service.thread("closed-thread").unwrap().skipped_events, 1);
+}
+
+#[test]
 fn append_event_rejects_turn_event_missing_turn_id() {
     let dir = tempfile::tempdir().unwrap();
     let service = test_service(dir.path());

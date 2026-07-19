@@ -426,7 +426,12 @@ impl OperatorSessionService {
                     .unsupported_schema_events
                     .get(thread_id)
                     .copied()
-                    .unwrap_or(0),
+                    .unwrap_or(0)
+                    + materialized
+                        .rejected_current_schema_events
+                        .get(thread_id)
+                        .copied()
+                        .unwrap_or(0),
             ),
             None => OperatorThreadView {
                 thread_id: thread_id.to_string(),
@@ -435,7 +440,12 @@ impl OperatorSessionService {
                     .unsupported_schema_events
                     .get(thread_id)
                     .copied()
-                    .unwrap_or(0),
+                    .unwrap_or(0)
+                    + materialized
+                        .rejected_current_schema_events
+                        .get(thread_id)
+                        .copied()
+                        .unwrap_or(0),
                 skipped_lines: materialized.skipped_lines,
             },
         })
@@ -861,6 +871,9 @@ struct MaterializedJournal {
     /// thread without creating a valid thread projection or affecting
     /// recency. `thread()` may surface this diagnostic count.
     unsupported_schema_events: HashMap<String, usize>,
+    /// Current-schema rows rejected by event-specific replay validation.
+    /// They remain diagnostics, not valid thread state or recency.
+    rejected_current_schema_events: HashMap<String, usize>,
     /// Deduplicated count of damaged journal lines (see
     /// [`OperatorThreadView::skipped_lines`] for what qualifies).
     skipped_lines: usize,
@@ -879,6 +892,7 @@ fn materialize_all(journal: &OperatorJournal) -> Result<MaterializedJournal> {
     const PAGE_SIZE: usize = 256;
     let mut threads: HashMap<String, FoldedThread> = HashMap::new();
     let mut unsupported_schema_events: HashMap<String, usize> = HashMap::new();
+    let mut rejected_current_schema_events: HashMap<String, usize> = HashMap::new();
     let mut seen_event_ids: HashSet<String> = HashSet::new();
     let mut cursor: Option<String> = None;
     let mut order = 0usize;
@@ -907,6 +921,7 @@ fn materialize_all(journal: &OperatorJournal) -> Result<MaterializedJournal> {
             apply_event(
                 &mut threads,
                 &mut unsupported_schema_events,
+                &mut rejected_current_schema_events,
                 &mut seen_event_ids,
                 row,
                 order,
@@ -918,6 +933,7 @@ fn materialize_all(journal: &OperatorJournal) -> Result<MaterializedJournal> {
     Ok(MaterializedJournal {
         threads,
         unsupported_schema_events,
+        rejected_current_schema_events,
         skipped_lines,
     })
 }
@@ -925,6 +941,7 @@ fn materialize_all(journal: &OperatorJournal) -> Result<MaterializedJournal> {
 fn apply_event(
     threads: &mut HashMap<String, FoldedThread>,
     unsupported_schema_events: &mut HashMap<String, usize>,
+    rejected_current_schema_events: &mut HashMap<String, usize>,
     seen_event_ids: &mut HashSet<String>,
     row: &CursorEvent,
     order: usize,
@@ -941,22 +958,45 @@ fn apply_event(
         return;
     }
 
-    let entry = threads
-        .entry(event.thread_id.clone())
-        .or_insert_with(|| FoldedThread::new(&event.thread_id));
-    entry.last_order = order;
+    if let Some(entry) = threads.get_mut(&event.thread_id) {
+        if apply_to_existing_thread(entry, event, row) {
+            entry.last_order = order;
+        } else {
+            entry.skipped_events += 1;
+        }
+        return;
+    }
 
+    // Only explicit thread lifecycle and synthetic turn-start records may
+    // establish a new projection. All other rows need existing state.
+    let mut candidate = FoldedThread::new(&event.thread_id);
+    let accepted = match event.event_type {
+        OperatorEventType::ThreadCreated => true,
+        OperatorEventType::TurnStarted => apply_turn_started(&mut candidate, event),
+        _ => false,
+    };
+    if accepted {
+        candidate.last_order = order;
+        threads.insert(event.thread_id.clone(), candidate);
+    } else {
+        *rejected_current_schema_events
+            .entry(event.thread_id.clone())
+            .or_default() += 1;
+    }
+}
+
+fn apply_to_existing_thread(
+    entry: &mut FoldedThread,
+    event: &OperatorEvent,
+    row: &CursorEvent,
+) -> bool {
     match event.event_type {
-        OperatorEventType::ThreadCreated => {}
+        OperatorEventType::ThreadCreated => false,
         OperatorEventType::TurnStarted => apply_turn_started(entry, event),
         OperatorEventType::UserMessage => apply_user_message(entry, event, row),
         OperatorEventType::TurnCompleted => apply_terminal(entry, event, "completed"),
         OperatorEventType::TurnInterrupted => apply_terminal(entry, event, "interrupted"),
         OperatorEventType::Blocker => apply_terminal(entry, event, "blocked"),
-        // `TurnCancelRequested` is intent, not closure: per the
-        // cancellation contract (module docs) the turn stays open until
-        // the follow-up `turn_interrupted` (reason `OPERATOR_CANCELLED`)
-        // arrives, so it folds like any other nonterminal touch.
         OperatorEventType::TurnCancelRequested => apply_turn_cancel_requested(entry, event),
         OperatorEventType::RoutePlanned
         | OperatorEventType::RouteAttempted
@@ -975,10 +1015,9 @@ fn apply_event(
     }
 }
 
-fn apply_turn_started(entry: &mut FoldedThread, event: &OperatorEvent) {
+fn apply_turn_started(entry: &mut FoldedThread, event: &OperatorEvent) -> bool {
     let Some(turn_id) = event.turn_id.clone() else {
-        entry.skipped_events += 1;
-        return;
+        return false;
     };
     let client_request_id = event
         .payload
@@ -1000,8 +1039,7 @@ fn apply_turn_started(entry: &mut FoldedThread, event: &OperatorEvent) {
                     .any(|turn| turn.client_request_id.as_deref() == Some(client_request_id))
             })
     {
-        entry.skipped_events += 1;
-        return;
+        return false;
     }
     let route_policy = event
         .payload
@@ -1019,20 +1057,18 @@ fn apply_turn_started(entry: &mut FoldedThread, event: &OperatorEvent) {
         started_at: event.occurred_at.clone(),
         route_policy,
     });
+    true
 }
 
-fn apply_user_message(entry: &mut FoldedThread, event: &OperatorEvent, row: &CursorEvent) {
+fn apply_user_message(entry: &mut FoldedThread, event: &OperatorEvent, row: &CursorEvent) -> bool {
     let Some(turn_id) = &event.turn_id else {
-        entry.skipped_events += 1;
-        return;
+        return false;
     };
     let Some(turn) = entry.turns.iter_mut().find(|turn| &turn.turn_id == turn_id) else {
-        entry.skipped_events += 1;
-        return;
+        return false;
     };
     if is_turn_terminal(&turn.status) || turn.cancel_requested {
-        entry.skipped_events += 1;
-        return;
+        return false;
     }
     turn.prompt = event
         .payload
@@ -1040,66 +1076,57 @@ fn apply_user_message(entry: &mut FoldedThread, event: &OperatorEvent, row: &Cur
         .and_then(|value| value.as_str())
         .map(str::to_string);
     turn.user_message_cursor = Some(row.cursor.clone());
+    true
 }
 
-fn apply_terminal(entry: &mut FoldedThread, event: &OperatorEvent, status: &str) {
+fn apply_terminal(entry: &mut FoldedThread, event: &OperatorEvent, status: &str) -> bool {
     let Some(turn_id) = &event.turn_id else {
-        // A thread-scoped Blocker (or a malformed terminal event) with no
-        // turn to close: nothing to project, not counted as invalid.
-        return;
+        // A thread-scoped Blocker has no turn to close but is still valid.
+        return event.event_type == OperatorEventType::Blocker;
     };
     let Some(turn) = entry.turns.iter_mut().find(|turn| &turn.turn_id == turn_id) else {
-        entry.skipped_events += 1;
-        return;
+        return false;
     };
     if is_turn_terminal(&turn.status) {
-        // A second terminal event for an already-closed turn: keep the
-        // first terminal state rather than clobbering it.
-        entry.skipped_events += 1;
-        return;
+        return false;
     }
     if turn.cancel_requested
         && (status != "interrupted" || interruption_reason(event) != Some("OPERATOR_CANCELLED"))
     {
-        entry.skipped_events += 1;
-        return;
+        return false;
     }
     if !turn.cancel_requested
         && event.event_type == OperatorEventType::TurnInterrupted
         && interruption_reason(event) == Some("OPERATOR_CANCELLED")
     {
-        entry.skipped_events += 1;
-        return;
+        return false;
     }
     turn.status = status.to_string();
+    true
 }
 
-fn apply_turn_cancel_requested(entry: &mut FoldedThread, event: &OperatorEvent) {
+fn apply_turn_cancel_requested(entry: &mut FoldedThread, event: &OperatorEvent) -> bool {
     let Some(turn_id) = &event.turn_id else {
-        entry.skipped_events += 1;
-        return;
+        return false;
     };
     let Some(turn) = entry.turns.iter_mut().find(|turn| &turn.turn_id == turn_id) else {
-        entry.skipped_events += 1;
-        return;
+        return false;
     };
     if is_turn_terminal(&turn.status) || turn.cancel_requested {
-        entry.skipped_events += 1;
-        return;
+        return false;
     }
     turn.cancel_requested = true;
+    true
 }
 
-fn apply_nonterminal_touch(entry: &mut FoldedThread, event: &OperatorEvent) {
+fn apply_nonterminal_touch(entry: &mut FoldedThread, event: &OperatorEvent) -> bool {
     let Some(turn_id) = &event.turn_id else {
-        return; // Not turn-scoped (e.g. a thread-level note); nothing to touch.
+        return true; // A valid thread-scoped note.
     };
     match entry.turns.iter_mut().find(|turn| &turn.turn_id == turn_id) {
-        Some(turn) if is_turn_terminal(&turn.status) || turn.cancel_requested => {
-            entry.skipped_events += 1;
-        }
-        Some(_) => {}
-        None => entry.skipped_events += 1,
+        Some(turn) if is_turn_terminal(&turn.status) || turn.cancel_requested => false,
+        Some(_) => true,
+        None => false,
     }
 }
 
