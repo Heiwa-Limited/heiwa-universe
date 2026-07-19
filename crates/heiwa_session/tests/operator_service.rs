@@ -9,10 +9,76 @@ use heiwa_evidence::{
     OperatorSensitivity, OPERATOR_EVENT_SCHEMA_VERSION,
 };
 use heiwa_session::operator::{OperatorSessionService, StartTurnRequest};
+use heiwa_session::{rebuild_operator_indexes_at, EmbeddingSink};
 use serde_json::json;
+use std::sync::Mutex;
 
 fn test_service(path: &std::path::Path) -> OperatorSessionService {
     OperatorSessionService::new(OperatorJournal::new(path.to_path_buf()).unwrap())
+}
+
+#[derive(Default)]
+struct RecordingEmbedder {
+    rows: Mutex<Vec<(String, String, String)>>,
+}
+
+impl EmbeddingSink for RecordingEmbedder {
+    fn upsert_text(&self, thread_id: &str, event_id: &str, text: &str) -> anyhow::Result<()> {
+        self.rows.lock().unwrap().push((
+            thread_id.to_string(),
+            event_id.to_string(),
+            text.to_string(),
+        ));
+        Ok(())
+    }
+}
+
+#[test]
+fn rebuild_indexes_projects_safe_text_and_only_embeds_messages() {
+    let evidence = tempfile::tempdir().unwrap();
+    let indexes = tempfile::tempdir().unwrap();
+    let service = test_service(evidence.path());
+    let turn = service
+        .start_turn(
+            "default",
+            StartTurnRequest::auto("request-1", "index this user text"),
+        )
+        .unwrap();
+    let mut assistant = base_event(
+        "default",
+        Some(&turn.turn_id),
+        None,
+        OperatorEventType::AssistantCompleted,
+    );
+    assistant.payload = json!({"text": "index this assistant text"});
+    service.append_event(assistant).unwrap();
+    let mut tool = base_event(
+        "default",
+        Some(&turn.turn_id),
+        Some("call-1"),
+        OperatorEventType::ToolCallCompleted,
+    );
+    tool.sensitivity = OperatorSensitivity::Restricted;
+    tool.payload = json!({"name": "shell", "output": "restricted but safe tool output"});
+    service.append_event(tool).unwrap();
+
+    let sink = RecordingEmbedder::default();
+    let first =
+        rebuild_operator_indexes_at(&service, &sink, &indexes.path().join("sessions.sqlite3"))
+            .unwrap();
+    let second =
+        rebuild_operator_indexes_at(&service, &sink, &indexes.path().join("sessions.sqlite3"))
+            .unwrap();
+
+    assert_eq!(first.fts_rows, 3);
+    assert_eq!(first.embedded_rows, 2);
+    assert_eq!(first.embedding_failures, 0);
+    assert_eq!(second, first);
+    assert_eq!(
+        sink.rows.lock().unwrap().len(),
+        4,
+        "each rebuild embeds user and assistant only"
+    );
 }
 
 /// Build a syntactically-valid `OperatorEvent` for validation tests: correct

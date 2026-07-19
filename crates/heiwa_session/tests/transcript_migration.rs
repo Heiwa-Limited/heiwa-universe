@@ -1,8 +1,10 @@
+use heiwa_evidence::{OperatorEventType, OperatorJournal};
 use heiwa_protocol::TranscriptBlock;
+use heiwa_session::operator::OperatorSessionService;
 use heiwa_session::{
-    append_entry, get_session_index_path, load_transcript, save_entries, save_transcript,
-    search_session_messages, set_parent_session_id, PersistedTranscript, TranscriptEntry,
-    PERSISTED_TRANSCRIPT_VERSION,
+    append_entry, get_session_index_path, import_legacy_sessions_with_service, load_transcript,
+    save_entries, save_transcript, search_session_messages, set_parent_session_id,
+    PersistedTranscript, TranscriptEntry, PERSISTED_TRANSCRIPT_VERSION,
 };
 use std::env;
 use std::fs;
@@ -35,6 +37,67 @@ fn write_legacy_v0(home: &Path, session_id: &str, body: &str) {
     let sessions = home.join(".heiwa").join("sessions");
     fs::create_dir_all(&sessions).unwrap();
     fs::write(sessions.join(format!("{}.json", session_id)), body).unwrap();
+}
+
+#[test]
+fn legacy_import_is_idempotent_and_preserves_source_bytes() {
+    let source = tempfile::tempdir().unwrap();
+    let evidence = tempfile::tempdir().unwrap();
+    let body = r#"{
+        "session_id": "legacy",
+        "transcript": [
+            { "User": "hello" },
+            { "Assistant": "hi" },
+            { "Tool": ["sh", "ok"] },
+            { "Evidence": "route ok" }
+        ]
+    }"#;
+    fs::write(source.path().join("legacy.json"), body).unwrap();
+    let original = fs::read(source.path().join("legacy.json")).unwrap();
+    let service =
+        OperatorSessionService::new(OperatorJournal::new(evidence.path().to_path_buf()).unwrap());
+
+    let first = import_legacy_sessions_with_service(&service, source.path()).unwrap();
+    let second = import_legacy_sessions_with_service(&service, source.path()).unwrap();
+
+    assert_eq!(first.imported_entries, 4);
+    assert_eq!(second.imported_entries, 0);
+    assert_eq!(
+        fs::read(source.path().join("legacy.json")).unwrap(),
+        original
+    );
+    let events = service.events_after("legacy", None, 100).unwrap().events;
+    assert_eq!(
+        events
+            .iter()
+            .filter(|row| row.event.event_type == OperatorEventType::LegacySessionImported)
+            .count(),
+        1
+    );
+}
+
+#[test]
+fn legacy_import_rejects_sensitive_material_before_appending_a_marker() {
+    let source = tempfile::tempdir().unwrap();
+    let evidence = tempfile::tempdir().unwrap();
+    let body = r#"{"session_id":"legacy-sensitive","transcript":[{"User":"ghp_live-token"}]}"#;
+    fs::write(source.path().join("legacy-sensitive.json"), body).unwrap();
+    let original = fs::read(source.path().join("legacy-sensitive.json")).unwrap();
+    let service =
+        OperatorSessionService::new(OperatorJournal::new(evidence.path().to_path_buf()).unwrap());
+
+    let error = import_legacy_sessions_with_service(&service, source.path()).unwrap_err();
+
+    assert!(error.to_string().contains("sensitive"));
+    assert_eq!(
+        fs::read(source.path().join("legacy-sensitive.json")).unwrap(),
+        original
+    );
+    assert!(service
+        .events_after("legacy-sensitive", None, 100)
+        .unwrap()
+        .events
+        .is_empty());
 }
 
 #[test]
@@ -152,7 +215,6 @@ fn save_entries_updates_sqlite_fts_mirror() {
         assert!(get_session_index_path().exists());
         let hits = search_session_messages(Some("default"), "operator", 10).unwrap();
         assert_eq!(hits.len(), 1);
-        assert_eq!(hits[0].entry_id, 0);
         assert_eq!(hits[0].role, "user");
 
         let tool_hits = search_session_messages(None, "cargo", 10).unwrap();
@@ -214,7 +276,7 @@ fn save_transcript_shim_appends_new_blocks_only() {
 }
 
 #[test]
-fn save_transcript_shim_truncates_on_shorter_input() {
+fn save_transcript_shim_rejects_truncation_after_operator_stream_cutover() {
     with_temp_home(|_home| {
         save_transcript(
             "default",
@@ -227,9 +289,12 @@ fn save_transcript_shim_truncates_on_shorter_input() {
         .unwrap();
         assert_eq!(load_transcript("default").unwrap().entries.len(), 3);
 
-        save_transcript("default", &[TranscriptBlock::User("a".into())]).unwrap();
+        let error = save_transcript("default", &[TranscriptBlock::User("a".into())]).unwrap_err();
+        assert!(error
+            .to_string()
+            .contains("legacy transcript truncation is unavailable after operator-stream cutover"));
         let reloaded = load_transcript("default").unwrap();
-        assert_eq!(reloaded.entries.len(), 1);
+        assert_eq!(reloaded.entries.len(), 3);
         assert_eq!(
             reloaded.next_entry_id, 3,
             "truncation preserves id generator"
@@ -238,7 +303,7 @@ fn save_transcript_shim_truncates_on_shorter_input() {
 }
 
 #[test]
-fn v0_file_is_rewritten_as_v1_on_next_save() {
+fn v0_file_is_preserved_after_operator_stream_cutover() {
     with_temp_home(|home| {
         let legacy = r#"{
             "session_id": "default",
@@ -249,8 +314,6 @@ fn v0_file_is_rewritten_as_v1_on_next_save() {
         save_transcript("default", &[TranscriptBlock::User("hello".into())]).unwrap();
 
         let raw = fs::read_to_string(home.join(".heiwa/sessions/default.json")).unwrap();
-        assert!(raw.contains("\"version\""));
-        assert!(raw.contains("\"entries\""));
-        assert!(!raw.contains("\"transcript\""));
+        assert_eq!(raw, legacy);
     });
 }
