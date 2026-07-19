@@ -241,6 +241,7 @@ pub struct OperatorTurnHandle {
     replay_complete: bool,
     seen_event_ids: HashSet<String>,
     frames: broadcast::Receiver<OperatorStreamFrame>,
+    global_open: bool,
     /// New submissions get a bounded, backpressured private stream. The
     /// global broadcast is intentionally lossy for observers and duplicates,
     /// but never carries the original caller's only copy of answer tokens.
@@ -269,19 +270,20 @@ impl OperatorTurnHandle {
                 // direct frame. `request_cancel` must stay synchronous, so
                 // it only broadcasts its durable intent; this priority keeps
                 // that intent ordered ahead of a direct terminal frame.
-                match self.frames.try_recv() {
-                    Ok(frame) if self.accept_global_frame(&frame) => return Ok(frame),
-                    Ok(_) => continue,
-                    Err(broadcast::error::TryRecvError::Lagged(_)) => {
-                        self.refill_replay()
-                            .map_err(|_| broadcast::error::RecvError::Closed)?;
-                        continue;
+                if self.global_open {
+                    match self.frames.try_recv() {
+                        Ok(frame) if self.accept_global_frame(&frame) => return Ok(frame),
+                        Ok(_) => continue,
+                        Err(broadcast::error::TryRecvError::Lagged(_)) => {
+                            self.refill_replay()
+                                .map_err(|_| broadcast::error::RecvError::Closed)?;
+                            continue;
+                        }
+                        Err(broadcast::error::TryRecvError::Closed) => {
+                            self.global_open = false;
+                        }
+                        Err(broadcast::error::TryRecvError::Empty) => {}
                     }
-                    Err(broadcast::error::TryRecvError::Closed) => {
-                        // The original handle remains lossless while its
-                        // private sender is alive, even if observers close.
-                    }
-                    Err(broadcast::error::TryRecvError::Empty) => {}
                 }
 
                 enum Incoming {
@@ -295,7 +297,7 @@ impl OperatorTurnHandle {
                         .expect("direct frame receiver checked above");
                     tokio::select! {
                         biased;
-                        global = self.frames.recv() => Incoming::Global(global),
+                        global = self.frames.recv(), if self.global_open => Incoming::Global(global),
                         direct = direct_frames.recv() => Incoming::Direct(direct),
                     }
                 };
@@ -315,7 +317,10 @@ impl OperatorTurnHandle {
                             .map_err(|_| broadcast::error::RecvError::Closed)?;
                         continue;
                     }
-                    Incoming::Global(Err(broadcast::error::RecvError::Closed)) => continue,
+                    Incoming::Global(Err(broadcast::error::RecvError::Closed)) => {
+                        self.global_open = false;
+                        continue;
+                    }
                 }
             }
 
@@ -512,6 +517,7 @@ impl OperatorTurnRunner {
             replay_complete,
             seen_event_ids: HashSet::new(),
             frames,
+            global_open: true,
             direct_frames,
         })
     }
@@ -1889,6 +1895,65 @@ mod tests {
             })
             .collect::<String>();
         assert_eq!(observed, answer);
+    }
+
+    #[tokio::test]
+    async fn operator_original_handle_drains_private_frames_after_global_close() {
+        let dir = tempfile::tempdir().unwrap();
+        let sessions = service(dir.path());
+        let (global, global_rx) = tokio::sync::broadcast::channel(1);
+        let (direct_tx, direct_rx) = mpsc::channel(4);
+        let turn_id = "turn-private-after-close".to_string();
+        direct_tx
+            .send(OperatorStreamFrame::AssistantDelta {
+                thread_id: "default".to_string(),
+                turn_id: turn_id.clone(),
+                text: "exact delta".to_string(),
+            })
+            .await
+            .unwrap();
+        direct_tx
+            .send(OperatorStreamFrame::Durable(Box::new(
+                heiwa_evidence::CursorEvent {
+                    cursor: "cursor-terminal".to_string(),
+                    event: super::runtime_event(
+                        "default",
+                        &turn_id,
+                        None,
+                        OperatorEventType::TurnCompleted,
+                        json!({}),
+                    ),
+                },
+            )))
+            .await
+            .unwrap();
+        drop(direct_tx);
+        drop(global);
+        let mut handle = super::OperatorTurnHandle {
+            thread_id: "default".to_string(),
+            turn_id,
+            cursor: String::new(),
+            duplicate: false,
+            sessions,
+            replay: std::collections::VecDeque::new(),
+            replay_complete: true,
+            seen_event_ids: std::collections::HashSet::new(),
+            frames: global_rx,
+            global_open: true,
+            direct_frames: Some(direct_rx),
+        };
+
+        assert!(matches!(
+            tokio::time::timeout(std::time::Duration::from_millis(250), handle.recv())
+                .await
+                .expect("global close must not starve private frames")
+                .unwrap(),
+            OperatorStreamFrame::AssistantDelta { text, .. } if text == "exact delta"
+        ));
+        assert!(
+            matches!(handle.recv().await.unwrap(), OperatorStreamFrame::Durable(row)
+            if row.event.event_type == OperatorEventType::TurnCompleted)
+        );
     }
 
     #[tokio::test]
