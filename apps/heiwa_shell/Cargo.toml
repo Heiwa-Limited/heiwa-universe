@@ -25,6 +25,7 @@ path = "src/lib.rs"
 
 [dependencies]
 anyhow = "1.0"
+async-trait = "0.1"
 base64 = "0.22"
 heiwa-core = { path = "../../apps/heiwa_core" }
 heiwa-session = { path = "../../crates/heiwa_session" }
