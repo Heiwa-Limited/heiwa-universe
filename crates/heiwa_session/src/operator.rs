@@ -41,8 +41,8 @@ use sha2::{Digest, Sha256};
 use uuid::Uuid;
 
 use heiwa_evidence::{
-    now_iso, CursorError, CursorEvent, OperatorActor, OperatorEvent, OperatorEventType,
-    OperatorJournal, OperatorPage, OperatorRisk, OperatorSensitivity,
+    find_sensitive, now_iso, CursorError, CursorEvent, OperatorActor, OperatorEvent,
+    OperatorEventType, OperatorJournal, OperatorPage, OperatorRisk, OperatorSensitivity,
     OPERATOR_EVENT_SCHEMA_VERSION,
 };
 
@@ -199,6 +199,15 @@ impl OperatorSessionService {
     /// `turn_started`, then `user_message`. Idempotency is decided purely by
     /// what is already on disk, per the module docs.
     pub fn start_turn(&self, thread_id: &str, request: StartTurnRequest) -> Result<TurnSubmission> {
+        // Use the exact evidence-journal sensitive-material gate before any
+        // append. Otherwise a rejected user message could leave durable
+        // thread/turn scaffolding behind it.
+        let user_message_payload = json!({ "text": request.prompt });
+        if find_sensitive(&user_message_payload).is_some() {
+            bail!("refused to start turn: user message payload contains sensitive material");
+        }
+        let prompt_fingerprint = prompt_fingerprint(&request.prompt);
+
         let _write_transaction = self.lock_write_transaction()?;
         let threads = materialize_all(&self.journal)?.threads;
 
@@ -206,16 +215,43 @@ impl OperatorSessionService {
             if let Some(turn) = folded.turns.iter().find(|turn| {
                 turn.client_request_id.as_deref() == Some(request.client_request_id.as_str())
             }) {
-                let cursor = turn.user_message_cursor.clone().ok_or_else(|| {
-                    anyhow!(
-                        "duplicate turn {} for thread {thread_id} has no recorded user_message cursor",
+                validate_retry_prompt(turn, &prompt_fingerprint)?;
+                if let Some(cursor) = &turn.user_message_cursor {
+                    return Ok(TurnSubmission {
+                        thread_id: thread_id.to_string(),
+                        turn_id: turn.turn_id.clone(),
+                        cursor: cursor.clone(),
+                        duplicate: true,
+                    });
+                }
+
+                if turn.status != "open" || turn.cancel_requested {
+                    bail!(
+                        "cannot safely recover orphaned turn {} for thread {thread_id}: turn is no longer accepting a user message",
                         turn.turn_id
-                    )
-                })?;
+                    );
+                }
+
+                // A prior crash/error after `turn_started` but before the
+                // user message is recoverable only after the safe prompt
+                // fingerprint check above. Append just the missing record.
+                let recovered = new_event(
+                    thread_id,
+                    Some(turn.turn_id.clone()),
+                    None,
+                    OperatorEventType::UserMessage,
+                    now_iso(),
+                    OperatorActor {
+                        kind: "operator".to_string(),
+                        id: "local-operator".to_string(),
+                    },
+                    user_message_payload,
+                );
+                let appended = self.journal.append(&recovered)?;
                 return Ok(TurnSubmission {
                     thread_id: thread_id.to_string(),
                     turn_id: turn.turn_id.clone(),
-                    cursor,
+                    cursor: appended.cursor,
                     duplicate: true,
                 });
             }
@@ -251,8 +287,9 @@ impl OperatorSessionService {
             now.clone(),
             operator_actor.clone(),
             json!({
-                "client_request_id": request.client_request_id,
-                "route_policy": request.route_policy,
+                "client_request_id": request.client_request_id.clone(),
+                "prompt_fingerprint": prompt_fingerprint,
+                "route_policy": request.route_policy.clone(),
             }),
         );
         self.journal.append(&turn_started)?;
@@ -264,7 +301,7 @@ impl OperatorSessionService {
             OperatorEventType::UserMessage,
             now,
             operator_actor,
-            json!({ "text": request.prompt }),
+            user_message_payload,
         );
         let appended = self.journal.append(&user_message)?;
 
@@ -425,7 +462,13 @@ impl OperatorSessionService {
                     OperatorEventType::TurnInterrupted,
                     now_iso(),
                     runtime_actor.clone(),
-                    json!({ "reason": "RUNTIME_RESTART" }),
+                    json!({
+                        "reason": if turn.cancel_requested {
+                            "OPERATOR_CANCELLED"
+                        } else {
+                            "RUNTIME_RESTART"
+                        }
+                    }),
                 );
                 self.journal.append(&event)?;
                 closed += 1;
@@ -492,6 +535,35 @@ fn deterministic_turn_id(thread_id: &str, client_request_id: &str) -> String {
     Uuid::new_v5(&namespace, name.as_bytes()).to_string()
 }
 
+/// Stable, non-plaintext binding between an idempotency key and the prompt
+/// it was first submitted with. This lets a retry repair a crash between
+/// `turn_started` and `user_message` without treating a changed prompt as
+/// the same turn.
+fn prompt_fingerprint(prompt: &str) -> String {
+    let digest = Sha256::digest(prompt.as_bytes());
+    digest.iter().map(|byte| format!("{byte:02x}")).collect()
+}
+
+fn validate_retry_prompt(turn: &FoldedTurn, retry_fingerprint: &str) -> Result<()> {
+    let stored_fingerprint = turn
+        .prompt_fingerprint
+        .clone()
+        .or_else(|| turn.prompt.as_deref().map(prompt_fingerprint));
+    let Some(stored_fingerprint) = stored_fingerprint else {
+        bail!(
+            "cannot safely recover orphaned turn {}: no prompt fingerprint is available",
+            turn.turn_id
+        );
+    };
+    if stored_fingerprint != retry_fingerprint {
+        bail!(
+            "rejected retry for turn {}: client_request_id was previously submitted with a different prompt",
+            turn.turn_id
+        );
+    }
+    Ok(())
+}
+
 /// Fixed namespace UUID for turn-id derivation, itself derived (once per
 /// call; cheap) from a SHA-256 of a stable domain string rather than a
 /// hand-picked literal, so it is reproducible from source alone.
@@ -551,12 +623,37 @@ fn validate_event(threads: &HashMap<String, FoldedThread>, event: &OperatorEvent
                 )
             })?;
 
-        if is_turn_terminal(&turn.status) && !is_terminal_event(&event.event_type) {
+        if is_turn_terminal(&turn.status) {
             bail!(
-                "rejected operator event {}: turn {turn_id} is already terminal ({}); nonterminal event {:?} rejected",
+                "rejected operator event {}: turn {turn_id} is already terminal ({}); event {:?} rejected",
                 event.event_id,
                 turn.status,
                 event.event_type
+            );
+        }
+
+        if turn.cancel_requested {
+            if event.event_type != OperatorEventType::TurnInterrupted
+                || interruption_reason(event) != Some("OPERATOR_CANCELLED")
+            {
+                bail!(
+                    "rejected operator event {}: turn {turn_id} has a pending cancellation and must close with turn_interrupted reason OPERATOR_CANCELLED",
+                    event.event_id
+                );
+            }
+        } else if event.event_type == OperatorEventType::TurnInterrupted
+            && interruption_reason(event) == Some("OPERATOR_CANCELLED")
+        {
+            bail!(
+                "rejected operator event {}: OPERATOR_CANCELLED interruption requires a prior turn_cancel_requested",
+                event.event_id
+            );
+        } else if event.event_type == OperatorEventType::TurnCancelRequested
+            && turn.cancel_requested
+        {
+            bail!(
+                "rejected operator event {}: turn {turn_id} already has a pending cancellation",
+                event.event_id
             );
         }
     }
@@ -616,6 +713,7 @@ fn requires_turn_id(event_type: &OperatorEventType) -> bool {
             | OperatorEventType::TurnCompleted
             | OperatorEventType::TurnCancelRequested
             | OperatorEventType::TurnInterrupted
+            | OperatorEventType::UserMessage
             | OperatorEventType::RoutePlanned
             | OperatorEventType::RouteAttempted
             | OperatorEventType::RouteCompleted
@@ -649,17 +747,12 @@ fn requires_call_id(event_type: &OperatorEventType) -> bool {
 /// and only records operator *intent* — the turn stays open until the
 /// resulting `turn_interrupted` (payload reason `OPERATOR_CANCELLED`)
 /// lands as the actual closing record.
-fn is_terminal_event(event_type: &OperatorEventType) -> bool {
-    matches!(
-        event_type,
-        OperatorEventType::TurnCompleted
-            | OperatorEventType::TurnInterrupted
-            | OperatorEventType::Blocker
-    )
-}
-
 fn is_turn_terminal(status: &str) -> bool {
     matches!(status, "completed" | "interrupted" | "blocked")
+}
+
+fn interruption_reason(event: &OperatorEvent) -> Option<&str> {
+    event.payload.get("reason").and_then(|value| value.as_str())
 }
 
 // ---------------------------------------------------------------------
@@ -670,7 +763,9 @@ fn is_turn_terminal(status: &str) -> bool {
 struct FoldedTurn {
     turn_id: String,
     client_request_id: Option<String>,
+    prompt_fingerprint: Option<String>,
     status: String,
+    cancel_requested: bool,
     prompt: Option<String>,
     user_message_cursor: Option<String>,
     started_at: String,
@@ -821,8 +916,8 @@ fn apply_event(
         // cancellation contract (module docs) the turn stays open until
         // the follow-up `turn_interrupted` (reason `OPERATOR_CANCELLED`)
         // arrives, so it folds like any other nonterminal touch.
-        OperatorEventType::TurnCancelRequested
-        | OperatorEventType::RoutePlanned
+        OperatorEventType::TurnCancelRequested => apply_turn_cancel_requested(entry, event),
+        OperatorEventType::RoutePlanned
         | OperatorEventType::RouteAttempted
         | OperatorEventType::RouteCompleted
         | OperatorEventType::RouteFailed
@@ -849,6 +944,11 @@ fn apply_turn_started(entry: &mut FoldedThread, event: &OperatorEvent) {
         .get("client_request_id")
         .and_then(|value| value.as_str())
         .map(str::to_string);
+    let prompt_fingerprint = event
+        .payload
+        .get("prompt_fingerprint")
+        .and_then(|value| value.as_str())
+        .map(str::to_string);
     if entry.turns.iter().any(|turn| turn.turn_id == turn_id)
         || client_request_id
             .as_deref()
@@ -870,7 +970,9 @@ fn apply_turn_started(entry: &mut FoldedThread, event: &OperatorEvent) {
     entry.turns.push(FoldedTurn {
         turn_id,
         client_request_id,
+        prompt_fingerprint,
         status: "open".to_string(),
+        cancel_requested: false,
         prompt: None,
         user_message_cursor: None,
         started_at: event.occurred_at.clone(),
@@ -887,7 +989,7 @@ fn apply_user_message(entry: &mut FoldedThread, event: &OperatorEvent, row: &Cur
         entry.skipped_events += 1;
         return;
     };
-    if is_turn_terminal(&turn.status) {
+    if is_turn_terminal(&turn.status) || turn.cancel_requested {
         entry.skipped_events += 1;
         return;
     }
@@ -915,7 +1017,36 @@ fn apply_terminal(entry: &mut FoldedThread, event: &OperatorEvent, status: &str)
         entry.skipped_events += 1;
         return;
     }
+    if turn.cancel_requested
+        && (status != "interrupted" || interruption_reason(event) != Some("OPERATOR_CANCELLED"))
+    {
+        entry.skipped_events += 1;
+        return;
+    }
+    if !turn.cancel_requested
+        && event.event_type == OperatorEventType::TurnInterrupted
+        && interruption_reason(event) == Some("OPERATOR_CANCELLED")
+    {
+        entry.skipped_events += 1;
+        return;
+    }
     turn.status = status.to_string();
+}
+
+fn apply_turn_cancel_requested(entry: &mut FoldedThread, event: &OperatorEvent) {
+    let Some(turn_id) = &event.turn_id else {
+        entry.skipped_events += 1;
+        return;
+    };
+    let Some(turn) = entry.turns.iter_mut().find(|turn| &turn.turn_id == turn_id) else {
+        entry.skipped_events += 1;
+        return;
+    };
+    if is_turn_terminal(&turn.status) || turn.cancel_requested {
+        entry.skipped_events += 1;
+        return;
+    }
+    turn.cancel_requested = true;
 }
 
 fn apply_nonterminal_touch(entry: &mut FoldedThread, event: &OperatorEvent) {
@@ -923,7 +1054,7 @@ fn apply_nonterminal_touch(entry: &mut FoldedThread, event: &OperatorEvent) {
         return; // Not turn-scoped (e.g. a thread-level note); nothing to touch.
     };
     match entry.turns.iter_mut().find(|turn| &turn.turn_id == turn_id) {
-        Some(turn) if is_turn_terminal(&turn.status) => {
+        Some(turn) if is_turn_terminal(&turn.status) || turn.cancel_requested => {
             entry.skipped_events += 1;
         }
         Some(_) => {}

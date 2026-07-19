@@ -79,6 +79,82 @@ fn restart_closes_unfinished_turn_once() {
     );
 }
 
+#[test]
+fn start_turn_rejects_sensitive_prompt_before_creating_operator_events() {
+    let dir = tempfile::tempdir().unwrap();
+    let service = test_service(dir.path());
+
+    let error = service
+        .start_turn("default", StartTurnRequest::auto("req-1", "ghp_live-token"))
+        .unwrap_err();
+    assert!(
+        error.to_string().to_lowercase().contains("sensitive"),
+        "error should identify the preflight safety rejection: {error}"
+    );
+
+    assert!(
+        service
+            .events_after("default", None, 100)
+            .unwrap()
+            .events
+            .is_empty(),
+        "no thread_created or turn_started event may precede a rejected message"
+    );
+    assert!(
+        !dir.path().join("operator_events.jsonl").exists(),
+        "preflight must reject before creating the journal stream"
+    );
+}
+
+#[test]
+fn orphaned_turn_retry_appends_the_missing_user_message() {
+    let dir = tempfile::tempdir().unwrap();
+    let service = test_service(dir.path());
+    let mut orphan = base_event(
+        "default",
+        Some("orphan-turn"),
+        None,
+        OperatorEventType::TurnStarted,
+    );
+    orphan.payload = json!({
+        "client_request_id": "req-1",
+        "prompt_fingerprint": "2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824"
+    });
+    service.append_event(orphan).unwrap();
+
+    let retry = service
+        .start_turn("default", StartTurnRequest::auto("req-1", "hello"))
+        .unwrap();
+    assert!(retry.duplicate);
+    assert_eq!(retry.turn_id, "orphan-turn");
+    assert_eq!(
+        service.thread("default").unwrap().turns[0]
+            .prompt
+            .as_deref(),
+        Some("hello")
+    );
+}
+
+#[test]
+fn retry_with_same_client_request_and_different_prompt_is_rejected() {
+    let dir = tempfile::tempdir().unwrap();
+    let service = test_service(dir.path());
+    service
+        .start_turn("default", StartTurnRequest::auto("req-1", "hello"))
+        .unwrap();
+
+    let error = service
+        .start_turn(
+            "default",
+            StartTurnRequest::auto("req-1", "different prompt"),
+        )
+        .unwrap_err();
+    assert!(
+        error.to_string().to_lowercase().contains("prompt"),
+        "error should identify the retry payload mismatch: {error}"
+    );
+}
+
 // ---------------------------------------------------------------------
 // append_event validation rejections.
 // ---------------------------------------------------------------------
@@ -118,6 +194,25 @@ fn append_event_rejects_turn_event_missing_turn_id() {
     assert!(
         message.contains("turn_id"),
         "error should name the missing turn_id: {message}"
+    );
+}
+
+#[test]
+fn append_event_rejects_user_message_missing_turn_id() {
+    let dir = tempfile::tempdir().unwrap();
+    let service = test_service(dir.path());
+
+    let error = service
+        .append_event(base_event(
+            "default",
+            None,
+            None,
+            OperatorEventType::UserMessage,
+        ))
+        .unwrap_err();
+    assert!(
+        error.to_string().to_lowercase().contains("turn_id"),
+        "error should identify the missing turn id: {error}"
     );
 }
 
@@ -364,6 +459,122 @@ fn append_event_rejects_cancel_request_on_terminal_turn() {
         message.contains("terminal"),
         "error should name the terminal-state violation: {message}"
     );
+}
+
+#[test]
+fn append_event_rejects_second_terminal_event() {
+    let dir = tempfile::tempdir().unwrap();
+    let service = test_service(dir.path());
+    let submission = service
+        .start_turn("default", StartTurnRequest::auto("req-1", "hi"))
+        .unwrap();
+    service
+        .append_event(base_event(
+            "default",
+            Some(&submission.turn_id),
+            None,
+            OperatorEventType::TurnCompleted,
+        ))
+        .unwrap();
+
+    let error = service
+        .append_event(base_event(
+            "default",
+            Some(&submission.turn_id),
+            None,
+            OperatorEventType::TurnInterrupted,
+        ))
+        .unwrap_err();
+    assert!(
+        error.to_string().to_lowercase().contains("terminal"),
+        "error should reject every event after terminal state: {error}"
+    );
+}
+
+#[test]
+fn operator_cancelled_interruption_requires_prior_cancel_request() {
+    let dir = tempfile::tempdir().unwrap();
+    let service = test_service(dir.path());
+    let submission = service
+        .start_turn("default", StartTurnRequest::auto("req-1", "hi"))
+        .unwrap();
+    let mut interrupted = base_event(
+        "default",
+        Some(&submission.turn_id),
+        None,
+        OperatorEventType::TurnInterrupted,
+    );
+    interrupted.payload = json!({ "reason": "OPERATOR_CANCELLED" });
+
+    let error = service.append_event(interrupted).unwrap_err();
+    assert!(
+        error.to_string().to_lowercase().contains("cancel"),
+        "error should require prior cancellation intent: {error}"
+    );
+}
+
+#[test]
+fn pending_cancellation_rejects_completion_and_closes_as_operator_cancelled() {
+    let dir = tempfile::tempdir().unwrap();
+    let service = test_service(dir.path());
+    let submission = service
+        .start_turn("default", StartTurnRequest::auto("req-1", "hi"))
+        .unwrap();
+    service
+        .append_event(base_event(
+            "default",
+            Some(&submission.turn_id),
+            None,
+            OperatorEventType::TurnCancelRequested,
+        ))
+        .unwrap();
+
+    let completion = base_event(
+        "default",
+        Some(&submission.turn_id),
+        None,
+        OperatorEventType::TurnCompleted,
+    );
+    assert!(service.append_event(completion).is_err());
+
+    let mut interrupted = base_event(
+        "default",
+        Some(&submission.turn_id),
+        None,
+        OperatorEventType::TurnInterrupted,
+    );
+    interrupted.payload = json!({ "reason": "OPERATOR_CANCELLED" });
+    service.append_event(interrupted).unwrap();
+    assert_eq!(
+        service.thread("default").unwrap().turns[0].status,
+        "interrupted"
+    );
+}
+
+#[test]
+fn restart_recovery_closes_pending_cancellation_as_operator_cancelled() {
+    let dir = tempfile::tempdir().unwrap();
+    let service = test_service(dir.path());
+    let submission = service
+        .start_turn("default", StartTurnRequest::auto("req-1", "hi"))
+        .unwrap();
+    service
+        .append_event(base_event(
+            "default",
+            Some(&submission.turn_id),
+            None,
+            OperatorEventType::TurnCancelRequested,
+        ))
+        .unwrap();
+
+    assert_eq!(service.recover_interrupted().unwrap(), 1);
+    let events = service.events_after("default", None, 100).unwrap().events;
+    let recovered = events.last().unwrap();
+    assert_eq!(
+        recovered.event.event_type,
+        OperatorEventType::TurnInterrupted
+    );
+    assert_eq!(recovered.event.payload["reason"], "OPERATOR_CANCELLED");
 }
 
 // ---------------------------------------------------------------------
