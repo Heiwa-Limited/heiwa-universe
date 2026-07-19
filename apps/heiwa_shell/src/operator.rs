@@ -251,12 +251,6 @@ impl OperatorTurnHandle {
     pub async fn recv(
         &mut self,
     ) -> std::result::Result<OperatorStreamFrame, broadcast::error::RecvError> {
-        if let Some(direct_frames) = &mut self.direct_frames {
-            return direct_frames
-                .recv()
-                .await
-                .ok_or(broadcast::error::RecvError::Closed);
-        }
         loop {
             if let Some(frame) = self.replay.pop_front() {
                 if self.accept_frame(&frame) {
@@ -269,6 +263,61 @@ impl OperatorTurnHandle {
                     .map_err(|_| broadcast::error::RecvError::Closed)?;
                 continue;
             }
+
+            if self.direct_frames.is_some() {
+                // Prefer every durable global row before taking the next
+                // direct frame. `request_cancel` must stay synchronous, so
+                // it only broadcasts its durable intent; this priority keeps
+                // that intent ordered ahead of a direct terminal frame.
+                match self.frames.try_recv() {
+                    Ok(frame) if self.accept_global_frame(&frame) => return Ok(frame),
+                    Ok(_) => continue,
+                    Err(broadcast::error::TryRecvError::Lagged(_)) => {
+                        self.refill_replay()
+                            .map_err(|_| broadcast::error::RecvError::Closed)?;
+                        continue;
+                    }
+                    Err(broadcast::error::TryRecvError::Closed) => {
+                        // The original handle remains lossless while its
+                        // private sender is alive, even if observers close.
+                    }
+                    Err(broadcast::error::TryRecvError::Empty) => {}
+                }
+
+                enum Incoming {
+                    Direct(Option<OperatorStreamFrame>),
+                    Global(std::result::Result<OperatorStreamFrame, broadcast::error::RecvError>),
+                }
+                let incoming = {
+                    let direct_frames = self
+                        .direct_frames
+                        .as_mut()
+                        .expect("direct frame receiver checked above");
+                    tokio::select! {
+                        direct = direct_frames.recv() => Incoming::Direct(direct),
+                        global = self.frames.recv() => Incoming::Global(global),
+                    }
+                };
+                match incoming {
+                    Incoming::Direct(Some(frame)) if self.accept_frame(&frame) => return Ok(frame),
+                    Incoming::Direct(Some(_)) => continue,
+                    Incoming::Direct(None) => {
+                        self.direct_frames = None;
+                        continue;
+                    }
+                    Incoming::Global(Ok(frame)) if self.accept_global_frame(&frame) => {
+                        return Ok(frame);
+                    }
+                    Incoming::Global(Ok(_)) => continue,
+                    Incoming::Global(Err(broadcast::error::RecvError::Lagged(_))) => {
+                        self.refill_replay()
+                            .map_err(|_| broadcast::error::RecvError::Closed)?;
+                        continue;
+                    }
+                    Incoming::Global(Err(broadcast::error::RecvError::Closed)) => continue,
+                }
+            }
+
             match self.frames.recv().await {
                 Ok(frame) if self.accept_frame(&frame) => return Ok(frame),
                 Ok(_) => continue,
@@ -279,6 +328,16 @@ impl OperatorTurnHandle {
                 Err(error) => return Err(error),
             }
         }
+    }
+
+    fn accept_global_frame(&mut self, frame: &OperatorStreamFrame) -> bool {
+        // The private channel owns original-turn terminal ordering. A global
+        // terminal can race ahead of buffered direct token deltas, whereas a
+        // global cancellation intent has no private counterpart and must be
+        // surfaced before that direct terminal.
+        matches!(frame, OperatorStreamFrame::Durable(_))
+            && !frame.is_terminal()
+            && self.accept_frame(frame)
     }
 
     fn accept_frame(&mut self, frame: &OperatorStreamFrame) -> bool {
@@ -2123,6 +2182,46 @@ mod tests {
         assert_eq!(tail[1].event.event_type, OperatorEventType::TurnInterrupted);
         assert_eq!(tail[1].event.payload["reason"], "OPERATOR_CANCELLED");
         assert!(!runner.active_turns().signal_cancel(&handle.turn_id));
+    }
+
+    #[tokio::test]
+    async fn operator_original_handle_observes_cancel_intent_before_interruption() {
+        let dir = tempfile::tempdir().unwrap();
+        let sessions = service(dir.path());
+        let executor = Arc::new(RecordingExecutor::with_sessions(sessions));
+        executor.block.store(true, Ordering::SeqCst);
+        let runner = OperatorTurnRunner::new(service(dir.path()), executor.clone());
+        let mut handle = runner
+            .submit(
+                "default",
+                StartTurnRequest::auto("original-cancel-sequence", "hello"),
+                OperatorTurnWork::Model(Box::new(model_turn())),
+            )
+            .unwrap();
+        tokio::time::timeout(
+            std::time::Duration::from_secs(2),
+            executor.started.notified(),
+        )
+        .await
+        .unwrap();
+        assert!(runner.request_cancel(&handle.turn_id).unwrap());
+        let frames = wait_for_terminal(&mut handle).await;
+        let event_types = frames
+            .iter()
+            .filter_map(|frame| match frame {
+                OperatorStreamFrame::Durable(row) => Some(row.event.event_type.clone()),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        let cancel = event_types
+            .iter()
+            .position(|event| *event == OperatorEventType::TurnCancelRequested)
+            .expect("original handle must receive durable cancel intent");
+        let interrupted = event_types
+            .iter()
+            .position(|event| *event == OperatorEventType::TurnInterrupted)
+            .expect("original handle must receive durable interruption");
+        assert!(cancel < interrupted);
     }
 
     #[tokio::test]
