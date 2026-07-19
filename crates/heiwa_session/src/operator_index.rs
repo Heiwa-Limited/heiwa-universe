@@ -4,7 +4,7 @@ use std::fs;
 use std::path::Path;
 
 use anyhow::Result;
-use heiwa_embed::embed_and_store;
+use heiwa_embed::{embed_and_store, replace_embeddings_from_texts};
 use rusqlite::{params, Connection};
 use sha2::{Digest, Sha256};
 
@@ -22,6 +22,9 @@ pub trait EmbeddingSink: Send + Sync {
     fn finalize_replace(&self) -> Result<()> {
         Ok(())
     }
+    fn replace_texts(&self, _texts: &[(String, String, String)]) -> Option<Result<(usize, usize)>> {
+        None
+    }
 }
 
 /// Configured embedding projection used by the installed service.
@@ -30,6 +33,16 @@ pub struct ProductionEmbeddingSink;
 impl EmbeddingSink for ProductionEmbeddingSink {
     fn upsert_text(&self, thread_id: &str, event_id: &str, text: &str) -> Result<()> {
         embed_and_store(thread_id, stable_event_key(event_id), text).map(|_| ())
+    }
+    fn replace_texts(&self, texts: &[(String, String, String)]) -> Option<Result<(usize, usize)>> {
+        let rows = texts
+            .iter()
+            .map(|(thread, event, text)| (thread.clone(), stable_event_key(event), text.clone()))
+            .collect::<Vec<_>>();
+        Some(
+            replace_embeddings_from_texts(&rows)
+                .map(|report| (report.stored_rows, report.failures)),
+        )
     }
 }
 
@@ -107,7 +120,19 @@ pub fn rebuild_operator_indexes_at(
 
     let mut embedded_rows = 0;
     let mut embedding_failures = 0;
-    if sink.begin_replace().is_err() {
+    let replacement_texts = embeddings
+        .iter()
+        .map(|(thread, event, text)| (thread.clone(), event.clone(), text.clone()))
+        .collect::<Vec<_>>();
+    if let Some(result) = sink.replace_texts(&replacement_texts) {
+        match result {
+            Ok((stored, failures)) => {
+                embedded_rows = stored;
+                embedding_failures = failures;
+            }
+            Err(_) => embedding_failures = embeddings.len(),
+        }
+    } else if sink.begin_replace().is_err() {
         embedding_failures = embeddings.len();
     } else {
         for (thread_id, event_id, text) in &embeddings {

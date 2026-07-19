@@ -100,6 +100,59 @@ impl VectorBackend {
             Self::Lance(store) => store.top_k_similar(session_id, query, limit),
         }
     }
+
+    pub fn rebuild_from(&self, rows: Vec<EmbeddingRow>) -> Result<usize> {
+        match self {
+            Self::Sqlite(store) => store.rebuild_from(rows),
+            #[cfg(feature = "lance")]
+            Self::Lance(store) => store.rebuild_from(rows.into_iter()),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct EmbeddingReplacementReport {
+    pub stored_rows: usize,
+    pub failures: usize,
+}
+
+/// Generate every available vector before replacing the derived backend.
+/// Existing rows remain untouched if vector generation itself fails.
+pub fn replace_embeddings_from_texts(
+    texts: &[(String, u64, String)],
+) -> Result<EmbeddingReplacementReport> {
+    let config = load_config();
+    let store = VectorBackend::open_from_config(&config.embedding)?;
+    if !config.embedding.enabled || config.embedding.ollama_url.is_none() {
+        return Ok(EmbeddingReplacementReport {
+            stored_rows: store.rebuild_from(Vec::new())?,
+            failures: 0,
+        });
+    }
+    let client = OllamaEmbeddingClient::new(
+        config.embedding.ollama_url.clone().unwrap(),
+        config.embedding.model.clone(),
+        config.embedding.request_timeout_ms,
+    )?;
+    let mut rows = Vec::new();
+    let mut failures = 0;
+    for (session_id, entry_id, text) in texts {
+        match client.embed(text) {
+            Ok(vector) if !vector.is_empty() => rows.push(EmbeddingRow {
+                session_id: session_id.clone(),
+                entry_id: *entry_id,
+                model: config.embedding.model.clone(),
+                vector,
+            }),
+            Ok(_) => {}
+            Err(_) => failures += 1,
+        }
+    }
+    let stored_rows = store.rebuild_from(rows)?;
+    Ok(EmbeddingReplacementReport {
+        stored_rows,
+        failures,
+    })
 }
 
 /// Copy every SQLite-stored embedding into a Lance store. One-way, additive:
@@ -305,6 +358,15 @@ impl SqliteVectorStore {
             });
         }
         Ok(results)
+    }
+
+    pub fn rebuild_from(&self, rows: Vec<EmbeddingRow>) -> Result<usize> {
+        self.conn.execute("DELETE FROM transcript_embeddings", [])?;
+        let count = rows.len();
+        for row in rows {
+            self.upsert(&row.session_id, row.entry_id, &row.model, &row.vector)?;
+        }
+        Ok(count)
     }
 
     pub fn top_k_similar(

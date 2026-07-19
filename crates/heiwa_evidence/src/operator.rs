@@ -370,17 +370,28 @@ fn repair_unterminated_tail(file: &mut std::fs::File) -> Result<()> {
     if len == 0 {
         return Ok(());
     }
-    file.seek(SeekFrom::Start(0))?;
-    let mut bytes = Vec::with_capacity(len as usize);
-    file.read_to_end(&mut bytes)?;
-    if bytes.last() == Some(&b'\n') {
+    file.seek(SeekFrom::Start(len - 1))?;
+    let mut final_byte = [0u8; 1];
+    file.read_exact(&mut final_byte)?;
+    if final_byte[0] == b'\n' {
         return Ok(());
     }
-    let complete_len = bytes
-        .iter()
-        .rposition(|byte| *byte == b'\n')
-        .map_or(0, |index| index + 1);
-    file.set_len(complete_len as u64)?;
+    const CHUNK: usize = 8192;
+    let mut end = len;
+    let complete_len = loop {
+        let start = end.saturating_sub(CHUNK as u64);
+        file.seek(SeekFrom::Start(start))?;
+        let mut chunk = vec![0; (end - start) as usize];
+        file.read_exact(&mut chunk)?;
+        if let Some(index) = chunk.iter().rposition(|byte| *byte == b'\n') {
+            break start + index as u64 + 1;
+        }
+        if start == 0 {
+            break 0;
+        }
+        end = start;
+    };
+    file.set_len(complete_len)?;
     Ok(())
 }
 

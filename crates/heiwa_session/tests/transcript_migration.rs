@@ -241,21 +241,37 @@ fn round_trips_v1_transcript() {
         t.parent_session_id = Some("root-session".into());
         for (i, text) in ["one", "two", "three"].iter().enumerate() {
             t.entries.push(TranscriptEntry {
-                id: i as u64,
+                id: [7, 19, 31][i],
                 ts_unix_ms: 1_700_000_000_000 + i as i64,
                 char_len: text.len(),
                 block: TranscriptBlock::User((*text).into()),
-                embedding_ref: None,
+                embedding_ref: (i == 0).then(|| heiwa_session::EmbeddingRef {
+                    model: "m".into(),
+                    dim: 3,
+                    row_id: 9,
+                }),
             });
         }
-        t.next_entry_id = 3;
+        t.next_entry_id = 42;
         save_entries(&t).expect("save");
 
         let reloaded = load_transcript("default").expect("load");
         assert_eq!(reloaded.version, PERSISTED_TRANSCRIPT_VERSION);
         assert_eq!(reloaded.parent_session_id.as_deref(), Some("root-session"));
         assert_eq!(reloaded.entries.len(), 3);
-        assert_eq!(reloaded.next_entry_id, 3);
+        assert_eq!(reloaded.next_entry_id, 42);
+        assert_eq!(
+            reloaded
+                .entries
+                .iter()
+                .map(|entry| entry.id)
+                .collect::<Vec<_>>(),
+            vec![7, 19, 31]
+        );
+        assert_eq!(
+            reloaded.entries[0].embedding_ref.as_ref().unwrap().row_id,
+            9
+        );
         let texts: Vec<String> = reloaded
             .entries
             .iter()

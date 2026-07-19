@@ -268,17 +268,40 @@ pub struct ImportReport {
 }
 
 pub fn save_entries(persisted: &PersistedTranscript) -> Result<()> {
-    save_transcript(&persisted.session_id, &persisted.blocks())?;
-    set_parent_session_id(&persisted.session_id, persisted.parent_session_id.clone())
+    let existing = load_transcript(&persisted.session_id)?;
+    if persisted.entries.len() < existing.entries.len() {
+        anyhow::bail!("legacy transcript truncation is unavailable after operator-stream cutover");
+    }
+    for (old, supplied) in existing.entries.iter().zip(&persisted.entries) {
+        if serde_json::to_value(old)? != serde_json::to_value(supplied)? {
+            anyhow::bail!("legacy transcript rewrite is unavailable after operator-stream cutover");
+        }
+    }
+    for entry in persisted.entries.iter().skip(existing.entries.len()) {
+        append_exact_entry(&persisted.session_id, entry.clone())?;
+    }
+    set_compat_transcript_metadata(
+        &persisted.session_id,
+        persisted.parent_session_id.clone(),
+        Some(persisted.next_entry_id),
+    )
 }
 
 pub fn set_parent_session_id(session_id: &str, parent_session_id: Option<String>) -> Result<()> {
+    set_compat_transcript_metadata(session_id, parent_session_id, None)
+}
+
+fn set_compat_transcript_metadata(
+    session_id: &str,
+    parent_session_id: Option<String>,
+    next_entry_id: Option<u64>,
+) -> Result<()> {
     default_operator_service()?.append_event(new_operator_event(
         session_id,
         None,
         None,
         OperatorEventType::ArtifactCreated,
-        serde_json::json!({"compat_parent_session_id": parent_session_id}),
+        serde_json::json!({"compat_parent_session_id": parent_session_id, "compat_next_entry_id": next_entry_id}),
     ))?;
     Ok(())
 }
@@ -332,6 +355,12 @@ pub fn append_entry(session_id: &str, block: TranscriptBlock) -> Result<Transcri
         block: block.clone(),
         embedding_ref: None,
     };
+    append_exact_entry(session_id, entry)
+}
+
+fn append_exact_entry(session_id: &str, entry: TranscriptEntry) -> Result<TranscriptEntry> {
+    let service = default_operator_service()?;
+    let block = entry.block.clone();
     match &block {
         TranscriptBlock::User(text) => {
             let turn_id = uuid::Uuid::new_v4().to_string();
@@ -533,6 +562,13 @@ fn transcript_from_events(
         if event.event_type == OperatorEventType::ArtifactCreated {
             if let Some(parent) = event.payload.get("compat_parent_session_id") {
                 transcript.parent_session_id = serde_json::from_value(parent.clone()).ok();
+            }
+            if let Some(next) = event
+                .payload
+                .get("compat_next_entry_id")
+                .and_then(|value| value.as_u64())
+            {
+                transcript.next_entry_id = next;
             }
         }
         if event.event_type == OperatorEventType::LegacySessionImported {
