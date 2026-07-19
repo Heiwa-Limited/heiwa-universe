@@ -5,8 +5,9 @@ pub mod scorer;
 pub mod vector;
 
 pub use call::{
-    compare_candidates, plan_model_call, CandidateRejection, CostTruth, ModelCallCandidate,
-    ModelCallPlan, ModelCallRequest,
+    compare_candidates, plan_model_call, CallRisk, CandidateRejection, CandidateRejectionReason,
+    CostTruth, ExecutionLocality, ModelCallCandidate, ModelCallPlan, ModelCallRequest,
+    PrivacyClass, SafetyClass,
 };
 pub use policy::{
     default_policy, DrexAuthorityGate, DrexDecision, DrexPolicy, DrexScoreCard, ExecutionMode,

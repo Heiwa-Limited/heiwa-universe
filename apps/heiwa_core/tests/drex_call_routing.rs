@@ -1,6 +1,7 @@
 use heiwa_core::drex::{
-    default_policy, plan_model_call, plan_route, CandidateRejection, CostTruth, DrexIngress,
-    ModelCallCandidate, ModelCallRequest,
+    default_policy, plan_model_call, plan_route, CallRisk, CandidateRejectionReason, CostTruth,
+    DrexIngress, ExecutionLocality, ModelCallCandidate, ModelCallRequest, PrivacyClass,
+    SafetyClass,
 };
 use heiwa_protocol::ModelTier;
 
@@ -11,8 +12,10 @@ fn request() -> ModelCallRequest {
         call_id: "call-1".to_string(),
         intent: "code".to_string(),
         stage: "execution".to_string(),
-        raw_text: "edit the routing implementation".to_string(),
-        privacy: "standard".to_string(),
+        raw_text: "edit routing".to_string(),
+        privacy: PrivacyClass::Standard,
+        risk: CallRisk::Low,
+        safety: SafetyClass::Approved,
         required_capabilities: vec!["advanced_coding".to_string()],
         required_context_tokens: 8_192,
         minimum_quality_class: 3,
@@ -30,6 +33,7 @@ fn candidate(
     model_id: &str,
     provider: &str,
     quality: u8,
+    locality: ExecutionLocality,
     cost: Option<f64>,
     cost_truth: CostTruth,
 ) -> ModelCallCandidate {
@@ -45,7 +49,7 @@ fn candidate(
             effort_level: quality,
             cost_per_turn: cost.unwrap_or(0.0),
             max_context_tokens: 128_000,
-            vram_requirement_mb: 0,
+            vram_requirement_mb: 4_096,
             quantization_type: "none".to_string(),
             kv_cache_strategy: "standard".to_string(),
             strengths_json: "[\"advanced_coding\",\"tool_use\"]".to_string(),
@@ -55,6 +59,7 @@ fn candidate(
             latency_p_95_ms: 750,
             updated_at: "2026-07-19T00:00:00Z".to_string(),
         },
+        locality,
         connected: true,
         adapter_capable: true,
         quota_available: true,
@@ -63,293 +68,533 @@ fn candidate(
     }
 }
 
-fn rejection(plan: &heiwa_core::drex::ModelCallPlan, id: u64) -> &CandidateRejection {
+fn reason(plan: &heiwa_core::drex::ModelCallPlan, id: u64) -> CandidateRejectionReason {
     plan.rejected
         .iter()
         .find(|rejection| rejection.candidate_id == id)
         .unwrap_or_else(|| panic!("missing rejection for {id}"))
+        .reasons[0]
+        .clone()
 }
 
 #[test]
-fn minimum_quality_admits_subscription_route_then_uses_marginal_cost() {
-    let free_low_quality = candidate(
+fn quality_admits_before_marginal_cost_and_preserves_cost_truth() {
+    let local_low = candidate(
         1,
-        "local-free",
+        "local-low",
         "ollama",
         1,
+        ExecutionLocality::OnDevice,
         Some(0.0),
         CostTruth::LocalZeroCost,
     );
     let subscription = candidate(
         2,
-        "codex-subscription",
+        "subscription",
         "openai",
         3,
+        ExecutionLocality::Remote,
         Some(0.0),
         CostTruth::TargetOnly,
     );
-    let direct_api = candidate(
+    let direct = candidate(
         3,
-        "direct-api",
+        "direct",
         "openai",
         3,
+        ExecutionLocality::Remote,
         Some(0.08),
         CostTruth::ExactProviderReport,
     );
 
     let plan = plan_model_call(
         &request(),
-        &[free_low_quality, subscription.clone(), direct_api],
+        &[local_low, subscription.clone(), direct],
         &default_policy(),
     )
-    .expect("call plan");
+    .expect("planner state is valid");
 
-    assert_eq!(plan.selected.as_ref(), Some(&subscription));
+    assert_eq!(plan.selected, Some(subscription));
     assert_eq!(plan.selected_cost_truth, Some(CostTruth::TargetOnly));
-    assert_eq!(rejection(&plan, 1).reasons, vec!["minimum_quality_class"]);
+    assert_eq!(
+        reason(&plan, 1),
+        CandidateRejectionReason::MinimumQualityClass
+    );
     assert_eq!(plan.admitted_ids, vec![2, 3]);
 }
 
 #[test]
-fn hard_gates_reject_before_cost_and_pins_do_not_bypass_them() {
-    let mut request = request();
-    request.privacy = "sovereign".to_string();
-    request.required_context_tokens = 200_000;
-    request.required_capabilities = vec!["tool_use".to_string()];
-    request.preferred_provider = Some("remote".to_string());
-    request.preferred_model = Some("pinned-remote".to_string());
-
-    let pinned_remote = candidate(
-        1,
-        "pinned-remote",
-        "remote",
-        3,
-        Some(0.0),
-        CostTruth::TargetOnly,
-    );
-    let mut disconnected = candidate(
-        2,
-        "disconnected",
-        "ollama",
-        3,
-        Some(0.0),
-        CostTruth::LocalZeroCost,
-    );
-    disconnected.connected = false;
-    let mut quota_exhausted =
-        candidate(3, "quota", "ollama", 3, Some(0.0), CostTruth::LocalZeroCost);
-    quota_exhausted.quota_available = false;
-    let mut context_short = candidate(
-        4,
-        "context",
-        "ollama",
-        3,
-        Some(0.0),
-        CostTruth::LocalZeroCost,
-    );
-    context_short.tier.max_context_tokens = 100;
-    let mut missing_capability = candidate(
-        5,
-        "capability",
-        "ollama",
-        3,
-        Some(0.0),
-        CostTruth::LocalZeroCost,
-    );
-    missing_capability.tier.strengths_json = "[\"advanced_coding\"]".to_string();
-
-    let plan = plan_model_call(
-        &request,
-        &[
-            pinned_remote,
-            disconnected,
-            quota_exhausted,
-            context_short,
-            missing_capability,
-        ],
-        &default_policy(),
-    )
-    .expect_err("all candidates fail hard gates");
-
-    assert!(plan
-        .to_string()
-        .contains("no admitted model call candidates"));
-}
-
-#[test]
-fn explicit_allow_and_exclude_and_budget_are_hard_gates() {
-    let mut request = request();
-    request.allowed_models = vec!["allowed".to_string()];
-    request.excluded_models = vec!["excluded".to_string()];
-    request.maximum_marginal_cost_usd = Some(0.01);
-    let allowed = candidate(
-        1,
-        "allowed",
-        "provider",
-        3,
-        Some(0.01),
-        CostTruth::ExactProviderReport,
-    );
-    let excluded = candidate(
-        2,
-        "excluded",
-        "provider",
-        3,
-        Some(0.0),
-        CostTruth::ExactProviderReport,
-    );
-    let unlisted = candidate(
-        3,
-        "unlisted",
-        "provider",
-        3,
-        Some(0.0),
-        CostTruth::ExactProviderReport,
-    );
-    let expensive = candidate(
-        4,
-        "allowed",
-        "expensive",
-        3,
-        Some(0.02),
-        CostTruth::ExactProviderReport,
-    );
-
-    let plan = plan_model_call(
-        &request,
-        &[allowed.clone(), excluded, unlisted, expensive],
-        &default_policy(),
-    )
-    .expect("allowed candidate remains");
-    assert_eq!(plan.selected, Some(allowed));
-    assert_eq!(rejection(&plan, 2).reasons, vec!["excluded_model"]);
-    assert_eq!(rejection(&plan, 3).reasons, vec!["not_allowed_model"]);
-    assert_eq!(
-        rejection(&plan, 4).reasons,
-        vec!["maximum_marginal_cost_usd"]
-    );
-}
-
-#[test]
-fn invalid_metrics_are_rejected_deterministically() {
-    let mut request = request();
-    request.minimum_success_rate = 0.95;
+fn each_hard_gate_reports_its_own_exact_reason() {
+    let mut baseline = request();
+    baseline.minimum_quality_class = 1;
+    baseline.minimum_success_rate = 0.0;
+    baseline.required_context_tokens = 1;
+    baseline.required_capabilities.clear();
     let valid = candidate(
         1,
         "valid",
         "provider",
         3,
+        ExecutionLocality::Remote,
         Some(0.01),
-        CostTruth::ExactProviderReport,
-    );
-    let nan_cost = candidate(
-        2,
-        "nan-cost",
-        "provider",
-        3,
-        Some(f64::NAN),
         CostTruth::ProxyEstimate,
     );
-    let negative_cost = candidate(
-        3,
-        "negative-cost",
-        "provider",
-        3,
-        Some(-0.01),
-        CostTruth::ProxyEstimate,
-    );
-    let infinite_cost = candidate(
-        4,
-        "infinite-cost",
-        "provider",
-        3,
-        Some(f64::INFINITY),
-        CostTruth::ProxyEstimate,
-    );
-    let mut nan_success = candidate(
-        5,
-        "nan-success",
-        "provider",
-        3,
-        Some(0.0),
-        CostTruth::ProxyEstimate,
-    );
-    nan_success.tier.last_success_rate = f64::NAN;
-    let mut negative_success = candidate(
-        6,
-        "negative-success",
-        "provider",
-        3,
-        Some(0.0),
-        CostTruth::ProxyEstimate,
-    );
-    negative_success.tier.last_success_rate = -0.1;
 
-    let plan = plan_model_call(
-        &request,
-        &[
-            valid.clone(),
-            nan_cost,
-            negative_cost,
-            infinite_cost,
-            nan_success,
-            negative_success,
-        ],
-        &default_policy(),
-    )
-    .expect("valid candidate selected");
+    let cases: Vec<(u64, ModelCallCandidate, CandidateRejectionReason)> = vec![
+        (
+            2,
+            {
+                let mut value = valid.clone();
+                value.tier.id = 2;
+                value.tier.enabled = false;
+                value
+            },
+            CandidateRejectionReason::DisabledModel,
+        ),
+        (
+            3,
+            {
+                let mut value = valid.clone();
+                value.tier.id = 3;
+                value.connected = false;
+                value
+            },
+            CandidateRejectionReason::Disconnected,
+        ),
+        (
+            4,
+            {
+                let mut value = valid.clone();
+                value.tier.id = 4;
+                value.adapter_capable = false;
+                value
+            },
+            CandidateRejectionReason::AdapterIncapable,
+        ),
+        (
+            5,
+            {
+                let mut value = valid.clone();
+                value.tier.id = 5;
+                value.quota_available = false;
+                value
+            },
+            CandidateRejectionReason::QuotaExhausted,
+        ),
+        (
+            6,
+            {
+                let mut value = valid.clone();
+                value.tier.id = 6;
+                value.tier.max_context_tokens = 0;
+                value
+            },
+            CandidateRejectionReason::InsufficientContext,
+        ),
+        (
+            7,
+            {
+                let mut value = valid.clone();
+                value.tier.id = 7;
+                value.tier.strengths_json = "[]".to_string();
+                value
+            },
+            CandidateRejectionReason::MissingRequiredCapability,
+        ),
+        (
+            8,
+            {
+                let mut value = valid.clone();
+                value.tier.id = 8;
+                value.tier.capability_class = 0;
+                value
+            },
+            CandidateRejectionReason::MinimumQualityClass,
+        ),
+        (
+            9,
+            {
+                let mut value = valid.clone();
+                value.tier.id = 9;
+                value.tier.last_success_rate = 0.5;
+                value
+            },
+            CandidateRejectionReason::MinimumSuccessRate,
+        ),
+    ];
 
-    assert_eq!(plan.selected, Some(valid));
-    for id in 2..=4 {
-        assert_eq!(
-            rejection(&plan, id).reasons,
-            vec!["invalid_marginal_cost_usd"]
-        );
-    }
-    for id in 5..=6 {
-        assert_eq!(rejection(&plan, id).reasons, vec!["invalid_success_rate"]);
+    for (id, rejected, expected) in cases {
+        let mut scoped = baseline.clone();
+        if id == 7 {
+            scoped.required_capabilities = vec!["tool_use".to_string()];
+        }
+        if id == 8 {
+            scoped.minimum_quality_class = 3;
+        }
+        if id == 9 {
+            scoped.minimum_success_rate = 0.9;
+        }
+        let plan = plan_model_call(&scoped, &[valid.clone(), rejected], &default_policy()).unwrap();
+        assert_eq!(reason(&plan, id), expected, "candidate {id}");
     }
 }
 
 #[test]
-fn legacy_route_wrapper_delegates_cost_selection_to_per_call_planner() {
-    let mut local = candidate(
+fn explicit_gates_and_privacy_do_not_fail_open() {
+    let valid = candidate(
         1,
-        "expensive-local",
-        "ollama",
+        "allowed",
+        "provider",
         3,
+        ExecutionLocality::Remote,
+        Some(0.01),
+        CostTruth::ProxyEstimate,
+    );
+
+    let mut excluded = request();
+    excluded.excluded_models = vec!["allowed".to_string()];
+    let plan = plan_model_call(&excluded, &[valid.clone()], &default_policy()).unwrap();
+    assert_eq!(reason(&plan, 1), CandidateRejectionReason::ExcludedModel);
+
+    let mut allowed = request();
+    allowed.allowed_models = vec!["other".to_string()];
+    let plan = plan_model_call(&allowed, &[valid.clone()], &default_policy()).unwrap();
+    assert_eq!(reason(&plan, 1), CandidateRejectionReason::NotAllowedModel);
+
+    let mut budget = request();
+    budget.maximum_marginal_cost_usd = Some(0.001);
+    let plan = plan_model_call(&budget, &[valid.clone()], &default_policy()).unwrap();
+    assert_eq!(
+        reason(&plan, 1),
+        CandidateRejectionReason::MaximumMarginalCostUsd
+    );
+
+    let mut provider_pin = request();
+    provider_pin.preferred_provider = Some("other".to_string());
+    let plan = plan_model_call(&provider_pin, &[valid.clone()], &default_policy()).unwrap();
+    assert_eq!(
+        reason(&plan, 1),
+        CandidateRejectionReason::PreferredProviderMismatch
+    );
+
+    let mut model_pin = request();
+    model_pin.preferred_model = Some("other".to_string());
+    let plan = plan_model_call(&model_pin, &[valid.clone()], &default_policy()).unwrap();
+    assert_eq!(
+        reason(&plan, 1),
+        CandidateRejectionReason::PreferredModelMismatch
+    );
+
+    let mut local_only = request();
+    local_only.privacy = PrivacyClass::LocalOnly;
+    let plan = plan_model_call(&local_only, &[valid.clone()], &default_policy()).unwrap();
+    assert_eq!(
+        reason(&plan, 1),
+        CandidateRejectionReason::LocalOnlyOnDeviceRequired
+    );
+
+    let mut sovereign = request();
+    sovereign.privacy = PrivacyClass::Sovereign;
+    let litellm_remote = candidate(
+        2,
+        "litellm",
+        "litellm",
+        3,
+        ExecutionLocality::Remote,
+        Some(0.0),
+        CostTruth::TargetOnly,
+    );
+    let plan = plan_model_call(&sovereign, &[litellm_remote], &default_policy()).unwrap();
+    assert_eq!(
+        reason(&plan, 2),
+        CandidateRejectionReason::SovereignLocalityRequired
+    );
+}
+
+#[test]
+fn safety_block_and_empty_or_rejected_input_return_no_route_evidence() {
+    let mut blocked = request();
+    blocked.safety = SafetyClass::Blocked;
+    let plan = plan_model_call(&blocked, &[], &default_policy()).unwrap();
+    assert_eq!(plan.selected, None);
+    assert_eq!(plan.selection_reason, "safety_forbids_execution");
+    assert!(!plan.decision.gate.authority_required.is_empty());
+    assert_eq!(plan.thread_id, "thread-1");
+
+    let plan = plan_model_call(&request(), &[], &default_policy()).unwrap();
+    assert_eq!(plan.selected, None);
+    assert_eq!(plan.selection_reason, "no_admitted_model_call_candidates");
+    assert!(plan.rejected.is_empty());
+}
+
+#[test]
+fn authority_gate_blocks_unapproved_high_risk_execution_before_selection() {
+    let mut governed = request();
+    governed.intent = "strategy".to_string();
+    governed.risk = CallRisk::High;
+    governed.safety = SafetyClass::Unapproved;
+    let candidate = candidate(
+        1,
+        "candidate",
+        "provider",
+        3,
+        ExecutionLocality::Remote,
+        Some(0.0),
+        CostTruth::TargetOnly,
+    );
+
+    let plan = plan_model_call(&governed, &[candidate], &default_policy()).unwrap();
+
+    assert_eq!(plan.selected, None);
+    assert_eq!(plan.selection_reason, "authority_approval_required");
+    assert_eq!(
+        reason(&plan, 1),
+        CandidateRejectionReason::AuthorityApprovalRequired
+    );
+    assert!(plan.decision.gate.requires_approval);
+}
+
+#[test]
+fn invalid_cost_truth_and_unknown_cost_never_win_known_zero() {
+    let known = candidate(
+        1,
+        "known",
+        "provider",
+        3,
+        ExecutionLocality::Remote,
+        Some(0.0),
+        CostTruth::TargetOnly,
+    );
+    let unknown = candidate(
+        2,
+        "unknown",
+        "provider",
+        3,
+        ExecutionLocality::Remote,
+        None,
+        CostTruth::CannotConfirm,
+    );
+    let invalid_local = candidate(
+        3,
+        "invalid-local",
+        "provider",
+        3,
+        ExecutionLocality::Remote,
+        Some(0.0),
+        CostTruth::LocalZeroCost,
+    );
+    let invalid_exact = candidate(
+        4,
+        "invalid-exact",
+        "provider",
+        3,
+        ExecutionLocality::Remote,
+        None,
+        CostTruth::ExactProviderReport,
+    );
+    let invalid_target = candidate(
+        5,
+        "invalid-target",
+        "provider",
+        3,
+        ExecutionLocality::Remote,
+        None,
+        CostTruth::TargetOnly,
+    );
+    let plan = plan_model_call(
+        &request(),
+        &[
+            unknown,
+            invalid_local,
+            invalid_exact,
+            invalid_target,
+            known.clone(),
+        ],
+        &default_policy(),
+    )
+    .unwrap();
+    assert_eq!(plan.selected, Some(known));
+    assert_eq!(reason(&plan, 3), CandidateRejectionReason::InvalidCostTruth);
+    assert_eq!(reason(&plan, 4), CandidateRejectionReason::InvalidCostTruth);
+    assert_eq!(reason(&plan, 5), CandidateRejectionReason::InvalidCostTruth);
+}
+
+#[test]
+fn duplicate_ids_reject_independently_of_input_order() {
+    let first = candidate(
+        7,
+        "first",
+        "provider",
+        3,
+        ExecutionLocality::Remote,
+        Some(0.01),
+        CostTruth::ProxyEstimate,
+    );
+    let second = candidate(
+        7,
+        "second",
+        "provider",
+        3,
+        ExecutionLocality::Remote,
+        Some(0.02),
+        CostTruth::ProxyEstimate,
+    );
+    let forward = plan_model_call(
+        &request(),
+        &[first.clone(), second.clone()],
+        &default_policy(),
+    )
+    .unwrap();
+    let reverse = plan_model_call(&request(), &[second, first], &default_policy()).unwrap();
+    assert_eq!(forward.selected, None);
+    assert_eq!(forward.rejected, reverse.rejected);
+    assert_eq!(
+        reason(&forward, 7),
+        CandidateRejectionReason::DuplicateCandidateId
+    );
+}
+
+#[test]
+fn full_tie_order_is_cost_quality_latency_success_then_id() {
+    let mut costly = candidate(
+        5,
+        "costly",
+        "p",
+        4,
+        ExecutionLocality::Remote,
+        Some(0.02),
+        CostTruth::ProxyEstimate,
+    );
+    let mut low_quality = candidate(
+        4,
+        "low-quality",
+        "p",
+        3,
+        ExecutionLocality::Remote,
+        Some(0.01),
+        CostTruth::ProxyEstimate,
+    );
+    let mut slow = candidate(
+        3,
+        "slow",
+        "p",
+        4,
+        ExecutionLocality::Remote,
+        Some(0.01),
+        CostTruth::ProxyEstimate,
+    );
+    let mut low_success = candidate(
+        2,
+        "low-success",
+        "p",
+        4,
+        ExecutionLocality::Remote,
+        Some(0.01),
+        CostTruth::ProxyEstimate,
+    );
+    let id_tiebreak = candidate(
+        1,
+        "id",
+        "p",
+        4,
+        ExecutionLocality::Remote,
+        Some(0.01),
+        CostTruth::ProxyEstimate,
+    );
+    costly.tier.latency_p_95_ms = 1;
+    low_quality.tier.latency_p_95_ms = 1;
+    slow.tier.latency_p_95_ms = 900;
+    low_success.tier.last_success_rate = 0.97;
+    let plan = plan_model_call(
+        &request(),
+        &[costly, low_quality, slow, low_success, id_tiebreak],
+        &default_policy(),
+    )
+    .unwrap();
+    assert_eq!(plan.admitted_ids, vec![1, 2, 3, 4, 5]);
+}
+
+#[test]
+fn legacy_wrapper_rejects_privacy_typo_and_remote_local_runtime() {
+    let mut tier = candidate(
+        1,
+        "remote",
+        "remote",
+        3,
+        ExecutionLocality::Remote,
+        Some(0.01),
+        CostTruth::ProxyEstimate,
+    )
+    .tier;
+    tier.vram_requirement_mb = 0;
+    let typo = DrexIngress {
+        intent: "code".to_string(),
+        risk: "low".to_string(),
+        raw_text: "edit".to_string(),
+        privacy: "sovreign".to_string(),
+        runtime: "local".to_string(),
+        available_vram_mb: 8_192,
+        required_context_tokens: 1,
+    };
+    let route = plan_route(&typo, &[tier.clone()], &default_policy()).unwrap();
+    assert_eq!(route.selected_model, None);
+    assert!(route.routing_metadata.contains("invalid_privacy_class"));
+
+    let local = DrexIngress {
+        privacy: "standard".to_string(),
+        ..typo
+    };
+    let route = plan_route(&local, &[tier], &default_policy()).unwrap();
+    assert_eq!(route.selected_model, None);
+    assert!(route
+        .routing_metadata
+        .contains("local_runtime_locality_required"));
+    assert_eq!(
+        PrivacyClass::parse("sovreign"),
+        Err("invalid_privacy_class")
+    );
+}
+
+#[test]
+fn legacy_sovereign_code_keeps_advanced_coding_or_quality_floor() {
+    let mut advanced = candidate(
+        1,
+        "advanced",
+        "ollama",
+        1,
+        ExecutionLocality::OnDevice,
         Some(0.0),
         CostTruth::LocalZeroCost,
     )
     .tier;
-    local.vram_requirement_mb = 32_768;
-    local.last_success_rate = 0.90;
-    let remote = candidate(
+    advanced.rate_group = "local_ollama".to_string();
+    let mut high_quality = candidate(
         2,
-        "cheap-remote",
-        "remote",
+        "high-quality",
+        "ollama",
         3,
-        Some(0.08),
-        CostTruth::ExactProviderReport,
+        ExecutionLocality::OnDevice,
+        Some(0.0),
+        CostTruth::LocalZeroCost,
     )
     .tier;
+    high_quality.rate_group = "local_ollama".to_string();
+    high_quality.strengths_json = "[]".to_string();
     let ingress = DrexIngress {
-        intent: "research".to_string(),
+        intent: "code".to_string(),
         risk: "low".to_string(),
-        raw_text: "research routing doctrine".to_string(),
-        privacy: "standard".to_string(),
-        runtime: "any".to_string(),
-        available_vram_mb: 32_768,
-        required_context_tokens: 8_192,
+        raw_text: "edit source".to_string(),
+        privacy: "sovereign".to_string(),
+        runtime: "local".to_string(),
+        available_vram_mb: 8_192,
+        required_context_tokens: 1,
     };
 
-    let route = plan_route(&ingress, &[local, remote], &default_policy()).expect("route plan");
+    let route = plan_route(&ingress, &[advanced, high_quality], &default_policy()).unwrap();
 
     assert_eq!(
         route.selected_model.expect("selected").model_id,
-        "expensive-local"
+        "high-quality"
     );
-    assert!(route
-        .routing_metadata
-        .contains("lowest_known_marginal_cost"));
+    assert!(route.routing_metadata.contains("\"admitted_ids\":[2,1]"));
 }

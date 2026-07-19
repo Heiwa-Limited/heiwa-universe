@@ -1,7 +1,10 @@
-use anyhow::{anyhow, Result};
+use anyhow::Result;
 use heiwa_protocol::ModelTier;
 
-use super::call::{plan_model_call, CostTruth, ModelCallCandidate, ModelCallRequest};
+use super::call::{
+    plan_model_call, CallRisk, CandidateRejection, CandidateRejectionReason, CostTruth,
+    ExecutionLocality, ModelCallCandidate, ModelCallRequest, PrivacyClass, SafetyClass,
+};
 use super::policy::{DrexDecision, DrexPolicy, ExecutionMode, ResolutionTier};
 use super::scorer::evaluate_drex;
 use super::vector::DrexVector;
@@ -123,35 +126,48 @@ pub fn plan_route(
     model_tiers: &[ModelTier],
     policy: &DrexPolicy,
 ) -> Result<RoutePlan> {
+    let privacy = match PrivacyClass::parse(&ingress.privacy) {
+        Ok(privacy) => privacy,
+        Err(reason) => return Ok(legacy_no_route(ingress, model_tiers, policy, reason)),
+    };
+    let risk = match CallRisk::parse(&ingress.risk) {
+        Ok(risk) => risk,
+        Err(reason) => return Ok(legacy_no_route(ingress, model_tiers, policy, reason)),
+    };
     let vector = build_drex_vector(
         &ingress.intent,
-        &ingress.risk,
+        risk.as_str(),
         &ingress.raw_text,
-        &ingress.privacy,
+        privacy.as_str(),
         &ingress.runtime,
     );
     let initial_runtime_hint = runtime_hint(ingress, &vector);
-    let runtime_fit = if is_local_runtime(&initial_runtime_hint) {
-        1.0
+    let mut required_capabilities = required_model_capabilities(ingress);
+    if ingress.intent == "code" && privacy == PrivacyClass::Sovereign {
+        required_capabilities.push("advanced_coding");
+    }
+    let request_privacy = if is_local_runtime(&ingress.runtime) {
+        PrivacyClass::LocalOnly
     } else {
-        0.8
+        privacy.clone()
     };
-    let decision = evaluate_drex(&vector, policy, 0.95, runtime_fit, 0.65);
-    let required_capabilities = required_model_capabilities(ingress);
+    let minimum_quality_class = minimum_quality_class(ingress, privacy);
     let request = ModelCallRequest {
-        thread_id: "legacy_route".to_string(),
-        turn_id: "legacy_route".to_string(),
-        call_id: "legacy_route".to_string(),
+        thread_id: legacy_identity("thread", ingress),
+        turn_id: legacy_identity("turn", ingress),
+        call_id: legacy_identity("call", ingress),
         intent: ingress.intent.clone(),
         stage: "legacy_route".to_string(),
         raw_text: ingress.raw_text.clone(),
-        privacy: ingress.privacy.clone(),
+        privacy: request_privacy,
+        risk,
+        safety: SafetyClass::Unapproved,
         required_capabilities: required_capabilities
             .iter()
             .map(|capability| (*capability).to_string())
             .collect(),
         required_context_tokens: ingress.required_context_tokens,
-        minimum_quality_class: minimum_quality_class(ingress),
+        minimum_quality_class,
         minimum_success_rate: 0.0,
         maximum_marginal_cost_usd: None,
         preferred_provider: None,
@@ -162,14 +178,21 @@ pub fn plan_route(
     let candidates: Vec<ModelCallCandidate> = model_tiers
         .iter()
         .cloned()
-        .map(|tier| ModelCallCandidate {
-            connected: tier.enabled,
-            adapter_capable: !is_local_provider(&tier.provider)
-                || tier.vram_requirement_mb <= ingress.available_vram_mb,
-            quota_available: true,
-            marginal_cost_usd: Some(tier.cost_per_turn),
-            cost_truth: cost_truth_for_tier(&tier),
-            tier,
+        .map(|mut tier| {
+            if tier.id == 0 {
+                tier.id = legacy_model_id(&tier);
+            }
+            ModelCallCandidate {
+                connected: tier.enabled,
+                locality: legacy_locality(ingress, &tier),
+                adapter_capable: !is_local_runtime(&ingress.runtime)
+                    || (tier.vram_requirement_mb > 0
+                        && tier.vram_requirement_mb <= ingress.available_vram_mb),
+                quota_available: true,
+                marginal_cost_usd: legacy_marginal_cost(ingress, &tier),
+                cost_truth: cost_truth_for_tier(ingress, &tier),
+                tier,
+            }
         })
         .collect();
     let call_plan = plan_model_call(&request, &candidates, policy)?;
@@ -199,11 +222,27 @@ pub fn plan_route(
             .to_string(),
         )
     } else {
-        return Err(anyhow!("no compatible model tier found for route"));
+        (
+            ExecutionMode::Clarify,
+            initial_runtime_hint.clone(),
+            json!({
+                "reason": call_plan.selection_reason,
+                "mode": execution_mode_label(ExecutionMode::Clarify),
+                "admitted_ids": call_plan.admitted_ids,
+                "rejected": call_plan.rejected,
+                "policy_version": call_plan.policy_version,
+                "legacy_locality_policy": if is_local_runtime(&ingress.runtime) {
+                    "local_runtime_locality_required"
+                } else {
+                    "none"
+                },
+            })
+            .to_string(),
+        )
     };
 
     Ok(RoutePlan {
-        decision,
+        decision: call_plan.decision,
         execution_mode,
         runtime_hint,
         selected_model,
@@ -211,22 +250,119 @@ pub fn plan_route(
     })
 }
 
-fn minimum_quality_class(ingress: &DrexIngress) -> u8 {
+fn minimum_quality_class(ingress: &DrexIngress, privacy: PrivacyClass) -> u8 {
     match ingress.risk.as_str() {
         "critical" | "high" => 3,
         "medium" => 2,
-        _ if ingress.intent == "code" && ingress.privacy != "sovereign" => 3,
+        _ if ingress.intent == "code" && privacy != PrivacyClass::Sovereign => 3,
         _ => 1,
     }
 }
 
-fn cost_truth_for_tier(tier: &ModelTier) -> CostTruth {
-    if tier.cost_per_turn == 0.0 && is_local_provider(&tier.provider) {
+fn legacy_locality(ingress: &DrexIngress, tier: &ModelTier) -> ExecutionLocality {
+    // Legacy `ModelTier` has no locality field. Only its explicit local rate-group
+    // declaration plus a fitting device-memory requirement becomes an OnDevice proof;
+    // provider names (including LiteLLM/vLLM) remain Unverified.
+    if tier.rate_group == "local_ollama"
+        && tier.vram_requirement_mb > 0
+        && (!is_local_runtime(&ingress.runtime)
+            || tier.vram_requirement_mb <= ingress.available_vram_mb)
+    {
+        ExecutionLocality::OnDevice
+    } else {
+        ExecutionLocality::Unverified
+    }
+}
+
+fn legacy_marginal_cost(ingress: &DrexIngress, tier: &ModelTier) -> Option<f64> {
+    if tier.cost_per_turn == 0.0 && legacy_locality(ingress, tier) != ExecutionLocality::OnDevice {
+        None
+    } else {
+        Some(tier.cost_per_turn)
+    }
+}
+
+fn cost_truth_for_tier(ingress: &DrexIngress, tier: &ModelTier) -> CostTruth {
+    if tier.cost_per_turn == 0.0 && legacy_locality(ingress, tier) == ExecutionLocality::OnDevice {
         CostTruth::LocalZeroCost
     } else if tier.cost_per_turn == 0.0 {
-        CostTruth::TargetOnly
+        CostTruth::CannotConfirm
     } else {
         CostTruth::ProxyEstimate
+    }
+}
+
+fn legacy_identity(prefix: &str, ingress: &DrexIngress) -> String {
+    let mut hash = 0xcbf29ce484222325_u64;
+    for byte in format!(
+        "{prefix}|{}|{}|{}|{}|{}|{}|{}",
+        ingress.intent,
+        ingress.risk,
+        ingress.raw_text,
+        ingress.privacy,
+        ingress.runtime,
+        ingress.required_context_tokens,
+        ingress.available_vram_mb
+    )
+    .bytes()
+    {
+        hash ^= u64::from(byte);
+        hash = hash.wrapping_mul(0x100000001b3);
+    }
+    format!("{prefix}-{hash:016x}")
+}
+
+fn legacy_model_id(tier: &ModelTier) -> u64 {
+    let mut hash = 0xcbf29ce484222325_u64;
+    for byte in format!(
+        "{}|{}|{}|{}",
+        tier.provider, tier.model_id, tier.provider_model_id, tier.rate_group
+    )
+    .bytes()
+    {
+        hash ^= u64::from(byte);
+        hash = hash.wrapping_mul(0x100000001b3);
+    }
+    hash
+}
+
+fn legacy_no_route(
+    ingress: &DrexIngress,
+    model_tiers: &[ModelTier],
+    policy: &DrexPolicy,
+    reason: &str,
+) -> RoutePlan {
+    let vector = build_drex_vector(
+        &ingress.intent,
+        "low",
+        &ingress.raw_text,
+        "standard",
+        &ingress.runtime,
+    );
+    let decision = evaluate_drex(&vector, policy, 0.80, 0.80, 0.65);
+    let rejected: Vec<CandidateRejection> = model_tiers
+        .iter()
+        .map(|tier| CandidateRejection {
+            candidate_id: tier.id,
+            reasons: vec![CandidateRejectionReason::InvalidRequestPolicy],
+        })
+        .collect();
+    RoutePlan {
+        decision,
+        execution_mode: ExecutionMode::Clarify,
+        runtime_hint: ingress.runtime.clone(),
+        selected_model: None,
+        routing_metadata: json!({
+            "reason": reason,
+            "mode": execution_mode_label(ExecutionMode::Clarify),
+            "rejected": rejected,
+            "policy_version": super::policy::DEFAULT_POLICY_VERSION,
+            "thread_id": legacy_identity("thread", ingress),
+            "turn_id": legacy_identity("turn", ingress),
+            "call_id": legacy_identity("call", ingress),
+            "stage": "legacy_route",
+        })
+        .to_string(),
     }
 }
 
