@@ -32,12 +32,13 @@ pub struct ActiveTurnRegistry {
 }
 
 impl ActiveTurnRegistry {
-    pub fn register(&self, turn_id: String) -> watch::Receiver<bool> {
+    pub fn register(&self, turn_id: String) -> Result<watch::Receiver<bool>> {
         let (sender, receiver) = watch::channel(false);
-        if let Ok(mut turns) = self.turns.lock() {
-            turns.insert(turn_id, sender);
-        }
-        receiver
+        self.turns
+            .lock()
+            .map_err(|_| anyhow!("operator active turn mutex poisoned"))?
+            .insert(turn_id, sender);
+        Ok(receiver)
     }
 
     pub fn signal_cancel(&self, turn_id: &str) -> bool {
@@ -117,6 +118,13 @@ pub struct CommittedOperatorArtifact {
     pub artifact_id: String,
     pub artifact_ref: String,
     path: PathBuf,
+    pending_path: PathBuf,
+}
+
+#[derive(serde::Serialize, serde::Deserialize)]
+struct PendingOperatorArtifact {
+    artifact_id: String,
+    thread_id: String,
 }
 
 pub trait OperatorArtifactStore: Send + Sync {
@@ -124,7 +132,11 @@ pub trait OperatorArtifactStore: Send + Sync {
     /// The runner rolls this back if its matching `artifact_created` journal
     /// append fails, keeping both planes symmetric.
     fn commit(&self, artifact: PersistedArtifact) -> Result<CommittedOperatorArtifact>;
+    fn finalize(&self, artifact: &CommittedOperatorArtifact) -> Result<()>;
     fn rollback(&self, artifact: &CommittedOperatorArtifact) -> Result<()>;
+    fn reconcile(&self, _sessions: &OperatorSessionService) -> Result<()> {
+        Ok(())
+    }
 }
 
 /// Injectable boundary around the existing DREX approval policy, staging, and
@@ -142,6 +154,39 @@ pub trait OperatorApprovalService: Send + Sync {
         approval: &crate::agentic::ToolApproval,
         cancelled: &AtomicBool,
     ) -> Result<String>;
+}
+
+#[async_trait]
+pub trait OperatorToolExecutor: Send + Sync {
+    async fn execute(
+        &self,
+        scope: ExecutionScope,
+        call: heiwa_protocol::ToolCall,
+        provider: &str,
+        model_id: &str,
+    ) -> Result<(
+        heiwa_protocol::ToolCallReceipt,
+        crate::agentic::ToolTranscriptEntry,
+    )>;
+}
+
+#[derive(Default)]
+struct AgenticToolExecutor;
+
+#[async_trait]
+impl OperatorToolExecutor for AgenticToolExecutor {
+    async fn execute(
+        &self,
+        scope: ExecutionScope,
+        call: heiwa_protocol::ToolCall,
+        provider: &str,
+        model_id: &str,
+    ) -> Result<(
+        heiwa_protocol::ToolCallReceipt,
+        crate::agentic::ToolTranscriptEntry,
+    )> {
+        crate::agentic::execute_approved_tool_call(scope, call, provider, model_id).await
+    }
 }
 
 #[derive(Default)]
@@ -170,15 +215,47 @@ impl OperatorApprovalService for DrexApprovalService {
 }
 
 #[derive(Default)]
-struct LocalArtifactStore;
+struct LocalArtifactStore {
+    root: Option<PathBuf>,
+}
+
+impl LocalArtifactStore {
+    fn artifact_dir(&self) -> Result<PathBuf> {
+        Ok(self
+            .root
+            .clone()
+            .unwrap_or(journal_root()?)
+            .join("operator_artifacts"))
+    }
+
+    #[cfg(test)]
+    fn at(root: PathBuf) -> Self {
+        Self { root: Some(root) }
+    }
+}
 
 impl OperatorArtifactStore for LocalArtifactStore {
     fn commit(&self, artifact: PersistedArtifact) -> Result<CommittedOperatorArtifact> {
-        let dir = journal_root()?.join("operator_artifacts");
+        let dir = self.artifact_dir()?;
         fs::create_dir_all(&dir)?;
+        validate_artifact_id(&artifact.artifact_id)?;
         let path = dir.join(format!("{}.json", artifact.artifact_id));
+        let pending_path = dir.join(format!("{}.pending.json", artifact.artifact_id));
+        if path.exists() || pending_path.exists() {
+            return Err(anyhow!("operator artifact id already exists"));
+        }
         let temp = dir.join(format!(".{}.{}.tmp", artifact.artifact_id, Uuid::new_v4()));
+        let pending_temp = dir.join(format!(
+            ".{}.{}.pending.tmp",
+            artifact.artifact_id,
+            Uuid::new_v4()
+        ));
         let write_result = (|| -> Result<()> {
+            let pending = PendingOperatorArtifact {
+                artifact_id: artifact.artifact_id.clone(),
+                thread_id: artifact.session_id.clone().unwrap_or_default(),
+            };
+            write_atomic_file(&pending_temp, &pending_path, &serde_json::to_vec(&pending)?)?;
             let mut file = OpenOptions::new()
                 .write(true)
                 .create_new(true)
@@ -186,29 +263,139 @@ impl OperatorArtifactStore for LocalArtifactStore {
             file.write_all(&serde_json::to_vec(&artifact)?)?;
             file.sync_all()?;
             fs::rename(&temp, &path)?;
-            // Best-effort directory durability: filesystems that permit a
-            // directory handle get the rename metadata flushed too.
-            if let Ok(directory) = OpenOptions::new().read(true).open(&dir) {
-                let _ = directory.sync_all();
-            }
+            sync_directory_if_supported(&dir);
             Ok(())
         })();
         if write_result.is_err() {
             let _ = fs::remove_file(&temp);
+            let _ = fs::remove_file(&pending_temp);
+            let _ = fs::remove_file(&pending_path);
         }
         write_result?;
         Ok(CommittedOperatorArtifact {
             artifact_id: artifact.artifact_id,
             artifact_ref: path.to_string_lossy().to_string(),
             path,
+            pending_path,
         })
+    }
+
+    fn finalize(&self, artifact: &CommittedOperatorArtifact) -> Result<()> {
+        if artifact.pending_path.exists() {
+            fs::remove_file(&artifact.pending_path)?;
+            if let Some(dir) = artifact.pending_path.parent() {
+                sync_directory_if_supported(dir);
+            }
+        }
+        Ok(())
     }
 
     fn rollback(&self, artifact: &CommittedOperatorArtifact) -> Result<()> {
         if artifact.path.exists() {
             fs::remove_file(&artifact.path)?;
         }
+        if artifact.pending_path.exists() {
+            fs::remove_file(&artifact.pending_path)?;
+        }
+        if let Some(dir) = artifact.path.parent() {
+            sync_directory_if_supported(dir);
+        }
         Ok(())
+    }
+
+    fn reconcile(&self, sessions: &OperatorSessionService) -> Result<()> {
+        let dir = self.artifact_dir()?;
+        if !dir.exists() {
+            return Ok(());
+        }
+        let artifact_links = sessions.artifact_links()?;
+        for entry in fs::read_dir(&dir)? {
+            let entry = entry?;
+            let pending_path = entry.path();
+            let Some(name) = pending_path.file_name().and_then(|name| name.to_str()) else {
+                continue;
+            };
+            let Some(artifact_id) = name.strip_suffix(".pending.json") else {
+                continue;
+            };
+            validate_artifact_id(artifact_id)?;
+            let pending: PendingOperatorArtifact =
+                serde_json::from_slice(&fs::read(&pending_path)?)?;
+            if pending.artifact_id != artifact_id {
+                return Err(anyhow!("operator artifact pending manifest id mismatch"));
+            }
+            let final_path = dir.join(format!("{artifact_id}.json"));
+            if artifact_links.contains(&(pending.thread_id.clone(), artifact_id.to_string())) {
+                fs::remove_file(&pending_path)?;
+            } else {
+                let _ = fs::remove_file(&final_path);
+                fs::remove_file(&pending_path)?;
+            }
+        }
+        // Pending manifests cover every protocol-compliant commit. Scan raw
+        // files too so a pre-protocol/manual orphan cannot become durable
+        // merely because it lacks a manifest.
+        for entry in fs::read_dir(&dir)? {
+            let entry = entry?;
+            let raw_path = entry.path();
+            let Some(name) = raw_path.file_name().and_then(|name| name.to_str()) else {
+                continue;
+            };
+            let Some(artifact_id) = name.strip_suffix(".json") else {
+                continue;
+            };
+            if artifact_id.ends_with(".pending") {
+                continue;
+            }
+            if validate_artifact_id(artifact_id).is_err() {
+                fs::remove_file(&raw_path)?;
+                continue;
+            }
+            let artifact = match serde_json::from_slice::<PersistedArtifact>(&fs::read(&raw_path)?)
+            {
+                Ok(artifact) if artifact.artifact_id == artifact_id => artifact,
+                _ => {
+                    fs::remove_file(&raw_path)?;
+                    continue;
+                }
+            };
+            if !artifact_links.contains(&(
+                artifact.session_id.unwrap_or_default(),
+                artifact_id.to_string(),
+            )) {
+                fs::remove_file(&raw_path)?;
+            }
+        }
+        sync_directory_if_supported(&dir);
+        Ok(())
+    }
+}
+
+fn validate_artifact_id(artifact_id: &str) -> Result<()> {
+    if artifact_id.is_empty()
+        || artifact_id.contains('/')
+        || artifact_id.contains('\\')
+        || artifact_id.contains("..")
+    {
+        return Err(anyhow!("invalid operator artifact id"));
+    }
+    Ok(())
+}
+
+fn write_atomic_file(temp: &PathBuf, final_path: &PathBuf, bytes: &[u8]) -> Result<()> {
+    let mut file = OpenOptions::new().write(true).create_new(true).open(temp)?;
+    file.write_all(bytes)?;
+    file.sync_all()?;
+    fs::rename(temp, final_path)?;
+    if let Some(dir) = final_path.parent() {
+        sync_directory_if_supported(dir);
+    }
+    Ok(())
+}
+
+fn sync_directory_if_supported(dir: &std::path::Path) {
+    if let Ok(directory) = OpenOptions::new().read(true).open(dir) {
+        let _ = directory.sync_all();
     }
 }
 
@@ -396,11 +583,13 @@ pub struct OperatorTurnRunner {
     executor: Arc<dyn OperatorModelExecutor>,
     active: ActiveTurnRegistry,
     submissions: Arc<Mutex<()>>,
+    artifact_reconciled: Arc<Mutex<bool>>,
     recoverable_orphans: Arc<Mutex<HashSet<String>>>,
     active_threads: Arc<Mutex<HashMap<String, String>>>,
     frames: broadcast::Sender<OperatorStreamFrame>,
     artifacts: Arc<dyn OperatorArtifactStore>,
     approvals: Arc<dyn OperatorApprovalService>,
+    tools: Arc<dyn OperatorToolExecutor>,
 }
 
 impl OperatorTurnRunner {
@@ -414,11 +603,13 @@ impl OperatorTurnRunner {
             executor,
             active: ActiveTurnRegistry::default(),
             submissions: Arc::new(Mutex::new(())),
+            artifact_reconciled: Arc::new(Mutex::new(false)),
             recoverable_orphans: Arc::new(Mutex::new(HashSet::new())),
             active_threads: Arc::new(Mutex::new(HashMap::new())),
             frames,
-            artifacts: Arc::new(LocalArtifactStore),
+            artifacts: Arc::new(LocalArtifactStore::default()),
             approvals: Arc::new(DrexApprovalService),
+            tools: Arc::new(AgenticToolExecutor),
         }
     }
 
@@ -429,6 +620,11 @@ impl OperatorTurnRunner {
 
     pub fn with_approval_service(mut self, approvals: Arc<dyn OperatorApprovalService>) -> Self {
         self.approvals = approvals;
+        self
+    }
+
+    pub fn with_tool_executor(mut self, tools: Arc<dyn OperatorToolExecutor>) -> Self {
+        self.tools = tools;
         self
     }
 
@@ -450,12 +646,27 @@ impl OperatorTurnRunner {
             .submissions
             .lock()
             .map_err(|_| anyhow!("operator submission mutex poisoned"))?;
+        let mut artifact_reconciled = self
+            .artifact_reconciled
+            .lock()
+            .map_err(|_| anyhow!("operator artifact reconciliation mutex poisoned"))?;
+        if !*artifact_reconciled {
+            self.artifacts.reconcile(&self.sessions)?;
+            *artifact_reconciled = true;
+        }
         let route_policy = request.route_policy.clone();
         let frames = self.subscribe();
         let submission = self.sessions.start_turn(thread_id, request)?;
         let mut direct_frames = None;
         if !submission.duplicate {
-            let cancel = self.active.register(submission.turn_id.clone());
+            let cancel = match self.active.register(submission.turn_id.clone()) {
+                Ok(cancel) => cancel,
+                Err(error) => {
+                    self.sessions
+                        .recover_proven_orphan(&submission.thread_id, &submission.turn_id)?;
+                    return Err(error);
+                }
+            };
             self.active_threads
                 .lock()
                 .map_err(|_| anyhow!("operator active turn mutex poisoned"))?
@@ -871,7 +1082,7 @@ impl OperatorTurnRunner {
                 return Err(anyhow!("operator turn cancelled"));
             }
             let mut tool_cancel = cancel.clone();
-            let tool_execution = crate::agentic::execute_approved_tool_call(
+            let tool_execution = self.tools.execute(
                 scope.clone(),
                 call.clone(),
                 &first.provider,
@@ -879,27 +1090,19 @@ impl OperatorTurnRunner {
             );
             tokio::pin!(tool_execution);
             let (receipt, entry) = tokio::select! {
+                biased;
                 result = &mut tool_execution => result?,
                 changed = tool_cancel.changed() => {
                     match changed {
                         Ok(()) if *tool_cancel.borrow() => {
-                            *cursor = self.append_and_publish(runtime_event(
+                            self.append_uncertain_tool_completion(
+                                cursor,
                                 thread_id,
                                 turn_id,
-                                Some(&call.id),
-                                OperatorEventType::ToolCallCompleted,
-                                json!({
-                                    "name": call.name,
-                                    "status": "uncertain",
-                                    "outcome": "uncertain",
-                                    "reason": "OPERATOR_CANCELLED",
-                                    "output": "",
-                                    "output_preview": "",
-                                    "artifact_ref": serde_json::Value::Null,
-                                    "receipt_id": serde_json::Value::Null,
-                                    "error": "tool outcome uncertain after cancellation",
-                                }),
-                            ), Some(direct_frames)).await?.cursor;
+                                &call.id,
+                                &call.name,
+                                direct_frames,
+                            ).await?;
                             return Err(anyhow!("operator turn cancelled"));
                         }
                         _ => return Err(anyhow!("operator cancellation channel closed")),
@@ -907,6 +1110,15 @@ impl OperatorTurnRunner {
                 }
             };
             if *cancel.borrow() {
+                self.append_uncertain_tool_completion(
+                    cursor,
+                    thread_id,
+                    turn_id,
+                    &call.id,
+                    &call.name,
+                    direct_frames,
+                )
+                .await?;
                 return Err(anyhow!("operator turn cancelled"));
             }
             let (preview, artifact_ref) = self
@@ -978,6 +1190,41 @@ impl OperatorTurnRunner {
             done_payload,
             receipt_ref,
         })
+    }
+
+    async fn append_uncertain_tool_completion(
+        &self,
+        cursor: &mut String,
+        thread_id: &str,
+        turn_id: &str,
+        call_id: &str,
+        tool_name: &str,
+        direct_frames: &mpsc::Sender<OperatorStreamFrame>,
+    ) -> Result<()> {
+        *cursor = self
+            .append_and_publish(
+                runtime_event(
+                    thread_id,
+                    turn_id,
+                    Some(call_id),
+                    OperatorEventType::ToolCallCompleted,
+                    json!({
+                        "name": tool_name,
+                        "status": "uncertain",
+                        "outcome": "uncertain",
+                        "reason": "OPERATOR_CANCELLED",
+                        "output": "",
+                        "output_preview": "",
+                        "artifact_ref": serde_json::Value::Null,
+                        "receipt_id": serde_json::Value::Null,
+                        "error": "tool outcome uncertain after cancellation",
+                    }),
+                ),
+                Some(direct_frames),
+            )
+            .await?
+            .cursor;
+        Ok(())
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -1103,6 +1350,7 @@ impl OperatorTurnRunner {
             }
         };
         *cursor = row.cursor;
+        self.artifacts.finalize(&committed)?;
         Ok((
             bounded_text(output, MAX_OPERATOR_TOOL_OUTPUT_BYTES),
             Some(artifact_id),
@@ -1332,16 +1580,18 @@ mod tests {
         ModelCallStage, PrivacyClass, SafetyClass,
     };
     use heiwa_evidence::{OperatorEventType, OperatorJournal, PersistedArtifact};
-    use heiwa_protocol::{ExecutionScope, ModelTier, RiskClass, ToolLease};
+    use heiwa_protocol::{
+        ExecutionScope, ModelTier, RiskClass, ToolCallReceipt, ToolCallStatus, ToolLease,
+    };
     use heiwa_provider::adapter::{Message, ProviderAdapter, Role, StreamEvent, TokenUsage};
     use heiwa_session::operator::{OperatorSessionService, StartTurnRequest};
     use serde_json::json;
     use tokio::sync::{mpsc, Notify};
 
     use super::{
-        ActiveTurnRegistry, CommittedOperatorArtifact, OperatorApprovalService,
+        ActiveTurnRegistry, CommittedOperatorArtifact, LocalArtifactStore, OperatorApprovalService,
         OperatorArtifactStore, OperatorModelExecutor, OperatorModelTurn, OperatorStreamFrame,
-        OperatorTurnRunner, OperatorTurnWork,
+        OperatorToolExecutor, OperatorTurnRunner, OperatorTurnWork,
     };
     use crate::model_calls::{
         ModelCallError, ModelCallExecution, ModelCallExecutor, ModelCallResult,
@@ -1375,6 +1625,44 @@ mod tests {
     struct CancellableApproval {
         active_waiters: AtomicUsize,
         entered: Notify,
+    }
+
+    struct ResultReadyToolExecutor {
+        entered: Notify,
+        release: Notify,
+    }
+
+    #[async_trait]
+    impl OperatorToolExecutor for ResultReadyToolExecutor {
+        async fn execute(
+            &self,
+            _scope: ExecutionScope,
+            call: heiwa_protocol::ToolCall,
+            provider: &str,
+            model_id: &str,
+        ) -> anyhow::Result<(ToolCallReceipt, crate::agentic::ToolTranscriptEntry)> {
+            self.entered.notify_waiters();
+            self.release.notified().await;
+            Ok((
+                ToolCallReceipt {
+                    id: "fabricated-tool-receipt".to_string(),
+                    call_id: call.id,
+                    provider: provider.to_string(),
+                    model_id: model_id.to_string(),
+                    tool_name: call.name.clone(),
+                    status: ToolCallStatus::Success,
+                    started_at: "2026-07-19T00:00:00Z".to_string(),
+                    completed_at: "2026-07-19T00:00:00Z".to_string(),
+                    arguments: call.arguments,
+                    result: Some(json!({"fabricated": true})),
+                    error: None,
+                },
+                crate::agentic::ToolTranscriptEntry {
+                    name: call.name,
+                    output: "fabricated output".to_string(),
+                },
+            ))
+        }
     }
 
     impl OperatorApprovalService for DelayedApproval {
@@ -1640,6 +1928,11 @@ mod tests {
     #[derive(Default)]
     struct FailingArtifactStore;
 
+    struct CountingArtifactStore {
+        reconciles: AtomicUsize,
+        failures_remaining: AtomicUsize,
+    }
+
     impl OperatorArtifactStore for RecordingArtifactStore {
         fn commit(&self, artifact: PersistedArtifact) -> anyhow::Result<CommittedOperatorArtifact> {
             let artifact_id = artifact.artifact_id.clone();
@@ -1647,8 +1940,13 @@ mod tests {
             Ok(CommittedOperatorArtifact {
                 artifact_ref: format!("memory://{artifact_id}"),
                 path: std::path::PathBuf::from(format!("memory-{artifact_id}")),
+                pending_path: std::path::PathBuf::from(format!("memory-{artifact_id}.pending")),
                 artifact_id,
             })
+        }
+
+        fn finalize(&self, _artifact: &CommittedOperatorArtifact) -> anyhow::Result<()> {
+            Ok(())
         }
 
         fn rollback(&self, artifact: &CommittedOperatorArtifact) -> anyhow::Result<()> {
@@ -1668,7 +1966,37 @@ mod tests {
             Err(anyhow::anyhow!("artifact commit failed"))
         }
 
+        fn finalize(&self, _artifact: &CommittedOperatorArtifact) -> anyhow::Result<()> {
+            Ok(())
+        }
+
         fn rollback(&self, _artifact: &CommittedOperatorArtifact) -> anyhow::Result<()> {
+            Ok(())
+        }
+    }
+
+    impl OperatorArtifactStore for CountingArtifactStore {
+        fn commit(
+            &self,
+            _artifact: PersistedArtifact,
+        ) -> anyhow::Result<CommittedOperatorArtifact> {
+            Err(anyhow::anyhow!("counting artifact store does not commit"))
+        }
+
+        fn finalize(&self, _artifact: &CommittedOperatorArtifact) -> anyhow::Result<()> {
+            Ok(())
+        }
+
+        fn rollback(&self, _artifact: &CommittedOperatorArtifact) -> anyhow::Result<()> {
+            Ok(())
+        }
+
+        fn reconcile(&self, _sessions: &OperatorSessionService) -> anyhow::Result<()> {
+            self.reconciles.fetch_add(1, Ordering::SeqCst);
+            if self.failures_remaining.load(Ordering::SeqCst) > 0 {
+                self.failures_remaining.fetch_sub(1, Ordering::SeqCst);
+                return Err(anyhow::anyhow!("reconciliation failed"));
+            }
             Ok(())
         }
     }
@@ -1736,6 +2064,26 @@ mod tests {
         ))
     }
 
+    fn persisted_artifact(id: &str, thread_id: &str) -> PersistedArtifact {
+        PersistedArtifact {
+            artifact_id: id.to_string(),
+            run_id: None,
+            lease_id: None,
+            session_id: Some(thread_id.to_string()),
+            user_id: "local-operator".to_string(),
+            mission_id: "turn-artifact".to_string(),
+            cell_run_id: None,
+            artifact_type: "tool_output".to_string(),
+            title: "test output".to_string(),
+            uri: None,
+            path: None,
+            content_json: "\"raw\"".to_string(),
+            created_at: "2026-07-19T00:00:00Z".to_string(),
+            owner_id: Some("local-operator".to_string()),
+            principal_id: Some("operator-turn-runner".to_string()),
+        }
+    }
+
     fn model_turn() -> OperatorModelTurn {
         OperatorModelTurn {
             request: ModelCallRequest {
@@ -1788,12 +2136,202 @@ mod tests {
     #[test]
     fn operator_active_turn_registry_registers_signals_and_removes() {
         let registry = ActiveTurnRegistry::default();
-        let receiver = registry.register("turn-1".into());
+        let receiver = registry.register("turn-1".into()).unwrap();
         assert!(!*receiver.borrow());
         assert!(registry.signal_cancel("turn-1"));
         assert!(*receiver.borrow());
         registry.remove("turn-1");
         assert!(!registry.signal_cancel("turn-1"));
+    }
+
+    #[test]
+    fn operator_active_turn_registry_fails_closed_when_poisoned() {
+        let registry = ActiveTurnRegistry::default();
+        let turns = registry.turns.clone();
+        let _ = std::thread::spawn(move || {
+            let _guard = turns.lock().unwrap();
+            panic!("poison active turn registry");
+        })
+        .join();
+        assert!(registry.register("turn-poisoned".into()).is_err());
+    }
+
+    #[tokio::test]
+    async fn operator_poisoned_registry_closes_the_newly_started_turn() {
+        let dir = tempfile::tempdir().unwrap();
+        let sessions = service(dir.path());
+        let runner =
+            OperatorTurnRunner::new(sessions.clone(), Arc::new(RecordingExecutor::default()));
+        let turns = runner.active.turns.clone();
+        let _ = std::thread::spawn(move || {
+            let _guard = turns.lock().unwrap();
+            panic!("poison runner active turn registry");
+        })
+        .join();
+
+        let error = runner
+            .submit(
+                "default",
+                StartTurnRequest::auto("poisoned-registry", "hello"),
+                OperatorTurnWork::Deterministic {
+                    response: "must not run".to_string(),
+                    route: json!({}),
+                    done: json!({}),
+                },
+            )
+            .err()
+            .expect("poisoned registry must reject submission");
+        assert!(error.to_string().contains("mutex poisoned"));
+        let thread = sessions.thread("default").unwrap();
+        assert_eq!(thread.turns[0].status, "interrupted");
+    }
+
+    #[test]
+    fn operator_artifact_reconcile_deletes_unlinked_crash_commit() {
+        let dir = tempfile::tempdir().unwrap();
+        let sessions = service(dir.path());
+        let store = LocalArtifactStore::at(dir.path().to_path_buf());
+        let committed = store
+            .commit(persisted_artifact("artifact-crash-unlinked", "default"))
+            .unwrap();
+        assert!(committed.path.exists());
+        assert!(committed.pending_path.exists());
+
+        store.reconcile(&sessions).unwrap();
+
+        assert!(!committed.path.exists());
+        assert!(!committed.pending_path.exists());
+    }
+
+    #[test]
+    fn operator_artifact_reconcile_deletes_unlinked_raw_without_manifest() {
+        let dir = tempfile::tempdir().unwrap();
+        let sessions = service(dir.path());
+        let store = LocalArtifactStore::at(dir.path().to_path_buf());
+        let committed = store
+            .commit(persisted_artifact("artifact-orphaned-raw", "default"))
+            .unwrap();
+        store.finalize(&committed).unwrap();
+        assert!(committed.path.exists());
+        assert!(!committed.pending_path.exists());
+
+        store.reconcile(&sessions).unwrap();
+
+        assert!(!committed.path.exists());
+    }
+
+    #[test]
+    fn operator_artifact_reconcile_keeps_durably_linked_crash_commit() {
+        let dir = tempfile::tempdir().unwrap();
+        let sessions = service(dir.path());
+        let store = LocalArtifactStore::at(dir.path().to_path_buf());
+        let submission = sessions
+            .start_turn("default", StartTurnRequest::auto("artifact-link", "hello"))
+            .unwrap();
+        let committed = store
+            .commit(persisted_artifact("artifact-crash-linked", "default"))
+            .unwrap();
+        sessions
+            .append_event(super::runtime_event(
+                "default",
+                &submission.turn_id,
+                None,
+                OperatorEventType::ArtifactCreated,
+                json!({
+                    "artifact_id": "artifact-crash-linked",
+                    "artifact_ref": committed.artifact_ref,
+                    "kind": "tool_output",
+                    "tool_name": "test",
+                    "byte_len": 3,
+                }),
+            ))
+            .unwrap();
+
+        store.reconcile(&sessions).unwrap();
+
+        assert!(committed.path.exists());
+        assert!(!committed.pending_path.exists());
+    }
+
+    #[tokio::test]
+    async fn operator_runner_reconciles_artifacts_once_after_success() {
+        let dir = tempfile::tempdir().unwrap();
+        let sessions = service(dir.path());
+        let artifacts = Arc::new(CountingArtifactStore {
+            reconciles: AtomicUsize::new(0),
+            failures_remaining: AtomicUsize::new(0),
+        });
+        let executor = Arc::new(RecordingExecutor::default());
+        let runner = OperatorTurnRunner::new(sessions.clone(), executor.clone())
+            .with_artifact_store(artifacts.clone());
+
+        for request_id in ["reconcile-once-1", "reconcile-once-2"] {
+            let mut handle = runner
+                .submit(
+                    "default",
+                    StartTurnRequest::auto(request_id, "hello"),
+                    OperatorTurnWork::Deterministic {
+                        response: "done".to_string(),
+                        route: json!({}),
+                        done: json!({}),
+                    },
+                )
+                .unwrap();
+            wait_for_terminal(&mut handle).await;
+        }
+        assert_eq!(artifacts.reconciles.load(Ordering::SeqCst), 1);
+
+        let fresh_runner =
+            OperatorTurnRunner::new(sessions, executor).with_artifact_store(artifacts.clone());
+        let mut fresh_handle = fresh_runner
+            .submit(
+                "default",
+                StartTurnRequest::auto("reconcile-fresh-runner", "hello"),
+                OperatorTurnWork::Deterministic {
+                    response: "done".to_string(),
+                    route: json!({}),
+                    done: json!({}),
+                },
+            )
+            .unwrap();
+        wait_for_terminal(&mut fresh_handle).await;
+        assert_eq!(artifacts.reconciles.load(Ordering::SeqCst), 2);
+    }
+
+    #[tokio::test]
+    async fn operator_runner_retries_failed_artifact_reconciliation() {
+        let dir = tempfile::tempdir().unwrap();
+        let sessions = service(dir.path());
+        let artifacts = Arc::new(CountingArtifactStore {
+            reconciles: AtomicUsize::new(0),
+            failures_remaining: AtomicUsize::new(1),
+        });
+        let runner = OperatorTurnRunner::new(sessions, Arc::new(RecordingExecutor::default()))
+            .with_artifact_store(artifacts.clone());
+        let failed = runner.submit(
+            "default",
+            StartTurnRequest::auto("reconcile-retry-fail", "hello"),
+            OperatorTurnWork::Deterministic {
+                response: "must not run".to_string(),
+                route: json!({}),
+                done: json!({}),
+            },
+        );
+        assert!(failed.is_err());
+
+        let mut handle = runner
+            .submit(
+                "default",
+                StartTurnRequest::auto("reconcile-retry-pass", "hello"),
+                OperatorTurnWork::Deterministic {
+                    response: "done".to_string(),
+                    route: json!({}),
+                    done: json!({}),
+                },
+            )
+            .unwrap();
+        wait_for_terminal(&mut handle).await;
+        assert_eq!(artifacts.reconciles.load(Ordering::SeqCst), 2);
     }
 
     #[tokio::test]
@@ -2797,6 +3335,56 @@ mod tests {
         assert!(!rows
             .iter()
             .any(|row| row.event.event_type == OperatorEventType::ToolCallCompleted));
+    }
+
+    #[tokio::test]
+    async fn operator_result_wins_simultaneous_cancel_with_one_uncertain_completion() {
+        let dir = tempfile::tempdir().unwrap();
+        let sessions = service(dir.path());
+        let executor = Arc::new(SequencedExecutor {
+            calls: AtomicUsize::new(0),
+            responses: vec![
+                r#"{"tool_calls":[{"id":"tool-race","name":"fs.list","arguments":{"path":"."}}]}"#
+                    .to_string(),
+            ],
+        });
+        let tool = Arc::new(ResultReadyToolExecutor {
+            entered: Notify::new(),
+            release: Notify::new(),
+        });
+        let entered = tool.entered.notified();
+        let runner = OperatorTurnRunner::new(sessions.clone(), executor.clone())
+            .with_tool_executor(tool.clone());
+        let mut turn = model_turn();
+        turn.tool_scope = Some(ExecutionScope::local_default(dir.path().to_path_buf()));
+        let mut handle = runner
+            .submit(
+                "default",
+                StartTurnRequest::auto("tool-result-cancel-race", "list files"),
+                OperatorTurnWork::Model(Box::new(turn)),
+            )
+            .unwrap();
+
+        tokio::time::timeout(std::time::Duration::from_secs(2), entered)
+            .await
+            .expect("tool executor did not start");
+        assert!(runner.request_cancel(&handle.turn_id).unwrap());
+        // The cancellation receiver and tool future are both ready on the
+        // next select poll. `biased; result` makes the completed result win;
+        // the post-result cancellation check must still write uncertainty.
+        tool.release.notify_one();
+        let _ = wait_for_terminal(&mut handle).await;
+
+        let rows = sessions.events_after("default", None, 64).unwrap().events;
+        let completions: Vec<_> = rows
+            .iter()
+            .filter(|row| row.event.event_type == OperatorEventType::ToolCallCompleted)
+            .collect();
+        assert_eq!(completions.len(), 1);
+        assert_eq!(completions[0].event.call_id.as_deref(), Some("tool-race"));
+        assert_eq!(completions[0].event.payload["status"], "uncertain");
+        assert!(completions[0].event.payload["receipt_id"].is_null());
+        assert_eq!(executor.calls.load(Ordering::SeqCst), 1);
     }
 
     #[tokio::test]

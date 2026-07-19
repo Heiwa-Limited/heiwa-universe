@@ -413,6 +413,52 @@ impl OperatorSessionService {
         })
     }
 
+    /// Scan the operator journal once for durable artifact links.
+    ///
+    /// Artifact reconciliation deliberately asks the journal rather than
+    /// trusting a filesystem marker: the event stream is the sole authority
+    /// for whether raw output may survive a restart. Pages are bounded so a
+    /// large history never requires one unbounded journal read.
+    pub fn artifact_links(&self) -> Result<HashSet<(String, String)>> {
+        const PAGE_SIZE: usize = 256;
+
+        let mut links = HashSet::new();
+        let mut cursor = None;
+        loop {
+            let page = self.journal.read_after(cursor.as_deref(), PAGE_SIZE)?;
+            for row in &page.events {
+                if row.event.event_type != OperatorEventType::ArtifactCreated {
+                    continue;
+                }
+                if let Some(artifact_id) = row
+                    .event
+                    .payload
+                    .get("artifact_id")
+                    .and_then(|id| id.as_str())
+                {
+                    links.insert((row.event.thread_id.clone(), artifact_id.to_string()));
+                }
+            }
+            let Some(next_cursor) = page.next_cursor else {
+                break;
+            };
+            if page.events.is_empty() || cursor.as_deref() == Some(next_cursor.as_str()) {
+                break;
+            }
+            cursor = Some(next_cursor);
+        }
+        Ok(links)
+    }
+
+    /// Return whether the durable journal has linked `artifact_id` to this
+    /// thread. Kept as a narrow convenience wrapper for callers that need
+    /// one lookup; batch recovery should use [`Self::artifact_links`].
+    pub fn has_artifact_link(&self, thread_id: &str, artifact_id: &str) -> Result<bool> {
+        Ok(self
+            .artifact_links()?
+            .contains(&(thread_id.to_string(), artifact_id.to_string())))
+    }
+
     /// Materialized view of one thread. Threads with no events yet return
     /// an empty view rather than an error. `skipped_lines` on the view is
     /// stream-wide journal damage (see [`OperatorThreadView::skipped_lines`])
@@ -1640,6 +1686,33 @@ mod tests {
                 json!({"reason": "OPERATOR_CANCELLED"}),
             ))
             .unwrap();
+    }
+
+    #[test]
+    fn artifact_links_scans_across_bounded_pages() {
+        let (_dir, service, turn_id) = started_service();
+        for index in 0..257 {
+            let artifact_id = format!("artifact-{index}");
+            service
+                .journal
+                .append(&new_event(
+                    "default",
+                    Some(turn_id.clone()),
+                    None,
+                    OperatorEventType::ArtifactCreated,
+                    now_iso(),
+                    OperatorActor {
+                        kind: "runtime".into(),
+                        id: "test".into(),
+                    },
+                    json!({"artifact_id": artifact_id}),
+                ))
+                .unwrap();
+        }
+
+        let links = service.artifact_links().unwrap();
+        assert!(links.contains(&("default".to_string(), "artifact-0".to_string())));
+        assert!(links.contains(&("default".to_string(), "artifact-256".to_string())));
     }
 
     #[test]
