@@ -1361,7 +1361,7 @@ async fn run_repl(use_cockpit: bool) -> Result<()> {
                             .collect::<Vec<_>>()
                             .join("\n");
                         let receipt_started = std::time::Instant::now();
-                        let (delta_tx, mut delta_rx) = tokio::sync::mpsc::unbounded_channel();
+                        let (delta_tx, mut delta_rx) = tokio::sync::mpsc::channel(32);
                         let delta_task = tokio::spawn(async move {
                             while let Some(delta) = delta_rx.recv().await {
                                 match delta {
@@ -1850,8 +1850,7 @@ async fn run_cockpit_controller(
                                     TranscriptBlock::User(t.clone()),
                                     &event_tx,
                                 );
-                                let (delta_tx, mut delta_rx) =
-                                    tokio::sync::mpsc::unbounded_channel();
+                                let (delta_tx, mut delta_rx) = tokio::sync::mpsc::channel(32);
                                 let delta_events = event_tx.clone();
                                 let delta_task = tokio::spawn(async move {
                                     while let Some(delta) = delta_rx.recv().await {
@@ -2851,7 +2850,7 @@ async fn execute_routed_model_call(
     messages: Vec<Message>,
     thread_id: &str,
     raw_text: &str,
-    delta_tx: Option<tokio::sync::mpsc::UnboundedSender<heiwa_provider::adapter::StreamEvent>>,
+    delta_tx: Option<tokio::sync::mpsc::Sender<heiwa_provider::adapter::StreamEvent>>,
 ) -> Result<ModelCallResult, String> {
     let (executor, sessions) = default_model_call_runtime()?;
     let call_id = format!("call-{}", uuid::Uuid::new_v4());
@@ -2947,7 +2946,7 @@ fn record_call_receipt(
         tokens_out,
     );
 
-    let receipt = Receipt::new(
+    let mut receipt = Receipt::new(
         Utc::now().timestamp(),
         env,
         result.provider.clone(),
@@ -2961,9 +2960,40 @@ fn record_call_receipt(
         session_id,
         None,
     );
+    receipt.model_call_cost_usd = Some(result.cost_usd);
+    receipt.model_call_cost_truth = Some(cost_truth_label(&result.cost_truth).to_string());
+    receipt.model_call_attempts = Some(result.attempts.min(i64::MAX as usize) as i64);
+    receipt.failed_attempt_cost_usd = Some(
+        result
+            .attempt_records
+            .iter()
+            .filter(|attempt| {
+                attempt.provider_invoked
+                    && attempt.outcome == heiwa_shell::model_calls::ModelCallAttemptOutcome::Failed
+            })
+            .filter_map(|attempt| attempt.cost_usd)
+            .fold(0.0, |total, cost| {
+                let next = total + cost;
+                if next.is_finite() {
+                    next
+                } else {
+                    f64::MAX
+                }
+            }),
+    );
 
     if let Err(error) = receipts.insert(&receipt) {
         debug_log(format_args!("receipt insert failed: {error}"));
+    }
+}
+
+fn cost_truth_label(truth: &CostTruth) -> &'static str {
+    match truth {
+        CostTruth::LocalZeroCost => "local_zero_cost",
+        CostTruth::TargetOnly => "target_only",
+        CostTruth::ProxyEstimate => "proxy_estimate",
+        CostTruth::ExactProviderReport => "exact_provider_report",
+        CostTruth::CannotConfirm => "cannot_confirm",
     }
 }
 
@@ -3564,7 +3594,7 @@ pub(crate) async fn execute_repl_turn_streaming(
 
             append_state_block(&mut state, TranscriptBlock::User(prompt.to_string()));
 
-            let (delta_tx, mut delta_rx) = tokio::sync::mpsc::unbounded_channel();
+            let (delta_tx, mut delta_rx) = tokio::sync::mpsc::channel(32);
             let delta_events = events.clone();
             let delta_task = tokio::spawn(async move {
                 while let Some(delta) = delta_rx.recv().await {
@@ -4158,6 +4188,79 @@ mod tests {
         assert_eq!(trace["model"], "secondary-model");
         assert_eq!(trace["cost_usd"], 0.03);
         assert_eq!(trace["attempts"], 2);
+    }
+
+    #[test]
+    fn fallback_receipt_persists_executor_usd_truth_and_failed_spend() {
+        let receipts = heiwa_receipts::ReceiptStore::open_in_memory().unwrap();
+        let rates = heiwa_receipts::RateTable::default();
+        let result = heiwa_shell::model_calls::ModelCallResult {
+            provider: "secondary".to_string(),
+            model_id: "secondary-model".to_string(),
+            provider_model_id: "secondary-provider-model".to_string(),
+            rate_group: "secondary-rate".to_string(),
+            text: "done".to_string(),
+            usage: heiwa_provider::adapter::TokenUsage {
+                input_tokens: 5,
+                output_tokens: 2,
+                cost_usd: 0.02,
+                ..Default::default()
+            },
+            attempts: 2,
+            failed_models: vec!["primary/primary-model".to_string()],
+            cost_usd: 0.03,
+            cost_truth: heiwa_core::drex::CostTruth::ProxyEstimate,
+            attempt_records: vec![
+                heiwa_shell::model_calls::ModelCallAttemptRecord {
+                    candidate_id: 1,
+                    provider: "primary".to_string(),
+                    model_id: "primary-model".to_string(),
+                    outcome: heiwa_shell::model_calls::ModelCallAttemptOutcome::Failed,
+                    failure_class: Some(
+                        heiwa_shell::model_calls::ProviderFailureClass::RateLimited,
+                    ),
+                    provider_invoked: true,
+                    cost_usd: Some(0.01),
+                    cost_truth: heiwa_core::drex::CostTruth::TargetOnly,
+                },
+                heiwa_shell::model_calls::ModelCallAttemptRecord {
+                    candidate_id: 2,
+                    provider: "secondary".to_string(),
+                    model_id: "secondary-model".to_string(),
+                    outcome: heiwa_shell::model_calls::ModelCallAttemptOutcome::Completed,
+                    failure_class: None,
+                    provider_invoked: true,
+                    cost_usd: Some(0.02),
+                    cost_truth: heiwa_core::drex::CostTruth::TargetOnly,
+                },
+            ],
+        };
+        let usage = super::usage_for_model_call(&result);
+
+        super::record_call_receipt(
+            &receipts,
+            &rates,
+            &result,
+            Some(&usage),
+            "session",
+            "input",
+            "output",
+            10,
+        );
+
+        let rows = receipts.list(0, i64::MAX).unwrap();
+        assert_eq!(rows.len(), 1);
+        let receipt = &rows[0];
+        assert_eq!(receipt.provider, "secondary");
+        assert_eq!(receipt.model, "secondary-model");
+        assert_eq!(receipt.actual_cost_cad, 0.0);
+        assert_eq!(receipt.model_call_cost_usd, Some(0.03));
+        assert_eq!(
+            receipt.model_call_cost_truth.as_deref(),
+            Some("proxy_estimate")
+        );
+        assert_eq!(receipt.model_call_attempts, Some(2));
+        assert_eq!(receipt.failed_attempt_cost_usd, Some(0.01));
     }
 
     #[test]

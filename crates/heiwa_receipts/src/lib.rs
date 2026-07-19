@@ -28,9 +28,10 @@ use sha2::{Digest, Sha256};
 use thiserror::Error;
 use uuid::Uuid;
 
-const SCHEMA_VERSION: i64 = 2;
+const SCHEMA_VERSION: i64 = 3;
 const INITIAL_SQL: &str = include_str!("../migrations/0001_initial.sql");
 const MIGRATION_0002_SQL: &str = include_str!("../migrations/0002_hash_chain.sql");
+const MIGRATION_0003_SQL: &str = include_str!("../migrations/0003_model_call_accounting.sql");
 
 /// Genesis predecessor for the first receipt in a chain: SHA-256's width in
 /// zero bytes, hex-encoded.
@@ -111,6 +112,14 @@ pub struct Receipt {
     pub latency_ms: i64,
     pub actual_cost_cad: f64,
     pub counterfactual_cost_cad: f64,
+    #[serde(default)]
+    pub model_call_cost_usd: Option<f64>,
+    #[serde(default)]
+    pub model_call_cost_truth: Option<String>,
+    #[serde(default)]
+    pub model_call_attempts: Option<i64>,
+    #[serde(default)]
+    pub failed_attempt_cost_usd: Option<f64>,
     pub session_id: String,
     pub parent_id: Option<String>,
 }
@@ -145,6 +154,10 @@ impl Receipt {
             latency_ms,
             actual_cost_cad,
             counterfactual_cost_cad,
+            model_call_cost_usd: None,
+            model_call_cost_truth: None,
+            model_call_attempts: None,
+            failed_attempt_cost_usd: None,
             session_id: session_id.into(),
             parent_id,
         }
@@ -254,6 +267,32 @@ pub fn entry_hash(r: &Receipt, prev_hash: &str) -> String {
         p,
         "counterfactual_cost_cad={:.6}",
         r.counterfactual_cost_cad
+    );
+    let _ = writeln!(
+        p,
+        "model_call_cost_usd={}",
+        r.model_call_cost_usd
+            .map(|value| format!("{value:.6}"))
+            .unwrap_or_default()
+    );
+    lp(
+        &mut p,
+        "model_call_cost_truth",
+        r.model_call_cost_truth.as_deref().unwrap_or(""),
+    );
+    let _ = writeln!(
+        p,
+        "model_call_attempts={}",
+        r.model_call_attempts
+            .map(|value| value.to_string())
+            .unwrap_or_default()
+    );
+    let _ = writeln!(
+        p,
+        "failed_attempt_cost_usd={}",
+        r.failed_attempt_cost_usd
+            .map(|value| format!("{value:.6}"))
+            .unwrap_or_default()
     );
     lp(&mut p, "session_id", &r.session_id);
     lp(&mut p, "parent_id", r.parent_id.as_deref().unwrap_or(""));
@@ -439,6 +478,10 @@ impl ReceiptStore {
             migrate_v2_hash_chain(conn)?;
             found = read_schema_version(conn)?;
         }
+        if found < 3 {
+            migrate_v3_model_call_accounting(conn)?;
+            found = read_schema_version(conn)?;
+        }
         if found != SCHEMA_VERSION {
             return Err(ReceiptError::SchemaVersion {
                 found,
@@ -478,14 +521,17 @@ impl ReceiptStore {
                 id, at, env, provider, model, agent,
                 tokens_in, tokens_out, latency_ms,
                 actual_cost_cad, counterfactual_cost_cad,
+                model_call_cost_usd, model_call_cost_truth,
+                model_call_attempts, failed_attempt_cost_usd,
                 session_id, parent_id,
                 seq, prev_hash, entry_hash
             ) VALUES (
                 ?1, ?2, ?3, ?4, ?5, ?6,
                 ?7, ?8, ?9,
                 ?10, ?11,
-                ?12, ?13,
-                ?14, ?15, ?16
+                ?12, ?13, ?14, ?15,
+                ?16, ?17,
+                ?18, ?19, ?20
             )",
             params![
                 r.id,
@@ -499,6 +545,10 @@ impl ReceiptStore {
                 r.latency_ms,
                 r.actual_cost_cad,
                 r.counterfactual_cost_cad,
+                r.model_call_cost_usd,
+                r.model_call_cost_truth,
+                r.model_call_attempts,
+                r.failed_attempt_cost_usd,
                 r.session_id,
                 r.parent_id,
                 seq,
@@ -529,6 +579,8 @@ impl ReceiptStore {
             "SELECT id, at, env, provider, model, agent,
                     tokens_in, tokens_out, latency_ms,
                     actual_cost_cad, counterfactual_cost_cad,
+                    model_call_cost_usd, model_call_cost_truth,
+                    model_call_attempts, failed_attempt_cost_usd,
                     session_id, parent_id
              FROM receipts
              WHERE at >= ?1 AND at < ?2
@@ -793,6 +845,48 @@ fn migrate_v2_hash_chain(conn: &Connection) -> Result<()> {
     Ok(())
 }
 
+/// v2 → v3: add executor USD accounting columns and rebuild the chain so new
+/// nullable fields are covered by tamper evidence without relabeling CAD.
+fn migrate_v3_model_call_accounting(conn: &Connection) -> Result<()> {
+    conn.execute_batch(MIGRATION_0003_SQL)?;
+
+    let rows: Vec<Receipt> = {
+        let mut stmt = conn.prepare("SELECT * FROM receipts ORDER BY seq ASC")?;
+        let collected = stmt
+            .query_map([], row_to_receipt)?
+            .collect::<std::result::Result<Vec<_>, _>>()?;
+        collected
+    };
+
+    let mut prev = GENESIS_HASH.to_string();
+    for (i, receipt) in rows.iter().enumerate() {
+        let seq = i as i64 + 1;
+        let entry = entry_hash(receipt, &prev);
+        conn.execute(
+            "UPDATE receipts SET seq = ?1, prev_hash = ?2, entry_hash = ?3 WHERE id = ?4",
+            params![seq, prev, entry, receipt.id],
+        )?;
+        prev = entry;
+    }
+
+    conn.execute(
+        "UPDATE schema_meta SET value = '3' WHERE key = 'schema_version'",
+        [],
+    )?;
+    Ok(())
+}
+
+fn optional_column<T: rusqlite::types::FromSql>(
+    row: &rusqlite::Row<'_>,
+    name: &str,
+) -> rusqlite::Result<Option<T>> {
+    match row.get::<_, Option<T>>(name) {
+        Ok(value) => Ok(value),
+        Err(rusqlite::Error::InvalidColumnName(_)) => Ok(None),
+        Err(error) => Err(error),
+    }
+}
+
 fn row_to_receipt(row: &rusqlite::Row<'_>) -> rusqlite::Result<Receipt> {
     let env: String = row.get("env")?;
     Ok(Receipt {
@@ -818,6 +912,10 @@ fn row_to_receipt(row: &rusqlite::Row<'_>) -> rusqlite::Result<Receipt> {
         latency_ms: row.get("latency_ms")?,
         actual_cost_cad: row.get("actual_cost_cad")?,
         counterfactual_cost_cad: row.get("counterfactual_cost_cad")?,
+        model_call_cost_usd: optional_column(row, "model_call_cost_usd")?,
+        model_call_cost_truth: optional_column(row, "model_call_cost_truth")?,
+        model_call_attempts: optional_column(row, "model_call_attempts")?,
+        failed_attempt_cost_usd: optional_column(row, "failed_attempt_cost_usd")?,
         session_id: row.get("session_id")?,
         parent_id: row.get("parent_id")?,
     })
@@ -1157,7 +1255,7 @@ mod tests {
 
         // Opening through the store runs the v1 → v2 migration + backfill.
         let store = ReceiptStore::open(&path).unwrap();
-        assert_eq!(store.schema_version().unwrap(), 2);
+        assert_eq!(store.schema_version().unwrap(), 3);
         match store.verify_chain().unwrap() {
             ChainStatus::Intact { len, head } => {
                 assert_eq!(len, 3, "all pre-existing rows should be chained");

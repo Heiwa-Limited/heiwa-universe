@@ -8,7 +8,7 @@ allowed_path='apps/heiwa_shell/src/model_calls.rs'
 # ProviderAdapter::send has three arguments after method dispatch: model,
 # message history by reference, and stream sender. Match that shape regardless
 # of receiver/variable names and formatting. Also catch trait UFCS dispatch.
-pattern='(?s)\.\s*send\s*\(\s*&?\s*[A-Za-z_][A-Za-z0-9_]*(?:\s*\.\s*[A-Za-z_][A-Za-z0-9_]*)*\s*,\s*&\s*[A-Za-z_][A-Za-z0-9_]*\s*,|(?:\b[A-Za-z_][A-Za-z0-9_]*::)*\bProviderAdapter\s*::\s*send\s*\('
+pattern='(?s)\.\s*send\s*\(\s*&?\s*[A-Za-z_][A-Za-z0-9_]*(?:\s*\.\s*[A-Za-z_][A-Za-z0-9_]*(?:\s*\(\s*\))?)*\s*,\s*(?:&\s*[A-Za-z_][A-Za-z0-9_]*|[A-Za-z_][A-Za-z0-9_]*(?:\s*\.\s*[A-Za-z_][A-Za-z0-9_]*(?:\s*\(\s*\))?)+)\s*,|(?:\b[A-Za-z_][A-Za-z0-9_]*::)*\bProviderAdapter\s*::\s*send\s*\('
 
 matches_pattern() {
   printf '%s\n' "$1" | rg --quiet --multiline --pcre2 "$pattern"
@@ -19,7 +19,7 @@ is_allowed_path() {
 }
 
 self_test() {
-  local allowed_fixture alias_fixture ufcs_fixture safe_fixture
+  local allowed_fixture alias_fixture ufcs_fixture expression_model_fixture expression_messages_fixture safe_fixture
   allowed_fixture='adapter.send(model, &messages, stream_tx)'
   alias_fixture='gateway
     .send(
@@ -33,14 +33,18 @@ self_test() {
       &history,
       stream_tx,
   )'
+  expression_model_fixture='gateway.send(model.as_str(), &history, stream_tx)'
+  expression_messages_fixture='gateway.send(model, messages.as_slice(), stream_tx)'
   safe_fixture='event_tx.send(StreamEvent::Done(usage))'
 
-  matches_pattern "$allowed_fixture"
-  matches_pattern "$alias_fixture"
-  matches_pattern "$ufcs_fixture"
-  ! matches_pattern "$safe_fixture"
-  is_allowed_path "$allowed_path"
-  ! is_allowed_path 'apps/heiwa_shell/src/other.rs'
+  matches_pattern "$allowed_fixture" || return 1
+  matches_pattern "$alias_fixture" || return 1
+  matches_pattern "$ufcs_fixture" || return 1
+  matches_pattern "$expression_model_fixture" || return 1
+  matches_pattern "$expression_messages_fixture" || return 1
+  ! matches_pattern "$safe_fixture" || return 1
+  is_allowed_path "$allowed_path" || return 1
+  ! is_allowed_path 'apps/heiwa_shell/src/other.rs' || return 1
 }
 
 if ! self_test; then

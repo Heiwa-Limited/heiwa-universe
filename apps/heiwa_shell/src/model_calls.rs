@@ -28,7 +28,7 @@ pub struct ModelCallExecution {
     pub cancel: watch::Receiver<bool>,
     /// Transient presentation-only deltas. Durable truth is still written
     /// exclusively through `OperatorSessionService`.
-    pub delta_tx: Option<mpsc::UnboundedSender<StreamEvent>>,
+    pub delta_tx: Option<mpsc::Sender<StreamEvent>>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
@@ -44,6 +44,7 @@ pub struct ModelCallAttemptRecord {
     pub model_id: String,
     pub outcome: ModelCallAttemptOutcome,
     pub failure_class: Option<ProviderFailureClass>,
+    pub provider_invoked: bool,
     pub cost_usd: Option<f64>,
     pub cost_truth: CostTruth,
 }
@@ -212,8 +213,8 @@ impl ModelCallExecutor {
                     ProviderFailureClass::Availability,
                     format!("provider resolver missing for {provider}/{provider_model_id}"),
                 );
-                let (attempt_cost, attempt_truth) = attempted_cost(&candidate);
-                let next_budget = subtract_optional_budget(remaining_budget, attempt_cost);
+                let attempt_cost = None;
+                let attempt_truth = CostTruth::CannotConfirm;
                 self.append_failure(
                     &execution.request,
                     &candidate,
@@ -221,18 +222,12 @@ impl ModelCallExecutor {
                     &failure,
                     attempt_cost,
                     &attempt_truth,
-                    next_budget,
+                    remaining_budget,
                 )?;
-                add_cumulative_cost(
-                    &mut cumulative_cost,
-                    &mut cumulative_truth,
-                    attempt_cost,
-                    &attempt_truth,
-                );
-                remaining_budget = next_budget;
                 attempt_records.push(failed_attempt_record(
                     &candidate,
                     failure.0,
+                    false,
                     attempt_cost,
                     attempt_truth,
                 ));
@@ -256,7 +251,7 @@ impl ModelCallExecutor {
             )
             .await
             {
-                Ok((text, mut usage)) => {
+                Ok((text, mut usage, emitted_delta)) => {
                     if *execution.cancel.borrow() {
                         return Err(ModelCallError::Cancelled);
                     }
@@ -293,6 +288,7 @@ impl ModelCallExecutor {
                             attempt_records.push(failed_attempt_record(
                                 &candidate,
                                 failure.0,
+                                true,
                                 attempt_cost,
                                 attempt_truth,
                             ));
@@ -302,7 +298,14 @@ impl ModelCallExecutor {
                                 .excluded_models
                                 .push(failed_identity.clone());
                             failed_models.push(failed_identity);
-                            last_failure = Some(failure);
+                            last_failure = Some(failure.clone());
+                            if emitted_delta {
+                                return Err(ModelCallError::AttemptsExhausted {
+                                    attempts,
+                                    class: failure.0,
+                                    message: failure.1,
+                                });
+                            }
                             continue;
                         }
                         Err(other) => return Err(other),
@@ -321,6 +324,7 @@ impl ModelCallExecutor {
                         model_id: model_id.clone(),
                         outcome: ModelCallAttemptOutcome::Completed,
                         failure_class: None,
+                        provider_invoked: true,
                         cost_usd: Some(charged_cost.0),
                         cost_truth: charged_cost.1.clone(),
                     });
@@ -361,7 +365,10 @@ impl ModelCallExecutor {
                     });
                 }
                 Err(AdapterRunError::Cancelled) => return Err(ModelCallError::Cancelled),
-                Err(AdapterRunError::Failed(message)) => {
+                Err(AdapterRunError::Failed {
+                    message,
+                    emitted_delta,
+                }) => {
                     let failure = (normalize_failure(&message), message);
                     let (attempt_cost, attempt_truth) = attempted_cost(&candidate);
                     let next_budget = subtract_optional_budget(remaining_budget, attempt_cost);
@@ -384,6 +391,7 @@ impl ModelCallExecutor {
                     attempt_records.push(failed_attempt_record(
                         &candidate,
                         failure.0,
+                        true,
                         attempt_cost,
                         attempt_truth,
                     ));
@@ -393,7 +401,14 @@ impl ModelCallExecutor {
                         .excluded_models
                         .push(failed_identity.clone());
                     failed_models.push(failed_identity);
-                    last_failure = Some(failure);
+                    last_failure = Some(failure.clone());
+                    if emitted_delta {
+                        return Err(ModelCallError::AttemptsExhausted {
+                            attempts,
+                            class: failure.0,
+                            message: failure.1,
+                        });
+                    }
                 }
             }
         }
@@ -494,7 +509,7 @@ impl heiwa_loop::LoopModelCaller for ExecutorLoopCaller {
         request: heiwa_loop::LoopCallRequest,
     ) -> anyhow::Result<heiwa_loop::LoopCallResult> {
         let mut submission =
-            StartTurnRequest::auto(request.call_id.clone(), request.raw_text.clone());
+            StartTurnRequest::auto(request.turn_id.clone(), request.raw_text.clone());
         submission.route_policy.excluded_models = request.prior_failed_models.clone();
         submission.route_policy.turn_budget_usd = request.remaining_budget_usd;
         submission.route_policy.privacy = request.privacy.as_str().to_string();
@@ -607,6 +622,7 @@ fn qualified_model_identity(candidate: &ModelCallCandidate) -> String {
 fn failed_attempt_record(
     candidate: &ModelCallCandidate,
     failure_class: ProviderFailureClass,
+    provider_invoked: bool,
     cost_usd: Option<f64>,
     cost_truth: CostTruth,
 ) -> ModelCallAttemptRecord {
@@ -616,6 +632,7 @@ fn failed_attempt_record(
         model_id: candidate.tier.model_id.clone(),
         outcome: ModelCallAttemptOutcome::Failed,
         failure_class: Some(failure_class),
+        provider_invoked,
         cost_usd,
         cost_truth,
     }
@@ -697,7 +714,10 @@ fn normalize_failure(message: &str) -> ProviderFailureClass {
 
 enum AdapterRunError {
     Cancelled,
-    Failed(String),
+    Failed {
+        message: String,
+        emitted_delta: bool,
+    },
 }
 
 async fn run_adapter(
@@ -705,8 +725,8 @@ async fn run_adapter(
     model: &str,
     messages: &[Message],
     cancel: &mut watch::Receiver<bool>,
-    delta_tx: Option<&mpsc::UnboundedSender<StreamEvent>>,
-) -> Result<(String, TokenUsage), AdapterRunError> {
+    delta_tx: Option<&mpsc::Sender<StreamEvent>>,
+) -> Result<(String, TokenUsage, bool), AdapterRunError> {
     if *cancel.borrow() {
         return Err(AdapterRunError::Cancelled);
     }
@@ -725,6 +745,7 @@ async fn run_adapter(
     });
 
     let mut text = String::new();
+    let mut emitted_delta = false;
     let mut cancel_open = true;
     loop {
         tokio::select! {
@@ -733,6 +754,7 @@ async fn run_adapter(
                 match changed {
                     Ok(()) if *cancel.borrow() => {
                         task.abort();
+                        let _ = task.await;
                         let _ = tokio::time::timeout(Duration::from_millis(250), adapter.interrupt()).await;
                         return Err(AdapterRunError::Cancelled);
                     }
@@ -743,17 +765,19 @@ async fn run_adapter(
             event = stream_rx.recv() => {
                 match event {
                     Some(StreamEvent::Token(token)) => {
+                        emitted_delta = true;
                         text.push_str(&token);
                         if let Some(delta_tx) = delta_tx {
-                            let _ = delta_tx.send(StreamEvent::Token(token));
+                            let _ = delta_tx.send(StreamEvent::Token(token)).await;
                         }
                     }
                     Some(StreamEvent::ToolUse { name, input }) => {
+                        emitted_delta = true;
                         if let Some(delta_tx) = delta_tx {
                             let _ = delta_tx.send(StreamEvent::ToolUse {
                                 name: name.clone(),
                                 input: input.clone(),
-                            });
+                            }).await;
                         }
                         text.push_str(&json!({
                             "tool_calls": [{
@@ -765,21 +789,29 @@ async fn run_adapter(
                     Some(StreamEvent::Done(usage)) => {
                         if *cancel.borrow() {
                             task.abort();
+                            let _ = task.await;
                             let _ = tokio::time::timeout(Duration::from_millis(250), adapter.interrupt()).await;
                             return Err(AdapterRunError::Cancelled);
                         }
                         task.abort();
-                        return Ok((text, usage));
+                        let _ = task.await;
+                        return Ok((text, usage, emitted_delta));
                     }
                     Some(StreamEvent::Error(error)) => {
                         task.abort();
-                        return Err(AdapterRunError::Failed(error));
+                        let _ = task.await;
+                        return Err(AdapterRunError::Failed {
+                            message: error,
+                            emitted_delta,
+                        });
                     }
                     None => {
                         task.abort();
-                        return Err(AdapterRunError::Failed(
-                            "provider stream ended without completion".to_string(),
-                        ));
+                        let _ = task.await;
+                        return Err(AdapterRunError::Failed {
+                            message: "provider stream ended without completion".to_string(),
+                            emitted_delta,
+                        });
                     }
                 }
             }

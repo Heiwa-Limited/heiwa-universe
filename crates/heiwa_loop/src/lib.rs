@@ -199,6 +199,10 @@ impl LoopController {
                 biased;
                 changed = cancel_wait.changed() => {
                     if changed.is_ok() && *cancel_wait.borrow() {
+                        // The caller owns spawned adapter work. Await its
+                        // cancellation path so abort/kill-on-drop completes
+                        // before the loop reports cancellation.
+                        let _ = (&mut call).await;
                         return self.finish_cancelled(&status_tx, current_turn, total_cost).await;
                     }
                     call.await?

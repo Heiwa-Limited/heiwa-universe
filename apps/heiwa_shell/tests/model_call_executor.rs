@@ -11,7 +11,7 @@ mod model_call {
         ModelCallStage, PrivacyClass, SafetyClass,
     };
     use heiwa_evidence::{OperatorEventType, OperatorJournal};
-    use heiwa_loop::{LoopCallRequest, LoopModelCaller};
+    use heiwa_loop::{LoopCallRequest, LoopConfig, LoopController, LoopModelCaller};
     use heiwa_protocol::ModelTier;
     use heiwa_provider::adapter::{Message, ProviderAdapter, Role, StreamEvent, TokenUsage};
     use heiwa_session::operator::{OperatorSessionService, StartTurnRequest};
@@ -91,6 +91,15 @@ mod model_call {
     struct BlockingAdapter {
         started: Arc<tokio::sync::Notify>,
         interrupted: Arc<AtomicBool>,
+        dropped: Arc<AtomicBool>,
+    }
+
+    struct SendDropGuard(Arc<AtomicBool>);
+
+    impl Drop for SendDropGuard {
+        fn drop(&mut self) {
+            self.0.store(true, Ordering::SeqCst);
+        }
     }
 
     struct TokenThenWaitAdapter {
@@ -160,6 +169,7 @@ mod model_call {
             _messages: &[Message],
             _stream_tx: mpsc::Sender<StreamEvent>,
         ) -> Result<()> {
+            let _drop_guard = SendDropGuard(self.dropped.clone());
             self.started.notify_one();
             std::future::pending::<()>().await;
             Ok(())
@@ -558,6 +568,7 @@ mod model_call {
         let adapter = Arc::new(BlockingAdapter {
             started: started.clone(),
             interrupted: interrupted.clone(),
+            dropped: Arc::new(AtomicBool::new(false)),
         }) as Arc<dyn ProviderAdapter>;
         let executor = Arc::new(ModelCallExecutor::new(
             Arc::new(move |_, _| Some(adapter.clone())),
@@ -870,10 +881,10 @@ mod model_call {
         }) as Arc<dyn ProviderAdapter>;
         let executor = Arc::new(ModelCallExecutor::new(
             Arc::new(move |_, _| Some(adapter.clone())),
-            service,
+            service.clone(),
         ));
         let (_cancel_tx, cancel_rx) = watch::channel(false);
-        let (delta_tx, mut delta_rx) = mpsc::unbounded_channel();
+        let (delta_tx, mut delta_rx) = mpsc::channel(1);
         let mut call = execution(
             request("thread-1", &submission.turn_id),
             vec![candidate(1, "primary", "model", 0.01)],
@@ -923,6 +934,188 @@ mod model_call {
     }
 
     #[tokio::test]
+    async fn partial_primary_output_stops_without_invoking_secondary() {
+        let (_evidence, service, submission) = service_and_turn();
+        let secondary_sends = Arc::new(AtomicUsize::new(0));
+        let primary = Arc::new(EventAdapter {
+            events: vec![
+                StreamEvent::Token("partial".to_string()),
+                StreamEvent::Error("rate_limited".to_string()),
+            ],
+        }) as Arc<dyn ProviderAdapter>;
+        let secondary = Arc::new(CountingDoneAdapter {
+            sends: secondary_sends.clone(),
+        }) as Arc<dyn ProviderAdapter>;
+        let executor = ModelCallExecutor::new(
+            Arc::new(move |provider, _| match provider {
+                "primary" => Some(primary.clone()),
+                "secondary" => Some(secondary.clone()),
+                _ => None,
+            }),
+            service,
+        );
+        let (_cancel_tx, cancel_rx) = watch::channel(false);
+        let (delta_tx, mut delta_rx) = mpsc::channel(8);
+        let mut call = execution(
+            request("thread-1", &submission.turn_id),
+            vec![
+                candidate(1, "primary", "primary-model", 0.01),
+                candidate(2, "secondary", "secondary-model", 0.02),
+            ],
+            3,
+            cancel_rx,
+        );
+        call.delta_tx = Some(delta_tx);
+
+        let error = executor.execute(call).await.unwrap_err();
+
+        assert!(matches!(
+            error,
+            ModelCallError::AttemptsExhausted { attempts: 1, .. }
+        ));
+        assert_eq!(secondary_sends.load(Ordering::SeqCst), 0);
+        assert!(matches!(
+            delta_rx.recv().await,
+            Some(StreamEvent::Token(text)) if text == "partial"
+        ));
+        assert!(delta_rx.try_recv().is_err());
+    }
+
+    #[tokio::test]
+    async fn partial_output_with_invalid_done_usage_stops_without_secondary() {
+        let (_evidence, service, submission) = service_and_turn();
+        let secondary_sends = Arc::new(AtomicUsize::new(0));
+        let primary = Arc::new(EventAdapter {
+            events: vec![
+                StreamEvent::Token("partial".to_string()),
+                StreamEvent::Done(TokenUsage {
+                    cost_usd: f64::INFINITY,
+                    ..TokenUsage::default()
+                }),
+            ],
+        }) as Arc<dyn ProviderAdapter>;
+        let secondary = Arc::new(CountingDoneAdapter {
+            sends: secondary_sends.clone(),
+        }) as Arc<dyn ProviderAdapter>;
+        let executor = ModelCallExecutor::new(
+            Arc::new(move |provider, _| match provider {
+                "primary" => Some(primary.clone()),
+                "secondary" => Some(secondary.clone()),
+                _ => None,
+            }),
+            service,
+        );
+        let (_cancel_tx, cancel_rx) = watch::channel(false);
+        let (delta_tx, mut delta_rx) = mpsc::channel(8);
+        let mut call = execution(
+            request("thread-1", &submission.turn_id),
+            vec![
+                candidate(1, "primary", "primary-model", 0.01),
+                candidate(2, "secondary", "secondary-model", 0.02),
+            ],
+            3,
+            cancel_rx,
+        );
+        call.delta_tx = Some(delta_tx);
+
+        let error = executor.execute(call).await.unwrap_err();
+
+        assert!(matches!(
+            error,
+            ModelCallError::AttemptsExhausted {
+                attempts: 1,
+                class: ProviderFailureClass::InvalidUsage,
+                ..
+            }
+        ));
+        assert_eq!(secondary_sends.load(Ordering::SeqCst), 0);
+        assert!(matches!(
+            delta_rx.recv().await,
+            Some(StreamEvent::Token(text)) if text == "partial"
+        ));
+    }
+
+    #[tokio::test]
+    async fn missing_resolver_spends_zero_and_preserves_budget_for_secondary() {
+        let (_evidence, service, submission) = service_and_turn();
+        let secondary = Arc::new(EventAdapter {
+            events: vec![StreamEvent::Done(TokenUsage::default())],
+        }) as Arc<dyn ProviderAdapter>;
+        let executor = ModelCallExecutor::new(
+            Arc::new(move |provider, _| (provider == "secondary").then(|| secondary.clone())),
+            service,
+        );
+        let (_cancel_tx, cancel_rx) = watch::channel(false);
+        let mut model_request = request("thread-1", &submission.turn_id);
+        model_request.maximum_marginal_cost_usd = Some(0.10);
+        let primary = candidate(1, "primary", "primary-model", 0.06);
+        let mut call = execution(
+            model_request,
+            vec![primary, candidate(2, "secondary", "secondary-model", 0.08)],
+            3,
+            cancel_rx,
+        );
+        call.remaining_budget_usd = Some(0.10);
+
+        let result = executor.execute(call).await.unwrap();
+
+        assert_eq!(result.provider, "secondary");
+        assert_eq!(result.cost_usd, 0.08);
+        assert_eq!(result.attempt_records[0].cost_usd, None);
+        assert!(!result.attempt_records[0].provider_invoked);
+    }
+
+    #[tokio::test]
+    async fn loop_cancel_waits_for_executor_adapter_task_drop() {
+        let evidence_dir = tempfile::tempdir().unwrap();
+        std::env::set_var("HEIWA_EVIDENCE_DIR", evidence_dir.path());
+        let service = Arc::new(OperatorSessionService::new(
+            OperatorJournal::new(evidence_dir.path().to_path_buf()).unwrap(),
+        ));
+        let started = Arc::new(tokio::sync::Notify::new());
+        let interrupted = Arc::new(AtomicBool::new(false));
+        let dropped = Arc::new(AtomicBool::new(false));
+        let adapter = Arc::new(BlockingAdapter {
+            started: started.clone(),
+            interrupted: interrupted.clone(),
+            dropped: dropped.clone(),
+        }) as Arc<dyn ProviderAdapter>;
+        let executor = Arc::new(ModelCallExecutor::new(
+            Arc::new(move |_, _| Some(adapter.clone())),
+            service.clone(),
+        ));
+        let caller = Arc::new(ExecutorLoopCaller::new(executor));
+        let controller = Arc::new(LoopController::new(
+            LoopConfig {
+                user_id: "test-user".to_string(),
+                objective: "cancel active executor".to_string(),
+                max_turns: 1,
+                max_cost_usd: 1.0,
+                intent: "code".to_string(),
+                risk: "low".to_string(),
+                privacy: "standard".to_string(),
+                runtime: "any".to_string(),
+                approved: true,
+            },
+            vec![candidate(1, "primary", "model", 0.01).tier],
+        ));
+        let (status_tx, _status_rx) = mpsc::channel(4);
+        let run_controller = controller.clone();
+        let run = tokio::spawn(async move { run_controller.run(status_tx, caller).await });
+
+        started.notified().await;
+        controller.cancel();
+        tokio::time::timeout(std::time::Duration::from_secs(1), run)
+            .await
+            .unwrap()
+            .unwrap()
+            .unwrap();
+
+        assert!(dropped.load(Ordering::SeqCst));
+        assert!(interrupted.load(Ordering::SeqCst));
+    }
+
+    #[tokio::test]
     async fn executor_loop_caller_fails_high_risk_closed_until_explicitly_approved() {
         let evidence = tempfile::tempdir().unwrap();
         let service = Arc::new(OperatorSessionService::new(
@@ -934,7 +1127,7 @@ mod model_call {
         }) as Arc<dyn ProviderAdapter>;
         let executor = Arc::new(ModelCallExecutor::new(
             Arc::new(move |_, _| Some(adapter.clone())),
-            service,
+            service.clone(),
         ));
         let caller = ExecutorLoopCaller::new(executor);
 
@@ -942,7 +1135,7 @@ mod model_call {
             let (_cancel_tx, cancel) = watch::channel(false);
             LoopCallRequest {
                 thread_id: "loop-thread".to_string(),
-                turn_id: "unused".to_string(),
+                turn_id: format!("turn-{call_id}"),
                 call_id: call_id.to_string(),
                 stage: ModelCallStage::Execution,
                 intent: "deploy".to_string(),
@@ -974,5 +1167,13 @@ mod model_call {
             .await
             .unwrap();
         assert_eq!(sends.load(Ordering::SeqCst), 1);
+        let events = service
+            .events_after("loop-thread", None, 100)
+            .unwrap()
+            .events;
+        assert!(events.iter().any(|row| {
+            row.event.event_type == OperatorEventType::TurnStarted
+                && row.event.payload["client_request_id"] == "turn-approved-call"
+        }));
     }
 }
