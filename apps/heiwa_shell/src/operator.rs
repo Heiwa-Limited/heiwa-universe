@@ -294,8 +294,9 @@ impl OperatorTurnHandle {
                         .as_mut()
                         .expect("direct frame receiver checked above");
                     tokio::select! {
-                        direct = direct_frames.recv() => Incoming::Direct(direct),
+                        biased;
                         global = self.frames.recv() => Incoming::Global(global),
+                        direct = direct_frames.recv() => Incoming::Direct(direct),
                     }
                 };
                 match incoming {
@@ -2157,6 +2158,10 @@ mod tests {
         .await
         .unwrap();
         assert!(runner.request_cancel(&handle.turn_id).unwrap());
+        // Let the runner observe its cancellation and queue the direct
+        // terminal before the handle starts draining. The global durable
+        // cancel intent must still win.
+        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
         let frames = wait_for_terminal(&mut handle).await;
 
         let event_ids = frames
