@@ -153,6 +153,34 @@ describe("OperatorStore", () => {
     expect(snapshot.blockers["blocker-1"]?.payload.message).toBe("latest");
   });
 
+  it("keeps hostile projection keys in null-prototype records", () => {
+    const store = new OperatorStore();
+    store.reduce({ type: "assistant_delta", thread_id: "default", turn_id: "__proto__", text: "safe delta" });
+    store.reduce(frame("proto-route", "route_planned", { provider: "ollama" }, { call_id: "__proto__" }));
+    store.reduce(frame("proto-tool", "tool_call_started", { name: "fs.read" }, { call_id: "__proto__" }));
+    store.reduce(frame("proto-approval", "approval_requested", { request_id: "__proto__" }));
+    store.reduce(frame("proto-artifact", "artifact_created", { artifact_id: "__proto__" }));
+    store.reduce(frame("proto-receipt", "receipt_linked", { receipt_id: "__proto__" }));
+    store.reduce(frame("proto-blocker", "blocker", { blocker_id: "__proto__" }, { turn_id: null }));
+
+    const snapshot = store.snapshot();
+    const maps = [
+      snapshot.routesByCall,
+      snapshot.toolCalls,
+      snapshot.approvals,
+      snapshot.artifacts,
+      snapshot.receipts,
+      snapshot.blockers,
+      snapshot.transientByTurn,
+    ];
+    maps.forEach((map) => {
+      expect(Object.getPrototypeOf(map)).toBeNull();
+      expect(Object.hasOwn(map, "__proto__")).toBe(true);
+    });
+    expect(snapshot.routesByCall["__proto__"]?.payload.provider).toBe("ollama");
+    expect(snapshot.transientByTurn["__proto__"]).toBe("safe delta");
+  });
+
   it("enriches a durable assistant message from its turn receipt", () => {
     const store = new OperatorStore();
     store.reduce(frame("assistant", "assistant_completed", { text: "done" }));

@@ -10,6 +10,7 @@ import { OperatorStore } from "./store";
 class StaleClientOperation extends Error {}
 
 const MAX_INVALID_CURSOR_RECOVERIES = 2;
+const MAX_HISTORY_PAGES = 1024;
 
 type SubscriptionRun = {
   generation: number;
@@ -37,6 +38,7 @@ export type OperatorClientDependencies = {
 
 export class OperatorClient {
   private threadId: string | null = null;
+  private startPromise: Promise<void> | null = null;
   private clientState: OperatorClientState = { status: "idle", error: null };
   private recovery: { generation: number; promise: Promise<void> } | null = null;
   private activeSubscription: SubscriptionRun | null = null;
@@ -48,24 +50,34 @@ export class OperatorClient {
     private readonly dependencies: OperatorClientDependencies,
   ) {}
 
-  async start(threadId: string): Promise<void> {
+  start(threadId: string): Promise<void> {
     const normalized = threadId.trim();
-    if (!normalized) throw new Error("thread_id_required");
+    if (!normalized) return Promise.reject(new Error("thread_id_required"));
+    if (this.threadId !== null) {
+      if (this.threadId === normalized && this.startPromise) return this.startPromise;
+      return Promise.reject(new Error("operator_client_already_started"));
+    }
     const generation = ++this.generation;
     this.invalidCursorRecoveries = 0;
     this.threadId = normalized;
+    const startPromise = Promise.resolve().then(() => this.initialize(normalized, generation));
+    this.startPromise = startPromise;
     this.store.resetProjectionForReplay();
     this.clientState = { status: "starting", error: null };
     this.dependencies.onChange?.();
+    return startPromise;
+  }
+
+  private async initialize(threadId: string, generation: number): Promise<void> {
     try {
-      const cursor = await this.replayHistory(normalized, generation);
-      this.assertCurrent(normalized, generation);
+      const cursor = await this.replayHistory(threadId, generation);
+      this.assertCurrent(threadId, generation);
       this.clientState = { status: "ready", error: null };
       this.dependencies.onChange?.();
-      this.startSubscription(normalized, cursor, generation);
+      this.startSubscription(threadId, cursor, generation);
     } catch (error) {
       if (error instanceof StaleClientOperation) return;
-      if (this.isCurrent(normalized, generation)) {
+      if (this.isCurrent(threadId, generation)) {
         this.store.resetProjectionForReplay();
         this.dependencies.onChange?.();
         this.reportError("operator_history_unavailable", generation);
@@ -108,7 +120,11 @@ export class OperatorClient {
   private async replayHistory(threadId: string, generation: number): Promise<string | null> {
     let after: string | null = null;
     let changed = false;
+    let pageCount = 0;
+    const visitedCursors = new Set<string>();
     for (;;) {
+      if (pageCount >= MAX_HISTORY_PAGES) throw new Error("operator_history_page_budget_exhausted");
+      pageCount += 1;
       const suffix = after ? `&after=${encodeURIComponent(after)}` : "";
       const response = await this.dependencies.get(
         `/api/v1/operator/threads/${encodeURIComponent(threadId)}/events?limit=500${suffix}`,
@@ -125,7 +141,7 @@ export class OperatorClient {
         || events.some((row) => !isOperatorEventFrame({ type: "event", cursor: row?.cursor, event: row?.event }))) {
         throw new Error("operator_history_invalid");
       }
-      if (events.length === 500 && (!next || next === after)) {
+      if (events.length === 500 && (!next || next === after || visitedCursors.has(next))) {
         throw new Error("operator_history_stalled");
       }
       for (const row of events) {
@@ -137,6 +153,8 @@ export class OperatorClient {
         if (changed) this.dependencies.onChange?.();
         return serverCursor;
       }
+      if (typeof next !== "string") throw new Error("operator_history_stalled");
+      visitedCursors.add(next);
       after = next;
     }
   }

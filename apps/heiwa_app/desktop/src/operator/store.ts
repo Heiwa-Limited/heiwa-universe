@@ -23,19 +23,23 @@ type MutableState = {
   finalizedAssistantTurns: Set<string>;
 };
 
+function nullRecord<T>(): Record<string, T> {
+  return Object.create(null) as Record<string, T>;
+}
+
 function emptyState(): MutableState {
   return {
     seenEventIds: new Set(),
     cursor: null,
     messages: [],
     turns: [],
-    routesByCall: {},
-    toolCalls: {},
-    approvals: {},
-    artifacts: {},
-    receipts: {},
-    blockers: {},
-    transientByTurn: {},
+    routesByCall: nullRecord(),
+    toolCalls: nullRecord(),
+    approvals: nullRecord(),
+    artifacts: nullRecord(),
+    receipts: nullRecord(),
+    blockers: nullRecord(),
+    transientByTurn: nullRecord(),
     finalizedAssistantTurns: new Set(),
   };
 }
@@ -52,6 +56,12 @@ function objectValue(value: unknown): Record<string, unknown> | undefined {
 
 function clone<T>(value: T): T {
   return structuredClone(value);
+}
+
+function cloneRecord<T>(value: Record<string, T>): Record<string, T> {
+  const result = nullRecord<T>();
+  for (const [key, entry] of Object.entries(value)) result[key] = clone(entry);
+  return result;
 }
 
 function projection(event: OperatorEvent, key: string): OperatorProjection {
@@ -96,19 +106,19 @@ export class OperatorStore {
   }
 
   snapshot(): OperatorSnapshot {
-    return clone({
+    return {
       seenEventIds: [...this.state.seenEventIds],
       cursor: this.state.cursor,
-      messages: this.state.messages,
-      turns: this.state.turns,
-      routesByCall: this.state.routesByCall,
-      toolCalls: this.state.toolCalls,
-      approvals: this.state.approvals,
-      artifacts: this.state.artifacts,
-      receipts: this.state.receipts,
-      blockers: this.state.blockers,
-      transientByTurn: this.state.transientByTurn,
-    });
+      messages: clone(this.state.messages),
+      turns: clone(this.state.turns),
+      routesByCall: cloneRecord(this.state.routesByCall),
+      toolCalls: cloneRecord(this.state.toolCalls),
+      approvals: cloneRecord(this.state.approvals),
+      artifacts: cloneRecord(this.state.artifacts),
+      receipts: cloneRecord(this.state.receipts),
+      blockers: cloneRecord(this.state.blockers),
+      transientByTurn: cloneRecord(this.state.transientByTurn),
+    };
   }
 
   private reduceDurable(event: OperatorEvent): void {

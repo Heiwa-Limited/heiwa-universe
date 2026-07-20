@@ -128,6 +128,42 @@ describe("OperatorClient", () => {
     expect(client.state()).toEqual({ status: "error", error: "operator_history_unavailable" });
   });
 
+  it("fails safely and clears partial replay when pagination cursors cycle", async () => {
+    const fullPage = Array.from({ length: 500 }, (_, index) => eventFrame(index + 1));
+    const cursors = ["cursor-a", "cursor-b", "cursor-a"];
+    let page = 0;
+    const get = vi.fn(async () => history(fullPage, cursors[page++]!));
+    const subscribe = vi.fn(async () => undefined);
+    const store = new OperatorStore();
+    const client = new OperatorClient(store, dependencies({ get, subscribe }));
+
+    await client.start("team & ops");
+
+    expect(get).toHaveBeenCalledTimes(3);
+    expect(subscribe).not.toHaveBeenCalled();
+    expect(store.snapshot().messages).toEqual([]);
+    expect(client.state()).toEqual({ status: "error", error: "operator_history_unavailable" });
+  });
+
+  it("fails safely at the finite history page budget even with unique cursors", async () => {
+    const fullPage = Array.from({ length: 500 }, (_, index) => eventFrame(index + 1));
+    let page = 0;
+    const get = vi.fn(async () => {
+      page += 1;
+      return history(fullPage, `unique-page-${page}`);
+    });
+    const subscribe = vi.fn(async () => undefined);
+    const store = new OperatorStore();
+    const client = new OperatorClient(store, dependencies({ get, subscribe }));
+
+    await client.start("team & ops");
+
+    expect(get).toHaveBeenCalledTimes(1024);
+    expect(subscribe).not.toHaveBeenCalled();
+    expect(store.snapshot().messages).toEqual([]);
+    expect(client.state()).toEqual({ status: "error", error: "operator_history_unavailable" });
+  });
+
   it("serializes invalid-cursor recovery before one replay and resubscription", async () => {
     let replayCount = 0;
     const get = vi.fn(async () => {
@@ -233,7 +269,8 @@ describe("OperatorClient", () => {
     const store = new OperatorStore();
     const client = new OperatorClient(store, dependencies({ get, subscribe, onError }));
 
-    await client.start("team & ops");
+    const originalStart = client.start("team & ops");
+    await originalStart;
     await flushAsyncWork();
 
     expect(subscribe).toHaveBeenCalledTimes(3);
@@ -245,41 +282,41 @@ describe("OperatorClient", () => {
     expect(subscribe).toHaveBeenCalledTimes(3);
     expect(get).toHaveBeenCalledTimes(3);
 
-    await client.start("team & ops");
+    expect(client.start(" team & ops ")).toBe(originalStart);
     await flushAsyncWork();
-    expect(subscribe).toHaveBeenCalledTimes(5);
-    expect(get).toHaveBeenCalledTimes(5);
-    expect(client.state()).toEqual({ status: "ready", error: null });
+    expect(subscribe).toHaveBeenCalledTimes(3);
+    expect(get).toHaveBeenCalledTimes(3);
+    expect(client.state()).toEqual({ status: "error", error: "operator_history_unavailable" });
   });
 
-  it("keeps a concurrent stale history start from mutating a switched thread", async () => {
-    const oldHistory = deferred<OperatorHistoryResponse>();
-    const get = vi.fn(async (path: string) => path.includes("/old%20thread/")
-      ? oldHistory.promise
-      : history([eventFrame(2, "new thread")], "new-cursor"));
+  it("coalesces concurrent and repeated same-thread starts onto one promise", async () => {
+    const pendingHistory = deferred<OperatorHistoryResponse>();
+    const get = vi.fn(async () => pendingHistory.promise);
     const subscribe = vi.fn(async () => undefined);
     const store = new OperatorStore();
     const client = new OperatorClient(store, dependencies({ get, subscribe }));
 
-    const oldStart = client.start("old thread");
-    await Promise.resolve();
-    await client.start("new thread");
-    oldHistory.resolve(history([eventFrame(1, "old thread")], "old-cursor"));
-    await oldStart;
+    const first = client.start(" team & ops ");
+    const concurrent = client.start("team & ops");
+    expect(concurrent).toBe(first);
+
+    pendingHistory.resolve(history([eventFrame(1)], "cursor-1"));
+    await first;
     await flushAsyncWork();
 
-    expect(store.snapshot().messages.map((message) => message.threadId)).toEqual(["new thread"]);
+    expect(client.start("team & ops")).toBe(first);
+    expect(get).toHaveBeenCalledOnce();
     expect(subscribe).toHaveBeenCalledTimes(1);
-    expect(subscribe).toHaveBeenCalledWith("new thread", "new-cursor", expect.any(Function));
+    expect(store.snapshot().messages).toHaveLength(1);
     expect(client.state()).toEqual({ status: "ready", error: null });
   });
 
-  it("ignores frames from a stale subscription after a repeated start", async () => {
+  it("rejects a different-thread start without mutating the active client", async () => {
     const callbacks: Array<(frame: OperatorFrame) => void> = [];
-    const subscriptions = [deferred<void>(), deferred<void>()];
+    const subscription = deferred<void>();
     const subscribe = vi.fn((_threadId: string, _after: string | null, onFrame: (frame: OperatorFrame) => void) => {
       callbacks.push(onFrame);
-      return subscriptions[callbacks.length - 1]!.promise;
+      return subscription.promise;
     });
     const get = vi.fn(async () => history([], null));
     const store = new OperatorStore();
@@ -287,13 +324,14 @@ describe("OperatorClient", () => {
 
     await client.start("old thread");
     await flushAsyncWork();
-    await client.start("new thread");
-    await flushAsyncWork();
+    await expect(client.start("new thread")).rejects.toThrow("operator_client_already_started");
     callbacks[0]!(eventFrame(1, "old thread"));
-    callbacks[1]!(eventFrame(2, "new thread"));
 
-    expect(store.snapshot().messages.map((message) => message.threadId)).toEqual(["new thread"]);
-    subscriptions.forEach((subscription) => subscription.resolve());
+    expect(get).toHaveBeenCalledOnce();
+    expect(subscribe).toHaveBeenCalledOnce();
+    expect(store.snapshot().messages.map((message) => message.threadId)).toEqual(["old thread"]);
+    expect(client.state()).toEqual({ status: "ready", error: null });
+    subscription.resolve();
   });
 
   it("submits a trimmed turn with a random request id and automatic policy without optimistic rows", async () => {
