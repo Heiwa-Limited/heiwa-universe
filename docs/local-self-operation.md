@@ -33,6 +33,9 @@ disabled until a redaction and privacy boundary exists.
 6. Refresh `~/.heiwa/machine.json` with current host, OS, arch, install path, runtime version, and capability probes.
 7. Adapt worker concurrency, polling cadence, and local-model use to machine load, battery, thermal state, and available runtimes.
 8. Surface pending update or restart requirements without interrupting active work.
+9. Require local runtime authentication for operator HTTP, turn submission,
+   cancellation, and `/ws/v1/operator`; a localhost listener alone is not a
+   trusted operator session.
 
 ## Install and Update Authority
 
@@ -169,6 +172,8 @@ For development verification, start a current checkout runtime on a temporary
 alternate port:
 
 ```bash
+HEIWA_EVIDENCE_DIR=/private/tmp/heiwa-operator-e2e/evidence \
+HEIWA_MACHINE_AUTH_TOKEN=operator-e2e-token \
 cargo run -q -p heiwa-shell --bin heiwa -- app start --port 7475 --no-open
 ```
 
@@ -188,7 +193,61 @@ runtime changed. `--dry-run` is the default probe. Use
 `heiwa app update --source checkout` only for developer reinstall from the
 current checkout.
 
-### 4. Start safely
+### 4. Verify the authenticated operator stream
+
+Operator HTTP and WebSocket endpoints require the existing local runtime auth.
+An unset runtime auth configuration returns `auth_not_configured`; a missing or
+invalid credential returns `unauthorized`. For the isolated checkout runtime
+above, use the same test token only against `127.0.0.1:7475`:
+
+```bash
+curl -fsS \
+  -H 'Authorization: Bearer operator-e2e-token' \
+  -H 'Content-Type: application/json' \
+  -d '{"thread_id":"default"}' \
+  http://127.0.0.1:7475/api/v1/operator/threads
+
+curl -fsS \
+  -H 'Authorization: Bearer operator-e2e-token' \
+  -H 'Content-Type: application/json' \
+  -d '{"client_request_id":"operator-e2e-1","prompt":"reply with ready","route_policy":{"mode":"auto"}}' \
+  http://127.0.0.1:7475/api/v1/operator/threads/default/turns
+
+curl -fsS \
+  -H 'Authorization: Bearer operator-e2e-token' \
+  'http://127.0.0.1:7475/api/v1/operator/threads/default/events?limit=100'
+```
+
+The turn response returns `turn_id`, the stable post-user-message `cursor`, and
+an encoded `stream_url`. The corresponding WebSocket request is:
+
+```text
+GET ws://127.0.0.1:7475/ws/v1/operator?thread_id=default&after=<percent-encoded-cursor>
+Authorization: Bearer operator-e2e-token
+```
+
+Use a WebSocket client that can set the `Authorization` header. For Desktop
+verification, launch the native wrapper with `HEIWA_APP_PORT=7475` and the same
+`HEIWA_MACHINE_AUTH_TOKEN`; its Tauri bridge injects the bearer below the
+renderer for both HTTP and WebSocket. Verify initial replay reaches
+`caught_up`, a newly appended shell event arrives without refresh, and reconnect
+from the last durable cursor does not duplicate an `event_id`. Heartbeats and
+assistant deltas are transient and never advance the durable cursor.
+
+Cursor and restart recovery are fail-closed:
+
+- HTTP replay returns structured `invalid_cursor` for unknown versions, stream
+  fingerprint mismatches, offsets beyond EOF, or offsets not on an event
+  boundary. The operator client must clear its disposable projection and replay
+  the thread from the beginning.
+- The WebSocket sends an `invalid_cursor` frame and closes so the client can
+  perform that same bounded recovery; it must not guess a replacement offset.
+- On runtime restart, every nonterminal turn is durably closed with one
+  `turn_interrupted` event whose reason is `RUNTIME_RESTART`. A turn with a
+  pending operator cancellation closes as `OPERATOR_CANCELLED`. Open work is
+  never silently resumed from process memory.
+
+### 5. Start safely
 
 Before starting a long-running runtime, decide:
 
@@ -200,7 +259,7 @@ Before starting a long-running runtime, decide:
 
 Prefer `--no-open` for agent verification so the browser is not disturbed.
 
-### 5. Use the runtime
+### 6. Use the runtime
 
 Use the local API and cockpit against the same port you started. Keep evidence
 local and concrete:
@@ -215,7 +274,7 @@ curl -fsS http://127.0.0.1:7475/api/v1/history
 Do not fabricate cockpit rows. If the UI needs data, wire it to existing
 `~/.heiwa/state` truth or add a clearly scoped read model with tests.
 
-### 6. Stop what you started
+### 7. Stop what you started
 
 Every agent-started runtime must be stopped before final reporting unless the
 operator explicitly asks to keep it running.
@@ -230,7 +289,7 @@ Preferred stop order:
 If sandbox policy blocks stopping a process, request escalation for the exact
 PID and explain that it is the temporary runtime started for verification.
 
-### 7. Clean as you go
+### 8. Clean as you go
 
 Clean up temporary verification artifacts before final reporting:
 

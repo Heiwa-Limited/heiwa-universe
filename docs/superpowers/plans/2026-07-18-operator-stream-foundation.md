@@ -919,7 +919,7 @@ git commit -m "Stream authenticated operator events to Desktop"
 - Consumes authenticated Tauri HTTP/stream commands.
 - Produces `OperatorStore.reduce(frame)`, `OperatorClient.submitTurn`, `OperatorClient.start`.
 
-- [ ] **Step 1: Add Vitest and failing reducer tests**
+- [x] **Step 1: Add Vitest and failing reducer tests**
 
 Run: `npm install --save-dev vitest@^3.2.0` from `apps/heiwa_app/desktop` and add `"test": "vitest run"`.
 
@@ -953,23 +953,23 @@ describe("OperatorStore", () => {
 });
 ```
 
-- [ ] **Step 2: Implement wire types and pure reducer**
+- [x] **Step 2: Implement wire types and pure reducer**
 
 Types cover durable event, cursor, transient delta, caught-up, heartbeat, invalid-cursor, thread summary, route policy, and turn submission. Store state contains `seenEventIds`, `cursor`, `messages`, `turns`, `routesByCall`, `toolCalls`, `approvals`, `artifacts`, `receipts`, `blockers`, and `transientByTurn`.
 
 Reducer never performs I/O and never stores auth material.
 
-- [ ] **Step 3: Implement operator client**
+- [x] **Step 3: Implement operator client**
 
 `OperatorClient.start(threadId)` first replays HTTP history from no cursor, reduces it, then invokes native `operator_subscribe` from returned cursor. `invalid_cursor` clears only disposable projection and replays thread start. `submitTurn` generates `crypto.randomUUID()` as `client_request_id` and defaults route policy to `auto`.
 
-- [ ] **Step 4: Cut renderer conversation over to store**
+- [x] **Step 4: Cut renderer conversation over to store**
 
 Remove renderer-local `messages` and `subagents` authority. `renderMessages`, worker/route inspector counts, composer submission, and WebSocket updates read from `operatorStore.snapshot()`. Remove direct browser `new WebSocket('/ws/v1/events')` for conversation/subagent events; keep the existing approvals/goals socket only until those events move into the operator stream.
 
 Extract only operator-specific code from `main.ts`; do not redesign Calendar, dock, pane, or CSS surfaces.
 
-- [ ] **Step 5: Run TypeScript tests/build and commit**
+- [x] **Step 5: Run TypeScript tests/build and commit**
 
 Run: `npm test && npm run typecheck && npm run build`
 
@@ -995,7 +995,7 @@ git commit -m "Render Desktop from durable operator stream"
 
 - Validates every acceptance gate from the approved design.
 
-- [ ] **Step 1: Remove stale backend wording and document live contract**
+- [x] **Step 1: Remove stale backend wording and document live contract**
 
 Replace remaining STDB language in `docs/architecture/app-foundation.md` with local JSONL truth, Lance derived recall, and GitHub sync planned/redaction-gated. Add operator stream ownership, authenticated API/WS, Desktop native auth bridge, per-call DREX routing, and current route-cost truth classes.
 
