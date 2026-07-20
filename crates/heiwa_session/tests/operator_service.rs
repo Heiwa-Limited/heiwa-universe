@@ -246,6 +246,8 @@ fn deleting_derived_indexes_rebuilds_identical_fts_and_lance_event_sets_from_jou
 
     let sink = DeterministicLanceSink::open(&lance_path);
     rebuild_operator_indexes_at(&service, &sink, &fts_path).unwrap();
+    let mut contaminated_ids = expected_ids.clone();
+    contaminated_ids.insert(stale_event_id.to_string());
     {
         let conn = rusqlite::Connection::open(&fts_path).unwrap();
         conn.execute(
@@ -262,6 +264,11 @@ fn deleting_derived_indexes_rebuilds_identical_fts_and_lance_event_sets_from_jou
         .unwrap();
     }
     sink.insert_stale("default", stale_event_id);
+    assert_eq!(fts_event_ids(&fts_path, "phoenix"), contaminated_ids);
+    assert_eq!(
+        sink.matching_event_ids("default", &event_ids_by_key),
+        contaminated_ids
+    );
 
     let before_report = rebuild_operator_indexes_at(&service, &sink, &fts_path).unwrap();
     let fts_before = fts_event_ids(&fts_path, "phoenix");
