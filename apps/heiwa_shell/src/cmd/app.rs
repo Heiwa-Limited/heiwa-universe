@@ -958,7 +958,7 @@ async fn handle_connection(mut stream: TcpStream, started_at: Arc<String>) -> Re
     }
     let head_only = method == "HEAD";
 
-    if is_runtime_authenticated_path(path) {
+    if is_runtime_authenticated_request(method, path) {
         if let Err(error) = operator_auth_subject(&request) {
             let (status, code) = operator_auth_response(error);
             return write_response(
@@ -1263,15 +1263,13 @@ fn is_operator_api_path(path: &str) -> bool {
     path == "/api/v1/operator" || path.starts_with("/api/v1/operator/")
 }
 
-fn is_runtime_authenticated_path(path: &str) -> bool {
-    is_operator_api_path(path)
-        || matches!(
-            path,
-            "/api/v1/repl"
-                | "/api/v1/repl/stream"
-                | "/api/v1/agents/dispatch"
-                | "/api/v1/calendar/holds"
-        )
+fn is_runtime_authenticated_request(method: &str, path: &str) -> bool {
+    if is_operator_api_path(path) || matches!(path, "/api/v1/repl" | "/api/v1/repl/stream") {
+        return true;
+    }
+    path.starts_with("/api/v1/")
+        && matches!(method, "POST" | "PUT" | "PATCH" | "DELETE")
+        && path != "/api/v1/route/preview"
 }
 
 fn operator_auth_subject(
@@ -4515,6 +4513,30 @@ mod app_readmodel_tests {
     use heiwa_evidence::OperatorJournal;
     use heiwa_session::operator::{OperatorSessionService, StartTurnRequest};
     use tokio::sync::broadcast;
+
+    #[test]
+    fn runtime_auth_classifier_defaults_api_mutations_closed() {
+        for method in ["POST", "PUT", "PATCH", "DELETE"] {
+            assert!(is_runtime_authenticated_request(
+                method,
+                "/api/v1/future-action"
+            ));
+        }
+        assert!(is_runtime_authenticated_request(
+            "GET",
+            "/api/v1/operator/threads"
+        ));
+        assert!(is_runtime_authenticated_request(
+            "POST",
+            "/api/v1/calendar/holds"
+        ));
+        assert!(!is_runtime_authenticated_request(
+            "POST",
+            "/api/v1/route/preview"
+        ));
+        assert!(!is_runtime_authenticated_request("GET", "/api/v1/status"));
+        assert!(!is_runtime_authenticated_request("GET", "/"));
+    }
 
     async fn written_status_line(status: u16) -> String {
         let listener = TcpListener::bind(("127.0.0.1", 0)).await.unwrap();
