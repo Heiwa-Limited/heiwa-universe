@@ -202,6 +202,7 @@ export class OperatorClient {
   }
 
   private scheduleRecovery(threadId: string, generation: number, run: SubscriptionRun): void {
+    if (this.lifecycleState.status === "error") return;
     if (this.recovery?.generation === generation) return;
     if (this.invalidCursorRecoveries >= MAX_INVALID_CURSOR_RECOVERIES) {
       this.reportError("operator_history_unavailable", generation);
@@ -219,6 +220,7 @@ export class OperatorClient {
         this.dependencies.onChange?.();
         const cursor = await this.replayHistory(threadId, generation);
         this.assertCurrent(threadId, generation);
+        if (this.lifecycleState.status !== "starting") return;
         this.transitionLifecycle({ status: "ready", error: null });
         this.dependencies.onChange?.();
         if (this.recovery === recoveryRecord) this.recovery = null;

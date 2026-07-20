@@ -288,6 +288,74 @@ describe("OperatorClient", () => {
     expect(client.state()).toEqual({ status: "ready", error: null });
   });
 
+  it("does not let late recovery success clear a newer submission error", async () => {
+    const recoveryHistory = deferred<OperatorHistoryResponse>();
+    let historyCalls = 0;
+    const get = vi.fn(() => {
+      historyCalls += 1;
+      return historyCalls === 1 ? Promise.resolve(history([], null)) : recoveryHistory.promise;
+    });
+    const firstSubscription = deferred<void>();
+    const callbacks: Array<(frame: OperatorFrame) => void> = [];
+    const subscribe = vi.fn((_threadId: string, _after: string | null, onFrame: (frame: OperatorFrame) => void) => {
+      callbacks.push(onFrame);
+      return callbacks.length === 1 ? firstSubscription.promise : Promise.resolve();
+    });
+    const postResult = deferred<OperatorTurnSubmissionResponse>();
+    const client = new OperatorClient(new OperatorStore(), dependencies({
+      get,
+      post: vi.fn(() => postResult.promise),
+      subscribe,
+    }));
+
+    await client.start("default");
+    await flushAsyncWork();
+    const submission = client.submitTurn("fail during recovery");
+    callbacks[0]!({ type: "invalid_cursor", code: "invalid_cursor" });
+    firstSubscription.resolve();
+    await flushAsyncWork();
+    expect(get).toHaveBeenCalledTimes(2);
+    expect(client.state()).toEqual({ status: "starting", error: null });
+
+    postResult.reject(new Error("submission failed"));
+    await expect(submission).rejects.toThrow("operator_submission_unavailable");
+    expect(client.state()).toEqual({ status: "error", error: "operator_submission_unavailable" });
+
+    recoveryHistory.resolve(history([], null));
+    await flushAsyncWork();
+
+    expect(client.state()).toEqual({ status: "error", error: "operator_submission_unavailable" });
+  });
+
+  it("does not start invalid-cursor recovery after a terminal submission error", async () => {
+    const subscription = deferred<void>();
+    const callbacks: Array<(frame: OperatorFrame) => void> = [];
+    const subscribe = vi.fn((_threadId: string, _after: string | null, onFrame: (frame: OperatorFrame) => void) => {
+      callbacks.push(onFrame);
+      return subscription.promise;
+    });
+    const postResult = deferred<OperatorTurnSubmissionResponse>();
+    const get = vi.fn(async () => history([], null));
+    const client = new OperatorClient(new OperatorStore(), dependencies({
+      get,
+      post: vi.fn(() => postResult.promise),
+      subscribe,
+    }));
+
+    await client.start("default");
+    await flushAsyncWork();
+    const submission = client.submitTurn("fail before recovery");
+    postResult.reject(new Error("submission failed"));
+    await expect(submission).rejects.toThrow("operator_submission_unavailable");
+
+    callbacks[0]!({ type: "invalid_cursor", code: "invalid_cursor" });
+    await flushAsyncWork();
+
+    expect(get).toHaveBeenCalledOnce();
+    expect(client.state()).toEqual({ status: "error", error: "operator_submission_unavailable" });
+    subscription.resolve();
+  });
+
   it("recovers when the replacement subscription immediately reports another invalid cursor", async () => {
     let subscriptions = 0;
     const subscribe = vi.fn(async (_threadId: string, _after: string | null, onFrame: (frame: OperatorFrame) => void) => {
