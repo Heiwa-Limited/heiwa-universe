@@ -6,7 +6,7 @@ import {
   runtimeStatus,
   runtimeVersion,
   providersFromSnapshot,
-  dispatchSubagent,
+  operatorSubscribe,
   herdPanes as loadHerdSnapshot,
   herdCommandCatalog,
   readHerdPane,
@@ -15,11 +15,13 @@ import {
   focusHerdPane,
   splitHerdPane,
   type RuntimeHealth,
-  type AgentRow,
   type HerdPane,
   type HerdActionResult,
   type HerdCommandSpec,
 } from "./runtime";
+import { OperatorClient } from "./operator/client";
+import { OperatorStore } from "./operator/store";
+import type { OperatorProjection, OperatorTurn } from "./operator/types";
 
 // ═══════════════════════════════════════════════════════════════════════════
 // Types
@@ -49,15 +51,6 @@ type DockItem = {
   preview: () => DockPreview;
 };
 
-type ChatMessage = {
-  id: string;
-  role: "user" | "assistant" | "system" | "subagent";
-  body: string;
-  meta?: string;       // provider/model or subagent name
-  ts: number;
-  compacted?: boolean; // true if this is a summary of older messages
-};
-
 type CalendarEvent = {
   id?: string;
   title?: string;
@@ -68,18 +61,6 @@ type CalendarEvent = {
   status?: string;
   source?: string;
   note?: string;
-};
-
-type SubagentTask = {
-  id: string;
-  task: string;
-  provider?: string;
-  model?: string;
-  route?: string;
-  status: "queued" | "running" | "accepted" | "done" | "error";
-  output?: string;
-  started_at?: number;
-  ended_at?: number;
 };
 
 type InboxItem = {
@@ -109,13 +90,9 @@ type SubApp = {
 
 const app = document.querySelector<HTMLDivElement>("#app")!;
 let health: RuntimeHealth | null = null;
-let busy = false;
 let view: View = "home";
-let messages: ChatMessage[] = [];
 let calendarEvents: CalendarEvent[] = [];
-let subagents: SubagentTask[] = [];
 let inbox: InboxItem[] = [];
-let agents: AgentRow[] = [];
 let herdPanes: HerdPane[] = [];
 let herdCommands: HerdCommandSpec[] = [];
 let herdStatus: "checking" | "online" | "offline" = "checking";
@@ -127,13 +104,20 @@ let selectedPaneStatus = "";
 let paneMode: "send" | "run" = "send";
 let ws: WebSocket | null = null;
 let calendarDate = new Date();
+const OPERATOR_THREAD_ID = "default";
+const operatorStore = new OperatorStore();
+const operatorClient = new OperatorClient(operatorStore, {
+  get: apiGet,
+  post: apiPost,
+  subscribe: operatorSubscribe,
+  randomUUID: () => crypto.randomUUID(),
+  onChange: refreshOperatorUi,
+  onError: refreshOperatorUi,
+});
 
 // ═══════════════════════════════════════════════════════════════════════════
 // Helpers
 // ═══════════════════════════════════════════════════════════════════════════
-
-let _idCounter = 0;
-function uid(): string { return `m${++_idCounter}_${Date.now().toString(36)}`; }
 
 function esc(s: string): string {
   return s.replace(/[&<>"']/g, (c) =>
@@ -162,8 +146,10 @@ function pendingApprovalCount(): number {
 }
 
 function liveWorkerCount(): number {
-  const activeSubagents = subagents.filter((s) => s.status === "queued" || s.status === "running" || s.status === "accepted").length;
-  return activeSubagents + herdPanes.length + (health?.snapshot?.data?.workers?.live ?? 0);
+  const activeTurns = operatorStore.snapshot().turns.filter((turn) =>
+    turn.status === "open" || turn.status === "running" || turn.status === "cancelling"
+  ).length;
+  return activeTurns + herdPanes.length + (health?.snapshot?.data?.workers?.live ?? 0);
 }
 
 function nextCalendarItems(limit = 3): CalendarEvent[] {
@@ -359,13 +345,6 @@ async function loadInbox(): Promise<void> {
   } catch { inbox = []; }
 }
 
-async function loadAgents(): Promise<void> {
-  try {
-    const resp = await apiGet<{ data?: { agents?: AgentRow[] } }>("/api/v1/agents");
-    agents = resp?.data?.agents ?? [];
-  } catch { agents = []; }
-}
-
 async function loadHerd(): Promise<void> {
   try {
     const snapshot = await loadHerdSnapshot();
@@ -430,7 +409,7 @@ async function runPaneAction(action: () => Promise<HerdActionResult>): Promise<v
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
-// WebSocket — live subagent + dispatch events
+// WebSocket — legacy approval and goal refresh only
 // ═══════════════════════════════════════════════════════════════════════════
 
 function connectWS(): void {
@@ -446,25 +425,11 @@ function connectWS(): void {
       const event = data.event as string;
 
       if (event === "dispatch_request_appeared" || event === "dispatch_request_decided") {
-        // Refresh inbox/approvals in background
-        loadInbox();
+        void loadInbox().then(() => render());
       }
 
-      if (event === "subagent_update") {
-        const sa = data.payload as SubagentTask;
-        const idx = subagents.findIndex(s => s.id === sa.id);
-        if (idx >= 0) subagents[idx] = { ...subagents[idx], ...sa };
-        else subagents.unshift(sa);
-        if (view === "agents" || view === "chat") render();
-      }
-
-      if (event === "subagent_output") {
-        const { task_id, text } = data.payload;
-        const sa = subagents.find(s => s.id === task_id);
-        if (sa) {
-          sa.output = (sa.output || "") + text;
-          if (view === "agents") render();
-        }
+      if (event === "goal_updated") {
+        void loadHealth().then(() => render());
       }
     } catch { /* ignore malformed */ }
   };
@@ -476,114 +441,11 @@ function connectWS(): void {
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
-// Chat: send message via SSE streaming
+// Operator submission — durable stream owns all displayed rows
 // ═══════════════════════════════════════════════════════════════════════════
 
 async function sendChat(text: string): Promise<void> {
-  const userMsg: ChatMessage = { id: uid(), role: "user", body: text, ts: Date.now() };
-  messages.push(userMsg);
-
-  const assistantId = uid();
-  const assistantMsg: ChatMessage = { id: assistantId, role: "assistant", body: "", meta: "…", ts: Date.now() };
-  messages.push(assistantMsg);
-  busy = true;
-  render();
-
-  try {
-    const resp = await apiPost<{
-      ok?: boolean;
-      data?: { response?: string; trace?: { provider?: string; model?: string; intent?: string; mode?: string } };
-      error?: { message?: string; code?: string };
-    }>("/api/v1/repl", { prompt: text });
-
-    if (resp?.ok === false) {
-      assistantMsg.body = `Error: ${resp.error?.message || resp.error?.code || "request failed"}`;
-      assistantMsg.meta = "error";
-    } else {
-      assistantMsg.body = resp?.data?.response || "No response.";
-      const trace = resp?.data?.trace;
-      const route = trace?.provider || trace?.mode || "heiwa";
-      const model = trace?.model || trace?.intent || "";
-      assistantMsg.meta = model ? `${route}/${model}` : route;
-    }
-  } catch (e) {
-    assistantMsg.body = `Connection error: ${e instanceof Error ? e.message : String(e)}`;
-    assistantMsg.meta = "error";
-  } finally {
-    busy = false;
-    render();
-  }
-}
-
-// ═══════════════════════════════════════════════════════════════════════════
-// Subagent dispatch
-// ═══════════════════════════════════════════════════════════════════════════
-
-async function dispatchTask(text: string): Promise<void> {
-  const task: SubagentTask = {
-    id: uid(),
-    task: text,
-    provider: "auto",
-    model: "router-selected",
-    route: "auto",
-    status: "queued",
-    started_at: Date.now(),
-  };
-  subagents.unshift(task);
-  view = "agents";
-  render();
-
-  try {
-    task.status = "running";
-    render();
-
-    const resp = await dispatchSubagent({ task: text, lane: "auto", approval_policy: "ask" });
-    task.status = resp?.data?.status === "accepted" ? "accepted" : "done";
-    task.provider = resp?.data?.provider || "auto";
-    task.model = resp?.data?.model || "router-selected";
-    task.route = `${task.provider}/${task.model}`;
-    task.output = resp?.data?.response || resp?.data?.error || "Accepted by Heiwa router. Results will stream back when available.";
-    task.ended_at = Date.now();
-
-    // Inject summary into chat without exposing model choice as a user control.
-    const route = task.route || "auto";
-    const summary = `[${route}] ${task.output.slice(0, 300)}${task.output.length > 300 ? "…" : ""}`;
-    messages.push({ id: uid(), role: "subagent", body: summary, meta: route, ts: Date.now() });
-  } catch (e) {
-    task.status = "error";
-    task.output = e instanceof Error ? e.message : String(e);
-    task.ended_at = Date.now();
-  }
-  render();
-}
-
-// ═══════════════════════════════════════════════════════════════════════════
-// Auto-compaction: summarize old messages into a single compacted block
-// ═══════════════════════════════════════════════════════════════════════════
-
-function autoCompact(): void {
-  const COMPACT_THRESHOLD = 30; // compact when > 30 messages
-  if (messages.length <= COMPACT_THRESHOLD) return;
-
-  // Keep last 15 messages intact, compact everything before
-  const keepFrom = messages.length - 15;
-  const toCompact = messages.slice(0, keepFrom);
-  const kept = messages.slice(keepFrom);
-
-  // Build a simple summary
-  const userMsgs = toCompact.filter(m => m.role === "user").map(m => m.body).join(" | ");
-  const summary = `[${toCompact.length} earlier messages compacted: ${userMsgs.slice(0, 200)}${userMsgs.length > 200 ? "…" : ""}]`;
-
-  const compacted: ChatMessage = {
-    id: uid(),
-    role: "system",
-    body: summary,
-    meta: "auto-compacted",
-    ts: toCompact[toCompact.length - 1].ts,
-    compacted: true,
-  };
-
-  messages = [compacted, ...kept];
+  await operatorClient.submitTurn(text);
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -592,6 +454,8 @@ function autoCompact(): void {
 
 function dockItems(): DockItem[] {
   const next = nextCalendarItems(1)[0];
+  const operator = operatorStore.snapshot();
+  const operatorStatus = operatorClient.state().status;
   return [
     {
       id: "home",
@@ -614,9 +478,11 @@ function dockItems(): DockItem[] {
       preview: () => ({
         title: "AI Console",
         lines: [
-          `${messages.length} messages`,
+          `${operator.messages.length} messages`,
           `${connectedProviderCount()} connected providers`,
-          busy ? "route in flight" : "ready",
+          operatorStatus === "submitting" || operator.turns.some((turn) => turn.status === "running")
+            ? "route in flight"
+            : operatorStatus,
         ],
       }),
     },
@@ -680,7 +546,7 @@ function dockItems(): DockItem[] {
         title: "Workers",
         lines: [
           `${liveWorkerCount()} live`,
-          `${subagents.length || agents.length} known tasks`,
+          `${operator.turns.length} known tasks`,
         ],
       }),
     },
@@ -890,24 +756,36 @@ function renderWindows(): string {
 // ═══════════════════════════════════════════════════════════════════════════
 
 function renderMessages(): string {
+  const snapshot = operatorStore.snapshot();
+  const transients = Object.entries(snapshot.transientByTurn).map(([turnId, body]) => ({
+    id: `transient-${turnId}`,
+    role: "assistant" as const,
+    body,
+    meta: "streaming",
+    occurredAt: "",
+  }));
+  const messages = [
+    ...snapshot.messages.map((message) => ({
+      ...message,
+      meta: [message.provider, message.model].filter(Boolean).join("/") || (message.receiptRef ? "receipt linked" : ""),
+    })),
+    ...transients,
+  ];
   if (messages.length === 0) {
+    const unavailable = operatorClient.state().status === "error";
     return `<div class="chat-empty">
       <div class="chat-empty-icon">✦</div>
-      <p>No messages yet.</p>
+      <p>${unavailable ? "Operator stream unavailable." : "No messages yet."}</p>
     </div>`;
   }
 
   return messages.map(m => {
-    if (m.compacted) {
-      return `<div class="chat-compacted" title="${esc(m.body)}">📎 ${esc(m.body)}</div>`;
-    }
-    const isSubagent = m.role === "subagent";
     return `
       <article class="chat-msg ${m.role}">
         <div class="chat-msg-header">
-          <span class="chat-role">${isSubagent ? "↳ subagent" : m.role}</span>
+          <span class="chat-role">${m.role}</span>
           <span class="chat-meta">${esc(m.meta || "")}</span>
-          <span class="chat-time">${timeFmt(m.ts)}</span>
+          <span class="chat-time">${timeFmt(Date.parse(m.occurredAt))}</span>
         </div>
         <div class="chat-body">${esc(m.body)}</div>
       </article>
@@ -996,12 +874,48 @@ function renderCalendar(): string {
 // Render: agents view
 // ═══════════════════════════════════════════════════════════════════════════
 
+function routeForTurn(turn: OperatorTurn, routes: Record<string, OperatorProjection>): OperatorProjection | undefined {
+  return Object.values(routes)
+    .filter((route) => route.turnId === turn.turnId)
+    .sort((left, right) => left.occurredAt.localeCompare(right.occurredAt))
+    .at(-1);
+}
+
+function routeLabel(route?: OperatorProjection): string {
+  if (!route) return "auto";
+  const provider = typeof route.payload.provider === "string" ? route.payload.provider : "auto";
+  const model = typeof route.payload.model === "string" ? route.payload.model : "";
+  return [provider, model].filter(Boolean).join("/");
+}
+
+function renderTurnRows(): string {
+  const snapshot = operatorStore.snapshot();
+  if (snapshot.turns.length === 0) return '<p class="muted">No operator turns yet.</p>';
+  return [...snapshot.turns].reverse().map(turn => {
+    const route = routeForTurn(turn, snapshot.routesByCall);
+    const output = snapshot.messages.find((message) => message.role === "assistant" && message.turnId === turn.turnId)?.body;
+    const task = turn.prompt || "Operator turn";
+    return `
+      <div class="subagent-card ${cssToken(turn.status)}">
+        <div class="sa-header">
+          <span class="sa-status-dot ${cssToken(turn.status)}"></span>
+          <span class="sa-task">${esc(task.slice(0, 80))}${task.length > 80 ? "…" : ""}</span>
+          <span class="sa-meta">${esc(routeLabel(route))}</span>
+          <span class="sa-time">${timeFmt(Date.parse(turn.updatedAt || turn.startedAt || ""))}</span>
+        </div>
+        ${output ? `<div class="sa-output">${esc(output)}</div>` : ""}
+      </div>
+    `;
+  }).join("");
+}
+
 function renderAgents(): string {
+  const dispatchDisabled = operatorClient.state().status !== "ready";
   return `
     <div class="view agents-view">
       <div class="view-header">
-        <h2>Subagents</h2>
-        <p class="muted">Background tasks dispatched to local or cloud models. Results stream into chat.</p>
+        <h2>Operator turns</h2>
+        <p class="muted">Durable tasks routed per call to the cheapest provider above the required quality floor.</p>
       </div>
 
       <div class="dispatch-quick">
@@ -1011,24 +925,12 @@ function renderAgents(): string {
             <strong>Auto-routed</strong>
             <span>Heiwa chooses the smallest sufficient route by task, privacy, quota, device state, and evidence quality.</span>
           </div>
-          <button id="dispatch-btn" class="btn-primary">Dispatch</button>
+          <button id="dispatch-btn" class="btn-primary" ${dispatchDisabled ? "disabled" : ""}>Dispatch</button>
         </div>
       </div>
 
       <div class="subagent-list">
-        ${subagents.length === 0 ? '<p class="muted">No subagents dispatched yet.</p>' :
-          subagents.map(sa => `
-            <div class="subagent-card ${sa.status}">
-              <div class="sa-header">
-                <span class="sa-status-dot ${sa.status}"></span>
-                <span class="sa-task">${esc(sa.task.slice(0, 80))}${sa.task.length > 80 ? "…" : ""}</span>
-                <span class="sa-meta">${esc(sa.route || [sa.provider, sa.model].filter(Boolean).join("/") || "auto")}</span>
-                <span class="sa-time">${sa.ended_at ? timeFmt(sa.ended_at) : sa.started_at ? timeFmt(sa.started_at) : ""}</span>
-              </div>
-              ${sa.output ? `<div class="sa-output">${esc(sa.output)}</div>` : ""}
-            </div>
-          `).join("")
-        }
+        ${renderTurnRows()}
       </div>
     </div>
   `;
@@ -1101,12 +1003,42 @@ function renderFeatureWindow(kind: "mail" | "finance" | "social"): string {
 
 async function loadForView(nextView: View): Promise<void> {
   if (nextView === "home" || nextView === "windows") {
-    await Promise.all([loadCalendar(), loadInbox(), loadAgents(), loadHerd(), loadHerdCommands()]);
+    await Promise.all([loadCalendar(), loadInbox(), loadHerd(), loadHerdCommands()]);
     if (nextView === "windows") await loadSelectedPaneText();
   }
   if (nextView === "calendar") await loadCalendar();
-  if (nextView === "agents") await loadAgents();
   if (nextView === "mail") await loadInbox();
+}
+
+function refreshOperatorUi(): void {
+  const disabled = operatorClient.state().status !== "ready";
+  const sendButton = document.querySelector<HTMLButtonElement>("#send-btn");
+  if (sendButton) {
+    sendButton.disabled = disabled;
+    sendButton.textContent = disabled ? "…" : "↑";
+  }
+  const dispatchButton = document.querySelector<HTMLButtonElement>("#dispatch-btn");
+  if (dispatchButton) dispatchButton.disabled = disabled;
+
+  for (const viewId of ["chat", "agents"] as const) {
+    const preview = dockItems().find((item) => item.id === viewId)?.preview();
+    const target = document.querySelector<HTMLElement>(`.rail-btn[data-view="${viewId}"] .dock-preview`);
+    if (preview && target) {
+      target.innerHTML = `<strong>${esc(preview.title)}</strong>${preview.lines.map((line) => `<span>${esc(line)}</span>`).join("")}`;
+    }
+  }
+
+  if (view === "chat") {
+    const chat = document.querySelector<HTMLElement>("#chat-messages");
+    if (chat) {
+      chat.innerHTML = renderMessages();
+      chat.scrollTop = chat.scrollHeight;
+    }
+  }
+  if (view === "agents") {
+    const list = document.querySelector<HTMLElement>(".subagent-list");
+    if (list) list.innerHTML = renderTurnRows();
+  }
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -1114,6 +1046,8 @@ async function loadForView(nextView: View): Promise<void> {
 // ═══════════════════════════════════════════════════════════════════════════
 
 function render(): void {
+  const operatorStatus = operatorClient.state().status;
+  const composerDisabled = operatorStatus !== "ready";
   const main =
     view === "home" ? renderHome() :
     view === "chat" ? renderChat() :
@@ -1134,7 +1068,7 @@ function render(): void {
         <div class="composer-area">
           <div class="composer-wrap">
             <textarea id="chat-input" rows="1" placeholder="Message Heiwa…"></textarea>
-            <button id="send-btn" ${busy ? "disabled" : ""}>${busy ? "…" : "↑"}</button>
+            <button id="send-btn" ${composerDisabled ? "disabled" : ""}>${composerDisabled ? "…" : "↑"}</button>
           </div>
           <div class="composer-hint">
             <span class="hint">${esc(viewCaption(view))}</span>
@@ -1242,12 +1176,11 @@ function render(): void {
 
   const doSend = async () => {
     const text = input?.value.trim() ?? "";
-    if (!text || busy) return;
+    if (!text || operatorClient.state().status !== "ready") return;
     if (input) input.value = "";
     view = "chat";
     render();
-    await sendChat(text);
-    autoCompact();
+    await sendChat(text).catch(() => undefined);
     render();
   };
 
@@ -1268,8 +1201,9 @@ function render(): void {
   const dispatchBtn = document.querySelector<HTMLButtonElement>("#dispatch-btn");
   dispatchBtn?.addEventListener("click", async () => {
     const task = document.querySelector<HTMLTextAreaElement>("#dispatch-input")?.value.trim() ?? "";
-    if (!task) return;
-    await dispatchTask(task);
+    if (!task || operatorClient.state().status !== "ready") return;
+    await sendChat(task).catch(() => undefined);
+    render();
   });
 
   // Browser bar
@@ -1296,7 +1230,8 @@ function render(): void {
 async function boot(): Promise<void> {
   render();
   await loadHealth();
-  await Promise.all([loadCalendar(), loadInbox(), loadAgents(), loadHerd(), loadHerdCommands()]);
+  await Promise.all([loadCalendar(), loadInbox(), loadHerd(), loadHerdCommands()]);
+  await operatorClient.start(OPERATOR_THREAD_ID);
   connectWS();
   render();
 }

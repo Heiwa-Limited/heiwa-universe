@@ -1,10 +1,12 @@
-import { invoke } from "@tauri-apps/api/core";
+import { Channel, invoke } from "@tauri-apps/api/core";
+import type { OperatorFrame } from "./operator/types";
 
 export type ApiErrorPayload =
   | { kind: "Offline"; detail: string }
   | { kind: "Http"; detail: { status: number; body: string } }
   | { kind: "Decode"; detail: string }
-  | { kind: "InvalidPath"; detail: string };
+  | { kind: "InvalidPath"; detail: string }
+  | { kind: "AuthNotConfigured" };
 
 export type RuntimeHealth = {
   reachable: boolean;
@@ -151,6 +153,15 @@ export async function apiGet<T>(path: string): Promise<T> {
 
 export async function apiPost<T>(path: string, body: unknown): Promise<T> {
   return invoke<T>("api_post", { path, body });
+}
+
+export async function operatorSubscribe(
+  threadId: string,
+  after: string | null,
+  onFrame: (frame: OperatorFrame) => void,
+): Promise<void> {
+  const onEvent = new Channel<OperatorFrame>(onFrame);
+  return invoke<void>("operator_subscribe", { threadId, after, onEvent });
 }
 
 export async function dispatchSubagent(req: SubagentDispatchRequest): Promise<SubagentDispatchResponse> {
