@@ -66,6 +66,12 @@ impl TestRuntime {
         )
     }
 
+    fn calendar_hold_count(&self) -> usize {
+        std::fs::read_dir(self._home.path().join(".heiwa/state/calendar/holds"))
+            .map(|entries| entries.filter_map(Result::ok).count())
+            .unwrap_or(0)
+    }
+
     fn request(&self, method: &str, target: &str, token: Option<&str>, body: Value) -> Response {
         request(self.port, method, target, token, &body.to_string())
     }
@@ -129,6 +135,58 @@ fn operator_routes_fail_closed_before_read_or_action() {
         assert_eq!(response.status, 401, "{method} {target}: {}", response.body);
         assert_eq!(response.body["error"]["code"], "unauthorized");
     }
+}
+
+#[test]
+fn agent_dispatch_authenticates_before_execution_and_accepts_valid_bearer() {
+    let runtime = TestRuntime::start_without_providers();
+    let request = json!({"task": "hi"});
+
+    for token in [None, Some("wrong-token")] {
+        let rejected = runtime.request("POST", "/api/v1/agents/dispatch", token, request.clone());
+        assert_eq!(rejected.status, 401, "{}", rejected.body);
+        assert_eq!(rejected.body["error"]["code"], "unauthorized");
+    }
+    assert!(
+        runtime
+            .external_sessions()
+            .list_threads(10)
+            .unwrap()
+            .is_empty(),
+        "rejected dispatches must not append operator events"
+    );
+
+    let accepted = runtime.request("POST", "/api/v1/agents/dispatch", Some(TOKEN), request);
+    assert_eq!(accepted.status, 202, "{}", accepted.body);
+    assert_eq!(accepted.body["data"]["status"], "accepted");
+    assert_eq!(accepted.body["data"]["provider"], "auto");
+    assert_eq!(accepted.body["data"]["model"], "router-selected");
+}
+
+#[test]
+fn calendar_hold_authenticates_before_mutation_and_accepts_valid_bearer() {
+    let runtime = TestRuntime::start_without_providers();
+    let request = json!({
+        "title": "Authenticated local hold",
+        "date": "2026-07-20",
+        "kind": "focus"
+    });
+
+    for token in [None, Some("wrong-token")] {
+        let rejected = runtime.request("POST", "/api/v1/calendar/holds", token, request.clone());
+        assert_eq!(rejected.status, 401, "{}", rejected.body);
+        assert_eq!(rejected.body["error"]["code"], "unauthorized");
+    }
+    assert_eq!(
+        runtime.calendar_hold_count(),
+        0,
+        "rejected calendar mutations must not write a hold"
+    );
+
+    let accepted = runtime.request("POST", "/api/v1/calendar/holds", Some(TOKEN), request);
+    assert_eq!(accepted.status, 201, "{}", accepted.body);
+    assert_eq!(accepted.body["data"]["hold"]["status"], "draft");
+    assert_eq!(runtime.calendar_hold_count(), 1);
 }
 
 #[test]

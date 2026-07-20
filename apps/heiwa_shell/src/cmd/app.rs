@@ -958,7 +958,7 @@ async fn handle_connection(mut stream: TcpStream, started_at: Arc<String>) -> Re
     }
     let head_only = method == "HEAD";
 
-    if is_operator_authenticated_path(path) {
+    if is_runtime_authenticated_path(path) {
         if let Err(error) = operator_auth_subject(&request) {
             let (status, code) = operator_auth_response(error);
             return write_response(
@@ -1263,8 +1263,15 @@ fn is_operator_api_path(path: &str) -> bool {
     path == "/api/v1/operator" || path.starts_with("/api/v1/operator/")
 }
 
-fn is_operator_authenticated_path(path: &str) -> bool {
-    is_operator_api_path(path) || matches!(path, "/api/v1/repl" | "/api/v1/repl/stream")
+fn is_runtime_authenticated_path(path: &str) -> bool {
+    is_operator_api_path(path)
+        || matches!(
+            path,
+            "/api/v1/repl"
+                | "/api/v1/repl/stream"
+                | "/api/v1/agents/dispatch"
+                | "/api/v1/calendar/holds"
+        )
 }
 
 fn operator_auth_subject(
