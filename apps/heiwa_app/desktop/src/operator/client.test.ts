@@ -1,7 +1,13 @@
 import { describe, expect, it, vi } from "vitest";
 import { OperatorClient, type OperatorClientDependencies } from "./client";
 import { OperatorStore } from "./store";
-import type { OperatorEvent, OperatorEventFrame, OperatorFrame, OperatorHistoryResponse } from "./types";
+import type {
+  OperatorEvent,
+  OperatorEventFrame,
+  OperatorFrame,
+  OperatorHistoryResponse,
+  OperatorTurnSubmissionResponse,
+} from "./types";
 
 function eventFrame(index: number, threadId = "team & ops"): OperatorEventFrame {
   const event: OperatorEvent = {
@@ -243,6 +249,45 @@ describe("OperatorClient", () => {
     expect(maxActive).toBe(1);
   });
 
+  it("remains submitting when invalid-cursor recovery completes before its POST", async () => {
+    const firstSubscription = deferred<void>();
+    const callbacks: Array<(frame: OperatorFrame) => void> = [];
+    const subscribe = vi.fn((_threadId: string, _after: string | null, onFrame: (frame: OperatorFrame) => void) => {
+      callbacks.push(onFrame);
+      return callbacks.length === 1 ? firstSubscription.promise : Promise.resolve();
+    });
+    const postResult = deferred<OperatorTurnSubmissionResponse>();
+    const client = new OperatorClient(new OperatorStore(), dependencies({
+      post: vi.fn(() => postResult.promise),
+      subscribe,
+    }));
+
+    await client.start("default");
+    await flushAsyncWork();
+    const submission = client.submitTurn("survive recovery");
+    callbacks[0]!({ type: "invalid_cursor", code: "invalid_cursor" });
+    expect(client.state()).toEqual({ status: "starting", error: null });
+
+    firstSubscription.resolve();
+    await flushAsyncWork();
+    expect(subscribe).toHaveBeenCalledTimes(2);
+    expect(client.state()).toEqual({ status: "submitting", error: null });
+
+    postResult.resolve({
+      ok: true,
+      data: {
+        thread_id: "default",
+        turn_id: "turn-recovered",
+        cursor: "cursor-recovered",
+        duplicate: false,
+        stream_url: "/ws",
+      },
+    });
+    await submission;
+
+    expect(client.state()).toEqual({ status: "ready", error: null });
+  });
+
   it("recovers when the replacement subscription immediately reports another invalid cursor", async () => {
     let subscriptions = 0;
     const subscribe = vi.fn(async (_threadId: string, _after: string | null, onFrame: (frame: OperatorFrame) => void) => {
@@ -401,6 +446,135 @@ describe("OperatorClient", () => {
       route_policy: { mode: "auto" },
     });
     expect(store.snapshot().messages).toEqual([]);
+  });
+
+  it("does not let a late submission success clear a newer stream error", async () => {
+    const postResult = deferred<OperatorTurnSubmissionResponse>();
+    const subscription = deferred<void>();
+    const client = new OperatorClient(new OperatorStore(), dependencies({
+      post: vi.fn(() => postResult.promise),
+      subscribe: vi.fn(() => subscription.promise),
+    }));
+    await client.start("default");
+    await flushAsyncWork();
+
+    const submission = client.submitTurn("run safely");
+    expect(client.state()).toEqual({ status: "submitting", error: null });
+
+    subscription.reject(new Error("native stream stopped"));
+    await flushAsyncWork();
+    expect(client.state()).toEqual({ status: "error", error: "operator_stream_unavailable" });
+
+    postResult.resolve({
+      ok: true,
+      data: {
+        thread_id: "default",
+        turn_id: "turn-late",
+        cursor: "cursor-late",
+        duplicate: false,
+        stream_url: "/ws",
+      },
+    });
+    await submission;
+
+    expect(client.state()).toEqual({ status: "error", error: "operator_stream_unavailable" });
+  });
+
+  it("rejects new submissions after a terminal stream error", async () => {
+    const subscription = deferred<void>();
+    const post = vi.fn();
+    const client = new OperatorClient(new OperatorStore(), dependencies({
+      post,
+      subscribe: vi.fn(() => subscription.promise),
+    }));
+    await client.start("default");
+    await flushAsyncWork();
+
+    subscription.reject(new Error("native stream stopped"));
+    await flushAsyncWork();
+
+    await expect(client.submitTurn("must not run")).rejects.toThrow("operator_client_not_ready");
+    expect(post).not.toHaveBeenCalled();
+    expect(client.state()).toEqual({ status: "error", error: "operator_stream_unavailable" });
+  });
+
+  it("keeps submitting until every concurrent submission settles", async () => {
+    const firstResult = deferred<OperatorTurnSubmissionResponse>();
+    const secondResult = deferred<OperatorTurnSubmissionResponse>();
+    const post = vi.fn()
+      .mockImplementationOnce(() => firstResult.promise)
+      .mockImplementationOnce(() => secondResult.promise);
+    const client = new OperatorClient(new OperatorStore(), dependencies({ post }));
+    await client.start("default");
+
+    const first = client.submitTurn("first");
+    const second = client.submitTurn("second");
+    firstResult.resolve({
+      ok: true,
+      data: {
+        thread_id: "default",
+        turn_id: "turn-first",
+        cursor: "cursor-first",
+        duplicate: false,
+        stream_url: "/ws",
+      },
+    });
+    await first;
+
+    expect(client.state()).toEqual({ status: "submitting", error: null });
+
+    secondResult.resolve({
+      ok: true,
+      data: {
+        thread_id: "default",
+        turn_id: "turn-second",
+        cursor: "cursor-second",
+        duplicate: false,
+        stream_url: "/ws",
+      },
+    });
+    await second;
+
+    expect(client.state()).toEqual({ status: "ready", error: null });
+  });
+
+  it("returns to ready when concurrent submissions settle out of order", async () => {
+    const firstResult = deferred<OperatorTurnSubmissionResponse>();
+    const secondResult = deferred<OperatorTurnSubmissionResponse>();
+    const post = vi.fn()
+      .mockImplementationOnce(() => firstResult.promise)
+      .mockImplementationOnce(() => secondResult.promise);
+    const client = new OperatorClient(new OperatorStore(), dependencies({ post }));
+    await client.start("default");
+
+    const first = client.submitTurn("first");
+    const second = client.submitTurn("second");
+    secondResult.resolve({
+      ok: true,
+      data: {
+        thread_id: "default",
+        turn_id: "turn-second",
+        cursor: "cursor-second",
+        duplicate: false,
+        stream_url: "/ws",
+      },
+    });
+    await second;
+    expect(client.state()).toEqual({ status: "submitting", error: null });
+
+    firstResult.resolve({
+      ok: true,
+      data: {
+        thread_id: "default",
+        turn_id: "turn-first",
+        cursor: "cursor-first",
+        duplicate: false,
+        stream_url: "/ws",
+      },
+    });
+    await first;
+
+    expect(client.state()).toEqual({ status: "ready", error: null });
   });
 
   it("rejects blank submission before transport", async () => {

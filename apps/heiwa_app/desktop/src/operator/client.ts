@@ -27,6 +27,10 @@ export type OperatorClientState =
   | { status: "idle" | "starting" | "ready" | "submitting"; error: null }
   | { status: "error"; error: OperatorClientError };
 
+type OperatorLifecycleState =
+  | { status: "idle" | "starting" | "ready"; error: null }
+  | { status: "error"; error: OperatorClientError };
+
 export type OperatorClientDependencies = {
   get: (path: string) => Promise<OperatorHistoryResponse>;
   post: (path: string, body: OperatorTurnSubmission) => Promise<OperatorTurnSubmissionResponse>;
@@ -39,11 +43,12 @@ export type OperatorClientDependencies = {
 export class OperatorClient {
   private threadId: string | null = null;
   private startPromise: Promise<void> | null = null;
-  private clientState: OperatorClientState = { status: "idle", error: null };
+  private lifecycleState: OperatorLifecycleState = { status: "idle", error: null };
   private recovery: { generation: number; promise: Promise<void> } | null = null;
   private activeSubscription: SubscriptionRun | null = null;
   private generation = 0;
   private invalidCursorRecoveries = 0;
+  private activeSubmissions = 0;
 
   constructor(
     private readonly store: OperatorStore,
@@ -63,7 +68,7 @@ export class OperatorClient {
     const startPromise = Promise.resolve().then(() => this.initialize(normalized, generation));
     this.startPromise = startPromise;
     this.store.resetProjectionForReplay();
-    this.clientState = { status: "starting", error: null };
+    this.transitionLifecycle({ status: "starting", error: null });
     this.dependencies.onChange?.();
     return startPromise;
   }
@@ -72,7 +77,7 @@ export class OperatorClient {
     try {
       const cursor = await this.replayHistory(threadId, generation);
       this.assertCurrent(threadId, generation);
-      this.clientState = { status: "ready", error: null };
+      this.transitionLifecycle({ status: "ready", error: null });
       this.dependencies.onChange?.();
       this.startSubscription(threadId, cursor, generation);
     } catch (error) {
@@ -88,13 +93,17 @@ export class OperatorClient {
   async submitTurn(prompt: string): Promise<OperatorTurnSubmissionResponse> {
     const threadId = this.threadId;
     if (!threadId) throw new Error("operator_client_not_started");
+    if (this.lifecycleState.status !== "ready") {
+      throw new Error("operator_client_not_ready");
+    }
     const generation = this.generation;
     const trimmed = prompt.trim();
     if (!trimmed) throw new Error("prompt_required");
-    this.clientState = { status: "submitting", error: null };
+    this.activeSubmissions += 1;
     this.dependencies.onChange?.();
+    let response: OperatorTurnSubmissionResponse;
     try {
-      const response = await this.dependencies.post(
+      response = await this.dependencies.post(
         `/api/v1/operator/threads/${encodeURIComponent(threadId)}/turns`,
         {
           client_request_id: this.dependencies.randomUUID(),
@@ -102,19 +111,25 @@ export class OperatorClient {
           route_policy: { mode: "auto" },
         },
       );
-      if (this.isCurrent(threadId, generation)) {
-        this.clientState = { status: "ready", error: null };
-        this.dependencies.onChange?.();
-      }
-      return response;
     } catch {
+      this.activeSubmissions -= 1;
       this.reportError("operator_submission_unavailable", generation);
       throw new Error("operator_submission_unavailable");
     }
+    this.activeSubmissions -= 1;
+    if (this.isCurrent(threadId, generation)
+      && this.activeSubmissions === 0
+      && this.lifecycleState.status === "ready") {
+      this.dependencies.onChange?.();
+    }
+    return response;
   }
 
   state(): OperatorClientState {
-    return { ...this.clientState };
+    if (this.lifecycleState.status === "ready" && this.activeSubmissions > 0) {
+      return { status: "submitting", error: null };
+    }
+    return { ...this.lifecycleState };
   }
 
   private async replayHistory(threadId: string, generation: number): Promise<string | null> {
@@ -193,7 +208,7 @@ export class OperatorClient {
       return;
     }
     this.invalidCursorRecoveries += 1;
-    this.clientState = { status: "starting", error: null };
+    this.transitionLifecycle({ status: "starting", error: null });
     this.dependencies.onChange?.();
     let recoveryRecord!: { generation: number; promise: Promise<void> };
     const promise = (async () => {
@@ -204,7 +219,7 @@ export class OperatorClient {
         this.dependencies.onChange?.();
         const cursor = await this.replayHistory(threadId, generation);
         this.assertCurrent(threadId, generation);
-        this.clientState = { status: "ready", error: null };
+        this.transitionLifecycle({ status: "ready", error: null });
         this.dependencies.onChange?.();
         if (this.recovery === recoveryRecord) this.recovery = null;
         this.startSubscription(threadId, cursor, generation);
@@ -239,8 +254,12 @@ export class OperatorClient {
 
   private reportError(code: OperatorClientError, generation = this.generation): void {
     if (generation !== this.generation) return;
-    this.clientState = { status: "error", error: code };
+    this.transitionLifecycle({ status: "error", error: code });
     this.dependencies.onError?.(code);
+  }
+
+  private transitionLifecycle(state: OperatorLifecycleState): void {
+    this.lifecycleState = state;
   }
 
   private isCurrent(threadId: string, generation: number): boolean {
