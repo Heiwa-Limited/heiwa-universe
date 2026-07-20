@@ -1,9 +1,11 @@
 use heiwa_evidence::{
     CursorError, OperatorActor, OperatorEvent, OperatorEventType, OperatorJournal, OperatorRisk,
-    OperatorSensitivity,
+    OperatorRuntimeLease, OperatorRuntimeLeaseError, OperatorSensitivity,
 };
 use serde_json::json;
 use std::io::Write;
+
+const EXPECTED_MAX_OPERATOR_ENVELOPE_BYTES: usize = 16 * 1024 * 1024;
 
 fn event(
     id: &str,
@@ -62,6 +64,89 @@ fn append_and_resume_from_versioned_cursor() {
             .collect::<Vec<_>>(),
         vec!["e2"]
     );
+}
+
+#[test]
+fn operator_runtime_lease_is_exclusive_empty_and_reacquirable() {
+    let dir = tempfile::tempdir().unwrap();
+    let first = OperatorRuntimeLease::acquire(dir.path().to_path_buf()).unwrap();
+    let lease_path = dir.path().join(".operator_runtime.lock");
+    assert_eq!(std::fs::read(&lease_path).unwrap(), b"");
+    assert!(matches!(
+        OperatorRuntimeLease::acquire(dir.path().to_path_buf()),
+        Err(OperatorRuntimeLeaseError::AlreadyHeld { .. })
+    ));
+
+    drop(first);
+    OperatorRuntimeLease::acquire(dir.path().to_path_buf()).unwrap();
+}
+
+#[test]
+fn operator_runtime_lease_is_scoped_to_one_evidence_root() {
+    let first_dir = tempfile::tempdir().unwrap();
+    let second_dir = tempfile::tempdir().unwrap();
+    let _first = OperatorRuntimeLease::acquire(first_dir.path().to_path_buf()).unwrap();
+    let _second = OperatorRuntimeLease::acquire(second_dir.path().to_path_buf()).unwrap();
+}
+
+#[test]
+fn cursor_after_exact_maximum_nonfirst_envelope_replays() {
+    let calibration_dir = tempfile::tempdir().unwrap();
+    let calibration = OperatorJournal::new(calibration_dir.path().to_path_buf()).unwrap();
+    calibration
+        .append(&event(
+            "first",
+            "thread-a",
+            OperatorEventType::UserMessage,
+            json!({"text":"first"}),
+        ))
+        .unwrap();
+    calibration
+        .append(&event(
+            "exact-max",
+            "thread-a",
+            OperatorEventType::UserMessage,
+            json!({"text":""}),
+        ))
+        .unwrap();
+    let calibration_bytes =
+        std::fs::read(calibration_dir.path().join("operator_events.jsonl")).unwrap();
+    let empty_second_len = calibration_bytes
+        .split_inclusive(|byte| *byte == b'\n')
+        .nth(1)
+        .unwrap()
+        .len();
+    let padding = EXPECTED_MAX_OPERATOR_ENVELOPE_BYTES - empty_second_len;
+
+    let dir = tempfile::tempdir().unwrap();
+    let journal = OperatorJournal::new(dir.path().to_path_buf()).unwrap();
+    journal
+        .append(&event(
+            "first",
+            "thread-a",
+            OperatorEventType::UserMessage,
+            json!({"text":"first"}),
+        ))
+        .unwrap();
+    let exact = journal
+        .append(&event(
+            "exact-max",
+            "thread-a",
+            OperatorEventType::UserMessage,
+            json!({"text":"x".repeat(padding)}),
+        ))
+        .unwrap();
+    let bytes = std::fs::read(dir.path().join("operator_events.jsonl")).unwrap();
+    assert_eq!(
+        bytes
+            .split_inclusive(|byte| *byte == b'\n')
+            .nth(1)
+            .unwrap()
+            .len(),
+        EXPECTED_MAX_OPERATOR_ENVELOPE_BYTES
+    );
+    let resumed = journal.read_after(Some(&exact.cursor), 1).unwrap();
+    assert!(resumed.events.is_empty());
 }
 
 #[test]

@@ -608,7 +608,115 @@ fn app_boot_recovers_open_turn_exactly_once_across_restarts() {
             interruptions, 1,
             "restart {restart} must leave exactly one durable recovery event"
         );
-        child.stop();
+        child.stop_and_assert_closed();
+    }
+}
+
+#[test]
+fn operator_runtime_lease_blocks_second_owner_then_allows_recovery() {
+    let home = tempfile::tempdir().unwrap();
+    let evidence = tempfile::tempdir().unwrap();
+
+    let first_state = tempfile::tempdir().unwrap();
+    let first_port = reserve_port();
+    let mut first = spawn_runtime(
+        first_port,
+        home.path(),
+        evidence.path(),
+        Some(first_state.path()),
+    );
+    wait_for_file(&first_state.path().join("workers.json"));
+
+    let sessions = OperatorSessionService::new(
+        OperatorJournal::new(evidence.path().to_path_buf()).expect("operator journal"),
+    );
+    let submission = sessions
+        .start_turn(
+            "lease-thread",
+            StartTurnRequest::auto("lease-live-turn", "remain open while owner is live"),
+        )
+        .unwrap();
+    let events_before_rejected_start = sessions
+        .events_after("lease-thread", None, 100)
+        .unwrap()
+        .events
+        .len();
+
+    let isolated_evidence = tempfile::tempdir().unwrap();
+    let isolated_state = tempfile::tempdir().unwrap();
+    let isolated_port = reserve_port();
+    let mut isolated = spawn_runtime(
+        isolated_port,
+        home.path(),
+        isolated_evidence.path(),
+        Some(isolated_state.path()),
+    );
+    wait_for_file(&isolated_state.path().join("workers.json"));
+
+    let second_state = tempfile::tempdir().unwrap();
+    let second_port = reserve_port();
+    let mut second = spawn_runtime(
+        second_port,
+        home.path(),
+        evidence.path(),
+        Some(second_state.path()),
+    );
+    let second_status = second
+        .wait_for_exit(Duration::from_secs(5))
+        .expect("second runtime sharing an evidence root must fail closed");
+    assert!(!second_status.success());
+    wait_for_port_closed(second_port);
+    assert!(
+        !second_state.path().join("workers.json").exists(),
+        "lease rejection must happen before heartbeat"
+    );
+    let still_open = sessions.thread("lease-thread").unwrap();
+    assert_eq!(still_open.turns[0].status, "open");
+    assert_eq!(
+        sessions
+            .events_after("lease-thread", None, 100)
+            .unwrap()
+            .events
+            .len(),
+        events_before_rejected_start,
+        "rejected second runtime must not append to another owner's live stream"
+    );
+
+    isolated.stop_and_assert_closed();
+
+    first.stop_and_assert_closed();
+
+    for restart in 0..2 {
+        let recovery_state = tempfile::tempdir().unwrap();
+        let recovery_port = reserve_port();
+        let mut recovery = spawn_runtime(
+            recovery_port,
+            home.path(),
+            evidence.path(),
+            Some(recovery_state.path()),
+        );
+        wait_for_file(&recovery_state.path().join("workers.json"));
+        let interruptions = sessions
+            .events_after("lease-thread", None, 100)
+            .unwrap()
+            .events
+            .iter()
+            .filter(|row| {
+                row.event.turn_id.as_deref() == Some(submission.turn_id.as_str())
+                    && row.event.event_type == heiwa_evidence::OperatorEventType::TurnInterrupted
+                    && row.event.payload["reason"] == "RUNTIME_RESTART"
+            })
+            .count();
+        assert_eq!(
+            interruptions, 1,
+            "successful restart {restart} must not duplicate recovery"
+        );
+        assert_eq!(
+            std::fs::read(evidence.path().join(".operator_runtime.lock")).unwrap(),
+            b"",
+            "runtime lease sidecar must never contain identity or auth material"
+        );
+        recovery.stop_and_assert_closed();
     }
 }
 
@@ -634,11 +742,12 @@ fn app_start_honors_explicit_state_dir_without_touching_home_state() {
         !home.path().join(".heiwa/state/workers.json").exists(),
         "isolated app start must not touch HOME-derived state"
     );
-    child.stop();
+    child.stop_and_assert_closed();
 }
 
 struct SpawnedRuntime {
     child: Child,
+    port: u16,
 }
 
 impl SpawnedRuntime {
@@ -652,7 +761,29 @@ impl SpawnedRuntime {
         }
         #[cfg(not(unix))]
         let _ = self.child.kill();
-        let _ = self.child.wait();
+
+        if self.wait_for_exit(Duration::from_secs(2)).is_none() {
+            let _ = self.child.kill();
+            let _ = self.child.wait();
+        }
+    }
+
+    fn wait_for_exit(&mut self, timeout: Duration) -> Option<std::process::ExitStatus> {
+        let deadline = Instant::now() + timeout;
+        loop {
+            match self.child.try_wait() {
+                Ok(Some(status)) => return Some(status),
+                Ok(None) if Instant::now() < deadline => {
+                    thread::sleep(Duration::from_millis(25));
+                }
+                Ok(None) | Err(_) => return None,
+            }
+        }
+    }
+
+    fn stop_and_assert_closed(&mut self) {
+        self.stop();
+        wait_for_port_closed(self.port);
     }
 }
 
@@ -683,6 +814,7 @@ fn spawn_runtime(
     }
     SpawnedRuntime {
         child: command.spawn().expect("start test runtime"),
+        port,
     }
 }
 
@@ -703,6 +835,17 @@ fn wait_for_file(path: &std::path::Path) {
         thread::sleep(Duration::from_millis(25));
     }
     panic!("test runtime did not create {}", path.display());
+}
+
+fn wait_for_port_closed(port: u16) {
+    let deadline = Instant::now() + Duration::from_secs(5);
+    while Instant::now() < deadline {
+        if TcpStream::connect(("127.0.0.1", port)).is_err() {
+            return;
+        }
+        thread::sleep(Duration::from_millis(25));
+    }
+    panic!("test runtime still listens on port {port} after shutdown");
 }
 
 fn operator_event_count(runtime: &TestRuntime, thread_id: &str) -> usize {

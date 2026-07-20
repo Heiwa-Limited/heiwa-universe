@@ -50,6 +50,61 @@ pub const OPERATOR_STREAM_KIND: &str = "operator_events";
 /// stream file has been modified by an untrusted local process.
 const MAX_OPERATOR_ENVELOPE_BYTES: usize = 16 * 1024 * 1024;
 
+const OPERATOR_RUNTIME_LEASE_FILE: &str = ".operator_runtime.lock";
+
+/// Exclusive cross-process ownership of one evidence root's operator writer.
+///
+/// The sidecar stays empty: the OS file lock is the ownership record, so no
+/// process identity, auth material, or other secret is persisted. Dropping the
+/// file releases the lease, including automatically on process termination.
+#[derive(Debug)]
+pub struct OperatorRuntimeLease {
+    _file: std::fs::File,
+}
+
+#[derive(Debug, thiserror::Error)]
+pub enum OperatorRuntimeLeaseError {
+    #[error(
+        "operator_runtime_lease_held: evidence root {root} already has a live operator runtime"
+    )]
+    AlreadyHeld { root: PathBuf },
+    #[error("operator runtime lease storage error at {root}: {source}")]
+    Storage {
+        root: PathBuf,
+        #[source]
+        source: std::io::Error,
+    },
+}
+
+impl OperatorRuntimeLease {
+    pub fn acquire(root: PathBuf) -> std::result::Result<Self, OperatorRuntimeLeaseError> {
+        std::fs::create_dir_all(&root).map_err(|source| OperatorRuntimeLeaseError::Storage {
+            root: root.clone(),
+            source,
+        })?;
+        let path = root.join(OPERATOR_RUNTIME_LEASE_FILE);
+        let file = OpenOptions::new()
+            .create(true)
+            .read(true)
+            .write(true)
+            .open(&path)
+            .map_err(|source| OperatorRuntimeLeaseError::Storage {
+                root: root.clone(),
+                source,
+            })?;
+        file.try_lock().map_err(|source| match source {
+            std::fs::TryLockError::WouldBlock => {
+                OperatorRuntimeLeaseError::AlreadyHeld { root: root.clone() }
+            }
+            std::fs::TryLockError::Error(source) => OperatorRuntimeLeaseError::Storage {
+                root: root.clone(),
+                source,
+            },
+        })?;
+        Ok(Self { _file: file })
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct OperatorActor {
     pub kind: String,
@@ -490,6 +545,12 @@ fn offset_follows_valid_operator_event(path: &Path, offset: u64) -> Result<bool>
             break 0;
         }
         if search_start == oldest_allowed_start {
+            file.seek(SeekFrom::Start(search_start - 1))?;
+            let mut preceding = [0u8; 1];
+            file.read_exact(&mut preceding)?;
+            if preceding[0] == b'\n' {
+                break search_start;
+            }
             return Ok(false);
         }
         search_end = search_start;

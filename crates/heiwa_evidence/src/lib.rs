@@ -34,8 +34,9 @@ mod state;
 pub use journal::{EvidenceTransport, JsonlTransport, NoopTransport};
 pub use operator::{
     CursorError, CursorEvent, OperatorActor, OperatorEvent, OperatorEventType, OperatorJournal,
-    OperatorPage, OperatorRisk, OperatorSensitivity, OPERATOR_CURSOR_VERSION,
-    OPERATOR_EVENT_SCHEMA_VERSION, OPERATOR_STREAM_KIND,
+    OperatorPage, OperatorRisk, OperatorRuntimeLease, OperatorRuntimeLeaseError,
+    OperatorSensitivity, OPERATOR_CURSOR_VERSION, OPERATOR_EVENT_SCHEMA_VERSION,
+    OPERATOR_STREAM_KIND,
 };
 pub use records::{
     PersistedArtifact, PersistedDispatchAck, PersistedDrexDecision, PersistedDrexFailure,

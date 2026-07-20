@@ -672,8 +672,12 @@ async fn start(args: &[String]) -> Result<()> {
     let started_at = Arc::new(chrono::Utc::now().to_rfc3339());
     let runtime_state_dir = state_dir();
 
-    // Binding establishes this process as the app runtime owner before the
-    // sole-writer session service mutates the shared operator journal.
+    // The port identifies this app instance; the evidence-root lease is the
+    // actual cross-process sole-writer boundary. Hold it for the entire app
+    // lifetime and acquire it before recovery or any heartbeat/API work.
+    let evidence_root = heiwa_evidence::journal_root()?;
+    let _operator_runtime_lease = heiwa_evidence::OperatorRuntimeLease::acquire(evidence_root)
+        .map_err(|error| anyhow!(error))?;
     let (_, sessions, _) = crate::default_model_call_runtime().map_err(anyhow::Error::msg)?;
     sessions
         .recover_interrupted()

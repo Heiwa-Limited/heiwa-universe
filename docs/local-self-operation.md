@@ -241,6 +241,11 @@ assistant deltas are transient and never advance the durable cursor.
 
 Cursor and restart recovery are fail-closed:
 
+- App startup exclusively leases the configured evidence root before recovery,
+  heartbeat, or API service. A second app process pointed at that same root
+  exits without mutating the operator stream; isolated verification roots may
+  run concurrently. The `.operator_runtime.lock` sidecar contains no identity,
+  credential, or other payload.
 - HTTP replay returns structured `invalid_cursor` for unknown versions, stream
   fingerprint mismatches, offsets beyond EOF, or offsets not on an event
   boundary. The operator client must clear its disposable projection and replay
