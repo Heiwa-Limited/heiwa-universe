@@ -9,7 +9,7 @@ const HEADER_SCAN_LIMIT: usize = 200;
 /// Max priority rows surfaced to read models.
 const PRIORITY_LIMIT: usize = 10;
 
-pub fn run(args: &[String]) -> Result<()> {
+pub async fn run(args: &[String]) -> Result<()> {
     match args.first().map(String::as_str) {
         Some("status") | None => status(args),
         Some("accounts") => accounts(args),
@@ -18,7 +18,7 @@ pub fn run(args: &[String]) -> Result<()> {
             Ok(())
         }
         Some("scan") => scan(&args[1..]),
-        Some("triage") => triage(&args[1..]),
+        Some("triage") => triage(&args[1..]).await,
         Some("--help") | Some("-h") => {
             print_help();
             Ok(())
@@ -615,7 +615,7 @@ fn write_scan_receipt(sources: &[Value], fetched: usize, appended: usize) -> Res
 /// dispatch lane the schedule command uses. Delete/archive is suggested but
 /// never staged: no write bridge exists (Gmail scope is read-only, Apple
 /// bridge is metadata-only), and pretending otherwise would be theater.
-fn triage(args: &[String]) -> Result<()> {
+async fn triage(args: &[String]) -> Result<()> {
     let dry_run = has_flag(args, "--dry-run");
     let json_output = has_flag(args, "--json");
     let no_draft = has_flag(args, "--no-draft");
@@ -661,7 +661,7 @@ fn triage(args: &[String]) -> Result<()> {
                 let (draft, draft_source) = if no_draft {
                     (template_draft(row), "template".to_string())
                 } else {
-                    generate_draft(row)
+                    generate_draft(row).await
                 };
                 let request = build_triage_request(&request_id, row, &draft, &draft_source);
                 if dry_run {
@@ -799,114 +799,38 @@ fn build_triage_request(request_id: &str, row: &Value, draft: &str, draft_source
     })
 }
 
-/// Ask the same DREX + quota router the REPL uses for a model choice.
-/// Mail metadata is personal, so only local routes are accepted — a remote
-/// winner is declined and we fall back to the default local model. Returns
-/// None when routing is unavailable (empty tiers, route error).
-fn route_for_draft() -> Option<crate::RouteResult> {
-    let registry = heiwa_provider::AccountRegistry::load();
-    let tiers = crate::get_live_model_tiers(&registry);
-    if tiers.is_empty() {
-        return None;
-    }
-    let ledger = crate::open_default_quota_ledger();
-    let pins = crate::SessionPins::new();
-    let now = chrono::Utc::now().timestamp();
-    match crate::route_task_with_quota(
-        "draft a short personal email reply from mail metadata",
-        &pins,
-        &tiers,
-        ledger.as_ref(),
-        now,
-    ) {
-        Ok(crate::RouteOutcome::Routed(route)) if route.provider == "ollama" => Some(*route),
-        _ => None,
-    }
-}
-
-/// Suggested reply text. Tries local Ollama first (metadata only — the
+/// Suggested reply text. Tries the local-only model-call route first (metadata only — the
 /// prompt carries sender + subject, never a body, and never leaves the
 /// machine); falls back to a deterministic template when Ollama is down.
-/// Model choice comes from the quota-aware DREX route when available, and
-/// successful generations are recorded in the quota ledger so "auto"
-/// routing sees real local usage.
-fn generate_draft(row: &Value) -> (String, String) {
-    let base =
-        std::env::var("HEIWA_OLLAMA_BASE").unwrap_or_else(|_| "http://localhost:11434".to_string());
-    let route = route_for_draft();
-    let model = std::env::var("HEIWA_OLLAMA_MODEL")
-        .ok()
-        .or_else(|| route.as_ref().map(|r| r.provider_model_id.clone()))
-        .unwrap_or_else(|| "gemma4:latest".to_string());
-    let sender = row.get("sender").and_then(Value::as_str).unwrap_or("");
-    let subject = row.get("subject").and_then(Value::as_str).unwrap_or("");
-    let prompt = format!(
-        "Draft a short email reply (2-3 sentences) on behalf of Devon. \
-         You only know the metadata — sender: {sender}, subject: \"{subject}\" — \
-         the body was not read for privacy reasons. Acknowledge the email and \
-         promise a fuller response where appropriate. Plain text only, no \
-         subject line, no placeholders. Sign as Devon."
-    );
-    let body = json!({"model": model, "prompt": prompt, "stream": false});
-    let output = std::process::Command::new("curl")
-        .args(["-s", "-m", "45", "-X", "POST"])
-        .arg(format!("{base}/api/generate"))
-        .arg("-d")
-        .arg(body.to_string())
-        .output();
-    if let Ok(output) = output {
-        if output.status.success() {
-            if let Ok(parsed) = serde_json::from_slice::<Value>(&output.stdout) {
-                if let Some(text) = parsed.get("response").and_then(Value::as_str) {
-                    let text = text.trim();
-                    if !text.is_empty() {
-                        let source = match &route {
-                            Some(route) => {
-                                record_draft_usage(route, &parsed);
-                                format!("ollama:{model} (drex-routed)")
-                            }
-                            None => format!("ollama:{model}"),
-                        };
-                        return (text.to_string(), source);
-                    }
-                }
-            }
+/// Model choice and durable route evidence come from `ModelCallExecutor`.
+async fn generate_draft(row: &Value) -> (String, String) {
+    let prompt = draft_prompt(row);
+    let candidates = crate::discovered_model_call_candidates().await;
+    if let Ok(result) = crate::execute_mail_draft_model_call(candidates, &prompt).await {
+        let text = result.text.trim();
+        if !text.is_empty() {
+            return (
+                text.to_string(),
+                format!(
+                    "{}/{} (drex-routed)",
+                    result.provider, result.provider_model_id
+                ),
+            );
         }
     }
     (template_draft(row), "template".to_string())
 }
 
-/// Feed real local usage back into the quota ledger so the auto router's
-/// budget view reflects mail-triage generations like any REPL turn.
-fn record_draft_usage(route: &crate::RouteResult, ollama_response: &Value) {
-    let Some(ledger) = crate::open_default_quota_ledger() else {
-        return;
-    };
-    let count = |key: &str| {
-        ollama_response
-            .get(key)
-            .and_then(Value::as_u64)
-            .unwrap_or(0) as u32
-    };
-    let usage = heiwa_provider::adapter::TokenUsage {
-        input_tokens: count("prompt_eval_count"),
-        output_tokens: count("eval_count"),
-        cache_read_tokens: 0,
-        cache_write_tokens: 0,
-        cost_usd: 0.0,
-    };
-    let run_id = format!(
-        "mail-triage-{}",
-        &uuid::Uuid::new_v4().simple().to_string()[..8]
-    );
-    let _ = crate::record_local_quota_run(
-        &ledger,
-        &run_id,
-        route,
-        Some(&usage),
-        None,
-        chrono::Utc::now().timestamp(),
-    );
+fn draft_prompt(row: &Value) -> String {
+    let sender = row.get("sender").and_then(Value::as_str).unwrap_or("");
+    let subject = row.get("subject").and_then(Value::as_str).unwrap_or("");
+    format!(
+        "Draft a short email reply (2-3 sentences) on behalf of Devon. \
+         You only know the metadata — sender: {sender}, subject: \"{subject}\" — \
+         the body was not read for privacy reasons. Acknowledge the email and \
+         promise a fuller response where appropriate. Plain text only, no \
+         subject line, no placeholders. Sign as Devon."
+    )
 }
 
 pub(crate) fn template_draft(row: &Value) -> String {
@@ -1296,6 +1220,19 @@ mod tests {
         let draft = template_draft(&row);
         assert!(draft.contains("Invoice follow-up"));
         assert!(draft.contains("Devon"));
+    }
+
+    #[test]
+    fn routed_draft_prompt_contains_metadata_but_never_message_body() {
+        let row = json!({
+            "sender": "vendor@example.com",
+            "subject": "Invoice follow-up",
+            "body": "BODY_MUST_NEVER_ENTER_MODEL_PROMPT",
+        });
+        let prompt = draft_prompt(&row);
+        assert!(prompt.contains("vendor@example.com"));
+        assert!(prompt.contains("Invoice follow-up"));
+        assert!(!prompt.contains("BODY_MUST_NEVER_ENTER_MODEL_PROMPT"));
     }
 
     #[test]

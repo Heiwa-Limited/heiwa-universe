@@ -26,8 +26,8 @@ use heiwa_shell::model_calls::{
     ExecutorLoopCaller, ModelCallExecution, ModelCallExecutor, ModelCallResult,
 };
 use heiwa_shell::operator::{
-    OperatorModelTurn, OperatorStreamFrame, OperatorTurnPreparation, OperatorTurnRunner,
-    OperatorTurnWork,
+    OperatorModelTurn, OperatorPreparationContext, OperatorStreamFrame, OperatorTurnPreparation,
+    OperatorTurnRunner, OperatorTurnWork,
 };
 use std::env;
 use std::io::{self, IsTerminal, Write};
@@ -206,7 +206,6 @@ enum RouteOutcome {
 const DEFAULT_SESSION_ID: &str = "default";
 const TRANSCRIPT_CHAR_BUDGET: usize = 16_000;
 const ROUTE_COMPRESSION_BYTE_THRESHOLD: usize = 4096;
-const ROUTE_COMPRESSION_MODEL: &str = "ollama/qwen3.5:4b";
 
 #[tokio::main]
 async fn main() -> Result<()> {
@@ -1352,7 +1351,7 @@ async fn run_repl(use_cockpit: bool) -> Result<()> {
                         continue;
                     }
                     Ok(RouteOutcome::Routed(route)) => {
-                        let prepared = prepare_outbound_prompt_for_route(&route, &t);
+                        let prepared = prepare_outbound_prompt_for_route(&route, &t).await;
                         let messages = build_messages_from_transcript(
                             &state.transcript,
                             &prepared.model_prompt,
@@ -1632,7 +1631,8 @@ async fn run_cockpit_controller(
                                         "agentic: planning tools...".into(),
                                     ));
 
-                                    let prepared = prepare_outbound_prompt_for_route(&route, &t);
+                                    let prepared =
+                                        prepare_outbound_prompt_for_route(&route, &t).await;
                                     let mut messages = build_messages_from_transcript(
                                         &transcript,
                                         &prepared.model_prompt,
@@ -1842,7 +1842,7 @@ async fn run_cockpit_controller(
                                     .send(CockpitEvent::StatusUpdate("streaming...".into()));
 
                                 // Stream response
-                                let prepared = prepare_outbound_prompt_for_route(&route, &t);
+                                let prepared = prepare_outbound_prompt_for_route(&route, &t).await;
                                 let messages = build_messages_from_transcript(
                                     &transcript,
                                     &prepared.model_prompt,
@@ -2341,17 +2341,58 @@ fn build_messages_from_transcript(
     messages
 }
 
-fn prepare_outbound_prompt_for_route(route: &RouteResult, input: &str) -> PreparedRoutePrompt {
-    let pricing = pricing_for_provider(&route.provider);
-    prepare_outbound_prompt_for_route_with(route, input, |body, source| {
-        let receipt = cmd::compress::compress_text_for_source_with_pricing(
-            body,
-            source,
-            ROUTE_COMPRESSION_MODEL,
-            Some(pricing.clone()),
-        )
-        .map_err(|error| error.to_string())?;
-        Ok(RouteCompressionResult {
+async fn prepare_outbound_prompt_for_route(
+    route: &RouteResult,
+    input: &str,
+) -> PreparedRoutePrompt {
+    if !route_should_compress(route, input) {
+        return PreparedRoutePrompt {
+            model_prompt: input.to_string(),
+            compression: None,
+        };
+    }
+    let (_, sessions, _) = match default_model_call_runtime() {
+        Ok(runtime) => runtime,
+        Err(error) => {
+            return prepare_outbound_prompt_for_route_with(route, input, |_, _| Err(error));
+        }
+    };
+    let source = format!(
+        "route:{}:{}:{}",
+        route.request_id, route.provider, route.intent_key
+    );
+    let submission = match sessions.start_turn(
+        "auxiliary-compression",
+        heiwa_session::operator::StartTurnRequest::auto(
+            format!("compress-{}", uuid::Uuid::new_v4()),
+            format!("compress source={source} chars={}", input.chars().count()),
+        ),
+    ) {
+        Ok(submission) => submission,
+        Err(error) => {
+            return prepare_outbound_prompt_for_route_with(route, input, |_, _| {
+                Err(error.to_string())
+            });
+        }
+    };
+    let context = OperatorPreparationContext {
+        thread_id: submission.thread_id,
+        turn_id: submission.turn_id,
+    };
+    let result = routed_compression_receipt(
+        &context,
+        route.candidates.clone(),
+        input,
+        &source,
+        vec![],
+        Some(pricing_for_provider(&route.provider)),
+        None,
+    )
+    .await;
+    let terminal_result = finish_auxiliary_turn(&sessions, &context, result.is_ok(), "compression");
+    prepare_outbound_prompt_for_route_with(route, input, |_, _| {
+        terminal_result.map_err(|error| error.to_string())?;
+        result.map(|receipt| RouteCompressionResult {
             compressed: receipt.compressed,
             receipt_path: receipt.receipt_path,
             input_chars: receipt.input_chars,
@@ -2365,6 +2406,7 @@ fn prepare_outbound_prompt_for_route(route: &RouteResult, input: &str) -> Prepar
 }
 
 async fn prepare_outbound_prompt_for_route_cancellable(
+    context: &OperatorPreparationContext,
     route: &RouteResult,
     input: &str,
     cancelled: Arc<std::sync::atomic::AtomicBool>,
@@ -2379,12 +2421,14 @@ async fn prepare_outbound_prompt_for_route_cancellable(
         "route:{}:{}:{}",
         route.request_id, route.provider, route.intent_key
     );
-    let result = cmd::compress::compress_text_for_source_with_pricing_cancellable(
+    let result = routed_compression_receipt(
+        context,
+        route.candidates.clone(),
         input,
         &source,
-        ROUTE_COMPRESSION_MODEL,
+        vec![],
         Some(pricing_for_provider(&route.provider)),
-        cancelled.clone(),
+        Some(cancelled.as_ref()),
     )
     .await
     .map(|receipt| RouteCompressionResult {
@@ -2883,6 +2927,14 @@ fn default_loop_model_caller() -> Result<Arc<dyn heiwa_loop::LoopModelCaller>, S
     Ok(Arc::new(ExecutorLoopCaller::new(executor)))
 }
 
+async fn execute_model_call(execution: ModelCallExecution) -> Result<ModelCallResult, String> {
+    let (executor, _, _) = default_model_call_runtime()?;
+    executor
+        .execute(execution)
+        .await
+        .map_err(|error| error.to_string())
+}
+
 async fn execute_routed_model_call(
     route: &RouteResult,
     messages: Vec<Message>,
@@ -2890,7 +2942,7 @@ async fn execute_routed_model_call(
     raw_text: &str,
     delta_tx: Option<tokio::sync::mpsc::Sender<heiwa_provider::adapter::StreamEvent>>,
 ) -> Result<ModelCallResult, String> {
-    let (executor, sessions, _) = default_model_call_runtime()?;
+    let (_, sessions, _) = default_model_call_runtime()?;
     let call_id = format!("call-{}", uuid::Uuid::new_v4());
     let turn = sessions
         .start_turn(
@@ -2900,37 +2952,265 @@ async fn execute_routed_model_call(
         .map_err(|error| error.to_string())?;
     let privacy = PrivacyClass::parse(&route.privacy).map_err(str::to_string)?;
     let (_cancel_tx, cancel) = tokio::sync::watch::channel(false);
-    executor
-        .execute(ModelCallExecution {
-            request: ModelCallRequest {
-                thread_id: thread_id.to_string(),
-                turn_id: turn.turn_id,
-                call_id,
-                intent: route.intent_key.clone(),
-                stage: ModelCallStage::Execution,
-                raw_text: raw_text.to_string(),
-                privacy,
-                risk: CallRisk::Low,
-                safety: SafetyClass::low_risk_auto_approval(&CallRisk::Low),
-                required_capabilities: vec![],
-                required_context_tokens: 1,
-                minimum_quality_class: 1,
-                minimum_success_rate: 0.0,
-                maximum_marginal_cost_usd: None,
-                preferred_provider: None,
-                preferred_model: None,
-                allowed_models: vec![],
-                excluded_models: vec![],
+    execute_model_call(ModelCallExecution {
+        request: ModelCallRequest {
+            thread_id: thread_id.to_string(),
+            turn_id: turn.turn_id,
+            call_id,
+            intent: route.intent_key.clone(),
+            stage: ModelCallStage::Execution,
+            raw_text: raw_text.to_string(),
+            privacy,
+            risk: CallRisk::Low,
+            safety: SafetyClass::low_risk_auto_approval(&CallRisk::Low),
+            required_capabilities: vec![],
+            required_context_tokens: 1,
+            minimum_quality_class: 1,
+            minimum_success_rate: 0.0,
+            maximum_marginal_cost_usd: None,
+            preferred_provider: None,
+            preferred_model: None,
+            allowed_models: vec![],
+            excluded_models: vec![],
+        },
+        candidates: route.candidates.clone(),
+        messages,
+        remaining_budget_usd: None,
+        max_attempts: 3,
+        cancel,
+        delta_tx,
+    })
+    .await
+}
+
+async fn execute_compression_model_call(
+    context: &OperatorPreparationContext,
+    candidates: Vec<ModelCallCandidate>,
+    body: &str,
+    allowed_models: Vec<String>,
+    cancelled: Option<&std::sync::atomic::AtomicBool>,
+) -> Result<ModelCallResult, String> {
+    let (_cancel_tx, cancel) = tokio::sync::watch::channel(
+        cancelled.is_some_and(|flag| flag.load(std::sync::atomic::Ordering::Acquire)),
+    );
+    let local_candidates = candidates
+        .into_iter()
+        .filter(|candidate| candidate.locality == ExecutionLocality::OnDevice)
+        .collect();
+    execute_model_call(ModelCallExecution {
+        request: ModelCallRequest {
+            thread_id: context.thread_id.clone(),
+            turn_id: context.turn_id.clone(),
+            call_id: format!("call-compression-{}", uuid::Uuid::new_v4()),
+            intent: "compression".to_string(),
+            stage: ModelCallStage::Compression,
+            raw_text: format!("compress {} characters locally", body.chars().count()),
+            privacy: PrivacyClass::Sovereign,
+            risk: CallRisk::Low,
+            safety: SafetyClass::Approved,
+            required_capabilities: vec![],
+            required_context_tokens: 1,
+            minimum_quality_class: 1,
+            minimum_success_rate: 0.0,
+            maximum_marginal_cost_usd: Some(0.0),
+            preferred_provider: None,
+            preferred_model: None,
+            allowed_models,
+            excluded_models: vec![],
+        },
+        candidates: local_candidates,
+        messages: vec![
+            Message {
+                role: Role::System,
+                content: cmd::compress::COMPRESSION_PROMPT.to_string(),
             },
-            candidates: route.candidates.clone(),
-            messages,
-            remaining_budget_usd: None,
-            max_attempts: 3,
-            cancel,
-            delta_tx,
-        })
-        .await
-        .map_err(|error| error.to_string())
+            Message {
+                role: Role::User,
+                content: body.to_string(),
+            },
+        ],
+        remaining_budget_usd: Some(0.0),
+        max_attempts: 3,
+        cancel,
+        delta_tx: None,
+    })
+    .await
+}
+
+async fn routed_compression_receipt(
+    context: &OperatorPreparationContext,
+    candidates: Vec<ModelCallCandidate>,
+    body: &str,
+    source: &str,
+    allowed_models: Vec<String>,
+    pricing: Option<cmd::compress::PricingInputs>,
+    cancelled: Option<&std::sync::atomic::AtomicBool>,
+) -> Result<cmd::compress::CompressionReceipt, String> {
+    let started = std::time::Instant::now();
+    let result =
+        execute_compression_model_call(context, candidates, body, allowed_models, cancelled)
+            .await?;
+    let compressed = cmd::compress::strip_think_blocks(&result.text)
+        .trim()
+        .to_string();
+    let model = format!("{}/{}", result.provider, result.provider_model_id);
+    cmd::compress::finish_compression_receipt(
+        body,
+        source,
+        &model,
+        pricing,
+        compressed,
+        started.elapsed().as_millis() as u64,
+    )
+    .map_err(|error| error.to_string())
+}
+
+pub(crate) async fn execute_standalone_compression(
+    body: &str,
+    source: &str,
+    requested_model: &str,
+) -> anyhow::Result<cmd::compress::CompressionReceipt> {
+    let candidates = discovered_model_call_candidates().await;
+    let (_, sessions, _) = default_model_call_runtime().map_err(anyhow::Error::msg)?;
+    let client_request_id = format!("compress-{}", uuid::Uuid::new_v4());
+    let submission = sessions
+        .start_turn(
+            "auxiliary-compression",
+            heiwa_session::operator::StartTurnRequest::auto(
+                client_request_id,
+                format!("compress source={source} chars={}", body.chars().count()),
+            ),
+        )
+        .map_err(|error| anyhow!(error.to_string()))?;
+    let context = OperatorPreparationContext {
+        thread_id: submission.thread_id,
+        turn_id: submission.turn_id,
+    };
+    let result = routed_compression_receipt(
+        &context,
+        candidates,
+        body,
+        source,
+        vec![requested_model.to_string()],
+        None,
+        None,
+    )
+    .await;
+    let model_succeeded = result.is_ok();
+    let final_result = match result {
+        Ok(receipt) => Ok(receipt),
+        Err(_) => cmd::compress::finish_compression_receipt(
+            body,
+            source,
+            "deterministic/no-compression",
+            None,
+            body.to_string(),
+            0,
+        ),
+    };
+    finish_auxiliary_turn(&sessions, &context, model_succeeded, "compression")?;
+    final_result
+}
+
+fn finish_auxiliary_turn(
+    sessions: &heiwa_session::operator::OperatorSessionService,
+    context: &OperatorPreparationContext,
+    succeeded: bool,
+    stage: &str,
+) -> anyhow::Result<()> {
+    sessions.append_event(heiwa_evidence::OperatorEvent {
+        schema_version: heiwa_evidence::OPERATOR_EVENT_SCHEMA_VERSION,
+        event_id: format!("evt-{}", uuid::Uuid::new_v4()),
+        thread_id: context.thread_id.clone(),
+        turn_id: Some(context.turn_id.clone()),
+        run_id: None,
+        call_id: None,
+        event_type: heiwa_evidence::OperatorEventType::TurnCompleted,
+        occurred_at: heiwa_evidence::now_iso(),
+        actor: heiwa_evidence::OperatorActor {
+            kind: "runtime".to_string(),
+            id: "model-call-executor".to_string(),
+        },
+        risk_class: heiwa_evidence::OperatorRisk::Low,
+        sensitivity: heiwa_evidence::OperatorSensitivity::LocalPrivate,
+        parent_event_id: None,
+        correlation_id: None,
+        source_refs: vec![],
+        evidence_refs: vec![],
+        payload: serde_json::json!({
+            "stage": stage,
+            "outcome": if succeeded { "completed" } else { "deterministic_fallback" },
+        }),
+    })?;
+    Ok(())
+}
+
+pub(crate) async fn execute_mail_draft_model_call(
+    candidates: Vec<ModelCallCandidate>,
+    prompt: &str,
+) -> Result<ModelCallResult, String> {
+    let (_, sessions, _) = default_model_call_runtime()?;
+    let submission = sessions
+        .start_turn(
+            "auxiliary-mail-drafting",
+            heiwa_session::operator::StartTurnRequest::auto(
+                format!("mail-draft-{}", uuid::Uuid::new_v4()),
+                "metadata-only local mail draft",
+            ),
+        )
+        .map_err(|error| error.to_string())?;
+    let context = OperatorPreparationContext {
+        thread_id: submission.thread_id,
+        turn_id: submission.turn_id,
+    };
+    let (_cancel_tx, cancel) = tokio::sync::watch::channel(false);
+    let result = execute_model_call(ModelCallExecution {
+        request: ModelCallRequest {
+            thread_id: context.thread_id.clone(),
+            turn_id: context.turn_id.clone(),
+            call_id: format!("call-drafting-{}", uuid::Uuid::new_v4()),
+            intent: "mail_drafting".to_string(),
+            stage: ModelCallStage::Drafting,
+            raw_text: "draft from mail metadata locally".to_string(),
+            privacy: PrivacyClass::Sovereign,
+            risk: CallRisk::Low,
+            safety: SafetyClass::Approved,
+            required_capabilities: vec![],
+            required_context_tokens: 1,
+            minimum_quality_class: 1,
+            minimum_success_rate: 0.0,
+            maximum_marginal_cost_usd: Some(0.0),
+            preferred_provider: None,
+            preferred_model: None,
+            allowed_models: vec![],
+            excluded_models: vec![],
+        },
+        candidates: candidates
+            .into_iter()
+            .filter(|candidate| candidate.locality == ExecutionLocality::OnDevice)
+            .collect(),
+        messages: vec![Message {
+            role: Role::User,
+            content: prompt.to_string(),
+        }],
+        remaining_budget_usd: Some(0.0),
+        max_attempts: 3,
+        cancel,
+        delta_tx: None,
+    })
+    .await;
+    finish_auxiliary_turn(&sessions, &context, result.is_ok(), "drafting")
+        .map_err(|error| error.to_string())?;
+    result
+}
+
+pub(crate) async fn discovered_model_call_candidates() -> Vec<ModelCallCandidate> {
+    let mut registry = heiwa_provider::AccountRegistry::load();
+    heiwa_provider::detect::auto_discover(&mut registry).await;
+    get_live_model_tiers(&registry)
+        .iter()
+        .map(model_call_candidate)
+        .collect()
 }
 
 /// Record a DREX route decision in the local evidence journal.
@@ -3555,13 +3835,14 @@ fn repl_trace_payload(
 
 /// Prepare model work only after the runner has made intake durable.
 async fn prepare_operator_turn_work(
-    thread_id: String,
+    context: OperatorPreparationContext,
     mut start_request: heiwa_session::operator::StartTurnRequest,
     cancelled: Arc<std::sync::atomic::AtomicBool>,
 ) -> Result<OperatorTurnWork, String> {
     if cancelled.load(std::sync::atomic::Ordering::Acquire) {
         return Err("operator preparation cancelled before routing".to_string());
     }
+    let thread_id = context.thread_id.clone();
     let prompt = start_request.prompt.clone();
     let persisted = heiwa_session::load_transcript(&thread_id)
         .unwrap_or_else(|_| heiwa_session::PersistedTranscript::empty(&thread_id));
@@ -3604,7 +3885,8 @@ async fn prepare_operator_turn_work(
         }
         RouteOutcome::Routed(route) => {
             let prepared =
-                prepare_outbound_prompt_for_route_cancellable(&route, &prompt, cancelled).await?;
+                prepare_outbound_prompt_for_route_cancellable(&context, &route, &prompt, cancelled)
+                    .await?;
             let messages =
                 build_messages_from_transcript(&transcript_blocks, &prepared.model_prompt, &pins);
             if start_request.route_policy.privacy == "standard" && route.privacy != "standard" {
@@ -3673,13 +3955,13 @@ async fn submit_operator_turn_with_route(
 > {
     let (_, _, runner) = default_model_call_runtime()
         .map_err(|error| heiwa_shell::operator::OperatorSubmissionError::Runtime(anyhow!(error)))?;
-    let preparation_thread_id = thread_id.to_string();
     let preparation_request = start_request.clone();
-    let preparation = OperatorTurnPreparation::cancellable(move |cancelled| async move {
-        prepare_operator_turn_work(preparation_thread_id, preparation_request, cancelled)
-            .await
-            .map_err(anyhow::Error::msg)
-    });
+    let preparation =
+        OperatorTurnPreparation::cancellable_with_context(move |context, cancelled| async move {
+            prepare_operator_turn_work(context, preparation_request, cancelled)
+                .await
+                .map_err(anyhow::Error::msg)
+        });
     runner.submit(thread_id, start_request, preparation)
 }
 

@@ -680,7 +680,12 @@ fn legacy_sovereign_code_keeps_advanced_coding_or_quality_floor() {
 
 #[test]
 fn execution_stages_fail_closed_and_unknown_stage_is_invalid() {
-    for stage in [ModelCallStage::Execution, ModelCallStage::LoopIteration] {
+    for stage in [
+        ModelCallStage::Compression,
+        ModelCallStage::Drafting,
+        ModelCallStage::Execution,
+        ModelCallStage::LoopIteration,
+    ] {
         let mut blocked = request();
         blocked.stage = stage.clone();
         blocked.safety = SafetyClass::Blocked;
@@ -724,6 +729,14 @@ fn execution_stages_fail_closed_and_unknown_stage_is_invalid() {
         Err("invalid_model_call_stage")
     );
     assert!(serde_json::from_str::<ModelCallStage>("\"wire_unknown\"").is_err());
+    assert_eq!(
+        ModelCallStage::parse("compression"),
+        Ok(ModelCallStage::Compression)
+    );
+    assert_eq!(
+        ModelCallStage::parse("drafting"),
+        Ok(ModelCallStage::Drafting)
+    );
 }
 
 #[test]

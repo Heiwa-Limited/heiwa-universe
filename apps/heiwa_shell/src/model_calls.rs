@@ -750,6 +750,19 @@ async fn run_adapter(
                 .await;
         }
     });
+    // Cancelling/dropping the executor future must not detach provider work.
+    // Explicit watch cancellation still calls `interrupt`; this guard covers
+    // outer races (for example operator preparation cancellation) that drop
+    // this future before the watch branch can run.
+    struct AbortProviderOnDrop(Option<tokio::task::JoinHandle<()>>);
+    impl Drop for AbortProviderOnDrop {
+        fn drop(&mut self) {
+            if let Some(task) = self.0.take() {
+                task.abort();
+            }
+        }
+    }
+    let mut task = AbortProviderOnDrop(Some(task));
 
     let mut text = String::new();
     let mut emitted_delta = false;
@@ -760,8 +773,10 @@ async fn run_adapter(
             changed = cancel.changed(), if cancel_open => {
                 match changed {
                     Ok(()) if *cancel.borrow() => {
-                        task.abort();
-                        let _ = task.await;
+                        if let Some(task) = task.0.take() {
+                            task.abort();
+                            let _ = task.await;
+                        }
                         let _ = tokio::time::timeout(Duration::from_millis(250), adapter.interrupt()).await;
                         return Err(AdapterRunError::Cancelled);
                     }
@@ -795,26 +810,34 @@ async fn run_adapter(
                     }
                     Some(StreamEvent::Done(usage)) => {
                         if *cancel.borrow() {
-                            task.abort();
-                            let _ = task.await;
+                            if let Some(task) = task.0.take() {
+                                task.abort();
+                                let _ = task.await;
+                            }
                             let _ = tokio::time::timeout(Duration::from_millis(250), adapter.interrupt()).await;
                             return Err(AdapterRunError::Cancelled);
                         }
-                        task.abort();
-                        let _ = task.await;
+                        if let Some(task) = task.0.take() {
+                            task.abort();
+                            let _ = task.await;
+                        }
                         return Ok((text, usage, emitted_delta));
                     }
                     Some(StreamEvent::Error(error)) => {
-                        task.abort();
-                        let _ = task.await;
+                        if let Some(task) = task.0.take() {
+                            task.abort();
+                            let _ = task.await;
+                        }
                         return Err(AdapterRunError::Failed {
                             message: error,
                             emitted_delta,
                         });
                     }
                     None => {
-                        task.abort();
-                        let _ = task.await;
+                        if let Some(task) = task.0.take() {
+                            task.abort();
+                            let _ = task.await;
+                        }
                         return Err(AdapterRunError::Failed {
                             message: "provider stream ended without completion".to_string(),
                             emitted_delta,

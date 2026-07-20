@@ -17,7 +17,7 @@ pub async fn try_handle(args: &[String]) -> Result<bool> {
             Ok(true)
         }
         Some("compress") => {
-            cmd::compress::run(&args[2..])?;
+            cmd::compress::run(&args[2..]).await?;
             Ok(true)
         }
         Some("app") => {
@@ -41,7 +41,7 @@ pub async fn try_handle(args: &[String]) -> Result<bool> {
             Ok(true)
         }
         Some("mail") => {
-            cmd::mail::run(&args[2..])?;
+            cmd::mail::run(&args[2..]).await?;
             Ok(true)
         }
         Some("schedule") => {

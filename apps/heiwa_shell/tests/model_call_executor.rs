@@ -441,6 +441,62 @@ mod model_call {
     }
 
     #[tokio::test]
+    async fn compression_and_drafting_each_emit_the_complete_local_route_sequence() {
+        for stage in [ModelCallStage::Compression, ModelCallStage::Drafting] {
+            let (_evidence, service, submission) = service_and_turn();
+            let adapter = Arc::new(EventAdapter {
+                events: vec![
+                    StreamEvent::Token("local output".to_string()),
+                    StreamEvent::Done(TokenUsage::default()),
+                ],
+            }) as Arc<dyn ProviderAdapter>;
+            let executor = ModelCallExecutor::new(
+                Arc::new(move |_, _| Some(adapter.clone())),
+                service.clone(),
+            );
+            let (_cancel_tx, cancel_rx) = watch::channel(false);
+            let mut call = request("thread-1", &submission.turn_id);
+            call.call_id = format!("call-{stage:?}");
+            call.stage = stage.clone();
+            call.privacy = PrivacyClass::Sovereign;
+            call.maximum_marginal_cost_usd = Some(0.0);
+            let mut local = candidate(1, "ollama", "local-model", 0.0);
+            local.locality = ExecutionLocality::OnDevice;
+            local.tier.rate_group = "local_ollama".to_string();
+            local.cost_truth = CostTruth::LocalZeroCost;
+
+            let result = executor
+                .execute(execution(call, vec![local], 1, cancel_rx))
+                .await
+                .unwrap();
+            assert_eq!(result.text, "local output");
+            assert_eq!(result.cost_truth, CostTruth::LocalZeroCost);
+
+            let events = service
+                .events_after("thread-1", Some(&submission.cursor), 10)
+                .unwrap()
+                .events;
+            assert_eq!(
+                events
+                    .iter()
+                    .map(|row| row.event.event_type.clone())
+                    .collect::<Vec<_>>(),
+                vec![
+                    OperatorEventType::RoutePlanned,
+                    OperatorEventType::RouteAttempted,
+                    OperatorEventType::RouteCompleted,
+                ]
+            );
+            assert_eq!(
+                events[0].event.payload["stage"],
+                serde_json::to_value(stage).unwrap()
+            );
+            assert_eq!(events[0].event.payload["privacy"], "sovereign");
+            assert_eq!(events[2].event.payload["cost_truth"], "local_zero_cost");
+        }
+    }
+
+    #[tokio::test]
     async fn evidence_failure_before_attempt_prevents_provider_send() {
         let (_evidence, service, submission) = service_and_turn();
         let sends = Arc::new(AtomicUsize::new(0));
@@ -656,6 +712,47 @@ mod model_call {
         assert!(!events
             .iter()
             .any(|row| row.event.event_type == OperatorEventType::RouteCompleted));
+    }
+
+    #[tokio::test]
+    async fn dropping_inflight_compression_aborts_the_provider_task() {
+        let (_evidence, service, submission) = service_and_turn();
+        let started = Arc::new(tokio::sync::Notify::new());
+        let dropped = Arc::new(AtomicBool::new(false));
+        let adapter = Arc::new(BlockingAdapter {
+            started: started.clone(),
+            interrupted: Arc::new(AtomicBool::new(false)),
+            dropped: dropped.clone(),
+        }) as Arc<dyn ProviderAdapter>;
+        let executor = Arc::new(ModelCallExecutor::new(
+            Arc::new(move |_, _| Some(adapter.clone())),
+            service,
+        ));
+        let (_cancel_tx, cancel_rx) = watch::channel(false);
+        let mut compression = request("thread-1", &submission.turn_id);
+        compression.stage = ModelCallStage::Compression;
+        compression.privacy = PrivacyClass::Sovereign;
+        compression.maximum_marginal_cost_usd = Some(0.0);
+        let mut local = candidate(1, "ollama", "local", 0.0);
+        local.locality = ExecutionLocality::OnDevice;
+        local.tier.rate_group = "local_ollama".to_string();
+        local.cost_truth = CostTruth::LocalZeroCost;
+        let task = tokio::spawn(async move {
+            executor
+                .execute(execution(compression, vec![local], 1, cancel_rx))
+                .await
+        });
+
+        started.notified().await;
+        task.abort();
+        let _ = task.await;
+        tokio::time::timeout(std::time::Duration::from_secs(1), async {
+            while !dropped.load(Ordering::SeqCst) {
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .expect("dropping compression must abort provider work");
     }
 
     #[tokio::test]

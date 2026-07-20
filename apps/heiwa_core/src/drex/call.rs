@@ -100,6 +100,8 @@ impl SafetyClass {
 pub enum ModelCallStage {
     Classification,
     Planning,
+    Compression,
+    Drafting,
     Execution,
     Review,
     LoopIteration,
@@ -111,6 +113,8 @@ impl ModelCallStage {
         match value {
             "classification" => Ok(Self::Classification),
             "planning" => Ok(Self::Planning),
+            "compression" => Ok(Self::Compression),
+            "drafting" => Ok(Self::Drafting),
             "execution" => Ok(Self::Execution),
             "review" => Ok(Self::Review),
             "loop_iteration" => Ok(Self::LoopIteration),
@@ -120,7 +124,10 @@ impl ModelCallStage {
     }
 
     pub fn is_execution_bearing(&self) -> bool {
-        matches!(self, Self::Execution | Self::LoopIteration)
+        matches!(
+            self,
+            Self::Compression | Self::Drafting | Self::Execution | Self::LoopIteration
+        )
     }
 }
 

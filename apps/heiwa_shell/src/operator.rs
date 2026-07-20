@@ -457,11 +457,18 @@ pub enum OperatorTurnWork {
 type OperatorPreparationFuture =
     Pin<Box<dyn Future<Output = Result<OperatorTurnWork>> + Send + 'static>>;
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct OperatorPreparationContext {
+    pub thread_id: String,
+    pub turn_id: String,
+}
+
 /// One-shot work preparation owned by the runner. The session intake is
 /// durable before this closure can run, and duplicate submissions discard it
 /// without polling provider discovery, routing, or compression.
 pub struct OperatorTurnPreparation {
-    prepare: Box<dyn FnOnce() -> OperatorPreparationFuture + Send + 'static>,
+    prepare:
+        Box<dyn FnOnce(OperatorPreparationContext) -> OperatorPreparationFuture + Send + 'static>,
     cancelled: Arc<AtomicBool>,
 }
 
@@ -479,16 +486,24 @@ impl OperatorTurnPreparation {
         F: FnOnce(Arc<AtomicBool>) -> Fut + Send + 'static,
         Fut: Future<Output = Result<OperatorTurnWork>> + Send + 'static,
     {
+        Self::cancellable_with_context(move |_, cancelled| prepare(cancelled))
+    }
+
+    pub fn cancellable_with_context<F, Fut>(prepare: F) -> Self
+    where
+        F: FnOnce(OperatorPreparationContext, Arc<AtomicBool>) -> Fut + Send + 'static,
+        Fut: Future<Output = Result<OperatorTurnWork>> + Send + 'static,
+    {
         let cancelled = Arc::new(AtomicBool::new(false));
         let preparation_cancelled = cancelled.clone();
         Self {
-            prepare: Box::new(move || Box::pin(prepare(preparation_cancelled))),
+            prepare: Box::new(move |context| Box::pin(prepare(context, preparation_cancelled))),
             cancelled,
         }
     }
 
-    async fn run(self) -> Result<OperatorTurnWork> {
-        (self.prepare)().await
+    async fn run(self, context: OperatorPreparationContext) -> Result<OperatorTurnWork> {
+        (self.prepare)(context).await
     }
 }
 
@@ -899,7 +914,10 @@ impl OperatorTurnRunner {
             Err(anyhow!("operator turn cancelled during preparation"))
         } else {
             let mut preparation_cancel = cancel.clone();
-            let preparation = preparation.run();
+            let preparation = preparation.run(OperatorPreparationContext {
+                thread_id: thread_id.clone(),
+                turn_id: turn_id.clone(),
+            });
             tokio::pin!(preparation);
             tokio::select! {
                 biased;
@@ -2406,6 +2424,41 @@ mod tests {
                 ][..]
             )
         );
+    }
+
+    #[tokio::test]
+    async fn operator_duplicate_submission_polls_context_bound_compression_once() {
+        let dir = tempfile::tempdir().unwrap();
+        let sessions = service(dir.path());
+        let runner = OperatorTurnRunner::new(sessions, Arc::new(RecordingExecutor::default()));
+        let compression_polls = Arc::new(AtomicUsize::new(0));
+        let request = StartTurnRequest::auto("compression-once", "large remote prompt");
+        let first_polls = compression_polls.clone();
+        let first = OperatorTurnPreparation::cancellable_with_context(
+            move |context, _cancelled| async move {
+                assert_eq!(context.thread_id, "default");
+                assert!(!context.turn_id.is_empty());
+                first_polls.fetch_add(1, Ordering::SeqCst);
+                Ok(OperatorTurnWork::Deterministic {
+                    response: "compressed once".to_string(),
+                    route: json!({"stage": "compression"}),
+                    done: json!({}),
+                })
+            },
+        );
+        let mut handle = runner.submit("default", request.clone(), first).unwrap();
+        wait_for_terminal(&mut handle).await;
+
+        let duplicate_polls = compression_polls.clone();
+        let duplicate = OperatorTurnPreparation::cancellable_with_context(move |_, _| async move {
+            duplicate_polls.fetch_add(1, Ordering::SeqCst);
+            anyhow::bail!("duplicate compression must not run")
+        });
+        let mut handle = runner.submit("default", request, duplicate).unwrap();
+        assert!(handle.duplicate);
+        wait_for_terminal(&mut handle).await;
+
+        assert_eq!(compression_polls.load(Ordering::SeqCst), 1);
     }
 
     #[tokio::test]
