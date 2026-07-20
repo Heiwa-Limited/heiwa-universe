@@ -26,6 +26,101 @@ const OPERATOR_STREAM_TIMEOUTS: OperatorStreamTimeouts = OperatorStreamTimeouts 
     pong_write: Duration::from_secs(10),
 };
 
+#[cfg(test)]
+#[derive(Debug)]
+struct TestTransportDropState {
+    id: u64,
+    base_url: String,
+    thread_id: String,
+    armed: bool,
+    fired: bool,
+}
+
+#[cfg(test)]
+static TEST_TRANSPORT_DROP_STATE: std::sync::Mutex<Option<TestTransportDropState>> =
+    std::sync::Mutex::new(None);
+
+#[cfg(test)]
+static NEXT_TEST_TRANSPORT_DROP_ID: std::sync::atomic::AtomicU64 =
+    std::sync::atomic::AtomicU64::new(1);
+
+#[cfg(test)]
+struct TestTransportDropGuard {
+    id: u64,
+}
+
+#[cfg(test)]
+impl TestTransportDropGuard {
+    fn install(base_url: &str, thread_id: &str) -> Self {
+        use std::sync::atomic::Ordering;
+
+        let id = NEXT_TEST_TRANSPORT_DROP_ID.fetch_add(1, Ordering::Relaxed);
+        let mut state = TEST_TRANSPORT_DROP_STATE
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        if state.is_some() {
+            drop(state);
+            panic!("only one native transport-drop test seam may be installed");
+        }
+        *state = Some(TestTransportDropState {
+            id,
+            base_url: base_url.to_string(),
+            thread_id: thread_id.to_string(),
+            armed: false,
+            fired: false,
+        });
+        Self { id }
+    }
+
+    fn arm(&self) {
+        let mut state = TEST_TRANSPORT_DROP_STATE
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let Some(state) = state.as_mut().filter(|state| state.id == self.id) else {
+            drop(state);
+            panic!("native transport-drop test seam is not installed");
+        };
+        assert!(!state.armed, "native transport-drop seam is already armed");
+        assert!(!state.fired, "native transport-drop seam already fired");
+        state.armed = true;
+    }
+
+    fn fired(&self) -> bool {
+        TEST_TRANSPORT_DROP_STATE
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .as_ref()
+            .is_some_and(|state| state.id == self.id && state.fired)
+    }
+}
+
+#[cfg(test)]
+impl Drop for TestTransportDropGuard {
+    fn drop(&mut self) {
+        let mut state = TEST_TRANSPORT_DROP_STATE
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        if state.as_ref().is_some_and(|state| state.id == self.id) {
+            *state = None;
+        }
+    }
+}
+
+#[cfg(test)]
+fn take_armed_test_transport_drop(base_url: &str, thread_id: &str) -> bool {
+    let mut state = TEST_TRANSPORT_DROP_STATE
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    let Some(state) = state.as_mut() else {
+        return false;
+    };
+    if state.base_url != base_url || state.thread_id != thread_id || !state.armed || state.fired {
+        return false;
+    }
+    state.fired = true;
+    true
+}
+
 #[derive(Debug, Error)]
 enum OperatorStreamError {
     #[error("runtime authentication is not configured")]
@@ -160,7 +255,9 @@ where
                         {
                             return Err(OperatorStreamError::InvalidFrame);
                         }
-                        if frame.get("type").and_then(Value::as_str) == Some("event") {
+                        let durable_event =
+                            frame.get("type").and_then(Value::as_str) == Some("event");
+                        if durable_event {
                             let next_cursor = frame
                                 .get("cursor")
                                 .and_then(Value::as_str)
@@ -173,6 +270,10 @@ where
                         let caught_up =
                             frame.get("type").and_then(Value::as_str) == Some("caught_up");
                         forward(frame)?;
+                        #[cfg(test)]
+                        if durable_event && take_armed_test_transport_drop(base_url, thread_id) {
+                            break 'connection;
+                        }
                         if invalid_cursor {
                             return Ok(());
                         }
@@ -283,6 +384,21 @@ mod tests {
             })
     }
 
+    #[derive(Clone, Debug)]
+    struct ObservedDurableEvent {
+        event_id: String,
+        cursor: String,
+        turn_id: String,
+        event_type: String,
+    }
+
+    #[derive(Default)]
+    struct ExternalOperatorObservation {
+        caught_up_count: usize,
+        seen_event_ids: HashSet<String>,
+        post_catch_up_events: Vec<ObservedDurableEvent>,
+    }
+
     #[tokio::test]
     #[ignore = "requires an explicitly isolated external Heiwa runtime"]
     async fn native_operator_external_runtime_replays_then_resumes_without_duplicates() {
@@ -291,133 +407,215 @@ mod tests {
         const THREAD_ID_ENV: &str = "HEIWA_OPERATOR_E2E_THREAD_ID";
         const START_CURSOR_ENV: &str = "HEIWA_OPERATOR_E2E_START_CURSOR";
 
-        let base_url = required_external_runtime_env(WS_BASE_URL_ENV);
-        let token = required_external_runtime_env(TOKEN_ENV);
-        let thread_id = required_external_runtime_env(THREAD_ID_ENV);
-        let starting_cursor = required_external_runtime_env(START_CURSOR_ENV);
-        let timeouts = OperatorStreamTimeouts {
-            connect: Duration::from_secs(2),
-            read_idle: Duration::from_secs(2),
-            pong_write: Duration::from_secs(1),
-        };
-        let backoffs = [Duration::from_millis(50)];
+        tokio::time::timeout(Duration::from_secs(10), async {
+            let base_url = required_external_runtime_env(WS_BASE_URL_ENV);
+            let token = required_external_runtime_env(TOKEN_ENV);
+            let thread_id = required_external_runtime_env(THREAD_ID_ENV);
+            let starting_cursor = required_external_runtime_env(START_CURSOR_ENV);
+            let parsed_base = crate::proxy::validate_loopback_url(&base_url, "ws")
+                .expect("external operator runtime must use an explicit loopback WS URL");
+            assert_eq!(
+                parsed_base.path(),
+                "/",
+                "external operator WS base must not contain a path"
+            );
+            assert!(
+                parsed_base.query().is_none(),
+                "external operator WS base must not contain a query"
+            );
+            let port = parsed_base
+                .port()
+                .expect("external operator WS base must specify a port");
+            assert_ne!(
+                port, 7474,
+                "ignored external operator test must never target the installed runtime port"
+            );
+            operator_stream_url(&base_url, &thread_id, Some(&starting_cursor))
+                .expect("external operator inputs must form a valid native stream URL");
+            let http_base = format!("http://127.0.0.1:{port}");
+            let transport_drop = TestTransportDropGuard::install(&base_url, &thread_id);
+            let observation = Arc::new(Mutex::new(ExternalOperatorObservation::default()));
+            let first_caught_up = Arc::new(tokio::sync::Notify::new());
+            let first_live_event = Arc::new(tokio::sync::Notify::new());
 
-        let mut first_event_ids = HashSet::new();
-        let mut first_durable_cursors = Vec::new();
-        let mut first_caught_up = false;
-        let first_result = tokio::time::timeout(
-            Duration::from_secs(5),
-            subscribe_with_auth_and_policy(
-                &base_url,
-                &thread_id,
-                Some(&starting_cursor),
-                &token,
-                |frame| {
-                    assert!(
-                        !frame.to_string().contains(&token),
-                        "operator stream frame must not contain the bearer token"
-                    );
-                    match frame.get("type").and_then(Value::as_str) {
-                        Some("event") => {
-                            let event_id = frame
-                                .pointer("/event/event_id")
-                                .and_then(Value::as_str)
-                                .expect("durable event frame must carry event.event_id");
-                            let cursor = frame
-                                .get("cursor")
-                                .and_then(Value::as_str)
-                                .expect("durable event frame must carry cursor");
-                            assert!(
-                                first_event_ids.insert(event_id.to_string()),
-                                "first replay must not contain duplicate event_id values"
-                            );
-                            first_durable_cursors.push(cursor.to_string());
-                            Ok(())
+            let stream_base = base_url.clone();
+            let stream_token = token.clone();
+            let stream_thread = thread_id.clone();
+            let stream_cursor = starting_cursor.clone();
+            let stream_observation = observation.clone();
+            let stream_caught_up = first_caught_up.clone();
+            let stream_live_event = first_live_event.clone();
+            let subscription = tokio::spawn(async move {
+                subscribe_with_auth_and_policy(
+                    &stream_base,
+                    &stream_thread,
+                    Some(&stream_cursor),
+                    &stream_token,
+                    |frame| {
+                        assert!(
+                            !frame.to_string().contains(&stream_token),
+                            "operator stream frame must not contain the bearer token"
+                        );
+                        match frame.get("type").and_then(Value::as_str) {
+                            Some("event") => {
+                                let event_id = frame
+                                    .pointer("/event/event_id")
+                                    .and_then(Value::as_str)
+                                    .expect("durable event frame must carry event.event_id")
+                                    .to_string();
+                                let cursor = frame
+                                    .get("cursor")
+                                    .and_then(Value::as_str)
+                                    .expect("durable event frame must carry cursor")
+                                    .to_string();
+                                let turn_id = frame
+                                    .pointer("/event/turn_id")
+                                    .and_then(Value::as_str)
+                                    .expect("durable event frame must carry event.turn_id")
+                                    .to_string();
+                                let event_type = frame
+                                    .pointer("/event/event_type")
+                                    .and_then(Value::as_str)
+                                    .expect("durable event frame must carry event.event_type")
+                                    .to_string();
+                                let mut observed = stream_observation.lock().unwrap();
+                                assert!(
+                                    observed.seen_event_ids.insert(event_id.clone()),
+                                    "native reconnect must not redeliver a durable event_id"
+                                );
+                                if observed.caught_up_count > 0 {
+                                    observed.post_catch_up_events.push(ObservedDurableEvent {
+                                        event_id,
+                                        cursor,
+                                        turn_id,
+                                        event_type,
+                                    });
+                                    if observed.post_catch_up_events.len() == 1 {
+                                        stream_live_event.notify_one();
+                                    }
+                                }
+                                Ok(())
+                            }
+                            Some("caught_up") => {
+                                let mut observed = stream_observation.lock().unwrap();
+                                observed.caught_up_count += 1;
+                                if observed.caught_up_count == 1 {
+                                    stream_caught_up.notify_one();
+                                    Ok(())
+                                } else {
+                                    Err(OperatorStreamError::ReceiverClosed)
+                                }
+                            }
+                            Some("invalid_cursor") => {
+                                panic!("external operator runtime rejected a native cursor")
+                            }
+                            Some("error") => {
+                                panic!(
+                                    "external operator runtime emitted an unexpected error frame"
+                                )
+                            }
+                            _ => Ok(()),
                         }
-                        Some("caught_up") => {
-                            first_caught_up = true;
-                            Err(OperatorStreamError::ReceiverClosed)
-                        }
-                        Some("invalid_cursor") => {
-                            panic!("supplied external runtime cursor must be valid")
-                        }
-                        _ => Ok(()),
-                    }
-                },
-                &backoffs,
-                timeouts,
-            ),
-        )
-        .await
-        .expect("first external operator subscription must finish within five seconds");
-        assert!(
-            matches!(&first_result, Err(OperatorStreamError::ReceiverClosed)),
-            "first subscription must stop intentionally after caught_up, got {first_result:?}"
-        );
-        assert!(
-            first_caught_up,
-            "first subscription must authenticate and catch up"
-        );
-        assert!(
-            !first_event_ids.is_empty(),
-            "first subscription must replay at least one durable event"
-        );
-        let resume_cursor = first_durable_cursors
-            .last()
-            .expect("first replay must produce a resume cursor")
-            .clone();
+                    },
+                    &[Duration::from_millis(50), Duration::from_millis(100)],
+                    OperatorStreamTimeouts {
+                        connect: Duration::from_secs(2),
+                        read_idle: Duration::from_secs(3),
+                        pong_write: Duration::from_secs(1),
+                    },
+                )
+                .await
+            });
 
-        let mut resumed_event_ids = HashSet::new();
-        let mut second_caught_up = false;
-        let second_result = tokio::time::timeout(
-            Duration::from_secs(5),
-            subscribe_with_auth_and_policy(
-                &base_url,
-                &thread_id,
-                Some(&resume_cursor),
-                &token,
-                |frame| {
-                    assert!(
-                        !frame.to_string().contains(&token),
-                        "operator stream frame must not contain the bearer token"
-                    );
-                    match frame.get("type").and_then(Value::as_str) {
-                        Some("event") => {
-                            let event_id = frame
-                                .pointer("/event/event_id")
-                                .and_then(Value::as_str)
-                                .expect("durable event frame must carry event.event_id");
-                            resumed_event_ids.insert(event_id.to_string());
-                            Ok(())
-                        }
-                        Some("caught_up") => {
-                            second_caught_up = true;
-                            Err(OperatorStreamError::ReceiverClosed)
-                        }
-                        Some("invalid_cursor") => {
-                            panic!("native resume cursor must remain valid")
-                        }
-                        _ => Ok(()),
-                    }
-                },
-                &backoffs,
-                timeouts,
-            ),
-        )
+            tokio::time::timeout(Duration::from_secs(3), first_caught_up.notified())
+                .await
+                .expect("native subscription must reach initial caught_up");
+            transport_drop.arm();
+
+            let unique_request_id = format!(
+                "native-live-tail-{}-{}",
+                std::process::id(),
+                std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .expect("system clock must follow the Unix epoch")
+                    .as_nanos()
+            );
+            let submission = tokio::time::timeout(
+                Duration::from_secs(3),
+                crate::proxy::api_post_with_auth(
+                    &http_base,
+                    &format!(
+                        "/api/v1/operator/threads/{}/turns",
+                        percent_encode_query_component(&thread_id)
+                    ),
+                    json!({"client_request_id": unique_request_id, "prompt": "hi"}),
+                    &token,
+                ),
+            )
+            .await
+            .expect("native authenticated turn submission must finish")
+            .unwrap_or_else(|_| panic!("native authenticated turn submission must succeed"));
+            let submitted_turn_id = submission
+                .pointer("/data/turn_id")
+                .and_then(Value::as_str)
+                .expect("turn submission must return data.turn_id")
+                .to_string();
+
+            tokio::time::timeout(Duration::from_secs(3), first_live_event.notified())
+                .await
+                .expect("open native subscription must receive a live durable event");
+            {
+                let observed = observation.lock().unwrap();
+                let first_live = observed
+                    .post_catch_up_events
+                    .first()
+                    .expect("post-catch-up durable event must be recorded");
+                assert_eq!(first_live.turn_id, submitted_turn_id);
+                assert_eq!(first_live.event_type, "turn_started");
+                assert!(!first_live.event_id.is_empty());
+                assert!(!first_live.cursor.is_empty());
+            }
+
+            let subscription_result = subscription
+                .await
+                .expect("native subscription task must not panic");
+            assert!(
+                matches!(
+                    subscription_result,
+                    Err(OperatorStreamError::ReceiverClosed)
+                ),
+                "native subscription must stop intentionally after reconnect caught_up"
+            );
+            assert!(
+                transport_drop.fired(),
+                "test seam must drop the first live durable-event transport"
+            );
+            let observed = observation.lock().unwrap();
+            assert_eq!(
+                observed.caught_up_count, 2,
+                "native stream must reconnect and catch up exactly once"
+            );
+            let first_live = observed.post_catch_up_events.first().unwrap();
+            assert_eq!(
+                observed
+                    .post_catch_up_events
+                    .iter()
+                    .filter(|event| event.event_id == first_live.event_id)
+                    .count(),
+                1,
+                "reconnect must resume after the last forwarded durable cursor"
+            );
+            assert!(
+                observed
+                    .post_catch_up_events
+                    .iter()
+                    .skip(1)
+                    .any(|event| event.turn_id == submitted_turn_id),
+                "reconnected stream must deliver later durable events for the submitted turn"
+            );
+        })
         .await
-        .expect("second external operator subscription must finish within five seconds");
-        assert!(
-            matches!(&second_result, Err(OperatorStreamError::ReceiverClosed)),
-            "second subscription must stop intentionally after caught_up, got {second_result:?}"
-        );
-        assert!(
-            second_caught_up,
-            "second subscription must authenticate and catch up"
-        );
-        assert!(
-            resumed_event_ids.is_empty(),
-            "resuming from the last durable cursor must replay zero durable events"
-        );
+        .expect("external native operator test must finish within ten seconds");
     }
 
     #[tokio::test]
