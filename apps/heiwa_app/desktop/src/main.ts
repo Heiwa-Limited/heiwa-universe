@@ -21,7 +21,13 @@ import {
 } from "./runtime";
 import { OperatorClient } from "./operator/client";
 import { OperatorStore } from "./operator/store";
-import type { OperatorProjection, OperatorTurn } from "./operator/types";
+import type {
+  OperatorAssistantDeltaFrame,
+  OperatorFrame,
+  OperatorProjection,
+  OperatorSnapshot,
+  OperatorTurn,
+} from "./operator/types";
 
 // ═══════════════════════════════════════════════════════════════════════════
 // Types
@@ -111,9 +117,13 @@ const operatorClient = new OperatorClient(operatorStore, {
   post: apiPost,
   subscribe: operatorSubscribe,
   randomUUID: () => crypto.randomUUID(),
-  onChange: refreshOperatorUi,
-  onError: refreshOperatorUi,
+  onChange: scheduleOperatorUiRefresh,
+  onError: () => scheduleOperatorUiRefresh(),
 });
+
+let operatorRefreshScheduled = false;
+let operatorStateDirty = false;
+let pendingOperatorFrames: OperatorFrame[] = [];
 
 // ═══════════════════════════════════════════════════════════════════════════
 // Helpers
@@ -145,8 +155,8 @@ function pendingApprovalCount(): number {
   return health?.snapshot?.data?.approvals?.pending ?? inbox.length;
 }
 
-function liveWorkerCount(): number {
-  const activeTurns = operatorStore.snapshot().turns.filter((turn) =>
+function liveWorkerCount(operator: OperatorSnapshot): number {
+  const activeTurns = operator.turns.filter((turn) =>
     turn.status === "open" || turn.status === "running" || turn.status === "cancelling"
   ).length;
   return activeTurns + herdPanes.length + (health?.snapshot?.data?.workers?.live ?? 0);
@@ -452,9 +462,8 @@ async function sendChat(text: string): Promise<void> {
 // Render: icon rail (left sidebar)
 // ═══════════════════════════════════════════════════════════════════════════
 
-function dockItems(): DockItem[] {
+function dockItems(operator: OperatorSnapshot): DockItem[] {
   const next = nextCalendarItems(1)[0];
-  const operator = operatorStore.snapshot();
   const operatorStatus = operatorClient.state().status;
   return [
     {
@@ -545,7 +554,7 @@ function dockItems(): DockItem[] {
       preview: () => ({
         title: "Workers",
         lines: [
-          `${liveWorkerCount()} live`,
+          `${liveWorkerCount(operator)} live`,
           `${operator.turns.length} known tasks`,
         ],
       }),
@@ -571,11 +580,11 @@ function dockItems(): DockItem[] {
   ];
 }
 
-function renderRail(): string {
+function renderRail(operator: OperatorSnapshot): string {
   return `
     <nav class="icon-rail">
       <div class="rail-logo">H</div>
-      ${dockItems().map((item) => {
+      ${dockItems(operator).map((item) => {
         const preview = item.preview();
         return `<button class="rail-btn ${view === item.id ? "active" : ""}" data-view="${item.id}" aria-label="${item.label}" title="${item.label}">
           <span class="rail-glyph">${item.glyph}</span>
@@ -755,23 +764,9 @@ function renderWindows(): string {
 // Render: chat view (main area)
 // ═══════════════════════════════════════════════════════════════════════════
 
-function renderMessages(): string {
-  const snapshot = operatorStore.snapshot();
-  const transients = Object.entries(snapshot.transientByTurn).map(([turnId, body]) => ({
-    id: `transient-${turnId}`,
-    role: "assistant" as const,
-    body,
-    meta: "streaming",
-    occurredAt: "",
-  }));
-  const messages = [
-    ...snapshot.messages.map((message) => ({
-      ...message,
-      meta: [message.provider, message.model].filter(Boolean).join("/") || (message.receiptRef ? "receipt linked" : ""),
-    })),
-    ...transients,
-  ];
-  if (messages.length === 0) {
+function renderMessages(snapshot: OperatorSnapshot): string {
+  const transients = Object.entries(snapshot.transientByTurn);
+  if (snapshot.messages.length === 0 && transients.length === 0) {
     const unavailable = operatorClient.state().status === "error";
     return `<div class="chat-empty">
       <div class="chat-empty-icon">✦</div>
@@ -779,25 +774,40 @@ function renderMessages(): string {
     </div>`;
   }
 
-  return messages.map(m => {
+  const durable = snapshot.messages.map((message) => {
+    const meta = [message.provider, message.model].filter(Boolean).join("/")
+      || (message.receiptRef ? "receipt linked" : "");
     return `
-      <article class="chat-msg ${m.role}">
+      <article class="chat-msg ${message.role}">
         <div class="chat-msg-header">
-          <span class="chat-role">${m.role}</span>
-          <span class="chat-meta">${esc(m.meta || "")}</span>
-          <span class="chat-time">${timeFmt(Date.parse(m.occurredAt))}</span>
+          <span class="chat-role">${message.role}</span>
+          <span class="chat-meta">${esc(meta)}</span>
+          <span class="chat-time">${timeFmt(Date.parse(message.occurredAt))}</span>
         </div>
-        <div class="chat-body">${esc(m.body)}</div>
+        <div class="chat-body">${esc(message.body)}</div>
       </article>
     `;
   }).join("");
+
+  const streaming = transients.map(([turnId, body]) => `
+    <article class="chat-msg assistant transient" data-transient-turn="${esc(turnId)}">
+      <div class="chat-msg-header">
+        <span class="chat-role">assistant</span>
+        <span class="chat-meta">streaming</span>
+        <span class="chat-time"></span>
+      </div>
+      <div class="chat-body">${esc(body)}</div>
+    </article>
+  `).join("");
+
+  return durable + streaming;
 }
 
-function renderChat(): string {
+function renderChat(snapshot: OperatorSnapshot): string {
   return `
     <div class="view chat-view">
       <div class="chat-messages" id="chat-messages">
-        ${renderMessages()}
+        ${renderMessages(snapshot)}
       </div>
     </div>
   `;
@@ -888,8 +898,7 @@ function routeLabel(route?: OperatorProjection): string {
   return [provider, model].filter(Boolean).join("/");
 }
 
-function renderTurnRows(): string {
-  const snapshot = operatorStore.snapshot();
+function renderTurnRows(snapshot: OperatorSnapshot): string {
   if (snapshot.turns.length === 0) return '<p class="muted">No operator turns yet.</p>';
   return [...snapshot.turns].reverse().map(turn => {
     const route = routeForTurn(turn, snapshot.routesByCall);
@@ -909,7 +918,7 @@ function renderTurnRows(): string {
   }).join("");
 }
 
-function renderAgents(): string {
+function renderAgents(snapshot: OperatorSnapshot): string {
   const dispatchDisabled = operatorClient.state().status !== "ready";
   return `
     <div class="view agents-view">
@@ -930,7 +939,7 @@ function renderAgents(): string {
       </div>
 
       <div class="subagent-list">
-        ${renderTurnRows()}
+        ${renderTurnRows(snapshot)}
       </div>
     </div>
   `;
@@ -1010,7 +1019,71 @@ async function loadForView(nextView: View): Promise<void> {
   if (nextView === "mail") await loadInbox();
 }
 
-function refreshOperatorUi(): void {
+function transientRow(chat: HTMLElement, turnId: string): HTMLElement | undefined {
+  return [...chat.querySelectorAll<HTMLElement>("[data-transient-turn]")]
+    .find((row) => row.dataset.transientTurn === turnId);
+}
+
+function createTransientRow(chat: HTMLElement, turnId: string): HTMLElement {
+  chat.querySelector(".chat-empty")?.remove();
+  const article = document.createElement("article");
+  article.className = "chat-msg assistant transient";
+  article.dataset.transientTurn = turnId;
+
+  const header = document.createElement("div");
+  header.className = "chat-msg-header";
+  for (const [className, text] of [
+    ["chat-role", "assistant"],
+    ["chat-meta", "streaming"],
+    ["chat-time", ""],
+  ] as const) {
+    const span = document.createElement("span");
+    span.className = className;
+    span.textContent = text;
+    header.appendChild(span);
+  }
+
+  const body = document.createElement("div");
+  body.className = "chat-body";
+  article.append(header, body);
+  chat.appendChild(article);
+  return article;
+}
+
+function appendTransientDeltaFrames(frames: OperatorAssistantDeltaFrame[]): void {
+  if (view !== "chat") return;
+  const chat = document.querySelector<HTMLElement>("#chat-messages");
+  if (!chat) return;
+  for (const frame of frames) {
+    const row = transientRow(chat, frame.turn_id) ?? createTransientRow(chat, frame.turn_id);
+    row.querySelector<HTMLElement>(".chat-body")?.appendChild(document.createTextNode(frame.text));
+  }
+  chat.scrollTop = chat.scrollHeight;
+}
+
+function scheduleOperatorUiRefresh(frame?: OperatorFrame): void {
+  if (frame) pendingOperatorFrames.push(frame);
+  else operatorStateDirty = true;
+  if (operatorRefreshScheduled) return;
+  operatorRefreshScheduled = true;
+  requestAnimationFrame(() => {
+    operatorRefreshScheduled = false;
+    const frames = pendingOperatorFrames;
+    pendingOperatorFrames = [];
+    const stateDirty = operatorStateDirty;
+    operatorStateDirty = false;
+    const deltas = frames.filter(
+      (candidate): candidate is OperatorAssistantDeltaFrame => candidate.type === "assistant_delta",
+    );
+    if (!stateDirty && deltas.length === frames.length) {
+      appendTransientDeltaFrames(deltas);
+      return;
+    }
+    refreshOperatorUi(operatorStore.snapshot());
+  });
+}
+
+function refreshOperatorUi(snapshot: OperatorSnapshot): void {
   const disabled = operatorClient.state().status !== "ready";
   const sendButton = document.querySelector<HTMLButtonElement>("#send-btn");
   if (sendButton) {
@@ -1020,8 +1093,9 @@ function refreshOperatorUi(): void {
   const dispatchButton = document.querySelector<HTMLButtonElement>("#dispatch-btn");
   if (dispatchButton) dispatchButton.disabled = disabled;
 
+  const items = dockItems(snapshot);
   for (const viewId of ["chat", "agents"] as const) {
-    const preview = dockItems().find((item) => item.id === viewId)?.preview();
+    const preview = items.find((item) => item.id === viewId)?.preview();
     const target = document.querySelector<HTMLElement>(`.rail-btn[data-view="${viewId}"] .dock-preview`);
     if (preview && target) {
       target.innerHTML = `<strong>${esc(preview.title)}</strong>${preview.lines.map((line) => `<span>${esc(line)}</span>`).join("")}`;
@@ -1031,13 +1105,13 @@ function refreshOperatorUi(): void {
   if (view === "chat") {
     const chat = document.querySelector<HTMLElement>("#chat-messages");
     if (chat) {
-      chat.innerHTML = renderMessages();
+      chat.innerHTML = renderMessages(snapshot);
       chat.scrollTop = chat.scrollHeight;
     }
   }
   if (view === "agents") {
     const list = document.querySelector<HTMLElement>(".subagent-list");
-    if (list) list.innerHTML = renderTurnRows();
+    if (list) list.innerHTML = renderTurnRows(snapshot);
   }
 }
 
@@ -1046,14 +1120,18 @@ function refreshOperatorUi(): void {
 // ═══════════════════════════════════════════════════════════════════════════
 
 function render(): void {
+  // This full snapshot covers any queued operator frames; leave the RAF callback to no-op.
+  pendingOperatorFrames = [];
+  operatorStateDirty = false;
+  const operator = operatorStore.snapshot();
   const operatorStatus = operatorClient.state().status;
   const composerDisabled = operatorStatus !== "ready";
   const main =
     view === "home" ? renderHome() :
-    view === "chat" ? renderChat() :
+    view === "chat" ? renderChat(operator) :
     view === "windows" ? renderWindows() :
     view === "calendar" ? renderCalendar() :
-    view === "agents" ? renderAgents() :
+    view === "agents" ? renderAgents(operator) :
     view === "mail" ? renderFeatureWindow("mail") :
     view === "finance" ? renderFeatureWindow("finance") :
     view === "social" ? renderFeatureWindow("social") :
@@ -1062,7 +1140,7 @@ function render(): void {
 
   app.innerHTML = `
     <div class="app-shell">
-      ${renderRail()}
+      ${renderRail(operator)}
       <main class="main-area">
         ${main}
         <div class="composer-area">

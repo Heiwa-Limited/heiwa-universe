@@ -19,7 +19,7 @@ type MutableState = {
   artifacts: Record<string, OperatorProjection>;
   receipts: Record<string, OperatorProjection>;
   blockers: Record<string, OperatorProjection>;
-  transientByTurn: Record<string, string>;
+  transientChunksByTurn: Record<string, string[]>;
   finalizedAssistantTurns: Set<string>;
 };
 
@@ -39,7 +39,7 @@ function emptyState(): MutableState {
     artifacts: nullRecord(),
     receipts: nullRecord(),
     blockers: nullRecord(),
-    transientByTurn: nullRecord(),
+    transientChunksByTurn: nullRecord(),
     finalizedAssistantTurns: new Set(),
   };
 }
@@ -62,6 +62,18 @@ function cloneRecord<T>(value: Record<string, T>): Record<string, T> {
   const result = nullRecord<T>();
   for (const [key, entry] of Object.entries(value)) result[key] = clone(entry);
   return result;
+}
+
+function joinChunkRecord(value: Record<string, string[]>): Record<string, string> {
+  const result = nullRecord<string>();
+  for (const [key, chunks] of Object.entries(value)) result[key] = chunks.join("");
+  return result;
+}
+
+function toolCallKey(event: OperatorEvent): string {
+  const turnId = stringValue(event.turn_id);
+  const callId = stringValue(event.call_id);
+  return turnId && callId ? JSON.stringify([turnId, callId]) : event.event_id;
 }
 
 function projection(event: OperatorEvent, key: string): OperatorProjection {
@@ -88,7 +100,9 @@ export class OperatorStore {
         || typeof candidate.turn_id !== "string" || candidate.turn_id.length === 0
         || typeof candidate.text !== "string"
         || this.state.finalizedAssistantTurns.has(candidate.turn_id)) return false;
-      this.state.transientByTurn[candidate.turn_id] = (this.state.transientByTurn[candidate.turn_id] ?? "") + candidate.text;
+      const chunks = this.state.transientChunksByTurn[candidate.turn_id]
+        ?? (this.state.transientChunksByTurn[candidate.turn_id] = []);
+      chunks.push(candidate.text);
       return true;
     }
     if (!isOperatorEventFrame(frame)) return false;
@@ -117,7 +131,7 @@ export class OperatorStore {
       artifacts: cloneRecord(this.state.artifacts),
       receipts: cloneRecord(this.state.receipts),
       blockers: cloneRecord(this.state.blockers),
-      transientByTurn: cloneRecord(this.state.transientByTurn),
+      transientByTurn: joinChunkRecord(this.state.transientChunksByTurn),
     };
   }
 
@@ -152,7 +166,7 @@ export class OperatorStore {
       case "assistant_completed": {
         const text = stringValue(event.payload.text);
         if (turnId) {
-          delete this.state.transientByTurn[turnId];
+          delete this.state.transientChunksByTurn[turnId];
           this.state.finalizedAssistantTurns.add(turnId);
         }
         if (text === undefined) break;
@@ -180,14 +194,14 @@ export class OperatorStore {
         if (turnId) {
           this.patchTurn(event, { status: "completed" });
           this.state.finalizedAssistantTurns.add(turnId);
-          delete this.state.transientByTurn[turnId];
+          delete this.state.transientChunksByTurn[turnId];
         }
         break;
       case "turn_interrupted":
         if (turnId) {
           this.patchTurn(event, { status: "interrupted" });
           this.state.finalizedAssistantTurns.add(turnId);
-          delete this.state.transientByTurn[turnId];
+          delete this.state.transientChunksByTurn[turnId];
         }
         break;
       case "route_planned":
@@ -200,7 +214,7 @@ export class OperatorStore {
       }
       case "tool_call_started":
       case "tool_call_completed": {
-        const key = stringValue(event.call_id) ?? event.event_id;
+        const key = toolCallKey(event);
         this.state.toolCalls[key] = projection(event, key);
         break;
       }
@@ -227,7 +241,7 @@ export class OperatorStore {
         if (turnId) {
           this.patchTurn(event, { status: "blocked" });
           this.state.finalizedAssistantTurns.add(turnId);
-          delete this.state.transientByTurn[turnId];
+          delete this.state.transientChunksByTurn[turnId];
         }
         break;
       }

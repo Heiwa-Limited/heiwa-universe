@@ -110,6 +110,19 @@ describe("OperatorClient", () => {
     expect(client.state()).toEqual({ status: "error", error: "operator_history_unavailable" });
   });
 
+  it("fails safely when history contains an event from another thread", async () => {
+    const get = vi.fn(async () => history([eventFrame(1, "other thread")], "cursor-1"));
+    const subscribe = vi.fn(async () => undefined);
+    const store = new OperatorStore();
+    const client = new OperatorClient(store, dependencies({ get, subscribe }));
+
+    await client.start("team & ops");
+
+    expect(subscribe).not.toHaveBeenCalled();
+    expect(store.snapshot().messages).toEqual([]);
+    expect(client.state()).toEqual({ status: "error", error: "operator_history_unavailable" });
+  });
+
   it("fails safely and clears partial replay when a full page cursor does not advance", async () => {
     const firstPage = Array.from({ length: 500 }, (_, index) => eventFrame(index + 1));
     const secondPage = Array.from({ length: 500 }, (_, index) => eventFrame(index + 501));
@@ -332,6 +345,43 @@ describe("OperatorClient", () => {
     expect(store.snapshot().messages.map((message) => message.threadId)).toEqual(["old thread"]);
     expect(client.state()).toEqual({ status: "ready", error: null });
     subscription.resolve();
+  });
+
+  it("rejects cross-thread live frames and reports accepted frames to onChange", async () => {
+    const callbacks: Array<(frame: OperatorFrame) => void> = [];
+    const subscribe = vi.fn(async (_threadId: string, _after: string | null, onFrame: (frame: OperatorFrame) => void) => {
+      callbacks.push(onFrame);
+    });
+    const onChange = vi.fn();
+    const store = new OperatorStore();
+    const client = new OperatorClient(store, dependencies({ subscribe, onChange }));
+
+    await client.start("owned thread");
+    await flushAsyncWork();
+    onChange.mockClear();
+
+    callbacks[0]!(null as unknown as OperatorFrame);
+    callbacks[0]!({ type: "assistant_delta", thread_id: "other thread", turn_id: "turn-1", text: "wrong" });
+    callbacks[0]!(eventFrame(1, "other thread"));
+
+    expect(store.snapshot().messages).toEqual([]);
+    expect(store.snapshot().transientByTurn).toEqual(Object.create(null));
+    expect(onChange).not.toHaveBeenCalled();
+
+    const delta: OperatorFrame = {
+      type: "assistant_delta",
+      thread_id: "owned thread",
+      turn_id: "turn-2",
+      text: "accepted",
+    };
+    const durable = eventFrame(2, "owned thread");
+    callbacks[0]!(delta);
+    callbacks[0]!(durable);
+
+    expect(store.snapshot().transientByTurn["turn-2"]).toBe("accepted");
+    expect(store.snapshot().messages.map((message) => message.threadId)).toEqual(["owned thread"]);
+    expect(onChange).toHaveBeenNthCalledWith(1, delta);
+    expect(onChange).toHaveBeenNthCalledWith(2, durable);
   });
 
   it("submits a trimmed turn with a random request id and automatic policy without optimistic rows", async () => {

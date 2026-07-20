@@ -52,6 +52,9 @@ describe("OperatorStore", () => {
     const store = new OperatorStore();
     store.reduce({ type: "assistant_delta", thread_id: "default", turn_id: "turn-1", text: "hel" });
     store.reduce({ type: "assistant_delta", thread_id: "default", turn_id: "turn-1", text: "lo" });
+
+    expect(store.snapshot().transientByTurn["turn-1"]).toBe("hello");
+
     store.reduce(frame("e2", "assistant_completed", { text: "hello" }));
 
     expect(store.snapshot().messages.at(-1)?.body).toBe("hello");
@@ -144,13 +147,33 @@ describe("OperatorStore", () => {
     expect(Object.keys(snapshot.routesByCall)).toEqual(["call-1"]);
     expect(snapshot.routesByCall["call-1"]?.eventType).toBe("route_completed");
     expect(snapshot.routesByCall["call-1"]?.payload.provider).toBe("codex");
-    expect(Object.keys(snapshot.toolCalls)).toEqual(["call-1"]);
-    expect(snapshot.toolCalls["call-1"]?.payload.status).toBe("ok");
+    const toolKey = JSON.stringify(["turn-1", "call-1"]);
+    expect(Object.keys(snapshot.toolCalls)).toEqual([toolKey]);
+    expect(snapshot.toolCalls[toolKey]?.payload.status).toBe("ok");
     expect(Object.keys(snapshot.approvals)).toEqual(["approval-1"]);
     expect(snapshot.approvals["approval-1"]?.payload.outcome).toBe("approved");
     expect(snapshot.artifacts["artifact-1"]?.payload.artifact_ref).toBe("local://new");
     expect(snapshot.receipts["receipt-1"]?.payload.cost_truth).toBe("target_only");
     expect(snapshot.blockers["blocker-1"]?.payload.message).toBe("latest");
+  });
+
+  it("keeps provider tool call ids distinct across turns", () => {
+    const store = new OperatorStore();
+    store.reduce(frame("tool-turn-1", "tool_call_started", { name: "fs.read" }, {
+      turn_id: "turn-1",
+      call_id: "reused-call-id",
+    }));
+    store.reduce(frame("tool-turn-2", "tool_call_started", { name: "shell.run" }, {
+      turn_id: "turn-2",
+      call_id: "reused-call-id",
+    }));
+
+    const snapshot = store.snapshot();
+    const firstKey = JSON.stringify(["turn-1", "reused-call-id"]);
+    const secondKey = JSON.stringify(["turn-2", "reused-call-id"]);
+    expect(Object.keys(snapshot.toolCalls)).toEqual([firstKey, secondKey]);
+    expect(snapshot.toolCalls[firstKey]?.payload.name).toBe("fs.read");
+    expect(snapshot.toolCalls[secondKey]?.payload.name).toBe("shell.run");
   });
 
   it("keeps hostile projection keys in null-prototype records", () => {
@@ -166,7 +189,6 @@ describe("OperatorStore", () => {
     const snapshot = store.snapshot();
     const maps = [
       snapshot.routesByCall,
-      snapshot.toolCalls,
       snapshot.approvals,
       snapshot.artifacts,
       snapshot.receipts,
@@ -177,7 +199,11 @@ describe("OperatorStore", () => {
       expect(Object.getPrototypeOf(map)).toBeNull();
       expect(Object.hasOwn(map, "__proto__")).toBe(true);
     });
+    const hostileToolKey = JSON.stringify(["turn-1", "__proto__"]);
+    expect(Object.getPrototypeOf(snapshot.toolCalls)).toBeNull();
+    expect(Object.hasOwn(snapshot.toolCalls, hostileToolKey)).toBe(true);
     expect(snapshot.routesByCall["__proto__"]?.payload.provider).toBe("ollama");
+    expect(snapshot.toolCalls[hostileToolKey]?.payload.name).toBe("fs.read");
     expect(snapshot.transientByTurn["__proto__"]).toBe("safe delta");
   });
 

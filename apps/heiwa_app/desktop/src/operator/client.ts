@@ -32,7 +32,7 @@ export type OperatorClientDependencies = {
   post: (path: string, body: OperatorTurnSubmission) => Promise<OperatorTurnSubmissionResponse>;
   subscribe: (threadId: string, after: string | null, onFrame: (frame: OperatorFrame) => void) => Promise<void>;
   randomUUID: () => string;
-  onChange?: () => void;
+  onChange?: (frame?: OperatorFrame) => void;
   onError?: (code: OperatorClientError) => void;
 };
 
@@ -138,7 +138,8 @@ export class OperatorClient {
         || (next !== null && (typeof next !== "string" || next.length === 0))
         || !Number.isInteger(response?.data?.skipped_lines)
         || Number(response?.data?.skipped_lines) < 0
-        || events.some((row) => !isOperatorEventFrame({ type: "event", cursor: row?.cursor, event: row?.event }))) {
+        || events.some((row) => !isOperatorEventFrame({ type: "event", cursor: row?.cursor, event: row?.event })
+          || row.event.thread_id !== threadId)) {
         throw new Error("operator_history_invalid");
       }
       if (events.length === 500 && (!next || next === after || visitedCursors.has(next))) {
@@ -223,8 +224,17 @@ export class OperatorClient {
     });
   }
 
-  private reduceFrame(frame: OperatorFrame): void {
-    if (this.store.reduce(frame)) this.dependencies.onChange?.();
+  private reduceFrame(frame: unknown): void {
+    const threadId = this.threadId;
+    if (!threadId) return;
+    if (isOperatorEventFrame(frame)) {
+      if (frame.event.thread_id !== threadId) return;
+    } else {
+      if (frame === null || typeof frame !== "object" || Array.isArray(frame)) return;
+      const candidate = frame as Record<string, unknown>;
+      if (candidate.type !== "assistant_delta" || candidate.thread_id !== threadId) return;
+    }
+    if (this.store.reduce(frame)) this.dependencies.onChange?.(frame as OperatorFrame);
   }
 
   private reportError(code: OperatorClientError, generation = this.generation): void {
