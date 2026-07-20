@@ -79,6 +79,18 @@ impl Drop for TestRuntime {
         }
         #[cfg(not(unix))]
         let _ = self.child.kill();
+
+        let deadline = Instant::now() + Duration::from_secs(2);
+        while Instant::now() < deadline {
+            match self.child.try_wait() {
+                Ok(Some(_)) => return,
+                Ok(None) => thread::sleep(Duration::from_millis(25)),
+                Err(_) => break,
+            }
+        }
+        // A failed/ignored graceful signal must never hang the test process
+        // or leak a listener after an assertion failure.
+        let _ = self.child.kill();
         let _ = self.child.wait();
     }
 }
@@ -561,12 +573,136 @@ fn model_submission_is_accepted_before_provider_preparation_and_fails_durably() 
     }
 }
 
+#[test]
+fn app_boot_recovers_open_turn_exactly_once_across_restarts() {
+    let home = tempfile::tempdir().unwrap();
+    let evidence = tempfile::tempdir().unwrap();
+    let sessions = OperatorSessionService::new(
+        OperatorJournal::new(evidence.path().to_path_buf()).expect("operator journal"),
+    );
+    let submission = sessions
+        .start_turn(
+            "restart-thread",
+            StartTurnRequest::auto("restart-request", "resume after restart"),
+        )
+        .unwrap();
+
+    for restart in 0..2 {
+        let state = tempfile::tempdir().unwrap();
+        let port = reserve_port();
+        let mut child = spawn_runtime(port, home.path(), evidence.path(), Some(state.path()));
+        wait_for_file(&state.path().join("workers.json"));
+        let events = sessions
+            .events_after("restart-thread", None, 100)
+            .unwrap()
+            .events;
+        let interruptions = events
+            .iter()
+            .filter(|row| {
+                row.event.turn_id.as_deref() == Some(submission.turn_id.as_str())
+                    && row.event.event_type == heiwa_evidence::OperatorEventType::TurnInterrupted
+                    && row.event.payload["reason"] == "RUNTIME_RESTART"
+            })
+            .count();
+        assert_eq!(
+            interruptions, 1,
+            "restart {restart} must leave exactly one durable recovery event"
+        );
+        child.stop();
+    }
+}
+
+#[test]
+fn app_start_honors_explicit_state_dir_without_touching_home_state() {
+    let home = tempfile::tempdir().unwrap();
+    let evidence = tempfile::tempdir().unwrap();
+    let isolated_state = tempfile::tempdir().unwrap();
+    let port = reserve_port();
+    let mut child = spawn_runtime(
+        port,
+        home.path(),
+        evidence.path(),
+        Some(isolated_state.path()),
+    );
+    wait_for_file(&isolated_state.path().join("workers.json"));
+
+    assert!(
+        isolated_state.path().join("workers.json").is_file(),
+        "app heartbeat must land in the explicit state directory"
+    );
+    assert!(
+        !home.path().join(".heiwa/state/workers.json").exists(),
+        "isolated app start must not touch HOME-derived state"
+    );
+    child.stop();
+}
+
+struct SpawnedRuntime {
+    child: Child,
+}
+
+impl SpawnedRuntime {
+    fn stop(&mut self) {
+        if self.child.try_wait().ok().flatten().is_some() {
+            return;
+        }
+        #[cfg(unix)]
+        unsafe {
+            libc::kill(self.child.id() as i32, libc::SIGTERM);
+        }
+        #[cfg(not(unix))]
+        let _ = self.child.kill();
+        let _ = self.child.wait();
+    }
+}
+
+impl Drop for SpawnedRuntime {
+    fn drop(&mut self) {
+        self.stop();
+    }
+}
+
+fn spawn_runtime(
+    port: u16,
+    home: &std::path::Path,
+    evidence: &std::path::Path,
+    state: Option<&std::path::Path>,
+) -> SpawnedRuntime {
+    let mut command = Command::new(env!("CARGO_BIN_EXE_heiwa"));
+    command
+        .env("HOME", home)
+        .env("HEIWA_EVIDENCE_DIR", evidence)
+        .env("HEIWA_MACHINE_AUTH_TOKEN", TOKEN)
+        .args(["app", "start", "--port", &port.to_string(), "--no-open"])
+        .stdout(Stdio::null())
+        .stderr(Stdio::null());
+    if let Some(state) = state {
+        command.env("HEIWA_STATE_DIR", state);
+    } else {
+        command.env_remove("HEIWA_STATE_DIR");
+    }
+    SpawnedRuntime {
+        child: command.spawn().expect("start test runtime"),
+    }
+}
+
 fn reserve_port() -> u16 {
     TcpListener::bind(("127.0.0.1", 0))
         .unwrap()
         .local_addr()
         .unwrap()
         .port()
+}
+
+fn wait_for_file(path: &std::path::Path) {
+    let deadline = Instant::now() + Duration::from_secs(10);
+    while Instant::now() < deadline {
+        if path.is_file() {
+            return;
+        }
+        thread::sleep(Duration::from_millis(25));
+    }
+    panic!("test runtime did not create {}", path.display());
 }
 
 fn operator_event_count(runtime: &TestRuntime, thread_id: &str) -> usize {

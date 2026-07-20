@@ -45,6 +45,11 @@ pub const OPERATOR_CURSOR_VERSION: u8 = 1;
 /// `<kind>.jsonl` convention every other journal stream uses.
 pub const OPERATOR_STREAM_KIND: &str = "operator_events";
 
+/// Hard ceiling for one durable operator envelope, including its newline.
+/// This keeps both append and cursor-boundary validation bounded even when a
+/// stream file has been modified by an untrusted local process.
+const MAX_OPERATOR_ENVELOPE_BYTES: usize = 16 * 1024 * 1024;
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct OperatorActor {
     pub kind: String,
@@ -209,6 +214,12 @@ impl OperatorJournal {
         .to_string();
         let mut bytes = line.into_bytes();
         bytes.push(b'\n');
+        if bytes.len() > MAX_OPERATOR_ENVELOPE_BYTES {
+            return Err(anyhow!(
+                "refused to append operator event: envelope is too large ({} bytes; maximum {MAX_OPERATOR_ENVELOPE_BYTES})",
+                bytes.len()
+            ));
+        }
 
         let _guard = self
             .write_lock
@@ -293,9 +304,9 @@ impl OperatorJournal {
                         reason: "cursor offset is beyond the end of the stream".to_string(),
                     });
                 }
-                if !offset_preceded_by_newline(&path, decoded.offset)? {
+                if !offset_follows_valid_operator_event(&path, decoded.offset)? {
                     return Err(CursorError::InvalidCursor {
-                        reason: "cursor offset does not fall on a line boundary".to_string(),
+                        reason: "cursor offset does not fall on a valid event boundary".to_string(),
                     });
                 }
                 decoded.offset
@@ -444,9 +455,11 @@ fn sha256_hex(bytes: &[u8]) -> String {
         .collect()
 }
 
-/// Whether `offset` sits immediately after a `\n` byte (or is `0`, the start
-/// of the file, which is always a valid boundary).
-fn offset_preceded_by_newline(path: &Path, offset: u64) -> Result<bool> {
+/// Whether `offset` is the start of the stream or sits immediately after a
+/// complete, parseable operator-event envelope. A newline alone is not a
+/// valid cursor boundary: otherwise a caller could resume after a corrupt or
+/// non-operator line and silently skip damaged evidence.
+fn offset_follows_valid_operator_event(path: &Path, offset: u64) -> Result<bool> {
     if offset == 0 {
         return Ok(true);
     }
@@ -454,7 +467,41 @@ fn offset_preceded_by_newline(path: &Path, offset: u64) -> Result<bool> {
     file.seek(SeekFrom::Start(offset - 1))?;
     let mut buf = [0u8; 1];
     file.read_exact(&mut buf)?;
-    Ok(buf[0] == b'\n')
+    if buf[0] != b'\n' || offset == 1 {
+        return Ok(false);
+    }
+
+    // Find the beginning of the preceding line without scanning from the
+    // beginning of an append-forever stream. Only the candidate envelope is
+    // read into memory.
+    const CHUNK: u64 = 8192;
+    let line_end = offset - 1;
+    let mut search_end = line_end;
+    let oldest_allowed_start = line_end.saturating_sub(MAX_OPERATOR_ENVELOPE_BYTES as u64 - 1);
+    let line_start = loop {
+        let search_start = search_end.saturating_sub(CHUNK).max(oldest_allowed_start);
+        file.seek(SeekFrom::Start(search_start))?;
+        let mut chunk = vec![0; usize::try_from(search_end - search_start)?];
+        file.read_exact(&mut chunk)?;
+        if let Some(index) = chunk.iter().rposition(|byte| *byte == b'\n') {
+            break search_start + index as u64 + 1;
+        }
+        if search_start == 0 {
+            break 0;
+        }
+        if search_start == oldest_allowed_start {
+            return Ok(false);
+        }
+        search_end = search_start;
+    };
+    if line_start == line_end {
+        return Ok(false);
+    }
+    let line_len = usize::try_from(line_end - line_start)?;
+    file.seek(SeekFrom::Start(line_start))?;
+    let mut line = vec![0; line_len];
+    file.read_exact(&mut line)?;
+    Ok(parse_operator_line(&line).is_some())
 }
 
 fn encode_cursor(cursor: &OperatorCursor) -> String {

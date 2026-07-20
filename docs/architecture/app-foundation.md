@@ -178,8 +178,10 @@ Terminal surfaces:
 
 ## Operator Stream Contract
 
-The live operator stream is the shared conversation/execution contract for the
-Desktop, REPL, TUI, loops, and local API clients:
+The live operator stream is the current conversation/execution contract for the
+Desktop and authenticated HTTP/WebSocket surfaces. The `/api/v1/repl`
+compatibility routes submit through the same operator runner. Full interactive
+CLI and TUI consumption of this stream remains a convergence target:
 
 - durable, totally ordered domain events live in `operator_events.jsonl`
 - `OperatorSessionService` admits turns idempotently by
@@ -198,9 +200,10 @@ Desktop, REPL, TUI, loops, and local API clients:
   nonterminal turn (`RUNTIME_RESTART`, or `OPERATOR_CANCELLED` when cancellation
   was already pending). No in-memory liveness is silently resurrected
 
-The Desktop reducer is a disposable projection of this contract. App, CLI, and
-future TUI views may render different layouts, but all submit through and replay
-from the same runtime/session state machine.
+The Desktop reducer is a disposable projection of this contract. The current
+authenticated API and REPL compatibility routes share its runtime/session state
+machine; interactive CLI and future TUI views must converge without adding a
+second write path.
 
 ## Per-Call Routing And Cost Truth
 
@@ -212,7 +215,12 @@ budget, then selects the cheapest eligible candidate. Availability, auth,
 quota, timeout, and provider failures are recorded before DREX replans the next
 attempt with failed candidates excluded.
 
-Every planned/attempted/completed route carries one honest cost-truth class:
+`route_planned` carries the selected candidate's cost-truth class when a
+candidate exists. `route_completed` carries actual completion cost truth, while
+`route_failed` carries the failed attempt's available cost truth.
+`route_attempted` records invocation identity only; it does not claim spend,
+and a no-selection plan has no selected cost truth. Current cost-truth classes
+are:
 
 | Class                   | Meaning                                                                 |
 | ----------------------- | ----------------------------------------------------------------------- |

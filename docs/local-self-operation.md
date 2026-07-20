@@ -173,9 +173,14 @@ alternate port:
 
 ```bash
 HEIWA_EVIDENCE_DIR=/private/tmp/heiwa-operator-e2e/evidence \
+HEIWA_STATE_DIR=/private/tmp/heiwa-operator-e2e/state \
 HEIWA_MACHINE_AUTH_TOKEN=operator-e2e-token \
 cargo run -q -p heiwa-shell --bin heiwa -- app start --port 7475 --no-open
 ```
+
+`HEIWA_STATE_DIR` is the supported temporary override for app runtime read
+models and worker heartbeats. Set it together with `HEIWA_EVIDENCE_DIR` during
+isolated verification; neither override changes installed `7474` state.
 
 Then probe that same port:
 
@@ -313,14 +318,19 @@ pre-existing or peer-agent changes.
 
 ## Model Tier Matrix
 
-| Lane                      | Primary                       | Secondary                                    | Notes                                            |
-| ------------------------- | ----------------------------- | -------------------------------------------- | ------------------------------------------------ |
-| Routine chat/status/audit | `ollama/*` where sufficient   | Gemini CLI / Antigravity                     | Cheapest acceptable route first                  |
-| Build/code                | Codex CLI                     | Claude Code, Gemini CLI, Ollama coding model | Provider CLIs own their auth and quota semantics |
-| Research/long context     | Gemini CLI                    | Antigravity, Claude Code                     | Escalate only when local context is insufficient |
-| Review/strategy           | Claude Code / Gemini          | Codex                                        | Use premium lanes intentionally                  |
-| Sovereign work            | local `ollama/*` tiers        | none                                         | Local-only providers only                        |
-| Embeddings                | `ollama/qwen3-embedding:0.6b` | none                                         | Local runtime default                            |
+| Lane                      | Preferred candidates when eligible | Other eligible candidates              | Notes                                              |
+| ------------------------- | ---------------------------------- | ---------------------------------------- | -------------------------------------------------- |
+| Routine chat/status/audit | local Ollama where sufficient      | OpenRouter, Codex, Claude Code           | Cheapest candidate above the call's quality floor  |
+| Build/code                | Codex CLI, Claude Code              | Ollama coding model, OpenRouter          | Provider CLIs own auth and quota semantics         |
+| Research/long context     | Claude Code, Codex                  | OpenRouter                               | Route per call from live provider evidence         |
+| Review/strategy           | Claude Code, Codex                  | OpenRouter                               | Use premium lanes only when the quality floor needs them |
+| Sovereign work            | local Ollama tiers                  | none                                     | Local-only providers; fail closed when unavailable |
+| Embeddings                | `ollama/qwen3-embedding:0.6b`       | none                                     | Requires a connected local Ollama runtime          |
+
+Gemini CLI is not a current fallback: the operator account returned
+`IneligibleTierError` on 2026-07-19. Antigravity required authentication in the
+same probe. Always refresh `heiwa providers`; entitlement, authentication, and
+adapter discovery are separate facts.
 
 ## Verification
 

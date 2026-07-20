@@ -102,7 +102,7 @@
 - Produces: `OperatorJournal::read_after(Option<&str>, usize) -> Result<OperatorPage, CursorError>`.
 - Produces: `OperatorEvent`, `OperatorCursor`, `CursorEvent`, `OperatorPage`, `CursorError`.
 
-- [ ] **Step 1: Write failing sensitive-material and cursor tests**
+- [x] **Step 1: Write failing sensitive-material and cursor tests**
 
 Create `crates/heiwa_evidence/tests/operator_journal.rs` with these cases:
 
@@ -168,13 +168,13 @@ fn fingerprint_or_boundary_mismatch_is_structured() {
 }
 ```
 
-- [ ] **Step 2: Run tests to verify RED**
+- [x] **Step 2: Run tests to verify RED**
 
 Run: `cargo test -p heiwa_evidence --test operator_journal`
 
 Expected: FAIL because operator journal exports do not exist.
 
-- [ ] **Step 3: Extract the shared sensitive-material gate**
+- [x] **Step 3: Extract the shared sensitive-material gate**
 
 Move basename/prefix policy from `apps/heiwa_shell/src/cmd/capabilities.rs` into `crates/heiwa_evidence/src/sensitive.rs`:
 
@@ -201,7 +201,7 @@ pub fn find_sensitive(value: &serde_json::Value) -> Option<SensitiveMatch> {
 
 Keep the existing basename and prefix lists byte-for-byte. Change capability callers to `heiwa_evidence::find_sensitive(&value).is_some()` and retain their existing tests.
 
-- [ ] **Step 4: Implement operator record and cursor types**
+- [x] **Step 4: Implement operator record and cursor types**
 
 In `operator.rs`, define this public surface:
 
@@ -287,17 +287,17 @@ pub enum CursorError {
 
 Add `thiserror = "2"`, `base64 = "0.22"`, and `sha2 = "0.10"` to `heiwa_evidence`.
 
-- [ ] **Step 5: Implement dumb append and lock-free replay**
+- [x] **Step 5: Implement dumb append and lock-free replay**
 
-`OperatorJournal::append` must serialize the existing envelope with `v: EVIDENCE_SCHEMA_VERSION`, call `find_sensitive` on `event.payload`, take the write-side sidecar lock, call one `write_all`, `sync_data`, and return the byte offset after the newline. `read_after` must not take the append lock. It validates cursor version, first-valid-event fingerprint, file length, and preceding newline boundary before reading complete newline-delimited records.
+`OperatorJournal::append` must serialize the existing envelope with `v: EVIDENCE_SCHEMA_VERSION`, call `find_sensitive` on `event.payload`, take the write-side sidecar lock, call one `write_all`, `sync_data`, and return the byte offset after the newline. `read_after` must not take the append lock. It validates cursor version, stream fingerprint, file length, and that the offset is `0` or immediately follows a valid operator-event envelope before reading complete newline-delimited records.
 
 Fingerprint rule: SHA-256 of the first valid complete envelope line. Empty stream fingerprint is `empty`. A cursor returned after the first append uses that first-line fingerprint.
 
-- [ ] **Step 6: Add corruption and concurrent-writer tests**
+- [x] **Step 6: Add corruption and concurrent-writer tests**
 
 Add tests that append a truncated final line and assert earlier events plus `skipped_lines == 1`, and that four `OperatorJournal` instances append 100 events each with 400 valid unique event IDs.
 
-- [ ] **Step 7: Run focused tests and commit**
+- [x] **Step 7: Run focused tests and commit**
 
 Run: `cargo test -p heiwa_evidence`
 
@@ -325,7 +325,7 @@ git commit -m "Add secure operator journal primitives"
 - Produces: `OperatorSessionService`, `OperatorThreadView`, `OperatorTurnView`, `TurnSubmission`, `TurnRoutePolicy`.
 - Produces: `start_turn`, `append_event`, `events_after`, `list_threads`, `recover_interrupted`.
 
-- [ ] **Step 1: Write failing materialization/idempotency/recovery tests**
+- [x] **Step 1: Write failing materialization/idempotency/recovery tests**
 
 Create `operator_service.rs` tests that prove:
 
@@ -355,13 +355,13 @@ fn restart_closes_unfinished_turn_once() {
 
 Use `OperatorSessionService::new(OperatorJournal::new(path.to_path_buf())?)`; do not mutate `HOME` in these tests.
 
-- [ ] **Step 2: Run tests to verify RED**
+- [x] **Step 2: Run tests to verify RED**
 
 Run: `cargo test -p heiwa-session --test operator_service`
 
 Expected: FAIL because operator service types do not exist.
 
-- [ ] **Step 3: Add session dependency and domain types**
+- [x] **Step 3: Add session dependency and domain types**
 
 Add `heiwa_evidence`, `sha2 = "0.10"`, and UUID feature `v5` to `crates/heiwa_session/Cargo.toml`. Define:
 
@@ -396,7 +396,7 @@ pub struct TurnSubmission { pub thread_id: String, pub turn_id: String, pub curs
 
 `StartTurnRequest::auto` sets mode `Auto`, minimum quality class `1`, privacy `standard`, and no explicit spending limit.
 
-- [ ] **Step 4: Implement sole-writer methods**
+- [x] **Step 4: Implement sole-writer methods**
 
 `OperatorSessionService` owns `Mutex<OperatorJournal>`. `start_turn` holds the service mutex, materializes existing events, returns the existing turn on matching `client_request_id`, otherwise appends `thread_created` when needed, then `turn_started` and `user_message`. `append_event` validates known event type, schema version, required turn/call identifiers, and terminal-state transitions before calling journal append.
 
@@ -416,11 +416,11 @@ impl OperatorSessionService {
 
 `events_after` iteratively reads globally ordered pages until it collects `limit` matching events or reaches EOF. It filters by `thread_id` while advancing the returned cursor across nonmatching events so clients neither miss later matching rows nor reread unrelated rows forever.
 
-- [ ] **Step 5: Implement deterministic thread materialization**
+- [x] **Step 5: Implement deterministic thread materialization**
 
 Fold events by append order. Deduplicate repeated `event_id` values reader-side. Ignore events for unknown schema versions and increment `skipped_events`. A turn terminal state is one of `completed`, `interrupted`, or `blocked`; operator cancellation appends `turn_cancel_requested` before signalling the runner and ends as `turn_interrupted` with reason `OPERATOR_CANCELLED`. Later nonterminal events for a closed turn are counted as invalid and not projected.
 
-- [ ] **Step 6: Run tests and commit**
+- [x] **Step 6: Run tests and commit**
 
 Run: `cargo test -p heiwa-session --test operator_service`
 
@@ -450,7 +450,7 @@ git commit -m "Add sole-writer operator session service"
 - Produces: `rebuild_operator_indexes(&OperatorSessionService, &dyn EmbeddingSink) -> Result<IndexReport>`.
 - Keeps: `load_transcript`, `append_entry`, `save_transcript` as compatibility projections over operator events.
 
-- [ ] **Step 1: Write failing idempotent import test**
+- [x] **Step 1: Write failing idempotent import test**
 
 Add a legacy v1 file with user, assistant, tool, and evidence blocks. Call import twice and assert first report imports four entries, second imports zero, exactly one `legacy_session_imported` event exists, and the source JSON bytes remain unchanged.
 
@@ -463,7 +463,7 @@ fn legacy_event_id(session_id: &str, entry_id: u64, role: &str) -> String {
 }
 ```
 
-- [ ] **Step 2: Write failing index rebuild test with fake embedder**
+- [x] **Step 2: Write failing index rebuild test with fake embedder**
 
 Define an injected boundary:
 
@@ -475,31 +475,31 @@ pub trait EmbeddingSink: Send + Sync {
 
 Test that rebuilding indexes from one user message, one assistant completion, and one restricted tool event inserts all safe text into FTS, sends only eligible user/assistant text to the fake embedding sink, and produces identical counts on a second rebuild.
 
-- [ ] **Step 3: Run tests to verify RED**
+- [x] **Step 3: Run tests to verify RED**
 
 Run: `cargo test -p heiwa-session --test operator_service legacy -- --nocapture`
 
 Expected: FAIL because import/rebuild APIs do not exist.
 
-- [ ] **Step 4: Implement deterministic import**
+- [x] **Step 4: Implement deterministic import**
 
 Fingerprint each legacy file with SHA-256. Before import, scan materialized events for `legacy_session_imported.payload.source_fingerprint`. Map `TranscriptBlock::User` to `user_message`, `Assistant` to `assistant_completed`, `Tool` to `tool_call_completed`, and `Evidence` to `receipt_linked`. Create one synthetic turn per adjacent user-led block group; preserve original timestamps, including `0` for unknown legacy timestamps.
 
 Append the import marker only after every entry append succeeds. Deterministic event IDs make crash/retry duplicates harmless in the reader.
 
-- [ ] **Step 5: Convert compatibility transcript functions**
+- [x] **Step 5: Convert compatibility transcript functions**
 
 `load_transcript(session_id)` imports legacy data if required, materializes operator events, and converts message/tool/receipt events back into `TranscriptEntry`. `append_entry` maps a block into a typed event through `OperatorSessionService`; `save_transcript` appends only new blocks and rejects truncation with `legacy transcript truncation is unavailable after operator-stream cutover`.
 
 Stop all production writes to `<sessions_dir>/<session_id>.json` after successful import. Keep file reads solely for import/recovery.
 
-- [ ] **Step 6: Implement FTS/Lance rebuild**
+- [x] **Step 6: Implement FTS/Lance rebuild**
 
 Move existing FTS schema/sync functions into `operator_index.rs`. Key message rows by `(thread_id, event_id)`, not legacy numeric entry ID. `ProductionEmbeddingSink` maps event IDs to stable u64 keys by the first eight bytes of SHA-256 and calls `heiwa_embed::embed_and_store`.
 
 Rebuild must transactionally clear/reinsert SQLite rows. Lance/embedding failures increment `embedding_failures` and return a degraded `IndexReport`; they do not alter journal truth.
 
-- [ ] **Step 7: Run session tests and commit**
+- [x] **Step 7: Run session tests and commit**
 
 Run: `cargo test -p heiwa-session --all-features`
 
@@ -526,7 +526,7 @@ git commit -m "Migrate session projections to operator events"
 - Produces: `ModelCallRequest`, `ModelCallCandidate`, `ModelCallPlan`, `CandidateRejection`, `CostTruth`.
 - Produces: `plan_model_call(&ModelCallRequest, &[ModelCallCandidate], &DrexPolicy) -> Result<ModelCallPlan>`.
 
-- [ ] **Step 1: Write failing quality-before-cost tests**
+- [x] **Step 1: Write failing quality-before-cost tests**
 
 Create tests with a quality-class-1 free model and quality-class-3 subscription model. For `minimum_quality_class: 3`, assert the class-3 model wins. Add a second class-3 direct API model at `$0.08`; assert a class-3 `target_only` subscription route with marginal cost `0.0` wins. Add sovereign, disconnected, quota-exhausted, context, capability, and explicit-override rejection tests.
 
@@ -554,13 +554,13 @@ pub struct ModelCallRequest {
 }
 ```
 
-- [ ] **Step 2: Run tests to verify RED**
+- [x] **Step 2: Run tests to verify RED**
 
 Run: `cargo test -p heiwa-core --test drex_call_routing`
 
 Expected: FAIL because call-routing types do not exist.
 
-- [ ] **Step 3: Implement candidate and cost-truth types**
+- [x] **Step 3: Implement candidate and cost-truth types**
 
 ```rust
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize, PartialEq, Eq)]
@@ -580,7 +580,7 @@ pub struct ModelCallCandidate {
 
 `ModelCallPlan` contains selected candidate, admitted candidate IDs, structured rejections, policy version, and selection reason.
 
-- [ ] **Step 4: Implement hard admission then lexicographic selection**
+- [x] **Step 4: Implement hard admission then lexicographic selection**
 
 Filter disconnected, adapter-ineligible, quota-exhausted, excluded, over-budget, insufficient context/capability/quality/success, sovereign-remote, and invalid explicit routes. Compare admitted candidates with:
 
@@ -593,11 +593,11 @@ fn compare_candidates(
 
 Do not add `ordered-float`; implement comparison with `f64::total_cmp`. Primary comparison is known marginal cost (`None` sorts after known values), then higher capability class, lower p95 latency, then higher success rate. Local-zero and target-only subscription routes may carry marginal `0.0`, but retain distinct truth classes in evidence.
 
-- [ ] **Step 5: Preserve existing DREX vector/gate metadata**
+- [x] **Step 5: Preserve existing DREX vector/gate metadata**
 
 Call existing `evaluate_drex` to produce authority/scorecard data. `plan_model_call` owns model selection; existing `plan_route` becomes a compatibility wrapper that builds candidates and delegates rather than mixing capability score and cost into one opaque `model_score`.
 
-- [ ] **Step 6: Run core tests and commit**
+- [x] **Step 6: Run core tests and commit**
 
 Run: `cargo test -p heiwa-core --test drex_call_routing && cargo test -p heiwa-core drex`
 
@@ -628,7 +628,7 @@ git commit -m "Route every model call by quality and marginal value"
 - Produces: `ModelCallExecutor::execute(ModelCallExecution) -> Result<ModelCallResult>`.
 - Produces: `LoopModelCaller` trait consumed by `LoopController`.
 
-- [ ] **Step 1: Write failing executor/fallback tests**
+- [x] **Step 1: Write failing executor/fallback tests**
 
 Use fake adapters where primary emits `StreamEvent::Error("rate_limited")` and secondary emits tokens plus usage. Assert events occur in order:
 
@@ -643,7 +643,7 @@ route_completed(secondary)
 
 Assert remaining budget is reduced only by reported/estimated completed attempts and retry count stops at three.
 
-- [ ] **Step 2: Define execution boundary**
+- [x] **Step 2: Define execution boundary**
 
 ```rust
 pub struct ModelCallExecution {
@@ -666,13 +666,13 @@ pub struct ModelCallResult {
 
 `ModelCallExecutor` receives an adapter resolver closure and `Arc<OperatorSessionService>` in its constructor.
 
-- [ ] **Step 3: Implement event-backed execution and fallback**
+- [x] **Step 3: Implement event-backed execution and fallback**
 
 Before adapter invocation, append `route_planned` and `route_attempted`. On normalized availability, auth, quota, timeout, or provider failure, append `route_failed`, add selected model to `excluded_models`, recompute remaining budget, and replan. On success append `route_completed` with honest cost truth, usage, and latency. If any append fails, abort before another adapter or side effect.
 
 Use `tokio::select!` between stream receive and `cancel.changed()`. On cancellation abort the adapter task and return `ModelCallError::Cancelled`.
 
-- [ ] **Step 4: Refactor bounded loops to request calls**
+- [x] **Step 4: Refactor bounded loops to request calls**
 
 Replace the current second `LoopController::run` parameter, `adapters: Arc<dyn Fn(&str) -> Option<Arc<dyn ProviderAdapter>> + Send + Sync>`, with `caller: Arc<dyn LoopModelCaller>`:
 
@@ -685,15 +685,15 @@ pub trait LoopModelCaller: Send + Sync {
 
 Each loop iteration builds a fresh `call_id`, stage `loop_iteration`, remaining loop budget, and prior failed models. Shell supplies an implementation backed by `ModelCallExecutor`.
 
-- [ ] **Step 5: Replace direct shell provider sends**
+- [x] **Step 5: Replace direct shell provider sends**
 
 Replace every `adapter.send` in `apps/heiwa_shell/src/main.rs` with `ModelCallExecutor`. Keep `adapter.send` only inside `apps/heiwa_shell/src/model_calls.rs` and provider adapter implementations.
 
-- [ ] **Step 6: Add boundary enforcement script**
+- [x] **Step 6: Add boundary enforcement script**
 
 `scripts/check_model_call_boundary.sh` runs `rg -n '\.send\(&.*messages|adapter.*\.send\(' apps/heiwa_shell crates/heiwa_loop --glob '*.rs'` and fails if any match is outside `apps/heiwa_shell/src/model_calls.rs`. Add it to `check_agent_baseline.sh`.
 
-- [ ] **Step 7: Run focused tests and commit**
+- [x] **Step 7: Run focused tests and commit**
 
 Run: `cargo test -p heiwa-shell model_call && cargo test -p heiwa-loop && bash scripts/check_model_call_boundary.sh`
 
@@ -721,11 +721,11 @@ git commit -m "Centralize routed model call execution"
 - Produces: `OperatorTurnRunner`, `ActiveTurnRegistry`, `OperatorStreamFrame`.
 - Keeps: `execute_repl_turn` and `execute_repl_turn_streaming` as compatibility wrappers.
 
-- [ ] **Step 1: Write failing durable-turn tests**
+- [x] **Step 1: Write failing durable-turn tests**
 
 Test deterministic and model-backed turns. Assert `turn_started` and `user_message` are fsynced before the fake executor is entered. Assert completed path appends `assistant_started`, route events, `assistant_completed`, receipt link, and `turn_completed`. Assert execution is never invoked when journal append returns an error.
 
-- [ ] **Step 2: Implement active-turn cancellation registry**
+- [x] **Step 2: Implement active-turn cancellation registry**
 
 ```rust
 #[derive(Default, Clone)]
@@ -740,7 +740,7 @@ impl ActiveTurnRegistry {
 }
 ```
 
-- [ ] **Step 3: Implement turn runner**
+- [x] **Step 3: Implement turn runner**
 
 `submit` calls `start_turn`; duplicate submissions return without a second spawn. New turns register cancellation and spawn `run_turn`. `run_turn` uses one `ModelCallRequest` per inference stage, passes route policy down, emits transient `assistant_delta` frames through a Tokio broadcast channel, and appends final/terminal events through session service.
 
@@ -748,11 +748,11 @@ Expose `OperatorTurnRunner::request_cancel(turn_id)`. It must append `turn_cance
 
 Tool calls append `tool_call_started` before execution and `tool_call_completed` after the existing approval/evidence path returns. Output above 16 KiB is written as an artifact and only a bounded preview enters event payload.
 
-- [ ] **Step 4: Make compatibility wrappers thin**
+- [x] **Step 4: Make compatibility wrappers thin**
 
 `execute_repl_turn_streaming` subscribes to the new runner and maps `route_planned` to `ReplStreamEvent::Route`, transient deltas to `Token`, and terminal events to `Done/Error`. `execute_repl_turn` continues collecting this stream. Remove direct transcript JSON writes and legacy `EvidenceClient::journal` calls for operator events.
 
-- [ ] **Step 5: Run shell unit tests and commit**
+- [x] **Step 5: Run shell unit tests and commit**
 
 Run: `cargo test -p heiwa-shell operator --lib`
 
@@ -778,11 +778,11 @@ git commit -m "Run shell turns through durable operator events"
 - Consumes: `OperatorTurnRunner`, `OperatorSessionService`, `heiwa_core::auth::extract_auth_subject`.
 - Produces the HTTP routes from the design spec.
 
-- [ ] **Step 1: Write failing auth and contract tests**
+- [x] **Step 1: Write failing auth and contract tests**
 
 Start a temporary app runtime with `HEIWA_MACHINE_AUTH_TOKEN=test-machine-token` and temp evidence/session roots. Assert unauthenticated list/submit/cancel return `401`; bearer-authenticated requests return `200/202`; duplicate `client_request_id` returns the same `turn_id`; malformed cursor returns `400` with `error.code == "invalid_cursor"`.
 
-- [ ] **Step 2: Add request auth helper**
+- [x] **Step 2: Add request auth helper**
 
 ```rust
 fn operator_auth_subject(request: &str) -> Result<heiwa_core::auth::AuthSubject, u16> {
@@ -796,7 +796,7 @@ fn operator_auth_subject(request: &str) -> Result<heiwa_core::auth::AuthSubject,
 
 Call this before reading operator data, submitting work, cancelling, or upgrading operator WebSockets. Return `500 auth_not_configured` when both machine token and signing secret are empty.
 
-- [ ] **Step 3: Add dynamic operator routes**
+- [x] **Step 3: Add dynamic operator routes**
 
 Implement exact endpoints:
 
@@ -813,15 +813,15 @@ Parse segments with a helper that rejects empty IDs, `..`, percent-decoded slash
 
 The cancel route calls `OperatorTurnRunner::request_cancel`; it never signals the registry directly, preserving the durable-intent-before-side-effect gate.
 
-- [ ] **Step 4: Inject auth in `heiwa app api` CLI calls**
+- [x] **Step 4: Inject auth in `heiwa app api` CLI calls**
 
 `call_local_app_api` loads `RuntimeConfig::from_env().machine_auth_token`, adds `Authorization: Bearer <token>` to the wire request, and returns `auth_not_configured` before network when absent. Dry-run JSON reports `auth: "machine_token_configured"` or `auth: "missing"`; it never prints token bytes.
 
-- [ ] **Step 5: Keep compatibility endpoints backed by runner**
+- [x] **Step 5: Keep compatibility endpoints backed by runner**
 
 `/api/v1/repl` and `/api/v1/repl/stream` authenticate, submit to thread `default`, and preserve response/SSE shapes. Existing read-only nonoperator endpoints remain unchanged in this task.
 
-- [ ] **Step 6: Run API tests and commit**
+- [x] **Step 6: Run API tests and commit**
 
 Run: `cargo test -p heiwa-shell --test operator_api --test app_api`
 
@@ -849,15 +849,15 @@ git commit -m "Expose authenticated operator HTTP API"
 - Produces: `WS /ws/v1/operator?thread_id=&after=` frames.
 - Produces Tauri command `operator_subscribe(thread_id, after, Channel<Value>)`.
 
-- [ ] **Step 1: Write failing WebSocket auth/replay tests**
+- [x] **Step 1: Write failing WebSocket auth/replay tests**
 
 Test rejection before `101 Switching Protocols` without auth, authenticated replay from cursor, `caught_up`, heartbeat, and live delivery after a separate `OperatorSessionService` appends an event. Replace stream file and assert `invalid_cursor` frame then close.
 
-- [ ] **Step 2: Implement authenticated operator event loop**
+- [x] **Step 2: Implement authenticated operator event loop**
 
 Pass full request target into `handle_websocket`. Authenticate before handshake. Every 200 ms call lock-free `events_after(thread_id, cursor, 100)`, emit each durable event with cursor, emit `caught_up` after initial replay, and heartbeat every 30 seconds. Broadcast transient deltas from `OperatorTurnRunner`; durable replay remains authority.
 
-- [ ] **Step 3: Inject auth into native HTTP proxy**
+- [x] **Step 3: Inject auth into native HTTP proxy**
 
 Replace `reqwest::get` with a client request builder and:
 
@@ -873,7 +873,7 @@ fn machine_auth_token() -> Result<String, ProxyError> {
 
 Add `Authorization: Bearer` natively. Extend proxy tests to inspect the received header. Never return the token through Tauri IPC or error strings.
 
-- [ ] **Step 4: Implement native WebSocket-to-channel bridge**
+- [x] **Step 4: Implement native WebSocket-to-channel bridge**
 
 Add `futures-util = "0.3"` and `tokio-tungstenite = { version = "0.24", features = ["rustls-tls-native-roots"] }`, reusing the version already present in `Cargo.lock`. Build an authenticated client request with bearer header, connect, and forward decoded JSON through `tauri::ipc::Channel<serde_json::Value>`. Reconnect with the last durable cursor after a bounded 250 ms, 1 s, 3 s backoff.
 
@@ -888,7 +888,7 @@ pub async fn operator_subscribe(
 ) -> Result<(), crate::proxy::ApiErrorPayload>;
 ```
 
-- [ ] **Step 5: Run shell/Desktop Rust tests and commit**
+- [x] **Step 5: Run shell/Desktop Rust tests and commit**
 
 Run: `cargo test -p heiwa-shell operator_websocket && cargo test -p heiwa-desktop --all-targets`
 
@@ -1031,6 +1031,7 @@ Use a temporary test root and explicit auth token:
 
 ```bash
 HEIWA_EVIDENCE_DIR=/private/tmp/heiwa-operator-e2e/evidence \
+HEIWA_STATE_DIR=/private/tmp/heiwa-operator-e2e/state \
 HEIWA_MACHINE_AUTH_TOKEN=operator-e2e-token \
 cargo run -q -p heiwa-shell --bin heiwa -- app start --port 7475 --no-open
 ```

@@ -81,6 +81,22 @@ fn rejects_sensitive_payload_before_file_creation() {
 }
 
 #[test]
+fn rejects_oversized_operator_envelope_before_file_creation() {
+    let dir = tempfile::tempdir().unwrap();
+    let journal = OperatorJournal::new(dir.path().to_path_buf()).unwrap();
+    let error = journal
+        .append(&event(
+            "e1",
+            "thread-a",
+            OperatorEventType::UserMessage,
+            json!({"text": "x".repeat(17 * 1024 * 1024)}),
+        ))
+        .unwrap_err();
+    assert!(error.to_string().contains("too large"), "{error}");
+    assert!(!dir.path().join("operator_events.jsonl").exists());
+}
+
+#[test]
 fn rejects_sensitive_event_metadata_before_file_creation() {
     let mut thread = event(
         "thread-secret",
@@ -509,6 +525,40 @@ fn rejects_cursor_with_offset_off_a_line_boundary() {
     assert!(
         reason.contains("boundary"),
         "reason names the framing failure: {reason}"
+    );
+}
+
+#[test]
+fn rejects_cursor_immediately_after_a_complete_corrupt_line() {
+    let dir = tempfile::tempdir().unwrap();
+    let journal = OperatorJournal::new(dir.path().to_path_buf()).unwrap();
+    let row = journal
+        .append(&event(
+            "e1",
+            "thread-a",
+            OperatorEventType::UserMessage,
+            json!({"text":"hi"}),
+        ))
+        .unwrap();
+    let path = dir.path().join("operator_events.jsonl");
+    let mut file = std::fs::OpenOptions::new()
+        .append(true)
+        .open(&path)
+        .unwrap();
+    file.write_all(b"complete but not an operator envelope\n")
+        .unwrap();
+    file.sync_data().unwrap();
+    let corrupt_boundary = file.metadata().unwrap().len();
+
+    // Correct version and stream fingerprint, but the offset follows a
+    // complete corrupt line rather than a valid operator event envelope.
+    let hostile = tampered_cursor(&row.cursor, |value| {
+        value["offset"] = json!(corrupt_boundary)
+    });
+    let reason = invalid_reason(journal.read_after(Some(&hostile), 50));
+    assert!(
+        reason.contains("event boundary"),
+        "reason names the invalid event boundary: {reason}"
     );
 }
 

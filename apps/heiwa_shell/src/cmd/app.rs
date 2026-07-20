@@ -670,11 +670,23 @@ async fn start(args: &[String]) -> Result<()> {
     let url = format!("http://127.0.0.1:{}/", local_addr.port());
     let worker_id = format!("heiwa-app-{}", std::process::id());
     let started_at = Arc::new(chrono::Utc::now().to_rfc3339());
+    let runtime_state_dir = state_dir();
 
-    write_app_heartbeat(&worker_id)?;
+    // Binding establishes this process as the app runtime owner before the
+    // sole-writer session service mutates the shared operator journal.
+    let (_, sessions, _) = crate::default_model_call_runtime().map_err(anyhow::Error::msg)?;
+    sessions
+        .recover_interrupted()
+        .map_err(|error| anyhow!("operator restart recovery failed: {error}"))?;
+
+    write_app_heartbeat(&runtime_state_dir, &worker_id)?;
     let mut caffeinate = spawn_caffeinate();
     let (shutdown_tx, shutdown_rx) = watch::channel(false);
-    tokio::spawn(heartbeat_loop(worker_id.clone(), shutdown_rx));
+    tokio::spawn(heartbeat_loop(
+        runtime_state_dir,
+        worker_id.clone(),
+        shutdown_rx,
+    ));
 
     if !no_open {
         open_url(&url)?;
@@ -719,12 +731,16 @@ async fn start(args: &[String]) -> Result<()> {
     Ok(())
 }
 
-async fn heartbeat_loop(worker_id: String, mut shutdown: watch::Receiver<bool>) {
+async fn heartbeat_loop(
+    runtime_state_dir: PathBuf,
+    worker_id: String,
+    mut shutdown: watch::Receiver<bool>,
+) {
     let mut ticker = time::interval(Duration::from_secs(60));
     loop {
         tokio::select! {
             _ = ticker.tick() => {
-                let _ = write_app_heartbeat(&worker_id);
+                let _ = write_app_heartbeat(&runtime_state_dir, &worker_id);
             }
             changed = shutdown.changed() => {
                 if changed.is_err() || *shutdown.borrow() {
@@ -4025,8 +4041,8 @@ fn generated_file_status(path: &Path) -> String {
     }
 }
 
-fn write_app_heartbeat(worker_id: &str) -> Result<()> {
-    let path = state_dir().join("workers.json");
+fn write_app_heartbeat(runtime_state_dir: &Path, worker_id: &str) -> Result<()> {
+    let path = runtime_state_dir.join("workers.json");
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent)?;
     }
@@ -4376,6 +4392,9 @@ fn flag_value(args: &[String], flag: &str) -> Option<String> {
 }
 
 fn state_dir() -> PathBuf {
+    if let Some(path) = env::var_os("HEIWA_STATE_DIR").filter(|value| !value.is_empty()) {
+        return PathBuf::from(path);
+    }
     let home = crate::home::heiwa_home().unwrap_or_else(|| PathBuf::from("."));
     home.join(".heiwa").join("state")
 }
@@ -4470,6 +4489,7 @@ fn print_start_help() {
     println!();
     println!("Binds 127.0.0.1, serves the per-user browser console by default,");
     println!("starts caffeinate while running, and writes a worker heartbeat.");
+    println!("Set HEIWA_STATE_DIR to isolate app runtime state for verification.");
 }
 
 #[cfg(test)]
