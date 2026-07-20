@@ -341,10 +341,16 @@ mod model_call {
         let executor = ModelCallExecutor::new(resolver, service.clone());
         let (_cancel_tx, cancel_rx) = watch::channel(false);
 
+        let mut call_request = request("thread-1", &submission.turn_id);
+        call_request.minimum_quality_class = 3;
+        let mut below_quality_floor = candidate(0, "cheap-low-quality", "cheap-low-quality", 0.0);
+        below_quality_floor.tier.capability_class = 2;
+
         let result = executor
             .execute(ModelCallExecution {
-                request: request("thread-1", &submission.turn_id),
+                request: call_request,
                 candidates: vec![
+                    below_quality_floor,
                     candidate(1, "primary", "primary-model", 0.01),
                     candidate(2, "secondary", "secondary-model", 0.02),
                 ],
@@ -373,9 +379,15 @@ mod model_call {
             ModelCallAttemptOutcome::Failed
         );
         assert_eq!(result.attempt_records[0].cost_usd, Some(0.01));
+        assert_eq!(result.attempt_records[0].cost_truth, CostTruth::TargetOnly);
         assert_eq!(
             result.attempt_records[1].outcome,
             ModelCallAttemptOutcome::Completed
+        );
+        assert_eq!(result.attempt_records[1].cost_usd, Some(0.02));
+        assert_eq!(
+            result.attempt_records[1].cost_truth,
+            CostTruth::ExactProviderReport
         );
 
         let events = service
@@ -397,8 +409,35 @@ mod model_call {
                 OperatorEventType::RouteCompleted,
             ]
         );
+        assert_eq!(events[0].event.payload["provider"], "primary");
+        assert_eq!(events[0].event.payload["selected_id"], 1);
+        assert_eq!(events[0].event.payload["rejections"][0]["candidate_id"], 0);
+        assert_eq!(
+            events[0].event.payload["rejections"][0]["reasons"][0],
+            "minimum_quality_class"
+        );
         assert_eq!(events[2].event.payload["failure_class"], "rate_limited");
+        assert_eq!(events[2].event.payload["cost_usd"], 0.01);
+        assert_eq!(events[2].event.payload["cost_truth"], "target_only");
+        assert_eq!(events[2].event.payload["remaining_budget_usd"], 0.99);
         assert_eq!(events[3].event.payload["provider"], "secondary");
+        assert_eq!(events[3].event.payload["selected_id"], 2);
+        assert_eq!(events[3].event.payload["rejections"][0]["candidate_id"], 0);
+        assert_eq!(
+            events[3].event.payload["rejections"][0]["reasons"][0],
+            "minimum_quality_class"
+        );
+        assert_eq!(events[5].event.payload["cost_usd"], 0.02);
+        assert_eq!(
+            events[5].event.payload["cost_truth"],
+            "exact_provider_report"
+        );
+        assert_eq!(events[5].event.payload["remaining_budget_usd"], 0.97);
+        assert_eq!(events[5].event.payload["cumulative_cost_usd"], 0.03);
+        assert_eq!(
+            events[5].event.payload["cumulative_cost_truth"],
+            "proxy_estimate"
+        );
     }
 
     #[tokio::test]
