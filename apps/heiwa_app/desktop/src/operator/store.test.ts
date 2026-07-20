@@ -58,6 +58,22 @@ describe("OperatorStore", () => {
     expect(store.snapshot().transientByTurn["turn-1"]).toBeUndefined();
   });
 
+  it("creates and replaces a durable assistant row with empty completion text", () => {
+    const store = new OperatorStore();
+    store.reduce({ type: "assistant_delta", thread_id: "default", turn_id: "turn-1", text: "discard me" });
+    store.reduce(frame("empty-completion", "assistant_completed", { text: "" }));
+
+    expect(store.snapshot().messages).toEqual([
+      expect.objectContaining({ role: "assistant", body: "", turnId: "turn-1" }),
+    ]);
+    expect(store.snapshot().transientByTurn["turn-1"]).toBeUndefined();
+
+    store.reduce(frame("temporary-completion", "assistant_completed", { text: "temporary" }));
+    store.reduce(frame("replacement-empty-completion", "assistant_completed", { text: "" }));
+    expect(store.snapshot().messages).toHaveLength(1);
+    expect(store.snapshot().messages[0]?.body).toBe("");
+  });
+
   it("ignores late assistant deltas after durable completion", () => {
     const store = new OperatorStore();
     store.reduce(frame("complete-before-delta", "assistant_completed", { text: "final" }));

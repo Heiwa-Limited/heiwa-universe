@@ -9,6 +9,8 @@ import { OperatorStore } from "./store";
 
 class StaleClientOperation extends Error {}
 
+const MAX_INVALID_CURSOR_RECOVERIES = 2;
+
 type SubscriptionRun = {
   generation: number;
   invalidRequested: boolean;
@@ -39,6 +41,7 @@ export class OperatorClient {
   private recovery: { generation: number; promise: Promise<void> } | null = null;
   private activeSubscription: SubscriptionRun | null = null;
   private generation = 0;
+  private invalidCursorRecoveries = 0;
 
   constructor(
     private readonly store: OperatorStore,
@@ -49,6 +52,7 @@ export class OperatorClient {
     const normalized = threadId.trim();
     if (!normalized) throw new Error("thread_id_required");
     const generation = ++this.generation;
+    this.invalidCursorRecoveries = 0;
     this.threadId = normalized;
     this.store.resetProjectionForReplay();
     this.clientState = { status: "starting", error: null };
@@ -165,6 +169,11 @@ export class OperatorClient {
 
   private scheduleRecovery(threadId: string, generation: number, run: SubscriptionRun): void {
     if (this.recovery?.generation === generation) return;
+    if (this.invalidCursorRecoveries >= MAX_INVALID_CURSOR_RECOVERIES) {
+      this.reportError("operator_history_unavailable", generation);
+      return;
+    }
+    this.invalidCursorRecoveries += 1;
     this.clientState = { status: "starting", error: null };
     this.dependencies.onChange?.();
     let recoveryRecord!: { generation: number; promise: Promise<void> };

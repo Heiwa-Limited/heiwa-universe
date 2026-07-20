@@ -145,7 +145,7 @@ export class OperatorStore {
           delete this.state.transientByTurn[turnId];
           this.state.finalizedAssistantTurns.add(turnId);
         }
-        if (!text) break;
+        if (text === undefined) break;
         const message: OperatorMessage = {
           id: event.event_id,
           role: "assistant",

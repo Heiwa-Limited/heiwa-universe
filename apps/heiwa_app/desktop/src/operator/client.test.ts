@@ -218,6 +218,40 @@ describe("OperatorClient", () => {
     expect(client.state()).toEqual({ status: "ready", error: null });
   });
 
+  it("stops persistent immediate invalid cursors at a finite generation budget", async () => {
+    const onError = vi.fn();
+    let subscriptions = 0;
+    const subscribe = vi.fn(async (_threadId: string, _after: string | null, onFrame: (frame: OperatorFrame) => void) => {
+      subscriptions += 1;
+      if (subscriptions <= 4) onFrame({ type: "invalid_cursor", code: "invalid_cursor" });
+    });
+    let replays = 0;
+    const get = vi.fn(async () => {
+      replays += 1;
+      return history([eventFrame(replays)], `cursor-${replays}`);
+    });
+    const store = new OperatorStore();
+    const client = new OperatorClient(store, dependencies({ get, subscribe, onError }));
+
+    await client.start("team & ops");
+    await flushAsyncWork();
+
+    expect(subscribe).toHaveBeenCalledTimes(3);
+    expect(get).toHaveBeenCalledTimes(3);
+    expect(client.state()).toEqual({ status: "error", error: "operator_history_unavailable" });
+    expect(onError).toHaveBeenLastCalledWith("operator_history_unavailable");
+
+    await flushAsyncWork();
+    expect(subscribe).toHaveBeenCalledTimes(3);
+    expect(get).toHaveBeenCalledTimes(3);
+
+    await client.start("team & ops");
+    await flushAsyncWork();
+    expect(subscribe).toHaveBeenCalledTimes(5);
+    expect(get).toHaveBeenCalledTimes(5);
+    expect(client.state()).toEqual({ status: "ready", error: null });
+  });
+
   it("keeps a concurrent stale history start from mutating a switched thread", async () => {
     const oldHistory = deferred<OperatorHistoryResponse>();
     const get = vi.fn(async (path: string) => path.includes("/old%20thread/")
