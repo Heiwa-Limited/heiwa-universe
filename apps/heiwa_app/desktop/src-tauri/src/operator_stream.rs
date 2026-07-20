@@ -266,12 +266,159 @@ mod tests {
     use super::*;
     use futures_util::SinkExt;
     use serde_json::{json, Value};
+    use std::collections::HashSet;
     use std::sync::atomic::{AtomicUsize, Ordering};
     use std::sync::{Arc, Mutex};
     use std::time::Duration;
     use tokio::net::TcpListener;
     use tokio_tungstenite::tungstenite::handshake::server::{Request, Response};
     use tokio_tungstenite::tungstenite::Message;
+
+    fn required_external_runtime_env(name: &str) -> String {
+        std::env::var(name)
+            .ok()
+            .filter(|value| !value.trim().is_empty())
+            .unwrap_or_else(|| {
+                panic!("{name} must be set for ignored external operator runtime test")
+            })
+    }
+
+    #[tokio::test]
+    #[ignore = "requires an explicitly isolated external Heiwa runtime"]
+    async fn native_operator_external_runtime_replays_then_resumes_without_duplicates() {
+        const WS_BASE_URL_ENV: &str = "HEIWA_OPERATOR_E2E_WS_BASE_URL";
+        const TOKEN_ENV: &str = "HEIWA_OPERATOR_E2E_TOKEN";
+        const THREAD_ID_ENV: &str = "HEIWA_OPERATOR_E2E_THREAD_ID";
+        const START_CURSOR_ENV: &str = "HEIWA_OPERATOR_E2E_START_CURSOR";
+
+        let base_url = required_external_runtime_env(WS_BASE_URL_ENV);
+        let token = required_external_runtime_env(TOKEN_ENV);
+        let thread_id = required_external_runtime_env(THREAD_ID_ENV);
+        let starting_cursor = required_external_runtime_env(START_CURSOR_ENV);
+        let timeouts = OperatorStreamTimeouts {
+            connect: Duration::from_secs(2),
+            read_idle: Duration::from_secs(2),
+            pong_write: Duration::from_secs(1),
+        };
+        let backoffs = [Duration::from_millis(50)];
+
+        let mut first_event_ids = HashSet::new();
+        let mut first_durable_cursors = Vec::new();
+        let mut first_caught_up = false;
+        let first_result = tokio::time::timeout(
+            Duration::from_secs(5),
+            subscribe_with_auth_and_policy(
+                &base_url,
+                &thread_id,
+                Some(&starting_cursor),
+                &token,
+                |frame| {
+                    assert!(
+                        !frame.to_string().contains(&token),
+                        "operator stream frame must not contain the bearer token"
+                    );
+                    match frame.get("type").and_then(Value::as_str) {
+                        Some("event") => {
+                            let event_id = frame
+                                .pointer("/event/event_id")
+                                .and_then(Value::as_str)
+                                .expect("durable event frame must carry event.event_id");
+                            let cursor = frame
+                                .get("cursor")
+                                .and_then(Value::as_str)
+                                .expect("durable event frame must carry cursor");
+                            assert!(
+                                first_event_ids.insert(event_id.to_string()),
+                                "first replay must not contain duplicate event_id values"
+                            );
+                            first_durable_cursors.push(cursor.to_string());
+                            Ok(())
+                        }
+                        Some("caught_up") => {
+                            first_caught_up = true;
+                            Err(OperatorStreamError::ReceiverClosed)
+                        }
+                        Some("invalid_cursor") => {
+                            panic!("supplied external runtime cursor must be valid")
+                        }
+                        _ => Ok(()),
+                    }
+                },
+                &backoffs,
+                timeouts,
+            ),
+        )
+        .await
+        .expect("first external operator subscription must finish within five seconds");
+        assert!(
+            matches!(&first_result, Err(OperatorStreamError::ReceiverClosed)),
+            "first subscription must stop intentionally after caught_up, got {first_result:?}"
+        );
+        assert!(
+            first_caught_up,
+            "first subscription must authenticate and catch up"
+        );
+        assert!(
+            !first_event_ids.is_empty(),
+            "first subscription must replay at least one durable event"
+        );
+        let resume_cursor = first_durable_cursors
+            .last()
+            .expect("first replay must produce a resume cursor")
+            .clone();
+
+        let mut resumed_event_ids = HashSet::new();
+        let mut second_caught_up = false;
+        let second_result = tokio::time::timeout(
+            Duration::from_secs(5),
+            subscribe_with_auth_and_policy(
+                &base_url,
+                &thread_id,
+                Some(&resume_cursor),
+                &token,
+                |frame| {
+                    assert!(
+                        !frame.to_string().contains(&token),
+                        "operator stream frame must not contain the bearer token"
+                    );
+                    match frame.get("type").and_then(Value::as_str) {
+                        Some("event") => {
+                            let event_id = frame
+                                .pointer("/event/event_id")
+                                .and_then(Value::as_str)
+                                .expect("durable event frame must carry event.event_id");
+                            resumed_event_ids.insert(event_id.to_string());
+                            Ok(())
+                        }
+                        Some("caught_up") => {
+                            second_caught_up = true;
+                            Err(OperatorStreamError::ReceiverClosed)
+                        }
+                        Some("invalid_cursor") => {
+                            panic!("native resume cursor must remain valid")
+                        }
+                        _ => Ok(()),
+                    }
+                },
+                &backoffs,
+                timeouts,
+            ),
+        )
+        .await
+        .expect("second external operator subscription must finish within five seconds");
+        assert!(
+            matches!(&second_result, Err(OperatorStreamError::ReceiverClosed)),
+            "second subscription must stop intentionally after caught_up, got {second_result:?}"
+        );
+        assert!(
+            second_caught_up,
+            "second subscription must authenticate and catch up"
+        );
+        assert!(
+            resumed_event_ids.is_empty(),
+            "resuming from the last durable cursor must replay zero durable events"
+        );
+    }
 
     #[tokio::test]
     async fn native_operator_bridge_authenticates_and_resumes_only_durable_cursor() {
