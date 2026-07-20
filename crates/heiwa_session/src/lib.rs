@@ -20,8 +20,8 @@ pub mod operator;
 pub mod operator_index;
 
 pub use operator_index::{
-    rebuild_operator_indexes, rebuild_operator_indexes_at, EmbeddingSink, IndexReport,
-    ProductionEmbeddingSink,
+    operator_event_key, rebuild_operator_indexes, rebuild_operator_indexes_at, EmbeddingSink,
+    IndexReport, ProductionEmbeddingSink,
 };
 
 pub const PERSISTED_TRANSCRIPT_VERSION: u32 = 1;
@@ -62,6 +62,10 @@ pub struct PersistedTranscript {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct SessionSearchHit {
     pub session_id: String,
+    /// Durable operator event identity. `entry_id` remains the stable numeric
+    /// projection key used by the vector index.
+    #[serde(default)]
+    pub event_id: String,
     pub entry_id: u64,
     pub role: String,
     pub content: String,

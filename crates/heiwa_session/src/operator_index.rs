@@ -32,12 +32,12 @@ pub struct ProductionEmbeddingSink;
 
 impl EmbeddingSink for ProductionEmbeddingSink {
     fn upsert_text(&self, thread_id: &str, event_id: &str, text: &str) -> Result<()> {
-        embed_and_store(thread_id, stable_event_key(event_id), text).map(|_| ())
+        embed_and_store(thread_id, operator_event_key(event_id), text).map(|_| ())
     }
     fn replace_texts(&self, texts: &[(String, String, String)]) -> Option<Result<(usize, usize)>> {
         let rows = texts
             .iter()
-            .map(|(thread, event, text)| (thread.clone(), stable_event_key(event), text.clone()))
+            .map(|(thread, event, text)| (thread.clone(), operator_event_key(event), text.clone()))
             .collect::<Vec<_>>();
         Some(
             replace_embeddings_from_texts(&rows)
@@ -87,7 +87,7 @@ pub fn rebuild_operator_indexes_at(
             let Some((role, text, embed)) = event_text(&row.event) else {
                 continue;
             };
-            let key = stable_event_key(&row.event.event_id);
+            let key = operator_event_key(&row.event.event_id);
             tx.execute(
                 "INSERT INTO messages (thread_id, event_id, entry_id, role, content)
                  VALUES (?1, ?2, ?3, ?4, ?5)",
@@ -163,9 +163,9 @@ pub fn search_session_messages_at(
     let limit = limit.clamp(1, 100) as i64;
     let mut hits = Vec::new();
     let sql = if session_id.is_some() {
-        "SELECT thread_id, entry_id, role, content FROM messages_fts WHERE messages_fts MATCH ?1 AND thread_id = ?2 ORDER BY rank LIMIT ?3"
+        "SELECT thread_id, event_id, entry_id, role, content FROM messages_fts WHERE messages_fts MATCH ?1 AND thread_id = ?2 ORDER BY rank LIMIT ?3"
     } else {
-        "SELECT thread_id, entry_id, role, content FROM messages_fts WHERE messages_fts MATCH ?1 ORDER BY rank LIMIT ?2"
+        "SELECT thread_id, event_id, entry_id, role, content FROM messages_fts WHERE messages_fts MATCH ?1 ORDER BY rank LIMIT ?2"
     };
     let mut statement = conn.prepare(sql)?;
     if let Some(session_id) = session_id {
@@ -199,13 +199,16 @@ const SCHEMA_SQL: &str = "CREATE TABLE IF NOT EXISTS messages (
 fn row_to_hit(row: &rusqlite::Row<'_>) -> rusqlite::Result<SessionSearchHit> {
     Ok(SessionSearchHit {
         session_id: row.get(0)?,
-        entry_id: row.get::<_, i64>(1)? as u64,
-        role: row.get(2)?,
-        content: row.get(3)?,
+        event_id: row.get(1)?,
+        entry_id: row.get::<_, i64>(2)? as u64,
+        role: row.get(3)?,
+        content: row.get(4)?,
     })
 }
 
-fn stable_event_key(event_id: &str) -> u64 {
+/// Stable numeric join key shared by FTS and embedding projections for one
+/// durable operator event.
+pub fn operator_event_key(event_id: &str) -> u64 {
     let digest = Sha256::digest(event_id.as_bytes());
     u64::from_be_bytes(digest[..8].try_into().expect("sha256 prefix"))
 }

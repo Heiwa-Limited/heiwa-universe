@@ -12,8 +12,12 @@ use heiwa_session::operator::{
     OperatorAppRuntimeLease, OperatorOwnershipError, OperatorSessionService, RouteMode,
     StartTurnRequest, TurnSubmissionError,
 };
+#[cfg(feature = "lance")]
+use heiwa_session::{operator_event_key, SessionSearchHit};
 use heiwa_session::{rebuild_operator_indexes_at, EmbeddingSink};
 use serde_json::json;
+#[cfg(feature = "lance")]
+use std::collections::{HashMap, HashSet};
 use std::io::Write;
 use std::sync::Mutex;
 
@@ -24,6 +28,100 @@ fn test_service(path: &std::path::Path) -> OperatorSessionService {
 #[derive(Default)]
 struct RecordingEmbedder {
     rows: Mutex<Vec<(String, String, String)>>,
+}
+
+#[cfg(feature = "lance")]
+struct DeterministicLanceSink {
+    store: Mutex<heiwa_embed::LanceVectorStore>,
+}
+
+#[cfg(feature = "lance")]
+impl DeterministicLanceSink {
+    fn open(path: &std::path::Path) -> Self {
+        Self {
+            store: Mutex::new(heiwa_embed::LanceVectorStore::open(path, 4).unwrap()),
+        }
+    }
+
+    fn insert_stale(&self, thread_id: &str, event_id: &str) {
+        self.store
+            .lock()
+            .unwrap()
+            .upsert(
+                thread_id,
+                operator_event_key(event_id),
+                "deterministic-test",
+                &[1.0, 0.0, 0.0, 0.0],
+            )
+            .unwrap();
+    }
+
+    fn matching_event_ids(
+        &self,
+        thread_id: &str,
+        event_ids_by_key: &HashMap<u64, String>,
+    ) -> HashSet<String> {
+        self.store
+            .lock()
+            .unwrap()
+            .top_k_similar(thread_id, &[1.0, 0.0, 0.0, 0.0], 100)
+            .unwrap()
+            .into_iter()
+            .map(|hit| {
+                event_ids_by_key
+                    .get(&hit.entry_id)
+                    .expect("every Lance hit must join to a known event id")
+                    .clone()
+            })
+            .collect()
+    }
+}
+
+#[cfg(feature = "lance")]
+impl EmbeddingSink for DeterministicLanceSink {
+    fn upsert_text(&self, thread_id: &str, event_id: &str, _text: &str) -> anyhow::Result<()> {
+        self.store.lock().unwrap().upsert(
+            thread_id,
+            operator_event_key(event_id),
+            "deterministic-test",
+            &[1.0, 0.0, 0.0, 0.0],
+        )
+    }
+
+    fn replace_texts(
+        &self,
+        texts: &[(String, String, String)],
+    ) -> Option<anyhow::Result<(usize, usize)>> {
+        let rows = texts
+            .iter()
+            .map(|(thread_id, event_id, _text)| heiwa_embed::EmbeddingRow {
+                session_id: thread_id.clone(),
+                entry_id: operator_event_key(event_id),
+                model: "deterministic-test".to_string(),
+                vector: vec![1.0, 0.0, 0.0, 0.0],
+            });
+        Some(
+            self.store
+                .lock()
+                .unwrap()
+                .rebuild_from(rows)
+                .map(|stored| (stored, 0)),
+        )
+    }
+}
+
+#[cfg(feature = "lance")]
+fn fts_event_ids(index_path: &std::path::Path, query: &str) -> HashSet<String> {
+    heiwa_session::operator_index::search_session_messages_at(
+        index_path,
+        Some("default"),
+        query,
+        100,
+    )
+    .unwrap()
+    .into_iter()
+    .map(|hit: SessionSearchHit| hit.event_id)
+    .collect()
 }
 
 impl EmbeddingSink for RecordingEmbedder {
@@ -96,6 +194,98 @@ fn rebuild_indexes_projects_safe_text_and_only_embeds_messages() {
         2,
         "replacement removes stale embedding rows before each rebuild"
     );
+}
+
+#[cfg(feature = "lance")]
+#[test]
+fn deleting_derived_indexes_rebuilds_identical_fts_and_lance_event_sets_from_journal() {
+    let root = tempfile::tempdir().unwrap();
+    let evidence_path = root.path().join("evidence");
+    let fts_path = root.path().join("indexes/sessions.sqlite3");
+    let lance_path = root.path().join("indexes/lance");
+    let service = test_service(&evidence_path);
+    let turn = service
+        .start_turn(
+            "default",
+            StartTurnRequest::auto("rebuild-request", "phoenix rebuild proof from user"),
+        )
+        .unwrap();
+    let mut assistant = base_event(
+        "default",
+        Some(&turn.turn_id),
+        None,
+        OperatorEventType::AssistantCompleted,
+    );
+    assistant.payload = json!({"text": "phoenix rebuild proof from assistant"});
+    service.append_event(assistant).unwrap();
+
+    let expected_ids = service
+        .events_after("default", None, 100)
+        .unwrap()
+        .events
+        .into_iter()
+        .filter(|row| {
+            matches!(
+                row.event.event_type,
+                OperatorEventType::UserMessage | OperatorEventType::AssistantCompleted
+            )
+        })
+        .map(|row| row.event.event_id)
+        .collect::<HashSet<_>>();
+    let mut event_ids_by_key = expected_ids
+        .iter()
+        .map(|event_id| (operator_event_key(event_id), event_id.clone()))
+        .collect::<HashMap<_, _>>();
+    let stale_event_id = "stale-event-not-in-journal";
+    event_ids_by_key.insert(
+        operator_event_key(stale_event_id),
+        stale_event_id.to_string(),
+    );
+    assert_eq!(expected_ids.len(), 2);
+    assert_eq!(event_ids_by_key.len(), expected_ids.len() + 1);
+
+    let sink = DeterministicLanceSink::open(&lance_path);
+    rebuild_operator_indexes_at(&service, &sink, &fts_path).unwrap();
+    {
+        let conn = rusqlite::Connection::open(&fts_path).unwrap();
+        conn.execute(
+            "INSERT INTO messages_fts (thread_id, event_id, entry_id, role, content)
+             VALUES (?1, ?2, ?3, ?4, ?5)",
+            rusqlite::params![
+                "default",
+                stale_event_id,
+                operator_event_key(stale_event_id) as i64,
+                "assistant",
+                "phoenix stale projection"
+            ],
+        )
+        .unwrap();
+    }
+    sink.insert_stale("default", stale_event_id);
+
+    let before_report = rebuild_operator_indexes_at(&service, &sink, &fts_path).unwrap();
+    let fts_before = fts_event_ids(&fts_path, "phoenix");
+    let lance_before = sink.matching_event_ids("default", &event_ids_by_key);
+    assert_eq!(before_report.fts_rows, expected_ids.len());
+    assert_eq!(before_report.embedded_rows, expected_ids.len());
+    assert_eq!(fts_before, expected_ids);
+    assert_eq!(lance_before, expected_ids);
+    assert!(!fts_before.contains(stale_event_id));
+    assert!(!lance_before.contains(stale_event_id));
+    drop(sink);
+
+    std::fs::remove_file(&fts_path).unwrap();
+    std::fs::remove_dir_all(&lance_path).unwrap();
+
+    let rebuilt_sink = DeterministicLanceSink::open(&lance_path);
+    let after_report = rebuild_operator_indexes_at(&service, &rebuilt_sink, &fts_path).unwrap();
+    let fts_after = fts_event_ids(&fts_path, "phoenix");
+    let lance_after = rebuilt_sink.matching_event_ids("default", &event_ids_by_key);
+    assert_eq!(after_report, before_report);
+    assert_eq!(fts_after, fts_before);
+    assert_eq!(lance_after, lance_before);
+    assert!(!fts_after.contains(stale_event_id));
+    assert!(!lance_after.contains(stale_event_id));
 }
 
 /// Build a syntactically-valid `OperatorEvent` for validation tests: correct
