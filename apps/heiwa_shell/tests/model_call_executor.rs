@@ -351,8 +351,8 @@ mod model_call {
                 request: call_request,
                 candidates: vec![
                     below_quality_floor,
-                    candidate(1, "primary", "primary-model", 0.01),
-                    candidate(2, "secondary", "secondary-model", 0.02),
+                    candidate(1, "secondary", "secondary-model", 0.02),
+                    candidate(2, "primary", "primary-model", 0.01),
                 ],
                 messages: vec![Message {
                     role: Role::User,
@@ -410,7 +410,7 @@ mod model_call {
             ]
         );
         assert_eq!(events[0].event.payload["provider"], "primary");
-        assert_eq!(events[0].event.payload["selected_id"], 1);
+        assert_eq!(events[0].event.payload["selected_id"], 2);
         assert_eq!(events[0].event.payload["rejections"][0]["candidate_id"], 0);
         assert_eq!(
             events[0].event.payload["rejections"][0]["reasons"][0],
@@ -421,7 +421,7 @@ mod model_call {
         assert_eq!(events[2].event.payload["cost_truth"], "target_only");
         assert_eq!(events[2].event.payload["remaining_budget_usd"], 0.99);
         assert_eq!(events[3].event.payload["provider"], "secondary");
-        assert_eq!(events[3].event.payload["selected_id"], 2);
+        assert_eq!(events[3].event.payload["selected_id"], 1);
         assert_eq!(events[3].event.payload["rejections"][0]["candidate_id"], 0);
         assert_eq!(
             events[3].event.payload["rejections"][0]["reasons"][0],
