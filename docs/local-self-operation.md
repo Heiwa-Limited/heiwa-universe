@@ -178,9 +178,12 @@ HEIWA_MACHINE_AUTH_TOKEN=operator-e2e-token \
 cargo run -q -p heiwa-shell --bin heiwa -- app start --port 7475 --no-open
 ```
 
-`HEIWA_STATE_DIR` is the supported temporary override for app runtime read
-models and worker heartbeats. Set it together with `HEIWA_EVIDENCE_DIR` during
-isolated verification; neither override changes installed `7474` state.
+`HEIWA_STATE_DIR` relocates the app shell's worker heartbeat and the state path
+reported by that shell; it does not relocate every Calendar, approvals, or
+other module-specific read model. Together with `HEIWA_EVIDENCE_DIR`, it keeps
+the operator-stream checks below out of installed `7474` state and the durable
+operator corpus. Use a disposable `HOME` with a prebuilt binary when probing
+broader state-backed APIs.
 
 Then probe that same port:
 
@@ -246,6 +249,11 @@ Cursor and restart recovery are fail-closed:
   exits without mutating the operator stream; isolated verification roots may
   run concurrently. The `.operator_runtime.lock` sidecar contains no identity,
   credential, or other payload.
+- Every mutating `OperatorSessionService` holds a shared
+  `.operator_activity.lock` lease. Recovery requires exclusive activity
+  ownership, so a live CLI, REPL, loop, or compatibility writer makes app
+  startup fail before heartbeat/API service and prevents false
+  `RUNTIME_RESTART` interruption. Both lease sidecars remain zero-content.
 - HTTP replay returns structured `invalid_cursor` for unknown versions, stream
   fingerprint mismatches, offsets beyond EOF, or offsets not on an event
   boundary. The operator client must clear its disposable projection and replay

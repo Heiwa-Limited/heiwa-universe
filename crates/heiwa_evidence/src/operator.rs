@@ -20,7 +20,7 @@ use std::io::{BufRead, Read, Seek, SeekFrom, Write};
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 
-use anyhow::{anyhow, Result};
+use anyhow::{anyhow, bail, Result};
 use base64::Engine;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
@@ -49,61 +49,8 @@ pub const OPERATOR_STREAM_KIND: &str = "operator_events";
 /// This keeps both append and cursor-boundary validation bounded even when a
 /// stream file has been modified by an untrusted local process.
 const MAX_OPERATOR_ENVELOPE_BYTES: usize = 16 * 1024 * 1024;
-
-const OPERATOR_RUNTIME_LEASE_FILE: &str = ".operator_runtime.lock";
-
-/// Exclusive cross-process ownership of one evidence root's operator writer.
-///
-/// The sidecar stays empty: the OS file lock is the ownership record, so no
-/// process identity, auth material, or other secret is persisted. Dropping the
-/// file releases the lease, including automatically on process termination.
-#[derive(Debug)]
-pub struct OperatorRuntimeLease {
-    _file: std::fs::File,
-}
-
-#[derive(Debug, thiserror::Error)]
-pub enum OperatorRuntimeLeaseError {
-    #[error(
-        "operator_runtime_lease_held: evidence root {root} already has a live operator runtime"
-    )]
-    AlreadyHeld { root: PathBuf },
-    #[error("operator runtime lease storage error at {root}: {source}")]
-    Storage {
-        root: PathBuf,
-        #[source]
-        source: std::io::Error,
-    },
-}
-
-impl OperatorRuntimeLease {
-    pub fn acquire(root: PathBuf) -> std::result::Result<Self, OperatorRuntimeLeaseError> {
-        std::fs::create_dir_all(&root).map_err(|source| OperatorRuntimeLeaseError::Storage {
-            root: root.clone(),
-            source,
-        })?;
-        let path = root.join(OPERATOR_RUNTIME_LEASE_FILE);
-        let file = OpenOptions::new()
-            .create(true)
-            .read(true)
-            .write(true)
-            .open(&path)
-            .map_err(|source| OperatorRuntimeLeaseError::Storage {
-                root: root.clone(),
-                source,
-            })?;
-        file.try_lock().map_err(|source| match source {
-            std::fs::TryLockError::WouldBlock => {
-                OperatorRuntimeLeaseError::AlreadyHeld { root: root.clone() }
-            }
-            std::fs::TryLockError::Error(source) => OperatorRuntimeLeaseError::Storage {
-                root: root.clone(),
-                source,
-            },
-        })?;
-        Ok(Self { _file: file })
-    }
-}
+const MAX_OPERATOR_CORRUPT_LINES_PER_READ: usize = 1_024;
+const MAX_OPERATOR_CORRUPT_BYTES_PER_READ: usize = 64 * 1024 * 1024;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct OperatorActor {
@@ -180,7 +127,7 @@ pub struct OperatorEvent {
 
 /// Opaque cursor payload (base64-JSON encoded before it leaves this module).
 /// `fingerprint` binds a cursor to one specific stream lineage: it is the
-/// SHA-256 of the stream's first complete envelope line, which never
+/// SHA-256 of the stream's first valid operator envelope line, which never
 /// changes for the life of the file (this journal only ever appends).
 /// `offset` is the byte position immediately after the last envelope the
 /// cursor has already yielded, and always falls on a newline boundary.
@@ -211,8 +158,8 @@ pub struct OperatorPage {
     /// regressing to the start of the stream.
     pub next_cursor: Option<String>,
     /// Unparseable or torn lines encountered while producing this page.
-    /// Bounded by the same range as `events`: lines past a `limit` cutoff
-    /// are never inspected and so never counted here.
+    /// Corrupt scanning has fixed line/byte budgets in addition to the event
+    /// limit; exceeding either budget fails closed.
     pub skipped_lines: usize,
 }
 
@@ -244,6 +191,12 @@ impl OperatorJournal {
             dir,
             write_lock: Mutex::new(()),
         })
+    }
+
+    /// Evidence root used by ownership services layered above this dumb
+    /// append/replay primitive.
+    pub fn root(&self) -> &Path {
+        &self.dir
     }
 
     /// Append one event and return the cursor positioned immediately after
@@ -283,6 +236,10 @@ impl OperatorJournal {
         let _stream_lock = lock_stream(&self.dir, OPERATOR_STREAM_KIND)?;
         let path = stream_path(&self.dir, OPERATOR_STREAM_KIND);
 
+        // Detect hostile out-of-band prefixes before mutating the stream. If
+        // the stream already has a valid lineage anchor, reuse it after the
+        // append; otherwise the new event becomes the first valid anchor.
+        let fingerprint_before = first_line_fingerprint(&path)?;
         let mut file = OpenOptions::new()
             .create(true)
             .read(true)
@@ -299,7 +256,11 @@ impl OperatorJournal {
         // raced us between the write above and this read: the first line is
         // stable and matches whatever the stream's actual current lineage
         // fingerprint will be for the next `read_after` call.
-        let fingerprint = first_line_fingerprint(&path)?;
+        let fingerprint = if fingerprint_before == "empty" {
+            first_line_fingerprint(&path)?
+        } else {
+            fingerprint_before
+        };
         let cursor = encode_cursor(&OperatorCursor {
             version: OPERATOR_CURSOR_VERSION,
             fingerprint,
@@ -318,12 +279,10 @@ impl OperatorJournal {
     /// tolerating a torn tail the same way [`crate::replay::read_stream`]
     /// tolerates corruption elsewhere in the journal.
     ///
-    /// The read is bounded by `limit`, not by stream length: lines are
-    /// consumed incrementally through a fixed-size buffer and scanning stops
-    /// as soon as `limit` complete records have been parsed, so resuming a
-    /// stale cursor against an append-forever stream never pulls the whole
-    /// remainder into memory. Lines past the cutoff are never inspected and
-    /// so never counted in `skipped_lines`.
+    /// Valid-event work is bounded by `limit`; invalid rows are independently
+    /// bounded by fixed corrupt-line and corrupt-byte budgets. Each candidate
+    /// line is capped at the append ceiling, so hostile out-of-band edits can
+    /// neither grow memory without bound nor bypass `limit` forever.
     pub fn read_after(
         &self,
         cursor: Option<&str>,
@@ -377,40 +336,40 @@ impl OperatorJournal {
                 let mut reader = std::io::BufReader::new(file);
                 let mut offset = start_offset;
                 let mut line = Vec::new();
+                let mut corrupt_budget = CorruptScanBudget::default();
                 while events.len() < limit {
-                    line.clear();
-                    let read = reader
-                        .read_until(b'\n', &mut line)
-                        .map_err(|err| CursorError::Storage(err.into()))?;
-                    if read == 0 {
-                        // Clean EOF on a line boundary.
-                        break;
-                    }
-                    if line.last() != Some(&b'\n') {
-                        // Torn/incomplete tail: no trailing newline yet, so
-                        // this is not a complete record. Never fatal, just
-                        // uncounted.
-                        skipped_lines += 1;
-                        break;
-                    }
-                    offset += read as u64;
-                    let content = &line[..line.len() - 1];
-                    if content.is_empty() {
-                        continue;
-                    }
-                    match parse_operator_line(content) {
-                        Some(event) => {
-                            let event_cursor = encode_cursor(&OperatorCursor {
-                                version: OPERATOR_CURSOR_VERSION,
-                                fingerprint: current_fingerprint.clone(),
-                                offset,
-                            });
-                            events.push(CursorEvent {
-                                cursor: event_cursor,
-                                event,
-                            });
+                    match read_capped_line(&mut reader, &mut line).map_err(CursorError::Storage)? {
+                        CappedLine::Eof => break,
+                        CappedLine::Torn => {
+                            skipped_lines += 1;
+                            corrupt_budget
+                                .record(line.len())
+                                .map_err(CursorError::Storage)?;
+                            break;
                         }
-                        None => skipped_lines += 1,
+                        CappedLine::Complete => {
+                            offset += line.len() as u64;
+                            let content = &line[..line.len() - 1];
+                            match parse_operator_line(content) {
+                                Some(event) => {
+                                    let event_cursor = encode_cursor(&OperatorCursor {
+                                        version: OPERATOR_CURSOR_VERSION,
+                                        fingerprint: current_fingerprint.clone(),
+                                        offset,
+                                    });
+                                    events.push(CursorEvent {
+                                        cursor: event_cursor,
+                                        event,
+                                    });
+                                }
+                                None => {
+                                    skipped_lines += 1;
+                                    corrupt_budget
+                                        .record(line.len())
+                                        .map_err(CursorError::Storage)?;
+                                }
+                            }
+                        }
                     }
                 }
             }
@@ -447,8 +406,9 @@ fn repair_unterminated_tail(file: &mut std::fs::File) -> Result<()> {
     }
     const CHUNK: usize = 8192;
     let mut end = len;
+    let oldest_allowed_start = len.saturating_sub((MAX_OPERATOR_ENVELOPE_BYTES - 1) as u64);
     let complete_len = loop {
-        let start = end.saturating_sub(CHUNK as u64);
+        let start = end.saturating_sub(CHUNK as u64).max(oldest_allowed_start);
         file.seek(SeekFrom::Start(start))?;
         let mut chunk = vec![0; (end - start) as usize];
         file.read_exact(&mut chunk)?;
@@ -457,6 +417,17 @@ fn repair_unterminated_tail(file: &mut std::fs::File) -> Result<()> {
         }
         if start == 0 {
             break 0;
+        }
+        if start == oldest_allowed_start {
+            file.seek(SeekFrom::Start(start - 1))?;
+            let mut preceding = [0u8; 1];
+            file.read_exact(&mut preceding)?;
+            if preceding[0] == b'\n' {
+                break start;
+            }
+            bail!(
+                "operator journal torn tail exceeds maximum operator envelope of {MAX_OPERATOR_ENVELOPE_BYTES} bytes"
+            );
         }
         end = start;
     };
@@ -468,19 +439,25 @@ fn repair_unterminated_tail(file: &mut std::fs::File) -> Result<()> {
 /// invalid JSON, wrong `kind`, a `record` that does not deserialize as
 /// [`OperatorEvent`] — is reported as `None` (skipped), never a panic.
 fn parse_operator_line(line: &[u8]) -> Option<OperatorEvent> {
-    let value: serde_json::Value = serde_json::from_slice(line).ok()?;
-    let object = value.as_object()?;
-    let kind = object.get("kind")?.as_str()?;
-    if kind != OPERATOR_STREAM_KIND {
+    #[derive(Deserialize)]
+    struct OperatorEnvelope {
+        v: u32,
+        at_ms: u64,
+        kind: String,
+        record: OperatorEvent,
+    }
+
+    let envelope: OperatorEnvelope = serde_json::from_slice(line).ok()?;
+    if envelope.v != EVIDENCE_SCHEMA_VERSION || envelope.kind != OPERATOR_STREAM_KIND {
         return None;
     }
-    let record = object.get("record")?.clone();
-    serde_json::from_value(record).ok()
+    let _ = envelope.at_ms;
+    Some(envelope.record)
 }
 
-/// SHA-256 of the stream's first complete envelope line, or the literal
-/// string `"empty"` when the stream has no valid first line yet (missing
-/// file, zero-byte file, or an unterminated/unparseable first line).
+/// SHA-256 of the stream's first valid, complete operator envelope line, or
+/// the literal string `"empty"` when the stream has no valid anchor yet.
+/// Corrupt prefixes are skipped only within the same fixed budget as replay.
 fn first_line_fingerprint(path: &Path) -> Result<String> {
     let file = match OpenOptions::new().read(true).open(path) {
         Ok(file) => file,
@@ -489,15 +466,81 @@ fn first_line_fingerprint(path: &Path) -> Result<String> {
     };
     let mut reader = std::io::BufReader::new(file);
     let mut line = Vec::new();
-    let read = reader.read_until(b'\n', &mut line)?;
-    if read == 0 || line.last() != Some(&b'\n') {
-        return Ok("empty".to_string());
+    let mut corrupt_budget = CorruptScanBudget::default();
+    loop {
+        match read_capped_line(&mut reader, &mut line)? {
+            CappedLine::Eof => return Ok("empty".to_string()),
+            CappedLine::Torn => {
+                corrupt_budget.record(line.len())?;
+                return Ok("empty".to_string());
+            }
+            CappedLine::Complete => {
+                let content = &line[..line.len() - 1];
+                if parse_operator_line(content).is_some() {
+                    return Ok(sha256_hex(content));
+                }
+                corrupt_budget.record(line.len())?;
+            }
+        }
     }
-    line.pop();
-    if line.is_empty() || serde_json::from_slice::<serde_json::Value>(&line).is_err() {
-        return Ok("empty".to_string());
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum CappedLine {
+    Eof,
+    Complete,
+    Torn,
+}
+
+/// Read one newline-framed envelope without allowing an out-of-band line to
+/// grow `line` past the append ceiling. `line` includes the newline for a
+/// complete record, matching the ceiling's definition.
+fn read_capped_line<R: BufRead>(reader: &mut R, line: &mut Vec<u8>) -> Result<CappedLine> {
+    line.clear();
+    loop {
+        let available = reader.fill_buf()?;
+        if available.is_empty() {
+            return Ok(if line.is_empty() {
+                CappedLine::Eof
+            } else {
+                CappedLine::Torn
+            });
+        }
+        let take = available
+            .iter()
+            .position(|byte| *byte == b'\n')
+            .map_or(available.len(), |position| position + 1);
+        if line.len().saturating_add(take) > MAX_OPERATOR_ENVELOPE_BYTES {
+            bail!(
+                "operator journal line exceeds maximum operator envelope of {MAX_OPERATOR_ENVELOPE_BYTES} bytes"
+            );
+        }
+        let complete = available[take - 1] == b'\n';
+        line.extend_from_slice(&available[..take]);
+        reader.consume(take);
+        if complete {
+            return Ok(CappedLine::Complete);
+        }
     }
-    Ok(sha256_hex(&line))
+}
+
+#[derive(Debug, Default)]
+struct CorruptScanBudget {
+    lines: usize,
+    bytes: usize,
+}
+
+impl CorruptScanBudget {
+    fn record(&mut self, bytes: usize) -> Result<()> {
+        self.lines = self.lines.saturating_add(1);
+        self.bytes = self.bytes.saturating_add(bytes);
+        if self.lines > MAX_OPERATOR_CORRUPT_LINES_PER_READ
+            || self.bytes > MAX_OPERATOR_CORRUPT_BYTES_PER_READ
+        {
+            bail!("operator journal corrupt scan budget exceeded");
+        }
+        Ok(())
+    }
 }
 
 fn sha256_hex(bytes: &[u8]) -> String {

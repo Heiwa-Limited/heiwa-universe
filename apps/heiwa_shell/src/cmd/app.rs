@@ -672,12 +672,14 @@ async fn start(args: &[String]) -> Result<()> {
     let started_at = Arc::new(chrono::Utc::now().to_rfc3339());
     let runtime_state_dir = state_dir();
 
-    // The port identifies this app instance; the evidence-root lease is the
-    // actual cross-process sole-writer boundary. Hold it for the entire app
-    // lifetime and acquire it before recovery or any heartbeat/API work.
+    // The port identifies this app instance; the runtime lease prevents two
+    // app servers from sharing one evidence root. Session-service activity
+    // leases separately prove exclusive recovery ownership across app, CLI,
+    // REPL, and loop writers.
     let evidence_root = heiwa_evidence::journal_root()?;
-    let _operator_runtime_lease = heiwa_evidence::OperatorRuntimeLease::acquire(evidence_root)
-        .map_err(|error| anyhow!(error))?;
+    let _operator_runtime_lease =
+        heiwa_session::operator::OperatorAppRuntimeLease::acquire(evidence_root)
+            .map_err(|error| anyhow!(error))?;
     let (_, sessions, _) = crate::default_model_call_runtime().map_err(anyhow::Error::msg)?;
     sessions
         .recover_interrupted()
@@ -4493,7 +4495,7 @@ fn print_start_help() {
     println!();
     println!("Binds 127.0.0.1, serves the per-user browser console by default,");
     println!("starts caffeinate while running, and writes a worker heartbeat.");
-    println!("Set HEIWA_STATE_DIR to isolate app runtime state for verification.");
+    println!("Set HEIWA_STATE_DIR to redirect app worker heartbeat state for verification.");
 }
 
 #[cfg(test)]

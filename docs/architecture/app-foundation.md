@@ -187,9 +187,11 @@ CLI and TUI consumption of this stream remains a convergence target:
 - `OperatorSessionService` admits turns idempotently by
   `client_request_id`, folds thread/turn state, and is the only domain append
   authority
-- app startup acquires an exclusive, zero-content lease sidecar for the
-  configured evidence root before recovery, heartbeat, or API service. A
-  second runtime targeting that same root fails closed; runtimes using isolated
+- app startup acquires an exclusive, zero-content app-runtime lease for the
+  configured evidence root before recovery, heartbeat, or API service. Every
+  session service that mutates the operator stream also holds a shared activity
+  lease; restart recovery requires exclusive activity ownership and fails
+  closed while a CLI, REPL, loop, or other session writer is live. Isolated
   evidence roots remain independent
 - authenticated HTTP provides thread creation, replay, turn submission, and
   cancellation; authenticated WebSocket provides cursor-based replay plus live

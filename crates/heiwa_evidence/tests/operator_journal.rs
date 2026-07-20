@@ -1,6 +1,6 @@
 use heiwa_evidence::{
     CursorError, OperatorActor, OperatorEvent, OperatorEventType, OperatorJournal, OperatorRisk,
-    OperatorRuntimeLease, OperatorRuntimeLeaseError, OperatorSensitivity,
+    OperatorSensitivity,
 };
 use serde_json::json;
 use std::io::Write;
@@ -67,29 +67,6 @@ fn append_and_resume_from_versioned_cursor() {
 }
 
 #[test]
-fn operator_runtime_lease_is_exclusive_empty_and_reacquirable() {
-    let dir = tempfile::tempdir().unwrap();
-    let first = OperatorRuntimeLease::acquire(dir.path().to_path_buf()).unwrap();
-    let lease_path = dir.path().join(".operator_runtime.lock");
-    assert_eq!(std::fs::read(&lease_path).unwrap(), b"");
-    assert!(matches!(
-        OperatorRuntimeLease::acquire(dir.path().to_path_buf()),
-        Err(OperatorRuntimeLeaseError::AlreadyHeld { .. })
-    ));
-
-    drop(first);
-    OperatorRuntimeLease::acquire(dir.path().to_path_buf()).unwrap();
-}
-
-#[test]
-fn operator_runtime_lease_is_scoped_to_one_evidence_root() {
-    let first_dir = tempfile::tempdir().unwrap();
-    let second_dir = tempfile::tempdir().unwrap();
-    let _first = OperatorRuntimeLease::acquire(first_dir.path().to_path_buf()).unwrap();
-    let _second = OperatorRuntimeLease::acquire(second_dir.path().to_path_buf()).unwrap();
-}
-
-#[test]
 fn cursor_after_exact_maximum_nonfirst_envelope_replays() {
     let calibration_dir = tempfile::tempdir().unwrap();
     let calibration = OperatorJournal::new(calibration_dir.path().to_path_buf()).unwrap();
@@ -147,6 +124,163 @@ fn cursor_after_exact_maximum_nonfirst_envelope_replays() {
     );
     let resumed = journal.read_after(Some(&exact.cursor), 1).unwrap();
     assert!(resumed.events.is_empty());
+}
+
+#[test]
+fn oversized_complete_or_torn_first_line_fails_closed() {
+    for terminated in [true, false] {
+        let dir = tempfile::tempdir().unwrap();
+        let journal = OperatorJournal::new(dir.path().to_path_buf()).unwrap();
+        let mut hostile = vec![b'x'; EXPECTED_MAX_OPERATOR_ENVELOPE_BYTES + 1];
+        if terminated {
+            hostile.push(b'\n');
+        }
+        std::fs::write(dir.path().join("operator_events.jsonl"), hostile).unwrap();
+
+        let error = journal.read_after(None, 1).unwrap_err();
+        assert!(
+            error.to_string().contains("maximum operator envelope"),
+            "terminated={terminated}: {error}"
+        );
+    }
+}
+
+#[test]
+fn oversized_complete_or_torn_middle_line_fails_closed() {
+    for terminated in [true, false] {
+        let dir = tempfile::tempdir().unwrap();
+        let journal = OperatorJournal::new(dir.path().to_path_buf()).unwrap();
+        let first = journal
+            .append(&event(
+                "e1",
+                "thread-a",
+                OperatorEventType::UserMessage,
+                json!({"text":"first"}),
+            ))
+            .unwrap();
+        let path = dir.path().join("operator_events.jsonl");
+        let mut hostile = vec![b'x'; EXPECTED_MAX_OPERATOR_ENVELOPE_BYTES + 1];
+        if terminated {
+            hostile.push(b'\n');
+        }
+        std::fs::OpenOptions::new()
+            .append(true)
+            .open(path)
+            .unwrap()
+            .write_all(&hostile)
+            .unwrap();
+
+        let error = journal.read_after(Some(&first.cursor), 1).unwrap_err();
+        assert!(
+            error.to_string().contains("maximum operator envelope"),
+            "terminated={terminated}: {error}"
+        );
+    }
+}
+
+#[test]
+fn append_rejects_oversized_torn_tail_without_scanning_or_truncating_it() {
+    let dir = tempfile::tempdir().unwrap();
+    let journal = OperatorJournal::new(dir.path().to_path_buf()).unwrap();
+    journal
+        .append(&event(
+            "e1",
+            "thread-a",
+            OperatorEventType::UserMessage,
+            json!({"text":"first"}),
+        ))
+        .unwrap();
+    let path = dir.path().join("operator_events.jsonl");
+    std::fs::OpenOptions::new()
+        .append(true)
+        .open(&path)
+        .unwrap()
+        .write_all(&vec![b'x'; EXPECTED_MAX_OPERATOR_ENVELOPE_BYTES + 1])
+        .unwrap();
+    let before = std::fs::metadata(&path).unwrap().len();
+
+    let error = journal
+        .append(&event(
+            "e2",
+            "thread-a",
+            OperatorEventType::AssistantCompleted,
+            json!({"text":"must not append"}),
+        ))
+        .unwrap_err();
+    assert!(error.to_string().contains("maximum operator envelope"));
+    assert_eq!(std::fs::metadata(path).unwrap().len(), before);
+}
+
+#[test]
+fn corrupt_line_scan_budget_fails_closed_before_unbounded_skip() {
+    let dir = tempfile::tempdir().unwrap();
+    let journal = OperatorJournal::new(dir.path().to_path_buf()).unwrap();
+    let first = journal
+        .append(&event(
+            "e1",
+            "thread-a",
+            OperatorEventType::UserMessage,
+            json!({"text":"first"}),
+        ))
+        .unwrap();
+    let path = dir.path().join("operator_events.jsonl");
+    let mut file = std::fs::OpenOptions::new().append(true).open(path).unwrap();
+    for _ in 0..1_025 {
+        file.write_all(b"not-json\n").unwrap();
+    }
+    drop(file);
+
+    let error = journal.read_after(Some(&first.cursor), 1).unwrap_err();
+    assert!(error.to_string().contains("scan budget"), "{error}");
+}
+
+#[test]
+fn fingerprint_uses_first_valid_operator_envelope_not_arbitrary_json() {
+    let source_dir = tempfile::tempdir().unwrap();
+    let source = OperatorJournal::new(source_dir.path().to_path_buf()).unwrap();
+    source
+        .append(&event(
+            "e1",
+            "thread-a",
+            OperatorEventType::UserMessage,
+            json!({"text":"first"}),
+        ))
+        .unwrap();
+    let valid = std::fs::read(source_dir.path().join("operator_events.jsonl")).unwrap();
+
+    let dir = tempfile::tempdir().unwrap();
+    let journal = OperatorJournal::new(dir.path().to_path_buf()).unwrap();
+    let path = dir.path().join("operator_events.jsonl");
+    let mut envelope: serde_json::Value =
+        serde_json::from_slice(&valid[..valid.len() - 1]).unwrap();
+    envelope["kind"] = json!("other");
+    let mut wrong_kind = serde_json::to_vec(&envelope).unwrap();
+    wrong_kind.push(b'\n');
+    envelope["kind"] = json!("operator_events");
+    envelope["v"] = json!(2);
+    let mut wrong_version = serde_json::to_vec(&envelope).unwrap();
+    wrong_version.push(b'\n');
+    let mut first_layout = b"{\"junk\":1}\n".to_vec();
+    first_layout.extend_from_slice(&wrong_kind);
+    first_layout.extend_from_slice(&wrong_version);
+    first_layout.extend_from_slice(&valid);
+    std::fs::write(&path, first_layout).unwrap();
+
+    let page = journal.read_after(None, 1).unwrap();
+    assert_eq!(page.events[0].event.event_id, "e1");
+    assert_eq!(page.skipped_lines, 3);
+    let cursor = page.events[0].cursor.clone();
+
+    let mut same_layout_new_junk = b"{\"junk\":2}\n".to_vec();
+    same_layout_new_junk.extend_from_slice(&wrong_kind);
+    same_layout_new_junk.extend_from_slice(&wrong_version);
+    same_layout_new_junk.extend_from_slice(&valid);
+    std::fs::write(path, same_layout_new_junk).unwrap();
+    assert!(journal
+        .read_after(Some(&cursor), 1)
+        .unwrap()
+        .events
+        .is_empty());
 }
 
 #[test]

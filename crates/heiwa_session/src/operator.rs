@@ -15,12 +15,12 @@
 //! [`OperatorSessionService::recover_interrupted`], while retaining
 //! lock-free read-only replay.
 //!
-//! Cross-process duplicate submission is explicitly best-effort: the mutex
-//! here only serializes calls within one process. The sole-writer contract
-//! (exactly one runtime process holds the journal) lands in a later task;
-//! until then, two processes racing `start_turn` against the same journal
-//! could both observe "no existing turn" and each append one. Single
-//! in-process callers are race-free.
+//! Every service that mutates the stream holds a shared cross-process activity
+//! lease for its remaining lifetime. Restart recovery temporarily requires an
+//! exclusive activity lease, so it fails closed while any other writer may
+//! still own live work. Shared activity leases deliberately do not serialize
+//! separate writers: cross-process duplicate submission remains best-effort,
+//! while single in-process callers are race-free.
 //!
 //! Cancellation contract: operator cancellation makes intent durable
 //! FIRST — a `turn_cancel_requested` event is appended *before* the runner
@@ -32,6 +32,8 @@
 //! appends with reason `RUNTIME_RESTART`.
 
 use std::collections::{HashMap, HashSet};
+use std::fs::{File, OpenOptions};
+use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 
 use anyhow::{anyhow, bail, Result};
@@ -45,6 +47,136 @@ use heiwa_evidence::{
     OperatorEventType, OperatorJournal, OperatorPage, OperatorRisk, OperatorSensitivity,
     OPERATOR_EVENT_SCHEMA_VERSION,
 };
+
+const OPERATOR_APP_RUNTIME_LEASE_FILE: &str = ".operator_runtime.lock";
+const OPERATOR_ACTIVITY_LEASE_FILE: &str = ".operator_activity.lock";
+
+/// Typed cross-process ownership failures for operator session writers.
+#[derive(Debug, thiserror::Error)]
+pub enum OperatorOwnershipError {
+    #[error("operator_runtime_lease_held: evidence root {root} already has a live app runtime")]
+    RuntimeAlreadyHeld { root: PathBuf },
+    #[error("operator_activity_lease_held: evidence root {root} has another live session writer")]
+    ActivityAlreadyHeld { root: PathBuf },
+    #[error("operator ownership lease storage error at {root}: {source}")]
+    Storage {
+        root: PathBuf,
+        #[source]
+        source: std::io::Error,
+    },
+}
+
+/// Exclusive app-server ownership for one evidence root. The zero-content
+/// sidecar stores no identity or auth data; the OS lock is the only state.
+#[derive(Debug)]
+pub struct OperatorAppRuntimeLease {
+    _file: File,
+}
+
+impl OperatorAppRuntimeLease {
+    pub fn acquire(root: impl AsRef<Path>) -> std::result::Result<Self, OperatorOwnershipError> {
+        let root = root.as_ref().to_path_buf();
+        let file = open_ownership_file(&root, OPERATOR_APP_RUNTIME_LEASE_FILE)?;
+        file.try_lock().map_err(|source| match source {
+            std::fs::TryLockError::WouldBlock => {
+                OperatorOwnershipError::RuntimeAlreadyHeld { root: root.clone() }
+            }
+            std::fs::TryLockError::Error(source) => OperatorOwnershipError::Storage {
+                root: root.clone(),
+                source,
+            },
+        })?;
+        Ok(Self { _file: file })
+    }
+}
+
+#[derive(Debug)]
+struct OperatorActivityLease {
+    root: PathBuf,
+    shared_file: Option<File>,
+}
+
+impl OperatorActivityLease {
+    fn new(root: PathBuf) -> Self {
+        Self {
+            root,
+            shared_file: None,
+        }
+    }
+
+    fn ensure_shared(&mut self) -> std::result::Result<(), OperatorOwnershipError> {
+        if self.shared_file.is_some() {
+            return Ok(());
+        }
+        let file = open_ownership_file(&self.root, OPERATOR_ACTIVITY_LEASE_FILE)?;
+        file.try_lock_shared().map_err(|source| match source {
+            std::fs::TryLockError::WouldBlock => OperatorOwnershipError::ActivityAlreadyHeld {
+                root: self.root.clone(),
+            },
+            std::fs::TryLockError::Error(source) => OperatorOwnershipError::Storage {
+                root: self.root.clone(),
+                source,
+            },
+        })?;
+        self.shared_file = Some(file);
+        Ok(())
+    }
+
+    fn with_exclusive<T>(&mut self, operation: impl FnOnce() -> Result<T>) -> Result<T> {
+        let exclusive_file = open_ownership_file(&self.root, OPERATOR_ACTIVITY_LEASE_FILE)?;
+        drop(self.shared_file.take());
+        let acquired = exclusive_file.try_lock().map_err(|source| match source {
+            std::fs::TryLockError::WouldBlock => OperatorOwnershipError::ActivityAlreadyHeld {
+                root: self.root.clone(),
+            },
+            std::fs::TryLockError::Error(source) => OperatorOwnershipError::Storage {
+                root: self.root.clone(),
+                source,
+            },
+        });
+        if let Err(error) = acquired {
+            drop(exclusive_file);
+            self.restore_shared()?;
+            return Err(anyhow!(error));
+        }
+
+        let operation_result = operation();
+        drop(exclusive_file);
+        self.restore_shared()?;
+        operation_result
+    }
+
+    fn restore_shared(&mut self) -> Result<()> {
+        let file = open_ownership_file(&self.root, OPERATOR_ACTIVITY_LEASE_FILE)?;
+        file.lock_shared().map_err(|source| {
+            anyhow!(OperatorOwnershipError::Storage {
+                root: self.root.clone(),
+                source,
+            })
+        })?;
+        self.shared_file = Some(file);
+        Ok(())
+    }
+}
+
+fn open_ownership_file(
+    root: &Path,
+    name: &str,
+) -> std::result::Result<File, OperatorOwnershipError> {
+    std::fs::create_dir_all(root).map_err(|source| OperatorOwnershipError::Storage {
+        root: root.to_path_buf(),
+        source,
+    })?;
+    OpenOptions::new()
+        .create(true)
+        .read(true)
+        .write(true)
+        .open(root.join(name))
+        .map_err(|source| OperatorOwnershipError::Storage {
+            root: root.to_path_buf(),
+            source,
+        })
+}
 
 /// How a turn should be routed to a provider/model.
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize, PartialEq, Eq)]
@@ -241,6 +373,7 @@ pub struct OperatorThreadSummary {
 #[derive(Debug)]
 pub struct OperatorSessionService {
     journal: OperatorJournal,
+    activity_lease: Mutex<OperatorActivityLease>,
     /// Serializes in-process read-modify-append writer transactions. It is
     /// deliberately separate from the journal's own append lock, so replay
     /// and materialization never wait behind a slow writer.
@@ -249,8 +382,10 @@ pub struct OperatorSessionService {
 
 impl OperatorSessionService {
     pub fn new(journal: OperatorJournal) -> Self {
+        let activity_lease = OperatorActivityLease::new(journal.root().to_path_buf());
         Self {
             journal,
+            activity_lease: Mutex::new(activity_lease),
             write_transaction: Mutex::new(()),
         }
     }
@@ -262,7 +397,7 @@ impl OperatorSessionService {
     /// with turn submission, so concurrent create/submit calls cannot append
     /// duplicate lifecycle rows inside one runtime process.
     pub fn ensure_thread(&self, thread_id: &str) -> Result<bool> {
-        let _write_transaction = self.lock_write_transaction()?;
+        let _write_transaction = self.lock_writer_transaction()?;
         let threads = materialize_all(&self.journal)?.threads;
         if threads.contains_key(thread_id) {
             return Ok(false);
@@ -321,7 +456,7 @@ impl OperatorSessionService {
             }
         }
 
-        let _write_transaction = self.lock_write_transaction()?;
+        let _write_transaction = self.lock_writer_transaction()?;
         let threads = materialize_all(&self.journal)?.threads;
 
         if let Some(folded) = threads.get(thread_id) {
@@ -426,7 +561,7 @@ impl OperatorSessionService {
     /// [`validate_event`] for the exact rules. Write-side is strict: a
     /// rejected event never reaches the journal.
     pub fn append_event(&self, event: OperatorEvent) -> Result<CursorEvent> {
-        let _write_transaction = self.lock_write_transaction()?;
+        let _write_transaction = self.lock_writer_transaction()?;
         let threads = materialize_all(&self.journal)?.threads;
         validate_event(&threads, &event)?;
         self.journal.append(&event)
@@ -618,41 +753,44 @@ impl OperatorSessionService {
     /// `0` and append nothing.
     pub fn recover_interrupted(&self) -> Result<usize> {
         let _write_transaction = self.lock_write_transaction()?;
-        let threads = materialize_all(&self.journal)?.threads;
-        let runtime_actor = OperatorActor {
-            kind: "runtime".to_string(),
-            id: "heiwa-core".to_string(),
-        };
+        let mut activity_lease = self
+            .activity_lease
+            .lock()
+            .map_err(|_| anyhow!("operator activity lease mutex poisoned"))?;
+        activity_lease.with_exclusive(|| {
+            let threads = materialize_all(&self.journal)?.threads;
+            let runtime_actor = OperatorActor {
+                kind: "runtime".to_string(),
+                id: "heiwa-core".to_string(),
+            };
 
-        let mut closed = 0usize;
-        // BTreeMap iteration would be nicer for determinism, but HashMap is
-        // fine here: each closure is independent and order does not affect
-        // the result, only which event lands first in the journal.
-        for (thread_id, folded) in &threads {
-            for turn in &folded.turns {
-                if is_turn_terminal(&turn.status) {
-                    continue;
+            let mut closed = 0usize;
+            for (thread_id, folded) in &threads {
+                for turn in &folded.turns {
+                    if is_turn_terminal(&turn.status) {
+                        continue;
+                    }
+                    let event = new_event(
+                        thread_id,
+                        Some(turn.turn_id.clone()),
+                        None,
+                        OperatorEventType::TurnInterrupted,
+                        now_iso(),
+                        runtime_actor.clone(),
+                        json!({
+                            "reason": if turn.cancel_requested {
+                                "OPERATOR_CANCELLED"
+                            } else {
+                                "RUNTIME_RESTART"
+                            }
+                        }),
+                    );
+                    self.journal.append(&event)?;
+                    closed += 1;
                 }
-                let event = new_event(
-                    thread_id,
-                    Some(turn.turn_id.clone()),
-                    None,
-                    OperatorEventType::TurnInterrupted,
-                    now_iso(),
-                    runtime_actor.clone(),
-                    json!({
-                        "reason": if turn.cancel_requested {
-                            "OPERATOR_CANCELLED"
-                        } else {
-                            "RUNTIME_RESTART"
-                        }
-                    }),
-                );
-                self.journal.append(&event)?;
-                closed += 1;
             }
-        }
-        Ok(closed)
+            Ok(closed)
+        })
     }
 
     /// Close one orphan after the caller has independently proved ownership
@@ -664,7 +802,7 @@ impl OperatorSessionService {
         thread_id: &str,
         turn_id: &str,
     ) -> Result<Option<CursorEvent>> {
-        let _write_transaction = self.lock_write_transaction()?;
+        let _write_transaction = self.lock_writer_transaction()?;
         let threads = materialize_all(&self.journal)?.threads;
         let Some(turn) = threads
             .get(thread_id)
@@ -700,6 +838,16 @@ impl OperatorSessionService {
         self.write_transaction
             .lock()
             .map_err(|_| anyhow!("operator session write transaction mutex poisoned"))
+    }
+
+    fn lock_writer_transaction(&self) -> Result<std::sync::MutexGuard<'_, ()>> {
+        let transaction = self.lock_write_transaction()?;
+        self.activity_lease
+            .lock()
+            .map_err(|_| anyhow!("operator activity lease mutex poisoned"))?
+            .ensure_shared()
+            .map_err(anyhow::Error::new)?;
+        Ok(transaction)
     }
 }
 

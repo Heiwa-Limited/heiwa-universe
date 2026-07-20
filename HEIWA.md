@@ -232,6 +232,7 @@ That is the architecture. DREX is not the public brand. It is the kernel inside 
 - Candidate generation and routing inputs
 - Adapter normalization
 - Local spool/buffer behavior
+- Operator session activity ownership and restart-safe turn recovery policy
 - Interacting with external systems and side effects
 
 ### Evidence plane owns
@@ -239,8 +240,9 @@ That is the architecture. DREX is not the public brand. It is the kernel inside 
 - The canonical durable record of state transitions (full-row snapshots per mutation)
 - Append-only JSONL journal streams: sessions, leases, runs, artifacts, failures, DREX decisions
 - Versioned envelopes, cross-process append locking, corruption-tolerant replay
-- Materialized read models rebuilt from the journal, and restart recovery
-  (interrupted sessions/leases are closed out, never silently resurrected)
+- Materialized read models rebuilt from the journal, plus generic worker
+  session/lease recovery primitives; operator-turn liveness policy stays in
+  the Rust session service layered above dumb evidence append/replay
 - The durable system-of-record view of execution
 
 Lance is derived from this truth and rebuildable at any time; it is never the

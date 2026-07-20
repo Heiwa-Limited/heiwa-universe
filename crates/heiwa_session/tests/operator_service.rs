@@ -9,10 +9,12 @@ use heiwa_evidence::{
     OperatorSensitivity, OPERATOR_EVENT_SCHEMA_VERSION,
 };
 use heiwa_session::operator::{
-    OperatorSessionService, RouteMode, StartTurnRequest, TurnSubmissionError,
+    OperatorAppRuntimeLease, OperatorOwnershipError, OperatorSessionService, RouteMode,
+    StartTurnRequest, TurnSubmissionError,
 };
 use heiwa_session::{rebuild_operator_indexes_at, EmbeddingSink};
 use serde_json::json;
+use std::io::Write;
 use std::sync::Mutex;
 
 fn test_service(path: &std::path::Path) -> OperatorSessionService {
@@ -158,6 +160,164 @@ fn restart_closes_unfinished_turn_once() {
         service.thread("default").unwrap().turns[0].status,
         "interrupted"
     );
+}
+
+#[test]
+fn restart_recovery_fails_while_another_session_writer_is_live() {
+    let dir = tempfile::tempdir().unwrap();
+    let live_writer = test_service(dir.path());
+    live_writer
+        .start_turn(
+            "default",
+            StartTurnRequest::auto("req-live", "still running"),
+        )
+        .unwrap();
+    let recovery = test_service(dir.path());
+
+    let error = recovery.recover_interrupted().unwrap_err();
+    assert!(
+        error.to_string().contains("operator_activity_lease_held"),
+        "{error}"
+    );
+    assert_eq!(
+        live_writer.thread("default").unwrap().turns[0].status,
+        "open"
+    );
+
+    drop(live_writer);
+    assert_eq!(recovery.recover_interrupted().unwrap(), 1);
+    assert_eq!(recovery.recover_interrupted().unwrap(), 0);
+}
+
+#[test]
+fn app_runtime_lease_is_exclusive_empty_reacquirable_and_root_scoped() {
+    let first_dir = tempfile::tempdir().unwrap();
+    let second_dir = tempfile::tempdir().unwrap();
+    let first = OperatorAppRuntimeLease::acquire(first_dir.path()).unwrap();
+    assert_eq!(
+        std::fs::read(first_dir.path().join(".operator_runtime.lock")).unwrap(),
+        b""
+    );
+    assert!(matches!(
+        OperatorAppRuntimeLease::acquire(first_dir.path()),
+        Err(OperatorOwnershipError::RuntimeAlreadyHeld { .. })
+    ));
+    let _isolated = OperatorAppRuntimeLease::acquire(second_dir.path()).unwrap();
+    drop(first);
+    OperatorAppRuntimeLease::acquire(first_dir.path()).unwrap();
+}
+
+#[test]
+fn read_only_service_does_not_block_restart_recovery() {
+    let dir = tempfile::tempdir().unwrap();
+    let writer = test_service(dir.path());
+    writer
+        .start_turn("default", StartTurnRequest::auto("req-read", "recover me"))
+        .unwrap();
+    drop(writer);
+
+    let reader = test_service(dir.path());
+    assert_eq!(reader.thread("default").unwrap().turns[0].status, "open");
+    let recovery = test_service(dir.path());
+    assert_eq!(recovery.recover_interrupted().unwrap(), 1);
+    assert_eq!(
+        reader.thread("default").unwrap().turns[0].status,
+        "interrupted"
+    );
+    let contender = test_service(dir.path());
+    assert!(contender
+        .recover_interrupted()
+        .unwrap_err()
+        .to_string()
+        .contains("operator_activity_lease_held"));
+}
+
+#[test]
+fn failed_recovery_restores_its_shared_writer_lease() {
+    let dir = tempfile::tempdir().unwrap();
+    let recovery = test_service(dir.path());
+    recovery
+        .start_turn("default", StartTurnRequest::auto("req-error", "stay open"))
+        .unwrap();
+    let mut stream = std::fs::OpenOptions::new()
+        .append(true)
+        .open(dir.path().join("operator_events.jsonl"))
+        .unwrap();
+    for _ in 0..1_025 {
+        stream.write_all(b"not-json\n").unwrap();
+    }
+    drop(stream);
+
+    let error = recovery.recover_interrupted().unwrap_err();
+    assert!(error.to_string().contains("scan budget"), "{error}");
+    let contender = test_service(dir.path());
+    let ownership = contender.recover_interrupted().unwrap_err();
+    assert!(
+        ownership
+            .to_string()
+            .contains("operator_activity_lease_held"),
+        "{ownership}"
+    );
+}
+
+#[test]
+fn shared_writer_lease_lives_until_last_arc_drops() {
+    let dir = tempfile::tempdir().unwrap();
+    let writer = std::sync::Arc::new(test_service(dir.path()));
+    writer
+        .start_turn("default", StartTurnRequest::auto("req-arc", "still live"))
+        .unwrap();
+    let last_owner = writer.clone();
+    drop(writer);
+
+    let recovery = test_service(dir.path());
+    assert!(recovery.recover_interrupted().is_err());
+    drop(last_owner);
+    assert_eq!(recovery.recover_interrupted().unwrap(), 1);
+}
+
+#[test]
+fn concurrent_recovery_attempts_append_at_most_one_terminal_event() {
+    let dir = tempfile::tempdir().unwrap();
+    let writer = test_service(dir.path());
+    let submission = writer
+        .start_turn(
+            "default",
+            StartTurnRequest::auto("req-concurrent-recovery", "recover once"),
+        )
+        .unwrap();
+    drop(writer);
+
+    let barrier = std::sync::Arc::new(std::sync::Barrier::new(3));
+    let handles = (0..2)
+        .map(|_| {
+            let service = test_service(dir.path());
+            let barrier = barrier.clone();
+            std::thread::spawn(move || {
+                barrier.wait();
+                service.recover_interrupted()
+            })
+        })
+        .collect::<Vec<_>>();
+    barrier.wait();
+    let results = handles
+        .into_iter()
+        .map(|handle| handle.join().unwrap())
+        .collect::<Vec<_>>();
+    assert!(results.iter().any(Result::is_ok), "{results:?}");
+
+    let journal = OperatorJournal::new(dir.path().to_path_buf()).unwrap();
+    let interruptions = journal
+        .read_after(None, 100)
+        .unwrap()
+        .events
+        .iter()
+        .filter(|row| {
+            row.event.turn_id.as_deref() == Some(submission.turn_id.as_str())
+                && row.event.event_type == OperatorEventType::TurnInterrupted
+        })
+        .count();
+    assert_eq!(interruptions, 1, "{results:?}");
 }
 
 #[test]

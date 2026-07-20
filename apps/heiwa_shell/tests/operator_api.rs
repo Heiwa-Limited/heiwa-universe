@@ -586,13 +586,17 @@ fn app_boot_recovers_open_turn_exactly_once_across_restarts() {
             StartTurnRequest::auto("restart-request", "resume after restart"),
         )
         .unwrap();
+    drop(sessions);
 
     for restart in 0..2 {
         let state = tempfile::tempdir().unwrap();
         let port = reserve_port();
         let mut child = spawn_runtime(port, home.path(), evidence.path(), Some(state.path()));
         wait_for_file(&state.path().join("workers.json"));
-        let events = sessions
+        let reader = OperatorSessionService::new(
+            OperatorJournal::new(evidence.path().to_path_buf()).expect("operator journal"),
+        );
+        let events = reader
             .events_after("restart-thread", None, 100)
             .unwrap()
             .events;
@@ -608,7 +612,80 @@ fn app_boot_recovers_open_turn_exactly_once_across_restarts() {
             interruptions, 1,
             "restart {restart} must leave exactly one durable recovery event"
         );
+        drop(reader);
         child.stop_and_assert_closed();
+    }
+}
+
+#[test]
+fn live_non_app_session_writer_blocks_app_recovery_until_release() {
+    let home = tempfile::tempdir().unwrap();
+    let evidence = tempfile::tempdir().unwrap();
+    let sessions = OperatorSessionService::new(
+        OperatorJournal::new(evidence.path().to_path_buf()).expect("operator journal"),
+    );
+    let submission = sessions
+        .start_turn(
+            "cli-thread",
+            StartTurnRequest::auto("cli-live-turn", "owned by a non-app writer"),
+        )
+        .unwrap();
+    let events_before = sessions
+        .events_after("cli-thread", None, 100)
+        .unwrap()
+        .events
+        .len();
+
+    let rejected_state = tempfile::tempdir().unwrap();
+    let rejected_port = reserve_port();
+    let mut rejected = spawn_runtime(
+        rejected_port,
+        home.path(),
+        evidence.path(),
+        Some(rejected_state.path()),
+    );
+    let status = rejected
+        .wait_for_exit(Duration::from_secs(5))
+        .expect("app startup must fail while a non-app session writer is live");
+    assert!(!status.success());
+    wait_for_port_closed(rejected_port);
+    assert!(!rejected_state.path().join("workers.json").exists());
+    assert_eq!(
+        sessions
+            .events_after("cli-thread", None, 100)
+            .unwrap()
+            .events
+            .len(),
+        events_before
+    );
+    assert_eq!(
+        sessions.thread("cli-thread").unwrap().turns[0].status,
+        "open"
+    );
+    drop(sessions);
+
+    for restart in 0..2 {
+        let state = tempfile::tempdir().unwrap();
+        let port = reserve_port();
+        let mut runtime = spawn_runtime(port, home.path(), evidence.path(), Some(state.path()));
+        wait_for_file(&state.path().join("workers.json"));
+        let reader = OperatorSessionService::new(
+            OperatorJournal::new(evidence.path().to_path_buf()).expect("operator journal"),
+        );
+        let interruptions = reader
+            .events_after("cli-thread", None, 100)
+            .unwrap()
+            .events
+            .iter()
+            .filter(|row| {
+                row.event.turn_id.as_deref() == Some(submission.turn_id.as_str())
+                    && row.event.event_type == heiwa_evidence::OperatorEventType::TurnInterrupted
+                    && row.event.payload["reason"] == "RUNTIME_RESTART"
+            })
+            .count();
+        assert_eq!(interruptions, 1, "restart {restart} duplicated recovery");
+        drop(reader);
+        runtime.stop_and_assert_closed();
     }
 }
 
@@ -684,6 +761,7 @@ fn operator_runtime_lease_blocks_second_owner_then_allows_recovery() {
 
     isolated.stop_and_assert_closed();
 
+    drop(sessions);
     first.stop_and_assert_closed();
 
     for restart in 0..2 {
@@ -696,7 +774,10 @@ fn operator_runtime_lease_blocks_second_owner_then_allows_recovery() {
             Some(recovery_state.path()),
         );
         wait_for_file(&recovery_state.path().join("workers.json"));
-        let interruptions = sessions
+        let reader = OperatorSessionService::new(
+            OperatorJournal::new(evidence.path().to_path_buf()).expect("operator journal"),
+        );
+        let interruptions = reader
             .events_after("lease-thread", None, 100)
             .unwrap()
             .events
@@ -716,6 +797,12 @@ fn operator_runtime_lease_blocks_second_owner_then_allows_recovery() {
             b"",
             "runtime lease sidecar must never contain identity or auth material"
         );
+        assert_eq!(
+            std::fs::read(evidence.path().join(".operator_activity.lock")).unwrap(),
+            b"",
+            "activity lease sidecar must never contain identity or auth material"
+        );
+        drop(reader);
         recovery.stop_and_assert_closed();
     }
 }
