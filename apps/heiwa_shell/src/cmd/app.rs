@@ -1374,9 +1374,10 @@ async fn operator_http_response(
                 Err(heiwa_evidence::CursorError::InvalidCursor { .. }) => {
                     operator_error(400, "invalid_cursor")
                 }
-                Err(heiwa_evidence::CursorError::Storage(_)) => {
-                    operator_error(503, "operator_unavailable")
-                }
+                Err(
+                    heiwa_evidence::CursorError::UnstableLineage { .. }
+                    | heiwa_evidence::CursorError::Storage(_),
+                ) => operator_error(503, "operator_unavailable"),
             }
         }
         ("POST", OperatorHttpRoute::Turns(thread_id)) => {
@@ -1915,7 +1916,10 @@ async fn operator_events_loop(
                         .await;
                         return Ok(());
                     }
-                    Err(heiwa_evidence::CursorError::Storage(_)) => {
+                    Err(
+                        heiwa_evidence::CursorError::UnstableLineage { .. }
+                        | heiwa_evidence::CursorError::Storage(_),
+                    ) => {
                         let payload = json!({"type":"error","code":"operator_unavailable"});
                         let _ = write_operator_ws_text(
                             &mut writer,

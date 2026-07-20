@@ -20,6 +20,9 @@ use std::io::{BufRead, Read, Seek, SeekFrom, Write};
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 
+#[cfg(test)]
+use std::cell::RefCell;
+
 use anyhow::{anyhow, bail, Result};
 use base64::Engine;
 use serde::{Deserialize, Serialize};
@@ -51,6 +54,22 @@ pub const OPERATOR_STREAM_KIND: &str = "operator_events";
 const MAX_OPERATOR_ENVELOPE_BYTES: usize = 16 * 1024 * 1024;
 const MAX_OPERATOR_CORRUPT_LINES_PER_READ: usize = 1_024;
 const MAX_OPERATOR_CORRUPT_BYTES_PER_READ: usize = 64 * 1024 * 1024;
+const MAX_OPERATOR_LINEAGE_READ_ATTEMPTS: usize = 3;
+
+#[cfg(test)]
+thread_local! {
+    static READ_AFTER_SNAPSHOT_HOOK: RefCell<Option<Box<dyn FnMut(usize)>>> =
+        RefCell::new(None);
+}
+
+#[cfg(test)]
+fn run_read_after_snapshot_hook(attempt: usize) {
+    READ_AFTER_SNAPSHOT_HOOK.with(|slot| {
+        if let Some(hook) = slot.borrow_mut().as_mut() {
+            hook(attempt);
+        }
+    });
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct OperatorActor {
@@ -167,6 +186,8 @@ pub struct OperatorPage {
 pub enum CursorError {
     #[error("invalid_cursor: {reason}")]
     InvalidCursor { reason: String },
+    #[error("operator_stream_unstable: lineage did not stabilize after {attempts} attempts")]
+    UnstableLineage { attempts: usize },
     #[error(transparent)]
     Storage(#[from] anyhow::Error),
 }
@@ -282,22 +303,17 @@ impl OperatorJournal {
     /// Valid-event work is bounded by `limit`; invalid rows are independently
     /// bounded by fixed corrupt-line and corrupt-byte budgets. Each candidate
     /// line is capped at the append ceiling, so hostile out-of-band edits can
-    /// neither grow memory without bound nor bypass `limit` forever.
+    /// neither grow memory without bound nor bypass `limit` forever. Every
+    /// attempt reads at most the file length captured with its lineage
+    /// fingerprint, then revalidates that fingerprint before returning.
     pub fn read_after(
         &self,
         cursor: Option<&str>,
         limit: usize,
     ) -> Result<OperatorPage, CursorError> {
         let path = stream_path(&self.dir, OPERATOR_STREAM_KIND);
-        let file_len = match std::fs::metadata(&path) {
-            Ok(meta) => meta.len(),
-            Err(err) if err.kind() == std::io::ErrorKind::NotFound => 0,
-            Err(err) => return Err(CursorError::Storage(err.into())),
-        };
-        let current_fingerprint = first_line_fingerprint(&path)?;
-
-        let start_offset = match cursor {
-            None => 0u64,
+        let decoded_cursor = match cursor {
+            None => None,
             Some(raw) => {
                 let decoded = decode_cursor(raw)?;
                 if decoded.version != OPERATOR_CURSOR_VERSION {
@@ -308,85 +324,132 @@ impl OperatorJournal {
                         ),
                     });
                 }
-                if decoded.fingerprint != current_fingerprint {
-                    return Err(CursorError::InvalidCursor {
-                        reason: "cursor fingerprint does not match the current stream".to_string(),
-                    });
-                }
-                if decoded.offset > file_len {
-                    return Err(CursorError::InvalidCursor {
-                        reason: "cursor offset is beyond the end of the stream".to_string(),
-                    });
-                }
-                if !offset_follows_valid_operator_event(&path, decoded.offset)? {
-                    return Err(CursorError::InvalidCursor {
-                        reason: "cursor offset does not fall on a valid event boundary".to_string(),
-                    });
-                }
-                decoded.offset
+                Some(decoded)
             }
         };
 
-        let mut events = Vec::new();
-        let mut skipped_lines = 0usize;
-        match OpenOptions::new().read(true).open(&path) {
-            Ok(mut file) => {
-                file.seek(SeekFrom::Start(start_offset))
-                    .map_err(|err| CursorError::Storage(err.into()))?;
-                let mut reader = std::io::BufReader::new(file);
-                let mut offset = start_offset;
-                let mut line = Vec::new();
-                let mut corrupt_budget = CorruptScanBudget::default();
-                while events.len() < limit {
-                    match read_capped_line(&mut reader, &mut line).map_err(CursorError::Storage)? {
-                        CappedLine::Eof => break,
-                        CappedLine::Torn => {
-                            skipped_lines += 1;
-                            corrupt_budget
-                                .record(line.len())
-                                .map_err(CursorError::Storage)?;
-                            break;
+        for attempt in 1..=MAX_OPERATOR_LINEAGE_READ_ATTEMPTS {
+            let file_len = match std::fs::metadata(&path) {
+                Ok(meta) => meta.len(),
+                Err(err) if err.kind() == std::io::ErrorKind::NotFound => 0,
+                Err(err) => return Err(CursorError::Storage(err.into())),
+            };
+            let snapshot_fingerprint = first_line_fingerprint(&path)?;
+
+            #[cfg(test)]
+            run_read_after_snapshot_hook(attempt);
+
+            let attempt_result = (|| {
+                let start_offset = match &decoded_cursor {
+                    None => 0u64,
+                    Some(decoded) => {
+                        if decoded.fingerprint != snapshot_fingerprint {
+                            return Err(CursorError::InvalidCursor {
+                                reason: "cursor fingerprint does not match the current stream"
+                                    .to_string(),
+                            });
                         }
-                        CappedLine::Complete => {
-                            offset += line.len() as u64;
-                            let content = &line[..line.len() - 1];
-                            match parse_operator_line(content) {
-                                Some(event) => {
-                                    let event_cursor = encode_cursor(&OperatorCursor {
-                                        version: OPERATOR_CURSOR_VERSION,
-                                        fingerprint: current_fingerprint.clone(),
-                                        offset,
-                                    });
-                                    events.push(CursorEvent {
-                                        cursor: event_cursor,
-                                        event,
-                                    });
-                                }
-                                None => {
+                        if decoded.offset > file_len {
+                            return Err(CursorError::InvalidCursor {
+                                reason: "cursor offset is beyond the end of the stream".to_string(),
+                            });
+                        }
+                        if !offset_follows_valid_operator_event(&path, decoded.offset)? {
+                            return Err(CursorError::InvalidCursor {
+                                reason: "cursor offset does not fall on a valid event boundary"
+                                    .to_string(),
+                            });
+                        }
+                        decoded.offset
+                    }
+                };
+
+                let mut events = Vec::new();
+                let mut skipped_lines = 0usize;
+                match OpenOptions::new().read(true).open(&path) {
+                    Ok(mut file) => {
+                        file.seek(SeekFrom::Start(start_offset))
+                            .map_err(|err| CursorError::Storage(err.into()))?;
+                        let read_ceiling = file_len.saturating_sub(start_offset);
+                        let mut reader = std::io::BufReader::new(file.take(read_ceiling));
+                        let mut offset = start_offset;
+                        let mut line = Vec::new();
+                        let mut corrupt_budget = CorruptScanBudget::default();
+                        while events.len() < limit {
+                            match read_capped_line(&mut reader, &mut line)
+                                .map_err(CursorError::Storage)?
+                            {
+                                CappedLine::Eof => break,
+                                CappedLine::Torn => {
                                     skipped_lines += 1;
                                     corrupt_budget
                                         .record(line.len())
                                         .map_err(CursorError::Storage)?;
+                                    break;
+                                }
+                                CappedLine::Complete => {
+                                    offset += line.len() as u64;
+                                    let content = &line[..line.len() - 1];
+                                    match parse_operator_line(content) {
+                                        Some(event) => {
+                                            let event_cursor = encode_cursor(&OperatorCursor {
+                                                version: OPERATOR_CURSOR_VERSION,
+                                                fingerprint: snapshot_fingerprint.clone(),
+                                                offset,
+                                            });
+                                            events.push(CursorEvent {
+                                                cursor: event_cursor,
+                                                event,
+                                            });
+                                        }
+                                        None => {
+                                            skipped_lines += 1;
+                                            corrupt_budget
+                                                .record(line.len())
+                                                .map_err(CursorError::Storage)?;
+                                        }
+                                    }
                                 }
                             }
                         }
                     }
+                    Err(err) if err.kind() == std::io::ErrorKind::NotFound => {}
+                    Err(err) => return Err(CursorError::Storage(err.into())),
                 }
+
+                let next_cursor = match events.last() {
+                    Some(last) => Some(last.cursor.clone()),
+                    None => cursor.map(str::to_string),
+                };
+                Ok(OperatorPage {
+                    events,
+                    next_cursor,
+                    skipped_lines,
+                })
+            })();
+
+            // A lock-free reader may have observed a file that was repaired,
+            // replaced, or given its first valid anchor after the snapshot.
+            // Never return that speculative page under a stale fingerprint.
+            let end_fingerprint = first_line_fingerprint(&path)?;
+            if end_fingerprint != snapshot_fingerprint {
+                if decoded_cursor.is_some() {
+                    return Err(CursorError::InvalidCursor {
+                        reason: "stream lineage changed while reading the cursor".to_string(),
+                    });
+                }
+                if attempt == MAX_OPERATOR_LINEAGE_READ_ATTEMPTS {
+                    return Err(CursorError::UnstableLineage {
+                        attempts: MAX_OPERATOR_LINEAGE_READ_ATTEMPTS,
+                    });
+                }
+                continue;
             }
-            Err(err) if err.kind() == std::io::ErrorKind::NotFound => {}
-            Err(err) => return Err(CursorError::Storage(err.into())),
+
+            return attempt_result;
         }
 
-        let next_cursor = match events.last() {
-            Some(last) => Some(last.cursor.clone()),
-            None => cursor.map(str::to_string),
-        };
-
-        Ok(OperatorPage {
-            events,
-            next_cursor,
-            skipped_lines,
-        })
+        unreachable!("bounded lineage retry loop always returns")
     }
 }
 
@@ -622,4 +685,213 @@ fn decode_cursor(raw: &str) -> Result<OperatorCursor, CursorError> {
     serde_json::from_slice(&bytes).map_err(|err| CursorError::InvalidCursor {
         reason: format!("cursor payload is malformed: {err}"),
     })
+}
+
+#[cfg(test)]
+mod lineage_race_tests {
+    use super::*;
+    use serde_json::json;
+
+    struct SnapshotHookGuard;
+
+    impl SnapshotHookGuard {
+        fn install(hook: impl FnMut(usize) + 'static) -> Self {
+            READ_AFTER_SNAPSHOT_HOOK.with(|slot| {
+                assert!(slot.borrow().is_none(), "snapshot hook already installed");
+                *slot.borrow_mut() = Some(Box::new(hook));
+            });
+            Self
+        }
+    }
+
+    impl Drop for SnapshotHookGuard {
+        fn drop(&mut self) {
+            READ_AFTER_SNAPSHOT_HOOK.with(|slot| *slot.borrow_mut() = None);
+        }
+    }
+
+    fn test_event(id: &str) -> OperatorEvent {
+        OperatorEvent {
+            schema_version: OPERATOR_EVENT_SCHEMA_VERSION,
+            event_id: id.to_string(),
+            thread_id: "thread-race".to_string(),
+            turn_id: Some("turn-race".to_string()),
+            run_id: None,
+            call_id: None,
+            event_type: OperatorEventType::UserMessage,
+            occurred_at: "2026-07-20T00:00:00Z".to_string(),
+            actor: OperatorActor {
+                kind: "operator".to_string(),
+                id: "local-operator".to_string(),
+            },
+            risk_class: OperatorRisk::Low,
+            sensitivity: OperatorSensitivity::LocalPrivate,
+            parent_event_id: None,
+            correlation_id: None,
+            source_refs: vec![],
+            evidence_refs: vec![],
+            payload: json!({"text": "race"}),
+        }
+    }
+
+    fn envelope_bytes(event: &OperatorEvent) -> Vec<u8> {
+        let mut bytes = json!({
+            "v": EVIDENCE_SCHEMA_VERSION,
+            "at_ms": 1,
+            "kind": OPERATOR_STREAM_KIND,
+            "record": event,
+        })
+        .to_string()
+        .into_bytes();
+        bytes.push(b'\n');
+        bytes
+    }
+
+    #[test]
+    fn retries_from_start_when_first_append_races_empty_snapshot() {
+        let dir = tempfile::tempdir().unwrap();
+        let journal = OperatorJournal::new(dir.path().to_path_buf()).unwrap();
+        let writer_root = dir.path().to_path_buf();
+        let mut appended = false;
+        let _hook = SnapshotHookGuard::install(move |_| {
+            if !appended {
+                OperatorJournal::new(writer_root.clone())
+                    .unwrap()
+                    .append(&test_event("first"))
+                    .unwrap();
+                appended = true;
+            }
+        });
+
+        let page = journal.read_after(None, 1).unwrap();
+        assert_eq!(
+            page.events
+                .iter()
+                .map(|row| row.event.event_id.as_str())
+                .collect::<Vec<_>>(),
+            vec!["first"]
+        );
+        assert!(journal
+            .read_after(page.next_cursor.as_deref(), 1)
+            .unwrap()
+            .events
+            .is_empty());
+    }
+
+    #[test]
+    fn retries_when_torn_only_stream_is_repaired_inside_snapshot_length() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("operator_events.jsonl");
+        std::fs::write(&path, vec![b'x'; 4_096]).unwrap();
+        let original_len = std::fs::metadata(&path).unwrap().len();
+        let journal = OperatorJournal::new(dir.path().to_path_buf()).unwrap();
+        let writer_root = dir.path().to_path_buf();
+        let mut appended = false;
+        let _hook = SnapshotHookGuard::install(move |_| {
+            if !appended {
+                OperatorJournal::new(writer_root.clone())
+                    .unwrap()
+                    .append(&test_event("repaired"))
+                    .unwrap();
+                appended = true;
+            }
+        });
+
+        let page = journal.read_after(None, 1).unwrap();
+        assert!(std::fs::metadata(&path).unwrap().len() < original_len);
+        assert_eq!(
+            page.events
+                .iter()
+                .map(|row| row.event.event_id.as_str())
+                .collect::<Vec<_>>(),
+            vec!["repaired"]
+        );
+        assert!(journal
+            .read_after(page.next_cursor.as_deref(), 1)
+            .unwrap()
+            .events
+            .is_empty());
+    }
+
+    #[test]
+    fn stable_lineage_append_past_snapshot_length_waits_for_next_page() {
+        let dir = tempfile::tempdir().unwrap();
+        let journal = OperatorJournal::new(dir.path().to_path_buf()).unwrap();
+        journal.append(&test_event("first")).unwrap();
+        let writer_root = dir.path().to_path_buf();
+        let mut appended = false;
+        let hook = SnapshotHookGuard::install(move |_| {
+            if !appended {
+                OperatorJournal::new(writer_root.clone())
+                    .unwrap()
+                    .append(&test_event("second"))
+                    .unwrap();
+                appended = true;
+            }
+        });
+
+        let first_page = journal.read_after(None, 10).unwrap();
+        assert_eq!(
+            first_page
+                .events
+                .iter()
+                .map(|row| row.event.event_id.as_str())
+                .collect::<Vec<_>>(),
+            vec!["first"]
+        );
+        drop(hook);
+
+        let second_page = journal
+            .read_after(first_page.next_cursor.as_deref(), 10)
+            .unwrap();
+        assert_eq!(
+            second_page
+                .events
+                .iter()
+                .map(|row| row.event.event_id.as_str())
+                .collect::<Vec<_>>(),
+            vec!["second"]
+        );
+    }
+
+    #[test]
+    fn cursor_read_rejects_lineage_change_after_snapshot() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("operator_events.jsonl");
+        let journal = OperatorJournal::new(dir.path().to_path_buf()).unwrap();
+        let cursor = journal.append(&test_event("anchor-a")).unwrap().cursor;
+        let replacement = envelope_bytes(&test_event("anchor-b"));
+        let mut replaced = false;
+        let _hook = SnapshotHookGuard::install(move |_| {
+            if !replaced {
+                std::fs::write(&path, &replacement).unwrap();
+                replaced = true;
+            }
+        });
+
+        assert!(matches!(
+            journal.read_after(Some(&cursor), 1),
+            Err(CursorError::InvalidCursor { .. })
+        ));
+    }
+
+    #[test]
+    fn anchor_churn_hits_bounded_retry_ceiling() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("operator_events.jsonl");
+        let journal = OperatorJournal::new(dir.path().to_path_buf()).unwrap();
+        journal.append(&test_event("anchor-0")).unwrap();
+        let _hook = SnapshotHookGuard::install(move |attempt| {
+            std::fs::write(
+                &path,
+                envelope_bytes(&test_event(&format!("anchor-{attempt}"))),
+            )
+            .unwrap();
+        });
+
+        assert!(matches!(
+            journal.read_after(None, 1),
+            Err(CursorError::UnstableLineage { attempts: 3 })
+        ));
+    }
 }
