@@ -1,5 +1,6 @@
 //! Integration tests for the authenticated operator HTTP contract.
 
+use heiwa_core::auth::{sign_local_request, LocalRequestParts, LocalRequestSignature};
 use heiwa_evidence::OperatorJournal;
 use heiwa_session::operator::{OperatorSessionService, StartTurnRequest};
 use serde_json::{json, Value};
@@ -207,6 +208,65 @@ fn missing_operator_auth_configuration_is_distinct_from_bad_credentials() {
     assert_eq!(bad.status, 401);
     assert_eq!(bad.body["error"]["code"], "unauthorized");
     assert!(!bad.body.to_string().contains(TOKEN));
+}
+
+#[test]
+fn signed_local_requests_are_port_bound_and_replay_rejected_before_action() {
+    let runtime = TestRuntime::start(true);
+    let target = "/api/v1/calendar/holds";
+    let body = json!({
+        "title": "Signed local hold",
+        "date": "2026-07-21",
+        "kind": "focus"
+    })
+    .to_string();
+    let timestamp = unix_timestamp_now();
+    let signed = sign_local_request(
+        LocalRequestParts {
+            method: "POST",
+            port: runtime.port,
+            target,
+            body: body.as_bytes(),
+        },
+        timestamp,
+        "0123456789abcdef0123456789abcdef",
+        TOKEN,
+    )
+    .unwrap();
+
+    let accepted = signed_request(runtime.port, "POST", target, &body, &signed);
+    assert_eq!(accepted.status, 201, "{}", accepted.body);
+    let replay = signed_request(runtime.port, "POST", target, &body, &signed);
+    assert_eq!(replay.status, 401, "{}", replay.body);
+    assert_eq!(replay.body["error"]["code"], "unauthorized");
+    assert_eq!(runtime.calendar_hold_count(), 1, "replay reached mutation");
+
+    let wrong_port = if runtime.port == u16::MAX {
+        runtime.port - 1
+    } else {
+        runtime.port + 1
+    };
+    let relayed = sign_local_request(
+        LocalRequestParts {
+            method: "GET",
+            port: wrong_port,
+            target: "/api/v1/operator/threads",
+            body: b"",
+        },
+        timestamp,
+        "fedcba9876543210fedcba9876543210",
+        TOKEN,
+    )
+    .unwrap();
+    let rejected = signed_request(
+        runtime.port,
+        "GET",
+        "/api/v1/operator/threads",
+        "",
+        &relayed,
+    );
+    assert_eq!(rejected.status, 401, "{}", rejected.body);
+    assert_eq!(rejected.body["error"]["code"], "unauthorized");
 }
 
 #[test]
@@ -1081,6 +1141,60 @@ fn request(port: u16, method: &str, target: &str, token: Option<&str>, body: &st
         )
     });
     Response { status, body }
+}
+
+fn signed_request(
+    port: u16,
+    method: &str,
+    target: &str,
+    body: &str,
+    signed: &LocalRequestSignature,
+) -> Response {
+    let mut stream = TcpStream::connect(("127.0.0.1", port)).unwrap();
+    stream
+        .set_read_timeout(Some(Duration::from_secs(20)))
+        .unwrap();
+    let request = format!(
+        "{method} {target} HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\nAccept: application/json\r\nContent-Type: application/json\r\nX-Heiwa-Local-Auth-Version: {}\r\nX-Heiwa-Local-Auth-Timestamp: {}\r\nX-Heiwa-Local-Auth-Nonce: {}\r\nX-Heiwa-Local-Auth-Signature: {}\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+        signed.version,
+        signed.timestamp,
+        signed.nonce,
+        signed.signature,
+        body.len(),
+    );
+    stream.write_all(request.as_bytes()).unwrap();
+    let mut raw = Vec::new();
+    stream.read_to_end(&mut raw).unwrap();
+    parse_response(&raw)
+}
+
+fn parse_response(raw: &[u8]) -> Response {
+    let split = raw
+        .windows(4)
+        .position(|window| window == b"\r\n\r\n")
+        .expect("response headers");
+    let head = String::from_utf8_lossy(&raw[..split]);
+    let status = head
+        .lines()
+        .next()
+        .and_then(|line| line.split_whitespace().nth(1))
+        .unwrap()
+        .parse()
+        .unwrap();
+    let body = serde_json::from_slice(&raw[split + 4..]).unwrap_or_else(|error| {
+        panic!(
+            "response body was not JSON: {error}: {}",
+            String::from_utf8_lossy(&raw[split + 4..])
+        )
+    });
+    Response { status, body }
+}
+
+fn unix_timestamp_now() -> i64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_secs() as i64
 }
 
 fn websocket_handshake(port: u16, token: Option<&str>) -> HandshakeResponse {

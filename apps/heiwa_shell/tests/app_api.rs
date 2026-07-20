@@ -95,7 +95,7 @@ fn app_api_fails_before_network_without_auth_configuration() {
 }
 
 #[test]
-fn app_api_injects_bearer_token_without_echoing_it() {
+fn app_api_sends_signed_headers_without_disclosing_machine_token() {
     use std::io::{Read, Write};
     use std::net::TcpListener;
     use std::sync::mpsc;
@@ -134,7 +134,7 @@ fn app_api_injects_bearer_token_without_echoing_it() {
             "app",
             "api",
             "get",
-            "/api/v1/operator/threads",
+            "/api/v1/operator/threads?limit=3",
             "--port",
             &port.to_string(),
         ])
@@ -148,7 +148,13 @@ fn app_api_injects_bearer_token_without_echoing_it() {
         String::from_utf8_lossy(&output.stderr)
     );
     let request = received.recv().unwrap();
-    assert!(request.contains(&format!("Authorization: Bearer {token}\r\n")));
+    assert!(request.starts_with("GET /api/v1/operator/threads?limit=3 HTTP/1.1\r\n"));
+    assert!(request.contains("X-Heiwa-Local-Auth-Version: 1\r\n"));
+    assert!(request.contains("X-Heiwa-Local-Auth-Timestamp: "));
+    assert!(request.contains("X-Heiwa-Local-Auth-Nonce: "));
+    assert!(request.contains("X-Heiwa-Local-Auth-Signature: "));
+    assert!(!request.to_ascii_lowercase().contains("authorization:"));
+    assert!(!request.contains(token), "machine token crossed the socket");
     assert!(!String::from_utf8_lossy(&output.stdout).contains(token));
     assert!(!String::from_utf8_lossy(&output.stderr).contains(token));
 }

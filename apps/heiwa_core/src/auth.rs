@@ -27,6 +27,195 @@ pub enum AuthSubject {
     User(AuthClaims),
 }
 
+pub const LOCAL_REQUEST_AUTH_VERSION_HEADER: &str = "x-heiwa-local-auth-version";
+pub const LOCAL_REQUEST_AUTH_TIMESTAMP_HEADER: &str = "x-heiwa-local-auth-timestamp";
+pub const LOCAL_REQUEST_AUTH_NONCE_HEADER: &str = "x-heiwa-local-auth-nonce";
+pub const LOCAL_REQUEST_AUTH_SIGNATURE_HEADER: &str = "x-heiwa-local-auth-signature";
+pub const LOCAL_REQUEST_AUTH_VERSION: &str = "1";
+pub const LOCAL_REQUEST_MAX_TARGET_BYTES: usize = 8 * 1024;
+pub const LOCAL_REQUEST_MAX_BODY_BYTES: usize = 10 * 1024 * 1024;
+pub const LOCAL_REQUEST_MAX_SKEW_SECONDS: u64 = 30;
+
+#[derive(Debug, Clone, Copy)]
+pub struct LocalRequestParts<'a> {
+    pub method: &'a str,
+    pub port: u16,
+    pub target: &'a str,
+    pub body: &'a [u8],
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct LocalRequestSignature {
+    pub version: String,
+    pub timestamp: String,
+    pub nonce: String,
+    pub signature: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct VerifiedLocalRequest {
+    pub timestamp: i64,
+    pub nonce: String,
+}
+
+/// Sign the v1 local-runtime request contract.
+///
+/// The canonical input is newline-framed as domain, method, numeric local
+/// port, exact request target, lowercase body SHA-256, timestamp, and nonce.
+pub fn sign_local_request(
+    parts: LocalRequestParts<'_>,
+    timestamp: i64,
+    nonce: &str,
+    secret: &str,
+) -> Result<LocalRequestSignature> {
+    validate_local_request_parts(parts)?;
+    validate_local_request_secret(secret)?;
+    validate_local_request_timestamp(timestamp)?;
+    validate_local_request_nonce(nonce)?;
+    let canonical = canonical_local_request(parts, timestamp, nonce);
+    let signature = URL_SAFE_NO_PAD.encode(sign_bytes(canonical.as_bytes(), secret)?);
+    Ok(LocalRequestSignature {
+        version: LOCAL_REQUEST_AUTH_VERSION.to_string(),
+        timestamp: timestamp.to_string(),
+        nonce: nonce.to_string(),
+        signature,
+    })
+}
+
+pub fn verify_local_request(
+    parts: LocalRequestParts<'_>,
+    signed: &LocalRequestSignature,
+    secret: &str,
+    now: i64,
+) -> Result<VerifiedLocalRequest> {
+    validate_local_request_parts(parts)?;
+    validate_local_request_secret(secret)?;
+    if signed.version != LOCAL_REQUEST_AUTH_VERSION {
+        return Err(anyhow!("invalid local request auth version"));
+    }
+    let timestamp = parse_local_request_timestamp(&signed.timestamp)?;
+    if timestamp.abs_diff(now) > LOCAL_REQUEST_MAX_SKEW_SECONDS {
+        return Err(anyhow!("local request timestamp outside allowed skew"));
+    }
+    validate_local_request_nonce(&signed.nonce)?;
+    if signed.signature.len() != 43
+        || !signed
+            .signature
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_'))
+    {
+        return Err(anyhow!("invalid local request signature encoding"));
+    }
+    let actual = URL_SAFE_NO_PAD
+        .decode(&signed.signature)
+        .map_err(|_| anyhow!("invalid local request signature encoding"))?;
+    let canonical = canonical_local_request(parts, timestamp, &signed.nonce);
+    let expected = sign_bytes(canonical.as_bytes(), secret)?;
+    if !constant_time_eq(&expected, &actual) {
+        return Err(anyhow!("invalid local request signature"));
+    }
+    Ok(VerifiedLocalRequest {
+        timestamp,
+        nonce: signed.nonce.clone(),
+    })
+}
+
+fn canonical_local_request(parts: LocalRequestParts<'_>, timestamp: i64, nonce: &str) -> String {
+    format!(
+        "heiwa-local-request-v1\n{}\n{}\n{}\n{}\n{}\n{}",
+        parts.method,
+        parts.port,
+        parts.target,
+        sha256_hex(parts.body),
+        timestamp,
+        nonce,
+    )
+}
+
+fn validate_local_request_parts(parts: LocalRequestParts<'_>) -> Result<()> {
+    if parts.method.is_empty()
+        || parts.method.len() > 16
+        || !parts.method.bytes().all(|byte| byte.is_ascii_uppercase())
+    {
+        return Err(anyhow!("invalid local request method"));
+    }
+    if parts.port == 0 {
+        return Err(anyhow!("invalid local request port"));
+    }
+    if parts.target.is_empty()
+        || parts.target.len() > LOCAL_REQUEST_MAX_TARGET_BYTES
+        || !parts.target.starts_with('/')
+        || !parts
+            .target
+            .bytes()
+            .all(|byte| byte.is_ascii() && !byte.is_ascii_control() && byte != b' ')
+    {
+        return Err(anyhow!("invalid local request target"));
+    }
+    if parts.body.len() > LOCAL_REQUEST_MAX_BODY_BYTES {
+        return Err(anyhow!("local request body too large"));
+    }
+    Ok(())
+}
+
+fn validate_local_request_secret(secret: &str) -> Result<()> {
+    if secret.trim().is_empty() || secret.len() > 4 * 1024 {
+        return Err(anyhow!("invalid local request secret"));
+    }
+    Ok(())
+}
+
+fn validate_local_request_timestamp(timestamp: i64) -> Result<()> {
+    if timestamp < 0 || timestamp.to_string().len() > 20 {
+        return Err(anyhow!("invalid local request timestamp"));
+    }
+    Ok(())
+}
+
+fn parse_local_request_timestamp(raw: &str) -> Result<i64> {
+    if raw.is_empty() || raw.len() > 20 || !raw.bytes().all(|byte| byte.is_ascii_digit()) {
+        return Err(anyhow!("invalid local request timestamp"));
+    }
+    let timestamp = raw
+        .parse::<i64>()
+        .map_err(|_| anyhow!("invalid local request timestamp"))?;
+    validate_local_request_timestamp(timestamp)?;
+    if raw != timestamp.to_string() {
+        return Err(anyhow!("invalid local request timestamp"));
+    }
+    Ok(timestamp)
+}
+
+fn validate_local_request_nonce(nonce: &str) -> Result<()> {
+    if nonce.len() != 32
+        || !nonce
+            .bytes()
+            .all(|byte| byte.is_ascii_digit() || matches!(byte, b'a'..=b'f'))
+    {
+        return Err(anyhow!("invalid local request nonce"));
+    }
+    Ok(())
+}
+
+fn sha256_hex(input: &[u8]) -> String {
+    let mut output = String::with_capacity(64);
+    for byte in sha256(input) {
+        output.push_str(&format!("{byte:02x}"));
+    }
+    output
+}
+
+fn constant_time_eq(expected: &[u8], actual: &[u8]) -> bool {
+    let mut difference = expected.len() ^ actual.len();
+    let compared = expected.len().max(actual.len());
+    for index in 0..compared {
+        let left = expected.get(index).copied().unwrap_or_default();
+        let right = actual.get(index).copied().unwrap_or_default();
+        difference |= usize::from(left ^ right);
+    }
+    difference == 0
+}
+
 pub fn sign_jwt(claims: &AuthClaims, secret: &str) -> Result<String> {
     let header = json!({
         "alg": "HS256",

@@ -6,13 +6,13 @@ use heiwa_resource::{ResourcePolicy, ResourceSnapshot, ThermalPressure, WorkClas
 use serde::Serialize;
 use serde_json::{json, Value};
 use sha1::{Digest, Sha1};
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::env;
 use std::fs;
 use std::net::SocketAddr;
 use std::path::{Component, Path, PathBuf};
 use std::process::{Child, Command, Stdio};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use std::time::Instant;
 use tokio::io::{AsyncReadExt, AsyncWrite, AsyncWriteExt};
 use tokio::net::{TcpListener, TcpStream};
@@ -612,6 +612,24 @@ struct ApiResponse {
     body: String,
 }
 
+#[derive(Clone, Copy)]
+struct LocalAppApiTransportPolicy {
+    connect_timeout: Duration,
+    write_timeout: Duration,
+    read_timeout: Duration,
+    max_response_bytes: usize,
+}
+
+// Local JSON API responses are operational control payloads, not bulk data.
+// Two MiB leaves ample room for bounded event pages while limiting a hostile
+// or malfunctioning loopback peer.
+const LOCAL_APP_API_TRANSPORT_POLICY: LocalAppApiTransportPolicy = LocalAppApiTransportPolicy {
+    connect_timeout: Duration::from_secs(3),
+    write_timeout: Duration::from_secs(5),
+    read_timeout: Duration::from_secs(15),
+    max_response_bytes: 2 * 1024 * 1024,
+};
+
 async fn call_local_app_api(
     method: &str,
     path: &str,
@@ -619,26 +637,92 @@ async fn call_local_app_api(
     body: Option<&str>,
     machine_auth_token: &str,
 ) -> Result<ApiResponse> {
-    let mut stream = TcpStream::connect(("127.0.0.1", port))
-        .await
-        .map_err(|error| {
-            anyhow!("cannot connect to Heiwa.app runtime on 127.0.0.1:{port}: {error}")
-        })?;
+    call_local_app_api_with_policy(
+        method,
+        path,
+        port,
+        body,
+        machine_auth_token,
+        LOCAL_APP_API_TRANSPORT_POLICY,
+    )
+    .await
+}
+
+async fn call_local_app_api_with_policy(
+    method: &str,
+    path: &str,
+    port: u16,
+    body: Option<&str>,
+    machine_auth_token: &str,
+    policy: LocalAppApiTransportPolicy,
+) -> Result<ApiResponse> {
     let body = body.unwrap_or("");
+    let signed = heiwa_core::auth::sign_local_request(
+        heiwa_core::auth::LocalRequestParts {
+            method,
+            port,
+            target: path,
+            body: body.as_bytes(),
+        },
+        chrono::Utc::now().timestamp(),
+        &uuid::Uuid::new_v4().simple().to_string(),
+        machine_auth_token,
+    )
+    .map_err(|_| anyhow!("cannot sign local app API request"))?;
+    let mut stream = time::timeout(
+        policy.connect_timeout,
+        TcpStream::connect(("127.0.0.1", port)),
+    )
+    .await
+    .map_err(|_| anyhow!("local app API connect timed out"))?
+    .map_err(|error| anyhow!("cannot connect to Heiwa.app runtime on 127.0.0.1:{port}: {error}"))?;
     let request = if method == "POST" {
         format!(
-            "POST {path} HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\nAccept: application/json\r\nAuthorization: Bearer {machine_auth_token}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+            "POST {path} HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\nAccept: application/json\r\nX-Heiwa-Local-Auth-Version: {}\r\nX-Heiwa-Local-Auth-Timestamp: {}\r\nX-Heiwa-Local-Auth-Nonce: {}\r\nX-Heiwa-Local-Auth-Signature: {}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+            signed.version,
+            signed.timestamp,
+            signed.nonce,
+            signed.signature,
             body.len()
         )
     } else {
         format!(
-            "GET {path} HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\nAccept: application/json\r\nAuthorization: Bearer {machine_auth_token}\r\nConnection: close\r\n\r\n"
+            "GET {path} HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\nAccept: application/json\r\nX-Heiwa-Local-Auth-Version: {}\r\nX-Heiwa-Local-Auth-Timestamp: {}\r\nX-Heiwa-Local-Auth-Nonce: {}\r\nX-Heiwa-Local-Auth-Signature: {}\r\nConnection: close\r\n\r\n",
+            signed.version, signed.timestamp, signed.nonce, signed.signature,
         )
     };
-    stream.write_all(request.as_bytes()).await?;
-    let mut raw = Vec::new();
-    stream.read_to_end(&mut raw).await?;
+    time::timeout(policy.write_timeout, stream.write_all(request.as_bytes()))
+        .await
+        .map_err(|_| anyhow!("local app API write timed out"))?
+        .map_err(|_| anyhow!("local app API write failed"))?;
+    let raw = time::timeout(
+        policy.read_timeout,
+        read_capped_api_response(&mut stream, policy.max_response_bytes),
+    )
+    .await
+    .map_err(|_| anyhow!("local app API read timed out"))??;
     parse_api_response(&raw)
+}
+
+async fn read_capped_api_response<R>(reader: &mut R, max_bytes: usize) -> Result<Vec<u8>>
+where
+    R: tokio::io::AsyncRead + Unpin,
+{
+    let mut response = Vec::new();
+    let mut buffer = [0_u8; 8192];
+    loop {
+        let read = reader
+            .read(&mut buffer)
+            .await
+            .map_err(|_| anyhow!("local app API read failed"))?;
+        if read == 0 {
+            return Ok(response);
+        }
+        if response.len().saturating_add(read) > max_bytes {
+            return Err(anyhow!("local app API response too large"));
+        }
+        response.extend_from_slice(&buffer[..read]);
+    }
 }
 
 fn parse_api_response(raw: &[u8]) -> Result<ApiResponse> {
@@ -711,6 +795,7 @@ async fn start(args: &[String]) -> Result<()> {
     println!("  static: {}", cockpit_static_root().display());
     println!("  stop: SIGINT/SIGTERM");
 
+    let local_request_replays = Arc::new(Mutex::new(LocalRequestReplayCache::default()));
     let signal = shutdown_signal();
     tokio::pin!(signal);
 
@@ -722,8 +807,9 @@ async fn start(args: &[String]) -> Result<()> {
             accepted = listener.accept() => {
                 let (stream, _) = accepted?;
                 let started_at = started_at.clone();
+                let local_request_replays = local_request_replays.clone();
                 tokio::spawn(async move {
-                    if let Err(err) = handle_connection(stream, started_at).await {
+                    if let Err(err) = handle_connection(stream, started_at, local_request_replays).await {
                         eprintln!("heiwa app connection error: {err}");
                     }
                 });
@@ -919,12 +1005,16 @@ impl RuntimeStatus {
     }
 }
 
-async fn handle_connection(mut stream: TcpStream, started_at: Arc<String>) -> Result<()> {
+async fn handle_connection(
+    mut stream: TcpStream,
+    started_at: Arc<String>,
+    local_request_replays: Arc<Mutex<LocalRequestReplayCache>>,
+) -> Result<()> {
     let local_port = stream
         .local_addr()
         .map(|addr| addr.port())
         .unwrap_or(DEFAULT_PORT);
-    let (request, body) = read_http_request_and_body(&mut stream).await?;
+    let (request, body_bytes) = read_http_request_and_body(&mut stream).await?;
     if request.is_empty() {
         return Ok(());
     }
@@ -933,7 +1023,14 @@ async fn handle_connection(mut stream: TcpStream, started_at: Arc<String>) -> Re
         let target = request_target(&request).unwrap_or("/").to_string();
         let path = request_path(&request).unwrap_or("/").to_string();
         if path == "/ws/v1/operator" {
-            if let Err(error) = operator_auth_subject(&request) {
+            if let Err(error) = operator_auth_subject(
+                &request,
+                "GET",
+                &target,
+                &body_bytes,
+                local_port,
+                &local_request_replays,
+            ) {
                 let (status, code) = operator_auth_response(error);
                 return write_response(
                     &mut stream,
@@ -953,13 +1050,21 @@ async fn handle_connection(mut stream: TcpStream, started_at: Arc<String>) -> Re
     let method = request_method(&request).unwrap_or("GET");
     let target = request_target(&request).unwrap_or("/");
     let path = request_path(&request).unwrap_or("/");
+    let body = String::from_utf8_lossy(&body_bytes).to_string();
     if method == "OPTIONS" {
         return write_response(&mut stream, 204, "text/plain", Vec::new(), false).await;
     }
     let head_only = method == "HEAD";
 
     if is_runtime_authenticated_request(method, path) {
-        if let Err(error) = operator_auth_subject(&request) {
+        if let Err(error) = operator_auth_subject(
+            &request,
+            method,
+            target,
+            &body_bytes,
+            local_port,
+            &local_request_replays,
+        ) {
             let (status, code) = operator_auth_response(error);
             return write_response(
                 &mut stream,
@@ -1272,17 +1377,121 @@ fn is_runtime_authenticated_request(method: &str, path: &str) -> bool {
         && path != "/api/v1/route/preview"
 }
 
+const MAX_LOCAL_REQUEST_NONCES: usize = 4096;
+
+#[derive(Default)]
+struct LocalRequestReplayCache {
+    nonces: HashMap<String, i64>,
+}
+
+impl LocalRequestReplayCache {
+    fn consume(
+        &mut self,
+        verified: heiwa_core::auth::VerifiedLocalRequest,
+        now: i64,
+    ) -> std::result::Result<(), ()> {
+        self.nonces.retain(|_, timestamp| {
+            timestamp.abs_diff(now) <= heiwa_core::auth::LOCAL_REQUEST_MAX_SKEW_SECONDS
+        });
+        if self.nonces.contains_key(&verified.nonce)
+            || self.nonces.len() >= MAX_LOCAL_REQUEST_NONCES
+        {
+            return Err(());
+        }
+        self.nonces.insert(verified.nonce, verified.timestamp);
+        Ok(())
+    }
+}
+
 fn operator_auth_subject(
     request: &str,
+    method: &str,
+    target: &str,
+    body: &[u8],
+    local_port: u16,
+    local_request_replays: &Mutex<LocalRequestReplayCache>,
 ) -> std::result::Result<heiwa_core::auth::AuthSubject, OperatorAuthError> {
     let config = heiwa_core::config::RuntimeConfig::from_env();
     if config.machine_auth_token.trim().is_empty() && config.jwt_signing_secret.trim().is_empty() {
         return Err(OperatorAuthError::NotConfigured);
     }
+    match local_request_signature_headers(request) {
+        Ok(Some(signed)) => {
+            if config.machine_auth_token.trim().is_empty() {
+                return Err(OperatorAuthError::Unauthorized);
+            }
+            let now = chrono::Utc::now().timestamp();
+            let verified = heiwa_core::auth::verify_local_request(
+                heiwa_core::auth::LocalRequestParts {
+                    method,
+                    port: local_port,
+                    target,
+                    body,
+                },
+                &signed,
+                &config.machine_auth_token,
+                now,
+            )
+            .map_err(|_| OperatorAuthError::Unauthorized)?;
+            local_request_replays
+                .lock()
+                .map_err(|_| OperatorAuthError::Unauthorized)?
+                .consume(verified, now)
+                .map_err(|_| OperatorAuthError::Unauthorized)?;
+            return Ok(heiwa_core::auth::AuthSubject::Operator);
+        }
+        Ok(None) => {}
+        Err(()) => return Err(OperatorAuthError::Unauthorized),
+    }
+
     let cookie = header_value(request, "cookie");
     let authorization = header_value(request, "authorization");
     heiwa_core::auth::extract_auth_subject(cookie.as_deref(), authorization.as_deref(), &config)
         .map_err(|_| OperatorAuthError::Unauthorized)
+}
+
+fn local_request_signature_headers(
+    request: &str,
+) -> std::result::Result<Option<heiwa_core::auth::LocalRequestSignature>, ()> {
+    let names = [
+        heiwa_core::auth::LOCAL_REQUEST_AUTH_VERSION_HEADER,
+        heiwa_core::auth::LOCAL_REQUEST_AUTH_TIMESTAMP_HEADER,
+        heiwa_core::auth::LOCAL_REQUEST_AUTH_NONCE_HEADER,
+        heiwa_core::auth::LOCAL_REQUEST_AUTH_SIGNATURE_HEADER,
+    ];
+    let values = names
+        .iter()
+        .map(|name| strict_header_value(request, name))
+        .collect::<std::result::Result<Vec<_>, _>>()?;
+    if values.iter().all(Option::is_none) {
+        return Ok(None);
+    }
+    if values.iter().any(Option::is_none) {
+        return Err(());
+    }
+    Ok(Some(heiwa_core::auth::LocalRequestSignature {
+        version: values[0].clone().ok_or(())?,
+        timestamp: values[1].clone().ok_or(())?,
+        nonce: values[2].clone().ok_or(())?,
+        signature: values[3].clone().ok_or(())?,
+    }))
+}
+
+fn strict_header_value(request: &str, name: &str) -> std::result::Result<Option<String>, ()> {
+    let values = request
+        .lines()
+        .filter_map(|line| {
+            let (header_name, value) = line.split_once(':')?;
+            header_name
+                .eq_ignore_ascii_case(name)
+                .then(|| value.trim().to_string())
+        })
+        .collect::<Vec<_>>();
+    match values.as_slice() {
+        [] => Ok(None),
+        [value] => Ok(Some(value.clone())),
+        _ => Err(()),
+    }
 }
 
 enum OperatorHttpRoute {
@@ -1658,7 +1867,7 @@ fn parse_nonnegative_budget(value: Option<&Value>) -> std::result::Result<Option
     }
 }
 
-async fn read_http_request_and_body(stream: &mut TcpStream) -> Result<(String, String)> {
+async fn read_http_request_and_body(stream: &mut TcpStream) -> Result<(String, Vec<u8>)> {
     const MAX_HTTP_HEADER_BYTES: usize = 64 * 1024;
     const MAX_HTTP_BODY_BYTES: usize = 10 * 1024 * 1024;
 
@@ -1727,8 +1936,7 @@ async fn read_http_request_and_body(stream: &mut TcpStream) -> Result<(String, S
     let body = data
         .get(headers_len..total_len)
         .ok_or_else(|| anyhow!("truncated request body"))?;
-    let body_str = String::from_utf8_lossy(body).to_string();
-    Ok((headers_str, body_str))
+    Ok((headers_str, body.to_vec()))
 }
 
 async fn handle_websocket(
@@ -4574,7 +4782,9 @@ mod app_readmodel_tests {
             stream.shutdown().await.unwrap();
         });
         let (mut server, _) = listener.accept().await?;
-        let result = read_http_request_and_body(&mut server).await;
+        let result = read_http_request_and_body(&mut server)
+            .await
+            .map(|(request, body)| (request, String::from_utf8_lossy(&body).to_string()));
         client.await.unwrap();
         result
     }
@@ -4949,6 +5159,104 @@ mod app_readmodel_tests {
             .expect_err("unread peer must time out");
         assert!(error.to_string().contains("timed out"));
         assert!(started.elapsed() < Duration::from_millis(100));
+    }
+
+    fn test_local_api_policy() -> LocalAppApiTransportPolicy {
+        LocalAppApiTransportPolicy {
+            connect_timeout: Duration::from_millis(50),
+            write_timeout: Duration::from_millis(5),
+            read_timeout: Duration::from_millis(5),
+            max_response_bytes: 1024,
+        }
+    }
+
+    #[tokio::test]
+    async fn local_app_api_read_deadline_rejects_never_ending_response() {
+        let listener = TcpListener::bind(("127.0.0.1", 0)).await.unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let server = tokio::spawn(async move {
+            let (mut stream, _) = listener.accept().await.unwrap();
+            let mut request = [0_u8; 4096];
+            let _ = stream.read(&mut request).await.unwrap();
+            stream
+                .write_all(b"HTTP/1.1 200 OK\r\nContent-Type: application/json\r\n\r\n{")
+                .await
+                .unwrap();
+            tokio::time::sleep(Duration::from_millis(100)).await;
+        });
+        let token = "read-deadline-secret";
+        let error = call_local_app_api_with_policy(
+            "GET",
+            "/api/v1/operator/threads",
+            port,
+            None,
+            token,
+            test_local_api_policy(),
+        )
+        .await
+        .err()
+        .expect("never-ending response must time out");
+        server.abort();
+        assert!(error.to_string().contains("read timed out"));
+        assert!(!error.to_string().contains(token));
+    }
+
+    #[tokio::test]
+    async fn local_app_api_response_cap_rejects_oversized_response() {
+        let listener = TcpListener::bind(("127.0.0.1", 0)).await.unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let server = tokio::spawn(async move {
+            let (mut stream, _) = listener.accept().await.unwrap();
+            let mut request = [0_u8; 4096];
+            let _ = stream.read(&mut request).await.unwrap();
+            let body = "x".repeat(2048);
+            let response = format!(
+                "HTTP/1.1 200 OK\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+                body.len()
+            );
+            stream.write_all(response.as_bytes()).await.unwrap();
+        });
+        let token = "response-cap-secret";
+        let error = call_local_app_api_with_policy(
+            "GET",
+            "/api/v1/operator/threads",
+            port,
+            None,
+            token,
+            test_local_api_policy(),
+        )
+        .await
+        .err()
+        .expect("oversized response must fail closed");
+        server.await.unwrap();
+        assert!(error.to_string().contains("response too large"));
+        assert!(!error.to_string().contains(token));
+    }
+
+    #[tokio::test]
+    async fn local_app_api_write_deadline_bounds_unread_peer() {
+        let listener = TcpListener::bind(("127.0.0.1", 0)).await.unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let server = tokio::spawn(async move {
+            let (_stream, _) = listener.accept().await.unwrap();
+            tokio::time::sleep(Duration::from_millis(100)).await;
+        });
+        let body = format!("\"{}\"", "x".repeat(8 * 1024 * 1024));
+        let token = "write-deadline-secret";
+        let error = call_local_app_api_with_policy(
+            "POST",
+            "/api/v1/operator/threads",
+            port,
+            Some(&body),
+            token,
+            test_local_api_policy(),
+        )
+        .await
+        .err()
+        .expect("unread peer must time out");
+        server.abort();
+        assert!(error.to_string().contains("write timed out"));
+        assert!(!error.to_string().contains(token));
     }
 
     #[tokio::test]
