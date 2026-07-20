@@ -390,6 +390,7 @@ mod tests {
         cursor: String,
         turn_id: String,
         event_type: String,
+        payload: Value,
     }
 
     #[derive(Default)]
@@ -397,6 +398,57 @@ mod tests {
         caught_up_count: usize,
         seen_event_ids: HashSet<String>,
         post_catch_up_events: Vec<ObservedDurableEvent>,
+    }
+
+    impl ExternalOperatorObservation {
+        fn should_stop(&self) -> bool {
+            if self.caught_up_count < 2 {
+                return false;
+            }
+            let Some(live_turn_id) = self
+                .post_catch_up_events
+                .first()
+                .map(|event| event.turn_id.as_str())
+            else {
+                return false;
+            };
+            self.post_catch_up_events
+                .iter()
+                .any(|event| event.turn_id == live_turn_id && event.event_type == "turn_completed")
+        }
+    }
+
+    #[test]
+    fn external_operator_stop_gate_requires_reconnect_and_terminal_in_either_order() {
+        let event = |event_type: &str| ObservedDurableEvent {
+            event_id: format!("event-{event_type}"),
+            cursor: format!("cursor-{event_type}"),
+            turn_id: "turn-live".to_string(),
+            event_type: event_type.to_string(),
+            payload: json!({}),
+        };
+
+        let mut reconnect_first = ExternalOperatorObservation {
+            caught_up_count: 2,
+            ..Default::default()
+        };
+        reconnect_first
+            .post_catch_up_events
+            .push(event("turn_started"));
+        assert!(!reconnect_first.should_stop());
+        reconnect_first
+            .post_catch_up_events
+            .push(event("turn_completed"));
+        assert!(reconnect_first.should_stop());
+
+        let mut terminal_first = ExternalOperatorObservation {
+            caught_up_count: 1,
+            post_catch_up_events: vec![event("turn_started"), event("turn_completed")],
+            ..Default::default()
+        };
+        assert!(!terminal_first.should_stop());
+        terminal_first.caught_up_count = 2;
+        assert!(terminal_first.should_stop());
     }
 
     #[tokio::test]
@@ -478,32 +530,58 @@ mod tests {
                                     .and_then(Value::as_str)
                                     .expect("durable event frame must carry event.event_type")
                                     .to_string();
+                                let payload = frame
+                                    .pointer("/event/payload")
+                                    .cloned()
+                                    .expect("durable event frame must carry event.payload");
                                 let mut observed = stream_observation.lock().unwrap();
                                 assert!(
                                     observed.seen_event_ids.insert(event_id.clone()),
                                     "native reconnect must not redeliver a durable event_id"
                                 );
                                 if observed.caught_up_count > 0 {
+                                    let unexpected_terminal = matches!(
+                                        event_type.as_str(),
+                                        "turn_failed"
+                                            | "turn_cancelled"
+                                            | "turn_interrupted"
+                                            | "blocker"
+                                    );
                                     observed.post_catch_up_events.push(ObservedDurableEvent {
                                         event_id,
                                         cursor,
                                         turn_id,
                                         event_type,
+                                        payload,
                                     });
                                     if observed.post_catch_up_events.len() == 1 {
                                         stream_live_event.notify_one();
                                     }
+                                    if unexpected_terminal {
+                                        drop(observed);
+                                        panic!(
+                                            "deterministic external operator turn ended unexpectedly"
+                                        );
+                                    }
                                 }
-                                Ok(())
+                                let should_stop = observed.should_stop();
+                                drop(observed);
+                                if should_stop {
+                                    Err(OperatorStreamError::ReceiverClosed)
+                                } else {
+                                    Ok(())
+                                }
                             }
                             Some("caught_up") => {
                                 let mut observed = stream_observation.lock().unwrap();
                                 observed.caught_up_count += 1;
                                 if observed.caught_up_count == 1 {
                                     stream_caught_up.notify_one();
-                                    Ok(())
-                                } else {
+                                }
+                                if observed.should_stop() {
                                     Err(OperatorStreamError::ReceiverClosed)
+                                } else {
+                                    Ok(())
                                 }
                             }
                             Some("invalid_cursor") => {
@@ -548,7 +626,16 @@ mod tests {
                         "/api/v1/operator/threads/{}/turns",
                         percent_encode_query_component(&thread_id)
                     ),
-                    json!({"client_request_id": unique_request_id, "prompt": "hi"}),
+                    json!({
+                        "client_request_id": unique_request_id,
+                        "prompt": "hi",
+                        "route_policy": {
+                            "mode": "explicit",
+                            "preferred_provider": "heiwa-e2e-no-provider",
+                            "maximum_marginal_cost_usd": 0.0,
+                            "turn_budget_usd": 0.0
+                        }
+                    }),
                     &token,
                 ),
             )
@@ -591,9 +678,9 @@ mod tests {
                 "test seam must drop the first live durable-event transport"
             );
             let observed = observation.lock().unwrap();
-            assert_eq!(
-                observed.caught_up_count, 2,
-                "native stream must reconnect and catch up exactly once"
+            assert!(
+                observed.caught_up_count >= 2,
+                "native stream must reconnect and catch up before exiting"
             );
             let first_live = observed.post_catch_up_events.first().unwrap();
             assert_eq!(
@@ -612,6 +699,35 @@ mod tests {
                     .skip(1)
                     .any(|event| event.turn_id == submitted_turn_id),
                 "reconnected stream must deliver later durable events for the submitted turn"
+            );
+            assert!(
+                observed.post_catch_up_events.iter().any(|event| {
+                    event.turn_id == submitted_turn_id && event.event_type == "turn_completed"
+                }),
+                "submitted deterministic turn must reach durable turn_completed"
+            );
+            let route_events = observed
+                .post_catch_up_events
+                .iter()
+                .filter(|event| {
+                    event.turn_id == submitted_turn_id
+                        && matches!(
+                            event.event_type.as_str(),
+                            "route_planned" | "route_completed"
+                        )
+                })
+                .collect::<Vec<_>>();
+            assert_eq!(
+                route_events.len(),
+                2,
+                "deterministic turn must durably plan and complete its route"
+            );
+            assert!(
+                route_events
+                    .iter()
+                    .all(|event| event.payload.get("mode").and_then(Value::as_str)
+                        == Some("deterministic")),
+                "deterministic route events must identify deterministic mode"
             );
         })
         .await
