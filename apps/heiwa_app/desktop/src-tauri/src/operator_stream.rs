@@ -416,6 +416,20 @@ mod tests {
                 .iter()
                 .any(|event| event.turn_id == live_turn_id && event.event_type == "turn_completed")
         }
+
+        fn has_exact_deterministic_route_pair(&self, turn_id: &str) -> bool {
+            ["route_planned", "route_completed"]
+                .into_iter()
+                .all(|event_type| {
+                    let mut matching = self
+                        .post_catch_up_events
+                        .iter()
+                        .filter(|event| event.turn_id == turn_id && event.event_type == event_type);
+                    matching.next().is_some_and(|event| {
+                        event.payload.get("mode").and_then(Value::as_str) == Some("deterministic")
+                    }) && matching.next().is_none()
+                })
+        }
     }
 
     #[test]
@@ -449,6 +463,28 @@ mod tests {
         assert!(!terminal_first.should_stop());
         terminal_first.caught_up_count = 2;
         assert!(terminal_first.should_stop());
+    }
+
+    #[test]
+    fn external_operator_route_proof_requires_one_planned_and_one_completed() {
+        let event = |event_type: &str| ObservedDurableEvent {
+            event_id: format!("event-{event_type}"),
+            cursor: format!("cursor-{event_type}"),
+            turn_id: "turn-live".to_string(),
+            event_type: event_type.to_string(),
+            payload: json!({"mode": "deterministic"}),
+        };
+        let duplicate_planned = ExternalOperatorObservation {
+            post_catch_up_events: vec![event("route_planned"), event("route_planned")],
+            ..Default::default()
+        };
+        assert!(!duplicate_planned.has_exact_deterministic_route_pair("turn-live"));
+
+        let complete_pair = ExternalOperatorObservation {
+            post_catch_up_events: vec![event("route_planned"), event("route_completed")],
+            ..Default::default()
+        };
+        assert!(complete_pair.has_exact_deterministic_route_pair("turn-live"));
     }
 
     #[tokio::test]
@@ -706,28 +742,9 @@ mod tests {
                 }),
                 "submitted deterministic turn must reach durable turn_completed"
             );
-            let route_events = observed
-                .post_catch_up_events
-                .iter()
-                .filter(|event| {
-                    event.turn_id == submitted_turn_id
-                        && matches!(
-                            event.event_type.as_str(),
-                            "route_planned" | "route_completed"
-                        )
-                })
-                .collect::<Vec<_>>();
-            assert_eq!(
-                route_events.len(),
-                2,
-                "deterministic turn must durably plan and complete its route"
-            );
             assert!(
-                route_events
-                    .iter()
-                    .all(|event| event.payload.get("mode").and_then(Value::as_str)
-                        == Some("deterministic")),
-                "deterministic route events must identify deterministic mode"
+                observed.has_exact_deterministic_route_pair(&submitted_turn_id),
+                "deterministic turn must have exactly one planned and one completed route event"
             );
         })
         .await
