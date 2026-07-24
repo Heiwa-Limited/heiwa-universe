@@ -285,6 +285,28 @@ fn operator_websocket_authenticates_before_any_upgrade() {
         assert_eq!(unauthorized.body["error"]["code"], "unauthorized");
     }
 
+    let target = "/ws/v1/operator";
+    let signed = sign_local_request(
+        LocalRequestParts {
+            method: "GET",
+            port: configured.port,
+            target,
+            body: b"",
+        },
+        unix_timestamp_now(),
+        "89abcdef0123456789abcdef01234567",
+        TOKEN,
+    )
+    .unwrap();
+    let signed_headers = format!(
+        "X-Heiwa-Local-Auth-Version: {}\r\nX-Heiwa-Local-Auth-Timestamp: {}\r\nX-Heiwa-Local-Auth-Nonce: {}\r\nX-Heiwa-Local-Auth-Signature: {}\r\n",
+        signed.version, signed.timestamp, signed.nonce, signed.signature,
+    );
+    let signed_only = websocket_handshake_with_headers(configured.port, target, &signed_headers);
+    assert_eq!(signed_only.status, 401, "{}", signed_only.head);
+    assert!(!signed_only.head.contains("101 Switching Protocols"));
+    assert_eq!(signed_only.body["error"]["code"], "unauthorized");
+
     let authorized = websocket_handshake(configured.port, Some(TOKEN));
     assert_eq!(authorized.status, 101, "{}", authorized.head);
 }
@@ -1198,15 +1220,23 @@ fn unix_timestamp_now() -> i64 {
 }
 
 fn websocket_handshake(port: u16, token: Option<&str>) -> HandshakeResponse {
+    let authorization = token
+        .map(|token| format!("Authorization: Bearer {token}\r\n"))
+        .unwrap_or_default();
+    websocket_handshake_with_headers(port, "/ws/v1/operator", &authorization)
+}
+
+fn websocket_handshake_with_headers(
+    port: u16,
+    target: &str,
+    additional_headers: &str,
+) -> HandshakeResponse {
     let mut stream = TcpStream::connect(("127.0.0.1", port)).unwrap();
     stream
         .set_read_timeout(Some(Duration::from_secs(2)))
         .unwrap();
-    let authorization = token
-        .map(|token| format!("Authorization: Bearer {token}\r\n"))
-        .unwrap_or_default();
     let request = format!(
-        "GET /ws/v1/operator HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Version: 13\r\nSec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\n{authorization}\r\n"
+        "GET {target} HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Version: 13\r\nSec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\n{additional_headers}\r\n"
     );
     stream.write_all(request.as_bytes()).unwrap();
 

@@ -1023,14 +1023,7 @@ async fn handle_connection(
         let target = request_target(&request).unwrap_or("/").to_string();
         let path = request_path(&request).unwrap_or("/").to_string();
         if path == "/ws/v1/operator" {
-            if let Err(error) = operator_auth_subject(
-                &request,
-                "GET",
-                &target,
-                &body_bytes,
-                local_port,
-                &local_request_replays,
-            ) {
+            if let Err(error) = operator_connection_auth_subject(&request) {
                 let (status, code) = operator_auth_response(error);
                 return write_response(
                     &mut stream,
@@ -1057,7 +1050,7 @@ async fn handle_connection(
     let head_only = method == "HEAD";
 
     if is_runtime_authenticated_request(method, path) {
-        if let Err(error) = operator_auth_subject(
+        if let Err(error) = operator_http_auth_subject(
             &request,
             method,
             target,
@@ -1403,7 +1396,20 @@ impl LocalRequestReplayCache {
     }
 }
 
-fn operator_auth_subject(
+fn operator_connection_auth_subject(
+    request: &str,
+) -> std::result::Result<heiwa_core::auth::AuthSubject, OperatorAuthError> {
+    let config = heiwa_core::config::RuntimeConfig::from_env();
+    if config.machine_auth_token.trim().is_empty() && config.jwt_signing_secret.trim().is_empty() {
+        return Err(OperatorAuthError::NotConfigured);
+    }
+    let cookie = header_value(request, "cookie");
+    let authorization = header_value(request, "authorization");
+    heiwa_core::auth::extract_auth_subject(cookie.as_deref(), authorization.as_deref(), &config)
+        .map_err(|_| OperatorAuthError::Unauthorized)
+}
+
+fn operator_http_auth_subject(
     request: &str,
     method: &str,
     target: &str,

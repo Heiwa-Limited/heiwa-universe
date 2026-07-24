@@ -125,6 +125,7 @@ fn grant_tool_lease(scope: &mut ExecutionScope, name: &str, risk_class: RiskClas
 #[derive(Clone)]
 struct RouteResult {
     candidates: Vec<ModelCallCandidate>,
+    local_auxiliary_candidates: Vec<ModelCallCandidate>,
     model_id: String,
     provider: String,
     provider_model_id: String,
@@ -2381,7 +2382,7 @@ async fn prepare_outbound_prompt_for_route(
     };
     let result = routed_compression_receipt(
         &context,
-        route.candidates.clone(),
+        route.local_auxiliary_candidates.clone(),
         input,
         &source,
         vec![],
@@ -2423,7 +2424,7 @@ async fn prepare_outbound_prompt_for_route_cancellable(
     );
     let result = routed_compression_receipt(
         context,
-        route.candidates.clone(),
+        route.local_auxiliary_candidates.clone(),
         input,
         &source,
         vec![],
@@ -2735,6 +2736,16 @@ fn route_task_inner(
         ));
     }
 
+    // Auxiliary calls have their own DREX policy. Preserve on-device
+    // inventory before main-turn pins or local/remote preference narrow the
+    // execution candidates, so a remote-only main call can still use a
+    // sovereign zero-cost compression call.
+    let local_auxiliary_candidates = adapter_capable
+        .iter()
+        .map(model_call_candidate)
+        .filter(|candidate| candidate.locality == ExecutionLocality::OnDevice)
+        .collect();
+
     let routed_tiers = filtered_model_tiers(
         &adapter_capable,
         pins.route_preference,
@@ -2809,6 +2820,7 @@ fn route_task_inner(
 
     Ok(RouteOutcome::Routed(Box::new(RouteResult {
         candidates: effective_tiers.iter().map(model_call_candidate).collect(),
+        local_auxiliary_candidates,
         model_id: selected.model_id.clone(),
         provider: selected.provider.clone(),
         provider_model_id: selected.provider_model_id.clone(),
@@ -4594,9 +4606,54 @@ mod tests {
     }
 
     #[test]
+    fn remote_only_main_route_preserves_local_auxiliary_call_candidates() {
+        let ledger = heiwa_quota::QuotaLedger::open_in_memory().expect("ledger");
+        let mut pins = super::SessionPins::new();
+        pins.route_preference = super::RoutePreference::RemoteOnly;
+        let mut tiers = vec![
+            test_model_tier("ollama", "qwen3.5:4b", "local_ollama", 2, 0.0),
+            test_model_tier("claude", "claude-sonnet", "anthropic", 4, 0.20),
+        ];
+        tiers[0].id = 1;
+        tiers[1].id = 2;
+
+        let outcome = super::route_task_with_quota(
+            "compare deployment approaches with enough detail to require a model",
+            &pins,
+            &tiers,
+            Some(&ledger),
+            1_777_000_000,
+        )
+        .expect("remote-only main call should route");
+        let super::RouteOutcome::Routed(route) = outcome else {
+            panic!("comparison task should route to a model")
+        };
+
+        assert_eq!(
+            route
+                .candidates
+                .iter()
+                .map(|candidate| candidate.tier.provider.as_str())
+                .collect::<Vec<_>>(),
+            vec!["claude"],
+            "main-call candidates must still honor remote-only"
+        );
+        assert_eq!(
+            route
+                .local_auxiliary_candidates
+                .iter()
+                .map(|candidate| candidate.tier.provider.as_str())
+                .collect::<Vec<_>>(),
+            vec!["ollama"],
+            "local auxiliary calls need inventory independent of main route"
+        );
+    }
+
+    #[test]
     fn remote_large_chat_prompt_is_compressed_before_model_send() {
         let route = super::RouteResult {
             candidates: vec![],
+            local_auxiliary_candidates: vec![],
             model_id: "claude-sonnet".to_string(),
             provider: "claude".to_string(),
             provider_model_id: "claude-sonnet".to_string(),
@@ -4635,6 +4692,7 @@ mod tests {
     fn fallback_result_replaces_primary_route_attribution() {
         let route = super::RouteResult {
             candidates: vec![],
+            local_auxiliary_candidates: vec![],
             model_id: "primary-model".to_string(),
             provider: "primary".to_string(),
             provider_model_id: "primary-model".to_string(),
@@ -4838,6 +4896,7 @@ mod tests {
     fn local_or_small_prompts_skip_route_compression() {
         let mut route = super::RouteResult {
             candidates: vec![],
+            local_auxiliary_candidates: vec![],
             model_id: "qwen3.5:4b".to_string(),
             provider: "ollama".to_string(),
             provider_model_id: "qwen3.5:4b".to_string(),
@@ -4887,6 +4946,7 @@ mod tests {
         let ledger = heiwa_quota::QuotaLedger::open_in_memory().expect("ledger");
         let route = super::RouteResult {
             candidates: vec![],
+            local_auxiliary_candidates: vec![],
             model_id: "gemma4".to_string(),
             provider: "ollama".to_string(),
             provider_model_id: "gemma4".to_string(),
