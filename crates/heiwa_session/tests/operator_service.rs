@@ -19,7 +19,7 @@ use serde_json::json;
 #[cfg(feature = "lance")]
 use std::collections::{HashMap, HashSet};
 use std::io::Write;
-use std::sync::Mutex;
+use std::sync::{Arc, Barrier, Mutex};
 
 fn test_service(path: &std::path::Path) -> OperatorSessionService {
     OperatorSessionService::new(OperatorJournal::new(path.to_path_buf()).unwrap())
@@ -342,6 +342,66 @@ fn duplicate_client_request_returns_one_turn() {
     assert_eq!(first.turn_id, second.turn_id);
     assert!(second.duplicate);
     assert_eq!(service.thread("default").unwrap().turns.len(), 1);
+}
+
+#[test]
+fn independent_services_serialize_same_root_turn_admission() {
+    let dir = tempfile::tempdir().unwrap();
+    let services = [test_service(dir.path()), test_service(dir.path())];
+    let barrier = Arc::new(Barrier::new(3));
+    let handles = services.map(|service| {
+        let barrier = barrier.clone();
+        std::thread::spawn(move || {
+            barrier.wait();
+            service.start_turn(
+                "default",
+                StartTurnRequest::auto("cross-process-request", "execute once"),
+            )
+        })
+    });
+    barrier.wait();
+
+    let submissions = handles
+        .into_iter()
+        .map(|handle| handle.join().unwrap().unwrap())
+        .collect::<Vec<_>>();
+    assert_eq!(submissions[0].turn_id, submissions[1].turn_id);
+    assert_eq!(submissions[0].cursor, submissions[1].cursor);
+    assert_eq!(
+        submissions
+            .iter()
+            .filter(|submission| !submission.duplicate)
+            .count(),
+        1,
+        "exactly one independent service may own execution admission"
+    );
+    assert_eq!(
+        submissions
+            .iter()
+            .filter(|submission| submission.duplicate)
+            .count(),
+        1
+    );
+
+    let events = OperatorJournal::new(dir.path().to_path_buf())
+        .unwrap()
+        .read_after(None, 32)
+        .unwrap()
+        .events;
+    for event_type in [
+        OperatorEventType::ThreadCreated,
+        OperatorEventType::TurnStarted,
+        OperatorEventType::UserMessage,
+    ] {
+        assert_eq!(
+            events
+                .iter()
+                .filter(|row| row.event.event_type == event_type)
+                .count(),
+            1,
+            "{event_type:?} must be appended once"
+        );
+    }
 }
 
 #[test]

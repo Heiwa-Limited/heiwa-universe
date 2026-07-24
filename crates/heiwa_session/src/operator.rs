@@ -18,9 +18,9 @@
 //! Every service that mutates the stream holds a shared cross-process activity
 //! lease for its remaining lifetime. Restart recovery temporarily requires an
 //! exclusive activity lease, so it fails closed while any other writer may
-//! still own live work. Shared activity leases deliberately do not serialize
-//! separate writers: cross-process duplicate submission remains best-effort,
-//! while single in-process callers are race-free.
+//! still own live work. A separate root-wide transaction lock serializes each
+//! materialize/validate/append sequence across processes; the journal's own
+//! lock remains responsible only for one framed append.
 //!
 //! Cancellation contract: operator cancellation makes intent durable
 //! FIRST — a `turn_cancel_requested` event is appended *before* the runner
@@ -50,6 +50,7 @@ use heiwa_evidence::{
 
 const OPERATOR_APP_RUNTIME_LEASE_FILE: &str = ".operator_runtime.lock";
 const OPERATOR_ACTIVITY_LEASE_FILE: &str = ".operator_activity.lock";
+const OPERATOR_TRANSACTION_LOCK_FILE: &str = ".operator_transaction.lock";
 
 /// Typed cross-process ownership failures for operator session writers.
 #[derive(Debug, thiserror::Error)]
@@ -378,6 +379,12 @@ pub struct OperatorSessionService {
     /// deliberately separate from the journal's own append lock, so replay
     /// and materialization never wait behind a slow writer.
     write_transaction: Mutex<()>,
+}
+
+struct OperatorWriteTransaction<'a> {
+    // Release the root-wide lock before the in-process mutex.
+    _cross_process: File,
+    _local: std::sync::MutexGuard<'a, ()>,
 }
 
 impl OperatorSessionService {
@@ -758,6 +765,7 @@ impl OperatorSessionService {
             .lock()
             .map_err(|_| anyhow!("operator activity lease mutex poisoned"))?;
         activity_lease.with_exclusive(|| {
+            let _cross_process_transaction = self.lock_cross_process_transaction()?;
             let threads = materialize_all(&self.journal)?.threads;
             let runtime_actor = OperatorActor {
                 kind: "runtime".to_string(),
@@ -840,14 +848,27 @@ impl OperatorSessionService {
             .map_err(|_| anyhow!("operator session write transaction mutex poisoned"))
     }
 
-    fn lock_writer_transaction(&self) -> Result<std::sync::MutexGuard<'_, ()>> {
-        let transaction = self.lock_write_transaction()?;
+    fn lock_cross_process_transaction(&self) -> Result<File> {
+        let root = self.journal.root().to_path_buf();
+        let file = open_ownership_file(&root, OPERATOR_TRANSACTION_LOCK_FILE)
+            .map_err(anyhow::Error::new)?;
+        file.lock()
+            .map_err(|source| anyhow!(OperatorOwnershipError::Storage { root, source }))?;
+        Ok(file)
+    }
+
+    fn lock_writer_transaction(&self) -> Result<OperatorWriteTransaction<'_>> {
+        let local = self.lock_write_transaction()?;
         self.activity_lease
             .lock()
             .map_err(|_| anyhow!("operator activity lease mutex poisoned"))?
             .ensure_shared()
             .map_err(anyhow::Error::new)?;
-        Ok(transaction)
+        let cross_process = self.lock_cross_process_transaction()?;
+        Ok(OperatorWriteTransaction {
+            _cross_process: cross_process,
+            _local: local,
+        })
     }
 }
 

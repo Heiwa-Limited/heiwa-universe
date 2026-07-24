@@ -1312,4 +1312,56 @@ mod model_call {
                 && row.event.payload["client_request_id"] == "turn-approved-call"
         }));
     }
+
+    #[tokio::test]
+    async fn executor_loop_caller_never_executes_duplicate_admission() {
+        let evidence = tempfile::tempdir().unwrap();
+        let service = Arc::new(OperatorSessionService::new(
+            OperatorJournal::new(evidence.path().to_path_buf()).unwrap(),
+        ));
+        let mut admitted = StartTurnRequest::auto("turn-duplicate-call", "duplicate loop work");
+        admitted.route_policy.turn_budget_usd = Some(1.0);
+        service.start_turn("loop-thread", admitted).unwrap();
+        let sends = Arc::new(AtomicUsize::new(0));
+        let adapter = Arc::new(CountingDoneAdapter {
+            sends: sends.clone(),
+        }) as Arc<dyn ProviderAdapter>;
+        let executor = Arc::new(ModelCallExecutor::new(
+            Arc::new(move |_, _| Some(adapter.clone())),
+            service,
+        ));
+        let caller = ExecutorLoopCaller::new(executor);
+        let (_cancel_tx, cancel) = watch::channel(false);
+
+        let error = caller
+            .call(LoopCallRequest {
+                thread_id: "loop-thread".to_string(),
+                turn_id: "turn-duplicate-call".to_string(),
+                call_id: "call-duplicate".to_string(),
+                stage: ModelCallStage::Execution,
+                intent: "code".to_string(),
+                raw_text: "duplicate loop work".to_string(),
+                privacy: PrivacyClass::Standard,
+                risk: CallRisk::Low,
+                safety: SafetyClass::Approved,
+                messages: vec![Message {
+                    role: Role::User,
+                    content: "duplicate loop work".to_string(),
+                }],
+                candidates: vec![candidate(1, "primary", "model", 0.01)],
+                remaining_budget_usd: Some(1.0),
+                prior_failed_models: vec![],
+                max_attempts: 1,
+                cancel,
+            })
+            .await
+            .unwrap_err();
+
+        assert!(error.to_string().contains("duplicate"), "{error}");
+        assert_eq!(
+            sends.load(Ordering::SeqCst),
+            0,
+            "duplicate admission must not invoke provider"
+        );
+    }
 }

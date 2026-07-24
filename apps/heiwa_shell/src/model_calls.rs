@@ -519,6 +519,12 @@ impl heiwa_loop::LoopModelCaller for ExecutorLoopCaller {
             .executor
             .sessions
             .start_turn(&request.thread_id, submission)?;
+        if turn.duplicate {
+            anyhow::bail!(
+                "duplicate model call admission for existing turn {}; refusing provider execution",
+                turn.turn_id
+            );
+        }
         let result = self
             .executor
             .execute(ModelCallExecution {
