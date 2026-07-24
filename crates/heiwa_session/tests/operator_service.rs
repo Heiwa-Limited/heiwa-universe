@@ -30,6 +30,34 @@ struct RecordingEmbedder {
     rows: Mutex<Vec<(String, String, String)>>,
 }
 
+#[derive(Default)]
+struct StreamingOnlyEmbedder {
+    rows: Mutex<Vec<(String, String, String)>>,
+    lifecycle: Mutex<Vec<&'static str>>,
+}
+
+impl EmbeddingSink for StreamingOnlyEmbedder {
+    fn begin_replace(&self) -> anyhow::Result<()> {
+        self.lifecycle.lock().unwrap().push("begin");
+        self.rows.lock().unwrap().clear();
+        Ok(())
+    }
+
+    fn upsert_text(&self, thread_id: &str, event_id: &str, text: &str) -> anyhow::Result<bool> {
+        self.rows.lock().unwrap().push((
+            thread_id.to_string(),
+            event_id.to_string(),
+            text.to_string(),
+        ));
+        Ok(true)
+    }
+
+    fn finalize_replace(&self) -> anyhow::Result<()> {
+        self.lifecycle.lock().unwrap().push("finalize");
+        Ok(())
+    }
+}
+
 #[cfg(feature = "lance")]
 struct DeterministicLanceSink {
     store: Mutex<heiwa_embed::LanceVectorStore>,
@@ -79,34 +107,22 @@ impl DeterministicLanceSink {
 
 #[cfg(feature = "lance")]
 impl EmbeddingSink for DeterministicLanceSink {
-    fn upsert_text(&self, thread_id: &str, event_id: &str, _text: &str) -> anyhow::Result<()> {
+    fn begin_replace(&self) -> anyhow::Result<()> {
+        self.store
+            .lock()
+            .unwrap()
+            .rebuild_from(std::iter::empty::<heiwa_embed::EmbeddingRow>())?;
+        Ok(())
+    }
+
+    fn upsert_text(&self, thread_id: &str, event_id: &str, _text: &str) -> anyhow::Result<bool> {
         self.store.lock().unwrap().upsert(
             thread_id,
             operator_event_key(event_id),
             "deterministic-test",
             &[1.0, 0.0, 0.0, 0.0],
-        )
-    }
-
-    fn replace_texts(
-        &self,
-        texts: &[(String, String, String)],
-    ) -> Option<anyhow::Result<(usize, usize)>> {
-        let rows = texts
-            .iter()
-            .map(|(thread_id, event_id, _text)| heiwa_embed::EmbeddingRow {
-                session_id: thread_id.clone(),
-                entry_id: operator_event_key(event_id),
-                model: "deterministic-test".to_string(),
-                vector: vec![1.0, 0.0, 0.0, 0.0],
-            });
-        Some(
-            self.store
-                .lock()
-                .unwrap()
-                .rebuild_from(rows)
-                .map(|stored| (stored, 0)),
-        )
+        )?;
+        Ok(true)
     }
 }
 
@@ -130,13 +146,13 @@ impl EmbeddingSink for RecordingEmbedder {
         Ok(())
     }
 
-    fn upsert_text(&self, thread_id: &str, event_id: &str, text: &str) -> anyhow::Result<()> {
+    fn upsert_text(&self, thread_id: &str, event_id: &str, text: &str) -> anyhow::Result<bool> {
         self.rows.lock().unwrap().push((
             thread_id.to_string(),
             event_id.to_string(),
             text.to_string(),
         ));
-        Ok(())
+        Ok(true)
     }
 }
 
@@ -194,6 +210,86 @@ fn rebuild_indexes_projects_safe_text_and_only_embeds_messages() {
         2,
         "replacement removes stale embedding rows before each rebuild"
     );
+}
+
+#[test]
+fn rebuild_indexes_streams_embedding_rows_without_bulk_materialization() {
+    let evidence = tempfile::tempdir().unwrap();
+    let indexes = tempfile::tempdir().unwrap();
+    let service = test_service(evidence.path());
+    for index in 0..300 {
+        service
+            .start_turn(
+                "default",
+                StartTurnRequest::auto(
+                    format!("bounded-{index}"),
+                    format!("bounded index message {index}"),
+                ),
+            )
+            .unwrap();
+    }
+
+    let sink = StreamingOnlyEmbedder::default();
+    let report =
+        rebuild_operator_indexes_at(&service, &sink, &indexes.path().join("sessions.sqlite3"))
+            .unwrap();
+
+    assert_eq!(report.fts_rows, 300);
+    assert_eq!(report.embedded_rows, 300);
+    assert_eq!(report.embedding_failures, 0);
+    assert_eq!(sink.rows.lock().unwrap().len(), 300);
+    assert_eq!(
+        sink.lifecycle.lock().unwrap().as_slice(),
+        ["begin", "finalize"]
+    );
+}
+
+#[test]
+fn rebuild_indexes_deduplicates_event_ids_before_projecting_message_text() {
+    let evidence = tempfile::tempdir().unwrap();
+    let indexes = tempfile::tempdir().unwrap();
+    let service = test_service(evidence.path());
+    let turn = service
+        .start_turn(
+            "default",
+            StartTurnRequest::auto("dedup-index-request", "canonical message"),
+        )
+        .unwrap();
+
+    let duplicate_id = "duplicate-across-event-kinds";
+    let mut first = base_event(
+        "default",
+        Some(&turn.turn_id),
+        None,
+        OperatorEventType::AssistantStarted,
+    );
+    first.event_id = duplicate_id.to_string();
+    service.append_event(first).unwrap();
+
+    let mut repeated = base_event(
+        "default",
+        Some(&turn.turn_id),
+        None,
+        OperatorEventType::AssistantCompleted,
+    );
+    repeated.event_id = duplicate_id.to_string();
+    repeated.payload = json!({"text": "must not enter derived indexes"});
+    service.append_event(repeated).unwrap();
+
+    let sink = RecordingEmbedder::default();
+    let index_path = indexes.path().join("sessions.sqlite3");
+    let report = rebuild_operator_indexes_at(&service, &sink, &index_path).unwrap();
+
+    assert_eq!(report.fts_rows, 1);
+    assert_eq!(report.embedded_rows, 1);
+    assert!(heiwa_session::operator_index::search_session_messages_at(
+        &index_path,
+        Some("default"),
+        "\"derived indexes\"",
+        10,
+    )
+    .unwrap()
+    .is_empty());
 }
 
 #[cfg(feature = "lance")]

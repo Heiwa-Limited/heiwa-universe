@@ -379,6 +379,9 @@ pub struct OperatorSessionService {
     /// deliberately separate from the journal's own append lock, so replay
     /// and materialization never wait behind a slow writer.
     write_transaction: Mutex<()>,
+    /// Disposable cursor-caught-up fold. JSONL remains authority; this state
+    /// can always reset and rebuild after cursor lineage changes.
+    projection: Mutex<MaterializedJournal>,
 }
 
 struct OperatorWriteTransaction<'a> {
@@ -394,6 +397,7 @@ impl OperatorSessionService {
             journal,
             activity_lease: Mutex::new(activity_lease),
             write_transaction: Mutex::new(()),
+            projection: Mutex::new(MaterializedJournal::default()),
         }
     }
 
@@ -405,8 +409,8 @@ impl OperatorSessionService {
     /// duplicate lifecycle rows inside one runtime process.
     pub fn ensure_thread(&self, thread_id: &str) -> Result<bool> {
         let _write_transaction = self.lock_writer_transaction()?;
-        let threads = materialize_all(&self.journal)?.threads;
-        if threads.contains_key(thread_id) {
+        let projection = self.materialized()?;
+        if projection.threads.contains_key(thread_id) {
             return Ok(false);
         }
         let event = new_event(
@@ -464,7 +468,8 @@ impl OperatorSessionService {
         }
 
         let _write_transaction = self.lock_writer_transaction()?;
-        let threads = materialize_all(&self.journal)?.threads;
+        let projection = self.materialized()?;
+        let threads = &projection.threads;
 
         if let Some(folded) = threads.get(thread_id) {
             if let Some(turn) = folded.turns.iter().find(|turn| {
@@ -569,8 +574,8 @@ impl OperatorSessionService {
     /// rejected event never reaches the journal.
     pub fn append_event(&self, event: OperatorEvent) -> Result<CursorEvent> {
         let _write_transaction = self.lock_writer_transaction()?;
-        let threads = materialize_all(&self.journal)?.threads;
-        validate_event(&threads, &event)?;
+        let projection = self.materialized()?;
+        validate_event(&projection.threads, &event)?;
         self.journal.append(&event)
     }
 
@@ -655,6 +660,17 @@ impl OperatorSessionService {
         })
     }
 
+    /// Crate-internal global page for rebuildable projections. Domain clients
+    /// use thread-filtered `events_after`; index rebuilds need one bounded
+    /// append-order pass across the canonical stream.
+    pub(crate) fn journal_page_after(
+        &self,
+        cursor: Option<&str>,
+        limit: usize,
+    ) -> std::result::Result<OperatorPage, CursorError> {
+        self.journal.read_after(cursor, limit)
+    }
+
     /// Scan the operator journal once for durable artifact links.
     ///
     /// Artifact reconciliation deliberately asks the journal rather than
@@ -706,10 +722,10 @@ impl OperatorSessionService {
     /// stream-wide journal damage (see [`OperatorThreadView::skipped_lines`])
     /// and is reported even on the empty-thread branch.
     pub fn thread(&self, thread_id: &str) -> Result<OperatorThreadView> {
-        let materialized = materialize_all(&self.journal)?;
+        let materialized = self.materialized()?;
         Ok(match materialized.threads.get(thread_id) {
             Some(folded) => folded.to_view(
-                materialized.skipped_lines,
+                materialized.skipped_lines(),
                 materialized
                     .unsupported_schema_events
                     .get(thread_id)
@@ -734,7 +750,7 @@ impl OperatorSessionService {
                         .get(thread_id)
                         .copied()
                         .unwrap_or(0),
-                skipped_lines: materialized.skipped_lines,
+                skipped_lines: materialized.skipped_lines(),
             },
         })
     }
@@ -742,8 +758,8 @@ impl OperatorSessionService {
     /// Summaries of the most recently active threads, most recent first,
     /// bounded to `limit`.
     pub fn list_threads(&self, limit: usize) -> Result<Vec<OperatorThreadSummary>> {
-        let threads = materialize_all(&self.journal)?.threads;
-        let mut folded: Vec<&FoldedThread> = threads.values().collect();
+        let materialized = self.materialized()?;
+        let mut folded: Vec<&FoldedThread> = materialized.threads.values().collect();
         folded.sort_by_key(|thread| std::cmp::Reverse(thread.last_order));
         Ok(folded
             .into_iter()
@@ -766,14 +782,15 @@ impl OperatorSessionService {
             .map_err(|_| anyhow!("operator activity lease mutex poisoned"))?;
         activity_lease.with_exclusive(|| {
             let _cross_process_transaction = self.lock_cross_process_transaction()?;
-            let threads = materialize_all(&self.journal)?.threads;
+            let projection = self.materialized()?;
+            let threads = &projection.threads;
             let runtime_actor = OperatorActor {
                 kind: "runtime".to_string(),
                 id: "heiwa-core".to_string(),
             };
 
             let mut closed = 0usize;
-            for (thread_id, folded) in &threads {
+            for (thread_id, folded) in threads {
                 for turn in &folded.turns {
                     if is_turn_terminal(&turn.status) {
                         continue;
@@ -811,8 +828,9 @@ impl OperatorSessionService {
         turn_id: &str,
     ) -> Result<Option<CursorEvent>> {
         let _write_transaction = self.lock_writer_transaction()?;
-        let threads = materialize_all(&self.journal)?.threads;
-        let Some(turn) = threads
+        let projection = self.materialized()?;
+        let Some(turn) = projection
+            .threads
             .get(thread_id)
             .and_then(|thread| thread.turns.iter().find(|turn| turn.turn_id == turn_id))
         else {
@@ -869,6 +887,15 @@ impl OperatorSessionService {
             _cross_process: cross_process,
             _local: local,
         })
+    }
+
+    fn materialized(&self) -> Result<std::sync::MutexGuard<'_, MaterializedJournal>> {
+        let mut projection = self
+            .projection
+            .lock()
+            .map_err(|_| anyhow!("operator materialized projection mutex poisoned"))?;
+        sync_materialized(&self.journal, &mut projection)?;
+        Ok(projection)
     }
 }
 
@@ -1319,7 +1346,7 @@ impl FoldedThread {
 
 /// Result of folding the whole journal: per-thread projections plus the
 /// stream-wide count of journal-level damage encountered along the way.
-#[derive(Debug)]
+#[derive(Debug, Default)]
 struct MaterializedJournal {
     threads: HashMap<String, FoldedThread>,
     /// Parsed but unsupported-schema events, tracked by their declared
@@ -1329,12 +1356,29 @@ struct MaterializedJournal {
     /// Current-schema rows rejected by event-specific replay validation.
     /// They remain diagnostics, not valid thread state or recency.
     rejected_current_schema_events: HashMap<String, usize>,
-    /// Deduplicated count of damaged journal lines (see
-    /// [`OperatorThreadView::skipped_lines`] for what qualifies).
-    skipped_lines: usize,
+    /// Event IDs already folded at or before `cursor`.
+    seen_event_ids: HashSet<String>,
+    /// Last durable journal cursor folded into this projection.
+    cursor: Option<String>,
+    /// Monotonic event order used for thread recency.
+    order: usize,
+    /// Damaged rows preceding a durable event.
+    committed_skipped_lines: usize,
+    /// Damaged rows after the current cursor. Replaced, not accumulated,
+    /// until a later event moves them into the committed prefix.
+    tail_skipped_lines: usize,
+    /// Diagnostic proving catch-up work is incremental in tests.
+    applied_event_rows: usize,
 }
 
-/// Fold the entire operator journal into per-thread state.
+impl MaterializedJournal {
+    fn skipped_lines(&self) -> usize {
+        self.committed_skipped_lines
+            .saturating_add(self.tail_skipped_lines)
+    }
+}
+
+/// Catch a disposable projection up from its last durable cursor.
 ///
 /// Applies, in append order: reader-side dedup of repeated `event_id`
 /// values, skip-and-count for unsupported schema versions, and skip-and-
@@ -1342,55 +1386,62 @@ struct MaterializedJournal {
 /// terminal. Journal-level damage (lines that never parse as events) is
 /// accumulated separately into `skipped_lines`. Never fails on content —
 /// only a genuine I/O/storage error from the underlying journal
-/// propagates.
-fn materialize_all(journal: &OperatorJournal) -> Result<MaterializedJournal> {
+/// propagates. Unknown cursor lineage resets the derived fold and rebuilds
+/// from stream start; callers' externally supplied cursors still receive the
+/// journal's structured invalid-cursor error through `events_after`.
+fn sync_materialized(
+    journal: &OperatorJournal,
+    projection: &mut MaterializedJournal,
+) -> Result<()> {
     const PAGE_SIZE: usize = 256;
-    let mut threads: HashMap<String, FoldedThread> = HashMap::new();
-    let mut unsupported_schema_events: HashMap<String, usize> = HashMap::new();
-    let mut rejected_current_schema_events: HashMap<String, usize> = HashMap::new();
-    let mut seen_event_ids: HashSet<String> = HashSet::new();
-    let mut cursor: Option<String> = None;
-    let mut order = 0usize;
-    let mut skipped_lines = 0usize;
-    // Whether the previous page returned events but fewer than PAGE_SIZE.
-    // Such a page stopped at end-of-stream (or a torn tail), meaning it
-    // already inspected — and counted — every damaged line between its
-    // last event and the end of the file. The journal cursor only advances
-    // to the last *event*, so the follow-up read that terminates this loop
-    // re-inspects exactly that trailing span; folding its count in again
-    // would double-count the same damage.
-    let mut prev_page_was_short = false;
-
     loop {
-        let page = journal.read_after(cursor.as_deref(), PAGE_SIZE)?;
-        if page.events.is_empty() {
-            if !prev_page_was_short {
-                skipped_lines += page.skipped_lines;
+        let page = match journal.read_after(projection.cursor.as_deref(), PAGE_SIZE) {
+            Ok(page) => page,
+            Err(CursorError::InvalidCursor { .. }) if projection.cursor.is_some() => {
+                *projection = MaterializedJournal::default();
+                continue;
             }
+            Err(error) => return Err(anyhow!(error)),
+        };
+        if page.events.is_empty() {
+            projection.tail_skipped_lines = page.skipped_lines;
             break;
         }
-        skipped_lines += page.skipped_lines;
-        prev_page_was_short = page.events.len() < PAGE_SIZE;
+
+        // A short page may include damaged tail rows after its last event.
+        // Probe from that event cursor to separate trailing damage from the
+        // committed prefix without replaying any event bodies.
+        let mut stable_tail = None;
+        if page.events.len() < PAGE_SIZE {
+            let probe = journal.read_after(page.next_cursor.as_deref(), 1)?;
+            if probe.events.is_empty() {
+                stable_tail = Some(probe.skipped_lines);
+            }
+        }
+        let trailing = stable_tail.unwrap_or_default();
+        projection.committed_skipped_lines = projection
+            .committed_skipped_lines
+            .saturating_add(page.skipped_lines.saturating_sub(trailing));
+        projection.tail_skipped_lines = trailing;
+
         for row in &page.events {
-            order += 1;
+            projection.order = projection.order.saturating_add(1);
+            projection.applied_event_rows = projection.applied_event_rows.saturating_add(1);
             apply_event(
-                &mut threads,
-                &mut unsupported_schema_events,
-                &mut rejected_current_schema_events,
-                &mut seen_event_ids,
+                &mut projection.threads,
+                &mut projection.unsupported_schema_events,
+                &mut projection.rejected_current_schema_events,
+                &mut projection.seen_event_ids,
                 row,
-                order,
+                projection.order,
             );
         }
-        cursor = page.next_cursor.clone();
+        projection.cursor = page.next_cursor;
+        if stable_tail.is_some() {
+            break;
+        }
     }
-
-    Ok(MaterializedJournal {
-        threads,
-        unsupported_schema_events,
-        rejected_current_schema_events,
-        skipped_lines,
-    })
+    Ok(())
 }
 
 fn apply_event(
@@ -1707,6 +1758,50 @@ mod tests {
                 .unwrap();
             assert!(view.turns.is_empty());
         });
+    }
+
+    #[test]
+    fn materialized_projection_catches_up_without_replaying_history() {
+        let dir = tempfile::tempdir().unwrap();
+        let service =
+            OperatorSessionService::new(OperatorJournal::new(dir.path().to_path_buf()).unwrap());
+        let submission = service
+            .start_turn(
+                "default",
+                StartTurnRequest::auto("projection-once", "first message"),
+            )
+            .unwrap();
+
+        service.thread("default").unwrap();
+        let first_applied = service.projection.lock().unwrap().applied_event_rows;
+        assert_eq!(first_applied, 3);
+
+        service.thread("default").unwrap();
+        assert_eq!(
+            service.projection.lock().unwrap().applied_event_rows,
+            first_applied,
+            "a second read at the same cursor must apply zero historical rows"
+        );
+
+        service
+            .append_event(new_event(
+                "default",
+                Some(submission.turn_id),
+                None,
+                OperatorEventType::AssistantStarted,
+                now_iso(),
+                OperatorActor {
+                    kind: "runtime".into(),
+                    id: "projection-test".into(),
+                },
+                json!({}),
+            ))
+            .unwrap();
+        service.thread("default").unwrap();
+        assert_eq!(
+            service.projection.lock().unwrap().applied_event_rows,
+            first_applied + 1
+        );
     }
 
     #[test]

@@ -217,6 +217,14 @@ pub fn embed_and_store(
     }))
 }
 
+/// Clear the configured derived embedding backend before a streamed rebuild.
+pub fn clear_embeddings() -> Result<()> {
+    let config = load_config();
+    let store = VectorBackend::open_from_config(&config.embedding)?;
+    store.rebuild_from(Vec::new())?;
+    Ok(())
+}
+
 pub struct OllamaEmbeddingClient {
     client: Client,
     endpoint: String,

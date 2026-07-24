@@ -4,7 +4,8 @@ use std::fs;
 use std::path::Path;
 
 use anyhow::Result;
-use heiwa_embed::{embed_and_store, replace_embeddings_from_texts};
+use heiwa_embed::{clear_embeddings, embed_and_store};
+use heiwa_evidence::OPERATOR_EVENT_SCHEMA_VERSION;
 use rusqlite::{params, Connection};
 use sha2::{Digest, Sha256};
 
@@ -17,13 +18,12 @@ pub trait EmbeddingSink: Send + Sync {
     fn begin_replace(&self) -> Result<()> {
         Ok(())
     }
-    fn upsert_text(&self, thread_id: &str, event_id: &str, text: &str) -> Result<()>;
+    /// Returns whether a vector was stored. Disabled embedding backends return
+    /// `false` without counting as a failure.
+    fn upsert_text(&self, thread_id: &str, event_id: &str, text: &str) -> Result<bool>;
     /// Finalize replacement only after every eligible event was offered.
     fn finalize_replace(&self) -> Result<()> {
         Ok(())
-    }
-    fn replace_texts(&self, _texts: &[(String, String, String)]) -> Option<Result<(usize, usize)>> {
-        None
     }
 }
 
@@ -31,18 +31,13 @@ pub trait EmbeddingSink: Send + Sync {
 pub struct ProductionEmbeddingSink;
 
 impl EmbeddingSink for ProductionEmbeddingSink {
-    fn upsert_text(&self, thread_id: &str, event_id: &str, text: &str) -> Result<()> {
-        embed_and_store(thread_id, operator_event_key(event_id), text).map(|_| ())
+    fn begin_replace(&self) -> Result<()> {
+        clear_embeddings()
     }
-    fn replace_texts(&self, texts: &[(String, String, String)]) -> Option<Result<(usize, usize)>> {
-        let rows = texts
-            .iter()
-            .map(|(thread, event, text)| (thread.clone(), operator_event_key(event), text.clone()))
-            .collect::<Vec<_>>();
-        Some(
-            replace_embeddings_from_texts(&rows)
-                .map(|report| (report.stored_rows, report.failures)),
-        )
+
+    fn upsert_text(&self, thread_id: &str, event_id: &str, text: &str) -> Result<bool> {
+        embed_and_store(thread_id, operator_event_key(event_id), text)
+            .map(|stored| stored.is_some())
     }
 }
 
@@ -74,16 +69,29 @@ pub fn rebuild_operator_indexes_at(
     // These are derived tables. Recreate them so pre-cutover schemas cannot
     // leak legacy numeric keys into the event-keyed projection.
     tx.execute_batch(&format!(
-        "DROP TABLE IF EXISTS messages_fts; DROP TABLE IF EXISTS messages; {SCHEMA_SQL}"
+        "DROP TABLE IF EXISTS messages_fts;
+         DROP TABLE IF EXISTS messages;
+         DROP TABLE IF EXISTS indexed_operator_events;
+         {SCHEMA_SQL}"
     ))?;
 
     let mut fts_rows = 0;
-    let mut embeddings = Vec::new();
-    for thread in service.list_threads(usize::MAX)? {
-        for row in service
-            .events_after(&thread.thread_id, None, usize::MAX)?
-            .events
-        {
+    let mut embedded_rows = 0;
+    let mut embedding_failures = 0;
+    let embedding_ready = sink.begin_replace().is_ok();
+    let mut cursor = None;
+    loop {
+        let page = service.journal_page_after(cursor.as_deref(), 256)?;
+        let event_count = page.events.len();
+        let next_cursor = page.next_cursor.clone();
+        for row in page.events {
+            let inserted_event = tx.execute(
+                "INSERT OR IGNORE INTO indexed_operator_events (event_id) VALUES (?1)",
+                params![&row.event.event_id],
+            )?;
+            if inserted_event == 0 || row.event.schema_version != OPERATOR_EVENT_SCHEMA_VERSION {
+                continue;
+            }
             let Some((role, text, embed)) = event_text(&row.event) else {
                 continue;
             };
@@ -92,58 +100,46 @@ pub fn rebuild_operator_indexes_at(
                 "INSERT INTO messages (thread_id, event_id, entry_id, role, content)
                  VALUES (?1, ?2, ?3, ?4, ?5)",
                 params![
-                    row.event.thread_id,
-                    row.event.event_id,
+                    &row.event.thread_id,
+                    &row.event.event_id,
                     key as i64,
                     role,
-                    text
+                    &text
                 ],
             )?;
             tx.execute(
                 "INSERT INTO messages_fts (thread_id, event_id, entry_id, role, content)
                  VALUES (?1, ?2, ?3, ?4, ?5)",
                 params![
-                    row.event.thread_id,
-                    row.event.event_id,
+                    &row.event.thread_id,
+                    &row.event.event_id,
                     key as i64,
                     role,
-                    text
+                    &text
                 ],
             )?;
             fts_rows += 1;
             if embed {
-                embeddings.push((row.event.thread_id, row.event.event_id, text));
+                if !embedding_ready {
+                    embedding_failures += 1;
+                } else {
+                    match sink.upsert_text(&row.event.thread_id, &row.event.event_id, &text) {
+                        Ok(true) => embedded_rows += 1,
+                        Ok(false) => {}
+                        Err(_) => embedding_failures += 1,
+                    }
+                }
             }
         }
+        if event_count == 0 || next_cursor == cursor {
+            break;
+        }
+        cursor = next_cursor;
     }
     tx.commit()?;
 
-    let mut embedded_rows = 0;
-    let mut embedding_failures = 0;
-    let replacement_texts = embeddings
-        .iter()
-        .map(|(thread, event, text)| (thread.clone(), event.clone(), text.clone()))
-        .collect::<Vec<_>>();
-    if let Some(result) = sink.replace_texts(&replacement_texts) {
-        match result {
-            Ok((stored, failures)) => {
-                embedded_rows = stored;
-                embedding_failures = failures;
-            }
-            Err(_) => embedding_failures = embeddings.len(),
-        }
-    } else if sink.begin_replace().is_err() {
-        embedding_failures = embeddings.len();
-    } else {
-        for (thread_id, event_id, text) in &embeddings {
-            match sink.upsert_text(thread_id, event_id, text) {
-                Ok(()) => embedded_rows += 1,
-                Err(_) => embedding_failures += 1,
-            }
-        }
-        if sink.finalize_replace().is_err() {
-            embedding_failures += 1;
-        }
+    if embedding_ready && sink.finalize_replace().is_err() {
+        embedding_failures += 1;
     }
     Ok(IndexReport {
         fts_rows,
@@ -187,11 +183,14 @@ fn ensure_schema(conn: &Connection) -> Result<()> {
 
 const SCHEMA_SQL: &str = "CREATE TABLE IF NOT EXISTS messages (
              thread_id TEXT NOT NULL,
-             event_id TEXT NOT NULL,
+             event_id TEXT NOT NULL UNIQUE,
              entry_id INTEGER NOT NULL,
              role TEXT NOT NULL,
              content TEXT NOT NULL,
              PRIMARY KEY(thread_id, event_id)
+         );
+         CREATE TABLE IF NOT EXISTS indexed_operator_events (
+             event_id TEXT PRIMARY KEY
          );
          CREATE VIRTUAL TABLE IF NOT EXISTS messages_fts
              USING fts5(thread_id UNINDEXED, event_id UNINDEXED, entry_id UNINDEXED, role, content);";
