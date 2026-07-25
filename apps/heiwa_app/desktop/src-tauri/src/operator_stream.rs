@@ -3,7 +3,6 @@ use serde_json::Value;
 use std::time::Duration;
 use thiserror::Error;
 use tokio_tungstenite::tungstenite::client::IntoClientRequest;
-use tokio_tungstenite::tungstenite::http::header::AUTHORIZATION;
 use tokio_tungstenite::tungstenite::http::HeaderValue;
 use tokio_tungstenite::tungstenite::Message;
 
@@ -232,10 +231,33 @@ where
         let mut request = url
             .into_client_request()
             .map_err(|_| OperatorStreamError::InvalidEndpoint)?;
-        let mut authorization = HeaderValue::from_str(&format!("Bearer {token}"))
+        let parsed_url = reqwest::Url::parse(request.uri().to_string().as_str())
+            .map_err(|_| OperatorStreamError::InvalidEndpoint)?;
+        let signed = crate::proxy::signed_local_request("GET", &parsed_url, b"", token)
             .map_err(|_| OperatorStreamError::AuthNotConfigured)?;
-        authorization.set_sensitive(true);
-        request.headers_mut().insert(AUTHORIZATION, authorization);
+        let mut insert_signed_header = |name: &'static str, value: &str| {
+            let mut value =
+                HeaderValue::from_str(value).map_err(|_| OperatorStreamError::AuthNotConfigured)?;
+            value.set_sensitive(true);
+            request.headers_mut().insert(name, value);
+            Ok::<(), OperatorStreamError>(())
+        };
+        insert_signed_header(
+            heiwa_core::auth::LOCAL_REQUEST_AUTH_VERSION_HEADER,
+            &signed.version,
+        )?;
+        insert_signed_header(
+            heiwa_core::auth::LOCAL_REQUEST_AUTH_TIMESTAMP_HEADER,
+            &signed.timestamp,
+        )?;
+        insert_signed_header(
+            heiwa_core::auth::LOCAL_REQUEST_AUTH_NONCE_HEADER,
+            &signed.nonce,
+        )?;
+        insert_signed_header(
+            heiwa_core::auth::LOCAL_REQUEST_AUTH_SIGNATURE_HEADER,
+            &signed.signature,
+        )?;
 
         match tokio::time::timeout(timeouts.connect, tokio_tungstenite::connect_async(request))
             .await
@@ -755,7 +777,11 @@ mod tests {
     async fn native_operator_bridge_authenticates_and_resumes_only_durable_cursor() {
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
         let address = listener.local_addr().unwrap();
-        let requests = Arc::new(Mutex::new(Vec::<(String, String)>::new()));
+        let requests = Arc::new(Mutex::new(Vec::<(
+            String,
+            String,
+            heiwa_core::auth::LocalRequestSignature,
+        )>::new()));
         let server_requests = requests.clone();
         let server = tokio::spawn(async move {
             for attempt in 0..2 {
@@ -764,14 +790,29 @@ mod tests {
                 let mut websocket = tokio_tungstenite::accept_hdr_async(
                     stream,
                     move |request: &Request, response: Response| {
-                        captured.lock().unwrap().push((
-                            request.uri().to_string(),
+                        let header = |name: &str| {
                             request
                                 .headers()
-                                .get("authorization")
+                                .get(name)
                                 .and_then(|value| value.to_str().ok())
                                 .unwrap_or_default()
-                                .to_string(),
+                                .to_string()
+                        };
+                        captured.lock().unwrap().push((
+                            request.uri().to_string(),
+                            header("authorization"),
+                            heiwa_core::auth::LocalRequestSignature {
+                                version: header(
+                                    heiwa_core::auth::LOCAL_REQUEST_AUTH_VERSION_HEADER,
+                                ),
+                                timestamp: header(
+                                    heiwa_core::auth::LOCAL_REQUEST_AUTH_TIMESTAMP_HEADER,
+                                ),
+                                nonce: header(heiwa_core::auth::LOCAL_REQUEST_AUTH_NONCE_HEADER),
+                                signature: header(
+                                    heiwa_core::auth::LOCAL_REQUEST_AUTH_SIGNATURE_HEADER,
+                                ),
+                            },
                         ));
                         Ok(response)
                     },
@@ -829,8 +870,22 @@ mod tests {
 
         let requests = requests.lock().unwrap();
         assert_eq!(requests.len(), 2);
-        assert_eq!(requests[0].1, "Bearer native-secret-token");
-        assert_eq!(requests[1].1, "Bearer native-secret-token");
+        assert!(requests.iter().all(|request| request.1.is_empty()));
+        assert_ne!(requests[0].2.nonce, requests[1].2.nonce);
+        for (target, _, signed) in requests.iter() {
+            heiwa_core::auth::verify_local_request(
+                heiwa_core::auth::LocalRequestParts {
+                    method: "GET",
+                    port: address.port(),
+                    target,
+                    body: b"",
+                },
+                signed,
+                "native-secret-token",
+                crate::proxy::unix_timestamp_now(),
+            )
+            .expect("native WebSocket handshake signature must verify");
+        }
         assert!(requests[0].0.contains("thread_id=team%26special"));
         assert!(!requests[0].0.contains("after="));
         assert!(requests[1].0.contains("after=cursor%26A"));

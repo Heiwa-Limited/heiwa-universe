@@ -303,9 +303,12 @@ fn operator_websocket_authenticates_before_any_upgrade() {
         signed.version, signed.timestamp, signed.nonce, signed.signature,
     );
     let signed_only = websocket_handshake_with_headers(configured.port, target, &signed_headers);
-    assert_eq!(signed_only.status, 401, "{}", signed_only.head);
-    assert!(!signed_only.head.contains("101 Switching Protocols"));
-    assert_eq!(signed_only.body["error"]["code"], "unauthorized");
+    assert_eq!(signed_only.status, 101, "{}", signed_only.head);
+    assert!(signed_only.head.contains("101 Switching Protocols"));
+    let signed_replay = websocket_handshake_with_headers(configured.port, target, &signed_headers);
+    assert_eq!(signed_replay.status, 401, "{}", signed_replay.head);
+    assert!(!signed_replay.head.contains("101 Switching Protocols"));
+    assert_eq!(signed_replay.body["error"]["code"], "unauthorized");
 
     let authorized = websocket_handshake(configured.port, Some(TOKEN));
     assert_eq!(authorized.status, 101, "{}", authorized.head);

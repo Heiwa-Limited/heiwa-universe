@@ -22,6 +22,9 @@ use tokio::time::{self, Duration};
 pub(crate) const DEFAULT_PORT: u16 = 7474;
 const HEARTBEAT_TTL_SECS: i64 = 120;
 const WS_GUID: &str = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11";
+const BROWSER_BOOTSTRAP_TTL_SECONDS: i64 = 60;
+const BROWSER_SESSION_TTL_SECONDS: i64 = 8 * 60 * 60;
+const BROWSER_SESSION_COOKIE_PREFIX: &str = "heiwa_local_operator_";
 const GITHUB_RELEASES_URL: &str = "https://github.com/Strategizing/heiwa-universe/releases";
 const GITHUB_LATEST_RELEASE_API: &str =
     "https://api.github.com/repos/Strategizing/heiwa-universe/releases/latest";
@@ -755,6 +758,8 @@ async fn start(args: &[String]) -> Result<()> {
     let worker_id = format!("heiwa-app-{}", std::process::id());
     let started_at = Arc::new(chrono::Utc::now().to_rfc3339());
     let runtime_state_dir = state_dir();
+    let local_request_replays = Arc::new(Mutex::new(LocalRequestReplayCache::default()));
+    let browser_sessions = Arc::new(Mutex::new(BrowserSessionStore::default()));
 
     // The port identifies this app instance; the runtime lease prevents two
     // app servers from sharing one evidence root. Session-service activity
@@ -779,7 +784,16 @@ async fn start(args: &[String]) -> Result<()> {
     ));
 
     if !no_open {
-        open_url(&url)?;
+        let config = heiwa_core::config::RuntimeConfig::from_env();
+        if config.machine_auth_token.trim().is_empty() {
+            open_url(&url)?;
+        } else {
+            let bootstrap = browser_sessions
+                .lock()
+                .map_err(|_| anyhow!("browser session mutex poisoned"))?
+                .issue_bootstrap_at(chrono::Utc::now().timestamp());
+            open_url(&format!("{url}?heiwa_bootstrap={bootstrap}"))?;
+        }
     }
 
     println!("heiwa app start");
@@ -795,7 +809,6 @@ async fn start(args: &[String]) -> Result<()> {
     println!("  static: {}", cockpit_static_root().display());
     println!("  stop: SIGINT/SIGTERM");
 
-    let local_request_replays = Arc::new(Mutex::new(LocalRequestReplayCache::default()));
     let signal = shutdown_signal();
     tokio::pin!(signal);
 
@@ -808,8 +821,16 @@ async fn start(args: &[String]) -> Result<()> {
                 let (stream, _) = accepted?;
                 let started_at = started_at.clone();
                 let local_request_replays = local_request_replays.clone();
+                let browser_sessions = browser_sessions.clone();
                 tokio::spawn(async move {
-                    if let Err(err) = handle_connection(stream, started_at, local_request_replays).await {
+                    if let Err(err) = handle_connection(
+                        stream,
+                        started_at,
+                        local_request_replays,
+                        browser_sessions,
+                    )
+                    .await
+                    {
                         eprintln!("heiwa app connection error: {err}");
                     }
                 });
@@ -1009,6 +1030,7 @@ async fn handle_connection(
     mut stream: TcpStream,
     started_at: Arc<String>,
     local_request_replays: Arc<Mutex<LocalRequestReplayCache>>,
+    browser_sessions: Arc<Mutex<BrowserSessionStore>>,
 ) -> Result<()> {
     let local_port = stream
         .local_addr()
@@ -1023,7 +1045,15 @@ async fn handle_connection(
         let target = request_target(&request).unwrap_or("/").to_string();
         let path = request_path(&request).unwrap_or("/").to_string();
         if path == "/ws/v1/operator" {
-            if let Err(error) = operator_connection_auth_subject(&request) {
+            if let Err(error) = operator_http_auth_subject(
+                &request,
+                "GET",
+                &target,
+                b"",
+                local_port,
+                &local_request_replays,
+                &browser_sessions,
+            ) {
                 let (status, code) = operator_auth_response(error);
                 return write_response(
                     &mut stream,
@@ -1044,6 +1074,31 @@ async fn handle_connection(
     let target = request_target(&request).unwrap_or("/");
     let path = request_path(&request).unwrap_or("/");
     let body = String::from_utf8_lossy(&body_bytes).to_string();
+    if method == "GET" && path == "/" {
+        if let Some(bootstrap) = query_param(target, "heiwa_bootstrap") {
+            let session = browser_sessions
+                .lock()
+                .map_err(|_| anyhow!("browser session mutex poisoned"))?
+                .consume_bootstrap_at(&bootstrap, chrono::Utc::now().timestamp());
+            return match session {
+                Some(session) => {
+                    write_browser_session_redirect(&mut stream, &session, local_port).await
+                }
+                None => {
+                    write_response(
+                        &mut stream,
+                        401,
+                        "application/json",
+                        json!({"ok": false, "error": {"code": "invalid_browser_bootstrap"}})
+                            .to_string()
+                            .into_bytes(),
+                        false,
+                    )
+                    .await
+                }
+            };
+        }
+    }
     if method == "OPTIONS" {
         return write_response(&mut stream, 204, "text/plain", Vec::new(), false).await;
     }
@@ -1057,6 +1112,7 @@ async fn handle_connection(
             &body_bytes,
             local_port,
             &local_request_replays,
+            &browser_sessions,
         ) {
             let (status, code) = operator_auth_response(error);
             return write_response(
@@ -1373,6 +1429,76 @@ fn is_runtime_authenticated_request(method: &str, path: &str) -> bool {
 const MAX_LOCAL_REQUEST_NONCES: usize = 4096;
 
 #[derive(Default)]
+struct BrowserSessionStore {
+    bootstraps: HashMap<String, i64>,
+    sessions: HashMap<String, i64>,
+}
+
+impl BrowserSessionStore {
+    fn issue_bootstrap_at(&mut self, now: i64) -> String {
+        self.retain_fresh(now);
+        loop {
+            let token = uuid::Uuid::new_v4().simple().to_string();
+            if self
+                .bootstraps
+                .insert(
+                    token.clone(),
+                    now.saturating_add(BROWSER_BOOTSTRAP_TTL_SECONDS),
+                )
+                .is_none()
+            {
+                return token;
+            }
+        }
+    }
+
+    fn consume_bootstrap_at(&mut self, bootstrap: &str, now: i64) -> Option<String> {
+        self.retain_fresh(now);
+        let expires_at = self.bootstraps.remove(bootstrap)?;
+        if expires_at < now {
+            return None;
+        }
+        loop {
+            let session = uuid::Uuid::new_v4().simple().to_string();
+            if self
+                .sessions
+                .insert(
+                    session.clone(),
+                    now.saturating_add(BROWSER_SESSION_TTL_SECONDS),
+                )
+                .is_none()
+            {
+                return Some(session);
+            }
+        }
+    }
+
+    fn authenticates_cookie_at(&mut self, cookie_header: &str, now: i64, port: u16) -> bool {
+        self.retain_fresh(now);
+        let expected_name = browser_session_cookie_name(port);
+        cookie_header.split(';').map(str::trim).any(|segment| {
+            let Some((name, value)) = segment.split_once('=') else {
+                return false;
+            };
+            name == expected_name
+                && self
+                    .sessions
+                    .get(value)
+                    .is_some_and(|expires_at| *expires_at >= now)
+        })
+    }
+
+    fn retain_fresh(&mut self, now: i64) {
+        self.bootstraps.retain(|_, expires_at| *expires_at >= now);
+        self.sessions.retain(|_, expires_at| *expires_at >= now);
+    }
+}
+
+fn browser_session_cookie_name(port: u16) -> String {
+    format!("{BROWSER_SESSION_COOKIE_PREFIX}{port}")
+}
+
+#[derive(Default)]
 struct LocalRequestReplayCache {
     nonces: HashMap<String, i64>,
 }
@@ -1396,19 +1522,6 @@ impl LocalRequestReplayCache {
     }
 }
 
-fn operator_connection_auth_subject(
-    request: &str,
-) -> std::result::Result<heiwa_core::auth::AuthSubject, OperatorAuthError> {
-    let config = heiwa_core::config::RuntimeConfig::from_env();
-    if config.machine_auth_token.trim().is_empty() && config.jwt_signing_secret.trim().is_empty() {
-        return Err(OperatorAuthError::NotConfigured);
-    }
-    let cookie = header_value(request, "cookie");
-    let authorization = header_value(request, "authorization");
-    heiwa_core::auth::extract_auth_subject(cookie.as_deref(), authorization.as_deref(), &config)
-        .map_err(|_| OperatorAuthError::Unauthorized)
-}
-
 fn operator_http_auth_subject(
     request: &str,
     method: &str,
@@ -1416,10 +1529,20 @@ fn operator_http_auth_subject(
     body: &[u8],
     local_port: u16,
     local_request_replays: &Mutex<LocalRequestReplayCache>,
+    browser_sessions: &Mutex<BrowserSessionStore>,
 ) -> std::result::Result<heiwa_core::auth::AuthSubject, OperatorAuthError> {
     let config = heiwa_core::config::RuntimeConfig::from_env();
     if config.machine_auth_token.trim().is_empty() && config.jwt_signing_secret.trim().is_empty() {
         return Err(OperatorAuthError::NotConfigured);
+    }
+    let cookie =
+        strict_header_value(request, "cookie").map_err(|_| OperatorAuthError::Unauthorized)?;
+    if cookie.is_some_and(|cookie| {
+        browser_sessions.lock().ok().is_some_and(|mut sessions| {
+            sessions.authenticates_cookie_at(&cookie, chrono::Utc::now().timestamp(), local_port)
+        })
+    }) {
+        return Ok(heiwa_core::auth::AuthSubject::Operator);
     }
     match local_request_signature_headers(request) {
         Ok(Some(signed)) => {
@@ -2626,11 +2749,43 @@ async fn write_response(
     body: Vec<u8>,
     head_only: bool,
 ) -> Result<()> {
+    write_response_with_headers(stream, status, content_type, body, head_only, &[]).await
+}
+
+async fn write_browser_session_redirect(
+    stream: &mut TcpStream,
+    session: &str,
+    port: u16,
+) -> Result<()> {
+    let cookie = format!(
+        "{}={session}; HttpOnly; SameSite=Strict; Path=/; Max-Age={BROWSER_SESSION_TTL_SECONDS}",
+        browser_session_cookie_name(port),
+    );
+    write_response_with_headers(
+        stream,
+        303,
+        "text/plain",
+        Vec::new(),
+        false,
+        &[("Location", "/"), ("Set-Cookie", &cookie)],
+    )
+    .await
+}
+
+async fn write_response_with_headers(
+    stream: &mut TcpStream,
+    status: u16,
+    content_type: &str,
+    body: Vec<u8>,
+    head_only: bool,
+    extra_headers: &[(&str, &str)],
+) -> Result<()> {
     let status_text = match status {
         200 => "OK",
         201 => "Created",
         202 => "Accepted",
         204 => "No Content",
+        303 => "See Other",
         400 => "Bad Request",
         401 => "Unauthorized",
         404 => "Not Found",
@@ -2640,18 +2795,25 @@ async fn write_response(
         503 => "Service Unavailable",
         _ => "OK",
     };
-    let header = format!(
+    let mut header = format!(
         "HTTP/1.1 {status} {status_text}\r\n\
          Content-Length: {}\r\n\
          Content-Type: {content_type}\r\n\
          Cache-Control: no-store\r\n\
+         Referrer-Policy: no-referrer\r\n\
          Access-Control-Allow-Origin: *\r\n\
-         Access-Control-Allow-Headers: content-type, authorization\r\n\
+         Access-Control-Allow-Headers: content-type, authorization, x-heiwa-local-auth-version, x-heiwa-local-auth-timestamp, x-heiwa-local-auth-nonce, x-heiwa-local-auth-signature\r\n\
          Access-Control-Allow-Methods: GET, POST, OPTIONS\r\n\
-         Connection: close\r\n\
-         \r\n",
+         Connection: close\r\n",
         body.len()
     );
+    for (name, value) in extra_headers {
+        header.push_str(name);
+        header.push_str(": ");
+        header.push_str(value);
+        header.push_str("\r\n");
+    }
+    header.push_str("\r\n");
     stream.write_all(header.as_bytes()).await?;
     if !head_only {
         stream.write_all(&body).await?;
@@ -4727,6 +4889,87 @@ mod app_readmodel_tests {
     use heiwa_evidence::OperatorJournal;
     use heiwa_session::operator::{OperatorSessionService, StartTurnRequest};
     use tokio::sync::broadcast;
+
+    #[test]
+    fn browser_bootstrap_is_single_use_and_issues_expiring_http_only_session() {
+        let mut sessions = BrowserSessionStore::default();
+        let bootstrap = sessions.issue_bootstrap_at(1_000);
+        let session = sessions
+            .consume_bootstrap_at(&bootstrap, 1_001)
+            .expect("fresh bootstrap must issue one browser session");
+
+        assert!(sessions.consume_bootstrap_at(&bootstrap, 1_001).is_none());
+        let cookie_name = browser_session_cookie_name(7474);
+        assert!(sessions.authenticates_cookie_at(
+            &format!("other=1; {cookie_name}={session}"),
+            1_001,
+            7474,
+        ));
+        assert!(!sessions.authenticates_cookie_at(
+            &format!("{cookie_name}={session}"),
+            1_001,
+            7475,
+        ));
+        assert!(!sessions.authenticates_cookie_at(
+            &format!("{cookie_name}={session}"),
+            1_001 + BROWSER_SESSION_TTL_SECONDS + 1,
+            7474,
+        ));
+    }
+
+    #[tokio::test]
+    async fn browser_bootstrap_http_redirect_hides_capability_and_sets_port_cookie() {
+        async fn request_once(
+            target: String,
+            browser_sessions: Arc<Mutex<BrowserSessionStore>>,
+        ) -> String {
+            let listener = TcpListener::bind(("127.0.0.1", 0)).await.unwrap();
+            let address = listener.local_addr().unwrap();
+            let client = tokio::spawn(async move {
+                let mut client = TcpStream::connect(address).await.unwrap();
+                client
+                    .write_all(
+                        format!(
+                            "GET {target} HTTP/1.1\r\nHost: {address}\r\nConnection: close\r\n\r\n"
+                        )
+                        .as_bytes(),
+                    )
+                    .await
+                    .unwrap();
+                let mut response = Vec::new();
+                client.read_to_end(&mut response).await.unwrap();
+                String::from_utf8(response).unwrap()
+            });
+            let (server, _) = listener.accept().await.unwrap();
+            handle_connection(
+                server,
+                Arc::new("2026-07-24T00:00:00Z".to_string()),
+                Arc::new(Mutex::new(LocalRequestReplayCache::default())),
+                browser_sessions,
+            )
+            .await
+            .unwrap();
+            client.await.unwrap()
+        }
+
+        let browser_sessions = Arc::new(Mutex::new(BrowserSessionStore::default()));
+        let bootstrap = browser_sessions
+            .lock()
+            .unwrap()
+            .issue_bootstrap_at(chrono::Utc::now().timestamp());
+        let target = format!("/?heiwa_bootstrap={bootstrap}");
+        let accepted = request_once(target.clone(), browser_sessions.clone()).await;
+        assert!(accepted.starts_with("HTTP/1.1 303 See Other\r\n"));
+        assert!(accepted.contains("\r\nLocation: /\r\n"));
+        assert!(accepted.contains("Set-Cookie: heiwa_local_operator_"));
+        assert!(accepted.contains("; HttpOnly; SameSite=Strict; Path=/; Max-Age="));
+        assert!(!accepted.contains(&bootstrap));
+
+        let replay = request_once(target, browser_sessions).await;
+        assert!(replay.starts_with("HTTP/1.1 401 Unauthorized\r\n"));
+        assert!(replay.contains("invalid_browser_bootstrap"));
+        assert!(!replay.contains(&bootstrap));
+    }
 
     #[test]
     fn runtime_auth_classifier_defaults_api_mutations_closed() {

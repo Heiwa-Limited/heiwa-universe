@@ -3334,6 +3334,7 @@ name = "heiwa-desktop"
 version = "0.1.0"
 dependencies = [
  "futures-util",
+ "heiwa-core",
  "reqwest 0.12.28",
  "serde",
  "serde_json",
@@ -3342,6 +3343,7 @@ dependencies = [
  "thiserror 2.0.18",
  "tokio",
  "tokio-tungstenite",
+ "uuid",
 ]
 
 [[package]]

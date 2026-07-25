@@ -3,6 +3,7 @@ export type ApiError = { status: number; message: string };
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const res = await fetch(path, {
     ...init,
+    credentials: "same-origin",
     headers: { "Content-Type": "application/json", ...(init?.headers ?? {}) },
   });
   if (!res.ok) {
@@ -42,6 +43,7 @@ export async function postSse(
 ): Promise<void> {
   const res = await fetch(path, {
     method: "POST",
+    credentials: "same-origin",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(body),
     signal: signal ?? null,

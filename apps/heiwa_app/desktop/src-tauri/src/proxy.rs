@@ -1,9 +1,11 @@
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::env;
+use std::time::{SystemTime, UNIX_EPOCH};
 use thiserror::Error;
 
 const DEFAULT_RUNTIME_PORT: &str = "7474";
+const MAX_RUNTIME_RESPONSE_BYTES: usize = 2 * 1024 * 1024;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(tag = "kind", content = "detail")]
@@ -23,6 +25,8 @@ pub enum ProxyError {
     InvalidEndpoint,
     #[error("runtime response contained protected authentication material")]
     ProtectedMaterial,
+    #[error("runtime response too large")]
+    ResponseTooLarge,
     #[error("runtime offline: {0}")]
     Offline(String),
     #[error("runtime returned HTTP {status}: {body}")]
@@ -43,6 +47,7 @@ impl From<ProxyError> for ApiErrorPayload {
             ProxyError::ProtectedMaterial => Self::Decode(
                 "runtime response contained protected authentication material".to_string(),
             ),
+            ProxyError::ResponseTooLarge => Self::Decode("runtime response too large".to_string()),
             ProxyError::Offline(message) => Self::Offline(message),
             ProxyError::Http { status, body } => Self::Http { status, body },
             ProxyError::Decode(message) => Self::Decode(message),
@@ -116,7 +121,7 @@ pub(crate) fn validate_loopback_url(
     Ok(url)
 }
 
-fn endpoint_url(base_url: &str, path: &str) -> Result<String, ProxyError> {
+fn endpoint_url(base_url: &str, path: &str) -> Result<reqwest::Url, ProxyError> {
     if !path.starts_with("/api/v1/") && path != "/status/health" {
         return Err(ProxyError::InvalidPath(path.to_string()));
     }
@@ -126,7 +131,7 @@ fn endpoint_url(base_url: &str, path: &str) -> Result<String, ProxyError> {
     }
     let final_url = base.join(path).map_err(|_| ProxyError::InvalidEndpoint)?;
     validate_loopback_url(final_url.as_str(), "http")?;
-    Ok(final_url.to_string())
+    Ok(final_url)
 }
 
 pub(crate) fn value_contains_secret(value: &Value, secret: &str) -> bool {
@@ -165,6 +170,86 @@ fn authenticated_http_client() -> Result<reqwest::Client, ProxyError> {
         .map_err(|_| ProxyError::Offline("runtime client unavailable".to_string()))
 }
 
+pub(crate) fn signed_local_request(
+    method: &str,
+    url: &reqwest::Url,
+    body: &[u8],
+    token: &str,
+) -> Result<heiwa_core::auth::LocalRequestSignature, ProxyError> {
+    validate_auth_token(token)?;
+    let port = url.port().ok_or(ProxyError::InvalidEndpoint)?;
+    let target = match url.query() {
+        Some(query) => format!("{}?{query}", url.path()),
+        None => url.path().to_string(),
+    };
+    let timestamp = unix_timestamp_now();
+    heiwa_core::auth::sign_local_request(
+        heiwa_core::auth::LocalRequestParts {
+            method,
+            port,
+            target: &target,
+            body,
+        },
+        timestamp,
+        &uuid::Uuid::new_v4().simple().to_string(),
+        token,
+    )
+    .map_err(|_| ProxyError::AuthNotConfigured)
+}
+
+pub(crate) fn unix_timestamp_now() -> i64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs() as i64
+}
+
+fn add_signed_headers(
+    request: reqwest::RequestBuilder,
+    signed: &heiwa_core::auth::LocalRequestSignature,
+) -> Result<reqwest::RequestBuilder, ProxyError> {
+    let mut signature = reqwest::header::HeaderValue::from_str(&signed.signature)
+        .map_err(|_| ProxyError::AuthNotConfigured)?;
+    signature.set_sensitive(true);
+    Ok(request
+        .header(
+            heiwa_core::auth::LOCAL_REQUEST_AUTH_VERSION_HEADER,
+            &signed.version,
+        )
+        .header(
+            heiwa_core::auth::LOCAL_REQUEST_AUTH_TIMESTAMP_HEADER,
+            &signed.timestamp,
+        )
+        .header(
+            heiwa_core::auth::LOCAL_REQUEST_AUTH_NONCE_HEADER,
+            &signed.nonce,
+        )
+        .header(
+            heiwa_core::auth::LOCAL_REQUEST_AUTH_SIGNATURE_HEADER,
+            signature,
+        ))
+}
+
+async fn bounded_response_text(response: reqwest::Response) -> Result<String, ProxyError> {
+    if response
+        .content_length()
+        .is_some_and(|length| length > MAX_RUNTIME_RESPONSE_BYTES as u64)
+    {
+        return Err(ProxyError::ResponseTooLarge);
+    }
+    let mut bytes = Vec::new();
+    let mut stream = response.bytes_stream();
+    while let Some(chunk) = futures_util::StreamExt::next(&mut stream).await {
+        let chunk =
+            chunk.map_err(|_| ProxyError::Offline("runtime response failed".to_string()))?;
+        if bytes.len().saturating_add(chunk.len()) > MAX_RUNTIME_RESPONSE_BYTES {
+            return Err(ProxyError::ResponseTooLarge);
+        }
+        bytes.extend_from_slice(&chunk);
+    }
+    String::from_utf8(bytes).map_err(|error| ProxyError::Decode(error.to_string()))
+}
+
 pub(crate) async fn api_get_with_auth(
     base_url: &str,
     path: &str,
@@ -172,17 +257,13 @@ pub(crate) async fn api_get_with_auth(
 ) -> Result<Value, ProxyError> {
     validate_auth_token(token)?;
     let url = endpoint_url(base_url, path)?;
-    let response = authenticated_http_client()?
-        .get(&url)
-        .bearer_auth(token)
+    let signed = signed_local_request("GET", &url, b"", token)?;
+    let response = add_signed_headers(authenticated_http_client()?.get(url), &signed)?
         .send()
         .await
         .map_err(|_| ProxyError::Offline("runtime request failed".to_string()))?;
     let status = response.status();
-    let body = response
-        .text()
-        .await
-        .map_err(|_| ProxyError::Offline("runtime response failed".to_string()))?;
+    let body = bounded_response_text(response).await?;
     let decoded = decode_protected_json(&body);
     reject_protected_response(&body, decoded.as_ref().ok(), token)?;
     if !status.is_success() {
@@ -202,18 +283,20 @@ pub(crate) async fn api_post_with_auth(
 ) -> Result<Value, ProxyError> {
     validate_auth_token(token)?;
     let url = endpoint_url(base_url, path)?;
-    let response = authenticated_http_client()?
-        .post(&url)
-        .bearer_auth(token)
-        .json(&body)
-        .send()
-        .await
-        .map_err(|_| ProxyError::Offline("runtime request failed".to_string()))?;
+    let body = serde_json::to_vec(&body).map_err(|error| ProxyError::Decode(error.to_string()))?;
+    let signed = signed_local_request("POST", &url, &body, token)?;
+    let response = add_signed_headers(
+        authenticated_http_client()?
+            .post(url)
+            .header(reqwest::header::CONTENT_TYPE, "application/json")
+            .body(body),
+        &signed,
+    )?
+    .send()
+    .await
+    .map_err(|_| ProxyError::Offline("runtime request failed".to_string()))?;
     let status = response.status();
-    let text = response
-        .text()
-        .await
-        .map_err(|_| ProxyError::Offline("runtime response failed".to_string()))?;
+    let text = bounded_response_text(response).await?;
     let decoded = decode_protected_json(&text);
     reject_protected_response(&text, decoded.as_ref().ok(), token)?;
     if !status.is_success() {
@@ -299,7 +382,9 @@ mod tests {
                 "HTTP/1.1 {status}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
                 body.len()
             );
-            stream.write_all(response.as_bytes()).unwrap();
+            // Oversized-response tests intentionally let the bounded client
+            // close before the stub finishes writing.
+            let _ = stream.write_all(response.as_bytes());
         });
         format!("http://{addr}")
     }
@@ -380,15 +465,15 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn native_get_and_post_send_machine_authorization() {
+    async fn native_get_and_post_send_signed_machine_requests_without_bearer() {
         let (get_base, get_request) = inspecting_stub_server("200 OK", r#"{"ok":true}"#);
         api_get_with_auth(&get_base, "/api/v1/operator/threads", "desktop-token")
             .await
             .expect("authorized get");
-        assert!(get_request
-            .recv()
-            .expect("get request")
-            .contains("authorization: Bearer desktop-token"));
+        let get_request = get_request.recv().expect("get request");
+        assert!(!get_request.to_ascii_lowercase().contains("authorization:"));
+        assert!(get_request.contains("x-heiwa-local-auth-version: 1"));
+        assert!(get_request.contains("x-heiwa-local-auth-signature:"));
 
         let (post_base, post_request) = inspecting_stub_server("200 OK", r#"{"ok":true}"#);
         api_post_with_auth(
@@ -399,10 +484,20 @@ mod tests {
         )
         .await
         .expect("authorized post");
-        assert!(post_request
-            .recv()
-            .expect("post request")
-            .contains("authorization: Bearer desktop-token"));
+        let post_request = post_request.recv().expect("post request");
+        assert!(!post_request.to_ascii_lowercase().contains("authorization:"));
+        assert!(post_request.contains("x-heiwa-local-auth-version: 1"));
+        assert!(post_request.contains("x-heiwa-local-auth-signature:"));
+    }
+
+    #[tokio::test]
+    async fn authenticated_http_rejects_response_bodies_over_two_mibibytes() {
+        let body = serde_json::to_string(&"x".repeat(2 * 1024 * 1024)).unwrap();
+        let base = owned_stub_server("200 OK", body);
+        let error = api_get_with_auth(&base, "/api/v1/operator/threads", "bounded-response-token")
+            .await
+            .expect_err("oversized response must be rejected before JSON projection");
+        assert_eq!(error.to_string(), "runtime response too large");
     }
 
     #[tokio::test]
@@ -489,7 +584,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn authenticated_http_never_follows_redirects_with_bearer_token() {
+    async fn authenticated_http_never_follows_redirects_with_machine_auth() {
         use tokio::io::{AsyncReadExt, AsyncWriteExt};
         use tokio::net::TcpListener as TokioTcpListener;
 
@@ -589,10 +684,11 @@ mod tests {
             .status()
             .expect("run isolated proxy child");
         assert!(status.success(), "isolated proxy child failed");
-        assert!(direct_request
+        let request = direct_request
             .recv_timeout(std::time::Duration::from_secs(1))
-            .expect("direct server request")
-            .contains("authorization: Bearer proxy-secret"));
+            .expect("direct server request");
+        assert!(!request.to_ascii_lowercase().contains("authorization:"));
+        assert!(request.contains("x-heiwa-local-auth-signature:"));
         assert!(
             !decoy_rx.recv().unwrap(),
             "system proxy received a connection"
