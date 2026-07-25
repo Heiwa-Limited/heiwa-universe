@@ -238,6 +238,57 @@ describe("OperatorStore", () => {
     expect(store.snapshot().messages).toHaveLength(0);
   });
 
+  it("skips future schemas diagnostically while advancing the durable cursor", () => {
+    const store = new OperatorStore();
+    const future = frame(
+      "future-schema",
+      "user_message",
+      { text: "must not be interpreted by the current reducer" },
+      { schema_version: 2 },
+    );
+
+    expect(store.reduce(future)).toBe(true);
+    let snapshot = store.snapshot();
+    expect(snapshot.cursor).toBe(future.cursor);
+    expect(snapshot.seenEventIds).toContain("future-schema");
+    expect(snapshot.messages).toHaveLength(0);
+    expect(snapshot.compatibility.unsupportedSchemaEvents).toBe(1);
+    expect(snapshot.compatibility.recent).toEqual([
+      {
+        kind: "unsupported_schema_version",
+        eventId: "future-schema",
+        threadId: "default",
+        cursor: future.cursor,
+        schemaVersion: 2,
+      },
+    ]);
+
+    const current = frame("current-after-future", "user_message", { text: "current schema" });
+    expect(store.reduce(current)).toBe(true);
+    snapshot = store.snapshot();
+    expect(snapshot.cursor).toBe(current.cursor);
+    expect(snapshot.messages.at(-1)?.body).toBe("current schema");
+    expect(snapshot.compatibility.unsupportedSchemaEvents).toBe(1);
+  });
+
+  it("bounds future-schema diagnostic detail without losing the total count", () => {
+    const store = new OperatorStore();
+    for (let index = 1; index <= 25; index += 1) {
+      store.reduce(frame(
+        `future-${index}`,
+        "user_message",
+        { text: "never interpreted" },
+        { schema_version: 2 },
+      ));
+    }
+
+    const compatibility = store.snapshot().compatibility;
+    expect(compatibility.unsupportedSchemaEvents).toBe(25);
+    expect(compatibility.recent).toHaveLength(20);
+    expect(compatibility.recent[0]?.eventId).toBe("future-6");
+    expect(compatibility.recent.at(-1)?.eventId).toBe("future-25");
+  });
+
   it("rejects malformed frames before cursor or dedup mutation", () => {
     const store = new OperatorStore();
     const valid = frame("not-poisoned", "user_message", { text: "accepted" });

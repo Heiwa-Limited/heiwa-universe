@@ -1,4 +1,5 @@
 import type {
+  OperatorCompatibilityDiagnostic,
   OperatorEvent,
   OperatorFrame,
   OperatorMessage,
@@ -6,7 +7,9 @@ import type {
   OperatorSnapshot,
   OperatorTurn,
 } from "./types";
-import { isOperatorEventFrame } from "./types";
+import { isOperatorEventFrame, OPERATOR_EVENT_SCHEMA_VERSION } from "./types";
+
+const MAX_COMPATIBILITY_DIAGNOSTICS = 20;
 
 type MutableState = {
   seenEventIds: Set<string>;
@@ -21,6 +24,8 @@ type MutableState = {
   blockers: Record<string, OperatorProjection>;
   transientChunksByTurn: Record<string, string[]>;
   finalizedAssistantTurns: Set<string>;
+  unsupportedSchemaEvents: number;
+  compatibilityDiagnostics: OperatorCompatibilityDiagnostic[];
 };
 
 function nullRecord<T>(): Record<string, T> {
@@ -41,6 +46,8 @@ function emptyState(): MutableState {
     blockers: nullRecord(),
     transientChunksByTurn: nullRecord(),
     finalizedAssistantTurns: new Set(),
+    unsupportedSchemaEvents: 0,
+    compatibilityDiagnostics: [],
   };
 }
 
@@ -111,6 +118,23 @@ export class OperatorStore {
     if (!event || typeof event.event_id !== "string" || this.state.seenEventIds.has(event.event_id)) return false;
     this.state.seenEventIds.add(event.event_id);
     this.state.cursor = frame.cursor;
+    if (event.schema_version !== OPERATOR_EVENT_SCHEMA_VERSION) {
+      this.state.unsupportedSchemaEvents += 1;
+      this.state.compatibilityDiagnostics.push({
+        kind: "unsupported_schema_version",
+        eventId: event.event_id,
+        threadId: event.thread_id,
+        cursor: frame.cursor,
+        schemaVersion: event.schema_version,
+      });
+      if (this.state.compatibilityDiagnostics.length > MAX_COMPATIBILITY_DIAGNOSTICS) {
+        this.state.compatibilityDiagnostics.splice(
+          0,
+          this.state.compatibilityDiagnostics.length - MAX_COMPATIBILITY_DIAGNOSTICS,
+        );
+      }
+      return true;
+    }
     this.reduceDurable(event);
     return true;
   }
@@ -132,6 +156,10 @@ export class OperatorStore {
       receipts: cloneRecord(this.state.receipts),
       blockers: cloneRecord(this.state.blockers),
       transientByTurn: joinChunkRecord(this.state.transientChunksByTurn),
+      compatibility: {
+        unsupportedSchemaEvents: this.state.unsupportedSchemaEvents,
+        recent: clone(this.state.compatibilityDiagnostics),
+      },
     };
   }
 

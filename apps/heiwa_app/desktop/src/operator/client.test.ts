@@ -69,6 +69,29 @@ function deferred<T>(): { promise: Promise<T>; resolve: (value: T) => void; reje
 }
 
 describe("OperatorClient", () => {
+  it("replays a future-schema event diagnostically and subscribes after its cursor", async () => {
+    const store = new OperatorStore();
+    const future = eventFrame(1);
+    future.event.schema_version = 2;
+    future.event.event_type = "user_message";
+    future.event.payload = { text: "must remain uninterpreted" };
+    const subscriptions: Array<{ threadId: string; after: string | null }> = [];
+    const client = new OperatorClient(store, dependencies({
+      get: vi.fn(async () => history([future], future.cursor)),
+      subscribe: vi.fn(async (threadId, after) => {
+        subscriptions.push({ threadId, after });
+      }),
+    }));
+
+    await client.start("team & ops");
+    await flushAsyncWork();
+
+    expect(subscriptions).toEqual([{ threadId: "team & ops", after: future.cursor }]);
+    expect(store.snapshot().cursor).toBe(future.cursor);
+    expect(store.snapshot().messages).toHaveLength(0);
+    expect(store.snapshot().compatibility.unsupportedSchemaEvents).toBe(1);
+  });
+
   it("replays every 500-event history page before subscribing from the final cursor", async () => {
     const firstPage = Array.from({ length: 500 }, (_, index) => eventFrame(index + 1));
     const secondPage = [eventFrame(501)];

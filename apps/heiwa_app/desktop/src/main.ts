@@ -765,10 +765,15 @@ function renderWindows(): string {
 // ═══════════════════════════════════════════════════════════════════════════
 
 function renderMessages(snapshot: OperatorSnapshot): string {
+  const compatibility = snapshot.compatibility.unsupportedSchemaEvents > 0
+    ? `<div class="operator-compat-warning" role="status">
+        Skipped ${snapshot.compatibility.unsupportedSchemaEvents} operator ${snapshot.compatibility.unsupportedSchemaEvents === 1 ? "event" : "events"} from a newer schema. Cursor progress is preserved; update Heiwa Desktop to interpret them.
+      </div>`
+    : "";
   const transients = Object.entries(snapshot.transientByTurn);
   if (snapshot.messages.length === 0 && transients.length === 0) {
     const unavailable = operatorClient.state().status === "error";
-    return `<div class="chat-empty">
+    return `${compatibility}<div class="chat-empty">
       <div class="chat-empty-icon">✦</div>
       <p>${unavailable ? "Operator stream unavailable." : "No messages yet."}</p>
     </div>`;
@@ -800,7 +805,7 @@ function renderMessages(snapshot: OperatorSnapshot): string {
     </article>
   `).join("");
 
-  return durable + streaming;
+  return compatibility + durable + streaming;
 }
 
 function renderChat(snapshot: OperatorSnapshot): string {

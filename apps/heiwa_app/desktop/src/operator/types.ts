@@ -3,6 +3,8 @@ export type OperatorActor = {
   id: string;
 };
 
+export const OPERATOR_EVENT_SCHEMA_VERSION = 1;
+
 export type OperatorEvent = {
   schema_version: number;
   event_id: string;
@@ -139,6 +141,19 @@ export type OperatorProjection = {
   payload: Record<string, unknown>;
 };
 
+export type OperatorCompatibilityDiagnostic = {
+  kind: "unsupported_schema_version";
+  eventId: string;
+  threadId: string;
+  cursor: string;
+  schemaVersion: number;
+};
+
+export type OperatorCompatibilitySummary = {
+  unsupportedSchemaEvents: number;
+  recent: OperatorCompatibilityDiagnostic[];
+};
+
 export type OperatorSnapshot = {
   seenEventIds: string[];
   cursor: string | null;
@@ -151,6 +166,7 @@ export type OperatorSnapshot = {
   receipts: Record<string, OperatorProjection>;
   blockers: Record<string, OperatorProjection>;
   transientByTurn: Record<string, string>;
+  compatibility: OperatorCompatibilitySummary;
 };
 
 function isRecord(value: unknown): value is Record<string, unknown> {
