@@ -36,10 +36,24 @@ current_surfaces=(
   scripts/audit_operator_machine.sh
   scripts/check_runtime_baseline.sh
   scripts/init_env.sh
+  apps/heiwa_shell/src
+)
+
+# Historical implementation plans/specs may describe the retired backend.
+# They are deliberately outside this active-surface gate; no other executable
+# source or current operator documentation is allowlisted.
+historical_allowlist=(
+  docs/superpowers/plans
+  docs/superpowers/specs
 )
 
 if rg -n -i 'spacetimedb|\bSTDB(_|\b)|spacetime (login|publish|start)' "${current_surfaces[@]}"; then
   echo "Current runtime surfaces still reference the retired SpacetimeDB backend." >&2
+  exit 1
+fi
+
+if ((${#historical_allowlist[@]} != 2)); then
+  echo "Backend historical allowlist changed unexpectedly." >&2
   exit 1
 fi
 

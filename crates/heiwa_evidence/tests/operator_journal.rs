@@ -385,7 +385,7 @@ fn sensitive_event_metadata_does_not_append_to_existing_stream() {
 }
 
 #[test]
-fn full_event_gate_ignores_safe_policy_key_names() {
+fn full_event_gate_accepts_explicitly_redacted_sensitive_fields() {
     let dir = tempfile::tempdir().unwrap();
     let journal = OperatorJournal::new(dir.path().to_path_buf()).unwrap();
     journal
@@ -394,7 +394,7 @@ fn full_event_gate_ignores_safe_policy_key_names() {
             "thread-a",
             OperatorEventType::TurnStarted,
             json!({
-                "authorization": "operator-approved",
+                "authorization": "[REDACTED]",
                 "credential_files": "disabled",
                 "preferred_provider": "claude"
             }),
@@ -402,6 +402,58 @@ fn full_event_gate_ignores_safe_policy_key_names() {
         .unwrap();
 
     assert_eq!(journal.read_after(None, 10).unwrap().events.len(), 1);
+}
+
+#[test]
+fn adversarial_credentials_never_create_or_append_operator_bytes() {
+    let hostile = [
+        json!({"output": "prefix Authorization: Bearer live-token suffix"}),
+        json!({"output": concat!("  OPENAI_API_", "KEY=", "sk-live-token")}),
+        json!({"refresh_token": "opaque-oauth-value"}),
+        json!({"output": concat!("-----BEGIN OPENSSH ", "PRIVATE KEY-----\nopaque")}),
+        json!({"output": "eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxIn0.c2ln"}),
+    ];
+
+    for (index, payload) in hostile.into_iter().enumerate() {
+        let dir = tempfile::tempdir().unwrap();
+        let journal = OperatorJournal::new(dir.path().to_path_buf()).unwrap();
+        let path = dir.path().join("operator_events.jsonl");
+        let error = journal
+            .append(&event(
+                &format!("hostile-{index}"),
+                "thread-a",
+                OperatorEventType::ToolCallCompleted,
+                payload,
+            ))
+            .unwrap_err();
+        assert!(error.to_string().contains("sensitive material"));
+        assert!(
+            !path.exists(),
+            "raw credential case {index} reached durable storage"
+        );
+    }
+
+    let dir = tempfile::tempdir().unwrap();
+    let journal = OperatorJournal::new(dir.path().to_path_buf()).unwrap();
+    journal
+        .append(&event(
+            "safe",
+            "thread-a",
+            OperatorEventType::UserMessage,
+            json!({"text": "safe"}),
+        ))
+        .unwrap();
+    let path = dir.path().join("operator_events.jsonl");
+    let before = std::fs::read(&path).unwrap();
+    assert!(journal
+        .append(&event(
+            "hostile-existing",
+            "thread-a",
+            OperatorEventType::ToolCallCompleted,
+            json!({"client_secret": "opaque-live-value"}),
+        ))
+        .is_err());
+    assert_eq!(std::fs::read(path).unwrap(), before);
 }
 
 #[test]

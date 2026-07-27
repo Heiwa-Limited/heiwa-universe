@@ -791,7 +791,10 @@ async fn start(args: &[String]) -> Result<()> {
             let bootstrap = browser_sessions
                 .lock()
                 .map_err(|_| anyhow!("browser session mutex poisoned"))?
-                .issue_bootstrap_at(chrono::Utc::now().timestamp());
+                .issue_bootstrap_at(
+                    chrono::Utc::now().timestamp(),
+                    &format!("http://127.0.0.1:{}", local_addr.port()),
+                );
             open_url(&format!("{url}?heiwa_bootstrap={bootstrap}"))?;
         }
     }
@@ -1076,10 +1079,12 @@ async fn handle_connection(
     let body = String::from_utf8_lossy(&body_bytes).to_string();
     if method == "GET" && path == "/" {
         if let Some(bootstrap) = query_param(target, "heiwa_bootstrap") {
+            let origin = exact_loopback_origin(&request, local_port)
+                .map_err(|_| anyhow!("invalid browser bootstrap origin"))?;
             let session = browser_sessions
                 .lock()
                 .map_err(|_| anyhow!("browser session mutex poisoned"))?
-                .consume_bootstrap_at(&bootstrap, chrono::Utc::now().timestamp());
+                .consume_bootstrap_at(&bootstrap, chrono::Utc::now().timestamp(), &origin);
             return match session {
                 Some(session) => {
                     write_browser_session_redirect(&mut stream, &session, local_port).await
@@ -1430,12 +1435,18 @@ const MAX_LOCAL_REQUEST_NONCES: usize = 4096;
 
 #[derive(Default)]
 struct BrowserSessionStore {
-    bootstraps: HashMap<String, i64>,
-    sessions: HashMap<String, i64>,
+    bootstraps: HashMap<String, BrowserSessionGrant>,
+    sessions: HashMap<String, BrowserSessionGrant>,
+}
+
+#[derive(Clone)]
+struct BrowserSessionGrant {
+    expires_at: i64,
+    origin: String,
 }
 
 impl BrowserSessionStore {
-    fn issue_bootstrap_at(&mut self, now: i64) -> String {
+    fn issue_bootstrap_at(&mut self, now: i64, origin: &str) -> String {
         self.retain_fresh(now);
         loop {
             let token = uuid::Uuid::new_v4().simple().to_string();
@@ -1443,7 +1454,10 @@ impl BrowserSessionStore {
                 .bootstraps
                 .insert(
                     token.clone(),
-                    now.saturating_add(BROWSER_BOOTSTRAP_TTL_SECONDS),
+                    BrowserSessionGrant {
+                        expires_at: now.saturating_add(BROWSER_BOOTSTRAP_TTL_SECONDS),
+                        origin: origin.to_string(),
+                    },
                 )
                 .is_none()
             {
@@ -1452,10 +1466,10 @@ impl BrowserSessionStore {
         }
     }
 
-    fn consume_bootstrap_at(&mut self, bootstrap: &str, now: i64) -> Option<String> {
+    fn consume_bootstrap_at(&mut self, bootstrap: &str, now: i64, origin: &str) -> Option<String> {
         self.retain_fresh(now);
-        let expires_at = self.bootstraps.remove(bootstrap)?;
-        if expires_at < now {
+        let grant = self.bootstraps.remove(bootstrap)?;
+        if grant.expires_at < now || grant.origin != origin {
             return None;
         }
         loop {
@@ -1464,7 +1478,10 @@ impl BrowserSessionStore {
                 .sessions
                 .insert(
                     session.clone(),
-                    now.saturating_add(BROWSER_SESSION_TTL_SECONDS),
+                    BrowserSessionGrant {
+                        expires_at: now.saturating_add(BROWSER_SESSION_TTL_SECONDS),
+                        origin: origin.to_string(),
+                    },
                 )
                 .is_none()
             {
@@ -1473,7 +1490,13 @@ impl BrowserSessionStore {
         }
     }
 
-    fn authenticates_cookie_at(&mut self, cookie_header: &str, now: i64, port: u16) -> bool {
+    fn authenticates_cookie_at(
+        &mut self,
+        cookie_header: &str,
+        now: i64,
+        port: u16,
+        origin: &str,
+    ) -> bool {
         self.retain_fresh(now);
         let expected_name = browser_session_cookie_name(port);
         cookie_header.split(';').map(str::trim).any(|segment| {
@@ -1484,13 +1507,13 @@ impl BrowserSessionStore {
                 && self
                     .sessions
                     .get(value)
-                    .is_some_and(|expires_at| *expires_at >= now)
+                    .is_some_and(|grant| grant.expires_at >= now && grant.origin == origin)
         })
     }
 
     fn retain_fresh(&mut self, now: i64) {
-        self.bootstraps.retain(|_, expires_at| *expires_at >= now);
-        self.sessions.retain(|_, expires_at| *expires_at >= now);
+        self.bootstraps.retain(|_, grant| grant.expires_at >= now);
+        self.sessions.retain(|_, grant| grant.expires_at >= now);
     }
 }
 
@@ -1535,12 +1558,27 @@ fn operator_http_auth_subject(
     if config.machine_auth_token.trim().is_empty() && config.jwt_signing_secret.trim().is_empty() {
         return Err(OperatorAuthError::NotConfigured);
     }
+    let expected_origin = exact_loopback_origin(request, local_port)?;
+    let supplied_origin =
+        strict_header_value(request, "origin").map_err(|_| OperatorAuthError::Unauthorized)?;
+    if supplied_origin
+        .as_deref()
+        .is_some_and(|origin| origin != expected_origin)
+    {
+        return Err(OperatorAuthError::Unauthorized);
+    }
     let cookie =
         strict_header_value(request, "cookie").map_err(|_| OperatorAuthError::Unauthorized)?;
     if cookie.is_some_and(|cookie| {
-        browser_sessions.lock().ok().is_some_and(|mut sessions| {
-            sessions.authenticates_cookie_at(&cookie, chrono::Utc::now().timestamp(), local_port)
-        })
+        supplied_origin.as_deref() == Some(expected_origin.as_str())
+            && browser_sessions.lock().ok().is_some_and(|mut sessions| {
+                sessions.authenticates_cookie_at(
+                    &cookie,
+                    chrono::Utc::now().timestamp(),
+                    local_port,
+                    &expected_origin,
+                )
+            })
     }) {
         return Ok(heiwa_core::auth::AuthSubject::Operator);
     }
@@ -1577,6 +1615,20 @@ fn operator_http_auth_subject(
     let authorization = header_value(request, "authorization");
     heiwa_core::auth::extract_auth_subject(cookie.as_deref(), authorization.as_deref(), &config)
         .map_err(|_| OperatorAuthError::Unauthorized)
+}
+
+fn exact_loopback_origin(
+    request: &str,
+    local_port: u16,
+) -> std::result::Result<String, OperatorAuthError> {
+    let host = strict_header_value(request, "host")
+        .map_err(|_| OperatorAuthError::Unauthorized)?
+        .ok_or(OperatorAuthError::Unauthorized)?;
+    let expected_host = format!("127.0.0.1:{local_port}");
+    if host != expected_host {
+        return Err(OperatorAuthError::Unauthorized);
+    }
+    Ok(format!("http://{expected_host}"))
 }
 
 fn local_request_signature_headers(
@@ -2708,8 +2760,6 @@ async fn serve_repl_stream(mut stream: TcpStream, prompt: String) -> Result<()> 
     let header = "HTTP/1.1 200 OK\r\n\
          Content-Type: text/event-stream\r\n\
          Cache-Control: no-store\r\n\
-         Access-Control-Allow-Origin: *\r\n\
-         Access-Control-Allow-Headers: content-type, authorization\r\n\
          Connection: close\r\n\
          \r\n";
     stream.write_all(header.as_bytes()).await?;
@@ -2801,9 +2851,6 @@ async fn write_response_with_headers(
          Content-Type: {content_type}\r\n\
          Cache-Control: no-store\r\n\
          Referrer-Policy: no-referrer\r\n\
-         Access-Control-Allow-Origin: *\r\n\
-         Access-Control-Allow-Headers: content-type, authorization, x-heiwa-local-auth-version, x-heiwa-local-auth-timestamp, x-heiwa-local-auth-nonce, x-heiwa-local-auth-signature\r\n\
-         Access-Control-Allow-Methods: GET, POST, OPTIONS\r\n\
          Connection: close\r\n",
         body.len()
     );
@@ -4909,44 +4956,64 @@ mod app_readmodel_tests {
     #[test]
     fn browser_bootstrap_is_single_use_and_issues_expiring_http_only_session() {
         let mut sessions = BrowserSessionStore::default();
-        let bootstrap = sessions.issue_bootstrap_at(1_000);
+        let origin = "http://127.0.0.1:7474";
+        let bootstrap = sessions.issue_bootstrap_at(1_000, origin);
         let session = sessions
-            .consume_bootstrap_at(&bootstrap, 1_001)
+            .consume_bootstrap_at(&bootstrap, 1_001, origin)
             .expect("fresh bootstrap must issue one browser session");
 
-        assert!(sessions.consume_bootstrap_at(&bootstrap, 1_001).is_none());
+        assert!(sessions
+            .consume_bootstrap_at(&bootstrap, 1_001, origin)
+            .is_none());
         let cookie_name = browser_session_cookie_name(7474);
         assert!(sessions.authenticates_cookie_at(
             &format!("other=1; {cookie_name}={session}"),
             1_001,
             7474,
+            origin,
         ));
         assert!(!sessions.authenticates_cookie_at(
             &format!("{cookie_name}={session}"),
             1_001,
             7475,
+            "http://127.0.0.1:7475",
+        ));
+        assert!(!sessions.authenticates_cookie_at(
+            &format!("{cookie_name}={session}"),
+            1_001,
+            7474,
+            "http://127.0.0.1:7555",
         ));
         assert!(!sessions.authenticates_cookie_at(
             &format!("{cookie_name}={session}"),
             1_001 + BROWSER_SESSION_TTL_SECONDS + 1,
             7474,
+            origin,
         ));
     }
 
     #[tokio::test]
     async fn browser_bootstrap_http_redirect_hides_capability_and_sets_port_cookie() {
         async fn request_once(
-            target: String,
+            target: Option<String>,
             browser_sessions: Arc<Mutex<BrowserSessionStore>>,
-        ) -> String {
+        ) -> (String, String) {
             let listener = TcpListener::bind(("127.0.0.1", 0)).await.unwrap();
             let address = listener.local_addr().unwrap();
+            let target = target.unwrap_or_else(|| {
+                let bootstrap = browser_sessions.lock().unwrap().issue_bootstrap_at(
+                    chrono::Utc::now().timestamp(),
+                    &format!("http://{address}"),
+                );
+                format!("/?heiwa_bootstrap={bootstrap}")
+            });
+            let client_target = target.clone();
             let client = tokio::spawn(async move {
                 let mut client = TcpStream::connect(address).await.unwrap();
                 client
                     .write_all(
                         format!(
-                            "GET {target} HTTP/1.1\r\nHost: {address}\r\nConnection: close\r\n\r\n"
+                            "GET {client_target} HTTP/1.1\r\nHost: {address}\r\nConnection: close\r\n\r\n"
                         )
                         .as_bytes(),
                     )
@@ -4965,23 +5032,19 @@ mod app_readmodel_tests {
             )
             .await
             .unwrap();
-            client.await.unwrap()
+            (client.await.unwrap(), target)
         }
 
         let browser_sessions = Arc::new(Mutex::new(BrowserSessionStore::default()));
-        let bootstrap = browser_sessions
-            .lock()
-            .unwrap()
-            .issue_bootstrap_at(chrono::Utc::now().timestamp());
-        let target = format!("/?heiwa_bootstrap={bootstrap}");
-        let accepted = request_once(target.clone(), browser_sessions.clone()).await;
+        let (accepted, target) = request_once(None, browser_sessions.clone()).await;
+        let bootstrap = query_param(&target, "heiwa_bootstrap").unwrap();
         assert!(accepted.starts_with("HTTP/1.1 303 See Other\r\n"));
         assert!(accepted.contains("\r\nLocation: /\r\n"));
         assert!(accepted.contains("Set-Cookie: heiwa_local_operator_"));
         assert!(accepted.contains("; HttpOnly; SameSite=Strict; Path=/; Max-Age="));
         assert!(!accepted.contains(&bootstrap));
 
-        let replay = request_once(target, browser_sessions).await;
+        let (replay, _) = request_once(Some(target), browser_sessions).await;
         assert!(replay.starts_with("HTTP/1.1 401 Unauthorized\r\n"));
         assert!(replay.contains("invalid_browser_bootstrap"));
         assert!(!replay.contains(&bootstrap));

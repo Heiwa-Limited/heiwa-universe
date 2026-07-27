@@ -1,10 +1,83 @@
+use heiwa_evidence::{OperatorEventType, OperatorJournal};
 use std::io::Write;
+use std::ops::{Deref, DerefMut};
+use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::process::Stdio;
 use tempfile::tempdir;
 
-fn heiwa_command() -> Command {
-    Command::new(env!("CARGO_BIN_EXE_heiwa"))
+struct HermeticCommand {
+    command: Command,
+    _root: tempfile::TempDir,
+    evidence_dir: PathBuf,
+}
+
+impl Deref for HermeticCommand {
+    type Target = Command;
+
+    fn deref(&self) -> &Self::Target {
+        &self.command
+    }
+}
+
+impl DerefMut for HermeticCommand {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.command
+    }
+}
+
+fn write_fake_executable(path: &Path, body: &str) {
+    std::fs::write(path, body).expect("write provider fixture");
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o755))
+            .expect("make provider fixture executable");
+    }
+}
+
+fn heiwa_command() -> HermeticCommand {
+    let root = tempfile::tempdir().expect("create hermetic shell root");
+    let home = root.path().join("home");
+    let evidence_dir = root.path().join("evidence");
+    let state_dir = root.path().join("state");
+    let index_dir = root.path().join("index");
+    let fixture_bin = root.path().join("bin");
+    for directory in [&home, &evidence_dir, &state_dir, &index_dir, &fixture_bin] {
+        std::fs::create_dir_all(directory).expect("create hermetic shell directory");
+    }
+    write_fake_executable(
+        &fixture_bin.join("ollama"),
+        "#!/bin/sh\ncase \"$1\" in\n  list) printf 'NAME ID SIZE MODIFIED\\n' ;;\n  ps) printf 'NAME ID SIZE PROCESSOR UNTIL\\n' ;;\n  *) exit 1 ;;\nesac\n",
+    );
+    for provider_cli in ["claude", "codex", "gemini"] {
+        write_fake_executable(
+            &fixture_bin.join(provider_cli),
+            "#!/bin/sh\nprintf 'hermetic provider fixture\\n'\n",
+        );
+    }
+
+    let mut command = Command::new(env!("CARGO_BIN_EXE_heiwa"));
+    command
+        .env_clear()
+        .env("HOME", &home)
+        .env("USER", "heiwa-test")
+        .env("LOGNAME", "heiwa-test")
+        .env("TMPDIR", root.path())
+        .env("HEIWA_EVIDENCE_DIR", &evidence_dir)
+        .env("HEIWA_STATE_DIR", &state_dir)
+        .env("HEIWA_INDEX_DIR", &index_dir)
+        .env("HEIWA_DISABLE_KEYCHAIN", "1")
+        .env("HEIWA_OLLAMA_BASE", "disabled-for-hermetic-tests")
+        .env("NO_COLOR", "1")
+        .env("LC_ALL", "C")
+        .env("LANG", "C")
+        .env("PATH", format!("{}:/usr/bin:/bin", fixture_bin.display()));
+    HermeticCommand {
+        command,
+        _root: root,
+        evidence_dir,
+    }
 }
 
 #[test]
@@ -28,11 +101,9 @@ fn test_heiwa_providers_lists_wrapped_and_loop_capable_surfaces_honestly() {
 
     assert!(output.status.success());
     let stdout = String::from_utf8_lossy(&output.stdout);
-    // Registry auto-discovers ollama; CLI discovery shows known providers
-    assert!(
-        stdout.contains("ollama"),
-        "expected ollama in provider list: {stdout}"
-    );
+    // Controlled fixture PATH surfaces wrapped CLIs without contacting live
+    // provider runtimes or operator account state.
+    assert!(stdout.contains("claude"), "expected fixture CLI: {stdout}");
     assert!(
         stdout.contains("[loop]"),
         "expected explicit loop capability marker: {stdout}"
@@ -139,6 +210,42 @@ fn test_shell_greeting_is_handled_without_model_requirement() {
         !stdout.contains("No models available. Connect a provider first."),
         "greetings should not require a model: {stdout}"
     );
+}
+
+#[test]
+fn plain_repl_success_has_one_canonical_closed_turn() {
+    let mut command = heiwa_command();
+    let evidence_dir = command.evidence_dir.clone();
+    let mut child = command
+        .arg("shell")
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .expect("spawn hermetic heiwa shell");
+    child
+        .stdin
+        .as_mut()
+        .expect("stdin")
+        .write_all(b"hi\nquit\n")
+        .expect("write deterministic turn");
+    let output = child.wait_with_output().expect("wait for shell");
+    assert!(output.status.success(), "{output:?}");
+
+    let rows = OperatorJournal::new(evidence_dir)
+        .unwrap()
+        .read_after(None, 64)
+        .unwrap()
+        .events;
+    let count = |event_type| {
+        rows.iter()
+            .filter(|row| row.event.event_type == event_type)
+            .count()
+    };
+    assert_eq!(count(OperatorEventType::UserMessage), 1);
+    assert_eq!(count(OperatorEventType::AssistantCompleted), 1);
+    assert_eq!(count(OperatorEventType::TurnCompleted), 1);
+    assert_eq!(count(OperatorEventType::TurnInterrupted), 0);
 }
 
 #[test]

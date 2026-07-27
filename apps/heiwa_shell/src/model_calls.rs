@@ -68,6 +68,7 @@ pub struct ModelCallResult {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
 pub enum ProviderFailureClass {
+    Cancelled,
     RateLimited,
     Authentication,
     QuotaExhausted,
@@ -80,6 +81,7 @@ pub enum ProviderFailureClass {
 impl ProviderFailureClass {
     pub fn as_str(self) -> &'static str {
         match self {
+            Self::Cancelled => "cancelled",
             Self::RateLimited => "rate_limited",
             Self::Authentication => "authentication",
             Self::QuotaExhausted => "quota_exhausted",
@@ -254,9 +256,6 @@ impl ModelCallExecutor {
             .await
             {
                 Ok((text, mut usage, emitted_delta)) => {
-                    if *execution.cancel.borrow() {
-                        return Err(ModelCallError::Cancelled);
-                    }
                     let charged_cost = completed_cost(&candidate, &usage).map_err(|message| {
                         ModelCallError::AttemptsExhausted {
                             attempts,
@@ -330,9 +329,6 @@ impl ModelCallExecutor {
                         cost_usd: Some(charged_cost.0),
                         cost_truth: charged_cost.1.clone(),
                     });
-                    if *execution.cancel.borrow() {
-                        return Err(ModelCallError::Cancelled);
-                    }
                     let route_receipt = self.append_route_event(
                         &execution.request,
                         OperatorEventType::RouteCompleted,
@@ -367,7 +363,17 @@ impl ModelCallExecutor {
                         attempt_records,
                     });
                 }
-                Err(AdapterRunError::Cancelled) => return Err(ModelCallError::Cancelled),
+                Err(AdapterRunError::Cancelled) => {
+                    let (attempt_cost, attempt_truth) = attempted_cost(&candidate);
+                    self.append_cancelled_attempt(
+                        &execution.request,
+                        &candidate,
+                        attempts,
+                        attempt_cost,
+                        &attempt_truth,
+                    )?;
+                    return Err(ModelCallError::Cancelled);
+                }
                 Err(AdapterRunError::Failed {
                     message,
                     emitted_delta,
@@ -427,6 +433,61 @@ impl ModelCallExecutor {
         })
     }
 
+    /// Execute one already-admitted interactive/loop turn and close its
+    /// durable lifecycle exactly once. The HTTP/Desktop runner owns the same
+    /// lifecycle itself and therefore continues to call [`Self::execute`].
+    pub async fn execute_canonical_turn(
+        &self,
+        execution: ModelCallExecution,
+    ) -> Result<ModelCallResult, ModelCallError> {
+        let request = execution.request.clone();
+        self.append_turn_event(
+            &request,
+            OperatorEventType::AssistantStarted,
+            "assistant_started",
+            json!({}),
+        )?;
+        match self.execute(execution).await {
+            Ok(result) => {
+                self.append_turn_event(
+                    &request,
+                    OperatorEventType::AssistantCompleted,
+                    "assistant_completed",
+                    json!({
+                        "text": result.text,
+                        "usage": result.usage,
+                        "cost_usd": result.cost_usd,
+                        "cost_truth": result.cost_truth,
+                    }),
+                )?;
+                self.append_turn_event(
+                    &request,
+                    OperatorEventType::TurnCompleted,
+                    "turn_completed",
+                    json!({"outcome": "completed"}),
+                )?;
+                Ok(result)
+            }
+            Err(error) => {
+                let reason = if matches!(error, ModelCallError::Cancelled) {
+                    "OPERATOR_CANCELLED"
+                } else {
+                    "EXECUTION_FAILED"
+                };
+                self.append_turn_event(
+                    &request,
+                    OperatorEventType::TurnInterrupted,
+                    "turn_interrupted",
+                    json!({
+                        "reason": reason,
+                        "message": error.to_string(),
+                    }),
+                )?;
+                Err(error)
+            }
+        }
+    }
+
     fn append_failure(
         &self,
         request: &ModelCallRequest,
@@ -451,6 +512,34 @@ impl ModelCallExecutor {
                 "cost_usd": cost_usd,
                 "cost_truth": cost_truth,
                 "remaining_budget_usd": remaining_budget_usd,
+            }),
+        )
+    }
+
+    fn append_cancelled_attempt(
+        &self,
+        request: &ModelCallRequest,
+        candidate: &ModelCallCandidate,
+        attempt: usize,
+        cost_usd: Option<f64>,
+        cost_truth: &CostTruth,
+    ) -> Result<CursorEvent, ModelCallError> {
+        self.append_route_event(
+            request,
+            OperatorEventType::RouteFailed,
+            "route_failed",
+            json!({
+                "attempt": attempt,
+                "provider": candidate.tier.provider,
+                "model": candidate.tier.model_id,
+                "provider_model": candidate.tier.provider_model_id,
+                "failure_class": ProviderFailureClass::Cancelled.as_str(),
+                "message": "provider attempt interrupted before completion truth",
+                "outcome": "uncertain",
+                "provider_invoked": true,
+                "cost_usd": cost_usd,
+                "cost_truth": cost_truth,
+                "remaining_budget_usd": serde_json::Value::Null,
             }),
         )
     }
@@ -481,6 +570,44 @@ impl ModelCallExecutor {
                 actor: OperatorActor {
                     kind: "runtime".to_string(),
                     id: "model-call-executor".to_string(),
+                },
+                risk_class,
+                sensitivity: OperatorSensitivity::LocalPrivate,
+                parent_event_id: None,
+                correlation_id: Some(request.call_id.clone()),
+                source_refs: vec![],
+                evidence_refs: vec![],
+                payload,
+            })
+            .map_err(|source| ModelCallError::EvidenceAppend { phase, source })
+    }
+
+    fn append_turn_event(
+        &self,
+        request: &ModelCallRequest,
+        event_type: OperatorEventType,
+        phase: &'static str,
+        payload: serde_json::Value,
+    ) -> Result<CursorEvent, ModelCallError> {
+        let risk_class = match request.risk {
+            heiwa_core::drex::CallRisk::Low => OperatorRisk::Low,
+            heiwa_core::drex::CallRisk::Medium => OperatorRisk::Medium,
+            heiwa_core::drex::CallRisk::High => OperatorRisk::High,
+            heiwa_core::drex::CallRisk::Critical => OperatorRisk::Critical,
+        };
+        self.sessions
+            .append_event(OperatorEvent {
+                schema_version: OPERATOR_EVENT_SCHEMA_VERSION,
+                event_id: format!("evt-{}", Uuid::new_v4()),
+                thread_id: request.thread_id.clone(),
+                turn_id: Some(request.turn_id.clone()),
+                run_id: None,
+                call_id: None,
+                event_type,
+                occurred_at: now_iso(),
+                actor: OperatorActor {
+                    kind: "runtime".to_string(),
+                    id: "model-call-turn-lifecycle".to_string(),
                 },
                 risk_class,
                 sensitivity: OperatorSensitivity::LocalPrivate,
@@ -527,7 +654,7 @@ impl heiwa_loop::LoopModelCaller for ExecutorLoopCaller {
         }
         let result = self
             .executor
-            .execute(ModelCallExecution {
+            .execute_canonical_turn(ModelCallExecution {
                 request: ModelCallRequest {
                     thread_id: request.thread_id,
                     turn_id: turn.turn_id,
@@ -776,20 +903,6 @@ async fn run_adapter(
     loop {
         tokio::select! {
             biased;
-            changed = cancel.changed(), if cancel_open => {
-                match changed {
-                    Ok(()) if *cancel.borrow() => {
-                        if let Some(task) = task.0.take() {
-                            task.abort();
-                            let _ = task.await;
-                        }
-                        let _ = tokio::time::timeout(Duration::from_millis(250), adapter.interrupt()).await;
-                        return Err(AdapterRunError::Cancelled);
-                    }
-                    Ok(()) => {}
-                    Err(_) => cancel_open = false,
-                }
-            }
             event = stream_rx.recv() => {
                 match event {
                     Some(StreamEvent::Token(token)) => {
@@ -815,14 +928,6 @@ async fn run_adapter(
                         }).to_string());
                     }
                     Some(StreamEvent::Done(usage)) => {
-                        if *cancel.borrow() {
-                            if let Some(task) = task.0.take() {
-                                task.abort();
-                                let _ = task.await;
-                            }
-                            let _ = tokio::time::timeout(Duration::from_millis(250), adapter.interrupt()).await;
-                            return Err(AdapterRunError::Cancelled);
-                        }
                         if let Some(task) = task.0.take() {
                             task.abort();
                             let _ = task.await;
@@ -849,6 +954,20 @@ async fn run_adapter(
                             emitted_delta,
                         });
                     }
+                }
+            }
+            changed = cancel.changed(), if cancel_open => {
+                match changed {
+                    Ok(()) if *cancel.borrow() => {
+                        if let Some(task) = task.0.take() {
+                            task.abort();
+                            let _ = task.await;
+                        }
+                        let _ = tokio::time::timeout(Duration::from_millis(250), adapter.interrupt()).await;
+                        return Err(AdapterRunError::Cancelled);
+                    }
+                    Ok(()) => {}
+                    Err(_) => cancel_open = false,
                 }
             }
         }

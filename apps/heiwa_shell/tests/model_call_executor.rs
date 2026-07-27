@@ -656,7 +656,7 @@ mod model_call {
     }
 
     #[tokio::test]
-    async fn cancellation_before_and_during_stream_never_appends_completion() {
+    async fn cancellation_before_invocation_is_free_and_inflight_attempt_is_durable_uncertain() {
         let (_evidence, service, submission) = service_and_turn();
         let started = Arc::new(tokio::sync::Notify::new());
         let interrupted = Arc::new(AtomicBool::new(false));
@@ -712,6 +712,17 @@ mod model_call {
         assert!(!events
             .iter()
             .any(|row| row.event.event_type == OperatorEventType::RouteCompleted));
+        let cancelled = events
+            .iter()
+            .find(|row| {
+                row.event.event_type == OperatorEventType::RouteFailed
+                    && row.event.payload["failure_class"] == "cancelled"
+            })
+            .expect("invoked cancellation must append one durable route outcome");
+        assert_eq!(cancelled.event.payload["outcome"], "uncertain");
+        assert_eq!(cancelled.event.payload["provider_invoked"], true);
+        assert_eq!(cancelled.event.payload["cost_usd"], 0.01);
+        assert_eq!(cancelled.event.payload["cost_truth"], "target_only");
     }
 
     #[tokio::test]
@@ -1042,7 +1053,7 @@ mod model_call {
     }
 
     #[tokio::test]
-    async fn simultaneous_cancel_wins_over_done_and_no_completion_is_persisted() {
+    async fn done_observed_persists_completed_usage_even_when_cancel_is_already_set() {
         let (_evidence, service, submission) = service_and_turn();
         let (cancel_tx, cancel_rx) = watch::channel(false);
         let adapter =
@@ -1050,7 +1061,7 @@ mod model_call {
         let executor =
             ModelCallExecutor::new(Arc::new(move |_, _| Some(adapter.clone())), service.clone());
 
-        let error = executor
+        let result = executor
             .execute(execution(
                 request("thread-1", &submission.turn_id),
                 vec![candidate(1, "primary", "model", 0.01)],
@@ -1058,15 +1069,19 @@ mod model_call {
                 cancel_rx,
             ))
             .await
-            .unwrap_err();
-        assert!(matches!(error, ModelCallError::Cancelled));
+            .expect("Done is provider completion truth even when cancellation follows");
+        assert_eq!(result.cost_usd, 0.01);
+        assert_eq!(result.cost_truth, CostTruth::TargetOnly);
         let events = service
             .events_after("thread-1", Some(&submission.cursor), 20)
             .unwrap()
             .events;
-        assert!(!events
+        let completed = events
             .iter()
-            .any(|row| row.event.event_type == OperatorEventType::RouteCompleted));
+            .find(|row| row.event.event_type == OperatorEventType::RouteCompleted)
+            .expect("Done must append route_completed");
+        assert_eq!(completed.event.payload["cost_usd"], 0.01);
+        assert_eq!(completed.event.payload["cost_truth"], "target_only");
     }
 
     #[tokio::test]
@@ -1311,6 +1326,48 @@ mod model_call {
             row.event.event_type == OperatorEventType::TurnStarted
                 && row.event.payload["client_request_id"] == "turn-approved-call"
         }));
+        assert_eq!(
+            events
+                .iter()
+                .filter(|row| row.event.event_type == OperatorEventType::UserMessage)
+                .count(),
+            2,
+            "one user message per admitted loop iteration"
+        );
+        assert_eq!(
+            events
+                .iter()
+                .filter(|row| row.event.event_type == OperatorEventType::AssistantCompleted)
+                .count(),
+            1,
+            "successful loop iteration needs one durable assistant completion"
+        );
+        assert_eq!(
+            events
+                .iter()
+                .filter(|row| row.event.event_type == OperatorEventType::TurnCompleted)
+                .count(),
+            1,
+            "successful loop iteration needs one terminal event"
+        );
+        assert_eq!(
+            events
+                .iter()
+                .filter(|row| row.event.event_type == OperatorEventType::TurnInterrupted)
+                .count(),
+            1,
+            "rejected loop iteration needs one honest terminal event"
+        );
+        let thread = service.thread("loop-thread").unwrap();
+        assert_eq!(
+            thread
+                .turns
+                .iter()
+                .filter(|turn| turn.status == "open")
+                .count(),
+            0,
+            "loop calls must not return with durable open turns"
+        );
     }
 
     #[tokio::test]

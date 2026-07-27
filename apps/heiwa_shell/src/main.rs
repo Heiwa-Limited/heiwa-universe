@@ -29,6 +29,7 @@ use heiwa_shell::operator::{
     OperatorModelTurn, OperatorPreparationContext, OperatorStreamFrame, OperatorTurnPreparation,
     OperatorTurnRunner, OperatorTurnWork,
 };
+use serde_json::Value;
 use std::env;
 use std::io::{self, IsTerminal, Write};
 use std::path::{Path, PathBuf};
@@ -1130,7 +1131,7 @@ fn stable_live_model_id(model: &heiwa_provider::DetectedModel) -> u64 {
     }
 }
 
-/// Local evidence appender (backend pivot 2026-07-15: Lance + GitHub, no STDB).
+/// Local evidence appender: JSONL truth with derived Lance recall.
 /// Journals to `~/.heiwa/evidence/<kind>.jsonl`; silently no-ops if the
 /// evidence directory cannot be created.
 #[derive(Clone)]
@@ -1342,6 +1343,14 @@ async fn run_repl(use_cockpit: bool) -> Result<()> {
                         continue;
                     }
                     Ok(RouteOutcome::Deterministic(response)) => {
+                        if let Err(error) =
+                            execute_deterministic_surface_turn(&state.session_id, &t, &response)
+                                .await
+                        {
+                            eprintln!("Operator turn error: {error}");
+                            turn_count += 1;
+                            continue;
+                        }
                         append_state_block(&mut state, TranscriptBlock::User(t.clone()));
                         append_state_block(
                             &mut state,
@@ -1586,6 +1595,22 @@ async fn run_cockpit_controller(
                             continue;
                         }
                         let _ = event_tx.send(CockpitEvent::StatusUpdate("routing...".into()));
+                        if pins.cockpit_mode == CockpitMode::Agentic {
+                            if let Err(error) = run_cockpit_operator_turn(
+                                &session_id,
+                                &t,
+                                Some(pins.scope.clone()),
+                                &mut pins,
+                                &mut transcript,
+                                &event_tx,
+                            )
+                            .await
+                            {
+                                let _ = event_tx.send(CockpitEvent::StreamError(error));
+                            }
+                            let _ = event_tx.send(CockpitEvent::StatusUpdate("ready".into()));
+                            continue;
+                        }
 
                         match route_task(&t, &pins, &model_tiers) {
                             Err(msg) => {
@@ -1596,6 +1621,15 @@ async fn run_cockpit_controller(
                                 continue;
                             }
                             Ok(RouteOutcome::Deterministic(response)) => {
+                                if let Err(error) =
+                                    execute_deterministic_surface_turn(&session_id, &t, &response)
+                                        .await
+                                {
+                                    let _ = event_tx.send(CockpitEvent::StreamError(error));
+                                    let _ =
+                                        event_tx.send(CockpitEvent::StatusUpdate("ready".into()));
+                                    continue;
+                                }
                                 append_controller_block(
                                     &session_id,
                                     &mut transcript,
@@ -2632,9 +2666,6 @@ fn transcript_block_to_message(block: &TranscriptBlock) -> Option<(Role, String)
 }
 
 fn append_state_block(state: &mut SessionState, block: TranscriptBlock) {
-    if let Err(error) = heiwa_session::append_entry(&state.session_id, block.clone()) {
-        eprintln!("Failed to append transcript entry: {}", error);
-    }
     state.transcript.push(block);
 }
 
@@ -2644,12 +2675,51 @@ fn append_controller_block(
     block: TranscriptBlock,
     event_tx: &tokio::sync::mpsc::UnboundedSender<CockpitEvent>,
 ) {
-    if let Err(error) = heiwa_session::append_entry(session_id, block.clone()) {
-        let _ = event_tx.send(CockpitEvent::TranscriptAppend(TranscriptBlock::Evidence(
-            format!("transcript persistence error: {}", error),
-        )));
-    }
+    let _ = (session_id, event_tx);
     transcript.push(block);
+}
+
+async fn execute_deterministic_surface_turn(
+    thread_id: &str,
+    prompt: &str,
+    response: &str,
+) -> Result<(), String> {
+    let (_, _, runner) = default_model_call_runtime()?;
+    let request = heiwa_session::operator::StartTurnRequest::auto(
+        format!("surface-{}", uuid::Uuid::new_v4()),
+        prompt,
+    );
+    let mut handle = runner
+        .submit(
+            thread_id,
+            request,
+            OperatorTurnWork::Deterministic {
+                response: response.to_string(),
+                route: route_event_payload("deterministic", None),
+                done: repl_trace_payload("deterministic", None, None, None, None),
+            },
+        )
+        .map_err(|error| error.to_string())?;
+    while let Ok(frame) = handle.recv().await {
+        if frame.is_terminal()
+            && matches!(
+                frame,
+                OperatorStreamFrame::Durable(ref row)
+                    if row.event.turn_id.as_deref() == Some(handle.turn_id.as_str())
+            )
+        {
+            return Ok(());
+        }
+        if let OperatorStreamFrame::Error {
+            turn_id, message, ..
+        } = frame
+        {
+            if turn_id == handle.turn_id {
+                return Err(message);
+            }
+        }
+    }
+    Err("operator turn ended without a durable terminal event".to_string())
 }
 
 // ---------------------------------------------------------------------------
@@ -2947,6 +3017,16 @@ async fn execute_model_call(execution: ModelCallExecution) -> Result<ModelCallRe
         .map_err(|error| error.to_string())
 }
 
+async fn execute_canonical_model_turn(
+    execution: ModelCallExecution,
+) -> Result<ModelCallResult, String> {
+    let (executor, _, _) = default_model_call_runtime()?;
+    executor
+        .execute_canonical_turn(execution)
+        .await
+        .map_err(|error| error.to_string())
+}
+
 async fn execute_routed_model_call(
     route: &RouteResult,
     messages: Vec<Message>,
@@ -2964,7 +3044,7 @@ async fn execute_routed_model_call(
         .map_err(|error| error.to_string())?;
     let privacy = PrivacyClass::parse(&route.privacy).map_err(str::to_string)?;
     let (_cancel_tx, cancel) = tokio::sync::watch::channel(false);
-    execute_model_call(ModelCallExecution {
+    execute_canonical_model_turn(ModelCallExecution {
         request: ModelCallRequest {
             thread_id: thread_id.to_string(),
             turn_id: turn.turn_id,
@@ -3845,11 +3925,96 @@ fn repl_trace_payload(
     })
 }
 
+async fn run_cockpit_operator_turn(
+    thread_id: &str,
+    prompt: &str,
+    tool_scope: Option<ExecutionScope>,
+    pins: &mut SessionPins,
+    transcript: &mut Vec<TranscriptBlock>,
+    event_tx: &tokio::sync::mpsc::UnboundedSender<CockpitEvent>,
+) -> Result<(), String> {
+    let mut request = heiwa_session::operator::StartTurnRequest::auto(
+        format!("cockpit-{}", uuid::Uuid::new_v4()),
+        prompt,
+    );
+    request.route_policy.preferred_provider = pins.pinned_provider.clone();
+    request.route_policy.preferred_model = pins.pinned_model.clone();
+    request.route_policy.mode = match pins.route_preference {
+        RoutePreference::Auto => heiwa_session::operator::RouteMode::Auto,
+        RoutePreference::LocalOnly => heiwa_session::operator::RouteMode::LocalOnly,
+        RoutePreference::RemoteOnly => heiwa_session::operator::RouteMode::RemoteOnly,
+    };
+    let mut handle = submit_operator_turn_with_scope(thread_id, request, tool_scope)
+        .await
+        .map_err(|error| error.to_string())?;
+    transcript.push(TranscriptBlock::User(prompt.to_string()));
+
+    while let Ok(frame) = handle.recv().await {
+        match frame {
+            OperatorStreamFrame::AssistantDelta { turn_id, text, .. }
+                if turn_id == handle.turn_id =>
+            {
+                let _ = event_tx.send(CockpitEvent::StreamToken(text));
+            }
+            OperatorStreamFrame::Durable(row)
+                if row.event.turn_id.as_deref() == Some(handle.turn_id.as_str()) =>
+            {
+                match row.event.event_type {
+                    heiwa_evidence::OperatorEventType::RouteCompleted => {
+                        if let Some(provider) =
+                            row.event.payload.get("provider").and_then(Value::as_str)
+                        {
+                            pins.current_provider = provider.to_string();
+                        }
+                        if let Some(model) = row.event.payload.get("model").and_then(Value::as_str)
+                        {
+                            pins.current_model = model.to_string();
+                        }
+                        let _ = event_tx.send(CockpitEvent::RoutingUpdate(RoutingState {
+                            current_provider: pins.current_provider.clone(),
+                            current_model: pins.current_model.clone(),
+                            mode: pins.cockpit_mode.label().to_string(),
+                            explanation: Some(row.event.payload.to_string()),
+                        }));
+                    }
+                    heiwa_evidence::OperatorEventType::AssistantCompleted => {
+                        if let Some(text) = row.event.payload.get("text").and_then(Value::as_str) {
+                            transcript.push(TranscriptBlock::Assistant(text.to_string()));
+                        }
+                    }
+                    heiwa_evidence::OperatorEventType::TurnCompleted => {
+                        send_done_event(event_tx, None);
+                        return Ok(());
+                    }
+                    heiwa_evidence::OperatorEventType::TurnInterrupted
+                    | heiwa_evidence::OperatorEventType::Blocker => {
+                        return Err(row
+                            .event
+                            .payload
+                            .get("message")
+                            .or_else(|| row.event.payload.get("reason"))
+                            .and_then(Value::as_str)
+                            .unwrap_or("operator turn interrupted")
+                            .to_string());
+                    }
+                    _ => {}
+                }
+            }
+            OperatorStreamFrame::Error {
+                turn_id, message, ..
+            } if turn_id == handle.turn_id => return Err(message),
+            _ => {}
+        }
+    }
+    Err("cockpit operator turn ended without durable terminal event".to_string())
+}
+
 /// Prepare model work only after the runner has made intake durable.
 async fn prepare_operator_turn_work(
     context: OperatorPreparationContext,
     mut start_request: heiwa_session::operator::StartTurnRequest,
     cancelled: Arc<std::sync::atomic::AtomicBool>,
+    tool_scope: Option<ExecutionScope>,
 ) -> Result<OperatorTurnWork, String> {
     if cancelled.load(std::sync::atomic::Ordering::Acquire) {
         return Err("operator preparation cancelled before routing".to_string());
@@ -3948,7 +4113,7 @@ async fn prepare_operator_turn_work(
                 messages,
                 remaining_budget_usd: start_request.route_policy.turn_budget_usd,
                 max_attempts: 3,
-                tool_scope: None,
+                tool_scope,
                 done_payload,
             }))
         }
@@ -3965,12 +4130,23 @@ async fn submit_operator_turn_with_route(
     heiwa_shell::operator::OperatorTurnHandle,
     heiwa_shell::operator::OperatorSubmissionError,
 > {
+    submit_operator_turn_with_scope(thread_id, start_request, None).await
+}
+
+async fn submit_operator_turn_with_scope(
+    thread_id: &str,
+    start_request: heiwa_session::operator::StartTurnRequest,
+    tool_scope: Option<ExecutionScope>,
+) -> std::result::Result<
+    heiwa_shell::operator::OperatorTurnHandle,
+    heiwa_shell::operator::OperatorSubmissionError,
+> {
     let (_, _, runner) = default_model_call_runtime()
         .map_err(|error| heiwa_shell::operator::OperatorSubmissionError::Runtime(anyhow!(error)))?;
     let preparation_request = start_request.clone();
     let preparation =
         OperatorTurnPreparation::cancellable_with_context(move |context, cancelled| async move {
-            prepare_operator_turn_work(context, preparation_request, cancelled)
+            prepare_operator_turn_work(context, preparation_request, cancelled, tool_scope)
                 .await
                 .map_err(anyhow::Error::msg)
         });

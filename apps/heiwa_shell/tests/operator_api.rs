@@ -316,6 +316,41 @@ fn signed_local_requests_are_port_bound_and_replay_rejected_before_action() {
 }
 
 #[test]
+fn attacker_loopback_host_cannot_relay_authenticated_post_or_websocket() {
+    let runtime = TestRuntime::start_without_providers();
+    let attacker_port = if runtime.port == u16::MAX {
+        runtime.port - 1
+    } else {
+        runtime.port + 1
+    };
+    let hostile_host = format!("127.0.0.1:{attacker_port}");
+    let post = request_with_host(
+        runtime.port,
+        &hostile_host,
+        "POST",
+        "/api/v1/calendar/holds",
+        Some(TOKEN),
+        &json!({
+            "title": "must not stage",
+            "date": "2026-07-26",
+            "kind": "focus"
+        })
+        .to_string(),
+    );
+    assert_eq!(post.status, 401, "{}", post.body);
+    assert_eq!(runtime.calendar_hold_count(), 0);
+
+    let ws = websocket_handshake_with_host(
+        runtime.port,
+        &hostile_host,
+        "/ws/v1/operator",
+        &format!("Authorization: Bearer {TOKEN}\r\n"),
+    );
+    assert_eq!(ws.status, 401, "{}", ws.head);
+    assert!(!ws.head.contains("101 Switching Protocols"));
+}
+
+#[test]
 fn operator_websocket_authenticates_before_any_upgrade() {
     let unconfigured = TestRuntime::start(false);
     let missing_config = websocket_handshake(unconfigured.port, None);
@@ -1226,6 +1261,24 @@ fn wait_for_port(port: u16) {
 }
 
 fn request(port: u16, method: &str, target: &str, token: Option<&str>, body: &str) -> Response {
+    request_with_host(
+        port,
+        &format!("127.0.0.1:{port}"),
+        method,
+        target,
+        token,
+        body,
+    )
+}
+
+fn request_with_host(
+    port: u16,
+    host: &str,
+    method: &str,
+    target: &str,
+    token: Option<&str>,
+    body: &str,
+) -> Response {
     let mut stream = TcpStream::connect(("127.0.0.1", port)).unwrap();
     stream
         .set_read_timeout(Some(Duration::from_secs(20)))
@@ -1234,7 +1287,7 @@ fn request(port: u16, method: &str, target: &str, token: Option<&str>, body: &st
         .map(|token| format!("Authorization: Bearer {token}\r\n"))
         .unwrap_or_default();
     let request = format!(
-        "{method} {target} HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\nAccept: application/json\r\nContent-Type: application/json\r\n{authorization}Content-Length: {}\r\nConnection: close\r\n\r\n{body}",
+        "{method} {target} HTTP/1.1\r\nHost: {host}\r\nAccept: application/json\r\nContent-Type: application/json\r\n{authorization}Content-Length: {}\r\nConnection: close\r\n\r\n{body}",
         body.len()
     );
     stream.write_all(request.as_bytes()).unwrap();
@@ -1327,12 +1380,26 @@ fn websocket_handshake_with_headers(
     target: &str,
     additional_headers: &str,
 ) -> HandshakeResponse {
+    websocket_handshake_with_host(
+        port,
+        &format!("127.0.0.1:{port}"),
+        target,
+        additional_headers,
+    )
+}
+
+fn websocket_handshake_with_host(
+    port: u16,
+    host: &str,
+    target: &str,
+    additional_headers: &str,
+) -> HandshakeResponse {
     let mut stream = TcpStream::connect(("127.0.0.1", port)).unwrap();
     stream
         .set_read_timeout(Some(Duration::from_secs(2)))
         .unwrap();
     let request = format!(
-        "GET {target} HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Version: 13\r\nSec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\n{additional_headers}\r\n"
+        "GET {target} HTTP/1.1\r\nHost: {host}\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Version: 13\r\nSec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\n{additional_headers}\r\n"
     );
     stream.write_all(request.as_bytes()).unwrap();
 
