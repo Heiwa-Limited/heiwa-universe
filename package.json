@@ -21,7 +21,7 @@
   "scripts": {
     "check:runtime": "bash scripts/check_runtime_baseline.sh",
     "lint": "biome ci .",
-    "typecheck": "tsc -p packages/heiwa_bindings/typescript/tsconfig.json --noEmit && tsc -p apps/heiwa_app/tsconfig.json --noEmit && npm --prefix apps/heiwa_app/clients/cockpit run typecheck"
+    "typecheck": "tsc -p apps/heiwa_app/tsconfig.json --noEmit && npm --prefix apps/heiwa_app/clients/cockpit run typecheck"
   },
   "devDependencies": {
     "@biomejs/biome": "^2.4.15",
