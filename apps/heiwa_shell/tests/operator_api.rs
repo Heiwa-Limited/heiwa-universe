@@ -28,6 +28,52 @@ impl TestRuntime {
         Self::start_with_provider_path(true, false)
     }
 
+    fn start_with_ollama_override(override_endpoint: &str, stored_endpoint: &str) -> Self {
+        let port = reserve_port();
+        let home = tempfile::tempdir().unwrap();
+        let evidence = tempfile::tempdir().unwrap();
+        let accounts_dir = home.path().join(".heiwa");
+        std::fs::create_dir_all(&accounts_dir).unwrap();
+        std::fs::write(
+            accounts_dir.join("accounts.json"),
+            serde_json::json!({
+                "accounts": [{
+                    "account_id": "ollama-local",
+                    "provider": "ollama",
+                    "credential": {
+                        "kind": "local_runtime",
+                        "endpoint": stored_endpoint,
+                    },
+                    "rate_group": "local",
+                    "status": "disconnected",
+                    "models": [],
+                }]
+            })
+            .to_string(),
+        )
+        .unwrap();
+        let mut command = Command::new(env!("CARGO_BIN_EXE_heiwa"));
+        command
+            .env("HOME", home.path())
+            .env("HEIWA_EVIDENCE_DIR", evidence.path())
+            .env("HEIWA_OLLAMA_BASE", override_endpoint)
+            .env_remove("HEIWA_MACHINE_AUTH_TOKEN")
+            .env_remove("HEIWA_AUTH_TOKEN")
+            .env_remove("HEIWA_JWT_SIGNING_SECRET")
+            .env_remove("HEIWA_AUTH_SECRET")
+            .args(["app", "start", "--port", &port.to_string(), "--no-open"])
+            .stdout(Stdio::null())
+            .stderr(Stdio::null());
+        let child = command.spawn().expect("start test runtime");
+        wait_for_port(port);
+        Self {
+            child,
+            port,
+            _home: home,
+            evidence,
+        }
+    }
+
     fn start_with_provider_path(configured_auth: bool, provider_path: bool) -> Self {
         let port = reserve_port();
         let home = tempfile::tempdir().unwrap();
@@ -476,6 +522,53 @@ fn authenticated_operator_routes_share_one_idempotent_runner() {
     assert_eq!(events.status, 200, "{}", events.body);
     assert!(events.body["data"]["events"].as_array().unwrap().len() >= 3);
     assert!(events.body["data"]["next_cursor"].is_string());
+}
+
+#[test]
+fn ollama_models_payload_uses_child_override_before_stored_live_endpoint() {
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    listener.set_nonblocking(true).unwrap();
+    let override_endpoint = format!("http://{}/", listener.local_addr().unwrap());
+    let fixture = thread::spawn(move || {
+        let deadline = Instant::now() + Duration::from_secs(2);
+        loop {
+            match listener.accept() {
+                Ok((mut stream, _)) => {
+                    let mut request = [0_u8; 1024];
+                    let bytes = stream.read(&mut request).unwrap();
+                    let request = std::str::from_utf8(&request[..bytes]).unwrap();
+                    assert!(request.starts_with("GET /api/tags HTTP/1.1"), "{request}");
+                    stream
+                        .write_all(
+                            b"HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: 31\r\nConnection: close\r\n\r\n{\"models\":[{\"name\":\"fixture\"}]}",
+                        )
+                        .unwrap();
+                    return true;
+                }
+                Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
+                    if Instant::now() >= deadline {
+                        return false;
+                    }
+                    thread::sleep(Duration::from_millis(10));
+                }
+                Err(error) => panic!("fixture listener failed: {error}"),
+            }
+        }
+    });
+
+    let runtime =
+        TestRuntime::start_with_ollama_override(&override_endpoint, "http://127.0.0.1:11434");
+    let response = runtime.request("GET", "/api/v1/providers/ollama/models", None, json!(null));
+
+    assert_eq!(response.status, 200, "{}", response.body);
+    assert_eq!(
+        response.body["data"]["models"],
+        json!([{ "name": "fixture" }])
+    );
+    assert!(
+        fixture.join().unwrap(),
+        "override fixture was never contacted"
+    );
 }
 
 #[test]
