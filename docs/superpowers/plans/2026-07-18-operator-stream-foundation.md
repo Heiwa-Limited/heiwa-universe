@@ -16,7 +16,9 @@
 - Raw secrets, bearer tokens, credential-file contents, and provider auth material must fail the sensitive-material gate before append.
 - Journal envelope `v` and operator event `schema_version` are distinct version domains.
 - All `/api/v1/operator/*` HTTP and `/ws/v1/operator` connections require `heiwa_core::auth` machine-token or signed-session authentication.
-- Tauri injects auth natively; machine token must never enter renderer assets or persisted operator events.
+- Tauri signs local HTTP/WS requests natively; HMAC binds method, port, exact
+  target, body digest, timestamp, and nonce. Machine bearer is compatibility
+  auth only and must never enter renderer assets or persisted operator events.
 - Every inference call routes independently; explicit pins constrain DREX but never bypass privacy, capability, quota, safety, or spend gates.
 - Cost truth must use `local_zero_cost`, `target_only`, `proxy_estimate`, `exact_provider_report`, or `cannot_confirm` honestly.
 - Desktop renderer state is disposable; SQLite FTS and Lance are rebuildable projections.
@@ -857,7 +859,7 @@ Test rejection before `101 Switching Protocols` without auth, authenticated repl
 
 Pass full request target into `handle_websocket`. Authenticate before handshake. Every 200 ms call lock-free `events_after(thread_id, cursor, 100)`, emit each durable event with cursor, emit `caught_up` after initial replay, and heartbeat every 30 seconds. Broadcast transient deltas from `OperatorTurnRunner`; durable replay remains authority.
 
-- [x] **Step 3: Inject auth into native HTTP proxy**
+- [x] **Step 3: Sign native HTTP proxy requests**
 
 Replace `reqwest::get` with a client request builder and:
 
@@ -871,11 +873,15 @@ fn machine_auth_token() -> Result<String, ProxyError> {
 }
 ```
 
-Add `Authorization: Bearer` natively. Extend proxy tests to inspect the received header. Never return the token through Tauri IPC or error strings.
+Superseded during implementation: sign native requests with local HMAC v1 over
+method, numeric port, exact target, SHA-256 body digest, timestamp, and nonce.
+Reject replay through the runtime nonce cache and timestamps outside the
+30-second skew. Machine bearer remains compatibility auth. Never return token
+or signature material through Tauri IPC or error strings.
 
-- [x] **Step 4: Implement native WebSocket-to-channel bridge**
+- [x] **Step 4: Implement signed native WebSocket-to-channel bridge**
 
-Add `futures-util = "0.3"` and `tokio-tungstenite = { version = "0.24", features = ["rustls-tls-native-roots"] }`, reusing the version already present in `Cargo.lock`. Build an authenticated client request with bearer header, connect, and forward decoded JSON through `tauri::ipc::Channel<serde_json::Value>`. Reconnect with the last durable cursor after a bounded 250 ms, 1 s, 3 s backoff.
+Add `futures-util = "0.3"` and `tokio-tungstenite = { version = "0.24", features = ["rustls-tls-native-roots"] }`, reusing the version already present in `Cargo.lock`. Build a signed local client request, connect, and forward decoded JSON through `tauri::ipc::Channel<serde_json::Value>`. Reconnect with the last durable cursor after a bounded 250 ms, 1 s, 3 s backoff.
 
 Register command:
 
@@ -999,7 +1005,7 @@ git commit -m "Render Desktop from durable operator stream"
 
 Replace remaining STDB language in `docs/architecture/app-foundation.md` with local JSONL truth, Lance derived recall, and GitHub sync planned/redaction-gated. Add operator stream ownership, authenticated API/WS, Desktop native auth bridge, per-call DREX routing, and current route-cost truth classes.
 
-- [ ] **Step 2: Run focused suites**
+- [x] **Step 2: Run focused suites**
 
 ```bash
 cargo test -p heiwa_evidence
@@ -1015,7 +1021,7 @@ bash scripts/check_model_call_boundary.sh
 
 Expected: every command PASS.
 
-- [ ] **Step 3: Run workspace and repo gates**
+- [x] **Step 3: Run workspace and repo gates**
 
 ```bash
 cargo test --workspace --all-features
@@ -1025,7 +1031,7 @@ git diff --check
 
 Expected: all tests/gates PASS and no whitespace errors.
 
-- [ ] **Step 4: Start checkout runtime on `7475` with isolated state**
+- [x] **Step 4: Start checkout runtime on `7475` with isolated state**
 
 Use a temporary test root and explicit auth token:
 
@@ -1038,27 +1044,27 @@ cargo run -q -p heiwa-shell --bin heiwa -- app start --port 7475 --no-open
 
 Record exact PID/session and stop it before final reporting.
 
-- [ ] **Step 5: Probe auth, replay, and idempotency**
+- [x] **Step 5: Probe auth, replay, and idempotency**
 
 Use bearer-authenticated `curl` requests to create/list thread `default`, submit one prompt twice with the same `client_request_id`, and assert one `turn_id`. Connect an authenticated WebSocket client from the Desktop/native test path, verify shell-created events arrive without refresh, reconnect from prior cursor, and verify no missing/duplicate events.
 
-- [ ] **Step 6: Prove restart recovery and invalid cursor**
+- [x] **Step 6: Prove restart recovery and invalid cursor**
 
 Start a controlled test turn with a blocking fake adapter, terminate only the checkout runtime, restart it on `7475`, and assert one `turn_interrupted` with `RUNTIME_RESTART`. Replace a copied temporary journal, submit its old cursor, and assert structured `invalid_cursor` followed by successful replay from thread start.
 
-- [ ] **Step 7: Prove per-call fallback and index rebuild**
+- [x] **Step 7: Prove per-call fallback and index rebuild**
 
 Run fixture candidates where primary is quota-exhausted or rate-limited and secondary is eligible. Verify route event order, quality floor, remaining budget, and honest cost truth. Delete only temporary fixture indexes, rebuild from temporary journal, and compare FTS/Lance result IDs before/after.
 
-- [ ] **Step 8: Stop and clean temporary verification state**
+- [x] **Step 8: Stop and clean temporary verification state**
 
 SIGTERM the exact `7475` process, confirm port closes, then remove `/private/tmp/heiwa-operator-e2e`. Do not touch installed `7474` or durable `~/.heiwa` state.
 
-- [ ] **Step 9: Post-feature review**
+- [x] **Step 9: Post-feature review**
 
 Inspect full diff for duplicated append/routing/auth mechanics, direct provider sends outside `model_calls.rs`, raw tokens in tests/output, frontend-owned authority, untested cursor branches, compatibility regressions, and doctrine drift.
 
-- [ ] **Step 10: Commit verification/docs**
+- [x] **Step 10: Commit verification/docs**
 
 ```bash
 git add docs scripts/check_agent_baseline.sh

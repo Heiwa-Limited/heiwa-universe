@@ -370,7 +370,15 @@ fn has_command(cmd: &str) -> bool {
 }
 
 fn is_ollama_running() -> bool {
-    std::net::TcpStream::connect("127.0.0.1:11434").is_ok()
+    let endpoint = crate::detect::ollama::default_endpoint();
+    let authority = endpoint
+        .split_once("://")
+        .map(|(_, rest)| rest)
+        .unwrap_or(endpoint.as_str())
+        .split('/')
+        .next()
+        .unwrap_or_default();
+    !authority.is_empty() && std::net::TcpStream::connect(authority).is_ok()
 }
 
 fn gemini_has_native_auth() -> bool {

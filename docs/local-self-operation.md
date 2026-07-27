@@ -203,10 +203,15 @@ current checkout.
 
 ### 4. Verify the authenticated operator stream
 
-Operator HTTP and WebSocket endpoints require the existing local runtime auth.
-An unset runtime auth configuration returns `auth_not_configured`; a missing or
-invalid credential returns `unauthorized`. For the isolated checkout runtime
-above, use the same test token only against `127.0.0.1:7475`:
+Operator HTTP and WebSocket endpoints require local runtime auth. Native Desktop
+uses signed local requests: HMAC v1 binds method, numeric local port, exact
+request target, SHA-256 body digest, timestamp, and nonce. Runtime accepts at
+most 30 seconds of clock skew and consumes every nonce once through its bounded
+replay cache. Machine bearer auth remains compatibility-only; Desktop native
+transport signs HTTP and WebSocket requests and never gives a bearer to the
+renderer. An unset runtime auth configuration returns `auth_not_configured`; a
+missing or invalid credential returns `unauthorized`. For the isolated checkout
+runtime above, use the test bearer only against `127.0.0.1:7475`:
 
 ```bash
 curl -fsS \
@@ -234,13 +239,18 @@ GET ws://127.0.0.1:7475/ws/v1/operator?thread_id=default&after=<percent-encoded-
 Authorization: Bearer operator-e2e-token
 ```
 
-Use a WebSocket client that can set the `Authorization` header. For Desktop
-verification, launch the native wrapper with `HEIWA_APP_PORT=7475` and the same
-`HEIWA_MACHINE_AUTH_TOKEN`; its Tauri bridge injects the bearer below the
-renderer for both HTTP and WebSocket. Verify initial replay reaches
+Use a WebSocket client that can set the compatibility `Authorization` header.
+For Desktop verification, launch the native wrapper with `HEIWA_APP_PORT=7475`
+and the same `HEIWA_MACHINE_AUTH_TOKEN`; its Tauri bridge signs the exact GET
+target below the renderer for both HTTP and WebSocket. Verify initial replay reaches
 `caught_up`, a newly appended shell event arrives without refresh, and reconnect
 from the last durable cursor does not duplicate an `event_id`. Heartbeats and
 assistant deltas are transient and never advance the durable cursor.
+
+Browser preview is separate: `heiwa app start --open` puts a single-use,
+60-second bootstrap token in the launch URL. The runtime consumes it once and
+redirects with a port-scoped HttpOnly session cookie (eight-hour TTL). Browser
+code receives neither bootstrap reuse authority nor machine bearer material.
 
 Cursor and restart recovery are fail-closed:
 
@@ -264,6 +274,9 @@ Cursor and restart recovery are fail-closed:
   `turn_interrupted` event whose reason is `RUNTIME_RESTART`. A turn with a
   pending operator cancellation closes as `OPERATOR_CANCELLED`. Open work is
   never silently resumed from process memory.
+- Readers skip unknown future operator-event schema versions, count them, and
+  retain known events. Never rewrite or delete durable JSONL solely because a
+  newer schema is present.
 
 ### 5. Start safely
 

@@ -128,9 +128,11 @@ Desktop:
   `/ws/v1/operator` for operator state alongside narrower runtime read models.
   Localhost is a transport boundary, not an authentication boundary.
 - The native Tauri bridge reads local runtime auth, restricts transport to the
-  configured `127.0.0.1` runtime port, and injects bearer authentication below
-  the renderer. The TypeScript renderer never owns or persists the machine
-  token.
+  configured `127.0.0.1` runtime port, and signs each HTTP/WebSocket handshake
+  below the renderer. The HMAC input binds method, numeric port, exact request
+  target, SHA-256 body digest, timestamp, and nonce. The machine bearer remains
+  compatibility auth; native Desktop transport does not send it. The TypeScript
+  renderer never owns or persists either credential material.
 - Tauri commands stay narrow: authenticated loopback transport plus OS
   integration such as tray, notifications, secure storage, file picker, login
   items, and local process supervision.
@@ -196,6 +198,11 @@ CLI and TUI consumption of this stream remains a convergence target:
 - authenticated HTTP provides thread creation, replay, turn submission, and
   cancellation; authenticated WebSocket provides cursor-based replay plus live
   durable and transient frames
+- native requests use signed local auth: v1 HMAC headers bind method, port,
+  exact target, body digest, timestamp, and nonce; the runtime rejects timestamps
+  outside 30 seconds and consumes each nonce once through a bounded replay cache
+- browser preview receives a single-use bootstrap token, then an HttpOnly local
+  session cookie; it does not receive a machine bearer token
 - opaque cursors are versioned and bound to one stream lineage. Unknown,
   replaced, truncated, or non-boundary cursors return structured
   `invalid_cursor`; clients clear only disposable projections and replay the
@@ -210,6 +217,10 @@ The Desktop reducer is a disposable projection of this contract. The current
 authenticated API and REPL compatibility routes share its runtime/session state
 machine; interactive CLI and future TUI views must converge without adding a
 second write path.
+
+Readers must skip future operator-event schema versions, count skipped events,
+and keep valid known events projected. Unknown future data never becomes a
+reason to reinterpret, rewrite, or delete durable local truth.
 
 ## Per-Call Routing And Cost Truth
 

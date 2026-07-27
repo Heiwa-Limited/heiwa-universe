@@ -4,6 +4,16 @@ use serde::Deserialize;
 /// Default Ollama API endpoint.
 pub const DEFAULT_ENDPOINT: &str = "http://127.0.0.1:11434";
 
+/// Resolved Ollama API endpoint.
+///
+/// `HEIWA_OLLAMA_BASE` overrides the default so hermetic tests can point
+/// discovery at a dead port and exercise deterministic fallbacks without
+/// reaching the operator's live daemon. Routing inference through
+/// `ModelCallExecutor` removed the direct-call override this replaces.
+pub fn default_endpoint() -> String {
+    std::env::var("HEIWA_OLLAMA_BASE").unwrap_or_else(|_| DEFAULT_ENDPOINT.to_string())
+}
+
 // ---------------------------------------------------------------------------
 // Ollama API response types (subset of /api/tags)
 // ---------------------------------------------------------------------------
@@ -60,10 +70,11 @@ struct CapabilityFlags {
 ///
 /// Updates the account's `status` and `models` fields in place.
 pub async fn detect_models(account: &mut ProviderAccount) -> anyhow::Result<()> {
-    let endpoint = match &account.credential {
-        crate::registry::Credential::LocalRuntime { endpoint } => endpoint.clone(),
-        _ => DEFAULT_ENDPOINT.to_string(),
-    };
+    let endpoint =
+        std::env::var("HEIWA_OLLAMA_BASE").unwrap_or_else(|_| match &account.credential {
+            crate::registry::Credential::LocalRuntime { endpoint } => endpoint.clone(),
+            _ => DEFAULT_ENDPOINT.to_string(),
+        });
 
     let url = format!("{}/api/tags", endpoint);
     let client = reqwest::Client::builder()
