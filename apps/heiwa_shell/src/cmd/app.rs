@@ -4137,18 +4137,34 @@ fn worker_agent_rows() -> Vec<Value> {
 }
 
 fn ollama_models_payload() -> Value {
-    let ollama_url =
-        std::env::var("OLLAMA_URL").unwrap_or_else(|_| "http://127.0.0.1:11434".to_string());
-    let url = format!("{}/api/tags", ollama_url.trim_end_matches('/'));
-    let models: Vec<Value> = tokio::task::block_in_place(|| {
-        reqwest::blocking::get(&url)
-            .ok()
-            .and_then(|resp| resp.json::<Value>().ok())
-            .and_then(|val| val.get("models").cloned())
-            .and_then(|val| serde_json::from_value(val).ok())
-            .unwrap_or_default()
-    });
-    json!({ "models": models })
+    let registry = heiwa_provider::AccountRegistry::load();
+    let stored_endpoint = heiwa_provider::detect::ollama::registered_endpoint(&registry.accounts);
+    let Ok(endpoint) = heiwa_provider::detect::ollama::resolve_configured_endpoint(stored_endpoint)
+    else {
+        return json!({ "models": [] });
+    };
+    json!({ "models": tokio::task::block_in_place(|| ollama_models_for_endpoint(&endpoint)) })
+}
+
+fn ollama_models_for_endpoint(
+    endpoint: &heiwa_provider::detect::ollama::OllamaEndpoint,
+) -> Vec<Value> {
+    let Ok(client) = reqwest::blocking::Client::builder()
+        .connect_timeout(heiwa_provider::detect::ollama::ENDPOINT_CONNECT_TIMEOUT)
+        .timeout(heiwa_provider::detect::ollama::ENDPOINT_REQUEST_TIMEOUT)
+        .no_proxy()
+        .build()
+    else {
+        return Vec::new();
+    };
+    client
+        .get(endpoint.api_url("/api/tags"))
+        .send()
+        .ok()
+        .and_then(|resp| resp.json::<Value>().ok())
+        .and_then(|val| val.get("models").cloned())
+        .and_then(|val| serde_json::from_value(val).ok())
+        .unwrap_or_default()
 }
 
 fn hook_provider_rows() -> Vec<Value> {
@@ -4969,6 +4985,36 @@ mod app_readmodel_tests {
         assert!(replay.starts_with("HTTP/1.1 401 Unauthorized\r\n"));
         assert!(replay.contains("invalid_browser_bootstrap"));
         assert!(!replay.contains(&bootstrap));
+    }
+
+    #[test]
+    fn ollama_models_payload_uses_resolved_override_not_live_default() {
+        use std::io::{Read, Write};
+        use std::net::TcpListener;
+
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let override_url = format!("http://{}/", listener.local_addr().unwrap());
+        let server = std::thread::spawn(move || {
+            let (mut stream, _) = listener.accept().unwrap();
+            let mut request = [0_u8; 1024];
+            let bytes = stream.read(&mut request).unwrap();
+            let request = std::str::from_utf8(&request[..bytes]).unwrap();
+            assert!(request.starts_with("GET /api/tags HTTP/1.1"), "{request}");
+            stream
+                .write_all(
+                    b"HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: 31\r\nConnection: close\r\n\r\n{\"models\":[{\"name\":\"fixture\"}]}",
+                )
+                .unwrap();
+        });
+        let endpoint = heiwa_provider::detect::ollama::resolve_endpoint(
+            heiwa_provider::detect::ollama::EndpointOverride::Value(&override_url),
+            Some("http://127.0.0.1:11434"),
+        )
+        .unwrap();
+
+        let models = ollama_models_for_endpoint(&endpoint);
+        server.join().unwrap();
+        assert_eq!(models, vec![json!({"name": "fixture"})]);
     }
 
     #[test]

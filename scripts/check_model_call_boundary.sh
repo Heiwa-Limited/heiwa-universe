@@ -12,7 +12,7 @@ provider_adapter_prefix='crates/heiwa_provider/src/providers/'
 adapter_send_pattern='(?s)\.\s*send\s*\(\s*&?\s*[A-Za-z_][A-Za-z0-9_]*(?:\s*\.\s*[A-Za-z_][A-Za-z0-9_]*(?:\s*\(\s*\))?)*\s*,\s*(?:&\s*[A-Za-z_][A-Za-z0-9_]*|[A-Za-z_][A-Za-z0-9_]*(?:\s*\.\s*[A-Za-z_][A-Za-z0-9_]*(?:\s*\(\s*\))?)+)\s*,|(?:\b[A-Za-z_][A-Za-z0-9_]*::)*\bProviderAdapter\s*::\s*send\s*\('
 # Production inference must not bypass ModelCallExecutor through a provider
 # endpoint or by spawning a provider-owned CLI in the shell/loop crates.
-direct_inference_pattern='(?s)/api/generate|\b(?:std::process::|tokio::process::)?Command\s*::\s*new\s*\(\s*"(?:ollama|claude|codex|gemini|grok)"|\breqwest\b.{0,1200}(?:11434|ollama|/api/generate)|\bCommand\s*::\s*new\s*\(\s*"curl"\s*\).{0,1200}(?:11434|ollama|/api/generate)'
+direct_inference_pattern='(?s)/api/(?:generate|chat)|/v1/chat(?:/completions)?|\b(?:std::process::|tokio::process::)?Command\s*::\s*new\s*\(\s*"(?:ollama|claude|codex|gemini|grok)"|\breqwest\b.{0,1200}(?:/api/(?:generate|chat)|/v1/chat(?:/completions)?)|\bCommand\s*::\s*new\s*\(\s*"curl"\s*\).{0,1200}(?:/api/(?:generate|chat)|/v1/chat(?:/completions)?)'
 
 matches_pattern() {
   printf '%s\n' "$1" | rg --quiet --multiline --pcre2 "$adapter_send_pattern"
@@ -55,6 +55,7 @@ self_test() {
   expression_messages_fixture='gateway.send(model, messages.as_slice(), stream_tx)'
   safe_fixture='event_tx.send(StreamEvent::Done(usage))'
   endpoint_fixture='client.post("http://localhost:11434/api/generate")'
+  inventory_fixture='client.get("http://localhost:11434/api/tags")'
   cli_fixture='tokio::process::Command::new("ollama").arg("run")'
   curl_fixture='Command::new("curl").arg("http://localhost:11434/v1/chat")'
 
@@ -65,6 +66,7 @@ self_test() {
   matches_pattern "$expression_messages_fixture" || return 1
   ! matches_pattern "$safe_fixture" || return 1
   matches_direct_inference "$endpoint_fixture" || return 1
+  ! matches_direct_inference "$inventory_fixture" || return 1
   matches_direct_inference "$cli_fixture" || return 1
   matches_direct_inference "$curl_fixture" || return 1
   ! matches_direct_inference "$safe_fixture" || return 1

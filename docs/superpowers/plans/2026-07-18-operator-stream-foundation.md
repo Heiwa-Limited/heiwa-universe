@@ -15,7 +15,7 @@
 - `heiwa_session` is the sole domain writer; `heiwa_evidence` remains a dumb framing/append service.
 - Raw secrets, bearer tokens, credential-file contents, and provider auth material must fail the sensitive-material gate before append.
 - Journal envelope `v` and operator event `schema_version` are distinct version domains.
-- All `/api/v1/operator/*` HTTP and `/ws/v1/operator` connections require `heiwa_core::auth` machine-token or signed-session authentication.
+- All `/api/v1/operator/*` HTTP and `/ws/v1/operator` connections require `heiwa_core::auth` signed local requests, browser session cookies, or compatibility bearer authentication.
 - Tauri signs local HTTP/WS requests natively; HMAC binds method, port, exact
   target, body digest, timestamp, and nonce. Machine bearer is compatibility
   auth only and must never enter renderer assets or persisted operator events.
@@ -1025,7 +1025,7 @@ Expected: every command PASS.
 
 ```bash
 cargo test --workspace --all-features
-bash scripts/check_agent_baseline.sh
+bash scripts/check_agent_baseline.sh --branch feature/backend-lance-github
 git diff --check
 ```
 

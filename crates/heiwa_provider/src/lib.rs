@@ -370,15 +370,23 @@ fn has_command(cmd: &str) -> bool {
 }
 
 fn is_ollama_running() -> bool {
-    let endpoint = crate::detect::ollama::default_endpoint();
-    let authority = endpoint
-        .split_once("://")
-        .map(|(_, rest)| rest)
-        .unwrap_or(endpoint.as_str())
-        .split('/')
-        .next()
-        .unwrap_or_default();
-    !authority.is_empty() && std::net::TcpStream::connect(authority).is_ok()
+    let registry = AccountRegistry::load();
+    let stored_endpoint = crate::detect::ollama::registered_endpoint(&registry.accounts);
+    let Ok(endpoint) = crate::detect::ollama::resolve_configured_endpoint(stored_endpoint) else {
+        return false;
+    };
+    let Ok(client) = reqwest::blocking::Client::builder()
+        .connect_timeout(crate::detect::ollama::ENDPOINT_CONNECT_TIMEOUT)
+        .timeout(crate::detect::ollama::ENDPOINT_CONNECT_TIMEOUT)
+        .no_proxy()
+        .build()
+    else {
+        return false;
+    };
+    client
+        .get(endpoint.api_url("/api/tags"))
+        .send()
+        .is_ok_and(|response| response.status().is_success())
 }
 
 fn gemini_has_native_auth() -> bool {

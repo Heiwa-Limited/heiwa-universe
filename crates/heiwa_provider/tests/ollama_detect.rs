@@ -1,9 +1,4 @@
 use heiwa_provider::registry::*;
-use std::io::{Read, Write};
-use std::net::TcpListener;
-use std::sync::Mutex;
-
-static OLLAMA_BASE_ENV_LOCK: Mutex<()> = Mutex::new(());
 
 /// Test Ollama model detection against a running instance.
 ///
@@ -92,48 +87,4 @@ async fn detect_ollama_unreachable() {
         account.models.is_empty(),
         "stale models should be cleared on failure"
     );
-}
-
-/// Hermetic callers must be able to prevent discovery from touching a live
-/// operator daemon, even when an account still carries the production default.
-#[tokio::test]
-async fn detect_ollama_honors_hermetic_base_override() {
-    let _env_lock = OLLAMA_BASE_ENV_LOCK.lock().unwrap();
-    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
-    let endpoint = format!("http://{}", listener.local_addr().unwrap());
-    let server = std::thread::spawn(move || {
-        let (mut stream, _) = listener.accept().unwrap();
-        let mut request = [0_u8; 1024];
-        let bytes = stream.read(&mut request).unwrap();
-        let request = std::str::from_utf8(&request[..bytes]).unwrap();
-        assert!(request.starts_with("GET /api/tags HTTP/1.1"), "{request}");
-        stream
-            .write_all(
-                b"HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: 13\r\nConnection: close\r\n\r\n{\"models\":[]}",
-            )
-            .unwrap();
-    });
-
-    let previous = std::env::var_os("HEIWA_OLLAMA_BASE");
-    std::env::set_var("HEIWA_OLLAMA_BASE", &endpoint);
-    let mut account = ProviderAccount {
-        account_id: "ollama-override-test".to_string(),
-        provider: "ollama".to_string(),
-        credential: Credential::LocalRuntime {
-            endpoint: "http://127.0.0.1:11434".to_string(),
-        },
-        rate_group: "local".to_string(),
-        status: AccountStatus::Disconnected,
-        models: vec![],
-    };
-    let result = heiwa_provider::detect::ollama::detect_models(&mut account).await;
-    match previous {
-        Some(value) => std::env::set_var("HEIWA_OLLAMA_BASE", value),
-        None => std::env::remove_var("HEIWA_OLLAMA_BASE"),
-    }
-    server.join().unwrap();
-
-    result.unwrap();
-    assert_eq!(account.status, AccountStatus::Connected);
-    assert!(account.models.is_empty());
 }

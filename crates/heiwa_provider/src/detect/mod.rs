@@ -16,8 +16,10 @@ pub async fn auto_discover(registry: &mut AccountRegistry) -> Vec<String> {
     // Ensure an Ollama local account exists if none is registered
     let has_ollama = registry.accounts.iter().any(|a| a.provider == "ollama");
     if !has_ollama {
-        if let Ok(id) = add_local_runtime_account(registry, "ollama", &ollama::default_endpoint()) {
-            changes.push(format!("Registered Ollama account: {}", id));
+        if let Ok(endpoint) = ollama::resolve_configured_endpoint(None) {
+            if let Ok(id) = add_local_runtime_account(registry, "ollama", endpoint.as_str()) {
+                changes.push(format!("Registered Ollama account: {}", id));
+            }
         }
     }
 
