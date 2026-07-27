@@ -20,14 +20,57 @@ use lancedb::arrow::arrow_schema::{ArrowError, DataType, Field, Schema};
 use lancedb::query::{ExecutableQuery, QueryBase};
 use lancedb::{Connection, DistanceType, Table};
 
-use crate::SimilarEntry;
+use crate::{EmbeddingRow, SimilarEntry};
 
 const TABLE_NAME: &str = "transcript_embeddings";
 
+/// Drive a lance future to completion from synchronous code without ever
+/// panicking on nested-runtime entry. Callers may be plain threads, tokio
+/// multi-thread workers, or a current-thread runtime:
+///
+/// - outside any runtime: block on our dedicated runtime directly;
+/// - inside a multi-thread runtime: `block_in_place` lifts the "cannot block
+///   a worker" restriction, then we block on our own runtime;
+/// - inside a current-thread runtime (where `block_in_place` itself panics):
+///   run the future on a scoped thread against our runtime and join.
+fn run_blocking<F>(runtime: &tokio::runtime::Runtime, future: F) -> F::Output
+where
+    F: std::future::Future + Send,
+    F::Output: Send,
+{
+    match tokio::runtime::Handle::try_current() {
+        Err(_) => runtime.block_on(future),
+        Ok(handle) => match handle.runtime_flavor() {
+            tokio::runtime::RuntimeFlavor::CurrentThread => std::thread::scope(|scope| {
+                scope
+                    .spawn(|| runtime.block_on(future))
+                    .join()
+                    .expect("lance blocking thread panicked")
+            }),
+            _ => tokio::task::block_in_place(|| runtime.block_on(future)),
+        },
+    }
+}
+
 pub struct LanceVectorStore {
     conn: Connection,
-    runtime: tokio::runtime::Runtime,
+    /// Dedicated runtime driving lancedb's async API. `Option` only so Drop
+    /// can take it: dropping a `Runtime` inside an async context panics, so
+    /// Drop hands it to `shutdown_background()` instead when a caller drops
+    /// the store from within tokio.
+    runtime: Option<tokio::runtime::Runtime>,
     dim: i32,
+}
+
+impl Drop for LanceVectorStore {
+    fn drop(&mut self) {
+        if let Some(runtime) = self.runtime.take() {
+            if tokio::runtime::Handle::try_current().is_ok() {
+                runtime.shutdown_background();
+            }
+            // Outside a runtime the normal (blocking) drop is fine.
+        }
+    }
 }
 
 impl LanceVectorStore {
@@ -44,12 +87,16 @@ impl LanceVectorStore {
             .to_str()
             .ok_or_else(|| anyhow!("non-utf8 lance dataset path"))?
             .to_string();
-        let conn = runtime.block_on(async { lancedb::connect(&uri).execute().await })?;
+        let conn = run_blocking(&runtime, async { lancedb::connect(&uri).execute().await })?;
         Ok(Self {
             conn,
-            runtime,
+            runtime: Some(runtime),
             dim: dim as i32,
         })
+    }
+
+    fn runtime(&self) -> &tokio::runtime::Runtime {
+        self.runtime.as_ref().expect("runtime present until drop")
     }
 
     fn schema(&self) -> Arc<Schema> {
@@ -101,17 +148,43 @@ impl LanceVectorStore {
     async fn table(&self) -> Result<Table> {
         match self.conn.open_table(TABLE_NAME).execute().await {
             Ok(table) => Ok(table),
-            Err(_) => {
-                let empty: Box<dyn RecordBatchReader + Send> = Box::new(
-                    RecordBatchIterator::new(std::iter::empty::<Result<RecordBatch, ArrowError>>(), self.schema()),
-                );
+            // Only a missing table means "create it". Any other failure
+            // (corruption, permissions, version skew) must surface as-is —
+            // masking it behind a create attempt would hide real damage.
+            Err(lancedb::Error::TableNotFound { .. }) => {
+                let empty: Box<dyn RecordBatchReader + Send> = Box::new(RecordBatchIterator::new(
+                    std::iter::empty::<Result<RecordBatch, ArrowError>>(),
+                    self.schema(),
+                ));
                 self.conn
                     .create_table(TABLE_NAME, empty)
                     .execute()
                     .await
                     .map_err(|error| anyhow!("creating lance table: {error}"))
             }
+            Err(error) => Err(anyhow!("opening lance table: {error}")),
         }
+    }
+
+    /// Drop everything and re-ingest from the source of truth. The Lance
+    /// index is derived state; this is the recovery path when the index is
+    /// lost, corrupt, or the embedding model changed.
+    pub fn rebuild_from<I>(&self, rows: I) -> Result<usize>
+    where
+        I: Iterator<Item = EmbeddingRow>,
+    {
+        run_blocking(self.runtime(), async {
+            match self.conn.drop_table(TABLE_NAME, &[]).await {
+                Ok(()) | Err(lancedb::Error::TableNotFound { .. }) => Ok(()),
+                Err(error) => Err(anyhow!("dropping lance table for rebuild: {error}")),
+            }
+        })?;
+        let mut count = 0;
+        for row in rows {
+            self.upsert(&row.session_id, row.entry_id, &row.model, &row.vector)?;
+            count += 1;
+        }
+        Ok(count)
     }
 
     /// Insert or replace the embedding for (session_id, entry_id).
@@ -124,10 +197,12 @@ impl LanceVectorStore {
     ) -> Result<()> {
         let batch = self.batch(session_id, entry_id, model, vector)?;
         let schema = self.schema();
-        self.runtime.block_on(async {
+        run_blocking(self.runtime(), async {
             let table = self.table().await?;
             let mut merge = table.merge_insert(&["session_id", "entry_id"]);
-            merge.when_matched_update_all(None).when_not_matched_insert_all();
+            merge
+                .when_matched_update_all(None)
+                .when_not_matched_insert_all();
             let reader: Box<dyn RecordBatchReader + Send> = Box::new(RecordBatchIterator::new(
                 vec![Ok::<RecordBatch, ArrowError>(batch)].into_iter(),
                 schema,
@@ -148,7 +223,7 @@ impl LanceVectorStore {
         query: &[f32],
         limit: usize,
     ) -> Result<Vec<SimilarEntry>> {
-        self.runtime.block_on(async {
+        run_blocking(self.runtime(), async {
             let table = self.table().await?;
             let escaped = session_id.replace('\'', "''");
             let batches: Vec<RecordBatch> = table
@@ -198,6 +273,104 @@ impl LanceVectorStore {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn lance_store_persists_across_reopen() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        {
+            let store = LanceVectorStore::open(dir.path(), 4).expect("open");
+            store
+                .upsert("session-a", 1, "test-model", &[1.0, 0.0, 0.0, 0.0])
+                .expect("upsert");
+        }
+
+        let reopened = LanceVectorStore::open(dir.path(), 4).expect("reopen");
+        let results = reopened
+            .top_k_similar("session-a", &[1.0, 0.0, 0.0, 0.0], 5)
+            .expect("search after reopen");
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].entry_id, 1);
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn lance_ops_are_safe_inside_multi_thread_tokio_runtime() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let store = LanceVectorStore::open(dir.path(), 4).expect("open");
+        store
+            .upsert("session-a", 1, "test-model", &[1.0, 0.0, 0.0, 0.0])
+            .expect("upsert inside runtime");
+        let results = store
+            .top_k_similar("session-a", &[1.0, 0.0, 0.0, 0.0], 1)
+            .expect("search inside runtime");
+        assert_eq!(results.len(), 1);
+    }
+
+    #[tokio::test]
+    async fn lance_ops_are_safe_inside_current_thread_tokio_runtime() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let store = LanceVectorStore::open(dir.path(), 4).expect("open");
+        store
+            .upsert("session-a", 1, "test-model", &[1.0, 0.0, 0.0, 0.0])
+            .expect("upsert inside runtime");
+        let results = store
+            .top_k_similar("session-a", &[1.0, 0.0, 0.0, 0.0], 1)
+            .expect("search inside runtime");
+        assert_eq!(results.len(), 1);
+    }
+
+    #[test]
+    fn open_surfaces_corrupt_table_instead_of_recreating() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        // A garbage file where the table directory should be produces an open
+        // error that is NOT "table missing"; it must surface, not be masked
+        // by a create-table attempt.
+        std::fs::write(dir.path().join(format!("{TABLE_NAME}.lance")), b"garbage")
+            .expect("write garbage");
+        let store = LanceVectorStore::open(dir.path(), 4).expect("connect");
+        let error = store
+            .upsert("session-a", 1, "test-model", &[1.0, 0.0, 0.0, 0.0])
+            .expect_err("corrupt table must error");
+        assert!(
+            error.to_string().contains("opening lance table"),
+            "unexpected error: {error}"
+        );
+    }
+
+    #[test]
+    fn rebuild_from_replaces_table_contents() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let store = LanceVectorStore::open(dir.path(), 4).expect("open");
+        store
+            .upsert("stale", 99, "old-model", &[0.5, 0.5, 0.0, 0.0])
+            .expect("stale row");
+
+        let source = vec![
+            EmbeddingRow {
+                session_id: "session-a".to_string(),
+                entry_id: 1,
+                model: "test-model".to_string(),
+                vector: vec![1.0, 0.0, 0.0, 0.0],
+            },
+            EmbeddingRow {
+                session_id: "session-a".to_string(),
+                entry_id: 2,
+                model: "test-model".to_string(),
+                vector: vec![0.0, 1.0, 0.0, 0.0],
+            },
+        ];
+        let rebuilt = store.rebuild_from(source.into_iter()).expect("rebuild");
+        assert_eq!(rebuilt, 2);
+
+        let stale = store
+            .top_k_similar("stale", &[0.5, 0.5, 0.0, 0.0], 5)
+            .expect("stale query");
+        assert!(stale.is_empty(), "rebuild must drop pre-existing rows");
+        let fresh = store
+            .top_k_similar("session-a", &[1.0, 0.0, 0.0, 0.0], 5)
+            .expect("fresh query");
+        assert_eq!(fresh.len(), 2);
+        assert_eq!(fresh[0].entry_id, 1);
+    }
 
     #[test]
     fn lance_store_upserts_and_searches() {

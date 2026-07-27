@@ -1,18 +1,20 @@
 mod cli;
-mod home;
 mod cmd;
+mod home;
 
 use anyhow::{anyhow, Result};
 use chrono::Utc;
 use heiwa_core::drex::{
-    default_policy, plan_route, preflight_execution, DrexIngress, ExecutionMode,
+    default_policy, plan_route, preflight_execution, CallRisk, CostTruth, DrexIngress,
+    ExecutionLocality, ExecutionMode, ModelCallCandidate, ModelCallRequest, ModelCallStage,
+    PrivacyClass, SafetyClass,
 };
 use heiwa_protocol::{
     parse_turn_intent, CockpitCommand, CockpitEvent, ExecutionRole, ExecutionScope, Permission,
     PrincipalKind, RiskClass, RoutingState, SessionPrincipal, SessionState, ToolCallReceipt,
     ToolLease, TranscriptBlock,
 };
-use heiwa_provider::adapter::{Message, ProviderAdapter, Role, StreamEvent, TokenUsage};
+use heiwa_provider::adapter::{Message, ProviderAdapter, Role, TokenUsage};
 use heiwa_provider::providers::claude_code::ClaudeCodeCliAdapter;
 use heiwa_provider::providers::codex_cli::CodexCliAdapter;
 use heiwa_provider::providers::gemini_cli::GeminiCliAdapter;
@@ -20,10 +22,18 @@ use heiwa_provider::providers::ollama::OllamaCliAdapter;
 use heiwa_provider::providers::openrouter::OpenRouterAdapter;
 use heiwa_repl::{parse_input, render_footer, ReplCommand, TelemetryState};
 use heiwa_shell::agentic;
+use heiwa_shell::model_calls::{
+    ExecutorLoopCaller, ModelCallExecution, ModelCallExecutor, ModelCallResult,
+};
+use heiwa_shell::operator::{
+    OperatorModelTurn, OperatorPreparationContext, OperatorStreamFrame, OperatorTurnPreparation,
+    OperatorTurnRunner, OperatorTurnWork,
+};
+use serde_json::Value;
 use std::env;
 use std::io::{self, IsTerminal, Write};
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
+use std::sync::{Arc, OnceLock};
 
 fn canonical_provider_id(provider: &str) -> &str {
     match provider {
@@ -113,8 +123,10 @@ fn grant_tool_lease(scope: &mut ExecutionScope, name: &str, risk_class: RiskClas
 }
 
 /// Result of successfully routing a task to a model.
+#[derive(Clone)]
 struct RouteResult {
-    adapter: Arc<dyn ProviderAdapter>,
+    candidates: Vec<ModelCallCandidate>,
+    local_auxiliary_candidates: Vec<ModelCallCandidate>,
     model_id: String,
     provider: String,
     provider_model_id: String,
@@ -124,6 +136,34 @@ struct RouteResult {
     privacy: String,
     request_id: String,
     turn_started_at: String,
+}
+
+fn resolved_route_after_model_call(planned: &RouteResult, result: &ModelCallResult) -> RouteResult {
+    let mut resolved = planned.clone();
+    resolved.provider = result.provider.clone();
+    resolved.model_id = result.model_id.clone();
+    resolved.provider_model_id = result.provider_model_id.clone();
+    resolved.rate_group = result.rate_group.clone();
+    resolved.candidates.retain(|candidate| {
+        let identity = format!("{}/{}", candidate.tier.provider, candidate.tier.model_id);
+        !result.failed_models.contains(&identity)
+    });
+    resolved.routing_metadata = serde_json::json!({
+        "planned": serde_json::from_str::<serde_json::Value>(&planned.routing_metadata)
+            .unwrap_or_else(|_| serde_json::Value::String(planned.routing_metadata.clone())),
+        "executed": {
+            "provider": result.provider,
+            "model_id": result.model_id,
+            "provider_model_id": result.provider_model_id,
+            "rate_group": result.rate_group,
+            "attempts": result.attempts,
+            "failed_models": result.failed_models,
+            "cost_usd": result.cost_usd,
+            "cost_truth": result.cost_truth,
+        }
+    })
+    .to_string();
+    resolved
 }
 
 #[derive(Debug, Clone)]
@@ -168,7 +208,6 @@ enum RouteOutcome {
 const DEFAULT_SESSION_ID: &str = "default";
 const TRANSCRIPT_CHAR_BUDGET: usize = 16_000;
 const ROUTE_COMPRESSION_BYTE_THRESHOLD: usize = 4096;
-const ROUTE_COMPRESSION_MODEL: &str = "ollama/qwen3.5:4b";
 
 #[tokio::main]
 async fn main() -> Result<()> {
@@ -225,18 +264,50 @@ async fn main() -> Result<()> {
         }
         "receipts" => {
             let receipts_db = heiwa_install::get_heiwa_dir().join("receipts.db");
-            let evidence_dir = heiwa_install::get_heiwa_dir().join("evidence");
+            let evidence_dir = heiwa_evidence::journal_root()?;
+            let receipts_dir = heiwa_evidence::receipts_root()?;
             println!("Receipts are recorded locally:");
             println!(
-                "  SQLite: {} ({})",
+                "  SQLite:   {} ({})",
                 receipts_db.display(),
-                if receipts_db.exists() { "present" } else { "not created yet" }
+                if receipts_db.exists() {
+                    "present"
+                } else {
+                    "not created yet"
+                }
             );
             println!(
-                "  JSONL:  {} ({})",
+                "  Journal:  {} ({})",
                 evidence_dir.display(),
-                if evidence_dir.exists() { "present" } else { "not created yet" }
+                if evidence_dir.exists() {
+                    "present"
+                } else {
+                    "not created yet"
+                }
             );
+            println!(
+                "  Receipts: {} ({})",
+                receipts_dir.display(),
+                if receipts_dir.exists() {
+                    "present"
+                } else {
+                    "not created yet"
+                }
+            );
+            let streams = heiwa_evidence::journal_summary(&evidence_dir)?;
+            if !streams.is_empty() {
+                println!("  Journal streams:");
+                for stream in streams {
+                    if stream.skipped_lines > 0 {
+                        println!(
+                            "    {:<24} {} event(s), {} unreadable line(s)",
+                            stream.kind, stream.events, stream.skipped_lines
+                        );
+                    } else {
+                        println!("    {:<24} {} event(s)", stream.kind, stream.events);
+                    }
+                }
+            }
         }
         "devices" => {
             let manifest_path = heiwa_install::get_heiwa_dir().join("machine.json");
@@ -265,7 +336,7 @@ async fn main() -> Result<()> {
                     manifest["installed_at"].as_str().unwrap_or("unknown")
                 );
 
-                println!("  Sync:     local-first (evidence under ~/.heiwa/evidence/, git-synced)");
+                println!("  Sync:     local-first (evidence under ~/.heiwa/evidence/; GitHub sync planned, gated on redaction — local-only today)");
             } else {
                 println!("No device registered. Run 'heiwa install' first.");
             }
@@ -277,11 +348,24 @@ async fn main() -> Result<()> {
             let identity = heiwa_provider::load_identity();
             let app_probe = crate::cmd::app::probe_local_app(crate::cmd::app::DEFAULT_PORT);
             let layout = heiwa_install::check_runtime_layout();
-            let evidence_dir = heiwa_install::get_heiwa_dir().join("evidence");
+            let evidence_dir = heiwa_evidence::journal_root()?;
+            let evidence_streams = heiwa_evidence::journal_summary(&evidence_dir)
+                .unwrap_or_default()
+                .into_iter()
+                .map(|stream| {
+                    serde_json::json!({
+                        "kind": stream.kind,
+                        "events": stream.events,
+                        "skipped_lines": stream.skipped_lines,
+                    })
+                })
+                .collect::<Vec<_>>();
             let evidence_status = serde_json::json!({
                 "backend": "local-jsonl",
                 "dir": evidence_dir.display().to_string(),
                 "present": evidence_dir.exists(),
+                "receipts_dir": heiwa_evidence::receipts_root()?.display().to_string(),
+                "streams": evidence_streams,
             });
             let provider_statuses: Vec<heiwa_provider::LegacyProviderAccount> =
                 ["claude", "codex", "gemini", "antigravity", "ollama"]
@@ -417,11 +501,15 @@ async fn main() -> Result<()> {
 
             println!();
             println!("Evidence:");
-            println!("  Backend:       local-jsonl (+ derived Lance index, git-synced truth)");
+            println!("  Backend:       local-jsonl (+ derived Lance index; GitHub sync planned, redaction-gated)");
             println!("  Dir:           {}", evidence_dir.display());
             println!(
                 "  Present:       {}",
-                if evidence_dir.exists() { "yes" } else { "not created yet" }
+                if evidence_dir.exists() {
+                    "yes"
+                } else {
+                    "not created yet"
+                }
             );
 
             if let Some(ai_ops) = ai_ops {
@@ -678,7 +766,7 @@ async fn main() -> Result<()> {
         }
         "loop" => {
             if args.len() < 3 {
-                println!("Usage: heiwa loop [max_turns] \"objective\" [--intent code] [--risk low] [--privacy standard]");
+                println!("Usage: heiwa loop [max_turns] \"objective\" [--intent code] [--risk low] [--privacy standard] [--approved]");
             } else {
                 let max_turns = args[2].parse::<u32>().unwrap_or(10);
                 let objective = if args.len() >= 4 {
@@ -705,6 +793,7 @@ async fn main() -> Result<()> {
                 } else {
                     "standard".to_string()
                 };
+                let approved = args.iter().any(|arg| arg == "--approved");
 
                 let config = heiwa_loop::LoopConfig {
                     user_id: identity.user_id,
@@ -715,6 +804,7 @@ async fn main() -> Result<()> {
                     risk,
                     privacy,
                     runtime: "any".to_string(),
+                    approved,
                 };
 
                 let mut registry = heiwa_provider::AccountRegistry::load();
@@ -731,28 +821,11 @@ async fn main() -> Result<()> {
 
                 println!("Loop initiated: {}", controller.get_id());
 
-                let adapters: Arc<dyn Fn(&str) -> Option<Arc<dyn ProviderAdapter>> + Send + Sync> =
-                    Arc::new(|provider: &str| match canonical_provider_id(provider) {
-                        "ollama" => {
-                            Some(Arc::new(OllamaCliAdapter::new()) as Arc<dyn ProviderAdapter>)
-                        }
-                        "claude" => {
-                            Some(Arc::new(ClaudeCodeCliAdapter::new()) as Arc<dyn ProviderAdapter>)
-                        }
-                        "codex" => {
-                            Some(Arc::new(CodexCliAdapter::new()) as Arc<dyn ProviderAdapter>)
-                        }
-                        "gemini" => {
-                            Some(Arc::new(GeminiCliAdapter::new()) as Arc<dyn ProviderAdapter>)
-                        }
-                        "openrouter" => OpenRouterAdapter::from_registry()
-                            .map(|a| Arc::new(a) as Arc<dyn ProviderAdapter>),
-                        _ => None,
-                    });
+                let caller = default_loop_model_caller().map_err(anyhow::Error::msg)?;
 
                 let c = controller;
                 tokio::spawn(async move {
-                    if let Err(e) = c.run(tx, adapters).await {
+                    if let Err(e) = c.run(tx, caller).await {
                         eprintln!("Loop error: {}", e);
                     }
                 });
@@ -979,10 +1052,16 @@ async fn register_current_device() -> Result<()> {
 pub(crate) fn get_live_model_tiers(
     registry: &heiwa_provider::AccountRegistry,
 ) -> Vec<heiwa_protocol::ModelTier> {
-    registry
+    let mut models = registry
         .all_models()
         .into_iter()
         .filter(|m| provider_supports_loop_adapter(&m.provider))
+        .collect::<Vec<_>>();
+    models.sort_by_key(|model| live_model_identity(model));
+    let mut used_ids = std::collections::HashSet::new();
+
+    models
+        .into_iter()
         .map(|m| {
             let mut strengths = vec!["chat"];
             if m.supports_tools {
@@ -995,8 +1074,16 @@ pub(crate) fn get_live_model_tiers(
                 strengths.push("advanced_coding");
             }
 
+            let mut id = stable_live_model_id(&m);
+            while !used_ids.insert(id) {
+                id = id.wrapping_add(1);
+                if id == 0 {
+                    id = 1;
+                }
+            }
+
             heiwa_protocol::ModelTier {
-                id: 0,
+                id,
                 model_id: m.model_id.clone(),
                 provider_model_id: m.provider_model_id.clone(),
                 provider: canonical_provider_id(&m.provider).to_string(),
@@ -1020,7 +1107,31 @@ pub(crate) fn get_live_model_tiers(
         .collect()
 }
 
-/// Local evidence appender (backend pivot 2026-07-15: Lance + GitHub, no STDB).
+fn live_model_identity(model: &heiwa_provider::DetectedModel) -> String {
+    format!(
+        "{}|{}|{}|{}|{}",
+        canonical_provider_id(&model.provider),
+        model.model_id,
+        model.provider_model_id,
+        model.account_id,
+        model.rate_group
+    )
+}
+
+fn stable_live_model_id(model: &heiwa_provider::DetectedModel) -> u64 {
+    let mut hash = 0xcbf29ce484222325_u64;
+    for byte in live_model_identity(model).bytes() {
+        hash ^= u64::from(byte);
+        hash = hash.wrapping_mul(0x100000001b3);
+    }
+    if hash == 0 {
+        1
+    } else {
+        hash
+    }
+}
+
+/// Local evidence appender: JSONL truth with derived Lance recall.
 /// Journals to `~/.heiwa/evidence/<kind>.jsonl`; silently no-ops if the
 /// evidence directory cannot be created.
 #[derive(Clone)]
@@ -1232,6 +1343,14 @@ async fn run_repl(use_cockpit: bool) -> Result<()> {
                         continue;
                     }
                     Ok(RouteOutcome::Deterministic(response)) => {
+                        if let Err(error) =
+                            execute_deterministic_surface_turn(&state.session_id, &t, &response)
+                                .await
+                        {
+                            eprintln!("Operator turn error: {error}");
+                            turn_count += 1;
+                            continue;
+                        }
                         append_state_block(&mut state, TranscriptBlock::User(t.clone()));
                         append_state_block(
                             &mut state,
@@ -1242,11 +1361,7 @@ async fn run_repl(use_cockpit: bool) -> Result<()> {
                         continue;
                     }
                     Ok(RouteOutcome::Routed(route)) => {
-                        pins.current_provider = route.provider.clone();
-                        pins.current_model = route.model_id.clone();
-                        record_route_evidence(&evidence_client, &route, &t);
-
-                        let prepared = prepare_outbound_prompt_for_route(&route, &t);
+                        let prepared = prepare_outbound_prompt_for_route(&route, &t).await;
                         let messages = build_messages_from_transcript(
                             &state.transcript,
                             &prepared.model_prompt,
@@ -1259,45 +1374,46 @@ async fn run_repl(use_cockpit: bool) -> Result<()> {
                             .collect::<Vec<_>>()
                             .join("\n");
                         let receipt_started = std::time::Instant::now();
-                        let (stream_tx, mut stream_rx) = tokio::sync::mpsc::channel(32);
-                        let model_id = route.provider_model_id.clone();
-
-                        tokio::spawn({
-                            let adapter = route.adapter.clone();
-                            async move {
-                                if let Err(e) = adapter.send(&model_id, &messages, stream_tx).await
-                                {
-                                    eprintln!("Adapter error: {}", e);
+                        let (delta_tx, mut delta_rx) = tokio::sync::mpsc::channel(32);
+                        let delta_task = tokio::spawn(async move {
+                            while let Some(delta) = delta_rx.recv().await {
+                                match delta {
+                                    heiwa_provider::adapter::StreamEvent::Token(text) => {
+                                        print!("{text}");
+                                        let _ = io::stdout().flush();
+                                    }
+                                    heiwa_provider::adapter::StreamEvent::ToolUse {
+                                        name, ..
+                                    } => {
+                                        println!("\n[tool: {name}]");
+                                    }
+                                    _ => {}
                                 }
                             }
                         });
-
-                        let mut usage = None;
-                        let mut full_response = String::new();
-                        while let Some(event) = stream_rx.recv().await {
-                            match event {
-                                StreamEvent::Token(text) => {
-                                    print!("{}", text);
-                                    io::stdout().flush()?;
-                                    full_response.push_str(&text);
-                                }
-                                StreamEvent::Done(u) => {
-                                    usage = Some(u);
-                                    break;
-                                }
-                                StreamEvent::Error(e) => {
-                                    eprintln!("\nStream error: {}", e);
-                                    break;
-                                }
-                                StreamEvent::ToolUse { name, .. } => {
-                                    println!("\n[tool: {}]", name);
-                                    append_state_block(
-                                        &mut state,
-                                        TranscriptBlock::Tool(name, "executed".to_string()),
-                                    );
-                                }
+                        let result = match execute_routed_model_call(
+                            &route,
+                            messages,
+                            &state.session_id,
+                            &t,
+                            Some(delta_tx),
+                        )
+                        .await
+                        {
+                            Ok(result) => result,
+                            Err(error) => {
+                                eprintln!("Model call error: {error}");
+                                turn_count += 1;
+                                continue;
                             }
-                        }
+                        };
+                        let _ = delta_task.await;
+                        let resolved_route = resolved_route_after_model_call(&route, &result);
+                        pins.current_provider = resolved_route.provider.clone();
+                        pins.current_model = resolved_route.model_id.clone();
+                        record_route_evidence(&evidence_client, &resolved_route, &t);
+                        let usage = Some(usage_for_model_call(&result));
+                        let full_response = result.text.clone();
                         println!();
                         let response_for_receipt = full_response.clone();
                         append_state_block(&mut state, TranscriptBlock::Assistant(full_response));
@@ -1310,13 +1426,18 @@ async fn run_repl(use_cockpit: bool) -> Result<()> {
                                 );
                             }
                         }
-                        record_run_evidence(&evidence_client, &route, usage.as_ref());
+                        record_run_evidence(
+                            &evidence_client,
+                            &resolved_route,
+                            usage.as_ref(),
+                            Some(&result),
+                        );
                         let receipt_latency_ms = receipt_started.elapsed().as_millis() as i64;
                         if let Some(ref receipts) = receipts {
                             record_call_receipt(
                                 receipts,
                                 &rates,
-                                &route,
+                                &result,
                                 usage.as_ref(),
                                 &state.session_id,
                                 &input_text,
@@ -1384,39 +1505,26 @@ async fn run_repl(use_cockpit: bool) -> Result<()> {
                             risk: "low".to_string(),
                             privacy: "standard".to_string(),
                             runtime: "any".to_string(),
+                            approved: args.iter().any(|arg| arg == "--approved"),
                         };
 
                         let mut reg = heiwa_provider::AccountRegistry::load();
                         heiwa_provider::detect::auto_discover(&mut reg).await;
                         let loop_tiers = get_live_model_tiers(&reg);
 
-                        let controller =
-                            heiwa_loop::LoopController::new(config, loop_tiers);
+                        let controller = heiwa_loop::LoopController::new(config, loop_tiers);
                         let (tx, mut rx) = tokio::sync::mpsc::channel(10);
 
-                        let adapters: Arc<
-                            dyn Fn(&str) -> Option<Arc<dyn ProviderAdapter>> + Send + Sync,
-                        > = Arc::new(|provider: &str| match canonical_provider_id(provider) {
-                            "ollama" => {
-                                Some(Arc::new(OllamaCliAdapter::new()) as Arc<dyn ProviderAdapter>)
+                        let caller = match default_loop_model_caller() {
+                            Ok(caller) => caller,
+                            Err(error) => {
+                                eprintln!("Loop caller error: {error}");
+                                continue;
                             }
-                            "claude" => {
-                                Some(Arc::new(ClaudeCodeCliAdapter::new())
-                                    as Arc<dyn ProviderAdapter>)
-                            }
-                            "codex" => {
-                                Some(Arc::new(CodexCliAdapter::new()) as Arc<dyn ProviderAdapter>)
-                            }
-                            "gemini" => {
-                                Some(Arc::new(GeminiCliAdapter::new()) as Arc<dyn ProviderAdapter>)
-                            }
-                            "openrouter" => OpenRouterAdapter::from_registry()
-                                .map(|a| Arc::new(a) as Arc<dyn ProviderAdapter>),
-                            _ => None,
-                        });
+                        };
 
                         tokio::spawn(async move {
-                            let _ = controller.run(tx, adapters).await;
+                            let _ = controller.run(tx, caller).await;
                         });
 
                         while let Some(status) = rx.recv().await {
@@ -1487,6 +1595,22 @@ async fn run_cockpit_controller(
                             continue;
                         }
                         let _ = event_tx.send(CockpitEvent::StatusUpdate("routing...".into()));
+                        if pins.cockpit_mode == CockpitMode::Agentic {
+                            if let Err(error) = run_cockpit_operator_turn(
+                                &session_id,
+                                &t,
+                                Some(pins.scope.clone()),
+                                &mut pins,
+                                &mut transcript,
+                                &event_tx,
+                            )
+                            .await
+                            {
+                                let _ = event_tx.send(CockpitEvent::StreamError(error));
+                            }
+                            let _ = event_tx.send(CockpitEvent::StatusUpdate("ready".into()));
+                            continue;
+                        }
 
                         match route_task(&t, &pins, &model_tiers) {
                             Err(msg) => {
@@ -1497,6 +1621,15 @@ async fn run_cockpit_controller(
                                 continue;
                             }
                             Ok(RouteOutcome::Deterministic(response)) => {
+                                if let Err(error) =
+                                    execute_deterministic_surface_turn(&session_id, &t, &response)
+                                        .await
+                                {
+                                    let _ = event_tx.send(CockpitEvent::StreamError(error));
+                                    let _ =
+                                        event_tx.send(CockpitEvent::StatusUpdate("ready".into()));
+                                    continue;
+                                }
                                 append_controller_block(
                                     &session_id,
                                     &mut transcript,
@@ -1516,18 +1649,6 @@ async fn run_cockpit_controller(
                                 continue;
                             }
                             Ok(RouteOutcome::Routed(route)) => {
-                                pins.current_provider = route.provider.clone();
-                                pins.current_model = route.model_id.clone();
-
-                                let _ = event_tx.send(CockpitEvent::RoutingUpdate(RoutingState {
-                                    current_provider: pins.current_provider.clone(),
-                                    current_model: pins.current_model.clone(),
-                                    mode: pins.cockpit_mode.label().to_string(),
-                                    explanation: Some(route.routing_metadata.clone()),
-                                }));
-
-                                record_route_evidence(&evidence_client, &route, &t);
-
                                 if pins.cockpit_mode == CockpitMode::Agentic {
                                     if route.provider != "ollama" {
                                         let _ = event_tx.send(CockpitEvent::TranscriptAppend(
@@ -1545,7 +1666,8 @@ async fn run_cockpit_controller(
                                         "agentic: planning tools...".into(),
                                     ));
 
-                                    let prepared = prepare_outbound_prompt_for_route(&route, &t);
+                                    let prepared =
+                                        prepare_outbound_prompt_for_route(&route, &t).await;
                                     let mut messages = build_messages_from_transcript(
                                         &transcript,
                                         &prepared.model_prompt,
@@ -1565,20 +1687,36 @@ async fn run_cockpit_controller(
                                         &event_tx,
                                     );
 
-                                    let (first_response, first_usage, first_error) =
-                                        collect_adapter_response(
-                                            route.adapter.clone(),
-                                            route.provider_model_id.clone(),
-                                            messages.clone(),
-                                        )
-                                        .await;
-
-                                    if let Some(error) = first_error {
-                                        let _ = event_tx.send(CockpitEvent::StreamError(error));
-                                        let _ = event_tx
-                                            .send(CockpitEvent::StatusUpdate("ready".into()));
-                                        continue;
-                                    }
+                                    let first_result = match collect_adapter_response(
+                                        &route,
+                                        messages.clone(),
+                                        &session_id,
+                                        &t,
+                                    )
+                                    .await
+                                    {
+                                        Ok(result) => result,
+                                        Err(error) => {
+                                            let _ = event_tx.send(CockpitEvent::StreamError(error));
+                                            let _ = event_tx
+                                                .send(CockpitEvent::StatusUpdate("ready".into()));
+                                            continue;
+                                        }
+                                    };
+                                    let first_route =
+                                        resolved_route_after_model_call(&route, &first_result);
+                                    pins.current_provider = first_route.provider.clone();
+                                    pins.current_model = first_route.model_id.clone();
+                                    let _ =
+                                        event_tx.send(CockpitEvent::RoutingUpdate(RoutingState {
+                                            current_provider: pins.current_provider.clone(),
+                                            current_model: pins.current_model.clone(),
+                                            mode: pins.cockpit_mode.label().to_string(),
+                                            explanation: Some(first_route.routing_metadata.clone()),
+                                        }));
+                                    record_route_evidence(&evidence_client, &first_route, &t);
+                                    let first_response = first_result.text.clone();
+                                    let first_usage = Some(usage_for_model_call(&first_result));
 
                                     let tool_calls = agentic::parse_tool_calls(&first_response);
                                     if tool_calls.is_empty() {
@@ -1594,8 +1732,9 @@ async fn run_cockpit_controller(
                                         send_done_event(&event_tx, first_usage.as_ref());
                                         record_run_evidence(
                                             &evidence_client,
-                                            &route,
+                                            &first_route,
                                             first_usage.as_ref(),
+                                            Some(&first_result),
                                         );
                                         let _ = event_tx
                                             .send(CockpitEvent::StatusUpdate("ready".into()));
@@ -1608,8 +1747,8 @@ async fn run_cockpit_controller(
                                     match agentic::execute_tool_calls(
                                         pins.scope.clone(),
                                         tool_calls,
-                                        &route.provider,
-                                        &route.model_id,
+                                        &first_route.provider,
+                                        &first_route.model_id,
                                     )
                                     .await
                                     {
@@ -1652,33 +1791,75 @@ async fn run_cockpit_controller(
                                                 content: agentic::tool_result_prompt(&tool_entries),
                                             });
 
-                                            let (final_response, final_usage, final_error) =
-                                                collect_adapter_response(
-                                                    route.adapter.clone(),
-                                                    route.provider_model_id.clone(),
-                                                    messages,
-                                                )
-                                                .await;
-                                            if let Some(error) = final_error {
-                                                let _ =
-                                                    event_tx.send(CockpitEvent::StreamError(error));
-                                            } else {
-                                                let _ = event_tx.send(CockpitEvent::StreamToken(
-                                                    final_response.clone(),
-                                                ));
-                                                append_controller_block(
-                                                    &session_id,
-                                                    &mut transcript,
-                                                    TranscriptBlock::Assistant(final_response),
-                                                    &event_tx,
-                                                );
-                                                let usage = merge_usage(first_usage, final_usage);
-                                                send_done_event(&event_tx, usage.as_ref());
-                                                record_run_evidence(
-                                                    &evidence_client,
-                                                    &route,
-                                                    usage.as_ref(),
-                                                );
+                                            match collect_adapter_response(
+                                                &first_route,
+                                                messages,
+                                                &session_id,
+                                                &t,
+                                            )
+                                            .await
+                                            {
+                                                Err(error) => {
+                                                    let _ = event_tx
+                                                        .send(CockpitEvent::StreamError(error));
+                                                }
+                                                Ok(final_result) => {
+                                                    let aggregate_result =
+                                                        aggregate_model_call_results(
+                                                            &first_result,
+                                                            &final_result,
+                                                        );
+                                                    let final_route =
+                                                        resolved_route_after_model_call(
+                                                            &first_route,
+                                                            &aggregate_result,
+                                                        );
+                                                    pins.current_provider =
+                                                        final_route.provider.clone();
+                                                    pins.current_model =
+                                                        final_route.model_id.clone();
+                                                    let _ = event_tx.send(
+                                                        CockpitEvent::RoutingUpdate(RoutingState {
+                                                            current_provider: pins
+                                                                .current_provider
+                                                                .clone(),
+                                                            current_model: pins
+                                                                .current_model
+                                                                .clone(),
+                                                            mode: pins
+                                                                .cockpit_mode
+                                                                .label()
+                                                                .to_string(),
+                                                            explanation: Some(
+                                                                final_route
+                                                                    .routing_metadata
+                                                                    .clone(),
+                                                            ),
+                                                        }),
+                                                    );
+                                                    let final_response = final_result.text.clone();
+                                                    let final_usage = Some(usage_for_model_call(
+                                                        &aggregate_result,
+                                                    ));
+                                                    let _ =
+                                                        event_tx.send(CockpitEvent::StreamToken(
+                                                            final_response.clone(),
+                                                        ));
+                                                    append_controller_block(
+                                                        &session_id,
+                                                        &mut transcript,
+                                                        TranscriptBlock::Assistant(final_response),
+                                                        &event_tx,
+                                                    );
+                                                    let usage = final_usage;
+                                                    send_done_event(&event_tx, usage.as_ref());
+                                                    record_run_evidence(
+                                                        &evidence_client,
+                                                        &final_route,
+                                                        usage.as_ref(),
+                                                        Some(&aggregate_result),
+                                                    );
+                                                }
                                             }
                                         }
                                         Err(error) => {
@@ -1696,7 +1877,7 @@ async fn run_cockpit_controller(
                                     .send(CockpitEvent::StatusUpdate("streaming...".into()));
 
                                 // Stream response
-                                let prepared = prepare_outbound_prompt_for_route(&route, &t);
+                                let prepared = prepare_outbound_prompt_for_route(&route, &t).await;
                                 let messages = build_messages_from_transcript(
                                     &transcript,
                                     &prepared.model_prompt,
@@ -1708,77 +1889,82 @@ async fn run_cockpit_controller(
                                     TranscriptBlock::User(t.clone()),
                                     &event_tx,
                                 );
-                                let (stream_tx, mut stream_rx) = tokio::sync::mpsc::channel(32);
-                                let model_id = route.provider_model_id.clone();
-
-                                tokio::spawn({
-                                    let adapter = route.adapter.clone();
-                                    let err_tx = event_tx.clone();
-                                    async move {
-                                        if let Err(e) =
-                                            adapter.send(&model_id, &messages, stream_tx).await
-                                        {
-                                            let _ = err_tx.send(CockpitEvent::StreamError(
-                                                format!("adapter error: {}", e),
-                                            ));
+                                let (delta_tx, mut delta_rx) = tokio::sync::mpsc::channel(32);
+                                let delta_events = event_tx.clone();
+                                let delta_task = tokio::spawn(async move {
+                                    while let Some(delta) = delta_rx.recv().await {
+                                        match delta {
+                                            heiwa_provider::adapter::StreamEvent::Token(text) => {
+                                                let _ = delta_events
+                                                    .send(CockpitEvent::StreamToken(text));
+                                            }
+                                            heiwa_provider::adapter::StreamEvent::ToolUse {
+                                                name,
+                                                ..
+                                            } => {
+                                                let _ = delta_events.send(
+                                                    CockpitEvent::TranscriptAppend(
+                                                        TranscriptBlock::Tool(
+                                                            name,
+                                                            "executed".to_string(),
+                                                        ),
+                                                    ),
+                                                );
+                                            }
+                                            _ => {}
                                         }
                                     }
                                 });
-
-                                let mut usage = None;
-                                let mut full_response = String::new();
-                                while let Some(ev) = stream_rx.recv().await {
-                                    match ev {
-                                        StreamEvent::Token(text) => {
-                                            full_response.push_str(&text);
-                                            let _ = event_tx.send(CockpitEvent::StreamToken(text));
-                                        }
-                                        StreamEvent::Done(u) => {
-                                            usage = Some(u);
-                                            break;
-                                        }
-                                        StreamEvent::Error(e) => {
-                                            let _ = event_tx.send(CockpitEvent::StreamError(e));
-                                            break;
-                                        }
-                                        StreamEvent::ToolUse { name, .. } => {
-                                            append_controller_block(
-                                                &session_id,
-                                                &mut transcript,
-                                                TranscriptBlock::Tool(
-                                                    name.clone(),
-                                                    "executed".to_string(),
+                                match execute_routed_model_call(
+                                    &route,
+                                    messages,
+                                    &session_id,
+                                    &t,
+                                    Some(delta_tx),
+                                )
+                                .await
+                                {
+                                    Ok(result) => {
+                                        let _ = delta_task.await;
+                                        let resolved_route =
+                                            resolved_route_after_model_call(&route, &result);
+                                        pins.current_provider = resolved_route.provider.clone();
+                                        pins.current_model = resolved_route.model_id.clone();
+                                        let _ = event_tx.send(CockpitEvent::RoutingUpdate(
+                                            RoutingState {
+                                                current_provider: pins.current_provider.clone(),
+                                                current_model: pins.current_model.clone(),
+                                                mode: pins.cockpit_mode.label().to_string(),
+                                                explanation: Some(
+                                                    resolved_route.routing_metadata.clone(),
                                                 ),
-                                                &event_tx,
-                                            );
-                                            let _ = event_tx.send(CockpitEvent::TranscriptAppend(
-                                                TranscriptBlock::Tool(name, "executed".to_string()),
-                                            ));
-                                        }
+                                            },
+                                        ));
+                                        record_route_evidence(
+                                            &evidence_client,
+                                            &resolved_route,
+                                            &t,
+                                        );
+                                        let usage = usage_for_model_call(&result);
+                                        let full_response = result.text.clone();
+                                        append_controller_block(
+                                            &session_id,
+                                            &mut transcript,
+                                            TranscriptBlock::Assistant(full_response),
+                                            &event_tx,
+                                        );
+                                        send_done_event(&event_tx, Some(&usage));
+                                        record_run_evidence(
+                                            &evidence_client,
+                                            &resolved_route,
+                                            Some(&usage),
+                                            Some(&result),
+                                        );
+                                    }
+                                    Err(error) => {
+                                        let _ = event_tx.send(CockpitEvent::StreamError(error));
                                     }
                                 }
-
-                                append_controller_block(
-                                    &session_id,
-                                    &mut transcript,
-                                    TranscriptBlock::Assistant(full_response),
-                                    &event_tx,
-                                );
-
-                                if let Some(ref u) = usage {
-                                    let _ = event_tx.send(CockpitEvent::StreamDone {
-                                        tokens_in: u.input_tokens as i64,
-                                        tokens_out: u.output_tokens as i64,
-                                        cost: u.cost_usd,
-                                    });
-                                } else {
-                                    let _ = event_tx.send(CockpitEvent::StreamDone {
-                                        tokens_in: 0,
-                                        tokens_out: 0,
-                                        cost: 0.0,
-                                    });
-                                }
-                                record_run_evidence(&evidence_client, &route, usage.as_ref());
                                 let _ = event_tx.send(CockpitEvent::StatusUpdate("ready".into()));
                             }
                         }
@@ -2190,17 +2376,58 @@ fn build_messages_from_transcript(
     messages
 }
 
-fn prepare_outbound_prompt_for_route(route: &RouteResult, input: &str) -> PreparedRoutePrompt {
-    let pricing = pricing_for_provider(&route.provider);
-    prepare_outbound_prompt_for_route_with(route, input, |body, source| {
-        let receipt = cmd::compress::compress_text_for_source_with_pricing(
-            body,
-            source,
-            ROUTE_COMPRESSION_MODEL,
-            Some(pricing.clone()),
-        )
-        .map_err(|error| error.to_string())?;
-        Ok(RouteCompressionResult {
+async fn prepare_outbound_prompt_for_route(
+    route: &RouteResult,
+    input: &str,
+) -> PreparedRoutePrompt {
+    if !route_should_compress(route, input) {
+        return PreparedRoutePrompt {
+            model_prompt: input.to_string(),
+            compression: None,
+        };
+    }
+    let (_, sessions, _) = match default_model_call_runtime() {
+        Ok(runtime) => runtime,
+        Err(error) => {
+            return prepare_outbound_prompt_for_route_with(route, input, |_, _| Err(error));
+        }
+    };
+    let source = format!(
+        "route:{}:{}:{}",
+        route.request_id, route.provider, route.intent_key
+    );
+    let submission = match sessions.start_turn(
+        "auxiliary-compression",
+        heiwa_session::operator::StartTurnRequest::auto(
+            format!("compress-{}", uuid::Uuid::new_v4()),
+            format!("compress source={source} chars={}", input.chars().count()),
+        ),
+    ) {
+        Ok(submission) => submission,
+        Err(error) => {
+            return prepare_outbound_prompt_for_route_with(route, input, |_, _| {
+                Err(error.to_string())
+            });
+        }
+    };
+    let context = OperatorPreparationContext {
+        thread_id: submission.thread_id,
+        turn_id: submission.turn_id,
+    };
+    let result = routed_compression_receipt(
+        &context,
+        route.local_auxiliary_candidates.clone(),
+        input,
+        &source,
+        vec![],
+        Some(pricing_for_provider(&route.provider)),
+        None,
+    )
+    .await;
+    let terminal_result = finish_auxiliary_turn(&sessions, &context, result.is_ok(), "compression");
+    prepare_outbound_prompt_for_route_with(route, input, |_, _| {
+        terminal_result.map_err(|error| error.to_string())?;
+        result.map(|receipt| RouteCompressionResult {
             compressed: receipt.compressed,
             receipt_path: receipt.receipt_path,
             input_chars: receipt.input_chars,
@@ -2211,6 +2438,53 @@ fn prepare_outbound_prompt_for_route(route: &RouteResult, input: &str) -> Prepar
             estimated_usd_saved: receipt.estimated_usd_saved,
         })
     })
+}
+
+async fn prepare_outbound_prompt_for_route_cancellable(
+    context: &OperatorPreparationContext,
+    route: &RouteResult,
+    input: &str,
+    cancelled: Arc<std::sync::atomic::AtomicBool>,
+) -> Result<PreparedRoutePrompt, String> {
+    if !route_should_compress(route, input) {
+        return Ok(PreparedRoutePrompt {
+            model_prompt: input.to_string(),
+            compression: None,
+        });
+    }
+    let source = format!(
+        "route:{}:{}:{}",
+        route.request_id, route.provider, route.intent_key
+    );
+    let result = routed_compression_receipt(
+        context,
+        route.local_auxiliary_candidates.clone(),
+        input,
+        &source,
+        vec![],
+        Some(pricing_for_provider(&route.provider)),
+        Some(cancelled.as_ref()),
+    )
+    .await
+    .map(|receipt| RouteCompressionResult {
+        compressed: receipt.compressed,
+        receipt_path: receipt.receipt_path,
+        input_chars: receipt.input_chars,
+        output_chars: receipt.output_chars,
+        ratio: receipt.ratio,
+        input_tokens: receipt.input_tokens,
+        output_tokens: receipt.output_tokens,
+        estimated_usd_saved: receipt.estimated_usd_saved,
+    })
+    .map_err(|error| error.to_string());
+    if cancelled.load(std::sync::atomic::Ordering::Acquire) {
+        return Err("operator preparation cancelled during compression".to_string());
+    }
+    Ok(prepare_outbound_prompt_for_route_with(
+        route,
+        input,
+        move |_, _| result,
+    ))
 }
 
 fn pricing_for_provider(provider: &str) -> cmd::compress::PricingInputs {
@@ -2392,9 +2666,6 @@ fn transcript_block_to_message(block: &TranscriptBlock) -> Option<(Role, String)
 }
 
 fn append_state_block(state: &mut SessionState, block: TranscriptBlock) {
-    if let Err(error) = heiwa_session::append_entry(&state.session_id, block.clone()) {
-        eprintln!("Failed to append transcript entry: {}", error);
-    }
     state.transcript.push(block);
 }
 
@@ -2404,12 +2675,51 @@ fn append_controller_block(
     block: TranscriptBlock,
     event_tx: &tokio::sync::mpsc::UnboundedSender<CockpitEvent>,
 ) {
-    if let Err(error) = heiwa_session::append_entry(session_id, block.clone()) {
-        let _ = event_tx.send(CockpitEvent::TranscriptAppend(TranscriptBlock::Evidence(
-            format!("transcript persistence error: {}", error),
-        )));
-    }
+    let _ = (session_id, event_tx);
     transcript.push(block);
+}
+
+async fn execute_deterministic_surface_turn(
+    thread_id: &str,
+    prompt: &str,
+    response: &str,
+) -> Result<(), String> {
+    let (_, _, runner) = default_model_call_runtime()?;
+    let request = heiwa_session::operator::StartTurnRequest::auto(
+        format!("surface-{}", uuid::Uuid::new_v4()),
+        prompt,
+    );
+    let mut handle = runner
+        .submit(
+            thread_id,
+            request,
+            OperatorTurnWork::Deterministic {
+                response: response.to_string(),
+                route: route_event_payload("deterministic", None),
+                done: repl_trace_payload("deterministic", None, None, None, None),
+            },
+        )
+        .map_err(|error| error.to_string())?;
+    while let Ok(frame) = handle.recv().await {
+        if frame.is_terminal()
+            && matches!(
+                frame,
+                OperatorStreamFrame::Durable(ref row)
+                    if row.event.turn_id.as_deref() == Some(handle.turn_id.as_str())
+            )
+        {
+            return Ok(());
+        }
+        if let OperatorStreamFrame::Error {
+            turn_id, message, ..
+        } = frame
+        {
+            if turn_id == handle.turn_id {
+                return Err(message);
+            }
+        }
+    }
+    Err("operator turn ended without a durable terminal event".to_string())
 }
 
 // ---------------------------------------------------------------------------
@@ -2496,6 +2806,16 @@ fn route_task_inner(
         ));
     }
 
+    // Auxiliary calls have their own DREX policy. Preserve on-device
+    // inventory before main-turn pins or local/remote preference narrow the
+    // execution candidates, so a remote-only main call can still use a
+    // sovereign zero-cost compression call.
+    let local_auxiliary_candidates = adapter_capable
+        .iter()
+        .map(model_call_candidate)
+        .filter(|candidate| candidate.locality == ExecutionLocality::OnDevice)
+        .collect();
+
     let routed_tiers = filtered_model_tiers(
         &adapter_capable,
         pins.route_preference,
@@ -2552,26 +2872,13 @@ fn route_task_inner(
         _ => {}
     }
 
-    let effective_route_preference = if pins.route_preference == RoutePreference::Auto {
-        match preflight.execution_mode {
-            ExecutionMode::LocalModel => RoutePreference::LocalOnly,
-            ExecutionMode::RemoteModel => RoutePreference::RemoteOnly,
-            _ => RoutePreference::Auto,
-        }
-    } else {
-        pins.route_preference
-    };
-
-    let effective_tiers = filtered_model_tiers(
-        &quota_admission.admitted,
-        effective_route_preference,
-        final_provider_pin,
-        final_model_pin,
-    );
-
-    if effective_tiers.is_empty() {
-        return Err("Routing failed: model stack unavailable for this execution mode.".to_string());
-    }
+    // Preserve the complete admitted inventory for per-call DREX planning.
+    // `routed_tiers` already enforced explicit provider/model pins and
+    // local-only/remote-only session policy. The legacy Auto preflight is a
+    // useful initial-route hint, but narrowing to that lane here would make
+    // an opposite-lane model invisible to a later call's quality floor,
+    // budget, allow/exclude set, or privacy policy.
+    let effective_tiers = quota_admission.admitted;
 
     let route = plan_route(&ingress, &effective_tiers, &policy)
         .map_err(|e| format!("Routing failed: {}", e))?;
@@ -2581,10 +2888,9 @@ fn route_task_inner(
         .as_ref()
         .ok_or_else(|| "No model matched for this task.".to_string())?;
 
-    let adapter = resolve_adapter(&selected.provider, &selected.model_id)?;
-
     Ok(RouteOutcome::Routed(Box::new(RouteResult {
-        adapter,
+        candidates: effective_tiers.iter().map(model_call_candidate).collect(),
+        local_auxiliary_candidates,
         model_id: selected.model_id.clone(),
         provider: selected.provider.clone(),
         provider_model_id: selected.provider_model_id.clone(),
@@ -2628,12 +2934,378 @@ fn resolve_adapter(provider: &str, model_id: &str) -> Result<Arc<dyn ProviderAda
         "gemini" => Ok(Arc::new(GeminiCliAdapter::new())),
         "openrouter" => OpenRouterAdapter::from_registry()
             .map(|a| Arc::new(a) as Arc<dyn ProviderAdapter>)
-            .ok_or_else(|| "No OpenRouter account registered (heiwa auth add-key openrouter <key>).".to_string()),
+            .ok_or_else(|| {
+                "No OpenRouter account registered (heiwa auth add-key openrouter <key>)."
+                    .to_string()
+            }),
         _ => Err(format!("No adapter for provider '{}' yet.", provider)),
     }
 }
 
-/// Record a DREX route decision in SpacetimeDB.
+fn model_call_candidate(tier: &heiwa_protocol::ModelTier) -> ModelCallCandidate {
+    let on_device = matches!(tier.provider.as_str(), "ollama" | "local")
+        && matches!(tier.rate_group.as_str(), "local" | "local_ollama");
+    let marginal_cost_usd = if tier.cost_per_turn == 0.0 && !on_device {
+        None
+    } else {
+        Some(tier.cost_per_turn)
+    };
+    ModelCallCandidate {
+        tier: tier.clone(),
+        locality: if on_device {
+            ExecutionLocality::OnDevice
+        } else {
+            ExecutionLocality::Unverified
+        },
+        connected: true,
+        adapter_capable: true,
+        quota_available: true,
+        marginal_cost_usd,
+        cost_truth: if tier.cost_per_turn == 0.0 {
+            if on_device {
+                CostTruth::LocalZeroCost
+            } else {
+                CostTruth::CannotConfirm
+            }
+        } else {
+            CostTruth::ProxyEstimate
+        },
+    }
+}
+
+fn default_model_call_runtime() -> Result<
+    (
+        Arc<ModelCallExecutor>,
+        Arc<heiwa_session::operator::OperatorSessionService>,
+        Arc<OperatorTurnRunner>,
+    ),
+    String,
+> {
+    type Runtime = (
+        Arc<ModelCallExecutor>,
+        Arc<heiwa_session::operator::OperatorSessionService>,
+        Arc<OperatorTurnRunner>,
+    );
+    static RUNTIME: OnceLock<Result<Runtime, String>> = OnceLock::new();
+    RUNTIME
+        .get_or_init(|| {
+            let sessions = Arc::new(heiwa_session::operator::OperatorSessionService::new(
+                heiwa_evidence::OperatorJournal::new(
+                    heiwa_evidence::journal_root().map_err(|error| error.to_string())?,
+                )
+                .map_err(|error| error.to_string())?,
+            ));
+            let resolver =
+                Arc::new(|provider: &str, model: &str| resolve_adapter(provider, model).ok());
+            let executor = Arc::new(ModelCallExecutor::new(resolver, sessions.clone()));
+            let runner = Arc::new(OperatorTurnRunner::new(sessions.clone(), executor.clone()));
+            Ok((executor, sessions, runner))
+        })
+        .clone()
+}
+
+fn default_loop_model_caller() -> Result<Arc<dyn heiwa_loop::LoopModelCaller>, String> {
+    let (executor, _, _) = default_model_call_runtime()?;
+    Ok(Arc::new(ExecutorLoopCaller::new(executor)))
+}
+
+async fn execute_model_call(execution: ModelCallExecution) -> Result<ModelCallResult, String> {
+    let (executor, _, _) = default_model_call_runtime()?;
+    executor
+        .execute(execution)
+        .await
+        .map_err(|error| error.to_string())
+}
+
+async fn execute_canonical_model_turn(
+    execution: ModelCallExecution,
+) -> Result<ModelCallResult, String> {
+    let (executor, _, _) = default_model_call_runtime()?;
+    executor
+        .execute_canonical_turn(execution)
+        .await
+        .map_err(|error| error.to_string())
+}
+
+async fn execute_routed_model_call(
+    route: &RouteResult,
+    messages: Vec<Message>,
+    thread_id: &str,
+    raw_text: &str,
+    delta_tx: Option<tokio::sync::mpsc::Sender<heiwa_provider::adapter::StreamEvent>>,
+) -> Result<ModelCallResult, String> {
+    let (_, sessions, _) = default_model_call_runtime()?;
+    let call_id = format!("call-{}", uuid::Uuid::new_v4());
+    let turn = sessions
+        .start_turn(
+            thread_id,
+            heiwa_session::operator::StartTurnRequest::auto(call_id.clone(), raw_text),
+        )
+        .map_err(|error| error.to_string())?;
+    let privacy = PrivacyClass::parse(&route.privacy).map_err(str::to_string)?;
+    let (_cancel_tx, cancel) = tokio::sync::watch::channel(false);
+    execute_canonical_model_turn(ModelCallExecution {
+        request: ModelCallRequest {
+            thread_id: thread_id.to_string(),
+            turn_id: turn.turn_id,
+            call_id,
+            intent: route.intent_key.clone(),
+            stage: ModelCallStage::Execution,
+            raw_text: raw_text.to_string(),
+            privacy,
+            risk: CallRisk::Low,
+            safety: SafetyClass::low_risk_auto_approval(&CallRisk::Low),
+            required_capabilities: vec![],
+            required_context_tokens: 1,
+            minimum_quality_class: 1,
+            minimum_success_rate: 0.0,
+            maximum_marginal_cost_usd: None,
+            preferred_provider: None,
+            preferred_model: None,
+            allowed_models: vec![],
+            excluded_models: vec![],
+        },
+        candidates: route.candidates.clone(),
+        messages,
+        remaining_budget_usd: None,
+        max_attempts: 3,
+        cancel,
+        delta_tx,
+    })
+    .await
+}
+
+async fn execute_compression_model_call(
+    context: &OperatorPreparationContext,
+    candidates: Vec<ModelCallCandidate>,
+    body: &str,
+    allowed_models: Vec<String>,
+    cancelled: Option<&std::sync::atomic::AtomicBool>,
+) -> Result<ModelCallResult, String> {
+    let (_cancel_tx, cancel) = tokio::sync::watch::channel(
+        cancelled.is_some_and(|flag| flag.load(std::sync::atomic::Ordering::Acquire)),
+    );
+    let local_candidates = candidates
+        .into_iter()
+        .filter(|candidate| candidate.locality == ExecutionLocality::OnDevice)
+        .collect();
+    execute_model_call(ModelCallExecution {
+        request: ModelCallRequest {
+            thread_id: context.thread_id.clone(),
+            turn_id: context.turn_id.clone(),
+            call_id: format!("call-compression-{}", uuid::Uuid::new_v4()),
+            intent: "compression".to_string(),
+            stage: ModelCallStage::Compression,
+            raw_text: format!("compress {} characters locally", body.chars().count()),
+            privacy: PrivacyClass::Sovereign,
+            risk: CallRisk::Low,
+            safety: SafetyClass::Approved,
+            required_capabilities: vec![],
+            required_context_tokens: 1,
+            minimum_quality_class: 1,
+            minimum_success_rate: 0.0,
+            maximum_marginal_cost_usd: Some(0.0),
+            preferred_provider: None,
+            preferred_model: None,
+            allowed_models,
+            excluded_models: vec![],
+        },
+        candidates: local_candidates,
+        messages: vec![
+            Message {
+                role: Role::System,
+                content: cmd::compress::COMPRESSION_PROMPT.to_string(),
+            },
+            Message {
+                role: Role::User,
+                content: body.to_string(),
+            },
+        ],
+        remaining_budget_usd: Some(0.0),
+        max_attempts: 3,
+        cancel,
+        delta_tx: None,
+    })
+    .await
+}
+
+async fn routed_compression_receipt(
+    context: &OperatorPreparationContext,
+    candidates: Vec<ModelCallCandidate>,
+    body: &str,
+    source: &str,
+    allowed_models: Vec<String>,
+    pricing: Option<cmd::compress::PricingInputs>,
+    cancelled: Option<&std::sync::atomic::AtomicBool>,
+) -> Result<cmd::compress::CompressionReceipt, String> {
+    let started = std::time::Instant::now();
+    let result =
+        execute_compression_model_call(context, candidates, body, allowed_models, cancelled)
+            .await?;
+    let compressed = cmd::compress::strip_think_blocks(&result.text)
+        .trim()
+        .to_string();
+    let model = format!("{}/{}", result.provider, result.provider_model_id);
+    cmd::compress::finish_compression_receipt(
+        body,
+        source,
+        &model,
+        pricing,
+        compressed,
+        started.elapsed().as_millis() as u64,
+    )
+    .map_err(|error| error.to_string())
+}
+
+pub(crate) async fn execute_standalone_compression(
+    body: &str,
+    source: &str,
+    requested_model: &str,
+) -> anyhow::Result<cmd::compress::CompressionReceipt> {
+    let candidates = discovered_model_call_candidates().await;
+    let (_, sessions, _) = default_model_call_runtime().map_err(anyhow::Error::msg)?;
+    let client_request_id = format!("compress-{}", uuid::Uuid::new_v4());
+    let submission = sessions
+        .start_turn(
+            "auxiliary-compression",
+            heiwa_session::operator::StartTurnRequest::auto(
+                client_request_id,
+                format!("compress source={source} chars={}", body.chars().count()),
+            ),
+        )
+        .map_err(|error| anyhow!(error.to_string()))?;
+    let context = OperatorPreparationContext {
+        thread_id: submission.thread_id,
+        turn_id: submission.turn_id,
+    };
+    let result = routed_compression_receipt(
+        &context,
+        candidates,
+        body,
+        source,
+        vec![requested_model.to_string()],
+        None,
+        None,
+    )
+    .await;
+    let model_succeeded = result.is_ok();
+    let final_result = match result {
+        Ok(receipt) => Ok(receipt),
+        Err(_) => cmd::compress::finish_compression_receipt(
+            body,
+            source,
+            "deterministic/no-compression",
+            None,
+            body.to_string(),
+            0,
+        ),
+    };
+    finish_auxiliary_turn(&sessions, &context, model_succeeded, "compression")?;
+    final_result
+}
+
+fn finish_auxiliary_turn(
+    sessions: &heiwa_session::operator::OperatorSessionService,
+    context: &OperatorPreparationContext,
+    succeeded: bool,
+    stage: &str,
+) -> anyhow::Result<()> {
+    sessions.append_event(heiwa_evidence::OperatorEvent {
+        schema_version: heiwa_evidence::OPERATOR_EVENT_SCHEMA_VERSION,
+        event_id: format!("evt-{}", uuid::Uuid::new_v4()),
+        thread_id: context.thread_id.clone(),
+        turn_id: Some(context.turn_id.clone()),
+        run_id: None,
+        call_id: None,
+        event_type: heiwa_evidence::OperatorEventType::TurnCompleted,
+        occurred_at: heiwa_evidence::now_iso(),
+        actor: heiwa_evidence::OperatorActor {
+            kind: "runtime".to_string(),
+            id: "model-call-executor".to_string(),
+        },
+        risk_class: heiwa_evidence::OperatorRisk::Low,
+        sensitivity: heiwa_evidence::OperatorSensitivity::LocalPrivate,
+        parent_event_id: None,
+        correlation_id: None,
+        source_refs: vec![],
+        evidence_refs: vec![],
+        payload: serde_json::json!({
+            "stage": stage,
+            "outcome": if succeeded { "completed" } else { "deterministic_fallback" },
+        }),
+    })?;
+    Ok(())
+}
+
+pub(crate) async fn execute_mail_draft_model_call(
+    candidates: Vec<ModelCallCandidate>,
+    prompt: &str,
+) -> Result<ModelCallResult, String> {
+    let (_, sessions, _) = default_model_call_runtime()?;
+    let submission = sessions
+        .start_turn(
+            "auxiliary-mail-drafting",
+            heiwa_session::operator::StartTurnRequest::auto(
+                format!("mail-draft-{}", uuid::Uuid::new_v4()),
+                "metadata-only local mail draft",
+            ),
+        )
+        .map_err(|error| error.to_string())?;
+    let context = OperatorPreparationContext {
+        thread_id: submission.thread_id,
+        turn_id: submission.turn_id,
+    };
+    let (_cancel_tx, cancel) = tokio::sync::watch::channel(false);
+    let result = execute_model_call(ModelCallExecution {
+        request: ModelCallRequest {
+            thread_id: context.thread_id.clone(),
+            turn_id: context.turn_id.clone(),
+            call_id: format!("call-drafting-{}", uuid::Uuid::new_v4()),
+            intent: "mail_drafting".to_string(),
+            stage: ModelCallStage::Drafting,
+            raw_text: "draft from mail metadata locally".to_string(),
+            privacy: PrivacyClass::Sovereign,
+            risk: CallRisk::Low,
+            safety: SafetyClass::Approved,
+            required_capabilities: vec![],
+            required_context_tokens: 1,
+            minimum_quality_class: 1,
+            minimum_success_rate: 0.0,
+            maximum_marginal_cost_usd: Some(0.0),
+            preferred_provider: None,
+            preferred_model: None,
+            allowed_models: vec![],
+            excluded_models: vec![],
+        },
+        candidates: candidates
+            .into_iter()
+            .filter(|candidate| candidate.locality == ExecutionLocality::OnDevice)
+            .collect(),
+        messages: vec![Message {
+            role: Role::User,
+            content: prompt.to_string(),
+        }],
+        remaining_budget_usd: Some(0.0),
+        max_attempts: 3,
+        cancel,
+        delta_tx: None,
+    })
+    .await;
+    finish_auxiliary_turn(&sessions, &context, result.is_ok(), "drafting")
+        .map_err(|error| error.to_string())?;
+    result
+}
+
+pub(crate) async fn discovered_model_call_candidates() -> Vec<ModelCallCandidate> {
+    let mut registry = heiwa_provider::AccountRegistry::load();
+    heiwa_provider::detect::auto_discover(&mut registry).await;
+    get_live_model_tiers(&registry)
+        .iter()
+        .map(model_call_candidate)
+        .collect()
+}
+
+/// Record a DREX route decision in the local evidence journal.
 fn record_route_evidence(evidence: &EvidenceClient, route: &RouteResult, task: &str) {
     evidence.journal(
         "route_decisions",
@@ -2656,7 +3328,7 @@ fn record_route_evidence(evidence: &EvidenceClient, route: &RouteResult, task: &
 fn record_call_receipt(
     receipts: &heiwa_receipts::ReceiptStore,
     rates: &heiwa_receipts::RateTable,
-    route: &RouteResult,
+    result: &ModelCallResult,
     usage: Option<&TokenUsage>,
     session_id: &str,
     input_text: &str,
@@ -2665,7 +3337,7 @@ fn record_call_receipt(
 ) {
     use heiwa_receipts::{runtime, Receipt};
 
-    let env = runtime::env_for_provider(&route.provider);
+    let env = runtime::env_for_provider(&result.provider);
     let tokens_in = usage
         .map(|u| u.input_tokens as i64)
         .filter(|&n| n > 0)
@@ -2678,17 +3350,17 @@ fn record_call_receipt(
     let (costs, _found) = runtime::compute_or_zero(
         rates,
         env,
-        &route.provider,
-        &route.model_id,
+        &result.provider,
+        &result.model_id,
         tokens_in,
         tokens_out,
     );
 
-    let receipt = Receipt::new(
+    let mut receipt = Receipt::new(
         Utc::now().timestamp(),
         env,
-        route.provider.clone(),
-        route.model_id.clone(),
+        result.provider.clone(),
+        result.model_id.clone(),
         "repl",
         tokens_in,
         tokens_out,
@@ -2698,9 +3370,40 @@ fn record_call_receipt(
         session_id,
         None,
     );
+    receipt.model_call_cost_usd = Some(result.cost_usd);
+    receipt.model_call_cost_truth = Some(cost_truth_label(&result.cost_truth).to_string());
+    receipt.model_call_attempts = Some(result.attempts.min(i64::MAX as usize) as i64);
+    receipt.failed_attempt_cost_usd = Some(
+        result
+            .attempt_records
+            .iter()
+            .filter(|attempt| {
+                attempt.provider_invoked
+                    && attempt.outcome == heiwa_shell::model_calls::ModelCallAttemptOutcome::Failed
+            })
+            .filter_map(|attempt| attempt.cost_usd)
+            .fold(0.0, |total, cost| {
+                let next = total + cost;
+                if next.is_finite() {
+                    next
+                } else {
+                    f64::MAX
+                }
+            }),
+    );
 
     if let Err(error) = receipts.insert(&receipt) {
         debug_log(format_args!("receipt insert failed: {error}"));
+    }
+}
+
+fn cost_truth_label(truth: &CostTruth) -> &'static str {
+    match truth {
+        CostTruth::LocalZeroCost => "local_zero_cost",
+        CostTruth::TargetOnly => "target_only",
+        CostTruth::ProxyEstimate => "proxy_estimate",
+        CostTruth::ExactProviderReport => "exact_provider_report",
+        CostTruth::CannotConfirm => "cannot_confirm",
     }
 }
 
@@ -2709,6 +3412,7 @@ fn record_run_evidence(
     evidence: &EvidenceClient,
     route: &RouteResult,
     usage: Option<&TokenUsage>,
+    result: Option<&ModelCallResult>,
 ) {
     let run_id = format!("run-{}", uuid::Uuid::new_v4());
     let turn_ended_at = Utc::now();
@@ -2729,14 +3433,24 @@ fn record_run_evidence(
             "model_id": route.model_id,
             "tokens_input": usage.map(|u| u.input_tokens as i64).unwrap_or(0),
             "tokens_output": usage.map(|u| u.output_tokens as i64).unwrap_or(0),
-            "cost_usd": usage.map(|u| u.cost_usd).unwrap_or(0.0),
+            "cost_usd": result.map(|call| call.cost_usd)
+                .or_else(|| usage.map(|u| u.cost_usd))
+                .unwrap_or(0.0),
+            "cost_truth": result.map(|call| &call.cost_truth),
+            "attempts": result.map(|call| call.attempts),
+            "attempt_records": result.map(|call| &call.attempt_records),
         }),
     );
 
     if let Some(ledger) = open_default_quota_ledger() {
-        if let Err(error) =
-            record_local_quota_run(&ledger, &run_id, route, usage, turn_ended_at.timestamp())
-        {
+        if let Err(error) = record_local_quota_run(
+            &ledger,
+            &run_id,
+            route,
+            usage,
+            result.map(|call| call.cost_usd),
+            turn_ended_at.timestamp(),
+        ) {
             debug_log(format_args!("quota ledger write failed: {error}"));
         }
     }
@@ -2751,13 +3465,14 @@ fn record_local_quota_run(
     run_id: &str,
     route: &RouteResult,
     usage: Option<&TokenUsage>,
+    model_call_cost_usd: Option<f64>,
     ended_at_unix: i64,
 ) -> heiwa_quota::Result<()> {
     let (tokens_input, tokens_output, cost, status) = match usage {
         Some(u) => (
             u.input_tokens as i64,
             u.output_tokens as i64,
-            u.cost_usd,
+            model_call_cost_usd.unwrap_or(u.cost_usd),
             "SUCCESS",
         ),
         None => (0, 0, 0.0, "COMPLETED_NO_USAGE"),
@@ -2969,47 +3684,12 @@ fn record_tool_call_evidence(
 }
 
 async fn collect_adapter_response(
-    adapter: Arc<dyn ProviderAdapter>,
-    model_id: String,
+    route: &RouteResult,
     messages: Vec<Message>,
-) -> (String, Option<TokenUsage>, Option<String>) {
-    let (stream_tx, mut stream_rx) = tokio::sync::mpsc::channel(32);
-    tokio::spawn(async move {
-        if let Err(error) = adapter.send(&model_id, &messages, stream_tx.clone()).await {
-            let _ = stream_tx
-                .send(StreamEvent::Error(format!("adapter error: {error}")))
-                .await;
-        }
-    });
-
-    let mut full_response = String::new();
-    let mut usage = None;
-    let mut error = None;
-    while let Some(event) = stream_rx.recv().await {
-        match event {
-            StreamEvent::Token(text) => full_response.push_str(&text),
-            StreamEvent::Done(u) => {
-                usage = Some(u);
-                break;
-            }
-            StreamEvent::Error(e) => {
-                error = Some(e);
-                break;
-            }
-            StreamEvent::ToolUse { name, input } => {
-                full_response.push_str(
-                    &serde_json::json!({
-                        "tool_calls": [{
-                            "name": name,
-                            "arguments": input,
-                        }]
-                    })
-                    .to_string(),
-                );
-            }
-        }
-    }
-    (full_response, usage, error)
+    thread_id: &str,
+    raw_text: &str,
+) -> Result<ModelCallResult, String> {
+    execute_routed_model_call(route, messages, thread_id, raw_text, None).await
 }
 
 fn merge_usage(first: Option<TokenUsage>, second: Option<TokenUsage>) -> Option<TokenUsage> {
@@ -3023,6 +3703,63 @@ fn merge_usage(first: Option<TokenUsage>, second: Option<TokenUsage>) -> Option<
             cache_write_tokens: a.cache_write_tokens + b.cache_write_tokens,
             cost_usd: a.cost_usd + b.cost_usd,
         }),
+    }
+}
+
+fn usage_for_model_call(result: &ModelCallResult) -> TokenUsage {
+    let mut usage = result.usage.clone();
+    usage.cost_usd = result.cost_usd;
+    usage
+}
+
+fn aggregate_model_call_results(
+    first: &ModelCallResult,
+    final_result: &ModelCallResult,
+) -> ModelCallResult {
+    let raw_cost = first.cost_usd + final_result.cost_usd;
+    let (cost_usd, cost_truth) = if raw_cost.is_finite() {
+        (
+            raw_cost,
+            aggregate_cost_truth(first.cost_truth.clone(), final_result.cost_truth.clone()),
+        )
+    } else {
+        (f64::MAX, CostTruth::CannotConfirm)
+    };
+    let mut failed_models = first.failed_models.clone();
+    for model in &final_result.failed_models {
+        if !failed_models.contains(model) {
+            failed_models.push(model.clone());
+        }
+    }
+    let mut attempt_records = first.attempt_records.clone();
+    attempt_records.extend(final_result.attempt_records.clone());
+    let mut usage = merge_usage(Some(first.usage.clone()), Some(final_result.usage.clone()))
+        .unwrap_or_default();
+    usage.cost_usd = cost_usd;
+    ModelCallResult {
+        route_receipt_ref: final_result.route_receipt_ref.clone(),
+        provider: final_result.provider.clone(),
+        model_id: final_result.model_id.clone(),
+        provider_model_id: final_result.provider_model_id.clone(),
+        rate_group: final_result.rate_group.clone(),
+        text: final_result.text.clone(),
+        usage,
+        attempts: first.attempts.saturating_add(final_result.attempts),
+        failed_models,
+        cost_usd,
+        cost_truth,
+        attempt_records,
+    }
+}
+
+fn aggregate_cost_truth(left: CostTruth, right: CostTruth) -> CostTruth {
+    if left == right {
+        return left;
+    }
+    match (left, right) {
+        (CostTruth::CannotConfirm, _) | (_, CostTruth::CannotConfirm) => CostTruth::CannotConfirm,
+        (CostTruth::LocalZeroCost, other) | (other, CostTruth::LocalZeroCost) => other,
+        _ => CostTruth::ProxyEstimate,
     }
 }
 
@@ -3147,9 +3884,13 @@ fn repl_trace_payload(
     mode: &str,
     route: Option<&RouteResult>,
     usage: Option<&TokenUsage>,
+    result: Option<&ModelCallResult>,
     compression: Option<&RouteCompressionMetadata>,
 ) -> serde_json::Value {
-    let cost_usd = usage.map(|u| u.cost_usd).unwrap_or(0.0);
+    let cost_usd = result
+        .map(|call| call.cost_usd)
+        .or_else(|| usage.map(|u| u.cost_usd))
+        .unwrap_or(0.0);
     let (intent, provider, model, rate_group, privacy) = match route {
         Some(route) => (
             route.intent_key.as_str(),
@@ -3168,6 +3909,9 @@ fn repl_trace_payload(
         "rate_group": rate_group,
         "privacy": privacy,
         "cost_usd": cost_usd,
+        "cost_truth": result.map(|call| &call.cost_truth),
+        "attempts": result.map(|call| call.attempts),
+        "failed_models": result.map(|call| &call.failed_models),
         "compression": compression.map(|c| serde_json::json!({
             "applied": c.applied,
             "reason": c.reason,
@@ -3181,151 +3925,334 @@ fn repl_trace_payload(
     })
 }
 
-/// Streaming REPL turn: routes through DREX, persists the transcript exactly
-/// like the blocking path, and emits Route → Token* → Done/Error events.
+async fn run_cockpit_operator_turn(
+    thread_id: &str,
+    prompt: &str,
+    tool_scope: Option<ExecutionScope>,
+    pins: &mut SessionPins,
+    transcript: &mut Vec<TranscriptBlock>,
+    event_tx: &tokio::sync::mpsc::UnboundedSender<CockpitEvent>,
+) -> Result<(), String> {
+    let mut request = heiwa_session::operator::StartTurnRequest::auto(
+        format!("cockpit-{}", uuid::Uuid::new_v4()),
+        prompt,
+    );
+    request.route_policy.preferred_provider = pins.pinned_provider.clone();
+    request.route_policy.preferred_model = pins.pinned_model.clone();
+    request.route_policy.mode = match pins.route_preference {
+        RoutePreference::Auto => heiwa_session::operator::RouteMode::Auto,
+        RoutePreference::LocalOnly => heiwa_session::operator::RouteMode::LocalOnly,
+        RoutePreference::RemoteOnly => heiwa_session::operator::RouteMode::RemoteOnly,
+    };
+    let mut handle = submit_operator_turn_with_scope(thread_id, request, tool_scope)
+        .await
+        .map_err(|error| error.to_string())?;
+    transcript.push(TranscriptBlock::User(prompt.to_string()));
+
+    while let Ok(frame) = handle.recv().await {
+        match frame {
+            OperatorStreamFrame::AssistantDelta { turn_id, text, .. }
+                if turn_id == handle.turn_id =>
+            {
+                let _ = event_tx.send(CockpitEvent::StreamToken(text));
+            }
+            OperatorStreamFrame::Durable(row)
+                if row.event.turn_id.as_deref() == Some(handle.turn_id.as_str()) =>
+            {
+                match row.event.event_type {
+                    heiwa_evidence::OperatorEventType::RouteCompleted => {
+                        if let Some(provider) =
+                            row.event.payload.get("provider").and_then(Value::as_str)
+                        {
+                            pins.current_provider = provider.to_string();
+                        }
+                        if let Some(model) = row.event.payload.get("model").and_then(Value::as_str)
+                        {
+                            pins.current_model = model.to_string();
+                        }
+                        let _ = event_tx.send(CockpitEvent::RoutingUpdate(RoutingState {
+                            current_provider: pins.current_provider.clone(),
+                            current_model: pins.current_model.clone(),
+                            mode: pins.cockpit_mode.label().to_string(),
+                            explanation: Some(row.event.payload.to_string()),
+                        }));
+                    }
+                    heiwa_evidence::OperatorEventType::AssistantCompleted => {
+                        if let Some(text) = row.event.payload.get("text").and_then(Value::as_str) {
+                            transcript.push(TranscriptBlock::Assistant(text.to_string()));
+                        }
+                    }
+                    heiwa_evidence::OperatorEventType::TurnCompleted => {
+                        send_done_event(event_tx, None);
+                        return Ok(());
+                    }
+                    heiwa_evidence::OperatorEventType::TurnInterrupted
+                    | heiwa_evidence::OperatorEventType::Blocker => {
+                        return Err(row
+                            .event
+                            .payload
+                            .get("message")
+                            .or_else(|| row.event.payload.get("reason"))
+                            .and_then(Value::as_str)
+                            .unwrap_or("operator turn interrupted")
+                            .to_string());
+                    }
+                    _ => {}
+                }
+            }
+            OperatorStreamFrame::Error {
+                turn_id, message, ..
+            } if turn_id == handle.turn_id => return Err(message),
+            _ => {}
+        }
+    }
+    Err("cockpit operator turn ended without durable terminal event".to_string())
+}
+
+/// Prepare model work only after the runner has made intake durable.
+async fn prepare_operator_turn_work(
+    context: OperatorPreparationContext,
+    mut start_request: heiwa_session::operator::StartTurnRequest,
+    cancelled: Arc<std::sync::atomic::AtomicBool>,
+    tool_scope: Option<ExecutionScope>,
+) -> Result<OperatorTurnWork, String> {
+    if cancelled.load(std::sync::atomic::Ordering::Acquire) {
+        return Err("operator preparation cancelled before routing".to_string());
+    }
+    let thread_id = context.thread_id.clone();
+    let prompt = start_request.prompt.clone();
+    let persisted = heiwa_session::load_transcript(&thread_id)
+        .unwrap_or_else(|_| heiwa_session::PersistedTranscript::empty(&thread_id));
+    let transcript_blocks = persisted.blocks();
+    let mut pins = SessionPins::new();
+    pins.pinned_provider = start_request.route_policy.preferred_provider.clone();
+    pins.pinned_model = start_request.route_policy.preferred_model.clone();
+    pins.route_preference = match start_request.route_policy.mode {
+        heiwa_session::operator::RouteMode::Auto | heiwa_session::operator::RouteMode::Explicit => {
+            RoutePreference::Auto
+        }
+        heiwa_session::operator::RouteMode::LocalOnly => RoutePreference::LocalOnly,
+        heiwa_session::operator::RouteMode::RemoteOnly => RoutePreference::RemoteOnly,
+    };
+
+    // Deterministic intents do not need provider discovery. Model-bearing
+    // turns still discover the current provider/account inventory per call.
+    let route_outcome = match route_task(&prompt, &pins, &[]) {
+        Ok(RouteOutcome::Deterministic(response)) => RouteOutcome::Deterministic(response),
+        _ => {
+            let mut registry = heiwa_provider::AccountRegistry::load();
+            heiwa_provider::detect::auto_discover(&mut registry).await;
+            if cancelled.load(std::sync::atomic::Ordering::Acquire) {
+                return Err("operator preparation cancelled during discovery".to_string());
+            }
+            let model_tiers = get_live_model_tiers(&registry);
+            route_task(&prompt, &pins, &model_tiers)?
+        }
+    };
+
+    let work = match route_outcome {
+        RouteOutcome::Deterministic(response) => {
+            let route = route_event_payload("deterministic", None);
+            let done = repl_trace_payload("deterministic", None, None, None, None);
+            OperatorTurnWork::Deterministic {
+                response,
+                route,
+                done,
+            }
+        }
+        RouteOutcome::Routed(route) => {
+            let prepared =
+                prepare_outbound_prompt_for_route_cancellable(&context, &route, &prompt, cancelled)
+                    .await?;
+            let messages =
+                build_messages_from_transcript(&transcript_blocks, &prepared.model_prompt, &pins);
+            if start_request.route_policy.privacy == "standard" && route.privacy != "standard" {
+                start_request.route_policy.privacy = route.privacy.clone();
+            }
+            let privacy = PrivacyClass::parse(&route.privacy).map_err(str::to_string)?;
+            let route_for_done = route.clone();
+            let compression = prepared.compression.clone();
+            let done_payload = Arc::new(move |result: &ModelCallResult| {
+                let resolved = resolved_route_after_model_call(&route_for_done, result);
+                let mode = if is_local_provider(&resolved.provider) {
+                    "local_model"
+                } else {
+                    "remote_model"
+                };
+                let usage = usage_for_model_call(result);
+                repl_trace_payload(
+                    mode,
+                    Some(&resolved),
+                    Some(&usage),
+                    Some(result),
+                    compression.as_ref(),
+                )
+            });
+            OperatorTurnWork::Model(Box::new(OperatorModelTurn {
+                request: ModelCallRequest {
+                    thread_id: String::new(),
+                    turn_id: String::new(),
+                    call_id: format!("call-{}", uuid::Uuid::new_v4()),
+                    intent: route.intent_key.clone(),
+                    stage: ModelCallStage::Execution,
+                    raw_text: prompt,
+                    privacy,
+                    risk: CallRisk::Low,
+                    safety: SafetyClass::low_risk_auto_approval(&CallRisk::Low),
+                    required_capabilities: vec![],
+                    required_context_tokens: 1,
+                    minimum_quality_class: start_request.route_policy.minimum_quality_class,
+                    minimum_success_rate: 0.0,
+                    maximum_marginal_cost_usd: start_request.route_policy.maximum_marginal_cost_usd,
+                    preferred_provider: start_request.route_policy.preferred_provider.clone(),
+                    preferred_model: start_request.route_policy.preferred_model.clone(),
+                    allowed_models: start_request.route_policy.allowed_models.clone(),
+                    excluded_models: start_request.route_policy.excluded_models.clone(),
+                },
+                candidates: route.candidates.clone(),
+                messages,
+                remaining_budget_usd: start_request.route_policy.turn_budget_usd,
+                max_attempts: 3,
+                tool_scope,
+                done_payload,
+            }))
+        }
+    };
+    Ok(work)
+}
+
+/// Persist caller intake immediately, then let the process-wide runner own
+/// deferred discovery, routing, compression, execution, and termination.
+async fn submit_operator_turn_with_route(
+    thread_id: &str,
+    start_request: heiwa_session::operator::StartTurnRequest,
+) -> std::result::Result<
+    heiwa_shell::operator::OperatorTurnHandle,
+    heiwa_shell::operator::OperatorSubmissionError,
+> {
+    submit_operator_turn_with_scope(thread_id, start_request, None).await
+}
+
+async fn submit_operator_turn_with_scope(
+    thread_id: &str,
+    start_request: heiwa_session::operator::StartTurnRequest,
+    tool_scope: Option<ExecutionScope>,
+) -> std::result::Result<
+    heiwa_shell::operator::OperatorTurnHandle,
+    heiwa_shell::operator::OperatorSubmissionError,
+> {
+    let (_, _, runner) = default_model_call_runtime()
+        .map_err(|error| heiwa_shell::operator::OperatorSubmissionError::Runtime(anyhow!(error)))?;
+    let preparation_request = start_request.clone();
+    let preparation =
+        OperatorTurnPreparation::cancellable_with_context(move |context, cancelled| async move {
+            prepare_operator_turn_work(context, preparation_request, cancelled, tool_scope)
+                .await
+                .map_err(anyhow::Error::msg)
+        });
+    runner.submit(thread_id, start_request, preparation)
+}
+
+pub(crate) async fn submit_operator_turn(
+    thread_id: &str,
+    request: heiwa_session::operator::StartTurnRequest,
+) -> std::result::Result<
+    heiwa_shell::operator::OperatorTurnHandle,
+    heiwa_shell::operator::OperatorSubmissionError,
+> {
+    submit_operator_turn_with_route(thread_id, request).await
+}
+
+/// Streaming REPL compatibility surface over the durable operator runner.
+/// The runner owns operator-event persistence; this wrapper only maps its
+/// route/delta/terminal frames into the established SSE response shape.
 pub(crate) async fn execute_repl_turn_streaming(
     prompt: &str,
     events: tokio::sync::mpsc::Sender<ReplStreamEvent>,
 ) {
-    let evidence_client = EvidenceClient::local();
-    let mut registry = heiwa_provider::AccountRegistry::load();
-    heiwa_provider::detect::auto_discover(&mut registry).await;
-    let model_tiers = get_live_model_tiers(&registry);
-
-    let pins = SessionPins::new();
-
-    let persisted = heiwa_session::load_transcript(DEFAULT_SESSION_ID)
-        .unwrap_or_else(|_| heiwa_session::PersistedTranscript::empty(DEFAULT_SESSION_ID));
-    let transcript_blocks = persisted.blocks();
-
-    match route_task(prompt, &pins, &model_tiers) {
-        Err(msg) => {
-            let _ = events.send(ReplStreamEvent::Error(msg)).await;
+    let client_request_id = format!("repl-{}", uuid::Uuid::new_v4());
+    let start_request = heiwa_session::operator::StartTurnRequest::auto(client_request_id, prompt);
+    let mut handle = match submit_operator_turn_with_route(DEFAULT_SESSION_ID, start_request).await
+    {
+        Ok(handle) => handle,
+        Err(error) => {
+            let _ = events.send(ReplStreamEvent::Error(error.to_string())).await;
+            return;
         }
-        Ok(RouteOutcome::Deterministic(response)) => {
-            let mut state = SessionState {
-                session_id: persisted.session_id.clone(),
-                transcript: transcript_blocks,
-                routing: RoutingState {
-                    current_provider: "none".to_string(),
-                    current_model: "none".to_string(),
-                    mode: CockpitMode::Direct.label().to_string(),
-                    explanation: None,
-                },
-                devices: vec![],
-                receipts: vec![],
-            };
-            append_state_block(&mut state, TranscriptBlock::User(prompt.to_string()));
-            append_state_block(&mut state, TranscriptBlock::Assistant(response.clone()));
-
-            let _ = events
-                .send(ReplStreamEvent::Route(route_event_payload(
-                    "deterministic",
-                    None,
-                )))
-                .await;
-            let _ = events.send(ReplStreamEvent::Token(response)).await;
-            let _ = events
-                .send(ReplStreamEvent::Done(repl_trace_payload(
-                    "deterministic",
-                    None,
-                    None,
-                    None,
-                )))
-                .await;
-        }
-        Ok(RouteOutcome::Routed(route)) => {
-            record_route_evidence(&evidence_client, &route, prompt);
-
-            let mode = if is_local_provider(&route.provider) {
-                "local_model"
-            } else {
-                "remote_model"
-            };
-            let _ = events
-                .send(ReplStreamEvent::Route(route_event_payload(
-                    mode,
-                    Some(&route),
-                )))
-                .await;
-
-            let prepared = prepare_outbound_prompt_for_route(&route, prompt);
-            let messages =
-                build_messages_from_transcript(&transcript_blocks, &prepared.model_prompt, &pins);
-            let mut state = SessionState {
-                session_id: persisted.session_id.clone(),
-                transcript: transcript_blocks,
-                routing: RoutingState {
-                    current_provider: route.provider.clone(),
-                    current_model: route.model_id.clone(),
-                    mode: CockpitMode::Direct.label().to_string(),
-                    explanation: None,
-                },
-                devices: vec![],
-                receipts: vec![],
-            };
-
-            append_state_block(&mut state, TranscriptBlock::User(prompt.to_string()));
-
-            let (stream_tx, mut stream_rx) = tokio::sync::mpsc::channel(32);
-            let model_id = route.provider_model_id.clone();
-
-            let adapter = route.adapter.clone();
-            tokio::spawn(async move {
-                if let Err(e) = adapter.send(&model_id, &messages, stream_tx).await {
-                    eprintln!("Adapter error: {}", e);
-                }
-            });
-
-            let mut usage = None;
-            let mut full_response = String::new();
-            let mut stream_error: Option<String> = None;
-            while let Some(event) = stream_rx.recv().await {
-                match event {
-                    StreamEvent::Token(text) => {
-                        full_response.push_str(&text);
-                        let _ = events.send(ReplStreamEvent::Token(text)).await;
+    };
+    while let Ok(frame) = handle.recv().await {
+        match frame {
+            OperatorStreamFrame::Error {
+                turn_id, message, ..
+            } if turn_id == handle.turn_id => {
+                let _ = events.send(ReplStreamEvent::Error(message)).await;
+                break;
+            }
+            OperatorStreamFrame::AssistantDelta { turn_id, text, .. }
+                if turn_id == handle.turn_id =>
+            {
+                let _ = events.send(ReplStreamEvent::Token(text)).await;
+            }
+            OperatorStreamFrame::Durable(row)
+                if row.event.turn_id.as_deref() == Some(handle.turn_id.as_str()) =>
+            {
+                match row.event.event_type {
+                    heiwa_evidence::OperatorEventType::RoutePlanned => {
+                        let payload = operator_repl_route_payload(&row.event.payload);
+                        let _ = events.send(ReplStreamEvent::Route(payload)).await;
                     }
-                    StreamEvent::Done(u) => {
-                        usage = Some(u);
+                    heiwa_evidence::OperatorEventType::TurnCompleted => {
+                        let done = row
+                            .event
+                            .payload
+                            .get("trace")
+                            .cloned()
+                            .unwrap_or_else(|| row.event.payload.clone());
+                        let _ = events.send(ReplStreamEvent::Done(done)).await;
                         break;
                     }
-                    StreamEvent::Error(e) => {
-                        eprintln!("Stream error: {}", e);
-                        stream_error = Some(e);
+                    heiwa_evidence::OperatorEventType::TurnInterrupted
+                    | heiwa_evidence::OperatorEventType::Blocker => {
+                        let message = row
+                            .event
+                            .payload
+                            .get("message")
+                            .or_else(|| row.event.payload.get("reason"))
+                            .and_then(serde_json::Value::as_str)
+                            .unwrap_or("operator turn interrupted")
+                            .to_string();
+                        let _ = events.send(ReplStreamEvent::Error(message)).await;
                         break;
                     }
-                    StreamEvent::ToolUse { name, .. } => {
-                        append_state_block(
-                            &mut state,
-                            TranscriptBlock::Tool(name, "executed".to_string()),
-                        );
-                    }
+                    _ => {}
                 }
             }
-
-            append_state_block(
-                &mut state,
-                TranscriptBlock::Assistant(full_response.clone()),
-            );
-            record_run_evidence(&evidence_client, &route, usage.as_ref());
-
-            if let Some(error) = stream_error {
-                if full_response.is_empty() {
-                    let _ = events.send(ReplStreamEvent::Error(error)).await;
-                    return;
-                }
-            }
-            let _ = events
-                .send(ReplStreamEvent::Done(repl_trace_payload(
-                    mode,
-                    Some(&route),
-                    usage.as_ref(),
-                    prepared.compression.as_ref(),
-                )))
-                .await;
+            _ => {}
         }
     }
+}
+
+fn operator_repl_route_payload(payload: &serde_json::Value) -> serde_json::Value {
+    let provider = payload.get("provider").and_then(serde_json::Value::as_str);
+    let model = payload.get("model").and_then(serde_json::Value::as_str);
+    let mode = payload
+        .get("mode")
+        .and_then(serde_json::Value::as_str)
+        .unwrap_or_else(|| match provider {
+            None => "deterministic",
+            Some(provider) if is_local_provider(provider) => "local_model",
+            Some(_) => "remote_model",
+        });
+    serde_json::json!({
+        "mode": mode,
+        "intent": payload.get("intent").cloned(),
+        "provider": provider,
+        "model": model,
+        "provider_model": payload.get("provider_model").cloned(),
+        "rate_group": payload.get("rate_group").cloned(),
+        "privacy": payload.get("privacy").cloned(),
+        "request_id": payload.get("request_id").cloned(),
+    })
 }
 
 /// Blocking REPL turn used by /api/v1/repl: collects the streaming pipeline
@@ -3399,6 +4326,26 @@ pub(crate) async fn preview_route_payload(prompt: &str) -> serde_json::Value {
 #[cfg(test)]
 mod tests {
     use heiwa_protocol::{parse_turn_intent, Intent};
+
+    #[test]
+    fn operator_route_frame_keeps_repl_route_shape() {
+        let payload = super::operator_repl_route_payload(&serde_json::json!({
+            "intent": "chat",
+            "provider": "ollama",
+            "model": "qwen3.5:9b",
+            "provider_model": "qwen3.5:9b",
+            "rate_group": "local",
+            "privacy": "standard",
+            "request_id": "request-1",
+        }));
+        assert_eq!(payload["mode"], "local_model");
+        assert_eq!(payload["intent"], "chat");
+        assert_eq!(payload["provider"], "ollama");
+        assert_eq!(payload["model"], "qwen3.5:9b");
+        assert_eq!(payload["rate_group"], "local");
+        assert_eq!(payload["privacy"], "standard");
+        assert_eq!(payload["request_id"], "request-1");
+    }
 
     #[test]
     fn privacy_cues_force_sovereign_lane() {
@@ -3576,6 +4523,121 @@ mod tests {
     }
 
     #[test]
+    fn live_inventory_ids_are_stable_nonzero_and_unique_per_provider_model() {
+        let model = |name: &str| heiwa_provider::DetectedModel {
+            model_id: name.to_string(),
+            provider_model_id: name.to_string(),
+            provider: "ollama".to_string(),
+            account_id: "ollama-local".to_string(),
+            rate_group: "local".to_string(),
+            capability_class: 3,
+            context_window: 32_768,
+            supports_streaming: true,
+            supports_tools: true,
+            supports_vision: false,
+            supports_audio: false,
+            cost_per_1k_input: 0.0,
+            cost_per_1k_output: 0.0,
+            inventory_truth: heiwa_provider::InventoryTruth::Verified,
+        };
+        let mut registry = heiwa_provider::AccountRegistry {
+            accounts: vec![heiwa_provider::ProviderAccount {
+                account_id: "ollama-local".to_string(),
+                provider: "ollama".to_string(),
+                credential: heiwa_provider::Credential::LocalRuntime {
+                    endpoint: "http://127.0.0.1:11434".to_string(),
+                },
+                rate_group: "local".to_string(),
+                status: heiwa_provider::AccountStatus::Connected,
+                models: vec![model("gemma4"), model("qwen3.5:9b")],
+            }],
+        };
+
+        let first = super::get_live_model_tiers(&registry);
+        registry.accounts[0].models.reverse();
+        let second = super::get_live_model_tiers(&registry);
+        let first_ids = first.iter().map(|tier| tier.id).collect::<Vec<_>>();
+        let second_ids = second.iter().map(|tier| tier.id).collect::<Vec<_>>();
+
+        assert!(first_ids.iter().all(|id| *id != 0));
+        assert_ne!(first_ids[0], first_ids[1]);
+        assert_eq!(first_ids, second_ids);
+    }
+
+    #[test]
+    fn discovered_ollama_models_are_zero_cost_on_device_budget_candidates() {
+        let model = |name: &str| heiwa_provider::DetectedModel {
+            model_id: name.to_string(),
+            provider_model_id: name.to_string(),
+            provider: "ollama".to_string(),
+            account_id: "ollama-local".to_string(),
+            rate_group: "local".to_string(),
+            capability_class: 3,
+            context_window: 32_768,
+            supports_streaming: true,
+            supports_tools: true,
+            supports_vision: false,
+            supports_audio: false,
+            cost_per_1k_input: 0.0,
+            cost_per_1k_output: 0.0,
+            inventory_truth: heiwa_provider::InventoryTruth::Verified,
+        };
+        let registry = heiwa_provider::AccountRegistry {
+            accounts: vec![heiwa_provider::ProviderAccount {
+                account_id: "ollama-local".to_string(),
+                provider: "ollama".to_string(),
+                credential: heiwa_provider::Credential::LocalRuntime {
+                    endpoint: "http://127.0.0.1:11434".to_string(),
+                },
+                rate_group: "local".to_string(),
+                status: heiwa_provider::AccountStatus::Connected,
+                models: vec![model("gemma4"), model("qwen3.5:9b")],
+            }],
+        };
+        let tiers = super::get_live_model_tiers(&registry);
+        let candidates = tiers
+            .iter()
+            .map(super::model_call_candidate)
+            .collect::<Vec<_>>();
+
+        assert!(candidates.iter().all(|candidate| {
+            candidate.locality == heiwa_core::drex::ExecutionLocality::OnDevice
+                && candidate.cost_truth == heiwa_core::drex::CostTruth::LocalZeroCost
+                && candidate.marginal_cost_usd == Some(0.0)
+                && candidate.adapter_capable
+        }));
+        let plan = heiwa_core::drex::plan_model_call(
+            &heiwa_core::drex::ModelCallRequest {
+                thread_id: "thread".to_string(),
+                turn_id: "turn".to_string(),
+                call_id: "call".to_string(),
+                intent: "code".to_string(),
+                stage: heiwa_core::drex::ModelCallStage::Execution,
+                raw_text: "local work".to_string(),
+                privacy: heiwa_core::drex::PrivacyClass::Sovereign,
+                risk: heiwa_core::drex::CallRisk::Low,
+                safety: heiwa_core::drex::SafetyClass::low_risk_auto_approval(
+                    &heiwa_core::drex::CallRisk::Low,
+                ),
+                required_capabilities: vec![],
+                required_context_tokens: 1,
+                minimum_quality_class: 1,
+                minimum_success_rate: 0.0,
+                maximum_marginal_cost_usd: Some(0.0),
+                preferred_provider: None,
+                preferred_model: None,
+                allowed_models: vec![],
+                excluded_models: vec![],
+            },
+            &candidates,
+            &heiwa_core::drex::default_policy(),
+        )
+        .unwrap();
+        assert!(plan.selected.is_some());
+        assert_eq!(plan.admitted_ids.len(), 2);
+    }
+
+    #[test]
     fn route_task_handles_greeting_without_models() {
         let pins = super::SessionPins::new();
         let outcome = super::route_task("hi", &pins, &[]).expect("greeting should route");
@@ -3608,7 +4670,7 @@ mod tests {
         let pins = super::SessionPins::new();
         let tiers = vec![
             test_model_tier("claude", "claude-sonnet", "anthropic", 4, 0.20),
-            test_model_tier("ollama", "qwen3.5:9b", "local", 3, 0.0),
+            test_model_tier("ollama", "qwen3.5:9b", "local_ollama", 3, 0.0),
         ];
 
         let outcome = super::route_task_with_quota(
@@ -3623,7 +4685,7 @@ mod tests {
         match outcome {
             super::RouteOutcome::Routed(route) => {
                 assert_eq!(route.provider, "ollama");
-                assert_eq!(route.rate_group, "local");
+                assert_eq!(route.rate_group, "local_ollama");
             }
             super::RouteOutcome::Deterministic(_) => panic!("strategy task should route"),
         }
@@ -3634,7 +4696,7 @@ mod tests {
         let pins = super::SessionPins::new();
         let tiers = vec![
             test_model_tier("claude", "claude-sonnet", "anthropic", 4, 0.20),
-            test_model_tier("ollama", "qwen3.5:9b", "local", 3, 0.0),
+            test_model_tier("ollama", "qwen3.5:9b", "local_ollama", 3, 0.0),
         ];
 
         let outcome = super::route_task_with_quota(
@@ -3650,7 +4712,7 @@ mod tests {
             super::RouteOutcome::Routed(route) => {
                 assert_eq!(route.privacy, "sovereign");
                 assert_eq!(route.provider, "ollama");
-                assert_eq!(route.rate_group, "local");
+                assert_eq!(route.rate_group, "local_ollama");
             }
             super::RouteOutcome::Deterministic(_) => {
                 panic!("private prompt should route to a local model")
@@ -3659,9 +4721,115 @@ mod tests {
     }
 
     #[test]
+    fn auto_route_preserves_remote_candidate_for_per_call_quality_floor() {
+        let ledger = heiwa_quota::QuotaLedger::open_in_memory().expect("ledger");
+        let pins = super::SessionPins::new();
+        let mut tiers = vec![
+            test_model_tier("ollama", "qwen3.5:4b", "local_ollama", 2, 0.0),
+            test_model_tier("claude", "claude-sonnet", "anthropic", 4, 0.20),
+        ];
+        tiers[0].id = 1;
+        tiers[1].id = 2;
+        let outcome = super::route_task_with_quota(
+            "compare these deployment approaches in one concise paragraph",
+            &pins,
+            &tiers,
+            Some(&ledger),
+            1_777_000_000,
+        )
+        .expect("auto route should preserve the admitted inventory");
+        let super::RouteOutcome::Routed(route) = outcome else {
+            panic!("comparison task should route to a model")
+        };
+
+        assert_eq!(
+            route.candidates.len(),
+            2,
+            "legacy local-first preflight must not discard the opposite lane"
+        );
+        let plan = heiwa_core::drex::plan_model_call(
+            &heiwa_core::drex::ModelCallRequest {
+                thread_id: "thread".to_string(),
+                turn_id: "turn".to_string(),
+                call_id: "call".to_string(),
+                intent: "chat".to_string(),
+                stage: heiwa_core::drex::ModelCallStage::Execution,
+                raw_text: "compare these deployment approaches".to_string(),
+                privacy: heiwa_core::drex::PrivacyClass::Standard,
+                risk: heiwa_core::drex::CallRisk::Low,
+                safety: heiwa_core::drex::SafetyClass::low_risk_auto_approval(
+                    &heiwa_core::drex::CallRisk::Low,
+                ),
+                required_capabilities: vec![],
+                required_context_tokens: 1,
+                minimum_quality_class: 4,
+                minimum_success_rate: 0.0,
+                maximum_marginal_cost_usd: Some(0.20),
+                preferred_provider: None,
+                preferred_model: None,
+                allowed_models: vec![],
+                excluded_models: vec![],
+            },
+            &route.candidates,
+            &heiwa_core::drex::default_policy(),
+        )
+        .unwrap();
+        let selected = plan
+            .selected
+            .expect("quality floor should admit remote model");
+        assert_eq!(selected.tier.provider, "claude");
+        assert_eq!(selected.tier.model_id, "claude-sonnet");
+    }
+
+    #[test]
+    fn remote_only_main_route_preserves_local_auxiliary_call_candidates() {
+        let ledger = heiwa_quota::QuotaLedger::open_in_memory().expect("ledger");
+        let mut pins = super::SessionPins::new();
+        pins.route_preference = super::RoutePreference::RemoteOnly;
+        let mut tiers = vec![
+            test_model_tier("ollama", "qwen3.5:4b", "local_ollama", 2, 0.0),
+            test_model_tier("claude", "claude-sonnet", "anthropic", 4, 0.20),
+        ];
+        tiers[0].id = 1;
+        tiers[1].id = 2;
+
+        let outcome = super::route_task_with_quota(
+            "compare deployment approaches with enough detail to require a model",
+            &pins,
+            &tiers,
+            Some(&ledger),
+            1_777_000_000,
+        )
+        .expect("remote-only main call should route");
+        let super::RouteOutcome::Routed(route) = outcome else {
+            panic!("comparison task should route to a model")
+        };
+
+        assert_eq!(
+            route
+                .candidates
+                .iter()
+                .map(|candidate| candidate.tier.provider.as_str())
+                .collect::<Vec<_>>(),
+            vec!["claude"],
+            "main-call candidates must still honor remote-only"
+        );
+        assert_eq!(
+            route
+                .local_auxiliary_candidates
+                .iter()
+                .map(|candidate| candidate.tier.provider.as_str())
+                .collect::<Vec<_>>(),
+            vec!["ollama"],
+            "local auxiliary calls need inventory independent of main route"
+        );
+    }
+
+    #[test]
     fn remote_large_chat_prompt_is_compressed_before_model_send() {
         let route = super::RouteResult {
-            adapter: std::sync::Arc::new(super::ClaudeCodeCliAdapter::new()),
+            candidates: vec![],
+            local_auxiliary_candidates: vec![],
             model_id: "claude-sonnet".to_string(),
             provider: "claude".to_string(),
             provider_model_id: "claude-sonnet".to_string(),
@@ -3694,6 +4862,130 @@ mod tests {
         let compression = prepared.compression.expect("compression metadata");
         assert!(compression.applied);
         assert_eq!(compression.receipt_path.as_deref(), Some("/tmp/cmp.json"));
+    }
+
+    #[test]
+    fn fallback_result_replaces_primary_route_attribution() {
+        let route = super::RouteResult {
+            candidates: vec![],
+            local_auxiliary_candidates: vec![],
+            model_id: "primary-model".to_string(),
+            provider: "primary".to_string(),
+            provider_model_id: "primary-model".to_string(),
+            rate_group: "primary-rate".to_string(),
+            routing_metadata: "{}".to_string(),
+            intent_key: "chat".to_string(),
+            privacy: "standard".to_string(),
+            request_id: "req-fallback".to_string(),
+            turn_started_at: "2026-05-26T00:00:00Z".to_string(),
+        };
+        let result = heiwa_shell::model_calls::ModelCallResult {
+            route_receipt_ref: "test-route-receipt".to_string(),
+            provider: "secondary".to_string(),
+            model_id: "secondary-model".to_string(),
+            provider_model_id: "secondary-provider-model".to_string(),
+            rate_group: "secondary-rate".to_string(),
+            text: "done".to_string(),
+            usage: heiwa_provider::adapter::TokenUsage::default(),
+            attempts: 2,
+            failed_models: vec!["primary/primary-model".to_string()],
+            cost_usd: 0.03,
+            cost_truth: heiwa_core::drex::CostTruth::ProxyEstimate,
+            attempt_records: vec![],
+        };
+
+        let resolved = super::resolved_route_after_model_call(&route, &result);
+
+        assert_eq!(resolved.provider, "secondary");
+        assert_eq!(resolved.model_id, "secondary-model");
+        assert_eq!(resolved.provider_model_id, "secondary-provider-model");
+        assert_eq!(resolved.rate_group, "secondary-rate");
+        let usage = super::usage_for_model_call(&result);
+        let trace = super::repl_trace_payload(
+            "remote_model",
+            Some(&resolved),
+            Some(&usage),
+            Some(&result),
+            None,
+        );
+        assert_eq!(trace["provider"], "secondary");
+        assert_eq!(trace["model"], "secondary-model");
+        assert_eq!(trace["cost_usd"], 0.03);
+        assert_eq!(trace["attempts"], 2);
+    }
+
+    #[test]
+    fn fallback_receipt_persists_executor_usd_truth_and_failed_spend() {
+        let receipts = heiwa_receipts::ReceiptStore::open_in_memory().unwrap();
+        let rates = heiwa_receipts::RateTable::default();
+        let result = heiwa_shell::model_calls::ModelCallResult {
+            route_receipt_ref: "test-route-receipt".to_string(),
+            provider: "secondary".to_string(),
+            model_id: "secondary-model".to_string(),
+            provider_model_id: "secondary-provider-model".to_string(),
+            rate_group: "secondary-rate".to_string(),
+            text: "done".to_string(),
+            usage: heiwa_provider::adapter::TokenUsage {
+                input_tokens: 5,
+                output_tokens: 2,
+                cost_usd: 0.02,
+                ..Default::default()
+            },
+            attempts: 2,
+            failed_models: vec!["primary/primary-model".to_string()],
+            cost_usd: 0.03,
+            cost_truth: heiwa_core::drex::CostTruth::ProxyEstimate,
+            attempt_records: vec![
+                heiwa_shell::model_calls::ModelCallAttemptRecord {
+                    candidate_id: 1,
+                    provider: "primary".to_string(),
+                    model_id: "primary-model".to_string(),
+                    outcome: heiwa_shell::model_calls::ModelCallAttemptOutcome::Failed,
+                    failure_class: Some(
+                        heiwa_shell::model_calls::ProviderFailureClass::RateLimited,
+                    ),
+                    provider_invoked: true,
+                    cost_usd: Some(0.01),
+                    cost_truth: heiwa_core::drex::CostTruth::TargetOnly,
+                },
+                heiwa_shell::model_calls::ModelCallAttemptRecord {
+                    candidate_id: 2,
+                    provider: "secondary".to_string(),
+                    model_id: "secondary-model".to_string(),
+                    outcome: heiwa_shell::model_calls::ModelCallAttemptOutcome::Completed,
+                    failure_class: None,
+                    provider_invoked: true,
+                    cost_usd: Some(0.02),
+                    cost_truth: heiwa_core::drex::CostTruth::TargetOnly,
+                },
+            ],
+        };
+        let usage = super::usage_for_model_call(&result);
+
+        super::record_call_receipt(
+            &receipts,
+            &rates,
+            &result,
+            Some(&usage),
+            "session",
+            "input",
+            "output",
+            10,
+        );
+
+        let rows = receipts.list(0, i64::MAX).unwrap();
+        assert_eq!(rows.len(), 1);
+        let receipt = &rows[0];
+        assert_eq!(receipt.provider, "secondary");
+        assert_eq!(receipt.model, "secondary-model");
+        assert_eq!(receipt.actual_cost_cad, 0.0);
+        assert_eq!(receipt.model_call_cost_usd, Some(0.03));
+        assert_eq!(
+            receipt.model_call_cost_truth.as_deref(),
+            Some("proxy_estimate")
+        );
+        assert_eq!(receipt.model_call_attempts, Some(2));
+        assert_eq!(receipt.failed_attempt_cost_usd, Some(0.01));
     }
 
     #[test]
@@ -3779,7 +5071,8 @@ mod tests {
     #[test]
     fn local_or_small_prompts_skip_route_compression() {
         let mut route = super::RouteResult {
-            adapter: std::sync::Arc::new(super::OllamaCliAdapter::new()),
+            candidates: vec![],
+            local_auxiliary_candidates: vec![],
             model_id: "qwen3.5:4b".to_string(),
             provider: "ollama".to_string(),
             provider_model_id: "qwen3.5:4b".to_string(),
@@ -3828,7 +5121,8 @@ mod tests {
     fn local_quota_record_persists_usage_by_rate_group() {
         let ledger = heiwa_quota::QuotaLedger::open_in_memory().expect("ledger");
         let route = super::RouteResult {
-            adapter: std::sync::Arc::new(super::OllamaCliAdapter::new()),
+            candidates: vec![],
+            local_auxiliary_candidates: vec![],
             model_id: "gemma4".to_string(),
             provider: "ollama".to_string(),
             provider_model_id: "gemma4".to_string(),
@@ -3847,8 +5141,15 @@ mod tests {
             cost_usd: 0.03,
         };
 
-        super::record_local_quota_run(&ledger, "run-test", &route, Some(&usage), 1_777_000_000)
-            .expect("quota write");
+        super::record_local_quota_run(
+            &ledger,
+            "run-test",
+            &route,
+            Some(&usage),
+            None,
+            1_777_000_000,
+        )
+        .expect("quota write");
 
         let quota = ledger
             .get_quota("ollama", "local")
@@ -3883,7 +5184,11 @@ mod tests {
             effort_level: 1,
             cost_per_turn,
             max_context_tokens: 32_768,
-            vram_requirement_mb: 0,
+            vram_requirement_mb: if rate_group == "local_ollama" {
+                4096
+            } else {
+                0
+            },
             quantization_type: "none".to_string(),
             kv_cache_strategy: "standard".to_string(),
             strengths_json: serde_json::json!(["chat", "advanced_coding"]).to_string(),

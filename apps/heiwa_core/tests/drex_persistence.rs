@@ -1,16 +1,16 @@
 use std::sync::{Arc, Mutex};
 
 use anyhow::Result;
-use heiwa_protocol::ModelTier;
 use heiwa_core::drex::{
     DrexAuthorityGate, DrexDecision, DrexScoreCard, DrexVector, ExecutionMode, ResolutionTier,
     RoutePlan,
 };
 use heiwa_core::evidence::{
-    PersistedArtifact, PersistedDispatchAck, PersistedDrexDecision, PersistedDrexFailure,
-    PersistedRunFailure, PersistedRunReceipt, PersistedWorkerLease, PersistedWorkerSession,
-    EvidenceRuntime, EvidenceTransport,
+    EvidenceRuntime, EvidenceTransport, PersistedArtifact, PersistedDispatchAck,
+    PersistedDrexDecision, PersistedDrexFailure, PersistedRunFailure, PersistedRunReceipt,
+    PersistedWorkerLease, PersistedWorkerSession,
 };
+use heiwa_protocol::ModelTier;
 
 #[derive(Clone, Default)]
 struct MemoryTransport {
@@ -89,9 +89,8 @@ impl TestEvidenceClient {
         task_id: &str,
         route_plan: &RoutePlan,
     ) -> Result<PersistedDrexDecision> {
-        self.runtime
-            .record_drex_decision(request_id, task_id, route_plan)
-            .await
+        let decision = heiwa_core::evidence::build_drex_decision(request_id, task_id, route_plan);
+        self.runtime.record_drex_decision(decision).await
     }
 
     async fn record_drex_failure(
@@ -182,6 +181,10 @@ async fn record_drex_failure_preserves_decision_linkage() {
 
 fn sample_route_plan() -> RoutePlan {
     RoutePlan {
+        thread_id: "thread-test".to_string(),
+        turn_id: "turn-test".to_string(),
+        call_id: "call-test".to_string(),
+        stage: heiwa_core::drex::ModelCallStage::LegacyRoute,
         decision: DrexDecision {
             vector: DrexVector {
                 scope: 0.35,

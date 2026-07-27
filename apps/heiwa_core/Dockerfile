@@ -9,11 +9,11 @@ WORKDIR /app
 
 RUN apt-get update && apt-get install -y git build-essential curl ca-certificates zstd libpq-dev pkg-config && rm -rf /var/lib/apt/lists/*
 
-# Copy workspace configuration and core components
+# Copy the Rust workspace. `.dockerignore` excludes build output and local
+# state, while copying all workspace members keeps Cargo metadata resolvable.
 COPY Cargo.toml Cargo.lock ./
-COPY apps/heiwa_core/ ./apps/heiwa_core/
-COPY apps/heiwa_hub/spacetimedb/ ./apps/heiwa_hub/spacetimedb/
-COPY packages/heiwa_bindings/rust/ ./packages/heiwa_bindings/rust/
+COPY apps/ ./apps/
+COPY crates/ ./crates/
 
 # Build the core binary
 RUN cargo build --release -p heiwa-core

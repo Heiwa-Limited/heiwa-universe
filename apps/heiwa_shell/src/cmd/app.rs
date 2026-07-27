@@ -6,22 +6,25 @@ use heiwa_resource::{ResourcePolicy, ResourceSnapshot, ThermalPressure, WorkClas
 use serde::Serialize;
 use serde_json::{json, Value};
 use sha1::{Digest, Sha1};
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::env;
 use std::fs;
 use std::net::SocketAddr;
 use std::path::{Component, Path, PathBuf};
 use std::process::{Child, Command, Stdio};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use std::time::Instant;
-use tokio::io::{AsyncReadExt, AsyncWriteExt};
+use tokio::io::{AsyncReadExt, AsyncWrite, AsyncWriteExt};
 use tokio::net::{TcpListener, TcpStream};
-use tokio::sync::watch;
+use tokio::sync::{broadcast, mpsc, watch};
 use tokio::time::{self, Duration};
 
 pub(crate) const DEFAULT_PORT: u16 = 7474;
 const HEARTBEAT_TTL_SECS: i64 = 120;
 const WS_GUID: &str = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11";
+const BROWSER_BOOTSTRAP_TTL_SECONDS: i64 = 60;
+const BROWSER_SESSION_TTL_SECONDS: i64 = 8 * 60 * 60;
+const BROWSER_SESSION_COOKIE_PREFIX: &str = "heiwa_local_operator_";
 const GITHUB_RELEASES_URL: &str = "https://github.com/Strategizing/heiwa-universe/releases";
 const GITHUB_LATEST_RELEASE_API: &str =
     "https://api.github.com/repos/Strategizing/heiwa-universe/releases/latest";
@@ -367,7 +370,7 @@ fn promotion_receipt_plan(
         "runtime_probes": runtime_probe_contracts(),
         "evidence_plane": {
             "backend": "local-jsonl",
-            "truth": "git-synced text (JSONL/markdown)",
+            "truth": "local text (JSONL/markdown); GitHub sync planned, redaction-gated",
             "index": "lance (derived, rebuildable)",
             "status": "local_only",
         },
@@ -542,6 +545,12 @@ async fn api(args: &[String]) -> Result<()> {
         None
     };
     let url = format!("http://127.0.0.1:{port}{path}");
+    let machine_auth_token = heiwa_core::config::RuntimeConfig::from_env().machine_auth_token;
+    let auth_state = if machine_auth_token.trim().is_empty() {
+        "missing"
+    } else {
+        "machine_token_configured"
+    };
 
     if dry_run {
         let payload = json!({
@@ -550,6 +559,7 @@ async fn api(args: &[String]) -> Result<()> {
             "path": path,
             "url": url,
             "dry_run": true,
+            "auth": auth_state,
             "body": body_value,
             "next": "drop --dry-run to call the running local Heiwa.app runtime",
         });
@@ -560,11 +570,24 @@ async fn api(args: &[String]) -> Result<()> {
             println!("  method: {}", payload["method"].as_str().unwrap_or("?"));
             println!("  url: {url}");
             println!("  dry_run: true");
+            println!("  auth: {auth_state}");
         }
         return Ok(());
     }
 
-    let response = call_local_app_api(&method, path, port, body_payload.as_deref()).await?;
+    if machine_auth_token.trim().is_empty() {
+        return Err(anyhow!(
+            "auth_not_configured: set HEIWA_MACHINE_AUTH_TOKEN before calling the local app API"
+        ));
+    }
+    let response = call_local_app_api(
+        &method,
+        path,
+        port,
+        body_payload.as_deref(),
+        &machine_auth_token,
+    )
+    .await?;
     if response.status >= 400 {
         return Err(anyhow!(
             "app api {} {} returned HTTP {}: {}",
@@ -592,32 +615,117 @@ struct ApiResponse {
     body: String,
 }
 
+#[derive(Clone, Copy)]
+struct LocalAppApiTransportPolicy {
+    connect_timeout: Duration,
+    write_timeout: Duration,
+    read_timeout: Duration,
+    max_response_bytes: usize,
+}
+
+// Local JSON API responses are operational control payloads, not bulk data.
+// Two MiB leaves ample room for bounded event pages while limiting a hostile
+// or malfunctioning loopback peer.
+const LOCAL_APP_API_TRANSPORT_POLICY: LocalAppApiTransportPolicy = LocalAppApiTransportPolicy {
+    connect_timeout: Duration::from_secs(3),
+    write_timeout: Duration::from_secs(5),
+    read_timeout: Duration::from_secs(15),
+    max_response_bytes: 2 * 1024 * 1024,
+};
+
 async fn call_local_app_api(
     method: &str,
     path: &str,
     port: u16,
     body: Option<&str>,
+    machine_auth_token: &str,
 ) -> Result<ApiResponse> {
-    let mut stream = TcpStream::connect(("127.0.0.1", port))
-        .await
-        .map_err(|error| {
-            anyhow!("cannot connect to Heiwa.app runtime on 127.0.0.1:{port}: {error}")
-        })?;
+    call_local_app_api_with_policy(
+        method,
+        path,
+        port,
+        body,
+        machine_auth_token,
+        LOCAL_APP_API_TRANSPORT_POLICY,
+    )
+    .await
+}
+
+async fn call_local_app_api_with_policy(
+    method: &str,
+    path: &str,
+    port: u16,
+    body: Option<&str>,
+    machine_auth_token: &str,
+    policy: LocalAppApiTransportPolicy,
+) -> Result<ApiResponse> {
     let body = body.unwrap_or("");
+    let signed = heiwa_core::auth::sign_local_request(
+        heiwa_core::auth::LocalRequestParts {
+            method,
+            port,
+            target: path,
+            body: body.as_bytes(),
+        },
+        chrono::Utc::now().timestamp(),
+        &uuid::Uuid::new_v4().simple().to_string(),
+        machine_auth_token,
+    )
+    .map_err(|_| anyhow!("cannot sign local app API request"))?;
+    let mut stream = time::timeout(
+        policy.connect_timeout,
+        TcpStream::connect(("127.0.0.1", port)),
+    )
+    .await
+    .map_err(|_| anyhow!("local app API connect timed out"))?
+    .map_err(|error| anyhow!("cannot connect to Heiwa.app runtime on 127.0.0.1:{port}: {error}"))?;
     let request = if method == "POST" {
         format!(
-            "POST {path} HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\nAccept: application/json\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+            "POST {path} HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\nAccept: application/json\r\nX-Heiwa-Local-Auth-Version: {}\r\nX-Heiwa-Local-Auth-Timestamp: {}\r\nX-Heiwa-Local-Auth-Nonce: {}\r\nX-Heiwa-Local-Auth-Signature: {}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+            signed.version,
+            signed.timestamp,
+            signed.nonce,
+            signed.signature,
             body.len()
         )
     } else {
         format!(
-            "GET {path} HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\nAccept: application/json\r\nConnection: close\r\n\r\n"
+            "GET {path} HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\nAccept: application/json\r\nX-Heiwa-Local-Auth-Version: {}\r\nX-Heiwa-Local-Auth-Timestamp: {}\r\nX-Heiwa-Local-Auth-Nonce: {}\r\nX-Heiwa-Local-Auth-Signature: {}\r\nConnection: close\r\n\r\n",
+            signed.version, signed.timestamp, signed.nonce, signed.signature,
         )
     };
-    stream.write_all(request.as_bytes()).await?;
-    let mut raw = Vec::new();
-    stream.read_to_end(&mut raw).await?;
+    time::timeout(policy.write_timeout, stream.write_all(request.as_bytes()))
+        .await
+        .map_err(|_| anyhow!("local app API write timed out"))?
+        .map_err(|_| anyhow!("local app API write failed"))?;
+    let raw = time::timeout(
+        policy.read_timeout,
+        read_capped_api_response(&mut stream, policy.max_response_bytes),
+    )
+    .await
+    .map_err(|_| anyhow!("local app API read timed out"))??;
     parse_api_response(&raw)
+}
+
+async fn read_capped_api_response<R>(reader: &mut R, max_bytes: usize) -> Result<Vec<u8>>
+where
+    R: tokio::io::AsyncRead + Unpin,
+{
+    let mut response = Vec::new();
+    let mut buffer = [0_u8; 8192];
+    loop {
+        let read = reader
+            .read(&mut buffer)
+            .await
+            .map_err(|_| anyhow!("local app API read failed"))?;
+        if read == 0 {
+            return Ok(response);
+        }
+        if response.len().saturating_add(read) > max_bytes {
+            return Err(anyhow!("local app API response too large"));
+        }
+        response.extend_from_slice(&buffer[..read]);
+    }
 }
 
 fn parse_api_response(raw: &[u8]) -> Result<ApiResponse> {
@@ -649,14 +757,46 @@ async fn start(args: &[String]) -> Result<()> {
     let url = format!("http://127.0.0.1:{}/", local_addr.port());
     let worker_id = format!("heiwa-app-{}", std::process::id());
     let started_at = Arc::new(chrono::Utc::now().to_rfc3339());
+    let runtime_state_dir = state_dir();
+    let local_request_replays = Arc::new(Mutex::new(LocalRequestReplayCache::default()));
+    let browser_sessions = Arc::new(Mutex::new(BrowserSessionStore::default()));
 
-    write_app_heartbeat(&worker_id)?;
+    // The port identifies this app instance; the runtime lease prevents two
+    // app servers from sharing one evidence root. Session-service activity
+    // leases separately prove exclusive recovery ownership across app, CLI,
+    // REPL, and loop writers.
+    let evidence_root = heiwa_evidence::journal_root()?;
+    let _operator_runtime_lease =
+        heiwa_session::operator::OperatorAppRuntimeLease::acquire(evidence_root)
+            .map_err(|error| anyhow!(error))?;
+    let (_, sessions, _) = crate::default_model_call_runtime().map_err(anyhow::Error::msg)?;
+    sessions
+        .recover_interrupted()
+        .map_err(|error| anyhow!("operator restart recovery failed: {error}"))?;
+
+    write_app_heartbeat(&runtime_state_dir, &worker_id)?;
     let mut caffeinate = spawn_caffeinate();
     let (shutdown_tx, shutdown_rx) = watch::channel(false);
-    tokio::spawn(heartbeat_loop(worker_id.clone(), shutdown_rx));
+    tokio::spawn(heartbeat_loop(
+        runtime_state_dir,
+        worker_id.clone(),
+        shutdown_rx,
+    ));
 
     if !no_open {
-        open_url(&url)?;
+        let config = heiwa_core::config::RuntimeConfig::from_env();
+        if config.machine_auth_token.trim().is_empty() {
+            open_url(&url)?;
+        } else {
+            let bootstrap = browser_sessions
+                .lock()
+                .map_err(|_| anyhow!("browser session mutex poisoned"))?
+                .issue_bootstrap_at(
+                    chrono::Utc::now().timestamp(),
+                    &format!("http://127.0.0.1:{}", local_addr.port()),
+                );
+            open_url(&format!("{url}?heiwa_bootstrap={bootstrap}"))?;
+        }
     }
 
     println!("heiwa app start");
@@ -683,8 +823,17 @@ async fn start(args: &[String]) -> Result<()> {
             accepted = listener.accept() => {
                 let (stream, _) = accepted?;
                 let started_at = started_at.clone();
+                let local_request_replays = local_request_replays.clone();
+                let browser_sessions = browser_sessions.clone();
                 tokio::spawn(async move {
-                    if let Err(err) = handle_connection(stream, started_at).await {
+                    if let Err(err) = handle_connection(
+                        stream,
+                        started_at,
+                        local_request_replays,
+                        browser_sessions,
+                    )
+                    .await
+                    {
                         eprintln!("heiwa app connection error: {err}");
                     }
                 });
@@ -698,12 +847,16 @@ async fn start(args: &[String]) -> Result<()> {
     Ok(())
 }
 
-async fn heartbeat_loop(worker_id: String, mut shutdown: watch::Receiver<bool>) {
+async fn heartbeat_loop(
+    runtime_state_dir: PathBuf,
+    worker_id: String,
+    mut shutdown: watch::Receiver<bool>,
+) {
     let mut ticker = time::interval(Duration::from_secs(60));
     loop {
         tokio::select! {
             _ = ticker.tick() => {
-                let _ = write_app_heartbeat(&worker_id);
+                let _ = write_app_heartbeat(&runtime_state_dir, &worker_id);
             }
             changed = shutdown.changed() => {
                 if changed.is_err() || *shutdown.borrow() {
@@ -876,28 +1029,121 @@ impl RuntimeStatus {
     }
 }
 
-async fn handle_connection(mut stream: TcpStream, started_at: Arc<String>) -> Result<()> {
+async fn handle_connection(
+    mut stream: TcpStream,
+    started_at: Arc<String>,
+    local_request_replays: Arc<Mutex<LocalRequestReplayCache>>,
+    browser_sessions: Arc<Mutex<BrowserSessionStore>>,
+) -> Result<()> {
     let local_port = stream
         .local_addr()
         .map(|addr| addr.port())
         .unwrap_or(DEFAULT_PORT);
-    let (request, body) = read_http_request_and_body(&mut stream).await?;
+    let (request, body_bytes) = read_http_request_and_body(&mut stream).await?;
     if request.is_empty() {
         return Ok(());
     }
 
     if is_websocket_request(&request) {
+        let target = request_target(&request).unwrap_or("/").to_string();
         let path = request_path(&request).unwrap_or("/").to_string();
-        return handle_websocket(stream, &request, started_at, &path).await;
+        if path == "/ws/v1/operator" {
+            if let Err(error) = operator_http_auth_subject(
+                &request,
+                "GET",
+                &target,
+                b"",
+                local_port,
+                &local_request_replays,
+                &browser_sessions,
+            ) {
+                let (status, code) = operator_auth_response(error);
+                return write_response(
+                    &mut stream,
+                    status,
+                    "application/json",
+                    json!({"ok": false, "error": {"code": code}})
+                        .to_string()
+                        .into_bytes(),
+                    false,
+                )
+                .await;
+            }
+        }
+        return handle_websocket(stream, &request, started_at, &path, &target).await;
     }
 
     let method = request_method(&request).unwrap_or("GET");
     let target = request_target(&request).unwrap_or("/");
     let path = request_path(&request).unwrap_or("/");
+    let body = String::from_utf8_lossy(&body_bytes).to_string();
+    if method == "GET" && path == "/" {
+        if let Some(bootstrap) = query_param(target, "heiwa_bootstrap") {
+            let origin = exact_loopback_origin(&request, local_port)
+                .map_err(|_| anyhow!("invalid browser bootstrap origin"))?;
+            let session = browser_sessions
+                .lock()
+                .map_err(|_| anyhow!("browser session mutex poisoned"))?
+                .consume_bootstrap_at(&bootstrap, chrono::Utc::now().timestamp(), &origin);
+            return match session {
+                Some(session) => {
+                    write_browser_session_redirect(&mut stream, &session, local_port).await
+                }
+                None => {
+                    write_response(
+                        &mut stream,
+                        401,
+                        "application/json",
+                        json!({"ok": false, "error": {"code": "invalid_browser_bootstrap"}})
+                            .to_string()
+                            .into_bytes(),
+                        false,
+                    )
+                    .await
+                }
+            };
+        }
+    }
     if method == "OPTIONS" {
         return write_response(&mut stream, 204, "text/plain", Vec::new(), false).await;
     }
     let head_only = method == "HEAD";
+
+    if is_runtime_authenticated_request(method, path) {
+        if let Err(error) = operator_http_auth_subject(
+            &request,
+            method,
+            target,
+            &body_bytes,
+            local_port,
+            &local_request_replays,
+            &browser_sessions,
+        ) {
+            let (status, code) = operator_auth_response(error);
+            return write_response(
+                &mut stream,
+                status,
+                "application/json",
+                json!({"ok": false, "error": {"code": code}})
+                    .to_string()
+                    .into_bytes(),
+                false,
+            )
+            .await;
+        }
+    }
+
+    if is_operator_api_path(path) {
+        let (status, payload) = operator_http_response(method, target, path, &body).await;
+        return write_response(
+            &mut stream,
+            status,
+            "application/json",
+            payload.to_string().into_bytes(),
+            head_only,
+        )
+        .await;
+    }
 
     if method == "POST" && path == "/api/v1/repl" {
         let parsed_body: Value = serde_json::from_str(&body).unwrap_or_else(|_| json!({}));
@@ -1159,7 +1405,653 @@ async fn handle_connection(mut stream: TcpStream, started_at: Arc<String>) -> Re
     serve_static(&mut stream, path, head_only).await
 }
 
-async fn read_http_request_and_body(stream: &mut TcpStream) -> Result<(String, String)> {
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum OperatorAuthError {
+    NotConfigured,
+    Unauthorized,
+}
+
+fn operator_auth_response(error: OperatorAuthError) -> (u16, &'static str) {
+    match error {
+        OperatorAuthError::NotConfigured => (500, "auth_not_configured"),
+        OperatorAuthError::Unauthorized => (401, "unauthorized"),
+    }
+}
+
+fn is_operator_api_path(path: &str) -> bool {
+    path == "/api/v1/operator" || path.starts_with("/api/v1/operator/")
+}
+
+fn is_runtime_authenticated_request(method: &str, path: &str) -> bool {
+    if is_operator_api_path(path) || matches!(path, "/api/v1/repl" | "/api/v1/repl/stream") {
+        return true;
+    }
+    path.starts_with("/api/v1/")
+        && matches!(method, "POST" | "PUT" | "PATCH" | "DELETE")
+        && path != "/api/v1/route/preview"
+}
+
+const MAX_LOCAL_REQUEST_NONCES: usize = 4096;
+
+#[derive(Default)]
+struct BrowserSessionStore {
+    bootstraps: HashMap<String, BrowserSessionGrant>,
+    sessions: HashMap<String, BrowserSessionGrant>,
+}
+
+#[derive(Clone)]
+struct BrowserSessionGrant {
+    expires_at: i64,
+    origin: String,
+}
+
+impl BrowserSessionStore {
+    fn issue_bootstrap_at(&mut self, now: i64, origin: &str) -> String {
+        self.retain_fresh(now);
+        loop {
+            let token = uuid::Uuid::new_v4().simple().to_string();
+            if self
+                .bootstraps
+                .insert(
+                    token.clone(),
+                    BrowserSessionGrant {
+                        expires_at: now.saturating_add(BROWSER_BOOTSTRAP_TTL_SECONDS),
+                        origin: origin.to_string(),
+                    },
+                )
+                .is_none()
+            {
+                return token;
+            }
+        }
+    }
+
+    fn consume_bootstrap_at(&mut self, bootstrap: &str, now: i64, origin: &str) -> Option<String> {
+        self.retain_fresh(now);
+        let grant = self.bootstraps.remove(bootstrap)?;
+        if grant.expires_at < now || grant.origin != origin {
+            return None;
+        }
+        loop {
+            let session = uuid::Uuid::new_v4().simple().to_string();
+            if self
+                .sessions
+                .insert(
+                    session.clone(),
+                    BrowserSessionGrant {
+                        expires_at: now.saturating_add(BROWSER_SESSION_TTL_SECONDS),
+                        origin: origin.to_string(),
+                    },
+                )
+                .is_none()
+            {
+                return Some(session);
+            }
+        }
+    }
+
+    fn authenticates_cookie_at(
+        &mut self,
+        cookie_header: &str,
+        now: i64,
+        port: u16,
+        origin: &str,
+    ) -> bool {
+        self.retain_fresh(now);
+        let expected_name = browser_session_cookie_name(port);
+        cookie_header.split(';').map(str::trim).any(|segment| {
+            let Some((name, value)) = segment.split_once('=') else {
+                return false;
+            };
+            name == expected_name
+                && self
+                    .sessions
+                    .get(value)
+                    .is_some_and(|grant| grant.expires_at >= now && grant.origin == origin)
+        })
+    }
+
+    fn retain_fresh(&mut self, now: i64) {
+        self.bootstraps.retain(|_, grant| grant.expires_at >= now);
+        self.sessions.retain(|_, grant| grant.expires_at >= now);
+    }
+}
+
+fn browser_session_cookie_name(port: u16) -> String {
+    format!("{BROWSER_SESSION_COOKIE_PREFIX}{port}")
+}
+
+#[derive(Default)]
+struct LocalRequestReplayCache {
+    nonces: HashMap<String, i64>,
+}
+
+impl LocalRequestReplayCache {
+    fn consume(
+        &mut self,
+        verified: heiwa_core::auth::VerifiedLocalRequest,
+        now: i64,
+    ) -> std::result::Result<(), ()> {
+        self.nonces.retain(|_, timestamp| {
+            timestamp.abs_diff(now) <= heiwa_core::auth::LOCAL_REQUEST_MAX_SKEW_SECONDS
+        });
+        if self.nonces.contains_key(&verified.nonce)
+            || self.nonces.len() >= MAX_LOCAL_REQUEST_NONCES
+        {
+            return Err(());
+        }
+        self.nonces.insert(verified.nonce, verified.timestamp);
+        Ok(())
+    }
+}
+
+fn operator_http_auth_subject(
+    request: &str,
+    method: &str,
+    target: &str,
+    body: &[u8],
+    local_port: u16,
+    local_request_replays: &Mutex<LocalRequestReplayCache>,
+    browser_sessions: &Mutex<BrowserSessionStore>,
+) -> std::result::Result<heiwa_core::auth::AuthSubject, OperatorAuthError> {
+    let config = heiwa_core::config::RuntimeConfig::from_env();
+    if config.machine_auth_token.trim().is_empty() && config.jwt_signing_secret.trim().is_empty() {
+        return Err(OperatorAuthError::NotConfigured);
+    }
+    let expected_origin = exact_loopback_origin(request, local_port)?;
+    let supplied_origin =
+        strict_header_value(request, "origin").map_err(|_| OperatorAuthError::Unauthorized)?;
+    if supplied_origin
+        .as_deref()
+        .is_some_and(|origin| origin != expected_origin)
+    {
+        return Err(OperatorAuthError::Unauthorized);
+    }
+    let cookie =
+        strict_header_value(request, "cookie").map_err(|_| OperatorAuthError::Unauthorized)?;
+    if cookie.is_some_and(|cookie| {
+        supplied_origin.as_deref() == Some(expected_origin.as_str())
+            && browser_sessions.lock().ok().is_some_and(|mut sessions| {
+                sessions.authenticates_cookie_at(
+                    &cookie,
+                    chrono::Utc::now().timestamp(),
+                    local_port,
+                    &expected_origin,
+                )
+            })
+    }) {
+        return Ok(heiwa_core::auth::AuthSubject::Operator);
+    }
+    match local_request_signature_headers(request) {
+        Ok(Some(signed)) => {
+            if config.machine_auth_token.trim().is_empty() {
+                return Err(OperatorAuthError::Unauthorized);
+            }
+            let now = chrono::Utc::now().timestamp();
+            let verified = heiwa_core::auth::verify_local_request(
+                heiwa_core::auth::LocalRequestParts {
+                    method,
+                    port: local_port,
+                    target,
+                    body,
+                },
+                &signed,
+                &config.machine_auth_token,
+                now,
+            )
+            .map_err(|_| OperatorAuthError::Unauthorized)?;
+            local_request_replays
+                .lock()
+                .map_err(|_| OperatorAuthError::Unauthorized)?
+                .consume(verified, now)
+                .map_err(|_| OperatorAuthError::Unauthorized)?;
+            return Ok(heiwa_core::auth::AuthSubject::Operator);
+        }
+        Ok(None) => {}
+        Err(()) => return Err(OperatorAuthError::Unauthorized),
+    }
+
+    let cookie = header_value(request, "cookie");
+    let authorization = header_value(request, "authorization");
+    heiwa_core::auth::extract_auth_subject(cookie.as_deref(), authorization.as_deref(), &config)
+        .map_err(|_| OperatorAuthError::Unauthorized)
+}
+
+fn exact_loopback_origin(
+    request: &str,
+    local_port: u16,
+) -> std::result::Result<String, OperatorAuthError> {
+    let host = strict_header_value(request, "host")
+        .map_err(|_| OperatorAuthError::Unauthorized)?
+        .ok_or(OperatorAuthError::Unauthorized)?;
+    let expected_host = format!("127.0.0.1:{local_port}");
+    if host != expected_host {
+        return Err(OperatorAuthError::Unauthorized);
+    }
+    Ok(format!("http://{expected_host}"))
+}
+
+fn local_request_signature_headers(
+    request: &str,
+) -> std::result::Result<Option<heiwa_core::auth::LocalRequestSignature>, ()> {
+    let names = [
+        heiwa_core::auth::LOCAL_REQUEST_AUTH_VERSION_HEADER,
+        heiwa_core::auth::LOCAL_REQUEST_AUTH_TIMESTAMP_HEADER,
+        heiwa_core::auth::LOCAL_REQUEST_AUTH_NONCE_HEADER,
+        heiwa_core::auth::LOCAL_REQUEST_AUTH_SIGNATURE_HEADER,
+    ];
+    let values = names
+        .iter()
+        .map(|name| strict_header_value(request, name))
+        .collect::<std::result::Result<Vec<_>, _>>()?;
+    if values.iter().all(Option::is_none) {
+        return Ok(None);
+    }
+    if values.iter().any(Option::is_none) {
+        return Err(());
+    }
+    Ok(Some(heiwa_core::auth::LocalRequestSignature {
+        version: values[0].clone().ok_or(())?,
+        timestamp: values[1].clone().ok_or(())?,
+        nonce: values[2].clone().ok_or(())?,
+        signature: values[3].clone().ok_or(())?,
+    }))
+}
+
+fn strict_header_value(request: &str, name: &str) -> std::result::Result<Option<String>, ()> {
+    let values = request
+        .lines()
+        .filter_map(|line| {
+            let (header_name, value) = line.split_once(':')?;
+            header_name
+                .eq_ignore_ascii_case(name)
+                .then(|| value.trim().to_string())
+        })
+        .collect::<Vec<_>>();
+    match values.as_slice() {
+        [] => Ok(None),
+        [value] => Ok(Some(value.clone())),
+        _ => Err(()),
+    }
+}
+
+enum OperatorHttpRoute {
+    Threads,
+    Thread(String),
+    Events(String),
+    Turns(String),
+    Cancel(String),
+}
+
+async fn operator_http_response(
+    method: &str,
+    target: &str,
+    path: &str,
+    body: &str,
+) -> (u16, Value) {
+    let route = match parse_operator_route(path) {
+        Ok(Some(route)) => route,
+        Ok(None) => return operator_error(404, "not_found"),
+        Err(()) => return operator_error(400, "invalid_id"),
+    };
+    let (_, sessions, runner) = match crate::default_model_call_runtime() {
+        Ok(runtime) => runtime,
+        Err(_) => return operator_error(503, "operator_unavailable"),
+    };
+
+    match (method, route) {
+        ("GET", OperatorHttpRoute::Threads) => match sessions.list_threads(100) {
+            Ok(threads) => (200, json!({"ok": true, "data": {"threads": threads}})),
+            Err(_) => operator_error(503, "operator_unavailable"),
+        },
+        ("POST", OperatorHttpRoute::Threads) => {
+            let parsed = match parse_json_body(body) {
+                Ok(parsed) => parsed,
+                Err(()) => return operator_error(400, "invalid_request"),
+            };
+            let raw_id = match parsed {
+                Value::Null => format!("thread-{}", uuid::Uuid::new_v4()),
+                Value::Object(object) => match object.get("thread_id") {
+                    None => format!("thread-{}", uuid::Uuid::new_v4()),
+                    Some(Value::String(thread_id)) => thread_id.clone(),
+                    Some(_) => return operator_error(400, "invalid_request"),
+                },
+                _ => return operator_error(400, "invalid_request"),
+            };
+            let thread_id = match validate_operator_identifier(&raw_id) {
+                Ok(thread_id) => thread_id,
+                Err(()) => return operator_error(400, "invalid_id"),
+            };
+            let created = match sessions.ensure_thread(&thread_id) {
+                Ok(created) => created,
+                Err(_) => return operator_error(503, "operator_unavailable"),
+            };
+            match sessions.thread(&thread_id) {
+                Ok(thread) => (
+                    200,
+                    json!({"ok": true, "data": {"thread_id": thread_id, "created": created, "thread": thread}}),
+                ),
+                Err(_) => operator_error(503, "operator_unavailable"),
+            }
+        }
+        ("GET", OperatorHttpRoute::Thread(thread_id)) => match sessions.thread(&thread_id) {
+            Ok(thread) => (200, json!({"ok": true, "data": {"thread": thread}})),
+            Err(_) => operator_error(503, "operator_unavailable"),
+        },
+        ("GET", OperatorHttpRoute::Events(thread_id)) => {
+            let limit = match query_param(target, "limit") {
+                Some(raw) => match raw.parse::<usize>() {
+                    Ok(limit) if (1..=500).contains(&limit) => limit,
+                    _ => return operator_error(400, "invalid_request"),
+                },
+                None => 100,
+            };
+            let after = query_param(target, "after").filter(|cursor| !cursor.is_empty());
+            match sessions.events_after(&thread_id, after.as_deref(), limit) {
+                Ok(page) => {
+                    let events = page
+                        .events
+                        .into_iter()
+                        .map(|row| json!({"cursor": row.cursor, "event": row.event}))
+                        .collect::<Vec<_>>();
+                    (
+                        200,
+                        json!({
+                            "ok": true,
+                            "data": {
+                                "events": events,
+                                "next_cursor": page.next_cursor,
+                                "skipped_lines": page.skipped_lines,
+                            }
+                        }),
+                    )
+                }
+                Err(heiwa_evidence::CursorError::InvalidCursor { .. }) => {
+                    operator_error(400, "invalid_cursor")
+                }
+                Err(
+                    heiwa_evidence::CursorError::UnstableLineage { .. }
+                    | heiwa_evidence::CursorError::Storage(_),
+                ) => operator_error(503, "operator_unavailable"),
+            }
+        }
+        ("POST", OperatorHttpRoute::Turns(thread_id)) => {
+            let request = match parse_turn_request(body) {
+                Ok(request) => request,
+                Err(()) => return operator_error(400, "invalid_request"),
+            };
+            match crate::submit_operator_turn(&thread_id, request).await {
+                Ok(handle) => {
+                    let stream_url = format!(
+                        "/ws/v1/operator?thread_id={}&after={}",
+                        percent_encode_query_component(&handle.thread_id),
+                        percent_encode_query_component(&handle.cursor)
+                    );
+                    (
+                        202,
+                        json!({
+                            "ok": true,
+                            "data": {
+                                "thread_id": handle.thread_id,
+                                "turn_id": handle.turn_id,
+                                "cursor": handle.cursor,
+                                "duplicate": handle.duplicate,
+                                "stream_url": stream_url,
+                            }
+                        }),
+                    )
+                }
+                Err(heiwa_shell::operator::OperatorSubmissionError::Rejected(
+                    heiwa_session::operator::TurnSubmissionError::IdempotencyConflict { .. },
+                )) => operator_error(409, "idempotency_conflict"),
+                Err(heiwa_shell::operator::OperatorSubmissionError::Rejected(
+                    heiwa_session::operator::TurnSubmissionError::SensitiveMaterial { .. },
+                )) => operator_error(400, "sensitive_material"),
+                Err(heiwa_shell::operator::OperatorSubmissionError::Rejected(
+                    heiwa_session::operator::TurnSubmissionError::Runtime(_),
+                ))
+                | Err(heiwa_shell::operator::OperatorSubmissionError::Runtime(_)) => {
+                    operator_error(503, "operator_unavailable")
+                }
+            }
+        }
+        ("POST", OperatorHttpRoute::Cancel(turn_id)) => match runner.request_cancel(&turn_id) {
+            Ok(true) => (
+                202,
+                json!({"ok": true, "data": {"turn_id": turn_id, "cancel_requested": true}}),
+            ),
+            Ok(false) => (
+                200,
+                json!({"ok": true, "data": {"turn_id": turn_id, "cancel_requested": false}}),
+            ),
+            Err(_) => operator_error(503, "operator_unavailable"),
+        },
+        _ => operator_error(405, "method_not_allowed"),
+    }
+}
+
+fn operator_error(status: u16, code: &str) -> (u16, Value) {
+    (status, json!({"ok": false, "error": {"code": code}}))
+}
+
+fn parse_operator_route(path: &str) -> std::result::Result<Option<OperatorHttpRoute>, ()> {
+    let segments = path.trim_start_matches('/').split('/').collect::<Vec<_>>();
+    if segments.get(..3) != Some(&["api", "v1", "operator"][..]) {
+        return Ok(None);
+    }
+    match segments.as_slice() {
+        ["api", "v1", "operator", "threads"] => Ok(Some(OperatorHttpRoute::Threads)),
+        ["api", "v1", "operator", "threads", thread_id] => Ok(Some(OperatorHttpRoute::Thread(
+            decode_operator_path_id(thread_id)?,
+        ))),
+        ["api", "v1", "operator", "threads", thread_id, "events"] => Ok(Some(
+            OperatorHttpRoute::Events(decode_operator_path_id(thread_id)?),
+        )),
+        ["api", "v1", "operator", "threads", thread_id, "turns"] => Ok(Some(
+            OperatorHttpRoute::Turns(decode_operator_path_id(thread_id)?),
+        )),
+        ["api", "v1", "operator", "turns", turn_id, "cancel"] => Ok(Some(
+            OperatorHttpRoute::Cancel(decode_operator_path_id(turn_id)?),
+        )),
+        _ if segments.iter().any(|segment| segment.is_empty()) => Err(()),
+        _ => Ok(None),
+    }
+}
+
+fn decode_operator_path_id(raw: &str) -> std::result::Result<String, ()> {
+    let bytes = raw.as_bytes();
+    let mut decoded = Vec::with_capacity(bytes.len());
+    let mut index = 0;
+    while index < bytes.len() {
+        if bytes[index] == b'%' {
+            if index + 2 >= bytes.len() {
+                return Err(());
+            }
+            let hi = hex_value(bytes[index + 1]).ok_or(())?;
+            let lo = hex_value(bytes[index + 2]).ok_or(())?;
+            decoded.push((hi << 4) | lo);
+            index += 3;
+        } else {
+            decoded.push(bytes[index]);
+            index += 1;
+        }
+    }
+    let decoded = String::from_utf8(decoded).map_err(|_| ())?;
+    validate_operator_identifier(&decoded)
+}
+
+fn percent_encode_query_component(value: &str) -> String {
+    let mut encoded = String::with_capacity(value.len());
+    for byte in value.bytes() {
+        if byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'.' | b'_' | b'~') {
+            encoded.push(byte as char);
+        } else {
+            encoded.push('%');
+            encoded.push_str(&format!("{byte:02X}"));
+        }
+    }
+    encoded
+}
+
+fn validate_operator_identifier(raw: &str) -> std::result::Result<String, ()> {
+    let id = validate_operator_identifier_shape(raw)?;
+    if heiwa_evidence::find_sensitive(&Value::String(id.clone())).is_some() {
+        return Err(());
+    }
+    Ok(id)
+}
+
+fn validate_operator_identifier_shape(raw: &str) -> std::result::Result<String, ()> {
+    let id = raw.trim();
+    if id.is_empty()
+        || id.len() > 128
+        || id.contains("..")
+        || id.contains('/')
+        || id.contains('\\')
+        || id.chars().any(char::is_control)
+    {
+        return Err(());
+    }
+    Ok(id.to_string())
+}
+
+fn parse_json_body(body: &str) -> std::result::Result<Value, ()> {
+    if body.trim().is_empty() {
+        Ok(Value::Null)
+    } else {
+        serde_json::from_str(body).map_err(|_| ())
+    }
+}
+
+fn parse_turn_request(
+    body: &str,
+) -> std::result::Result<heiwa_session::operator::StartTurnRequest, ()> {
+    let value = parse_json_body(body)?;
+    let object = value.as_object().ok_or(())?;
+    let client_request_id = object
+        .get("client_request_id")
+        .and_then(Value::as_str)
+        .ok_or(())?;
+    // Client request IDs are not path components. Validate their shape here,
+    // then let the typed session admission gate classify sensitive material.
+    let client_request_id = validate_operator_identifier_shape(client_request_id)?;
+    let prompt = object.get("prompt").and_then(Value::as_str).ok_or(())?;
+    if prompt.trim().is_empty() || prompt.len() > 64 * 1024 {
+        return Err(());
+    }
+
+    let mut request = heiwa_session::operator::StartTurnRequest::auto(client_request_id, prompt);
+    if let Some(policy) = object.get("route_policy").filter(|value| !value.is_null()) {
+        request.route_policy = parse_route_policy(policy)?;
+    }
+    Ok(request)
+}
+
+fn parse_route_policy(
+    value: &Value,
+) -> std::result::Result<heiwa_session::operator::TurnRoutePolicy, ()> {
+    use heiwa_session::operator::{RouteMode, TurnRoutePolicy};
+
+    let object = value.as_object().ok_or(())?;
+    let mode = match object.get("mode") {
+        None => RouteMode::Auto,
+        Some(Value::String(mode)) => match mode.as_str() {
+            "auto" => RouteMode::Auto,
+            "local_only" => RouteMode::LocalOnly,
+            "remote_only" => RouteMode::RemoteOnly,
+            "explicit" => RouteMode::Explicit,
+            _ => return Err(()),
+        },
+        Some(_) => return Err(()),
+    };
+    let preferred_provider = parse_optional_policy_string(object.get("preferred_provider"))?;
+    let preferred_model = parse_optional_policy_string(object.get("preferred_model"))?;
+    let allowed_models = parse_policy_string_list(object.get("allowed_models"))?;
+    let excluded_models = parse_policy_string_list(object.get("excluded_models"))?;
+    let minimum_quality_class = match object.get("minimum_quality_class") {
+        Some(value) => {
+            let quality = value.as_u64().ok_or(())?;
+            if !(1..=5).contains(&quality) {
+                return Err(());
+            }
+            quality as u8
+        }
+        None => 1,
+    };
+    let maximum_marginal_cost_usd =
+        parse_nonnegative_budget(object.get("maximum_marginal_cost_usd"))?;
+    let turn_budget_usd = parse_nonnegative_budget(object.get("turn_budget_usd"))?;
+    let privacy = match object.get("privacy") {
+        None => "standard",
+        Some(Value::String(privacy)) => privacy.as_str(),
+        Some(_) => return Err(()),
+    };
+    heiwa_core::drex::PrivacyClass::parse(privacy).map_err(|_| ())?;
+    if mode == RouteMode::Explicit && preferred_provider.is_none() && preferred_model.is_none() {
+        return Err(());
+    }
+    Ok(TurnRoutePolicy {
+        mode,
+        preferred_provider,
+        preferred_model,
+        allowed_models,
+        excluded_models,
+        minimum_quality_class,
+        maximum_marginal_cost_usd,
+        turn_budget_usd,
+        privacy: privacy.to_string(),
+    })
+}
+
+fn parse_optional_policy_string(value: Option<&Value>) -> std::result::Result<Option<String>, ()> {
+    match value {
+        None | Some(Value::Null) => Ok(None),
+        Some(Value::String(value)) if !value.trim().is_empty() && value.len() <= 256 => {
+            Ok(Some(value.trim().to_string()))
+        }
+        _ => Err(()),
+    }
+}
+
+fn parse_policy_string_list(value: Option<&Value>) -> std::result::Result<Vec<String>, ()> {
+    let Some(value) = value else {
+        return Ok(Vec::new());
+    };
+    let values = value.as_array().ok_or(())?;
+    if values.len() > 64 {
+        return Err(());
+    }
+    values
+        .iter()
+        .map(|value| {
+            let value = value.as_str().ok_or(())?;
+            if value.trim().is_empty() || value.len() > 256 {
+                Err(())
+            } else {
+                Ok(value.trim().to_string())
+            }
+        })
+        .collect()
+}
+
+fn parse_nonnegative_budget(value: Option<&Value>) -> std::result::Result<Option<f64>, ()> {
+    match value {
+        None | Some(Value::Null) => Ok(None),
+        Some(value) => {
+            let value = value.as_f64().ok_or(())?;
+            if value.is_finite() && value >= 0.0 {
+                Ok(Some(value))
+            } else {
+                Err(())
+            }
+        }
+    }
+}
+
+async fn read_http_request_and_body(stream: &mut TcpStream) -> Result<(String, Vec<u8>)> {
+    const MAX_HTTP_HEADER_BYTES: usize = 64 * 1024;
+    const MAX_HTTP_BODY_BYTES: usize = 10 * 1024 * 1024;
+
     let mut data = Vec::new();
     let mut buf = [0u8; 1024];
     let mut headers_len = None;
@@ -1171,10 +2063,14 @@ async fn read_http_request_and_body(stream: &mut TcpStream) -> Result<(String, S
         }
         data.extend_from_slice(&buf[..n]);
         if let Some(pos) = data.windows(4).position(|w| w == b"\r\n\r\n") {
-            headers_len = Some(pos + 4);
+            let end = pos + 4;
+            if end > MAX_HTTP_HEADER_BYTES {
+                return Err(anyhow!("request headers too large"));
+            }
+            headers_len = Some(end);
             break;
         }
-        if data.len() > 64 * 1024 {
+        if data.len() > MAX_HTTP_HEADER_BYTES {
             return Err(anyhow!("request headers too large"));
         }
     }
@@ -1186,27 +2082,42 @@ async fn read_http_request_and_body(stream: &mut TcpStream) -> Result<(String, S
 
     let headers_str = String::from_utf8_lossy(&data[..headers_len]).to_string();
 
-    let mut content_length = 0;
-    if let Some(cl_str) = header_value(&headers_str, "content-length") {
-        if let Ok(len) = cl_str.trim().parse::<usize>() {
-            content_length = len;
-        }
+    let content_lengths = headers_str
+        .lines()
+        .filter_map(|line| {
+            let (name, value) = line.split_once(':')?;
+            name.eq_ignore_ascii_case("content-length")
+                .then_some(value.trim())
+        })
+        .collect::<Vec<_>>();
+    let content_length = match content_lengths.as_slice() {
+        [] => 0,
+        [raw] if !raw.is_empty() && raw.bytes().all(|byte| byte.is_ascii_digit()) => raw
+            .parse::<usize>()
+            .map_err(|_| anyhow!("invalid content-length"))?,
+        [_] => return Err(anyhow!("invalid content-length")),
+        _ => return Err(anyhow!("multiple content-length headers")),
+    };
+    let total_len = headers_len
+        .checked_add(content_length)
+        .ok_or_else(|| anyhow!("request length overflow"))?;
+    if content_length > MAX_HTTP_BODY_BYTES {
+        return Err(anyhow!("request body too large"));
     }
-
-    let total_len = headers_len + content_length;
     while data.len() < total_len {
         let n = stream.read(&mut buf).await?;
         if n == 0 {
-            break;
+            return Err(anyhow!(
+                "truncated request body: expected {content_length} bytes"
+            ));
         }
         data.extend_from_slice(&buf[..n]);
-        if data.len() > 10 * 1024 * 1024 {
-            return Err(anyhow!("request body too large"));
-        }
     }
 
-    let body_str = String::from_utf8_lossy(&data[headers_len..total_len]).to_string();
-    Ok((headers_str, body_str))
+    let body = data
+        .get(headers_len..total_len)
+        .ok_or_else(|| anyhow!("truncated request body"))?;
+    Ok((headers_str, body.to_vec()))
 }
 
 async fn handle_websocket(
@@ -1214,6 +2125,7 @@ async fn handle_websocket(
     request: &str,
     started_at: Arc<String>,
     path: &str,
+    target: &str,
 ) -> Result<()> {
     let key = header_value(request, "sec-websocket-key")
         .ok_or_else(|| anyhow!("missing websocket key"))?;
@@ -1231,6 +2143,34 @@ async fn handle_websocket(
         return events_loop(stream).await;
     }
 
+    if path == "/ws/v1/operator" {
+        let params = match parse_operator_websocket_request(target) {
+            Ok(params) => params,
+            Err(()) => {
+                let payload = json!({"type":"error","code":"invalid_request"});
+                let _ = write_ws_text(&mut stream, &payload.to_string()).await;
+                return Ok(());
+            }
+        };
+        let (_, sessions, runner) = match crate::default_model_call_runtime() {
+            Ok(runtime) => runtime,
+            Err(_) => {
+                let payload = json!({"type":"error","code":"operator_unavailable"});
+                let _ = write_ws_text(&mut stream, &payload.to_string()).await;
+                return Ok(());
+            }
+        };
+        return operator_events_loop(
+            stream,
+            sessions,
+            runner.subscribe(),
+            params.thread_id,
+            params.after,
+            OperatorWebsocketIntervals::default(),
+        )
+        .await;
+    }
+
     let mut ticker = time::interval(Duration::from_secs(5));
     loop {
         ticker.tick().await;
@@ -1246,6 +2186,333 @@ async fn handle_websocket(
         }
     }
     Ok(())
+}
+
+struct OperatorWebsocketRequest {
+    thread_id: String,
+    after: Option<String>,
+}
+
+#[derive(Clone, Copy)]
+struct OperatorWebsocketIntervals {
+    poll: Duration,
+    heartbeat: Duration,
+    write_timeout: Duration,
+}
+
+impl Default for OperatorWebsocketIntervals {
+    fn default() -> Self {
+        Self {
+            poll: Duration::from_millis(200),
+            heartbeat: Duration::from_secs(30),
+            write_timeout: Duration::from_secs(10),
+        }
+    }
+}
+
+fn parse_operator_websocket_request(
+    target: &str,
+) -> std::result::Result<OperatorWebsocketRequest, ()> {
+    let (path, query) = target.split_once('?').ok_or(())?;
+    if path != "/ws/v1/operator" {
+        return Err(());
+    }
+    let mut thread_id = None;
+    let mut after = None;
+    for pair in query.split('&').filter(|pair| !pair.is_empty()) {
+        let (raw_key, raw_value) = pair.split_once('=').unwrap_or((pair, ""));
+        let key = strict_percent_decode_query(raw_key)?;
+        let value = strict_percent_decode_query(raw_value)?;
+        match key.as_str() {
+            "thread_id" if thread_id.is_none() => thread_id = Some(value),
+            "after" if after.is_none() => after = Some(value),
+            _ => return Err(()),
+        }
+    }
+    let thread_id = validate_operator_identifier(&thread_id.ok_or(())?)?;
+    let after = after.filter(|cursor| !cursor.is_empty());
+    if after
+        .as_ref()
+        .is_some_and(|cursor| cursor.len() > 8 * 1024 || cursor.chars().any(char::is_control))
+    {
+        return Err(());
+    }
+    Ok(OperatorWebsocketRequest { thread_id, after })
+}
+
+fn strict_percent_decode_query(raw: &str) -> std::result::Result<String, ()> {
+    let bytes = raw.as_bytes();
+    let mut decoded = Vec::with_capacity(bytes.len());
+    let mut index = 0;
+    while index < bytes.len() {
+        match bytes[index] {
+            b'+' => {
+                decoded.push(b' ');
+                index += 1;
+            }
+            b'%' => {
+                if index + 2 >= bytes.len() {
+                    return Err(());
+                }
+                let hi = hex_value(bytes[index + 1]).ok_or(())?;
+                let lo = hex_value(bytes[index + 2]).ok_or(())?;
+                decoded.push((hi << 4) | lo);
+                index += 3;
+            }
+            byte => {
+                decoded.push(byte);
+                index += 1;
+            }
+        }
+    }
+    String::from_utf8(decoded).map_err(|_| ())
+}
+
+async fn operator_events_loop(
+    stream: TcpStream,
+    sessions: Arc<heiwa_session::operator::OperatorSessionService>,
+    mut transient: broadcast::Receiver<heiwa_shell::operator::OperatorStreamFrame>,
+    thread_id: String,
+    mut cursor: Option<String>,
+    intervals: OperatorWebsocketIntervals,
+) -> Result<()> {
+    let (reader, mut writer) = stream.into_split();
+    let (control_tx, mut control_rx) = mpsc::channel(8);
+    let _reader = AbortTask(tokio::spawn(read_operator_websocket_controls(
+        reader, control_tx,
+    )));
+    let mut poll = time::interval(intervals.poll);
+    poll.set_missed_tick_behavior(time::MissedTickBehavior::Skip);
+    let mut heartbeat = time::interval(intervals.heartbeat);
+    heartbeat.set_missed_tick_behavior(time::MissedTickBehavior::Skip);
+    // `interval` ticks immediately. Consume that heartbeat tick so the first
+    // heartbeat observes the configured delay while replay starts at once.
+    heartbeat.tick().await;
+    let mut caught_up = false;
+    let mut transient_open = true;
+
+    loop {
+        tokio::select! {
+            _ = poll.tick() => {
+                let page = match sessions.events_after(&thread_id, cursor.as_deref(), 100) {
+                    Ok(page) => page,
+                    Err(heiwa_evidence::CursorError::InvalidCursor { .. }) => {
+                        let payload = json!({
+                            "type": "invalid_cursor",
+                            "code": "invalid_cursor",
+                            "action": "replay_from_start",
+                        });
+                        let _ = write_operator_ws_text(
+                            &mut writer,
+                            &payload.to_string(),
+                            intervals.write_timeout,
+                        )
+                        .await;
+                        return Ok(());
+                    }
+                    Err(
+                        heiwa_evidence::CursorError::UnstableLineage { .. }
+                        | heiwa_evidence::CursorError::Storage(_),
+                    ) => {
+                        let payload = json!({"type":"error","code":"operator_unavailable"});
+                        let _ = write_operator_ws_text(
+                            &mut writer,
+                            &payload.to_string(),
+                            intervals.write_timeout,
+                        )
+                        .await;
+                        return Ok(());
+                    }
+                };
+                let event_count = page.events.len();
+                for row in page.events {
+                    cursor = Some(row.cursor.clone());
+                    let payload = json!({
+                        "type": "event",
+                        "cursor": row.cursor,
+                        "event": row.event,
+                    });
+                    if write_operator_ws_text(&mut writer, &payload.to_string(), intervals.write_timeout).await.is_err() {
+                        return Ok(());
+                    }
+                }
+                if let Some(next_cursor) = page.next_cursor {
+                    cursor = Some(next_cursor);
+                }
+                if !caught_up && event_count < 100 {
+                    if write_operator_ws_text(&mut writer, &json!({"type":"caught_up"}).to_string(), intervals.write_timeout).await.is_err() {
+                        return Ok(());
+                    }
+                    caught_up = true;
+                }
+            }
+            frame = transient.recv(), if transient_open => {
+                match frame {
+                    Ok(heiwa_shell::operator::OperatorStreamFrame::AssistantDelta {
+                        thread_id: frame_thread,
+                        turn_id,
+                        text,
+                    }) if frame_thread == thread_id => {
+                        let payload = json!({
+                            "type":"assistant_delta",
+                            "thread_id": frame_thread,
+                            "turn_id": turn_id,
+                            "text": text,
+                        });
+                        if write_operator_ws_text(&mut writer, &payload.to_string(), intervals.write_timeout).await.is_err() {
+                            return Ok(());
+                        }
+                    }
+                    Ok(heiwa_shell::operator::OperatorStreamFrame::Error {
+                        thread_id: frame_thread,
+                        turn_id,
+                        ..
+                    }) if frame_thread == thread_id => {
+                        let payload = json!({
+                            "type":"error",
+                            "code":"execution_failed",
+                            "thread_id": frame_thread,
+                            "turn_id": turn_id,
+                        });
+                        if write_operator_ws_text(&mut writer, &payload.to_string(), intervals.write_timeout).await.is_err() {
+                            return Ok(());
+                        }
+                    }
+                    Ok(_) | Err(broadcast::error::RecvError::Lagged(_)) => {}
+                    Err(broadcast::error::RecvError::Closed) => transient_open = false,
+                }
+            }
+            _ = heartbeat.tick() => {
+                let payload = json!({
+                    "type":"heartbeat",
+                    "occurred_at": chrono::Utc::now().to_rfc3339(),
+                });
+                if write_operator_ws_text(&mut writer, &payload.to_string(), intervals.write_timeout).await.is_err() {
+                    return Ok(());
+                }
+            }
+            control = control_rx.recv() => {
+                match control {
+                    Some(OperatorWebsocketControl::Ping(payload)) => {
+                        if write_operator_ws_control(&mut writer, 0xA, &payload, intervals.write_timeout).await.is_err() {
+                            return Ok(());
+                        }
+                    }
+                    Some(OperatorWebsocketControl::Close(payload)) => {
+                        let _ = write_operator_ws_control(&mut writer, 0x8, &payload, intervals.write_timeout).await;
+                        return Ok(());
+                    }
+                    Some(OperatorWebsocketControl::ProtocolError) => {
+                        let _ = write_operator_ws_control(
+                            &mut writer,
+                            0x8,
+                            &1002_u16.to_be_bytes(),
+                            intervals.write_timeout,
+                        )
+                        .await;
+                        return Ok(());
+                    }
+                    None => return Ok(()),
+                }
+            }
+        }
+    }
+}
+
+enum OperatorWebsocketControl {
+    Ping(Vec<u8>),
+    Close(Vec<u8>),
+    ProtocolError,
+}
+
+struct AbortTask(tokio::task::JoinHandle<()>);
+
+impl Drop for AbortTask {
+    fn drop(&mut self) {
+        self.0.abort();
+    }
+}
+
+async fn read_operator_websocket_controls(
+    mut reader: tokio::net::tcp::OwnedReadHalf,
+    controls: mpsc::Sender<OperatorWebsocketControl>,
+) {
+    const MAX_CLIENT_FRAME_BYTES: usize = 64 * 1024;
+
+    loop {
+        let mut header = [0_u8; 2];
+        if reader.read_exact(&mut header).await.is_err() {
+            let _ = controls
+                .send(OperatorWebsocketControl::Close(Vec::new()))
+                .await;
+            return;
+        }
+        let fin = header[0] & 0x80 != 0;
+        let reserved = header[0] & 0x70;
+        let opcode = header[0] & 0x0f;
+        let masked = header[1] & 0x80 != 0;
+        let short_len = header[1] & 0x7f;
+        let is_control = opcode & 0x08 != 0;
+        if reserved != 0 || !masked || (is_control && (!fin || short_len > 125)) {
+            let _ = controls.send(OperatorWebsocketControl::ProtocolError).await;
+            return;
+        }
+
+        let payload_len = match short_len {
+            value @ 0..=125 => value as usize,
+            126 => {
+                let mut bytes = [0_u8; 2];
+                if reader.read_exact(&mut bytes).await.is_err() {
+                    return;
+                }
+                u16::from_be_bytes(bytes) as usize
+            }
+            127 => {
+                let mut bytes = [0_u8; 8];
+                if reader.read_exact(&mut bytes).await.is_err() {
+                    return;
+                }
+                match usize::try_from(u64::from_be_bytes(bytes)) {
+                    Ok(length) => length,
+                    Err(_) => {
+                        let _ = controls.send(OperatorWebsocketControl::ProtocolError).await;
+                        return;
+                    }
+                }
+            }
+            _ => unreachable!(),
+        };
+        if payload_len > MAX_CLIENT_FRAME_BYTES {
+            let _ = controls.send(OperatorWebsocketControl::ProtocolError).await;
+            return;
+        }
+
+        let mut mask = [0_u8; 4];
+        if reader.read_exact(&mut mask).await.is_err() {
+            return;
+        }
+        let mut payload = vec![0_u8; payload_len];
+        if reader.read_exact(&mut payload).await.is_err() {
+            return;
+        }
+        for (index, byte) in payload.iter_mut().enumerate() {
+            *byte ^= mask[index % mask.len()];
+        }
+
+        let control = match opcode {
+            0x8 if payload.len() != 1 => OperatorWebsocketControl::Close(payload),
+            0x9 => OperatorWebsocketControl::Ping(payload),
+            0xA | 0x0 | 0x1 | 0x2 => continue,
+            _ => OperatorWebsocketControl::ProtocolError,
+        };
+        let terminal = matches!(
+            control,
+            OperatorWebsocketControl::Close(_) | OperatorWebsocketControl::ProtocolError
+        );
+        if controls.send(control).await.is_err() || terminal {
+            return;
+        }
+    }
 }
 
 async fn events_loop(mut stream: TcpStream) -> Result<()> {
@@ -1375,8 +2642,7 @@ fn scan_goals_fingerprint() -> HashSet<(String, u64)> {
 }
 
 fn scan_dispatch_ids(subdir: &str) -> HashSet<String> {
-    let home = crate::home::heiwa_home()
-        .unwrap_or_else(|| PathBuf::from("."));
+    let home = crate::home::heiwa_home().unwrap_or_else(|| PathBuf::from("."));
     let dir = home
         .join(".heiwa")
         .join("state")
@@ -1402,10 +2668,56 @@ fn scan_dispatch_ids_in(dir: &Path) -> HashSet<String> {
     ids
 }
 
-async fn write_ws_text(stream: &mut TcpStream, text: &str) -> Result<()> {
-    let bytes = text.as_bytes();
+async fn write_operator_ws_text<W>(
+    stream: &mut W,
+    text: &str,
+    write_timeout: Duration,
+) -> Result<()>
+where
+    W: AsyncWrite + Unpin,
+{
+    time::timeout(write_timeout, write_ws_text(stream, text))
+        .await
+        .map_err(|_| anyhow!("operator websocket write timed out"))?
+}
+
+async fn write_operator_ws_control<W>(
+    stream: &mut W,
+    opcode: u8,
+    payload: &[u8],
+    write_timeout: Duration,
+) -> Result<()>
+where
+    W: AsyncWrite + Unpin,
+{
+    time::timeout(write_timeout, write_ws_control(stream, opcode, payload))
+        .await
+        .map_err(|_| anyhow!("operator websocket write timed out"))?
+}
+
+async fn write_ws_text<W>(stream: &mut W, text: &str) -> Result<()>
+where
+    W: AsyncWrite + Unpin,
+{
+    write_ws_frame(stream, 0x1, text.as_bytes()).await
+}
+
+async fn write_ws_control<W>(stream: &mut W, opcode: u8, payload: &[u8]) -> Result<()>
+where
+    W: AsyncWrite + Unpin,
+{
+    if payload.len() > 125 || !matches!(opcode, 0x8..=0xA) {
+        return Err(anyhow!("invalid websocket control frame"));
+    }
+    write_ws_frame(stream, opcode, payload).await
+}
+
+async fn write_ws_frame<W>(stream: &mut W, opcode: u8, bytes: &[u8]) -> Result<()>
+where
+    W: AsyncWrite + Unpin,
+{
     let mut frame = Vec::with_capacity(bytes.len() + 10);
-    frame.push(0x81);
+    frame.push(0x80 | opcode);
     match bytes.len() {
         len if len < 126 => frame.push(len as u8),
         len if len <= u16::MAX as usize => {
@@ -1448,8 +2760,6 @@ async fn serve_repl_stream(mut stream: TcpStream, prompt: String) -> Result<()> 
     let header = "HTTP/1.1 200 OK\r\n\
          Content-Type: text/event-stream\r\n\
          Cache-Control: no-store\r\n\
-         Access-Control-Allow-Origin: *\r\n\
-         Access-Control-Allow-Headers: content-type, authorization\r\n\
          Connection: close\r\n\
          \r\n";
     stream.write_all(header.as_bytes()).await?;
@@ -1489,27 +2799,68 @@ async fn write_response(
     body: Vec<u8>,
     head_only: bool,
 ) -> Result<()> {
+    write_response_with_headers(stream, status, content_type, body, head_only, &[]).await
+}
+
+async fn write_browser_session_redirect(
+    stream: &mut TcpStream,
+    session: &str,
+    port: u16,
+) -> Result<()> {
+    let cookie = format!(
+        "{}={session}; HttpOnly; SameSite=Strict; Path=/; Max-Age={BROWSER_SESSION_TTL_SECONDS}",
+        browser_session_cookie_name(port),
+    );
+    write_response_with_headers(
+        stream,
+        303,
+        "text/plain",
+        Vec::new(),
+        false,
+        &[("Location", "/"), ("Set-Cookie", &cookie)],
+    )
+    .await
+}
+
+async fn write_response_with_headers(
+    stream: &mut TcpStream,
+    status: u16,
+    content_type: &str,
+    body: Vec<u8>,
+    head_only: bool,
+    extra_headers: &[(&str, &str)],
+) -> Result<()> {
     let status_text = match status {
         200 => "OK",
         201 => "Created",
+        202 => "Accepted",
         204 => "No Content",
+        303 => "See Other",
         400 => "Bad Request",
+        401 => "Unauthorized",
         404 => "Not Found",
         405 => "Method Not Allowed",
+        409 => "Conflict",
+        500 => "Internal Server Error",
+        503 => "Service Unavailable",
         _ => "OK",
     };
-    let header = format!(
+    let mut header = format!(
         "HTTP/1.1 {status} {status_text}\r\n\
          Content-Length: {}\r\n\
          Content-Type: {content_type}\r\n\
          Cache-Control: no-store\r\n\
-         Access-Control-Allow-Origin: *\r\n\
-         Access-Control-Allow-Headers: content-type, authorization\r\n\
-         Access-Control-Allow-Methods: GET, POST, OPTIONS\r\n\
-         Connection: close\r\n\
-         \r\n",
+         Referrer-Policy: no-referrer\r\n\
+         Connection: close\r\n",
         body.len()
     );
+    for (name, value) in extra_headers {
+        header.push_str(name);
+        header.push_str(": ");
+        header.push_str(value);
+        header.push_str("\r\n");
+    }
+    header.push_str("\r\n");
     stream.write_all(header.as_bytes()).await?;
     if !head_only {
         stream.write_all(&body).await?;
@@ -2833,18 +4184,34 @@ fn worker_agent_rows() -> Vec<Value> {
 }
 
 fn ollama_models_payload() -> Value {
-    let ollama_url =
-        std::env::var("OLLAMA_URL").unwrap_or_else(|_| "http://127.0.0.1:11434".to_string());
-    let url = format!("{}/api/tags", ollama_url.trim_end_matches('/'));
-    let models: Vec<Value> = tokio::task::block_in_place(|| {
-        reqwest::blocking::get(&url)
-            .ok()
-            .and_then(|resp| resp.json::<Value>().ok())
-            .and_then(|val| val.get("models").cloned())
-            .and_then(|val| serde_json::from_value(val).ok())
-            .unwrap_or_default()
-    });
-    json!({ "models": models })
+    let registry = heiwa_provider::AccountRegistry::load();
+    let stored_endpoint = heiwa_provider::detect::ollama::registered_endpoint(&registry.accounts);
+    let Ok(endpoint) = heiwa_provider::detect::ollama::resolve_configured_endpoint(stored_endpoint)
+    else {
+        return json!({ "models": [] });
+    };
+    json!({ "models": tokio::task::block_in_place(|| ollama_models_for_endpoint(&endpoint)) })
+}
+
+fn ollama_models_for_endpoint(
+    endpoint: &heiwa_provider::detect::ollama::OllamaEndpoint,
+) -> Vec<Value> {
+    let Ok(client) = reqwest::blocking::Client::builder()
+        .connect_timeout(heiwa_provider::detect::ollama::ENDPOINT_CONNECT_TIMEOUT)
+        .timeout(heiwa_provider::detect::ollama::ENDPOINT_REQUEST_TIMEOUT)
+        .no_proxy()
+        .build()
+    else {
+        return Vec::new();
+    };
+    client
+        .get(endpoint.api_url("/api/tags"))
+        .send()
+        .ok()
+        .and_then(|resp| resp.json::<Value>().ok())
+        .and_then(|val| val.get("models").cloned())
+        .and_then(|val| serde_json::from_value(val).ok())
+        .unwrap_or_default()
 }
 
 fn hook_provider_rows() -> Vec<Value> {
@@ -3128,8 +4495,8 @@ fn generated_file_status(path: &Path) -> String {
     }
 }
 
-fn write_app_heartbeat(worker_id: &str) -> Result<()> {
-    let path = state_dir().join("workers.json");
+fn write_app_heartbeat(runtime_state_dir: &Path, worker_id: &str) -> Result<()> {
+    let path = runtime_state_dir.join("workers.json");
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent)?;
     }
@@ -3479,6 +4846,9 @@ fn flag_value(args: &[String], flag: &str) -> Option<String> {
 }
 
 fn state_dir() -> PathBuf {
+    if let Some(path) = env::var_os("HEIWA_STATE_DIR").filter(|value| !value.is_empty()) {
+        return PathBuf::from(path);
+    }
     let home = crate::home::heiwa_home().unwrap_or_else(|| PathBuf::from("."));
     home.join(".heiwa").join("state")
 }
@@ -3573,17 +4943,727 @@ fn print_start_help() {
     println!();
     println!("Binds 127.0.0.1, serves the per-user browser console by default,");
     println!("starts caffeinate while running, and writes a worker heartbeat.");
+    println!("Set HEIWA_STATE_DIR to redirect app worker heartbeat state for verification.");
 }
 
 #[cfg(test)]
 mod app_readmodel_tests {
     use super::*;
+    use heiwa_evidence::OperatorJournal;
+    use heiwa_session::operator::{OperatorSessionService, StartTurnRequest};
+    use tokio::sync::broadcast;
+
+    #[test]
+    fn browser_bootstrap_is_single_use_and_issues_expiring_http_only_session() {
+        let mut sessions = BrowserSessionStore::default();
+        let origin = "http://127.0.0.1:7474";
+        let bootstrap = sessions.issue_bootstrap_at(1_000, origin);
+        let session = sessions
+            .consume_bootstrap_at(&bootstrap, 1_001, origin)
+            .expect("fresh bootstrap must issue one browser session");
+
+        assert!(sessions
+            .consume_bootstrap_at(&bootstrap, 1_001, origin)
+            .is_none());
+        let cookie_name = browser_session_cookie_name(7474);
+        assert!(sessions.authenticates_cookie_at(
+            &format!("other=1; {cookie_name}={session}"),
+            1_001,
+            7474,
+            origin,
+        ));
+        assert!(!sessions.authenticates_cookie_at(
+            &format!("{cookie_name}={session}"),
+            1_001,
+            7475,
+            "http://127.0.0.1:7475",
+        ));
+        assert!(!sessions.authenticates_cookie_at(
+            &format!("{cookie_name}={session}"),
+            1_001,
+            7474,
+            "http://127.0.0.1:7555",
+        ));
+        assert!(!sessions.authenticates_cookie_at(
+            &format!("{cookie_name}={session}"),
+            1_001 + BROWSER_SESSION_TTL_SECONDS + 1,
+            7474,
+            origin,
+        ));
+    }
+
+    #[tokio::test]
+    async fn browser_bootstrap_http_redirect_hides_capability_and_sets_port_cookie() {
+        async fn request_once(
+            target: Option<String>,
+            browser_sessions: Arc<Mutex<BrowserSessionStore>>,
+        ) -> (String, String) {
+            let listener = TcpListener::bind(("127.0.0.1", 0)).await.unwrap();
+            let address = listener.local_addr().unwrap();
+            let target = target.unwrap_or_else(|| {
+                let bootstrap = browser_sessions.lock().unwrap().issue_bootstrap_at(
+                    chrono::Utc::now().timestamp(),
+                    &format!("http://{address}"),
+                );
+                format!("/?heiwa_bootstrap={bootstrap}")
+            });
+            let client_target = target.clone();
+            let client = tokio::spawn(async move {
+                let mut client = TcpStream::connect(address).await.unwrap();
+                client
+                    .write_all(
+                        format!(
+                            "GET {client_target} HTTP/1.1\r\nHost: {address}\r\nConnection: close\r\n\r\n"
+                        )
+                        .as_bytes(),
+                    )
+                    .await
+                    .unwrap();
+                let mut response = Vec::new();
+                client.read_to_end(&mut response).await.unwrap();
+                String::from_utf8(response).unwrap()
+            });
+            let (server, _) = listener.accept().await.unwrap();
+            handle_connection(
+                server,
+                Arc::new("2026-07-24T00:00:00Z".to_string()),
+                Arc::new(Mutex::new(LocalRequestReplayCache::default())),
+                browser_sessions,
+            )
+            .await
+            .unwrap();
+            (client.await.unwrap(), target)
+        }
+
+        let browser_sessions = Arc::new(Mutex::new(BrowserSessionStore::default()));
+        let (accepted, target) = request_once(None, browser_sessions.clone()).await;
+        let bootstrap = query_param(&target, "heiwa_bootstrap").unwrap();
+        assert!(accepted.starts_with("HTTP/1.1 303 See Other\r\n"));
+        assert!(accepted.contains("\r\nLocation: /\r\n"));
+        assert!(accepted.contains("Set-Cookie: heiwa_local_operator_"));
+        assert!(accepted.contains("; HttpOnly; SameSite=Strict; Path=/; Max-Age="));
+        assert!(!accepted.contains(&bootstrap));
+
+        let (replay, _) = request_once(Some(target), browser_sessions).await;
+        assert!(replay.starts_with("HTTP/1.1 401 Unauthorized\r\n"));
+        assert!(replay.contains("invalid_browser_bootstrap"));
+        assert!(!replay.contains(&bootstrap));
+    }
+
+    #[test]
+    fn ollama_models_payload_uses_resolved_override_not_live_default() {
+        use std::io::{Read, Write};
+        use std::net::TcpListener;
+
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let override_url = format!("http://{}/", listener.local_addr().unwrap());
+        let server = std::thread::spawn(move || {
+            let (mut stream, _) = listener.accept().unwrap();
+            let mut request = [0_u8; 1024];
+            let bytes = stream.read(&mut request).unwrap();
+            let request = std::str::from_utf8(&request[..bytes]).unwrap();
+            assert!(request.starts_with("GET /api/tags HTTP/1.1"), "{request}");
+            stream
+                .write_all(
+                    b"HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: 31\r\nConnection: close\r\n\r\n{\"models\":[{\"name\":\"fixture\"}]}",
+                )
+                .unwrap();
+        });
+        let endpoint = heiwa_provider::detect::ollama::resolve_endpoint(
+            heiwa_provider::detect::ollama::EndpointOverride::Value(&override_url),
+            Some("http://127.0.0.1:11434"),
+        )
+        .unwrap();
+
+        let models = ollama_models_for_endpoint(&endpoint);
+        server.join().unwrap();
+        assert_eq!(models, vec![json!({"name": "fixture"})]);
+    }
+
+    #[test]
+    fn runtime_auth_classifier_defaults_api_mutations_closed() {
+        for method in ["POST", "PUT", "PATCH", "DELETE"] {
+            assert!(is_runtime_authenticated_request(
+                method,
+                "/api/v1/future-action"
+            ));
+        }
+        assert!(is_runtime_authenticated_request(
+            "GET",
+            "/api/v1/operator/threads"
+        ));
+        assert!(is_runtime_authenticated_request(
+            "POST",
+            "/api/v1/calendar/holds"
+        ));
+        assert!(!is_runtime_authenticated_request(
+            "POST",
+            "/api/v1/route/preview"
+        ));
+        assert!(!is_runtime_authenticated_request("GET", "/api/v1/status"));
+        assert!(!is_runtime_authenticated_request("GET", "/"));
+    }
+
+    async fn written_status_line(status: u16) -> String {
+        let listener = TcpListener::bind(("127.0.0.1", 0)).await.unwrap();
+        let address = listener.local_addr().unwrap();
+        let client = tokio::spawn(async move { TcpStream::connect(address).await.unwrap() });
+        let (mut server, _) = listener.accept().await.unwrap();
+        write_response(
+            &mut server,
+            status,
+            "application/json",
+            b"{}".to_vec(),
+            false,
+        )
+        .await
+        .unwrap();
+        drop(server);
+        let mut client = client.await.unwrap();
+        let mut response = Vec::new();
+        client.read_to_end(&mut response).await.unwrap();
+        String::from_utf8(response)
+            .unwrap()
+            .lines()
+            .next()
+            .unwrap()
+            .to_string()
+    }
+
+    async fn read_raw_http_request(raw: &[u8]) -> Result<(String, String)> {
+        let listener = TcpListener::bind(("127.0.0.1", 0)).await?;
+        let address = listener.local_addr()?;
+        let raw = raw.to_vec();
+        let client = tokio::spawn(async move {
+            let mut stream = TcpStream::connect(address).await.unwrap();
+            stream.write_all(&raw).await.unwrap();
+            stream.shutdown().await.unwrap();
+        });
+        let (mut server, _) = listener.accept().await?;
+        let result = read_http_request_and_body(&mut server)
+            .await
+            .map(|(request, body)| (request, String::from_utf8_lossy(&body).to_string()));
+        client.await.unwrap();
+        result
+    }
 
     fn temp_state_dir(name: &str) -> PathBuf {
         let dir = env::temp_dir().join(format!("heiwa-shell-{name}-{}", std::process::id()));
         let _ = fs::remove_dir_all(&dir);
         fs::create_dir_all(&dir).expect("create temp state dir");
         dir
+    }
+
+    fn test_operator_sessions(root: &Path) -> Arc<OperatorSessionService> {
+        Arc::new(OperatorSessionService::new(
+            OperatorJournal::new(root.to_path_buf()).expect("operator journal"),
+        ))
+    }
+
+    async fn tcp_pair() -> (TcpStream, TcpStream) {
+        let listener = TcpListener::bind(("127.0.0.1", 0)).await.unwrap();
+        let address = listener.local_addr().unwrap();
+        let client = tokio::spawn(async move { TcpStream::connect(address).await.unwrap() });
+        let (server, _) = listener.accept().await.unwrap();
+        (server, client.await.unwrap())
+    }
+
+    async fn read_server_ws_json(stream: &mut TcpStream) -> Value {
+        let (opcode, payload) = read_server_ws_frame(stream).await;
+        assert_eq!(opcode, 0x1, "server frame must be text");
+        serde_json::from_slice(&payload).expect("JSON websocket frame")
+    }
+
+    async fn read_server_ws_frame(stream: &mut TcpStream) -> (u8, Vec<u8>) {
+        let mut header = [0_u8; 2];
+        stream.read_exact(&mut header).await.expect("frame header");
+        assert_eq!(header[0] & 0x80, 0x80, "server frame must be final");
+        assert_eq!(header[1] & 0x80, 0, "server frame must not be masked");
+        let length = match header[1] & 0x7f {
+            value @ 0..=125 => value as usize,
+            126 => {
+                let mut bytes = [0_u8; 2];
+                stream.read_exact(&mut bytes).await.unwrap();
+                u16::from_be_bytes(bytes) as usize
+            }
+            127 => {
+                let mut bytes = [0_u8; 8];
+                stream.read_exact(&mut bytes).await.unwrap();
+                usize::try_from(u64::from_be_bytes(bytes)).unwrap()
+            }
+            _ => unreachable!(),
+        };
+        let mut payload = vec![0_u8; length];
+        stream
+            .read_exact(&mut payload)
+            .await
+            .expect("frame payload");
+        (header[0] & 0x0f, payload)
+    }
+
+    async fn write_masked_client_frame(stream: &mut TcpStream, opcode: u8, payload: &[u8]) {
+        assert!(payload.len() <= 125);
+        let mask = [0x11_u8, 0x22, 0x33, 0x44];
+        let mut frame = vec![0x80 | opcode, 0x80 | payload.len() as u8];
+        frame.extend_from_slice(&mask);
+        frame.extend(
+            payload
+                .iter()
+                .enumerate()
+                .map(|(index, byte)| byte ^ mask[index % mask.len()]),
+        );
+        stream.write_all(&frame).await.unwrap();
+    }
+
+    fn test_ws_intervals() -> OperatorWebsocketIntervals {
+        OperatorWebsocketIntervals {
+            poll: Duration::from_millis(5),
+            heartbeat: Duration::from_millis(80),
+            write_timeout: Duration::from_secs(1),
+        }
+    }
+
+    #[tokio::test]
+    async fn operator_websocket_replays_resumes_and_polls_external_appends() {
+        let root = tempfile::tempdir().unwrap();
+        let sessions = test_operator_sessions(root.path());
+        sessions
+            .start_turn("ws-thread", StartTurnRequest::auto("request-1", "hello"))
+            .expect("seed turn");
+        let seeded = sessions.events_after("ws-thread", None, 100).unwrap();
+        assert_eq!(seeded.events.len(), 3);
+
+        let (_sender, receiver) = broadcast::channel(8);
+        let (server, mut client) = tcp_pair().await;
+        let loop_sessions = sessions.clone();
+        let first = tokio::spawn(async move {
+            operator_events_loop(
+                server,
+                loop_sessions,
+                receiver,
+                "ws-thread".to_string(),
+                None,
+                test_ws_intervals(),
+            )
+            .await
+        });
+        let mut cursors = Vec::new();
+        for expected in ["thread_created", "turn_started", "user_message"] {
+            let frame = read_server_ws_json(&mut client).await;
+            assert_eq!(frame["type"], "event");
+            assert_eq!(frame["event"]["event_type"], expected);
+            cursors.push(frame["cursor"].as_str().unwrap().to_string());
+        }
+        assert_eq!(read_server_ws_json(&mut client).await["type"], "caught_up");
+        first.abort();
+
+        let (_sender, receiver) = broadcast::channel(8);
+        let (server, mut resumed_client) = tcp_pair().await;
+        let loop_sessions = sessions.clone();
+        let after = cursors[0].clone();
+        let resumed = tokio::spawn(async move {
+            operator_events_loop(
+                server,
+                loop_sessions,
+                receiver,
+                "ws-thread".to_string(),
+                Some(after),
+                test_ws_intervals(),
+            )
+            .await
+        });
+        for expected in ["turn_started", "user_message"] {
+            let frame = read_server_ws_json(&mut resumed_client).await;
+            assert_eq!(frame["event"]["event_type"], expected);
+        }
+        assert_eq!(
+            read_server_ws_json(&mut resumed_client).await["type"],
+            "caught_up"
+        );
+
+        let external = test_operator_sessions(root.path());
+        external
+            .start_turn(
+                "ws-thread",
+                StartTurnRequest::auto("request-2", "from peer"),
+            )
+            .expect("external append");
+        for expected in ["turn_started", "user_message"] {
+            let frame = tokio::time::timeout(
+                Duration::from_millis(100),
+                read_server_ws_json(&mut resumed_client),
+            )
+            .await
+            .expect("external event became visible");
+            assert_eq!(frame["event"]["event_type"], expected);
+        }
+        let next = tokio::time::timeout(
+            Duration::from_millis(40),
+            read_server_ws_json(&mut resumed_client),
+        )
+        .await;
+        assert!(next.is_err(), "caught_up must be emitted exactly once");
+        resumed.abort();
+    }
+
+    #[tokio::test]
+    async fn operator_websocket_emits_injected_heartbeat_without_advancing_cursor() {
+        let root = tempfile::tempdir().unwrap();
+        let sessions = test_operator_sessions(root.path());
+        let (_sender, receiver) = broadcast::channel(8);
+        let (server, mut client) = tcp_pair().await;
+        let task = tokio::spawn(async move {
+            operator_events_loop(
+                server,
+                sessions,
+                receiver,
+                "heartbeat-thread".to_string(),
+                None,
+                OperatorWebsocketIntervals {
+                    poll: Duration::from_millis(5),
+                    heartbeat: Duration::from_millis(10),
+                    write_timeout: Duration::from_secs(1),
+                },
+            )
+            .await
+        });
+        assert_eq!(read_server_ws_json(&mut client).await["type"], "caught_up");
+        let heartbeat = read_server_ws_json(&mut client).await;
+        assert_eq!(heartbeat["type"], "heartbeat");
+        assert!(heartbeat.get("cursor").is_none());
+        task.abort();
+    }
+
+    #[tokio::test]
+    async fn operator_websocket_reports_replaced_stream_cursor_then_closes() {
+        let root = tempfile::tempdir().unwrap();
+        let sessions = test_operator_sessions(root.path());
+        sessions.ensure_thread("original-thread").unwrap();
+        let old_cursor = sessions
+            .events_after("original-thread", None, 10)
+            .unwrap()
+            .next_cursor
+            .unwrap();
+
+        let replacement_root = tempfile::tempdir().unwrap();
+        let replacement = test_operator_sessions(replacement_root.path());
+        replacement.ensure_thread("replacement-thread").unwrap();
+        fs::copy(
+            replacement_root.path().join("operator_events.jsonl"),
+            root.path().join("operator_events.jsonl"),
+        )
+        .unwrap();
+
+        let (_sender, receiver) = broadcast::channel(8);
+        let (server, mut client) = tcp_pair().await;
+        let task = tokio::spawn(async move {
+            operator_events_loop(
+                server,
+                sessions,
+                receiver,
+                "original-thread".to_string(),
+                Some(old_cursor),
+                test_ws_intervals(),
+            )
+            .await
+        });
+        let frame = read_server_ws_json(&mut client).await;
+        assert_eq!(frame["type"], "invalid_cursor");
+        assert_eq!(frame["code"], "invalid_cursor");
+        assert_eq!(frame["action"], "replay_from_start");
+        assert!(task.await.unwrap().is_ok());
+        let mut trailing = [0_u8; 1];
+        assert_eq!(client.read(&mut trailing).await.unwrap(), 0);
+    }
+
+    #[tokio::test]
+    async fn operator_websocket_forwards_only_matching_transient_frames() {
+        let root = tempfile::tempdir().unwrap();
+        let sessions = test_operator_sessions(root.path());
+        let (sender, receiver) = broadcast::channel(8);
+        let (server, mut client) = tcp_pair().await;
+        let task = tokio::spawn(async move {
+            operator_events_loop(
+                server,
+                sessions,
+                receiver,
+                "wanted-thread".to_string(),
+                None,
+                OperatorWebsocketIntervals {
+                    poll: Duration::from_millis(5),
+                    heartbeat: Duration::from_millis(30),
+                    write_timeout: Duration::from_secs(1),
+                },
+            )
+            .await
+        });
+        assert_eq!(read_server_ws_json(&mut client).await["type"], "caught_up");
+        sender
+            .send(heiwa_shell::operator::OperatorStreamFrame::AssistantDelta {
+                thread_id: "other-thread".to_string(),
+                turn_id: "other-turn".to_string(),
+                text: "do not forward".to_string(),
+            })
+            .unwrap();
+        sender
+            .send(heiwa_shell::operator::OperatorStreamFrame::AssistantDelta {
+                thread_id: "wanted-thread".to_string(),
+                turn_id: "wanted-turn".to_string(),
+                text: "forward me".to_string(),
+            })
+            .unwrap();
+        let frame = read_server_ws_json(&mut client).await;
+        assert_eq!(frame["type"], "assistant_delta");
+        assert_eq!(frame["turn_id"], "wanted-turn");
+        assert_eq!(frame["text"], "forward me");
+        let next = read_server_ws_json(&mut client).await;
+        assert_eq!(next["type"], "heartbeat", "unrelated delta leaked: {next}");
+        task.abort();
+    }
+
+    #[tokio::test]
+    async fn operator_websocket_masked_close_terminates_promptly() {
+        let root = tempfile::tempdir().unwrap();
+        let sessions = test_operator_sessions(root.path());
+        let (_sender, receiver) = broadcast::channel(8);
+        let (server, mut client) = tcp_pair().await;
+        let task = tokio::spawn(async move {
+            operator_events_loop(
+                server,
+                sessions,
+                receiver,
+                "close-thread".to_string(),
+                None,
+                test_ws_intervals(),
+            )
+            .await
+        });
+        assert_eq!(read_server_ws_json(&mut client).await["type"], "caught_up");
+        write_masked_client_frame(&mut client, 0x8, &1000_u16.to_be_bytes()).await;
+        tokio::time::timeout(Duration::from_millis(50), task)
+            .await
+            .expect("close terminates without waiting for poll")
+            .unwrap()
+            .unwrap();
+    }
+
+    #[tokio::test]
+    async fn operator_websocket_masked_ping_receives_pong() {
+        let root = tempfile::tempdir().unwrap();
+        let sessions = test_operator_sessions(root.path());
+        let (_sender, receiver) = broadcast::channel(8);
+        let (server, mut client) = tcp_pair().await;
+        let task = tokio::spawn(async move {
+            operator_events_loop(
+                server,
+                sessions,
+                receiver,
+                "ping-thread".to_string(),
+                None,
+                OperatorWebsocketIntervals {
+                    poll: Duration::from_millis(50),
+                    heartbeat: Duration::from_secs(10),
+                    write_timeout: Duration::from_secs(1),
+                },
+            )
+            .await
+        });
+        assert_eq!(read_server_ws_json(&mut client).await["type"], "caught_up");
+        write_masked_client_frame(&mut client, 0x9, b"probe").await;
+        let (opcode, payload) =
+            tokio::time::timeout(Duration::from_millis(50), read_server_ws_frame(&mut client))
+                .await
+                .expect("pong is prompt");
+        assert_eq!(opcode, 0xA);
+        assert_eq!(payload, b"probe");
+        task.abort();
+    }
+
+    #[tokio::test]
+    async fn operator_websocket_oversized_control_frame_closes_safely() {
+        let root = tempfile::tempdir().unwrap();
+        let sessions = test_operator_sessions(root.path());
+        let (_sender, receiver) = broadcast::channel(8);
+        let (server, mut client) = tcp_pair().await;
+        let task = tokio::spawn(async move {
+            operator_events_loop(
+                server,
+                sessions,
+                receiver,
+                "invalid-control-thread".to_string(),
+                None,
+                test_ws_intervals(),
+            )
+            .await
+        });
+        assert_eq!(read_server_ws_json(&mut client).await["type"], "caught_up");
+        // Control frames may never use extended lengths. The reader must
+        // reject this header without waiting for the declared payload.
+        client.write_all(&[0x89, 0xFE, 0x00, 0x7E]).await.unwrap();
+        tokio::time::timeout(Duration::from_millis(50), task)
+            .await
+            .expect("invalid control closes promptly")
+            .unwrap()
+            .unwrap();
+    }
+
+    #[tokio::test]
+    async fn operator_websocket_write_timeout_bounds_backpressure() {
+        let (mut writer, _unread_peer) = tokio::io::duplex(64);
+        let payload = "x".repeat(128 * 1024);
+        let started = std::time::Instant::now();
+        let error = write_operator_ws_text(&mut writer, &payload, Duration::from_millis(5))
+            .await
+            .expect_err("unread peer must time out");
+        assert!(error.to_string().contains("timed out"));
+        assert!(started.elapsed() < Duration::from_millis(100));
+    }
+
+    fn test_local_api_policy() -> LocalAppApiTransportPolicy {
+        LocalAppApiTransportPolicy {
+            connect_timeout: Duration::from_millis(50),
+            write_timeout: Duration::from_millis(5),
+            read_timeout: Duration::from_millis(5),
+            max_response_bytes: 1024,
+        }
+    }
+
+    #[tokio::test]
+    async fn local_app_api_read_deadline_rejects_never_ending_response() {
+        let listener = TcpListener::bind(("127.0.0.1", 0)).await.unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let server = tokio::spawn(async move {
+            let (mut stream, _) = listener.accept().await.unwrap();
+            let mut request = [0_u8; 4096];
+            let _ = stream.read(&mut request).await.unwrap();
+            stream
+                .write_all(b"HTTP/1.1 200 OK\r\nContent-Type: application/json\r\n\r\n{")
+                .await
+                .unwrap();
+            tokio::time::sleep(Duration::from_millis(100)).await;
+        });
+        let token = "read-deadline-secret";
+        let error = call_local_app_api_with_policy(
+            "GET",
+            "/api/v1/operator/threads",
+            port,
+            None,
+            token,
+            test_local_api_policy(),
+        )
+        .await
+        .err()
+        .expect("never-ending response must time out");
+        server.abort();
+        assert!(error.to_string().contains("read timed out"));
+        assert!(!error.to_string().contains(token));
+    }
+
+    #[tokio::test]
+    async fn local_app_api_response_cap_rejects_oversized_response() {
+        let listener = TcpListener::bind(("127.0.0.1", 0)).await.unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let server = tokio::spawn(async move {
+            let (mut stream, _) = listener.accept().await.unwrap();
+            let mut request = [0_u8; 4096];
+            let _ = stream.read(&mut request).await.unwrap();
+            let body = "x".repeat(2048);
+            let response = format!(
+                "HTTP/1.1 200 OK\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+                body.len()
+            );
+            stream.write_all(response.as_bytes()).await.unwrap();
+        });
+        let token = "response-cap-secret";
+        let error = call_local_app_api_with_policy(
+            "GET",
+            "/api/v1/operator/threads",
+            port,
+            None,
+            token,
+            test_local_api_policy(),
+        )
+        .await
+        .err()
+        .expect("oversized response must fail closed");
+        server.await.unwrap();
+        assert!(error.to_string().contains("response too large"));
+        assert!(!error.to_string().contains(token));
+    }
+
+    #[tokio::test]
+    async fn local_app_api_write_deadline_bounds_unread_peer() {
+        let listener = TcpListener::bind(("127.0.0.1", 0)).await.unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let server = tokio::spawn(async move {
+            let (_stream, _) = listener.accept().await.unwrap();
+            tokio::time::sleep(Duration::from_millis(100)).await;
+        });
+        let body = format!("\"{}\"", "x".repeat(8 * 1024 * 1024));
+        let token = "write-deadline-secret";
+        let error = call_local_app_api_with_policy(
+            "POST",
+            "/api/v1/operator/threads",
+            port,
+            Some(&body),
+            token,
+            test_local_api_policy(),
+        )
+        .await
+        .err()
+        .expect("unread peer must time out");
+        server.abort();
+        assert!(error.to_string().contains("write timed out"));
+        assert!(!error.to_string().contains(token));
+    }
+
+    #[tokio::test]
+    async fn http_reader_rejects_truncated_declared_body() {
+        let request = b"POST / HTTP/1.1\r\nContent-Length: 10\r\n\r\nhi";
+        assert!(read_raw_http_request(request).await.is_err());
+    }
+
+    #[tokio::test]
+    async fn http_reader_rejects_invalid_content_length() {
+        let request = b"POST / HTTP/1.1\r\nContent-Length: nope\r\n\r\n";
+        assert!(read_raw_http_request(request).await.is_err());
+    }
+
+    #[tokio::test]
+    async fn http_reader_rejects_oversized_body_before_reading_it() {
+        let request = b"POST / HTTP/1.1\r\nContent-Length: 10485761\r\n\r\n";
+        assert!(read_raw_http_request(request).await.is_err());
+    }
+
+    #[tokio::test]
+    async fn http_reader_rejects_overflowing_total_length() {
+        let request = format!("POST / HTTP/1.1\r\nContent-Length: {}\r\n\r\n", usize::MAX);
+        assert!(read_raw_http_request(request.as_bytes()).await.is_err());
+    }
+
+    #[tokio::test]
+    async fn http_reader_rejects_duplicate_content_length_headers() {
+        let request = b"POST / HTTP/1.1\r\nContent-Length: 2\r\nContent-Length: 2\r\n\r\nhi";
+        assert!(read_raw_http_request(request).await.is_err());
+    }
+
+    #[tokio::test]
+    async fn http_response_status_lines_use_standard_reason_phrases() {
+        for (status, expected) in [
+            (200, "HTTP/1.1 200 OK"),
+            (201, "HTTP/1.1 201 Created"),
+            (202, "HTTP/1.1 202 Accepted"),
+            (204, "HTTP/1.1 204 No Content"),
+            (400, "HTTP/1.1 400 Bad Request"),
+            (401, "HTTP/1.1 401 Unauthorized"),
+            (404, "HTTP/1.1 404 Not Found"),
+            (405, "HTTP/1.1 405 Method Not Allowed"),
+            (409, "HTTP/1.1 409 Conflict"),
+            (500, "HTTP/1.1 500 Internal Server Error"),
+            (503, "HTTP/1.1 503 Service Unavailable"),
+        ] {
+            assert_eq!(written_status_line(status).await, expected);
+        }
     }
 
     #[test]

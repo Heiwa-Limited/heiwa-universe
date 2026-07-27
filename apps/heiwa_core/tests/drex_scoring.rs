@@ -1,8 +1,8 @@
-use heiwa_protocol::ModelTier;
 use heiwa_core::drex::{
     default_policy, evaluate_drex, plan_route, preflight_execution, DrexIngress, DrexVector,
     ExecutionMode, ResolutionTier,
 };
+use heiwa_protocol::ModelTier;
 
 fn local_model(
     model_id: &str,

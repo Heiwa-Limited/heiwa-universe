@@ -11,6 +11,10 @@ readme.workspace = true
 keywords.workspace = true
 categories.workspace = true
 
+[features]
+default = ["lance"]
+lance = ["heiwa-session/lance"]
+
 [[bin]]
 name = "heiwa"
 path = "src/main.rs"
@@ -21,6 +25,7 @@ path = "src/lib.rs"
 
 [dependencies]
 anyhow = "1.0"
+async-trait = "0.1"
 base64 = "0.22"
 heiwa-core = { path = "../../apps/heiwa_core" }
 heiwa-session = { path = "../../crates/heiwa_session" }
@@ -30,6 +35,7 @@ heiwa_quota = { path = "../../crates/heiwa_quota" }
 heiwa-resource = { path = "../../crates/heiwa_resource" }
 heiwa_receipts = { path = "../../crates/heiwa_receipts" }
 heiwa-install = { path = "../../crates/heiwa_install" }
+heiwa_evidence = { path = "../../crates/heiwa_evidence" }
 heiwa-loop = { path = "../../crates/heiwa_loop" }
 heiwa-protocol = { path = "../../crates/heiwa_protocol" }
 heiwa_mcp = { path = "../../crates/heiwa_mcp" }
@@ -47,6 +53,7 @@ chrono = { version = "0.4", features = ["serde"] }
 sha1 = "0.10"
 sha2 = "0.10"
 tiktoken-rs = "0.6"
+thiserror = "2"
 reqwest = { version = "0.12", default-features = false, features = ["blocking", "json", "rustls-tls"] }
 
 [dev-dependencies]

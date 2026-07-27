@@ -1,6 +1,6 @@
 # Publishing Pipeline
 
-How the `heiwa-universe` repository becomes the public Heiwa surface. Cloudflare delivers the shop window. GitHub stays authoritative for source, releases, and docs. SpacetimeDB adjudicates receipts when the runtime is online.
+How the `heiwa-universe` repository becomes the public Heiwa surface. GitHub stays authoritative for source, releases, and docs. Cloudflare is DNS utility only; operator evidence remains local.
 
 > Heiwa.ltd delivers software. The operator machine runs the runtime.
 
@@ -8,28 +8,27 @@ How the `heiwa-universe` repository becomes the public Heiwa surface. Cloudflare
 
 | Plane                        | Surface          | Source in repo                                            | Authority        |
 | ---------------------------- | ---------------- | --------------------------------------------------------- | ---------------- |
-| **Marketing shell**          | `heiwa.ltd`      | `apps/heiwa_app/clients/web/`                             | Cloudflare Pages |
+| **Marketing shell**          | `heiwa.ltd`      | `apps/heiwa_app/clients/web/`                             | GitHub Pages     |
 | **Documentation**            | `docs.heiwa.ltd` | `docs/` + `mkdocs.yml`                                    | GitHub Pages     |
 | **Releases**                 | GitHub Releases  | `apps/heiwa_core/`, `apps/heiwa_shell/`                   | GitHub Releases  |
-| **Evidence + licence state** | (internal)       | `apps/heiwa_orchestrator/src/stdb/`, `crates/heiwa_stdb/` | SpacetimeDB      |
+| **Evidence + recall**        | owner-local      | `crates/heiwa_evidence/`, `crates/heiwa_embed/`           | Local JSONL      |
 
 Each plane has a single source of truth in the repo and a single deploy path. Automated workflows are the normal channel; a [manual fallback](#manual-fallback-when-actions-are-paused) exists for the periods when GitHub Actions are paused.
 
-## Cloudflare — the static shop window
+## Public web — GitHub Pages with Cloudflare DNS
 
-`heiwa.ltd` is a static surface. It exists to deliver the installer, marketing copy, install funnel, support routing, and the identity-exchange touchpoint. **It does not execute operator work.**
+`heiwa.ltd` is a static surface. It exists to deliver the installer, marketing copy, install funnel, and support routing. **It does not execute operator work.**
 
-- **Cloudflare Pages project**: `heiwa-clients`
 - **Build output**: `apps/heiwa_app/clients/web/` (static HTML + CSS + JS)
-- **Wrangler config**: [`apps/heiwa_app/wrangler.toml`](https://github.com/Strategizing/heiwa-universe/blob/main/apps/heiwa_app/wrangler.toml)
-- **Terraform**: [`infra/platform/cloudflare/main.tf`](https://github.com/Strategizing/heiwa-universe/blob/main/infra/platform/cloudflare/main.tf) — DNS, project, custom domain
-- **Routes**: `heiwa.ltd` -> marketing/install/support; `docs.heiwa.ltd` -> documentation; `status.heiwa.ltd` -> read-only WebSocket health surface. The primary app is HOME-installed at `~/.heiwa/app/Heiwa.app`, not hosted at `app.heiwa.ltd`.
+- **Host authority**: GitHub Pages
+- **Cloudflare role**: DNS records only
+- **Routes**: `heiwa.ltd` -> marketing/install/support; `docs.heiwa.ltd` -> documentation. The primary app is HOME-installed at `~/.heiwa/app/Heiwa.app`.
 
 ### What Cloudflare must never receive
 
 - Operator state, memory, sessions, or evidence
 - Provider secrets, API keys, OAuth tokens
-- SpacetimeDB credentials or reducer authority
+- Local evidence journals or Lance indexes
 
 If a future feature appears to need any of the above on Cloudflare, treat it as a design escape and route through governance before shipping.
 
@@ -122,32 +121,15 @@ heiwa-<version>-checksums.txt
 
 See [Install Guide](https://heiwa.ltd/download.html) for the operator-facing summary.
 
-## SpacetimeDB — the evidence plane
+## Local evidence and recall
 
-When the installed runtime is online, Heiwa mirrors a narrow slice of state to SpacetimeDB as the **backend authority** for receipts, leases, and licence facts.
+The installed runtime writes canonical, versioned JSONL journals through
+`crates/heiwa_evidence/`. Lance tables from `crates/heiwa_embed/` are derived,
+rebuildable local recall indexes. Neither is a public publishing surface.
 
-- **Adjudication crate**: [`crates/heiwa_stdb/`](https://github.com/Strategizing/heiwa-universe/tree/main/crates/heiwa_stdb)
-- **Reducers**: WASM-compiled, called over WebSocket. Sub-millisecond internal latency. **Not** a REST/HTTP API.
-- **Orchestrator binding**: [`apps/heiwa_orchestrator/src/stdb/`](https://github.com/Strategizing/heiwa-universe/tree/main/apps/heiwa_orchestrator/src/stdb)
-
-### What STDB stores
-
-- Receipt headers — never operator memory, prompts, or model outputs
-- Licence keys and entitlement state
-- Lease metadata for cross-device sessions
-- Audit-trail breadcrumbs that link a receipt to the runtime that produced it
-
-### What STDB does **not** store
-
-- Operator memory, conversations, or session content
-- Provider secrets
-- Local model weights or inference outputs
-
-This boundary is enforced in code in `crates/heiwa_stdb`. If a reducer signature appears to need richer payloads, route the design through governance — the public/runtime boundary is a non-negotiable.
-
-### Maturity statement
-
-STDB integration is wired and active for receipt mirroring and licence state. Lease coordination across multiple operator devices is partial today; see [`HEIWA.md`](https://github.com/Strategizing/heiwa-universe/blob/main/HEIWA.md) for the current vs target capability matrix.
+GitHub evidence sync is planned, not active. Any future projection must be
+explicitly enabled, redacted before leaving the machine, and incapable of
+becoming a second write authority.
 
 ## Operator boundary diagram
 
@@ -155,9 +137,8 @@ STDB integration is wired and active for receipt mirroring and licence state. Le
 +---------------------------------------------------------------+
 |                       PUBLIC BACKBONE                         |
 |                                                               |
-|   Cloudflare Pages        GitHub                STDB Cloud    |
-|   (heiwa.ltd)             (source, releases,    (receipts,    |
-|   static only             docs.heiwa.ltd)       licence)      |
+|   Cloudflare DNS          GitHub Pages + Releases              |
+|   (records only)          (site, docs, source, binaries)       |
 |                                                               |
 +--------------------------------|------------------------------+
                                  | install + identity exchange
@@ -169,7 +150,7 @@ STDB integration is wired and active for receipt mirroring and licence state. Le
 |   memory, sessions,       OAuth tokens,    Ollama, etc.       |
 |   approvals, evidence     API keys                            |
 |                                                               |
-|   nothing here leaves except a narrow receipt header to STDB  |
+|   evidence stays local; future sync is opt-in and redacted    |
 +---------------------------------------------------------------+
 ```
 
@@ -183,9 +164,11 @@ No. `heiwa.ltd` is a static site delivered by Cloudflare Pages. The runtime, app
 
 Docs are tightly coupled to source — every tag publishes both. GitHub Pages keeps the doc surface authoritative against the commit it was built from. Cloudflare hosts the marketing surface where doc-source coupling is not a requirement.
 
-### Why SpacetimeDB for evidence and not a plain database?
+### Why JSONL plus Lance?
 
-WASM reducers give us sub-millisecond, schema-validated state transitions with a WebSocket transport that does not require operator infrastructure. Heiwa never needs to run a server-side database — STDB is the backend authority operators can read from but never administer.
+JSONL keeps durable truth inspectable, replayable, and Git-friendly. Lance gives
+fast local vector recall without becoming a second authority; the index can be
+rebuilt from the text corpus.
 
 ### Can I self-host the publishing pipeline?
 
@@ -193,9 +176,9 @@ The repository is the entire surface. Fork it, point a Pages project at `clients
 
 ## Change-control rules
 
-- Cloudflare Pages config changes go through `infra/platform/cloudflare/main.tf` — never through the dashboard.
+- Cloudflare DNS changes go through the tracked infrastructure path — never through the dashboard.
 - New workflows or workflow edits land in `.github/workflows/` with the same review gate as runtime code.
-- STDB reducer signatures are stamped against a published contract in `crates/heiwa_stdb/`; breaking changes require a major-version tag.
+- Evidence envelope or migration changes require compatibility tests and local replay verification.
 - The public/runtime boundary is a doctrine line. If a publishing change appears to need operator state on a public surface, route through [governance](support.html#governance--boundaries) before opening the PR.
 
 ## Where to next

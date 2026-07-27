@@ -29,7 +29,7 @@ Before touching runtime or architecture work, read in this order:
 - The installed `heiwa` runtime is the current product center.
 - `apps/heiwa_shell/` is the main operator surface in this repo.
 - `apps/heiwa_core/` contains the Rust execution kernel and hosted runtime path.
-- STDB-facing active work lives in `apps/heiwa_core/src/stdb/`, `apps/heiwa_orchestrator/src/stdb/`, and `crates/heiwa_stdb/`.
+- Evidence authority lives in `crates/heiwa_evidence/`; Lance recall lives in `crates/heiwa_embed/`.
 - Legacy surfaces (old Hub, CLI, limbs) were removed from the tree on 2026-07-06; they live in git history and `~/heiwa_archive/`. Do not treat them as work targets.
 - Web and `/code` surfaces are later work. Do not overstate them.
 
@@ -57,7 +57,7 @@ Use corrected peer framing before architecture or parity work:
   Composio/OAuth integrations, TokenJuice, and voice/meeting surface. Do not
   call it pure local-first.
 - Heiwa's defensible difference: provider-peer MacBook owner seat, local runtime
-  authority, approvals, receipts, STDB evidence sync, and provider-owned runtime
+  authority, approvals, local receipts, derived Lance recall, and provider-owned runtime
   truth.
 - Biggest current gap: connector/tool breadth and compression/learning loop.
   Do not imply parity until code proves it.
@@ -73,7 +73,7 @@ Use corrected peer framing before architecture or parity work:
 
 ### 2. Security & Credentials
 
-- **Vault First**: All provider keys MUST be resolved via `UserVault` in SpacetimeDB for `owner_id != system`.
+- **Vault First**: Resolve provider keys through Heiwa's local vault/keychain boundary; never place raw secrets in evidence or Lance.
 - **Scrubbing**: `ToolMesh` uses `SAFE_ENV_ALLOWLIST`. Never expose `HEIWA_MASTER_KEY` or `RAILWAY_AUTH_TOKEN` to child processes.
 - **BYOK**: Strict enforcement. If a user key is missing, return `BLOCKED_AUTH`.
 
@@ -94,10 +94,10 @@ cargo test -p heiwa-loop -- --nocapture
 
 - local-first truth over hosted-first framing
 - provider-owned semantics stay provider-owned
-- SpacetimeDB is backend authority, not a normal operator surface
+- Local JSONL is evidence authority; Lance is a disposable, rebuildable recall index
 - Railway is support infra, not the product center
 - honesty over maturity theater
-- State: write to SpacetimeDB first
+- State: write canonical local text truth first; derive indexes afterward
 - Transport: prefer subscriptions/WebSockets over polling
 - Cost: cheapest acceptable route first
 - Privacy: sovereign work stays local-first

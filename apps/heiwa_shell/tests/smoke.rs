@@ -1,12 +1,89 @@
+use heiwa_evidence::{OperatorEventType, OperatorJournal};
 use std::io::Write;
+use std::ops::{Deref, DerefMut};
+use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::process::Stdio;
 use tempfile::tempdir;
 
+struct HermeticCommand {
+    command: Command,
+    _root: tempfile::TempDir,
+    evidence_dir: PathBuf,
+}
+
+impl Deref for HermeticCommand {
+    type Target = Command;
+
+    fn deref(&self) -> &Self::Target {
+        &self.command
+    }
+}
+
+impl DerefMut for HermeticCommand {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.command
+    }
+}
+
+fn write_fake_executable(path: &Path, body: &str) {
+    std::fs::write(path, body).expect("write provider fixture");
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o755))
+            .expect("make provider fixture executable");
+    }
+}
+
+fn heiwa_command() -> HermeticCommand {
+    let root = tempfile::tempdir().expect("create hermetic shell root");
+    let home = root.path().join("home");
+    let evidence_dir = root.path().join("evidence");
+    let state_dir = root.path().join("state");
+    let index_dir = root.path().join("index");
+    let fixture_bin = root.path().join("bin");
+    for directory in [&home, &evidence_dir, &state_dir, &index_dir, &fixture_bin] {
+        std::fs::create_dir_all(directory).expect("create hermetic shell directory");
+    }
+    write_fake_executable(
+        &fixture_bin.join("ollama"),
+        "#!/bin/sh\ncase \"$1\" in\n  list) printf 'NAME ID SIZE MODIFIED\\n' ;;\n  ps) printf 'NAME ID SIZE PROCESSOR UNTIL\\n' ;;\n  *) exit 1 ;;\nesac\n",
+    );
+    for provider_cli in ["claude", "codex", "gemini"] {
+        write_fake_executable(
+            &fixture_bin.join(provider_cli),
+            "#!/bin/sh\nprintf 'hermetic provider fixture\\n'\n",
+        );
+    }
+
+    let mut command = Command::new(env!("CARGO_BIN_EXE_heiwa"));
+    command
+        .env_clear()
+        .env("HOME", &home)
+        .env("USER", "heiwa-test")
+        .env("LOGNAME", "heiwa-test")
+        .env("TMPDIR", root.path())
+        .env("HEIWA_EVIDENCE_DIR", &evidence_dir)
+        .env("HEIWA_STATE_DIR", &state_dir)
+        .env("HEIWA_INDEX_DIR", &index_dir)
+        .env("HEIWA_DISABLE_KEYCHAIN", "1")
+        .env("HEIWA_OLLAMA_BASE", "disabled-for-hermetic-tests")
+        .env("NO_COLOR", "1")
+        .env("LC_ALL", "C")
+        .env("LANG", "C")
+        .env("PATH", format!("{}:/usr/bin:/bin", fixture_bin.display()));
+    HermeticCommand {
+        command,
+        _root: root,
+        evidence_dir,
+    }
+}
+
 #[test]
 fn test_heiwa_help() {
-    let output = Command::new("cargo")
-        .args(["run", "-p", "heiwa-shell", "--bin", "heiwa", "--", "--help"])
+    let output = heiwa_command()
+        .arg("--help")
         .output()
         .expect("failed to execute process");
 
@@ -17,26 +94,16 @@ fn test_heiwa_help() {
 
 #[test]
 fn test_heiwa_providers_lists_wrapped_and_loop_capable_surfaces_honestly() {
-    let output = Command::new("cargo")
-        .args([
-            "run",
-            "-p",
-            "heiwa-shell",
-            "--bin",
-            "heiwa",
-            "--",
-            "providers",
-        ])
+    let output = heiwa_command()
+        .arg("providers")
         .output()
         .expect("failed to execute process");
 
     assert!(output.status.success());
     let stdout = String::from_utf8_lossy(&output.stdout);
-    // Registry auto-discovers ollama; CLI discovery shows known providers
-    assert!(
-        stdout.contains("ollama"),
-        "expected ollama in provider list: {stdout}"
-    );
+    // Controlled fixture PATH surfaces wrapped CLIs without contacting live
+    // provider runtimes or operator account state.
+    assert!(stdout.contains("claude"), "expected fixture CLI: {stdout}");
     assert!(
         stdout.contains("[loop]"),
         "expected explicit loop capability marker: {stdout}"
@@ -51,8 +118,8 @@ fn test_heiwa_providers_lists_wrapped_and_loop_capable_surfaces_honestly() {
 }
 
 fn run_shell_script(script: &str) -> std::process::Output {
-    let mut child = Command::new("cargo")
-        .args(["run", "-p", "heiwa-shell", "--bin", "heiwa", "--", "shell"])
+    let mut child = heiwa_command()
+        .arg("shell")
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
@@ -146,19 +213,45 @@ fn test_shell_greeting_is_handled_without_model_requirement() {
 }
 
 #[test]
+fn plain_repl_success_has_one_canonical_closed_turn() {
+    let mut command = heiwa_command();
+    let evidence_dir = command.evidence_dir.clone();
+    let mut child = command
+        .arg("shell")
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .expect("spawn hermetic heiwa shell");
+    child
+        .stdin
+        .as_mut()
+        .expect("stdin")
+        .write_all(b"hi\nquit\n")
+        .expect("write deterministic turn");
+    let output = child.wait_with_output().expect("wait for shell");
+    assert!(output.status.success(), "{output:?}");
+
+    let rows = OperatorJournal::new(evidence_dir)
+        .unwrap()
+        .read_after(None, 64)
+        .unwrap()
+        .events;
+    let count = |event_type| {
+        rows.iter()
+            .filter(|row| row.event.event_type == event_type)
+            .count()
+    };
+    assert_eq!(count(OperatorEventType::UserMessage), 1);
+    assert_eq!(count(OperatorEventType::AssistantCompleted), 1);
+    assert_eq!(count(OperatorEventType::TurnCompleted), 1);
+    assert_eq!(count(OperatorEventType::TurnInterrupted), 0);
+}
+
+#[test]
 fn test_route_preview_greeting_does_not_execute_model() {
-    let output = Command::new("cargo")
-        .args([
-            "run",
-            "-p",
-            "heiwa-shell",
-            "--bin",
-            "heiwa",
-            "--",
-            "route",
-            "preview",
-            "hi",
-        ])
+    let output = heiwa_command()
+        .args(["route", "preview", "hi"])
         .output()
         .expect("failed to execute route preview");
 
@@ -176,18 +269,8 @@ fn test_route_preview_greeting_does_not_execute_model() {
 
 #[test]
 fn test_route_preview_surfaces_privacy_lane() {
-    let output = Command::new("cargo")
-        .args([
-            "run",
-            "-p",
-            "heiwa-shell",
-            "--bin",
-            "heiwa",
-            "--",
-            "route",
-            "preview",
-            "summarize my priority mail privately",
-        ])
+    let output = heiwa_command()
+        .args(["route", "preview", "summarize my priority mail privately"])
         .output()
         .expect("failed to execute route preview");
 
@@ -209,18 +292,8 @@ fn test_route_preview_surfaces_privacy_lane() {
 
 #[test]
 fn test_life_status_json_reports_sources_and_evidence_mode() {
-    let output = Command::new("cargo")
-        .args([
-            "run",
-            "-p",
-            "heiwa-shell",
-            "--bin",
-            "heiwa",
-            "--",
-            "life",
-            "status",
-            "--json",
-        ])
+    let output = heiwa_command()
+        .args(["life", "status", "--json"])
         .output()
         .expect("failed to execute life status");
 
@@ -242,18 +315,8 @@ fn test_life_status_json_reports_sources_and_evidence_mode() {
 
 #[test]
 fn test_life_today_json_reports_local_read_model_keys() {
-    let output = Command::new("cargo")
-        .args([
-            "run",
-            "-p",
-            "heiwa-shell",
-            "--bin",
-            "heiwa",
-            "--",
-            "life",
-            "today",
-            "--json",
-        ])
+    let output = heiwa_command()
+        .args(["life", "today", "--json"])
         .output()
         .expect("failed to execute life today");
 
@@ -276,18 +339,8 @@ fn test_life_today_json_reports_local_read_model_keys() {
 
 #[test]
 fn test_life_freshness_json_reports_source_slas() {
-    let output = Command::new("cargo")
-        .args([
-            "run",
-            "-p",
-            "heiwa-shell",
-            "--bin",
-            "heiwa",
-            "--",
-            "life",
-            "freshness",
-            "--json",
-        ])
+    let output = heiwa_command()
+        .args(["life", "freshness", "--json"])
         .output()
         .expect("failed to execute life freshness");
 
@@ -318,20 +371,8 @@ fn test_life_freshness_json_reports_source_slas() {
 
 #[test]
 fn test_life_import_home_dry_run_jsonl_counts_rows() {
-    let output = Command::new("cargo")
-        .args([
-            "run",
-            "-p",
-            "heiwa-shell",
-            "--bin",
-            "heiwa",
-            "--",
-            "life",
-            "import",
-            "home",
-            "--dry-run",
-            "--jsonl",
-        ])
+    let output = heiwa_command()
+        .args(["life", "import", "home", "--dry-run", "--jsonl"])
         .output()
         .expect("failed to execute life import dry run");
 
@@ -353,17 +394,8 @@ fn test_life_import_home_dry_run_jsonl_counts_rows() {
 
 #[test]
 fn test_app_help_exposes_boot_command_boundary() {
-    let output = Command::new("cargo")
-        .args([
-            "run",
-            "-p",
-            "heiwa-shell",
-            "--bin",
-            "heiwa",
-            "--",
-            "app",
-            "--help",
-        ])
+    let output = heiwa_command()
+        .args(["app", "--help"])
         .output()
         .expect("failed to execute app help");
 
@@ -389,18 +421,8 @@ fn test_app_help_exposes_boot_command_boundary() {
 
 #[test]
 fn test_app_update_dry_run_defaults_to_github_release_source() {
-    let output = Command::new("cargo")
-        .args([
-            "run",
-            "-p",
-            "heiwa-shell",
-            "--bin",
-            "heiwa",
-            "--",
-            "app",
-            "update",
-            "--dry-run",
-        ])
+    let output = heiwa_command()
+        .args(["app", "update", "--dry-run"])
         .output()
         .expect("failed to execute app update dry-run");
 
@@ -432,20 +454,8 @@ fn test_app_update_dry_run_defaults_to_github_release_source() {
 
 #[test]
 fn test_app_update_checkout_source_reports_dev_reinstall_target() {
-    let output = Command::new("cargo")
-        .args([
-            "run",
-            "-p",
-            "heiwa-shell",
-            "--bin",
-            "heiwa",
-            "--",
-            "app",
-            "update",
-            "--source",
-            "checkout",
-            "--dry-run",
-        ])
+    let output = heiwa_command()
+        .args(["app", "update", "--source", "checkout", "--dry-run"])
         .output()
         .expect("failed to execute app update checkout dry-run");
 
@@ -471,14 +481,8 @@ fn test_app_update_checkout_source_reports_dev_reinstall_target() {
 
 #[test]
 fn test_app_update_checkout_dry_run_json_reports_promotion_contract() {
-    let output = Command::new("cargo")
+    let output = heiwa_command()
         .args([
-            "run",
-            "-p",
-            "heiwa-shell",
-            "--bin",
-            "heiwa",
-            "--",
             "app",
             "update",
             "--source",
@@ -606,17 +610,8 @@ fn test_app_update_checkout_dry_run_json_reports_promotion_contract() {
 
 #[test]
 fn test_doctor_json_reports_runtimes_providers_and_app_probe() {
-    let output = Command::new("cargo")
-        .args([
-            "run",
-            "-p",
-            "heiwa-shell",
-            "--bin",
-            "heiwa",
-            "--",
-            "doctor",
-            "--json",
-        ])
+    let output = heiwa_command()
+        .args(["doctor", "--json"])
         .output()
         .expect("failed to execute doctor --json");
 
@@ -702,19 +697,8 @@ fn test_doctor_json_reports_runtimes_providers_and_app_probe() {
 
 #[test]
 fn test_app_runtime_status_json_reports_local_probe() {
-    let output = Command::new("cargo")
-        .args([
-            "run",
-            "-p",
-            "heiwa-shell",
-            "--bin",
-            "heiwa",
-            "--",
-            "app",
-            "runtime",
-            "status",
-            "--json",
-        ])
+    let output = heiwa_command()
+        .args(["app", "runtime", "status", "--json"])
         .output()
         .expect("failed to execute app runtime status");
 
@@ -760,14 +744,8 @@ fn test_app_runtime_status_json_reports_local_probe() {
 
 #[test]
 fn test_workers_heartbeat_dry_run_emits_local_envelope() {
-    let output = Command::new("cargo")
+    let output = heiwa_command()
         .args([
-            "run",
-            "-p",
-            "heiwa-shell",
-            "--bin",
-            "heiwa",
-            "--",
             "workers",
             "heartbeat",
             "--class",
@@ -805,18 +783,8 @@ fn test_workers_heartbeat_dry_run_emits_local_envelope() {
 
 #[test]
 fn test_workers_status_json_reports_registry_path() {
-    let output = Command::new("cargo")
-        .args([
-            "run",
-            "-p",
-            "heiwa-shell",
-            "--bin",
-            "heiwa",
-            "--",
-            "workers",
-            "status",
-            "--json",
-        ])
+    let output = heiwa_command()
+        .args(["workers", "status", "--json"])
         .output()
         .expect("failed to execute workers status");
 
@@ -834,18 +802,8 @@ fn test_workers_status_json_reports_registry_path() {
 
 #[test]
 fn test_approvals_list_json_reports_dispatch_paths() {
-    let output = Command::new("cargo")
-        .args([
-            "run",
-            "-p",
-            "heiwa-shell",
-            "--bin",
-            "heiwa",
-            "--",
-            "approvals",
-            "list",
-            "--json",
-        ])
+    let output = heiwa_command()
+        .args(["approvals", "list", "--json"])
         .output()
         .expect("failed to execute approvals list");
 
@@ -886,19 +844,9 @@ fn test_approvals_list_json_reports_dispatch_v1_summary() {
     )
     .expect("write request");
 
-    let output = Command::new("cargo")
+    let output = heiwa_command()
         .env("HOME", temp.path())
-        .args([
-            "run",
-            "-p",
-            "heiwa-shell",
-            "--bin",
-            "heiwa",
-            "--",
-            "approvals",
-            "list",
-            "--json",
-        ])
+        .args(["approvals", "list", "--json"])
         .output()
         .expect("failed to execute approvals list");
 
@@ -919,18 +867,8 @@ fn test_approvals_list_json_reports_dispatch_v1_summary() {
 
 #[test]
 fn test_mail_status_json_enforces_metadata_only_policy() {
-    let output = Command::new("cargo")
-        .args([
-            "run",
-            "-p",
-            "heiwa-shell",
-            "--bin",
-            "heiwa",
-            "--",
-            "mail",
-            "status",
-            "--json",
-        ])
+    let output = heiwa_command()
+        .args(["mail", "status", "--json"])
         .output()
         .expect("failed to execute mail status");
 
@@ -952,19 +890,8 @@ fn test_mail_status_json_enforces_metadata_only_policy() {
 
 #[test]
 fn test_capabilities_refresh_dry_run_reports_bounded_redacted_json() {
-    let output = Command::new("cargo")
-        .args([
-            "run",
-            "-p",
-            "heiwa-shell",
-            "--bin",
-            "heiwa",
-            "--",
-            "capabilities",
-            "refresh",
-            "--json",
-            "--dry-run",
-        ])
+    let output = heiwa_command()
+        .args(["capabilities", "refresh", "--json", "--dry-run"])
         .output()
         .expect("failed to execute capabilities refresh");
 
@@ -997,18 +924,8 @@ fn test_capabilities_refresh_dry_run_reports_bounded_redacted_json() {
 
 #[test]
 fn test_capabilities_status_json_reports_catalog_counts() {
-    let output = Command::new("cargo")
-        .args([
-            "run",
-            "-p",
-            "heiwa-shell",
-            "--bin",
-            "heiwa",
-            "--",
-            "capabilities",
-            "status",
-            "--json",
-        ])
+    let output = heiwa_command()
+        .args(["capabilities", "status", "--json"])
         .output()
         .expect("failed to execute capabilities status");
 
@@ -1030,18 +947,8 @@ fn test_capabilities_status_json_reports_catalog_counts() {
 
 #[test]
 fn test_calendar_status_json_reports_lanes_and_holds() {
-    let output = Command::new("cargo")
-        .args([
-            "run",
-            "-p",
-            "heiwa-shell",
-            "--bin",
-            "heiwa",
-            "--",
-            "calendar",
-            "status",
-            "--json",
-        ])
+    let output = heiwa_command()
+        .args(["calendar", "status", "--json"])
         .output()
         .expect("failed to execute calendar status");
 
@@ -1067,17 +974,8 @@ fn test_calendar_status_json_reports_lanes_and_holds() {
 
 #[test]
 fn test_mail_summary_json_reports_priority_read_model() {
-    let output = Command::new("cargo")
-        .args([
-            "run",
-            "-p",
-            "heiwa-shell",
-            "--bin",
-            "heiwa",
-            "--",
-            "mail",
-            "summary",
-        ])
+    let output = heiwa_command()
+        .args(["mail", "summary"])
         .output()
         .expect("failed to execute mail summary");
 
@@ -1103,18 +1001,8 @@ fn test_mail_summary_json_reports_priority_read_model() {
 
 #[test]
 fn test_connect_status_json_reports_unified_registry() {
-    let output = Command::new("cargo")
-        .args([
-            "run",
-            "-p",
-            "heiwa-shell",
-            "--bin",
-            "heiwa",
-            "--",
-            "connect",
-            "status",
-            "--json",
-        ])
+    let output = heiwa_command()
+        .args(["connect", "status", "--json"])
         .output()
         .expect("failed to execute connect status");
 
@@ -1140,19 +1028,8 @@ fn test_connect_status_json_reports_unified_registry() {
 
 #[test]
 fn test_mail_scan_dry_run_reports_source_readiness() {
-    let output = Command::new("cargo")
-        .args([
-            "run",
-            "-p",
-            "heiwa-shell",
-            "--bin",
-            "heiwa",
-            "--",
-            "mail",
-            "scan",
-            "--dry-run",
-            "--json",
-        ])
+    let output = heiwa_command()
+        .args(["mail", "scan", "--dry-run", "--json"])
         .output()
         .expect("failed to execute mail scan dry run");
 

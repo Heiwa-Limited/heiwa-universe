@@ -158,6 +158,8 @@ extra_worktree_count="$(printf '%s\n' "$worktrees" | awk '/^worktree / { count++
 ok "extra linked worktrees: $extra_worktree_count"
 
 run_gate "runtime baseline pins" bash scripts/check_runtime_baseline.sh
+run_gate "backend transition truth" bash scripts/check_backend_transition.sh
+run_gate "model call boundary" bash scripts/check_model_call_boundary.sh
 run_gate "heiwa_core Dockerfile baseline" bash scripts/check_heiwa_core_dockerfile.sh
 run_gate "release metadata" bash scripts/check_release_metadata.sh
 

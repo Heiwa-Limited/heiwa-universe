@@ -28,9 +28,10 @@ use sha2::{Digest, Sha256};
 use thiserror::Error;
 use uuid::Uuid;
 
-const SCHEMA_VERSION: i64 = 2;
+const SCHEMA_VERSION: i64 = 3;
 const INITIAL_SQL: &str = include_str!("../migrations/0001_initial.sql");
 const MIGRATION_0002_SQL: &str = include_str!("../migrations/0002_hash_chain.sql");
+const MIGRATION_0003_SQL: &str = include_str!("../migrations/0003_model_call_accounting.sql");
 
 /// Genesis predecessor for the first receipt in a chain: SHA-256's width in
 /// zero bytes, hex-encoded.
@@ -56,6 +57,12 @@ pub enum ReceiptError {
     },
     #[error("invalid schema version: found {found}, expected {expected}")]
     SchemaVersion { found: i64, expected: i64 },
+    #[error("cannot migrate broken schema-v2 receipt chain at seq {seq} ({id}): {reason:?}")]
+    BrokenV2Chain {
+        seq: i64,
+        id: String,
+        reason: ChainBreak,
+    },
     #[error("store lock poisoned")]
     LockPoisoned,
 }
@@ -111,6 +118,14 @@ pub struct Receipt {
     pub latency_ms: i64,
     pub actual_cost_cad: f64,
     pub counterfactual_cost_cad: f64,
+    #[serde(default)]
+    pub model_call_cost_usd: Option<f64>,
+    #[serde(default)]
+    pub model_call_cost_truth: Option<String>,
+    #[serde(default)]
+    pub model_call_attempts: Option<i64>,
+    #[serde(default)]
+    pub failed_attempt_cost_usd: Option<f64>,
     pub session_id: String,
     pub parent_id: Option<String>,
 }
@@ -145,6 +160,10 @@ impl Receipt {
             latency_ms,
             actual_cost_cad,
             counterfactual_cost_cad,
+            model_call_cost_usd: None,
+            model_call_cost_truth: None,
+            model_call_attempts: None,
+            failed_attempt_cost_usd: None,
             session_id: session_id.into(),
             parent_id,
         }
@@ -221,16 +240,28 @@ pub enum ChainBreak {
     MissingHash,
 }
 
-/// Deterministic SHA-256 digest binding receipt `r` to its predecessor
-/// `prev_hash`. Pure, so it is trivially testable and identical on every
-/// platform.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ReceiptHashVersion {
+    /// Schema v2's deployed preimage used the original `chain.v1` domain.
+    LegacyV2,
+    /// Schema v3 adds executor USD accounting fields under a new domain.
+    V3,
+}
+
+/// Deterministic schema-v3 SHA-256 digest binding receipt `r` to its
+/// predecessor `prev_hash`. Pure, so it is trivially testable and identical on
+/// every platform.
 ///
 /// The preimage is canonical by construction: integers render as decimal, costs
 /// as fixed 6-decimal, and every free-text field is length-prefixed
 /// (`key=<len>:<value>`) so no value can borrow bytes from its neighbour. The
-/// `heiwa.receipt.chain.v1` header is the domain separator — change the layout
-/// and you must bump it, or previously written chains stop verifying.
+/// `heiwa.receipt.chain.v3` is the current domain separator. Schema-v2
+/// migration verification uses its legacy preimage explicitly.
 pub fn entry_hash(r: &Receipt, prev_hash: &str) -> String {
+    entry_hash_for_version(r, prev_hash, ReceiptHashVersion::V3)
+}
+
+fn entry_hash_for_version(r: &Receipt, prev_hash: &str, version: ReceiptHashVersion) -> String {
     use std::fmt::Write as _;
 
     fn lp(buf: &mut String, key: &str, val: &str) {
@@ -238,7 +269,10 @@ pub fn entry_hash(r: &Receipt, prev_hash: &str) -> String {
     }
 
     let mut p = String::with_capacity(256);
-    p.push_str("heiwa.receipt.chain.v1\n");
+    p.push_str(match version {
+        ReceiptHashVersion::LegacyV2 => "heiwa.receipt.chain.v1\n",
+        ReceiptHashVersion::V3 => "heiwa.receipt.chain.v3\n",
+    });
     lp(&mut p, "prev", prev_hash);
     lp(&mut p, "id", &r.id);
     let _ = writeln!(p, "at={}", r.at);
@@ -255,6 +289,34 @@ pub fn entry_hash(r: &Receipt, prev_hash: &str) -> String {
         "counterfactual_cost_cad={:.6}",
         r.counterfactual_cost_cad
     );
+    if version == ReceiptHashVersion::V3 {
+        let _ = writeln!(
+            p,
+            "model_call_cost_usd={}",
+            r.model_call_cost_usd
+                .map(|value| format!("{value:.6}"))
+                .unwrap_or_default()
+        );
+        lp(
+            &mut p,
+            "model_call_cost_truth",
+            r.model_call_cost_truth.as_deref().unwrap_or(""),
+        );
+        let _ = writeln!(
+            p,
+            "model_call_attempts={}",
+            r.model_call_attempts
+                .map(|value| value.to_string())
+                .unwrap_or_default()
+        );
+        let _ = writeln!(
+            p,
+            "failed_attempt_cost_usd={}",
+            r.failed_attempt_cost_usd
+                .map(|value| format!("{value:.6}"))
+                .unwrap_or_default()
+        );
+    }
     lp(&mut p, "session_id", &r.session_id);
     lp(&mut p, "parent_id", r.parent_id.as_deref().unwrap_or(""));
 
@@ -439,6 +501,10 @@ impl ReceiptStore {
             migrate_v2_hash_chain(conn)?;
             found = read_schema_version(conn)?;
         }
+        if found < 3 {
+            migrate_v3_model_call_accounting(conn)?;
+            found = read_schema_version(conn)?;
+        }
         if found != SCHEMA_VERSION {
             return Err(ReceiptError::SchemaVersion {
                 found,
@@ -478,14 +544,17 @@ impl ReceiptStore {
                 id, at, env, provider, model, agent,
                 tokens_in, tokens_out, latency_ms,
                 actual_cost_cad, counterfactual_cost_cad,
+                model_call_cost_usd, model_call_cost_truth,
+                model_call_attempts, failed_attempt_cost_usd,
                 session_id, parent_id,
                 seq, prev_hash, entry_hash
             ) VALUES (
                 ?1, ?2, ?3, ?4, ?5, ?6,
                 ?7, ?8, ?9,
                 ?10, ?11,
-                ?12, ?13,
-                ?14, ?15, ?16
+                ?12, ?13, ?14, ?15,
+                ?16, ?17,
+                ?18, ?19, ?20
             )",
             params![
                 r.id,
@@ -499,6 +568,10 @@ impl ReceiptStore {
                 r.latency_ms,
                 r.actual_cost_cad,
                 r.counterfactual_cost_cad,
+                r.model_call_cost_usd,
+                r.model_call_cost_truth,
+                r.model_call_attempts,
+                r.failed_attempt_cost_usd,
                 r.session_id,
                 r.parent_id,
                 seq,
@@ -529,6 +602,8 @@ impl ReceiptStore {
             "SELECT id, at, env, provider, model, agent,
                     tokens_in, tokens_out, latency_ms,
                     actual_cost_cad, counterfactual_cost_cad,
+                    model_call_cost_usd, model_call_cost_truth,
+                    model_call_attempts, failed_attempt_cost_usd,
                     session_id, parent_id
              FROM receipts
              WHERE at >= ?1 AND at < ?2
@@ -687,58 +762,79 @@ impl ReceiptStore {
     /// where the audit trail was tampered with.
     pub fn verify_chain(&self) -> Result<ChainStatus> {
         let conn = self.lock()?;
-        let mut stmt = conn.prepare(
+        verify_chain_with_version(&conn, ReceiptHashVersion::V3)
+    }
+}
+
+fn verify_chain_with_version(
+    conn: &Connection,
+    version: ReceiptHashVersion,
+) -> Result<ChainStatus> {
+    let sql = match version {
+        ReceiptHashVersion::LegacyV2 => {
             "SELECT id, at, env, provider, model, agent,
                     tokens_in, tokens_out, latency_ms,
                     actual_cost_cad, counterfactual_cost_cad,
                     session_id, parent_id,
                     seq, prev_hash, entry_hash
              FROM receipts
-             ORDER BY seq ASC",
-        )?;
-        let mut rows = stmt.query([])?;
+             ORDER BY seq ASC"
+        }
+        ReceiptHashVersion::V3 => {
+            "SELECT id, at, env, provider, model, agent,
+                    tokens_in, tokens_out, latency_ms,
+                    actual_cost_cad, counterfactual_cost_cad,
+                    model_call_cost_usd, model_call_cost_truth,
+                    model_call_attempts, failed_attempt_cost_usd,
+                    session_id, parent_id,
+                    seq, prev_hash, entry_hash
+             FROM receipts
+             ORDER BY seq ASC"
+        }
+    };
+    let mut stmt = conn.prepare(sql)?;
+    let mut rows = stmt.query([])?;
 
-        let mut prev = GENESIS_HASH.to_string();
-        let mut len: u64 = 0;
+    let mut prev = GENESIS_HASH.to_string();
+    let mut len: u64 = 0;
 
-        while let Some(row) = rows.next()? {
-            let receipt = row_to_receipt(row)?;
-            let seq: Option<i64> = row.get("seq")?;
-            let stored_prev: Option<String> = row.get("prev_hash")?;
-            let stored_entry: Option<String> = row.get("entry_hash")?;
+    while let Some(row) = rows.next()? {
+        let receipt = row_to_receipt(row)?;
+        let seq: Option<i64> = row.get("seq")?;
+        let stored_prev: Option<String> = row.get("prev_hash")?;
+        let stored_entry: Option<String> = row.get("entry_hash")?;
 
-            let (seq, stored_prev, stored_entry) = match (seq, stored_prev, stored_entry) {
-                (Some(s), Some(p), Some(e)) => (s, p, e),
-                _ => {
-                    return Ok(ChainStatus::Broken {
-                        seq: seq.unwrap_or(-1),
-                        id: receipt.id,
-                        reason: ChainBreak::MissingHash,
-                    })
-                }
-            };
-
-            if stored_prev != prev {
+        let (seq, stored_prev, stored_entry) = match (seq, stored_prev, stored_entry) {
+            (Some(s), Some(p), Some(e)) => (s, p, e),
+            _ => {
                 return Ok(ChainStatus::Broken {
-                    seq,
+                    seq: seq.unwrap_or(-1),
                     id: receipt.id,
-                    reason: ChainBreak::PrevMismatch,
-                });
+                    reason: ChainBreak::MissingHash,
+                })
             }
-            if entry_hash(&receipt, &prev) != stored_entry {
-                return Ok(ChainStatus::Broken {
-                    seq,
-                    id: receipt.id,
-                    reason: ChainBreak::HashMismatch,
-                });
-            }
+        };
 
-            prev = stored_entry;
-            len += 1;
+        if stored_prev != prev {
+            return Ok(ChainStatus::Broken {
+                seq,
+                id: receipt.id,
+                reason: ChainBreak::PrevMismatch,
+            });
+        }
+        if entry_hash_for_version(&receipt, &prev, version) != stored_entry {
+            return Ok(ChainStatus::Broken {
+                seq,
+                id: receipt.id,
+                reason: ChainBreak::HashMismatch,
+            });
         }
 
-        Ok(ChainStatus::Intact { len, head: prev })
+        prev = stored_entry;
+        len += 1;
     }
+
+    Ok(ChainStatus::Intact { len, head: prev })
 }
 
 fn read_schema_version(conn: &Connection) -> Result<i64> {
@@ -778,7 +874,7 @@ fn migrate_v2_hash_chain(conn: &Connection) -> Result<()> {
     let mut prev = GENESIS_HASH.to_string();
     for (i, r) in rows.iter().enumerate() {
         let seq = i as i64 + 1;
-        let entry = entry_hash(r, &prev);
+        let entry = entry_hash_for_version(r, &prev, ReceiptHashVersion::LegacyV2);
         conn.execute(
             "UPDATE receipts SET seq = ?1, prev_hash = ?2, entry_hash = ?3 WHERE id = ?4",
             params![seq, prev, entry, r.id],
@@ -791,6 +887,58 @@ fn migrate_v2_hash_chain(conn: &Connection) -> Result<()> {
         [],
     )?;
     Ok(())
+}
+
+/// v2 → v3: add executor USD accounting columns and rebuild the chain so new
+/// nullable fields are covered by tamper evidence without relabeling CAD.
+fn migrate_v3_model_call_accounting(conn: &Connection) -> Result<()> {
+    let tx = conn.unchecked_transaction()?;
+
+    match verify_chain_with_version(&tx, ReceiptHashVersion::LegacyV2)? {
+        ChainStatus::Intact { .. } => {}
+        ChainStatus::Broken { seq, id, reason } => {
+            return Err(ReceiptError::BrokenV2Chain { seq, id, reason });
+        }
+    }
+
+    tx.execute_batch(MIGRATION_0003_SQL)?;
+
+    let rows: Vec<Receipt> = {
+        let mut stmt = tx.prepare("SELECT * FROM receipts ORDER BY seq ASC")?;
+        let collected = stmt
+            .query_map([], row_to_receipt)?
+            .collect::<std::result::Result<Vec<_>, _>>()?;
+        collected
+    };
+
+    let mut prev = GENESIS_HASH.to_string();
+    for (i, receipt) in rows.iter().enumerate() {
+        let seq = i as i64 + 1;
+        let entry = entry_hash_for_version(receipt, &prev, ReceiptHashVersion::V3);
+        tx.execute(
+            "UPDATE receipts SET seq = ?1, prev_hash = ?2, entry_hash = ?3 WHERE id = ?4",
+            params![seq, prev, entry, receipt.id],
+        )?;
+        prev = entry;
+    }
+
+    tx.execute(
+        "UPDATE schema_meta SET value = '3' WHERE key = 'schema_version'",
+        [],
+    )?;
+    tx.commit()?;
+    Ok(())
+}
+
+fn optional_column<T: rusqlite::types::FromSql>(
+    row: &rusqlite::Row<'_>,
+    name: &str,
+) -> rusqlite::Result<Option<T>> {
+    match row.get::<_, Option<T>>(name) {
+        Ok(value) => Ok(value),
+        Err(rusqlite::Error::InvalidColumnName(_)) => Ok(None),
+        Err(error) => Err(error),
+    }
 }
 
 fn row_to_receipt(row: &rusqlite::Row<'_>) -> rusqlite::Result<Receipt> {
@@ -818,6 +966,10 @@ fn row_to_receipt(row: &rusqlite::Row<'_>) -> rusqlite::Result<Receipt> {
         latency_ms: row.get("latency_ms")?,
         actual_cost_cad: row.get("actual_cost_cad")?,
         counterfactual_cost_cad: row.get("counterfactual_cost_cad")?,
+        model_call_cost_usd: optional_column(row, "model_call_cost_usd")?,
+        model_call_cost_truth: optional_column(row, "model_call_cost_truth")?,
+        model_call_attempts: optional_column(row, "model_call_attempts")?,
+        failed_attempt_cost_usd: optional_column(row, "failed_attempt_cost_usd")?,
         session_id: row.get("session_id")?,
         parent_id: row.get("parent_id")?,
     })
@@ -1097,6 +1249,122 @@ mod tests {
     }
 
     #[test]
+    fn populated_v3_model_call_fields_round_trip_and_verify() {
+        let store = ReceiptStore::open_in_memory().unwrap();
+        let mut receipt = chain_sample(1);
+        receipt.model_call_cost_usd = Some(0.031_25);
+        receipt.model_call_cost_truth = Some("proxy_estimate".to_string());
+        receipt.model_call_attempts = Some(2);
+        receipt.failed_attempt_cost_usd = Some(0.01);
+
+        store.insert(&receipt).unwrap();
+
+        assert_eq!(store.get(&receipt.id).unwrap(), Some(receipt));
+        assert!(matches!(
+            store.verify_chain().unwrap(),
+            ChainStatus::Intact { len: 1, .. }
+        ));
+    }
+
+    fn seed_v2_database(path: &Path) {
+        let raw = rusqlite::Connection::open(path).unwrap();
+        raw.execute_batch(INITIAL_SQL).unwrap();
+        for i in 0..2 {
+            raw.execute(
+                "INSERT INTO receipts
+                   (id, at, env, provider, model, agent, tokens_in, tokens_out,
+                    latency_ms, actual_cost_cad, counterfactual_cost_cad,
+                    session_id, parent_id)
+                 VALUES (?1, ?2, 'local', 'ollama', 'qwen3.5:9b', 'coding',
+                         ?3, ?4, 42, 0.0, 0.0, 'sess-v2', NULL)",
+                rusqlite::params![format!("v2-id-{i}"), 1_716_640_000_i64 + i, 100 + i, 10 + i],
+            )
+            .unwrap();
+        }
+        migrate_v2_hash_chain(&raw).unwrap();
+        assert_eq!(read_schema_version(&raw).unwrap(), 2);
+    }
+
+    fn column_exists(conn: &rusqlite::Connection, name: &str) -> bool {
+        let mut stmt = conn.prepare("PRAGMA table_info(receipts)").unwrap();
+        stmt.query_map([], |row| row.get::<_, String>(1))
+            .unwrap()
+            .collect::<std::result::Result<Vec<_>, _>>()
+            .unwrap()
+            .iter()
+            .any(|column| column == name)
+    }
+
+    #[test]
+    fn tampered_v2_chain_is_rejected_without_schema_mutation() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("tampered-v2.db");
+        seed_v2_database(&path);
+
+        let raw = rusqlite::Connection::open(&path).unwrap();
+        raw.execute("UPDATE receipts SET agent = 'forged' WHERE seq = 1", [])
+            .unwrap();
+        drop(raw);
+
+        match ReceiptStore::open(&path) {
+            Err(ReceiptError::BrokenV2Chain { seq, reason, .. }) => {
+                assert_eq!(seq, 1);
+                assert_eq!(reason, ChainBreak::HashMismatch);
+            }
+            Err(other) => panic!("expected broken-v2-chain error, got {other}"),
+            Ok(_) => panic!("tampered v2 chain must not migrate"),
+        }
+
+        let raw = rusqlite::Connection::open(&path).unwrap();
+        assert_eq!(read_schema_version(&raw).unwrap(), 2);
+        for column in [
+            "model_call_cost_usd",
+            "model_call_cost_truth",
+            "model_call_attempts",
+            "failed_attempt_cost_usd",
+        ] {
+            assert!(!column_exists(&raw, column));
+        }
+    }
+
+    #[test]
+    fn failed_v3_rehash_rolls_back_alters_and_reopens_cleanly() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("failed-v3.db");
+        seed_v2_database(&path);
+
+        {
+            let raw = rusqlite::Connection::open(&path).unwrap();
+            raw.execute_batch(
+                "CREATE TEMP TRIGGER fail_v3_rehash
+                 BEFORE UPDATE OF entry_hash ON receipts
+                 BEGIN
+                   SELECT RAISE(ABORT, 'injected v3 rehash failure');
+                 END;",
+            )
+            .unwrap();
+
+            assert!(migrate_v3_model_call_accounting(&raw).is_err());
+            assert_eq!(read_schema_version(&raw).unwrap(), 2);
+            for column in [
+                "model_call_cost_usd",
+                "model_call_cost_truth",
+                "model_call_attempts",
+                "failed_attempt_cost_usd",
+            ] {
+                assert!(!column_exists(&raw, column));
+            }
+        }
+
+        let store = ReceiptStore::open(&path).unwrap();
+        assert_eq!(store.schema_version().unwrap(), 3);
+        assert!(matches!(
+            store.verify_chain().unwrap(),
+            ChainStatus::Intact { len: 2, .. }
+        ));
+    }
+
+    #[test]
     fn tampering_a_field_is_detected_at_its_seq() {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("receipts.db");
@@ -1157,7 +1425,7 @@ mod tests {
 
         // Opening through the store runs the v1 → v2 migration + backfill.
         let store = ReceiptStore::open(&path).unwrap();
-        assert_eq!(store.schema_version().unwrap(), 2);
+        assert_eq!(store.schema_version().unwrap(), 3);
         match store.verify_chain().unwrap() {
             ChainStatus::Intact { len, head } => {
                 assert_eq!(len, 3, "all pre-existing rows should be chained");

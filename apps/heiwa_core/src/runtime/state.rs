@@ -6,8 +6,8 @@ use tokio::sync::{mpsc, RwLock};
 
 use crate::config::RuntimeConfig;
 use crate::evidence::{
-    PersistedDispatchAck, PersistedWorkerLease, PersistedWorkerSession, JsonlTransport,
-    EvidenceRuntime, EvidenceTransport,
+    EvidenceRuntime, EvidenceTransport, JsonlTransport, PersistedDispatchAck, PersistedWorkerLease,
+    PersistedWorkerSession,
 };
 use heiwa_protocol::ModelTier;
 
@@ -241,7 +241,9 @@ impl WorkerRegistry {
         self.sessions
             .insert(session.session_id.clone(), session.clone());
 
-        let _ = evidence.transport.upsert_worker_session(session.to_persisted());
+        let _ = evidence
+            .transport
+            .upsert_worker_session(session.to_persisted());
 
         session
     }
@@ -375,7 +377,9 @@ impl WorkerRegistry {
             stored.completed_at_ms = Some(now_ms);
             stored.failure_code = Some("DISPATCH_REJECTED".to_string());
             let rejected = stored.clone();
-            let _ = evidence.transport.upsert_worker_lease(rejected.to_persisted());
+            let _ = evidence
+                .transport
+                .upsert_worker_lease(rejected.to_persisted());
             let _ = evidence.transport.record_dispatch_ack(ack);
             if let Some(session) = self.sessions.get_mut(session_id) {
                 session.active_tasks = session.active_tasks.saturating_sub(1);
@@ -474,7 +478,11 @@ impl WorkerRegistry {
         Some(lease)
     }
 
-    pub fn remove_session<T: EvidenceTransport>(&mut self, evidence: &EvidenceRuntime<T>, session_id: &str) {
+    pub fn remove_session<T: EvidenceTransport>(
+        &mut self,
+        evidence: &EvidenceRuntime<T>,
+        session_id: &str,
+    ) {
         let mut closed_at_ms = 0;
         if let Some(session) = self.sessions.remove(session_id) {
             let mut closed = session;
@@ -482,7 +490,9 @@ impl WorkerRegistry {
             closed.status = "closed".to_string();
             closed.active_tasks = 0;
             closed.load = 0.0;
-            let _ = evidence.transport.upsert_worker_session(closed.to_persisted());
+            let _ = evidence
+                .transport
+                .upsert_worker_session(closed.to_persisted());
             let _ = evidence.transport.close_session(session_id.to_string());
         }
 

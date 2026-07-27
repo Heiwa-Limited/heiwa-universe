@@ -1,8 +1,6 @@
 use heiwa_session::get_session_dir;
 #[cfg(unix)]
-use heiwa_session::start_daemon;
-#[cfg(unix)]
-use std::fs;
+use heiwa_session::start_daemon_at;
 #[cfg(unix)]
 use std::time::Duration;
 
@@ -28,12 +26,23 @@ use tokio::net::UnixStream;
 #[cfg(unix)]
 #[tokio::test]
 async fn test_session_daemon_socket_creation() {
-    let session_dir = get_session_dir();
-    if session_dir.exists() {
-        fs::remove_dir_all(&session_dir).ok();
-    }
+    let temp = tempfile::Builder::new()
+        .prefix("hs-")
+        .tempdir_in("/tmp")
+        .unwrap();
+    let session_dir = temp.path().join("sessions");
 
-    let info = start_daemon().expect("failed to start daemon");
+    let info = match start_daemon_at(session_dir) {
+        Ok(info) => info,
+        Err(error)
+            if error
+                .downcast_ref::<std::io::Error>()
+                .is_some_and(|error| error.kind() == std::io::ErrorKind::PermissionDenied) =>
+        {
+            return;
+        }
+        Err(error) => panic!("failed to start daemon: {error}"),
+    };
 
     // Check socket exists with retry
     let mut retry = 0;

@@ -165,7 +165,10 @@ fn today(args: &[String]) -> Result<()> {
             println!("    ... {} more", snapshot.pending_approvals.len() - 5);
         }
     }
-    println!("  provider_runtime: evidence={}", snapshot.runtime.evidence_mode);
+    println!(
+        "  provider_runtime: evidence={}",
+        snapshot.runtime.evidence_mode
+    );
     println!("  next: heiwa life freshness --json | heiwa approvals list");
     Ok(())
 }
@@ -194,21 +197,26 @@ fn freshness(args: &[String]) -> Result<()> {
 }
 
 fn approvals(args: &[String]) -> Result<()> {
+    let pending = pending_approvals_summary();
     if has_flag(args, "--json") {
         println!(
             "{}",
             json!({
                 "command": "life approvals",
-                "status": "not_synced",
-                "source": "STDB approval_requests",
-                "pending": []
+                "status": "local",
+                "source": "local approval request journal",
+                "pending": pending
             })
         );
         return Ok(());
     }
     println!("life approvals");
-    println!("  status: not synced");
-    println!("  source: STDB approval_requests");
+    println!("  status: local");
+    println!("  source: local approval request journal");
+    println!("  pending: {}", pending.len());
+    for request in pending {
+        println!("    {}", request);
+    }
     Ok(())
 }
 
@@ -220,7 +228,7 @@ fn import(args: &[String]) -> Result<()> {
     let dry_run = has_flag(args, "--dry-run");
     if !dry_run {
         return Err(anyhow!(
-            "life import requires --dry-run until STDB sync is explicitly wired"
+            "life import is preview-only; no canonical local journal importer is available"
         ));
     }
 
@@ -502,7 +510,7 @@ fn print_help() {
     println!("  heiwa life approvals [--json]");
     println!("  heiwa life import home|claude|codex|calendar --dry-run [--json|--jsonl]");
     println!();
-    println!("Writes nothing unless explicit STDB sync is added later.");
+    println!("Import is preview-only; it does not write local operator or evidence journals.");
 }
 
 #[derive(Clone, Debug)]

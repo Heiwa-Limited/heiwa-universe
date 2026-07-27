@@ -570,6 +570,17 @@ textarea { resize: none; }
 .chat-empty-icon { font-size: 48px; }
 .chat-empty p { font-size: 1.05rem; text-align: center; max-width: 320px; }
 
+.operator-compat-warning {
+  margin-bottom: 12px;
+  padding: 8px 10px;
+  border: 1px solid color-mix(in srgb, var(--warn) 45%, var(--border));
+  border-radius: var(--radius);
+  background: color-mix(in srgb, var(--warn) 8%, var(--bg-surface));
+  color: var(--text-dim);
+  font-size: 0.76rem;
+  line-height: 1.45;
+}
+
 .chat-msg {
   margin-bottom: 12px;
   animation: msg-in 0.15s ease-out;

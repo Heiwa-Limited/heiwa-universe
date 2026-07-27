@@ -10,7 +10,8 @@
 
 Class 3 executives (Claude Code, Gemini CLI, Codex, Antigravity) are OAuth-powered peer executors over the same Heiwa stack. The authority model is:
 
-- **STDB** = canonical state truth
+- **Local JSONL evidence** = canonical durable execution truth
+- **Lance** = derived, rebuildable local recall index
 - **Rust core** = execution authority
 - **Provider session** = operator client and orchestration owner
 - **Python** = bounded legacy bridge only
@@ -57,7 +58,7 @@ To close a cycle, the active execution frame must validate current truth instead
   bash scripts/check_release_metadata.sh
   bash scripts/audit_product_surface.sh
   ```
-- **Remote pre-flight separation**: Remote health is not implied by local green checks. `git fetch`, `git pull`, `git push`, `gh run`, `gh release`, `spacetime publish`, `wrangler deploy`, and equivalent network-promotion operations require explicit assignment and the checklist in `docs/agent-baseline-workflow.md`.
+- **Remote pre-flight separation**: Remote health is not implied by local green checks. `git fetch`, `git pull`, `git push`, `gh run`, `gh release`, `wrangler deploy`, and equivalent network-promotion operations require explicit assignment and the checklist in `docs/agent-baseline-workflow.md`.
 - **Vendor quarantine**: Untracked `vendor/oss-lifts` is reference material only until Devon assigns a vendor-policy slice. Do not add, delete, import from, or cite it as product evidence.
 
 ---
@@ -65,7 +66,7 @@ To close a cycle, the active execution frame must validate current truth instead
 ## 5. Economic & Privacy Guardrails
 
 - **Cheapest acceptable route first**: Match the execution tier correctly. Direct simple prompts or status queries to free endpoint tiers or local nodes.
-- **State Sovereignty**: Write to SpacetimeDB _first_. All logical decision buffers evaluate downstream.
+- **State Sovereignty**: Append canonical evidence locally first. Derived Lance indexes and future redacted sync evaluate downstream.
 
 ---
 

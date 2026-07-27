@@ -1,8 +1,133 @@
 use crate::registry::{AccountStatus, DetectedModel, InventoryTruth, ProviderAccount};
 use serde::Deserialize;
+use std::time::Duration;
+use thiserror::Error;
 
 /// Default Ollama API endpoint.
 pub const DEFAULT_ENDPOINT: &str = "http://127.0.0.1:11434";
+pub const ENDPOINT_CONNECT_TIMEOUT: Duration = Duration::from_millis(500);
+pub const ENDPOINT_REQUEST_TIMEOUT: Duration = Duration::from_secs(5);
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum EndpointOverride<'a> {
+    Unset,
+    Value(&'a str),
+    NonUnicode,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct OllamaEndpoint {
+    base_url: String,
+}
+
+impl OllamaEndpoint {
+    pub fn as_str(&self) -> &str {
+        &self.base_url
+    }
+
+    pub fn api_url(&self, path: &str) -> String {
+        format!("{}{path}", self.base_url)
+    }
+}
+
+#[derive(Debug, Error, Clone, PartialEq, Eq)]
+pub enum EndpointError {
+    #[error("HEIWA_OLLAMA_BASE is not valid Unicode")]
+    NonUnicodeOverride,
+    #[error("invalid {origin} endpoint: {reason}")]
+    Invalid {
+        origin: &'static str,
+        reason: &'static str,
+    },
+}
+
+/// Resolve a normalized Ollama base URL without touching process environment.
+///
+/// Precedence is explicit override, stored account endpoint, then default. A
+/// configured but invalid override is an error, never a cue to contact the
+/// default live daemon.
+pub fn resolve_endpoint(
+    override_value: EndpointOverride<'_>,
+    stored_endpoint: Option<&str>,
+) -> Result<OllamaEndpoint, EndpointError> {
+    match override_value {
+        EndpointOverride::Value(value) => parse_endpoint(value, "HEIWA_OLLAMA_BASE"),
+        EndpointOverride::NonUnicode => Err(EndpointError::NonUnicodeOverride),
+        EndpointOverride::Unset => match stored_endpoint {
+            Some(value) => parse_endpoint(value, "stored Ollama"),
+            None => parse_endpoint(DEFAULT_ENDPOINT, "default Ollama"),
+        },
+    }
+}
+
+/// Resolve from the process environment for production calls.
+pub fn resolve_configured_endpoint(
+    stored_endpoint: Option<&str>,
+) -> Result<OllamaEndpoint, EndpointError> {
+    match std::env::var("HEIWA_OLLAMA_BASE") {
+        Ok(value) => resolve_endpoint(EndpointOverride::Value(&value), stored_endpoint),
+        Err(std::env::VarError::NotPresent) => {
+            resolve_endpoint(EndpointOverride::Unset, stored_endpoint)
+        }
+        Err(std::env::VarError::NotUnicode(_)) => {
+            resolve_endpoint(EndpointOverride::NonUnicode, stored_endpoint)
+        }
+    }
+}
+
+/// Return the configured endpoint from the first registered Ollama account.
+pub fn registered_endpoint(accounts: &[ProviderAccount]) -> Option<&str> {
+    accounts
+        .iter()
+        .find_map(|account| match &account.credential {
+            crate::registry::Credential::LocalRuntime { endpoint }
+                if account.provider == "ollama" =>
+            {
+                Some(endpoint.as_str())
+            }
+            _ => None,
+        })
+}
+
+fn parse_endpoint(value: &str, source: &'static str) -> Result<OllamaEndpoint, EndpointError> {
+    if value.trim().is_empty() {
+        return Err(EndpointError::Invalid {
+            origin: source,
+            reason: "empty value",
+        });
+    }
+    let parsed = reqwest::Url::parse(value).map_err(|_| EndpointError::Invalid {
+        origin: source,
+        reason: "invalid URL",
+    })?;
+    if parsed.scheme() != "http" {
+        return Err(EndpointError::Invalid {
+            origin: source,
+            reason: "scheme must be http",
+        });
+    }
+    if parsed.host_str().is_none() {
+        return Err(EndpointError::Invalid {
+            origin: source,
+            reason: "missing authority",
+        });
+    }
+    if !parsed.username().is_empty() || parsed.password().is_some() {
+        return Err(EndpointError::Invalid {
+            origin: source,
+            reason: "credentials are not allowed",
+        });
+    }
+    if parsed.path() != "/" || parsed.query().is_some() || parsed.fragment().is_some() {
+        return Err(EndpointError::Invalid {
+            origin: source,
+            reason: "path, query, and fragment are not allowed",
+        });
+    }
+    Ok(OllamaEndpoint {
+        base_url: parsed.as_str().trim_end_matches('/').to_string(),
+    })
+}
 
 // ---------------------------------------------------------------------------
 // Ollama API response types (subset of /api/tags)
@@ -60,14 +185,30 @@ struct CapabilityFlags {
 ///
 /// Updates the account's `status` and `models` fields in place.
 pub async fn detect_models(account: &mut ProviderAccount) -> anyhow::Result<()> {
-    let endpoint = match &account.credential {
-        crate::registry::Credential::LocalRuntime { endpoint } => endpoint.clone(),
-        _ => DEFAULT_ENDPOINT.to_string(),
+    let stored_endpoint = match &account.credential {
+        crate::registry::Credential::LocalRuntime { endpoint } => Some(endpoint.as_str()),
+        _ => None,
     };
+    let endpoint = match resolve_configured_endpoint(stored_endpoint) {
+        Ok(endpoint) => endpoint,
+        Err(error) => {
+            account.status = AccountStatus::Error(error.to_string());
+            account.models.clear();
+            return Err(anyhow::anyhow!(error));
+        }
+    };
+    detect_models_at_endpoint(account, endpoint).await
+}
 
-    let url = format!("{}/api/tags", endpoint);
+async fn detect_models_at_endpoint(
+    account: &mut ProviderAccount,
+    endpoint: OllamaEndpoint,
+) -> anyhow::Result<()> {
+    let url = endpoint.api_url("/api/tags");
     let client = reqwest::Client::builder()
-        .timeout(std::time::Duration::from_secs(5))
+        .connect_timeout(ENDPOINT_CONNECT_TIMEOUT)
+        .timeout(ENDPOINT_REQUEST_TIMEOUT)
+        .no_proxy()
         .build()?;
 
     let resp = match client.get(&url).send().await {
@@ -77,7 +218,7 @@ pub async fn detect_models(account: &mut ProviderAccount) -> anyhow::Result<()> 
             account.models.clear();
             return Err(anyhow::anyhow!(
                 "Ollama not reachable at {}: {}",
-                endpoint,
+                endpoint.as_str(),
                 e
             ));
         }
@@ -188,10 +329,10 @@ fn parse_param_billions_from_name(name: &str) -> Option<f64> {
 
 async fn fetch_capability_flags(
     client: &reqwest::Client,
-    endpoint: &str,
+    endpoint: &OllamaEndpoint,
     model_name: &str,
 ) -> anyhow::Result<CapabilityFlags> {
-    let url = format!("{}/api/show", endpoint);
+    let url = endpoint.api_url("/api/show");
     let resp = client
         .post(&url)
         .json(&serde_json::json!({ "model": model_name }))
@@ -304,5 +445,67 @@ mod tests {
         assert!(!flags.supports_tools);
         assert!(!flags.supports_vision);
         assert!(!flags.supports_audio);
+    }
+
+    #[test]
+    fn resolver_prefers_override_normalizes_trailing_slash() {
+        let endpoint = resolve_endpoint(
+            EndpointOverride::Value("http://127.0.0.1:11435/"),
+            Some("http://127.0.0.1:11434"),
+        )
+        .unwrap();
+        assert_eq!(endpoint.as_str(), "http://127.0.0.1:11435");
+        assert_eq!(
+            endpoint.api_url("/api/tags"),
+            "http://127.0.0.1:11435/api/tags"
+        );
+    }
+
+    #[test]
+    fn resolver_uses_stored_endpoint_before_default() {
+        let endpoint =
+            resolve_endpoint(EndpointOverride::Unset, Some("http://127.0.0.1:11436/")).unwrap();
+        assert_eq!(endpoint.as_str(), "http://127.0.0.1:11436");
+    }
+
+    #[test]
+    fn resolver_rejects_invalid_overrides_without_fallback() {
+        for override_value in [
+            EndpointOverride::Value(""),
+            EndpointOverride::Value("not-a-url"),
+            EndpointOverride::Value("https://127.0.0.1:11434"),
+            EndpointOverride::NonUnicode,
+        ] {
+            assert!(resolve_endpoint(override_value, Some(DEFAULT_ENDPOINT)).is_err());
+        }
+    }
+
+    #[test]
+    fn invalid_override_does_not_probe_stored_or_live_endpoint() {
+        use std::net::TcpListener;
+
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        listener.set_nonblocking(true).unwrap();
+        let endpoint = format!("http://{}", listener.local_addr().unwrap());
+        let account = ProviderAccount {
+            account_id: "invalid-override".to_string(),
+            provider: "ollama".to_string(),
+            credential: crate::registry::Credential::LocalRuntime { endpoint },
+            rate_group: "local".to_string(),
+            status: AccountStatus::Connected,
+            models: vec![],
+        };
+
+        let result = resolve_endpoint(
+            EndpointOverride::Value("malformed-endpoint"),
+            match &account.credential {
+                crate::registry::Credential::LocalRuntime { endpoint } => Some(endpoint.as_str()),
+                _ => None,
+            },
+        );
+        assert!(matches!(&result, Err(EndpointError::Invalid { .. })));
+        assert!(
+            matches!(listener.accept(), Err(error) if error.kind() == std::io::ErrorKind::WouldBlock)
+        );
     }
 }
