@@ -20,8 +20,11 @@ Load this room for:
 - `.github/workflows/deploy.yml`
 - `apps/heiwa_core/`
 - `apps/heiwa_orchestrator/`
-- `crates/heiwa_stdb/`
-- `packages/heiwa_bindings/*`
+- `crates/heiwa_evidence/` — JSONL journal truth under `~/.heiwa/evidence/`
+- `crates/heiwa_embed/` — Lance derived recall index
+
+(`crates/heiwa_stdb/` and `packages/heiwa_bindings/` were deleted in the
+2026-07-15 backend pivot. They are not work targets.)
 
 ## Current CI Expectations
 

@@ -7,7 +7,6 @@ pytest := ".venv/bin/python -m pytest"
 
 default:
     @echo "Product graph recipes:"
-    @echo "  test-hub       Run legacy Python hub regression suite"
     @echo "  test-trading   Run incubator trading tests"
     @echo "  check-web      Validate transitional web surface"
     @echo "  check-docs     Build MkDocs docs strictly"
@@ -20,9 +19,6 @@ default:
     @echo "  check-product  Run product verification recipes"
     @echo "  verify-product Run product tests and checks"
     @echo "  deploy-product Push main to trigger CI deploy"
-
-test-hub:
-    {{pytest}} apps/heiwa_hub/tests -q
 
 test-trading:
     cd apps/heiwa_trading && PYTHONPATH=src ../../{{python}} -m pytest tests -q
@@ -49,7 +45,7 @@ verify-security:
 rotate-security:
     bash scripts/weekly_security_rotate.sh
 
-test-product: test-hub test-trading
+test-product: test-trading
 
 check-product: check-web check-docs
 
