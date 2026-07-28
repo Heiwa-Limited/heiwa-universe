@@ -827,11 +827,18 @@ fn model_submission_is_accepted_before_provider_preparation_and_fails_durably() 
             .find(|row| row["event"]["event_type"] == "turn_interrupted")
         {
             assert_eq!(terminal["event"]["payload"]["reason"], "EXECUTION_FAILED");
+            // The durable-failure property is what this test is named for, and
+            // it holds either way. The MESSAGE is environment-dependent: a
+            // machine with providers configured rejects the unknown preferred
+            // provider ("... is not available"), while a bare CI runner has no
+            // adapters at all and short-circuits earlier ("No models with
+            // working adapters"). Asserting only the first string made this
+            // pass on a dev Mac and fail on every runner.
+            let message = terminal["event"]["payload"]["message"]
+                .as_str()
+                .unwrap_or_default();
             assert!(
-                terminal["event"]["payload"]["message"]
-                    .as_str()
-                    .unwrap_or_default()
-                    .contains("not available"),
+                message.contains("not available") || message.contains("No models"),
                 "{terminal}"
             );
             break;
