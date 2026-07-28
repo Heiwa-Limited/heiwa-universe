@@ -167,6 +167,61 @@ pub struct RouteInput {
     pub prompt: String,
     #[serde(default)]
     pub hints: serde_json::Value,
+
+    /// Minimum capability class the task actually needs (1=small/fast .. 5=frontier).
+    ///
+    /// `intent` is a *category*; this is a *magnitude*. "Summarise this line" and
+    /// "design this subsystem" are both `chat`, and no amount of downstream
+    /// scoring can recover the difference if the input never carried it.
+    ///
+    /// When absent the router infers a floor from `intent`. Callers that know
+    /// better should say so.
+    #[serde(default)]
+    pub min_capability: Option<u8>,
+
+    /// Hard ceiling on estimated USD for this single turn. Candidates whose
+    /// estimate exceeds it are rejected rather than silently chosen.
+    #[serde(default)]
+    pub max_cost_usd: Option<f64>,
+
+    /// Expected output size, for cost estimation. Defaults to
+    /// [`DEFAULT_OUTPUT_TOKENS`] when the caller has no better guess.
+    #[serde(default)]
+    pub est_output_tokens: Option<u32>,
+}
+
+/// Assumed completion length when a caller gives no estimate.
+pub const DEFAULT_OUTPUT_TOKENS: u32 = 800;
+
+impl RouteInput {
+    /// Rough token count for a prompt. Deliberately crude — this feeds a
+    /// *comparison* between candidates, not a billing figure, and every
+    /// candidate is measured the same way so the bias cancels out.
+    pub fn est_input_tokens(&self) -> u32 {
+        (self.prompt.len() / 4).max(1) as u32
+    }
+
+    pub fn output_tokens(&self) -> u32 {
+        self.est_output_tokens.unwrap_or(DEFAULT_OUTPUT_TOKENS)
+    }
+
+    /// Capability floor for this turn: explicit if given, else inferred from intent.
+    ///
+    /// The inferred defaults are deliberately conservative — routing a hard task
+    /// to a small model wastes a whole turn discovering it could not do the job,
+    /// which costs more than the model tier it was trying to save.
+    pub fn required_capability(&self) -> u8 {
+        if let Some(c) = self.min_capability {
+            return c.clamp(1, 5);
+        }
+        match self.intent.to_ascii_lowercase().as_str() {
+            "trivial" | "classify" | "extract" | "format" => 1,
+            "chat" | "summarize" | "summarise" => 2,
+            "code" | "review" | "research" | "general" => 3,
+            "architect" | "design" | "strategy" | "audit" => 4,
+            _ => 2,
+        }
+    }
 }
 
 #[async_trait]

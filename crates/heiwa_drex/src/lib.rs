@@ -26,8 +26,22 @@
 //! - It does not perform the HTTP refresh dance for expired OAuth tokens; it
 //!   only surfaces that a refresh is needed via the `needs_refresh` flag on
 //!   returned candidates.
-//! - It does not cost-optimize across providers. The priority ladder is
-//!   operator-intent-first: "use what the user already pays for."
+//! ## Selection policy
+//!
+//! **Cheapest model that clears the capability bar.** [`RouteInput`] carries a
+//! capability floor (explicit `min_capability`, else inferred from `intent`).
+//! Candidates are filtered to models at or above that floor, priced with
+//! `cost_per_1k_input`/`cost_per_1k_output` against the estimated turn size,
+//! and the cheapest wins. Saturation, then the rate-group ladder, then
+//! `account_id` break ties.
+//!
+//! Local models cost 0.0, so they still win whenever they are genuinely good
+//! enough — which is the honest version of "local first". They no longer win a
+//! task they cannot do.
+//!
+//! This replaced a ladder that sorted by rate group and then took
+//! `max_by_key(capability_class)` within the winner. That policy overspent on
+//! easy work and underserved hard work, and never read the cost fields at all.
 
 pub mod drex_gate;
 
@@ -36,8 +50,8 @@ use std::sync::Arc;
 use async_trait::async_trait;
 use heiwa_mcp::tools::{RouteDecision, RouteInput, Router};
 use heiwa_provider::{
-    needs_refresh, AccountRegistry, AccountStatus, Credential, OAuthBridgeError, ProviderAccount,
-    ProviderVault,
+    needs_refresh, AccountRegistry, AccountStatus, Credential, DetectedModel, OAuthBridgeError,
+    ProviderAccount, ProviderVault,
 };
 use heiwa_quota::QuotaLedger;
 use thiserror::Error;
@@ -91,6 +105,44 @@ fn default_budget_for(rate_group: &str) -> Option<RateGroupBudget> {
 struct RateGroupBudget {
     token_ceiling: i64,
     request_ceiling: i64,
+}
+
+/// Estimated USD for one turn on `model`, given input/output size in *thousands*
+/// of tokens. Local models report 0.0 for both rates and therefore price at 0.
+pub fn estimate_turn_cost(model: &DetectedModel, in_ktok: f64, out_ktok: f64) -> f64 {
+    model.cost_per_1k_input * in_ktok + model.cost_per_1k_output * out_ktok
+}
+
+/// The core selection policy, factored out so it is testable without a
+/// registry, vault, or quota ledger.
+///
+/// Returns the **cheapest** model in `models` whose `capability_class` is at
+/// least `need`, subject to an optional per-turn cost ceiling.
+///
+/// Ties on price prefer the model that most closely *meets* the bar —
+/// smallest sufficient, not most capable. Dollars are not the only cost:
+/// every local model prices at 0.0, but a 9B model is materially slower than
+/// a 4B one, and latency is part of return-per-turn. Oversizing a trivial
+/// task buys nothing and costs seconds.
+///
+/// Returns `None` when nothing clears the capability bar or the ceiling.
+pub fn cheapest_qualifying<'a>(
+    models: &'a [DetectedModel],
+    need: u8,
+    in_ktok: f64,
+    out_ktok: f64,
+    max_cost_usd: Option<f64>,
+) -> Option<(&'a DetectedModel, f64)> {
+    models
+        .iter()
+        .filter(|m| m.capability_class >= need)
+        .map(|m| (m, estimate_turn_cost(m, in_ktok, out_ktok)))
+        .filter(|(_, cost)| max_cost_usd.is_none_or(|ceiling| *cost <= ceiling))
+        .min_by(|(ma, ca), (mb, cb)| {
+            ca.partial_cmp(cb)
+                .unwrap_or(std::cmp::Ordering::Equal)
+                .then(ma.capability_class.cmp(&mb.capability_class))
+        })
 }
 
 #[derive(Debug, Error)]
@@ -289,7 +341,7 @@ impl DrexRouter {
             return Err(RoutingError::NoAccounts);
         }
 
-        let mut eligible: Vec<&Candidate> = all.iter().filter(|c| c.rejection.is_none()).collect();
+        let eligible: Vec<&Candidate> = all.iter().filter(|c| c.rejection.is_none()).collect();
 
         if eligible.is_empty() {
             let summary = all
@@ -304,40 +356,87 @@ impl DrexRouter {
             return Err(RoutingError::NoEligibleCandidate { reason: summary });
         }
 
-        // Sort: rank asc, then lower saturation first, then account_id for stable output.
-        eligible.sort_by(|a, b| {
-            DrexRouter::rank(&a.account)
-                .cmp(&DrexRouter::rank(&b.account))
+        // ── capability-matched selection ────────────────────────────────
+        //
+        // The old policy sorted by rate-group rank and then took
+        // `max_by_key(capability_class)` within the winner — "cheapest
+        // provider, then max it out". That is not ROI: it overspends on easy
+        // work (a trivial task got the biggest local model) and underserves
+        // hard work (a frontier task went local first, then burned a turn
+        // failing). It also never read cost_per_1k_* at all.
+        //
+        // New policy: pick the CHEAPEST model that CLEARS the capability bar.
+        // Local models are 0.0 cost, so they still win whenever they are
+        // actually good enough — which is the honest version of "local first".
+        let need = input.required_capability();
+        let in_tok = input.est_input_tokens() as f64 / 1000.0;
+        let out_tok = input.output_tokens() as f64 / 1000.0;
+
+        let mut priced: Vec<(&Candidate, &DetectedModel, f64)> = Vec::new();
+        for cand in &eligible {
+            if let Some((m, cost)) = cheapest_qualifying(
+                &cand.account.models,
+                need,
+                in_tok,
+                out_tok,
+                input.max_cost_usd,
+            ) {
+                priced.push((cand, m, cost));
+            }
+        }
+
+        if priced.is_empty() {
+            let have = eligible
+                .iter()
+                .flat_map(|c| c.account.models.iter())
+                .map(|m| m.capability_class)
+                .max();
+            return Err(RoutingError::NoEligibleCandidate {
+                reason: match (have, input.max_cost_usd) {
+                    (Some(h), _) if h < need => {
+                        format!("task needs capability_class >= {need}, best available is {h}")
+                    }
+                    (_, Some(c)) => format!("no candidate at capability >= {need} under ${c}"),
+                    _ => format!("no model at capability_class >= {need}"),
+                },
+            });
+        }
+
+        // Cost first, then saturation, then the rate-group ladder as a tiebreak,
+        // then account_id for stable output.
+        priced.sort_by(|(ca, _, cost_a), (cb, _, cost_b)| {
+            cost_a
+                .partial_cmp(cost_b)
+                .unwrap_or(std::cmp::Ordering::Equal)
                 .then(
-                    a.saturation
-                        .partial_cmp(&b.saturation)
+                    ca.saturation
+                        .partial_cmp(&cb.saturation)
                         .unwrap_or(std::cmp::Ordering::Equal),
                 )
-                .then_with(|| a.account.account_id.cmp(&b.account.account_id))
+                .then(DrexRouter::rank(&ca.account).cmp(&DrexRouter::rank(&cb.account)))
+                .then_with(|| ca.account.account_id.cmp(&cb.account.account_id))
         });
 
-        let chosen = eligible[0];
-        let model_id = chosen
-            .account
-            .models
-            .iter()
-            .max_by_key(|m| m.capability_class)
-            .map(|m| m.model_id.clone())
-            .unwrap_or_else(|| format!("{}-default", chosen.account.provider));
+        let (chosen, model, est_cost) = priced[0];
 
         let rationale = format!(
-            "intent={} rank={} rate_group={} saturation={:.2} account={} needs_refresh={}",
+            "intent={} need_cap={} chose_cap={} est_cost=${:.5} rank={} rate_group={} \
+             saturation={:.2} account={} needs_refresh={} considered={}",
             input.intent,
+            need,
+            model.capability_class,
+            est_cost,
             DrexRouter::rank(&chosen.account),
             chosen.account.rate_group,
             chosen.saturation,
             chosen.account.account_id,
             chosen.needs_refresh,
+            priced.len(),
         );
 
         Ok(RouteDecision {
             provider: chosen.account.provider.clone(),
-            model_id,
+            model_id: model.model_id.clone(),
             rationale,
         })
     }
@@ -401,4 +500,150 @@ impl std::fmt::Display for Rejection {
 // Expose saturation ratio for tests / introspection.
 pub fn saturation_ratio() -> f64 {
     DEFAULT_QUOTA_SATURATION_RATIO
+}
+
+// ─── selection policy tests ───────────────────────────────────────────────
+//
+// These cover the policy directly. Before this change the router had ZERO
+// tests of its own (all five in the crate lived in `drex_gate`), which is how
+// "cheapest rate group, then max_by_key(capability_class)" survived while the
+// cost fields went unread.
+
+#[cfg(test)]
+mod selection_tests {
+    use super::*;
+    use heiwa_mcp::tools::RouteInput;
+    use heiwa_provider::InventoryTruth;
+
+    fn model(id: &str, class: u8, cin: f64, cout: f64) -> DetectedModel {
+        DetectedModel {
+            model_id: id.to_string(),
+            provider_model_id: id.to_string(),
+            provider: "p".into(),
+            account_id: "a".into(),
+            rate_group: "g".into(),
+            capability_class: class,
+            context_window: 100_000,
+            supports_streaming: true,
+            supports_tools: true,
+            supports_vision: false,
+            supports_audio: false,
+            cost_per_1k_input: cin,
+            cost_per_1k_output: cout,
+            inventory_truth: InventoryTruth::Verified,
+        }
+    }
+
+    /// local small + local big (both free) + a paid frontier model
+    fn fleet() -> Vec<DetectedModel> {
+        vec![
+            model("gemma4", 2, 0.0, 0.0),
+            model("qwen3.5:9b", 3, 0.0, 0.0),
+            model("opus-5", 5, 0.015, 0.075),
+            model("sonnet-5", 4, 0.003, 0.015),
+        ]
+    }
+
+    fn req(intent: &str, prompt: &str) -> RouteInput {
+        RouteInput {
+            intent: intent.into(),
+            prompt: prompt.into(),
+            hints: serde_json::Value::Null,
+            min_capability: None,
+            max_cost_usd: None,
+            est_output_tokens: None,
+        }
+    }
+
+    #[test]
+    fn easy_task_takes_the_small_local_model_not_the_big_one() {
+        // The old policy took max_by_key(capability_class) and would have
+        // returned qwen3.5:9b here — paying local compute for nothing.
+        let f = fleet();
+        let (m, cost) = cheapest_qualifying(&f, 2, 1.0, 0.8, None).unwrap();
+        assert_eq!(m.model_id, "gemma4");
+        assert_eq!(cost, 0.0);
+    }
+
+    #[test]
+    fn hard_task_skips_free_models_that_cannot_do_it() {
+        // Both local models are free, but neither clears class 5. Free is not
+        // a reason to route work somewhere it will fail.
+        let f = fleet();
+        let (m, _) = cheapest_qualifying(&f, 5, 1.0, 0.8, None).unwrap();
+        assert_eq!(m.model_id, "opus-5");
+    }
+
+    #[test]
+    fn picks_the_cheapest_that_clears_the_bar_not_the_best_available() {
+        let f = fleet();
+        let (m, _) = cheapest_qualifying(&f, 4, 1.0, 0.8, None).unwrap();
+        assert_eq!(
+            m.model_id, "sonnet-5",
+            "opus-5 also clears 4 but costs more"
+        );
+    }
+
+    #[test]
+    fn free_local_wins_whenever_it_genuinely_qualifies() {
+        let f = fleet();
+        let (m, cost) = cheapest_qualifying(&f, 3, 1.0, 0.8, None).unwrap();
+        assert_eq!(m.model_id, "qwen3.5:9b");
+        assert_eq!(cost, 0.0);
+    }
+
+    #[test]
+    fn cost_ceiling_rejects_rather_than_silently_overspending() {
+        // sonnet-5 on this turn: 0.003*1 + 0.015*0.8 = 0.015
+        let f = fleet();
+        assert!(cheapest_qualifying(&f, 4, 1.0, 0.8, Some(0.01)).is_none());
+        assert!(cheapest_qualifying(&f, 4, 1.0, 0.8, Some(0.02)).is_some());
+    }
+
+    #[test]
+    fn no_candidate_when_nothing_clears_the_bar() {
+        let weak = vec![model("tiny", 1, 0.0, 0.0)];
+        assert!(cheapest_qualifying(&weak, 4, 1.0, 0.8, None).is_none());
+    }
+
+    #[test]
+    fn equal_cost_prefers_smallest_sufficient_not_most_capable() {
+        // Two free models. Dollars tie at 0.0, so latency decides: a 9B model
+        // is slower than a 4B one and buys nothing on a task class 3 clears.
+        // An earlier version preferred the *bigger* model here, which
+        // contradicted `easy_task_takes_the_small_local_model_not_the_big_one`
+        // — the two tests disagreeing is what surfaced the real policy.
+        let free = vec![model("small", 3, 0.0, 0.0), model("big", 5, 0.0, 0.0)];
+        let (m, _) = cheapest_qualifying(&free, 3, 1.0, 0.8, None).unwrap();
+        assert_eq!(m.model_id, "small");
+    }
+
+    #[test]
+    fn intent_infers_a_capability_floor_and_explicit_beats_inferred() {
+        assert_eq!(req("classify", "x").required_capability(), 1);
+        assert_eq!(req("chat", "x").required_capability(), 2);
+        assert_eq!(req("code", "x").required_capability(), 3);
+        assert_eq!(req("architect", "x").required_capability(), 4);
+        assert_eq!(
+            req("who-knows", "x").required_capability(),
+            2,
+            "safe default"
+        );
+
+        let mut r = req("classify", "x");
+        r.min_capability = Some(5);
+        assert_eq!(r.required_capability(), 5, "explicit wins over inferred");
+        r.min_capability = Some(9);
+        assert_eq!(r.required_capability(), 5, "clamped to the real ceiling");
+    }
+
+    #[test]
+    fn turn_cost_scales_with_both_directions() {
+        let m = model("x", 3, 0.01, 0.03);
+        assert!((estimate_turn_cost(&m, 2.0, 1.0) - 0.05).abs() < 1e-9);
+        assert_eq!(
+            estimate_turn_cost(&model("local", 3, 0.0, 0.0), 99.0, 99.0),
+            0.0
+        );
+    }
 }
