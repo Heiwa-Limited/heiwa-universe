@@ -54,6 +54,10 @@ where
 
 pub struct LanceVectorStore {
     conn: Connection,
+    /// Dataset directory, retained so `table()` can distinguish a genuinely
+    /// absent table from a corrupt one. lancedb's own classification is not
+    /// portable - see the note there.
+    dir: std::path::PathBuf,
     /// Dedicated runtime driving lancedb's async API. `Option` only so Drop
     /// can take it: dropping a `Runtime` inside an async context panics, so
     /// Drop hands it to `shutdown_background()` instead when a caller drops
@@ -90,6 +94,7 @@ impl LanceVectorStore {
         let conn = run_blocking(&runtime, async { lancedb::connect(&uri).execute().await })?;
         Ok(Self {
             conn,
+            dir: dir.to_path_buf(),
             runtime: Some(runtime),
             dim: dim as i32,
         })
@@ -152,6 +157,21 @@ impl LanceVectorStore {
             // (corruption, permissions, version skew) must surface as-is —
             // masking it behind a create attempt would hide real damage.
             Err(lancedb::Error::TableNotFound { .. }) => {
+                // Do not trust TableNotFound to mean "absent". A stray file
+                // where the table directory belongs is reported as an IO error
+                // on Unix but as TableNotFound on Windows, so on Windows this
+                // branch would try to create over the corruption and fail with
+                // "Cannot create a file when that file already exists" - losing
+                // the real diagnosis, which is exactly what the surrounding
+                // comment says must not happen. Confirm absence ourselves.
+                let table_path = self.dir.join(format!("{TABLE_NAME}.lance"));
+                if table_path.exists() {
+                    return Err(anyhow!(
+                        "opening lance table: {} exists but is not a readable \
+                         lance table",
+                        table_path.display()
+                    ));
+                }
                 let empty: Box<dyn RecordBatchReader + Send> = Box::new(RecordBatchIterator::new(
                     std::iter::empty::<Result<RecordBatch, ArrowError>>(),
                     self.schema(),
