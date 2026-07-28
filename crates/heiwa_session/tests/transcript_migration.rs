@@ -20,13 +20,27 @@ fn with_temp_home<T>(f: impl FnOnce(&PathBuf) -> T) -> T {
     fs::create_dir_all(&tmp).expect("create temp home");
 
     let original_home = env::var_os("HOME");
+    let original_evidence = env::var_os("HEIWA_EVIDENCE_DIR");
     env::set_var("HOME", &tmp);
+    // HOME alone does NOT isolate this on Windows. The evidence plane resolves
+    // its root through `dirs::home_dir()`, which reads $HOME on Unix but calls
+    // the Windows known-folder API and ignores HOME entirely. Without this,
+    // every test on Windows resolved to the real user profile, shared one
+    // evidence corpus, and leaked state into its siblings - which is why
+    // `empty_file_returns_empty_transcript` saw four entries it never wrote.
+    // HEIWA_EVIDENCE_DIR is the documented override and short-circuits the
+    // home lookup on every platform.
+    env::set_var("HEIWA_EVIDENCE_DIR", tmp.join(".heiwa").join("evidence"));
 
     let result = f(&tmp);
 
     match original_home {
         Some(v) => env::set_var("HOME", v),
         None => env::remove_var("HOME"),
+    }
+    match original_evidence {
+        Some(v) => env::set_var("HEIWA_EVIDENCE_DIR", v),
+        None => env::remove_var("HEIWA_EVIDENCE_DIR"),
     }
     let _ = fs::remove_dir_all(&tmp);
 
