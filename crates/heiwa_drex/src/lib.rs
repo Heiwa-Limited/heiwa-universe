@@ -126,13 +126,13 @@ pub fn estimate_turn_cost(model: &DetectedModel, in_ktok: f64, out_ktok: f64) ->
 /// task buys nothing and costs seconds.
 ///
 /// Returns `None` when nothing clears the capability bar or the ceiling.
-pub fn cheapest_qualifying<'a>(
-    models: &'a [DetectedModel],
+pub fn cheapest_qualifying(
+    models: &[DetectedModel],
     need: u8,
     in_ktok: f64,
     out_ktok: f64,
     max_cost_usd: Option<f64>,
-) -> Option<(&'a DetectedModel, f64)> {
+) -> Option<(&DetectedModel, f64)> {
     models
         .iter()
         .filter(|m| m.capability_class >= need)

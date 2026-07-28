@@ -168,10 +168,15 @@ fn open_ownership_file(
         root: root.to_path_buf(),
         source,
     })?;
+    // truncate(false): this is an ownership-lock file. Another process may
+    // already hold it, and clobbering its contents on open would defeat the
+    // lock. Stated explicitly so clippy::suspicious_open_options does not have
+    // to infer intent from create+write.
     OpenOptions::new()
         .create(true)
         .read(true)
         .write(true)
+        .truncate(false)
         .open(root.join(name))
         .map_err(|source| OperatorOwnershipError::Storage {
             root: root.to_path_buf(),

@@ -541,7 +541,7 @@ fn legacy_occurred_at(ts_unix_ms: i64) -> String {
     OffsetDateTime::from_unix_timestamp_nanos(i128::from(ts_unix_ms) * 1_000_000)
         .ok()
         .and_then(|timestamp| timestamp.format(&Rfc3339).ok())
-        .unwrap_or_else(|| now_iso())
+        .unwrap_or_else(now_iso)
 }
 
 fn new_operator_event(

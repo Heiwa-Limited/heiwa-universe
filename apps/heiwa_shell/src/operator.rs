@@ -3388,7 +3388,7 @@ mod tests {
         std::fs::rename(&stream, &backup).unwrap();
         std::fs::create_dir(&stream).unwrap();
         assert!(runner.request_cancel(&handle.turn_id).is_err());
-        assert!(runner.active_turns().signal_cancel("missing") == false);
+        assert!(!runner.active_turns().signal_cancel("missing"));
         assert_eq!(executor.calls.load(Ordering::SeqCst), 1);
 
         std::fs::remove_dir(&stream).unwrap();

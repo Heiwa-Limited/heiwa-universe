@@ -253,17 +253,17 @@ fn explicit_gates_and_privacy_do_not_fail_open() {
 
     let mut excluded = request();
     excluded.excluded_models = vec!["allowed".to_string()];
-    let plan = plan_model_call(&excluded, &[valid.clone()], &default_policy()).unwrap();
+    let plan = plan_model_call(&excluded, std::slice::from_ref(&valid), &default_policy()).unwrap();
     assert_eq!(reason(&plan, 1), CandidateRejectionReason::ExcludedModel);
 
     let mut allowed = request();
     allowed.allowed_models = vec!["other".to_string()];
-    let plan = plan_model_call(&allowed, &[valid.clone()], &default_policy()).unwrap();
+    let plan = plan_model_call(&allowed, std::slice::from_ref(&valid), &default_policy()).unwrap();
     assert_eq!(reason(&plan, 1), CandidateRejectionReason::NotAllowedModel);
 
     let mut budget = request();
     budget.maximum_marginal_cost_usd = Some(0.001);
-    let plan = plan_model_call(&budget, &[valid.clone()], &default_policy()).unwrap();
+    let plan = plan_model_call(&budget, std::slice::from_ref(&valid), &default_policy()).unwrap();
     assert_eq!(
         reason(&plan, 1),
         CandidateRejectionReason::MaximumMarginalCostUsd
@@ -271,7 +271,7 @@ fn explicit_gates_and_privacy_do_not_fail_open() {
 
     let mut provider_pin = request();
     provider_pin.preferred_provider = Some("other".to_string());
-    let plan = plan_model_call(&provider_pin, &[valid.clone()], &default_policy()).unwrap();
+    let plan = plan_model_call(&provider_pin, std::slice::from_ref(&valid), &default_policy()).unwrap();
     assert_eq!(
         reason(&plan, 1),
         CandidateRejectionReason::PreferredProviderMismatch
@@ -279,7 +279,7 @@ fn explicit_gates_and_privacy_do_not_fail_open() {
 
     let mut model_pin = request();
     model_pin.preferred_model = Some("other".to_string());
-    let plan = plan_model_call(&model_pin, &[valid.clone()], &default_policy()).unwrap();
+    let plan = plan_model_call(&model_pin, std::slice::from_ref(&valid), &default_policy()).unwrap();
     assert_eq!(
         reason(&plan, 1),
         CandidateRejectionReason::PreferredModelMismatch
@@ -287,7 +287,7 @@ fn explicit_gates_and_privacy_do_not_fail_open() {
 
     let mut local_only = request();
     local_only.privacy = PrivacyClass::LocalOnly;
-    let plan = plan_model_call(&local_only, &[valid.clone()], &default_policy()).unwrap();
+    let plan = plan_model_call(&local_only, std::slice::from_ref(&valid), &default_policy()).unwrap();
     assert_eq!(
         reason(&plan, 1),
         CandidateRejectionReason::LocalOnlyOnDeviceRequired
@@ -615,7 +615,7 @@ fn legacy_wrapper_rejects_privacy_typo_and_remote_local_runtime() {
         available_vram_mb: 8_192,
         required_context_tokens: 1,
     };
-    let route = plan_route(&typo, &[tier.clone()], &default_policy()).unwrap();
+    let route = plan_route(&typo, std::slice::from_ref(&tier), &default_policy()).unwrap();
     assert_eq!(route.selected_model, None);
     assert!(route.routing_metadata.contains("invalid_privacy_class"));
 
@@ -762,7 +762,7 @@ fn local_legacy_vram_gate_applies_even_when_runtime_is_any() {
         available_vram_mb: 8_192,
         required_context_tokens: 1,
     };
-    let rejected = plan_route(&ingress, &[tier.clone()], &default_policy()).unwrap();
+    let rejected = plan_route(&ingress, std::slice::from_ref(&tier), &default_policy()).unwrap();
     assert_eq!(rejected.selected_model, None);
     assert!(rejected.routing_metadata.contains("adapter_incapable"));
 
@@ -792,8 +792,8 @@ fn legacy_call_identity_is_unique_or_round_trips_when_supplied() {
         available_vram_mb: 0,
         required_context_tokens: 1,
     };
-    let first = plan_route(&ingress, &[tier.clone()], &default_policy()).unwrap();
-    let second = plan_route(&ingress, &[tier.clone()], &default_policy()).unwrap();
+    let first = plan_route(&ingress, std::slice::from_ref(&tier), &default_policy()).unwrap();
+    let second = plan_route(&ingress, std::slice::from_ref(&tier), &default_policy()).unwrap();
     assert_ne!(first.call_id, second.call_id);
     assert_eq!(first.stage, ModelCallStage::LegacyRoute);
 

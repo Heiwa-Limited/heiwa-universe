@@ -99,7 +99,10 @@ pub enum ModelCallError {
     InvalidBudget(String),
     MaxAttemptsZero,
     Planning(String),
-    NoRoute(ModelCallPlan),
+    /// Boxed: `ModelCallPlan` is large, and an unboxed variant made the whole
+    /// enum - and therefore every `Result<_, ModelCallError>` in this module -
+    /// big enough to trip clippy::result_large_err on four functions.
+    NoRoute(Box<ModelCallPlan>),
     EvidenceAppend {
         phase: &'static str,
         source: anyhow::Error,
@@ -193,7 +196,7 @@ impl ModelCallExecutor {
             )?;
 
             let Some(candidate) = selected else {
-                return Err(ModelCallError::NoRoute(plan));
+                return Err(ModelCallError::NoRoute(Box::new(plan)));
             };
 
             attempts += 1;

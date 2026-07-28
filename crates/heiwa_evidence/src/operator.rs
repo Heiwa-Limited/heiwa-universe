@@ -261,10 +261,16 @@ impl OperatorJournal {
         // the stream already has a valid lineage anchor, reuse it after the
         // append; otherwise the new event becomes the first valid anchor.
         let fingerprint_before = first_line_fingerprint(&path)?;
+        // truncate(false) is explicit, not incidental: this journal is
+        // append-only, and the very next steps repair an unterminated tail and
+        // seek to the end. Truncating here would destroy the evidence stream.
+        // Stating it also satisfies clippy::suspicious_open_options, which
+        // rightly refuses to guess intent from create+write alone.
         let mut file = OpenOptions::new()
             .create(true)
             .read(true)
             .write(true)
+            .truncate(false)
             .open(&path)?;
         repair_unterminated_tail(&mut file)?;
         file.seek(SeekFrom::End(0))?;

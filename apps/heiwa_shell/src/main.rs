@@ -1074,7 +1074,7 @@ pub(crate) fn get_live_model_tiers(
                 strengths.push("advanced_coding");
             }
 
-            let mut id = stable_live_model_id(&m);
+            let mut id = stable_live_model_id(m);
             while !used_ids.insert(id) {
                 id = id.wrapping_add(1);
                 if id == 0 {

@@ -198,7 +198,7 @@ fn contains_labeled_secret(text: &str) -> bool {
                 return false;
             };
             let value = value
-                .split(|character: char| character == '\n' || character == '\r')
+                .split(['\n', '\r'])
                 .next()
                 .unwrap_or("")
                 .trim();
