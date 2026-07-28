@@ -101,6 +101,13 @@ jobs:
             libwebkit2gtk-4.1-dev \
             patchelf \
             pkg-config
+      # heiwa-shell defaults to the `lance` feature -> lance-encoding ->
+      # prost-build, which requires `protoc` on PATH.
+      - name: Install protoc
+        if: needs.changes.outputs.deploy_core == 'true'
+        uses: arduino/setup-protoc@v3
+        with:
+          repo-token: ${{ secrets.GITHUB_TOKEN }}
       - name: Run Rust release preflight
         if: needs.changes.outputs.deploy_core == 'true'
         run: cargo test --workspace --locked

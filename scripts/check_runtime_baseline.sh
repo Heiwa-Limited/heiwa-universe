@@ -98,7 +98,7 @@ for workflow in .github/workflows/ci.yml .github/workflows/deploy.yml; do
   fi
 done
 
-for required_env in STDB_TOKEN HEIWA_MACHINE_AUTH_TOKEN HEIWA_JWT_SIGNING_SECRET; do
+for required_env in HEIWA_MACHINE_AUTH_TOKEN HEIWA_JWT_SIGNING_SECRET HEIWA_STATE_BACKEND; do
   if ! grep -q "^${required_env}=" .env.example; then
     echo ".env.example is missing canonical variable: $required_env" >&2
     exit 1

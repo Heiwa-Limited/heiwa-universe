@@ -1,6 +1,6 @@
 # Heiwa Build Matrix
 
-Updated 2026-05-22. Canonical repo shape: MacBook-first runtime, local `~/.heiwa` state, GitHub-native distribution, paused Cloudflare public edge, optional SpacetimeDB evidence sync.
+Updated 2026-07-27. Canonical repo shape: MacBook-first runtime, local `~/.heiwa` state, GitHub-native distribution, paused Cloudflare public edge, local-first JSONL evidence with a Lance recall index. SpacetimeDB was extracted 2026-07-15.
 
 ## Architecture
 
@@ -11,21 +11,21 @@ Updated 2026-05-22. Canonical repo shape: MacBook-first runtime, local `~/.heiwa
 | Provider/auth normalization | Rust                                  | `crates/heiwa_provider/`, `crates/heiwa_vault/`, `crates/heiwa_quota/`                 | Active, uneven by provider                                           |
 | Session and local memory    | Rust + SQLite mirror                  | `crates/heiwa_session/`, `crates/heiwa_memory/`                                        | Active local substrate                                               |
 | Companion app               | TypeScript public shell + cockpit SPA | `apps/heiwa_app/clients/web/`, `apps/heiwa_app/clients/cockpit/`                       | Web client today; native wrapper later                               |
-| STDB evidence/state         | SpacetimeDB + generated bindings      | `crates/heiwa_stdb/`, `packages/heiwa_bindings/`                                       | Evidence sync/adjudication plane                                     |
+| Evidence / recall           | JSONL journal + Lance index           | `crates/heiwa_evidence/`, `crates/heiwa_embed/`                                        | Local truth plane; Lance is derived and rebuildable                  |
 | Python sidecar/reference    | Python                                | `runtime/python/`, `packages/heiwa_sdk/`, `apps/heiwa_trading/`                        | Compatibility/R&D sidecars, not product center                       |
 | Distribution                | GitHub                                | `.github/workflows/{ci,release,pages}.yml`                                             | CI, release archives, GHCR image, docs                               |
 | Public edge                 | Cloudflare                            | `apps/heiwa_app/wrangler.toml`, `infra/platform/cloudflare/`                           | Paused until user functionality is solid; no local runtime authority |
 
 ## Product Contract
 
-Rust proposes and executes. Local `~/.heiwa` state records current owner truth. SpacetimeDB syncs evidence and adjudication when enabled. `heiwa` presents. TypeScript renders public and cockpit surfaces. Python remains sidecar/reference until promoted behind explicit Rust-owned contracts.
+Rust proposes and executes. Local `~/.heiwa` state records current owner truth; JSONL evidence under `~/.heiwa/evidence/` is the authority plane and Lance is the derived recall index. `heiwa` presents. TypeScript renders public and cockpit surfaces. Python remains sidecar/reference until promoted behind explicit Rust-owned contracts.
 
 ## Current Work Lanes
 
 | Lane         | Goal                                                                                                | Gate                                                                                                      |
 | ------------ | --------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------- |
 | Runtime      | Keep `heiwa` local runtime installable, updateable, and honest about provider maturity              | `cargo test -p heiwa-shell --test smoke`, `heiwa doctor --ai-ops`, `heiwa app runtime status --json`      |
-| State        | Keep local SQLite/files as current owner truth while STDB stays optional evidence sync/adjudication | `cargo test -p heiwa-session --test transcript_migration`, `cargo test -p heiwa-stdb`                     |
+| State        | Local SQLite/files are owner truth; JSONL evidence is the authority plane                          | `cargo test -p heiwa-session --test transcript_migration`, `cargo test -p heiwa_evidence`                 |
 | Web          | Keep public shell static/safe and cockpit local-runtime oriented                                    | `npm run typecheck`, `python apps/heiwa_app/scripts/check_static_surface.py`                              |
 | Python       | Keep sidecars dependency-clean and non-authoritative                                                | `uv run --extra dev python -m pytest` where relevant; lockfiles must have no open Dependabot alerts       |
 | Distribution | Publish through GitHub Releases/GHCR and docs through GitHub Pages                                  | `.github/workflows/release.yml`, `.github/workflows/pages.yml`, `scripts/check_release_metadata.sh`       |
@@ -39,7 +39,7 @@ Rust proposes and executes. Local `~/.heiwa` state records current owner truth. 
 - GitHub Pages publishes docs on release tags and manual dispatch.
 - Cloudflare Pages is not active public access yet; when re-enabled it should host the public web shell from `apps/heiwa_app/clients/web`.
 - The cockpit SPA under `apps/heiwa_app/clients/cockpit` is served by `heiwa app start` on localhost, not assumed to be a privileged hosted runtime.
-- SpacetimeDB maincloud / `heiwaproductiondb` is an evidence sync/adjudication target; local runtime must work without it.
+- There is no hosted authority plane. Evidence sync to GitHub is future, redaction-gated work; the local runtime is complete without it.
 
 ## Retired Assumptions
 

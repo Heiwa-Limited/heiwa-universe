@@ -19,8 +19,9 @@ Read these in order before making runtime or architecture changes:
 
 - **MacBook (macOS)**: Owner/operator seat. Primary local runtime host.
 - **Local `heiwa` runtime**: Installed on each operator machine; owns routing and execution locally.
-- **SpacetimeDB**: Backend authority plane for cross-device adjudication and evidence. Not a normal operator surface.
-- **GitHub**: Distribution surface — Releases, Pages, Actions, homebrew tap.
+- **Local evidence (`crates/heiwa_evidence`)**: Truth is text — JSONL journal streams under `~/.heiwa/evidence/` plus markdown/receipts. This is the authority plane.
+- **Lance (`crates/heiwa_embed`)**: Derived recall index over that corpus. Rebuildable; never the source of truth.
+- **GitHub**: Source, CI, and distribution — Releases, Pages, Actions, homebrew tap. Evidence sync to GitHub is planned and redaction-gated, local-only today.
 - **Consolidated Monorepo**: `~/heiwa-universe` is the canonical active workspace. Older `~/heiwa` references are compatibility debt to retire, not the source of truth.
 
 A cloud/VPS plane is deferred until traction warrants it; the client-only architecture is the current truth.
@@ -41,8 +42,8 @@ The system is anchored by machine-readable files that persist across agent sessi
 
 ## Hard Rules
 
-- **State Authority**: SpacetimeDB is the authority plane for cross-device state. Local SQLite (e.g. `~/.heiwa/state.db`) is the legitimate per-machine ledger for quota, history, and run traces; it is not retired.
-- **Target Fidelity**: Develop for the operator's local machine first. Cross-device sync flows through STDB when it matters.
+- **State Authority**: Local JSONL evidence under `~/.heiwa/evidence/` is the authority, written through `crates/heiwa_evidence`. Local SQLite (e.g. `~/.heiwa/state.db`) is the legitimate per-machine ledger for quota, history, and run traces; it is not retired. Lance is a derived index and must be rebuildable from evidence.
+- **Target Fidelity**: Develop for the operator's local machine first. There is no cross-device sync plane today; GitHub-backed evidence sync is future, redaction-gated work.
 - **Transport**: Prefer subscriptions and WebSockets over polling.
 - **Execution**: Route model and tool execution through `HeiwaClaw` / MCP.
 - **Economy**: Cheapest acceptable route first.
@@ -68,7 +69,7 @@ Routing details live in `config/swarm/ai_router.json` and current Rust runtime c
 
 ## Room Index
 
-- `ops/rooms/control-plane.md` — proposal lifecycle, routing/lease/approval, STDB state
+- `ops/rooms/control-plane.md` — proposal lifecycle, routing/lease/approval, local evidence state
 - `ops/rooms/execution.md` — worker node execution, claim/run/result loops
 - `ops/rooms/orchestration.md` — human-in-loop, LLM roles, approval posture, Discord channels
 - `ops/rooms/infra.md` — GitHub distribution, Cloudflare edge, CI/CD, runtime topology
@@ -83,7 +84,7 @@ Each major directory has a `CONTEXT.md` that agents should read when working in 
 | Directory | Context File | What It Covers |
 | --- | --- | --- |
 | `apps/heiwa_core/` | `CONTEXT.md` | Rust execution kernel, routing, receipts, hosted runtime path |
-| `apps/heiwa_orchestrator/` | `CONTEXT.md` | DREX orchestration, scoring, persistence, STDB-facing runtime work |
+| `apps/heiwa_orchestrator/` | `CONTEXT.md` | DREX orchestration, scoring, persistence, evidence-facing runtime work |
 | `apps/heiwa_shell/` | `CONTEXT.md` | Installed `heiwa` runtime and shell surface |
 | `apps/heiwa_trading/` | `CONTEXT.md` | Trading cockpit, supervisor, strategy engine |
 | `apps/heiwa_dj/` | `CONTEXT.md` | Archived — shipped v1.7.0 standalone app |

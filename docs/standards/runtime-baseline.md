@@ -13,13 +13,11 @@ These versions are the canonical floor for `heiwa-universe`:
 
 | Surface             | Baseline                                             | Reason                                                                               |
 | ------------------- | ---------------------------------------------------- | ------------------------------------------------------------------------------------ |
-| Rust                | `1.93.1`                                             | Required by `heiwa-core` and SpacetimeDB crates.                                     |
+| Rust                | `1.93.1`                                             | Required by `heiwa-core` and the local evidence/Lance crates.                        |
 | Docker rust-builder | `rust:1.93-slim`                                     | Matches the workspace toolchain floor used in CI and optional remote-support builds. |
 | Node                | `24.14.1`                                            | Stable LTS lane for TypeScript workspace and deploy tooling.                         |
 | npm                 | bundled with Node 24                                 | Repo installs should follow the pinned Node lane.                                    |
 | Python              | `3.14.x`                                             | Current repo pytest/docs/runtime compatibility lane.                                 |
-| STDB auth           | `spacetime login` shell identity targeting Maincloud | Canonical SpacetimeDB publisher/operator auth. No Heiwa-owned API key plane.         |
-| STDB token compat   | `STDB_TOKEN`                                         | Legacy/compat only for code paths that still require token-shaped material.          |
 | Machine auth        | `HEIWA_MACHINE_AUTH_TOKEN`                           | Canonical worker and operator machine auth boundary.                                 |
 | Session auth        | `HEIWA_JWT_SIGNING_SECRET`                           | Canonical user session signing boundary.                                             |
 
@@ -78,4 +76,5 @@ bash scripts/audit_operator_machine.sh
 
 - `heiwa app start` is the canonical current user runtime server.
 - Local `~/.heiwa` state must be enough for user functionality.
-- STDB (`local` or `maincloud`) is sync/adjudication, not required for the local cockpit hot path.
+- JSONL under `~/.heiwa/evidence/` is canonical evidence truth; Lance is a derived local index.
+- GitHub evidence sync is planned and redaction-gated; it is not a current runtime dependency.

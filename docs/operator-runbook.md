@@ -44,7 +44,7 @@ bash scripts/check_agent_baseline.sh
 Rust/runtime examples:
 
 ```bash
-cargo test --offline -p heiwa-protocol -p heiwa_mcp -p heiwa-stdb -p heiwa-shell
+cargo test --offline -p heiwa-protocol -p heiwa_mcp -p heiwa_evidence -p heiwa-shell
 cargo test --offline -p heiwa-core --test drex_provider_routing --test drex_scoring --test run_receipts --test worker_mesh
 cargo test --offline -p heiwa-shell --test agentic_smoke
 ```

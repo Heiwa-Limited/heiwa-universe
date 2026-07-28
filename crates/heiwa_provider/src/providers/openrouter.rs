@@ -185,9 +185,7 @@ mod tests {
 
     #[test]
     fn parses_content_delta() {
-        let (delta, usage) = parse_stream_payload(
-            r#"{"choices":[{"delta":{"content":"hello"}}]}"#,
-        );
+        let (delta, usage) = parse_stream_payload(r#"{"choices":[{"delta":{"content":"hello"}}]}"#);
         assert_eq!(delta.as_deref(), Some("hello"));
         assert!(usage.is_none());
     }

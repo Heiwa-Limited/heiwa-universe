@@ -11,14 +11,25 @@ readme.workspace = true
 keywords.workspace = true
 categories.workspace = true
 
+[features]
+default = []
+lance = ["heiwa-embed/lance"]
+
 [dependencies]
 anyhow = "1.0"
 heiwa-config = { path = "../heiwa_config", package = "heiwa_config" }
 heiwa-embed = { path = "../heiwa_embed", package = "heiwa_embed" }
+heiwa-evidence = { path = "../heiwa_evidence", package = "heiwa_evidence" }
 heiwa-protocol = { path = "../../crates/heiwa_protocol" }
 portable-pty = { version = "0.9.0", features = ["serde"] }
 rusqlite = { version = "0.31", features = ["bundled"] }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
+sha2 = "0.10"
 tokio = { version = "1.50.0", features = ["full"] }
-uuid = { version = "1.23.0", features = ["v4", "serde"] }
+time = { version = "0.3", features = ["formatting"] }
+thiserror = "2"
+uuid = { version = "1.23.0", features = ["v4", "v5", "serde"] }
+
+[dev-dependencies]
+tempfile = "3"

@@ -70,7 +70,7 @@ const initialArtifacts: Artifact[] = [
     file: "docs/deployment.md",
     badge: "review",
     summary:
-      "Separates installed GitHub-release runtime from checkout development mode and keeps Cloudflare/STDB as protected backends.",
+      "Separates installed GitHub-release runtime from checkout development mode and keeps local evidence and Cloudflare edge as protected surfaces.",
   },
   {
     title: "Surface Context Packet",

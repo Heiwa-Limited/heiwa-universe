@@ -253,7 +253,7 @@
           </div>
           <div class="tile">
             <span class="k">3 &middot; RUN</span>
-            <p>Use the REPL or open the local app with <code>heiwa app</code>. Receipts written to local evidence + STDB.</p>
+            <p>Use the REPL or open the local app with <code>heiwa app</code>. Receipts append to the local evidence journal.</p>
             <code class="mono">heiwa doctor</code>
           </div>
         </div>
@@ -263,13 +263,13 @@
       <section class="section">
         <div class="section-head">
           <h2>05 &middot; Public Backbone</h2>
-          <span class="idx">CLOUDFLARE &middot; GITHUB &middot; SPACETIMEDB</span>
+          <span class="idx">CLOUDFLARE DNS &middot; GITHUB &middot; LOCAL RUNTIME</span>
         </div>
         <div class="grid-3">
           <div class="tile">
-            <span class="k">CLOUDFLARE PAGES</span>
-            <p>Static shell for <code>heiwa.ltd</code> &mdash; install path, docs front, identity exchange. Zero operator work runs here.</p>
-            <span class="pill neutral">edge static</span>
+            <span class="k">CLOUDFLARE DNS</span>
+            <p>DNS utility for public names. It is not Heiwa's runtime, storage, or binary authority.</p>
+            <span class="pill neutral">dns only</span>
           </div>
           <div class="tile">
             <span class="k">GITHUB</span>
@@ -277,9 +277,9 @@
             <span class="pill neutral">authoritative</span>
           </div>
           <div class="tile">
-            <span class="k">SPACETIMEDB</span>
-            <p>WASM-reducer adjudication plane. Receipts, leases, and licence state mirror here when the runtime is online.</p>
-            <span class="pill active">backend authority</span>
+            <span class="k">LOCAL JSONL + LANCE</span>
+            <p>JSONL records canonical evidence on-device. Lance derives rebuildable local recall over that corpus.</p>
+            <span class="pill active">local authority</span>
           </div>
         </div>
         <p class="muted" style="margin-top:1rem;font-family:var(--ff-mono);font-size:0.78rem;letter-spacing:0.04em;">
@@ -304,7 +304,7 @@
           </div>
           <div class="tile">
             <span class="k">COMPRESSION</span>
-            <p style="color:var(--ink-2);">"Rust proposes, SpacetimeDB adjudicates, <code>heiwa</code> presents."</p>
+            <p style="color:var(--ink-2);">"Rust executes, local text records, Lance recalls, <code>heiwa</code> presents."</p>
           </div>
         </div>
       </section>

@@ -20,14 +20,9 @@ notify = "6"
 rusqlite = { version = "0.31", features = ["bundled"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
-thiserror = "2"
-tokio = { version = "1", features = ["full", "macros", "rt-multi-thread"] }
-tracing = "0.1"
 uuid = { version = "1", features = ["v4", "serde"] }
 
 # Heiwa internal deps
-heiwa_receipts = { path = "../heiwa_receipts" }
-heiwa-protocol = { path = "../heiwa_protocol" }
 
 [dev-dependencies]
 tempfile = "3"

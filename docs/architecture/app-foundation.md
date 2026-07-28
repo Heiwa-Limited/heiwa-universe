@@ -1,6 +1,6 @@
 # Heiwa App Foundation
 
-Date: 2026-05-26
+Date: 2026-07-19
 
 ## Decision
 
@@ -29,7 +29,9 @@ Keep:
 - TypeScript/Vite as a small app build layer, not as the owner of policy or state.
 - tmux as the local multiplexer substrate for panes, windows, worker terminals,
   attach/read/write boundaries, and future remote attach.
-- STDB as optional sync/adjudication/evidence plane, not the operator surface.
+- Local append-only JSONL as canonical evidence truth, with Lance as a
+  rebuildable local recall projection. GitHub evidence sync remains planned,
+  local-first, and blocked behind an explicit redaction/privacy boundary.
 
 Drop or defer:
 
@@ -107,15 +109,33 @@ Claude Code / Codex / Gemini CLI:
 Runtime:
 
 - `heiwa_shell` is the local owner runtime and API host.
-- DREX routes work to local models, provider CLIs, API providers, workers, or remote machines.
+- DREX plans every model call against its own capabilities, privacy/risk,
+  quality floor, success floor, and marginal-cost budget. Only candidates that
+  clear those gates compete on cost.
 - `~/.heiwa/` stores machine truth, approvals, workers, traces, receipts, and local state.
-- STDB syncs adjudication/evidence when enabled, but users do not operate STDB directly.
+- The append-only JSONL journal under `~/.heiwa/evidence/` is durable truth.
+  Lance and SQLite/FTS read models are derived and rebuildable; GitHub evidence
+  sync is planned and redaction-gated, not live.
+- `heiwa_session::OperatorSessionService` is the sole domain writer for
+  `operator_events.jsonl`. `heiwa_evidence` owns dumb append/replay framing,
+  cursor validation, locking, fsync, and sensitive-material rejection; command
+  handlers, clients, and projections do not append operator events directly.
 
 Desktop:
 
 - `Heiwa.app` is a Tauri wrapper over the app shell.
-- The app shell consumes local `/api/v1/*` and later `/ws/v1/*`.
-- Tauri commands are for OS integration only: tray, notifications, secure storage, file picker, login items, and local process supervision.
+- The app shell consumes authenticated local `/api/v1/operator/*` and
+  `/ws/v1/operator` for operator state alongside narrower runtime read models.
+  Localhost is a transport boundary, not an authentication boundary.
+- The native Tauri bridge reads local runtime auth, restricts transport to the
+  configured `127.0.0.1` runtime port, and signs each HTTP/WebSocket handshake
+  below the renderer. The HMAC input binds method, numeric port, exact request
+  target, SHA-256 body digest, timestamp, and nonce. The machine bearer remains
+  compatibility auth; native Desktop transport does not send it. The TypeScript
+  renderer never owns or persists either credential material.
+- Tauri commands stay narrow: authenticated loopback transport plus OS
+  integration such as tray, notifications, secure storage, file picker, login
+  items, and local process supervision.
 - UI does not own policy or state.
 - Home is the pinned ops view: live terminal/herd panes first, then compact
   widgets for sub-app servers, agent skills/tools, personalization, approvals,
@@ -158,6 +178,79 @@ Terminal surfaces:
 - App, TUI, and REPL are three displays over one state machine. They must not
   fork write paths or invent separate automation authority.
 
+## Operator Stream Contract
+
+The live operator stream is the current conversation/execution contract for the
+Desktop and authenticated HTTP/WebSocket surfaces. The `/api/v1/repl`
+compatibility routes submit through the same operator runner. Full interactive
+CLI and TUI consumption of this stream remains a convergence target:
+
+- durable, totally ordered domain events live in `operator_events.jsonl`
+- `OperatorSessionService` admits turns idempotently by
+  `client_request_id`, folds thread/turn state, and is the only domain append
+  authority
+- app startup acquires an exclusive, zero-content app-runtime lease for the
+  configured evidence root before recovery, heartbeat, or API service. Every
+  session service that mutates the operator stream also holds a shared activity
+  lease; restart recovery requires exclusive activity ownership and fails
+  closed while a CLI, REPL, loop, or other session writer is live. Isolated
+  evidence roots remain independent
+- authenticated HTTP provides thread creation, replay, turn submission, and
+  cancellation; authenticated WebSocket provides cursor-based replay plus live
+  durable and transient frames
+- native requests use signed local auth: v1 HMAC headers bind method, port,
+  exact target, body digest, timestamp, and nonce; the runtime rejects timestamps
+  outside 30 seconds and consumes each nonce once through a bounded replay cache
+- browser preview receives a single-use bootstrap token, then an HttpOnly local
+  session cookie; it does not receive a machine bearer token
+- opaque cursors are versioned and bound to one stream lineage. Unknown,
+  replaced, truncated, or non-boundary cursors return structured
+  `invalid_cursor`; clients clear only disposable projections and replay the
+  thread from the beginning
+- event-id deduplication makes replay safe, while assistant deltas remain
+  transient and only completion events become durable transcript truth
+- restart recovery appends one terminal `turn_interrupted` event for every
+  nonterminal turn (`RUNTIME_RESTART`, or `OPERATOR_CANCELLED` when cancellation
+  was already pending). No in-memory liveness is silently resurrected
+
+The Desktop reducer is a disposable projection of this contract. The current
+authenticated API and REPL compatibility routes share its runtime/session state
+machine; interactive CLI and future TUI views must converge without adding a
+second write path.
+
+Readers must skip future operator-event schema versions, count skipped events,
+and keep valid known events projected. Unknown future data never becomes a
+reason to reinterpret, rewrite, or delete durable local truth.
+
+## Per-Call Routing And Cost Truth
+
+Routing is per model call, not permanently fixed per thread, turn, or worker.
+`apps/heiwa_shell/src/model_calls.rs` is the provider-invocation boundary: DREX
+filters candidates against the call's required capabilities, locality,
+privacy/risk, quality floor, success floor, allow/exclude policy, and remaining
+budget, then selects the cheapest eligible candidate. Availability, auth,
+quota, timeout, and provider failures are recorded before DREX replans the next
+attempt with failed candidates excluded.
+
+`route_planned` carries the selected candidate's cost-truth class when a
+candidate exists. `route_completed` carries actual completion cost truth, while
+`route_failed` carries the failed attempt's available cost truth.
+`route_attempted` records invocation identity only; it does not claim spend,
+and a no-selection plan has no selected cost truth. Current cost-truth classes
+are:
+
+| Class                   | Meaning                                                                 |
+| ----------------------- | ----------------------------------------------------------------------- |
+| `local_zero_cost`       | No marginal provider charge for the local call; not a claim of zero hardware cost |
+| `target_only`           | A configured target/budget value, not provider-reported spend          |
+| `proxy_estimate`        | An estimate derived from known pricing or a comparable pricing proxy   |
+| `exact_provider_report` | The connected provider reported the call's actual usage cost           |
+| `cannot_confirm`        | Heiwa has no defensible marginal-cost number and does not invent one    |
+
+The policy is **cheapest above the per-call quality floor**, not cheapest-first.
+That quality floor is the value control that lets a later call in the same turn
+escalate to a stronger model while routine calls remain local or inexpensive.
+
 Remote/N machines:
 
 - Each machine runs a local `heiwa` node.
@@ -193,7 +286,8 @@ log, not the source of truth.
    expose skills, allowed tools, personalization, and evidence hooks.
 5. Native app bridge: Tauri commands for runtime health/API, herd/pane state,
    packaged Deno sidecars, and terminal daemon attach/read/send.
-6. SSE/WebSocket event stream for run/tool/worker/terminal/sub-app/receipt events.
+6. Extend the authenticated operator WebSocket contract to remaining
+   terminal/sub-app event families without creating another state machine.
 7. TUI/REPL parity: same session, approval, receipt, and terminal daemon state
    visible in `heiwa shell`, `session attach`, and `heiwa_tui`.
 8. Connector sync lane: auth, list, one bounded action, evidence receipt, revoke.

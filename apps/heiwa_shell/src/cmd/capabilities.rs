@@ -8,40 +8,12 @@
 
 use anyhow::{anyhow, Result};
 use chrono::Utc;
+use heiwa_evidence::find_sensitive;
 use serde::Serialize;
 use serde_json::{json, Value};
 use sha1::{Digest, Sha1};
 use std::fs;
 use std::path::{Path, PathBuf};
-
-/// Filesystem basenames that must never appear in surfaced capability metadata.
-const SENSITIVE_BASENAMES: &[&str] = &[
-    "auth.json",
-    "accounts.json",
-    "credentials",
-    "credential.json",
-    "id_rsa",
-    "id_ed25519",
-    "secrets.json",
-    "token.json",
-    ".pem",
-    ".env",
-];
-
-/// Value prefixes that look like live secrets / bearer tokens.
-const SENSITIVE_VALUE_PREFIXES: &[&str] = &[
-    "sk-",
-    "ghp_",
-    "gho_",
-    "github_pat_",
-    "xoxb-",
-    "xoxp-",
-    "xoxa-",
-    "Bearer ",
-    "AKIA",
-    "AIza",
-    "ya29.",
-];
 
 const CATALOG_SCHEMA_VERSION: &str = "heiwa_local_capability_inventory_v1";
 const REFRESH_KIND: &str = "capability_refresh";
@@ -88,30 +60,6 @@ pub fn run(args: &[String]) -> Result<()> {
             Ok(())
         }
         Some(other) => Err(anyhow!("unknown capabilities command: {other}")),
-    }
-}
-
-/// Walk a JSON value and return the first string that looks like a credential
-/// path or live token. Object keys are not inspected so policy vocabulary such
-/// as `oauth_tokens` or `credential_files` is not a false positive.
-pub(crate) fn find_sensitive(value: &Value) -> Option<String> {
-    match value {
-        Value::String(s) => {
-            let lower = s.to_ascii_lowercase();
-            if SENSITIVE_BASENAMES.iter().any(|name| lower.contains(name)) {
-                return Some(s.clone());
-            }
-            if SENSITIVE_VALUE_PREFIXES
-                .iter()
-                .any(|prefix| s.starts_with(prefix))
-            {
-                return Some(s.clone());
-            }
-            None
-        }
-        Value::Array(items) => items.iter().find_map(find_sensitive),
-        Value::Object(map) => map.values().find_map(find_sensitive),
-        _ => None,
     }
 }
 

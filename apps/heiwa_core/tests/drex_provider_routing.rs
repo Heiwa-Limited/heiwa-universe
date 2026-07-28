@@ -1,5 +1,5 @@
-use heiwa_protocol::ModelTier;
 use heiwa_core::drex::{default_policy, plan_route, DrexIngress};
+use heiwa_protocol::ModelTier;
 
 fn get_mock_model_tiers() -> Vec<ModelTier> {
     vec![

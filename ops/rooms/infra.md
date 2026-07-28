@@ -10,7 +10,7 @@ Load this room for:
 ## Runtime Topology
 
 - The MacBook checkout plus `~/.heiwa/` host current user functionality.
-- SpacetimeDB is the optional evidence sync/adjudication plane.
+- Local JSONL is evidence authority; Lance is the derived recall plane.
 - Cloudflare serves docs / marketing shell / install and update-manifest edge only after public access is re-enabled.
 - Heiwa.app and the installed `heiwa` runtime run solely on user devices; Heiwa does not provide a hosted app/runtime service.
 - WebSockets are the live transport for local cockpit status and future event subscriptions.
@@ -20,8 +20,11 @@ Load this room for:
 - `.github/workflows/deploy.yml`
 - `apps/heiwa_core/`
 - `apps/heiwa_orchestrator/`
-- `crates/heiwa_stdb/`
-- `packages/heiwa_bindings/*`
+- `crates/heiwa_evidence/` — JSONL journal truth under `~/.heiwa/evidence/`
+- `crates/heiwa_embed/` — Lance derived recall index
+
+(`crates/heiwa_stdb/` and `packages/heiwa_bindings/` were deleted in the
+2026-07-15 backend pivot. They are not work targets.)
 
 ## Current CI Expectations
 

@@ -20,8 +20,34 @@ use self::state::{CoreState, SharedState, SystemStatus};
 use crate::auth;
 use crate::config::RuntimeConfig;
 use crate::drex::{default_policy, plan_route, DrexIngress, RoutePlan};
-use crate::evidence::{EvidenceRuntime, EvidenceTransport, JsonlTransport};
+use crate::evidence::{
+    journal_root, recover_interrupted, EvidenceRuntime, EvidenceTransport, JsonlTransport,
+    RecoveryReport,
+};
 use heiwa_protocol::ModelTier;
+
+/// Open the local evidence journal and run restart recovery before serving:
+/// worker connections never survive a restart, so sessions and leases the
+/// journal still shows live are closed out (`RUNTIME_RESTART`) instead of
+/// being silently resurrected or leaked.
+pub fn init_evidence() -> Result<EvidenceRuntime<JsonlTransport>> {
+    let (runtime, report) = init_evidence_at(journal_root()?)?;
+    if report.sessions_closed > 0 || report.leases_revoked > 0 {
+        info!(
+            "Evidence recovery: closed {} interrupted session(s), revoked {} lease(s)",
+            report.sessions_closed, report.leases_revoked
+        );
+    }
+    Ok(runtime)
+}
+
+pub fn init_evidence_at(
+    dir: std::path::PathBuf,
+) -> Result<(EvidenceRuntime<JsonlTransport>, RecoveryReport)> {
+    let transport = JsonlTransport::new(dir)?;
+    let report = recover_interrupted(transport.dir(), &transport)?;
+    Ok((EvidenceRuntime::new(transport), report))
+}
 
 #[derive(Debug, Deserialize, Serialize, Clone)]
 struct ModelTierSeed {
@@ -45,8 +71,7 @@ pub async fn run(cfg: RuntimeConfig) -> Result<()> {
     info!("Initializing Heiwa Core Runtime...");
 
     // 1. Local evidence plane (JSONL under ~/.heiwa/evidence/)
-    let transport = JsonlTransport::default_local()?;
-    let evidence_runtime = EvidenceRuntime::new(transport);
+    let evidence_runtime = init_evidence()?;
     let state = Arc::new(CoreState::new(cfg.clone(), evidence_runtime));
 
     // 2. Seed runtime catalogs and start heartbeat journal

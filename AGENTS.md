@@ -10,12 +10,12 @@ This repository builds the Heiwa full stack. The current product center of gravi
 - **`heiwa`** is the primary installed operator surface.
 - **DREX** is the internal execution kernel.
 - **Local MacBook state** under `~/.heiwa/` plus this checkout is the current owner runtime truth.
-- **Lance + GitHub** are the backend (pivot 2026-07-15): text truth (JSONL/markdown) git-synced, Lance derived local recall index. SpacetimeDB is retired; code extracted from the tree.
-- **GitHub** is distribution, sync, and CI. **Cloudflare** is DNS utility only.
+- **Lance + GitHub** are the backend (pivot 2026-07-15): text truth (JSONL/markdown) local-first — GitHub sync planned, redaction-gated — with Lance as the derived local recall index. SpacetimeDB is retired; code extracted from the tree. Journal service: `crates/heiwa_evidence/`.
+- **GitHub** is distribution and CI. Evidence sync is planned and redaction-gated, not live. **Cloudflare** is DNS utility only.
 
 Compression:
 
-> Rust proposes and executes, local text truth records, GitHub syncs, Lance recalls, `heiwa` presents.
+> Rust proposes and executes, local text truth records, Lance recalls, `heiwa` presents; future redacted projections may sync through GitHub.
 
 ## Current Repo Spine
 
@@ -146,7 +146,7 @@ For Heiwa, this currently means:
 
 - Rust for runtime authority, provider supervision, local execution, leases, and
   evidence.
-- GitHub for text-truth sync; Lance for local recall over the evidence corpus.
+- Local JSONL for text truth; Lance for local recall over the evidence corpus; GitHub sync remains planned and redaction-gated.
 - TypeScript for client contracts and companion app surfaces.
 - Shell for install, bootstrap, and operator glue.
 

@@ -3315,11 +3315,12 @@ dependencies = [
  "anyhow",
  "axum",
  "base64 0.22.1",
- "dirs 6.0.0",
  "futures-util",
  "heiwa-protocol",
+ "heiwa_evidence",
  "serde",
  "serde_json",
+ "tempfile",
  "time",
  "tokio",
  "tower-http 0.5.2",
@@ -3332,6 +3333,8 @@ dependencies = [
 name = "heiwa-desktop"
 version = "0.1.0"
 dependencies = [
+ "futures-util",
+ "heiwa-core",
  "reqwest 0.12.28",
  "serde",
  "serde_json",
@@ -3339,6 +3342,8 @@ dependencies = [
  "tauri-build",
  "thiserror 2.0.18",
  "tokio",
+ "tokio-tungstenite",
+ "uuid",
 ]
 
 [[package]]
@@ -3365,6 +3370,7 @@ dependencies = [
  "heiwa-provider",
  "serde",
  "serde_json",
+ "tempfile",
  "tokio",
  "uuid",
 ]
@@ -3382,9 +3388,8 @@ name = "heiwa-orchestrator"
 version = "0.1.0"
 dependencies = [
  "anyhow",
- "dirs 6.0.0",
  "heiwa-protocol",
- "serde",
+ "heiwa_evidence",
  "serde_json",
  "tokio",
 ]
@@ -3435,10 +3440,15 @@ dependencies = [
  "heiwa-protocol",
  "heiwa_config",
  "heiwa_embed",
+ "heiwa_evidence",
  "portable-pty",
  "rusqlite",
  "serde",
  "serde_json",
+ "sha2",
+ "tempfile",
+ "thiserror 2.0.18",
+ "time",
  "tokio",
  "uuid",
 ]
@@ -3448,6 +3458,7 @@ name = "heiwa-shell"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "async-trait",
  "base64 0.22.1",
  "chrono",
  "dirs 5.0.1",
@@ -3462,6 +3473,7 @@ dependencies = [
  "heiwa-tui",
  "heiwa_automations",
  "heiwa_drex",
+ "heiwa_evidence",
  "heiwa_mcp",
  "heiwa_quota",
  "heiwa_receipts",
@@ -3473,6 +3485,7 @@ dependencies = [
  "sha1",
  "sha2",
  "tempfile",
+ "thiserror 2.0.18",
  "tiktoken-rs",
  "tokio",
  "uuid",
@@ -3497,16 +3510,11 @@ dependencies = [
  "chrono",
  "chrono-tz",
  "cron",
- "heiwa-protocol",
- "heiwa_receipts",
  "notify",
  "rusqlite",
  "serde",
  "serde_json",
  "tempfile",
- "thiserror 2.0.18",
- "tokio",
- "tracing",
  "uuid",
 ]
 
@@ -3529,12 +3537,9 @@ dependencies = [
  "heiwa-provider",
  "heiwa_mcp",
  "heiwa_quota",
- "heiwa_vault",
- "serde",
  "serde_json",
  "tempfile",
  "thiserror 1.0.69",
- "time",
  "tokio",
  "uuid",
 ]
@@ -3553,6 +3558,22 @@ dependencies = [
  "serde_json",
  "tempfile",
  "tokio",
+]
+
+[[package]]
+name = "heiwa_evidence"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "base64 0.22.1",
+ "dirs 6.0.0",
+ "serde",
+ "serde_json",
+ "sha2",
+ "tempfile",
+ "thiserror 2.0.18",
+ "time",
+ "uuid",
 ]
 
 [[package]]
@@ -3583,7 +3604,6 @@ dependencies = [
 name = "heiwa_receipts"
 version = "0.1.0"
 dependencies = [
- "chrono",
  "rusqlite",
  "serde",
  "serde_json",
@@ -8833,7 +8853,11 @@ checksum = "edc5f74e248dc973e0dbb7b74c7e0d6fcc301c694ff50049504004ef4d0cdcd9"
 dependencies = [
  "futures-util",
  "log",
+ "rustls",
+ "rustls-native-certs",
+ "rustls-pki-types",
  "tokio",
+ "tokio-rustls",
  "tungstenite",
 ]
 
@@ -9141,6 +9165,8 @@ dependencies = [
  "httparse",
  "log",
  "rand 0.8.6",
+ "rustls",
+ "rustls-pki-types",
  "sha1",
  "thiserror 1.0.69",
  "utf-8",

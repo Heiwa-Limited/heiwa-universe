@@ -2,6 +2,9 @@ use anyhow::Result;
 use chrono::Utc;
 use heiwa_protocol::{ExecutionScope, ToolCall, ToolCallReceipt, ToolCallStatus};
 use serde_json::{json, Value};
+use std::path::PathBuf;
+use std::sync::atomic::AtomicBool;
+use std::time::Duration;
 
 #[derive(Debug, Clone)]
 pub struct AgenticTurnInput {
@@ -14,6 +17,92 @@ pub struct AgenticTurnInput {
 pub struct ToolTranscriptEntry {
     pub name: String,
     pub output: String,
+}
+
+/// Policy/staging adapter over DREX's existing approval mechanics. The turn
+/// runner owns durable provenance around this adapter; it never reimplements
+/// the policy matrix or approval-packet format.
+#[derive(Debug, Clone)]
+pub struct ToolApproval {
+    pub request_id: Option<String>,
+    pub request_path: Option<PathBuf>,
+    pub risk: heiwa_drex::drex_gate::RiskLevel,
+    pub surface: String,
+}
+
+pub fn plan_tool_approval(call: &ToolCall) -> ToolApproval {
+    let risk = tool_risk(call);
+    let surface = std::env::var("HEIWA_SURFACE").unwrap_or_else(|_| "cli".to_string());
+    match heiwa_drex::drex_gate::evaluate_approval_policy(
+        &call.name,
+        &serde_json::to_string(&call.arguments).unwrap_or_default(),
+        risk,
+        &surface,
+    ) {
+        heiwa_drex::drex_gate::ApprovalVerdict::AutoApproved => ToolApproval {
+            request_id: None,
+            request_path: None,
+            risk,
+            surface,
+        },
+        heiwa_drex::drex_gate::ApprovalVerdict::AwaitingApproval {
+            request_id,
+            request_path,
+        } => ToolApproval {
+            request_id: Some(request_id),
+            request_path: Some(request_path),
+            risk,
+            surface,
+        },
+    }
+}
+
+pub fn stage_tool_approval(call: &ToolCall, approval: &ToolApproval) -> Result<()> {
+    let (Some(request_id), Some(request_path)) = (&approval.request_id, &approval.request_path)
+    else {
+        return Ok(());
+    };
+    heiwa_drex::drex_gate::stage_approval_request(
+        request_id,
+        request_path,
+        &call.name,
+        &serde_json::to_string(&call.arguments).unwrap_or_default(),
+        approval.risk,
+        &approval.surface,
+        &call.arguments,
+    )
+}
+
+pub fn wait_for_tool_approval(approval: &ToolApproval) -> Result<String> {
+    wait_for_tool_approval_cancellable(approval, &AtomicBool::new(false))
+}
+
+pub fn wait_for_tool_approval_cancellable(
+    approval: &ToolApproval,
+    cancelled: &AtomicBool,
+) -> Result<String> {
+    let request_id = approval
+        .request_id
+        .as_deref()
+        .ok_or_else(|| anyhow::anyhow!("auto-approved action has no approval wait"))?;
+    heiwa_drex::drex_gate::wait_for_decision_cancellable(
+        request_id,
+        Duration::from_secs(300),
+        cancelled,
+    )
+}
+
+fn tool_risk(call: &ToolCall) -> heiwa_drex::drex_gate::RiskLevel {
+    match call.name.as_str() {
+        "deploy" | "app.deploy" => heiwa_drex::drex_gate::RiskLevel::Critical,
+        name if name.contains("write") || name.contains("delete") => {
+            heiwa_drex::drex_gate::RiskLevel::High
+        }
+        name if name.contains("net") || name.contains("http") => {
+            heiwa_drex::drex_gate::RiskLevel::Medium
+        }
+        _ => heiwa_drex::drex_gate::RiskLevel::Low,
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -219,6 +308,91 @@ pub async fn execute_tool_calls(
     }
 
     Ok((tool_receipts, tool_transcript))
+}
+
+/// Execute exactly one tool through the existing approval/MCP/evidence path.
+/// Turn runners use this narrow adapter so they can persist `tool_call_started`
+/// before the side effect and `tool_call_completed` immediately after it.
+pub async fn execute_tool_call(
+    scope: ExecutionScope,
+    call: ToolCall,
+    provider: &str,
+    model_id: &str,
+) -> Result<(ToolCallReceipt, ToolTranscriptEntry)> {
+    let (mut receipts, mut transcript) =
+        execute_tool_calls(scope, vec![call], provider, model_id).await?;
+    let receipt = receipts
+        .pop()
+        .ok_or_else(|| anyhow::anyhow!("tool execution returned no receipt"))?;
+    let entry = transcript
+        .pop()
+        .ok_or_else(|| anyhow::anyhow!("tool execution returned no transcript entry"))?;
+    Ok((receipt, entry))
+}
+
+/// Execute a tool after the caller has completed DREX approval policy and
+/// durable approval provenance. Keeping this separate prevents a cancelled
+/// detached approval waiter from ever reaching the MCP side effect.
+pub async fn execute_approved_tool_call(
+    scope: ExecutionScope,
+    call: ToolCall,
+    provider: &str,
+    model_id: &str,
+) -> Result<(ToolCallReceipt, ToolTranscriptEntry)> {
+    let registry = heiwa_mcp::local_repo_registry(scope);
+    let started_at = Utc::now().to_rfc3339();
+    match registry.call(&call.name, call.arguments.clone()).await {
+        Ok(value) => {
+            let completed_at = Utc::now().to_rfc3339();
+            let output = serde_json::to_string_pretty(&value)?;
+            Ok((
+                ToolCallReceipt {
+                    id: format!("tool-receipt-{}", uuid::Uuid::new_v4()),
+                    call_id: call.id,
+                    provider: provider.to_string(),
+                    model_id: model_id.to_string(),
+                    tool_name: call.name.clone(),
+                    status: ToolCallStatus::Success,
+                    started_at,
+                    completed_at,
+                    arguments: call.arguments,
+                    result: Some(value),
+                    error: None,
+                },
+                ToolTranscriptEntry {
+                    name: call.name,
+                    output,
+                },
+            ))
+        }
+        Err(error) => {
+            let completed_at = Utc::now().to_rfc3339();
+            let status = if error.is_policy_denial() {
+                ToolCallStatus::Denied
+            } else {
+                ToolCallStatus::Failure
+            };
+            Ok((
+                ToolCallReceipt {
+                    id: format!("tool-receipt-{}", uuid::Uuid::new_v4()),
+                    call_id: call.id,
+                    provider: provider.to_string(),
+                    model_id: model_id.to_string(),
+                    tool_name: call.name.clone(),
+                    status,
+                    started_at,
+                    completed_at,
+                    arguments: call.arguments,
+                    result: None,
+                    error: Some(error.to_string()),
+                },
+                ToolTranscriptEntry {
+                    name: call.name,
+                    output: format!("error: {error}"),
+                },
+            ))
+        }
+    }
 }
 
 pub fn tool_instruction_prompt() -> String {

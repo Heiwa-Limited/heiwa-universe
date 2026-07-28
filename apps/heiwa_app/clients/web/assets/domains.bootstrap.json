@@ -4,38 +4,38 @@
   "root_domain": "heiwa.ltd",
   "platform": {
     "dns": "cloudflare",
-    "public_web": "cloudflare_pages",
+    "public_web": "github_pages",
     "control_plane": "local_runtime",
-    "edge_security": "cloudflare_waf",
-    "state_ledger": "spacetimedb_maincloud",
-    "state_endpoint": "maincloud.spacetimedb.com"
+    "edge_security": "cloudflare_dns_only",
+    "state_ledger": "local_jsonl",
+    "state_endpoint": "local_runtime"
   },
   "domains": [
     {
       "host": "heiwa.ltd",
       "purpose": "Public marketing shell",
-      "target": "Cloudflare Pages marketing project",
+      "target": "GitHub Pages marketing project via Cloudflare DNS",
       "state": "active",
       "health_path": "/"
     },
     {
       "host": "status.heiwa.ltd",
       "purpose": "Read-only status shell",
-      "target": "Cloudflare Pages status shell backed by public-safe status telemetry",
+      "target": "GitHub Pages status shell via Cloudflare DNS",
       "state": "active",
       "health_path": "/status.html"
     },
     {
       "host": "api.heiwa.ltd",
       "purpose": "Public-safe status, install, or identity helper paths",
-      "target": "Narrow edge or service surface behind Cloudflare proxy/WAF",
-      "state": "active",
+      "target": "Paused public-safe helper surface",
+      "state": "paused",
       "health_path": "/health"
     },
     {
       "host": "docs.heiwa.ltd",
       "purpose": "Heiwa canon docs",
-      "target": "Cloudflare Pages MkDocs deployment",
+      "target": "GitHub Pages MkDocs deployment via Cloudflare DNS",
       "state": "active",
       "health_path": "/"
     }
@@ -44,48 +44,48 @@
     {
       "type": "CNAME flattening",
       "name": "@",
-      "value": "Cloudflare Pages marketing project",
-      "proxy": true,
+      "value": "GitHub Pages marketing project",
+      "proxy": false,
       "ttl": "auto"
     },
     {
       "type": "CNAME",
       "name": "app",
-      "value": "Cloudflare Pages app shell project",
-      "proxy": true,
+      "value": "paused app target",
+      "proxy": false,
       "ttl": "auto"
     },
     {
       "type": "CNAME",
       "name": "status",
-      "value": "Cloudflare Pages marketing project",
-      "proxy": true,
+      "value": "GitHub Pages status project",
+      "proxy": false,
       "ttl": "auto"
     },
     {
       "type": "CNAME",
       "name": "api",
       "value": "paused public API target",
-      "proxy": true,
+      "proxy": false,
       "ttl": "auto"
     },
     {
       "type": "CNAME",
       "name": "docs",
-      "value": "Cloudflare Pages docs project",
-      "proxy": true,
+      "value": "GitHub Pages docs project",
+      "proxy": false,
       "ttl": "auto"
     }
   ],
   "bootstrap_steps": [
-    "Point heiwa.ltd at the Cloudflare Pages marketing project.",
-    "Point status.heiwa.ltd at the Cloudflare Pages status shell.",
-    "Point docs.heiwa.ltd at the Cloudflare Pages docs project built from MkDocs Material.",
+    "Point heiwa.ltd at the GitHub Pages marketing project through Cloudflare DNS only.",
+    "Point status.heiwa.ltd at the GitHub Pages status shell through Cloudflare DNS only.",
+    "Point docs.heiwa.ltd at the GitHub Pages docs project built from MkDocs Material.",
     "Keep runtime control on the installed local heiwa runtime rather than a hosted product shell.",
     "Attach api.heiwa.ltd only to public-safe helper paths such as status, install delivery, or identity exchange.",
-    "Keep SpacetimeDB external on maincloud.spacetimedb.com rather than modeling it as an app-host sidecar or volume.",
+    "Keep canonical evidence in the local JSONL journal; Lance remains derived and rebuildable.",
     "Keep internal preview runtimes such as heiwa-trading off the supported public host manifest until they graduate into first-class product surfaces.",
-    "Enable strict TLS and baseline WAF rules for api.heiwa.ltd while keeping the Pages shells behind Cloudflare edge controls.",
+    "Use Cloudflare for DNS only; public Pages TLS remains owned by the publishing target.",
     "Run post-cutover checks for api.heiwa.ltd/health, status.heiwa.ltd, and public page endpoints."
   ]
 }

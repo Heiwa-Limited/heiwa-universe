@@ -7,16 +7,19 @@ pub use fanout::{
 };
 
 use anyhow::{anyhow, Result};
+use async_trait::async_trait;
 use chrono::Utc;
-use heiwa_core::drex::{default_policy, plan_route, DrexIngress};
+use heiwa_core::drex::{
+    CallRisk, CostTruth, ExecutionLocality, ModelCallCandidate, ModelCallStage, PrivacyClass,
+    SafetyClass,
+};
 use heiwa_core::evidence::{EvidenceTransport, JsonlTransport};
 use heiwa_protocol::{ModelTier, TranscriptBlock};
-use heiwa_provider::adapter::{Message, ProviderAdapter, Role, StreamEvent};
+use heiwa_provider::adapter::{Message, Role, TokenUsage};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
-use tokio::sync::mpsc;
+use tokio::sync::{mpsc, watch};
 use uuid::Uuid;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -29,6 +32,8 @@ pub struct LoopConfig {
     pub risk: String,
     pub privacy: String,
     pub runtime: String,
+    #[serde(default)]
+    pub approved: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -40,20 +45,57 @@ pub struct LoopStatus {
     pub latest_block: Option<TranscriptBlock>,
 }
 
+#[derive(Debug, Clone)]
+pub struct LoopCallRequest {
+    pub thread_id: String,
+    pub turn_id: String,
+    pub call_id: String,
+    pub stage: ModelCallStage,
+    pub intent: String,
+    pub raw_text: String,
+    pub privacy: PrivacyClass,
+    pub risk: CallRisk,
+    pub safety: SafetyClass,
+    pub messages: Vec<Message>,
+    pub candidates: Vec<ModelCallCandidate>,
+    pub remaining_budget_usd: Option<f64>,
+    pub prior_failed_models: Vec<String>,
+    pub max_attempts: usize,
+    pub cancel: watch::Receiver<bool>,
+}
+
+#[derive(Debug, Clone)]
+pub struct LoopCallResult {
+    pub provider: String,
+    pub model_id: String,
+    pub text: String,
+    pub usage: TokenUsage,
+    pub attempts: usize,
+    pub failed_models: Vec<String>,
+    pub cost_usd: f64,
+    pub cost_truth: CostTruth,
+}
+
+#[async_trait]
+pub trait LoopModelCaller: Send + Sync {
+    async fn call(&self, request: LoopCallRequest) -> Result<LoopCallResult>;
+}
+
 pub struct LoopController {
     config: LoopConfig,
     loop_id: String,
-    cancelled: Arc<AtomicBool>,
+    cancel_tx: watch::Sender<bool>,
     evidence: Option<JsonlTransport>,
     model_tiers: Vec<ModelTier>,
 }
 
 impl LoopController {
     pub fn new(config: LoopConfig, model_tiers: Vec<ModelTier>) -> Self {
+        let (cancel_tx, _cancel_rx) = watch::channel(false);
         Self {
             config,
             loop_id: Uuid::new_v4().to_string(),
-            cancelled: Arc::new(AtomicBool::new(false)),
+            cancel_tx,
             evidence: JsonlTransport::default_local().ok(),
             model_tiers,
         }
@@ -70,13 +112,13 @@ impl LoopController {
     }
 
     pub fn cancel(&self) {
-        self.cancelled.store(true, Ordering::SeqCst);
+        let _ = self.cancel_tx.send(true);
     }
 
     pub async fn run(
         &self,
         status_tx: mpsc::Sender<LoopStatus>,
-        adapters: Arc<dyn Fn(&str) -> Option<Arc<dyn ProviderAdapter>> + Send + Sync>,
+        caller: Arc<dyn LoopModelCaller>,
     ) -> Result<()> {
         println!(
             "Starting loop {} with objective: {}",
@@ -99,106 +141,91 @@ impl LoopController {
         let mut current_turn = 0;
         let mut total_cost = 0.0;
         let mut last_summary = String::new();
+        let mut prior_failed_models = Vec::new();
 
         while current_turn < self.config.max_turns {
-            if self.cancelled.load(Ordering::SeqCst) {
-                println!("Loop {} cancelled.", self.loop_id);
-                self.journal(
-                    "loop_sessions",
-                    json!({
-                        "loop_id": self.loop_id,
-                        "status": "CANCELLED",
-                        "reason": "User requested cancellation",
-                    }),
-                );
-
-                let _ = status_tx
-                    .send(LoopStatus {
-                        loop_id: self.loop_id.clone(),
-                        current_turn,
-                        total_cost_usd: total_cost,
-                        status: "CANCELLED".to_string(),
-                        latest_block: None,
-                    })
+            if *self.cancel_tx.borrow() {
+                return self
+                    .finish_cancelled(&status_tx, current_turn, total_cost)
                     .await;
-
-                return Ok(());
             }
 
             current_turn += 1;
             let turn_started_at = Utc::now().to_rfc3339();
             println!("Turn {}/{}...", current_turn, self.config.max_turns);
 
-            // 2. DREX Routing
-            let ingress = DrexIngress {
-                intent: self.config.intent.clone(),
-                risk: self.config.risk.clone(),
-                raw_text: format!(
-                    "Objective: {}. Context: {}",
-                    self.config.objective, last_summary
-                ),
-                privacy: self.config.privacy.clone(),
-                runtime: self.config.runtime.clone(),
-                available_vram_mb: 8192,
-                required_context_tokens: 1024,
-            };
-
-            let policy = default_policy();
-            let route_plan = plan_route(&ingress, &self.model_tiers, &policy)?;
-
-            let selected_tier = route_plan
-                .selected_model
-                .ok_or_else(|| anyhow!("No model available for turn {}", current_turn))?;
-            let adapter = adapters(&selected_tier.provider).ok_or_else(|| {
-                anyhow!("No adapter found for provider {}", selected_tier.provider)
-            })?;
-
-            // 3. Execution via streaming adapter
+            // 2. One routed execution request. The caller owns the sole
+            // provider-send boundary; the loop only supplies per-iteration
+            // identity, policy inputs, candidates, and remaining budget.
+            let raw_text = format!(
+                "Objective: {}. Context: {}",
+                self.config.objective, last_summary
+            );
             let messages = vec![Message {
                 role: Role::User,
-                content: ingress.raw_text.clone(),
+                content: raw_text.clone(),
             }];
-
-            let (stream_tx, mut stream_rx) = mpsc::channel(32);
-            let adapter_clone = adapter.clone();
-            let model_id = selected_tier.model_id.clone();
-
-            tokio::spawn(async move {
-                if let Err(e) = adapter_clone.send(&model_id, &messages, stream_tx).await {
-                    eprintln!("Adapter error: {}", e);
-                }
+            let privacy = PrivacyClass::parse(&self.config.privacy)
+                .map_err(|error| anyhow!("invalid loop privacy: {error}"))?;
+            let risk = CallRisk::parse(&self.config.risk)
+                .map_err(|error| anyhow!("invalid loop risk: {error}"))?;
+            let candidates = loop_candidates(&self.model_tiers);
+            let call_id = format!("call-{}", Uuid::new_v4());
+            let safety = if self.config.approved {
+                SafetyClass::Approved
+            } else {
+                SafetyClass::Unapproved
+            };
+            let mut cancel_wait = self.cancel_tx.subscribe();
+            let call = caller.call(LoopCallRequest {
+                thread_id: format!("loop-{}", self.loop_id),
+                turn_id: format!("loop-{}-iteration-{current_turn}", self.loop_id),
+                call_id,
+                stage: ModelCallStage::LoopIteration,
+                intent: self.config.intent.clone(),
+                raw_text: raw_text.clone(),
+                privacy,
+                risk,
+                safety,
+                messages,
+                candidates,
+                remaining_budget_usd: Some((self.config.max_cost_usd - total_cost).max(0.0)),
+                prior_failed_models: prior_failed_models.clone(),
+                max_attempts: 3,
+                cancel: self.cancel_tx.subscribe(),
             });
-
-            // Collect streamed output
-            let mut output_parts = Vec::new();
-            let mut turn_usage = heiwa_provider::adapter::TokenUsage::default();
-
-            while let Some(event) = stream_rx.recv().await {
-                match event {
-                    StreamEvent::Token(text) => output_parts.push(text),
-                    StreamEvent::Done(usage) => {
-                        turn_usage = usage;
-                        break;
+            tokio::pin!(call);
+            let result = tokio::select! {
+                biased;
+                changed = cancel_wait.changed() => {
+                    if changed.is_ok() && *cancel_wait.borrow() {
+                        // The caller owns spawned adapter work. Await its
+                        // cancellation path so abort/kill-on-drop completes
+                        // before the loop reports cancellation.
+                        let _ = (&mut call).await;
+                        return self.finish_cancelled(&status_tx, current_turn, total_cost).await;
                     }
-                    StreamEvent::Error(e) => {
-                        eprintln!("Stream error: {}", e);
-                        break;
-                    }
-                    StreamEvent::ToolUse { .. } => { /* future */ }
+                    call.await?
+                }
+                result = &mut call => result?,
+            };
+            for failed in &result.failed_models {
+                if !prior_failed_models.contains(failed) {
+                    prior_failed_models.push(failed.clone());
                 }
             }
 
-            let output_summary = output_parts.join("\n");
+            let output_summary = result.text;
+            let turn_usage = result.usage;
             let turn_ended_at = Utc::now().to_rfc3339();
             last_summary = output_summary.clone();
 
-            // 4. Record Evidence in STDB
+            // 4. Record evidence in the local journal.
             let run_id = format!("run-{}", Uuid::new_v4());
-            let turn_cost = if turn_usage.cost_usd > 0.0 {
-                turn_usage.cost_usd
-            } else {
-                selected_tier.cost_per_turn
-            };
+            let turn_cost = result.cost_usd;
+            if !turn_cost.is_finite() || turn_cost < 0.0 {
+                return Err(anyhow!("model caller returned invalid cost_usd"));
+            }
             total_cost += turn_cost;
 
             self.journal(
@@ -212,10 +239,13 @@ impl LoopController {
                     "ended_at": turn_ended_at,
                     "status": "SUCCESS",
                     "mode": "loop",
-                    "model_id": selected_tier.model_id,
+                    "provider": result.provider,
+                    "model_id": result.model_id,
+                    "attempts": result.attempts,
                     "tokens_input": turn_usage.input_tokens,
                     "tokens_output": turn_usage.output_tokens,
                     "cost": turn_cost,
+                    "cost_truth": result.cost_truth,
                 }),
             );
             self.journal(
@@ -224,7 +254,7 @@ impl LoopController {
                     "iteration_id": Uuid::new_v4().to_string(),
                     "loop_id": self.loop_id,
                     "turn": current_turn,
-                    "input": ingress.raw_text,
+                    "input": raw_text,
                     "output_summary": output_summary,
                     "run_id": run_id,
                     "cost": turn_cost,
@@ -270,4 +300,69 @@ impl LoopController {
         println!("Loop {} finished.", self.loop_id);
         Ok(())
     }
+
+    async fn finish_cancelled(
+        &self,
+        status_tx: &mpsc::Sender<LoopStatus>,
+        current_turn: u32,
+        total_cost: f64,
+    ) -> Result<()> {
+        println!("Loop {} cancelled.", self.loop_id);
+        self.journal(
+            "loop_sessions",
+            json!({
+                "loop_id": self.loop_id,
+                "status": "CANCELLED",
+                "reason": "User requested cancellation",
+            }),
+        );
+        let _ = status_tx
+            .send(LoopStatus {
+                loop_id: self.loop_id.clone(),
+                current_turn,
+                total_cost_usd: total_cost,
+                status: "CANCELLED".to_string(),
+                latest_block: None,
+            })
+            .await;
+        Ok(())
+    }
+}
+
+fn loop_candidates(model_tiers: &[ModelTier]) -> Vec<ModelCallCandidate> {
+    model_tiers
+        .iter()
+        .cloned()
+        .map(|tier| {
+            let on_device = matches!(tier.provider.as_str(), "ollama" | "local")
+                && matches!(tier.rate_group.as_str(), "local" | "local_ollama");
+            let marginal_cost_usd = if tier.cost_per_turn == 0.0 && !on_device {
+                None
+            } else {
+                Some(tier.cost_per_turn)
+            };
+            let cost_truth = if tier.cost_per_turn == 0.0 {
+                if on_device {
+                    CostTruth::LocalZeroCost
+                } else {
+                    CostTruth::CannotConfirm
+                }
+            } else {
+                CostTruth::ProxyEstimate
+            };
+            ModelCallCandidate {
+                tier,
+                locality: if on_device {
+                    ExecutionLocality::OnDevice
+                } else {
+                    ExecutionLocality::Unverified
+                },
+                connected: true,
+                adapter_capable: true,
+                quota_available: true,
+                marginal_cost_usd,
+                cost_truth,
+            }
+        })
+        .collect()
 }

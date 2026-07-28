@@ -55,7 +55,9 @@ impl ProviderAdapter for OllamaCliAdapter {
             .collect::<Vec<_>>()
             .join("\n");
 
-        let mut child = Command::new("ollama")
+        let mut cmd = Command::new("ollama");
+        crate::adapter::configure_cli_command(&mut cmd);
+        let mut child = cmd
             .arg("run")
             .arg(model)
             .arg(&prompt)

@@ -14,13 +14,13 @@ Three planes compose one flow:
 
 - **Intake** — operator command bar and passive feeds (mail, calendar, messages, files, runtime alerts).
 - **Execution** — DREX routes work to local models, provider CLIs, tools, and connectors under leases and approval gates.
-- **Evidence** — every read or action emits a source-linked receipt, mirrored to SpacetimeDB when online.
+- **Evidence** — every read or action emits a source-linked receipt into the local JSONL journal; Lance provides derived recall.
 
 Maturity is uneven across planes today; see [`HEIWA.md`](HEIWA.md#the-three-planes) for current vs target.
 
 ## One-Sentence Truth
 
-`heiwa` is the installed product surface, DREX is the internal execution kernel, SpacetimeDB is the adjudication and evidence sync backend, Rust proposes and executes, and `heiwa` presents.
+`heiwa` is the installed product surface, DREX is the internal execution kernel, local JSONL is evidence truth, Lance is derived recall, and GitHub is source, CI, and distribution.
 
 ## Current Repo Focus
 
@@ -28,7 +28,7 @@ Maturity is uneven across planes today; see [`HEIWA.md`](HEIWA.md#the-three-plan
 - Core execution and routing: `apps/heiwa_core/`, `crates/heiwa_loop/`, `crates/heiwa_session/`
 - Provider normalization: `crates/heiwa_provider/`
 - Terminal UX: `crates/heiwa_tui/`, `crates/heiwa_repl/`
-- STDB-facing Rust surfaces: `apps/heiwa_core/src/stdb/`, `apps/heiwa_orchestrator/src/stdb/`, `crates/heiwa_stdb/`
+- Evidence journal and recall: `crates/heiwa_evidence/`, `crates/heiwa_embed/`
 - GitHub distribution surfaces: Actions, Pages, and release metadata
 
 ## Architecture
@@ -38,10 +38,10 @@ Maturity is uneven across planes today; see [`HEIWA.md`](HEIWA.md#the-three-plan
 | **Heiwa**        | Company and product identity                                                               | Repo root                                                                              |
 | **`heiwa`**      | Primary installed runtime and operator surface                                             | `apps/heiwa_shell/`                                                                    |
 | **DREX**         | Internal execution kernel and routing substrate                                            | `apps/heiwa_core/`                                                                     |
-| **SpacetimeDB**  | Adjudication, canonical state, and evidence sync backend (materializes the Evidence plane) | `apps/heiwa_core/src/stdb/`, `apps/heiwa_orchestrator/src/stdb/`, `crates/heiwa_stdb/` |
+| **Local evidence** | Canonical JSONL journal plus derived Lance recall index                                  | `crates/heiwa_evidence/`, `crates/heiwa_embed/`                                      |
 | **Rust runtime** | Volatile execution: provider supervision and candidate generation                          | `crates/`                                                                              |
 
-> Rust proposes, SpacetimeDB adjudicates, `heiwa` presents.
+> Rust proposes and executes, local text truth records, Lance recalls, `heiwa` presents.
 
 ## Quick Start
 

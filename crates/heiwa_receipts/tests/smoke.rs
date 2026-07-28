@@ -169,7 +169,7 @@ fn full_marketing_demo_roundtrip() {
     assert_eq!(header.tokens_in, one.tokens_in);
     assert_eq!(header.tokens_out, one.tokens_out);
     assert_eq!(header.actual_cost_cad, one.actual_cost_cad);
-    assert_eq!(header.schema_version, 2);
+    assert_eq!(header.schema_version, 3);
 
     // Evidence plane: the seeded ledger forms an intact tamper-evident chain.
     assert_ne!(store.head_hash().unwrap(), GENESIS_HASH);
@@ -183,9 +183,9 @@ fn full_marketing_demo_roundtrip() {
 }
 
 #[test]
-fn schema_version_is_two() {
+fn schema_version_is_three() {
     let store = ReceiptStore::open_in_memory().unwrap();
-    assert_eq!(store.schema_version().unwrap(), 2);
+    assert_eq!(store.schema_version().unwrap(), 3);
 }
 
 #[test]

@@ -3,18 +3,16 @@ use chrono::Utc;
 use serde_json::{json, Value};
 use sha1::{Digest, Sha1};
 use std::fs;
-use std::io::{Read, Write};
+use std::io::Read;
 use std::path::PathBuf;
-use std::process::{Command, Stdio};
 use std::sync::OnceLock;
-use std::time::Instant;
 use tiktoken_rs::{cl100k_base, CoreBPE};
 use uuid::Uuid;
 
 const SCHEMA_VERSION: &str = "heiwa_compress_receipt_v1";
 const TOKENIZER_ID: &str = "cl100k_base";
 const DEFAULT_MODEL: &str = "ollama/qwen3.5:9b";
-const COMPRESSION_PROMPT: &str = "/no_think\nYou are a token-compression filter. Output a shorter version of the input that preserves every fact, number, name, identifier, code block, and CJK/emoji character. Convert HTML to Markdown. Drop navigation, footers, tracking pixels, and repeated boilerplate. Shorten URLs to domain plus path. Reply with the compressed content only. Do not explain, do not summarize what you did, do not wrap in code fences, do not add preface or suffix. If the input is already minimal, return it unchanged.";
+pub(crate) const COMPRESSION_PROMPT: &str = "/no_think\nYou are a token-compression filter. Output a shorter version of the input that preserves every fact, number, name, identifier, code block, and CJK/emoji character. Convert HTML to Markdown. Drop navigation, footers, tracking pixels, and repeated boilerplate. Shorten URLs to domain plus path. Reply with the compressed content only. Do not explain, do not summarize what you did, do not wrap in code fences, do not add preface or suffix. If the input is already minimal, return it unchanged.";
 
 #[derive(Debug, Clone)]
 pub(crate) struct CompressionReceipt {
@@ -39,24 +37,24 @@ pub(crate) struct PricingInputs {
     pub exact_count_source: Option<String>,
 }
 
-pub fn run(args: &[String]) -> Result<()> {
+pub async fn run(args: &[String]) -> Result<()> {
     match args.first().map(String::as_str) {
         Some("--help") | Some("-h") => {
             print_help();
             Ok(())
         }
-        _ => compress(args),
+        _ => compress(args).await,
     }
 }
 
-fn compress(args: &[String]) -> Result<()> {
+async fn compress(args: &[String]) -> Result<()> {
     let model = flag_value(args, "--model").unwrap_or_else(|| DEFAULT_MODEL.to_string());
     let (body, source) = read_body(args)?;
     if body.trim().is_empty() {
         return Err(anyhow!("compress: empty input"));
     }
 
-    let result = compress_text_for_source(&body, &source, &model)?;
+    let result = crate::execute_standalone_compression(&body, &source, &model).await?;
     let input_stats = result
         .receipt
         .get("input")
@@ -91,7 +89,14 @@ fn compress(args: &[String]) -> Result<()> {
         );
     } else {
         println!("compress  receipt={receipt_id}");
-        println!("  model: {model}");
+        println!(
+            "  model: {}",
+            result
+                .receipt
+                .get("model")
+                .and_then(Value::as_str)
+                .unwrap_or(&model)
+        );
         println!(
             "  input:  chars={} words={} lines={}",
             input_stats
@@ -145,25 +150,15 @@ fn compress(args: &[String]) -> Result<()> {
     Ok(())
 }
 
-pub(crate) fn compress_text_for_source(
-    body: &str,
-    source: &str,
-    model: &str,
-) -> Result<CompressionReceipt> {
-    compress_text_for_source_with_pricing(body, source, model, None)
-}
-
-pub(crate) fn compress_text_for_source_with_pricing(
+pub(crate) fn finish_compression_receipt(
     body: &str,
     source: &str,
     model: &str,
     pricing: Option<PricingInputs>,
+    compressed: String,
+    duration_ms: u64,
 ) -> Result<CompressionReceipt> {
-    let model_id = strip_provider_prefix(model);
-
-    let started = Instant::now();
-    let compressed = run_ollama(model_id, COMPRESSION_PROMPT, body)?;
-    let duration_ms = started.elapsed().as_millis() as u64;
+    let model_id = model.strip_prefix("ollama/").unwrap_or(model);
 
     let receipt_id = format!("cmp_{}", Uuid::new_v4().simple());
     let ts = Utc::now().to_rfc3339();
@@ -273,74 +268,7 @@ fn read_body(args: &[String]) -> Result<(String, String)> {
     Ok((body, "stdin".to_string()))
 }
 
-fn strip_provider_prefix(model: &str) -> &str {
-    model.strip_prefix("ollama/").unwrap_or(model)
-}
-
-fn run_ollama(model: &str, prompt: &str, body: &str) -> Result<String> {
-    // Hits the Ollama HTTP API directly via curl. Avoids `ollama run`'s TTY
-    // emissions (ANSI codes, streamed degenerate continuations) which broke
-    // earlier attempts. stream=false for one-shot JSON response.
-    let request_body = json!({
-        "model": model,
-        "prompt": format!("{prompt}\n\n{body}"),
-        "stream": false,
-        "think": false,
-    });
-    let mut child = Command::new("curl")
-        .args([
-            "-sS",
-            "--max-time",
-            "300",
-            "-H",
-            "Content-Type: application/json",
-            "-d",
-            "@-",
-            "http://localhost:11434/api/generate",
-        ])
-        .stdin(Stdio::piped())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .spawn()
-        .with_context(|| "spawn curl for ollama HTTP API (is curl on PATH?)")?;
-
-    {
-        let mut stdin = child
-            .stdin
-            .take()
-            .ok_or_else(|| anyhow!("curl stdin missing"))?;
-        stdin
-            .write_all(request_body.to_string().as_bytes())
-            .context("write request body to curl stdin")?;
-    }
-
-    let output = child.wait_with_output().context("wait curl")?;
-    if !output.status.success() {
-        let stderr = String::from_utf8_lossy(&output.stderr);
-        return Err(anyhow!(
-            "curl exited with {}: {} (is ollama serving at localhost:11434?)",
-            output.status,
-            stderr.trim()
-        ));
-    }
-    let body = String::from_utf8_lossy(&output.stdout).to_string();
-    let parsed: Value = serde_json::from_str(&body).with_context(|| {
-        format!(
-            "parse ollama response (raw: {})",
-            body.chars().take(200).collect::<String>()
-        )
-    })?;
-    if let Some(err) = parsed.get("error").and_then(Value::as_str) {
-        return Err(anyhow!("ollama error: {err}"));
-    }
-    let response = parsed
-        .get("response")
-        .and_then(Value::as_str)
-        .ok_or_else(|| anyhow!("ollama response missing 'response' field"))?;
-    Ok(strip_think_blocks(response).trim().to_string())
-}
-
-fn strip_think_blocks(s: &str) -> String {
+pub(crate) fn strip_think_blocks(s: &str) -> String {
     // Strip qwen3-style <think>...</think> blocks (case-insensitive, multiline).
     let mut out = String::with_capacity(s.len());
     let mut rest = s;
@@ -387,8 +315,7 @@ fn sha1_hex(s: &str) -> String {
 }
 
 pub(crate) fn receipts_dir() -> PathBuf {
-    let home = crate::home::heiwa_home()
-        .unwrap_or_else(|| PathBuf::from("."));
+    let home = crate::home::heiwa_home().unwrap_or_else(|| PathBuf::from("."));
     home.join(".heiwa")
         .join("state")
         .join("evidence")
@@ -513,7 +440,9 @@ fn print_help() {
     println!("Usage:");
     println!("  heiwa compress [--text \"...\" | --file <path> | stdin] [--model ollama/<id>] [--show] [--json]");
     println!();
-    println!("Routes outbound payloads through a local Ollama model to reduce tokens");
+    println!(
+        "Routes outbound payloads through the local-only model-call executor to reduce tokens"
+    );
     println!("before frontier-model calls. Receipts persist in ~/.heiwa/state/evidence/compress/.");
 }
 
@@ -539,12 +468,6 @@ mod tests {
         let stats = string_stats("日本語 emoji 🦀 ok");
         assert_eq!(stats.words, 4);
         assert!(stats.chars >= 13);
-    }
-
-    #[test]
-    fn strip_provider_prefix_strips_ollama() {
-        assert_eq!(strip_provider_prefix("ollama/qwen3.5:9b"), "qwen3.5:9b");
-        assert_eq!(strip_provider_prefix("qwen3.5:9b"), "qwen3.5:9b");
     }
 
     #[test]

@@ -6,8 +6,9 @@ model.
 
 The goal is simple: the installed `heiwa` runtime should authenticate provider
 CLIs through their owner-managed configs, read/write local state under
-`~/.heiwa`, expose the cockpit on localhost, and sync evidence to SpacetimeDB
-only when that path is configured.
+`~/.heiwa`, expose the cockpit on localhost, append durable JSONL evidence, and
+derive local recall through Lance. Evidence sync to GitHub is planned but
+disabled until a redaction and privacy boundary exists.
 
 ## Required Local Inputs
 
@@ -17,10 +18,8 @@ only when that path is configured.
 | `~/.heiwa/accounts.json`                | Provider/account registry                                                                     |
 | `~/.heiwa/machine.json`                 | Local machine identity and capability manifest                                                |
 | `~/.heiwa/state/`                       | Local runtime state, approvals, worker heartbeats                                             |
+| `~/.heiwa/evidence/`                    | Canonical local JSONL evidence journal                                                        |
 | `~/.claude/`, `~/.codex/`, `~/.gemini/` | Provider-owned auth and hook posture                                                          |
-| `spacetime login` shell identity        | Optional SpacetimeDB Maincloud sync/adjudication auth; canonical publisher/operator path      |
-| `STDB_TOKEN`                            | Legacy/compat SpacetimeDB token material only; not the preferred Heiwa operator auth boundary |
-| `CLOUDFLARE_API_TOKEN`                  | Optional edge work only; not needed for local user functionality                              |
 
 ## Boot Contract
 
@@ -30,10 +29,13 @@ only when that path is configured.
 2. Report health at `/status/health`.
 3. Write local app worker heartbeats under `~/.heiwa/state`.
 4. Report provider, route, approval, worker, and hook posture without mutating provider-owned configs.
-5. Keep running without public DNS, Cloudflare auth, or SpacetimeDB connectivity.
+5. Keep running without public DNS, GitHub connectivity, or evidence sync.
 6. Refresh `~/.heiwa/machine.json` with current host, OS, arch, install path, runtime version, and capability probes.
 7. Adapt worker concurrency, polling cadence, and local-model use to machine load, battery, thermal state, and available runtimes.
 8. Surface pending update or restart requirements without interrupting active work.
+9. Require local runtime authentication for operator HTTP, turn submission,
+   cancellation, and `/ws/v1/operator`; a localhost listener alone is not a
+   trusted operator session.
 
 ## Install and Update Authority
 
@@ -109,7 +111,7 @@ On first boot or install, the runtime should:
 2. Record stable machine id, hostname, OS, arch, CPU/GPU class, memory, battery/thermal availability, install path, and runtime channel.
 3. Discover local providers and CLIs without mutating provider-owned configs.
 4. Discover local model runtimes such as Ollama.
-5. Register or sync machine identity with SpacetimeDB only when configured.
+5. Record machine identity locally; future cross-machine sync must be explicitly redaction-gated.
 6. Write a boot receipt under local evidence state.
 
 Adaptation rules:
@@ -119,7 +121,7 @@ Adaptation rules:
 - Machines with strong local models should take cheap sovereign work first.
 - Machines without local models should route through approved provider lanes.
 - Machine-specific provider auth stays local and provider-owned.
-- Cross-machine truth is synchronized through evidence and machine identity, not by sharing raw secrets.
+- Cross-machine sync is planned through redacted evidence and machine identity; raw secrets never participate.
 
 ## Agentic Runtime Workflow
 
@@ -170,8 +172,18 @@ For development verification, start a current checkout runtime on a temporary
 alternate port:
 
 ```bash
+HEIWA_EVIDENCE_DIR=/private/tmp/heiwa-operator-e2e/evidence \
+HEIWA_STATE_DIR=/private/tmp/heiwa-operator-e2e/state \
+HEIWA_MACHINE_AUTH_TOKEN=operator-e2e-token \
 cargo run -q -p heiwa-shell --bin heiwa -- app start --port 7475 --no-open
 ```
+
+`HEIWA_STATE_DIR` relocates the app shell's worker heartbeat and the state path
+reported by that shell; it does not relocate every Calendar, approvals, or
+other module-specific read model. Together with `HEIWA_EVIDENCE_DIR`, it keeps
+the operator-stream checks below out of installed `7474` state and the durable
+operator corpus. Use a disposable `HOME` with a prebuilt binary when probing
+broader state-backed APIs.
 
 Then probe that same port:
 
@@ -189,7 +201,84 @@ runtime changed. `--dry-run` is the default probe. Use
 `heiwa app update --source checkout` only for developer reinstall from the
 current checkout.
 
-### 4. Start safely
+### 4. Verify the authenticated operator stream
+
+Operator HTTP and WebSocket endpoints require local runtime auth. Native Desktop
+uses signed local requests: HMAC v1 binds method, numeric local port, exact
+request target, SHA-256 body digest, timestamp, and nonce. Runtime accepts at
+most 30 seconds of clock skew and consumes every nonce once through its bounded
+replay cache. Machine bearer auth remains compatibility-only; Desktop native
+transport signs HTTP and WebSocket requests and never gives a bearer to the
+renderer. An unset runtime auth configuration returns `auth_not_configured`; a
+missing or invalid credential returns `unauthorized`. For the isolated checkout
+runtime above, use the test bearer only against `127.0.0.1:7475`:
+
+```bash
+curl -fsS \
+  -H 'Authorization: Bearer operator-e2e-token' \
+  -H 'Content-Type: application/json' \
+  -d '{"thread_id":"default"}' \
+  http://127.0.0.1:7475/api/v1/operator/threads
+
+curl -fsS \
+  -H 'Authorization: Bearer operator-e2e-token' \
+  -H 'Content-Type: application/json' \
+  -d '{"client_request_id":"operator-e2e-1","prompt":"reply with ready","route_policy":{"mode":"auto"}}' \
+  http://127.0.0.1:7475/api/v1/operator/threads/default/turns
+
+curl -fsS \
+  -H 'Authorization: Bearer operator-e2e-token' \
+  'http://127.0.0.1:7475/api/v1/operator/threads/default/events?limit=100'
+```
+
+The turn response returns `turn_id`, the stable post-user-message `cursor`, and
+an encoded `stream_url`. The corresponding WebSocket request is:
+
+```text
+GET ws://127.0.0.1:7475/ws/v1/operator?thread_id=default&after=<percent-encoded-cursor>
+Authorization: Bearer operator-e2e-token
+```
+
+Use a WebSocket client that can set the compatibility `Authorization` header.
+For Desktop verification, launch the native wrapper with `HEIWA_APP_PORT=7475`
+and the same `HEIWA_MACHINE_AUTH_TOKEN`; its Tauri bridge signs the exact GET
+target below the renderer for both HTTP and WebSocket. Verify initial replay reaches
+`caught_up`, a newly appended shell event arrives without refresh, and reconnect
+from the last durable cursor does not duplicate an `event_id`. Heartbeats and
+assistant deltas are transient and never advance the durable cursor.
+
+Browser preview is separate: `heiwa app start --open` puts a single-use,
+60-second bootstrap token in the launch URL. The runtime consumes it once and
+redirects with a port-scoped HttpOnly session cookie (eight-hour TTL). Browser
+code receives neither bootstrap reuse authority nor machine bearer material.
+
+Cursor and restart recovery are fail-closed:
+
+- App startup exclusively leases the configured evidence root before recovery,
+  heartbeat, or API service. A second app process pointed at that same root
+  exits without mutating the operator stream; isolated verification roots may
+  run concurrently. The `.operator_runtime.lock` sidecar contains no identity,
+  credential, or other payload.
+- Every mutating `OperatorSessionService` holds a shared
+  `.operator_activity.lock` lease. Recovery requires exclusive activity
+  ownership, so a live CLI, REPL, loop, or compatibility writer makes app
+  startup fail before heartbeat/API service and prevents false
+  `RUNTIME_RESTART` interruption. Both lease sidecars remain zero-content.
+- HTTP replay returns structured `invalid_cursor` for unknown versions, stream
+  fingerprint mismatches, offsets beyond EOF, or offsets not on an event
+  boundary. The operator client must clear its disposable projection and replay
+  the thread from the beginning.
+- The WebSocket sends an `invalid_cursor` frame and closes so the client can
+  perform that same bounded recovery; it must not guess a replacement offset.
+- On runtime restart, every nonterminal turn is durably closed with one
+  `turn_interrupted` event whose reason is `RUNTIME_RESTART`. A turn with a
+  pending operator cancellation closes as `OPERATOR_CANCELLED`. Open work is
+  never silently resumed from process memory.
+- Readers skip unknown future operator-event schema versions, count them, and
+  retain known events. Never rewrite or delete durable JSONL solely because a
+  newer schema is present.
+
+### 5. Start safely
 
 Before starting a long-running runtime, decide:
 
@@ -201,7 +290,7 @@ Before starting a long-running runtime, decide:
 
 Prefer `--no-open` for agent verification so the browser is not disturbed.
 
-### 5. Use the runtime
+### 6. Use the runtime
 
 Use the local API and cockpit against the same port you started. Keep evidence
 local and concrete:
@@ -216,7 +305,7 @@ curl -fsS http://127.0.0.1:7475/api/v1/history
 Do not fabricate cockpit rows. If the UI needs data, wire it to existing
 `~/.heiwa/state` truth or add a clearly scoped read model with tests.
 
-### 6. Stop what you started
+### 7. Stop what you started
 
 Every agent-started runtime must be stopped before final reporting unless the
 operator explicitly asks to keep it running.
@@ -231,7 +320,7 @@ Preferred stop order:
 If sandbox policy blocks stopping a process, request escalation for the exact
 PID and explain that it is the temporary runtime started for verification.
 
-### 7. Clean as you go
+### 8. Clean as you go
 
 Clean up temporary verification artifacts before final reporting:
 
@@ -255,14 +344,19 @@ pre-existing or peer-agent changes.
 
 ## Model Tier Matrix
 
-| Lane                      | Primary                       | Secondary                                    | Notes                                            |
-| ------------------------- | ----------------------------- | -------------------------------------------- | ------------------------------------------------ |
-| Routine chat/status/audit | `ollama/*` where sufficient   | Gemini CLI / Antigravity                     | Cheapest acceptable route first                  |
-| Build/code                | Codex CLI                     | Claude Code, Gemini CLI, Ollama coding model | Provider CLIs own their auth and quota semantics |
-| Research/long context     | Gemini CLI                    | Antigravity, Claude Code                     | Escalate only when local context is insufficient |
-| Review/strategy           | Claude Code / Gemini          | Codex                                        | Use premium lanes intentionally                  |
-| Sovereign work            | local `ollama/*` tiers        | none                                         | Local-only providers only                        |
-| Embeddings                | `ollama/qwen3-embedding:0.6b` | none                                         | Local runtime default                            |
+| Lane                      | Preferred candidates when eligible | Other eligible candidates              | Notes                                              |
+| ------------------------- | ---------------------------------- | ---------------------------------------- | -------------------------------------------------- |
+| Routine chat/status/audit | local Ollama where sufficient      | OpenRouter, Codex, Claude Code           | Cheapest candidate above the call's quality floor  |
+| Build/code                | Codex CLI, Claude Code              | Ollama coding model, OpenRouter          | Provider CLIs own auth and quota semantics         |
+| Research/long context     | Claude Code, Codex                  | OpenRouter                               | Route per call from live provider evidence         |
+| Review/strategy           | Claude Code, Codex                  | OpenRouter                               | Use premium lanes only when the quality floor needs them |
+| Sovereign work            | local Ollama tiers                  | none                                     | Local-only providers; fail closed when unavailable |
+| Embeddings                | `ollama/qwen3-embedding:0.6b`       | none                                     | Requires a connected local Ollama runtime          |
+
+Gemini CLI is not a current fallback: the operator account returned
+`IneligibleTierError` on 2026-07-19. Antigravity required authentication in the
+same probe. Always refresh `heiwa providers`; entitlement, authentication, and
+adapter discovery are separate facts.
 
 ## Verification
 

@@ -28,4 +28,5 @@ lance = ["dep:lancedb", "dep:futures", "dep:tokio"]
 
 [dev-dependencies]
 tempfile = "3"
+tokio = { version = "1.52.3", features = ["rt-multi-thread", "macros"] }
 

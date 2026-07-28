@@ -1,4 +1,5 @@
 pub mod herd;
+pub mod operator_stream;
 pub mod proxy;
 
 pub fn run() {
@@ -11,6 +12,7 @@ pub fn run() {
             herd::herd_pane_send,
             herd::herd_pane_split,
             herd::herd_panes,
+            operator_stream::operator_subscribe,
             proxy::api_get,
             proxy::api_post,
             proxy::runtime_health

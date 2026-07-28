@@ -2,6 +2,11 @@ use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 use tokio::sync::mpsc;
 
+/// Ensure aborting an adapter future also terminates its provider CLI child.
+pub(crate) fn configure_cli_command(command: &mut tokio::process::Command) {
+    command.kill_on_drop(true);
+}
+
 // ---------------------------------------------------------------------------
 // Message types (provider-normalized)
 // ---------------------------------------------------------------------------
@@ -91,4 +96,38 @@ pub trait ProviderAdapter: Send + Sync {
 
     /// Provider model IDs this adapter can serve.
     fn supported_models(&self) -> Vec<String>;
+}
+
+#[cfg(all(test, unix))]
+mod tests {
+    use std::process::Stdio;
+    use std::time::Duration;
+
+    #[tokio::test]
+    async fn configured_cli_child_is_killed_when_send_future_is_aborted() {
+        let mut command = tokio::process::Command::new("sh");
+        command
+            .arg("-c")
+            .arg("sleep 30")
+            .stdout(Stdio::null())
+            .stderr(Stdio::null());
+        super::configure_cli_command(&mut command);
+        let child = command.spawn().unwrap();
+        let pid = child.id().unwrap();
+        drop(child);
+
+        for _ in 0..50 {
+            if !std::process::Command::new("kill")
+                .arg("-0")
+                .arg(pid.to_string())
+                .status()
+                .unwrap()
+                .success()
+            {
+                return;
+            }
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+        panic!("kill_on_drop child {pid} remained alive");
+    }
 }

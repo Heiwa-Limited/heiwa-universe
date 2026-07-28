@@ -1,5 +1,13 @@
 # Room: Web — SvelteKit Migration Spec (DRAFT)
 
+> **STATUS 2026-07-27 — STALE.** This room describes a hub-backed web
+> architecture. The hub was removed from the tree on 2026-07-06 and
+> SpacetimeDB was extracted on 2026-07-15, so the "api.heiwa.ltd / STDB is
+> hub-only" framing below no longer reflects any code that exists. Repo
+> CLAUDE.md states web surfaces are later work. Treat this file as a design
+> record, not as instructions, until it is rewritten against the Lance +
+> GitHub backend.
+
 > **Status:** Draft — 2026-03-29
 > **Owner:** Devon
 > **Scope:** Migrate heiwa.ltd + app.heiwa.ltd from static HTML to SvelteKit on Cloudflare Pages

@@ -87,6 +87,14 @@ jobs:
           prefix-key: v1-rust
           cache-bin: false
 
+      # heiwa-shell defaults to the `lance` feature, whose lance-encoding
+      # dependency shells out to `protoc` at build time. Without this the
+      # release binary does not build on any runner.
+      - name: Install protoc
+        uses: arduino/setup-protoc@v3
+        with:
+          repo-token: ${{ secrets.GITHUB_TOKEN }}
+
       - name: Build release binary
         run: cargo build --locked --release -p heiwa-shell --bin heiwa --target ${{ matrix.target }}
 

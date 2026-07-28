@@ -106,7 +106,7 @@ const surfaceSignals: SurfaceSignal[] = [
   {
     name: "Integrations",
     status: "staged",
-    detail: "GitHub, Cloudflare, STDB",
+    detail: "GitHub, Cloudflare, Lance",
     tone: "secure",
   },
 ];
@@ -160,7 +160,7 @@ const advancedItems: ConsoleItem[] = [
   },
   {
     name: "Evidence sync",
-    detail: "Local receipts first; STDB sync when enabled",
+    detail: "Local JSONL evidence is the authority; GitHub sync is planned",
     status: "secure",
   },
   {

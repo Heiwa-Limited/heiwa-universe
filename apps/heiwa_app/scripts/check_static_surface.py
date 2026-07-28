@@ -38,17 +38,17 @@ def check_domain_manifest(path: Path) -> list[str]:
     data = json.loads(read_text(path))
 
     public_web = data.get("platform", {}).get("public_web")
-    if public_web != "cloudflare_pages":
-        problems.append(f"{path}: expected platform.public_web to be 'cloudflare_pages', got {public_web!r}")
+    if public_web != "github_pages":
+        problems.append(f"{path}: expected platform.public_web to be 'github_pages', got {public_web!r}")
 
     platform = data.get("platform", {})
-    if platform.get("state_ledger") != "spacetimedb_maincloud":
+    if platform.get("state_ledger") != "local_jsonl":
         problems.append(
-            f"{path}: expected platform.state_ledger to be 'spacetimedb_maincloud', got {platform.get('state_ledger')!r}"
+            f"{path}: expected platform.state_ledger to be 'local_jsonl', got {platform.get('state_ledger')!r}"
         )
-    if platform.get("state_endpoint") != "maincloud.spacetimedb.com":
+    if platform.get("state_endpoint") != "local_runtime":
         problems.append(
-            f"{path}: expected platform.state_endpoint to be 'maincloud.spacetimedb.com', got {platform.get('state_endpoint')!r}"
+            f"{path}: expected platform.state_endpoint to be 'local_runtime', got {platform.get('state_endpoint')!r}"
         )
 
     hosts = {entry.get("host") for entry in data.get("domains", [])}
@@ -141,15 +141,16 @@ def main() -> int:
         require_contains(
             WEB_ROOT / "governance.html",
             "installed local runtime",
-            "Cloudflare Pages",
-            "Cloudflare Pages",
-            "SpacetimeDB",
+            "GitHub Pages",
+            "Cloudflare DNS",
+            "Local JSONL + Lance",
         )
     )
     problems.extend(
         require_contains(
             WEB_ROOT / "domains.html",
-            "Cloudflare Pages",
+            "GitHub Pages",
+            "Cloudflare DNS",
             "public-safe routing intent only",
             "status.heiwa.ltd",
         )
