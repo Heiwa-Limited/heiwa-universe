@@ -96,23 +96,13 @@ jobs:
           tool: cargo-machete
       - name: Check unused Rust dependencies
         if: matrix.os == 'ubuntu-latest'
-        run: >
-          cargo machete
-          apps/heiwa_core
-          apps/heiwa_orchestrator
-          apps/heiwa_shell
-          crates/heiwa_config
-          crates/heiwa_embed
-          crates/heiwa_install
-          crates/heiwa_loop
-          crates/heiwa_mcp
-          crates/heiwa_protocol
-          crates/heiwa_provider
-          crates/heiwa_quota
-          crates/heiwa_repl
-          crates/heiwa_session
-          crates/heiwa_tui
-          crates/heiwa_vault
+        # Scan the whole workspace rather than a hand-maintained path list.
+        # The old list named 16 paths and had drifted: heiwa_evidence,
+        # heiwa_drex, heiwa_automations, heiwa_receipts, heiwa_a2a,
+        # heiwa_memory and heiwa_resource were never checked - including the
+        # two crates the current backend is built on. Unused deps had
+        # accumulated there unnoticed.
+        run: cargo machete
 
   lint:
     name: TypeScript and Web Lint

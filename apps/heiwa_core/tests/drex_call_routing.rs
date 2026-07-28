@@ -271,7 +271,12 @@ fn explicit_gates_and_privacy_do_not_fail_open() {
 
     let mut provider_pin = request();
     provider_pin.preferred_provider = Some("other".to_string());
-    let plan = plan_model_call(&provider_pin, std::slice::from_ref(&valid), &default_policy()).unwrap();
+    let plan = plan_model_call(
+        &provider_pin,
+        std::slice::from_ref(&valid),
+        &default_policy(),
+    )
+    .unwrap();
     assert_eq!(
         reason(&plan, 1),
         CandidateRejectionReason::PreferredProviderMismatch
@@ -279,7 +284,8 @@ fn explicit_gates_and_privacy_do_not_fail_open() {
 
     let mut model_pin = request();
     model_pin.preferred_model = Some("other".to_string());
-    let plan = plan_model_call(&model_pin, std::slice::from_ref(&valid), &default_policy()).unwrap();
+    let plan =
+        plan_model_call(&model_pin, std::slice::from_ref(&valid), &default_policy()).unwrap();
     assert_eq!(
         reason(&plan, 1),
         CandidateRejectionReason::PreferredModelMismatch
@@ -287,7 +293,8 @@ fn explicit_gates_and_privacy_do_not_fail_open() {
 
     let mut local_only = request();
     local_only.privacy = PrivacyClass::LocalOnly;
-    let plan = plan_model_call(&local_only, std::slice::from_ref(&valid), &default_policy()).unwrap();
+    let plan =
+        plan_model_call(&local_only, std::slice::from_ref(&valid), &default_policy()).unwrap();
     assert_eq!(
         reason(&plan, 1),
         CandidateRejectionReason::LocalOnlyOnDeviceRequired

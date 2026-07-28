@@ -3390,7 +3390,6 @@ dependencies = [
  "anyhow",
  "heiwa-protocol",
  "heiwa_evidence",
- "serde",
  "serde_json",
  "tokio",
 ]
@@ -3511,16 +3510,11 @@ dependencies = [
  "chrono",
  "chrono-tz",
  "cron",
- "heiwa-protocol",
- "heiwa_receipts",
  "notify",
  "rusqlite",
  "serde",
  "serde_json",
  "tempfile",
- "thiserror 2.0.18",
- "tokio",
- "tracing",
  "uuid",
 ]
 
@@ -3543,12 +3537,9 @@ dependencies = [
  "heiwa-provider",
  "heiwa_mcp",
  "heiwa_quota",
- "heiwa_vault",
- "serde",
  "serde_json",
  "tempfile",
  "thiserror 1.0.69",
- "time",
  "tokio",
  "uuid",
 ]
@@ -3613,7 +3604,6 @@ dependencies = [
 name = "heiwa_receipts"
 version = "0.1.0"
 dependencies = [
- "chrono",
  "rusqlite",
  "serde",
  "serde_json",

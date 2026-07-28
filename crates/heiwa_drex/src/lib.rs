@@ -1,4 +1,4 @@
-//! DREX routing: binds [`heiwa_provider`], [`heiwa_quota`], and [`heiwa_vault`]
+//! DREX routing: binds [`heiwa_provider`] and [`heiwa_quota`]
 //! into a single routing decision.
 //!
 //! ## Scope

@@ -197,11 +197,7 @@ fn contains_labeled_secret(text: &str) -> bool {
             else {
                 return false;
             };
-            let value = value
-                .split(['\n', '\r'])
-                .next()
-                .unwrap_or("")
-                .trim();
+            let value = value.split(['\n', '\r']).next().unwrap_or("").trim();
             !value.is_empty() && !is_redaction_marker(value)
         })
     })
