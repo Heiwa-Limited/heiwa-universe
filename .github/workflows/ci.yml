@@ -54,8 +54,17 @@ jobs:
             .
           prefix-key: v2-rust
           cache-bin: true
+      # heiwa-shell enables the `lance` feature by default, which pulls
+      # lancedb -> lance-encoding -> prost-build, whose build script shells out
+      # to `protoc`. No runner ships it, so the workspace does not build without
+      # this step. Developers miss it locally because Homebrew/apt usually
+      # already provide protoc.
+      - name: Install protoc
+        uses: arduino/setup-protoc@v3
+        with:
+          repo-token: ${{ secrets.GITHUB_TOKEN }}
       # keyring's sync-secret-service backend links libdbus; that is the only
-      # system dependency the non-desktop workspace needs on Linux.
+      # other system dependency the non-desktop workspace needs on Linux.
       - name: Install Linux system dependencies
         if: matrix.os == 'ubuntu-latest'
         run: |
