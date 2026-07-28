@@ -5613,8 +5613,20 @@ mod app_readmodel_tests {
         .err()
         .expect("unread peer must time out");
         server.abort();
-        assert!(error.to_string().contains("write timed out"));
-        assert!(!error.to_string().contains(token));
+        // The property under test is that an unread peer cannot hang us and
+        // that the error never carries the token - not which of the two
+        // bounded failures we hit. call_local_app_api_with_policy maps the
+        // elapsed timeout to "write timed out" and an io error to "write
+        // failed". A 8 MiB write to a peer that accepts but never reads fills
+        // the send buffer and blocks on Unix (-> timeout), while Winsock
+        // returns an error instead (-> failed). Asserting only the first
+        // string passed on Unix and failed on every Windows runner.
+        let message = error.to_string();
+        assert!(
+            message.contains("write timed out") || message.contains("write failed"),
+            "expected a bounded write failure, got: {message}"
+        );
+        assert!(!message.contains(token));
     }
 
     #[tokio::test]

@@ -565,7 +565,14 @@ fn ollama_models_payload_uses_child_override_before_stored_live_endpoint() {
     listener.set_nonblocking(true).unwrap();
     let override_endpoint = format!("http://{}/", listener.local_addr().unwrap());
     let fixture = thread::spawn(move || {
-        let deadline = Instant::now() + Duration::from_secs(2);
+        // This fixture waits for a full runtime SUBPROCESS to boot, bind a
+        // port, and issue an HTTP request. Two seconds is comfortable on an
+        // idle laptop and a coin-flip on a loaded CI runner - this test passed
+        // on macOS one run and failed the next with no relevant change. The
+        // deadline exists to stop a hung test, not to assert a latency budget,
+        // so it can be generous: the loop returns the instant a connection
+        // arrives, and a fast machine never waits longer than it does today.
+        let deadline = Instant::now() + Duration::from_secs(30);
         loop {
             match listener.accept() {
                 Ok((mut stream, _)) => {
