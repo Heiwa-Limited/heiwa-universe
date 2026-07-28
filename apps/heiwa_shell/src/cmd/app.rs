@@ -5613,18 +5613,26 @@ mod app_readmodel_tests {
         .err()
         .expect("unread peer must time out");
         server.abort();
-        // The property under test is that an unread peer cannot hang us and
-        // that the error never carries the token - not which of the two
-        // bounded failures we hit. call_local_app_api_with_policy maps the
-        // elapsed timeout to "write timed out" and an io error to "write
-        // failed". A 8 MiB write to a peer that accepts but never reads fills
-        // the send buffer and blocks on Unix (-> timeout), while Winsock
-        // returns an error instead (-> failed). Asserting only the first
-        // string passed on Unix and failed on every Windows runner.
+        // The guarantee is that a peer which accepts and then goes silent
+        // cannot hang this call, and that the resulting error never carries
+        // the auth token. WHICH phase bounds it is platform-dependent and not
+        // something this test should pin:
+        //
+        //   Unix    an 8 MiB write to an unread socket fills the send buffer
+        //           and blocks -> "write timed out"
+        //   Windows Winsock buffers the whole body, so the write COMPLETES,
+        //           the call moves on to read, and the silent peer trips the
+        //           read deadline instead -> "read timed out"
+        //
+        // Pinning the write phase is why this failed on every Windows runner.
+        // The token assertion below is the security-critical one and stays
+        // exact.
         let message = error.to_string();
         assert!(
-            message.contains("write timed out") || message.contains("write failed"),
-            "expected a bounded write failure, got: {message}"
+            ["write timed out", "write failed", "read timed out"]
+                .iter()
+                .any(|expected| message.contains(expected)),
+            "call must be bounded by a deadline, got: {message}"
         );
         assert!(!message.contains(token));
     }
