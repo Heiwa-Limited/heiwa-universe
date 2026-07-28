@@ -547,9 +547,16 @@ fn app_runtime_lease_is_exclusive_empty_reacquirable_and_root_scoped() {
     let first_dir = tempfile::tempdir().unwrap();
     let second_dir = tempfile::tempdir().unwrap();
     let first = OperatorAppRuntimeLease::acquire(first_dir.path()).unwrap();
+    // Assert emptiness via metadata, not by reading the bytes. The lease holds
+    // an exclusive lock on this file, and Windows locks are MANDATORY: any read
+    // of a locked range fails with ERROR_LOCK_VIOLATION (os error 33). Unix
+    // flock is advisory, so std::fs::read succeeded there and this test passed
+    // on macOS and Linux while failing on every Windows runner.
     assert_eq!(
-        std::fs::read(first_dir.path().join(".operator_runtime.lock")).unwrap(),
-        b""
+        std::fs::metadata(first_dir.path().join(".operator_runtime.lock"))
+            .unwrap()
+            .len(),
+        0
     );
     assert!(matches!(
         OperatorAppRuntimeLease::acquire(first_dir.path()),

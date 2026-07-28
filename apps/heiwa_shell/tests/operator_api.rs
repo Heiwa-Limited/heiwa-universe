@@ -1070,14 +1070,22 @@ fn operator_runtime_lease_blocks_second_owner_then_allows_recovery() {
             interruptions, 1,
             "successful restart {restart} must not duplicate recovery"
         );
+        // Emptiness via metadata, not fs::read: these sidecars are held under
+        // an exclusive lock, and Windows locks are mandatory - reading a locked
+        // range fails with ERROR_LOCK_VIOLATION (os error 33). Unix flock is
+        // advisory, so reads succeeded there and hid this on macOS and Linux.
         assert_eq!(
-            std::fs::read(evidence.path().join(".operator_runtime.lock")).unwrap(),
-            b"",
+            std::fs::metadata(evidence.path().join(".operator_runtime.lock"))
+                .unwrap()
+                .len(),
+            0,
             "runtime lease sidecar must never contain identity or auth material"
         );
         assert_eq!(
-            std::fs::read(evidence.path().join(".operator_activity.lock")).unwrap(),
-            b"",
+            std::fs::metadata(evidence.path().join(".operator_activity.lock"))
+                .unwrap()
+                .len(),
+            0,
             "activity lease sidecar must never contain identity or auth material"
         );
         drop(reader);
