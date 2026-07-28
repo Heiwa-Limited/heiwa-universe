@@ -43,9 +43,20 @@ pub trait EvidenceTransport: Send + Sync + 'static {
 /// writer can never end up appending to an unlinked inode.
 pub(crate) fn lock_stream(dir: &Path, kind: &str) -> Result<File> {
     let lock_path = dir.join(format!(".{kind}.jsonl.lock"));
+    // read+write, NOT append-only. `File::lock()` is `LockFileEx` on Windows,
+    // which needs a handle carrying GENERIC_READ or GENERIC_WRITE. Opening
+    // append-only yields FILE_APPEND_DATA, which is not sufficient, and the
+    // lock fails with ERROR_ACCESS_DENIED (os error 5). On Unix `flock` is
+    // happy with an append-only fd, so this only ever failed on Windows.
+    //
+    // truncate(false) because the lock file is a pure sentinel shared with
+    // other processes; its length is irrelevant but clobbering it is not ours
+    // to do.
     let lock_file = OpenOptions::new()
         .create(true)
-        .append(true)
+        .read(true)
+        .write(true)
+        .truncate(false)
         .open(&lock_path)?;
     lock_file.lock()?;
     Ok(lock_file)
