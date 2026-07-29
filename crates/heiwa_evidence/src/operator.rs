@@ -57,9 +57,11 @@ const MAX_OPERATOR_CORRUPT_BYTES_PER_READ: usize = 64 * 1024 * 1024;
 const MAX_OPERATOR_LINEAGE_READ_ATTEMPTS: usize = 3;
 
 #[cfg(test)]
+type ReadAfterSnapshotHook = Option<Box<dyn FnMut(usize)>>;
+
+#[cfg(test)]
 thread_local! {
-    static READ_AFTER_SNAPSHOT_HOOK: RefCell<Option<Box<dyn FnMut(usize)>>> =
-        RefCell::new(None);
+    static READ_AFTER_SNAPSHOT_HOOK: RefCell<ReadAfterSnapshotHook> = RefCell::new(None);
 }
 
 #[cfg(test)]

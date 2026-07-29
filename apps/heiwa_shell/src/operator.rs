@@ -445,6 +445,20 @@ pub struct OperatorModelTurn {
     pub done_payload: DonePayload,
 }
 
+struct OperatorTurnStreamContext<'a> {
+    cursor: &'a mut String,
+    thread_id: &'a str,
+    turn_id: &'a str,
+    direct_frames: &'a mpsc::Sender<OperatorStreamFrame>,
+}
+
+struct OperatorTurnCompletion {
+    response: String,
+    done: serde_json::Value,
+    model: Option<ModelCallResult>,
+    receipt_ref: Option<String>,
+}
+
 pub enum OperatorTurnWork {
     Deterministic {
         response: String,
@@ -1051,14 +1065,18 @@ impl OperatorTurnRunner {
                 )
                 .await;
                 self.finish_turn(
-                    &mut cursor,
-                    thread_id,
-                    turn_id,
-                    response,
-                    done,
-                    None,
-                    Some(route_completed.event.event_id),
-                    direct_frames,
+                    OperatorTurnStreamContext {
+                        cursor: &mut cursor,
+                        thread_id,
+                        turn_id,
+                        direct_frames,
+                    },
+                    OperatorTurnCompletion {
+                        response,
+                        done,
+                        model: None,
+                        receipt_ref: Some(route_completed.event.event_id),
+                    },
                 )
                 .await?;
             }
@@ -1082,14 +1100,18 @@ impl OperatorTurnRunner {
                 let done = (result.done_payload)(&result.result);
                 let response = result.result.text.clone();
                 self.finish_turn(
-                    &mut cursor,
-                    thread_id,
-                    turn_id,
-                    response,
-                    done,
-                    Some(result.result),
-                    Some(result.receipt_ref),
-                    direct_frames,
+                    OperatorTurnStreamContext {
+                        cursor: &mut cursor,
+                        thread_id,
+                        turn_id,
+                        direct_frames,
+                    },
+                    OperatorTurnCompletion {
+                        response,
+                        done,
+                        model: Some(result.result),
+                        receipt_ref: Some(result.receipt_ref),
+                    },
                 )
                 .await?;
             }
@@ -1294,13 +1316,15 @@ impl OperatorTurnRunner {
             }
             let (preview, artifact_ref) = self
                 .persist_large_tool_output(
-                    cursor,
-                    thread_id,
-                    turn_id,
+                    OperatorTurnStreamContext {
+                        cursor,
+                        thread_id,
+                        turn_id,
+                        direct_frames,
+                    },
                     &call.id,
                     &call.name,
                     &entry.output,
-                    direct_frames,
                 )
                 .await?;
             *cursor = self
@@ -1458,14 +1482,17 @@ impl OperatorTurnRunner {
 
     async fn persist_large_tool_output(
         &self,
-        cursor: &mut String,
-        thread_id: &str,
-        turn_id: &str,
+        context: OperatorTurnStreamContext<'_>,
         call_id: &str,
         tool_name: &str,
         output: &str,
-        direct_frames: &mpsc::Sender<OperatorStreamFrame>,
     ) -> Result<(String, Option<String>)> {
+        let OperatorTurnStreamContext {
+            cursor,
+            thread_id,
+            turn_id,
+            direct_frames,
+        } = context;
         const MAX_OPERATOR_TOOL_OUTPUT_BYTES: usize = 16 * 1024;
         if tool_output_is_sensitive(output) {
             return Err(anyhow!("sensitive tool output cannot be persisted"));
@@ -1530,15 +1557,21 @@ impl OperatorTurnRunner {
 
     async fn finish_turn(
         &self,
-        cursor: &mut String,
-        thread_id: &str,
-        turn_id: &str,
-        response: String,
-        done: serde_json::Value,
-        model: Option<ModelCallResult>,
-        receipt_ref: Option<String>,
-        direct_frames: &mpsc::Sender<OperatorStreamFrame>,
+        context: OperatorTurnStreamContext<'_>,
+        completion: OperatorTurnCompletion,
     ) -> Result<()> {
+        let OperatorTurnStreamContext {
+            cursor,
+            thread_id,
+            turn_id,
+            direct_frames,
+        } = context;
+        let OperatorTurnCompletion {
+            response,
+            done,
+            model,
+            receipt_ref,
+        } = completion;
         *cursor = self
             .append_and_publish(
                 runtime_event(
@@ -1773,7 +1806,7 @@ mod tests {
         ActiveTurnRegistry, CommittedOperatorArtifact, LocalArtifactStore, OperatorApprovalService,
         OperatorArtifactStore, OperatorModelExecutor, OperatorModelTurn, OperatorStreamFrame,
         OperatorSubmissionError, OperatorToolExecutor, OperatorTurnPreparation, OperatorTurnRunner,
-        OperatorTurnWork,
+        OperatorTurnStreamContext, OperatorTurnWork,
     };
     use crate::model_calls::{
         ModelCallError, ModelCallExecution, ModelCallExecutor, ModelCallResult,
@@ -3567,13 +3600,15 @@ mod tests {
 
         assert!(runner
             .persist_large_tool_output(
-                &mut cursor,
-                "default",
-                &submission.turn_id,
+                OperatorTurnStreamContext {
+                    cursor: &mut cursor,
+                    thread_id: "default",
+                    turn_id: &submission.turn_id,
+                    direct_frames: &direct,
+                },
                 "call-1",
                 "fs.read",
                 &output,
-                &direct,
             )
             .await
             .is_err());
@@ -3603,13 +3638,15 @@ mod tests {
 
         assert!(runner
             .persist_large_tool_output(
-                &mut cursor,
-                "default",
-                &submission.turn_id,
+                OperatorTurnStreamContext {
+                    cursor: &mut cursor,
+                    thread_id: "default",
+                    turn_id: &submission.turn_id,
+                    direct_frames: &direct,
+                },
                 "call-1",
                 "fs.read",
                 &output,
-                &direct,
             )
             .await
             .is_err());
@@ -3638,13 +3675,15 @@ mod tests {
 
         assert!(runner
             .persist_large_tool_output(
-                &mut cursor,
-                "default",
-                &submission.turn_id,
+                OperatorTurnStreamContext {
+                    cursor: &mut cursor,
+                    thread_id: "default",
+                    turn_id: &submission.turn_id,
+                    direct_frames: &direct,
+                },
                 "call-1",
                 "fs.read",
                 &"x".repeat(20 * 1024),
-                &direct,
             )
             .await
             .is_err());
@@ -3671,13 +3710,15 @@ mod tests {
 
         assert!(runner
             .persist_large_tool_output(
-                &mut cursor,
-                "default",
-                &submission.turn_id,
+                OperatorTurnStreamContext {
+                    cursor: &mut cursor,
+                    thread_id: "default",
+                    turn_id: &submission.turn_id,
+                    direct_frames: &direct,
+                },
                 "call-1",
                 "fs.read",
                 &"x".repeat(20 * 1024),
-                &direct,
             )
             .await
             .is_err());

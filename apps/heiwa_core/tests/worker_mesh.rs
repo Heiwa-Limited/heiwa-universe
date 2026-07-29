@@ -9,7 +9,7 @@ use heiwa_core::runtime::{
         parse_worker_envelope, DispatchAckPayload, DispatchPolicy, RegisterPayload, WorkerEnvelope,
         WorkerEnvelopeType,
     },
-    state::{WorkerProtocolFlavor, WorkerRegistry, WorkerSessionRegistration},
+    state::{WorkerDispatchAck, WorkerProtocolFlavor, WorkerRegistry, WorkerSessionRegistration},
 };
 use serde_json::json;
 use std::sync::{Arc, Mutex};
@@ -157,7 +157,17 @@ fn worker_registry_tracks_session_dispatch_and_completion() {
     assert_eq!(lease.task_id, "task-1");
 
     registry
-        .record_dispatch_ack(&stdb, "session-1", "task-1", "lease-1", true, None, 2_100)
+        .record_dispatch_ack(
+            &stdb,
+            WorkerDispatchAck {
+                session_id: "session-1",
+                task_id: "task-1",
+                lease_id: "lease-1",
+                accepted: true,
+                detail: None,
+                now_ms: 2_100,
+            },
+        )
         .expect("ack should succeed");
     let validated = registry
         .validate_lease("session-1", "task-1", "lease-1", 2_200)
@@ -213,12 +223,14 @@ fn worker_registry_persists_session_lease_and_ack_events() {
     registry
         .record_dispatch_ack(
             &stdb,
-            "session-persist",
-            "task-persist",
-            "lease-persist",
-            true,
-            None,
-            2_100,
+            WorkerDispatchAck {
+                session_id: "session-persist",
+                task_id: "task-persist",
+                lease_id: "lease-persist",
+                accepted: true,
+                detail: None,
+                now_ms: 2_100,
+            },
         )
         .expect("ack should succeed");
 

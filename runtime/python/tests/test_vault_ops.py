@@ -14,8 +14,26 @@ async def test_vault_resolve_missing_args():
     req = Request(id="test-2", op="vault_resolve", args={"owner_id": "1"})
     res = await op_vault_resolve(req)
     assert isinstance(res, ErrResponse)
-    assert res.code == "missing_args"
-    assert "db_identity" in res.message
+    assert res.code == "backend_retired"
+    assert "Rust runtime" in res.message
+
+
+@pytest.mark.asyncio
+async def test_vault_resolve_rejects_retired_spacetimedb_backend():
+    req = Request(
+        id="test-retired",
+        op="vault_resolve",
+        args={
+            "owner_id": "owner-1",
+            "provider_id": "openai",
+            "db_identity": "retired-db",
+        },
+    )
+    res = await op_vault_resolve(req)
+    assert isinstance(res, ErrResponse)
+    assert res.code == "backend_retired"
+    assert "Rust runtime" in res.message
+
 
 @pytest.mark.asyncio
 async def test_vault_decrypt_error_handling(monkeypatch):

@@ -55,29 +55,16 @@ async def op_shutdown(req: Request) -> OkResponse | ErrResponse:
 
 
 async def op_vault_resolve(req: Request) -> OkResponse | ErrResponse:
-    """Resolve a credential from the UserVault in SpacetimeDB."""
-    owner_id = req.args.get("owner_id")
-    provider_id = req.args.get("provider_id")
-    db_identity = req.args.get("db_identity")
+    """Reject the retired Python state-backend credential path.
 
-    if not all([owner_id, provider_id, db_identity]):
-        return err(
-            req.id,
-            code="missing_args",
-            message="owner_id, provider_id, and db_identity are required",
-        )
-
-    try:
-        from heiwa_sdk.spacetimedb import SpacetimeDB
-        from heiwa_sdk.vault import UserVault
-
-        stdb = SpacetimeDB(db_identity=db_identity)
-        vault = UserVault(stdb)
-        plaintext = vault.resolve_credential(owner_id, provider_id)
-
-        return ok(req.id, {"plaintext": plaintext})
-    except Exception as exc:
-        return err(req.id, code="vault_error", message=repr(exc))
+    Provider credentials are resolved by the owner runtime. The Python sidecar
+    must never shell out to a retired backend or receive provider secrets.
+    """
+    return err(
+        req.id,
+        code="backend_retired",
+        message="vault_resolve moved to the Rust runtime; Python sidecar access is retired",
+    )
 
 
 async def op_vault_decrypt(req: Request) -> OkResponse | ErrResponse:

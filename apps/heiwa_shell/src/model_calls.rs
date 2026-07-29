@@ -143,6 +143,15 @@ impl fmt::Display for ModelCallError {
 
 impl std::error::Error for ModelCallError {}
 
+struct FailedRouteAttempt<'a> {
+    candidate: &'a ModelCallCandidate,
+    attempt: usize,
+    failure: &'a (ProviderFailureClass, String),
+    cost_usd: Option<f64>,
+    cost_truth: &'a CostTruth,
+    remaining_budget_usd: Option<f64>,
+}
+
 pub struct ModelCallExecutor {
     resolver: Arc<AdapterResolver>,
     sessions: Arc<OperatorSessionService>,
@@ -224,12 +233,14 @@ impl ModelCallExecutor {
                 let attempt_truth = CostTruth::CannotConfirm;
                 self.append_failure(
                     &execution.request,
-                    &candidate,
-                    attempts,
-                    &failure,
-                    attempt_cost,
-                    &attempt_truth,
-                    remaining_budget,
+                    FailedRouteAttempt {
+                        candidate: &candidate,
+                        attempt: attempts,
+                        failure: &failure,
+                        cost_usd: attempt_cost,
+                        cost_truth: &attempt_truth,
+                        remaining_budget_usd: remaining_budget,
+                    },
                 )?;
                 attempt_records.push(failed_attempt_record(
                     &candidate,
@@ -275,12 +286,14 @@ impl ModelCallExecutor {
                                 subtract_optional_budget(remaining_budget, attempt_cost);
                             self.append_failure(
                                 &execution.request,
-                                &candidate,
-                                attempts,
-                                &failure,
-                                attempt_cost,
-                                &attempt_truth,
-                                next_budget,
+                                FailedRouteAttempt {
+                                    candidate: &candidate,
+                                    attempt: attempts,
+                                    failure: &failure,
+                                    cost_usd: attempt_cost,
+                                    cost_truth: &attempt_truth,
+                                    remaining_budget_usd: next_budget,
+                                },
                             )?;
                             add_cumulative_cost(
                                 &mut cumulative_cost,
@@ -386,12 +399,14 @@ impl ModelCallExecutor {
                     let next_budget = subtract_optional_budget(remaining_budget, attempt_cost);
                     self.append_failure(
                         &execution.request,
-                        &candidate,
-                        attempts,
-                        &failure,
-                        attempt_cost,
-                        &attempt_truth,
-                        next_budget,
+                        FailedRouteAttempt {
+                            candidate: &candidate,
+                            attempt: attempts,
+                            failure: &failure,
+                            cost_usd: attempt_cost,
+                            cost_truth: &attempt_truth,
+                            remaining_budget_usd: next_budget,
+                        },
                     )?;
                     add_cumulative_cost(
                         &mut cumulative_cost,
@@ -494,27 +509,22 @@ impl ModelCallExecutor {
     fn append_failure(
         &self,
         request: &ModelCallRequest,
-        candidate: &ModelCallCandidate,
-        attempt: usize,
-        failure: &(ProviderFailureClass, String),
-        cost_usd: Option<f64>,
-        cost_truth: &CostTruth,
-        remaining_budget_usd: Option<f64>,
+        failed: FailedRouteAttempt<'_>,
     ) -> Result<CursorEvent, ModelCallError> {
         self.append_route_event(
             request,
             OperatorEventType::RouteFailed,
             "route_failed",
             json!({
-                "attempt": attempt,
-                "provider": candidate.tier.provider,
-                "model": candidate.tier.model_id,
-                "provider_model": candidate.tier.provider_model_id,
-                "failure_class": failure.0.as_str(),
-                "message": failure.1,
-                "cost_usd": cost_usd,
-                "cost_truth": cost_truth,
-                "remaining_budget_usd": remaining_budget_usd,
+                "attempt": failed.attempt,
+                "provider": failed.candidate.tier.provider,
+                "model": failed.candidate.tier.model_id,
+                "provider_model": failed.candidate.tier.provider_model_id,
+                "failure_class": failed.failure.0.as_str(),
+                "message": failed.failure.1,
+                "cost_usd": failed.cost_usd,
+                "cost_truth": failed.cost_truth,
+                "remaining_budget_usd": failed.remaining_budget_usd,
             }),
         )
     }

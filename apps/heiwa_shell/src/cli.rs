@@ -37,7 +37,7 @@ pub async fn try_handle(args: &[String]) -> Result<bool> {
             Ok(true)
         }
         Some("auto") | Some("automations") => {
-            cmd::auto::run(&args[2..])?;
+            cmd::auto::run(&args[2..]).await?;
             Ok(true)
         }
         Some("mail") => {

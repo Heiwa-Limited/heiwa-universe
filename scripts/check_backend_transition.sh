@@ -52,6 +52,17 @@ if rg -n -i 'spacetimedb|\bSTDB(_|\b)|spacetime (login|publish|start)' "${curren
   exit 1
 fi
 
+python_bridge="packages/heiwa_sdk/heiwa_sdk/spacetimedb.py"
+if [[ -e "$python_bridge" ]]; then
+  echo "Retired Python SpacetimeDB bridge still exists: $python_bridge" >&2
+  exit 1
+fi
+
+if rg -n --glob '*.py' '(^|[[:space:]])(from|import)[[:space:]].*spacetimedb' .; then
+  echo "Live Python surfaces still import the retired SpacetimeDB backend." >&2
+  exit 1
+fi
+
 if ((${#historical_allowlist[@]} != 2)); then
   echo "Backend historical allowlist changed unexpectedly." >&2
   exit 1

@@ -9,8 +9,6 @@ from pathlib import Path
 from typing import Any, List, Dict
 
 import aiohttp
-from heiwa_sdk.spacetimedb import SpacetimeDB
-
 logger = logging.getLogger("SDK.Memory")
 
 
@@ -20,7 +18,7 @@ class MemoryService:
     Uses qwen3-embedding:0.6b via Ollama for vector generation.
     """
 
-    def __init__(self, stdb: SpacetimeDB, ollama_url: str | None = None) -> None:
+    def __init__(self, stdb: Any, ollama_url: str | None = None) -> None:
         self.stdb = stdb
         # On remote/cloud mode, Ollama is OFF unless HEIWA_OLLAMA_URL is provided.
         # On local owner nodes, it defaults to localhost.

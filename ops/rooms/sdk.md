@@ -12,10 +12,9 @@ Load this room for:
 - `packages/heiwa_sdk/heiwa_sdk/heiwaclaw.py`
 - `packages/heiwa_sdk/heiwa_sdk/bench.py`
 - `packages/heiwa_sdk/heiwa_sdk/cells.py`
-- `packages/heiwa_sdk/heiwa_sdk/spacetimedb.py` — LEGACY. STDB was extracted from Rust
-  on 2026-07-15 but this Python module is still tracked and still imported by
-  `heiwa_cli/commands.py`, `agent_memory.py`, `db.py`, and `heiwaclaw/gateway.py`.
-  Retiring it is open work; do not build new surfaces on it.
+- Retired Python state bridge removed 2026-07-28; Rust runtime owns state
+  authority. Python compatibility services accept only injected test or
+  migration backends.
 - `packages/heiwa_sdk/heiwa_sdk/db.py`
 - `packages/heiwa_protocol/heiwa_protocol/routing.py`
 

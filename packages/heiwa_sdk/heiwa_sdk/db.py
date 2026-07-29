@@ -1,7 +1,8 @@
-"""Authoritative state facade for Heiwa.
+"""Compatibility state facade for Python-only consumers.
 
-Rely strictly on SpacetimeDB as the mesh source of truth.
-SQLite support has been retired to enforce single-ledger sovereignty.
+Authoritative runtime state lives in the Rust runtime. Python callers may
+inject a narrow compatibility backend, but this module never discovers or
+launches an external state service.
 """
 from __future__ import annotations
 
@@ -16,37 +17,30 @@ from pathlib import Path
 from typing import Optional, List, Any, Dict, Union
 
 from .config import settings
-from .spacetimedb import SpacetimeDB
-
 logger = logging.getLogger("SDK.Database")
 
 
 class Database:
-    def __init__(self):
-        self.state_backend = settings.HEIWA_STATE_BACKEND
-        self.stdb_identity = settings.STDB_IDENTITY
-        self.stdb = None
-        
-        if self.stdb_identity:
-            self.stdb = SpacetimeDB(
-                db_identity=self.stdb_identity,
-                server=settings.STDB_SERVER,
+    def __init__(self, backend: Any | None = None):
+        configured_backend = settings.HEIWA_STATE_BACKEND
+        if configured_backend == "spacetimedb":
+            raise ValueError(
+                "HEIWA_STATE_BACKEND=spacetimedb is retired; use the Rust runtime"
             )
-            
-        if self.state_backend == "spacetimedb" and not self.stdb:
-            raise ValueError("STDB_IDENTITY is required when HEIWA_STATE_BACKEND=spacetimedb.")
-        
-        if self.state_backend != "spacetimedb":
-            logger.warning("[DB] Non-STDB backend selected (%s). Operating in stateless mode.", self.state_backend)
+        self.state_backend = "rust_runtime" if backend is None else configured_backend
+        self.stdb = backend
+
+        if backend is None:
+            logger.info("[DB] Python compatibility facade operating without state authority.")
 
     def init_db(self):
-        """No-op in STDB-native mode."""
+        """Report whether an injected compatibility backend is available."""
         if self.stdb:
-            logger.info("STDB backend active; state sovereignty enforced.")
+            logger.info("Injected Python compatibility backend active.")
         else:
-            logger.warning("[DB] No authoritative state backend available.")
+            logger.warning("[DB] Authoritative state is owned by the Rust runtime.")
 
-    # ── Core Operations (STDB Delegates) ───────────────────────────────
+    # ── Core Operations (Injected Backend Delegates) ───────────────────
 
     def record_run(self, run_data: dict[str, Any]) -> bool:
         if self.stdb:
@@ -58,7 +52,7 @@ class Database:
             try:
                 return self.stdb.list_nodes(status=status)
             except Exception as e:
-                logger.error("STDB list_nodes failed: %s", e)
+                logger.error("Compatibility backend list_nodes failed: %s", e)
         return []
 
     def list_provider_accounts(
@@ -308,7 +302,7 @@ class Database:
         # Roles are inferred from Discord membership at runtime. Keep the old
         # facade method as a compatibility no-op so sync utilities do not crash.
         logger.info(
-            "[DB] Discord role persistence is not modeled in STDB yet; keeping %s (%s) in compatibility mode.",
+            "[DB] Discord role persistence is not modeled; keeping %s (%s) in compatibility mode.",
             role_name,
             role_id,
         )
@@ -582,7 +576,7 @@ class Database:
         detail: dict[str, Any] | None = None,
     ) -> tuple[dict[str, Any] | None, str | None]:
         if not self.stdb:
-            return None, "No STDB backend"
+            return None, "No injected compatibility backend"
         result = self.stdb.record_proposal_heartbeat(
             proposal_id, node_id, node_instance_id, ts_iso, detail,
         )

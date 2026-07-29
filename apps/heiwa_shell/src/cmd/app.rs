@@ -769,7 +769,9 @@ async fn start(args: &[String]) -> Result<()> {
     let _operator_runtime_lease =
         heiwa_session::operator::OperatorAppRuntimeLease::acquire(evidence_root)
             .map_err(|error| anyhow!(error))?;
-    let (_, sessions, _) = crate::default_model_call_runtime().map_err(anyhow::Error::msg)?;
+    let sessions = crate::default_model_call_runtime()
+        .map_err(anyhow::Error::msg)?
+        .sessions;
     sessions
         .recover_interrupted()
         .map_err(|error| anyhow!("operator restart recovery failed: {error}"))?;
@@ -778,10 +780,11 @@ async fn start(args: &[String]) -> Result<()> {
     let mut caffeinate = spawn_caffeinate();
     let (shutdown_tx, shutdown_rx) = watch::channel(false);
     tokio::spawn(heartbeat_loop(
-        runtime_state_dir,
+        runtime_state_dir.clone(),
         worker_id.clone(),
-        shutdown_rx,
+        shutdown_rx.clone(),
     ));
+    tokio::spawn(automation_loop(runtime_state_dir, shutdown_rx));
 
     if !no_open {
         let config = heiwa_core::config::RuntimeConfig::from_env();
@@ -857,6 +860,28 @@ async fn heartbeat_loop(
         tokio::select! {
             _ = ticker.tick() => {
                 let _ = write_app_heartbeat(&runtime_state_dir, &worker_id);
+            }
+            changed = shutdown.changed() => {
+                if changed.is_err() || *shutdown.borrow() {
+                    break;
+                }
+            }
+        }
+    }
+}
+
+async fn automation_loop(runtime_state_dir: PathBuf, mut shutdown: watch::Receiver<bool>) {
+    let mut ticker = time::interval(Duration::from_secs(60));
+    ticker.set_missed_tick_behavior(time::MissedTickBehavior::Skip);
+    loop {
+        tokio::select! {
+            _ = ticker.tick() => {
+                if let Err(error) = crate::cmd::auto::tick_and_execute_state_dir(
+                    &runtime_state_dir,
+                    chrono::Utc::now(),
+                ).await {
+                    eprintln!("heiwa automation tick error: {error:#}");
+                }
             }
             changed = shutdown.changed() => {
                 if changed.is_err() || *shutdown.borrow() {
@@ -1694,10 +1719,12 @@ async fn operator_http_response(
         Ok(None) => return operator_error(404, "not_found"),
         Err(()) => return operator_error(400, "invalid_id"),
     };
-    let (_, sessions, runner) = match crate::default_model_call_runtime() {
+    let runtime = match crate::default_model_call_runtime() {
         Ok(runtime) => runtime,
         Err(_) => return operator_error(503, "operator_unavailable"),
     };
+    let sessions = runtime.sessions;
+    let runner = runtime.runner;
 
     match (method, route) {
         ("GET", OperatorHttpRoute::Threads) => match sessions.list_threads(100) {
@@ -2152,7 +2179,7 @@ async fn handle_websocket(
                 return Ok(());
             }
         };
-        let (_, sessions, runner) = match crate::default_model_call_runtime() {
+        let runtime = match crate::default_model_call_runtime() {
             Ok(runtime) => runtime,
             Err(_) => {
                 let payload = json!({"type":"error","code":"operator_unavailable"});
@@ -2160,6 +2187,8 @@ async fn handle_websocket(
                 return Ok(());
             }
         };
+        let sessions = runtime.sessions;
+        let runner = runtime.runner;
         return operator_events_loop(
             stream,
             sessions,

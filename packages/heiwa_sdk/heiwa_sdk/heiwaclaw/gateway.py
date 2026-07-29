@@ -8,14 +8,11 @@ from __future__ import annotations
 import logging
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
-from typing import Any, Dict, Type, TYPE_CHECKING
+from typing import Any, Dict, Type
 
 from heiwa_protocol.routing import BrokerRouteResult
 from heiwa_sdk.provider_registry import ProviderRegistry
 from heiwa_sdk.heiwaclaw.adapters.base import BaseClawAdapter
-
-if TYPE_CHECKING:
-    from heiwa_sdk.spacetimedb import SpacetimeDB
 
 logger = logging.getLogger("SDK.OpenClaw")
 
@@ -50,7 +47,7 @@ class OpenClaw:
     Claude Code, Codex, Gemini, Antigravity, and Ollama.
     """
 
-    def __init__(self, root_dir: Path, stdb: SpacetimeDB | None = None):
+    def __init__(self, root_dir: Path, stdb: Any | None = None):
         self.root = root_dir
         self.providers = ProviderRegistry(root_dir)
         self._stdb = stdb
@@ -66,7 +63,7 @@ class OpenClaw:
         self._adapters: Dict[str, BaseClawAdapter] = {}
         self._load_adapters()
         from heiwa_sdk.hooks import ExecutionHookManager
-        self.hooks = ExecutionHookManager(root_dir)
+        self.hooks = ExecutionHookManager(root_dir, backend=self._stdb)
 
         # UserVault for owner-specific credential resolution
         from heiwa_sdk.vault import UserVault

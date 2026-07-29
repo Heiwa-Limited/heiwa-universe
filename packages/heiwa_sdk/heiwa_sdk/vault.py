@@ -2,13 +2,10 @@ import os
 import base64
 import logging
 from pathlib import Path
-from typing import Any, TYPE_CHECKING
+from typing import Any
 from cryptography.fernet import Fernet, InvalidToken
 from cryptography.hazmat.primitives import hashes
 from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
-
-if TYPE_CHECKING:
-    from .spacetimedb import SpacetimeDB
 
 logger = logging.getLogger("SDK.Vault")
 
@@ -125,11 +122,10 @@ class VaultStore:
 
 class UserVault:
     """
-    Handles user-scoped credentials stored in STDB.
-    Terminates 'owner_id' to STDB 'user_id' mapping.
+    Legacy compatibility surface for an explicitly injected credential backend.
     """
 
-    def __init__(self, stdb: "SpacetimeDB"):
+    def __init__(self, stdb: Any):
         self.stdb = stdb
         self.cipher = InstanceVault()
 
@@ -142,7 +138,7 @@ class UserVault:
         rate_group: str,
         display_label: str | None = None,
     ) -> str:
-        """Encrypts and stores a credential in STDB."""
+        """Encrypt and store a credential through the injected backend."""
         import uuid
 
         credential_id = f"cred-{owner_id[:8]}-{provider_id[:8]}-{uuid.uuid4().hex[:6]}"
@@ -169,7 +165,7 @@ class UserVault:
 
     def resolve_credential(self, owner_id: str, provider_id: str) -> str | None:
         """Finds and decrypts the active credential for a provider."""
-        # STDB query returns list[dict].
+        # Compatibility query returns list[dict].
         esc_owner = self.stdb._escape_sql_literal(owner_id)
         esc_provider = self.stdb._escape_sql_literal(provider_id)
 

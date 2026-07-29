@@ -1,20 +1,41 @@
 use anyhow::{anyhow, Result};
 use chrono::Utc;
 use heiwa_automations::{
-    Automation, AutomationId, AutomationScheduler, AutomationStatus, AutomationStore,
-    ExternalSource, FileWatchEvent, FileWatchTriggerConfig, TriggerEventData,
+    Automation, AutomationId, AutomationScheduler, AutomationStatus, AutomationStore, Execution,
+    ExecutionOutcome, ExecutionRunner, ExternalSource, FileWatchEvent, FileWatchTriggerConfig,
+    SchedulerEvent, TriggerEventData,
 };
 use serde_json::json;
 use std::fs;
 use std::path::PathBuf;
 
-pub fn run(args: &[String]) -> Result<()> {
+const AUTOMATION_DRAIN_LIMIT: usize = 16;
+
+struct RuntimeAutomationRunner;
+
+impl ExecutionRunner for RuntimeAutomationRunner {
+    async fn run(
+        &self,
+        automation: &Automation,
+        execution: &Execution,
+    ) -> Result<ExecutionOutcome> {
+        crate::execute_automation_prompt(automation, execution).await
+    }
+}
+
+pub(crate) struct AutomationTickReport {
+    pub events: Vec<SchedulerEvent>,
+    pub executions: Vec<Execution>,
+}
+
+pub async fn run(args: &[String]) -> Result<()> {
     match args.first().map(String::as_str) {
         Some("status") | None => status(args),
         Some("list") => list(args),
         Some("create") | Some("add") => create(&args[1..]),
         Some("trigger") | Some("queue") => trigger(&args[1..]),
-        Some("tick") => tick(&args[1..]),
+        Some("run") => run_one(&args[1..]).await,
+        Some("tick") => tick(&args[1..]).await,
         Some("--help") | Some("-h") => {
             print_help();
             Ok(())
@@ -278,12 +299,45 @@ fn trigger(args: &[String]) -> Result<()> {
     Ok(())
 }
 
-fn tick(args: &[String]) -> Result<()> {
+async fn run_one(args: &[String]) -> Result<()> {
+    let id_arg = args
+        .first()
+        .ok_or_else(|| anyhow!("usage: heiwa auto run <automation-id> [--json]"))?;
+    let id = AutomationId::from_string(id_arg)?;
     let store = open_store()?;
-    let scheduler = AutomationScheduler::new(store.clone());
+    let execution = AutomationScheduler::new(store)
+        .executor()
+        .run_now(
+            id,
+            TriggerEventData::External {
+                timestamp: Utc::now(),
+                source: ExternalSource::Api,
+                metadata: Some(json!({"command": "heiwa auto run"})),
+            },
+            &RuntimeAutomationRunner,
+        )
+        .await?;
+
+    if has_flag(args, "--json") {
+        println!(
+            "{}",
+            json!({
+                "command": "auto run",
+                "execution": execution,
+            })
+        );
+    } else {
+        println!("auto run");
+        println!("  automation: {}", execution.automation_id);
+        println!("  execution: {}", execution.id);
+        println!("  status: {:?}", execution.status);
+    }
+    Ok(())
+}
+
+async fn tick(args: &[String]) -> Result<()> {
     let now = Utc::now();
-    let mut events = scheduler.initialize_schedule_state(now)?;
-    events.extend(scheduler.tick(now)?);
+    let report = tick_and_execute_state_dir(&state_dir(), now).await?;
 
     if has_flag(args, "--json") {
         println!(
@@ -291,8 +345,9 @@ fn tick(args: &[String]) -> Result<()> {
             json!({
                 "command": "auto tick",
                 "at": now,
-                "events": events,
-                "db_path": store.db_path().display().to_string(),
+                "events": report.events,
+                "executions": report.executions,
+                "db_path": state_dir().join("automations/automations.sqlite3").display().to_string(),
             })
         );
         return Ok(());
@@ -300,14 +355,30 @@ fn tick(args: &[String]) -> Result<()> {
 
     println!("auto tick");
     println!("  at: {now}");
-    if events.is_empty() {
+    if report.events.is_empty() {
         println!("  events: none");
     } else {
-        for event in events {
+        for event in report.events {
             println!("  - {}", event_summary(&event));
         }
     }
+    println!("  executed: {}", report.executions.len());
     Ok(())
+}
+
+pub(crate) async fn tick_and_execute_state_dir(
+    state_dir: &std::path::Path,
+    now: chrono::DateTime<Utc>,
+) -> Result<AutomationTickReport> {
+    let store = AutomationStore::open_state_dir(state_dir)?;
+    let scheduler = AutomationScheduler::new(store);
+    let mut events = scheduler.initialize_schedule_state(now)?;
+    events.extend(scheduler.tick(now)?);
+    let executions = scheduler
+        .executor()
+        .run_pending(&RuntimeAutomationRunner, AUTOMATION_DRAIN_LIMIT)
+        .await?;
+    Ok(AutomationTickReport { events, executions })
 }
 
 fn open_store() -> Result<AutomationStore> {
@@ -406,6 +477,7 @@ fn print_help() {
     println!("  heiwa auto create --name NAME --prompt PROMPT [--cron EXPR] [--timezone TZ] [--active] [--json]");
     println!("  heiwa auto create --name NAME --prompt PROMPT --watch PATH [--events create,modify] [--pattern GLOB] [--active]");
     println!("  heiwa auto trigger <automation-id> [--json]");
+    println!("  heiwa auto run <automation-id> [--json]");
     println!("  heiwa auto tick [--json]");
     println!();
     println!("Stores local automations under ~/.heiwa/state/automations/.");

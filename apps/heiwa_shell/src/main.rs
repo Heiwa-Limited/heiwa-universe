@@ -1437,12 +1437,14 @@ async fn run_repl(use_cockpit: bool) -> Result<()> {
                             record_call_receipt(
                                 receipts,
                                 &rates,
-                                &result,
-                                usage.as_ref(),
-                                &state.session_id,
-                                &input_text,
-                                &response_for_receipt,
-                                receipt_latency_ms,
+                                CallReceiptInput {
+                                    result: &result,
+                                    usage: usage.as_ref(),
+                                    session_id: &state.session_id,
+                                    input_text: &input_text,
+                                    output_text: &response_for_receipt,
+                                    latency_ms: receipt_latency_ms,
+                                },
                             );
                         }
                         turn_count += 1;
@@ -2386,8 +2388,8 @@ async fn prepare_outbound_prompt_for_route(
             compression: None,
         };
     }
-    let (_, sessions, _) = match default_model_call_runtime() {
-        Ok(runtime) => runtime,
+    let sessions = match default_model_call_runtime() {
+        Ok(runtime) => runtime.sessions,
         Err(error) => {
             return prepare_outbound_prompt_for_route_with(route, input, |_, _| Err(error));
         }
@@ -2684,7 +2686,7 @@ async fn execute_deterministic_surface_turn(
     prompt: &str,
     response: &str,
 ) -> Result<(), String> {
-    let (_, _, runner) = default_model_call_runtime()?;
+    let runner = default_model_call_runtime()?.runner;
     let request = heiwa_session::operator::StartTurnRequest::auto(
         format!("surface-{}", uuid::Uuid::new_v4()),
         prompt,
@@ -2973,20 +2975,15 @@ fn model_call_candidate(tier: &heiwa_protocol::ModelTier) -> ModelCallCandidate 
     }
 }
 
-fn default_model_call_runtime() -> Result<
-    (
-        Arc<ModelCallExecutor>,
-        Arc<heiwa_session::operator::OperatorSessionService>,
-        Arc<OperatorTurnRunner>,
-    ),
-    String,
-> {
-    type Runtime = (
-        Arc<ModelCallExecutor>,
-        Arc<heiwa_session::operator::OperatorSessionService>,
-        Arc<OperatorTurnRunner>,
-    );
-    static RUNTIME: OnceLock<Result<Runtime, String>> = OnceLock::new();
+#[derive(Clone)]
+struct DefaultModelCallRuntime {
+    executor: Arc<ModelCallExecutor>,
+    sessions: Arc<heiwa_session::operator::OperatorSessionService>,
+    runner: Arc<OperatorTurnRunner>,
+}
+
+fn default_model_call_runtime() -> Result<DefaultModelCallRuntime, String> {
+    static RUNTIME: OnceLock<Result<DefaultModelCallRuntime, String>> = OnceLock::new();
     RUNTIME
         .get_or_init(|| {
             let sessions = Arc::new(heiwa_session::operator::OperatorSessionService::new(
@@ -2999,19 +2996,24 @@ fn default_model_call_runtime() -> Result<
                 Arc::new(|provider: &str, model: &str| resolve_adapter(provider, model).ok());
             let executor = Arc::new(ModelCallExecutor::new(resolver, sessions.clone()));
             let runner = Arc::new(OperatorTurnRunner::new(sessions.clone(), executor.clone()));
-            Ok((executor, sessions, runner))
+            Ok(DefaultModelCallRuntime {
+                executor,
+                sessions,
+                runner,
+            })
         })
         .clone()
 }
 
 fn default_loop_model_caller() -> Result<Arc<dyn heiwa_loop::LoopModelCaller>, String> {
-    let (executor, _, _) = default_model_call_runtime()?;
-    Ok(Arc::new(ExecutorLoopCaller::new(executor)))
+    let runtime = default_model_call_runtime()?;
+    Ok(Arc::new(ExecutorLoopCaller::new(runtime.executor)))
 }
 
 async fn execute_model_call(execution: ModelCallExecution) -> Result<ModelCallResult, String> {
-    let (executor, _, _) = default_model_call_runtime()?;
-    executor
+    let runtime = default_model_call_runtime()?;
+    runtime
+        .executor
         .execute(execution)
         .await
         .map_err(|error| error.to_string())
@@ -3020,8 +3022,9 @@ async fn execute_model_call(execution: ModelCallExecution) -> Result<ModelCallRe
 async fn execute_canonical_model_turn(
     execution: ModelCallExecution,
 ) -> Result<ModelCallResult, String> {
-    let (executor, _, _) = default_model_call_runtime()?;
-    executor
+    let runtime = default_model_call_runtime()?;
+    runtime
+        .executor
         .execute_canonical_turn(execution)
         .await
         .map_err(|error| error.to_string())
@@ -3034,7 +3037,7 @@ async fn execute_routed_model_call(
     raw_text: &str,
     delta_tx: Option<tokio::sync::mpsc::Sender<heiwa_provider::adapter::StreamEvent>>,
 ) -> Result<ModelCallResult, String> {
-    let (_, sessions, _) = default_model_call_runtime()?;
+    let sessions = default_model_call_runtime()?.sessions;
     let call_id = format!("call-{}", uuid::Uuid::new_v4());
     let turn = sessions
         .start_turn(
@@ -3163,7 +3166,9 @@ pub(crate) async fn execute_standalone_compression(
     requested_model: &str,
 ) -> anyhow::Result<cmd::compress::CompressionReceipt> {
     let candidates = discovered_model_call_candidates().await;
-    let (_, sessions, _) = default_model_call_runtime().map_err(anyhow::Error::msg)?;
+    let sessions = default_model_call_runtime()
+        .map_err(anyhow::Error::msg)?
+        .sessions;
     let client_request_id = format!("compress-{}", uuid::Uuid::new_v4());
     let submission = sessions
         .start_turn(
@@ -3241,7 +3246,7 @@ pub(crate) async fn execute_mail_draft_model_call(
     candidates: Vec<ModelCallCandidate>,
     prompt: &str,
 ) -> Result<ModelCallResult, String> {
-    let (_, sessions, _) = default_model_call_runtime()?;
+    let sessions = default_model_call_runtime()?.sessions;
     let submission = sessions
         .start_turn(
             "auxiliary-mail-drafting",
@@ -3325,33 +3330,39 @@ fn record_route_evidence(evidence: &EvidenceClient, route: &RouteResult, task: &
 }
 
 /// Record a completed run in the local receipt store.
+struct CallReceiptInput<'a> {
+    result: &'a ModelCallResult,
+    usage: Option<&'a TokenUsage>,
+    session_id: &'a str,
+    input_text: &'a str,
+    output_text: &'a str,
+    latency_ms: i64,
+}
+
 fn record_call_receipt(
     receipts: &heiwa_receipts::ReceiptStore,
     rates: &heiwa_receipts::RateTable,
-    result: &ModelCallResult,
-    usage: Option<&TokenUsage>,
-    session_id: &str,
-    input_text: &str,
-    output_text: &str,
-    latency_ms: i64,
+    input: CallReceiptInput<'_>,
 ) {
     use heiwa_receipts::{runtime, Receipt};
 
-    let env = runtime::env_for_provider(&result.provider);
-    let tokens_in = usage
+    let env = runtime::env_for_provider(&input.result.provider);
+    let tokens_in = input
+        .usage
         .map(|u| u.input_tokens as i64)
         .filter(|&n| n > 0)
-        .unwrap_or_else(|| runtime::estimate_tokens(input_text));
-    let tokens_out = usage
+        .unwrap_or_else(|| runtime::estimate_tokens(input.input_text));
+    let tokens_out = input
+        .usage
         .map(|u| u.output_tokens as i64)
         .filter(|&n| n > 0)
-        .unwrap_or_else(|| runtime::estimate_tokens(output_text));
+        .unwrap_or_else(|| runtime::estimate_tokens(input.output_text));
 
     let (costs, _found) = runtime::compute_or_zero(
         rates,
         env,
-        &result.provider,
-        &result.model_id,
+        &input.result.provider,
+        &input.result.model_id,
         tokens_in,
         tokens_out,
     );
@@ -3359,22 +3370,23 @@ fn record_call_receipt(
     let mut receipt = Receipt::new(
         Utc::now().timestamp(),
         env,
-        result.provider.clone(),
-        result.model_id.clone(),
+        input.result.provider.clone(),
+        input.result.model_id.clone(),
         "repl",
         tokens_in,
         tokens_out,
-        latency_ms,
+        input.latency_ms,
         costs.actual_cad,
         costs.counterfactual_cad,
-        session_id,
+        input.session_id,
         None,
     );
-    receipt.model_call_cost_usd = Some(result.cost_usd);
-    receipt.model_call_cost_truth = Some(cost_truth_label(&result.cost_truth).to_string());
-    receipt.model_call_attempts = Some(result.attempts.min(i64::MAX as usize) as i64);
+    receipt.model_call_cost_usd = Some(input.result.cost_usd);
+    receipt.model_call_cost_truth = Some(cost_truth_label(&input.result.cost_truth).to_string());
+    receipt.model_call_attempts = Some(input.result.attempts.min(i64::MAX as usize) as i64);
     receipt.failed_attempt_cost_usd = Some(
-        result
+        input
+            .result
             .attempt_records
             .iter()
             .filter(|attempt| {
@@ -4141,8 +4153,9 @@ async fn submit_operator_turn_with_scope(
     heiwa_shell::operator::OperatorTurnHandle,
     heiwa_shell::operator::OperatorSubmissionError,
 > {
-    let (_, _, runner) = default_model_call_runtime()
-        .map_err(|error| heiwa_shell::operator::OperatorSubmissionError::Runtime(anyhow!(error)))?;
+    let runner = default_model_call_runtime()
+        .map_err(|error| heiwa_shell::operator::OperatorSubmissionError::Runtime(anyhow!(error)))?
+        .runner;
     let preparation_request = start_request.clone();
     let preparation =
         OperatorTurnPreparation::cancellable_with_context(move |context, cancelled| async move {
@@ -4161,6 +4174,98 @@ pub(crate) async fn submit_operator_turn(
     heiwa_shell::operator::OperatorSubmissionError,
 > {
     submit_operator_turn_with_route(thread_id, request).await
+}
+
+pub(crate) async fn execute_automation_prompt(
+    automation: &heiwa_automations::Automation,
+    execution: &heiwa_automations::Execution,
+) -> Result<heiwa_automations::ExecutionOutcome> {
+    let thread_id = format!("automation-{}", automation.id);
+    let request = heiwa_session::operator::StartTurnRequest::auto(
+        format!("automation-{}", execution.id),
+        &automation.prompt,
+    );
+    let mut handle = submit_operator_turn_with_route(&thread_id, request)
+        .await
+        .map_err(|error| anyhow!(error.to_string()))?;
+    let mut assistant_text = None;
+
+    while let Ok(frame) = handle.recv().await {
+        match frame {
+            OperatorStreamFrame::Durable(row)
+                if row.event.turn_id.as_deref() == Some(handle.turn_id.as_str()) =>
+            {
+                match row.event.event_type {
+                    heiwa_evidence::OperatorEventType::AssistantCompleted => {
+                        assistant_text = row
+                            .event
+                            .payload
+                            .get("text")
+                            .and_then(Value::as_str)
+                            .map(str::to_string);
+                    }
+                    heiwa_evidence::OperatorEventType::TurnCompleted => {
+                        let text = assistant_text.unwrap_or_default();
+                        return Ok(heiwa_automations::ExecutionOutcome::Completed {
+                            summary: if text.is_empty() {
+                                format!("automation {} completed", automation.name)
+                            } else {
+                                text.clone()
+                            },
+                            output: Some(serde_json::json!({
+                                "thread_id": thread_id,
+                                "turn_id": handle.turn_id,
+                                "text": text,
+                            })),
+                        });
+                    }
+                    heiwa_evidence::OperatorEventType::Blocker => {
+                        let summary = row
+                            .event
+                            .payload
+                            .get("message")
+                            .or_else(|| row.event.payload.get("reason"))
+                            .and_then(Value::as_str)
+                            .unwrap_or("automation requires operator confirmation")
+                            .to_string();
+                        let request_id = row
+                            .event
+                            .payload
+                            .get("request_id")
+                            .and_then(Value::as_str)
+                            .unwrap_or(&handle.turn_id)
+                            .to_string();
+                        return Ok(heiwa_automations::ExecutionOutcome::AwaitingConfirmation {
+                            request_id,
+                            summary,
+                        });
+                    }
+                    heiwa_evidence::OperatorEventType::TurnInterrupted => {
+                        let message = row
+                            .event
+                            .payload
+                            .get("message")
+                            .or_else(|| row.event.payload.get("reason"))
+                            .and_then(Value::as_str)
+                            .unwrap_or("automation turn interrupted")
+                            .to_string();
+                        return Ok(heiwa_automations::ExecutionOutcome::Failed { message });
+                    }
+                    _ => {}
+                }
+            }
+            OperatorStreamFrame::Error {
+                turn_id, message, ..
+            } if turn_id == handle.turn_id => {
+                return Ok(heiwa_automations::ExecutionOutcome::Failed { message });
+            }
+            _ => {}
+        }
+    }
+
+    Ok(heiwa_automations::ExecutionOutcome::Failed {
+        message: "automation operator turn ended without a durable terminal event".to_string(),
+    })
 }
 
 /// Streaming REPL compatibility surface over the durable operator runner.
@@ -4965,12 +5070,14 @@ mod tests {
         super::record_call_receipt(
             &receipts,
             &rates,
-            &result,
-            Some(&usage),
-            "session",
-            "input",
-            "output",
-            10,
+            super::CallReceiptInput {
+                result: &result,
+                usage: Some(&usage),
+                session_id: "session",
+                input_text: "input",
+                output_text: "output",
+                latency_ms: 10,
+            },
         );
 
         let rows = receipts.list(0, i64::MAX).unwrap();

@@ -6,8 +6,7 @@ The shared library powering state, routing, security, and execution gateway.
 
 | File | Purpose |
 | --- | --- |
-| `db.py` | Multi-backend DB abstraction (SpacetimeDB primary, legacy SQLite/Postgres being removed) |
-| `spacetimedb.py` | Native SpacetimeDB CLI bridge |
+| `db.py` | Stateless compatibility facade; authoritative state remains in Rust |
 | `heiwaclaw.py` | Execution gateway — resolves BrokerRouteResult → HeiwaClawDispatch (tool, adapter, provider, transport) |
 | `tool_mesh.py` | Executes selected adapter with environment (heiwa_ops, heiwa_reflex) |
 | `routing.py` | Compute routing logic |
@@ -19,14 +18,14 @@ The shared library powering state, routing, security, and execution gateway.
 
 ## State Layer
 
-- SpacetimeDB is authoritative (`HEIWA_STATE_BACKEND=spacetimedb`)
-- Tables: proposals, nodes, runs, capability_leases, approval_requests, approval_decisions
-- Legacy SQLite/Postgres code in db.py is scheduled for removal
-- All state writes should go through SpacetimeDB first
+- Rust plus local JSONL own authoritative state.
+- Lance is a derived, rebuildable recall index.
+- Python services may receive narrow injected compatibility backends, but do
+  not discover, launch, or claim authority over state services.
 
 ## Rules
 
 - Prefer typed contracts from `heiwa_protocol`
 - Route execution through HeiwaClaw/MCP, not ad-hoc provider calls
 - Keep public API surfaces honest — back them with tests
-- STDB-backed service layers over direct DB access
+- Route state mutations through Rust runtime service layers.
