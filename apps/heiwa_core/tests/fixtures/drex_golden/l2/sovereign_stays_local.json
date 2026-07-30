@@ -1,0 +1,22 @@
+{
+  "schema_version": 1,
+  "layer": "l2_route",
+  "id": "sovereign_stays_local",
+  "description": "Hard rule: sovereign/privacy work routes to a local provider, never cloud.",
+  "status": "active",
+  "registry": "default",
+  "ingress": {
+    "intent": "build",
+    "risk": "low",
+    "privacy": "sovereign",
+    "runtime": "macbook",
+    "available_vram_mb": 18000,
+    "required_context_tokens": 2000,
+    "raw_text": "refactor the local receipt module"
+  },
+  "expect": {
+    "outcome": "routed",
+    "provider_is_local": true,
+    "mode": "local_model"
+  }
+}

@@ -19,6 +19,7 @@ default:
     @echo "  check-product  Run product verification recipes"
     @echo "  verify-product Run product tests and checks"
     @echo "  deploy-product Push main to trigger CI deploy"
+    @echo "  drex-evals     Run DREX routing golden eval suite (E3)"
 
 test-trading:
     cd apps/heiwa_trading && PYTHONPATH=src ../../{{python}} -m pytest tests -q
@@ -53,3 +54,8 @@ verify-product: test-product check-product
 
 deploy-product:
     git push origin main
+
+# E3 DREX routing golden eval suite: L1 intent classification + L2 routing
+# decisions. Hermetic (no providers/network/STDB). Fails on route regressions.
+drex-evals:
+    cargo test -p heiwa-protocol -p heiwa-core --test drex_golden -- --nocapture

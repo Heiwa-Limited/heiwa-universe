@@ -1,0 +1,21 @@
+{
+  "schema_version": 1,
+  "layer": "l2_route",
+  "id": "pending_quota_exhausted_falls_back",
+  "description": "PENDING / known gap: when a provider's quota is exhausted, routing should fall back to the next available lane. Quota lives in `route_task_with_quota` (private to the heiwa-shell binary), not `plan_route`, so it is not reachable from this hermetic layer. Building a testable quota seam is the E3<->E10 boundary; this fixture documents the target.",
+  "status": "pending",
+  "registry": "default",
+  "ingress": {
+    "intent": "build",
+    "risk": "low",
+    "privacy": "standard",
+    "runtime": "cloud",
+    "available_vram_mb": 0,
+    "required_context_tokens": 2000,
+    "raw_text": "build feature X (anthropic quota exhausted)"
+  },
+  "expect": {
+    "outcome": "routed",
+    "provider_is_local": false
+  }
+}

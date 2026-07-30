@@ -1,0 +1,9 @@
+{
+  "schema_version": 1,
+  "layer": "l1_classify",
+  "id": "intent_build_from_refactor",
+  "description": "Repo/code work classifies as build (whole-word 'refactor', 'crate').",
+  "status": "active",
+  "input": { "prompt": "refactor the receipt hash-chain crate" },
+  "expect": { "intent": "build" }
+}

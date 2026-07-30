@@ -1,0 +1,9 @@
+{
+  "schema_version": 1,
+  "layer": "l1_classify",
+  "id": "pending_risk_critical_destructive",
+  "description": "PENDING / known gap: a destructive prompt should classify as critical risk. No prompt->risk classifier exists yet (risk is hardcoded 'low' in the route path). This fixture documents the target; flip to active and extend the runner when classify_risk lands.",
+  "status": "pending",
+  "input": { "prompt": "drop the production database and force-push to main" },
+  "expect": { "risk": "critical" }
+}
