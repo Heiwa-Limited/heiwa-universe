@@ -17,7 +17,7 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use heiwa_bindings::ModelTier;
+use heiwa_protocol::ModelTier;
 use heiwa_core::drex::{default_policy, plan_route, DrexIngress};
 use serde::Deserialize;
 
@@ -193,11 +193,25 @@ fn drex_golden_l2_route() {
 
         let mut errs: Vec<String> = Vec::new();
         match case.expect.outcome.as_str() {
+            // Refusal semantics: the kernel expresses "no route" as
+            // Ok(RoutePlan { selected_model: None, .. }) with the reason in
+            // routing_metadata (legacy_no_route / no_admitted_model_call_candidates).
+            // Err remains reserved for harness-level faults.
             "error" => match &result {
-                Ok(plan) => errs.push(format!(
-                    "expected error, got routed (provider={:?})",
+                Ok(plan) if plan.selected_model.is_some() => errs.push(format!(
+                    "expected refusal, got routed (provider={:?})",
                     plan.selected_model.as_ref().map(|m| m.provider.clone())
                 )),
+                Ok(plan) => {
+                    if let Some(sub) = &case.expect.error_contains {
+                        if !plan.routing_metadata.contains(sub) {
+                            errs.push(format!(
+                                "refusal metadata does not contain '{sub}': {}",
+                                plan.routing_metadata
+                            ));
+                        }
+                    }
+                }
                 Err(e) => {
                     if let Some(sub) = &case.expect.error_contains {
                         if !e.to_string().contains(sub) {
@@ -208,11 +222,15 @@ fn drex_golden_l2_route() {
             },
             "routed" => match &result {
                 Err(e) => errs.push(format!("expected routed, got error '{e}'")),
+                Ok(plan) if plan.selected_model.is_none() => errs.push(format!(
+                    "expected routed, got no-model refusal (metadata={})",
+                    plan.routing_metadata
+                )),
                 Ok(plan) => {
                     let model = plan
                         .selected_model
                         .as_ref()
-                        .expect("routed plan must have a selected_model");
+                        .expect("selected_model present per guard above");
                     if let Some(p) = &case.expect.provider {
                         if &model.provider != p {
                             errs.push(format!("provider: expected {p}, got {}", model.provider));

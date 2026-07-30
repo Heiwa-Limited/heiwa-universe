@@ -16,6 +16,6 @@
   },
   "expect": {
     "outcome": "error",
-    "error_contains": "no compatible model tier"
+    "error_contains": "no_admitted_model_call_candidates"
   }
 }
