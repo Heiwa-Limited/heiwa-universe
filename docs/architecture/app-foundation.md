@@ -239,13 +239,13 @@ candidate exists. `route_completed` carries actual completion cost truth, while
 and a no-selection plan has no selected cost truth. Current cost-truth classes
 are:
 
-| Class                   | Meaning                                                                 |
-| ----------------------- | ----------------------------------------------------------------------- |
+| Class                   | Meaning                                                                           |
+| ----------------------- | --------------------------------------------------------------------------------- |
 | `local_zero_cost`       | No marginal provider charge for the local call; not a claim of zero hardware cost |
-| `target_only`           | A configured target/budget value, not provider-reported spend          |
-| `proxy_estimate`        | An estimate derived from known pricing or a comparable pricing proxy   |
-| `exact_provider_report` | The connected provider reported the call's actual usage cost           |
-| `cannot_confirm`        | Heiwa has no defensible marginal-cost number and does not invent one    |
+| `target_only`           | A configured target/budget value, not provider-reported spend                     |
+| `proxy_estimate`        | An estimate derived from known pricing or a comparable pricing proxy              |
+| `exact_provider_report` | The connected provider reported the call's actual usage cost                      |
+| `cannot_confirm`        | Heiwa has no defensible marginal-cost number and does not invent one              |
 
 The policy is **cheapest above the per-call quality floor**, not cheapest-first.
 That quality floor is the value control that lets a later call in the same turn

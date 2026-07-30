@@ -6,22 +6,22 @@ Default location: `~/.heiwa/` (override via `HEIWA_HOME`).
 
 ## Top-Level
 
-| Path                       | Owner    | Purpose                                                         |
-| -------------------------- | -------- | --------------------------------------------------------------- |
-| `~/.heiwa/config.toml`     | operator | Local profile, route prefs, BYOX registration defaults          |
-| `~/.heiwa/accounts.json`   | runtime  | Connected provider accounts (status, models, expiry refs)       |
-| `~/.heiwa/identity.json`   | runtime  | Operator identity bound to this machine                         |
-| `~/.heiwa/machine.json`    | runtime  | Device manifest (id, hostname, os, arch, installed_at)          |
-| `~/.heiwa/evidence/`       | runtime  | Canonical versioned JSONL evidence journals                     |
-| `~/.heiwa/secrets/`        | runtime  | OS-keychain-backed secret refs; never raw secrets in plain JSON |
-| `~/.heiwa/state/`          | runtime  | Mutable runtime state (see below)                               |
-| `~/.heiwa/sessions/`       | runtime  | Session transcripts and per-session metadata                    |
-| `~/.heiwa/logs/`           | runtime  | Rotating runtime logs                                           |
-| `~/.heiwa/cache/`          | runtime  | Provider response caches, model lists, expensive lookups        |
-| `~/.heiwa/bin/`            | install  | Helper binaries (`heiwa-route`, etc.)                           |
-| `~/.heiwa/app/Heiwa.app`   | install  | HOME-local primary user input/display launcher for Heiwa.app    |
-| `~/.heiwa/state.db`        | runtime  | Optional SQLite ledger (quotas, evidence)                       |
-| `~/.heiwa/state/lance/`    | runtime  | Derived local recall index; safe to rebuild from text truth     |
+| Path                     | Owner    | Purpose                                                         |
+| ------------------------ | -------- | --------------------------------------------------------------- |
+| `~/.heiwa/config.toml`   | operator | Local profile, route prefs, BYOX registration defaults          |
+| `~/.heiwa/accounts.json` | runtime  | Connected provider accounts (status, models, expiry refs)       |
+| `~/.heiwa/identity.json` | runtime  | Operator identity bound to this machine                         |
+| `~/.heiwa/machine.json`  | runtime  | Device manifest (id, hostname, os, arch, installed_at)          |
+| `~/.heiwa/evidence/`     | runtime  | Canonical versioned JSONL evidence journals                     |
+| `~/.heiwa/secrets/`      | runtime  | OS-keychain-backed secret refs; never raw secrets in plain JSON |
+| `~/.heiwa/state/`        | runtime  | Mutable runtime state (see below)                               |
+| `~/.heiwa/sessions/`     | runtime  | Session transcripts and per-session metadata                    |
+| `~/.heiwa/logs/`         | runtime  | Rotating runtime logs                                           |
+| `~/.heiwa/cache/`        | runtime  | Provider response caches, model lists, expensive lookups        |
+| `~/.heiwa/bin/`          | install  | Helper binaries (`heiwa-route`, etc.)                           |
+| `~/.heiwa/app/Heiwa.app` | install  | HOME-local primary user input/display launcher for Heiwa.app    |
+| `~/.heiwa/state.db`      | runtime  | Optional SQLite ledger (quotas, evidence)                       |
+| `~/.heiwa/state/lance/`  | runtime  | Derived local recall index; safe to rebuild from text truth     |
 
 ## `~/.heiwa/state/` Subtree
 

@@ -73,10 +73,10 @@ Heiwa is taught to operators as three planes that compose one flow.
 
 > Heiwa watches what matters, summarizes what changed, stages what needs action, executes what is safe, and proves what happened.
 
-| Plane         | What it does                                                                                                                                                | Current repo surfaces                                                                                                                            |
-| ------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------ |
-| **Intake**    | One command bar plus passive feeds. Captures intent and signal from operator commands, mail, calendar, messages, forums, GitHub, files, and runtime alerts. | `apps/heiwa_shell/` REPL and `session attach` are the current intake surface. Passive feeds are target work.                                     |
-| **Execution** | DREX routes work to local models, provider CLIs, tools, workers, or connectors under leases, budgets, and approval gates.                                   | `apps/heiwa_core/` (DREX), `apps/heiwa_orchestrator/`, `crates/heiwa_loop/`, `crates/heiwa_provider/`, `crates/heiwa_session/`.                  |
+| Plane         | What it does                                                                                                                                                | Current repo surfaces                                                                                                                                                                                 |
+| ------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Intake**    | One command bar plus passive feeds. Captures intent and signal from operator commands, mail, calendar, messages, forums, GitHub, files, and runtime alerts. | `apps/heiwa_shell/` REPL and `session attach` are the current intake surface. Passive feeds are target work.                                                                                          |
+| **Execution** | DREX routes work to local models, provider CLIs, tools, workers, or connectors under leases, budgets, and approval gates.                                   | `apps/heiwa_core/` (DREX), `apps/heiwa_orchestrator/`, `crates/heiwa_loop/`, `crates/heiwa_provider/`, `crates/heiwa_session/`.                                                                       |
 | **Evidence**  | Every useful read or action emits a source-linked receipt appended locally as JSONL; Lance indexes the corpus for recall.                                   | `crates/heiwa_evidence/` (journal service; core and orchestrator consume it), `crates/heiwa_embed/` (Lance index), `crates/heiwa_receipts/`. Receipt schema and source-span syntax are still partial. |
 
 The planes are a flow lens. They sit alongside the layer anatomy in [What Heiwa Is](#what-heiwa-is) (user surface, execution kernel, enterprise platform), which is an ownership lens. Both are correct: planes describe **how a task flows**, layers describe **who owns what**.
@@ -92,10 +92,10 @@ Every feature, connector, doc change, and release item must classify as one of:
 
 ### Current vs target maturity per plane
 
-| Plane     | Current (2026-05)                                                                                                                                                                                                                                                                          | Target                                                                                                             |
-| --------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------ |
-| Intake    | `heiwa` REPL plus `session attach`. No passive feeds wired.                                                                                                                                                                                                                                | Command bar plus calendar, mail, messages, forums, GitHub, files, and runtime alerts as governed feeds.            |
-| Execution | DREX kernel plus provider adapters: Claude Code, Codex, Gemini CLI, and Ollama are wired in the shell adapter path; Antigravity is discovered and normalized; Codex execution depth and evidence still lag. Bounded loops are real in `crates/heiwa_loop/`. No staged-approval outbox yet. | Approval-staged outbox for every risky write action. Honest per-provider execution depth surfaced at routing time. |
+| Plane     | Current (2026-05)                                                                                                                                                                                                                                                                          | Target                                                                                                                    |
+| --------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------- |
+| Intake    | `heiwa` REPL plus `session attach`. No passive feeds wired.                                                                                                                                                                                                                                | Command bar plus calendar, mail, messages, forums, GitHub, files, and runtime alerts as governed feeds.                   |
+| Execution | DREX kernel plus provider adapters: Claude Code, Codex, Gemini CLI, and Ollama are wired in the shell adapter path; Antigravity is discovered and normalized; Codex execution depth and evidence still lag. Bounded loops are real in `crates/heiwa_loop/`. No staged-approval outbox yet. | Approval-staged outbox for every risky write action. Honest per-provider execution depth surfaced at routing time.        |
 | Evidence  | Local JSONL under `~/.heiwa/evidence/` plus SQLite receipts. Receipt schema not fully canonical. Source-span syntax (`file:line-line`, `message_id`, `event_id`, `thread_id`, `receipt_id`) not implemented.                                                                               | Source-spanned receipts on every action. Canonical JSONL evidence schema, git-synced; Lance recall index derived from it. |
 
 ## Optimization Doctrine
@@ -203,16 +203,16 @@ As of 2026-04-22, `heiwa-universe` has already landed meaningful local runtime s
 
 ## Canonical Product Identity
 
-| Name               | Canonical meaning                                                                           |
-| ------------------ | ------------------------------------------------------------------------------------------- |
-| **Heiwa**          | Product identity: app, runtime, CLI, packages, docs, and user-visible system                |
-| **Heiwa Limited**  | Company, publisher, employer, legal/commercial identity                                     |
-| **Heiwa Universe** | Open-source repository and project workspace: `Strategizing/heiwa-universe`                 |
-| **`heiwa`**        | Primary installed runtime and operator surface                                              |
-| **DREX**           | Internal execution kernel and routing substrate                                             |
+| Name               | Canonical meaning                                                                                 |
+| ------------------ | ------------------------------------------------------------------------------------------------- |
+| **Heiwa**          | Product identity: app, runtime, CLI, packages, docs, and user-visible system                      |
+| **Heiwa Limited**  | Company, publisher, employer, legal/commercial identity                                           |
+| **Heiwa Universe** | Open-source repository and project workspace: `Strategizing/heiwa-universe`                       |
+| **`heiwa`**        | Primary installed runtime and operator surface                                                    |
+| **DREX**           | Internal execution kernel and routing substrate                                                   |
 | **Evidence plane** | Canonical durable record: local JSONL journal (truth), Lance (derived recall), SQLite (hot state) |
-| **Rust runtime**   | Volatile execution plane: provider supervision, candidate generation, shell/process control |
-| **Web surfaces**   | Later attached or hosted surfaces over the same kernel                                      |
+| **Rust runtime**   | Volatile execution plane: provider supervision, candidate generation, shell/process control       |
+| **Web surfaces**   | Later attached or hosted surfaces over the same kernel                                            |
 
 > See [`PRODUCT_SURFACE.md`](PRODUCT_SURFACE.md) for the path-by-path class table that feeds repo hygiene and LOC audits.
 
@@ -390,18 +390,18 @@ That is how Heiwa scales from “my machine” to “my fleet” without changin
 
 Heiwa is local-first. Hosted infrastructure exists to provide durable truth, public surfaces, and distribution without moving the inference/shell hot path off the operator device.
 
-| Surface           | Role in Heiwa                                                           |
-| ----------------- | ----------------------------------------------------------------------- |
-| **Local machine** | Primary `heiwa` runtime, provider CLIs, local models, operator control, canonical evidence truth |
+| Surface           | Role in Heiwa                                                                                                         |
+| ----------------- | --------------------------------------------------------------------------------------------------------------------- |
+| **Local machine** | Primary `heiwa` runtime, provider CLIs, local models, operator control, canonical evidence truth                      |
 | **GitHub**        | Source of truth for code, CI, release artifacts, install/update distribution; planned (redaction-gated) evidence sync |
-| **Cloudflare**    | DNS utility only                                                        |
+| **Cloudflare**    | DNS utility only                                                                                                      |
 
-| Layer                       | Host                              | Role                                                                     |
-| --------------------------- | --------------------------------- | ------------------------------------------------------------------------ |
+| Layer                       | Host                              | Role                                                                                                  |
+| --------------------------- | --------------------------------- | ----------------------------------------------------------------------------------------------------- |
 | Canonical state / evidence  | Local device (`~/.heiwa/`)        | JSONL journal truth, replay/materialized read models, receipts, Lance derived index, SQLite hot state |
-| Local inference + streaming | `heiwa` app runtime on the device | Provider streams, PTY/shell, local models, local approvals, side effects |
-| Source / CI / distribution  | GitHub                            | Releases, install artifacts, binaries, checksums, source trust           |
-| DNS                         | Cloudflare                        | Domain records only                                                      |
+| Local inference + streaming | `heiwa` app runtime on the device | Provider streams, PTY/shell, local models, local approvals, side effects                              |
+| Source / CI / distribution  | GitHub                            | Releases, install artifacts, binaries, checksums, source trust                                        |
+| DNS                         | Cloudflare                        | Domain records only                                                                                   |
 
 Architectural implication:
 
@@ -634,12 +634,12 @@ Heiwa should expose its kernel in this order:
 
 Do not collapse everything into “plugins.”
 
-| Class                   | Meaning                                                                      |
-| ----------------------- | ---------------------------------------------------------------------------- |
-| **Provider adapters**   | Trusted system code that starts/stops providers and normalizes their streams |
-| **Tools**               | Callable actions such as shell, MCP, or local services                       |
-| **Hooks**               | User-facing block/modify/observe logic over event streams                    |
-| **Policies**            | Highest-trust canonical routing/authority logic in the local runtime         |
+| Class                 | Meaning                                                                      |
+| --------------------- | ---------------------------------------------------------------------------- |
+| **Provider adapters** | Trusted system code that starts/stops providers and normalizes their streams |
+| **Tools**             | Callable actions such as shell, MCP, or local services                       |
+| **Hooks**             | User-facing block/modify/observe logic over event streams                    |
+| **Policies**          | Highest-trust canonical routing/authority logic in the local runtime         |
 
 This separation is necessary for security, determinism, and platform clarity.
 

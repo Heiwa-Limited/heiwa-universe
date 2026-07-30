@@ -4,17 +4,17 @@ Updated 2026-07-27. Canonical repo shape: MacBook-first runtime, local `~/.heiwa
 
 ## Architecture
 
-| Layer                       | Owner                                 | Current path                                                                           | Status                                                               |
-| --------------------------- | ------------------------------------- | -------------------------------------------------------------------------------------- | -------------------------------------------------------------------- |
-| Installed runtime           | Rust + Shell                          | `apps/heiwa_shell/`                                                                    | Active product surface                                               |
-| Execution kernel            | Rust                                  | `apps/heiwa_core/`, `apps/heiwa_orchestrator/`, `crates/heiwa_loop/`                   | Active substrate                                                     |
-| Provider/auth normalization | Rust                                  | `crates/heiwa_provider/`, `crates/heiwa_vault/`, `crates/heiwa_quota/`                 | Active, uneven by provider                                           |
-| Session and local memory    | Rust + SQLite mirror                  | `crates/heiwa_session/`, `crates/heiwa_memory/`                                        | Active local substrate                                               |
-| Companion app               | TypeScript public shell + cockpit SPA | `apps/heiwa_app/clients/web/`, `apps/heiwa_app/clients/cockpit/`                       | Web client today; native wrapper later                               |
-| Evidence / recall           | JSONL journal + Lance index           | `crates/heiwa_evidence/`, `crates/heiwa_embed/`                                        | Local truth plane; Lance is derived and rebuildable                  |
-| Python sidecar/reference    | Python                                | `runtime/python/`, `packages/heiwa_sdk/`, `apps/heiwa_trading/`                        | Compatibility/R&D sidecars, not product center                       |
-| Distribution                | GitHub                                | `.github/workflows/{ci,release,pages}.yml`                                             | CI, release archives, GHCR image, docs                               |
-| Public edge                 | Cloudflare                            | `apps/heiwa_app/wrangler.toml`, `infra/platform/cloudflare/`                           | Paused until user functionality is solid; no local runtime authority |
+| Layer                       | Owner                                 | Current path                                                           | Status                                                               |
+| --------------------------- | ------------------------------------- | ---------------------------------------------------------------------- | -------------------------------------------------------------------- |
+| Installed runtime           | Rust + Shell                          | `apps/heiwa_shell/`                                                    | Active product surface                                               |
+| Execution kernel            | Rust                                  | `apps/heiwa_core/`, `apps/heiwa_orchestrator/`, `crates/heiwa_loop/`   | Active substrate                                                     |
+| Provider/auth normalization | Rust                                  | `crates/heiwa_provider/`, `crates/heiwa_vault/`, `crates/heiwa_quota/` | Active, uneven by provider                                           |
+| Session and local memory    | Rust + SQLite mirror                  | `crates/heiwa_session/`, `crates/heiwa_memory/`                        | Active local substrate                                               |
+| Companion app               | TypeScript public shell + cockpit SPA | `apps/heiwa_app/clients/web/`, `apps/heiwa_app/clients/cockpit/`       | Web client today; native wrapper later                               |
+| Evidence / recall           | JSONL journal + Lance index           | `crates/heiwa_evidence/`, `crates/heiwa_embed/`                        | Local truth plane; Lance is derived and rebuildable                  |
+| Python sidecar/reference    | Python                                | `runtime/python/`, `packages/heiwa_sdk/`, `apps/heiwa_trading/`        | Compatibility/R&D sidecars, not product center                       |
+| Distribution                | GitHub                                | `.github/workflows/{ci,release,pages}.yml`                             | CI, release archives, GHCR image, docs                               |
+| Public edge                 | Cloudflare                            | `apps/heiwa_app/wrangler.toml`, `infra/platform/cloudflare/`           | Paused until user functionality is solid; no local runtime authority |
 
 ## Product Contract
 
@@ -22,14 +22,14 @@ Rust proposes and executes. Local `~/.heiwa` state records current owner truth; 
 
 ## Current Work Lanes
 
-| Lane         | Goal                                                                                                | Gate                                                                                                      |
-| ------------ | --------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------- |
-| Runtime      | Keep `heiwa` local runtime installable, updateable, and honest about provider maturity              | `cargo test -p heiwa-shell --test smoke`, `heiwa doctor --ai-ops`, `heiwa app runtime status --json`      |
-| State        | Local SQLite/files are owner truth; JSONL evidence is the authority plane                          | `cargo test -p heiwa-session --test transcript_migration`, `cargo test -p heiwa_evidence`                 |
-| Web          | Keep public shell static/safe and cockpit local-runtime oriented                                    | `npm run typecheck`, `python apps/heiwa_app/scripts/check_static_surface.py`                              |
-| Python       | Keep sidecars dependency-clean and non-authoritative                                                | `uv run --extra dev python -m pytest` where relevant; lockfiles must have no open Dependabot alerts       |
-| Distribution | Publish through GitHub Releases/GHCR and docs through GitHub Pages                                  | `.github/workflows/release.yml`, `.github/workflows/pages.yml`, `scripts/check_release_metadata.sh`       |
-| Edge         | Keep Cloudflare DNS/Pages/WAF declarations aligned with public shell reality                        | `apps/heiwa_app/wrangler.toml`, `infra/platform/cloudflare/main.tf`, live Cloudflare auth before mutation |
+| Lane         | Goal                                                                                   | Gate                                                                                                      |
+| ------------ | -------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------- |
+| Runtime      | Keep `heiwa` local runtime installable, updateable, and honest about provider maturity | `cargo test -p heiwa-shell --test smoke`, `heiwa doctor --ai-ops`, `heiwa app runtime status --json`      |
+| State        | Local SQLite/files are owner truth; JSONL evidence is the authority plane              | `cargo test -p heiwa-session --test transcript_migration`, `cargo test -p heiwa_evidence`                 |
+| Web          | Keep public shell static/safe and cockpit local-runtime oriented                       | `npm run typecheck`, `python apps/heiwa_app/scripts/check_static_surface.py`                              |
+| Python       | Keep sidecars dependency-clean and non-authoritative                                   | `uv run --extra dev python -m pytest` where relevant; lockfiles must have no open Dependabot alerts       |
+| Distribution | Publish through GitHub Releases/GHCR and docs through GitHub Pages                     | `.github/workflows/release.yml`, `.github/workflows/pages.yml`, `scripts/check_release_metadata.sh`       |
+| Edge         | Keep Cloudflare DNS/Pages/WAF declarations aligned with public shell reality           | `apps/heiwa_app/wrangler.toml`, `infra/platform/cloudflare/main.tf`, live Cloudflare auth before mutation |
 
 ## Active Baseline
 

@@ -12,14 +12,14 @@ disabled until a redaction and privacy boundary exists.
 
 ## Required Local Inputs
 
-| Input                                   | Purpose                                                                                       |
-| --------------------------------------- | --------------------------------------------------------------------------------------------- |
-| `~/.heiwa/config.toml`                  | Runtime configuration                                                                         |
-| `~/.heiwa/accounts.json`                | Provider/account registry                                                                     |
-| `~/.heiwa/machine.json`                 | Local machine identity and capability manifest                                                |
-| `~/.heiwa/state/`                       | Local runtime state, approvals, worker heartbeats                                             |
-| `~/.heiwa/evidence/`                    | Canonical local JSONL evidence journal                                                        |
-| `~/.claude/`, `~/.codex/`, `~/.gemini/` | Provider-owned auth and hook posture                                                          |
+| Input                                   | Purpose                                           |
+| --------------------------------------- | ------------------------------------------------- |
+| `~/.heiwa/config.toml`                  | Runtime configuration                             |
+| `~/.heiwa/accounts.json`                | Provider/account registry                         |
+| `~/.heiwa/machine.json`                 | Local machine identity and capability manifest    |
+| `~/.heiwa/state/`                       | Local runtime state, approvals, worker heartbeats |
+| `~/.heiwa/evidence/`                    | Canonical local JSONL evidence journal            |
+| `~/.claude/`, `~/.codex/`, `~/.gemini/` | Provider-owned auth and hook posture              |
 
 ## Boot Contract
 
@@ -344,14 +344,14 @@ pre-existing or peer-agent changes.
 
 ## Model Tier Matrix
 
-| Lane                      | Preferred candidates when eligible | Other eligible candidates              | Notes                                              |
-| ------------------------- | ---------------------------------- | ---------------------------------------- | -------------------------------------------------- |
-| Routine chat/status/audit | local Ollama where sufficient      | OpenRouter, Codex, Claude Code           | Cheapest candidate above the call's quality floor  |
-| Build/code                | Codex CLI, Claude Code              | Ollama coding model, OpenRouter          | Provider CLIs own auth and quota semantics         |
-| Research/long context     | Claude Code, Codex                  | OpenRouter                               | Route per call from live provider evidence         |
-| Review/strategy           | Claude Code, Codex                  | OpenRouter                               | Use premium lanes only when the quality floor needs them |
-| Sovereign work            | local Ollama tiers                  | none                                     | Local-only providers; fail closed when unavailable |
-| Embeddings                | `ollama/qwen3-embedding:0.6b`       | none                                     | Requires a connected local Ollama runtime          |
+| Lane                      | Preferred candidates when eligible | Other eligible candidates       | Notes                                                    |
+| ------------------------- | ---------------------------------- | ------------------------------- | -------------------------------------------------------- |
+| Routine chat/status/audit | local Ollama where sufficient      | OpenRouter, Codex, Claude Code  | Cheapest candidate above the call's quality floor        |
+| Build/code                | Codex CLI, Claude Code             | Ollama coding model, OpenRouter | Provider CLIs own auth and quota semantics               |
+| Research/long context     | Claude Code, Codex                 | OpenRouter                      | Route per call from live provider evidence               |
+| Review/strategy           | Claude Code, Codex                 | OpenRouter                      | Use premium lanes only when the quality floor needs them |
+| Sovereign work            | local Ollama tiers                 | none                            | Local-only providers; fail closed when unavailable       |
+| Embeddings                | `ollama/qwen3-embedding:0.6b`      | none                            | Requires a connected local Ollama runtime                |
 
 Gemini CLI is not a current fallback: the operator account returned
 `IneligibleTierError` on 2026-07-19. Antigravity required authentication in the

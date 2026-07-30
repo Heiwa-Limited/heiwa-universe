@@ -33,13 +33,13 @@ Maturity is uneven across planes today; see [`HEIWA.md`](HEIWA.md#the-three-plan
 
 ## Architecture
 
-| Layer            | Canonical meaning                                                                          | Location                                                                               |
-| ---------------- | ------------------------------------------------------------------------------------------ | -------------------------------------------------------------------------------------- |
-| **Heiwa**        | Company and product identity                                                               | Repo root                                                                              |
-| **`heiwa`**      | Primary installed runtime and operator surface                                             | `apps/heiwa_shell/`                                                                    |
-| **DREX**         | Internal execution kernel and routing substrate                                            | `apps/heiwa_core/`                                                                     |
-| **Local evidence** | Canonical JSONL journal plus derived Lance recall index                                  | `crates/heiwa_evidence/`, `crates/heiwa_embed/`                                      |
-| **Rust runtime** | Volatile execution: provider supervision and candidate generation                          | `crates/`                                                                              |
+| Layer              | Canonical meaning                                                 | Location                                        |
+| ------------------ | ----------------------------------------------------------------- | ----------------------------------------------- |
+| **Heiwa**          | Company and product identity                                      | Repo root                                       |
+| **`heiwa`**        | Primary installed runtime and operator surface                    | `apps/heiwa_shell/`                             |
+| **DREX**           | Internal execution kernel and routing substrate                   | `apps/heiwa_core/`                              |
+| **Local evidence** | Canonical JSONL journal plus derived Lance recall index           | `crates/heiwa_evidence/`, `crates/heiwa_embed/` |
+| **Rust runtime**   | Volatile execution: provider supervision and candidate generation | `crates/`                                       |
 
 > Rust proposes and executes, local text truth records, Lance recalls, `heiwa` presents.
 

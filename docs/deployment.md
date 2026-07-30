@@ -79,10 +79,10 @@ Deployment gate:
 
 GitHub and Cloudflare are protected company services with separate authority.
 
-| Backend     | Protected role                                               | Safe update path                                                                        |
-| ----------- | ------------------------------------------------------------ | --------------------------------------------------------------------------------------- |
-| GitHub      | source, tag archive, releases, checksums, install provenance | local sandbox checks passed, local merge, push to main, tagged release                  |
-| Cloudflare  | DNS, WAF, public docs/app shell, install/update front door   | GitHub-driven deploys or explicit owner-approved `wrangler` deploys                     |
+| Backend    | Protected role                                               | Safe update path                                                       |
+| ---------- | ------------------------------------------------------------ | ---------------------------------------------------------------------- |
+| GitHub     | source, tag archive, releases, checksums, install provenance | local sandbox checks passed, local merge, push to main, tagged release |
+| Cloudflare | DNS, WAF, public docs/app shell, install/update front door   | GitHub-driven deploys or explicit owner-approved `wrangler` deploys    |
 
 Rules:
 

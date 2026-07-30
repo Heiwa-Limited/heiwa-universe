@@ -6,12 +6,12 @@ How the `heiwa-universe` repository becomes the public Heiwa surface. GitHub sta
 
 ## Three publishing planes
 
-| Plane                        | Surface          | Source in repo                                            | Authority        |
-| ---------------------------- | ---------------- | --------------------------------------------------------- | ---------------- |
-| **Marketing shell**          | `heiwa.ltd`      | `apps/heiwa_app/clients/web/`                             | GitHub Pages     |
-| **Documentation**            | `docs.heiwa.ltd` | `docs/` + `mkdocs.yml`                                    | GitHub Pages     |
-| **Releases**                 | GitHub Releases  | `apps/heiwa_core/`, `apps/heiwa_shell/`                   | GitHub Releases  |
-| **Evidence + recall**        | owner-local      | `crates/heiwa_evidence/`, `crates/heiwa_embed/`           | Local JSONL      |
+| Plane                 | Surface          | Source in repo                                  | Authority       |
+| --------------------- | ---------------- | ----------------------------------------------- | --------------- |
+| **Marketing shell**   | `heiwa.ltd`      | `apps/heiwa_app/clients/web/`                   | GitHub Pages    |
+| **Documentation**     | `docs.heiwa.ltd` | `docs/` + `mkdocs.yml`                          | GitHub Pages    |
+| **Releases**          | GitHub Releases  | `apps/heiwa_core/`, `apps/heiwa_shell/`         | GitHub Releases |
+| **Evidence + recall** | owner-local      | `crates/heiwa_evidence/`, `crates/heiwa_embed/` | Local JSONL     |
 
 Each plane has a single source of truth in the repo and a single deploy path. Automated workflows are the normal channel; a [manual fallback](#manual-fallback-when-actions-are-paused) exists for the periods when GitHub Actions are paused.
 

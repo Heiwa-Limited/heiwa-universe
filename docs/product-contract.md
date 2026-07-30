@@ -101,11 +101,11 @@ where privileged automation logic lives.
 
 The current backbone keeps runtime authority on the operator machine:
 
-| Service               | Product role                                                      |
-| --------------------- | ----------------------------------------------------------------- |
-| GitHub                | source, CI, release artifacts, installer, public repo front page  |
-| Cloudflare            | DNS utility only                                                   |
-| Local JSONL + Lance   | canonical evidence plus derived local recall                       |
+| Service             | Product role                                                     |
+| ------------------- | ---------------------------------------------------------------- |
+| GitHub              | source, CI, release artifacts, installer, public repo front page |
+| Cloudflare          | DNS utility only                                                 |
+| Local JSONL + Lance | canonical evidence plus derived local recall                     |
 
 This is not a hosted control plane. Local runtimes execute side effects, hold
 trust, and own durable state. GitHub evidence sync is planned and must remain
@@ -142,12 +142,12 @@ treated as product-grade.
 
 ## Service Boundaries
 
-| Service boundary | Runs where        | Owns                                                                  | Must not own                                  |
-| ---------------- | ----------------- | --------------------------------------------------------------------- | --------------------------------------------- |
-| Local runtime    | Devon/user device | side effects, provider subprocesses, secrets, JSONL evidence, Lance recall | hosted authority or unredacted sync        |
-| Cloudflare DNS   | Cloudflare        | DNS records                                                           | state, application hosting, or automation  |
-| GitHub           | GitHub            | source, CI, releases, install distribution                             | live user state or private runtime memory  |
-| Public website   | GitHub Pages      | marketing, docs, install, public repo trust                            | privileged control-plane mutations         |
+| Service boundary | Runs where        | Owns                                                                       | Must not own                              |
+| ---------------- | ----------------- | -------------------------------------------------------------------------- | ----------------------------------------- |
+| Local runtime    | Devon/user device | side effects, provider subprocesses, secrets, JSONL evidence, Lance recall | hosted authority or unredacted sync       |
+| Cloudflare DNS   | Cloudflare        | DNS records                                                                | state, application hosting, or automation |
+| GitHub           | GitHub            | source, CI, releases, install distribution                                 | live user state or private runtime memory |
+| Public website   | GitHub Pages      | marketing, docs, install, public repo trust                                | privileged control-plane mutations        |
 
 ## Feature Families
 
