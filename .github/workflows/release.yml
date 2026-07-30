@@ -59,7 +59,9 @@ jobs:
             archive_ext: tar.gz
             binary_name: heiwa
           - name: macos-aarch64
-            runner: macos-14
+            # macos-14 is retiring; macos-26 GA since 2026-02-26. Keep the
+            # bundle minimumSystemVersion floor at 14.0 — runner != floor.
+            runner: macos-26
             target: aarch64-apple-darwin
             archive_ext: tar.gz
             binary_name: heiwa

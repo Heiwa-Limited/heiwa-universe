@@ -1,9 +1,10 @@
 name: Heiwa CI
 
+# CI economy: runs on PRs targeting main (the production gate) and manual
+# dispatch. No push:main trigger — the PR already validated the merge ref,
+# and only PRs can update main under branch protection.
 on:
   pull_request:
-    branches: ["main"]
-  push:
     branches: ["main"]
   workflow_dispatch:
 

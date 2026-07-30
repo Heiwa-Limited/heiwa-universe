@@ -20,6 +20,13 @@ Updated 2026-07-27. Canonical repo shape: MacBook-first runtime, local `~/.heiwa
 
 Rust proposes and executes. Local `~/.heiwa` state records current owner truth; JSONL evidence under `~/.heiwa/evidence/` is the authority plane and Lance is the derived recall index. `heiwa` presents. TypeScript renders public and cockpit surfaces. Python remains sidecar/reference until promoted behind explicit Rust-owned contracts.
 
+## Release Runners (macOS)
+
+- Production release builds: `runs-on: macos-26` (GA since 2026-02-26; `macos-latest` also resolves to macos-26 since June 2026). `macos-14` is retiring — do not reintroduce it.
+- Compatibility floor: `minimumSystemVersion: "14.0"` in the Tauri bundle. The runner OS is the build environment, not the floor — do not raise the floor unless Heiwa adopts APIs that genuinely require it.
+- Xcode 27 preview: GitHub exposes `xcode-27` / `xcode-27-xlarge` labels (arm64-only, public preview since 2026-07-16). Use for a scratch-branch canary before macOS 27 GA; never gate releases on a preview toolchain.
+- Desktop bundle is ad-hoc signed (`signingIdentity: "-"`) — see `docs/publishing.md` for distribution truth and forbidden claims.
+
 ## Current Work Lanes
 
 | Lane         | Goal                                                                                   | Gate                                                                                                      |

@@ -1,8 +1,9 @@
 name: Heiwa Deploy
 
+# Deliberate deploys only: manual dispatch (surface detection runs --all).
+# No push:main trigger — merging to main must not implicitly republish the
+# public shell; releases ride v* tags (pages.yml, release.yml).
 on:
-  push:
-    branches: ["main"]
   workflow_dispatch:
 
 permissions:
