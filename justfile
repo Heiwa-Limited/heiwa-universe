@@ -18,7 +18,7 @@ default:
     @echo "  test-product   Run product test recipes"
     @echo "  check-product  Run product verification recipes"
     @echo "  verify-product Run product tests and checks"
-    @echo "  deploy-product Push main to trigger CI deploy"
+    @echo "  deploy-product Push dev, PR to main, auto-merge on green CI"
     @echo "  drex-evals     Run DREX routing golden eval suite (E3)"
 
 test-trading:
@@ -52,8 +52,12 @@ check-product: check-web check-docs
 
 verify-product: test-product check-product
 
+# main is branch-protected (enforce_admins + required checks); production
+# promotion is push dev -> PR -> merge on green. Requires gh auth.
 deploy-product:
-    git push origin main
+    git push origin dev
+    gh pr create --base main --head dev --fill || true
+    gh pr merge dev --merge --auto
 
 # E3 DREX routing golden eval suite: L1 intent classification + L2 routing
 # decisions. Hermetic (no providers/network/STDB). Fails on route regressions.

@@ -13,9 +13,7 @@
       "apps/heiwa_app/clients/cockpit/*.{json,ts}",
       "apps/heiwa_app/package.json",
       "package.json",
-      "package-lock.json",
-      "packages/heiwa_bindings/typescript/package.json",
-      "packages/heiwa_bindings/typescript/tsconfig.json"
+      "package-lock.json"
     ]
   },
   "formatter": {

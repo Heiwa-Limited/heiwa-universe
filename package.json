@@ -15,8 +15,7 @@
   },
   "workspaces": [
     "apps/heiwa_app",
-    "apps/heiwa_app/clients/cockpit",
-    "packages/heiwa_bindings/typescript"
+    "apps/heiwa_app/clients/cockpit"
   ],
   "scripts": {
     "check:runtime": "bash scripts/check_runtime_baseline.sh",

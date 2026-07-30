@@ -79,7 +79,7 @@ GitHub plus Cloudflare are the public install source: GitHub owns source, releas
 
 Heiwa must initialize and adapt per machine through `~/.heiwa/machine.json`; do not hardcode one-user or one-device assumptions into runtime behavior.
 
-Promotion rule (Local-first bypass posture): Local sandbox verification is the canonical gate. Verify the checkout with the sandbox release checks, merge to `main` locally, and then promote to the installed `heiwa` runtime via local checkout updates (`heiwa app update --source checkout`). Bypassing GitHub Actions and PR checks is standard to prevent remote blockers from stopping operator progress.
+Promotion rule (two-branch model): `dev` is the integration branch and `main` is production. All agent commits land on `dev` (a local hook blocks commits on `main`). Verify on `dev` with the local gates (`bash scripts/check_agent_baseline.sh`, targeted tests), then update `main` only via a `dev` -> `main` pull request. GitHub branch protection on `main` (`enforce_admins`, required status checks, 0 approvals — self-merge is fine) makes direct pushes impossible; do not attempt to bypass it, the PR checks are the production gate. After `main` updates, promote to the installed `heiwa` runtime via local checkout updates (`heiwa app update --source checkout`).
 
 Agent baseline gate: before closing repo-health work, local promotion, or peer-agent handoff, run `bash scripts/check_agent_baseline.sh`. The gate is local-only and must not be treated as remote health. Remote operations (`git fetch/pull/push`, `gh run`, releases, `wrangler deploy`) require an explicit assignment and the remote pre-flight in `docs/agent-baseline-workflow.md`.
 

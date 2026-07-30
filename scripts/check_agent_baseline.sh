@@ -4,7 +4,7 @@ set -euo pipefail
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$repo_root"
 
-expected_branch="${HEIWA_BASELINE_BRANCH:-main}"
+expected_branch="${HEIWA_BASELINE_BRANCH:-dev}"
 allow_dirty=0
 
 usage() {
@@ -16,7 +16,7 @@ perform network health checks. Remote pre-flight remains a separate explicitly
 assigned operation.
 
 Checks:
-  - current checkout is on the expected integration branch (default: main)
+  - current checkout is on the expected integration branch (default: dev)
   - cached origin/<branch> ref exists and local ahead/behind is reportable
   - no tracked dirty files unless --allow-dirty is passed
   - untracked files are absent except ignored or explicit vendor/ quarantine material
