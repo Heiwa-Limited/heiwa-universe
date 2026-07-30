@@ -17,8 +17,8 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use heiwa_protocol::ModelTier;
 use heiwa_core::drex::{default_policy, plan_route, DrexIngress};
+use heiwa_protocol::ModelTier;
 use serde::Deserialize;
 
 #[derive(Deserialize)]
@@ -85,25 +85,121 @@ fn is_local_provider(provider: &str) -> bool {
 fn registry(name: &str) -> Vec<ModelTier> {
     match name {
         "default" => vec![
-            tier("qwen3.5:9b", "ollama", "local", 3, 8192, 16384, r#"["chat","advanced_coding"]"#),
-            tier("gemma4:latest", "ollama", "local", 2, 4096, 8192, r#"["chat"]"#),
-            tier("claude-sonnet-4-6", "anthropic", "anthropic", 3, 0, 200000, r#"["chat","advanced_coding"]"#),
-            tier("gpt-5-codex", "openai", "openai", 3, 0, 200000, r#"["chat","advanced_coding"]"#),
-            tier("gemini-3.1-pro", "google", "google", 3, 0, 1000000, r#"["chat","advanced_coding"]"#),
+            tier(
+                "qwen3.5:9b",
+                "ollama",
+                "local",
+                3,
+                8192,
+                16384,
+                r#"["chat","advanced_coding"]"#,
+            ),
+            tier(
+                "gemma4:latest",
+                "ollama",
+                "local",
+                2,
+                4096,
+                8192,
+                r#"["chat"]"#,
+            ),
+            tier(
+                "claude-sonnet-4-6",
+                "anthropic",
+                "anthropic",
+                3,
+                0,
+                200000,
+                r#"["chat","advanced_coding"]"#,
+            ),
+            tier(
+                "gpt-5-codex",
+                "openai",
+                "openai",
+                3,
+                0,
+                200000,
+                r#"["chat","advanced_coding"]"#,
+            ),
+            tier(
+                "gemini-3.1-pro",
+                "google",
+                "google",
+                3,
+                0,
+                1000000,
+                r#"["chat","advanced_coding"]"#,
+            ),
         ],
         "cloud_only" => vec![
-            tier("claude-sonnet-4-6", "anthropic", "anthropic", 3, 0, 200000, r#"["chat","advanced_coding"]"#),
-            tier("gpt-5-codex", "openai", "openai", 3, 0, 200000, r#"["chat","advanced_coding"]"#),
-            tier("gemini-3.1-pro", "google", "google", 3, 0, 1000000, r#"["chat","advanced_coding"]"#),
+            tier(
+                "claude-sonnet-4-6",
+                "anthropic",
+                "anthropic",
+                3,
+                0,
+                200000,
+                r#"["chat","advanced_coding"]"#,
+            ),
+            tier(
+                "gpt-5-codex",
+                "openai",
+                "openai",
+                3,
+                0,
+                200000,
+                r#"["chat","advanced_coding"]"#,
+            ),
+            tier(
+                "gemini-3.1-pro",
+                "google",
+                "google",
+                3,
+                0,
+                1000000,
+                r#"["chat","advanced_coding"]"#,
+            ),
         ],
         "local_only" => vec![
-            tier("qwen3.5:9b", "ollama", "local", 3, 8192, 16384, r#"["chat","advanced_coding"]"#),
-            tier("gemma4:latest", "ollama", "local", 2, 4096, 8192, r#"["chat"]"#),
+            tier(
+                "qwen3.5:9b",
+                "ollama",
+                "local",
+                3,
+                8192,
+                16384,
+                r#"["chat","advanced_coding"]"#,
+            ),
+            tier(
+                "gemma4:latest",
+                "ollama",
+                "local",
+                2,
+                4096,
+                8192,
+                r#"["chat"]"#,
+            ),
         ],
         // No local tier reaches capability_class 3.
         "local_weak_only" => vec![
-            tier("gemma4:latest", "ollama", "local", 2, 4096, 8192, r#"["chat"]"#),
-            tier("qwen3.5:4b", "ollama", "local", 1, 2048, 8192, r#"["chat"]"#),
+            tier(
+                "gemma4:latest",
+                "ollama",
+                "local",
+                2,
+                4096,
+                8192,
+                r#"["chat"]"#,
+            ),
+            tier(
+                "qwen3.5:4b",
+                "ollama",
+                "local",
+                1,
+                2048,
+                8192,
+                r#"["chat"]"#,
+            ),
         ],
         "empty" => vec![],
         other => panic!("unknown registry '{other}' referenced by fixture"),
@@ -128,7 +224,11 @@ fn tier(
         capability_class,
         effort_knob: "default".to_string(),
         effort_level: 1,
-        cost_per_turn: if is_local_provider(provider) { 0.0 } else { 0.01 },
+        cost_per_turn: if is_local_provider(provider) {
+            0.0
+        } else {
+            0.01
+        },
         max_context_tokens,
         vram_requirement_mb,
         quantization_type: "q4_K_M".to_string(),
@@ -282,7 +382,11 @@ fn drex_golden_l2_route() {
     }
 
     println!("drex_golden L2: {active} active, {pending} pending fixture(s)");
-    assert!(active > 0, "no active L2 fixtures found in {}", dir.display());
+    assert!(
+        active > 0,
+        "no active L2 fixtures found in {}",
+        dir.display()
+    );
     assert!(
         failures.is_empty(),
         "{} L2 golden failure(s) ({} active, {} pending):\n{}",

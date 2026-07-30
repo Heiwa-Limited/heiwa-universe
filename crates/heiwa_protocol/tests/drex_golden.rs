@@ -93,7 +93,11 @@ fn drex_golden_l1_classify() {
     }
 
     println!("drex_golden L1: {active} active, {pending} pending fixture(s)");
-    assert!(active > 0, "no active L1 fixtures found in {}", dir.display());
+    assert!(
+        active > 0,
+        "no active L1 fixtures found in {}",
+        dir.display()
+    );
     assert!(
         failures.is_empty(),
         "{} L1 golden failure(s) ({} active, {} pending):\n{}",
