@@ -84,18 +84,6 @@ audit_python_project() {
   )
 }
 
-audit_rust() {
-  # quick-xml 0.26 is pulled only through:
-  # lancedb -> lance-testing -> pprof -> inferno.
-  # Inferno uses quick_xml::Writer, while both advisories require reader-side
-  # attribute iteration or NsReader. Current upstream LanceDB has already moved
-  # lance-testing to dev-dependencies; remove these exceptions when that change
-  # reaches a stable LanceDB release or pprof upgrades Inferno to quick-xml 0.41.
-  cargo audit \
-    --ignore RUSTSEC-2026-0194 \
-    --ignore RUSTSEC-2026-0195
-}
-
 cd "$ROOT" || exit 1
 
 section "security gate metadata"
@@ -104,7 +92,7 @@ printf 'python-audit-python: %s\n' "$PYTHON_AUDIT_PYTHON"
 printf 'git: %s\n' "$(git rev-parse --short HEAD 2>/dev/null || echo unknown)"
 printf 'dirty: %s\n' "$(test -z "$(git status --porcelain 2>/dev/null)" && echo false || echo true)"
 
-run_required "cargo audit" audit_rust
+run_required "cargo audit" cargo audit
 run_required "root npm prod audit" npm audit --omit=dev
 run_required "root TypeScript typecheck" npm run typecheck --silent
 run_required "desktop TypeScript typecheck" bash -c 'cd apps/heiwa_app/desktop && npm run typecheck --silent'
