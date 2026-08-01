@@ -214,9 +214,32 @@ fn update_from_checkout(dry_run: bool, json_output: bool) -> Result<()> {
     if !status.success() {
         return Err(anyhow!("cargo install failed with status {status}"));
     }
+
+    let desktop_bundle = plan
+        .get("desktop_bundle_source")
+        .ok_or_else(|| anyhow!("desktop bundle source missing from update plan"))?;
+    let desktop_bundle_present = desktop_bundle
+        .get("present")
+        .and_then(Value::as_bool)
+        .unwrap_or(false);
+    if desktop_bundle_present {
+        let desktop_bundle_path = desktop_bundle
+            .get("path")
+            .and_then(Value::as_str)
+            .ok_or_else(|| anyhow!("desktop bundle path missing from update plan"))?;
+        heiwa_install::install_desktop_app_bundle(&install_root, Path::new(desktop_bundle_path))?;
+    }
     let receipt_path = write_promotion_receipt(&plan)?;
     if !json_output {
         println!("  status: updated");
+        println!(
+            "  app_bundle: {}",
+            if desktop_bundle_present {
+                "updated"
+            } else {
+                "not built; CLI only"
+            }
+        );
         println!("  promotion_receipt: {}", receipt_path.display());
     }
     Ok(())
@@ -287,10 +310,7 @@ fn checkout_update_plan(
         "installed_app": installed_app.display().to_string(),
         "installed_app_present": installed_app.join("Contents").join("MacOS").join("Heiwa").is_file(),
         "desktop_bundle_source": desktop_bundle,
-        "app_bundle_update": {
-            "wired": false,
-            "blocker": "checkout update currently installs ~/.heiwa/bin/heiwa only; Heiwa.app bundle promotion is still handled by install/app-bundle logic and needs explicit update wiring plus receipt",
-        },
+        "app_bundle_update": app_bundle_update_plan(&desktop_bundle, dry_run),
         "install_command": install_command,
         "restart_policy": "prompt-before-restart",
         "restart_required": true,
@@ -323,6 +343,25 @@ fn desktop_bundle_source(repo_root: &Path) -> Value {
         "path": bundle.display().to_string(),
         "present": executable.is_file(),
         "executable": executable.display().to_string(),
+    })
+}
+
+fn app_bundle_update_plan(desktop_bundle: &Value, dry_run: bool) -> Value {
+    let source_present = desktop_bundle
+        .get("present")
+        .and_then(Value::as_bool)
+        .unwrap_or(false);
+    json!({
+        "wired": true,
+        "status": if source_present { "ready" } else { "not_built" },
+        "source_present": source_present,
+        "would_install": source_present,
+        "will_install": source_present && !dry_run,
+        "blocker": if source_present {
+            Value::Null
+        } else {
+            json!("build target/release/bundle/macos/Heiwa.app before checkout promotion to update the desktop surface")
+        },
     })
 }
 
@@ -365,6 +404,8 @@ fn promotion_receipt_plan(
             "installed_version_before": installed_version,
             "installed_app": installed_app.display().to_string(),
             "desktop_bundle_source": desktop_bundle,
+            "desktop_bundle_would_install": desktop_bundle.get("present").and_then(Value::as_bool).unwrap_or(false),
+            "desktop_bundle_installed": !dry_run && desktop_bundle.get("present").and_then(Value::as_bool).unwrap_or(false),
         },
         "codesign": codesign_probe(desktop_bundle),
         "runtime_probes": runtime_probe_contracts(),
@@ -4989,6 +5030,23 @@ mod app_readmodel_tests {
     use heiwa_evidence::OperatorJournal;
     use heiwa_session::operator::{OperatorSessionService, StartTurnRequest};
     use tokio::sync::broadcast;
+
+    #[test]
+    fn checkout_app_bundle_plan_distinguishes_ready_and_missing_sources() {
+        let ready = app_bundle_update_plan(&json!({"present": true}), true);
+        assert_eq!(ready["wired"], true);
+        assert_eq!(ready["status"], "ready");
+        assert_eq!(ready["would_install"], true);
+        assert_eq!(ready["will_install"], false);
+        assert!(ready["blocker"].is_null());
+
+        let missing = app_bundle_update_plan(&json!({"present": false}), false);
+        assert_eq!(missing["wired"], true);
+        assert_eq!(missing["status"], "not_built");
+        assert_eq!(missing["would_install"], false);
+        assert_eq!(missing["will_install"], false);
+        assert!(missing["blocker"].is_string());
+    }
 
     #[test]
     fn browser_bootstrap_is_single_use_and_issues_expiring_http_only_session() {
