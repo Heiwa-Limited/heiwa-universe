@@ -680,6 +680,10 @@ fn test_doctor_json_reports_runtimes_providers_and_app_probe() {
         "expected providers array in doctor json: {stdout}"
     );
     assert!(
+        stdout.contains("\"provider_accounts\":["),
+        "expected provider account summaries in doctor json: {stdout}"
+    );
+    assert!(
         stdout.contains("\"provider_id\":\"ollama\""),
         "expected ollama in providers array: {stdout}"
     );

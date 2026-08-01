@@ -372,6 +372,21 @@ async fn main() -> Result<()> {
                     .iter()
                     .filter_map(|p| heiwa_provider::get_auth_status(p))
                     .collect();
+            let provider_registry = heiwa_provider::AccountRegistry::load();
+            let provider_accounts = provider_registry
+                .accounts
+                .iter()
+                .map(|account| {
+                    serde_json::json!({
+                        "account_id": account.account_id,
+                        "provider": account.provider,
+                        "auth_kind": account.credential.kind_label(),
+                        "rate_group": account.rate_group,
+                        "status": &account.status,
+                        "model_count": account.models.len(),
+                    })
+                })
+                .collect::<Vec<_>>();
             let ai_ops = if include_ai_ops {
                 Some(heiwa_install::check_ai_ops()?)
             } else {
@@ -393,6 +408,7 @@ async fn main() -> Result<()> {
                         "runtimes": report,
                         "identity": identity_json,
                         "providers": provider_statuses,
+                        "provider_accounts": provider_accounts,
                         "heiwa_app": app_probe,
                         "layout": layout,
                         "evidence": evidence_status,
@@ -436,7 +452,24 @@ async fn main() -> Result<()> {
                 println!("Heiwa Identity: Not logged in (run 'heiwa login')");
             }
             println!();
-            println!("Providers:");
+            println!("Provider Accounts:");
+            if provider_registry.accounts.is_empty() {
+                println!("  none registered");
+            } else {
+                for account in &provider_registry.accounts {
+                    println!(
+                        "  {:<20} {:<20} ({}) [{:?}] — {} model{}",
+                        account.account_id,
+                        account.provider,
+                        account.credential.kind_label(),
+                        account.status,
+                        account.models.len(),
+                        if account.models.len() == 1 { "" } else { "s" },
+                    );
+                }
+            }
+            println!();
+            println!("CLI Discovery (auth presence only):");
             for status in &provider_statuses {
                 let kind = match status.auth_kind {
                     heiwa_provider::AuthKind::OauthCli => "oauth_cli",
@@ -456,6 +489,9 @@ async fn main() -> Result<()> {
                     }
                     "not_installed" => match status.provider_id.as_str() {
                         "ollama" => Some("brew install ollama".to_string()),
+                        "antigravity" => {
+                            Some("connect Antigravity in its provider-owned surface".to_string())
+                        }
                         _ => Some(format!(
                             "install {} CLI (see provider docs)",
                             status.provider_id
