@@ -55,6 +55,7 @@ impl TestRuntime {
         let mut command = Command::new(env!("CARGO_BIN_EXE_heiwa"));
         command
             .env("HOME", home.path())
+            .env_remove("HEIWA_HOME")
             .env("HEIWA_EVIDENCE_DIR", evidence.path())
             .env("HEIWA_OLLAMA_BASE", override_endpoint)
             .env_remove("HEIWA_MACHINE_AUTH_TOKEN")
@@ -81,6 +82,7 @@ impl TestRuntime {
         let mut command = Command::new(env!("CARGO_BIN_EXE_heiwa"));
         command
             .env("HOME", home.path())
+            .env_remove("HEIWA_HOME")
             .env("HEIWA_EVIDENCE_DIR", evidence.path())
             .env_remove("HEIWA_MACHINE_AUTH_TOKEN")
             .env_remove("HEIWA_AUTH_TOKEN")
@@ -1190,6 +1192,7 @@ fn spawn_runtime(
     let mut command = Command::new(env!("CARGO_BIN_EXE_heiwa"));
     command
         .env("HOME", home)
+        .env_remove("HEIWA_HOME")
         .env("HEIWA_EVIDENCE_DIR", evidence)
         .env("HEIWA_MACHINE_AUTH_TOKEN", TOKEN)
         .args(["app", "start", "--port", &port.to_string(), "--no-open"])
