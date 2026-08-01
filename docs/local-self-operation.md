@@ -252,6 +252,17 @@ Browser preview is separate: `heiwa app start --open` puts a single-use,
 redirects with a port-scoped HttpOnly session cookie (eight-hour TTL). Browser
 code receives neither bootstrap reuse authority nor machine bearer material.
 
+Installed mode resolves canonical secrets from environment variables first,
+then from owner-private local files:
+
+- `~/.heiwa/secrets/machine_auth_token` for `HEIWA_MACHINE_AUTH_TOKEN`
+- `~/.heiwa/secrets/jwt_signing_secret` for `HEIWA_JWT_SIGNING_SECRET`
+
+Both files must be regular, non-symlink files with mode `0600` and contain one
+ASCII token. Empty, oversized, multiline, group-readable, or world-readable
+files are rejected. This keeps tokens out of LaunchAgent plists while giving
+the installed CLI, runtime, and native Desktop one auth source.
+
 Cursor and restart recovery are fail-closed:
 
 - App startup exclusively leases the configured evidence root before recovery,

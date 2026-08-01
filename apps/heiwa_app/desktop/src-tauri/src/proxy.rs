@@ -90,9 +90,7 @@ pub(crate) fn runtime_websocket_base_url() -> Result<String, ProxyError> {
 }
 
 pub(crate) fn machine_auth_token() -> Result<String, ProxyError> {
-    let token = env::var("HEIWA_MACHINE_AUTH_TOKEN")
-        .or_else(|_| env::var("HEIWA_AUTH_TOKEN"))
-        .unwrap_or_default();
+    let token = heiwa_core::config::RuntimeConfig::from_env().machine_auth_token;
     validate_auth_token(&token)?;
     Ok(token)
 }
