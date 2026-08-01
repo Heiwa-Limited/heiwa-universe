@@ -105,4 +105,6 @@ for required_env in HEIWA_MACHINE_AUTH_TOKEN HEIWA_JWT_SIGNING_SECRET HEIWA_STAT
   fi
 done
 
+bash scripts/tests/test_audit_operator_machine.sh
+
 echo "Runtime baseline pins and workflow wiring are present."
