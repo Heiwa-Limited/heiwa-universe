@@ -1416,7 +1416,14 @@ async fn handle_connection(
         .await;
     }
 
-    if let Some(payload) = api_payload_for_port(path, &started_at, local_port) {
+    let payload_path = path.to_string();
+    let payload_started_at = started_at.as_str().to_string();
+    let payload = tokio::task::spawn_blocking(move || {
+        api_payload_for_port(&payload_path, &payload_started_at, local_port)
+    })
+    .await
+    .map_err(|error| anyhow!("local app payload task failed: {error}"))?;
+    if let Some(payload) = payload {
         return write_response(
             &mut stream,
             200,
@@ -4658,7 +4665,8 @@ fn approvals_summary(state_dir: &Path) -> Value {
         .join("dispatch")
         .join("approvals")
         .join("decisions");
-    let pending = count_json(&requests);
+    let pending =
+        crate::cmd::approvals::scan_pending_requests_in(&requests, &decisions).len() as i64;
     let decided = count_json(&decisions);
     json!({
         "requests_dir": requests.display().to_string(),
@@ -5079,6 +5087,43 @@ mod app_readmodel_tests {
         assert!(!replay.contains(&bootstrap));
     }
 
+    #[tokio::test]
+    async fn runtime_snapshot_http_is_safe_inside_async_server_context() {
+        let listener = TcpListener::bind(("127.0.0.1", 0)).await.unwrap();
+        let address = listener.local_addr().unwrap();
+        let client = tokio::spawn(async move {
+            let mut client = TcpStream::connect(address).await.unwrap();
+            client
+                .write_all(
+                    format!(
+                        "GET /api/v1/runtime/snapshot HTTP/1.1\r\nHost: {address}\r\nConnection: close\r\n\r\n"
+                    )
+                    .as_bytes(),
+                )
+                .await
+                .unwrap();
+            let mut response = Vec::new();
+            client.read_to_end(&mut response).await.unwrap();
+            String::from_utf8(response).unwrap()
+        });
+        let (server, _) = listener.accept().await.unwrap();
+
+        handle_connection(
+            server,
+            Arc::new("2026-08-01T00:00:00Z".to_string()),
+            Arc::new(Mutex::new(LocalRequestReplayCache::default())),
+            Arc::new(Mutex::new(BrowserSessionStore::default())),
+        )
+        .await
+        .unwrap();
+
+        let response = client.await.unwrap();
+        assert!(response.starts_with("HTTP/1.1 200 OK\r\n"));
+        let body = response.split("\r\n\r\n").nth(1).expect("response body");
+        let payload: Value = serde_json::from_str(body).expect("JSON snapshot");
+        assert_eq!(payload["ok"], true);
+    }
+
     #[test]
     fn ollama_models_payload_uses_resolved_override_not_live_default() {
         use std::io::{Read, Write};
@@ -5181,6 +5226,35 @@ mod app_readmodel_tests {
         let _ = fs::remove_dir_all(&dir);
         fs::create_dir_all(&dir).expect("create temp state dir");
         dir
+    }
+
+    #[test]
+    fn runtime_approval_summary_excludes_decided_requests() {
+        let state = temp_state_dir("approval-summary");
+        let requests = state.join("dispatch").join("requests");
+        let decisions = state.join("dispatch").join("approvals").join("decisions");
+        fs::create_dir_all(&requests).expect("create request directory");
+        fs::create_dir_all(&decisions).expect("create decision directory");
+        fs::write(
+            requests.join("req_completed.json"),
+            json!({"request_id":"req_completed"}).to_string(),
+        )
+        .expect("write approval request");
+        fs::write(
+            decisions.join("req_completed.json"),
+            json!({"id":"req_completed","outcome":"approved"}).to_string(),
+        )
+        .expect("write approval decision");
+
+        let summary = approvals_summary(&state);
+
+        assert_eq!(summary["pending"], 0);
+        assert_eq!(summary["decided"], 1);
+
+        fs::remove_file(decisions.join("req_completed.json"))
+            .expect("remove decision to expose pending request");
+        assert_eq!(approvals_summary(&state)["pending"], 1);
+        let _ = fs::remove_dir_all(&state);
     }
 
     fn test_operator_sessions(root: &Path) -> Arc<OperatorSessionService> {
