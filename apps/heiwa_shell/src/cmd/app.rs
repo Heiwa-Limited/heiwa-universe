@@ -4572,6 +4572,20 @@ fn generated_file_status(path: &Path) -> String {
     }
 }
 
+fn worker_entry_is_live(entry: &Value, now: i64) -> bool {
+    let last = entry
+        .get("last_heartbeat_utc")
+        .and_then(Value::as_str)
+        .and_then(|value| chrono::DateTime::parse_from_rfc3339(value).ok())
+        .map(|timestamp| timestamp.timestamp())
+        .unwrap_or(0);
+    let ttl = entry
+        .get("ttl_seconds")
+        .and_then(Value::as_i64)
+        .unwrap_or(HEARTBEAT_TTL_SECS);
+    (now - last) <= ttl
+}
+
 fn write_app_heartbeat(runtime_state_dir: &Path, worker_id: &str) -> Result<()> {
     let path = runtime_state_dir.join("workers.json");
     if let Some(parent) = path.parent() {
@@ -4581,11 +4595,12 @@ fn write_app_heartbeat(runtime_state_dir: &Path, worker_id: &str) -> Result<()> 
         .ok()
         .and_then(|raw| serde_json::from_str::<Value>(&raw).ok())
         .unwrap_or_else(|| json!({"workers": []}));
+    let now = chrono::Utc::now();
     let entry = json!({
         "worker_id": worker_id,
         "class": "shell_machine",
         "node": hostname_string(),
-        "last_heartbeat_utc": chrono::Utc::now().to_rfc3339(),
+        "last_heartbeat_utc": now.to_rfc3339(),
         "ttl_seconds": HEARTBEAT_TTL_SECS,
         "transport": "localhost-http-websocket",
     });
@@ -4595,6 +4610,7 @@ fn write_app_heartbeat(runtime_state_dir: &Path, worker_id: &str) -> Result<()> 
             .as_array_mut()
     });
     if let Some(arr) = arr {
+        arr.retain(|worker| worker_entry_is_live(worker, now.timestamp()));
         if let Some(idx) = arr
             .iter()
             .position(|worker| worker.get("worker_id").and_then(Value::as_str) == Some(worker_id))
@@ -4676,17 +4692,7 @@ fn workers_summary(state_dir: &Path) -> Value {
     let mut live = 0i64;
     let mut stale = 0i64;
     for entry in &entries {
-        let last = entry
-            .get("last_heartbeat_utc")
-            .and_then(Value::as_str)
-            .and_then(|s| chrono::DateTime::parse_from_rfc3339(s).ok())
-            .map(|dt| dt.timestamp())
-            .unwrap_or(0);
-        let ttl = entry
-            .get("ttl_seconds")
-            .and_then(Value::as_i64)
-            .unwrap_or(HEARTBEAT_TTL_SECS);
-        if (now - last) <= ttl {
+        if worker_entry_is_live(entry, now) {
             live += 1;
         } else {
             stale += 1;
@@ -5046,6 +5052,47 @@ mod app_readmodel_tests {
         assert_eq!(missing["would_install"], false);
         assert_eq!(missing["will_install"], false);
         assert!(missing["blocker"].is_string());
+    }
+
+    #[test]
+    fn app_heartbeat_prunes_expired_worker_records() {
+        let state = temp_state_dir("worker-prune");
+        let now = chrono::Utc::now();
+        fs::write(
+            state.join("workers.json"),
+            serde_json::to_vec_pretty(&json!({
+                "workers": [
+                    {
+                        "worker_id": "expired-worker",
+                        "last_heartbeat_utc": (now - chrono::Duration::minutes(10)).to_rfc3339(),
+                        "ttl_seconds": 120
+                    },
+                    {
+                        "worker_id": "live-peer",
+                        "last_heartbeat_utc": now.to_rfc3339(),
+                        "ttl_seconds": 120
+                    }
+                ]
+            }))
+            .expect("worker registry JSON"),
+        )
+        .expect("write worker registry");
+
+        write_app_heartbeat(&state, "current-worker").expect("write current heartbeat");
+
+        let workers: Value = serde_json::from_slice(
+            &fs::read(state.join("workers.json")).expect("read worker registry"),
+        )
+        .expect("parse worker registry");
+        let worker_ids = workers["workers"]
+            .as_array()
+            .expect("workers array")
+            .iter()
+            .filter_map(|worker| worker["worker_id"].as_str())
+            .collect::<Vec<_>>();
+        assert_eq!(worker_ids, vec!["live-peer", "current-worker"]);
+
+        let _ = fs::remove_dir_all(state);
     }
 
     #[test]
