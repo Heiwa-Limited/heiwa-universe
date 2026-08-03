@@ -102,11 +102,11 @@ run_required "runtime Python dependency audit" audit_python_project runtime-pyth
 run_required "product surface audit" bash scripts/audit_product_surface.sh
 
 if command -v gitleaks >/dev/null 2>&1; then
-  run_optional "gitleaks secret scan (redacted, non-blocking until repo baseline exists)" \
+  run_required "gitleaks secret scan (redacted, blocking; reviewed baseline in .gitleaksignore)" \
     gitleaks detect --no-banner --redact --source "$ROOT"
 else
   section "gitleaks secret scan"
-  warn "gitleaks not installed; install it to make secret scanning mandatory"
+  fail "gitleaks not installed; secret scanning is mandatory (brew install gitleaks)"
 fi
 
 section "security gate summary"
