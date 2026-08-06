@@ -17,7 +17,7 @@ concurrency:
 jobs:
   security-scan:
     name: Security Vulnerability Scan
-    runs-on: ubuntu-latest
+    runs-on: blacksmith-4vcpu-ubuntu-2404
     steps:
       - uses: actions/checkout@v5
       - name: Run Trivy vulnerability scanner
@@ -34,7 +34,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, macos-latest, windows-latest]
+        os: [ubuntu-latest, macos-latest, blacksmith-4vcpu-windows-2025]
     env:
       # PR CI gates correctness, not artifacts: skip debuginfo and incremental
       # bookkeeping to cut compile time and cache size.
@@ -106,7 +106,7 @@ jobs:
 
   lint:
     name: TypeScript and Web Lint
-    runs-on: ubuntu-latest
+    runs-on: blacksmith-4vcpu-ubuntu-2404
     steps:
       - uses: actions/checkout@v5
       - name: Set up Node
@@ -121,7 +121,7 @@ jobs:
 
   docs-build:
     name: Docs Build
-    runs-on: ubuntu-latest
+    runs-on: blacksmith-4vcpu-ubuntu-2404
     steps:
       - uses: actions/checkout@v5
       - name: Set up Python
@@ -141,7 +141,7 @@ jobs:
 
   agent-sync-check:
     name: Agent Sync Check
-    runs-on: ubuntu-latest
+    runs-on: blacksmith-4vcpu-ubuntu-2404
     steps:
       - uses: actions/checkout@v5
       - name: Set up Python
@@ -157,7 +157,7 @@ jobs:
 
   repo-hygiene:
     name: Repo Hygiene
-    runs-on: ubuntu-latest
+    runs-on: blacksmith-4vcpu-ubuntu-2404
     steps:
       - uses: actions/checkout@v5
       - name: Fail on tracked cargo cache artifacts
@@ -191,7 +191,7 @@ jobs:
   # out of the required matrix while preserving compile coverage.
   desktop-check:
     name: Desktop Shell Check (macOS)
-    runs-on: macos-latest
+    runs-on: blacksmith-6vcpu-macos-15
     permissions:
       contents: read
       pull-requests: read

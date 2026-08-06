@@ -18,7 +18,7 @@ concurrency:
 jobs:
   build:
     name: Build MkDocs Site
-    runs-on: ubuntu-latest
+    runs-on: blacksmith-4vcpu-ubuntu-2404
     steps:
       - uses: actions/checkout@v5
       - name: Set up Python
@@ -44,7 +44,7 @@ jobs:
 
   deploy:
     name: Deploy GitHub Pages
-    runs-on: ubuntu-latest
+    runs-on: blacksmith-4vcpu-ubuntu-2404
     needs: build
     environment:
       name: github-pages

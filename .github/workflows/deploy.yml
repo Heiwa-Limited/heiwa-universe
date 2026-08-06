@@ -15,7 +15,7 @@ concurrency:
 jobs:
   changes:
     name: Detect Deploy Surfaces
-    runs-on: ubuntu-latest
+    runs-on: blacksmith-4vcpu-ubuntu-2404
     outputs:
       deploy_core: ${{ steps.detect.outputs.deploy_core }}
       deploy_trading: ${{ steps.detect.outputs.deploy_trading }}
@@ -44,7 +44,7 @@ jobs:
 
   repo-hygiene:
     name: Repo Hygiene
-    runs-on: ubuntu-latest
+    runs-on: blacksmith-4vcpu-ubuntu-2404
     steps:
       - uses: actions/checkout@v5
       - name: Fail on tracked cargo cache artifacts
@@ -67,7 +67,7 @@ jobs:
 
   core-release-preflight:
     name: Core Rust Release Preflight
-    runs-on: ubuntu-latest
+    runs-on: blacksmith-4vcpu-ubuntu-2404
     needs:
       - changes
       - repo-hygiene
@@ -114,7 +114,7 @@ jobs:
 
   web-release-preflight:
     name: Web Release Preflight
-    runs-on: ubuntu-latest
+    runs-on: blacksmith-4vcpu-ubuntu-2404
     needs:
       - changes
       - repo-hygiene
@@ -147,7 +147,7 @@ jobs:
 
   deploy-web:
     name: Deploy Cloudflare Public Shell
-    runs-on: ubuntu-latest
+    runs-on: blacksmith-4vcpu-ubuntu-2404
     needs:
       - changes
       - web-release-preflight
