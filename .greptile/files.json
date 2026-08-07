@@ -1,0 +1,28 @@
+{
+  "files": [
+    {
+      "path": "HEIWA.md",
+      "description": "Canonical product truth: what Heiwa is, what the runtime owns, and what is deferred. Use this to judge whether a change's framing and scope are accurate."
+    },
+    {
+      "path": "AGENTS.md",
+      "description": "Repo spine (which path owns which role), provider truth, operator/infra truth, and the agentic runtime workflow including port and runtime-identity rules."
+    },
+    {
+      "path": "CLAUDE.md",
+      "description": "Hard rules and current product truth, including which surfaces are live and which were removed from the tree."
+    },
+    {
+      "path": "BUILD_MATRIX.md",
+      "description": "Task decomposition. Use it to judge whether a PR is scoped to one task."
+    },
+    {
+      "path": "CONTRIBUTING.md",
+      "description": "Development loop, branch/worktree convention, and PR expectations including required verification commands."
+    },
+    {
+      "path": ".github/workflows/ci.yml",
+      "description": "What CI already gates: Trivy scan, and Rust build/test/clippy on ubuntu, macos, and windows. Do not duplicate these checks in review comments."
+    }
+  ]
+}
