@@ -191,10 +191,24 @@ product from PR comments, and the more interesting one for this repo.
 
 ## Teardown if you do not convert (2026-08-19)
 
+**The API key is already deleted (2026-08-08) and that stopped nothing.** The
+`greptile-apps` App is installed for all `Heiwa-Limited` repositories and is not
+suspended, so it keeps reviewing every PR opened and keeps consuming credits.
+The key only ever fed the CLI, API, and MCP. **Uninstalling the App from the
+org's GitHub App settings is the actual off-switch** — do that first.
+
+Then remove the config from the tree, not just from the index:
+
 ```bash
-git rm -r --cached .greptile/ && claude mcp remove greptile && npm uninstall -g greptile
+git rm -r .greptile/ && npm uninstall -g greptile
 ```
 
-Then uninstall the GitHub App from the org and revoke the API key. Keep
-`ops/greptile-trial/` — the scorecard is the record of why, and the baseline if
-you re-trial after fixing PR size.
+Use `git rm -r`, not `git rm -r --cached`. The cached form only clears Git's
+index and leaves unignored copies in the working tree, where local tooling can
+still read them and a later bulk `git add` can silently re-commit them.
+(Greptile flagged exactly this on PR #54 — a P2, and correct.)
+
+There is no `claude mcp remove greptile` step: the MCP server was never added.
+
+Keep `ops/greptile-trial/` — the scorecard is the record of why, and the
+baseline if you re-trial after fixing PR size.

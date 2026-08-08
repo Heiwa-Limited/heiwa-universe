@@ -110,6 +110,7 @@ evidence about the tool's value on the repo's actual substance.
 | 08-07 | #54 | `ops/greptile-trial/SETUP.md:49` | P2 | Setup names `greptile.json` as committed, but the PR contains no such file; PLAN and teardown repeat the stale reference | `NOVEL` | yes | Correct. I removed the file one commit earlier and left five references behind. Caught the inconsistency across three files. Fixed |
 | 08-07 | #54 | `ops/greptile-trial/PLAN.md:16-17` | P2 | Claims Heiwa routes work to all five named providers; Antigravity is an authenticated interactive executor, not a headless adapter | `NOVEL` | yes | Correct per `AGENTS.md`. This is the repo's own maturity-overstatement rule firing against my prose — the exact class of finding the rules were written to catch. Fixed |
 | 08-07 | #54 | `ops/greptile-trial/SETUP.md:25-27` | **P1 security** | The key-handling step appends the rotated API key literally to `~/.bashrc`, exposing it to backups and dotfile sync, contradicting the vault contract stated later in the same file | `NOVEL` | yes | **Found by the GitHub bot, not the CLI.** Correct and self-contradiction-aware — it caught the doc arguing against itself two sections apart. Rewritten to store in the OS keychain via `secret-tool` and export a lookup rather than a secret |
+| 08-07 | #54 | `ops/greptile-trial/SETUP.md:84` | P2 | Teardown uses `git rm --cached`, which clears only Git's index and leaves unignored copies in the working tree for local tooling to read and a later bulk stage to re-add | `NOVEL` | yes | Bot only. Correct, and supplied the right form. Teardown now uses `git rm -r` and leads with uninstalling the GitHub App, which is the actual off-switch |
 
 ### PR #52 — the first review on real code
 
@@ -133,6 +134,27 @@ locally correct. This is the whole-repo-graph claim doing exactly what it says
 on the tin.
 
 That is 2 novel P1s on real code, against a kill criterion of 3 across 13 days.
+
+### Re-review on push is off by design, and its absence is useful evidence
+
+Independent verification on 2026-08-08 found that PR #54's head advanced with
+no newer Greptile check, and recorded automatic re-review as unproven. It is
+not unproven — it is **switched off**. `triggerOnUpdates: false` in
+`.greptile/config.json` is exactly what suppresses re-review on push, and it is
+the setting the whole credit argument rests on: one credit per PR opened rather
+than one per push.
+
+That reframes a null result into a positive one. Since the API key was deleted,
+`greptile config` can no longer be run, so there is no direct way to confirm the
+committed config is live. The absent re-review is now **independent proof that
+`.greptile/config.json` is being read and honored** — a behavior that only
+happens if the file loaded. Together with the `Rule Used:` citations in the PR
+#54 comments, that is two separate confirmations from different mechanisms.
+
+The cost is real though: with re-review off, **a finding fixed on a later push
+is never re-checked**. Greptile's view of PR #54 is frozen at the first head.
+Any "did the fix work" question has to be answered by hand for the rest of the
+trial.
 
 ### The two surfaces do not return the same findings
 
