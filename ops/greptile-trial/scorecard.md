@@ -15,21 +15,19 @@ Setup got as far as it can without Devon's browser. What was verified:
 - Telemetry disabled via `GREPTILE_TELEMETRY_DISABLED=1` (the CLI shares
   anonymous usage data by default; it states never code or repo contents).
 
-**Blocked on:** `greptile config` and `greptile review` both fail with
-`this repository is not connected to Greptile yet`. The only paths through are
-the dashboard or `greptile onboard`, an interactive browser OAuth wizard that
-installs a GitHub App on the org. That is Devon's step. Nothing else in the
-trial can start until it is done.
+- Repo connected, first review completed. **Trial is live as of Day 1**, not
+  Day 2 as planned.
 
-### Findings before Greptile reviewed a single line
+### Findings from setup, before Greptile reviewed a line
 
-Three came out of setup itself. They are not Greptile findings — Greptile has
-not run — but two of them change how the trial should be read.
+Five came out of standing the thing up. Two of them change how the trial should
+be read; two were self-inflicted and are worth recording because they are the
+kind of silent failure that would have invalidated the whole exercise.
 
 **1. The CLI has a hard file cap well below anything tunable.** A review of 760
 files was refused outright: `error: this review touches 760 files. Split it
 into smaller commits and try again.` This is independent of `fileChangeLimit`
-in `greptile.json`, which only governs the PR bot. It confirms that PR size is
+in `.greptile/config.json`, which only governs the PR bot. It confirms that PR size is
 a **wall, not a tuning knob** — PRs #48 (1169 files) and #50 (616 files) could
 not have been reviewed by this tool at any setting. If work keeps arriving in
 that shape the trial cannot produce signal, and the honest conclusion will be
@@ -54,11 +52,62 @@ this repo. Do not install it until after the counterfactual is recorded — it
 would contaminate the comparison by letting the authoring agent see Greptile's
 findings mid-review.
 
+**4. The CLI identifies the repo by git remote URL, and ours was stale.** After
+the GitHub App was installed on the org, every command still failed with `this
+repository is not connected to Greptile yet`. The App was installed correctly —
+`gh api orgs/Heiwa-Limited/installations` listed `greptile-apps` — but `origin`
+still pointed at `git@github.com:Strategizing/heiwa-universe.git` from before
+the repo moved to the org. GitHub redirects that transparently; Greptile does
+not. The error names the wrong cause: it reads as "you have not connected this
+repo" when the truth is "the name I resolved does not match the one you
+connected." Fixed with `git remote set-url origin
+git@github.com:Heiwa-Limited/heiwa-universe.git`. Anything else keyed on the
+remote URL was silently resolving to the old name too.
+
+**5. Shipping both `greptile.json` and `.greptile/` silently voided the entire
+config.** The first `greptile config` against the connected repo showed
+`strictness: 1` (config said 2), `commentTypes: logic, syntax, style` (config
+excluded style), `Filters: (none)` despite four filters being set, and no
+instructions. The docs are explicit: *"If both `.greptile/` and `greptile.json`
+exist in the same directory, `.greptile/` takes precedence and `greptile.json`
+is ignored."* Not merged — ignored. No warning, no parse error, no diagnostic.
+The tuning layer was completely dead and the trial would have measured stock
+defaults while the scorecard claimed otherwise.
+
+The same silent-drop applies to key names. `includeSequenceDiagram`,
+`includeIssuesTable`, and `includeConfidenceScore` are not in the schema; the
+`sequenceDiagramSection` / `issuesTableSection` / `confidenceScoreSection`
+objects are. The unrecognized spellings were discarded without complaint.
+
+**Standing lesson:** this config surface fails silently in at least three ways
+(wrong file, wrong key name, wrong remote). `greptile config` is the only thing
+that tells you the truth. Run it after every config change, and never assume a
+committed setting is a live setting.
+
+**Open question:** the inline `rules` array in `.greptile/config.json` still
+does not appear in `greptile config` output, which reports only the two
+org-level rules (CLAUDE.md, AGENTS.md). `rules.md` and `files.json` both load
+and are confirmed. Whether inline rules are applied-but-not-displayed or not
+parsed at all cannot be determined from the config command. The first review
+suggests they *are* applied — see finding #1 below, which is the
+`no-maturity-overstatement` rule firing — but that rule also exists in prose in
+`rules.md`, so it is not a clean attribution. The standards are duplicated
+across both files deliberately, so review behavior is covered either way.
+
 ## Findings log
+
+Tagging convention note: findings 1–3 are Greptile reviewing a diff **I** wrote
+(the trial config itself). That makes me the authoring agent, so NOVEL here
+means "the agent that wrote this did not catch it before submitting" — the same
+test the trial applies to Devon's agents, just at small scale and on
+docs/config rather than Rust. Treat it as a cold-start sanity check, not as
+evidence about the tool's value on the repo's actual substance.
 
 | Date | PR | File:line | Severity | Greptile's claim | Tag | Real? | Notes |
 | --- | --- | --- | --- | --- | --- | --- | --- |
-| | | | | | | | |
+| 08-07 | #54 | `ops/greptile-trial/raw/run-review.sh:9` | P1 | `shift 3 \|\| true` does not shift when fewer than 3 args are passed, so the label and workdir are forwarded to `greptile review` as stray positionals | `NOVEL` | yes | Correct, and the documented 2-arg form was the failing case. Supplied a working fix. Real bug in code I wrote and did not catch. Fixed in `f6997df`+ |
+| 08-07 | #54 | `ops/greptile-trial/SETUP.md:49` | P2 | Setup names `greptile.json` as committed, but the PR contains no such file; PLAN and teardown repeat the stale reference | `NOVEL` | yes | Correct. I removed the file one commit earlier and left five references behind. Caught the inconsistency across three files. Fixed |
+| 08-07 | #54 | `ops/greptile-trial/PLAN.md:16-17` | P2 | Claims Heiwa routes work to all five named providers; Antigravity is an authenticated interactive executor, not a headless adapter | `NOVEL` | yes | Correct per `AGENTS.md`. This is the repo's own maturity-overstatement rule firing against my prose — the exact class of finding the rules were written to catch. Fixed |
 
 ## Running tally
 

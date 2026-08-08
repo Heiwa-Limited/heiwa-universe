@@ -5,8 +5,14 @@ set -uo pipefail
 
 LABEL="${1:?need a label}"
 WORKDIR="${2:?need a workdir}"
-BASE="${3:-main}"
-shift 3 || true
+# Default to origin/main: the local main ref is routinely stale in this
+# checkout, and reviewing against it reconstructs old merges in reverse.
+BASE="${3:-origin/main}"
+if (( $# >= 3 )); then
+  shift 3
+else
+  shift "$#"
+fi
 
 OUT="$HOME/heiwa/ops/greptile-trial/raw"
 mkdir -p "$OUT"

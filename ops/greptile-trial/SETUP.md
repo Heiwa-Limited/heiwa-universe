@@ -1,6 +1,6 @@
 # Greptile setup — exact commands
 
-Run from `~/heiwa` inside WSL Ubuntu. Steps 1–3 are done; step 4 is the gate.
+Run from `~/heiwa` inside WSL Ubuntu.
 
 ## Status as of 2026-08-07
 
@@ -8,13 +8,17 @@ Run from `~/heiwa` inside WSL Ubuntu. Steps 1–3 are done; step 4 is the gate.
 | --- | --- |
 | CLI installed (3.3.1, node 26.5.0) | done |
 | API key authenticates, org "Heiwa Limited" resolves | done |
-| Config committed and opened as PR #54 | done |
-| **Repo connected to Greptile** | **blocked — needs your browser** |
-| GitHub App installed on the org | blocked, same step |
-| Flex limit set to $0 | blocked, dashboard only |
-| Key rotated | not done |
+| GitHub App installed on the org | done |
+| `origin` remote corrected to `Heiwa-Limited/…` | done — was the real blocker |
+| Config committed, opened as PR #54 | done |
+| Config verified live via `greptile config` | done |
+| First review completed (3 findings, all real) | done |
+| **Flex limit set to $0** | **not done — dashboard only, do this** |
+| **API key rotated** | **not done — do this** |
+| MCP server added to Claude Code | not done |
+| `@greptileai` run on PR #52 | not done |
 
-Everything after the gate is written out below and ready to run.
+The trial is live. The two bold rows are yours and neither can wait long.
 
 ## 1. CLI (done)
 
@@ -46,36 +50,55 @@ greptile whoami
 
 ## 3. Config (done — PR #54)
 
-`greptile.json`, `.greptile/`, and `ops/greptile-trial/` are committed on branch
+`.greptile/` and `ops/greptile-trial/` are committed on branch
 `ops/greptile-trial`, built in a worktree at
 `.worktrees/claude/greptile-trial/` per the `CONTRIBUTING.md` convention, so
 the ~70 uncommitted files in the main checkout were left alone.
 
-## 4. Connect the repo — this is the gate
+## 4. Connect the repo (done — with a trap worth knowing)
 
-`greptile review` and `greptile config` both hard-fail with
-`this repository is not connected to Greptile yet` until this is done. There is
-no non-interactive path; the CLI exposes only an interactive wizard.
+`greptile onboard` or the dashboard installs the GitHub App on the org. Scope
+it to this repo only.
+
+**The App being installed is not sufficient.** The CLI identifies the repo by
+the `origin` remote URL, and ours still read
+`git@github.com:Strategizing/heiwa-universe.git` from before the transfer to
+the org. GitHub redirects that; Greptile does not. Every command kept failing
+with `this repository is not connected to Greptile yet` — an error that names
+the wrong cause. Fixed with:
 
 ```bash
-greptile onboard
+git remote set-url origin git@github.com:Heiwa-Limited/heiwa-universe.git
 ```
 
-Or connect `Heiwa-Limited/heiwa-universe` from the dashboard. Either way it
-installs a GitHub App on the org — scope it to this repo only.
-
-Immediately afterward, in Organization Settings → Billing, set **Flex Usage
+**Still outstanding:** in Organization Settings → Billing, set **Flex Usage
 Limit = $0**. Billing is $30/seat/month including 50 credits, $1/credit beyond,
 and the cap is the only thing that makes an accident impossible.
 
-Then confirm the committed rules are actually in effect:
+## 4a. Verify the config is actually live — do this after every change
 
 ```bash
 greptile config
 ```
 
-If `.greptile/config.json`'s rules do not appear in the merged output, nothing
-downstream in the trial is measuring what you think it is.
+This is not a formality. The config surface fails silently in at least three
+ways, all found on Day 1:
+
+- **Wrong file.** If `.greptile/` and `greptile.json` both exist, `.greptile/`
+  wins and `greptile.json` is *ignored entirely* — not merged. Shipping both
+  left the whole tuning layer dead with no warning.
+- **Wrong key name.** `includeSequenceDiagram`, `includeIssuesTable`, and
+  `includeConfidenceScore` are not in the schema; the `…Section` objects are.
+  Unrecognized keys are discarded without complaint.
+- **Wrong remote.** See above.
+
+Read the output and confirm each setting you care about appears. A committed
+setting is not a live setting.
+
+Known display gap: the inline `rules` array in `.greptile/config.json` does not
+show up in this output — only org-level rules do. `rules.md` and `files.json`
+both appear and are confirmed loaded. The standards are duplicated across both
+files on purpose, so behavior is covered either way.
 
 ## 5. MCP server for Claude Code
 
@@ -107,7 +130,7 @@ the *local* ref, and local `main` is currently 762 files behind `origin/main`.
 Without `--branch origin/main` you get a diff of PRs #50 and #51 in reverse.
 
 **There is a hard file cap around 760**, separate from `fileChangeLimit` in
-`greptile.json` (which only governs the PR bot). Oversized reviews are refused,
+`.greptile/config.json` (which only governs the PR bot). Oversized reviews are refused,
 not truncated.
 
 A helper that archives raw output for the scorecard:
@@ -149,7 +172,7 @@ product from PR comments, and the more interesting one for this repo.
 ## Teardown if you do not convert (2026-08-19)
 
 ```bash
-git rm -r --cached greptile.json .greptile/ && claude mcp remove greptile && npm uninstall -g greptile
+git rm -r --cached .greptile/ && claude mcp remove greptile && npm uninstall -g greptile
 ```
 
 Then uninstall the GitHub App from the org and revoke the API key. Keep

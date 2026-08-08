@@ -13,8 +13,10 @@ bot. So the standard pitch does not apply and the standard metrics
 
 What is actually being tested is narrower and sharper:
 
-> Heiwa already routes work to Claude Code, Codex, Gemini CLI, Grok, and
-> Antigravity. Those agents write the code **and** currently self-review it.
+> Heiwa already routes work to Claude Code, Codex, and Gemini CLI, with Grok
+> and Ollama wrapped at varying depth and Antigravity still an authenticated
+> interactive executor rather than a headless adapter. Those agents write the
+> code **and** currently self-review it.
 > Self-review by the authoring agent is structurally weak: it shares the
 > author's context, its blind spots, and its assumptions. Does an independent
 > reviewer with a whole-repo graph catch things the authoring agent
@@ -64,7 +66,7 @@ when #52 lands, independently of this trial.
 1. Install the GitHub app on `Heiwa-Limited` and grant it `heiwa-universe` only.
 2. Organization Settings → Billing → **Flex Usage Limit = $0**.
 3. Commit the config that is already written into the working tree:
-   `greptile.json`, `.greptile/rules.md`, `.greptile/config.json`,
+   `.greptile/rules.md`, `.greptile/config.json`,
    `.greptile/files.json`. Commit these paths *only* — the tree has unrelated
    uncommitted work in it right now.
 4. Install the CLI and the MCP server (commands in `SETUP.md`).
