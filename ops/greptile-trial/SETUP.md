@@ -36,17 +36,37 @@ greptile settings set telemetry false
 ## 2. Key handling
 
 The original key was pasted into a chat transcript — rotate it at
-app.greptile.com, then keep the replacement out of tracked files:
+app.greptile.com.
+
+Do **not** append it to `~/.bashrc`. That is what this file said first, and
+Greptile flagged it P1 on the very PR that introduced it: a literal credential
+in a dotfile is exposed to backups, dotfile sync, and anything that reads
+`$HOME`, which contradicts the vault contract stated two sections down. The
+catch was correct.
+
+Use the OS keychain. `libsecret` is already a build dependency here — the
+workspace links it through `keyring` — so `secret-tool` is available:
 
 ```bash
-echo 'export GREPTILE_API_KEY="<rotated-key>"' >> ~/.bashrc && source ~/.bashrc
+secret-tool store --label="Greptile API key" service greptile account "$USER"
 ```
+
+Then resolve it per-shell, so the secret is never written to a dotfile:
+
+```bash
+echo 'export GREPTILE_API_KEY="$(secret-tool lookup service greptile account "$USER")"' >> ~/.bashrc
+```
+
+That line contains a lookup, not a credential, and is safe to sync.
 
 Verify:
 
 ```bash
 greptile whoami
 ```
+
+Longer term the right home is `crates/heiwa_vault`, same as provider auth
+material. The keychain is the interim.
 
 ## 3. Config (done — PR #54)
 

@@ -84,15 +84,16 @@ objects are. The unrecognized spellings were discarded without complaint.
 that tells you the truth. Run it after every config change, and never assume a
 committed setting is a live setting.
 
-**Open question:** the inline `rules` array in `.greptile/config.json` still
-does not appear in `greptile config` output, which reports only the two
-org-level rules (CLAUDE.md, AGENTS.md). `rules.md` and `files.json` both load
-and are confirmed. Whether inline rules are applied-but-not-displayed or not
-parsed at all cannot be determined from the config command. The first review
-suggests they *are* applied — see finding #1 below, which is the
-`no-maturity-overstatement` rule firing — but that rule also exists in prose in
-`rules.md`, so it is not a clean attribution. The standards are duplicated
-across both files deliberately, so review behavior is covered either way.
+**Resolved — inline rules are applied, just not displayed.** `greptile config`
+reports only the two org-level rules and never lists the `rules` array from
+`.greptile/config.json`, which looked like it might not be parsed. The GitHub
+bot review settled it: its comments carry a `**Rule Used:**` line quoting
+`config.json` verbatim — "No credentials, tokens, API keys, or private
+endpo…" (`no-secrets-in-tree`) and "Docs, comments, log strings, and
+user-facing messa…" (`no-maturity-overstatement`), each attributed to
+`([source](.greptile))`. Those are the config.json strings, not the `rules.md`
+prose, which phrases both differently. So the rules work; `greptile config`
+just under-reports. Do not use its rule count as a health check.
 
 ## Findings log
 
@@ -108,6 +109,20 @@ evidence about the tool's value on the repo's actual substance.
 | 08-07 | #54 | `ops/greptile-trial/raw/run-review.sh:9` | P1 | `shift 3 \|\| true` does not shift when fewer than 3 args are passed, so the label and workdir are forwarded to `greptile review` as stray positionals | `NOVEL` | yes | Correct, and the documented 2-arg form was the failing case. Supplied a working fix. Real bug in code I wrote and did not catch. Fixed in `f6997df`+ |
 | 08-07 | #54 | `ops/greptile-trial/SETUP.md:49` | P2 | Setup names `greptile.json` as committed, but the PR contains no such file; PLAN and teardown repeat the stale reference | `NOVEL` | yes | Correct. I removed the file one commit earlier and left five references behind. Caught the inconsistency across three files. Fixed |
 | 08-07 | #54 | `ops/greptile-trial/PLAN.md:16-17` | P2 | Claims Heiwa routes work to all five named providers; Antigravity is an authenticated interactive executor, not a headless adapter | `NOVEL` | yes | Correct per `AGENTS.md`. This is the repo's own maturity-overstatement rule firing against my prose — the exact class of finding the rules were written to catch. Fixed |
+| 08-07 | #54 | `ops/greptile-trial/SETUP.md:25-27` | **P1 security** | The key-handling step appends the rotated API key literally to `~/.bashrc`, exposing it to backups and dotfile sync, contradicting the vault contract stated later in the same file | `NOVEL` | yes | **Found by the GitHub bot, not the CLI.** Correct and self-contradiction-aware — it caught the doc arguing against itself two sections apart. Rewritten to store in the OS keychain via `secret-tool` and export a lookup rather than a secret |
+
+### The two surfaces do not return the same findings
+
+Same diff, same config, same day. The CLI returned the `shift 3` bug, the stale
+`greptile.json` references, and Antigravity. The GitHub bot returned the
+`~/.bashrc` credential and Antigravity. Overlap: one of four.
+
+Do not treat `greptile review` and the PR bot as interchangeable. For the rest
+of the trial, run both on any PR that matters, and log which surface produced
+each finding — if that asymmetry holds, it is a material fact about the product
+and belongs in the Day 13 verdict. The bot's unique find was also the most
+severe of the four, which is the opposite of what "the CLI is the power-user
+surface" would predict.
 
 ## Running tally
 
