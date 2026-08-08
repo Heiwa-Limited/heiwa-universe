@@ -1,4 +1,28 @@
 {
+  "strictness": 2,
+  "commentTypes": ["logic", "syntax"],
+
+  "triggerOnUpdates": false,
+  "triggerOnDrafts": false,
+
+  "includeBranches": ["main", "dev"],
+  "excludeAuthors": ["dependabot[bot]", "blacksmith-sh[bot]"],
+  "fileChangeLimit": 150,
+
+  "ignorePatterns": "Cargo.lock\npackage-lock.json\ndeno.lock\nuv.lock\narchive/**\noss-lifts/**\npackages/heiwa_bindings/**\n**/goldens/**\n**/snapshots/**\n**/__snapshots__/**\n**/*.generated.*\n**/*.min.js\n**/dist/**\n**/target/**\n**/site/**\n**/*.svg\n**/*.png",
+
+  "instructions": "This is heiwa-universe: a local-first, multi-provider AI runtime. Rust is the authoritative execution layer (apps/heiwa_core, apps/heiwa_orchestrator, crates/*), TypeScript is companion UI (apps/heiwa_app), Python is a prototype/compat surface. CI already runs clippy, biome, and Trivy — do NOT report formatting, naming, lint-level style, or generic dependency-CVE findings. Report only what a whole-repo reviewer can see that a per-file linter cannot: cross-crate contract drift, state/ownership bugs, evidence-journal correctness, async and locking hazards, error-path regressions, and silent behavior changes at provider or runtime boundaries. Devon is the sole reviewer on this repo, so there is no second human to catch a miss — prefer one well-evidenced high-severity finding over five speculative ones, and always name the specific caller or call site that breaks.",
+
+  "fixWithAI": true,
+  "shouldUpdateDescription": false,
+  "statusCheck": false,
+  "statusCommentsEnabled": true,
+
+  "summarySection": { "included": true, "collapsible": false, "defaultOpen": true },
+  "issuesTableSection": { "included": true, "collapsible": true, "defaultOpen": true },
+  "confidenceScoreSection": { "included": true, "collapsible": false, "defaultOpen": true },
+  "sequenceDiagramSection": { "included": false },
+
   "rules": [
     {
       "id": "no-panic-in-runtime",
