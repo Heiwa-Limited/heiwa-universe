@@ -47,10 +47,27 @@ instructions explicitly forbid style/lint/CVE findings. If Greptile still
 reports them, that is itself a finding — it means the config surface is weaker
 than advertised.
 
-**Credits.** $30/seat/mo including 50 credits, $1/credit beyond. One active
-developer. `triggerOnUpdates` is `false`, so each PR costs 1 credit on open, not
-1 per push. Expected trial burn: well under 20. **Set the flex limit to $0** in
-Organization Settings → Billing so an accident cannot bill.
+**Credits — resolved, and the flex cap turned out not to matter.** The Flex
+Usage Limit is not settable on the trial plan. It does not need to be. Billing
+is $30/seat/mo including 50 credits with one active developer, and
+`triggerOnUpdates` is `false`, so a PR costs **1 credit on open, not 1 per
+push**. Devon's merge cadence is roughly 4–8 PRs a month; thirteen days of it
+is single digits. Reaching 50 would take a step change in throughput that
+cannot happen by accident, and the standard review is 1 credit (only T-Rex
+reviews are 3).
+
+The exposure that *would* have mattered is the CLI, where a review is a credit
+on demand and `greploop` is a credit per iteration. Which is the main reason
+the trial now runs bot-first.
+
+**Bot-first, from 2026-08-08.** The GitHub bot is the primary surface. The API
+and MCP server are out of scope for this trial — not added, not evaluated. The
+CLI stays installed but idle.
+
+This is not purely a cost decision; Day 1 evidence supports it. The bot
+auto-reviews on PR open with no command to run, and on the one diff where both
+surfaces ran it produced the most severe finding of the four while the CLI
+missed it. The thing being given up is deliberate and named below.
 
 **Branch model is mid-migration.** PR #52 is codifying a two-branch dev→main
 flow and has been open since 2026-07-30. `includeBranches` covers both `main`
@@ -86,22 +103,18 @@ The trial fails silently if no reviewable PRs land in 13 days. Two moves:
   [#52](https://github.com/Heiwa-Limited/heiwa-universe/pull/52) (87 files —
   under the limit, so it will review). This is the single best available test
   case: it touches CI, branch flow, and DREX goldens at once.
-- **Retro-review merged history with the CLI.** No PR needed, and it produces
-  ground truth you can check, because you already know what broke afterward:
-
-  ```bash
-  git checkout -b trial/retro-51 8435983
-  greptile review --branch main --json > ops/greptile-trial/raw/retro-51.json
-  ```
-
-  Do this for PR #51 (operator stream + auth hardening, 170 files) and PR #49
-  (agent configs + monitor read model, 8 files). If Greptile flags something
-  you later had to fix by hand, that is the strongest possible evidence — and
-  it is available on day 2 instead of day 13.
+- ~~**Retro-review merged history with the CLI.**~~ **Dropped** with the
+  bot-first decision. It was the strongest early-evidence idea in this plan —
+  reviewing a merged PR whose later breakage you already know is the cleanest
+  ground truth available — but it is CLI-only, since there is no PR to comment
+  on. Recording it as a deliberate loss rather than an oversight. If the trial
+  ends inconclusive, this is the first thing to reach for in an extension.
 
 - **Change PR habit for 13 days.** Break work into PRs under ~150 files. This
   is worth doing regardless of the Greptile outcome; it is the precondition for
-  *any* reviewer, agentic or human, to be useful to this repo.
+  *any* reviewer, agentic or human, to be useful to this repo. Bot-first raises
+  the stakes on this: with the CLI idle, **an unreviewed PR is a lost day**,
+  because there is no way to go back and review it after the fact.
 
 ### Days 3–6 — 2026-08-09 → 08-12 — run live, log everything
 
@@ -161,6 +174,33 @@ graph**, which your local agents genuinely do not have, and which is worth
 paying for.
 
 That distinction is the whole trial. Do not skip this step.
+
+**Bot-first does not weaken this.** Step 3 is the bot's PR review, which is
+what the trial is evaluating anyway. The comparison is unaffected.
+
+**PR #52 is now the counterfactual candidate, and the window is closing.** It
+already has two verified P1s from Greptile, and it was authored in July by
+Devon's agents rather than for this trial — which makes it a better test case
+than anything likely to land in the next twelve days. The requirement is a cold
+non-authoring provider that has **not** seen Greptile's comments on it. That
+disqualifies any agent already in this trial's context. Use Codex or Gemini CLI
+on the raw diff, ask for correctness findings only, and record what it does and
+does not surface.
+
+The two P1s make unusually sharp targets, because both are *structurally*
+beyond a per-file linter: a second `state_dir()` in a sibling module that drops
+the env check, and a claim path with no reaper. If a cold local provider finds
+both, the whole-repo graph bought nothing here and Heiwa routing replaces it.
+If it finds neither, that is the strongest evidence the trial can produce.
+
+**`greploop` — dropped, with the cost named.** The CLI's review-fix-review loop
+is the most Heiwa-native surface Greptile has, and evaluating it would have
+been the most interesting part of this trial. It is also CLI-only and burns a
+credit per iteration, so bot-first excludes it. The honest consequence: **this
+trial does not evaluate Greptile's agentic surface at all**, only its PR
+reviewer. Do not let the Day 13 verdict generalize past that. If the verdict is
+"decline," it declines the PR reviewer, and `greploop` remains untested and
+possibly the better product.
 
 ### Day 13 — 2026-08-19 (Wed) — decide
 

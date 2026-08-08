@@ -111,6 +111,29 @@ evidence about the tool's value on the repo's actual substance.
 | 08-07 | #54 | `ops/greptile-trial/PLAN.md:16-17` | P2 | Claims Heiwa routes work to all five named providers; Antigravity is an authenticated interactive executor, not a headless adapter | `NOVEL` | yes | Correct per `AGENTS.md`. This is the repo's own maturity-overstatement rule firing against my prose — the exact class of finding the rules were written to catch. Fixed |
 | 08-07 | #54 | `ops/greptile-trial/SETUP.md:25-27` | **P1 security** | The key-handling step appends the rotated API key literally to `~/.bashrc`, exposing it to backups and dotfile sync, contradicting the vault contract stated later in the same file | `NOVEL` | yes | **Found by the GitHub bot, not the CLI.** Correct and self-contradiction-aware — it caught the doc arguing against itself two sections apart. Rewritten to store in the OS keychain via `secret-tool` and export a lookup rather than a secret |
 
+### PR #52 — the first review on real code
+
+Two P1s, 87 files, bot surface. **Both verified against the source before
+logging.** These are the first findings on Rust written by Devon's agents
+rather than on trial paperwork, and they are the trial's first genuine
+evidence.
+
+| Date | PR | File:line | Severity | Greptile's claim | Tag | Real? | Notes |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| 08-08 | #52 | `apps/heiwa_shell/src/cmd/auto.rs:335` | P1 | `auto tick` derives `~/.heiwa/state` while the app daemon honors `HEIWA_STATE_DIR`, so the CLI drains a different queue than the one in use | `NOVEL` | **yes, verified** | `app.rs:4877` reads `HEIWA_STATE_DIR` and falls back to `~/.heiwa/state`. `auto.rs:389` defines a **second, private `state_dir()`** in a sibling module of the same crate that omits the env check entirely. Both functions are individually correct; only the pair is wrong. Note `tests/smoke.rs`, `tests/local_boot.rs`, and `tests/operator_api.rs` all set `HEIWA_STATE_DIR` |
+| 08-08 | #52 | `crates/heiwa_automations/src/executor/mod.rs:215` | P1 | A claim that dies before completion strands the row in `running` forever, because later drains select only `pending` | `NOVEL` | **yes, verified** | `storage/mod.rs:245` `list_pending_executions` is `WHERE status = 'pending'`; `:258` `claim_pending_execution` flips the row to `Running`. Grepped the whole crate for `reap`/`requeue`/`stale_running` — **no recovery path exists**, no lease timeout, no startup reconciliation. The doc comment above `run_pending` reasons carefully about double-execution and is silent on the crash case. `started_at` is already set at claim time, so a lease-expiry reaper is the natural fix |
+
+**Why these two matter more than the four on PR #54.** Neither is reachable by
+a per-file linter, and that is not a judgment call — it is structural. The
+first requires noticing that two same-named private functions in sibling
+modules of one crate diverge on an env var. The second requires holding the
+SQL, the drain loop, and the *absence* of a reaper in mind simultaneously.
+Clippy cannot express either; both functions and every individual statement are
+locally correct. This is the whole-repo-graph claim doing exactly what it says
+on the tin.
+
+That is 2 novel P1s on real code, against a kill criterion of 3 across 13 days.
+
 ### The two surfaces do not return the same findings
 
 Same diff, same config, same day. The CLI returned the `shift 3` bug, the stale
