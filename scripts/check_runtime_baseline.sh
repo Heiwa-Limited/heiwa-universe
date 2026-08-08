@@ -105,13 +105,21 @@ if ! grep -q "\"node\": \"${required_node_major}\"" package.json; then
 fi
 
 for workflow in .github/workflows/ci.yml .github/workflows/deploy.yml; do
-  if ! grep -Eq "actions/setup-node@v[0-9]+" "$workflow"; then
-    echo "$workflow must set up Node explicitly" >&2
+  repo_hygiene_job="$(
+    awk '
+      /^  repo-hygiene:/ { in_job = 1 }
+      in_job && /^  [[:alnum:]_-]+:/ && $1 != "repo-hygiene:" { exit }
+      in_job { print }
+    ' "$workflow"
+  )"
+
+  if ! grep -Eq "actions/setup-node@v[0-9]+" <<< "$repo_hygiene_job"; then
+    echo "$workflow repo-hygiene must set up Node explicitly" >&2
     exit 1
   fi
 
-  if ! grep -Eq "node-version-file: ['\"]?\\.nvmrc['\"]?" "$workflow"; then
-    echo "$workflow must source Node from .nvmrc" >&2
+  if ! grep -Eq "node-version-file: ['\"]?\\.nvmrc['\"]?" <<< "$repo_hygiene_job"; then
+    echo "$workflow repo-hygiene must source Node from .nvmrc" >&2
     exit 1
   fi
 done
