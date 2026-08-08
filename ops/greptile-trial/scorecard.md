@@ -169,19 +169,40 @@ Single change made (and why):
 Prediction for the second half — write it down *before* Day 8, so Day 13 cannot
 rationalize whatever happened:
 
-## Counterfactual — Days 8–12
+## Counterfactual — run early, 2026-08-08, on PR #52
 
-PR used: #____
+Full writeup and verification: `raw/counterfactual.md`. Run on Day 2 rather
+than Days 8–12 because PR #52 was a better test case than anything likely to
+land later — 87 files, authored in July by Devon's agents, not for this trial.
 
-| Finding | Authoring agent | Cold non-authoring provider | Greptile |
+| Finding | Cold non-authoring provider (Codex) | Greptile | Verified |
 | --- | --- | --- | --- |
-| | | | |
+| Split `state_dir()` ignoring `HEIWA_STATE_DIR` | *missed* | **P1** | yes |
+| Claimed executions stranded in `running`, no reaper | P2 | **P1** | yes |
+| `ApprovalRequested` unhandled, blocks the sequential drain | **P1** | *missed* | yes |
 
-Findings only Greptile had: ____
-Findings the cold provider also had: ____
+Findings only Greptile had: **1**
+Findings the cold provider also had: **1**
+Findings only the cold provider had: **1**
 
-Read: was the value **independence** (reproducible free, via Heiwa routing) or
-the **whole-repo graph** (not reproducible locally)?
+Codex ran with `--base`, which refuses a custom prompt, so it had **no steer and
+no repo context** while Greptile had tuned config, 10 scoped rules, and 6
+context files. The comparison favored Greptile on setup and still came out even.
+
+**Read: substantially independence, not uniquely the graph.** Greptile's unique
+find is genuinely cross-module and a per-file linter could never produce it —
+but so is Codex's, and Codex is already paid for. The two are complementary
+(either alone caught 2 of 3; together 3 of 3), which is a real argument for
+running both, and a weak one for paying for one.
+
+**n = 1.** Single diff, single run each, both tools non-deterministic. Rerun on
+the next substantive PR before the Day 13 verdict leans on this.
+
+**The kill criterion is met but is now the wrong test.** It asks whether
+Greptile is useful — plainly yes, 6 novel real findings including 2 verified
+P1s on live Rust. The question that decides the money is whether it is useful
+*beyond a non-authoring provider Devon already runs*, which currently measures
+at one finding in three.
 
 ## Day 13 verdict — 2026-08-19
 

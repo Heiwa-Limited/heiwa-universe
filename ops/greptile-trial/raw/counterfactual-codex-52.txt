@@ -1,0 +1,9 @@
+The new automation execution pump can block on approval-required work and can permanently strand claimed executions across process interruption. Both issues affect reliable scheduled automation execution.
+
+Full review comments:
+
+- [P1] Handle approval requests before waiting for terminal events — /home/devon/heiwa/.worktrees/claude/cf-52/apps/heiwa_shell/src/main.rs:4222-4222
+  When an automation produces a tool call requiring approval, the operator runner emits `ApprovalRequested` and then blocks in `approvals.wait`; this code ignores that event and only maps `Blocker` to `AwaitingConfirmation`. Consequently `heiwa auto run`, `auto tick`, and the sequential daemon drain can hang on that execution and prevent later automations from running. Treat a pending `ApprovalRequested` as the confirmation outcome or otherwise detach the approval wait from the drain.
+
+- [P2] Recover executions left running after interruption — /home/devon/heiwa/.worktrees/claude/cf-52/crates/heiwa_automations/src/storage/mod.rs:279-285
+  If the app exits or crashes after this claim commits but before `complete_execution`, the row remains `running` permanently. Subsequent pumps only select `pending` rows, so the automation is never retried or finalized after restart. Add startup recovery or a lease/timeout that requeues stale running executions.
