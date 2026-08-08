@@ -12,11 +12,15 @@ the target primary display.
 
 ## Dev
 
+The cockpit is an npm workspace owned by the repository root. Its dependency
+source of truth is the root `package-lock.json`; do not add a nested lockfile.
+Run installs and workspace scripts from the repository root:
+
 ```bash
-npm install
-npm run dev        # Vite on :5173, proxies /api and /ws to :8787
-npm run build      # static bundle in dist/
-npm run typecheck  # tsc --noEmit
+npm ci
+npm run dev --workspace @heiwa/cockpit        # Vite on :5173, proxies /api and /ws to :8787
+npm run build --workspace @heiwa/cockpit      # static bundle in dist/
+npm run typecheck --workspace @heiwa/cockpit  # tsc --noEmit
 ```
 
 ## Shape

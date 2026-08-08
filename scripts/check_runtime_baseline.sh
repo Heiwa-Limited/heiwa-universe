@@ -73,6 +73,31 @@ if ! grep -q '"workspaces"' package.json; then
   exit 1
 fi
 
+npm_workspaces="$(
+  node -e '
+    const { globSync } = require("node:fs");
+    const pkg = require("./package.json");
+    const patterns = Array.isArray(pkg.workspaces)
+      ? pkg.workspaces
+      : pkg.workspaces?.packages ?? [];
+    const workspaces = patterns.flatMap((pattern) =>
+      globSync(pattern, { exclude: ["**/node_modules/**"] })
+    );
+    process.stdout.write([...new Set(workspaces)].join("\n"));
+  '
+)" || {
+  echo "Could not parse npm workspaces from package.json" >&2
+  exit 1
+}
+
+while IFS= read -r workspace; do
+  [[ -z "$workspace" ]] && continue
+  if [[ -f "$workspace/package-lock.json" ]]; then
+    echo "npm workspace must use the root package-lock.json: $workspace/package-lock.json" >&2
+    exit 1
+  fi
+done <<< "$npm_workspaces"
+
 required_node_major="${required_node_version%%.*}.x"
 if ! grep -q "\"node\": \"${required_node_major}\"" package.json; then
   echo "package.json engines must pin Node ${required_node_major}" >&2
