@@ -77,6 +77,9 @@ require_match ".github/workflows/release.yml" '--features heiwa-shell/lance' "re
 require_match ".github/workflows/release.yml" 'actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a' "release uploads must use the Node 24 artifact action"
 require_match ".github/workflows/release.yml" 'actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c' "release downloads must use the Node 24 artifact action"
 require_no_match ".github/workflows/release.yml" '^[[:space:]]+tags:$' "release publication must be explicitly dispatched from main so caches remain reusable"
+require_match ".github/workflows/container.yml" 'git merge-base --is-ancestor "\$commit" HEAD' "container tags must resolve to commits on main"
+require_match ".github/workflows/container.yml" '^[[:space:]]*file: packaging/apps/heiwa_shell/Dockerfile$' "container repair must use the trusted main packaging recipe"
+require_match ".github/workflows/container.yml" '^[[:space:]]*platforms: linux/amd64$' "container publication must match the currently certified architecture"
 require_block_match ".github/workflows/release.yml" \
   'ARCHIVE_EXT.*zip.*then' \
   '^[[:space:]]*else$' \

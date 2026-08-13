@@ -20,6 +20,7 @@ expect_file ".env.example"
 expect_file ".github/workflows/ci.yml"
 expect_file ".github/workflows/deploy.yml"
 expect_file "apps/heiwa_core/Dockerfile"
+expect_file "apps/heiwa_shell/Dockerfile"
 
 required_rust_channel="1.95.0"
 required_node_version="26.0.0"
@@ -35,20 +36,40 @@ if [[ "$rust_channel" != "$required_rust_channel" ]]; then
   exit 1
 fi
 
-builder_line="$(grep -E '^FROM rust:[0-9]+\.[0-9]+-slim AS rust-builder$' apps/heiwa_core/Dockerfile || true)"
-if [[ -z "$builder_line" ]]; then
-  echo "Could not find rust-builder image pin in apps/heiwa_core/Dockerfile" >&2
-  exit 1
-fi
-
-builder_version="${builder_line#FROM rust:}"
-builder_version="${builder_version%-slim AS rust-builder}"
 rust_major_minor="${rust_channel%.*}"
 
-if [[ "$builder_version" != "$rust_major_minor" ]]; then
-  echo "Rust baseline drift: rust-toolchain.toml=$rust_channel but Dockerfile builder pin=$builder_version" >&2
-  exit 1
-fi
+for dockerfile in apps/heiwa_core/Dockerfile apps/heiwa_shell/Dockerfile; do
+  builder_line="$(grep -E '^FROM rust:[0-9]+\.[0-9]+-slim AS rust-builder$' "$dockerfile" || true)"
+  if [[ -z "$builder_line" ]]; then
+    echo "Could not find rust-builder image pin in $dockerfile" >&2
+    exit 1
+  fi
+
+  builder_version="${builder_line#FROM rust:}"
+  builder_version="${builder_version%-slim AS rust-builder}"
+  if [[ "$builder_version" != "$rust_major_minor" ]]; then
+    echo "Rust baseline drift: rust-toolchain.toml=$rust_channel but $dockerfile builder pin=$builder_version" >&2
+    exit 1
+  fi
+done
+
+while IFS= read -r copy_line; do
+  read -r -a copy_parts <<<"$copy_line"
+  for ((index = 1; index < ${#copy_parts[@]} - 1; index++)); do
+    copy_source="${copy_parts[$index]%/}"
+    if [[ ! -e "$copy_source" ]]; then
+      echo "apps/heiwa_shell/Dockerfile copies missing source: $copy_source" >&2
+      exit 1
+    fi
+  done
+done < <(grep -E '^COPY ' apps/heiwa_shell/Dockerfile | grep -Ev '^COPY --from=')
+
+for container_requirement in protobuf-compiler libdbus-1-dev '--features heiwa-shell/lance'; do
+  if ! grep -Fq -- "$container_requirement" apps/heiwa_shell/Dockerfile; then
+    echo "apps/heiwa_shell/Dockerfile is missing full-runtime requirement: $container_requirement" >&2
+    exit 1
+  fi
+done
 
 nvmrc_version="$(tr -d '[:space:]' < .nvmrc)"
 node_version_file="$(tr -d '[:space:]' < .node-version)"

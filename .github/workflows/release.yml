@@ -302,10 +302,12 @@ jobs:
           context: .
           file: apps/heiwa_shell/Dockerfile
           push: true
-          platforms: linux/amd64,linux/arm64
+          platforms: linux/amd64
           tags: |
             ${{ steps.img.outputs.image }}:${{ needs.metadata.outputs.tag }}
             ${{ steps.img.outputs.image }}:${{ needs.metadata.outputs.version }}
             ${{ steps.img.outputs.image }}:latest
           provenance: mode=max
           sbom: true
+          cache-from: type=gha,scope=heiwa-container-amd64
+          cache-to: type=gha,mode=max,scope=heiwa-container-amd64

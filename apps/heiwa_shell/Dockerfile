@@ -15,12 +15,12 @@
 # -----------------------------------------------------
 # STAGE 1: RUST BUILDER
 # -----------------------------------------------------
-FROM rust:1.93-slim AS rust-builder
+FROM rust:1.95-slim AS rust-builder
 WORKDIR /build
 
 RUN apt-get update \
     && apt-get install -y --no-install-recommends \
-        build-essential pkg-config libssl-dev ca-certificates git \
+        build-essential pkg-config libssl-dev libdbus-1-dev protobuf-compiler ca-certificates git \
     && rm -rf /var/lib/apt/lists/*
 
 # Copy workspace layout. We keep the build context narrow so a `heiwa shell`
@@ -29,11 +29,9 @@ COPY Cargo.toml Cargo.lock rust-toolchain.toml ./
 COPY apps/heiwa_core/ ./apps/heiwa_core/
 COPY apps/heiwa_orchestrator/ ./apps/heiwa_orchestrator/
 COPY apps/heiwa_shell/ ./apps/heiwa_shell/
-COPY apps/heiwa_hub/ ./apps/heiwa_hub/
 COPY crates/ ./crates/
-COPY packages/heiwa_bindings/rust/ ./packages/heiwa_bindings/rust/
 
-RUN cargo build --release --bin heiwa -p heiwa-shell \
+RUN cargo build --locked --release --bin heiwa -p heiwa-shell --features heiwa-shell/lance \
     && strip target/release/heiwa || true
 
 # -----------------------------------------------------
