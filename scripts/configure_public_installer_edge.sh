@@ -20,7 +20,7 @@ rule_json() {
           "http_request_firewall_managed",
           "http_request_sbfm"
         ],
-        products: ["bic", "hot", "securityLevel", "uaBlock", "zoneLockdown"]
+        products: ["bic", "hot", "rateLimit", "securityLevel", "uaBlock", "waf", "zoneLockdown"]
       },
       expression: ("(http.host eq \"" + $host + "\" and http.request.uri.path in {\"/install\" \"/install.sh\"})"),
       description: $description,

@@ -83,9 +83,12 @@ require_match ".github/workflows/container.yml" 'git merge-base --is-ancestor "\
 require_match ".github/workflows/container.yml" '^[[:space:]]*file: packaging/apps/heiwa_shell/Dockerfile$' "container repair must use the trusted main packaging recipe"
 require_match ".github/workflows/container.yml" '^[[:space:]]*platforms: linux/amd64$' "container publication must match the currently certified architecture"
 require_file "scripts/configure_public_installer_edge.sh"
-require_match ".github/workflows/deploy.yml" 'bash scripts/configure_public_installer_edge\.sh' "Cloudflare deploys must preserve non-browser installer access"
+require_file "scripts/check_public_installer_edge.sh"
+require_match ".github/workflows/deploy.yml" 'bash scripts/check_public_installer_edge\.sh' "Cloudflare deploys must verify non-browser installer access"
 require_match "scripts/configure_public_installer_edge.sh" '^zone_name=.*heiwa\.ltd' "installer edge exception must stay scoped to heiwa.ltd"
 require_match "scripts/configure_public_installer_edge.sh" 'uri\.path in \{\\"/install\\" \\"/install\.sh\\"\}' "installer edge exception must stay scoped to the two public installer paths"
+require_match "scripts/check_public_installer_edge.sh" '^installer_url=.*https://heiwa\.ltd/install' "installer edge check must target the public installer"
+bash scripts/tests/test_check_public_installer_edge.sh
 require_block_match ".github/workflows/release.yml" \
   'ARCHIVE_EXT.*zip.*then' \
   '^[[:space:]]*else$' \

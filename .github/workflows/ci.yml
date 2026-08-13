@@ -393,9 +393,7 @@ jobs:
           cache-workspace-crates: true
           cache-bin: false
       - name: Install protoc
-        uses: arduino/setup-protoc@c65c819552d16ad3c9b72d9dfd5ba5237b9c906b # v3
-        with:
-          repo-token: ${{ secrets.GITHUB_TOKEN }}
+        uses: taiki-e/install-action@f6886ea0c81d86f9719fdab9de74e4d72e8486fb # protoc
       - name: Certify Lance backend
         run: |
           cargo test -p heiwa_embed --locked --features lance
