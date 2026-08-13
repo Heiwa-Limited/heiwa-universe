@@ -12,7 +12,7 @@
 #   - `cargo machete` was never run locally at all
 #   - the workspace builds fine on a Mac with Homebrew protoc; no runner has it
 #
-# Keep the Rust commands in sync with certification.yml.
+# Keep the Rust commands in sync with ci.yml and certification.yml.
 set -uo pipefail
 cd "$(dirname "$0")/.." || exit 1
 
@@ -48,7 +48,7 @@ if [[ "$FULL" == "1" ]]; then
 fi
 
 echo
-echo "== rust certification (certification.yml) =="
+echo "== rust promotion and certification =="
 step "cargo fmt --check" cargo fmt --all -- --check
 step "cargo test (fast)" cargo test --workspace --exclude heiwa-desktop --locked --no-default-features
 if [[ "$FULL" == "1" ]]; then
