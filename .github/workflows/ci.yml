@@ -110,15 +110,31 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - group: shell
+          - group: shell-unit
             needs_native_vault: true
-          - group: runtime
+          - group: shell-api
             needs_native_vault: true
-          - group: foundation
+          - group: shell-state
+            needs_native_vault: true
+          - group: shell-ops
+            needs_native_vault: true
+          - group: runtime-unit
+            needs_native_vault: true
+          - group: runtime-a
+            needs_native_vault: true
+          - group: runtime-b
+            needs_native_vault: true
+          - group: foundation-unit
+            needs_native_vault: false
+          - group: foundation-a
+            needs_native_vault: false
+          - group: foundation-b
             needs_native_vault: false
     env:
       CARGO_PROFILE_DEV_DEBUG: "0"
       CARGO_INCREMENTAL: "0"
+      SCCACHE_GHA_ENABLED: "true"
+      RUSTC_WRAPPER: sccache
     steps:
       - name: Skip unchanged Rust surface
         if: needs.changes.outputs.rust != 'true'
@@ -132,28 +148,11 @@ jobs:
         uses: dtolnay/rust-toolchain@4360b52568e2003a75bf9bc1d59f33a8e3fc893c # stable
         with:
           toolchain: 1.95.0
-      - name: Rust group cache
-        id: rust-group-cache
+      - name: Install on-demand compiler cache
         if: needs.changes.outputs.rust == 'true'
-        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
+        uses: mozilla-actions/sccache-action@fc920bf0ec8de6ee65d409111f7ec508035751ba # v0.0.11
         with:
-          workspaces: |
-            .
-          prefix-key: v2-rust
-          shared-key: pr-${{ matrix.group }}
-          cache-workspace-crates: true
-          cache-bin: true
-      - name: Bootstrap group cache from protected main
-        if: needs.changes.outputs.rust == 'true' && steps.rust-group-cache.outputs.cache-hit != 'true'
-        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
-        with:
-          workspaces: |
-            .
-          prefix-key: v2-rust
-          shared-key: rust-matrix
-          cache-workspace-crates: true
-          cache-bin: true
-          save-if: false
+          version: v0.16.0
       - name: Install Linux system dependencies
         if: needs.changes.outputs.rust == 'true' && matrix.needs_native_vault
         run: sudo apt-get install -y --no-install-recommends libdbus-1-dev pkg-config
@@ -173,6 +172,8 @@ jobs:
     env:
       CARGO_PROFILE_DEV_DEBUG: "0"
       CARGO_INCREMENTAL: "0"
+      SCCACHE_GHA_ENABLED: "true"
+      RUSTC_WRAPPER: sccache
     steps:
       - name: Skip unchanged Rust surface
         if: needs.changes.outputs.rust != 'true'
@@ -187,28 +188,11 @@ jobs:
         with:
           toolchain: 1.95.0
           components: clippy
-      - name: Rust static cache
-        id: rust-static-cache
+      - name: Install on-demand compiler cache
         if: needs.changes.outputs.rust == 'true'
-        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
+        uses: mozilla-actions/sccache-action@fc920bf0ec8de6ee65d409111f7ec508035751ba # v0.0.11
         with:
-          workspaces: |
-            .
-          prefix-key: v2-rust
-          shared-key: pr-static
-          cache-workspace-crates: true
-          cache-bin: true
-      - name: Bootstrap static cache from protected main
-        if: needs.changes.outputs.rust == 'true' && steps.rust-static-cache.outputs.cache-hit != 'true'
-        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
-        with:
-          workspaces: |
-            .
-          prefix-key: v2-rust
-          shared-key: rust-matrix
-          cache-workspace-crates: true
-          cache-bin: true
-          save-if: false
+          version: v0.16.0
       - name: Install Linux system dependencies
         if: needs.changes.outputs.rust == 'true'
         run: sudo apt-get install -y --no-install-recommends libdbus-1-dev pkg-config
