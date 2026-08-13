@@ -74,6 +74,7 @@ Longest prefix wins. Put narrower paths above broader parents when a child has a
 | `.ollama`                  | product          |
 | `.openclaw`                | legacy           |
 | `.wrangler`                | runtime-artifact |
+| `.gitleaksignore`          | product          |
 | `Cargo.lock`               | generated        |
 | `Cargo.toml`               | product          |
 | `package-lock.json`        | generated        |
