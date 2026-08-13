@@ -61,6 +61,7 @@ nav:
   - Local Operation: local-self-operation.md
   - Plugins: plugins.md
   - Deployment: deployment.md
+  - Delivery Pipeline: delivery-pipeline.md
   - Security: security.md
   - Failure Modes: failure-modes.md
   - Operator Runbook: operator-runbook.md
