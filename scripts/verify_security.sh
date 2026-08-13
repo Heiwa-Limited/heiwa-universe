@@ -37,28 +37,42 @@ fail() {
   printf 'FAIL %s\n' "$1"
 }
 
-run_required() {
+# Dependency audits are independent and read-only. Run them concurrently so
+# the security gate costs the duration of its slowest ecosystem instead of the
+# sum of every network and type-check operation. Logs are replayed in launch
+# order to keep CI output deterministic and easy to audit.
+parallel_labels=()
+parallel_logs=()
+parallel_pids=()
+
+run_required_async() {
   local label="$1"
   shift
-  section "$label"
-  if "$@"; then
-    pass "$label"
-  else
-    local status=$?
-    fail "$label (exit $status)"
-  fi
+  local index="${#parallel_pids[@]}"
+  local log="$TMPDIR/parallel-$index.log"
+
+  (
+    section "$label"
+    "$@"
+  ) >"$log" 2>&1 &
+
+  parallel_labels+=("$label")
+  parallel_logs+=("$log")
+  parallel_pids+=("$!")
 }
 
-run_optional() {
-  local label="$1"
-  shift
-  section "$label"
-  if "$@"; then
-    pass "$label"
-  else
-    local status=$?
-    warn "$label skipped/failed (exit $status)"
-  fi
+wait_required_async() {
+  local index status
+  for index in "${!parallel_pids[@]}"; do
+    status=0
+    wait "${parallel_pids[$index]}" || status=$?
+    cat "${parallel_logs[$index]}"
+    if [[ "$status" -eq 0 ]]; then
+      pass "${parallel_labels[$index]}"
+    else
+      fail "${parallel_labels[$index]} (exit $status)"
+    fi
+  done
 }
 
 require_command() {
@@ -103,19 +117,20 @@ printf 'dirty: %s\n' "$(test -z "$(git status --porcelain 2>/dev/null)" && echo 
 if command -v cargo-audit >/dev/null 2>&1; then
   # Calling the installed subcommand directly avoids rustup auto-syncing the
   # repository toolchain before the audit can run on hosted runners.
-  run_required "cargo audit" cargo-audit audit
+  run_required_async "cargo audit" cargo-audit audit
 else
-  run_required "cargo audit" cargo audit
+  run_required_async "cargo audit" cargo audit
 fi
-run_required "root npm audit" npm audit
-run_required "cockpit npm audit" npm --prefix apps/heiwa_app/clients/cockpit audit
-run_required "desktop npm audit" npm --prefix apps/heiwa_app/desktop audit
-run_required "root TypeScript typecheck" npm run typecheck --silent
-run_required "desktop TypeScript typecheck" bash -c 'cd apps/heiwa_app/desktop && npm run typecheck --silent'
-run_required "Deno herd/prototype typecheck" deno check scripts/herd.ts prototypes/heiwa-desk/main.ts prototypes/heiwa-desk/herdr.ts
-run_required "root Python dependency audit" audit_python_project root "$ROOT"
-run_required "runtime Python dependency audit" audit_python_project runtime-python "$ROOT/runtime/python"
-run_required "product surface audit" bash scripts/audit_product_surface.sh
+run_required_async "root npm audit" npm audit
+run_required_async "cockpit npm audit" npm --prefix apps/heiwa_app/clients/cockpit audit
+run_required_async "desktop npm audit" npm --prefix apps/heiwa_app/desktop audit
+run_required_async "root TypeScript typecheck" npm run typecheck --silent
+run_required_async "desktop TypeScript typecheck" bash -c 'cd apps/heiwa_app/desktop && npm run typecheck --silent'
+run_required_async "Deno herd/prototype typecheck" deno check scripts/herd.ts prototypes/heiwa-desk/main.ts prototypes/heiwa-desk/herdr.ts
+run_required_async "root Python dependency audit" audit_python_project root "$ROOT"
+run_required_async "runtime Python dependency audit" audit_python_project runtime-python "$ROOT/runtime/python"
+run_required_async "product surface audit" bash scripts/audit_product_surface.sh
+wait_required_async
 
 if [[ "$SKIP_SECRET_SCAN" == "1" ]]; then
   section "gitleaks secret scan"

@@ -13,7 +13,7 @@ How the `heiwa-universe` repository becomes the public Heiwa surface. GitHub sta
 | **Releases**          | GitHub Releases  | `apps/heiwa_core/`, `apps/heiwa_shell/`         | GitHub Releases |
 | **Evidence + recall** | owner-local      | `crates/heiwa_evidence/`, `crates/heiwa_embed/` | Local JSONL     |
 
-Each plane has a single source of truth in the repo and a single deploy path. Automated workflows are the normal channel; a [manual fallback](#manual-fallback-when-actions-are-paused) exists for the periods when GitHub Actions are paused.
+Each plane has a single source of truth in the repo and a single deploy path. Automated workflows are the normal channel; a [break-glass manual fallback](#break-glass-manual-fallback) remains available during a GitHub Actions outage.
 
 ## Public web — GitHub Pages with Cloudflare DNS
 
@@ -38,20 +38,29 @@ GitHub is the source of truth. Every public artifact is built from a tagged comm
 
 | Workflow                                                                                                | Trigger                         | Output                                         |
 | ------------------------------------------------------------------------------------------------------- | ------------------------------- | ---------------------------------------------- |
-| [`ci.yml`](https://github.com/Heiwa-Limited/heiwa-universe/blob/main/.github/workflows/ci.yml)           | PRs to `main` + manual dispatch | Rust matrix, lint, docs, agent-sync, hygiene   |
+| [`ci.yml`](https://github.com/Heiwa-Limited/heiwa-universe/blob/main/.github/workflows/ci.yml)           | PRs + `main` push + manual      | Fast PR gate; full `main` release certification |
 | [`pages.yml`](https://github.com/Heiwa-Limited/heiwa-universe/blob/main/.github/workflows/pages.yml)     | tag push `v*`                   | MkDocs build → GitHub Pages → `docs.heiwa.ltd` |
-| [`release.yml`](https://github.com/Heiwa-Limited/heiwa-universe/blob/main/.github/workflows/release.yml) | tag push `v*`                   | Cross-platform binaries → GitHub Releases      |
+| [`release.yml`](https://github.com/Heiwa-Limited/heiwa-universe/blob/main/.github/workflows/release.yml) | manual dispatch for an existing annotated tag | Certified cross-platform binaries → GitHub Releases |
 | [`deploy.yml`](https://github.com/Heiwa-Limited/heiwa-universe/blob/main/.github/workflows/deploy.yml)   | manual dispatch only            | Cloudflare Pages publish for `clients/web/`    |
 
-CI economy: compute runs at the moments that matter — PR validation (the production gate for `main`), tagged releases, and deliberate dispatches. Merges to `main` do not implicitly re-test or republish anything. `bash scripts/check_ci_local.sh` mirrors the PR checks locally and is the required pre-push gate.
+CI has two deliberate latency classes. Pull requests run the Linux execution
+gate, native dependency review, secret/vulnerability scans, lint, docs, and
+repository contracts; the feedback budget is under one minute on warm hosted
+runners. Every protected `main` advance then runs the complete macOS/Windows
+test-target compilation, desktop shell, Lance integration, and multi-ecosystem
+security certification. `release.yml` refuses to publish a tag until that exact
+commit has a successful `main` certification run. `bash scripts/check_ci_local.sh`
+is the required local pre-push mirror.
 
-### Current pipeline status (2026-07-30)
+### Current pipeline status (2026-08-13)
 
-The Actions lock is **chronic, not incidental**: runner-billed-out since at least 2026-05-25, briefly cleared (PR #51 ran 27 green minutes on 2026-07-28), then re-locked with "recent account payments have failed". The durable fix is downgrading the account to **GitHub Free** (Settings → Billing and licensing → Current plan → Downgrade): this repository is public, and standard GitHub-hosted runners on public repositories bill nothing, so no spending limit or paid plan is required. The workflow code paths remain valid — no code change is needed when runners return.
+The repository is public and standard GitHub-hosted Actions are active without
+a paid external runner. `v0.1.0` is an immutable GitHub Release with verified
+checksums and artifact attestations for Linux, macOS, and Windows. The first
+container publication is repaired through the dedicated container workflow;
+it is a separate receipt from the immutable binary release.
 
-Until that resolves, ship from the manual fallback below. Remove the fallback section once at least one tagged release flows cleanly through the automated path again — doctrine pages stay honest.
-
-### Manual fallback (when Actions are paused)
+### Break-glass manual fallback
 
 **Docs → `docs.heiwa.ltd`**
 

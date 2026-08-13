@@ -37,5 +37,10 @@ if ! grep -Fq 'git show "$BASE_SHA:scripts/detect_ci_surfaces.sh"' "$workflow"; 
   echo "FAIL: pull-request classification must execute protected base policy" >&2
   exit 1
 fi
+if ! grep -Fq 'git -C "$GITHUB_WORKSPACE" diff --name-only "$BASE_SHA" "$HEAD_SHA"' "$workflow" ||
+  ! grep -Fq 'bash "$trusted_classifier" --paths' "$workflow"; then
+  echo "FAIL: trusted classifier must receive paths computed inside the checkout" >&2
+  exit 1
+fi
 
 printf 'CI surface detector tests passed.\n'

@@ -9,6 +9,7 @@ on:
         type: string
 
 permissions:
+  actions: read
   contents: read
 
 concurrency:
@@ -19,6 +20,7 @@ jobs:
   metadata:
     name: Resolve Release Metadata
     runs-on: ubuntu-latest
+    timeout-minutes: 16
     outputs:
       tag: ${{ steps.meta.outputs.tag }}
       version: ${{ steps.meta.outputs.version }}
@@ -62,6 +64,47 @@ jobs:
             echo "version=${tag#v}"
             echo "commit=$commit"
           } >> "$GITHUB_OUTPUT"
+
+      - name: Require successful full main certification
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_COMMIT: ${{ steps.meta.outputs.commit }}
+        run: |
+          set -euo pipefail
+
+          deadline=$((SECONDS + 900))
+          while (( SECONDS < deadline )); do
+            certification="$({
+              gh api \
+                "repos/${GITHUB_REPOSITORY}/actions/workflows/ci.yml/runs?event=push&branch=main&head_sha=${RELEASE_COMMIT}&per_page=20" \
+                --jq '.workflow_runs | sort_by(.run_number) | last | [.status, (.conclusion // "")] | @tsv'
+            } 2>/dev/null || true)"
+
+            if [[ -z "$certification" ]]; then
+              echo "Waiting for main certification to start at ${RELEASE_COMMIT}."
+              sleep 10
+              continue
+            fi
+
+            IFS=$'\t' read -r status conclusion <<<"$certification"
+            if [[ "$status" != "completed" ]]; then
+              echo "Waiting for main certification at ${RELEASE_COMMIT}: ${status}."
+              sleep 10
+              continue
+            fi
+
+            if [[ "$conclusion" != "success" ]]; then
+              echo "Main certification failed at ${RELEASE_COMMIT}: ${conclusion}." >&2
+              exit 1
+            fi
+
+            echo "Main certification passed at ${RELEASE_COMMIT}."
+            exit 0
+          done
+
+          echo "Timed out waiting for main certification at ${RELEASE_COMMIT}." >&2
+          exit 1
 
   cockpit:
     name: Build Cockpit Assets
@@ -135,11 +178,11 @@ jobs:
           prefix-key: v3-release
           shared-key: ${{ matrix.target }}
           cache-on-failure: true
+          cache-workspace-crates: true
           cache-bin: false
 
-      # heiwa-shell defaults to the `lance` feature, whose lance-encoding
-      # dependency shells out to `protoc` at build time. Without this the
-      # release binary does not build on any runner.
+      # Release binaries explicitly include Lance; its lance-encoding
+      # dependency shells out to `protoc` at build time.
       - name: Install protoc
         uses: arduino/setup-protoc@c65c819552d16ad3c9b72d9dfd5ba5237b9c906b # v3
         with:
@@ -152,7 +195,9 @@ jobs:
           sudo apt-get install -y --no-install-recommends libdbus-1-dev pkg-config
 
       - name: Build release binary
-        run: cargo build --locked --release -p heiwa-shell --bin heiwa --target ${{ matrix.target }}
+        run: >
+          cargo build --locked --release -p heiwa-shell --bin heiwa
+          --features heiwa-shell/lance --target ${{ matrix.target }}
 
       - name: Download cockpit assets
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
@@ -299,10 +344,12 @@ jobs:
           context: .
           file: apps/heiwa_shell/Dockerfile
           push: true
-          platforms: linux/amd64,linux/arm64
+          platforms: linux/amd64
           tags: |
             ${{ steps.img.outputs.image }}:${{ needs.metadata.outputs.tag }}
             ${{ steps.img.outputs.image }}:${{ needs.metadata.outputs.version }}
             ${{ steps.img.outputs.image }}:latest
           provenance: mode=max
           sbom: true
+          cache-from: type=gha,scope=heiwa-container-amd64
+          cache-to: type=gha,mode=max,scope=heiwa-container-amd64

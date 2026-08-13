@@ -1,0 +1,106 @@
+name: Heiwa Container
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Existing annotated release tag to containerize
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: heiwa-container-${{ inputs.tag }}
+  cancel-in-progress: false
+
+jobs:
+  metadata:
+    name: Resolve Container Metadata
+    runs-on: ubuntu-latest
+    outputs:
+      tag: ${{ steps.meta.outputs.tag }}
+      version: ${{ steps.meta.outputs.version }}
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          persist-credentials: false
+          ref: main
+          fetch-depth: 0
+          fetch-tags: true
+      - id: meta
+        shell: bash
+        env:
+          TAG: ${{ inputs.tag }}
+        run: |
+          set -euo pipefail
+          if [[ ! "$TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+([+-][0-9A-Za-z.-]+)?$ ]]; then
+            echo "Container tags must look like v0.1.0" >&2
+            exit 1
+          fi
+          if [[ "$(git cat-file -t "$TAG" 2>/dev/null || true)" != "tag" ]]; then
+            echo "Container tag must exist and be annotated: $TAG" >&2
+            exit 1
+          fi
+          commit="$(git rev-parse "${TAG}^{}")"
+          if ! git merge-base --is-ancestor "$commit" HEAD; then
+            echo "Container tag $TAG does not resolve to a commit on main" >&2
+            exit 1
+          fi
+          {
+            echo "tag=$TAG"
+            echo "version=${TAG#v}"
+          } >> "$GITHUB_OUTPUT"
+
+  build:
+    name: Build and Push Container Image
+    needs: metadata
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - name: Check out release source
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          persist-credentials: false
+          ref: ${{ needs.metadata.outputs.tag }}
+          path: source
+      - name: Check out trusted packaging recipe
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          persist-credentials: false
+          ref: main
+          path: packaging
+          sparse-checkout: apps/heiwa_shell/Dockerfile
+          sparse-checkout-cone-mode: false
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3
+      - name: Login to GHCR
+        uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Compute lower-cased image name
+        id: img
+        shell: bash
+        run: |
+          owner_lower="$(echo '${{ github.repository_owner }}' | tr '[:upper:]' '[:lower:]')"
+          echo "image=ghcr.io/${owner_lower}/heiwa" >> "$GITHUB_OUTPUT"
+      - name: Build and push
+        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6
+        with:
+          context: source
+          file: packaging/apps/heiwa_shell/Dockerfile
+          push: true
+          platforms: linux/amd64
+          tags: |
+            ${{ steps.img.outputs.image }}:${{ needs.metadata.outputs.tag }}
+            ${{ steps.img.outputs.image }}:${{ needs.metadata.outputs.version }}
+            ${{ steps.img.outputs.image }}:latest
+          provenance: mode=max
+          sbom: true
+          cache-from: type=gha,scope=heiwa-container-amd64
+          cache-to: type=gha,mode=max,scope=heiwa-container-amd64

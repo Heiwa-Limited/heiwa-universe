@@ -69,9 +69,15 @@ if ((${#historical_allowlist[@]} != 2)); then
   exit 1
 fi
 
-if ! cargo tree -p heiwa-shell -e features -i heiwa_embed | grep -q 'heiwa_embed feature "lance"'; then
-  echo "heiwa-shell does not enable the Lance embedding backend in its production feature graph." >&2
+if cargo tree -p heiwa-shell -e features -i heiwa_embed | grep -q 'heiwa_embed feature "lance"'; then
+  echo "heiwa-shell unexpectedly enables Lance in the lightweight developer feature graph." >&2
   exit 1
 fi
 
-echo "Current runtime surfaces match the Lance + local JSONL backend contract."
+if ! cargo tree -p heiwa-shell -e features --features heiwa-shell/lance -i heiwa_embed \
+  | grep -q 'heiwa_embed feature "lance"'; then
+  echo "heiwa-shell cannot enable the Lance embedding backend for full release builds." >&2
+  exit 1
+fi
+
+echo "Current runtime surfaces match the lightweight-default + full-release Lance contract."
