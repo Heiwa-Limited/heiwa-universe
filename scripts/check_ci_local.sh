@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Run the fast Rust lane plus the repository's full local acceptance gates.
+# Run the Rust certification lane plus the repository's full local acceptance gates.
 # Pass --full to add the Lance certification used when its boundary changes.
 #
 # Why this exists: the rust-matrix job failed four times in a row on this
@@ -12,7 +12,7 @@
 #   - `cargo machete` was never run locally at all
 #   - the workspace builds fine on a Mac with Homebrew protoc; no runner has it
 #
-# Keep the Rust commands in sync with ci.yml.
+# Keep the Rust commands in sync with certification.yml.
 set -uo pipefail
 cd "$(dirname "$0")/.." || exit 1
 
@@ -48,7 +48,7 @@ if [[ "$FULL" == "1" ]]; then
 fi
 
 echo
-echo "== rust matrix (ci.yml: rust-matrix) =="
+echo "== rust certification (certification.yml) =="
 step "cargo fmt --check" cargo fmt --all -- --check
 step "cargo test (fast)" cargo test --workspace --exclude heiwa-desktop --locked --no-default-features
 if [[ "$FULL" == "1" ]]; then
