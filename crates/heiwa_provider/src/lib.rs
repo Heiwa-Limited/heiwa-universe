@@ -1,6 +1,8 @@
 use serde::{Deserialize, Serialize};
 use std::env;
 use std::fs;
+use std::io::{BufRead, BufReader, Read, Write};
+use std::net::{TcpStream, ToSocketAddrs};
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
@@ -375,18 +377,53 @@ fn is_ollama_running() -> bool {
     let Ok(endpoint) = crate::detect::ollama::resolve_configured_endpoint(stored_endpoint) else {
         return false;
     };
-    let Ok(client) = reqwest::blocking::Client::builder()
-        .connect_timeout(crate::detect::ollama::ENDPOINT_CONNECT_TIMEOUT)
-        .timeout(crate::detect::ollama::ENDPOINT_CONNECT_TIMEOUT)
-        .no_proxy()
-        .build()
-    else {
+    let Ok(url) = reqwest::Url::parse(&endpoint.api_url("/api/tags")) else {
         return false;
     };
-    client
-        .get(endpoint.api_url("/api/tags"))
-        .send()
-        .is_ok_and(|response| response.status().is_success())
+    let Some(host) = url.host_str() else {
+        return false;
+    };
+    let Some(port) = url.port_or_known_default() else {
+        return false;
+    };
+    let Ok(addresses) = (host, port).to_socket_addrs() else {
+        return false;
+    };
+    let host_header = if host.contains(':') {
+        format!("[{host}]:{port}")
+    } else {
+        format!("{host}:{port}")
+    };
+    let request =
+        format!("GET /api/tags HTTP/1.1\r\nHost: {host_header}\r\nConnection: close\r\n\r\n");
+
+    addresses.into_iter().any(|address| {
+        let Ok(mut stream) =
+            TcpStream::connect_timeout(&address, crate::detect::ollama::ENDPOINT_CONNECT_TIMEOUT)
+        else {
+            return false;
+        };
+        if stream
+            .set_read_timeout(Some(crate::detect::ollama::ENDPOINT_CONNECT_TIMEOUT))
+            .is_err()
+            || stream
+                .set_write_timeout(Some(crate::detect::ollama::ENDPOINT_CONNECT_TIMEOUT))
+                .is_err()
+            || stream.write_all(request.as_bytes()).is_err()
+        {
+            return false;
+        }
+        let mut status_line = String::new();
+        let mut reader = BufReader::new(stream).take(128);
+        if reader.read_line(&mut status_line).is_err() {
+            return false;
+        }
+        status_line
+            .split_whitespace()
+            .nth(1)
+            .and_then(|status| status.parse::<u16>().ok())
+            .is_some_and(|status| (200..300).contains(&status))
+    })
 }
 
 fn gemini_has_native_auth() -> bool {

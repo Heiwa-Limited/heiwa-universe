@@ -13,6 +13,13 @@ fn test_provider_status_discovery() {
     assert_eq!(acc.auth_kind, AuthKind::OauthCli);
 }
 
+#[tokio::test(flavor = "multi_thread")]
+async fn ollama_status_probe_is_safe_inside_async_runtime() {
+    let ollama = get_auth_status("ollama").expect("ollama provider should be known");
+    assert_eq!(ollama.provider_id, "ollama");
+    assert_eq!(ollama.auth_kind, AuthKind::LocalRuntime);
+}
+
 #[test]
 fn test_antigravity_provider_is_known_and_codex_is_oauth_cli() {
     let antigravity = get_auth_status("antigravity").expect("antigravity provider should be known");
