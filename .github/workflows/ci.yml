@@ -1,7 +1,21 @@
 name: Heiwa CI
 
-# CI is the sub-minute change gate. Compilation, tests, and other cache-sensitive
-# proofs run independently in certification.yml at every protected-main commit.
+# CI is the promotion gate for `main`. It has two lanes:
+#
+#   * the sub-minute feedback lane (everything except the Rust jobs), bounded at
+#     one minute per job by scripts/check_ci_job_deadlines.rb
+#   * the bounded Rust promotion lane (rust-tests, rust-static), which compiles
+#     and therefore cannot be sub-minute; it is capped at 20 minutes and warmed
+#     by the sccache GitHub Actions cache seeded on protected `main`
+#
+# `Rust Source Policy` is the aggregate required status check. Branch protection
+# on `main` pins that context name, so it must keep reporting even when the
+# underlying Rust jobs are renamed or re-sharded.
+#
+# Runner note: these jobs previously targeted `blacksmith-16vcpu-ubuntu-2404`.
+# That label was never picked up by a runner (jobs sat queued indefinitely, and
+# `timeout-minutes` does not bound queue time), so the lanes run on
+# GitHub-hosted runners until Blacksmith is proven for this org.
 on:
   pull_request:
     branches: ["main"]
@@ -62,8 +76,8 @@ jobs:
 
   rust-tests:
     name: Rust Tests
-    runs-on: blacksmith-16vcpu-ubuntu-2404
-    timeout-minutes: 1
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
     env:
       CARGO_PROFILE_DEV_DEBUG: "0"
       CARGO_INCREMENTAL: "0"
@@ -90,8 +104,8 @@ jobs:
 
   rust-static:
     name: Rust Static Checks
-    runs-on: blacksmith-16vcpu-ubuntu-2404
-    timeout-minutes: 1
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
     env:
       CARGO_PROFILE_DEV_DEBUG: "0"
       CARGO_INCREMENTAL: "0"
@@ -135,6 +149,37 @@ jobs:
           tool: cargo-machete
       - name: Check unused Rust dependencies
         run: cargo machete
+
+  rust-source-policy:
+    # Aggregate required status check. `main` branch protection pins this exact
+    # context name, so it must always report a conclusion — including when the
+    # lanes it guards fail, are cancelled, or are skipped.
+    name: Rust Source Policy
+    needs: [rust-tests, rust-static]
+    if: always()
+    runs-on: ubuntu-latest
+    timeout-minutes: 1
+    steps:
+      - name: Require the Rust promotion lanes to pass
+        env:
+          RUST_TESTS_RESULT: ${{ needs.rust-tests.result }}
+          RUST_STATIC_RESULT: ${{ needs.rust-static.result }}
+        run: |
+          set -euo pipefail
+          echo "rust-tests=$RUST_TESTS_RESULT rust-static=$RUST_STATIC_RESULT"
+          status=0
+          if [[ "$RUST_TESTS_RESULT" != "success" ]]; then
+            echo "Rust Tests did not succeed" >&2
+            status=1
+          fi
+          if [[ "$RUST_STATIC_RESULT" != "success" ]]; then
+            echo "Rust Static Checks did not succeed" >&2
+            status=1
+          fi
+          if (( status != 0 )); then
+            exit 1
+          fi
+          echo "Rust promotion proof complete."
 
   lint:
     name: TypeScript and Web Lint

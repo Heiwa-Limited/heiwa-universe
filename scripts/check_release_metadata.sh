@@ -79,14 +79,27 @@ require_file ".github/workflows/certification.yml"
 require_match ".github/workflows/certification.yml" '^name: Heiwa Certification$' "heavy release proofs must use the certification workflow"
 require_no_match ".github/workflows/ci.yml" 'name: (Lance Backend Certification|Desktop Shell Certification|Cross-Platform Rust Compilation|Multi-Ecosystem Security Certification)' "heavy release proofs must stay out of sub-minute CI"
 require_match ".github/workflows/certification.yml" 'mozilla-actions/sccache-action@fc920bf0ec8de6ee65d409111f7ec508035751ba' "protected main must seed the on-demand Rust compiler cache"
-require_match ".github/workflows/ci.yml" 'name: Rust Tests' "fast CI must run the Rust test suite"
-require_match ".github/workflows/ci.yml" 'name: Rust Static Checks' "fast CI must run Rust static checks"
-require_match ".github/workflows/ci.yml" 'runs-on: blacksmith-16vcpu-ubuntu-2404' "full Rust promotion gates require bounded high-performance runners"
-require_match ".github/workflows/ci.yml" 'cargo fmt --all -- --check' "fast CI must check Rust formatting"
-require_match ".github/workflows/ci.yml" 'bash scripts/ci_rust_test_group\.sh --check' "fast CI must validate the Rust test inventory"
-require_match ".github/workflows/ci.yml" 'cargo test --workspace --exclude heiwa-desktop --locked --no-default-features' "fast CI must execute workspace Rust tests before merge"
-require_match ".github/workflows/ci.yml" 'cargo clippy --workspace --exclude heiwa-desktop' "fast CI must execute clippy before merge"
-require_match ".github/workflows/ci.yml" 'run: cargo machete' "fast CI must check unused Rust dependencies before merge"
+require_match ".github/workflows/ci.yml" 'name: Rust Tests' "PR CI must run the Rust test suite"
+require_match ".github/workflows/ci.yml" 'name: Rust Static Checks' "PR CI must run Rust static checks"
+# `main` branch protection pins the `Rust Source Policy` status context by name.
+# Renaming or deleting the job that reports it leaves the required check pending
+# forever and no PR can merge, so the aggregate job is release metadata.
+require_match ".github/workflows/ci.yml" 'name: Rust Source Policy' "main branch protection requires the Rust Source Policy status context"
+require_block_match ".github/workflows/ci.yml" \
+  '^  rust-source-policy:' \
+  '^    runs-on:' \
+  'needs: \[rust-tests, rust-static\]' \
+  "the Rust Source Policy context must aggregate both Rust promotion lanes"
+require_block_match ".github/workflows/ci.yml" \
+  '^  rust-source-policy:' \
+  '^    runs-on:' \
+  '^ *if: always\(\)$' \
+  "the Rust Source Policy context must report even when a lane fails or is skipped"
+require_match ".github/workflows/ci.yml" 'cargo fmt --all -- --check' "PR CI must check Rust formatting"
+require_match ".github/workflows/ci.yml" 'bash scripts/ci_rust_test_group\.sh --check' "PR CI must validate the Rust test inventory"
+require_match ".github/workflows/ci.yml" 'cargo test --workspace --exclude heiwa-desktop --locked --no-default-features' "PR CI must execute workspace Rust tests before merge"
+require_match ".github/workflows/ci.yml" 'cargo clippy --workspace --exclude heiwa-desktop' "PR CI must execute clippy before merge"
+require_match ".github/workflows/ci.yml" 'run: cargo machete' "PR CI must check unused Rust dependencies before merge"
 require_match ".github/workflows/certification.yml" 'name: Run Linux Rust tests' "protected main must execute the Rust test suite"
 require_match ".github/workflows/certification.yml" 'name: Compile non-Linux Rust test targets' "protected main must compile macOS and Windows Rust tests"
 require_match ".github/workflows/certification.yml" 'name: Rust Static Certification' "protected main must run Rust static certification"
