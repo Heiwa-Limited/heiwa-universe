@@ -170,8 +170,7 @@ jobs:
         with:
           workspaces: |
             .
-          prefix-key: v3-rust
-          shared-key: ${{ matrix.os }}
+          prefix-key: v2-rust
           cache-workspace-crates: true
           cache-bin: true
       # keyring's sync-secret-service backend links libdbus; that is the only
@@ -249,7 +248,7 @@ jobs:
         with:
           workspaces: |
             . -> target/lance
-          prefix-key: v3-rust
+          prefix-key: v2-rust
           shared-key: lance-linux
           cache-workspace-crates: true
           cache-bin: false
@@ -389,7 +388,7 @@ jobs:
         with:
           workspaces: |
             .
-          prefix-key: v3-rust-desktop
+          prefix-key: v2-rust-desktop
           cache-workspace-crates: true
       - name: Cargo check desktop shell
         if: needs.changes.outputs.desktop == 'true'

@@ -20,7 +20,7 @@ require_match() {
   local label="$3"
 
   require_file "$file"
-  if [[ -f "$file" ]] && ! grep -Eq "$pattern" "$file"; then
+  if [[ -f "$file" ]] && ! grep -Eq -- "$pattern" "$file"; then
     echo "release metadata check failed for $file: $label" >&2
     fail=1
   fi
@@ -32,7 +32,7 @@ require_no_match() {
   local label="$3"
 
   require_file "$file"
-  if [[ -f "$file" ]] && grep -Eq "$pattern" "$file"; then
+  if [[ -f "$file" ]] && grep -Eq -- "$pattern" "$file"; then
     echo "release metadata check failed for $file: $label" >&2
     fail=1
   fi
@@ -57,7 +57,7 @@ require_block_match() {
     in_block && $0 ~ end { exit }
   ' "$file")"
 
-  if [[ -z "$block" ]] || ! grep -Eq "$required_pattern" <<<"$block"; then
+  if [[ -z "$block" ]] || ! grep -Eq -- "$required_pattern" <<<"$block"; then
     echo "release metadata check failed for $file: $label" >&2
     fail=1
   fi
@@ -73,6 +73,7 @@ require_block_match ".github/workflows/release.yml" \
   "release metadata validation must check out protected main"
 require_match ".github/workflows/release.yml" 'git merge-base --is-ancestor "\$commit" HEAD' "release tags must resolve to commits on main"
 require_match ".github/workflows/release.yml" 'shared-key: \$\{\{ matrix\.target \}\}' "release caches must be stable per target"
+require_match ".github/workflows/release.yml" '--features heiwa-shell/lance' "release binaries must explicitly include the Lance recall backend"
 require_match ".github/workflows/release.yml" 'actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a' "release uploads must use the Node 24 artifact action"
 require_match ".github/workflows/release.yml" 'actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c' "release downloads must use the Node 24 artifact action"
 require_no_match ".github/workflows/release.yml" '^[[:space:]]+tags:$' "release publication must be explicitly dispatched from main so caches remain reusable"
