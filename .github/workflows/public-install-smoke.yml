@@ -40,8 +40,23 @@ jobs:
           fi
 
           installer="${RUNNER_TEMP}/heiwa-install.sh"
-          curl --proto '=https' --tlsv1.2 --fail --location --silent --show-error \
-            --output "$installer" "$INSTALL_URL"
+          headers="${RUNNER_TEMP}/heiwa-install.headers"
+          status="$({
+            curl --proto '=https' --tlsv1.2 --location --silent --show-error \
+              --retry 2 --retry-all-errors --retry-delay 1 \
+              --user-agent 'Heiwa-Installer/0.1 (+https://heiwa.ltd)' \
+              --header 'Accept: text/x-shellscript' \
+              --dump-header "$headers" \
+              --output "$installer" \
+              --write-out '%{http_code}' \
+              "$INSTALL_URL"
+          } || true)"
+          if [[ "$status" != "200" ]]; then
+            echo "public installer returned HTTP $status" >&2
+            sed -n '1,80p' "$headers" >&2 || true
+            sed -n '1,80p' "$installer" >&2 || true
+            exit 1
+          fi
           test -s "$installer"
 
           HEIWA_HOME="$RUNTIME_ROOT" sh "$installer"

@@ -111,9 +111,7 @@ jobs:
       # prost-build, which requires `protoc` on PATH.
       - name: Install protoc
         if: needs.changes.outputs.deploy_core == 'true'
-        uses: arduino/setup-protoc@c65c819552d16ad3c9b72d9dfd5ba5237b9c906b # v3
-        with:
-          repo-token: ${{ secrets.GITHUB_TOKEN }}
+        uses: taiki-e/install-action@f6886ea0c81d86f9719fdab9de74e4d72e8486fb # protoc
       - name: Run Rust release preflight
         if: needs.changes.outputs.deploy_core == 'true'
         run: cargo test --workspace --locked
@@ -184,8 +182,12 @@ jobs:
         run: bash scripts/package_public_web.sh .artifacts/public-web
       - name: Deploy to Cloudflare Pages
         if: env.ENABLE_CLOUDFLARE_DEPLOY == 'true' && env.CF_API_TOKEN != '' && env.CF_ACCOUNT_ID != ''
-        uses: cloudflare/wrangler-action@9acf94ace14e7dc412b076f2c5c20b8ce93c79cd # v3
+        uses: cloudflare/wrangler-action@ebbaa1584979971c8614a24965b4405ff95890e0 # v4.0.0
         with:
           apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          wranglerVersion: 4.122.0
           command: pages deploy .artifacts/public-web --project-name=heiwa-clients --branch=main
+      - name: Verify non-browser installer access
+        if: env.ENABLE_CLOUDFLARE_DEPLOY == 'true' && env.CF_API_TOKEN != '' && env.CF_ACCOUNT_ID != ''
+        run: bash scripts/check_public_installer_edge.sh

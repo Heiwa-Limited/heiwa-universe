@@ -64,12 +64,21 @@ while IFS= read -r copy_line; do
   done
 done < <(grep -E '^COPY ' apps/heiwa_shell/Dockerfile | grep -Ev '^COPY --from=')
 
-for container_requirement in protobuf-compiler libdbus-1-dev '--features heiwa-shell/lance'; do
+for container_requirement in \
+  protobuf-compiler \
+  libdbus-1-dev \
+  '--features heiwa-shell/lance' \
+  'COPY apps/heiwa_app/desktop/src-tauri/ ./apps/heiwa_app/desktop/src-tauri/'; do
   if ! grep -Fq -- "$container_requirement" apps/heiwa_shell/Dockerfile; then
     echo "apps/heiwa_shell/Dockerfile is missing full-runtime requirement: $container_requirement" >&2
     exit 1
   fi
 done
+
+if grep -Eq 'cargo build[^|]*&& strip[^|]*\|\| true' apps/heiwa_shell/Dockerfile; then
+  echo "apps/heiwa_shell/Dockerfile must not let strip failure handling swallow cargo build failures" >&2
+  exit 1
+fi
 
 nvmrc_version="$(tr -d '[:space:]' < .nvmrc)"
 node_version_file="$(tr -d '[:space:]' < .node-version)"
