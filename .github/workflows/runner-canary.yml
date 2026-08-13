@@ -31,10 +31,6 @@ on:
         description: Runner label to probe
         required: true
         default: blacksmith-2vcpu-ubuntu-2404
-      timeout:
-        description: Minutes to allow the probe to run once claimed
-        required: false
-        default: "5"
 
 permissions:
   contents: read
@@ -43,7 +39,11 @@ jobs:
   probe:
     name: Runner Canary
     runs-on: ${{ inputs.runner }}
-    timeout-minutes: ${{ fromJSON(inputs.timeout) }}
+    # Literal, not an expression: the probe itself is trivial, and the point of
+    # this workflow is the label, not the deadline. Note that this deadline
+    # cannot rescue an unclaimed label — it only starts once a runner claims the
+    # job, which is exactly why the canary exists.
+    timeout-minutes: 5
     steps:
       - name: Report runner identity
         env:
