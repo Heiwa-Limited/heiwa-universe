@@ -127,7 +127,10 @@ case "$archive_ext" in
       echo "7z is required for Windows zip packaging" >&2
       exit 1
     fi
-    7z a "$archive_path" "$release_root" >/dev/null
+    (
+      cd "$dist_dir"
+      7z a "$(basename "$archive_path")" "$(basename "$release_root")" >/dev/null
+    )
     ;;
   *)
     echo "unsupported archive extension: $archive_ext" >&2

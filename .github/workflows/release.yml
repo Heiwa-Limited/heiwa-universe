@@ -165,7 +165,12 @@ jobs:
           test -n "$(find "${release_root}/cockpit/assets" -type f -print -quit)"
 
           if [[ "${ARCHIVE_EXT}" == "zip" ]]; then
-            7z a "${archive_path}" "${release_root}" >/dev/null
+            # Run 7z from dist so the archive starts at the declared release
+            # root instead of accidentally embedding an extra dist/ parent.
+            (
+              cd dist
+              7z a "$(basename "${archive_path}")" "$(basename "${release_root}")" >/dev/null
+            )
           else
             tar -C dist -czf "${archive_path}" "heiwa-${VERSION}-${ASSET_NAME}"
           fi
