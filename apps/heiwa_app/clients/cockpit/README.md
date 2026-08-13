@@ -57,4 +57,4 @@ The cockpit is self-hosted. It must never:
 
 ## Runtime contract
 
-API shape lives in [docs/design/refs/API.md](/Users/dmcgregsauce/heiwa-universe/docs/design/refs/API.md).
+API shape lives in [docs/design/refs/API.md](../../../../docs/design/refs/API.md).

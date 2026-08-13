@@ -6,6 +6,8 @@ fn heiwa_with_home(home: &std::path::Path, args: &[&str]) -> std::process::Outpu
     Command::new(env!("CARGO_BIN_EXE_heiwa"))
         .args(args)
         .env("HOME", home)
+        .env_remove("HEIWA_HOME")
+        .env_remove("HEIWA_STATE_DIR")
         .output()
         .expect("run heiwa")
 }
@@ -112,4 +114,48 @@ fn auto_trigger_queues_execution_and_writes_receipt() {
     assert!(receipt.exists(), "missing receipt: {}", receipt.display());
     let raw = fs::read_to_string(receipt).unwrap();
     assert!(raw.contains("automation_execution_event"));
+}
+
+#[test]
+fn auto_run_executes_deterministic_prompt_through_operator_runtime() {
+    let home = tempdir().unwrap();
+    let evidence = home.path().join(".heiwa/evidence");
+    let create = heiwa_with_home(
+        home.path(),
+        &[
+            "auto", "create", "--name", "Greeting", "--prompt", "hi", "--active", "--json",
+        ],
+    );
+    assert!(
+        create.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&create.stderr)
+    );
+    let create_payload: serde_json::Value = serde_json::from_slice(&create.stdout).unwrap();
+    let id = create_payload["automation"]["id"].as_str().unwrap();
+
+    let output = Command::new(env!("CARGO_BIN_EXE_heiwa"))
+        .args(["auto", "run", id, "--json"])
+        .env("HOME", home.path())
+        .env_remove("HEIWA_HOME")
+        .env_remove("HEIWA_STATE_DIR")
+        .env("HEIWA_EVIDENCE_DIR", &evidence)
+        .output()
+        .expect("run deterministic automation");
+
+    assert!(
+        output.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let payload: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(payload["command"], "auto run");
+    assert_eq!(payload["execution"]["status"], "completed");
+    let execution_id = payload["execution"]["id"].as_str().unwrap();
+    assert!(home
+        .path()
+        .join(format!(
+            ".heiwa/state/automations/receipts/rcpt-{execution_id}-completed.json"
+        ))
+        .exists());
 }

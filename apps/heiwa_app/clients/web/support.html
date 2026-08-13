@@ -12,6 +12,7 @@
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
     <link rel="stylesheet" href="./assets/instrument.css" />
+    <script defer src="./assets/site.js"></script>
   </head>
   <body data-page="support">
     <div class="bg-grid" aria-hidden="true"></div>
@@ -27,7 +28,7 @@
         <a href="/download.html">Install</a>
         <a href="https://docs.heiwa.ltd">Docs</a>
         <a class="is-active" href="/support.html">Support</a>
-        <a href="https://github.com/Strategizing/heiwa-universe">Source</a>
+        <a href="https://github.com/Heiwa-Limited/heiwa-universe">Source</a>
       </nav>
     </header>
 
@@ -41,7 +42,7 @@
         </p>
         <div class="hero-actions" style="margin-top:1.2rem;">
           <a class="ig-btn" data-intent="active" href="https://docs.heiwa.ltd">Read Docs</a>
-          <a class="ig-btn" href="https://github.com/Strategizing/heiwa-universe/issues/new/choose">Open Issue</a>
+          <a class="ig-btn" href="https://github.com/Heiwa-Limited/heiwa-universe/issues/new/choose">Open Issue</a>
           <a class="ig-btn" data-intent="critical" href="mailto:security@heiwa.ltd?subject=Security%20disclosure">Security Disclosure</a>
         </div>
       </section>
@@ -61,7 +62,7 @@
           <div class="tile corner">
             <div class="t-h"><h3>GitHub Issues</h3><span class="k">PUBLIC TRACKER</span></div>
             <p>Bug reports, feature requests, runtime questions, and CLI behaviour. Templates wired for each.</p>
-            <a class="ig-btn" href="https://github.com/Strategizing/heiwa-universe/issues">Open tracker</a>
+            <a class="ig-btn" href="https://github.com/Heiwa-Limited/heiwa-universe/issues">Open tracker</a>
           </div>
           <div class="tile corner is-critical">
             <div class="t-h"><h3>Security</h3><span class="k" style="color:var(--critical);">PRIVATE CHANNEL</span></div>
@@ -192,35 +193,12 @@
       <div class="page-foot">
         <p>Heiwa Support &middot;
           <a href="https://docs.heiwa.ltd">docs</a> &middot;
-          <a href="https://github.com/Strategizing/heiwa-universe/issues">issues</a> &middot;
+          <a href="https://github.com/Heiwa-Limited/heiwa-universe/issues">issues</a> &middot;
           <a href="mailto:security@heiwa.ltd">security</a>
         </p>
         <p>Honest fiducials &middot; Public-first &middot; Local runtime sovereignty preserved</p>
       </div>
     </main>
 
-    <script>
-      document.querySelectorAll(".ig-btn").forEach((btn) => {
-        btn.addEventListener("click", () => {
-          const intent = btn.dataset.intent;
-          const colour =
-            intent === "active" ? "var(--active)" :
-            intent === "system" ? "var(--system)" :
-            intent === "critical" ? "var(--critical)" :
-            "var(--ink-2)";
-          const prevBg = btn.style.background;
-          const prevCol = btn.style.color;
-          const prevBd = btn.style.borderColor;
-          btn.style.background = colour;
-          btn.style.color = "var(--bg)";
-          btn.style.borderColor = colour;
-          setTimeout(() => {
-            btn.style.background = prevBg;
-            btn.style.color = prevCol;
-            btn.style.borderColor = prevBd;
-          }, 80);
-        });
-      });
-    </script>
   </body>
 </html>

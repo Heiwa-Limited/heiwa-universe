@@ -12,6 +12,7 @@
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
     <link rel="stylesheet" href="./assets/instrument.css" />
+    <script defer src="./assets/site.js"></script>
   </head>
   <body data-page="home">
     <div class="bg-grid" aria-hidden="true"></div>
@@ -27,7 +28,7 @@
         <a href="/download.html">Install</a>
         <a href="https://docs.heiwa.ltd">Docs</a>
         <a href="/support.html">Support</a>
-        <a href="https://github.com/Strategizing/heiwa-universe">Source</a>
+        <a href="https://github.com/Heiwa-Limited/heiwa-universe">Source</a>
       </nav>
       <label class="ccy-wrap" title="Currency overlay — tokens are counted locally, this only changes how cost is displayed">
         <span class="ccy-k">CCY</span>
@@ -326,7 +327,7 @@
             </p>
             <div class="hero-actions">
               <a class="ig-btn" data-intent="active" href="/download.html">Open Install Guide</a>
-              <a class="ig-btn" href="https://github.com/Strategizing/heiwa-universe/releases">GitHub Releases</a>
+              <a class="ig-btn" href="https://github.com/Heiwa-Limited/heiwa-universe/releases">GitHub Releases</a>
             </div>
           </div>
           <div class="tile">
@@ -346,7 +347,7 @@
 
       <div class="page-foot">
         <p>Heiwa &middot; Instrument-Grade &middot; v1.0 &middot;
-          <a href="https://github.com/Strategizing/heiwa-universe">source</a>
+          <a href="https://github.com/Heiwa-Limited/heiwa-universe">source</a>
           &middot;
           <a href="/support.html">support</a>
         </p>
@@ -354,92 +355,5 @@
       </div>
     </main>
 
-    <script>
-      // ---------- Currency overlay ----------
-      // Tokens are counted locally. Cost is a derived function (rate-table × token-count).
-      // Currency is a presentation preference — this only changes how cost displays.
-      // Marketing rates are illustrative; the real runtime reads ~/.heiwa/rates.toml.
-      const RATES = {
-        CAD: { mult: 1.00,  sym: "CAD", decimals: 2 },
-        USD: { mult: 0.73,  sym: "USD", decimals: 2 },
-        EUR: { mult: 0.67,  sym: "EUR", decimals: 2 },
-        GBP: { mult: 0.58,  sym: "GBP", decimals: 2 },
-        JPY: { mult: 105.0, sym: "JPY", decimals: 0 },
-      };
-      const STORAGE_KEY = "heiwa.ccy";
-      function applyCurrency(code) {
-        const isOff = code === "OFF";
-        const r = isOff ? null : RATES[code];
-        document.querySelectorAll(".cost-num[data-cost-base-cad]").forEach((el) => {
-          if (isOff) {
-            el.textContent = "—";
-          } else {
-            const base = parseFloat(el.dataset.costBaseCad);
-            el.textContent = (base * r.mult).toFixed(r.decimals);
-          }
-        });
-        document.querySelectorAll(".ccy-suffix").forEach((el) => {
-          el.textContent = isOff ? "" : r.sym;
-        });
-      }
-      const ccySelect = document.getElementById("ccy-select");
-      if (ccySelect) {
-        const stored = localStorage.getItem(STORAGE_KEY);
-        if (stored && (RATES[stored] || stored === "OFF")) {
-          ccySelect.value = stored;
-          applyCurrency(stored);
-        }
-        ccySelect.addEventListener("change", (e) => {
-          localStorage.setItem(STORAGE_KEY, e.target.value);
-          applyCurrency(e.target.value);
-        });
-      }
-
-      // Copy-to-clipboard for the install command
-      document.querySelectorAll("[data-copy]").forEach((btn) => {
-        btn.addEventListener("click", async () => {
-          const target = document.getElementById(btn.dataset.copy);
-          if (!target) return;
-          try {
-            await navigator.clipboard.writeText(target.textContent.trim());
-            const prev = btn.textContent;
-            btn.textContent = "Copied";
-            btn.style.color = "var(--active)";
-            btn.style.borderColor = "var(--active)";
-            setTimeout(() => {
-              btn.textContent = prev;
-              btn.style.color = "";
-              btn.style.borderColor = "";
-            }, 1200);
-          } catch (err) {
-            btn.textContent = "Copy failed";
-            setTimeout(() => (btn.textContent = "Copy"), 1200);
-          }
-        });
-      });
-
-      // 80ms strike on .ig-btn click
-      document.querySelectorAll(".ig-btn").forEach((btn) => {
-        btn.addEventListener("click", () => {
-          const intent = btn.dataset.intent;
-          const colour =
-            intent === "active" ? "var(--active)" :
-            intent === "system" ? "var(--system)" :
-            intent === "critical" ? "var(--critical)" :
-            "var(--ink-2)";
-          const prevBg = btn.style.background;
-          const prevCol = btn.style.color;
-          const prevBd = btn.style.borderColor;
-          btn.style.background = colour;
-          btn.style.color = "var(--bg)";
-          btn.style.borderColor = colour;
-          setTimeout(() => {
-            btn.style.background = prevBg;
-            btn.style.color = prevCol;
-            btn.style.borderColor = prevBd;
-          }, 80);
-        });
-      });
-    </script>
   </body>
 </html>

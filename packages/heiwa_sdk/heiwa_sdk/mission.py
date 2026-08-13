@@ -1,4 +1,4 @@
-"""Mission Service: Manage long-running agent workflows in STDB."""
+"""Mission compatibility service over an injected backend."""
 from __future__ import annotations
 
 import datetime
@@ -6,13 +6,11 @@ import json
 import uuid
 from typing import Any, Optional
 
-from heiwa_sdk.spacetimedb import SpacetimeDB
-
 
 class MissionService:
-    """Manages multi-step missions and their persistence in SpacetimeDB."""
+    """Manages multi-step missions through an injected compatibility backend."""
 
-    def __init__(self, stdb: SpacetimeDB) -> None:
+    def __init__(self, stdb: Any) -> None:
         self.stdb = stdb
 
     def create_mission(
@@ -24,7 +22,7 @@ class MissionService:
         source_surface: str = "cli",
         node_id: str = "local",
     ) -> bool:
-        """Initialize a new mission in STDB."""
+        """Initialize a new mission through the injected backend."""
         now = datetime.datetime.now(datetime.timezone.utc).isoformat()
         return self.stdb.call(
             "create_mission",

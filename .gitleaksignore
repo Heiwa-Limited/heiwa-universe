@@ -1,0 +1,52 @@
+# Reviewed gitleaks baseline — triaged 2026-08-03, 46 historical findings, 0 active secrets.
+# Classes: JWT/test fixtures + redaction vectors; doc example keys (Figma/Cloudflare skills);
+# test tokens (operator_api.rs); fake auditor fixture (sk-live-1234...); dead legacy local
+# provision token (file deleted 2026-07-06, absent from active secret stores); .env.example placeholder;
+# Authorization: Bearer doc examples. Evidence: promotion/security receipts + session triage 2026-08-03.
+# Do NOT add new fingerprints without a recorded triage. Format: commit:file:rule:line
+1197b1171c3a7d5934b34dd40a46b417841e0bb6:apps/heiwa_shell/tests/operator_api.rs:generic-api-key:732
+196e079b4da41602e0a5a7409e2a6523fa7ebfd2:apps/heiwa_shell/tests/operator_api.rs:generic-api-key:475
+1a6abe3a36a7ea6261c07d6a58e0285539c2004f:config/swarm/profiles/heiwa-one-system.yaml:generic-api-key:382
+1a6abe3a36a7ea6261c07d6a58e0285539c2004f:packages/heiwa_skills/cloudflare-deploy/references/argo-smart-routing/README.md:curl-auth-header:13
+1a6abe3a36a7ea6261c07d6a58e0285539c2004f:packages/heiwa_skills/cloudflare-deploy/references/argo-smart-routing/api.md:curl-auth-header:27
+1a6abe3a36a7ea6261c07d6a58e0285539c2004f:packages/heiwa_skills/cloudflare-deploy/references/argo-smart-routing/api.md:curl-auth-header:84
+1a6abe3a36a7ea6261c07d6a58e0285539c2004f:packages/heiwa_skills/cloudflare-deploy/references/bindings/patterns.md:generic-api-key:182
+1a6abe3a36a7ea6261c07d6a58e0285539c2004f:packages/heiwa_skills/cloudflare-deploy/references/bindings/patterns.md:generic-api-key:82
+1a6abe3a36a7ea6261c07d6a58e0285539c2004f:packages/heiwa_skills/cloudflare-deploy/references/pipelines/api.md:curl-auth-header:113
+1a6abe3a36a7ea6261c07d6a58e0285539c2004f:packages/heiwa_skills/figma-implement-design/SKILL.md:generic-api-key:177
+1a6abe3a36a7ea6261c07d6a58e0285539c2004f:packages/heiwa_skills/figma-implement-design/SKILL.md:generic-api-key:178
+1a6abe3a36a7ea6261c07d6a58e0285539c2004f:packages/heiwa_skills/figma-implement-design/SKILL.md:generic-api-key:179
+1a6abe3a36a7ea6261c07d6a58e0285539c2004f:packages/heiwa_skills/figma-implement-design/SKILL.md:generic-api-key:194
+1a6abe3a36a7ea6261c07d6a58e0285539c2004f:packages/heiwa_skills/figma-implement-design/SKILL.md:generic-api-key:195
+1a6abe3a36a7ea6261c07d6a58e0285539c2004f:packages/heiwa_skills/figma-implement-design/SKILL.md:generic-api-key:197
+1a6abe3a36a7ea6261c07d6a58e0285539c2004f:packages/heiwa_skills/figma-implement-design/SKILL.md:generic-api-key:198
+1a6abe3a36a7ea6261c07d6a58e0285539c2004f:packages/heiwa_skills/figma-implement-design/SKILL.md:generic-api-key:57
+23c8b7ff59a17aea78479444e81bf2060291c291:apps/heiwa_shell/tests/operator_api.rs:generic-api-key:1402
+23c8b7ff59a17aea78479444e81bf2060291c291:crates/heiwa_evidence/src/sensitive.rs:jwt:385
+25da9f49e800c453e90a8e564d8a85bd3c0aebd8:node/cli/scripts/ops/provision_node.sh:generic-api-key:13
+6645131867664eee6879bd1b07a569441f20db59:docs/local-self-operation.md:curl-auth-header:204
+6645131867664eee6879bd1b07a569441f20db59:docs/local-self-operation.md:curl-auth-header:210
+6645131867664eee6879bd1b07a569441f20db59:docs/local-self-operation.md:curl-auth-header:216
+6ec9a7f4334f5c44c851c0fd6e674d8b6367a71e:.env.example:discord-client-secret:63
+a07f2e2689612e43427da8a8d38d12d70752bacf:apps/heiwa_cli/scripts/ops/provision_node.sh:generic-api-key:13
+a07f2e2689612e43427da8a8d38d12d70752bacf:config/swarm/profiles/heiwa-one-system.yaml:generic-api-key:382
+a07f2e2689612e43427da8a8d38d12d70752bacf:packages/heiwa_sdk/heiwa_sdk/sanity/auditor.py:generic-api-key:20
+a07f2e2689612e43427da8a8d38d12d70752bacf:packages/heiwa_skills/cloudflare-deploy/references/argo-smart-routing/README.md:curl-auth-header:13
+a07f2e2689612e43427da8a8d38d12d70752bacf:packages/heiwa_skills/cloudflare-deploy/references/argo-smart-routing/api.md:curl-auth-header:27
+a07f2e2689612e43427da8a8d38d12d70752bacf:packages/heiwa_skills/cloudflare-deploy/references/argo-smart-routing/api.md:curl-auth-header:84
+a07f2e2689612e43427da8a8d38d12d70752bacf:packages/heiwa_skills/cloudflare-deploy/references/bindings/patterns.md:generic-api-key:182
+a07f2e2689612e43427da8a8d38d12d70752bacf:packages/heiwa_skills/cloudflare-deploy/references/bindings/patterns.md:generic-api-key:82
+a07f2e2689612e43427da8a8d38d12d70752bacf:packages/heiwa_skills/cloudflare-deploy/references/pipelines/api.md:curl-auth-header:113
+a07f2e2689612e43427da8a8d38d12d70752bacf:packages/heiwa_skills/figma-implement-design/SKILL.md:generic-api-key:177
+a07f2e2689612e43427da8a8d38d12d70752bacf:packages/heiwa_skills/figma-implement-design/SKILL.md:generic-api-key:178
+a07f2e2689612e43427da8a8d38d12d70752bacf:packages/heiwa_skills/figma-implement-design/SKILL.md:generic-api-key:179
+a07f2e2689612e43427da8a8d38d12d70752bacf:packages/heiwa_skills/figma-implement-design/SKILL.md:generic-api-key:194
+a07f2e2689612e43427da8a8d38d12d70752bacf:packages/heiwa_skills/figma-implement-design/SKILL.md:generic-api-key:195
+a07f2e2689612e43427da8a8d38d12d70752bacf:packages/heiwa_skills/figma-implement-design/SKILL.md:generic-api-key:197
+a07f2e2689612e43427da8a8d38d12d70752bacf:packages/heiwa_skills/figma-implement-design/SKILL.md:generic-api-key:198
+a07f2e2689612e43427da8a8d38d12d70752bacf:packages/heiwa_skills/figma-implement-design/SKILL.md:generic-api-key:57
+d2d082c45d43fefd491e26166f9336475b1d03b8:apps/heiwa_core/tests/auth_session.rs:jwt:57
+eadab1834a574301afebf7675332494f79f80d42:core/profiles/heiwa-limited.yaml:generic-api-key:382
+eadab1834a574301afebf7675332494f79f80d42:core/profiles/heiwa-one-system.yaml:generic-api-key:382
+eadab1834a574301afebf7675332494f79f80d42:runtime/libs/heiwa_sdk/sanity/auditor.py:generic-api-key:20
+fb08594d1ff04d85a9267be98e6fdb7aae0d810b:apps/heiwa_shell/tests/operator_api.rs:generic-api-key:1239

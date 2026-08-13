@@ -12,14 +12,14 @@ disabled until a redaction and privacy boundary exists.
 
 ## Required Local Inputs
 
-| Input                                   | Purpose                                                                                       |
-| --------------------------------------- | --------------------------------------------------------------------------------------------- |
-| `~/.heiwa/config.toml`                  | Runtime configuration                                                                         |
-| `~/.heiwa/accounts.json`                | Provider/account registry                                                                     |
-| `~/.heiwa/machine.json`                 | Local machine identity and capability manifest                                                |
-| `~/.heiwa/state/`                       | Local runtime state, approvals, worker heartbeats                                             |
-| `~/.heiwa/evidence/`                    | Canonical local JSONL evidence journal                                                        |
-| `~/.claude/`, `~/.codex/`, `~/.gemini/` | Provider-owned auth and hook posture                                                          |
+| Input                                   | Purpose                                           |
+| --------------------------------------- | ------------------------------------------------- |
+| `~/.heiwa/config.toml`                  | Runtime configuration                             |
+| `~/.heiwa/accounts.json`                | Provider/account registry                         |
+| `~/.heiwa/machine.json`                 | Local machine identity and capability manifest    |
+| `~/.heiwa/state/`                       | Local runtime state, approvals, worker heartbeats |
+| `~/.heiwa/evidence/`                    | Canonical local JSONL evidence journal            |
+| `~/.claude/`, `~/.codex/`, `~/.gemini/` | Provider-owned auth and hook posture              |
 
 ## Boot Contract
 
@@ -53,7 +53,10 @@ Cloudflare may front or cache install/update material, but it must point back to
 GitHub release identity and checksums. Cloudflare must not become a second
 source of binary truth.
 
-Under the local-first emergency bypass posture, local checkout source promotion (`heiwa app update --source checkout`) is the authoritative install and update path on Devon's MacBook. The MacBook operates directly from locally-verified sandbox artifacts rather than waiting for GitHub Releases.
+GitHub Releases are the authoritative public install and update path, including
+on the operator MacBook. Local checkout promotion (`heiwa app update --source
+checkout`) is reserved for development or recovery and must identify the exact
+checkout commit in its receipt; it is not evidence of a public release.
 
 `heiwa app update --dry-run` is the safe probe for the installed runtime and
 defaults to GitHub Releases. It should report:
@@ -252,6 +255,17 @@ Browser preview is separate: `heiwa app start --open` puts a single-use,
 redirects with a port-scoped HttpOnly session cookie (eight-hour TTL). Browser
 code receives neither bootstrap reuse authority nor machine bearer material.
 
+Installed mode resolves canonical secrets from environment variables first,
+then from owner-private local files:
+
+- `~/.heiwa/secrets/machine_auth_token` for `HEIWA_MACHINE_AUTH_TOKEN`
+- `~/.heiwa/secrets/jwt_signing_secret` for `HEIWA_JWT_SIGNING_SECRET`
+
+Both files must be regular, non-symlink files with mode `0600` and contain one
+ASCII token. Empty, oversized, multiline, group-readable, or world-readable
+files are rejected. This keeps tokens out of LaunchAgent plists while giving
+the installed CLI, runtime, and native Desktop one auth source.
+
 Cursor and restart recovery are fail-closed:
 
 - App startup exclusively leases the configured evidence root before recovery,
@@ -344,14 +358,14 @@ pre-existing or peer-agent changes.
 
 ## Model Tier Matrix
 
-| Lane                      | Preferred candidates when eligible | Other eligible candidates              | Notes                                              |
-| ------------------------- | ---------------------------------- | ---------------------------------------- | -------------------------------------------------- |
-| Routine chat/status/audit | local Ollama where sufficient      | OpenRouter, Codex, Claude Code           | Cheapest candidate above the call's quality floor  |
-| Build/code                | Codex CLI, Claude Code              | Ollama coding model, OpenRouter          | Provider CLIs own auth and quota semantics         |
-| Research/long context     | Claude Code, Codex                  | OpenRouter                               | Route per call from live provider evidence         |
-| Review/strategy           | Claude Code, Codex                  | OpenRouter                               | Use premium lanes only when the quality floor needs them |
-| Sovereign work            | local Ollama tiers                  | none                                     | Local-only providers; fail closed when unavailable |
-| Embeddings                | `ollama/qwen3-embedding:0.6b`       | none                                     | Requires a connected local Ollama runtime          |
+| Lane                      | Preferred candidates when eligible | Other eligible candidates       | Notes                                                    |
+| ------------------------- | ---------------------------------- | ------------------------------- | -------------------------------------------------------- |
+| Routine chat/status/audit | local Ollama where sufficient      | OpenRouter, Codex, Claude Code  | Cheapest candidate above the call's quality floor        |
+| Build/code                | Codex CLI, Claude Code             | Ollama coding model, OpenRouter | Provider CLIs own auth and quota semantics               |
+| Research/long context     | Claude Code, Codex                 | OpenRouter                      | Route per call from live provider evidence               |
+| Review/strategy           | Claude Code, Codex                 | OpenRouter                      | Use premium lanes only when the quality floor needs them |
+| Sovereign work            | local Ollama tiers                 | none                            | Local-only providers; fail closed when unavailable       |
+| Embeddings                | `ollama/qwen3-embedding:0.6b`      | none                            | Requires a connected local Ollama runtime                |
 
 Gemini CLI is not a current fallback: the operator account returned
 `IneligibleTierError` on 2026-07-19. Antigravity required authentication in the

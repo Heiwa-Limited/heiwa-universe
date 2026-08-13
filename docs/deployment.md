@@ -13,17 +13,28 @@ This repo should be able to go from fresh clone to verified build and published 
 
 ## Source Promotion Contract
 
-Under the local-first promotion posture, local sandbox verification is the primary gate before updating `main` directly on the local machine. GitHub Actions are minimal, only used as a back-end emergency or release archiver, and must not block local development progress.
+GitHub is the canonical source, promotion, and release authority. Local sandbox
+verification supplies independent evidence before a push; protected GitHub
+checks decide whether a pull request may update `main`.
 
-The local-first promotion path is:
+The promotion path is:
 
 1. Work happens on a branch.
-2. Run the local development sandbox checks to verify the build, tests, and documentation.
-3. Once all local sandbox checks pass, merge the branch directly into `main` locally.
-4. The local installed runtime promotes from the local checkout source using `heiwa app update --source checkout`.
-5. GitHub serves primarily as a remote backup, tag archiver, and distribution mechanism rather than a build/test gatekeeper. Commits can be pushed to remote `main` only after passing the local sandbox gate.
+2. Run the local development sandbox checks for build, tests, documentation,
+   security, packaging, and checkout-runtime behavior.
+3. Push the branch and open or update a pull request targeting `main`.
+4. Require every protected GitHub check to pass on the current pull-request
+   head and merge result before merging.
+5. Merge through the protected pull request; do not push directly to `main`.
+6. Tag the verified `main` commit and let the release workflow publish archives,
+   checksums, attestations, and the container image.
+7. Update installed runtimes from the verified GitHub Release and record the
+   before/after receipt.
 
-The MacBook has owner permissions to bypass remote CI blockers, shifting verification authority entirely to local sandbox runs. The MacBook's runtime updates through local checkout source promotion (`--source checkout`) rather than waiting for remote build artifacts.
+`heiwa app update --source checkout` remains a developer and recovery path. It
+must not be presented as a public release or used to bypass a failed protected
+check. Any emergency use requires the same local gates and an explicit receipt
+identifying the checkout commit.
 
 ## Development vs Installed Runtime
 
@@ -47,7 +58,8 @@ CLI contract:
 
 ## Local Development Sandbox
 
-Use the local sandbox as the primary verification gate before merging to `main` locally or performing any release updates.
+Use the local sandbox as an independent preflight before pushing a promotion
+candidate or performing release work.
 
 Build/test gate:
 
@@ -73,16 +85,17 @@ Deployment gate:
 
 - Cloudflare changes must be tested against local/static build output first.
 - Evidence schema and Lance migration changes must be tested locally before promotion.
-- GitHub Releases serve as a secondary emergency archive; local sandbox verification remains the canonical gate.
+- GitHub Releases are the canonical public binary authority; local sandbox
+  output is evidence, not a substitute release channel.
 
 ## Protected Backend Workflow
 
 GitHub and Cloudflare are protected company services with separate authority.
 
-| Backend     | Protected role                                               | Safe update path                                                                        |
-| ----------- | ------------------------------------------------------------ | --------------------------------------------------------------------------------------- |
-| GitHub      | source, tag archive, releases, checksums, install provenance | local sandbox checks passed, local merge, push to main, tagged release                  |
-| Cloudflare  | DNS, WAF, public docs/app shell, install/update front door   | GitHub-driven deploys or explicit owner-approved `wrangler` deploys                     |
+| Backend    | Protected role                                               | Safe update path                                                       |
+| ---------- | ------------------------------------------------------------ | ---------------------------------------------------------------------- |
+| GitHub     | source, protected promotion, releases, checksums, install provenance | local preflight, protected pull request, tagged release |
+| Cloudflare | DNS, WAF, public docs/app shell, install/update front door   | GitHub-driven deploys or explicit owner-approved `wrangler` deploys    |
 
 Rules:
 
@@ -91,7 +104,8 @@ Rules:
 - Do not put provider secrets, Cloudflare tokens, or user runtime
   state in GitHub.
 - Keep user-machine state under `~/.heiwa`; any future GitHub evidence projection must be redacted and explicitly enabled.
-- Bypassing GitHub Actions and CI checks is standard posture; verify entirely in local sandbox instead of waiting for remote checks.
+- Do not bypass required GitHub checks. A local result and a hosted result prove
+  different environments; both are required for a public release candidate.
 
 ## CI contract
 

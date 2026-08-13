@@ -58,7 +58,7 @@ The gap between "what runs today" and "Devon's 24/7 assistant that syncs physica
 
 ### 1.3 The Rust workspace — the engine
 
-9 apps + 17 crates under one Cargo workspace (`github.com/Strategizing/heiwa-universe`, Apache-2.0). The crates that matter for a 24/7 assistant:
+9 apps + 17 crates under one Cargo workspace (`github.com/Heiwa-Limited/heiwa-universe`, Apache-2.0). The crates that matter for a 24/7 assistant:
 
 | Crate                                         | Role                                            | Why it matters here                                             |
 | --------------------------------------------- | ----------------------------------------------- | --------------------------------------------------------------- |

@@ -32,55 +32,55 @@
 
 ### New files
 
-| File | Responsibility |
-| --- | --- |
-| `crates/heiwa_evidence/src/sensitive.rs` | Shared secret/material scanner used before durable writes. |
-| `crates/heiwa_evidence/src/operator.rs` | Operator event record, cursor, append, and lock-free replay framing. |
-| `crates/heiwa_evidence/tests/operator_journal.rs` | Append, cursor, corruption, concurrency, and sensitive-payload tests. |
-| `crates/heiwa_session/src/operator.rs` | Sole writer, thread/turn materializer, idempotency, recovery, transcript compatibility. |
-| `crates/heiwa_session/src/operator_index.rs` | FTS/Lance projection and rebuild boundary. |
-| `crates/heiwa_session/tests/operator_service.rs` | Domain writer, migration, index, and restart tests. |
-| `apps/heiwa_core/src/drex/call.rs` | Per-call policy, candidate admission, cheapest-above-floor selection, fallback inputs. |
-| `apps/heiwa_core/tests/drex_call_routing.rs` | Quality/cost/privacy/quota/override selection contracts. |
-| `apps/heiwa_shell/src/model_calls.rs` | Only shell provider-call executor; routing events, usage, fallback, cancellation. |
-| `apps/heiwa_shell/src/operator.rs` | Turn runner and active-turn registry over session/model-call services. |
-| `apps/heiwa_shell/tests/operator_api.rs` | Authenticated HTTP, idempotency, replay, cancel, and compatibility tests. |
-| `apps/heiwa_app/desktop/src-tauri/src/operator_stream.rs` | Authenticated native WebSocket-to-Tauri-channel bridge. |
-| `apps/heiwa_app/desktop/src/operator/types.ts` | Operator wire and view types. |
-| `apps/heiwa_app/desktop/src/operator/store.ts` | Pure idempotent event reducer. |
-| `apps/heiwa_app/desktop/src/operator/client.ts` | HTTP submit/replay and native stream controller. |
-| `apps/heiwa_app/desktop/src/operator/store.test.ts` | Replay and duplicate-suppression tests. |
-| `scripts/check_model_call_boundary.sh` | Prevent direct provider sends outside the routed executor and provider adapters. |
+| File                                                      | Responsibility                                                                          |
+| --------------------------------------------------------- | --------------------------------------------------------------------------------------- |
+| `crates/heiwa_evidence/src/sensitive.rs`                  | Shared secret/material scanner used before durable writes.                              |
+| `crates/heiwa_evidence/src/operator.rs`                   | Operator event record, cursor, append, and lock-free replay framing.                    |
+| `crates/heiwa_evidence/tests/operator_journal.rs`         | Append, cursor, corruption, concurrency, and sensitive-payload tests.                   |
+| `crates/heiwa_session/src/operator.rs`                    | Sole writer, thread/turn materializer, idempotency, recovery, transcript compatibility. |
+| `crates/heiwa_session/src/operator_index.rs`              | FTS/Lance projection and rebuild boundary.                                              |
+| `crates/heiwa_session/tests/operator_service.rs`          | Domain writer, migration, index, and restart tests.                                     |
+| `apps/heiwa_core/src/drex/call.rs`                        | Per-call policy, candidate admission, cheapest-above-floor selection, fallback inputs.  |
+| `apps/heiwa_core/tests/drex_call_routing.rs`              | Quality/cost/privacy/quota/override selection contracts.                                |
+| `apps/heiwa_shell/src/model_calls.rs`                     | Only shell provider-call executor; routing events, usage, fallback, cancellation.       |
+| `apps/heiwa_shell/src/operator.rs`                        | Turn runner and active-turn registry over session/model-call services.                  |
+| `apps/heiwa_shell/tests/operator_api.rs`                  | Authenticated HTTP, idempotency, replay, cancel, and compatibility tests.               |
+| `apps/heiwa_app/desktop/src-tauri/src/operator_stream.rs` | Authenticated native WebSocket-to-Tauri-channel bridge.                                 |
+| `apps/heiwa_app/desktop/src/operator/types.ts`            | Operator wire and view types.                                                           |
+| `apps/heiwa_app/desktop/src/operator/store.ts`            | Pure idempotent event reducer.                                                          |
+| `apps/heiwa_app/desktop/src/operator/client.ts`           | HTTP submit/replay and native stream controller.                                        |
+| `apps/heiwa_app/desktop/src/operator/store.test.ts`       | Replay and duplicate-suppression tests.                                                 |
+| `scripts/check_model_call_boundary.sh`                    | Prevent direct provider sends outside the routed executor and provider adapters.        |
 
 ### Modified files
 
-| File | Change |
-| --- | --- |
-| `crates/heiwa_evidence/Cargo.toml` | Add base64/sha2 support used by opaque cursors and fingerprints. |
-| `crates/heiwa_evidence/src/lib.rs` | Export operator and sensitive APIs; clarify envelope version name. |
-| `crates/heiwa_evidence/src/journal.rs` | Expose internal append primitive to operator journal without domain logic. |
-| `apps/heiwa_shell/src/cmd/capabilities.rs` | Reuse `heiwa_evidence::find_sensitive`. |
-| `crates/heiwa_session/Cargo.toml` | Add `heiwa_evidence`, sha2, and UUID v5 dependencies. |
-| `crates/heiwa_session/src/lib.rs` | Export operator service; convert legacy transcript calls into compatibility projections. |
-| `crates/heiwa_session/src/migration.rs` | Produce deterministic import events and marker fingerprints. |
-| `apps/heiwa_core/src/drex/mod.rs` | Export per-call routing contract. |
-| `apps/heiwa_core/src/drex/router.rs` | Reuse existing ingress scoring inside candidate admission; remove cost-first score blending. |
-| `crates/heiwa_loop/src/lib.rs` | Consume routed call executor instead of invoking adapters directly. |
-| `crates/heiwa_loop/tests/loop_execution.rs` | Verify each loop iteration requests a fresh model call. |
-| `apps/heiwa_shell/src/lib.rs` | Export `model_calls` and `operator`. |
-| `apps/heiwa_shell/src/main.rs` | Route all REPL/TUI/loop calls through services and keep compatibility wrappers thin. |
-| `apps/heiwa_shell/src/cmd/app.rs` | Authenticated operator HTTP/WS routing and lock-free cursor tailing. |
-| `apps/heiwa_shell/tests/app_api.rs` | Verify CLI bearer injection and no secret leakage in dry-run JSON. |
-| `apps/heiwa_app/desktop/src-tauri/Cargo.toml` | Add `futures-util` and `tokio-tungstenite` for native authenticated WS. |
-| `apps/heiwa_app/desktop/src-tauri/src/proxy.rs` | Inject machine auth into HTTP calls. |
-| `apps/heiwa_app/desktop/src-tauri/src/lib.rs` | Register native operator subscription command. |
-| `apps/heiwa_app/desktop/src/runtime.ts` | Expose operator replay/submit/stream functions. |
-| `apps/heiwa_app/desktop/src/main.ts` | Replace renderer-owned messages/tasks with operator store projection. |
-| `apps/heiwa_app/desktop/package.json` | Add Vitest test script and dev dependency. |
-| `apps/heiwa_app/desktop/package-lock.json` | Lock Vitest dependency. |
-| `docs/architecture/app-foundation.md` | Replace remaining stale backend wording and document operator stream. |
-| `docs/local-self-operation.md` | Add authenticated `7475` operator probes. |
-| `scripts/check_agent_baseline.sh` | Run model-call boundary check. |
+| File                                            | Change                                                                                       |
+| ----------------------------------------------- | -------------------------------------------------------------------------------------------- |
+| `crates/heiwa_evidence/Cargo.toml`              | Add base64/sha2 support used by opaque cursors and fingerprints.                             |
+| `crates/heiwa_evidence/src/lib.rs`              | Export operator and sensitive APIs; clarify envelope version name.                           |
+| `crates/heiwa_evidence/src/journal.rs`          | Expose internal append primitive to operator journal without domain logic.                   |
+| `apps/heiwa_shell/src/cmd/capabilities.rs`      | Reuse `heiwa_evidence::find_sensitive`.                                                      |
+| `crates/heiwa_session/Cargo.toml`               | Add `heiwa_evidence`, sha2, and UUID v5 dependencies.                                        |
+| `crates/heiwa_session/src/lib.rs`               | Export operator service; convert legacy transcript calls into compatibility projections.     |
+| `crates/heiwa_session/src/migration.rs`         | Produce deterministic import events and marker fingerprints.                                 |
+| `apps/heiwa_core/src/drex/mod.rs`               | Export per-call routing contract.                                                            |
+| `apps/heiwa_core/src/drex/router.rs`            | Reuse existing ingress scoring inside candidate admission; remove cost-first score blending. |
+| `crates/heiwa_loop/src/lib.rs`                  | Consume routed call executor instead of invoking adapters directly.                          |
+| `crates/heiwa_loop/tests/loop_execution.rs`     | Verify each loop iteration requests a fresh model call.                                      |
+| `apps/heiwa_shell/src/lib.rs`                   | Export `model_calls` and `operator`.                                                         |
+| `apps/heiwa_shell/src/main.rs`                  | Route all REPL/TUI/loop calls through services and keep compatibility wrappers thin.         |
+| `apps/heiwa_shell/src/cmd/app.rs`               | Authenticated operator HTTP/WS routing and lock-free cursor tailing.                         |
+| `apps/heiwa_shell/tests/app_api.rs`             | Verify CLI bearer injection and no secret leakage in dry-run JSON.                           |
+| `apps/heiwa_app/desktop/src-tauri/Cargo.toml`   | Add `futures-util` and `tokio-tungstenite` for native authenticated WS.                      |
+| `apps/heiwa_app/desktop/src-tauri/src/proxy.rs` | Inject machine auth into HTTP calls.                                                         |
+| `apps/heiwa_app/desktop/src-tauri/src/lib.rs`   | Register native operator subscription command.                                               |
+| `apps/heiwa_app/desktop/src/runtime.ts`         | Expose operator replay/submit/stream functions.                                              |
+| `apps/heiwa_app/desktop/src/main.ts`            | Replace renderer-owned messages/tasks with operator store projection.                        |
+| `apps/heiwa_app/desktop/package.json`           | Add Vitest test script and dev dependency.                                                   |
+| `apps/heiwa_app/desktop/package-lock.json`      | Lock Vitest dependency.                                                                      |
+| `docs/architecture/app-foundation.md`           | Replace remaining stale backend wording and document operator stream.                        |
+| `docs/local-self-operation.md`                  | Add authenticated `7475` operator probes.                                                    |
+| `scripts/check_agent_baseline.sh`               | Run model-call boundary check.                                                               |
 
 ---
 
@@ -936,9 +936,22 @@ import { describe, expect, it } from "vitest";
 import { OperatorStore } from "./store";
 import type { OperatorEventFrame } from "./types";
 
-const frame = (id: string, eventType: string, payload: Record<string, unknown>): OperatorEventFrame => ({
-  type: "event", cursor: `cursor-${id}`,
-  event: { schema_version: 1, event_id: id, thread_id: "default", turn_id: "turn-1", event_type: eventType, occurred_at: "2026-07-18T00:00:00Z", payload },
+const frame = (
+  id: string,
+  eventType: string,
+  payload: Record<string, unknown>,
+): OperatorEventFrame => ({
+  type: "event",
+  cursor: `cursor-${id}`,
+  event: {
+    schema_version: 1,
+    event_id: id,
+    thread_id: "default",
+    turn_id: "turn-1",
+    event_type: eventType,
+    occurred_at: "2026-07-18T00:00:00Z",
+    payload,
+  },
 });
 
 describe("OperatorStore", () => {
@@ -952,7 +965,9 @@ describe("OperatorStore", () => {
   it("keeps transient deltas disposable and final output durable", () => {
     const store = new OperatorStore();
     store.reduce({ type: "assistant_delta", thread_id: "default", turn_id: "turn-1", text: "hel" });
-    store.reduce(frame("e2", "assistant_completed", { text: "hello", provider: "ollama", model: "qwen" }));
+    store.reduce(
+      frame("e2", "assistant_completed", { text: "hello", provider: "ollama", model: "qwen" }),
+    );
     expect(store.snapshot().messages.at(-1)?.body).toBe("hello");
     expect(store.snapshot().transientByTurn["turn-1"]).toBeUndefined();
   });

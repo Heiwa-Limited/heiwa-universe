@@ -1,5 +1,4 @@
 use serde::{Deserialize, Serialize};
-use std::env;
 use std::fs;
 use std::path::PathBuf;
 
@@ -158,8 +157,7 @@ pub struct DetectedModel {
 // ---------------------------------------------------------------------------
 
 fn get_registry_path() -> PathBuf {
-    let home = env::var("HOME").unwrap_or_else(|_| ".".to_string());
-    PathBuf::from(home).join(".heiwa").join("accounts.json")
+    crate::get_heiwa_state_dir().join("accounts.json")
 }
 
 /// The full set of provider accounts Heiwa knows about.

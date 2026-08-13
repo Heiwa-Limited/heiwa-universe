@@ -80,8 +80,8 @@ if ! grep -q "\"node\": \"${required_node_major}\"" package.json; then
 fi
 
 for workflow in .github/workflows/ci.yml .github/workflows/deploy.yml; do
-  if ! grep -Eq "actions/setup-node@v[0-9]+" "$workflow"; then
-    echo "$workflow must set up Node explicitly" >&2
+  if ! grep -Eq "actions/setup-node@[0-9a-f]{40}[[:space:]]+# v[0-9]+" "$workflow"; then
+    echo "$workflow must set up Node with an immutable commit pin" >&2
     exit 1
   fi
 
@@ -90,6 +90,8 @@ for workflow in .github/workflows/ci.yml .github/workflows/deploy.yml; do
     exit 1
   fi
 done
+
+bash scripts/check_workflow_pins.sh
 
 for workflow in .github/workflows/ci.yml .github/workflows/deploy.yml; do
   if ! grep -Eq "toolchain: ${required_rust_channel}" "$workflow"; then
@@ -104,5 +106,7 @@ for required_env in HEIWA_MACHINE_AUTH_TOKEN HEIWA_JWT_SIGNING_SECRET HEIWA_STAT
     exit 1
   fi
 done
+
+bash scripts/tests/test_audit_operator_machine.sh
 
 echo "Runtime baseline pins and workflow wiring are present."

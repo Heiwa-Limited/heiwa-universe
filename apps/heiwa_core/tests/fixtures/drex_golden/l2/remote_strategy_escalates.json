@@ -1,0 +1,22 @@
+{
+  "schema_version": 1,
+  "layer": "l2_route",
+  "id": "remote_strategy_escalates",
+  "description": "Remote escalation: large-context strategy work with only cloud providers routes remote.",
+  "status": "active",
+  "registry": "cloud_only",
+  "ingress": {
+    "intent": "strategy",
+    "risk": "medium",
+    "privacy": "standard",
+    "runtime": "cloud",
+    "available_vram_mb": 0,
+    "required_context_tokens": 120000,
+    "raw_text": "draft the enterprise roadmap priorities for the next two quarters"
+  },
+  "expect": {
+    "outcome": "routed",
+    "provider_is_local": false,
+    "mode": "remote_model"
+  }
+}

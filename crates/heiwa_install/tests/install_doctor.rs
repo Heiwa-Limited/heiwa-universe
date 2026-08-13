@@ -15,8 +15,10 @@ fn with_temp_home<T>(f: impl FnOnce(&PathBuf) -> T) -> T {
     fs::create_dir_all(&tmp).expect("create temp home");
 
     let original_home = env::var_os("HOME");
+    let original_heiwa_home = env::var_os("HEIWA_HOME");
     let original_root = env::var_os("HEIWA_ROOT");
     env::set_var("HOME", &tmp);
+    env::remove_var("HEIWA_HOME");
     env::set_var(
         "HEIWA_ROOT",
         PathBuf::from(env!("CARGO_MANIFEST_DIR"))
@@ -36,9 +38,22 @@ fn with_temp_home<T>(f: impl FnOnce(&PathBuf) -> T) -> T {
         Some(v) => env::set_var("HEIWA_ROOT", v),
         None => env::remove_var("HEIWA_ROOT"),
     }
+    match original_heiwa_home {
+        Some(v) => env::set_var("HEIWA_HOME", v),
+        None => env::remove_var("HEIWA_HOME"),
+    }
     let _ = fs::remove_dir_all(&tmp);
 
     result
+}
+
+#[test]
+fn test_heiwa_dir_honors_explicit_runtime_root() {
+    with_temp_home(|home| {
+        let runtime_root = home.join("custom-runtime");
+        env::set_var("HEIWA_HOME", &runtime_root);
+        assert_eq!(get_heiwa_dir(), runtime_root);
+    });
 }
 
 #[test]

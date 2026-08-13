@@ -20,11 +20,7 @@ const GOOGLE_SYNC_SEMANTICS: &str =
     "full sync stores nextSyncToken; incremental sync handles 410 Gone with scoped wipe + full resync";
 
 fn calendar_state_dir() -> PathBuf {
-    crate::home::heiwa_home()
-        .unwrap_or_else(|| PathBuf::from("."))
-        .join(".heiwa")
-        .join("state")
-        .join("calendar")
+    crate::home::heiwa_state_dir().join("calendar")
 }
 
 fn holds_dir() -> PathBuf {

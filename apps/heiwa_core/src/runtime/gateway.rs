@@ -24,7 +24,8 @@ use crate::{
     drex::{default_policy, plan_route, DrexIngress},
     evidence::{EvidenceTransport, PersistedArtifact, PersistedRunReceipt},
     runtime::state::{
-        RegistryErrorCode, SharedState, WorkerProtocolFlavor, WorkerSessionRegistration,
+        RegistryErrorCode, SharedState, WorkerDispatchAck, WorkerHeartbeatUpdate,
+        WorkerProtocolFlavor, WorkerSessionRegistration,
     },
 };
 const WORKER_PROTOCOL_VERSION: &str = "v1";
@@ -679,12 +680,14 @@ async fn handle_worker_socket(socket: WebSocket, state: SharedState) {
                             let mut registry = state.worker_registry.write().await;
                             registry.update_heartbeat(
                                 &state.evidence,
-                                &current_session_id,
-                                now_ms(),
-                                heartbeat.status,
-                                heartbeat.active_tasks,
-                                heartbeat.load,
-                                None,
+                                WorkerHeartbeatUpdate {
+                                    session_id: &current_session_id,
+                                    now_ms: now_ms(),
+                                    status: heartbeat.status,
+                                    active_tasks: heartbeat.active_tasks,
+                                    load: heartbeat.load,
+                                    capabilities: None,
+                                },
                             )
                         };
                         match session {
@@ -722,12 +725,14 @@ async fn handle_worker_socket(socket: WebSocket, state: SharedState) {
                             let mut registry = state.worker_registry.write().await;
                             registry.record_dispatch_ack(
                                 &state.evidence,
-                                &current_session_id,
-                                &ack.task_id,
-                                &ack.lease_id,
-                                ack.accepted,
-                                ack.reason.clone(),
-                                now_ms(),
+                                WorkerDispatchAck {
+                                    session_id: &current_session_id,
+                                    task_id: &ack.task_id,
+                                    lease_id: &ack.lease_id,
+                                    accepted: ack.accepted,
+                                    detail: ack.reason.clone(),
+                                    now_ms: now_ms(),
+                                },
                             )
                         };
                         match result {
@@ -965,12 +970,14 @@ async fn handle_legacy_worker_socket(socket: WebSocket, state: SharedState) {
                     let mut registry = state.worker_registry.write().await;
                     registry.update_heartbeat(
                         &state.evidence,
-                        &current_session_id,
-                        now_ms(),
-                        status.unwrap_or_else(|| "idle".to_string()),
-                        0,
-                        0.0,
-                        Some(capabilities_vec),
+                        WorkerHeartbeatUpdate {
+                            session_id: &current_session_id,
+                            now_ms: now_ms(),
+                            status: status.unwrap_or_else(|| "idle".to_string()),
+                            active_tasks: 0,
+                            load: 0.0,
+                            capabilities: Some(capabilities_vec),
+                        },
                     )
                 };
                 if let Ok(session) = updated {

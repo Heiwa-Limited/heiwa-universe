@@ -6,7 +6,7 @@ This repository builds the Heiwa full stack. The current product center of gravi
 
 - **Heiwa** is the product identity: app, runtime, CLI, packages, and docs.
 - **Heiwa Limited** is the company/publisher/legal identity.
-- **Heiwa Universe** is this open-source repository: `Strategizing/heiwa-universe`.
+- **Heiwa Universe** is this repository: `Heiwa-Limited/heiwa-universe`, private until the public security/readiness gate passes.
 - **`heiwa`** is the primary installed operator surface.
 - **DREX** is the internal execution kernel.
 - **Local MacBook state** under `~/.heiwa/` plus this checkout is the current owner runtime truth.
@@ -79,7 +79,9 @@ GitHub plus Cloudflare are the public install source: GitHub owns source, releas
 
 Heiwa must initialize and adapt per machine through `~/.heiwa/machine.json`; do not hardcode one-user or one-device assumptions into runtime behavior.
 
-Promotion rule (Local-first bypass posture): Local sandbox verification is the canonical gate. Verify the checkout with the sandbox release checks, merge to `main` locally, and then promote to the installed `heiwa` runtime via local checkout updates (`heiwa app update --source checkout`). Bypassing GitHub Actions and PR checks is standard to prevent remote blockers from stopping operator progress.
+Promotion rule (two-branch model): `dev` is the integration branch and `main` is production. All agent commits land on `dev` (a local hook blocks commits on `main`). Verify on `dev` with the local gates — `bash scripts/check_ci_local.sh` mirrors the remote PR checks exactly and is the required pre-push gate; `bash scripts/check_agent_baseline.sh` covers repo baseline — then update `main` only via a `dev` -> `main` pull request. GitHub branch protection on `main` (`enforce_admins`, required status checks, 0 approvals — self-merge is fine) makes direct pushes impossible; do not attempt to bypass it, the PR checks are the production gate. Do not hold a standing `dev` -> `main` PR open between promotions — every `dev` push re-runs its checks; open the PR when promoting, merge it, move on. After `main` updates, promote to the installed `heiwa` runtime via local checkout updates (`heiwa app update --source checkout`).
+
+CI economy: remote compute runs only on PRs targeting `main`, `v*` tags (release + docs), and manual dispatch. Merges to `main` do not implicitly re-test or redeploy; `deploy.yml` is dispatch-only. Local verification is the default; remote CI is the promotion gate, not a development loop.
 
 Agent baseline gate: before closing repo-health work, local promotion, or peer-agent handoff, run `bash scripts/check_agent_baseline.sh`. The gate is local-only and must not be treated as remote health. Remote operations (`git fetch/pull/push`, `gh run`, releases, `wrangler deploy`) require an explicit assignment and the remote pre-flight in `docs/agent-baseline-workflow.md`.
 

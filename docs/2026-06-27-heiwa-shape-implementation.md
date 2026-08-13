@@ -920,7 +920,7 @@ Tests: `calendar_import_is_read_only`, `calendar_pull_parses_rows`, `mail_policy
 "plugins": {
   "updater": {
     "active": true,
-    "endpoints": ["https://github.com/Strategizing/heiwa-universe/releases/latest/download/latest.json"],
+    "endpoints": ["https://github.com/Heiwa-Limited/heiwa-universe/releases/latest/download/latest.json"],
     "dialog": true,
     "pubkey": "<minisign public key>"
   }

@@ -2,7 +2,7 @@
     "schema_version": "local_owner_runtime_contract_v1",
     "repo_identity": {
         "repo_name": "heiwa",
-        "github_repo": "Strategizing/heiwa-universe",
+        "github_repo": "Heiwa-Limited/heiwa-universe",
         "role": "owner_runtime"
     },
     "runtime": {
@@ -30,7 +30,7 @@
             "read_only": true
         },
         "github_env_audit": {
-            "command": "gh api repos/Strategizing/heiwa-universe",
+            "command": "gh api repos/Heiwa-Limited/heiwa-universe",
             "cwd": ".",
             "mode": "exec",
             "read_only": true

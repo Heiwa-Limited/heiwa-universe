@@ -3,7 +3,7 @@
 Updated: 2026-04-22
 Status: working spec for the single `heiwa` binary and its REPL
 
-If this conflicts with [`HEIWA.md`](/Users/dmcgregsauce/heiwa-universe/HEIWA.md) or [`BRAND.md`](./BRAND.md), those win.
+If this conflicts with [`HEIWA.md`](../../../HEIWA.md) or [`BRAND.md`](./BRAND.md), those win.
 
 ## Purpose
 

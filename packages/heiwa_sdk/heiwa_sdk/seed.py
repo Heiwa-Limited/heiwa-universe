@@ -1,23 +1,18 @@
-"""Seed loader: bootstrap STDB tables from checked-in JSON files."""
+"""Seed loader for an injected compatibility backend."""
 from __future__ import annotations
 
 import json
 import logging
 from pathlib import Path
-from typing import TYPE_CHECKING
-
-from heiwa_sdk.spacetimedb import SpacetimeDB
-
-if TYPE_CHECKING:
-    pass
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
 
 class SeedLoader:
-    """Loads seed data into STDB tables on first boot."""
+    """Loads checked-in seed data through an injected backend."""
 
-    def __init__(self, stdb: SpacetimeDB) -> None:
+    def __init__(self, stdb: Any) -> None:
         self.stdb = stdb
 
     def seed_model_tiers(self, seed_path: Path) -> None:

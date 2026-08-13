@@ -6,12 +6,12 @@ How the `heiwa-universe` repository becomes the public Heiwa surface. GitHub sta
 
 ## Three publishing planes
 
-| Plane                        | Surface          | Source in repo                                            | Authority        |
-| ---------------------------- | ---------------- | --------------------------------------------------------- | ---------------- |
-| **Marketing shell**          | `heiwa.ltd`      | `apps/heiwa_app/clients/web/`                             | GitHub Pages     |
-| **Documentation**            | `docs.heiwa.ltd` | `docs/` + `mkdocs.yml`                                    | GitHub Pages     |
-| **Releases**                 | GitHub Releases  | `apps/heiwa_core/`, `apps/heiwa_shell/`                   | GitHub Releases  |
-| **Evidence + recall**        | owner-local      | `crates/heiwa_evidence/`, `crates/heiwa_embed/`           | Local JSONL      |
+| Plane                 | Surface          | Source in repo                                  | Authority       |
+| --------------------- | ---------------- | ----------------------------------------------- | --------------- |
+| **Marketing shell**   | `heiwa.ltd`      | `apps/heiwa_app/clients/web/`                   | GitHub Pages    |
+| **Documentation**     | `docs.heiwa.ltd` | `docs/` + `mkdocs.yml`                          | GitHub Pages    |
+| **Releases**          | GitHub Releases  | `apps/heiwa_core/`, `apps/heiwa_shell/`         | GitHub Releases |
+| **Evidence + recall** | owner-local      | `crates/heiwa_evidence/`, `crates/heiwa_embed/` | Local JSONL     |
 
 Each plane has a single source of truth in the repo and a single deploy path. Automated workflows are the normal channel; a [manual fallback](#manual-fallback-when-actions-are-paused) exists for the periods when GitHub Actions are paused.
 
@@ -36,16 +36,18 @@ If a future feature appears to need any of the above on Cloudflare, treat it as 
 
 GitHub is the source of truth. Every public artifact is built from a tagged commit on `main`.
 
-| Workflow                                                                                                | Trigger                 | Output                                         |
-| ------------------------------------------------------------------------------------------------------- | ----------------------- | ---------------------------------------------- |
-| [`ci.yml`](https://github.com/Strategizing/heiwa-universe/blob/main/.github/workflows/ci.yml)           | every push + PR         | `cargo build --workspace`, smoke tests, lint   |
-| [`pages.yml`](https://github.com/Strategizing/heiwa-universe/blob/main/.github/workflows/pages.yml)     | tag push `v*`           | MkDocs build → GitHub Pages → `docs.heiwa.ltd` |
-| [`release.yml`](https://github.com/Strategizing/heiwa-universe/blob/main/.github/workflows/release.yml) | tag push `v*`           | Cross-platform binaries → GitHub Releases      |
-| [`deploy.yml`](https://github.com/Strategizing/heiwa-universe/blob/main/.github/workflows/deploy.yml)   | manual / push to `main` | Cloudflare Pages publish for `clients/web/`    |
+| Workflow                                                                                                | Trigger                         | Output                                         |
+| ------------------------------------------------------------------------------------------------------- | ------------------------------- | ---------------------------------------------- |
+| [`ci.yml`](https://github.com/Heiwa-Limited/heiwa-universe/blob/main/.github/workflows/ci.yml)           | PRs to `main` + manual dispatch | Rust matrix, lint, docs, agent-sync, hygiene   |
+| [`pages.yml`](https://github.com/Heiwa-Limited/heiwa-universe/blob/main/.github/workflows/pages.yml)     | tag push `v*`                   | MkDocs build → GitHub Pages → `docs.heiwa.ltd` |
+| [`release.yml`](https://github.com/Heiwa-Limited/heiwa-universe/blob/main/.github/workflows/release.yml) | tag push `v*`                   | Cross-platform binaries → GitHub Releases      |
+| [`deploy.yml`](https://github.com/Heiwa-Limited/heiwa-universe/blob/main/.github/workflows/deploy.yml)   | manual dispatch only            | Cloudflare Pages publish for `clients/web/`    |
 
-### Current pipeline status (2026-05-25)
+CI economy: compute runs at the moments that matter — PR validation (the production gate for `main`), tagged releases, and deliberate dispatches. Merges to `main` do not implicitly re-test or republish anything. `bash scripts/check_ci_local.sh` mirrors the PR checks locally and is the required pre-push gate.
 
-The four workflows above are **runner-billed-out, not code-broken**. The GitHub account's spending-limit annotation blocks the runners; a `v*` tag push queues but does not execute. The code paths in `.github/workflows/*.yml` remain valid — restoring runner budget re-enables them with no code change required.
+### Current pipeline status (2026-07-30)
+
+The Actions lock is **chronic, not incidental**: runner-billed-out since at least 2026-05-25, briefly cleared (PR #51 ran 27 green minutes on 2026-07-28), then re-locked with "recent account payments have failed". The durable fix is downgrading the account to **GitHub Free** (Settings → Billing and licensing → Current plan → Downgrade): this repository is public, and standard GitHub-hosted runners on public repositories bill nothing, so no spending limit or paid plan is required. The workflow code paths remain valid — no code change is needed when runners return.
 
 Until that resolves, ship from the manual fallback below. Remove the fallback section once at least one tagged release flows cleanly through the automated path again — doctrine pages stay honest.
 
@@ -65,42 +67,43 @@ uv run --extra docs mkdocs gh-deploy --force
 Build each target locally (or in a clean sandbox), assemble the archive, generate the checksums manifest, and create the release with `gh`:
 
 ```bash
-TAG=v0.1.0
-mkdir -p dist
-
-# macOS · Apple Silicon
-cargo build --release --target aarch64-apple-darwin -p heiwa-shell
-tar -czf dist/heiwa-${TAG}-macos-aarch64.tar.gz \
-  -C target/aarch64-apple-darwin/release heiwa
-
-# Linux · x86_64  (cross-build via Docker or build on a Linux host)
-cargo build --release --target x86_64-unknown-linux-gnu -p heiwa-shell
-tar -czf dist/heiwa-${TAG}-linux-x86_64.tar.gz \
-  -C target/x86_64-unknown-linux-gnu/release heiwa
-
-# Windows · x86_64  (cross-build via cargo-xwin or build on a Windows host)
-cargo build --release --target x86_64-pc-windows-msvc -p heiwa-shell
-zip -j dist/heiwa-${TAG}-windows-x86_64.zip \
-  target/x86_64-pc-windows-msvc/release/heiwa.exe
-
-# Checksums manifest — authoritative for mirrors and the installer
-( cd dist && shasum -a 256 heiwa-${TAG}-* > heiwa-${TAG}-checksums.txt )
-
-# Cut the release
-gh release create ${TAG} dist/heiwa-${TAG}-* \
-  --title "Heiwa ${TAG}" \
-  --notes-file CHANGELOG.md
+bash scripts/check_ci_local.sh
+bash scripts/package_release_sandbox.sh --version 0.1.0
 ```
 
-The result is byte-identical to what `release.yml` produces. The checksums manifest stays authoritative.
+The sandbox creates the host-platform archive with the release binary, built
+cockpit assets, license/community files, and checksum manifest. Its structure
+matches `release.yml`; independently compressed archives are not guaranteed to
+be byte-identical. The tagged workflow remains the canonical multi-platform
+publisher and provenance source.
+
+### macOS distribution without the Apple Developer Program
+
+Heiwa's desktop bundle is **ad-hoc signed** (`signingIdentity: "-"` in
+`apps/heiwa_app/desktop/src-tauri/tauri.conf.json`). Apple Developer Program
+membership (≈US$99/yr) is required for Developer ID signing and notarization —
+not for the legal right to distribute your own software. Ground rules:
+
+- Publish the `.dmg`/`.zip` with SHA-256 checksums, the source tag, license,
+  and third-party notices.
+- Tell users plainly: macOS will flag the app as from an unverified developer.
+  The unblock path is System Settings → Privacy & Security → **Open Anyway**.
+- Never describe a build as "Apple verified", "Developer ID signed", or
+  "notarized" — none of those are true for ad-hoc signatures. Honesty over
+  install friction.
+- This route serves technical users and early releases. When consumer-grade
+  install friction matters, the paid Apple program becomes unavoidable —
+  treat that as a deliberate future decision, not a default.
 
 **Cloudflare Pages → `heiwa.ltd`**
 
 ```bash
-npx wrangler pages deploy apps/heiwa_app/clients/web --project-name=heiwa-clients
+bash scripts/package_public_web.sh .artifacts/public-web
+npx wrangler pages deploy .artifacts/public-web --project-name=heiwa-clients --branch=main
 ```
 
-Functionally identical to the `deploy.yml` workflow path.
+This is the same public-only allowlisted artifact used by `deploy.yml`. Never
+deploy the source web directory directly; it also contains operator-only files.
 
 ### Release tagging conventions
 
@@ -118,6 +121,11 @@ heiwa-<version>-linux-x86_64.tar.gz
 heiwa-<version>-windows-x86_64.zip
 heiwa-<version>-checksums.txt
 ```
+
+Each platform archive contains `heiwa` (or `heiwa.exe`), the compiled cockpit
+under `cockpit/`, and the license/community files. The installer verifies the
+archive checksum and rejects links or paths outside the versioned archive root
+before extracting it.
 
 See [Install Guide](https://heiwa.ltd/download.html) for the operator-facing summary.
 

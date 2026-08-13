@@ -12,6 +12,7 @@
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
     <link rel="stylesheet" href="./assets/instrument.css" />
+    <script defer src="./assets/site.js"></script>
   </head>
   <body data-page="download">
     <div class="bg-grid" aria-hidden="true"></div>
@@ -27,7 +28,7 @@
         <a class="is-active" href="/download.html">Install</a>
         <a href="https://docs.heiwa.ltd">Docs</a>
         <a href="/support.html">Support</a>
-        <a href="https://github.com/Strategizing/heiwa-universe">Source</a>
+        <a href="https://github.com/Heiwa-Limited/heiwa-universe">Source</a>
       </nav>
     </header>
 
@@ -46,7 +47,7 @@
           <button type="button" class="copy-btn" data-copy="install-cmd">Copy</button>
         </div>
         <div class="hero-actions" style="margin-top:1.2rem;">
-          <a class="ig-btn" data-intent="active" href="https://github.com/Strategizing/heiwa-universe/releases">Open Releases</a>
+          <a class="ig-btn" data-intent="active" href="https://github.com/Heiwa-Limited/heiwa-universe/releases">Open Releases</a>
           <a class="ig-btn" href="https://docs.heiwa.ltd/local-self-operation">Install Doctrine</a>
           <a class="ig-btn" href="/support.html">Need Help</a>
         </div>
@@ -156,7 +157,7 @@
               software, never operator state.
             </p>
             <div class="hero-actions">
-              <a class="ig-btn" data-intent="active" href="https://github.com/Strategizing/heiwa-universe/releases">Browse Releases</a>
+              <a class="ig-btn" data-intent="active" href="https://github.com/Heiwa-Limited/heiwa-universe/releases">Browse Releases</a>
               <a class="ig-btn" href="https://docs.heiwa.ltd/publishing">Publishing Pipeline</a>
             </div>
           </div>
@@ -166,7 +167,7 @@
               <thead><tr><th>Surface</th><th>Role</th></tr></thead>
               <tbody>
                 <tr><td><code>heiwa.ltd</code></td><td>install path, marketing</td></tr>
-                <tr><td><code>github.com/Strategizing/heiwa-universe</code></td><td>source, Releases</td></tr>
+                <tr><td><code>github.com/Heiwa-Limited/heiwa-universe</code></td><td>source, Releases</td></tr>
                 <tr><td><code>docs.heiwa.ltd</code></td><td>doctrine, runbooks</td></tr>
                 <tr><td><code>localhost</code></td><td>runtime, app, memory, secrets</td></tr>
               </tbody>
@@ -194,7 +195,7 @@
 
       <div class="page-foot">
         <p>Heiwa &middot; Install Guide &middot;
-          <a href="https://github.com/Strategizing/heiwa-universe/releases">releases</a>
+          <a href="https://github.com/Heiwa-Limited/heiwa-universe/releases">releases</a>
           &middot;
           <a href="/support.html">support</a>
         </p>
@@ -202,50 +203,5 @@
       </div>
     </main>
 
-    <script>
-      document.querySelectorAll("[data-copy]").forEach((btn) => {
-        btn.addEventListener("click", async () => {
-          const target = document.getElementById(btn.dataset.copy);
-          if (!target) return;
-          try {
-            await navigator.clipboard.writeText(target.textContent.trim());
-            const prev = btn.textContent;
-            btn.textContent = "Copied";
-            btn.style.color = "var(--active)";
-            btn.style.borderColor = "var(--active)";
-            setTimeout(() => {
-              btn.textContent = prev;
-              btn.style.color = "";
-              btn.style.borderColor = "";
-            }, 1200);
-          } catch (err) {
-            btn.textContent = "Copy failed";
-            setTimeout(() => (btn.textContent = "Copy"), 1200);
-          }
-        });
-      });
-
-      document.querySelectorAll(".ig-btn").forEach((btn) => {
-        btn.addEventListener("click", () => {
-          const intent = btn.dataset.intent;
-          const colour =
-            intent === "active" ? "var(--active)" :
-            intent === "system" ? "var(--system)" :
-            intent === "critical" ? "var(--critical)" :
-            "var(--ink-2)";
-          const prevBg = btn.style.background;
-          const prevCol = btn.style.color;
-          const prevBd = btn.style.borderColor;
-          btn.style.background = colour;
-          btn.style.color = "var(--bg)";
-          btn.style.borderColor = colour;
-          setTimeout(() => {
-            btn.style.background = prevBg;
-            btn.style.color = prevCol;
-            btn.style.borderColor = prevBd;
-          }, 80);
-        });
-      });
-    </script>
   </body>
 </html>

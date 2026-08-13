@@ -13,6 +13,7 @@ current_surfaces=(
   apps/heiwa_app/clients/web/index.html
   apps/heiwa_app/clients/web/domains.html
   apps/heiwa_app/scripts/check_static_surface.py
+  scripts/check_public_web_package.sh
   apps/heiwa_core/Dockerfile
   apps/heiwa_core/start.sh
   docs/architecture.md
@@ -49,6 +50,17 @@ historical_allowlist=(
 
 if rg -n -i 'spacetimedb|\bSTDB(_|\b)|spacetime (login|publish|start)' "${current_surfaces[@]}"; then
   echo "Current runtime surfaces still reference the retired SpacetimeDB backend." >&2
+  exit 1
+fi
+
+python_bridge="packages/heiwa_sdk/heiwa_sdk/spacetimedb.py"
+if [[ -e "$python_bridge" ]]; then
+  echo "Retired Python SpacetimeDB bridge still exists: $python_bridge" >&2
+  exit 1
+fi
+
+if rg -n --glob '*.py' '(^|[[:space:]])(from|import)[[:space:]].*spacetimedb' .; then
+  echo "Live Python surfaces still import the retired SpacetimeDB backend." >&2
   exit 1
 fi
 

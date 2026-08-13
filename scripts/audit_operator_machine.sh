@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+root_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+
 print_version() {
   local label="$1"
   local cmd="$2"
@@ -27,11 +29,21 @@ print_version "pnpm" pnpm
 print_version "ollama" ollama
 print_version "tailscale" tailscale
 
+failures=0
+required_node_version="$(tr -d '[:space:]' <"$root_dir/.node-version")"
+required_node_major="${required_node_version%%.*}"
+actual_node_version="$(node --version 2>/dev/null || true)"
+
+if [[ "$actual_node_version" != "v${required_node_major}."* ]]; then
+  echo "Node runtime mismatch: expected ${required_node_major}.x, found ${actual_node_version:-missing}" >&2
+  failures=$((failures + 1))
+fi
+
 echo
 echo "Recommended repo baseline"
 echo "-------------------------"
 echo "Rust toolchain : 1.95.0"
-echo "Node runtime   : 26.0.0"
+echo "Node runtime   : $required_node_version"
 echo "Python         : 3.14.x"
 echo "Required CLIs  : gh, uv"
 echo "Optional CLIs  : wrangler, pnpm, ollama, tailscale"
@@ -42,3 +54,5 @@ if command -v brew >/dev/null 2>&1; then
   echo "-------------------------"
   brew outdated --greedy-auto-updates || true
 fi
+
+exit "$failures"

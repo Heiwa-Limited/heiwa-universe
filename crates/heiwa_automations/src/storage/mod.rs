@@ -1,5 +1,6 @@
 use crate::types::{
-    Automation, AutomationId, AutomationStatus, Execution, ExecutionId, TriggerConfig,
+    Automation, AutomationId, AutomationStatus, Execution, ExecutionId, ExecutionStatus,
+    TriggerConfig,
 };
 use anyhow::{Context, Result};
 use chrono::{DateTime, Utc};
@@ -239,6 +240,118 @@ impl AutomationStore {
             row.get::<_, String>(0)
         })?;
         decode_execution_rows(rows)
+    }
+
+    pub fn list_pending_executions(&self, limit: usize) -> Result<Vec<Execution>> {
+        let conn = self.conn.lock().expect("automation store mutex poisoned");
+        let mut stmt = conn.prepare(
+            "SELECT json FROM executions WHERE status = 'pending' ORDER BY created_at ASC LIMIT ?1",
+        )?;
+        let rows = stmt.query_map(params![limit.max(1) as i64], |row| row.get::<_, String>(0))?;
+        decode_execution_rows(rows)
+    }
+
+    /// Atomically recover expired running rows or fail exhausted rows.
+    pub fn recover_stale_running_executions(
+        &self,
+        stale_before: DateTime<Utc>,
+        max_recoveries: u32,
+    ) -> Result<Vec<Execution>> {
+        let conn = self.conn.lock().expect("automation store mutex poisoned");
+        let candidates = {
+            let mut stmt = conn.prepare(
+                "SELECT json FROM executions WHERE status = 'running' ORDER BY started_at ASC",
+            )?;
+            let rows = stmt.query_map([], |row| row.get::<_, String>(0))?;
+            decode_execution_rows(rows)?
+        };
+        let mut recovered = Vec::new();
+        for mut execution in candidates {
+            if execution
+                .started_at
+                .is_some_and(|started_at| started_at > stale_before)
+            {
+                continue;
+            }
+            let original_started_at = execution.started_at.map(|value| value.to_rfc3339());
+            if execution.retry_count >= max_recoveries {
+                execution.status = ExecutionStatus::Failed;
+                execution.completed_at = Some(Utc::now());
+                execution.error_message = Some("execution_lease_retry_limit_exceeded".to_string());
+            } else {
+                execution.status = ExecutionStatus::Pending;
+                execution.started_at = None;
+                execution.retry_count = execution.retry_count.saturating_add(1);
+                execution.error_message = Some("requeued_after_expired_lease".to_string());
+            }
+            let updated_json = serde_json::to_string(&execution)?;
+            let changed = conn.execute(
+                r#"
+                UPDATE executions
+                   SET status = ?2,
+                       json = ?3,
+                       started_at = ?4,
+                       completed_at = ?5
+                 WHERE id = ?1
+                   AND status = 'running'
+                   AND (started_at = ?6 OR (started_at IS NULL AND ?6 IS NULL))
+                "#,
+                params![
+                    execution.id.to_string(),
+                    execution_status_text(execution.status),
+                    updated_json,
+                    execution.started_at.map(|value| value.to_rfc3339()),
+                    execution.completed_at.map(|value| value.to_rfc3339()),
+                    original_started_at,
+                ],
+            )?;
+            if changed == 1 {
+                recovered.push(execution);
+            }
+        }
+        Ok(recovered)
+    }
+
+    /// Atomically move one pending execution to running.
+    ///
+    /// The `status = 'pending'` guard is the cross-process claim. Two runtime
+    /// pumps may observe the same row, but only one SQLite update can win.
+    pub fn claim_pending_execution(&self, id: ExecutionId) -> Result<Option<Execution>> {
+        let conn = self.conn.lock().expect("automation store mutex poisoned");
+        let json: Option<String> = conn
+            .query_row(
+                "SELECT json FROM executions WHERE id = ?1",
+                params![id.to_string()],
+                |row| row.get(0),
+            )
+            .optional()?;
+        let Some(raw) = json else {
+            return Ok(None);
+        };
+        let mut execution: Execution =
+            serde_json::from_str(&raw).context("decode automation execution json")?;
+        if execution.status != ExecutionStatus::Pending {
+            return Ok(None);
+        }
+
+        execution.status = ExecutionStatus::Running;
+        execution.started_at = Some(Utc::now());
+        let updated_json = serde_json::to_string(&execution)?;
+        let changed = conn.execute(
+            r#"
+            UPDATE executions
+               SET status = 'running',
+                   json = ?2,
+                   started_at = ?3
+             WHERE id = ?1 AND status = 'pending'
+            "#,
+            params![
+                id.to_string(),
+                updated_json,
+                execution.started_at.map(|dt| dt.to_rfc3339()),
+            ],
+        )?;
+        Ok((changed == 1).then_some(execution))
     }
 
     pub fn count_executions_since(

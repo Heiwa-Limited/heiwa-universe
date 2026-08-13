@@ -20,8 +20,12 @@ fn with_temp_home<T>(f: impl FnOnce(&PathBuf) -> T) -> T {
     fs::create_dir_all(&tmp).expect("create temp home");
 
     let original_home = env::var_os("HOME");
+    let original_heiwa_home = env::var_os("HEIWA_HOME");
+    let original_state = env::var_os("HEIWA_STATE_DIR");
     let original_evidence = env::var_os("HEIWA_EVIDENCE_DIR");
     env::set_var("HOME", &tmp);
+    env::set_var("HEIWA_HOME", tmp.join(".heiwa"));
+    env::set_var("HEIWA_STATE_DIR", tmp.join(".heiwa").join("state"));
     // HOME alone does NOT isolate this on Windows. The evidence plane resolves
     // its root through `dirs::home_dir()`, which reads $HOME on Unix but calls
     // the Windows known-folder API and ignores HOME entirely. Without this,
@@ -37,6 +41,14 @@ fn with_temp_home<T>(f: impl FnOnce(&PathBuf) -> T) -> T {
     match original_home {
         Some(v) => env::set_var("HOME", v),
         None => env::remove_var("HOME"),
+    }
+    match original_heiwa_home {
+        Some(v) => env::set_var("HEIWA_HOME", v),
+        None => env::remove_var("HEIWA_HOME"),
+    }
+    match original_state {
+        Some(v) => env::set_var("HEIWA_STATE_DIR", v),
+        None => env::remove_var("HEIWA_STATE_DIR"),
     }
     match original_evidence {
         Some(v) => env::set_var("HEIWA_EVIDENCE_DIR", v),

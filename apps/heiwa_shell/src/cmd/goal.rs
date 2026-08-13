@@ -284,8 +284,7 @@ pub(crate) fn scan_goals(dir: &Path) -> Vec<Value> {
 }
 
 pub(crate) fn goals_dir() -> PathBuf {
-    let home = crate::home::heiwa_home().unwrap_or_else(|| PathBuf::from("."));
-    home.join(".heiwa").join("state").join("goals")
+    crate::home::heiwa_state_dir().join("goals")
 }
 
 fn has_flag(args: &[String], flag: &str) -> bool {

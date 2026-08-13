@@ -11,7 +11,11 @@ use std::path::Path;
 use std::process::Command;
 
 fn heiwa() -> Command {
-    Command::new(env!("CARGO_BIN_EXE_heiwa"))
+    let mut command = Command::new(env!("CARGO_BIN_EXE_heiwa"));
+    command
+        .env_remove("HEIWA_HOME")
+        .env_remove("HEIWA_STATE_DIR");
+    command
 }
 
 fn stage(home: &Path) -> (String, String) {

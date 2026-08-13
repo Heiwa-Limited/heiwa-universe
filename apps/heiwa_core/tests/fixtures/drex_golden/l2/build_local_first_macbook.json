@@ -1,0 +1,22 @@
+{
+  "schema_version": 1,
+  "layer": "l2_route",
+  "id": "build_local_first_macbook",
+  "description": "Local-first: a small build task on the MacBook with VRAM headroom prefers a local model over cloud.",
+  "status": "active",
+  "registry": "default",
+  "ingress": {
+    "intent": "build",
+    "risk": "low",
+    "privacy": "standard",
+    "runtime": "macbook",
+    "available_vram_mb": 18000,
+    "required_context_tokens": 2000,
+    "raw_text": "add a unit test to the receipt module"
+  },
+  "expect": {
+    "outcome": "routed",
+    "provider_is_local": true,
+    "mode": "local_model"
+  }
+}

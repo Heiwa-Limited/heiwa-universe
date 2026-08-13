@@ -19,48 +19,61 @@ function humanPlatform(platform) {
   return `DNS on ${humanLabel(platform.dns)}, public web on ${humanLabel(platform.public_web)}, and control plane on ${humanLabel(platform.control_plane)}.${state}`;
 }
 
+function textElement(tag, text, className) {
+  const element = document.createElement(tag);
+  if (className) element.className = className;
+  element.textContent = String(text);
+  return element;
+}
+
 function renderDomainCards(domains) {
   const container = document.getElementById("domains-list");
-  container.innerHTML = "";
+  container.replaceChildren();
 
   domains.forEach((domain) => {
     const state = domain.state || "planned";
     const card = document.createElement("article");
     card.className = "panel";
-    card.innerHTML = `
-      <div class="status-card-head">
-        <h2 class="mono">${domain.host}</h2>
-        <span class="status-badge ${stateBadgeClass(state)}">${state}</span>
-      </div>
-      <p>${domain.purpose || "No purpose declared."}</p>
-      <div class="domain-kv">
-        <div><span>Target</span><strong>${domain.target || "-"}</strong></div>
-        <div><span>Health path</span><strong>${domain.health_path || "-"}</strong></div>
-      </div>
-    `;
+    const head = document.createElement("div");
+    head.className = "status-card-head";
+    head.append(
+      textElement("h2", domain.host || "-", "mono"),
+      textElement("span", state, `status-badge ${stateBadgeClass(state)}`)
+    );
+    const values = document.createElement("div");
+    values.className = "domain-kv";
+    for (const [label, value] of [
+      ["Target", domain.target || "-"],
+      ["Health path", domain.health_path || "-"],
+    ]) {
+      const row = document.createElement("div");
+      row.append(textElement("span", label), textElement("strong", value));
+      values.appendChild(row);
+    }
+    card.append(head, textElement("p", domain.purpose || "No purpose declared."), values);
     container.appendChild(card);
   });
 }
 
 function renderDnsRecords(records) {
   const body = document.getElementById("dns-records");
-  body.innerHTML = "";
+  body.replaceChildren();
   records.forEach((record) => {
     const row = document.createElement("tr");
-    row.innerHTML = `
-      <td>${record.type || "-"}</td>
-      <td class="mono">${record.name || "-"}</td>
-      <td class="mono">${record.value || "-"}</td>
-      <td>${String(record.proxy ?? "-")}</td>
-      <td>${record.ttl || "-"}</td>
-    `;
+    row.append(
+      textElement("td", record.type || "-"),
+      textElement("td", record.name || "-", "mono"),
+      textElement("td", record.value || "-", "mono"),
+      textElement("td", record.proxy ?? "-"),
+      textElement("td", record.ttl || "-")
+    );
     body.appendChild(row);
   });
 }
 
 function renderSteps(steps) {
   const list = document.getElementById("bootstrap-steps");
-  list.innerHTML = "";
+  list.replaceChildren();
   steps.forEach((step) => {
     const item = document.createElement("li");
     item.textContent = step;
@@ -93,7 +106,13 @@ async function refreshDomains() {
     renderManifest(manifest);
   } catch (error) {
     const container = document.getElementById("domains-list");
-    container.innerHTML = `<article class="panel"><h2>Manifest unavailable</h2><p class="muted mono">${String(error)}</p></article>`;
+    const card = document.createElement("article");
+    card.className = "panel";
+    card.append(
+      textElement("h2", "Manifest unavailable"),
+      textElement("p", String(error), "muted mono")
+    );
+    container.replaceChildren(card);
   } finally {
     button.disabled = false;
     button.textContent = "Refresh";

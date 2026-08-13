@@ -7,10 +7,10 @@ authors = [{ name = "Heiwa", email = "noreply@heiwa.dev" }]
 license = { text = "Apache-2.0" }
 
 [project.urls]
-Homepage = "https://github.com/Strategizing/heiwa-universe"
-Repository = "https://github.com/Strategizing/heiwa-universe"
-Documentation = "https://strategizing.github.io/heiwa-universe/"
-Issues = "https://github.com/Strategizing/heiwa-universe/issues"
+Homepage = "https://github.com/Heiwa-Limited/heiwa-universe"
+Repository = "https://github.com/Heiwa-Limited/heiwa-universe"
+Documentation = "https://heiwa-limited.github.io/heiwa-universe/"
+Issues = "https://github.com/Heiwa-Limited/heiwa-universe/issues"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

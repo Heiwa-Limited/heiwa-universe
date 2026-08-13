@@ -7,7 +7,7 @@ Plane: Evidence — this workflow keeps repo truth inspectable before Execution 
 ## Non-negotiables
 
 1. **Repo truth first.** Read `HEIWA.md`, `AGENTS.md`, and `docs/local-self-operation.md` before architecture, runtime, promotion, or remote work.
-2. **Local `main` is the integration baseline.** Use temporary worktrees under `.worktrees/` or `.claude/worktrees/` for risky or broad edits; merge back only after real evidence.
+2. **`dev` is the integration branch; `main` is production.** Agents commit on `dev` and local `main` only mirrors `origin/main` (updated via `dev` -> `main` pull requests). Use temporary worktrees under `.worktrees/` or `.claude/worktrees/` for risky or broad edits; merge back to `dev` only after real evidence.
 3. **No remote operations by drift.** `git fetch`, `git pull`, `git push`, `gh run`, `gh release`, `spacetime publish`, `wrangler deploy`, and equivalent network-promotion commands require an explicit assignment for that remote operation.
 4. **Small execution slices.** Every slice must classify as Intake, Execution, Evidence, or out-of-scope. If it cannot be reviewed as one slice, split it.
 5. **Runtime split-brain is a blocker.** Port `7474` is installed product runtime. Checkout verification uses `7475` or another temporary port and the agent stops what it starts.
@@ -24,7 +24,7 @@ bash scripts/check_agent_baseline.sh
 
 The gate is intentionally local-only. It does not fetch, push, call GitHub, or verify remote CI. It checks:
 
-- branch is the expected integration branch (`main` by default)
+- branch is the expected integration branch (`dev` by default; `--branch main` for post-merge checks)
 - cached `origin/main` ref exists and local ahead/behind can be reported
 - tracked tree is clean
 - untracked files are absent except ignored or explicit `vendor/` quarantine entries

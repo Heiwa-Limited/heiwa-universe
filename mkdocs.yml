@@ -1,8 +1,8 @@
 site_name: Heiwa
 site_description: Local-first AI runtime documentation for Heiwa
-site_url: https://strategizing.github.io/heiwa-universe/
-repo_url: https://github.com/Strategizing/heiwa-universe
-repo_name: Strategizing/heiwa-universe
+site_url: https://heiwa-limited.github.io/heiwa-universe/
+repo_url: https://github.com/Heiwa-Limited/heiwa-universe
+repo_name: Heiwa-Limited/heiwa-universe
 
 theme:
   name: material

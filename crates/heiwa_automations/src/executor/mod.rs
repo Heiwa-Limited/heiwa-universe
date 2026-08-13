@@ -7,6 +7,10 @@ use chrono::{Duration, Utc};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use std::fs;
+use std::future::Future;
+
+const EXECUTION_LEASE_TIMEOUT_MINUTES: i64 = 60;
+const MAX_EXECUTION_LEASE_RECOVERIES: u32 = 3;
 
 /// Result of attempting to queue an execution.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -37,7 +41,11 @@ pub enum ExecutionOutcome {
 /// Runtime hook for the actual work. The automation crate owns durable queueing
 /// and evidence; the shell/runtime supplies a runner that routes through DREX.
 pub trait ExecutionRunner: Send + Sync {
-    fn run(&self, automation: &Automation, execution: &Execution) -> Result<ExecutionOutcome>;
+    fn run(
+        &self,
+        automation: &Automation,
+        execution: &Execution,
+    ) -> impl Future<Output = Result<ExecutionOutcome>> + Send;
 }
 
 /// Durable local executor: rate-limit checks, queue creation, status changes,
@@ -111,14 +119,15 @@ impl AutomationExecutor {
     }
 
     pub fn start_execution(&self, execution_id: ExecutionId) -> Result<Execution> {
-        let mut execution = self
-            .store
-            .get_execution(execution_id)?
-            .ok_or_else(|| anyhow!("execution {execution_id} not found"))?;
-        execution.status = ExecutionStatus::Running;
-        execution.started_at = Some(Utc::now());
-        self.store.update_execution(&execution)?;
-        self.write_receipt(&execution, "started", json!({}))?;
+        self.claim_execution(execution_id)?
+            .ok_or_else(|| anyhow!("execution {execution_id} is not pending"))
+    }
+
+    pub fn claim_execution(&self, execution_id: ExecutionId) -> Result<Option<Execution>> {
+        let execution = self.store.claim_pending_execution(execution_id)?;
+        if let Some(execution) = execution.as_ref() {
+            self.write_receipt(execution, "started", json!({}))?;
+        }
         Ok(execution)
     }
 
@@ -163,7 +172,7 @@ impl AutomationExecutor {
     /// Queue and run immediately with a runtime-provided runner. This is used by
     /// command-line/manual execution; daemon schedulers can queue first and let a
     /// worker process drain separately.
-    pub fn run_now<R: ExecutionRunner>(
+    pub async fn run_now<R: ExecutionRunner>(
         &self,
         automation_id: AutomationId,
         trigger_data: TriggerEventData,
@@ -177,18 +186,70 @@ impl AutomationExecutor {
                 queue.reason.unwrap_or_else(|| "unknown".into())
             ));
         };
-        let execution = self.start_execution(execution_id)?;
+        let execution = self
+            .claim_execution(execution_id)?
+            .ok_or_else(|| anyhow!("execution {execution_id} was claimed by another runner"))?;
         let automation = self
             .store
             .get_automation(execution.automation_id)?
             .ok_or_else(|| anyhow!("automation {} not found", execution.automation_id))?;
-        let outcome =
-            runner
+        let outcome = runner
+            .run(&automation, &execution)
+            .await
+            .unwrap_or_else(|err| ExecutionOutcome::Failed {
+                message: format!("{err:#}"),
+            });
+        self.complete_execution(execution_id, outcome)
+    }
+
+    /// Claim and run pending work in creation order.
+    ///
+    /// Claims are atomic in SQLite, so concurrent app/CLI pumps cannot execute
+    /// the same row twice. Execution is sequential in this bounded slice;
+    /// concurrency belongs in runtime policy, not storage.
+    pub async fn run_pending<R: ExecutionRunner>(
+        &self,
+        runner: &R,
+        limit: usize,
+    ) -> Result<Vec<Execution>> {
+        let stale_before = Utc::now() - Duration::minutes(EXECUTION_LEASE_TIMEOUT_MINUTES);
+        for execution in self
+            .store
+            .recover_stale_running_executions(stale_before, MAX_EXECUTION_LEASE_RECOVERIES)?
+        {
+            match execution.status {
+                ExecutionStatus::Pending => self.write_receipt(
+                    &execution,
+                    "requeued",
+                    json!({"reason": "execution_lease_expired"}),
+                )?,
+                ExecutionStatus::Failed => self.write_receipt(
+                    &execution,
+                    "failed",
+                    json!({"reason": "execution_lease_retry_limit_exceeded"}),
+                )?,
+                _ => {}
+            }
+        }
+        let pending = self.store.list_pending_executions(limit)?;
+        let mut completed = Vec::new();
+        for row in pending {
+            let Some(execution) = self.claim_execution(row.id)? else {
+                continue;
+            };
+            let automation = self
+                .store
+                .get_automation(execution.automation_id)?
+                .ok_or_else(|| anyhow!("automation {} not found", execution.automation_id))?;
+            let outcome = runner
                 .run(&automation, &execution)
+                .await
                 .unwrap_or_else(|err| ExecutionOutcome::Failed {
                     message: format!("{err:#}"),
                 });
-        self.complete_execution(execution_id, outcome)
+            completed.push(self.complete_execution(execution.id, outcome)?);
+        }
+        Ok(completed)
     }
 
     fn within_rate_limits(&self, automation: &Automation) -> Result<bool> {
@@ -243,7 +304,11 @@ mod tests {
 
     struct EchoRunner;
     impl ExecutionRunner for EchoRunner {
-        fn run(&self, automation: &Automation, _execution: &Execution) -> Result<ExecutionOutcome> {
+        async fn run(
+            &self,
+            automation: &Automation,
+            _execution: &Execution,
+        ) -> Result<ExecutionOutcome> {
             Ok(ExecutionOutcome::Completed {
                 summary: format!("ran {}", automation.name),
                 output: None,
@@ -251,8 +316,8 @@ mod tests {
         }
     }
 
-    #[test]
-    fn executor_queues_runs_and_writes_receipts() {
+    #[tokio::test]
+    async fn executor_queues_runs_and_writes_receipts() {
         let tmp = tempfile::tempdir().unwrap();
         let store = AutomationStore::open_state_dir(tmp.path()).unwrap();
         let automation = Automation::new("heartbeat".into(), "check status".into()).activate();
@@ -269,6 +334,7 @@ mod tests {
                 },
                 &EchoRunner,
             )
+            .await
             .unwrap();
 
         assert_eq!(execution.status, ExecutionStatus::Completed);
@@ -279,6 +345,131 @@ mod tests {
                 execution.id
             ))
             .exists());
+    }
+
+    #[tokio::test]
+    async fn pending_executions_are_drained_through_async_runner() {
+        let tmp = tempfile::tempdir().unwrap();
+        let store = AutomationStore::open_state_dir(tmp.path()).unwrap();
+        let automation = Automation::new("brief".into(), "summarize".into()).activate();
+        store.upsert_automation(&automation).unwrap();
+        let executor = AutomationExecutor::new(store.clone());
+        executor
+            .queue_execution(
+                automation.id,
+                TriggerEventData::External {
+                    timestamp: Utc::now(),
+                    source: crate::types::ExternalSource::Api,
+                    metadata: None,
+                },
+            )
+            .unwrap();
+
+        let completed = executor.run_pending(&EchoRunner, 10).await.unwrap();
+
+        assert_eq!(completed.len(), 1);
+        assert_eq!(completed[0].status, ExecutionStatus::Completed);
+    }
+
+    #[tokio::test]
+    async fn stale_running_execution_is_requeued_and_completed() {
+        let tmp = tempfile::tempdir().unwrap();
+        let store = AutomationStore::open_state_dir(tmp.path()).unwrap();
+        let automation = Automation::new("recovery".into(), "resume work".into()).activate();
+        store.upsert_automation(&automation).unwrap();
+        let executor = AutomationExecutor::new(store.clone());
+        let queued = executor
+            .queue_execution(
+                automation.id,
+                TriggerEventData::External {
+                    timestamp: Utc::now(),
+                    source: crate::types::ExternalSource::Api,
+                    metadata: None,
+                },
+            )
+            .unwrap();
+        let execution_id = queued.execution_id.unwrap();
+        let mut claimed = executor.claim_execution(execution_id).unwrap().unwrap();
+        claimed.started_at = Some(Utc::now() - Duration::hours(2));
+        store.update_execution(&claimed).unwrap();
+
+        let completed = executor.run_pending(&EchoRunner, 10).await.unwrap();
+
+        assert_eq!(completed.len(), 1);
+        assert_eq!(completed[0].status, ExecutionStatus::Completed);
+        assert_eq!(completed[0].retry_count, 1);
+        assert!(tmp
+            .path()
+            .join(format!(
+                "automations/receipts/rcpt-{}-requeued.json",
+                execution_id
+            ))
+            .exists());
+    }
+
+    #[tokio::test]
+    async fn expired_execution_is_failed_after_recovery_limit() {
+        let tmp = tempfile::tempdir().unwrap();
+        let store = AutomationStore::open_state_dir(tmp.path()).unwrap();
+        let automation = Automation::new("bounded".into(), "do not loop forever".into()).activate();
+        store.upsert_automation(&automation).unwrap();
+        let executor = AutomationExecutor::new(store.clone());
+        let queued = executor
+            .queue_execution(
+                automation.id,
+                TriggerEventData::External {
+                    timestamp: Utc::now(),
+                    source: crate::types::ExternalSource::Api,
+                    metadata: None,
+                },
+            )
+            .unwrap();
+        let execution_id = queued.execution_id.unwrap();
+        let mut claimed = executor.claim_execution(execution_id).unwrap().unwrap();
+        claimed.started_at = Some(Utc::now() - Duration::hours(2));
+        claimed.retry_count = 3;
+        store.update_execution(&claimed).unwrap();
+
+        let completed = executor.run_pending(&EchoRunner, 10).await.unwrap();
+        let recovered = store.get_execution(execution_id).unwrap().unwrap();
+
+        assert!(completed.is_empty());
+        assert_eq!(recovered.status, ExecutionStatus::Failed);
+        assert_eq!(
+            recovered.error_message.as_deref(),
+            Some("execution_lease_retry_limit_exceeded")
+        );
+        assert!(recovered.completed_at.is_some());
+        assert!(tmp
+            .path()
+            .join(format!(
+                "automations/receipts/rcpt-{}-failed.json",
+                execution_id
+            ))
+            .exists());
+    }
+
+    #[test]
+    fn pending_execution_can_only_be_claimed_once() {
+        let tmp = tempfile::tempdir().unwrap();
+        let store = AutomationStore::open_state_dir(tmp.path()).unwrap();
+        let automation = Automation::new("single".into(), "once".into()).activate();
+        store.upsert_automation(&automation).unwrap();
+        let executor = AutomationExecutor::new(store);
+        let queued = executor
+            .queue_execution(
+                automation.id,
+                TriggerEventData::External {
+                    timestamp: Utc::now(),
+                    source: crate::types::ExternalSource::Api,
+                    metadata: None,
+                },
+            )
+            .unwrap();
+        let execution_id = queued.execution_id.unwrap();
+
+        assert!(executor.claim_execution(execution_id).unwrap().is_some());
+        assert!(executor.claim_execution(execution_id).unwrap().is_none());
     }
 
     #[test]

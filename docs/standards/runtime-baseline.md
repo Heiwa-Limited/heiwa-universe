@@ -11,15 +11,15 @@ The deploy baseline is pinned and conservative. The operator baseline can move f
 
 These versions are the canonical floor for `heiwa-universe`:
 
-| Surface             | Baseline                                             | Reason                                                                               |
-| ------------------- | ---------------------------------------------------- | ------------------------------------------------------------------------------------ |
-| Rust                | `1.93.1`                                             | Required by `heiwa-core` and the local evidence/Lance crates.                        |
-| Docker rust-builder | `rust:1.93-slim`                                     | Matches the workspace toolchain floor used in CI and optional remote-support builds. |
-| Node                | `24.14.1`                                            | Stable LTS lane for TypeScript workspace and deploy tooling.                         |
-| npm                 | bundled with Node 24                                 | Repo installs should follow the pinned Node lane.                                    |
-| Python              | `3.14.x`                                             | Current repo pytest/docs/runtime compatibility lane.                                 |
-| Machine auth        | `HEIWA_MACHINE_AUTH_TOKEN`                           | Canonical worker and operator machine auth boundary.                                 |
-| Session auth        | `HEIWA_JWT_SIGNING_SECRET`                           | Canonical user session signing boundary.                                             |
+| Surface             | Baseline                   | Reason                                                                               |
+| ------------------- | -------------------------- | ------------------------------------------------------------------------------------ |
+| Rust                | `1.95.0`                   | Pinned by `rust-toolchain.toml`, CI, and the Rust builder image.                      |
+| Docker rust-builder | `rust:1.95-slim`           | Matches the workspace toolchain used in CI and optional remote-support builds.        |
+| Node                | `26.0.0`                   | Pinned by `.nvmrc` and `.node-version` for TypeScript and deploy tooling.             |
+| npm                 | bundled with Node 26       | Repo installs follow the pinned Node lane and root npm workspaces.                    |
+| Python              | `3.14.x`                   | Current repo pytest/docs/runtime compatibility lane.                                 |
+| Machine auth        | `HEIWA_MACHINE_AUTH_TOKEN` | Canonical worker and operator machine auth boundary.                                 |
+| Session auth        | `HEIWA_JWT_SIGNING_SECRET` | Canonical user session signing boundary.                                             |
 
 ### Non-negotiables
 
@@ -36,7 +36,7 @@ Devon's machine is the operator and boost-node plane. It needs a wider tool surf
 
 - `git`
 - `rustup`, `rustc`, `cargo`
-- Node `24.x` available for repo work
+- Node `26.x` active for repo work
 - `python3` `3.14.x`
 - `uv`
 - `gh`
@@ -50,7 +50,7 @@ Devon's machine is the operator and boost-node plane. It needs a wider tool surf
 
 ### Recommended practice
 
-- Keep a repo-compatible Node 24 toolchain available even if newer Node versions are installed globally.
+- Keep Node 26 active for repo work; provider-owned runtimes such as Hermes may keep private Node versions under their own state roots.
 - Use repo-local npm dependencies for TypeScript (`npm install` in the repo), not global `tsc`.
 - Treat `brew upgrade` as a staged operator action, not a blanket cron job.
 - Upgrade one package-manager lane at a time: Homebrew formulae, Rust toolchain, Node toolchain, Python/uv dependencies.

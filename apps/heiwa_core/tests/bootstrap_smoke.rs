@@ -20,6 +20,7 @@ fn runtime_config_reads_expected_defaults() {
         "MODEL_TIERS_SEED_PATH",
         "AI_ROUTER_SEED_PATH",
         "LOG_LEVEL",
+        "HEIWA_HOME",
     ];
     let saved: Vec<(String, Option<String>)> = vars
         .iter()
@@ -28,6 +29,8 @@ fn runtime_config_reads_expected_defaults() {
     for key in vars {
         unsafe { std::env::remove_var(key) };
     }
+    let isolated_heiwa_home = tempfile::tempdir().expect("isolated Heiwa home");
+    unsafe { std::env::set_var("HEIWA_HOME", isolated_heiwa_home.path()) };
 
     let cfg = RuntimeConfig::from_env();
 

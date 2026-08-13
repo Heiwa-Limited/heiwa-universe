@@ -934,10 +934,7 @@ fn flag_value(args: &[String], flag: &str) -> Option<String> {
 }
 
 fn headers_snapshot_path() -> PathBuf {
-    crate::home::heiwa_home()
-        .unwrap_or_else(|| PathBuf::from("."))
-        .join(".heiwa")
-        .join("state")
+    crate::home::heiwa_state_dir()
         .join("mail")
         .join("headers.jsonl")
 }

@@ -167,23 +167,7 @@ class Settings:
 
     @property
     def HEIWA_STATE_BACKEND(self):
-        default = "spacetimedb" if self.IS_PROD else "compatibility_sqlite"
-        return get_env("HEIWA_STATE_BACKEND", default=default, required=False)
-
-    @property
-    def STDB_IDENTITY(self):
-        # On local server, always use the module name to avoid stale hash overrides.
-        if self.STDB_SERVER == "local":
-            return "heiwaproductiondb"
-        return get_env("STDB_IDENTITY", default="heiwaproductiondb", required=False)
-
-    @property
-    def STDB_SERVER(self):
-        return get_env("STDB_SERVER", default="maincloud", required=False)
-
-    @property
-    def STDB_TOKEN(self):
-        return get_env("STDB_TOKEN", default=get_env("SPACETIMEDB_TOKEN", required=False), required=False)
+        return get_env("HEIWA_STATE_BACKEND", default="local-jsonl", required=False)
 
     # --- DISCORD ---
     @property

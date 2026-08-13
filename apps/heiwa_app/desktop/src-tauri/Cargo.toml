@@ -5,7 +5,7 @@ description = "Heiwa native desktop shell"
 authors = ["Heiwa Limited"]
 license = "Apache-2.0"
 edition = "2021"
-repository = "https://github.com/Strategizing/heiwa-universe"
+repository = "https://github.com/Heiwa-Limited/heiwa-universe"
 
 [lib]
 name = "heiwa_desktop_lib"

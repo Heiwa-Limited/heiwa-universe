@@ -106,7 +106,13 @@ impl QuotaLedger {
 
     pub fn default_path() -> PathBuf {
         let base = std::env::var_os("HEIWA_STATE_DIR")
+            .filter(|value| !value.is_empty())
             .map(PathBuf::from)
+            .or_else(|| {
+                std::env::var_os("HEIWA_HOME")
+                    .filter(|value| !value.is_empty())
+                    .map(PathBuf::from)
+            })
             .or_else(|| dirs_home().map(|h| h.join(".heiwa")))
             .unwrap_or_else(|| PathBuf::from(".heiwa"));
         base.join("state.db")

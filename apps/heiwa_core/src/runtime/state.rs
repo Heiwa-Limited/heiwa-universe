@@ -97,6 +97,26 @@ pub struct WorkerSessionRegistration {
 }
 
 #[derive(Debug, Clone, PartialEq)]
+pub struct WorkerHeartbeatUpdate<'a> {
+    pub session_id: &'a str,
+    pub now_ms: u64,
+    pub status: String,
+    pub active_tasks: u32,
+    pub load: f64,
+    pub capabilities: Option<Vec<String>>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct WorkerDispatchAck<'a> {
+    pub session_id: &'a str,
+    pub task_id: &'a str,
+    pub lease_id: &'a str,
+    pub accepted: bool,
+    pub detail: Option<String>,
+    pub now_ms: u64,
+}
+
+#[derive(Debug, Clone, PartialEq)]
 pub struct WorkerLeaseRecord {
     pub lease_id: String,
     pub task_id: String,
@@ -251,31 +271,26 @@ impl WorkerRegistry {
     pub fn update_heartbeat<T: EvidenceTransport>(
         &mut self,
         evidence: &EvidenceRuntime<T>,
-        session_id: &str,
-        now_ms: u64,
-        status: String,
-        active_tasks: u32,
-        load: f64,
-        capabilities: Option<Vec<String>>,
+        update: WorkerHeartbeatUpdate<'_>,
     ) -> Result<WorkerSessionRecord, RegistryError> {
         let session = self
             .sessions
-            .get_mut(session_id)
+            .get_mut(update.session_id)
             .ok_or_else(|| RegistryError {
                 code: RegistryErrorCode::TaskNotFound,
-                message: format!("worker session not found: {session_id}"),
+                message: format!("worker session not found: {}", update.session_id),
             })?;
-        if session.session_expires_at_ms <= now_ms {
+        if session.session_expires_at_ms <= update.now_ms {
             return Err(RegistryError {
                 code: RegistryErrorCode::SessionExpired,
-                message: format!("worker session expired: {session_id}"),
+                message: format!("worker session expired: {}", update.session_id),
             });
         }
-        session.last_seen_at_ms = now_ms;
-        session.status = status;
-        session.active_tasks = active_tasks;
-        session.load = load;
-        if let Some(capabilities) = capabilities {
+        session.last_seen_at_ms = update.now_ms;
+        session.status = update.status;
+        session.active_tasks = update.active_tasks;
+        session.load = update.load;
+        if let Some(capabilities) = update.capabilities {
             session.capabilities = capabilities;
         }
         let persisted = session.clone();
@@ -344,70 +359,70 @@ impl WorkerRegistry {
     pub fn record_dispatch_ack<T: EvidenceTransport>(
         &mut self,
         evidence: &EvidenceRuntime<T>,
-        session_id: &str,
-        task_id: &str,
-        lease_id: &str,
-        accepted: bool,
-        detail: Option<String>,
-        now_ms: u64,
+        ack_update: WorkerDispatchAck<'_>,
     ) -> Result<WorkerLeaseRecord, RegistryError> {
-        let _lease = self.validate_lease(session_id, task_id, lease_id, now_ms)?;
+        let _lease = self.validate_lease(
+            ack_update.session_id,
+            ack_update.task_id,
+            ack_update.lease_id,
+            ack_update.now_ms,
+        )?;
         let stored = self
             .task_leases
-            .get_mut(lease_id)
+            .get_mut(ack_update.lease_id)
             .expect("validated lease should exist");
-        stored.accepted = Some(accepted);
-        stored.reason = detail.clone();
+        stored.accepted = Some(ack_update.accepted);
+        stored.reason = ack_update.detail.clone();
         let ack = PersistedDispatchAck {
-            ack_id: format!("ack:{lease_id}:{now_ms}"),
+            ack_id: format!("ack:{}:{}", ack_update.lease_id, ack_update.now_ms),
             lease_id: stored.lease_id.clone(),
             session_id: stored.session_id.clone(),
             task_id: stored.task_id.clone(),
             node_id: stored.node_id.clone(),
-            status: if accepted {
+            status: if ack_update.accepted {
                 "accepted".to_string()
             } else {
                 "rejected".to_string()
             },
-            decided_at: iso_from_ms(now_ms),
-            detail: detail.clone(),
+            decided_at: iso_from_ms(ack_update.now_ms),
+            detail: ack_update.detail.clone(),
         };
-        if !accepted {
+        if !ack_update.accepted {
             stored.status = "failed".to_string();
-            stored.completed_at_ms = Some(now_ms);
+            stored.completed_at_ms = Some(ack_update.now_ms);
             stored.failure_code = Some("DISPATCH_REJECTED".to_string());
             let rejected = stored.clone();
             let _ = evidence
                 .transport
                 .upsert_worker_lease(rejected.to_persisted());
             let _ = evidence.transport.record_dispatch_ack(ack);
-            if let Some(session) = self.sessions.get_mut(session_id) {
+            if let Some(session) = self.sessions.get_mut(ack_update.session_id) {
                 session.active_tasks = session.active_tasks.saturating_sub(1);
                 session.status = "idle".to_string();
                 session.load = 0.0;
-                session.last_seen_at_ms = now_ms;
+                session.last_seen_at_ms = ack_update.now_ms;
                 session.current_task_id = None;
                 session.lease_id = None;
                 let _ = evidence
                     .transport
                     .upsert_worker_session(session.clone().to_persisted());
             }
-            self.task_index.remove(task_id);
-            self.task_leases.remove(lease_id);
+            self.task_index.remove(ack_update.task_id);
+            self.task_leases.remove(ack_update.lease_id);
             return Err(RegistryError {
                 code: RegistryErrorCode::DispatchRejected,
-                message: format!("dispatch rejected for task {task_id}"),
+                message: format!("dispatch rejected for task {}", ack_update.task_id),
             });
         }
         stored.status = "acked".to_string();
-        stored.acked_at_ms = Some(now_ms);
+        stored.acked_at_ms = Some(ack_update.now_ms);
         let accepted_record = stored.clone();
         let _ = evidence
             .transport
             .upsert_worker_lease(accepted_record.to_persisted());
         let _ = evidence.transport.record_dispatch_ack(ack);
-        if let Some(session) = self.sessions.get_mut(session_id) {
-            session.last_seen_at_ms = now_ms;
+        if let Some(session) = self.sessions.get_mut(ack_update.session_id) {
+            session.last_seen_at_ms = ack_update.now_ms;
             let _ = evidence
                 .transport
                 .upsert_worker_session(session.clone().to_persisted());

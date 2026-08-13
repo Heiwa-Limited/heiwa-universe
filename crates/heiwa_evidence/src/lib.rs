@@ -60,17 +60,27 @@ pub const EVIDENCE_SCHEMA_VERSION: u32 = 1;
 /// Canonical journal root: `HEIWA_EVIDENCE_DIR` override, else
 /// `~/.heiwa/evidence/`.
 pub fn journal_root() -> Result<PathBuf> {
-    if let Some(dir) = std::env::var_os("HEIWA_EVIDENCE_DIR") {
+    if let Some(dir) = std::env::var_os("HEIWA_EVIDENCE_DIR").filter(|value| !value.is_empty()) {
         return Ok(PathBuf::from(dir));
     }
-    Ok(home_dir()?.join(".heiwa").join("evidence"))
+    Ok(runtime_root()?.join("evidence"))
 }
 
 /// Root of the redacted receipts plane: `~/.heiwa/state/evidence/`. Kept
 /// where the installed runtime already writes it; readers should resolve it
 /// through this function rather than joining paths by hand.
 pub fn receipts_root() -> Result<PathBuf> {
-    Ok(home_dir()?.join(".heiwa").join("state").join("evidence"))
+    if let Some(dir) = std::env::var_os("HEIWA_STATE_DIR").filter(|value| !value.is_empty()) {
+        return Ok(PathBuf::from(dir).join("evidence"));
+    }
+    Ok(runtime_root()?.join("state").join("evidence"))
+}
+
+fn runtime_root() -> Result<PathBuf> {
+    if let Some(root) = std::env::var_os("HEIWA_HOME").filter(|value| !value.is_empty()) {
+        return Ok(PathBuf::from(root));
+    }
+    Ok(home_dir()?.join(".heiwa"))
 }
 
 fn home_dir() -> Result<PathBuf> {

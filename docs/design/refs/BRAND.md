@@ -14,7 +14,7 @@ Use it when writing:
 - docs intros and release copy
 - future designer or Claude Design handoffs
 
-If marketing copy conflicts with [`HEIWA.md`](/Users/dmcgregsauce/heiwa-universe/HEIWA.md), `HEIWA.md` wins.
+If marketing copy conflicts with [`HEIWA.md`](../../../HEIWA.md), `HEIWA.md` wins.
 
 ## One-Line Product Truth
 

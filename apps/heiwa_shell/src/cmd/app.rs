@@ -25,9 +25,9 @@ const WS_GUID: &str = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11";
 const BROWSER_BOOTSTRAP_TTL_SECONDS: i64 = 60;
 const BROWSER_SESSION_TTL_SECONDS: i64 = 8 * 60 * 60;
 const BROWSER_SESSION_COOKIE_PREFIX: &str = "heiwa_local_operator_";
-const GITHUB_RELEASES_URL: &str = "https://github.com/Strategizing/heiwa-universe/releases";
+const GITHUB_RELEASES_URL: &str = "https://github.com/Heiwa-Limited/heiwa-universe/releases";
 const GITHUB_LATEST_RELEASE_API: &str =
-    "https://api.github.com/repos/Strategizing/heiwa-universe/releases/latest";
+    "https://api.github.com/repos/Heiwa-Limited/heiwa-universe/releases/latest";
 
 #[derive(Debug, Clone, Serialize)]
 pub(crate) struct LocalAppProbe {
@@ -214,9 +214,32 @@ fn update_from_checkout(dry_run: bool, json_output: bool) -> Result<()> {
     if !status.success() {
         return Err(anyhow!("cargo install failed with status {status}"));
     }
+
+    let desktop_bundle = plan
+        .get("desktop_bundle_source")
+        .ok_or_else(|| anyhow!("desktop bundle source missing from update plan"))?;
+    let desktop_bundle_present = desktop_bundle
+        .get("present")
+        .and_then(Value::as_bool)
+        .unwrap_or(false);
+    if desktop_bundle_present {
+        let desktop_bundle_path = desktop_bundle
+            .get("path")
+            .and_then(Value::as_str)
+            .ok_or_else(|| anyhow!("desktop bundle path missing from update plan"))?;
+        heiwa_install::install_desktop_app_bundle(&install_root, Path::new(desktop_bundle_path))?;
+    }
     let receipt_path = write_promotion_receipt(&plan)?;
     if !json_output {
         println!("  status: updated");
+        println!(
+            "  app_bundle: {}",
+            if desktop_bundle_present {
+                "updated"
+            } else {
+                "not built; CLI only"
+            }
+        );
         println!("  promotion_receipt: {}", receipt_path.display());
     }
     Ok(())
@@ -287,10 +310,7 @@ fn checkout_update_plan(
         "installed_app": installed_app.display().to_string(),
         "installed_app_present": installed_app.join("Contents").join("MacOS").join("Heiwa").is_file(),
         "desktop_bundle_source": desktop_bundle,
-        "app_bundle_update": {
-            "wired": false,
-            "blocker": "checkout update currently installs ~/.heiwa/bin/heiwa only; Heiwa.app bundle promotion is still handled by install/app-bundle logic and needs explicit update wiring plus receipt",
-        },
+        "app_bundle_update": app_bundle_update_plan(&desktop_bundle, dry_run),
         "install_command": install_command,
         "restart_policy": "prompt-before-restart",
         "restart_required": true,
@@ -323,6 +343,25 @@ fn desktop_bundle_source(repo_root: &Path) -> Value {
         "path": bundle.display().to_string(),
         "present": executable.is_file(),
         "executable": executable.display().to_string(),
+    })
+}
+
+fn app_bundle_update_plan(desktop_bundle: &Value, dry_run: bool) -> Value {
+    let source_present = desktop_bundle
+        .get("present")
+        .and_then(Value::as_bool)
+        .unwrap_or(false);
+    json!({
+        "wired": true,
+        "status": if source_present { "ready" } else { "not_built" },
+        "source_present": source_present,
+        "would_install": source_present,
+        "will_install": source_present && !dry_run,
+        "blocker": if source_present {
+            Value::Null
+        } else {
+            json!("build target/release/bundle/macos/Heiwa.app before checkout promotion to update the desktop surface")
+        },
     })
 }
 
@@ -365,6 +404,8 @@ fn promotion_receipt_plan(
             "installed_version_before": installed_version,
             "installed_app": installed_app.display().to_string(),
             "desktop_bundle_source": desktop_bundle,
+            "desktop_bundle_would_install": desktop_bundle.get("present").and_then(Value::as_bool).unwrap_or(false),
+            "desktop_bundle_installed": !dry_run && desktop_bundle.get("present").and_then(Value::as_bool).unwrap_or(false),
         },
         "codesign": codesign_probe(desktop_bundle),
         "runtime_probes": runtime_probe_contracts(),
@@ -769,7 +810,9 @@ async fn start(args: &[String]) -> Result<()> {
     let _operator_runtime_lease =
         heiwa_session::operator::OperatorAppRuntimeLease::acquire(evidence_root)
             .map_err(|error| anyhow!(error))?;
-    let (_, sessions, _) = crate::default_model_call_runtime().map_err(anyhow::Error::msg)?;
+    let sessions = crate::default_model_call_runtime()
+        .map_err(anyhow::Error::msg)?
+        .sessions;
     sessions
         .recover_interrupted()
         .map_err(|error| anyhow!("operator restart recovery failed: {error}"))?;
@@ -778,10 +821,11 @@ async fn start(args: &[String]) -> Result<()> {
     let mut caffeinate = spawn_caffeinate();
     let (shutdown_tx, shutdown_rx) = watch::channel(false);
     tokio::spawn(heartbeat_loop(
-        runtime_state_dir,
+        runtime_state_dir.clone(),
         worker_id.clone(),
-        shutdown_rx,
+        shutdown_rx.clone(),
     ));
+    tokio::spawn(automation_loop(runtime_state_dir, shutdown_rx));
 
     if !no_open {
         let config = heiwa_core::config::RuntimeConfig::from_env();
@@ -857,6 +901,28 @@ async fn heartbeat_loop(
         tokio::select! {
             _ = ticker.tick() => {
                 let _ = write_app_heartbeat(&runtime_state_dir, &worker_id);
+            }
+            changed = shutdown.changed() => {
+                if changed.is_err() || *shutdown.borrow() {
+                    break;
+                }
+            }
+        }
+    }
+}
+
+async fn automation_loop(runtime_state_dir: PathBuf, mut shutdown: watch::Receiver<bool>) {
+    let mut ticker = time::interval(Duration::from_secs(60));
+    ticker.set_missed_tick_behavior(time::MissedTickBehavior::Skip);
+    loop {
+        tokio::select! {
+            _ = ticker.tick() => {
+                if let Err(error) = crate::cmd::auto::tick_and_execute_state_dir(
+                    &runtime_state_dir,
+                    chrono::Utc::now(),
+                ).await {
+                    eprintln!("heiwa automation tick error: {error:#}");
+                }
             }
             changed = shutdown.changed() => {
                 if changed.is_err() || *shutdown.borrow() {
@@ -1391,7 +1457,14 @@ async fn handle_connection(
         .await;
     }
 
-    if let Some(payload) = api_payload_for_port(path, &started_at, local_port) {
+    let payload_path = path.to_string();
+    let payload_started_at = started_at.as_str().to_string();
+    let payload = tokio::task::spawn_blocking(move || {
+        api_payload_for_port(&payload_path, &payload_started_at, local_port)
+    })
+    .await
+    .map_err(|error| anyhow!("local app payload task failed: {error}"))?;
+    if let Some(payload) = payload {
         return write_response(
             &mut stream,
             200,
@@ -1694,10 +1767,12 @@ async fn operator_http_response(
         Ok(None) => return operator_error(404, "not_found"),
         Err(()) => return operator_error(400, "invalid_id"),
     };
-    let (_, sessions, runner) = match crate::default_model_call_runtime() {
+    let runtime = match crate::default_model_call_runtime() {
         Ok(runtime) => runtime,
         Err(_) => return operator_error(503, "operator_unavailable"),
     };
+    let sessions = runtime.sessions;
+    let runner = runtime.runner;
 
     match (method, route) {
         ("GET", OperatorHttpRoute::Threads) => match sessions.list_threads(100) {
@@ -2152,7 +2227,7 @@ async fn handle_websocket(
                 return Ok(());
             }
         };
-        let (_, sessions, runner) = match crate::default_model_call_runtime() {
+        let runtime = match crate::default_model_call_runtime() {
             Ok(runtime) => runtime,
             Err(_) => {
                 let payload = json!({"type":"error","code":"operator_unavailable"});
@@ -2160,6 +2235,8 @@ async fn handle_websocket(
                 return Ok(());
             }
         };
+        let sessions = runtime.sessions;
+        let runner = runtime.runner;
         return operator_events_loop(
             stream,
             sessions,
@@ -2642,12 +2719,7 @@ fn scan_goals_fingerprint() -> HashSet<(String, u64)> {
 }
 
 fn scan_dispatch_ids(subdir: &str) -> HashSet<String> {
-    let home = crate::home::heiwa_home().unwrap_or_else(|| PathBuf::from("."));
-    let dir = home
-        .join(".heiwa")
-        .join("state")
-        .join("dispatch")
-        .join(subdir);
+    let dir = crate::home::heiwa_state_dir().join("dispatch").join(subdir);
     scan_dispatch_ids_in(&dir)
 }
 
@@ -2900,6 +2972,7 @@ fn api_payload_for_port(path: &str, started_at: &str, app_port: u16) -> Option<V
         "/api/v1/approvals/summary" => crate::cmd::approvals::pending_approvals_summary_payload(),
         "/api/v1/life/today" => crate::cmd::life::today_payload(),
         "/api/v1/life/freshness" => crate::cmd::life::freshness_payload(),
+        "/api/v1/life/social" => crate::cmd::life::social_payload(),
         "/api/v1/calendar/summary" => crate::cmd::calendar::summary_payload(),
         "/api/v1/mail/summary" => crate::cmd::mail::summary_payload(),
         "/api/v1/automations" => crate::cmd::auto::automations_payload(),
@@ -4216,20 +4289,21 @@ fn ollama_models_for_endpoint(
 
 fn hook_provider_rows() -> Vec<Value> {
     let home = crate::home::heiwa_home().unwrap_or_else(|| PathBuf::from("."));
+    let runtime_root = crate::home::heiwa_runtime_dir();
     vec![
         json_hook_provider_row(
             "claude",
             "Claude Code",
             &home.join(".claude").join("settings.json"),
             Some(
-                home.join(".heiwa")
+                runtime_root
                     .join("generated")
                     .join("claude")
                     .join("settings.json"),
             ),
             &["PreToolUse", "UserPromptSubmit"],
             Some(
-                home.join(".heiwa")
+                runtime_root
                     .join("logs")
                     .join("policy")
                     .join("claude-runtime-safety.jsonl"),
@@ -4245,14 +4319,14 @@ fn hook_provider_rows() -> Vec<Value> {
             "Gemini CLI",
             &home.join(".gemini").join("settings.json"),
             Some(
-                home.join(".heiwa")
+                runtime_root
                     .join("generated")
                     .join("gemini")
                     .join("settings.json"),
             ),
             &["BeforeTool", "SessionStart"],
             Some(
-                home.join(".heiwa")
+                runtime_root
                     .join("logs")
                     .join("policy")
                     .join("gemini-runtime-policy.jsonl"),
@@ -4269,7 +4343,7 @@ fn hook_provider_rows() -> Vec<Value> {
             "display_name": "Antigravity",
             "status": "delegated",
             "config_path": home.join(".gemini").join("antigravity").display().to_string(),
-            "generated_config_status": generated_file_status(&home.join(".heiwa").join("generated").join("antigravity").join("settings.json")),
+            "generated_config_status": generated_file_status(&runtime_root.join("generated").join("antigravity").join("settings.json")),
             "audit_file": Value::Null,
             "events": [],
             "notes": [
@@ -4330,12 +4404,13 @@ fn json_hook_provider_row(
 
 fn codex_hook_provider_row(home: &Path) -> Value {
     let config_path = home.join(".codex").join("config.toml");
+    let runtime_root = crate::home::heiwa_runtime_dir();
     json!({
         "provider_id": "codex",
         "display_name": "Codex",
         "status": "unsupported",
         "config_path": config_path.display().to_string(),
-        "generated_config_status": generated_file_status(&home.join(".heiwa").join("generated").join("codex").join("config.toml")),
+        "generated_config_status": generated_file_status(&runtime_root.join("generated").join("codex").join("config.toml")),
         "audit_file": Value::Null,
         "events": [],
         "notes": [
@@ -4495,6 +4570,20 @@ fn generated_file_status(path: &Path) -> String {
     }
 }
 
+fn worker_entry_is_live(entry: &Value, now: i64) -> bool {
+    let last = entry
+        .get("last_heartbeat_utc")
+        .and_then(Value::as_str)
+        .and_then(|value| chrono::DateTime::parse_from_rfc3339(value).ok())
+        .map(|timestamp| timestamp.timestamp())
+        .unwrap_or(0);
+    let ttl = entry
+        .get("ttl_seconds")
+        .and_then(Value::as_i64)
+        .unwrap_or(HEARTBEAT_TTL_SECS);
+    (now - last) <= ttl
+}
+
 fn write_app_heartbeat(runtime_state_dir: &Path, worker_id: &str) -> Result<()> {
     let path = runtime_state_dir.join("workers.json");
     if let Some(parent) = path.parent() {
@@ -4504,11 +4593,12 @@ fn write_app_heartbeat(runtime_state_dir: &Path, worker_id: &str) -> Result<()> 
         .ok()
         .and_then(|raw| serde_json::from_str::<Value>(&raw).ok())
         .unwrap_or_else(|| json!({"workers": []}));
+    let now = chrono::Utc::now();
     let entry = json!({
         "worker_id": worker_id,
         "class": "shell_machine",
         "node": hostname_string(),
-        "last_heartbeat_utc": chrono::Utc::now().to_rfc3339(),
+        "last_heartbeat_utc": now.to_rfc3339(),
         "ttl_seconds": HEARTBEAT_TTL_SECS,
         "transport": "localhost-http-websocket",
     });
@@ -4518,6 +4608,7 @@ fn write_app_heartbeat(runtime_state_dir: &Path, worker_id: &str) -> Result<()> 
             .as_array_mut()
     });
     if let Some(arr) = arr {
+        arr.retain(|worker| worker_entry_is_live(worker, now.timestamp()));
         if let Some(idx) = arr
             .iter()
             .position(|worker| worker.get("worker_id").and_then(Value::as_str) == Some(worker_id))
@@ -4599,17 +4690,7 @@ fn workers_summary(state_dir: &Path) -> Value {
     let mut live = 0i64;
     let mut stale = 0i64;
     for entry in &entries {
-        let last = entry
-            .get("last_heartbeat_utc")
-            .and_then(Value::as_str)
-            .and_then(|s| chrono::DateTime::parse_from_rfc3339(s).ok())
-            .map(|dt| dt.timestamp())
-            .unwrap_or(0);
-        let ttl = entry
-            .get("ttl_seconds")
-            .and_then(Value::as_i64)
-            .unwrap_or(HEARTBEAT_TTL_SECS);
-        if (now - last) <= ttl {
+        if worker_entry_is_live(entry, now) {
             live += 1;
         } else {
             stale += 1;
@@ -4629,7 +4710,8 @@ fn approvals_summary(state_dir: &Path) -> Value {
         .join("dispatch")
         .join("approvals")
         .join("decisions");
-    let pending = count_json(&requests);
+    let pending =
+        crate::cmd::approvals::scan_pending_requests_in(&requests, &decisions).len() as i64;
     let decided = count_json(&decisions);
     json!({
         "requests_dir": requests.display().to_string(),
@@ -4672,13 +4754,41 @@ fn cockpit_static_root() -> PathBuf {
         .and_then(Path::parent)
         .map(Path::to_path_buf)
         .unwrap_or_else(|| env::current_dir().unwrap_or_else(|_| PathBuf::from(".")));
+    let override_root = env::var_os("HEIWA_COCKPIT_DIR").map(PathBuf::from);
+    let portable_root = env::current_exe()
+        .ok()
+        .and_then(|executable| executable.parent().map(|parent| parent.join("cockpit")));
+    cockpit_static_root_from(
+        override_root.as_deref(),
+        &heiwa_install::get_heiwa_dir(),
+        portable_root.as_deref(),
+        &repo_root,
+    )
+}
+
+fn cockpit_static_root_from(
+    override_root: Option<&Path>,
+    install_root: &Path,
+    portable_root: Option<&Path>,
+    repo_root: &Path,
+) -> PathBuf {
+    if let Some(root) = override_root.filter(|root| root.join("index.html").is_file()) {
+        return root.to_path_buf();
+    }
+    let installed = install_root.join("app").join("cockpit-current");
+    if installed.join("index.html").is_file() {
+        return installed;
+    }
+    if let Some(root) = portable_root.filter(|root| root.join("index.html").is_file()) {
+        return root.to_path_buf();
+    }
     let cockpit_dist = repo_root
         .join("apps")
         .join("heiwa_app")
         .join("clients")
         .join("cockpit")
         .join("dist");
-    if cockpit_dist.exists() {
+    if cockpit_dist.join("index.html").is_file() {
         return cockpit_dist;
     }
     repo_root
@@ -4846,11 +4956,7 @@ fn flag_value(args: &[String], flag: &str) -> Option<String> {
 }
 
 fn state_dir() -> PathBuf {
-    if let Some(path) = env::var_os("HEIWA_STATE_DIR").filter(|value| !value.is_empty()) {
-        return PathBuf::from(path);
-    }
-    let home = crate::home::heiwa_home().unwrap_or_else(|| PathBuf::from("."));
-    home.join(".heiwa").join("state")
+    crate::home::heiwa_state_dir()
 }
 
 fn hostname_string() -> String {
@@ -4954,6 +5060,105 @@ mod app_readmodel_tests {
     use tokio::sync::broadcast;
 
     #[test]
+    fn cockpit_static_root_prefers_override_then_installed_release_assets() {
+        let state = temp_state_dir("cockpit-static-root");
+        let install_root = state.join("install");
+        let installed = install_root.join("app").join("cockpit-current");
+        let repo_root = state.join("repo");
+        let portable = state.join("portable").join("cockpit");
+        let checkout = repo_root
+            .join("apps")
+            .join("heiwa_app")
+            .join("clients")
+            .join("cockpit")
+            .join("dist");
+        let override_root = state.join("override");
+        for root in [&installed, &portable, &checkout, &override_root] {
+            fs::create_dir_all(root).expect("create cockpit root");
+            fs::write(root.join("index.html"), b"<!doctype html>").expect("write cockpit index");
+        }
+
+        assert_eq!(
+            cockpit_static_root_from(None, &install_root, Some(&portable), &repo_root),
+            installed
+        );
+        assert_eq!(
+            cockpit_static_root_from(
+                Some(&override_root),
+                &install_root,
+                Some(&portable),
+                &repo_root,
+            ),
+            override_root
+        );
+        fs::remove_file(installed.join("index.html")).expect("remove installed index");
+        assert_eq!(
+            cockpit_static_root_from(None, &install_root, Some(&portable), &repo_root),
+            portable
+        );
+
+        let _ = fs::remove_dir_all(&state);
+    }
+
+    #[test]
+    fn checkout_app_bundle_plan_distinguishes_ready_and_missing_sources() {
+        let ready = app_bundle_update_plan(&json!({"present": true}), true);
+        assert_eq!(ready["wired"], true);
+        assert_eq!(ready["status"], "ready");
+        assert_eq!(ready["would_install"], true);
+        assert_eq!(ready["will_install"], false);
+        assert!(ready["blocker"].is_null());
+
+        let missing = app_bundle_update_plan(&json!({"present": false}), false);
+        assert_eq!(missing["wired"], true);
+        assert_eq!(missing["status"], "not_built");
+        assert_eq!(missing["would_install"], false);
+        assert_eq!(missing["will_install"], false);
+        assert!(missing["blocker"].is_string());
+    }
+
+    #[test]
+    fn app_heartbeat_prunes_expired_worker_records() {
+        let state = temp_state_dir("worker-prune");
+        let now = chrono::Utc::now();
+        fs::write(
+            state.join("workers.json"),
+            serde_json::to_vec_pretty(&json!({
+                "workers": [
+                    {
+                        "worker_id": "expired-worker",
+                        "last_heartbeat_utc": (now - chrono::Duration::minutes(10)).to_rfc3339(),
+                        "ttl_seconds": 120
+                    },
+                    {
+                        "worker_id": "live-peer",
+                        "last_heartbeat_utc": now.to_rfc3339(),
+                        "ttl_seconds": 120
+                    }
+                ]
+            }))
+            .expect("worker registry JSON"),
+        )
+        .expect("write worker registry");
+
+        write_app_heartbeat(&state, "current-worker").expect("write current heartbeat");
+
+        let workers: Value = serde_json::from_slice(
+            &fs::read(state.join("workers.json")).expect("read worker registry"),
+        )
+        .expect("parse worker registry");
+        let worker_ids = workers["workers"]
+            .as_array()
+            .expect("workers array")
+            .iter()
+            .filter_map(|worker| worker["worker_id"].as_str())
+            .collect::<Vec<_>>();
+        assert_eq!(worker_ids, vec!["live-peer", "current-worker"]);
+
+        let _ = fs::remove_dir_all(state);
+    }
+
+    #[test]
     fn browser_bootstrap_is_single_use_and_issues_expiring_http_only_session() {
         let mut sessions = BrowserSessionStore::default();
         let origin = "http://127.0.0.1:7474";
@@ -5048,6 +5253,43 @@ mod app_readmodel_tests {
         assert!(replay.starts_with("HTTP/1.1 401 Unauthorized\r\n"));
         assert!(replay.contains("invalid_browser_bootstrap"));
         assert!(!replay.contains(&bootstrap));
+    }
+
+    #[tokio::test]
+    async fn runtime_snapshot_http_is_safe_inside_async_server_context() {
+        let listener = TcpListener::bind(("127.0.0.1", 0)).await.unwrap();
+        let address = listener.local_addr().unwrap();
+        let client = tokio::spawn(async move {
+            let mut client = TcpStream::connect(address).await.unwrap();
+            client
+                .write_all(
+                    format!(
+                        "GET /api/v1/runtime/snapshot HTTP/1.1\r\nHost: {address}\r\nConnection: close\r\n\r\n"
+                    )
+                    .as_bytes(),
+                )
+                .await
+                .unwrap();
+            let mut response = Vec::new();
+            client.read_to_end(&mut response).await.unwrap();
+            String::from_utf8(response).unwrap()
+        });
+        let (server, _) = listener.accept().await.unwrap();
+
+        handle_connection(
+            server,
+            Arc::new("2026-08-01T00:00:00Z".to_string()),
+            Arc::new(Mutex::new(LocalRequestReplayCache::default())),
+            Arc::new(Mutex::new(BrowserSessionStore::default())),
+        )
+        .await
+        .unwrap();
+
+        let response = client.await.unwrap();
+        assert!(response.starts_with("HTTP/1.1 200 OK\r\n"));
+        let body = response.split("\r\n\r\n").nth(1).expect("response body");
+        let payload: Value = serde_json::from_str(body).expect("JSON snapshot");
+        assert_eq!(payload["ok"], true);
     }
 
     #[test]
@@ -5154,6 +5396,35 @@ mod app_readmodel_tests {
         dir
     }
 
+    #[test]
+    fn runtime_approval_summary_excludes_decided_requests() {
+        let state = temp_state_dir("approval-summary");
+        let requests = state.join("dispatch").join("requests");
+        let decisions = state.join("dispatch").join("approvals").join("decisions");
+        fs::create_dir_all(&requests).expect("create request directory");
+        fs::create_dir_all(&decisions).expect("create decision directory");
+        fs::write(
+            requests.join("req_completed.json"),
+            json!({"request_id":"req_completed"}).to_string(),
+        )
+        .expect("write approval request");
+        fs::write(
+            decisions.join("req_completed.json"),
+            json!({"id":"req_completed","outcome":"approved"}).to_string(),
+        )
+        .expect("write approval decision");
+
+        let summary = approvals_summary(&state);
+
+        assert_eq!(summary["pending"], 0);
+        assert_eq!(summary["decided"], 1);
+
+        fs::remove_file(decisions.join("req_completed.json"))
+            .expect("remove decision to expose pending request");
+        assert_eq!(approvals_summary(&state)["pending"], 1);
+        let _ = fs::remove_dir_all(&state);
+    }
+
     fn test_operator_sessions(root: &Path) -> Arc<OperatorSessionService> {
         Arc::new(OperatorSessionService::new(
             OperatorJournal::new(root.to_path_buf()).expect("operator journal"),
@@ -5172,6 +5443,18 @@ mod app_readmodel_tests {
         let (opcode, payload) = read_server_ws_frame(stream).await;
         assert_eq!(opcode, 0x1, "server frame must be text");
         serde_json::from_slice(&payload).expect("JSON websocket frame")
+    }
+
+    async fn read_next_server_ws_event(stream: &mut TcpStream) -> Value {
+        loop {
+            let frame = tokio::time::timeout(Duration::from_secs(1), read_server_ws_json(stream))
+                .await
+                .expect("event became visible");
+            if frame["type"] == "event" {
+                return frame;
+            }
+            assert_eq!(frame["type"], "heartbeat", "unexpected frame: {frame}");
+        }
     }
 
     async fn read_server_ws_frame(stream: &mut TcpStream) -> (u8, Vec<u8>) {
@@ -5289,20 +5572,16 @@ mod app_readmodel_tests {
             )
             .expect("external append");
         for expected in ["turn_started", "user_message"] {
-            let frame = tokio::time::timeout(
-                Duration::from_millis(100),
-                read_server_ws_json(&mut resumed_client),
-            )
-            .await
-            .expect("external event became visible");
+            let frame = read_next_server_ws_event(&mut resumed_client).await;
             assert_eq!(frame["event"]["event_type"], expected);
         }
         let next = tokio::time::timeout(
-            Duration::from_millis(40),
+            Duration::from_millis(200),
             read_server_ws_json(&mut resumed_client),
         )
-        .await;
-        assert!(next.is_err(), "caught_up must be emitted exactly once");
+        .await
+        .expect("resumed stream heartbeat");
+        assert_eq!(next["type"], "heartbeat");
         resumed.abort();
     }
 
@@ -5705,6 +5984,41 @@ mod app_readmodel_tests {
             .get("runtime")
             .and_then(|runtime| runtime.get("evidence_mode"))
             .is_some_and(Value::is_string));
+    }
+
+    #[test]
+    fn api_payload_wires_life_social_route() {
+        // ROUTE WIRING ONLY. This asserts the path is dispatched and returns
+        // the standard envelope. It points HEIWA_STATE_DIR at an empty temp
+        // root rather than reading ambient operator state. An earlier version
+        // claimed to verify metadata-only enforcement and, under an empty HOME,
+        // silently took the `available:false` branch and asserted nothing.
+        //
+        // Schema validation, forbidden fields, scalars, version and policy
+        // mismatch, staleness and the reconnect error state are covered
+        // hermetically in `cmd::life::social_projection_tests`, which injects
+        // a path and writes its own fixtures.
+        // Pointed at an empty temp state dir so the test never reads the
+        // operator's real projection, and holding the shared env lock so it
+        // cannot race the projection tests that also set HEIWA_STATE_DIR.
+        let dir = tempfile::tempdir().expect("tempdir");
+        let _guard = crate::cmd::life::social_projection_tests::StateDirGuard::set(dir.path());
+
+        let payload = api_payload("/api/v1/life/social", "2026-05-26T00:00:00Z")
+            .expect("life social endpoint");
+        assert_eq!(payload.get("ok").and_then(Value::as_bool), Some(true));
+        let data = payload.get("data").expect("data envelope");
+        assert_eq!(
+            data.get("command").and_then(Value::as_str),
+            Some("life social")
+        );
+        // Deterministic: nothing is published in the temp dir.
+        assert_eq!(data.get("available").and_then(Value::as_bool), Some(false));
+        // Both branches answer, so a missing producer is a reportable state
+        // rather than a 500.
+        assert!(data.get("available").is_some_and(Value::is_boolean));
+        assert!(data.get("contacts").is_some_and(Value::is_array));
+        assert!(data.get("reconnect").is_some_and(Value::is_object));
     }
 
     #[test]

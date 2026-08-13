@@ -1,0 +1,9 @@
+{
+  "schema_version": 1,
+  "layer": "l1_classify",
+  "id": "intent_deploy_from_release",
+  "description": "Shipping/infra work classifies as deploy.",
+  "status": "active",
+  "input": { "prompt": "ship the v2 release to cloudflare" },
+  "expect": { "intent": "deploy" }
+}

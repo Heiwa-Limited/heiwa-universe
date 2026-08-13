@@ -787,6 +787,9 @@ mod tests {
             for attempt in 0..2 {
                 let (stream, _) = listener.accept().await.unwrap();
                 let captured = server_requests.clone();
+                // Tauri's WebSocket handshake callback fixes the rejection type
+                // as a full HTTP response; this adapter cannot shrink that type.
+                #[allow(clippy::result_large_err)]
                 let mut websocket = tokio_tungstenite::accept_hdr_async(
                     stream,
                     move |request: &Request, response: Response| {

@@ -2,7 +2,7 @@ use anyhow::{anyhow, Result};
 use chrono::Utc;
 use serde_json::{json, Value};
 use std::fs;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 pub fn run(args: &[String]) -> Result<()> {
     match args.first().map(String::as_str) {
@@ -277,11 +277,15 @@ fn summarize_effects(plan: &Value) -> String {
 }
 
 pub(crate) fn scan_pending_requests() -> Vec<Value> {
+    scan_pending_requests_in(&requests_dir(), &decisions_dir())
+}
+
+pub(crate) fn scan_pending_requests_in(requests: &Path, decisions: &Path) -> Vec<Value> {
     let mut out = Vec::new();
-    let Ok(entries) = fs::read_dir(requests_dir()) else {
+    let Ok(entries) = fs::read_dir(requests) else {
         return out;
     };
-    let decided: std::collections::HashSet<String> = scan_decisions()
+    let decided: std::collections::HashSet<String> = scan_decisions_in(decisions)
         .into_iter()
         .filter_map(|d| d.get("id").and_then(Value::as_str).map(|s| s.to_string()))
         .collect();
@@ -357,8 +361,12 @@ fn string_field(value: &Value, fields: &[&str]) -> Option<String> {
 }
 
 fn scan_decisions() -> Vec<Value> {
+    scan_decisions_in(&decisions_dir())
+}
+
+fn scan_decisions_in(dir: &Path) -> Vec<Value> {
     let mut out = Vec::new();
-    let Ok(entries) = fs::read_dir(decisions_dir()) else {
+    let Ok(entries) = fs::read_dir(dir) else {
         return out;
     };
     for entry in entries.flatten() {
@@ -375,8 +383,7 @@ fn scan_decisions() -> Vec<Value> {
 }
 
 fn dispatch_dir() -> PathBuf {
-    let home = crate::home::heiwa_home().unwrap_or_else(|| PathBuf::from("."));
-    home.join(".heiwa").join("state").join("dispatch")
+    crate::home::heiwa_state_dir().join("dispatch")
 }
 
 pub(crate) fn requests_dir() -> PathBuf {

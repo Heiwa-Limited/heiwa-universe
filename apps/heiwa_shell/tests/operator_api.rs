@@ -55,6 +55,7 @@ impl TestRuntime {
         let mut command = Command::new(env!("CARGO_BIN_EXE_heiwa"));
         command
             .env("HOME", home.path())
+            .env_remove("HEIWA_HOME")
             .env("HEIWA_EVIDENCE_DIR", evidence.path())
             .env("HEIWA_OLLAMA_BASE", override_endpoint)
             .env_remove("HEIWA_MACHINE_AUTH_TOKEN")
@@ -81,6 +82,7 @@ impl TestRuntime {
         let mut command = Command::new(env!("CARGO_BIN_EXE_heiwa"));
         command
             .env("HOME", home.path())
+            .env_remove("HEIWA_HOME")
             .env("HEIWA_EVIDENCE_DIR", evidence.path())
             .env_remove("HEIWA_MACHINE_AUTH_TOKEN")
             .env_remove("HEIWA_AUTH_TOKEN")
@@ -1190,6 +1192,7 @@ fn spawn_runtime(
     let mut command = Command::new(env!("CARGO_BIN_EXE_heiwa"));
     command
         .env("HOME", home)
+        .env_remove("HEIWA_HOME")
         .env("HEIWA_EVIDENCE_DIR", evidence)
         .env("HEIWA_MACHINE_AUTH_TOKEN", TOKEN)
         .args(["app", "start", "--port", &port.to_string(), "--no-open"])
@@ -1321,27 +1324,8 @@ fn request_with_host(
         body.len()
     );
     stream.write_all(request.as_bytes()).unwrap();
-    let mut raw = Vec::new();
-    stream.read_to_end(&mut raw).unwrap();
-    let split = raw
-        .windows(4)
-        .position(|window| window == b"\r\n\r\n")
-        .expect("response headers");
-    let head = String::from_utf8_lossy(&raw[..split]);
-    let status = head
-        .lines()
-        .next()
-        .and_then(|line| line.split_whitespace().nth(1))
-        .unwrap()
-        .parse()
-        .unwrap();
-    let body = serde_json::from_slice(&raw[split + 4..]).unwrap_or_else(|error| {
-        panic!(
-            "response body was not JSON: {error}: {}",
-            String::from_utf8_lossy(&raw[split + 4..])
-        )
-    });
-    Response { status, body }
+    let raw = read_http_response(&mut stream);
+    parse_response(&raw)
 }
 
 fn signed_request(
@@ -1364,9 +1348,43 @@ fn signed_request(
         body.len(),
     );
     stream.write_all(request.as_bytes()).unwrap();
-    let mut raw = Vec::new();
-    stream.read_to_end(&mut raw).unwrap();
+    let raw = read_http_response(&mut stream);
     parse_response(&raw)
+}
+
+fn read_http_response(stream: &mut TcpStream) -> Vec<u8> {
+    let mut raw = Vec::new();
+    let mut chunk = [0u8; 4096];
+    loop {
+        if http_response_is_complete(&raw) {
+            return raw;
+        }
+        match stream.read(&mut chunk) {
+            Ok(0) => return raw,
+            Ok(read) => raw.extend_from_slice(&chunk[..read]),
+            Err(error)
+                if error.kind() == std::io::ErrorKind::ConnectionReset
+                    && http_response_is_complete(&raw) =>
+            {
+                return raw;
+            }
+            Err(error) => panic!("read HTTP response: {error}"),
+        }
+    }
+}
+
+fn http_response_is_complete(raw: &[u8]) -> bool {
+    let Some(split) = raw.windows(4).position(|window| window == b"\r\n\r\n") else {
+        return false;
+    };
+    let head = String::from_utf8_lossy(&raw[..split]);
+    let content_length = head.lines().find_map(|line| {
+        let (name, value) = line.split_once(':')?;
+        name.eq_ignore_ascii_case("content-length")
+            .then(|| value.trim().parse::<usize>().ok())
+            .flatten()
+    });
+    content_length.is_some_and(|length| raw.len() >= split + 4 + length)
 }
 
 fn parse_response(raw: &[u8]) -> Response {

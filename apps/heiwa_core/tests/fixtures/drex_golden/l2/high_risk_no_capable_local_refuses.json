@@ -1,0 +1,21 @@
+{
+  "schema_version": 1,
+  "layer": "l2_route",
+  "id": "high_risk_no_capable_local_refuses",
+  "description": "Safety: critical-risk sovereign work with only weak local models must refuse, not route to an under-capability model.",
+  "status": "active",
+  "registry": "local_weak_only",
+  "ingress": {
+    "intent": "build",
+    "risk": "critical",
+    "privacy": "sovereign",
+    "runtime": "macbook",
+    "available_vram_mb": 18000,
+    "required_context_tokens": 2000,
+    "raw_text": "rotate the production signing key"
+  },
+  "expect": {
+    "outcome": "error",
+    "error_contains": "no_admitted_model_call_candidates"
+  }
+}

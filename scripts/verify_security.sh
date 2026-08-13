@@ -67,18 +67,20 @@ audit_python_project() {
   local output_file="$TMPDIR/${label//[^A-Za-z0-9_.-]/_}.requirements.txt"
 
   require_command uv || return 1
-  require_command uvx || return 1
 
   (
     cd "$project_dir" &&
       uv export \
         --frozen \
+        --all-extras \
         --format requirements.txt \
         --no-hashes \
         --no-emit-project \
         --no-emit-local \
         --output-file "$output_file" >/dev/null &&
-      uvx --python "$PYTHON_AUDIT_PYTHON" pip-audit -r "$output_file"
+      uv tool run --python "$PYTHON_AUDIT_PYTHON" pip-audit \
+        --cache-dir "$TMPDIR/pip-audit-cache-$label" \
+        -r "$output_file"
   )
 }
 
@@ -90,8 +92,16 @@ printf 'python-audit-python: %s\n' "$PYTHON_AUDIT_PYTHON"
 printf 'git: %s\n' "$(git rev-parse --short HEAD 2>/dev/null || echo unknown)"
 printf 'dirty: %s\n' "$(test -z "$(git status --porcelain 2>/dev/null)" && echo false || echo true)"
 
-run_required "cargo audit" cargo audit
-run_required "root npm prod audit" npm audit --omit=dev
+if command -v cargo-audit >/dev/null 2>&1; then
+  # Calling the installed subcommand directly avoids rustup auto-syncing the
+  # repository toolchain before the audit can run on hosted runners.
+  run_required "cargo audit" cargo-audit audit
+else
+  run_required "cargo audit" cargo audit
+fi
+run_required "root npm audit" npm audit
+run_required "cockpit npm audit" npm --prefix apps/heiwa_app/clients/cockpit audit
+run_required "desktop npm audit" npm --prefix apps/heiwa_app/desktop audit
 run_required "root TypeScript typecheck" npm run typecheck --silent
 run_required "desktop TypeScript typecheck" bash -c 'cd apps/heiwa_app/desktop && npm run typecheck --silent'
 run_required "Deno herd/prototype typecheck" deno check scripts/herd.ts prototypes/heiwa-desk/main.ts prototypes/heiwa-desk/herdr.ts
@@ -100,11 +110,11 @@ run_required "runtime Python dependency audit" audit_python_project runtime-pyth
 run_required "product surface audit" bash scripts/audit_product_surface.sh
 
 if command -v gitleaks >/dev/null 2>&1; then
-  run_optional "gitleaks secret scan (redacted, non-blocking until repo baseline exists)" \
+  run_required "gitleaks secret scan (redacted, blocking; reviewed baseline in .gitleaksignore)" \
     gitleaks detect --no-banner --redact --source "$ROOT"
 else
   section "gitleaks secret scan"
-  warn "gitleaks not installed; install it to make secret scanning mandatory"
+  fail "gitleaks not installed; secret scanning is mandatory (brew install gitleaks)"
 fi
 
 section "security gate summary"

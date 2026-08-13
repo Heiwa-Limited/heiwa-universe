@@ -182,7 +182,7 @@ Heiwa should decompose capability execution by runtime fit:
 | TypeScript client contracts   | Heiwa.app, typed cockpit clients, connector setup UX, generated bindings           |
 | Shell bootstrap glue          | install, update, doctor, provider CLI resolution, operator probes                  |
 | Python compatibility workers  | document/R&D tasks and existing Python package compatibility when isolated         |
-| Local JSONL + Lance           | durable evidence, deterministic replay, recovery, and derived local recall          |
+| Local JSONL + Lance           | durable evidence, deterministic replay, recovery, and derived local recall         |
 | WebAssembly plugin sandbox    | portable low-level modules with embedder-controlled imports                        |
 | Ollama/local model lane       | cheap private inference, embeddings, summaries, local classification               |
 | Provider-owned agent runtimes | Codex, Claude Code, Gemini CLI, Antigravity, and future peers as delegated workers |

@@ -645,6 +645,297 @@ pub(crate) fn freshness_payload() -> Value {
     freshness_payload_for_date(&date)
 }
 
+/// Schema this runtime accepts. A projection carrying any other version is
+/// rejected rather than best-effort parsed: the producer lives outside this
+/// repo, so version skew is a normal condition and must fail loudly.
+const SOCIAL_SCHEMA_VERSION: &str = "life_social_v1";
+
+/// The producer's declared handling policy. Asserted, not trusted - a
+/// projection that does not declare exactly this is refused.
+const SOCIAL_POLICY: &str = "metadata-only-no-message-text";
+
+/// Longest a display name or relation label may be.
+///
+/// A closed schema proves only these FIELDS exist. It cannot prove the string
+/// in `name` is a name - message text can arrive through any allowed string.
+/// Length bounds shrink that channel; they do not close it. See the trust
+/// boundary note on `SocialProjection`.
+const MAX_LABEL_LEN: usize = 120;
+
+/// Which relationship bucket a contact or aggregate count falls in. A closed
+/// set, so it is an enum rather than a `String`: an unrecognised map key or
+/// contact value is rejected instead of being forwarded verbatim.
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, serde::Deserialize, serde::Serialize,
+)]
+#[serde(rename_all = "snake_case", deny_unknown_fields)]
+enum SocialBucket {
+    Friend,
+    Family,
+    Work,
+    Group,
+    Ended,
+    Service,
+    Acquaintance,
+    Unidentified,
+    Other,
+}
+
+/// Reciprocity classification. Also a closed set.
+#[derive(Debug, serde::Deserialize, serde::Serialize)]
+#[serde(rename_all = "snake_case", deny_unknown_fields)]
+enum SocialClass {
+    Reciprocal,
+    OneSidedOut,
+    OneSidedIn,
+    Broadcast,
+    Incidental,
+    Group,
+    Ended,
+    Service,
+}
+
+/// One contact. `deny_unknown_fields` is the structural control here.
+///
+/// The first version of this route deserialised into `serde_json::Value` and
+/// re-emitted it, checking four forbidden key names on the way past. That is a
+/// denylist, and a denylist cannot enforce metadata-only: `snippet`, `raw`,
+/// `preview`, a nested object, or anything else unanticipated passes straight
+/// through. Only a closed schema can state what is allowed.
+///
+/// `bucket` and `class` are enums because their value sets are closed.
+/// `name` and `relation` cannot be - they carry operator-defined labels - so
+/// they are length-bounded and otherwise TRUSTED. That is the residual
+/// semantic boundary, stated rather than papered over.
+#[derive(Debug, serde::Deserialize, serde::Serialize)]
+#[serde(deny_unknown_fields)]
+struct SocialContact {
+    name: String,
+    relation: String,
+    bucket: SocialBucket,
+    class: SocialClass,
+    sent: u64,
+    recv: u64,
+    total: u64,
+    active_days: u64,
+    last: chrono::NaiveDateTime,
+    stale_days: i64,
+}
+
+#[derive(Debug, serde::Deserialize, serde::Serialize)]
+#[serde(deny_unknown_fields)]
+struct ReconnectDue {
+    name: String,
+    relation: String,
+    stale_days: i64,
+    score: f64,
+}
+
+#[derive(Debug, PartialEq, serde::Deserialize, serde::Serialize)]
+#[serde(rename_all = "snake_case", deny_unknown_fields)]
+enum ReconnectStatus {
+    Ok,
+    Error,
+}
+
+/// Failure as a CODE, never as a message.
+///
+/// The producer previously published `f"{type(e).__name__}: {e}"`, so an
+/// exception string reached this boundary unfiltered - and an exception string
+/// can contain a query, a row, or a fragment of the very message text the
+/// whole projection exists to keep out. A closed set of codes says what went
+/// wrong without carrying an arbitrary payload to say it.
+#[derive(Debug, serde::Deserialize, serde::Serialize)]
+#[serde(rename_all = "snake_case", deny_unknown_fields)]
+enum ReconnectError {
+    ProducerUnavailable,
+    RankingFailed,
+    DataUnavailable,
+}
+
+/// Reconnect ranking carries an explicit status. The producer previously
+/// swallowed a failed calculation into an empty list, which made "the
+/// calculation broke" indistinguishable from "nobody is due" - the two states
+/// call for opposite responses.
+#[derive(Debug, serde::Deserialize, serde::Serialize)]
+#[serde(deny_unknown_fields)]
+struct ReconnectState {
+    status: ReconnectStatus,
+    #[serde(default)]
+    error: Option<ReconnectError>,
+    due: Vec<ReconnectDue>,
+}
+
+/// # Trust boundary
+///
+/// This schema proves **which fields exist and, where the value set is closed,
+/// which values they hold**. It cannot prove that the string in `name` is a
+/// name. `name` and `relation` carry operator-defined labels, so a producer
+/// that put message text there would satisfy every check in this file.
+///
+/// What is enforced: no unknown fields; count keys, `bucket`, `class`,
+/// `status` and `error` restricted to closed sets; timestamps parsed and
+/// canonically re-serialised; reconnect cross-field invariants; labels
+/// length-bounded; the declared `policy` and `schema_version` matched exactly.
+///
+/// What is trusted: that `name` and `relation` contain labels. That is a
+/// producer contract, documented in `docs/standards/life-social-projection.md`
+/// and not verifiable here.
+#[derive(Debug, serde::Deserialize, serde::Serialize)]
+#[serde(deny_unknown_fields)]
+struct SocialProjection {
+    schema_version: String,
+    generated_at: chrono::NaiveDateTime,
+    window_days: u32,
+    counts: std::collections::BTreeMap<SocialBucket, u64>,
+    messages_total: u64,
+    identified_pct: f64,
+    live_relationships: u64,
+    reconnect: ReconnectState,
+    contacts: Vec<SocialContact>,
+    policy: String,
+}
+
+/// Canonical location: `$HEIWA_STATE_DIR/life/social.json`, falling back to
+/// `~/.heiwa/state/life/social.json`.
+///
+/// The first version read `~/plans/ultimate_devon/social_read_model.json` -
+/// one operator's personal directory hardcoded into a product route. That
+/// cannot survive per-machine initialisation and made the route unusable for
+/// anyone but Devon.
+fn social_projection_path() -> PathBuf {
+    let base = std::env::var_os("HEIWA_STATE_DIR")
+        .filter(|value| !value.is_empty())
+        .map(PathBuf::from)
+        .unwrap_or_else(crate::home::heiwa_state_dir);
+    base.join("life").join("social.json")
+}
+
+/// Social read model: relationship cadence, reciprocity, and who is due a
+/// reconnect.
+///
+/// Sourced from a published projection rather than from `life.db` directly.
+/// `heiwa_shell` has no SQLite dependency, and taking one so a read model can
+/// be served would put schema knowledge in two places and tie the runtime's
+/// release cycle to an external producer's schema.
+///
+/// Everything served here is re-serialised from the validated struct above -
+/// nothing is passed through from the file. A field the schema does not name
+/// cannot reach a consumer.
+pub(crate) fn social_payload() -> Value {
+    social_payload_at(&social_projection_path())
+}
+
+pub(crate) fn social_payload_at(path: &Path) -> Value {
+    let display = path.display().to_string();
+    let Ok(raw) = fs::read_to_string(path) else {
+        return social_unavailable("no published social projection", Some(display));
+    };
+    let parsed: SocialProjection = match serde_json::from_str(&raw) {
+        Ok(value) => value,
+        Err(err) => {
+            // Only the LOCATION, never serde's message. serde embeds the
+            // offending value in errors like `unknown variant \`…\``, so
+            // echoing it back made the rejection reason itself a leak channel -
+            // a projection carrying message text in a bad field would have had
+            // that text reflected into the response that rejected it. Caught by
+            // `free_text_error_message_is_rejected`.
+            return social_unavailable(
+                &format!(
+                    "projection rejected by schema at line {}, column {}",
+                    err.line(),
+                    err.column()
+                ),
+                Some(display),
+            );
+        }
+    };
+    // Neither branch echoes the producer's value back - `schema_version` and
+    // `policy` are producer-controlled strings like any other.
+    if parsed.schema_version != SOCIAL_SCHEMA_VERSION {
+        return social_unavailable(
+            &format!("unsupported schema_version; this runtime accepts {SOCIAL_SCHEMA_VERSION:?}"),
+            Some(display),
+        );
+    }
+    if parsed.policy != SOCIAL_POLICY {
+        return social_unavailable(
+            &format!("projection policy mismatch; refusing anything but {SOCIAL_POLICY:?}"),
+            Some(display),
+        );
+    }
+    if let Err(reason) = validate_projection(&parsed) {
+        return social_unavailable(&reason, Some(display));
+    }
+
+    json!({
+        "command": "life social",
+        "available": true,
+        "source": display,
+        "age_days": source_age_days(path),
+        "schema_version": parsed.schema_version,
+        "policy": parsed.policy,
+        "generated_at": parsed.generated_at,
+        "window_days": parsed.window_days,
+        "counts": parsed.counts,
+        "messages_total": parsed.messages_total,
+        "identified_pct": parsed.identified_pct,
+        "live_relationships": parsed.live_relationships,
+        "reconnect": parsed.reconnect,
+        "contacts": parsed.contacts,
+    })
+}
+
+/// Validate semantic invariants not expressible through serde's field types.
+fn validate_projection(projection: &SocialProjection) -> Result<(), String> {
+    for contact in &projection.contacts {
+        for (field, value) in [("name", &contact.name), ("relation", &contact.relation)] {
+            if value.chars().count() > MAX_LABEL_LEN {
+                return Err(format!(
+                    "contact {field} exceeds {MAX_LABEL_LEN} chars; labels only"
+                ));
+            }
+        }
+    }
+    for due in &projection.reconnect.due {
+        for (field, value) in [("name", &due.name), ("relation", &due.relation)] {
+            if value.chars().count() > MAX_LABEL_LEN {
+                return Err(format!(
+                    "reconnect {field} exceeds {MAX_LABEL_LEN} chars; labels only"
+                ));
+            }
+        }
+    }
+
+    match (
+        &projection.reconnect.status,
+        projection.reconnect.error.as_ref(),
+        projection.reconnect.due.is_empty(),
+    ) {
+        (ReconnectStatus::Ok, None, _) | (ReconnectStatus::Error, Some(_), true) => {}
+        _ => return Err("reconnect state is inconsistent".to_string()),
+    }
+    Ok(())
+}
+
+fn social_unavailable(reason: &str, source: Option<String>) -> Value {
+    json!({
+        "command": "life social",
+        "available": false,
+        "reason": reason,
+        "source": source,
+        "counts": {},
+        "contacts": [],
+        "reconnect": { "status": "unavailable", "due": [] },
+    })
+}
+
+fn source_age_days(path: &Path) -> Option<i64> {
+    let modified = fs::metadata(path).ok()?.modified().ok()?;
+    let age = std::time::SystemTime::now().duration_since(modified).ok()?;
+    Some((age.as_secs() / 86_400) as i64)
+}
+
 fn freshness_payload_for_date(date: &str) -> Value {
     let probes = freshness_probes(date);
     let stale_sources = probes.iter().filter(|probe| probe.stale).count();
@@ -878,5 +1169,422 @@ fn freshness_sla_days(group: &str, label: &str) -> i64 {
         ("codex", _) => 7,
         ("claude", _) => 7,
         _ => 14,
+    }
+}
+
+#[cfg(test)]
+pub(crate) mod social_projection_tests {
+    use super::*;
+    use serde_json::Value;
+    use std::io::Write;
+    use std::sync::{Mutex, OnceLock};
+
+    /// Serialises every test that touches process environment.
+    ///
+    /// `std::env::set_var` mutates state shared by the whole test binary, and
+    /// cargo runs tests in parallel threads. Without this a concurrent test
+    /// could observe another's HEIWA_STATE_DIR - or, worse, observe the real
+    /// one after a test removed the override and read live operator state.
+    fn env_lock() -> &'static Mutex<()> {
+        static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
+        LOCK.get_or_init(|| Mutex::new(()))
+    }
+
+    /// Sets HEIWA_STATE_DIR for a scope and restores the PRIOR value, which
+    /// may itself have been set. Removing unconditionally would leak a
+    /// different bug: the next reader falls back to the real state directory.
+    pub(crate) struct StateDirGuard {
+        prior: Option<std::ffi::OsString>,
+        _lock: std::sync::MutexGuard<'static, ()>,
+    }
+
+    impl StateDirGuard {
+        pub(crate) fn set(path: &Path) -> Self {
+            let lock = env_lock().lock().unwrap_or_else(|e| e.into_inner());
+            let prior = std::env::var_os("HEIWA_STATE_DIR");
+            std::env::set_var("HEIWA_STATE_DIR", path);
+            Self { prior, _lock: lock }
+        }
+    }
+
+    impl Drop for StateDirGuard {
+        fn drop(&mut self) {
+            match self.prior.take() {
+                Some(value) => std::env::set_var("HEIWA_STATE_DIR", value),
+                None => std::env::remove_var("HEIWA_STATE_DIR"),
+            }
+        }
+    }
+
+    /// Every case writes its own file and passes the path in. The earlier test
+    /// called the real `social_payload()`, so under an empty HOME it took the
+    /// `available:false` branch and asserted nothing about validation - it
+    /// passed without ever exercising the code it claimed to cover.
+    fn projection(body: &str) -> (tempfile::TempDir, PathBuf) {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let path = dir.path().join("social.json");
+        let mut file = fs::File::create(&path).expect("create");
+        file.write_all(body.as_bytes()).expect("write");
+        (dir, path)
+    }
+
+    fn valid_body() -> String {
+        r#"{
+          "schema_version": "life_social_v1",
+          "generated_at": "2026-08-11T09:00:00",
+          "window_days": 90,
+          "counts": {"friend": 12},
+          "messages_total": 5189,
+          "identified_pct": 99.4,
+          "live_relationships": 20,
+          "reconnect": {"status": "ok", "error": null, "due": [
+            {"name":"Clayton Ring","relation":"friend","stale_days":62,"score":74.4}
+          ]},
+          "contacts": [
+            {"name":"Justin","relation":"friend","bucket":"friend","class":"reciprocal",
+             "sent":456,"recv":916,"total":1372,"active_days":78,
+             "last":"2026-08-10T20:00:00","stale_days":1}
+          ],
+          "policy": "metadata-only-no-message-text"
+        }"#
+        .to_string()
+    }
+
+    fn reason(payload: &Value) -> String {
+        payload
+            .get("reason")
+            .and_then(Value::as_str)
+            .unwrap_or_default()
+            .to_string()
+    }
+
+    #[test]
+    fn valid_projection_is_served() {
+        let (_dir, path) = projection(&valid_body());
+        let payload = social_payload_at(&path);
+        assert_eq!(
+            payload.get("available").and_then(Value::as_bool),
+            Some(true)
+        );
+        assert_eq!(
+            payload.get("policy").and_then(Value::as_str),
+            Some(SOCIAL_POLICY)
+        );
+        assert_eq!(
+            payload.pointer("/contacts/0/name").and_then(Value::as_str),
+            Some("Justin")
+        );
+        assert_eq!(
+            payload.pointer("/reconnect/status").and_then(Value::as_str),
+            Some("ok")
+        );
+    }
+
+    #[test]
+    fn missing_file_is_reported_not_fatal() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let payload = social_payload_at(&dir.path().join("absent.json"));
+        assert_eq!(
+            payload.get("available").and_then(Value::as_bool),
+            Some(false)
+        );
+        assert!(reason(&payload).contains("no published"));
+        assert!(payload.get("contacts").is_some_and(Value::is_array));
+    }
+
+    #[test]
+    fn malformed_json_is_rejected() {
+        let (_dir, path) = projection("{ this is not json ");
+        let payload = social_payload_at(&path);
+        assert_eq!(
+            payload.get("available").and_then(Value::as_bool),
+            Some(false)
+        );
+        assert!(reason(&payload).contains("rejected by schema"));
+    }
+
+    #[test]
+    fn bare_scalar_json_is_rejected() {
+        // Valid JSON, wrong shape. A Value-based reader would accept this.
+        for body in ["42", "\"hello\"", "null", "[]", "true"] {
+            let (_dir, path) = projection(body);
+            let payload = social_payload_at(&path);
+            assert_eq!(
+                payload.get("available").and_then(Value::as_bool),
+                Some(false),
+                "scalar {body} was accepted"
+            );
+        }
+    }
+
+    #[test]
+    fn unknown_contact_field_is_rejected() {
+        // The whole point of the closed schema. `snippet` is not on the
+        // forbidden-key list the first implementation checked, and would have
+        // sailed through to the consumer.
+        let body = valid_body().replace(
+            r#""stale_days":1}"#,
+            r#""stale_days":1,"snippet":"hey are you free saturday"}"#,
+        );
+        let (_dir, path) = projection(&body);
+        let payload = social_payload_at(&path);
+        assert_eq!(
+            payload.get("available").and_then(Value::as_bool),
+            Some(false)
+        );
+        assert!(reason(&payload).contains("rejected by schema"));
+        // The reason must not reflect producer-controlled content back.
+        assert!(!reason(&payload).contains("snippet"));
+        assert!(!serde_json::to_string(&payload)
+            .unwrap()
+            .contains("saturday"));
+    }
+
+    #[test]
+    fn unknown_top_level_field_is_rejected() {
+        let body = valid_body().replace(
+            r#""policy": "metadata-only-no-message-text""#,
+            r#""policy": "metadata-only-no-message-text", "raw_messages": ["leak"]"#,
+        );
+        let (_dir, path) = projection(&body);
+        let payload = social_payload_at(&path);
+        assert_eq!(
+            payload.get("available").and_then(Value::as_bool),
+            Some(false)
+        );
+        assert!(!serde_json::to_string(&payload).unwrap().contains("leak"));
+    }
+
+    #[test]
+    fn wrong_schema_version_is_rejected() {
+        let body = valid_body().replace("life_social_v1", "life_social_v2");
+        let (_dir, path) = projection(&body);
+        let payload = social_payload_at(&path);
+        assert_eq!(
+            payload.get("available").and_then(Value::as_bool),
+            Some(false)
+        );
+        assert!(reason(&payload).contains("unsupported schema_version"));
+    }
+
+    #[test]
+    fn wrong_policy_declaration_is_rejected() {
+        let body = valid_body().replace(SOCIAL_POLICY, "includes-message-text");
+        let (_dir, path) = projection(&body);
+        let payload = social_payload_at(&path);
+        assert_eq!(
+            payload.get("available").and_then(Value::as_bool),
+            Some(false)
+        );
+        assert!(reason(&payload).contains("refusing"));
+    }
+
+    #[test]
+    fn stale_but_valid_projection_is_still_served_with_age() {
+        let (_dir, path) = projection(&valid_body());
+        let payload = social_payload_at(&path);
+        assert_eq!(
+            payload.get("available").and_then(Value::as_bool),
+            Some(true)
+        );
+        assert!(payload.get("age_days").is_some_and(Value::is_number));
+    }
+
+    #[test]
+    fn reconnect_error_state_survives_to_the_consumer() {
+        // "the calculation broke" must not look like "nobody is due".
+        let body = valid_body()
+            .replace(
+                r#""status": "ok", "error": null"#,
+                r#""status": "error", "error": "ranking_failed""#,
+            )
+            .replace(
+                r#""due": [
+            {"name":"Clayton Ring","relation":"friend","stale_days":62,"score":74.4}
+          ]"#,
+                r#""due": []"#,
+            );
+        let (_dir, path) = projection(&body);
+        let payload = social_payload_at(&path);
+        assert_eq!(
+            payload.get("available").and_then(Value::as_bool),
+            Some(true)
+        );
+        assert_eq!(
+            payload.pointer("/reconnect/status").and_then(Value::as_str),
+            Some("error")
+        );
+        assert_eq!(
+            payload.pointer("/reconnect/error").and_then(Value::as_str),
+            Some("ranking_failed")
+        );
+    }
+
+    #[test]
+    fn free_text_error_message_is_rejected() {
+        // The producer used to publish `f"{type(e).__name__}: {e}"`. An
+        // exception string can carry a query, a row, or message text.
+        let body = valid_body().replace(
+            r#""error": null"#,
+            r#""error": "OperationalError: no such column: hey are you free saturday""#,
+        );
+        let (_dir, path) = projection(&body);
+        let payload = social_payload_at(&path);
+        assert_eq!(
+            payload.get("available").and_then(Value::as_bool),
+            Some(false)
+        );
+        assert!(!serde_json::to_string(&payload)
+            .unwrap()
+            .contains("saturday"));
+    }
+
+    #[test]
+    fn unknown_bucket_or_class_is_rejected() {
+        for (from, to) in [
+            (r#""bucket":"friend""#, r#""bucket":"secret_lover""#),
+            (r#""class":"reciprocal""#, r#""class":"leaked""#),
+        ] {
+            let (_dir, path) = projection(&valid_body().replace(from, to));
+            let payload = social_payload_at(&path);
+            assert_eq!(
+                payload.get("available").and_then(Value::as_bool),
+                Some(false),
+                "{to} was accepted"
+            );
+        }
+    }
+
+    #[test]
+    fn unknown_counts_key_is_rejected_without_reflection() {
+        let body = valid_body().replace(
+            r#""counts": {"friend": 12}"#,
+            r#""counts": {"hey are you free saturday": 12}"#,
+        );
+        let (_dir, path) = projection(&body);
+        let payload = social_payload_at(&path);
+        assert_eq!(
+            payload.get("available").and_then(Value::as_bool),
+            Some(false)
+        );
+        assert!(!serde_json::to_string(&payload)
+            .unwrap()
+            .contains("saturday"));
+    }
+
+    #[test]
+    fn timestamps_are_parsed_and_canonically_reserialized() {
+        let (_dir, path) = projection(&valid_body());
+        let payload = social_payload_at(&path);
+        assert_eq!(
+            payload.get("generated_at").and_then(Value::as_str),
+            Some("2026-08-11T09:00:00")
+        );
+        assert_eq!(
+            payload
+                .get("contacts")
+                .and_then(Value::as_array)
+                .and_then(|contacts| contacts.first())
+                .and_then(|contact| contact.get("last"))
+                .and_then(Value::as_str),
+            Some("2026-08-10T20:00:00")
+        );
+
+        let body = valid_body()
+            .replace("2026-08-11T09:00:00", "message text hidden in generated_at")
+            .replace("2026-08-10T20:00:00", "message text hidden in last");
+        let (_dir, path) = projection(&body);
+        let payload = social_payload_at(&path);
+        assert_eq!(
+            payload.get("available").and_then(Value::as_bool),
+            Some(false)
+        );
+        let encoded = serde_json::to_string(&payload).unwrap();
+        assert!(!encoded.contains("message text"));
+    }
+
+    #[test]
+    fn reconnect_state_rejects_contradictory_combinations() {
+        let cases = [
+            (
+                r#""status": "ok", "error": null"#,
+                r#""status": "ok", "error": "ranking_failed""#,
+            ),
+            (
+                r#""status": "ok", "error": null"#,
+                r#""status": "error", "error": null"#,
+            ),
+            (
+                r#""status": "ok", "error": null"#,
+                r#""status": "error", "error": "ranking_failed""#,
+            ),
+        ];
+
+        for (index, (from, to)) in cases.into_iter().enumerate() {
+            let mut body = valid_body().replace(from, to);
+            if index == 2 {
+                // valid_body carries one due row; error states must not.
+                assert!(body.contains(r#""due": ["#));
+            } else if index == 1 {
+                body = body.replace(
+                    r#""due": [
+            {"name":"Clayton Ring","relation":"friend","stale_days":62,"score":74.4}
+          ]"#,
+                    r#""due": []"#,
+                );
+            }
+            let (_dir, path) = projection(&body);
+            let payload = social_payload_at(&path);
+            assert_eq!(
+                payload.get("available").and_then(Value::as_bool),
+                Some(false),
+                "contradictory reconnect case {index} was accepted"
+            );
+        }
+    }
+
+    #[test]
+    fn overlong_label_is_rejected() {
+        let long = "x".repeat(MAX_LABEL_LEN + 1);
+        let body = valid_body().replace(r#""name":"Justin""#, &format!(r#""name":"{long}""#));
+        let (_dir, path) = projection(&body);
+        let payload = social_payload_at(&path);
+        assert_eq!(
+            payload.get("available").and_then(Value::as_bool),
+            Some(false)
+        );
+        assert!(reason(&payload).contains("labels only"));
+    }
+
+    #[test]
+    fn state_dir_env_overrides_the_projection_path() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let prior = std::env::var_os("HEIWA_STATE_DIR");
+        let resolved = {
+            let _guard = StateDirGuard::set(dir.path());
+            social_projection_path()
+        };
+        assert_eq!(resolved, dir.path().join("life").join("social.json"));
+        assert!(!resolved.to_string_lossy().contains("ultimate_devon"));
+        // The guard restored whatever was there before, set or unset.
+        assert_eq!(std::env::var_os("HEIWA_STATE_DIR"), prior);
+    }
+
+    #[test]
+    fn default_path_is_under_dot_heiwa_state() {
+        let _guard = env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let prior = std::env::var_os("HEIWA_STATE_DIR");
+        std::env::remove_var("HEIWA_STATE_DIR");
+        let resolved = social_projection_path();
+        if let Some(value) = prior {
+            std::env::set_var("HEIWA_STATE_DIR", value);
+        }
+        assert!(resolved.ends_with("life/social.json"), "{resolved:?}");
+        assert!(
+            resolved
+                .ancestors()
+                .any(|path| path.ends_with(Path::new(".heiwa").join("state"))),
+            "{resolved:?}"
+        );
     }
 }

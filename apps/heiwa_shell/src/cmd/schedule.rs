@@ -256,9 +256,7 @@ pub fn build_approval_request(
 }
 
 fn requests_dir() -> PathBuf {
-    let home = crate::home::heiwa_home().unwrap_or_else(|| PathBuf::from("."));
-    home.join(".heiwa")
-        .join("state")
+    crate::home::heiwa_state_dir()
         .join("dispatch")
         .join("requests")
 }

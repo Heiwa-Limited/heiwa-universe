@@ -1,12 +1,10 @@
-"""Heiwa Agent Memory: persistent conversation memory backed by SpacetimeDB."""
+"""Heiwa Agent Memory compatibility service over an injected backend."""
 from __future__ import annotations
 
 import logging
 import time
 import uuid
 from typing import Any
-
-from heiwa_sdk.spacetimedb import SpacetimeDB
 
 logger = logging.getLogger("SDK.AgentMemory")
 
@@ -22,11 +20,11 @@ _CHAR_LENGTH_COMPLEX = 200
 class AgentMemory:
     """High-level memory service for Heiwa Agent conversations.
 
-    Wraps STDB captain_messages/captain_summaries/captain_focus tables
-    with token budgeting, compression detection, and context assembly.
+    Wraps an injected compatibility backend with token budgeting, compression
+    detection, and context assembly.
     """
 
-    def __init__(self, stdb: SpacetimeDB, session_id: str | None = None, token_budget: int = 8000):
+    def __init__(self, stdb: Any, session_id: str | None = None, token_budget: int = 8000):
         self.stdb = stdb
         self.session_id = session_id or str(uuid.uuid4())
         self._token_budget = token_budget

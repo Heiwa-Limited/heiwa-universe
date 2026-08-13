@@ -17,7 +17,10 @@ impl HeiwaPaths {
             .or_else(|_| env::var("USERPROFILE"))
             .map(PathBuf::from)
             .unwrap_or_else(|_| PathBuf::from("."));
-        let state_dir = home_dir.join(".heiwa");
+        let state_dir = env::var_os("HEIWA_HOME")
+            .filter(|value| !value.is_empty())
+            .map(PathBuf::from)
+            .unwrap_or_else(|| home_dir.join(".heiwa"));
         Self {
             sessions_dir: state_dir.join("sessions"),
             config_path: state_dir.join("config.toml"),

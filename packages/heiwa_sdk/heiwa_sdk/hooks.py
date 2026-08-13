@@ -8,13 +8,9 @@ logger = logging.getLogger("SDK.Hooks")
 class ExecutionHookManager:
     """Manages pre and post tool execution hooks, enforcing leases and security gates."""
 
-    def __init__(self, root_dir):
-        from heiwa_sdk.spacetimedb import SpacetimeDB
+    def __init__(self, root_dir, backend: Any | None = None):
         self.root = root_dir
-        self.db = SpacetimeDB(
-            db_identity=os.environ.get("STDB_IDENTITY", "heiwaproductiondb"),
-            server=os.environ.get("STDB_SERVER", "local")
-        )
+        self.db = backend
 
     def before_tool_call(
         self, 
@@ -29,6 +25,13 @@ class ExecutionHookManager:
         """
         mode = os.getenv("HEIWA_ROLLOUT_MODE", "observe")  # enforce | observe
         logger.info("Hook pre-check tool=%s proposal=%s node=%s mode=%s", tool, proposal_id, node_id, mode)
+
+        if self.db is None:
+            reason = "Rust runtime lease backend unavailable"
+            if mode == "enforce":
+                return False, reason, None
+            logger.warning("[OBSERVE] %s", reason)
+            return True, reason, None
 
         try:
             lease = self.db.get_active_capability_lease(proposal_id, node_id)
@@ -104,8 +107,15 @@ class ExecutionHookManager:
         
         mode = os.getenv("HEIWA_ROLLOUT_MODE", "observe")
         import uuid
-        import asyncio
         event_id = uuid.uuid4().hex[:12]
+
+        if self.db is None:
+            logger.warning("Execution audit not recorded: Rust runtime evidence backend unavailable")
+            return {
+                "audit_ts": event_id,
+                "status": "not_recorded",
+                "reason": "rust_runtime_backend_unavailable",
+            }
         
         def _commit_audit() -> None:
             try:
@@ -124,7 +134,7 @@ class ExecutionHookManager:
                     }
                 })
             except Exception as e:
-                logger.error("Failed to persist execution audit to STDB: %s", e)
+                logger.error("Failed to persist execution audit: %s", e)
                 
         import threading
         threading.Thread(target=_commit_audit, daemon=True).start()

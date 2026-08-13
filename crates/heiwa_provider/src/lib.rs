@@ -1,6 +1,8 @@
 use serde::{Deserialize, Serialize};
 use std::env;
 use std::fs;
+use std::io::{BufRead, BufReader, Read, Write};
+use std::net::{TcpStream, ToSocketAddrs};
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
@@ -36,6 +38,9 @@ pub struct HeiwaIdentity {
 }
 
 fn get_heiwa_state_dir() -> PathBuf {
+    if let Some(root) = env::var_os("HEIWA_HOME").filter(|value| !value.is_empty()) {
+        return PathBuf::from(root);
+    }
     let home = env::var("HOME")
         .or_else(|_| env::var("USERPROFILE"))
         .expect("HOME or USERPROFILE must be set");
@@ -323,8 +328,19 @@ pub fn logout(provider_id: &str) -> anyhow::Result<()> {
 }
 
 fn provider_search_paths_for_home(home: &Path) -> Vec<PathBuf> {
+    let runtime_root = env::var_os("HEIWA_HOME")
+        .filter(|value| !value.is_empty())
+        .map(PathBuf::from);
+    provider_search_paths(home, runtime_root.as_deref())
+}
+
+fn provider_search_paths(home: &Path, runtime_root: Option<&Path>) -> Vec<PathBuf> {
+    let runtime_bin = runtime_root
+        .map(Path::to_path_buf)
+        .unwrap_or_else(|| home.join(".heiwa"))
+        .join("bin");
     vec![
-        home.join(".heiwa").join("bin"),
+        runtime_bin,
         home.join(".local").join("bin"),
         home.join(".npm-global").join("bin"),
         home.join(".cargo").join("bin"),
@@ -336,11 +352,31 @@ fn provider_search_paths_for_home(home: &Path) -> Vec<PathBuf> {
 }
 
 fn resolve_command_with_home_and_path(cmd: &str, home: &Path, path: &str) -> Option<PathBuf> {
+    #[cfg(windows)]
+    const EXTENSIONS: &[&str] = &["", ".exe", ".cmd", ".bat", ".com"];
+    #[cfg(not(windows))]
+    const EXTENSIONS: &[&str] = &[""];
+
+    resolve_command_with_extensions(cmd, home, path, EXTENSIONS)
+}
+
+fn resolve_command_with_extensions(
+    cmd: &str,
+    home: &Path,
+    path: &str,
+    extensions: &[&str],
+) -> Option<PathBuf> {
     let mut dirs = env::split_paths(path).collect::<Vec<_>>();
     dirs.extend(provider_search_paths_for_home(home));
-    dirs.into_iter()
-        .map(|dir| dir.join(cmd))
-        .find(|candidate| candidate.is_file())
+    for dir in dirs {
+        for extension in extensions {
+            let candidate = dir.join(format!("{cmd}{extension}"));
+            if candidate.is_file() {
+                return Some(candidate);
+            }
+        }
+    }
+    None
 }
 
 pub fn resolve_command(cmd: &str) -> Option<PathBuf> {
@@ -375,18 +411,53 @@ fn is_ollama_running() -> bool {
     let Ok(endpoint) = crate::detect::ollama::resolve_configured_endpoint(stored_endpoint) else {
         return false;
     };
-    let Ok(client) = reqwest::blocking::Client::builder()
-        .connect_timeout(crate::detect::ollama::ENDPOINT_CONNECT_TIMEOUT)
-        .timeout(crate::detect::ollama::ENDPOINT_CONNECT_TIMEOUT)
-        .no_proxy()
-        .build()
-    else {
+    let Ok(url) = reqwest::Url::parse(&endpoint.api_url("/api/tags")) else {
         return false;
     };
-    client
-        .get(endpoint.api_url("/api/tags"))
-        .send()
-        .is_ok_and(|response| response.status().is_success())
+    let Some(host) = url.host_str() else {
+        return false;
+    };
+    let Some(port) = url.port_or_known_default() else {
+        return false;
+    };
+    let Ok(addresses) = (host, port).to_socket_addrs() else {
+        return false;
+    };
+    let host_header = if host.contains(':') {
+        format!("[{host}]:{port}")
+    } else {
+        format!("{host}:{port}")
+    };
+    let request =
+        format!("GET /api/tags HTTP/1.1\r\nHost: {host_header}\r\nConnection: close\r\n\r\n");
+
+    addresses.into_iter().any(|address| {
+        let Ok(mut stream) =
+            TcpStream::connect_timeout(&address, crate::detect::ollama::ENDPOINT_CONNECT_TIMEOUT)
+        else {
+            return false;
+        };
+        if stream
+            .set_read_timeout(Some(crate::detect::ollama::ENDPOINT_CONNECT_TIMEOUT))
+            .is_err()
+            || stream
+                .set_write_timeout(Some(crate::detect::ollama::ENDPOINT_CONNECT_TIMEOUT))
+                .is_err()
+            || stream.write_all(request.as_bytes()).is_err()
+        {
+            return false;
+        }
+        let mut status_line = String::new();
+        let mut reader = BufReader::new(stream).take(128);
+        if reader.read_line(&mut status_line).is_err() {
+            return false;
+        }
+        status_line
+            .split_whitespace()
+            .nth(1)
+            .and_then(|status| status.parse::<u16>().ok())
+            .is_some_and(|status| (200..300).contains(&status))
+    })
 }
 
 fn gemini_has_native_auth() -> bool {
@@ -448,12 +519,22 @@ mod command_resolution_tests {
     #[test]
     fn provider_search_paths_include_user_local_bins() {
         let home = PathBuf::from("/Users/devon");
-        let paths = provider_search_paths_for_home(&home);
+        let paths = provider_search_paths(&home, None);
 
         assert!(paths.contains(&home.join(".heiwa").join("bin")));
         assert!(paths.contains(&home.join(".local").join("bin")));
         assert!(paths.contains(&home.join(".npm-global").join("bin")));
         assert!(paths.contains(&home.join(".cargo").join("bin")));
+    }
+
+    #[test]
+    fn provider_search_paths_honor_explicit_runtime_root() {
+        let home = PathBuf::from("/Users/devon");
+        let runtime_root = PathBuf::from("/opt/heiwa-runtime");
+        let paths = provider_search_paths(&home, Some(&runtime_root));
+
+        assert!(paths.contains(&runtime_root.join("bin")));
+        assert!(!paths.contains(&home.join(".heiwa").join("bin")));
     }
 
     #[test]
@@ -471,6 +552,28 @@ mod command_resolution_tests {
         let resolved = resolve_command_with_home_and_path("codex", &temp, "");
 
         assert_eq!(resolved.as_deref(), Some(exe.as_path()));
+        let _ = fs::remove_dir_all(temp);
+    }
+
+    #[test]
+    fn resolve_command_accepts_windows_command_shims() {
+        let temp = env::temp_dir().join(format!(
+            "heiwa-provider-windows-command-resolution-{}",
+            std::process::id()
+        ));
+        let _ = fs::remove_dir_all(&temp);
+        let bin = temp.join("bin");
+        fs::create_dir_all(&bin).expect("create bin");
+        let shim = bin.join("gemini.cmd");
+        fs::write(&shim, "@exit /b 0\r\n").expect("write fake gemini shim");
+        let path = env::join_paths([&bin])
+            .expect("join test PATH")
+            .to_string_lossy()
+            .into_owned();
+
+        let resolved = resolve_command_with_extensions("gemini", &temp, &path, &["", ".cmd"]);
+
+        assert_eq!(resolved.as_deref(), Some(shim.as_path()));
         let _ = fs::remove_dir_all(temp);
     }
 

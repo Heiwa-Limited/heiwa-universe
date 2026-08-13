@@ -1,7 +1,7 @@
 # Heiwa
 
-[![CI](https://github.com/Strategizing/heiwa-universe/actions/workflows/ci.yml/badge.svg)](https://github.com/Strategizing/heiwa-universe/actions/workflows/ci.yml)
-[![Docs](https://github.com/Strategizing/heiwa-universe/actions/workflows/pages.yml/badge.svg)](https://github.com/Strategizing/heiwa-universe/actions/workflows/pages.yml)
+[![CI](https://github.com/Heiwa-Limited/heiwa-universe/actions/workflows/ci.yml/badge.svg)](https://github.com/Heiwa-Limited/heiwa-universe/actions/workflows/ci.yml)
+[![Docs](https://github.com/Heiwa-Limited/heiwa-universe/actions/workflows/pages.yml/badge.svg)](https://github.com/Heiwa-Limited/heiwa-universe/actions/workflows/pages.yml)
 [![License](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE)
 
 Heiwa is a local-first AI operating layer. The installed `heiwa` runtime is the product center, Rust owns the execution path, and this repository is being hardened for GitHub-native distribution rather than hosted-platform theater.
@@ -33,13 +33,13 @@ Maturity is uneven across planes today; see [`HEIWA.md`](HEIWA.md#the-three-plan
 
 ## Architecture
 
-| Layer            | Canonical meaning                                                                          | Location                                                                               |
-| ---------------- | ------------------------------------------------------------------------------------------ | -------------------------------------------------------------------------------------- |
-| **Heiwa**        | Company and product identity                                                               | Repo root                                                                              |
-| **`heiwa`**      | Primary installed runtime and operator surface                                             | `apps/heiwa_shell/`                                                                    |
-| **DREX**         | Internal execution kernel and routing substrate                                            | `apps/heiwa_core/`                                                                     |
-| **Local evidence** | Canonical JSONL journal plus derived Lance recall index                                  | `crates/heiwa_evidence/`, `crates/heiwa_embed/`                                      |
-| **Rust runtime** | Volatile execution: provider supervision and candidate generation                          | `crates/`                                                                              |
+| Layer              | Canonical meaning                                                 | Location                                        |
+| ------------------ | ----------------------------------------------------------------- | ----------------------------------------------- |
+| **Heiwa**          | Company and product identity                                      | Repo root                                       |
+| **`heiwa`**        | Primary installed runtime and operator surface                    | `apps/heiwa_shell/`                             |
+| **DREX**           | Internal execution kernel and routing substrate                   | `apps/heiwa_core/`                              |
+| **Local evidence** | Canonical JSONL journal plus derived Lance recall index           | `crates/heiwa_evidence/`, `crates/heiwa_embed/` |
+| **Rust runtime**   | Volatile execution: provider supervision and candidate generation | `crates/`                                       |
 
 > Rust proposes and executes, local text truth records, Lance recalls, `heiwa` presents.
 

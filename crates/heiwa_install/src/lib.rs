@@ -121,6 +121,9 @@ pub enum InstallOutcome {
 }
 
 pub fn get_heiwa_dir() -> PathBuf {
+    if let Some(root) = env::var_os("HEIWA_HOME").filter(|value| !value.is_empty()) {
+        return PathBuf::from(root);
+    }
     let home = env::var("HOME")
         .or_else(|_| env::var("USERPROFILE"))
         .expect("HOME or USERPROFILE must be set");
@@ -401,6 +404,12 @@ fn write_canonical_launcher_internal(
 ) -> Result<()> {
     let launcher_path = heiwa_dir.join("bin").join("heiwa");
 
+    // An installed binary may still carry a build-time repository path that exists
+    // on the build machine. Never replace the executable that is currently running.
+    if current_exe == launcher_path && current_exe.exists() {
+        return Ok(());
+    }
+
     // Robust dev-env check: Does Cargo.toml exist where we expect it in the monorepo?
     let is_dev_env = repo_root.join("Cargo.toml").exists();
 
@@ -464,7 +473,7 @@ fn write_home_app_launcher(heiwa_dir: &Path) -> Result<()> {
 
 fn write_home_app_launcher_internal(heiwa_dir: &Path) -> Result<()> {
     if let Some(desktop_bundle) = find_built_desktop_app_bundle() {
-        return install_built_desktop_app_bundle(heiwa_dir, &desktop_bundle);
+        return install_desktop_app_bundle(heiwa_dir, &desktop_bundle);
     }
 
     let bundle_root = heiwa_dir.join("app").join("Heiwa.app");
@@ -560,32 +569,91 @@ fn find_built_desktop_app_bundle() -> Option<PathBuf> {
     }
 }
 
-fn install_built_desktop_app_bundle(heiwa_dir: &Path, desktop_bundle: &Path) -> Result<()> {
+pub fn install_desktop_app_bundle(heiwa_dir: &Path, desktop_bundle: &Path) -> Result<()> {
     let app_root = heiwa_dir.join("app");
     let target_bundle = app_root.join("Heiwa.app");
-    if target_bundle.exists() {
-        fs::remove_dir_all(&target_bundle).with_context(|| {
-            format!("remove old Heiwa.app bundle at {}", target_bundle.display())
+    let staging_bundle = app_root.join(".Heiwa.app.installing");
+    let backup_bundle = app_root.join(".Heiwa.app.previous");
+    fs::create_dir_all(&app_root)?;
+    if !target_bundle.exists() && backup_bundle.exists() {
+        fs::rename(&backup_bundle, &target_bundle).with_context(|| {
+            format!(
+                "restore interrupted Heiwa.app backup to {}",
+                target_bundle.display()
+            )
         })?;
     }
-    fs::create_dir_all(&app_root)?;
-    copy_dir_all(desktop_bundle, &target_bundle).with_context(|| {
+
+    let source_executable = desktop_bundle.join("Contents").join("MacOS").join("Heiwa");
+    if !source_executable.is_file() {
+        return Err(anyhow!(
+            "Tauri Heiwa.app bundle missing executable: {}",
+            source_executable.display()
+        ));
+    }
+
+    if staging_bundle.exists() {
+        fs::remove_dir_all(&staging_bundle).with_context(|| {
+            format!(
+                "remove stale Heiwa.app staging bundle at {}",
+                staging_bundle.display()
+            )
+        })?;
+    }
+    copy_dir_all(desktop_bundle, &staging_bundle).with_context(|| {
         format!(
-            "install Tauri Heiwa.app from {} to {}",
+            "stage Tauri Heiwa.app from {} to {}",
             desktop_bundle.display(),
-            target_bundle.display()
+            staging_bundle.display()
         )
     })?;
 
-    let executable_path = target_bundle.join("Contents").join("MacOS").join("Heiwa");
-    if !executable_path.is_file() {
+    let staging_executable = staging_bundle.join("Contents").join("MacOS").join("Heiwa");
+    if !staging_executable.is_file() {
         return Err(anyhow!(
-            "Tauri Heiwa.app bundle missing executable: {}",
-            executable_path.display()
+            "staged Tauri Heiwa.app bundle missing executable: {}",
+            staging_executable.display()
         ));
     }
     #[cfg(unix)]
-    fs::set_permissions(&executable_path, fs::Permissions::from_mode(0o755))?;
+    fs::set_permissions(&staging_executable, fs::Permissions::from_mode(0o755))?;
+
+    if backup_bundle.exists() {
+        fs::remove_dir_all(&backup_bundle).with_context(|| {
+            format!(
+                "remove stale Heiwa.app backup at {}",
+                backup_bundle.display()
+            )
+        })?;
+    }
+    let had_installed_bundle = target_bundle.exists();
+    if had_installed_bundle {
+        fs::rename(&target_bundle, &backup_bundle).with_context(|| {
+            format!(
+                "stage installed Heiwa.app for rollback at {}",
+                backup_bundle.display()
+            )
+        })?;
+    }
+    if let Err(error) = fs::rename(&staging_bundle, &target_bundle) {
+        if had_installed_bundle {
+            fs::rename(&backup_bundle, &target_bundle).with_context(|| {
+                format!("restore previous Heiwa.app after install failed: {error}")
+            })?;
+        }
+        return Err(error)
+            .with_context(|| format!("promote staged Heiwa.app to {}", target_bundle.display()));
+    }
+    if backup_bundle.exists() {
+        fs::remove_dir_all(&backup_bundle).with_context(|| {
+            format!(
+                "remove replaced Heiwa.app backup at {}",
+                backup_bundle.display()
+            )
+        })?;
+    }
+
+    let executable_path = target_bundle.join("Contents").join("MacOS").join("Heiwa");
 
     let bin_launcher_path = heiwa_dir.join("bin").join("heiwa-app");
     fs::create_dir_all(bin_launcher_path.parent().expect("launcher parent"))?;
@@ -759,6 +827,24 @@ mod tests {
     }
 
     #[test]
+    fn test_write_canonical_launcher_preserves_running_installed_binary() -> Result<()> {
+        let tmp = tempdir()?;
+        let heiwa_dir = tmp.path().join(".heiwa");
+        let launcher_path = heiwa_dir.join("bin").join("heiwa");
+        fs::create_dir_all(launcher_path.parent().expect("launcher parent"))?;
+        fs::write(&launcher_path, "installed binary")?;
+
+        let mock_repo = tmp.path().join("heiwa-universe");
+        fs::create_dir_all(&mock_repo)?;
+        fs::write(mock_repo.join("Cargo.toml"), "")?;
+
+        write_canonical_launcher_internal(&heiwa_dir, &launcher_path, &mock_repo)?;
+
+        assert_eq!(fs::read_to_string(launcher_path)?, "installed binary");
+        Ok(())
+    }
+
+    #[test]
     fn test_check_runtime_layout_reports_missing_dirs() -> Result<()> {
         let tmp = tempdir()?;
         let root = tmp.path().join(".heiwa");
@@ -829,7 +915,7 @@ mod tests {
         )?;
         fs::write(source_macos.join("Heiwa"), "tauri binary")?;
 
-        install_built_desktop_app_bundle(&heiwa_dir, &source_bundle)?;
+        install_desktop_app_bundle(&heiwa_dir, &source_bundle)?;
 
         let installed_bundle = heiwa_dir.join("app").join("Heiwa.app");
         assert_eq!(
@@ -852,6 +938,69 @@ mod tests {
             "shim launches Tauri app: {shim}"
         );
         assert!(shim.starts_with("#!/bin/zsh"));
+        Ok(())
+    }
+
+    #[test]
+    #[cfg(not(windows))]
+    fn test_install_built_desktop_app_bundle_preserves_working_bundle_on_invalid_source(
+    ) -> Result<()> {
+        let tmp = tempdir()?;
+        let heiwa_dir = tmp.path().join(".heiwa");
+        let installed_macos = heiwa_dir
+            .join("app")
+            .join("Heiwa.app")
+            .join("Contents")
+            .join("MacOS");
+        fs::create_dir_all(&installed_macos)?;
+        fs::write(installed_macos.join("Heiwa"), "working binary")?;
+
+        let invalid_source = tmp.path().join("invalid/Heiwa.app");
+        fs::create_dir_all(invalid_source.join("Contents"))?;
+        fs::write(invalid_source.join("Contents/Info.plist"), "invalid bundle")?;
+
+        let error = install_desktop_app_bundle(&heiwa_dir, &invalid_source)
+            .expect_err("a bundle without Contents/MacOS/Heiwa must be rejected");
+
+        assert!(error.to_string().contains("missing executable"));
+        assert_eq!(
+            fs::read_to_string(installed_macos.join("Heiwa"))?,
+            "working binary"
+        );
+        Ok(())
+    }
+
+    #[test]
+    #[cfg(not(windows))]
+    fn test_install_built_desktop_app_bundle_recovers_interrupted_backup_before_validation(
+    ) -> Result<()> {
+        let tmp = tempdir()?;
+        let heiwa_dir = tmp.path().join(".heiwa");
+        let backup_macos = heiwa_dir
+            .join("app")
+            .join(".Heiwa.app.previous")
+            .join("Contents")
+            .join("MacOS");
+        fs::create_dir_all(&backup_macos)?;
+        fs::write(backup_macos.join("Heiwa"), "recoverable binary")?;
+
+        let invalid_source = tmp.path().join("invalid/Heiwa.app");
+        fs::create_dir_all(invalid_source.join("Contents"))?;
+
+        install_desktop_app_bundle(&heiwa_dir, &invalid_source)
+            .expect_err("invalid source must still trigger rollback recovery");
+
+        let installed_executable = heiwa_dir
+            .join("app")
+            .join("Heiwa.app")
+            .join("Contents")
+            .join("MacOS")
+            .join("Heiwa");
+        assert_eq!(
+            fs::read_to_string(installed_executable)?,
+            "recoverable binary"
+        );
+        assert!(!heiwa_dir.join("app/.Heiwa.app.previous").exists());
         Ok(())
     }
 

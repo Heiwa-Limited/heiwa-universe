@@ -8,6 +8,7 @@ fn app_api_dry_run_exposes_get_and_post_contracts_without_network() {
 
     let get = Command::new(env!("CARGO_BIN_EXE_heiwa"))
         .env("HOME", home.path())
+        .env_remove("HEIWA_HOME")
         .env_remove("HEIWA_MACHINE_AUTH_TOKEN")
         .env_remove("HEIWA_AUTH_TOKEN")
         .args([
@@ -37,6 +38,7 @@ fn app_api_dry_run_exposes_get_and_post_contracts_without_network() {
 
     let post = Command::new(env!("CARGO_BIN_EXE_heiwa"))
         .env("HOME", home.path())
+        .env_remove("HEIWA_HOME")
         .env("HEIWA_MACHINE_AUTH_TOKEN", "dry-run-secret-token")
         .args([
             "app",
@@ -75,6 +77,7 @@ fn app_api_fails_before_network_without_auth_configuration() {
     let home = tempfile::tempdir().unwrap();
     let output = Command::new(env!("CARGO_BIN_EXE_heiwa"))
         .env("HOME", home.path())
+        .env_remove("HEIWA_HOME")
         .env_remove("HEIWA_MACHINE_AUTH_TOKEN")
         .env_remove("HEIWA_AUTH_TOKEN")
         .args([
@@ -129,6 +132,7 @@ fn app_api_sends_signed_headers_without_disclosing_machine_token() {
 
     let token = "wire-only-machine-token";
     let output = Command::new(env!("CARGO_BIN_EXE_heiwa"))
+        .env_remove("HEIWA_HOME")
         .env("HEIWA_MACHINE_AUTH_TOKEN", token)
         .args([
             "app",
