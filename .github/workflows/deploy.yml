@@ -189,3 +189,6 @@ jobs:
           apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
           command: pages deploy .artifacts/public-web --project-name=heiwa-clients --branch=main
+      - name: Preserve non-browser installer access
+        if: env.ENABLE_CLOUDFLARE_DEPLOY == 'true' && env.CF_API_TOKEN != '' && env.CF_ACCOUNT_ID != ''
+        run: bash scripts/configure_public_installer_edge.sh
