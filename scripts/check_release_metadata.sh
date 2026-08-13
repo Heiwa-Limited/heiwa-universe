@@ -29,6 +29,8 @@ require_match() {
 require_match "LICENSE" "^ *Apache License$" "root Apache-2.0 license text is required"
 require_match "Cargo.toml" 'license = "Apache-2\.0"' "workspace package license must be Apache-2.0"
 require_match ".github/workflows/release.yml" 'cp README\.md CONTRIBUTING\.md CODE_OF_CONDUCT\.md LICENSE' "release archives must include LICENSE"
+require_match ".github/workflows/release.yml" 'cd dist' "Windows archives must be created from inside dist so they have one release root"
+require_match "scripts/package_release_sandbox.sh" 'cd "\$dist_dir"' "sandbox Windows archives must have the same one-root layout as CI"
 
 python_projects=(
   "pyproject.toml"
