@@ -111,7 +111,7 @@ Rules:
 
 Pull requests are the sub-minute feedback gate:
 
-- Linux unit/integration tests via three deterministic `cargo nextest` hash shards
+- Linux unit/integration tests via one compiler-cached `cargo nextest` run
 - Rust formatting, Clippy, and unused-dependency checks
 - dependency diff review, Gitleaks, and Trivy
 - TypeScript/web lint, docs, agent sync, and repository contracts
