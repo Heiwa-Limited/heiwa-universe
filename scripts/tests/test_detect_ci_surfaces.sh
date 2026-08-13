@@ -31,6 +31,7 @@ assert_case "Lance source enables targeted Lance certification" "$lance" "crates
 assert_case "Node lockfile enables dependency security only" "$dependencies" "package-lock.json"
 assert_case "Gitleaks policy uses the mandatory scan without dependency audits" "$none" ".gitleaksignore"
 assert_case "CI workflow changes exercise every CI surface" "$all" ".github/workflows/ci.yml"
+assert_case "certification workflow changes exercise every CI surface" "$all" ".github/workflows/certification.yml"
 assert_case "root Rust metadata exercises every Rust target" "$all" "Cargo.lock"
 
 if ! grep -Fq 'git show "$BASE_SHA:scripts/detect_ci_surfaces.sh"' "$workflow"; then
