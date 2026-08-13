@@ -105,11 +105,24 @@ and Deno security audits.
 | | |
 | --- | --- |
 | Surface | `release.yml`, dispatch-only from `main` |
-| Gate | Annotated tag resolving to a commit on `main`; **both** `ci.yml` and `certification.yml` green at that exact commit; public installer pin matches the tag |
+| Gate | Annotated tag resolving to a commit on `main`; **both** `ci.yml` and `certification.yml` green at that exact commit; the installer pin matches the tag **in the checkout and on the served edge** |
 | Evidence | Three platform archives, a checksums file, and the license and contributor materials in each archive |
 
 Dispatch-only is deliberate: tag-triggered releases would rebuild caches on every
 tag and make the release path a development loop.
+
+**Release ordering.** The public installer reaches users through the
+dispatch-only Cloudflare deploy, which the release workflow does not trigger.
+The checkout pin and the served bytes are therefore different truths, and a
+green checkout proves nothing about what the edge is handing out. Order:
+
+1. land the pin bump on `main`
+2. dispatch the deploy so `heiwa.ltd/install` serves the new installer
+3. dispatch the release
+
+`release.yml` verifies both pins and refuses to publish if the edge is still
+serving the previous fallback. Without that check a release could go out while
+new installs whose latest-release lookup fails silently land on the old version.
 
 ### 7. Install and update
 

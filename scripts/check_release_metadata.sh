@@ -143,7 +143,8 @@ require_match ".github/workflows/container.yml" '^[[:space:]]*platforms: linux/a
 # while `curl https://heiwa.ltd/install | sh` still installed the previous
 # version. The release gate now refuses a stale pin.
 require_file "scripts/check_installer_version_pin.sh"
-require_match ".github/workflows/release.yml" 'bash scripts/check_installer_version_pin\.sh' "releases must refuse a stale public installer fallback pin"
+require_match ".github/workflows/release.yml" 'bash scripts/check_installer_version_pin\.sh "\$RELEASE_VERSION"' "releases must refuse a stale public installer fallback pin in the checkout"
+require_match ".github/workflows/release.yml" 'bash scripts/check_installer_version_pin\.sh --served "\$RELEASE_VERSION"' "releases must refuse a stale installer on the public edge, which deploys separately"
 require_match "apps/heiwa_app/clients/web/install" '^pinned_version="[0-9]+\.[0-9]+\.[0-9]+"$' "the public installer must keep a semantic fallback pin"
 require_match "apps/heiwa_app/clients/web/install" 'resolve_latest_version' "the public installer must resolve the newest release at run time"
 require_file "scripts/configure_public_installer_edge.sh"
