@@ -185,9 +185,14 @@ jobs:
       - name: Cargo test
         if: needs.changes.outputs.rust == 'true' && matrix.os == 'ubuntu-latest'
         run: cargo test --workspace --exclude heiwa-desktop --locked --no-default-features
-      - name: Cross-platform cargo check
+      # Compile test targets on their native OS without executing the full
+      # suite three times. This preserves cfg-gated platform coverage while
+      # Linux remains the single execution lane.
+      - name: Cross-platform test compilation
         if: needs.changes.outputs.rust == 'true' && matrix.os != 'ubuntu-latest'
-        run: cargo check --workspace --exclude heiwa-desktop --locked --no-default-features
+        run: >
+          cargo test --workspace --exclude heiwa-desktop --locked
+          --no-default-features --no-run
       - name: Cargo fmt
         if: needs.changes.outputs.rust == 'true' && matrix.os == 'ubuntu-latest'
         run: cargo fmt --all -- --check
@@ -260,7 +265,9 @@ jobs:
           repo-token: ${{ secrets.GITHUB_TOKEN }}
       - name: Certify Lance backend
         if: needs.changes.outputs.lance == 'true'
-        run: cargo test -p heiwa_embed --locked --features lance
+        run: |
+          cargo test -p heiwa_embed --locked --features lance
+          cargo test -p heiwa-session --locked --features lance --test operator_service
 
   lint:
     name: TypeScript and Web Lint
