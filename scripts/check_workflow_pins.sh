@@ -18,7 +18,10 @@ while IFS= read -r line; do
     echo "mutable or malformed workflow action reference: $line" >&2
     failures=$((failures + 1))
   fi
-done < <(rg -n '^\s*-?\s*uses:' .github/workflows -g '*.yml' -g '*.yaml')
+done < <(
+  grep -R -n -E --include='*.yml' --include='*.yaml' \
+    '^[[:space:]]*-?[[:space:]]*uses:' .github/workflows
+)
 
 if (( count == 0 )); then
   echo "no workflow action references found" >&2

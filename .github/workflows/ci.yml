@@ -50,7 +50,7 @@ jobs:
         run: |
           set -euo pipefail
           python -m pip install uv==0.12.1
-          go install github.com/gitleaks/gitleaks/v8@v8.30.1
+          go install github.com/zricethezav/gitleaks/v8@v8.30.1
           npm ci --ignore-scripts
           npm ci --ignore-scripts --prefix apps/heiwa_app/clients/cockpit
           npm ci --ignore-scripts --prefix apps/heiwa_app/desktop

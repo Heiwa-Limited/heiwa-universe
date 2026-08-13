@@ -70,10 +70,11 @@ test assumption. Both are fixed locally; a new full run remains required.
       the first honest signal in two weeks: 8/9 green. Push the Windows fixes,
       security gates, and public-readiness hardening, then require a fully green
       replacement run.
-- [ ] **B5 — Resolve PR #53 (Blacksmith runners) and #54 (Greptile).** #53 is
+- [x] **B5 — Resolve PR #53 (Blacksmith runners) and #54 (Greptile).** #53 was
       superseded by the zero-cost GitHub-hosted runner path already proven on
-      #52. #54 is an independent Greptile trial/config change, not a competing
-      workflow implementation; handle it separately from the promotion PR.
+      #52 and closed. #54 was confirmed as an independent Greptile trial/config
+      change, then closed outside promotion with its three unresolved review
+      findings preserved in the PR receipt.
 - [ ] **B6 — Fix the queued-forever Dependabot runs on `main`.** Runs
       `31552660223`, `31539043322` and others sit queued ~24h, then cancel.
       Separate from the #52 CI story: these are on `main`, which does not yet
