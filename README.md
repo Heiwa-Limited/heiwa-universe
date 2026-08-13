@@ -1,7 +1,7 @@
 # Heiwa
 
-[![CI](https://github.com/Strategizing/heiwa-universe/actions/workflows/ci.yml/badge.svg)](https://github.com/Strategizing/heiwa-universe/actions/workflows/ci.yml)
-[![Docs](https://github.com/Strategizing/heiwa-universe/actions/workflows/pages.yml/badge.svg)](https://github.com/Strategizing/heiwa-universe/actions/workflows/pages.yml)
+[![CI](https://github.com/Heiwa-Limited/heiwa-universe/actions/workflows/ci.yml/badge.svg)](https://github.com/Heiwa-Limited/heiwa-universe/actions/workflows/ci.yml)
+[![Docs](https://github.com/Heiwa-Limited/heiwa-universe/actions/workflows/pages.yml/badge.svg)](https://github.com/Heiwa-Limited/heiwa-universe/actions/workflows/pages.yml)
 [![License](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE)
 
 Heiwa is a local-first AI operating layer. The installed `heiwa` runtime is the product center, Rust owns the execution path, and this repository is being hardened for GitHub-native distribution rather than hosted-platform theater.

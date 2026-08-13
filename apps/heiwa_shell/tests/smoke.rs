@@ -433,12 +433,12 @@ fn test_app_update_dry_run_defaults_to_github_release_source() {
         "expected update dry-run to identify GitHub release source mode: {stdout}"
     );
     assert!(
-        stdout.contains("source: https://github.com/Strategizing/heiwa-universe/releases"),
+        stdout.contains("source: https://github.com/Heiwa-Limited/heiwa-universe/releases"),
         "expected update dry-run to identify GitHub Releases as source: {stdout}"
     );
     assert!(
         stdout.contains(
-            "release_api: https://api.github.com/repos/Strategizing/heiwa-universe/releases/latest"
+            "release_api: https://api.github.com/repos/Heiwa-Limited/heiwa-universe/releases/latest"
         ),
         "expected update dry-run to expose latest release API: {stdout}"
     );

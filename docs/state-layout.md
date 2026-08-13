@@ -65,7 +65,7 @@ The container ships with `HEIWA_HOME=/root/.heiwa` and `HEIWA_DEFAULT_POLICY=loc
 
 GitHub is the source of truth for source and binaries.
 
-- Source: <https://github.com/Strategizing/heiwa-universe>
+- Source: <https://github.com/Heiwa-Limited/heiwa-universe>
 - Container: `ghcr.io/strategizing/heiwa:<tag>` (built from `apps/heiwa_shell/Dockerfile`)
 - Binary releases: GitHub Releases on tag push (see `.github/workflows/release.yml`)
 

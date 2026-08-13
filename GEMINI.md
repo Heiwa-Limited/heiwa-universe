@@ -6,7 +6,7 @@ Naming:
 
 - **Heiwa** = product/app/runtime/CLI/packages/docs.
 - **Heiwa Limited** = company/publisher/legal identity.
-- **Heiwa Universe** = this open-source repo, `Strategizing/heiwa-universe`.
+- **Heiwa Universe** = this repo, `Heiwa-Limited/heiwa-universe`, private until the public security/readiness gate passes.
 
 ## Gemini's Role Here
 

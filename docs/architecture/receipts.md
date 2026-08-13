@@ -4,7 +4,7 @@
 
 ## Status (2026-05-25)
 
-Spec status: **partial**. The cost-attribution ledger on [`heiwa.ltd`](https://heiwa.ltd) mocks this schema for demonstration. The runtime stub at `crates/heiwa_receipts/` (planned) will write receipts to `~/.heiwa/receipts.db`. STDB mirror is wired for receipt headers only. `counterfactual_cost_cad` is not yet computed automatically — operators see actual cost in the operator app, counterfactual on the marketing surface as a hand-curated demo. See [`HEIWA.md`](https://github.com/Strategizing/heiwa-universe/blob/main/HEIWA.md) for the current-vs-target capability matrix.
+Spec status: **partial**. The cost-attribution ledger on [`heiwa.ltd`](https://heiwa.ltd) mocks this schema for demonstration. The runtime stub at `crates/heiwa_receipts/` (planned) will write receipts to `~/.heiwa/receipts.db`. STDB mirror is wired for receipt headers only. `counterfactual_cost_cad` is not yet computed automatically — operators see actual cost in the operator app, counterfactual on the marketing surface as a hand-curated demo. See [`HEIWA.md`](https://github.com/Heiwa-Limited/heiwa-universe/blob/main/HEIWA.md) for the current-vs-target capability matrix.
 
 ## Why this schema
 

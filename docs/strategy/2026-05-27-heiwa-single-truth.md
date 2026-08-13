@@ -17,7 +17,7 @@ Compression:
 
 ## Current Truth
 
-- Repository: `Strategizing/heiwa-universe`, private on GitHub as of this check.
+- Repository: `Heiwa-Limited/heiwa-universe`, private on GitHub as of this check.
 - Default branch: `main`.
 - Local checkout: `/Users/dmcgregsauce/heiwa-universe`, currently dirty with
   peer-agent work.
@@ -29,7 +29,7 @@ Compression:
 - Git tags exist, including old backup tags and `v1.0`, but no tag should be
   treated as stable distribution until a release artifact and checksum exist.
 - Public `https://heiwa.ltd/install` currently serves a source-build installer
-  that clones `https://github.com/Strategizing/heiwa-universe.git` from `main`;
+  that clones `https://github.com/Heiwa-Limited/heiwa-universe.git` from `main`;
   this fails for normal users while the repo is private and is not release
   provenance.
 - `docs.heiwa.ltd` returned GitHub Pages 404 during this check.

@@ -38,10 +38,10 @@ GitHub is the source of truth. Every public artifact is built from a tagged comm
 
 | Workflow                                                                                                | Trigger                         | Output                                         |
 | ------------------------------------------------------------------------------------------------------- | ------------------------------- | ---------------------------------------------- |
-| [`ci.yml`](https://github.com/Strategizing/heiwa-universe/blob/main/.github/workflows/ci.yml)           | PRs to `main` + manual dispatch | Rust matrix, lint, docs, agent-sync, hygiene   |
-| [`pages.yml`](https://github.com/Strategizing/heiwa-universe/blob/main/.github/workflows/pages.yml)     | tag push `v*`                   | MkDocs build → GitHub Pages → `docs.heiwa.ltd` |
-| [`release.yml`](https://github.com/Strategizing/heiwa-universe/blob/main/.github/workflows/release.yml) | tag push `v*`                   | Cross-platform binaries → GitHub Releases      |
-| [`deploy.yml`](https://github.com/Strategizing/heiwa-universe/blob/main/.github/workflows/deploy.yml)   | manual dispatch only            | Cloudflare Pages publish for `clients/web/`    |
+| [`ci.yml`](https://github.com/Heiwa-Limited/heiwa-universe/blob/main/.github/workflows/ci.yml)           | PRs to `main` + manual dispatch | Rust matrix, lint, docs, agent-sync, hygiene   |
+| [`pages.yml`](https://github.com/Heiwa-Limited/heiwa-universe/blob/main/.github/workflows/pages.yml)     | tag push `v*`                   | MkDocs build → GitHub Pages → `docs.heiwa.ltd` |
+| [`release.yml`](https://github.com/Heiwa-Limited/heiwa-universe/blob/main/.github/workflows/release.yml) | tag push `v*`                   | Cross-platform binaries → GitHub Releases      |
+| [`deploy.yml`](https://github.com/Heiwa-Limited/heiwa-universe/blob/main/.github/workflows/deploy.yml)   | manual dispatch only            | Cloudflare Pages publish for `clients/web/`    |
 
 CI economy: compute runs at the moments that matter — PR validation (the production gate for `main`), tagged releases, and deliberate dispatches. Merges to `main` do not implicitly re-test or republish anything. `bash scripts/check_ci_local.sh` mirrors the PR checks locally and is the required pre-push gate.
 

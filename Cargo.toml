@@ -28,9 +28,9 @@ resolver = "2"
 
 [workspace.package]
 license = "Apache-2.0"
-repository = "https://github.com/Strategizing/heiwa-universe"
-homepage = "https://github.com/Strategizing/heiwa-universe"
-documentation = "https://strategizing.github.io/heiwa-universe/"
+repository = "https://github.com/Heiwa-Limited/heiwa-universe"
+homepage = "https://github.com/Heiwa-Limited/heiwa-universe"
+documentation = "https://heiwa-limited.github.io/heiwa-universe/"
 readme = "README.md"
 keywords = ["heiwa", "ai", "agents", "cli", "local-first"]
 categories = ["command-line-utilities", "development-tools"]

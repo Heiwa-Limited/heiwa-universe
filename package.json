@@ -4,11 +4,11 @@
   "license": "Apache-2.0",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/Strategizing/heiwa-universe.git"
+    "url": "git+https://github.com/Heiwa-Limited/heiwa-universe.git"
   },
-  "homepage": "https://github.com/Strategizing/heiwa-universe",
+  "homepage": "https://github.com/Heiwa-Limited/heiwa-universe",
   "bugs": {
-    "url": "https://github.com/Strategizing/heiwa-universe/issues"
+    "url": "https://github.com/Heiwa-Limited/heiwa-universe/issues"
   },
   "engines": {
     "node": "26.x"

@@ -1,7 +1,7 @@
 # Heiwa Swarm Bootstrapper for Windows
 # Run this in PowerShell to initialize your Heavy Compute Node
 
-$RepoUrl = "https://github.com/Strategizing/heiwa-universe.git"
+$RepoUrl = "https://github.com/Heiwa-Limited/heiwa-universe.git"
 $WorkDir = "$HOME/heiwa-universe"
 
 Write-Host "🌐 [HEIWA] Starting Windows Bootstrapper..." -ForegroundColor Cyan

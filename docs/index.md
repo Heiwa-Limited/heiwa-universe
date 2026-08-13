@@ -17,7 +17,7 @@ Three planes compose one flow:
 - **Execution** — DREX routes work to local models, provider CLIs, tools, and connectors under leases and approval gates.
 - **Evidence** — every read or action emits a source-linked receipt into local JSONL; Lance provides derived recall.
 
-Maturity is uneven across planes today; see [`HEIWA.md`](https://github.com/Strategizing/heiwa-universe/blob/main/HEIWA.md#the-three-planes) for current vs target.
+Maturity is uneven across planes today; see [`HEIWA.md`](https://github.com/Heiwa-Limited/heiwa-universe/blob/main/HEIWA.md#the-three-planes) for current vs target.
 
 ## Supported surfaces
 
@@ -57,8 +57,8 @@ If a surface is not covered by current docs, CI, or an explicit build matrix tas
 
 ## Source of truth
 
-- [`HEIWA.md`](https://github.com/Strategizing/heiwa-universe/blob/main/HEIWA.md)
+- [`HEIWA.md`](https://github.com/Heiwa-Limited/heiwa-universe/blob/main/HEIWA.md)
 - [`docs/product-contract.md`](product-contract.md)
 - [`docs/capability-fabric.md`](capability-fabric.md)
-- [`BUILD_MATRIX.md`](https://github.com/Strategizing/heiwa-universe/blob/main/BUILD_MATRIX.md)
-- [`README.md`](https://github.com/Strategizing/heiwa-universe/blob/main/README.md)
+- [`BUILD_MATRIX.md`](https://github.com/Heiwa-Limited/heiwa-universe/blob/main/BUILD_MATRIX.md)
+- [`README.md`](https://github.com/Heiwa-Limited/heiwa-universe/blob/main/README.md)
