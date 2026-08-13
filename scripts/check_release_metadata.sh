@@ -95,11 +95,29 @@ require_block_match ".github/workflows/ci.yml" \
   '^    runs-on:' \
   '^ *if: always\(\)$' \
   "the Rust Source Policy context must report even when a lane fails or is skipped"
-require_match ".github/workflows/ci.yml" 'cargo fmt --all -- --check' "PR CI must check Rust formatting"
-require_match ".github/workflows/ci.yml" 'bash scripts/ci_rust_test_group\.sh --check' "PR CI must validate the Rust test inventory"
-require_match ".github/workflows/ci.yml" 'cargo test --workspace --exclude heiwa-desktop --locked --no-default-features' "PR CI must execute workspace Rust tests before merge"
-require_match ".github/workflows/ci.yml" 'cargo clippy --workspace --exclude heiwa-desktop' "PR CI must execute clippy before merge"
-require_match ".github/workflows/ci.yml" 'run: cargo machete' "PR CI must check unused Rust dependencies before merge"
+# Scope each command to the job that must own it. A whole-file `require_match`
+# would still pass if a command drifted from one Rust lane into the other, which
+# would silently change what each required context actually proves.
+require_block_match ".github/workflows/ci.yml" \
+  '^  rust-tests:' '^  rust-static:' \
+  'bash scripts/ci_rust_test_group\.sh --check' \
+  "the Rust Tests lane must validate the Rust test inventory"
+require_block_match ".github/workflows/ci.yml" \
+  '^  rust-tests:' '^  rust-static:' \
+  'cargo test --workspace --exclude heiwa-desktop --locked --no-default-features' \
+  "the Rust Tests lane must execute the workspace test suite before merge"
+require_block_match ".github/workflows/ci.yml" \
+  '^  rust-static:' '^  rust-source-policy:' \
+  'cargo fmt --all -- --check' \
+  "the Rust Static Checks lane must check Rust formatting"
+require_block_match ".github/workflows/ci.yml" \
+  '^  rust-static:' '^  rust-source-policy:' \
+  'cargo clippy --workspace --exclude heiwa-desktop' \
+  "the Rust Static Checks lane must execute clippy before merge"
+require_block_match ".github/workflows/ci.yml" \
+  '^  rust-static:' '^  rust-source-policy:' \
+  'run: cargo machete' \
+  "the Rust Static Checks lane must check unused Rust dependencies before merge"
 require_match ".github/workflows/certification.yml" 'name: Run Linux Rust tests' "protected main must execute the Rust test suite"
 require_match ".github/workflows/certification.yml" 'name: Compile non-Linux Rust test targets' "protected main must compile macOS and Windows Rust tests"
 require_match ".github/workflows/certification.yml" 'name: Rust Static Certification' "protected main must run Rust static certification"
