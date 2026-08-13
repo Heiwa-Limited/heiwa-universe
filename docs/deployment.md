@@ -109,12 +109,34 @@ Rules:
 
 ## CI contract
 
-Pull requests are the sub-minute feedback gate:
+Pull requests run two lanes, both required before merge.
 
-- Linux unit/integration tests via three drift-checked `cargo nextest` package groups
-- Rust formatting, Clippy, and unused-dependency checks
+Sub-minute feedback lane, one minute per job:
+
 - dependency diff review, Gitleaks, and Trivy
 - TypeScript/web lint, docs, agent sync, and repository contracts
+
+Rust promotion lane, bounded at 20 minutes per job:
+
+- `Rust Tests` — the drift check in `scripts/ci_rust_test_group.sh --check`, then
+  `cargo test --workspace --exclude heiwa-desktop --locked --no-default-features`
+- `Rust Static Checks` — `cargo fmt --check`, Clippy with `-D warnings`, and
+  `cargo machete`
+
+Compiling Rust cannot be sub-minute, so this lane is bounded rather than fast; the
+sccache Actions cache seeded on protected `main` keeps the usual PR run to a few
+minutes. Both lanes report through `Rust Source Policy`, the aggregate status
+context that `main` branch protection requires — it is pinned by name in branch
+protection, so it must keep reporting even if the jobs behind it are renamed or
+re-sharded.
+
+Runner policy: `scripts/check_ci_job_deadlines.rb` enforces both a hard deadline
+and a runner label proven to claim jobs in this repository. A deadline alone is
+not enough — `timeout-minutes` bounds a *running* job and does not bound queue
+time, so a job requesting a label no runner provides sits queued for hours. The
+`blacksmith-*` labels are not proven here yet: the app is installed at the
+organization, but no Blacksmith runner has ever claimed a job in this repository.
+Prove a label claims a job before adding it to `PROVEN_RUNNER_LABELS`.
 
 Protected `main` is the full release certification gate:
 

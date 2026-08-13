@@ -191,18 +191,16 @@ pub fn check_ai_ops_at(repo_root: &Path) -> Result<AiOpsReport> {
     let biome_configured = repo_root.join("biome.json").is_file();
     let npm_lint_uses_biome = package_lint_uses_biome(&repo_root.join("package.json"));
     let ci = fs::read_to_string(repo_root.join(".github/workflows/ci.yml")).unwrap_or_default();
-    let certification = fs::read_to_string(repo_root.join(".github/workflows/certification.yml"))
-        .unwrap_or_default();
 
     Ok(AiOpsReport {
         mcp_notion_http,
         biome_configured,
         npm_lint_uses_biome,
         ci_lint_uses_biome: ci.contains("npm run lint") && ci.contains("Run Biome"),
-        ci_clippy_dead_code_enforced: certification.contains("cargo clippy")
-            && certification.contains("-D warnings")
-            && !certification.contains("-A dead_code"),
-        ci_unused_deps_uses_cargo_machete: certification.contains("cargo machete"),
+        ci_clippy_dead_code_enforced: ci.contains("cargo clippy")
+            && ci.contains("-D warnings")
+            && !ci.contains("-A dead_code"),
+        ci_unused_deps_uses_cargo_machete: ci.contains("cargo machete"),
     })
 }
 

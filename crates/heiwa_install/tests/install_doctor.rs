@@ -81,11 +81,11 @@ fn test_ai_ops_doctor_checks_repo_hygiene_gates() {
     assert!(report.ci_lint_uses_biome, "CI must run the Biome gate");
     assert!(
         report.ci_clippy_dead_code_enforced,
-        "Rust certification Clippy must not suppress dead_code"
+        "CI Clippy must not suppress dead_code"
     );
     assert!(
         report.ci_unused_deps_uses_cargo_machete,
-        "Rust certification must run cargo machete for unused dependencies"
+        "CI must run cargo machete for unused Rust dependencies"
     );
     assert!(report.is_clean(), "all ai ops checks should be clean");
 }

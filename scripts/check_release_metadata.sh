@@ -79,11 +79,45 @@ require_file ".github/workflows/certification.yml"
 require_match ".github/workflows/certification.yml" '^name: Heiwa Certification$' "heavy release proofs must use the certification workflow"
 require_no_match ".github/workflows/ci.yml" 'name: (Lance Backend Certification|Desktop Shell Certification|Cross-Platform Rust Compilation|Multi-Ecosystem Security Certification)' "heavy release proofs must stay out of sub-minute CI"
 require_match ".github/workflows/certification.yml" 'mozilla-actions/sccache-action@fc920bf0ec8de6ee65d409111f7ec508035751ba' "protected main must seed the on-demand Rust compiler cache"
-require_match ".github/workflows/ci.yml" 'name: Rust Source Policy' "fast CI must retain bounded Rust source policy"
-require_match ".github/workflows/ci.yml" 'cargo fmt --all -- --check' "fast CI must check Rust formatting"
-require_match ".github/workflows/ci.yml" 'bash scripts/ci_rust_test_group\.sh --check' "fast CI must validate the Rust test inventory"
-require_no_match ".github/workflows/ci.yml" 'cargo (test|nextest|clippy|machete|build|check)' "cache-sensitive Rust work must stay out of sub-minute CI"
-require_no_match ".github/workflows/ci.yml" 'sccache-action|cargo-nextest|libdbus-1-dev' "compiler setup must stay out of sub-minute CI"
+require_match ".github/workflows/ci.yml" 'name: Rust Tests' "PR CI must run the Rust test suite"
+require_match ".github/workflows/ci.yml" 'name: Rust Static Checks' "PR CI must run Rust static checks"
+# `main` branch protection pins the `Rust Source Policy` status context by name.
+# Renaming or deleting the job that reports it leaves the required check pending
+# forever and no PR can merge, so the aggregate job is release metadata.
+require_match ".github/workflows/ci.yml" 'name: Rust Source Policy' "main branch protection requires the Rust Source Policy status context"
+require_block_match ".github/workflows/ci.yml" \
+  '^  rust-source-policy:' \
+  '^    runs-on:' \
+  'needs: \[rust-tests, rust-static\]' \
+  "the Rust Source Policy context must aggregate both Rust promotion lanes"
+require_block_match ".github/workflows/ci.yml" \
+  '^  rust-source-policy:' \
+  '^    runs-on:' \
+  '^ *if: always\(\)$' \
+  "the Rust Source Policy context must report even when a lane fails or is skipped"
+# Scope each command to the job that must own it. A whole-file `require_match`
+# would still pass if a command drifted from one Rust lane into the other, which
+# would silently change what each required context actually proves.
+require_block_match ".github/workflows/ci.yml" \
+  '^  rust-tests:' '^  rust-static:' \
+  'bash scripts/ci_rust_test_group\.sh --check' \
+  "the Rust Tests lane must validate the Rust test inventory"
+require_block_match ".github/workflows/ci.yml" \
+  '^  rust-tests:' '^  rust-static:' \
+  'cargo test --workspace --exclude heiwa-desktop --locked --no-default-features' \
+  "the Rust Tests lane must execute the workspace test suite before merge"
+require_block_match ".github/workflows/ci.yml" \
+  '^  rust-static:' '^  rust-source-policy:' \
+  'cargo fmt --all -- --check' \
+  "the Rust Static Checks lane must check Rust formatting"
+require_block_match ".github/workflows/ci.yml" \
+  '^  rust-static:' '^  rust-source-policy:' \
+  'cargo clippy --workspace --exclude heiwa-desktop' \
+  "the Rust Static Checks lane must execute clippy before merge"
+require_block_match ".github/workflows/ci.yml" \
+  '^  rust-static:' '^  rust-source-policy:' \
+  'run: cargo machete' \
+  "the Rust Static Checks lane must check unused Rust dependencies before merge"
 require_match ".github/workflows/certification.yml" 'name: Run Linux Rust tests' "protected main must execute the Rust test suite"
 require_match ".github/workflows/certification.yml" 'name: Compile non-Linux Rust test targets' "protected main must compile macOS and Windows Rust tests"
 require_match ".github/workflows/certification.yml" 'name: Rust Static Certification' "protected main must run Rust static certification"

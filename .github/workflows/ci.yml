@@ -1,7 +1,21 @@
 name: Heiwa CI
 
-# CI is the sub-minute change gate. Compilation, tests, and other cache-sensitive
-# proofs run independently in certification.yml at every protected-main commit.
+# CI is the promotion gate for `main`. It has two lanes:
+#
+#   * the sub-minute feedback lane (everything except the Rust jobs), bounded at
+#     one minute per job by scripts/check_ci_job_deadlines.rb
+#   * the bounded Rust promotion lane (rust-tests, rust-static), which compiles
+#     and therefore cannot be sub-minute; it is capped at 20 minutes and warmed
+#     by the sccache GitHub Actions cache seeded on protected `main`
+#
+# `Rust Source Policy` is the aggregate required status check. Branch protection
+# on `main` pins that context name, so it must keep reporting even when the
+# underlying Rust jobs are renamed or re-sharded.
+#
+# Runner note: these jobs previously targeted `blacksmith-16vcpu-ubuntu-2404`.
+# That label was never picked up by a runner (jobs sat queued indefinitely, and
+# `timeout-minutes` does not bound queue time), so the lanes run on
+# GitHub-hosted runners until Blacksmith is proven for this org.
 on:
   pull_request:
     branches: ["main"]
@@ -60,10 +74,15 @@ jobs:
       - name: Reject vulnerable dependency changes
         uses: actions/dependency-review-action@a1d282b36b6f3519aa1f3fc636f609c47dddb294 # v5.0.0
 
-  rust-source-policy:
-    name: Rust Source Policy
+  rust-tests:
+    name: Rust Tests
     runs-on: ubuntu-latest
-    timeout-minutes: 1
+    timeout-minutes: 20
+    env:
+      CARGO_PROFILE_DEV_DEBUG: "0"
+      CARGO_INCREMENTAL: "0"
+      SCCACHE_GHA_ENABLED: "true"
+      RUSTC_WRAPPER: sccache
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
         with:
@@ -72,11 +91,95 @@ jobs:
         uses: dtolnay/rust-toolchain@4360b52568e2003a75bf9bc1d59f33a8e3fc893c # stable
         with:
           toolchain: 1.95.0
-          components: rustfmt
-      - name: Verify Rust source and test inventory
+      - name: Install on-demand compiler cache
+        uses: mozilla-actions/sccache-action@fc920bf0ec8de6ee65d409111f7ec508035751ba # v0.0.11
+        with:
+          version: v0.16.0
+      - name: Install Linux system dependencies
+        run: sudo apt-get install -y --no-install-recommends libdbus-1-dev pkg-config
+      - name: Run Rust tests
         run: |
-          cargo fmt --all -- --check
           bash scripts/ci_rust_test_group.sh --check
+          cargo test --workspace --exclude heiwa-desktop --locked --no-default-features
+
+  rust-static:
+    name: Rust Static Checks
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      CARGO_PROFILE_DEV_DEBUG: "0"
+      CARGO_INCREMENTAL: "0"
+      SCCACHE_GHA_ENABLED: "true"
+      RUSTC_WRAPPER: sccache
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          persist-credentials: false
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@4360b52568e2003a75bf9bc1d59f33a8e3fc893c # stable
+        with:
+          toolchain: 1.95.0
+          components: clippy,rustfmt
+      - name: Install on-demand compiler cache
+        uses: mozilla-actions/sccache-action@fc920bf0ec8de6ee65d409111f7ec508035751ba # v0.0.11
+        with:
+          version: v0.16.0
+      - name: Install Linux system dependencies
+        run: sudo apt-get install -y --no-install-recommends libdbus-1-dev pkg-config
+      - name: Check Rust formatting
+        run: cargo fmt --all -- --check
+      - name: Run Rust clippy
+        run: >
+          cargo clippy --workspace --exclude heiwa-desktop --locked --all-targets
+          --no-default-features --
+          -A clippy::too_many_arguments
+          -A clippy::new_without_default
+          -A clippy::unnecessary_to_owned
+          -A clippy::needless_range_loop
+          -A clippy::approx_constant
+          -A clippy::collapsible_if
+          -A clippy::bool_assert_comparison
+          -A clippy::type_complexity
+          -A clippy::needless_borrows_for_generic_args
+          -A clippy::unnecessary_unwrap
+          -D warnings
+      - name: Install cargo-machete
+        uses: taiki-e/install-action@b20dedce73af6905cdc30d6611090c9b67557c8d # v2
+        with:
+          tool: cargo-machete
+      - name: Check unused Rust dependencies
+        run: cargo machete
+
+  rust-source-policy:
+    # Aggregate required status check. `main` branch protection pins this exact
+    # context name, so it must always report a conclusion — including when the
+    # lanes it guards fail, are cancelled, or are skipped.
+    name: Rust Source Policy
+    needs: [rust-tests, rust-static]
+    if: always()
+    runs-on: ubuntu-latest
+    timeout-minutes: 1
+    steps:
+      - name: Require the Rust promotion lanes to pass
+        env:
+          RUST_TESTS_RESULT: ${{ needs.rust-tests.result }}
+          RUST_STATIC_RESULT: ${{ needs.rust-static.result }}
+        run: |
+          set -euo pipefail
+          echo "rust-tests=$RUST_TESTS_RESULT rust-static=$RUST_STATIC_RESULT"
+          status=0
+          if [[ "$RUST_TESTS_RESULT" != "success" ]]; then
+            echo "Rust Tests did not succeed" >&2
+            status=1
+          fi
+          if [[ "$RUST_STATIC_RESULT" != "success" ]]; then
+            echo "Rust Static Checks did not succeed" >&2
+            status=1
+          fi
+          if (( status != 0 )); then
+            exit 1
+          fi
+          echo "Rust promotion proof complete."
 
   lint:
     name: TypeScript and Web Lint

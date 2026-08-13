@@ -63,7 +63,7 @@ cargo run -p heiwa-shell --bin heiwa -- auth status
 
 ## Platform Lane
 
-- CI runs Rust build/test/clippy across macOS, Linux, and Windows.
+- PR CI pairs a sub-minute feedback lane with a bounded Linux Rust test/Clippy lane; protected-main certification compiles macOS/Windows and certifies desktop, Lance, and security before release.
 - Docs publish through GitHub Pages on release tags.
 - Cargo manifests now carry shared package metadata for release readiness.
 - Release archives include the Apache-2.0 license and contributor materials.
