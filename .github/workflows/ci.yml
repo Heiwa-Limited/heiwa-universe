@@ -114,11 +114,25 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - group: shell
+          - group: shell-unit
             needs_native_vault: true
-          - group: runtime
+          - group: shell-api
             needs_native_vault: true
-          - group: foundation
+          - group: shell-state
+            needs_native_vault: true
+          - group: shell-ops
+            needs_native_vault: true
+          - group: runtime-unit
+            needs_native_vault: true
+          - group: runtime-a
+            needs_native_vault: true
+          - group: runtime-b
+            needs_native_vault: true
+          - group: foundation-unit
+            needs_native_vault: false
+          - group: foundation-a
+            needs_native_vault: false
+          - group: foundation-b
             needs_native_vault: false
     env:
       CARGO_PROFILE_DEV_DEBUG: "0"
