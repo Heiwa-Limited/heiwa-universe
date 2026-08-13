@@ -387,8 +387,7 @@ fn open_store() -> Result<AutomationStore> {
 }
 
 fn state_dir() -> PathBuf {
-    let home = crate::home::heiwa_home().unwrap_or_else(|| PathBuf::from("."));
-    home.join(".heiwa").join("state")
+    crate::home::heiwa_state_dir()
 }
 
 fn ensure_state_dir() -> Result<()> {
@@ -487,6 +486,25 @@ fn print_help() {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn state_dir_honors_explicit_override() {
+        let prior = std::env::var_os("HEIWA_STATE_DIR");
+        let expected = std::env::temp_dir().join(format!(
+            "heiwa-auto-state-{}-{}",
+            std::process::id(),
+            uuid::Uuid::new_v4()
+        ));
+        std::env::set_var("HEIWA_STATE_DIR", &expected);
+
+        let actual = state_dir();
+
+        match prior {
+            Some(value) => std::env::set_var("HEIWA_STATE_DIR", value),
+            None => std::env::remove_var("HEIWA_STATE_DIR"),
+        }
+        assert_eq!(actual, expected);
+    }
 
     #[test]
     fn parse_file_event_accepts_common_names() {

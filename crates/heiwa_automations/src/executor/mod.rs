@@ -9,6 +9,9 @@ use serde_json::json;
 use std::fs;
 use std::future::Future;
 
+const EXECUTION_LEASE_TIMEOUT_MINUTES: i64 = 60;
+const MAX_EXECUTION_LEASE_RECOVERIES: u32 = 3;
+
 /// Result of attempting to queue an execution.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct QueueResult {
@@ -209,6 +212,25 @@ impl AutomationExecutor {
         runner: &R,
         limit: usize,
     ) -> Result<Vec<Execution>> {
+        let stale_before = Utc::now() - Duration::minutes(EXECUTION_LEASE_TIMEOUT_MINUTES);
+        for execution in self
+            .store
+            .recover_stale_running_executions(stale_before, MAX_EXECUTION_LEASE_RECOVERIES)?
+        {
+            match execution.status {
+                ExecutionStatus::Pending => self.write_receipt(
+                    &execution,
+                    "requeued",
+                    json!({"reason": "execution_lease_expired"}),
+                )?,
+                ExecutionStatus::Failed => self.write_receipt(
+                    &execution,
+                    "failed",
+                    json!({"reason": "execution_lease_retry_limit_exceeded"}),
+                )?,
+                _ => {}
+            }
+        }
         let pending = self.store.list_pending_executions(limit)?;
         let mut completed = Vec::new();
         for row in pending {
@@ -347,6 +369,84 @@ mod tests {
 
         assert_eq!(completed.len(), 1);
         assert_eq!(completed[0].status, ExecutionStatus::Completed);
+    }
+
+    #[tokio::test]
+    async fn stale_running_execution_is_requeued_and_completed() {
+        let tmp = tempfile::tempdir().unwrap();
+        let store = AutomationStore::open_state_dir(tmp.path()).unwrap();
+        let automation = Automation::new("recovery".into(), "resume work".into()).activate();
+        store.upsert_automation(&automation).unwrap();
+        let executor = AutomationExecutor::new(store.clone());
+        let queued = executor
+            .queue_execution(
+                automation.id,
+                TriggerEventData::External {
+                    timestamp: Utc::now(),
+                    source: crate::types::ExternalSource::Api,
+                    metadata: None,
+                },
+            )
+            .unwrap();
+        let execution_id = queued.execution_id.unwrap();
+        let mut claimed = executor.claim_execution(execution_id).unwrap().unwrap();
+        claimed.started_at = Some(Utc::now() - Duration::hours(2));
+        store.update_execution(&claimed).unwrap();
+
+        let completed = executor.run_pending(&EchoRunner, 10).await.unwrap();
+
+        assert_eq!(completed.len(), 1);
+        assert_eq!(completed[0].status, ExecutionStatus::Completed);
+        assert_eq!(completed[0].retry_count, 1);
+        assert!(tmp
+            .path()
+            .join(format!(
+                "automations/receipts/rcpt-{}-requeued.json",
+                execution_id
+            ))
+            .exists());
+    }
+
+    #[tokio::test]
+    async fn expired_execution_is_failed_after_recovery_limit() {
+        let tmp = tempfile::tempdir().unwrap();
+        let store = AutomationStore::open_state_dir(tmp.path()).unwrap();
+        let automation = Automation::new("bounded".into(), "do not loop forever".into()).activate();
+        store.upsert_automation(&automation).unwrap();
+        let executor = AutomationExecutor::new(store.clone());
+        let queued = executor
+            .queue_execution(
+                automation.id,
+                TriggerEventData::External {
+                    timestamp: Utc::now(),
+                    source: crate::types::ExternalSource::Api,
+                    metadata: None,
+                },
+            )
+            .unwrap();
+        let execution_id = queued.execution_id.unwrap();
+        let mut claimed = executor.claim_execution(execution_id).unwrap().unwrap();
+        claimed.started_at = Some(Utc::now() - Duration::hours(2));
+        claimed.retry_count = 3;
+        store.update_execution(&claimed).unwrap();
+
+        let completed = executor.run_pending(&EchoRunner, 10).await.unwrap();
+        let recovered = store.get_execution(execution_id).unwrap().unwrap();
+
+        assert!(completed.is_empty());
+        assert_eq!(recovered.status, ExecutionStatus::Failed);
+        assert_eq!(
+            recovered.error_message.as_deref(),
+            Some("execution_lease_retry_limit_exceeded")
+        );
+        assert!(recovered.completed_at.is_some());
+        assert!(tmp
+            .path()
+            .join(format!(
+                "automations/receipts/rcpt-{}-failed.json",
+                execution_id
+            ))
+            .exists());
     }
 
     #[test]

@@ -4212,6 +4212,79 @@ pub(crate) async fn submit_operator_turn(
     submit_operator_turn_with_route(thread_id, request).await
 }
 
+fn automation_terminal_outcome(
+    event_type: &heiwa_evidence::OperatorEventType,
+    payload: &Value,
+    assistant_text: Option<&str>,
+    automation_name: &str,
+    thread_id: &str,
+    turn_id: &str,
+) -> Option<heiwa_automations::ExecutionOutcome> {
+    match event_type {
+        heiwa_evidence::OperatorEventType::TurnCompleted => {
+            let text = assistant_text.unwrap_or_default();
+            Some(heiwa_automations::ExecutionOutcome::Completed {
+                summary: if text.is_empty() {
+                    format!("automation {automation_name} completed")
+                } else {
+                    text.to_string()
+                },
+                output: Some(serde_json::json!({
+                    "thread_id": thread_id,
+                    "turn_id": turn_id,
+                    "text": text,
+                })),
+            })
+        }
+        heiwa_evidence::OperatorEventType::ApprovalRequested => {
+            let request_id = payload.get("request_id").and_then(Value::as_str)?;
+            let summary = payload
+                .get("message")
+                .or_else(|| payload.get("reason"))
+                .and_then(Value::as_str)
+                .map(str::to_string)
+                .or_else(|| {
+                    payload
+                        .get("tool")
+                        .and_then(Value::as_str)
+                        .map(|tool| format!("automation requires approval for {tool}"))
+                })
+                .unwrap_or_else(|| "automation requires operator confirmation".to_string());
+            Some(heiwa_automations::ExecutionOutcome::AwaitingConfirmation {
+                request_id: request_id.to_string(),
+                summary,
+            })
+        }
+        heiwa_evidence::OperatorEventType::Blocker => {
+            let summary = payload
+                .get("message")
+                .or_else(|| payload.get("reason"))
+                .and_then(Value::as_str)
+                .unwrap_or("automation requires operator confirmation")
+                .to_string();
+            let request_id = payload
+                .get("request_id")
+                .and_then(Value::as_str)
+                .unwrap_or(turn_id)
+                .to_string();
+            Some(heiwa_automations::ExecutionOutcome::AwaitingConfirmation {
+                request_id,
+                summary,
+            })
+        }
+        heiwa_evidence::OperatorEventType::TurnInterrupted => {
+            let message = payload
+                .get("message")
+                .or_else(|| payload.get("reason"))
+                .and_then(Value::as_str)
+                .unwrap_or("automation turn interrupted")
+                .to_string();
+            Some(heiwa_automations::ExecutionOutcome::Failed { message })
+        }
+        _ => None,
+    }
+}
+
 pub(crate) async fn execute_automation_prompt(
     automation: &heiwa_automations::Automation,
     execution: &heiwa_automations::Execution,
@@ -4240,54 +4313,18 @@ pub(crate) async fn execute_automation_prompt(
                             .and_then(Value::as_str)
                             .map(str::to_string);
                     }
-                    heiwa_evidence::OperatorEventType::TurnCompleted => {
-                        let text = assistant_text.unwrap_or_default();
-                        return Ok(heiwa_automations::ExecutionOutcome::Completed {
-                            summary: if text.is_empty() {
-                                format!("automation {} completed", automation.name)
-                            } else {
-                                text.clone()
-                            },
-                            output: Some(serde_json::json!({
-                                "thread_id": thread_id,
-                                "turn_id": handle.turn_id,
-                                "text": text,
-                            })),
-                        });
+                    ref event_type => {
+                        if let Some(outcome) = automation_terminal_outcome(
+                            event_type,
+                            &row.event.payload,
+                            assistant_text.as_deref(),
+                            &automation.name,
+                            &thread_id,
+                            &handle.turn_id,
+                        ) {
+                            return Ok(outcome);
+                        }
                     }
-                    heiwa_evidence::OperatorEventType::Blocker => {
-                        let summary = row
-                            .event
-                            .payload
-                            .get("message")
-                            .or_else(|| row.event.payload.get("reason"))
-                            .and_then(Value::as_str)
-                            .unwrap_or("automation requires operator confirmation")
-                            .to_string();
-                        let request_id = row
-                            .event
-                            .payload
-                            .get("request_id")
-                            .and_then(Value::as_str)
-                            .unwrap_or(&handle.turn_id)
-                            .to_string();
-                        return Ok(heiwa_automations::ExecutionOutcome::AwaitingConfirmation {
-                            request_id,
-                            summary,
-                        });
-                    }
-                    heiwa_evidence::OperatorEventType::TurnInterrupted => {
-                        let message = row
-                            .event
-                            .payload
-                            .get("message")
-                            .or_else(|| row.event.payload.get("reason"))
-                            .and_then(Value::as_str)
-                            .unwrap_or("automation turn interrupted")
-                            .to_string();
-                        return Ok(heiwa_automations::ExecutionOutcome::Failed { message });
-                    }
-                    _ => {}
                 }
             }
             OperatorStreamFrame::Error {
@@ -4467,6 +4504,29 @@ pub(crate) async fn preview_route_payload(prompt: &str) -> serde_json::Value {
 #[cfg(test)]
 mod tests {
     use heiwa_protocol::{parse_turn_intent, Intent};
+
+    #[test]
+    fn automation_approval_request_becomes_awaiting_confirmation() {
+        let outcome = super::automation_terminal_outcome(
+            &heiwa_evidence::OperatorEventType::ApprovalRequested,
+            &serde_json::json!({
+                "request_id": "approval-42",
+                "message": "calendar write needs approval",
+            }),
+            None,
+            "daily brief",
+            "automation-thread",
+            "turn-42",
+        );
+
+        assert_eq!(
+            outcome,
+            Some(heiwa_automations::ExecutionOutcome::AwaitingConfirmation {
+                request_id: "approval-42".to_string(),
+                summary: "calendar write needs approval".to_string(),
+            })
+        );
+    }
 
     #[test]
     fn operator_route_frame_keeps_repl_route_shape() {

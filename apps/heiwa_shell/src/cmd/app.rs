@@ -25,9 +25,9 @@ const WS_GUID: &str = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11";
 const BROWSER_BOOTSTRAP_TTL_SECONDS: i64 = 60;
 const BROWSER_SESSION_TTL_SECONDS: i64 = 8 * 60 * 60;
 const BROWSER_SESSION_COOKIE_PREFIX: &str = "heiwa_local_operator_";
-const GITHUB_RELEASES_URL: &str = "https://github.com/Strategizing/heiwa-universe/releases";
+const GITHUB_RELEASES_URL: &str = "https://github.com/Heiwa-Limited/heiwa-universe/releases";
 const GITHUB_LATEST_RELEASE_API: &str =
-    "https://api.github.com/repos/Strategizing/heiwa-universe/releases/latest";
+    "https://api.github.com/repos/Heiwa-Limited/heiwa-universe/releases/latest";
 
 #[derive(Debug, Clone, Serialize)]
 pub(crate) struct LocalAppProbe {
@@ -4931,11 +4931,7 @@ fn flag_value(args: &[String], flag: &str) -> Option<String> {
 }
 
 fn state_dir() -> PathBuf {
-    if let Some(path) = env::var_os("HEIWA_STATE_DIR").filter(|value| !value.is_empty()) {
-        return PathBuf::from(path);
-    }
-    let home = crate::home::heiwa_home().unwrap_or_else(|| PathBuf::from("."));
-    home.join(".heiwa").join("state")
+    crate::home::heiwa_state_dir()
 }
 
 fn hostname_string() -> String {
@@ -5383,6 +5379,18 @@ mod app_readmodel_tests {
         serde_json::from_slice(&payload).expect("JSON websocket frame")
     }
 
+    async fn read_next_server_ws_event(stream: &mut TcpStream) -> Value {
+        loop {
+            let frame = tokio::time::timeout(Duration::from_secs(1), read_server_ws_json(stream))
+                .await
+                .expect("event became visible");
+            if frame["type"] == "event" {
+                return frame;
+            }
+            assert_eq!(frame["type"], "heartbeat", "unexpected frame: {frame}");
+        }
+    }
+
     async fn read_server_ws_frame(stream: &mut TcpStream) -> (u8, Vec<u8>) {
         let mut header = [0_u8; 2];
         stream.read_exact(&mut header).await.expect("frame header");
@@ -5498,12 +5506,7 @@ mod app_readmodel_tests {
             )
             .expect("external append");
         for expected in ["turn_started", "user_message"] {
-            let frame = tokio::time::timeout(
-                Duration::from_millis(100),
-                read_server_ws_json(&mut resumed_client),
-            )
-            .await
-            .expect("external event became visible");
+            let frame = read_next_server_ws_event(&mut resumed_client).await;
             assert_eq!(frame["event"]["event_type"], expected);
         }
         let next = tokio::time::timeout(

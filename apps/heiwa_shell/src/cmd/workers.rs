@@ -167,8 +167,7 @@ fn workers_path() -> PathBuf {
 }
 
 fn state_dir() -> PathBuf {
-    let home = crate::home::heiwa_home().unwrap_or_else(|| PathBuf::from("."));
-    home.join(".heiwa").join("state")
+    crate::home::heiwa_state_dir()
 }
 
 fn ensure_state_dir() -> Result<()> {

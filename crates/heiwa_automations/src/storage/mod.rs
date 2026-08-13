@@ -251,6 +251,67 @@ impl AutomationStore {
         decode_execution_rows(rows)
     }
 
+    /// Atomically recover expired running rows or fail exhausted rows.
+    pub fn recover_stale_running_executions(
+        &self,
+        stale_before: DateTime<Utc>,
+        max_recoveries: u32,
+    ) -> Result<Vec<Execution>> {
+        let conn = self.conn.lock().expect("automation store mutex poisoned");
+        let candidates = {
+            let mut stmt = conn.prepare(
+                "SELECT json FROM executions WHERE status = 'running' ORDER BY started_at ASC",
+            )?;
+            let rows = stmt.query_map([], |row| row.get::<_, String>(0))?;
+            decode_execution_rows(rows)?
+        };
+        let mut recovered = Vec::new();
+        for mut execution in candidates {
+            if execution
+                .started_at
+                .is_some_and(|started_at| started_at > stale_before)
+            {
+                continue;
+            }
+            let original_started_at = execution.started_at.map(|value| value.to_rfc3339());
+            if execution.retry_count >= max_recoveries {
+                execution.status = ExecutionStatus::Failed;
+                execution.completed_at = Some(Utc::now());
+                execution.error_message = Some("execution_lease_retry_limit_exceeded".to_string());
+            } else {
+                execution.status = ExecutionStatus::Pending;
+                execution.started_at = None;
+                execution.retry_count = execution.retry_count.saturating_add(1);
+                execution.error_message = Some("requeued_after_expired_lease".to_string());
+            }
+            let updated_json = serde_json::to_string(&execution)?;
+            let changed = conn.execute(
+                r#"
+                UPDATE executions
+                   SET status = ?2,
+                       json = ?3,
+                       started_at = ?4,
+                       completed_at = ?5
+                 WHERE id = ?1
+                   AND status = 'running'
+                   AND (started_at = ?6 OR (started_at IS NULL AND ?6 IS NULL))
+                "#,
+                params![
+                    execution.id.to_string(),
+                    execution_status_text(execution.status),
+                    updated_json,
+                    execution.started_at.map(|value| value.to_rfc3339()),
+                    execution.completed_at.map(|value| value.to_rfc3339()),
+                    original_started_at,
+                ],
+            )?;
+            if changed == 1 {
+                recovered.push(execution);
+            }
+        }
+        Ok(recovered)
+    }
+
     /// Atomically move one pending execution to running.
     ///
     /// The `status = 'pending'` guard is the cross-process claim. Two runtime

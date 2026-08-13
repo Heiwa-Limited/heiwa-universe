@@ -1585,6 +1585,11 @@ pub(crate) mod social_projection_tests {
             std::env::set_var("HEIWA_STATE_DIR", value);
         }
         assert!(resolved.ends_with("life/social.json"), "{resolved:?}");
-        assert!(resolved.to_string_lossy().contains(".heiwa/state"));
+        assert!(
+            resolved
+                .ancestors()
+                .any(|path| path.ends_with(Path::new(".heiwa").join("state"))),
+            "{resolved:?}"
+        );
     }
 }
