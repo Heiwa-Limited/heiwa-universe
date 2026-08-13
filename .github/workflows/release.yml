@@ -135,6 +135,7 @@ jobs:
           prefix-key: v3-release
           shared-key: ${{ matrix.target }}
           cache-on-failure: true
+          cache-workspace-crates: true
           cache-bin: false
 
       # heiwa-shell defaults to the `lance` feature, whose lance-encoding
