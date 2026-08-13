@@ -850,6 +850,8 @@ fn test_approvals_list_json_reports_dispatch_v1_summary() {
 
     let output = heiwa_command()
         .env("HOME", temp.path())
+        .env("HEIWA_HOME", temp.path().join(".heiwa"))
+        .env("HEIWA_STATE_DIR", temp.path().join(".heiwa").join("state"))
         .args(["approvals", "list", "--json"])
         .output()
         .expect("failed to execute approvals list");

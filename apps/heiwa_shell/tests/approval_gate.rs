@@ -1,3 +1,4 @@
+use std::ffi::OsString;
 use std::fs;
 use std::path::PathBuf;
 use std::time::Duration;
@@ -7,6 +8,28 @@ use heiwa_shell::agentic::execute_tool_calls;
 use tempfile::tempdir;
 
 static ENV_MUTEX: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+struct EnvGuard {
+    key: &'static str,
+    original: Option<OsString>,
+}
+
+impl EnvGuard {
+    fn set(key: &'static str, value: impl AsRef<std::ffi::OsStr>) -> Self {
+        let original = std::env::var_os(key);
+        std::env::set_var(key, value);
+        Self { key, original }
+    }
+}
+
+impl Drop for EnvGuard {
+    fn drop(&mut self) {
+        match &self.original {
+            Some(value) => std::env::set_var(self.key, value),
+            None => std::env::remove_var(self.key),
+        }
+    }
+}
 
 fn leased_scope(root: PathBuf) -> ExecutionScope {
     let mut scope = ExecutionScope::local_default(root);
@@ -31,9 +54,11 @@ async fn test_approval_gate_approve_flow() {
     let root = temp.path().to_path_buf();
 
     // Set environment overrides
-    std::env::set_var("HOME", &root);
-    std::env::set_var("HEIWA_AUTO_APPROVE", "none");
-    std::env::set_var("HEIWA_SURFACE", "discord"); // discord ensures it holds on medium/high/critical
+    let _home = EnvGuard::set("HOME", &root);
+    let _heiwa_home = EnvGuard::set("HEIWA_HOME", root.join(".heiwa"));
+    let _state_dir = EnvGuard::set("HEIWA_STATE_DIR", root.join(".heiwa").join("state"));
+    let _auto_approve = EnvGuard::set("HEIWA_AUTO_APPROVE", "none");
+    let _surface = EnvGuard::set("HEIWA_SURFACE", "discord"); // discord ensures it holds on medium/high/critical
 
     // Prepare a high-risk tool call
     let tool_calls = vec![ToolCall {
@@ -123,9 +148,11 @@ async fn test_approval_gate_deny_flow() {
     let temp = tempdir().unwrap();
     let root = temp.path().to_path_buf();
 
-    std::env::set_var("HOME", &root);
-    std::env::set_var("HEIWA_AUTO_APPROVE", "none");
-    std::env::set_var("HEIWA_SURFACE", "discord");
+    let _home = EnvGuard::set("HOME", &root);
+    let _heiwa_home = EnvGuard::set("HEIWA_HOME", root.join(".heiwa"));
+    let _state_dir = EnvGuard::set("HEIWA_STATE_DIR", root.join(".heiwa").join("state"));
+    let _auto_approve = EnvGuard::set("HEIWA_AUTO_APPROVE", "none");
+    let _surface = EnvGuard::set("HEIWA_SURFACE", "discord");
 
     let tool_calls = vec![ToolCall {
         id: "call-456".to_string(),

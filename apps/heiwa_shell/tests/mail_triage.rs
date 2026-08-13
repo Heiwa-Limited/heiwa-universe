@@ -25,6 +25,8 @@ fn seed_snapshot(home: &std::path::Path) {
 fn heiwa(home: &std::path::Path, args: &[&str]) -> (bool, String, String) {
     let out = Command::new(env!("CARGO_BIN_EXE_heiwa"))
         .env("HOME", home)
+        .env_remove("HEIWA_HOME")
+        .env_remove("HEIWA_STATE_DIR")
         .env("HEIWA_OLLAMA_BASE", "http://127.0.0.1:1") // force template fallback
         .args(args)
         .output()

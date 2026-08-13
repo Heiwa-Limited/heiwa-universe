@@ -7,6 +7,8 @@ use std::process::Command;
 fn run_schedule(home: &std::path::Path, extra: &[&str]) -> (bool, String, String) {
     let mut cmd = Command::new(env!("CARGO_BIN_EXE_heiwa"));
     cmd.env("HOME", home)
+        .env_remove("HEIWA_HOME")
+        .env_remove("HEIWA_STATE_DIR")
         .arg("schedule")
         .args(["call", "mom", "--at", "2026-06-19T15:00", "--json"])
         .args(extra);
@@ -71,6 +73,8 @@ fn real_run_stages_approval_and_hold_under_home() {
     // The staged request must be visible to the existing approvals surface.
     let out = Command::new(env!("CARGO_BIN_EXE_heiwa"))
         .env("HOME", home.path())
+        .env_remove("HEIWA_HOME")
+        .env_remove("HEIWA_STATE_DIR")
         .args(["approvals", "list", "--json"])
         .output()
         .expect("approvals list runs");
@@ -89,6 +93,8 @@ fn unparseable_without_at_fails_cleanly() {
     let home = tempfile::tempdir().unwrap();
     let out = Command::new(env!("CARGO_BIN_EXE_heiwa"))
         .env("HOME", home.path())
+        .env_remove("HEIWA_HOME")
+        .env_remove("HEIWA_STATE_DIR")
         // HEIWA_PARSE_TIME points nowhere: simulates an install without the SDK.
         .env("HEIWA_PARSE_TIME", "/nonexistent/parse_time.py")
         .env("HEIWA_PYTHON", "/nonexistent/python")

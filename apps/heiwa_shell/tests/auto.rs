@@ -6,6 +6,8 @@ fn heiwa_with_home(home: &std::path::Path, args: &[&str]) -> std::process::Outpu
     Command::new(env!("CARGO_BIN_EXE_heiwa"))
         .args(args)
         .env("HOME", home)
+        .env_remove("HEIWA_HOME")
+        .env_remove("HEIWA_STATE_DIR")
         .output()
         .expect("run heiwa")
 }
@@ -135,6 +137,8 @@ fn auto_run_executes_deterministic_prompt_through_operator_runtime() {
     let output = Command::new(env!("CARGO_BIN_EXE_heiwa"))
         .args(["auto", "run", id, "--json"])
         .env("HOME", home.path())
+        .env_remove("HEIWA_HOME")
+        .env_remove("HEIWA_STATE_DIR")
         .env("HEIWA_EVIDENCE_DIR", &evidence)
         .output()
         .expect("run deterministic automation");

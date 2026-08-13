@@ -8,6 +8,8 @@ fn calendar_sync_dry_run_reports_apple_google_read_model_plan_without_writing_st
     let home = tempfile::tempdir().unwrap();
     let out = Command::new(env!("CARGO_BIN_EXE_heiwa"))
         .env("HOME", home.path())
+        .env_remove("HEIWA_HOME")
+        .env_remove("HEIWA_STATE_DIR")
         .args(["calendar", "sync", "--source", "all", "--dry-run", "--json"])
         .output()
         .expect("binary runs");
