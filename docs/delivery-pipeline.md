@@ -116,7 +116,19 @@ tag and make the release path a development loop.
 | Path | Mechanism |
 | --- | --- |
 | New install | `curl https://heiwa.ltd/install \| sh` — resolves the newest release at run time, falls back to a pinned version, verifies SHA-256, rejects archives containing links or paths outside the expected root, stages and swaps atomically |
-| Existing install | `heiwa app update` queries the GitHub releases API |
+| Existing install | `heiwa app update` — same invariants, reached from the runtime instead of the shell |
+
+The installer and `heiwa app update` are the same trust boundary reached two
+different ways, so they hold the same invariants: HTTPS-only downloads from
+release assets, SHA-256 verified against the published checksums file, archives
+rejected if they contain links or paths outside the expected root, every write
+staged beside its destination and landed with an atomic rename, and no automatic
+restart. `heiwa app update --dry-run` stays offline and deterministic so it is
+usable from a sandboxed job.
+
+Cockpit assets land *before* the binary that serves them. The reverse order
+produces a new runtime serving a stale cockpit — the version-skew failure
+`AGENTS.md` warns about when a new API endpoint returns `index.html`.
 | Container | `container.yml` packages already-certified release bytes; the release image never recompiles Rust |
 | Local promotion | `heiwa app update --source checkout` after `main` moves |
 
