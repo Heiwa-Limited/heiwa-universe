@@ -2977,6 +2977,7 @@ fn api_payload_for_port(path: &str, started_at: &str, app_port: u16) -> Option<V
         "/api/v1/approvals/summary" => crate::cmd::approvals::pending_approvals_summary_payload(),
         "/api/v1/life/today" => crate::cmd::life::today_payload(),
         "/api/v1/life/freshness" => crate::cmd::life::freshness_payload(),
+        "/api/v1/life/social" => crate::cmd::life::social_payload(),
         "/api/v1/calendar/summary" => crate::cmd::calendar::summary_payload(),
         "/api/v1/mail/summary" => crate::cmd::mail::summary_payload(),
         "/api/v1/automations" => crate::cmd::auto::automations_payload(),
@@ -5913,6 +5914,41 @@ mod app_readmodel_tests {
             .get("runtime")
             .and_then(|runtime| runtime.get("evidence_mode"))
             .is_some_and(Value::is_string));
+    }
+
+    #[test]
+    fn api_payload_wires_life_social_route() {
+        // ROUTE WIRING ONLY. This asserts the path is dispatched and returns
+        // the standard envelope. It points HEIWA_STATE_DIR at an empty temp
+        // root rather than reading ambient operator state. An earlier version
+        // claimed to verify metadata-only enforcement and, under an empty HOME,
+        // silently took the `available:false` branch and asserted nothing.
+        //
+        // Schema validation, forbidden fields, scalars, version and policy
+        // mismatch, staleness and the reconnect error state are covered
+        // hermetically in `cmd::life::social_projection_tests`, which injects
+        // a path and writes its own fixtures.
+        // Pointed at an empty temp state dir so the test never reads the
+        // operator's real projection, and holding the shared env lock so it
+        // cannot race the projection tests that also set HEIWA_STATE_DIR.
+        let dir = tempfile::tempdir().expect("tempdir");
+        let _guard = crate::cmd::life::social_projection_tests::StateDirGuard::set(dir.path());
+
+        let payload = api_payload("/api/v1/life/social", "2026-05-26T00:00:00Z")
+            .expect("life social endpoint");
+        assert_eq!(payload.get("ok").and_then(Value::as_bool), Some(true));
+        let data = payload.get("data").expect("data envelope");
+        assert_eq!(
+            data.get("command").and_then(Value::as_str),
+            Some("life social")
+        );
+        // Deterministic: nothing is published in the temp dir.
+        assert_eq!(data.get("available").and_then(Value::as_bool), Some(false));
+        // Both branches answer, so a missing producer is a reportable state
+        // rather than a 500.
+        assert!(data.get("available").is_some_and(Value::is_boolean));
+        assert!(data.get("contacts").is_some_and(Value::is_array));
+        assert!(data.get("reconnect").is_some_and(Value::is_object));
     }
 
     #[test]
