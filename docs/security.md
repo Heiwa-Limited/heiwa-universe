@@ -1,79 +1,71 @@
 # Security
 
-Heiwa is a local-first operator runtime with a public-safe client. Durable user evidence stays on the owner machine; there is no hosted evidence authority. Public domains are support surfaces only when deployed. Internal preview runtimes such as trading remain isolated until their security posture is proven.
+Heiwa is an installed, local-first operator runtime. The supported public surface is static documentation, release distribution, installation, and read-only status. There is no hosted multi-tenant operator control plane.
 
-## Public surfaces
+## Supported public surfaces
 
-- `heiwa.ltd`: marketing only
-- `app.heiwa.ltd`: authenticated product shell for keys, runs, approvals, and mission views
-- `api.heiwa.ltd`: user/session APIs, runtime health, MCP, and task ingress where deployed
-- `status.heiwa.ltd`: read-only operational status
+- `heiwa.ltd`: static product, install, support, and release links
 - `docs.heiwa.ltd`: public documentation
+- `status.heiwa.ltd`: read-only public status when deployed
+- GitHub Releases: signed workflow provenance, checksums, archives, and installer authority
+
+`app.heiwa.ltd`, `auth.heiwa.ltd`, and `trade.heiwa.ltd` are not supported public surfaces. Legacy operator HTML remains source-only until it is either retired or redesigned around the installed loopback runtime. `scripts/package_public_web.sh` is the deploy allowlist and excludes those files.
 
 ## Trust boundaries
 
-### Browser or client -> runtime API
+### Public browser -> static support surface
 
-- Public authentication and orchestration requests terminate at `api.heiwa.ltd` where that ingress is deployed.
-- Discord and other clients are optional ingress surfaces, not the only identity or execution model.
-- Public edge infrastructure provides TLS termination, proxying, and baseline WAF coverage before traffic reaches hosted runtime services.
+- Public pages contain no provider keys, operator tokens, authenticated mutations, or private runtime data.
+- Endpoint overrides are restricted to the official HTTPS/WSS API host.
+- Untrusted status and domain data is rendered through text nodes, not HTML parsing.
+- The deployed artifact is built from an explicit file allowlist and checked against inline scripts and private operator assets.
 
-### App shell -> runtime API
+### Installed UI or CLI -> loopback runtime
 
-- `app.heiwa.ltd` is a UI surface, not a second control plane.
-- The app shell should never hold platform secrets or make privileged decisions locally.
-- All user reads and mutations must be enforced by the installed or hosted runtime with tenant-scoped authorization.
+- The installed `heiwa` process owns sessions, approvals, routing, evidence, and local app APIs.
+- Operator HTTP and WebSocket surfaces bind to loopback by default; they are not public identity endpoints.
+- Mutating actions pass through the approval and execution contract instead of trusting a browser-only decision.
 
-### Runtime API -> local evidence plane
+### Runtime -> local evidence plane
 
-- Versioned JSONL under `~/.heiwa/evidence/` is canonical execution evidence; SQLite holds bounded hot state and Lance is a rebuildable recall index.
-- Raw journal streams never sync to GitHub until explicit redaction, privacy, conflict, and promotion rules exist.
-- User boundaries remain explicit throughout routes, state, receipts, and any future sync projection.
-- User auth and operator auth remain separate so operator tooling does not inherit user-facing trust.
+- Versioned JSONL under `~/.heiwa/evidence/` is canonical execution evidence.
+- SQLite holds bounded hot state; Lance is derived, local recall and can be rebuilt.
+- Raw journals, provider secrets, and private operator state are not published to GitHub or the public web package.
 
-### Runtime API -> provider APIs
+### Runtime -> providers
 
-- BYOK credentials are tenant-scoped assets. They must never be shared across users, leaked through logs, or reused outside the owning tenant's execution path.
-- The target posture is encrypted-at-rest credential storage with just-in-time decryption at execution. The current hardening backlog still includes encrypting stored Discord OAuth tokens and removing the remaining string-built queries.
-- Routing decisions must respect each user's own budget, rate limits, and provider inventory rather than a shared global pool.
+- Providers own authentication and inference internals.
+- Heiwa discovers provider-owned accounts, routes calls, and records bounded receipts without claiming account usability from credential presence alone.
+- Provider credentials remain local and must be redacted from logs, diagnostics, evidence, and generated artifacts.
 
-### Runtime API -> execution runtimes
+### Runtime -> execution
 
-- Hosted runtime APIs should act as control planes, not long-lived execution planes for arbitrary user workloads.
-- Public launch paths should stay limited to curated missions and curated tools until stronger sandboxing exists.
-- Any future arbitrary execution path should move through isolated workers or sandboxes rather than shared in-process execution.
-
-## Identity and authorization
-
-- Discord can identify users for sign-in and DM correlation where that ingress is enabled.
-- User auth uses short-lived runtime-issued JWTs for dashboard reads and mission views.
-- operator auth stays separate for admin routes, MCP internals, and privileged controls.
-- Read-only public surfaces must not expose write-capable operator actions.
+- Tool leases, scoped paths, approval requirements, and receipts constrain nondeterministic execution.
+- Stale automation executions use a bounded lease-recovery path; exhausted work fails closed instead of retrying forever.
+- Untrusted third-party code belongs in an isolated sandbox, not the owner runtime.
 
 ## Assets that matter
 
-- BYOK credentials and OAuth tokens
-- cross-tenant mission, run, and artifact data
-- billing events and usage attribution
-- routing logic and approval state
-- operator tokens and internal provider credentials
+- provider OAuth sessions, API keys, and local model endpoints
+- operator prompts, outputs, evidence, recall, and life projections
+- approval state, execution leases, and receipts
+- GitHub release permissions, workflow tokens, tags, checksums, and artifacts
+- installer source URLs and installed runtime paths
 
 ## Current guardrails
 
-- fail closed on missing secrets and identities
-- redact transport and provider credentials in logs
-- keep marketing, docs, and status separate from privileged runtime state
-- prefer canonical domains over direct provider URLs in the public shell
-- keep internal preview runtimes off the supported public host map
+- blocking full-history gitleaks scan with reviewed historical fingerprints
+- Cargo, npm, and Python dependency audits in the local and hosted security gate
+- immutable commit pins for every GitHub Action
+- least-privilege workflow permissions and explicit release/container permissions
+- public web allowlist, strict CSP, HSTS, frame denial, and no inline scripts
+- closed-schema private projections and local state-directory overrides
+- release metadata, product-surface, backend-transition, runtime-pin, and machine-security gates
 
-## Near-term hardening backlog
+## Accepted transitive warning
 
-- verify JWT `aud` in addition to signature, issuer, and expiry
-- encrypt stored Discord OAuth tokens and any other persisted tenant credentials
-- replace remaining string-built database queries with parameterized queries
-- bring WebSocket/event auth onto the same tenant-scoped model as HTTP routes
-- move execution isolation toward worker or sandbox boundaries before exposing broader public automation
+The Linux Tauri desktop graph currently inherits GTK3 and `glib 0.18.5`. RustSec flags the unmaintained GTK3 bindings and `RUSTSEC-2024-0429`, which affects `glib::VariantStrIter`. Heiwa does not call `VariantStrIter`; the dependency is absent from non-Linux targets and remains constrained by Tauri's current Linux WebKit stack. This is an informational transitive exception, not a suppressed vulnerability. It must be removed when Tauri's Linux stack moves to `glib >=0.20` or the Linux desktop target is retired.
 
-## Non-goals for public docs
+## Reporting
 
-This doc set does not claim that Discord or experimental canvases are the only product interfaces, and it does not claim that internal preview services are ready public surfaces.
+Follow [the repository security policy](https://github.com/Heiwa-Limited/heiwa-universe/blob/main/SECURITY.md). Do not open public issues containing exploit details, secrets, private logs, or operator data.

@@ -132,8 +132,10 @@ def main() -> int:
     problems.extend(
         require_contains(
             WEB_ROOT / "install",
-            "HEIWA_REPO_URL",
-            "cargo install --path",
+            'repo="Heiwa-Limited/heiwa-universe"',
+            "/releases/download/v",
+            "checksums.txt",
+            "checksum mismatch",
             "heiwa app start --no-open",
         )
     )

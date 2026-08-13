@@ -93,7 +93,9 @@ printf 'git: %s\n' "$(git rev-parse --short HEAD 2>/dev/null || echo unknown)"
 printf 'dirty: %s\n' "$(test -z "$(git status --porcelain 2>/dev/null)" && echo false || echo true)"
 
 run_required "cargo audit" cargo audit
-run_required "root npm prod audit" npm audit --omit=dev
+run_required "root npm audit" npm audit
+run_required "cockpit npm audit" npm --prefix apps/heiwa_app/clients/cockpit audit
+run_required "desktop npm audit" npm --prefix apps/heiwa_app/desktop audit
 run_required "root TypeScript typecheck" npm run typecheck --silent
 run_required "desktop TypeScript typecheck" bash -c 'cd apps/heiwa_app/desktop && npm run typecheck --silent'
 run_required "Deno herd/prototype typecheck" deno check scripts/herd.ts prototypes/heiwa-desk/main.ts prototypes/heiwa-desk/herdr.ts

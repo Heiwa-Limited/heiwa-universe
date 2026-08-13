@@ -14,7 +14,7 @@
 # Each round-trip to CI costs ~15 minutes. This script costs a few minutes and
 # catches the same things. Keep it in sync with ci.yml.
 set -uo pipefail
-cd "$(dirname "$0")/.."
+cd "$(dirname "$0")/.." || exit 1
 
 FAILED=()
 step() {
@@ -58,8 +58,8 @@ step "just test-product" just test-product
 echo
 echo "== repo gates =="
 for s in check_agent_baseline check_backend_transition check_model_call_boundary \
-         check_release_metadata check_runtime_baseline check_machine_security \
-         check_heiwa_core_dockerfile; do
+         check_release_metadata check_runtime_baseline verify_security check_machine_security \
+         check_heiwa_core_dockerfile check_workflow_pins check_public_installer; do
   step "$s" bash "scripts/$s.sh"
 done
 

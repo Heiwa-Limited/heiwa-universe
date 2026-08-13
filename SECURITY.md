@@ -9,13 +9,13 @@ Security reports should target the current public contract:
 - GitHub Actions, release packaging, docs publishing, and installer flows
 - local secret handling and generated artifacts that may expose operator data
 
-Legacy hosted, trading, and experimental surfaces may still exist in the tree. Report issues there if they are reachable from the current runtime, release process, or documented public surfaces.
+Legacy hosted, trading, and experimental surfaces may still exist in the tree. They are unsupported unless reachable from the installed runtime, release process, or explicit public deployment allowlist.
 
 ## Reporting
 
 Do not open a public issue for exploitable vulnerabilities, leaked secrets, credential material, private logs, or local operator data.
 
-Use GitHub private vulnerability reporting for `Strategizing/heiwa-universe` when available. If that is unavailable, contact the repository owner privately and include:
+Use GitHub private vulnerability reporting for `Heiwa-Limited/heiwa-universe` when available. If that is unavailable, contact the repository owner privately and include:
 
 - affected commit, tag, or release
 - exact reproduction steps

@@ -20,24 +20,42 @@ function stampUpdated() {
   if (el) el.textContent = new Date().toLocaleTimeString();
 }
 
-function getConfiguredEndpoints() {
-  const params = new URLSearchParams(window.location.search);
-  const queryEndpoints = params.getAll("endpoint").map((v) => v.trim()).filter(Boolean);
-  if (queryEndpoints.length) return queryEndpoints;
-  if (Array.isArray(window.HEIWA_STATUS_ENDPOINTS) && window.HEIWA_STATUS_ENDPOINTS.length) {
-    return window.HEIWA_STATUS_ENDPOINTS;
+function allowedPublicEndpoint(value, protocol) {
+  try {
+    const url = new URL(value);
+    return url.protocol === protocol && url.hostname === "api.heiwa.ltd" && url.port === "";
+  } catch {
+    return false;
   }
-  return DEFAULT_HTTP_ENDPOINTS;
+}
+
+function configuredValues(queryKey, injected, defaults, protocol) {
+  const params = new URLSearchParams(window.location.search);
+  const queryValues = params.getAll(queryKey).map((value) => value.trim()).filter(Boolean);
+  const injectedValues = Array.isArray(injected)
+    ? injected.filter((value) => typeof value === "string")
+    : [];
+  const candidates = queryValues.length ? queryValues : injectedValues;
+  const allowed = candidates.filter((value) => allowedPublicEndpoint(value, protocol));
+  return allowed.length ? allowed : defaults;
+}
+
+function getConfiguredEndpoints() {
+  return configuredValues(
+    "endpoint",
+    window.HEIWA_STATUS_ENDPOINTS,
+    DEFAULT_HTTP_ENDPOINTS,
+    "https:"
+  );
 }
 
 function getConfiguredWebSockets() {
-  const params = new URLSearchParams(window.location.search);
-  const querySockets = params.getAll("ws").map((v) => v.trim()).filter(Boolean);
-  if (querySockets.length) return querySockets;
-  if (Array.isArray(window.HEIWA_STATUS_STREAMS) && window.HEIWA_STATUS_STREAMS.length) {
-    return window.HEIWA_STATUS_STREAMS;
-  }
-  return DEFAULT_WS_ENDPOINTS;
+  return configuredValues(
+    "ws",
+    window.HEIWA_STATUS_STREAMS,
+    DEFAULT_WS_ENDPOINTS,
+    "wss:"
+  );
 }
 
 async function probe(url) {
@@ -101,7 +119,7 @@ function renderSummary(results) {
 
 function renderResults(results) {
   const list = document.getElementById("status-list");
-  list.innerHTML = "";
+  list.replaceChildren();
   stampUpdated();
 
   results.forEach((result) => {
@@ -115,14 +133,23 @@ function renderResults(results) {
       2
     );
 
-    card.innerHTML = `
-      <div class="status-card-head">
-        <h2 class="mono">${result.url}</h2>
-        <span class="status-badge ${state.cls}">${state.label}</span>
-      </div>
-      <p class="muted">HTTP ${result.status ?? "ERR"} · ${result.durationMs}ms</p>
-      <pre class="status-payload">${prettyPayload}</pre>
-    `;
+    const head = document.createElement("div");
+    head.className = "status-card-head";
+    const title = document.createElement("h2");
+    title.className = "mono";
+    title.textContent = result.url;
+    const badge = document.createElement("span");
+    badge.className = `status-badge ${state.cls}`;
+    badge.textContent = state.label;
+    head.append(title, badge);
+
+    const timing = document.createElement("p");
+    timing.className = "muted";
+    timing.textContent = `HTTP ${result.status ?? "ERR"} · ${result.durationMs}ms`;
+    const payload = document.createElement("pre");
+    payload.className = "status-payload";
+    payload.textContent = prettyPayload ?? "";
+    card.append(head, timing, payload);
     list.appendChild(card);
   });
 }

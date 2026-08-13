@@ -1,67 +1,123 @@
 #!/bin/sh
 set -eu
 
-default_repo_url="https://github.com/Strategizing/heiwa-universe.git"
-repo_url="${HEIWA_REPO_URL:-$default_repo_url}"
-repo_ref="${HEIWA_REF:-main}"
+version="${HEIWA_VERSION:-0.1.0}"
 heiwa_home="${HEIWA_HOME:-$HOME/.heiwa}"
-source_dir="${HEIWA_SOURCE_DIR:-$heiwa_home/src/heiwa-universe}"
+repo="Heiwa-Limited/heiwa-universe"
+
+fail() {
+  echo "heiwa install: $*" >&2
+  exit 1
+}
 
 need() {
-  if ! command -v "$1" >/dev/null 2>&1; then
-    echo "heiwa install: missing required command: $1" >&2
-    echo "Install $2, then rerun this installer." >&2
-    exit 1
-  fi
+  command -v "$1" >/dev/null 2>&1 || fail "missing required command: $1"
 }
 
-git_auth() {
-  if [ -n "${HEIWA_PRIVATE_TOKEN:-}" ]; then
-    git -c "http.https://github.com/.extraheader=AUTHORIZATION: bearer $HEIWA_PRIVATE_TOKEN" "$@"
-  else
-    git "$@"
+printf '%s\n' "$version" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+$' ||
+  fail "HEIWA_VERSION must be a stable semantic version such as 0.1.0"
+
+case "$heiwa_home" in
+  ""|"/"|".") fail "refusing unsafe HEIWA_HOME: $heiwa_home" ;;
+esac
+
+need curl
+need grep
+need awk
+need tar
+need install
+need mv
+need mktemp
+
+os="$(uname -s)"
+arch="$(uname -m)"
+case "$os:$arch" in
+  Darwin:arm64|Darwin:aarch64)
+    asset="macos-aarch64"
+    ;;
+  Linux:x86_64|Linux:amd64)
+    asset="linux-x86_64"
+    ;;
+  *)
+    fail "unsupported platform $os/$arch; use the GitHub Release assets directly"
+    ;;
+esac
+
+archive_name="heiwa-${version}-${asset}.tar.gz"
+checksums_name="heiwa-${version}-checksums.txt"
+release_base="https://github.com/${repo}/releases/download/v${version}"
+tmp_dir="$(mktemp -d "${TMPDIR:-/tmp}/heiwa-install.XXXXXX")"
+staged_path=""
+
+cleanup() {
+  rm -rf -- "$tmp_dir"
+  if [ -n "$staged_path" ]; then
+    rm -f -- "$staged_path"
   fi
 }
+trap cleanup EXIT HUP INT TERM
 
-need git "Git"
-need cargo "Rust from https://rustup.rs"
+download() {
+  curl --proto '=https' --tlsv1.2 --fail --location --silent --show-error     --output "$2" "$1"
+}
 
-if [ "$repo_url" = "$default_repo_url" ] && [ -z "${HEIWA_PRIVATE_TOKEN:-}" ]; then
-  cat >&2 <<'EOF'
-heiwa install: the public release installer is not live yet.
+echo "heiwa install: downloading v$version for $asset"
+download "$release_base/$archive_name" "$tmp_dir/$archive_name"
+download "$release_base/$checksums_name" "$tmp_dir/$checksums_name"
 
-This temporary source installer targets the private heiwa-universe repository.
-Set HEIWA_PRIVATE_TOKEN to a GitHub token with repository read access, or wait
-for the GitHub Release installer with checksums.
-EOF
-  exit 1
-fi
+expected="$(
+  awk -v file="$archive_name" '$2 == file || $2 == "*" file { print $1 }'     "$tmp_dir/$checksums_name"
+)"
+case "$expected" in
+  ""|*[!0-9a-fA-F]*) fail "release checksum entry is missing or malformed" ;;
+esac
+[ "${#expected}" -eq 64 ] || fail "release checksum must be SHA-256"
 
-mkdir -p "$heiwa_home/src"
-
-if [ -d "$source_dir/.git" ]; then
-  echo "heiwa install: updating source at $source_dir"
-  git_auth -C "$source_dir" fetch --depth 1 origin "$repo_ref"
-  git_auth -C "$source_dir" checkout --force FETCH_HEAD
+if command -v sha256sum >/dev/null 2>&1; then
+  actual="$(sha256sum "$tmp_dir/$archive_name" | awk '{ print $1 }')"
+elif command -v shasum >/dev/null 2>&1; then
+  actual="$(shasum -a 256 "$tmp_dir/$archive_name" | awk '{ print $1 }')"
 else
-  echo "heiwa install: cloning $repo_url#$repo_ref into $source_dir"
-  rm -rf "$source_dir"
-  git_auth clone --depth 1 --branch "$repo_ref" "$repo_url" "$source_dir"
+  fail "missing SHA-256 tool: install sha256sum or shasum"
+fi
+[ "$actual" = "$expected" ] || fail "checksum mismatch for $archive_name"
+
+archive_root="heiwa-${version}-${asset}"
+if ! tar -tzf "$tmp_dir/$archive_name" | while IFS= read -r path; do
+  case "$path" in
+    "$archive_root"|"$archive_root/"|"$archive_root/"*) ;;
+    *) exit 1 ;;
+  esac
+  case "/$path/" in
+    *"/../"*|*"/./"*) exit 1 ;;
+  esac
+done; then
+  fail "archive contains a path outside $archive_root"
 fi
 
-echo "heiwa install: building heiwa into $heiwa_home/bin/heiwa"
-cargo install --path "$source_dir/apps/heiwa_shell" --root "$heiwa_home" --locked --force
+tar -xzf "$tmp_dir/$archive_name" -C "$tmp_dir"
+binary="$tmp_dir/$archive_root/heiwa"
+[ -f "$binary" ] || fail "release archive does not contain the heiwa binary"
+
+bin_dir="$heiwa_home/bin"
+mkdir -p "$bin_dir"
+staged_path="$bin_dir/.heiwa.new.$$"
+install -m 0755 "$binary" "$staged_path"
+mv -f "$staged_path" "$bin_dir/heiwa"
+staged_path=""
 
 echo "heiwa install: bootstrapping local runtime state"
-"$heiwa_home/bin/heiwa" install
+"$bin_dir/heiwa" install
 
 cat <<EOF
 heiwa install: complete
-  binary: $heiwa_home/bin/heiwa
-  source: $source_dir
+  version: v$version
+  binary: $bin_dir/heiwa
+  archive: $archive_name
+  sha256: $actual
 
 Next:
-  export PATH="$heiwa_home/bin:\$PATH"
+  export PATH="$bin_dir:\$PATH"
   heiwa doctor
   heiwa app start --no-open
 EOF

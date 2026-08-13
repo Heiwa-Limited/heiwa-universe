@@ -13,6 +13,7 @@ current_surfaces=(
   apps/heiwa_app/clients/web/index.html
   apps/heiwa_app/clients/web/domains.html
   apps/heiwa_app/scripts/check_static_surface.py
+  scripts/check_public_web_package.sh
   apps/heiwa_core/Dockerfile
   apps/heiwa_core/start.sh
   docs/architecture.md
