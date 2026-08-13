@@ -1,0 +1,67 @@
+name: Runner Canary
+
+# Proves a candidate runner label actually claims a job before that label is
+# allowed anywhere near the promotion gate.
+#
+# This exists because of a concrete failure: `blacksmith-16vcpu-ubuntu-2404`
+# was put straight onto the required Rust lanes, no runner ever claimed it, and
+# PR #65 sat queued for six hours. `timeout-minutes` bounds a *running* job and
+# does not bound queue time, so nothing failed — the gate just hung.
+#
+# Dispatch-only by design: it has no `pull_request` or `push` trigger, so a
+# label nothing claims simply sits in this workflow instead of blocking a merge.
+#
+# Promotion path for a new runner label:
+#   1. dispatch this workflow with the label
+#   2. confirm it is claimed, and note the queue time in the run timing
+#   3. add the label to PROVEN_RUNNER_LABELS in scripts/check_ci_job_deadlines.rb
+#   4. only then use it in ci.yml
+#
+# Usage:
+#   gh workflow run runner-canary.yml -f runner=blacksmith-2vcpu-ubuntu-2404
+#
+# Inputs come from a collaborator who can already dispatch workflows, but they
+# are still passed to `run:` steps through `env:` rather than interpolated into
+# the script body.
+
+on:
+  workflow_dispatch:
+    inputs:
+      runner:
+        description: Runner label to probe
+        required: true
+        default: blacksmith-2vcpu-ubuntu-2404
+
+permissions:
+  contents: read
+
+jobs:
+  probe:
+    name: Runner Canary
+    runs-on: ${{ inputs.runner }}
+    # Literal, not an expression: the probe itself is trivial, and the point of
+    # this workflow is the label, not the deadline. Note that this deadline
+    # cannot rescue an unclaimed label — it only starts once a runner claims the
+    # job, which is exactly why the canary exists.
+    timeout-minutes: 5
+    steps:
+      - name: Report runner identity
+        env:
+          REQUESTED_LABEL: ${{ inputs.runner }}
+        run: |
+          set -euo pipefail
+          echo "requested label : $REQUESTED_LABEL"
+          echo "runner name     : ${RUNNER_NAME:-unknown}"
+          echo "runner os/arch  : ${RUNNER_OS:-unknown}/${RUNNER_ARCH:-unknown}"
+          echo "kernel          : $(uname -srm)"
+          echo "cpus            : $(nproc 2>/dev/null || echo unknown)"
+          echo "memory          : $(awk '/MemTotal/ {printf "%.1f GiB", $2/1048576}' /proc/meminfo 2>/dev/null || echo unknown)"
+          echo "disk            : $(df -h / | awk 'NR==2 {print $4 " free of " $2}')"
+      - name: Confirm the claim
+        env:
+          RUN_ID: ${{ github.run_id }}
+        run: |
+          set -euo pipefail
+          # Reaching this step is the proof: a runner claimed the job. Claim
+          # latency is the gap between the run's queued and started timestamps.
+          echo "Runner claimed the job for run $RUN_ID."

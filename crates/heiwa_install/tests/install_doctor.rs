@@ -1,8 +1,9 @@
 use heiwa_install::{
     check_ai_ops_at, check_installation, get_heiwa_dir, parse_plugin_source, plan_plugin_install,
-    run_install,
+    resolve_heiwa_dir, run_install,
 };
 use std::env;
+use std::ffi::OsString;
 use std::fs;
 use std::path::PathBuf;
 use std::sync::{Mutex, OnceLock};
@@ -92,18 +93,46 @@ fn test_ai_ops_doctor_checks_repo_hygiene_gates() {
 
 #[test]
 fn test_heiwa_dir_uses_owner_home_state_root() {
-    let dir = get_heiwa_dir();
-    let dir_str = dir.to_string_lossy();
-    assert!(
-        dir_str.contains(".heiwa"),
-        "expected heiwa state dir under ~/.heiwa, got {:?}",
-        dir
+    // Asserts on explicit inputs rather than process-global environment. This
+    // test used to call get_heiwa_dir() directly, which reads HOME and
+    // HEIWA_HOME — variables that with_temp_home mutates under ENV_LOCK on
+    // other threads. Cargo runs these tests in parallel, so the read raced the
+    // writes and the assertion failed depending on scheduling.
+    assert_eq!(
+        resolve_heiwa_dir(None, Some(OsString::from("/Users/example"))),
+        Some(PathBuf::from("/Users/example/.heiwa")),
+        "a home directory must resolve to <home>/.heiwa"
     );
-    assert!(
-        !dir_str.contains(".gemini/tmp/heiwa-universe"),
-        "heiwa state dir should not live under gemini temp roots: {:?}",
-        dir
+    assert_eq!(
+        resolve_heiwa_dir(
+            Some(OsString::from("/srv/heiwa-state")),
+            Some(OsString::from("/Users/example")),
+        ),
+        Some(PathBuf::from("/srv/heiwa-state")),
+        "an explicit HEIWA_HOME must win over the home directory"
     );
+    assert_eq!(
+        resolve_heiwa_dir(
+            Some(OsString::new()),
+            Some(OsString::from("/Users/example"))
+        ),
+        Some(PathBuf::from("/Users/example/.heiwa")),
+        "an empty HEIWA_HOME must fall back rather than resolve to the filesystem root"
+    );
+    assert_eq!(
+        resolve_heiwa_dir(None, None),
+        None,
+        "with no home at all there is no state root to guess"
+    );
+    // The original intent: without an explicit override the state root is
+    // always <home>/.heiwa, so a polluted home cannot land it somewhere like a
+    // provider's temp directory without the .heiwa suffix.
+    let from_temp_home = resolve_heiwa_dir(
+        None,
+        Some(OsString::from("/tmp/.gemini/tmp/heiwa-universe")),
+    )
+    .expect("a home directory resolves");
+    assert!(from_temp_home.ends_with(".heiwa"), "got {from_temp_home:?}");
 }
 
 #[test]

@@ -65,6 +65,24 @@ jobs:
             echo "commit=$commit"
           } >> "$GITHUB_OUTPUT"
 
+      - name: Require a fresh public installer pin
+        shell: bash
+        env:
+          RELEASE_VERSION: ${{ steps.meta.outputs.version }}
+        run: bash scripts/check_installer_version_pin.sh "$RELEASE_VERSION"
+
+      # The checkout pin and the bytes served at heiwa.ltd/install are different
+      # truths: the installer reaches users through the dispatch-only Cloudflare
+      # deploy, which this workflow does not trigger. Without this check a
+      # release can go out while the edge still serves the previous fallback,
+      # and any new install whose latest-release lookup fails lands on the old
+      # version. Deploy the installer first, then release.
+      - name: Require the served public installer to match
+        shell: bash
+        env:
+          RELEASE_VERSION: ${{ steps.meta.outputs.version }}
+        run: bash scripts/check_installer_version_pin.sh --served "$RELEASE_VERSION"
+
       - name: Require successful full main certification
         shell: bash
         env:

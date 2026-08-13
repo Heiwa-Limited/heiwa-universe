@@ -25,9 +25,6 @@ const WS_GUID: &str = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11";
 const BROWSER_BOOTSTRAP_TTL_SECONDS: i64 = 60;
 const BROWSER_SESSION_TTL_SECONDS: i64 = 8 * 60 * 60;
 const BROWSER_SESSION_COOKIE_PREFIX: &str = "heiwa_local_operator_";
-const GITHUB_RELEASES_URL: &str = "https://github.com/Heiwa-Limited/heiwa-universe/releases";
-const GITHUB_LATEST_RELEASE_API: &str =
-    "https://api.github.com/repos/Heiwa-Limited/heiwa-universe/releases/latest";
 
 #[derive(Debug, Clone, Serialize)]
 pub(crate) struct LocalAppProbe {
@@ -90,43 +87,17 @@ fn update(args: &[String]) -> Result<()> {
 
 fn update_from_github_release(dry_run: bool, json_output: bool) -> Result<()> {
     let install_root = heiwa_install::get_heiwa_dir();
-    let installed_bin = install_root.join("bin").join("heiwa");
-    if json_output {
-        println!(
-            "{}",
-            json!({
-                "command": "app update",
-                "source_mode": "github-release",
-                "source": GITHUB_RELEASES_URL,
-                "release_api": GITHUB_LATEST_RELEASE_API,
-                "platform": github_release_platform(),
-                "installed_bin": installed_bin.display().to_string(),
-                "restart_policy": "prompt-before-restart",
-                "dry_run": dry_run,
-                "implemented": false,
-                "blocker": "GitHub release update awaits release asset verification",
-            })
-        );
-        if dry_run {
-            return Ok(());
-        }
-    } else {
-        println!("heiwa app update");
-        println!("  source_mode: github-release");
-        println!("  source: {GITHUB_RELEASES_URL}");
-        println!("  release_api: {GITHUB_LATEST_RELEASE_API}");
-        println!("  platform: {}", github_release_platform());
-        println!("  target: {}", installed_bin.display());
-        println!("  restart_policy: prompt-before-restart");
-        if dry_run {
-            println!("  dry_run: true");
-            return Ok(());
-        }
-    }
-
-    Err(anyhow!(
-        "GitHub release update is not implemented until release asset verification is wired; use --dry-run or --source checkout for dev-only reinstall"
-    ))
+    // `update` is reached from an async command dispatcher, and the release
+    // update performs blocking HTTP, so it has to leave the async worker.
+    tokio::task::block_in_place(|| {
+        super::release_update::run(
+            install_root,
+            github_release_platform(),
+            env!("CARGO_PKG_VERSION"),
+            dry_run,
+            json_output,
+        )
+    })
 }
 
 fn update_from_checkout(dry_run: bool, json_output: bool) -> Result<()> {

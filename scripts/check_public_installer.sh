@@ -20,6 +20,8 @@ required=(
   'shasum -a 256'
   'mktemp -d'
   'HEIWA_VERSION'
+  'pinned_version='
+  'resolve_latest_version'
   'HEIWA_HOME must be an absolute path'
   'mv -f'
   'cockpit-current'
