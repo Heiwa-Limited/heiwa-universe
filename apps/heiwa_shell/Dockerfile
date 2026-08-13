@@ -29,10 +29,11 @@ COPY Cargo.toml Cargo.lock rust-toolchain.toml ./
 COPY apps/heiwa_core/ ./apps/heiwa_core/
 COPY apps/heiwa_orchestrator/ ./apps/heiwa_orchestrator/
 COPY apps/heiwa_shell/ ./apps/heiwa_shell/
+COPY apps/heiwa_app/desktop/src-tauri/ ./apps/heiwa_app/desktop/src-tauri/
 COPY crates/ ./crates/
 
 RUN cargo build --locked --release --bin heiwa -p heiwa-shell --features heiwa-shell/lance \
-    && strip target/release/heiwa || true
+    && (strip target/release/heiwa || true)
 
 # -----------------------------------------------------
 # STAGE 2: RUNTIME
