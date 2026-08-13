@@ -1,8 +1,8 @@
 name: Heiwa CI
 
-# PRs are the production gate. The main-branch run is intentionally retained:
-# GitHub isolates pull-request caches by refs/pull/<n>/merge, so only a run on
-# main can seed Rust caches that later PRs are allowed to restore.
+# CI is the sub-minute change gate. Heavy cross-platform, Lance, desktop, and
+# multi-ecosystem proofs run independently in certification.yml. The main run
+# remains so protected-main caches are reusable by later pull requests.
 on:
   pull_request:
     branches: ["main"]
@@ -84,47 +84,6 @@ jobs:
           echo "$security_bin" >> "$GITHUB_PATH"
       - name: Run mandatory secret scan
         run: gitleaks detect --no-banner --redact --source .
-      - name: Set up Node
-        if: github.event_name != 'pull_request'
-        uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
-        with:
-          node-version-file: .nvmrc
-          cache: npm
-      - name: Set up Python
-        if: github.event_name != 'pull_request'
-        uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
-        with:
-          python-version: "3.14"
-      - name: Install Rust toolchain
-        if: github.event_name != 'pull_request'
-        uses: dtolnay/rust-toolchain@4360b52568e2003a75bf9bc1d59f33a8e3fc893c # stable
-        with:
-          toolchain: 1.95.0
-      - name: Install cargo-audit
-        if: github.event_name != 'pull_request'
-        uses: taiki-e/install-action@b20dedce73af6905cdc30d6611090c9b67557c8d # v2
-        with:
-          tool: cargo-audit
-      - name: Set up Deno
-        if: github.event_name != 'pull_request'
-        uses: denoland/setup-deno@22d081ff2d3a40755e97629de92e3bcbfa7cf2ed # v2
-        with:
-          deno-version: v2.9.4
-      - name: Install dependency and secret audit tools
-        if: github.event_name != 'pull_request'
-        shell: bash
-        run: |
-          set -euo pipefail
-          security_bin="$RUNNER_TEMP/security-bin"
-          mkdir -p "$security_bin"
-          echo "$security_bin" >> "$GITHUB_PATH"
-          python -m pip install uv==0.12.1
-          npm ci --ignore-scripts
-          npm ci --ignore-scripts --prefix apps/heiwa_app/clients/cockpit
-          npm ci --ignore-scripts --prefix apps/heiwa_app/desktop
-      - name: Run multi-ecosystem security gate
-        if: github.event_name != 'pull_request'
-        run: bash scripts/verify_security.sh --skip-secret-scan
       - name: Run Trivy vulnerability scanner
         uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25
         with:
@@ -142,53 +101,6 @@ jobs:
     steps:
       - name: Reject vulnerable dependency changes
         uses: actions/dependency-review-action@a1d282b36b6f3519aa1f3fc636f609c47dddb294 # v5.0.0
-
-  rust-matrix:
-    name: Rust Build, Test, and Clippy (${{ matrix.os }})
-    if: github.event_name != 'pull_request'
-    runs-on: ${{ matrix.os }}
-    needs: changes
-    strategy:
-      fail-fast: false
-      matrix:
-        os: [macos-latest, windows-latest]
-    env:
-      # PR CI gates correctness, not artifacts: skip debuginfo and incremental
-      # bookkeeping to cut compile time and cache size.
-      CARGO_PROFILE_DEV_DEBUG: "0"
-      CARGO_INCREMENTAL: "0"
-    steps:
-      - name: Skip unchanged Rust surface
-        if: needs.changes.outputs.rust != 'true'
-        run: echo "Rust inputs are unchanged."
-      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
-        if: needs.changes.outputs.rust == 'true'
-        with:
-          persist-credentials: false
-      - name: Install Rust toolchain
-        if: needs.changes.outputs.rust == 'true'
-        uses: dtolnay/rust-toolchain@4360b52568e2003a75bf9bc1d59f33a8e3fc893c # stable
-        with:
-          toolchain: 1.95.0
-      - name: Rust cache
-        if: needs.changes.outputs.rust == 'true'
-        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
-        with:
-          workspaces: |
-            .
-          prefix-key: v2-rust
-          cache-workspace-crates: true
-          cache-bin: true
-      # heiwa-desktop (Tauri shell) is excluded here: its wry/webkit dep tree
-      # dominates compile time and needs OS GUI packages. Protected-main
-      # desktop certification covers it on macOS; releases build it fully.
-      # Compile test targets on their native OS without executing the full
-      # suite twice. The package-group jobs execute the Linux test suite.
-      - name: Cross-platform test compilation
-        if: needs.changes.outputs.rust == 'true'
-        run: >
-          cargo test --workspace --exclude heiwa-desktop --locked
-          --no-default-features --no-run
 
   rust-pr-tests:
     name: Rust Tests (${{ matrix.group }})
@@ -345,39 +257,6 @@ jobs:
           [[ "$TEST_RESULT" == "success" ]]
           [[ "$STATIC_RESULT" == "success" ]]
 
-  lance-check:
-    name: Lance Backend Certification
-    if: github.event_name != 'pull_request'
-    runs-on: ubuntu-latest
-    needs: changes
-    env:
-      CARGO_PROFILE_DEV_DEBUG: "0"
-      CARGO_INCREMENTAL: "0"
-      CARGO_TARGET_DIR: target/lance
-    steps:
-      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
-        with:
-          persist-credentials: false
-      - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@4360b52568e2003a75bf9bc1d59f33a8e3fc893c # stable
-        with:
-          toolchain: 1.95.0
-      - name: Rust cache
-        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
-        with:
-          workspaces: |
-            . -> target/lance
-          prefix-key: v2-rust
-          shared-key: lance-linux
-          cache-workspace-crates: true
-          cache-bin: false
-      - name: Install protoc
-        uses: taiki-e/install-action@f6886ea0c81d86f9719fdab9de74e4d72e8486fb # protoc
-      - name: Certify Lance backend
-        run: |
-          cargo test -p heiwa_embed --locked --features lance
-          cargo test -p heiwa-session --locked --features lance --test operator_service
-
   lint:
     name: TypeScript and Web Lint
     runs-on: ubuntu-latest
@@ -475,35 +354,3 @@ jobs:
           bash scripts/check_public_installer.sh
           bash scripts/tests/test_detect_ci_surfaces.sh
           bats tests/audit/*.bats
-
-  # Protected-main certification compiles the Tauri desktop shell on its
-  # native target. PR feedback stays fast; every shippable main commit still
-  # proves the heavy wry/webkit tree before release metadata can advance.
-  desktop-check:
-    name: Desktop Shell Check (macOS)
-    if: github.event_name != 'pull_request'
-    runs-on: macos-latest
-    needs: changes
-    permissions:
-      contents: read
-      pull-requests: read
-    steps:
-      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
-        with:
-          persist-credentials: false
-      - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@4360b52568e2003a75bf9bc1d59f33a8e3fc893c # stable
-        with:
-          toolchain: 1.95.0
-      - name: Rust cache
-        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
-        with:
-          workspaces: |
-            .
-          prefix-key: v2-rust-desktop
-          cache-workspace-crates: true
-      - name: Cargo check desktop shell
-        env:
-          CARGO_PROFILE_DEV_DEBUG: "0"
-          CARGO_INCREMENTAL: "0"
-        run: cargo check -p heiwa-desktop --locked

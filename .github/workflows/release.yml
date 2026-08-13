@@ -74,33 +74,40 @@ jobs:
           set -euo pipefail
 
           deadline=$((SECONDS + 900))
+          required_workflows=(ci.yml certification.yml)
           while (( SECONDS < deadline )); do
-            certification="$({
-              gh api \
-                "repos/${GITHUB_REPOSITORY}/actions/workflows/ci.yml/runs?event=push&branch=main&head_sha=${RELEASE_COMMIT}&per_page=20" \
-                --jq '.workflow_runs | sort_by(.run_number) | last | [.status, (.conclusion // "")] | @tsv'
-            } 2>/dev/null || true)"
+            all_passed=true
+            for workflow_file in "${required_workflows[@]}"; do
+              result="$({
+                gh api \
+                  "repos/${GITHUB_REPOSITORY}/actions/workflows/${workflow_file}/runs?event=push&branch=main&head_sha=${RELEASE_COMMIT}&per_page=20" \
+                  --jq '.workflow_runs | sort_by(.run_number) | last | [.status, (.conclusion // "")] | @tsv'
+              } 2>/dev/null || true)"
 
-            if [[ -z "$certification" ]]; then
-              echo "Waiting for main certification to start at ${RELEASE_COMMIT}."
-              sleep 10
-              continue
+              if [[ -z "$result" ]]; then
+                echo "Waiting for ${workflow_file} to start at ${RELEASE_COMMIT}."
+                all_passed=false
+                continue
+              fi
+
+              IFS=$'\t' read -r status conclusion <<<"$result"
+              if [[ "$status" != "completed" ]]; then
+                echo "Waiting for ${workflow_file} at ${RELEASE_COMMIT}: ${status}."
+                all_passed=false
+                continue
+              fi
+
+              if [[ "$conclusion" != "success" ]]; then
+                echo "${workflow_file} failed at ${RELEASE_COMMIT}: ${conclusion}." >&2
+                exit 1
+              fi
+            done
+
+            if [[ "$all_passed" == "true" ]]; then
+              echo "Fast CI and full certification passed at ${RELEASE_COMMIT}."
+              exit 0
             fi
-
-            IFS=$'\t' read -r status conclusion <<<"$certification"
-            if [[ "$status" != "completed" ]]; then
-              echo "Waiting for main certification at ${RELEASE_COMMIT}: ${status}."
-              sleep 10
-              continue
-            fi
-
-            if [[ "$conclusion" != "success" ]]; then
-              echo "Main certification failed at ${RELEASE_COMMIT}: ${conclusion}." >&2
-              exit 1
-            fi
-
-            echo "Main certification passed at ${RELEASE_COMMIT}."
-            exit 0
+            sleep 10
           done
 
           echo "Timed out waiting for main certification at ${RELEASE_COMMIT}." >&2

@@ -109,7 +109,7 @@ if ! grep -q "\"node\": \"${required_node_major}\"" package.json; then
   exit 1
 fi
 
-for workflow in .github/workflows/ci.yml .github/workflows/deploy.yml; do
+for workflow in .github/workflows/ci.yml .github/workflows/certification.yml .github/workflows/deploy.yml; do
   if ! grep -Eq "actions/setup-node@[0-9a-f]{40}[[:space:]]+# v[0-9]+" "$workflow"; then
     echo "$workflow must set up Node with an immutable commit pin" >&2
     exit 1
@@ -123,7 +123,7 @@ done
 
 bash scripts/check_workflow_pins.sh
 
-for workflow in .github/workflows/ci.yml .github/workflows/deploy.yml; do
+for workflow in .github/workflows/ci.yml .github/workflows/certification.yml .github/workflows/deploy.yml; do
   if ! grep -Eq "toolchain: ${required_rust_channel}" "$workflow"; then
     echo "$workflow must install Rust $required_rust_channel" >&2
     exit 1

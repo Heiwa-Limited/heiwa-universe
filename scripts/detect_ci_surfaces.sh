@@ -20,7 +20,7 @@ classify_path() {
   local file="$1"
 
   case "$file" in
-    .github/workflows/ci.yml|scripts/detect_ci_surfaces.sh|scripts/tests/test_detect_ci_surfaces.sh)
+    .github/workflows/ci.yml|.github/workflows/certification.yml|scripts/detect_ci_surfaces.sh|scripts/tests/test_detect_ci_surfaces.sh)
       rust=true
       lance=true
       dependency_security=true
