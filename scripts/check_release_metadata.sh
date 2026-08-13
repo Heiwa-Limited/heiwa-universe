@@ -138,6 +138,14 @@ require_match ".github/workflows/container.yml" 'bash packaging/scripts/stage_re
 require_match ".github/workflows/container.yml" '^[[:space:]]*file: packaging/apps/heiwa_shell/Dockerfile\.release$' "container publication must use the trusted runtime-only packaging recipe"
 require_no_match "apps/heiwa_shell/Dockerfile.release" 'cargo build|rust-builder|^FROM rust:' "release containers must not recompile Rust"
 require_match ".github/workflows/container.yml" '^[[:space:]]*platforms: linux/amd64$' "container publication must match the currently certified architecture"
+# The public installer resolves the newest release at run time and falls back to
+# a literal pin. Nothing used to keep that pin fresh, so a release could ship
+# while `curl https://heiwa.ltd/install | sh` still installed the previous
+# version. The release gate now refuses a stale pin.
+require_file "scripts/check_installer_version_pin.sh"
+require_match ".github/workflows/release.yml" 'bash scripts/check_installer_version_pin\.sh' "releases must refuse a stale public installer fallback pin"
+require_match "apps/heiwa_app/clients/web/install" '^pinned_version="[0-9]+\.[0-9]+\.[0-9]+"$' "the public installer must keep a semantic fallback pin"
+require_match "apps/heiwa_app/clients/web/install" 'resolve_latest_version' "the public installer must resolve the newest release at run time"
 require_file "scripts/configure_public_installer_edge.sh"
 require_file "scripts/check_public_installer_edge.sh"
 require_match ".github/workflows/deploy.yml" 'bash scripts/check_public_installer_edge\.sh' "Cloudflare deploys must verify non-browser installer access"

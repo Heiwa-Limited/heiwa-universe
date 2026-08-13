@@ -1,7 +1,11 @@
 #!/bin/sh
 set -eu
 
-version="${HEIWA_VERSION:-0.1.0}"
+# Fallback only. The installer resolves the newest published release at run
+# time; this pin is what it falls back to when that lookup fails. release.yml
+# refuses to publish a tag that does not match it, so the fallback cannot go
+# stale behind a release.
+pinned_version="0.1.0"
 heiwa_home="${HEIWA_HOME:-$HOME/.heiwa}"
 repo="Heiwa-Limited/heiwa-universe"
 
@@ -13,9 +17,6 @@ fail() {
 need() {
   command -v "$1" >/dev/null 2>&1 || fail "missing required command: $1"
 }
-
-printf '%s\n' "$version" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+$' ||
-  fail "HEIWA_VERSION must be a stable semantic version such as 0.1.0"
 
 case "$heiwa_home" in
   ""|"/"|".") fail "refusing unsafe HEIWA_HOME: $heiwa_home" ;;
@@ -34,6 +35,33 @@ need cp
 need find
 need ln
 need mkdir
+need sed
+
+# GitHub answers /releases/latest with a 302 to /releases/tag/vX.Y.Z, so the
+# newest version is readable from one header without shipping a JSON parser.
+# Deliberately no --location: the redirect target is the answer.
+resolve_latest_version() {
+  curl --proto '=https' --tlsv1.2 --fail --silent --show-error --head \
+    "https://github.com/${repo}/releases/latest" 2>/dev/null |
+    awk 'tolower($1) == "location:" { print $2 }' |
+    tr -d '\r' |
+    sed -n 's|.*/releases/tag/v\([0-9][0-9.]*\)$|\1|p' |
+    tail -n 1
+}
+
+version="${HEIWA_VERSION:-}"
+version_source="HEIWA_VERSION"
+if [ -z "$version" ]; then
+  version="$(resolve_latest_version || true)"
+  version_source="latest release"
+fi
+if [ -z "$version" ]; then
+  version="$pinned_version"
+  version_source="pinned fallback"
+fi
+
+printf '%s\n' "$version" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+$' ||
+  fail "HEIWA_VERSION must be a stable semantic version such as 0.1.0"
 
 os="$(uname -s)"
 arch="$(uname -m)"
@@ -75,7 +103,7 @@ download() {
   curl --proto '=https' --tlsv1.2 --fail --location --silent --show-error     --output "$2" "$1"
 }
 
-echo "heiwa install: downloading v$version for $asset"
+echo "heiwa install: downloading v$version for $asset (version from $version_source)"
 download "$release_base/$archive_name" "$tmp_dir/$archive_name"
 download "$release_base/$checksums_name" "$tmp_dir/$checksums_name"
 

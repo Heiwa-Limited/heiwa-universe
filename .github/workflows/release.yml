@@ -65,6 +65,12 @@ jobs:
             echo "commit=$commit"
           } >> "$GITHUB_OUTPUT"
 
+      - name: Require a fresh public installer pin
+        shell: bash
+        env:
+          RELEASE_VERSION: ${{ steps.meta.outputs.version }}
+        run: bash scripts/check_installer_version_pin.sh "$RELEASE_VERSION"
+
       - name: Require successful full main certification
         shell: bash
         env:
