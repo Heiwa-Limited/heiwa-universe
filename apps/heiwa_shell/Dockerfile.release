@@ -1,0 +1,31 @@
+# syntax=docker/dockerfile:1
+
+# Runtime-only image assembled from a verified Heiwa release archive. The
+# workflow stages `heiwa` and `cockpit/` from the immutable GitHub Release;
+# Docker must not compile a second, potentially divergent binary.
+FROM debian:bookworm-slim
+
+ARG HEIWA_VERSION
+ARG HEIWA_REVISION
+
+LABEL org.opencontainers.image.title="Heiwa" \
+      org.opencontainers.image.description="Heiwa local-first runtime" \
+      org.opencontainers.image.source="https://github.com/Heiwa-Limited/heiwa-universe" \
+      org.opencontainers.image.version="$HEIWA_VERSION" \
+      org.opencontainers.image.revision="$HEIWA_REVISION"
+
+ENV HEIWA_HOME="/root/.heiwa" \
+    HEIWA_PROFILE="container" \
+    HEIWA_DEFAULT_POLICY="local-only-no-side-effects" \
+    PATH="/usr/local/bin:$PATH"
+
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends ca-certificates curl \
+    && rm -rf /var/lib/apt/lists/* \
+    && mkdir -p /root/.heiwa/app /root/.heiwa/state
+
+COPY --chmod=0755 heiwa /usr/local/bin/heiwa
+COPY cockpit/ /root/.heiwa/app/cockpit-current/
+
+ENTRYPOINT ["/usr/local/bin/heiwa"]
+CMD ["app", "runtime", "status"]
