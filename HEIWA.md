@@ -207,7 +207,7 @@ As of 2026-04-22, `heiwa-universe` has already landed meaningful local runtime s
 | ------------------ | ------------------------------------------------------------------------------------------------- |
 | **Heiwa**          | Product identity: app, runtime, CLI, packages, docs, and user-visible system                      |
 | **Heiwa Limited**  | Company, publisher, employer, legal/commercial identity                                           |
-| **Heiwa Universe** | Repository and project workspace: `Heiwa-Limited/heiwa-universe`; private until the public security/readiness gate passes |
+| **Heiwa Universe** | Repository and project workspace: `Heiwa-Limited/heiwa-universe`; public on GitHub since the v0.1.0 release |
 | **`heiwa`**        | Primary installed runtime and operator surface                                                    |
 | **DREX**           | Internal execution kernel and routing substrate                                                   |
 | **Evidence plane** | Canonical durable record: local JSONL journal (truth), Lance (derived recall), SQLite (hot state) |

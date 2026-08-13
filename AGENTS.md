@@ -6,7 +6,7 @@ This repository builds the Heiwa full stack. The current product center of gravi
 
 - **Heiwa** is the product identity: app, runtime, CLI, packages, and docs.
 - **Heiwa Limited** is the company/publisher/legal identity.
-- **Heiwa Universe** is this repository: `Heiwa-Limited/heiwa-universe`, private until the public security/readiness gate passes.
+- **Heiwa Universe** is this repository: `Heiwa-Limited/heiwa-universe`, public on GitHub since the v0.1.0 release. Treat everything committed here as published; secret scanning and the security gates are the only thing between a commit and the world.
 - **`heiwa`** is the primary installed operator surface.
 - **DREX** is the internal execution kernel.
 - **Local MacBook state** under `~/.heiwa/` plus this checkout is the current owner runtime truth.
