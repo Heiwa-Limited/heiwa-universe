@@ -44,6 +44,18 @@ jobs:
             [[ -z "$BASE_SHA" ]] ||
             [[ "$BASE_SHA" == "0000000000000000000000000000000000000000" ]]; then
             scripts/detect_ci_surfaces.sh --all >> "$GITHUB_OUTPUT"
+          elif [[ "$EVENT_NAME" == "pull_request" ]]; then
+            # Classification is security-sensitive: a PR must not be allowed
+            # to edit the classifier that decides whether its own dependency
+            # audits run. Execute the script from the protected base commit.
+            trusted_classifier="$RUNNER_TEMP/detect_ci_surfaces.sh"
+            if git show "$BASE_SHA:scripts/detect_ci_surfaces.sh" > "$trusted_classifier" 2>/dev/null; then
+              bash "$trusted_classifier" "$BASE_SHA" "$HEAD_SHA" >> "$GITHUB_OUTPUT"
+            else
+              # Bootstrap safely when the protected base predates the
+              # classifier: exercise every surface rather than trust the PR.
+              scripts/detect_ci_surfaces.sh --all >> "$GITHUB_OUTPUT"
+            fi
           else
             scripts/detect_ci_surfaces.sh "$BASE_SHA" "$HEAD_SHA" >> "$GITHUB_OUTPUT"
           fi

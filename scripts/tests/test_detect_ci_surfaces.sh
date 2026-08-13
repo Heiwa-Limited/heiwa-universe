@@ -3,6 +3,7 @@ set -euo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 detector="$repo_root/scripts/detect_ci_surfaces.sh"
+workflow="$repo_root/.github/workflows/ci.yml"
 
 assert_case() {
   local label="$1"
@@ -31,5 +32,10 @@ assert_case "Node lockfile enables dependency security only" "$dependencies" "pa
 assert_case "Gitleaks policy uses the mandatory scan without dependency audits" "$none" ".gitleaksignore"
 assert_case "CI workflow changes exercise every CI surface" "$all" ".github/workflows/ci.yml"
 assert_case "root Rust metadata exercises every Rust target" "$all" "Cargo.lock"
+
+if ! grep -Fq 'git show "$BASE_SHA:scripts/detect_ci_surfaces.sh"' "$workflow"; then
+  echo "FAIL: pull-request classification must execute protected base policy" >&2
+  exit 1
+fi
 
 printf 'CI surface detector tests passed.\n'
