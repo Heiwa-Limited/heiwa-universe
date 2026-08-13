@@ -92,7 +92,13 @@ printf 'python-audit-python: %s\n' "$PYTHON_AUDIT_PYTHON"
 printf 'git: %s\n' "$(git rev-parse --short HEAD 2>/dev/null || echo unknown)"
 printf 'dirty: %s\n' "$(test -z "$(git status --porcelain 2>/dev/null)" && echo false || echo true)"
 
-run_required "cargo audit" cargo audit
+if command -v cargo-audit >/dev/null 2>&1; then
+  # Calling the installed subcommand directly avoids rustup auto-syncing the
+  # repository toolchain before the audit can run on hosted runners.
+  run_required "cargo audit" cargo-audit audit
+else
+  run_required "cargo audit" cargo audit
+fi
 run_required "root npm audit" npm audit
 run_required "cockpit npm audit" npm --prefix apps/heiwa_app/clients/cockpit audit
 run_required "desktop npm audit" npm --prefix apps/heiwa_app/desktop audit
