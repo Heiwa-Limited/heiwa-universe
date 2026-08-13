@@ -85,6 +85,7 @@ require_match ".github/workflows/container.yml" '^[[:space:]]*platforms: linux/a
 require_file "scripts/configure_public_installer_edge.sh"
 require_file "scripts/check_public_installer_edge.sh"
 require_match ".github/workflows/deploy.yml" 'bash scripts/check_public_installer_edge\.sh' "Cloudflare deploys must verify non-browser installer access"
+require_match ".github/workflows/deploy.yml" 'echo "deploy_core=false"' "manual web deploys must not run the Rust release preflight"
 require_match "scripts/configure_public_installer_edge.sh" '^zone_name=.*heiwa\.ltd' "installer edge exception must stay scoped to heiwa.ltd"
 require_match "scripts/configure_public_installer_edge.sh" 'uri\.path in \{\\"/install\\" \\"/install\.sh\\"\}' "installer edge exception must stay scoped to the two public installer paths"
 require_match "scripts/check_public_installer_edge.sh" '^installer_url=.*https://heiwa\.ltd/install' "installer edge check must target the public installer"

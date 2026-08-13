@@ -271,7 +271,11 @@ jobs:
           workspaces: |
             .
           prefix-key: v2-rust
-          shared-key: pr-tests
+          # Pull requests restore the protected-main workspace cache. GitHub
+          # permits PRs to read base-branch caches but isolates PR-written
+          # caches under refs/pull/<n>/merge, so PR-only keys cold-start every
+          # new pull request.
+          shared-key: rust-matrix
           cache-workspace-crates: true
           cache-bin: true
       - name: Install Linux system dependencies
@@ -315,7 +319,7 @@ jobs:
           workspaces: |
             .
           prefix-key: v2-rust
-          shared-key: pr-static
+          shared-key: rust-matrix
           cache-workspace-crates: true
           cache-bin: true
       - name: Install Linux system dependencies
@@ -393,9 +397,7 @@ jobs:
           cache-workspace-crates: true
           cache-bin: false
       - name: Install protoc
-        uses: arduino/setup-protoc@c65c819552d16ad3c9b72d9dfd5ba5237b9c906b # v3
-        with:
-          repo-token: ${{ secrets.GITHUB_TOKEN }}
+        uses: taiki-e/install-action@f6886ea0c81d86f9719fdab9de74e4d72e8486fb # protoc
       - name: Certify Lance backend
         run: |
           cargo test -p heiwa_embed --locked --features lance

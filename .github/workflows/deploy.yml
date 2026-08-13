@@ -1,6 +1,6 @@
 name: Heiwa Deploy
 
-# Deliberate deploys only: manual dispatch (surface detection runs --all).
+# Deliberate web deploys only: manual dispatch publishes the public shell.
 # No push:main trigger — merging to main must not implicitly republish the
 # public shell; releases are explicitly dispatched against an annotated tag.
 on:
@@ -32,7 +32,11 @@ jobs:
           set -euo pipefail
 
           if [[ "${GITHUB_EVENT_NAME}" == "workflow_dispatch" ]]; then
-            scripts/detect_changed_surfaces.sh --all >> "$GITHUB_OUTPUT"
+            {
+              echo "deploy_core=false"
+              echo "deploy_trading=false"
+              echo "deploy_web=true"
+            } >> "$GITHUB_OUTPUT"
             exit 0
           fi
 
