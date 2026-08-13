@@ -151,7 +151,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, macos-latest, windows-latest]
+        os: [macos-latest, windows-latest]
     env:
       # PR CI gates correctness, not artifacts: skip debuginfo and incremental
       # bookkeeping to cut compile time and cache size.
@@ -170,7 +170,6 @@ jobs:
         uses: dtolnay/rust-toolchain@4360b52568e2003a75bf9bc1d59f33a8e3fc893c # stable
         with:
           toolchain: 1.95.0
-          components: clippy
       - name: Rust cache
         if: needs.changes.outputs.rust == 'true'
         uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
@@ -180,62 +179,19 @@ jobs:
           prefix-key: v2-rust
           cache-workspace-crates: true
           cache-bin: true
-      # keyring's sync-secret-service backend links libdbus; that is the only
-      # other system dependency the non-desktop workspace needs on Linux.
-      - name: Install Linux system dependencies
-        if: needs.changes.outputs.rust == 'true' && matrix.os == 'ubuntu-latest'
-        run: sudo apt-get install -y --no-install-recommends libdbus-1-dev pkg-config
       # heiwa-desktop (Tauri shell) is excluded here: its wry/webkit dep tree
       # dominates compile time and needs OS GUI packages. Protected-main
       # desktop certification covers it on macOS; releases build it fully.
-      - name: Cargo test
-        if: needs.changes.outputs.rust == 'true' && matrix.os == 'ubuntu-latest'
-        run: cargo test --workspace --exclude heiwa-desktop --locked --no-default-features
       # Compile test targets on their native OS without executing the full
-      # suite three times. This preserves cfg-gated platform coverage while
-      # Linux remains the single execution lane.
+      # suite twice. The package-group jobs execute the Linux test suite.
       - name: Cross-platform test compilation
-        if: needs.changes.outputs.rust == 'true' && matrix.os != 'ubuntu-latest'
+        if: needs.changes.outputs.rust == 'true'
         run: >
           cargo test --workspace --exclude heiwa-desktop --locked
           --no-default-features --no-run
-      - name: Cargo fmt
-        if: needs.changes.outputs.rust == 'true' && matrix.os == 'ubuntu-latest'
-        run: cargo fmt --all -- --check
-      - name: Cargo clippy
-        if: needs.changes.outputs.rust == 'true' && matrix.os == 'ubuntu-latest'
-        run: >
-          cargo clippy --workspace --exclude heiwa-desktop --locked --all-targets
-          --no-default-features --
-          -A clippy::too_many_arguments
-          -A clippy::new_without_default
-          -A clippy::unnecessary_to_owned
-          -A clippy::needless_range_loop
-          -A clippy::approx_constant
-          -A clippy::collapsible_if
-          -A clippy::bool_assert_comparison
-          -A clippy::type_complexity
-          -A clippy::needless_borrows_for_generic_args
-          -A clippy::unnecessary_unwrap
-          -D warnings
-      - name: Install cargo-machete
-        if: needs.changes.outputs.rust == 'true' && matrix.os == 'ubuntu-latest'
-        uses: taiki-e/install-action@b20dedce73af6905cdc30d6611090c9b67557c8d # v2
-        with:
-          tool: cargo-machete
-      - name: Check unused Rust dependencies
-        if: needs.changes.outputs.rust == 'true' && matrix.os == 'ubuntu-latest'
-        # Scan the whole workspace rather than a hand-maintained path list.
-        # The old list named 16 paths and had drifted: heiwa_evidence,
-        # heiwa_drex, heiwa_automations, heiwa_receipts, heiwa_a2a,
-        # heiwa_memory and heiwa_resource were never checked - including the
-        # two crates the current backend is built on. Unused deps had
-        # accumulated there unnoticed.
-        run: cargo machete
 
   rust-pr-tests:
     name: Rust Tests (${{ matrix.group }})
-    if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest
     needs: changes
     strategy:
@@ -264,16 +220,28 @@ jobs:
         uses: dtolnay/rust-toolchain@4360b52568e2003a75bf9bc1d59f33a8e3fc893c # stable
         with:
           toolchain: 1.95.0
-      - name: Rust cache
+      - name: Rust group cache
+        id: rust-group-cache
         if: needs.changes.outputs.rust == 'true'
         uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
         with:
           workspaces: |
             .
           prefix-key: v2-rust
-          shared-key: pr-tests
+          shared-key: pr-${{ matrix.group }}
           cache-workspace-crates: true
           cache-bin: true
+      - name: Bootstrap group cache from protected main
+        if: needs.changes.outputs.rust == 'true' && steps.rust-group-cache.outputs.cache-hit != 'true'
+        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
+        with:
+          workspaces: |
+            .
+          prefix-key: v2-rust
+          shared-key: rust-matrix
+          cache-workspace-crates: true
+          cache-bin: true
+          save-if: false
       - name: Install Linux system dependencies
         if: needs.changes.outputs.rust == 'true' && matrix.needs_native_vault
         run: sudo apt-get install -y --no-install-recommends libdbus-1-dev pkg-config
@@ -288,7 +256,6 @@ jobs:
 
   rust-pr-static:
     name: Rust Static Checks
-    if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest
     needs: changes
     env:
@@ -308,7 +275,8 @@ jobs:
         with:
           toolchain: 1.95.0
           components: clippy
-      - name: Rust cache
+      - name: Rust static cache
+        id: rust-static-cache
         if: needs.changes.outputs.rust == 'true'
         uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
         with:
@@ -318,6 +286,17 @@ jobs:
           shared-key: pr-static
           cache-workspace-crates: true
           cache-bin: true
+      - name: Bootstrap static cache from protected main
+        if: needs.changes.outputs.rust == 'true' && steps.rust-static-cache.outputs.cache-hit != 'true'
+        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
+        with:
+          workspaces: |
+            .
+          prefix-key: v2-rust
+          shared-key: rust-matrix
+          cache-workspace-crates: true
+          cache-bin: true
+          save-if: false
       - name: Install Linux system dependencies
         if: needs.changes.outputs.rust == 'true'
         run: sudo apt-get install -y --no-install-recommends libdbus-1-dev pkg-config
@@ -393,9 +372,7 @@ jobs:
           cache-workspace-crates: true
           cache-bin: false
       - name: Install protoc
-        uses: arduino/setup-protoc@c65c819552d16ad3c9b72d9dfd5ba5237b9c906b # v3
-        with:
-          repo-token: ${{ secrets.GITHUB_TOKEN }}
+        uses: taiki-e/install-action@f6886ea0c81d86f9719fdab9de74e4d72e8486fb # protoc
       - name: Certify Lance backend
         run: |
           cargo test -p heiwa_embed --locked --features lance
