@@ -9,10 +9,19 @@
 use std::path::PathBuf;
 
 pub fn heiwa_home() -> Option<PathBuf> {
-    std::env::var_os("HOME")
-        .filter(|v| !v.is_empty())
-        .map(PathBuf::from)
-        .or_else(dirs::home_dir)
+    resolve_heiwa_home(
+        std::env::var_os("HOME").map(PathBuf::from),
+        dirs::home_dir(),
+    )
+}
+
+fn resolve_heiwa_home(
+    home_env: Option<PathBuf>,
+    platform_home: Option<PathBuf>,
+) -> Option<PathBuf> {
+    home_env
+        .filter(|value| !value.as_os_str().is_empty())
+        .or(platform_home)
 }
 
 /// Resolve the canonical Heiwa runtime root.
@@ -41,14 +50,16 @@ mod tests {
 
     #[test]
     fn home_env_wins_over_platform_lookup() {
-        // Serialize env mutation within this test only; no other test in this
-        // binary touches HOME.
-        let prev = std::env::var_os("HOME");
-        std::env::set_var("HOME", "/tmp/heiwa-home-test");
-        assert_eq!(heiwa_home(), Some(PathBuf::from("/tmp/heiwa-home-test")));
-        match prev {
-            Some(v) => std::env::set_var("HOME", v),
-            None => std::env::remove_var("HOME"),
-        }
+        assert_eq!(
+            resolve_heiwa_home(
+                Some(PathBuf::from("/tmp/heiwa-home-test")),
+                Some(PathBuf::from("/platform/home")),
+            ),
+            Some(PathBuf::from("/tmp/heiwa-home-test"))
+        );
+        assert_eq!(
+            resolve_heiwa_home(Some(PathBuf::new()), Some(PathBuf::from("/platform/home"))),
+            Some(PathBuf::from("/platform/home"))
+        );
     }
 }
