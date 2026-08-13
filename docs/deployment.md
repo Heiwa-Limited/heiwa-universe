@@ -109,11 +109,23 @@ Rules:
 
 ## CI contract
 
-- `cargo build --workspace --locked`
-- `cargo test --workspace --locked`
-- `cargo clippy --workspace --locked --all-targets`
-- `uv run --extra dev python -m pytest`
-- `mkdocs build --strict`
+Pull requests are the sub-minute feedback gate:
+
+- Linux unit/integration tests via `cargo nextest`
+- Rust formatting, Clippy, and unused-dependency checks
+- dependency diff review, Gitleaks, and Trivy
+- TypeScript/web lint, docs, agent sync, and repository contracts
+
+Protected `main` is the full release certification gate:
+
+- the standard Cargo test harness on Linux
+- native macOS and Windows test-target compilation
+- Tauri desktop-shell compilation on macOS
+- Lance backend and journal-rebuild integration tests
+- full Rust, npm, Python, and Deno security audits
+
+`release.yml` queries the Actions API and requires that full `main` workflow to
+have succeeded at the exact annotated-tag commit before any release build starts.
 
 The default Python gate intentionally excludes legacy Hub tests. Run `uv run --extra dev python -m pytest legacy/apps/heiwa_hub/tests` when repairing or promoting that surface (the hub was quarantined under `legacy/`).
 
@@ -127,7 +139,8 @@ Hosted and control-plane material still exists in the repository as reference or
 
 ## Verification
 
-- CI must pass on all Rust matrix platforms before release work continues.
+- The fast PR gate must pass before merge; the full `main` certification must
+  pass at the exact tag commit before release work continues.
 - Docs must build cleanly with `mkdocs build --strict`.
 - Release automation should extend from this baseline rather than bypass it.
 - Release asset names and checksum output should stay aligned with `infra/platform/github/README.md`.

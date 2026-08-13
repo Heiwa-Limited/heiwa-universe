@@ -72,6 +72,8 @@ require_block_match ".github/workflows/release.yml" \
   '^[[:space:]]*ref: main$' \
   "release metadata validation must check out protected main"
 require_match ".github/workflows/release.yml" 'git merge-base --is-ancestor "\$commit" HEAD' "release tags must resolve to commits on main"
+require_match ".github/workflows/release.yml" 'actions/workflows/ci\.yml/runs\?event=push&branch=main&head_sha=\$\{RELEASE_COMMIT\}' "release publication must require full main certification at the tagged commit"
+require_match ".github/workflows/release.yml" 'if \[\[ "\$conclusion" != "success" \]\]' "release publication must reject failed main certification"
 require_match ".github/workflows/release.yml" 'shared-key: \$\{\{ matrix\.target \}\}' "release caches must be stable per target"
 require_match ".github/workflows/release.yml" '--features heiwa-shell/lance' "release binaries must explicitly include the Lance recall backend"
 require_match ".github/workflows/release.yml" 'actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a' "release uploads must use the Node 24 artifact action"
