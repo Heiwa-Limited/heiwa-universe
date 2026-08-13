@@ -1,9 +1,6 @@
 name: Heiwa Release
 
 on:
-  push:
-    tags:
-      - "v*"
   workflow_dispatch:
     inputs:
       tag:
@@ -15,7 +12,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: heiwa-release-${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref }}
+  group: heiwa-release-${{ inputs.tag }}
   cancel-in-progress: false
 
 jobs:
@@ -25,7 +22,15 @@ jobs:
     outputs:
       tag: ${{ steps.meta.outputs.tag }}
       version: ${{ steps.meta.outputs.version }}
+      commit: ${{ steps.meta.outputs.commit }}
     steps:
+      # Releases are dispatched from main so optimized Rust caches live on the
+      # default branch and remain reusable by later release tags.
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+          fetch-tags: true
       - id: meta
         shell: bash
         env:
@@ -33,19 +38,29 @@ jobs:
         run: |
           set -euo pipefail
 
-          if [[ "${GITHUB_EVENT_NAME}" == "workflow_dispatch" ]]; then
-            tag="${DISPATCH_TAG}"
-          else
-            tag="${GITHUB_REF_NAME}"
-          fi
+          tag="${DISPATCH_TAG}"
 
           if [[ ! "$tag" =~ ^v[0-9]+\.[0-9]+\.[0-9]+([+-][0-9A-Za-z.-]+)?$ ]]; then
             echo "Release tags must look like v0.1.0" >&2
             exit 1
           fi
 
-          echo "tag=$tag" >> "$GITHUB_OUTPUT"
-          echo "version=${tag#v}" >> "$GITHUB_OUTPUT"
+          if [[ "$(git cat-file -t "$tag" 2>/dev/null || true)" != "tag" ]]; then
+            echo "Release tag must exist and be annotated: $tag" >&2
+            exit 1
+          fi
+
+          commit="$(git rev-parse "${tag}^{}")"
+          if ! git merge-base --is-ancestor "$commit" HEAD; then
+            echo "Release tag $tag does not resolve to a commit on main" >&2
+            exit 1
+          fi
+
+          {
+            echo "tag=$tag"
+            echo "version=${tag#v}"
+            echo "commit=$commit"
+          } >> "$GITHUB_OUTPUT"
 
   cockpit:
     name: Build Cockpit Assets
@@ -68,7 +83,7 @@ jobs:
           test -f apps/heiwa_app/clients/cockpit/dist/index.html
           test -n "$(find apps/heiwa_app/clients/cockpit/dist/assets -type f -print -quit)"
       - name: Upload cockpit assets
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: cockpit
           path: apps/heiwa_app/clients/cockpit/dist/
@@ -116,7 +131,9 @@ jobs:
         with:
           workspaces: |
             .
-          prefix-key: v1-rust
+          prefix-key: v3-release
+          shared-key: ${{ matrix.target }}
+          cache-on-failure: true
           cache-bin: false
 
       # heiwa-shell defaults to the `lance` feature, whose lance-encoding
@@ -137,7 +154,7 @@ jobs:
         run: cargo build --locked --release -p heiwa-shell --bin heiwa --target ${{ matrix.target }}
 
       - name: Download cockpit assets
-        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
           name: cockpit
           path: cockpit-dist
@@ -176,7 +193,7 @@ jobs:
           fi
 
       - name: Upload packaged asset
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: ${{ matrix.name }}
           path: dist/heiwa-${{ needs.metadata.outputs.version }}-${{ matrix.name }}.${{ matrix.archive_ext }}
@@ -188,7 +205,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Download packaged assets
-        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
           pattern: "*-*"
           path: dist
@@ -202,7 +219,7 @@ jobs:
           sha256sum heiwa-* > "heiwa-${{ needs.metadata.outputs.version }}-checksums.txt"
 
       - name: Upload checksum artifact
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: checksums
           path: dist/heiwa-${{ needs.metadata.outputs.version }}-checksums.txt
@@ -218,14 +235,14 @@ jobs:
       id-token: write
     steps:
       - name: Download release artifacts
-        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
           pattern: "*-*"
           path: release-artifacts
           merge-multiple: true
 
       - name: Download checksum manifest
-        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
           name: checksums
           path: release-artifacts
