@@ -5576,11 +5576,12 @@ mod app_readmodel_tests {
             assert_eq!(frame["event"]["event_type"], expected);
         }
         let next = tokio::time::timeout(
-            Duration::from_millis(40),
+            Duration::from_millis(200),
             read_server_ws_json(&mut resumed_client),
         )
-        .await;
-        assert!(next.is_err(), "caught_up must be emitted exactly once");
+        .await
+        .expect("resumed stream heartbeat");
+        assert_eq!(next["type"], "heartbeat");
         resumed.abort();
     }
 
