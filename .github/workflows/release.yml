@@ -185,6 +185,7 @@ jobs:
       - name: Download packaged assets
         uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
         with:
+          pattern: "*-*"
           path: dist
           merge-multiple: true
 
@@ -214,8 +215,15 @@ jobs:
       - name: Download release artifacts
         uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
         with:
+          pattern: "*-*"
           path: release-artifacts
           merge-multiple: true
+
+      - name: Download checksum manifest
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: checksums
+          path: release-artifacts
 
       - name: Attest release artifacts
         uses: actions/attest-build-provenance@977bb373ede98d70efdf65b84cb5f73e068dcc2a # v3
