@@ -53,7 +53,10 @@ Cloudflare may front or cache install/update material, but it must point back to
 GitHub release identity and checksums. Cloudflare must not become a second
 source of binary truth.
 
-Under the local-first emergency bypass posture, local checkout source promotion (`heiwa app update --source checkout`) is the authoritative install and update path on Devon's MacBook. The MacBook operates directly from locally-verified sandbox artifacts rather than waiting for GitHub Releases.
+GitHub Releases are the authoritative public install and update path, including
+on the operator MacBook. Local checkout promotion (`heiwa app update --source
+checkout`) is reserved for development or recovery and must identify the exact
+checkout commit in its receipt; it is not evidence of a public release.
 
 `heiwa app update --dry-run` is the safe probe for the installed runtime and
 defaults to GitHub Releases. It should report:

@@ -30,10 +30,7 @@ fn google_scopes(connector: &str) -> Option<&'static str> {
 }
 
 pub fn secrets_dir() -> PathBuf {
-    crate::home::heiwa_home()
-        .unwrap_or_else(|| PathBuf::from("."))
-        .join(".heiwa")
-        .join("secrets")
+    crate::home::heiwa_runtime_dir().join("secrets")
 }
 
 fn client_secret_path() -> PathBuf {

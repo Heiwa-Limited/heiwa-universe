@@ -2719,12 +2719,7 @@ fn scan_goals_fingerprint() -> HashSet<(String, u64)> {
 }
 
 fn scan_dispatch_ids(subdir: &str) -> HashSet<String> {
-    let home = crate::home::heiwa_home().unwrap_or_else(|| PathBuf::from("."));
-    let dir = home
-        .join(".heiwa")
-        .join("state")
-        .join("dispatch")
-        .join(subdir);
+    let dir = crate::home::heiwa_state_dir().join("dispatch").join(subdir);
     scan_dispatch_ids_in(&dir)
 }
 
@@ -4294,20 +4289,21 @@ fn ollama_models_for_endpoint(
 
 fn hook_provider_rows() -> Vec<Value> {
     let home = crate::home::heiwa_home().unwrap_or_else(|| PathBuf::from("."));
+    let runtime_root = crate::home::heiwa_runtime_dir();
     vec![
         json_hook_provider_row(
             "claude",
             "Claude Code",
             &home.join(".claude").join("settings.json"),
             Some(
-                home.join(".heiwa")
+                runtime_root
                     .join("generated")
                     .join("claude")
                     .join("settings.json"),
             ),
             &["PreToolUse", "UserPromptSubmit"],
             Some(
-                home.join(".heiwa")
+                runtime_root
                     .join("logs")
                     .join("policy")
                     .join("claude-runtime-safety.jsonl"),
@@ -4323,14 +4319,14 @@ fn hook_provider_rows() -> Vec<Value> {
             "Gemini CLI",
             &home.join(".gemini").join("settings.json"),
             Some(
-                home.join(".heiwa")
+                runtime_root
                     .join("generated")
                     .join("gemini")
                     .join("settings.json"),
             ),
             &["BeforeTool", "SessionStart"],
             Some(
-                home.join(".heiwa")
+                runtime_root
                     .join("logs")
                     .join("policy")
                     .join("gemini-runtime-policy.jsonl"),
@@ -4347,7 +4343,7 @@ fn hook_provider_rows() -> Vec<Value> {
             "display_name": "Antigravity",
             "status": "delegated",
             "config_path": home.join(".gemini").join("antigravity").display().to_string(),
-            "generated_config_status": generated_file_status(&home.join(".heiwa").join("generated").join("antigravity").join("settings.json")),
+            "generated_config_status": generated_file_status(&runtime_root.join("generated").join("antigravity").join("settings.json")),
             "audit_file": Value::Null,
             "events": [],
             "notes": [
@@ -4408,12 +4404,13 @@ fn json_hook_provider_row(
 
 fn codex_hook_provider_row(home: &Path) -> Value {
     let config_path = home.join(".codex").join("config.toml");
+    let runtime_root = crate::home::heiwa_runtime_dir();
     json!({
         "provider_id": "codex",
         "display_name": "Codex",
         "status": "unsupported",
         "config_path": config_path.display().to_string(),
-        "generated_config_status": generated_file_status(&home.join(".heiwa").join("generated").join("codex").join("config.toml")),
+        "generated_config_status": generated_file_status(&runtime_root.join("generated").join("codex").join("config.toml")),
         "audit_file": Value::Null,
         "events": [],
         "notes": [
@@ -4757,13 +4754,41 @@ fn cockpit_static_root() -> PathBuf {
         .and_then(Path::parent)
         .map(Path::to_path_buf)
         .unwrap_or_else(|| env::current_dir().unwrap_or_else(|_| PathBuf::from(".")));
+    let override_root = env::var_os("HEIWA_COCKPIT_DIR").map(PathBuf::from);
+    let portable_root = env::current_exe()
+        .ok()
+        .and_then(|executable| executable.parent().map(|parent| parent.join("cockpit")));
+    cockpit_static_root_from(
+        override_root.as_deref(),
+        &heiwa_install::get_heiwa_dir(),
+        portable_root.as_deref(),
+        &repo_root,
+    )
+}
+
+fn cockpit_static_root_from(
+    override_root: Option<&Path>,
+    install_root: &Path,
+    portable_root: Option<&Path>,
+    repo_root: &Path,
+) -> PathBuf {
+    if let Some(root) = override_root.filter(|root| root.join("index.html").is_file()) {
+        return root.to_path_buf();
+    }
+    let installed = install_root.join("app").join("cockpit-current");
+    if installed.join("index.html").is_file() {
+        return installed;
+    }
+    if let Some(root) = portable_root.filter(|root| root.join("index.html").is_file()) {
+        return root.to_path_buf();
+    }
     let cockpit_dist = repo_root
         .join("apps")
         .join("heiwa_app")
         .join("clients")
         .join("cockpit")
         .join("dist");
-    if cockpit_dist.exists() {
+    if cockpit_dist.join("index.html").is_file() {
         return cockpit_dist;
     }
     repo_root
@@ -5033,6 +5058,47 @@ mod app_readmodel_tests {
     use heiwa_evidence::OperatorJournal;
     use heiwa_session::operator::{OperatorSessionService, StartTurnRequest};
     use tokio::sync::broadcast;
+
+    #[test]
+    fn cockpit_static_root_prefers_override_then_installed_release_assets() {
+        let state = temp_state_dir("cockpit-static-root");
+        let install_root = state.join("install");
+        let installed = install_root.join("app").join("cockpit-current");
+        let repo_root = state.join("repo");
+        let portable = state.join("portable").join("cockpit");
+        let checkout = repo_root
+            .join("apps")
+            .join("heiwa_app")
+            .join("clients")
+            .join("cockpit")
+            .join("dist");
+        let override_root = state.join("override");
+        for root in [&installed, &portable, &checkout, &override_root] {
+            fs::create_dir_all(root).expect("create cockpit root");
+            fs::write(root.join("index.html"), b"<!doctype html>").expect("write cockpit index");
+        }
+
+        assert_eq!(
+            cockpit_static_root_from(None, &install_root, Some(&portable), &repo_root),
+            installed
+        );
+        assert_eq!(
+            cockpit_static_root_from(
+                Some(&override_root),
+                &install_root,
+                Some(&portable),
+                &repo_root,
+            ),
+            override_root
+        );
+        fs::remove_file(installed.join("index.html")).expect("remove installed index");
+        assert_eq!(
+            cockpit_static_root_from(None, &install_root, Some(&portable), &repo_root),
+            portable
+        );
+
+        let _ = fs::remove_dir_all(&state);
+    }
 
     #[test]
     fn checkout_app_bundle_plan_distinguishes_ready_and_missing_sources() {

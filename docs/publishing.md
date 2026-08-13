@@ -67,34 +67,15 @@ uv run --extra docs mkdocs gh-deploy --force
 Build each target locally (or in a clean sandbox), assemble the archive, generate the checksums manifest, and create the release with `gh`:
 
 ```bash
-TAG=v0.1.0
-mkdir -p dist
-
-# macOS · Apple Silicon
-cargo build --release --target aarch64-apple-darwin -p heiwa-shell
-tar -czf dist/heiwa-${TAG}-macos-aarch64.tar.gz \
-  -C target/aarch64-apple-darwin/release heiwa
-
-# Linux · x86_64  (cross-build via Docker or build on a Linux host)
-cargo build --release --target x86_64-unknown-linux-gnu -p heiwa-shell
-tar -czf dist/heiwa-${TAG}-linux-x86_64.tar.gz \
-  -C target/x86_64-unknown-linux-gnu/release heiwa
-
-# Windows · x86_64  (cross-build via cargo-xwin or build on a Windows host)
-cargo build --release --target x86_64-pc-windows-msvc -p heiwa-shell
-zip -j dist/heiwa-${TAG}-windows-x86_64.zip \
-  target/x86_64-pc-windows-msvc/release/heiwa.exe
-
-# Checksums manifest — authoritative for mirrors and the installer
-( cd dist && shasum -a 256 heiwa-${TAG}-* > heiwa-${TAG}-checksums.txt )
-
-# Cut the release
-gh release create ${TAG} dist/heiwa-${TAG}-* \
-  --title "Heiwa ${TAG}" \
-  --notes-file CHANGELOG.md
+bash scripts/check_ci_local.sh
+bash scripts/package_release_sandbox.sh --version 0.1.0
 ```
 
-The result is byte-identical to what `release.yml` produces. The checksums manifest stays authoritative. Run `bash scripts/check_ci_local.sh` before packaging (it mirrors the PR checks exactly), and prefer `bash scripts/package_release_sandbox.sh` for a clean-room build. Uploading locally built artifacts to a GitHub Release does not require Actions.
+The sandbox creates the host-platform archive with the release binary, built
+cockpit assets, license/community files, and checksum manifest. Its structure
+matches `release.yml`; independently compressed archives are not guaranteed to
+be byte-identical. The tagged workflow remains the canonical multi-platform
+publisher and provenance source.
 
 ### macOS distribution without the Apple Developer Program
 
@@ -117,10 +98,12 @@ not for the legal right to distribute your own software. Ground rules:
 **Cloudflare Pages → `heiwa.ltd`**
 
 ```bash
-npx wrangler pages deploy apps/heiwa_app/clients/web --project-name=heiwa-clients
+bash scripts/package_public_web.sh .artifacts/public-web
+npx wrangler pages deploy .artifacts/public-web --project-name=heiwa-clients --branch=main
 ```
 
-Functionally identical to the `deploy.yml` workflow path.
+This is the same public-only allowlisted artifact used by `deploy.yml`. Never
+deploy the source web directory directly; it also contains operator-only files.
 
 ### Release tagging conventions
 
@@ -138,6 +121,11 @@ heiwa-<version>-linux-x86_64.tar.gz
 heiwa-<version>-windows-x86_64.zip
 heiwa-<version>-checksums.txt
 ```
+
+Each platform archive contains `heiwa` (or `heiwa.exe`), the compiled cockpit
+under `cockpit/`, and the license/community files. The installer verifies the
+archive checksum and rejects links or paths outside the versioned archive root
+before extracting it.
 
 See [Install Guide](https://heiwa.ltd/download.html) for the operator-facing summary.
 

@@ -383,8 +383,7 @@ fn scan_decisions_in(dir: &Path) -> Vec<Value> {
 }
 
 fn dispatch_dir() -> PathBuf {
-    let home = crate::home::heiwa_home().unwrap_or_else(|| PathBuf::from("."));
-    home.join(".heiwa").join("state").join("dispatch")
+    crate::home::heiwa_state_dir().join("dispatch")
 }
 
 pub(crate) fn requests_dir() -> PathBuf {

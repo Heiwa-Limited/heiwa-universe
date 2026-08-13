@@ -807,12 +807,7 @@ fn social_projection_path() -> PathBuf {
     let base = std::env::var_os("HEIWA_STATE_DIR")
         .filter(|value| !value.is_empty())
         .map(PathBuf::from)
-        .unwrap_or_else(|| {
-            crate::home::heiwa_home()
-                .unwrap_or_else(|| PathBuf::from("."))
-                .join(".heiwa")
-                .join("state")
-        });
+        .unwrap_or_else(crate::home::heiwa_state_dir);
     base.join("life").join("social.json")
 }
 

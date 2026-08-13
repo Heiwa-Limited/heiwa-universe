@@ -87,12 +87,20 @@ esac
 cd "$repo_root"
 
 if [[ "$skip_build" == "0" ]]; then
+  npm ci --ignore-scripts
+  npm --prefix apps/heiwa_app/clients/cockpit run build
   cargo build --locked --release -p heiwa-shell --bin heiwa --target "$target"
 fi
 
 binary_path="target/${target}/release/${binary_name}"
+cockpit_dist="apps/heiwa_app/clients/cockpit/dist"
 if [[ ! -x "$binary_path" ]]; then
   echo "release binary missing or not executable: $binary_path" >&2
+  exit 1
+fi
+if [[ ! -f "$cockpit_dist/index.html" ]] ||
+  [[ -z "$(find "$cockpit_dist/assets" -type f -print -quit 2>/dev/null)" ]]; then
+  echo "built cockpit assets are missing under $cockpit_dist" >&2
   exit 1
 fi
 
@@ -102,15 +110,17 @@ release_root="${dist_dir}/heiwa-${version}-${asset_name}"
 archive_path="${dist_dir}/heiwa-${version}-${asset_name}.${archive_ext}"
 checksum_path="${dist_dir}/heiwa-${version}-checksums.txt"
 
-mkdir -p "$release_root"
+mkdir -p "$release_root/cockpit"
 cp "$binary_path" "$release_root/"
 cp README.md CONTRIBUTING.md CODE_OF_CONDUCT.md LICENSE "$release_root/"
+cp -R "$cockpit_dist"/. "$release_root/cockpit/"
 
 case "$archive_ext" in
   tar.gz)
     tar -C "$dist_dir" -czf "$archive_path" "heiwa-${version}-${asset_name}"
     tar -tzf "$archive_path" | grep -q "heiwa-${version}-${asset_name}/${binary_name}$"
     tar -tzf "$archive_path" | grep -q "heiwa-${version}-${asset_name}/LICENSE$"
+    tar -tzf "$archive_path" | grep -q "heiwa-${version}-${asset_name}/cockpit/index.html$"
     ;;
   zip)
     if ! command -v 7z >/dev/null 2>&1; then
@@ -142,5 +152,6 @@ heiwa release sandbox
   binary: ${binary_path}
   archive: ${archive_path}
   checksums: ${checksum_path}
+  cockpit: ${release_root}/cockpit/index.html
   smoke: ${binary_name} app update --dry-run
 EOF

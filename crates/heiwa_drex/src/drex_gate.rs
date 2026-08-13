@@ -45,6 +45,19 @@ fn get_home_dir() -> PathBuf {
         .unwrap_or_else(|| PathBuf::from("."))
 }
 
+fn get_state_dir() -> PathBuf {
+    std::env::var_os("HEIWA_STATE_DIR")
+        .filter(|value| !value.is_empty())
+        .map(PathBuf::from)
+        .unwrap_or_else(|| {
+            std::env::var_os("HEIWA_HOME")
+                .filter(|value| !value.is_empty())
+                .map(PathBuf::from)
+                .unwrap_or_else(|| get_home_dir().join(".heiwa"))
+                .join("state")
+        })
+}
+
 pub fn evaluate_approval_policy(
     _action: &str,
     _target: &str,
@@ -76,10 +89,7 @@ pub fn evaluate_approval_policy(
     }
 
     let request_id = format!("req_{}", uuid::Uuid::new_v4().simple());
-    let home = get_home_dir();
-    let request_path = home
-        .join(".heiwa")
-        .join("state")
+    let request_path = get_state_dir()
         .join("dispatch")
         .join("requests")
         .join(format!("{}.json", request_id));
@@ -129,10 +139,7 @@ pub fn wait_for_decision_cancellable(
     timeout: Duration,
     cancelled: &AtomicBool,
 ) -> Result<String> {
-    let home = get_home_dir();
-    let decision_path = home
-        .join(".heiwa")
-        .join("state")
+    let decision_path = get_state_dir()
         .join("dispatch")
         .join("approvals")
         .join("decisions")
@@ -166,10 +173,39 @@ pub fn wait_for_decision_cancellable(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::ffi::OsString;
     use std::sync::Mutex;
     use tempfile::tempdir;
 
     static ENV_MUTEX: Mutex<()> = Mutex::new(());
+
+    struct EnvGuard {
+        key: &'static str,
+        original: Option<OsString>,
+    }
+
+    impl EnvGuard {
+        fn set(key: &'static str, value: impl AsRef<std::ffi::OsStr>) -> Self {
+            let original = std::env::var_os(key);
+            std::env::set_var(key, value);
+            Self { key, original }
+        }
+
+        fn remove(key: &'static str) -> Self {
+            let original = std::env::var_os(key);
+            std::env::remove_var(key);
+            Self { key, original }
+        }
+    }
+
+    impl Drop for EnvGuard {
+        fn drop(&mut self) {
+            match &self.original {
+                Some(value) => std::env::set_var(self.key, value),
+                None => std::env::remove_var(self.key),
+            }
+        }
+    }
 
     #[test]
     fn test_risk_level_as_str() {
@@ -182,7 +218,7 @@ mod tests {
     #[test]
     fn test_evaluate_approval_policy_auto_approve_all() {
         let _lock = ENV_MUTEX.lock().unwrap();
-        std::env::set_var("HEIWA_AUTO_APPROVE", "all");
+        let _auto_approve = EnvGuard::set("HEIWA_AUTO_APPROVE", "all");
         let verdict = evaluate_approval_policy("fs_write", "/path", RiskLevel::Critical, "discord");
         assert_eq!(verdict, ApprovalVerdict::AutoApproved);
     }
@@ -190,7 +226,7 @@ mod tests {
     #[test]
     fn test_evaluate_approval_policy_cli_default() {
         let _lock = ENV_MUTEX.lock().unwrap();
-        std::env::set_var("HEIWA_AUTO_APPROVE", "cli");
+        let _auto_approve = EnvGuard::set("HEIWA_AUTO_APPROVE", "cli");
         // Low is always auto-approved
         let verdict = evaluate_approval_policy("fs_write", "/path", RiskLevel::Low, "discord");
         assert_eq!(verdict, ApprovalVerdict::AutoApproved);
@@ -218,9 +254,11 @@ mod tests {
     fn test_stage_and_wait_for_decision() {
         let _lock = ENV_MUTEX.lock().unwrap();
         let temp = tempdir().unwrap();
-        std::env::set_var("HOME", temp.path());
+        let _home = EnvGuard::set("HOME", temp.path());
+        let _heiwa_home = EnvGuard::remove("HEIWA_HOME");
+        let _state_dir = EnvGuard::remove("HEIWA_STATE_DIR");
 
-        std::env::set_var("HEIWA_AUTO_APPROVE", "none");
+        let _auto_approve = EnvGuard::set("HEIWA_AUTO_APPROVE", "none");
         let verdict = evaluate_approval_policy("deploy", "production", RiskLevel::Critical, "cli");
 
         if let ApprovalVerdict::AwaitingApproval {
@@ -278,7 +316,9 @@ mod tests {
     fn cancellable_wait_stops_before_polling_for_a_decision() {
         let _lock = ENV_MUTEX.lock().unwrap();
         let temp = tempdir().unwrap();
-        std::env::set_var("HOME", temp.path());
+        let _home = EnvGuard::set("HOME", temp.path());
+        let _heiwa_home = EnvGuard::remove("HEIWA_HOME");
+        let _state_dir = EnvGuard::remove("HEIWA_STATE_DIR");
         let cancelled = AtomicBool::new(true);
         let error =
             wait_for_decision_cancellable("req_cancelled", Duration::from_secs(1), &cancelled)

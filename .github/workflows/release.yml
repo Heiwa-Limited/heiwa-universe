@@ -47,9 +47,36 @@ jobs:
           echo "tag=$tag" >> "$GITHUB_OUTPUT"
           echo "version=${tag#v}" >> "$GITHUB_OUTPUT"
 
+  cockpit:
+    name: Build Cockpit Assets
+    needs: metadata
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          persist-credentials: false
+          ref: ${{ needs.metadata.outputs.tag }}
+      - name: Set up Node
+        uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+      - name: Build cockpit
+        run: |
+          npm ci --ignore-scripts
+          npm --prefix apps/heiwa_app/clients/cockpit run build
+          test -f apps/heiwa_app/clients/cockpit/dist/index.html
+          test -n "$(find apps/heiwa_app/clients/cockpit/dist/assets -type f -print -quit)"
+      - name: Upload cockpit assets
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: cockpit
+          path: apps/heiwa_app/clients/cockpit/dist/
+          if-no-files-found: error
+
   build:
     name: Build Release Asset (${{ matrix.name }})
-    needs: metadata
+    needs: [metadata, cockpit]
     runs-on: ${{ matrix.runner }}
     strategy:
       fail-fast: false
@@ -109,6 +136,12 @@ jobs:
       - name: Build release binary
         run: cargo build --locked --release -p heiwa-shell --bin heiwa --target ${{ matrix.target }}
 
+      - name: Download cockpit assets
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: cockpit
+          path: cockpit-dist
+
       - name: Package archive
         shell: bash
         env:
@@ -124,9 +157,12 @@ jobs:
           archive_path="${release_root}.${ARCHIVE_EXT}"
           binary_path="target/${TARGET}/release/${BINARY_NAME}"
 
-          mkdir -p "${release_root}"
+          mkdir -p "${release_root}/cockpit"
           cp "${binary_path}" "${release_root}/"
           cp README.md CONTRIBUTING.md CODE_OF_CONDUCT.md LICENSE "${release_root}/"
+          cp -R cockpit-dist/. "${release_root}/cockpit/"
+          test -f "${release_root}/cockpit/index.html"
+          test -n "$(find "${release_root}/cockpit/assets" -type f -print -quit)"
 
           if [[ "${ARCHIVE_EXT}" == "zip" ]]; then
             7z a "${archive_path}" "${release_root}" >/dev/null

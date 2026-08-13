@@ -15,17 +15,24 @@ pub fn heiwa_home() -> Option<PathBuf> {
         .or_else(dirs::home_dir)
 }
 
-/// Resolve the canonical hot-state root used by every shell command.
-pub fn heiwa_state_dir() -> PathBuf {
-    std::env::var_os("HEIWA_STATE_DIR")
+/// Resolve the canonical Heiwa runtime root.
+pub fn heiwa_runtime_dir() -> PathBuf {
+    std::env::var_os("HEIWA_HOME")
         .filter(|value| !value.is_empty())
         .map(PathBuf::from)
         .unwrap_or_else(|| {
             heiwa_home()
                 .unwrap_or_else(|| PathBuf::from("."))
                 .join(".heiwa")
-                .join("state")
         })
+}
+
+/// Resolve the canonical hot-state root used by every shell command.
+pub fn heiwa_state_dir() -> PathBuf {
+    std::env::var_os("HEIWA_STATE_DIR")
+        .filter(|value| !value.is_empty())
+        .map(PathBuf::from)
+        .unwrap_or_else(|| heiwa_runtime_dir().join("state"))
 }
 
 #[cfg(test)]

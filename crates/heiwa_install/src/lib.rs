@@ -121,6 +121,9 @@ pub enum InstallOutcome {
 }
 
 pub fn get_heiwa_dir() -> PathBuf {
+    if let Some(root) = env::var_os("HEIWA_HOME").filter(|value| !value.is_empty()) {
+        return PathBuf::from(root);
+    }
     let home = env::var("HOME")
         .or_else(|_| env::var("USERPROFILE"))
         .expect("HOME or USERPROFILE must be set");
@@ -400,6 +403,12 @@ fn write_canonical_launcher_internal(
     repo_root: &Path,
 ) -> Result<()> {
     let launcher_path = heiwa_dir.join("bin").join("heiwa");
+
+    // An installed binary may still carry a build-time repository path that exists
+    // on the build machine. Never replace the executable that is currently running.
+    if current_exe == launcher_path && current_exe.exists() {
+        return Ok(());
+    }
 
     // Robust dev-env check: Does Cargo.toml exist where we expect it in the monorepo?
     let is_dev_env = repo_root.join("Cargo.toml").exists();
@@ -814,6 +823,24 @@ mod tests {
         let content = fs::read_to_string(target)?;
         assert_eq!(content, "binary content");
 
+        Ok(())
+    }
+
+    #[test]
+    fn test_write_canonical_launcher_preserves_running_installed_binary() -> Result<()> {
+        let tmp = tempdir()?;
+        let heiwa_dir = tmp.path().join(".heiwa");
+        let launcher_path = heiwa_dir.join("bin").join("heiwa");
+        fs::create_dir_all(launcher_path.parent().expect("launcher parent"))?;
+        fs::write(&launcher_path, "installed binary")?;
+
+        let mock_repo = tmp.path().join("heiwa-universe");
+        fs::create_dir_all(&mock_repo)?;
+        fs::write(mock_repo.join("Cargo.toml"), "")?;
+
+        write_canonical_launcher_internal(&heiwa_dir, &launcher_path, &mock_repo)?;
+
+        assert_eq!(fs::read_to_string(launcher_path)?, "installed binary");
         Ok(())
     }
 

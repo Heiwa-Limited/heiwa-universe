@@ -3,7 +3,7 @@
 Updated: 2026-04-22
 Status: working HTTP + WebSocket contract for the local `heiwa` runtime and cockpit
 
-If this conflicts with [`HEIWA.md`](/Users/dmcgregsauce/heiwa-universe/HEIWA.md), [`BRAND.md`](./BRAND.md), or [`CLI.md`](./CLI.md), those win.
+If this conflicts with [`HEIWA.md`](../../../HEIWA.md), [`BRAND.md`](./BRAND.md), or [`CLI.md`](./CLI.md), those win.
 
 ## Purpose
 

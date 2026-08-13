@@ -20,7 +20,12 @@ required=(
   'shasum -a 256'
   'mktemp -d'
   'HEIWA_VERSION'
+  'HEIWA_HOME must be an absolute path'
   'mv -f'
+  'cockpit-current'
+  'archive contains links or unsupported entry types'
+  'mv -fh'
+  'mv -Tf'
 )
 for text in "${required[@]}"; do
   if ! grep -Fq "$text" "$installer"; then

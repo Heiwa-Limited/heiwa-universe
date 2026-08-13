@@ -17,7 +17,7 @@ not an install.
 | ----------------- | ------ | --------------------------------------------------------------------------------------------- |
 | decision          | over   | 48 files in `docs/`, 15 at repo root. Supply exceeds demand.                                    |
 | implementation    | green  | `cargo build --workspace` clean. 1 `TODO` marker in all of `apps/` + `crates/`.                 |
-| tests             | repair | Fresh PR #52 run `31657578216`: 8/9 jobs passed; Windows exposed two portable-test defects now fixed locally. |
+| tests             | repair | PR #52 run `31660451964`: 8/9 jobs passed; the remaining Windows CLI-shim defect is fixed locally. |
 | installed runtime | stale  | `~/.heiwa/bin/heiwa` built 2026-08-01. `dev` HEAD is 2026-08-12.                                |
 | release           | zero   | `gh release list` is empty. `release.yml` has never executed.                                   |
 | public install    | closed | Repo is **private**. `heiwa.ltd/install` hard-exits: "the public release installer is not live yet." |
@@ -38,8 +38,9 @@ jobs failed with **zero steps executed**
 test failure. The fix for that condition is commit `ab310836`, *inside PR #52*.
 CI has since been proven working: PR #54 ran "Heiwa CI" to success in 7m3s on
 2026-08-08. Fresh run `31657578216` on 2026-08-12 proved jobs now start: eight
-passed and Windows found a path-separator assertion plus a heartbeat-interleaving
-test assumption. Both are fixed locally; a new full run remains required.
+passed and Windows found portable-test defects. Run `31660451964` then proved
+security plus macOS/Linux Rust green and isolated the last Windows CLI-shim
+discovery defect. It is fixed locally; a new full run remains required.
 
 ## Backlog
 
@@ -66,10 +67,11 @@ test assumption. Both are fixed locally; a new full run remains required.
       The 2026-08-01 auth, install-atomicity, heartbeat-pruning and
       secret-loading fixes have never left this machine. They exist in exactly
       one place. Pushed through `d213cee9` on 2026-08-12.
-- [ ] **B4 — Re-run CI on PR #52 and read the result.** Run `31657578216` was
-      the first honest signal in two weeks: 8/9 green. Push the Windows fixes,
-      security gates, and public-readiness hardening, then require a fully green
-      replacement run.
+- [ ] **B4 — Re-run CI on PR #52 and read the result.** Runs `31657578216` and
+      `31660451964` each reached 8/9 green and progressively isolated Windows
+      portability defects. Push the final CLI-shim fix, runtime-root repair,
+      release packaging, and public-readiness hardening, then require a fully
+      green replacement run.
 - [x] **B5 — Resolve PR #53 (Blacksmith runners) and #54 (Greptile).** #53 was
       superseded by the zero-cost GitHub-hosted runner path already proven on
       #52 and closed. #54 was confirmed as an independent Greptile trial/config
@@ -116,9 +118,10 @@ test assumption. Both are fixed locally; a new full run remains required.
       release tag and verify against the checksum manifest from B11. The
       release/checksum installer is implemented locally; public deployment and
       a real release receipt remain.
-- [ ] **B14 — Prove the install from a clean machine.** Not from this one.
-      Until a machine that has never built Heiwa can install and run it, public
-      install is unproven.
+- [ ] **B14 — Prove the install from a clean machine.** The source-free
+      `public-install-smoke.yml` workflow installs through `heiwa.ltd` on fresh
+      macOS and Linux runners, then boots the packaged cockpit. It cannot produce
+      a receipt until B10-B13 make the release and public edge live.
 - [ ] **B15 — Fix the GitHub Pages 404.** `heiwa-limited.github.io/heiwa-universe/`
       returns 404 while `pages.yml` is tag-triggered, so it has never published.
       Gated on B10 and on the ownership question in B12.

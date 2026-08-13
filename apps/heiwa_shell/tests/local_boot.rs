@@ -77,7 +77,10 @@ fn doctor_separates_provider_account_availability_from_cli_auth() {
         .env("HEIWA_EVIDENCE_DIR", evidence)
         .env("HEIWA_STATE_DIR", state)
         .env("HEIWA_OLLAMA_BASE", "disabled-for-hermetic-tests")
-        .env("PATH", format!("{}:/usr/bin:/bin", bin.display()))
+        .env(
+            "PATH",
+            std::env::join_paths([&bin]).expect("build hermetic provider PATH"),
+        )
         .arg("doctor")
         .output()
         .expect("failed to execute doctor");

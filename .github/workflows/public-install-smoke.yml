@@ -1,0 +1,84 @@
+name: Public Installer Smoke
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Stable Heiwa release version to install
+        required: true
+        default: 0.1.0
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  install:
+    name: Public install (${{ matrix.name }})
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: linux-x86_64
+            runner: ubuntu-latest
+          - name: macos-aarch64
+            runner: macos-26
+    steps:
+      - name: Install from the public edge
+        shell: bash
+        env:
+          HEIWA_VERSION: ${{ inputs.version }}
+          INSTALL_URL: https://heiwa.ltd/install
+          RUNTIME_ROOT: ${{ runner.temp }}/heiwa-public-install
+        run: |
+          set -euo pipefail
+
+          if [[ ! "$HEIWA_VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "version must look like 0.1.0" >&2
+            exit 1
+          fi
+
+          installer="${RUNNER_TEMP}/heiwa-install.sh"
+          curl --proto '=https' --tlsv1.2 --fail --location --silent --show-error \
+            --output "$installer" "$INSTALL_URL"
+          test -s "$installer"
+
+          HEIWA_HOME="$RUNTIME_ROOT" sh "$installer"
+          test -x "$RUNTIME_ROOT/bin/heiwa"
+          test -f "$RUNTIME_ROOT/app/cockpit-current/index.html"
+          "$RUNTIME_ROOT/bin/heiwa" --version | grep -Fx "heiwa $HEIWA_VERSION"
+
+      - name: Boot installed runtime and verify cockpit
+        shell: bash
+        env:
+          HEIWA_HOME: ${{ runner.temp }}/heiwa-public-install
+          PORT: "7475"
+        run: |
+          set -euo pipefail
+
+          "$HEIWA_HOME/bin/heiwa" app start --port "$PORT" --no-open >"${RUNNER_TEMP}/heiwa-app.log" 2>&1 &
+          app_pid=$!
+          cleanup() {
+            kill "$app_pid" 2>/dev/null || true
+            wait "$app_pid" 2>/dev/null || true
+          }
+          trap cleanup EXIT HUP INT TERM
+
+          ready=0
+          for _ in $(seq 1 30); do
+            if curl --fail --silent --show-error "http://127.0.0.1:${PORT}/api/v1/runtime/snapshot" \
+              | grep -q '"status":"ok"'; then
+              ready=1
+              break
+            fi
+            sleep 1
+          done
+          if [[ "$ready" != "1" ]]; then
+            cat "${RUNNER_TEMP}/heiwa-app.log" >&2
+            exit 1
+          fi
+
+          curl --fail --silent --show-error "http://127.0.0.1:${PORT}/" \
+            | grep -qi '<!doctype html>'
+          grep -F "static: $HEIWA_HOME/app/cockpit-current" "${RUNNER_TEMP}/heiwa-app.log"

@@ -38,6 +38,9 @@ pub struct HeiwaIdentity {
 }
 
 fn get_heiwa_state_dir() -> PathBuf {
+    if let Some(root) = env::var_os("HEIWA_HOME").filter(|value| !value.is_empty()) {
+        return PathBuf::from(root);
+    }
     let home = env::var("HOME")
         .or_else(|_| env::var("USERPROFILE"))
         .expect("HOME or USERPROFILE must be set");
@@ -325,8 +328,19 @@ pub fn logout(provider_id: &str) -> anyhow::Result<()> {
 }
 
 fn provider_search_paths_for_home(home: &Path) -> Vec<PathBuf> {
+    let runtime_root = env::var_os("HEIWA_HOME")
+        .filter(|value| !value.is_empty())
+        .map(PathBuf::from);
+    provider_search_paths(home, runtime_root.as_deref())
+}
+
+fn provider_search_paths(home: &Path, runtime_root: Option<&Path>) -> Vec<PathBuf> {
+    let runtime_bin = runtime_root
+        .map(Path::to_path_buf)
+        .unwrap_or_else(|| home.join(".heiwa"))
+        .join("bin");
     vec![
-        home.join(".heiwa").join("bin"),
+        runtime_bin,
         home.join(".local").join("bin"),
         home.join(".npm-global").join("bin"),
         home.join(".cargo").join("bin"),
@@ -338,11 +352,31 @@ fn provider_search_paths_for_home(home: &Path) -> Vec<PathBuf> {
 }
 
 fn resolve_command_with_home_and_path(cmd: &str, home: &Path, path: &str) -> Option<PathBuf> {
+    #[cfg(windows)]
+    const EXTENSIONS: &[&str] = &["", ".exe", ".cmd", ".bat", ".com"];
+    #[cfg(not(windows))]
+    const EXTENSIONS: &[&str] = &[""];
+
+    resolve_command_with_extensions(cmd, home, path, EXTENSIONS)
+}
+
+fn resolve_command_with_extensions(
+    cmd: &str,
+    home: &Path,
+    path: &str,
+    extensions: &[&str],
+) -> Option<PathBuf> {
     let mut dirs = env::split_paths(path).collect::<Vec<_>>();
     dirs.extend(provider_search_paths_for_home(home));
-    dirs.into_iter()
-        .map(|dir| dir.join(cmd))
-        .find(|candidate| candidate.is_file())
+    for dir in dirs {
+        for extension in extensions {
+            let candidate = dir.join(format!("{cmd}{extension}"));
+            if candidate.is_file() {
+                return Some(candidate);
+            }
+        }
+    }
+    None
 }
 
 pub fn resolve_command(cmd: &str) -> Option<PathBuf> {
@@ -485,12 +519,22 @@ mod command_resolution_tests {
     #[test]
     fn provider_search_paths_include_user_local_bins() {
         let home = PathBuf::from("/Users/devon");
-        let paths = provider_search_paths_for_home(&home);
+        let paths = provider_search_paths(&home, None);
 
         assert!(paths.contains(&home.join(".heiwa").join("bin")));
         assert!(paths.contains(&home.join(".local").join("bin")));
         assert!(paths.contains(&home.join(".npm-global").join("bin")));
         assert!(paths.contains(&home.join(".cargo").join("bin")));
+    }
+
+    #[test]
+    fn provider_search_paths_honor_explicit_runtime_root() {
+        let home = PathBuf::from("/Users/devon");
+        let runtime_root = PathBuf::from("/opt/heiwa-runtime");
+        let paths = provider_search_paths(&home, Some(&runtime_root));
+
+        assert!(paths.contains(&runtime_root.join("bin")));
+        assert!(!paths.contains(&home.join(".heiwa").join("bin")));
     }
 
     #[test]
@@ -508,6 +552,28 @@ mod command_resolution_tests {
         let resolved = resolve_command_with_home_and_path("codex", &temp, "");
 
         assert_eq!(resolved.as_deref(), Some(exe.as_path()));
+        let _ = fs::remove_dir_all(temp);
+    }
+
+    #[test]
+    fn resolve_command_accepts_windows_command_shims() {
+        let temp = env::temp_dir().join(format!(
+            "heiwa-provider-windows-command-resolution-{}",
+            std::process::id()
+        ));
+        let _ = fs::remove_dir_all(&temp);
+        let bin = temp.join("bin");
+        fs::create_dir_all(&bin).expect("create bin");
+        let shim = bin.join("gemini.cmd");
+        fs::write(&shim, "@exit /b 0\r\n").expect("write fake gemini shim");
+        let path = env::join_paths([&bin])
+            .expect("join test PATH")
+            .to_string_lossy()
+            .into_owned();
+
+        let resolved = resolve_command_with_extensions("gemini", &temp, &path, &["", ".cmd"]);
+
+        assert_eq!(resolved.as_deref(), Some(shim.as_path()));
         let _ = fs::remove_dir_all(temp);
     }
 
