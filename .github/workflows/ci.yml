@@ -21,7 +21,6 @@ jobs:
   changes:
     name: Classify Changed Surfaces
     runs-on: ubuntu-latest
-    timeout-minutes: 1
     outputs:
       rust: ${{ steps.classify.outputs.rust }}
       lance: ${{ steps.classify.outputs.lance }}
@@ -65,7 +64,6 @@ jobs:
   security-scan:
     name: Security Vulnerability Scan
     runs-on: ubuntu-latest
-    timeout-minutes: 1
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
         with:
@@ -98,7 +96,6 @@ jobs:
     name: Dependency Review
     if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest
-    timeout-minutes: 1
     permissions:
       contents: read
     steps:
@@ -108,7 +105,6 @@ jobs:
   rust-pr-tests:
     name: Rust Tests (${{ matrix.group }})
     runs-on: ubuntu-latest
-    timeout-minutes: 1
     needs: changes
     strategy:
       fail-fast: false
@@ -172,7 +168,6 @@ jobs:
   rust-pr-static:
     name: Rust Static Checks
     runs-on: ubuntu-latest
-    timeout-minutes: 1
     needs: changes
     env:
       CARGO_PROFILE_DEV_DEBUG: "0"
@@ -233,7 +228,6 @@ jobs:
     name: Rust Build, Test, and Clippy (ubuntu-latest)
     if: always() && github.event_name == 'pull_request'
     runs-on: ubuntu-latest
-    timeout-minutes: 1
     needs: [changes, rust-pr-tests, rust-pr-static]
     steps:
       - name: Require Rust tests and static checks
@@ -250,7 +244,6 @@ jobs:
   lint:
     name: TypeScript and Web Lint
     runs-on: ubuntu-latest
-    timeout-minutes: 1
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
         with:
@@ -272,7 +265,6 @@ jobs:
   docs-build:
     name: Docs Build
     runs-on: ubuntu-latest
-    timeout-minutes: 1
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
         with:
@@ -295,7 +287,6 @@ jobs:
   agent-sync-check:
     name: Agent Sync Check
     runs-on: ubuntu-latest
-    timeout-minutes: 1
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
         with:
@@ -314,7 +305,6 @@ jobs:
   repo-hygiene:
     name: Repo Hygiene
     runs-on: ubuntu-latest
-    timeout-minutes: 1
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
         with:
