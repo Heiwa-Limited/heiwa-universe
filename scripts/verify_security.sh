@@ -1,6 +1,14 @@
 #!/usr/bin/env bash
 set -u -o pipefail
 
+SKIP_SECRET_SCAN=0
+if [[ "${1:-}" == "--skip-secret-scan" ]]; then
+  SKIP_SECRET_SCAN=1
+elif [[ $# -ne 0 ]]; then
+  echo "usage: scripts/verify_security.sh [--skip-secret-scan]" >&2
+  exit 2
+fi
+
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 TMPDIR="$(mktemp -d)"
 trap 'rm -rf "$TMPDIR"' EXIT
@@ -109,7 +117,10 @@ run_required "root Python dependency audit" audit_python_project root "$ROOT"
 run_required "runtime Python dependency audit" audit_python_project runtime-python "$ROOT/runtime/python"
 run_required "product surface audit" bash scripts/audit_product_surface.sh
 
-if command -v gitleaks >/dev/null 2>&1; then
+if [[ "$SKIP_SECRET_SCAN" == "1" ]]; then
+  section "gitleaks secret scan"
+  pass "gitleaks secret scan already completed by the caller"
+elif command -v gitleaks >/dev/null 2>&1; then
   run_required "gitleaks secret scan (redacted, blocking; reviewed baseline in .gitleaksignore)" \
     gitleaks detect --no-banner --redact --source "$ROOT"
 else

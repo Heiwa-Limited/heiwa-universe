@@ -4,9 +4,11 @@ use heiwa_core::auth::{sign_local_request, LocalRequestParts, LocalRequestSignat
 use heiwa_evidence::OperatorJournal;
 use heiwa_session::operator::{OperatorSessionService, StartTurnRequest};
 use serde_json::{json, Value};
+use std::collections::HashSet;
 use std::io::{Read, Write};
 use std::net::{TcpListener, TcpStream};
 use std::process::{Child, Command, Stdio};
+use std::sync::{Mutex, OnceLock};
 use std::thread;
 use std::time::{Duration, Instant};
 
@@ -1210,11 +1212,32 @@ fn spawn_runtime(
 }
 
 fn reserve_port() -> u16 {
-    TcpListener::bind(("127.0.0.1", 0))
-        .unwrap()
-        .local_addr()
-        .unwrap()
-        .port()
+    static ISSUED_PORTS: OnceLock<Mutex<HashSet<u16>>> = OnceLock::new();
+    let issued = ISSUED_PORTS.get_or_init(|| Mutex::new(HashSet::new()));
+
+    loop {
+        let listener = TcpListener::bind(("127.0.0.1", 0)).unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let mut ports = issued
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        if ports.insert(port) {
+            return port;
+        }
+    }
+}
+
+#[test]
+fn reserved_runtime_ports_are_unique_across_parallel_callers() {
+    let callers = (0..32)
+        .map(|_| thread::spawn(reserve_port))
+        .collect::<Vec<_>>();
+    let ports = callers
+        .into_iter()
+        .map(|caller| caller.join().expect("port reservation caller"))
+        .collect::<HashSet<_>>();
+
+    assert_eq!(ports.len(), 32);
 }
 
 fn wait_for_file(path: &std::path::Path) {
