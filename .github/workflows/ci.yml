@@ -21,8 +21,12 @@ jobs:
   changes:
     name: Classify Changed Surfaces
     runs-on: ubuntu-latest
+    timeout-minutes: 1
     outputs:
       rust: ${{ steps.classify.outputs.rust }}
+      rust_shell: ${{ steps.classify.outputs.rust_shell }}
+      rust_runtime: ${{ steps.classify.outputs.rust_runtime }}
+      rust_foundation: ${{ steps.classify.outputs.rust_foundation }}
       lance: ${{ steps.classify.outputs.lance }}
       dependency_security: ${{ steps.classify.outputs.dependency_security }}
       desktop: ${{ steps.classify.outputs.desktop }}
@@ -64,6 +68,7 @@ jobs:
   security-scan:
     name: Security Vulnerability Scan
     runs-on: ubuntu-latest
+    timeout-minutes: 1
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
         with:
@@ -96,6 +101,7 @@ jobs:
     name: Dependency Review
     if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest
+    timeout-minutes: 1
     permissions:
       contents: read
     steps:
@@ -105,30 +111,41 @@ jobs:
   rust-pr-tests:
     name: Rust Tests (${{ matrix.group }})
     runs-on: ubuntu-latest
+    timeout-minutes: 1
     needs: changes
     strategy:
       fail-fast: false
       matrix:
         include:
           - group: shell-unit
+            family: shell
             needs_native_vault: true
           - group: shell-api
+            family: shell
             needs_native_vault: true
           - group: shell-state
+            family: shell
             needs_native_vault: true
           - group: shell-ops
+            family: shell
             needs_native_vault: true
           - group: runtime-unit
+            family: runtime
             needs_native_vault: true
           - group: runtime-a
+            family: runtime
             needs_native_vault: true
           - group: runtime-b
+            family: runtime
             needs_native_vault: true
           - group: foundation-unit
+            family: foundation
             needs_native_vault: false
           - group: foundation-a
+            family: foundation
             needs_native_vault: false
           - group: foundation-b
+            family: foundation
             needs_native_vault: false
     env:
       CARGO_PROFILE_DEV_DEBUG: "0"
@@ -136,38 +153,56 @@ jobs:
       SCCACHE_GHA_ENABLED: "true"
       RUSTC_WRAPPER: sccache
     steps:
-      - name: Skip unchanged Rust surface
-        if: needs.changes.outputs.rust != 'true'
-        run: echo "Rust inputs are unchanged."
+      - id: select
+        name: Select changed Rust family
+        shell: bash
+        env:
+          FAMILY: ${{ matrix.family }}
+          RUST_SHELL: ${{ needs.changes.outputs.rust_shell }}
+          RUST_RUNTIME: ${{ needs.changes.outputs.rust_runtime }}
+          RUST_FOUNDATION: ${{ needs.changes.outputs.rust_foundation }}
+        run: |
+          set -euo pipefail
+          enabled=false
+          case "$FAMILY" in
+            shell) [[ "$RUST_SHELL" == "true" ]] && enabled=true ;;
+            runtime) [[ "$RUST_RUNTIME" == "true" ]] && enabled=true ;;
+            foundation) [[ "$RUST_FOUNDATION" == "true" ]] && enabled=true ;;
+          esac
+          echo "enabled=$enabled" >> "$GITHUB_OUTPUT"
+      - name: Skip unchanged Rust family
+        if: steps.select.outputs.enabled != 'true'
+        run: echo "${{ matrix.family }} Rust inputs are unchanged."
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
-        if: needs.changes.outputs.rust == 'true'
+        if: steps.select.outputs.enabled == 'true'
         with:
           persist-credentials: false
       - name: Install Rust toolchain
-        if: needs.changes.outputs.rust == 'true'
+        if: steps.select.outputs.enabled == 'true'
         uses: dtolnay/rust-toolchain@4360b52568e2003a75bf9bc1d59f33a8e3fc893c # stable
         with:
           toolchain: 1.95.0
       - name: Install on-demand compiler cache
-        if: needs.changes.outputs.rust == 'true'
+        if: steps.select.outputs.enabled == 'true'
         uses: mozilla-actions/sccache-action@fc920bf0ec8de6ee65d409111f7ec508035751ba # v0.0.11
         with:
           version: v0.16.0
       - name: Install Linux system dependencies
-        if: needs.changes.outputs.rust == 'true' && matrix.needs_native_vault
+        if: steps.select.outputs.enabled == 'true' && matrix.needs_native_vault
         run: sudo apt-get install -y --no-install-recommends libdbus-1-dev pkg-config
       - name: Install cargo-nextest
-        if: needs.changes.outputs.rust == 'true'
+        if: steps.select.outputs.enabled == 'true'
         uses: taiki-e/install-action@b20dedce73af6905cdc30d6611090c9b67557c8d # v2
         with:
           tool: cargo-nextest@0.9.143
       - name: Run tests
-        if: needs.changes.outputs.rust == 'true'
+        if: steps.select.outputs.enabled == 'true'
         run: bash scripts/ci_rust_test_group.sh "${{ matrix.group }}"
 
   rust-pr-static:
     name: Rust Static Checks
     runs-on: ubuntu-latest
+    timeout-minutes: 1
     needs: changes
     env:
       CARGO_PROFILE_DEV_DEBUG: "0"
@@ -228,6 +263,7 @@ jobs:
     name: Rust Build, Test, and Clippy (ubuntu-latest)
     if: always() && github.event_name == 'pull_request'
     runs-on: ubuntu-latest
+    timeout-minutes: 1
     needs: [changes, rust-pr-tests, rust-pr-static]
     steps:
       - name: Require Rust tests and static checks
@@ -244,6 +280,7 @@ jobs:
   lint:
     name: TypeScript and Web Lint
     runs-on: ubuntu-latest
+    timeout-minutes: 1
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
         with:
@@ -265,6 +302,7 @@ jobs:
   docs-build:
     name: Docs Build
     runs-on: ubuntu-latest
+    timeout-minutes: 1
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
         with:
@@ -287,6 +325,7 @@ jobs:
   agent-sync-check:
     name: Agent Sync Check
     runs-on: ubuntu-latest
+    timeout-minutes: 1
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
         with:
@@ -305,6 +344,7 @@ jobs:
   repo-hygiene:
     name: Repo Hygiene
     runs-on: ubuntu-latest
+    timeout-minutes: 1
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
         with:
@@ -325,7 +365,9 @@ jobs:
       - name: Verify runtime baseline pins
         run: bash scripts/check_runtime_baseline.sh
       - name: Verify release metadata
-        run: bash scripts/check_release_metadata.sh
+        run: |
+          bash scripts/check_release_metadata.sh
+          bash scripts/tests/test_ci_job_deadlines.sh
       - name: Verify immutable workflow action pins
         run: bash scripts/check_workflow_pins.sh
       - name: Install audit tools

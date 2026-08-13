@@ -80,6 +80,9 @@ require_match ".github/workflows/certification.yml" '^name: Heiwa Certification$
 require_no_match ".github/workflows/ci.yml" 'name: (Lance Backend Certification|Desktop Shell Certification|Cross-Platform Rust Compilation|Multi-Ecosystem Security Certification)' "heavy release proofs must stay out of sub-minute CI"
 require_match ".github/workflows/certification.yml" 'mozilla-actions/sccache-action@fc920bf0ec8de6ee65d409111f7ec508035751ba' "protected main must seed the on-demand Rust compiler cache"
 require_match ".github/workflows/ci.yml" 'mozilla-actions/sccache-action@fc920bf0ec8de6ee65d409111f7ec508035751ba' "fast CI must use the on-demand Rust compiler cache"
+if ! ruby scripts/check_ci_job_deadlines.rb; then
+  fail=1
+fi
 require_match ".github/workflows/release.yml" 'shared-key: \$\{\{ matrix\.target \}\}' "release caches must be stable per target"
 require_match ".github/workflows/release.yml" '--features heiwa-shell/lance' "release binaries must explicitly include the Lance recall backend"
 require_match ".github/workflows/release.yml" 'actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a' "release uploads must use the Node 24 artifact action"
