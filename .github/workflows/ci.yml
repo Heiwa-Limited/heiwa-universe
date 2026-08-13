@@ -50,7 +50,8 @@ jobs:
             # audits run. Execute the script from the protected base commit.
             trusted_classifier="$RUNNER_TEMP/detect_ci_surfaces.sh"
             if git show "$BASE_SHA:scripts/detect_ci_surfaces.sh" > "$trusted_classifier" 2>/dev/null; then
-              bash "$trusted_classifier" "$BASE_SHA" "$HEAD_SHA" >> "$GITHUB_OUTPUT"
+              git -C "$GITHUB_WORKSPACE" diff --name-only "$BASE_SHA" "$HEAD_SHA" \
+                | bash "$trusted_classifier" --paths >> "$GITHUB_OUTPUT"
             else
               # Bootstrap safely when the protected base predates the
               # classifier: exercise every surface rather than trust the PR.
