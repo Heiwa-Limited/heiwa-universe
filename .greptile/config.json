@@ -1,0 +1,88 @@
+{
+  "strictness": 2,
+  "commentTypes": ["logic", "syntax"],
+
+  "triggerOnUpdates": false,
+  "triggerOnDrafts": false,
+
+  "includeBranches": ["main", "dev"],
+  "excludeAuthors": ["dependabot[bot]", "blacksmith-sh[bot]"],
+  "fileChangeLimit": 150,
+
+  "ignorePatterns": "Cargo.lock\npackage-lock.json\ndeno.lock\nuv.lock\narchive/**\noss-lifts/**\npackages/heiwa_bindings/**\n**/goldens/**\n**/snapshots/**\n**/__snapshots__/**\n**/*.generated.*\n**/*.min.js\n**/dist/**\n**/target/**\n**/site/**\n**/*.svg\n**/*.png",
+
+  "instructions": "This is heiwa-universe: a local-first, multi-provider AI runtime. Rust is the authoritative execution layer (apps/heiwa_core, apps/heiwa_orchestrator, crates/*), TypeScript is companion UI (apps/heiwa_app), Python is a prototype/compat surface. CI already runs clippy, biome, and Trivy — do NOT report formatting, naming, lint-level style, or generic dependency-CVE findings. Report only what a whole-repo reviewer can see that a per-file linter cannot: cross-crate contract drift, state/ownership bugs, evidence-journal correctness, async and locking hazards, error-path regressions, and silent behavior changes at provider or runtime boundaries. Devon is the sole reviewer on this repo, so there is no second human to catch a miss — prefer one well-evidenced high-severity finding over five speculative ones, and always name the specific caller or call site that breaks.",
+
+  "fixWithAI": true,
+  "shouldUpdateDescription": false,
+  "statusCheck": false,
+  "statusCommentsEnabled": true,
+
+  "summarySection": { "included": true, "collapsible": false, "defaultOpen": true },
+  "issuesTableSection": { "included": true, "collapsible": true, "defaultOpen": true },
+  "confidenceScoreSection": { "included": true, "collapsible": false, "defaultOpen": true },
+  "sequenceDiagramSection": { "included": false },
+
+  "rules": [
+    {
+      "id": "no-panic-in-runtime",
+      "rule": "Non-test code must not use unwrap(), expect(), panic!, unchecked indexing, or overflow-capable arithmetic on values derived from config, provider output, network data, user input, or on-disk state. Return a typed error instead.",
+      "scope": ["apps/heiwa_core/**", "apps/heiwa_orchestrator/**", "apps/heiwa_shell/**", "crates/**"],
+      "severity": "high"
+    },
+    {
+      "id": "no-swallowed-errors",
+      "rule": "An error on a path that mutates state must be propagated or logged. Flag `let _ =`, empty Err arms, and bare catch blocks that do neither.",
+      "scope": ["apps/**", "crates/**", "connectors/**"],
+      "severity": "high"
+    },
+    {
+      "id": "evidence-journal-durability",
+      "rule": "JSONL journal writes must be atomic per envelope and must not leave a partial line after a crash or cancellation. Locks must be released on every error path and acquired in a consistent order across call sites. Replay and compaction must not drop, reorder, or duplicate envelopes.",
+      "scope": ["crates/heiwa_evidence/**", "apps/heiwa_core/evidence/**", "apps/heiwa_orchestrator/evidence/**"],
+      "severity": "high"
+    },
+    {
+      "id": "provider-owned-semantics",
+      "rule": "Heiwa normalizes provider surfaces; it does not reimplement provider internals. Flag code that hardcodes a provider's model list, quota math, auth token lifetime, or system prompt as if Heiwa owned it, instead of reading it from the provider.",
+      "scope": ["crates/heiwa_provider/**", "crates/heiwa_quota/**", "apps/heiwa_shell/**"],
+      "severity": "medium"
+    },
+    {
+      "id": "no-legacy-surface-dependency",
+      "rule": "New production code must not depend on archive/, apps/heiwa_hub, or treat crates/heiwa_stdb as a normal operator-facing surface. Explicit legacy repair work is exempt when the PR states that intent.",
+      "scope": ["apps/**", "crates/**", "connectors/**", "packages/**"],
+      "severity": "medium"
+    },
+    {
+      "id": "cross-platform-paths",
+      "rule": "Build paths with Path/PathBuf joins, not string concatenation with '/'. No hardcoded /tmp, no assumed HOME, no assumption that a shelled-out binary exists on all of ubuntu-latest, macos-latest, and windows-latest.",
+      "scope": ["apps/**", "crates/**", "bin/**", "scripts/**"],
+      "severity": "high"
+    },
+    {
+      "id": "new-system-dependency-needs-ci",
+      "rule": "A change that introduces a new system-level build dependency (a native library, or a build script that shells out to a binary such as protoc) must also add the corresponding install step to .github/workflows/ci.yml.",
+      "scope": ["Cargo.toml", "**/Cargo.toml", "**/build.rs"],
+      "severity": "high"
+    },
+    {
+      "id": "no-secrets-in-tree",
+      "rule": "No credentials, tokens, API keys, or private endpoints in tracked files, .env.example, fixtures, log lines, or error strings. Provider auth material belongs behind crates/heiwa_vault. Flag log statements that print whole config structs or provider responses.",
+      "scope": ["**"],
+      "severity": "high"
+    },
+    {
+      "id": "no-maturity-overstatement",
+      "rule": "Docs, comments, log strings, and user-facing messages must not claim capability the diff does not implement — no unearned 'supported', 'wired', or parity claims, no framing apps/heiwa_app as a native desktop runtime, no web-first framing where local-first is correct.",
+      "scope": ["**/*.md", "docs/**", "README.md", "apps/**", "crates/**"],
+      "severity": "medium"
+    },
+    {
+      "id": "runtime-port-identity",
+      "rule": "Port 7474 is the installed product runtime. Verification of a local build must use an alternate port such as 7475. Flag scripts, tests, or docs that verify a checkout against 7474, and flag new API routes that can fall through to the SPA and return index.html on an unknown path.",
+      "scope": ["apps/heiwa_app/**", "apps/heiwa_shell/**", "scripts/**", "docs/**"],
+      "severity": "medium"
+    }
+  ]
+}
