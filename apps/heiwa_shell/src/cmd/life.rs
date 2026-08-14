@@ -799,16 +799,15 @@ struct SocialProjection {
 /// Canonical location: `$HEIWA_STATE_DIR/life/social.json`, falling back to
 /// `~/.heiwa/state/life/social.json`.
 ///
-/// The first version read `~/plans/ultimate_devon/social_read_model.json` -
-/// one operator's personal directory hardcoded into a product route. That
-/// cannot survive per-machine initialisation and made the route unusable for
-/// anyone but Devon.
+/// The first version read a personal plans directory hardcoded into a
+/// product route. That cannot survive per-machine initialisation and made
+/// the route unusable for anyone but its author.
 fn social_projection_path() -> PathBuf {
-    let base = std::env::var_os("HEIWA_STATE_DIR")
-        .filter(|value| !value.is_empty())
-        .map(PathBuf::from)
-        .unwrap_or_else(crate::home::heiwa_state_dir);
-    base.join("life").join("social.json")
+    // `HEIWA_STATE_DIR` is honored by ConfigRoot; reading it here as well
+    // was the second resolver this function used to carry.
+    crate::home::heiwa_state_dir()
+        .join("life")
+        .join("social.json")
 }
 
 /// Social read model: relationship cadence, reciprocity, and who is due a
@@ -1001,7 +1000,7 @@ fn pending_approvals_summary() -> Vec<Value> {
 
 /// Per-user plans live under the state dir (`state/life/plans/`), matching
 /// [`social_projection_path`]. The first version read one operator's personal
-/// `~/plans/ultimate_devon/` directory, which cannot survive per-machine
+/// personal plans directory, which cannot survive per-machine
 /// initialisation.
 fn plan_path(name: &str) -> Option<PathBuf> {
     Some(

@@ -39,10 +39,17 @@ function BrowserSurface() {
         </button>
       </div>
       <div class="browser-frame">
+        {/*
+          No allow-same-origin: with it, a page framed from the dev server's
+          own origin would share that origin with the shell, and the shell's
+          CSP already permits `ipc:`. The frame is display-only until L4
+          replaces it with the runtime-owned browser.
+        */}
         <iframe
           title="Heiwa browser"
           src={url()}
-          sandbox="allow-forms allow-same-origin allow-scripts allow-popups"
+          referrerpolicy="no-referrer"
+          sandbox="allow-forms allow-scripts allow-popups"
         />
       </div>
     </div>

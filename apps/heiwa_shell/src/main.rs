@@ -15,11 +15,6 @@ use heiwa_protocol::{
     ToolLease, TranscriptBlock,
 };
 use heiwa_provider::adapter::{Message, ProviderAdapter, Role, TokenUsage};
-use heiwa_provider::providers::claude_code::ClaudeCodeCliAdapter;
-use heiwa_provider::providers::codex_cli::CodexCliAdapter;
-use heiwa_provider::providers::gemini_cli::GeminiCliAdapter;
-use heiwa_provider::providers::ollama::OllamaCliAdapter;
-use heiwa_provider::providers::openrouter::OpenRouterAdapter;
 use heiwa_repl::{parse_input, render_footer, ReplCommand, TelemetryState};
 use heiwa_shell::agentic;
 use heiwa_shell::model_calls::{
@@ -2838,10 +2833,18 @@ fn route_task_inner(
         .collect();
 
     if adapter_capable.is_empty() {
-        return Err(format!(
-            "No models with working adapters. Supported providers: {}.",
-            SUPPORTED_ADAPTER_PROVIDERS.join(", "),
-        ));
+        // Zero routable providers is a state the user can act on, not an
+        // internal failure: say which of their accounts were skipped and
+        // why, or how to connect a first one.
+        let guidance = heiwa_provider::health::FleetHealth::load().guidance();
+        return Err(if guidance.is_empty() {
+            format!(
+                "No models with working adapters. Supported providers: {}.",
+                SUPPORTED_ADAPTER_PROVIDERS.join(", "),
+            )
+        } else {
+            guidance
+        });
     }
 
     // Auxiliary calls have their own DREX policy. Preserve on-device
@@ -2964,20 +2967,12 @@ pub(crate) fn privacy_for_task(task: &str) -> &'static str {
 }
 
 /// Resolve a provider adapter by name.
+///
+/// Selection itself lives in `heiwa_provider::routing` so every surface —
+/// this CLI, the desktop runtime, and the fresh-install harness — resolves a
+/// provider the same way.
 fn resolve_adapter(provider: &str, model_id: &str) -> Result<Arc<dyn ProviderAdapter>, String> {
-    match canonical_provider_id(provider) {
-        "ollama" => Ok(Arc::new(OllamaCliAdapter::with_model(model_id))),
-        "claude" => Ok(Arc::new(ClaudeCodeCliAdapter::new())),
-        "codex" => Ok(Arc::new(CodexCliAdapter::new())),
-        "gemini" => Ok(Arc::new(GeminiCliAdapter::new())),
-        "openrouter" => OpenRouterAdapter::from_registry()
-            .map(|a| Arc::new(a) as Arc<dyn ProviderAdapter>)
-            .ok_or_else(|| {
-                "No OpenRouter account registered (heiwa auth add-key openrouter <key>)."
-                    .to_string()
-            }),
-        _ => Err(format!("No adapter for provider '{}' yet.", provider)),
-    }
+    heiwa_provider::routing::resolve_adapter(provider, model_id)
 }
 
 fn model_call_candidate(tier: &heiwa_protocol::ModelTier) -> ModelCallCandidate {

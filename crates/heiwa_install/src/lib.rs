@@ -121,7 +121,16 @@ pub enum InstallOutcome {
 }
 
 pub fn get_heiwa_dir() -> PathBuf {
-    heiwa_config::HeiwaPaths::resolve().runtime_root
+    try_get_heiwa_dir().expect("HOME, USERPROFILE, or HEIWA_HOME must be set")
+}
+
+/// The runtime root, or `None` when no real home exists.
+///
+/// Install and doctor flows create and inspect this directory tree, so a
+/// cwd-relative fallback would provision a phantom runtime wherever the
+/// process happened to start.
+pub fn try_get_heiwa_dir() -> Option<PathBuf> {
+    heiwa_config::HeiwaPaths::try_resolve().map(|paths| paths.runtime_root)
 }
 
 pub fn get_plugins_dir() -> PathBuf {
@@ -376,6 +385,15 @@ fn package_lint_uses_biome(path: &Path) -> bool {
 }
 
 fn ensure_runtime_layout(heiwa_dir: &Path) -> Result<()> {
+    // ConfigRoot owns first-run creation of the directories it resolves
+    // (runtime root, state, sessions, evidence) so the resolver and the
+    // installer cannot disagree about where they are. The install-only
+    // directories below are layered on top.
+    if let Some(paths) = heiwa_config::HeiwaPaths::try_resolve() {
+        if paths.runtime_root == heiwa_dir {
+            paths.ensure()?;
+        }
+    }
     fs::create_dir_all(heiwa_dir)?;
     for dirname in [
         "app", "bin", "logs", "sessions", "cache", "state", "secrets", "plugins",

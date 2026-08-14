@@ -68,10 +68,14 @@ fn triage_stages_reply_draft_and_is_idempotent() {
         serde_json::from_str(&std::fs::read_to_string(&request_path).unwrap()).unwrap();
     assert_eq!(request["action"], "mail-reply-draft");
     assert_eq!(request["intent"]["draft_source"], "template");
-    assert!(request["intent"]["draft"]
-        .as_str()
-        .unwrap()
-        .contains("Devon"));
+    // The draft acknowledges the subject and carries no signature baked into
+    // the binary — this install has no identity, so there is no name to sign.
+    let draft = request["intent"]["draft"].as_str().unwrap();
+    assert!(draft.contains("Invoice follow-up") || draft.contains("thanks for your note"));
+    assert!(
+        !draft.to_lowercase().contains("devon"),
+        "draft carries a hardcoded identity: {draft}"
+    );
 
     // The bulk sender is suggested for delete but never staged.
     let bulk = payload["items"]

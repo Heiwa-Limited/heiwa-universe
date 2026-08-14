@@ -104,15 +104,22 @@ function harness(overrides: { subscribeNever?: boolean } = {}): Harness {
   return { state, post, emit: (frame) => emit(frame) };
 }
 
-/** A distinctive string each surface must put on screen when mounted. */
-const SURFACE_MARKERS: Record<string, string> = {
+/**
+ * A distinctive string each surface must put on screen when mounted.
+ *
+ * These must not collide with rail content: the rail renders every surface's
+ * `preview().title` regardless of which surface is active, so keying Mail on
+ * "Mail" passed even with the component gutted. Each marker below is body
+ * copy only that surface renders.
+ */
+const SURFACE_MARKERS: Record<string, string | RegExp> = {
   home: "Heiwa Ops",
   ai: "No messages yet.",
   windows: "Terminal panes",
   calendar: "Upcoming",
-  mail: "Mail",
-  finance: "Finance",
-  social: "Social",
+  mail: /Reads land on the L3 connector plane/,
+  finance: /Read model arrives with the L3 connector plane/,
+  social: /Ingress arrives with the L3 connector plane/,
   workers: "Operator turns",
   browser: "Go",
   files: "Workspace tree",
@@ -145,8 +152,17 @@ describe("shell", () => {
   it.each(SURFACES.map((surface) => surface.id))("mounts the %s surface", (id) => {
     const { state } = harness();
     state.navigate(id);
-    render(() => <App state={state} />);
-    expect(screen.getAllByText(SURFACE_MARKERS[id]).length).toBeGreaterThan(0);
+    const { container } = render(() => <App state={state} />);
+    // Scope to the main area: the rail carries every surface's preview title,
+    // so an unscoped query can pass on a surface that rendered nothing.
+    const main = container.querySelector(".main-area");
+    expect(main).toBeTruthy();
+    const marker = SURFACE_MARKERS[id];
+    const matcher =
+      typeof marker === "string"
+        ? new RegExp(marker.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"))
+        : marker;
+    expect(matcher.test(main!.textContent ?? "")).toBe(true);
   });
 
   it("shows the active surface caption in the composer", () => {

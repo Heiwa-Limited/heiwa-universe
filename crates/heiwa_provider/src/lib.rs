@@ -8,10 +8,12 @@ use std::process::Command;
 
 pub mod adapter;
 pub mod detect;
+pub mod health;
 pub mod keychain;
 pub mod oauth;
 pub mod providers;
 pub mod registry;
+pub mod routing;
 
 // ---------------------------------------------------------------------------
 // Re-exports for convenience
@@ -323,45 +325,69 @@ pub fn logout(provider_id: &str) -> anyhow::Result<()> {
     Ok(())
 }
 
-fn provider_search_paths_for_home(home: &Path) -> Vec<PathBuf> {
-    provider_search_paths(home, &heiwa_config::HeiwaPaths::resolve().runtime_root)
-}
+/// System-wide directories probed for a provider CLI beyond `PATH`.
+///
+/// Package managers install into these whether or not they are on the
+/// invoking shell's `PATH`, so discovery would miss real installs without
+/// them. Exposed so a caller that must model a machine with nothing
+/// installed — the fresh-install harness — can pass an empty set instead.
+pub const DEFAULT_SYSTEM_BIN_DIRS: &[&str] =
+    &["/opt/homebrew/bin", "/usr/local/bin", "/usr/bin", "/bin"];
 
 /// Directories probed for a provider CLI, in priority order. `runtime_root`
 /// comes from ConfigRoot; this function stays pure so the ordering can be
 /// tested without touching process-global environment.
+#[cfg(test)]
 fn provider_search_paths(home: &Path, runtime_root: &Path) -> Vec<PathBuf> {
-    vec![
+    provider_search_paths_with_system_dirs(home, runtime_root, DEFAULT_SYSTEM_BIN_DIRS)
+}
+
+fn provider_search_paths_with_system_dirs(
+    home: &Path,
+    runtime_root: &Path,
+    system_dirs: &[&str],
+) -> Vec<PathBuf> {
+    let mut dirs = vec![
         runtime_root.join("bin"),
         home.join(".local").join("bin"),
         home.join(".npm-global").join("bin"),
         home.join(".cargo").join("bin"),
-        PathBuf::from("/opt/homebrew/bin"),
-        PathBuf::from("/usr/local/bin"),
-        PathBuf::from("/usr/bin"),
-        PathBuf::from("/bin"),
-    ]
+    ];
+    dirs.extend(system_dirs.iter().map(PathBuf::from));
+    dirs
 }
 
-fn resolve_command_with_home_and_path(cmd: &str, home: &Path, path: &str) -> Option<PathBuf> {
+/// Resolve a command against explicit inputs, including which system
+/// directories to consider installed.
+///
+/// [`resolve_command`] is the production entry point and passes the real
+/// home, runtime root, and [`DEFAULT_SYSTEM_BIN_DIRS`]. Pass an empty
+/// `system_dirs` slice to model a machine on which no provider CLI is
+/// installed anywhere Heiwa looks.
+///
+/// Every input is explicit — including the runtime root — so a caller that
+/// injects a sandbox home cannot accidentally probe, and execute, binaries
+/// out of the real user's runtime.
+pub fn resolve_command_in(
+    cmd: &str,
+    home: &Path,
+    runtime_root: &Path,
+    path: &str,
+    system_dirs: &[&str],
+) -> Option<PathBuf> {
     #[cfg(windows)]
     const EXTENSIONS: &[&str] = &["", ".exe", ".cmd", ".bat", ".com"];
     #[cfg(not(windows))]
     const EXTENSIONS: &[&str] = &[""];
 
-    resolve_command_with_extensions(cmd, home, path, EXTENSIONS)
-}
-
-fn resolve_command_with_extensions(
-    cmd: &str,
-    home: &Path,
-    path: &str,
-    extensions: &[&str],
-) -> Option<PathBuf> {
     let mut dirs = env::split_paths(path).collect::<Vec<_>>();
-    dirs.extend(provider_search_paths_for_home(home));
+    dirs.extend(provider_search_paths_with_system_dirs(
+        home,
+        runtime_root,
+        system_dirs,
+    ));
     for dir in dirs {
-        for extension in extensions {
+        for extension in EXTENSIONS {
             let candidate = dir.join(format!("{cmd}{extension}"));
             if candidate.is_file() {
                 return Some(candidate);
@@ -372,19 +398,19 @@ fn resolve_command_with_extensions(
 }
 
 pub fn resolve_command(cmd: &str) -> Option<PathBuf> {
-    let home = heiwa_config::HeiwaPaths::resolve().home_dir;
+    let paths = heiwa_config::HeiwaPaths::resolve();
     let path = env::var("PATH").unwrap_or_default();
-    resolve_command_with_home_and_path(cmd, &home, &path)
-}
-
-fn resolve_command_or_name_with_home_and_path(cmd: &str, home: &Path, path: &str) -> PathBuf {
-    resolve_command_with_home_and_path(cmd, home, path).unwrap_or_else(|| PathBuf::from(cmd))
+    resolve_command_in(
+        cmd,
+        &paths.home_dir,
+        &paths.runtime_root,
+        &path,
+        DEFAULT_SYSTEM_BIN_DIRS,
+    )
 }
 
 pub fn resolve_command_or_name(cmd: &str) -> PathBuf {
-    let home = heiwa_config::HeiwaPaths::resolve().home_dir;
-    let path = env::var("PATH").unwrap_or_default();
-    resolve_command_or_name_with_home_and_path(cmd, &home, &path)
+    resolve_command(cmd).unwrap_or_else(|| PathBuf::from(cmd))
 }
 
 fn has_command(cmd: &str) -> bool {
@@ -508,7 +534,7 @@ mod command_resolution_tests {
         let exe = bin.join("codex");
         fs::write(&exe, "#!/bin/sh\n").expect("write fake codex");
 
-        let resolved = resolve_command_with_home_and_path("codex", &temp, "");
+        let resolved = resolve_command_in("codex", &temp, &temp.join(".heiwa"), "", &[]);
 
         assert_eq!(resolved.as_deref(), Some(exe.as_path()));
         let _ = fs::remove_dir_all(temp);
@@ -530,16 +556,28 @@ mod command_resolution_tests {
             .to_string_lossy()
             .into_owned();
 
-        let resolved = resolve_command_with_extensions("gemini", &temp, &path, &["", ".cmd"]);
+        // On Windows the resolver appends shim extensions; elsewhere the
+        // bare name is the only candidate, so the shim is not a match.
+        let resolved = resolve_command_in("gemini", &temp, &temp.join(".heiwa"), &path, &[]);
 
+        #[cfg(windows)]
         assert_eq!(resolved.as_deref(), Some(shim.as_path()));
+        #[cfg(not(windows))]
+        assert!(resolved.is_none(), "got {resolved:?}");
+        let _ = &shim;
         let _ = fs::remove_dir_all(temp);
     }
 
     #[test]
     fn resolve_command_or_name_falls_back_to_command_name() {
-        let resolved =
-            resolve_command_or_name_with_home_and_path("missing-heiwa-cli", Path::new("/nope"), "");
+        let resolved = resolve_command_in(
+            "missing-heiwa-cli",
+            Path::new("/nope"),
+            Path::new("/nope/.heiwa"),
+            "",
+            &[],
+        )
+        .unwrap_or_else(|| PathBuf::from("missing-heiwa-cli"));
 
         assert_eq!(resolved, PathBuf::from("missing-heiwa-cli"));
     }

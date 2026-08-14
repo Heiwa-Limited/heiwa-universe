@@ -2,8 +2,29 @@ import { For } from "solid-js";
 import { cssToken, shortenPath } from "../../lib/format";
 import { useApp } from "../../state/app";
 import type { HerdPane } from "../../runtime";
+import type { SurfaceId } from "../ids";
 import type { SurfaceModule } from "../types";
 import "./home.css";
+
+/**
+ * Which surface a placeholder tile stands for.
+ *
+ * Matches on the workspace/pane/agent/cwd text because a planned pane names
+ * its surface there ("calendar:today", "mail:triage") — there is no live
+ * pane to key off yet.
+ */
+function surfaceForPane(pane: HerdPane): SurfaceId {
+  const haystack =
+    `${pane.workspace} ${pane.pane} ${pane.agent} ${pane.cwd}`.toLowerCase();
+  if (haystack.includes("calendar")) return "calendar";
+  if (haystack.includes("mail")) return "mail";
+  if (haystack.includes("finance")) return "finance";
+  if (haystack.includes("social")) return "social";
+  if (haystack.includes("file")) return "files";
+  if (haystack.includes("browser")) return "browser";
+  if (haystack.includes("agent") || haystack.includes("worker")) return "workers";
+  return "windows";
+}
 
 /** Placeholder pane rows shown before herdr reports live panes. */
 function fallbackPanes(app: ReturnType<typeof useApp>): HerdPane[] {
@@ -54,12 +75,16 @@ function HomeSurface() {
               class="pinned-pane"
               classList={{ "primary-pane": index() === 0 }}
               onClick={() => {
+                // A live pane opens in Windows with that pane selected; a
+                // placeholder tile opens the surface it stands for. Sending
+                // every tile to Windows would dead-end the five sub-app
+                // tiles that are all a fresh install shows.
                 if (app.herd.livePaneIds().has(pane.pane)) {
                   app.herd.select(pane.pane);
                   app.navigate("windows");
                   void app.herd.loadPaneText();
                 } else {
-                  app.navigate("windows");
+                  app.navigate(surfaceForPane(pane));
                 }
               }}
             >

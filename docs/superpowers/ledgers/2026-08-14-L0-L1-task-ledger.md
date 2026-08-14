@@ -35,12 +35,12 @@ commit as the work it records.
 
 | # | Requirement (roadmap) | Implementation tasks | Files/modules | Depends on | Verification | Status |
 |---|---|---|---|---|---|---|
-| L1.1 | Direct-API adapters alongside CLI adapters (Anthropic, OpenAI, Gemini families) | `anthropic_api.rs` (Messages API SSE), `openai_api.rs` (Chat Completions SSE), `gemini_api.rs` (streamGenerateContent); shared OpenAI-compat SSE helpers; constructor-injected base URL for harness | `crates/heiwa_provider/src/providers/*` | — | `cargo test -p heiwa-provider` unit tests vs recorded SSE fixtures + local mock server | todo |
-| L1.2 | Model inventory discovered, never invented; discovery ≠ execution support | Per-adapter `discover_models()` hitting provider list endpoints; `InventoryTruth::Verified` only from live probe | same files + `registry.rs` | L1.1 | unit tests with mock list endpoints | todo |
-| L1.3 | Account-aware adapter resolution: ApiKey account → direct adapter; OauthCli → CLI adapter; several accounts per provider | Make `resolve_adapter()` registry/account-aware in shell; keep DREX as selector | `apps/heiwa_shell/src/main.rs` (resolve_adapter, has_adapter) | L1.1 | `model_call_executor` tests + new routing tests | todo |
-| L1.4 | Account health projection: user sees which accounts healthy and why one was skipped | Health projection type in `heiwa_provider`; surfaced through existing `/api/v1` snapshot (`ProviderSnapshot` already carries status/auth_kind/last_error); AI surface renders it | `crates/heiwa_provider/src/health.rs` (new), `apps/heiwa_shell/src/cmd/app.rs`, desktop AI surface | L1.1 | unit + snapshot API test | todo |
-| L1.5 | Failure semantics: unauthenticated/rate-limited/unreachable = routing constraint, not crash; zero healthy accounts → app opens and guides | Extend `has_adapter`/candidate filter to account health; graceful blocker event on zero-account turn; desktop zero-state panel | shell routing + desktop AI surface | L1.3, L1.4 | harness cases: zero-provider turn yields actionable blocker, app renders | todo |
-| L1.6 | Fresh-install contract: no provider CLI on PATH + one API key completes a turn end-to-end, automated | Integration test: scrubbed PATH, temp HEIWA_HOME, mock provider HTTP server (or live key via env), drive OperatorTurnRunner path to `assistant_completed` | `apps/heiwa_shell/tests/fresh_install.rs` (new) | L1.1–L1.5 | `scripts/check_l1_acceptance.sh` | todo |
+| L1.1 | Direct-API adapters alongside CLI adapters (Anthropic, OpenAI, Gemini families) | `anthropic_api.rs` (Messages API SSE), `openai_api.rs` (Chat Completions SSE), `gemini_api.rs` (streamGenerateContent), shared `sse.rs` framer; OpenRouter consolidated onto the OpenAI-compat parser; constructor-injected base URL and optional caller-supplied credential | `crates/heiwa_provider/src/providers/*` | — | 98 provider tests (pure stream state machines, TDD) | done |
+| L1.2 | Model inventory discovered, never invented; discovery ≠ execution support | Per-adapter `discover_models()` against each provider's list endpoint; `InventoryTruth::Verified` only from a live probe. Replaced `anthropic_known_models()` — a hardcoded, already-stale list whose verification probe named a model id that does not exist | providers + `detect/mod.rs` | L1.1 | unit tests with mock list payloads; harness discovery test | done |
+| L1.3 | Account-aware adapter resolution: ApiKey account → direct adapter; OauthCli → CLI adapter; several accounts per provider | `heiwa_provider::routing` owns selection (moved out of the shell binary so every surface and the harness resolve identically); health-gated so an expired key does not beat a working CLI seat | `crates/heiwa_provider/src/routing.rs`, `apps/heiwa_shell/src/main.rs` | L1.1 | routing unit tests + harness | done |
+| L1.4 | Account health projection: user sees which accounts healthy and why one was skipped | `HealthState` (healthy/unauthenticated/rate-limited/unreachable/not-installed), per-account detail, `FleetHealth` partition and guidance text | `crates/heiwa_provider/src/health.rs` | L1.1 | 11 health tests | done |
+| L1.5 | Failure semantics: unauthenticated/rate-limited/unreachable = routing constraint, not crash; zero healthy accounts → app opens and guides | Zero-candidate routing now returns `FleetHealth::guidance()` naming each skipped account and its reason, or how to connect a first provider | shell routing + `health.rs` | L1.3, L1.4 | harness: zero-account, expired-credential, and rate-limited cases | done |
+| L1.6 | Fresh-install contract: no provider CLI on PATH + one API key completes a turn end-to-end, automated | `fresh_install.rs`: loopback mock speaking the Messages API, scrubbed PATH, temp state root, empty system bin dirs, one API-key account → Token stream + terminal Done. Surfaced that PATH-scrubbing alone was insufficient (discovery also probes `/opt/homebrew/bin`), so the system bin set is now injectable | `apps/heiwa_shell/tests/fresh_install.rs` | L1.1–L1.5 | `scripts/check_l1_acceptance.sh` passes | done |
 
 ## Single-seat audit findings (2026-08-14, drives L0.1/L0.2)
 
@@ -102,3 +102,62 @@ then the identity removals.
 - **AD-7** `heiwa_install::resolve_heiwa_dir` deleted rather than rerouted: it
   was a second pure implementation of ConfigRoot's precedence, reachable only
   from its own tests once `get_heiwa_dir` began delegating.
+- **AD-8** `HeiwaPaths::try_resolve()` added alongside `resolve()`. The
+  lenient form falls back to a cwd-relative `./.heiwa`; anything that reads
+  secrets or appends to the evidence journal uses the strict form, because a
+  root that follows the process working directory would let whatever can
+  write that directory supply the JWT signing secret, and would split one
+  machine's append-only history across directories silently.
+- **AD-9** Adapters accept a caller-supplied credential
+  (`with_api_key`) in addition to the keychain default. Not a test hook: a
+  headless server or container has no OS keychain and holds its secrets
+  elsewhere, and only the embedder knows where.
+- **AD-10** Adapter selection moved from the shell binary into
+  `heiwa_provider::routing`. Selection is provider knowledge, not CLI
+  knowledge — and a binary-local function is unreachable from the
+  integration test that has to prove the fresh-install path.
+- **AD-11** CLI discovery's system bin directories
+  (`DEFAULT_SYSTEM_BIN_DIRS`) are a parameter, not a constant baked into the
+  probe. Scrubbing `PATH` does not model a machine without provider CLIs,
+  because discovery also probes `/opt/homebrew/bin` and friends — the
+  fresh-install harness passes an empty set. Every input to command
+  resolution, including the runtime root, is now explicit.
+- **AD-12** Mail draft signatures come from the per-install identity or are
+  omitted. Drafts are outgoing text written on the user's behalf, so the
+  binary must never supply a name; the prompt and template take the
+  signature as a parameter, which makes "no name is baked in" testable
+  without depending on whose machine runs the suite.
+
+## Independent review (2026-08-14)
+
+An adversarial review of the L0 commits found defects that this session then
+fixed. Recording them because several were in code this session wrote, and
+because two of them show the acceptance gate itself was the thing at fault:
+
+- **Secrets read from the working directory.** `heiwa_core` adopted the
+  cwd-relative fallback, so a container with no `HOME` would read its JWT
+  signing secret from `./.heiwa/secrets/`. Fixed by AD-8.
+- **The gate was blind to 31% of the code it claimed to scan.** Its awk
+  exited at the *first* `#[cfg(test)]` and skipped to EOF, missing 3,674
+  lines of `cmd/app.rs` — including every home-path call site in that file.
+  Now skips test modules by their column-0 close brace. Verified by planting
+  a `env::var("HOME")` read at `app.rs:4500` and watching the gate fail.
+- **The identity check was a three-literal grep** that missed a bare
+  "Devon" in the mail draft prompt and template — meaning every N-user
+  install produced outgoing mail signed by the maintainer, while
+  `docs/current-capability.md` claimed the gate enforced the opposite. Both
+  the code and the check are fixed (AD-12).
+- **A stale ref could run a command the user never typed.** The Windows
+  surface picked the input-vs-select ref by mode while the markup picked by
+  mode *and* catalog contents; Solid never clears refs on removal, so an
+  emptied catalog left a stale selection that Run would submit. One
+  union-typed ref now serves both controls.
+- Also fixed: Home tiles dead-ending at Windows instead of their own
+  surfaces, navigation outside the rail skipping the surface refresh,
+  `subApps` rebuilding derived lists on every poll, the provider PATH probe
+  reading ambient env instead of its injected home, absolute home paths
+  serialized into fan-out plans, `ensure()` being dead code, three vacuous
+  surface-render assertions that passed on a gutted component, the
+  color-token check seeing only hex, the seam checksum pinning only the
+  tests and not the implementation, and the acceptance stamp being writable
+  from a dirty tree.

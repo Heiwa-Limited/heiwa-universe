@@ -100,6 +100,13 @@ fn test_heiwa_dir_delegates_to_config_root() {
 }
 
 #[test]
+fn test_no_home_anywhere_is_an_error_not_a_guess() {
+    // With no home at all there is no state root to guess: install must not
+    // provision a runtime into whatever directory it was started in.
+    assert!(heiwa_config::HeiwaPaths::try_resolve_from(|_| None, None).is_none());
+}
+
+#[test]
 fn test_install_creates_runtime_layout_and_canonical_launcher() {
     with_temp_home(|home| {
         run_install().expect("run_install should succeed");

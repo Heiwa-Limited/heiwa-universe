@@ -1,5 +1,6 @@
 import {
   createContext,
+  createMemo,
   createSignal,
   useContext,
   type Accessor,
@@ -41,7 +42,10 @@ export function createAppState(options: AppStateOptions = {}): AppState {
   const herd = createHerdState(options.herd);
   const [view, setView] = createSignal<SurfaceId>(options.initialView ?? "home");
 
-  const subApps = (): SubApp[] => [
+  // Memoized: six surfaces render <For> over slices of this, and rebuilding
+  // the array on every read tears down and recreates those rows on each
+  // inbox poll.
+  const subApps = createMemo<SubApp[]>(() => [
     {
       id: "ai",
       title: "AI Ops",
@@ -108,7 +112,7 @@ export function createAppState(options: AppStateOptions = {}): AppState {
       tools: ["repo.grep", "fs.read", "artifact log"],
       personalization: ["smallest source slice", "evidence before claim"],
     },
-  ];
+  ]);
 
   return { operator, runtime, herd, view, navigate: setView, subApps };
 }

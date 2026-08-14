@@ -17,14 +17,21 @@ function WindowsSurface() {
     return Boolean(pane && herd.livePaneIds().has(pane.pane));
   };
 
-  let commandInput: HTMLInputElement | undefined;
-  let commandSelect: HTMLSelectElement | undefined;
+  // One ref for whichever control is mounted. Solid assigns refs on create
+  // and never clears them on removal, so keeping a separate select ref would
+  // leave a stale value behind when the catalog empties — and submitting
+  // would run a command the user never typed.
+  let commandControl: HTMLInputElement | HTMLSelectElement | undefined;
+
+  /// The catalog picker is only mounted when run mode has commands to offer;
+  /// this is the single predicate both the markup and the submit path use.
+  const catalogMode = () => herd.mode() === "run" && herd.commands().length > 0;
 
   const submitCommand = async () => {
     const pane = activePane();
-    const text = (herd.mode() === "run" ? commandSelect?.value : commandInput?.value)?.trim() ?? "";
+    const text = commandControl?.value.trim() ?? "";
     if (!pane || !herd.livePaneIds().has(pane.pane) || !text) return;
-    if (commandInput) commandInput.value = "";
+    if (commandControl instanceof HTMLInputElement) commandControl.value = "";
     await herd.act(() =>
       herd.mode() === "run" ? herd.run(pane.pane, text) : herd.send(pane.pane, text),
     );
@@ -106,10 +113,10 @@ function WindowsSurface() {
             </select>
 
             <Show
-              when={herd.mode() === "run" && herd.commands().length > 0}
+              when={catalogMode()}
               fallback={
                 <input
-                  ref={commandInput}
+                  ref={(el) => (commandControl = el)}
                   type="text"
                   disabled={!canControl()}
                   placeholder={herd.mode() === "run" ? "command id: git.status" : "prompt text…"}
@@ -122,7 +129,7 @@ function WindowsSurface() {
                 />
               }
             >
-              <select ref={commandSelect} disabled={!canControl()}>
+              <select ref={(el) => (commandControl = el)} disabled={!canControl()}>
                 <For each={herd.commands()}>
                   {(command) => (
                     <option value={command.id}>

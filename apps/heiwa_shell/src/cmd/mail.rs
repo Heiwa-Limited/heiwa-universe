@@ -821,26 +821,57 @@ async fn generate_draft(row: &Value) -> (String, String) {
     (template_draft(row), "template".to_string())
 }
 
+/// The signature drafts are written under.
+///
+/// Drafts are outgoing text written on the user's behalf, so this must never
+/// be a name baked into the binary. Until L2 establishes a per-user identity
+/// with a display name, drafts go unsigned rather than signed by whoever
+/// happened to build Heiwa.
+fn draft_signature() -> Option<String> {
+    heiwa_provider::load_identity()
+        .and_then(|identity| identity.display_name)
+        .filter(|name| !name.trim().is_empty())
+}
+
 fn draft_prompt(row: &Value) -> String {
+    draft_prompt_with(row, draft_signature().as_deref())
+}
+
+/// Pure form: the signature is an input, so the invariant "no name is baked
+/// into the binary" is testable without depending on whose machine runs it.
+fn draft_prompt_with(row: &Value, signer: Option<&str>) -> String {
     let sender = row.get("sender").and_then(Value::as_str).unwrap_or("");
     let subject = row.get("subject").and_then(Value::as_str).unwrap_or("");
+    let signature = match signer {
+        Some(name) => format!(" Sign as {name}."),
+        None => " Do not add a signature or sign-off name.".to_string(),
+    };
     format!(
-        "Draft a short email reply (2-3 sentences) on behalf of Devon. \
-         You only know the metadata — sender: {sender}, subject: \"{subject}\" — \
-         the body was not read for privacy reasons. Acknowledge the email and \
-         promise a fuller response where appropriate. Plain text only, no \
-         subject line, no placeholders. Sign as Devon."
+        "Draft a short email reply (2-3 sentences) on the account owner's \
+         behalf. You only know the metadata — sender: {sender}, subject: \
+         \"{subject}\" — the body was not read for privacy reasons. \
+         Acknowledge the email and promise a fuller response where \
+         appropriate. Plain text only, no subject line, no placeholders.\
+         {signature}"
     )
 }
 
 pub(crate) fn template_draft(row: &Value) -> String {
+    template_draft_with(row, draft_signature().as_deref())
+}
+
+fn template_draft_with(row: &Value, signer: Option<&str>) -> String {
     let subject = row
         .get("subject")
         .and_then(Value::as_str)
         .unwrap_or("your email");
+    let signature = match signer {
+        Some(name) => format!(" — {name}"),
+        None => String::new(),
+    };
     format!(
         "Hi — thanks for your note about \"{subject}\". I've seen it and will \
-         follow up with a proper reply shortly. — Devon"
+         follow up with a proper reply shortly.{signature}"
     )
 }
 
@@ -1216,7 +1247,30 @@ mod tests {
         let row = json!({"subject": "Invoice follow-up"});
         let draft = template_draft(&row);
         assert!(draft.contains("Invoice follow-up"));
-        assert!(draft.contains("Devon"));
+    }
+
+    #[test]
+    fn drafts_carry_no_signature_when_the_install_has_no_identity() {
+        // A draft is outgoing text written on the user's behalf. With no
+        // per-install identity there is no name to sign, and the binary must
+        // not supply one of its own.
+        let row = json!({"sender": "a@example.com", "subject": "Invoice"});
+        let template = template_draft_with(&row, None);
+        let prompt = draft_prompt_with(&row, None);
+        // The greeting itself contains an em dash, so assert on the tail:
+        // an unsigned draft ends at the sentence, with no sign-off appended.
+        assert!(
+            template.trim_end().ends_with("shortly."),
+            "unsigned template gained a sign-off: {template}"
+        );
+        assert!(prompt.contains("Do not add a signature"));
+    }
+
+    #[test]
+    fn drafts_sign_with_the_installs_own_identity() {
+        let row = json!({"sender": "a@example.com", "subject": "Invoice"});
+        assert!(template_draft_with(&row, Some("Alex")).ends_with("— Alex"));
+        assert!(draft_prompt_with(&row, Some("Alex")).contains("Sign as Alex."));
     }
 
     #[test]

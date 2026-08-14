@@ -21,7 +21,7 @@
 use std::path::PathBuf;
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use anyhow::Result;
+use anyhow::{anyhow, Result};
 
 mod journal;
 mod operator;
@@ -59,15 +59,25 @@ pub const EVIDENCE_SCHEMA_VERSION: u32 = 1;
 
 /// Canonical journal root: `HEIWA_EVIDENCE_DIR` override, else
 /// `~/.heiwa/evidence/`. Resolution is owned by `heiwa_config::HeiwaPaths`.
+///
+/// Fails rather than falling back to a cwd-relative root: the journal is
+/// append-only truth, and a root that follows the process working directory
+/// would split one machine's history across directories with nothing to
+/// signal it happened.
 pub fn journal_root() -> Result<PathBuf> {
-    Ok(heiwa_config::HeiwaPaths::resolve().evidence_dir)
+    Ok(resolved_paths()?.evidence_dir)
 }
 
 /// Root of the redacted receipts plane: `~/.heiwa/state/evidence/`. Kept
 /// where the installed runtime already writes it; readers should resolve it
 /// through this function rather than joining paths by hand.
 pub fn receipts_root() -> Result<PathBuf> {
-    Ok(heiwa_config::HeiwaPaths::resolve().receipts_dir())
+    Ok(resolved_paths()?.receipts_dir())
+}
+
+fn resolved_paths() -> Result<heiwa_config::HeiwaPaths> {
+    heiwa_config::HeiwaPaths::try_resolve()
+        .ok_or_else(|| anyhow!("cannot resolve a Heiwa state root (set HEIWA_HOME or HOME)"))
 }
 
 pub(crate) fn now_ms() -> u64 {

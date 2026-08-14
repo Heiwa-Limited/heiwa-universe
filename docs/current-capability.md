@@ -10,10 +10,20 @@
 
 ## Supported architecture claims
 
-- The application is written for N users. No hardcoded operator identity,
-  machine name, or home path exists in runtime code;
-  `crates/heiwa_config::HeiwaPaths` (ConfigRoot) is the single resolver for
-  per-user state and is enforced by `scripts/check_l0_acceptance.sh`.
+- The application is written for N users. `crates/heiwa_config::HeiwaPaths`
+  (ConfigRoot) is the single resolver for per-user state, and
+  `scripts/check_l0_acceptance.sh` fails on any independent home/state-root
+  resolution or hardcoded operator identity in runtime code. The check greps
+  source rather than proving absence by construction, so it is a guard
+  against regression, not a proof.
+- A user supplies one API key and the application works with no provider CLI
+  installed: direct-API adapters for the Anthropic, OpenAI, and Google
+  families run alongside the CLI adapters, and
+  `apps/heiwa_shell/tests/fresh_install.rs` completes a turn end to end on a
+  machine with no reachable provider CLI.
+- Provider failure is a routing constraint: `heiwa_provider::health` reports
+  which accounts are usable and why one was skipped, and a zero-provider
+  install opens with actionable guidance rather than an error.
 - The desktop shell is a SolidJS component layer: ten surface modules behind a
   `SurfaceModule` contract over a tokenized design system, with the operator
   stream seam (`store.ts` / `client.ts` / `types.ts`) preserved unmodified.

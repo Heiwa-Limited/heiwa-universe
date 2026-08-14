@@ -1,15 +1,16 @@
 //! HTTP API adapter for OpenRouter.
 //!
-//! First BYOK HTTP adapter (the other adapters wrap provider CLIs).
 //! Streams chat completions from the OpenAI-compatible endpoint at
 //! `https://openrouter.ai/api/v1`, authenticating with the API key stored
-//! in the OS keychain under the account's `account_id`.
+//! in the OS keychain under the account's `account_id`. The stream
+//! vocabulary is shared with `openai_api` — OpenRouter's differences are the
+//! endpoint, the attribution headers, and free-tier 429 retries.
 
-use crate::adapter::{Message, ProviderAdapter, Role, StreamEvent, TokenUsage};
+use crate::adapter::{Message, ProviderAdapter, StreamEvent};
+use crate::providers::openai_api::{pump_openai_stream, role_str};
 use anyhow::{anyhow, Result};
 use async_trait::async_trait;
-use futures_util::StreamExt;
-use serde_json::{json, Value};
+use serde_json::json;
 use tokio::sync::mpsc;
 
 const OPENROUTER_CHAT_URL: &str = "https://openrouter.ai/api/v1/chat/completions";
@@ -37,36 +38,6 @@ impl OpenRouterAdapter {
                 .collect(),
         })
     }
-
-    fn role_str(role: &Role) -> &'static str {
-        match role {
-            Role::User => "user",
-            Role::Assistant => "assistant",
-            Role::System => "system",
-        }
-    }
-}
-
-/// Parse one SSE `data:` payload from an OpenAI-compatible stream.
-///
-/// Returns the text delta (if any) and usage (if this is the final chunk
-/// that carries it). `[DONE]` is handled by the caller.
-fn parse_stream_payload(payload: &str) -> (Option<String>, Option<TokenUsage>) {
-    let Ok(v) = serde_json::from_str::<Value>(payload) else {
-        return (None, None);
-    };
-    let delta = v["choices"][0]["delta"]["content"]
-        .as_str()
-        .filter(|s| !s.is_empty())
-        .map(str::to_string);
-    let usage = v.get("usage").filter(|u| !u.is_null()).map(|u| TokenUsage {
-        input_tokens: u["prompt_tokens"].as_u64().unwrap_or(0) as u32,
-        output_tokens: u["completion_tokens"].as_u64().unwrap_or(0) as u32,
-        cache_read_tokens: 0,
-        cache_write_tokens: 0,
-        cost_usd: u["cost"].as_f64().unwrap_or(0.0),
-    });
-    (delta, usage)
 }
 
 #[async_trait]
@@ -83,7 +54,7 @@ impl ProviderAdapter for OpenRouterAdapter {
         let body = json!({
             "model": model,
             "messages": messages.iter().map(|m| json!({
-                "role": Self::role_str(&m.role),
+                "role": role_str(&m.role),
                 "content": m.content,
             })).collect::<Vec<_>>(),
             "stream": true,
@@ -133,39 +104,10 @@ impl ProviderAdapter for OpenRouterAdapter {
             return Err(anyhow!(msg));
         }
 
-        let mut stream = resp.bytes_stream();
-        let mut carry = String::new();
-        let mut usage = TokenUsage::default();
-
-        'outer: while let Some(chunk) = stream.next().await {
-            let chunk = chunk?;
-            carry.push_str(&String::from_utf8_lossy(&chunk));
-
-            // SSE events are separated by a blank line.
-            while let Some(sep) = carry.find("\n\n") {
-                let event: String = carry.drain(..sep + 2).collect();
-                for line in event.lines() {
-                    let Some(payload) = line.strip_prefix("data: ") else {
-                        continue; // comments / keep-alives
-                    };
-                    if payload == "[DONE]" {
-                        break 'outer;
-                    }
-                    let (delta, chunk_usage) = parse_stream_payload(payload);
-                    if let Some(u) = chunk_usage {
-                        usage = u;
-                    }
-                    if let Some(text) = delta {
-                        if stream_tx.send(StreamEvent::Token(text)).await.is_err() {
-                            return Ok(()); // consumer went away
-                        }
-                    }
-                }
-            }
-        }
-
-        let _ = stream_tx.send(StreamEvent::Done(usage)).await;
-        Ok(())
+        // Framing, tool-call assembly, usage, and terminal-event handling are
+        // shared with the OpenAI adapter — OpenRouter speaks the same wire
+        // format, so the vocabulary is implemented once.
+        pump_openai_stream(resp, stream_tx).await
     }
 
     async fn interrupt(&self) -> Result<()> {
@@ -176,41 +118,5 @@ impl ProviderAdapter for OpenRouterAdapter {
 
     fn supported_models(&self) -> Vec<String> {
         self.models.clone()
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn parses_content_delta() {
-        let (delta, usage) = parse_stream_payload(r#"{"choices":[{"delta":{"content":"hello"}}]}"#);
-        assert_eq!(delta.as_deref(), Some("hello"));
-        assert!(usage.is_none());
-    }
-
-    #[test]
-    fn parses_final_usage_chunk() {
-        let (delta, usage) = parse_stream_payload(
-            r#"{"choices":[{"delta":{}}],"usage":{"prompt_tokens":12,"completion_tokens":34,"cost":0.0}}"#,
-        );
-        assert!(delta.is_none());
-        let usage = usage.expect("usage present");
-        assert_eq!(usage.input_tokens, 12);
-        assert_eq!(usage.output_tokens, 34);
-    }
-
-    #[test]
-    fn ignores_malformed_payload() {
-        let (delta, usage) = parse_stream_payload("not json");
-        assert!(delta.is_none());
-        assert!(usage.is_none());
-    }
-
-    #[test]
-    fn empty_delta_yields_no_token() {
-        let (delta, _) = parse_stream_payload(r#"{"choices":[{"delta":{"content":""}}]}"#);
-        assert!(delta.is_none());
     }
 }

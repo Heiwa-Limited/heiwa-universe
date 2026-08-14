@@ -51,9 +51,21 @@ else
   fail_msg "fresh-install harness missing: apps/heiwa_shell/tests/fresh_install.rs"
 fi
 
+# ── 5. Adapter selection and health are shared, not shell-local ─────────────
+if [[ -f "crates/heiwa_provider/src/routing.rs" && -f "crates/heiwa_provider/src/health.rs" ]]; then
+  ok "adapter selection and account health live in the provider crate"
+else
+  fail_msg "expected crates/heiwa_provider/src/{routing,health}.rs"
+fi
+
 if (( fail != 0 )); then
   printf 'L1 acceptance gate FAILED.\n' >&2
   exit 1
 fi
-mkdir -p .claude && git rev-parse HEAD > .claude/l1-accept-sha
-printf 'L1 acceptance gate passed (stamp written for HEAD).\n'
+# Stamp HEAD only when HEAD is what actually passed.
+if git diff --quiet && git diff --cached --quiet; then
+  mkdir -p .claude && git rev-parse HEAD > .claude/l1-accept-sha
+  printf 'L1 acceptance gate passed (stamp written for HEAD).\n'
+else
+  printf 'L1 acceptance gate passed. Tree is dirty, so no HEAD stamp was written.\n'
+fi

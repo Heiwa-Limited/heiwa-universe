@@ -41,9 +41,37 @@ pub struct HeiwaPaths {
 }
 
 impl HeiwaPaths {
-    /// Resolve from the process environment.
+    /// Resolve from the process environment, falling back to a
+    /// cwd-relative root when no home can be found.
+    ///
+    /// Callers that would rather fail than write to an attacker-writable
+    /// working directory must use [`try_resolve`](Self::try_resolve).
     pub fn resolve() -> Self {
         Self::resolve_from(|key| env::var_os(key), dirs::home_dir())
+    }
+
+    /// Resolve only when a real root exists.
+    ///
+    /// Returns `None` when neither `HEIWA_HOME` nor any home directory is
+    /// resolvable — a containerized run with no `HOME` and no passwd entry,
+    /// for instance. Anything that reads secrets or writes the evidence
+    /// journal must use this: silently falling back to `./.heiwa` would read
+    /// credentials from, and append receipts to, whatever directory the
+    /// process happens to be started in.
+    pub fn try_resolve() -> Option<Self> {
+        Self::try_resolve_from(|key| env::var_os(key), dirs::home_dir())
+    }
+
+    /// Pure form of [`try_resolve`](Self::try_resolve).
+    pub fn try_resolve_from(
+        env: impl Fn(&str) -> Option<OsString>,
+        platform_home: Option<PathBuf>,
+    ) -> Option<Self> {
+        let has_root = ["HEIWA_HOME", "HOME", "USERPROFILE"]
+            .iter()
+            .any(|key| env(key).is_some_and(|value| !value.is_empty()))
+            || platform_home.is_some();
+        has_root.then(|| Self::resolve_from(env, platform_home))
     }
 
     /// Pure resolution from an injected environment, so precedence is
@@ -339,6 +367,37 @@ mod config_root_tests {
     fn no_home_anywhere_falls_back_to_cwd_relative() {
         let paths = HeiwaPaths::resolve_from(env_of(&[]), None);
         assert_eq!(paths.runtime_root, PathBuf::from("./.heiwa"));
+    }
+
+    #[test]
+    fn try_resolve_refuses_to_guess_a_root_when_there_is_none() {
+        // With no home at all there is no state root to guess. Callers that
+        // read secrets must get None here rather than a cwd-relative path an
+        // attacker who controls the working directory could populate.
+        assert!(HeiwaPaths::try_resolve_from(env_of(&[]), None).is_none());
+    }
+
+    #[test]
+    fn try_resolve_yields_the_same_layout_as_resolve_when_a_root_exists() {
+        for env in [
+            vec![("HOME", "/h")],
+            vec![("USERPROFILE", "/win")],
+            vec![("HEIWA_HOME", "/custom")],
+        ] {
+            let strict = HeiwaPaths::try_resolve_from(env_of(&env), None).expect("root");
+            let lenient = HeiwaPaths::resolve_from(env_of(&env), None);
+            assert_eq!(strict.runtime_root, lenient.runtime_root);
+        }
+        // A platform home with no env vars set still counts as a real root.
+        assert!(HeiwaPaths::try_resolve_from(env_of(&[]), Some(PathBuf::from("/p"))).is_some());
+    }
+
+    #[test]
+    fn try_resolve_ignores_empty_env_values() {
+        assert!(
+            HeiwaPaths::try_resolve_from(env_of(&[("HOME", ""), ("HEIWA_HOME", "")]), None)
+                .is_none()
+        );
     }
 
     #[test]
