@@ -124,12 +124,17 @@ files on purpose, so behavior is covered either way.
 
 Deferred until step 4 lands — the MCP tools hit the same connection gate.
 
+Single-quote the header. Double quotes let the shell expand the key *before*
+`claude` sees it, and the resolved `Authorization: Bearer <token>` is then
+written in plaintext to `~/.claude.json`. Single quotes persist the literal
+reference, which is resolved at server runtime instead:
+
 ```bash
-claude mcp add --transport http greptile https://api.greptile.com/mcp --header "Authorization: Bearer $GREPTILE_API_KEY"
+claude mcp add --transport http greptile https://api.greptile.com/mcp --header 'Authorization: Bearer ${GREPTILE_API_KEY}'
 ```
 
 Do **not** add Greptile to this repo's tracked `.mcp.json` with a literal key.
-If you want it project-scoped, use the variable form:
+If you want it project-scoped, use the same variable form:
 
 ```json
 {
