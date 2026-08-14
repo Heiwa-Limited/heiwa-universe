@@ -10,6 +10,13 @@
 
 ## Supported architecture claims
 
+- The application is written for N users. No hardcoded operator identity,
+  machine name, or home path exists in runtime code;
+  `crates/heiwa_config::HeiwaPaths` (ConfigRoot) is the single resolver for
+  per-user state and is enforced by `scripts/check_l0_acceptance.sh`.
+- The desktop shell is a SolidJS component layer: ten surface modules behind a
+  `SurfaceModule` contract over a tokenized design system, with the operator
+  stream seam (`store.ts` / `client.ts` / `types.ts`) preserved unmodified.
 - The installed runtime is the current product center of gravity.
 - DREX routing, provider/session/protocol crates, execution scopes, tool leases, and receipts are the live runtime spine.
 - Local JSONL is the canonical evidence plane; Lance is the derived local recall index.
@@ -23,6 +30,11 @@
 - iMessage as a productized ingress surface
 - broad computer-use automation
 - `Heiwa.app` as a fully native desktop runtime
+- first-run onboarding inside the application (roadmap L2)
+- live read models behind the Calendar, Mail, Finance, and Social surfaces —
+  they state their pending status honestly and land on the L3 connector plane
+- the Browser surface as an actionable, approval-gated automation surface; it
+  is an iframe until the L4 runtime-owned browser lands
 - cross-device evidence sync or a hosted state backbone
 - `heiwa-limited` as an active product target
 - experimental canvases as part of the supported stack

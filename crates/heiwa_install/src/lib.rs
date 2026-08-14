@@ -1,7 +1,6 @@
 use anyhow::{anyhow, Context, Result};
 use serde::{Deserialize, Serialize};
 use std::env;
-use std::ffi::OsString;
 use std::fs;
 #[cfg(unix)]
 use std::os::unix::fs::PermissionsExt;
@@ -123,20 +122,6 @@ pub enum InstallOutcome {
 
 pub fn get_heiwa_dir() -> PathBuf {
     heiwa_config::HeiwaPaths::resolve().runtime_root
-}
-
-/// Resolve the runtime root from explicit inputs.
-///
-/// Split out from [`get_heiwa_dir`] so the precedence can be tested without
-/// reading process-global environment. Tests in the same binary run on parallel
-/// threads, and any test that sets `HOME` or `HEIWA_HOME` races every other test
-/// that reads them — which is how the state-root test became flaky.
-pub fn resolve_heiwa_dir(heiwa_home: Option<OsString>, home: Option<OsString>) -> Option<PathBuf> {
-    if let Some(root) = heiwa_home.filter(|value| !value.is_empty()) {
-        return Some(PathBuf::from(root));
-    }
-    home.filter(|value| !value.is_empty())
-        .map(|value| PathBuf::from(value).join(".heiwa"))
 }
 
 pub fn get_plugins_dir() -> PathBuf {

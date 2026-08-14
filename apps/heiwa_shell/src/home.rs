@@ -1,10 +1,9 @@
-//! Canonical home-directory resolution for the `heiwa` shell.
+//! Shell-side accessors for the per-user state layout.
 //!
-//! `HOME` wins over the platform lookup so hermetic tests (and any sandboxed
-//! run) can redirect all `~/.heiwa` state with one env var. On Unix this is
-//! what `dirs::home_dir()` reads anyway; on Windows `dirs` ignores `HOME`
-//! (it uses `USERPROFILE`), which previously let sandboxed state leak into
-//! the real user profile.
+//! Resolution itself belongs to `heiwa_config::HeiwaPaths` (ConfigRoot), which
+//! owns the env precedence and is the only code that knows where user state
+//! lives. These are thin named accessors so shell call sites read well; they
+//! deliberately hold no policy of their own.
 
 use std::path::PathBuf;
 

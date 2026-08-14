@@ -42,8 +42,10 @@ The system is anchored by machine-readable files that persist across agent sessi
 
 ## Hard Rules
 
-- **State Authority**: Local JSONL evidence under `~/.heiwa/evidence/` is the authority, written through `crates/heiwa_evidence`. Local SQLite (e.g. `~/.heiwa/state.db`) is the legitimate per-machine ledger for quota, history, and run traces; it is not retired. Lance is a derived index and must be rebuildable from evidence.
-- **Target Fidelity**: Develop for the operator's local machine first. There is no cross-device sync plane today; GitHub-backed evidence sync is future, redaction-gated work.
+- **State Authority**: Local JSONL evidence under the per-user evidence dir is the authority, written through `crates/heiwa_evidence`. Local SQLite (quota `state.db`, receipts, embedding hot state) is the legitimate per-machine ledger; it is not retired. Lance is a derived index and must be rebuildable from evidence.
+- **Config Root**: `crates/heiwa_config::HeiwaPaths` is the only code that resolves where user state lives (`HEIWA_HOME` / `HEIWA_STATE_DIR` / `HEIWA_EVIDENCE_DIR`, else `<home>/.heiwa`). Never read `HOME` or join `.heiwa` anywhere else. `~/.heiwa` in prose means "this user's resolved root", not a literal path.
+- **N-user product**: The application is written for any user on their own machine — no hardcoded operator identity, machine name, or home path, and no capability that assumes a tool the user did not install. That the repo is developed on one maintainer's Mac is a fact about the workflow, not about the product.
+- **Target Fidelity**: Develop for a single local machine first. There is no cross-device sync plane today; the transport is an open decision (roadmap D1) and blocks L5 only.
 - **Transport**: Prefer subscriptions and WebSockets over polling.
 - **Execution**: Route model and tool execution through `HeiwaClaw` / MCP.
 - **Economy**: Cheapest acceptable route first.

@@ -24,12 +24,12 @@ commit as the work it records.
 |---|---|---|---|---|---|---|
 | L0.1 | ConfigRoot: single resolver owns per-user state root, platform-correct, first-run creation, sole authority | `HeiwaPaths` rewritten: `runtime_root`/`state_dir`/`evidence_dir`/`sessions_dir`/`config_path`, `HEIWA_STATE_DIR`+`HEIWA_EVIDENCE_DIR` support, injectable `resolve_from`, `ensure()`, `receipts_dir()` | `crates/heiwa_config/src/lib.rs` | — | `cargo test -p heiwa_config` (12 pass, TDD) | done |
 | L0.2 | Single-seat audit: no hardcoded operator identity, machine name, or home path outside resolver | 8 resolvers collapsed onto ConfigRoot (shell/core/drex/evidence/install/provider/quota/loop); identity removals: `devon-canonical`→`local-user`, `ultimate_devon`→`state/life/plans`, cockpit chip→"Local operator", `~` API literals→resolved paths, repo-checkout fallback dropped, fixtures neutralized, herd bridge URL overridable | 31 files (see commit) | L0.1, audit report | 717 workspace + 314 shell + 42 desktop tests, clippy -D warnings, machete clean | done |
-| L0.3 | SolidJS adoption (matches cockpit idiom, `solid-js ^1.9`) | Add `solid-js`, `vite-plugin-solid`; convert entry to `.tsx`; mount `<App/>` | `apps/heiwa_app/desktop/{package.json,vite.config.ts,tsconfig.json,src/main.tsx}` | — | `npm run build` + vitest | todo |
-| L0.4 | Decompose ten surfaces into component modules, each owning render + local state, consuming operator store through typed interface | One module per surface: Home, AI, Windows, Calendar, Mail, Finance, Social, Workers, Browser, Files; `SurfaceModule` contract; shell chrome (rail/dock/composer) own module | `desktop/src/surfaces/*`, `desktop/src/shell/*`, `desktop/src/state/*` | L0.3 | Component render test mounts all ten; behavior parity checks | todo |
-| L0.5 | Operator seam preserved: `store.ts`, `client.ts`, `types.ts` retained; their tests pass unmodified | Solid adapter wraps `OperatorStore`/`OperatorClient` via version signal; zero edits to seam files | `desktop/src/state/operator.tsx` (new); seam files untouched | L0.3 | Checksum guard + vitest pass | todo |
-| L0.6 | Token design system: color/type/spacing/motion/elevation; light+dark as token sets; surfaces consume tokens only | `theme/tokens.css` (token definitions, light+dark), `theme/base.css` (reset+primitives); per-surface styles consume `var(--*)` only | `desktop/src/theme/*`, replaces `src/styles.css` | L0.3 | L0 gate: no raw hex colors outside `theme/`; build passes | todo |
-| L0.7 | D2 repository truth update: revise single-seat statements | Update `CLAUDE.md`, `ops/context/HEIWA.md`, `docs/current-capability.md` to N-user presumption | those three files | L0.2 landed | docs gates (`check_agent_baseline.sh` docs checks) | todo |
-| L0.8 | Acceptance: ten surfaces render via component layer, no behavior regression; seam tests pass unmodified; no home path outside resolver | Write and wire `scripts/check_l0_acceptance.sh` | `scripts/check_l0_acceptance.sh` | L0.1–L0.6 | the script itself; run in baseline flow | doing |
+| L0.3 | SolidJS adoption (matches cockpit idiom, `solid-js ^1.9`) | `solid-js` + `vite-plugin-solid` added; entry is `main.tsx`; vitest keeps `node` default with per-file jsdom opt-in so seam tests stay untouched | `desktop/{package.json,vite.config.ts,tsconfig.json,index.html,src/main.tsx}` | — | `npm run build` (43 modules, 67 kB js) | done |
+| L0.4 | Decompose ten surfaces into component modules, each owning render + local state, consuming operator store through typed interface | Ten modules under `src/surfaces/<id>/`; `SurfaceModule` contract + registry; shell chrome split into `Rail`/`Composer`; `Dynamic` mount so the shell holds no per-surface branch | `desktop/src/surfaces/*`, `src/shell/*`, `src/state/*`, `src/app.tsx` | L0.3 | `app.test.tsx`: 17 tests, mounts all ten | done |
+| L0.5 | Operator seam preserved: `store.ts`, `client.ts`, `types.ts` retained; their tests pass unmodified | `state/operator.ts` adapts the seam into signals, coalescing frames through a scheduler; zero edits to seam files | `desktop/src/state/operator.ts`; seam files untouched | L0.3 | checksum guard + 42 seam tests green | done |
+| L0.6 | Token design system: color/type/spacing/motion/elevation; light+dark as token sets; surfaces consume tokens only | Two-tier tokens (primitives + semantics), light and dark as complete sets, reduced-motion honored; `styles.css` (1030 lines) deleted; per-surface CSS consumes `var(--*)` only | `desktop/src/theme/{tokens,base}.css`, per-surface `*.css` | L0.3 | L0 gate: no raw hex outside `theme/` | done |
+| L0.7 | D2 repository truth update: revise single-seat statements | `ops/context/HEIWA.md` (ConfigRoot + N-user hard rules), `AGENTS.md` (per-user root, dev-machine vs product separation), `docs/current-capability.md` (N-user + Solid claims; L2/L3/L4 gaps stated) | those three files | L0.2 landed | `check_agent_baseline.sh` | done |
+| L0.8 | Acceptance: ten surfaces render via component layer, no behavior regression; seam tests pass unmodified; no home path outside resolver | `scripts/check_l0_acceptance.sh`: typecheck, build, vitest, seam checksums, ten-surface presence, render test, ConfigRoot sole-resolver grep (test modules skipped), identity grep, token discipline; stamps HEAD on pass | `scripts/check_l0_acceptance.sh` | L0.1–L0.7 | gate passes at HEAD | done |
 
 ## L1 — BYOK provider tier
 
@@ -84,9 +84,21 @@ then the identity removals.
 - **AD-3** Direct-API adapters take `base_url` at construction (default = provider
   endpoint) so the fresh-install harness can point them at a local mock server.
   No env-var magic inside adapters.
-- **AD-4** Solid migration keeps view ids (`home|chat|windows|calendar|mail|finance|social|agents|browser|files`)
-  and CSS class names where behavior parity matters; `chat` = AI surface,
-  `agents` = Workers surface (labels unchanged).
-- **AD-5** Seam wrapper: `OperatorStore.snapshot()` behind a Solid signal bumped by
-  `OperatorClient.onChange`; streaming deltas ride the same signal (Solid
-  fine-grained updates replace the hand-rolled RAF fast path).
+- **AD-4** (revised in implementation) View ids unify on the roadmap's product
+  names: `home|ai|windows|calendar|mail|finance|social|workers|browser|files`.
+  The old `chat`/`agents` ids were internal only — no router, no persistence,
+  no external consumer — so carrying them forward would have meant maintaining
+  two vocabularies for the same ten surfaces. Reversible.
+- **AD-5** Seam wrapper: `OperatorStore.snapshot()` behind a Solid signal
+  published on `OperatorClient.onChange`, coalesced through an injectable
+  scheduler (one animation frame by default). Snapshots deep-clone, so
+  per-frame publishing would clone at token rate; message lists use `<Index>`
+  rather than `<For>` because the clone breaks referential identity and `For`
+  would rebuild every row per streamed token.
+- **AD-6** The legacy `/ws/v1/events` socket (approvals + goal refresh) is kept
+  in `state/legacy-events.ts` rather than dropped. It is the one raw socket
+  left in the shell; removing it would silently stop inbox/approval refresh,
+  which the L0 no-regression criterion forbids. It folds into L3.
+- **AD-7** `heiwa_install::resolve_heiwa_dir` deleted rather than rerouted: it
+  was a second pure implementation of ConfigRoot's precedence, reachable only
+  from its own tests once `get_heiwa_dir` began delegating.

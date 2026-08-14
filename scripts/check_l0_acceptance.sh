@@ -77,27 +77,35 @@ else
 fi
 
 # ── 5. No home-path resolution outside ConfigRoot (runtime code) ────────────
-# The resolver (crates/heiwa_config) is the only Rust code allowed to read
-# HOME/USERPROFILE or name ~/.heiwa. Everything else must consume HeiwaPaths.
-# Allowlist entries require a justification comment beside them here.
-home_grep_allow=(
-  "crates/heiwa_config/src/lib.rs"          # the resolver itself
-  "crates/heiwa_provider/src/lib.rs:provider_search_paths"  # PATH-probe fallback dirs, not state root (routed via config for state)
-)
-violations="$(grep -rn --include='*.rs' -e 'join("\.heiwa")' -e '\.heiwa' \
-  apps/heiwa_core/src apps/heiwa_shell/src apps/heiwa_orchestrator/src crates \
-  2>/dev/null \
-  | grep -v -e '^crates/heiwa_config/src/lib.rs' \
-            -e 'tests/' -e '#\[cfg(test)\]' -e 'mod tests' \
-            -e '_test\.rs' -e '^.*//.*\.heiwa' \
-  | grep -v -f <(printf '%s\n' "${home_grep_allow[@]%%:*}" | sed 's/^/^/') \
-  || true)"
-if [[ -z "$violations" ]]; then
-  ok "no independent ~/.heiwa resolution outside ConfigRoot"
+# The invariant is about path *construction*, not about the string "~/.heiwa"
+# appearing in help text: only crates/heiwa_config may read HOME/USERPROFILE,
+# call dirs::home_dir(), or join a ".heiwa" root. Prose in println!/json! that
+# documents the default location is not a violation.
+#
+# Test modules are skipped from the first `#[cfg(test)]` line to EOF (Rust
+# convention places them last), since hermetic tests legitimately build their
+# own temp roots.
+strip_tests() {
+  awk '/^#\[cfg\(test\)\]/ { exit } { print FILENAME ":" FNR ":" $0 }' "$1"
+}
+
+resolver_violations=""
+while IFS= read -r file; do
+  [[ "$file" == crates/heiwa_config/src/lib.rs ]] && continue
+  hits="$(strip_tests "$file" \
+    | grep -E 'env::var(_os)?\("(HOME|USERPROFILE)"\)|dirs::home_dir|join\("\.heiwa"\)' \
+    || true)"
+  [[ -n "$hits" ]] && resolver_violations+="$hits"$'\n'
+done < <(find apps/heiwa_core/src apps/heiwa_shell/src apps/heiwa_orchestrator/src crates \
+  -name '*.rs' -not -path '*/tests/*' -not -name '*_test.rs' 2>/dev/null | sort)
+
+resolver_violations="$(printf '%s' "$resolver_violations" | grep -v '^$' || true)"
+if [[ -z "$resolver_violations" ]]; then
+  ok "no independent home/state-root resolution outside ConfigRoot"
 else
-  count="$(printf '%s\n' "$violations" | wc -l | tr -d ' ')"
-  fail_msg "$count independent home/state-path reference(s) outside ConfigRoot:"
-  printf '%s\n' "$violations" | head -40 >&2
+  count="$(printf '%s\n' "$resolver_violations" | wc -l | tr -d ' ')"
+  fail_msg "$count independent home/state-root resolution(s) outside ConfigRoot:"
+  printf '%s\n' "$resolver_violations" | head -40 >&2
 fi
 
 identity_violations="$(grep -rn --include='*.rs' --include='*.ts' --include='*.tsx' \

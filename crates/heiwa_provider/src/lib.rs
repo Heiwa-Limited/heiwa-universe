@@ -324,19 +324,15 @@ pub fn logout(provider_id: &str) -> anyhow::Result<()> {
 }
 
 fn provider_search_paths_for_home(home: &Path) -> Vec<PathBuf> {
-    let runtime_root = env::var_os("HEIWA_HOME")
-        .filter(|value| !value.is_empty())
-        .map(PathBuf::from);
-    provider_search_paths(home, runtime_root.as_deref())
+    provider_search_paths(home, &heiwa_config::HeiwaPaths::resolve().runtime_root)
 }
 
-fn provider_search_paths(home: &Path, runtime_root: Option<&Path>) -> Vec<PathBuf> {
-    let runtime_bin = runtime_root
-        .map(Path::to_path_buf)
-        .unwrap_or_else(|| home.join(".heiwa"))
-        .join("bin");
+/// Directories probed for a provider CLI, in priority order. `runtime_root`
+/// comes from ConfigRoot; this function stays pure so the ordering can be
+/// tested without touching process-global environment.
+fn provider_search_paths(home: &Path, runtime_root: &Path) -> Vec<PathBuf> {
     vec![
-        runtime_bin,
+        runtime_root.join("bin"),
         home.join(".local").join("bin"),
         home.join(".npm-global").join("bin"),
         home.join(".cargo").join("bin"),
@@ -481,9 +477,10 @@ mod command_resolution_tests {
     #[test]
     fn provider_search_paths_include_user_local_bins() {
         let home = PathBuf::from("/Users/example");
-        let paths = provider_search_paths(&home, None);
+        let runtime_root = home.join(".heiwa");
+        let paths = provider_search_paths(&home, &runtime_root);
 
-        assert!(paths.contains(&home.join(".heiwa").join("bin")));
+        assert!(paths.contains(&runtime_root.join("bin")));
         assert!(paths.contains(&home.join(".local").join("bin")));
         assert!(paths.contains(&home.join(".npm-global").join("bin")));
         assert!(paths.contains(&home.join(".cargo").join("bin")));
@@ -493,7 +490,7 @@ mod command_resolution_tests {
     fn provider_search_paths_honor_explicit_runtime_root() {
         let home = PathBuf::from("/Users/example");
         let runtime_root = PathBuf::from("/opt/heiwa-runtime");
-        let paths = provider_search_paths(&home, Some(&runtime_root));
+        let paths = provider_search_paths(&home, &runtime_root);
 
         assert!(paths.contains(&runtime_root.join("bin")));
         assert!(!paths.contains(&home.join(".heiwa").join("bin")));
