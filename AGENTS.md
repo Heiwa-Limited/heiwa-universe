@@ -45,6 +45,10 @@ Compression:
 Heiwa wraps provider-owned runtimes. It does not own their internals.
 
 - Claude Code, Codex, Gemini CLI, Antigravity, and Grok remain provider-owned CLI surfaces.
+- Direct-API adapters ship alongside the CLI adapters (Anthropic, OpenAI,
+  Google). Adapter selection lives in `heiwa_provider::routing`, never in a
+  surface binary; adapters do transport and `StreamEvent` translation only,
+  with routing, quota, and cost staying with DREX and `heiwa_quota`.
 - Providers own their own system prompts, auth semantics, session behavior, cloud model inventory, and native quotas.
 - Ollama and other local runtimes remain local-model providers, not Heiwa-native models.
 - Heiwa adds local install/auth UX, routing, evidence, bounded loops, and operator coherence across those surfaces.

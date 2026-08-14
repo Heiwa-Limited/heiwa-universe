@@ -325,7 +325,18 @@ A task is eligible only if it satisfies both the provider-side constraint set an
 ### Current provider reality in this repo
 
 - Claude Code, Codex, Gemini CLI, and Antigravity are wrapped as provider-owned CLI surfaces.
+- Direct-API adapters ship alongside them for the Anthropic, OpenAI, and
+  Google families (`crates/heiwa_provider/src/providers/*_api.rs`), so a user
+  with an API key works on a machine with no provider CLI installed. Selection
+  between the two is `heiwa_provider::routing`: a healthy key takes the route,
+  the CLI seat is the fallback, and neither is privileged by the architecture.
 - Ollama is the canonical local-runtime provider today.
+- Model inventory is discovered from each provider's own list endpoint and
+  marked `Verified` only from a live probe. Heiwa does not carry model lists
+  for providers that are authoritative for their own.
+- Provider failure is a routing constraint, not an application failure:
+  `heiwa_provider::health` reports which accounts are usable and why one was
+  skipped, and zero routable accounts yields actionable guidance.
 - Discovery, auth status wrapping, and routing metadata do not imply equal execution depth across all providers.
 - Heiwa should always say which providers are merely wrapped, which are verified connected, and which are actually execution-capable for a given workflow.
 
