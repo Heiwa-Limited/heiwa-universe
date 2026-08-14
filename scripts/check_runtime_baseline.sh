@@ -103,20 +103,58 @@ if ! grep -q '"workspaces"' package.json; then
   exit 1
 fi
 
+npm_workspaces="$(
+  node -e '
+    const { globSync } = require("node:fs");
+    const pkg = require("./package.json");
+    const patterns = Array.isArray(pkg.workspaces)
+      ? pkg.workspaces
+      : pkg.workspaces?.packages ?? [];
+    const workspaces = patterns.flatMap((pattern) =>
+      globSync(pattern, { exclude: ["**/node_modules/**"] })
+    );
+    process.stdout.write([...new Set(workspaces)].join("\n"));
+  '
+)" || {
+  echo "Could not parse npm workspaces from package.json" >&2
+  exit 1
+}
+
+while IFS= read -r workspace; do
+  [[ -z "$workspace" ]] && continue
+  if [[ -f "$workspace/package-lock.json" ]]; then
+    echo "npm workspace must use the root package-lock.json: $workspace/package-lock.json" >&2
+    exit 1
+  fi
+done <<< "$npm_workspaces"
+
 required_node_major="${required_node_version%%.*}.x"
 if ! grep -q "\"node\": \"${required_node_major}\"" package.json; then
   echo "package.json engines must pin Node ${required_node_major}" >&2
   exit 1
 fi
 
-for workflow in .github/workflows/ci.yml .github/workflows/certification.yml .github/workflows/deploy.yml; do
-  if ! grep -Eq "actions/setup-node@[0-9a-f]{40}[[:space:]]+# v[0-9]+" "$workflow"; then
-    echo "$workflow must set up Node with an immutable commit pin" >&2
+if ! grep -Eq "actions/setup-node@[0-9a-f]{40}[[:space:]]+# v[0-9]+" .github/workflows/certification.yml; then
+  echo ".github/workflows/certification.yml must set up Node with an immutable commit pin" >&2
+  exit 1
+fi
+
+for workflow in .github/workflows/ci.yml .github/workflows/deploy.yml; do
+  repo_hygiene_job="$(
+    awk '
+      /^  repo-hygiene:/ { in_job = 1 }
+      in_job && /^  [[:alnum:]_-]+:/ && $1 != "repo-hygiene:" { exit }
+      in_job { print }
+    ' "$workflow"
+  )"
+
+  if ! grep -Eq "actions/setup-node@[0-9a-f]{40}[[:space:]]+# v[0-9]+" <<< "$repo_hygiene_job"; then
+    echo "$workflow repo-hygiene must set up Node with an immutable commit pin" >&2
     exit 1
   fi
 
-  if ! grep -Eq "node-version-file: ['\"]?\\.nvmrc['\"]?" "$workflow"; then
-    echo "$workflow must source Node from .nvmrc" >&2
+  if ! grep -Eq "node-version-file: ['\"]?\\.nvmrc['\"]?" <<< "$repo_hygiene_job"; then
+    echo "$workflow repo-hygiene must source Node from .nvmrc" >&2
     exit 1
   fi
 done
