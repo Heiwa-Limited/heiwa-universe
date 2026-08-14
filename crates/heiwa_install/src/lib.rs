@@ -122,11 +122,7 @@ pub enum InstallOutcome {
 }
 
 pub fn get_heiwa_dir() -> PathBuf {
-    resolve_heiwa_dir(
-        env::var_os("HEIWA_HOME"),
-        env::var_os("HOME").or_else(|| env::var_os("USERPROFILE")),
-    )
-    .expect("HOME or USERPROFILE must be set")
+    heiwa_config::HeiwaPaths::resolve().runtime_root
 }
 
 /// Resolve the runtime root from explicit inputs.

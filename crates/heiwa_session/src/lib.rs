@@ -92,11 +92,7 @@ pub fn get_session_dir() -> PathBuf {
 }
 
 pub fn get_session_index_path() -> PathBuf {
-    load_config()
-        .paths
-        .state_dir
-        .join("state")
-        .join("sessions.sqlite3")
+    load_config().paths.state_dir.join("sessions.sqlite3")
 }
 
 pub fn block_raw_char_len(block: &TranscriptBlock) -> usize {

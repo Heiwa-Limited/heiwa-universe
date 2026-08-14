@@ -38,13 +38,7 @@ pub struct HeiwaIdentity {
 }
 
 fn get_heiwa_state_dir() -> PathBuf {
-    if let Some(root) = env::var_os("HEIWA_HOME").filter(|value| !value.is_empty()) {
-        return PathBuf::from(root);
-    }
-    let home = env::var("HOME")
-        .or_else(|_| env::var("USERPROFILE"))
-        .expect("HOME or USERPROFILE must be set");
-    PathBuf::from(home).join(".heiwa")
+    heiwa_config::HeiwaPaths::resolve().runtime_root
 }
 
 pub fn get_identity_path() -> std::path::PathBuf {
@@ -79,12 +73,14 @@ pub fn clear_identity() -> anyhow::Result<()> {
 }
 
 pub fn login_heiwa(token: &str) -> anyhow::Result<HeiwaIdentity> {
-    // In a real implementation, this would verify the token against Heiwa Hub
+    // Local per-install identity stamp. Verification against a hosted
+    // account plane is L2 work; until then no personal identity is invented
+    // here — the id is neutral and profile fields stay empty.
     let identity = HeiwaIdentity {
-        user_id: "devon-canonical".to_string(),
+        user_id: "local-user".to_string(),
         auth_token: token.to_string(),
-        email: Some("devon@heiwa.ltd".to_string()),
-        display_name: Some("Devon".to_string()),
+        email: None,
+        display_name: None,
     };
     save_identity(&identity)?;
     Ok(identity)
@@ -380,10 +376,7 @@ fn resolve_command_with_extensions(
 }
 
 pub fn resolve_command(cmd: &str) -> Option<PathBuf> {
-    let home = env::var("HOME")
-        .or_else(|_| env::var("USERPROFILE"))
-        .map(PathBuf::from)
-        .unwrap_or_else(|_| PathBuf::from("."));
+    let home = heiwa_config::HeiwaPaths::resolve().home_dir;
     let path = env::var("PATH").unwrap_or_default();
     resolve_command_with_home_and_path(cmd, &home, &path)
 }
@@ -393,10 +386,7 @@ fn resolve_command_or_name_with_home_and_path(cmd: &str, home: &Path, path: &str
 }
 
 pub fn resolve_command_or_name(cmd: &str) -> PathBuf {
-    let home = env::var("HOME")
-        .or_else(|_| env::var("USERPROFILE"))
-        .map(PathBuf::from)
-        .unwrap_or_else(|_| PathBuf::from("."));
+    let home = heiwa_config::HeiwaPaths::resolve().home_dir;
     let path = env::var("PATH").unwrap_or_default();
     resolve_command_or_name_with_home_and_path(cmd, &home, &path)
 }
@@ -461,54 +451,26 @@ fn is_ollama_running() -> bool {
 }
 
 fn gemini_has_native_auth() -> bool {
-    let home = env::var("HOME")
-        .or_else(|_| env::var("USERPROFILE"))
-        .unwrap_or_default();
-    if home.is_empty() {
-        return false;
-    }
-    PathBuf::from(home)
-        .join(".gemini")
-        .join("oauth_creds.json")
-        .exists()
+    let home = heiwa_config::HeiwaPaths::resolve().home_dir;
+    home.join(".gemini").join("oauth_creds.json").exists()
 }
 
 fn codex_has_native_auth() -> bool {
-    let home = env::var("HOME")
-        .or_else(|_| env::var("USERPROFILE"))
-        .unwrap_or_default();
-    if home.is_empty() {
-        return false;
-    }
-    PathBuf::from(home)
-        .join(".codex")
-        .join("auth.json")
-        .exists()
+    let home = heiwa_config::HeiwaPaths::resolve().home_dir;
+    home.join(".codex").join("auth.json").exists()
 }
 
 fn claude_has_native_auth() -> bool {
-    let home = env::var("HOME")
-        .or_else(|_| env::var("USERPROFILE"))
-        .unwrap_or_default();
-    if home.is_empty() {
-        return false;
-    }
-    let claude_dir = PathBuf::from(&home).join(".claude");
+    let home = heiwa_config::HeiwaPaths::resolve().home_dir;
+    let claude_dir = home.join(".claude");
     // settings.json is written only after the OAuth flow completes.
     claude_dir.join("settings.json").exists()
 }
 
 fn antigravity_has_native_auth() -> bool {
-    let home = env::var("HOME")
-        .or_else(|_| env::var("USERPROFILE"))
-        .unwrap_or_default();
-    if home.is_empty() {
-        return false;
-    }
-    let gemini_oauth = PathBuf::from(&home)
-        .join(".gemini")
-        .join("oauth_creds.json");
-    let ag_initialized = PathBuf::from(&home).join(".antigravity").join("argv.json");
+    let home = heiwa_config::HeiwaPaths::resolve().home_dir;
+    let gemini_oauth = home.join(".gemini").join("oauth_creds.json");
+    let ag_initialized = home.join(".antigravity").join("argv.json");
     gemini_oauth.exists() && ag_initialized.exists()
 }
 
@@ -518,7 +480,7 @@ mod command_resolution_tests {
 
     #[test]
     fn provider_search_paths_include_user_local_bins() {
-        let home = PathBuf::from("/Users/devon");
+        let home = PathBuf::from("/Users/example");
         let paths = provider_search_paths(&home, None);
 
         assert!(paths.contains(&home.join(".heiwa").join("bin")));
@@ -529,7 +491,7 @@ mod command_resolution_tests {
 
     #[test]
     fn provider_search_paths_honor_explicit_runtime_root() {
-        let home = PathBuf::from("/Users/devon");
+        let home = PathBuf::from("/Users/example");
         let runtime_root = PathBuf::from("/opt/heiwa-runtime");
         let paths = provider_search_paths(&home, Some(&runtime_root));
 

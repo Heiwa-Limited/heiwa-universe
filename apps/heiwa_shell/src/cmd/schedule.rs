@@ -167,15 +167,12 @@ fn iana_local_tz() -> String {
 /// the installed binary working without the repo: HEIWA_PARSE_TIME /
 /// HEIWA_PYTHON envs first, then the dev checkout, then PATH python3.
 fn parse_via_sdk(text: &str) -> Result<Value> {
+    // No repo-checkout fallback: an installed runtime must not assume a dev
+    // clone under the user's home. HEIWA_PARSE_TIME is the only escape hatch.
     let script = std::env::var("HEIWA_PARSE_TIME")
         .map(PathBuf::from)
         .ok()
         .filter(|p| p.exists())
-        .or_else(|| {
-            let dev = crate::home::heiwa_home()?
-                .join("heiwa-universe/packages/heiwa_sdk/heiwa_sdk/intent/parse_time.py");
-            dev.exists().then_some(dev)
-        })
         .ok_or_else(|| {
             anyhow!("parse_time.py not found; set HEIWA_PARSE_TIME or pass --at YYYY-MM-DDTHH:MM")
         })?;
@@ -183,10 +180,6 @@ fn parse_via_sdk(text: &str) -> Result<Value> {
         .map(PathBuf::from)
         .ok()
         .filter(|p| p.exists())
-        .or_else(|| {
-            let venv = crate::home::heiwa_home()?.join("heiwa-universe/.venv/bin/python");
-            venv.exists().then_some(venv)
-        })
         .unwrap_or_else(|| PathBuf::from("python3"));
 
     let output = Command::new(&python)

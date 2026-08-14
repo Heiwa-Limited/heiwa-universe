@@ -389,10 +389,10 @@ export default function App(props: ParentProps): JSX.Element {
         <div class="sidebar-footer">
           <div class="operator-profile">
             <div class="avatar" aria-hidden="true">
-              D
+              H
             </div>
             <div class="operator-info">
-              <span class="operator-name">Devon</span>
+              <span class="operator-name">Local operator</span>
               <span class="operator-role">Owner runtime</span>
             </div>
           </div>

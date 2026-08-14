@@ -42,7 +42,12 @@ impl Default for RecursiveHarnessConstraints {
             small_batch_threshold: 5,
             max_children: 128,
             max_entries_per_child: 25,
-            output_root: ".heiwa/receipts/recursive-harness".to_string(),
+            output_root: heiwa_config::HeiwaPaths::resolve()
+                .runtime_root
+                .join("receipts")
+                .join("recursive-harness")
+                .to_string_lossy()
+                .into_owned(),
         }
     }
 }

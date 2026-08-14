@@ -9,57 +9,15 @@
 use std::path::PathBuf;
 
 pub fn heiwa_home() -> Option<PathBuf> {
-    resolve_heiwa_home(
-        std::env::var_os("HOME").map(PathBuf::from),
-        dirs::home_dir(),
-    )
-}
-
-fn resolve_heiwa_home(
-    home_env: Option<PathBuf>,
-    platform_home: Option<PathBuf>,
-) -> Option<PathBuf> {
-    home_env
-        .filter(|value| !value.as_os_str().is_empty())
-        .or(platform_home)
+    Some(heiwa_config::HeiwaPaths::resolve().home_dir)
 }
 
 /// Resolve the canonical Heiwa runtime root.
 pub fn heiwa_runtime_dir() -> PathBuf {
-    std::env::var_os("HEIWA_HOME")
-        .filter(|value| !value.is_empty())
-        .map(PathBuf::from)
-        .unwrap_or_else(|| {
-            heiwa_home()
-                .unwrap_or_else(|| PathBuf::from("."))
-                .join(".heiwa")
-        })
+    heiwa_config::HeiwaPaths::resolve().runtime_root
 }
 
 /// Resolve the canonical hot-state root used by every shell command.
 pub fn heiwa_state_dir() -> PathBuf {
-    std::env::var_os("HEIWA_STATE_DIR")
-        .filter(|value| !value.is_empty())
-        .map(PathBuf::from)
-        .unwrap_or_else(|| heiwa_runtime_dir().join("state"))
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn home_env_wins_over_platform_lookup() {
-        assert_eq!(
-            resolve_heiwa_home(
-                Some(PathBuf::from("/tmp/heiwa-home-test")),
-                Some(PathBuf::from("/platform/home")),
-            ),
-            Some(PathBuf::from("/tmp/heiwa-home-test"))
-        );
-        assert_eq!(
-            resolve_heiwa_home(Some(PathBuf::new()), Some(PathBuf::from("/platform/home"))),
-            Some(PathBuf::from("/platform/home"))
-        );
-    }
+    heiwa_config::HeiwaPaths::resolve().state_dir
 }

@@ -50,14 +50,7 @@ impl RuntimeConfig {
 }
 
 fn heiwa_home_from_env() -> Option<PathBuf> {
-    env::var_os("HEIWA_HOME")
-        .filter(|value| !value.is_empty())
-        .map(PathBuf::from)
-        .or_else(|| {
-            env::var_os("HOME")
-                .filter(|value| !value.is_empty())
-                .map(|home| PathBuf::from(home).join(".heiwa"))
-        })
+    Some(heiwa_config::HeiwaPaths::resolve().runtime_root)
 }
 
 fn resolve_runtime_secret(

@@ -21,7 +21,7 @@
 use std::path::PathBuf;
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use anyhow::{anyhow, Result};
+use anyhow::Result;
 
 mod journal;
 mod operator;
@@ -58,33 +58,16 @@ pub use state::{
 pub const EVIDENCE_SCHEMA_VERSION: u32 = 1;
 
 /// Canonical journal root: `HEIWA_EVIDENCE_DIR` override, else
-/// `~/.heiwa/evidence/`.
+/// `~/.heiwa/evidence/`. Resolution is owned by `heiwa_config::HeiwaPaths`.
 pub fn journal_root() -> Result<PathBuf> {
-    if let Some(dir) = std::env::var_os("HEIWA_EVIDENCE_DIR").filter(|value| !value.is_empty()) {
-        return Ok(PathBuf::from(dir));
-    }
-    Ok(runtime_root()?.join("evidence"))
+    Ok(heiwa_config::HeiwaPaths::resolve().evidence_dir)
 }
 
 /// Root of the redacted receipts plane: `~/.heiwa/state/evidence/`. Kept
 /// where the installed runtime already writes it; readers should resolve it
 /// through this function rather than joining paths by hand.
 pub fn receipts_root() -> Result<PathBuf> {
-    if let Some(dir) = std::env::var_os("HEIWA_STATE_DIR").filter(|value| !value.is_empty()) {
-        return Ok(PathBuf::from(dir).join("evidence"));
-    }
-    Ok(runtime_root()?.join("state").join("evidence"))
-}
-
-fn runtime_root() -> Result<PathBuf> {
-    if let Some(root) = std::env::var_os("HEIWA_HOME").filter(|value| !value.is_empty()) {
-        return Ok(PathBuf::from(root));
-    }
-    Ok(home_dir()?.join(".heiwa"))
-}
-
-fn home_dir() -> Result<PathBuf> {
-    dirs::home_dir().ok_or_else(|| anyhow!("cannot resolve home directory"))
+    Ok(heiwa_config::HeiwaPaths::resolve().receipts_dir())
 }
 
 pub(crate) fn now_ms() -> u64 {

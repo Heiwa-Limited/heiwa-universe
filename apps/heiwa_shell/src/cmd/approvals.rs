@@ -432,7 +432,7 @@ mod tests {
             "created_at": "2026-03-30T18:20:22.112520Z",
             "action": "write-file",
             "target_surface": "filesystem",
-            "target_scope": "/Users/dmcgregsauce/.gemini/settings.json",
+            "target_scope": "/Users/example/.gemini/settings.json",
             "requested_mode": "write"
         });
 
@@ -442,7 +442,7 @@ mod tests {
         assert_eq!(summary["action"], "write-file");
         assert_eq!(
             summary["target"],
-            "filesystem:/Users/dmcgregsauce/.gemini/settings.json"
+            "filesystem:/Users/example/.gemini/settings.json"
         );
         assert_eq!(summary["risk"], "write");
         assert_eq!(summary["requested_at"], "2026-03-30T18:20:22.112520Z");

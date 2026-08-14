@@ -1,6 +1,12 @@
 import { Channel, invoke } from "@tauri-apps/api/core";
 import type { OperatorFrame } from "./operator/types";
 
+// Dev-only Deno herd bridge, reached when the Tauri command layer is absent
+// (plain `vite dev` in a browser). The Rust path honors HEIWA_HERD_URL; this
+// is the equivalent escape hatch for the dev fallback.
+const HERD_BRIDGE_URL: string =
+  (import.meta.env.VITE_HERD_BRIDGE_URL as string | undefined) ?? "http://127.0.0.1:7480";
+
 export type ApiErrorPayload =
   | { kind: "Offline"; detail: string }
   | { kind: "Http"; detail: { status: number; body: string } }
@@ -177,7 +183,7 @@ export async function herdPanes(): Promise<HerdSnapshot> {
     return await invoke<HerdSnapshot>("herd_panes");
   } catch {
     try {
-      const resp = await fetch("http://127.0.0.1:7480/api/herd", { cache: "no-store" });
+      const resp = await fetch(`${HERD_BRIDGE_URL}/api/herd`, { cache: "no-store" });
       if (!resp.ok) throw new Error(`herd ${resp.status}`);
       const panes = await resp.json() as HerdPane[];
       return { status: "online", source: "deno-bridge-dev", panes, error: null };
@@ -246,7 +252,7 @@ export async function readHerdPane(pane: string): Promise<HerdPaneRead> {
     return await invoke<HerdPaneRead>("herd_pane_read", { pane });
   } catch {
     try {
-      const resp = await fetch(`http://127.0.0.1:7480/api/pane/${encodeURIComponent(pane)}?format=text`, {
+      const resp = await fetch(`${HERD_BRIDGE_URL}/api/pane/${encodeURIComponent(pane)}?format=text`, {
         cache: "no-store",
       });
       const text = await resp.text();
@@ -307,7 +313,7 @@ async function postHerdPaneAction(
 ): Promise<HerdActionResult> {
   try {
     const resp = await fetch(
-      `http://127.0.0.1:7480/api/pane/${encodeURIComponent(pane)}/${action}`,
+      `${HERD_BRIDGE_URL}/api/pane/${encodeURIComponent(pane)}/${action}`,
       { method: "POST", body },
     );
     const text = await resp.text();

@@ -1272,8 +1272,8 @@ mod tests {
                 {"name": "Subject", "value": "Invoice follow-up"},
             ]},
         });
-        let row = gmail_message_to_row(&message, "devon@gmail.com").unwrap();
-        assert_eq!(row["account"], "devon@gmail.com");
+        let row = gmail_message_to_row(&message, "user@example.com").unwrap();
+        assert_eq!(row["account"], "user@example.com");
         assert_eq!(row["sender"], "Vendor <vendor@example.com>");
         assert_eq!(row["subject"], "Invoice follow-up");
         assert_eq!(row["unread"], true);

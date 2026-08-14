@@ -390,9 +390,6 @@ fn all_source_probes() -> Vec<SourceProbe> {
 }
 
 fn home_source_probes() -> Vec<SourceProbe> {
-    let Some(home) = crate::home::heiwa_home() else {
-        return Vec::new();
-    };
     [
         "current_state_register.md",
         "heiwa_life_project.md",
@@ -407,7 +404,10 @@ fn home_source_probes() -> Vec<SourceProbe> {
         probe_path(
             "home",
             (*name).to_string(),
-            home.join("plans").join("ultimate_devon").join(name),
+            crate::home::heiwa_state_dir()
+                .join("life")
+                .join("plans")
+                .join(name),
         )
     })
     .collect()
@@ -999,8 +999,17 @@ fn pending_approvals_summary() -> Vec<Value> {
         .collect()
 }
 
+/// Per-user plans live under the state dir (`state/life/plans/`), matching
+/// [`social_projection_path`]. The first version read one operator's personal
+/// `~/plans/ultimate_devon/` directory, which cannot survive per-machine
+/// initialisation.
 fn plan_path(name: &str) -> Option<PathBuf> {
-    crate::home::heiwa_home().map(|home| home.join("plans").join("ultimate_devon").join(name))
+    Some(
+        crate::home::heiwa_state_dir()
+            .join("life")
+            .join("plans")
+            .join(name),
+    )
 }
 
 fn parse_work_schedule_row(path: &Option<PathBuf>, date: &str) -> (String, Vec<String>) {

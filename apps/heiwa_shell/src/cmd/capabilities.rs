@@ -595,7 +595,7 @@ mod tests {
             "installed_apps_observed": [
                 {
                     "name": "Codex.app",
-                    "path": "/Users/dmcgregsauce/Applications/Codex.app",
+                    "path": "/Users/example/Applications/Codex.app",
                     "bundle_id": "com.openai.codex",
                     "heiwa_use": "codex_app_capability_and_session_surface"
                 }
