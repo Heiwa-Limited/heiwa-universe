@@ -204,7 +204,11 @@ jobs:
     # context name, so it must always report a conclusion — including when the
     # lanes it guards fail, are cancelled, or are skipped.
     name: Rust Source Policy
-    needs: [rust-tests, rust-static]
+    # desktop-app belongs here: it compiles, tests, lints, and release-builds
+    # the crate a user actually double-clicks. Left out of the aggregate, a
+    # broken desktop lane merges while the only required Rust context stays
+    # green.
+    needs: [rust-tests, rust-static, desktop-app]
     if: always()
     runs-on: blacksmith-4vcpu-ubuntu-2404
     timeout-minutes: 1
@@ -213,9 +217,10 @@ jobs:
         env:
           RUST_TESTS_RESULT: ${{ needs.rust-tests.result }}
           RUST_STATIC_RESULT: ${{ needs.rust-static.result }}
+          DESKTOP_APP_RESULT: ${{ needs.desktop-app.result }}
         run: |
           set -euo pipefail
-          echo "rust-tests=$RUST_TESTS_RESULT rust-static=$RUST_STATIC_RESULT"
+          echo "rust-tests=$RUST_TESTS_RESULT rust-static=$RUST_STATIC_RESULT desktop-app=$DESKTOP_APP_RESULT"
           status=0
           if [[ "$RUST_TESTS_RESULT" != "success" ]]; then
             echo "Rust Tests did not succeed" >&2
@@ -223,6 +228,10 @@ jobs:
           fi
           if [[ "$RUST_STATIC_RESULT" != "success" ]]; then
             echo "Rust Static Checks did not succeed" >&2
+            status=1
+          fi
+          if [[ "$DESKTOP_APP_RESULT" != "success" ]]; then
+            echo "Desktop App did not succeed" >&2
             status=1
           fi
           if (( status != 0 )); then

@@ -122,13 +122,17 @@ Rust promotion lane, bounded at 20 minutes per job:
   `cargo test --workspace --exclude heiwa-desktop --locked --no-default-features`
 - `Rust Static Checks` — `cargo fmt --check`, Clippy with `-D warnings`, and
   `cargo machete`
+- `Desktop App` — the `heiwa-desktop` crate the workspace jobs exclude: frontend
+  typecheck and tests, crate tests, Clippy with `-D warnings`, and a release build
 
 Compiling Rust cannot be sub-minute, so this lane is bounded rather than fast; the
 sccache Actions cache seeded on protected `main` keeps the usual PR run to a few
-minutes. Both lanes report through `Rust Source Policy`, the aggregate status
+minutes. All three jobs report through `Rust Source Policy`, the aggregate status
 context that `main` branch protection requires — it is pinned by name in branch
 protection, so it must keep reporting even if the jobs behind it are renamed or
-re-sharded.
+re-sharded. The aggregate must both declare a lane in `needs` and compare its
+result: declaring it alone only makes the aggregate wait, and a failing lane
+would still merge behind a green required check.
 
 Runner policy: `scripts/check_ci_job_deadlines.rb` enforces both a hard deadline
 and a runner label proven to claim jobs in this repository. A deadline alone is

@@ -43,6 +43,7 @@ pub fn run() {
             );
 
             let (decision, owned) = runtime_supervisor::ensure_runtime(
+                proxy::runtime_identity_confirmed,
                 proxy::runtime_is_reachable,
                 runtime_supervisor::spawn_runtime,
                 binary,

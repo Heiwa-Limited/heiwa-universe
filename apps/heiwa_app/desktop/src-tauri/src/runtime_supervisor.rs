@@ -36,15 +36,19 @@ pub enum SupervisorDecision {
 /// What the app knows at startup.
 #[derive(Debug, Clone)]
 pub struct SupervisorFacts {
-    /// Whether something already answers on the runtime port.
-    pub runtime_reachable: bool,
+    /// Whether a *Heiwa* runtime already serves on the runtime port.
+    ///
+    /// Identity, not liveness: an unrelated listener holding the port is not
+    /// something to adopt, it is something the bundled runtime has to be
+    /// started in spite of.
+    pub heiwa_runtime_serving: bool,
     /// The runtime binary, if one was found.
     pub binary: Option<PathBuf>,
 }
 
 impl SupervisorDecision {
     pub fn decide(facts: &SupervisorFacts) -> Self {
-        if facts.runtime_reachable {
+        if facts.heiwa_runtime_serving {
             return SupervisorDecision::Adopt;
         }
         match &facts.binary {
@@ -157,15 +161,23 @@ impl Drop for OwnedRuntime {
 
 /// Bring a runtime up, or adopt one already running.
 ///
+/// Two probes, because they answer different questions. `identifies_as_heiwa`
+/// decides adoption and must prove the process on the port is a Heiwa runtime
+/// this app can drive. `listening` is the cheap liveness poll used only while
+/// a child *this* app started takes the port; it is never sufficient on its
+/// own, so readiness still confirms identity before the window is told the
+/// runtime is up.
+///
 /// Returns the decision taken and, when this app started the runtime, the
 /// handle that stops it again.
 pub fn ensure_runtime(
-    reachable: impl Fn() -> bool,
+    identifies_as_heiwa: impl Fn() -> bool,
+    listening: impl Fn() -> bool,
     spawn: impl FnOnce(&std::path::Path) -> std::io::Result<Child>,
     binary: Option<PathBuf>,
 ) -> (SupervisorDecision, Option<OwnedRuntime>) {
     let decision = SupervisorDecision::decide(&SupervisorFacts {
-        runtime_reachable: reachable(),
+        heiwa_runtime_serving: identifies_as_heiwa(),
         binary,
     });
 
@@ -186,10 +198,14 @@ pub fn ensure_runtime(
     };
 
     // Wait for it to actually serve. Returning before the port answers would
-    // make the first surface load fail on a runtime that was merely slow.
+    // make the first surface load fail on a runtime that was merely slow. The
+    // cheap TCP poll gates the expensive identity check, and identity is what
+    // decides readiness: if something else holds the port, our child never
+    // takes it, and reporting ready on the foreign listener's TCP answer would
+    // hand the window a server that cannot serve it.
     let deadline = Instant::now() + READY_TIMEOUT;
     while Instant::now() < deadline {
-        if reachable() {
+        if listening() && identifies_as_heiwa() {
             return (
                 decision,
                 Some(OwnedRuntime {
@@ -200,15 +216,23 @@ pub fn ensure_runtime(
         std::thread::sleep(POLL_INTERVAL);
     }
 
-    // Started but never answered. Keep the handle so the stuck child is
-    // still cleaned up rather than left behind holding the evidence lease.
+    // Started but never answered as a Heiwa runtime. Keep the handle so the
+    // stuck child is still cleaned up rather than left behind holding the
+    // evidence lease.
+    let detail = if listening() {
+        format!(
+            "the runtime did not take the port within {}s; something else is listening on it and \
+             is not a Heiwa runtime",
+            READY_TIMEOUT.as_secs()
+        )
+    } else {
+        format!(
+            "the runtime started but did not answer within {}s",
+            READY_TIMEOUT.as_secs()
+        )
+    };
     (
-        SupervisorDecision::Unavailable {
-            detail: format!(
-                "the runtime started but did not answer within {}s",
-                READY_TIMEOUT.as_secs()
-            ),
-        },
+        SupervisorDecision::Unavailable { detail },
         Some(OwnedRuntime {
             child: Mutex::new(Some(child)),
         }),
@@ -228,9 +252,9 @@ pub fn spawn_runtime(binary: &std::path::Path) -> std::io::Result<Child> {
 mod tests {
     use super::*;
 
-    fn facts(reachable: bool, binary: Option<&str>) -> SupervisorFacts {
+    fn facts(heiwa_runtime_serving: bool, binary: Option<&str>) -> SupervisorFacts {
         SupervisorFacts {
-            runtime_reachable: reachable,
+            heiwa_runtime_serving,
             binary: binary.map(PathBuf::from),
         }
     }
@@ -320,6 +344,7 @@ mod tests {
     fn an_adopted_runtime_is_not_owned_and_so_is_never_stopped() {
         let (decision, owned) = ensure_runtime(
             || true,
+            || true,
             |_| panic!("must not spawn over a live runtime"),
             Some(PathBuf::from("/usr/local/bin/heiwa")),
         );
@@ -332,10 +357,57 @@ mod tests {
     }
 
     #[test]
+    fn a_listening_port_is_not_adoption_evidence_and_does_not_signal_readiness() {
+        // A port answering is not a runtime existing. Adoption keyed on a bare
+        // TCP connect meant an unrelated service on 7474 left the bundled
+        // runtime unstarted and the window bound to a server that could not
+        // answer a single Heiwa call. Readiness has the same flaw in reverse:
+        // the socket binds before the runtime can serve.
+        //
+        // So: something is listening throughout, and nothing identifies as
+        // Heiwa until the third probe. The bundled runtime must still start,
+        // and readiness must wait for identity.
+        let identity_probes = std::cell::Cell::new(0_u32);
+        let spawned = std::cell::Cell::new(false);
+        let (decision, owned) = ensure_runtime(
+            || {
+                identity_probes.set(identity_probes.get() + 1);
+                identity_probes.get() > 2
+            },
+            || true,
+            |_| {
+                spawned.set(true);
+                Command::new(if cfg!(windows) { "cmd" } else { "sleep" })
+                    .args(if cfg!(windows) {
+                        vec!["/c", "timeout", "60"]
+                    } else {
+                        vec!["60"]
+                    })
+                    .spawn()
+            },
+            Some(PathBuf::from("/Applications/heiwa")),
+        );
+
+        assert!(spawned.get(), "the bundled runtime must still be started");
+        assert_eq!(
+            decision,
+            SupervisorDecision::Spawn {
+                binary: PathBuf::from("/Applications/heiwa")
+            }
+        );
+        assert!(
+            identity_probes.get() > 2,
+            "identity, not the open port, must decide adoption and readiness"
+        );
+        owned.expect("a spawned runtime is owned").shutdown();
+    }
+
+    #[test]
     fn a_runtime_that_never_answers_is_reported_and_still_cleaned_up() {
         // Started but wedged. Reporting without the handle would leak a
         // child that holds the evidence lease and blocks the next start.
         let (decision, owned) = ensure_runtime(
+            || false,
             || false,
             |_| {
                 Command::new(if cfg!(windows) { "cmd" } else { "sleep" })
@@ -357,6 +429,7 @@ mod tests {
     #[test]
     fn a_binary_that_cannot_be_started_is_reported_not_panicked() {
         let (decision, owned) = ensure_runtime(
+            || false,
             || false,
             |_| Err(std::io::Error::new(std::io::ErrorKind::NotFound, "nope")),
             Some(PathBuf::from("/does/not/exist/heiwa")),
