@@ -50,7 +50,21 @@ pub struct AccountHealth {
 
 impl AccountHealth {
     pub fn project(account: &ProviderAccount) -> Self {
-        let (state, detail) = classify(account);
+        Self::project_with(account, |binary| crate::resolve_command(binary).is_some())
+    }
+
+    /// Project against an explicit "can this binary be run" probe.
+    ///
+    /// Production answers that from `PATH`. Tests must state the answer
+    /// instead of inheriting it: whether the developer's machine happens to
+    /// have `ollama` installed decides which branch of `classify` runs, so a
+    /// test asserting the behaviour behind an *installed* binary passes on a
+    /// machine that has it and fails on a CI runner that does not.
+    pub(crate) fn project_with(
+        account: &ProviderAccount,
+        is_installed: impl Fn(&str) -> bool,
+    ) -> Self {
+        let (state, detail) = classify(account, is_installed);
         Self {
             account_id: account.account_id.clone(),
             provider: account.provider.clone(),
@@ -63,13 +77,16 @@ impl AccountHealth {
     }
 }
 
-fn classify(account: &ProviderAccount) -> (HealthState, String) {
+fn classify(
+    account: &ProviderAccount,
+    is_installed: impl Fn(&str) -> bool,
+) -> (HealthState, String) {
     // An account is only as available as the thing that executes the turn,
     // whatever the stored status says — the binary can disappear between
     // runs, and for a local runtime the daemon that answers discovery is not
     // the same thing as the binary the adapter drives.
     if let Some(binary) = execution_binary(account) {
-        if crate::resolve_command(binary).is_none() {
+        if !is_installed(binary) {
             return (
                 HealthState::NotInstalled,
                 format!("`{binary}` is not installed or not on PATH"),
@@ -331,6 +348,12 @@ mod tests {
         assert!(report.detail.contains("connection refused"));
     }
 
+    /// The installed/missing answer is stated, never inherited from the host:
+    /// `ollama` present on a developer machine and absent on a CI runner sends
+    /// `classify` down different branches for the same account.
+    const INSTALLED: fn(&str) -> bool = |_| true;
+    const MISSING: fn(&str) -> bool = |_| false;
+
     #[test]
     fn a_disconnected_local_runtime_is_unreachable() {
         let mut account = account(
@@ -341,7 +364,7 @@ mod tests {
             },
         );
         account.status = AccountStatus::Disconnected;
-        let report = AccountHealth::project(&account);
+        let report = AccountHealth::project_with(&account, INSTALLED);
         assert_eq!(report.state, HealthState::Unreachable);
         assert!(report.detail.contains("11434"));
     }
@@ -356,7 +379,7 @@ mod tests {
             },
         );
         account.status = AccountStatus::Disconnected;
-        let report = AccountHealth::project(&account);
+        let report = AccountHealth::project_with(&account, MISSING);
         assert_eq!(report.state, HealthState::NotInstalled);
         assert!(report.detail.contains("definitely-not-installed-xyz"));
         assert!(!report.routable);
@@ -378,7 +401,7 @@ mod tests {
         );
         account.status = AccountStatus::Connected;
 
-        let report = AccountHealth::project(&account);
+        let report = AccountHealth::project_with(&account, MISSING);
 
         assert_eq!(report.state, HealthState::NotInstalled);
         assert!(!report.routable);

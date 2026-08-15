@@ -3217,7 +3217,6 @@ dependencies = [
  "heiwa-core",
  "heiwa-protocol",
  "heiwa-provider",
- "heiwa_config",
  "serde",
  "serde_json",
  "tempfile",
