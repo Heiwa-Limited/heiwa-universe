@@ -24,7 +24,9 @@ COMPILE_LANE_DEADLINE_MINUTES = 20
 # desktop-app compiles the shipped app crate and its release build, so it
 # belongs in the compile lane rather than the sub-minute feedback lane.
 COMPILE_LANES = %w[rust-tests rust-static desktop-app].freeze
-PROVEN_RUNNER_LABELS = %w[ubuntu-latest].freeze
+# `blacksmith-4vcpu-ubuntu-2404` is proven: every job in CI run 31914594311
+# (PR #68) was claimed by a Blacksmith runner within ~10s of being queued.
+PROVEN_RUNNER_LABELS = %w[ubuntu-latest blacksmith-4vcpu-ubuntu-2404].freeze
 
 path = ARGV.fetch(0, ".github/workflows/ci.yml")
 workflow = YAML.safe_load(File.read(path), aliases: true)

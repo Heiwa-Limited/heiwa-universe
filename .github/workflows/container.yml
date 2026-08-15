@@ -18,7 +18,7 @@ concurrency:
 jobs:
   metadata:
     name: Resolve Container Metadata
-    runs-on: ubuntu-latest
+    runs-on: blacksmith-4vcpu-ubuntu-2404
     outputs:
       tag: ${{ steps.meta.outputs.tag }}
       version: ${{ steps.meta.outputs.version }}
@@ -56,7 +56,7 @@ jobs:
   build:
     name: Build and Push Container Image
     needs: metadata
-    runs-on: ubuntu-latest
+    runs-on: blacksmith-4vcpu-ubuntu-2404
     permissions:
       contents: read
       packages: write
@@ -78,8 +78,8 @@ jobs:
         run: >
           bash packaging/scripts/stage_release_container.sh
           "${{ needs.metadata.outputs.tag }}" .artifacts/container
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3
+      - name: Setup Blacksmith Builder
+        uses: useblacksmith/setup-docker-builder@9309da73a81f66976a6d750572e221508b1e2682 # v1
       - name: Login to GHCR
         uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3
         with:
@@ -93,7 +93,7 @@ jobs:
           owner_lower="$(echo '${{ github.repository_owner }}' | tr '[:upper:]' '[:lower:]')"
           echo "image=ghcr.io/${owner_lower}/heiwa" >> "$GITHUB_OUTPUT"
       - name: Build and push
-        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6
+        uses: useblacksmith/build-push-action@9b0579bbec7a6cad2f171596c57e7ac1e7658850 # v2
         with:
           context: .artifacts/container
           file: packaging/apps/heiwa_shell/Dockerfile.release
@@ -108,5 +108,3 @@ jobs:
             ${{ steps.img.outputs.image }}:latest
           provenance: mode=max
           sbom: true
-          cache-from: type=gha,scope=heiwa-container-amd64
-          cache-to: type=gha,mode=max,scope=heiwa-container-amd64
