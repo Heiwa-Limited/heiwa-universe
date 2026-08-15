@@ -157,11 +157,10 @@ Be exact about what is actually wired. Integration maturity is not uniform.
 | Service | Role | Status |
 | --- | --- | --- |
 | GitHub | Source, CI, releases, distribution | Live |
-| GitHub-hosted runners | Promotion and certification gates | Live, proven |
+| Blacksmith runners | Promotion and certification gates | Live, proven for `blacksmith-4vcpu-ubuntu-2404` (run 31914594311); other labels unproven |
 | sccache via Actions cache | Rust compiler cache, seeded on `main` | Live |
 | Greptile | Automated PR review | Live |
 | Cloudflare | DNS and the public installer edge | Live, edge only — never a second binary authority |
-| Blacksmith runners | CI acceleration | **Not proven.** App installed org-wide; no runner has claimed a job in this repository. Canary first. |
 | Blacksmith testbox | Linux inner loop for agents | Not wired |
 
 ## Runner promotion protocol

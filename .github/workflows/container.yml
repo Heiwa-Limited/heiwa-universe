@@ -79,7 +79,7 @@ jobs:
           bash packaging/scripts/stage_release_container.sh
           "${{ needs.metadata.outputs.tag }}" .artifacts/container
       - name: Setup Blacksmith Builder
-        uses: useblacksmith/setup-docker-builder@v1
+        uses: useblacksmith/setup-docker-builder@9309da73a81f66976a6d750572e221508b1e2682 # v1
       - name: Login to GHCR
         uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3
         with:
@@ -93,7 +93,7 @@ jobs:
           owner_lower="$(echo '${{ github.repository_owner }}' | tr '[:upper:]' '[:lower:]')"
           echo "image=ghcr.io/${owner_lower}/heiwa" >> "$GITHUB_OUTPUT"
       - name: Build and push
-        uses: useblacksmith/build-push-action@v2
+        uses: useblacksmith/build-push-action@9b0579bbec7a6cad2f171596c57e7ac1e7658850 # v2
         with:
           context: .artifacts/container
           file: packaging/apps/heiwa_shell/Dockerfile.release

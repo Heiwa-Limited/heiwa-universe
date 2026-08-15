@@ -133,10 +133,11 @@ re-sharded.
 Runner policy: `scripts/check_ci_job_deadlines.rb` enforces both a hard deadline
 and a runner label proven to claim jobs in this repository. A deadline alone is
 not enough — `timeout-minutes` bounds a *running* job and does not bound queue
-time, so a job requesting a label no runner provides sits queued for hours. The
-`blacksmith-*` labels are not proven here yet: the app is installed at the
-organization, but no Blacksmith runner has ever claimed a job in this repository.
-Prove a label claims a job before adding it to `PROVEN_RUNNER_LABELS`.
+time, so a job requesting a label no runner provides sits queued for hours.
+`blacksmith-4vcpu-ubuntu-2404` is proven: every `ci.yml` job was claimed by a
+Blacksmith runner within ~10s of being queued in run 31914594311. Every other
+`blacksmith-*` label remains unproven here. Prove a label claims a job before
+adding it to `PROVEN_RUNNER_LABELS`.
 
 Protected `main` is the full release certification gate:
 
