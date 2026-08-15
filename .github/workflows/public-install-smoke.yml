@@ -21,7 +21,7 @@ jobs:
       matrix:
         include:
           - name: linux-x86_64
-            runner: ubuntu-latest
+            runner: blacksmith-4vcpu-ubuntu-2404
           - name: macos-aarch64
             runner: macos-26
     steps:
