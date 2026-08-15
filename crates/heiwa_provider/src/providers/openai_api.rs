@@ -199,20 +199,30 @@ impl OpenAiStream {
 
 /// Chat-capable model ids. The list endpoint returns embeddings, audio, and
 /// image models too, and routing must not offer those as chat routes.
+///
+/// Excluding known non-chat modalities, rather than allow-listing known chat
+/// families, is deliberate. An allowlist of `gpt-*`/`o1`/`o3`/`o4` silently
+/// hides every future family and every fine-tune (`ft:...`) — a model the
+/// user is paying for simply never appears, with nothing to indicate why.
+/// Admitting an unknown id is the recoverable error: it surfaces as a
+/// provider error on use, which the user can see and act on.
 fn is_chat_model(id: &str) -> bool {
+    const NON_CHAT_MARKERS: &[&str] = &[
+        "embedding",
+        "whisper",
+        "tts",
+        "dall-e",
+        "moderation",
+        "realtime",
+        "audio",
+        "image",
+        "transcribe",
+        "search",
+        "rerank",
+        "codex-mini",
+    ];
     let id = id.to_ascii_lowercase();
-    if id.contains("embedding")
-        || id.contains("whisper")
-        || id.contains("tts")
-        || id.contains("dall-e")
-        || id.contains("moderation")
-        || id.contains("realtime")
-        || id.contains("audio")
-        || id.contains("image")
-    {
-        return false;
-    }
-    id.starts_with("gpt-") || id.starts_with("o1") || id.starts_with("o3") || id.starts_with("o4")
+    !NON_CHAT_MARKERS.iter().any(|marker| id.contains(marker))
 }
 
 fn capability_class(id: &str) -> u8 {
@@ -505,5 +515,31 @@ mod tests {
             .iter()
             .all(|model| model.inventory_truth == InventoryTruth::Verified));
         assert!(models.iter().all(|model| model.provider == "openai"));
+    }
+
+    #[test]
+    fn an_unrecognized_model_family_is_still_offered() {
+        // The previous allowlist admitted only gpt-*/o1/o3/o4, so the next
+        // family a user gained access to would silently never appear.
+        assert!(is_chat_model("o5-preview"));
+        assert!(is_chat_model("ft:gpt-4o:acme::9xYz"));
+        assert!(is_chat_model("some-future-model-2027"));
+    }
+
+    #[test]
+    fn other_modalities_are_still_kept_out_of_chat_routing() {
+        for id in [
+            "text-embedding-3-large",
+            "whisper-1",
+            "tts-1-hd",
+            "dall-e-3",
+            "omni-moderation-latest",
+            "gpt-4o-realtime-preview",
+            "gpt-4o-audio-preview",
+            "gpt-image-1",
+            "gpt-4o-transcribe",
+        ] {
+            assert!(!is_chat_model(id), "{id} is not a chat route");
+        }
     }
 }

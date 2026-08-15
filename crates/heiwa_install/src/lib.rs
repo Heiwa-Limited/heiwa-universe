@@ -120,6 +120,17 @@ pub enum InstallOutcome {
     Plugin(Box<InstalledPlugin>),
 }
 
+/// The runtime root.
+///
+/// # Panics
+///
+/// Panics when no per-user root can be resolved — none of `HEIWA_HOME`,
+/// `HEIWA_STATE_DIR`, `HOME`, or `USERPROFILE` is set and the platform
+/// reports no home directory. Install and doctor flows treat that as
+/// unrecoverable, because the alternative is provisioning a runtime tree
+/// wherever the process happened to start. Callers that must not panic —
+/// libraries, embedders, anything running under an empty environment — use
+/// [`try_get_heiwa_dir`] instead.
 pub fn get_heiwa_dir() -> PathBuf {
     try_get_heiwa_dir().expect("HOME, USERPROFILE, or HEIWA_HOME must be set")
 }
