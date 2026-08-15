@@ -63,16 +63,66 @@ pub fn routable_api_key_account(
     registry: &AccountRegistry,
     drex_provider: &str,
 ) -> Option<ProviderAccount> {
+    routable_api_key_account_for(registry, drex_provider, "")
+}
+
+/// Pick the account that can actually serve `model_id`.
+///
+/// A user may hold several keys for one vendor with different inventories —
+/// a work seat and a personal seat, or a key whose org has no Opus access.
+/// Taking the first routable account sends the turn to a seat that may not
+/// serve the routed model. An account that lists the model wins; otherwise
+/// any healthy account does, because an empty inventory means "not probed",
+/// not "cannot serve".
+pub fn routable_api_key_account_for(
+    registry: &AccountRegistry,
+    drex_provider: &str,
+    model_id: &str,
+) -> Option<ProviderAccount> {
     let registry_provider = registry_provider_for(drex_provider)?;
-    registry
+    let candidates: Vec<&ProviderAccount> = registry
         .accounts
         .iter()
-        .find(|account| {
+        .filter(|account| {
             account.provider == registry_provider
                 && matches!(account.credential, Credential::ApiKey)
                 && AccountHealth::project(account).routable
         })
-        .cloned()
+        .collect();
+
+    candidates
+        .iter()
+        .find(|account| {
+            account
+                .models
+                .iter()
+                .any(|model| model.provider_model_id == model_id || model.model_id == model_id)
+        })
+        .or(candidates.first())
+        .map(|account| (*account).clone())
+}
+
+/// Environment variable that retargets a provider's API base URL.
+///
+/// The provider's own published name, so a machine already pointed at a
+/// gateway, proxy, or self-hosted endpoint for that vendor's SDK works
+/// without extra Heiwa configuration.
+fn base_url_env_var(canonical_provider: &str) -> Option<&'static str> {
+    match canonical_provider {
+        "claude" => Some("ANTHROPIC_BASE_URL"),
+        "codex" => Some("OPENAI_BASE_URL"),
+        "gemini" => Some("GEMINI_BASE_URL"),
+        _ => None,
+    }
+}
+
+/// Base URL override for a provider, from the environment.
+fn env_base_url(canonical_provider: &str) -> Option<String> {
+    let name = base_url_env_var(canonical_provider)?;
+    std::env::var(name)
+        .ok()
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty())
 }
 
 /// Resolve an adapter for a provider using the user's own registry.
@@ -91,7 +141,7 @@ pub fn resolve_adapter_with(
     model_id: &str,
     base_url_override: Option<&str>,
 ) -> Result<Arc<dyn ProviderAdapter>, String> {
-    if let Some(account) = routable_api_key_account(registry, provider) {
+    if let Some(account) = routable_api_key_account_for(registry, provider, model_id) {
         let models: Vec<String> = account
             .models
             .iter()
@@ -99,7 +149,12 @@ pub fn resolve_adapter_with(
             .collect();
         let account_id = account.account_id.clone();
 
-        match canonical_provider_id(provider) {
+        let canonical = canonical_provider_id(provider);
+        let from_env = env_base_url(canonical);
+        let override_url = base_url_override.map(str::to_string).or(from_env);
+        let base_url_override = override_url.as_deref();
+
+        match canonical {
             "claude" => {
                 let base =
                     base_url_override.unwrap_or(crate::providers::anthropic_api::DEFAULT_BASE_URL);
@@ -191,6 +246,82 @@ mod tests {
         for provider in ["claude", "codex", "gemini"] {
             assert!(routable_api_key_account(&registry, provider).is_none());
         }
+    }
+
+    fn with_models(mut account: ProviderAccount, model_ids: &[&str]) -> ProviderAccount {
+        account.models = model_ids
+            .iter()
+            .map(|id| crate::registry::DetectedModel {
+                model_id: id.to_string(),
+                provider_model_id: id.to_string(),
+                provider: account.provider.clone(),
+                account_id: account.account_id.clone(),
+                rate_group: account.rate_group.clone(),
+                capability_class: 4,
+                context_window: 200_000,
+                supports_streaming: true,
+                supports_tools: true,
+                supports_vision: false,
+                supports_audio: false,
+                cost_per_1k_input: 0.0,
+                cost_per_1k_output: 0.0,
+                inventory_truth: crate::registry::InventoryTruth::Verified,
+            })
+            .collect();
+        account
+    }
+
+    fn named(account_id: &str, provider: &str) -> ProviderAccount {
+        let mut account = api_key_account(provider, AccountStatus::Connected);
+        account.account_id = account_id.to_string();
+        account
+    }
+
+    #[test]
+    fn the_account_that_serves_the_model_wins_over_registry_order() {
+        // Two keys for the same vendor with different inventories — a work key
+        // and a personal key. Taking the first would send an Opus turn to a
+        // seat that cannot serve Opus.
+        let registry = AccountRegistry {
+            accounts: vec![
+                with_models(named("anthropic-work", "anthropic"), &["claude-haiku-4-5"]),
+                with_models(named("anthropic-personal", "anthropic"), &["claude-opus-5"]),
+            ],
+        };
+
+        let account =
+            routable_api_key_account_for(&registry, "claude", "claude-opus-5").expect("account");
+
+        assert_eq!(account.account_id, "anthropic-personal");
+    }
+
+    #[test]
+    fn an_unknown_model_still_routes_to_a_healthy_account() {
+        // Inventory may be empty (never probed) or the caller may pass a model
+        // this crate has not seen. Refusing to route would turn a working key
+        // into a dead end.
+        let registry = AccountRegistry {
+            accounts: vec![with_models(
+                named("anthropic-work", "anthropic"),
+                &["claude-haiku-4-5"],
+            )],
+        };
+
+        let account = routable_api_key_account_for(&registry, "claude", "some-unlisted-model")
+            .expect("account");
+
+        assert_eq!(account.account_id, "anthropic-work");
+    }
+
+    #[test]
+    fn a_model_served_only_by_an_unhealthy_account_does_not_resurrect_it() {
+        let mut broken = with_models(named("anthropic-work", "anthropic"), &["claude-opus-5"]);
+        broken.status = AccountStatus::Error("Invalid API key".to_string());
+        let registry = AccountRegistry {
+            accounts: vec![broken],
+        };
+
+        assert!(routable_api_key_account_for(&registry, "claude", "claude-opus-5").is_none());
     }
 
     #[test]

@@ -203,6 +203,12 @@ impl AccountRegistry {
         self.accounts.iter().find(|a| a.account_id == account_id)
     }
 
+    pub fn get_mut(&mut self, account_id: &str) -> Option<&mut ProviderAccount> {
+        self.accounts
+            .iter_mut()
+            .find(|a| a.account_id == account_id)
+    }
+
     /// Add or update an account.  If an account with the same `account_id`
     /// exists, it is replaced.
     pub fn upsert(&mut self, account: ProviderAccount) {
@@ -275,7 +281,47 @@ pub fn store_secret(account_id: &str, secret: &str) -> anyhow::Result<()> {
 /// Returns `None` if the account has no stored secret or the Keychain
 /// is not available.
 pub fn resolve_secret(account_id: &str) -> Option<String> {
-    crate::keychain::load_secret(account_id).ok()
+    resolve_secret_with(
+        account_id,
+        |id| crate::keychain::load_secret(id).ok(),
+        |name| std::env::var(name).ok(),
+    )
+}
+
+/// The conventional environment variables that carry a provider's API key.
+///
+/// These are the provider's own published names, so a machine already set up
+/// for that vendor's SDK works without re-entering the key.
+fn key_env_vars(provider: &str) -> &'static [&'static str] {
+    match provider {
+        "anthropic" => &["ANTHROPIC_API_KEY"],
+        "openai" => &["OPENAI_API_KEY"],
+        "google" => &["GEMINI_API_KEY", "GOOGLE_API_KEY"],
+        "openrouter" => &["OPENROUTER_API_KEY"],
+        _ => &[],
+    }
+}
+
+/// Resolve an account's secret from an explicit store and environment.
+///
+/// Stored secret first: adding a key is a stated intent, while an inherited
+/// environment variable is ambient. The environment fallback exists because
+/// a keychain is a desktop OS feature — a container, a CI runner, or a
+/// headless server has none, and BYOK has to work there too.
+pub fn resolve_secret_with(
+    account_id: &str,
+    stored: impl Fn(&str) -> Option<String>,
+    env: impl Fn(&str) -> Option<String>,
+) -> Option<String> {
+    if let Some(secret) = stored(account_id) {
+        return Some(secret);
+    }
+    // Account ids are minted as `{provider}-...`, so the prefix names the
+    // vendor whose variable applies.
+    let provider = account_id.split('-').next()?;
+    key_env_vars(provider)
+        .iter()
+        .find_map(|name| env(name).filter(|value| !value.trim().is_empty()))
 }
 
 /// Remove the stored secret for an account.
@@ -538,5 +584,63 @@ mod tests {
         assert!(reg.remove("to-remove"));
         assert!(!reg.remove("to-remove"));
         assert_eq!(reg.accounts.len(), 0);
+    }
+
+    #[test]
+    fn an_environment_key_serves_a_machine_with_no_keychain() {
+        // A Linux container, a CI runner, a headless server: no OS keychain
+        // exists, and BYOK still has to work. The provider's own conventional
+        // variable is the credential of last resort.
+        let env = |name: &str| match name {
+            "ANTHROPIC_API_KEY" => Some("sk-ant-from-env".to_string()),
+            _ => None,
+        };
+        assert_eq!(
+            resolve_secret_with("anthropic-api-1", |_| None, env),
+            Some("sk-ant-from-env".to_string())
+        );
+    }
+
+    #[test]
+    fn a_stored_secret_wins_over_the_environment() {
+        // An explicitly-added key is the user's stated intent; an inherited
+        // environment variable is ambient.
+        let env = |name: &str| (name == "ANTHROPIC_API_KEY").then(|| "sk-ant-env".to_string());
+        assert_eq!(
+            resolve_secret_with(
+                "anthropic-api-1",
+                |_| Some("sk-ant-stored".to_string()),
+                env
+            ),
+            Some("sk-ant-stored".to_string())
+        );
+    }
+
+    #[test]
+    fn each_provider_reads_its_own_conventional_variables() {
+        let env = |name: &str| match name {
+            "OPENAI_API_KEY" => Some("sk-openai".to_string()),
+            "GEMINI_API_KEY" => Some("gem".to_string()),
+            "OPENROUTER_API_KEY" => Some("or".to_string()),
+            _ => None,
+        };
+        assert_eq!(
+            resolve_secret_with("openai-api-1", |_| None, env),
+            Some("sk-openai".to_string())
+        );
+        assert_eq!(
+            resolve_secret_with("google-api-1", |_| None, env),
+            Some("gem".to_string())
+        );
+        assert_eq!(
+            resolve_secret_with("openrouter-api-1", |_| None, env),
+            Some("or".to_string())
+        );
+    }
+
+    #[test]
+    fn an_unknown_account_prefix_reads_no_environment_variable() {
+        let env = |_: &str| Some("leaked".to_string());
+        assert_eq!(resolve_secret_with("mystery-api-1", |_| None, env), None);
     }
 }

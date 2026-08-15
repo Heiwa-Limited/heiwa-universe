@@ -6,10 +6,12 @@ set -euo pipefail
 # Deterministic checks:
 #   1. heiwa-provider unit tests pass (direct-API adapters included)
 #   2. direct-API adapter modules exist for the three CLI-dependent families
-#   3. fresh-install harness passes: no provider CLI on PATH + one API key
-#      (mock provider server) completes an operator turn end to end
-#   4. zero-provider state is usable: turn submission with no accounts yields
-#      an actionable blocker, not a crash (asserted inside the harness)
+#   3. fresh-install harness passes: the shipped `heiwa` binary, run with no
+#      provider CLI reachable, no keychain, no local runtime, and one API key,
+#      completes a turn against a loopback mock and prints the model's text
+#   4. zero-provider state is usable: no accounts yields actionable guidance,
+#      not a crash (asserted inside the harness)
+#   5. adapter selection is not duplicated in the shell binary
 #
 # Local-only; the mock provider server binds loopback. No external network.
 
@@ -37,25 +39,42 @@ else
 fi
 
 # ── 3+4. Fresh-install harness ──────────────────────────────────────────────
-# The harness itself scrubs PATH of provider CLIs, uses a temp HEIWA_HOME,
-# registers one API-key account against a loopback mock provider, and drives
-# a full operator turn. It also asserts the zero-account blocker path.
+# The harness spawns the built `heiwa` binary with an emptied PATH, a temp
+# state root holding one API-key account, the key in the environment (no
+# keychain), and both the provider and the local runtime pointed at loopback.
+# It asserts the model's text reaches stdout and that the request carried the
+# user's key. It also asserts the zero-account guidance path.
 if [[ -f "apps/heiwa_shell/tests/fresh_install.rs" ]]; then
   ok "fresh-install harness present"
-  if cargo test -p heiwa-shell --test fresh_install --quiet >/tmp/l1_fresh_install.log 2>&1; then
-    ok "fresh-install harness passes (no CLI on PATH + one API key → full turn)"
+  # The harness drives the binary, so it must exist before the test runs.
+  if cargo build -p heiwa-shell --bin heiwa --quiet >/tmp/l1_build.log 2>&1; then
+    if cargo test -p heiwa-shell --test fresh_install --quiet >/tmp/l1_fresh_install.log 2>&1; then
+      ok "fresh-install harness passes (no CLI, no keychain, one API key → full turn)"
+    else
+      fail_msg "fresh-install harness failed (see /tmp/l1_fresh_install.log)"
+    fi
   else
-    fail_msg "fresh-install harness failed (see /tmp/l1_fresh_install.log)"
+    fail_msg "heiwa binary did not build (see /tmp/l1_build.log)"
   fi
 else
   fail_msg "fresh-install harness missing: apps/heiwa_shell/tests/fresh_install.rs"
 fi
 
-# ── 5. Adapter selection and health are shared, not shell-local ─────────────
-if [[ -f "crates/heiwa_provider/src/routing.rs" && -f "crates/heiwa_provider/src/health.rs" ]]; then
-  ok "adapter selection and account health live in the provider crate"
-else
+# ── 5. Adapter selection is not duplicated in the shell ─────────────────────
+# A second provider-alias table in the shell is what broke L1 the first time:
+# it never mapped vendor names onto route names, so every direct-API model was
+# filtered out before routing and a valid API key reported "no working
+# adapters". File existence proves nothing here — the property is that the
+# shell has no alias table of its own.
+if [[ ! -f "crates/heiwa_provider/src/routing.rs" || ! -f "crates/heiwa_provider/src/health.rs" ]]; then
   fail_msg "expected crates/heiwa_provider/src/{routing,health}.rs"
+elif grep -nE '^[[:space:]]*(pub[[:space:]]+)?(fn[[:space:]]+canonical_provider_id|const[[:space:]]+SUPPORTED_ADAPTER_PROVIDERS)' \
+     apps/heiwa_shell/src/main.rs >/tmp/l1_shell_alias.log 2>&1; then
+  fail_msg "the shell defines its own provider alias table (see /tmp/l1_shell_alias.log); route through heiwa_provider::routing"
+elif ! grep -q 'heiwa_provider::routing::' apps/heiwa_shell/src/main.rs; then
+  fail_msg "the shell does not use heiwa_provider::routing for adapter selection"
+else
+  ok "adapter selection is shared: the shell has no provider alias table of its own"
 fi
 
 if (( fail != 0 )); then

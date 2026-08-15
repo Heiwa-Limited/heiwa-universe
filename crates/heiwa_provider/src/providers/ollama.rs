@@ -55,7 +55,9 @@ impl ProviderAdapter for OllamaCliAdapter {
             .collect::<Vec<_>>()
             .join("\n");
 
-        let mut cmd = Command::new("ollama");
+        // Resolve like every other CLI adapter: the runtime knows install
+        // locations a bare PATH lookup misses.
+        let mut cmd = Command::new(crate::resolve_command_or_name("ollama"));
         crate::adapter::configure_cli_command(&mut cmd);
         let mut child = cmd
             .arg("run")

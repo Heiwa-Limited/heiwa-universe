@@ -64,9 +64,11 @@ impl AccountHealth {
 }
 
 fn classify(account: &ProviderAccount) -> (HealthState, String) {
-    // A CLI account is only as available as its binary, whatever the stored
-    // status says — the binary can disappear between runs.
-    if let Credential::OauthCli { binary } = &account.credential {
+    // An account is only as available as the thing that executes the turn,
+    // whatever the stored status says — the binary can disappear between
+    // runs, and for a local runtime the daemon that answers discovery is not
+    // the same thing as the binary the adapter drives.
+    if let Some(binary) = execution_binary(account) {
         if crate::resolve_command(binary).is_none() {
             return (
                 HealthState::NotInstalled,
@@ -96,6 +98,19 @@ fn classify(account: &ProviderAccount) -> (HealthState, String) {
             ),
         },
         AccountStatus::Error(message) => classify_error(message),
+    }
+}
+
+/// The binary this account's adapter must be able to run, if any.
+///
+/// A direct API key needs no local executable. A CLI seat names its binary.
+/// A local runtime is discovered over HTTP but driven as a subprocess, so its
+/// provider name is the binary that has to exist.
+fn execution_binary(account: &ProviderAccount) -> Option<&str> {
+    match &account.credential {
+        Credential::OauthCli { binary } => Some(binary),
+        Credential::LocalRuntime { .. } => Some(&account.provider),
+        _ => None,
     }
 }
 
@@ -289,6 +304,29 @@ mod tests {
         assert_eq!(report.state, HealthState::NotInstalled);
         assert!(report.detail.contains("definitely-not-installed-xyz"));
         assert!(!report.routable);
+    }
+
+    #[test]
+    fn a_local_runtime_that_answers_http_but_cannot_be_executed_is_not_routable() {
+        // Ollama is discovered over HTTP and driven by shelling out to its
+        // binary. Those can disagree — a daemon left running after the binary
+        // was removed, or a sandbox with no PATH. Reporting Healthy there
+        // sends the turn to an adapter that cannot start, and the whole turn
+        // dies on an OS error instead of routing elsewhere.
+        let mut account = account(
+            "ollama-local",
+            "definitely-not-installed-xyz",
+            Credential::LocalRuntime {
+                endpoint: "http://127.0.0.1:11434".to_string(),
+            },
+        );
+        account.status = AccountStatus::Connected;
+
+        let report = AccountHealth::project(&account);
+
+        assert_eq!(report.state, HealthState::NotInstalled);
+        assert!(!report.routable);
+        assert!(report.detail.contains("definitely-not-installed-xyz"));
     }
 
     #[test]

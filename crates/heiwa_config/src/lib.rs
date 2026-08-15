@@ -67,9 +67,18 @@ impl HeiwaPaths {
         env: impl Fn(&str) -> Option<OsString>,
         platform_home: Option<PathBuf>,
     ) -> Option<Self> {
-        let has_root = ["HEIWA_HOME", "HOME", "USERPROFILE"]
-            .iter()
-            .any(|key| env(key).is_some_and(|value| !value.is_empty()))
+        // Any signal that names a real root counts, including the two that
+        // override sub-paths — a caller that set only HEIWA_STATE_DIR has
+        // still told us where its state lives.
+        let has_root = [
+            "HEIWA_HOME",
+            "HEIWA_STATE_DIR",
+            "HEIWA_EVIDENCE_DIR",
+            "HOME",
+            "USERPROFILE",
+        ]
+        .iter()
+        .any(|key| env(key).is_some_and(|value| !value.is_empty()))
             || platform_home.is_some();
         has_root.then(|| Self::resolve_from(env, platform_home))
     }

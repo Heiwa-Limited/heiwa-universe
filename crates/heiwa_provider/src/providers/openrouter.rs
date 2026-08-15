@@ -107,7 +107,7 @@ impl ProviderAdapter for OpenRouterAdapter {
         // Framing, tool-call assembly, usage, and terminal-event handling are
         // shared with the OpenAI adapter — OpenRouter speaks the same wire
         // format, so the vocabulary is implemented once.
-        pump_openai_stream(resp, stream_tx).await
+        pump_openai_stream(resp, stream_tx, "OpenRouter").await
     }
 
     async fn interrupt(&self) -> Result<()> {

@@ -11,11 +11,11 @@
 //! have to keep current.
 
 use crate::adapter::{Message, ProviderAdapter, Role, StreamEvent, TokenUsage};
-use crate::providers::sse::{SseDecoder, SseEvent};
+use crate::providers::sse::SseEvent;
+use crate::providers::stream::{pump, SseConsumer};
 use crate::registry::{DetectedModel, InventoryTruth};
 use anyhow::{anyhow, Result};
 use async_trait::async_trait;
-use futures_util::StreamExt;
 use serde_json::{json, Value};
 use tokio::sync::mpsc;
 
@@ -117,6 +117,13 @@ fn build_request_body(model: &str, messages: &[Message], max_tokens: u32) -> Val
     body
 }
 
+/// Content-block index the event refers to. Anthropic streams blocks
+/// sequentially today, but keying on the index is what makes an interleaved
+/// or malformed stream drop a block instead of corrupting a sibling's input.
+fn block_index(payload: &Value) -> u64 {
+    payload["index"].as_u64().unwrap_or(0)
+}
+
 /// Translates the Messages API event stream into `StreamEvent`s.
 ///
 /// Kept as a pure state machine so the wire vocabulary is testable without a
@@ -124,8 +131,11 @@ fn build_request_body(model: &str, messages: &[Message], max_tokens: u32) -> Val
 #[derive(Default)]
 struct AnthropicStream {
     usage: TokenUsage,
-    /// Tool block being assembled, if the open block is a tool_use.
-    pending_tool: Option<PendingTool>,
+    /// Tool blocks being assembled, keyed by content-block index. A single
+    /// slot would let a delta for one index append to another block's
+    /// arguments, and a wrong tool input executes.
+    pending_tools: std::collections::BTreeMap<u64, PendingTool>,
+    done_emitted: bool,
 }
 
 #[derive(Default)]
@@ -134,7 +144,15 @@ struct PendingTool {
     input: String,
 }
 
-impl AnthropicStream {
+impl SseConsumer for AnthropicStream {
+    fn finish(&mut self) -> Vec<StreamEvent> {
+        if self.done_emitted {
+            return Vec::new();
+        }
+        self.done_emitted = true;
+        vec![StreamEvent::Done(self.usage.clone())]
+    }
+
     fn consume(&mut self, event: &SseEvent) -> Vec<StreamEvent> {
         let Ok(payload) = serde_json::from_str::<Value>(&event.data) else {
             return Vec::new(); // keep-alive or malformed frame
@@ -157,13 +175,16 @@ impl AnthropicStream {
             }
             "content_block_start" => {
                 if payload["content_block"]["type"] == "tool_use" {
-                    self.pending_tool = Some(PendingTool {
-                        name: payload["content_block"]["name"]
-                            .as_str()
-                            .unwrap_or_default()
-                            .to_string(),
-                        input: String::new(),
-                    });
+                    self.pending_tools.insert(
+                        block_index(&payload),
+                        PendingTool {
+                            name: payload["content_block"]["name"]
+                                .as_str()
+                                .unwrap_or_default()
+                                .to_string(),
+                            input: String::new(),
+                        },
+                    );
                 }
                 Vec::new()
             }
@@ -175,7 +196,7 @@ impl AnthropicStream {
                     .unwrap_or_default(),
                 Some("input_json_delta") => {
                     if let (Some(tool), Some(fragment)) = (
-                        self.pending_tool.as_mut(),
+                        self.pending_tools.get_mut(&block_index(&payload)),
                         payload["delta"]["partial_json"].as_str(),
                     ) {
                         tool.input.push_str(fragment);
@@ -186,12 +207,19 @@ impl AnthropicStream {
                 _ => Vec::new(),
             },
             "content_block_stop" => self
-                .pending_tool
-                .take()
+                .pending_tools
+                .remove(&block_index(&payload))
                 .map(|tool| {
                     vec![StreamEvent::ToolUse {
                         name: tool.name,
-                        input: tool.input,
+                        // A no-argument tool call accumulates nothing; emit
+                        // valid empty JSON rather than an empty string that
+                        // no consumer can parse.
+                        input: if tool.input.is_empty() {
+                            "{}".to_string()
+                        } else {
+                            tool.input
+                        },
                     }]
                 })
                 .unwrap_or_default(),
@@ -201,7 +229,7 @@ impl AnthropicStream {
                 }
                 Vec::new()
             }
-            "message_stop" => vec![StreamEvent::Done(self.usage.clone())],
+            "message_stop" => self.finish(),
             "error" => {
                 let error = &payload["error"];
                 vec![StreamEvent::Error(format!(
@@ -294,7 +322,14 @@ pub async fn discover_models(
     let status = response.status();
     if !status.is_success() {
         let detail = response.text().await.unwrap_or_default();
-        return Err(anyhow!("Anthropic models HTTP {status}: {detail}"));
+        // Carry the status as a value. Classifying by substring-matching the
+        // message body once marked a working key invalid because an upstream
+        // 500 body happened to contain a request id with "401" in it.
+        return Err(crate::detect::DiscoveryError {
+            status: status.as_u16(),
+            detail,
+        }
+        .into());
     }
     let body: Value = response.json().await?;
     Ok(models_from_list_response(&body, account_id, rate_group))
@@ -337,30 +372,7 @@ impl ProviderAdapter for AnthropicApiAdapter {
             return Err(anyhow!(message));
         }
 
-        let mut decoder = SseDecoder::new();
-        let mut state = AnthropicStream::default();
-        let mut body = response.bytes_stream();
-
-        while let Some(chunk) = body.next().await {
-            let chunk = chunk?;
-            for event in decoder.push(&String::from_utf8_lossy(&chunk)) {
-                for stream_event in state.consume(&event) {
-                    let terminal =
-                        matches!(stream_event, StreamEvent::Done(_) | StreamEvent::Error(_));
-                    if stream_tx.send(stream_event).await.is_err() {
-                        return Ok(()); // consumer went away
-                    }
-                    if terminal {
-                        return Ok(());
-                    }
-                }
-            }
-        }
-
-        // Stream ended without message_stop: report what was counted rather
-        // than leaving the consumer waiting on a terminal event.
-        let _ = stream_tx.send(StreamEvent::Done(state.usage.clone())).await;
-        Ok(())
+        pump(response, AnthropicStream::default(), stream_tx, "Anthropic").await
     }
 
     async fn interrupt(&self) -> Result<()> {

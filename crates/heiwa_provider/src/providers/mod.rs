@@ -7,3 +7,4 @@ pub mod ollama;
 pub mod openai_api;
 pub mod openrouter;
 pub(crate) mod sse;
+pub(crate) mod stream;

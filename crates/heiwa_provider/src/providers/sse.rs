@@ -44,18 +44,54 @@ impl SseDecoder {
         self.carry.push_str(chunk);
         let mut events = Vec::new();
 
-        // Events are separated by a blank line. Normalizing CRLF first keeps
-        // the split single-pattern rather than a per-provider special case.
-        while let Some(index) = self.carry.replace("\r\n", "\n").find("\n\n") {
-            let normalized = self.carry.replace("\r\n", "\n");
-            let (raw, rest) = normalized.split_at(index + 2);
-            self.carry = rest.to_string();
-            if let Some(event) = parse_event(raw) {
+        // Events are separated by a blank line. Scan the buffer once and
+        // remove the consumed prefix once: a fast provider can deliver
+        // thousands of events in a single read, and rescanning the whole
+        // buffer per event turns one read into quadratic work.
+        let mut consumed = 0;
+        while let Some((event_end, next_start)) = find_separator(&self.carry[consumed..]) {
+            if let Some(event) = parse_event(&self.carry[consumed..consumed + event_end]) {
                 events.push(event);
             }
+            consumed += next_start;
         }
+        self.carry.drain(..consumed);
         events
     }
+}
+
+/// Byte length of the line terminator at `index`, if one starts there.
+///
+/// A lone `\r` at the very end of the buffer is ambiguous — the `\n` that
+/// would make it CRLF may be in the next chunk — but that resolves itself:
+/// a separator needs a *second* terminator after it, which cannot be read
+/// past the end, so the scan waits for more data instead of mis-framing.
+fn terminator_len(bytes: &[u8], index: usize) -> Option<usize> {
+    match bytes.get(index)? {
+        b'\r' if bytes.get(index + 1) == Some(&b'\n') => Some(2),
+        b'\r' | b'\n' => Some(1),
+        _ => None,
+    }
+}
+
+/// Locate the first blank line: `(end of the event, start of the next one)`.
+///
+/// Byte indexing is safe because UTF-8 never encodes a multi-byte character
+/// with an ASCII byte, so a `\r` or `\n` match is always a char boundary.
+fn find_separator(buffer: &str) -> Option<(usize, usize)> {
+    let bytes = buffer.as_bytes();
+    let mut index = 0;
+    while index < bytes.len() {
+        let Some(first) = terminator_len(bytes, index) else {
+            index += 1;
+            continue;
+        };
+        if let Some(second) = terminator_len(bytes, index + first) {
+            return Some((index, index + first + second));
+        }
+        index += first;
+    }
+    None
 }
 
 fn parse_event(raw: &str) -> Option<SseEvent> {
@@ -124,6 +160,41 @@ mod tests {
         let mut decoder = SseDecoder::new();
         let events = decoder.push(": keep-alive\n\ndata: {\"ok\":true}\n\n");
         assert_eq!(events, vec![SseEvent::new(None, "{\"ok\":true}")]);
+    }
+
+    #[test]
+    fn decodes_a_large_burst_in_linear_time() {
+        // A fast provider can land thousands of events in one read. Rescanning
+        // and reallocating the whole buffer per event made this quadratic:
+        // 16k events took 6.5s, which stalls the turn it is supposed to
+        // stream. The bound is deliberately loose — the point is the shape of
+        // the curve, not a latency budget.
+        const EVENTS: usize = 20_000;
+        let mut chunk = String::new();
+        for n in 0..EVENTS {
+            chunk.push_str(&format!("data: {{\"n\":{n}}}\n\n"));
+        }
+
+        let started = std::time::Instant::now();
+        let events = SseDecoder::new().push(&chunk);
+        let elapsed = started.elapsed();
+
+        assert_eq!(events.len(), EVENTS);
+        assert_eq!(events[EVENTS - 1].data, format!("{{\"n\":{}}}", EVENTS - 1));
+        assert!(
+            elapsed < std::time::Duration::from_secs(2),
+            "decoding {EVENTS} events took {elapsed:?}; that is quadratic behavior"
+        );
+    }
+
+    #[test]
+    fn holds_a_trailing_cr_until_the_next_chunk_decides_it() {
+        // A CRLF pair split across chunks must not frame an event early.
+        let mut decoder = SseDecoder::new();
+        assert!(decoder.push("data: {\"n\":1}\r").is_empty());
+        let events = decoder.push("\n\r\n");
+        assert_eq!(events.len(), 1);
+        assert_eq!(events[0].data, "{\"n\":1}");
     }
 
     #[test]

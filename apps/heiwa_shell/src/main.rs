@@ -30,20 +30,9 @@ use std::io::{self, IsTerminal, Write};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, OnceLock};
 
-fn canonical_provider_id(provider: &str) -> &str {
-    match provider {
-        "claude-code" => "claude",
-        "google-gemini-cli" => "gemini",
-        other => other,
-    }
-}
-
-fn provider_supports_loop_adapter(provider: &str) -> bool {
-    matches!(
-        canonical_provider_id(provider),
-        "claude" | "codex" | "ollama" | "gemini" | "openrouter"
-    )
-}
+use heiwa_provider::routing::{
+    canonical_provider_id, is_supported as provider_supports_loop_adapter,
+};
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 enum RoutePreference {
@@ -236,6 +225,23 @@ async fn main() -> Result<()> {
                 }
             }
         },
+        // One non-interactive turn. This is the scriptable entry point — a
+        // fresh install can prove itself without a TTY, and CI can drive a
+        // real turn end to end rather than approximating one.
+        "ask" => {
+            let prompt = args[2..].join(" ");
+            if prompt.trim().is_empty() {
+                eprintln!("Usage: heiwa ask <prompt>");
+                std::process::exit(2);
+            }
+            match execute_repl_turn(&prompt).await {
+                Ok((response, _trace)) => println!("{}", response.trim_end()),
+                Err(message) => {
+                    eprintln!("{message}");
+                    std::process::exit(1);
+                }
+            }
+        }
         "login" => {
             if args.len() < 3 {
                 println!("Usage: heiwa login [token]");
@@ -921,6 +927,7 @@ fn print_help() {
     println!("  auto status|create|tick       Manage local background automations");
     println!("  approvals list|show|decide    Manage local approval packets");
     println!("  mail status|accounts          Mail.app metadata-only bridge probe");
+    println!("  ask <prompt>                  Run one non-interactive turn and print the reply");
     println!("  route preview <prompt>        Preview DREX routing without execution");
     println!("  session attach                Attach to a Heiwa session");
     println!("  loop [turns] <objective>      Run a bounded execution loop");
@@ -2759,12 +2766,9 @@ async fn execute_deterministic_surface_turn(
 // Shared execution core — used by both plain REPL and cockpit controller
 // ---------------------------------------------------------------------------
 
-/// Providers that have a working adapter in `resolve_adapter()`.
-const SUPPORTED_ADAPTER_PROVIDERS: &[&str] = &["ollama", "claude", "codex", "gemini", "openrouter"];
-
-/// Returns true if the provider has a working adapter in this binary.
+/// Returns true if the provider has a working adapter.
 fn has_adapter(provider: &str) -> bool {
-    SUPPORTED_ADAPTER_PROVIDERS.contains(&canonical_provider_id(provider))
+    provider_supports_loop_adapter(provider)
 }
 
 /// Route a task through DREX, returning the adapter + metadata needed to stream.
@@ -2840,7 +2844,7 @@ fn route_task_inner(
         return Err(if guidance.is_empty() {
             format!(
                 "No models with working adapters. Supported providers: {}.",
-                SUPPORTED_ADAPTER_PROVIDERS.join(", "),
+                heiwa_provider::routing::SUPPORTED_PROVIDERS.join(", "),
             )
         } else {
             guidance
@@ -4500,6 +4504,70 @@ pub(crate) async fn preview_route_payload(prompt: &str) -> serde_json::Value {
 mod tests {
     use heiwa_protocol::{parse_turn_intent, Intent};
 
+    /// The BYOK path must survive the turn path, not just the adapter.
+    ///
+    /// Direct-API accounts are registered under the vendor name the
+    /// credential belongs to ("anthropic"), while DREX routes are named after
+    /// the surface ("claude"). A second alias table in this binary once
+    /// failed to map between them, so every direct-API model was filtered out
+    /// before routing ever saw it and a user with a valid key got "no models
+    /// with working adapters". Alias mapping now has exactly one owner.
+    #[test]
+    fn direct_api_accounts_survive_the_live_model_tier_filter() {
+        use heiwa_provider::registry::{
+            AccountRegistry, AccountStatus, Credential, DetectedModel, InventoryTruth,
+            ProviderAccount,
+        };
+
+        fn account(vendor: &str, model_id: &str) -> ProviderAccount {
+            ProviderAccount {
+                account_id: format!("{vendor}-api-1"),
+                provider: vendor.to_string(),
+                credential: Credential::ApiKey,
+                rate_group: format!("{vendor}_api"),
+                status: AccountStatus::Connected,
+                models: vec![DetectedModel {
+                    model_id: model_id.to_string(),
+                    provider_model_id: model_id.to_string(),
+                    provider: vendor.to_string(),
+                    account_id: format!("{vendor}-api-1"),
+                    rate_group: format!("{vendor}_api"),
+                    capability_class: 5,
+                    context_window: 200_000,
+                    supports_streaming: true,
+                    supports_tools: true,
+                    supports_vision: true,
+                    supports_audio: false,
+                    cost_per_1k_input: 0.0,
+                    cost_per_1k_output: 0.0,
+                    inventory_truth: InventoryTruth::Verified,
+                }],
+            }
+        }
+
+        for (vendor, model_id) in [
+            ("anthropic", "claude-opus-5"),
+            ("openai", "gpt-5"),
+            ("google", "gemini-3-pro"),
+        ] {
+            let registry = AccountRegistry {
+                accounts: vec![account(vendor, model_id)],
+            };
+            let tiers = super::get_live_model_tiers(&registry);
+            assert!(
+                !tiers.is_empty(),
+                "a {vendor} API-key account produced no routable tier — the BYOK \
+                 path is unreachable from a turn"
+            );
+            assert!(
+                tiers.iter().any(|tier| tier.model_id == model_id),
+                "{vendor} tier list is missing {model_id}: {:?}",
+                tiers.iter().map(|t| &t.model_id).collect::<Vec<_>>()
+            );
+            assert!(super::has_adapter(vendor), "{vendor} must have an adapter");
+        }
+    }
+
     #[test]
     fn automation_approval_request_becomes_awaiting_confirmation() {
         let outcome = super::automation_terminal_outcome(
@@ -4670,8 +4738,21 @@ mod tests {
         assert!(super::has_adapter("claude"));
         assert!(super::has_adapter("codex"));
         assert!(super::has_adapter("gemini"));
-        assert!(!super::has_adapter("anthropic"));
-        assert!(!super::has_adapter("openai"));
+        assert!(!super::has_adapter("mystery-provider"));
+    }
+
+    #[test]
+    fn vendor_names_resolve_to_the_same_adapters_as_route_names() {
+        // The registry names accounts after the vendor whose key it holds;
+        // DREX names routes after the surface. When the shell kept its own
+        // alias table, these disagreed and every direct-API model was dropped
+        // before routing — a user with a valid key saw "no working adapters".
+        for vendor in ["anthropic", "openai", "google"] {
+            assert!(
+                super::has_adapter(vendor),
+                "vendor name `{vendor}` must resolve to an adapter"
+            );
+        }
     }
 
     #[test]

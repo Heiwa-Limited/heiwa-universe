@@ -18,12 +18,22 @@
   against regression, not a proof.
 - A user supplies one API key and the application works with no provider CLI
   installed: direct-API adapters for the Anthropic, OpenAI, and Google
-  families run alongside the CLI adapters, and
-  `apps/heiwa_shell/tests/fresh_install.rs` completes a turn end to end on a
-  machine with no reachable provider CLI.
+  families run alongside the CLI adapters.
+  `apps/heiwa_shell/tests/fresh_install.rs` proves this by running the built
+  `heiwa` binary with an emptied `PATH`, a temp state root, no keychain, and
+  no local runtime, and asserting the model's text reaches stdout and the
+  request carried the user's key. Keys resolve from the OS keychain first and
+  the provider's conventional environment variable otherwise, so a container
+  or CI runner with no keychain still works.
+  Scope: the harness covers the Anthropic wire format. OpenAI and Google have
+  unit-level wire coverage but are not driven through the binary.
 - Provider failure is a routing constraint: `heiwa_provider::health` reports
   which accounts are usable and why one was skipped, and a zero-provider
-  install opens with actionable guidance rather than an error.
+  install opens with actionable guidance rather than an error. An account is
+  judged on the path that executes the turn, so a local runtime whose daemon
+  answers but whose binary is absent is skipped rather than failing the turn.
+  Credential rejection is classified from the HTTP status, never by matching
+  text in a provider's response body.
 - The desktop shell is a SolidJS component layer: ten surface modules behind a
   `SurfaceModule` contract over a tokenized design system, with the operator
   stream seam (`store.ts` / `client.ts` / `types.ts`) preserved unmodified.

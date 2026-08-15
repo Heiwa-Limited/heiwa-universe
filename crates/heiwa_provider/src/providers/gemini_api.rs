@@ -6,11 +6,11 @@
 //! working Google route without it.
 
 use crate::adapter::{Message, ProviderAdapter, Role, StreamEvent, TokenUsage};
-use crate::providers::sse::{SseDecoder, SseEvent};
+use crate::providers::sse::SseEvent;
+use crate::providers::stream::{pump, SseConsumer};
 use crate::registry::{DetectedModel, InventoryTruth};
 use anyhow::{anyhow, Result};
 use async_trait::async_trait;
-use futures_util::StreamExt;
 use serde_json::{json, Value};
 use tokio::sync::mpsc;
 
@@ -107,7 +107,7 @@ struct GeminiStream {
     done_emitted: bool,
 }
 
-impl GeminiStream {
+impl SseConsumer for GeminiStream {
     fn consume(&mut self, event: &SseEvent) -> Vec<StreamEvent> {
         let Ok(payload) = serde_json::from_str::<Value>(&event.data) else {
             return Vec::new();
@@ -238,7 +238,14 @@ pub async fn discover_models(
     let status = response.status();
     if !status.is_success() {
         let detail = response.text().await.unwrap_or_default();
-        return Err(anyhow!("Gemini models HTTP {status}: {detail}"));
+        // Carry the status as a value. Classifying by substring-matching the
+        // message body once marked a working key invalid because an upstream
+        // 500 body happened to contain a request id with "401" in it.
+        return Err(crate::detect::DiscoveryError {
+            status: status.as_u16(),
+            detail,
+        }
+        .into());
     }
     let body: Value = response.json().await?;
     Ok(models_from_list_response(&body, account_id, rate_group))
@@ -279,32 +286,7 @@ impl ProviderAdapter for GeminiApiAdapter {
             return Err(anyhow!(message));
         }
 
-        let mut decoder = SseDecoder::new();
-        let mut state = GeminiStream::default();
-        let mut body = response.bytes_stream();
-
-        while let Some(chunk) = body.next().await {
-            let chunk = chunk?;
-            for event in decoder.push(&String::from_utf8_lossy(&chunk)) {
-                for stream_event in state.consume(&event) {
-                    let terminal =
-                        matches!(stream_event, StreamEvent::Done(_) | StreamEvent::Error(_));
-                    if stream_tx.send(stream_event).await.is_err() {
-                        return Ok(());
-                    }
-                    if terminal {
-                        return Ok(());
-                    }
-                }
-            }
-        }
-
-        for stream_event in state.finish() {
-            if stream_tx.send(stream_event).await.is_err() {
-                return Ok(());
-            }
-        }
-        Ok(())
+        pump(response, GeminiStream::default(), stream_tx, "Gemini").await
     }
 
     async fn interrupt(&self) -> Result<()> {

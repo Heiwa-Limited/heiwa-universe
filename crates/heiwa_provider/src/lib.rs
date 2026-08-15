@@ -39,12 +39,34 @@ pub struct HeiwaIdentity {
     pub display_name: Option<String>,
 }
 
+/// The runtime root, or `None` when no real per-user root exists.
+///
+/// Strict rather than lenient: this backs the identity file, which holds an
+/// auth token, and the account registry. The lenient resolver falls back to
+/// `./.heiwa`, which would write credentials into whatever directory the
+/// process happened to start in.
+fn try_heiwa_state_dir() -> Option<PathBuf> {
+    heiwa_config::HeiwaPaths::try_resolve().map(|paths| paths.runtime_root)
+}
+
 fn get_heiwa_state_dir() -> PathBuf {
-    heiwa_config::HeiwaPaths::resolve().runtime_root
+    try_heiwa_state_dir().unwrap_or_else(|| heiwa_config::HeiwaPaths::resolve().runtime_root)
 }
 
 pub fn get_identity_path() -> std::path::PathBuf {
-    get_heiwa_state_dir().join("identity.json")
+    identity_path_in(get_heiwa_state_dir())
+}
+
+fn identity_path_in(root: PathBuf) -> PathBuf {
+    root.join("identity.json")
+}
+
+/// The identity file, or `None` when there is no per-user root to hold it.
+///
+/// Callers that write the token use this: refusing is better than writing an
+/// auth token into the current working directory.
+pub fn try_identity_path() -> Option<PathBuf> {
+    try_heiwa_state_dir().map(identity_path_in)
 }
 
 pub fn load_identity() -> Option<HeiwaIdentity> {
@@ -57,7 +79,11 @@ pub fn load_identity() -> Option<HeiwaIdentity> {
 }
 
 pub fn save_identity(identity: &HeiwaIdentity) -> anyhow::Result<()> {
-    let path = get_identity_path();
+    let path = try_identity_path().ok_or_else(|| {
+        anyhow::anyhow!(
+            "no Heiwa state root: set HEIWA_HOME or HOME before storing an identity token"
+        )
+    })?;
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent)?;
     }

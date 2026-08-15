@@ -6,11 +6,11 @@
 //! rather than one per provider that happens to use it.
 
 use crate::adapter::{Message, ProviderAdapter, Role, StreamEvent, TokenUsage};
-use crate::providers::sse::{SseDecoder, SseEvent};
+use crate::providers::sse::SseEvent;
+use crate::providers::stream::{pump, SseConsumer};
 use crate::registry::{DetectedModel, InventoryTruth};
 use anyhow::{anyhow, Result};
 use async_trait::async_trait;
-use futures_util::StreamExt;
 use serde_json::{json, Value};
 use std::collections::BTreeMap;
 use tokio::sync::mpsc;
@@ -109,8 +109,8 @@ struct PendingToolCall {
     arguments: String,
 }
 
-impl OpenAiStream {
-    pub fn consume(&mut self, event: &SseEvent) -> Vec<StreamEvent> {
+impl SseConsumer for OpenAiStream {
+    fn consume(&mut self, event: &SseEvent) -> Vec<StreamEvent> {
         if event.is_done() {
             return self.finish();
         }
@@ -155,7 +155,10 @@ impl OpenAiStream {
                 let index = call["index"].as_u64().unwrap_or(0);
                 let entry = self.tool_calls.entry(index).or_default();
                 if let Some(name) = call["function"]["name"].as_str() {
-                    entry.name.push_str(name);
+                    // Assign, not append: OpenAI sends the name once, but
+                    // several OpenAI-compatible servers repeat it on every
+                    // fragment, which appending turns into "readread…".
+                    entry.name = name.to_string();
                 }
                 if let Some(fragment) = call["function"]["arguments"].as_str() {
                     entry.arguments.push_str(fragment);
@@ -169,6 +172,20 @@ impl OpenAiStream {
         events
     }
 
+    /// Terminal event. Any tool calls still buffered are flushed first so a
+    /// stream that ends without an explicit finish_reason does not drop them.
+    fn finish(&mut self) -> Vec<StreamEvent> {
+        if self.done_emitted {
+            return Vec::new();
+        }
+        self.done_emitted = true;
+        let mut events = self.flush_tool_calls();
+        events.push(StreamEvent::Done(self.usage.clone()));
+        events
+    }
+}
+
+impl OpenAiStream {
     fn flush_tool_calls(&mut self) -> Vec<StreamEvent> {
         std::mem::take(&mut self.tool_calls)
             .into_values()
@@ -177,18 +194,6 @@ impl OpenAiStream {
                 input: call.arguments,
             })
             .collect()
-    }
-
-    /// Terminal event. Any tool calls still buffered are flushed first so a
-    /// stream that ends without an explicit finish_reason does not drop them.
-    pub fn finish(&mut self) -> Vec<StreamEvent> {
-        if self.done_emitted {
-            return Vec::new();
-        }
-        self.done_emitted = true;
-        let mut events = self.flush_tool_calls();
-        events.push(StreamEvent::Done(self.usage.clone()));
-        events
     }
 }
 
@@ -276,7 +281,14 @@ pub async fn discover_models(
     let status = response.status();
     if !status.is_success() {
         let detail = response.text().await.unwrap_or_default();
-        return Err(anyhow!("OpenAI models HTTP {status}: {detail}"));
+        // Carry the status as a value. Classifying by substring-matching the
+        // message body once marked a working key invalid because an upstream
+        // 500 body happened to contain a request id with "401" in it.
+        return Err(crate::detect::DiscoveryError {
+            status: status.as_u16(),
+            detail,
+        }
+        .into());
     }
     let body: Value = response.json().await?;
     Ok(models_from_list_response(&body, account_id, rate_group))
@@ -284,37 +296,13 @@ pub async fn discover_models(
 
 /// Drive an OpenAI-compatible SSE response into `StreamEvent`s.
 ///
-/// Shared by this adapter and OpenRouter so the framing, terminal-event, and
-/// consumer-hangup handling exist once.
+/// Shared by this adapter and OpenRouter so the wire vocabulary exists once.
 pub(crate) async fn pump_openai_stream(
     response: reqwest::Response,
     stream_tx: mpsc::Sender<StreamEvent>,
+    provider: &str,
 ) -> Result<()> {
-    let mut decoder = SseDecoder::new();
-    let mut state = OpenAiStream::default();
-    let mut body = response.bytes_stream();
-
-    while let Some(chunk) = body.next().await {
-        let chunk = chunk?;
-        for event in decoder.push(&String::from_utf8_lossy(&chunk)) {
-            for stream_event in state.consume(&event) {
-                let terminal = matches!(stream_event, StreamEvent::Done(_) | StreamEvent::Error(_));
-                if stream_tx.send(stream_event).await.is_err() {
-                    return Ok(());
-                }
-                if terminal {
-                    return Ok(());
-                }
-            }
-        }
-    }
-
-    for stream_event in state.finish() {
-        if stream_tx.send(stream_event).await.is_err() {
-            return Ok(());
-        }
-    }
-    Ok(())
+    pump(response, OpenAiStream::default(), stream_tx, provider).await
 }
 
 #[async_trait]
@@ -351,7 +339,7 @@ impl ProviderAdapter for OpenAiApiAdapter {
             let _ = stream_tx.send(StreamEvent::Error(message.clone())).await;
             return Err(anyhow!(message));
         }
-        pump_openai_stream(response, stream_tx).await
+        pump_openai_stream(response, stream_tx, "OpenAI").await
     }
 
     async fn interrupt(&self) -> Result<()> {
