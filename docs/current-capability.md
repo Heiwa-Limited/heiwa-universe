@@ -40,6 +40,15 @@
   silently yielding no models.
   Credential rejection is classified from the HTTP status, never by matching
   text in a provider's response body.
+- First run happens inside the application. `heiwa setup` establishes a local
+  per-installation identity and reports every remaining gap with the action
+  that closes it, exiting non-zero while incomplete; the desktop shows the
+  same projection as an overlay and can close the identity gap in-window.
+  `heiwa_identity::onboarding` is the only place readiness is decided, so the
+  two surfaces cannot disagree. `apps/heiwa_shell/tests/first_run.rs` drives
+  the shipped binary from an empty state root to a completed turn.
+  Identity is local and per-installation and contacts no server; whether it
+  is also account-backed is the open D1 fork and is not decided.
 - The desktop shell is a SolidJS component layer: ten surface modules behind a
   `SurfaceModule` contract over a tokenized design system, with the operator
   stream seam (`store.ts` / `client.ts` / `types.ts`) preserved unmodified.
@@ -56,7 +65,6 @@
 - iMessage as a productized ingress surface
 - broad computer-use automation
 - `Heiwa.app` as a fully native desktop runtime
-- first-run onboarding inside the application (roadmap L2)
 - live read models behind the Calendar, Mail, Finance, and Social surfaces —
   they state their pending status honestly and land on the L3 connector plane
 - the Browser surface as an actionable, approval-gated automation surface; it

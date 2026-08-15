@@ -3176,8 +3176,12 @@ dependencies = [
 name = "heiwa-desktop"
 version = "0.1.0"
 dependencies = [
+ "chrono",
  "futures-util",
  "heiwa-core",
+ "heiwa-provider",
+ "heiwa_config",
+ "heiwa_identity",
  "reqwest 0.12.28",
  "serde",
  "serde_json",
@@ -3320,6 +3324,7 @@ dependencies = [
  "heiwa_config",
  "heiwa_drex",
  "heiwa_evidence",
+ "heiwa_identity",
  "heiwa_mcp",
  "heiwa_quota",
  "heiwa_receipts",
@@ -3422,6 +3427,17 @@ dependencies = [
  "tempfile",
  "thiserror 2.0.18",
  "time",
+ "uuid",
+]
+
+[[package]]
+name = "heiwa_identity"
+version = "0.1.0"
+dependencies = [
+ "heiwa_config",
+ "serde",
+ "serde_json",
+ "tempfile",
  "uuid",
 ]
 

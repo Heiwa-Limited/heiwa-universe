@@ -33,3 +33,23 @@ export type SubApp = {
   tools: string[];
   personalization: string[];
 };
+
+/**
+ * One thing first run still needs, and the action that closes it.
+ *
+ * Mirrors `heiwa_identity::onboarding` — the Rust projection is the only
+ * place readiness is decided, so these are carried across, never recomputed.
+ */
+export type OnboardingStep = "state_root" | "identity" | "provider";
+
+export type OnboardingGap = {
+  step: OnboardingStep;
+  detail: string;
+  remedy: string;
+};
+
+export type OnboardingState = {
+  complete: boolean;
+  gaps: OnboardingGap[];
+  display_name: string | null;
+};

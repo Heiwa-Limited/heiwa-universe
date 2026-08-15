@@ -311,7 +311,16 @@ pub fn resolve_secret(account_id: &str) -> Option<String> {
 ///
 /// These are the provider's own published names, so a machine already set up
 /// for that vendor's SDK works without re-entering the key.
-fn key_env_vars(provider: &str) -> &'static [&'static str] {
+/// Providers that can be adopted from an environment key, with the rate
+/// group their metered API tier belongs to.
+pub const ENV_KEY_PROVIDERS: &[(&str, &str)] = &[
+    ("anthropic", "anthropic_api"),
+    ("openai", "openai_api"),
+    ("google", "google"),
+    ("openrouter", "openrouter"),
+];
+
+pub(crate) fn key_env_vars(provider: &str) -> &'static [&'static str] {
     match provider {
         "anthropic" => &["ANTHROPIC_API_KEY"],
         "openai" => &["OPENAI_API_KEY"],

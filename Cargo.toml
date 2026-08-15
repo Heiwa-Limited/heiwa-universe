@@ -10,6 +10,7 @@ members = [
     "crates/heiwa_drex",
     "crates/heiwa_embed",
     "crates/heiwa_evidence",
+    "crates/heiwa_identity",
     "crates/heiwa_install",
     "crates/heiwa_loop",
     "crates/heiwa_memory",

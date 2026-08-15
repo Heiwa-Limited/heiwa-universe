@@ -244,4 +244,71 @@ describe("operator seam", () => {
     render(() => <App state={state} />);
     expect((screen.getByLabelText("Send") as HTMLButtonElement).disabled).toBe(true);
   });
+
+  it("covers the shell with first run until onboarding is complete", () => {
+    // Onboarding gates the whole application, so it is an overlay rather
+    // than an eleventh surface — there is nothing useful to navigate to
+    // before a provider exists.
+    const { state } = harness();
+    render(() => (
+      <App
+        state={state}
+        onboarding={{
+          complete: false,
+          display_name: null,
+          gaps: [
+            {
+              step: "provider",
+              detail: "no provider account is connected",
+              remedy: "add a key with `heiwa auth add-key <provider> <key>`",
+            },
+          ],
+        }}
+      />
+    ));
+
+    expect(screen.getByText("Set up Heiwa")).toBeTruthy();
+    expect(screen.getByText("no provider account is connected")).toBeTruthy();
+  });
+
+  it("shows every gap with the action that closes it", () => {
+    const { state } = harness();
+    render(() => (
+      <App
+        state={state}
+        onboarding={{
+          complete: false,
+          display_name: null,
+          gaps: [
+            { step: "identity", detail: "no local identity yet", remedy: "run heiwa setup" },
+            { step: "provider", detail: "no provider connected", remedy: "add a key" },
+          ],
+        }}
+      />
+    ));
+
+    for (const text of ["no local identity yet", "run heiwa setup", "no provider connected", "add a key"]) {
+      expect(screen.getByText(text)).toBeTruthy();
+    }
+  });
+
+  it("gets out of the way once onboarding is complete", () => {
+    const { state } = harness();
+    render(() => (
+      <App state={state} onboarding={{ complete: true, display_name: "Ada", gaps: [] }} />
+    ));
+
+    expect(screen.queryByText("Set up Heiwa")).toBeNull();
+    expect(screen.getByLabelText("Send")).toBeTruthy();
+  });
+
+  it("renders the shell when onboarding state has not arrived yet", () => {
+    // The projection is fetched asynchronously. Blocking the shell on it
+    // would make a slow provider probe look like a broken application.
+    const { state } = harness();
+    render(() => <App state={state} />);
+
+    expect(screen.queryByText("Set up Heiwa")).toBeNull();
+    expect(screen.getByLabelText("Send")).toBeTruthy();
+  });
 });

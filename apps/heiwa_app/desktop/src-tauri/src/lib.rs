@@ -1,4 +1,5 @@
 pub mod herd;
+pub mod onboarding;
 pub mod operator_stream;
 pub mod proxy;
 
@@ -12,6 +13,8 @@ pub fn run() {
             herd::herd_pane_send,
             herd::herd_pane_split,
             herd::herd_panes,
+            onboarding::establish_identity,
+            onboarding::onboarding_state,
             operator_stream::operator_subscribe,
             proxy::api_get,
             proxy::api_post,

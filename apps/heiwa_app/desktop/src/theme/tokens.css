@@ -90,6 +90,9 @@
   --surface-overlay: var(--p-ink-800);
   --surface-input: var(--p-ink-900);
   --surface-hover: var(--p-ink-800);
+  /* Scrim behind a modal gate. A theme decision, so it is a token rather
+     than a color-mix at the call site. */
+  --surface-scrim: rgb(8 10 9 / 88%);
 
   --content-primary: var(--p-bone-100);
   --content-secondary: rgb(241 241 234 / 58%);
@@ -128,6 +131,8 @@
     --surface-overlay: var(--p-white);
     --surface-input: var(--p-white);
     --surface-hover: rgb(13 15 14 / 5%);
+  --surface-scrim: rgb(247 247 243 / 88%);
+    --surface-scrim: rgb(247 247 243 / 88%);
 
     --content-primary: var(--p-ink-950);
     --content-secondary: rgb(13 15 14 / 66%);

@@ -225,6 +225,27 @@ async fn main() -> Result<()> {
                 }
             }
         },
+        // First run, inside the application. The roadmap's L2 requirement is
+        // that a user reaches a working install without reading docs, so this
+        // reports what is missing and what to do about each gap.
+        "setup" => {
+            let name = flag_value(&args, "--name");
+            run_setup(name.as_deref()).await?;
+        }
+        "whoami" => match heiwa_identity::load() {
+            Ok(Some(identity)) => {
+                println!("{}", identity.display_name);
+                println!("  installation: {}", identity.installation_id);
+                println!("  created:      {}", identity.created_at);
+            }
+            Ok(None) => {
+                println!("No local identity yet. Run `heiwa setup --name \"<your name>\"`.");
+            }
+            Err(error) => {
+                eprintln!("{error}");
+                std::process::exit(1);
+            }
+        },
         // One non-interactive turn. This is the scriptable entry point — a
         // fresh install can prove itself without a TTY, and CI can drive a
         // real turn end to end rather than approximating one.
@@ -901,6 +922,94 @@ async fn main() -> Result<()> {
     Ok(())
 }
 
+/// Value of a `--flag value` argument, if present.
+fn flag_value(args: &[String], flag: &str) -> Option<String> {
+    let index = args.iter().position(|arg| arg == flag)?;
+    args.get(index + 1)
+        .filter(|value| !value.starts_with("--"))
+        .cloned()
+}
+
+/// Observe this installation and project what first run still needs.
+async fn onboarding_state() -> heiwa_identity::onboarding::OnboardingState {
+    use heiwa_identity::onboarding::{OnboardingFacts, OnboardingState};
+
+    let paths = heiwa_config::HeiwaPaths::try_resolve();
+    let identity = match &paths {
+        Some(_) => heiwa_identity::load().ok().flatten(),
+        // Without a root there is nowhere to have stored one; reporting
+        // "no identity" here would be true but is not the actionable gap.
+        None => None,
+    };
+
+    let mut registry = heiwa_provider::AccountRegistry::load();
+    heiwa_provider::detect::auto_discover(&mut registry).await;
+    let fleet = heiwa_provider::health::FleetHealth::project(&registry.accounts);
+
+    OnboardingState::project(&OnboardingFacts {
+        has_state_root: paths.is_some(),
+        identity: identity.as_ref().map(|id| id.display_name.as_str()),
+        has_routable_account: fleet.has_routable_account(),
+        provider_guidance: fleet.guidance(),
+    })
+}
+
+/// First-run setup. Establishes what it can and reports the rest.
+async fn run_setup(name: Option<&str>) -> Result<()> {
+    // Identity first: it is the anchor the rest attaches to, and it is the
+    // one gap this command can close on its own.
+    if heiwa_config::HeiwaPaths::try_resolve().is_some() {
+        match heiwa_identity::load() {
+            Ok(None) => {
+                let display_name = name
+                    .map(str::to_string)
+                    .unwrap_or_else(default_display_name);
+                let created = chrono::Utc::now().to_rfc3339();
+                match heiwa_identity::establish(&display_name, &created) {
+                    Ok(identity) => println!("Created local identity: {}", identity.display_name),
+                    Err(error) => {
+                        eprintln!("{error}");
+                        std::process::exit(1);
+                    }
+                }
+            }
+            Ok(Some(identity)) => {
+                if let Some(name) = name.filter(|name| *name != identity.display_name) {
+                    match heiwa_identity::rename(name) {
+                        Ok(renamed) => println!("Renamed to {}", renamed.display_name),
+                        Err(error) => {
+                            eprintln!("{error}");
+                            std::process::exit(1);
+                        }
+                    }
+                }
+            }
+            Err(error) => {
+                eprintln!("{error}");
+                std::process::exit(1);
+            }
+        }
+    }
+
+    let state = onboarding_state().await;
+    println!("{}", state.report());
+    if !state.complete {
+        // A non-zero exit is what makes this scriptable: a first-run check in
+        // CI or an installer can branch on it.
+        std::process::exit(1);
+    }
+    Ok(())
+}
+
+/// A neutral name for an installation the user has not named.
+///
+/// Deliberately not the OS username: this string is shown in the interface
+/// and will travel with connector metadata, and lifting a login name into a
+/// display name is the single-seat assumption in miniature.
+fn default_display_name() -> String {
+    "Heiwa user".to_string()
+}
+
 fn print_help() {
     println!("Heiwa — BYOK terminal agent");
     println!();
@@ -927,6 +1036,8 @@ fn print_help() {
     println!("  auto status|create|tick       Manage local background automations");
     println!("  approvals list|show|decide    Manage local approval packets");
     println!("  mail status|accounts          Mail.app metadata-only bridge probe");
+    println!("  setup [--name <name>]         First-run setup: identity, provider, readiness");
+    println!("  whoami                        Show this installation's local identity");
     println!("  ask <prompt>                  Run one non-interactive turn and print the reply");
     println!("  route preview <prompt>        Preview DREX routing without execution");
     println!("  session attach                Attach to a Heiwa session");

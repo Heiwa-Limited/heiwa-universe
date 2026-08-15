@@ -44,6 +44,39 @@ commit as the work it records.
 | L1.7 | Credential resolution on a machine with no OS keychain | `resolve_secret` falls back to the provider's conventional variable (`ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `GEMINI_API_KEY`/`GOOGLE_API_KEY`, `OPENROUTER_API_KEY`); stored secrets still win. Base URLs accept `ANTHROPIC_BASE_URL`/`OPENAI_BASE_URL`/`GEMINI_BASE_URL` for gateways | `crates/heiwa_provider/src/registry.rs`, `routing.rs` | L1.1 | 4 secret-resolution tests; exercised by the harness | done |
 | L1.8 | Non-interactive turn entry point | `heiwa ask <prompt>` runs one turn through the real operator pipeline and prints the reply; the fresh-install contract is asserted against it rather than against a reconstruction of it | `apps/heiwa_shell/src/main.rs` | L1.5 | fresh-install harness | done |
 
+## L2 — Onboarding and per-user identity
+
+Roadmap scope: "First run establishes a local user identity, a configuration
+root, and at least one provider account, entirely inside the application."
+
+**The roadmap's Verification section defines criteria for L0, L1, L3 and L4
+and none for L2.** The criterion below was chosen to match L2's own wording
+and is enforced by `scripts/check_l2_acceptance.sh`: *the application itself
+takes a user from an empty state root to a completed turn, using only what it
+told them to do.* Every step drives the shipped binary, so a remedy the app
+prints that does not work fails the gate.
+
+**Audit finding.** The roadmap names `packages/heiwa_identity` as the starting
+point. It is Python, resolves identity from the *monorepo root* — the
+single-seat pattern L0 removed — reads `config/identities/persona/user.md` out
+of the repository, and no application code imports it (consumers are
+`heiwa_sdk`, `heiwa_cli`, and two test scripts). It cannot serve "entirely
+inside the application", so L2 identity is a new Rust crate on ConfigRoot. The
+Python package is left alone; nothing was ported from it.
+
+**Open decision.** Whether identity is also account-backed is the same fork as
+D1 and stays open. Identity is purely local, versioned, and contacts nothing;
+account backing arrives as an added field, not a rewrite.
+
+| # | Requirement (roadmap) | Implementation tasks | Files/modules | Depends on | Verification | Status |
+|---|---|---|---|---|---|---|
+| L2.1 | Local per-installation identity | `crates/heiwa_identity`: stable installation id, display name, `created_at`, schema version, under ConfigRoot's strict root. Idempotent — re-running setup never re-mints, since connector credentials will hang off the id. A record from a newer schema is refused rather than overwritten. Clock and id generator are injected, so the tests are reproducible | `crates/heiwa_identity/src/lib.rs` | L0 ConfigRoot | 8 unit tests; L2 gate check 3 (no repo-relative or lenient resolution) | done |
+| L2.2 | Onboarding state, one implementation | `onboarding.rs`: pure projection over (state root, identity, routable account) reusing L1 `FleetHealth`. Every gap carries a remedy; gaps are ordered by dependency so a user is never sent to do something that cannot work yet | `crates/heiwa_identity/src/onboarding.rs` | L1.4, L2.1 | 8 unit tests; L2 gate check 4 (no second readiness decider) | done |
+| L2.3 | First run inside the application — CLI | `heiwa setup [--name]` establishes identity, reports every remaining gap with its remedy, and exits non-zero while incomplete so an installer or CI can branch on it. `heiwa whoami` shows the identity | `apps/heiwa_shell/src/main.rs` | L2.2 | first-run harness | done |
+| L2.4 | First run inside the application — desktop | `FirstRun` overlay over the shell (onboarding gates the app; it is not an eleventh surface, and the rail keeps its ten). Renders the same projection the CLI prints, and can close the identity gap in-window. Undefined state renders the shell rather than blocking, so a slow provider probe does not read as a broken app | `apps/heiwa_app/desktop/src/shell/FirstRun.tsx`, `src-tauri/src/onboarding.rs` | L2.2 | 4 shell tests; 42 seam tests still unmodified | done |
+| L2.5 | Headless BYOK: a first account without a keychain | `register_env_key_accounts` adopts a provider key the machine already carries. Found while building the harness: `auth add-key` stores through the OS keychain, which a container has none of, and L1's environment fallback only resolved secrets for accounts that *already existed* — so a headless machine had no way to register its first account at all | `crates/heiwa_provider/src/detect/mod.rs`, `registry.rs` | L1.7 | 3 unit tests; exercised by the first-run harness | done |
+| L2.6 | Acceptance gate | `scripts/check_l2_acceptance.sh`: identity tests, first-run harness, no repo-relative identity resolution, single readiness implementation. Checks 3 and 4 verified by planting each defect and watching the gate fail | `scripts/check_l2_acceptance.sh` | L2.1–L2.5 | gate passes at HEAD | done |
+
 ## L1 review findings and repairs (2026-08-14)
 
 An independent review of the L1 commit found that L1 was **not** complete when

@@ -112,12 +112,54 @@ fn register_installed_clis(
     added
 }
 
+/// Register an API-key account for each provider whose conventional variable
+/// is set and that has no account yet.
+///
+/// This is the headless BYOK path. `auth add-key` stores the secret through
+/// the OS keychain, which a container or CI runner does not have, and the
+/// keychain-or-environment fallback in `resolve_secret` only applies to an
+/// account that already exists — so before this, a machine with no keychain
+/// had no way to register its first account at all.
+///
+/// The account is `NeedsAuth`, not `Connected`: a key being present is not
+/// evidence of what it can serve. Verification populates the inventory.
+fn register_env_key_accounts(
+    registry: &mut AccountRegistry,
+    env: impl Fn(&str) -> Option<String>,
+) -> Vec<String> {
+    let mut added = Vec::new();
+    for (provider, rate_group) in crate::registry::ENV_KEY_PROVIDERS {
+        let has_key = crate::registry::key_env_vars(provider)
+            .iter()
+            .any(|name| env(name).is_some_and(|value| !value.trim().is_empty()));
+        let already_registered = registry
+            .accounts_for(provider)
+            .iter()
+            .any(|account| matches!(account.credential, crate::registry::Credential::ApiKey));
+        if !has_key || already_registered {
+            continue;
+        }
+        let account_id = format!("{provider}-api-1");
+        registry.upsert(ProviderAccount {
+            account_id: account_id.clone(),
+            provider: provider.to_string(),
+            credential: crate::registry::Credential::ApiKey,
+            rate_group: rate_group.to_string(),
+            status: AccountStatus::NeedsAuth,
+            models: Vec::new(),
+        });
+        added.push(account_id);
+    }
+    added
+}
+
 /// Auto-discover local providers and refresh model inventories for all
 /// connected accounts.
 ///
 /// Discovers:
 /// - Ollama on localhost:11434
 /// - Provider CLIs present on PATH, as optional account kinds
+/// - API keys the environment already carries, for machines with no keychain
 pub async fn auto_discover(registry: &mut AccountRegistry) -> Vec<String> {
     let mut changes = Vec::new();
 
@@ -140,6 +182,24 @@ pub async fn auto_discover(registry: &mut AccountRegistry) -> Vec<String> {
         register_installed_clis(registry, |binary| crate::resolve_command(binary).is_some())
     {
         changes.push(format!("Registered provider CLI account: {account_id}"));
+    }
+
+    // --- Environment credential discovery ---
+    // A key the machine already carries is a credential the user supplied,
+    // not one Heiwa invented. Newly registered accounts are verified below so
+    // their inventory comes from the provider rather than from a guess.
+    let from_env = register_env_key_accounts(registry, |name| std::env::var(name).ok());
+    for account_id in &from_env {
+        changes.push(format!(
+            "Registered API key account from environment: {account_id}"
+        ));
+    }
+    for account_id in from_env {
+        if let Some(account) = registry.get_mut(&account_id) {
+            // A failure here is recorded on the account as a health state;
+            // discovery itself does not fail because one probe did.
+            let _ = verify_api_key(account).await;
+        }
     }
 
     // Probe all Ollama accounts
@@ -365,6 +425,51 @@ fn openrouter_capability_class(id: &str) -> u8 {
 mod tests {
     use super::*;
     use crate::registry::InventoryTruth;
+
+    #[test]
+    fn a_provider_key_in_the_environment_registers_an_account() {
+        // Without this, BYOK cannot complete first run on a machine with no
+        // OS keychain: `auth add-key` stores through the keychain, and the
+        // environment fallback only resolves secrets for accounts that
+        // already exist — so there was no way to get the first account.
+        let mut registry = AccountRegistry::default();
+        let env = |name: &str| (name == "ANTHROPIC_API_KEY").then(|| "sk-ant-x".to_string());
+
+        let added = register_env_key_accounts(&mut registry, env);
+
+        assert_eq!(added, vec!["anthropic-api-1".to_string()]);
+        let account = registry.get("anthropic-api-1").expect("registered");
+        assert!(matches!(
+            account.credential,
+            crate::registry::Credential::ApiKey
+        ));
+        assert_eq!(account.provider, "anthropic");
+        // Not Connected: the key is present, but nothing has verified it or
+        // learned what it can serve. Claiming Connected would invent
+        // inventory, which is the thing this crate does not do.
+        assert_eq!(account.status, AccountStatus::NeedsAuth);
+    }
+
+    #[test]
+    fn an_environment_key_does_not_duplicate_an_account_the_user_already_added() {
+        let mut registry = AccountRegistry::default();
+        let env = |name: &str| (name == "ANTHROPIC_API_KEY").then(|| "sk-ant-x".to_string());
+        register_env_key_accounts(&mut registry, env);
+
+        let again = register_env_key_accounts(&mut registry, env);
+
+        assert!(again.is_empty());
+        assert_eq!(registry.accounts_for("anthropic").len(), 1);
+    }
+
+    #[test]
+    fn an_empty_environment_variable_is_not_a_credential() {
+        let mut registry = AccountRegistry::default();
+        let env = |name: &str| (name == "ANTHROPIC_API_KEY").then(|| "   ".to_string());
+
+        assert!(register_env_key_accounts(&mut registry, env).is_empty());
+        assert!(registry.accounts.is_empty());
+    }
 
     #[test]
     fn cli_discovery_registers_only_the_binaries_that_are_actually_present() {

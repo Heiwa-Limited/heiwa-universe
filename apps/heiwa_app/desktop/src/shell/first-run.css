@@ -1,0 +1,140 @@
+/* First run, over the shell. Tokens only — no literal colors. */
+
+.first-run {
+  position: fixed;
+  inset: 0;
+  z-index: 100;
+  display: grid;
+  place-items: center;
+  padding: var(--space-8);
+  background: var(--surface-scrim);
+  backdrop-filter: blur(6px);
+}
+
+.first-run-panel {
+  width: min(560px, 100%);
+  max-height: 100%;
+  overflow-y: auto;
+  padding: var(--space-9);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-xl);
+  background: var(--surface-raised);
+  box-shadow: var(--elevation-3);
+}
+
+.first-run-title {
+  margin: 0;
+  font-size: 1.35rem;
+  font-weight: 600;
+  color: var(--content-primary);
+}
+
+.first-run-lede {
+  margin: var(--space-3) 0 var(--space-8);
+  color: var(--content-secondary);
+}
+
+.first-run-identity {
+  margin-bottom: var(--space-8);
+}
+
+.first-run-label {
+  display: block;
+  margin-bottom: var(--space-3);
+  color: var(--content-secondary);
+  font-size: 0.9rem;
+}
+
+.first-run-row {
+  display: flex;
+  gap: var(--space-4);
+}
+
+.first-run-input {
+  flex: 1;
+  min-width: 0;
+  padding: var(--space-4) var(--space-5);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  background: var(--surface-input);
+  color: var(--content-primary);
+  font: inherit;
+}
+
+.first-run-input:focus-visible {
+  outline: 2px solid var(--accent-ring);
+  outline-offset: 1px;
+}
+
+.first-run-button {
+  padding: var(--space-4) var(--space-6);
+  border: 0;
+  border-radius: var(--radius-md);
+  background: var(--accent);
+  color: var(--accent-contrast);
+  font: inherit;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.first-run-button:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.first-run-gaps {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: grid;
+  gap: var(--space-5);
+}
+
+.first-run-gap {
+  padding: var(--space-5);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-lg);
+  background: var(--surface-overlay);
+}
+
+.first-run-step {
+  display: inline-block;
+  margin-bottom: var(--space-3);
+  color: var(--accent-alt);
+  font-size: 0.75rem;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.first-run-detail {
+  /* Account-health text is one line per account; keep the breaks and let a
+     long line scroll rather than widening the panel. */
+  margin: 0 0 var(--space-4);
+  overflow-x: auto;
+  color: var(--content-primary);
+  font: inherit;
+  white-space: pre-wrap;
+}
+
+.first-run-remedy {
+  margin: 0;
+  color: var(--content-secondary);
+  font-size: 0.9rem;
+}
+
+.first-run-recheck {
+  /* Secondary action: it must still read as a button. Background alone does
+     not carry that in the light set, where the input surface and the panel
+     are nearly the same value. */
+  margin-top: var(--space-8);
+  border: 1px solid var(--border-strong);
+  background: var(--surface-input);
+  color: var(--content-primary);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .first-run {
+    backdrop-filter: none;
+  }
+}

@@ -1,9 +1,11 @@
-import { createEffect, on } from "solid-js";
+import { createEffect, on, Show } from "solid-js";
 import { Dynamic } from "solid-js/web";
 import { AppProvider, useApp, type AppState } from "./state/app";
 import { Composer } from "./shell/Composer";
+import { FirstRun } from "./shell/FirstRun";
 import { Rail } from "./shell/Rail";
 import { assertRegistryComplete, surfaceById } from "./surfaces/registry";
+import type { OnboardingState } from "./state/types";
 import "./theme/tokens.css";
 import "./theme/base.css";
 import "./shell/shell.css";
@@ -43,10 +45,35 @@ function Shell() {
   );
 }
 
-export function App(props: { state: AppState }) {
+export type AppProps = {
+  state: AppState;
+  /**
+   * First-run state from `heiwa_identity::onboarding`, or undefined while it
+   * is still being fetched. Undefined renders the shell: blocking on the
+   * projection would make a slow provider probe look like a broken app, and
+   * the overlay appears the moment the answer arrives.
+   */
+  onboarding?: OnboardingState;
+  onEstablishIdentity?: (displayName: string) => void | Promise<void>;
+  onRecheckOnboarding?: () => void | Promise<void>;
+};
+
+export function App(props: AppProps) {
   return (
     <AppProvider state={props.state}>
       <Shell />
+      {/*
+        Over the shell, not instead of it — onboarding gates the application
+        rather than being a place inside it, and the surfaces behind stay
+        mounted so nothing reloads when the last gap closes.
+      */}
+      <Show when={props.onboarding && !props.onboarding.complete}>
+        <FirstRun
+          state={props.onboarding!}
+          onEstablishIdentity={(name) => props.onEstablishIdentity?.(name)}
+          onRecheck={() => props.onRecheckOnboarding?.()}
+        />
+      </Show>
     </AppProvider>
   );
 }
