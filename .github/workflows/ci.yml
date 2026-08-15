@@ -4,18 +4,19 @@ name: Heiwa CI
 #
 #   * the sub-minute feedback lane (everything except the Rust jobs), bounded at
 #     one minute per job by scripts/check_ci_job_deadlines.rb
-#   * the bounded Rust promotion lane (rust-tests, rust-static), which compiles
-#     and therefore cannot be sub-minute; it is capped at 20 minutes and warmed
+#   * the bounded compile lane (rust-tests, rust-static, desktop-app), which
+#     compiles and therefore cannot be sub-minute; capped at 20 minutes, warmed
 #     by the sccache GitHub Actions cache seeded on protected `main`
 #
 # `Rust Source Policy` is the aggregate required status check. Branch protection
 # on `main` pins that context name, so it must keep reporting even when the
 # underlying Rust jobs are renamed or re-sharded.
 #
-# Runner note: these jobs previously targeted `blacksmith-16vcpu-ubuntu-2404`.
-# That label was never picked up by a runner (jobs sat queued indefinitely, and
-# `timeout-minutes` does not bound queue time), so the lanes run on
-# GitHub-hosted runners until Blacksmith is proven for this org.
+# Runner note: these jobs run on `blacksmith-4vcpu-ubuntu-2404` since PR #68.
+# An earlier attempt at `blacksmith-16vcpu-ubuntu-2404` was never picked up by
+# a runner — jobs sat queued indefinitely, and `timeout-minutes` does not bound
+# queue time — which is why scripts/check_ci_job_deadlines.rb requires a label
+# to be proven before it may be used.
 on:
   pull_request:
     branches: ["main"]
