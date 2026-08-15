@@ -78,6 +78,17 @@ fn classify(account: &ProviderAccount) -> (HealthState, String) {
     }
 
     match &account.status {
+        // Connected with nothing to offer is not usable. It happens on a
+        // normal path — add a key while offline, or during a provider 5xx,
+        // and discovery leaves the account Connected with no inventory —
+        // and routing then finds no model and reports "no working adapters"
+        // without ever naming the account or what to do about it.
+        AccountStatus::Connected if account.models.is_empty() => (
+            HealthState::Unreachable,
+            "connected but no models have been detected yet; re-add the key \
+             (heiwa auth add-key) to probe the provider's model list"
+                .to_string(),
+        ),
         AccountStatus::Connected => (HealthState::Healthy, String::new()),
         AccountStatus::NeedsAuth => (
             HealthState::Unauthenticated,
@@ -225,14 +236,59 @@ mod tests {
         }
     }
 
+    /// An account with something to offer. Health treats a Connected account
+    /// with an empty inventory as unusable, so a fixture standing in for a
+    /// working account has to carry a model.
+    fn stocked(id: &str, provider: &str, credential: Credential) -> ProviderAccount {
+        let mut account = account(id, provider, credential);
+        account.models = vec![crate::registry::DetectedModel {
+            model_id: "a-model".to_string(),
+            provider_model_id: "a-model".to_string(),
+            provider: provider.to_string(),
+            account_id: id.to_string(),
+            rate_group: account.rate_group.clone(),
+            capability_class: 4,
+            context_window: 200_000,
+            supports_streaming: true,
+            supports_tools: true,
+            supports_vision: false,
+            supports_audio: false,
+            cost_per_1k_input: 0.0,
+            cost_per_1k_output: 0.0,
+            inventory_truth: crate::registry::InventoryTruth::Verified,
+        }];
+        account
+    }
+
     #[test]
     fn a_connected_api_key_account_is_routable() {
         let report =
-            AccountHealth::project(&account("anthropic-api-1", "anthropic", Credential::ApiKey));
+            AccountHealth::project(&stocked("anthropic-api-1", "anthropic", Credential::ApiKey));
         assert_eq!(report.state, HealthState::Healthy);
         assert!(report.routable);
         assert_eq!(report.account_id, "anthropic-api-1");
         assert_eq!(report.credential_kind, "api_key");
+    }
+
+    #[test]
+    fn a_connected_account_with_no_models_is_reported_rather_than_silently_dead() {
+        // Reachable from a normal flow: add a valid key while offline, or
+        // during a provider 5xx. Routing found no model and told the user
+        // "no models with working adapters", naming neither the account nor
+        // a way out, and nothing re-probed the inventory afterwards.
+        let account = account("anthropic-api-1", "anthropic", Credential::ApiKey);
+        assert!(account.models.is_empty());
+
+        let report = AccountHealth::project(&account);
+
+        assert!(!report.routable);
+        assert!(
+            report.detail.contains("no models"),
+            "the reason must name the empty inventory: {}",
+            report.detail
+        );
+        let fleet = FleetHealth::project(std::slice::from_ref(&account));
+        assert!(fleet.guidance().contains("anthropic-api-1"));
     }
 
     #[test]
@@ -331,8 +387,7 @@ mod tests {
 
     #[test]
     fn the_fleet_projection_partitions_routable_from_skipped() {
-        let mut healthy = account("anthropic-api-1", "anthropic", Credential::ApiKey);
-        healthy.models = vec![];
+        let healthy = stocked("anthropic-api-1", "anthropic", Credential::ApiKey);
         let mut broken = account("openai-api-1", "openai", Credential::ApiKey);
         broken.status = AccountStatus::Error("Invalid API key".to_string());
 
@@ -368,7 +423,7 @@ mod tests {
     #[test]
     fn guidance_is_silent_when_a_routable_account_exists() {
         let fleet =
-            FleetHealth::project(&[account("anthropic-api-1", "anthropic", Credential::ApiKey)]);
+            FleetHealth::project(&[stocked("anthropic-api-1", "anthropic", Credential::ApiKey)]);
         assert!(fleet.guidance().is_empty());
     }
 }

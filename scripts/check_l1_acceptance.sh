@@ -6,9 +6,11 @@ set -euo pipefail
 # Deterministic checks:
 #   1. heiwa-provider unit tests pass (direct-API adapters included)
 #   2. direct-API adapter modules exist for the three CLI-dependent families
-#   3. fresh-install harness passes: the shipped `heiwa` binary, run with no
-#      provider CLI reachable, no keychain, no local runtime, and one API key,
-#      completes a turn against a loopback mock and prints the model's text
+#   3. fresh-install harness passes: the shipped `heiwa` binary, run with an
+#      emptied PATH and no system bin dirs, no reachable local runtime, and
+#      one API key, completes a turn against a loopback mock, prints the
+#      model's text, sends the prompt once, and registers no CLI account.
+#      Covers the Anthropic wire format only
 #   4. zero-provider state is usable: no accounts yields actionable guidance,
 #      not a crash (asserted inside the harness)
 #   5. adapter selection is not duplicated in the shell binary
@@ -39,11 +41,12 @@ else
 fi
 
 # ── 3+4. Fresh-install harness ──────────────────────────────────────────────
-# The harness spawns the built `heiwa` binary with an emptied PATH, a temp
-# state root holding one API-key account, the key in the environment (no
-# keychain), and both the provider and the local runtime pointed at loopback.
-# It asserts the model's text reaches stdout and that the request carried the
-# user's key. It also asserts the zero-account guidance path.
+# The harness spawns the built `heiwa` binary with an emptied PATH and empty
+# HEIWA_BIN_DIRS, a temp state root holding one API-key account, the key in
+# the environment, and both the provider and the local runtime pointed at
+# loopback. It asserts the model's text reaches stdout, the request carried
+# the key exactly once, and no provider-CLI account was registered. It also
+# asserts the zero-account guidance path.
 if [[ -f "apps/heiwa_shell/tests/fresh_install.rs" ]]; then
   ok "fresh-install harness present"
   # The harness drives the binary, so it must exist before the test runs.

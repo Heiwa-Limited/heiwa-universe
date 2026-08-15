@@ -20,18 +20,24 @@
   installed: direct-API adapters for the Anthropic, OpenAI, and Google
   families run alongside the CLI adapters.
   `apps/heiwa_shell/tests/fresh_install.rs` proves this by running the built
-  `heiwa` binary with an emptied `PATH`, a temp state root, no keychain, and
-  no local runtime, and asserting the model's text reaches stdout and the
-  request carried the user's key. Keys resolve from the OS keychain first and
-  the provider's conventional environment variable otherwise, so a container
-  or CI runner with no keychain still works.
+  `heiwa` binary with an emptied `PATH`, `HEIWA_BIN_DIRS` empty so no system
+  directory is probed, a temp state root, and no reachable local runtime. It
+  asserts the model's text reaches stdout, the request carried the user's
+  key exactly once, and the run registered no provider-CLI account. Keys
+  resolve from the OS keychain first and the provider's conventional
+  environment variable otherwise, so a container or CI runner with no
+  keychain works; the harness uses a distinct account id so it reads no real
+  keychain entry.
   Scope: the harness covers the Anthropic wire format. OpenAI and Google have
   unit-level wire coverage but are not driven through the binary.
 - Provider failure is a routing constraint: `heiwa_provider::health` reports
   which accounts are usable and why one was skipped, and a zero-provider
-  install opens with actionable guidance rather than an error. An account is
-  judged on the path that executes the turn, so a local runtime whose daemon
-  answers but whose binary is absent is skipped rather than failing the turn.
+  install opens with actionable guidance rather than an error. Routing reads
+  that projection: `AccountRegistry::routable_models` filters on health, not
+  on stored status, so a CLI seat or local runtime whose executable is gone
+  offers no route instead of failing the turn on an OS error. A connected
+  account with an empty inventory is reported with a way out rather than
+  silently yielding no models.
   Credential rejection is classified from the HTTP status, never by matching
   text in a provider's response body.
 - The desktop shell is a SolidJS component layer: ten surface modules behind a

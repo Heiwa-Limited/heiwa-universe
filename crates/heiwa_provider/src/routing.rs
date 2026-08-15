@@ -90,16 +90,32 @@ pub fn routable_api_key_account_for(
         })
         .collect();
 
-    candidates
-        .iter()
-        .find(|account| {
-            account
-                .models
-                .iter()
-                .any(|model| model.provider_model_id == model_id || model.model_id == model_id)
-        })
-        .or(candidates.first())
-        .map(|account| (*account).clone())
+    if let Some(serving) = candidates.iter().find(|account| {
+        account
+            .models
+            .iter()
+            .any(|model| model.provider_model_id == model_id || model.model_id == model_id)
+    }) {
+        return Some((*serving).clone());
+    }
+
+    // No API-key account lists this model. If some *other* account does — a
+    // subscription seat, say — that account owns the model, and falling back
+    // to a metered key would move the charge to the user's card while quota
+    // still debits the seat. Only fall back when nothing claims the model.
+    let claimed_elsewhere = !model_id.is_empty()
+        && registry.accounts.iter().any(|account| {
+            !matches!(account.credential, Credential::ApiKey)
+                && account
+                    .models
+                    .iter()
+                    .any(|model| model.provider_model_id == model_id || model.model_id == model_id)
+        });
+    if claimed_elsewhere {
+        return None;
+    }
+
+    candidates.first().map(|account| (*account).clone())
 }
 
 /// Environment variable that retargets a provider's API base URL.
@@ -114,6 +130,16 @@ fn base_url_env_var(canonical_provider: &str) -> Option<&'static str> {
         "gemini" => Some("GEMINI_BASE_URL"),
         _ => None,
     }
+}
+
+/// The base URL a provider's calls should use.
+///
+/// Every call for a provider must agree on this. Verification used to
+/// hardcode the vendor default while turns honored the override, so a user
+/// on a gateway had their gateway credential transmitted to the vendor,
+/// rejected, and their account permanently marked invalid.
+pub fn api_base_url(provider: &str, default: &str) -> String {
+    env_base_url(canonical_provider_id(provider)).unwrap_or_else(|| default.to_string())
 }
 
 /// Base URL override for a provider, from the environment.
@@ -223,7 +249,10 @@ mod tests {
     #[test]
     fn picks_a_healthy_api_key_account_for_the_route() {
         let registry = AccountRegistry {
-            accounts: vec![api_key_account("anthropic", AccountStatus::Connected)],
+            accounts: vec![with_models(
+                api_key_account("anthropic", AccountStatus::Connected),
+                &["claude-opus-5"],
+            )],
         };
         let account = routable_api_key_account(&registry, "claude").expect("account");
         assert_eq!(account.account_id, "anthropic-api-1");
@@ -311,6 +340,35 @@ mod tests {
             .expect("account");
 
         assert_eq!(account.account_id, "anthropic-work");
+    }
+
+    #[test]
+    fn a_subscription_seats_model_does_not_get_billed_to_a_metered_key() {
+        // A user with both a Claude Code seat and an Anthropic key. Routing
+        // picks a model the seat serves; taking "any healthy API-key account"
+        // would run it on the metered key while quota still debits the seat.
+        let mut seat = named("anthropic-cli", "anthropic");
+        seat.credential = Credential::OauthCli {
+            binary: "claude".to_string(),
+        };
+        seat.rate_group = "claude_code".to_string();
+        let seat = with_models(seat, &["claude-fable-5"]);
+        let key = with_models(named("anthropic-api-1", "anthropic"), &["claude-opus-5"]);
+        let registry = AccountRegistry {
+            accounts: vec![seat, key],
+        };
+
+        assert!(
+            routable_api_key_account_for(&registry, "claude", "claude-fable-5").is_none(),
+            "a seat's model must not fall back to a metered key"
+        );
+        // The key's own model still routes to the key.
+        assert_eq!(
+            routable_api_key_account_for(&registry, "claude", "claude-opus-5")
+                .expect("account")
+                .account_id,
+            "anthropic-api-1"
+        );
     }
 
     #[test]

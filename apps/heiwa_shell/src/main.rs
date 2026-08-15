@@ -1090,8 +1090,10 @@ async fn register_current_device() -> Result<()> {
 pub(crate) fn get_live_model_tiers(
     registry: &heiwa_provider::AccountRegistry,
 ) -> Vec<heiwa_protocol::ModelTier> {
+    // Health-filtered, not stored-status-filtered: a route is only real if
+    // the account behind it can execute a turn right now.
     let mut models = registry
-        .all_models()
+        .routable_models()
         .into_iter()
         .filter(|m| provider_supports_loop_adapter(&m.provider))
         .collect::<Vec<_>>();
@@ -2408,11 +2410,20 @@ fn build_messages_from_transcript(
         role: Role::System,
         content: working_context_prompt(pins),
     }];
-    messages.extend(transcript_messages);
-    messages.push(Message {
-        role: Role::User,
-        content: current_input.to_string(),
+    // The turn is persisted before the prompt is built, so the transcript's
+    // last entry is usually the message being sent. Appending it again sent
+    // the newest message twice — billed twice, and the one most likely to
+    // carry pasted context. Append only when it is not already there.
+    let already_present = transcript_messages.last().is_some_and(|message| {
+        matches!(message.role, Role::User) && message.content == current_input
     });
+    messages.extend(transcript_messages);
+    if !already_present {
+        messages.push(Message {
+            role: Role::User,
+            content: current_input.to_string(),
+        });
+    }
     messages
 }
 
@@ -4764,6 +4775,45 @@ mod tests {
     }
 
     #[test]
+    fn a_cli_seat_whose_binary_is_gone_offers_no_route() {
+        // Health said NotInstalled and nothing asked: the tier filter read
+        // stored status only, so a turn was routed to an adapter that could
+        // not start and died on a raw OS error instead of routing elsewhere.
+        let registry = heiwa_provider::AccountRegistry {
+            accounts: vec![heiwa_provider::ProviderAccount {
+                account_id: "anthropic-cli".to_string(),
+                provider: "claude-code".to_string(),
+                credential: heiwa_provider::Credential::OauthCli {
+                    binary: "definitely-not-installed-xyz".to_string(),
+                },
+                rate_group: "claude_code".to_string(),
+                status: heiwa_provider::AccountStatus::Connected,
+                models: vec![heiwa_provider::DetectedModel {
+                    model_id: "claude/sonnet-4-6".to_string(),
+                    provider_model_id: "claude-sonnet-4-6".to_string(),
+                    provider: "claude-code".to_string(),
+                    account_id: "anthropic-cli".to_string(),
+                    rate_group: "claude_code".to_string(),
+                    capability_class: 4,
+                    context_window: 200_000,
+                    supports_streaming: true,
+                    supports_tools: true,
+                    supports_vision: false,
+                    supports_audio: false,
+                    cost_per_1k_input: 0.003,
+                    cost_per_1k_output: 0.015,
+                    inventory_truth: heiwa_provider::InventoryTruth::Inferred,
+                }],
+            }],
+        };
+
+        assert!(
+            super::get_live_model_tiers(&registry).is_empty(),
+            "an account whose executor is missing must not be offered as a route"
+        );
+    }
+
+    #[test]
     fn live_model_tiers_canonicalize_cli_provider_ids() {
         let registry = heiwa_provider::AccountRegistry {
             accounts: vec![heiwa_provider::ProviderAccount {
@@ -5531,6 +5581,60 @@ mod tests {
             .content
             .contains("current directory:"));
         assert_eq!(messages.last().unwrap().content, "status");
+    }
+
+    #[test]
+    fn the_current_prompt_is_not_repeated_when_the_transcript_already_holds_it() {
+        // The turn is persisted to the transcript before the prompt is built,
+        // so the transcript's last entry is the message being sent. Appending
+        // it again billed the user twice for the newest message on every
+        // turn — the one carrying pasted context.
+        use heiwa_protocol::TranscriptBlock;
+        let pins = super::SessionPins::new();
+
+        let messages = super::build_messages_from_transcript(
+            &[
+                TranscriptBlock::User("First question.".into()),
+                TranscriptBlock::Assistant("An answer.".into()),
+                TranscriptBlock::User("Second question.".into()),
+            ],
+            "Second question.",
+            &pins,
+        );
+
+        let asked: Vec<&str> = messages
+            .iter()
+            .filter(|message| {
+                matches!(message.role, heiwa_provider::adapter::Role::User)
+                    && message.content == "Second question."
+            })
+            .map(|message| message.content.as_str())
+            .collect();
+        assert_eq!(
+            asked.len(),
+            1,
+            "prompt sent {} times: {messages:?}",
+            asked.len()
+        );
+        assert_eq!(messages.last().unwrap().content, "Second question.");
+    }
+
+    #[test]
+    fn the_current_prompt_is_appended_when_the_transcript_does_not_hold_it() {
+        use heiwa_protocol::TranscriptBlock;
+        let pins = super::SessionPins::new();
+
+        let messages = super::build_messages_from_transcript(
+            &[TranscriptBlock::Assistant("An answer.".into())],
+            "A new question.",
+            &pins,
+        );
+
+        assert_eq!(messages.last().unwrap().content, "A new question.");
+        assert!(matches!(
+            messages.last().unwrap().role,
+            heiwa_provider::adapter::Role::User
+        ));
     }
 
     #[test]

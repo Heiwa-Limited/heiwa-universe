@@ -14,10 +14,14 @@
 //! state root, set at spawn rather than mutated into this process's global
 //! environment where parallel tests would race.
 //!
-//! Everything is hermetic — a temp state root, an emptied `PATH`, and a
-//! loopback mock speaking the Anthropic Messages API wire format. No network,
-//! no keychain, no installed CLI. That is the machine a stranger installs
-//! Heiwa on.
+//! Everything is hermetic — a temp state root, an emptied `PATH`, no system
+//! bin directories, a dead local-runtime endpoint, and a loopback mock
+//! speaking the Anthropic Messages API wire format. No network, no reachable
+//! CLI, and an account id that matches nothing in the developer's keychain.
+//!
+//! Scope, stated plainly: this drives the Anthropic wire format. The OpenAI
+//! and Google adapters have unit-level wire coverage but are not driven
+//! through the binary.
 
 use heiwa_provider::health::{FleetHealth, HealthState};
 use heiwa_provider::registry::{
@@ -27,7 +31,7 @@ use heiwa_provider::routing::{resolve_adapter_with, routable_api_key_account};
 use std::collections::HashMap;
 use std::io::{BufRead, BufReader, Write};
 use std::net::{TcpListener, TcpStream};
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::process::Command;
 use std::sync::mpsc as std_mpsc;
 use std::sync::{Arc, Mutex};
@@ -182,7 +186,7 @@ fn handle(
 fn single_api_key_registry() -> AccountRegistry {
     AccountRegistry {
         accounts: vec![ProviderAccount {
-            account_id: "anthropic-api-1".to_string(),
+            account_id: "anthropic-api-harness".to_string(),
             provider: "anthropic".to_string(),
             credential: Credential::ApiKey,
             rate_group: "anthropic_api".to_string(),
@@ -191,7 +195,7 @@ fn single_api_key_registry() -> AccountRegistry {
                 model_id: "claude-opus-5".to_string(),
                 provider_model_id: "claude-opus-5".to_string(),
                 provider: "anthropic".to_string(),
-                account_id: "anthropic-api-1".to_string(),
+                account_id: "anthropic-api-harness".to_string(),
                 rate_group: "anthropic_api".to_string(),
                 capability_class: 5,
                 context_window: 1_000_000,
@@ -214,15 +218,34 @@ fn single_api_key_registry() -> AccountRegistry {
 /// `/opt/homebrew/bin` and friends, so on a developer Mac the real `claude`
 /// binary would still be found and the harness would be testing the CLI path
 /// while claiming to test the fresh-install one.
-fn assert_no_provider_cli_reachable(home: &Path) {
+fn assert_no_provider_cli_reachable(install: &FreshInstall) {
+    // Resolve exactly as the child does: same home, same runtime root, same
+    // PATH, same system directories. Passing empty lists here instead would
+    // make the assertion true by construction — it could never fail, and the
+    // child would go on finding /usr/local/bin/claude.
+    let path = install.empty_bin.to_string_lossy().into_owned();
+    let system_dirs: Vec<&str> = HARNESS_BIN_DIRS
+        .split(':')
+        .filter(|d| !d.is_empty())
+        .collect();
     for binary in PROVIDER_CLIS {
         assert!(
-            heiwa_provider::resolve_command_in(binary, home, &home.join(".heiwa"), "", &[])
-                .is_none(),
+            heiwa_provider::resolve_command_in(
+                binary,
+                &install.home,
+                &install.state_dir,
+                &path,
+                &system_dirs,
+            )
+            .is_none(),
             "fresh-install harness requires no reachable provider CLI, found `{binary}`"
         );
     }
 }
+
+/// The child probes only its `PATH`. `HEIWA_BIN_DIRS` set empty removes the
+/// built-in system directories, which an emptied `PATH` alone does not.
+const HARNESS_BIN_DIRS: &str = "";
 
 /// Path to the `heiwa` binary this test run built.
 ///
@@ -300,6 +323,11 @@ impl FreshInstall {
             // testing the direct-API path it exists to test. Port 1 never
             // listens.
             .env("HEIWA_OLLAMA_BASE", "http://127.0.0.1:1")
+            // No provider CLI is reachable. An emptied PATH is not enough:
+            // discovery also probes /opt/homebrew/bin and /usr/local/bin, so
+            // on a developer machine the real `claude` binary is found and
+            // registered, and the harness stops modelling a fresh install.
+            .env("HEIWA_BIN_DIRS", HARNESS_BIN_DIRS)
             .output()
             .expect("run the heiwa binary")
     }
@@ -311,7 +339,7 @@ impl FreshInstall {
 fn fresh_install_with_one_api_key_and_no_cli_completes_a_turn() {
     let mock = MockProvider::start();
     let install = FreshInstall::new(&single_api_key_registry());
-    assert_no_provider_cli_reachable(&install.home);
+    assert_no_provider_cli_reachable(&install);
 
     let output = install.run(&mock, &["ask", "Say hello."]);
 
@@ -329,6 +357,27 @@ fn fresh_install_with_one_api_key_and_no_cli_completes_a_turn() {
         "the assistant's text did not reach stdout:\nstdout: {stdout}\nstderr: {stderr}"
     );
 
+    // Discovery must not have found a provider CLI. Asserting on the state
+    // the child actually wrote is the only version of this check that can
+    // fail: the earlier one resolved with empty search lists, which is true
+    // for any input, while the child went on registering the real
+    // /usr/local/bin/claude it found through the built-in system directories.
+    let written: serde_json::Value = serde_json::from_str(
+        &std::fs::read_to_string(install.state_dir.join("accounts.json")).expect("registry"),
+    )
+    .expect("registry parses");
+    let minted: Vec<&str> = written["accounts"]
+        .as_array()
+        .expect("accounts array")
+        .iter()
+        .filter(|account| account["credential"]["kind"] == "oauth_cli")
+        .filter_map(|account| account["account_id"].as_str())
+        .collect();
+    assert!(
+        minted.is_empty(),
+        "a fresh install found provider CLIs: {minted:?}"
+    );
+
     // And the turn really went to the Messages API with the supplied key.
     let turn = mock
         .request_matching("POST /v1/messages")
@@ -344,7 +393,15 @@ fn fresh_install_with_one_api_key_and_no_cli_completes_a_turn() {
         "the request did not carry the user's key"
     );
     assert!(turn.body.contains("\"stream\":true"));
-    assert!(turn.body.contains("Say hello."));
+    // Count, not contains: the prompt was being sent twice, and a presence
+    // check passed on the doubled body while the user was billed for both.
+    assert_eq!(
+        turn.body.matches("Say hello.").count(),
+        1,
+        "the prompt was sent {} times: {}",
+        turn.body.matches("Say hello.").count(),
+        turn.body
+    );
 }
 
 /// The turn must reach the provider *because* routing chose the API key,
@@ -378,7 +435,7 @@ fn fresh_install_discovers_model_inventory_from_the_provider() {
         .block_on(heiwa_provider::providers::anthropic_api::discover_models(
             HARNESS_API_KEY,
             &mock.base_url,
-            "anthropic-api-1",
+            "anthropic-api-harness",
             "anthropic_api",
         ))
         .expect("discovery succeeds");
@@ -420,7 +477,7 @@ fn an_expired_credential_is_skipped_with_a_reason_rather_than_failing_the_app() 
     let report = &fleet.reports[0];
     assert_eq!(report.state, HealthState::Unauthenticated);
     assert!(report.detail.contains("Invalid API key"));
-    assert!(fleet.guidance().contains("anthropic-api-1"));
+    assert!(fleet.guidance().contains("anthropic-api-harness"));
 }
 
 /// A rate-limited account is temporary, and says so.

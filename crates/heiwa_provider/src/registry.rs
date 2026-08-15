@@ -232,11 +232,30 @@ impl AccountRegistry {
 
     /// Every detected model across all connected accounts, sorted by
     /// rate group then capability class descending.
+    ///
+    /// Stored status only. Prefer [`routable_models`](Self::routable_models)
+    /// for anything that decides where a turn goes.
     pub fn all_models(&self) -> Vec<&DetectedModel> {
+        self.models_where(|account| account.status == AccountStatus::Connected)
+    }
+
+    /// Models that can actually serve a turn right now.
+    ///
+    /// Stored status is what a past probe recorded; health is what is true
+    /// now. An account can be stored `Connected` while the thing that
+    /// executes its turns is gone — a CLI uninstalled since the last probe,
+    /// or a local runtime whose daemon answers but whose binary does not
+    /// exist. Offering those as routes sends the turn to an adapter that
+    /// cannot start, which fails the whole turn instead of routing elsewhere.
+    pub fn routable_models(&self) -> Vec<&DetectedModel> {
+        self.models_where(|account| crate::health::AccountHealth::project(account).routable)
+    }
+
+    fn models_where(&self, usable: impl Fn(&ProviderAccount) -> bool) -> Vec<&DetectedModel> {
         let mut models: Vec<&DetectedModel> = self
             .accounts
             .iter()
-            .filter(|a| a.status == AccountStatus::Connected)
+            .filter(|account| usable(account))
             .flat_map(|a| a.models.iter())
             .collect();
         models.sort_by(|a, b| {

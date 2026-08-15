@@ -423,15 +423,37 @@ pub fn resolve_command_in(
     None
 }
 
+/// The system directories probed in addition to `PATH`.
+///
+/// `HEIWA_BIN_DIRS` replaces the built-in list (a colon-separated path list;
+/// set it empty to probe nothing beyond `PATH`). The built-ins exist because
+/// a GUI-launched process inherits a minimal `PATH` and would otherwise miss
+/// Homebrew installs — but a sandbox, a corporate image, or a test that must
+/// see no provider CLI needs to say so, and there was no way to.
+pub fn system_bin_dirs() -> Vec<String> {
+    match env::var("HEIWA_BIN_DIRS") {
+        Ok(value) => env::split_paths(&value)
+            .filter(|dir| !dir.as_os_str().is_empty())
+            .map(|dir| dir.to_string_lossy().into_owned())
+            .collect(),
+        Err(_) => DEFAULT_SYSTEM_BIN_DIRS
+            .iter()
+            .map(|dir| (*dir).to_string())
+            .collect(),
+    }
+}
+
 pub fn resolve_command(cmd: &str) -> Option<PathBuf> {
     let paths = heiwa_config::HeiwaPaths::resolve();
     let path = env::var("PATH").unwrap_or_default();
+    let system_dirs = system_bin_dirs();
+    let system_dirs: Vec<&str> = system_dirs.iter().map(String::as_str).collect();
     resolve_command_in(
         cmd,
         &paths.home_dir,
         &paths.runtime_root,
         &path,
-        DEFAULT_SYSTEM_BIN_DIRS,
+        &system_dirs,
     )
 }
 

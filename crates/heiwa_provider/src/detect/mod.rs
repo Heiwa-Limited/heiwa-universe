@@ -69,7 +69,10 @@ fn apply_discovery(
 const PROVIDER_CLIS: &[(&str, &str, &str)] = &[
     ("anthropic", "claude", "anthropic_sub"),
     ("openai", "codex", "openai_sub"),
-    ("google", "gemini", "google_sub"),
+    // `google`, not `google_sub`: heiwa_drex knows budgets for
+    // anthropic_sub/openai_sub/google, and an unknown group silently falls
+    // through to a conservative 200k ceiling.
+    ("google", "gemini", "google"),
 ];
 
 /// Register an account for each provider CLI present on this machine.
@@ -197,9 +200,15 @@ pub async fn verify_api_key(account: &mut ProviderAccount) -> anyhow::Result<()>
 /// hardcoded model id, which both invented inventory and pinned a snapshot
 /// that goes stale on every model release.
 async fn verify_anthropic(account: &mut ProviderAccount, api_key: &str) -> anyhow::Result<()> {
+    // Same base URL the turn will use: verifying against the vendor while
+    // turns go to a gateway sends the gateway's credential to the vendor.
+    let base_url = crate::routing::api_base_url(
+        "anthropic",
+        crate::providers::anthropic_api::DEFAULT_BASE_URL,
+    );
     let result = crate::providers::anthropic_api::discover_models(
         api_key,
-        crate::providers::anthropic_api::DEFAULT_BASE_URL,
+        &base_url,
         &account.account_id,
         &account.rate_group,
     )
@@ -209,9 +218,13 @@ async fn verify_anthropic(account: &mut ProviderAccount, api_key: &str) -> anyho
 
 /// Verify a Google API key by listing models.
 async fn verify_google(account: &mut ProviderAccount, api_key: &str) -> anyhow::Result<()> {
+    // Same base URL the turn will use: verifying against the vendor while
+    // turns go to a gateway sends the gateway's credential to the vendor.
+    let base_url =
+        crate::routing::api_base_url("google", crate::providers::gemini_api::DEFAULT_BASE_URL);
     let result = crate::providers::gemini_api::discover_models(
         api_key,
-        crate::providers::gemini_api::DEFAULT_BASE_URL,
+        &base_url,
         &account.account_id,
         &account.rate_group,
     )
@@ -221,9 +234,13 @@ async fn verify_google(account: &mut ProviderAccount, api_key: &str) -> anyhow::
 
 /// Verify an OpenAI API key by listing models.
 async fn verify_openai(account: &mut ProviderAccount, api_key: &str) -> anyhow::Result<()> {
+    // Same base URL the turn will use: verifying against the vendor while
+    // turns go to a gateway sends the gateway's credential to the vendor.
+    let base_url =
+        crate::routing::api_base_url("openai", crate::providers::openai_api::DEFAULT_BASE_URL);
     let result = crate::providers::openai_api::discover_models(
         api_key,
-        crate::providers::openai_api::DEFAULT_BASE_URL,
+        &base_url,
         &account.account_id,
         &account.rate_group,
     )

@@ -52,7 +52,7 @@ it was first marked done. Recorded here because the ledger claimed otherwise.
 | ID | Finding | Repair | Regression guard |
 |---|---|---|---|
 | C1 | The shell kept its own `canonical_provider_id` that never mapped vendor names onto route names, so `get_live_model_tiers` dropped every direct-API model and a user with a valid key saw "No models with working adapters". The harness could not catch it because it bypassed the turn path | Deleted the shell-local table; the shell now uses `heiwa_provider::routing` | `vendor_names_resolve_to_the_same_adapters_as_route_names`, `direct_api_accounts_survive_the_live_model_tier_filter`, L1 gate check 5 |
-| H3 | A mid-stream network error returned via `?` without emitting a terminal event, so the turn ended silently | Shared `stream::pump`; every early return emits `StreamEvent::Error` first | provider stream tests |
+| H3 | A mid-stream network error returned via `?` without emitting a terminal event, so the turn ended silently | Shared `stream::pump`: every return *after the response is in hand* emits a terminal event. The pre-pump `?`s (client build, `send()`) still return bare; `model_calls.rs` compensates, so no user-visible gap, but the module doc overstated it | provider stream tests |
 | H4 | No idle timeout: a half-open socket hung the turn indefinitely | 180s idle timeout around each chunk read | `stream.rs` |
 | H5 | Credential validity was classified by substring-matching the raw response body; an Anthropic 500 whose request id contains "401" marked a working key invalid and cleared its inventory | Discovery returns a typed `DiscoveryError` carrying the HTTP status; classification is status-driven | `a_server_error_whose_body_mentions_401_does_not_invalidate_the_key` |
 | H6 | `RateLimited` and `NotInstalled` had no producers — vocabulary without behavior | 429 now produces a rate-limit status; discovery registers installed provider CLIs as optional accounts, so a CLI that disappears projects `NotInstalled` | health + detect tests |
@@ -62,13 +62,45 @@ it was first marked done. Recorded here because the ledger claimed otherwise.
 | M10 | The harness mutated process-global `PATH`/`HOME` with no panic-safe restore, racing other tests | The harness spawns a child process with a built environment; nothing global is mutated | — |
 | M11 | The harness never reached the real turn path, and four places overstated what it proved | Harness drives the shipped binary; claims corrected here, in `fresh_install.rs`, `docs/current-capability.md`, and `check_l1_acceptance.sh` | — |
 | M12 | L1 gate check 5 asserted two files exist — it would pass on empty files | Replaced with a grep asserting the shell defines no provider alias table and does use `heiwa_provider::routing`; verified by planting the defect | L1 gate check 5 |
-| L14 | The lenient path resolver backed the identity file, so an auth token could be written under the process working directory | `save_identity` uses the strict resolver and refuses when no per-user root exists; `try_resolve_from` now counts `HEIWA_STATE_DIR`/`HEIWA_EVIDENCE_DIR` | `heiwa_config` tests |
+| L14 | The lenient path resolver backed the identity file, so an auth token could be written under the process working directory | `save_identity` uses the strict resolver and refuses when no per-user root exists. **The first fix reintroduced the defect**: `try_resolve_from` counted `HEIWA_STATE_DIR`/`HEIWA_EVIDENCE_DIR` as roots while `runtime_root` still fell back to `./.heiwa`. The runtime root is now derived from those keys when no home exists | `a_state_dir_override_with_no_home_never_resolves_under_the_working_directory` |
 
 Found by the repaired harness, not by review: a local runtime discovered over
 HTTP but executed as a subprocess could report Healthy while its binary was
 absent, and the turn died on a raw OS error instead of routing elsewhere —
-a direct violation of L1.5. Health now judges an account on the path that
-executes the turn.
+a direct violation of L1.5.
+
+## Second review (2026-08-14) — the repairs were themselves incomplete
+
+A second independent review, with wire captures against the built binary,
+found that the projection had been fixed while routing still ignored it, and
+that the harness could not fail the checks it claimed to make. Repaired:
+
+| ID | Finding | Repair | Regression guard |
+|---|---|---|---|
+| H-1 | The L14 repair reintroduced the cwd-relative root it fixed (above) | Runtime root derives from `HEIWA_STATE_DIR`/`HEIWA_EVIDENCE_DIR` when no home exists | `a_state_dir_override_with_no_home_never_resolves_under_the_working_directory` |
+| H-2 | Health had **zero** effect on routing: `get_live_model_tiers` filtered on stored status, so the `NotInstalled` work changed no route. Reproduced: `route preview` chose a CLI seat whose binary was absent, and the turn then failed | `AccountRegistry::routable_models` filters on health; tier selection uses it | `a_cli_seat_whose_binary_is_gone_offers_no_route` |
+| H-3 | The harness's no-CLI assertion resolved with empty search lists — true for any input — while the child still found `/usr/local/bin/claude` and registered it | `HEIWA_BIN_DIRS` makes the search path configurable; the harness empties it and asserts on the registry the child actually wrote. Verified by removing the isolation and watching the assertion fail | `fresh_install_with_one_api_key_and_no_cli_completes_a_turn` |
+| H-4 | The harness used account id `anthropic-api-1` — the id `add-key` mints — so it would read the developer's real key from the keychain and fail the gate for an unrelated reason | Harness uses `anthropic-api-harness` | — |
+| H-5 | Verification hardcoded the vendor base URL while turns honored the override, so a gateway user's credential was sent to the vendor, rejected, and the account permanently marked invalid | `routing::api_base_url` is shared by both paths | — |
+| H-6 | Every turn sent the prompt twice — the transcript already held it and it was appended again. Billed twice, on the message most likely to carry pasted context | Append only when the transcript does not already end with it | `the_current_prompt_is_not_repeated_when_the_transcript_already_holds_it`; harness counts occurrences on the wire |
+| H-7 | A `Connected` account with an empty inventory reported Healthy and dead-ended the turn with a message naming neither the account nor a way out | Empty inventory is `Unreachable` with a remedy in the detail | `a_connected_account_with_no_models_is_reported_rather_than_silently_dead` |
+| M-2 | Model-aware selection fell back to any healthy API-key account, so a subscription seat's model could execute on the metered key while quota debited the seat | Fall back only when no other account claims the model | `a_subscription_seats_model_does_not_get_billed_to_a_metered_key` |
+| — | CLI discovery assigned rate group `google_sub`, which `heiwa_drex` does not know — it fell through to a 200k ceiling instead of Google's 2M | Use `google` | — |
+
+Open, accepted for now (recorded rather than fixed):
+
+- `String::from_utf8_lossy` per chunk in `stream.rs` corrupts a multi-byte
+  character split across a read. Pre-existing; the decoder carries a `String`,
+  so fixing it means carrying bytes instead.
+- The L1 gate's alias-table grep covers `main.rs` and two identifier names
+  only; a table elsewhere in the shell, or under another name, passes.
+- `AccountHealth::project` does filesystem I/O per account per projection.
+- `env_base_url` accepts `http://` to any host and no route event records the
+  destination, so an ambient variable can redirect a keychain-stored key.
+- `keychain::load_secret(..).ok()` collapses "not found" and "keychain
+  locked" into `None`, silently substituting an ambient env key.
+- `SseDecoder.carry` is unbounded and there is no whole-stream timeout.
+
 
 ## Single-seat audit findings (2026-08-14, drives L0.1/L0.2)
 
