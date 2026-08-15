@@ -324,6 +324,28 @@ pub async fn api_post(path: String, body: Value) -> Result<Value, ApiErrorPayloa
         .map_err(ApiErrorPayload::from)
 }
 
+/// Whether a runtime answers on the configured port.
+///
+/// A bare TCP connect, not a health request: the supervisor polls this in a
+/// loop while waiting for startup, and an HTTP round trip per poll would be
+/// both slower and misleading — a runtime that is listening but not yet
+/// serving `/status/health` is still the one we started.
+pub fn runtime_is_reachable() -> bool {
+    let Ok(base) = runtime_base_url() else {
+        return false;
+    };
+    let Some(authority) = base.strip_prefix("http://") else {
+        return false;
+    };
+    use std::net::ToSocketAddrs;
+    let Ok(mut addrs) = authority.to_socket_addrs() else {
+        return false;
+    };
+    addrs.any(|addr| {
+        std::net::TcpStream::connect_timeout(&addr, std::time::Duration::from_millis(400)).is_ok()
+    })
+}
+
 #[tauri::command]
 pub async fn runtime_health() -> RuntimeHealth {
     let token = match machine_auth_token() {

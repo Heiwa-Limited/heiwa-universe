@@ -1,0 +1,4 @@
+
+# Runtime binary staged by the release workflow; never committed.
+resources/heiwa
+resources/heiwa.exe

@@ -77,6 +77,29 @@ account backing arrives as an added field, not a rewrite.
 | L2.5 | Headless BYOK: a first account without a keychain | `register_env_key_accounts` adopts a provider key the machine already carries. Found while building the harness: `auth add-key` stores through the OS keychain, which a container has none of, and L1's environment fallback only resolved secrets for accounts that *already existed* — so a headless machine had no way to register its first account at all | `crates/heiwa_provider/src/detect/mod.rs`, `registry.rs` | L1.7 | 3 unit tests; exercised by the first-run harness | done |
 | L2.6 | Acceptance gate | `scripts/check_l2_acceptance.sh`: identity tests, first-run harness, no repo-relative identity resolution, single readiness implementation. Checks 3 and 4 verified by planting each defect and watching the gate fail | `scripts/check_l2_acceptance.sh` | L2.1–L2.5 | gate passes at HEAD | done |
 
+## L2.5 — Distribution: the app must be an app (2026-08-15)
+
+Trajectory check against Claude Desktop and Odysseus (PewDiePie's self-hosted
+AI workspace, released 2026-05-31, ~77k GitHub stars in three weeks — Python
+/ FastAPI / SQLite / ChromaDB / Docker; Ollama, llama.cpp, vLLM; no
+telemetry). The architecture compares well and is ahead on approvals,
+receipts, and native packaging. **Distribution was not on track at all.**
+
+Findings, each verified rather than assumed:
+
+| # | Finding | Status |
+|---|---|---|
+| D-1 | `release.yml` built CLI binaries for three platforms and **no desktop bundle**. There was nothing to download and double-click | fixed: `desktop-bundle` job builds dmg/app, msi, AppImage/deb |
+| D-2 | The desktop shell proxied to `127.0.0.1:7474` and **nothing started a runtime**. Double-clicking Heiwa opened a window talking to a server that did not exist | fixed: `runtime_supervisor` spawns and supervises the runtime, adopts one already running, and stops only what it started |
+| D-3 | `ci.yml` excluded `heiwa-desktop` from both tests and clippy — the one crate a user actually runs was the one crate never tested | fixed: `desktop-app` job on macOS runs frontend typecheck + tests, crate tests, clippy `-D warnings`, and a release build |
+| D-4 | The desktop app **did not build in release at all**. Host linker (`ld-27037`) emits proc-macro dylibs with a mis-aligned LINKEDIT string pool at release optimization, which rustc then cannot `dlopen`. Reproduced after a full `cargo clean --release`, so not stale artifacts | fixed: `[profile.release.build-override] opt-level = 0` — proc-macros run at compile time only, so this costs nothing at runtime |
+| D-5 | A bundled app had no runtime to find. Resource staging plus a bundle-relative search order (sibling → macOS `Contents/Resources` → PATH) means the installed app runs the runtime it shipped with, never a mismatched one from PATH | fixed |
+
+Deliberately not done yet, and why: auto-update (needs a signing identity and
+an update endpoint — Devon's call), code signing/notarization (needs an Apple
+Developer identity), llama.cpp and vLLM runtimes, and a hardware-matched model
+recommender. None of these blocks shipping a first installable build.
+
 ## L1 review findings and repairs (2026-08-14)
 
 An independent review of the L1 commit found that L1 was **not** complete when

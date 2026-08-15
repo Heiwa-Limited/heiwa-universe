@@ -21,7 +21,9 @@ require "yaml"
 
 FAST_LANE_DEADLINE_MINUTES = 1
 COMPILE_LANE_DEADLINE_MINUTES = 20
-COMPILE_LANES = %w[rust-tests rust-static].freeze
+# desktop-app compiles the shipped app crate and its release build, so it
+# belongs in the compile lane rather than the sub-minute feedback lane.
+COMPILE_LANES = %w[rust-tests rust-static desktop-app].freeze
 PROVEN_RUNNER_LABELS = %w[ubuntu-latest].freeze
 
 path = ARGV.fetch(0, ".github/workflows/ci.yml")

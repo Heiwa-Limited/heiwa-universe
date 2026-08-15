@@ -3182,6 +3182,7 @@ dependencies = [
  "heiwa-provider",
  "heiwa_config",
  "heiwa_identity",
+ "libc",
  "reqwest 0.12.28",
  "serde",
  "serde_json",

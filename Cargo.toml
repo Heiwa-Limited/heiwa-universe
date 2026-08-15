@@ -35,3 +35,12 @@ documentation = "https://heiwa-limited.github.io/heiwa-universe/"
 readme = "README.md"
 keywords = ["heiwa", "ai", "agents", "cli", "local-first"]
 categories = ["command-line-utilities", "development-tools"]
+
+# Proc-macro and build-script crates are compiled with the release profile
+# too, and this machine's linker (ld-27037) emits dylibs with a mis-aligned
+# LINKEDIT string pool at release optimization, which rustc then cannot
+# dlopen. Building them unoptimized sidesteps it and costs nothing at
+# runtime — these run at compile time only.
+[profile.release.build-override]
+opt-level = 0
+codegen-units = 16

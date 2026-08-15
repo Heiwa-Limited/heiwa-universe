@@ -32,15 +32,24 @@
   },
   "bundle": {
     "active": true,
-    "targets": ["app", "dmg"],
+    "targets": [
+      "app",
+      "dmg",
+      "msi",
+      "appimage",
+      "deb"
+    ],
     "category": "Productivity",
     "shortDescription": "Local-first AI operator runtime",
     "longDescription": "Heiwa is a local-first AI operating layer for intake, execution, evidence, and human life optimization.",
-    "copyright": "Copyright © 2026 Heiwa Limited",
+    "copyright": "Copyright \u00a9 2026 Heiwa Limited",
     "macOS": {
       "minimumSystemVersion": "14.0",
       "signingIdentity": "-",
       "hardenedRuntime": false
-    }
+    },
+    "resources": [
+      "resources/*"
+    ]
   }
 }
