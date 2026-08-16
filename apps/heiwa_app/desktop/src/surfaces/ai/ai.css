@@ -1,0 +1,98 @@
+.ai-view {
+  padding: 0;
+  overflow: hidden;
+}
+
+.chat-messages {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-6);
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: var(--space-8) var(--space-8) var(--space-6);
+  scroll-behavior: smooth;
+}
+
+.chat-msg {
+  display: grid;
+  gap: var(--space-2);
+  max-width: var(--composer-max);
+  width: 100%;
+  margin: 0 auto;
+}
+
+.chat-msg-header {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-4);
+  font-size: var(--text-2xs);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--content-muted);
+}
+
+.chat-role {
+  font-weight: var(--weight-semibold);
+  color: var(--content-secondary);
+}
+
+.chat-msg.assistant .chat-role {
+  color: var(--accent);
+}
+
+.chat-time {
+  margin-left: auto;
+}
+
+.chat-body {
+  white-space: pre-wrap;
+  word-break: break-word;
+  font-size: var(--text-base);
+  line-height: var(--leading-normal);
+}
+
+.chat-msg.user .chat-body {
+  padding: var(--space-4) var(--space-5);
+  background: var(--surface-raised);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-lg);
+}
+
+.chat-msg.transient .chat-body::after {
+  content: "▍";
+  color: var(--accent);
+  animation: heiwa-caret 1s steps(2) infinite;
+}
+
+@keyframes heiwa-caret {
+  50% {
+    opacity: 0;
+  }
+}
+
+.chat-empty {
+  display: grid;
+  place-items: center;
+  gap: var(--space-4);
+  flex: 1;
+  color: var(--content-muted);
+}
+
+.chat-empty-icon {
+  font-size: var(--text-2xl);
+  color: var(--accent);
+  opacity: 0.7;
+}
+
+.operator-compat-warning {
+  max-width: var(--composer-max);
+  width: 100%;
+  margin: 0 auto;
+  padding: var(--space-4) var(--space-5);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-md);
+  background: var(--surface-overlay);
+  color: var(--status-warn);
+  font-size: var(--text-sm);
+}

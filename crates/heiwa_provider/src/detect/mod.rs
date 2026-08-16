@@ -2,13 +2,164 @@ pub mod ollama;
 
 use crate::registry::{add_local_runtime_account, AccountRegistry, AccountStatus, ProviderAccount};
 
+/// A model-discovery failure that kept its HTTP status.
+#[derive(Debug)]
+pub struct DiscoveryError {
+    pub status: u16,
+    pub detail: String,
+}
+
+impl std::fmt::Display for DiscoveryError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "models endpoint returned HTTP {}", self.status)
+    }
+}
+
+impl std::error::Error for DiscoveryError {}
+
+/// Turn a discovery failure into the account status routing reads.
+///
+/// Status-driven, not text-driven: 401/403 means the credential is bad and
+/// the user must act; 429 means try later and must stay distinguishable from
+/// both; anything else is transient and leaves the account usable rather
+/// than disabling a key over one bad response.
+fn status_after_discovery_failure(error: &anyhow::Error) -> AccountStatus {
+    let Some(discovery) = error.downcast_ref::<DiscoveryError>() else {
+        // Transport failure with no HTTP status: the key may still be good.
+        return AccountStatus::Connected;
+    };
+    match discovery.status {
+        401 | 403 => AccountStatus::Error("Invalid API key".to_string()),
+        429 => AccountStatus::Error(format!("HTTP 429 rate limit: {}", discovery.detail)),
+        _ => AccountStatus::Connected,
+    }
+}
+
+/// Apply a discovery result to an account.
+fn apply_discovery(
+    account: &mut ProviderAccount,
+    provider_label: &str,
+    result: anyhow::Result<Vec<crate::registry::DetectedModel>>,
+) -> anyhow::Result<()> {
+    match result {
+        Ok(models) => {
+            account.models = models;
+            account.status = AccountStatus::Connected;
+            Ok(())
+        }
+        Err(error) => {
+            let status = status_after_discovery_failure(&error);
+            let invalid =
+                matches!(&status, AccountStatus::Error(message) if message == "Invalid API key");
+            account.status = status;
+            if invalid {
+                account.models.clear();
+                return Err(anyhow::anyhow!("Invalid {provider_label} API key"));
+            }
+            Ok(())
+        }
+    }
+}
+
+/// Provider CLIs Heiwa can drive when the user happens to have them.
+///
+/// `(provider, binary, rate_group)`. These are optional account kinds: a
+/// direct API key is the primary path, and nothing here is required for a
+/// turn to run. The CLI owns its own auth, so no secret is stored.
+const PROVIDER_CLIS: &[(&str, &str, &str)] = &[
+    ("anthropic", "claude", "anthropic_sub"),
+    ("openai", "codex", "openai_sub"),
+    // `google`, not `google_sub`: heiwa_drex knows budgets for
+    // anthropic_sub/openai_sub/google, and an unknown group silently falls
+    // through to a conservative 200k ceiling.
+    ("google", "gemini", "google"),
+];
+
+/// Register an account for each provider CLI present on this machine.
+///
+/// Returns the account ids newly added. Existing accounts are left alone —
+/// re-running discovery must not reset a status an earlier probe established,
+/// and must not resurrect an account the user removed on purpose within the
+/// same run.
+///
+/// The installed-probe is a parameter so this is testable without depending
+/// on what happens to be installed on the machine running the tests.
+fn register_installed_clis(
+    registry: &mut AccountRegistry,
+    installed: impl Fn(&str) -> bool,
+) -> Vec<String> {
+    let mut added = Vec::new();
+    for (provider, binary, rate_group) in PROVIDER_CLIS {
+        let account_id = format!("{provider}-cli");
+        if registry.get(&account_id).is_some() || !installed(binary) {
+            continue;
+        }
+        registry.upsert(ProviderAccount {
+            account_id: account_id.clone(),
+            provider: provider.to_string(),
+            credential: crate::registry::Credential::OauthCli {
+                binary: binary.to_string(),
+            },
+            rate_group: rate_group.to_string(),
+            // Present on PATH is not the same as signed in; the health
+            // projection reads `Disconnected` + OauthCli as "installed but
+            // not signed in", which is exactly what is known at this point.
+            status: AccountStatus::Disconnected,
+            models: Vec::new(),
+        });
+        added.push(account_id);
+    }
+    added
+}
+
+/// Register an API-key account for each provider whose conventional variable
+/// is set and that has no account yet.
+///
+/// This is the headless BYOK path. `auth add-key` stores the secret through
+/// the OS keychain, which a container or CI runner does not have, and the
+/// keychain-or-environment fallback in `resolve_secret` only applies to an
+/// account that already exists — so before this, a machine with no keychain
+/// had no way to register its first account at all.
+///
+/// The account is `NeedsAuth`, not `Connected`: a key being present is not
+/// evidence of what it can serve. Verification populates the inventory.
+fn register_env_key_accounts(
+    registry: &mut AccountRegistry,
+    env: impl Fn(&str) -> Option<String>,
+) -> Vec<String> {
+    let mut added = Vec::new();
+    for (provider, rate_group) in crate::registry::ENV_KEY_PROVIDERS {
+        let has_key = crate::registry::key_env_vars(provider)
+            .iter()
+            .any(|name| env(name).is_some_and(|value| !value.trim().is_empty()));
+        let already_registered = registry
+            .accounts_for(provider)
+            .iter()
+            .any(|account| matches!(account.credential, crate::registry::Credential::ApiKey));
+        if !has_key || already_registered {
+            continue;
+        }
+        let account_id = format!("{provider}-api-1");
+        registry.upsert(ProviderAccount {
+            account_id: account_id.clone(),
+            provider: provider.to_string(),
+            credential: crate::registry::Credential::ApiKey,
+            rate_group: rate_group.to_string(),
+            status: AccountStatus::NeedsAuth,
+            models: Vec::new(),
+        });
+        added.push(account_id);
+    }
+    added
+}
+
 /// Auto-discover local providers and refresh model inventories for all
 /// connected accounts.
 ///
-/// Currently discovers:
+/// Discovers:
 /// - Ollama on localhost:11434
-///
-/// Future: detect installed CLIs and register them as cli accounts.
+/// - Provider CLIs present on PATH, as optional account kinds
+/// - API keys the environment already carries, for machines with no keychain
 pub async fn auto_discover(registry: &mut AccountRegistry) -> Vec<String> {
     let mut changes = Vec::new();
 
@@ -20,6 +171,34 @@ pub async fn auto_discover(registry: &mut AccountRegistry) -> Vec<String> {
             if let Ok(id) = add_local_runtime_account(registry, "ollama", endpoint.as_str()) {
                 changes.push(format!("Registered Ollama account: {}", id));
             }
+        }
+    }
+
+    // --- Provider CLI discovery ---
+    // Optional account kinds: found because they are installed, never
+    // required. A CLI that later disappears projects as NotInstalled rather
+    // than failing a turn.
+    for account_id in
+        register_installed_clis(registry, |binary| crate::resolve_command(binary).is_some())
+    {
+        changes.push(format!("Registered provider CLI account: {account_id}"));
+    }
+
+    // --- Environment credential discovery ---
+    // A key the machine already carries is a credential the user supplied,
+    // not one Heiwa invented. Newly registered accounts are verified below so
+    // their inventory comes from the provider rather than from a guess.
+    let from_env = register_env_key_accounts(registry, |name| std::env::var(name).ok());
+    for account_id in &from_env {
+        changes.push(format!(
+            "Registered API key account from environment: {account_id}"
+        ));
+    }
+    for account_id in from_env {
+        if let Some(account) = registry.get_mut(&account_id) {
+            // A failure here is recorded on the account as a health state;
+            // discovery itself does not fail because one probe did.
+            let _ = verify_api_key(account).await;
         }
     }
 
@@ -63,6 +242,7 @@ pub async fn verify_api_key(account: &mut ProviderAccount) -> anyhow::Result<()>
     match account.provider.as_str() {
         "anthropic" => verify_anthropic(account, &api_key).await,
         "openai" => verify_openai(account, &api_key).await,
+        "google" => verify_google(account, &api_key).await,
         "openrouter" => verify_openrouter(account, &api_key).await,
         _ => {
             // For unknown providers, just mark as connected (key stored, unverified models)
@@ -72,188 +252,60 @@ pub async fn verify_api_key(account: &mut ProviderAccount) -> anyhow::Result<()>
     }
 }
 
-/// Verify an Anthropic API key by calling the Messages API with a minimal
-/// request.  Anthropic doesn't have a public `/v1/models` endpoint for
-/// listing models, so we infer the model list from known models and check
-/// the key is valid with a cheap probe.
+/// Verify an Anthropic API key by listing models.
+///
+/// Anthropic publishes `GET /v1/models`, so the key check and the inventory
+/// are one call and the inventory is `Verified` rather than a list this
+/// crate carries. The previous implementation probed the Messages API with a
+/// hardcoded model id, which both invented inventory and pinned a snapshot
+/// that goes stale on every model release.
 async fn verify_anthropic(account: &mut ProviderAccount, api_key: &str) -> anyhow::Result<()> {
-    let client = reqwest::Client::builder()
-        .timeout(std::time::Duration::from_secs(10))
-        .build()?;
-
-    // Minimal messages request to verify the key is valid
-    let resp = client
-        .post("https://api.anthropic.com/v1/messages")
-        .header("x-api-key", api_key)
-        .header("anthropic-version", "2023-06-01")
-        .header("content-type", "application/json")
-        .body(r#"{"model":"claude-haiku-4-5-20241022","max_tokens":1,"messages":[{"role":"user","content":"hi"}]}"#)
-        .send()
-        .await?;
-
-    if resp.status().is_success() || resp.status().as_u16() == 200 {
-        account.status = AccountStatus::Connected;
-        account.models = anthropic_known_models(&account.account_id, &account.rate_group);
-        Ok(())
-    } else if resp.status().as_u16() == 401 {
-        account.status = AccountStatus::Error("Invalid API key".to_string());
-        account.models.clear();
-        Err(anyhow::anyhow!("Invalid Anthropic API key"))
-    } else {
-        // Other errors (rate limit, etc.) — key might be valid
-        account.status = AccountStatus::Connected;
-        account.models = anthropic_known_models(&account.account_id, &account.rate_group);
-        Ok(())
-    }
+    // Same base URL the turn will use: verifying against the vendor while
+    // turns go to a gateway sends the gateway's credential to the vendor.
+    let base_url = crate::routing::api_base_url(
+        "anthropic",
+        crate::providers::anthropic_api::DEFAULT_BASE_URL,
+    );
+    let result = crate::providers::anthropic_api::discover_models(
+        api_key,
+        &base_url,
+        &account.account_id,
+        &account.rate_group,
+    )
+    .await;
+    apply_discovery(account, "Anthropic", result)
 }
 
-fn anthropic_known_models(
-    account_id: &str,
-    rate_group: &str,
-) -> Vec<crate::registry::DetectedModel> {
-    use crate::registry::{DetectedModel, InventoryTruth};
-    vec![
-        DetectedModel {
-            model_id: "claude-opus-4".to_string(),
-            provider_model_id: "claude-opus-4-20250514".to_string(),
-            provider: "anthropic".to_string(),
-            account_id: account_id.to_string(),
-            rate_group: rate_group.to_string(),
-            capability_class: 5,
-            context_window: 200_000,
-            supports_streaming: true,
-            supports_tools: true,
-            supports_vision: true,
-            supports_audio: false,
-            cost_per_1k_input: 0.015,
-            cost_per_1k_output: 0.075,
-            inventory_truth: InventoryTruth::Inferred,
-        },
-        DetectedModel {
-            model_id: "claude-sonnet-4".to_string(),
-            provider_model_id: "claude-sonnet-4-20250514".to_string(),
-            provider: "anthropic".to_string(),
-            account_id: account_id.to_string(),
-            rate_group: rate_group.to_string(),
-            capability_class: 4,
-            context_window: 200_000,
-            supports_streaming: true,
-            supports_tools: true,
-            supports_vision: true,
-            supports_audio: false,
-            cost_per_1k_input: 0.003,
-            cost_per_1k_output: 0.015,
-            inventory_truth: InventoryTruth::Inferred,
-        },
-        DetectedModel {
-            model_id: "claude-haiku-4".to_string(),
-            provider_model_id: "claude-haiku-4-5-20241022".to_string(),
-            provider: "anthropic".to_string(),
-            account_id: account_id.to_string(),
-            rate_group: rate_group.to_string(),
-            capability_class: 2,
-            context_window: 200_000,
-            supports_streaming: true,
-            supports_tools: true,
-            supports_vision: true,
-            supports_audio: false,
-            cost_per_1k_input: 0.0008,
-            cost_per_1k_output: 0.004,
-            inventory_truth: InventoryTruth::Inferred,
-        },
-    ]
+/// Verify a Google API key by listing models.
+async fn verify_google(account: &mut ProviderAccount, api_key: &str) -> anyhow::Result<()> {
+    // Same base URL the turn will use: verifying against the vendor while
+    // turns go to a gateway sends the gateway's credential to the vendor.
+    let base_url =
+        crate::routing::api_base_url("google", crate::providers::gemini_api::DEFAULT_BASE_URL);
+    let result = crate::providers::gemini_api::discover_models(
+        api_key,
+        &base_url,
+        &account.account_id,
+        &account.rate_group,
+    )
+    .await;
+    apply_discovery(account, "Google", result)
 }
 
 /// Verify an OpenAI API key by listing models.
 async fn verify_openai(account: &mut ProviderAccount, api_key: &str) -> anyhow::Result<()> {
-    let client = reqwest::Client::builder()
-        .timeout(std::time::Duration::from_secs(10))
-        .build()?;
-
-    let resp = client
-        .get("https://api.openai.com/v1/models")
-        .header("Authorization", format!("Bearer {}", api_key))
-        .send()
-        .await?;
-
-    if resp.status().as_u16() == 401 {
-        account.status = AccountStatus::Error("Invalid API key".to_string());
-        account.models.clear();
-        return Err(anyhow::anyhow!("Invalid OpenAI API key"));
-    }
-
-    if resp.status().is_success() {
-        // Parse model list — OpenAI returns { data: [{ id, ... }] }
-        let body: serde_json::Value = resp.json().await?;
-        if let Some(data) = body.get("data").and_then(|d| d.as_array()) {
-            account.models = data
-                .iter()
-                .filter_map(|m| {
-                    let id = m.get("id")?.as_str()?;
-                    // Only include chat-capable models
-                    if !is_openai_chat_model(id) {
-                        return None;
-                    }
-                    Some(crate::registry::DetectedModel {
-                        model_id: id.to_string(),
-                        provider_model_id: id.to_string(),
-                        provider: "openai".to_string(),
-                        account_id: account.account_id.clone(),
-                        rate_group: account.rate_group.clone(),
-                        capability_class: openai_capability_class(id),
-                        context_window: openai_context_window(id),
-                        supports_streaming: true,
-                        supports_tools: true,
-                        supports_vision: id.contains("gpt-4")
-                            || id.contains("o3")
-                            || id.contains("o4"),
-                        supports_audio: false,
-                        cost_per_1k_input: 0.002, // approximate default
-                        cost_per_1k_output: 0.008,
-                        inventory_truth: crate::registry::InventoryTruth::Verified,
-                    })
-                })
-                .collect();
-            account.status = AccountStatus::Connected;
-        }
-    } else {
-        account.status = AccountStatus::Connected;
-    }
-
-    Ok(())
-}
-
-fn is_openai_chat_model(id: &str) -> bool {
-    id.starts_with("gpt-4")
-        || id.starts_with("gpt-3.5")
-        || id.starts_with("o1")
-        || id.starts_with("o3")
-        || id.starts_with("o4")
-        || id.starts_with("chatgpt")
-}
-
-fn openai_capability_class(id: &str) -> u8 {
-    if id.starts_with("o3") || id.starts_with("o4-mini-deep") {
-        5
-    } else if id.starts_with("gpt-4.1") || id.starts_with("o4") || id.starts_with("o1") {
-        4
-    } else if id.starts_with("gpt-4") {
-        3
-    } else {
-        2
-    }
-}
-
-fn openai_context_window(id: &str) -> u32 {
-    if id.contains("gpt-4.1") {
-        1_000_000
-    } else if id.contains("o3") || id.contains("o4") {
-        200_000
-    } else if id.contains("gpt-4") {
-        128_000
-    } else {
-        16_384
-    }
+    // Same base URL the turn will use: verifying against the vendor while
+    // turns go to a gateway sends the gateway's credential to the vendor.
+    let base_url =
+        crate::routing::api_base_url("openai", crate::providers::openai_api::DEFAULT_BASE_URL);
+    let result = crate::providers::openai_api::discover_models(
+        api_key,
+        &base_url,
+        &account.account_id,
+        &account.rate_group,
+    )
+    .await;
+    apply_discovery(account, "OpenAI", result)
 }
 
 /// Verify an OpenRouter API key and detect the free-tier model inventory.
@@ -373,6 +425,226 @@ fn openrouter_capability_class(id: &str) -> u8 {
 mod tests {
     use super::*;
     use crate::registry::InventoryTruth;
+
+    #[test]
+    fn a_provider_key_in_the_environment_registers_an_account() {
+        // Without this, BYOK cannot complete first run on a machine with no
+        // OS keychain: `auth add-key` stores through the keychain, and the
+        // environment fallback only resolves secrets for accounts that
+        // already exist — so there was no way to get the first account.
+        let mut registry = AccountRegistry::default();
+        let env = |name: &str| (name == "ANTHROPIC_API_KEY").then(|| "sk-ant-x".to_string());
+
+        let added = register_env_key_accounts(&mut registry, env);
+
+        assert_eq!(added, vec!["anthropic-api-1".to_string()]);
+        let account = registry.get("anthropic-api-1").expect("registered");
+        assert!(matches!(
+            account.credential,
+            crate::registry::Credential::ApiKey
+        ));
+        assert_eq!(account.provider, "anthropic");
+        // Not Connected: the key is present, but nothing has verified it or
+        // learned what it can serve. Claiming Connected would invent
+        // inventory, which is the thing this crate does not do.
+        assert_eq!(account.status, AccountStatus::NeedsAuth);
+    }
+
+    #[test]
+    fn an_environment_key_does_not_duplicate_an_account_the_user_already_added() {
+        let mut registry = AccountRegistry::default();
+        let env = |name: &str| (name == "ANTHROPIC_API_KEY").then(|| "sk-ant-x".to_string());
+        register_env_key_accounts(&mut registry, env);
+
+        let again = register_env_key_accounts(&mut registry, env);
+
+        assert!(again.is_empty());
+        assert_eq!(registry.accounts_for("anthropic").len(), 1);
+    }
+
+    #[test]
+    fn an_empty_environment_variable_is_not_a_credential() {
+        let mut registry = AccountRegistry::default();
+        let env = |name: &str| (name == "ANTHROPIC_API_KEY").then(|| "   ".to_string());
+
+        assert!(register_env_key_accounts(&mut registry, env).is_empty());
+        assert!(registry.accounts.is_empty());
+    }
+
+    #[test]
+    fn cli_discovery_registers_only_the_binaries_that_are_actually_present() {
+        let mut registry = AccountRegistry::default();
+        let installed = |binary: &str| binary == "claude";
+
+        let added = register_installed_clis(&mut registry, installed);
+
+        assert_eq!(added, vec!["anthropic-cli".to_string()]);
+        let account = registry
+            .get("anthropic-cli")
+            .expect("the Claude CLI registers under its vendor, not its binary name");
+        assert!(matches!(
+            &account.credential,
+            crate::registry::Credential::OauthCli { binary } if binary == "claude"
+        ));
+        assert!(
+            registry.get("openai-cli").is_none(),
+            "an absent binary must not become an account"
+        );
+    }
+
+    #[test]
+    fn cli_discovery_does_not_disturb_an_already_registered_cli_account() {
+        // Re-running discovery must not reset a CLI account that a previous
+        // probe already marked usable.
+        let mut registry = AccountRegistry::default();
+        register_installed_clis(&mut registry, |binary| binary == "claude");
+        registry.get_mut("anthropic-cli").unwrap().status = AccountStatus::Connected;
+
+        let added = register_installed_clis(&mut registry, |binary| binary == "claude");
+
+        assert!(added.is_empty(), "already-known CLI is not re-announced");
+        assert_eq!(
+            registry.get("anthropic-cli").unwrap().status,
+            AccountStatus::Connected
+        );
+    }
+
+    #[test]
+    fn a_registered_cli_whose_binary_disappears_becomes_not_installed() {
+        // The state exists because this transition happens: a user uninstalls
+        // the CLI and the account must read as NotInstalled, not as healthy.
+        let mut registry = AccountRegistry::default();
+        register_installed_clis(&mut registry, |_| true);
+        let account = registry.get_mut("openai-cli").unwrap();
+        account.status = AccountStatus::Connected;
+        account.credential = crate::registry::Credential::OauthCli {
+            binary: "heiwa-no-such-binary-exists".to_string(),
+        };
+
+        let report = crate::health::AccountHealth::project(registry.get("openai-cli").unwrap());
+
+        assert_eq!(report.state, crate::health::HealthState::NotInstalled);
+        assert!(!report.routable);
+    }
+
+    fn account_with_verified_inventory() -> ProviderAccount {
+        ProviderAccount {
+            account_id: "anthropic-api-1".to_string(),
+            provider: "anthropic".to_string(),
+            credential: crate::registry::Credential::ApiKey,
+            rate_group: "anthropic_api".to_string(),
+            status: AccountStatus::Connected,
+            models: vec![crate::registry::DetectedModel {
+                model_id: "claude-opus-5".to_string(),
+                provider_model_id: "claude-opus-5".to_string(),
+                provider: "anthropic".to_string(),
+                account_id: "anthropic-api-1".to_string(),
+                rate_group: "anthropic_api".to_string(),
+                capability_class: 5,
+                context_window: 200_000,
+                supports_streaming: true,
+                supports_tools: true,
+                supports_vision: true,
+                supports_audio: false,
+                cost_per_1k_input: 0.0,
+                cost_per_1k_output: 0.0,
+                inventory_truth: InventoryTruth::Verified,
+            }],
+        }
+    }
+
+    fn discovery_failure(status: u16, detail: &str) -> anyhow::Error {
+        DiscoveryError {
+            status,
+            detail: detail.to_string(),
+        }
+        .into()
+    }
+
+    #[test]
+    fn a_server_error_whose_body_mentions_401_does_not_invalidate_the_key() {
+        // Anthropic 5xx bodies carry a request id, and request ids contain
+        // arbitrary digits: req_011CS401Nk reads as "401" to a substring match.
+        // Classifying on the body once cleared a working key's inventory.
+        let mut account = account_with_verified_inventory();
+        let result = apply_discovery(
+            &mut account,
+            "Anthropic",
+            Err(discovery_failure(
+                500,
+                r#"{"type":"error","request_id":"req_011CS401Nk403x"}"#,
+            )),
+        );
+
+        assert!(
+            result.is_ok(),
+            "a transient 500 is not a credential verdict"
+        );
+        assert_eq!(account.status, AccountStatus::Connected);
+        assert_eq!(
+            account.models.len(),
+            1,
+            "a 500 must not clear a verified inventory"
+        );
+    }
+
+    #[test]
+    fn an_actual_401_invalidates_the_key_and_clears_inventory() {
+        let mut account = account_with_verified_inventory();
+        let result = apply_discovery(
+            &mut account,
+            "Anthropic",
+            Err(discovery_failure(401, "authentication_error")),
+        );
+
+        assert!(result.is_err());
+        assert_eq!(
+            account.status,
+            AccountStatus::Error("Invalid API key".to_string())
+        );
+        assert!(account.models.is_empty());
+    }
+
+    #[test]
+    fn a_429_is_distinguishable_from_both_healthy_and_invalid() {
+        let mut account = account_with_verified_inventory();
+        let result = apply_discovery(
+            &mut account,
+            "Anthropic",
+            Err(discovery_failure(429, "slow down")),
+        );
+
+        assert!(
+            result.is_ok(),
+            "rate limiting is a wait, not a credential failure"
+        );
+        let AccountStatus::Error(message) = &account.status else {
+            panic!("expected a rate-limit status, got {:?}", account.status);
+        };
+        assert!(
+            message.contains("429"),
+            "status must name the rate limit: {message}"
+        );
+        assert!(
+            !account.models.is_empty(),
+            "a rate limit must not clear inventory"
+        );
+    }
+
+    #[test]
+    fn a_transport_failure_with_no_http_status_leaves_the_account_usable() {
+        // Offline, DNS failure, TLS reset: says nothing about the credential.
+        let mut account = account_with_verified_inventory();
+        let result = apply_discovery(
+            &mut account,
+            "Anthropic",
+            Err(anyhow::anyhow!("error sending request: connection refused")),
+        );
+
+        assert!(result.is_ok());
+        assert_eq!(account.status, AccountStatus::Connected);
+        assert!(!account.models.is_empty());
+    }
 
     fn sample_models_body() -> serde_json::Value {
         serde_json::json!({

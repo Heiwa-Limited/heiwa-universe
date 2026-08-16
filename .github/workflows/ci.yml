@@ -4,18 +4,19 @@ name: Heiwa CI
 #
 #   * the sub-minute feedback lane (everything except the Rust jobs), bounded at
 #     one minute per job by scripts/check_ci_job_deadlines.rb
-#   * the bounded Rust promotion lane (rust-tests, rust-static), which compiles
-#     and therefore cannot be sub-minute; it is capped at 20 minutes and warmed
+#   * the bounded compile lane (rust-tests, rust-static, desktop-app), which
+#     compiles and therefore cannot be sub-minute; capped at 20 minutes, warmed
 #     by the sccache GitHub Actions cache seeded on protected `main`
 #
 # `Rust Source Policy` is the aggregate required status check. Branch protection
 # on `main` pins that context name, so it must keep reporting even when the
 # underlying Rust jobs are renamed or re-sharded.
 #
-# Runner note: these jobs previously targeted `blacksmith-16vcpu-ubuntu-2404`.
-# That label was never picked up by a runner (jobs sat queued indefinitely, and
-# `timeout-minutes` does not bound queue time), so the lanes run on
-# GitHub-hosted runners until Blacksmith is proven for this org.
+# Runner note: these jobs run on `blacksmith-4vcpu-ubuntu-2404` since PR #68.
+# An earlier attempt at `blacksmith-16vcpu-ubuntu-2404` was never picked up by
+# a runner — jobs sat queued indefinitely, and `timeout-minutes` does not bound
+# queue time — which is why scripts/check_ci_job_deadlines.rb requires a label
+# to be proven before it may be used.
 on:
   pull_request:
     branches: ["main"]
@@ -100,7 +101,55 @@ jobs:
       - name: Run Rust tests
         run: |
           bash scripts/ci_rust_test_group.sh --check
+          # heiwa-desktop is covered by the desktop-app job on macOS.
           cargo test --workspace --exclude heiwa-desktop --locked --no-default-features
+
+  desktop-app:
+    name: Desktop App
+    # Blacksmith, like every other lane since the PR #68 migration. Linux
+    # needs the GTK/WebKit stack installed below; the macOS and Windows
+    # bundle paths are exercised by the release workflow. Excluding this
+    # crate from the workspace jobs left the one crate a user actually runs
+    # untested.
+    runs-on: blacksmith-4vcpu-ubuntu-2404
+    timeout-minutes: 20
+    env:
+      CARGO_PROFILE_DEV_DEBUG: "0"
+      CARGO_INCREMENTAL: "0"
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          persist-credentials: false
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@4360b52568e2003a75bf9bc1d59f33a8e3fc893c # stable
+        with:
+          toolchain: 1.95.0
+      - name: Rust cache
+        uses: Swatinem/rust-cache@f13886b937689c021905a6b90929199931d60db1 # v2.8.1
+      - name: Set up Node
+        uses: actions/setup-node@2028fbc5c25fe9cf00d9f06a71cc4710d4507903 # v5.0.0
+        with:
+          node-version: 22
+      - name: Install Tauri system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev \
+            patchelf libdbus-1-dev pkg-config
+      - name: Install frontend dependencies
+        run: npm ci --ignore-scripts --prefix apps/heiwa_app/desktop
+      - name: Frontend typecheck and tests
+        run: |
+          npm --prefix apps/heiwa_app/desktop run typecheck
+          npm --prefix apps/heiwa_app/desktop run test
+      - name: Desktop crate tests
+        run: cargo test -p heiwa-desktop --locked
+      - name: Desktop crate lints
+        run: cargo clippy -p heiwa-desktop --locked --all-targets -- -D warnings
+      - name: Desktop app builds for release
+        # The product must compile the way it ships, not only the way it is
+        # developed. A release-only break is invisible to every other job.
+        run: cargo build --release -p heiwa-desktop --locked
 
   rust-static:
     name: Rust Static Checks
@@ -155,7 +204,11 @@ jobs:
     # context name, so it must always report a conclusion — including when the
     # lanes it guards fail, are cancelled, or are skipped.
     name: Rust Source Policy
-    needs: [rust-tests, rust-static]
+    # desktop-app belongs here: it compiles, tests, lints, and release-builds
+    # the crate a user actually double-clicks. Left out of the aggregate, a
+    # broken desktop lane merges while the only required Rust context stays
+    # green.
+    needs: [rust-tests, rust-static, desktop-app]
     if: always()
     runs-on: blacksmith-4vcpu-ubuntu-2404
     timeout-minutes: 1
@@ -164,9 +217,10 @@ jobs:
         env:
           RUST_TESTS_RESULT: ${{ needs.rust-tests.result }}
           RUST_STATIC_RESULT: ${{ needs.rust-static.result }}
+          DESKTOP_APP_RESULT: ${{ needs.desktop-app.result }}
         run: |
           set -euo pipefail
-          echo "rust-tests=$RUST_TESTS_RESULT rust-static=$RUST_STATIC_RESULT"
+          echo "rust-tests=$RUST_TESTS_RESULT rust-static=$RUST_STATIC_RESULT desktop-app=$DESKTOP_APP_RESULT"
           status=0
           if [[ "$RUST_TESTS_RESULT" != "success" ]]; then
             echo "Rust Tests did not succeed" >&2
@@ -174,6 +228,10 @@ jobs:
           fi
           if [[ "$RUST_STATIC_RESULT" != "success" ]]; then
             echo "Rust Static Checks did not succeed" >&2
+            status=1
+          fi
+          if [[ "$DESKTOP_APP_RESULT" != "success" ]]; then
+            echo "Desktop App did not succeed" >&2
             status=1
           fi
           if (( status != 0 )); then

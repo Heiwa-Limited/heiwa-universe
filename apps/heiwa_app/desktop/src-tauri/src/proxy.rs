@@ -324,6 +324,71 @@ pub async fn api_post(path: String, body: Value) -> Result<Value, ApiErrorPayloa
         .map_err(ApiErrorPayload::from)
 }
 
+/// Whether *something* holds the configured runtime port.
+///
+/// A bare TCP connect, not a health request: the supervisor polls this in a
+/// loop while a runtime it started comes up, and an HTTP round trip per poll
+/// would be both slower and misleading — a runtime that is listening but not
+/// yet serving is still the one we started.
+///
+/// This is liveness only, never identity. Any listener answers it, so it must
+/// not decide whether to adopt a process; see [`runtime_identity_confirmed`].
+pub fn runtime_is_reachable() -> bool {
+    let Ok(base) = runtime_base_url() else {
+        return false;
+    };
+    let Some(authority) = base.strip_prefix("http://") else {
+        return false;
+    };
+    use std::net::ToSocketAddrs;
+    let Ok(mut addrs) = authority.to_socket_addrs() else {
+        return false;
+    };
+    addrs.any(|addr| {
+        std::net::TcpStream::connect_timeout(&addr, std::time::Duration::from_millis(400)).is_ok()
+    })
+}
+
+/// Whether the process on the runtime port is a Heiwa runtime this app can
+/// drive.
+///
+/// Adoption cannot be decided by a TCP connect. Any unrelated listener on the
+/// port — another product, a tunnel, a stale process — would then stop the
+/// bundled runtime from ever starting and leave the window bound to a server
+/// that cannot answer a single Heiwa call. So adoption costs one signed
+/// request to the runtime's own snapshot endpoint: a foreign listener cannot
+/// return that payload, and a Heiwa runtime this app is not authorized
+/// against does not count as adoptable either.
+pub fn runtime_identity_confirmed() -> bool {
+    let Ok(token) = machine_auth_token() else {
+        return false;
+    };
+    let Ok(base) = runtime_base_url() else {
+        return false;
+    };
+    tauri::async_runtime::block_on(async move { confirm_runtime_identity(&base, &token).await })
+}
+
+pub(crate) async fn confirm_runtime_identity(base_url: &str, token: &str) -> bool {
+    match api_get_with_auth(base_url, "/api/v1/runtime/snapshot", token).await {
+        Ok(snapshot) => is_heiwa_runtime_snapshot(&snapshot),
+        Err(_) => false,
+    }
+}
+
+/// The runtime identity in a snapshot response: `data.runtime.version`.
+///
+/// Checked rather than trusting a 200, because an unrelated local service can
+/// answer any path with valid JSON.
+fn is_heiwa_runtime_snapshot(snapshot: &Value) -> bool {
+    snapshot
+        .get("data")
+        .and_then(|data| data.get("runtime"))
+        .and_then(|runtime| runtime.get("version"))
+        .and_then(Value::as_str)
+        .is_some_and(|version| !version.trim().is_empty())
+}
+
 #[tauri::command]
 pub async fn runtime_health() -> RuntimeHealth {
     let token = match machine_auth_token() {
@@ -505,6 +570,24 @@ mod tests {
             .expect_err("empty auth must fail before connect");
         assert!(matches!(error, ProxyError::AuthNotConfigured));
         assert!(!error.to_string().contains("Bearer"));
+    }
+
+    #[tokio::test]
+    async fn runtime_identity_requires_a_heiwa_snapshot_not_merely_a_200() {
+        // An unrelated local service can answer any path with valid JSON. If
+        // that counted as identity, the supervisor would adopt it and never
+        // start the runtime the app shipped with.
+        let foreign = stub_server("200 OK", r#"{"ok":true,"data":{"status":"fine"}}"#);
+        assert!(!confirm_runtime_identity(&foreign, "identity-token").await);
+
+        let dead = confirm_runtime_identity("http://127.0.0.1:1", "identity-token").await;
+        assert!(!dead, "an unreachable port is not an adoptable runtime");
+
+        let heiwa = stub_server(
+            "200 OK",
+            r#"{"ok":true,"data":{"runtime":{"status":"ok","version":"0.1.0"}}}"#,
+        );
+        assert!(confirm_runtime_identity(&heiwa, "identity-token").await);
     }
 
     #[test]

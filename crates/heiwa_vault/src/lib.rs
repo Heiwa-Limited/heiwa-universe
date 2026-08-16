@@ -7,7 +7,7 @@
 //!
 //! Secrets never touch disk in plaintext. Each entry is keyed by `(service,
 //! account)` where `service` scopes to a Heiwa subsystem (e.g. `"heiwa-oauth"`)
-//! and `account` identifies the principal (e.g. `"claude-code:devon@local"`).
+//! and `account` identifies the principal (e.g. `"claude-code:user@local"`).
 
 use serde::{Deserialize, Serialize};
 use thiserror::Error;

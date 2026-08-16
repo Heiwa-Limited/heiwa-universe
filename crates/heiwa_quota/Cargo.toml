@@ -12,6 +12,7 @@ categories.workspace = true
 description = "Local SQLite quota ledger — per-provider rate-limit state and run history for Heiwa."
 
 [dependencies]
+heiwa_config = { path = "../heiwa_config" }
 rusqlite = { version = "0.31", features = ["bundled"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"

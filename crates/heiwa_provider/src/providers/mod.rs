@@ -1,5 +1,10 @@
+pub mod anthropic_api;
 pub mod claude_code;
 pub mod codex_cli;
+pub mod gemini_api;
 pub mod gemini_cli;
 pub mod ollama;
+pub mod openai_api;
 pub mod openrouter;
+pub(crate) mod sse;
+pub(crate) mod stream;

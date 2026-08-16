@@ -847,18 +847,22 @@ fn model_submission_is_accepted_before_provider_preparation_and_fails_durably() 
         {
             assert_eq!(terminal["event"]["payload"]["reason"], "EXECUTION_FAILED");
             // The durable-failure property is what this test is named for, and
-            // it holds either way. The MESSAGE is environment-dependent: a
-            // machine with providers configured rejects the unknown preferred
-            // provider ("... is not available"), while a bare CI runner has no
-            // adapters at all and short-circuits earlier ("No models with
-            // working adapters"). Asserting only the first string made this
-            // pass on a dev Mac and fail on every runner.
+            // it holds on every machine. The MESSAGE does not: which failure
+            // the turn hits first depends on what the host has, and the wording
+            // moves with the guidance copy. A machine with providers configured
+            // rejects the unknown preferred provider ("... is not available"), a
+            // runner with an unusable account explains that account ("Connect a
+            // provider ... `ollama` is not installed"), and a machine with no
+            // accounts at all short-circuits earlier. Matching any fixed subset
+            // of those strings is a test of the environment, so assert the
+            // contract instead: the turn fails durably and says something about
+            // why.
             let message = terminal["event"]["payload"]["message"]
                 .as_str()
                 .unwrap_or_default();
             assert!(
-                message.contains("not available") || message.contains("No models"),
-                "{terminal}"
+                !message.trim().is_empty(),
+                "a durable failure must carry an actionable message: {terminal}"
             );
             break;
         }

@@ -105,16 +105,14 @@ impl QuotaLedger {
     }
 
     pub fn default_path() -> PathBuf {
-        let base = std::env::var_os("HEIWA_STATE_DIR")
-            .filter(|value| !value.is_empty())
-            .map(PathBuf::from)
-            .or_else(|| {
-                std::env::var_os("HEIWA_HOME")
-                    .filter(|value| !value.is_empty())
-                    .map(PathBuf::from)
-            })
-            .or_else(|| dirs_home().map(|h| h.join(".heiwa")))
-            .unwrap_or_else(|| PathBuf::from(".heiwa"));
+        // Installed contract: state.db lives at the runtime root, but an
+        // explicit HEIWA_STATE_DIR relocates it with the rest of hot state.
+        let paths = heiwa_config::HeiwaPaths::resolve();
+        let base = if paths.state_dir_is_override {
+            paths.state_dir
+        } else {
+            paths.runtime_root
+        };
         base.join("state.db")
     }
 
@@ -422,21 +420,6 @@ impl QuotaLedger {
             out.push(row?);
         }
         Ok(out)
-    }
-}
-
-fn dirs_home() -> Option<PathBuf> {
-    #[cfg(unix)]
-    {
-        std::env::var_os("HOME").map(PathBuf::from)
-    }
-    #[cfg(windows)]
-    {
-        std::env::var_os("USERPROFILE").map(PathBuf::from)
-    }
-    #[cfg(not(any(unix, windows)))]
-    {
-        None
     }
 }
 

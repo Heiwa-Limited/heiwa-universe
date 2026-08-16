@@ -15,11 +15,6 @@ use heiwa_protocol::{
     ToolLease, TranscriptBlock,
 };
 use heiwa_provider::adapter::{Message, ProviderAdapter, Role, TokenUsage};
-use heiwa_provider::providers::claude_code::ClaudeCodeCliAdapter;
-use heiwa_provider::providers::codex_cli::CodexCliAdapter;
-use heiwa_provider::providers::gemini_cli::GeminiCliAdapter;
-use heiwa_provider::providers::ollama::OllamaCliAdapter;
-use heiwa_provider::providers::openrouter::OpenRouterAdapter;
 use heiwa_repl::{parse_input, render_footer, ReplCommand, TelemetryState};
 use heiwa_shell::agentic;
 use heiwa_shell::model_calls::{
@@ -35,20 +30,9 @@ use std::io::{self, IsTerminal, Write};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, OnceLock};
 
-fn canonical_provider_id(provider: &str) -> &str {
-    match provider {
-        "claude-code" => "claude",
-        "google-gemini-cli" => "gemini",
-        other => other,
-    }
-}
-
-fn provider_supports_loop_adapter(provider: &str) -> bool {
-    matches!(
-        canonical_provider_id(provider),
-        "claude" | "codex" | "ollama" | "gemini" | "openrouter"
-    )
-}
+use heiwa_provider::routing::{
+    canonical_provider_id, is_supported as provider_supports_loop_adapter,
+};
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 enum RoutePreference {
@@ -241,6 +225,44 @@ async fn main() -> Result<()> {
                 }
             }
         },
+        // First run, inside the application. The roadmap's L2 requirement is
+        // that a user reaches a working install without reading docs, so this
+        // reports what is missing and what to do about each gap.
+        "setup" => {
+            let name = flag_value(&args, "--name");
+            run_setup(name.as_deref()).await?;
+        }
+        "whoami" => match heiwa_identity::load() {
+            Ok(Some(identity)) => {
+                println!("{}", identity.display_name);
+                println!("  installation: {}", identity.installation_id);
+                println!("  created:      {}", identity.created_at);
+            }
+            Ok(None) => {
+                println!("No local identity yet. Run `heiwa setup --name \"<your name>\"`.");
+            }
+            Err(error) => {
+                eprintln!("{error}");
+                std::process::exit(1);
+            }
+        },
+        // One non-interactive turn. This is the scriptable entry point — a
+        // fresh install can prove itself without a TTY, and CI can drive a
+        // real turn end to end rather than approximating one.
+        "ask" => {
+            let prompt = args[2..].join(" ");
+            if prompt.trim().is_empty() {
+                eprintln!("Usage: heiwa ask <prompt>");
+                std::process::exit(2);
+            }
+            match execute_repl_turn(&prompt).await {
+                Ok((response, _trace)) => println!("{}", response.trim_end()),
+                Err(message) => {
+                    eprintln!("{message}");
+                    std::process::exit(1);
+                }
+            }
+        }
         "login" => {
             if args.len() < 3 {
                 println!("Usage: heiwa login [token]");
@@ -900,6 +922,94 @@ async fn main() -> Result<()> {
     Ok(())
 }
 
+/// Value of a `--flag value` argument, if present.
+fn flag_value(args: &[String], flag: &str) -> Option<String> {
+    let index = args.iter().position(|arg| arg == flag)?;
+    args.get(index + 1)
+        .filter(|value| !value.starts_with("--"))
+        .cloned()
+}
+
+/// Observe this installation and project what first run still needs.
+async fn onboarding_state() -> heiwa_identity::onboarding::OnboardingState {
+    use heiwa_identity::onboarding::{OnboardingFacts, OnboardingState};
+
+    let paths = heiwa_config::HeiwaPaths::try_resolve();
+    let identity = match &paths {
+        Some(_) => heiwa_identity::load().ok().flatten(),
+        // Without a root there is nowhere to have stored one; reporting
+        // "no identity" here would be true but is not the actionable gap.
+        None => None,
+    };
+
+    let mut registry = heiwa_provider::AccountRegistry::load();
+    heiwa_provider::detect::auto_discover(&mut registry).await;
+    let fleet = heiwa_provider::health::FleetHealth::project(&registry.accounts);
+
+    OnboardingState::project(&OnboardingFacts {
+        has_state_root: paths.is_some(),
+        identity: identity.as_ref().map(|id| id.display_name.as_str()),
+        has_routable_account: fleet.has_routable_account(),
+        provider_guidance: fleet.guidance(),
+    })
+}
+
+/// First-run setup. Establishes what it can and reports the rest.
+async fn run_setup(name: Option<&str>) -> Result<()> {
+    // Identity first: it is the anchor the rest attaches to, and it is the
+    // one gap this command can close on its own.
+    if heiwa_config::HeiwaPaths::try_resolve().is_some() {
+        match heiwa_identity::load() {
+            Ok(None) => {
+                let display_name = name
+                    .map(str::to_string)
+                    .unwrap_or_else(default_display_name);
+                let created = chrono::Utc::now().to_rfc3339();
+                match heiwa_identity::establish(&display_name, &created) {
+                    Ok(identity) => println!("Created local identity: {}", identity.display_name),
+                    Err(error) => {
+                        eprintln!("{error}");
+                        std::process::exit(1);
+                    }
+                }
+            }
+            Ok(Some(identity)) => {
+                if let Some(name) = name.filter(|name| *name != identity.display_name) {
+                    match heiwa_identity::rename(name) {
+                        Ok(renamed) => println!("Renamed to {}", renamed.display_name),
+                        Err(error) => {
+                            eprintln!("{error}");
+                            std::process::exit(1);
+                        }
+                    }
+                }
+            }
+            Err(error) => {
+                eprintln!("{error}");
+                std::process::exit(1);
+            }
+        }
+    }
+
+    let state = onboarding_state().await;
+    println!("{}", state.report());
+    if !state.complete {
+        // A non-zero exit is what makes this scriptable: a first-run check in
+        // CI or an installer can branch on it.
+        std::process::exit(1);
+    }
+    Ok(())
+}
+
+/// A neutral name for an installation the user has not named.
+///
+/// Deliberately not the OS username: this string is shown in the interface
+/// and will travel with connector metadata, and lifting a login name into a
+/// display name is the single-seat assumption in miniature.
+fn default_display_name() -> String {
+    "Heiwa user".to_string()
+}
+
 fn print_help() {
     println!("Heiwa — BYOK terminal agent");
     println!();
@@ -926,6 +1036,9 @@ fn print_help() {
     println!("  auto status|create|tick       Manage local background automations");
     println!("  approvals list|show|decide    Manage local approval packets");
     println!("  mail status|accounts          Mail.app metadata-only bridge probe");
+    println!("  setup [--name <name>]         First-run setup: identity, provider, readiness");
+    println!("  whoami                        Show this installation's local identity");
+    println!("  ask <prompt>                  Run one non-interactive turn and print the reply");
     println!("  route preview <prompt>        Preview DREX routing without execution");
     println!("  session attach                Attach to a Heiwa session");
     println!("  loop [turns] <objective>      Run a bounded execution loop");
@@ -1088,8 +1201,25 @@ async fn register_current_device() -> Result<()> {
 pub(crate) fn get_live_model_tiers(
     registry: &heiwa_provider::AccountRegistry,
 ) -> Vec<heiwa_protocol::ModelTier> {
+    get_live_model_tiers_with(registry, |binary| {
+        heiwa_provider::resolve_command(binary).is_some()
+    })
+}
+
+/// The same projection against an explicit installed-binary probe.
+///
+/// Health filtering asks the host whether the executor exists, so a test that
+/// does not state the answer asserts against whatever the machine has
+/// installed: the tier list for a `claude` seat or an `ollama` runtime is
+/// non-empty on a developer laptop and empty on a CI runner.
+pub(crate) fn get_live_model_tiers_with(
+    registry: &heiwa_provider::AccountRegistry,
+    is_installed: impl Fn(&str) -> bool,
+) -> Vec<heiwa_protocol::ModelTier> {
+    // Health-filtered, not stored-status-filtered: a route is only real if
+    // the account behind it can execute a turn right now.
     let mut models = registry
-        .all_models()
+        .routable_models_with(is_installed)
         .into_iter()
         .filter(|m| provider_supports_loop_adapter(&m.provider))
         .collect::<Vec<_>>();
@@ -2406,11 +2536,20 @@ fn build_messages_from_transcript(
         role: Role::System,
         content: working_context_prompt(pins),
     }];
-    messages.extend(transcript_messages);
-    messages.push(Message {
-        role: Role::User,
-        content: current_input.to_string(),
+    // The turn is persisted before the prompt is built, so the transcript's
+    // last entry is usually the message being sent. Appending it again sent
+    // the newest message twice — billed twice, and the one most likely to
+    // carry pasted context. Append only when it is not already there.
+    let already_present = transcript_messages.last().is_some_and(|message| {
+        matches!(message.role, Role::User) && message.content == current_input
     });
+    messages.extend(transcript_messages);
+    if !already_present {
+        messages.push(Message {
+            role: Role::User,
+            content: current_input.to_string(),
+        });
+    }
     messages
 }
 
@@ -2764,12 +2903,9 @@ async fn execute_deterministic_surface_turn(
 // Shared execution core — used by both plain REPL and cockpit controller
 // ---------------------------------------------------------------------------
 
-/// Providers that have a working adapter in `resolve_adapter()`.
-const SUPPORTED_ADAPTER_PROVIDERS: &[&str] = &["ollama", "claude", "codex", "gemini", "openrouter"];
-
-/// Returns true if the provider has a working adapter in this binary.
+/// Returns true if the provider has a working adapter.
 fn has_adapter(provider: &str) -> bool {
-    SUPPORTED_ADAPTER_PROVIDERS.contains(&canonical_provider_id(provider))
+    provider_supports_loop_adapter(provider)
 }
 
 /// Route a task through DREX, returning the adapter + metadata needed to stream.
@@ -2838,10 +2974,18 @@ fn route_task_inner(
         .collect();
 
     if adapter_capable.is_empty() {
-        return Err(format!(
-            "No models with working adapters. Supported providers: {}.",
-            SUPPORTED_ADAPTER_PROVIDERS.join(", "),
-        ));
+        // Zero routable providers is a state the user can act on, not an
+        // internal failure: say which of their accounts were skipped and
+        // why, or how to connect a first one.
+        let guidance = heiwa_provider::health::FleetHealth::load().guidance();
+        return Err(if guidance.is_empty() {
+            format!(
+                "No models with working adapters. Supported providers: {}.",
+                heiwa_provider::routing::SUPPORTED_PROVIDERS.join(", "),
+            )
+        } else {
+            guidance
+        });
     }
 
     // Auxiliary calls have their own DREX policy. Preserve on-device
@@ -2964,20 +3108,12 @@ pub(crate) fn privacy_for_task(task: &str) -> &'static str {
 }
 
 /// Resolve a provider adapter by name.
+///
+/// Selection itself lives in `heiwa_provider::routing` so every surface —
+/// this CLI, the desktop runtime, and the fresh-install harness — resolves a
+/// provider the same way.
 fn resolve_adapter(provider: &str, model_id: &str) -> Result<Arc<dyn ProviderAdapter>, String> {
-    match canonical_provider_id(provider) {
-        "ollama" => Ok(Arc::new(OllamaCliAdapter::with_model(model_id))),
-        "claude" => Ok(Arc::new(ClaudeCodeCliAdapter::new())),
-        "codex" => Ok(Arc::new(CodexCliAdapter::new())),
-        "gemini" => Ok(Arc::new(GeminiCliAdapter::new())),
-        "openrouter" => OpenRouterAdapter::from_registry()
-            .map(|a| Arc::new(a) as Arc<dyn ProviderAdapter>)
-            .ok_or_else(|| {
-                "No OpenRouter account registered (heiwa auth add-key openrouter <key>)."
-                    .to_string()
-            }),
-        _ => Err(format!("No adapter for provider '{}' yet.", provider)),
-    }
+    heiwa_provider::routing::resolve_adapter(provider, model_id)
 }
 
 fn model_call_candidate(tier: &heiwa_protocol::ModelTier) -> ModelCallCandidate {
@@ -4505,6 +4641,77 @@ pub(crate) async fn preview_route_payload(prompt: &str) -> serde_json::Value {
 mod tests {
     use heiwa_protocol::{parse_turn_intent, Intent};
 
+    /// Executor present. Tier projection filters on whether the account's
+    /// executor exists on the host, so a test that does not state the answer
+    /// asserts against the machine's installed tooling: a `claude` seat or an
+    /// `ollama` runtime is routable on a developer laptop and filtered out on
+    /// a CI runner.
+    const INSTALLED: fn(&str) -> bool = |_| true;
+
+    /// The BYOK path must survive the turn path, not just the adapter.
+    ///
+    /// Direct-API accounts are registered under the vendor name the
+    /// credential belongs to ("anthropic"), while DREX routes are named after
+    /// the surface ("claude"). A second alias table in this binary once
+    /// failed to map between them, so every direct-API model was filtered out
+    /// before routing ever saw it and a user with a valid key got "no models
+    /// with working adapters". Alias mapping now has exactly one owner.
+    #[test]
+    fn direct_api_accounts_survive_the_live_model_tier_filter() {
+        use heiwa_provider::registry::{
+            AccountRegistry, AccountStatus, Credential, DetectedModel, InventoryTruth,
+            ProviderAccount,
+        };
+
+        fn account(vendor: &str, model_id: &str) -> ProviderAccount {
+            ProviderAccount {
+                account_id: format!("{vendor}-api-1"),
+                provider: vendor.to_string(),
+                credential: Credential::ApiKey,
+                rate_group: format!("{vendor}_api"),
+                status: AccountStatus::Connected,
+                models: vec![DetectedModel {
+                    model_id: model_id.to_string(),
+                    provider_model_id: model_id.to_string(),
+                    provider: vendor.to_string(),
+                    account_id: format!("{vendor}-api-1"),
+                    rate_group: format!("{vendor}_api"),
+                    capability_class: 5,
+                    context_window: 200_000,
+                    supports_streaming: true,
+                    supports_tools: true,
+                    supports_vision: true,
+                    supports_audio: false,
+                    cost_per_1k_input: 0.0,
+                    cost_per_1k_output: 0.0,
+                    inventory_truth: InventoryTruth::Verified,
+                }],
+            }
+        }
+
+        for (vendor, model_id) in [
+            ("anthropic", "claude-opus-5"),
+            ("openai", "gpt-5"),
+            ("google", "gemini-3-pro"),
+        ] {
+            let registry = AccountRegistry {
+                accounts: vec![account(vendor, model_id)],
+            };
+            let tiers = super::get_live_model_tiers(&registry);
+            assert!(
+                !tiers.is_empty(),
+                "a {vendor} API-key account produced no routable tier — the BYOK \
+                 path is unreachable from a turn"
+            );
+            assert!(
+                tiers.iter().any(|tier| tier.model_id == model_id),
+                "{vendor} tier list is missing {model_id}: {:?}",
+                tiers.iter().map(|t| &t.model_id).collect::<Vec<_>>()
+            );
+            assert!(super::has_adapter(vendor), "{vendor} must have an adapter");
+        }
+    }
+
     #[test]
     fn automation_approval_request_becomes_awaiting_confirmation() {
         let outcome = super::automation_terminal_outcome(
@@ -4675,8 +4882,21 @@ mod tests {
         assert!(super::has_adapter("claude"));
         assert!(super::has_adapter("codex"));
         assert!(super::has_adapter("gemini"));
-        assert!(!super::has_adapter("anthropic"));
-        assert!(!super::has_adapter("openai"));
+        assert!(!super::has_adapter("mystery-provider"));
+    }
+
+    #[test]
+    fn vendor_names_resolve_to_the_same_adapters_as_route_names() {
+        // The registry names accounts after the vendor whose key it holds;
+        // DREX names routes after the surface. When the shell kept its own
+        // alias table, these disagreed and every direct-API model was dropped
+        // before routing — a user with a valid key saw "no working adapters".
+        for vendor in ["anthropic", "openai", "google"] {
+            assert!(
+                super::has_adapter(vendor),
+                "vendor name `{vendor}` must resolve to an adapter"
+            );
+        }
     }
 
     #[test]
@@ -4685,6 +4905,45 @@ mod tests {
         assert!(super::provider_supports_loop_adapter("google-gemini-cli"));
         assert!(super::has_adapter("claude-code"));
         assert!(super::has_adapter("google-gemini-cli"));
+    }
+
+    #[test]
+    fn a_cli_seat_whose_binary_is_gone_offers_no_route() {
+        // Health said NotInstalled and nothing asked: the tier filter read
+        // stored status only, so a turn was routed to an adapter that could
+        // not start and died on a raw OS error instead of routing elsewhere.
+        let registry = heiwa_provider::AccountRegistry {
+            accounts: vec![heiwa_provider::ProviderAccount {
+                account_id: "anthropic-cli".to_string(),
+                provider: "claude-code".to_string(),
+                credential: heiwa_provider::Credential::OauthCli {
+                    binary: "definitely-not-installed-xyz".to_string(),
+                },
+                rate_group: "claude_code".to_string(),
+                status: heiwa_provider::AccountStatus::Connected,
+                models: vec![heiwa_provider::DetectedModel {
+                    model_id: "claude/sonnet-4-6".to_string(),
+                    provider_model_id: "claude-sonnet-4-6".to_string(),
+                    provider: "claude-code".to_string(),
+                    account_id: "anthropic-cli".to_string(),
+                    rate_group: "claude_code".to_string(),
+                    capability_class: 4,
+                    context_window: 200_000,
+                    supports_streaming: true,
+                    supports_tools: true,
+                    supports_vision: false,
+                    supports_audio: false,
+                    cost_per_1k_input: 0.003,
+                    cost_per_1k_output: 0.015,
+                    inventory_truth: heiwa_provider::InventoryTruth::Inferred,
+                }],
+            }],
+        };
+
+        assert!(
+            super::get_live_model_tiers(&registry).is_empty(),
+            "an account whose executor is missing must not be offered as a route"
+        );
     }
 
     #[test]
@@ -4717,7 +4976,7 @@ mod tests {
             }],
         };
 
-        let tiers = super::get_live_model_tiers(&registry);
+        let tiers = super::get_live_model_tiers_with(&registry, INSTALLED);
 
         assert_eq!(tiers.len(), 1);
         assert_eq!(tiers[0].provider, "claude");
@@ -4754,9 +5013,9 @@ mod tests {
             }],
         };
 
-        let first = super::get_live_model_tiers(&registry);
+        let first = super::get_live_model_tiers_with(&registry, INSTALLED);
         registry.accounts[0].models.reverse();
-        let second = super::get_live_model_tiers(&registry);
+        let second = super::get_live_model_tiers_with(&registry, INSTALLED);
         let first_ids = first.iter().map(|tier| tier.id).collect::<Vec<_>>();
         let second_ids = second.iter().map(|tier| tier.id).collect::<Vec<_>>();
 
@@ -4795,7 +5054,7 @@ mod tests {
                 models: vec![model("gemma4"), model("qwen3.5:9b")],
             }],
         };
-        let tiers = super::get_live_model_tiers(&registry);
+        let tiers = super::get_live_model_tiers_with(&registry, INSTALLED);
         let candidates = tiers
             .iter()
             .map(super::model_call_candidate)
@@ -5455,6 +5714,60 @@ mod tests {
             .content
             .contains("current directory:"));
         assert_eq!(messages.last().unwrap().content, "status");
+    }
+
+    #[test]
+    fn the_current_prompt_is_not_repeated_when_the_transcript_already_holds_it() {
+        // The turn is persisted to the transcript before the prompt is built,
+        // so the transcript's last entry is the message being sent. Appending
+        // it again billed the user twice for the newest message on every
+        // turn — the one carrying pasted context.
+        use heiwa_protocol::TranscriptBlock;
+        let pins = super::SessionPins::new();
+
+        let messages = super::build_messages_from_transcript(
+            &[
+                TranscriptBlock::User("First question.".into()),
+                TranscriptBlock::Assistant("An answer.".into()),
+                TranscriptBlock::User("Second question.".into()),
+            ],
+            "Second question.",
+            &pins,
+        );
+
+        let asked: Vec<&str> = messages
+            .iter()
+            .filter(|message| {
+                matches!(message.role, heiwa_provider::adapter::Role::User)
+                    && message.content == "Second question."
+            })
+            .map(|message| message.content.as_str())
+            .collect();
+        assert_eq!(
+            asked.len(),
+            1,
+            "prompt sent {} times: {messages:?}",
+            asked.len()
+        );
+        assert_eq!(messages.last().unwrap().content, "Second question.");
+    }
+
+    #[test]
+    fn the_current_prompt_is_appended_when_the_transcript_does_not_hold_it() {
+        use heiwa_protocol::TranscriptBlock;
+        let pins = super::SessionPins::new();
+
+        let messages = super::build_messages_from_transcript(
+            &[TranscriptBlock::Assistant("An answer.".into())],
+            "A new question.",
+            &pins,
+        );
+
+        assert_eq!(messages.last().unwrap().content, "A new question.");
+        assert!(matches!(
+            messages.last().unwrap().role,
+            heiwa_provider::adapter::Role::User
+        ));
     }
 
     #[test]

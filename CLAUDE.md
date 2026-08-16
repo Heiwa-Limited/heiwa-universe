@@ -63,6 +63,17 @@ Use corrected peer framing before architecture or parity work:
 - Biggest current gap: connector/tool breadth and compression/learning loop.
   Do not imply parity until code proves it.
 
+## Active Build: Roadmap L0/L1 (autonomous)
+
+Contract: `docs/superpowers/specs/2026-08-14-heiwa-app-product-roadmap-design.md`.
+Ledger (repo truth, update in the same commit as the work):
+`docs/superpowers/ledgers/2026-08-14-L0-L1-task-ledger.md`.
+Acceptance: `scripts/check_l0_acceptance.sh`, `scripts/check_l1_acceptance.sh` —
+a layer is complete only when its script passes at HEAD (a Stop hook enforces
+this against the ledger). Escalate to Devon only for product-policy changes,
+irreversible/destructive actions, or credentials. D1 (sync transport) blocks
+L5 only — do not raise it during L0-L4.
+
 ## Commands
 
 ```bash

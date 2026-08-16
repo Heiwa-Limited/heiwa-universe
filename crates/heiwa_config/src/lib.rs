@@ -1,32 +1,154 @@
 use serde::Deserialize;
 use std::env;
+use std::ffi::OsString;
 use std::fs;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
+/// ConfigRoot: the single resolver for Heiwa's per-user state layout.
+///
+/// This is the only code permitted to know where user state lives. Every
+/// crate and app resolves the runtime root, state dir, evidence dir, and
+/// session dir through this struct instead of reading `HOME`/`HEIWA_*`
+/// env vars or joining `.heiwa` by hand.
+///
+/// Layout and overrides:
+/// - `runtime_root`  = `HEIWA_HOME`          | `<home>/.heiwa`
+/// - `state_dir`     = `HEIWA_STATE_DIR`     | `<runtime_root>/state`
+/// - `evidence_dir`  = `HEIWA_EVIDENCE_DIR`  | `<runtime_root>/evidence`
+/// - `sessions_dir`  =                         `<runtime_root>/sessions`
+/// - `config_path`   =                         `<runtime_root>/config.toml`
+///
+/// `HOME` wins over the platform home lookup so hermetic tests and sandboxed
+/// runs can redirect all state with one env var; on Windows the platform
+/// lookup ignores `HOME`, which previously let sandboxed state leak into the
+/// real user profile.
 #[derive(Debug, Clone)]
 pub struct HeiwaPaths {
     pub home_dir: PathBuf,
+    /// The per-user runtime root (`~/.heiwa` unless `HEIWA_HOME` overrides).
+    pub runtime_root: PathBuf,
+    /// Hot operational state (`<runtime_root>/state` unless `HEIWA_STATE_DIR`).
     pub state_dir: PathBuf,
+    /// True when `HEIWA_STATE_DIR` explicitly relocated `state_dir`. Callers
+    /// that historically anchored files at the runtime root (quota's
+    /// `state.db`) use this to preserve their on-disk contract.
+    pub state_dir_is_override: bool,
+    /// Evidence journal root (`<runtime_root>/evidence` unless
+    /// `HEIWA_EVIDENCE_DIR`).
+    pub evidence_dir: PathBuf,
     pub sessions_dir: PathBuf,
     pub config_path: PathBuf,
 }
 
 impl HeiwaPaths {
+    /// Resolve from the process environment, falling back to a
+    /// cwd-relative root when no home can be found.
+    ///
+    /// Callers that would rather fail than write to an attacker-writable
+    /// working directory must use [`try_resolve`](Self::try_resolve).
     pub fn resolve() -> Self {
-        let home_dir = env::var("HOME")
-            .or_else(|_| env::var("USERPROFILE"))
-            .map(PathBuf::from)
-            .unwrap_or_else(|_| PathBuf::from("."));
-        let state_dir = env::var_os("HEIWA_HOME")
-            .filter(|value| !value.is_empty())
-            .map(PathBuf::from)
+        Self::resolve_from(|key| env::var_os(key), dirs::home_dir())
+    }
+
+    /// Resolve only when a real root exists.
+    ///
+    /// Returns `None` when neither `HEIWA_HOME` nor any home directory is
+    /// resolvable — a containerized run with no `HOME` and no passwd entry,
+    /// for instance. Anything that reads secrets or writes the evidence
+    /// journal must use this: silently falling back to `./.heiwa` would read
+    /// credentials from, and append receipts to, whatever directory the
+    /// process happens to be started in.
+    pub fn try_resolve() -> Option<Self> {
+        Self::try_resolve_from(|key| env::var_os(key), dirs::home_dir())
+    }
+
+    /// Pure form of [`try_resolve`](Self::try_resolve).
+    pub fn try_resolve_from(
+        env: impl Fn(&str) -> Option<OsString>,
+        platform_home: Option<PathBuf>,
+    ) -> Option<Self> {
+        // Any signal that names a real root counts, including the two that
+        // override sub-paths — a caller that set only HEIWA_STATE_DIR has
+        // still told us where its state lives.
+        let has_root = [
+            "HEIWA_HOME",
+            "HEIWA_STATE_DIR",
+            "HEIWA_EVIDENCE_DIR",
+            "HOME",
+            "USERPROFILE",
+        ]
+        .iter()
+        .any(|key| env(key).is_some_and(|value| !value.is_empty()))
+            || platform_home.is_some();
+        has_root.then(|| Self::resolve_from(env, platform_home))
+    }
+
+    /// Pure resolution from an injected environment, so precedence is
+    /// testable without touching process-global env (parallel test threads
+    /// race on `set_var`).
+    pub fn resolve_from(
+        env: impl Fn(&str) -> Option<OsString>,
+        platform_home: Option<PathBuf>,
+    ) -> Self {
+        let non_empty = |key: &str| {
+            env(key)
+                .filter(|value| !value.is_empty())
+                .map(PathBuf::from)
+        };
+
+        let home_dir = non_empty("HOME")
+            .or_else(|| non_empty("USERPROFILE"))
+            .or(platform_home)
+            .unwrap_or_else(|| PathBuf::from("."));
+
+        // A caller that named only the state directory has still named a
+        // root. Deriving the runtime root from it beats falling through to
+        // `./.heiwa`, which would put an auth token wherever the process
+        // started — the thing `try_resolve` exists to prevent.
+        let runtime_root = non_empty("HEIWA_HOME")
+            .or_else(|| {
+                if home_dir == Path::new(".") {
+                    non_empty("HEIWA_STATE_DIR").or_else(|| non_empty("HEIWA_EVIDENCE_DIR"))
+                } else {
+                    None
+                }
+            })
             .unwrap_or_else(|| home_dir.join(".heiwa"));
+
+        let state_override = non_empty("HEIWA_STATE_DIR");
+        let state_dir_is_override = state_override.is_some();
+        let state_dir = state_override.unwrap_or_else(|| runtime_root.join("state"));
+
+        let evidence_dir =
+            non_empty("HEIWA_EVIDENCE_DIR").unwrap_or_else(|| runtime_root.join("evidence"));
+
         Self {
-            sessions_dir: state_dir.join("sessions"),
-            config_path: state_dir.join("config.toml"),
+            sessions_dir: runtime_root.join("sessions"),
+            config_path: runtime_root.join("config.toml"),
             home_dir,
+            runtime_root,
             state_dir,
+            state_dir_is_override,
+            evidence_dir,
         }
+    }
+
+    /// Redacted receipts plane: always under the state dir.
+    pub fn receipts_dir(&self) -> PathBuf {
+        self.state_dir.join("evidence")
+    }
+
+    /// First-run creation of the per-user layout. Idempotent.
+    pub fn ensure(&self) -> std::io::Result<()> {
+        for dir in [
+            &self.runtime_root,
+            &self.state_dir,
+            &self.sessions_dir,
+            &self.evidence_dir,
+        ] {
+            fs::create_dir_all(dir)?;
+        }
+        Ok(())
     }
 }
 
@@ -122,12 +244,12 @@ pub fn load() -> AppConfig {
             .ok()
             .map(PathBuf::from)
             .or_else(|| file.embedding.sqlite_path.clone())
-            .unwrap_or_else(|| paths.state_dir.join("state").join("memory.sqlite3")),
+            .unwrap_or_else(|| paths.state_dir.join("memory.sqlite3")),
         lance_path: env::var("HEIWA_EMBED_LANCE_PATH")
             .ok()
             .map(PathBuf::from)
             .or_else(|| file.embedding.lance_path.clone())
-            .unwrap_or_else(|| paths.state_dir.join("state").join("lance")),
+            .unwrap_or_else(|| paths.state_dir.join("lance")),
         dim: env::var("HEIWA_EMBED_DIM")
             .ok()
             .and_then(|value| value.parse::<usize>().ok())
@@ -156,6 +278,222 @@ fn env_bool(key: &str) -> Option<bool> {
         "1" | "true" | "yes" | "on" => Some(true),
         "0" | "false" | "no" | "off" => Some(false),
         _ => None,
+    }
+}
+
+#[cfg(test)]
+mod config_root_tests {
+    use super::*;
+    use std::ffi::OsString;
+
+    fn env_of<'a>(pairs: &'a [(&'a str, &'a str)]) -> impl Fn(&str) -> Option<OsString> + 'a {
+        move |key: &str| {
+            pairs
+                .iter()
+                .find(|(k, _)| *k == key)
+                .map(|(_, v)| OsString::from(v))
+        }
+    }
+
+    #[test]
+    fn a_state_dir_override_with_no_home_never_resolves_under_the_working_directory() {
+        // A container with no HOME and no passwd entry, told only where its
+        // state lives. Counting that as "a root exists" while resolving the
+        // runtime root to `./.heiwa` would write the auth token into
+        // whatever directory the process happened to start in.
+        let env = env_of(&[("HEIWA_STATE_DIR", "/data/state")]);
+        let paths = HeiwaPaths::try_resolve_from(env, None).expect("a named state dir is a root");
+
+        assert_eq!(paths.state_dir, PathBuf::from("/data/state"));
+        for path in [
+            &paths.runtime_root,
+            &paths.config_path,
+            &paths.sessions_dir,
+            &paths.evidence_dir,
+        ] {
+            assert!(
+                !path.starts_with("."),
+                "resolved under the working directory: {}",
+                path.display()
+            );
+        }
+    }
+
+    #[test]
+    fn a_real_home_still_wins_over_a_state_dir_override() {
+        let env = env_of(&[
+            ("HOME", "/Users/someone"),
+            ("HEIWA_STATE_DIR", "/data/state"),
+        ]);
+        let paths = HeiwaPaths::try_resolve_from(env, None).expect("root");
+
+        assert_eq!(paths.runtime_root, PathBuf::from("/Users/someone/.heiwa"));
+        assert_eq!(paths.state_dir, PathBuf::from("/data/state"));
+    }
+
+    #[test]
+    fn an_empty_environment_with_no_platform_home_resolves_to_nothing() {
+        assert!(HeiwaPaths::try_resolve_from(env_of(&[]), None).is_none());
+    }
+
+    #[test]
+    fn defaults_derive_every_path_from_platform_home() {
+        let paths = HeiwaPaths::resolve_from(env_of(&[]), Some(PathBuf::from("/platform/home")));
+        assert_eq!(paths.home_dir, PathBuf::from("/platform/home"));
+        assert_eq!(paths.runtime_root, PathBuf::from("/platform/home/.heiwa"));
+        assert_eq!(
+            paths.state_dir,
+            PathBuf::from("/platform/home/.heiwa/state")
+        );
+        assert!(!paths.state_dir_is_override);
+        assert_eq!(
+            paths.evidence_dir,
+            PathBuf::from("/platform/home/.heiwa/evidence")
+        );
+        assert_eq!(
+            paths.sessions_dir,
+            PathBuf::from("/platform/home/.heiwa/sessions")
+        );
+        assert_eq!(
+            paths.config_path,
+            PathBuf::from("/platform/home/.heiwa/config.toml")
+        );
+    }
+
+    #[test]
+    fn home_env_wins_over_platform_home_for_hermetic_tests() {
+        let paths = HeiwaPaths::resolve_from(
+            env_of(&[("HOME", "/sandbox/home")]),
+            Some(PathBuf::from("/platform/home")),
+        );
+        assert_eq!(paths.runtime_root, PathBuf::from("/sandbox/home/.heiwa"));
+    }
+
+    #[test]
+    fn userprofile_used_when_home_absent() {
+        let paths = HeiwaPaths::resolve_from(env_of(&[("USERPROFILE", "/win/profile")]), None);
+        assert_eq!(paths.runtime_root, PathBuf::from("/win/profile/.heiwa"));
+    }
+
+    #[test]
+    fn heiwa_home_overrides_runtime_root_and_children_follow() {
+        let paths = HeiwaPaths::resolve_from(
+            env_of(&[("HOME", "/h"), ("HEIWA_HOME", "/custom/root")]),
+            None,
+        );
+        assert_eq!(paths.runtime_root, PathBuf::from("/custom/root"));
+        assert_eq!(paths.state_dir, PathBuf::from("/custom/root/state"));
+        assert_eq!(paths.evidence_dir, PathBuf::from("/custom/root/evidence"));
+        assert_eq!(paths.sessions_dir, PathBuf::from("/custom/root/sessions"));
+        assert_eq!(paths.config_path, PathBuf::from("/custom/root/config.toml"));
+    }
+
+    #[test]
+    fn state_dir_env_replaces_state_root_and_flags_override() {
+        let paths = HeiwaPaths::resolve_from(
+            env_of(&[("HOME", "/h"), ("HEIWA_STATE_DIR", "/isolated/state")]),
+            None,
+        );
+        assert_eq!(paths.state_dir, PathBuf::from("/isolated/state"));
+        assert!(paths.state_dir_is_override);
+        assert_eq!(paths.runtime_root, PathBuf::from("/h/.heiwa"));
+    }
+
+    #[test]
+    fn evidence_dir_env_replaces_evidence_root() {
+        let paths = HeiwaPaths::resolve_from(
+            env_of(&[("HOME", "/h"), ("HEIWA_EVIDENCE_DIR", "/isolated/evidence")]),
+            None,
+        );
+        assert_eq!(paths.evidence_dir, PathBuf::from("/isolated/evidence"));
+    }
+
+    #[test]
+    fn empty_env_values_are_ignored() {
+        let paths = HeiwaPaths::resolve_from(
+            env_of(&[
+                ("HOME", "/h"),
+                ("HEIWA_HOME", ""),
+                ("HEIWA_STATE_DIR", ""),
+                ("HEIWA_EVIDENCE_DIR", ""),
+            ]),
+            None,
+        );
+        assert_eq!(paths.runtime_root, PathBuf::from("/h/.heiwa"));
+        assert_eq!(paths.state_dir, PathBuf::from("/h/.heiwa/state"));
+        assert!(!paths.state_dir_is_override);
+        assert_eq!(paths.evidence_dir, PathBuf::from("/h/.heiwa/evidence"));
+    }
+
+    #[test]
+    fn no_home_anywhere_falls_back_to_cwd_relative() {
+        let paths = HeiwaPaths::resolve_from(env_of(&[]), None);
+        assert_eq!(paths.runtime_root, PathBuf::from("./.heiwa"));
+    }
+
+    #[test]
+    fn try_resolve_refuses_to_guess_a_root_when_there_is_none() {
+        // With no home at all there is no state root to guess. Callers that
+        // read secrets must get None here rather than a cwd-relative path an
+        // attacker who controls the working directory could populate.
+        assert!(HeiwaPaths::try_resolve_from(env_of(&[]), None).is_none());
+    }
+
+    #[test]
+    fn try_resolve_yields_the_same_layout_as_resolve_when_a_root_exists() {
+        for env in [
+            vec![("HOME", "/h")],
+            vec![("USERPROFILE", "/win")],
+            vec![("HEIWA_HOME", "/custom")],
+        ] {
+            let strict = HeiwaPaths::try_resolve_from(env_of(&env), None).expect("root");
+            let lenient = HeiwaPaths::resolve_from(env_of(&env), None);
+            assert_eq!(strict.runtime_root, lenient.runtime_root);
+        }
+        // A platform home with no env vars set still counts as a real root.
+        assert!(HeiwaPaths::try_resolve_from(env_of(&[]), Some(PathBuf::from("/p"))).is_some());
+    }
+
+    #[test]
+    fn try_resolve_ignores_empty_env_values() {
+        assert!(
+            HeiwaPaths::try_resolve_from(env_of(&[("HOME", ""), ("HEIWA_HOME", "")]), None)
+                .is_none()
+        );
+    }
+
+    #[test]
+    fn receipts_dir_lives_under_state_dir() {
+        let default = HeiwaPaths::resolve_from(env_of(&[("HOME", "/h")]), None);
+        assert_eq!(
+            default.receipts_dir(),
+            PathBuf::from("/h/.heiwa/state/evidence")
+        );
+        let overridden = HeiwaPaths::resolve_from(
+            env_of(&[("HOME", "/h"), ("HEIWA_STATE_DIR", "/iso/state")]),
+            None,
+        );
+        assert_eq!(
+            overridden.receipts_dir(),
+            PathBuf::from("/iso/state/evidence")
+        );
+    }
+
+    #[test]
+    fn ensure_creates_the_per_user_layout_on_first_run() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let root = temp.path().join("fresh-user");
+        let paths = HeiwaPaths::resolve_from(
+            env_of(&[("HEIWA_HOME", root.to_str().expect("utf8 temp path"))]),
+            None,
+        );
+        assert!(!root.exists());
+        paths.ensure().expect("ensure creates layout");
+        assert!(paths.runtime_root.is_dir());
+        assert!(paths.state_dir.is_dir());
+        assert!(paths.sessions_dir.is_dir());
+        assert!(paths.evidence_dir.is_dir());
+        paths.ensure().expect("ensure is idempotent");
     }
 }
 

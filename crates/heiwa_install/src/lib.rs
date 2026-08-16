@@ -1,7 +1,6 @@
 use anyhow::{anyhow, Context, Result};
 use serde::{Deserialize, Serialize};
 use std::env;
-use std::ffi::OsString;
 use std::fs;
 #[cfg(unix)]
 use std::os::unix::fs::PermissionsExt;
@@ -121,26 +120,28 @@ pub enum InstallOutcome {
     Plugin(Box<InstalledPlugin>),
 }
 
+/// The runtime root.
+///
+/// # Panics
+///
+/// Panics when no per-user root can be resolved — none of `HEIWA_HOME`,
+/// `HEIWA_STATE_DIR`, `HOME`, or `USERPROFILE` is set and the platform
+/// reports no home directory. Install and doctor flows treat that as
+/// unrecoverable, because the alternative is provisioning a runtime tree
+/// wherever the process happened to start. Callers that must not panic —
+/// libraries, embedders, anything running under an empty environment — use
+/// [`try_get_heiwa_dir`] instead.
 pub fn get_heiwa_dir() -> PathBuf {
-    resolve_heiwa_dir(
-        env::var_os("HEIWA_HOME"),
-        env::var_os("HOME").or_else(|| env::var_os("USERPROFILE")),
-    )
-    .expect("HOME or USERPROFILE must be set")
+    try_get_heiwa_dir().expect("HOME, USERPROFILE, or HEIWA_HOME must be set")
 }
 
-/// Resolve the runtime root from explicit inputs.
+/// The runtime root, or `None` when no real home exists.
 ///
-/// Split out from [`get_heiwa_dir`] so the precedence can be tested without
-/// reading process-global environment. Tests in the same binary run on parallel
-/// threads, and any test that sets `HOME` or `HEIWA_HOME` races every other test
-/// that reads them — which is how the state-root test became flaky.
-pub fn resolve_heiwa_dir(heiwa_home: Option<OsString>, home: Option<OsString>) -> Option<PathBuf> {
-    if let Some(root) = heiwa_home.filter(|value| !value.is_empty()) {
-        return Some(PathBuf::from(root));
-    }
-    home.filter(|value| !value.is_empty())
-        .map(|value| PathBuf::from(value).join(".heiwa"))
+/// Install and doctor flows create and inspect this directory tree, so a
+/// cwd-relative fallback would provision a phantom runtime wherever the
+/// process happened to start.
+pub fn try_get_heiwa_dir() -> Option<PathBuf> {
+    heiwa_config::HeiwaPaths::try_resolve().map(|paths| paths.runtime_root)
 }
 
 pub fn get_plugins_dir() -> PathBuf {
@@ -395,6 +396,15 @@ fn package_lint_uses_biome(path: &Path) -> bool {
 }
 
 fn ensure_runtime_layout(heiwa_dir: &Path) -> Result<()> {
+    // ConfigRoot owns first-run creation of the directories it resolves
+    // (runtime root, state, sessions, evidence) so the resolver and the
+    // installer cannot disagree about where they are. The install-only
+    // directories below are layered on top.
+    if let Some(paths) = heiwa_config::HeiwaPaths::try_resolve() {
+        if paths.runtime_root == heiwa_dir {
+            paths.ensure()?;
+        }
+    }
     fs::create_dir_all(heiwa_dir)?;
     for dirname in [
         "app", "bin", "logs", "sessions", "cache", "state", "secrets", "plugins",

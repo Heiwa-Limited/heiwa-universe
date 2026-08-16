@@ -88,13 +88,21 @@ require_match ".github/workflows/ci.yml" 'name: Rust Source Policy' "main branch
 require_block_match ".github/workflows/ci.yml" \
   '^  rust-source-policy:' \
   '^    runs-on:' \
-  'needs: \[rust-tests, rust-static\]' \
-  "the Rust Source Policy context must aggregate both Rust promotion lanes"
+  'needs: \[rust-tests, rust-static, desktop-app\]' \
+  "the Rust Source Policy context must aggregate every Rust promotion lane"
 require_block_match ".github/workflows/ci.yml" \
   '^  rust-source-policy:' \
   '^    runs-on:' \
   '^ *if: always\(\)$' \
   "the Rust Source Policy context must report even when a lane fails or is skipped"
+# Declaring a lane in `needs` only makes the aggregate wait for it. Without a
+# result comparison the required context still passes while that lane fails,
+# which is the exact hole this pins shut.
+require_block_match ".github/workflows/ci.yml" \
+  '^  rust-source-policy:' \
+  '^  lint:' \
+  '"\$DESKTOP_APP_RESULT" != "success"' \
+  "the Rust Source Policy context must fail when the Desktop App lane fails"
 # Scope each command to the job that must own it. A whole-file `require_match`
 # would still pass if a command drifted from one Rust lane into the other, which
 # would silently change what each required context actually proves.

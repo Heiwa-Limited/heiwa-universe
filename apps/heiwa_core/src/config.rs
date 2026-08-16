@@ -49,15 +49,14 @@ impl RuntimeConfig {
     }
 }
 
+/// The runtime root, or `None` when no real home exists.
+///
+/// Deliberately strict: this feeds `resolve_runtime_secret`, which reads the
+/// JWT signing secret and machine auth token off disk. A cwd-relative
+/// fallback would let anything able to write the process working directory
+/// supply those secrets, so no root means no secret adopted.
 fn heiwa_home_from_env() -> Option<PathBuf> {
-    env::var_os("HEIWA_HOME")
-        .filter(|value| !value.is_empty())
-        .map(PathBuf::from)
-        .or_else(|| {
-            env::var_os("HOME")
-                .filter(|value| !value.is_empty())
-                .map(|home| PathBuf::from(home).join(".heiwa"))
-        })
+    heiwa_config::HeiwaPaths::try_resolve().map(|paths| paths.runtime_root)
 }
 
 fn resolve_runtime_secret(

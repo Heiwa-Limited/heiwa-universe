@@ -39,7 +39,7 @@ export default function TodayRoute(): JSX.Element {
         <p class="eyebrow">Today</p>
         <h1>Operator daily read model</h1>
         <p class="lede">
-          Local snapshot built from <code>~/plans/ultimate_devon/</code> and{" "}
+          Local snapshot built from <code>~/.heiwa/state/life/plans/</code> and{" "}
           <code>~/.heiwa/state/dispatch/</code>. No connectors, no cloud.
         </p>
       </div>

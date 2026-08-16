@@ -12,12 +12,12 @@ keywords.workspace = true
 categories.workspace = true
 
 [dependencies]
+heiwa_config = { path = "../heiwa_config" }
 async-trait = "0.1"
 heiwa-provider = { path = "../heiwa_provider" }
 heiwa_mcp = { path = "../heiwa_mcp" }
 heiwa_quota = { path = "../heiwa_quota" }
 thiserror = "1.0"
-dirs = "5.0"
 uuid = { version = "1.0", features = ["v4", "serde"] }
 chrono = { version = "0.4", features = ["serde"] }
 serde_json = "1.0"

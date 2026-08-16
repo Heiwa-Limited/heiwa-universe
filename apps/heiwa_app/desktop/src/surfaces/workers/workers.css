@@ -1,0 +1,101 @@
+.dispatch-quick {
+  display: grid;
+  gap: var(--space-4);
+  padding: var(--space-5);
+}
+
+.dispatch-quick textarea {
+  padding: var(--space-4);
+  background: var(--surface-input);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  font-size: var(--text-sm);
+  resize: vertical;
+  min-height: 56px;
+}
+
+.dispatch-controls {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-6);
+  flex-wrap: wrap;
+}
+
+.route-note {
+  display: grid;
+  gap: var(--space-1);
+  max-width: 60ch;
+  font-size: var(--text-sm);
+}
+
+.subagent-list {
+  display: grid;
+  gap: var(--space-4);
+}
+
+.subagent-card {
+  padding: var(--space-4) var(--space-5);
+  display: grid;
+  gap: var(--space-3);
+}
+
+.sa-header {
+  display: flex;
+  align-items: center;
+  gap: var(--space-4);
+  font-size: var(--text-sm);
+}
+
+.sa-status-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: var(--radius-pill);
+  background: var(--status-idle);
+  flex-shrink: 0;
+}
+
+.sa-status-dot.running,
+.sa-status-dot.open {
+  background: var(--status-ok);
+}
+
+.sa-status-dot.completed {
+  background: var(--accent);
+}
+
+.sa-status-dot.blocked,
+.sa-status-dot.interrupted {
+  background: var(--status-error);
+}
+
+.sa-status-dot.cancelling {
+  background: var(--status-warn);
+}
+
+.sa-task {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-weight: var(--weight-medium);
+}
+
+.sa-meta,
+.sa-time {
+  font-size: var(--text-xs);
+  white-space: nowrap;
+}
+
+.sa-output {
+  padding: var(--space-4);
+  background: var(--surface-input);
+  border-radius: var(--radius-md);
+  font-size: var(--text-sm);
+  color: var(--content-secondary);
+  white-space: pre-wrap;
+  word-break: break-word;
+  max-height: 220px;
+  overflow-y: auto;
+}

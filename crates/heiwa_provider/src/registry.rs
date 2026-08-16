@@ -203,6 +203,12 @@ impl AccountRegistry {
         self.accounts.iter().find(|a| a.account_id == account_id)
     }
 
+    pub fn get_mut(&mut self, account_id: &str) -> Option<&mut ProviderAccount> {
+        self.accounts
+            .iter_mut()
+            .find(|a| a.account_id == account_id)
+    }
+
     /// Add or update an account.  If an account with the same `account_id`
     /// exists, it is replaced.
     pub fn upsert(&mut self, account: ProviderAccount) {
@@ -226,11 +232,42 @@ impl AccountRegistry {
 
     /// Every detected model across all connected accounts, sorted by
     /// rate group then capability class descending.
+    ///
+    /// Stored status only. Prefer [`routable_models`](Self::routable_models)
+    /// for anything that decides where a turn goes.
     pub fn all_models(&self) -> Vec<&DetectedModel> {
+        self.models_where(|account| account.status == AccountStatus::Connected)
+    }
+
+    /// Models that can actually serve a turn right now.
+    ///
+    /// Stored status is what a past probe recorded; health is what is true
+    /// now. An account can be stored `Connected` while the thing that
+    /// executes its turns is gone — a CLI uninstalled since the last probe,
+    /// or a local runtime whose daemon answers but whose binary does not
+    /// exist. Offering those as routes sends the turn to an adapter that
+    /// cannot start, which fails the whole turn instead of routing elsewhere.
+    pub fn routable_models(&self) -> Vec<&DetectedModel> {
+        self.routable_models_with(|binary| crate::resolve_command(binary).is_some())
+    }
+
+    /// The same filter against an explicit "can this binary be run" probe.
+    ///
+    /// Production answers that from `PATH`. Callers that must not inherit the
+    /// host's installed tooling (tests above all) state the answer instead, so
+    /// the assertion does not depend on whether the machine running it happens
+    /// to have `claude` or `ollama` installed.
+    pub fn routable_models_with(&self, is_installed: impl Fn(&str) -> bool) -> Vec<&DetectedModel> {
+        self.models_where(|account| {
+            crate::health::AccountHealth::project_with(account, &is_installed).routable
+        })
+    }
+
+    fn models_where(&self, usable: impl Fn(&ProviderAccount) -> bool) -> Vec<&DetectedModel> {
         let mut models: Vec<&DetectedModel> = self
             .accounts
             .iter()
-            .filter(|a| a.status == AccountStatus::Connected)
+            .filter(|account| usable(account))
             .flat_map(|a| a.models.iter())
             .collect();
         models.sort_by(|a, b| {
@@ -275,7 +312,56 @@ pub fn store_secret(account_id: &str, secret: &str) -> anyhow::Result<()> {
 /// Returns `None` if the account has no stored secret or the Keychain
 /// is not available.
 pub fn resolve_secret(account_id: &str) -> Option<String> {
-    crate::keychain::load_secret(account_id).ok()
+    resolve_secret_with(
+        account_id,
+        |id| crate::keychain::load_secret(id).ok(),
+        |name| std::env::var(name).ok(),
+    )
+}
+
+/// The conventional environment variables that carry a provider's API key.
+///
+/// These are the provider's own published names, so a machine already set up
+/// for that vendor's SDK works without re-entering the key.
+/// Providers that can be adopted from an environment key, with the rate
+/// group their metered API tier belongs to.
+pub const ENV_KEY_PROVIDERS: &[(&str, &str)] = &[
+    ("anthropic", "anthropic_api"),
+    ("openai", "openai_api"),
+    ("google", "google"),
+    ("openrouter", "openrouter"),
+];
+
+pub(crate) fn key_env_vars(provider: &str) -> &'static [&'static str] {
+    match provider {
+        "anthropic" => &["ANTHROPIC_API_KEY"],
+        "openai" => &["OPENAI_API_KEY"],
+        "google" => &["GEMINI_API_KEY", "GOOGLE_API_KEY"],
+        "openrouter" => &["OPENROUTER_API_KEY"],
+        _ => &[],
+    }
+}
+
+/// Resolve an account's secret from an explicit store and environment.
+///
+/// Stored secret first: adding a key is a stated intent, while an inherited
+/// environment variable is ambient. The environment fallback exists because
+/// a keychain is a desktop OS feature — a container, a CI runner, or a
+/// headless server has none, and BYOK has to work there too.
+pub fn resolve_secret_with(
+    account_id: &str,
+    stored: impl Fn(&str) -> Option<String>,
+    env: impl Fn(&str) -> Option<String>,
+) -> Option<String> {
+    if let Some(secret) = stored(account_id) {
+        return Some(secret);
+    }
+    // Account ids are minted as `{provider}-...`, so the prefix names the
+    // vendor whose variable applies.
+    let provider = account_id.split('-').next()?;
+    key_env_vars(provider)
+        .iter()
+        .find_map(|name| env(name).filter(|value| !value.trim().is_empty()))
 }
 
 /// Remove the stored secret for an account.
@@ -538,5 +624,63 @@ mod tests {
         assert!(reg.remove("to-remove"));
         assert!(!reg.remove("to-remove"));
         assert_eq!(reg.accounts.len(), 0);
+    }
+
+    #[test]
+    fn an_environment_key_serves_a_machine_with_no_keychain() {
+        // A Linux container, a CI runner, a headless server: no OS keychain
+        // exists, and BYOK still has to work. The provider's own conventional
+        // variable is the credential of last resort.
+        let env = |name: &str| match name {
+            "ANTHROPIC_API_KEY" => Some("sk-ant-from-env".to_string()),
+            _ => None,
+        };
+        assert_eq!(
+            resolve_secret_with("anthropic-api-1", |_| None, env),
+            Some("sk-ant-from-env".to_string())
+        );
+    }
+
+    #[test]
+    fn a_stored_secret_wins_over_the_environment() {
+        // An explicitly-added key is the user's stated intent; an inherited
+        // environment variable is ambient.
+        let env = |name: &str| (name == "ANTHROPIC_API_KEY").then(|| "sk-ant-env".to_string());
+        assert_eq!(
+            resolve_secret_with(
+                "anthropic-api-1",
+                |_| Some("sk-ant-stored".to_string()),
+                env
+            ),
+            Some("sk-ant-stored".to_string())
+        );
+    }
+
+    #[test]
+    fn each_provider_reads_its_own_conventional_variables() {
+        let env = |name: &str| match name {
+            "OPENAI_API_KEY" => Some("sk-openai".to_string()),
+            "GEMINI_API_KEY" => Some("gem".to_string()),
+            "OPENROUTER_API_KEY" => Some("or".to_string()),
+            _ => None,
+        };
+        assert_eq!(
+            resolve_secret_with("openai-api-1", |_| None, env),
+            Some("sk-openai".to_string())
+        );
+        assert_eq!(
+            resolve_secret_with("google-api-1", |_| None, env),
+            Some("gem".to_string())
+        );
+        assert_eq!(
+            resolve_secret_with("openrouter-api-1", |_| None, env),
+            Some("or".to_string())
+        );
+    }
+
+    #[test]
+    fn an_unknown_account_prefix_reads_no_environment_variable() {
+        let env = |_: &str| Some("leaked".to_string());
+        assert_eq!(resolve_secret_with("mystery-api-1", |_| None, env), None);
     }
 }

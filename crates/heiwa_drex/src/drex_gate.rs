@@ -37,25 +37,8 @@ pub enum ApprovalVerdict {
 
 /// Check the approval policy for a planned action and risk tier.
 /// Enforces environment-level HEIWA_AUTO_APPROVE override.
-fn get_home_dir() -> PathBuf {
-    std::env::var("HOME")
-        .map(PathBuf::from)
-        .ok()
-        .or_else(dirs::home_dir)
-        .unwrap_or_else(|| PathBuf::from("."))
-}
-
 fn get_state_dir() -> PathBuf {
-    std::env::var_os("HEIWA_STATE_DIR")
-        .filter(|value| !value.is_empty())
-        .map(PathBuf::from)
-        .unwrap_or_else(|| {
-            std::env::var_os("HEIWA_HOME")
-                .filter(|value| !value.is_empty())
-                .map(PathBuf::from)
-                .unwrap_or_else(|| get_home_dir().join(".heiwa"))
-                .join("state")
-        })
+    heiwa_config::HeiwaPaths::resolve().state_dir
 }
 
 pub fn evaluate_approval_policy(

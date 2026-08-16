@@ -8,10 +8,12 @@ use std::process::Command;
 
 pub mod adapter;
 pub mod detect;
+pub mod health;
 pub mod keychain;
 pub mod oauth;
 pub mod providers;
 pub mod registry;
+pub mod routing;
 
 // ---------------------------------------------------------------------------
 // Re-exports for convenience
@@ -37,18 +39,34 @@ pub struct HeiwaIdentity {
     pub display_name: Option<String>,
 }
 
+/// The runtime root, or `None` when no real per-user root exists.
+///
+/// Strict rather than lenient: this backs the identity file, which holds an
+/// auth token, and the account registry. The lenient resolver falls back to
+/// `./.heiwa`, which would write credentials into whatever directory the
+/// process happened to start in.
+fn try_heiwa_state_dir() -> Option<PathBuf> {
+    heiwa_config::HeiwaPaths::try_resolve().map(|paths| paths.runtime_root)
+}
+
 fn get_heiwa_state_dir() -> PathBuf {
-    if let Some(root) = env::var_os("HEIWA_HOME").filter(|value| !value.is_empty()) {
-        return PathBuf::from(root);
-    }
-    let home = env::var("HOME")
-        .or_else(|_| env::var("USERPROFILE"))
-        .expect("HOME or USERPROFILE must be set");
-    PathBuf::from(home).join(".heiwa")
+    try_heiwa_state_dir().unwrap_or_else(|| heiwa_config::HeiwaPaths::resolve().runtime_root)
 }
 
 pub fn get_identity_path() -> std::path::PathBuf {
-    get_heiwa_state_dir().join("identity.json")
+    identity_path_in(get_heiwa_state_dir())
+}
+
+fn identity_path_in(root: PathBuf) -> PathBuf {
+    root.join("identity.json")
+}
+
+/// The identity file, or `None` when there is no per-user root to hold it.
+///
+/// Callers that write the token use this: refusing is better than writing an
+/// auth token into the current working directory.
+pub fn try_identity_path() -> Option<PathBuf> {
+    try_heiwa_state_dir().map(identity_path_in)
 }
 
 pub fn load_identity() -> Option<HeiwaIdentity> {
@@ -61,7 +79,11 @@ pub fn load_identity() -> Option<HeiwaIdentity> {
 }
 
 pub fn save_identity(identity: &HeiwaIdentity) -> anyhow::Result<()> {
-    let path = get_identity_path();
+    let path = try_identity_path().ok_or_else(|| {
+        anyhow::anyhow!(
+            "no Heiwa state root: set HEIWA_HOME or HOME before storing an identity token"
+        )
+    })?;
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent)?;
     }
@@ -79,12 +101,14 @@ pub fn clear_identity() -> anyhow::Result<()> {
 }
 
 pub fn login_heiwa(token: &str) -> anyhow::Result<HeiwaIdentity> {
-    // In a real implementation, this would verify the token against Heiwa Hub
+    // Local per-install identity stamp. Verification against a hosted
+    // account plane is L2 work; until then no personal identity is invented
+    // here — the id is neutral and profile fields stay empty.
     let identity = HeiwaIdentity {
-        user_id: "devon-canonical".to_string(),
+        user_id: "local-user".to_string(),
         auth_token: token.to_string(),
-        email: Some("devon@heiwa.ltd".to_string()),
-        display_name: Some("Devon".to_string()),
+        email: None,
+        display_name: None,
     };
     save_identity(&identity)?;
     Ok(identity)
@@ -327,49 +351,69 @@ pub fn logout(provider_id: &str) -> anyhow::Result<()> {
     Ok(())
 }
 
-fn provider_search_paths_for_home(home: &Path) -> Vec<PathBuf> {
-    let runtime_root = env::var_os("HEIWA_HOME")
-        .filter(|value| !value.is_empty())
-        .map(PathBuf::from);
-    provider_search_paths(home, runtime_root.as_deref())
+/// System-wide directories probed for a provider CLI beyond `PATH`.
+///
+/// Package managers install into these whether or not they are on the
+/// invoking shell's `PATH`, so discovery would miss real installs without
+/// them. Exposed so a caller that must model a machine with nothing
+/// installed — the fresh-install harness — can pass an empty set instead.
+pub const DEFAULT_SYSTEM_BIN_DIRS: &[&str] =
+    &["/opt/homebrew/bin", "/usr/local/bin", "/usr/bin", "/bin"];
+
+/// Directories probed for a provider CLI, in priority order. `runtime_root`
+/// comes from ConfigRoot; this function stays pure so the ordering can be
+/// tested without touching process-global environment.
+#[cfg(test)]
+fn provider_search_paths(home: &Path, runtime_root: &Path) -> Vec<PathBuf> {
+    provider_search_paths_with_system_dirs(home, runtime_root, DEFAULT_SYSTEM_BIN_DIRS)
 }
 
-fn provider_search_paths(home: &Path, runtime_root: Option<&Path>) -> Vec<PathBuf> {
-    let runtime_bin = runtime_root
-        .map(Path::to_path_buf)
-        .unwrap_or_else(|| home.join(".heiwa"))
-        .join("bin");
-    vec![
-        runtime_bin,
+fn provider_search_paths_with_system_dirs(
+    home: &Path,
+    runtime_root: &Path,
+    system_dirs: &[&str],
+) -> Vec<PathBuf> {
+    let mut dirs = vec![
+        runtime_root.join("bin"),
         home.join(".local").join("bin"),
         home.join(".npm-global").join("bin"),
         home.join(".cargo").join("bin"),
-        PathBuf::from("/opt/homebrew/bin"),
-        PathBuf::from("/usr/local/bin"),
-        PathBuf::from("/usr/bin"),
-        PathBuf::from("/bin"),
-    ]
+    ];
+    dirs.extend(system_dirs.iter().map(PathBuf::from));
+    dirs
 }
 
-fn resolve_command_with_home_and_path(cmd: &str, home: &Path, path: &str) -> Option<PathBuf> {
+/// Resolve a command against explicit inputs, including which system
+/// directories to consider installed.
+///
+/// [`resolve_command`] is the production entry point and passes the real
+/// home, runtime root, and [`DEFAULT_SYSTEM_BIN_DIRS`]. Pass an empty
+/// `system_dirs` slice to model a machine on which no provider CLI is
+/// installed anywhere Heiwa looks.
+///
+/// Every input is explicit — including the runtime root — so a caller that
+/// injects a sandbox home cannot accidentally probe, and execute, binaries
+/// out of the real user's runtime.
+pub fn resolve_command_in(
+    cmd: &str,
+    home: &Path,
+    runtime_root: &Path,
+    path: &str,
+    system_dirs: &[&str],
+) -> Option<PathBuf> {
     #[cfg(windows)]
     const EXTENSIONS: &[&str] = &["", ".exe", ".cmd", ".bat", ".com"];
     #[cfg(not(windows))]
     const EXTENSIONS: &[&str] = &[""];
 
-    resolve_command_with_extensions(cmd, home, path, EXTENSIONS)
-}
-
-fn resolve_command_with_extensions(
-    cmd: &str,
-    home: &Path,
-    path: &str,
-    extensions: &[&str],
-) -> Option<PathBuf> {
     let mut dirs = env::split_paths(path).collect::<Vec<_>>();
-    dirs.extend(provider_search_paths_for_home(home));
+    dirs.extend(provider_search_paths_with_system_dirs(
+        home,
+        runtime_root,
+        system_dirs,
+    ));
     for dir in dirs {
-        for extension in extensions {
+        for extension in EXTENSIONS {
             let candidate = dir.join(format!("{cmd}{extension}"));
             if candidate.is_file() {
                 return Some(candidate);
@@ -379,26 +423,42 @@ fn resolve_command_with_extensions(
     None
 }
 
-pub fn resolve_command(cmd: &str) -> Option<PathBuf> {
-    let home = env::var("HOME")
-        .or_else(|_| env::var("USERPROFILE"))
-        .map(PathBuf::from)
-        .unwrap_or_else(|_| PathBuf::from("."));
-    let path = env::var("PATH").unwrap_or_default();
-    resolve_command_with_home_and_path(cmd, &home, &path)
+/// The system directories probed in addition to `PATH`.
+///
+/// `HEIWA_BIN_DIRS` replaces the built-in list (a colon-separated path list;
+/// set it empty to probe nothing beyond `PATH`). The built-ins exist because
+/// a GUI-launched process inherits a minimal `PATH` and would otherwise miss
+/// Homebrew installs — but a sandbox, a corporate image, or a test that must
+/// see no provider CLI needs to say so, and there was no way to.
+pub fn system_bin_dirs() -> Vec<String> {
+    match env::var("HEIWA_BIN_DIRS") {
+        Ok(value) => env::split_paths(&value)
+            .filter(|dir| !dir.as_os_str().is_empty())
+            .map(|dir| dir.to_string_lossy().into_owned())
+            .collect(),
+        Err(_) => DEFAULT_SYSTEM_BIN_DIRS
+            .iter()
+            .map(|dir| (*dir).to_string())
+            .collect(),
+    }
 }
 
-fn resolve_command_or_name_with_home_and_path(cmd: &str, home: &Path, path: &str) -> PathBuf {
-    resolve_command_with_home_and_path(cmd, home, path).unwrap_or_else(|| PathBuf::from(cmd))
+pub fn resolve_command(cmd: &str) -> Option<PathBuf> {
+    let paths = heiwa_config::HeiwaPaths::resolve();
+    let path = env::var("PATH").unwrap_or_default();
+    let system_dirs = system_bin_dirs();
+    let system_dirs: Vec<&str> = system_dirs.iter().map(String::as_str).collect();
+    resolve_command_in(
+        cmd,
+        &paths.home_dir,
+        &paths.runtime_root,
+        &path,
+        &system_dirs,
+    )
 }
 
 pub fn resolve_command_or_name(cmd: &str) -> PathBuf {
-    let home = env::var("HOME")
-        .or_else(|_| env::var("USERPROFILE"))
-        .map(PathBuf::from)
-        .unwrap_or_else(|_| PathBuf::from("."));
-    let path = env::var("PATH").unwrap_or_default();
-    resolve_command_or_name_with_home_and_path(cmd, &home, &path)
+    resolve_command(cmd).unwrap_or_else(|| PathBuf::from(cmd))
 }
 
 fn has_command(cmd: &str) -> bool {
@@ -461,54 +521,26 @@ fn is_ollama_running() -> bool {
 }
 
 fn gemini_has_native_auth() -> bool {
-    let home = env::var("HOME")
-        .or_else(|_| env::var("USERPROFILE"))
-        .unwrap_or_default();
-    if home.is_empty() {
-        return false;
-    }
-    PathBuf::from(home)
-        .join(".gemini")
-        .join("oauth_creds.json")
-        .exists()
+    let home = heiwa_config::HeiwaPaths::resolve().home_dir;
+    home.join(".gemini").join("oauth_creds.json").exists()
 }
 
 fn codex_has_native_auth() -> bool {
-    let home = env::var("HOME")
-        .or_else(|_| env::var("USERPROFILE"))
-        .unwrap_or_default();
-    if home.is_empty() {
-        return false;
-    }
-    PathBuf::from(home)
-        .join(".codex")
-        .join("auth.json")
-        .exists()
+    let home = heiwa_config::HeiwaPaths::resolve().home_dir;
+    home.join(".codex").join("auth.json").exists()
 }
 
 fn claude_has_native_auth() -> bool {
-    let home = env::var("HOME")
-        .or_else(|_| env::var("USERPROFILE"))
-        .unwrap_or_default();
-    if home.is_empty() {
-        return false;
-    }
-    let claude_dir = PathBuf::from(&home).join(".claude");
+    let home = heiwa_config::HeiwaPaths::resolve().home_dir;
+    let claude_dir = home.join(".claude");
     // settings.json is written only after the OAuth flow completes.
     claude_dir.join("settings.json").exists()
 }
 
 fn antigravity_has_native_auth() -> bool {
-    let home = env::var("HOME")
-        .or_else(|_| env::var("USERPROFILE"))
-        .unwrap_or_default();
-    if home.is_empty() {
-        return false;
-    }
-    let gemini_oauth = PathBuf::from(&home)
-        .join(".gemini")
-        .join("oauth_creds.json");
-    let ag_initialized = PathBuf::from(&home).join(".antigravity").join("argv.json");
+    let home = heiwa_config::HeiwaPaths::resolve().home_dir;
+    let gemini_oauth = home.join(".gemini").join("oauth_creds.json");
+    let ag_initialized = home.join(".antigravity").join("argv.json");
     gemini_oauth.exists() && ag_initialized.exists()
 }
 
@@ -518,10 +550,11 @@ mod command_resolution_tests {
 
     #[test]
     fn provider_search_paths_include_user_local_bins() {
-        let home = PathBuf::from("/Users/devon");
-        let paths = provider_search_paths(&home, None);
+        let home = PathBuf::from("/Users/example");
+        let runtime_root = home.join(".heiwa");
+        let paths = provider_search_paths(&home, &runtime_root);
 
-        assert!(paths.contains(&home.join(".heiwa").join("bin")));
+        assert!(paths.contains(&runtime_root.join("bin")));
         assert!(paths.contains(&home.join(".local").join("bin")));
         assert!(paths.contains(&home.join(".npm-global").join("bin")));
         assert!(paths.contains(&home.join(".cargo").join("bin")));
@@ -529,9 +562,9 @@ mod command_resolution_tests {
 
     #[test]
     fn provider_search_paths_honor_explicit_runtime_root() {
-        let home = PathBuf::from("/Users/devon");
+        let home = PathBuf::from("/Users/example");
         let runtime_root = PathBuf::from("/opt/heiwa-runtime");
-        let paths = provider_search_paths(&home, Some(&runtime_root));
+        let paths = provider_search_paths(&home, &runtime_root);
 
         assert!(paths.contains(&runtime_root.join("bin")));
         assert!(!paths.contains(&home.join(".heiwa").join("bin")));
@@ -549,7 +582,7 @@ mod command_resolution_tests {
         let exe = bin.join("codex");
         fs::write(&exe, "#!/bin/sh\n").expect("write fake codex");
 
-        let resolved = resolve_command_with_home_and_path("codex", &temp, "");
+        let resolved = resolve_command_in("codex", &temp, &temp.join(".heiwa"), "", &[]);
 
         assert_eq!(resolved.as_deref(), Some(exe.as_path()));
         let _ = fs::remove_dir_all(temp);
@@ -571,16 +604,28 @@ mod command_resolution_tests {
             .to_string_lossy()
             .into_owned();
 
-        let resolved = resolve_command_with_extensions("gemini", &temp, &path, &["", ".cmd"]);
+        // On Windows the resolver appends shim extensions; elsewhere the
+        // bare name is the only candidate, so the shim is not a match.
+        let resolved = resolve_command_in("gemini", &temp, &temp.join(".heiwa"), &path, &[]);
 
+        #[cfg(windows)]
         assert_eq!(resolved.as_deref(), Some(shim.as_path()));
+        #[cfg(not(windows))]
+        assert!(resolved.is_none(), "got {resolved:?}");
+        let _ = &shim;
         let _ = fs::remove_dir_all(temp);
     }
 
     #[test]
     fn resolve_command_or_name_falls_back_to_command_name() {
-        let resolved =
-            resolve_command_or_name_with_home_and_path("missing-heiwa-cli", Path::new("/nope"), "");
+        let resolved = resolve_command_in(
+            "missing-heiwa-cli",
+            Path::new("/nope"),
+            Path::new("/nope/.heiwa"),
+            "",
+            &[],
+        )
+        .unwrap_or_else(|| PathBuf::from("missing-heiwa-cli"));
 
         assert_eq!(resolved, PathBuf::from("missing-heiwa-cli"));
     }

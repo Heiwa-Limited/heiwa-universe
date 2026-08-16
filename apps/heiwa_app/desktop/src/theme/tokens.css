@@ -1,0 +1,204 @@
+/* ───────────────────────────────────────────────────────────────────────────
+   Heiwa design tokens
+
+   Two tiers:
+     1. Primitives  — the raw scale. The only place color literals exist.
+     2. Semantics   — role tokens (surface/content/accent/status/…) that every
+                      surface consumes. Light and dark are defined as complete
+                      semantic sets, not as overrides of one another, so a
+                      theme can never inherit a stale value from the other.
+
+   Surfaces consume semantic tokens only. A raw color literal outside this
+   directory fails scripts/check_l0_acceptance.sh.
+   ─────────────────────────────────────────────────────────────────────────── */
+
+:root {
+  /* ── Primitives: neutrals (green-tinted, matching the shell's character) ── */
+  --p-ink-950: #0d0f0e;
+  --p-ink-900: #111411;
+  --p-ink-850: #171a18;
+  --p-ink-800: #20251f;
+  --p-ink-700: #2b312a;
+  --p-sage-300: #bec9b2;
+  --p-bone-100: #f1f1ea;
+  --p-bone-050: #f8f8f3;
+  --p-white: #ffffff;
+
+  /* ── Primitives: brand and status ── */
+  --p-teal-400: #2dd4bf;
+  --p-teal-600: #0d9488;
+  --p-amber-400: #f6c85f;
+  --p-amber-600: #b45309;
+  --p-green-400: #22d3a2;
+  --p-green-600: #047857;
+  --p-orange-500: #f59e0b;
+  --p-red-500: #ef4444;
+  --p-red-700: #b91c1c;
+
+  /* ── Type scale (1.125 minor third, 14px base) ── */
+  --font-sans: -apple-system, BlinkMacSystemFont, "Inter", "Segoe UI", system-ui, sans-serif;
+  --font-mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, monospace;
+  --text-2xs: 10px;
+  --text-xs: 11px;
+  --text-sm: 12px;
+  --text-base: 14px;
+  --text-md: 16px;
+  --text-lg: 18px;
+  --text-xl: 22px;
+  --text-2xl: 28px;
+  --leading-tight: 1.25;
+  --leading-normal: 1.5;
+  --weight-normal: 400;
+  --weight-medium: 500;
+  --weight-semibold: 600;
+  --weight-bold: 800;
+
+  /* ── Spacing (4px base) ── */
+  --space-0: 0;
+  --space-1: 2px;
+  --space-2: 4px;
+  --space-3: 6px;
+  --space-4: 8px;
+  --space-5: 12px;
+  --space-6: 16px;
+  --space-7: 20px;
+  --space-8: 24px;
+  --space-9: 32px;
+  --space-10: 40px;
+
+  /* ── Radius ── */
+  --radius-sm: 4px;
+  --radius-md: 8px;
+  --radius-lg: 10px;
+  --radius-xl: 14px;
+  --radius-pill: 999px;
+
+  /* ── Motion ── */
+  --motion-fast: 120ms;
+  --motion-base: 150ms;
+  --motion-slow: 240ms;
+  --ease-standard: cubic-bezier(0.2, 0, 0.2, 1);
+  --ease-exit: cubic-bezier(0.4, 0, 1, 1);
+
+  /* ── Layout ── */
+  --rail-width: 60px;
+  --composer-max: 820px;
+
+  /* ═══ Semantic set: DARK (default) ═══ */
+  --surface-base: var(--p-ink-950);
+  --surface-raised: var(--p-ink-850);
+  --surface-overlay: var(--p-ink-800);
+  --surface-input: var(--p-ink-900);
+  --surface-hover: var(--p-ink-800);
+  /* Scrim behind a modal gate. A theme decision, so it is a token rather
+     than a color-mix at the call site. */
+  --surface-scrim: rgb(8 10 9 / 88%);
+
+  --content-primary: var(--p-bone-100);
+  --content-secondary: rgb(241 241 234 / 58%);
+  --content-muted: rgb(241 241 234 / 36%);
+  --content-inverse: var(--p-ink-950);
+
+  --border-subtle: rgb(190 201 178 / 14%);
+  --border-strong: rgb(190 201 178 / 28%);
+
+  --accent: var(--p-teal-400);
+  --accent-contrast: var(--p-ink-950);
+  --accent-wash: rgb(45 212 191 / 14%);
+  --accent-ring: rgb(45 212 191 / 35%);
+  --accent-alt: var(--p-amber-400);
+
+  --status-ok: var(--p-green-400);
+  --status-warn: var(--p-orange-500);
+  --status-error: var(--p-red-500);
+  --status-idle: var(--content-muted);
+
+  /* ── Elevation ── */
+  --elevation-1: 0 1px 2px rgb(0 0 0 / 30%);
+  --elevation-2: 0 8px 20px rgb(0 0 0 / 28%);
+  --elevation-3: 0 18px 44px rgb(0 0 0 / 35%);
+
+  color-scheme: dark;
+}
+
+/* ═══ Semantic set: LIGHT ═══
+   A complete redefinition of every semantic token above. Applied when the
+   platform asks for light and the user has not pinned dark. */
+@media (prefers-color-scheme: light) {
+  :root:not([data-theme="dark"]) {
+    --surface-base: var(--p-bone-050);
+    --surface-raised: var(--p-white);
+    --surface-overlay: var(--p-white);
+    --surface-input: var(--p-white);
+    --surface-hover: rgb(13 15 14 / 5%);
+  --surface-scrim: rgb(247 247 243 / 88%);
+    --surface-scrim: rgb(247 247 243 / 88%);
+
+    --content-primary: var(--p-ink-950);
+    --content-secondary: rgb(13 15 14 / 66%);
+    --content-muted: rgb(13 15 14 / 45%);
+    --content-inverse: var(--p-bone-050);
+
+    --border-subtle: rgb(13 15 14 / 12%);
+    --border-strong: rgb(13 15 14 / 24%);
+
+    --accent: var(--p-teal-600);
+    --accent-contrast: var(--p-white);
+    --accent-wash: rgb(13 148 136 / 10%);
+    --accent-ring: rgb(13 148 136 / 32%);
+    --accent-alt: var(--p-amber-600);
+
+    --status-ok: var(--p-green-600);
+    --status-warn: var(--p-amber-600);
+    --status-error: var(--p-red-700);
+    --status-idle: var(--content-muted);
+
+    --elevation-1: 0 1px 2px rgb(13 15 14 / 8%);
+    --elevation-2: 0 8px 20px rgb(13 15 14 / 10%);
+    --elevation-3: 0 18px 44px rgb(13 15 14 / 14%);
+
+    color-scheme: light;
+  }
+}
+
+/* Explicit light pin wins over the platform preference. */
+:root[data-theme="light"] {
+  --surface-base: var(--p-bone-050);
+  --surface-raised: var(--p-white);
+  --surface-overlay: var(--p-white);
+  --surface-input: var(--p-white);
+  --surface-hover: rgb(13 15 14 / 5%);
+
+  --content-primary: var(--p-ink-950);
+  --content-secondary: rgb(13 15 14 / 66%);
+  --content-muted: rgb(13 15 14 / 45%);
+  --content-inverse: var(--p-bone-050);
+
+  --border-subtle: rgb(13 15 14 / 12%);
+  --border-strong: rgb(13 15 14 / 24%);
+
+  --accent: var(--p-teal-600);
+  --accent-contrast: var(--p-white);
+  --accent-wash: rgb(13 148 136 / 10%);
+  --accent-ring: rgb(13 148 136 / 32%);
+  --accent-alt: var(--p-amber-600);
+
+  --status-ok: var(--p-green-600);
+  --status-warn: var(--p-amber-600);
+  --status-error: var(--p-red-700);
+  --status-idle: var(--content-muted);
+
+  --elevation-1: 0 1px 2px rgb(13 15 14 / 8%);
+  --elevation-2: 0 8px 20px rgb(13 15 14 / 10%);
+  --elevation-3: 0 18px 44px rgb(13 15 14 / 14%);
+
+  color-scheme: light;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  :root {
+    --motion-fast: 0ms;
+    --motion-base: 0ms;
+    --motion-slow: 0ms;
+  }
+}

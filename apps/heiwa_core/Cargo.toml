@@ -19,6 +19,7 @@ name = "heiwa-core"
 path = "src/main.rs"
 
 [dependencies]
+heiwa_config = { path = "../../crates/heiwa_config" }
 anyhow = "1.0"
 axum = { version = "0.7.5", features = ["ws"] }
 base64 = "0.22"

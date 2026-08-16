@@ -10,6 +10,48 @@
 
 ## Supported architecture claims
 
+- The application is written for N users. `crates/heiwa_config::HeiwaPaths`
+  (ConfigRoot) is the single resolver for per-user state, and
+  `scripts/check_l0_acceptance.sh` fails on any independent home/state-root
+  resolution or hardcoded operator identity in runtime code. The check greps
+  source rather than proving absence by construction, so it is a guard
+  against regression, not a proof.
+- A user supplies one API key and the application works with no provider CLI
+  installed: direct-API adapters for the Anthropic, OpenAI, and Google
+  families run alongside the CLI adapters.
+  `apps/heiwa_shell/tests/fresh_install.rs` proves this by running the built
+  `heiwa` binary with an emptied `PATH`, `HEIWA_BIN_DIRS` empty so no system
+  directory is probed, a temp state root, and no reachable local runtime. It
+  asserts the model's text reaches stdout, the request carried the user's
+  key exactly once, and the run registered no provider-CLI account. Keys
+  resolve from the OS keychain first and the provider's conventional
+  environment variable otherwise, so a container or CI runner with no
+  keychain works; the harness uses a distinct account id so it reads no real
+  keychain entry.
+  Scope: the harness covers the Anthropic wire format. OpenAI and Google have
+  unit-level wire coverage but are not driven through the binary.
+- Provider failure is a routing constraint: `heiwa_provider::health` reports
+  which accounts are usable and why one was skipped, and a zero-provider
+  install opens with actionable guidance rather than an error. Routing reads
+  that projection: `AccountRegistry::routable_models` filters on health, not
+  on stored status, so a CLI seat or local runtime whose executable is gone
+  offers no route instead of failing the turn on an OS error. A connected
+  account with an empty inventory is reported with a way out rather than
+  silently yielding no models.
+  Credential rejection is classified from the HTTP status, never by matching
+  text in a provider's response body.
+- First run happens inside the application. `heiwa setup` establishes a local
+  per-installation identity and reports every remaining gap with the action
+  that closes it, exiting non-zero while incomplete; the desktop shows the
+  same projection as an overlay and can close the identity gap in-window.
+  `heiwa_identity::onboarding` is the only place readiness is decided, so the
+  two surfaces cannot disagree. `apps/heiwa_shell/tests/first_run.rs` drives
+  the shipped binary from an empty state root to a completed turn.
+  Identity is local and per-installation and contacts no server; whether it
+  is also account-backed is the open D1 fork and is not decided.
+- The desktop shell is a SolidJS component layer: ten surface modules behind a
+  `SurfaceModule` contract over a tokenized design system, with the operator
+  stream seam (`store.ts` / `client.ts` / `types.ts`) preserved unmodified.
 - The installed runtime is the current product center of gravity.
 - DREX routing, provider/session/protocol crates, execution scopes, tool leases, and receipts are the live runtime spine.
 - Local JSONL is the canonical evidence plane; Lance is the derived local recall index.
@@ -23,6 +65,10 @@
 - iMessage as a productized ingress surface
 - broad computer-use automation
 - `Heiwa.app` as a fully native desktop runtime
+- live read models behind the Calendar, Mail, Finance, and Social surfaces —
+  they state their pending status honestly and land on the L3 connector plane
+- the Browser surface as an actionable, approval-gated automation surface; it
+  is an iframe until the L4 runtime-owned browser lands
 - cross-device evidence sync or a hosted state backbone
 - `heiwa-limited` as an active product target
 - experimental canvases as part of the supported stack

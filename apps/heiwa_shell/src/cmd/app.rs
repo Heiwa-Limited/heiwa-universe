@@ -3824,7 +3824,9 @@ fn life_inbox_items() -> Vec<Value> {
                 "source_id": hold_id,
                 "source_type": "calendar_hold",
                 "label": "Heiwa Calendar",
-                "path": format!("~/.heiwa/state/calendar/holds/{hold_id}.json"),
+                "path": crate::home::heiwa_state_dir()
+                    .join("calendar").join("holds").join(format!("{hold_id}.json"))
+                    .display().to_string(),
             },
             "subject_ref": hold_id,
             "receipt_refs": [{ "kind": "receipt", "ref": format!("rcpt-{hold_id}") }],
@@ -3861,7 +3863,9 @@ fn life_inbox_items() -> Vec<Value> {
                 "source_id": "mail_priority_scan",
                 "source_type": "mail_metadata",
                 "label": "Mail priority scan",
-                "path": "~/.heiwa/state/mail/headers.jsonl",
+                "path": crate::home::heiwa_state_dir()
+                    .join("mail").join("headers.jsonl")
+                    .display().to_string(),
             },
             "subject_ref": subject,
             "receipt_refs": [],
@@ -6253,7 +6257,7 @@ mod app_readmodel_tests {
                     "ts": "2026-05-24T12:01:00Z",
                     "event_type": "dispatch.policy.classified",
                     "severity": "warn",
-                    "source": "devonx",
+                    "source": "operator-x",
                     "subject": "network request",
                     "redaction_applied": true,
                     "payload_ref": "dispatch/results/res_demo.json"

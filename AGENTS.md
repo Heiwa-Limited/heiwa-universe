@@ -9,7 +9,7 @@ This repository builds the Heiwa full stack. The current product center of gravi
 - **Heiwa Universe** is this repository: `Heiwa-Limited/heiwa-universe`, public on GitHub since the v0.1.0 release. Treat everything committed here as published; secret scanning and the security gates are the only thing between a commit and the world.
 - **`heiwa`** is the primary installed operator surface.
 - **DREX** is the internal execution kernel.
-- **Local MacBook state** under `~/.heiwa/` plus this checkout is the current owner runtime truth.
+- **Per-user local state** under the resolved config root (`~/.heiwa` by default) is the runtime truth on each machine. `crates/heiwa_config::HeiwaPaths` is the sole resolver; the product assumes N users, not one seat.
 - **Lance + GitHub** are the backend (pivot 2026-07-15): text truth (JSONL/markdown) local-first — GitHub sync planned, redaction-gated — with Lance as the derived local recall index. SpacetimeDB is retired; code extracted from the tree. Journal service: `crates/heiwa_evidence/`.
 - **GitHub** is distribution and CI. Evidence sync is planned and redaction-gated, not live. **Cloudflare** is DNS utility only.
 
@@ -34,7 +34,7 @@ Compression:
 
 ## Architecture Direction (April 2026)
 
-- User-functionality stack is **Rust + TypeScript + Shell** on Devon's MacBook first.
+- User-functionality stack is **Rust + TypeScript + Shell**, developed against a local machine first (currently the maintainer's MacBook) but written for any user's machine.
 - **Rust** owns the authoritative state layer, orchestration, routing, and future DREX execution logic.
 - **TypeScript** owns companion visual surfaces and typed client contracts.
 - **Shell** remains the bootstrap and operator glue layer for the local runtime plus future Linux/WSL execution.
@@ -45,6 +45,10 @@ Compression:
 Heiwa wraps provider-owned runtimes. It does not own their internals.
 
 - Claude Code, Codex, Gemini CLI, Antigravity, and Grok remain provider-owned CLI surfaces.
+- Direct-API adapters ship alongside the CLI adapters (Anthropic, OpenAI,
+  Google). Adapter selection lives in `heiwa_provider::routing`, never in a
+  surface binary; adapters do transport and `StreamEvent` translation only,
+  with routing, quota, and cost staying with DREX and `heiwa_quota`.
 - Providers own their own system prompts, auth semantics, session behavior, cloud model inventory, and native quotas.
 - Ollama and other local runtimes remain local-model providers, not Heiwa-native models.
 - Heiwa adds local install/auth UX, routing, evidence, bounded loops, and operator coherence across those surfaces.
@@ -58,8 +62,8 @@ Be honest about maturity:
 
 ## Operator and Infra Truth
 
-- `~/.heiwa/` is the owner-local runtime root on Devon's machine.
-- This checkout plus `~/.heiwa/` are the current source-of-truth/server for user functionality.
+- The runtime root is per-user and resolved by ConfigRoot; on the maintainer's machine that is `~/.heiwa/`. Product code must never assume that path or that operator.
+- This checkout plus the local runtime root are the current source-of-truth/server for user functionality on a development machine.
 - Users/operators should not have to think about the evidence backend directly.
 - GitHub is source, CI, and release distribution.
 - Cloudflare is paused public edge and later remote-surface infrastructure.

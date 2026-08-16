@@ -2157,32 +2157,11 @@ dependencies = [
 
 [[package]]
 name = "dirs"
-version = "5.0.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "44c45a9d03d6676652bcb5e724c7e988de1acad23a711b5217ab9cbecbec2225"
-dependencies = [
- "dirs-sys 0.4.1",
-]
-
-[[package]]
-name = "dirs"
 version = "6.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c3e8aa94d75141228480295a7d0e7feb620b1a5ad9f12bc40be62411e38cce4e"
 dependencies = [
- "dirs-sys 0.5.0",
-]
-
-[[package]]
-name = "dirs-sys"
-version = "0.4.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "520f05a5cbd335fae5a99ff7a6ab8627577660ee5cfd6a94a6a929b52ff0321c"
-dependencies = [
- "libc",
- "option-ext",
- "redox_users 0.4.6",
- "windows-sys 0.48.0",
+ "dirs-sys",
 ]
 
 [[package]]
@@ -2193,7 +2172,7 @@ checksum = "e01a3366d27ee9890022452ee61b2b63a67e6f13f58900b651ff5665f0bb1fab"
 dependencies = [
  "libc",
  "option-ext",
- "redox_users 0.5.2",
+ "redox_users",
  "windows-sys 0.59.0",
 ]
 
@@ -3180,6 +3159,7 @@ dependencies = [
  "base64 0.22.1",
  "futures-util",
  "heiwa-protocol",
+ "heiwa_config",
  "heiwa_evidence",
  "serde",
  "serde_json",
@@ -3196,8 +3176,13 @@ dependencies = [
 name = "heiwa-desktop"
 version = "0.1.0"
 dependencies = [
+ "chrono",
  "futures-util",
  "heiwa-core",
+ "heiwa-provider",
+ "heiwa_config",
+ "heiwa_identity",
+ "libc",
  "reqwest 0.12.28",
  "serde",
  "serde_json",
@@ -3215,6 +3200,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "chrono",
+ "heiwa_config",
  "serde",
  "serde_json",
  "tempfile",
@@ -3273,6 +3259,7 @@ dependencies = [
  "anyhow",
  "async-trait",
  "futures-util",
+ "heiwa_config",
  "heiwa_vault",
  "reqwest 0.12.28",
  "serde",
@@ -3324,7 +3311,6 @@ dependencies = [
  "async-trait",
  "base64 0.22.1",
  "chrono",
- "dirs 5.0.1",
  "heiwa-core",
  "heiwa-install",
  "heiwa-loop",
@@ -3335,8 +3321,10 @@ dependencies = [
  "heiwa-session",
  "heiwa-tui",
  "heiwa_automations",
+ "heiwa_config",
  "heiwa_drex",
  "heiwa_evidence",
+ "heiwa_identity",
  "heiwa_mcp",
  "heiwa_quota",
  "heiwa_receipts",
@@ -3386,7 +3374,9 @@ dependencies = [
 name = "heiwa_config"
 version = "0.1.0"
 dependencies = [
+ "dirs",
  "serde",
+ "tempfile",
  "toml 0.8.2",
 ]
 
@@ -3397,8 +3387,8 @@ dependencies = [
  "anyhow",
  "async-trait",
  "chrono",
- "dirs 5.0.1",
  "heiwa-provider",
+ "heiwa_config",
  "heiwa_mcp",
  "heiwa_quota",
  "serde_json",
@@ -3430,13 +3420,24 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "base64 0.22.1",
- "dirs 6.0.0",
+ "heiwa_config",
  "serde",
  "serde_json",
  "sha2 0.10.9",
  "tempfile",
  "thiserror 2.0.18",
  "time",
+ "uuid",
+]
+
+[[package]]
+name = "heiwa_identity"
+version = "0.1.0"
+dependencies = [
+ "heiwa_config",
+ "serde",
+ "serde_json",
+ "tempfile",
  "uuid",
 ]
 
@@ -3457,6 +3458,7 @@ dependencies = [
 name = "heiwa_quota"
 version = "0.1.0"
 dependencies = [
+ "heiwa_config",
  "rusqlite",
  "serde",
  "serde_json",
@@ -4581,7 +4583,7 @@ dependencies = [
  "datafusion-common",
  "datafusion-expr",
  "datafusion-physical-expr",
- "dirs 6.0.0",
+ "dirs",
  "fst",
  "futures",
  "half",
@@ -6851,17 +6853,6 @@ dependencies = [
 
 [[package]]
 name = "redox_users"
-version = "0.4.6"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ba009ff324d1fc1b900bd1fdb31564febe58a8ccc8a6fdbb93b543d33b13ca43"
-dependencies = [
- "getrandom 0.2.17",
- "libredox",
- "thiserror 1.0.69",
-]
-
-[[package]]
-name = "redox_users"
 version = "0.5.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "a4e608c6638b9c18977b00b475ac1f28d14e84b27d8d42f70e0bf1e3dec127ac"
@@ -8071,7 +8062,7 @@ dependencies = [
  "anyhow",
  "bytes",
  "cookie",
- "dirs 6.0.0",
+ "dirs",
  "dunce",
  "embed_plist",
  "getrandom 0.3.4",
@@ -8121,7 +8112,7 @@ checksum = "4aa1f9055fc23919a54e4e125052bed16ed04aef0487086e758fe01a67b451c7"
 dependencies = [
  "anyhow",
  "cargo_toml",
- "dirs 6.0.0",
+ "dirs",
  "glob",
  "heck 0.5.0",
  "json-patch",
@@ -8862,7 +8853,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "15edbb0d80583e85ee8df283410038e17314df5cba30da2087a54a85216c0773"
 dependencies = [
  "crossbeam-channel",
- "dirs 6.0.0",
+ "dirs",
  "libappindicator",
  "muda",
  "objc2",
@@ -10151,7 +10142,7 @@ dependencies = [
  "block2",
  "cookie",
  "crossbeam-channel",
- "dirs 6.0.0",
+ "dirs",
  "dom_query",
  "dpi",
  "dunce",

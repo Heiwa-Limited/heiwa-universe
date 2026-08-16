@@ -23,6 +23,7 @@ foundation_packages=(
   heiwa_config
   heiwa_embed
   heiwa_evidence
+  heiwa_identity
   heiwa_mcp
   heiwa_quota
   heiwa_receipts
@@ -39,6 +40,8 @@ shell_state_targets=(
   approval_gate
   approvals_decide
   auto
+  first_run
+  fresh_install
   local_boot
 )
 
