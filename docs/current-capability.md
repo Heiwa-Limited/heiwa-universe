@@ -49,6 +49,11 @@
   the shipped binary from an empty state root to a completed turn.
   Identity is local and per-installation and contacts no server; whether it
   is also account-backed is the open D1 fork and is not decided.
+- Mail reads from the machine, not the cloud. `heiwa mail scan` pulls sender,
+  subject, date, and read state from the user's own Mail.app — never a body —
+  into a snapshot under the config root, and the Mail surface renders it. No
+  OAuth, no IMAP credentials, nothing leaves the machine. Sending is not
+  built; the surface says so. Gmail and other remote mailboxes remain L3.
 - The desktop shell is a SolidJS component layer: ten surface modules behind a
   `SurfaceModule` contract over a tokenized design system, with the operator
   stream seam (`store.ts` / `client.ts` / `types.ts`) preserved unmodified.

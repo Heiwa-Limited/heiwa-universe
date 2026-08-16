@@ -53,3 +53,19 @@ export type OnboardingState = {
   gaps: OnboardingGap[];
   display_name: string | null;
 };
+
+/**
+ * One message from the local mail snapshot.
+ *
+ * Metadata only, by policy: `heiwa mail scan` reads sender, subject, date,
+ * and read state from the user's own Mail.app and never touches a body. The
+ * snapshot lives under the config root and no part of it leaves the machine.
+ */
+export type MailMessage = {
+  sender: string;
+  subject: string;
+  unread: boolean;
+  account?: string;
+  mailbox?: string;
+  date?: string;
+};
