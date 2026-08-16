@@ -244,9 +244,15 @@ Turns `connectors/*.connector.json` from validated manifests into executable
 capability. Requires a per-user OAuth flow, credential storage through
 `heiwa_vault`, a capability vocabulary mapped onto `RiskTier`, and a read model
 per surface. `heiwa_automations` already provides executor, scheduler, and
-storage and is the execution substrate. GitHub is the first connector because
-its manifest already exists — as a user-facing repository connector, not as
-infrastructure. Calendar, Mail, Finance, and Social follow on the same plane.
+storage and is the execution substrate.
+
+**Superseded 2026-08-15 (AD-14):** this section originally made GitHub the
+first connector because its manifest already exists. That optimized for the
+easiest credential rather than the stated user. **Calendar and Mail come
+first** — an executive assistant for a non-technical person is Calendar and
+Mail; GitHub serves developers, and it, Finance, and Social follow on the
+same plane. The cost — Google/Microsoft OAuth is the hardest credential work
+in L3 — is accepted deliberately.
 
 ### L4 — Browser surface
 

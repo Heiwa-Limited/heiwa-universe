@@ -188,6 +188,53 @@ Implementation order (dependency-safe): extend `HeiwaPaths` first (env precedenc
 + naming), then collapse resolvers, then delete `heiwa_shell`'s second resolver,
 then the identity removals.
 
+## Product direction (decided by Devon, 2026-08-15)
+
+Positioning, against the three products this is measured on:
+
+- **Grok Bot** (xAI, 2026-08-11) — persistent per-task agents, each with its
+  own cloud computer and the user's logins, driving app UIs directly, working
+  while the laptop is closed, returning for approval. $120–200/mo.
+- **Odysseus** (2026-05-31, ~77k stars) — local-first, free, no telemetry;
+  Python/FastAPI/Docker; chat, agents, research, mail, calendar, notes,
+  images, and a hardware-matched model Cookbook.
+- **Claude Desktop** — native signed installer, MCP connectors, polished; not
+  local-first and not autonomous.
+
+**Heiwa is the intersection nobody occupies: persistent delegated agents that
+run on the user's own machine, in a native installable app, where approvals
+and receipts are what make delegation safe.** Grok Bot proves people will
+hand real logins to an always-on agent; it holds them in someone else's
+cloud. Odysseus proves the local-first appetite; it has no approval or audit
+layer. Heiwa already owns the hard part — DREX `AwaitingApproval`, the
+receipts hash-chain, `RiskTier` — which is precisely what the other two lack.
+
+The target user is non-technical and must be useful immediately after
+install. That constraint drives all three decisions below.
+
+- **AD-13** First run must work with no API key. Ship the local-model path as
+  the default — a one-click model download so the app works offline, free,
+  private, with no accounts — and offer BYOK and provider sign-in as upgrades
+  in the same first-run screen, so no user is ever blocked and no user is
+  forced through a key they do not have. This makes the local runtime a
+  first-class install target rather than an optional extra, and extends L2's
+  onboarding projection with a fourth path. Supersedes the implicit L1
+  assumption that BYOK is the only entry.
+- **AD-14** Calendar and Mail are the first real connectors, **not GitHub**.
+  This overrides the roadmap's L3 sequencing ("GitHub is the first connector
+  because its manifest already exists"), which optimized for the easiest
+  credential rather than the stated user. An executive assistant for a
+  non-technical person is Calendar and Mail; GitHub serves developers. The
+  cost is real — Google/Microsoft OAuth is the hardest credential work in
+  L3 — and is accepted deliberately.
+- **AD-15** Slack is a delivery and approval channel first, and a readable
+  surface second. It is **not** a bot other people can address: that would
+  let third-party input reach the user's agent, which is a far larger trust
+  surface than the approval plane currently models. The delivery role is the
+  Grok Bot idea worth taking — an agent that works while the laptop is closed
+  has to reach the user somewhere they already are, and that is where
+  approvals get answered.
+
 ## Architectural decisions (recorded as taken)
 
 - **AD-1** ConfigRoot extends `crates/heiwa_config::HeiwaPaths` in place; root stays
