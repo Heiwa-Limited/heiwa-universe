@@ -23,6 +23,18 @@ export type RuntimeHealth = {
 export type RuntimeSnapshotEnvelope = {
   ok?: boolean;
   data?: {
+    /**
+     * The runtime block the snapshot actually returns. `runtime_version` at
+     * the top level was never a field the runtime sends — the version lives
+     * here, which is why every screen showed "unknown".
+     */
+    runtime?: {
+      version?: string;
+      status?: string;
+      started_at?: string;
+      node?: string;
+    };
+    /** Kept for older snapshots that flattened it. */
     runtime_version?: string;
     started_at?: string;
     status?: string;
@@ -326,13 +338,15 @@ async function postHerdPaneAction(
 }
 
 export function runtimeVersion(health: RuntimeHealth | null): string {
-  return health?.snapshot?.data?.runtime_version ?? "unknown";
+  const data = health?.snapshot?.data;
+  return data?.runtime?.version ?? data?.runtime_version ?? "unknown";
 }
 
 export function runtimeStatus(health: RuntimeHealth | null): string {
   if (!health) return "checking";
   if (!health.reachable) return "offline";
-  return health.snapshot?.data?.status ?? "ok";
+  const data = health.snapshot?.data;
+  return data?.runtime?.status ?? data?.status ?? "ok";
 }
 
 export function providersFromSnapshot(health: RuntimeHealth | null): ProviderSnapshot[] {

@@ -61,8 +61,10 @@ function harness(
         snapshot: {
           ok: true,
           data: {
-            runtime_version: "0.1.0-test",
-            status: "ok",
+            // The shape the runtime actually returns. The old fixture put
+            // the version at the top level, where nothing sends it, so the
+            // reader could look in the wrong place and still pass.
+            runtime: { version: "0.1.0-test", status: "ok" },
             providers: [
               {
                 provider_id: "ollama",
