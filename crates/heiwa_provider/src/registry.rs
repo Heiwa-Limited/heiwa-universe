@@ -248,7 +248,19 @@ impl AccountRegistry {
     /// exist. Offering those as routes sends the turn to an adapter that
     /// cannot start, which fails the whole turn instead of routing elsewhere.
     pub fn routable_models(&self) -> Vec<&DetectedModel> {
-        self.models_where(|account| crate::health::AccountHealth::project(account).routable)
+        self.routable_models_with(|binary| crate::resolve_command(binary).is_some())
+    }
+
+    /// The same filter against an explicit "can this binary be run" probe.
+    ///
+    /// Production answers that from `PATH`. Callers that must not inherit the
+    /// host's installed tooling (tests above all) state the answer instead, so
+    /// the assertion does not depend on whether the machine running it happens
+    /// to have `claude` or `ollama` installed.
+    pub fn routable_models_with(&self, is_installed: impl Fn(&str) -> bool) -> Vec<&DetectedModel> {
+        self.models_where(|account| {
+            crate::health::AccountHealth::project_with(account, &is_installed).routable
+        })
     }
 
     fn models_where(&self, usable: impl Fn(&ProviderAccount) -> bool) -> Vec<&DetectedModel> {

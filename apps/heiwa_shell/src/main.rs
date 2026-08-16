@@ -1201,10 +1201,25 @@ async fn register_current_device() -> Result<()> {
 pub(crate) fn get_live_model_tiers(
     registry: &heiwa_provider::AccountRegistry,
 ) -> Vec<heiwa_protocol::ModelTier> {
+    get_live_model_tiers_with(registry, |binary| {
+        heiwa_provider::resolve_command(binary).is_some()
+    })
+}
+
+/// The same projection against an explicit installed-binary probe.
+///
+/// Health filtering asks the host whether the executor exists, so a test that
+/// does not state the answer asserts against whatever the machine has
+/// installed: the tier list for a `claude` seat or an `ollama` runtime is
+/// non-empty on a developer laptop and empty on a CI runner.
+pub(crate) fn get_live_model_tiers_with(
+    registry: &heiwa_provider::AccountRegistry,
+    is_installed: impl Fn(&str) -> bool,
+) -> Vec<heiwa_protocol::ModelTier> {
     // Health-filtered, not stored-status-filtered: a route is only real if
     // the account behind it can execute a turn right now.
     let mut models = registry
-        .routable_models()
+        .routable_models_with(is_installed)
         .into_iter()
         .filter(|m| provider_supports_loop_adapter(&m.provider))
         .collect::<Vec<_>>();
@@ -4626,6 +4641,13 @@ pub(crate) async fn preview_route_payload(prompt: &str) -> serde_json::Value {
 mod tests {
     use heiwa_protocol::{parse_turn_intent, Intent};
 
+    /// Executor present. Tier projection filters on whether the account's
+    /// executor exists on the host, so a test that does not state the answer
+    /// asserts against the machine's installed tooling: a `claude` seat or an
+    /// `ollama` runtime is routable on a developer laptop and filtered out on
+    /// a CI runner.
+    const INSTALLED: fn(&str) -> bool = |_| true;
+
     /// The BYOK path must survive the turn path, not just the adapter.
     ///
     /// Direct-API accounts are registered under the vendor name the
@@ -4954,7 +4976,7 @@ mod tests {
             }],
         };
 
-        let tiers = super::get_live_model_tiers(&registry);
+        let tiers = super::get_live_model_tiers_with(&registry, INSTALLED);
 
         assert_eq!(tiers.len(), 1);
         assert_eq!(tiers[0].provider, "claude");
@@ -4991,9 +5013,9 @@ mod tests {
             }],
         };
 
-        let first = super::get_live_model_tiers(&registry);
+        let first = super::get_live_model_tiers_with(&registry, INSTALLED);
         registry.accounts[0].models.reverse();
-        let second = super::get_live_model_tiers(&registry);
+        let second = super::get_live_model_tiers_with(&registry, INSTALLED);
         let first_ids = first.iter().map(|tier| tier.id).collect::<Vec<_>>();
         let second_ids = second.iter().map(|tier| tier.id).collect::<Vec<_>>();
 
@@ -5032,7 +5054,7 @@ mod tests {
                 models: vec![model("gemma4"), model("qwen3.5:9b")],
             }],
         };
-        let tiers = super::get_live_model_tiers(&registry);
+        let tiers = super::get_live_model_tiers_with(&registry, INSTALLED);
         let candidates = tiers
             .iter()
             .map(super::model_call_candidate)

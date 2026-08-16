@@ -60,10 +60,7 @@ impl AccountHealth {
     /// have `ollama` installed decides which branch of `classify` runs, so a
     /// test asserting the behaviour behind an *installed* binary passes on a
     /// machine that has it and fails on a CI runner that does not.
-    pub(crate) fn project_with(
-        account: &ProviderAccount,
-        is_installed: impl Fn(&str) -> bool,
-    ) -> Self {
+    pub fn project_with(account: &ProviderAccount, is_installed: impl Fn(&str) -> bool) -> Self {
         let (state, detail) = classify(account, is_installed);
         Self {
             account_id: account.account_id.clone(),
