@@ -357,4 +357,65 @@ describe("operator seam", () => {
       expect(screen.getByText(/heiwa mail scan/)).toBeTruthy();
     });
   });
+
+  it("opens on a briefing of what today actually holds", () => {
+    // The point of having the calendar and the mail locally is that the app
+    // can answer "what do I need to know right now" the moment it opens,
+    // without the user going and looking in two places.
+    const today = new Date().toISOString().slice(0, 10);
+    const { state } = harness({
+      get: async (path: string) => {
+        if (path === "/api/v1/calendar/summary") {
+          return {
+            data: {
+              events: [
+                { id: "e1", title: "Standup", date: today, start: "09:30" },
+                { id: "e2", title: "Design review", date: today, start: "14:00" },
+                { id: "e3", title: "Next week thing", date: "2099-01-01", start: "10:00" },
+              ],
+            },
+          };
+        }
+        if (path === "/api/v1/mail/summary") {
+          return {
+            data: {
+              priority: [
+                { sender: "ada@example.com", subject: "Re: launch", unread: true },
+                { sender: "grace@example.com", subject: "Invoice", unread: false },
+              ],
+            },
+          };
+        }
+        return { data: {} };
+      },
+    });
+
+    render(() => <App state={state} />);
+
+    return Promise.resolve()
+      .then(() => Promise.resolve())
+      .then(() => {
+        const briefing = document.querySelector(".today-briefing");
+        expect(briefing).toBeTruthy();
+        const text = briefing!.textContent ?? "";
+        // Today's events only — a briefing that includes next week is a list,
+        // not a briefing.
+        expect(text).toContain("Standup");
+        expect(text).not.toContain("Next week thing");
+        expect(text).toContain("1 unread");
+      });
+  });
+
+  it("says the day is clear rather than showing an empty briefing", () => {
+    const { state } = harness({ get: async () => ({ data: { events: [], priority: [] } }) });
+
+    render(() => <App state={state} />);
+
+    return Promise.resolve()
+      .then(() => Promise.resolve())
+      .then(() => {
+        const briefing = document.querySelector(".today-briefing");
+        expect(briefing?.textContent ?? "").toMatch(/nothing scheduled/i);
+      });
+  });
 });

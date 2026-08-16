@@ -1,5 +1,6 @@
 import { For } from "solid-js";
 import { cssToken, shortenPath } from "../../lib/format";
+import { TodayBriefing } from "./TodayBriefing";
 import { useApp } from "../../state/app";
 import type { HerdPane } from "../../runtime";
 import type { SurfaceId } from "../ids";
@@ -67,6 +68,12 @@ function HomeSurface() {
           Open Windows
         </button>
       </section>
+
+      {/*
+        First thing on the page, because it is the first thing a user wants:
+        what today holds, from data already on this machine.
+      */}
+      <TodayBriefing />
 
       <section class="pinned-pane-board" aria-label="Pinned terminal and ops panes">
         <For each={pinned()}>
@@ -186,6 +193,9 @@ export const homeSurface: SurfaceModule = {
     await Promise.all([
       app.runtime.loadCalendar(),
       app.runtime.loadInbox(),
+      // The briefing reads mail too, so Home has to load it — otherwise the
+      // unread count is only correct after the user visits Mail.
+      app.runtime.loadMail(),
       app.herd.load(),
       app.herd.loadCommands(),
     ]);
