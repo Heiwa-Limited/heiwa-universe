@@ -276,7 +276,11 @@ fn scan(args: &[String]) -> Result<()> {
         } else {
             source_reports.push(json!({
                 "source": "apple", "status": "skipped",
-                "reason": "no Apple Mail accounts configured",
+                "reason": format!(
+                    "no Apple Mail accounts found under {}; open Mail.app and add an account, \
+                     or grant Heiwa automation access in System Settings > Privacy & Security > Automation",
+                    MailProbe::detect().data_dir.display()
+                ),
             }));
         }
     }
@@ -329,7 +333,17 @@ fn scan(args: &[String]) -> Result<()> {
         for report in payload["sources"].as_array().unwrap_or(&Vec::new()) {
             let source = report.get("source").and_then(Value::as_str).unwrap_or("?");
             let status = report.get("status").and_then(Value::as_str).unwrap_or("?");
-            println!("  {source}: {status}");
+            // A source that did nothing has to say why. `apple: skipped`
+            // alone leaves the user with no idea whether Heiwa is broken,
+            // unsupported, or simply looking in a place they can fix.
+            let why = report
+                .get("reason")
+                .or_else(|| report.get("error"))
+                .and_then(Value::as_str);
+            match why {
+                Some(why) => println!("  {source}: {status} — {why}"),
+                None => println!("  {source}: {status}"),
+            }
         }
         println!("  snapshot: {}", headers_snapshot_path().display());
     }
