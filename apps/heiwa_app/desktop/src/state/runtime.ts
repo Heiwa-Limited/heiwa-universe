@@ -1,15 +1,20 @@
 import { createSignal, type Accessor } from "solid-js";
 import { apiGet, runtimeHealth, type RuntimeHealth } from "../runtime";
-import type { CalendarEvent, InboxItem } from "./types";
+import type { CalendarEvent, InboxItem, MailMessage } from "./types";
 
 /** Runtime-derived state consumed by more than one surface. */
 export type RuntimeState = {
   health: Accessor<RuntimeHealth | null>;
   calendarEvents: Accessor<CalendarEvent[]>;
   inbox: Accessor<InboxItem[]>;
+  /** Messages from the local Mail.app snapshot; empty until a scan runs. */
+  mail: Accessor<MailMessage[]>;
+  /** Whether the mail snapshot has been read at least once this session. */
+  mailLoaded: Accessor<boolean>;
   loadHealth: () => Promise<void>;
   loadCalendar: () => Promise<void>;
   loadInbox: () => Promise<void>;
+  loadMail: () => Promise<void>;
 };
 
 export type RuntimeStateOptions = {
@@ -22,6 +27,7 @@ type LifeToday = {
   data?: { calendar?: { holds?: CalendarEvent[] }; appointments?: CalendarEvent[] };
 };
 type InboxResponse = { data?: { items?: InboxItem[] } };
+type MailResponse = { data?: { priority?: MailMessage[] } };
 
 export function createRuntimeState(options: RuntimeStateOptions = {}): RuntimeState {
   const get = options.get ?? apiGet;
@@ -30,6 +36,8 @@ export function createRuntimeState(options: RuntimeStateOptions = {}): RuntimeSt
   const [health, setHealth] = createSignal<RuntimeHealth | null>(null);
   const [calendarEvents, setCalendarEvents] = createSignal<CalendarEvent[]>([]);
   const [inbox, setInbox] = createSignal<InboxItem[]>([]);
+  const [mail, setMail] = createSignal<MailMessage[]>([]);
+  const [mailLoaded, setMailLoaded] = createSignal(false);
 
   async function loadHealth(): Promise<void> {
     const next = await health$().catch(
@@ -64,6 +72,20 @@ export function createRuntimeState(options: RuntimeStateOptions = {}): RuntimeSt
     }
   }
 
+  async function loadMail(): Promise<void> {
+    try {
+      const response = await get<MailResponse>("/api/v1/mail/summary");
+      setMail(response?.data?.priority ?? []);
+    } catch {
+      setMail([]);
+    } finally {
+      // Marked loaded either way: "the snapshot is empty" and "the request
+      // failed" both mean there is nothing to show, and the surface has to
+      // stop saying "loading" in both cases.
+      setMailLoaded(true);
+    }
+  }
+
   async function loadInbox(): Promise<void> {
     try {
       const response = await get<InboxResponse>("/api/v1/inbox");
@@ -73,5 +95,15 @@ export function createRuntimeState(options: RuntimeStateOptions = {}): RuntimeSt
     }
   }
 
-  return { health, calendarEvents, inbox, loadHealth, loadCalendar, loadInbox };
+  return {
+    health,
+    calendarEvents,
+    inbox,
+    mail,
+    mailLoaded,
+    loadHealth,
+    loadCalendar,
+    loadInbox,
+    loadMail,
+  };
 }

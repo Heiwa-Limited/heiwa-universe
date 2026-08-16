@@ -49,6 +49,22 @@
   the shipped binary from an empty state root to a completed turn.
   Identity is local and per-installation and contacts no server; whether it
   is also account-backed is the open D1 fork and is not decided.
+- A fresh install completes a turn with no credentials at all. Verified by
+  walking an empty state root with the shipped binary: `heiwa setup` mints the
+  local identity, discovery finds a local runtime if one is present, and
+  `heiwa ask` answers — no API key, no account, no network. Where no local
+  runtime exists, the same command reports the provider gap with the actions
+  that close it (AD-13).
+- Calendar reads from the machine, not the cloud. `heiwa calendar sync` pulls
+  events from the user's own Calendar.app through a JXA metadata bridge into
+  a snapshot under the config root; `/api/v1/calendar/summary` serves it and
+  the Calendar surface renders it. Verified against a real calendar.
+  Google Calendar remains L3 and reports `needs_auth`.
+- Mail reads from the machine, not the cloud. `heiwa mail scan` pulls sender,
+  subject, date, and read state from the user's own Mail.app — never a body —
+  into a snapshot under the config root, and the Mail surface renders it. No
+  OAuth, no IMAP credentials, nothing leaves the machine. Sending is not
+  built; the surface says so. Gmail and other remote mailboxes remain L3.
 - The desktop shell is a SolidJS component layer: ten surface modules behind a
   `SurfaceModule` contract over a tokenized design system, with the operator
   stream seam (`store.ts` / `client.ts` / `types.ts`) preserved unmodified.

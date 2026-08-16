@@ -25,7 +25,9 @@ type Harness = {
  * scheduler defers publishes to an animation frame, which a test would have
  * to wait on.
  */
-function harness(overrides: { subscribeNever?: boolean } = {}): Harness {
+function harness(
+  overrides: { subscribeNever?: boolean; get?: (path: string) => Promise<unknown> } = {},
+): Harness {
   const post = vi.fn().mockResolvedValue({
     ok: true,
     data: {
@@ -50,7 +52,9 @@ function harness(overrides: { subscribeNever?: boolean } = {}): Harness {
       schedule: (task) => task(),
     },
     runtime: {
-      get: vi.fn().mockResolvedValue({ data: { items: [], holds: [], events: [] } }),
+      get: overrides.get
+        ? (vi.fn(overrides.get) as never)
+        : vi.fn().mockResolvedValue({ data: { items: [], holds: [], events: [] } }),
       health: vi.fn().mockResolvedValue({
         reachable: true,
         error: null,
@@ -117,7 +121,8 @@ const SURFACE_MARKERS: Record<string, string | RegExp> = {
   ai: "No messages yet.",
   windows: "Terminal panes",
   calendar: "Upcoming",
-  mail: /Reads land on the L3 connector plane/,
+  // Mail now renders the local snapshot rather than an L3 placeholder.
+  mail: /metadata only, read\s+from this machine/,
   finance: /Read model arrives with the L3 connector plane/,
   social: /Ingress arrives with the L3 connector plane/,
   workers: "Operator turns",
@@ -310,5 +315,46 @@ describe("operator seam", () => {
 
     expect(screen.queryByText("Set up Heiwa")).toBeNull();
     expect(screen.getByLabelText("Send")).toBeTruthy();
+  });
+
+  it("shows the messages the local mail snapshot actually holds", () => {
+    // The pipeline existed and the surface ignored it: `heiwa mail scan`
+    // writes a metadata snapshot from the user's own Mail.app, the runtime
+    // serves it at /api/v1/mail/summary, and the surface was rendering a
+    // "reads land on L3" placeholder while real data sat one call away.
+    const { state } = harness({
+      get: async (path: string) =>
+        path === "/api/v1/mail/summary"
+          ? {
+              data: {
+                priority: [
+                  { sender: "ada@example.com", subject: "Re: launch", unread: true, account: "Work" },
+                  { sender: "grace@example.com", subject: "Invoice", unread: false, account: "Work" },
+                ],
+              },
+            }
+          : { data: {} },
+    });
+
+    render(() => <App state={state} />);
+    state.navigate("mail");
+
+    return Promise.resolve().then(() => {
+      expect(screen.getByText("Re: launch")).toBeTruthy();
+      expect(screen.getByText("ada@example.com")).toBeTruthy();
+    });
+  });
+
+  it("says the snapshot is empty rather than pretending mail is unsupported", () => {
+    // An empty snapshot is a state with an action — run a scan — not the
+    // same thing as the feature not existing.
+    const { state } = harness({ get: async () => ({ data: { priority: [] } }) });
+
+    render(() => <App state={state} />);
+    state.navigate("mail");
+
+    return Promise.resolve().then(() => {
+      expect(screen.getByText(/heiwa mail scan/)).toBeTruthy();
+    });
   });
 });

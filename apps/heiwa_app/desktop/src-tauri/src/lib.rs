@@ -36,7 +36,12 @@ pub fn run() {
             let executable_dir = std::env::current_exe()
                 .ok()
                 .and_then(|path| path.parent().map(std::path::Path::to_path_buf));
+            // Tauri resolves the resource directory per platform; hardcoding
+            // the layouts gets Linux wrong, where a deb installs resources to
+            // usr/lib/<product> rather than beside the executable.
+            let resource_dir = app.path().resource_dir().ok();
             let binary = runtime_supervisor::find_runtime_binary(
+                resource_dir.as_deref(),
                 executable_dir.as_deref(),
                 which_on_path,
                 |path| path.is_file(),

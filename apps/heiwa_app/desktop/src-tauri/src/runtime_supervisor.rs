@@ -78,25 +78,54 @@ impl SupervisorDecision {
 /// with, not whatever version happens to be on the user's PATH. Only when
 /// there is no sibling — a developer running `tauri dev` — does PATH apply.
 pub fn find_runtime_binary(
+    resource_dir: Option<&std::path::Path>,
     executable_dir: Option<&std::path::Path>,
     path_lookup: impl Fn(&str) -> Option<PathBuf>,
     exists: impl Fn(&std::path::Path) -> bool,
 ) -> Option<PathBuf> {
     const BINARY: &str = if cfg!(windows) { "heiwa.exe" } else { "heiwa" };
 
+    // The resource directory Tauri itself resolves, which is the only
+    // portable answer. Each platform puts bundled resources somewhere
+    // different — macOS `Contents/Resources`, Linux `usr/lib/<product>`,
+    // Windows beside the executable — and hardcoding those layouts gets
+    // Linux wrong, which is exactly how a deb or AppImage ends up installed
+    // with a runtime it cannot find.
+    //
+    // Inside that directory the bundler keeps each resource's relative path,
+    // so the staged `resources/heiwa` arrives under a `resources/`
+    // subdirectory rather than at the root. Both are accepted: the app should
+    // not break on a staging detail it does not control.
+    if let Some(dir) = resource_dir {
+        let staged = dir.join("resources").join(BINARY);
+        if exists(&staged) {
+            return Some(staged);
+        }
+        let bundled = dir.join(BINARY);
+        if exists(&bundled) {
+            return Some(bundled);
+        }
+    }
+
+    // Fallbacks for a build where the resource directory is not available:
+    // beside the executable, then the macOS bundle layout.
     if let Some(dir) = executable_dir {
-        // Windows and Linux bundles put resources beside the executable.
         let sibling = dir.join(BINARY);
         if exists(&sibling) {
             return Some(sibling);
         }
-        // macOS puts the executable in Contents/MacOS and bundled resources
-        // in Contents/Resources, so the shipped runtime is one level over.
-        let macos_resources = dir.join("../Resources").join(BINARY);
-        if exists(&macos_resources) {
-            return Some(macos_resources);
+        let macos_resources = dir.join("../Resources");
+        let macos_staged = macos_resources.join("resources").join(BINARY);
+        if exists(&macos_staged) {
+            return Some(macos_staged);
+        }
+        let macos_bundled = macos_resources.join(BINARY);
+        if exists(&macos_bundled) {
+            return Some(macos_bundled);
         }
     }
+
+    // Development only: no bundle, so whatever the developer has installed.
     path_lookup(BINARY)
 }
 
@@ -299,6 +328,7 @@ mod tests {
         // different version from PATH is how an app and its runtime drift
         // into speaking different protocols on a user's machine.
         let found = find_runtime_binary(
+            None,
             Some(std::path::Path::new(
                 "/Applications/Heiwa.app/Contents/MacOS",
             )),
@@ -320,6 +350,7 @@ mod tests {
     fn path_is_the_fallback_when_no_runtime_shipped_alongside() {
         // `tauri dev`: the app binary is in target/debug with no sibling.
         let found = find_runtime_binary(
+            None,
             Some(std::path::Path::new("/repo/target/debug")),
             |_| Some(PathBuf::from("/opt/homebrew/bin/heiwa")),
             |_| false,
@@ -332,6 +363,7 @@ mod tests {
     fn no_sibling_and_nothing_on_path_finds_nothing() {
         assert_eq!(
             find_runtime_binary(
+                None,
                 Some(std::path::Path::new("/repo/target/debug")),
                 |_| None,
                 |_| false
@@ -448,6 +480,7 @@ mod tests {
         // Contents/Resources. Looking only beside the executable would miss
         // the runtime the bundle shipped and silently fall through to PATH.
         let found = find_runtime_binary(
+            None,
             Some(std::path::Path::new(
                 "/Applications/Heiwa.app/Contents/MacOS",
             )),
@@ -460,6 +493,71 @@ mod tests {
             found.to_string_lossy().contains("Resources"),
             "resolved to {} instead of the bundled runtime",
             found.display()
+        );
+    }
+
+    #[test]
+    fn a_linux_package_finds_the_runtime_in_its_resource_directory() {
+        // A deb or AppImage installs the executable to usr/bin and bundled
+        // resources to usr/lib/<product>. Searching only beside the
+        // executable misses it, so the installed app could not start the
+        // runtime it shipped with — it would fall through to PATH, or to
+        // nothing at all.
+        //
+        // The packaged layout is exact: the bundler keeps a resource's
+        // relative path, so the staged `resources/heiwa` installs to
+        // usr/lib/<product>/resources/heiwa and nothing sits at the root of
+        // the resource directory.
+        let installed = if cfg!(windows) {
+            "/usr/lib/Heiwa/resources/heiwa.exe"
+        } else {
+            "/usr/lib/Heiwa/resources/heiwa"
+        };
+        let found = find_runtime_binary(
+            Some(std::path::Path::new("/usr/lib/Heiwa")),
+            Some(std::path::Path::new("/usr/bin")),
+            |_| None,
+            |path| path == std::path::Path::new(installed),
+        );
+
+        assert_eq!(found, Some(PathBuf::from(installed)));
+    }
+
+    #[test]
+    fn a_runtime_staged_at_the_resource_root_is_still_found() {
+        // Staging is the workflow's business, not the app's: a runtime placed
+        // directly in the resource directory must work too, or a change to
+        // how the bundle is assembled silently ships an app that cannot start
+        // its runtime.
+        let installed = if cfg!(windows) {
+            "/usr/lib/Heiwa/heiwa.exe"
+        } else {
+            "/usr/lib/Heiwa/heiwa"
+        };
+        let found = find_runtime_binary(
+            Some(std::path::Path::new("/usr/lib/Heiwa")),
+            Some(std::path::Path::new("/usr/bin")),
+            |_| None,
+            |path| path == std::path::Path::new(installed),
+        );
+
+        assert_eq!(found, Some(PathBuf::from(installed)));
+    }
+
+    #[test]
+    fn the_resource_directory_wins_over_a_sibling_and_over_path() {
+        // When Tauri answers, that answer is authoritative: it is the only
+        // source that is correct on every platform.
+        let found = find_runtime_binary(
+            Some(std::path::Path::new("/bundle/resources")),
+            Some(std::path::Path::new("/bundle/bin")),
+            |_| Some(PathBuf::from("/opt/homebrew/bin/heiwa")),
+            |_| true,
+        );
+
+        assert!(
+            found.expect("a runtime").starts_with("/bundle/resources"),
+            "the resource directory must take precedence"
         );
     }
 }

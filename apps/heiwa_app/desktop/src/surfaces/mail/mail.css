@@ -1,0 +1,111 @@
+/* Mail surface. Tokens only — no literal colors. */
+
+.mail-surface {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-6);
+  height: 100%;
+  min-height: 0;
+  padding: var(--space-8);
+}
+
+.mail-header {
+  flex: none;
+}
+
+.mail-title {
+  margin: 0;
+  font-size: 1.1rem;
+  font-weight: 600;
+  color: var(--content-primary);
+}
+
+.mail-subtitle {
+  margin: var(--space-2) 0 0;
+  color: var(--content-secondary);
+  font-size: 0.85rem;
+}
+
+.mail-list {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-lg);
+  background: var(--surface-raised);
+}
+
+.mail-row {
+  display: grid;
+  grid-template-columns: minmax(0, 18ch) minmax(0, 1fr) auto;
+  gap: var(--space-5);
+  align-items: baseline;
+  padding: var(--space-4) var(--space-5);
+  border-bottom: 1px solid var(--border-subtle);
+}
+
+.mail-row:last-child {
+  border-bottom: 0;
+}
+
+.mail-row-unread .mail-subject {
+  color: var(--content-primary);
+  font-weight: 600;
+}
+
+.mail-sender,
+.mail-subject,
+.mail-account {
+  /* Any of these can be long; truncate rather than widen the surface. */
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.mail-sender {
+  color: var(--content-secondary);
+  font-size: 0.85rem;
+}
+
+.mail-subject {
+  color: var(--content-secondary);
+}
+
+.mail-account {
+  color: var(--content-muted);
+  font-size: 0.75rem;
+}
+
+.mail-empty {
+  flex: 1;
+  display: grid;
+  place-content: center;
+  gap: var(--space-3);
+  padding: var(--space-9);
+  border: 1px dashed var(--border-subtle);
+  border-radius: var(--radius-lg);
+  color: var(--content-secondary);
+  text-align: center;
+}
+
+.mail-empty-action {
+  margin: 0;
+  color: var(--content-muted);
+  font-size: 0.85rem;
+}
+
+.mail-empty code {
+  padding: 0 var(--space-2);
+  border-radius: var(--radius-sm);
+  background: var(--surface-input);
+  color: var(--content-primary);
+}
+
+.mail-footer {
+  flex: none;
+  color: var(--content-muted);
+  font-size: 0.8rem;
+}
