@@ -188,6 +188,33 @@ Implementation order (dependency-safe): extend `HeiwaPaths` first (env precedenc
 + naming), then collapse resolvers, then delete `heiwa_shell`'s second resolver,
 then the identity removals.
 
+## Fresh-install walkthrough (2026-08-16)
+
+Walked a genuinely empty state root with the shipped binary, as a stranger
+would. Recorded because it is the first evidence of the whole product path
+working together rather than layer by layer.
+
+| Step | Result |
+|---|---|
+| `heiwa setup` on an empty root | Minted the local identity, discovery registered the local runtime, reported set up |
+| `heiwa ask "what is 2+2?"` | **Answered, with zero credentials.** No API key, no account, no network — AD-13's local path working today rather than as a plan |
+| `heiwa calendar sync` | 50 real events from Calendar.app into the snapshot, no OAuth |
+| `heiwa mail scan` | Skipped, correctly — the probe is `$HOME`-scoped and the temp home has no Mail data. Against the real home it pulls the inbox |
+
+Two defects the walkthrough found, both fixed:
+
+- The Mail surface rendered "reads land on the L3 connector plane" while the
+  snapshot pipeline already worked and the runtime already served it at
+  `/api/v1/mail/summary`. A shipped capability looked unbuilt and the user's
+  own data sat one call behind a placeholder.
+- `heiwa mail scan` printed `apple: skipped` with no reason. The reason was
+  in the payload and the printer dropped it, so the user learned nothing
+  actionable. Same rule as the L2 onboarding gaps: a state the user cannot
+  act on is not a report.
+
+Not built, and not claimed: sending mail, Gmail, Google Calendar, and Slack
+all need the L3 connector plane and OAuth credentials only Devon can provide.
+
 ## Product direction (decided by Devon, 2026-08-15)
 
 Positioning, against the three products this is measured on:
