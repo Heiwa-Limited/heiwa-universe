@@ -144,6 +144,19 @@ jobs:
             || { echo "bundle is missing its runtime at Contents/Resources/heiwa" >&2; exit 1; }
           "$app/Contents/Resources/heiwa" --version 2>&1 | head -1
 
+      - name: Verify the Linux package carries its runtime
+        if: steps.gate.outputs.run == 'true' && runner.os == 'Linux'
+        shell: bash
+        run: |
+          set -euo pipefail
+          # A deb installs resources under usr/lib/<product>, not beside the
+          # executable. Confirm the runtime is actually in the package rather
+          # than trusting that staging it was enough.
+          deb=$(find target/release/bundle/deb -name '*.deb' | head -1)
+          test -n "$deb" || { echo "no .deb produced" >&2; exit 1; }
+          dpkg-deb -c "$deb" | grep -E '/heiwa$' \
+            || { echo "package is missing its runtime" >&2; exit 1; }
+
       - name: Upload bundle
         if: steps.gate.outputs.run == 'true'
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
