@@ -173,6 +173,8 @@ jobs:
             artifact_glob: |
               apps/heiwa_app/desktop/src-tauri/target/release/bundle/dmg/*.dmg
               dist/desktop/*-app.tar.gz
+              dist/desktop/*-app.tar.gz.sig
+              dist/desktop/latest.json
           - name: windows-x86_64
             runner: windows-latest
             bundles: msi
@@ -231,13 +233,19 @@ jobs:
           fi
 
       - name: Build desktop bundle
+        env:
+          # createUpdaterArtifacts is on, so the bundler signs the update
+          # payload during this step. Without the key the build fails here
+          # rather than publishing a release nobody can update to.
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ""
         run: npm --prefix apps/heiwa_app/desktop run tauri -- build --bundles ${{ matrix.bundles }}
 
-      # A browser download sets com.apple.quarantine and Gatekeeper blocks the
-      # app; curl and the updater do not. So the shipped macOS artifact is a
-      # tarball fetched by the installer, not the .dmg. Same archive is the
-      # Tauri updater payload, which keeps both paths on one artifact.
-      - name: Package the macOS app for the installer and updater
+      # A browser download sets com.apple.quarantine and Gatekeeper blocks
+      # the app; curl and the updater do not. So the shipped macOS artifact is
+      # the bundler's own signed tarball, fetched by the installer, rather
+      # than the .dmg. One artifact serves the installer and the updater.
+      - name: Collect the signed macOS app and write the update manifest
         if: matrix.name == 'macos-aarch64'
         shell: bash
         env:
@@ -245,16 +253,39 @@ jobs:
         run: |
           set -euo pipefail
           bundle_dir="apps/heiwa_app/desktop/src-tauri/target/release/bundle/macos"
-          test -d "${bundle_dir}/Heiwa.app" || {
-            echo "expected ${bundle_dir}/Heiwa.app from --bundles dmg,app" >&2
-            exit 1
-          }
+          archive="${bundle_dir}/Heiwa.app.tar.gz"
+          signature="${archive}.sig"
+
+          for required in "$archive" "$signature"; do
+            test -f "$required" || {
+              echo "missing $required -- createUpdaterArtifacts did not run," \
+                "or TAURI_SIGNING_PRIVATE_KEY was not set" >&2
+              exit 1
+            }
+          done
+
           mkdir -p dist/desktop
-          tar -C "${bundle_dir}" -czf \
-            "dist/desktop/heiwa-${VERSION}-macos-aarch64-app.tar.gz" Heiwa.app
-          tar -tzf "dist/desktop/heiwa-${VERSION}-macos-aarch64-app.tar.gz" \
-            | grep -q '^Heiwa.app/Contents/MacOS/' \
-            || { echo "app archive is missing its executable" >&2; exit 1; }
+          asset="heiwa-${VERSION}-macos-aarch64-app.tar.gz"
+          cp "$archive" "dist/desktop/${asset}"
+          cp "$signature" "dist/desktop/${asset}.sig"
+
+          # The manifest points at the renamed asset, so the URL has to be
+          # built from the release tag rather than copied from the bundler.
+          base="https://github.com/Heiwa-Limited/heiwa-universe/releases/download/v${VERSION}"
+          python3 -c '
+          import json, sys
+          version, url, sig_path = sys.argv[1], sys.argv[2], sys.argv[3]
+          with open(sig_path) as handle:
+              signature = handle.read().strip()
+          print(json.dumps({
+              "version": version,
+              "notes": "Heiwa " + version,
+              "platforms": {"darwin-aarch64": {"signature": signature, "url": url}},
+          }, indent=2))
+          ' "$VERSION" "$base/${asset}" "dist/desktop/${asset}.sig" \
+            > dist/desktop/latest.json
+
+          python3 -c "import json,sys; d=json.load(open('dist/desktop/latest.json')); assert d['platforms']['darwin-aarch64']['signature'], 'empty signature'; print('manifest ok:', d['version'])"
 
       - name: Upload desktop bundle
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1

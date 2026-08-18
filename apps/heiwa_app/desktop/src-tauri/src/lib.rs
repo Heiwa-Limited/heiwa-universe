@@ -30,6 +30,13 @@ fn runtime_startup(
 pub fn run() {
     tauri::Builder::default()
         .setup(|app| {
+            // The shipped bundle updates itself. Without this the runtime
+            // could advance through `heiwa app update` while the shell it
+            // lives in stayed on whatever version was first installed.
+            #[cfg(desktop)]
+            app.handle()
+                .plugin(tauri_plugin_updater::Builder::new().build())?;
+
             // Own the runtime. An installable app cannot ask the user to
             // start a server first, and it must not kill one they already
             // started — `ensure_runtime` distinguishes the two.

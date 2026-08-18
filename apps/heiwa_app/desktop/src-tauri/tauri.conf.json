@@ -50,6 +50,15 @@
     },
     "resources": [
       "resources/*"
-    ]
+    ],
+    "createUpdaterArtifacts": true
+  },
+  "plugins": {
+    "updater": {
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IEVDMDREM0E5NTRBOTg4MQpSV1NCbUVxVk9rM0FEdWVCdm1ERnVnemROQ3R5WUpKVVRQSzNMSDRkQy91a0xBUEdtZm5MMFlGaAo=",
+      "endpoints": [
+        "https://github.com/Heiwa-Limited/heiwa-universe/releases/latest/download/latest.json"
+      ]
+    }
   }
 }
