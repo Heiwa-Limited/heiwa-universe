@@ -169,6 +169,81 @@ if [ ! -d "$cockpit_target" ]; then
 fi
 [ -f "$cockpit_target/index.html" ] || fail "installed cockpit target is incomplete"
 
+# The desktop app is a separate, macOS-only release asset. Releases cut before
+# it existed have no such entry, so its absence from the checksum manifest is
+# a skip rather than a failure -- the CLI install must not regress to serve a
+# GUI that older tags never published.
+installed_app=""
+app_archive_name="heiwa-${version}-${asset}-app.tar.gz"
+app_expected="$(
+  awk -v file="$app_archive_name" '$2 == file || $2 == "*" file { print $1 }' \
+    "$tmp_dir/$checksums_name"
+)"
+
+if [ "$os" = "Darwin" ] && [ -n "$app_expected" ]; then
+  case "$app_expected" in
+    *[!0-9a-fA-F]*) fail "desktop app checksum entry is malformed" ;;
+  esac
+  [ "${#app_expected}" -eq 64 ] || fail "desktop app checksum must be SHA-256"
+
+  download "$release_base/$app_archive_name" "$tmp_dir/$app_archive_name"
+
+  if command -v sha256sum >/dev/null 2>&1; then
+    app_actual="$(sha256sum "$tmp_dir/$app_archive_name" | awk '{ print $1 }')"
+  else
+    app_actual="$(shasum -a 256 "$tmp_dir/$app_archive_name" | awk '{ print $1 }')"
+  fi
+  [ "$app_actual" = "$app_expected" ] ||
+    fail "checksum mismatch for $app_archive_name"
+
+  # Same containment and entry-type rules the runtime archive gets. A bundle
+  # is a directory tree the user will execute, so it earns no relaxation.
+  if ! tar -tzf "$tmp_dir/$app_archive_name" | while IFS= read -r path; do
+    case "$path" in
+      "Heiwa.app"|"Heiwa.app/"|"Heiwa.app/"*) ;;
+      *) exit 1 ;;
+    esac
+    case "/$path/" in
+      *"/../"*|*"/./"*) exit 1 ;;
+    esac
+  done; then
+    fail "desktop archive contains a path outside Heiwa.app"
+  fi
+  if ! tar -tvzf "$tmp_dir/$app_archive_name" | awk '
+    { type = substr($1, 1, 1) }
+    type != "-" && type != "d" { exit 1 }
+  '; then
+    fail "desktop archive contains links or unsupported entry types"
+  fi
+
+  tar -xzf "$tmp_dir/$app_archive_name" -C "$tmp_dir"
+  [ -x "$tmp_dir/Heiwa.app/Contents/MacOS/Heiwa" ] ||
+    fail "desktop archive does not contain an executable app bundle"
+
+  # Deliberately not $app_dir/Heiwa.app: `heiwa install` runs later in this
+  # script and writes its own launcher shim to that path. Two different things
+  # cannot own one path, and the runtime's bootstrap is not this installer's
+  # to redefine. /Applications is also where a user's app belongs -- it is the
+  # only location that reaches Spotlight and Launchpad.
+  if [ -w /Applications ]; then
+    applications_dir="/Applications"
+  else
+    applications_dir="$HOME/Applications"
+    mkdir -p "$applications_dir"
+  fi
+
+  staged_bundle="$applications_dir/.Heiwa.app.new.$$"
+  rm -rf -- "$staged_bundle"
+  if cp -R "$tmp_dir/Heiwa.app" "$staged_bundle" 2>/dev/null; then
+    rm -rf -- "$applications_dir/Heiwa.app"
+    mv "$staged_bundle" "$applications_dir/Heiwa.app"
+    installed_app="$applications_dir/Heiwa.app"
+  else
+    rm -rf -- "$staged_bundle"
+    echo "heiwa install: could not write $applications_dir; skipped the app" >&2
+  fi
+fi
+
 cockpit_link="$app_dir/cockpit-current"
 if [ -e "$cockpit_link" ] && [ ! -L "$cockpit_link" ]; then
   fail "$cockpit_link exists and is not a managed symlink"
@@ -187,11 +262,17 @@ staged_path=""
 echo "heiwa install: bootstrapping local runtime state"
 "$bin_dir/heiwa" install
 
+app_line=""
+if [ -n "$installed_app" ]; then
+  app_line="
+  app: $installed_app"
+fi
+
 cat <<EOF
 heiwa install: complete
   version: v$version
   binary: $bin_dir/heiwa
-  cockpit: $cockpit_link
+  cockpit: $cockpit_link$app_line
   archive: $archive_name
   sha256: $actual
 
