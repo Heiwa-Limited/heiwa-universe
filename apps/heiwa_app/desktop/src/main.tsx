@@ -3,6 +3,7 @@ import { render } from "solid-js/web";
 import { App } from "./app";
 import { createAppState, OPERATOR_THREAD_ID } from "./state/app";
 import { connectLegacyEvents } from "./state/legacy-events";
+import { checkForUpdate, installUpdate, type UpdateOffer } from "./runtime";
 import type { OnboardingState } from "./state/types";
 
 const root = document.querySelector<HTMLDivElement>("#app");
@@ -18,6 +19,13 @@ let disposeLegacyEvents: (() => void) | undefined;
  * slow probe must not read as a broken application.
  */
 const [onboarding, setOnboarding] = createSignal<OnboardingState | undefined>();
+
+/**
+ * A published release newer than this shell, once the check answers. The
+ * shipped bundle can replace itself, but only on the user's word — this is
+ * what the offer is made from.
+ */
+const [update, setUpdate] = createSignal<UpdateOffer | undefined>();
 
 /** Ask the runtime what first run still needs. */
 async function refreshOnboarding(): Promise<void> {
@@ -46,6 +54,8 @@ render(
       onboarding={onboarding()}
       onEstablishIdentity={establishIdentity}
       onRecheckOnboarding={refreshOnboarding}
+      update={update()}
+      onInstallUpdate={installUpdate}
     />
   ),
   root,
@@ -64,6 +74,9 @@ async function boot(): Promise<void> {
   await state.runtime.loadHealth();
   await state.operator.start(OPERATOR_THREAD_ID).catch(() => undefined);
   disposeLegacyEvents = connectLegacyEvents(state);
+  // Last, and not awaited by anything the window needs: the check reaches the
+  // network, and a published update is never a reason to hold the first paint.
+  setUpdate(await checkForUpdate());
 }
 
 void boot();

@@ -161,8 +161,38 @@ export type OllamaModel = {
   quantization_level?: string;
 };
 
+/** A published release newer than the running one, as the shell offers it. */
+export type UpdateOffer = {
+  version: string;
+  current_version: string;
+  notes?: string | null;
+};
+
 export async function runtimeHealth(): Promise<RuntimeHealth> {
   return invoke<RuntimeHealth>("runtime_health");
+}
+
+/**
+ * Whether a newer signed bundle is published. `undefined` covers both "up to
+ * date" and "nothing to ask" — a browser-only dev server has no updater, and
+ * an unreachable manifest is not something to put in front of the user.
+ */
+export async function checkForUpdate(): Promise<UpdateOffer | undefined> {
+  try {
+    return (await invoke<UpdateOffer | null>("update_check")) ?? undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * Install the offered update and relaunch into it.
+ *
+ * Errors propagate: the banner shows why, because silently doing nothing
+ * would leave the user thinking they had updated.
+ */
+export async function installUpdate(): Promise<void> {
+  return invoke<void>("update_install");
 }
 
 export async function apiGet<T>(path: string): Promise<T> {

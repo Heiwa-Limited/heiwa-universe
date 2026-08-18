@@ -3,6 +3,7 @@ pub mod onboarding;
 pub mod operator_stream;
 pub mod proxy;
 pub mod runtime_supervisor;
+pub mod updater;
 
 use std::sync::Mutex;
 use tauri::Manager;
@@ -33,6 +34,9 @@ pub fn run() {
             // The shipped bundle updates itself. Without this the runtime
             // could advance through `heiwa app update` while the shell it
             // lives in stayed on whatever version was first installed.
+            // Registering only makes an update fetchable — `updater::
+            // update_check` and `updater::update_install` are what actually
+            // apply one, asked for by the shell on open.
             #[cfg(desktop)]
             app.handle()
                 .plugin(tauri_plugin_updater::Builder::new().build())?;
@@ -90,7 +94,9 @@ pub fn run() {
             proxy::api_get,
             proxy::api_post,
             proxy::runtime_health,
-            runtime_startup
+            runtime_startup,
+            updater::update_check,
+            updater::update_install
         ])
         .run(tauri::generate_context!())
         .expect("error while running Heiwa desktop application");

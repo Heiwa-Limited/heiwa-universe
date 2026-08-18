@@ -2,6 +2,7 @@
 import { cleanup, render, screen } from "@solidjs/testing-library";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { App } from "./app";
+import { localIsoDate } from "./lib/format";
 import { createAppState, type AppState } from "./state/app";
 import { SURFACES } from "./surfaces/registry";
 import type { OperatorFrame } from "./operator/types";
@@ -364,7 +365,8 @@ describe("operator seam", () => {
     // The point of having the calendar and the mail locally is that the app
     // can answer "what do I need to know right now" the moment it opens,
     // without the user going and looking in two places.
-    const today = new Date().toISOString().slice(0, 10);
+    // Local, matching what a machine's calendar hands back.
+    const today = localIsoDate();
     const { state } = harness({
       get: async (path: string) => {
         if (path === "/api/v1/calendar/summary") {
@@ -419,5 +421,60 @@ describe("operator seam", () => {
         const briefing = document.querySelector(".today-briefing");
         expect(briefing?.textContent ?? "").toMatch(/nothing scheduled/i);
       });
+  });
+
+  it("offers a published update and installs it on the user's word", async () => {
+    // Registering the updater plugin only makes a release fetchable. This is
+    // the reachable path: without a rendered offer wired to the install
+    // command, a signed release sits on GitHub and every shell stays stale.
+    const { state } = harness();
+    const onInstallUpdate = vi.fn().mockResolvedValue(undefined);
+
+    render(() => (
+      <App
+        state={state}
+        update={{ version: "0.2.0", current_version: "0.1.0" }}
+        onInstallUpdate={onInstallUpdate}
+      />
+    ));
+
+    const banner = document.querySelector(".update-banner");
+    expect(banner?.textContent ?? "").toContain("0.2.0");
+
+    const action = screen.getByRole("button", { name: /install and relaunch/i });
+    action.click();
+    await Promise.resolve();
+
+    expect(onInstallUpdate).toHaveBeenCalledTimes(1);
+  });
+
+  it("stays quiet when no update is published", () => {
+    const { state } = harness();
+
+    render(() => <App state={state} />);
+
+    expect(document.querySelector(".update-banner")).toBeNull();
+  });
+
+  it("keeps the offer on screen with the reason when installing fails", async () => {
+    // A banner that disappears on failure leaves the user believing they
+    // updated when they did not.
+    const { state } = harness();
+    const onInstallUpdate = vi.fn().mockRejectedValue(new Error("signature rejected"));
+
+    render(() => (
+      <App
+        state={state}
+        update={{ version: "0.2.0", current_version: "0.1.0" }}
+        onInstallUpdate={onInstallUpdate}
+      />
+    ));
+
+    screen.getByRole("button", { name: /install and relaunch/i }).click();
+    await Promise.resolve();
+    await Promise.resolve();
+
+    const banner = document.querySelector(".update-banner");
+    expect(banner?.textContent ?? "").toContain("signature rejected");
   });
 });

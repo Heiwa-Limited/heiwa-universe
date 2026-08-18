@@ -1,4 +1,5 @@
 import { For, Show } from "solid-js";
+import { localIsoDate } from "../../lib/format";
 import { useApp } from "../../state/app";
 import "./today-briefing.css";
 
@@ -17,7 +18,9 @@ import "./today-briefing.css";
 export function TodayBriefing() {
   const app = useApp();
 
-  const todayIso = () => new Date().toISOString().slice(0, 10);
+  // Local, not UTC: the events came off this machine's calendar, so "today"
+  // has to mean the day the machine is having.
+  const todayIso = () => localIsoDate();
 
   const todaysEvents = () =>
     app.runtime
