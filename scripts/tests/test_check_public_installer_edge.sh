@@ -24,7 +24,19 @@ printf '%s\n' \
   '    *) shift ;;' \
   '  esac' \
   'done' \
-  'case "${CURL_SCENARIO:?}" in' \
+  '# CURL_SCENARIO may name one scenario or a sequence of them; with' \
+  '# CURL_COUNTER set, each invocation advances to the next and the last one' \
+  '# repeats once the sequence is exhausted.' \
+  'read -r -a scenarios <<<"${CURL_SCENARIO:?}"' \
+  'index=0' \
+  'if [[ -n "${CURL_COUNTER:-}" ]]; then' \
+  '  index="$(cat "$CURL_COUNTER" 2>/dev/null || printf 0)"' \
+  '  printf "%s" "$((index + 1))" >"$CURL_COUNTER"' \
+  '  if (( index >= ${#scenarios[@]} )); then' \
+  '    index=$(( ${#scenarios[@]} - 1 ))' \
+  '  fi' \
+  'fi' \
+  'case "${scenarios[index]}" in' \
   '  success)' \
   '    printf "HTTP/2 200\\ncontent-type: text/x-shellscript\\n\\n" >"$headers"' \
   '    cat "${REPO_INSTALLER:?}" >"$body"' \
@@ -52,6 +64,18 @@ run_check() {
   CURL_SCENARIO="$1" \
     REPO_INSTALLER="$repo_root/apps/heiwa_app/clients/web/install" \
     HEIWA_PUBLIC_INSTALLER_ATTEMPTS=1 \
+    PATH="$tmp_dir/bin:$PATH" \
+    bash "$checker" >"$tmp_dir/output" 2>&1
+}
+
+run_check_sequence() {
+  local counter="$tmp_dir/counter"
+  printf 0 >"$counter"
+  CURL_SCENARIO="$1" \
+    CURL_COUNTER="$counter" \
+    REPO_INSTALLER="$repo_root/apps/heiwa_app/clients/web/install" \
+    HEIWA_PUBLIC_INSTALLER_ATTEMPTS="$2" \
+    HEIWA_PUBLIC_INSTALLER_RETRY_DELAY=0 \
     PATH="$tmp_dir/bin:$PATH" \
     bash "$checker" >"$tmp_dir/output" 2>&1
 }
@@ -93,6 +117,35 @@ fi
 if ! run_check_with_drift_allowed drift; then
   cat "$tmp_dir/output" >&2
   echo "expected the deploy-window override to allow drift" >&2
+  exit 1
+fi
+# Drift on an early attempt followed by a response we cannot compare is an edge
+# availability failure, not a stale installer: reporting the earlier body as
+# persistent drift would diff a copy the edge is no longer serving.
+if run_check_sequence "drift challenge" 2; then
+  echo "expected a trailing Cloudflare challenge to fail" >&2
+  exit 1
+fi
+if grep -q "does not match the repo copy" "$tmp_dir/output"; then
+  cat "$tmp_dir/output" >&2
+  echo "expected a trailing challenge to be reported as a failed attempt," \
+    "not as persistent installer drift" >&2
+  exit 1
+fi
+if ! grep -q "attempt 2/2 failed (HTTP 403)" "$tmp_dir/output"; then
+  cat "$tmp_dir/output" >&2
+  echo "expected the final challenge attempt to be reported" >&2
+  exit 1
+fi
+# The reverse order still reports drift: the last comparable answer is the one
+# that decides, and here it is a stale installer.
+if run_check_sequence "challenge drift" 2; then
+  echo "expected a trailing stale installer to fail" >&2
+  exit 1
+fi
+if ! grep -q "does not match the repo copy" "$tmp_dir/output"; then
+  cat "$tmp_dir/output" >&2
+  echo "expected a trailing stale installer to be reported as drift" >&2
   exit 1
 fi
 
