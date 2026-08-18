@@ -147,7 +147,10 @@ mod tests {
 
     #[test]
     fn accepts_a_matching_state() {
-        assert_eq!(extract_code("/?code=abc123&state=xyz", "xyz").unwrap(), "abc123");
+        assert_eq!(
+            extract_code("/?code=abc123&state=xyz", "xyz").unwrap(),
+            "abc123"
+        );
     }
 
     #[test]

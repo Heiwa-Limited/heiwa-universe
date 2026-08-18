@@ -56,8 +56,8 @@ pub fn build_authorization_request(
     let pkce = Pkce::generate();
     let state = generate_state();
 
-    let mut url = Url::parse(&config.auth_endpoint)
-        .map_err(|source| OAuthError::InvalidEndpoint {
+    let mut url =
+        Url::parse(&config.auth_endpoint).map_err(|source| OAuthError::InvalidEndpoint {
             endpoint: config.auth_endpoint.clone(),
             source,
         })?;

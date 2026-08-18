@@ -72,7 +72,10 @@ mod tests {
     fn verifier_satisfies_rfc7636_length_and_alphabet() {
         let pkce = Pkce::generate();
         let len = pkce.verifier().len();
-        assert!((43..=128).contains(&len), "verifier length {len} out of range");
+        assert!(
+            (43..=128).contains(&len),
+            "verifier length {len} out of range"
+        );
         for byte in pkce.verifier().bytes() {
             assert!(
                 VERIFIER_ALPHABET.contains(&byte),
@@ -86,15 +89,25 @@ mod tests {
         // RFC 7636 Appendix B fixes this pair, so it catches an encoder that
         // pads, uses standard base64, or hashes the wrong bytes.
         let pkce = Pkce::from_verifier("dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk");
-        assert_eq!(pkce.challenge(), "E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM");
+        assert_eq!(
+            pkce.challenge(),
+            "E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM"
+        );
     }
 
     #[test]
     fn challenge_is_unpadded_urlsafe() {
         let challenge = Pkce::generate().challenge();
         assert!(!challenge.contains('='), "challenge must not be padded");
-        assert!(!challenge.contains('+') && !challenge.contains('/'), "must be url-safe");
-        assert_eq!(challenge.len(), 43, "SHA-256 base64url unpadded is 43 chars");
+        assert!(
+            !challenge.contains('+') && !challenge.contains('/'),
+            "must be url-safe"
+        );
+        assert_eq!(
+            challenge.len(),
+            43,
+            "SHA-256 base64url unpadded is 43 chars"
+        );
     }
 
     #[test]

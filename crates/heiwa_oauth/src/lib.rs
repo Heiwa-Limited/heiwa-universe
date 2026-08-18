@@ -9,11 +9,13 @@
 pub mod authorize;
 pub mod loopback;
 pub mod pkce;
+pub mod session;
 pub mod token;
 
 pub use authorize::{build_authorization_request, AuthorizationRequest, ProviderConfig};
 pub use loopback::LoopbackListener;
 pub use pkce::Pkce;
+pub use session::{merge_refreshed, to_secret};
 pub use token::{exchange_code, refresh, TokenResponse};
 
 #[derive(Debug, thiserror::Error)]

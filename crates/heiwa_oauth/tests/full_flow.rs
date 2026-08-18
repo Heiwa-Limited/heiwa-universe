@@ -16,7 +16,10 @@ use heiwa_oauth::{
 
 /// Minimal token endpoint. Captures the form body it received so the test can
 /// assert the client sent the verifier, then answers with a token set.
-fn spawn_token_endpoint(response_body: &'static str, status: u16) -> (String, mpsc::Receiver<String>) {
+fn spawn_token_endpoint(
+    response_body: &'static str,
+    status: u16,
+) -> (String, mpsc::Receiver<String>) {
     let listener = TcpListener::bind(SocketAddr::from((Ipv4Addr::LOCALHOST, 0))).unwrap();
     let port = listener.local_addr().unwrap().port();
     let (tx, rx) = mpsc::channel();
@@ -39,7 +42,8 @@ fn spawn_token_endpoint(response_body: &'static str, status: u16) -> (String, mp
 
         let mut body = vec![0u8; content_length];
         reader.read_exact(&mut body).unwrap();
-        tx.send(String::from_utf8_lossy(&body).into_owned()).unwrap();
+        tx.send(String::from_utf8_lossy(&body).into_owned())
+            .unwrap();
 
         let reason = if status == 200 { "OK" } else { "Bad Request" };
         let response = format!(
