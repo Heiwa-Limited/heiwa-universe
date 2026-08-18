@@ -25,6 +25,7 @@ foundation_packages=(
   heiwa_evidence
   heiwa_identity
   heiwa_mcp
+  heiwa_oauth
   heiwa_quota
   heiwa_receipts
 )
@@ -80,6 +81,7 @@ runtime_b_targets=(
 foundation_a_targets=(
   cockpit_contract
   drex_golden
+  full_flow
   install_doctor
   journal
   operator_journal
