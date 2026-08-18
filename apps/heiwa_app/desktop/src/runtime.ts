@@ -23,6 +23,18 @@ export type RuntimeHealth = {
 export type RuntimeSnapshotEnvelope = {
   ok?: boolean;
   data?: {
+    /**
+     * The runtime block the snapshot actually returns. `runtime_version` at
+     * the top level was never a field the runtime sends — the version lives
+     * here, which is why every screen showed "unknown".
+     */
+    runtime?: {
+      version?: string;
+      status?: string;
+      started_at?: string;
+      node?: string;
+    };
+    /** Kept for older snapshots that flattened it. */
     runtime_version?: string;
     started_at?: string;
     status?: string;
@@ -149,8 +161,38 @@ export type OllamaModel = {
   quantization_level?: string;
 };
 
+/** A published release newer than the running one, as the shell offers it. */
+export type UpdateOffer = {
+  version: string;
+  current_version: string;
+  notes?: string | null;
+};
+
 export async function runtimeHealth(): Promise<RuntimeHealth> {
   return invoke<RuntimeHealth>("runtime_health");
+}
+
+/**
+ * Whether a newer signed bundle is published. `undefined` covers both "up to
+ * date" and "nothing to ask" — a browser-only dev server has no updater, and
+ * an unreachable manifest is not something to put in front of the user.
+ */
+export async function checkForUpdate(): Promise<UpdateOffer | undefined> {
+  try {
+    return (await invoke<UpdateOffer | null>("update_check")) ?? undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * Install the offered update and relaunch into it.
+ *
+ * Errors propagate: the banner shows why, because silently doing nothing
+ * would leave the user thinking they had updated.
+ */
+export async function installUpdate(): Promise<void> {
+  return invoke<void>("update_install");
 }
 
 export async function apiGet<T>(path: string): Promise<T> {
@@ -326,13 +368,15 @@ async function postHerdPaneAction(
 }
 
 export function runtimeVersion(health: RuntimeHealth | null): string {
-  return health?.snapshot?.data?.runtime_version ?? "unknown";
+  const data = health?.snapshot?.data;
+  return data?.runtime?.version ?? data?.runtime_version ?? "unknown";
 }
 
 export function runtimeStatus(health: RuntimeHealth | null): string {
   if (!health) return "checking";
   if (!health.reachable) return "offline";
-  return health.snapshot?.data?.status ?? "ok";
+  const data = health.snapshot?.data;
+  return data?.runtime?.status ?? data?.status ?? "ok";
 }
 
 export function providersFromSnapshot(health: RuntimeHealth | null): ProviderSnapshot[] {

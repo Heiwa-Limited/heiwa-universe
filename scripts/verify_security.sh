@@ -121,8 +121,12 @@ if command -v cargo-audit >/dev/null 2>&1; then
 else
   run_required_async "cargo audit" cargo audit
 fi
+# The cockpit is a workspace member of the root package.json, so the root audit
+# above already covers its dependencies. It has no lockfile of its own -- a
+# workspace member with one is the orphan e70a1fe4 removed -- and both
+# `npm audit` and `npm ci` scoped to that directory fail without one.
+# apps/heiwa_app/desktop is not a workspace and is audited separately.
 run_required_async "root npm audit" npm audit
-run_required_async "cockpit npm audit" npm --prefix apps/heiwa_app/clients/cockpit audit
 run_required_async "desktop npm audit" npm --prefix apps/heiwa_app/desktop audit
 run_required_async "root TypeScript typecheck" npm run typecheck --silent
 run_required_async "desktop TypeScript typecheck" bash -c 'cd apps/heiwa_app/desktop && npm run typecheck --silent'

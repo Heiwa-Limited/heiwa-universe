@@ -153,3 +153,7 @@ apps/heiwa_app/desktop/src-tauri/target/
 .worktrees/
 apps/heiwa_trading/runtime/
 /heiwa-desk.app/
+
+# Local-only working material. GitHub carries product, distribution, and
+# marketing; company strategy and operator-private notes stay on this machine.
+private/

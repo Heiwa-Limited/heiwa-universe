@@ -27,7 +27,12 @@ printf '%s\n' \
   'case "${CURL_SCENARIO:?}" in' \
   '  success)' \
   '    printf "HTTP/2 200\\ncontent-type: text/x-shellscript\\n\\n" >"$headers"' \
-  '    printf "#!/bin/sh\\nset -eu\\n" >"$body"' \
+  '    cat "${REPO_INSTALLER:?}" >"$body"' \
+  '    printf 200' \
+  '    ;;' \
+  '  drift)' \
+  '    printf "HTTP/2 200\\ncontent-type: text/x-shellscript\\n\\n" >"$headers"' \
+  '    printf "#!/bin/sh\\nset -eu\\n# a stale deploy\\n" >"$body"' \
   '    printf 200' \
   '    ;;' \
   '  challenge)' \
@@ -45,6 +50,16 @@ chmod +x "$curl_stub"
 
 run_check() {
   CURL_SCENARIO="$1" \
+    REPO_INSTALLER="$repo_root/apps/heiwa_app/clients/web/install" \
+    HEIWA_PUBLIC_INSTALLER_ATTEMPTS=1 \
+    PATH="$tmp_dir/bin:$PATH" \
+    bash "$checker" >"$tmp_dir/output" 2>&1
+}
+
+run_check_with_drift_allowed() {
+  CURL_SCENARIO="$1" \
+    REPO_INSTALLER="$repo_root/apps/heiwa_app/clients/web/install" \
+    HEIWA_ALLOW_INSTALLER_EDGE_DRIFT=1 \
     HEIWA_PUBLIC_INSTALLER_ATTEMPTS=1 \
     PATH="$tmp_dir/bin:$PATH" \
     bash "$checker" >"$tmp_dir/output" 2>&1
@@ -61,6 +76,23 @@ if run_check challenge; then
 fi
 if run_check html; then
   echo "expected a 200 HTML response to fail" >&2
+  exit 1
+fi
+# A 200 that is shaped like a shell script but is not the installer we ship is
+# exactly the failure that kept heiwa.ltd on a pinned version while every other
+# check stayed green.
+if run_check drift; then
+  echo "expected a stale edge installer to fail" >&2
+  exit 1
+fi
+if ! grep -q "does not match the repo copy" "$tmp_dir/output"; then
+  cat "$tmp_dir/output" >&2
+  echo "expected drift failure to name the mismatch" >&2
+  exit 1
+fi
+if ! run_check_with_drift_allowed drift; then
+  cat "$tmp_dir/output" >&2
+  echo "expected the deploy-window override to allow drift" >&2
   exit 1
 fi
 

@@ -1,0 +1,55 @@
+/* Update offer, above the shell. Tokens only — no literal colors. */
+
+.update-banner {
+  position: fixed;
+  z-index: 90;
+  right: var(--space-6);
+  bottom: var(--space-6);
+  display: flex;
+  align-items: center;
+  gap: var(--space-6);
+  max-width: min(480px, calc(100vw - var(--space-8)));
+  padding: var(--space-5) var(--space-6);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-lg);
+  background: var(--surface-raised);
+  box-shadow: var(--elevation-3);
+}
+
+.update-text {
+  display: grid;
+  gap: var(--space-2);
+  min-width: 0;
+}
+
+.update-headline {
+  color: var(--content-primary);
+  font-weight: 600;
+}
+
+.update-detail {
+  color: var(--content-secondary);
+  font-size: 0.85rem;
+}
+
+.update-failure {
+  color: var(--status-error);
+  font-size: 0.85rem;
+}
+
+.update-action {
+  flex: none;
+  padding: var(--space-4) var(--space-5);
+  border: 0;
+  border-radius: var(--radius-md);
+  background: var(--accent);
+  color: var(--accent-contrast);
+  font: inherit;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.update-action:disabled {
+  opacity: 0.5;
+  cursor: default;
+}

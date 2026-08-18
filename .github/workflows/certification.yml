@@ -49,8 +49,12 @@ jobs:
         run: |
           set -euo pipefail
           python -m pip install uv==0.12.1
+          # The cockpit is a workspace member in the root package.json, so the
+          # root install above already covers it. It gets no lockfile of its
+          # own -- a workspace member with one is the orphan that e70a1fe4
+          # removed -- and `npm ci --prefix` there fails with EUSAGE.
+          # apps/heiwa_app/desktop is not a workspace and does need its own.
           npm ci --ignore-scripts
-          npm ci --ignore-scripts --prefix apps/heiwa_app/clients/cockpit
           npm ci --ignore-scripts --prefix apps/heiwa_app/desktop
       - name: Run multi-ecosystem security certification
         run: bash scripts/verify_security.sh --skip-secret-scan

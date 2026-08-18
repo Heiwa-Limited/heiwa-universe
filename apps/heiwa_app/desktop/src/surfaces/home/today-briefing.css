@@ -1,0 +1,66 @@
+/* Today briefing. Tokens only. */
+
+.today-briefing {
+  padding: var(--space-6);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-lg);
+  background: var(--surface-raised);
+}
+
+.today-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--space-4);
+  margin-bottom: var(--space-4);
+}
+
+.today-title {
+  margin: 0;
+  font-size: 0.95rem;
+  font-weight: 600;
+  color: var(--content-primary);
+}
+
+.today-unread {
+  padding: var(--space-1) var(--space-3);
+  border-radius: var(--radius-pill);
+  background: var(--accent-wash);
+  color: var(--accent);
+  font-size: 0.75rem;
+  font-weight: 600;
+}
+
+.today-events {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: grid;
+  gap: var(--space-3);
+}
+
+.today-event {
+  display: grid;
+  grid-template-columns: 5.5ch minmax(0, 1fr);
+  gap: var(--space-4);
+  align-items: baseline;
+}
+
+.today-time {
+  color: var(--content-muted);
+  font-size: 0.8rem;
+  font-variant-numeric: tabular-nums;
+}
+
+.today-event-title {
+  overflow: hidden;
+  color: var(--content-secondary);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.today-clear {
+  margin: 0;
+  color: var(--content-muted);
+  font-size: 0.9rem;
+}

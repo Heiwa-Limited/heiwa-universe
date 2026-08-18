@@ -169,9 +169,17 @@ jobs:
         include:
           - name: macos-aarch64
             runner: macos-26
-            bundles: dmg,app
+            # No .dmg. It builds fine and is the one macOS format we cannot
+            # ship: a browser download sets com.apple.quarantine and Gatekeeper
+            # blocks an unsigned app, so publishing it would put a broken
+            # artifact behind the most obvious download button on the releases
+            # page. curl and the updater set no quarantine bit; both consume
+            # the tarball below.
+            bundles: app
             artifact_glob: |
-              apps/heiwa_app/desktop/src-tauri/target/release/bundle/dmg/*.dmg
+              dist/desktop/*-app.tar.gz
+              dist/desktop/*-app.tar.gz.sig
+              dist/desktop/latest.json
           - name: windows-x86_64
             runner: windows-latest
             bundles: msi
@@ -230,7 +238,59 @@ jobs:
           fi
 
       - name: Build desktop bundle
+        env:
+          # createUpdaterArtifacts is on, so the bundler signs the update
+          # payload during this step. Without the key the build fails here
+          # rather than publishing a release nobody can update to.
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ""
         run: npm --prefix apps/heiwa_app/desktop run tauri -- build --bundles ${{ matrix.bundles }}
+
+      # A browser download sets com.apple.quarantine and Gatekeeper blocks
+      # the app; curl and the updater do not. So the shipped macOS artifact is
+      # the bundler's own signed tarball, fetched by the installer, rather
+      # than the .dmg. One artifact serves the installer and the updater.
+      - name: Collect the signed macOS app and write the update manifest
+        if: matrix.name == 'macos-aarch64'
+        shell: bash
+        env:
+          VERSION: ${{ needs.metadata.outputs.version }}
+        run: |
+          set -euo pipefail
+          bundle_dir="apps/heiwa_app/desktop/src-tauri/target/release/bundle/macos"
+          archive="${bundle_dir}/Heiwa.app.tar.gz"
+          signature="${archive}.sig"
+
+          for required in "$archive" "$signature"; do
+            test -f "$required" || {
+              echo "missing $required -- createUpdaterArtifacts did not run," \
+                "or TAURI_SIGNING_PRIVATE_KEY was not set" >&2
+              exit 1
+            }
+          done
+
+          mkdir -p dist/desktop
+          asset="heiwa-${VERSION}-macos-aarch64-app.tar.gz"
+          cp "$archive" "dist/desktop/${asset}"
+          cp "$signature" "dist/desktop/${asset}.sig"
+
+          # The manifest points at the renamed asset, so the URL has to be
+          # built from the release tag rather than copied from the bundler.
+          base="https://github.com/Heiwa-Limited/heiwa-universe/releases/download/v${VERSION}"
+          python3 -c '
+          import json, sys
+          version, url, sig_path = sys.argv[1], sys.argv[2], sys.argv[3]
+          with open(sig_path) as handle:
+              signature = handle.read().strip()
+          print(json.dumps({
+              "version": version,
+              "notes": "Heiwa " + version,
+              "platforms": {"darwin-aarch64": {"signature": signature, "url": url}},
+          }, indent=2))
+          ' "$VERSION" "$base/${asset}" "dist/desktop/${asset}.sig" \
+            > dist/desktop/latest.json
+
+          python3 -c "import json,sys; d=json.load(open('dist/desktop/latest.json')); assert d['platforms']['darwin-aarch64']['signature'], 'empty signature'; print('manifest ok:', d['version'])"
 
       - name: Upload desktop bundle
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
@@ -351,7 +411,7 @@ jobs:
 
   checksums:
     name: Generate Checksums
-    needs: [metadata, build]
+    needs: [metadata, build, desktop-bundle]
     runs-on: blacksmith-4vcpu-ubuntu-2404
     steps:
       - name: Download packaged assets
@@ -367,6 +427,13 @@ jobs:
           set -euo pipefail
           cd dist
           sha256sum heiwa-* > "heiwa-${{ needs.metadata.outputs.version }}-checksums.txt"
+          # A silently-absent app archive would ship a release whose installer
+          # has nothing to place in /Applications.
+          grep -q -- '-macos-aarch64-app\.tar\.gz$' \
+            "heiwa-${{ needs.metadata.outputs.version }}-checksums.txt" || {
+            echo "checksum manifest is missing the macOS app archive" >&2
+            exit 1
+          }
 
       - name: Upload checksum artifact
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
@@ -377,7 +444,7 @@ jobs:
 
   publish:
     name: Publish GitHub Release
-    needs: [metadata, build, checksums]
+    needs: [metadata, build, checksums, desktop-bundle]
     runs-on: blacksmith-4vcpu-ubuntu-2404
     permissions:
       attestations: write

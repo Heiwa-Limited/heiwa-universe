@@ -4,8 +4,10 @@ import { AppProvider, useApp, type AppState } from "./state/app";
 import { Composer } from "./shell/Composer";
 import { FirstRun } from "./shell/FirstRun";
 import { Rail } from "./shell/Rail";
+import { UpdateBanner } from "./shell/UpdateBanner";
 import { assertRegistryComplete, surfaceById } from "./surfaces/registry";
 import type { OnboardingState } from "./state/types";
+import type { UpdateOffer } from "./runtime";
 import "./theme/tokens.css";
 import "./theme/base.css";
 import "./shell/shell.css";
@@ -56,6 +58,13 @@ export type AppProps = {
   onboarding?: OnboardingState;
   onEstablishIdentity?: (displayName: string) => void | Promise<void>;
   onRecheckOnboarding?: () => void | Promise<void>;
+  /**
+   * A published release newer than the running shell, or undefined when there
+   * is none to offer. Undefined is also the answer outside a bundle, where
+   * there is nothing an install could replace.
+   */
+  update?: UpdateOffer;
+  onInstallUpdate?: () => void | Promise<void>;
 };
 
 export function App(props: AppProps) {
@@ -67,6 +76,16 @@ export function App(props: AppProps) {
         rather than being a place inside it, and the surfaces behind stay
         mounted so nothing reloads when the last gap closes.
       */}
+      {/*
+        Offered over the shell too, but not a gate — the user keeps working
+        and relaunches when it suits them.
+      */}
+      <Show when={props.update}>
+        <UpdateBanner
+          offer={props.update!}
+          onInstall={() => props.onInstallUpdate?.()}
+        />
+      </Show>
       <Show when={props.onboarding && !props.onboarding.complete}>
         <FirstRun
           state={props.onboarding!}
