@@ -66,6 +66,11 @@ for attempt in $(seq 1 "$attempts"); do
     echo "Edge installer differs from the repo (attempt $attempt/$attempts);" \
       "retrying in case a deploy is still propagating." >&2
   else
+    # A response we cannot compare says nothing about drift, and the drift we
+    # recorded earlier says nothing about *this* answer. Keeping it would let a
+    # final challenge or HTTP error be reported as a stale installer, with a
+    # diff of a body the edge is no longer serving.
+    drift_body=""
     echo "Public installer edge check attempt $attempt/$attempts failed (HTTP ${status:-000})." >&2
     grep -Ei '^(HTTP/|cf-ray|cf-mitigated|content-type|server):' "$headers" >&2 || true
   fi
