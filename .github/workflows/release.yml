@@ -169,9 +169,14 @@ jobs:
         include:
           - name: macos-aarch64
             runner: macos-26
-            bundles: dmg,app
+            # No .dmg. It builds fine and is the one macOS format we cannot
+            # ship: a browser download sets com.apple.quarantine and Gatekeeper
+            # blocks an unsigned app, so publishing it would put a broken
+            # artifact behind the most obvious download button on the releases
+            # page. curl and the updater set no quarantine bit; both consume
+            # the tarball below.
+            bundles: app
             artifact_glob: |
-              apps/heiwa_app/desktop/src-tauri/target/release/bundle/dmg/*.dmg
               dist/desktop/*-app.tar.gz
               dist/desktop/*-app.tar.gz.sig
               dist/desktop/latest.json
