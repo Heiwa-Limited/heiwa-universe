@@ -158,6 +158,11 @@ jobs:
           path: apps/heiwa_app/clients/cockpit/dist/
           if-no-files-found: error
 
+  # macOS only, deliberately. latest.json describes darwin-aarch64 and nothing
+  # else, and the public installer places the app on macOS alone -- a Windows
+  # or Linux bundle here would be an artifact no install path consumes and no
+  # updater manifest covers. They return when those two things exist for them.
+  # The CLI tarball in `build` below still ships for all three platforms.
   desktop-bundle:
     name: Build Desktop Bundle (${{ matrix.name }})
     needs: [metadata]
@@ -180,17 +185,7 @@ jobs:
               dist/desktop/*-app.tar.gz
               dist/desktop/*-app.tar.gz.sig
               dist/desktop/latest.json
-          - name: windows-x86_64
-            runner: windows-latest
-            bundles: msi
-            artifact_glob: |
-              apps/heiwa_app/desktop/src-tauri/target/release/bundle/msi/*.msi
-          - name: linux-x86_64
-            runner: ubuntu-latest
-            bundles: appimage,deb
-            artifact_glob: |
-              apps/heiwa_app/desktop/src-tauri/target/release/bundle/appimage/*.AppImage
-              apps/heiwa_app/desktop/src-tauri/target/release/bundle/deb/*.deb
+
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
         with:
@@ -257,7 +252,7 @@ jobs:
           VERSION: ${{ needs.metadata.outputs.version }}
         run: |
           set -euo pipefail
-          bundle_dir="apps/heiwa_app/desktop/src-tauri/target/release/bundle/macos"
+          bundle_dir="target/release/bundle/macos"
           archive="${bundle_dir}/Heiwa.app.tar.gz"
           signature="${archive}.sig"
 
