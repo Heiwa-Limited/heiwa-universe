@@ -185,6 +185,17 @@ jobs:
         run: |
           echo "ENABLE_CLOUDFLARE_DEPLOY=true but Cloudflare credentials are missing." >&2
           exit 1
+      # wrangler-action runs whatever node the runner image ships, which is
+      # currently v20 while wrangler requires >=22. Every other job that
+      # touches node pins it from .nvmrc; this one never did, so the deploy
+      # broke the moment the runner image drifted rather than when anything
+      # in this repository changed.
+      - name: Set up Node
+        if: env.ENABLE_CLOUDFLARE_DEPLOY == 'true' && env.CF_API_TOKEN != '' && env.CF_ACCOUNT_ID != ''
+        uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        with:
+          node-version-file: .nvmrc
+
       - name: Package public-only web artifact
         if: env.ENABLE_CLOUDFLARE_DEPLOY == 'true' && env.CF_API_TOKEN != '' && env.CF_ACCOUNT_ID != ''
         run: bash scripts/package_public_web.sh .artifacts/public-web
