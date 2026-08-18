@@ -87,12 +87,20 @@ jobs:
           fi
 
           # v0.1.0 shipped four hours before its own update path landed and
-          # reported "implemented": false, stranding every install. A release
-          # that cannot update itself must never ship again silently.
+          # reported "implemented": false, stranding every install. That field
+          # no longer exists -- it was the stub -- so assert the fields the
+          # working path emits, and that the binary agrees with the release it
+          # came from. A binary that misreports its version offers itself an
+          # endless update.
           update_plan="$("$RUNTIME_ROOT/bin/heiwa" app update --dry-run --json)"
           printf '%s\n' "$update_plan"
-          printf '%s' "$update_plan" | grep -q '"implemented": *true' || {
-            echo "installed runtime reports it cannot update itself" >&2
+          printf '%s' "$update_plan" | grep -q '"source_mode": *"github-release"' || {
+            echo "installed runtime has no GitHub release update path" >&2
+            exit 1
+          }
+          printf '%s' "$update_plan" \
+            | grep -q "\"current_version\": *\"${HEIWA_VERSION}\"" || {
+            echo "runtime reports a version other than $HEIWA_VERSION" >&2
             exit 1
           }
 
