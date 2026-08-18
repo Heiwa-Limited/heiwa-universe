@@ -4,6 +4,9 @@ set -euo pipefail
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 installer_url="${HEIWA_PUBLIC_INSTALLER_URL:-https://heiwa.ltd/install}"
 attempts="${HEIWA_PUBLIC_INSTALLER_ATTEMPTS:-4}"
+# Cloudflare propagation after a deploy takes longer than a network blip, so
+# the gap between attempts is tunable independently of the attempt count.
+retry_delay="${HEIWA_PUBLIC_INSTALLER_RETRY_DELAY:-2}"
 
 if [[ ! "$attempts" =~ ^[1-9][0-9]*$ ]]; then
   echo "HEIWA_PUBLIC_INSTALLER_ATTEMPTS must be a positive integer." >&2
@@ -54,20 +57,31 @@ for attempt in $(seq 1 "$attempts"); do
       exit 0
     fi
 
-    echo "Edge installer at $installer_url does not match the repo copy." >&2
-    echo "The edge is serving a stale deploy. Redeploy" \
-      "apps/heiwa_app/clients/web/install, or set" \
-      "HEIWA_ALLOW_INSTALLER_EDGE_DRIFT=1 during a deploy window." >&2
-    echo "--- diff (repo vs edge) ---" >&2
-    diff "$repo_installer" "$body" >&2 || true
-    exit 1
+    # Drift is retried, not failed on immediately. Run straight after a
+    # `wrangler pages deploy` the edge has not finished propagating, and an
+    # instant verdict reports a stale deploy that is about to correct itself
+    # -- which is exactly what happened on run 32180221136, where the deploy
+    # succeeded and this check failed the job seconds later.
+    drift_body="$body"
+    echo "Edge installer differs from the repo (attempt $attempt/$attempts);" \
+      "retrying in case a deploy is still propagating." >&2
+  else
+    echo "Public installer edge check attempt $attempt/$attempts failed (HTTP ${status:-000})." >&2
+    grep -Ei '^(HTTP/|cf-ray|cf-mitigated|content-type|server):' "$headers" >&2 || true
   fi
 
-  echo "Public installer edge check attempt $attempt/$attempts failed (HTTP ${status:-000})." >&2
-  grep -Ei '^(HTTP/|cf-ray|cf-mitigated|content-type|server):' "$headers" >&2 || true
   if [[ "$attempt" -lt "$attempts" ]]; then
-    sleep 2
+    sleep "$retry_delay"
   fi
 done
+
+if [[ -n "${drift_body:-}" ]]; then
+  echo "Edge installer at $installer_url still does not match the repo copy" \
+    "after $attempts attempts." >&2
+  echo "Redeploy apps/heiwa_app/clients/web/install, or set" \
+    "HEIWA_ALLOW_INSTALLER_EDGE_DRIFT=1 during a deploy window." >&2
+  echo "--- diff (repo vs edge) ---" >&2
+  diff "$repo_installer" "$drift_body" >&2 || true
+fi
 
 exit 1

@@ -207,6 +207,12 @@ jobs:
           accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
           wranglerVersion: 4.122.0
           command: pages deploy .artifacts/public-web --project-name=heiwa-clients --branch=main
+      # Straight after a deploy the edge may still be serving the previous
+      # copy, so this needs a real propagation window rather than the default
+      # blip-sized one. 10 x 15s = 2.5 minutes before it calls a deploy stale.
       - name: Verify non-browser installer access
         if: env.ENABLE_CLOUDFLARE_DEPLOY == 'true' && env.CF_API_TOKEN != '' && env.CF_ACCOUNT_ID != ''
+        env:
+          HEIWA_PUBLIC_INSTALLER_ATTEMPTS: "10"
+          HEIWA_PUBLIC_INSTALLER_RETRY_DELAY: "15"
         run: bash scripts/check_public_installer_edge.sh
