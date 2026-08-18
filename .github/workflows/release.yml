@@ -172,6 +172,7 @@ jobs:
             bundles: dmg,app
             artifact_glob: |
               apps/heiwa_app/desktop/src-tauri/target/release/bundle/dmg/*.dmg
+              dist/desktop/*-app.tar.gz
           - name: windows-x86_64
             runner: windows-latest
             bundles: msi
@@ -231,6 +232,29 @@ jobs:
 
       - name: Build desktop bundle
         run: npm --prefix apps/heiwa_app/desktop run tauri -- build --bundles ${{ matrix.bundles }}
+
+      # A browser download sets com.apple.quarantine and Gatekeeper blocks the
+      # app; curl and the updater do not. So the shipped macOS artifact is a
+      # tarball fetched by the installer, not the .dmg. Same archive is the
+      # Tauri updater payload, which keeps both paths on one artifact.
+      - name: Package the macOS app for the installer and updater
+        if: matrix.name == 'macos-aarch64'
+        shell: bash
+        env:
+          VERSION: ${{ needs.metadata.outputs.version }}
+        run: |
+          set -euo pipefail
+          bundle_dir="apps/heiwa_app/desktop/src-tauri/target/release/bundle/macos"
+          test -d "${bundle_dir}/Heiwa.app" || {
+            echo "expected ${bundle_dir}/Heiwa.app from --bundles dmg,app" >&2
+            exit 1
+          }
+          mkdir -p dist/desktop
+          tar -C "${bundle_dir}" -czf \
+            "dist/desktop/heiwa-${VERSION}-macos-aarch64-app.tar.gz" Heiwa.app
+          tar -tzf "dist/desktop/heiwa-${VERSION}-macos-aarch64-app.tar.gz" \
+            | grep -q '^Heiwa.app/Contents/MacOS/' \
+            || { echo "app archive is missing its executable" >&2; exit 1; }
 
       - name: Upload desktop bundle
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
@@ -351,7 +375,7 @@ jobs:
 
   checksums:
     name: Generate Checksums
-    needs: [metadata, build]
+    needs: [metadata, build, desktop-bundle]
     runs-on: blacksmith-4vcpu-ubuntu-2404
     steps:
       - name: Download packaged assets
@@ -367,6 +391,13 @@ jobs:
           set -euo pipefail
           cd dist
           sha256sum heiwa-* > "heiwa-${{ needs.metadata.outputs.version }}-checksums.txt"
+          # A silently-absent app archive would ship a release whose installer
+          # has nothing to place in /Applications.
+          grep -q -- '-macos-aarch64-app\.tar\.gz$' \
+            "heiwa-${{ needs.metadata.outputs.version }}-checksums.txt" || {
+            echo "checksum manifest is missing the macOS app archive" >&2
+            exit 1
+          }
 
       - name: Upload checksum artifact
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
@@ -377,7 +408,7 @@ jobs:
 
   publish:
     name: Publish GitHub Release
-    needs: [metadata, build, checksums]
+    needs: [metadata, build, checksums, desktop-bundle]
     runs-on: blacksmith-4vcpu-ubuntu-2404
     permissions:
       attestations: write
