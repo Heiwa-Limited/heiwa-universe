@@ -59,10 +59,50 @@ jobs:
           fi
           test -s "$installer"
 
-          HEIWA_HOME="$RUNTIME_ROOT" sh "$installer"
+          HEIWA_HOME="$RUNTIME_ROOT" sh "$installer" | tee "$RUNTIME_ROOT/install.log"
           test -x "$RUNTIME_ROOT/bin/heiwa"
           test -f "$RUNTIME_ROOT/app/cockpit-current/index.html"
           "$RUNTIME_ROOT/bin/heiwa" --version | grep -Fx "heiwa $HEIWA_VERSION"
+
+          # v0.2.0 is the first release where `curl | sh` installs an
+          # application rather than a CLI plus a web page. Asserting the
+          # binary alone would keep passing if the app silently stopped
+          # shipping.
+          # Assert on the path the installer reports rather than a guessed
+          # one: it prefers /Applications and falls back to ~/Applications
+          # only when that is not writable, and which branch a runner takes
+          # is not this test's business.
+          if [[ "$RUNNER_OS" == "macOS" ]]; then
+            bundle="$(sed -n 's/^  app: //p' "$RUNTIME_ROOT/install.log")"
+            if [[ -z "$bundle" ]]; then
+              echo "installer reported no app path; it installed a CLI, not an app" >&2
+              cat "$RUNTIME_ROOT/install.log" >&2
+              exit 1
+            fi
+            test -x "$bundle/Contents/MacOS/Heiwa" || {
+              echo "reported bundle $bundle has no executable" >&2
+              exit 1
+            }
+            echo "installed app: $bundle"
+          fi
+
+          # v0.1.0 shipped four hours before its own update path landed and
+          # reported "implemented": false, stranding every install. That field
+          # no longer exists -- it was the stub -- so assert the fields the
+          # working path emits, and that the binary agrees with the release it
+          # came from. A binary that misreports its version offers itself an
+          # endless update.
+          update_plan="$("$RUNTIME_ROOT/bin/heiwa" app update --dry-run --json)"
+          printf '%s\n' "$update_plan"
+          printf '%s' "$update_plan" | grep -q '"source_mode": *"github-release"' || {
+            echo "installed runtime has no GitHub release update path" >&2
+            exit 1
+          }
+          printf '%s' "$update_plan" \
+            | grep -q "\"current_version\": *\"${HEIWA_VERSION}\"" || {
+            echo "runtime reports a version other than $HEIWA_VERSION" >&2
+            exit 1
+          }
 
       - name: Boot installed runtime and verify cockpit
         shell: bash
