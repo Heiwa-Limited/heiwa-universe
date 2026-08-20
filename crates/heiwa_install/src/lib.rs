@@ -1,6 +1,7 @@
 use anyhow::{anyhow, Context, Result};
 use serde::{Deserialize, Serialize};
 use std::env;
+use std::error::Error;
 use std::fs;
 #[cfg(unix)]
 use std::os::unix::fs::PermissionsExt;
@@ -72,12 +73,103 @@ impl AiOpsReport {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct MachineManifest {
+    #[serde(default = "machine_schema_version")]
+    pub schema_version: String,
     pub device_id: String,
+    #[serde(default)]
+    pub display_name: String,
     pub hostname: String,
     pub os: String,
     pub arch: String,
+    #[serde(default = "full_node_class")]
+    pub device_class: String,
     pub installed_at: String,
+    #[serde(default)]
+    pub refreshed_at: String,
+    #[serde(default)]
+    pub hardware: MachineHardware,
+    #[serde(default)]
+    pub capabilities: MachineCapabilities,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub runtime: Option<MachineRuntime>,
     pub runtimes: DoctorReport,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct MachineHardware {
+    pub logical_cpu_count: u32,
+    pub memory_total_bytes: u64,
+    pub cpu_model: Option<String>,
+    pub hardware_model: Option<String>,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct MachineCapabilities {
+    pub provider_clis: Vec<String>,
+    pub local_model_runtimes: Vec<String>,
+    pub host_surfaces: Vec<String>,
+    pub display_surfaces: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct MachineRuntime {
+    pub version: String,
+    pub channel: String,
+    pub install_path: PathBuf,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MachineManifestLoadIssue {
+    ReadFailed,
+    InvalidJson,
+    UnsupportedSchema,
+    InvalidShape,
+}
+
+#[derive(Debug)]
+pub struct MachineManifestLoadError {
+    issue: MachineManifestLoadIssue,
+    detail: String,
+}
+
+impl MachineManifestLoadError {
+    fn new(issue: MachineManifestLoadIssue, detail: impl Into<String>) -> Self {
+        Self {
+            issue,
+            detail: detail.into(),
+        }
+    }
+
+    pub fn issue(&self) -> MachineManifestLoadIssue {
+        self.issue
+    }
+
+    pub fn user_message(&self) -> &'static str {
+        match self.issue {
+            MachineManifestLoadIssue::ReadFailed => "Machine identity file could not be read.",
+            MachineManifestLoadIssue::InvalidJson => "Machine identity file is corrupt.",
+            MachineManifestLoadIssue::UnsupportedSchema => {
+                "Machine identity was written by a newer or incompatible Heiwa build."
+            }
+            MachineManifestLoadIssue::InvalidShape => "Machine identity file is incomplete.",
+        }
+    }
+}
+
+impl std::fmt::Display for MachineManifestLoadError {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str(&self.detail)
+    }
+}
+
+impl Error for MachineManifestLoadError {}
+
+fn machine_schema_version() -> String {
+    "heiwa_machine_v1".to_string()
+}
+
+fn full_node_class() -> String {
+    "full_node".to_string()
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -227,21 +319,8 @@ pub fn run_install() -> Result<()> {
     write_canonical_launcher(&heiwa_dir)?;
     write_home_app_launcher(&heiwa_dir)?;
 
+    refresh_machine_manifest_at(&heiwa_dir, report.clone(), None)?;
     let manifest_path = heiwa_dir.join("machine.json");
-    let manifest = load_existing_manifest(&manifest_path).unwrap_or_else(|| MachineManifest {
-        device_id: uuid::Uuid::new_v4().to_string(),
-        hostname: get_hostname().unwrap_or_else(|| "unknown".to_string()),
-        os: env::consts::OS.to_string(),
-        arch: env::consts::ARCH.to_string(),
-        installed_at: chrono::Utc::now().to_rfc3339(),
-        runtimes: report.clone(),
-    });
-    let manifest = MachineManifest {
-        runtimes: report.clone(),
-        ..manifest
-    };
-
-    fs::write(&manifest_path, serde_json::to_string_pretty(&manifest)?)?;
     println!("Machine manifest written to {:?}", manifest_path);
 
     if report.rust_version.is_none() {
@@ -266,6 +345,134 @@ pub fn run_install() -> Result<()> {
     );
     println!("Installation check complete.");
 
+    Ok(())
+}
+
+/// Refresh local machine identity and capability truth while preserving the
+/// installation's stable device id and original install timestamp.
+pub fn refresh_machine_manifest_for_runtime(runtime: MachineRuntime) -> Result<MachineManifest> {
+    let report = check_installation()?;
+    refresh_machine_manifest_at(&get_heiwa_dir(), report, Some(runtime))
+}
+
+pub fn load_machine_manifest(
+) -> std::result::Result<Option<MachineManifest>, MachineManifestLoadError> {
+    load_existing_manifest(&get_heiwa_dir().join("machine.json"))
+}
+
+pub fn probe_machine_hardware() -> MachineHardware {
+    MachineHardware {
+        logical_cpu_count: std::thread::available_parallelism()
+            .map(|count| count.get() as u32)
+            .unwrap_or(1),
+        memory_total_bytes: total_memory_bytes().unwrap_or(0),
+        cpu_model: cpu_model(),
+        hardware_model: hardware_model(),
+    }
+}
+
+fn refresh_machine_manifest_at(
+    heiwa_dir: &Path,
+    report: DoctorReport,
+    runtime: Option<MachineRuntime>,
+) -> Result<MachineManifest> {
+    fs::create_dir_all(heiwa_dir)?;
+    let path = heiwa_dir.join("machine.json");
+    let existing = load_existing_manifest(&path).map_err(anyhow::Error::new)?;
+    let now = chrono::Utc::now().to_rfc3339();
+    let hostname = get_hostname().unwrap_or_else(|| "unknown".to_string());
+    let display_name = existing
+        .as_ref()
+        .map(|manifest| manifest.display_name.trim())
+        .filter(|name| !name.is_empty())
+        .map(str::to_string)
+        .unwrap_or_else(|| hostname.clone());
+    let manifest = MachineManifest {
+        schema_version: machine_schema_version(),
+        device_id: existing
+            .as_ref()
+            .map(|manifest| manifest.device_id.clone())
+            .filter(|id| !id.trim().is_empty())
+            .unwrap_or_else(|| uuid::Uuid::new_v4().to_string()),
+        display_name,
+        hostname,
+        os: env::consts::OS.to_string(),
+        arch: env::consts::ARCH.to_string(),
+        device_class: full_node_class(),
+        installed_at: existing
+            .as_ref()
+            .map(|manifest| manifest.installed_at.clone())
+            .filter(|timestamp| !timestamp.trim().is_empty())
+            .unwrap_or_else(|| now.clone()),
+        refreshed_at: now,
+        hardware: probe_machine_hardware(),
+        capabilities: capabilities_from_report(&report),
+        runtime: runtime.or_else(|| existing.and_then(|manifest| manifest.runtime)),
+        runtimes: report,
+    };
+    write_machine_manifest(&path, &manifest)?;
+    Ok(manifest)
+}
+
+fn capabilities_from_report(report: &DoctorReport) -> MachineCapabilities {
+    let mut provider_clis = Vec::new();
+    if report.claude_installed {
+        provider_clis.push("claude".to_string());
+    }
+    if report.codex_installed {
+        provider_clis.push("codex".to_string());
+    }
+    if report.gemini_installed {
+        provider_clis.push("gemini".to_string());
+    }
+    if report.antigravity_installed {
+        provider_clis.push("antigravity".to_string());
+    }
+    let local_model_runtimes = if report.ollama_installed {
+        vec!["ollama".to_string()]
+    } else {
+        Vec::new()
+    };
+    MachineCapabilities {
+        provider_clis,
+        local_model_runtimes,
+        host_surfaces: vec!["terminal".to_string(), "desktop".to_string()],
+        display_surfaces: vec!["desktop".to_string()],
+    }
+}
+
+fn write_machine_manifest(path: &Path, manifest: &MachineManifest) -> Result<()> {
+    let temporary = path.with_extension(format!("json.tmp-{}", uuid::Uuid::new_v4()));
+    fs::write(&temporary, serde_json::to_vec_pretty(manifest)?)?;
+    #[cfg(unix)]
+    fs::set_permissions(&temporary, fs::Permissions::from_mode(0o600))?;
+    replace_machine_manifest(&temporary, path)?;
+    Ok(())
+}
+
+#[cfg(not(target_os = "windows"))]
+fn replace_machine_manifest(temporary: &Path, path: &Path) -> Result<()> {
+    fs::rename(temporary, path)?;
+    Ok(())
+}
+
+#[cfg(target_os = "windows")]
+fn replace_machine_manifest(temporary: &Path, path: &Path) -> Result<()> {
+    // Windows rename does not replace an existing file. Keep the previous
+    // manifest recoverable until the new one occupies the canonical path.
+    let backup = path.with_extension(format!("json.previous-{}", uuid::Uuid::new_v4()));
+    if path.exists() {
+        fs::rename(path, &backup)?;
+    }
+    if let Err(error) = fs::rename(temporary, path) {
+        if backup.exists() {
+            let _ = fs::rename(&backup, path);
+        }
+        return Err(error.into());
+    }
+    if backup.exists() {
+        fs::remove_file(backup)?;
+    }
     Ok(())
 }
 
@@ -725,10 +932,42 @@ fn get_repo_root() -> PathBuf {
         })
 }
 
-fn load_existing_manifest(path: &Path) -> Option<MachineManifest> {
-    fs::read_to_string(path)
-        .ok()
-        .and_then(|raw| serde_json::from_str(&raw).ok())
+fn load_existing_manifest(
+    path: &Path,
+) -> std::result::Result<Option<MachineManifest>, MachineManifestLoadError> {
+    let raw = match fs::read_to_string(path) {
+        Ok(raw) => raw,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+        Err(error) => {
+            return Err(MachineManifestLoadError::new(
+                MachineManifestLoadIssue::ReadFailed,
+                format!("read machine manifest at {}: {error}", path.display()),
+            ))
+        }
+    };
+    let value: serde_json::Value = serde_json::from_str(&raw).map_err(|error| {
+        MachineManifestLoadError::new(
+            MachineManifestLoadIssue::InvalidJson,
+            format!("parse machine manifest at {}: {error}", path.display()),
+        )
+    })?;
+    if let Some(schema) = value
+        .get("schema_version")
+        .and_then(serde_json::Value::as_str)
+    {
+        if schema != machine_schema_version() {
+            return Err(MachineManifestLoadError::new(
+                MachineManifestLoadIssue::UnsupportedSchema,
+                format!("unsupported machine manifest schema at {}", path.display()),
+            ));
+        }
+    }
+    serde_json::from_value(value).map(Some).map_err(|error| {
+        MachineManifestLoadError::new(
+            MachineManifestLoadIssue::InvalidShape,
+            format!("decode machine manifest at {}: {error}", path.display()),
+        )
+    })
 }
 
 fn get_version(cmd: &str, args: &[&str]) -> Option<String> {
@@ -819,6 +1058,110 @@ fn get_hostname() -> Option<String> {
             None
         }
     })
+}
+
+#[cfg(target_os = "macos")]
+fn total_memory_bytes() -> Option<u64> {
+    command_stdout("/usr/sbin/sysctl", &["-n", "hw.memsize"])?
+        .parse()
+        .ok()
+}
+
+#[cfg(target_os = "linux")]
+fn total_memory_bytes() -> Option<u64> {
+    fs::read_to_string("/proc/meminfo")
+        .ok()?
+        .lines()
+        .find_map(|line| {
+            let kb = line.strip_prefix("MemTotal:")?.split_whitespace().next()?;
+            kb.parse::<u64>().ok().map(|value| value * 1024)
+        })
+}
+
+#[cfg(target_os = "windows")]
+fn total_memory_bytes() -> Option<u64> {
+    command_stdout(
+        "powershell.exe",
+        &[
+            "-NoProfile",
+            "-Command",
+            "(Get-CimInstance Win32_ComputerSystem).TotalPhysicalMemory",
+        ],
+    )?
+    .parse()
+    .ok()
+}
+
+#[cfg(not(any(target_os = "macos", target_os = "linux", target_os = "windows")))]
+fn total_memory_bytes() -> Option<u64> {
+    None
+}
+
+#[cfg(target_os = "macos")]
+fn cpu_model() -> Option<String> {
+    command_stdout("/usr/sbin/sysctl", &["-n", "machdep.cpu.brand_string"])
+}
+
+#[cfg(target_os = "linux")]
+fn cpu_model() -> Option<String> {
+    fs::read_to_string("/proc/cpuinfo")
+        .ok()?
+        .lines()
+        .find_map(|line| line.split_once("model name").map(|(_, value)| value))
+        .map(|value| value.trim_start_matches(':').trim().to_string())
+        .filter(|value| !value.is_empty())
+}
+
+#[cfg(target_os = "windows")]
+fn cpu_model() -> Option<String> {
+    env::var("PROCESSOR_IDENTIFIER")
+        .ok()
+        .filter(|value| !value.trim().is_empty())
+}
+
+#[cfg(not(any(target_os = "macos", target_os = "linux", target_os = "windows")))]
+fn cpu_model() -> Option<String> {
+    None
+}
+
+#[cfg(target_os = "macos")]
+fn hardware_model() -> Option<String> {
+    command_stdout("/usr/sbin/sysctl", &["-n", "hw.model"])
+}
+
+#[cfg(target_os = "linux")]
+fn hardware_model() -> Option<String> {
+    fs::read_to_string("/sys/devices/virtual/dmi/id/product_name")
+        .ok()
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty())
+}
+
+#[cfg(target_os = "windows")]
+fn hardware_model() -> Option<String> {
+    command_stdout(
+        "powershell.exe",
+        &[
+            "-NoProfile",
+            "-Command",
+            "(Get-CimInstance Win32_ComputerSystem).Model",
+        ],
+    )
+}
+
+#[cfg(not(any(target_os = "macos", target_os = "linux", target_os = "windows")))]
+fn hardware_model() -> Option<String> {
+    None
+}
+
+#[cfg(any(target_os = "macos", target_os = "windows"))]
+fn command_stdout(command: &str, args: &[&str]) -> Option<String> {
+    let output = Command::new(command).args(args).output().ok()?;
+    if !output.status.success() {
+        return None;
+    }
+    let value = String::from_utf8_lossy(&output.stdout).trim().to_string();
+    (!value.is_empty()).then_some(value)
 }
 
 #[cfg(test)]

@@ -11,6 +11,84 @@
   letter-spacing: -0.02em;
 }
 
+.machine-perspective {
+  display: grid;
+  gap: var(--space-5);
+  padding: var(--space-6);
+  background:
+    linear-gradient(135deg, var(--accent-wash), transparent 58%),
+    var(--surface-raised);
+}
+
+.machine-perspective-header,
+.machine-scope {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--space-5);
+}
+
+.machine-perspective-header h2 {
+  margin-top: var(--space-1);
+  font-size: var(--text-xl);
+}
+
+.machine-perspective-header p,
+.machine-scope span,
+.machine-boundary {
+  color: var(--content-secondary);
+  font-size: var(--text-sm);
+}
+
+.machine-facts {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2) var(--space-5);
+  font-size: var(--text-sm);
+}
+
+.machine-facts span {
+  color: var(--content-secondary);
+}
+
+.machine-recognition-error {
+  display: grid;
+  gap: var(--space-1);
+  padding: var(--space-3) var(--space-4);
+  border: 1px solid var(--accent-ring);
+  border-radius: var(--radius-md);
+  background: var(--accent-wash);
+}
+
+.machine-recognition-error span {
+  color: var(--content-secondary);
+  font-size: var(--text-sm);
+}
+
+.machine-scope {
+  padding-top: var(--space-4);
+  border-top: 1px solid var(--border-subtle);
+}
+
+.machine-scope > div {
+  display: grid;
+  gap: var(--space-1);
+}
+
+.machine-perspective-loading {
+  display: grid;
+  gap: var(--space-2);
+}
+
+@media (max-width: 640px) {
+  .machine-perspective-header,
+  .machine-scope {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+}
+
 .pinned-pane-board {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));

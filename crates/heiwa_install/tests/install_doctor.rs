@@ -1,6 +1,6 @@
 use heiwa_install::{
-    check_ai_ops_at, check_installation, get_heiwa_dir, parse_plugin_source, plan_plugin_install,
-    run_install,
+    check_ai_ops_at, check_installation, get_heiwa_dir, load_machine_manifest, parse_plugin_source,
+    plan_plugin_install, run_install, MachineManifestLoadIssue,
 };
 use std::env;
 use std::fs;
@@ -116,6 +116,30 @@ fn test_install_creates_runtime_layout_and_canonical_launcher() {
             runtime_root.join("machine.json").exists(),
             "machine manifest should exist"
         );
+        let manifest: serde_json::Value = serde_json::from_slice(
+            &fs::read(runtime_root.join("machine.json")).expect("read machine manifest"),
+        )
+        .expect("machine manifest JSON");
+        assert_eq!(manifest["schema_version"], "heiwa_machine_v1");
+        assert_eq!(manifest["device_class"], "full_node");
+        assert!(
+            manifest["hardware"]["logical_cpu_count"]
+                .as_u64()
+                .is_some_and(|count| count > 0),
+            "machine manifest should recognize host CPU resources: {manifest}"
+        );
+        assert!(
+            manifest["hardware"]["memory_total_bytes"]
+                .as_u64()
+                .is_some_and(|bytes| bytes > 0),
+            "machine manifest should recognize host memory resources: {manifest}"
+        );
+        assert!(
+            manifest["capabilities"]["host_surfaces"]
+                .as_array()
+                .is_some_and(|surfaces| surfaces.iter().any(|surface| surface == "terminal")),
+            "full node should advertise terminal host surface: {manifest}"
+        );
 
         for dirname in [
             "app", "bin", "logs", "sessions", "cache", "state", "secrets", "plugins",
@@ -176,6 +200,138 @@ fn test_install_creates_runtime_layout_and_canonical_launcher() {
         assert!(
             bin_app.exists(),
             "expected CLI shim at ~/.heiwa/bin/heiwa-app"
+        );
+    });
+}
+
+#[test]
+fn test_install_upgrades_legacy_manifest_without_rotating_device_identity() {
+    with_temp_home(|home| {
+        let runtime_root = home.join(".heiwa");
+        fs::create_dir_all(&runtime_root).expect("create runtime root");
+        fs::write(
+            runtime_root.join("machine.json"),
+            serde_json::to_vec_pretty(&serde_json::json!({
+                "device_id": "stable-device-id",
+                "hostname": "old-hostname",
+                "os": "macos",
+                "arch": "aarch64",
+                "installed_at": "2026-04-05T05:17:37Z",
+                "runtimes": {
+                    "rust_version": null,
+                    "node_version": null,
+                    "python_version": null,
+                    "claude_installed": false,
+                    "codex_installed": false,
+                    "gemini_installed": false,
+                    "antigravity_installed": false,
+                    "ollama_installed": false
+                }
+            }))
+            .expect("legacy manifest JSON"),
+        )
+        .expect("write legacy manifest");
+
+        run_install().expect("legacy manifest refresh should succeed");
+
+        let manifest: serde_json::Value = serde_json::from_slice(
+            &fs::read(runtime_root.join("machine.json")).expect("read refreshed manifest"),
+        )
+        .expect("refreshed manifest JSON");
+        assert_eq!(manifest["device_id"], "stable-device-id");
+        assert_eq!(manifest["installed_at"], "2026-04-05T05:17:37Z");
+        assert_eq!(manifest["schema_version"], "heiwa_machine_v1");
+        assert!(manifest["refreshed_at"].as_str().is_some());
+        assert!(manifest["hardware"].is_object());
+    });
+}
+
+#[test]
+fn test_install_refuses_future_machine_manifest_without_rotating_identity() {
+    with_temp_home(|home| {
+        let runtime_root = home.join(".heiwa");
+        fs::create_dir_all(&runtime_root).expect("create runtime root");
+        let future = serde_json::json!({
+            "schema_version": "heiwa_machine_v2",
+            "device_id": "future-device-id",
+            "display_name": "future-node",
+            "hostname": "future-node",
+            "os": "macos",
+            "arch": "aarch64",
+            "device_class": "full_node",
+            "installed_at": "2026-08-20T00:00:00Z",
+            "refreshed_at": "2026-08-20T00:00:00Z",
+            "hardware": {},
+            "capabilities": {},
+            "runtimes": {
+                "rust_version": null,
+                "node_version": null,
+                "python_version": null,
+                "claude_installed": false,
+                "codex_installed": false,
+                "gemini_installed": false,
+                "antigravity_installed": false,
+                "ollama_installed": false
+            }
+        });
+        let path = runtime_root.join("machine.json");
+        fs::write(
+            &path,
+            serde_json::to_vec_pretty(&future).expect("future manifest JSON"),
+        )
+        .expect("write future manifest");
+
+        let error = run_install().expect_err("future machine schema must fail closed");
+
+        assert!(error
+            .to_string()
+            .contains("unsupported machine manifest schema"));
+        let unchanged: serde_json::Value =
+            serde_json::from_slice(&fs::read(path).expect("future manifest should remain present"))
+                .expect("future manifest should remain unchanged JSON");
+        assert_eq!(unchanged["schema_version"], "heiwa_machine_v2");
+        assert_eq!(unchanged["device_id"], "future-device-id");
+    });
+}
+
+#[test]
+fn test_read_reports_future_machine_manifest_instead_of_treating_it_as_missing() {
+    with_temp_home(|home| {
+        let runtime_root = home.join(".heiwa");
+        fs::create_dir_all(&runtime_root).expect("create runtime root");
+        fs::write(
+            runtime_root.join("machine.json"),
+            r#"{"schema_version":"heiwa_machine_v2"}"#,
+        )
+        .expect("write future manifest");
+
+        let error = load_machine_manifest().expect_err("future schema must be visible to readers");
+
+        assert_eq!(error.issue(), MachineManifestLoadIssue::UnsupportedSchema);
+    });
+}
+
+#[test]
+fn test_read_reports_corrupt_machine_manifest_instead_of_treating_it_as_missing() {
+    with_temp_home(|home| {
+        let runtime_root = home.join(".heiwa");
+        fs::create_dir_all(&runtime_root).expect("create runtime root");
+        fs::write(runtime_root.join("machine.json"), "{not-json").expect("write corrupt manifest");
+
+        let error = load_machine_manifest().expect_err("corruption must be visible to readers");
+
+        assert_eq!(error.issue(), MachineManifestLoadIssue::InvalidJson);
+    });
+}
+
+#[test]
+fn test_read_keeps_missing_machine_manifest_distinct_from_invalid() {
+    with_temp_home(|_| {
+        assert!(
+            load_machine_manifest()
+                .expect("missing manifest is not a read failure")
+                .is_none(),
+            "missing manifest should remain an explicit empty state"
         );
     });
 }

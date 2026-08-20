@@ -44,6 +44,8 @@ heiwa_mcp = { path = "../../crates/heiwa_mcp" }
 heiwa-tui = { path = "../../crates/heiwa_tui" }
 heiwa_drex = { path = "../../crates/heiwa_drex" }
 heiwa_automations = { path = "../../crates/heiwa_automations" }
+heiwa_oauth = { path = "../../crates/heiwa_oauth" }
+heiwa_vault = { path = "../../crates/heiwa_vault" }
 uuid = { version = "1.0", features = ["v4"] }
 hostname = "0.4"
 libc = "0.2"

@@ -45,16 +45,36 @@ impl LoopbackListener {
         timeout: Duration,
     ) -> Result<String, OAuthError> {
         self.listener
-            .set_nonblocking(false)
+            .set_nonblocking(true)
             .map_err(OAuthError::Listener)?;
 
         let deadline = std::time::Instant::now() + timeout;
-        let (mut stream, _) = self.listener.accept().map_err(OAuthError::Listener)?;
-        if std::time::Instant::now() > deadline {
+        let (mut stream, _) = loop {
+            match self.listener.accept() {
+                Ok(connection) => break connection,
+                Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
+                    let now = std::time::Instant::now();
+                    if now >= deadline {
+                        return Err(OAuthError::CallbackTimeout);
+                    }
+                    std::thread::sleep(
+                        deadline
+                            .saturating_duration_since(now)
+                            .min(Duration::from_millis(5)),
+                    );
+                }
+                Err(error) => return Err(OAuthError::Listener(error)),
+            }
+        };
+        stream
+            .set_nonblocking(false)
+            .map_err(OAuthError::Listener)?;
+        let remaining = deadline.saturating_duration_since(std::time::Instant::now());
+        if remaining.is_zero() {
             return Err(OAuthError::CallbackTimeout);
         }
         stream
-            .set_read_timeout(Some(timeout))
+            .set_read_timeout(Some(remaining))
             .map_err(OAuthError::Listener)?;
 
         let target = read_request_target(&mut stream)?;
@@ -185,5 +205,31 @@ mod tests {
             extract_code("/?error=access_denied", "xyz"),
             Err(OAuthError::AuthorizationDenied { .. })
         ));
+    }
+
+    #[test]
+    fn callback_timeout_does_not_wait_for_a_late_connection() {
+        let listener = LoopbackListener::bind().unwrap();
+        let address = listener
+            .redirect_uri()
+            .trim_start_matches("http://")
+            .to_string();
+        let late = std::thread::spawn(move || {
+            std::thread::sleep(Duration::from_millis(150));
+            let _ = TcpStream::connect(address);
+        });
+        let started = std::time::Instant::now();
+
+        let error = listener
+            .wait_for_code("expected", Duration::from_millis(20))
+            .expect_err("listener must honor its deadline");
+
+        assert!(matches!(error, OAuthError::CallbackTimeout));
+        assert!(
+            started.elapsed() < Duration::from_millis(100),
+            "timeout waited for a late connection: {:?}",
+            started.elapsed()
+        );
+        late.join().unwrap();
     }
 }

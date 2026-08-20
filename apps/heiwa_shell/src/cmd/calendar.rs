@@ -39,7 +39,7 @@ fn google_sync_tokens_path() -> PathBuf {
     calendar_state_dir().join("google_sync_tokens.json")
 }
 
-pub fn run(args: &[String]) -> Result<()> {
+pub async fn run(args: &[String]) -> Result<()> {
     match args.first().map(String::as_str) {
         Some("status") | None => {
             let payload = summary_payload();
@@ -50,7 +50,7 @@ pub fn run(args: &[String]) -> Result<()> {
             }
             Ok(())
         }
-        Some("sync") => sync(&args[1..]),
+        Some("sync") => sync(&args[1..]).await,
         Some("hold") => hold(&args[1..]),
         Some("--help") | Some("-h") => {
             print_help();
@@ -122,7 +122,7 @@ fn hold(args: &[String]) -> Result<()> {
     }
 }
 
-fn sync(args: &[String]) -> Result<()> {
+async fn sync(args: &[String]) -> Result<()> {
     let source = flag_value(args, "--source")
         .unwrap_or_else(|| "all".to_string())
         .replace('-', "_")
@@ -182,8 +182,8 @@ fn sync(args: &[String]) -> Result<()> {
     }
 
     if source == "all" || source == "google" || source == "google_calendar" {
-        if crate::cmd::connectors::connector_token_path("google_calendar").exists() {
-            match sync_google_calendar(limit.saturating_sub(fetched.len()).max(1), days) {
+        if crate::cmd::connectors::google_lane_status("google_calendar") == "connected" {
+            match sync_google_calendar(limit.saturating_sub(fetched.len()).max(1), days).await {
                 Ok((rows, reports)) => {
                     fetched.extend(rows);
                     source_reports.extend(reports);
@@ -236,7 +236,7 @@ fn sync(args: &[String]) -> Result<()> {
 fn calendar_sync_dry_run_payload(source: &str, limit: usize, days: i64) -> Value {
     let apple_selected = source == "all" || source == "apple" || source == "apple_calendar";
     let google_selected = source == "all" || source == "google" || source == "google_calendar";
-    let google_token = crate::cmd::connectors::connector_token_path("google_calendar").exists();
+    let google_token = crate::cmd::connectors::google_lane_status("google_calendar") == "connected";
     json!({
         "command": "calendar sync",
         "dry_run": true,
@@ -336,11 +336,12 @@ fn scan_apple_calendar(limit: usize, days: i64) -> Result<Vec<Value>> {
         .collect())
 }
 
-fn sync_google_calendar(limit: usize, days: i64) -> Result<(Vec<Value>, Vec<Value>)> {
-    let mut access_token = google_calendar_access_token()?;
+async fn sync_google_calendar(limit: usize, days: i64) -> Result<(Vec<Value>, Vec<Value>)> {
+    let mut access_token =
+        crate::cmd::connectors::connector_access_token("google_calendar").await?;
     let base = google_calendar_api_base();
     let list_url = format!("{base}/users/me/calendarList?maxResults=50");
-    let listing = google_calendar_get_retry(&list_url, &mut access_token)?;
+    let listing = google_calendar_get_retry(&list_url, &mut access_token).await?;
     if let Some(error) = listing.get("error") {
         return Err(anyhow!("google calendar list failed: {error}"));
     }
@@ -371,7 +372,9 @@ fn sync_google_calendar(limit: usize, days: i64) -> Result<(Vec<Value>, Vec<Valu
             calendar_name,
             limit - rows.len(),
             days,
-        ) {
+        )
+        .await
+        {
             Ok((mut events, report)) => {
                 rows.append(&mut events);
                 reports.push(report);
@@ -385,7 +388,7 @@ fn sync_google_calendar(limit: usize, days: i64) -> Result<(Vec<Value>, Vec<Valu
     Ok((rows, reports))
 }
 
-fn google_events_for_calendar(
+async fn google_events_for_calendar(
     base: &str,
     access_token: &mut String,
     calendar_id: &str,
@@ -407,14 +410,14 @@ fn google_events_for_calendar(
         google_full_events_url(base, &encoded_id, limit, days)
     };
 
-    let mut payload = google_calendar_get_retry(&url, access_token)?;
+    let mut payload = google_calendar_get_retry(&url, access_token).await?;
     if google_error_code(&payload) == Some(410) && sync_token.is_some() {
         clear_google_sync_token(calendar_id)?;
         remove_google_calendar_events(calendar_id)?;
         used_410_recovery = true;
         mode = "full_after_410";
         url = google_full_events_url(base, &encoded_id, limit, days);
-        payload = google_calendar_get_retry(&url, access_token)?;
+        payload = google_calendar_get_retry(&url, access_token).await?;
     }
     if let Some(error) = payload.get("error") {
         return Err(anyhow!("google calendar events failed: {error}"));
@@ -505,10 +508,11 @@ fn google_calendar_api_base() -> String {
         .unwrap_or_else(|_| GOOGLE_CALENDAR_API_BASE.to_string())
 }
 
-fn google_calendar_get_retry(url: &str, access_token: &mut String) -> Result<Value> {
+async fn google_calendar_get_retry(url: &str, access_token: &mut String) -> Result<Value> {
     let first = google_calendar_get(url, access_token)?;
     if google_error_code(&first) == Some(401) {
-        *access_token = refresh_google_calendar_access_token()?;
+        *access_token =
+            crate::cmd::connectors::force_refresh_connector_access_token("google_calendar").await?;
         return google_calendar_get(url, access_token);
     }
     Ok(first)
@@ -539,49 +543,6 @@ fn google_error_code(payload: &Value) -> Option<i64> {
         .get("error")
         .and_then(|error| error.get("code"))
         .and_then(Value::as_i64)
-}
-
-fn google_calendar_access_token() -> Result<String> {
-    let path = crate::cmd::connectors::connector_token_path("google_calendar");
-    let raw = fs::read_to_string(&path).map_err(|_| {
-        anyhow!("no google_calendar token; run: heiwa connect google-calendar --authorize")
-    })?;
-    let stored: Value = serde_json::from_str(&raw)?;
-    stored
-        .get("token")
-        .and_then(|token| token.get("access_token"))
-        .and_then(Value::as_str)
-        .map(str::to_string)
-        .ok_or_else(|| anyhow!("google_calendar token file missing access_token"))
-}
-
-fn refresh_google_calendar_access_token() -> Result<String> {
-    let path = crate::cmd::connectors::connector_token_path("google_calendar");
-    let raw = fs::read_to_string(&path)?;
-    let mut stored: Value = serde_json::from_str(&raw)?;
-    let refresh_token = stored
-        .get("token")
-        .and_then(|token| token.get("refresh_token"))
-        .and_then(Value::as_str)
-        .map(str::to_string)
-        .ok_or_else(|| anyhow!("google_calendar token has no refresh_token; re-run: heiwa connect google-calendar --authorize"))?;
-
-    let refreshed_raw = crate::cmd::connectors::refresh_google_token(&refresh_token)?;
-    let refreshed: Value = serde_json::from_str(&refreshed_raw)?;
-    let access_token = refreshed
-        .get("access_token")
-        .and_then(Value::as_str)
-        .map(str::to_string)
-        .ok_or_else(|| anyhow!("token refresh failed: {refreshed_raw}"))?;
-
-    if let Some(token) = stored.get_mut("token") {
-        if let Some(obj) = token.as_object_mut() {
-            obj.insert("access_token".to_string(), json!(access_token));
-            obj.insert("rotated_at".to_string(), json!(Utc::now().to_rfc3339()));
-        }
-    }
-    crate::cmd::connectors::store_connector_token("google_calendar", &stored)?;
-    Ok(access_token)
 }
 
 fn google_sync_token_for(calendar_id: &str) -> Option<String> {

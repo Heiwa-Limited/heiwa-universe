@@ -9,36 +9,42 @@
 //! - `planned`     — direction is committed, no working bridge yet
 
 use anyhow::{anyhow, Context, Result};
-use base64::Engine;
+use heiwa_oauth::{
+    build_authorization_request, exchange_code, merge_refreshed, refresh, to_secret,
+    LoopbackListener, ProviderConfig,
+};
+use heiwa_vault::{OAuthSecret, Vault, VaultError};
 use serde_json::{json, Value};
-use sha2::{Digest, Sha256};
 use std::fs;
 use std::io::Write as _;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::Command;
+use std::time::Duration;
 
-const GOOGLE_AUTH_URL: &str = "https://accounts.google.com/o/oauth2/v2/auth";
-const GOOGLE_TOKEN_URL: &str = "https://oauth2.googleapis.com/token";
+const CONNECTOR_OAUTH_SERVICE: &str = "heiwa-connector-oauth";
+const GOOGLE_CLIENT_SCHEMA: &str = "heiwa_google_oauth_client_v1";
 
 /// Read-first scopes: syncs become read models before any external write lane.
 fn google_scopes(connector: &str) -> Option<&'static str> {
     match connector {
         "google_calendar" => Some("https://www.googleapis.com/auth/calendar.readonly"),
-        "gmail" => Some("https://www.googleapis.com/auth/gmail.readonly"),
+        "gmail" => Some("https://www.googleapis.com/auth/gmail.send"),
         _ => None,
     }
 }
 
-pub fn secrets_dir() -> PathBuf {
-    crate::home::heiwa_runtime_dir().join("secrets")
+fn client_config_path() -> PathBuf {
+    crate::home::heiwa_state_dir()
+        .join("connectors")
+        .join("google_oauth_client.json")
 }
 
-fn client_secret_path() -> PathBuf {
-    secrets_dir().join("google_oauth_client.json")
+fn connector_account_id(connector: &str) -> String {
+    format!("google:{connector}:default")
 }
 
-fn token_path(connector: &str) -> PathBuf {
-    secrets_dir().join(format!("{connector}_token.json"))
+fn connector_vault() -> Vault {
+    Vault::new(CONNECTOR_OAUTH_SERVICE)
 }
 
 pub async fn run(args: &[String]) -> Result<()> {
@@ -70,7 +76,7 @@ fn status(args: &[String]) {
             println!("  {id:<18} {status:<12} ({kind})");
         }
     }
-    println!("  next: heiwa connect google-calendar --client-secret <path>");
+    println!("  next: heiwa connect google-calendar --client-secret <downloaded-desktop-app.json>");
 }
 
 async fn connect(connector: &str, args: &[String]) -> Result<()> {
@@ -102,243 +108,203 @@ async fn google_connect(connector: &str, args: &[String]) -> Result<()> {
         return stage_client_secret(&path);
     }
     if has_flag(args, "--authorize") {
+        if connector == "gmail" {
+            return Err(anyhow!(
+                "Gmail send authorization stays disabled until the approval-backed send executor exists"
+            ));
+        }
         return google_authorize(connector).await;
     }
-    let staged = client_secret_path().exists();
-    let token = token_path(connector).exists();
+    if has_flag(args, "--disconnect") {
+        connector_vault()
+            .delete(&connector_account_id(connector))
+            .or_else(|error| match error {
+                VaultError::NotFound { .. } => Ok(()),
+                other => Err(other),
+            })?;
+        println!("{connector}: disconnected; local read models were preserved");
+        return Ok(());
+    }
+    let client = google_client_probe();
+    let lane_status = google_lane_status(connector);
     println!("{connector}");
     println!(
-        "  client_secret: {}",
-        if staged { "staged" } else { "missing" }
+        "  client_id: {}",
+        match client {
+            ConnectorClientProbe::Configured => "staged",
+            ConnectorClientProbe::Missing => "missing",
+            ConnectorClientProbe::Invalid => "invalid",
+        }
     );
-    println!("  token: {}", if token { "present" } else { "absent" });
-    if !staged {
+    println!("  credential: {lane_status}");
+    if client != ConnectorClientProbe::Configured {
         println!(
             "  next: heiwa connect {connector} --client-secret <downloaded-client-secret.json>"
         );
-    } else if !token {
+    } else if lane_status == "staged" {
         println!("  next: heiwa connect {connector} --authorize");
-    } else {
+    } else if lane_status == "connected" {
         println!("  next: connected; read-model sync can use this token");
     }
     Ok(())
 }
 
-/// Copy a Google OAuth client secret into ~/.heiwa/secrets with 0600 perms.
+/// Extract the public client id from Google's downloaded desktop-app JSON.
+/// The bundled client secret is not a secret for native apps and is neither
+/// needed by PKCE nor persisted by Heiwa.
 fn stage_client_secret(source: &str) -> Result<()> {
-    let raw = fs::read_to_string(source)
-        .with_context(|| format!("cannot read client secret file: {source}"))?;
-    let parsed: Value = serde_json::from_str(&raw).context("client secret is not valid JSON")?;
-    let creds = parsed
-        .get("installed")
-        .or_else(|| parsed.get("web"))
-        .ok_or_else(|| anyhow!("client secret JSON missing 'installed' or 'web' key"))?;
-    if creds.get("client_id").and_then(Value::as_str).is_none() {
-        return Err(anyhow!("client secret JSON missing client_id"));
-    }
-
-    let dir = secrets_dir();
-    fs::create_dir_all(&dir)?;
-    let dest = client_secret_path();
-    write_secret_file(&dest, raw.as_bytes())?;
-    println!("staged: {}", dest.display());
+    let destination = client_config_path();
+    stage_client_config_at(Path::new(source), &destination)?;
+    println!("staged: {}", destination.display());
     println!("next: heiwa connect google-calendar --authorize");
     Ok(())
 }
 
-/// Read the staged Google OAuth client credentials (client_id, client_secret).
-/// Shared by the consent flow and token refresh in the mail/calendar scanners.
-pub(crate) fn google_client_credentials() -> Result<(String, String)> {
-    let raw = fs::read_to_string(client_secret_path()).context(
-        "no staged client secret; run: heiwa connect google-calendar --client-secret <path>",
-    )?;
-    let parsed: Value = serde_json::from_str(&raw)?;
+fn stage_client_config_at(source: &Path, destination: &Path) -> Result<()> {
+    let raw = fs::read_to_string(source)
+        .with_context(|| format!("cannot read client config file: {}", source.display()))?;
+    let parsed: Value = serde_json::from_str(&raw).context("client secret is not valid JSON")?;
     let creds = parsed
         .get("installed")
-        .or_else(|| parsed.get("web"))
-        .ok_or_else(|| anyhow!("client secret JSON missing 'installed' or 'web' key"))?;
+        .ok_or_else(|| anyhow!("Google OAuth client must be created as a Desktop app"))?;
     let client_id = creds
         .get("client_id")
         .and_then(Value::as_str)
-        .ok_or_else(|| anyhow!("missing client_id"))?
-        .to_string();
-    let client_secret = creds
-        .get("client_secret")
-        .and_then(Value::as_str)
-        .unwrap_or_default()
-        .to_string();
-    Ok((client_id, client_secret))
-}
-
-/// POST a refresh_token grant via curl; returns the raw token-endpoint JSON.
-pub(crate) fn refresh_google_token(refresh_token: &str) -> Result<String> {
-    let (client_id, client_secret) = google_client_credentials()?;
-    let token_url =
-        std::env::var("HEIWA_GOOGLE_TOKEN_URL").unwrap_or_else(|_| GOOGLE_TOKEN_URL.to_string());
-    let mut cmd = Command::new("curl");
-    cmd.arg("-s")
-        .arg("-X")
-        .arg("POST")
-        .arg(token_url)
-        .arg("--data-urlencode")
-        .arg(format!("client_id={client_id}"))
-        .arg("--data-urlencode")
-        .arg("grant_type=refresh_token")
-        .arg("--data-urlencode")
-        .arg(format!("refresh_token={refresh_token}"));
-    if !client_secret.is_empty() {
-        cmd.arg("--data-urlencode")
-            .arg(format!("client_secret={client_secret}"));
-    }
-    let output = cmd
-        .output()
-        .context("failed to run curl for token refresh")?;
-    if !output.status.success() {
-        return Err(anyhow!(
-            "curl token refresh failed: {}",
-            String::from_utf8_lossy(&output.stderr)
-        ));
-    }
-    Ok(String::from_utf8_lossy(&output.stdout).to_string())
-}
-
-/// Path of a connector's stored token file (shared with scanners).
-pub(crate) fn connector_token_path(connector: &str) -> PathBuf {
-    token_path(connector)
-}
-
-/// Persist an updated token payload for a connector with owner-only perms.
-pub(crate) fn store_connector_token(connector: &str, payload: &Value) -> Result<()> {
-    write_secret_file(&token_path(connector), payload.to_string().as_bytes())
-}
-
-/// Run the loopback PKCE consent flow: open browser, catch the redirect on
-/// 127.0.0.1, exchange the code via curl, store the token read-only for owner.
-async fn google_authorize(connector: &str) -> Result<()> {
-    let scope = google_scopes(connector)
-        .ok_or_else(|| anyhow!("no Google scope mapped for connector {connector}"))?;
-    let (client_id, client_secret) = google_client_credentials()?;
-
-    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await?;
-    let port = listener.local_addr()?.port();
-    let redirect_uri = format!("http://127.0.0.1:{port}/oauth/callback");
-
-    let (verifier, challenge) = pkce_pair();
-    let consent_url = format!(
-        "{GOOGLE_AUTH_URL}?response_type=code&client_id={}&redirect_uri={}&scope={}&code_challenge={}&code_challenge_method=S256&access_type=offline&prompt=consent",
-        url_encode(&client_id),
-        url_encode(&redirect_uri),
-        url_encode(scope),
-        challenge,
-    );
-
-    println!("consent URL:");
-    println!("  {consent_url}");
-    let _ = Command::new("open").arg(&consent_url).status();
-    println!("waiting for Google redirect on {redirect_uri} …");
-
-    let code = wait_for_oauth_code(listener).await?;
-    let token_json =
-        exchange_code_via_curl(&code, &client_id, &client_secret, &redirect_uri, &verifier)?;
-
-    let token_value: Value =
-        serde_json::from_str(&token_json).context("token endpoint returned non-JSON")?;
-    if token_value
-        .get("access_token")
-        .and_then(Value::as_str)
-        .is_none()
-    {
-        return Err(anyhow!("token exchange failed: {token_json}"));
-    }
-
-    let dest = token_path(connector);
-    let stored = json!({
-        "connector": connector,
-        "scope": scope,
-        "obtained_at": chrono::Utc::now().to_rfc3339(),
-        "token": token_value,
+        .filter(|value| !value.trim().is_empty())
+        .ok_or_else(|| anyhow!("client secret JSON missing client_id"))?;
+    let bounded = json!({
+        "schema_version": GOOGLE_CLIENT_SCHEMA,
+        "client_id": client_id,
     });
-    write_secret_file(&dest, stored.to_string().as_bytes())?;
-    println!("token stored: {}", dest.display());
+    write_secret_file(
+        destination,
+        serde_json::to_string_pretty(&bounded)?.as_bytes(),
+    )?;
     Ok(())
 }
 
-async fn wait_for_oauth_code(listener: tokio::net::TcpListener) -> Result<String> {
-    use tokio::io::{AsyncReadExt, AsyncWriteExt};
-    let (mut stream, _) = listener.accept().await?;
-    let mut buf = vec![0u8; 8192];
-    let n = stream.read(&mut buf).await?;
-    let request = String::from_utf8_lossy(&buf[..n]).to_string();
-    let code = request
-        .lines()
-        .next()
-        .and_then(|line| line.split_whitespace().nth(1))
-        .and_then(|path| path.split("code=").nth(1))
-        .map(|rest| rest.split('&').next().unwrap_or(rest).to_string())
-        .filter(|code| !code.is_empty())
-        .ok_or_else(|| anyhow!("no authorization code in redirect"))?;
-    let body = "<html><body><p>Heiwa received the authorization. You can close this tab.</p></body></html>";
-    let response = format!(
-        "HTTP/1.1 200 OK\r\nContent-Type: text/html\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
-        body.len()
-    );
-    let _ = stream.write_all(response.as_bytes()).await;
-    Ok(code)
+fn google_client_id() -> Result<String> {
+    if let Ok(client_id) = std::env::var("HEIWA_GOOGLE_OAUTH_CLIENT_ID") {
+        if !client_id.trim().is_empty() {
+            return Ok(client_id);
+        }
+    }
+    let raw = fs::read_to_string(client_config_path()).context(
+        "no staged client secret; run: heiwa connect google-calendar --client-secret <path>",
+    )?;
+    let parsed: Value =
+        serde_json::from_str(&raw).context("Google OAuth client config is corrupt")?;
+    if parsed.get("schema_version").and_then(Value::as_str) != Some(GOOGLE_CLIENT_SCHEMA) {
+        return Err(anyhow!("unsupported Google OAuth client config schema"));
+    }
+    parsed
+        .get("client_id")
+        .and_then(Value::as_str)
+        .filter(|value| !value.trim().is_empty())
+        .map(str::to_string)
+        .ok_or_else(|| anyhow!("Google OAuth client config is missing client_id"))
 }
 
-fn exchange_code_via_curl(
-    code: &str,
-    client_id: &str,
-    client_secret: &str,
-    redirect_uri: &str,
-    verifier: &str,
+fn google_provider_config(connector: &str) -> Result<ProviderConfig> {
+    let scope = google_scopes(connector)
+        .ok_or_else(|| anyhow!("no Google scope mapped for connector {connector}"))?;
+    let mut config = ProviderConfig::google(google_client_id()?, vec![scope.to_string()]);
+    if let Ok(endpoint) = std::env::var("HEIWA_GOOGLE_AUTH_URL") {
+        if !endpoint.trim().is_empty() {
+            config.auth_endpoint = endpoint;
+        }
+    }
+    if let Ok(endpoint) = std::env::var("HEIWA_GOOGLE_TOKEN_URL") {
+        if !endpoint.trim().is_empty() {
+            config.token_endpoint = endpoint;
+        }
+    }
+    Ok(config)
+}
+
+fn load_connector_oauth(connector: &str) -> std::result::Result<OAuthSecret, VaultError> {
+    connector_vault().load_oauth(&connector_account_id(connector))
+}
+
+fn store_connector_oauth(connector: &str, secret: &OAuthSecret) -> Result<()> {
+    connector_vault()
+        .store_oauth(&connector_account_id(connector), secret)
+        .context("store connector OAuth token in OS credential vault")
+}
+
+pub(crate) async fn connector_access_token(connector: &str) -> Result<String> {
+    let secret = load_connector_oauth(connector)
+        .with_context(|| format!("no usable {connector} credential in OS credential vault"))?;
+    if heiwa_provider::needs_refresh(&secret, unix_now(), 120) {
+        return refresh_connector_access_token(connector, &secret).await;
+    }
+    Ok(secret.access_token)
+}
+
+pub(crate) async fn force_refresh_connector_access_token(connector: &str) -> Result<String> {
+    let existing = load_connector_oauth(connector)
+        .with_context(|| format!("no usable {connector} credential in OS credential vault"))?;
+    refresh_connector_access_token(connector, &existing).await
+}
+
+pub(crate) async fn refresh_connector_access_token(
+    connector: &str,
+    existing: &OAuthSecret,
 ) -> Result<String> {
-    let token_url =
-        std::env::var("HEIWA_GOOGLE_TOKEN_URL").unwrap_or_else(|_| GOOGLE_TOKEN_URL.to_string());
-    let mut cmd = Command::new("curl");
-    cmd.arg("-s")
-        .arg("-X")
-        .arg("POST")
-        .arg(token_url)
-        .arg("--data-urlencode")
-        .arg(format!("code={code}"))
-        .arg("--data-urlencode")
-        .arg(format!("client_id={client_id}"))
-        .arg("--data-urlencode")
-        .arg(format!("redirect_uri={redirect_uri}"))
-        .arg("--data-urlencode")
-        .arg("grant_type=authorization_code")
-        .arg("--data-urlencode")
-        .arg(format!("code_verifier={verifier}"));
-    if !client_secret.is_empty() {
-        cmd.arg("--data-urlencode")
-            .arg(format!("client_secret={client_secret}"));
-    }
-    let output = cmd
-        .output()
-        .context("failed to run curl for token exchange")?;
-    if !output.status.success() {
-        return Err(anyhow!(
-            "curl token exchange failed: {}",
-            String::from_utf8_lossy(&output.stderr)
-        ));
-    }
-    Ok(String::from_utf8_lossy(&output.stdout).to_string())
+    let refresh_token = existing.refresh_token.as_deref().ok_or_else(|| {
+        anyhow!("{connector} credential has no refresh token; reconnect the account")
+    })?;
+    let config = google_provider_config(connector)?;
+    let response = refresh(&reqwest::Client::new(), &config, refresh_token).await?;
+    let merged = merge_refreshed(existing, &response, unix_now());
+    let access_token = merged.access_token.clone();
+    store_connector_oauth(connector, &merged)?;
+    Ok(access_token)
 }
 
-fn pkce_pair() -> (String, String) {
-    // Two v4 UUIDs give 244 bits of entropy in 64 unreserved chars.
-    let verifier = format!(
-        "{}{}",
-        uuid::Uuid::new_v4().simple(),
-        uuid::Uuid::new_v4().simple()
-    );
-    let digest = Sha256::digest(verifier.as_bytes());
-    let challenge = base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(digest);
-    (verifier, challenge)
+/// Run the audited loopback PKCE flow from `heiwa_oauth` and store the token
+/// only in the OS credential vault.
+async fn google_authorize(connector: &str) -> Result<()> {
+    let config = google_provider_config(connector)?;
+    let listener = LoopbackListener::bind()?;
+    let request = build_authorization_request(&config, listener.redirect_uri())?;
+
+    let open_status = Command::new("open")
+        .arg(&request.url)
+        .status()
+        .context("open Google consent page")?;
+    if !open_status.success() {
+        return Err(anyhow!("open Google consent page exited {open_status}"));
+    }
+    println!("waiting for Google redirect on {} …", request.redirect_uri);
+
+    let expected_state = request.state.clone();
+    let code = tokio::task::spawn_blocking(move || {
+        listener.wait_for_code(&expected_state, Duration::from_secs(180))
+    })
+    .await
+    .context("join OAuth callback listener")??;
+    let response = exchange_code(
+        &reqwest::Client::new(),
+        &config,
+        &code,
+        request.pkce.verifier(),
+        &request.redirect_uri,
+    )
+    .await?;
+    store_connector_oauth(connector, &to_secret(&response, unix_now()))?;
+    println!("{connector}: connected; token stored in OS credential vault");
+    Ok(())
 }
 
-fn write_secret_file(path: &PathBuf, bytes: &[u8]) -> Result<()> {
+fn unix_now() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|duration| duration.as_secs())
+        .unwrap_or(0)
+}
+
+fn write_secret_file(path: &Path, bytes: &[u8]) -> Result<()> {
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent)?;
     }
@@ -350,19 +316,6 @@ fn write_secret_file(path: &PathBuf, bytes: &[u8]) -> Result<()> {
         fs::set_permissions(path, fs::Permissions::from_mode(0o600))?;
     }
     Ok(())
-}
-
-fn url_encode(value: &str) -> String {
-    let mut out = String::with_capacity(value.len() * 3);
-    for byte in value.bytes() {
-        match byte {
-            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => {
-                out.push(byte as char)
-            }
-            _ => out.push_str(&format!("%{byte:02X}")),
-        }
-    }
-    out
 }
 
 fn normalize_connector_id(raw: &str) -> String {
@@ -385,25 +338,67 @@ fn print_help() {
     println!("  heiwa connect status [--json]");
     println!("  heiwa connect google-calendar --client-secret <path>");
     println!("  heiwa connect google-calendar --authorize");
-    println!("  heiwa connect gmail --authorize");
+    println!("  heiwa connect google-calendar --disconnect");
     println!();
-    println!("Google flows use loopback PKCE with read-only scopes.");
-    println!("Secrets land in ~/.heiwa/secrets with owner-only permissions.");
+    println!("Google Calendar uses loopback PKCE with calendar.readonly.");
+    println!("The public client id lands in node config; tokens stay in the OS credential vault.");
 }
 
 // ---------------------------------------------------------------------------
 // Read model
 // ---------------------------------------------------------------------------
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ConnectorCredentialProbe {
+    Present,
+    Missing,
+    BackendError,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ConnectorClientProbe {
+    Configured,
+    Missing,
+    Invalid,
+}
+
+fn google_client_probe() -> ConnectorClientProbe {
+    match std::env::var("HEIWA_GOOGLE_OAUTH_CLIENT_ID") {
+        Ok(value) if !value.trim().is_empty() => return ConnectorClientProbe::Configured,
+        Err(std::env::VarError::NotUnicode(_)) => return ConnectorClientProbe::Invalid,
+        Ok(_) | Err(std::env::VarError::NotPresent) => {}
+    }
+
+    if !client_config_path().exists() {
+        ConnectorClientProbe::Missing
+    } else if google_client_id().is_ok() {
+        ConnectorClientProbe::Configured
+    } else {
+        ConnectorClientProbe::Invalid
+    }
+}
+
+fn connector_lane_status(
+    credential: ConnectorCredentialProbe,
+    client: ConnectorClientProbe,
+) -> &'static str {
+    match (credential, client) {
+        (_, ConnectorClientProbe::Invalid) => "config_error",
+        (ConnectorCredentialProbe::Present, _) => "connected",
+        (ConnectorCredentialProbe::Missing, ConnectorClientProbe::Configured) => "staged",
+        (ConnectorCredentialProbe::Missing, ConnectorClientProbe::Missing) => "needs_auth",
+        (ConnectorCredentialProbe::BackendError, _) => "auth_error",
+    }
+}
+
 /// Connector lane status used by calendar/mail summaries and /api/v1/connectors.
 pub(crate) fn google_lane_status(connector: &str) -> &'static str {
-    if token_path(connector).exists() {
-        "connected"
-    } else if client_secret_path().exists() {
-        "staged"
-    } else {
-        "needs_auth"
-    }
+    let credential = match load_connector_oauth(connector) {
+        Ok(_) => ConnectorCredentialProbe::Present,
+        Err(VaultError::NotFound { .. }) => ConnectorCredentialProbe::Missing,
+        Err(_) => ConnectorCredentialProbe::BackendError,
+    };
+    connector_lane_status(credential, google_client_probe())
 }
 
 pub(crate) fn imap_configured() -> bool {
@@ -453,6 +448,7 @@ pub(crate) fn connectors_payload() -> Value {
         "next_action": match google_calendar {
             "needs_auth" => Value::String("heiwa connect google-calendar --client-secret <path>".into()),
             "staged" => Value::String("heiwa connect google-calendar --authorize".into()),
+            "config_error" => Value::String("re-stage a valid Google desktop-app client config".into()),
             _ => Value::Null,
         },
     }));
@@ -477,21 +473,15 @@ pub(crate) fn connectors_payload() -> Value {
         "next_action": Value::Null,
     }));
 
-    let gmail = google_lane_status("gmail");
     rows.push(json!({
         "id": "gmail",
         "kind": "mail",
         "display_name": "Gmail",
-        "status": gmail,
+        "status": "planned",
         "auth_kind": "oauth_loopback_pkce",
         "scopes": google_scopes("gmail"),
-        "detail": "Read-only priority scan via scheduled local pull; send stays approval-gated.",
-        "next_action": match gmail {
-            "needs_auth" => Value::String("heiwa connect gmail --client-secret <path>".into()),
-            "staged" => Value::String("heiwa connect gmail --authorize".into()),
-            "connected" => Value::String("heiwa mail scan --source gmail".into()),
-            _ => Value::Null,
-        },
+        "detail": "Gmail reads are disabled. gmail.send remains ungranted until the approval-backed sender exists.",
+        "next_action": Value::Null,
     }));
 
     let apple_mail_ready = crate::cmd::mail::apple_mail_accounts_present();
@@ -535,7 +525,7 @@ pub(crate) fn connectors_payload() -> Value {
         "policy": [
             "read models before external writes",
             "external writes stage through approvals + receipts",
-            "secrets stay local under ~/.heiwa/secrets (0600)"
+            "OAuth tokens stay in the OS credential vault"
         ],
     })
 }
@@ -545,23 +535,89 @@ mod tests {
     use super::*;
 
     #[test]
-    fn pkce_pair_is_urlsafe_and_long_enough() {
-        let (verifier, challenge) = pkce_pair();
-        assert!(verifier.len() >= 43 && verifier.len() <= 128);
-        assert!(!challenge.contains('='));
-        assert!(!challenge.contains('+'));
-        assert!(!challenge.contains('/'));
-    }
-
-    #[test]
-    fn url_encode_escapes_reserved() {
-        assert_eq!(url_encode("a b/c"), "a%20b%2Fc");
-        assert_eq!(url_encode("safe-_.~"), "safe-_.~");
-    }
-
-    #[test]
     fn normalize_connector_accepts_dashes() {
         assert_eq!(normalize_connector_id("google-calendar"), "google_calendar");
         assert_eq!(normalize_connector_id("Apple-Mail"), "apple_mail");
+    }
+
+    #[test]
+    fn gmail_connector_requests_send_only_never_restricted_read_access() {
+        assert_eq!(
+            google_scopes("gmail"),
+            Some("https://www.googleapis.com/auth/gmail.send")
+        );
+    }
+
+    #[test]
+    fn staging_google_client_config_discards_downloaded_client_secret() {
+        let root = tempfile::tempdir().expect("tempdir");
+        let source = root.path().join("downloaded.json");
+        let destination = root
+            .path()
+            .join("state/connectors/google_oauth_client.json");
+        fs::write(
+            &source,
+            r#"{"installed":{"client_id":"public-id.apps.googleusercontent.com","client_secret":"must-not-persist"}}"#,
+        )
+        .expect("write source");
+
+        stage_client_config_at(&source, &destination).expect("stage bounded config");
+
+        let staged: Value = serde_json::from_slice(&fs::read(destination).expect("read staged"))
+            .expect("staged JSON");
+        assert_eq!(staged["schema_version"], "heiwa_google_oauth_client_v1");
+        assert_eq!(staged["client_id"], "public-id.apps.googleusercontent.com");
+        assert!(staged.get("client_secret").is_none());
+        assert!(!staged.to_string().contains("must-not-persist"));
+    }
+
+    #[test]
+    fn staging_rejects_a_google_web_client() {
+        let root = tempfile::tempdir().expect("tempdir");
+        let source = root.path().join("downloaded.json");
+        let destination = root.path().join("google_oauth_client.json");
+        fs::write(
+            &source,
+            r#"{"web":{"client_id":"wrong-client-class.apps.googleusercontent.com"}}"#,
+        )
+        .expect("write source");
+
+        let error = stage_client_config_at(&source, &destination)
+            .expect_err("web clients must not enter the native PKCE lane");
+
+        assert!(error.to_string().contains("Desktop app"));
+        assert!(!destination.exists());
+    }
+
+    #[test]
+    fn connector_status_keeps_missing_distinct_from_vault_failure() {
+        assert_eq!(
+            connector_lane_status(
+                ConnectorCredentialProbe::Missing,
+                ConnectorClientProbe::Missing,
+            ),
+            "needs_auth"
+        );
+        assert_eq!(
+            connector_lane_status(
+                ConnectorCredentialProbe::Missing,
+                ConnectorClientProbe::Configured,
+            ),
+            "staged"
+        );
+        assert_eq!(
+            connector_lane_status(
+                ConnectorCredentialProbe::BackendError,
+                ConnectorClientProbe::Configured,
+            ),
+            "auth_error"
+        );
+        assert_eq!(
+            connector_lane_status(
+                ConnectorCredentialProbe::Missing,
+                ConnectorClientProbe::Invalid,
+            ),
+            "config_error"
+        );
     }
 }

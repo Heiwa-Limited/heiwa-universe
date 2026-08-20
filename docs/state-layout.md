@@ -11,7 +11,7 @@ Default location: `~/.heiwa/` (override via `HEIWA_HOME`).
 | `~/.heiwa/config.toml`   | operator | Local profile, route prefs, BYOX registration defaults          |
 | `~/.heiwa/accounts.json` | runtime  | Connected provider accounts (status, models, expiry refs)       |
 | `~/.heiwa/identity.json` | runtime  | Operator identity bound to this machine                         |
-| `~/.heiwa/machine.json`  | runtime  | Device manifest (id, hostname, os, arch, installed_at)          |
+| `~/.heiwa/machine.json`  | runtime  | Stable device id plus refreshed platform, hardware, runtime, and local capability manifest |
 | `~/.heiwa/evidence/`     | runtime  | Canonical versioned JSONL evidence journals                     |
 | `~/.heiwa/secrets/`      | runtime  | OS-keychain-backed secret refs; never raw secrets in plain JSON |
 | `~/.heiwa/state/`        | runtime  | Mutable runtime state (see below)                               |
@@ -50,6 +50,9 @@ This subtree is the only place runtime mutation happens for life/workers/approva
 3. **JSON Lines for append-only**. Logs and headers append to `.jsonl`; index/snapshot files use `.json`.
 4. **UTC-stamped subdirs**. Time-bucketed evidence uses `YYYY-MM-DD/` UTC.
 5. **Container-friendly**. The whole `~/.heiwa/` tree is mountable into a container so the same binary works on host and in Docker.
+6. **Machine-local capability truth**. `machine.json` is refreshed at app boot,
+   but its `device_id` and `installed_at` never rotate. Credentials and live
+   process handles are never written into it or replicated.
 
 ## Container Mount
 

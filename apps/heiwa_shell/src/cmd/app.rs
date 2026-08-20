@@ -1,4 +1,4 @@
-use anyhow::{anyhow, Result};
+use anyhow::{anyhow, Context, Result};
 use base64::engine::general_purpose::STANDARD as BASE64;
 use base64::Engine;
 use heiwa_protocol::{ExecutionScope, RiskClass, ToolLease};
@@ -763,10 +763,12 @@ async fn start(args: &[String]) -> Result<()> {
 
     let port = parse_port(args)?;
     let no_open = has_flag(args, "--no-open");
-    let bind_addr = SocketAddr::from(([127, 0, 0, 1], port));
-    let listener = TcpListener::bind(bind_addr).await?;
-    let local_addr = listener.local_addr()?;
-    let url = format!("http://127.0.0.1:{}/", local_addr.port());
+    let install_path = env::current_exe().context("resolve current heiwa runtime path")?;
+    heiwa_install::refresh_machine_manifest_for_runtime(heiwa_install::MachineRuntime {
+        version: env!("CARGO_PKG_VERSION").to_string(),
+        channel: runtime_channel(),
+        install_path,
+    })?;
     let worker_id = format!("heiwa-app-{}", std::process::id());
     let started_at = Arc::new(chrono::Utc::now().to_rfc3339());
     let runtime_state_dir = state_dir();
@@ -787,6 +789,14 @@ async fn start(args: &[String]) -> Result<()> {
     sessions
         .recover_interrupted()
         .map_err(|error| anyhow!("operator restart recovery failed: {error}"))?;
+
+    // Port reachability is the readiness boundary used by launchers and
+    // tests. Bind only after ownership and recovery finish so a successful
+    // TCP connect cannot race the exclusive recovery lease.
+    let bind_addr = SocketAddr::from(([127, 0, 0, 1], port));
+    let listener = TcpListener::bind(bind_addr).await?;
+    let local_addr = listener.local_addr()?;
+    let url = format!("http://127.0.0.1:{}/", local_addr.port());
 
     write_app_heartbeat(&runtime_state_dir, &worker_id)?;
     let mut caffeinate = spawn_caffeinate();
@@ -3369,22 +3379,128 @@ fn snapshot(started_at: &str) -> Value {
         "hooks": status.hooks_summary,
         "providers": provider_rows(),
         "resource": resource_payload(),
+        "machine": machine_perspective_payload(),
     })
+}
+
+fn machine_perspective_payload() -> Value {
+    let current_runtime = json!({
+        "version": env!("CARGO_PKG_VERSION"),
+        "channel": runtime_channel(),
+        "install_path": env::current_exe().ok().map(|path| path.display().to_string()),
+    });
+    let (mut machine, recognition_error) = match heiwa_install::load_machine_manifest() {
+        Ok(Some(mut manifest)) => {
+            if manifest.display_name.trim().is_empty() {
+                manifest.display_name = manifest.hostname.clone();
+            }
+            if manifest.hardware.logical_cpu_count == 0 || manifest.hardware.memory_total_bytes == 0
+            {
+                manifest.hardware = heiwa_install::probe_machine_hardware();
+            }
+            if manifest.capabilities.host_surfaces.is_empty() {
+                manifest.capabilities.host_surfaces =
+                    vec!["terminal".to_string(), "desktop".to_string()];
+            }
+            if manifest.capabilities.display_surfaces.is_empty() {
+                manifest.capabilities.display_surfaces = vec!["desktop".to_string()];
+            }
+            match serde_json::to_value(manifest) {
+                Ok(machine) => (machine, None),
+                Err(_) => (
+                    unrecognized_machine_payload("manifest_error"),
+                    Some(json!({
+                        "code": "invalid_shape",
+                        "message": "Machine identity file is incomplete.",
+                    })),
+                ),
+            }
+        }
+        Ok(None) => (unrecognized_machine_payload("unregistered"), None),
+        Err(error) => (
+            unrecognized_machine_payload("manifest_error"),
+            Some(json!({
+                "code": machine_manifest_issue_code(error.issue()),
+                "message": error.user_message(),
+            })),
+        ),
+    };
+    if let Some(object) = machine.as_object_mut() {
+        object.insert("runtime".to_string(), current_runtime);
+        if let Some(error) = recognition_error {
+            object.insert("recognition_error".to_string(), error);
+        }
+        // L5.0 will populate this with enrolled node fingerprints. Keep the
+        // pre-mesh local handle (`device_id`) out of peer identity.
+        let enrolled_peer_ids: Vec<String> = Vec::new();
+        object.insert(
+            "perspective".to_string(),
+            json!({
+                "locality": "local",
+                "execution_scope": "this_device",
+                "data_scope": "shared_user",
+                "sync_status": machine_sync_status(&enrolled_peer_ids),
+                "transport": "not_configured",
+                "enrolled_peer_count": enrolled_peer_ids.len(),
+            }),
+        );
+    }
+    machine
+}
+
+fn unrecognized_machine_payload(registration_status: &str) -> Value {
+    let hardware = heiwa_install::probe_machine_hardware();
+    json!({
+                "schema_version": "heiwa_machine_v1",
+                "device_id": null,
+                "display_name": hostname_string(),
+                "hostname": hostname_string(),
+                "os": env::consts::OS,
+                "arch": env::consts::ARCH,
+                "device_class": "full_node",
+                "hardware": hardware,
+                "capabilities": {
+                    "provider_clis": [],
+                    "local_model_runtimes": [],
+                    "host_surfaces": ["terminal", "desktop"],
+                    "display_surfaces": ["desktop"],
+                },
+                "registration_status": registration_status,
+    })
+}
+
+fn machine_manifest_issue_code(issue: heiwa_install::MachineManifestLoadIssue) -> &'static str {
+    match issue {
+        heiwa_install::MachineManifestLoadIssue::ReadFailed => "read_failed",
+        heiwa_install::MachineManifestLoadIssue::InvalidJson => "invalid_json",
+        heiwa_install::MachineManifestLoadIssue::UnsupportedSchema => "unsupported_schema",
+        heiwa_install::MachineManifestLoadIssue::InvalidShape => "invalid_shape",
+    }
+}
+
+fn machine_sync_status(enrolled_peer_ids: &[String]) -> &'static str {
+    if enrolled_peer_ids.is_empty() {
+        "local_only"
+    } else {
+        "peer_enrolled"
+    }
 }
 
 fn resource_payload() -> Value {
     let policy = ResourcePolicy::default();
     let (free_memory_bytes, free_memory_source) = free_memory_bytes();
     let (load_1m, load_source) = load_1m();
+    let power = power_state();
+    let (thermal_pressure, thermal_source) = thermal_pressure();
     let snapshot = ResourceSnapshot {
         cpu_count: std::thread::available_parallelism()
             .map(|count| count.get() as u32)
             .unwrap_or(1),
         load_1m,
         free_memory_bytes,
-        battery_percent: None,
-        on_battery: false,
-        thermal_pressure: ThermalPressure::Unknown,
+        battery_percent: power.battery_percent,
+        on_battery: power.on_battery,
+        thermal_pressure,
     };
     let admissions = json!({
         "foreground_interactive": policy.admit(&snapshot, WorkClass::ForegroundInteractive),
@@ -3403,8 +3519,8 @@ fn resource_payload() -> Value {
             "cpu_count": "std::thread::available_parallelism",
             "load_1m": load_source,
             "free_memory_bytes": free_memory_source,
-            "battery_percent": "not_probed_v0",
-            "thermal_pressure": "unknown_v0",
+            "battery_percent": power.source,
+            "thermal_pressure": thermal_source,
         },
         "notes": [
             "read_only_local_probe",
@@ -3595,6 +3711,111 @@ fn load_1m() -> (f32, &'static str) {
         }
     }
     (0.0, "unavailable_default_zero")
+}
+
+struct PowerState {
+    battery_percent: Option<u8>,
+    on_battery: bool,
+    source: &'static str,
+}
+
+#[cfg(target_os = "macos")]
+fn power_state() -> PowerState {
+    let Ok(output) = Command::new("/usr/bin/pmset").args(["-g", "batt"]).output() else {
+        return PowerState {
+            battery_percent: None,
+            on_battery: false,
+            source: "macos_pmset_unavailable",
+        };
+    };
+    let raw = String::from_utf8_lossy(&output.stdout);
+    let battery_percent = raw.lines().find_map(|line| {
+        let percent = line.split('%').next()?.split_whitespace().last()?;
+        percent.parse::<u8>().ok()
+    });
+    PowerState {
+        battery_percent,
+        on_battery: raw.contains("'Battery Power'"),
+        source: "macos_pmset_g_batt",
+    }
+}
+
+#[cfg(target_os = "linux")]
+fn power_state() -> PowerState {
+    let batteries = fs::read_dir("/sys/class/power_supply").ok();
+    let battery = batteries.and_then(|entries| {
+        entries.filter_map(Result::ok).find(|entry| {
+            entry
+                .file_name()
+                .to_string_lossy()
+                .to_ascii_uppercase()
+                .starts_with("BAT")
+        })
+    });
+    let Some(path) = battery.map(|entry| entry.path()) else {
+        return PowerState {
+            battery_percent: None,
+            on_battery: false,
+            source: "linux_sysfs_no_battery",
+        };
+    };
+    let battery_percent = fs::read_to_string(path.join("capacity"))
+        .ok()
+        .and_then(|value| value.trim().parse::<u8>().ok());
+    let on_battery = fs::read_to_string(path.join("status"))
+        .ok()
+        .is_some_and(|status| status.trim().eq_ignore_ascii_case("discharging"));
+    PowerState {
+        battery_percent,
+        on_battery,
+        source: "linux_sysfs_power_supply",
+    }
+}
+
+#[cfg(not(any(target_os = "macos", target_os = "linux")))]
+fn power_state() -> PowerState {
+    PowerState {
+        battery_percent: None,
+        on_battery: false,
+        source: "platform_power_probe_unavailable",
+    }
+}
+
+#[cfg(target_os = "macos")]
+fn thermal_pressure() -> (ThermalPressure, &'static str) {
+    let Ok(output) = Command::new("/usr/bin/pmset")
+        .args(["-g", "therm"])
+        .output()
+    else {
+        return (ThermalPressure::Unknown, "macos_pmset_unavailable");
+    };
+    let raw = String::from_utf8_lossy(&output.stdout);
+    let pressure = if raw.contains("No thermal warning level has been recorded") {
+        ThermalPressure::Nominal
+    } else if raw.contains("CPU_Speed_Limit") || raw.contains("thermal warning") {
+        ThermalPressure::Serious
+    } else {
+        ThermalPressure::Unknown
+    };
+    (pressure, "macos_pmset_g_therm")
+}
+
+#[cfg(not(target_os = "macos"))]
+fn thermal_pressure() -> (ThermalPressure, &'static str) {
+    (
+        ThermalPressure::Unknown,
+        "platform_thermal_probe_unavailable",
+    )
+}
+
+fn runtime_channel() -> String {
+    env::var("HEIWA_CHANNEL").unwrap_or_else(|_| {
+        if cfg!(debug_assertions) {
+            "dev".to_string()
+        } else {
+            "stable".to_string()
+        }
+    })
 }
 
 fn free_memory_bytes() -> (u64, &'static str) {
@@ -6388,6 +6609,20 @@ mod app_readmodel_tests {
                 .is_some(),
             "resource admissions should include local_model_large: {payload}"
         );
+        assert_ne!(
+            data.get("sources")
+                .and_then(|sources| sources.get("battery_percent"))
+                .and_then(Value::as_str),
+            Some("not_probed_v0"),
+            "resource snapshot must perform a platform power probe: {payload}"
+        );
+        assert_ne!(
+            data.get("sources")
+                .and_then(|sources| sources.get("thermal_pressure"))
+                .and_then(Value::as_str),
+            Some("unknown_v0"),
+            "resource snapshot must perform a platform thermal probe: {payload}"
+        );
     }
 
     #[test]
@@ -6410,6 +6645,29 @@ mod app_readmodel_tests {
         assert!(
             data.get("resource").is_some(),
             "runtime snapshot should include resource state: {payload}"
+        );
+        let machine = data
+            .get("machine")
+            .expect("runtime snapshot should identify local machine perspective");
+        assert_eq!(machine["device_class"], "full_node");
+        assert_eq!(machine["perspective"]["locality"], "local");
+        assert_eq!(machine["perspective"]["execution_scope"], "this_device");
+        assert_eq!(machine["perspective"]["data_scope"], "shared_user");
+        assert_eq!(machine["perspective"]["sync_status"], "local_only");
+        assert!(
+            machine["hardware"]["logical_cpu_count"]
+                .as_u64()
+                .is_some_and(|count| count > 0),
+            "machine perspective should include CPU resources: {payload}"
+        );
+    }
+
+    #[test]
+    fn machine_sync_status_is_derived_from_enrolled_peer_count() {
+        assert_eq!(machine_sync_status(&[]), "local_only");
+        assert_eq!(
+            machine_sync_status(&["sha256:peer-fingerprint".to_string()]),
+            "peer_enrolled"
         );
     }
 

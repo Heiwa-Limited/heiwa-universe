@@ -27,7 +27,13 @@ type Harness = {
  * to wait on.
  */
 function harness(
-  overrides: { subscribeNever?: boolean; get?: (path: string) => Promise<unknown> } = {},
+  overrides: {
+    subscribeNever?: boolean;
+    get?: (path: string) => Promise<unknown>;
+    machineOs?: string;
+    machineName?: string;
+    machineRecognitionError?: { code: string; message: string };
+  } = {},
 ): Harness {
   const post = vi.fn().mockResolvedValue({
     ok: true,
@@ -66,6 +72,38 @@ function harness(
             // the version at the top level, where nothing sends it, so the
             // reader could look in the wrong place and still pass.
             runtime: { version: "0.1.0-test", status: "ok" },
+            machine: {
+              schema_version: "heiwa_machine_v1",
+              device_id: "mac-test-device",
+              display_name: overrides.machineName ?? "dmac.local",
+              hostname: overrides.machineName ?? "dmac.local",
+              os: overrides.machineOs ?? "macos",
+              arch: "aarch64",
+              device_class: "full_node",
+              hardware: {
+                logical_cpu_count: 12,
+                memory_total_bytes: 25_769_803_776,
+                cpu_model: "Apple M4 Pro",
+                hardware_model: "Mac16,8",
+              },
+              perspective: {
+                locality: "local",
+                execution_scope: "this_device",
+                data_scope: "shared_user",
+                sync_status: "local_only",
+              },
+              recognition_error: overrides.machineRecognitionError,
+            },
+            resource: {
+              snapshot: {
+                cpu_count: 12,
+                free_memory_bytes: 12_884_901_888,
+                load_1m: 1.2,
+                battery_percent: 100,
+                on_battery: false,
+                thermal_pressure: "nominal",
+              },
+            },
             providers: [
               {
                 provider_id: "ollama",
@@ -407,6 +445,63 @@ describe("operator seam", () => {
         expect(text).toContain("Standup");
         expect(text).not.toContain("Next week thing");
         expect(text).toContain("1 unread");
+      });
+  });
+
+  it("opens from this Mac perspective without pretending peer sync exists", () => {
+    const { state } = harness();
+
+    render(() => <App state={state} />);
+
+    return Promise.resolve()
+      .then(() => Promise.resolve())
+      .then(() => {
+        const perspective = document.querySelector(".machine-perspective");
+        expect(perspective).toBeTruthy();
+        const text = perspective!.textContent ?? "";
+        expect(text).toContain("This Mac");
+        expect(text).toContain("dmac.local");
+        expect(text).toContain("Apple M4 Pro");
+        expect(text).toContain("12 cores");
+        expect(text).toContain("Shared data");
+        expect(text).toContain("sync local only");
+      });
+  });
+
+  it("renders the same shared-data client from a Windows-local perspective", () => {
+    const { state } = harness({ machineOs: "windows", machineName: "devon-windows" });
+
+    render(() => <App state={state} />);
+
+    return Promise.resolve()
+      .then(() => Promise.resolve())
+      .then(() => {
+        const text = document.querySelector(".machine-perspective")?.textContent ?? "";
+        expect(text).toContain("This Windows PC");
+        expect(text).toContain("devon-windows");
+        expect(text).toContain("Shared data");
+        expect(text).toContain("sync local only");
+      });
+  });
+
+  it("explains an incompatible machine manifest without exposing its contents", () => {
+    const { state } = harness({
+      machineRecognitionError: {
+        code: "unsupported_schema",
+        message: "Machine identity was written by a newer or incompatible Heiwa build.",
+      },
+    });
+
+    render(() => <App state={state} />);
+
+    return Promise.resolve()
+      .then(() => Promise.resolve())
+      .then(() => {
+        const perspective = document.querySelector(".machine-perspective");
+        expect(perspective?.textContent).toContain("Device recognition needs attention");
+        expect(perspective?.textContent).toContain(
+          "Machine identity was written by a newer or incompatible Heiwa build.",
+        );
       });
   });
 

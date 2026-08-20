@@ -10,11 +10,11 @@ when its verification runs.
 
 | # | Step | Status | Verification |
 |---|---|---|---|
-| 1 | `heiwa_oauth` — loopback + PKCE + exchange | **done** | 27 tests incl. end-to-end flow against a mock provider; `cargo test -p heiwa_oauth` |
-| 2 | Token storage shape through `heiwa_vault` | **done** | `session.rs` tests: refresh-token preservation, rotation, saturating expiry |
-| 3 | Google Calendar read | blocked | needs an OAuth client id |
+| 1 | `heiwa_oauth` — loopback + PKCE + exchange | **done** | 28 tests incl. end-to-end flow against a mock provider and deadline-bounded listener timeout; `cargo test -p heiwa_oauth` |
+| 2 | Shell caller + token storage through `heiwa_vault` | **done** | Calendar caller uses `heiwa_oauth`; refresh-token preservation is tested; tokens exist only in the OS credential vault |
+| 3 | Google Calendar read | blocked (live) | offline caller path is wired; needs Google account 2-step verification and a Desktop OAuth client id for live acceptance |
 | 4 | Calendar write under approval → receipt | blocked | needs 3; this is the L3 acceptance criterion |
-| 5 | `gmail.send` on the same path | blocked | needs 3 |
+| 5 | `gmail.send` on the same path | blocked | needs 3 plus an approval-backed sender; Gmail reads remain local through Mail.app |
 
 Steps 1 and 2 required no Google account, no client id, and no network. That
 was the point of the seam: steps 3–5 are a credential away, not a build away.
@@ -22,9 +22,13 @@ was the point of the seam: steps 3–5 are a credential away, not a build away.
 ## External dependency
 
 Steps 3–5 need a Google Cloud project with an OAuth client of type "Desktop
-app", kept in testing mode with Devon's account as a test user. It cannot be
-automated — it requires an account, a consent screen, and accepting Google's
-terms. Requested 2026-08-18; not yet supplied.
+app", kept in testing mode with Devon's account as a test user. Live inspection
+on 2026-08-20 reached Google Cloud's account gate: the account must enable
+2-step verification before Cloud Console will open. That authentication change
+requires Devon's direct confirmation in Google's UI. After that, create the
+project/client and stage its downloaded JSON with `heiwa connect
+google-calendar --client-secret <path>`; Heiwa persists only the public client
+id.
 
 No verification submission is needed while the app serves only the developer
 and personal acquaintances, or is in testing. That exemption covers all
@@ -51,6 +55,17 @@ AD-16 through AD-19 are recorded in the spec. Implementation added:
 - **AD-23** A provider denial is reported as a denial even when the callback
   omits `state`. Providers do not reliably echo state on the error path, and
   a user who clicked "deny" should not be told their callback was corrupt.
+- **AD-24** The shell caller uses `heiwa_oauth` plus `heiwa_vault`; it does not
+  duplicate PKCE with shell commands or write token JSON beneath the config
+  root. The downloaded desktop-app file is reduced to a versioned public
+  client-id record under node state, with owner-only permissions.
+- **AD-25** Connector status distinguishes absent credentials, a credential
+  vault backend failure, absent client configuration, and malformed client
+  configuration. A corrupt config is `config_error`, never silently rendered
+  as first-time setup.
+- **AD-26** No Gmail read scope or API caller exists. Mail reads remain the
+  metadata-only Mail.app lane; `gmail.send` is advertised but cannot be granted
+  until an approval-backed sender is implemented.
 
 ## Notes from implementation
 

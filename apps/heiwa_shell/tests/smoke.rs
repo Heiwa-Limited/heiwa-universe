@@ -1030,6 +1030,22 @@ fn test_connect_status_json_reports_unified_registry() {
         stdout.contains("read models before external writes"),
         "expected read-model-first policy line: {stdout}"
     );
+    assert!(
+        stdout.contains("https://www.googleapis.com/auth/gmail.send"),
+        "Gmail must expose only the approval-gated send scope: {stdout}"
+    );
+    assert!(
+        !stdout.contains("https://www.googleapis.com/auth/gmail.readonly"),
+        "restricted Gmail read scope is forbidden; Mail.app owns reads: {stdout}"
+    );
+    assert!(
+        stdout.contains("OAuth tokens stay in the OS credential vault"),
+        "connector registry must name the real secret boundary: {stdout}"
+    );
+    assert!(
+        !stdout.contains("secrets stay local under ~/.heiwa/secrets"),
+        "plaintext secret-file policy must not survive the vault migration: {stdout}"
+    );
 }
 
 #[test]
@@ -1050,11 +1066,26 @@ fn test_mail_scan_dry_run_reports_source_readiness() {
         "expected dry run flag: {stdout}"
     );
     assert!(
-        stdout.contains("\"apple\"") && stdout.contains("\"gmail\""),
-        "expected apple and gmail source readiness probes: {stdout}"
+        stdout.contains("\"apple\"") && !stdout.contains("\"gmail\""),
+        "mail scan must expose only the local Apple read lane: {stdout}"
     );
     assert!(
         stdout.contains("\"policy\":\"metadata-only-no-body\""),
         "expected metadata-only policy on scan: {stdout}"
+    );
+}
+
+#[test]
+fn test_mail_scan_refuses_restricted_gmail_read_lane() {
+    let output = heiwa_command()
+        .args(["mail", "scan", "--source", "gmail", "--dry-run", "--json"])
+        .output()
+        .expect("failed to execute gmail read refusal");
+
+    assert!(!output.status.success(), "Gmail reads must remain disabled");
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("Gmail reads are disabled"),
+        "expected explicit local-Mail boundary: {stderr}"
     );
 }

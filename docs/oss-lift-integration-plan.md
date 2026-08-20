@@ -213,9 +213,10 @@ dismissal receipt. Delete/archive is _suggested_ for bulk senders but never
 staged — no write bridge exists (Gmail scope is read-only, Apple bridge is
 metadata-only) and pretending otherwise would be theater.
 
-Real-machine blocker surfaced: no mail source is actually connected on this
-Mac (Apple Mail unconfigured, Gmail connector `needs_auth`). Unblock with:
-`heiwa connect gmail --client-secret <path>` then `--authorize` (user step).
+Historical blocker, superseded 2026-08-20: Gmail API reads were removed from
+the L3 design because every useful read scope is restricted. The current read
+path is `heiwa mail scan --source apple`; `gmail.send` remains ungranted until
+an approval-backed sender exists.
 
 ## Commit 4 — EXECUTED 2026-06-12
 

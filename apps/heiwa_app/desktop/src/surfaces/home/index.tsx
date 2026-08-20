@@ -1,6 +1,7 @@
 import { For } from "solid-js";
 import { cssToken, shortenPath } from "../../lib/format";
 import { TodayBriefing } from "./TodayBriefing";
+import { MachinePerspective } from "./MachinePerspective";
 import { useApp } from "../../state/app";
 import type { HerdPane } from "../../runtime";
 import type { SurfaceId } from "../ids";
@@ -74,6 +75,8 @@ function HomeSurface() {
         what today holds, from data already on this machine.
       */}
       <TodayBriefing />
+
+      <MachinePerspective />
 
       <section class="pinned-pane-board" aria-label="Pinned terminal and ops panes">
         <For each={pinned()}>
@@ -196,6 +199,7 @@ export const homeSurface: SurfaceModule = {
       // The briefing reads mail too, so Home has to load it — otherwise the
       // unread count is only correct after the user visits Mail.
       app.runtime.loadMail(),
+      app.runtime.loadHealth(),
       app.herd.load(),
       app.herd.loadCommands(),
     ]);

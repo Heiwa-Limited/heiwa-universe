@@ -41,6 +41,7 @@ export type RuntimeSnapshotEnvelope = {
     notes?: string[];
     providers?: ProviderSnapshot[];
     resource?: ResourceSnapshot;
+    machine?: MachineSnapshot;
     workers?: WorkersSnapshot;
     approvals?: ApprovalsSnapshot;
     [key: string]: unknown;
@@ -64,10 +65,50 @@ export type ResourceSnapshot = {
     cpu_count?: number;
     free_memory_bytes?: number;
     load_1m?: number;
+    battery_percent?: number | null;
     on_battery?: boolean;
     thermal_pressure?: string;
   };
   admissions?: Record<string, { decision: string }>;
+};
+
+export type MachineSnapshot = {
+  schema_version?: string;
+  device_id?: string | null;
+  display_name?: string;
+  hostname?: string;
+  os?: string;
+  arch?: string;
+  device_class?: string;
+  hardware?: {
+    logical_cpu_count?: number;
+    memory_total_bytes?: number;
+    cpu_model?: string | null;
+    hardware_model?: string | null;
+  };
+  capabilities?: {
+    provider_clis?: string[];
+    local_model_runtimes?: string[];
+    host_surfaces?: string[];
+    display_surfaces?: string[];
+  };
+  runtime?: {
+    version?: string;
+    channel?: string;
+    install_path?: string | null;
+  };
+  perspective?: {
+    locality?: string;
+    execution_scope?: string;
+    data_scope?: string;
+    sync_status?: string;
+    transport?: string;
+    enrolled_peer_count?: number;
+  };
+  recognition_error?: {
+    code?: string;
+    message?: string;
+  };
 };
 
 export type WorkersSnapshot = {

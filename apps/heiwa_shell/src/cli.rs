@@ -49,7 +49,7 @@ pub async fn try_handle(args: &[String]) -> Result<bool> {
             Ok(true)
         }
         Some("calendar") => {
-            cmd::calendar::run(&args[2..])?;
+            cmd::calendar::run(&args[2..]).await?;
             Ok(true)
         }
         Some("connect") => {
