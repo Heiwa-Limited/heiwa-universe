@@ -1,7 +1,7 @@
 # L3 — Calendar and Mail Connectors
 
 Date: 2026-08-18
-Status: Draft — implementation-ready except where marked
+Status: Active — offline OAuth/storage caller complete; live Google acceptance blocked
 Plane: Intake + Execution + Evidence
 Depends on: `2026-08-18-build-foundation.md` (Phase 1), AD-14, `docs/references/google-oauth-native.md`
 
@@ -13,7 +13,7 @@ connector executes under it, the trust plane is architecture nobody has used.
 
 ## What already exists
 
-Verified 2026-08-18, so the spec builds on the real seam rather than a guess:
+Verified through 2026-08-20, so the spec builds on the real seam rather than a guess:
 
 - `heiwa_vault::Vault` — `store_oauth` / `load_oauth` over an `OAuthSecret`.
 - `heiwa_provider::oauth::ProviderVault` — keychain-backed storage plus
@@ -25,10 +25,16 @@ Verified 2026-08-18, so the spec builds on the real seam rather than a guess:
 - `heiwa_automations` — executor, scheduler, storage.
 - Local bridges — `heiwa calendar sync` and `heiwa mail scan` already read the
   user's own Calendar.app and Mail.app.
+- `heiwa_oauth` — loopback PKCE, exchange, refresh, and strict listener
+  deadlines, including a full-flow test against a local mock provider.
+- `heiwa connect google-calendar` — reduces Google's downloaded desktop-app
+  JSON to a versioned public client-id record, opens consent without logging
+  the OAuth state URL, and stores OAuth tokens only through `heiwa_vault`.
 
-**Not present:** any authorization-code flow. Grepping for `code_challenge`,
-PKCE, or a loopback listener returns nothing. The flow itself is net-new; the
-storage it feeds is not.
+**Not yet live-proven:** Google Calendar read/write and Gmail send. The offline
+protocol and storage seams are built; the account cannot enter Cloud Console
+until 2-step verification is enabled, after which a Desktop OAuth client id is
+still required.
 
 ## Scope selection — no restricted scopes
 
@@ -57,11 +63,13 @@ testing, verification is waived entirely. Build against real scopes now.
   itself (loopback listener, PKCE, code exchange, refresh) is provider-agnostic
   and takes its endpoints and scopes as parameters, so it is testable against a
   mock authorization server with no Google account involved.
-- **AD-17 — The OAuth client id ships in the binary and is not treated as a
+- **AD-17 — The OAuth client id is node configuration and is not treated as a
   secret.** Native apps are public clients; Google issues a "client secret" for
   desktop clients that cannot be kept secret in a distributed binary, and the
-  loopback flow does not require it. PKCE is what makes the exchange safe. Any
-  design that depends on that value staying private is wrong.
+  loopback flow does not require it. Heiwa discards that field from the
+  downloaded JSON and persists only a versioned client-id record. PKCE is what
+  makes the exchange safe. Any design that depends on that value staying
+  private is wrong.
 - **AD-18 — The loopback listener binds an ephemeral port, serves exactly one
   request, and shuts down.** A listener that outlives the exchange is an open
   local port any process on the machine can talk to. `state` is required and
@@ -83,8 +91,8 @@ testing, verification is waived entirely. Build against real scopes now.
 ## Build order
 
 1. `heiwa_oauth` — loopback + PKCE + exchange + refresh, against a mock server.
-   No Google dependency, fully testable in CI.
-2. Token storage through `heiwa_vault`, reusing `needs_refresh`.
+   No Google dependency, fully testable in CI. **Complete.**
+2. Token storage through `heiwa_vault`, reusing `needs_refresh`. **Complete, including the shell caller.**
 3. Google Calendar read → the Calendar surface renders live events beside the
    local ones, with the source labelled.
 4. Calendar write → `AwaitingApproval` → receipt → journal replay. **This is
@@ -96,14 +104,18 @@ the client id below.
 
 ## Blocked on Devon
 
-**Create a Google Cloud project and an OAuth client of type "Desktop app".**
-Nothing in steps 3–5 can be tested without it, and it cannot be automated —
-it requires an account, a consent screen, and accepting Google's terms.
+**Enable 2-step verification on Devon's Google account, then create a Google
+Cloud project and an OAuth client of type "Desktop app".** Live inspection on
+2026-08-20 confirmed that Google Cloud blocks the account before the console
+until 2-step verification is enabled. This authentication change cannot be
+completed by Heiwa; it requires Devon's direct confirmation in Google's UI.
 
-What is needed back: the client id, and the project kept in testing mode with
-Devon's account as a test user. No verification submission yet; that is a
-distribution task for when the app ships publicly, and the exemption covers
-development.
+What is needed back: the downloaded desktop-app JSON, with the project kept in
+testing mode and Devon's account as a test user. `heiwa connect
+google-calendar --client-secret <path>` extracts only the public client id; it
+never persists Google's bundled client-secret field. No verification
+submission yet; that is a distribution task for when the app ships publicly,
+and the exemption covers development.
 
 ## Verification
 

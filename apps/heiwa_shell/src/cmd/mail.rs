@@ -216,7 +216,20 @@ function run(argv) {
 "#;
 
 fn scan(args: &[String]) -> Result<()> {
-    let source = flag_value(args, "--source").unwrap_or_else(|| "all".to_string());
+    let source = flag_value(args, "--source")
+        .unwrap_or_else(|| "all".to_string())
+        .replace('-', "_")
+        .to_ascii_lowercase();
+    if source == "gmail" {
+        return Err(anyhow!(
+            "Gmail reads are disabled; use the local Apple Mail metadata bridge"
+        ));
+    }
+    if source != "all" && source != "apple" && source != "apple_mail" {
+        return Err(anyhow!(
+            "unknown mail scan source: {source} (expected all or apple)"
+        ));
+    }
     let limit = flag_value(args, "--limit")
         .and_then(|raw| raw.parse::<usize>().ok())
         .unwrap_or(DEFAULT_SCAN_LIMIT)
@@ -225,7 +238,6 @@ fn scan(args: &[String]) -> Result<()> {
     let json_output = has_flag(args, "--json");
 
     let apple_ready = apple_mail_accounts_present();
-    let gmail_token = crate::cmd::connectors::connector_token_path("gmail").exists();
 
     if dry_run {
         let payload = json!({
@@ -240,13 +252,6 @@ fn scan(args: &[String]) -> Result<()> {
                     "ready": apple_ready,
                     "blocker": if apple_ready { Value::Null } else {
                         Value::String("no Apple Mail accounts configured".into())
-                    },
-                },
-                "gmail": {
-                    "selected": source == "all" || source == "gmail",
-                    "ready": gmail_token,
-                    "blocker": if gmail_token { Value::Null } else {
-                        Value::String("no token; run: heiwa connect gmail --client-secret <path> then --authorize".into())
                     },
                 },
             },
@@ -281,32 +286,6 @@ fn scan(args: &[String]) -> Result<()> {
                      or grant Heiwa automation access in System Settings > Privacy & Security > Automation",
                     MailProbe::detect().data_dir.display()
                 ),
-            }));
-        }
-    }
-
-    if source == "all" || source == "gmail" {
-        if gmail_token {
-            match scan_gmail(limit) {
-                Ok(rows) => {
-                    source_reports.push(json!({
-                        "source": "gmail", "status": "scanned", "fetched": rows.len(),
-                    }));
-                    fetched.extend(rows);
-                }
-                Err(error) => {
-                    source_reports.push(json!({
-                        "source": "gmail", "status": "error", "error": error.to_string(),
-                    }));
-                }
-            }
-        } else {
-            source_reports.push(json!({
-                "source": "gmail", "status": "needs_auth",
-                "next": [
-                    "heiwa connect gmail --client-secret <path>",
-                    "heiwa connect gmail --authorize",
-                ],
             }));
         }
     }
@@ -371,172 +350,6 @@ fn scan_apple_mail(limit: usize) -> Result<Vec<Value>> {
         .lines()
         .filter_map(|line| serde_json::from_str::<Value>(line.trim()).ok())
         .collect())
-}
-
-fn gmail_api_base() -> String {
-    std::env::var("HEIWA_GMAIL_API_BASE")
-        .unwrap_or_else(|_| "https://gmail.googleapis.com/gmail/v1".to_string())
-}
-
-/// Pull INBOX metadata via the Gmail API using the stored read-only token.
-/// Refreshes the access token once on 401 and persists the rotation.
-fn scan_gmail(limit: usize) -> Result<Vec<Value>> {
-    let mut access_token = gmail_access_token()?;
-    let base = gmail_api_base();
-
-    let list_url = format!("{base}/users/me/messages?maxResults={limit}&labelIds=INBOX");
-    let mut listing = gmail_get(&list_url, &access_token)?;
-    if listing.get("error").is_some() {
-        // One refresh attempt, then re-list.
-        access_token = refresh_gmail_access_token()?;
-        listing = gmail_get(&list_url, &access_token)?;
-        if let Some(error) = listing.get("error") {
-            return Err(anyhow!("gmail list failed after refresh: {error}"));
-        }
-    }
-
-    let account = gmail_profile_address(&access_token).unwrap_or_else(|| "gmail".to_string());
-    let ids: Vec<String> = listing
-        .get("messages")
-        .and_then(Value::as_array)
-        .map(|messages| {
-            messages
-                .iter()
-                .filter_map(|m| m.get("id").and_then(Value::as_str).map(str::to_string))
-                .collect()
-        })
-        .unwrap_or_default();
-
-    let mut rows = Vec::new();
-    for id in ids {
-        let url = format!(
-            "{base}/users/me/messages/{id}?format=metadata&metadataHeaders=From&metadataHeaders=Subject"
-        );
-        let Ok(message) = gmail_get(&url, &access_token) else {
-            continue;
-        };
-        if let Some(row) = gmail_message_to_row(&message, &account) {
-            rows.push(row);
-        }
-    }
-    Ok(rows)
-}
-
-/// Normalize one Gmail metadata response into the snapshot row shape.
-fn gmail_message_to_row(message: &Value, account: &str) -> Option<Value> {
-    let headers = message
-        .get("payload")
-        .and_then(|payload| payload.get("headers"))
-        .and_then(Value::as_array)?;
-    let header = |name: &str| -> Option<String> {
-        headers.iter().find_map(|h| {
-            (h.get("name").and_then(Value::as_str)? == name)
-                .then(|| h.get("value").and_then(Value::as_str).map(str::to_string))?
-        })
-    };
-    let label_ids = message
-        .get("labelIds")
-        .and_then(Value::as_array)
-        .map(|labels| {
-            labels
-                .iter()
-                .filter_map(Value::as_str)
-                .map(str::to_string)
-                .collect::<Vec<_>>()
-        })
-        .unwrap_or_default();
-    let date = message
-        .get("internalDate")
-        .and_then(Value::as_str)
-        .and_then(|ms| ms.parse::<i64>().ok())
-        .and_then(chrono::DateTime::from_timestamp_millis)
-        .map(|dt| dt.to_rfc3339())
-        .unwrap_or_default();
-
-    Some(json!({
-        "account": account,
-        "mailbox": "INBOX",
-        "sender": header("From").unwrap_or_default(),
-        "subject": header("Subject").unwrap_or_default(),
-        "date": date,
-        "unread": label_ids.iter().any(|label| label == "UNREAD"),
-    }))
-}
-
-fn gmail_get(url: &str, access_token: &str) -> Result<Value> {
-    use anyhow::Context;
-    let auth_header = format!("{} {}", "Authorization: Bearer", access_token);
-    let output = std::process::Command::new("curl")
-        .arg("-s")
-        .arg("-H")
-        .arg(auth_header)
-        .arg(url)
-        .output()
-        .context("failed to run curl for gmail request")?;
-    if !output.status.success() {
-        return Err(anyhow!(
-            "gmail request failed: {}",
-            String::from_utf8_lossy(&output.stderr).trim()
-        ));
-    }
-    serde_json::from_slice(&output.stdout).map_err(|e| anyhow!("gmail returned non-JSON: {e}"))
-}
-
-fn gmail_access_token() -> Result<String> {
-    let path = crate::cmd::connectors::connector_token_path("gmail");
-    let raw = std::fs::read_to_string(&path)
-        .map_err(|_| anyhow!("no gmail token; run: heiwa connect gmail --authorize"))?;
-    let stored: Value = serde_json::from_str(&raw)?;
-    stored
-        .get("token")
-        .and_then(|token| token.get("access_token"))
-        .and_then(Value::as_str)
-        .map(str::to_string)
-        .ok_or_else(|| anyhow!("gmail token file missing access_token"))
-}
-
-fn refresh_gmail_access_token() -> Result<String> {
-    let path = crate::cmd::connectors::connector_token_path("gmail");
-    let raw = std::fs::read_to_string(&path)?;
-    let mut stored: Value = serde_json::from_str(&raw)?;
-    let refresh_token = stored
-        .get("token")
-        .and_then(|token| token.get("refresh_token"))
-        .and_then(Value::as_str)
-        .map(str::to_string)
-        .ok_or_else(|| {
-            anyhow!("gmail token has no refresh_token; re-run: heiwa connect gmail --authorize")
-        })?;
-
-    let refreshed_raw = crate::cmd::connectors::refresh_google_token(&refresh_token)?;
-    let refreshed: Value = serde_json::from_str(&refreshed_raw)?;
-    let access_token = refreshed
-        .get("access_token")
-        .and_then(Value::as_str)
-        .map(str::to_string)
-        .ok_or_else(|| anyhow!("token refresh failed: {refreshed_raw}"))?;
-
-    // Persist the rotated access token; refresh_token is retained.
-    if let Some(token) = stored.get_mut("token") {
-        if let Some(obj) = token.as_object_mut() {
-            obj.insert("access_token".to_string(), json!(access_token));
-            obj.insert(
-                "rotated_at".to_string(),
-                json!(chrono::Utc::now().to_rfc3339()),
-            );
-        }
-    }
-    crate::cmd::connectors::store_connector_token("gmail", &stored)?;
-    Ok(access_token)
-}
-
-fn gmail_profile_address(access_token: &str) -> Option<String> {
-    let url = format!("{}/users/me/profile", gmail_api_base());
-    gmail_get(&url, access_token)
-        .ok()?
-        .get("emailAddress")
-        .and_then(Value::as_str)
-        .map(str::to_string)
 }
 
 /// Stable identity for a snapshot row so repeated scans never duplicate.
@@ -1089,15 +902,14 @@ pub(crate) fn summary_payload() -> Value {
         .filter(|row| row.get("unread").and_then(Value::as_bool).unwrap_or(false))
         .count();
 
-    let gmail_status = crate::cmd::connectors::google_lane_status("gmail");
     let lanes = json!([
         {
             "id": "gmail",
             "name": "Gmail",
-            "status": gmail_status,
-            "read": "OAuth read-only scope; local scheduled scan (no hosted webhook runtime).",
-            "reply": "Draft replies in-app; send through Gmail API only after approval.",
-            "guardrail": "Send scope stays separate from read scope; every outbound send records a receipt.",
+            "status": "planned",
+            "read": "Disabled by policy; Mail.app owns local metadata reads without restricted Gmail scopes.",
+            "reply": "Draft replies in-app; gmail.send remains ungranted until an approval-backed sender exists.",
+            "guardrail": "No Gmail read scope; every future outbound send must show the full body and record a receipt.",
         },
         {
             "id": "apple_mail",
@@ -1147,7 +959,7 @@ fn print_help() {
     println!("  heiwa mail status [--json]");
     println!("  heiwa mail accounts [--json]");
     println!("  heiwa mail summary");
-    println!("  heiwa mail scan [--source apple|gmail|all] [--limit N] [--dry-run] [--json]");
+    println!("  heiwa mail scan [--source apple|all] [--limit N] [--dry-run] [--json]");
     println!("  heiwa mail triage [--limit N] [--no-draft] [--dry-run] [--json]");
     println!();
     println!("Policy: {POLICY}.");
@@ -1328,23 +1140,5 @@ mod tests {
             .as_str()
             .unwrap()
             .contains("not staged"));
-    }
-
-    #[test]
-    fn gmail_metadata_normalizes_to_snapshot_row() {
-        let message = json!({
-            "internalDate": "1749710000000",
-            "labelIds": ["INBOX", "UNREAD"],
-            "payload": {"headers": [
-                {"name": "From", "value": "Vendor <vendor@example.com>"},
-                {"name": "Subject", "value": "Invoice follow-up"},
-            ]},
-        });
-        let row = gmail_message_to_row(&message, "user@example.com").unwrap();
-        assert_eq!(row["account"], "user@example.com");
-        assert_eq!(row["sender"], "Vendor <vendor@example.com>");
-        assert_eq!(row["subject"], "Invoice follow-up");
-        assert_eq!(row["unread"], true);
-        assert!(row["date"].as_str().unwrap().starts_with("2025-06-12"));
     }
 }
