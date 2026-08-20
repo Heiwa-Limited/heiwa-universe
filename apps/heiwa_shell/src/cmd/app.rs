@@ -8,6 +8,7 @@ use serde_json::{json, Value};
 use sha1::{Digest, Sha1};
 use std::collections::{HashMap, HashSet};
 use std::env;
+use std::ffi::OsString;
 use std::fs;
 use std::net::SocketAddr;
 use std::path::{Component, Path, PathBuf};
@@ -25,6 +26,8 @@ const WS_GUID: &str = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11";
 const BROWSER_BOOTSTRAP_TTL_SECONDS: i64 = 60;
 const BROWSER_SESSION_TTL_SECONDS: i64 = 8 * 60 * 60;
 const BROWSER_SESSION_COOKIE_PREFIX: &str = "heiwa_local_operator_";
+const APPLE_ARM64_LINKER_ENV: &str = "CARGO_TARGET_AARCH64_APPLE_DARWIN_LINKER";
+const MACH_O_LINKER_FLAVOR: &str = "-C linker-flavor=ld64.lld";
 
 #[derive(Debug, Clone, Serialize)]
 pub(crate) struct LocalAppProbe {
@@ -117,6 +120,7 @@ fn update_from_checkout(dry_run: bool, json_output: bool) -> Result<()> {
     let install_root = heiwa_install::get_heiwa_dir();
     let installed_bin = install_root.join("bin").join("heiwa");
     let installed_app = install_root.join("app").join("Heiwa.app");
+    let cargo_environment = checkout_cargo_environment()?;
     let install_command = vec![
         "cargo".to_string(),
         "install".to_string(),
@@ -137,6 +141,7 @@ fn update_from_checkout(dry_run: bool, json_output: bool) -> Result<()> {
         &installed_app,
         dry_run,
         &install_command,
+        &cargo_environment,
     );
 
     if json_output {
@@ -159,6 +164,7 @@ fn update_from_checkout(dry_run: bool, json_output: bool) -> Result<()> {
         );
         println!("  official_source: GitHub Releases");
         println!("  target: {}", installed_bin.display());
+        println!("  cargo_environment: {}", cargo_environment.strategy);
         println!("  restart_policy: prompt-before-restart");
         println!(
             "  command: cargo install --path apps/heiwa_shell --root ~/.heiwa --locked --force"
@@ -173,15 +179,17 @@ fn update_from_checkout(dry_run: bool, json_output: bool) -> Result<()> {
         return Ok(());
     }
 
-    let status = Command::new("cargo")
+    let mut cargo = Command::new("cargo");
+    cargo
         .arg("install")
         .arg("--path")
         .arg(repo_root.join("apps").join("heiwa_shell"))
         .arg("--root")
         .arg(&install_root)
         .arg("--locked")
-        .arg("--force")
-        .status()?;
+        .arg("--force");
+    cargo_environment.apply(&mut cargo);
+    let status = cargo.status()?;
     if !status.success() {
         return Err(anyhow!("cargo install failed with status {status}"));
     }
@@ -231,6 +239,7 @@ fn checkout_update_plan(
     installed_app: &Path,
     dry_run: bool,
     install_command: &[String],
+    cargo_environment: &CheckoutCargoEnvironment,
 ) -> Value {
     let state = RuntimeStatus::detect();
     let pending_approvals = state
@@ -265,6 +274,7 @@ fn checkout_update_plan(
         &installed_version,
         installed_app,
         &desktop_bundle,
+        &cargo_environment.receipt(),
         dry_run,
     );
 
@@ -283,6 +293,7 @@ fn checkout_update_plan(
         "desktop_bundle_source": desktop_bundle,
         "app_bundle_update": app_bundle_update_plan(&desktop_bundle, dry_run),
         "install_command": install_command,
+        "cargo_environment": cargo_environment.receipt(),
         "restart_policy": "prompt-before-restart",
         "restart_required": true,
         "dry_run": dry_run,
@@ -347,6 +358,7 @@ fn promotion_receipt_plan(
     installed_version: &Value,
     installed_app: &Path,
     desktop_bundle: &Value,
+    cargo_environment: &Value,
     dry_run: bool,
 ) -> Value {
     let receipt_path = heiwa_install::get_heiwa_dir()
@@ -379,6 +391,7 @@ fn promotion_receipt_plan(
             "desktop_bundle_installed": !dry_run && desktop_bundle.get("present").and_then(Value::as_bool).unwrap_or(false),
         },
         "codesign": codesign_probe(desktop_bundle),
+        "cargo_environment": cargo_environment,
         "runtime_probes": runtime_probe_contracts(),
         "evidence_plane": {
             "backend": "local-jsonl",
@@ -388,6 +401,133 @@ fn promotion_receipt_plan(
         },
         "restart_policy": "prompt-before-restart",
     })
+}
+
+#[derive(Debug)]
+struct CheckoutCargoEnvironment {
+    strategy: &'static str,
+    linker: Option<PathBuf>,
+    rustflags: Option<OsString>,
+}
+
+impl CheckoutCargoEnvironment {
+    fn apply(&self, command: &mut Command) {
+        if let Some(linker) = &self.linker {
+            command.env(APPLE_ARM64_LINKER_ENV, linker);
+        }
+        if let Some(rustflags) = &self.rustflags {
+            command.env("RUSTFLAGS", rustflags);
+        }
+    }
+
+    fn receipt(&self) -> Value {
+        json!({
+            "strategy": self.strategy,
+            "operator_override": self.strategy == "operator_override",
+            "linker": self.linker.as_ref().map(|path| path.display().to_string()),
+            "rustflags_append": if self.strategy == "rust_bundled_macho_linker" {
+                Some(MACH_O_LINKER_FLAVOR)
+            } else {
+                None
+            },
+        })
+    }
+}
+
+fn checkout_cargo_environment() -> Result<CheckoutCargoEnvironment> {
+    let operator_linker = env::var_os(APPLE_ARM64_LINKER_ENV).filter(|value| !value.is_empty());
+    if env::consts::OS != "macos" || env::consts::ARCH != "aarch64" || operator_linker.is_some() {
+        return checkout_cargo_environment_from(
+            env::consts::OS,
+            env::consts::ARCH,
+            operator_linker,
+            env::var_os("RUSTFLAGS"),
+            None,
+            false,
+        );
+    }
+
+    let output = Command::new("rustc")
+        .args(["--print", "sysroot"])
+        .output()
+        .context("resolve the pinned Rust sysroot for checkout promotion")?;
+    if !output.status.success() {
+        return Err(anyhow!(
+            "rustc --print sysroot failed with status {}: {}",
+            output.status,
+            String::from_utf8_lossy(&output.stderr).trim()
+        ));
+    }
+    let sysroot = String::from_utf8(output.stdout)
+        .context("rustc --print sysroot returned non-UTF-8 output")?;
+    let sysroot = PathBuf::from(sysroot.trim());
+    let linker = bundled_macho_linker(&sysroot);
+    checkout_cargo_environment_from(
+        env::consts::OS,
+        env::consts::ARCH,
+        None,
+        env::var_os("RUSTFLAGS"),
+        Some(&sysroot),
+        linker.is_file(),
+    )
+}
+
+fn checkout_cargo_environment_from(
+    os: &str,
+    arch: &str,
+    operator_linker: Option<OsString>,
+    existing_rustflags: Option<OsString>,
+    rust_sysroot: Option<&Path>,
+    bundled_linker_exists: bool,
+) -> Result<CheckoutCargoEnvironment> {
+    if os != "macos" || arch != "aarch64" {
+        return Ok(CheckoutCargoEnvironment {
+            strategy: "host_default",
+            linker: None,
+            rustflags: None,
+        });
+    }
+    if operator_linker.is_some_and(|value| !value.is_empty()) {
+        return Ok(CheckoutCargoEnvironment {
+            strategy: "operator_override",
+            linker: None,
+            rustflags: None,
+        });
+    }
+
+    let sysroot = rust_sysroot.ok_or_else(|| anyhow!("pinned Rust sysroot is unavailable"))?;
+    let linker = bundled_macho_linker(sysroot);
+    if !bundled_linker_exists {
+        return Err(anyhow!(
+            "Rust's bundled rust-lld is missing at {}; reinstall the pinned Rust toolchain before checkout promotion",
+            linker.display()
+        ));
+    }
+
+    let mut rustflags = existing_rustflags.unwrap_or_default();
+    if !rustflags
+        .to_string_lossy()
+        .contains("linker-flavor=ld64.lld")
+    {
+        if !rustflags.is_empty() {
+            rustflags.push(" ");
+        }
+        rustflags.push(MACH_O_LINKER_FLAVOR);
+    }
+    Ok(CheckoutCargoEnvironment {
+        strategy: "rust_bundled_macho_linker",
+        linker: Some(linker),
+        rustflags: Some(rustflags),
+    })
+}
+
+fn bundled_macho_linker(rust_sysroot: &Path) -> PathBuf {
+    rust_sysroot
+        .join("lib")
+        .join("rustlib")
+        .join("aarch64-apple-darwin")
+        .join("bin")
+        .join("rust-lld")
 }
 
 fn runtime_probe_contracts() -> Value {
@@ -5311,6 +5451,106 @@ mod app_readmodel_tests {
         assert_eq!(missing["would_install"], false);
         assert_eq!(missing["will_install"], false);
         assert!(missing["blocker"].is_string());
+    }
+
+    #[test]
+    fn checkout_install_selects_the_bundled_macho_linker_on_apple_silicon() {
+        let environment = checkout_cargo_environment_from(
+            "macos",
+            "aarch64",
+            None,
+            Some(std::ffi::OsString::from("-C target-cpu=native")),
+            Some(Path::new("/toolchains/pinned")),
+            true,
+        )
+        .expect("bundled linker environment");
+
+        assert_eq!(environment.strategy, "rust_bundled_macho_linker");
+        assert_eq!(
+            environment.linker.as_deref(),
+            Some(Path::new(
+                "/toolchains/pinned/lib/rustlib/aarch64-apple-darwin/bin/rust-lld"
+            ))
+        );
+        assert_eq!(
+            environment.rustflags.as_deref(),
+            Some(std::ffi::OsStr::new(
+                "-C target-cpu=native -C linker-flavor=ld64.lld"
+            ))
+        );
+        assert_eq!(
+            environment.receipt()["strategy"],
+            "rust_bundled_macho_linker"
+        );
+        let mut cargo = Command::new("cargo");
+        environment.apply(&mut cargo);
+        assert!(cargo.get_envs().any(|(key, value)| {
+            key == APPLE_ARM64_LINKER_ENV
+                && value == environment.linker.as_deref().map(Path::as_os_str)
+        }));
+        assert!(cargo.get_envs().any(|(key, value)| {
+            key == "RUSTFLAGS" && value == environment.rustflags.as_deref()
+        }));
+    }
+
+    #[test]
+    fn checkout_install_preserves_an_explicit_operator_linker() {
+        let environment = checkout_cargo_environment_from(
+            "macos",
+            "aarch64",
+            Some(std::ffi::OsString::from("/operator/linker")),
+            Some(std::ffi::OsString::from("-C target-cpu=native")),
+            None,
+            false,
+        )
+        .expect("operator linker environment");
+
+        assert_eq!(environment.strategy, "operator_override");
+        assert!(environment.linker.is_none());
+        assert!(environment.rustflags.is_none());
+        assert_eq!(environment.receipt()["operator_override"], true);
+    }
+
+    #[test]
+    fn checkout_install_does_not_treat_an_empty_linker_as_an_override() {
+        let environment = checkout_cargo_environment_from(
+            "macos",
+            "aarch64",
+            Some(std::ffi::OsString::new()),
+            None,
+            Some(Path::new("/toolchains/pinned")),
+            true,
+        )
+        .expect("bundled linker environment");
+
+        assert_eq!(environment.strategy, "rust_bundled_macho_linker");
+    }
+
+    #[test]
+    fn checkout_install_uses_host_defaults_off_apple_silicon() {
+        let environment =
+            checkout_cargo_environment_from("linux", "x86_64", None, None, None, false)
+                .expect("host environment");
+
+        assert_eq!(environment.strategy, "host_default");
+        assert!(environment.linker.is_none());
+        assert!(environment.rustflags.is_none());
+    }
+
+    #[test]
+    fn checkout_install_rejects_a_missing_bundled_linker() {
+        let error = checkout_cargo_environment_from(
+            "macos",
+            "aarch64",
+            None,
+            None,
+            Some(Path::new("/toolchains/incomplete")),
+            false,
+        )
+        .expect_err("missing linker must block checkout install");
+
+        assert!(error.to_string().contains("rust-lld"));
+        assert!(error.to_string().contains("pinned Rust toolchain"));
     }
 
     #[test]
