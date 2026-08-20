@@ -32,6 +32,7 @@ function harness(
     get?: (path: string) => Promise<unknown>;
     machineOs?: string;
     machineName?: string;
+    machineRecognitionError?: { code: string; message: string };
   } = {},
 ): Harness {
   const post = vi.fn().mockResolvedValue({
@@ -91,6 +92,7 @@ function harness(
                 data_scope: "shared_user",
                 sync_status: "local_only",
               },
+              recognition_error: overrides.machineRecognitionError,
             },
             resource: {
               snapshot: {
@@ -479,6 +481,27 @@ describe("operator seam", () => {
         expect(text).toContain("devon-windows");
         expect(text).toContain("Shared data");
         expect(text).toContain("sync local only");
+      });
+  });
+
+  it("explains an incompatible machine manifest without exposing its contents", () => {
+    const { state } = harness({
+      machineRecognitionError: {
+        code: "unsupported_schema",
+        message: "Machine identity was written by a newer or incompatible Heiwa build.",
+      },
+    });
+
+    render(() => <App state={state} />);
+
+    return Promise.resolve()
+      .then(() => Promise.resolve())
+      .then(() => {
+        const perspective = document.querySelector(".machine-perspective");
+        expect(perspective?.textContent).toContain("Device recognition needs attention");
+        expect(perspective?.textContent).toContain(
+          "Machine identity was written by a newer or incompatible Heiwa build.",
+        );
       });
   });
 

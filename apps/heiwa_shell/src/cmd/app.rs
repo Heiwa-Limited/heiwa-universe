@@ -3385,8 +3385,8 @@ fn machine_perspective_payload() -> Value {
         "channel": runtime_channel(),
         "install_path": env::current_exe().ok().map(|path| path.display().to_string()),
     });
-    let mut machine = heiwa_install::load_machine_manifest()
-        .map(|mut manifest| {
+    let (mut machine, recognition_error) = match heiwa_install::load_machine_manifest() {
+        Ok(Some(mut manifest)) => {
             if manifest.display_name.trim().is_empty() {
                 manifest.display_name = manifest.hostname.clone();
             }
@@ -3401,12 +3401,52 @@ fn machine_perspective_payload() -> Value {
             if manifest.capabilities.display_surfaces.is_empty() {
                 manifest.capabilities.display_surfaces = vec!["desktop".to_string()];
             }
-            manifest
-        })
-        .and_then(|manifest| serde_json::to_value(manifest).ok())
-        .unwrap_or_else(|| {
-            let hardware = heiwa_install::probe_machine_hardware();
+            match serde_json::to_value(manifest) {
+                Ok(machine) => (machine, None),
+                Err(_) => (
+                    unrecognized_machine_payload("manifest_error"),
+                    Some(json!({
+                        "code": "invalid_shape",
+                        "message": "Machine identity file is incomplete.",
+                    })),
+                ),
+            }
+        }
+        Ok(None) => (unrecognized_machine_payload("unregistered"), None),
+        Err(error) => (
+            unrecognized_machine_payload("manifest_error"),
+            Some(json!({
+                "code": machine_manifest_issue_code(error.issue()),
+                "message": error.user_message(),
+            })),
+        ),
+    };
+    if let Some(object) = machine.as_object_mut() {
+        object.insert("runtime".to_string(), current_runtime);
+        if let Some(error) = recognition_error {
+            object.insert("recognition_error".to_string(), error);
+        }
+        // L5.0 will populate this with enrolled node fingerprints. Keep the
+        // pre-mesh local handle (`device_id`) out of peer identity.
+        let enrolled_peer_ids: Vec<String> = Vec::new();
+        object.insert(
+            "perspective".to_string(),
             json!({
+                "locality": "local",
+                "execution_scope": "this_device",
+                "data_scope": "shared_user",
+                "sync_status": machine_sync_status(&enrolled_peer_ids),
+                "transport": "not_configured",
+                "enrolled_peer_count": enrolled_peer_ids.len(),
+            }),
+        );
+    }
+    machine
+}
+
+fn unrecognized_machine_payload(registration_status: &str) -> Value {
+    let hardware = heiwa_install::probe_machine_hardware();
+    json!({
                 "schema_version": "heiwa_machine_v1",
                 "device_id": null,
                 "display_name": hostname_string(),
@@ -3421,23 +3461,25 @@ fn machine_perspective_payload() -> Value {
                     "host_surfaces": ["terminal", "desktop"],
                     "display_surfaces": ["desktop"],
                 },
-                "registration_status": "unregistered",
-            })
-        });
-    if let Some(object) = machine.as_object_mut() {
-        object.insert("runtime".to_string(), current_runtime);
-        object.insert(
-            "perspective".to_string(),
-            json!({
-                "locality": "local",
-                "execution_scope": "this_device",
-                "data_scope": "shared_user",
-                "sync_status": "local_only",
-                "transport": "not_configured",
-            }),
-        );
+                "registration_status": registration_status,
+    })
+}
+
+fn machine_manifest_issue_code(issue: heiwa_install::MachineManifestLoadIssue) -> &'static str {
+    match issue {
+        heiwa_install::MachineManifestLoadIssue::ReadFailed => "read_failed",
+        heiwa_install::MachineManifestLoadIssue::InvalidJson => "invalid_json",
+        heiwa_install::MachineManifestLoadIssue::UnsupportedSchema => "unsupported_schema",
+        heiwa_install::MachineManifestLoadIssue::InvalidShape => "invalid_shape",
     }
-    machine
+}
+
+fn machine_sync_status(enrolled_peer_ids: &[String]) -> &'static str {
+    if enrolled_peer_ids.is_empty() {
+        "local_only"
+    } else {
+        "peer_enrolled"
+    }
 }
 
 fn resource_payload() -> Value {
@@ -6613,6 +6655,15 @@ mod app_readmodel_tests {
                 .as_u64()
                 .is_some_and(|count| count > 0),
             "machine perspective should include CPU resources: {payload}"
+        );
+    }
+
+    #[test]
+    fn machine_sync_status_is_derived_from_enrolled_peer_count() {
+        assert_eq!(machine_sync_status(&[]), "local_only");
+        assert_eq!(
+            machine_sync_status(&["sha256:peer-fingerprint".to_string()]),
+            "peer_enrolled"
         );
     }
 

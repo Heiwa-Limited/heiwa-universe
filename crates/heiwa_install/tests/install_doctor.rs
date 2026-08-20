@@ -1,6 +1,6 @@
 use heiwa_install::{
-    check_ai_ops_at, check_installation, get_heiwa_dir, parse_plugin_source, plan_plugin_install,
-    run_install,
+    check_ai_ops_at, check_installation, get_heiwa_dir, load_machine_manifest, parse_plugin_source,
+    plan_plugin_install, run_install, MachineManifestLoadIssue,
 };
 use std::env;
 use std::fs;
@@ -291,6 +291,48 @@ fn test_install_refuses_future_machine_manifest_without_rotating_identity() {
                 .expect("future manifest should remain unchanged JSON");
         assert_eq!(unchanged["schema_version"], "heiwa_machine_v2");
         assert_eq!(unchanged["device_id"], "future-device-id");
+    });
+}
+
+#[test]
+fn test_read_reports_future_machine_manifest_instead_of_treating_it_as_missing() {
+    with_temp_home(|home| {
+        let runtime_root = home.join(".heiwa");
+        fs::create_dir_all(&runtime_root).expect("create runtime root");
+        fs::write(
+            runtime_root.join("machine.json"),
+            r#"{"schema_version":"heiwa_machine_v2"}"#,
+        )
+        .expect("write future manifest");
+
+        let error = load_machine_manifest().expect_err("future schema must be visible to readers");
+
+        assert_eq!(error.issue(), MachineManifestLoadIssue::UnsupportedSchema);
+    });
+}
+
+#[test]
+fn test_read_reports_corrupt_machine_manifest_instead_of_treating_it_as_missing() {
+    with_temp_home(|home| {
+        let runtime_root = home.join(".heiwa");
+        fs::create_dir_all(&runtime_root).expect("create runtime root");
+        fs::write(runtime_root.join("machine.json"), "{not-json").expect("write corrupt manifest");
+
+        let error = load_machine_manifest().expect_err("corruption must be visible to readers");
+
+        assert_eq!(error.issue(), MachineManifestLoadIssue::InvalidJson);
+    });
+}
+
+#[test]
+fn test_read_keeps_missing_machine_manifest_distinct_from_invalid() {
+    with_temp_home(|_| {
+        assert!(
+            load_machine_manifest()
+                .expect("missing manifest is not a read failure")
+                .is_none(),
+            "missing manifest should remain an explicit empty state"
+        );
     });
 }
 

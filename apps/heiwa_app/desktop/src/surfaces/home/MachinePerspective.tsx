@@ -59,12 +59,25 @@ export function MachinePerspective() {
                 </Show>
               </div>
 
+              <Show when={current().recognition_error?.message}>
+                {(message) => (
+                  <div class="machine-recognition-error" role="alert">
+                    <strong>Device recognition needs attention</strong>
+                    <span>{message()}</span>
+                  </div>
+                )}
+              </Show>
+
               <div class="machine-scope">
                 <div>
                   <strong>Shared data</strong>
                   <span>Work and evidence use one user scope.</span>
                 </div>
-                <span class="state-chip planned">sync local only</span>
+                <span class="state-chip planned">
+                  {current().perspective?.sync_status === "local_only"
+                    ? "sync local only"
+                    : "peer enrolled"}
+                </span>
               </div>
               <p class="quiet machine-boundary">
                 Capabilities, credentials, processes, and live resource pressure stay on this device.

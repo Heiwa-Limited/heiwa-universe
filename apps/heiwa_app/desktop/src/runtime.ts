@@ -103,6 +103,11 @@ export type MachineSnapshot = {
     data_scope?: string;
     sync_status?: string;
     transport?: string;
+    enrolled_peer_count?: number;
+  };
+  recognition_error?: {
+    code?: string;
+    message?: string;
   };
 };
 

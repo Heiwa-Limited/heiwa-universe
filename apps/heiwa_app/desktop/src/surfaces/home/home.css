@@ -52,6 +52,20 @@
   color: var(--content-secondary);
 }
 
+.machine-recognition-error {
+  display: grid;
+  gap: var(--space-1);
+  padding: var(--space-3) var(--space-4);
+  border: 1px solid var(--accent-ring);
+  border-radius: var(--radius-md);
+  background: var(--accent-wash);
+}
+
+.machine-recognition-error span {
+  color: var(--content-secondary);
+  font-size: var(--text-sm);
+}
+
 .machine-scope {
   padding-top: var(--space-4);
   border-top: 1px solid var(--border-subtle);

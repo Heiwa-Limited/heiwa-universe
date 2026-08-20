@@ -1,6 +1,7 @@
 use anyhow::{anyhow, Context, Result};
 use serde::{Deserialize, Serialize};
 use std::env;
+use std::error::Error;
 use std::fs;
 #[cfg(unix)]
 use std::os::unix::fs::PermissionsExt;
@@ -116,6 +117,52 @@ pub struct MachineRuntime {
     pub channel: String,
     pub install_path: PathBuf,
 }
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MachineManifestLoadIssue {
+    ReadFailed,
+    InvalidJson,
+    UnsupportedSchema,
+    InvalidShape,
+}
+
+#[derive(Debug)]
+pub struct MachineManifestLoadError {
+    issue: MachineManifestLoadIssue,
+    detail: String,
+}
+
+impl MachineManifestLoadError {
+    fn new(issue: MachineManifestLoadIssue, detail: impl Into<String>) -> Self {
+        Self {
+            issue,
+            detail: detail.into(),
+        }
+    }
+
+    pub fn issue(&self) -> MachineManifestLoadIssue {
+        self.issue
+    }
+
+    pub fn user_message(&self) -> &'static str {
+        match self.issue {
+            MachineManifestLoadIssue::ReadFailed => "Machine identity file could not be read.",
+            MachineManifestLoadIssue::InvalidJson => "Machine identity file is corrupt.",
+            MachineManifestLoadIssue::UnsupportedSchema => {
+                "Machine identity was written by a newer or incompatible Heiwa build."
+            }
+            MachineManifestLoadIssue::InvalidShape => "Machine identity file is incomplete.",
+        }
+    }
+}
+
+impl std::fmt::Display for MachineManifestLoadError {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str(&self.detail)
+    }
+}
+
+impl Error for MachineManifestLoadError {}
 
 fn machine_schema_version() -> String {
     "heiwa_machine_v1".to_string()
@@ -308,7 +355,8 @@ pub fn refresh_machine_manifest_for_runtime(runtime: MachineRuntime) -> Result<M
     refresh_machine_manifest_at(&get_heiwa_dir(), report, Some(runtime))
 }
 
-pub fn load_machine_manifest() -> Option<MachineManifest> {
+pub fn load_machine_manifest(
+) -> std::result::Result<Option<MachineManifest>, MachineManifestLoadError> {
     load_existing_manifest(&get_heiwa_dir().join("machine.json"))
 }
 
@@ -330,7 +378,7 @@ fn refresh_machine_manifest_at(
 ) -> Result<MachineManifest> {
     fs::create_dir_all(heiwa_dir)?;
     let path = heiwa_dir.join("machine.json");
-    let existing = load_machine_manifest_for_refresh(&path)?;
+    let existing = load_existing_manifest(&path).map_err(anyhow::Error::new)?;
     let now = chrono::Utc::now().to_rfc3339();
     let hostname = get_hostname().unwrap_or_else(|| "unknown".to_string());
     let display_name = existing
@@ -884,34 +932,42 @@ fn get_repo_root() -> PathBuf {
         })
 }
 
-fn load_existing_manifest(path: &Path) -> Option<MachineManifest> {
-    fs::read_to_string(path)
-        .ok()
-        .and_then(|raw| serde_json::from_str(&raw).ok())
-}
-
-fn load_machine_manifest_for_refresh(path: &Path) -> Result<Option<MachineManifest>> {
+fn load_existing_manifest(
+    path: &Path,
+) -> std::result::Result<Option<MachineManifest>, MachineManifestLoadError> {
     let raw = match fs::read_to_string(path) {
         Ok(raw) => raw,
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
         Err(error) => {
-            return Err(error)
-                .with_context(|| format!("read machine manifest at {}", path.display()))
+            return Err(MachineManifestLoadError::new(
+                MachineManifestLoadIssue::ReadFailed,
+                format!("read machine manifest at {}: {error}", path.display()),
+            ))
         }
     };
-    let value: serde_json::Value = serde_json::from_str(&raw)
-        .with_context(|| format!("parse machine manifest at {}", path.display()))?;
+    let value: serde_json::Value = serde_json::from_str(&raw).map_err(|error| {
+        MachineManifestLoadError::new(
+            MachineManifestLoadIssue::InvalidJson,
+            format!("parse machine manifest at {}: {error}", path.display()),
+        )
+    })?;
     if let Some(schema) = value
         .get("schema_version")
         .and_then(serde_json::Value::as_str)
     {
         if schema != machine_schema_version() {
-            return Err(anyhow!("unsupported machine manifest schema: {schema}"));
+            return Err(MachineManifestLoadError::new(
+                MachineManifestLoadIssue::UnsupportedSchema,
+                format!("unsupported machine manifest schema at {}", path.display()),
+            ));
         }
     }
-    serde_json::from_value(value)
-        .map(Some)
-        .with_context(|| format!("decode machine manifest at {}", path.display()))
+    serde_json::from_value(value).map(Some).map_err(|error| {
+        MachineManifestLoadError::new(
+            MachineManifestLoadIssue::InvalidShape,
+            format!("decode machine manifest at {}: {error}", path.display()),
+        )
+    })
 }
 
 fn get_version(cmd: &str, args: &[&str]) -> Option<String> {
