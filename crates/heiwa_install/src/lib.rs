@@ -1154,6 +1154,7 @@ fn hardware_model() -> Option<String> {
     None
 }
 
+#[cfg(any(target_os = "macos", target_os = "windows"))]
 fn command_stdout(command: &str, args: &[&str]) -> Option<String> {
     let output = Command::new(command).args(args).output().ok()?;
     if !output.status.success() {
