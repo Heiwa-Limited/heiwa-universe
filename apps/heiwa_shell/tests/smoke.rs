@@ -43,9 +43,23 @@ fn heiwa_command() -> HermeticCommand {
     let state_dir = root.path().join("state");
     let index_dir = root.path().join("index");
     let fixture_bin = root.path().join("bin");
+    let rust_sysroot = root.path().join("rust-sysroot");
+    let rust_lld = rust_sysroot
+        .join("lib")
+        .join("rustlib")
+        .join("aarch64-apple-darwin")
+        .join("bin")
+        .join("rust-lld");
     for directory in [&home, &evidence_dir, &state_dir, &index_dir, &fixture_bin] {
         std::fs::create_dir_all(directory).expect("create hermetic shell directory");
     }
+    std::fs::create_dir_all(rust_lld.parent().expect("fake rust-lld parent"))
+        .expect("create fake Rust sysroot");
+    std::fs::write(&rust_lld, b"hermetic rust-lld fixture").expect("write fake bundled linker");
+    write_fake_executable(
+        &fixture_bin.join("rustc"),
+        "#!/bin/sh\nif [ \"$1 $2\" = \"--print sysroot\" ]; then\n  printf '%s\\n' \"$HEIWA_TEST_RUST_SYSROOT\"\nelse\n  exit 1\nfi\n",
+    );
     write_fake_executable(
         &fixture_bin.join("ollama"),
         "#!/bin/sh\ncase \"$1\" in\n  list) printf 'NAME ID SIZE MODIFIED\\n' ;;\n  ps) printf 'NAME ID SIZE PROCESSOR UNTIL\\n' ;;\n  *) exit 1 ;;\nesac\n",
@@ -68,6 +82,7 @@ fn heiwa_command() -> HermeticCommand {
         .env("HEIWA_STATE_DIR", &state_dir)
         .env("HEIWA_INDEX_DIR", &index_dir)
         .env("HEIWA_DISABLE_KEYCHAIN", "1")
+        .env("HEIWA_TEST_RUST_SYSROOT", &rust_sysroot)
         .env("HEIWA_OLLAMA_BASE", "disabled-for-hermetic-tests")
         .env("NO_COLOR", "1")
         .env("LC_ALL", "C")
@@ -552,6 +567,14 @@ fn test_app_update_checkout_dry_run_json_reports_promotion_contract() {
         .get("install_command")
         .and_then(serde_json::Value::as_array)
         .is_some());
+    let cargo_environment = payload
+        .get("cargo_environment")
+        .and_then(serde_json::Value::as_object)
+        .expect("checkout cargo environment contract object");
+    assert!(cargo_environment
+        .get("strategy")
+        .and_then(serde_json::Value::as_str)
+        .is_some_and(|strategy| !strategy.is_empty()));
     assert!(payload
         .get("verification_commands")
         .and_then(serde_json::Value::as_array)
@@ -586,6 +609,10 @@ fn test_app_update_checkout_dry_run_json_reports_promotion_contract() {
     assert!(promotion_receipt
         .get("codesign")
         .is_some_and(serde_json::Value::is_object));
+    assert_eq!(
+        promotion_receipt.get("cargo_environment"),
+        payload.get("cargo_environment")
+    );
     assert_eq!(
         promotion_receipt
             .get("would_write")

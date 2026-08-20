@@ -204,6 +204,12 @@ runtime changed. `--dry-run` is the default probe. Use
 `heiwa app update --source checkout` only for developer reinstall from the
 current checkout.
 
+On Apple Silicon, checkout update dry-runs report
+`cargo_environment.strategy: rust_bundled_macho_linker` and the executed
+`cargo install` resolves `rust-lld` from the active pinned Rust sysroot. An
+explicit non-empty `CARGO_TARGET_AARCH64_APPLE_DARWIN_LINKER` remains
+authoritative and is reported as `operator_override`.
+
 Build a coherent local macOS `.app` before checkout promotion with:
 
 ```bash
