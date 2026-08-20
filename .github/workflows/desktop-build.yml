@@ -129,7 +129,7 @@ jobs:
         if: steps.gate.outputs.run == 'true'
         env:
           BUNDLES: ${{ matrix.bundles }}
-        run: npm --prefix apps/heiwa_app/desktop run tauri -- build --bundles "$BUNDLES"
+        run: npm --prefix apps/heiwa_app/desktop run tauri:build -- --bundles "$BUNDLES"
 
       - name: Verify the bundle carries its runtime
         if: steps.gate.outputs.run == 'true' && runner.os == 'macOS'

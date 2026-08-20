@@ -248,7 +248,7 @@ jobs:
           # rather than publishing a release nobody can update to.
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ""
-        run: npm --prefix apps/heiwa_app/desktop run tauri -- build --bundles ${{ matrix.bundles }}
+        run: npm --prefix apps/heiwa_app/desktop run tauri:build -- --bundles ${{ matrix.bundles }}
 
       # A browser download sets com.apple.quarantine and Gatekeeper blocks
       # the app; curl and the updater do not. So the shipped macOS artifact is

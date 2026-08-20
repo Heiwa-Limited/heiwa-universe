@@ -204,6 +204,17 @@ runtime changed. `--dry-run` is the default probe. Use
 `heiwa app update --source checkout` only for developer reinstall from the
 current checkout.
 
+Build a coherent local macOS `.app` before checkout promotion with:
+
+```bash
+npm --prefix apps/heiwa_app/desktop run tauri:build:app
+```
+
+That command builds and stages the current checkout's release `heiwa` binary,
+isolates it from the case-folded `Heiwa` desktop output, disables
+updater-artifact signing for the local-only bundle, and uses Rust's bundled
+Mach-O linker on Apple Silicon. Release builds keep updater signing on.
+
 ### 4. Verify the authenticated operator stream
 
 Operator HTTP and WebSocket endpoints require local runtime auth. Native Desktop
