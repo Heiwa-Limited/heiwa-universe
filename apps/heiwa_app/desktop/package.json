@@ -7,13 +7,13 @@
   "type": "module",
   "scripts": {
     "dev": "vite --host 127.0.0.1",
-    "test": "vitest run",
+    "test": "vitest run && node --test scripts/tauri-build-env.node-test.mjs",
     "build": "tsc --noEmit && vite build",
     "typecheck": "tsc --noEmit",
     "tauri": "tauri",
     "tauri:dev": "tauri dev",
-    "tauri:build": "tauri build",
-    "tauri:build:app": "tauri build --bundles app"
+    "tauri:build": "node scripts/tauri-build.mjs",
+    "tauri:build:app": "node scripts/tauri-build.mjs --local-app"
   },
   "dependencies": {
     "@tauri-apps/api": "^2.8.0",
