@@ -75,7 +75,7 @@ layer produces work that must be rewritten.
 - A hosted inference middleman. Local execution stays on the local machine.
 - Reproducing this repository's developer workflow inside the product.
 - Cross-device sync in L0 through L4. The seams are placed; the machinery is
-  L5 and depends on an unresolved decision recorded below.
+  L5 under the transport decision ratified on 2026-08-20.
 - Mobile clients. `apps/heiwa_app/clients/iphone` stays out of scope here.
 
 ## Product thesis
@@ -118,7 +118,7 @@ handling is a prerequisite task inside L0, not a separate project.
 | L2 | Onboarding and per-user identity | First-run without docs | L1 |
 | L3 | Connector plane | Calendar, Mail, Finance, Social, GitHub | L2 identity, `heiwa_vault` |
 | L4 | Browser surface | Web as an actionable surface | L0, DREX gate |
-| L5 | Cross-device state | Continuity across machines | L2 identity, open decision |
+| L5 | Cross-device state | Continuity across machines | L2 identity, ratified D1 |
 
 Heiwa Limited infrastructure — the release chain in `docs/backlog.md` (B6a
 through B15), distribution, and installer integrity — runs as a parallel track.
@@ -298,26 +298,27 @@ client, `profile.rs` cookie jar and redaction, `tabs.rs` ownership registry,
 
 ### L5 — Cross-device state
 
-Deferred pending the open decision below.
+Networked L5 remains sequenced after L3/L4. Its local machine-perspective
+bootstrap may land earlier because it also closes the existing app boot
+contract on one machine.
 
 **Superseded 2026-08-20.** L5 is specified in
 `docs/superpowers/specs/2026-08-20-heiwa-mesh-runtime-design.md`, which widens
 the layer from "cross-device state" to one governed runtime across the user's
-machines, and carries D1's recommendation. Implementation of that spec is
-blocked on Devon ratifying D1; L3 and L4 remain the immediate work and are
-unaffected except for the four constraints that spec lists.
+machines. Devon ratified D1 on 2026-08-20: direct device-to-device transport
+plus optional user-supplied ciphertext relay, with no hosted authority plane.
+L3 and L4 remain unaffected except for the four constraints that spec lists.
 
 ## Open decisions
 
 ### D1 — Cross-device sync transport
 
-**Recommendation recorded 2026-08-20** in
+**Resolved by Devon 2026-08-20** as specified in
 `docs/superpowers/specs/2026-08-20-heiwa-mesh-runtime-design.md`: candidate 3
 (direct device-to-device) as the transport, candidate 1 (user-supplied storage)
 as an optional ciphertext relay for the both-offline case. Candidate 2 is
 refused only because adopting a hosted authority plane is a product-policy
-change that is Devon's to make, not because it lacks merit. The decision stays
-open until ratified.
+change that is Devon's to make, not because it lacks merit.
 
 `HEIWA.md` currently records that "redaction-gated evidence sync through GitHub
 is the planned (not yet built) multi-device path", and that "no hosted backend
@@ -326,7 +327,7 @@ reassigns GitHub to a user connector, which removes it as the sync transport and
 leaves the requirement — persistent state across a user's devices and accounts —
 without an answer.
 
-Three candidates, none yet chosen:
+Candidates considered:
 
 1. **User-supplied storage.** The user points Heiwa at storage they already own.
    Preserves local-first fully and adds no Heiwa Limited service. Cost: the user
@@ -339,9 +340,9 @@ Three candidates, none yet chosen:
    machines. No third party at all. Cost: hardest to make reliable, and both
    devices must be reachable.
 
-This decision blocks L5 only. L0 through L4 proceed without it, provided each
-layer keeps user state serializable and scoped to the configuration root, so
-that whichever transport wins can carry it.
+This decision no longer blocks L5. L0 through L4 still keep user state
+serializable and scoped to the configuration root so the ratified transport can
+carry bounded, redaction-approved projections later.
 
 ### D2 — Repository truth update
 
@@ -380,6 +381,7 @@ parallel.
 L2 follows, since onboarding is meaningless before a provider works and
 required before connectors have an identity to attach credentials to. L3 is the
 largest value step and the documented bottleneck. L4 is independent of L3 and
-may be scheduled against appetite. L5 waits on D1.
+may be scheduled against appetite. Networked L5 follows them; local
+machine-perspective bootstrap may land earlier as app-runtime foundation.
 
 The Heiwa Limited release chain runs continuously alongside all of it.

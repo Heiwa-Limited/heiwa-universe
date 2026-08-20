@@ -1,7 +1,7 @@
 # Heiwa Mesh Runtime Design
 
 Date: 2026-08-20
-Status: Draft for review — D1 requires Devon's ratification before implementation
+Status: Accepted — D1 ratified by Devon on 2026-08-20
 Plane: Intake + Execution + Evidence
 Supersedes: `2026-08-14-heiwa-app-product-roadmap-design.md` § L5 and § D1
 
@@ -28,7 +28,7 @@ container above `Task`.
 
 ## What this document does and does not do
 
-**Does:** resolve open decision D1; define the mesh domain model against
+**Does:** record the ratified decision D1; define the mesh domain model against
 existing crates; reconcile the mesh's partial ordering with the operator
 stream's total ordering; state platform limits honestly; specify the first
 vertical slice and its acceptance gate.
@@ -92,14 +92,34 @@ become an authority plane — it is a mailbox, not a source of truth.
 
 Candidate 2 is not refused on merit. It is the least user effort and is what
 ChatGPT and Claude desktop do. It is refused because adopting it is a product
-policy change, and product policy is Devon's. **This is the one item in this
-document that must not be implemented until ratified.**
+policy change, and product policy is Devon's. Devon ratified candidate 3 plus
+the optional ciphertext relay on 2026-08-20; no hosted authority plane is
+introduced.
 
 Cost accepted with candidate 3: peer reachability is genuinely hard (NAT
 traversal, changing networks, sleeping laptops), and both devices must be up
 for a live exchange. The relay covers the asynchronous case; nothing covers
 "steer a session on a machine that is powered off," and the product must say
 so rather than pretend.
+
+### MacBook-first bootstrap
+
+Implementation begins from the machine running Heiwa now, without making that
+machine a master:
+
+1. App boot refreshes the local machine manifest and capability/resource
+   probes under the resolved configuration root.
+2. Runtime snapshot identifies this device as local execution and presentation
+   perspective while describing durable user data as shared.
+3. Until peer enrolment and replication land, sync status remains explicitly
+   `local_only`; UI must not imply another device already has the data.
+4. Same contract on Windows produces a Windows-local perspective over the same
+   replicated Work/evidence data. Machine capabilities, credentials, process
+   handles, and live resource pressure remain node-scoped.
+
+This bootstrap satisfies existing one-machine boot contract and prepares L5
+seam. It does not create a node keypair, enrol a peer, or claim cross-device
+replication exists.
 
 ## Mesh domain model
 
@@ -540,11 +560,11 @@ The mesh does not reorder the roadmap. It constrains it:
 - **Every domain event L3 and L4 emit should already carry `work_id`.** Free
   today, expensive to backfill.
 
-## Open decisions
+## Decision registry
 
 | ID | Decision | Owner |
 |---|---|---|
-| D1 | Sync transport — recommendation above is device-to-device plus optional ciphertext relay. **Blocks implementation.** | Devon |
+| D1 | **Resolved 2026-08-20.** Device-to-device plus optional user-supplied ciphertext relay; no hosted authority plane. | Devon |
 | D3 | Whether `LocalIdentity` gains the node keypair or a sibling record holds it. Leaning sibling, so identity stays contact-free as L2 established. | Architecture, resolvable in implementation |
 | D4 | Peer transport concretely — QUIC direct, an existing overlay, or relay-only first. Affects the reachability cost accepted under D1. | Architecture, needs a spike |
 | D5 | Whether mobile ships as a Tauri mobile target or a native shell over the same Rust core. Not needed until after L5.0. | Deferred |
