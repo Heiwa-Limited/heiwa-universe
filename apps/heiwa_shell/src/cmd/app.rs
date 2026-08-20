@@ -769,10 +769,6 @@ async fn start(args: &[String]) -> Result<()> {
         channel: runtime_channel(),
         install_path,
     })?;
-    let bind_addr = SocketAddr::from(([127, 0, 0, 1], port));
-    let listener = TcpListener::bind(bind_addr).await?;
-    let local_addr = listener.local_addr()?;
-    let url = format!("http://127.0.0.1:{}/", local_addr.port());
     let worker_id = format!("heiwa-app-{}", std::process::id());
     let started_at = Arc::new(chrono::Utc::now().to_rfc3339());
     let runtime_state_dir = state_dir();
@@ -793,6 +789,14 @@ async fn start(args: &[String]) -> Result<()> {
     sessions
         .recover_interrupted()
         .map_err(|error| anyhow!("operator restart recovery failed: {error}"))?;
+
+    // Port reachability is the readiness boundary used by launchers and
+    // tests. Bind only after ownership and recovery finish so a successful
+    // TCP connect cannot race the exclusive recovery lease.
+    let bind_addr = SocketAddr::from(([127, 0, 0, 1], port));
+    let listener = TcpListener::bind(bind_addr).await?;
+    let local_addr = listener.local_addr()?;
+    let url = format!("http://127.0.0.1:{}/", local_addr.port());
 
     write_app_heartbeat(&runtime_state_dir, &worker_id)?;
     let mut caffeinate = spawn_caffeinate();
