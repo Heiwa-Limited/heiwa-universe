@@ -300,9 +300,24 @@ client, `profile.rs` cookie jar and redaction, `tabs.rs` ownership registry,
 
 Deferred pending the open decision below.
 
+**Superseded 2026-08-20.** L5 is specified in
+`docs/superpowers/specs/2026-08-20-heiwa-mesh-runtime-design.md`, which widens
+the layer from "cross-device state" to one governed runtime across the user's
+machines, and carries D1's recommendation. Implementation of that spec is
+blocked on Devon ratifying D1; L3 and L4 remain the immediate work and are
+unaffected except for the four constraints that spec lists.
+
 ## Open decisions
 
 ### D1 — Cross-device sync transport
+
+**Recommendation recorded 2026-08-20** in
+`docs/superpowers/specs/2026-08-20-heiwa-mesh-runtime-design.md`: candidate 3
+(direct device-to-device) as the transport, candidate 1 (user-supplied storage)
+as an optional ciphertext relay for the both-offline case. Candidate 2 is
+refused only because adopting a hosted authority plane is a product-policy
+change that is Devon's to make, not because it lacks merit. The decision stays
+open until ratified.
 
 `HEIWA.md` currently records that "redaction-gated evidence sync through GitHub
 is the planned (not yet built) multi-device path", and that "no hosted backend
