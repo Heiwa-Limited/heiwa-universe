@@ -12,16 +12,19 @@ when its verification runs.
 |---|---|---|---|
 | 1 | `heiwa_oauth` — loopback + PKCE + exchange | **done** | 28 tests incl. end-to-end flow against a mock provider and deadline-bounded listener timeout; `cargo test -p heiwa_oauth` |
 | 2 | Shell caller + token storage through `heiwa_vault` | **done** | Calendar caller uses `heiwa_oauth`; refresh-token preservation is tested; tokens exist only in the OS credential vault |
-| 3 | Google Calendar read | blocked (live) | offline caller path is wired; needs Google account 2-step verification and a Desktop OAuth client id for live acceptance |
-| 4 | Calendar write under approval → receipt | blocked | needs 3; this is the L3 acceptance criterion |
-| 5 | `gmail.send` on the same path | blocked | needs 3 plus an approval-backed sender; Gmail reads remain local through Mail.app |
+| 3 | Apple Calendar resource list + read model | **done** | exact writable resources discovered through Calendar.app; normalized source/deadline/actionable/privacy fields feed the read model |
+| 4 | Calendar write under approval → receipt replay | **done** | 2026-08-21 live Calendar.app write returned one external id; T2 approval, `work_id`, file receipt, and one replayed journal event agreed; exact verification event removed |
+| 5 | Heiwa.app Calendar staging | **done** | authenticated endpoint stages exact Apple target without creating; cockpit self-discovers writable Mac calendars; connector integration test + TypeScript typecheck/build |
+| 6 | Google Calendar read/write | blocked (external setup) | offline caller path is wired; needs Google account 2-step verification and a Desktop OAuth client id for live acceptance |
+| 7 | `gmail.send` on the same path | pending | needs Google setup plus an approval-backed sender; Gmail reads remain local through Mail.app |
 
-Steps 1 and 2 required no Google account, no client id, and no network. That
-was the point of the seam: steps 3–5 are a credential away, not a build away.
+Steps 1–5 establish the product-grade Mac-first connector without a Google
+account. Google and Gmail breadth remain separate work rather than an L3
+milestone blocker.
 
 ## External dependency
 
-Steps 3–5 need a Google Cloud project with an OAuth client of type "Desktop
+Steps 6–7 need a Google Cloud project with an OAuth client of type "Desktop
 app", kept in testing mode with Devon's account as a test user. Live inspection
 on 2026-08-20 reached Google Cloud's account gate: the account must enable
 2-step verification before Cloud Console will open. That authentication change
@@ -66,6 +69,20 @@ AD-16 through AD-19 are recorded in the spec. Implementation added:
 - **AD-26** No Gmail read scope or API caller exists. Mail reads remain the
   metadata-only Mail.app lane; `gmail.send` is advertised but cannot be granted
   until an approval-backed sender is implemented.
+- **AD-27 through AD-30** Mac-first Calendar.app is a valid complete connector
+  lane; domain records carry `work_id` without pretending `device_id` is a
+  mesh node key; stable hold markers make external creation retry-safe; and
+  the external write must succeed before the local hold becomes confirmed.
+
+## 2026-08-21 Mac-first acceptance
+
+- `cargo test -p heiwa-shell --test apple_calendar_connector` — 3/3, including
+  authenticated app staging and `heiwa_evidence::read_stream` replay.
+- Existing schedule/approval/calendar-sync integration tests — 7/7.
+- Cockpit `tsc --noEmit` and Vite production build — green.
+- Live Calendar.app: exact writable `Calendar` target, one approved event, one
+  external id, one connector receipt event, zero skipped journal lines, exact
+  marker/id cleanup, zero verification events left.
 
 ## Notes from implementation
 

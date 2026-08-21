@@ -1,7 +1,7 @@
 # L3 — Calendar and Mail Connectors
 
 Date: 2026-08-18
-Status: Active — offline OAuth/storage caller complete; live Google acceptance blocked
+Status: Active — Mac-first Calendar acceptance complete; Google/Gmail expansion pending
 Plane: Intake + Execution + Evidence
 Depends on: `2026-08-18-build-foundation.md` (Phase 1), AD-14, `docs/references/google-oauth-native.md`
 
@@ -13,7 +13,7 @@ connector executes under it, the trust plane is architecture nobody has used.
 
 ## What already exists
 
-Verified through 2026-08-20, so the spec builds on the real seam rather than a guess:
+Verified through 2026-08-21, so the spec builds on the real seam rather than a guess:
 
 - `heiwa_vault::Vault` — `store_oauth` / `load_oauth` over an `OAuthSecret`.
 - `heiwa_provider::oauth::ProviderVault` — keychain-backed storage plus
@@ -30,6 +30,15 @@ Verified through 2026-08-20, so the spec builds on the real seam rather than a g
 - `heiwa connect google-calendar` — reduces Google's downloaded desktop-app
   JSON to a versioned public client-id record, opens consent without logging
   the OAuth state URL, and stores OAuth tokens only through `heiwa_vault`.
+- `heiwa calendar calendars --source apple` — discovers exact writable
+  Calendar.app resources through macOS-owned Automation permission.
+- `heiwa schedule ... --promote apple --calendar <exact name>` and the
+  Heiwa.app Calendar form — stage a named T2 write; `approvals decide` is the
+  only execution point.
+- Apple event creation is retry-safe through a stable
+  `heiwa://calendar/holds/<hold_id>` marker. The file receipt and
+  `connector_receipts.jsonl` carry the same external id, `work_id`, approval
+  id, pre-mesh device handle, and undo posture.
 
 **Not yet live-proven:** Google Calendar read/write and Gmail send. The offline
 protocol and storage seams are built; the account cannot enter Cloud Console
@@ -43,8 +52,8 @@ third-party security assessment. This design uses none of them.
 
 | Capability | Mechanism | Google tier |
 |---|---|---|
-| Read calendar | `calendar.readonly` | sensitive |
-| Write calendar | `calendar.events` | sensitive |
+| Read calendar | Calendar.app bridge / `calendar.readonly` | none / sensitive |
+| Write calendar | Calendar.app bridge / `calendar.events` | none / sensitive |
 | Read mail | Mail.app bridge (built) | **no scope** |
 | Send mail | `gmail.send` | sensitive |
 
@@ -87,22 +96,36 @@ testing, verification is waived entirely. Build against real scopes now.
 
   Mail send shows the rendered body in the approval, never a summary. An
   approval the user cannot read is not an approval.
+- **AD-27 — Mac-first Calendar.app is a complete connector lane, not a mock
+  pending Google.** macOS owns Automation consent and revocation; Heiwa owns
+  exact resource selection, T2 approval, execution, and evidence. Google
+  remains a portable expansion lane rather than the gate on local value.
+- **AD-28 — Connector domain records carry `work_id`; receipts name
+  `origin_device_id`, not `node_id`.** `device_id` remains the unsigned
+  pre-mesh local handle. L5 public-key node identity is not fabricated early.
+- **AD-29 — Apple event creation is idempotent by stable hold URL.** A retry
+  returns the one existing event only when title/start/end still match; marker
+  collisions or changed content fail closed.
+- **AD-30 — External creation precedes local confirmation.** A connector
+  failure leaves the hold draft and writes no approval decision. Once the
+  external side effect succeeds, its deterministic receipt id supports
+  at-least-once evidence without ambiguous action identity.
 
 ## Build order
 
 1. `heiwa_oauth` — loopback + PKCE + exchange + refresh, against a mock server.
    No Google dependency, fully testable in CI. **Complete.**
 2. Token storage through `heiwa_vault`, reusing `needs_refresh`. **Complete, including the shell caller.**
-3. Google Calendar read → the Calendar surface renders live events beside the
-   local ones, with the source labelled.
-4. Calendar write → `AwaitingApproval` → receipt → journal replay. **This is
-   the milestone that makes the moat real.**
-5. `gmail.send` on the same path.
+3. Apple Calendar resource discovery and read model. **Complete.**
+4. Apple Calendar write → T2 approval → external id → file receipt → journal
+   replay. **Complete; this is the accepted L3 milestone.**
+5. Google Calendar read/write on the same normalized read model. Offline
+   caller complete; live account setup remains external.
+6. `gmail.send` on the same approval/evidence path.
 
-Steps 1 and 2 need no credential and no external account. Step 3 onward needs
-the client id below.
+Steps 1–4 need no Google credential. Steps 5–6 need the client id below.
 
-## Blocked on Devon
+## Remaining Google setup
 
 **Enable 2-step verification on Devon's Google account, then create a Google
 Cloud project and an OAuth client of type "Desktop app".** Live inspection on
@@ -117,13 +140,20 @@ never persists Google's bundled client-secret field. No verification
 submission yet; that is a distribution task for when the app ships publicly,
 and the exemption covers development.
 
+This does not block the accepted Mac-first L3 connector milestone.
+
 ## Verification
 
-L3 is complete when a calendar write executes against a live account under
-approval and the resulting receipt replays from the journal — the criterion
-already set in the 2026-08-14 roadmap. `heiwa_oauth` carries its own unit
-coverage against a mock authorization server, so the flow is proven in CI
-without a network or an account.
+The roadmap's L3 criterion passed on 2026-08-21 through the live Mac
+Calendar.app lane: one exact event was staged as T2, created only after
+approval, returned one external id, and replayed as one connector receipt with
+zero skipped lines. Cleanup matched both the stable marker and external id and
+left zero verification events. CI replaces only Calendar.app with a hermetic
+`osascript` fixture while exercising the real binary, app endpoint, approval,
+state, file receipt, and journal replay.
+
+Google Calendar and `gmail.send` remain incomplete connector breadth. They no
+longer make the already-proven local connector milestone appear blocked.
 
 ## References
 

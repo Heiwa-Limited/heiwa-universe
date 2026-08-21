@@ -45,7 +45,12 @@ Source: <https://developer.apple.com/documentation/eventkit>
 
 EventKit provides access to calendar/reminder data, including create/retrieve/edit, recurrence, alarms, reminders, and change notifications when the Calendar database changes outside the app.
 
-Heiwa implication: Apple Calendar should be a local macOS connector using EventKit permissions and local change notifications. It belongs in the device-local runtime/helper layer, not a cloud connector.
+Heiwa implication: Apple Calendar is a local macOS connector. The current
+working bridge uses Calendar.app through macOS Automation because EventKit
+full-access did not prompt from the shell context on the operator Mac; a native
+EventKit helper remains an optional wrapper-depth improvement, not the product
+gate. It belongs in the device-local runtime/helper layer, not a cloud
+connector.
 
 ### Apple Mail
 
@@ -136,7 +141,7 @@ Add a local read model shaped like:
 | Lane            | Auth                                       | Sync                                                                | Writes                                    | First product action               |
 | --------------- | ------------------------------------------ | ------------------------------------------------------------------- | ----------------------------------------- | ---------------------------------- |
 | Google Calendar | OAuth desktop flow, narrow Calendar scopes | full + incremental sync token; recover 410 by scoped wipe/full sync | create/update/delete after approval       | `calendar.list` + draft focus hold |
-| Apple Calendar  | EventKit local permission                  | EventKit fetch + change notification                                | create/update via EventKit after approval | local day/week read model          |
+| Apple Calendar  | macOS Automation permission                | Calendar.app JXA snapshot; EventKit change notifications remain target depth | exact-calendar create after T2 approval | local day/week read model          |
 | Heiwa Holds     | local runtime state                        | immediate local                                                     | promote to provider after approval        | focus blocks / travel buffers      |
 
 ### UX innovation
@@ -275,20 +280,23 @@ Acceptance:
 - Inbox can merge mail/calendar items into typed `InboxItem`
 - tests fail first, then pass
 
-### Slice 3 — Apple Calendar local bridge
+### Slice 3 — Apple Calendar local bridge — shipped 2026-08-21
 
 Plane: Intake
 
-- macOS helper/command uses EventKit with user permission.
+- macOS helper/command uses Calendar.app with OS-owned Automation permission;
+  native EventKit remains optional later depth.
 - Fetch calendars/events into local read model.
-- Listen for local calendar database change notifications where practical.
-- No writes until approvals and receipts exist.
+- Discover exact writable calendars for Heiwa.app.
+- Create an event only after T2 approval, with stable retry marker, external
+  id, file receipt, and JSONL replay.
 
 Acceptance:
 
 - `heiwa calendar status --json`
+- `heiwa calendar calendars --source apple --json`
 - `heiwa calendar sync --source apple --dry-run --json`
-- local receipt for read/sync
+- live approval → external event → connector receipt replay
 
 ### Slice 4 — Google Calendar connector
 

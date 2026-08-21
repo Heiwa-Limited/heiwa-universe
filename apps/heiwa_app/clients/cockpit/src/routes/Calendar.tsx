@@ -1,5 +1,11 @@
 import type { JSX } from "solid-js";
-import { createSignal, For, Show } from "solid-js";
+import {
+  createEffect,
+  createResource,
+  createSignal,
+  For,
+  Show,
+} from "solid-js";
 import { v1 } from "../lib/endpoints";
 import { RemoteShell } from "../lib/resource";
 import type { CalendarSummary } from "../lib/types";
@@ -11,22 +17,58 @@ function HoldForm(props: { onCreated: () => void }): JSX.Element {
   const [start, setStart] = createSignal("");
   const [end, setEnd] = createSignal("");
   const [kind, setKind] = createSignal("focus");
+  const [destination, setDestination] = createSignal<"local" | "apple">(
+    "local",
+  );
+  const [calendar, setCalendar] = createSignal("Calendar");
   const [busy, setBusy] = createSignal(false);
   const [error, setError] = createSignal<string | null>(null);
+  const [notice, setNotice] = createSignal<string | null>(null);
+  const [resources] = createResource(() => v1.calendarResources());
+
+  const writableCalendars = () =>
+    (resources()?.calendars ?? []).filter((item) => item.writable);
+
+  createEffect(() => {
+    const calendars = writableCalendars();
+    const first = calendars[0];
+    if (first && !calendars.some((item) => item.name === calendar())) {
+      setCalendar(first.name);
+    }
+  });
+
+  const appleReady = () =>
+    destination() !== "apple" ||
+    (resources()?.status === "ready" &&
+      writableCalendars().some((item) => item.name === calendar()) &&
+      Boolean(date() && start() && end()));
 
   async function submit(event: Event): Promise<void> {
     event.preventDefault();
     if (!title().trim() || busy()) return;
     setBusy(true);
     setError(null);
+    setNotice(null);
     try {
-      await v1.createHold({
+      const result = await v1.createHold({
         title: title().trim(),
         date: date() || undefined,
         start: start() || undefined,
         end: end() || undefined,
         kind: kind(),
+        promotion:
+          destination() === "apple"
+            ? {
+                connector: "apple_calendar",
+                calendar: calendar(),
+              }
+            : undefined,
       });
+      setNotice(
+        result.approval_request
+          ? `Staged for approval: ${result.approval_request.request_id}. The Apple event has not been created yet.`
+          : "Local hold created.",
+      );
       setTitle("");
       setStart("");
       setEnd("");
@@ -78,20 +120,58 @@ function HoldForm(props: { onCreated: () => void }): JSX.Element {
           <option value="travel">travel</option>
           <option value="soft">soft</option>
         </select>
+        <select
+          value={destination()}
+          onInput={(event) =>
+            setDestination(event.currentTarget.value as "local" | "apple")
+          }
+          aria-label="Hold destination"
+        >
+          <option value="local">Local hold</option>
+          <option value="apple">Stage for Apple Calendar</option>
+        </select>
+        <Show when={destination() === "apple"}>
+          <select
+            value={calendar()}
+            onInput={(event) => setCalendar(event.currentTarget.value)}
+            aria-label="Apple calendar"
+            disabled={resources.loading || writableCalendars().length === 0}
+          >
+            <Show when={writableCalendars().length === 0}>
+              <option value="">No writable calendars detected</option>
+            </Show>
+            <For each={writableCalendars()}>
+              {(item) => <option value={item.name}>{item.name}</option>}
+            </For>
+          </select>
+        </Show>
         <button
           type="submit"
           class="btn btn-outline"
-          disabled={busy() || !title().trim()}
+          disabled={busy() || !title().trim() || !appleReady()}
         >
-          {busy() ? "Saving…" : "Add hold"}
+          {busy()
+            ? "Saving…"
+            : destination() === "apple"
+              ? "Stage event"
+              : "Add hold"}
         </button>
       </div>
       <Show when={error()}>
         {(message) => <p class="repl-error">{message()}</p>}
       </Show>
+      <Show when={notice()}>
+        {(message) => <p class="muted">{message()}</p>}
+      </Show>
+      <Show when={destination() === "apple" && resources()?.status === "error"}>
+        <p class="repl-error">
+          {resources()?.error ?? "Apple Calendar resources are unavailable."}
+        </p>
+      </Show>
       <p class="muted">
-        Holds stay local under <code>~/.heiwa/state/calendar</code> with a
-        receipt; promotion to Apple/Google is approval-gated.
+        Local holds stay under <code>~/.heiwa/state/calendar</code>. Apple
+        events are staged as T2 approvals; nothing is written to Calendar.app
+        until you approve the exact target and time.
       </p>
     </form>
   );

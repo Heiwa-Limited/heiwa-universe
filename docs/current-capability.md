@@ -58,8 +58,12 @@
 - Calendar reads from the machine, not the cloud. `heiwa calendar sync` pulls
   events from the user's own Calendar.app through a JXA metadata bridge into
   a snapshot under the config root; `/api/v1/calendar/summary` serves it and
-  the Calendar surface renders it. Verified against a real calendar.
-  Google Calendar remains L3 and reports `needs_auth`.
+  the Calendar surface renders it. The same Mac lane discovers exact writable
+  calendars and can stage an event from CLI or Heiwa.app; only a T2 approval
+  invokes Calendar.app, after which the external id and connector receipt
+  replay from local JSONL. Verified against a real calendar, then removed by
+  exact marker/id. Google Calendar remains expansion work and reports
+  `needs_auth`.
 - Mail reads from the machine, not the cloud. `heiwa mail scan` pulls sender,
   subject, date, and read state from the user's own Mail.app — never a body —
   into a snapshot under the config root, and the Mail surface renders it. No
@@ -81,8 +85,7 @@
 - iMessage as a productized ingress surface
 - broad computer-use automation
 - `Heiwa.app` as a fully native desktop runtime
-- live read models behind the Calendar, Mail, Finance, and Social surfaces —
-  they state their pending status honestly and land on the L3 connector plane
+- live connector read models behind Finance and the broader Social surfaces
 - the Browser surface as an actionable, approval-gated automation surface; it
   is an iframe until the L4 runtime-owned browser lands
 - cross-device evidence sync or a hosted state backbone
@@ -90,7 +93,7 @@
 - experimental canvases as part of the supported stack
 - placeholder agent personas as productized capabilities
 - full provider-normalized multi-turn tool calling across every provider
-- executable connector capability truth beyond manifest validation
+- executable connector breadth beyond the Mac-first Apple Calendar lane
 
 ## Evidence rule
 

@@ -118,7 +118,8 @@ model.
 
 - Output defaults to `$caveman`: result/action/blocker first, no filler, exact
   paths/commands/errors. Handoffs must include this simple line: `$caveman; repo
-  truth first; execute smallest real-value slice; verify; report blocker.`
+  truth first; ideate, build, execute, and ship real value only, regardless of
+  slice size; verify; use reasonable workarounds; report only true blockers.`
 - Repo truth beats prompt truth. Inspect current code, schemas, commands, tests,
   runtime status, and docs before making architecture claims.
 - Keep context narrow. Load only the files, contracts, errors, and tests needed
@@ -129,8 +130,9 @@ model.
   prompts. Do not rely on stale web snippets for package internals.
 - Prefer existing service modules, crates, reducers, adapters, and runtime
   contracts over new standalone mechanics.
-- Keep PRs and patches atomic. If a change cannot be reviewed as one small
-  Intake, Execution, or Evidence slice, split it before implementation.
+- Keep PRs and patches cohesive and reviewable. Size work by the value boundary,
+  not artificial smallness. Split only where each part can deliver independent
+  Intake, Execution, or Evidence value without leaving the product incomplete.
 - Every substantial output must separate: acquired data, missing data, needed
   data, executable next action, and verification evidence.
 - Post-feature review is mandatory for non-trivial changes: inspect the diff for

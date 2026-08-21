@@ -182,6 +182,37 @@ fn compute_effects(id: &str, approve: bool) -> Result<Value> {
         .unwrap_or("");
     match (surface, target, approve) {
         ("calendar", hold_id, true) if !hold_id.is_empty() => {
+            if let Some(promotion) = request
+                .get("intent")
+                .and_then(|intent| intent.get("promotion"))
+                .filter(|value| !value.is_null())
+            {
+                let connector = promotion
+                    .get("connector")
+                    .and_then(Value::as_str)
+                    .unwrap_or("");
+                if connector != "apple_calendar" {
+                    return Err(anyhow!(
+                        "unsupported approved calendar connector: {connector}"
+                    ));
+                }
+                let calendar = promotion
+                    .get("calendar")
+                    .and_then(Value::as_str)
+                    .ok_or_else(|| anyhow!("approved Apple promotion has no calendar target"))?;
+                let work_id = request
+                    .get("work_id")
+                    .and_then(Value::as_str)
+                    .ok_or_else(|| anyhow!("approved Apple promotion has no work_id"))?;
+                effects.push(json!({
+                    "surface": "calendar",
+                    "target": hold_id,
+                    "calendar": calendar,
+                    "work_id": work_id,
+                    "change": format!("create event in Apple Calendar calendar {calendar:?}"),
+                    "kind": "apple_calendar_create",
+                }));
+            }
             effects.push(json!({
                 "surface": "calendar",
                 "target": hold_id,
@@ -227,6 +258,28 @@ fn apply_effects(id: &str, plan: &Value, approve: bool) -> Result<Value> {
         let kind = effect.get("kind").and_then(Value::as_str).unwrap_or("");
         let target = effect.get("target").and_then(Value::as_str).unwrap_or("");
         match (kind, approve) {
+            ("apple_calendar_create", true) => {
+                let calendar = effect
+                    .get("calendar")
+                    .and_then(Value::as_str)
+                    .ok_or_else(|| anyhow!("Apple Calendar effect has no calendar target"))?;
+                let work_id = effect
+                    .get("work_id")
+                    .and_then(Value::as_str)
+                    .ok_or_else(|| anyhow!("Apple Calendar effect has no work_id"))?;
+                let external_event =
+                    crate::cmd::calendar::promote_hold_to_apple(target, calendar, id, work_id)?;
+                applied.push(json!({
+                    "kind": "apple_calendar_create",
+                    "summary": format!(
+                        "{} -> Apple Calendar {} ({})",
+                        target,
+                        calendar,
+                        external_event.get("external_id").and_then(Value::as_str).unwrap_or("?")
+                    ),
+                    "external_event": external_event,
+                }));
+            }
             ("hold_confirm", true) => {
                 let hold = crate::cmd::calendar::update_hold_status(target, "confirmed", id)?;
                 applied.push(json!({
@@ -328,7 +381,8 @@ pub(crate) fn approval_request_summary(req: &Value) -> Value {
             (None, None) => "?".to_string(),
         }
     });
-    let risk = string_field(req, &["risk", "requested_mode"]).unwrap_or_else(|| "?".to_string());
+    let risk = string_field(req, &["risk_tier", "risk", "requested_mode"])
+        .unwrap_or_else(|| "?".to_string());
     let requested_at = string_field(req, &["requested_at", "requested_at_utc", "created_at"]);
 
     json!({

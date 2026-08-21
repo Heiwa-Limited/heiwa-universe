@@ -367,7 +367,8 @@ unclassified.
   completes a turn end to end. This is the fresh-install contract and it must be
   automated, not demonstrated manually.
 - **L3** — a connector executes against a live account under approval, and the
-  resulting receipt replays from the journal.
+  resulting receipt replays from the journal. **Accepted 2026-08-21 through
+  the Mac Calendar.app lane; Google/Gmail breadth remains follow-on work.**
 - **L4** — an agent action against a user-owned tab is rejected; a T2 action
   without approval is rejected; both produce receipts.
 
