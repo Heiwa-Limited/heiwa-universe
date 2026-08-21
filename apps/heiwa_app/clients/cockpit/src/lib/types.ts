@@ -97,8 +97,10 @@ export interface CalendarResource {
 
 export interface CalendarResources {
   source: "apple_calendar" | string;
-  status: "ready" | "error" | string;
+  status: "ready" | "disconnected" | "config_error" | "error" | string;
   calendars: CalendarResource[];
+  detail?: string | null;
+  next_action?: string | null;
   error?: string;
   revoke: {
     owner: "macOS" | string;

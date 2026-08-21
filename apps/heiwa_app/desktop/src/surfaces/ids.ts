@@ -1,5 +1,5 @@
 /**
- * The ten surfaces, in rail order.
+ * The primary surfaces, in rail order.
  *
  * Ids match the product names in the roadmap. The pre-Solid shell used
  * `chat` for AI and `agents` for Workers; those ids were internal only (no
@@ -11,6 +11,7 @@ export const SURFACE_IDS = [
   "ai",
   "windows",
   "calendar",
+  "approvals",
   "mail",
   "finance",
   "social",

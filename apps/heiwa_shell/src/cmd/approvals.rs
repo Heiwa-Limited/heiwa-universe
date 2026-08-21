@@ -2,6 +2,7 @@ use anyhow::{anyhow, Result};
 use chrono::Utc;
 use serde_json::{json, Value};
 use std::fs;
+use std::io::Write;
 use std::path::{Path, PathBuf};
 
 pub fn run(args: &[String]) -> Result<()> {
@@ -84,6 +85,7 @@ fn decide(args: &[String]) -> Result<()> {
     }
     let dry_run = has_flag(args, "--dry-run");
 
+    validate_request_id(id)?;
     let plan = compute_effects(id, approve)?;
     let decision = json!({
         "id": id,
@@ -123,11 +125,9 @@ fn decide(args: &[String]) -> Result<()> {
         return Ok(());
     }
 
-    let applied = apply_effects(id, &plan, approve)?;
-    fs::create_dir_all(decisions_dir())?;
-    let mut decision_out = decision.clone();
-    decision_out["applied_effects"] = applied.clone();
-    fs::write(&path, serde_json::to_string_pretty(&decision_out)?)?;
+    let result = decide_request(id, approve, flag_value(args, "--note"), "local-cli")?;
+    let decision_out = result["decision"].clone();
+    let applied = decision_out["applied_effects"].clone();
     if has_flag(args, "--json") {
         println!(
             "{}",
@@ -154,6 +154,135 @@ fn decide(args: &[String]) -> Result<()> {
             }
         }
         println!("  wrote: {}", path.display());
+    }
+    Ok(())
+}
+
+/// Apply one immutable local decision through the same service used by the
+/// CLI and Heiwa.app. Replaying the same outcome is safe; changing a recorded
+/// outcome is rejected before any effect runs.
+pub(crate) fn decide_request(
+    id: &str,
+    approve: bool,
+    note: Option<String>,
+    operator: &str,
+) -> Result<Value> {
+    validate_request_id(id)?;
+    let _lease = DecisionLease::acquire(id)?;
+    let path = decisions_dir().join(format!("{id}.json"));
+    let requested_outcome = if approve { "approved" } else { "denied" };
+    if path.exists() {
+        let existing: Value = serde_json::from_slice(&fs::read(&path)?)
+            .map_err(|error| anyhow!("recorded decision {id} is malformed: {error}"))?;
+        let existing_outcome = existing
+            .get("outcome")
+            .and_then(Value::as_str)
+            .ok_or_else(|| anyhow!("recorded decision {id} has no outcome"))?;
+        if existing_outcome != requested_outcome {
+            return Err(anyhow!(
+                "approval {id} is already {existing_outcome}; recorded decisions are immutable"
+            ));
+        }
+        return Ok(json!({
+            "decision": existing,
+            "path": path.display().to_string(),
+            "replayed": true,
+        }));
+    }
+
+    let plan = compute_effects(id, approve)?;
+    let applied = apply_effects(id, &plan, approve)?;
+    let decision = json!({
+        "id": id,
+        "outcome": requested_outcome,
+        "decided_at_utc": Utc::now().to_rfc3339(),
+        "operator": operator,
+        "note": note,
+        "effects": plan,
+        "applied_effects": applied,
+    });
+    write_decision_atomic(&path, &decision)?;
+    Ok(json!({
+        "decision": decision,
+        "path": path.display().to_string(),
+        "replayed": false,
+    }))
+}
+
+/// Cross-process exclusion for one approval request. The sidecar has no
+/// identity or decision content; the operating-system lock is the authority.
+#[derive(Debug)]
+struct DecisionLease {
+    _file: fs::File,
+}
+
+impl DecisionLease {
+    fn acquire(id: &str) -> Result<Self> {
+        let dir = decisions_dir();
+        fs::create_dir_all(&dir)?;
+        Self::acquire_at(&dir.join(format!(".{id}.lock")))
+    }
+
+    fn acquire_at(path: &Path) -> Result<Self> {
+        if let Some(parent) = path.parent() {
+            fs::create_dir_all(parent)?;
+        }
+        let file = fs::OpenOptions::new()
+            .read(true)
+            .write(true)
+            .create(true)
+            .truncate(false)
+            .open(path)?;
+        file.try_lock().map_err(|error| match error {
+            fs::TryLockError::WouldBlock => anyhow!("approval decision is already in progress"),
+            fs::TryLockError::Error(error) => anyhow!(error),
+        })?;
+        Ok(Self { _file: file })
+    }
+}
+
+fn write_decision_atomic(path: &Path, decision: &Value) -> Result<()> {
+    let dir = path
+        .parent()
+        .ok_or_else(|| anyhow!("approval decision path has no parent"))?;
+    fs::create_dir_all(dir)?;
+    let temporary = dir.join(format!(
+        ".decision.{}.{}.tmp",
+        std::process::id(),
+        uuid::Uuid::new_v4().simple()
+    ));
+    let result = (|| -> Result<()> {
+        let mut file = fs::OpenOptions::new()
+            .create_new(true)
+            .write(true)
+            .open(&temporary)?;
+        file.write_all(&serde_json::to_vec_pretty(decision)?)?;
+        file.sync_all()?;
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            fs::set_permissions(&temporary, fs::Permissions::from_mode(0o600))?;
+        }
+        drop(file);
+        fs::rename(&temporary, path)?;
+        let _ = fs::File::open(dir).and_then(|directory| directory.sync_all());
+        Ok(())
+    })();
+    if result.is_err() {
+        let _ = fs::remove_file(&temporary);
+    }
+    result
+}
+
+fn validate_request_id(id: &str) -> Result<()> {
+    if id.is_empty()
+        || id.len() > 160
+        || matches!(id, "." | "..")
+        || !id
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_' | b'.'))
+    {
+        return Err(anyhow!("invalid approval request id"));
     }
     Ok(())
 }
@@ -477,6 +606,19 @@ fn print_help() {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn approval_decision_lease_excludes_a_second_process_handle() {
+        let dir = tempfile::tempdir().expect("temp decision dir");
+        let path = dir.path().join(".req_123.lock");
+        let first = DecisionLease::acquire_at(&path).expect("first lease");
+
+        let second = DecisionLease::acquire_at(&path).expect_err("second lease must be blocked");
+
+        assert!(second.to_string().contains("already in progress"));
+        drop(first);
+        DecisionLease::acquire_at(&path).expect("lease becomes available after drop");
+    }
 
     #[test]
     fn approval_summary_maps_dispatch_v1_schema() {

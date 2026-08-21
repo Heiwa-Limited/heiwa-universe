@@ -1,0 +1,44 @@
+.approvals-view {
+  padding: 24px;
+  overflow: auto;
+}
+
+.surface-heading {
+  display: flex;
+  align-items: end;
+  justify-content: space-between;
+  margin-bottom: 18px;
+}
+
+.surface-heading h2,
+.surface-heading p {
+  margin: 0;
+}
+
+.approval-list {
+  display: grid;
+  gap: 12px;
+}
+
+.approval-card code {
+  overflow-wrap: anywhere;
+}
+
+.approval-actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 14px;
+}
+
+.approval-approve {
+  border-color: var(--accent-ring);
+}
+
+.approval-empty,
+.surface-error {
+  padding: 18px;
+}
+
+.surface-error {
+  color: var(--status-error);
+}

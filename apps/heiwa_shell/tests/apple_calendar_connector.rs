@@ -90,6 +90,23 @@ fn post_json(port: u16, target: &str, body: &serde_json::Value) -> String {
     response
 }
 
+fn get(port: u16, target: &str) -> String {
+    let mut stream = TcpStream::connect(("127.0.0.1", port)).expect("connect runtime");
+    write!(
+        stream,
+        "GET {target} HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\nConnection: close\r\n\r\n"
+    )
+    .expect("write request");
+    let mut response = String::new();
+    stream.read_to_string(&mut response).expect("read response");
+    response
+}
+
+fn response_json(response: &str) -> serde_json::Value {
+    let body = response.split("\r\n\r\n").nth(1).expect("response body");
+    serde_json::from_str(body).expect("response JSON")
+}
+
 struct Fixture {
     _root: tempfile::TempDir,
     home: PathBuf,
@@ -130,10 +147,185 @@ impl Fixture {
             .env_remove("HEIWA_STATE_DIR");
         command
     }
+
+    fn establish_local_identity(&self) {
+        let root = self.home.join(".heiwa");
+        fs::create_dir_all(&root).expect("create Heiwa root");
+        fs::write(
+            root.join("local-identity.json"),
+            serde_json::to_vec_pretty(&serde_json::json!({
+                "version": 1,
+                "installation_id": "install-apple-connector-test",
+                "display_name": "Ada",
+                "created_at": "2026-08-21T00:00:00Z"
+            }))
+            .expect("identity JSON"),
+        )
+        .expect("write local identity");
+    }
+
+    fn connect_apple_calendar_cli(&self) {
+        self.establish_local_identity();
+        let output = self
+            .heiwa()
+            .args(["connect", "apple-calendar", "--authorize"])
+            .output()
+            .expect("connect Apple Calendar");
+        assert!(
+            output.status.success(),
+            "connect stderr: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+    }
 }
 
 #[test]
-fn lists_writable_apple_calendar_resources_without_writing_heiwa_state() {
+fn stranger_app_keeps_apple_calendar_private_until_this_profile_connects_it() {
+    let fixture = Fixture::new();
+    fixture.establish_local_identity();
+    let port = available_port();
+    let child = fixture
+        .heiwa()
+        .env("HEIWA_MACHINE_AUTH_TOKEN", "apple-connector-test-token")
+        .args(["app", "start", "--port", &port.to_string(), "--no-open"])
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .spawn()
+        .expect("start temporary runtime");
+    let _child = ChildGuard(child);
+    wait_for_runtime(port);
+
+    let before = response_json(&get(port, "/api/v1/calendar/resources"));
+    assert_eq!(before["data"]["status"], "disconnected");
+    assert_eq!(before["data"]["calendars"], serde_json::json!([]));
+    assert!(
+        !fixture.log.exists(),
+        "a fresh profile must not probe or reveal Calendar.app resources"
+    );
+
+    let connected = post_json(
+        port,
+        "/api/v1/connectors/apple_calendar/connect",
+        &serde_json::json!({}),
+    );
+    assert!(
+        connected.starts_with("HTTP/1.1 200 OK\r\n"),
+        "unexpected connect response: {connected}"
+    );
+    let connected = response_json(&connected);
+    assert_eq!(connected["data"]["status"], "connected");
+    assert_eq!(connected["data"]["resource_count"], 2);
+
+    let after = response_json(&get(port, "/api/v1/calendar/resources"));
+    assert_eq!(after["data"]["status"], "ready");
+    assert_eq!(after["data"]["calendars"][0]["name"], "Calendar");
+    assert!(
+        fixture
+            .home
+            .join(".heiwa/state/connectors/apple_calendar.json")
+            .is_file(),
+        "the explicit profile enrollment must be durable"
+    );
+    let enrollment_path = fixture
+        .home
+        .join(".heiwa/state/connectors/apple_calendar.json");
+    let enrollment: serde_json::Value =
+        serde_json::from_slice(&fs::read(&enrollment_path).expect("read connector enrollment"))
+            .expect("connector enrollment JSON");
+    assert_eq!(
+        enrollment["schema_version"],
+        "heiwa_connector_enrollment_v1"
+    );
+    assert_eq!(
+        enrollment["installation_id"],
+        "install-apple-connector-test"
+    );
+    assert!(
+        enrollment["device_id"]
+            .as_str()
+            .is_some_and(|value| !value.is_empty()),
+        "connector enrollment must be node-bound"
+    );
+    assert_eq!(
+        fs::metadata(&enrollment_path)
+            .expect("enrollment metadata")
+            .permissions()
+            .mode()
+            & 0o777,
+        0o600
+    );
+}
+
+#[test]
+fn authenticated_app_approval_endpoint_executes_the_existing_connector_effect() {
+    let fixture = Fixture::new();
+    fixture.establish_local_identity();
+    let port = available_port();
+    let child = fixture
+        .heiwa()
+        .env("HEIWA_MACHINE_AUTH_TOKEN", "apple-connector-test-token")
+        .args(["app", "start", "--port", &port.to_string(), "--no-open"])
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .spawn()
+        .expect("start temporary runtime");
+    let _child = ChildGuard(child);
+    wait_for_runtime(port);
+
+    let connected = post_json(
+        port,
+        "/api/v1/connectors/apple_calendar/connect",
+        &serde_json::json!({}),
+    );
+    assert!(connected.starts_with("HTTP/1.1 200 OK\r\n"));
+
+    let staged = response_json(&post_json(
+        port,
+        "/api/v1/calendar/holds",
+        &serde_json::json!({
+            "title": "call mom",
+            "date": "2026-06-19",
+            "start": "15:00",
+            "end": "15:30",
+            "kind": "focus",
+            "promotion": {
+                "connector": "apple_calendar",
+                "calendar": "Calendar"
+            }
+        }),
+    ));
+    let request_id = staged["data"]["approval_request"]["request_id"]
+        .as_str()
+        .expect("approval request id");
+    assert!(!fixture.event_state.exists());
+
+    let decided = post_json(
+        port,
+        &format!("/api/v1/approvals/{request_id}/approve"),
+        &serde_json::json!({"note":"approved in Heiwa.app"}),
+    );
+    assert!(
+        decided.starts_with("HTTP/1.1 200 OK\r\n"),
+        "unexpected approval response: {decided}"
+    );
+    let decided = response_json(&decided);
+    assert_eq!(decided["data"]["decision"]["outcome"], "approved");
+    assert_eq!(
+        decided["data"]["decision"]["applied_effects"][0]["kind"],
+        "apple_calendar_create"
+    );
+    assert!(fixture.event_state.exists());
+
+    let pending = response_json(&get(port, "/api/v1/approvals"));
+    assert_eq!(
+        pending["data"]["approvals"],
+        serde_json::json!([]),
+        "a decided request must leave the app's pending approval list"
+    );
+}
+
+#[test]
+fn listing_resources_before_enrollment_is_empty_and_does_not_probe_calendar_app() {
     let fixture = Fixture::new();
     let output = fixture
         .heiwa()
@@ -149,19 +341,132 @@ fn lists_writable_apple_calendar_resources_without_writing_heiwa_state() {
     let payload: serde_json::Value =
         serde_json::from_slice(&output.stdout).expect("calendar resources JSON");
     assert_eq!(payload["source"], "apple_calendar");
-    assert_eq!(payload["status"], "ready");
-    assert_eq!(payload["calendars"][0]["name"], "Calendar");
-    assert_eq!(payload["calendars"][0]["writable"], true);
+    assert_eq!(payload["status"], "disconnected");
+    assert_eq!(payload["calendars"], serde_json::json!([]));
     assert_eq!(payload["revoke"]["owner"], "macOS");
+    assert!(
+        !fixture.log.exists(),
+        "resource listing must not probe Calendar.app before enrollment"
+    );
     assert!(
         !fixture.home.join(".heiwa").exists(),
         "resource discovery must not create Heiwa state"
+    );
+
+    let sync = fixture
+        .heiwa()
+        .args([
+            "calendar", "sync", "--source", "apple", "--limit", "5", "--json",
+        ])
+        .output()
+        .expect("calendar sync reports disconnected source");
+    assert!(sync.status.success());
+    let sync: serde_json::Value = serde_json::from_slice(&sync.stdout).expect("calendar sync JSON");
+    assert_eq!(sync["sources"][0]["status"], "disconnected");
+    assert!(
+        !fixture.log.exists(),
+        "calendar sync must not probe Calendar.app before enrollment"
+    );
+}
+
+#[test]
+fn reconnect_refuses_to_overwrite_a_future_enrollment_schema() {
+    let fixture = Fixture::new();
+    fixture.establish_local_identity();
+    let enrollment_path = fixture
+        .home
+        .join(".heiwa/state/connectors/apple_calendar.json");
+    fs::create_dir_all(enrollment_path.parent().expect("connector directory"))
+        .expect("create connector directory");
+    let future = serde_json::json!({
+        "schema_version": "heiwa_connector_enrollment_v2",
+        "connector": "apple_calendar",
+        "installation_id": "future-installation",
+        "device_id": "future-device",
+        "connected_at": "2026-08-21T00:00:00Z",
+        "scopes": ["calendar.read"]
+    });
+    fs::write(
+        &enrollment_path,
+        serde_json::to_vec_pretty(&future).expect("future enrollment JSON"),
+    )
+    .expect("write future enrollment");
+
+    let output = fixture
+        .heiwa()
+        .args(["connect", "apple-calendar", "--authorize"])
+        .output()
+        .expect("reconnect runs");
+
+    assert!(!output.status.success());
+    assert!(String::from_utf8_lossy(&output.stderr).contains("upgrade Heiwa"));
+    let unchanged: serde_json::Value = serde_json::from_slice(
+        &fs::read(&enrollment_path).expect("future enrollment remains present"),
+    )
+    .expect("future enrollment remains JSON");
+    assert_eq!(unchanged, future);
+    assert!(
+        !fixture.log.exists(),
+        "future-schema refusal must happen before probing Calendar.app"
+    );
+}
+
+#[test]
+fn disconnect_after_staging_blocks_the_pending_external_write() {
+    let fixture = Fixture::new();
+    fixture.connect_apple_calendar_cli();
+    let staged = fixture
+        .heiwa()
+        .args([
+            "schedule",
+            "call",
+            "mom",
+            "--at",
+            "2026-06-19T15:00",
+            "--promote",
+            "apple",
+            "--calendar",
+            "Calendar",
+            "--json",
+        ])
+        .output()
+        .expect("schedule staging runs");
+    assert!(staged.status.success());
+    let staged: serde_json::Value = serde_json::from_slice(&staged.stdout).expect("staging JSON");
+    let request_id = staged["approval_request"]["request_id"]
+        .as_str()
+        .expect("request id");
+
+    let disconnected = fixture
+        .heiwa()
+        .args(["connect", "apple-calendar", "--disconnect"])
+        .output()
+        .expect("disconnect runs");
+    assert!(disconnected.status.success());
+
+    let approved = fixture
+        .heiwa()
+        .args(["approvals", "decide", request_id, "--approve"])
+        .output()
+        .expect("approval runs");
+
+    assert!(!approved.status.success());
+    assert!(String::from_utf8_lossy(&approved.stderr).contains("not connected"));
+    assert!(!fixture.event_state.exists());
+    assert!(
+        !fixture
+            .home
+            .join(".heiwa/state/dispatch/approvals/decisions")
+            .join(format!("{request_id}.json"))
+            .exists(),
+        "a failed external effect must remain pending and undecided"
     );
 }
 
 #[test]
 fn approval_executes_apple_write_and_replays_connector_receipt() {
     let fixture = Fixture::new();
+    fixture.connect_apple_calendar_cli();
     let staged = fixture
         .heiwa()
         .args([
@@ -203,8 +508,8 @@ fn approval_executes_apple_write_and_replays_connector_receipt() {
     assert_eq!(staged["hold"]["external_promotion"], "approval_required");
     assert_eq!(
         fs::read_to_string(&fixture.log).expect("bridge log after staging"),
-        "list\n",
-        "staging may validate the target but must not create an event"
+        "list\nlist\n",
+        "connection and staging may list resources but must not create an event"
     );
     assert!(!fixture.event_state.exists());
 
@@ -292,6 +597,7 @@ fn approval_executes_apple_write_and_replays_connector_receipt() {
 #[test]
 fn authenticated_app_hold_endpoint_stages_named_apple_promotion() {
     let fixture = Fixture::new();
+    fixture.establish_local_identity();
     let port = available_port();
     let child = fixture
         .heiwa()
@@ -303,6 +609,16 @@ fn authenticated_app_hold_endpoint_stages_named_apple_promotion() {
         .expect("start temporary runtime");
     let _child = ChildGuard(child);
     wait_for_runtime(port);
+
+    let connected = post_json(
+        port,
+        "/api/v1/connectors/apple_calendar/connect",
+        &serde_json::json!({}),
+    );
+    assert!(
+        connected.starts_with("HTTP/1.1 200 OK\r\n"),
+        "unexpected connect response: {connected}"
+    );
 
     let response = post_json(
         port,
@@ -334,7 +650,7 @@ fn authenticated_app_hold_endpoint_stages_named_apple_promotion() {
     );
     assert_eq!(
         fs::read_to_string(&fixture.log).expect("bridge log after app staging"),
-        "list\n",
-        "the app may validate the target but must not create before approval"
+        "list\nlist\n",
+        "connection and app staging may list resources but must not create before approval"
     );
 }

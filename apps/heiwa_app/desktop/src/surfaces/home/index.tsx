@@ -1,59 +1,14 @@
-import { For } from "solid-js";
+import { For, Show } from "solid-js";
 import { cssToken, shortenPath } from "../../lib/format";
 import { TodayBriefing } from "./TodayBriefing";
 import { MachinePerspective } from "./MachinePerspective";
 import { useApp } from "../../state/app";
-import type { HerdPane } from "../../runtime";
-import type { SurfaceId } from "../ids";
 import type { SurfaceModule } from "../types";
 import "./home.css";
 
-/**
- * Which surface a placeholder tile stands for.
- *
- * Matches on the workspace/pane/agent/cwd text because a planned pane names
- * its surface there ("calendar:today", "mail:triage") — there is no live
- * pane to key off yet.
- */
-function surfaceForPane(pane: HerdPane): SurfaceId {
-  const haystack =
-    `${pane.workspace} ${pane.pane} ${pane.agent} ${pane.cwd}`.toLowerCase();
-  if (haystack.includes("calendar")) return "calendar";
-  if (haystack.includes("mail")) return "mail";
-  if (haystack.includes("finance")) return "finance";
-  if (haystack.includes("social")) return "social";
-  if (haystack.includes("file")) return "files";
-  if (haystack.includes("browser")) return "browser";
-  if (haystack.includes("agent") || haystack.includes("worker")) return "workers";
-  return "windows";
-}
-
-/** Placeholder pane rows shown before herdr reports live panes. */
-function fallbackPanes(app: ReturnType<typeof useApp>): HerdPane[] {
-  return [
-    {
-      workspace: "heiwa",
-      pane: "herdr",
-      agent: "multiplexer",
-      state: app.herd.status(),
-      cwd: "Heiwa.app native herd command",
-      message: "live herd feed not connected",
-    },
-    ...app.subApps().slice(0, 5).map((sub) => ({
-      workspace: sub.title.toLowerCase(),
-      pane: sub.pinnedPane,
-      agent: sub.agent,
-      state: "planned",
-      cwd: sub.server,
-      message: sub.skills.join(" · "),
-    })),
-  ];
-}
-
 function HomeSurface() {
   const app = useApp();
-  const visiblePanes = () => (app.herd.panes().length ? app.herd.panes() : fallbackPanes(app));
-  const pinned = () => visiblePanes().slice(0, 8);
+  const pinned = () => app.herd.panes().slice(0, 8);
 
   return (
     <div class="view home-view">
@@ -61,8 +16,8 @@ function HomeSurface() {
         <div>
           <h1>Heiwa Ops</h1>
           <p class="muted">
-            {pinned().length} pinned panes · herd {app.herd.status()} via {app.herd.source()} ·{" "}
-            {app.subApps().length} sub-app agents
+            {pinned().length} live panes · herd {app.herd.status()} via {app.herd.source()} ·{" "}
+            {app.subApps().length} available capabilities
           </p>
         </div>
         <button class="btn-primary" onClick={() => app.navigate("windows")}>
@@ -78,51 +33,53 @@ function HomeSurface() {
 
       <MachinePerspective />
 
-      <section class="pinned-pane-board" aria-label="Pinned terminal and ops panes">
-        <For each={pinned()}>
-          {(pane, index) => (
-            <button
-              class="pinned-pane"
-              classList={{ "primary-pane": index() === 0 }}
-              onClick={() => {
-                // A live pane opens in Windows with that pane selected; a
-                // placeholder tile opens the surface it stands for. Sending
-                // every tile to Windows would dead-end the five sub-app
-                // tiles that are all a fresh install shows.
-                if (app.herd.livePaneIds().has(pane.pane)) {
+      <section class="pinned-pane-board" aria-label="Live terminal and ops panes">
+        <Show
+          when={pinned().length > 0}
+          fallback={
+            <div class="panel home-empty-panes">
+              <strong>No live panes.</strong>
+              <span class="quiet">Terminal work appears here only after herdr reports it.</span>
+            </div>
+          }
+        >
+          <For each={pinned()}>
+            {(pane, index) => (
+              <button
+                class="pinned-pane"
+                classList={{ "primary-pane": index() === 0 }}
+                onClick={() => {
                   app.herd.select(pane.pane);
                   app.navigate("windows");
                   void app.herd.loadPaneText();
-                } else {
-                  app.navigate(surfaceForPane(pane));
-                }
-              }}
-            >
-              <span class="pane-topline">
-                <span>{pane.workspace}</span>
-                <span class={`state-chip ${cssToken(pane.state)}`}>{pane.state}</span>
-              </span>
-              <strong>{pane.agent === "-" ? pane.pane : pane.agent}</strong>
-              <span class="quiet">
-                {pane.pane} · {shortenPath(pane.cwd)}
-              </span>
-              {pane.message ? <small class="quiet">{pane.message}</small> : null}
-            </button>
-          )}
-        </For>
+                }}
+              >
+                <span class="pane-topline">
+                  <span>{pane.workspace}</span>
+                  <span class={`state-chip ${cssToken(pane.state)}`}>{pane.state}</span>
+                </span>
+                <strong>{pane.agent === "-" ? pane.pane : pane.agent}</strong>
+                <span class="quiet">
+                  {pane.pane} · {shortenPath(pane.cwd)}
+                </span>
+                {pane.message ? <small class="quiet">{pane.message}</small> : null}
+              </button>
+            )}
+          </For>
+        </Show>
       </section>
 
       <section class="quick-grid">
         <article class="panel quick-widget">
           <header>
-            <span>Sub-app servers</span>
+            <span>Available surfaces</span>
             <strong>{app.subApps().length}</strong>
           </header>
           <For each={app.subApps().slice(0, 4)}>
             {(sub) => (
               <div class="widget-row">
                 <span>{sub.title}</span>
-                <strong>{sub.server}</strong>
+                <strong>{sub.state}</strong>
               </div>
             )}
           </For>
@@ -130,13 +87,13 @@ function HomeSurface() {
 
         <article class="panel quick-widget">
           <header>
-            <span>Agent skills</span>
+            <span>Capability profiles</span>
             <strong>{app.subApps().length}</strong>
           </header>
           <For each={app.subApps().slice(0, 4)}>
             {(sub) => (
               <div class="widget-row">
-                <span>{sub.agent}</span>
+                <span>{sub.title}</span>
                 <strong>{sub.skills.join(" · ")}</strong>
               </div>
             )}
@@ -145,7 +102,7 @@ function HomeSurface() {
 
         <article class="panel quick-widget">
           <header>
-            <span>Tools</span>
+            <span>Tool policies</span>
             <strong>{app.subApps().reduce((sum, sub) => sum + sub.tools.length, 0)}</strong>
           </header>
           <For each={app.subApps().slice(0, 4)}>
@@ -160,8 +117,8 @@ function HomeSurface() {
 
         <article class="panel quick-widget">
           <header>
-            <span>Personalization</span>
-            <strong>local</strong>
+            <span>Local policy defaults</span>
+            <strong>built in</strong>
           </header>
           <For each={app.subApps().slice(0, 4)}>
             {(sub) => (
@@ -181,15 +138,15 @@ export const homeSurface: SurfaceModule = {
   id: "home",
   label: "Home",
   glyph: "⌂",
-  caption: "pinned ops",
+  caption: "local ops",
   Component: HomeSurface,
   preview: (app) => ({
-    title: "Pinned Ops",
+    title: "Local Ops",
     lines: [
-      `${app.herd.panes().length || 6} panes`,
+      `${app.herd.panes().length} live panes`,
       `herd ${app.herd.status()}`,
       `source ${app.herd.source()}`,
-      `${app.subApps().length} sub-app agents`,
+      `${app.subApps().length} available capabilities`,
     ],
   }),
   refresh: async (app) => {

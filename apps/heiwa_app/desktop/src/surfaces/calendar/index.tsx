@@ -14,6 +14,70 @@ function CalendarSurface() {
   const app = useApp();
   // Month cursor is surface-local: no other surface needs it.
   const [cursor, setCursor] = createSignal(new Date());
+  const [connectionBusy, setConnectionBusy] = createSignal(false);
+  const [connectionError, setConnectionError] = createSignal<string | null>(null);
+  const [title, setTitle] = createSignal("");
+  const [date, setDate] = createSignal("");
+  const [start, setStart] = createSignal("");
+  const [end, setEnd] = createSignal("");
+  const [stagingBusy, setStagingBusy] = createSignal(false);
+  const [stagingError, setStagingError] = createSignal<string | null>(null);
+  const [stagingNotice, setStagingNotice] = createSignal<string | null>(null);
+
+  const writableCalendars = createMemo(
+    () => app.runtime.calendarResources()?.calendars.filter((calendar) => calendar.writable) ?? [],
+  );
+  const [selectedCalendar, setSelectedCalendar] = createSignal("");
+
+  function promotionCalendar(): string {
+    const selected = selectedCalendar();
+    return writableCalendars().some((calendar) => calendar.name === selected)
+      ? selected
+      : writableCalendars()[0]?.name ?? "";
+  }
+
+  async function setAppleConnection(connect: boolean): Promise<void> {
+    if (connectionBusy()) return;
+    setConnectionBusy(true);
+    setConnectionError(null);
+    try {
+      if (connect) await app.runtime.connectAppleCalendar();
+      else await app.runtime.disconnectAppleCalendar();
+    } catch (cause) {
+      setConnectionError(cause instanceof Error ? cause.message : String(cause));
+    } finally {
+      setConnectionBusy(false);
+    }
+  }
+
+  async function stageAppleEvent(event: SubmitEvent): Promise<void> {
+    event.preventDefault();
+    if (stagingBusy()) return;
+    const calendar = promotionCalendar();
+    if (!title().trim() || !date() || !start() || !end() || !calendar) {
+      setStagingError("Add a title, date, start, end, and writable calendar.");
+      return;
+    }
+    setStagingBusy(true);
+    setStagingError(null);
+    setStagingNotice(null);
+    try {
+      await app.runtime.createCalendarHold({
+        title: title().trim(),
+        date: date(),
+        start: start(),
+        end: end(),
+        kind: "focus",
+        promotion: { connector: "apple_calendar", calendar },
+      });
+      setTitle("");
+      setStagingNotice("Staged locally. Review the pending decision before Apple Calendar changes.");
+    } catch (cause) {
+      setStagingError(cause instanceof Error ? cause.message : String(cause));
+    } finally {
+      setStagingBusy(false);
+    }
+  }
 
   const grid = createMemo(() => {
     const date = cursor();
@@ -52,6 +116,106 @@ function CalendarSurface() {
 
   return (
     <div class="view calendar-view">
+      <section class="panel cal-connection">
+        <div>
+          <strong>Apple Calendar</strong>
+          <p class="quiet">
+            {app.runtime.calendarResources()?.detail ?? "Checking this profile's connection…"}
+          </p>
+        </div>
+        <Show
+          when={app.runtime.calendarResources()?.status === "ready"}
+          fallback={
+            <button
+              class="small-action"
+              disabled={connectionBusy() || app.runtime.calendarResources() === null}
+              onClick={() => void setAppleConnection(true)}
+            >
+              Connect Apple Calendar
+            </button>
+          }
+        >
+          <button
+            class="small-action"
+            disabled={connectionBusy()}
+            onClick={() => void setAppleConnection(false)}
+          >
+            Disconnect Apple Calendar
+          </button>
+        </Show>
+        <Show when={connectionError()}>
+          {(message) => <p class="surface-error">{message()}</p>}
+        </Show>
+      </section>
+
+      <Show when={app.runtime.calendarResources()?.status === "ready"}>
+        <form class="panel cal-stage" onSubmit={(event) => void stageAppleEvent(event)}>
+          <header>
+            <div>
+              <strong>Stage an Apple event</strong>
+              <p class="quiet">Creates a local hold first. Apple Calendar waits for approval.</p>
+            </div>
+          </header>
+          <div class="cal-stage-fields">
+            <label class="cal-stage-title">
+              <span>Event title</span>
+              <input
+                value={title()}
+                onInput={(event) => setTitle(event.currentTarget.value)}
+                autocomplete="off"
+                required
+              />
+            </label>
+            <label>
+              <span>Event date</span>
+              <input
+                type="date"
+                value={date()}
+                onInput={(event) => setDate(event.currentTarget.value)}
+                required
+              />
+            </label>
+            <label>
+              <span>Event start</span>
+              <input
+                type="time"
+                value={start()}
+                onInput={(event) => setStart(event.currentTarget.value)}
+                required
+              />
+            </label>
+            <label>
+              <span>Event end</span>
+              <input
+                type="time"
+                value={end()}
+                onInput={(event) => setEnd(event.currentTarget.value)}
+                required
+              />
+            </label>
+            <label>
+              <span>Calendar</span>
+              <select
+                value={promotionCalendar()}
+                onChange={(event) => setSelectedCalendar(event.currentTarget.value)}
+                required
+              >
+                <For each={writableCalendars()}>
+                  {(calendar) => <option value={calendar.name}>{calendar.name}</option>}
+                </For>
+              </select>
+            </label>
+          </div>
+          <div class="cal-stage-actions">
+            <Show when={stagingError()}>{(message) => <p class="surface-error">{message()}</p>}</Show>
+            <Show when={stagingNotice()}>{(message) => <p class="quiet">{message()}</p>}</Show>
+            <button class="btn-primary" type="submit" disabled={stagingBusy() || !promotionCalendar()}>
+              Stage Apple event
+            </button>
+          </div>
+        </form>
+      </Show>
+
       <div class="cal-header">
         <div class="cal-nav">
           <button
@@ -138,5 +302,8 @@ export const calendarSurface: SurfaceModule = {
       ],
     };
   },
-  refresh: (app) => app.runtime.loadCalendar(),
+  refresh: (app) =>
+    Promise.all([app.runtime.loadCalendar(), app.runtime.loadCalendarResources()]).then(
+      () => undefined,
+    ),
 };

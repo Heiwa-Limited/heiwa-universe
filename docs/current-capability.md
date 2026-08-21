@@ -55,7 +55,11 @@
   `heiwa ask` answers — no API key, no account, no network. Where no local
   runtime exists, the same command reports the provider gap with the actions
   that close it (AD-13).
-- Calendar reads from the machine, not the cloud. `heiwa calendar sync` pulls
+- Apple Calendar begins disconnected for every fresh Heiwa profile. An
+  explicit in-app or `heiwa connect apple-calendar --authorize` action binds
+  enrollment to the local installation and device; before that, resource
+  discovery returns no calendar names and does not probe Calendar.app.
+  Once connected, Calendar reads from the machine, not the cloud. `heiwa calendar sync` pulls
   events from the user's own Calendar.app through a JXA metadata bridge into
   a snapshot under the config root; `/api/v1/calendar/summary` serves it and
   the Calendar surface renders it. The same Mac lane discovers exact writable
@@ -69,9 +73,12 @@
   into a snapshot under the config root, and the Mail surface renders it. No
   OAuth, no IMAP credentials, nothing leaves the machine. Sending is not
   built; the surface says so. Gmail and other remote mailboxes remain L3.
-- The desktop shell is a SolidJS component layer: ten surface modules behind a
+- The desktop shell is a SolidJS component layer: eleven surface modules behind a
   `SurfaceModule` contract over a tokenized design system, with the operator
   stream seam (`store.ts` / `client.ts` / `types.ts`) preserved unmodified.
+  Calendar can connect/disconnect and stage an exact Apple event; Approvals can
+  approve or deny that pending write through the same immutable executor as the
+  CLI.
 - The installed runtime is the current product center of gravity.
 - DREX routing, provider/session/protocol crates, execution scopes, tool leases, and receipts are the live runtime spine.
 - Local JSONL is the canonical evidence plane; Lance is the derived local recall index.

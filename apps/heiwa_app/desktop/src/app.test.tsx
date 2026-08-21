@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { cleanup, render, screen } from "@solidjs/testing-library";
+import { cleanup, fireEvent, render, screen } from "@solidjs/testing-library";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { App } from "./app";
 import { localIsoDate } from "./lib/format";
@@ -17,6 +17,7 @@ const EMPTY_HISTORY = {
 type Harness = {
   state: AppState;
   post: ReturnType<typeof vi.fn>;
+  runtimePost: ReturnType<typeof vi.fn>;
   emit: (frame: OperatorFrame) => void;
 };
 
@@ -33,6 +34,7 @@ function harness(
     machineOs?: string;
     machineName?: string;
     machineRecognitionError?: { code: string; message: string };
+    emptyHerd?: boolean;
   } = {},
 ): Harness {
   const post = vi.fn().mockResolvedValue({
@@ -45,6 +47,7 @@ function harness(
       stream_url: "/stream",
     },
   });
+  const runtimePost = vi.fn().mockResolvedValue({ ok: true, data: {} });
   let emit: (frame: OperatorFrame) => void = () => {};
 
   const state = createAppState({
@@ -104,6 +107,13 @@ function harness(
                 thermal_pressure: "nominal",
               },
             },
+            workers: {
+              total: 1,
+              live: 1,
+              stale: 0,
+              runtime_live: 1,
+              task_live: 0,
+            },
             providers: [
               {
                 provider_id: "ollama",
@@ -119,20 +129,23 @@ function harness(
           },
         },
       }),
+      post: runtimePost,
     },
     herd: {
       snapshot: vi.fn().mockResolvedValue({
         status: "online",
         source: "test",
-        panes: [
-          {
-            workspace: "heiwa",
-            pane: "heiwa:ops",
-            agent: "multiplexer",
-            state: "running",
-            cwd: "/work",
-          },
-        ],
+        panes: overrides.emptyHerd
+          ? []
+          : [
+              {
+                workspace: "heiwa",
+                pane: "heiwa:ops",
+                agent: "multiplexer",
+                state: "running",
+                cwd: "/work",
+              },
+            ],
         error: null,
       }),
       catalog: vi.fn().mockResolvedValue([]),
@@ -146,7 +159,7 @@ function harness(
     },
   });
 
-  return { state, post, emit: (frame) => emit(frame) };
+  return { state, post, runtimePost, emit: (frame) => emit(frame) };
 }
 
 /**
@@ -162,6 +175,7 @@ const SURFACE_MARKERS: Record<string, string | RegExp> = {
   ai: "No messages yet.",
   windows: "Terminal panes",
   calendar: "Upcoming",
+  approvals: "Pending decisions",
   // Mail now renders the local snapshot rather than an L3 placeholder.
   mail: /metadata only, read\s+from this machine/,
   finance: /Read model arrives with the L3 connector plane/,
@@ -172,12 +186,13 @@ const SURFACE_MARKERS: Record<string, string | RegExp> = {
 };
 
 describe("shell", () => {
-  it("registers exactly the ten roadmap surfaces", () => {
+  it("registers the primary surfaces including in-app approvals", () => {
     expect(SURFACES.map((surface) => surface.id)).toEqual([
       "home",
       "ai",
       "windows",
       "calendar",
+      "approvals",
       "mail",
       "finance",
       "social",
@@ -185,6 +200,144 @@ describe("shell", () => {
       "browser",
       "files",
     ]);
+  });
+
+  it("decides a pending dispatch approval through the runtime service", async () => {
+    const { state, runtimePost } = harness({
+      get: async (path) => {
+        if (path === "/api/v1/approvals/summary") {
+          return {
+            data: {
+              pending_count: 1,
+              pending: [
+                {
+                  id: "req_calendar_1",
+                  action: "calendar-event-create",
+                  target: "calendar:hold-1",
+                  risk: "T2",
+                  requested_at: "2026-08-21T00:00:00Z",
+                },
+              ],
+              requests_dir: "/state/dispatch/requests",
+              decisions_dir: "/state/dispatch/approvals/decisions",
+            },
+          };
+        }
+        return { data: { items: [], holds: [], events: [] } };
+      },
+    });
+    state.navigate("approvals");
+    render(() => <App state={state} />);
+
+    await Promise.resolve();
+    await Promise.resolve();
+    screen.getByRole("button", { name: /approve req_calendar_1/i }).click();
+    await Promise.resolve();
+
+    expect(runtimePost).toHaveBeenCalledWith(
+      "/api/v1/approvals/req_calendar_1/approve",
+      {},
+    );
+  });
+
+  it("keeps Apple Calendar disconnected until the user connects it", async () => {
+    const { state, runtimePost } = harness({
+      get: async (path) => {
+        if (path === "/api/v1/calendar/resources") {
+          return {
+            data: {
+              source: "apple_calendar",
+              status: "disconnected",
+              calendars: [],
+              detail: "Detected on this Mac, but not connected to this Heiwa profile.",
+              next_action: "heiwa connect apple-calendar --authorize",
+            },
+          };
+        }
+        return { data: { items: [], holds: [], events: [] } };
+      },
+    });
+    state.navigate("calendar");
+    render(() => <App state={state} />);
+
+    await Promise.resolve();
+    await Promise.resolve();
+    screen.getByRole("button", { name: /connect apple calendar/i }).click();
+    await Promise.resolve();
+
+    expect(runtimePost).toHaveBeenCalledWith(
+      "/api/v1/connectors/apple_calendar/connect",
+      {},
+    );
+  });
+
+  it("stages an Apple event for approval from the native Calendar surface", async () => {
+    const { state, runtimePost } = harness({
+      get: async (path) => {
+        if (path === "/api/v1/calendar/resources") {
+          return {
+            data: {
+              source: "apple_calendar",
+              status: "ready",
+              calendars: [{ name: "Calendar", writable: true }],
+              detail: "Connected to this Heiwa profile on this device.",
+            },
+          };
+        }
+        return { data: { items: [], holds: [], events: [] } };
+      },
+    });
+    state.navigate("calendar");
+    render(() => <App state={state} />);
+    await Promise.resolve();
+    await Promise.resolve();
+
+    fireEvent.input(screen.getByLabelText("Event title"), {
+      target: { value: "Call mom" },
+    });
+    fireEvent.input(screen.getByLabelText("Event date"), {
+      target: { value: "2026-08-22" },
+    });
+    fireEvent.input(screen.getByLabelText("Event start"), {
+      target: { value: "15:00" },
+    });
+    fireEvent.input(screen.getByLabelText("Event end"), {
+      target: { value: "15:30" },
+    });
+    screen.getByRole("button", { name: /stage apple event/i }).click();
+    await Promise.resolve();
+
+    expect(runtimePost).toHaveBeenCalledWith("/api/v1/calendar/holds", {
+      title: "Call mom",
+      date: "2026-08-22",
+      start: "15:00",
+      end: "15:30",
+      kind: "focus",
+      promotion: { connector: "apple_calendar", calendar: "Calendar" },
+    });
+  });
+
+  it("does not present the live runtime host as a task worker", async () => {
+    const { state } = harness();
+    state.navigate("workers");
+    render(() => <App state={state} />);
+    await Promise.resolve();
+
+    expect(screen.getByText("0 task workers")).toBeTruthy();
+  });
+
+  it("does not invent panes or active agents for a fresh profile", async () => {
+    const { state } = harness({ emptyHerd: true });
+    render(() => <App state={state} />);
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(screen.getAllByText(/0 live panes/).length).toBeGreaterThan(0);
+    expect(screen.queryByText(/6 sub-app agents/)).toBeNull();
+    expect(screen.queryByText("planned")).toBeNull();
+
+    state.navigate("windows");
+    expect(screen.queryByText("Sub-app agents")).toBeNull();
   });
 
   it("renders one rail button per surface", () => {

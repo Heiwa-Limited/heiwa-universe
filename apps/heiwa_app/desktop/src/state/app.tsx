@@ -25,7 +25,7 @@ export type AppState = {
   herd: HerdState;
   view: Accessor<SurfaceId>;
   navigate: (view: SurfaceId) => void;
-  /** Static per-surface descriptors rendered by Home and the feature windows. */
+  /** Static capability descriptors; these never imply a live agent or pane. */
   subApps: Accessor<SubApp[]>;
 };
 
@@ -42,17 +42,15 @@ export function createAppState(options: AppStateOptions = {}): AppState {
   const herd = createHerdState(options.herd);
   const [view, setView] = createSignal<SurfaceId>(options.initialView ?? "home");
 
-  // Memoized: six surfaces render <For> over slices of this, and rebuilding
+  // Memoized: several surfaces render <For> over slices of this, and rebuilding
   // the array on every read tears down and recreates those rows on each
   // inbox poll.
   const subApps = createMemo<SubApp[]>(() => [
     {
       id: "ai",
       title: "AI Ops",
-      agent: "router-persona",
       server: "heiwa runtime",
       state: runtimeStatusLabel(runtime),
-      pinnedPane: herd.panes()[0]?.pane ?? "heiwa:ops",
       skills: ["route", "summarize", "delegate"],
       tools: ["provider adapters", "local models", "receipts"],
       personalization: ["cheapest acceptable route", "repo truth first"],
@@ -60,10 +58,8 @@ export function createAppState(options: AppStateOptions = {}): AppState {
     {
       id: "calendar",
       title: "Calendar",
-      agent: "scheduler",
       server: "calendar sub-app",
       state: `${runtime.calendarEvents().length} items`,
-      pinnedPane: "calendar:today",
       skills: ["schedule", "conflict check", "draft holds"],
       tools: ["calendar.read", "calendar.draft", "life state"],
       personalization: ["recovery floor", "no-overlap days"],
@@ -71,10 +67,8 @@ export function createAppState(options: AppStateOptions = {}): AppState {
     {
       id: "mail",
       title: "Mail",
-      agent: "communications",
       server: "mail sub-app",
       state: `${runtime.inbox().length} inbox rows`,
-      pinnedPane: "mail:triage",
       skills: ["triage", "draft replies", "extract asks"],
       tools: ["mail.search", "mail.draft", "approval outbox"],
       personalization: ["draft first", "no external send without approval"],
@@ -82,10 +76,8 @@ export function createAppState(options: AppStateOptions = {}): AppState {
     {
       id: "finance",
       title: "Finance",
-      agent: "cashflow",
       server: "finance sub-app",
       state: "read model pending",
-      pinnedPane: "finance:ledger",
       skills: ["cashflow", "debt plan", "receipt audit"],
       tools: ["local docs", "calculators", "approval ledger"],
       personalization: ["no money movement"],
@@ -93,10 +85,8 @@ export function createAppState(options: AppStateOptions = {}): AppState {
     {
       id: "social",
       title: "Social",
-      agent: "boundary",
       server: "social sub-app",
       state: "ingress pending",
-      pinnedPane: "social:review",
       skills: ["context read", "draft", "boundary check"],
       tools: ["message read models", "draft outbox", "receipts"],
       personalization: ["respect non-reciprocity"],
@@ -104,10 +94,8 @@ export function createAppState(options: AppStateOptions = {}): AppState {
     {
       id: "files",
       title: "Files",
-      agent: "librarian",
       server: "files sub-app",
       state: "workspace",
-      pinnedPane: "files:workspace",
       skills: ["search", "index", "source cite"],
       tools: ["repo.grep", "fs.read", "artifact log"],
       personalization: ["smallest source slice", "evidence before claim"],

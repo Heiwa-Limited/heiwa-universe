@@ -1,21 +1,16 @@
 import type { JSX } from "solid-js";
-import { For, Show } from "solid-js";
+import { createSignal, For, Show } from "solid-js";
 import { api } from "../lib/api";
 import { v1 } from "../lib/endpoints";
 import { RemoteShell } from "../lib/resource";
-import type { Approval, ApprovalsSummary } from "../lib/types";
+import type { ApprovalsSummary } from "../lib/types";
 
 interface ApprovalsBundle {
-  approvals: Approval[];
   summary: ApprovalsSummary;
 }
 
 async function loadApprovalsBundle(): Promise<ApprovalsBundle> {
-  const [missionResult, summary] = await Promise.all([
-    v1.approvals(),
-    v1.approvalsSummary(),
-  ]);
-  return { approvals: missionResult.approvals, summary };
+  return { summary: await v1.approvalsSummary() };
 }
 
 function isApprovalEvent(msg: unknown): boolean {
@@ -29,7 +24,7 @@ function isApprovalEvent(msg: unknown): boolean {
 
 async function resolve(
   approvalId: string,
-  action: "grant" | "deny",
+  action: "approve" | "deny",
   refetch: () => void,
 ): Promise<void> {
   await api.post(`/api/v1/approvals/${approvalId}/${action}`, {});
@@ -37,6 +32,30 @@ async function resolve(
 }
 
 export default function ApprovalsRoute(): JSX.Element {
+  const [deciding, setDeciding] = createSignal<string | null>(null);
+  const [decisionError, setDecisionError] = createSignal<string | null>(null);
+
+  async function decide(
+    id: string,
+    action: "approve" | "deny",
+    refetch: () => void,
+  ): Promise<void> {
+    if (deciding()) return;
+    setDeciding(id);
+    setDecisionError(null);
+    try {
+      await resolve(id, action, refetch);
+    } catch (cause) {
+      setDecisionError(
+        cause instanceof Error
+          ? cause.message
+          : ((cause as { message?: string }).message ?? String(cause)),
+      );
+    } finally {
+      setDeciding(null);
+    }
+  }
+
   return (
     <section>
       <div class="hero compact">
@@ -54,73 +73,14 @@ export default function ApprovalsRoute(): JSX.Element {
       >
         {(data, refetch) => (
           <>
-            <h2>Mission approvals</h2>
-            <Show
-              when={data.approvals.length > 0}
-              fallback={
-                <div class="empty-state">
-                  <strong>Nothing waiting.</strong>
-                  <p class="muted">
-                    Missions don't need operator sign-off right now.
-                  </p>
-                </div>
-              }
-            >
-              <div class="card-list">
-                <For each={data.approvals}>
-                  {(a) => (
-                    <article>
-                      <div class="status-card-head">
-                        <h3>
-                          <code>{a.approval_id}</code>
-                        </h3>
-                        <span
-                          class={`status-badge ${a.risk_level === "critical" || a.risk_level === "high" ? "fail" : a.risk_level === "medium" ? "warn" : "ok"}`}
-                        >
-                          {a.risk_level}
-                        </span>
-                      </div>
-                      <p class="muted">
-                        mission <code>{a.mission_id}</code> · requested by{" "}
-                        {a.requested_by}
-                      </p>
-                      <p>{a.summary}</p>
-                      <p class="mono muted">
-                        requested {a.requested_at}
-                        {a.expires_at && ` · expires ${a.expires_at}`}
-                      </p>
-                      <div class="hero-actions">
-                        <button
-                          class="btn btn-solid"
-                          onClick={() =>
-                            resolve(a.approval_id, "grant", refetch)
-                          }
-                          type="button"
-                        >
-                          Grant
-                        </button>
-                        <button
-                          class="btn btn-outline"
-                          onClick={() =>
-                            resolve(a.approval_id, "deny", refetch)
-                          }
-                          type="button"
-                        >
-                          Deny
-                        </button>
-                      </div>
-                    </article>
-                  )}
-                </For>
-              </div>
-            </Show>
-
-            <h2>Dispatch requests</h2>
+            <h2>Pending decisions</h2>
             <p class="muted">
-              Local dispatch v1 queue at{" "}
-              <code>{data.summary.requests_dir}</code>. Decide with{" "}
-              <code>heiwa approvals decide &lt;id&gt;</code>.
+              Each card is one local request. Approve or deny it here; the CLI
+              uses the same immutable executor.
             </p>
+            <Show when={decisionError()}>
+              {(message) => <p class="repl-error">{message()}</p>}
+            </Show>
             <Show
               when={data.summary.pending.length > 0}
               fallback={
@@ -147,6 +107,26 @@ export default function ApprovalsRoute(): JSX.Element {
                       <Show when={req.requested_at}>
                         <p class="mono muted">requested {req.requested_at}</p>
                       </Show>
+                      <div class="hero-actions">
+                        <button
+                          class="btn btn-solid"
+                          disabled={deciding() !== null}
+                          onClick={() =>
+                            void decide(req.id, "approve", refetch)
+                          }
+                          type="button"
+                        >
+                          Approve
+                        </button>
+                        <button
+                          class="btn btn-outline"
+                          disabled={deciding() !== null}
+                          onClick={() => void decide(req.id, "deny", refetch)}
+                          type="button"
+                        >
+                          Deny
+                        </button>
+                      </div>
                     </article>
                   )}
                 </For>

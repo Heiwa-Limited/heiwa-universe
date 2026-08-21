@@ -198,3 +198,46 @@ fn deny_drops_draft_hold_and_writes_drop_receipt() {
     assert_eq!(decision["effects"][0]["kind"], "hold_drop");
     assert_eq!(decision["applied_effects"][0]["kind"], "hold_drop");
 }
+
+#[test]
+fn a_recorded_decision_is_idempotent_but_cannot_change_outcome() {
+    let home = tempfile::tempdir().unwrap();
+    let (request_id, _hold_id) = stage(home.path());
+
+    let approved = heiwa()
+        .env("HOME", home.path())
+        .args(["approvals", "decide", &request_id, "--approve", "--json"])
+        .output()
+        .expect("first decision runs");
+    assert!(approved.status.success(), "stderr: {:?}", approved.stderr);
+
+    let replay = heiwa()
+        .env("HOME", home.path())
+        .args(["approvals", "decide", &request_id, "--approve", "--json"])
+        .output()
+        .expect("same decision replays");
+    assert!(replay.status.success(), "stderr: {:?}", replay.stderr);
+
+    let conflict = heiwa()
+        .env("HOME", home.path())
+        .args(["approvals", "decide", &request_id, "--deny", "--json"])
+        .output()
+        .expect("conflicting decision runs");
+    assert!(!conflict.status.success());
+    assert!(
+        String::from_utf8_lossy(&conflict.stderr).contains("already approved"),
+        "stderr: {}",
+        String::from_utf8_lossy(&conflict.stderr)
+    );
+
+    let decision: serde_json::Value = serde_json::from_slice(
+        &fs::read(
+            home.path()
+                .join(".heiwa/state/dispatch/approvals/decisions")
+                .join(format!("{request_id}.json")),
+        )
+        .expect("decision file"),
+    )
+    .expect("decision JSON");
+    assert_eq!(decision["outcome"], "approved");
+}

@@ -1,3 +1,71 @@
+.cal-connection {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-5);
+  margin-bottom: var(--space-5);
+  padding: var(--space-4) var(--space-5);
+}
+
+.cal-connection p {
+  margin: var(--space-1) 0 0;
+}
+
+.cal-stage {
+  display: grid;
+  gap: var(--space-4);
+  margin-bottom: var(--space-5);
+  padding: var(--space-4) var(--space-5);
+}
+
+.cal-stage header p {
+  margin: var(--space-1) 0 0;
+}
+
+.cal-stage-fields {
+  display: grid;
+  grid-template-columns: minmax(180px, 2fr) repeat(4, minmax(110px, 1fr));
+  gap: var(--space-3);
+}
+
+.cal-stage-fields label {
+  display: grid;
+  gap: var(--space-1);
+  color: var(--content-muted);
+  font-size: var(--text-xs);
+}
+
+.cal-stage-fields input,
+.cal-stage-fields select {
+  min-width: 0;
+  padding: var(--space-2) var(--space-3);
+  color: var(--content-primary);
+  background: var(--surface-raised);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
+}
+
+.cal-stage-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: var(--space-4);
+}
+
+.cal-stage-actions p {
+  margin: 0 auto 0 0;
+}
+
+@media (max-width: 900px) {
+  .cal-stage-fields {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .cal-stage-title {
+    grid-column: 1 / -1;
+  }
+}
+
 .cal-nav {
   display: flex;
   align-items: center;

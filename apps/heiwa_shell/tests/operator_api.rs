@@ -181,6 +181,18 @@ fn operator_routes_fail_closed_before_read_or_action() {
         ),
         ("POST", "/api/v1/repl", json!({"prompt": "hi"})),
         ("POST", "/api/v1/repl/stream", json!({"prompt": "hi"})),
+        (
+            "POST",
+            "/api/v1/connectors/apple_calendar/connect",
+            json!({}),
+        ),
+        (
+            "POST",
+            "/api/v1/connectors/apple_calendar/disconnect",
+            json!({}),
+        ),
+        ("POST", "/api/v1/approvals/req_not_real/approve", json!({})),
+        ("POST", "/api/v1/approvals/req_not_real/deny", json!({})),
     ] {
         let response = runtime.request(method, target, None, body);
         assert_eq!(response.status, 401, "{method} {target}: {}", response.body);

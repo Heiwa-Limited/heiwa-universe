@@ -115,6 +115,10 @@ export type WorkersSnapshot = {
   total?: number;
   live?: number;
   stale?: number;
+  /** Runtime hosts keep Heiwa available; they are not user-dispatched work. */
+  runtime_live?: number;
+  /** Workers currently executing user or automation tasks. */
+  task_live?: number;
 };
 
 export type ApprovalsSnapshot = {

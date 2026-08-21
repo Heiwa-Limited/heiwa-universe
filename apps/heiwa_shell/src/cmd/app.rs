@@ -252,7 +252,17 @@ fn checkout_update_plan(
         .get("live")
         .and_then(Value::as_i64)
         .unwrap_or(0);
-    let blocking = pending_approvals > 0;
+    let runtime_workers = state
+        .workers_summary
+        .get("runtime_live")
+        .and_then(Value::as_i64)
+        .unwrap_or(0);
+    let task_workers = state
+        .workers_summary
+        .get("task_live")
+        .and_then(Value::as_i64)
+        .unwrap_or(0);
+    let blocking = pending_approvals > 0 || task_workers > 0;
     let receipt_id = format!(
         "heiwa-app-update-{}",
         chrono::Utc::now().format("%Y%m%dT%H%M%SZ")
@@ -300,6 +310,8 @@ fn checkout_update_plan(
         "active_work": {
             "pending_approvals": pending_approvals,
             "live_workers": live_workers,
+            "runtime_workers": runtime_workers,
+            "task_workers": task_workers,
             "blocking_restart": blocking,
             "classification": if blocking { "blocking" } else { "none_or_pausable" },
         },
@@ -1391,6 +1403,84 @@ async fn handle_connection(
             .await;
         }
         return serve_repl_stream(stream, prompt).await;
+    }
+
+    if method == "POST"
+        && matches!(
+            path,
+            "/api/v1/connectors/apple_calendar/connect"
+                | "/api/v1/connectors/apple_calendar/disconnect"
+        )
+    {
+        let result = if path.ends_with("/connect") {
+            crate::cmd::connectors::connect_apple_calendar()
+        } else {
+            crate::cmd::connectors::disconnect_apple_calendar()
+        };
+        let (status, payload) = match result {
+            Ok(data) => (200, json!({"ok": true, "data": data})),
+            Err(error) => (
+                400,
+                json!({"ok": false, "error": {"code": "connector_action_failed", "message": error.to_string()}}),
+            ),
+        };
+        return write_response(
+            &mut stream,
+            status,
+            "application/json",
+            payload.to_string().into_bytes(),
+            false,
+        )
+        .await;
+    }
+
+    if method == "POST" {
+        let segments = path.trim_start_matches('/').split('/').collect::<Vec<_>>();
+        if let ["api", "v1", "approvals", request_id, action] = segments.as_slice() {
+            let approve = match *action {
+                "approve" | "grant" => Some(true),
+                "deny" => Some(false),
+                _ => None,
+            };
+            if let Some(approve) = approve {
+                let parsed_body: Value = serde_json::from_str(&body).unwrap_or_else(|_| json!({}));
+                let note = parsed_body
+                    .get("note")
+                    .and_then(Value::as_str)
+                    .map(str::to_string);
+                let (status, payload) = match crate::cmd::approvals::decide_request(
+                    request_id,
+                    approve,
+                    note,
+                    "Heiwa.app",
+                ) {
+                    Ok(data) => (200, json!({"ok": true, "data": data})),
+                    Err(error) => {
+                        let message = error.to_string();
+                        let status = if message.contains("already approved")
+                            || message.contains("already denied")
+                            || message.contains("already in progress")
+                        {
+                            409
+                        } else {
+                            400
+                        };
+                        (
+                            status,
+                            json!({"ok": false, "error": {"code": "approval_decision_failed", "message": message}}),
+                        )
+                    }
+                };
+                return write_response(
+                    &mut stream,
+                    status,
+                    "application/json",
+                    payload.to_string().into_bytes(),
+                    false,
+                )
+                .await;
+            }
+        }
     }
 
     if method == "POST" && path == "/api/v1/calendar/holds" {
@@ -4249,28 +4339,15 @@ fn stable_hash(input: &str) -> String {
 }
 
 fn approval_rows() -> Vec<Value> {
-    let requests = state_dir().join("dispatch").join("requests");
-    let Ok(entries) = fs::read_dir(requests) else {
-        return Vec::new();
-    };
-    let mut rows = Vec::new();
-    for entry in entries.flatten() {
-        let path = entry.path();
-        if path.extension().and_then(|ext| ext.to_str()) != Some("json") {
-            continue;
-        }
-        let raw = fs::read_to_string(&path).unwrap_or_default();
-        let value: Value = serde_json::from_str(&raw).unwrap_or_else(|_| json!({}));
-        let fallback_id = path
-            .file_stem()
-            .and_then(|stem| stem.to_str())
-            .unwrap_or("approval")
-            .to_string();
+    crate::cmd::approvals::scan_pending_requests()
+        .into_iter()
+        .map(|value| {
         let approval_id = value
             .get("id")
+            .or_else(|| value.get("request_id"))
             .or_else(|| value.get("task_id"))
             .and_then(Value::as_str)
-            .unwrap_or(&fallback_id)
+            .unwrap_or("approval")
             .to_string();
         let summary = value
             .get("summary")
@@ -4279,7 +4356,7 @@ fn approval_rows() -> Vec<Value> {
             .and_then(Value::as_str)
             .unwrap_or("Local approval request")
             .to_string();
-        rows.push(json!({
+        json!({
             "approval_id": approval_id,
             "mission_id": value.get("mission_id").or_else(|| value.get("task_id")).and_then(Value::as_str).unwrap_or("local-dispatch"),
             "risk_level": value.get("risk_level").or_else(|| value.get("risk")).or_else(|| value.get("risk_tier")).and_then(Value::as_str).unwrap_or("unknown"),
@@ -4287,9 +4364,9 @@ fn approval_rows() -> Vec<Value> {
             "requested_at": value.get("requested_at").or_else(|| value.get("created_at")).and_then(Value::as_str).unwrap_or("unknown"),
             "expires_at": Value::Null,
             "requested_by": value.get("requested_by").or_else(|| value.get("from")).and_then(Value::as_str).unwrap_or("local-dispatch"),
-        }));
-    }
-    rows
+        })
+    })
+    .collect()
 }
 
 fn history_summary_for_state_dir(state_dir: &Path) -> Value {
@@ -5027,10 +5104,17 @@ fn workers_summary(state_dir: &Path) -> Value {
         .unwrap_or_default();
     let now = chrono::Utc::now().timestamp();
     let mut live = 0i64;
+    let mut runtime_live = 0i64;
+    let mut task_live = 0i64;
     let mut stale = 0i64;
     for entry in &entries {
         if worker_entry_is_live(entry, now) {
             live += 1;
+            if entry.get("class").and_then(Value::as_str) == Some("shell_machine") {
+                runtime_live += 1;
+            } else {
+                task_live += 1;
+            }
         } else {
             stale += 1;
         }
@@ -5038,6 +5122,8 @@ fn workers_summary(state_dir: &Path) -> Value {
     json!({
         "path": workers_path.display().to_string(),
         "live": live,
+        "runtime_live": runtime_live,
+        "task_live": task_live,
         "stale": stale,
         "total": entries.len(),
     })
@@ -5594,6 +5680,47 @@ mod app_readmodel_tests {
             .collect::<Vec<_>>();
         assert_eq!(worker_ids, vec!["live-peer", "current-worker"]);
 
+        let _ = fs::remove_dir_all(state);
+    }
+
+    #[test]
+    fn worker_summary_separates_runtime_hosts_from_task_workers() {
+        let state = temp_state_dir("worker-classes");
+        let now = chrono::Utc::now();
+        fs::write(
+            state.join("workers.json"),
+            serde_json::to_vec_pretty(&json!({
+                "workers": [
+                    {
+                        "worker_id": "heiwa-app-1",
+                        "class": "shell_machine",
+                        "last_heartbeat_utc": now.to_rfc3339(),
+                        "ttl_seconds": 120
+                    },
+                    {
+                        "worker_id": "task-worker-1",
+                        "class": "model_worker",
+                        "last_heartbeat_utc": now.to_rfc3339(),
+                        "ttl_seconds": 120
+                    },
+                    {
+                        "worker_id": "stale-task",
+                        "class": "model_worker",
+                        "last_heartbeat_utc": (now - chrono::Duration::minutes(10)).to_rfc3339(),
+                        "ttl_seconds": 120
+                    }
+                ]
+            }))
+            .expect("worker registry JSON"),
+        )
+        .expect("write worker registry");
+
+        let summary = workers_summary(&state);
+
+        assert_eq!(summary["live"], 2);
+        assert_eq!(summary["runtime_live"], 1);
+        assert_eq!(summary["task_live"], 1);
+        assert_eq!(summary["stale"], 1);
         let _ = fs::remove_dir_all(state);
     }
 

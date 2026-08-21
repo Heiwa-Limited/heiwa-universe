@@ -14,6 +14,7 @@ use heiwa_oauth::{
     LoopbackListener, ProviderConfig,
 };
 use heiwa_vault::{OAuthSecret, Vault, VaultError};
+use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use std::fs;
 use std::io::Write as _;
@@ -23,6 +24,17 @@ use std::time::Duration;
 
 const CONNECTOR_OAUTH_SERVICE: &str = "heiwa-connector-oauth";
 const GOOGLE_CLIENT_SCHEMA: &str = "heiwa_google_oauth_client_v1";
+const APPLE_CALENDAR_ENROLLMENT_SCHEMA: &str = "heiwa_connector_enrollment_v1";
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct AppleCalendarEnrollment {
+    schema_version: String,
+    connector: String,
+    installation_id: String,
+    device_id: String,
+    connected_at: String,
+    scopes: Vec<String>,
+}
 
 /// Read-first scopes: syncs become read models before any external write lane.
 fn google_scopes(connector: &str) -> Option<&'static str> {
@@ -83,11 +95,7 @@ async fn connect(connector: &str, args: &[String]) -> Result<()> {
     let connector = normalize_connector_id(connector);
     match connector.as_str() {
         "google_calendar" | "gmail" => google_connect(&connector, args).await,
-        "apple_calendar" => {
-            println!("apple_calendar: EventKit bridge is planned; no connect step exists yet.");
-            println!("Direction: device-local EventKit bridge with Calendar permission.");
-            Ok(())
-        }
+        "apple_calendar" => apple_calendar_connect(args),
         "apple_mail" => {
             println!("apple_mail: metadata-only lane; no connect step required.");
             println!("Snapshot target: ~/.heiwa/state/mail/headers.jsonl");
@@ -101,6 +109,232 @@ async fn connect(connector: &str, args: &[String]) -> Result<()> {
             "unknown connector: {other} (try: google-calendar, gmail, apple-calendar, apple-mail, imap)"
         )),
     }
+}
+
+fn apple_calendar_connect(args: &[String]) -> Result<()> {
+    if has_flag(args, "--disconnect") {
+        let payload = disconnect_apple_calendar()?;
+        println!(
+            "apple_calendar: {}",
+            payload["status"].as_str().unwrap_or("disconnected")
+        );
+        println!("local read models were preserved; revoke macOS permission separately if wanted");
+        return Ok(());
+    }
+    if has_flag(args, "--authorize") {
+        let payload = connect_apple_calendar()?;
+        println!("apple_calendar: connected");
+        println!(
+            "  resources: {}",
+            payload["resource_count"].as_u64().unwrap_or(0)
+        );
+        println!("  permission owner: macOS");
+        return Ok(());
+    }
+
+    let payload = apple_calendar_connection_payload();
+    println!("apple_calendar");
+    println!(
+        "  status: {}",
+        payload["status"].as_str().unwrap_or("config_error")
+    );
+    if payload["status"] != "connected" {
+        println!("  next: heiwa connect apple-calendar --authorize");
+    }
+    Ok(())
+}
+
+fn apple_calendar_enrollment_path() -> PathBuf {
+    crate::home::heiwa_state_dir()
+        .join("connectors")
+        .join("apple_calendar.json")
+}
+
+fn load_apple_calendar_enrollment() -> Result<Option<AppleCalendarEnrollment>> {
+    let path = apple_calendar_enrollment_path();
+    if !path.exists() {
+        return Ok(None);
+    }
+    let raw = fs::read_to_string(&path)
+        .with_context(|| format!("read Apple Calendar enrollment: {}", path.display()))?;
+    let enrollment: AppleCalendarEnrollment = serde_json::from_str(&raw)
+        .with_context(|| format!("Apple Calendar enrollment is corrupt: {}", path.display()))?;
+    if enrollment.schema_version != APPLE_CALENDAR_ENROLLMENT_SCHEMA {
+        return Err(anyhow!(
+            "Apple Calendar enrollment schema {} is unsupported; upgrade Heiwa rather than overwriting it",
+            enrollment.schema_version
+        ));
+    }
+    if enrollment.connector != "apple_calendar"
+        || enrollment.installation_id.trim().is_empty()
+        || enrollment.device_id.trim().is_empty()
+    {
+        return Err(anyhow!("Apple Calendar enrollment is incomplete"));
+    }
+    Ok(Some(enrollment))
+}
+
+fn current_apple_calendar_binding() -> Result<(String, String)> {
+    let identity = heiwa_identity::load()?
+        .ok_or_else(|| anyhow!("finish Heiwa first-run setup before connecting Apple Calendar"))?;
+    let machine = heiwa_install::load_machine_manifest()
+        .map_err(|error| anyhow!(error))?
+        .ok_or_else(|| anyhow!("start Heiwa.app once before connecting Apple Calendar"))?;
+    Ok((identity.installation_id, machine.device_id))
+}
+
+fn ensure_apple_calendar_binding_for_connect() -> Result<(String, String)> {
+    let identity = heiwa_identity::load()?
+        .ok_or_else(|| anyhow!("finish Heiwa first-run setup before connecting Apple Calendar"))?;
+    let machine = match heiwa_install::load_machine_manifest().map_err(|error| anyhow!(error))? {
+        Some(machine) => machine,
+        None => {
+            heiwa_install::refresh_machine_manifest_for_runtime(heiwa_install::MachineRuntime {
+                version: env!("CARGO_PKG_VERSION").to_string(),
+                channel: "local".to_string(),
+                install_path: std::env::current_exe().context("resolve Heiwa executable")?,
+            })?
+        }
+    };
+    Ok((identity.installation_id, machine.device_id))
+}
+
+pub(crate) fn require_apple_calendar_connection() -> Result<()> {
+    let enrollment = load_apple_calendar_enrollment()?
+        .ok_or_else(|| anyhow!("Apple Calendar is not connected to this Heiwa profile"))?;
+    let (installation_id, device_id) = current_apple_calendar_binding()?;
+    if enrollment.installation_id != installation_id || enrollment.device_id != device_id {
+        return Err(anyhow!(
+            "Apple Calendar enrollment belongs to a different Heiwa installation or device; reconnect it"
+        ));
+    }
+    Ok(())
+}
+
+pub(crate) fn apple_calendar_connection_payload() -> Value {
+    match load_apple_calendar_enrollment() {
+        Ok(None) => json!({
+            "connector": "apple_calendar",
+            "status": "disconnected",
+            "detail": "Detected on this Mac, but not connected to this Heiwa profile.",
+            "next_action": "heiwa connect apple-calendar --authorize",
+        }),
+        Ok(Some(enrollment)) => match current_apple_calendar_binding() {
+            Ok((installation_id, device_id))
+                if enrollment.installation_id == installation_id
+                    && enrollment.device_id == device_id =>
+            {
+                json!({
+                    "connector": "apple_calendar",
+                    "status": "connected",
+                    "detail": "Connected to this Heiwa profile on this device.",
+                    "connected_at": enrollment.connected_at,
+                    "scopes": enrollment.scopes,
+                })
+            }
+            Ok(_) => json!({
+                "connector": "apple_calendar",
+                "status": "disconnected",
+                "detail": "The saved enrollment belongs to another installation or device; reconnect it.",
+                "next_action": "heiwa connect apple-calendar --authorize",
+            }),
+            Err(error) => json!({
+                "connector": "apple_calendar",
+                "status": "config_error",
+                "detail": error.to_string(),
+            }),
+        },
+        Err(error) => json!({
+            "connector": "apple_calendar",
+            "status": "config_error",
+            "detail": error.to_string(),
+        }),
+    }
+}
+
+pub(crate) fn connect_apple_calendar() -> Result<Value> {
+    // Parse any existing record before touching Calendar.app or writing. A
+    // newer schema belongs to a newer Heiwa and must never be reset by this
+    // build's reconnect path.
+    let _existing = load_apple_calendar_enrollment()?;
+    let (installation_id, device_id) = ensure_apple_calendar_binding_for_connect()?;
+    let calendars = crate::cmd::calendar_apple::list_calendars()?;
+    let enrollment = AppleCalendarEnrollment {
+        schema_version: APPLE_CALENDAR_ENROLLMENT_SCHEMA.to_string(),
+        connector: "apple_calendar".to_string(),
+        installation_id,
+        device_id,
+        connected_at: chrono::Utc::now().to_rfc3339(),
+        scopes: vec![
+            "calendar.read".to_string(),
+            "calendar.event.create_with_approval".to_string(),
+        ],
+    };
+    write_owner_private_json(&apple_calendar_enrollment_path(), &enrollment)?;
+    Ok(json!({
+        "connector": "apple_calendar",
+        "status": "connected",
+        "resource_count": calendars.len(),
+        "auth": {
+            "mode": "macos_automation",
+            "owner": "macOS",
+            "secrets": "none",
+        },
+    }))
+}
+
+pub(crate) fn disconnect_apple_calendar() -> Result<Value> {
+    let path = apple_calendar_enrollment_path();
+    if path.exists() {
+        fs::remove_file(&path)
+            .with_context(|| format!("remove Apple Calendar enrollment: {}", path.display()))?;
+    }
+    Ok(json!({
+        "connector": "apple_calendar",
+        "status": "disconnected",
+        "read_models_preserved": true,
+        "revoke": {
+            "owner": "macOS",
+            "path": "System Settings > Privacy & Security > Automation > heiwa > Calendar",
+        },
+    }))
+}
+
+fn write_owner_private_json<T: Serialize>(path: &Path, value: &T) -> Result<()> {
+    let parent = path
+        .parent()
+        .ok_or_else(|| anyhow!("connector enrollment path has no parent"))?;
+    fs::create_dir_all(parent)?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        fs::set_permissions(parent, fs::Permissions::from_mode(0o700))?;
+    }
+    let temporary = parent.join(format!(
+        ".apple_calendar.{}.{}.tmp",
+        std::process::id(),
+        uuid::Uuid::new_v4().simple()
+    ));
+    let result = (|| -> Result<()> {
+        let body = serde_json::to_vec_pretty(value)?;
+        let mut file = fs::OpenOptions::new()
+            .create_new(true)
+            .write(true)
+            .open(&temporary)?;
+        file.write_all(&body)?;
+        file.sync_all()?;
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            fs::set_permissions(&temporary, fs::Permissions::from_mode(0o600))?;
+        }
+        fs::rename(&temporary, path)?;
+        Ok(())
+    })();
+    if result.is_err() {
+        let _ = fs::remove_file(&temporary);
+    }
+    result
 }
 
 async fn google_connect(connector: &str, args: &[String]) -> Result<()> {
@@ -453,14 +687,22 @@ pub(crate) fn connectors_payload() -> Value {
         },
     }));
 
+    let apple_calendar = apple_calendar_connection_payload();
+    let apple_calendar_status = apple_calendar
+        .get("status")
+        .and_then(Value::as_str)
+        .unwrap_or("config_error");
     rows.push(json!({
         "id": "apple_calendar",
         "kind": "calendar",
         "display_name": "Apple Calendar",
-        "status": "planned",
-        "auth_kind": "eventkit_bridge",
-        "detail": "Device-local EventKit bridge with Calendar permission; not wired yet.",
-        "next_action": Value::Null,
+        "status": apple_calendar_status,
+        "auth_kind": "macos_automation",
+        "scopes": "calendar.read calendar.event.create_with_approval",
+        "detail": apple_calendar.get("detail").cloned().unwrap_or_else(|| Value::String(
+            "Device-local Calendar.app bridge; external writes require approval.".into()
+        )),
+        "next_action": apple_calendar.get("next_action").cloned().unwrap_or(Value::Null),
     }));
 
     rows.push(json!({

@@ -10,7 +10,8 @@ Default location: `~/.heiwa/` (override via `HEIWA_HOME`).
 | ------------------------ | -------- | --------------------------------------------------------------- |
 | `~/.heiwa/config.toml`   | operator | Local profile, route prefs, BYOX registration defaults          |
 | `~/.heiwa/accounts.json` | runtime  | Connected provider accounts (status, models, expiry refs)       |
-| `~/.heiwa/identity.json` | runtime  | Operator identity bound to this machine                         |
+| `~/.heiwa/local-identity.json` | runtime | Local per-installation identity established during first run |
+| `~/.heiwa/identity.json` | runtime  | Optional Heiwa service-login identity and token; distinct from first-run identity |
 | `~/.heiwa/machine.json`  | runtime  | Stable device id plus refreshed platform, hardware, runtime, and local capability manifest |
 | `~/.heiwa/evidence/`     | runtime  | Canonical versioned JSONL evidence journals                     |
 | `~/.heiwa/secrets/`      | runtime  | OS-keychain-backed secret refs; never raw secrets in plain JSON |
@@ -33,6 +34,8 @@ This subtree is the only place runtime mutation happens for life/workers/approva
 | `state/dispatch/requests/`            | runtime, brokers                 | `heiwa approvals list`, `heiwa approvals show`     |
 | `state/dispatch/approvals/decisions/` | `heiwa approvals decide`         | runtime brokers, audit                             |
 | `state/dispatch/results/`             | runtime                          | audit                                              |
+| `state/connectors/apple_calendar.json` | explicit connector enrollment   | Calendar resource/read/write gates                 |
+| `state/calendar/`                     | calendar runtime                | Calendar UI, approval executor, connector audit    |
 | `state/evidence/<utc-date>/`          | runtime, brokers                 | audit                                              |
 | `state/health/doctor_latest.json`     | `heiwa doctor`                   | UI, CI                                             |
 | `state/inventory/`                    | runtime                          | `heiwa providers`, `heiwa models`                  |
@@ -74,14 +77,22 @@ GitHub is the source of truth for source and binaries.
 
 ## Filesystem Hygiene
 
-Treat `state/` as recreatable. The only paths that contain authoritative truth are:
+Do not treat the entire `state/` subtree as recreatable. Read models and caches
+can be rebuilt, but approvals, connector enrollment, calendar holds/receipts,
+and other user-authored records are durable local truth.
+
+Identity and connection anchors include:
 
 - `accounts.json`
+- `local-identity.json`
 - `identity.json`
 - `machine.json`
-- `connection.json`
 - `secrets/` (keychain references)
+- `state/connectors/`
+- `state/dispatch/approvals/decisions/`
+- user-authored or receipt-bearing domain records under `state/`
+- canonical journals under `evidence/`
 
-Everything in `state/`, `cache/`, `logs/`, and `sessions/` is recoverable from the
-backend (when connected) or rebuildable by running `heiwa doctor`, `heiwa life import`,
-and the relevant heartbeats.
+`cache/`, logs, derived Lance indexes, health probes, and external-source read
+models are rebuildable. There is no hosted backend that can restore unsynced
+local identity, decisions, receipts, or evidence journals.

@@ -24,7 +24,10 @@ function HoldForm(props: { onCreated: () => void }): JSX.Element {
   const [busy, setBusy] = createSignal(false);
   const [error, setError] = createSignal<string | null>(null);
   const [notice, setNotice] = createSignal<string | null>(null);
-  const [resources] = createResource(() => v1.calendarResources());
+  const [resources, { refetch: refetchResources }] = createResource(() =>
+    v1.calendarResources(),
+  );
+  const [connectionBusy, setConnectionBusy] = createSignal(false);
 
   const writableCalendars = () =>
     (resources()?.calendars ?? []).filter((item) => item.writable);
@@ -81,6 +84,24 @@ function HoldForm(props: { onCreated: () => void }): JSX.Element {
       setError(message);
     } finally {
       setBusy(false);
+    }
+  }
+
+  async function connectAppleCalendar(): Promise<void> {
+    if (connectionBusy()) return;
+    setConnectionBusy(true);
+    setError(null);
+    try {
+      await v1.connectAppleCalendar();
+      await refetchResources();
+    } catch (err) {
+      const message =
+        err instanceof Error
+          ? err.message
+          : ((err as { message?: string }).message ?? String(err));
+      setError(message);
+    } finally {
+      setConnectionBusy(false);
     }
   }
 
@@ -167,6 +188,28 @@ function HoldForm(props: { onCreated: () => void }): JSX.Element {
         <p class="repl-error">
           {resources()?.error ?? "Apple Calendar resources are unavailable."}
         </p>
+      </Show>
+      <Show
+        when={
+          destination() === "apple" &&
+          resources() !== undefined &&
+          resources()?.status !== "ready"
+        }
+      >
+        <div class="hero-actions">
+          <button
+            class="btn btn-outline"
+            type="button"
+            disabled={connectionBusy()}
+            onClick={() => void connectAppleCalendar()}
+          >
+            Connect Apple Calendar
+          </button>
+          <span class="muted">
+            {resources()?.detail ??
+              "This Heiwa profile has not enrolled Apple Calendar."}
+          </span>
+        </div>
       </Show>
       <p class="muted">
         Local holds stay under <code>~/.heiwa/state/calendar</code>. Apple
