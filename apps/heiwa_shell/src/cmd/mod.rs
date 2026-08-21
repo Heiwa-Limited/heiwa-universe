@@ -2,6 +2,7 @@ pub mod app;
 pub mod approvals;
 pub mod auto;
 pub mod calendar;
+pub(crate) mod calendar_apple;
 pub mod capabilities;
 pub mod compress;
 pub mod connectors;

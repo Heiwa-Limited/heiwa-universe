@@ -5,7 +5,9 @@ import type {
   ApprovalsSummary,
   AutomationsSummary,
   BrowserProbePayload,
+  CalendarApprovalRequest,
   CalendarHold,
+  CalendarResources,
   CalendarSummary,
   CellsCatalogEntry,
   ConnectorsSummary,
@@ -67,6 +69,8 @@ export const v1 = {
     unwrap(api.get<Envelope<FreshnessReport>>("/api/v1/life/freshness")),
   calendarSummary: () =>
     unwrap(api.get<Envelope<CalendarSummary>>("/api/v1/calendar/summary")),
+  calendarResources: () =>
+    unwrap(api.get<Envelope<CalendarResources>>("/api/v1/calendar/resources")),
   createHold: (hold: {
     title: string;
     date?: string | undefined;
@@ -74,12 +78,21 @@ export const v1 = {
     end?: string | undefined;
     kind?: string | undefined;
     note?: string | undefined;
+    promotion?:
+      | {
+          connector: "apple_calendar";
+          calendar: string;
+        }
+      | undefined;
   }) =>
     unwrap(
-      api.post<Envelope<{ hold: CalendarHold }>>(
-        "/api/v1/calendar/holds",
-        hold,
-      ),
+      api.post<
+        Envelope<{
+          hold: CalendarHold;
+          approval_request?: CalendarApprovalRequest;
+          approval_path?: string;
+        }>
+      >("/api/v1/calendar/holds", hold),
     ),
   mailSummary: () =>
     unwrap(api.get<Envelope<MailSummary>>("/api/v1/mail/summary")),

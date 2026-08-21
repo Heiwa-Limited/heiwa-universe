@@ -32,7 +32,7 @@ export function RemoteShell<T>(props: RemoteShellProps<T>): JSX.Element {
     const onMessage = (event: MessageEvent) => {
       try {
         const msg: unknown = JSON.parse(event.data);
-        if (props.liveEventFilter && props.liveEventFilter(msg)) {
+        if (props.liveEventFilter?.(msg)) {
           ctl.refetch();
         }
       } catch {

@@ -9,9 +9,9 @@ Plane: Evidence — this workflow keeps repo truth inspectable before Execution 
 1. **Repo truth first.** Read `HEIWA.md`, `AGENTS.md`, and `docs/local-self-operation.md` before architecture, runtime, promotion, or remote work.
 2. **`dev` is the integration branch; `main` is production.** Agents commit on `dev` and local `main` only mirrors `origin/main` (updated via `dev` -> `main` pull requests). Use temporary worktrees under `.worktrees/` or `.claude/worktrees/` for risky or broad edits; merge back to `dev` only after real evidence.
 3. **No remote operations by drift.** `git fetch`, `git pull`, `git push`, `gh run`, `gh release`, `spacetime publish`, `wrangler deploy`, and equivalent network-promotion commands require an explicit assignment for that remote operation.
-4. **Small execution slices.** Every slice must classify as Intake, Execution, Evidence, or out-of-scope. If it cannot be reviewed as one slice, split it.
+4. **Value-bearing execution.** Every work item must classify as Intake, Execution, Evidence, or out-of-scope. Size it by delivered value, not artificial smallness; split only where each part can ship independent value without leaving the product incomplete.
 5. **Runtime split-brain is a blocker.** Port `7474` is installed product runtime. Checkout verification uses `7475` or another temporary port and the agent stops what it starts.
-6. **Handoffs use the repo house style.** Include: `$caveman; repo truth first; execute smallest real-value slice; verify; report blocker.`
+6. **Handoffs use the repo house style.** Include: `$caveman; repo truth first; ideate, build, execute, and ship real value only, regardless of slice size; verify; use reasonable workarounds; report only true blockers.`
 7. **Do not mutate `vendor/` by accident.** Current `vendor/oss-lifts` material is ignored local quarantine/reference. Do not add, remove, depend on, or promote it without an explicit tracked-vendor assignment.
 
 ## Local baseline gate
@@ -97,7 +97,7 @@ Tracked vendor code remains possible later, but only as an explicit slice:
 Use this shape for peer handoffs and final repo-health reports:
 
 ```text
-$caveman; repo truth first; execute smallest real-value slice; verify; report blocker.
+$caveman; repo truth first; ideate, build, execute, and ship real value only, regardless of slice size; verify; use reasonable workarounds; report only true blockers.
 
 Acquired data:
 - ...

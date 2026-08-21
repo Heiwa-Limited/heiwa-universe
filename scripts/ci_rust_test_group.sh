@@ -47,6 +47,7 @@ shell_state_targets=(
 )
 
 shell_ops_targets=(
+  apple_calendar_connector
   calendar_sync
   mail_triage
   schedule

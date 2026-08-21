@@ -52,6 +52,8 @@ fn real_run_stages_approval_and_hold_under_home() {
         .as_str()
         .expect("request id");
     let hold_id = payload["hold"]["id"].as_str().expect("hold id");
+    assert_eq!(payload["hold"]["external_promotion"], "local_only");
+    assert!(payload["hold"]["promotion"].is_null());
 
     let state = home.path().join(".heiwa").join("state");
     assert!(state

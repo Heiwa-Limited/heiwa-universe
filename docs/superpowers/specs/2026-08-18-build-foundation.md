@@ -25,6 +25,11 @@ purchase, a credential, or a hosted service.
 | Peak velocity | 109 commits/week; L0→L2 spec-to-shipped in ~2 days |
 | Executable connectors | **0** (1 validated manifest) |
 
+2026-08-21 update: the executable connector count is now **1**. Apple Calendar
+has real resource discovery, read, T2 event creation, receipt replay, and
+OS-owned revocation guidance. The table above remains the measured 2026-08-18
+baseline.
+
 Verified working, by execution rather than by document:
 
 - **Approval gate** — `heiwa approvals list` returns 3 pending requests with
@@ -128,10 +133,12 @@ Days. No purchase, no credential, no hosted service.
 Do not publish a `.dmg` as the headline artifact. Browser downloads set the quarantine bit;
 `curl` and the updater do not. Detail: `docs/references/tauri-updater.md`.
 
-### Phase 2 — one connector, all the way through
+### Phase 2 — one connector, all the way through — complete 2026-08-21
 
-Google OAuth loopback + PKCE → Calendar and Mail, read **and write**, where every write
-crosses `AwaitingApproval` and lands a receipt that replays from the journal.
+Mac Calendar.app resource discovery → local read model → exact T2 event write,
+where the write crosses approval and lands a receipt that replays from the
+journal. Google OAuth remains the portable Calendar/Gmail expansion path; it
+does not gate the Mac-first product lane.
 
 This is the first moment the trust plane does work, and the first capability ChatGPT cannot
 match on architecture rather than on polish.
@@ -162,9 +169,9 @@ Phase 1 is complete when a machine running v0.2.0 receives a subsequent release 
 re-running the installer, and `scripts/check_public_installer_edge.sh` proves the edge
 serves the repo's installer rather than a pinned copy.
 
-Phase 2 is complete when a calendar write executes against a live account under approval and
-the resulting receipt replays from the journal — the L3 criterion already set in the
-2026-08-14 roadmap.
+Phase 2 passed on 2026-08-21: a live Calendar.app write executed under approval,
+returned one external id, and replayed one connector receipt with zero skipped
+lines. The exact verification event was removed by marker plus external id.
 
 ## References
 

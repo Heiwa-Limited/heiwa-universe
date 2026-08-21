@@ -1395,8 +1395,8 @@ async fn handle_connection(
 
     if method == "POST" && path == "/api/v1/calendar/holds" {
         let parsed_body: Value = serde_json::from_str(&body).unwrap_or_else(|_| json!({}));
-        let (status, payload) = match crate::cmd::calendar::create_hold(&parsed_body) {
-            Ok(hold) => (201, json!({"ok": true, "data": {"hold": hold}})),
+        let (status, payload) = match crate::cmd::calendar::create_hold_from_app(&parsed_body) {
+            Ok(data) => (201, json!({"ok": true, "data": data})),
             Err(error) => (
                 400,
                 json!({"ok": false, "error": {"code": "invalid_hold", "message": error.to_string()}}),
@@ -3095,6 +3095,9 @@ fn api_payload_for_port(path: &str, started_at: &str, app_port: u16) -> Option<V
         "/api/v1/life/freshness" => crate::cmd::life::freshness_payload(),
         "/api/v1/life/social" => crate::cmd::life::social_payload(),
         "/api/v1/calendar/summary" => crate::cmd::calendar::summary_payload(),
+        "/api/v1/calendar/resources" => {
+            crate::cmd::calendar::apple_calendar_resources_payload_or_error()
+        }
         "/api/v1/mail/summary" => crate::cmd::mail::summary_payload(),
         "/api/v1/automations" => crate::cmd::auto::automations_payload(),
         "/api/v1/receipts" => receipts_payload_for_state_dir(&state_dir()),

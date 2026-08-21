@@ -74,8 +74,45 @@ export interface CalendarHold {
   status: "draft" | "committed" | string;
   note: string | null;
   source: string;
+  work_id: string;
   created_at: string;
   external_promotion: string;
+  promotion?: {
+    connector: "apple_calendar" | string;
+    calendar: string;
+  } | null;
+  external_event?: {
+    connector: string;
+    calendar: string;
+    external_id: string;
+    marker: string;
+    created: boolean;
+  };
+}
+
+export interface CalendarResource {
+  name: string;
+  writable: boolean;
+}
+
+export interface CalendarResources {
+  source: "apple_calendar" | string;
+  status: "ready" | "error" | string;
+  calendars: CalendarResource[];
+  error?: string;
+  revoke: {
+    owner: "macOS" | string;
+    path: string;
+  };
+}
+
+export interface CalendarApprovalRequest {
+  request_id: string;
+  work_id: string;
+  risk_tier: "T2" | string;
+  action: string;
+  target_surface: "calendar" | string;
+  target_scope: string;
 }
 
 export interface CalendarMoment {

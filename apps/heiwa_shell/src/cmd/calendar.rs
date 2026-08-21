@@ -1,10 +1,10 @@
-//! Heiwa Calendar read model: local-first holds plus connector lane status.
+//! Heiwa Calendar read model plus governed connector actions.
 //!
-//! Holds are the only writable lane today and they are local-only; promoting
-//! a hold to Apple/Google stays approval-gated and is not implemented here.
+//! Holds remain local truth. A named Apple Calendar promotion is an explicit
+//! T2 effect and can execute only from the approval service.
 
 use anyhow::{anyhow, Result};
-use chrono::{Duration, Local, Utc};
+use chrono::{Duration, Local, NaiveDateTime, TimeZone, Utc};
 use serde_json::{json, Value};
 use std::collections::HashSet;
 use std::fs;
@@ -50,6 +50,7 @@ pub async fn run(args: &[String]) -> Result<()> {
             }
             Ok(())
         }
+        Some("calendars") => calendars(&args[1..]),
         Some("sync") => sync(&args[1..]).await,
         Some("hold") => hold(&args[1..]),
         Some("--help") | Some("-h") => {
@@ -58,6 +59,67 @@ pub async fn run(args: &[String]) -> Result<()> {
         }
         Some(other) => Err(anyhow!("unknown calendar command: {other}")),
     }
+}
+
+fn calendars(args: &[String]) -> Result<()> {
+    let source = flag_value(args, "--source")
+        .unwrap_or_else(|| "apple".to_string())
+        .replace('-', "_")
+        .to_ascii_lowercase();
+    if !["apple", "apple_calendar"].contains(&source.as_str()) {
+        return Err(anyhow!(
+            "unknown calendar resource source: {source} (expected apple)"
+        ));
+    }
+    let payload = apple_calendar_resources_payload()?;
+    if has_flag(args, "--json") {
+        println!("{payload}");
+    } else {
+        println!("Apple calendars");
+        for calendar in payload["calendars"].as_array().into_iter().flatten() {
+            let name = calendar.get("name").and_then(Value::as_str).unwrap_or("?");
+            let writable = calendar
+                .get("writable")
+                .and_then(Value::as_bool)
+                .unwrap_or(false);
+            println!("  {name}{}", if writable { "" } else { " (read-only)" });
+        }
+        println!("  revoke: System Settings > Privacy & Security > Automation > heiwa > Calendar");
+    }
+    Ok(())
+}
+
+pub(crate) fn apple_calendar_resources_payload() -> Result<Value> {
+    let calendars = crate::cmd::calendar_apple::list_calendars()?;
+    Ok(json!({
+        "source": "apple_calendar",
+        "status": "ready",
+        "auth": {
+            "mode": "macos_automation",
+            "owner": "macOS",
+            "secrets": "none",
+        },
+        "calendars": calendars,
+        "revoke": {
+            "owner": "macOS",
+            "path": "System Settings > Privacy & Security > Automation > heiwa > Calendar",
+        },
+    }))
+}
+
+pub(crate) fn apple_calendar_resources_payload_or_error() -> Value {
+    apple_calendar_resources_payload().unwrap_or_else(|error| {
+        json!({
+            "source": "apple_calendar",
+            "status": "error",
+            "calendars": [],
+            "error": error.to_string(),
+            "revoke": {
+                "owner": "macOS",
+                "path": "System Settings > Privacy & Security > Automation > heiwa > Calendar",
+            },
+        })
+    })
 }
 
 fn print_status(payload: &Value) {
@@ -165,7 +227,7 @@ async fn sync(args: &[String]) -> Result<()> {
                 Ok(rows) => {
                     source_reports.push(json!({
                         "source": "apple", "status": "scanned", "fetched": rows.len(),
-                        "bridge": "Calendar.app JXA metadata bridge (EventKit-native bridge target remains planned)",
+                        "bridge": "Calendar.app JXA metadata bridge",
                     }));
                     fetched.extend(rows);
                 }
@@ -248,9 +310,9 @@ fn calendar_sync_dry_run_payload(source: &str, limit: usize, days: i64) -> Value
             "apple": {
                 "selected": apple_selected,
                 "ready": calendar_app_present(),
-                "bridge": "Calendar.app JXA metadata bridge now; EventKit-native helper remains the target",
+                "bridge": "Calendar.app JXA metadata bridge",
                 "fields": ["calendar", "title", "start", "end", "date", "status"],
-                "external_writes": "approval_required_not_implemented_here",
+                "external_writes": "approval_required",
             },
             "google": {
                 "selected": google_selected,
@@ -266,8 +328,17 @@ fn calendar_sync_dry_run_payload(source: &str, limit: usize, days: i64) -> Value
 }
 
 fn calendar_app_present() -> bool {
-    PathBuf::from("/System/Applications/Calendar.app").exists()
-        || PathBuf::from("/Applications/Calendar.app").exists()
+    crate::cmd::calendar_apple::bridge_available()
+}
+
+fn local_timezone_name() -> String {
+    fs::read_link("/etc/localtime")
+        .ok()
+        .and_then(|path| {
+            let path = path.to_string_lossy();
+            path.split("zoneinfo/").nth(1).map(str::to_string)
+        })
+        .unwrap_or_else(|| "local".to_string())
 }
 
 const APPLE_CALENDAR_JXA: &str = r#"
@@ -694,12 +765,27 @@ fn write_sync_receipt(sources: &[Value], fetched: usize, appended: usize) -> Res
 }
 
 fn ensure_event_identity(mut row: Value) -> Value {
-    if row.get("id").and_then(Value::as_str).is_some() {
-        return row;
-    }
-    let id = stable_event_id(&event_dedupe_key(&row));
+    let id = row
+        .get("id")
+        .and_then(Value::as_str)
+        .map(str::to_string)
+        .unwrap_or_else(|| stable_event_id(&event_dedupe_key(&row)));
+    let source = row
+        .get("source")
+        .and_then(Value::as_str)
+        .unwrap_or("calendar")
+        .to_string();
+    let deadline = row.get("start").cloned().unwrap_or(Value::Null);
     if let Some(obj) = row.as_object_mut() {
         obj.insert("id".to_string(), json!(id));
+        obj.entry("signal".to_string()).or_insert_with(|| {
+            json!({
+                "source": source,
+                "deadline": deadline,
+                "actionable": false,
+                "privacy": "personal",
+            })
+        });
     }
     row
 }
@@ -821,6 +907,17 @@ pub(crate) fn create_hold(request: &Value) -> Result<Value> {
         .get("source")
         .and_then(Value::as_str)
         .unwrap_or("cockpit");
+    let work_id = request
+        .get("work_id")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(str::to_string)
+        .unwrap_or_else(|| format!("work_{}", uuid::Uuid::new_v4().simple()));
+    if work_id.len() > 200 {
+        return Err(anyhow!("hold work_id too long (max 200 chars)"));
+    }
+    let promotion = normalized_promotion(request.get("promotion"))?;
 
     let id = format!(
         "hold-{}-{}",
@@ -838,8 +935,10 @@ pub(crate) fn create_hold(request: &Value) -> Result<Value> {
         "status": "draft",
         "note": note,
         "source": source,
+        "work_id": work_id,
         "created_at": created_at,
-        "external_promotion": "approval_required",
+        "external_promotion": if promotion.is_some() { "approval_required" } else { "local_only" },
+        "promotion": promotion,
     });
 
     let dir = holds_dir();
@@ -850,9 +949,11 @@ pub(crate) fn create_hold(request: &Value) -> Result<Value> {
         "receipt_id": format!("rcpt-{id}"),
         "kind": "calendar_hold_created",
         "hold_id": id,
+        "work_id": work_id,
         "title": title,
         "date": date,
         "source": source,
+        "promotion": promotion,
         "created_at": created_at,
         "external_writes": [],
     });
@@ -864,6 +965,296 @@ pub(crate) fn create_hold(request: &Value) -> Result<Value> {
     )?;
 
     Ok(hold)
+}
+
+pub(crate) fn create_hold_from_app(request: &Value) -> Result<Value> {
+    let mut request = request.clone();
+    request["source"] = json!("heiwa.app");
+    let promotion = normalized_promotion(request.get("promotion"))?;
+    if let Some(promotion) = promotion.as_ref() {
+        validate_promotion_target(promotion)?;
+    }
+    let hold = create_hold(&request)?;
+    let Some(promotion) = promotion else {
+        return Ok(json!({ "hold": hold }));
+    };
+
+    let hold_id = hold
+        .get("id")
+        .and_then(Value::as_str)
+        .ok_or_else(|| anyhow!("staged hold has no id"))?;
+    if let Err(error) = hold_interval(&hold) {
+        let _ = fs::remove_file(holds_dir().join(format!("{hold_id}.json")));
+        let _ = fs::remove_file(receipts_dir().join(format!("rcpt-{hold_id}.json")));
+        return Err(anyhow!(
+            "Apple Calendar staging requires a concrete local interval: {error}"
+        ));
+    }
+    let work_id = hold
+        .get("work_id")
+        .and_then(Value::as_str)
+        .ok_or_else(|| anyhow!("staged hold has no work_id"))?;
+    let request_id = format!("req_{}", &uuid::Uuid::new_v4().simple().to_string()[..12]);
+    let approval = json!({
+        "schema_version": "operator_dispatch_request_v1",
+        "request_id": request_id,
+        "work_id": work_id,
+        "created_at": Utc::now().to_rfc3339(),
+        "action": "calendar-event-create",
+        "target_surface": "calendar",
+        "target_scope": hold_id,
+        "requested_mode": "stage",
+        "risk_tier": "T2",
+        "intent": {
+            "hold_id": hold_id,
+            "title": hold.get("title"),
+            "date": hold.get("date"),
+            "start": hold.get("start"),
+            "end": hold.get("end"),
+            "note": hold.get("note"),
+            "promotion": promotion,
+        },
+        "source": "Heiwa.app Calendar",
+    });
+    let approval_path = crate::cmd::approvals::requests_dir().join(format!("{request_id}.json"));
+    let persisted = (|| -> Result<()> {
+        if let Some(parent) = approval_path.parent() {
+            fs::create_dir_all(parent)?;
+        }
+        fs::write(&approval_path, serde_json::to_string_pretty(&approval)?)?;
+        Ok(())
+    })();
+    if let Err(error) = persisted {
+        let _ = fs::remove_file(holds_dir().join(format!("{hold_id}.json")));
+        let _ = fs::remove_file(receipts_dir().join(format!("rcpt-{hold_id}.json")));
+        return Err(anyhow!(
+            "failed to stage approval; newly created hold was rolled back: {error}"
+        ));
+    }
+
+    Ok(json!({
+        "hold": hold,
+        "approval_request": approval,
+        "approval_path": approval_path.display().to_string(),
+    }))
+}
+
+pub(crate) fn normalized_promotion(raw: Option<&Value>) -> Result<Option<Value>> {
+    let Some(raw) = raw.filter(|value| !value.is_null()) else {
+        return Ok(None);
+    };
+    let connector = raw
+        .get("connector")
+        .and_then(Value::as_str)
+        .unwrap_or("")
+        .replace('-', "_")
+        .to_ascii_lowercase();
+    if !["apple", "apple_calendar"].contains(&connector.as_str()) {
+        return Err(anyhow!(
+            "calendar promotion connector must be apple_calendar"
+        ));
+    }
+    let calendar = raw
+        .get("calendar")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .ok_or_else(|| anyhow!("Apple Calendar promotion requires an exact calendar name"))?;
+    if calendar.len() > 200 {
+        return Err(anyhow!("Apple calendar name too long (max 200 chars)"));
+    }
+    Ok(Some(json!({
+        "connector": "apple_calendar",
+        "calendar": calendar,
+    })))
+}
+
+pub(crate) fn validate_promotion_target(promotion: &Value) -> Result<()> {
+    let normalized = normalized_promotion(Some(promotion))?
+        .ok_or_else(|| anyhow!("calendar promotion target is missing"))?;
+    let calendar = normalized["calendar"]
+        .as_str()
+        .ok_or_else(|| anyhow!("Apple calendar target is missing"))?;
+    crate::cmd::calendar_apple::ensure_writable_calendar(calendar)
+}
+
+pub(crate) fn promote_hold_to_apple(
+    hold_id: &str,
+    calendar: &str,
+    approval_id: &str,
+    work_id: &str,
+) -> Result<Value> {
+    crate::cmd::calendar_apple::ensure_writable_calendar(calendar)?;
+    let path = holds_dir().join(format!("{hold_id}.json"));
+    let raw = fs::read_to_string(&path)
+        .map_err(|error| anyhow!("hold {hold_id} could not be read: {error}"))?;
+    let mut hold: Value = serde_json::from_str(&raw)
+        .map_err(|error| anyhow!("hold {hold_id} is malformed: {error}"))?;
+    if hold.get("work_id").and_then(Value::as_str) != Some(work_id) {
+        return Err(anyhow!(
+            "approval work_id does not match hold {hold_id}; refusing external write"
+        ));
+    }
+    let promotion = normalized_promotion(hold.get("promotion"))?
+        .ok_or_else(|| anyhow!("hold {hold_id} has no external promotion target"))?;
+    if promotion.get("calendar").and_then(Value::as_str) != Some(calendar) {
+        return Err(anyhow!(
+            "approval calendar does not match hold {hold_id}; refusing external write"
+        ));
+    }
+
+    let (start, end) = hold_interval(&hold)?;
+    let title = hold
+        .get("title")
+        .and_then(Value::as_str)
+        .ok_or_else(|| anyhow!("hold {hold_id} has no title"))?;
+    let marker = format!("heiwa://calendar/holds/{hold_id}");
+    let origin_device_id = match heiwa_install::load_machine_manifest() {
+        Ok(Some(manifest)) => Some(manifest.device_id),
+        Ok(None) => None,
+        Err(error) => {
+            return Err(anyhow!(
+                "cannot bind connector receipt to this machine: {error}"
+            ))
+        }
+    };
+    let request = json!({
+        "calendar": calendar,
+        "title": title,
+        "start": start,
+        "end": end,
+        "note": hold.get("note").and_then(Value::as_str).unwrap_or(""),
+        "marker": marker,
+    });
+    let bridge_result = crate::cmd::calendar_apple::create_event(&request)?;
+    let external_id = bridge_result
+        .get("external_id")
+        .and_then(Value::as_str)
+        .ok_or_else(|| anyhow!("Apple Calendar returned no external event id"))?;
+    let observed_external_event = json!({
+        "connector": "apple_calendar",
+        "calendar": calendar,
+        "external_id": external_id,
+        "marker": marker,
+        "title": title,
+        "start": start,
+        "end": end,
+        "created": bridge_result.get("created").and_then(Value::as_bool).unwrap_or(false),
+    });
+
+    let created_at = Utc::now().to_rfc3339();
+    let receipt_id = format!("rcpt-{hold_id}-apple-create");
+    let proposed_receipt = json!({
+        "schema_version": "heiwa_connector_receipt_v1",
+        "receipt_id": receipt_id,
+        "kind": "calendar_event_created",
+        "work_id": work_id,
+        "approval_id": approval_id,
+        "connector": "apple_calendar",
+        "action": "event.create",
+        "origin_device_id": origin_device_id,
+        "target": {
+            "calendar": calendar,
+            "marker": marker,
+        },
+        "external_id": external_id,
+        "after": observed_external_event,
+        "created_at": created_at,
+        "undo": {
+            "supported": true,
+            "posture": "delete the exact external_id only through a new approval",
+        },
+    });
+
+    fs::create_dir_all(receipts_dir())?;
+    let receipt_path = receipts_dir().join(format!("{receipt_id}.json"));
+    let journal = heiwa_evidence::JsonlTransport::default_local()?;
+    let replay = heiwa_evidence::read_stream(journal.dir(), "connector_receipts")?;
+    let journal_receipt = replay
+        .events
+        .into_iter()
+        .find(|event| {
+            event.record.get("receipt_id").and_then(Value::as_str) == Some(receipt_id.as_str())
+        })
+        .map(|event| event.record);
+    let file_receipt = if receipt_path.exists() {
+        let raw = fs::read_to_string(&receipt_path)?;
+        Some(serde_json::from_str::<Value>(&raw).map_err(|error| {
+            anyhow!(
+                "existing connector receipt {} is malformed: {error}",
+                receipt_path.display()
+            )
+        })?)
+    } else {
+        None
+    };
+    if let (Some(journal_receipt), Some(file_receipt)) = (&journal_receipt, &file_receipt) {
+        if journal_receipt != file_receipt {
+            return Err(anyhow!(
+                "connector receipt file and journal disagree for {receipt_id}"
+            ));
+        }
+    }
+    let receipt = journal_receipt
+        .clone()
+        .or(file_receipt)
+        .unwrap_or(proposed_receipt);
+    if receipt.get("work_id").and_then(Value::as_str) != Some(work_id)
+        || receipt.get("approval_id").and_then(Value::as_str) != Some(approval_id)
+        || receipt.get("external_id").and_then(Value::as_str) != Some(external_id)
+    {
+        return Err(anyhow!(
+            "existing connector receipt does not match this approval or external event"
+        ));
+    }
+    let external_event = receipt
+        .get("after")
+        .cloned()
+        .ok_or_else(|| anyhow!("connector receipt has no after state"))?;
+    let promoted_at = receipt
+        .get("created_at")
+        .cloned()
+        .unwrap_or_else(|| json!(created_at));
+    fs::write(&receipt_path, serde_json::to_string_pretty(&receipt)?)?;
+    use heiwa_evidence::EvidenceTransport;
+    if journal_receipt.is_none() {
+        journal.journal("connector_receipts", receipt.clone())?;
+    }
+
+    hold["external_promotion"] = json!("promoted");
+    hold["external_event"] = external_event.clone();
+    hold["promoted_at"] = promoted_at;
+    hold["promoted_by_decision"] = json!(approval_id);
+    fs::write(&path, serde_json::to_string_pretty(&hold)?)?;
+
+    Ok(external_event)
+}
+
+fn hold_interval(hold: &Value) -> Result<(String, String)> {
+    let date = hold
+        .get("date")
+        .and_then(Value::as_str)
+        .ok_or_else(|| anyhow!("external calendar promotion requires a date"))?;
+    let start = hold
+        .get("start")
+        .and_then(Value::as_str)
+        .ok_or_else(|| anyhow!("external calendar promotion requires a start time"))?;
+    let end = hold
+        .get("end")
+        .and_then(Value::as_str)
+        .ok_or_else(|| anyhow!("external calendar promotion requires an end time"))?;
+    let parse_local = |time: &str| -> Result<String> {
+        let naive = NaiveDateTime::parse_from_str(&format!("{date}T{time}"), "%Y-%m-%dT%H:%M")
+            .map_err(|_| anyhow!("external calendar promotion has an invalid date/time"))?;
+        Local
+            .from_local_datetime(&naive)
+            .single()
+            .map(|value| value.to_rfc3339())
+            .ok_or_else(|| {
+                anyhow!("external calendar promotion time is ambiguous or skipped locally")
+            })
+    };
+    Ok((parse_local(start)?, parse_local(end)?))
 }
 
 /// Flip a hold's status and write a status-change receipt. Idempotent on
@@ -899,6 +1290,12 @@ pub(crate) fn update_hold_status(
         serde_json::from_str(&raw).map_err(|e| anyhow!("hold {hold_id} is malformed: {e}"))?;
 
     let now = chrono::Utc::now().to_rfc3339();
+    let work_id = hold.get("work_id").cloned().unwrap_or(Value::Null);
+    let external_writes = hold
+        .get("external_event")
+        .cloned()
+        .map(|event| json!([event]))
+        .unwrap_or_else(|| json!([]));
     hold["status"] = json!(new_status);
     if new_status == "confirmed" {
         hold["confirmed_at"] = json!(now);
@@ -917,10 +1314,11 @@ pub(crate) fn update_hold_status(
         "receipt_id": format!("rcpt-{hold_id}-status-{new_status}"),
         "kind": "calendar_hold_status_changed",
         "hold_id": hold_id,
+        "work_id": work_id,
         "new_status": new_status,
         "by_decision": by_decision,
         "created_at": now,
-        "external_writes": [],
+        "external_writes": external_writes,
     });
     let receipts = receipts_dir();
     fs::create_dir_all(&receipts)?;
@@ -953,10 +1351,12 @@ pub(crate) fn drop_draft_hold(hold_id: &str, by_decision: &str) -> Result<()> {
     fs::remove_file(&path)?;
 
     let now = chrono::Utc::now().to_rfc3339();
+    let work_id = hold.get("work_id").cloned().unwrap_or(Value::Null);
     let receipt = json!({
         "receipt_id": format!("rcpt-{hold_id}-dropped"),
         "kind": "calendar_hold_dropped",
         "hold_id": hold_id,
+        "work_id": work_id,
         "by_decision": by_decision,
         "created_at": now,
         "external_writes": [],
@@ -1079,6 +1479,11 @@ pub(crate) fn summary_payload() -> Value {
     });
 
     let google_status = crate::cmd::connectors::google_lane_status("google_calendar");
+    let apple_status = if crate::cmd::calendar_apple::bridge_available() {
+        "available"
+    } else {
+        "unavailable"
+    };
     let lanes = json!([
         {
             "id": "heiwa_holds",
@@ -1099,17 +1504,17 @@ pub(crate) fn summary_payload() -> Value {
         {
             "id": "apple_calendar",
             "name": "Apple Calendar",
-            "status": "planned",
-            "sync": "Device-local EventKit bridge with Calendar permission and change notifications.",
-            "write": "Create/update events only after an approval lease is granted.",
-            "evidence": "Local receipt for permission, sync, and before/after writes.",
+            "status": apple_status,
+            "sync": "Device-local Calendar.app read model through macOS Automation permission.",
+            "write": "Exact-calendar event creation after a T2 approval; stable hold markers make retries idempotent.",
+            "evidence": "External event id, work id, approval id, device handle, undo posture, and replayable connector receipt.",
         },
     ]);
 
     json!({
         "command": "calendar summary",
         "date": today,
-        "timezone": "America/Vancouver",
+        "timezone": local_timezone_name(),
         "lanes": lanes,
         "holds": holds,
         "events": events,

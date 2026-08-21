@@ -52,11 +52,22 @@ pub fn run(args: &[String]) -> Result<()> {
     }
 
     let kind = flag_value(args, "--kind").unwrap_or_else(|| "soft".to_string());
-    let hold_request = build_hold_request(&text, &parsed, &kind)?;
+    let work_id = format!("work_{}", uuid::Uuid::new_v4().simple());
+    let promotion = promotion_from_args(args)?;
+    let mut hold_request = build_hold_request(&text, &parsed, &kind)?;
+    hold_request["work_id"] = json!(work_id);
+    hold_request["promotion"] = promotion.clone().unwrap_or(Value::Null);
     let request_id = format!("req_{}", &uuid::Uuid::new_v4().simple().to_string()[..12]);
 
     if has_flag(args, "--dry-run") {
-        let approval = build_approval_request(&request_id, &text, &parsed, "(dry-run)");
+        let approval = build_approval_request(
+            &request_id,
+            &work_id,
+            &text,
+            &parsed,
+            "(dry-run)",
+            promotion.as_ref(),
+        );
         let payload = json!({
             "command": "schedule",
             "dry_run": true,
@@ -73,6 +84,10 @@ pub fn run(args: &[String]) -> Result<()> {
         return Ok(());
     }
 
+    if let Some(promotion) = promotion.as_ref() {
+        crate::cmd::calendar::validate_promotion_target(promotion)?;
+    }
+
     let hold = crate::cmd::calendar::create_hold(&hold_request)?;
     let hold_id = hold
         .get("id")
@@ -80,7 +95,14 @@ pub fn run(args: &[String]) -> Result<()> {
         .unwrap_or("?")
         .to_string();
 
-    let approval = build_approval_request(&request_id, &text, &parsed, &hold_id);
+    let approval = build_approval_request(
+        &request_id,
+        &work_id,
+        &text,
+        &parsed,
+        &hold_id,
+        promotion.as_ref(),
+    );
     let dir = requests_dir();
     fs::create_dir_all(&dir)?;
     let path = dir.join(format!("{request_id}.json"));
@@ -106,7 +128,14 @@ pub fn run(args: &[String]) -> Result<()> {
         if let Some(rrule) = parsed.get("rrule").and_then(Value::as_str) {
             println!("  recurrence: {rrule}");
         }
-        println!("  hold: {hold_id} (draft, local-only)");
+        println!(
+            "  hold: {hold_id} ({})",
+            if promotion.is_some() {
+                "draft; Apple promotion staged"
+            } else {
+                "draft, local-only"
+            }
+        );
         println!("  approval: {request_id} pending");
         println!("  next: heiwa approvals decide {request_id} --approve");
     }
@@ -115,7 +144,7 @@ pub fn run(args: &[String]) -> Result<()> {
 
 /// Everything that isn't a flag or a flag's value is the intent text.
 pub fn free_text(args: &[String]) -> String {
-    let value_flags = ["--at", "--kind"];
+    let value_flags = ["--at", "--kind", "--promote", "--calendar"];
     let mut parts: Vec<&str> = Vec::new();
     let mut skip = false;
     for arg in args {
@@ -227,25 +256,51 @@ pub fn build_hold_request(text: &str, parsed: &Value, kind: &str) -> Result<Valu
 /// Shape consumed by `approvals list/show/decide` (operator_dispatch_request_v1).
 pub fn build_approval_request(
     request_id: &str,
+    work_id: &str,
     text: &str,
     parsed: &Value,
     hold_id: &str,
+    promotion: Option<&Value>,
 ) -> Value {
     json!({
         "schema_version": "operator_dispatch_request_v1",
         "request_id": request_id,
+        "work_id": work_id,
         "created_at": chrono::Utc::now().to_rfc3339(),
         "action": "schedule-intent",
         "target_surface": "calendar",
         "target_scope": hold_id,
         "requested_mode": "stage",
+        "risk_tier": if promotion.is_some() { "T2" } else { "T1" },
         "intent": {
             "text": text,
             "parsed": parsed,
             "hold_id": hold_id,
+            "promotion": promotion,
         },
         "source": "heiwa schedule",
     })
+}
+
+fn promotion_from_args(args: &[String]) -> Result<Option<Value>> {
+    let Some(raw_connector) = flag_value(args, "--promote") else {
+        if has_flag(args, "--calendar") {
+            return Err(anyhow!("--calendar requires --promote apple"));
+        }
+        return Ok(None);
+    };
+    let connector = raw_connector.replace('-', "_").to_ascii_lowercase();
+    if !["apple", "apple_calendar"].contains(&connector.as_str()) {
+        return Err(anyhow!("--promote currently supports only apple"));
+    }
+    let calendar = flag_value(args, "--calendar")
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty())
+        .ok_or_else(|| anyhow!("--promote apple requires --calendar <exact name>"))?;
+    Ok(Some(json!({
+        "connector": "apple_calendar",
+        "calendar": calendar,
+    })))
 }
 
 fn requests_dir() -> PathBuf {
@@ -269,10 +324,11 @@ fn print_help() {
     println!("Usage:");
     println!("  heiwa schedule \"remind me Friday 3pm to call mom\" [--json] [--dry-run]");
     println!("  heiwa schedule \"call mom\" --at 2026-06-19T15:00 [--kind soft|focus|travel]");
+    println!("  heiwa schedule \"call mom\" --at 2026-06-19T15:00 --promote apple --calendar \"Calendar\"");
     println!();
     println!("Parses the time deterministically (no LLM), writes a draft local");
-    println!("calendar hold and a pending approval. Nothing leaves the machine;");
-    println!("external promotion stays behind `heiwa approvals decide`.");
+    println!("calendar hold and a pending approval. Without --promote, nothing");
+    println!("leaves the machine. Apple promotion executes only on approval.");
 }
 
 #[cfg(test)]
@@ -334,9 +390,17 @@ mod tests {
     #[test]
     fn approval_request_matches_dispatch_v1() {
         let parsed = json!({"dt": "2026-06-19T15:00:00-07:00", "confidence": 0.9});
-        let req = build_approval_request("req_abc123", "call mom", &parsed, "hold-20260619-aaaa");
+        let req = build_approval_request(
+            "req_abc123",
+            "work_abc123",
+            "call mom",
+            &parsed,
+            "hold-20260619-aaaa",
+            None,
+        );
         assert_eq!(req["schema_version"], "operator_dispatch_request_v1");
         assert_eq!(req["request_id"], "req_abc123");
+        assert_eq!(req["work_id"], "work_abc123");
         assert_eq!(req["action"], "schedule-intent");
         assert_eq!(req["target_surface"], "calendar");
         assert_eq!(req["target_scope"], "hold-20260619-aaaa");
@@ -346,7 +410,7 @@ mod tests {
         let summary = crate::cmd::approvals::approval_request_summary(&req);
         assert_eq!(summary["id"], "req_abc123");
         assert_eq!(summary["action"], "schedule-intent");
-        assert_eq!(summary["risk"], "stage");
+        assert_eq!(summary["risk"], "T1");
     }
 
     #[test]
