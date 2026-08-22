@@ -235,7 +235,7 @@ pub async fn auto_discover(registry: &mut AccountRegistry) -> Vec<String> {
 /// On success, updates the account's status to Connected and populates
 /// the model inventory.  On failure, sets status to Error.
 pub async fn verify_api_key(account: &mut ProviderAccount) -> anyhow::Result<()> {
-    let api_key = crate::registry::resolve_secret(&account.account_id).ok_or_else(|| {
+    let api_key = crate::registry::resolve_secret(&account.account_id)?.ok_or_else(|| {
         anyhow::anyhow!("No API key found in Keychain for {}", account.account_id)
     })?;
 

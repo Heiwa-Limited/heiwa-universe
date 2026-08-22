@@ -23,13 +23,19 @@ pub fn store_secret(account_id: &str, secret: &str) -> Result<()> {
         .map_err(|e| anyhow!("failed to store secret for {account_id}: {e}"))
 }
 
-/// Retrieve a stored secret. Returns an error if not present.
-pub fn load_secret(account_id: &str) -> Result<String> {
+/// Retrieve a stored secret while preserving the difference between a missing
+/// entry and an unavailable credential backend.
+pub fn load_secret_optional(account_id: &str) -> Result<Option<String>> {
     match vault().load(account_id) {
-        Ok(s) => Ok(s),
-        Err(VaultError::NotFound { .. }) => Err(anyhow!("no secret found for {account_id}")),
+        Ok(secret) => Ok(Some(secret)),
+        Err(VaultError::NotFound { .. }) => Ok(None),
         Err(e) => Err(anyhow!("keyring error for {account_id}: {e}")),
     }
+}
+
+/// Retrieve a stored secret. Returns an error if not present.
+pub fn load_secret(account_id: &str) -> Result<String> {
+    load_secret_optional(account_id)?.ok_or_else(|| anyhow!("no secret found for {account_id}"))
 }
 
 /// Delete a stored secret. Missing entries are treated as success.
