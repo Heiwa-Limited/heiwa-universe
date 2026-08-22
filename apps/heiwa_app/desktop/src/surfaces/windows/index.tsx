@@ -42,7 +42,7 @@ function WindowsSurface() {
       <div class="view-header">
         <h2>Windows</h2>
         <p class="muted">
-          Pinned terminal panes, ops servers, and app agents over one runtime state.
+          Live terminal panes and approved controls over one local runtime state.
         </p>
       </div>
 
@@ -99,7 +99,7 @@ function WindowsSurface() {
             {herd.paneText() ||
               (canControl()
                 ? "Select refresh to read pane output."
-                : "No live pane output. Planned panes are placeholders until herdr reports real panes.")}
+                : "No live pane output. Work appears only after herdr reports a real pane.")}
           </pre>
 
           <div class="pane-controls">
@@ -219,7 +219,7 @@ function WindowsSurface() {
 
         <section class="panel">
           <header>
-            <span>Sub-app agents</span>
+            <span>Available capability profiles</span>
             <strong>{app.subApps().length}</strong>
           </header>
           <div class="mux-body">
@@ -227,9 +227,7 @@ function WindowsSurface() {
               {(sub) => (
                 <div class="mux-line">
                   <span>{sub.title}</span>
-                  <strong>
-                    {sub.agent} · {sub.skills.join(" · ")}
-                  </strong>
+                  <strong>{sub.skills.join(" · ")}</strong>
                 </div>
               )}
             </For>
@@ -238,11 +236,8 @@ function WindowsSurface() {
 
         <section class="panel">
           <header>
-            <span>Ops personalization</span>
-            <strong>
-              {app.runtime.health()?.snapshot?.data?.approvals?.pending ??
-                app.runtime.inbox().length}
-            </strong>
+            <span>Local policy defaults</span>
+            <strong>built in</strong>
           </header>
           <div class="mux-body">
             <For each={app.subApps().slice(0, 5)}>
@@ -270,8 +265,8 @@ export const windowsSurface: SurfaceModule = {
     title: "Multiplexer",
     lines: [
       `${app.herd.panes().length} live herdr panes`,
-      "pinned ops windows",
-      "terminal + sub-app servers",
+      "local terminal control",
+      "capability catalog",
     ],
   }),
   refresh: async (app) => {

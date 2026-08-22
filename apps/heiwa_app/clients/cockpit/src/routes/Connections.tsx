@@ -1,5 +1,5 @@
 import type { JSX } from "solid-js";
-import { For, Show } from "solid-js";
+import { createSignal, For, Show } from "solid-js";
 import { v1 } from "../lib/endpoints";
 import { type Lane, providers } from "../lib/providers";
 import { RemoteShell } from "../lib/resource";
@@ -39,7 +39,12 @@ const KIND_ORDER: Array<{ kind: string; title: string; blurb: string }> = [
   },
 ];
 
-function ConnectorCard(props: { connector: Connector }): JSX.Element {
+function ConnectorCard(props: {
+  connector: Connector;
+  onChanged: () => void;
+}): JSX.Element {
+  const [busy, setBusy] = createSignal(false);
+  const [error, setError] = createSignal<string | null>(null);
   const meta = () =>
     props.connector.kind === "provider"
       ? providerMeta(props.connector.id)
@@ -71,6 +76,44 @@ function ConnectorCard(props: { connector: Connector }): JSX.Element {
           next: <code>{props.connector.next_action}</code>
         </p>
       </Show>
+      <Show when={props.connector.id === "apple_calendar"}>
+        <div class="hero-actions">
+          <button
+            class="btn btn-outline"
+            type="button"
+            disabled={busy()}
+            onClick={async () => {
+              if (busy()) return;
+              setBusy(true);
+              setError(null);
+              try {
+                if (props.connector.status === "connected") {
+                  await v1.disconnectAppleCalendar();
+                } else {
+                  await v1.connectAppleCalendar();
+                }
+                props.onChanged();
+              } catch (cause) {
+                setError(
+                  cause instanceof Error
+                    ? cause.message
+                    : ((cause as { message?: string }).message ??
+                        String(cause)),
+                );
+              } finally {
+                setBusy(false);
+              }
+            }}
+          >
+            {props.connector.status === "connected"
+              ? "Disconnect Apple Calendar"
+              : "Connect Apple Calendar"}
+          </button>
+        </div>
+        <Show when={error()}>
+          {(message) => <p class="repl-error">{message()}</p>}
+        </Show>
+      </Show>
     </article>
   );
 }
@@ -85,7 +128,7 @@ export default function ConnectionsRoute(): JSX.Element {
       />
 
       <RemoteShell loader={() => v1.connectors()}>
-        {(data) => (
+        {(data, refetch) => (
           <Show
             when={data.connectors.length > 0}
             fallback={
@@ -112,7 +155,10 @@ export default function ConnectionsRoute(): JSX.Element {
                       <div class="panels">
                         <For each={rows}>
                           {(connector) => (
-                            <ConnectorCard connector={connector} />
+                            <ConnectorCard
+                              connector={connector}
+                              onChanged={refetch}
+                            />
                           )}
                         </For>
                       </div>

@@ -71,6 +71,20 @@ export const v1 = {
     unwrap(api.get<Envelope<CalendarSummary>>("/api/v1/calendar/summary")),
   calendarResources: () =>
     unwrap(api.get<Envelope<CalendarResources>>("/api/v1/calendar/resources")),
+  connectAppleCalendar: () =>
+    unwrap(
+      api.post<Envelope<{ status: string; resource_count: number }>>(
+        "/api/v1/connectors/apple_calendar/connect",
+        {},
+      ),
+    ),
+  disconnectAppleCalendar: () =>
+    unwrap(
+      api.post<Envelope<{ status: string; read_models_preserved: boolean }>>(
+        "/api/v1/connectors/apple_calendar/disconnect",
+        {},
+      ),
+    ),
   createHold: (hold: {
     title: string;
     date?: string | undefined;

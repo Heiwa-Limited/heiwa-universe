@@ -12,6 +12,34 @@ export type CalendarEvent = {
   note?: string;
 };
 
+export type CalendarResource = {
+  name: string;
+  writable: boolean;
+};
+
+export type CalendarResources = {
+  source: string;
+  status: string;
+  calendars: CalendarResource[];
+  detail?: string | null;
+  next_action?: string | null;
+};
+
+export type PendingApproval = {
+  id: string;
+  action: string;
+  target: string;
+  risk: string;
+  requested_at?: string | null;
+};
+
+export type ApprovalsSummary = {
+  pending_count: number;
+  pending: PendingApproval[];
+  requests_dir: string;
+  decisions_dir: string;
+};
+
 export type InboxItem = {
   title?: string;
   detail?: string;
@@ -25,10 +53,8 @@ export type InboxItem = {
 export type SubApp = {
   id: string;
   title: string;
-  agent: string;
   server: string;
   state: string;
-  pinnedPane: string;
   skills: string[];
   tools: string[];
   personalization: string[];

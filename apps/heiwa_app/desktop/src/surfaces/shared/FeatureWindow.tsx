@@ -26,12 +26,11 @@ export function FeatureWindow(props: { id: SurfaceId; pending: string }) {
             </header>
             <For
               each={[
-                ["agent", sub().agent],
-                ["server", sub().server],
-                ["pane", sub().pinnedPane],
-                ["skills", sub().skills.join(" · ")],
-                ["tools", sub().tools.join(" · ")],
-                ["personal", sub().personalization.join(" · ")],
+                ["availability", sub().state],
+                ["runtime boundary", sub().server],
+                ["capabilities", sub().skills.join(" · ")],
+                ["tool policy", sub().tools.join(" · ")],
+                ["local defaults", sub().personalization.join(" · ")],
               ]}
             >
               {([label, value]) => (

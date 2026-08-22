@@ -38,7 +38,7 @@ export function connectLegacyEvents(
       try {
         const event = (JSON.parse(message.data) as { event?: string }).event;
         if (event === "dispatch_request_appeared" || event === "dispatch_request_decided") {
-          void app.runtime.loadInbox();
+          void Promise.all([app.runtime.loadInbox(), app.runtime.loadApprovals()]);
         }
         if (event === "goal_updated") {
           void app.runtime.loadHealth();

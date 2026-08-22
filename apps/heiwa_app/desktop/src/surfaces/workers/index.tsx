@@ -22,11 +22,11 @@ function routeLabel(route?: OperatorProjection): string {
   return [provider, model].filter(Boolean).join("/");
 }
 
-function liveWorkerCount(snapshot: OperatorSnapshot, panes: number, reported: number): number {
+function taskWorkerCount(snapshot: OperatorSnapshot, reported: number): number {
   const active = snapshot.turns.filter(
     (turn) => turn.status === "open" || turn.status === "running" || turn.status === "cancelling",
   ).length;
-  return active + panes + reported;
+  return active + reported;
 }
 
 function WorkersSurface() {
@@ -120,7 +120,7 @@ export const workersSurface: SurfaceModule = {
     return {
       title: "Workers",
       lines: [
-        `${liveWorkerCount(snapshot, app.herd.panes().length, app.runtime.health()?.snapshot?.data?.workers?.live ?? 0)} live`,
+        `${taskWorkerCount(snapshot, app.runtime.health()?.snapshot?.data?.workers?.task_live ?? 0)} task workers`,
         `${snapshot.turns.length} known tasks`,
       ],
     };

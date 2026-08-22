@@ -14,7 +14,7 @@ when its verification runs.
 | 2 | Shell caller + token storage through `heiwa_vault` | **done** | Calendar caller uses `heiwa_oauth`; refresh-token preservation is tested; tokens exist only in the OS credential vault |
 | 3 | Apple Calendar resource list + read model | **done** | exact writable resources discovered through Calendar.app; normalized source/deadline/actionable/privacy fields feed the read model |
 | 4 | Calendar write under approval → receipt replay | **done** | 2026-08-21 live Calendar.app write returned one external id; T2 approval, `work_id`, file receipt, and one replayed journal event agreed; exact verification event removed |
-| 5 | Heiwa.app Calendar staging | **done** | authenticated endpoint stages exact Apple target without creating; cockpit self-discovers writable Mac calendars; connector integration test + TypeScript typecheck/build |
+| 5 | Heiwa.app Calendar staging | **done** | fresh profiles reveal no Calendar.app resources until explicitly enrolled; native desktop and cockpit connect/disconnect, stage an exact Apple target without creating, and decide the resulting immutable approval through the shared executor; connector integration tests + both TypeScript checks/builds |
 | 6 | Google Calendar read/write | blocked (external setup) | offline caller path is wired; needs Google account 2-step verification and a Desktop OAuth client id for live acceptance |
 | 7 | `gmail.send` on the same path | pending | needs Google setup plus an approval-backed sender; Gmail reads remain local through Mail.app |
 
@@ -76,8 +76,10 @@ AD-16 through AD-19 are recorded in the spec. Implementation added:
 
 ## 2026-08-21 Mac-first acceptance
 
-- `cargo test -p heiwa-shell --test apple_calendar_connector` — 3/3, including
-  authenticated app staging and `heiwa_evidence::read_stream` replay.
+- `cargo test -p heiwa-shell --test apple_calendar_connector` — 7/7, including
+  disconnected fresh-profile resource privacy, authenticated app staging,
+  app-side approval execution, disconnect-before-approval enforcement,
+  future-schema preservation, and `heiwa_evidence::read_stream` replay.
 - Existing schedule/approval/calendar-sync integration tests — 7/7.
 - Cockpit `tsc --noEmit` and Vite production build — green.
 - Live Calendar.app: exact writable `Calendar` target, one approved event, one

@@ -90,6 +90,26 @@ fn calendars(args: &[String]) -> Result<()> {
 }
 
 pub(crate) fn apple_calendar_resources_payload() -> Result<Value> {
+    let connection = crate::cmd::connectors::apple_calendar_connection_payload();
+    if connection.get("status").and_then(Value::as_str) != Some("connected") {
+        return Ok(json!({
+            "source": "apple_calendar",
+            "status": connection.get("status").cloned().unwrap_or_else(|| Value::String("config_error".into())),
+            "detail": connection.get("detail").cloned().unwrap_or(Value::Null),
+            "next_action": connection.get("next_action").cloned().unwrap_or(Value::Null),
+            "auth": {
+                "mode": "macos_automation",
+                "owner": "macOS",
+                "secrets": "none",
+            },
+            "calendars": [],
+            "revoke": {
+                "owner": "macOS",
+                "path": "System Settings > Privacy & Security > Automation > heiwa > Calendar",
+            },
+        }));
+    }
+    crate::cmd::connectors::require_apple_calendar_connection()?;
     let calendars = crate::cmd::calendar_apple::list_calendars()?;
     Ok(json!({
         "source": "apple_calendar",
@@ -222,7 +242,19 @@ async fn sync(args: &[String]) -> Result<()> {
     let mut source_reports: Vec<Value> = Vec::new();
 
     if source == "all" || source == "apple" || source == "apple_calendar" {
-        if calendar_app_present() {
+        let connection = crate::cmd::connectors::apple_calendar_connection_payload();
+        let connection_status = connection
+            .get("status")
+            .and_then(Value::as_str)
+            .unwrap_or("config_error");
+        if connection_status != "connected" {
+            source_reports.push(json!({
+                "source": "apple",
+                "status": connection_status,
+                "reason": connection.get("detail").cloned().unwrap_or(Value::Null),
+                "next_action": connection.get("next_action").cloned().unwrap_or(Value::Null),
+            }));
+        } else if calendar_app_present() {
             match scan_apple_calendar(limit, days) {
                 Ok(rows) => {
                     source_reports.push(json!({
@@ -299,6 +331,11 @@ fn calendar_sync_dry_run_payload(source: &str, limit: usize, days: i64) -> Value
     let apple_selected = source == "all" || source == "apple" || source == "apple_calendar";
     let google_selected = source == "all" || source == "google" || source == "google_calendar";
     let google_token = crate::cmd::connectors::google_lane_status("google_calendar") == "connected";
+    let apple_connection = crate::cmd::connectors::apple_calendar_connection_payload();
+    let apple_connection_status = apple_connection
+        .get("status")
+        .and_then(Value::as_str)
+        .unwrap_or("config_error");
     json!({
         "command": "calendar sync",
         "dry_run": true,
@@ -309,7 +346,11 @@ fn calendar_sync_dry_run_payload(source: &str, limit: usize, days: i64) -> Value
         "sources": {
             "apple": {
                 "selected": apple_selected,
-                "ready": calendar_app_present(),
+                "ready": apple_connection_status == "connected" && calendar_app_present(),
+                "status": apple_connection_status,
+                "blocker": if apple_connection_status == "connected" { Value::Null } else {
+                    apple_connection.get("detail").cloned().unwrap_or(Value::Null)
+                },
                 "bridge": "Calendar.app JXA metadata bridge",
                 "fields": ["calendar", "title", "start", "end", "date", "status"],
                 "external_writes": "approval_required",
@@ -1070,6 +1111,7 @@ pub(crate) fn normalized_promotion(raw: Option<&Value>) -> Result<Option<Value>>
 }
 
 pub(crate) fn validate_promotion_target(promotion: &Value) -> Result<()> {
+    crate::cmd::connectors::require_apple_calendar_connection()?;
     let normalized = normalized_promotion(Some(promotion))?
         .ok_or_else(|| anyhow!("calendar promotion target is missing"))?;
     let calendar = normalized["calendar"]
@@ -1084,6 +1126,7 @@ pub(crate) fn promote_hold_to_apple(
     approval_id: &str,
     work_id: &str,
 ) -> Result<Value> {
+    crate::cmd::connectors::require_apple_calendar_connection()?;
     crate::cmd::calendar_apple::ensure_writable_calendar(calendar)?;
     let path = holds_dir().join(format!("{hold_id}.json"));
     let raw = fs::read_to_string(&path)
@@ -1479,8 +1522,15 @@ pub(crate) fn summary_payload() -> Value {
     });
 
     let google_status = crate::cmd::connectors::google_lane_status("google_calendar");
-    let apple_status = if crate::cmd::calendar_apple::bridge_available() {
-        "available"
+    let apple_connection = crate::cmd::connectors::apple_calendar_connection_payload();
+    let apple_connection_status = apple_connection
+        .get("status")
+        .and_then(Value::as_str)
+        .unwrap_or("config_error");
+    let apple_status = if apple_connection_status != "connected" {
+        apple_connection_status
+    } else if crate::cmd::calendar_apple::bridge_available() {
+        "connected"
     } else {
         "unavailable"
     };

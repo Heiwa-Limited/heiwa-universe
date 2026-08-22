@@ -1,4 +1,5 @@
 import { aiSurface } from "./ai";
+import { approvalsSurface } from "./approvals";
 import { browserSurface } from "./browser";
 import { calendarSurface } from "./calendar";
 import { filesSurface } from "./files";
@@ -20,6 +21,7 @@ export const SURFACES: SurfaceModule[] = [
   aiSurface,
   windowsSurface,
   calendarSurface,
+  approvalsSurface,
   mailSurface,
   financeSurface,
   socialSurface,
