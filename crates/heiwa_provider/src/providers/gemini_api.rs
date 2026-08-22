@@ -259,11 +259,11 @@ impl ProviderAdapter for GeminiApiAdapter {
         messages: &[Message],
         stream_tx: mpsc::Sender<StreamEvent>,
     ) -> Result<()> {
-        let api_key = self
-            .api_key
-            .clone()
-            .or_else(|| crate::registry::resolve_secret(&self.account_id))
-            .ok_or_else(|| anyhow!("no Google API key in keychain for {}", self.account_id))?;
+        let api_key = match self.api_key.clone() {
+            Some(api_key) => Some(api_key),
+            None => crate::registry::resolve_secret(&self.account_id)?,
+        }
+        .ok_or_else(|| anyhow!("no Google API key in keychain for {}", self.account_id))?;
 
         let client = reqwest::Client::builder()
             .connect_timeout(std::time::Duration::from_secs(15))

@@ -48,7 +48,7 @@ impl ProviderAdapter for OpenRouterAdapter {
         messages: &[Message],
         stream_tx: mpsc::Sender<StreamEvent>,
     ) -> Result<()> {
-        let api_key = crate::registry::resolve_secret(&self.account_id)
+        let api_key = crate::registry::resolve_secret(&self.account_id)?
             .ok_or_else(|| anyhow!("no OpenRouter key in keychain for {}", self.account_id))?;
 
         let body = json!({

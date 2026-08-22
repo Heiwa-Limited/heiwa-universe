@@ -309,14 +309,14 @@ pub fn store_secret(account_id: &str, secret: &str) -> anyhow::Result<()> {
 
 /// Retrieve the secret (API key or OAuth token) for an account at runtime.
 ///
-/// Returns `None` if the account has no stored secret or the Keychain
-/// is not available.
-pub fn resolve_secret(account_id: &str) -> Option<String> {
-    resolve_secret_with(
-        account_id,
-        |id| crate::keychain::load_secret(id).ok(),
-        |name| std::env::var(name).ok(),
-    )
+/// Returns `Ok(None)` when no stored or environment secret exists. Credential
+/// backend failures remain errors unless a provider environment variable can
+/// satisfy the account, so callers never misreport a broken keychain as an
+/// absent key.
+pub fn resolve_secret(account_id: &str) -> anyhow::Result<Option<String>> {
+    resolve_secret_with(account_id, crate::keychain::load_secret_optional, |name| {
+        std::env::var(name).ok()
+    })
 }
 
 /// The conventional environment variables that carry a provider's API key.
@@ -350,18 +350,23 @@ pub(crate) fn key_env_vars(provider: &str) -> &'static [&'static str] {
 /// headless server has none, and BYOK has to work there too.
 pub fn resolve_secret_with(
     account_id: &str,
-    stored: impl Fn(&str) -> Option<String>,
+    stored: impl Fn(&str) -> anyhow::Result<Option<String>>,
     env: impl Fn(&str) -> Option<String>,
-) -> Option<String> {
-    if let Some(secret) = stored(account_id) {
-        return Some(secret);
-    }
+) -> anyhow::Result<Option<String>> {
     // Account ids are minted as `{provider}-...`, so the prefix names the
     // vendor whose variable applies.
-    let provider = account_id.split('-').next()?;
-    key_env_vars(provider)
-        .iter()
-        .find_map(|name| env(name).filter(|value| !value.trim().is_empty()))
+    let environment_secret = || {
+        account_id.split('-').next().and_then(|provider| {
+            key_env_vars(provider)
+                .iter()
+                .find_map(|name| env(name).filter(|value| !value.trim().is_empty()))
+        })
+    };
+    match stored(account_id) {
+        Ok(Some(secret)) => Ok(Some(secret)),
+        Ok(None) => Ok(environment_secret()),
+        Err(error) => environment_secret().map(Some).ok_or(error),
+    }
 }
 
 /// Remove the stored secret for an account.
@@ -636,7 +641,7 @@ mod tests {
             _ => None,
         };
         assert_eq!(
-            resolve_secret_with("anthropic-api-1", |_| None, env),
+            resolve_secret_with("anthropic-api-1", |_| Ok(None), env).unwrap(),
             Some("sk-ant-from-env".to_string())
         );
     }
@@ -649,9 +654,10 @@ mod tests {
         assert_eq!(
             resolve_secret_with(
                 "anthropic-api-1",
-                |_| Some("sk-ant-stored".to_string()),
+                |_| Ok(Some("sk-ant-stored".to_string())),
                 env
-            ),
+            )
+            .unwrap(),
             Some("sk-ant-stored".to_string())
         );
     }
@@ -665,15 +671,15 @@ mod tests {
             _ => None,
         };
         assert_eq!(
-            resolve_secret_with("openai-api-1", |_| None, env),
+            resolve_secret_with("openai-api-1", |_| Ok(None), env).unwrap(),
             Some("sk-openai".to_string())
         );
         assert_eq!(
-            resolve_secret_with("google-api-1", |_| None, env),
+            resolve_secret_with("google-api-1", |_| Ok(None), env).unwrap(),
             Some("gem".to_string())
         );
         assert_eq!(
-            resolve_secret_with("openrouter-api-1", |_| None, env),
+            resolve_secret_with("openrouter-api-1", |_| Ok(None), env).unwrap(),
             Some("or".to_string())
         );
     }
@@ -681,6 +687,33 @@ mod tests {
     #[test]
     fn an_unknown_account_prefix_reads_no_environment_variable() {
         let env = |_: &str| Some("leaked".to_string());
-        assert_eq!(resolve_secret_with("mystery-api-1", |_| None, env), None);
+        assert_eq!(
+            resolve_secret_with("mystery-api-1", |_| Ok(None), env).unwrap(),
+            None
+        );
+    }
+
+    #[test]
+    fn a_keychain_backend_error_is_not_reported_as_a_missing_key() {
+        let error = resolve_secret_with(
+            "anthropic-api-1",
+            |_| anyhow::bail!("keyring backend unavailable"),
+            |_| None,
+        )
+        .unwrap_err();
+
+        assert!(error.to_string().contains("keyring backend unavailable"));
+    }
+
+    #[test]
+    fn an_environment_key_can_recover_from_an_unavailable_keychain() {
+        let resolved = resolve_secret_with(
+            "anthropic-api-1",
+            |_| anyhow::bail!("keyring backend unavailable"),
+            |name| (name == "ANTHROPIC_API_KEY").then(|| "sk-ant-from-env".to_string()),
+        )
+        .unwrap();
+
+        assert_eq!(resolved, Some("sk-ant-from-env".to_string()));
     }
 }

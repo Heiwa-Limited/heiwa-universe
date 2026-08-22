@@ -900,13 +900,29 @@ impl OperatorTurnRunner {
         else {
             return Ok(false);
         };
-        let row = self.sessions.append_event(runtime_event(
+        let row = match self.sessions.append_event(runtime_event(
             &thread_id,
             turn_id,
             None,
             OperatorEventType::TurnCancelRequested,
             json!({"reason": "OPERATOR_REQUEST"}),
-        ))?;
+        )) {
+            Ok(row) => row,
+            Err(_)
+                if self.sessions.thread(&thread_id).is_ok_and(|thread| {
+                    thread
+                        .turns
+                        .iter()
+                        .any(|turn| turn.turn_id == turn_id && turn.status != "open")
+                }) =>
+            {
+                if let Ok(mut active_threads) = self.active_threads.lock() {
+                    active_threads.remove(turn_id);
+                }
+                return Ok(false);
+            }
+            Err(error) => return Err(error),
+        };
         let _ = self
             .frames
             .send(OperatorStreamFrame::Durable(Box::new(row)));
@@ -3428,6 +3444,29 @@ mod tests {
         std::fs::rename(&backup, &stream).unwrap();
         assert!(runner.request_cancel(&handle.turn_id).unwrap());
         wait_for_terminal(&mut handle).await;
+    }
+
+    #[tokio::test]
+    async fn operator_cancel_treats_a_stale_active_entry_as_already_finished() {
+        let dir = tempfile::tempdir().unwrap();
+        let sessions = service(dir.path());
+        let runner = OperatorTurnRunner::new(sessions, Arc::new(RecordingExecutor::default()));
+        let mut handle = runner
+            .submit(
+                "default",
+                StartTurnRequest::auto("terminal-cancel-race", "hello"),
+                OperatorTurnWork::Model(Box::new(model_turn())),
+            )
+            .unwrap();
+        wait_for_terminal(&mut handle).await;
+
+        runner
+            .active_threads
+            .lock()
+            .unwrap()
+            .insert(handle.turn_id.clone(), handle.thread_id.clone());
+
+        assert!(!runner.request_cancel(&handle.turn_id).unwrap());
     }
 
     #[tokio::test]
