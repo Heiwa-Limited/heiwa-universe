@@ -95,8 +95,10 @@ fn test_heiwa_dir_delegates_to_config_root() {
     // Path precedence (HEIWA_HOME > HOME > USERPROFILE > platform home) is
     // owned and tested by heiwa_config::HeiwaPaths. This asserts only that the
     // install crate reads that resolver rather than resolving a second time.
-    let paths = heiwa_config::HeiwaPaths::resolve();
-    assert_eq!(get_heiwa_dir(), paths.runtime_root);
+    with_temp_home(|_| {
+        let paths = heiwa_config::HeiwaPaths::resolve();
+        assert_eq!(get_heiwa_dir(), paths.runtime_root);
+    });
 }
 
 #[test]
