@@ -1,9 +1,8 @@
 name: Publish Docs
 
+# The github-pages environment permits protected main, not tag refs.
+# Dispatch after source promotion; tags do not implicitly deploy public surfaces.
 on:
-  push:
-    tags:
-      - "v*"
   workflow_dispatch:
 
 permissions:
@@ -18,6 +17,7 @@ concurrency:
 jobs:
   build:
     name: Build MkDocs Site
+    if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5

@@ -34,13 +34,13 @@ If a future feature appears to need any of the above on Cloudflare, treat it as 
 
 ## GitHub — the authoritative repository
 
-GitHub is the source authority. Binary releases require an existing annotated tag whose resolved commit belongs to `main`. Docs build from a pushed `v*` tag or the manually selected ref. The public shell deploys from the manually selected ref; use reviewed `main` for production.
+GitHub is the source authority. Binary releases require an existing annotated tag whose resolved commit belongs to `main`. Docs publish through a manual dispatch from `main`, matching the GitHub Pages environment policy. The public shell deploys from the manually selected ref; use reviewed `main` for production.
 
 | Workflow | Trigger | Output |
 | -------- | ------- | ------ |
 | [`ci.yml`](https://github.com/Heiwa-Limited/heiwa-universe/blob/main/.github/workflows/ci.yml) | PRs targeting `dev`/`main`, `main` push, manual | Rust tests/static checks, Python tests, security, lint, docs, repository contracts |
 | [`certification.yml`](https://github.com/Heiwa-Limited/heiwa-universe/blob/main/.github/workflows/certification.yml) | `main` push, manual | Cross-platform Rust compilation, desktop shell, Lance, multi-ecosystem security proofs |
-| [`pages.yml`](https://github.com/Heiwa-Limited/heiwa-universe/blob/main/.github/workflows/pages.yml) | Tag push `v*`, manual | Locked strict MkDocs build → GitHub Pages → `docs.heiwa.ltd` |
+| [`pages.yml`](https://github.com/Heiwa-Limited/heiwa-universe/blob/main/.github/workflows/pages.yml) | Manual dispatch from `main` | Locked strict MkDocs build → GitHub Pages → `docs.heiwa.ltd` |
 | [`release.yml`](https://github.com/Heiwa-Limited/heiwa-universe/blob/main/.github/workflows/release.yml) | Manual dispatch with an existing annotated tag | Certified CLI archives and signed macOS updater bundle → GitHub Releases |
 | [`deploy.yml`](https://github.com/Heiwa-Limited/heiwa-universe/blob/main/.github/workflows/deploy.yml) | Manual dispatch only | Allowlisted public artifact → Cloudflare Pages → served installer verification |
 | [`container.yml`](https://github.com/Heiwa-Limited/heiwa-universe/blob/main/.github/workflows/container.yml) | Manual dispatch or call from `release.yml` after publication | Verified Linux release bytes → GHCR image with provenance and SBOM |
@@ -69,7 +69,8 @@ gh workflow run pages.yml --ref main
 ```
 
 `pages.yml` uploads `site/` with `actions/upload-pages-artifact` and deploys that
-artifact with `actions/deploy-pages`. It does not publish a `gh-pages` branch;
+artifact with `actions/deploy-pages`. The `github-pages` environment permits
+`main` only; the build job skips other refs. It does not publish a `gh-pages` branch;
 `mkdocs gh-deploy --force` is not the configured deployment path. During an
 Actions outage, a local build can validate docs but cannot prove deployment.
 
@@ -129,8 +130,8 @@ allows time for propagation.
    Deploy the matching public installer through `deploy.yml` and verify the
    served bytes before starting the release.
 3. Create and push an annotated `v<major>.<minor>.<patch>` tag at that reviewed
-   `main` commit. A `v*` tag push triggers **docs only**; it does not start the
-   binary release or public shell deployment.
+   `main` commit. Tag pushes do not start docs, binary releases, or public shell
+   deployment. Publish docs with `gh workflow run pages.yml --ref main`.
 4. Dispatch `release.yml` from `main` with its `tag` input set to that existing
    tag. For example, replace `vX.Y.Z` in
    `gh workflow run release.yml --ref main -f tag=vX.Y.Z`.
@@ -211,7 +212,7 @@ No. `heiwa.ltd` is a static site delivered by Cloudflare Pages. The runtime, app
 
 ### Why GitHub Pages for docs and not Cloudflare?
 
-The docs workflow builds repository docs from its selected tag or dispatch ref and publishes an Actions artifact to GitHub Pages. Cloudflare hosts the separately deployed static shell and installer. A docs deployment does not prove a binary release has published.
+The docs workflow builds repository docs from protected `main` and publishes an Actions artifact to GitHub Pages. Cloudflare hosts the separately deployed static shell and installer. A docs deployment does not prove a binary release has published.
 
 ### Why JSONL plus Lance?
 
