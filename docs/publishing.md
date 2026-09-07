@@ -1,28 +1,28 @@
 # Publishing Pipeline
 
-How the `heiwa-universe` repository becomes the public Heiwa surface. GitHub stays authoritative for source, releases, and docs. Cloudflare is DNS utility only; operator evidence remains local.
+How the `heiwa-universe` repository becomes the public Heiwa surface. GitHub owns source, release binaries, checksums, and provenance; GitHub Pages hosts the docs. Cloudflare serves DNS and the static public shell/installer. Runtime authority and private evidence remain local.
 
 > Heiwa.ltd delivers software. The operator machine runs the runtime.
 
-## Three publishing planes
+## Publishing surfaces and local evidence
 
 | Plane                 | Surface          | Source in repo                                  | Authority       |
 | --------------------- | ---------------- | ----------------------------------------------- | --------------- |
-| **Marketing shell**   | `heiwa.ltd`      | `apps/heiwa_app/clients/web/`                   | GitHub Pages    |
+| **Marketing shell**   | `heiwa.ltd`      | allowlisted package from `apps/heiwa_app/clients/web/` | Cloudflare Pages |
 | **Documentation**     | `docs.heiwa.ltd` | `docs/` + `mkdocs.yml`                          | GitHub Pages    |
 | **Releases**          | GitHub Releases  | `apps/heiwa_core/`, `apps/heiwa_shell/`         | GitHub Releases |
 | **Evidence + recall** | owner-local      | `crates/heiwa_evidence/`, `crates/heiwa_embed/` | Local JSONL     |
 
-Each plane has a single source of truth in the repo and a single deploy path. Automated workflows are the normal channel; a [break-glass manual fallback](#break-glass-manual-fallback) remains available during a GitHub Actions outage.
+Public artifacts come from repository source through the workflows below. Local evidence is a separate runtime surface and is never part of a public deployment. [Verification and dispatch](#verification-and-dispatch) distinguish local build receipts from publication.
 
-## Public web — GitHub Pages with Cloudflare DNS
+## Public web — Cloudflare Pages
 
 `heiwa.ltd` is a static surface. It exists to deliver the installer, marketing copy, install funnel, and support routing. **It does not execute operator work.**
 
-- **Build output**: `apps/heiwa_app/clients/web/` (static HTML + CSS + JS)
-- **Host authority**: GitHub Pages
-- **Cloudflare role**: DNS records only
-- **Routes**: `heiwa.ltd` -> marketing/install/support; `docs.heiwa.ltd` -> documentation. The primary app is HOME-installed at `~/.heiwa/app/Heiwa.app`.
+- **Build output**: `.artifacts/public-web`, produced by `bash scripts/package_public_web.sh .artifacts/public-web`
+- **Host**: Cloudflare Pages project `heiwa-clients`
+- **Cloudflare role**: DNS and static shell/installer delivery; GitHub Releases remains the binary authority
+- **Routes**: `heiwa.ltd` -> marketing/install/support; `docs.heiwa.ltd` -> documentation. On macOS the public installer places `Heiwa.app` in `/Applications` when writable, otherwise `~/Applications`; the runtime remains local.
 
 ### What Cloudflare must never receive
 
@@ -34,104 +34,136 @@ If a future feature appears to need any of the above on Cloudflare, treat it as 
 
 ## GitHub — the authoritative repository
 
-GitHub is the source of truth. Every public artifact is built from a tagged commit on `main`.
+GitHub is the source authority. Binary releases require an existing annotated tag whose resolved commit belongs to `main`. Docs build from a pushed `v*` tag or the manually selected ref. The public shell deploys from the manually selected ref; use reviewed `main` for production.
 
-| Workflow                                                                                                | Trigger                         | Output                                         |
-| ------------------------------------------------------------------------------------------------------- | ------------------------------- | ---------------------------------------------- |
-| [`ci.yml`](https://github.com/Heiwa-Limited/heiwa-universe/blob/main/.github/workflows/ci.yml)           | PRs + `main` push + manual      | Fast PR gate; full `main` release certification |
-| [`pages.yml`](https://github.com/Heiwa-Limited/heiwa-universe/blob/main/.github/workflows/pages.yml)     | tag push `v*`                   | MkDocs build → GitHub Pages → `docs.heiwa.ltd` |
-| [`release.yml`](https://github.com/Heiwa-Limited/heiwa-universe/blob/main/.github/workflows/release.yml) | manual dispatch for an existing annotated tag | Certified cross-platform binaries → GitHub Releases |
-| [`deploy.yml`](https://github.com/Heiwa-Limited/heiwa-universe/blob/main/.github/workflows/deploy.yml)   | manual dispatch only            | Cloudflare Pages publish for `clients/web/`    |
+| Workflow | Trigger | Output |
+| -------- | ------- | ------ |
+| [`ci.yml`](https://github.com/Heiwa-Limited/heiwa-universe/blob/main/.github/workflows/ci.yml) | PRs targeting `dev`/`main`, `main` push, manual | Rust tests/static checks, Python tests, security, lint, docs, repository contracts |
+| [`certification.yml`](https://github.com/Heiwa-Limited/heiwa-universe/blob/main/.github/workflows/certification.yml) | `main` push, manual | Cross-platform Rust compilation, desktop shell, Lance, multi-ecosystem security proofs |
+| [`pages.yml`](https://github.com/Heiwa-Limited/heiwa-universe/blob/main/.github/workflows/pages.yml) | Tag push `v*`, manual | Locked strict MkDocs build → GitHub Pages → `docs.heiwa.ltd` |
+| [`release.yml`](https://github.com/Heiwa-Limited/heiwa-universe/blob/main/.github/workflows/release.yml) | Manual dispatch with an existing annotated tag | Certified CLI archives and signed macOS updater bundle → GitHub Releases |
+| [`deploy.yml`](https://github.com/Heiwa-Limited/heiwa-universe/blob/main/.github/workflows/deploy.yml) | Manual dispatch only | Allowlisted public artifact → Cloudflare Pages → served installer verification |
+| [`container.yml`](https://github.com/Heiwa-Limited/heiwa-universe/blob/main/.github/workflows/container.yml) | Manual dispatch or call from `release.yml` after publication | Verified Linux release bytes → GHCR image with provenance and SBOM |
+| [`public-install-smoke.yml`](https://github.com/Heiwa-Limited/heiwa-universe/blob/main/.github/workflows/public-install-smoke.yml) | Manual dispatch or call from `release.yml` after publication | Linux/macOS public installation and runtime checks |
 
-CI has two deliberate latency classes. Pull requests run the Linux execution
-gate, native dependency review, secret/vulnerability scans, lint, docs, and
-repository contracts; the feedback budget is under one minute on warm hosted
-runners. Every protected `main` advance then runs the complete macOS/Windows
-test-target compilation, desktop shell, Lance integration, and multi-ecosystem
-security certification. `release.yml` refuses to publish a tag until that exact
-commit has a successful `main` certification run. `bash scripts/check_ci_local.sh`
-is the required local pre-push mirror.
+PR feedback jobs have one-minute deadlines; the Rust compile lanes have
+20-minute deadlines. Every protected `main` advance runs CI and the separate
+certification workflow. Release metadata requires successful `push` runs of
+both workflows at the exact resolved release commit. A manual certification
+run or a green run at another commit does not satisfy that query.
 
-### Current pipeline status (2026-08-13)
+Run `HEIWA_BRANCH_MODE=experimental bash scripts/check_ci_local.sh` before
+promoting an experimental branch into `dev`; run `bash scripts/check_ci_local.sh`
+on `dev` before production promotion. Local success does not establish a
+remote release or an installed-runtime receipt.
 
-The repository is public and standard GitHub-hosted Actions are active without
-a paid external runner. `v0.1.0` is an immutable GitHub Release with verified
-checksums and artifact attestations for Linux, macOS, and Windows. The first
-container publication is repaired through the dedicated container workflow;
-it is a separate receipt from the immutable binary release.
-
-### Break-glass manual fallback
+### Verification and dispatch
 
 **Docs → `docs.heiwa.ltd`**
 
+The workflow installs `uv==0.12.1` and builds the locked docs environment:
+
 ```bash
-uv run --extra docs mkdocs build --strict
-uv run --extra docs mkdocs gh-deploy --force
+uv run --locked --extra docs python -m mkdocs build --strict
+gh workflow run pages.yml --ref main
 ```
 
-`gh-deploy` pushes the built site to the `gh-pages` branch, which GitHub Pages serves. `--force` is appropriate because `gh-pages` is generated state, not source.
+`pages.yml` uploads `site/` with `actions/upload-pages-artifact` and deploys that
+artifact with `actions/deploy-pages`. It does not publish a `gh-pages` branch;
+`mkdocs gh-deploy --force` is not the configured deployment path. During an
+Actions outage, a local build can validate docs but cannot prove deployment.
 
 **Binary releases → GitHub Releases**
 
-Build each target locally (or in a clean sandbox), assemble the archive, generate the checksums manifest, and create the release with `gh`:
+For local packaging verification:
 
 ```bash
-bash scripts/check_ci_local.sh
-bash scripts/package_release_sandbox.sh --version 0.1.0
+bash scripts/package_release_sandbox.sh
 ```
 
-The sandbox creates the host-platform archive with the release binary, built
-cockpit assets, license/community files, and checksum manifest. Its structure
-matches `release.yml`; independently compressed archives are not guaranteed to
-be byte-identical. The tagged workflow remains the canonical multi-platform
-publisher and provenance source.
+The sandbox creates a host-platform CLI archive, cockpit assets, community
+files, and checksums. Its default version is `dev-<git-sha>`; it uploads nothing
+and does not replace the cross-platform release, signed desktop bundle, or
+GitHub provenance. Publish with the release workflow after completing the
+[release sequence](#release-tagging-and-sequence) below.
 
-### macOS distribution without the Apple Developer Program
+### macOS release packaging
 
-Heiwa's desktop bundle is **ad-hoc signed** (`signingIdentity: "-"` in
-`apps/heiwa_app/desktop/src-tauri/tauri.conf.json`). Apple Developer Program
-membership (≈US$99/yr) is required for Developer ID signing and notarization —
-not for the legal right to distribute your own software. Ground rules:
+The desktop configuration uses ad-hoc macOS code signing
+(`signingIdentity: "-"`). The release workflow separately signs the updater
+archive using `TAURI_SIGNING_PRIVATE_KEY` and requires both the archive and its
+signature before publication. An updater signature is not Apple notarization
+or Developer ID signing.
 
-- Publish the `.dmg`/`.zip` with SHA-256 checksums, the source tag, license,
-  and third-party notices.
-- Tell users plainly: macOS will flag the app as from an unverified developer.
-  The unblock path is System Settings → Privacy & Security → **Open Anyway**.
-- Never describe a build as "Apple verified", "Developer ID signed", or
-  "notarized" — none of those are true for ad-hoc signatures. Honesty over
-  install friction.
-- This route serves technical users and early releases. When consumer-grade
-  install friction matters, the paid Apple program becomes unavoidable —
-  treat that as a deliberate future decision, not a default.
+The shipped desktop payload is the macOS ARM64 app tarball consumed by the
+installer and updater, with its `.sig` file and `latest.json`. `release.yml`
+deliberately omits `.dmg` publication. The standalone desktop-build workflow can
+produce additional development bundles; those are not the release artifact
+contract.
 
 **Cloudflare Pages → `heiwa.ltd`**
 
+The normal production route is `gh workflow run deploy.yml --ref main`.
+Publication requires `ENABLE_CLOUDFLARE_DEPLOY=true` and the configured
+Cloudflare credentials; otherwise the deploy step skips or fails as declared
+in the workflow. For an explicitly authorized manual static deployment, use the
+same allowlisted package and pinned Wrangler version:
+
 ```bash
 bash scripts/package_public_web.sh .artifacts/public-web
-npx wrangler pages deploy .artifacts/public-web --project-name=heiwa-clients --branch=main
+npx wrangler@4.122.0 pages deploy .artifacts/public-web --project-name=heiwa-clients --branch=main
+HEIWA_PUBLIC_INSTALLER_ATTEMPTS=10 HEIWA_PUBLIC_INSTALLER_RETRY_DELAY=15 \
+  bash scripts/check_public_installer_edge.sh
 ```
 
-This is the same public-only allowlisted artifact used by `deploy.yml`. Never
-deploy the source web directory directly; it also contains operator-only files.
+Never deploy the source web directory directly; it also contains operator-only
+files. The edge check compares served installer bytes with the checkout and
+allows time for propagation.
 
-### Release tagging conventions
+### Release tagging and sequence
 
-- Tags follow `v<major>.<minor>.<patch>` (semver). Pre-releases are `vX.Y.Z-rcN`.
-- A tag triggers **both** `pages.yml` (docs) and `release.yml` (binaries) in parallel. Order is not enforced — readers can land on either surface independently.
-- The release manifest (`heiwa-<version>-checksums.txt`) is the canonical install-time verifier. The installer at `https://heiwa.ltd/install` resolves the latest tag and pulls the matching archive.
+1. Promote reviewed changes through experimental → `dev` → `main`. The release
+   version declarations and both installer fallback pins must match the stable
+   version being released.
+2. Require successful `main` push CI and certification at the source commit.
+   Deploy the matching public installer through `deploy.yml` and verify the
+   served bytes before starting the release.
+3. Create and push an annotated `v<major>.<minor>.<patch>` tag at that reviewed
+   `main` commit. A `v*` tag push triggers **docs only**; it does not start the
+   binary release or public shell deployment.
+4. Dispatch `release.yml` from `main` with its `tag` input set to that existing
+   tag. For example, replace `vX.Y.Z` in
+   `gh workflow run release.yml --ref main -f tag=vX.Y.Z`.
+5. Wait for the entire release workflow, including public-install smoke and
+   container packaging after publication. Release assets can already exist
+   when a downstream check fails; their presence alone is not readiness.
+
+Release metadata validates the resolved tag's version and installer data using
+validators from `main`, checks the served installer pin, and checks exact-commit
+CI/certification. Builds check out that resolved commit. The current validators
+and installer require stable `X.Y.Z` versions, and publication sets
+`prerelease: false`; prerelease tags are not a supported release path today.
+
+The checksum manifest (`heiwa-<version>-checksums.txt`) verifies downloaded
+archives. Unless `HEIWA_VERSION` is supplied, the installer resolves GitHub's
+latest published release and falls back to its pinned version if lookup fails.
+It does not install an unpublished tag merely because the tag exists.
 
 ### Release artifacts
 
-For each tag the release workflow produces:
+For each successfully dispatched stable release, the workflow publishes:
 
 ```
 heiwa-<version>-macos-aarch64.tar.gz
 heiwa-<version>-linux-x86_64.tar.gz
 heiwa-<version>-windows-x86_64.zip
 heiwa-<version>-checksums.txt
+heiwa-<version>-macos-aarch64-app.tar.gz
+heiwa-<version>-macos-aarch64-app.tar.gz.sig
+latest.json
 ```
 
-Each platform archive contains `heiwa` (or `heiwa.exe`), the compiled cockpit
+Each CLI platform archive contains `heiwa` (or `heiwa.exe`), the compiled cockpit
 under `cockpit/`, and the license/community files. The installer verifies the
 archive checksum and rejects links or paths outside the versioned archive root
 before extracting it.
@@ -154,11 +186,11 @@ becoming a second write authority.
 +---------------------------------------------------------------+
 |                       PUBLIC BACKBONE                         |
 |                                                               |
-|   Cloudflare DNS          GitHub Pages + Releases              |
-|   (records only)          (site, docs, source, binaries)       |
+|   Cloudflare DNS/Pages    GitHub Pages + Releases              |
+|   (static shell/install)  (docs, source, binaries)              |
 |                                                               |
 +--------------------------------|------------------------------+
-                                 | install + identity exchange
+                                 | verified software installation
                                  v
 +---------------------------------------------------------------+
 |                       OPERATOR MACHINE                        |
@@ -179,7 +211,7 @@ No. `heiwa.ltd` is a static site delivered by Cloudflare Pages. The runtime, app
 
 ### Why GitHub Pages for docs and not Cloudflare?
 
-Docs are tightly coupled to source — every tag publishes both. GitHub Pages keeps the doc surface authoritative against the commit it was built from. Cloudflare hosts the marketing surface where doc-source coupling is not a requirement.
+The docs workflow builds repository docs from its selected tag or dispatch ref and publishes an Actions artifact to GitHub Pages. Cloudflare hosts the separately deployed static shell and installer. A docs deployment does not prove a binary release has published.
 
 ### Why JSONL plus Lance?
 
@@ -189,7 +221,7 @@ rebuilt from the text corpus.
 
 ### Can I self-host the publishing pipeline?
 
-The repository is the entire surface. Fork it, point a Pages project at `clients/web/`, and run MkDocs against `docs/` to get an isolated mirror. The release workflow is tagged-trigger driven and runs in any GitHub Actions account with no Heiwa-specific secrets beyond release signing.
+A fork needs its own hosting configuration, domains, registry permissions, and release-signing setup. Update the Heiwa-specific repository and project references before publishing. Deploy the allowlisted public package to Cloudflare Pages, use the artifact-based docs workflow for GitHub Pages, and explicitly dispatch binary releases for reviewed annotated tags.
 
 ## Change-control rules
 
