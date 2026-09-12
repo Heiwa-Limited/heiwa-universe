@@ -59,6 +59,92 @@ fn heiwa_home_from_env() -> Option<PathBuf> {
     heiwa_config::HeiwaPaths::try_resolve().map(|paths| paths.runtime_root)
 }
 
+/// Bootstrap only the private desktop-to-runtime credential on a fresh profile.
+/// Existing credentials, including malformed files, are never replaced here.
+pub fn ensure_desktop_machine_auth() -> std::io::Result<()> {
+    if !RuntimeConfig::from_env().machine_auth_token.is_empty() {
+        return Ok(());
+    }
+    let root = heiwa_home_from_env()
+        .ok_or_else(|| std::io::Error::other("local runtime root unavailable"))?;
+    ensure_machine_auth_in(&root)
+}
+
+fn ensure_machine_auth_in(root: &Path) -> std::io::Result<()> {
+    use std::io::Write;
+    let directory = root.join("secrets");
+    fs::create_dir_all(root)?;
+    let mut builder = fs::DirBuilder::new();
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::DirBuilderExt;
+        builder.mode(0o700);
+    }
+    match builder.create(&directory) {
+        Ok(()) => {}
+        Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {}
+        Err(error) => return Err(error),
+    }
+    let metadata = fs::symlink_metadata(&directory)?;
+    if metadata.file_type().is_symlink() || !metadata.is_dir() {
+        return Err(std::io::Error::other(
+            "local secrets directory must be a real directory",
+        ));
+    }
+    #[cfg(unix)]
+    if metadata.permissions().mode() & 0o077 != 0 {
+        return Err(std::io::Error::other(
+            "local secrets directory must be owner-private",
+        ));
+    }
+    let target = directory.join("machine_auth_token");
+    match fs::symlink_metadata(&target) {
+        Ok(_) => return validate_existing_machine_auth(root),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+        Err(error) => return Err(error),
+    }
+    // Publish a fully written private file without replacing a concurrent
+    // launcher's credential. A hard link gives create-if-absent semantics.
+    let temporary = directory.join(format!(".machine-auth-{}", uuid::Uuid::new_v4()));
+    let result = (|| {
+        let mut options = fs::OpenOptions::new();
+        options.write(true).create_new(true);
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::OpenOptionsExt;
+            options.mode(0o600);
+        }
+        let mut file = options.open(&temporary)?;
+        let credential = format!(
+            "{}{}",
+            uuid::Uuid::new_v4().simple(),
+            uuid::Uuid::new_v4().simple()
+        );
+        file.write_all(credential.as_bytes())?;
+        file.sync_all()?;
+        match fs::hard_link(&temporary, &target) {
+            Ok(()) => {}
+            Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {}
+            Err(error) => return Err(error),
+        }
+        #[cfg(unix)]
+        fs::File::open(&directory)?.sync_all()?;
+        validate_existing_machine_auth(root)
+    })();
+    let _ = fs::remove_file(&temporary);
+    result
+}
+
+fn validate_existing_machine_auth(root: &Path) -> std::io::Result<()> {
+    if resolve_runtime_secret(None, None, Some(root), "machine_auth_token").is_empty() {
+        Err(std::io::Error::other(
+            "existing local machine credential is invalid; it was preserved",
+        ))
+    } else {
+        Ok(())
+    }
+}
+
 fn resolve_runtime_secret(
     primary: Option<String>,
     legacy: Option<String>,
@@ -113,6 +199,68 @@ mod tests {
     #[cfg(unix)]
     use std::os::unix::fs::PermissionsExt;
     use tempfile::tempdir;
+
+    #[test]
+    fn desktop_auth_bootstrap_is_private_stable_and_profile_isolated() {
+        let first = tempdir().unwrap();
+        let other = tempdir().unwrap();
+        ensure_machine_auth_in(first.path()).unwrap();
+        let token = resolve_runtime_secret(None, None, Some(first.path()), "machine_auth_token");
+        assert_eq!(token.len(), 64);
+        ensure_machine_auth_in(first.path()).unwrap();
+        assert_eq!(
+            token,
+            resolve_runtime_secret(None, None, Some(first.path()), "machine_auth_token")
+        );
+        ensure_machine_auth_in(other.path()).unwrap();
+        assert_ne!(
+            token,
+            resolve_runtime_secret(None, None, Some(other.path()), "machine_auth_token")
+        );
+        assert_eq!(
+            fs::read_dir(first.path().join("secrets")).unwrap().count(),
+            1
+        );
+    }
+
+    #[test]
+    fn desktop_auth_bootstrap_does_not_replace_invalid_credentials() {
+        let root = tempdir().unwrap();
+        ensure_machine_auth_in(root.path()).unwrap();
+        let target = root.path().join("secrets/machine_auth_token");
+        fs::write(&target, "malformed token").unwrap();
+        assert!(ensure_machine_auth_in(root.path()).is_err());
+        assert_eq!(fs::read_to_string(target).unwrap(), "malformed token");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn desktop_auth_bootstrap_rejects_symlinked_storage() {
+        use std::os::unix::fs::symlink;
+        let root = tempdir().unwrap();
+        let elsewhere = tempdir().unwrap();
+        symlink(elsewhere.path(), root.path().join("secrets")).unwrap();
+        assert!(ensure_machine_auth_in(root.path()).is_err());
+        assert!(!elsewhere.path().join("machine_auth_token").exists());
+    }
+
+    #[test]
+    fn desktop_auth_concurrent_launches_share_one_credential() {
+        let root = tempdir().unwrap();
+        std::thread::scope(|scope| {
+            let handles: Vec<_> = (0..8)
+                .map(|_| scope.spawn(|| ensure_machine_auth_in(root.path())))
+                .collect();
+            for handle in handles {
+                handle.join().unwrap().unwrap();
+            }
+        });
+        assert_eq!(
+            fs::read_dir(root.path().join("secrets")).unwrap().count(),
+            1
+        );
+        validate_existing_machine_auth(root.path()).unwrap();
+    }
 
     #[test]
     fn runtime_secret_prefers_primary_then_legacy_environment_values() {

@@ -1,0 +1,11 @@
+.machine-perspective { margin-top: 16px; padding: 18px; background: var(--surface-base); box-shadow: none; }
+.machine-perspective > header { padding: 0 0 12px; }
+.machine-perspective h2 { font-size: 18px; font-weight: 500; }
+.machine-perspective p { font-size: 13px; color: var(--content-secondary); }
+.machine-facts { display: flex; flex-wrap: wrap; gap: 12px; padding: 16px 0; color: var(--content-secondary); font-size: 13px; }
+.machine-facts strong { width: 100%; font-weight: 500; color: var(--content-primary); }
+.machine-scope { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 12px 0; border-top: 1px solid var(--border-subtle); font-size: 13px; }
+.machine-scope > div { display: grid; gap: 4px; }
+.machine-scope strong { font-weight: 500; }
+.machine-recognition-error { display: grid; gap: 6px; padding: 12px 0; color: var(--status-error); font-size: 13px; }
+.machine-boundary { margin-top: 12px; }

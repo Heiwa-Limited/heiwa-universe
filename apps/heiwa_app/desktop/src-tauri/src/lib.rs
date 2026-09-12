@@ -1,6 +1,8 @@
+pub mod apple_mail;
 pub mod herd;
 pub mod onboarding;
 pub mod operator_stream;
+pub mod operator_subscriptions;
 pub mod proxy;
 pub mod runtime_supervisor;
 pub mod updater;
@@ -30,6 +32,7 @@ fn runtime_startup(
 
 pub fn run() {
     tauri::Builder::default()
+        .manage(operator_subscriptions::OperatorSubscriptions::default())
         .setup(|app| {
             // The shipped bundle updates itself. Without this the runtime
             // could advance through `heiwa app update` while the shell it
@@ -58,12 +61,22 @@ pub fn run() {
                 |path| path.is_file(),
             );
 
-            let (decision, owned) = runtime_supervisor::ensure_runtime(
-                proxy::runtime_identity_confirmed,
-                proxy::runtime_is_reachable,
-                runtime_supervisor::spawn_runtime,
-                binary,
-            );
+            let (decision, owned) = match heiwa_core::config::ensure_desktop_machine_auth() {
+                Ok(()) => runtime_supervisor::ensure_runtime(
+                    proxy::runtime_identity_confirmed,
+                    proxy::runtime_is_reachable,
+                    runtime_supervisor::spawn_runtime,
+                    binary,
+                ),
+                Err(error) => (
+                    runtime_supervisor::SupervisorDecision::Unavailable {
+                        detail: format!(
+                            "Local runtime authentication could not be prepared: {error}"
+                        ),
+                    },
+                    None,
+                ),
+            };
 
             app.manage(RuntimeStartup(decision));
             app.manage(SupervisedRuntime(Mutex::new(owned)));
@@ -71,6 +84,9 @@ pub fn run() {
         })
         .on_window_event(|window, event| {
             if matches!(event, tauri::WindowEvent::Destroyed) {
+                window
+                    .state::<operator_subscriptions::OperatorSubscriptions>()
+                    .cancel_window(window.label());
                 if let Some(state) = window.try_state::<SupervisedRuntime>() {
                     if let Ok(mut guard) = state.0.lock() {
                         if let Some(runtime) = guard.take() {
@@ -88,9 +104,13 @@ pub fn run() {
             herd::herd_pane_send,
             herd::herd_pane_split,
             herd::herd_panes,
+            apple_mail::apple_mail_scan,
             onboarding::establish_identity,
             onboarding::onboarding_state,
+            onboarding::complete_workspace_setup,
+            onboarding::open_resource_guide,
             operator_stream::operator_subscribe,
+            operator_stream::operator_unsubscribe,
             proxy::api_get,
             proxy::api_post,
             proxy::runtime_health,
@@ -107,7 +127,7 @@ pub fn run() {
 /// Deliberately not `heiwa_provider::resolve_command`: that also probes
 /// Heiwa's own install locations, and here the question is narrower — the
 /// bundle was already checked, so this is only the developer fallback.
-fn which_on_path(name: &str) -> Option<std::path::PathBuf> {
+pub(crate) fn which_on_path(name: &str) -> Option<std::path::PathBuf> {
     let path = std::env::var_os("PATH")?;
     std::env::split_paths(&path)
         .map(|dir| dir.join(name))

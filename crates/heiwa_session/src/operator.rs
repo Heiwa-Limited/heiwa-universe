@@ -361,6 +361,9 @@ pub struct OperatorTurnView {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct OperatorThreadView {
     pub thread_id: String,
+    pub title: Option<String>,
+    pub project_id: Option<String>,
+    pub archived: bool,
     pub turns: Vec<OperatorTurnView>,
     /// Schema/state-level rejects: events whose line parsed fine but that
     /// could not be projected — unsupported schema versions, or
@@ -383,6 +386,38 @@ pub struct OperatorThreadSummary {
     pub turn_count: usize,
     pub latest_turn_id: Option<String>,
     pub latest_status: Option<String>,
+    pub title: Option<String>,
+    pub project_id: Option<String>,
+    pub archived: bool,
+}
+
+/// Lightweight durable project projection. Projects are collections of
+/// threads; their event envelopes are deliberately not thread envelopes.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct OperatorProjectSummary {
+    pub project_id: String,
+    pub title: String,
+    pub archived: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct OperatorCatalog {
+    pub threads: Vec<OperatorThreadSummary>,
+    pub projects: Vec<OperatorProjectSummary>,
+    pub truncated: bool,
+}
+
+#[derive(Debug, Clone, Default)]
+pub struct ThreadMetadataUpdate {
+    pub title: Option<String>,
+    pub project_id: Option<Option<String>>,
+    pub archived: Option<bool>,
+}
+
+#[derive(Debug, Clone, Default)]
+pub struct ProjectMetadataUpdate {
+    pub title: Option<String>,
+    pub archived: Option<bool>,
 }
 
 /// Sole-writer service over one [`OperatorJournal`]. See the module docs for
@@ -424,10 +459,27 @@ impl OperatorSessionService {
     /// with turn submission, so concurrent create/submit calls cannot append
     /// duplicate lifecycle rows inside one runtime process.
     pub fn ensure_thread(&self, thread_id: &str) -> Result<bool> {
+        self.create_thread(thread_id, None, None)
+    }
+
+    /// Create a named thread with optional durable metadata. Repeating a
+    /// create for an existing id is idempotent and never rewrites metadata.
+    pub fn create_thread(
+        &self,
+        thread_id: &str,
+        title: Option<String>,
+        project_id: Option<String>,
+    ) -> Result<bool> {
+        validate_thread_metadata(thread_id, title.as_deref(), project_id.as_deref(), None)?;
         let _write_transaction = self.lock_writer_transaction()?;
         let projection = self.materialized()?;
         if projection.threads.contains_key(thread_id) {
             return Ok(false);
+        }
+        if let Some(project_id) = project_id.as_deref() {
+            if !projection.projects.contains_key(project_id) {
+                bail!("unknown project {project_id}");
+            }
         }
         let event = new_event(
             thread_id,
@@ -439,10 +491,144 @@ impl OperatorSessionService {
                 kind: "operator".to_string(),
                 id: "local-operator".to_string(),
             },
-            json!({}),
+            json!({ "title": title, "project_id": project_id }),
         );
         self.journal.append(&event)?;
         Ok(true)
+    }
+
+    /// Create an empty project. The durable envelope subject is `project:{id}`
+    /// so replay cannot fabricate a chat thread from this lifecycle row.
+    pub fn create_project(
+        &self,
+        project_id: &str,
+        title: String,
+    ) -> Result<OperatorProjectSummary> {
+        validate_project_metadata(project_id, Some(&title), None)?;
+        let _write_transaction = self.lock_writer_transaction()?;
+        let projection = self.materialized()?;
+        if let Some(project) = projection.projects.get(project_id) {
+            return Ok(project.to_summary());
+        }
+        let event = new_event(
+            &project_subject(project_id),
+            None,
+            None,
+            OperatorEventType::ProjectCreated,
+            now_iso(),
+            OperatorActor {
+                kind: "operator".to_string(),
+                id: "local-operator".to_string(),
+            },
+            json!({ "project_id": project_id, "title": title }),
+        );
+        self.journal.append(&event)?;
+        Ok(OperatorProjectSummary {
+            project_id: project_id.to_string(),
+            title,
+            archived: false,
+        })
+    }
+
+    pub fn update_project_metadata(
+        &self,
+        project_id: &str,
+        update: ProjectMetadataUpdate,
+    ) -> Result<OperatorProjectSummary> {
+        if update.title.is_none() && update.archived.is_none() {
+            bail!("empty metadata update");
+        }
+        validate_project_metadata(project_id, update.title.as_deref(), update.archived)?;
+        let _write_transaction = self.lock_writer_transaction()?;
+        let projection = self.materialized()?;
+        let current = projection
+            .projects
+            .get(project_id)
+            .ok_or_else(|| anyhow!("unknown project {project_id}"))?;
+        let title = update
+            .title
+            .clone()
+            .unwrap_or_else(|| current.title.clone());
+        let archived = update.archived.unwrap_or(current.archived);
+        let event = new_event(
+            &project_subject(project_id),
+            None,
+            None,
+            OperatorEventType::ProjectMetadataUpdated,
+            now_iso(),
+            OperatorActor {
+                kind: "operator".to_string(),
+                id: "local-operator".to_string(),
+            },
+            json!({ "project_id": project_id, "title": update.title, "archived": update.archived }),
+        );
+        self.journal.append(&event)?;
+        Ok(OperatorProjectSummary {
+            project_id: project_id.to_string(),
+            title,
+            archived,
+        })
+    }
+
+    pub fn update_thread_metadata(
+        &self,
+        thread_id: &str,
+        update: ThreadMetadataUpdate,
+    ) -> Result<OperatorThreadSummary> {
+        if update.title.is_none() && update.project_id.is_none() && update.archived.is_none() {
+            bail!("empty metadata update");
+        }
+        validate_thread_metadata(
+            thread_id,
+            update.title.as_deref(),
+            update.project_id.as_ref().and_then(|id| id.as_deref()),
+            update.archived,
+        )?;
+        let _write_transaction = self.lock_writer_transaction()?;
+        let projection = self.materialized()?;
+        let current = projection
+            .threads
+            .get(thread_id)
+            .ok_or_else(|| anyhow!("unknown thread {thread_id}"))?;
+        if let Some(Some(project_id)) = update.project_id.as_ref() {
+            if !projection.projects.contains_key(project_id) {
+                bail!("unknown project {project_id}");
+            }
+        }
+        let mut payload = serde_json::Map::new();
+        if let Some(title) = update.title.as_ref() {
+            payload.insert("title".to_string(), json!(title));
+        }
+        if let Some(project_id) = update.project_id.as_ref() {
+            payload.insert("project_id".to_string(), json!(project_id));
+        }
+        if let Some(archived) = update.archived {
+            payload.insert("archived".to_string(), json!(archived));
+        }
+        let event = new_event(
+            thread_id,
+            None,
+            None,
+            OperatorEventType::ThreadMetadataUpdated,
+            now_iso(),
+            OperatorActor {
+                kind: "operator".to_string(),
+                id: "local-operator".to_string(),
+            },
+            serde_json::Value::Object(payload),
+        );
+        self.journal.append(&event)?;
+        let mut summary = current.to_summary();
+        if let Some(title) = update.title {
+            summary.title = Some(title);
+        }
+        if let Some(project_id) = update.project_id {
+            summary.project_id = project_id;
+        }
+        if let Some(archived) = update.archived {
+            summary.archived = archived;
+        }
+        Ok(summary)
     }
 
     /// Start a turn, or return the existing one if `request.client_request_id`
@@ -779,6 +965,9 @@ impl OperatorSessionService {
             ),
             None => OperatorThreadView {
                 thread_id: thread_id.to_string(),
+                title: None,
+                project_id: None,
+                archived: false,
                 turns: Vec::new(),
                 skipped_events: materialized
                     .unsupported_schema_events
@@ -806,6 +995,28 @@ impl OperatorSessionService {
             .take(limit)
             .map(FoldedThread::to_summary)
             .collect())
+    }
+
+    pub fn catalog(&self, limit: usize) -> Result<OperatorCatalog> {
+        let materialized = self.materialized()?;
+        let mut threads: Vec<&FoldedThread> = materialized.threads.values().collect();
+        threads.sort_by_key(|thread| std::cmp::Reverse(thread.last_order));
+        let mut projects: Vec<&FoldedProject> = materialized.projects.values().collect();
+        projects.sort_by_key(|project| std::cmp::Reverse(project.last_order));
+        let truncated = threads.len() > limit || projects.len() > limit;
+        Ok(OperatorCatalog {
+            threads: threads
+                .into_iter()
+                .take(limit)
+                .map(FoldedThread::to_summary)
+                .collect(),
+            projects: projects
+                .into_iter()
+                .take(limit)
+                .map(FoldedProject::to_summary)
+                .collect(),
+            truncated,
+        })
     }
 
     /// Close out every nonterminal turn with a `turn_interrupted` event, as
@@ -998,6 +1209,59 @@ fn deterministic_turn_id(thread_id: &str, client_request_id: &str) -> String {
 fn prompt_fingerprint(prompt: &str) -> String {
     let digest = Sha256::digest(prompt.as_bytes());
     digest.iter().map(|byte| format!("{byte:02x}")).collect()
+}
+
+fn project_subject(project_id: &str) -> String {
+    format!("project:{project_id}")
+}
+
+fn validate_metadata_text(value: &str) -> Result<()> {
+    if value.trim().is_empty() || value.len() > 256 || find_sensitive(&json!(value)).is_some() {
+        bail!("invalid metadata");
+    }
+    Ok(())
+}
+
+fn validate_metadata_identifier(value: &str) -> Result<()> {
+    if value.trim().is_empty()
+        || value.len() > 128
+        || value.contains("..")
+        || value.contains('/')
+        || value.contains('\\')
+        || value.chars().any(char::is_control)
+        || find_sensitive(&json!(value)).is_some()
+    {
+        bail!("invalid metadata identifier");
+    }
+    Ok(())
+}
+
+fn validate_thread_metadata(
+    thread_id: &str,
+    title: Option<&str>,
+    project_id: Option<&str>,
+    _archived: Option<bool>,
+) -> Result<()> {
+    validate_metadata_identifier(thread_id)?;
+    if let Some(title) = title {
+        validate_metadata_text(title)?;
+    }
+    if let Some(project_id) = project_id {
+        validate_metadata_identifier(project_id)?;
+    }
+    Ok(())
+}
+
+fn validate_project_metadata(
+    project_id: &str,
+    title: Option<&str>,
+    _archived: Option<bool>,
+) -> Result<()> {
+    validate_metadata_identifier(project_id)?;
+    if let Some(title) = title {
+        validate_metadata_text(title)?;
+    }
+    Ok(())
 }
 
 fn validate_retry_binding(
@@ -1388,6 +1652,9 @@ struct FoldedThread {
     /// append order. Used only to order [`OperatorSessionService::list_threads`]
     /// by recency; never exposed directly.
     last_order: usize,
+    title: Option<String>,
+    project_id: Option<String>,
+    archived: bool,
 }
 
 impl FoldedThread {
@@ -1397,6 +1664,9 @@ impl FoldedThread {
             turns: Vec::new(),
             skipped_events: 0,
             last_order: 0,
+            title: None,
+            project_id: None,
+            archived: false,
         }
     }
 
@@ -1409,6 +1679,13 @@ impl FoldedThread {
     ) -> OperatorThreadView {
         OperatorThreadView {
             thread_id: self.thread_id.clone(),
+            title: self.title.clone().or_else(|| {
+                self.turns
+                    .iter()
+                    .find_map(|turn| turn.prompt.as_deref().map(fallback_thread_title))
+            }),
+            project_id: self.project_id.clone(),
+            archived: self.archived,
             turns: self
                 .turns
                 .iter()
@@ -1434,6 +1711,40 @@ impl FoldedThread {
             turn_count: self.turns.len(),
             latest_turn_id: self.turns.last().map(|turn| turn.turn_id.clone()),
             latest_status: self.turns.last().map(|turn| turn.status.clone()),
+            title: self.title.clone().or_else(|| {
+                self.turns
+                    .iter()
+                    .find_map(|turn| turn.prompt.as_deref().map(fallback_thread_title))
+            }),
+            project_id: self.project_id.clone(),
+            archived: self.archived,
+        }
+    }
+}
+
+fn fallback_thread_title(prompt: &str) -> String {
+    const LIMIT: usize = 120;
+    let mut title: String = prompt.trim().chars().take(LIMIT).collect();
+    if prompt.trim().chars().count() > LIMIT {
+        title.push('…');
+    }
+    title
+}
+
+#[derive(Debug, Clone)]
+struct FoldedProject {
+    project_id: String,
+    title: String,
+    archived: bool,
+    last_order: usize,
+}
+
+impl FoldedProject {
+    fn to_summary(&self) -> OperatorProjectSummary {
+        OperatorProjectSummary {
+            project_id: self.project_id.clone(),
+            title: self.title.clone(),
+            archived: self.archived,
         }
     }
 }
@@ -1443,6 +1754,7 @@ impl FoldedThread {
 #[derive(Debug, Default)]
 struct MaterializedJournal {
     threads: HashMap<String, FoldedThread>,
+    projects: HashMap<String, FoldedProject>,
     /// Durable Work-to-thread relationships derived from accepted Work
     /// lifecycle events. Used only for scoped turn admission.
     work_threads: HashMap<String, HashSet<String>>,
@@ -1524,15 +1836,8 @@ fn sync_materialized(
         for row in &page.events {
             projection.order = projection.order.saturating_add(1);
             projection.applied_event_rows = projection.applied_event_rows.saturating_add(1);
-            apply_event(
-                &mut projection.threads,
-                &mut projection.work_threads,
-                &mut projection.unsupported_schema_events,
-                &mut projection.rejected_current_schema_events,
-                &mut projection.seen_event_ids,
-                row,
-                projection.order,
-            );
+            let order = projection.order;
+            apply_event(projection, row, order);
         }
         projection.cursor = page.next_cursor;
         if stable_tail.is_some() {
@@ -1542,31 +1847,85 @@ fn sync_materialized(
     Ok(())
 }
 
-fn apply_event(
-    threads: &mut HashMap<String, FoldedThread>,
-    work_threads: &mut HashMap<String, HashSet<String>>,
-    unsupported_schema_events: &mut HashMap<String, usize>,
-    rejected_current_schema_events: &mut HashMap<String, usize>,
-    seen_event_ids: &mut HashSet<String>,
-    row: &CursorEvent,
-    order: usize,
-) {
+fn apply_event(projection: &mut MaterializedJournal, row: &CursorEvent, order: usize) {
     let event = &row.event;
-    if !seen_event_ids.insert(event.event_id.clone()) {
+    if !projection.seen_event_ids.insert(event.event_id.clone()) {
         return; // Reader-side dedup of a repeated event_id.
     }
 
     if event.schema_version != OPERATOR_EVENT_SCHEMA_VERSION {
-        *unsupported_schema_events
+        *projection
+            .unsupported_schema_events
             .entry(event.thread_id.clone())
             .or_default() += 1;
         return;
     }
 
-    if let Some(entry) = threads.get_mut(&event.thread_id) {
+    // Project rows use a project-specific subject and are folded before any
+    // thread logic. This is the guard that prevents a project lifecycle row
+    // from becoming a fabricated empty chat session during replay.
+    match event.event_type {
+        OperatorEventType::ProjectCreated => {
+            let Some(project_id) = event
+                .payload
+                .get("project_id")
+                .and_then(|value| value.as_str())
+            else {
+                return;
+            };
+            let Some(title) = event.payload.get("title").and_then(|value| value.as_str()) else {
+                return;
+            };
+            if event.thread_id != project_subject(project_id)
+                || projection.projects.contains_key(project_id)
+            {
+                return;
+            }
+            projection.projects.insert(
+                project_id.to_string(),
+                FoldedProject {
+                    project_id: project_id.to_string(),
+                    title: title.to_string(),
+                    archived: false,
+                    last_order: order,
+                },
+            );
+            return;
+        }
+        OperatorEventType::ProjectMetadataUpdated => {
+            let Some(project_id) = event
+                .payload
+                .get("project_id")
+                .and_then(|value| value.as_str())
+            else {
+                return;
+            };
+            let Some(project) = projection.projects.get_mut(project_id) else {
+                return;
+            };
+            if event.thread_id != project_subject(project_id) {
+                return;
+            }
+            if let Some(title) = event.payload.get("title").and_then(|value| value.as_str()) {
+                project.title = title.to_string();
+            }
+            if let Some(archived) = event
+                .payload
+                .get("archived")
+                .and_then(|value| value.as_bool())
+            {
+                project.archived = archived;
+            }
+            project.last_order = order;
+            return;
+        }
+        _ => {}
+    }
+
+    if let Some(entry) = projection.threads.get_mut(&event.thread_id) {
         if apply_to_existing_thread(entry, event, row) {
             entry.last_order = order;
-            apply_work_membership(work_threads, event);
+            apply_work_membership(&mut projection.work_threads, event);
         } else {
             entry.skipped_events += 1;
         }
@@ -1577,16 +1936,36 @@ fn apply_event(
     // establish a new projection. All other rows need existing state.
     let mut candidate = FoldedThread::new(&event.thread_id);
     let accepted = match event.event_type {
-        OperatorEventType::ThreadCreated => true,
+        OperatorEventType::ThreadCreated => {
+            candidate.title = event
+                .payload
+                .get("title")
+                .and_then(|value| value.as_str())
+                .map(str::to_string);
+            candidate.project_id = event
+                .payload
+                .get("project_id")
+                .and_then(|value| value.as_str())
+                .map(str::to_string);
+            candidate.archived = event
+                .payload
+                .get("archived")
+                .and_then(|value| value.as_bool())
+                .unwrap_or(false);
+            true
+        }
         OperatorEventType::TurnStarted => apply_turn_started(&mut candidate, event),
         _ => false,
     };
     if accepted {
         candidate.last_order = order;
-        threads.insert(event.thread_id.clone(), candidate);
-        apply_work_membership(work_threads, event);
+        projection
+            .threads
+            .insert(event.thread_id.clone(), candidate);
+        apply_work_membership(&mut projection.work_threads, event);
     } else {
-        *rejected_current_schema_events
+        *projection
+            .rejected_current_schema_events
             .entry(event.thread_id.clone())
             .or_default() += 1;
     }
@@ -1637,6 +2016,14 @@ fn apply_to_existing_thread(
 ) -> bool {
     match event.event_type {
         OperatorEventType::ThreadCreated => false,
+        OperatorEventType::ThreadMetadataUpdated => {
+            if let Some(title) = event.payload.get("title").and_then(|value| value.as_str()) { entry.title = Some(title.to_string()); }
+            if let Some(project_id) = event.payload.get("project_id") {
+                entry.project_id = project_id.as_str().map(str::to_string);
+            }
+            if let Some(archived) = event.payload.get("archived").and_then(|value| value.as_bool()) { entry.archived = archived; }
+            true
+        }
         OperatorEventType::TurnStarted => apply_turn_started(entry, event),
         OperatorEventType::UserMessage => apply_user_message(entry, event, row),
         OperatorEventType::TurnCompleted => apply_terminal(entry, event, "completed"),
@@ -1672,6 +2059,8 @@ fn apply_to_existing_thread(
         | OperatorEventType::WorkerExited
         | OperatorEventType::PaneOpened
         | OperatorEventType::PaneClosed => apply_nonterminal_touch(entry, event),
+        // Project events were handled before thread projection above.
+        OperatorEventType::ProjectCreated | OperatorEventType::ProjectMetadataUpdated => false,
     }
 }
 

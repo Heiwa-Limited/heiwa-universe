@@ -10,9 +10,9 @@ import type { SurfaceId } from "../surfaces/ids";
 import { createHerdState, type HerdState, type HerdStateOptions } from "./herd";
 import { createOperatorState, type OperatorState, type OperatorStateOptions } from "./operator";
 import { createRuntimeState, type RuntimeState, type RuntimeStateOptions } from "./runtime";
+import { createSessionState, type SessionState } from "./sessions";
+import type { SessionStateOptions } from "./sessions";
 import type { SubApp } from "./types";
-
-export const OPERATOR_THREAD_ID = "default";
 
 /**
  * The typed interface every surface consumes. Surfaces read this instead of
@@ -23,8 +23,11 @@ export type AppState = {
   operator: OperatorState;
   runtime: RuntimeState;
   herd: HerdState;
+  sessions: SessionState;
   view: Accessor<SurfaceId>;
   navigate: (view: SurfaceId) => void;
+  selectedProjectId: Accessor<string | undefined>;
+  selectProject: (projectId: string) => void;
   /** Static capability descriptors; these never imply a live agent or pane. */
   subApps: Accessor<SubApp[]>;
 };
@@ -33,14 +36,23 @@ export type AppStateOptions = {
   operator?: OperatorStateOptions;
   runtime?: RuntimeStateOptions;
   herd?: HerdStateOptions;
+  sessions?: Omit<Partial<SessionStateOptions>, "start" | "dispose">;
   initialView?: SurfaceId;
+  initialSelectedSessionId?: string;
 };
 
 export function createAppState(options: AppStateOptions = {}): AppState {
   const operator = createOperatorState(options.operator);
+  const sessions = createSessionState({
+    ...options.sessions,
+    start: operator.start,
+    dispose: operator.dispose,
+    initialSelectedId: options.initialSelectedSessionId,
+  });
   const runtime = createRuntimeState(options.runtime);
   const herd = createHerdState(options.herd);
   const [view, setView] = createSignal<SurfaceId>(options.initialView ?? "home");
+  const [selectedProjectId, setSelectedProjectId] = createSignal<string | undefined>();
 
   // Memoized: several surfaces render <For> over slices of this, and rebuilding
   // the array on every read tears down and recreates those rows on each
@@ -102,7 +114,7 @@ export function createAppState(options: AppStateOptions = {}): AppState {
     },
   ]);
 
-  return { operator, runtime, herd, view, navigate: setView, subApps };
+  return { operator, runtime, herd, sessions, view, navigate: setView, selectedProjectId, selectProject: setSelectedProjectId, subApps };
 }
 
 function runtimeStatusLabel(runtime: RuntimeState): string {

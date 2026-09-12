@@ -96,3 +96,16 @@
   color: var(--status-warn);
   font-size: var(--text-sm);
 }
+
+/* Conversations share the composer's reading width at every app location. */
+.main-area > .ai-view { padding: 0; }
+.chat-messages { padding: 36px 44px; gap: 28px; }
+.chat-msg-header { font-size: 12px; text-transform: none; letter-spacing: 0; }
+.chat-body { line-height: 1.65; }
+.chat-msg.user .chat-body { padding: 14px 18px; }
+.chat-empty { align-content: center; gap: 18px; font-size: 16px; }
+.chat-empty-icon { display: grid; place-items: center; opacity: 1; }
+@media (prefers-reduced-motion: reduce) {
+  .chat-messages { scroll-behavior: auto; }
+  .chat-msg.transient .chat-body::after { animation: none; }
+}

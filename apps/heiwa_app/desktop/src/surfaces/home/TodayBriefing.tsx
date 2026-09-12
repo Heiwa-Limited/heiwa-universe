@@ -42,7 +42,7 @@ export function TodayBriefing() {
 
       <Show
         when={todaysEvents().length > 0}
-        fallback={<p class="today-clear">Nothing scheduled today.</p>}
+        fallback={<p class="today-clear">No calendar items loaded for today.</p>}
       >
         <ul class="today-events">
           <For each={todaysEvents()}>

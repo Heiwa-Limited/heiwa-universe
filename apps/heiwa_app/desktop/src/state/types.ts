@@ -78,6 +78,24 @@ export type OnboardingState = {
   complete: boolean;
   gaps: OnboardingGap[];
   display_name: string | null;
+  /** Desktop welcome completion does not imply provider or connector access. */
+  workspace?: {
+    can_enter: boolean;
+    setup_complete: boolean;
+    resources: DiscoveredResource[];
+  };
+};
+
+export type DiscoveredResource = {
+  id: string;
+  name: string;
+  category: "apple" | "inference";
+  app_detected: boolean;
+  tools_detected: string[];
+  registered_accounts: number;
+  detail: string;
+  surface: "calendar" | "mail" | null;
+  has_guide: boolean;
 };
 
 /**

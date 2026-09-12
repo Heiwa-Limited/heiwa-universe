@@ -577,6 +577,67 @@ fn authenticated_operator_routes_share_one_idempotent_runner() {
 }
 
 #[test]
+fn authenticated_catalog_project_and_thread_metadata_round_trip_across_restart() {
+    let home = tempfile::tempdir().unwrap();
+    let evidence = tempfile::tempdir().unwrap();
+    let port = reserve_port();
+    let mut runtime = spawn_runtime(port, home.path(), evidence.path(), None);
+    wait_for_port(port);
+
+    let project = request(
+        port,
+        "POST",
+        "/api/v1/operator/projects",
+        Some(TOKEN),
+        &json!({"project_id":"project-a","title":"Project A"}).to_string(),
+    );
+    assert_eq!(project.status, 200, "{}", project.body);
+    let thread = request(
+        port,
+        "POST",
+        "/api/v1/operator/threads",
+        Some(TOKEN),
+        &json!({"thread_id":"thread-a","title":"Inbox"}).to_string(),
+    );
+    assert_eq!(thread.status, 200, "{}", thread.body);
+    let moved = request(
+        port,
+        "POST",
+        "/api/v1/operator/threads/thread-a/metadata",
+        Some(TOKEN),
+        &json!({"project_id":"project-a","archived":true}).to_string(),
+    );
+    assert_eq!(moved.status, 200, "{}", moved.body);
+    assert_eq!(moved.body["data"]["thread"]["project_id"], "project-a");
+    assert_eq!(moved.body["data"]["thread"]["archived"], true);
+    runtime.stop_and_assert_closed();
+
+    let restarted_port = reserve_port();
+    let mut restarted = spawn_runtime(restarted_port, home.path(), evidence.path(), None);
+    wait_for_port(restarted_port);
+    let catalog = request(
+        restarted_port,
+        "GET",
+        "/api/v1/operator/catalog",
+        Some(TOKEN),
+        "null",
+    );
+    assert_eq!(catalog.status, 200, "{}", catalog.body);
+    assert_eq!(
+        catalog.body["data"]["projects"][0],
+        json!({"project_id":"project-a","title":"Project A","archived":false})
+    );
+    assert_eq!(catalog.body["data"]["threads"][0]["thread_id"], "thread-a");
+    assert_eq!(catalog.body["data"]["threads"][0]["title"], "Inbox");
+    assert_eq!(
+        catalog.body["data"]["threads"][0]["project_id"],
+        "project-a"
+    );
+    assert_eq!(catalog.body["data"]["threads"][0]["archived"], true);
+    restarted.stop_and_assert_closed();
+}
+
+#[test]
 fn ollama_models_payload_uses_child_override_before_stored_live_endpoint() {
     let listener = TcpListener::bind("127.0.0.1:0").unwrap();
     listener.set_nonblocking(true).unwrap();

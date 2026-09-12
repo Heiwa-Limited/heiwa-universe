@@ -100,6 +100,11 @@ pub enum OperatorSensitivity {
 #[serde(rename_all = "snake_case")]
 pub enum OperatorEventType {
     ThreadCreated,
+    /// Project lifecycle uses a project-specific envelope subject. It must
+    /// never be folded as a chat thread.
+    ProjectCreated,
+    ProjectMetadataUpdated,
+    ThreadMetadataUpdated,
     TurnStarted,
     UserMessage,
     RoutePlanned,

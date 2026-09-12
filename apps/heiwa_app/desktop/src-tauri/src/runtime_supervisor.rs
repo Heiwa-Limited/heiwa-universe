@@ -271,15 +271,33 @@ pub fn ensure_runtime(
 /// Start the runtime the way the app needs it: serving, and not opening a
 /// browser window of its own.
 pub fn spawn_runtime(binary: &std::path::Path) -> std::io::Result<Child> {
-    Command::new(binary)
-        .args(["app", "start", "--no-open"])
+    let port = crate::proxy::runtime_port().map_err(|_| {
+        std::io::Error::new(std::io::ErrorKind::InvalidInput, "invalid runtime port")
+    })?;
+    runtime_command(binary, port)
         .stdin(std::process::Stdio::null())
         .spawn()
+}
+
+fn runtime_command(binary: &std::path::Path, port: u16) -> Command {
+    let mut command = Command::new(binary);
+    command.args(["app", "start", "--port", &port.to_string(), "--no-open"]);
+    command
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn spawned_runtime_uses_the_same_port_as_the_proxy() {
+        let command = runtime_command(std::path::Path::new("heiwa"), 7487);
+        let args: Vec<_> = command
+            .get_args()
+            .map(|arg| arg.to_str().unwrap())
+            .collect();
+        assert_eq!(args, ["app", "start", "--port", "7487", "--no-open"]);
+    }
 
     fn facts(heiwa_runtime_serving: bool, binary: Option<&str>) -> SupervisorFacts {
         SupervisorFacts {

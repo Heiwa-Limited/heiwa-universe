@@ -43,8 +43,8 @@ categories = ["command-line-utilities", "development-tools"]
 
 # Keep proc-macro and build-script crates cheap to compile; these run only at
 # build time. This once masked host linker ld-27037's malformed LINKEDIT output,
-# but clean Apple Silicon desktop builds now select Rust's bundled Mach-O linker
-# through apps/heiwa_app/desktop/scripts/tauri-build.mjs instead.
+# but linker selection and the SDK 27 stripping workaround now live in
+# apps/heiwa_app/desktop/scripts/tauri-build-env.mjs.
 [profile.release.build-override]
 opt-level = 0
 codegen-units = 16

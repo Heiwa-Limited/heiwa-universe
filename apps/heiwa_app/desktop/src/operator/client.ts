@@ -15,6 +15,7 @@ const MAX_HISTORY_PAGES = 1024;
 type SubscriptionRun = {
   generation: number;
   invalidRequested: boolean;
+  controller: AbortController;
   promise: Promise<void>;
 };
 
@@ -34,7 +35,8 @@ type OperatorLifecycleState =
 export type OperatorClientDependencies = {
   get: (path: string) => Promise<OperatorHistoryResponse>;
   post: (path: string, body: OperatorTurnSubmission) => Promise<OperatorTurnSubmissionResponse>;
-  subscribe: (threadId: string, after: string | null, onFrame: (frame: OperatorFrame) => void) => Promise<void>;
+  /** Aborting stops observation only; it never requests turn cancellation. */
+  subscribe: (threadId: string, after: string | null, onFrame: (frame: OperatorFrame) => void, signal?: AbortSignal) => Promise<void>;
   randomUUID: () => string;
   onChange?: (frame?: OperatorFrame) => void;
   onError?: (code: OperatorClientError) => void;
@@ -48,7 +50,8 @@ export class OperatorClient {
   private activeSubscription: SubscriptionRun | null = null;
   private generation = 0;
   private invalidCursorRecoveries = 0;
-  private activeSubmissions = 0;
+  private activeSubmissions = new Map<number, number>();
+  private retryableHistoryFailure = false;
 
   constructor(
     private readonly store: OperatorStore,
@@ -58,12 +61,13 @@ export class OperatorClient {
   start(threadId: string): Promise<void> {
     const normalized = threadId.trim();
     if (!normalized) return Promise.reject(new Error("thread_id_required"));
-    if (this.threadId !== null) {
-      if (this.threadId === normalized && this.startPromise) return this.startPromise;
-      return Promise.reject(new Error("operator_client_already_started"));
-    }
+    if (this.threadId === normalized && this.startPromise && (this.lifecycleState.status !== "error" || !this.retryableHistoryFailure)) return this.startPromise;
+    // A changed session is a new projection. Abort the native observation
+    // before replaying it; the runtime keeps any underlying turn alive.
+    this.activeSubscription?.controller.abort();
     const generation = ++this.generation;
     this.invalidCursorRecoveries = 0;
+    this.retryableHistoryFailure = false;
     this.threadId = normalized;
     const startPromise = Promise.resolve().then(() => this.initialize(normalized, generation));
     this.startPromise = startPromise;
@@ -71,6 +75,19 @@ export class OperatorClient {
     this.transitionLifecycle({ status: "starting", error: null });
     this.dependencies.onChange?.();
     return startPromise;
+  }
+
+  /** Stop this window's observation without cancelling runtime work. */
+  dispose(): void {
+    this.activeSubscription?.controller.abort();
+    this.activeSubscription = null;
+    this.generation += 1;
+    this.threadId = null;
+    this.startPromise = null;
+    this.recovery = null;
+    this.store.resetProjectionForReplay();
+    this.transitionLifecycle({ status: "idle", error: null });
+    this.dependencies.onChange?.();
   }
 
   private async initialize(threadId: string, generation: number): Promise<void> {
@@ -86,6 +103,7 @@ export class OperatorClient {
         this.store.resetProjectionForReplay();
         this.dependencies.onChange?.();
         this.reportError("operator_history_unavailable", generation);
+        this.retryableHistoryFailure = true;
       }
     }
   }
@@ -99,7 +117,7 @@ export class OperatorClient {
     const generation = this.generation;
     const trimmed = prompt.trim();
     if (!trimmed) throw new Error("prompt_required");
-    this.activeSubmissions += 1;
+    this.incrementSubmission(generation);
     this.dependencies.onChange?.();
     let response: OperatorTurnSubmissionResponse;
     try {
@@ -112,13 +130,13 @@ export class OperatorClient {
         },
       );
     } catch {
-      this.activeSubmissions -= 1;
+      this.decrementSubmission(generation);
       this.reportError("operator_submission_unavailable", generation);
       throw new Error("operator_submission_unavailable");
     }
-    this.activeSubmissions -= 1;
+    this.decrementSubmission(generation);
     if (this.isCurrent(threadId, generation)
-      && this.activeSubmissions === 0
+      && this.submissionsFor(generation) === 0
       && this.lifecycleState.status === "ready") {
       this.dependencies.onChange?.();
     }
@@ -126,7 +144,7 @@ export class OperatorClient {
   }
 
   state(): OperatorClientState {
-    if (this.lifecycleState.status === "ready" && this.activeSubmissions > 0) {
+    if (this.lifecycleState.status === "ready" && this.submissionsFor(this.generation) > 0) {
       return { status: "submitting", error: null };
     }
     return { ...this.lifecycleState };
@@ -179,6 +197,7 @@ export class OperatorClient {
     const run: SubscriptionRun = {
       generation,
       invalidRequested: false,
+      controller: new AbortController(),
       promise: Promise.resolve(),
     };
     run.promise = Promise.resolve().then(() => this.dependencies.subscribe(threadId, after, (frame) => {
@@ -190,7 +209,7 @@ export class OperatorClient {
         return;
       }
       this.reduceFrame(frame);
-    }));
+    }, run.controller.signal));
     this.activeSubscription = run;
     void run.promise.catch(() => {
       if (!run.invalidRequested && this.isCurrent(threadId, generation)) {
@@ -205,6 +224,7 @@ export class OperatorClient {
     if (this.lifecycleState.status === "error") return;
     if (this.recovery?.generation === generation) return;
     if (this.invalidCursorRecoveries >= MAX_INVALID_CURSOR_RECOVERIES) {
+      this.retryableHistoryFailure = false;
       this.reportError("operator_history_unavailable", generation);
       return;
     }
@@ -231,6 +251,7 @@ export class OperatorClient {
           this.store.resetProjectionForReplay();
           this.dependencies.onChange?.();
           this.reportError("operator_history_unavailable", generation);
+          this.retryableHistoryFailure = true;
         }
       }
     })();
@@ -270,5 +291,19 @@ export class OperatorClient {
 
   private assertCurrent(threadId: string, generation: number): void {
     if (!this.isCurrent(threadId, generation)) throw new StaleClientOperation();
+  }
+
+  private submissionsFor(generation: number): number {
+    return this.activeSubmissions.get(generation) ?? 0;
+  }
+
+  private incrementSubmission(generation: number): void {
+    this.activeSubmissions.set(generation, this.submissionsFor(generation) + 1);
+  }
+
+  private decrementSubmission(generation: number): void {
+    const next = this.submissionsFor(generation) - 1;
+    if (next <= 0) this.activeSubmissions.delete(generation);
+    else this.activeSubmissions.set(generation, next);
   }
 }

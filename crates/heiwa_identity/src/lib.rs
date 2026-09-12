@@ -14,6 +14,7 @@
 //! exists before any account does.
 
 pub mod onboarding;
+pub mod workspace_setup;
 
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
@@ -135,8 +136,35 @@ fn write_to(runtime_root: &Path, identity: &LocalIdentity) -> Result<(), Identit
     std::fs::create_dir_all(runtime_root)?;
     let body = serde_json::to_string_pretty(identity)
         .map_err(|error| IdentityError::Malformed(error.to_string()))?;
-    std::fs::write(identity_path_in(runtime_root), body)?;
+    write_record(&identity_path_in(runtime_root), body.as_bytes())?;
     Ok(())
+}
+
+/// Replace a small local record without exposing a partially written document.
+/// The temporary file shares the destination filesystem and is private at creation.
+pub(crate) fn write_record(path: &Path, body: &[u8]) -> std::io::Result<()> {
+    use std::io::Write;
+    let temporary = path.with_extension(format!("{}.tmp", uuid::Uuid::new_v4()));
+    let result = (|| {
+        let mut options = std::fs::OpenOptions::new();
+        options.write(true).create_new(true);
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::OpenOptionsExt;
+            options.mode(0o600);
+        }
+        let mut file = options.open(&temporary)?;
+        file.write_all(body)?;
+        file.sync_all()?;
+        std::fs::rename(&temporary, path)?;
+        #[cfg(unix)]
+        std::fs::File::open(path.parent().expect("record has parent"))?.sync_all()?;
+        Ok(())
+    })();
+    if result.is_err() {
+        let _ = std::fs::remove_file(&temporary);
+    }
+    result
 }
 
 /// The runtime root for this user, strictly resolved.

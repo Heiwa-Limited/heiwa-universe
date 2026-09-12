@@ -1,6 +1,7 @@
 # Product Contract
 
-**Status:** Personal-first product contract for the enterprise-grade Heiwa stack.
+**Status:** Product contract. The [macOS 27 desktop contract](macos27-product-contract.md)
+supersedes the older personal-first and dashboard interaction descriptions here.
 
 This document defines what Heiwa is allowed to present as product. `HEIWA.md`
 remains the architecture authority. `PRODUCT_SURFACE.md` remains the tracked-path
@@ -11,15 +12,11 @@ The modular resource model is defined in [`capability-fabric.md`](capability-fab
 
 ## First Customer
 
-The first customer is Devon.
+The current customer is any macOS 27 user installing Heiwa without this repository,
+a developer toolchain, the maintainer's configuration, or a pre-existing runtime.
+Their own resources populate the workspace through detection and scoped onboarding.
+The maintainer's installation is one test profile, never a product dependency.
 
-The first winning product is not a generic public AI dashboard. It is the operator
-system that lets one person safely use local models, provider CLIs, hosted models,
-computer use, messaging surfaces, files, and personal workflows through one
-governed runtime.
-
-Personal-first does not mean hobby-grade. It means the system must work for one
-high-trust operator before it claims team or enterprise maturity.
 
 ## Product Set
 

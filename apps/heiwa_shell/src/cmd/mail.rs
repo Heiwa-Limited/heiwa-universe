@@ -183,7 +183,9 @@ function run(argv) {
   const Mail = Application("Mail");
   const rows = [];
   let accounts = [];
-  try { accounts = Mail.accounts(); } catch (e) { return ""; }
+  try { accounts = Mail.accounts(); } catch (e) {
+    throw new Error("Apple Mail account query failed: " + e);
+  }
   for (let a = 0; a < accounts.length && rows.length < limit; a++) {
     let accountName = "";
     let mailboxes = [];
@@ -370,43 +372,146 @@ fn append_snapshot_rows(rows: &[Value]) -> Result<usize> {
     append_snapshot_rows_at(&headers_snapshot_path(), rows)
 }
 
+fn atomic_private_write(path: &std::path::Path, contents: &[u8]) -> Result<()> {
+    use anyhow::Context;
+    use std::fs::OpenOptions;
+    use std::io::Write;
+
+    let parent = path
+        .parent()
+        .ok_or_else(|| anyhow!("mail snapshot has no parent: {}", path.display()))?;
+    let file_name = path
+        .file_name()
+        .and_then(|name| name.to_str())
+        .unwrap_or("headers.jsonl");
+    let temp_path = parent.join(format!(".{file_name}.{}.tmp", uuid::Uuid::new_v4()));
+    let mut temp_options = OpenOptions::new();
+    temp_options.create_new(true).write(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        temp_options.mode(0o600);
+    }
+    let write_result = (|| -> Result<()> {
+        let mut temp = temp_options.open(&temp_path).with_context(|| {
+            format!(
+                "failed to create private mail snapshot {}",
+                temp_path.display()
+            )
+        })?;
+        temp.write_all(contents)?;
+        temp.sync_all()?;
+        drop(temp);
+        std::fs::rename(&temp_path, path).with_context(|| {
+            format!(
+                "failed to atomically replace mail snapshot {}",
+                path.display()
+            )
+        })?;
+        #[cfg(unix)]
+        std::fs::File::open(parent)
+            .and_then(|directory| directory.sync_all())
+            .with_context(|| {
+                format!(
+                    "failed to sync mail snapshot directory {}",
+                    parent.display()
+                )
+            })?;
+        Ok(())
+    })();
+    if write_result.is_err() {
+        let _ = std::fs::remove_file(&temp_path);
+    }
+    write_result
+}
+
 fn append_snapshot_rows_at(path: &std::path::Path, rows: &[Value]) -> Result<usize> {
+    use anyhow::Context;
+    use std::fs::OpenOptions;
+
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent)?;
     }
-    let existing_raw = std::fs::read_to_string(path).unwrap_or_default();
-    let mut lines: Vec<String> = existing_raw
-        .lines()
-        .filter(|line| !line.trim().is_empty())
-        .map(str::to_string)
-        .collect();
-    let mut seen: std::collections::HashSet<String> = lines
+
+    let lock_path = path.with_extension("jsonl.lock");
+    let mut lock_options = OpenOptions::new();
+    lock_options.create(true).read(true).write(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        lock_options.mode(0o600);
+    }
+    let lock = lock_options
+        .open(&lock_path)
+        .with_context(|| format!("failed to open mail snapshot lock {}", lock_path.display()))?;
+    lock.lock()
+        .with_context(|| format!("failed to lock mail snapshot {}", path.display()))?;
+
+    let existing_raw = match std::fs::read_to_string(path) {
+        Ok(raw) => raw,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => String::new(),
+        Err(error) => {
+            return Err(error)
+                .with_context(|| format!("failed to read mail snapshot {}", path.display()));
+        }
+    };
+    let mut existing_rows = Vec::new();
+    for (index, line) in existing_raw.lines().enumerate() {
+        if line.trim().is_empty() {
+            continue;
+        }
+        let parsed = serde_json::from_str::<Value>(line).with_context(|| {
+            format!(
+                "invalid JSON in mail snapshot {} at line {}",
+                path.display(),
+                index + 1
+            )
+        })?;
+        if !parsed.is_object() {
+            return Err(anyhow!(
+                "invalid mail snapshot row in {} at line {}: expected object",
+                path.display(),
+                index + 1
+            ));
+        }
+        existing_rows.push(parsed);
+    }
+    let mut positions: std::collections::HashMap<String, usize> = existing_rows
         .iter()
-        .filter_map(|line| serde_json::from_str::<Value>(line).ok())
-        .map(|row| snapshot_dedupe_key(&row))
+        .enumerate()
+        .map(|(index, row)| (snapshot_dedupe_key(row), index))
         .collect();
 
     let scanned_at = chrono::Utc::now().to_rfc3339();
     let mut appended = 0;
     for row in rows {
         let key = snapshot_dedupe_key(row);
-        if seen.contains(&key) {
-            continue;
-        }
         let mut stamped = row.clone();
         if let Some(obj) = stamped.as_object_mut() {
-            obj.insert("scanned_at".to_string(), json!(scanned_at));
+            obj.insert("scanned_at".to_string(), json!(&scanned_at));
         }
-        lines.push(stamped.to_string());
-        seen.insert(key);
-        appended += 1;
+        if let Some(index) = positions.get(&key).copied() {
+            existing_rows[index] = stamped;
+        } else {
+            let index = existing_rows.len();
+            existing_rows.push(stamped);
+            positions.insert(key, index);
+            appended += 1;
+        }
     }
 
-    if lines.len() > MAX_SNAPSHOT_LINES {
-        let drop = lines.len() - MAX_SNAPSHOT_LINES;
-        lines.drain(..drop);
+    if existing_rows.len() > MAX_SNAPSHOT_LINES {
+        let drop = existing_rows.len() - MAX_SNAPSHOT_LINES;
+        existing_rows.drain(..drop);
     }
-    std::fs::write(path, lines.join("\n") + "\n")?;
+    let serialized = existing_rows
+        .iter()
+        .map(Value::to_string)
+        .collect::<Vec<_>>()
+        .join("\n")
+        + "\n";
+    atomic_private_write(path, serialized.as_bytes())?;
+    drop(lock);
     Ok(appended)
 }
 
@@ -1015,6 +1120,12 @@ mod tests {
     }
 
     #[test]
+    fn apple_mail_script_propagates_account_query_failure() {
+        assert!(APPLE_MAIL_JXA.contains("Apple Mail account query failed"));
+        assert!(!APPLE_MAIL_JXA.contains("catch (e) { return \"\"; }"));
+    }
+
+    #[test]
     fn snapshot_append_dedupes_and_stamps() {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("headers.jsonl");
@@ -1029,6 +1140,169 @@ mod tests {
         let raw = std::fs::read_to_string(&path).unwrap();
         assert_eq!(raw.lines().count(), 1);
         assert!(raw.contains("\"scanned_at\""));
+    }
+
+    #[test]
+    fn snapshot_refresh_updates_existing_row_and_preserves_unqueried_rows() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("headers.jsonl");
+        let target = json!({
+            "account": "a", "mailbox": "INBOX", "sender": "s",
+            "subject": "x", "date": "2026-06-12", "unread": true,
+        });
+        let unqueried = json!({
+            "account": "b", "mailbox": "INBOX", "sender": "other",
+            "subject": "keep", "date": "2026-06-11", "unread": true,
+        });
+        assert_eq!(
+            append_snapshot_rows_at(&path, &[target.clone(), unqueried.clone()]).unwrap(),
+            2
+        );
+
+        let mut refreshed = target;
+        refreshed["unread"] = json!(false);
+        let appended = append_snapshot_rows_at(&path, &[refreshed]).unwrap();
+
+        assert_eq!(appended, 0, "refreshing known mail is not an append");
+        let rows: Vec<Value> = std::fs::read_to_string(&path)
+            .unwrap()
+            .lines()
+            .map(|line| serde_json::from_str(line).unwrap())
+            .collect();
+        assert_eq!(rows.len(), 2, "refresh must not duplicate known mail");
+        assert_eq!(rows[0]["unread"], false, "latest unread state wins");
+        assert_eq!(rows[1]["sender"], "other");
+        assert_eq!(rows[1]["unread"], true, "unqueried mail is preserved");
+    }
+
+    #[test]
+    fn snapshot_corrupt_json_fails_without_replacing_source() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("headers.jsonl");
+        let original = b"{not-json}\n";
+        std::fs::write(&path, original).unwrap();
+
+        let result = append_snapshot_rows_at(
+            &path,
+            &[json!({
+                "account": "a", "sender": "s", "subject": "x", "date": "2026-06-12"
+            })],
+        );
+
+        assert!(result.is_err(), "corrupt source must fail closed");
+        assert_eq!(std::fs::read(&path).unwrap(), original);
+    }
+
+    #[test]
+    fn snapshot_non_object_row_fails_without_replacing_source() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("headers.jsonl");
+        let original = b"[]\n";
+        std::fs::write(&path, original).unwrap();
+
+        let result = append_snapshot_rows_at(
+            &path,
+            &[json!({
+                "account": "a", "sender": "s", "subject": "x", "date": "2026-06-12"
+            })],
+        );
+
+        assert!(result.is_err(), "non-object snapshot rows must fail closed");
+        assert_eq!(std::fs::read(&path).unwrap(), original);
+    }
+
+    #[test]
+    fn snapshot_invalid_utf8_fails_without_replacing_source() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("headers.jsonl");
+        let original = [0xff, 0xfe, b'\n'];
+        std::fs::write(&path, original).unwrap();
+
+        let result = append_snapshot_rows_at(
+            &path,
+            &[json!({
+                "account": "a", "sender": "s", "subject": "x", "date": "2026-06-12"
+            })],
+        );
+
+        assert!(result.is_err(), "unreadable UTF-8 source must fail closed");
+        assert_eq!(std::fs::read(&path).unwrap(), original);
+    }
+
+    #[test]
+    fn concurrent_snapshot_updates_are_serialized() {
+        use std::sync::{Arc, Barrier};
+
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("headers.jsonl");
+        let barrier = Arc::new(Barrier::new(3));
+        let handles: Vec<_> = ["one", "two"]
+            .into_iter()
+            .map(|sender| {
+                let path = path.clone();
+                let barrier = Arc::clone(&barrier);
+                std::thread::spawn(move || {
+                    barrier.wait();
+                    append_snapshot_rows_at(
+                        &path,
+                        &[json!({
+                            "account": "a", "sender": sender, "subject": "x",
+                            "date": "2026-06-12", "unread": true
+                        })],
+                    )
+                    .unwrap();
+                })
+            })
+            .collect();
+        barrier.wait();
+        for handle in handles {
+            handle.join().unwrap();
+        }
+
+        let raw = std::fs::read_to_string(&path).unwrap();
+        assert_eq!(raw.lines().count(), 2);
+        assert!(raw.contains("\"sender\":\"one\""));
+        assert!(raw.contains("\"sender\":\"two\""));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn snapshot_and_lock_files_are_owner_private() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("headers.jsonl");
+        append_snapshot_rows_at(
+            &path,
+            &[json!({
+                "account": "a", "sender": "s", "subject": "x", "date": "2026-06-12"
+            })],
+        )
+        .unwrap();
+
+        let snapshot_mode = std::fs::metadata(&path).unwrap().permissions().mode() & 0o777;
+        let lock_mode = std::fs::metadata(path.with_extension("jsonl.lock"))
+            .unwrap()
+            .permissions()
+            .mode()
+            & 0o777;
+        assert_eq!(snapshot_mode, 0o600);
+        assert_eq!(lock_mode, 0o600);
+    }
+
+    #[test]
+    fn failed_atomic_replace_removes_private_temp_file() {
+        let dir = tempfile::tempdir().unwrap();
+        let target = dir.path().join("headers.jsonl");
+        std::fs::create_dir(&target).unwrap();
+
+        assert!(atomic_private_write(&target, b"replacement\n").is_err());
+        let names: Vec<_> = std::fs::read_dir(dir.path())
+            .unwrap()
+            .map(|entry| entry.unwrap().file_name().to_string_lossy().into_owned())
+            .collect();
+        assert_eq!(names, vec!["headers.jsonl"]);
+        assert!(target.is_dir(), "failed replace must preserve the target");
     }
 
     #[test]
