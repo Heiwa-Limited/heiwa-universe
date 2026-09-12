@@ -294,6 +294,7 @@ mod tests {
                 supports_audio: false,
                 cost_per_1k_input: 0.0,
                 cost_per_1k_output: 0.0,
+                price_truth: crate::registry::PriceTruth::Known,
                 inventory_truth: crate::registry::InventoryTruth::Verified,
             })
             .collect();

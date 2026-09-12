@@ -105,6 +105,24 @@ pub enum InventoryTruth {
     UserConfigured,
 }
 
+/// Whether Heiwa actually knows this model's per-token rates.
+///
+/// `cost_per_1k_*` is a bare `f64`, so "free" and "not published" are the
+/// same number. They are not the same fact. A local model at 0.0 really is
+/// free; a model from `GET /v1/models` at 0.0 just means the list endpoint
+/// does not carry pricing. Routing on the raw number makes the second kind
+/// look like the cheapest thing available.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum PriceTruth {
+    /// Rates came from a source that publishes them (static catalog, local
+    /// runtime, operator config). `cost_per_1k_*` is authoritative.
+    Known,
+    /// No published rate. `cost_per_1k_*` is a placeholder, not a price.
+    #[default]
+    Unknown,
+}
+
 /// A model detected or configured for a specific provider account.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DetectedModel {
@@ -147,6 +165,15 @@ pub struct DetectedModel {
 
     /// Cost per 1K output tokens (0.0 for local models).
     pub cost_per_1k_output: f64,
+
+    /// Whether `cost_per_1k_*` is a real rate or a placeholder.
+    ///
+    /// Missing evidence defaults to [`PriceTruth::Unknown`]. Older registries
+    /// used zero for both free models and undiscovered cloud rates; loading
+    /// them cannot establish a budget-safe price. Discovery or explicit
+    /// operator configuration must establish known rates, including free ones.
+    #[serde(default)]
+    pub price_truth: PriceTruth,
 
     /// How this model information was obtained.
     pub inventory_truth: InventoryTruth,
@@ -541,6 +568,7 @@ mod tests {
                     supports_audio: false,
                     cost_per_1k_input: 0.0008,
                     cost_per_1k_output: 0.004,
+                    price_truth: PriceTruth::Known,
                     inventory_truth: InventoryTruth::Verified,
                 },
                 DetectedModel {
@@ -557,6 +585,7 @@ mod tests {
                     supports_audio: false,
                     cost_per_1k_input: 0.003,
                     cost_per_1k_output: 0.015,
+                    price_truth: PriceTruth::Known,
                     inventory_truth: InventoryTruth::Verified,
                 },
             ],
@@ -583,6 +612,7 @@ mod tests {
                 supports_audio: false,
                 cost_per_1k_input: 0.0,
                 cost_per_1k_output: 0.0,
+                price_truth: PriceTruth::Known,
                 inventory_truth: InventoryTruth::Verified,
             }],
         });

@@ -33,9 +33,11 @@
     <main>
       <section class="hero compact">
         <p class="eyebrow">Public topology</p>
-        <h1>GitHub Pages for public shells, local runtime for operator work</h1>
+        <h1>Public pages at the edge, operator work on your machine</h1>
         <p class="lede">
-          <code>heiwa.ltd</code>, <code>status.heiwa.ltd</code>, and <code>docs.heiwa.ltd</code> publish through GitHub Pages with Cloudflare DNS only.
+          <code>heiwa.ltd</code> publishes the public shell and installer through Cloudflare Pages.
+          <code>docs.heiwa.ltd</code> publishes documentation through GitHub Pages, with Cloudflare DNS.
+          <code>status.heiwa.ltd</code> serves the same public shell, including its static status page at <code>/status.html</code>.
           Public helper paths may exist for status or install delivery, but operator sessions and runtime control stay
           off the hosted domain map. This page shows the public-safe routing intent only.
         </p>
@@ -44,7 +46,7 @@
       <section class="panel domain-controls">
         <div>
           <h2>Domain manifest</h2>
-          <p class="muted">Generated from the canonical public domain plan.</p>
+          <p class="muted">Maintained alongside the public domain plan; routing intent does not establish live health.</p>
         </div>
         <button id="refresh-domains" class="btn btn-solid" type="button">Refresh</button>
       </section>
@@ -57,8 +59,9 @@
           <p class="muted mono">Source: <span id="manifest-source">pending</span></p>
         </div>
         <div class="callout-metrics">
-          <div><span>DNS / WAF</span><strong id="platform-dns">-</strong></div>
-          <div><span>Public web</span><strong id="platform-web">-</strong></div>
+          <div><span>DNS</span><strong id="platform-dns">-</strong></div>
+          <div><span>Public shell</span><strong id="platform-web">-</strong></div>
+          <div><span>Public docs</span><strong id="platform-docs">-</strong></div>
           <div><span>Control plane</span><strong id="platform-control">-</strong></div>
         </div>
       </section>

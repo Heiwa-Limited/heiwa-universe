@@ -46,12 +46,17 @@ same authority.
 | ----------------- | ------------------------------------------------------------------------------------------------- |
 | GitHub repository | Canonical source code, tags, CI evidence, release artifacts, checksums, and install scripts       |
 | GitHub Releases   | Canonical binary/archive distribution and version provenance                                      |
-| Cloudflare        | Public edge, docs, install landing pages, update manifest cache, status, and future remote attach |
+| GitHub Pages      | Public documentation at `docs.heiwa.ltd`                                                          |
+| Cloudflare        | DNS, static public shell, install landing pages, and installer script delivery                    |
 | Local machine     | Installed binary, local config, provider auth, local state, and user-approved side effects        |
 
 Cloudflare may front or cache install/update material, but it must point back to
 GitHub release identity and checksums. Cloudflare must not become a second
 source of binary truth.
+
+Update-manifest caching, edge status services, and remote attachment remain
+future capabilities requiring their own implementation and verification. A
+static public deployment does not establish them.
 
 GitHub Releases are the authoritative public install and update path, including
 on the operator MacBook. Local checkout promotion (`heiwa app update --source
@@ -81,7 +86,9 @@ Default behavior:
 1. Detect update or restart requirement.
 2. Classify active work as `none`, `pausable`, or `blocking`.
 3. Prompt the operator with target version, source, expected downtime, active tasks, and rollback path.
-4. Apply update/restart only after approval.
+4. Apply update/restart within the user's authorization. A request that already
+   includes the installed update/restart is sufficient; do not ask again for
+   the same action. Verify active-work safety immediately before applying it.
 5. Emit an evidence receipt with before/after versions and task handling.
 
 Optional auto-restart is allowed only when explicitly enabled and one of these
@@ -93,6 +100,10 @@ conditions holds:
 Auto-restart must not run while a provider subprocess, file mutation, network
 mutation, payment, booking, message send, or credential operation is in flight.
 Those cases require an approval prompt.
+
+If existing authorization explicitly covers interrupting that active work,
+follow it and record the disposition. Otherwise stage the restart until the
+work completes or the operator decides how it should be handled.
 
 Pause-before-restart must:
 
@@ -373,6 +384,37 @@ git status --porcelain=v1 -uall
 Report remaining dirty files honestly, separating agent changes from
 pre-existing or peer-agent changes.
 
+## Codex CLI result contract
+
+The subscription adapter wraps provider-owned `codex exec --json`. It forwards
+completed assistant message items and preserves token/cache usage from
+`turn.completed`. Intermediate item snapshots, reasoning, tool output, and
+stderr progress are not assistant text. Stderr is discarded so an unread
+diagnostic pipe cannot block the provider.
+
+A completion event and a successful child exit are both required for success.
+`turn.failed`, `error`, nonzero exit, invalid JSONL/UTF-8, and EOF without a
+completion produce one normalized error instead of an empty successful answer.
+Consumer cancellation stops and reaps the child even while stdout is idle or
+the adapter is waiting for process exit. Supervisor cancellation retains the
+shared `kill_on_drop` safeguard. Prompt arguments are separated from CLI flags.
+
+Verify without provider credentials or inference:
+
+```bash
+cargo test -p heiwa-provider --locked --test codex_cli
+```
+
+The fixtures exercise the public adapter with disposable CLI processes and
+isolated environment/state roots. They establish transport behavior, not live
+account entitlement, model availability, native session continuation, or tool
+effect receipts. Model selection remains with the existing routing/account
+contracts.
+
+Source: [Codex non-interactive JSONL contract](https://learn.chatgpt.com/docs/non-interactive-mode).
+This applies the [latest-model guide](https://developers.openai.com/api/docs/guides/latest-model)
+to the existing CLI integration; it does not claim a Responses API migration.
+
 ## Model Tier Matrix
 
 | Lane                      | Preferred candidates when eligible | Other eligible candidates       | Notes                                                    |
@@ -398,5 +440,7 @@ heiwa providers
 curl -fsS http://127.0.0.1:7474/status/health
 ```
 
-The runtime is not ready for public access until the localhost checks pass and
-Cloudflare is explicitly re-enabled with fresh targets.
+The installed runtime stays local. Public release readiness requires current
+GitHub CI and certification, verified release assets, and a successful static
+installer deployment with public install checks. A reachable localhost runtime
+proves only that local surface.

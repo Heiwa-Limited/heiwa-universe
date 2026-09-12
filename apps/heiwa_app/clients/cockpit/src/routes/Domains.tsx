@@ -27,8 +27,9 @@ export default function DomainsRoute(): JSX.Element {
           <p class="eyebrow">Current view</p>
           <h2>{manifest.root_domain}</h2>
           <p class="section-copy">
-            DNS on {humanLabel(manifest.platform.dns)}, public web on{" "}
-            {humanLabel(manifest.platform.public_web)}, and control plane on{" "}
+            DNS on {humanLabel(manifest.platform.dns)}, public shell on{" "}
+            {humanLabel(manifest.platform.public_shell)}, docs on{" "}
+            {humanLabel(manifest.platform.public_docs)}, and control plane on{" "}
             {humanLabel(manifest.platform.control_plane)}.
           </p>
         </div>

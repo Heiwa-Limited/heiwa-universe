@@ -75,6 +75,10 @@ require_match ".github/workflows/release.yml" 'git merge-base --is-ancestor "\$c
 require_match ".github/workflows/release.yml" 'actions/workflows/\$\{workflow_file\}/runs\?event=push&branch=main&head_sha=\$\{RELEASE_COMMIT\}' "release publication must query required workflows at the tagged commit"
 require_match ".github/workflows/release.yml" 'required_workflows=\(ci\.yml certification\.yml\)' "release publication must require fast CI and full certification"
 require_match ".github/workflows/release.yml" 'if \[\[ "\$conclusion" != "success" \]\]' "release publication must reject failed main certification"
+require_block_match ".github/workflows/pages.yml" \
+  '^  build:' '^  deploy:' \
+  'uv run --locked --extra docs python -m mkdocs build --strict' \
+  "published docs must use the verified lockfile and strict build"
 require_file ".github/workflows/certification.yml"
 require_match ".github/workflows/certification.yml" '^name: Heiwa Certification$' "heavy release proofs must use the certification workflow"
 require_no_match ".github/workflows/ci.yml" 'name: (Lance Backend Certification|Desktop Shell Certification|Cross-Platform Rust Compilation|Multi-Ecosystem Security Certification)' "heavy release proofs must stay out of sub-minute CI"
@@ -88,8 +92,8 @@ require_match ".github/workflows/ci.yml" 'name: Rust Source Policy' "main branch
 require_block_match ".github/workflows/ci.yml" \
   '^  rust-source-policy:' \
   '^    runs-on:' \
-  'needs: \[rust-tests, rust-static, desktop-app\]' \
-  "the Rust Source Policy context must aggregate every Rust promotion lane"
+  'needs: \[rust-tests, rust-static, desktop-app, python-tests\]' \
+  "the Rust Source Policy context must aggregate every runtime promotion lane"
 require_block_match ".github/workflows/ci.yml" \
   '^  rust-source-policy:' \
   '^    runs-on:' \
@@ -103,6 +107,14 @@ require_block_match ".github/workflows/ci.yml" \
   '^  lint:' \
   '"\$DESKTOP_APP_RESULT" != "success"' \
   "the Rust Source Policy context must fail when the Desktop App lane fails"
+require_block_match ".github/workflows/ci.yml" \
+  '^  rust-source-policy:' '^  lint:' \
+  '"\$PYTHON_TESTS_RESULT" != "success"' \
+  "the required aggregate must fail when Python Tests fail or are skipped"
+require_block_match ".github/workflows/ci.yml" \
+  '^  python-tests:' '^  lint:' \
+  'bash scripts/check_python_sidecar\.sh' \
+  "PR CI must use the shared frozen sidecar checks"
 # Scope each command to the job that must own it. A whole-file `require_match`
 # would still pass if a command drifted from one Rust lane into the other, which
 # would silently change what each required context actually proves.
@@ -163,6 +175,7 @@ require_match "scripts/configure_public_installer_edge.sh" '^zone_name=.*heiwa\.
 require_match "scripts/configure_public_installer_edge.sh" 'uri\.path in \{\\"/install\\" \\"/install\.sh\\"\}' "installer edge exception must stay scoped to the two public installer paths"
 require_match "scripts/check_public_installer_edge.sh" '^installer_url=.*https://heiwa\.ltd/install' "installer edge check must target the public installer"
 bash scripts/tests/test_check_public_installer_edge.sh
+bash scripts/tests/test_public_install_smoke.sh
 require_block_match ".github/workflows/release.yml" \
   'ARCHIVE_EXT.*zip.*then' \
   '^[[:space:]]*else$' \

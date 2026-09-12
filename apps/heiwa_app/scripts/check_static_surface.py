@@ -37,11 +37,15 @@ def check_domain_manifest(path: Path) -> list[str]:
     problems: list[str] = []
     data = json.loads(read_text(path))
 
-    public_web = data.get("platform", {}).get("public_web")
-    if public_web != "github_pages":
-        problems.append(f"{path}: expected platform.public_web to be 'github_pages', got {public_web!r}")
-
     platform = data.get("platform", {})
+    if "public_web" in platform:
+        problems.append(f"{path}: obsolete platform.public_web; declare public_shell and public_docs separately")
+    for field, expected in (("public_shell", "cloudflare_pages"), ("public_docs", "github_pages")):
+        if platform.get(field) != expected:
+            problems.append(
+                f"{path}: expected platform.{field} to be {expected!r}, got {platform.get(field)!r}"
+            )
+
     if platform.get("state_ledger") != "local_jsonl":
         problems.append(
             f"{path}: expected platform.state_ledger to be 'local_jsonl', got {platform.get('state_ledger')!r}"
@@ -144,6 +148,7 @@ def main() -> int:
             WEB_ROOT / "governance.html",
             "installed local runtime",
             "GitHub Pages",
+            "Cloudflare Pages",
             "Cloudflare DNS",
             "Local JSONL + Lance",
         )
@@ -152,6 +157,7 @@ def main() -> int:
         require_contains(
             WEB_ROOT / "domains.html",
             "GitHub Pages",
+            "Cloudflare Pages",
             "Cloudflare DNS",
             "public-safe routing intent only",
             "status.heiwa.ltd",

@@ -24,6 +24,7 @@ fn multi_account_per_provider() {
             supports_audio: false,
             cost_per_1k_input: 0.003,
             cost_per_1k_output: 0.015,
+            price_truth: PriceTruth::Known,
             inventory_truth: InventoryTruth::Verified,
         }],
     });
@@ -50,6 +51,7 @@ fn multi_account_per_provider() {
             supports_audio: false,
             cost_per_1k_input: 0.003,
             cost_per_1k_output: 0.015,
+            price_truth: PriceTruth::Known,
             inventory_truth: InventoryTruth::Inferred,
         }],
     });
@@ -97,6 +99,7 @@ fn ollama_local_account() {
                 supports_audio: false,
                 cost_per_1k_input: 0.0,
                 cost_per_1k_output: 0.0,
+                price_truth: PriceTruth::Known,
                 inventory_truth: InventoryTruth::Verified,
             },
             DetectedModel {
@@ -113,6 +116,7 @@ fn ollama_local_account() {
                 supports_audio: false,
                 cost_per_1k_input: 0.0,
                 cost_per_1k_output: 0.0,
+                price_truth: PriceTruth::Known,
                 inventory_truth: InventoryTruth::Verified,
             },
         ],
@@ -149,6 +153,7 @@ fn disconnected_accounts_excluded_from_models() {
             supports_audio: false,
             cost_per_1k_input: 0.001,
             cost_per_1k_output: 0.002,
+            price_truth: PriceTruth::Known,
             inventory_truth: InventoryTruth::Verified,
         }],
     });
