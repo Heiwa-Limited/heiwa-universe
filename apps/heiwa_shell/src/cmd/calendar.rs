@@ -120,6 +120,18 @@ pub(crate) fn apple_calendar_resources_payload() -> Result<Value> {
     }
     crate::cmd::connectors::require_apple_calendar_connection()?;
     let calendars = crate::cmd::calendar_apple::list_calendars()?;
+    let reader_available = !calendars.is_empty()
+        && calendars.iter().all(|calendar| {
+            calendar
+                .get("id")
+                .and_then(Value::as_str)
+                .is_some_and(|id| !id.is_empty())
+        });
+    let detail = if reader_available {
+        "Choose calendars to read existing events into this workspace."
+    } else {
+        "Calendar.app is connected for local writes. Stable calendar IDs are unavailable in the background runtime; use `heiwa calendar calendars --json` and `heiwa calendar read-selected` from an interactive shell to import existing events."
+    };
     Ok(json!({
         "source": "apple_calendar",
         "status": "ready",
@@ -130,8 +142,8 @@ pub(crate) fn apple_calendar_resources_payload() -> Result<Value> {
         },
         "calendars": calendars,
         "selected_ids": super::calendar_read::selected_ids()?,
-        "reader_available": super::calendar_read::helper_path().is_some(),
-        "detail": "Choose calendars to read existing events into this workspace.",
+        "reader_available": reader_available,
+        "detail": detail,
         "revoke": {
             "owner": "macOS",
             "path": "System Settings > Privacy & Security > Automation > heiwa > Calendar",

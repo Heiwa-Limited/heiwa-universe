@@ -49,6 +49,17 @@ esac
     path
 }
 
+fn fixture_failing_eventkit_helper(root: &Path) -> PathBuf {
+    let path = root.join("fixture-eventkit-helper");
+    fs::write(&path, "#!/bin/sh\nexit 1\n").expect("write failing EventKit fixture");
+    let mut permissions = fs::metadata(&path)
+        .expect("failing helper metadata")
+        .permissions();
+    permissions.set_mode(0o700);
+    fs::set_permissions(&path, permissions).expect("make failing helper executable");
+    path
+}
+
 struct ChildGuard(Child);
 
 impl Drop for ChildGuard {
@@ -226,6 +237,33 @@ impl Fixture {
             String::from_utf8_lossy(&output.stderr)
         );
     }
+}
+
+#[test]
+fn background_runtime_falls_back_to_calendar_app_discovery_when_eventkit_helper_fails() {
+    let fixture = Fixture::new();
+    fixture.connect_apple_calendar_cli();
+    let helper = fixture_failing_eventkit_helper(fixture._root.path());
+    let port = available_port();
+    let child = fixture
+        .heiwa()
+        .env("HEIWA_APPLE_RESOURCES_HELPER", &helper)
+        .env("HEIWA_MACHINE_AUTH_TOKEN", "apple-connector-test-token")
+        .args(["app", "start", "--port", &port.to_string(), "--no-open"])
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .spawn()
+        .expect("start temporary runtime");
+    let _child = ChildGuard(child);
+    wait_for_runtime(port);
+
+    let resources = response_json(&get(port, "/api/v1/calendar/resources"));
+    assert_eq!(resources["data"]["status"], "ready");
+    assert_eq!(resources["data"]["reader_available"], false);
+    assert_eq!(resources["data"]["calendars"][0]["name"], "Calendar");
+    assert!(resources["data"]["detail"]
+        .as_str()
+        .is_some_and(|detail| detail.contains("Stable calendar IDs are unavailable")));
 }
 
 #[test]
