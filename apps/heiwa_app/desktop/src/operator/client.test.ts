@@ -460,7 +460,7 @@ describe("OperatorClient", () => {
     expect(client.state()).toEqual({ status: "ready", error: null });
   });
 
-  it("rejects a different-thread start without mutating the active client", async () => {
+  it("switches a different thread without retaining the old projection", async () => {
     const callbacks: Array<(frame: OperatorFrame) => void> = [];
     const subscription = deferred<void>();
     const subscribe = vi.fn((_threadId: string, _after: string | null, onFrame: (frame: OperatorFrame) => void) => {
@@ -473,12 +473,13 @@ describe("OperatorClient", () => {
 
     await client.start("old thread");
     await flushAsyncWork();
-    await expect(client.start("new thread")).rejects.toThrow("operator_client_already_started");
+    await client.start("new thread");
+    await flushAsyncWork();
     callbacks[0]!(eventFrame(1, "old thread"));
 
-    expect(get).toHaveBeenCalledOnce();
-    expect(subscribe).toHaveBeenCalledOnce();
-    expect(store.snapshot().messages.map((message) => message.threadId)).toEqual(["old thread"]);
+    expect(get).toHaveBeenCalledTimes(2);
+    expect(subscribe).toHaveBeenCalledTimes(2);
+    expect(store.snapshot().messages).toEqual([]);
     expect(client.state()).toEqual({ status: "ready", error: null });
     subscription.resolve();
   });
@@ -705,4 +706,54 @@ describe("OperatorClient", () => {
     expect(onError).toHaveBeenCalledWith("operator_stream_unavailable");
     expect(JSON.stringify(client.state())).not.toContain("stream-token-secret");
   });
+
+  it("retries the same session after a history failure", async () => {
+    let attempts = 0;
+    const get = vi.fn(async () => {
+      attempts += 1;
+      if (attempts === 1) throw new Error("offline");
+      return history([], null);
+    });
+    const client = new OperatorClient(new OperatorStore(), dependencies({ get }));
+    await client.start("retry");
+    expect(client.state()).toEqual({ status: "error", error: "operator_history_unavailable" });
+    await client.start("retry");
+    expect(get).toHaveBeenCalledTimes(2);
+    expect(client.state()).toEqual({ status: "ready", error: null });
+  });
+
+  it("switches sessions by aborting observation and ignores late frames and acknowledgements", async () => {
+    const callbacks: Array<(frame: OperatorFrame) => void> = [];
+    const signals: AbortSignal[] = [];
+    const firstPost = deferred<OperatorTurnSubmissionResponse>();
+    const get = vi.fn(async (path: string) => history([eventFrame(path.includes("second") ? 2 : 1, path.includes("second") ? "second" : "first")], null));
+    const subscribe = vi.fn((_threadId: string, _after: string | null, onFrame: (frame: OperatorFrame) => void, signal?: AbortSignal) => {
+      callbacks.push(onFrame);
+      if (signal) signals.push(signal);
+      return new Promise<void>(() => undefined);
+    });
+    const client = new OperatorClient(new OperatorStore(), dependencies({ get, subscribe, post: vi.fn(() => firstPost.promise) }));
+
+    await client.start("first");
+    await flushAsyncWork();
+    const pending = client.submitTurn("keep running");
+    await client.start("second");
+    await flushAsyncWork();
+    callbacks[0]!({ type: "assistant_delta", thread_id: "first", turn_id: "turn-1", text: "must not cross" });
+    firstPost.resolve({ ok: true, data: { thread_id: "first", turn_id: "turn-1", cursor: "1", duplicate: false, stream_url: "/ws" } });
+    await pending;
+
+    expect(signals[0]?.aborted).toBe(true);
+    expect(client.state()).toEqual({ status: "ready", error: null });
+  });
+  it("clears the visible conversation when its observation is disposed", async () => {
+    const store = new OperatorStore();
+    const client = new OperatorClient(store, dependencies({ get: async () => history([eventFrame(1)], null) }));
+    await client.start("team & ops");
+    expect(store.snapshot()).not.toEqual(new OperatorStore().snapshot());
+    client.dispose();
+    expect(store.snapshot()).toEqual(new OperatorStore().snapshot());
+    expect(client.state()).toEqual({ status: "idle", error: null });
+  });
+
 });

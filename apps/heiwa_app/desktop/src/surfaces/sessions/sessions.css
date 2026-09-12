@@ -1,0 +1,19 @@
+.catalog-view { width: 100%; max-width: 1060px; margin: 0 auto; gap: 0; }
+.catalog-heading { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: end; gap: 20px; margin: 12px 0 32px; }
+.catalog-heading p { margin-bottom: 10px; color: var(--content-muted); font-size: 13px; }
+.catalog-heading h1 { font-size: 32px; font-weight: 500; letter-spacing: -0.04em; }
+.catalog-heading label { display: flex; align-items: center; gap: 8px; width: 230px; height: 36px; padding: 0 10px; border: 1px solid var(--border-subtle); border-radius: 7px; background: var(--surface-input); color: var(--content-muted); }
+.catalog-heading input { width: 100%; min-width: 0; font-size: 13px; }
+.catalog-heading > span { color: var(--content-secondary); font-size: 13px; }
+.catalog-row { display: flex; align-items: center; gap: 14px; width: 100%; min-height: 68px; padding: 14px 4px; border-bottom: 1px solid var(--border-subtle); text-align: left; }
+.catalog-row:hover { background: var(--surface-raised); }
+.catalog-row span:nth-child(2) { display: grid; gap: 4px; flex: 1; min-width: 0; }
+.catalog-row strong { font-size: 15px; font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.catalog-row small { color: var(--content-secondary); font-size: 13px; }
+.catalog-icon { display: grid; place-items: center; width: 34px; height: 34px; border-radius: 9px; background: var(--surface-overlay); color: var(--content-secondary); flex-shrink: 0; }
+.catalog-empty { padding: 24px 0; color: var(--content-secondary); font-size: 14px; }
+
+.catalog-heading-actions { display: flex; align-items: center; gap: 14px; color: var(--content-secondary); font-size: 13px; }
+.catalog-new-project { display: flex; align-items: center; gap: 6px; min-height: 36px; padding: 6px 10px; border: 1px solid var(--border-subtle); border-radius: 7px; }
+.catalog-row-main { display: flex; align-items: center; gap: 14px; flex: 1; min-width: 0; text-align: left; }
+.catalog-row-main > span:nth-child(2) { display: grid; gap: 4px; flex: 1; min-width: 0; }

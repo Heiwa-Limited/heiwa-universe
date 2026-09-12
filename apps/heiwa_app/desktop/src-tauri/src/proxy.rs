@@ -64,15 +64,27 @@ pub struct RuntimeHealth {
 }
 
 pub(crate) fn runtime_base_url() -> Result<String, ProxyError> {
+    Ok(format!("http://127.0.0.1:{}", runtime_port()?))
+}
+
+pub(crate) fn runtime_port() -> Result<u16, ProxyError> {
     let configured = match env::var("HEIWA_APP_PORT") {
         Ok(value) => Some(value),
         Err(env::VarError::NotPresent) => None,
         Err(env::VarError::NotUnicode(_)) => return Err(ProxyError::InvalidEndpoint),
     };
-    runtime_base_url_from_port(configured.as_deref())
+    parse_runtime_port(configured.as_deref())
 }
 
+#[cfg(test)]
 fn runtime_base_url_from_port(configured: Option<&str>) -> Result<String, ProxyError> {
+    Ok(format!(
+        "http://127.0.0.1:{}",
+        parse_runtime_port(configured)?
+    ))
+}
+
+fn parse_runtime_port(configured: Option<&str>) -> Result<u16, ProxyError> {
     let raw = configured.unwrap_or(DEFAULT_RUNTIME_PORT);
     if raw.is_empty() || !raw.bytes().all(|byte| byte.is_ascii_digit()) {
         return Err(ProxyError::InvalidEndpoint);
@@ -82,7 +94,7 @@ fn runtime_base_url_from_port(configured: Option<&str>) -> Result<String, ProxyE
         .ok()
         .filter(|port| *port != 0)
         .ok_or(ProxyError::InvalidEndpoint)?;
-    Ok(format!("http://127.0.0.1:{port}"))
+    Ok(port)
 }
 
 pub(crate) fn runtime_websocket_base_url() -> Result<String, ProxyError> {

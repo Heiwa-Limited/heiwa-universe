@@ -363,13 +363,25 @@ fn stream_api_error(error: OperatorStreamError) -> crate::proxy::ApiErrorPayload
 
 #[tauri::command]
 pub async fn operator_subscribe(
+    window: tauri::WebviewWindow,
+    subscriptions: tauri::State<'_, crate::operator_subscriptions::OperatorSubscriptions>,
     thread_id: String,
     after: Option<String>,
+    subscription_id: Option<String>,
     on_event: tauri::ipc::Channel<Value>,
 ) -> Result<(), crate::proxy::ApiErrorPayload> {
+    let id = subscription_id.unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
+    let mut lease = subscriptions
+        .register(window.label(), &id)
+        .map_err(crate::proxy::ApiErrorPayload::InvalidPath)?;
+    if *lease.cancelled.borrow() {
+        return Ok(());
+    }
     let token = crate::proxy::machine_auth_token().map_err(crate::proxy::ApiErrorPayload::from)?;
-    subscribe_with_auth_and_backoff(
-        &crate::proxy::runtime_websocket_base_url().map_err(crate::proxy::ApiErrorPayload::from)?,
+    let base =
+        crate::proxy::runtime_websocket_base_url().map_err(crate::proxy::ApiErrorPayload::from)?;
+    let stream = subscribe_with_auth_and_backoff(
+        &base,
         &thread_id,
         after.as_deref(),
         &token,
@@ -379,9 +391,23 @@ pub async fn operator_subscribe(
                 .map_err(|_| OperatorStreamError::ReceiverClosed)
         },
         &RECONNECT_BACKOFF,
-    )
-    .await
-    .map_err(stream_api_error)
+    );
+    tokio::select! {
+        biased;
+        _ = lease.cancelled.changed() => Ok(()),
+        result = stream => result.map_err(stream_api_error),
+    }
+}
+
+#[tauri::command]
+pub fn operator_unsubscribe(
+    window: tauri::WebviewWindow,
+    subscriptions: tauri::State<'_, crate::operator_subscriptions::OperatorSubscriptions>,
+    subscription_id: String,
+) -> Result<(), crate::proxy::ApiErrorPayload> {
+    subscriptions
+        .cancel(window.label(), &subscription_id)
+        .map_err(crate::proxy::ApiErrorPayload::InvalidPath)
 }
 
 #[cfg(test)]

@@ -1,9 +1,19 @@
 # HEIWA
 
-Updated: 2026-09-07
+Updated: 2026-09-12
 Status: Canonical truth for `heiwa-universe`
 
 This file replaces the old repo-root compatibility shim. When `README.md`, legacy plans, or older architecture notes conflict with this document, this document wins.
+
+## Current desktop product direction
+
+The current delivery target is an installable macOS 27 chat and work home for
+any user, with TypeScript and/or Swift presentation and Rust runtime authority.
+The [macOS 27 product contract](docs/macos27-product-contract.md) defines this
+direction and its acceptance criteria. It supersedes older personal-operator,
+dashboard, and single-conversation product descriptions below; those descriptions
+are historical implementation context, not limits on the requested product.
+This direction does not claim that every target capability is implemented.
 
 > **Backend (since the 2026-07-15 pivot): Lance + GitHub.** SpacetimeDB,
 > Railway, and hosted runtime backends are retired; the STDB code paths were

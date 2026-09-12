@@ -216,6 +216,12 @@ export type UpdateOffer = {
   notes?: string | null;
 };
 
+export type AppleMailScanResult = {
+  fetched: number;
+  appended: number;
+  deduplicated: number;
+};
+
 export async function runtimeHealth(): Promise<RuntimeHealth> {
   return invoke<RuntimeHealth>("runtime_health");
 }
@@ -243,6 +249,16 @@ export async function installUpdate(): Promise<void> {
   return invoke<void>("update_install");
 }
 
+export async function readAppleMail(): Promise<AppleMailScanResult> {
+  try {
+    return await invoke<AppleMailScanResult>("apple_mail_scan");
+  } catch (cause) {
+    if (cause instanceof Error) throw cause;
+    if (typeof cause === "string") throw new Error(cause);
+    throw new Error("Apple Mail could not be read.");
+  }
+}
+
 export async function apiGet<T>(path: string): Promise<T> {
   return invoke<T>("api_get", { path });
 }
@@ -255,9 +271,23 @@ export async function operatorSubscribe(
   threadId: string,
   after: string | null,
   onFrame: (frame: OperatorFrame) => void,
+  signal?: AbortSignal,
 ): Promise<void> {
+  if (signal?.aborted) return;
+  const subscriptionId = crypto.randomUUID();
   const onEvent = new Channel<OperatorFrame>(onFrame);
-  return invoke<void>("operator_subscribe", { threadId, after, onEvent });
+  let settled = false;
+  const unsubscribe = () => {
+    if (settled) return;
+    void invoke<void>("operator_unsubscribe", { subscriptionId }).catch(() => undefined);
+  };
+  signal?.addEventListener("abort", unsubscribe, { once: true });
+  try {
+    await invoke<void>("operator_subscribe", { threadId, after, onEvent, subscriptionId });
+  } finally {
+    settled = true;
+    signal?.removeEventListener("abort", unsubscribe);
+  }
 }
 
 export async function dispatchSubagent(req: SubagentDispatchRequest): Promise<SubagentDispatchResponse> {

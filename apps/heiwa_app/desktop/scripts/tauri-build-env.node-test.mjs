@@ -8,7 +8,16 @@ import {
   normalizeBuildArgs,
   resolveTauriBuildEnv,
   tauriBuildInvocation,
+  assertBundledRuntime,
 } from "./tauri-build-env.mjs";
+
+test("packaging refuses missing, empty, non-file, and non-executable runtimes", () => {
+  for (const file of [null, { isFile: true, size: 0, mode: 0o755 }, { isFile: false, size: 1, mode: 0o755 }, { isFile: true, size: 1, mode: 0o644 }]) {
+    assert.throws(() => assertBundledRuntime("/repo/desktop", "darwin", () => file), /Missing usable bundled runtime/);
+  }
+  assert.equal(assertBundledRuntime("/repo/desktop", "darwin", () => ({ isFile: true, size: 123, mode: 0o755 })), "/repo/desktop/src-tauri/resources/heiwa");
+  assert.equal(assertBundledRuntime("/repo/desktop", "win32", () => ({ isFile: true, size: 123, mode: 0o644 })), "/repo/desktop/src-tauri/resources/heiwa.exe");
+});
 
 test("non-macOS builds preserve the caller environment", () => {
   const env = { PATH: "/usr/bin", RUSTFLAGS: "-C debuginfo=1" };
@@ -43,6 +52,20 @@ test("Apple Silicon builds use Rust's bundled Mach-O linker", () => {
       RUSTFLAGS: "-C debuginfo=1 -C linker-flavor=ld64.lld",
     },
   );
+});
+
+test("macOS 27 SDK uses Apple clang because bundled LLD cannot parse arm64e.x1 TAPI", () => {
+  const env = { PATH: "/usr/bin", RUSTFLAGS: "-C debuginfo=1" };
+  assert.deepEqual(resolveTauriBuildEnv({
+    platform: "darwin", arch: "arm64", env,
+    sdkVersion: "27.0", appleClang: "/Library/Developer/CommandLineTools/usr/bin/clang",
+    rustSysroot: "/rust", pathExists: () => true,
+  }), {
+    ...env,
+    CARGO_TARGET_AARCH64_APPLE_DARWIN_LINKER: "/Library/Developer/CommandLineTools/usr/bin/clang",
+    CARGO_PROFILE_RELEASE_STRIP: "none",
+    CARGO_PROFILE_RELEASE_BUILD_OVERRIDE_STRIP: "none",
+  });
 });
 
 test("an explicit Apple linker override remains authoritative", () => {

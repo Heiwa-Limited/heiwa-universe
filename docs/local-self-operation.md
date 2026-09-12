@@ -215,11 +215,20 @@ runtime changed. `--dry-run` is the default probe. Use
 `heiwa app update --source checkout` only for developer reinstall from the
 current checkout.
 
-On Apple Silicon, checkout update dry-runs report
-`cargo_environment.strategy: rust_bundled_macho_linker` and the executed
-`cargo install` resolves `rust-lld` from the active pinned Rust sysroot. An
-explicit non-empty `CARGO_TARGET_AARCH64_APPLE_DARWIN_LINKER` remains
-authoritative and is reported as `operator_override`.
+On Apple Silicon, the standalone checkout installer selects Rust's bundled
+Mach-O linker unless the operator supplies an explicit non-empty
+`CARGO_TARGET_AARCH64_APPLE_DARWIN_LINKER`. The desktop build script detects the
+selected SDK: SDK 27 uses its Apple clang driver and disables the affected
+release stripping paths; older SDKs use bundled `rust-lld`. When updating from a
+SDK 27 checkout, carry that same build environment into the installer so the
+standalone and bundled runtimes use compatible toolchains.
+
+For a development request to update from latest GitHub `main`, fetch `main`,
+verify a clean checkout at that remote commit, build the coherent bundle below,
+and use `heiwa app update --source checkout`. Recheck active work immediately
+before installation and verify installed hashes, runtime identity, and health
+afterward. Record the commit and rollback copy. This does not publish a release
+or change the public updater's GitHub Releases authority.
 
 Build a coherent local macOS `.app` before checkout promotion with:
 
@@ -229,8 +238,8 @@ npm --prefix apps/heiwa_app/desktop run tauri:build:app
 
 That command builds and stages the current checkout's release `heiwa` binary,
 isolates it from the case-folded `Heiwa` desktop output, disables
-updater-artifact signing for the local-only bundle, and uses Rust's bundled
-Mach-O linker on Apple Silicon. Release builds keep updater signing on.
+updater-artifact signing for the local-only bundle, and selects the Apple SDK
+compatible linker described above. Release builds keep updater signing on.
 
 ### 4. Verify the authenticated operator stream
 

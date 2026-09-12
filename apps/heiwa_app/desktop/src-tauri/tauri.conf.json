@@ -15,15 +15,20 @@
       {
         "title": "Heiwa",
         "label": "main",
-        "width": 1440,
-        "height": 960,
-        "minWidth": 1100,
-        "minHeight": 720,
+        "width": 1280,
+        "height": 840,
+        "minWidth": 1000,
+        "minHeight": 680,
         "resizable": true,
         "fullscreen": false,
         "center": true,
         "decorations": true,
-        "transparent": false
+        "transparent": false,
+        "theme": "Dark",
+        "titleBarStyle": "Overlay",
+        "hiddenTitle": true,
+        "trafficLightPosition": { "x": 20, "y": 22 },
+        "backgroundColor": "#171a1c"
       }
     ],
     "security": {
@@ -40,11 +45,11 @@
       "deb"
     ],
     "category": "Productivity",
-    "shortDescription": "Local-first AI operator runtime",
-    "longDescription": "Heiwa is a local-first AI operating layer for intake, execution, evidence, and human life optimization.",
+    "shortDescription": "Your chat and work home",
+    "longDescription": "Heiwa brings conversations, projects, connected apps, and multiple inference providers into one local workspace.",
     "copyright": "Copyright \u00a9 2026 Heiwa Limited",
     "macOS": {
-      "minimumSystemVersion": "14.0",
+      "minimumSystemVersion": "27.0",
       "signingIdentity": "-",
       "hardenedRuntime": false
     },

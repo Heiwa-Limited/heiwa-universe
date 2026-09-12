@@ -1962,6 +1962,10 @@ fn strict_header_value(request: &str, name: &str) -> std::result::Result<Option<
 enum OperatorHttpRoute {
     Threads,
     Thread(String),
+    ThreadMetadata(String),
+    Catalog,
+    Projects,
+    ProjectMetadata(String),
     Events(String),
     Turns(String),
     Cancel(String),
@@ -1986,6 +1990,42 @@ async fn operator_http_response(
     let runner = runtime.runner;
 
     match (method, route) {
+        ("GET", OperatorHttpRoute::Catalog) => match sessions.catalog(100) {
+            Ok(catalog) => (200, json!({"ok": true, "data": catalog})),
+            Err(_) => operator_error(503, "operator_unavailable"),
+        },
+        ("POST", OperatorHttpRoute::Projects) => {
+            let parsed = match parse_project_create_request(body) {
+                Ok(request) => request,
+                Err(()) => return operator_error(400, "invalid_request"),
+            };
+            match sessions.create_project(&parsed.0, parsed.1) {
+                Ok(project) => (200, json!({"ok": true, "data": {"project": project}})),
+                Err(error) if error.to_string().contains("invalid metadata") => {
+                    operator_error(400, "invalid_request")
+                }
+                Err(_) => operator_error(503, "operator_unavailable"),
+            }
+        }
+        ("POST", OperatorHttpRoute::ProjectMetadata(project_id)) => {
+            let update = match parse_project_metadata_request(body) {
+                Ok(update) => update,
+                Err(()) => return operator_error(400, "invalid_request"),
+            };
+            match sessions.update_project_metadata(&project_id, update) {
+                Ok(project) => (200, json!({"ok": true, "data": {"project": project}})),
+                Err(error) if error.to_string().contains("unknown project") => {
+                    operator_error(404, "unknown_project")
+                }
+                Err(error)
+                    if error.to_string().contains("invalid metadata")
+                        || error.to_string().contains("empty metadata") =>
+                {
+                    operator_error(400, "invalid_request")
+                }
+                Err(_) => operator_error(503, "operator_unavailable"),
+            }
+        }
         ("GET", OperatorHttpRoute::Threads) => match sessions.list_threads(100) {
             Ok(threads) => (200, json!({"ok": true, "data": {"threads": threads}})),
             Err(_) => operator_error(503, "operator_unavailable"),
@@ -1995,21 +2035,41 @@ async fn operator_http_response(
                 Ok(parsed) => parsed,
                 Err(()) => return operator_error(400, "invalid_request"),
             };
-            let raw_id = match parsed {
-                Value::Null => format!("thread-{}", uuid::Uuid::new_v4()),
-                Value::Object(object) => match object.get("thread_id") {
-                    None => format!("thread-{}", uuid::Uuid::new_v4()),
-                    Some(Value::String(thread_id)) => thread_id.clone(),
-                    Some(_) => return operator_error(400, "invalid_request"),
-                },
+            let (raw_id, title, project_id) = match parsed {
+                Value::Null => (format!("thread-{}", uuid::Uuid::new_v4()), None, None),
+                Value::Object(object) => {
+                    let title = match parse_optional_title(&object) {
+                        Ok(title) => title,
+                        Err(()) => return operator_error(400, "invalid_request"),
+                    };
+                    let project_id = match parse_nullable_project_id(&object) {
+                        Ok(project_id) => project_id,
+                        Err(()) => return operator_error(400, "invalid_request"),
+                    };
+                    match object.get("thread_id") {
+                        None => (
+                            format!("thread-{}", uuid::Uuid::new_v4()),
+                            title,
+                            project_id,
+                        ),
+                        Some(Value::String(thread_id)) => (thread_id.clone(), title, project_id),
+                        Some(_) => return operator_error(400, "invalid_request"),
+                    }
+                }
                 _ => return operator_error(400, "invalid_request"),
             };
             let thread_id = match validate_operator_identifier(&raw_id) {
                 Ok(thread_id) => thread_id,
                 Err(()) => return operator_error(400, "invalid_id"),
             };
-            let created = match sessions.ensure_thread(&thread_id) {
+            let created = match sessions.create_thread(&thread_id, title, project_id) {
                 Ok(created) => created,
+                Err(error) if error.to_string().contains("unknown project") => {
+                    return operator_error(404, "unknown_project")
+                }
+                Err(error) if error.to_string().contains("invalid metadata") => {
+                    return operator_error(400, "invalid_request")
+                }
                 Err(_) => return operator_error(503, "operator_unavailable"),
             };
             match sessions.thread(&thread_id) {
@@ -2024,6 +2084,28 @@ async fn operator_http_response(
             Ok(thread) => (200, json!({"ok": true, "data": {"thread": thread}})),
             Err(_) => operator_error(503, "operator_unavailable"),
         },
+        ("POST", OperatorHttpRoute::ThreadMetadata(thread_id)) => {
+            let update = match parse_thread_metadata_request(body) {
+                Ok(update) => update,
+                Err(()) => return operator_error(400, "invalid_request"),
+            };
+            match sessions.update_thread_metadata(&thread_id, update) {
+                Ok(thread) => (200, json!({"ok": true, "data": {"thread": thread}})),
+                Err(error) if error.to_string().contains("unknown project") => {
+                    operator_error(404, "unknown_project")
+                }
+                Err(error) if error.to_string().contains("unknown thread") => {
+                    operator_error(404, "unknown_thread")
+                }
+                Err(error)
+                    if error.to_string().contains("invalid metadata")
+                        || error.to_string().contains("empty metadata") =>
+                {
+                    operator_error(400, "invalid_request")
+                }
+                Err(_) => operator_error(503, "operator_unavailable"),
+            }
+        }
         ("GET", OperatorHttpRoute::Events(thread_id)) => {
             let limit = match query_param(target, "limit") {
                 Some(raw) => match raw.parse::<usize>() {
@@ -2129,7 +2211,15 @@ fn parse_operator_route(path: &str) -> std::result::Result<Option<OperatorHttpRo
         return Ok(None);
     }
     match segments.as_slice() {
+        ["api", "v1", "operator", "catalog"] => Ok(Some(OperatorHttpRoute::Catalog)),
+        ["api", "v1", "operator", "projects"] => Ok(Some(OperatorHttpRoute::Projects)),
+        ["api", "v1", "operator", "projects", project_id, "metadata"] => Ok(Some(
+            OperatorHttpRoute::ProjectMetadata(decode_operator_path_id(project_id)?),
+        )),
         ["api", "v1", "operator", "threads"] => Ok(Some(OperatorHttpRoute::Threads)),
+        ["api", "v1", "operator", "threads", thread_id, "metadata"] => Ok(Some(
+            OperatorHttpRoute::ThreadMetadata(decode_operator_path_id(thread_id)?),
+        )),
         ["api", "v1", "operator", "threads", thread_id] => Ok(Some(OperatorHttpRoute::Thread(
             decode_operator_path_id(thread_id)?,
         ))),
@@ -2210,6 +2300,81 @@ fn parse_json_body(body: &str) -> std::result::Result<Value, ()> {
     } else {
         serde_json::from_str(body).map_err(|_| ())
     }
+}
+
+fn parse_optional_title(
+    object: &serde_json::Map<String, Value>,
+) -> std::result::Result<Option<String>, ()> {
+    match object.get("title") {
+        None => Ok(None),
+        Some(Value::String(title)) if !title.trim().is_empty() && title.len() <= 256 => {
+            Ok(Some(title.trim().to_string()))
+        }
+        _ => Err(()),
+    }
+}
+
+fn parse_nullable_project_id(
+    object: &serde_json::Map<String, Value>,
+) -> std::result::Result<Option<String>, ()> {
+    match object.get("project_id") {
+        None | Some(Value::Null) => Ok(None),
+        Some(Value::String(project_id)) => validate_operator_identifier(project_id).map(Some),
+        _ => Err(()),
+    }
+}
+
+fn parse_project_create_request(body: &str) -> std::result::Result<(String, String), ()> {
+    let object = parse_json_body(body)?.as_object().cloned().ok_or(())?;
+    let title = parse_optional_title(&object)?.ok_or(())?;
+    let project_id = match object.get("project_id") {
+        None => format!("project-{}", uuid::Uuid::new_v4()),
+        Some(Value::String(project_id)) => validate_operator_identifier(project_id)?,
+        _ => return Err(()),
+    };
+    Ok((project_id, title))
+}
+
+fn parse_project_metadata_request(
+    body: &str,
+) -> std::result::Result<heiwa_session::operator::ProjectMetadataUpdate, ()> {
+    let object = parse_json_body(body)?.as_object().cloned().ok_or(())?;
+    let title = parse_optional_title(&object)?;
+    let archived = match object.get("archived") {
+        None => None,
+        Some(Value::Bool(value)) => Some(*value),
+        _ => return Err(()),
+    };
+    if title.is_none() && archived.is_none() {
+        return Err(());
+    }
+    Ok(heiwa_session::operator::ProjectMetadataUpdate { title, archived })
+}
+
+fn parse_thread_metadata_request(
+    body: &str,
+) -> std::result::Result<heiwa_session::operator::ThreadMetadataUpdate, ()> {
+    let object = parse_json_body(body)?.as_object().cloned().ok_or(())?;
+    let title = parse_optional_title(&object)?;
+    let project_id = match object.get("project_id") {
+        None => None,
+        Some(Value::Null) => Some(None),
+        Some(Value::String(project_id)) => Some(Some(validate_operator_identifier(project_id)?)),
+        _ => return Err(()),
+    };
+    let archived = match object.get("archived") {
+        None => None,
+        Some(Value::Bool(value)) => Some(*value),
+        _ => return Err(()),
+    };
+    if title.is_none() && project_id.is_none() && archived.is_none() {
+        return Err(());
+    }
+    Ok(heiwa_session::operator::ThreadMetadataUpdate {
+        title,
+        project_id,
+        archived,
+    })
 }
 
 fn parse_turn_request(

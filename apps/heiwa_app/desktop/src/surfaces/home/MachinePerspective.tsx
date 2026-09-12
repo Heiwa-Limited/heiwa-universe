@@ -1,5 +1,6 @@
 import { Show } from "solid-js";
 import { useApp } from "../../state/app";
+import "./machine-perspective.css";
 
 function platformLabel(os: string | undefined): string {
   if (os === "macos") return "This Mac";

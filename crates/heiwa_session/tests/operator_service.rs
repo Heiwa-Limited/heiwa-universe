@@ -10,7 +10,7 @@ use heiwa_evidence::{
 };
 use heiwa_session::operator::{
     OperatorAppRuntimeLease, OperatorOwnershipError, OperatorSessionService, RouteMode,
-    StartTurnRequest, TurnSubmissionError,
+    StartTurnRequest, ThreadMetadataUpdate, TurnSubmissionError,
 };
 #[cfg(feature = "lance")]
 use heiwa_session::{operator_event_key, SessionSearchHit};
@@ -1912,4 +1912,145 @@ fn thread_view_reflects_turn_completed_transition() {
     let after = service.thread("default").unwrap();
     assert_eq!(after.turns.len(), 1);
     assert_eq!(after.turns[0].status, "completed");
+}
+
+#[test]
+fn catalog_projects_are_durable_without_fabricating_threads() {
+    let dir = tempfile::tempdir().unwrap();
+    let service = test_service(dir.path());
+    let project = service
+        .create_project("project-a", "Project A".to_string())
+        .unwrap();
+    assert_eq!(project.title, "Project A");
+    assert!(service.list_threads(10).unwrap().is_empty());
+
+    let restarted = test_service(dir.path());
+    let catalog = restarted.catalog(10).unwrap();
+    assert_eq!(catalog.projects, vec![project]);
+    assert!(catalog.threads.is_empty());
+    let rows = OperatorJournal::new(dir.path().to_path_buf())
+        .unwrap()
+        .read_after(None, 10)
+        .unwrap();
+    assert_eq!(rows.events.len(), 1);
+    assert_eq!(rows.events[0].event.thread_id, "project:project-a");
+}
+
+#[test]
+fn catalog_moves_archives_and_preserves_history() {
+    let dir = tempfile::tempdir().unwrap();
+    let service = test_service(dir.path());
+    service
+        .create_project("project-a", "Project A".to_string())
+        .unwrap();
+    service.create_thread("thread-a", None, None).unwrap();
+    let submitted = service
+        .start_turn(
+            "thread-a",
+            StartTurnRequest::auto("request-a", "first prompt"),
+        )
+        .unwrap();
+    service
+        .update_thread_metadata(
+            "thread-a",
+            ThreadMetadataUpdate {
+                title: Some("Renamed thread".to_string()),
+                project_id: Some(Some("project-a".to_string())),
+                archived: Some(true),
+            },
+        )
+        .unwrap();
+    let mut catalog = service.catalog(10).unwrap();
+    let summary = catalog.threads.pop().unwrap();
+    assert_eq!(summary.title.as_deref(), Some("Renamed thread"));
+    assert_eq!(summary.project_id.as_deref(), Some("project-a"));
+    assert!(summary.archived);
+    assert_eq!(
+        service.thread("thread-a").unwrap().turns[0].turn_id,
+        submitted.turn_id
+    );
+
+    // An omitted project_id during a later rename must remain omitted in the
+    // event payload, so replay preserves the prior project assignment.
+    service
+        .update_thread_metadata(
+            "thread-a",
+            ThreadMetadataUpdate {
+                title: Some("Renamed again".to_string()),
+                project_id: None,
+                archived: None,
+            },
+        )
+        .unwrap();
+    let replayed = test_service(dir.path())
+        .catalog(10)
+        .unwrap()
+        .threads
+        .remove(0);
+    assert_eq!(replayed.title.as_deref(), Some("Renamed again"));
+    assert_eq!(replayed.project_id.as_deref(), Some("project-a"));
+
+    service
+        .update_thread_metadata(
+            "thread-a",
+            ThreadMetadataUpdate {
+                title: None,
+                project_id: Some(None),
+                archived: None,
+            },
+        )
+        .unwrap();
+    assert_eq!(service.catalog(10).unwrap().threads[0].project_id, None);
+    assert_eq!(service.thread("thread-a").unwrap().turns.len(), 1);
+}
+
+#[test]
+fn invalid_or_unknown_project_never_partially_appends_metadata() {
+    let dir = tempfile::tempdir().unwrap();
+    let service = test_service(dir.path());
+    service.create_thread("thread-a", None, None).unwrap();
+    let before = OperatorJournal::new(dir.path().to_path_buf())
+        .unwrap()
+        .read_after(None, 10)
+        .unwrap()
+        .events
+        .len();
+    assert!(service
+        .update_thread_metadata(
+            "thread-a",
+            ThreadMetadataUpdate {
+                title: Some("new title".to_string()),
+                project_id: Some(Some("missing".to_string())),
+                archived: None,
+            }
+        )
+        .is_err());
+    assert!(service
+        .create_project("project-b", "sk-live-secret".to_string())
+        .is_err());
+    let after = OperatorJournal::new(dir.path().to_path_buf())
+        .unwrap()
+        .read_after(None, 10)
+        .unwrap()
+        .events
+        .len();
+    assert_eq!(before, after);
+    assert_eq!(service.catalog(10).unwrap().threads[0].title, None);
+}
+
+#[test]
+fn duplicate_project_create_is_idempotent_and_old_thread_rows_stay_readable() {
+    let dir = tempfile::tempdir().unwrap();
+    let service = test_service(dir.path());
+    service.ensure_thread("old-thread").unwrap();
+    let first = service
+        .create_project("project-a", "First title".to_string())
+        .unwrap();
+    let again = service
+        .create_project("project-a", "Ignored title".to_string())
+        .unwrap();
+    assert_eq!(first, again);
+    let catalog = test_service(dir.path()).catalog(10).unwrap();
+    assert_eq!(catalog.threads[0].thread_id, "old-thread");
+    assert_eq!(catalog.projects[0].title, "First title");
 }

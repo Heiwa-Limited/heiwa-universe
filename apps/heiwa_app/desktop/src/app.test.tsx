@@ -1,11 +1,13 @@
 // @vitest-environment jsdom
-import { cleanup, fireEvent, render, screen } from "@solidjs/testing-library";
+import { cleanup, fireEvent, render, screen, waitFor } from "@solidjs/testing-library";
+import { createSignal } from "solid-js";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { App } from "./app";
 import { localIsoDate } from "./lib/format";
-import { createAppState, type AppState } from "./state/app";
+import { AppProvider, createAppState, type AppState } from "./state/app";
 import { SURFACES } from "./surfaces/registry";
 import type { OperatorFrame } from "./operator/types";
+import { MachinePerspective } from "./surfaces/home/MachinePerspective";
 
 afterEach(cleanup);
 
@@ -36,6 +38,7 @@ function harness(
     machineRecognitionError?: { code: string; message: string };
     machineSyncStatus?: string;
     emptyHerd?: boolean;
+    readAppleMail?: () => Promise<{ fetched: number; appended: number; deduplicated: number }>;
   } = {},
 ): Harness {
   const post = vi.fn().mockResolvedValue({
@@ -131,6 +134,7 @@ function harness(
         },
       }),
       post: runtimePost,
+      readAppleMail: overrides.readAppleMail ?? vi.fn().mockRejectedValue(new Error("Apple Mail read not configured in this test.")),
     },
     herd: {
       snapshot: vi.fn().mockResolvedValue({
@@ -172,7 +176,9 @@ function harness(
  * copy only that surface renders.
  */
 const SURFACE_MARKERS: Record<string, string | RegExp> = {
-  home: "Heiwa Ops",
+  home: "What’s on your mind?",
+  sessions: "Every conversation",
+  projects: "Select a project from the sidebar.",
   ai: "No messages yet.",
   windows: "Terminal panes",
   calendar: "Upcoming",
@@ -190,6 +196,8 @@ describe("shell", () => {
   it("registers the primary surfaces including in-app approvals", () => {
     expect(SURFACES.map((surface) => surface.id)).toEqual([
       "home",
+      "sessions",
+      "projects",
       "ai",
       "windows",
       "calendar",
@@ -316,15 +324,15 @@ describe("shell", () => {
       kind: "focus",
       promotion: { connector: "apple_calendar", calendar: "Calendar" },
     });
+    fireEvent.click(await screen.findByRole("button", { name: "Review pending changes" }));
+    expect(state.view()).toBe("approvals");
   });
 
   it("does not present the live runtime host as a task worker", async () => {
     const { state } = harness();
-    state.navigate("workers");
-    render(() => <App state={state} />);
-    await Promise.resolve();
-
-    expect(screen.getByText("0 task workers")).toBeTruthy();
+    await state.runtime.loadHealth();
+    const preview = SURFACES.find((surface) => surface.id === "workers")!.preview(state);
+    expect(preview.lines).toContain("0 task workers");
   });
 
   it("does not invent panes or active agents for a fresh profile", async () => {
@@ -333,7 +341,7 @@ describe("shell", () => {
     await Promise.resolve();
     await Promise.resolve();
 
-    expect(screen.getAllByText(/0 live panes/).length).toBeGreaterThan(0);
+    expect(screen.getByText("A place for your next idea.")).toBeTruthy();
     expect(screen.queryByText(/6 sub-app agents/)).toBeNull();
     expect(screen.queryByText("planned")).toBeNull();
 
@@ -341,12 +349,11 @@ describe("shell", () => {
     expect(screen.queryByText("Sub-app agents")).toBeNull();
   });
 
-  it("renders one rail button per surface", () => {
+  it("renders the primary rail navigation", () => {
     const { state } = harness();
     render(() => <App state={state} />);
-    for (const surface of SURFACES) {
-      expect(screen.getByLabelText(surface.label)).toBeTruthy();
-    }
+    const labels = [...document.querySelectorAll<HTMLButtonElement>(".sidebar-navlist button")].map((button) => button.textContent);
+    expect(labels).toEqual(["Home", "All sessions", "Calendar", "Mail"]);
   });
 
   it.each(SURFACES.map((surface) => surface.id))("mounts the %s surface", (id) => {
@@ -369,7 +376,21 @@ describe("shell", () => {
     const { state } = harness();
     state.navigate("windows");
     render(() => <App state={state} />);
-    expect(screen.getByText("windows")).toBeTruthy();
+    expect(screen.getByText("Viewing windows")).toBeTruthy();
+  });
+
+  it("focuses the composer with Command-L without stealing focus from a dialog", async () => {
+    const { state } = harness();
+    render(() => <App state={state} />);
+    const composer = screen.getByLabelText("Message Heiwa");
+    fireEvent.keyDown(document, { key: "l", metaKey: true });
+    expect(document.activeElement).toBe(composer);
+
+    fireEvent.click(screen.getByRole("button", { name: "New project" }));
+    const name = screen.getByLabelText("Name");
+    await waitFor(() => expect(document.activeElement).toBe(name));
+    fireEvent.keyDown(document, { key: "l", metaKey: true });
+    expect(document.activeElement).toBe(name);
   });
 
   it("renders runtime health in the composer hint", async () => {
@@ -381,14 +402,48 @@ describe("shell", () => {
 });
 
 describe("operator seam", () => {
-  it("submits a turn through the untouched OperatorClient and lands on AI", async () => {
+  it("keeps session B's same-text draft when session A's submission settles late", async () => {
+    let settleA!: () => void;
+    const post = vi.fn((path: string) => {
+      if (path.endsWith("/turns")) return new Promise((resolve) => { settleA = () => resolve({ ok: true, data: { thread_id: "a", turn_id: "turn-a", cursor: "1", duplicate: false, stream_url: "/stream" } }); });
+      return Promise.resolve({ ok: true, data: {} });
+    });
+    const state = createAppState({
+      operator: {
+        get: (async () => EMPTY_HISTORY) as never,
+        post: post as never,
+        subscribe: () => new Promise<void>(() => {}),
+        randomUUID: () => "req-a",
+        schedule: (task) => task(),
+      },
+      sessions: {
+        get: async () => ({ ok: true, data: { threads: [{ thread_id: "a", title: "A", archived: false }, { thread_id: "b", title: "B", archived: false }], projects: [] } }),
+        post: post as never,
+      },
+    });
+    await state.sessions.load();
+    render(() => <App state={state} />);
+    await Promise.resolve();
+    const input = screen.getByLabelText("Message Heiwa") as HTMLTextAreaElement;
+    fireEvent.input(input, { target: { value: "same text" } });
+    fireEvent.click(screen.getByLabelText("Send"));
+    await state.sessions.select("b");
+    fireEvent.input(input, { target: { value: "same text" } });
+    settleA();
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(input.value).toBe("same text");
+    expect(state.sessions.draft()).toBe("same text");
+  });
+
+  it("submits through OperatorClient and expands the same conversation on request", async () => {
     const { state, post } = harness();
     render(() => <App state={state} />);
     await state.operator.start("default");
     expect(state.operator.ready()).toBe(true);
 
     const input = screen.getByLabelText("Message Heiwa") as HTMLTextAreaElement;
-    input.value = "hello heiwa";
+    fireEvent.input(input, { target: { value: "hello heiwa" } });
     screen.getByLabelText("Send").click();
     await Promise.resolve();
 
@@ -397,7 +452,74 @@ describe("operator seam", () => {
       prompt: "hello heiwa",
       route_policy: { mode: "auto" },
     });
+    expect(state.view()).toBe("home");
+    expect(screen.getByRole("region", { name: "Heiwa response" })).toBeTruthy();
+    fireEvent.click(screen.getByText("Open conversation"));
     expect(state.view()).toBe("ai");
+    expect(post).toHaveBeenCalledTimes(1);
+  });
+
+  it("keeps Calendar open while responses stream, close, and reopen", async () => {
+    const { state, emit, post } = harness({ subscribeNever: true });
+    state.navigate("calendar");
+    render(() => <App state={state} />);
+    await state.operator.start("default");
+    fireEvent.input(screen.getByLabelText("Message Heiwa"), { target: { value: "Plan a focus block" } });
+    fireEvent.click(screen.getByLabelText("Send"));
+    await waitFor(() => expect(post).toHaveBeenCalledOnce());
+    emit({ type: "assistant_delta", thread_id: "default", turn_id: "turn-1", text: "A quiet afternoon" });
+    expect(screen.getByText("A quiet afternoon")).toBeTruthy();
+    expect(state.view()).toBe("calendar");
+    fireEvent.click(screen.getByLabelText("Close response"));
+    expect(screen.queryByText("A quiet afternoon")).toBeNull();
+    fireEvent.click(screen.getByText("Show conversation"));
+    expect(screen.getByText("A quiet afternoon")).toBeTruthy();
+    expect(post).toHaveBeenCalledOnce();
+  });
+
+  it("retains an unacknowledged draft and shows the submission failure", async () => {
+    const { state, post } = harness();
+    post.mockRejectedValueOnce(new Error("transport offline"));
+    render(() => <App state={state} />);
+    await state.operator.start("default");
+    const input = screen.getByLabelText("Message Heiwa") as HTMLTextAreaElement;
+    fireEvent.input(input, { target: { value: "Keep this draft" } });
+    fireEvent.click(screen.getByLabelText("Send"));
+    await waitFor(() => expect(screen.getByRole("alert").textContent).toContain("draft is retained"));
+    expect(input.value).toBe("Keep this draft");
+  });
+
+  it("does not erase the next draft when the previous submission finishes", async () => {
+    const { state, post } = harness();
+    let accept!: (value: unknown) => void;
+    post.mockImplementationOnce(() => new Promise((resolve) => { accept = resolve; }));
+    render(() => <App state={state} />);
+    await state.operator.start("default");
+    const input = screen.getByLabelText("Message Heiwa") as HTMLTextAreaElement;
+    fireEvent.input(input, { target: { value: "First message" } });
+    fireEvent.click(screen.getByLabelText("Send"));
+    fireEvent.input(input, { target: { value: "Next message" } });
+    accept({ ok: true, data: { thread_id: "default", turn_id: "turn-1", cursor: "1", duplicate: false, stream_url: "/stream" } });
+    await waitFor(() => expect((screen.getByLabelText("Send") as HTMLButtonElement).disabled).toBe(false));
+    expect(input.value).toBe("Next message");
+  });
+
+  it("persists local entry and allows resource setup to be reopened without a provider", async () => {
+    const { state } = harness();
+    const [onboarding, setOnboarding] = createSignal({
+      complete: false, display_name: "Ada", gaps: [],
+      workspace: { can_enter: true, setup_complete: false, resources: [] },
+    });
+    const finish = vi.fn(async () => setOnboarding((s) => ({ ...s, workspace: { ...s.workspace, setup_complete: true } })));
+    render(() => <App state={state} onboarding={onboarding()} onCompleteWorkspace={async () => { await finish(); }} />);
+    fireEvent.click(screen.getByText("Enter workspace"));
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+    expect(onboarding().complete).toBe(false);
+    fireEvent.click(screen.getByRole("button", { name: "Your resources" }));
+    expect(screen.getByRole("dialog")).toBeTruthy();
+    fireEvent.click(screen.getByLabelText("Close resources"));
+    expect(screen.queryByRole("dialog")).toBeNull();
+    expect(finish).toHaveBeenCalledOnce();
   });
 
   it("renders durable events and streaming deltas from the store projection", async () => {
@@ -540,17 +662,60 @@ describe("operator seam", () => {
     });
   });
 
-  it("says the snapshot is empty rather than pretending mail is unsupported", () => {
-    // An empty snapshot is a state with an action — run a scan — not the
-    // same thing as the feature not existing.
+  it("offers a native Apple Mail read for an empty snapshot", () => {
     const { state } = harness({ get: async () => ({ data: { priority: [] } }) });
 
     render(() => <App state={state} />);
     state.navigate("mail");
 
     return Promise.resolve().then(() => {
-      expect(screen.getByText(/heiwa mail scan/)).toBeTruthy();
+      expect(screen.getByRole("button", { name: "Read Apple Mail" })).toBeTruthy();
+      expect(screen.queryByText(/heiwa mail scan/)).toBeNull();
     });
+  });
+
+  it("reads Apple Mail only after the button is clicked and refreshes the snapshot", async () => {
+    let finishRead!: (result: { fetched: number; appended: number; deduplicated: number }) => void;
+    const readAppleMail = vi.fn(() => new Promise<{ fetched: number; appended: number; deduplicated: number }>((resolve) => {
+      finishRead = resolve;
+    }));
+    const { state } = harness({
+      readAppleMail,
+      get: async (path) => path === "/api/v1/mail/summary"
+        ? { data: { priority: [{ sender: "ada@example.com", subject: "Fresh mail", unread: true, date: "2026-09-11T12:00:00Z" }] } }
+        : { data: {} },
+    });
+    state.navigate("mail");
+    render(() => <App state={state} />);
+    expect(readAppleMail).not.toHaveBeenCalled();
+
+    fireEvent.click(screen.getByRole("button", { name: "Read Apple Mail" }));
+    const pending = screen.getByRole("button", { name: "Reading…" }) as HTMLButtonElement;
+    expect(pending.disabled).toBe(true);
+    fireEvent.click(pending);
+    expect(readAppleMail).toHaveBeenCalledOnce();
+    finishRead({ fetched: 2, appended: 1, deduplicated: 1 });
+    expect(await screen.findByText("Fresh mail")).toBeTruthy();
+    expect((await screen.findByRole("status")).textContent).toContain("Read 2 headers; 1 added");
+  });
+
+  it("keeps existing mail visible and allows retry after a native read failure", async () => {
+    // Tauri serializes a Rust `Result::Err(String)` as a rejected string.
+    const readAppleMail = vi.fn().mockRejectedValue("Automation access is required.");
+    const { state } = harness({
+      readAppleMail,
+      get: async (path) => path === "/api/v1/mail/summary"
+        ? { data: { priority: [{ sender: "ada@example.com", subject: "Existing mail", unread: false, date: "2026-09-11T12:00:00Z" }] } }
+        : { data: {} },
+    });
+    state.navigate("mail");
+    render(() => <App state={state} />);
+    expect(await screen.findByText("Existing mail")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Read Apple Mail" }));
+
+    expect((await screen.findByRole("alert")).textContent).toContain("Automation access is required.");
+    expect(screen.getByText("Existing mail")).toBeTruthy();
+    expect((screen.getByRole("button", { name: "Read Apple Mail" }) as HTMLButtonElement).disabled).toBe(false);
   });
 
   it("opens on a briefing of what today actually holds", () => {
@@ -602,58 +767,41 @@ describe("operator seam", () => {
       });
   });
 
-  it("opens from this Mac perspective without pretending peer sync exists", () => {
+  it("renders this Mac perspective without pretending peer sync exists", async () => {
     const { state } = harness();
-
-    render(() => <App state={state} />);
-
-    return Promise.resolve()
-      .then(() => Promise.resolve())
-      .then(() => {
-        const perspective = document.querySelector(".machine-perspective");
-        expect(perspective).toBeTruthy();
-        const text = perspective!.textContent ?? "";
-        expect(text).toContain("This Mac");
-        expect(text).toContain("dmac.local");
-        expect(text).toContain("Apple M4 Pro");
-        expect(text).toContain("12 cores");
-        expect(text).toContain("Shared data");
-        expect(text).toContain("sync local only");
-      });
+    await state.runtime.loadHealth();
+    render(() => <AppProvider state={state}><MachinePerspective /></AppProvider>);
+    const text = document.querySelector(".machine-perspective")!.textContent ?? "";
+    expect(text).toContain("This Mac");
+    expect(text).toContain("dmac.local");
+    expect(text).toContain("Apple M4 Pro");
+    expect(text).toContain("12 cores");
+    expect(text).toContain("Shared data");
+    expect(text).toContain("sync local only");
   });
 
-  it("does not claim peer sync when the mesh state could not be read", () => {
+  it("does not claim peer sync when the mesh state could not be read", async () => {
     const { state } = harness({ machineSyncStatus: "unknown" });
-
-    render(() => <App state={state} />);
-
-    return Promise.resolve()
-      .then(() => Promise.resolve())
-      .then(() => {
-        const text = document.querySelector(".machine-perspective")?.textContent ?? "";
-        expect(text).not.toContain("peer enrolled");
-        expect(text).not.toContain("sync local only");
-        expect(text).toContain("sync state unavailable");
-      });
+    await state.runtime.loadHealth();
+    render(() => <AppProvider state={state}><MachinePerspective /></AppProvider>);
+    const text = document.querySelector(".machine-perspective")?.textContent ?? "";
+    expect(text).not.toContain("peer enrolled");
+    expect(text).not.toContain("sync local only");
+    expect(text).toContain("sync state unavailable");
   });
 
-  it("renders the same shared-data client from a Windows-local perspective", () => {
+  it("renders the same shared-data client from a Windows-local perspective", async () => {
     const { state } = harness({ machineOs: "windows", machineName: "devon-windows" });
-
-    render(() => <App state={state} />);
-
-    return Promise.resolve()
-      .then(() => Promise.resolve())
-      .then(() => {
-        const text = document.querySelector(".machine-perspective")?.textContent ?? "";
-        expect(text).toContain("This Windows PC");
-        expect(text).toContain("devon-windows");
-        expect(text).toContain("Shared data");
-        expect(text).toContain("sync local only");
-      });
+    await state.runtime.loadHealth();
+    render(() => <AppProvider state={state}><MachinePerspective /></AppProvider>);
+    const text = document.querySelector(".machine-perspective")?.textContent ?? "";
+    expect(text).toContain("This Windows PC");
+    expect(text).toContain("devon-windows");
+    expect(text).toContain("Shared data");
+    expect(text).toContain("sync local only");
   });
 
-  it("explains an incompatible machine manifest without exposing its contents", () => {
+  it("explains an incompatible machine manifest without exposing its contents", async () => {
     const { state } = harness({
       machineRecognitionError: {
         code: "unsupported_schema",
@@ -661,20 +809,16 @@ describe("operator seam", () => {
       },
     });
 
-    render(() => <App state={state} />);
-
-    return Promise.resolve()
-      .then(() => Promise.resolve())
-      .then(() => {
-        const perspective = document.querySelector(".machine-perspective");
-        expect(perspective?.textContent).toContain("Device recognition needs attention");
-        expect(perspective?.textContent).toContain(
-          "Machine identity was written by a newer or incompatible Heiwa build.",
-        );
-      });
+    await state.runtime.loadHealth();
+    render(() => <AppProvider state={state}><MachinePerspective /></AppProvider>);
+    const perspective = document.querySelector(".machine-perspective");
+    expect(perspective?.textContent).toContain("Device recognition needs attention");
+    expect(perspective?.textContent).toContain(
+      "Machine identity was written by a newer or incompatible Heiwa build.",
+    );
   });
 
-  it("says the day is clear rather than showing an empty briefing", () => {
+  it("does not show an empty briefing dashboard", () => {
     const { state } = harness({ get: async () => ({ data: { events: [], priority: [] } }) });
 
     render(() => <App state={state} />);
@@ -682,8 +826,7 @@ describe("operator seam", () => {
     return Promise.resolve()
       .then(() => Promise.resolve())
       .then(() => {
-        const briefing = document.querySelector(".today-briefing");
-        expect(briefing?.textContent ?? "").toMatch(/nothing scheduled/i);
+        expect(document.querySelector(".today-briefing")).toBeNull();
       });
   });
 
