@@ -703,3 +703,99 @@ fn authenticated_app_hold_endpoint_stages_named_apple_promotion() {
         "connection and app staging may list resources but must not create before approval"
     );
 }
+
+#[test]
+fn selected_calendar_read_reconciles_real_service_state_and_respects_disconnect() {
+    let fixture = Fixture::new();
+    fixture.establish_local_identity();
+    let helper = fixture._root.path().join("eventkit-fixture");
+    let source = fixture._root.path().join("eventkit-source.json");
+    let calls = fixture._root.path().join("eventkit-calls");
+    fs::write(&helper, r#"#!/usr/bin/env python3
+import datetime, json, os, sys
+request = json.loads(sys.argv[1])
+with open(os.environ['FIXTURE_CALLS'], 'a') as log: log.write(request['operation'] + '\n')
+if request['operation'] == 'list':
+    result = {'schema_version':1, 'calendars':[{'id':'work','name':'Work','writable':True},{'id':'private','name':'Private','writable':True}]}
+else:
+    state = json.load(open(os.environ['FIXTURE_SOURCE']))
+    rows = []
+    if state['present']:
+        rows = [{'source':'apple_calendar','calendar_id':state['calendar_id'],'external_id':'source-event','occurrence':'','title':state['title'],'start':state['start'],'end':state['end'],'date':state['start'][:10]}]
+    result = {'schema_version':1,'calendar_ids':request['calendar_ids'],'start':request['start'],'end':request['end'],'truncated':state['truncated'],'events':rows}
+print(json.dumps(result))
+"#).unwrap();
+    fs::set_permissions(&helper, fs::Permissions::from_mode(0o700)).unwrap();
+    let mut original = serde_json::json!({"calendar_id":"work", "title":"Original event", "present":true, "truncated":false,
+        "start":chrono::Utc::now().to_rfc3339(), "end":(chrono::Utc::now()+chrono::Duration::hours(1)).to_rfc3339()});
+    fs::write(&source, original.to_string()).unwrap();
+    let command = || {
+        let mut cmd = fixture.heiwa();
+        cmd.env("HEIWA_APPLE_RESOURCES_HELPER", &helper)
+            .env("FIXTURE_SOURCE", &source)
+            .env("FIXTURE_CALLS", &calls);
+        cmd
+    };
+    let read = || {
+        command()
+            .args(["calendar", "read-selected", "--calendar-ids", "[\"work\"]"])
+            .output()
+            .unwrap()
+    };
+    assert!(!read().status.success());
+    assert!(
+        !calls.exists(),
+        "unenrolled profiles cannot read source resources"
+    );
+    assert!(command()
+        .args(["connect", "apple-calendar", "--authorize"])
+        .output()
+        .unwrap()
+        .status
+        .success());
+    let imported = read();
+    assert!(
+        imported.status.success(),
+        "{}",
+        String::from_utf8_lossy(&imported.stderr)
+    );
+    let snapshot = fixture.home.join(".heiwa/state/calendar/events.jsonl");
+    let before: serde_json::Value =
+        serde_json::from_str(fs::read_to_string(&snapshot).unwrap().trim()).unwrap();
+    original["title"] = serde_json::json!("Renamed event");
+    fs::write(&source, original.to_string()).unwrap();
+    assert!(read().status.success());
+    let after: serde_json::Value =
+        serde_json::from_str(fs::read_to_string(&snapshot).unwrap().trim()).unwrap();
+    assert_eq!(before["id"], after["id"]);
+    assert_eq!(after["title"], "Renamed event");
+    original["calendar_id"] = serde_json::json!("private");
+    fs::write(&source, original.to_string()).unwrap();
+    assert!(
+        !read().status.success(),
+        "unselected source rows are rejected"
+    );
+    assert_eq!(
+        serde_json::from_str::<serde_json::Value>(fs::read_to_string(&snapshot).unwrap().trim())
+            .unwrap(),
+        after
+    );
+    original["present"] = serde_json::json!(false);
+    original["truncated"] = serde_json::json!(true);
+    fs::write(&source, original.to_string()).unwrap();
+    assert!(read().status.success());
+    assert!(!fs::read_to_string(&snapshot).unwrap().is_empty());
+    original["truncated"] = serde_json::json!(false);
+    fs::write(&source, original.to_string()).unwrap();
+    assert!(read().status.success());
+    assert!(fs::read_to_string(&snapshot).unwrap().is_empty());
+    assert!(command()
+        .args(["connect", "apple-calendar", "--disconnect"])
+        .output()
+        .unwrap()
+        .status
+        .success());
+    let calls_before = fs::read(&calls).unwrap();
+    assert!(!read().status.success());
+    assert_eq!(calls_before, fs::read(&calls).unwrap());
+}

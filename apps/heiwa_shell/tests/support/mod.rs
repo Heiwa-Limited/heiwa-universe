@@ -166,32 +166,30 @@ fn handle(
 
 /// A registry holding exactly one credential: the fresh-install shape.
 pub fn single_api_key_registry() -> AccountRegistry {
-    AccountRegistry {
-        accounts: vec![ProviderAccount {
-            account_id: "anthropic-api-harness".to_string(),
+    AccountRegistry::from_accounts(vec![ProviderAccount {
+        account_id: "anthropic-api-harness".to_string(),
+        provider: "anthropic".to_string(),
+        credential: Credential::ApiKey,
+        rate_group: "anthropic_api".to_string(),
+        status: AccountStatus::Connected,
+        models: vec![DetectedModel {
+            model_id: "claude-opus-5".to_string(),
+            provider_model_id: "claude-opus-5".to_string(),
             provider: "anthropic".to_string(),
-            credential: Credential::ApiKey,
+            account_id: "anthropic-api-harness".to_string(),
             rate_group: "anthropic_api".to_string(),
-            status: AccountStatus::Connected,
-            models: vec![DetectedModel {
-                model_id: "claude-opus-5".to_string(),
-                provider_model_id: "claude-opus-5".to_string(),
-                provider: "anthropic".to_string(),
-                account_id: "anthropic-api-harness".to_string(),
-                rate_group: "anthropic_api".to_string(),
-                capability_class: 5,
-                context_window: 1_000_000,
-                supports_streaming: true,
-                supports_tools: true,
-                supports_vision: true,
-                supports_audio: false,
-                cost_per_1k_input: 0.0,
-                cost_per_1k_output: 0.0,
-                price_truth: PriceTruth::Known,
-                inventory_truth: InventoryTruth::Verified,
-            }],
+            capability_class: 5,
+            context_window: 1_000_000,
+            supports_streaming: true,
+            supports_tools: true,
+            supports_vision: true,
+            supports_audio: false,
+            cost_per_1k_input: 0.0,
+            cost_per_1k_output: 0.0,
+            price_truth: PriceTruth::Known,
+            inventory_truth: InventoryTruth::Verified,
         }],
-    }
+    }])
 }
 
 /// Assert no provider CLI is reachable, the way the runtime itself looks.

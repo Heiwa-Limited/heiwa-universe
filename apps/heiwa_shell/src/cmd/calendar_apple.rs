@@ -87,7 +87,17 @@ function run(argv) {
 }
 "#;
 
+pub(crate) fn request_calendars() -> Result<Vec<Value>> {
+    if super::calendar_read::helper_path().is_some() {
+        return super::calendar_read::resources(true);
+    }
+    list_calendars()
+}
+
 pub(crate) fn list_calendars() -> Result<Vec<Value>> {
+    if super::calendar_read::helper_path().is_some() {
+        return super::calendar_read::resources(false);
+    }
     let value = run_bridge("list", None)?;
     let calendars = value
         .as_array()

@@ -62,6 +62,19 @@ async function openResourceGuide(resourceId: string): Promise<void> {
   await invoke("open_resource_guide", { resourceId });
 }
 
+async function changeProviderConnection(command: string, args: Record<string, string>): Promise<void> {
+  const { invoke } = await import("@tauri-apps/api/core");
+  try {
+    setOnboarding(await invoke<OnboardingState>(command, args));
+    setOnboardingError(undefined);
+  } finally {
+    // Registration can succeed even if verification or a later read fails.
+    // Reconcile from saved state rather than retrying a credential mutation.
+    await refreshOnboarding().catch(() => undefined);
+    await state.runtime.loadHealth();
+  }
+}
+
 async function establishIdentity(displayName: string): Promise<void> {
   const { invoke } = await import("@tauri-apps/api/core");
   setOnboarding(
@@ -79,6 +92,9 @@ render(
       onVerifyProviders={() => refreshOnboarding(true)}
       onCompleteWorkspace={completeWorkspace}
       onOpenResourceGuide={openResourceGuide}
+      onConnectApiProvider={(provider, apiKey) => changeProviderConnection("connect_api_provider", { provider, apiKey })}
+      onVerifyApiProvider={(accountId) => changeProviderConnection("verify_api_provider", { accountId })}
+      onDisconnectApiProvider={(accountId) => changeProviderConnection("disconnect_api_provider", { accountId })}
       onboardingError={onboardingError()}
       update={update()}
       onInstallUpdate={installUpdate}

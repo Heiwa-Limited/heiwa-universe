@@ -206,3 +206,8 @@
 /* The scroll container owns overflow; connection controls must never shrink. */
 .calendar-view > * { flex-shrink: 0; }
 .cal-grid-row { display: contents; }
+
+.cal-import { padding: 18px; }
+.cal-import fieldset { border: 0; padding: 0; margin: 14px 0; }
+.cal-import legend { margin-bottom: 8px; }
+.cal-resource-choice { display: flex; gap: 10px; align-items: center; padding: 7px 0; }

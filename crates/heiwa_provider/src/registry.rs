@@ -1,6 +1,6 @@
 use serde::{Deserialize, Serialize};
-use std::fs;
 use std::path::PathBuf;
+mod storage;
 
 // ---------------------------------------------------------------------------
 // Credential types
@@ -189,32 +189,35 @@ fn get_registry_path() -> PathBuf {
 
 /// The full set of provider accounts Heiwa knows about.
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[serde(deny_unknown_fields)]
 pub struct AccountRegistry {
     pub accounts: Vec<ProviderAccount>,
+    #[serde(skip)]
+    baseline: Option<String>,
 }
 
 impl AccountRegistry {
     /// Load the registry from disk.  Returns an empty registry if the file
     /// does not exist.
     pub fn load() -> Self {
-        let path = get_registry_path();
-        if !path.exists() {
-            return Self::default();
+        Self::load_strict().unwrap_or_default()
+    }
+
+    /// Setup and mutation callers must distinguish absent from damaged data.
+    pub fn load_strict() -> anyhow::Result<Self> {
+        Self::load_from(&get_registry_path())
+    }
+
+    pub fn from_accounts(accounts: Vec<ProviderAccount>) -> Self {
+        Self {
+            accounts,
+            baseline: None,
         }
-        fs::read_to_string(&path)
-            .ok()
-            .and_then(|raw| serde_json::from_str(&raw).ok())
-            .unwrap_or_default()
     }
 
     /// Persist the registry to disk.
-    pub fn save(&self) -> anyhow::Result<()> {
-        let path = get_registry_path();
-        if let Some(parent) = path.parent() {
-            fs::create_dir_all(parent)?;
-        }
-        fs::write(&path, serde_json::to_string_pretty(self)?)?;
-        Ok(())
+    pub fn save(&mut self) -> anyhow::Result<()> {
+        self.save_to(&get_registry_path())
     }
 
     /// All accounts for a given provider.
@@ -415,12 +418,9 @@ pub fn add_api_key_account(
     api_key: &str,
     rate_group: &str,
 ) -> anyhow::Result<String> {
-    let existing_count = registry
-        .accounts_for(provider)
-        .iter()
-        .filter(|a| matches!(a.credential, Credential::ApiKey))
-        .count();
-    let account_id = format!("{}-api-{}", provider, existing_count + 1);
+    // Counts reuse IDs after removal and can overwrite a different Keychain
+    // entry. Each connection attempt owns an independent credential reference.
+    let account_id = format!("{}-api-{}", provider, uuid::Uuid::new_v4());
 
     // Secret → Keychain, not disk
     store_secret(&account_id, api_key)?;
@@ -435,7 +435,11 @@ pub fn add_api_key_account(
     };
 
     registry.upsert(account);
-    registry.save()?;
+    if let Err(error) = registry.save() {
+        registry.remove(&account_id);
+        let _ = crate::keychain::delete_secret(&account_id);
+        return Err(error);
+    }
 
     Ok(account_id)
 }

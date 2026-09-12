@@ -7,6 +7,7 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 
 pub mod adapter;
+pub mod connections;
 pub mod detect;
 pub mod health;
 pub mod keychain;
