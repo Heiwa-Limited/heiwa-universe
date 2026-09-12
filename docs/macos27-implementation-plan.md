@@ -152,3 +152,21 @@ The Mail permission/account flow still needs live macOS permission and source-ap
 verification. Other open product work remains the structured turn context,
 attachments/media transport, deeper Apple actions, measured routing, and public
 fresh-machine installation certification described above.
+
+
+## 2026-09-12 integration checkpoint
+
+The preserved desktop changes are integrated with the current execution/pricing
+fixes on `codex/desktop-continuity-checkpoint` (PR #99). The shared session
+controller now rejects stale catalog responses after refreshes and acknowledged
+metadata writes, switches away from externally archived sessions, retains an
+observed session omitted by a bounded catalog, and clears the visible transcript
+when its observation ends. Five regressions failed before these repairs.
+
+Fresh local evidence: 119 frontend tests, 9 packaging tests, production web build,
+full Rust workspace tests, and a built macOS app with a verified ad-hoc signature.
+The packaged CLI passed create/rename/move/restart/archive/restore in a disposable
+profile on port 7475; its processes and profile were removed afterward. The L0
+client/type hash pins are advanced to this reviewed implementation; the store and
+its replay tests remain unchanged. Remote checks, final promotion, and installed
+hash/health receipts are established at delivery, not inferred from these checks.
