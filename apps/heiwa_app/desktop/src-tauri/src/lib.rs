@@ -98,6 +98,14 @@ pub fn run() {
             Ok(())
         })
         .on_window_event(|window, event| {
+            #[cfg(target_os = "macos")]
+            if let tauri::WindowEvent::CloseRequested { api, .. } = event {
+                // Standard Mac close behavior: work belongs to the app, and
+                // reopening from the Dock should restore the same window.
+                if window.hide().is_ok() {
+                    api.prevent_close();
+                }
+            }
             if matches!(event, tauri::WindowEvent::Destroyed) {
                 window
                     .state::<operator_subscriptions::OperatorSubscriptions>()
@@ -132,6 +140,14 @@ pub fn run() {
         .build(tauri::generate_context!())
         .expect("error while building Heiwa desktop application")
         .run(|app, event| {
+            #[cfg(target_os = "macos")]
+            if matches!(event, tauri::RunEvent::Reopen { .. }) {
+                if let Some(window) = app.get_webview_window("main") {
+                    let _ = window.show();
+                    let _ = window.unminimize();
+                    let _ = window.set_focus();
+                }
+            }
             // Windows own observations; the application owns the child.
             // Closing one window must not stop work viewed by another.
             if matches!(event, tauri::RunEvent::Exit) {
