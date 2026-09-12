@@ -78,3 +78,32 @@ A macOS integration regression starts a real isolated runtime/helper, force-stop
 the runtime, and requires the helper to exit. It failed before the fix and passed
 afterward; the four app API tests and seven Calendar connector tests pass together.
 The test owns and cleans only its own processes and temporary profile.
+
+
+## Final lifecycle promotion and installed verification
+
+[PR #101](https://github.com/Heiwa-Limited/heiwa-universe/pull/101) integrated the
+keep-awake repair and this delivery evidence. [PR #102](https://github.com/Heiwa-Limited/heiwa-universe/pull/102)
+promoted it to main at `38825bbcb18599e5c466298daf444c65b677e978`. Both PRs passed
+all 11 remote checks with no unresolved review threads before their exact-head
+merges. All 31 local checks passed on clean dev `feb311d746edfe3bab0a897828f888327fe6f54f`
+with `RUST_TEST_THREADS=4`. One earlier state-directory startup timeout passed a
+complete operator API recheck; the bounded full run then passed. The main source
+tree matches that verified integration tree.
+
+The coherent app was rebuilt from clean fetched main and installed again through
+`heiwa app update --source checkout --json`. The packaged release runtime passed
+create/rename/move/restart/archive/restore and a real forced-stop test confirming
+its keep-awake helper exits. Its disposable profile and probe processes were
+removed. The previous installed checkpoint was backed up before the update.
+
+Final installed CLI and bundled runtime SHA-256:
+`428752dcce80c8cc468104a88e9a679225589462584863317793a7caa35d429c`.
+Final installed native executable SHA-256:
+`ffa67b413a30ea1e2d03353c60e7bdbdcb3848b2c2eb33342242e3120326e88f`.
+Both match the rebuilt bundle and the app signature verifies. Graceful SIGTERM
+restarted the idle installed LaunchAgent, runtime 7474 returned JSON health, and
+its full existing catalog was unchanged. The installed helper's `-w` argument
+matches the new runtime PID. The native app reopened on Home with an empty
+composer and is left running for normal use. This remains a local development
+installation, with the public-release and unfinished-product limits above.
