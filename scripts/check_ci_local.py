@@ -209,7 +209,9 @@ def check_inventory(root: Path, *, full: bool, python: str) -> list[Check]:
     add("Python tests", python, "-m", "pytest", "-q")
     add("product tests", "just", "test-product")
     add("Python sidecar", "bash", "scripts/check_python_sidecar.sh")
-    add("strict docs build", "uv", "run", "--locked", "--extra", "docs", "python", "-m", "mkdocs", "build", "--strict")
+    # Keep the shared verification environment usable by subsequent test runs.
+    # Syncing only the docs extra removes pytest from an existing .venv.
+    add("strict docs build", "uv", "run", "--locked", "--extra", "dev", "--extra", "docs", "python", "-m", "mkdocs", "build", "--strict")
     add("agent instruction sync", python, "scripts/sync_agents.py", "--check")
     add("local Python resolver", "bash", "scripts/tests/test_local_python_resolution.sh")
     add("Justfile Python override", "bash", "scripts/tests/test_just_python_override.sh")

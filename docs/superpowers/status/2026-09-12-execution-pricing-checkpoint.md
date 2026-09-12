@@ -75,3 +75,10 @@ acceptance gate are outstanding in the
 The separate macOS desktop rewrite is outside this promotion and was preserved
 with a verified private snapshot. This checkpoint does not establish installed
 runtime behavior, live provider entitlement, or a published 0.3.0 binary release.
+
+## Integration follow-through
+
+The follow-through synchronizes production history back into `dev` and retains
+this receipt. It also keeps both `dev` and `docs` extras in the local gate's docs
+build: requesting only `docs` removed Pytest from the shared `.venv`, causing a
+subsequent local verification run to fail its Python and product tests.
