@@ -623,9 +623,66 @@ fn write_canonical_launcher(heiwa_dir: &Path) -> Result<()> {
 fn write_canonical_launcher_internal(
     heiwa_dir: &Path,
     current_exe: &Path,
-    _repo_root: &Path,
+    repo_root: &Path,
 ) -> Result<()> {
-    install_runtime_binary(heiwa_dir, current_exe)?;
+    let launcher_path = heiwa_dir.join("bin").join("heiwa");
+
+    // An installed binary may still carry a build-time repository path that exists
+    // on the build machine. Never replace the executable that is currently running.
+    if current_exe == launcher_path && current_exe.exists() {
+        return Ok(());
+    }
+
+    // A packaged binary has no repository checkout to fall back to, so copy it
+    // into the durable per-user runtime. Development installs retain the script
+    // launcher because it resolves the active checkout and debug binary.
+    let is_dev_env = repo_root.join("Cargo.toml").exists();
+    if !is_dev_env && current_exe.exists() {
+        install_runtime_binary(heiwa_dir, current_exe)?;
+        return Ok(());
+    }
+
+    let launcher = format!(
+        r#"#!/bin/zsh
+set -euo pipefail
+
+REPO_ROOT="${{HEIWA_ROOT:-{repo_root}}}"
+RUST_BIN_OVERRIDE="${{HEIWA_SHELL_BIN:-}}"
+
+typeset -a candidates
+if [[ -n "$RUST_BIN_OVERRIDE" ]]; then
+  candidates+=("$RUST_BIN_OVERRIDE")
+fi
+candidates+=(
+  "$REPO_ROOT/target/debug/heiwa"
+  "$REPO_ROOT/target/release/heiwa"
+  "$REPO_ROOT/target/debug/heiwa-shell"
+  "$REPO_ROOT/target/release/heiwa-shell"
+)
+
+for candidate in "${{candidates[@]}}"; do
+  if [[ -x "$candidate" ]]; then
+    exec "$candidate" "$@"
+  fi
+done
+
+LAUNCHER="$REPO_ROOT/apps/heiwa_cli/bin/heiwa"
+if [[ -f "$LAUNCHER" ]]; then
+  exec node "$LAUNCHER" "$@"
+fi
+
+if [[ -f "$REPO_ROOT/Cargo.toml" ]]; then
+  exec cargo run -q -p heiwa-shell --bin heiwa -- "$@"
+fi
+
+echo "[FATAL] Could not locate a Heiwa launcher from $REPO_ROOT" >&2
+exit 1
+"#,
+        repo_root = repo_root.display()
+    );
+    fs::write(&launcher_path, launcher)?;
+    #[cfg(unix)]
+    fs::set_permissions(&launcher_path, fs::Permissions::from_mode(0o755))?;
     Ok(())
 }
 
@@ -1321,7 +1378,9 @@ mod tests {
         let target = heiwa_dir.join("bin").join("heiwa");
         assert!(target.exists());
         let content = fs::read_to_string(target)?;
-        assert_eq!(content, "binary content");
+        assert!(content.starts_with("#!/bin/zsh"));
+        assert!(content.contains("target/debug/heiwa"));
+        assert!(content.contains("apps/heiwa_cli/bin/heiwa"));
 
         Ok(())
     }
