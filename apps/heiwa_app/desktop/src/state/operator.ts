@@ -1,5 +1,5 @@
 import { createSignal, type Accessor } from "solid-js";
-import { OperatorClient, type OperatorClientDependencies } from "../operator/client";
+import { OperatorClient, type OperatorClientDependencies, type OperatorClientError } from "../operator/client";
 import { OperatorStore } from "../operator/store";
 import type { OperatorSnapshot } from "../operator/types";
 import { apiGet, apiPost, operatorSubscribe } from "../runtime";
@@ -25,9 +25,11 @@ export type OperatorStatus = "idle" | "starting" | "ready" | "submitting" | "err
 export type OperatorState = {
   snapshot: Accessor<OperatorSnapshot>;
   status: Accessor<OperatorStatus>;
+  error: Accessor<OperatorClientError | null>;
   /** True when a turn can be submitted right now. */
   ready: Accessor<boolean>;
   start: (threadId: string) => Promise<void>;
+  reconnect: () => Promise<void>;
   submit: (prompt: string) => Promise<void>;
   dispose: () => void;
 };
@@ -48,6 +50,7 @@ export function createOperatorState(options: OperatorStateOptions = {}): Operato
   const store = new OperatorStore();
   const [snapshot, setSnapshot] = createSignal<OperatorSnapshot>(store.snapshot());
   const [status, setStatus] = createSignal<OperatorStatus>("idle");
+  const [error, setError] = createSignal<OperatorClientError | null>(null);
 
   const schedule = options.schedule ?? defaultSchedule;
   let client!: OperatorClient;
@@ -60,6 +63,7 @@ export function createOperatorState(options: OperatorStateOptions = {}): Operato
       pending = false;
       setSnapshot(store.snapshot());
       setStatus(client.state().status);
+      setError(client.state().error);
     });
   };
 
@@ -75,8 +79,10 @@ export function createOperatorState(options: OperatorStateOptions = {}): Operato
   return {
     snapshot,
     status,
+    error,
     ready: () => status() === "ready",
     start: (threadId) => client.start(threadId),
+    reconnect: () => client.reconnect(),
     submit: async (prompt) => {
       await client.submitTurn(prompt);
       publish();

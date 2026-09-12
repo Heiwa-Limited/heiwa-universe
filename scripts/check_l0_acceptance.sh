@@ -59,9 +59,9 @@ fi
 # window observation disposal, and regression coverage. Store replay is unchanged.
 declare -A seam_baseline=(
   ["$desktop/src/operator/store.test.ts"]="7f68b72bc113940349648ef505bc49b52ecd11d21410b046b05fee06b8e6b2a0"
-  ["$desktop/src/operator/client.test.ts"]="e7d845d996c5fd92edafc7793a833f629027f1a524a56d868b00da9082933b35"
+  ["$desktop/src/operator/client.test.ts"]="128f056d7cdb0d2f7657df77a84d38158417dde31844ffde298d199994dd034e"
   ["$desktop/src/operator/store.ts"]="e2ca87af2c7e975b38b7f6eafb90d0ae4f8b5d44b5cf1b12bad5bd33607ae793"
-  ["$desktop/src/operator/client.ts"]="53a2ebb744c65efff9c9aa748e92d347c0a3c5f2f337bdddaca39359d9997343"
+  ["$desktop/src/operator/client.ts"]="60cd2c763214b0b02dd4ebb115ec29e790c521bfdf70c1140a3e00a320f9d793"
   ["$desktop/src/operator/types.ts"]="4086ff8536f9d7d376a9dd74adf28f680d7405d82b54a0cd0110f5d2261bef2b"
 )
 for file in "${!seam_baseline[@]}"; do

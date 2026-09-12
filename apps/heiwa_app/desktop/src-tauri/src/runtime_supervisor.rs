@@ -153,7 +153,7 @@ pub struct OwnedRuntime {
 impl OwnedRuntime {
     /// Stop the runtime this app started.
     ///
-    /// Called on window close. An adopted runtime never reaches here, so a
+    /// Called on application exit. An adopted runtime never reaches here, so a
     /// server the user started in a terminal survives closing the window.
     pub fn shutdown(&self) {
         let Ok(mut guard) = self.child.lock() else {
@@ -214,7 +214,7 @@ pub fn ensure_runtime(
         return (decision, None);
     };
 
-    let child = match spawn(binary) {
+    let mut child = match spawn(binary) {
         Ok(child) => child,
         Err(error) => {
             return (
@@ -234,6 +234,27 @@ pub fn ensure_runtime(
     // hand the window a server that cannot serve it.
     let deadline = Instant::now() + READY_TIMEOUT;
     while Instant::now() < deadline {
+        match child.try_wait() {
+            Ok(Some(status)) => {
+                return (
+                    SupervisorDecision::Unavailable {
+                        detail: format!("the runtime exited before becoming ready: {status}"),
+                    },
+                    None,
+                );
+            }
+            Err(error) => {
+                return (
+                    SupervisorDecision::Unavailable {
+                        detail: format!("could not observe runtime startup: {error}"),
+                    },
+                    Some(OwnedRuntime {
+                        child: Mutex::new(Some(child)),
+                    }),
+                );
+            }
+            Ok(None) => {}
+        }
         if listening() && identifies_as_heiwa() {
             return (
                 decision,
@@ -288,6 +309,35 @@ fn runtime_command(binary: &std::path::Path, port: u16) -> Command {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[cfg(unix)]
+    #[test]
+    fn an_exited_child_is_reported_without_adopting_a_late_listener() {
+        // The process has deterministically exited before observation. A
+        // different Heiwa process taking the port cannot make our child ready.
+        let mut child = Command::new("/bin/sh")
+            .args(["-c", "exit 17"])
+            .spawn()
+            .unwrap();
+        child.wait().unwrap();
+        let probes = std::cell::Cell::new(0);
+        let (decision, owned) = ensure_runtime(
+            || {
+                let count = probes.get();
+                probes.set(count + 1);
+                count > 0
+            },
+            || true,
+            |_| Ok(child),
+            Some(PathBuf::from("test-runtime")),
+        );
+        let SupervisorDecision::Unavailable { detail } = decision else {
+            panic!("a dead child must not be reported as serving");
+        };
+        assert!(detail.contains("exited before becoming ready"), "{detail}");
+        assert!(detail.contains("17"), "{detail}");
+        assert!(owned.is_none());
+    }
 
     #[test]
     fn spawned_runtime_uses_the_same_port_as_the_proxy() {

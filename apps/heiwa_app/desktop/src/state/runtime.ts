@@ -31,6 +31,7 @@ export type RuntimeState = {
   loadCalendar: () => Promise<void>;
   loadCalendarResources: () => Promise<void>;
   connectAppleCalendar: () => Promise<void>;
+  readAppleCalendars: (ids: string[]) => Promise<{ fetched: number; truncated: boolean }>;
   disconnectAppleCalendar: () => Promise<void>;
   createCalendarHold: (input: CalendarHoldInput) => Promise<void>;
   loadApprovals: () => Promise<void>;
@@ -131,6 +132,12 @@ export function createRuntimeState(options: RuntimeStateOptions = {}): RuntimeSt
     await loadCalendarResources();
   }
 
+  async function readAppleCalendars(ids: string[]): Promise<{ fetched: number; truncated: boolean }> {
+    const response = await post<{ data: { fetched: number; truncated: boolean } }>("/api/v1/calendar/read", { calendar_ids: ids });
+    await Promise.all([loadCalendar(), loadCalendarResources()]);
+    return response.data;
+  }
+
   async function disconnectAppleCalendar(): Promise<void> {
     await post("/api/v1/connectors/apple_calendar/disconnect", {});
     await loadCalendarResources();
@@ -207,6 +214,7 @@ export function createRuntimeState(options: RuntimeStateOptions = {}): RuntimeSt
     loadCalendar,
     loadCalendarResources,
     connectAppleCalendar,
+    readAppleCalendars,
     disconnectAppleCalendar,
     createCalendarHold,
     loadApprovals,

@@ -1,9 +1,10 @@
 import { createSignal, For, onCleanup, onMount, Show, type JSX } from "solid-js";
 import type { DiscoveredResource, OnboardingState } from "../state/types";
 import "./first-run.css";
+import { ProviderConnections, type ProviderConnectionActions } from "./ProviderConnections";
 
 /** Desktop setup acknowledges a local workspace; resource detection grants no access. */
-export function FirstRun(props: {
+export function FirstRun(props: ProviderConnectionActions & {
   state: OnboardingState;
   onEstablishIdentity: (displayName: string) => void | Promise<void>;
   onRecheck: () => void | Promise<void>;
@@ -44,7 +45,7 @@ export function FirstRun(props: {
       props.onClose();
     }
     if (event.key !== "Tab") return;
-    const focusable = Array.from(panel.querySelectorAll<HTMLElement>("button:not(:disabled), input:not(:disabled), summary"))
+    const focusable = Array.from(panel.querySelectorAll<HTMLElement>("button:not(:disabled), input:not(:disabled), select:not(:disabled), summary"))
       .filter((element) => {
         // A closed details still exposes its summary, but not its descendants.
         for (let parent = element.parentElement; parent && parent !== panel; parent = parent.parentElement) {
@@ -111,6 +112,10 @@ export function FirstRun(props: {
           </form>
         </Show>
         <Show when={props.state.workspace}>
+          <ProviderConnections connections={props.state.workspace?.connections ?? []}
+            onConnectApiProvider={props.onConnectApiProvider}
+            onVerifyApiProvider={props.onVerifyApiProvider}
+            onDisconnectApiProvider={props.onDisconnectApiProvider} />
           <div class="resource-section">
             <h2>Inference & creation</h2>
             <p class="quiet">Local installation metadata only. Detection does not verify sign-in, model access, or media tools.</p>
@@ -125,6 +130,12 @@ export function FirstRun(props: {
               <For each={resources("apple").filter((r) => !detected(r))}>{card}</For>
             </details>
           </div>
+        </Show>
+        <Show when={props.state.workspace?.cli_path}>
+          <details class="setup-diagnostics"><summary>Heiwa CLI is installed</summary>
+            <p>The app includes the same runtime for Terminal. No developer tools are needed.</p>
+            <code>{props.state.workspace?.cli_path} --help</code>
+          </details>
         </Show>
         <Show when={props.deviceDetails}>
           <details class="setup-diagnostics"><summary>This device & runtime</summary>{props.deviceDetails}</details>

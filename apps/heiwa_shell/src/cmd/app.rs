@@ -1405,6 +1405,34 @@ async fn handle_connection(
         return serve_repl_stream(stream, prompt).await;
     }
 
+    if method == "POST" && path == "/api/v1/calendar/read" {
+        let request = serde_json::from_str::<super::calendar_read::ReadRequest>(&body);
+        let result = match request {
+            Ok(request) => {
+                tokio::task::spawn_blocking(move || super::calendar_read::read_selected(request))
+                    .await
+                    .map_err(|_| anyhow!("Calendar reading stopped unexpectedly"))
+                    .and_then(|result| result)
+            }
+            Err(_) => Err(anyhow!("Select calendars with a valid calendar_ids array")),
+        };
+        let (status, payload) = match result {
+            Ok(data) => (200, json!({"ok":true, "data":data})),
+            Err(error) => (
+                400,
+                json!({"ok":false, "error":{"code":"calendar_read_failed", "message":error.to_string()}}),
+            ),
+        };
+        return write_response(
+            &mut stream,
+            status,
+            "application/json",
+            payload.to_string().into_bytes(),
+            false,
+        )
+        .await;
+    }
+
     if method == "POST"
         && matches!(
             path,
@@ -4344,8 +4372,15 @@ fn parse_vm_stat_pages(raw: &str, label: &str) -> u64 {
 }
 
 fn provider_rows() -> Vec<Value> {
-    ["ollama", "gemini", "antigravity", "claude", "codex"]
+    let registry = heiwa_provider::AccountRegistry::load();
+    let mut rows = registered_provider_rows(&registry);
+    rows.extend(["ollama", "gemini", "antigravity", "claude", "codex"]
         .iter()
+        .filter(|provider| !registry.accounts.iter().any(|account| match &account.credential {
+            heiwa_provider::Credential::OauthCli { binary } => binary == *provider,
+            heiwa_provider::Credential::LocalRuntime { .. } => account.provider == **provider,
+            _ => false,
+        }))
         .filter_map(|provider| heiwa_provider::get_auth_status(provider))
         .map(|account| {
             json!({
@@ -4355,12 +4390,55 @@ fn provider_rows() -> Vec<Value> {
                 "status": cockpit_status(&account.status),
                 "rate_group": account.rate_group,
                 "default_model": account.default_model,
-                "last_validated_at": chrono::Utc::now().to_rfc3339(),
+                "last_validated_at": Value::Null,
                 "last_error": if cockpit_status(&account.status) == "connected" { Value::Null } else { Value::String(account.status.clone()) },
                 "supported_lanes": supported_lanes(&account.provider_id),
             })
+        }));
+    rows
+}
+
+fn registered_provider_rows(registry: &heiwa_provider::AccountRegistry) -> Vec<Value> {
+    registry.accounts.iter().map(|account| {
+        let health = heiwa_provider::health::AccountHealth::project(account);
+        json!({
+            "provider_id": account.provider,
+            "account_id": account.account_id,
+            "display_name": provider_display_name(&account.provider),
+            "auth_kind": account.credential.kind_label(),
+            "status": if health.routable { "connected" } else { "degraded" },
+            "rate_group": account.rate_group,
+            "default_model": account.models.first().map(|model| &model.model_id),
+            "model_count": health.model_count,
+            "last_validated_at": Value::Null,
+            "last_error": if health.routable { None } else { Some("Check this connection in Resources.") },
+            "supported_lanes": [account.credential.kind_label()],
+            "source": "account_registry",
         })
-        .collect()
+    }).collect()
+}
+
+#[cfg(test)]
+mod provider_projection_tests {
+    use super::*;
+    #[test]
+    fn api_connections_appear_without_fabricated_probe_time_or_provider_error_text() {
+        let registry =
+            heiwa_provider::AccountRegistry::from_accounts(vec![heiwa_provider::ProviderAccount {
+                account_id: "openai-api-seat".into(),
+                provider: "openai".into(),
+                credential: heiwa_provider::Credential::ApiKey,
+                rate_group: "openai_api".into(),
+                status: heiwa_provider::AccountStatus::Error("private provider response".into()),
+                models: vec![],
+            }]);
+        let rows = registered_provider_rows(&registry);
+        assert_eq!(rows[0]["account_id"], "openai-api-seat");
+        assert_eq!(rows[0]["display_name"], "OpenAI");
+        assert_eq!(rows[0]["status"], "degraded");
+        assert!(rows[0]["last_validated_at"].is_null());
+        assert!(!rows[0].to_string().contains("private provider response"));
+    }
 }
 
 /// Live route table: ask DREX what it would pick today for each intent,
@@ -5588,6 +5666,10 @@ fn hostname_string() -> String {
 fn provider_display_name(provider: &str) -> &'static str {
     match provider {
         "ollama" => "Ollama",
+        "openai" => "OpenAI",
+        "anthropic" => "Anthropic",
+        "google" => "Google",
+        "openrouter" => "OpenRouter",
         "gemini" => "Gemini CLI",
         "antigravity" => "Antigravity",
         "claude" => "Claude Code",

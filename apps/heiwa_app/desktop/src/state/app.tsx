@@ -65,7 +65,7 @@ export function createAppState(options: AppStateOptions = {}): AppState {
       state: runtimeStatusLabel(runtime),
       skills: ["route", "summarize", "delegate"],
       tools: ["provider adapters", "local models", "receipts"],
-      personalization: ["cheapest acceptable route", "repo truth first"],
+      personalization: [],
     },
     {
       id: "calendar",
@@ -74,7 +74,7 @@ export function createAppState(options: AppStateOptions = {}): AppState {
       state: `${runtime.calendarEvents().length} items`,
       skills: ["schedule", "conflict check", "draft holds"],
       tools: ["calendar.read", "calendar.draft", "life state"],
-      personalization: ["recovery floor", "no-overlap days"],
+      personalization: [],
     },
     {
       id: "mail",
@@ -83,7 +83,7 @@ export function createAppState(options: AppStateOptions = {}): AppState {
       state: `${runtime.inbox().length} inbox rows`,
       skills: ["triage", "draft replies", "extract asks"],
       tools: ["mail.search", "mail.draft", "approval outbox"],
-      personalization: ["draft first", "no external send without approval"],
+      personalization: [],
     },
     {
       id: "finance",
@@ -92,7 +92,7 @@ export function createAppState(options: AppStateOptions = {}): AppState {
       state: "read model pending",
       skills: ["cashflow", "debt plan", "receipt audit"],
       tools: ["local docs", "calculators", "approval ledger"],
-      personalization: ["no money movement"],
+      personalization: [],
     },
     {
       id: "social",
@@ -101,7 +101,7 @@ export function createAppState(options: AppStateOptions = {}): AppState {
       state: "ingress pending",
       skills: ["context read", "draft", "boundary check"],
       tools: ["message read models", "draft outbox", "receipts"],
-      personalization: ["respect non-reciprocity"],
+      personalization: [],
     },
     {
       id: "files",
@@ -110,7 +110,7 @@ export function createAppState(options: AppStateOptions = {}): AppState {
       state: "workspace",
       skills: ["search", "index", "source cite"],
       tools: ["repo.grep", "fs.read", "artifact log"],
-      personalization: ["smallest source slice", "evidence before claim"],
+      personalization: [],
     },
   ]);
 

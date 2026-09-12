@@ -13,6 +13,8 @@ export type CalendarEvent = {
 };
 
 export type CalendarResource = {
+  id?: string;
+  source?: string;
   name: string;
   writable: boolean;
 };
@@ -21,6 +23,8 @@ export type CalendarResources = {
   source: string;
   status: string;
   calendars: CalendarResource[];
+  selected_ids?: string[];
+  reader_available?: boolean;
   detail?: string | null;
   next_action?: string | null;
 };
@@ -83,7 +87,18 @@ export type OnboardingState = {
     can_enter: boolean;
     setup_complete: boolean;
     resources: DiscoveredResource[];
+    connections?: ProviderConnection[];
+    cli_path?: string | null;
   };
+};
+
+export type ProviderConnection = {
+  account_id: string;
+  provider: string;
+  channel: string;
+  status: "connected" | "disconnected" | "needs_verification" | "verification_failed";
+  model_count: number;
+  can_manage_key: boolean;
 };
 
 export type DiscoveredResource = {

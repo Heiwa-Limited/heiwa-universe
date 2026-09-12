@@ -308,40 +308,183 @@ async fn verify_openai(account: &mut ProviderAccount, api_key: &str) -> anyhow::
     apply_discovery(account, "OpenAI", result)
 }
 
-/// Verify an OpenRouter API key and detect the free-tier model inventory.
-///
-/// Calls `GET https://openrouter.ai/api/v1/models` and keeps only models
-/// whose id carries the `:free` suffix — the zero-cost overflow tier that
-/// replaced the dead gemini-cli free seat.  Note the models endpoint is
-/// public, so a syntactically-stored but revoked key is only truly proven
-/// on the first completion call.
+/// Verify the credential at the authenticated key endpoint before accepting
+/// the public model catalog. Listing public models alone proves no access.
 async fn verify_openrouter(account: &mut ProviderAccount, api_key: &str) -> anyhow::Result<()> {
     let client = reqwest::Client::builder()
         .timeout(std::time::Duration::from_secs(10))
+        .redirect(reqwest::redirect::Policy::none())
         .build()?;
+    verify_openrouter_at(account, api_key, "https://openrouter.ai/api/v1", &client).await
+}
 
-    let resp = client
-        .get("https://openrouter.ai/api/v1/models")
-        .header("Authorization", format!("Bearer {}", api_key))
-        .send()
-        .await?;
+async fn verify_openrouter_at(
+    account: &mut ProviderAccount,
+    api_key: &str,
+    base: &str,
+    client: &reqwest::Client,
+) -> anyhow::Result<()> {
+    let result = async {
+        let key_response = client
+            .get(format!("{base}/key"))
+            .bearer_auth(api_key)
+            .send()
+            .await?;
+        anyhow::ensure!(
+            key_response.status().is_success(),
+            "OpenRouter credential verification failed"
+        );
+        let key: serde_json::Value = key_response.json().await?;
+        anyhow::ensure!(
+            key.get("data").is_some_and(serde_json::Value::is_object),
+            "OpenRouter returned invalid key metadata"
+        );
+        anyhow::ensure!(
+            key.pointer("/data/is_management_key")
+                .and_then(serde_json::Value::as_bool)
+                != Some(true),
+            "Use an inference key rather than a management key"
+        );
+        let response = client
+            .get(format!("{base}/models"))
+            .bearer_auth(api_key)
+            .send()
+            .await?;
+        anyhow::ensure!(
+            response.status().is_success(),
+            "OpenRouter model discovery failed"
+        );
+        let body: serde_json::Value = response.json().await?;
+        anyhow::ensure!(
+            body.get("data").is_some_and(serde_json::Value::is_array),
+            "OpenRouter returned an invalid model catalog"
+        );
+        Ok::<_, anyhow::Error>(openrouter_free_models(
+            &body,
+            &account.account_id,
+            &account.rate_group,
+        ))
+    }
+    .await;
+    match result {
+        Ok(models) => {
+            account.models = models;
+            account.status = AccountStatus::Connected;
+            Ok(())
+        }
+        Err(error) => {
+            account.models.clear();
+            account.status = AccountStatus::Error(
+                "OpenRouter verification failed; check the key and network".into(),
+            );
+            Err(error)
+        }
+    }
+}
 
-    if resp.status().as_u16() == 401 {
-        account.status = AccountStatus::Error("Invalid API key".to_string());
-        account.models.clear();
-        return Err(anyhow::anyhow!("Invalid OpenRouter API key"));
+#[cfg(test)]
+mod openrouter_connection_tests {
+    use super::*;
+    use std::io::{Read, Write};
+
+    async fn verify(responses: Vec<(u16, &'static str)>) -> (ProviderAccount, bool, Vec<String>) {
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let address = listener.local_addr().unwrap();
+        listener.set_nonblocking(true).unwrap();
+        let server = std::thread::spawn(move || {
+            let mut requests = vec![];
+            for (status, body) in responses {
+                let deadline = std::time::Instant::now() + std::time::Duration::from_secs(3);
+                let (mut stream, _) = loop {
+                    match listener.accept() {
+                        Ok(connection) => break connection,
+                        Err(error)
+                            if error.kind() == std::io::ErrorKind::WouldBlock
+                                && std::time::Instant::now() < deadline =>
+                        {
+                            std::thread::sleep(std::time::Duration::from_millis(5))
+                        }
+                        Err(error) => panic!("Expected verification request: {error}"),
+                    }
+                };
+                stream.set_nonblocking(false).unwrap();
+                stream
+                    .set_read_timeout(Some(std::time::Duration::from_secs(2)))
+                    .unwrap();
+                let mut request = Vec::new();
+                let mut byte = [0];
+                while !request.ends_with(b"\r\n\r\n") {
+                    stream.read_exact(&mut byte).unwrap();
+                    request.push(byte[0]);
+                }
+                requests.push(String::from_utf8(request).unwrap());
+                write!(stream, "HTTP/1.1 {status} Result\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}", body.len()).unwrap();
+            }
+            requests
+        });
+        let mut account = ProviderAccount {
+            account_id: "openrouter-test".into(),
+            provider: "openrouter".into(),
+            credential: crate::Credential::ApiKey,
+            rate_group: "openrouter".into(),
+            status: AccountStatus::Connected,
+            models: openrouter_free_models(
+                &serde_json::json!({"data":[{"id":"old:free"}]}),
+                "openrouter-test",
+                "openrouter",
+            ),
+        };
+        let client = reqwest::Client::builder()
+            .no_proxy()
+            .timeout(std::time::Duration::from_secs(2))
+            .build()
+            .unwrap();
+        let success = verify_openrouter_at(
+            &mut account,
+            "test-only-key",
+            &format!("http://{address}"),
+            &client,
+        )
+        .await
+        .is_ok();
+        (account, success, server.join().unwrap())
     }
 
-    if resp.status().is_success() {
-        let body: serde_json::Value = resp.json().await?;
-        account.models = openrouter_free_models(&body, &account.account_id, &account.rate_group);
-        account.status = AccountStatus::Connected;
-    } else {
-        // Transient upstream error — key may still be valid.
-        account.status = AccountStatus::Connected;
+    #[tokio::test]
+    async fn a_rejected_key_never_reaches_the_public_catalog() {
+        let (account, success, requests) = verify(vec![(401, "{}")]).await;
+        assert!(!success);
+        assert!(account.models.is_empty());
+        assert!(matches!(account.status, AccountStatus::Error(_)));
+        assert_eq!(requests.len(), 1);
+        assert!(requests[0].starts_with("GET /key "));
     }
 
-    Ok(())
+    #[tokio::test]
+    async fn a_catalog_failure_clears_stale_models_instead_of_claiming_connection() {
+        let (account, success, requests) = verify(vec![
+            (200, r#"{"data":{"is_management_key":false}}"#),
+            (503, "{}"),
+        ])
+        .await;
+        assert!(!success);
+        assert!(account.models.is_empty());
+        assert!(matches!(account.status, AccountStatus::Error(_)));
+        assert!(requests[1].starts_with("GET /models "));
+    }
+
+    #[tokio::test]
+    async fn an_authenticated_inference_key_can_populate_its_catalog() {
+        let (account, success, requests) = verify(vec![
+            (200, r#"{"data":{"is_management_key":false}}"#),
+            (200, r#"{"data":[{"id":"available:free"}]}"#),
+        ])
+        .await;
+        assert!(success);
+        assert_eq!(account.models[0].model_id, "available:free");
+        assert_eq!(account.status, AccountStatus::Connected);
+        assert_eq!(requests.len(), 2);
+    }
 }
 
 /// Map an OpenRouter `/models` response to free-tier `DetectedModel`s.

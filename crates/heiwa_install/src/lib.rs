@@ -8,6 +8,9 @@ use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
+mod runtime_binary;
+pub use runtime_binary::install_runtime_binary;
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DoctorReport {
     pub rust_version: Option<String>,
@@ -323,17 +326,7 @@ pub fn run_install() -> Result<()> {
     let manifest_path = heiwa_dir.join("machine.json");
     println!("Machine manifest written to {:?}", manifest_path);
 
-    if report.rust_version.is_none() {
-        println!("Rust not found. Please install Rust: https://rustup.rs/");
-    }
-
-    if report.node_version.is_none() {
-        println!("Node.js not found. Please install Node.js: https://nodejs.org/");
-    }
-
-    if report.python_version.is_none() {
-        println!("Python 3 not found. Please install Python 3.");
-    }
+    println!("Heiwa runs without Rust, Node.js, or Python. Provider tools may have their own requirements.");
 
     println!(
         "Installed canonical launcher at {:?}",
@@ -640,15 +633,12 @@ fn write_canonical_launcher_internal(
         return Ok(());
     }
 
-    // Robust dev-env check: Does Cargo.toml exist where we expect it in the monorepo?
+    // A packaged binary has no repository checkout to fall back to, so copy it
+    // into the durable per-user runtime. Development installs retain the script
+    // launcher because it resolves the active checkout and debug binary.
     let is_dev_env = repo_root.join("Cargo.toml").exists();
-
     if !is_dev_env && current_exe.exists() {
-        if current_exe != launcher_path {
-            fs::copy(current_exe, &launcher_path)?;
-            #[cfg(unix)]
-            fs::set_permissions(&launcher_path, fs::Permissions::from_mode(0o755))?;
-        }
+        install_runtime_binary(heiwa_dir, current_exe)?;
         return Ok(());
     }
 
@@ -690,7 +680,6 @@ exit 1
 "#,
         repo_root = repo_root.display()
     );
-
     fs::write(&launcher_path, launcher)?;
     #[cfg(unix)]
     fs::set_permissions(&launcher_path, fs::Permissions::from_mode(0o755))?;
@@ -1390,7 +1379,8 @@ mod tests {
         assert!(target.exists());
         let content = fs::read_to_string(target)?;
         assert!(content.starts_with("#!/bin/zsh"));
-        assert!(content.contains("REPO_ROOT=\"${HEIWA_ROOT:-"));
+        assert!(content.contains("target/debug/heiwa"));
+        assert!(content.contains("apps/heiwa_cli/bin/heiwa"));
 
         Ok(())
     }

@@ -248,24 +248,20 @@ mod tests {
 
     #[test]
     fn picks_a_healthy_api_key_account_for_the_route() {
-        let registry = AccountRegistry {
-            accounts: vec![with_models(
-                api_key_account("anthropic", AccountStatus::Connected),
-                &["claude-opus-5"],
-            )],
-        };
+        let registry = AccountRegistry::from_accounts(vec![with_models(
+            api_key_account("anthropic", AccountStatus::Connected),
+            &["claude-opus-5"],
+        )]);
         let account = routable_api_key_account(&registry, "claude").expect("account");
         assert_eq!(account.account_id, "anthropic-api-1");
     }
 
     #[test]
     fn skips_an_unhealthy_api_key_account_so_a_cli_seat_can_serve() {
-        let registry = AccountRegistry {
-            accounts: vec![api_key_account(
-                "anthropic",
-                AccountStatus::Error("Invalid API key".to_string()),
-            )],
-        };
+        let registry = AccountRegistry::from_accounts(vec![api_key_account(
+            "anthropic",
+            AccountStatus::Error("Invalid API key".to_string()),
+        )]);
         assert!(routable_api_key_account(&registry, "claude").is_none());
     }
 
@@ -312,12 +308,10 @@ mod tests {
         // Two keys for the same vendor with different inventories — a work key
         // and a personal key. Taking the first would send an Opus turn to a
         // seat that cannot serve Opus.
-        let registry = AccountRegistry {
-            accounts: vec![
-                with_models(named("anthropic-work", "anthropic"), &["claude-haiku-4-5"]),
-                with_models(named("anthropic-personal", "anthropic"), &["claude-opus-5"]),
-            ],
-        };
+        let registry = AccountRegistry::from_accounts(vec![
+            with_models(named("anthropic-work", "anthropic"), &["claude-haiku-4-5"]),
+            with_models(named("anthropic-personal", "anthropic"), &["claude-opus-5"]),
+        ]);
 
         let account =
             routable_api_key_account_for(&registry, "claude", "claude-opus-5").expect("account");
@@ -330,12 +324,10 @@ mod tests {
         // Inventory may be empty (never probed) or the caller may pass a model
         // this crate has not seen. Refusing to route would turn a working key
         // into a dead end.
-        let registry = AccountRegistry {
-            accounts: vec![with_models(
-                named("anthropic-work", "anthropic"),
-                &["claude-haiku-4-5"],
-            )],
-        };
+        let registry = AccountRegistry::from_accounts(vec![with_models(
+            named("anthropic-work", "anthropic"),
+            &["claude-haiku-4-5"],
+        )]);
 
         let account = routable_api_key_account_for(&registry, "claude", "some-unlisted-model")
             .expect("account");
@@ -355,9 +347,7 @@ mod tests {
         seat.rate_group = "claude_code".to_string();
         let seat = with_models(seat, &["claude-fable-5"]);
         let key = with_models(named("anthropic-api-1", "anthropic"), &["claude-opus-5"]);
-        let registry = AccountRegistry {
-            accounts: vec![seat, key],
-        };
+        let registry = AccountRegistry::from_accounts(vec![seat, key]);
 
         assert!(
             routable_api_key_account_for(&registry, "claude", "claude-fable-5").is_none(),
@@ -376,9 +366,7 @@ mod tests {
     fn a_model_served_only_by_an_unhealthy_account_does_not_resurrect_it() {
         let mut broken = with_models(named("anthropic-work", "anthropic"), &["claude-opus-5"]);
         broken.status = AccountStatus::Error("Invalid API key".to_string());
-        let registry = AccountRegistry {
-            accounts: vec![broken],
-        };
+        let registry = AccountRegistry::from_accounts(vec![broken]);
 
         assert!(routable_api_key_account_for(&registry, "claude", "claude-opus-5").is_none());
     }

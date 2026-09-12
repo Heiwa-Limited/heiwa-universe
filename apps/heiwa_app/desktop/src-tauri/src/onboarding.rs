@@ -16,6 +16,8 @@ struct WorkspaceState {
     can_enter: bool,
     setup_complete: bool,
     resources: Vec<resources::Resource>,
+    connections: Vec<heiwa_provider::connections::ConnectionSummary>,
+    cli_path: Option<String>,
 }
 
 /// Passive by default. Explicit verification may contact configured provider
@@ -34,7 +36,7 @@ pub async fn onboarding_state(
         None => None,
     };
     let mut registry = if paths.is_some() {
-        heiwa_provider::AccountRegistry::load()
+        heiwa_provider::AccountRegistry::load_strict().map_err(|error| error.to_string())?
     } else {
         heiwa_provider::AccountRegistry::default()
     };
@@ -43,6 +45,7 @@ pub async fn onboarding_state(
             return Err("Resolve the local state directory before verifying providers.".into());
         }
         heiwa_provider::detect::auto_discover(&mut registry).await;
+        registry.save().map_err(|error| error.to_string())?;
     }
     let fleet = heiwa_provider::health::FleetHealth::project(&registry.accounts);
     Ok(DesktopOnboardingState {
@@ -56,8 +59,43 @@ pub async fn onboarding_state(
             can_enter: paths.is_some() && identity.is_some(),
             setup_complete: setup.is_some(),
             resources: resources::discover(paths.as_ref(), &registry),
+            connections: heiwa_provider::connections::summaries(&registry),
+            cli_path: paths.as_ref().and_then(|paths| {
+                let binary = paths.runtime_root.join("bin").join(if cfg!(windows) {
+                    "heiwa.exe"
+                } else {
+                    "heiwa"
+                });
+                binary.is_file().then(|| binary.display().to_string())
+            }),
         },
     })
+}
+
+#[tauri::command]
+pub async fn connect_api_provider(
+    provider: String,
+    api_key: String,
+) -> Result<DesktopOnboardingState, String> {
+    heiwa_provider::connections::connect_api_key(&provider, &api_key)
+        .await
+        .map_err(|error| error.to_string())?;
+    onboarding_state(None).await
+}
+
+#[tauri::command]
+pub async fn verify_api_provider(account_id: String) -> Result<DesktopOnboardingState, String> {
+    heiwa_provider::connections::verify_api_connection(&account_id)
+        .await
+        .map_err(|error| error.to_string())?;
+    onboarding_state(None).await
+}
+
+#[tauri::command]
+pub async fn disconnect_api_provider(account_id: String) -> Result<DesktopOnboardingState, String> {
+    heiwa_provider::connections::disconnect_api_connection(&account_id)
+        .map_err(|error| error.to_string())?;
+    onboarding_state(None).await
 }
 
 #[tauri::command]

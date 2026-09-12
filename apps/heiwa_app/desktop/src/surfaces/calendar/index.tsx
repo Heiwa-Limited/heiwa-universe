@@ -24,6 +24,23 @@ function CalendarSurface() {
   const [stagingError, setStagingError] = createSignal<string | null>(null);
   const [stagingNotice, setStagingNotice] = createSignal<string | null>(null);
 
+  const [readSelection, setReadSelection] = createSignal<string[] | null>(null);
+  const [readBusy, setReadBusy] = createSignal(false);
+  const [readNotice, setReadNotice] = createSignal<string | null>(null);
+  const selectedIds = () => readSelection() ?? app.runtime.calendarResources()?.selected_ids ?? [];
+  async function readCalendars(): Promise<void> {
+    if (readBusy() || !selectedIds().length) return;
+    setReadBusy(true);
+    setConnectionError(null);
+    setReadNotice(null);
+    try {
+      const result = await app.runtime.readAppleCalendars(selectedIds());
+      setReadSelection(null);
+      setReadNotice(`${result.fetched} events read from your selected calendars. ${result.truncated ? "This is a partial import; unseen events were preserved." : "The selected date range is refreshed."}`);
+    } catch (cause) { setConnectionError(cause instanceof Error ? cause.message : String(cause)); }
+    finally { setReadBusy(false); }
+  }
+
   const writableCalendars = createMemo(
     () => app.runtime.calendarResources()?.calendars.filter((calendar) => calendar.writable) ?? [],
   );
@@ -142,7 +159,7 @@ function CalendarSurface() {
         >
           <button
             class="small-action"
-            disabled={connectionBusy()}
+            disabled={connectionBusy() || readBusy()}
             onClick={() => void setAppleConnection(false)}
           >
             Disconnect Apple Calendar
@@ -154,6 +171,26 @@ function CalendarSurface() {
       </section>
 
       <Show when={app.runtime.calendarResources()?.status === "ready"}>
+        <Show when={app.runtime.calendarResources()?.reader_available}>
+          <section class="panel cal-import" aria-busy={readBusy()}>
+            <strong>Read your calendars</strong>
+            <p class="quiet">Choose calendars for this workspace. Reads up to 500 events from the last 31 days through the next 90 days, including recurring occurrences.</p>
+            <fieldset disabled={readBusy()}>
+              <legend>Calendars to import</legend>
+              <For each={app.runtime.calendarResources()?.calendars.filter((calendar) => calendar.id)}>{(calendar) => (
+                <label class="cal-resource-choice">
+                  <input type="checkbox" checked={selectedIds().includes(calendar.id!)} onChange={(event) =>
+                    setReadSelection(event.currentTarget.checked ? [...selectedIds().filter((id) => id !== calendar.id), calendar.id!] : selectedIds().filter((id) => id !== calendar.id))} />
+                  <span>{calendar.name}{calendar.source ? ` · ${calendar.source}` : ""}</span>
+                </label>
+              )}</For>
+            </fieldset>
+            <button class="btn-primary" disabled={readBusy() || !selectedIds().length} onClick={() => void readCalendars()}>
+              {readBusy() ? "Reading calendars…" : "Read selected calendars"}
+            </button>
+            <Show when={readNotice()}><p class="quiet" role="status">{readNotice()}</p></Show>
+          </section>
+        </Show>
         <form class="panel cal-stage" onSubmit={(event) => void stageAppleEvent(event)}>
           <header>
             <div>
