@@ -162,3 +162,88 @@ fn app_api_sends_signed_headers_without_disclosing_machine_token() {
     assert!(!String::from_utf8_lossy(&output.stdout).contains(token));
     assert!(!String::from_utf8_lossy(&output.stderr).contains(token));
 }
+
+#[cfg(target_os = "macos")]
+#[test]
+fn runtime_keep_awake_exits_after_forced_parent_stop() {
+    use std::fs;
+    use std::net::TcpListener;
+    use std::process::{Child, Stdio};
+    use std::thread;
+    use std::time::{Duration, Instant};
+
+    struct Cleanup {
+        runtime: Child,
+        helper: Option<i32>,
+    }
+    impl Drop for Cleanup {
+        fn drop(&mut self) {
+            let _ = self.runtime.kill();
+            let _ = self.runtime.wait();
+            if let Some(pid) = self.helper {
+                // Only the descendant reported by this disposable runtime.
+                unsafe { libc::kill(pid, libc::SIGKILL) };
+            }
+        }
+    }
+
+    let fixture = tempfile::tempdir().unwrap();
+    let log = fixture.path().join("runtime.log");
+    let port = TcpListener::bind(("127.0.0.1", 0))
+        .unwrap()
+        .local_addr()
+        .unwrap()
+        .port();
+    let runtime = Command::new(env!("CARGO_BIN_EXE_heiwa"))
+        .env_clear()
+        .env("HOME", fixture.path())
+        .env("PATH", "/usr/bin:/bin")
+        .env("HEIWA_OLLAMA_BASE", "http://127.0.0.1:9")
+        .args(["app", "start", "--port", &port.to_string(), "--no-open"])
+        .stdin(Stdio::null())
+        .stdout(fs::File::create(&log).unwrap())
+        .stderr(Stdio::null())
+        .spawn()
+        .unwrap();
+    let mut cleanup = Cleanup {
+        runtime,
+        helper: None,
+    };
+    let deadline = Instant::now() + Duration::from_secs(10);
+    while Instant::now() < deadline {
+        let output = fs::read_to_string(&log).unwrap();
+        cleanup.helper = output.lines().find_map(|line| {
+            line.trim()
+                .strip_prefix("caffeinate: ")?
+                .parse::<i32>()
+                .ok()
+        });
+        if cleanup.helper.is_some() {
+            break;
+        }
+        assert!(
+            cleanup.runtime.try_wait().unwrap().is_none(),
+            "runtime exited before startup"
+        );
+        thread::sleep(Duration::from_millis(25));
+    }
+    let helper = cleanup
+        .helper
+        .expect("runtime must report its real keep-awake helper");
+    assert_eq!(
+        unsafe { libc::kill(helper, 0) },
+        0,
+        "helper was not running"
+    );
+    cleanup.runtime.kill().unwrap();
+    cleanup.runtime.wait().unwrap();
+    let deadline = Instant::now() + Duration::from_secs(5);
+    while Instant::now() < deadline {
+        if unsafe { libc::kill(helper, 0) } != 0 {
+            cleanup.helper = None;
+            return;
+        }
+        thread::sleep(Duration::from_millis(25));
+    }
+    panic!("keep-awake helper {helper} outlived its force-stopped runtime");
+}
