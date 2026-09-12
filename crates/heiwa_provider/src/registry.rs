@@ -117,9 +117,9 @@ pub enum InventoryTruth {
 pub enum PriceTruth {
     /// Rates came from a source that publishes them (static catalog, local
     /// runtime, operator config). `cost_per_1k_*` is authoritative.
-    #[default]
     Known,
     /// No published rate. `cost_per_1k_*` is a placeholder, not a price.
+    #[default]
     Unknown,
 }
 
@@ -168,10 +168,10 @@ pub struct DetectedModel {
 
     /// Whether `cost_per_1k_*` is a real rate or a placeholder.
     ///
-    /// Defaults to [`PriceTruth::Known`] so registries persisted before this
-    /// field existed keep their meaning: local models at 0.0 are genuinely
-    /// free and must stay routable under a budget. Stale cloud entries are
-    /// corrected at the next discovery pass.
+    /// Missing evidence defaults to [`PriceTruth::Unknown`]. Older registries
+    /// used zero for both free models and undiscovered cloud rates; loading
+    /// them cannot establish a budget-safe price. Discovery or explicit
+    /// operator configuration must establish known rates, including free ones.
     #[serde(default)]
     pub price_truth: PriceTruth,
 

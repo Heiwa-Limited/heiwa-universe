@@ -436,12 +436,20 @@ impl DrexRouter {
             });
         }
 
-        // Cost first, then saturation, then the rate-group ladder as a tiebreak,
-        // then account_id for stable output.
-        priced.sort_by(|(ca, _, cost_a), (cb, _, cost_b)| {
-            cost_a
-                .partial_cmp(cost_b)
-                .unwrap_or(std::cmp::Ordering::Equal)
+        // Preserve price truth across accounts as well as within each account.
+        // Unknown rates are placeholders and must never compete as dollars.
+        priced.sort_by(|(ca, ma, cost_a), (cb, mb, cost_b)| {
+            let price_order = match (ma.price_truth, mb.price_truth) {
+                (PriceTruth::Known, PriceTruth::Unknown) => std::cmp::Ordering::Less,
+                (PriceTruth::Unknown, PriceTruth::Known) => std::cmp::Ordering::Greater,
+                (PriceTruth::Known, PriceTruth::Known) => cost_a
+                    .partial_cmp(cost_b)
+                    .unwrap_or(std::cmp::Ordering::Equal),
+                (PriceTruth::Unknown, PriceTruth::Unknown) => {
+                    ma.capability_class.cmp(&mb.capability_class)
+                }
+            };
+            price_order
                 .then(
                     ca.saturation
                         .partial_cmp(&cb.saturation)
@@ -714,6 +722,78 @@ mod price_truth_tests {
         let mut m = priced(id, class, 0.0, 0.0);
         m.price_truth = PriceTruth::Unknown;
         m
+    }
+
+    fn decide_across_accounts(
+        models: Vec<DetectedModel>,
+        ceiling: Option<f64>,
+    ) -> Result<RouteDecision> {
+        let mut registry = AccountRegistry::default();
+        for mut model in models {
+            model.account_id = model.model_id.clone();
+            registry.upsert(ProviderAccount {
+                account_id: model.account_id.clone(),
+                provider: model.provider.clone(),
+                credential: Credential::ApiKey,
+                rate_group: model.rate_group.clone(),
+                status: AccountStatus::Connected,
+                models: vec![model],
+            });
+        }
+        // API-key metadata never reads this isolated vault; no credentials or
+        // provider requests are needed to exercise the real account selector.
+        DrexRouter::new(
+            Arc::new(registry),
+            Arc::new(ProviderVault::with_service("heiwa-price-truth-test")),
+            Arc::new(QuotaLedger::open_in_memory().expect("isolated quota")),
+        )
+        .with_clock(|| 1_800_000_000)
+        .decide(&RouteInput {
+            intent: "code".into(),
+            prompt: "test route selection".into(),
+            hints: serde_json::Value::Null,
+            min_capability: Some(3),
+            max_cost_usd: ceiling,
+            est_output_tokens: Some(800),
+        })
+    }
+
+    #[test]
+    fn known_price_wins_across_provider_accounts() {
+        let decision = decide_across_accounts(
+            vec![unpriced("cloud", 5), priced("priced", 3, 0.001, 0.002)],
+            None,
+        )
+        .expect("known candidate qualifies");
+        assert_eq!(decision.model_id, "priced");
+    }
+
+    #[test]
+    fn unknown_account_fallback_uses_the_smallest_sufficient_model() {
+        let decision = decide_across_accounts(
+            vec![unpriced("a-frontier", 5), unpriced("z-sufficient", 3)],
+            None,
+        )
+        .expect("unbudgeted fallback");
+        assert_eq!(decision.model_id, "z-sufficient");
+        assert!(decision.rationale.contains("est_cost=unknown"));
+    }
+
+    #[test]
+    fn legacy_cloud_placeholder_cannot_satisfy_a_zero_budget() {
+        let mut saved = serde_json::to_value(unpriced("legacy-cloud", 5)).unwrap();
+        saved.as_object_mut().unwrap().remove("price_truth");
+        let legacy: DetectedModel = serde_json::from_value(saved).unwrap();
+        assert!(decide_across_accounts(vec![legacy], Some(0.0)).is_err());
+    }
+
+    #[test]
+    fn explicit_known_zero_survives_persistence_and_budgeted_routing() {
+        let saved = serde_json::to_vec(&priced("free", 3, 0.0, 0.0)).unwrap();
+        let restored: DetectedModel = serde_json::from_slice(&saved).unwrap();
+        let decision = decide_across_accounts(vec![restored], Some(0.0)).unwrap();
+        assert_eq!(decision.model_id, "free");
+        assert!(decision.rationale.contains("est_cost=$0.00000"));
     }
 
     #[test]
