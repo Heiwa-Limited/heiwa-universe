@@ -4692,6 +4692,7 @@ mod tests {
                     supports_audio: false,
                     cost_per_1k_input: 0.0,
                     cost_per_1k_output: 0.0,
+                    price_truth: heiwa_provider::PriceTruth::Known,
                     inventory_truth: InventoryTruth::Verified,
                 }],
             }
@@ -4943,6 +4944,7 @@ mod tests {
                     supports_audio: false,
                     cost_per_1k_input: 0.003,
                     cost_per_1k_output: 0.015,
+                    price_truth: heiwa_provider::PriceTruth::Known,
                     inventory_truth: heiwa_provider::InventoryTruth::Inferred,
                 }],
             }],
@@ -4979,6 +4981,7 @@ mod tests {
                     supports_audio: false,
                     cost_per_1k_input: 0.003,
                     cost_per_1k_output: 0.015,
+                    price_truth: heiwa_provider::PriceTruth::Known,
                     inventory_truth: heiwa_provider::InventoryTruth::Inferred,
                 }],
             }],
@@ -5006,6 +5009,7 @@ mod tests {
             supports_audio: false,
             cost_per_1k_input: 0.0,
             cost_per_1k_output: 0.0,
+            price_truth: heiwa_provider::PriceTruth::Known,
             inventory_truth: heiwa_provider::InventoryTruth::Verified,
         };
         let mut registry = heiwa_provider::AccountRegistry {
@@ -5048,6 +5052,7 @@ mod tests {
             supports_audio: false,
             cost_per_1k_input: 0.0,
             cost_per_1k_output: 0.0,
+            price_truth: heiwa_provider::PriceTruth::Known,
             inventory_truth: heiwa_provider::InventoryTruth::Verified,
         };
         let registry = heiwa_provider::AccountRegistry {

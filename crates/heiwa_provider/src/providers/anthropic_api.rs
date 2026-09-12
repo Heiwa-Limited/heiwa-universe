@@ -13,7 +13,7 @@
 use crate::adapter::{Message, ProviderAdapter, Role, StreamEvent, TokenUsage};
 use crate::providers::sse::SseEvent;
 use crate::providers::stream::{pump, SseConsumer};
-use crate::registry::{DetectedModel, InventoryTruth};
+use crate::registry::{DetectedModel, InventoryTruth, PriceTruth};
 use anyhow::{anyhow, Result};
 use async_trait::async_trait;
 use serde_json::{json, Value};
@@ -274,9 +274,11 @@ fn models_from_list_response(
                 supports_vision: true,
                 supports_audio: false,
                 // Per-token prices are not on the models endpoint; the cost
-                // layer owns pricing.
+                // layer owns pricing. These zeros are placeholders, so the
+                // price is Unknown — routing must not read them as free.
                 cost_per_1k_input: 0.0,
                 cost_per_1k_output: 0.0,
+                price_truth: PriceTruth::Unknown,
                 inventory_truth: InventoryTruth::Verified,
             })
         })

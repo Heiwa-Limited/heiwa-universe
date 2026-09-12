@@ -8,7 +8,7 @@
 use crate::adapter::{Message, ProviderAdapter, Role, StreamEvent, TokenUsage};
 use crate::providers::sse::SseEvent;
 use crate::providers::stream::{pump, SseConsumer};
-use crate::registry::{DetectedModel, InventoryTruth};
+use crate::registry::{DetectedModel, InventoryTruth, PriceTruth};
 use anyhow::{anyhow, Result};
 use async_trait::async_trait;
 use serde_json::{json, Value};
@@ -207,8 +207,11 @@ fn models_from_list_response(
                 supports_tools: true,
                 supports_vision: true,
                 supports_audio: false,
+                // The list endpoint does not publish rates; these are
+                // placeholders, not a price of zero.
                 cost_per_1k_input: 0.0,
                 cost_per_1k_output: 0.0,
+                price_truth: PriceTruth::Unknown,
                 inventory_truth: InventoryTruth::Verified,
             })
         })
