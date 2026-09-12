@@ -56,6 +56,11 @@ fn call(request: &Value) -> Result<Value> {
         )
     })?;
     let mut command = std::process::Command::new(helper);
+    // launchd labels the always-on runtime with its XPC service identity. That
+    // identity is not valid for the standalone EventKit reader and causes
+    // TCC to reject an otherwise authorized Calendar read. Keep the service
+    // identity on Heiwa itself, but do not pass it to the native helper.
+    command.env_remove("XPC_SERVICE_NAME");
     command.arg(request.to_string());
     let bytes = heiwa_core::subprocess::bounded_output(
         &mut command,
