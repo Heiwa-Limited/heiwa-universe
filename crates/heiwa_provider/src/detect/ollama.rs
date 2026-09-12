@@ -1,4 +1,4 @@
-use crate::registry::{AccountStatus, DetectedModel, InventoryTruth, ProviderAccount};
+use crate::registry::{AccountStatus, DetectedModel, InventoryTruth, PriceTruth, ProviderAccount};
 use serde::Deserialize;
 use std::time::Duration;
 use thiserror::Error;
@@ -253,8 +253,10 @@ async fn detect_models_at_endpoint(
             supports_tools: capability_flags.supports_tools,
             supports_vision: capability_flags.supports_vision,
             supports_audio: capability_flags.supports_audio,
+            // Local inference: 0.0 is the real rate, not a placeholder.
             cost_per_1k_input: 0.0,
             cost_per_1k_output: 0.0,
+            price_truth: PriceTruth::Known,
             inventory_truth: InventoryTruth::Verified,
         });
     }

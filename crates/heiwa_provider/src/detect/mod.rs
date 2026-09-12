@@ -350,7 +350,7 @@ fn openrouter_free_models(
     account_id: &str,
     rate_group: &str,
 ) -> Vec<crate::registry::DetectedModel> {
-    use crate::registry::{DetectedModel, InventoryTruth};
+    use crate::registry::{DetectedModel, InventoryTruth, PriceTruth};
 
     let Some(data) = body.get("data").and_then(|d| d.as_array()) else {
         return Vec::new();
@@ -388,8 +388,10 @@ fn openrouter_free_models(
                 supports_tools: supported_parameters.contains(&"tools"),
                 supports_vision: input_modalities.contains(&"image"),
                 supports_audio: input_modalities.contains(&"audio"),
+                // Filtered to `:free` ids above, so 0.0 is the real rate.
                 cost_per_1k_input: 0.0,
                 cost_per_1k_output: 0.0,
+                price_truth: PriceTruth::Known,
                 inventory_truth: InventoryTruth::Verified,
             })
         })
@@ -424,7 +426,7 @@ fn openrouter_capability_class(id: &str) -> u8 {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::registry::InventoryTruth;
+    use crate::registry::{InventoryTruth, PriceTruth};
 
     #[test]
     fn a_provider_key_in_the_environment_registers_an_account() {
@@ -548,6 +550,7 @@ mod tests {
                 supports_audio: false,
                 cost_per_1k_input: 0.0,
                 cost_per_1k_output: 0.0,
+                price_truth: PriceTruth::Known,
                 inventory_truth: InventoryTruth::Verified,
             }],
         }

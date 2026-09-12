@@ -21,7 +21,8 @@ pub mod routing;
 
 pub use oauth::{needs_refresh, OAuthBridgeError, ProviderVault, OAUTH_SERVICE};
 pub use registry::{
-    AccountRegistry, AccountStatus, Credential, DetectedModel, InventoryTruth, ProviderAccount,
+    AccountRegistry, AccountStatus, Credential, DetectedModel, InventoryTruth, PriceTruth,
+    ProviderAccount,
 };
 
 // Re-export the OAuth payload type so callers don't need a direct dep on heiwa-vault.
