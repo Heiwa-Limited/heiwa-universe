@@ -48,7 +48,7 @@ it("imports only explicitly selected calendar identities and shows the loaded ev
   const state = createRoot((cleanupRoot) => {
     dispose = cleanupRoot;
     return createAppState({ runtime: {
-      post,
+      post: async <T,>(path: string, body: unknown): Promise<T> => await post(path, body) as T,
       get: async <T,>(path: string): Promise<T> => ({ data: path.endsWith("/resources") ? {
         source: "apple_calendar", status: "ready", reader_available: true, selected_ids: imported ? ["work-id"] : [],
         calendars: [{ id: "work-id", name: "Work", source: "iCloud", writable: true }, { id: "private-id", name: "Private", writable: true }],
