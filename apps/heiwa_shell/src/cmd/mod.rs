@@ -3,6 +3,7 @@ pub mod approvals;
 pub mod auto;
 pub mod calendar;
 pub(crate) mod calendar_apple;
+pub(crate) mod calendar_read;
 pub mod capabilities;
 pub mod compress;
 pub mod connectors;

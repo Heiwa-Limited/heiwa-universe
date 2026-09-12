@@ -162,3 +162,13 @@
     backdrop-filter: none;
   }
 }
+.provider-connections { margin: 24px 0; }
+.connection-list { list-style: none; padding: 0; margin: 16px 0; }
+.connection-row { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 12px 0; border-bottom: 1px solid var(--border-subtle); }
+.connection-row span { display: block; margin-top: 4px; font-size: 12px; color: var(--content-muted); }
+.connection-actions { display: flex; gap: 8px; }
+.connection-add { margin-top: 16px; }
+.connection-add summary { cursor: pointer; padding: 8px 0; }
+.connection-add form { display: grid; gap: 12px; padding: 12px 0; }
+.connection-add label { display: grid; gap: 6px; }
+.connection-add input, .connection-add select { width: 100%; padding: 10px 12px; border: 1px solid var(--border-subtle); border-radius: 8px; background: var(--surface-input); color: var(--content-primary); font: inherit; }

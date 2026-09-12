@@ -112,6 +112,22 @@ jobs:
           RELEASE_VERSION: ${{ steps.meta.outputs.version }}
         run: bash scripts/check_installer_version_pin.sh --served "$RELEASE_VERSION"
 
+      - name: Require Apple distribution credentials
+        shell: bash
+        env:
+          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
+        run: |
+          set -euo pipefail
+          for name in APPLE_CERTIFICATE APPLE_CERTIFICATE_PASSWORD APPLE_SIGNING_IDENTITY APPLE_ID APPLE_TEAM_ID APPLE_PASSWORD; do
+            test -n "${!name}" || { echo "Missing required release credential: $name" >&2; exit 1; }
+          done
+          [[ "$APPLE_SIGNING_IDENTITY" == 'Developer ID Application:'* ]] || { echo 'A Developer ID Application identity is required.' >&2; exit 1; }
+
       - name: Require successful full main certification
         shell: bash
         env:
@@ -194,7 +210,7 @@ jobs:
   # The CLI tarball in `build` below still ships for all three platforms.
   desktop-bundle:
     name: Build Desktop Bundle (${{ matrix.name }})
-    needs: [metadata]
+    needs: [metadata, build]
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 60
     strategy:
@@ -203,17 +219,13 @@ jobs:
         include:
           - name: macos-aarch64
             runner: macos-26
-            # No .dmg. It builds fine and is the one macOS format we cannot
-            # ship: a browser download sets com.apple.quarantine and Gatekeeper
-            # blocks an unsigned app, so publishing it would put a broken
-            # artifact behind the most obvious download button on the releases
-            # page. curl and the updater set no quarantine bit; both consume
-            # the tarball below.
-            bundles: app
+            # Both download paths contain the same signed, notarized app.
+            bundles: app,dmg
             artifact_glob: |
               dist/desktop/*-app.tar.gz
               dist/desktop/*-app.tar.gz.sig
               dist/desktop/latest.json
+              dist/desktop/*.dmg
 
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
@@ -245,40 +257,68 @@ jobs:
       - name: Install frontend dependencies
         run: npm ci --ignore-scripts --prefix apps/heiwa_app/desktop
 
-      - name: Build the runtime the app ships with
-        # The bundle carries its own runtime. Without this the installed app
-        # would fall back to whatever `heiwa` happens to be on the user's
-        # PATH, or to none at all.
-        run: cargo build --release -p heiwa-shell --bin heiwa --locked
+      - name: Download the exact published CLI candidate
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: macos-aarch64
+          path: runtime-asset
 
-      - name: Stage the runtime as a bundled resource
+      - name: Stage the signed runtime as a bundled resource
         shell: bash
+        env:
+          VERSION: ${{ needs.metadata.outputs.version }}
         run: |
-          mkdir -p apps/heiwa_app/desktop/src-tauri/resources
-          if [ "$RUNNER_OS" = "Windows" ]; then
-            cp target/release/heiwa.exe apps/heiwa_app/desktop/src-tauri/resources/
-          else
-            cp target/release/heiwa apps/heiwa_app/desktop/src-tauri/resources/
-          fi
+          set -euo pipefail
+          mkdir -p runtime-unpacked apps/heiwa_app/desktop/src-tauri/resources
+          tar -xzf "runtime-asset/heiwa-${VERSION}-macos-aarch64.tar.gz" -C runtime-unpacked
+          cp "runtime-unpacked/heiwa-${VERSION}-macos-aarch64/heiwa" apps/heiwa_app/desktop/src-tauri/resources/heiwa
+          codesign --verify --strict apps/heiwa_app/desktop/src-tauri/resources/heiwa
+
+      - name: Prepare Developer ID signing
+        env:
+          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+        run: bash scripts/macos_signing_keychain.sh
 
       - name: Build desktop bundle
         env:
-          # createUpdaterArtifacts is on, so the bundler signs the update
-          # payload during this step. Without the key the build fails here
-          # rather than publishing a release nobody can update to.
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ""
-        run: npm --prefix apps/heiwa_app/desktop run tauri:build -- --bundles ${{ matrix.bundles }}
+          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
+        run: |
+          set -euo pipefail
+          python3 - <<'PYCONFIG'
+          import json, os
+          with open(os.path.join(os.environ['RUNNER_TEMP'], 'heiwa-signing.json'), 'w') as handle:
+              json.dump({'bundle': {'macOS': {'signingIdentity': os.environ['APPLE_SIGNING_IDENTITY'], 'hardenedRuntime': True}}}, handle)
+          PYCONFIG
+          npm --prefix apps/heiwa_app/desktop run tauri:build -- --bundles ${{ matrix.bundles }} --config "$RUNNER_TEMP/heiwa-signing.json"
 
-      # A browser download sets com.apple.quarantine and Gatekeeper blocks
-      # the app; curl and the updater do not. So the shipped macOS artifact is
-      # the bundler's own signed tarball, fetched by the installer, rather
-      # than the .dmg. One artifact serves the installer and the updater.
+      - name: Verify notarized app and coherent runtime
+        shell: bash
+        env:
+          VERSION: ${{ needs.metadata.outputs.version }}
+        run: |
+          set -euo pipefail
+          app="target/release/bundle/macos/Heiwa.app"
+          codesign --verify --deep --strict "$app"
+          xcrun stapler validate "$app"
+          spctl --assess --type execute --verbose=2 "$app"
+          cmp "runtime-unpacked/heiwa-${VERSION}-macos-aarch64/heiwa" "$app/Contents/Resources/resources/heiwa"
+          codesign --verify --strict "$app/Contents/Resources/resources/heiwa-apple-resources"
+
       - name: Collect the signed macOS app and write the update manifest
         if: matrix.name == 'macos-aarch64'
         shell: bash
         env:
           VERSION: ${{ needs.metadata.outputs.version }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
         run: |
           set -euo pipefail
           bundle_dir="target/release/bundle/macos"
@@ -297,6 +337,13 @@ jobs:
           asset="heiwa-${VERSION}-macos-aarch64-app.tar.gz"
           cp "$archive" "dist/desktop/${asset}"
           cp "$signature" "dist/desktop/${asset}.sig"
+          dmg=(target/release/bundle/dmg/*.dmg)
+          test "${#dmg[@]}" -eq 1 && test -f "${dmg[0]}"
+          xcrun notarytool submit "${dmg[0]}" --apple-id "$APPLE_ID" --team-id "$APPLE_TEAM_ID" --password "$APPLE_PASSWORD" --wait --output-format json > "$RUNNER_TEMP/heiwa-dmg-notarization.json"
+          python3 -c 'import json,sys; assert json.load(open(sys.argv[1]))["status"] == "Accepted", "DMG notarization was not accepted"' "$RUNNER_TEMP/heiwa-dmg-notarization.json"
+          xcrun stapler staple "${dmg[0]}"
+          xcrun stapler validate "${dmg[0]}"
+          cp "${dmg[0]}" "dist/desktop/heiwa-${VERSION}-macos-aarch64.dmg"
 
           # The manifest points at the renamed asset, so the URL has to be
           # built from the release tag rather than copied from the bundler.
@@ -323,6 +370,13 @@ jobs:
           path: ${{ matrix.artifact_glob }}
           if-no-files-found: error
 
+      - name: Remove temporary signing keychain
+        if: always() && runner.os == 'macOS'
+        run: |
+          if [ -f "$RUNNER_TEMP/heiwa-signing.keychain-db" ]; then
+            security delete-keychain "$RUNNER_TEMP/heiwa-signing.keychain-db"
+          fi
+
   build:
     name: Build Release Asset (${{ matrix.name }})
     needs: [metadata, cockpit]
@@ -337,8 +391,7 @@ jobs:
             archive_ext: tar.gz
             binary_name: heiwa
           - name: macos-aarch64
-            # macos-14 is retiring; macos-26 GA since 2026-02-26. Keep the
-            # bundle minimumSystemVersion floor at 14.0 — runner != floor.
+            # The app targets macOS 27; build hosts and deployment floors differ.
             runner: macos-26
             target: aarch64-apple-darwin
             archive_ext: tar.gz
@@ -387,6 +440,22 @@ jobs:
           cargo build --locked --release -p heiwa-shell --bin heiwa
           --features heiwa-shell/lance --target ${{ matrix.target }}
 
+      - name: Prepare macOS CLI signing
+        if: runner.os == 'macOS'
+        env:
+          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+        run: bash scripts/macos_signing_keychain.sh
+
+      - name: Sign the macOS CLI candidate
+        if: runner.os == 'macOS'
+        env:
+          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+        run: |
+          codesign --force --options runtime --timestamp --entitlements apps/heiwa_app/desktop/src-tauri/Heiwa.entitlements --sign "$APPLE_SIGNING_IDENTITY" target/aarch64-apple-darwin/release/heiwa
+          codesign --verify --strict target/aarch64-apple-darwin/release/heiwa
+
       - name: Download cockpit assets
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
@@ -432,6 +501,13 @@ jobs:
           name: ${{ matrix.name }}
           path: dist/heiwa-${{ needs.metadata.outputs.version }}-${{ matrix.name }}.${{ matrix.archive_ext }}
           if-no-files-found: error
+
+      - name: Remove temporary signing keychain
+        if: always() && runner.os == 'macOS'
+        run: |
+          if [ -f "$RUNNER_TEMP/heiwa-signing.keychain-db" ]; then
+            security delete-keychain "$RUNNER_TEMP/heiwa-signing.keychain-db"
+          fi
 
   checksums:
     name: Generate Checksums

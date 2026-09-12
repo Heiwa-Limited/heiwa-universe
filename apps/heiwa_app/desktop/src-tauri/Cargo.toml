@@ -15,6 +15,7 @@ crate-type = ["staticlib", "cdylib", "rlib"]
 tauri-build = { version = "2.4.1", features = [] }
 
 [dependencies]
+heiwa-install = { path = "../../../../crates/heiwa_install" }
 futures-util = "0.3"
 chrono = "0.4"
 heiwa-core = { path = "../../../heiwa_core" }

@@ -4,7 +4,7 @@
 [![Docs](https://github.com/Heiwa-Limited/heiwa-universe/actions/workflows/pages.yml/badge.svg)](https://github.com/Heiwa-Limited/heiwa-universe/actions/workflows/pages.yml)
 [![License](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE)
 
-Heiwa is a local-first AI operating layer. The installed `heiwa` runtime is the product center, Rust owns the execution path, and this repository is being hardened for GitHub-native distribution rather than hosted-platform theater.
+Heiwa is a local-first chat and work application for macOS 27, with a bundled `heiwa` CLI. Conversations, projects, connected resources, and inference providers share one local Rust runtime. Each user connects their own accounts and data.
 
 ## What Heiwa Does
 
@@ -73,10 +73,23 @@ What each platform gets today:
 | Windows x86_64 | yes | not yet | [Releases](https://github.com/Heiwa-Limited/heiwa-universe/releases) archive |
 | Container | yes | not applicable | `ghcr.io/heiwa-limited/heiwa` |
 
-The macOS app ships as the updater's own signed tarball rather than a `.dmg`: a
-browser download sets `com.apple.quarantine` and Gatekeeper blocks an unsigned
-app, so a `.dmg` on the releases page would be a broken artifact behind the most
-obvious download button. `curl` and the in-app updater set no quarantine bit.
+Current source targets macOS 27. Features on `main` may be newer than the latest
+published release; the [Releases page](https://github.com/Heiwa-Limited/heiwa-universe/releases)
+is the download authority. The current macOS 27 checkpoint is a development
+installation, not a newly published public release.
+
+The next macOS release pipeline requires Developer ID signing and Apple
+notarization. It builds a browser-downloadable DMG and an updater archive,
+verifies the notarization ticket, and compares the bundled runtime with the
+signed CLI release candidate. Publication remains blocked until the Apple
+credentials and the release's exact-commit checks are available.
+
+Opening the packaged app installs its matching CLI under the selected user's
+Heiwa directory. It needs no Rust, Node.js, or Python installation. Inside
+**Resources**, establish a workspace, connect supported API keys through the OS
+credential store, or use provider-owned CLI sign-in. Calendar lets you choose
+actual calendars and read a bounded window of existing events. Workspace setup,
+provider verification, and permission to read content are separate choices.
 
 Release archives carry build provenance attestations; the container image also
 carries an SBOM. Every published release is installed end-to-end on Linux and

@@ -641,60 +641,9 @@ async fn main() -> Result<()> {
                             println!();
                             println!("Providers: anthropic, openai, google, openrouter");
                         } else {
-                            let provider = &args[3];
-                            let api_key = &args[4];
-                            let rate_group = match provider.as_str() {
-                                "anthropic" => "anthropic_api",
-                                "openai" => "openai_api",
-                                "google" => "google_api",
-                                "openrouter" => "openrouter",
-                                _ => provider.as_str(),
-                            };
-
-                            let mut registry = heiwa_provider::AccountRegistry::load();
-                            match heiwa_provider::registry::add_api_key_account(
-                                &mut registry,
-                                provider,
-                                api_key,
-                                rate_group,
-                            ) {
-                                Ok(account_id) => {
-                                    println!(
-                                        "Stored {} API key in Keychain as '{}'",
-                                        provider, account_id
-                                    );
-                                    // Verify key and detect models
-                                    print!("Verifying...");
-                                    io::stdout().flush()?;
-                                    if let Some(account) = registry
-                                        .accounts
-                                        .iter_mut()
-                                        .find(|a| a.account_id == account_id)
-                                    {
-                                        match heiwa_provider::detect::verify_api_key(account).await
-                                        {
-                                            Ok(()) => {
-                                                println!(
-                                                    " {} models available",
-                                                    account.models.len()
-                                                );
-                                                for m in &account.models {
-                                                    println!(
-                                                        "  {} (class:{})",
-                                                        m.model_id, m.capability_class
-                                                    );
-                                                }
-                                                registry.save()?;
-                                            }
-                                            Err(e) => {
-                                                println!(" verification failed: {}", e);
-                                                registry.save()?;
-                                            }
-                                        }
-                                    }
-                                }
-                                Err(e) => eprintln!("Failed to store key: {}", e),
-                            }
+                            heiwa_provider::connections::connect_api_key(&args[3], &args[4])
+                                .await?;
+                            println!("Connection saved. Run `heiwa auth status` to view verification and model access.");
                         }
                     }
                     "login" => {
@@ -4703,9 +4652,7 @@ mod tests {
             ("openai", "gpt-5"),
             ("google", "gemini-3-pro"),
         ] {
-            let registry = AccountRegistry {
-                accounts: vec![account(vendor, model_id)],
-            };
+            let registry = AccountRegistry::from_accounts(vec![account(vendor, model_id)]);
             let tiers = super::get_live_model_tiers(&registry);
             assert!(
                 !tiers.is_empty(),
@@ -4921,8 +4868,8 @@ mod tests {
         // Health said NotInstalled and nothing asked: the tier filter read
         // stored status only, so a turn was routed to an adapter that could
         // not start and died on a raw OS error instead of routing elsewhere.
-        let registry = heiwa_provider::AccountRegistry {
-            accounts: vec![heiwa_provider::ProviderAccount {
+        let registry =
+            heiwa_provider::AccountRegistry::from_accounts(vec![heiwa_provider::ProviderAccount {
                 account_id: "anthropic-cli".to_string(),
                 provider: "claude-code".to_string(),
                 credential: heiwa_provider::Credential::OauthCli {
@@ -4947,8 +4894,7 @@ mod tests {
                     price_truth: heiwa_provider::PriceTruth::Known,
                     inventory_truth: heiwa_provider::InventoryTruth::Inferred,
                 }],
-            }],
-        };
+            }]);
 
         assert!(
             super::get_live_model_tiers(&registry).is_empty(),
@@ -4958,8 +4904,8 @@ mod tests {
 
     #[test]
     fn live_model_tiers_canonicalize_cli_provider_ids() {
-        let registry = heiwa_provider::AccountRegistry {
-            accounts: vec![heiwa_provider::ProviderAccount {
+        let registry =
+            heiwa_provider::AccountRegistry::from_accounts(vec![heiwa_provider::ProviderAccount {
                 account_id: "anthropic-cli".to_string(),
                 provider: "claude-code".to_string(),
                 credential: heiwa_provider::Credential::OauthCli {
@@ -4984,8 +4930,7 @@ mod tests {
                     price_truth: heiwa_provider::PriceTruth::Known,
                     inventory_truth: heiwa_provider::InventoryTruth::Inferred,
                 }],
-            }],
-        };
+            }]);
 
         let tiers = super::get_live_model_tiers_with(&registry, INSTALLED);
 
@@ -5012,8 +4957,8 @@ mod tests {
             price_truth: heiwa_provider::PriceTruth::Known,
             inventory_truth: heiwa_provider::InventoryTruth::Verified,
         };
-        let mut registry = heiwa_provider::AccountRegistry {
-            accounts: vec![heiwa_provider::ProviderAccount {
+        let mut registry =
+            heiwa_provider::AccountRegistry::from_accounts(vec![heiwa_provider::ProviderAccount {
                 account_id: "ollama-local".to_string(),
                 provider: "ollama".to_string(),
                 credential: heiwa_provider::Credential::LocalRuntime {
@@ -5022,8 +4967,7 @@ mod tests {
                 rate_group: "local".to_string(),
                 status: heiwa_provider::AccountStatus::Connected,
                 models: vec![model("gemma4"), model("qwen3.5:9b")],
-            }],
-        };
+            }]);
 
         let first = super::get_live_model_tiers_with(&registry, INSTALLED);
         registry.accounts[0].models.reverse();
@@ -5055,8 +4999,8 @@ mod tests {
             price_truth: heiwa_provider::PriceTruth::Known,
             inventory_truth: heiwa_provider::InventoryTruth::Verified,
         };
-        let registry = heiwa_provider::AccountRegistry {
-            accounts: vec![heiwa_provider::ProviderAccount {
+        let registry =
+            heiwa_provider::AccountRegistry::from_accounts(vec![heiwa_provider::ProviderAccount {
                 account_id: "ollama-local".to_string(),
                 provider: "ollama".to_string(),
                 credential: heiwa_provider::Credential::LocalRuntime {
@@ -5065,8 +5009,7 @@ mod tests {
                 rate_group: "local".to_string(),
                 status: heiwa_provider::AccountStatus::Connected,
                 models: vec![model("gemma4"), model("qwen3.5:9b")],
-            }],
-        };
+            }]);
         let tiers = super::get_live_model_tiers_with(&registry, INSTALLED);
         let candidates = tiers
             .iter()

@@ -3,7 +3,7 @@
 //! Holds remain local truth. A named Apple Calendar promotion is an explicit
 //! T2 effect and can execute only from the approval service.
 
-use anyhow::{anyhow, Result};
+use anyhow::{anyhow, Context, Result};
 use chrono::{Duration, Local, NaiveDateTime, TimeZone, Utc};
 use serde_json::{json, Value};
 use std::collections::HashSet;
@@ -19,7 +19,7 @@ const SYNC_POLICY: &str = "read-model-before-external-writes";
 const GOOGLE_SYNC_SEMANTICS: &str =
     "full sync stores nextSyncToken; incremental sync handles 410 Gone with scoped wipe + full resync";
 
-fn calendar_state_dir() -> PathBuf {
+pub(super) fn calendar_state_dir() -> PathBuf {
     crate::home::heiwa_state_dir().join("calendar")
 }
 
@@ -52,6 +52,15 @@ pub async fn run(args: &[String]) -> Result<()> {
         }
         Some("calendars") => calendars(&args[1..]),
         Some("sync") => sync(&args[1..]).await,
+        Some("read-selected") => {
+            let ids = flag_value(args, "--calendar-ids")
+                .context("--calendar-ids JSON array is required")?;
+            let result = super::calendar_read::read_selected(super::calendar_read::ReadRequest {
+                calendar_ids: serde_json::from_str(&ids)?,
+            })?;
+            println!("{result}");
+            Ok(())
+        }
         Some("hold") => hold(&args[1..]),
         Some("--help") | Some("-h") => {
             print_help();
@@ -120,6 +129,9 @@ pub(crate) fn apple_calendar_resources_payload() -> Result<Value> {
             "secrets": "none",
         },
         "calendars": calendars,
+        "selected_ids": super::calendar_read::selected_ids()?,
+        "reader_available": super::calendar_read::helper_path().is_some(),
+        "detail": "Choose calendars to read existing events into this workspace.",
         "revoke": {
             "owner": "macOS",
             "path": "System Settings > Privacy & Security > Automation > heiwa > Calendar",
@@ -708,6 +720,16 @@ fn load_events() -> Vec<Value> {
         .filter(|line| !line.trim().is_empty())
         .filter_map(|line| serde_json::from_str::<Value>(line.trim()).ok())
         .collect();
+    match super::calendar_read::selected_ids() {
+        Ok(ids) if !ids.is_empty() => events.retain(|event| {
+            event["source"] != "apple_calendar"
+                || event["calendar_id"]
+                    .as_str()
+                    .is_some_and(|id| ids.iter().any(|selected| selected == id))
+        }),
+        Err(_) => events.retain(|event| event["source"] != "apple_calendar"),
+        _ => {}
+    }
     events.sort_by_key(event_sort_key);
     events
 }
@@ -720,11 +742,10 @@ fn append_event_rows_at(path: &Path, rows: &[Value]) -> Result<usize> {
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent)?;
     }
-    let existing_raw = fs::read_to_string(path).unwrap_or_default();
-    let mut lines: Vec<String> = existing_raw
-        .lines()
-        .filter(|line| !line.trim().is_empty())
-        .map(str::to_string)
+    let _lock = super::calendar_read::snapshot_lock(path)?;
+    let mut lines: Vec<String> = super::calendar_read::read_snapshot(path)?
+        .iter()
+        .map(Value::to_string)
         .collect();
     let mut seen: HashSet<String> = lines
         .iter()
@@ -753,7 +774,7 @@ fn append_event_rows_at(path: &Path, rows: &[Value]) -> Result<usize> {
         let drop = lines.len() - MAX_EVENT_LINES;
         lines.drain(..drop);
     }
-    fs::write(path, lines.join("\n") + "\n")?;
+    super::calendar_read::atomic_write(path, (lines.join("\n") + "\n").as_bytes())?;
     Ok(appended)
 }
 
@@ -762,25 +783,12 @@ fn remove_google_calendar_events(calendar_id: &str) -> Result<()> {
     if !path.exists() {
         return Ok(());
     }
-    let raw = fs::read_to_string(&path)?;
-    let kept: Vec<String> = raw
-        .lines()
-        .filter(|line| {
-            serde_json::from_str::<Value>(line)
-                .ok()
-                .map(|row| {
-                    row.get("source").and_then(Value::as_str) != Some("google_calendar")
-                        || row.get("calendar_id").and_then(Value::as_str) != Some(calendar_id)
-                })
-                .unwrap_or(true)
-        })
-        .map(str::to_string)
+    let _lock = super::calendar_read::snapshot_lock(&path)?;
+    let kept: Vec<Value> = super::calendar_read::read_snapshot(&path)?
+        .into_iter()
+        .filter(|row| row["source"] != "google_calendar" || row["calendar_id"] != calendar_id)
         .collect();
-    fs::write(
-        &path,
-        kept.join("\n") + if kept.is_empty() { "" } else { "\n" },
-    )?;
-    Ok(())
+    super::calendar_read::atomic_write(&path, &super::calendar_read::serialize_rows(&kept))
 }
 
 fn write_sync_receipt(sources: &[Value], fetched: usize, appended: usize) -> Result<String> {
@@ -805,7 +813,18 @@ fn write_sync_receipt(sources: &[Value], fetched: usize, appended: usize) -> Res
     Ok(receipt_id)
 }
 
-fn ensure_event_identity(mut row: Value) -> Value {
+pub(super) fn ensure_event_identity(mut row: Value) -> Value {
+    if row["source"] == "apple_calendar"
+        && row["calendar_id"].as_str().is_some()
+        && row["occurrence"].as_str().is_some()
+    {
+        row["id"] = json!(stable_event_id(&format!(
+            "apple_calendar|{}|{}|{}",
+            row["calendar_id"].as_str().unwrap_or(""),
+            row["external_id"].as_str().unwrap_or(""),
+            row["occurrence"].as_str().unwrap_or("")
+        )));
+    }
     let id = row
         .get("id")
         .and_then(Value::as_str)

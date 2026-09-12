@@ -69,6 +69,90 @@ function deferred<T>(): { promise: Promise<T>; resolve: (value: T) => void; reje
 }
 
 describe("OperatorClient", () => {
+  it("explicitly reconnects from durable history after exhausted transport retries", async () => {
+    const firstStream = deferred<void>();
+    const replay = deferred<OperatorHistoryResponse>();
+    const callbacks: Array<(frame: OperatorFrame) => void> = [];
+    const signals: Array<AbortSignal | undefined> = [];
+    const get = vi.fn().mockResolvedValueOnce(history([eventFrame(1)], "cursor-1"))
+      .mockImplementationOnce(() => replay.promise);
+    const post = vi.fn();
+    const subscribe = vi.fn((_thread: string, _after: string | null, onFrame: (frame: OperatorFrame) => void, signal?: AbortSignal) => {
+      callbacks.push(onFrame);
+      signals.push(signal);
+      return callbacks.length === 1 ? firstStream.promise : new Promise<void>(() => {});
+    });
+    const store = new OperatorStore();
+    const client = new OperatorClient(store, dependencies({ get, post, subscribe }));
+    await client.start("team & ops");
+    await flushAsyncWork();
+    firstStream.reject(new Error("reconnect budget exhausted"));
+    await flushAsyncWork();
+
+    const recovered = client.reconnect();
+    expect(client.reconnect()).toBe(recovered);
+    expect(client.state().status).toBe("starting");
+    await flushAsyncWork();
+    callbacks[0]!(eventFrame(99));
+    replay.resolve(history([eventFrame(1), eventFrame(2)], "cursor-2"));
+    await recovered;
+    await flushAsyncWork();
+
+    expect(get).toHaveBeenCalledTimes(2);
+    expect(subscribe).toHaveBeenCalledTimes(2);
+    expect(subscribe.mock.calls[1]?.[1]).toBe("cursor-2");
+    expect(store.snapshot().messages.map((message) => message.body)).toEqual(["message 1", "message 2"]);
+    expect(client.state().status).toBe("ready");
+    expect(post).not.toHaveBeenCalled();
+    client.dispose();
+    expect(signals[1]?.aborted).toBe(true);
+  });
+
+  it("reconciles a lost submission acknowledgement without submitting it again", async () => {
+    const get = vi.fn().mockResolvedValueOnce(history([], null))
+      .mockResolvedValueOnce(history([eventFrame(1)], "cursor-1"));
+    const post = vi.fn().mockRejectedValue(new Error("response lost after acceptance"));
+    const signals: Array<AbortSignal | undefined> = [];
+    const client = new OperatorClient(new OperatorStore(), dependencies({
+      get, post,
+      subscribe: vi.fn((_thread, _after, _onFrame, signal) => {
+        signals.push(signal);
+        return new Promise<void>(() => {});
+      }),
+    }));
+    await client.start("team & ops");
+    await flushAsyncWork();
+    await expect(client.submitTurn("work accepted by the runtime")).rejects.toThrow("operator_submission_unavailable");
+
+    await client.reconnect();
+    await flushAsyncWork();
+
+    expect(signals[0]?.aborted).toBe(true);
+    expect(post).toHaveBeenCalledOnce();
+    expect(get).toHaveBeenCalledTimes(2);
+    expect(client.state().status).toBe("ready");
+    client.dispose();
+  });
+
+  it("does not resurrect an observation disposed during recovery", async () => {
+    const replay = deferred<OperatorHistoryResponse>();
+    const get = vi.fn().mockRejectedValueOnce(new Error("offline"))
+      .mockImplementationOnce(() => replay.promise);
+    const subscribe = vi.fn();
+    const store = new OperatorStore();
+    const client = new OperatorClient(store, dependencies({ get, subscribe }));
+    await client.start("team & ops");
+    const recovery = client.reconnect();
+    await flushAsyncWork();
+    client.dispose();
+    replay.resolve(history([eventFrame(1)], "cursor-1"));
+    await recovery;
+
+    expect(client.state().status).toBe("idle");
+    expect(store.snapshot().messages).toEqual([]);
+    expect(subscribe).not.toHaveBeenCalled();
+  });
+
   it("replays a future-schema event diagnostically and subscribes after its cursor", async () => {
     const store = new OperatorStore();
     const future = eventFrame(1);

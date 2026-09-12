@@ -51,7 +51,8 @@
     "macOS": {
       "minimumSystemVersion": "27.0",
       "signingIdentity": "-",
-      "hardenedRuntime": false
+      "hardenedRuntime": false,
+      "entitlements": "Heiwa.entitlements"
     },
     "resources": [
       "resources/*"

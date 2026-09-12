@@ -19,6 +19,7 @@ name = "heiwa-core"
 path = "src/main.rs"
 
 [dependencies]
+libc = "0.2"
 heiwa_config = { path = "../../crates/heiwa_config" }
 anyhow = "1.0"
 axum = { version = "0.7.5", features = ["ws"] }

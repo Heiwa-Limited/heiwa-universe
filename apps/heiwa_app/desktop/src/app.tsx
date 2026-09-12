@@ -3,6 +3,7 @@ import { Dynamic } from "solid-js/web";
 import { AppProvider, useApp, type AppState } from "./state/app";
 import { Composer } from "./shell/Composer";
 import { FirstRun } from "./shell/FirstRun";
+import type { ProviderConnectionActions } from "./shell/ProviderConnections";
 import { Rail } from "./shell/Rail";
 import { Icon } from "./shell/Icon";
 import { MachinePerspective } from "./surfaces/home/MachinePerspective";
@@ -75,7 +76,7 @@ function Shell(props: { onResources?: () => void; blocked?: boolean }) {
   );
 }
 
-export type AppProps = {
+export type AppProps = ProviderConnectionActions & {
   state: AppState;
   /**
    * First-run state from `heiwa_identity::onboarding`, or undefined while it
@@ -142,6 +143,9 @@ export function App(props: AppProps) {
           onVerifyProviders={props.onVerifyProviders}
           onCompleteWorkspace={props.onCompleteWorkspace ? finish : undefined}
           onOpenResourceGuide={props.onOpenResourceGuide}
+          onConnectApiProvider={props.onConnectApiProvider}
+          onVerifyApiProvider={props.onVerifyApiProvider}
+          onDisconnectApiProvider={props.onDisconnectApiProvider}
           onClose={!setupNeeded() ? () => setResourcesOpen(false) : undefined}
           onOpenSurface={async (surface) => {
             if (setupNeeded()) await finish();

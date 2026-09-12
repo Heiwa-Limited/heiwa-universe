@@ -77,6 +77,20 @@ export class OperatorClient {
     return startPromise;
   }
 
+  /**
+   * An explicit new observation attempt after the transport's retry budget.
+   * Replaying history also reconciles a POST whose acknowledgement was lost;
+   * reconnecting never resubmits that POST or cancels its durable turn.
+   */
+  reconnect(): Promise<void> {
+    if (!this.threadId) return Promise.resolve();
+    if (this.lifecycleState.status !== "error") {
+      return this.recovery?.promise ?? this.startPromise ?? Promise.resolve();
+    }
+    this.startPromise = null;
+    return this.start(this.threadId);
+  }
+
   /** Stop this window's observation without cancelling runtime work. */
   dispose(): void {
     this.activeSubscription?.controller.abort();

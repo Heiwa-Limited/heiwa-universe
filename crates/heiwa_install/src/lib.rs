@@ -8,6 +8,9 @@ use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
+mod runtime_binary;
+pub use runtime_binary::install_runtime_binary;
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DoctorReport {
     pub rust_version: Option<String>,
@@ -323,17 +326,7 @@ pub fn run_install() -> Result<()> {
     let manifest_path = heiwa_dir.join("machine.json");
     println!("Machine manifest written to {:?}", manifest_path);
 
-    if report.rust_version.is_none() {
-        println!("Rust not found. Please install Rust: https://rustup.rs/");
-    }
-
-    if report.node_version.is_none() {
-        println!("Node.js not found. Please install Node.js: https://nodejs.org/");
-    }
-
-    if report.python_version.is_none() {
-        println!("Python 3 not found. Please install Python 3.");
-    }
+    println!("Heiwa runs without Rust, Node.js, or Python. Provider tools may have their own requirements.");
 
     println!(
         "Installed canonical launcher at {:?}",
@@ -630,70 +623,9 @@ fn write_canonical_launcher(heiwa_dir: &Path) -> Result<()> {
 fn write_canonical_launcher_internal(
     heiwa_dir: &Path,
     current_exe: &Path,
-    repo_root: &Path,
+    _repo_root: &Path,
 ) -> Result<()> {
-    let launcher_path = heiwa_dir.join("bin").join("heiwa");
-
-    // An installed binary may still carry a build-time repository path that exists
-    // on the build machine. Never replace the executable that is currently running.
-    if current_exe == launcher_path && current_exe.exists() {
-        return Ok(());
-    }
-
-    // Robust dev-env check: Does Cargo.toml exist where we expect it in the monorepo?
-    let is_dev_env = repo_root.join("Cargo.toml").exists();
-
-    if !is_dev_env && current_exe.exists() {
-        if current_exe != launcher_path {
-            fs::copy(current_exe, &launcher_path)?;
-            #[cfg(unix)]
-            fs::set_permissions(&launcher_path, fs::Permissions::from_mode(0o755))?;
-        }
-        return Ok(());
-    }
-
-    let launcher = format!(
-        r#"#!/bin/zsh
-set -euo pipefail
-
-REPO_ROOT="${{HEIWA_ROOT:-{repo_root}}}"
-RUST_BIN_OVERRIDE="${{HEIWA_SHELL_BIN:-}}"
-
-typeset -a candidates
-if [[ -n "$RUST_BIN_OVERRIDE" ]]; then
-  candidates+=("$RUST_BIN_OVERRIDE")
-fi
-candidates+=(
-  "$REPO_ROOT/target/debug/heiwa"
-  "$REPO_ROOT/target/release/heiwa"
-  "$REPO_ROOT/target/debug/heiwa-shell"
-  "$REPO_ROOT/target/release/heiwa-shell"
-)
-
-for candidate in "${{candidates[@]}}"; do
-  if [[ -x "$candidate" ]]; then
-    exec "$candidate" "$@"
-  fi
-done
-
-LAUNCHER="$REPO_ROOT/apps/heiwa_cli/bin/heiwa"
-if [[ -f "$LAUNCHER" ]]; then
-  exec node "$LAUNCHER" "$@"
-fi
-
-if [[ -f "$REPO_ROOT/Cargo.toml" ]]; then
-  exec cargo run -q -p heiwa-shell --bin heiwa -- "$@"
-fi
-
-echo "[FATAL] Could not locate a Heiwa launcher from $REPO_ROOT" >&2
-exit 1
-"#,
-        repo_root = repo_root.display()
-    );
-
-    fs::write(&launcher_path, launcher)?;
-    #[cfg(unix)]
-    fs::set_permissions(&launcher_path, fs::Permissions::from_mode(0o755))?;
+    install_runtime_binary(heiwa_dir, current_exe)?;
     Ok(())
 }
 
@@ -1389,8 +1321,7 @@ mod tests {
         let target = heiwa_dir.join("bin").join("heiwa");
         assert!(target.exists());
         let content = fs::read_to_string(target)?;
-        assert!(content.starts_with("#!/bin/zsh"));
-        assert!(content.contains("REPO_ROOT=\"${HEIWA_ROOT:-"));
+        assert_eq!(content, "binary content");
 
         Ok(())
     }

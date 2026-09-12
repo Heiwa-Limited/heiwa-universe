@@ -174,6 +174,8 @@ fn reject_protected_response(
 
 fn authenticated_http_client() -> Result<reqwest::Client, ProxyError> {
     reqwest::Client::builder()
+        .connect_timeout(std::time::Duration::from_secs(2))
+        .timeout(std::time::Duration::from_secs(60))
         .no_proxy()
         .redirect(reqwest::redirect::Policy::none())
         .build()
@@ -382,9 +384,14 @@ pub fn runtime_identity_confirmed() -> bool {
 }
 
 pub(crate) async fn confirm_runtime_identity(base_url: &str, token: &str) -> bool {
-    match api_get_with_auth(base_url, "/api/v1/runtime/snapshot", token).await {
-        Ok(snapshot) => is_heiwa_runtime_snapshot(&snapshot),
-        Err(_) => false,
+    match tokio::time::timeout(
+        std::time::Duration::from_millis(1500),
+        api_get_with_auth(base_url, "/api/v1/runtime/snapshot", token),
+    )
+    .await
+    {
+        Ok(Ok(snapshot)) => is_heiwa_runtime_snapshot(&snapshot),
+        _ => false,
     }
 }
 

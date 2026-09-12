@@ -82,6 +82,7 @@ docs_and_deps/
 
 # Rust
 target/
+/target
 **/*.rs.bk
 Cargo.lock
 

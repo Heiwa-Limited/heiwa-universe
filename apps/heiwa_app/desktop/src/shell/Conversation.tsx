@@ -21,6 +21,21 @@ export function Conversation(props: { compact?: boolean }) {
   return (
     <div class={props.compact ? "conversation-preview" : "view ai-view"}>
       <div class="chat-messages" ref={scroller} id={props.compact ? undefined : "chat-messages"}>
+        <Show when={app.operator.status() === "error"}>
+          <div class="operator-compat-warning" role="status" aria-label="Connection status">
+            <p>
+              {app.operator.error() === "operator_submission_unavailable"
+                ? "Message delivery could not be confirmed. Reconnect to check the saved conversation before sending again."
+                : "Live updates are unavailable. Reconnect to load the latest saved conversation."}
+            </p>
+            <button class="btn-secondary" onClick={() => void app.operator.reconnect()}>
+              Reconnect
+            </button>
+          </div>
+        </Show>
+        <Show when={app.operator.status() === "starting"}>
+          <div role="status">Loading saved conversation…</div>
+        </Show>
         <Show when={snapshot().compatibility.unsupportedSchemaEvents > 0}>
           <div class="operator-compat-warning" role="status">
             Skipped {snapshot().compatibility.unsupportedSchemaEvents} operator{" "}
@@ -29,14 +44,10 @@ export function Conversation(props: { compact?: boolean }) {
           </div>
         </Show>
 
-        <Show when={isEmpty()}>
+        <Show when={isEmpty() && app.operator.status() !== "error" && app.operator.status() !== "starting"}>
           <div class="chat-empty">
             <div class="chat-empty-icon"><Icon name="heiwa" size={36} /></div>
-            <p>
-              {app.operator.status() === "error"
-                ? "Operator stream unavailable."
-                : "No messages yet."}
-            </p>
+            <p>No messages yet.</p>
           </div>
         </Show>
 

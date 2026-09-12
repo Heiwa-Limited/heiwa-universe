@@ -63,6 +63,21 @@ if (localApp) {
   copyFileSync(runtime.source, runtime.target);
 }
 
+if (process.platform === "darwin") {
+  const rustTarget = rawArgs[rawArgs.indexOf("--target") + 1];
+  const arch = rustTarget?.startsWith("x86_64") ? "x86_64" : rustTarget?.startsWith("aarch64") ? "arm64" : process.arch === "arm64" ? "arm64" : "x86_64";
+  const helper = path.join(desktopDir, "src-tauri/resources/heiwa-apple-resources");
+  mkdirSync(path.dirname(helper), { recursive: true });
+  run("xcrun", ["swiftc", "-parse-as-library", "-O", "-target", `${arch}-apple-macosx27.0`,
+    "-framework", "EventKit", "-framework", "Foundation", path.join(desktopDir, "native/AppleResources.swift"),
+    "-Xlinker", "-sectcreate", "-Xlinker", "__TEXT", "-Xlinker", "__info_plist", "-Xlinker",
+    path.join(desktopDir, "native/AppleResources.plist"), "-o", helper], { env: buildEnv });
+  const identity = process.env.APPLE_SIGNING_IDENTITY;
+  if (identity && identity !== "-") {
+    run("codesign", ["--force", "--options", "runtime", "--timestamp", "--entitlements", path.join(desktopDir, "src-tauri/Heiwa.entitlements"), "--sign", identity, helper], { env: buildEnv });
+  }
+}
+
 const tauri = tauriBuildInvocation(process.execPath, desktopDir, rawArgs);
 assertBundledRuntime(desktopDir, process.platform, (binary) => {
   try {

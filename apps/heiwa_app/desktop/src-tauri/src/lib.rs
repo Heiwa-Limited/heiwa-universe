@@ -12,7 +12,7 @@ use tauri::Manager;
 
 /// The runtime this app started, if it started one.
 ///
-/// Held in Tauri state so window teardown can stop it. An adopted runtime is
+/// Held in Tauri state so application exit can stop it. An adopted runtime is
 /// never stored here, which is what keeps closing the window from killing a
 /// server the user started themselves.
 struct SupervisedRuntime(Mutex<Option<runtime_supervisor::OwnedRuntime>>);
@@ -61,7 +61,22 @@ pub fn run() {
                 |path| path.is_file(),
             );
 
-            let (decision, owned) = match heiwa_core::config::ensure_desktop_machine_auth() {
+            // A downloaded app is also a CLI installation. Only packaged
+            // resources may provision it; a PATH fallback in tauri dev may
+            // belong to another checkout and must not silently replace it.
+            let prepare = || -> Result<(), String> {
+                if let (Some(resource_dir), Some(binary)) = (&resource_dir, &binary) {
+                    if binary.starts_with(resource_dir) {
+                        let root = heiwa_install::try_get_heiwa_dir()
+                            .ok_or("The local Heiwa directory could not be resolved.")?;
+                        heiwa_install::install_runtime_binary(&root, binary).map_err(|error| {
+                            format!("The bundled CLI could not be installed: {error}")
+                        })?;
+                    }
+                }
+                heiwa_core::config::ensure_desktop_machine_auth().map_err(|error| error.to_string())
+            };
+            let (decision, owned) = match prepare() {
                 Ok(()) => runtime_supervisor::ensure_runtime(
                     proxy::runtime_identity_confirmed,
                     proxy::runtime_is_reachable,
@@ -87,13 +102,6 @@ pub fn run() {
                 window
                     .state::<operator_subscriptions::OperatorSubscriptions>()
                     .cancel_window(window.label());
-                if let Some(state) = window.try_state::<SupervisedRuntime>() {
-                    if let Ok(mut guard) = state.0.lock() {
-                        if let Some(runtime) = guard.take() {
-                            runtime.shutdown();
-                        }
-                    }
-                }
             }
         })
         .invoke_handler(tauri::generate_handler![
@@ -109,6 +117,9 @@ pub fn run() {
             onboarding::onboarding_state,
             onboarding::complete_workspace_setup,
             onboarding::open_resource_guide,
+            onboarding::connect_api_provider,
+            onboarding::verify_api_provider,
+            onboarding::disconnect_api_provider,
             operator_stream::operator_subscribe,
             operator_stream::operator_unsubscribe,
             proxy::api_get,
@@ -118,8 +129,21 @@ pub fn run() {
             updater::update_check,
             updater::update_install
         ])
-        .run(tauri::generate_context!())
-        .expect("error while running Heiwa desktop application");
+        .build(tauri::generate_context!())
+        .expect("error while building Heiwa desktop application")
+        .run(|app, event| {
+            // Windows own observations; the application owns the child.
+            // Closing one window must not stop work viewed by another.
+            if matches!(event, tauri::RunEvent::Exit) {
+                if let Some(state) = app.try_state::<SupervisedRuntime>() {
+                    if let Ok(mut guard) = state.0.lock() {
+                        if let Some(runtime) = guard.take() {
+                            runtime.shutdown();
+                        }
+                    }
+                }
+            }
+        });
 }
 
 /// First match for `name` on `PATH`.

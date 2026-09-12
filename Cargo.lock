@@ -3261,6 +3261,7 @@ dependencies = [
  "heiwa-protocol",
  "heiwa_config",
  "heiwa_evidence",
+ "libc",
  "serde",
  "serde_json",
  "tempfile",
@@ -3279,6 +3280,7 @@ dependencies = [
  "chrono",
  "futures-util",
  "heiwa-core",
+ "heiwa-install",
  "heiwa-provider",
  "heiwa_config",
  "heiwa_identity",
@@ -3365,8 +3367,10 @@ dependencies = [
  "reqwest 0.12.28",
  "serde",
  "serde_json",
+ "tempfile",
  "thiserror 1.0.69",
  "tokio",
+ "uuid",
 ]
 
 [[package]]

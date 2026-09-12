@@ -56,7 +56,20 @@ async fn available_update(app: &tauri::AppHandle) -> Result<Option<UpdateOffer>,
 
 #[cfg(desktop)]
 async fn install_update(app: &tauri::AppHandle) -> Result<(), String> {
+    use tauri::Manager;
     use tauri_plugin_updater::UpdaterExt;
+
+    // A separately started runtime must be updated through its owning CLI.
+    let owns_runtime = app
+        .state::<crate::SupervisedRuntime>()
+        .0
+        .lock()
+        .map_err(|_| "Runtime ownership could not be checked.".to_string())?
+        .is_some();
+    if !owns_runtime {
+        return Err("The runtime was started separately. Finish its work and use `heiwa app update` to update it and the app together.".into());
+    }
+    require_idle_runtime().await?;
 
     let update = app
         .updater()
@@ -66,15 +79,79 @@ async fn install_update(app: &tauri::AppHandle) -> Result<(), String> {
         .map_err(|error| error.to_string())?
         .ok_or_else(|| "No update is available.".to_string())?;
 
-    update
-        .download_and_install(|_chunk, _total| {}, || {})
+    let bytes = update
+        .download(|_chunk, _total| {}, || {})
         .await
         .map_err(|error| error.to_string())?;
+
+    // Downloading can take time. Do not reuse the pre-download activity check.
+    require_idle_runtime().await?;
+    update.install(bytes).map_err(|error| error.to_string())?;
+    if let Some(runtime) = app
+        .state::<crate::SupervisedRuntime>()
+        .0
+        .lock()
+        .map_err(|_| "Runtime could not be stopped for the update.".to_string())?
+        .take()
+    {
+        runtime.shutdown();
+    }
 
     // Diverges: the process is replaced, so nothing after this runs. The
     // relaunch is the point — an installed-but-not-running update is the
     // same stale shell with extra bytes on disk.
     app.restart()
+}
+
+#[cfg(desktop)]
+async fn require_idle_runtime() -> Result<(), String> {
+    let health = crate::proxy::runtime_health().await;
+    let snapshot = health
+        .snapshot
+        .ok_or("Heiwa could not verify runtime activity. Retry when the runtime is reachable.")?;
+    check_update_activity(&snapshot)
+}
+
+#[cfg(any(desktop, test))]
+fn check_update_activity(snapshot: &serde_json::Value) -> Result<(), String> {
+    let count = |path| {
+        snapshot
+            .pointer(path)
+            .and_then(serde_json::Value::as_u64)
+            .ok_or_else(|| {
+                "Runtime activity is incomplete; the update has been deferred.".to_string()
+            })
+    };
+    let workers = count("/data/workers/task_live")?;
+    let approvals = count("/data/approvals/pending")?;
+    if workers > 0 || approvals > 0 {
+        return Err(
+            "Finish active work and resolve pending approvals before updating Heiwa.".into(),
+        );
+    }
+    Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn updates_require_explicit_idle_counts() {
+        for snapshot in [
+            json!({}),
+            json!({"data":{"workers":{"task_live":0}}}),
+            json!({"data":{"workers":{"task_live":1},"approvals":{"pending":0}}}),
+            json!({"data":{"workers":{"task_live":0},"approvals":{"pending":1}}}),
+        ] {
+            assert!(check_update_activity(&snapshot).is_err());
+        }
+        assert!(check_update_activity(
+            &json!({"data":{"workers":{"task_live":0},"approvals":{"pending":0}}})
+        )
+        .is_ok());
+    }
 }
 
 #[cfg(not(desktop))]

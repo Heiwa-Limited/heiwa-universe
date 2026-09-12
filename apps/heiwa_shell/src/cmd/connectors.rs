@@ -258,7 +258,7 @@ pub(crate) fn connect_apple_calendar() -> Result<Value> {
     // build's reconnect path.
     let _existing = load_apple_calendar_enrollment()?;
     let (installation_id, device_id) = ensure_apple_calendar_binding_for_connect()?;
-    let calendars = crate::cmd::calendar_apple::list_calendars()?;
+    let calendars = crate::cmd::calendar_apple::request_calendars()?;
     let enrollment = AppleCalendarEnrollment {
         schema_version: APPLE_CALENDAR_ENROLLMENT_SCHEMA.to_string(),
         connector: "apple_calendar".to_string(),
@@ -284,6 +284,9 @@ pub(crate) fn connect_apple_calendar() -> Result<Value> {
 }
 
 pub(crate) fn disconnect_apple_calendar() -> Result<Value> {
+    let state = super::calendar::calendar_state_dir();
+    fs::create_dir_all(&state)?;
+    let _lock = super::calendar_read::snapshot_lock(&state.join("events.jsonl"))?;
     let path = apple_calendar_enrollment_path();
     if path.exists() {
         fs::remove_file(&path)
