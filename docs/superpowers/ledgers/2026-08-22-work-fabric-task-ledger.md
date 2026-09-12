@@ -87,6 +87,26 @@ pane bound to it. Neither claims tri-surface or restart-recovery completion.
 | 2 | Repeated runs survive both the run fold and canonical Work-session projection | done | `cargo test -p heiwa-shell --bin heiwa cmd::worker` |
 | 3 | `heiwa work run --json` emits one JSON document while retaining both child streams in bounded pane evidence | done | `cargo test -p heiwa-shell --test work_run` |
 | 4 | Reader-thread panics reach the caller instead of becoming clean worker results | done | `cargo test -p heiwa-shell --bin heiwa cmd::worker` |
+| 5 | Relative provider commands execute the canonical binary recorded in the receipt | done | `cargo test -p heiwa-shell --test work_run relative_provider_runs_the_executable_whose_identity_was_recorded` |
+| 6 | A failed initial heartbeat kills and reaps the provider child | done | `cargo test -p heiwa-shell --bin heiwa a_child_whose_heartbeat_cannot_be_persisted_is_not_left_running` |
+| 7 | Sensitivity-screen rejection of a pane tail still permits worker exit evidence | done | `cargo test -p heiwa-shell --test work_run a_refused_pane_tail_still_records_that_the_worker_exited` |
+
+## Execution and Evidence checkpoint — 2026-09-12
+
+DREX distinguishes known rates from missing price evidence both within an
+account and when comparing accounts. Unknown prices cannot satisfy a cost
+ceiling. Saved models without price evidence load as unknown until discovery
+or operator configuration establishes their rates; explicitly known free
+models retain their zero-budget eligibility. Without a ceiling, an unknown
+price is a last resort and is rendered as unknown in the rationale.
+
+Verification: `cargo test -p heiwa_drex -p heiwa-provider --locked` passes.
+Three added regressions first failed against the proposed price-truth fix:
+cross-account price ordering, smallest-sufficient unknown fallback, and a
+legacy cloud placeholder passing a zero-dollar ceiling. A fourth verifies
+persistence and routing of explicitly known free models. Worker repairs above
+also pass the workspace suite. These repairs do not complete A1-c3 or the
+pending Work Fabric A1 acceptance gate.
 
 ## Provider stream repair — 2026-09-06
 

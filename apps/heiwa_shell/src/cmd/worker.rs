@@ -260,7 +260,13 @@ fn run_in_prepared_workspace_with_output(
         ))
         .map_err(|error| anyhow!("{error}"))?;
 
-    let mut builder = Command::new(&executable);
+    // Spawn the canonical path that was hashed, not the operator's literal
+    // argument. A relative command like `./provider` is canonicalized here
+    // against the shell's cwd but would be resolved by the child against
+    // `current_dir` below, so the receipt could attest to one binary while a
+    // different one ran. Rust's own `Command::current_dir` docs call this
+    // resolution platform-specific; identity and execution must not diverge.
+    let mut builder = Command::new(&identified.path);
     builder
         .args(&command[1..])
         .current_dir(&worktree)
@@ -294,30 +300,36 @@ fn run_in_prepared_workspace_with_output(
 
     // The child exists, so the worker is live rather than merely declared.
     let pid = child.id();
-    service
-        .append_event(worker_heartbeat_event(
-            &worker,
-            &run_id,
-            pid,
-            &chrono::Utc::now().to_rfc3339(),
-            new_event_id,
-        ))
-        .map_err(|error| anyhow!("{error}"))?;
+    let child = heartbeat_or_reap(child, |pid| {
+        service
+            .append_event(worker_heartbeat_event(
+                &worker,
+                &run_id,
+                pid,
+                &chrono::Utc::now().to_rfc3339(),
+                new_event_id,
+            ))
+            .map(|_| ())
+            .map_err(|error| anyhow!("{error}"))
+    })?;
 
     let (tail, status, capture_failure) = stream_and_reap(child, echo_live_output)?;
 
     let closed_at = chrono::Utc::now().to_rfc3339();
-    service
-        .append_event(pane_closed_event(
-            &pane,
-            &run_id,
-            &worker.thread_id,
-            tail.lines(),
-            tail.dropped_lines(),
-            &closed_at,
-            new_event_id,
-        ))
-        .map_err(|error| anyhow!("{error}"))?;
+    // The process has already exited by now. A pane tail can still be refused
+    // — the sensitivity screen rejects token-shaped output, for instance — so
+    // hold that error rather than returning on it: a finished worker whose
+    // exit event never lands stays projected as live forever, with its status
+    // missing from durable evidence. Record the exit, then report the refusal.
+    let pane_closed = service.append_event(pane_closed_event(
+        &pane,
+        &run_id,
+        &worker.thread_id,
+        tail.lines(),
+        tail.dropped_lines(),
+        &closed_at,
+        new_event_id,
+    ));
 
     let exit_code = status.code();
     let failure_code = match (&capture_failure, exit_code) {
@@ -326,16 +338,17 @@ fn run_in_prepared_workspace_with_output(
         (None, Some(_)) => Some("nonzero_exit".to_string()),
         (None, None) => Some("signalled".to_string()),
     };
-    service
-        .append_event(worker_exited_event(
-            &worker,
-            &run_id,
-            exit_code,
-            failure_code.clone(),
-            &closed_at,
-            new_event_id,
-        ))
-        .map_err(|error| anyhow!("{error}"))?;
+    let exited = service.append_event(worker_exited_event(
+        &worker,
+        &run_id,
+        exit_code,
+        failure_code.clone(),
+        &closed_at,
+        new_event_id,
+    ));
+
+    pane_closed.map_err(|error| anyhow!("{error}"))?;
+    exited.map_err(|error| anyhow!("{error}"))?;
 
     if let Some(error) = capture_failure {
         return Err(anyhow!(error));
@@ -476,9 +489,61 @@ fn latest_prepared(
     Ok(prepared)
 }
 
+/// Persist the first heartbeat for a freshly spawned child, reaping the child
+/// if that fails.
+///
+/// Dropping a [`Child`] neither kills nor waits for it, so returning early on a
+/// heartbeat failure would leave a live provider that no replay knows about —
+/// the exact situation appending identity before spawning is meant to prevent.
+/// A provider the journal cannot track is killed rather than orphaned.
+fn heartbeat_or_reap(mut child: Child, append: impl FnOnce(u32) -> Result<()>) -> Result<Child> {
+    let pid = child.id();
+    match append(pid) {
+        Ok(()) => Ok(child),
+        Err(error) => {
+            let _ = child.kill();
+            let _ = child.wait();
+            Err(error)
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// `ps` still knows this pid. A reaped child leaves nothing behind.
+    fn process_is_alive(pid: u32) -> bool {
+        Command::new("/bin/ps")
+            .args(["-p", &pid.to_string(), "-o", "pid="])
+            .output()
+            .map(|out| !String::from_utf8_lossy(&out.stdout).trim().is_empty())
+            .unwrap_or(false)
+    }
+
+    #[test]
+    fn a_child_whose_heartbeat_cannot_be_persisted_is_not_left_running() {
+        // Dropping a `std::process::Child` neither kills nor waits, so
+        // returning early on a heartbeat failure would leave a quiet provider
+        // running that no replay can see, while its projection stays Starting.
+        let child = Command::new("/bin/sleep")
+            .arg("30")
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .spawn()
+            .expect("spawn sleep");
+        let pid = child.id();
+        assert!(process_is_alive(pid), "sanity: the child started");
+
+        let result = heartbeat_or_reap(child, |_| Err(anyhow!("journal refused the heartbeat")));
+
+        assert!(result.is_err(), "the heartbeat failure must surface");
+        assert!(
+            !process_is_alive(pid),
+            "a provider the journal cannot track must not keep running"
+        );
+    }
 
     #[test]
     fn an_executable_is_identified_by_path_and_content_digest() {

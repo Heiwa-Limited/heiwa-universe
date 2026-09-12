@@ -16,7 +16,7 @@ function humanPlatform(platform) {
   const state = platform.state_endpoint
     ? ` State ledger on ${platform.state_endpoint}.`
     : "";
-  return `DNS on ${humanLabel(platform.dns)}, public web on ${humanLabel(platform.public_web)}, and control plane on ${humanLabel(platform.control_plane)}.${state}`;
+  return `DNS on ${humanLabel(platform.dns)}, public shell on ${humanLabel(platform.public_shell)}, docs on ${humanLabel(platform.public_docs)}, and control plane on ${humanLabel(platform.control_plane)}.${state}`;
 }
 
 function textElement(tag, text, className) {
@@ -87,7 +87,8 @@ function renderManifest(manifest) {
   document.getElementById("root-domain").textContent = manifest.root_domain || "heiwa.ltd";
   document.getElementById("platform-summary").textContent = humanPlatform(manifest.platform);
   document.getElementById("platform-dns").textContent = humanLabel(manifest.platform?.dns);
-  document.getElementById("platform-web").textContent = humanLabel(manifest.platform?.public_web);
+  document.getElementById("platform-web").textContent = humanLabel(manifest.platform?.public_shell);
+  document.getElementById("platform-docs").textContent = humanLabel(manifest.platform?.public_docs);
   document.getElementById("platform-control").textContent = humanLabel(manifest.platform?.control_plane);
 
   renderDomainCards(manifest.domains || []);

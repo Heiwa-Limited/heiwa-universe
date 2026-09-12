@@ -13,7 +13,7 @@
 
   "instructions": "This is heiwa-universe: a local-first, multi-provider AI runtime. Rust is the authoritative execution layer (apps/heiwa_core, apps/heiwa_orchestrator, crates/*), TypeScript is companion UI (apps/heiwa_app), Python is a prototype/compat surface. CI already runs clippy, biome, and Trivy — do NOT report formatting, naming, lint-level style, or generic dependency-CVE findings. Report only what a whole-repo reviewer can see that a per-file linter cannot: cross-crate contract drift, state/ownership bugs, evidence-journal correctness, async and locking hazards, error-path regressions, and silent behavior changes at provider or runtime boundaries. Devon is the sole reviewer on this repo, so there is no second human to catch a miss — prefer one well-evidenced high-severity finding over five speculative ones, and always name the specific caller or call site that breaks.",
 
-  "fixWithAI": true,
+  "fixWithAI": false,
   "shouldUpdateDescription": false,
   "statusCheck": false,
   "statusCommentsEnabled": true,

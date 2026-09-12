@@ -76,6 +76,7 @@ async fn detect_ollama_unreachable() {
             supports_audio: false,
             cost_per_1k_input: 0.0,
             cost_per_1k_output: 0.0,
+            price_truth: PriceTruth::Known,
             inventory_truth: InventoryTruth::Verified,
         }],
     };

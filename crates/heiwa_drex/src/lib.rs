@@ -51,7 +51,7 @@ use async_trait::async_trait;
 use heiwa_mcp::tools::{RouteDecision, RouteInput, Router};
 use heiwa_provider::{
     needs_refresh, AccountRegistry, AccountStatus, Credential, DetectedModel, OAuthBridgeError,
-    ProviderAccount, ProviderVault,
+    PriceTruth, ProviderAccount, ProviderVault,
 };
 use heiwa_quota::QuotaLedger;
 use thiserror::Error;
@@ -133,16 +133,50 @@ pub fn cheapest_qualifying(
     out_ktok: f64,
     max_cost_usd: Option<f64>,
 ) -> Option<(&DetectedModel, f64)> {
-    models
-        .iter()
-        .filter(|m| m.capability_class >= need)
+    let clears_the_bar = || models.iter().filter(|m| m.capability_class >= need);
+
+    // Tier 1 — models whose rates Heiwa actually knows. A real 0.0 (local
+    // runtime, `:free` tier) competes here on equal footing, which is what
+    // makes "local first" honest rather than accidental.
+    let known = clears_the_bar()
+        .filter(|m| m.price_truth == PriceTruth::Known)
         .map(|m| (m, estimate_turn_cost(m, in_ktok, out_ktok)))
         .filter(|(_, cost)| max_cost_usd.is_none_or(|ceiling| *cost <= ceiling))
         .min_by(|(ma, ca), (mb, cb)| {
             ca.partial_cmp(cb)
                 .unwrap_or(std::cmp::Ordering::Equal)
                 .then(ma.capability_class.cmp(&mb.capability_class))
-        })
+        });
+    if known.is_some() {
+        return known;
+    }
+
+    // Tier 2 — price unknown. Nothing can prove such a model lands under a
+    // budget, so a budgeted turn declines rather than spending blind.
+    if max_cost_usd.is_some() {
+        return None;
+    }
+
+    // No ceiling and nothing priced clears the bar: an unpriced model is the
+    // honest last resort. Degraded routing beats no routing, and `decide`
+    // reports the price as unknown rather than as $0.
+    clears_the_bar()
+        .filter(|m| m.price_truth == PriceTruth::Unknown)
+        .map(|m| (m, estimate_turn_cost(m, in_ktok, out_ktok)))
+        .min_by_key(|(m, _)| m.capability_class)
+}
+
+/// Render the per-turn cost estimate for the audit rationale.
+///
+/// A model with no published rate renders as `unknown`, never as `$0.00000`.
+/// The receipt is evidence: a placeholder that reads like a measured zero is
+/// worse than no number at all, because it cannot be told apart later from a
+/// genuinely free local turn.
+pub fn render_est_cost(model: &DetectedModel, cost: f64) -> String {
+    match model.price_truth {
+        PriceTruth::Known => format!("${cost:.5}"),
+        PriceTruth::Unknown => "unknown".to_string(),
+    }
 }
 
 #[derive(Debug, Error)]
@@ -402,12 +436,20 @@ impl DrexRouter {
             });
         }
 
-        // Cost first, then saturation, then the rate-group ladder as a tiebreak,
-        // then account_id for stable output.
-        priced.sort_by(|(ca, _, cost_a), (cb, _, cost_b)| {
-            cost_a
-                .partial_cmp(cost_b)
-                .unwrap_or(std::cmp::Ordering::Equal)
+        // Preserve price truth across accounts as well as within each account.
+        // Unknown rates are placeholders and must never compete as dollars.
+        priced.sort_by(|(ca, ma, cost_a), (cb, mb, cost_b)| {
+            let price_order = match (ma.price_truth, mb.price_truth) {
+                (PriceTruth::Known, PriceTruth::Unknown) => std::cmp::Ordering::Less,
+                (PriceTruth::Unknown, PriceTruth::Known) => std::cmp::Ordering::Greater,
+                (PriceTruth::Known, PriceTruth::Known) => cost_a
+                    .partial_cmp(cost_b)
+                    .unwrap_or(std::cmp::Ordering::Equal),
+                (PriceTruth::Unknown, PriceTruth::Unknown) => {
+                    ma.capability_class.cmp(&mb.capability_class)
+                }
+            };
+            price_order
                 .then(
                     ca.saturation
                         .partial_cmp(&cb.saturation)
@@ -420,12 +462,12 @@ impl DrexRouter {
         let (chosen, model, est_cost) = priced[0];
 
         let rationale = format!(
-            "intent={} need_cap={} chose_cap={} est_cost=${:.5} rank={} rate_group={} \
+            "intent={} need_cap={} chose_cap={} est_cost={} rank={} rate_group={} \
              saturation={:.2} account={} needs_refresh={} considered={}",
             input.intent,
             need,
             model.capability_class,
-            est_cost,
+            render_est_cost(model, est_cost),
             DrexRouter::rank(&chosen.account),
             chosen.account.rate_group,
             chosen.saturation,
@@ -513,7 +555,7 @@ pub fn saturation_ratio() -> f64 {
 mod selection_tests {
     use super::*;
     use heiwa_mcp::tools::RouteInput;
-    use heiwa_provider::InventoryTruth;
+    use heiwa_provider::{InventoryTruth, PriceTruth};
 
     fn model(id: &str, class: u8, cin: f64, cout: f64) -> DetectedModel {
         DetectedModel {
@@ -530,6 +572,7 @@ mod selection_tests {
             supports_audio: false,
             cost_per_1k_input: cin,
             cost_per_1k_output: cout,
+            price_truth: PriceTruth::Known,
             inventory_truth: InventoryTruth::Verified,
         }
     }
@@ -645,5 +688,174 @@ mod selection_tests {
             estimate_turn_cost(&model("local", 3, 0.0, 0.0), 99.0, 99.0),
             0.0
         );
+    }
+}
+
+#[cfg(test)]
+mod price_truth_tests {
+    use super::*;
+    use heiwa_provider::{InventoryTruth, PriceTruth};
+
+    fn priced(id: &str, class: u8, cin: f64, cout: f64) -> DetectedModel {
+        DetectedModel {
+            model_id: id.to_string(),
+            provider_model_id: id.to_string(),
+            provider: "p".into(),
+            account_id: "a".into(),
+            rate_group: "g".into(),
+            capability_class: class,
+            context_window: 100_000,
+            supports_streaming: true,
+            supports_tools: true,
+            supports_vision: false,
+            supports_audio: false,
+            cost_per_1k_input: cin,
+            cost_per_1k_output: cout,
+            price_truth: PriceTruth::Known,
+            inventory_truth: InventoryTruth::Verified,
+        }
+    }
+
+    /// What `GET /v1/models` actually yields today: a real frontier model
+    /// whose per-token rates are simply not on that endpoint.
+    fn unpriced(id: &str, class: u8) -> DetectedModel {
+        let mut m = priced(id, class, 0.0, 0.0);
+        m.price_truth = PriceTruth::Unknown;
+        m
+    }
+
+    fn decide_across_accounts(
+        models: Vec<DetectedModel>,
+        ceiling: Option<f64>,
+    ) -> Result<RouteDecision> {
+        let mut registry = AccountRegistry::default();
+        for mut model in models {
+            model.account_id = model.model_id.clone();
+            registry.upsert(ProviderAccount {
+                account_id: model.account_id.clone(),
+                provider: model.provider.clone(),
+                credential: Credential::ApiKey,
+                rate_group: model.rate_group.clone(),
+                status: AccountStatus::Connected,
+                models: vec![model],
+            });
+        }
+        // API-key metadata never reads this isolated vault; no credentials or
+        // provider requests are needed to exercise the real account selector.
+        DrexRouter::new(
+            Arc::new(registry),
+            Arc::new(ProviderVault::with_service("heiwa-price-truth-test")),
+            Arc::new(QuotaLedger::open_in_memory().expect("isolated quota")),
+        )
+        .with_clock(|| 1_800_000_000)
+        .decide(&RouteInput {
+            intent: "code".into(),
+            prompt: "test route selection".into(),
+            hints: serde_json::Value::Null,
+            min_capability: Some(3),
+            max_cost_usd: ceiling,
+            est_output_tokens: Some(800),
+        })
+    }
+
+    #[test]
+    fn known_price_wins_across_provider_accounts() {
+        let decision = decide_across_accounts(
+            vec![unpriced("cloud", 5), priced("priced", 3, 0.001, 0.002)],
+            None,
+        )
+        .expect("known candidate qualifies");
+        assert_eq!(decision.model_id, "priced");
+    }
+
+    #[test]
+    fn unknown_account_fallback_uses_the_smallest_sufficient_model() {
+        let decision = decide_across_accounts(
+            vec![unpriced("a-frontier", 5), unpriced("z-sufficient", 3)],
+            None,
+        )
+        .expect("unbudgeted fallback");
+        assert_eq!(decision.model_id, "z-sufficient");
+        assert!(decision.rationale.contains("est_cost=unknown"));
+    }
+
+    #[test]
+    fn legacy_cloud_placeholder_cannot_satisfy_a_zero_budget() {
+        let mut saved = serde_json::to_value(unpriced("legacy-cloud", 5)).unwrap();
+        saved.as_object_mut().unwrap().remove("price_truth");
+        let legacy: DetectedModel = serde_json::from_value(saved).unwrap();
+        assert!(decide_across_accounts(vec![legacy], Some(0.0)).is_err());
+    }
+
+    #[test]
+    fn explicit_known_zero_survives_persistence_and_budgeted_routing() {
+        let saved = serde_json::to_vec(&priced("free", 3, 0.0, 0.0)).unwrap();
+        let restored: DetectedModel = serde_json::from_slice(&saved).unwrap();
+        let decision = decide_across_accounts(vec![restored], Some(0.0)).unwrap();
+        assert_eq!(decision.model_id, "free");
+        assert!(decision.rationale.contains("est_cost=$0.00000"));
+    }
+
+    #[test]
+    fn unpriced_model_does_not_beat_a_genuinely_cheaper_priced_one() {
+        // The live-discovery adapters write 0.0 as a placeholder. Read as a
+        // number, an unpriced Opus is "free" and wins over a catalog-priced
+        // Haiku — the router preferring the model it knows nothing about.
+        let fleet = vec![priced("haiku", 5, 0.0008, 0.004), unpriced("opus", 5)];
+        let (m, _) = cheapest_qualifying(&fleet, 5, 1.0, 0.8, None).unwrap();
+        assert_eq!(
+            m.model_id, "haiku",
+            "a known price must outrank an unknown one"
+        );
+    }
+
+    #[test]
+    fn a_cost_ceiling_is_never_satisfied_by_an_unknown_price() {
+        // Nothing can prove an unpriced model lands under the cap, so a
+        // budgeted turn must not silently spend on it.
+        let fleet = vec![unpriced("opus", 5)];
+        assert!(
+            cheapest_qualifying(&fleet, 5, 1.0, 0.8, Some(0.01)).is_none(),
+            "unknown price must not pass a budget ceiling"
+        );
+        assert!(
+            cheapest_qualifying(&fleet, 5, 1.0, 0.8, Some(0.0)).is_none(),
+            "a $0 ceiling must not admit an unpriced frontier model"
+        );
+    }
+
+    #[test]
+    fn known_free_local_still_outranks_an_unknown_price() {
+        // 0.0 that is *true* is different from 0.0 that is a placeholder.
+        let fleet = vec![unpriced("cloud", 3), priced("qwen3.5:9b", 3, 0.0, 0.0)];
+        let (m, cost) = cheapest_qualifying(&fleet, 3, 1.0, 0.8, None).unwrap();
+        assert_eq!(m.model_id, "qwen3.5:9b");
+        assert_eq!(cost, 0.0);
+    }
+
+    #[test]
+    fn unpriced_is_still_routable_as_a_last_resort_without_a_ceiling() {
+        // Degraded routing beats no routing: if nothing priced clears the
+        // bar and the operator set no budget, the unpriced model is the
+        // honest answer — flagged, not hidden.
+        let fleet = vec![priced("small", 2, 0.0, 0.0), unpriced("frontier", 5)];
+        let (m, _) = cheapest_qualifying(&fleet, 5, 1.0, 0.8, None).unwrap();
+        assert_eq!(m.model_id, "frontier");
+    }
+
+    #[test]
+    fn rationale_reports_an_unknown_price_as_unknown_not_as_zero() {
+        // A real rate renders as money.
+        assert_eq!(
+            render_est_cost(&priced("haiku", 5, 0.0008, 0.004), 0.0024),
+            "$0.00240"
+        );
+        // A genuine zero is still money — local really is free.
+        assert_eq!(
+            render_est_cost(&priced("qwen", 3, 0.0, 0.0), 0.0),
+            "$0.00000"
+        );
+        // A placeholder zero must never be written into the receipt as $0.
+        assert_eq!(render_est_cost(&unpriced("opus", 5), 0.0), "unknown");
     }
 }
