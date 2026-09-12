@@ -1,4 +1,4 @@
-use anyhow::{anyhow, Context, Result};
+use anyhow::{anyhow, bail, Context, Result};
 use base64::engine::general_purpose::STANDARD as BASE64;
 use base64::Engine;
 use heiwa_protocol::{ExecutionScope, RiskClass, ToolLease};
@@ -189,6 +189,9 @@ fn update_from_checkout(dry_run: bool, json_output: bool) -> Result<()> {
         .arg("--locked")
         .arg("--force");
     cargo_environment.apply(&mut cargo);
+    if json_output {
+        cargo.stdout(Stdio::null()).stderr(Stdio::null());
+    }
     let status = cargo.status()?;
     if !status.success() {
         return Err(anyhow!("cargo install failed with status {status}"));
@@ -473,6 +476,9 @@ fn checkout_cargo_environment() -> Result<CheckoutCargoEnvironment> {
     let sysroot = String::from_utf8(output.stdout)
         .context("rustc --print sysroot returned non-UTF-8 output")?;
     let sysroot = PathBuf::from(sysroot.trim());
+    if let Some(environment) = sdk27_cargo_environment(&env::var_os("RUSTFLAGS"))? {
+        return Ok(environment);
+    }
     let linker = bundled_macho_linker(&sysroot);
     checkout_cargo_environment_from(
         env::consts::OS,
@@ -482,6 +488,45 @@ fn checkout_cargo_environment() -> Result<CheckoutCargoEnvironment> {
         Some(&sysroot),
         linker.is_file(),
     )
+}
+
+fn sdk27_cargo_environment(
+    existing_rustflags: &Option<OsString>,
+) -> Result<Option<CheckoutCargoEnvironment>> {
+    let sdk = Command::new("xcrun")
+        .args(["--sdk", "macosx", "--show-sdk-version"])
+        .output()
+        .context("resolve the selected macOS SDK for checkout promotion")?;
+    if !sdk.status.success() {
+        return Ok(None);
+    }
+    let sdk_version = String::from_utf8_lossy(&sdk.stdout);
+    let major = sdk_version
+        .trim()
+        .split('.')
+        .next()
+        .and_then(|value| value.parse::<u32>().ok())
+        .unwrap_or_default();
+    if major < 27 {
+        return Ok(None);
+    }
+
+    let clang = Command::new("xcrun")
+        .args(["--sdk", "macosx", "--find", "clang"])
+        .output()
+        .context("resolve Apple clang for macOS 27 checkout promotion")?;
+    if !clang.status.success() {
+        bail!("macOS 27 requires Apple clang from the selected SDK");
+    }
+    let linker = PathBuf::from(String::from_utf8_lossy(&clang.stdout).trim());
+    if !linker.is_file() {
+        bail!("macOS 27 Apple clang is missing at {}", linker.display());
+    }
+    Ok(Some(CheckoutCargoEnvironment {
+        strategy: "apple_clang_sdk27",
+        linker: Some(linker),
+        rustflags: existing_rustflags.clone(),
+    }))
 }
 
 fn checkout_cargo_environment_from(
