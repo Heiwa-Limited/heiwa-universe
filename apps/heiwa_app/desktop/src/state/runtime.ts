@@ -1,5 +1,12 @@
 import { createSignal, type Accessor } from "solid-js";
-import { apiGet, apiPost, runtimeHealth, type RuntimeHealth } from "../runtime";
+import {
+  apiGet,
+  apiPost,
+  readAppleMail,
+  runtimeHealth,
+  type AppleMailScanResult,
+  type RuntimeHealth,
+} from "../runtime";
 import type {
   ApprovalsSummary,
   CalendarEvent,
@@ -19,6 +26,7 @@ export type RuntimeState = {
   mail: Accessor<MailMessage[]>;
   /** Whether the mail snapshot has been read at least once this session. */
   mailLoaded: Accessor<boolean>;
+  mailError: Accessor<string | undefined>;
   loadHealth: () => Promise<void>;
   loadCalendar: () => Promise<void>;
   loadCalendarResources: () => Promise<void>;
@@ -29,6 +37,7 @@ export type RuntimeState = {
   decideApproval: (id: string, approve: boolean) => Promise<void>;
   loadInbox: () => Promise<void>;
   loadMail: () => Promise<void>;
+  readAppleMail: () => Promise<AppleMailScanResult>;
 };
 
 export type CalendarHoldInput = {
@@ -47,6 +56,7 @@ export type RuntimeStateOptions = {
   get?: typeof apiGet;
   post?: typeof apiPost;
   health?: typeof runtimeHealth;
+  readAppleMail?: typeof readAppleMail;
 };
 
 type CalendarSummary = { data?: { holds?: CalendarEvent[]; events?: CalendarEvent[] } };
@@ -62,6 +72,7 @@ export function createRuntimeState(options: RuntimeStateOptions = {}): RuntimeSt
   const get = options.get ?? apiGet;
   const post = options.post ?? apiPost;
   const health$ = options.health ?? runtimeHealth;
+  const scanAppleMail = options.readAppleMail ?? readAppleMail;
 
   const [health, setHealth] = createSignal<RuntimeHealth | null>(null);
   const [calendarEvents, setCalendarEvents] = createSignal<CalendarEvent[]>([]);
@@ -71,6 +82,7 @@ export function createRuntimeState(options: RuntimeStateOptions = {}): RuntimeSt
   const [inbox, setInbox] = createSignal<InboxItem[]>([]);
   const [mail, setMail] = createSignal<MailMessage[]>([]);
   const [mailLoaded, setMailLoaded] = createSignal(false);
+  const [mailError, setMailError] = createSignal<string>();
 
   async function loadHealth(): Promise<void> {
     const next = await health$().catch(
@@ -144,18 +156,33 @@ export function createRuntimeState(options: RuntimeStateOptions = {}): RuntimeSt
     await loadCalendar();
   }
 
-  async function loadMail(): Promise<void> {
+  async function loadMailSnapshot(propagateError: boolean): Promise<void> {
     try {
       const response = await get<MailResponse>("/api/v1/mail/summary");
       setMail(response?.data?.priority ?? []);
+      setMailError(undefined);
     } catch {
-      setMail([]);
+      // A failed refresh must not erase a snapshot the user was already
+      // reading. The next explicit read can be retried from the surface.
+      const detail = "The local Mail snapshot could not be loaded.";
+      setMailError(detail);
+      if (propagateError) throw new Error(detail);
     } finally {
       // Marked loaded either way: "the snapshot is empty" and "the request
       // failed" both mean there is nothing to show, and the surface has to
       // stop saying "loading" in both cases.
       setMailLoaded(true);
     }
+  }
+
+  async function loadMail(): Promise<void> {
+    await loadMailSnapshot(false);
+  }
+
+  async function readAppleMailSnapshot(): Promise<AppleMailScanResult> {
+    const result = await scanAppleMail();
+    await loadMailSnapshot(true);
+    return result;
   }
 
   async function loadInbox(): Promise<void> {
@@ -175,6 +202,7 @@ export function createRuntimeState(options: RuntimeStateOptions = {}): RuntimeSt
     inbox,
     mail,
     mailLoaded,
+    mailError,
     loadHealth,
     loadCalendar,
     loadCalendarResources,
@@ -185,5 +213,6 @@ export function createRuntimeState(options: RuntimeStateOptions = {}): RuntimeSt
     decideApproval,
     loadInbox,
     loadMail,
+    readAppleMail: readAppleMailSnapshot,
   };
 }

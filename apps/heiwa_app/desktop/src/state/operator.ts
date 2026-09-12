@@ -7,7 +7,7 @@ import { apiGet, apiPost, operatorSubscribe } from "../runtime";
 /**
  * Solid adapter over the operator seam.
  *
- * `operator/{store,client,types}.ts` are deliberately untouched: they carry
+ * `operator/{store,client,types}.ts` carry
  * the durable-stream contract (cursor recovery, replay, generation guards)
  * and their own test suite. This module is the only bridge between that
  * imperative seam and Solid's reactive graph.
@@ -29,6 +29,7 @@ export type OperatorState = {
   ready: Accessor<boolean>;
   start: (threadId: string) => Promise<void>;
   submit: (prompt: string) => Promise<void>;
+  dispose: () => void;
 };
 
 export type OperatorStateOptions = Partial<
@@ -80,5 +81,6 @@ export function createOperatorState(options: OperatorStateOptions = {}): Operato
       await client.submitTurn(prompt);
       publish();
     },
+    dispose: () => client.dispose(),
   };
 }

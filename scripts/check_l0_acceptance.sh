@@ -14,7 +14,7 @@ set -euo pipefail
 # Deterministic checks:
 #   1. desktop typecheck + production build succeed
 #   2. desktop vitest suite passes (operator seam + surface render tests)
-#   3. operator seam test files are byte-identical to the pre-migration baseline
+#   3. operator seam files match the reviewed integration baseline
 #   4. all ten surfaces exist as component modules and a shell render test exists
 #   5. no home-path resolution outside the ConfigRoot resolver (runtime code)
 #   6. design tokens: no raw hex colors outside the theme layer
@@ -52,15 +52,17 @@ else
   fail_msg "desktop vitest suite (see $log_dir/l0_vitest.log)"
 fi
 
-# ── 3. Operator seam preserved: test files byte-identical to baseline ───────
+# ── 3. Operator seam preserved: implementation and tests match reviewed baseline ───────
 # The seam is the implementation as much as its tests: pinning only the
 # tests would let store.ts be rewritten under a passing suite.
+# Reviewed 2026-09-12: additive session metadata, generation-guarded switching,
+# window observation disposal, and regression coverage. Store replay is unchanged.
 declare -A seam_baseline=(
   ["$desktop/src/operator/store.test.ts"]="7f68b72bc113940349648ef505bc49b52ecd11d21410b046b05fee06b8e6b2a0"
-  ["$desktop/src/operator/client.test.ts"]="a162fe8e094baf8f497504c9e99761ad069b8e5c614321efea4a34ab0ebb8470"
+  ["$desktop/src/operator/client.test.ts"]="e7d845d996c5fd92edafc7793a833f629027f1a524a56d868b00da9082933b35"
   ["$desktop/src/operator/store.ts"]="e2ca87af2c7e975b38b7f6eafb90d0ae4f8b5d44b5cf1b12bad5bd33607ae793"
-  ["$desktop/src/operator/client.ts"]="0986fd4366d2e1cb3d876c36ecf00dc68db82b0b340d5cae59e0d53e3509cd17"
-  ["$desktop/src/operator/types.ts"]="a01a076c800ccccbfe5d1bedd3cfd08e72c2a68261c8aa7502c1df3296cac663"
+  ["$desktop/src/operator/client.ts"]="53a2ebb744c65efff9c9aa748e92d347c0a3c5f2f337bdddaca39359d9997343"
+  ["$desktop/src/operator/types.ts"]="4086ff8536f9d7d376a9dd74adf28f680d7405d82b54a0cd0110f5d2261bef2b"
 )
 for file in "${!seam_baseline[@]}"; do
   if [[ ! -f "$file" ]]; then

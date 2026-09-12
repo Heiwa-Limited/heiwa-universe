@@ -97,17 +97,22 @@ function CalendarSurface() {
         isToday: isCurrentMonth && today.getDate() === day,
       });
     }
+    while (cells.length % 7 !== 0) cells.push({ day: null, iso: "", isToday: false });
+    const nextMonth = new Date(year, month + 1, 1);
     return {
       cells,
+      weeks: Array.from({ length: cells.length / 7 }, (_, index) => cells.slice(index * 7, index * 7 + 7)),
       monthName: date.toLocaleDateString("en-US", { month: "long", year: "numeric" }),
       monthStart: `${year}-${pad(month + 1)}-01`,
+      monthEnd: `${nextMonth.getFullYear()}-${pad(nextMonth.getMonth() + 1)}-01`,
     };
   });
 
   const upcoming = createMemo(() =>
     app.runtime
       .calendarEvents()
-      .filter((event) => event.date && event.date >= grid().monthStart)
+      .filter((event) => event.date && event.date >= grid().monthStart && event.date < grid().monthEnd)
+      .sort((a, b) => `${a.date} ${a.start ?? ""}`.localeCompare(`${b.date} ${b.start ?? ""}`))
       .slice(0, 10),
   );
 
@@ -209,6 +214,9 @@ function CalendarSurface() {
           <div class="cal-stage-actions">
             <Show when={stagingError()}>{(message) => <p class="surface-error">{message()}</p>}</Show>
             <Show when={stagingNotice()}>{(message) => <p class="quiet">{message()}</p>}</Show>
+            <Show when={stagingNotice() || (app.runtime.approvals()?.pending?.length ?? 0) > 0}>
+              <button type="button" class="small-action" onClick={() => app.navigate("approvals")}>Review pending changes</button>
+            </Show>
             <button class="btn-primary" type="submit" disabled={stagingBusy() || !promotionCalendar()}>
               Stage Apple event
             </button>
@@ -239,11 +247,14 @@ function CalendarSurface() {
         </div>
       </div>
 
-      <div class="cal-grid" role="grid">
-        <For each={WEEKDAYS}>{(day) => <div class="cal-weekday">{day}</div>}</For>
-        <For each={grid().cells}>
+      <div class="cal-grid" role="table" aria-label={grid().monthName}>
+        <div class="cal-grid-row" role="row">
+          <For each={WEEKDAYS}>{(day) => <div class="cal-weekday" role="columnheader">{day}</div>}</For>
+        </div>
+        <For each={grid().weeks}>{(week) => <div class="cal-grid-row" role="row">
+        <For each={week}>
           {(cell) => (
-            <div class="cal-cell" classList={{ empty: cell.day === null, today: cell.isToday }}>
+            <div class="cal-cell" role="cell" aria-label={cell.day === null ? "Outside this month" : `${cell.iso}${cell.isToday ? ", today" : ""}, ${eventsOn(cell.iso).length} events`} classList={{ empty: cell.day === null, today: cell.isToday }}>
               <Show when={cell.day !== null}>
                 <span class="cal-day">{cell.day}</span>
                 <div class="cal-dots">
@@ -255,6 +266,7 @@ function CalendarSurface() {
             </div>
           )}
         </For>
+        </div>}</For>
       </div>
 
       <div class="panel cal-upcoming">
@@ -264,7 +276,7 @@ function CalendarSurface() {
         </header>
         <Show
           when={upcoming().length > 0}
-          fallback={<div class="empty-state">No events this month.</div>}
+          fallback={<div class="empty-state">No calendar items loaded for this month.</div>}
         >
           <For each={upcoming()}>
             {(event) => (
@@ -303,7 +315,7 @@ export const calendarSurface: SurfaceModule = {
     };
   },
   refresh: (app) =>
-    Promise.all([app.runtime.loadCalendar(), app.runtime.loadCalendarResources()]).then(
+    Promise.all([app.runtime.loadCalendar(), app.runtime.loadCalendarResources(), app.runtime.loadApprovals()]).then(
       () => undefined,
     ),
 };

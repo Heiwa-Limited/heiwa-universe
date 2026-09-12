@@ -83,6 +83,21 @@ export type OperatorThreadSummary = {
   title?: string | null;
   status?: string;
   last_cursor?: string | null;
+  latest_status?: string | null;
+  turn_count?: number;
+  project_id?: string | null;
+  archived?: boolean;
+};
+
+export type OperatorProject = {
+  project_id: string;
+  title: string;
+  archived: boolean;
+};
+
+export type OperatorCatalogResponse = {
+  ok: boolean;
+  data: { threads: OperatorThreadSummary[]; projects: OperatorProject[]; truncated?: boolean };
 };
 
 export type OperatorRoutePolicy = {

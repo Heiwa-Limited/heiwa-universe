@@ -12,7 +12,7 @@
 }
 
 .first-run-panel {
-  width: min(560px, 100%);
+  width: min(740px, 100%);
   max-height: 100%;
   overflow-y: auto;
   padding: var(--space-9);
@@ -21,6 +21,30 @@
   background: var(--surface-raised);
   box-shadow: var(--elevation-3);
 }
+
+.first-run-header, .first-run-actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-4);
+}
+.first-run-actions { margin-top: var(--space-7); flex-wrap: wrap; }
+.first-run-eyebrow { font-size: .7rem; letter-spacing: .1em; color: var(--content-muted); margin: 0 0 var(--space-3); }
+.first-run-button.secondary { background: var(--surface-input); color: var(--content-primary); border: 1px solid var(--border-strong); }
+.resource-section { margin-block: var(--space-7); }
+.resource-section h2 { font-size: 1rem; margin-bottom: var(--space-2); }
+.resource-section .quiet { margin-bottom: var(--space-4); font-size: .85rem; }
+.resource-card { border-bottom: 1px solid var(--border-subtle); padding-block: var(--space-4); }
+.resource-card summary { display: flex; justify-content: space-between; gap: var(--space-4); cursor: pointer; }
+.resource-card summary strong { font-weight: 500; }
+.resource-card p { color: var(--content-secondary); font-size: .85rem; margin-block: var(--space-4); }
+.resource-fact, .resource-evidence { color: var(--content-muted); font-size: .75rem; }
+.resource-other, .setup-diagnostics { margin-top: var(--space-5); }
+.resource-other > summary, .setup-diagnostics > summary { cursor: pointer; color: var(--content-secondary); font-size: .85rem; }
+.setup-diagnostics .first-run-gaps { margin-top: var(--space-4); }
+.setup-inline-error { color: var(--content-primary); padding: var(--space-4); border: 1px solid var(--border-strong); border-radius: var(--radius-md); }
+.setup-error { position: fixed; top: var(--space-5); left: 15%; right: 15%; z-index: 110; padding: var(--space-5); background: var(--surface-raised); border: 1px solid var(--border-strong); border-radius: var(--radius-lg); }
+.setup-error button { margin-left: var(--space-4); }
 
 .first-run-title {
   margin: 0;

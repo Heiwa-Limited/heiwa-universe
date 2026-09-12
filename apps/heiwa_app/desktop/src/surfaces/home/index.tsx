@@ -1,164 +1,65 @@
 import { For, Show } from "solid-js";
-import { cssToken, shortenPath } from "../../lib/format";
-import { TodayBriefing } from "./TodayBriefing";
-import { MachinePerspective } from "./MachinePerspective";
 import { useApp } from "../../state/app";
+import { Icon } from "../../shell/Icon";
+import { localIsoDate } from "../../lib/format";
+import { TodayBriefing } from "./TodayBriefing";
 import type { SurfaceModule } from "../types";
 import "./home.css";
 
 function HomeSurface() {
   const app = useApp();
-  const pinned = () => app.herd.panes().slice(0, 8);
+  const recent = () => app.sessions.threads()
+    .filter((thread) => !thread.archived && Boolean(thread.title?.trim()) && (thread.turn_count ?? 1) > 0)
+    .slice(0, 6);
+  const projects = () => app.sessions.projects().filter((project) => !project.archived);
+  const hasToday = () => app.runtime.calendarEvents().some((event) => event.date === localIsoDate())
+    || app.runtime.mail().some((message) => message.unread);
+  const projectTitle = (id: string | null | undefined) =>
+    app.sessions.projects().find((project) => project.project_id === id)?.title;
+  const open = (id: string) => void app.sessions.select(id)
+    .then(() => app.navigate("ai")).catch(() => undefined);
 
   return (
     <div class="view home-view">
-      <section class="home-command">
-        <div>
-          <h1>Heiwa Ops</h1>
-          <p class="muted">
-            {pinned().length} live panes · herd {app.herd.status()} via {app.herd.source()} ·{" "}
-            {app.subApps().length} available capabilities
-          </p>
-        </div>
-        <button class="btn-primary" onClick={() => app.navigate("windows")}>
-          Open Windows
-        </button>
+      <section class="home-intro">
+        <div class="home-eyebrow"><span>Your space</span><span>{new Intl.DateTimeFormat(undefined, { weekday: "long", month: "long", day: "numeric" }).format(new Date())}</span></div>
+        <h1>What’s on your mind?</h1>
+        <p>Pick up a conversation, or start something new.</p>
       </section>
-
-      {/*
-        First thing on the page, because it is the first thing a user wants:
-        what today holds, from data already on this machine.
-      */}
-      <TodayBriefing />
-
-      <MachinePerspective />
-
-      <section class="pinned-pane-board" aria-label="Live terminal and ops panes">
-        <Show
-          when={pinned().length > 0}
-          fallback={
-            <div class="panel home-empty-panes">
-              <strong>No live panes.</strong>
-              <span class="quiet">Terminal work appears here only after herdr reports it.</span>
-            </div>
-          }
-        >
-          <For each={pinned()}>
-            {(pane, index) => (
-              <button
-                class="pinned-pane"
-                classList={{ "primary-pane": index() === 0 }}
-                onClick={() => {
-                  app.herd.select(pane.pane);
-                  app.navigate("windows");
-                  void app.herd.loadPaneText();
-                }}
-              >
-                <span class="pane-topline">
-                  <span>{pane.workspace}</span>
-                  <span class={`state-chip ${cssToken(pane.state)}`}>{pane.state}</span>
-                </span>
-                <strong>{pane.agent === "-" ? pane.pane : pane.agent}</strong>
-                <span class="quiet">
-                  {pane.pane} · {shortenPath(pane.cwd)}
-                </span>
-                {pane.message ? <small class="quiet">{pane.message}</small> : null}
-              </button>
-            )}
-          </For>
+      <section class="home-recent">
+        <header><h2>Recent sessions</h2><button onClick={() => app.navigate("sessions")}>All sessions <Icon name="chevron" size={14} /></button></header>
+        <Show when={app.sessions.loading()}><p class="home-empty">Loading your sessions…</p></Show>
+        <Show when={!app.sessions.loading() && recent().length === 0}>
+          <div class="home-empty"><Icon name="sessions" size={24} /><div><strong>A place for your next idea.</strong><p>Start with the chatbar below. Your conversations will be here when you return.</p></div></div>
         </Show>
+        <For each={recent()}>{(thread) => (
+          <button class="home-session-row" onClick={() => open(thread.thread_id)}>
+            <span class="home-row-icon"><Icon name="sessions" size={18} /></span>
+            <span class="home-row-text"><strong>{thread.title}</strong><small>{projectTitle(thread.project_id) ?? "Standalone session"}</small></span>
+            <small>{thread.latest_status ?? "Conversation"}</small><Icon name="chevron" size={16} />
+          </button>
+        )}</For>
       </section>
-
-      <section class="quick-grid">
-        <article class="panel quick-widget">
-          <header>
-            <span>Available surfaces</span>
-            <strong>{app.subApps().length}</strong>
-          </header>
-          <For each={app.subApps().slice(0, 4)}>
-            {(sub) => (
-              <div class="widget-row">
-                <span>{sub.title}</span>
-                <strong>{sub.state}</strong>
-              </div>
-            )}
-          </For>
-        </article>
-
-        <article class="panel quick-widget">
-          <header>
-            <span>Capability profiles</span>
-            <strong>{app.subApps().length}</strong>
-          </header>
-          <For each={app.subApps().slice(0, 4)}>
-            {(sub) => (
-              <div class="widget-row">
-                <span>{sub.title}</span>
-                <strong>{sub.skills.join(" · ")}</strong>
-              </div>
-            )}
-          </For>
-        </article>
-
-        <article class="panel quick-widget">
-          <header>
-            <span>Tool policies</span>
-            <strong>{app.subApps().reduce((sum, sub) => sum + sub.tools.length, 0)}</strong>
-          </header>
-          <For each={app.subApps().slice(0, 4)}>
-            {(sub) => (
-              <div class="widget-row">
-                <span>{sub.title}</span>
-                <strong>{sub.tools.join(" · ")}</strong>
-              </div>
-            )}
-          </For>
-        </article>
-
-        <article class="panel quick-widget">
-          <header>
-            <span>Local policy defaults</span>
-            <strong>built in</strong>
-          </header>
-          <For each={app.subApps().slice(0, 4)}>
-            {(sub) => (
-              <div class="widget-row">
-                <span>{sub.title}</span>
-                <strong>{sub.personalization.join(" · ")}</strong>
-              </div>
-            )}
-          </For>
-        </article>
+      <Show when={hasToday()}><TodayBriefing /></Show>
+      <section class="home-projects">
+        <header><h2>Projects</h2><span>{projects().length || ""}</span></header>
+        <Show when={projects().length === 0}>
+          <p class="home-project-empty">Keep related conversations together. Create a project from the sidebar.</p>
+        </Show>
+        <For each={projects()}>{(project) => (
+          <button class="home-project-row" onClick={() => { app.selectProject(project.project_id); app.navigate("projects"); }}>
+            <Icon name="folder" size={19} /><span>{project.title}</span>
+            <small>{app.sessions.threads().filter((thread) => thread.project_id === project.project_id && !thread.archived).length} sessions</small>
+            <Icon name="chevron" size={16} />
+          </button>
+        )}</For>
       </section>
     </div>
   );
 }
 
 export const homeSurface: SurfaceModule = {
-  id: "home",
-  label: "Home",
-  glyph: "⌂",
-  caption: "local ops",
-  Component: HomeSurface,
-  preview: (app) => ({
-    title: "Local Ops",
-    lines: [
-      `${app.herd.panes().length} live panes`,
-      `herd ${app.herd.status()}`,
-      `source ${app.herd.source()}`,
-      `${app.subApps().length} available capabilities`,
-    ],
-  }),
-  refresh: async (app) => {
-    await Promise.all([
-      app.runtime.loadCalendar(),
-      app.runtime.loadInbox(),
-      // The briefing reads mail too, so Home has to load it — otherwise the
-      // unread count is only correct after the user visits Mail.
-      app.runtime.loadMail(),
-      app.runtime.loadHealth(),
-      app.herd.load(),
-      app.herd.loadCommands(),
-    ]);
-  },
+  id: "home", label: "Home", glyph: "", caption: "Viewing Home", Component: HomeSurface,
+  preview: () => ({ title: "Home", lines: ["Recent work"] }),
+  refresh: (app) => Promise.all([app.runtime.loadCalendar(), app.runtime.loadMail()]).then(() => undefined),
 };
