@@ -1,38 +1,31 @@
-# Heiwa.ltd Domain Strategy
+# Heiwa public domain plan
 
-Status: local-first reset, 2026-05-22.
+Status: publishing contract, 2026-09-07. Plane: Evidence.
 
-Public access is paused. The MacBook checkout plus `~/.heiwa/` are the current
-source-of-truth/server for user functionality. Cloudflare remains future edge
-infrastructure; it must not be treated as runtime authority.
+Each user's installed runtime and resolved configuration root own private
+identity, state, sessions, approvals, and execution. Public pages distribute
+software and documentation; they do not host the operator runtime.
 
-## Current Live State
-
-| Surface | Current host | Purpose |
+| Surface | Publishing owner | Contract |
 | --- | --- | --- |
-| `heiwa app start` | `127.0.0.1:7474` on Devon's MacBook | Cockpit, local API, runtime status |
-| `~/.heiwa/` | Devon's MacBook | Local identity, state, sessions, approvals, workers |
-| `maincloud.spacetimedb.com` | Optional external service | Evidence sync/adjudication when enabled |
-| `heiwa.ltd` / `app.heiwa.ltd` / `api.heiwa.ltd` | Paused | No public user access target yet |
+| Installed `heiwa` | User's machine | Local runtime, cockpit, and private evidence |
+| `heiwa.ltd` | Cloudflare Pages, project `heiwa-clients` | Allowlisted public shell and installer glue via `deploy.yml` |
+| `docs.heiwa.ltd` | GitHub Pages | Locked MkDocs build via `pages.yml` |
+| GitHub Releases | GitHub | Sole release binary, checksum, and provenance authority |
+| `status.heiwa.ltd` | Cloudflare Pages public shell alias | Static status page at `/status.html`; static reachability does not prove live runtime health |
+| `api.heiwa.ltd` | Paused | Future public-safe helper paths require their own acceptance |
 
-## Target State
+Cloudflare owns DNS and the static public edge. GitHub owns source, CI, releases,
+and documentation publication. Local JSONL is canonical evidence; Lance is
+rebuildable recall. Future redacted evidence sync is not a live service.
 
-1. Finish the local owner runtime first.
-2. Keep the cockpit local until auth, routing, hook posture, and local state are reliable.
-3. Re-enable Cloudflare only as public edge for static shell/docs and a future API target.
-4. Keep SpacetimeDB external; do not model it as an app-host volume or sidecar.
+`apps/heiwa_app/clients/web/assets/domains.bootstrap.json` is the public-safe
+projection of this plan, consumed by the static site and local cockpit. Its
+`platform.public_shell` and `platform.public_docs` fields model independent
+hosting. The static-surface validator rejects the old single-host field.
+This plan and manifest express publishing ownership and intent, not measured
+availability or a DNS inventory. Verify endpoints after each deployment.
 
-## Domain Rules
-
-- Do not point public DNS at stale origins.
-- Do not list `auth.heiwa.ltd` or `trade.heiwa.ltd` as active public surfaces.
-- Do not make Cloudflare the authority for runtime truth.
-- Public DNS records stay disabled in Terraform unless `enable_public_dns=true`
-  and explicit non-empty CNAME targets are provided.
-
-## Next Steps
-
-1. Verify `heiwa app start` and `heiwa app runtime status --json` locally.
-2. Build the cockpit against localhost API endpoints.
-3. Keep Cloudflare credentials absent or read-only until public access is explicitly re-enabled.
-4. When ready, publish static docs/shell first; expose API only after local auth and state gates pass.
+Do not expose private operator routes, credentials, or runtime state in public
+artifacts. `scripts/package_public_web.sh` is the public deployment allowlist.
+Do not present `app.heiwa.ltd`, `auth.heiwa.ltd`, or `trade.heiwa.ltd` as active.

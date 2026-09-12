@@ -5,6 +5,8 @@ repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 tmp_dir="$(mktemp -d "${TMPDIR:-/tmp}/heiwa-public-web.XXXXXX")"
 trap 'rm -rf -- "$tmp_dir"' EXIT
 
+python3 -m unittest discover -s "$repo_root/scripts/tests" -p test_static_surface.py
+
 "$repo_root/scripts/package_public_web.sh" "$tmp_dir/site"
 
 required=(
