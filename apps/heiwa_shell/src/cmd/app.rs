@@ -5242,8 +5242,10 @@ fn detect_keep_awake() -> String {
 
 fn spawn_caffeinate() -> Option<Child> {
     let path = which("caffeinate")?;
+    // Normal shutdown reaps the child below; -w also releases the assertion
+    // when the runtime crashes or is force-stopped before cleanup can run.
     Command::new(path)
-        .args(["-dimsu"])
+        .args(["-dimsu", "-w", &std::process::id().to_string()])
         .stdin(Stdio::null())
         .stdout(Stdio::null())
         .stderr(Stdio::null())

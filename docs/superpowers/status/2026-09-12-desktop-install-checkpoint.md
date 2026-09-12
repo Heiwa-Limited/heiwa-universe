@@ -64,3 +64,17 @@ This is a local development installation from verified GitHub main. It does not
 publish a new GitHub Release or establish Developer ID notarization, provider
 execution, structured current-view context transport, Mail body/send support, or
 complete Work Fabric A1 acceptance. Those need their own implementation and proof.
+
+
+## Lifecycle repair found during delivery verification
+
+A forced-stop test exposed an unowned `caffeinate -dimsu` process after a runtime
+was killed. Its inherited pipe kept a concurrent Calendar fixture waiting for
+EOF. The exact helper was traced through its pipe descriptors and removed.
+
+The runtime now starts `caffeinate` with `-w` bound to its own PID, retaining normal
+explicit cleanup while also ending the assertion after a crash or forced stop.
+A macOS integration regression starts a real isolated runtime/helper, force-stops
+the runtime, and requires the helper to exit. It failed before the fix and passed
+afterward; the four app API tests and seven Calendar connector tests pass together.
+The test owns and cleans only its own processes and temporary profile.
