@@ -104,6 +104,11 @@ heiwa app update --dry-run --json   # show the plan
 heiwa app update                    # apply it
 ```
 
+Updates follow GitHub Releases, tagged on `main`. Contributors who want the
+integration branch can run `heiwa app channel dev` from their checkout; later
+updates then build and install `origin/dev`. Run `heiwa app channel main` to
+return to releases.
+
 ## Build from Source
 
 For contributors. Requires the Rust toolchain in

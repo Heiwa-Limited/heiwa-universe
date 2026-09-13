@@ -12,6 +12,17 @@
 
 use serde::Serialize;
 
+/// Published desktop updates are the `main` channel. A machine that follows
+/// `dev` is updated by `heiwa app update`, which builds origin/dev; offering a
+/// release there would quietly move it back to `main`.
+#[cfg(desktop)]
+fn follows_dev_channel() -> bool {
+    heiwa_install::try_get_heiwa_dir().is_some_and(|root| {
+        heiwa_install::update_channel::configured(&root)
+            == heiwa_install::update_channel::Channel::Dev
+    })
+}
+
 /// A newer release than the one running, as the shell needs to describe it.
 #[derive(Clone, Debug, Serialize)]
 pub struct UpdateOffer {
@@ -45,6 +56,9 @@ pub async fn update_install(app: tauri::AppHandle) -> Result<(), String> {
 async fn available_update(app: &tauri::AppHandle) -> Result<Option<UpdateOffer>, String> {
     use tauri_plugin_updater::UpdaterExt;
 
+    if follows_dev_channel() {
+        return Ok(None);
+    }
     let updater = app.updater().map_err(|error| error.to_string())?;
     let update = updater.check().await.map_err(|error| error.to_string())?;
     Ok(update.map(|update| UpdateOffer {
@@ -58,6 +72,10 @@ async fn available_update(app: &tauri::AppHandle) -> Result<Option<UpdateOffer>,
 async fn install_update(app: &tauri::AppHandle) -> Result<(), String> {
     use tauri::Manager;
     use tauri_plugin_updater::UpdaterExt;
+
+    if follows_dev_channel() {
+        return Err("This Mac follows the dev channel. Update with `heiwa app update`.".into());
+    }
 
     // A separately started runtime must be updated through its owning CLI.
     let owns_runtime = app

@@ -54,7 +54,7 @@ const desktopDir = path.resolve(scriptDir, "..");
 const repoRoot = path.resolve(scriptDir, "../../../..");
 
 if (localApp) {
-  const runtime = localRuntimeBuildPlan(repoRoot, desktopDir);
+  const runtime = localRuntimeBuildPlan(repoRoot, desktopDir, process.env.CARGO_TARGET_DIR || undefined);
   run("cargo", runtime.args, {
     cwd: repoRoot,
     env: buildEnv,

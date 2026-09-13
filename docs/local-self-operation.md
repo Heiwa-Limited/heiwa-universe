@@ -58,13 +58,28 @@ Update-manifest caching, edge status services, and remote attachment remain
 future capabilities requiring their own implementation and verification. A
 static public deployment does not establish them.
 
-GitHub Releases are the authoritative public install and update path, including
-on the operator MacBook. Local checkout promotion (`heiwa app update --source
-checkout`) is reserved for development or recovery and must identify the exact
-checkout commit in its receipt; it is not evidence of a public release.
+GitHub Releases are the authoritative public install and update path. An
+installation follows one of two update channels, chosen with `heiwa app
+channel`:
+
+| Channel | `heiwa app update` installs | Who |
+| --- | --- | --- |
+| `main` (default) | the latest GitHub Release, tagged on `main` | public installs |
+| `dev` | `origin/dev`, built locally from a recorded heiwa-universe checkout | operators developing Heiwa |
+
+A dev update fetches `origin/dev`, checks out that exact commit in a
+Heiwa-managed worktree under `~/.heiwa/build/`, runs the checkout's
+`scripts/build_local_bundle.sh`, and installs the cockpit, runtime, EventKit
+helper, and desktop bundle it produced. It skips a commit that is already
+installed, never builds or cleans the operator's own working tree, and writes a
+`heiwa.app.update.channel` receipt naming the commit. The desktop app stops
+offering GitHub Releases while the machine follows `dev`. A dev build is not
+evidence of a public release. Local checkout promotion (`heiwa app update
+--source checkout`) remains for development or recovery from a specific
+checkout and must identify its commit in the receipt.
 
 `heiwa app update --dry-run` is the safe probe for the installed runtime and
-defaults to GitHub Releases. It should report:
+follows the configured channel without touching the network. It should report:
 
 - installed version and path
 - target version, channel, and release URL
@@ -211,7 +226,8 @@ SPA serving. Assume you are probing the wrong runtime, an old runtime, or an
 unimplemented route until proven otherwise.
 
 Only run `heiwa app update` when the operator explicitly wants the installed
-runtime changed. `--dry-run` is the default probe. Use
+runtime changed. `--dry-run` is the default probe. Choosing a channel installs
+nothing; the next `heiwa app update` follows it. Use
 `heiwa app update --source checkout` only for developer reinstall from the
 current checkout.
 

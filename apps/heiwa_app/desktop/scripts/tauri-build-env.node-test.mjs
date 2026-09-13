@@ -128,6 +128,10 @@ test("the bundled runtime cannot collide with Tauri's case-folded app output", (
     source: "/repo/target/bundled-runtime/release/heiwa",
     target: "/repo/apps/desktop/src-tauri/resources/heiwa",
   });
+  assert.deepEqual(localRuntimeBuildPlan("/repo", "/repo/apps/desktop", "/cache/target").args.slice(-2), [
+    "--target-dir",
+    "/cache/target/bundled-runtime",
+  ]);
   assert.notEqual(
     localRuntimeBuildPlan("/repo", "/repo/apps/desktop").source,
     "/repo/target/release/heiwa",

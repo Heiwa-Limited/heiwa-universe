@@ -99,3 +99,59 @@ GitHub's current hosted runner inventory tops out at macOS 26. The application
 still targets macOS 27. Hosted build/signature checks must not be described as
 macOS 27 first-launch certification; the installed Mac and a fresh-profile
 exercise supply that separate proof.
+
+## Update channels (2026-09-13)
+
+The operator chose to keep this MacBook on `dev`, while public installs follow
+`main`. `heiwa app channel main|dev` records the choice in
+`~/.heiwa/channel.json`. On `dev`, `heiwa app update`:
+
+1. fetches `origin/dev`;
+2. builds that exact commit in `~/.heiwa/build/heiwa-universe-dev` with
+   `scripts/build_local_bundle.sh`;
+3. installs cockpit, then runtime and helper, then desktop bundle;
+4. records the commit and writes a `heiwa.app.update.channel` receipt.
+
+Other behaviour:
+
+- An already-installed commit is skipped.
+- Returning to `main` reinstalls the release even when the version number
+  matches.
+- The desktop updater makes no release offers while the machine follows `dev`.
+- Release builds compile in `HEIWA_BUILD_CHANNEL=main` and the release commit.
+  `/api/v1/session` reports the channel instead of the old hardcoded `stable`.
+
+Verification:
+
+- `update_channel` integration tests, 3 passed. They use a fixture origin,
+  an agent worktree and a stub build script, and cover:
+  - recording the primary checkout;
+  - offline dry runs;
+  - one build per commit;
+  - `--force`;
+  - untouched operator checkout;
+  - reinstall on `main`;
+  - failed builds leaving the install untouched.
+- Other suites: heiwa-install units 29 passed; shell unit suite 241 passed;
+  smoke 31 passed; desktop packaging node tests 9 passed; `heiwa-desktop`
+  compiles.
+
+Remaining:
+
+- Installing on this Mac needs the operator's go-ahead (separate
+  authorization).
+
+Real build, not installed:
+
+- `scripts/build_local_bundle.sh` ran on this Mac (SDK 27, shared target).
+  It took 45 s warm and produced:
+  - the cockpit;
+  - `heiwa 0.3.0` with the commit stamp compiled in;
+  - the ad-hoc-signed EventKit helper;
+  - `Heiwa.app`, whose bundled runtime is byte-identical to the standalone
+    `heiwa`.
+- Rebuilding the helper from the same absolute source path produced identical
+  bytes (sha256 `4f288534…`). An unchanged helper keeps its code identity
+  across dev updates, and `install_runtime_binary` skips identical files.
+- The first dev install builds from a new path, so Calendar access is
+  requested again once.

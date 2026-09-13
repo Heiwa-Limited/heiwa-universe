@@ -1,6 +1,7 @@
 use anyhow::{anyhow, bail, Context, Result};
 use base64::engine::general_purpose::STANDARD as BASE64;
 use base64::Engine;
+use heiwa_install::update_channel;
 use heiwa_protocol::{ExecutionScope, RiskClass, ToolLease};
 use heiwa_resource::{ResourcePolicy, ResourceSnapshot, ThermalPressure, WorkClass};
 use serde::Serialize;
@@ -53,6 +54,7 @@ pub async fn run(args: &[String]) -> Result<()> {
     match args.first().map(String::as_str) {
         Some("start") => start(&args[1..]).await,
         Some("update") => update(&args[1..]),
+        Some("channel") => super::update_channel::run(&args[1..]),
         Some("runtime") => runtime(&args[1..]),
         Some("api") => api(&args[1..]).await,
         Some("status") => runtime_status(args),
@@ -77,30 +79,60 @@ fn update(args: &[String]) -> Result<()> {
 
     let dry_run = has_flag(args, "--dry-run");
     let json_output = has_flag(args, "--json");
-    let source = flag_value(args, "--source").unwrap_or_else(|| "github".to_string());
 
-    match source.as_str() {
-        "github" => update_from_github_release(dry_run, json_output),
-        "checkout" => update_from_checkout(dry_run, json_output),
-        other => Err(anyhow!(
+    // An explicit --source is a one-off; otherwise the chosen channel decides.
+    match flag_value(args, "--source").as_deref() {
+        Some("github") => update_from_github_release(dry_run, json_output),
+        Some("checkout") => update_from_checkout(dry_run, json_output),
+        Some(other) => Err(anyhow!(
             "invalid --source value: {other} (expected github or checkout)"
         )),
+        None => {
+            let install_root = heiwa_install::get_heiwa_dir();
+            match update_channel::load(&install_root)?.channel {
+                update_channel::Channel::Main => update_from_github_release(dry_run, json_output),
+                update_channel::Channel::Dev => super::update_channel::update_dev(
+                    &install_root,
+                    super::update_channel::DevUpdate {
+                        dry_run,
+                        json_output,
+                        force: has_flag(args, "--force"),
+                    },
+                ),
+            }
+        }
     }
 }
 
 fn update_from_github_release(dry_run: bool, json_output: bool) -> Result<()> {
     let install_root = heiwa_install::get_heiwa_dir();
+    let mut state = update_channel::load(&install_root)?;
+    // A dev or checkout build can carry the release's version number without
+    // being the release, so an equal version does not end the update.
+    let reinstall = state.installed_from_elsewhere("main");
     // `update` is reached from an async command dispatcher, and the release
     // update performs blocking HTTP, so it has to leave the async worker.
-    tokio::task::block_in_place(|| {
+    let installed = tokio::task::block_in_place(|| {
         super::release_update::run(
-            install_root,
+            install_root.clone(),
             github_release_platform(),
             env!("CARGO_PKG_VERSION"),
+            reinstall,
             dry_run,
             json_output,
         )
-    })
+    })?;
+    if let Some(version) = installed {
+        state.installed = Some(update_channel::InstalledBuild {
+            source: "main".to_string(),
+            version,
+            commit: None,
+            installed_at: chrono::Utc::now().to_rfc3339(),
+            receipt: None,
+        });
+        update_channel::save(&install_root, &state)?;
+    }
+    Ok(())
 }
 
 fn update_from_checkout(dry_run: bool, json_output: bool) -> Result<()> {
@@ -216,6 +248,18 @@ fn update_from_checkout(dry_run: bool, json_output: bool) -> Result<()> {
         heiwa_install::install_desktop_app_bundle(&install_root, Path::new(desktop_bundle_path))?;
     }
     let receipt_path = write_promotion_receipt(&plan)?;
+    let mut state = update_channel::load(&install_root)?;
+    state.installed = Some(update_channel::InstalledBuild {
+        source: "checkout".to_string(),
+        version: installed_heiwa_version(&installed_bin)
+            .as_str()
+            .unwrap_or("unknown")
+            .to_string(),
+        commit: plan["source_commit"].as_str().map(str::to_string),
+        installed_at: chrono::Utc::now().to_rfc3339(),
+        receipt: Some(receipt_path.clone()),
+    });
+    update_channel::save(&install_root, &state)?;
     if !json_output {
         println!("  status: updated");
         println!(
@@ -3420,7 +3464,8 @@ fn api_payload_for_port(path: &str, started_at: &str, app_port: u16) -> Option<V
             "operator_id": env::var("USER").unwrap_or_else(|_| "local-operator".to_string()),
             "hostname": hostname_string(),
             "runtime_version": env!("CARGO_PKG_VERSION"),
-            "channel": "stable",
+            "channel": runtime_channel(),
+            "build_commit": option_env!("HEIWA_BUILD_COMMIT"),
             "default_route_role": "local_first",
             "app_url": format!("http://127.0.0.1:{app_port}/"),
         }),
@@ -3869,6 +3914,7 @@ fn machine_perspective_payload() -> Value {
     let current_runtime = json!({
         "version": env!("CARGO_PKG_VERSION"),
         "channel": runtime_channel(),
+        "build_commit": option_env!("HEIWA_BUILD_COMMIT"),
         "install_path": env::current_exe().ok().map(|path| path.display().to_string()),
     });
     let (mut machine, recognition_error) = match heiwa_install::load_machine_manifest() {
@@ -4310,13 +4356,14 @@ fn thermal_pressure() -> (ThermalPressure, &'static str) {
     )
 }
 
-fn runtime_channel() -> String {
+/// The channel this binary was built for. Release builds stamp `main` and
+/// dev-channel builds stamp `dev` at compile time; anything else was built by
+/// hand and says `local` rather than guessing.
+pub(crate) fn runtime_channel() -> String {
     env::var("HEIWA_CHANNEL").unwrap_or_else(|_| {
-        if cfg!(debug_assertions) {
-            "dev".to_string()
-        } else {
-            "stable".to_string()
-        }
+        option_env!("HEIWA_BUILD_CHANNEL")
+            .unwrap_or("local")
+            .to_string()
     })
 }
 
@@ -5761,7 +5808,8 @@ fn print_help() {
     println!("  heiwa app start [--port N] [--no-open]");
     println!("  heiwa app api get <path> [--port N]");
     println!("  heiwa app api post <path> --body JSON [--port N]");
-    println!("  heiwa app update [--source github|checkout] [--dry-run]");
+    println!("  heiwa app update [--source github|checkout] [--dry-run] [--force]");
+    println!("  heiwa app channel [main|dev] [--source <checkout>] [--json]");
     println!("  heiwa app runtime status [--json]");
     println!("  heiwa app status [--json]");
     println!("  heiwa app [--json]");
@@ -5773,9 +5821,11 @@ fn print_update_help() {
     println!("heiwa app update");
     println!();
     println!("Usage:");
-    println!("  heiwa app update [--source github|checkout] [--dry-run]");
+    println!("  heiwa app update [--source github|checkout] [--dry-run] [--json] [--force]");
     println!();
-    println!("Defaults to GitHub Releases for user/runtime updates.");
+    println!("Follows the channel chosen with `heiwa app channel`:");
+    println!("  main (default)  GitHub Releases, which are tagged on main");
+    println!("  dev             origin/dev, built locally from the recorded checkout; --force rebuilds the same commit");
     println!(
         "Use --source checkout only for explicit developer reinstall from the current checkout."
     );

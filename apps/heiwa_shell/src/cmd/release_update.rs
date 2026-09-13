@@ -129,7 +129,7 @@ fn validate_entry_types(verbose_listing: &str) -> Result<()> {
     Ok(())
 }
 
-fn sha256_file(path: &Path) -> Result<String> {
+pub(super) fn sha256_file(path: &Path) -> Result<String> {
     let bytes = fs::read(path)
         .with_context(|| format!("could not read staged download {}", path.display()))?;
     let mut hasher = Sha256::new();
@@ -193,7 +193,7 @@ fn tar_output(args: &[&str]) -> Result<String> {
     Ok(String::from_utf8_lossy(&output.stdout).into_owned())
 }
 
-fn copy_dir_all(src: &Path, dst: &Path) -> Result<()> {
+pub(super) fn copy_dir_all(src: &Path, dst: &Path) -> Result<()> {
     fs::create_dir_all(dst).with_context(|| format!("could not create {}", dst.display()))?;
     for entry in fs::read_dir(src).with_context(|| format!("could not read {}", src.display()))? {
         let entry = entry?;
@@ -222,7 +222,7 @@ fn install_executable(staged: &Path) -> Result<()> {
 }
 
 #[cfg(unix)]
-fn swap_symlink(link: &Path, target_name: &str) -> Result<()> {
+pub(super) fn swap_symlink(link: &Path, target_name: &str) -> Result<()> {
     if link.exists() && !link.is_symlink() {
         bail!(
             "{} exists and is not a managed symlink; move it aside and retry",
@@ -252,7 +252,7 @@ fn install_executable(_staged: &Path) -> Result<()> {
 }
 
 #[cfg(not(unix))]
-fn swap_symlink(_link: &Path, _target_name: &str) -> Result<()> {
+pub(super) fn swap_symlink(_link: &Path, _target_name: &str) -> Result<()> {
     bail!("release update currently supports macOS and Linux only")
 }
 
@@ -261,6 +261,7 @@ fn plan(
     platform: &str,
     current_version: &str,
     latest_version: Option<&str>,
+    reinstall: bool,
     dry_run: bool,
 ) -> Value {
     json!({
@@ -272,7 +273,9 @@ fn plan(
         "installed_bin": install_root.join("bin").join("heiwa").display().to_string(),
         "current_version": current_version,
         "latest_version": latest_version,
-        "update_available": latest_version.map(|latest| latest != current_version),
+        "channel": "main",
+        "reinstall": reinstall,
+        "update_available": latest_version.map(|latest| reinstall || latest != current_version),
         "restart_policy": "prompt-before-restart",
         "dry_run": dry_run,
     })
@@ -291,8 +294,12 @@ fn print_plan(summary: &Value, json_output: bool) {
             .to_string()
     };
     println!("heiwa app update");
+    println!("  channel: main");
     println!("  source_mode: {}", field("source_mode"));
     println!("  source: {}", field("source"));
+    if summary.get("reinstall").and_then(Value::as_bool) == Some(true) {
+        println!("  reinstall: the install root holds a build from another channel");
+    }
     println!("  release_api: {}", field("release_api"));
     println!("  platform: {}", field("platform"));
     println!("  current_version: {}", field("current_version"));
@@ -303,15 +310,19 @@ fn print_plan(summary: &Value, json_output: bool) {
     }
 }
 
-/// Update the installed runtime in place. Callers on an async runtime must wrap
-/// this in `tokio::task::block_in_place` — it performs blocking HTTP.
+/// Update the installed runtime in place and return the version installed, if
+/// any. `reinstall` installs the latest release even when its version equals
+/// the running one, because the install root holds a build from another
+/// channel. Callers on an async runtime must wrap this in
+/// `tokio::task::block_in_place` — it performs blocking HTTP.
 pub(crate) fn run(
     install_root: PathBuf,
     platform: &str,
     current_version: &str,
+    reinstall: bool,
     dry_run: bool,
     json_output: bool,
-) -> Result<()> {
+) -> Result<Option<String>> {
     if !supported_platform(platform) {
         bail!(
             "release update does not support {platform} yet; download the asset from https://github.com/{REPO}/releases"
@@ -325,10 +336,17 @@ pub(crate) fn run(
     // deterministic and offline so it is usable from a sandboxed CI job.
     if dry_run {
         print_plan(
-            &plan(&install_root, platform, current_version, None, true),
+            &plan(
+                &install_root,
+                platform,
+                current_version,
+                None,
+                reinstall,
+                true,
+            ),
             json_output,
         );
-        return Ok(());
+        return Ok(None);
     }
 
     let client = http_client()?;
@@ -339,16 +357,17 @@ pub(crate) fn run(
             platform,
             current_version,
             Some(&latest),
+            reinstall,
             false,
         ),
         json_output,
     );
 
-    if latest == current_version {
+    if latest == current_version && !reinstall {
         if !json_output {
             println!("  already on the latest release");
         }
-        return Ok(());
+        return Ok(None);
     }
 
     let bin_dir = install_root.join("bin");
@@ -375,7 +394,7 @@ pub(crate) fn run(
         json_output,
     );
     let _ = fs::remove_dir_all(&work_dir);
-    outcome
+    outcome.map(|()| Some(latest))
 }
 
 /// Move a verified, extracted payload into the install root and return the
@@ -578,6 +597,7 @@ mod tests {
             "macos-aarch64",
             "0.1.0",
             None,
+            false,
             true,
         );
         assert_eq!(summary["source_mode"], "github-release");
@@ -601,13 +621,26 @@ mod tests {
             "0.1.0",
             Some("0.1.0"),
             false,
+            false,
         );
         assert_eq!(same["update_available"], false);
+        // A dev or checkout build carrying the same version is not the release.
+        let other_channel = plan(
+            Path::new("/tmp/heiwa"),
+            "linux-x86_64",
+            "0.1.0",
+            Some("0.1.0"),
+            true,
+            false,
+        );
+        assert_eq!(other_channel["update_available"], true);
+        assert_eq!(other_channel["channel"], "main");
         let newer = plan(
             Path::new("/tmp/heiwa"),
             "linux-x86_64",
             "0.1.0",
             Some("0.1.1"),
+            false,
             false,
         );
         assert_eq!(newer["update_available"], true);

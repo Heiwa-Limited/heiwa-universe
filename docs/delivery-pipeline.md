@@ -139,6 +139,7 @@ new installs whose latest-release lookup fails silently land on the old version.
 | --- | --- |
 | New install | `curl https://heiwa.ltd/install \| sh` — resolves the newest release at run time, falls back to a pinned version, verifies SHA-256, rejects archives containing links or paths outside the expected root, stages and swaps atomically |
 | Existing install | `heiwa app update` — same invariants, reached from the runtime instead of the shell |
+| Dev channel | `heiwa app channel dev`, then `heiwa app update` — builds `origin/dev` locally with `scripts/build_local_bundle.sh` and installs it the same staged way |
 
 The installer and `heiwa app update` are the same trust boundary reached two
 different ways, so they hold the same invariants: HTTPS-only downloads from
@@ -151,6 +152,17 @@ usable from a sandboxed job.
 Cockpit assets land *before* the binary that serves them. The reverse order
 produces a new runtime serving a stale cockpit — the version-skew failure
 `AGENTS.md` warns about when a new API endpoint returns `index.html`.
+
+`main` is the default update channel and the only public one. An operator who
+develops Heiwa can choose `dev`: each update fetches `origin/dev`, builds that
+commit in a Heiwa-managed worktree, and installs the result with the same
+ordering and staged renames, skipping a commit that is already installed. The
+checkout owns its build recipe (`scripts/build_local_bundle.sh`), so the recipe
+changes with the code it builds. On macOS the runtime comes from the desktop
+bundle it built, because the app installs its bundled runtime when it opens.
+Release builds compile in `HEIWA_BUILD_CHANNEL=main` and dev builds `dev`, so
+`/api/v1/session` reports where the running runtime came from; other builds
+report `local`.
 | Container | `container.yml` packages already-certified release bytes; the release image never recompiles Rust |
 | Local promotion | `heiwa app update --source checkout` after `main` moves |
 

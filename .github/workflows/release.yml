@@ -436,6 +436,10 @@ jobs:
           sudo apt-get install -y --no-install-recommends libdbus-1-dev pkg-config
 
       - name: Build release binary
+        env:
+          # Compiled in, so an installed runtime reports the channel and commit it came from.
+          HEIWA_BUILD_CHANNEL: main
+          HEIWA_BUILD_COMMIT: ${{ needs.metadata.outputs.commit }}
         run: >
           cargo build --locked --release -p heiwa-shell --bin heiwa
           --features heiwa-shell/lance --target ${{ matrix.target }}

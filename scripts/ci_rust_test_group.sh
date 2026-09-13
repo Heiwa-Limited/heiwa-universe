@@ -48,6 +48,7 @@ shell_state_targets=(
   first_run
   fresh_install
   local_boot
+  update_channel
 )
 
 shell_ops_targets=(
