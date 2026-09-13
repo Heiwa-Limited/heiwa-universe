@@ -91,6 +91,37 @@ impl OperatorAppRuntimeLease {
     }
 }
 
+/// Page size for the full-stream scan inside exclusive restart recovery.
+const RECOVERY_PAGE_SIZE: usize = 256;
+
+/// Extends one exclusive restart-recovery pass with appends derived from the
+/// operator stream — for example, marking worker runs whose supervisor died.
+pub trait RecoveryPlanner {
+    /// Called once for every operator event, in append order.
+    fn observe(&mut self, event: &OperatorEvent);
+    /// Events to append, in order, before the exclusive section ends.
+    fn plan(self) -> Result<Vec<OperatorEvent>>;
+}
+
+/// A planner that adds nothing to turn recovery.
+pub struct NoFurtherRecovery;
+
+impl RecoveryPlanner for NoFurtherRecovery {
+    fn observe(&mut self, _event: &OperatorEvent) {}
+
+    fn plan(self) -> Result<Vec<OperatorEvent>> {
+        Ok(Vec::new())
+    }
+}
+
+/// What one exclusive restart-recovery pass appended.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct RecoveryOutcome {
+    pub interrupted_turns: usize,
+    /// The planner's events, exactly as appended.
+    pub appended: Vec<OperatorEvent>,
+}
+
 #[derive(Debug)]
 struct OperatorActivityLease {
     root: PathBuf,
@@ -1026,6 +1057,24 @@ impl OperatorSessionService {
     /// Idempotent: once every turn is terminal, subsequent calls return
     /// `0` and append nothing.
     pub fn recover_interrupted(&self) -> Result<usize> {
+        Ok(self
+            .recover_interrupted_with(NoFurtherRecovery)?
+            .interrupted_turns)
+    }
+
+    /// [`Self::recover_interrupted`], extended by `planner` inside the same
+    /// exclusive recovery section.
+    ///
+    /// Holding the exclusive activity lease is the proof that no app, CLI,
+    /// REPL, or loop writer is live on this evidence root, so anything the
+    /// stream still shows in flight has lost its supervisor. `planner` sees the
+    /// complete stream in append order and its events are appended before the
+    /// section ends. If another writer holds activity, nothing is read or
+    /// appended and the error names the held lease.
+    pub fn recover_interrupted_with<P: RecoveryPlanner>(
+        &self,
+        planner: P,
+    ) -> Result<RecoveryOutcome> {
         let _write_transaction = self.lock_write_transaction()?;
         let mut activity_lease = self
             .activity_lease
@@ -1065,7 +1114,32 @@ impl OperatorSessionService {
                     closed += 1;
                 }
             }
-            Ok(closed)
+
+            let mut planner = planner;
+            let mut cursor: Option<String> = None;
+            loop {
+                let page = self
+                    .journal
+                    .read_after(cursor.as_deref(), RECOVERY_PAGE_SIZE)?;
+                for row in &page.events {
+                    planner.observe(&row.event);
+                }
+                let Some(next_cursor) = page.next_cursor else {
+                    break;
+                };
+                if page.events.is_empty() || cursor.as_deref() == Some(next_cursor.as_str()) {
+                    break;
+                }
+                cursor = Some(next_cursor);
+            }
+            let appended = planner.plan()?;
+            for event in &appended {
+                self.journal.append(event)?;
+            }
+            Ok(RecoveryOutcome {
+                interrupted_turns: closed,
+                appended,
+            })
         })
     }
 
@@ -2057,6 +2131,7 @@ fn apply_to_existing_thread(
         | OperatorEventType::WorkerLaunched
         | OperatorEventType::WorkerHeartbeat
         | OperatorEventType::WorkerExited
+        | OperatorEventType::WorkerStale
         | OperatorEventType::PaneOpened
         | OperatorEventType::PaneClosed => apply_nonterminal_touch(entry, event),
         // Project events were handled before thread projection above.

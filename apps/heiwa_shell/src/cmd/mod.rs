@@ -13,6 +13,7 @@ pub mod goal;
 pub mod life;
 pub mod mail;
 pub mod mesh;
+pub(crate) mod recover;
 pub mod release_update;
 pub mod schedule;
 pub(crate) mod update_channel;

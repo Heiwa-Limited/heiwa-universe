@@ -1031,9 +1031,14 @@ async fn start(args: &[String]) -> Result<()> {
     let sessions = crate::default_model_call_runtime()
         .map_err(anyhow::Error::msg)?
         .sessions;
-    sessions
-        .recover_interrupted()
+    // Worker runs recover in the same exclusive section as turns: winning it
+    // proves every run the stream still shows in flight lost its supervisor.
+    let recovery = crate::cmd::recover::recover(&sessions)
         .map_err(|error| anyhow!("operator restart recovery failed: {error}"))?;
+    let recovered_runs = crate::cmd::recover::report(&recovery);
+    if recovered_runs["runs_marked_stale"].as_u64().unwrap_or(0) > 0 {
+        eprintln!("heiwa app: restart recovery {recovered_runs}");
+    }
 
     // Port reachability is the readiness boundary used by launchers and
     // tests. Bind only after ownership and recovery finish so a successful
@@ -2090,6 +2095,7 @@ enum OperatorHttpRoute {
     Events(String),
     Turns(String),
     Cancel(String),
+    WorkSurfaces(String),
 }
 
 async fn operator_http_response(
@@ -2111,6 +2117,11 @@ async fn operator_http_response(
     let runner = runtime.runner;
 
     match (method, route) {
+        ("GET", OperatorHttpRoute::WorkSurfaces(work_id)) => work_surfaces_response(
+            &heiwa_config::HeiwaPaths::resolve().evidence_dir,
+            &work_id,
+            &format!("app-{}", std::process::id()),
+        ),
         ("GET", OperatorHttpRoute::Catalog) => match sessions.catalog(100) {
             Ok(catalog) => (200, json!({"ok": true, "data": catalog})),
             Err(_) => operator_error(503, "operator_unavailable"),
@@ -2322,6 +2333,17 @@ async fn operator_http_response(
     }
 }
 
+/// `GET /api/v1/operator/work/{work_id}/surfaces`: the same one-snapshot views
+/// `heiwa work show --surface all` prints. The epoch is per app process, so it
+/// changes exactly when the projector restarts.
+fn work_surfaces_response(evidence_root: &Path, work_id: &str, epoch_seed: &str) -> (u16, Value) {
+    match crate::cmd::work::surfaces_json(evidence_root, work_id, epoch_seed) {
+        Ok(surfaces) => (200, json!({"ok": true, "data": surfaces})),
+        Err(error) if error.to_string().contains("unknown") => operator_error(404, "unknown_work"),
+        Err(_) => operator_error(503, "operator_unavailable"),
+    }
+}
+
 fn operator_error(status: u16, code: &str) -> (u16, Value) {
     (status, json!({"ok": false, "error": {"code": code}}))
 }
@@ -2352,6 +2374,9 @@ fn parse_operator_route(path: &str) -> std::result::Result<Option<OperatorHttpRo
         )),
         ["api", "v1", "operator", "turns", turn_id, "cancel"] => Ok(Some(
             OperatorHttpRoute::Cancel(decode_operator_path_id(turn_id)?),
+        )),
+        ["api", "v1", "operator", "work", work_id, "surfaces"] => Ok(Some(
+            OperatorHttpRoute::WorkSurfaces(decode_operator_path_id(work_id)?),
         )),
         _ if segments.iter().any(|segment| segment.is_empty()) => Err(()),
         _ => Ok(None),
@@ -5858,6 +5883,39 @@ mod app_readmodel_tests {
     use heiwa_evidence::OperatorJournal;
     use heiwa_session::operator::{OperatorSessionService, StartTurnRequest};
     use tokio::sync::broadcast;
+
+    #[test]
+    fn work_surfaces_route_serves_one_snapshot_and_refuses_unknown_work() {
+        match parse_operator_route("/api/v1/operator/work/work-a%2Db/surfaces") {
+            Ok(Some(OperatorHttpRoute::WorkSurfaces(work_id))) => assert_eq!(work_id, "work-a-b"),
+            _ => panic!("work surfaces route must parse with a decoded id"),
+        }
+
+        let runtime = tempfile::tempdir().expect("runtime");
+        let evidence = runtime.path().join("evidence");
+        let created = crate::cmd::work::create(&evidence, "agree", "install-1").expect("create");
+        let work_id = created["work_id"].as_str().expect("work id");
+
+        let (status, body) = work_surfaces_response(&evidence, work_id, "app-test");
+        assert_eq!(status, 200, "{body}");
+        let surfaces = body["data"]["surfaces"].as_array().expect("surfaces");
+        let names: Vec<_> = surfaces
+            .iter()
+            .map(|view| view["surface"].clone())
+            .collect();
+        assert_eq!(names, vec![json!("home"), json!("work"), json!("agent")]);
+        for view in surfaces {
+            assert_eq!(
+                view["identity"], surfaces[0]["identity"],
+                "one snapshot, one identity"
+            );
+            assert_eq!(view["identity"]["work_id"], json!(work_id));
+        }
+
+        let (status, body) = work_surfaces_response(&evidence, "work-missing", "app-test");
+        assert_eq!(status, 404, "{body}");
+        assert_eq!(body["error"]["code"], json!("unknown_work"));
+    }
 
     #[test]
     fn cockpit_static_root_prefers_override_then_installed_release_assets() {

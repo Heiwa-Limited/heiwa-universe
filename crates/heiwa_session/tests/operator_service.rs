@@ -9,8 +9,8 @@ use heiwa_evidence::{
     OperatorSensitivity, OPERATOR_EVENT_SCHEMA_VERSION,
 };
 use heiwa_session::operator::{
-    OperatorAppRuntimeLease, OperatorOwnershipError, OperatorSessionService, RouteMode,
-    StartTurnRequest, ThreadMetadataUpdate, TurnSubmissionError,
+    OperatorAppRuntimeLease, OperatorOwnershipError, OperatorSessionService, RecoveryPlanner,
+    RouteMode, StartTurnRequest, ThreadMetadataUpdate, TurnSubmissionError,
 };
 #[cfg(feature = "lance")]
 use heiwa_session::{operator_event_key, SessionSearchHit};
@@ -729,6 +729,98 @@ fn restart_recovery_fails_while_another_session_writer_is_live() {
     drop(live_writer);
     assert_eq!(recovery.recover_interrupted().unwrap(), 1);
     assert_eq!(recovery.recover_interrupted().unwrap(), 0);
+}
+
+/// Records what it saw and appends one marker per observed turn start.
+struct MarkTurnStarts {
+    seen: Arc<Mutex<Vec<OperatorEventType>>>,
+    starts: Vec<OperatorEvent>,
+}
+
+impl RecoveryPlanner for MarkTurnStarts {
+    fn observe(&mut self, event: &OperatorEvent) {
+        self.seen.lock().unwrap().push(event.event_type.clone());
+        if event.event_type == OperatorEventType::TurnStarted {
+            self.starts.push(event.clone());
+        }
+    }
+
+    fn plan(self) -> anyhow::Result<Vec<OperatorEvent>> {
+        Ok(self
+            .starts
+            .into_iter()
+            .map(|start| OperatorEvent {
+                event_id: format!("marker-{}", start.event_id),
+                event_type: OperatorEventType::Blocker,
+                turn_id: None,
+                actor: OperatorActor {
+                    kind: "runtime".to_string(),
+                    id: "test-recovery".to_string(),
+                },
+                payload: json!({ "code": "test_marker" }),
+                ..start
+            })
+            .collect())
+    }
+}
+
+#[test]
+fn restart_recovery_planner_sees_the_whole_stream_and_appends_inside_the_section() {
+    let dir = tempfile::tempdir().unwrap();
+    let service = test_service(dir.path());
+    service
+        .start_turn("default", StartTurnRequest::auto("req-1", "hello"))
+        .unwrap();
+
+    let seen = Arc::new(Mutex::new(Vec::new()));
+    let outcome = service
+        .recover_interrupted_with(MarkTurnStarts {
+            seen: seen.clone(),
+            starts: Vec::new(),
+        })
+        .unwrap();
+    assert_eq!(outcome.interrupted_turns, 1);
+    assert_eq!(outcome.appended.len(), 1);
+    let seen = seen.lock().unwrap().clone();
+    assert!(seen.contains(&OperatorEventType::TurnStarted));
+    // The planner scans after turn recovery, so it sees the closure too.
+    assert!(seen.contains(&OperatorEventType::TurnInterrupted));
+
+    let journal = OperatorJournal::new(dir.path().to_path_buf()).unwrap();
+    let page = journal.read_after(None, 500).unwrap();
+    assert_eq!(
+        page.events
+            .iter()
+            .filter(|row| row.event.event_id.starts_with("marker-"))
+            .count(),
+        1
+    );
+}
+
+#[test]
+fn restart_recovery_planner_is_never_consulted_while_another_writer_is_live() {
+    let dir = tempfile::tempdir().unwrap();
+    let live_writer = test_service(dir.path());
+    live_writer
+        .start_turn(
+            "default",
+            StartTurnRequest::auto("req-live", "still running"),
+        )
+        .unwrap();
+    let recovery = test_service(dir.path());
+
+    let seen = Arc::new(Mutex::new(Vec::new()));
+    let error = recovery
+        .recover_interrupted_with(MarkTurnStarts {
+            seen: seen.clone(),
+            starts: Vec::new(),
+        })
+        .unwrap_err();
+    assert!(
+        error.to_string().contains("operator_activity_lease_held"),
+        "{error}"
+    );
+    assert!(seen.lock().unwrap().is_empty(), "no proof, no scan");
 }
 
 #[test]
