@@ -418,57 +418,62 @@ fn operator_stream(root: &Path) -> std::path::PathBuf {
 
 #[test]
 fn a1_recovery_never_interprets_a_worker_row_this_build_cannot_admit() {
-    // Review reproduction: a schema-999 `worker_launched` under a valid Work,
-    // with no real provider process, must not become a current-schema marker.
-    let work = prepared_work("A1 future schema");
-    let stream = operator_stream(&work.runtime_root);
-    let original = std::fs::read_to_string(&stream).expect("stream");
-    let last: Value =
-        serde_json::from_str(original.lines().last().expect("an envelope")).expect("envelope");
-    let mut future = last.clone();
-    let record = future["record"].as_object_mut().expect("record");
-    let thread_id = record["thread_id"].clone();
-    record.insert("schema_version".into(), 999.into());
-    record.insert("event_id".into(), "future-launch-event".into());
-    record.insert("event_type".into(), "worker_launched".into());
-    record.insert("work_id".into(), work.work_id.as_str().into());
-    record.insert("thread_id".into(), thread_id);
-    record.insert("run_id".into(), "future-run".into());
-    record.insert("turn_id".into(), Value::Null);
-    record.insert("call_id".into(), Value::Null);
-    record.insert(
-        "actor".into(),
-        serde_json::json!({"kind": "worker", "id": "future-worker"}),
-    );
-    record.insert(
-        "payload".into(),
-        serde_json::json!({
-            "worker_id": "future-worker", "provider": "fixture", "provider_session_ref": null,
-            "executable_path": "/bin/true", "executable_sha256": "a".repeat(64),
-            "cwd": "/tmp", "repo_root": "/tmp", "branch": "fixture",
-            "base_commit": "b".repeat(40), "lease_id": "fixture-lease",
-            "installation_id": "install-test",
-        }),
-    );
-    let mut appended = original.clone();
-    appended.push_str(&serde_json::to_string(&future).expect("encode"));
-    appended.push('\n');
-    std::fs::write(&stream, &appended).expect("append future row");
+    // Review reproductions: under a valid Work, with no real provider process,
+    // a newer-schema `worker_launched` and a current-schema one whose payload
+    // does not parse must each stay uninterpreted and byte-preserved.
+    let full_payload = serde_json::json!({
+        "worker_id": "future-worker", "provider": "fixture", "provider_session_ref": null,
+        "executable_path": "/bin/true", "executable_sha256": "a".repeat(64),
+        "cwd": "/tmp", "repo_root": "/tmp", "branch": "fixture",
+        "base_commit": "b".repeat(40), "lease_id": "fixture-lease",
+        "installation_id": "install-test",
+    });
+    for (schema, payload, reason) in [
+        (999, full_payload, "unsupported_schema"),
+        (1, serde_json::json!({}), "malformed_worker_payload"),
+    ] {
+        let work = prepared_work("A1 uninterpretable worker row");
+        let stream = operator_stream(&work.runtime_root);
+        let original = std::fs::read_to_string(&stream).expect("stream");
+        let last: Value =
+            serde_json::from_str(original.lines().last().expect("an envelope")).expect("envelope");
+        let mut row = last.clone();
+        let record = row["record"].as_object_mut().expect("record");
+        record.insert("schema_version".into(), schema.into());
+        record.insert(
+            "event_id".into(),
+            format!("uninterpretable-{schema}").into(),
+        );
+        record.insert("event_type".into(), "worker_launched".into());
+        record.insert("work_id".into(), work.work_id.as_str().into());
+        record.insert("run_id".into(), "uninterpretable-run".into());
+        record.insert("turn_id".into(), Value::Null);
+        record.insert("call_id".into(), Value::Null);
+        record.insert(
+            "actor".into(),
+            serde_json::json!({"kind": "worker", "id": "future-worker"}),
+        );
+        record.insert("payload".into(), payload);
+        let mut appended = original.clone();
+        appended.push_str(&serde_json::to_string(&row).expect("encode"));
+        appended.push('\n');
+        std::fs::write(&stream, &appended).expect("append row");
 
-    let report = json(recover(&work), "work recover");
-    assert_eq!(report["runs_marked_stale"], 0, "{report}");
-    let unadmitted = report["unadmitted_worker_events"]
-        .as_array()
-        .expect("unadmitted");
-    assert!(
-        unadmitted
-            .iter()
-            .any(|doubt| doubt["run_id"] == "future-run" && doubt["reason"] == "unsupported_schema"),
-        "the uninterpreted row is reported: {report}"
-    );
-    assert_eq!(
-        std::fs::read_to_string(&stream).expect("stream after"),
-        appended,
-        "recovery preserved the unsupported evidence and appended nothing"
-    );
+        let report = json(recover(&work), "work recover");
+        assert_eq!(report["runs_marked_stale"], 0, "{reason}: {report}");
+        let unadmitted = report["unadmitted_worker_events"]
+            .as_array()
+            .expect("unadmitted");
+        assert!(
+            unadmitted
+                .iter()
+                .any(|doubt| doubt["run_id"] == "uninterpretable-run" && doubt["reason"] == reason),
+            "{reason}: the uninterpreted row is reported: {report}"
+        );
+        assert_eq!(
+            std::fs::read_to_string(&stream).expect("stream after"),
+            appended,
+            "{reason}: recovery preserved the evidence and appended nothing"
+        );
+    }
 }

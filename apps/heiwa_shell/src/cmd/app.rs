@@ -5906,8 +5906,12 @@ mod app_readmodel_tests {
         );
         assert_ne!(seed, format!("app-{}", std::process::id()));
         let instance = seed.strip_prefix("app-instance-").expect("instance seed");
-        assert!(uuid::Uuid::parse_str(instance).is_ok(), "{seed}");
-        assert!(!instance.contains(&std::process::id().to_string()));
+        let instance = uuid::Uuid::parse_str(instance).expect("instance uuid");
+        assert_eq!(
+            instance.get_version(),
+            Some(uuid::Version::Random),
+            "minted at random, not derived from the pid: {seed}"
+        );
     }
 
     #[test]

@@ -24,7 +24,8 @@ use heiwa_session::operator::{
     EventAdmission, OperatorSessionService, RecoveryOutcome, RecoveryPlanner,
 };
 use heiwa_worker::{
-    observe_process, stale_marker, unfinished_runs, ProcessSighting, RunRow, WorkerStalePayload,
+    observe_process, stale_marker, unfinished_runs, ProcessSighting, RunRow, WorkerExitedPayload,
+    WorkerHeartbeatPayload, WorkerLaunchedPayload, WorkerStalePayload,
 };
 use serde::Serialize;
 use serde_json::{json, Value};
@@ -61,8 +62,9 @@ impl Doubt {
 pub(crate) struct RunRecoveryReport {
     /// Unfinished runs recovery did not mark, with the doubt that stopped it.
     pub runs_withheld: Vec<Doubt>,
-    /// Worker rows this build did not admit or could not place. Preserved in
-    /// the journal as written; listed so the uncertainty is visible.
+    /// Worker rows this build did not admit, could not parse, or could not
+    /// place. Preserved in the journal as written; listed so the uncertainty
+    /// is visible.
     pub unadmitted_worker_events: Vec<Doubt>,
     pub unreadable_journal_lines: usize,
 }
@@ -92,6 +94,21 @@ impl<S: FnMut(u32) -> ProcessSighting> RunRecovery<S> {
     }
 }
 
+/// Whether a run-shaping row's payload parses as its typed worker payload.
+///
+/// Replay admission checks the envelope, not the payload, and the display fold
+/// deliberately keeps an envelope-only row visible. Recovery writes evidence,
+/// so a payload it cannot parse is uncertainty, not a run it may mark.
+fn worker_payload_parses(event: &OperatorEvent) -> bool {
+    match event.event_type {
+        OperatorEventType::WorkerLaunched => WorkerLaunchedPayload::from_event(event).is_some(),
+        OperatorEventType::WorkerHeartbeat => WorkerHeartbeatPayload::from_event(event).is_some(),
+        OperatorEventType::WorkerExited => WorkerExitedPayload::from_event(event).is_some(),
+        OperatorEventType::WorkerStale => WorkerStalePayload::from_event(event).is_some(),
+        _ => true,
+    }
+}
+
 fn shapes_a_run(event_type: &OperatorEventType) -> bool {
     matches!(
         event_type,
@@ -112,6 +129,10 @@ impl<S: FnMut(u32) -> ProcessSighting> RecoveryPlanner for RunRecovery<S> {
             return;
         }
         match admission {
+            EventAdmission::Admitted if !worker_payload_parses(event) => {
+                self.doubts
+                    .push(Doubt::of(event, "malformed_worker_payload"));
+            }
             EventAdmission::Admitted if event.run_id.is_some() => {
                 self.worker_events.push(event.clone());
             }
@@ -336,6 +357,7 @@ mod tests {
         fold_runs, worker_exited_event, worker_heartbeat_event, worker_launched_event,
         ObservedProcess, WorkerIdentity, WorkerState, SCHEMA_VERSION,
     };
+    use serde_json::json;
 
     use super::*;
 
@@ -671,6 +693,78 @@ mod tests {
             withheld(&outcome),
             vec![("run-1".to_string(), "worker_row_without_run")]
         );
+    }
+
+    /// Recovery through a sighting that records every pid it was asked about.
+    fn recover_counting_sightings(
+        writer: &OperatorSessionService,
+    ) -> (RecoveryOutcome<RunRecoveryReport>, Vec<u32>) {
+        let sighted = std::cell::RefCell::new(Vec::new());
+        let outcome = writer
+            .recover_interrupted_with(RunRecovery::observing(|pid| {
+                sighted.borrow_mut().push(pid);
+                ProcessSighting::NotRunning
+            }))
+            .expect("recovery");
+        (outcome, sighted.into_inner())
+    }
+
+    #[test]
+    fn a_current_schema_launch_with_a_malformed_payload_is_preserved_and_never_marked() {
+        let runtime = tempfile::tempdir().expect("runtime");
+        let evidence = runtime.path().join("evidence");
+        let worker = work_with_worker(&evidence);
+        let mut launch_row = launched_row(&worker, "malformed-run");
+        launch_row.payload = json!({});
+        raw_append(&evidence, &launch_row);
+        let before = journal_len(&evidence);
+
+        let (outcome, sighted) = recover_counting_sightings(&service(&evidence));
+
+        assert!(
+            outcome.appended.is_empty(),
+            "no marker from a payload that does not parse"
+        );
+        assert!(sighted.is_empty(), "no process observation either");
+        assert_eq!(journal_len(&evidence), before);
+        assert_eq!(
+            outcome.report.unadmitted_worker_events,
+            vec![Doubt {
+                run_id: Some("malformed-run".to_string()),
+                work_id: Some(worker.work_id.clone()),
+                reason: "malformed_worker_payload",
+            }]
+        );
+    }
+
+    #[test]
+    fn a_malformed_heartbeat_ending_or_marker_withholds_its_run() {
+        for (label, malformed) in [
+            ("heartbeat", OperatorEventType::WorkerHeartbeat),
+            ("exit", OperatorEventType::WorkerExited),
+            ("stale", OperatorEventType::WorkerStale),
+        ] {
+            let runtime = tempfile::tempdir().expect("runtime");
+            let evidence = runtime.path().join("evidence");
+            let worker = work_with_worker(&evidence);
+            let writer = service(&evidence);
+            launch(&writer, &worker, "run-1", None);
+            let mut row = launched_row(&worker, "run-1");
+            row.event_id = id();
+            row.event_type = malformed;
+            row.payload = json!({ "pid": "not-a-pid", "exit_code": [] });
+            raw_append(&evidence, &row);
+
+            let (outcome, sighted) = recover_counting_sightings(&writer);
+
+            assert!(outcome.appended.is_empty(), "{label}: no marker");
+            assert!(sighted.is_empty(), "{label}: no process observation");
+            assert_eq!(
+                withheld(&outcome),
+                vec![("run-1".to_string(), "malformed_worker_payload")],
+                "{label}"
+            );
+        }
     }
 
     #[test]

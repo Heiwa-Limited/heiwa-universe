@@ -119,14 +119,16 @@ no relaunch or file change), kill both (recorded gone), and restart
 
 ### A1-c3 review repair — 2026-09-13
 
-Astra reproduced three boundary defects at `614960f1` with disposable
-fixtures; each repair below first failed against that revision.
+Astra reproduced three boundary defects at `614960f1`, and a fourth (malformed
+current-schema payload) at `14459ef2`, with disposable fixtures; each repair
+below first failed against the revision it was found at.
 
 | # | Repaired invariant | Status | Verification |
 |---|---|---|---|
 | 1 | An acceptance stamp names only the clean source (tracked and untracked) its checks observed; a revision committed or source added during checks fails the gate, and a dirty start never stamps | done | `bash scripts/tests/test_acceptance_stamp.sh` |
 | 2 | Recovery interprets only rows the service's replay admits; unsupported-schema, rejected, unplaced, scope-mismatched, or unreadable worker evidence withholds the run and is reported, never marked | done | `cargo test -p heiwa-shell --bin heiwa cmd::recover` |
 | 3 | Linux start identity carries the kernel boot identity; the app API surface epoch is minted per runtime instance, not per pid | done | `cargo test -p heiwa-shell --bin heiwa -- linux_start_identity work_surface_epoch` |
+| 4 | A current-schema worker row whose payload does not parse as its typed worker payload withholds its run and is reported; no marker or process observation comes from it | done | `cargo test -p heiwa-shell --bin heiwa malformed` |
 
 All four acceptance gates (L0, L1, L2, Work Fabric A1) now stamp through
 `scripts/lib/acceptance_stamp.sh`; L0-L2 had the same end-only stamp check.
