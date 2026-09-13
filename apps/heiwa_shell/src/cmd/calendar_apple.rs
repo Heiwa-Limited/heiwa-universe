@@ -89,15 +89,46 @@ function run(argv) {
 
 pub(crate) fn request_calendars() -> Result<Vec<Value>> {
     if super::calendar_read::helper_path().is_some() {
-        return super::calendar_read::resources(true);
+        return match super::calendar_read::resources(true) {
+            Ok(calendars) => Ok(calendars),
+            Err(eventkit_error) => jxa_list_calendars().map_err(|bridge_error| {
+                anyhow!(
+                    "Apple Calendar resource discovery failed through EventKit ({eventkit_error}); Calendar.app fallback also failed ({bridge_error})"
+                )
+            }),
+        };
     }
     list_calendars()
 }
 
 pub(crate) fn list_calendars() -> Result<Vec<Value>> {
     if super::calendar_read::helper_path().is_some() {
-        return super::calendar_read::resources(false);
+        return match super::calendar_read::resources(false) {
+            Ok(calendars) => Ok(calendars),
+            Err(eventkit_error) => {
+                let calendars = jxa_list_calendars().map_err(|bridge_error| {
+                    anyhow!(
+                        "Apple Calendar resource discovery failed through EventKit ({eventkit_error}); Calendar.app fallback also failed ({bridge_error})"
+                    )
+                })?;
+                if calendars.is_empty() {
+                    return Err(anyhow!(
+                        "Apple Calendar resource discovery returned no calendars after EventKit fallback"
+                    ));
+                }
+                Ok(calendars)
+            }
+        };
     }
+    jxa_list_calendars()
+}
+
+/// Calendar.app remains the supported local automation fallback when a
+/// background launchd runtime cannot use the standalone EventKit helper.
+/// Calendar.app does not expose stable calendar identifiers through JXA, so
+/// callers must treat these rows as discovery/write-only and keep EventKit
+/// import disabled until stable IDs are available.
+fn jxa_list_calendars() -> Result<Vec<Value>> {
     let value = run_bridge("list", None)?;
     let calendars = value
         .as_array()
