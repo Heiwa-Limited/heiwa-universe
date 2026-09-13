@@ -191,7 +191,7 @@ fn ensure_apple_calendar_binding_for_connect() -> Result<(String, String)> {
         None => {
             heiwa_install::refresh_machine_manifest_for_runtime(heiwa_install::MachineRuntime {
                 version: env!("CARGO_PKG_VERSION").to_string(),
-                channel: "local".to_string(),
+                channel: super::app::runtime_channel(),
                 install_path: std::env::current_exe().context("resolve Heiwa executable")?,
             })?
         }

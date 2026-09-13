@@ -78,8 +78,11 @@ export function normalizeBuildArgs(args) {
   ];
 }
 
-export function localRuntimeBuildPlan(repoRoot, desktopDir) {
-  const targetDir = path.join(repoRoot, "target", "bundled-runtime");
+// A separate target directory keeps the runtime's `heiwa` from colliding with
+// Tauri's case-folded `Heiwa`. It sits under the caller's Cargo target root so a
+// shared CARGO_TARGET_DIR reuses already compiled dependencies.
+export function localRuntimeBuildPlan(repoRoot, desktopDir, targetRoot = path.join(repoRoot, "target")) {
+  const targetDir = path.join(targetRoot, "bundled-runtime");
   return {
     args: [
       "build",

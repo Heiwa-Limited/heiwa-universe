@@ -9,6 +9,7 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 
 mod runtime_binary;
+pub mod update_channel;
 pub use runtime_binary::install_runtime_binary;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
