@@ -690,7 +690,7 @@ mod tests {
     fn plan(events: Vec<PlanEvent>) -> Plan {
         Plan {
             schema_version: 1,
-            plan_id: "devon-2026-09".into(),
+            plan_id: "operator-2026-09".into(),
             window: Window {
                 start: "2026-09-01T00:00:00-07:00".into(),
                 end: "2026-10-01T00:00:00-07:00".into(),
@@ -702,7 +702,7 @@ mod tests {
 
     fn existing(key: &str, title: &str, start: &str, end: &str, id: &str) -> Existing {
         Existing {
-            marker: marker("devon-2026-09", key),
+            marker: marker("operator-2026-09", key),
             external_id: id.into(),
             calendar: "Life".into(),
             title: title.into(),
@@ -897,7 +897,7 @@ mod tests {
         let floating = event("c", "Lunch", "2026-09-14T11:15:00", "2026-09-14T12:00:00");
         assert!(validate(&plan(vec![floating])).is_err(), "offset required");
         let mut upper = plan(vec![]);
-        upper.plan_id = "Devon".into();
+        upper.plan_id = "Operator".into();
         assert!(validate(&upper).is_err());
     }
 }

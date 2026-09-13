@@ -13,7 +13,7 @@ use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output};
 
-const PLAN_ID: &str = "devon-2026-09";
+const PLAN_ID: &str = "operator-2026-09";
 
 fn marker(key: &str) -> String {
     format!("heiwa://calendar/plan/{PLAN_ID}/{key}")
