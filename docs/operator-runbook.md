@@ -62,6 +62,26 @@ bats tests/audit/test_audit_product_surface.bats
 uv run --extra docs mkdocs build --strict
 ```
 
+## Calendar plans
+
+Use a plan whenever more than one Apple Calendar event changes (a month of
+shifts, a revised roster, a moved block). The plan file is the memory of how the
+calendar should look; receipts are the memory of what changed.
+
+```bash
+heiwa connect apple-calendar --authorize      # once: allow full Calendar access for Heiwa
+heiwa calendar plan diff  plan.json           # what would change; writes nothing
+heiwa calendar plan stage plan.json           # one T2 approval listing every change
+heiwa approvals decide <request_id> --approve # one EventKit commit + one receipt
+```
+
+- **Plan format:** `schema_version: 1`, lowercase `plan_id`, an offset-bearing `window`, the exact `calendars` it owns, and `events` (`key`, `calendar`, `title`, `start`, `end`, optional `notes`, `location`, `tentative`).
+- **Changing the calendar:** edit the plan (or regenerate it), then diff, stage and approve. Only the delta is written; re-staging an applied plan reports `in_sync`.
+- **Scope:** a plan owns only events whose URL is `heiwa://calendar/plan/<plan_id>/…`. Events added by hand are never touched.
+- **Migrating an earlier unmarked import:** stage once with `--adopt`. It claims exact title/start/end matches instead of duplicating them.
+- **Drift:** if Calendar changes between staging and approval, the approval refuses. Stage again.
+- **Receipts:** land in `~/.heiwa/state/calendar/receipts/` and the `connector_receipts` journal.
+
 ## Remote pre-flight
 
 Remote operations require explicit assignment. Do not drift from local repo health into network promotion.

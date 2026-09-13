@@ -268,6 +268,7 @@ pub(crate) fn connect_apple_calendar() -> Result<Value> {
         scopes: vec![
             "calendar.read".to_string(),
             "calendar.event.create_with_approval".to_string(),
+            "calendar.plan.apply_with_approval".to_string(),
         ],
     };
     write_owner_private_json(&apple_calendar_enrollment_path(), &enrollment)?;

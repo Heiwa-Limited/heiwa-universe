@@ -62,6 +62,7 @@ pub async fn run(args: &[String]) -> Result<()> {
             Ok(())
         }
         Some("hold") => hold(&args[1..]),
+        Some("plan") => super::calendar_plan::run(&args[1..]),
         Some("--help") | Some("-h") => {
             print_help();
             Ok(())
@@ -1627,6 +1628,7 @@ fn print_help() {
     println!("  heiwa calendar sync [--source all|apple|google] [--dry-run] [--json]");
     println!("  heiwa calendar hold add <title> [--date YYYY-MM-DD] [--start HH:MM] [--end HH:MM] [--kind focus|travel|soft] [--note <text>]");
     println!("  heiwa calendar hold list [--json]");
+    println!("  heiwa calendar plan diff|stage <plan.json> [--adopt] [--json]");
     println!();
     println!("Holds are local-first; external promotion stays approval-gated.");
 }

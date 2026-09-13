@@ -16,6 +16,7 @@ when its verification runs.
 | 4 | Calendar write under approval → receipt replay | **done** | 2026-08-21 live Calendar.app write returned one external id; T2 approval, `work_id`, file receipt, and one replayed journal event agreed; exact verification event removed |
 | 5 | Heiwa.app Calendar staging | **done** | fresh profiles reveal no Calendar.app resources until explicitly enrolled; native desktop and cockpit connect/disconnect, stage an exact Apple target without creating, and decide the resulting immutable approval through the shared executor; connector integration tests + both TypeScript checks/builds |
 | 6 | Google Calendar read/write | blocked (external setup) | offline caller path is wired; needs Google account 2-step verification and a Desktop OAuth client id for live acceptance |
+| 5b | Calendar plans: many events, one approval, one EventKit commit (AD-31) | **done (hermetic)** | 2026-09-13: `cargo test -p heiwa-shell --test calendar_plan_sync` 3/3 (delta-only single batch, replay without rewrite, `in_sync` after apply, drift refusal writes nothing, invalid plans rejected before any read); `calendar_plan` unit tests 4/4; `apple_calendar_connector` 9/9 and `calendar_sync` still green; heiwa-shell unit suite 242/242. Live EventKit acceptance pending Full Calendar access for the Heiwa helper |
 | 7 | `gmail.send` on the same path | pending | needs Google setup plus an approval-backed sender; Gmail reads remain local through Mail.app |
 
 Steps 1–5 establish the product-grade Mac-first connector without a Google
