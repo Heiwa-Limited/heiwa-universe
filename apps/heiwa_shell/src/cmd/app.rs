@@ -134,6 +134,8 @@ fn update_from_checkout(dry_run: bool, json_output: bool) -> Result<()> {
         install_root.display().to_string(),
         "--locked".to_string(),
         "--force".to_string(),
+        "--features".to_string(),
+        "lance".to_string(),
     ];
     let plan = checkout_update_plan(
         &repo_root,
@@ -167,7 +169,7 @@ fn update_from_checkout(dry_run: bool, json_output: bool) -> Result<()> {
         println!("  cargo_environment: {}", cargo_environment.strategy);
         println!("  restart_policy: prompt-before-restart");
         println!(
-            "  command: cargo install --path apps/heiwa_shell --root ~/.heiwa --locked --force"
+            "  command: cargo install --path apps/heiwa_shell --root ~/.heiwa --locked --force --features lance"
         );
         if dry_run {
             println!("  dry_run: true");
@@ -187,7 +189,9 @@ fn update_from_checkout(dry_run: bool, json_output: bool) -> Result<()> {
         .arg("--root")
         .arg(&install_root)
         .arg("--locked")
-        .arg("--force");
+        .arg("--force")
+        .arg("--features")
+        .arg("lance");
     cargo_environment.apply(&mut cargo);
     if json_output {
         cargo.stdout(Stdio::null()).stderr(Stdio::null());

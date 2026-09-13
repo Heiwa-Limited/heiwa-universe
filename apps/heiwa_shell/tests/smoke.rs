@@ -576,6 +576,14 @@ fn test_app_update_checkout_dry_run_json_reports_promotion_contract() {
         .get("install_command")
         .and_then(serde_json::Value::as_array)
         .is_some());
+    let install_command = payload
+        .get("install_command")
+        .and_then(serde_json::Value::as_array)
+        .expect("checkout install command");
+    assert!(install_command.windows(2).any(|pair| {
+        pair[0] == serde_json::Value::String("--features".to_string())
+            && pair[1] == serde_json::Value::String("lance".to_string())
+    }));
     let cargo_environment = payload
         .get("cargo_environment")
         .and_then(serde_json::Value::as_object)
