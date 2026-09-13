@@ -3,5 +3,5 @@
 <plist version="1.0"><dict>
   <key>CFBundleIdentifier</key><string>ltd.heiwa.desktop.resources</string>
   <key>CFBundleName</key><string>Heiwa</string>
-  <key>NSCalendarsFullAccessUsageDescription</key><string>Heiwa reads calendars you select to show your existing events in your local workspace.</string>
+  <key>NSCalendarsFullAccessUsageDescription</key><string>Heiwa reads calendars you select to show your existing events in your local workspace, and writes the calendar plan changes you approve.</string>
 </dict></plist>
