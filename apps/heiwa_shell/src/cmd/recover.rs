@@ -8,21 +8,70 @@
 //! still shows starting or live has lost its owner. Healthy owned work is
 //! never marked, because its owner's lease makes the section unobtainable.
 //!
+//! Recovery interprets only rows this service's replay admits. A run touched
+//! by evidence this build cannot admit — a newer schema, a row replay rejects,
+//! a worker row without a run, a row naming the run under another Work or
+//! thread, or an unreadable journal line — may already have an outcome this
+//! build cannot read, so it is withheld and reported, never marked.
+//!
 //! What recovery does is record. It never kills, reattaches, or relaunches a
 //! process, and "stale" never claims the process stopped: each marker carries
 //! what recovery observed of it — alive, gone, or unknown.
 
 use anyhow::{anyhow, Result};
 use heiwa_evidence::{OperatorEvent, OperatorEventType};
-use heiwa_session::operator::{OperatorSessionService, RecoveryOutcome, RecoveryPlanner};
-use heiwa_worker::{
-    observe_process, stale_marker, unfinished_runs, ProcessSighting, WorkerStalePayload,
+use heiwa_session::operator::{
+    EventAdmission, OperatorSessionService, RecoveryOutcome, RecoveryPlanner,
 };
+use heiwa_worker::{
+    observe_process, stale_marker, unfinished_runs, ProcessSighting, RunRow, WorkerStalePayload,
+};
+use serde::Serialize;
 use serde_json::{json, Value};
 
-/// Marks every unfinished run stale, observing each process through `sight`.
+/// Worker evidence recovery would not interpret, and why. `run_id` and
+/// `work_id` say how far the doubt reaches: one run, one Work, or every run.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+pub(crate) struct Doubt {
+    pub run_id: Option<String>,
+    pub work_id: Option<String>,
+    pub reason: &'static str,
+}
+
+impl Doubt {
+    fn of(event: &OperatorEvent, reason: &'static str) -> Self {
+        Self {
+            run_id: event.run_id.clone(),
+            work_id: event.work_id.clone(),
+            reason,
+        }
+    }
+
+    fn reaches(&self, row: &RunRow) -> bool {
+        match (&self.run_id, &self.work_id) {
+            (Some(run_id), _) => run_id == &row.run_id,
+            (None, Some(work_id)) => work_id == &row.work_id,
+            (None, None) => true,
+        }
+    }
+}
+
+/// What a recovery pass left alone, beside the markers it appended.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize)]
+pub(crate) struct RunRecoveryReport {
+    /// Unfinished runs recovery did not mark, with the doubt that stopped it.
+    pub runs_withheld: Vec<Doubt>,
+    /// Worker rows this build did not admit or could not place. Preserved in
+    /// the journal as written; listed so the uncertainty is visible.
+    pub unadmitted_worker_events: Vec<Doubt>,
+    pub unreadable_journal_lines: usize,
+}
+
+/// Marks every unfinished run whose evidence it can fully interpret stale,
+/// observing each process through `sight`.
 pub(crate) struct RunRecovery<S> {
     worker_events: Vec<OperatorEvent>,
+    doubts: Vec<Doubt>,
     sight: S,
 }
 
@@ -37,43 +86,107 @@ impl<S: FnMut(u32) -> ProcessSighting> RunRecovery<S> {
     pub(crate) fn observing(sight: S) -> Self {
         Self {
             worker_events: Vec::new(),
+            doubts: Vec::new(),
             sight,
         }
     }
 }
 
+fn shapes_a_run(event_type: &OperatorEventType) -> bool {
+    matches!(
+        event_type,
+        OperatorEventType::WorkerLaunched
+            | OperatorEventType::WorkerHeartbeat
+            | OperatorEventType::WorkerExited
+            | OperatorEventType::WorkerStale
+    )
+}
+
 impl<S: FnMut(u32) -> ProcessSighting> RecoveryPlanner for RunRecovery<S> {
-    fn observe(&mut self, event: &OperatorEvent) {
-        // Only what builds a run row is kept, so a long operator history does
+    type Report = RunRecoveryReport;
+
+    fn observe(&mut self, event: &OperatorEvent, admission: EventAdmission) {
+        // Only what shapes a run row is kept, so a long operator history does
         // not have to fit in memory for recovery to finish.
-        if matches!(
-            event.event_type,
-            OperatorEventType::WorkerLaunched
-                | OperatorEventType::WorkerHeartbeat
-                | OperatorEventType::WorkerExited
-                | OperatorEventType::WorkerStale
-        ) {
-            self.worker_events.push(event.clone());
+        if !shapes_a_run(&event.event_type) {
+            return;
+        }
+        match admission {
+            EventAdmission::Admitted if event.run_id.is_some() => {
+                self.worker_events.push(event.clone());
+            }
+            EventAdmission::Admitted => {
+                self.doubts.push(Doubt::of(event, "worker_row_without_run"))
+            }
+            // The first occurrence already decided; a repeat adds nothing.
+            EventAdmission::Duplicate => {}
+            EventAdmission::UnsupportedSchema => {
+                self.doubts.push(Doubt::of(event, "unsupported_schema"));
+            }
+            EventAdmission::Rejected => self.doubts.push(Doubt::of(event, "rejected_by_replay")),
         }
     }
 
-    fn plan(mut self) -> Result<Vec<OperatorEvent>> {
+    fn plan(mut self, unreadable_lines: usize) -> Result<(Vec<OperatorEvent>, RunRecoveryReport)> {
+        let rows = unfinished_runs(&self.worker_events);
+
+        // An admitted row that names an unfinished run under another Work or
+        // thread is corrupt evidence about that run; the fold ignores it, so
+        // recovery must not act as if it were absent.
+        let mut mismatches = Vec::new();
+        for event in &self.worker_events {
+            let Some(row) = rows
+                .iter()
+                .find(|row| event.run_id.as_deref() == Some(row.run_id.as_str()))
+            else {
+                continue;
+            };
+            if event.work_id.as_deref() != Some(row.work_id.as_str())
+                || event.thread_id != row.thread_id
+            {
+                mismatches.push(Doubt::of(event, "scope_mismatch"));
+            }
+        }
+
+        let mut report = RunRecoveryReport {
+            unadmitted_worker_events: self.doubts.clone(),
+            unreadable_journal_lines: unreadable_lines,
+            ..RunRecoveryReport::default()
+        };
         let occurred_at = chrono::Utc::now().to_rfc3339();
-        Ok(unfinished_runs(&self.worker_events)
-            .iter()
-            .map(|row| {
-                let process =
-                    observe_process(row.pid, row.process_start_id.as_deref(), &mut self.sight);
-                stale_marker(row, process, &occurred_at, || {
-                    uuid::Uuid::new_v4().to_string()
-                })
-            })
-            .collect())
+        let mut markers = Vec::new();
+        for row in &rows {
+            let doubt = if unreadable_lines > 0 {
+                Some("unreadable_journal_lines")
+            } else {
+                self.doubts
+                    .iter()
+                    .chain(&mismatches)
+                    .find(|doubt| doubt.reaches(row))
+                    .map(|doubt| doubt.reason)
+            };
+            if let Some(reason) = doubt {
+                report.runs_withheld.push(Doubt {
+                    run_id: Some(row.run_id.clone()),
+                    work_id: Some(row.work_id.clone()),
+                    reason,
+                });
+                continue;
+            }
+            let process =
+                observe_process(row.pid, row.process_start_id.as_deref(), &mut self.sight);
+            markers.push(stale_marker(row, process, &occurred_at, || {
+                uuid::Uuid::new_v4().to_string()
+            }));
+        }
+        Ok((markers, report))
     }
 }
 
 /// One exclusive recovery pass through `service`, observing real processes.
-pub(crate) fn recover(service: &OperatorSessionService) -> Result<RecoveryOutcome> {
+pub(crate) fn recover(
+    service: &OperatorSessionService,
+) -> Result<RecoveryOutcome<RunRecoveryReport>> {
     service
         .recover_interrupted_with(RunRecovery::on_this_machine())
         .map_err(|error| {
@@ -90,7 +203,7 @@ pub(crate) fn recover(service: &OperatorSessionService) -> Result<RecoveryOutcom
 }
 
 /// The machine-readable report of one pass.
-pub(crate) fn report(outcome: &RecoveryOutcome) -> Value {
+pub(crate) fn report(outcome: &RecoveryOutcome<RunRecoveryReport>) -> Value {
     let runs: Vec<Value> = outcome
         .appended
         .iter()
@@ -111,6 +224,9 @@ pub(crate) fn report(outcome: &RecoveryOutcome) -> Value {
         "interrupted_turns": outcome.interrupted_turns,
         "runs_marked_stale": runs.len(),
         "runs": runs,
+        "runs_withheld": outcome.report.runs_withheld,
+        "unadmitted_worker_events": outcome.report.unadmitted_worker_events,
+        "unreadable_journal_lines": outcome.report.unreadable_journal_lines,
     })
 }
 
@@ -170,21 +286,37 @@ pub(crate) fn sight_process(pid: u32) -> ProcessSighting {
 pub(crate) fn sight_process(pid: u32) -> ProcessSighting {
     match std::fs::read_to_string(format!("/proc/{pid}/stat")) {
         Ok(stat) => {
-            // Fields after the parenthesised command name start at `state`;
-            // `starttime` (clock ticks after boot) is the twentieth of them.
-            let Some((_, fields)) = stat.rsplit_once(')') else {
-                return ProcessSighting::Uninspectable;
-            };
-            let fields: Vec<&str> = fields.split_whitespace().collect();
-            if matches!(fields.first(), Some(&"Z") | Some(&"X")) {
-                return ProcessSighting::NotRunning;
-            }
-            ProcessSighting::Running {
-                start_id: fields.get(19).map(|field| (*field).to_string()),
-            }
+            let boot_id = std::fs::read_to_string("/proc/sys/kernel/random/boot_id").ok();
+            sighting_from_linux_stat(&stat, boot_id.as_deref())
         }
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => ProcessSighting::NotRunning,
         Err(_) => ProcessSighting::Uninspectable,
+    }
+}
+
+/// Read one `/proc/<pid>/stat` line.
+///
+/// `starttime` counts clock ticks since boot, so it repeats across reboots;
+/// the start identity therefore pairs it with the kernel boot identity. When
+/// the boot identity cannot be read, the process is running but its identity
+/// is unknown — never a match.
+#[cfg_attr(not(target_os = "linux"), allow(dead_code))]
+fn sighting_from_linux_stat(stat: &str, boot_id: Option<&str>) -> ProcessSighting {
+    // Fields after the parenthesised command name start at `state`;
+    // `starttime` is the twentieth of them.
+    let Some((_, fields)) = stat.rsplit_once(')') else {
+        return ProcessSighting::Uninspectable;
+    };
+    let fields: Vec<&str> = fields.split_whitespace().collect();
+    if matches!(fields.first(), Some(&"Z") | Some(&"X")) {
+        return ProcessSighting::NotRunning;
+    }
+    let boot_id = boot_id.map(str::trim).filter(|boot_id| !boot_id.is_empty());
+    ProcessSighting::Running {
+        start_id: match (boot_id, fields.get(19)) {
+            (Some(boot_id), Some(ticks)) => Some(format!("{boot_id}:{ticks}")),
+            _ => None,
+        },
     }
 }
 
@@ -267,7 +399,7 @@ mod tests {
         fold_runs(&events, work_id)
     }
 
-    fn only_marked(outcome: &RecoveryOutcome) -> Vec<(String, ObservedProcess)> {
+    fn only_marked(outcome: &RecoveryOutcome<RunRecoveryReport>) -> Vec<(String, ObservedProcess)> {
         outcome
             .appended
             .iter()
@@ -387,6 +519,242 @@ mod tests {
         drop(owner);
         let outcome = recover(&service(&evidence)).expect("owner gone");
         assert_eq!(outcome.appended.len(), 1, "only once the owner is gone");
+    }
+
+    fn raw_append(evidence: &Path, event: &OperatorEvent) {
+        OperatorJournal::new(evidence.to_path_buf())
+            .expect("journal")
+            .append(event)
+            .expect("raw append");
+    }
+
+    fn journal_len(evidence: &Path) -> usize {
+        OperatorJournal::new(evidence.to_path_buf())
+            .expect("journal")
+            .read_after(None, 10_000)
+            .expect("read")
+            .events
+            .len()
+    }
+
+    fn launched_row(worker: &WorkerIdentity, run_id: &str) -> OperatorEvent {
+        worker_launched_event(worker, run_id, "2026-09-13T00:00:00Z", id)
+    }
+
+    fn withheld(outcome: &RecoveryOutcome<RunRecoveryReport>) -> Vec<(String, &'static str)> {
+        outcome
+            .report
+            .runs_withheld
+            .iter()
+            .map(|doubt| (doubt.run_id.clone().unwrap_or_default(), doubt.reason))
+            .collect()
+    }
+
+    #[test]
+    fn a_future_schema_launch_is_preserved_and_never_marked() {
+        let runtime = tempfile::tempdir().expect("runtime");
+        let evidence = runtime.path().join("evidence");
+        let worker = work_with_worker(&evidence);
+        let mut future = launched_row(&worker, "future-run");
+        future.schema_version = 999;
+        raw_append(&evidence, &future);
+        let before = journal_len(&evidence);
+
+        let outcome = recover(&service(&evidence)).expect("recovery");
+
+        assert!(
+            outcome.appended.is_empty(),
+            "nothing is invented from a row this build rejects"
+        );
+        assert_eq!(journal_len(&evidence), before);
+        assert_eq!(
+            outcome.report.unadmitted_worker_events,
+            vec![Doubt {
+                run_id: Some("future-run".to_string()),
+                work_id: Some(worker.work_id.clone()),
+                reason: "unsupported_schema",
+            }]
+        );
+    }
+
+    #[test]
+    fn a_future_schema_ending_withholds_its_run() {
+        let runtime = tempfile::tempdir().expect("runtime");
+        let evidence = runtime.path().join("evidence");
+        let worker = work_with_worker(&evidence);
+        let writer = service(&evidence);
+        launch(&writer, &worker, "run-1", Some((4242, Some("1.000001"))));
+        let mut ending =
+            worker_exited_event(&worker, "run-1", Some(0), None, "2026-09-13T00:00:05Z", id);
+        ending.schema_version = 999;
+        raw_append(&evidence, &ending);
+
+        let outcome = recover(&writer).expect("recovery");
+
+        assert!(
+            outcome.appended.is_empty(),
+            "a newer ending may exist; never overwrite it"
+        );
+        assert_eq!(
+            withheld(&outcome),
+            vec![("run-1".to_string(), "unsupported_schema")]
+        );
+    }
+
+    #[test]
+    fn a_rejected_current_schema_ending_withholds_its_run() {
+        let runtime = tempfile::tempdir().expect("runtime");
+        let evidence = runtime.path().join("evidence");
+        let worker = work_with_worker(&evidence);
+        let writer = service(&evidence);
+        launch(&writer, &worker, "run-1", Some((4242, None)));
+        // Current schema, but on a thread replay has never seen: rejected.
+        let mut ending =
+            worker_exited_event(&worker, "run-1", Some(0), None, "2026-09-13T00:00:05Z", id);
+        ending.thread_id = "thread-that-does-not-exist".to_string();
+        raw_append(&evidence, &ending);
+
+        let outcome = recover(&writer).expect("recovery");
+
+        assert!(outcome.appended.is_empty());
+        assert_eq!(
+            withheld(&outcome),
+            vec![("run-1".to_string(), "rejected_by_replay")]
+        );
+    }
+
+    #[test]
+    fn an_admitted_row_naming_the_run_under_another_work_withholds_it() {
+        let runtime = tempfile::tempdir().expect("runtime");
+        let evidence = runtime.path().join("evidence");
+        let worker = work_with_worker(&evidence);
+        let other = work_with_worker(&evidence);
+        let writer = service(&evidence);
+        launch(&writer, &worker, "run-1", Some((4242, None)));
+        // Replay admits it (its thread exists), but it claims run-1 for another Work.
+        writer
+            .append_event(worker_exited_event(
+                &other,
+                "run-1",
+                Some(0),
+                None,
+                "2026-09-13T00:00:05Z",
+                id,
+            ))
+            .expect("admitted mismatch");
+
+        let outcome = recover(&writer).expect("recovery");
+
+        assert!(outcome.appended.is_empty());
+        assert_eq!(
+            withheld(&outcome),
+            vec![("run-1".to_string(), "scope_mismatch")]
+        );
+    }
+
+    #[test]
+    fn an_admitted_worker_row_without_a_run_withholds_its_work() {
+        let runtime = tempfile::tempdir().expect("runtime");
+        let evidence = runtime.path().join("evidence");
+        let worker = work_with_worker(&evidence);
+        let writer = service(&evidence);
+        launch(&writer, &worker, "run-1", Some((4242, None)));
+        let mut unplaced =
+            worker_exited_event(&worker, "run-1", Some(0), None, "2026-09-13T00:00:05Z", id);
+        unplaced.run_id = None;
+        raw_append(&evidence, &unplaced);
+
+        let outcome = recover(&writer).expect("recovery");
+
+        assert!(outcome.appended.is_empty());
+        assert_eq!(
+            withheld(&outcome),
+            vec![("run-1".to_string(), "worker_row_without_run")]
+        );
+    }
+
+    #[test]
+    fn unreadable_journal_lines_withhold_every_marker() {
+        let runtime = tempfile::tempdir().expect("runtime");
+        let evidence = runtime.path().join("evidence");
+        let worker = work_with_worker(&evidence);
+        let writer = service(&evidence);
+        launch(&writer, &worker, "run-1", Some((4242, None)));
+        let stream = walk(&evidence)
+            .into_iter()
+            .find(|path| {
+                path.file_name()
+                    .is_some_and(|name| name == "operator_events.jsonl")
+            })
+            .expect("operator stream");
+        let mut damaged = std::fs::read_to_string(&stream).expect("stream");
+        damaged.push_str("{\"record\": not json\n");
+        std::fs::write(&stream, damaged).expect("damage stream");
+
+        let outcome = recover(&writer).expect("recovery");
+
+        assert!(
+            outcome.appended.is_empty(),
+            "an unreadable line may be this run's ending"
+        );
+        assert_eq!(outcome.report.unreadable_journal_lines, 1);
+        assert_eq!(
+            withheld(&outcome),
+            vec![("run-1".to_string(), "unreadable_journal_lines")]
+        );
+    }
+
+    fn walk(root: &Path) -> Vec<std::path::PathBuf> {
+        let mut found = Vec::new();
+        for entry in std::fs::read_dir(root).expect("dir").flatten() {
+            let path = entry.path();
+            if path.is_dir() {
+                found.extend(walk(&path));
+            } else {
+                found.push(path);
+            }
+        }
+        found
+    }
+
+    #[test]
+    fn linux_start_identity_is_scoped_to_its_boot() {
+        let stat =
+            "4242 (sleep) S 1 4242 4242 0 -1 4194560 100 0 0 0 0 0 0 0 20 0 1 0 987654 1000 10";
+        let on = |boot: Option<&str>| match sighting_from_linux_stat(stat, boot) {
+            ProcessSighting::Running { start_id } => start_id,
+            other => panic!("expected running, got {other:?}"),
+        };
+        let first_boot = on(Some("0f7c6c3e-0000-4000-8000-000000000001\n"));
+        let second_boot = on(Some("0f7c6c3e-0000-4000-8000-000000000002\n"));
+        assert_eq!(
+            first_boot.as_deref(),
+            Some("0f7c6c3e-0000-4000-8000-000000000001:987654")
+        );
+        assert_ne!(
+            first_boot, second_boot,
+            "same pid and ticks on another boot is another process"
+        );
+        // Recorded on the first boot, sighted on the second: the recorded one is gone.
+        assert_eq!(
+            observe_process(Some(4242), first_boot.as_deref(), |_| {
+                sighting_from_linux_stat(stat, Some("0f7c6c3e-0000-4000-8000-000000000002"))
+            }),
+            ObservedProcess::Gone
+        );
+        // No readable boot identity: running, but never a match.
+        assert_eq!(on(None), None);
+        assert_eq!(
+            observe_process(Some(4242), first_boot.as_deref(), |_| {
+                sighting_from_linux_stat(stat, None)
+            }),
+            ObservedProcess::Unknown
+        );
+        let zombie = stat.replacen(") S ", ") Z ", 1);
+        assert_eq!(
+            sighting_from_linux_stat(&zombie, Some("boot")),
+            ProcessSighting::NotRunning
+        );
     }
 
     #[test]

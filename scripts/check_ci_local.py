@@ -217,6 +217,7 @@ def check_inventory(root: Path, *, full: bool, python: str) -> list[Check]:
     add("Justfile Python override", "bash", "scripts/tests/test_just_python_override.sh")
     add("release source regression", "bash", "scripts/tests/test_release_workflow_source.sh")
     add("required CI results regression", "bash", "scripts/tests/test_ci_required_checks.sh")
+    add("acceptance stamp regression", "bash", "scripts/tests/test_acceptance_stamp.sh")
     for script in (
         "check_agent_baseline", "check_backend_transition", "check_model_call_boundary",
         "check_release_metadata", "check_runtime_baseline", "verify_security", "check_machine_security",

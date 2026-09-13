@@ -396,3 +396,79 @@ fn a1_app_restart_recovers_an_orphaned_run_before_it_serves() {
 
     kill_and_wait_gone(pid);
 }
+
+/// The operator stream file under an isolated runtime root.
+fn operator_stream(root: &Path) -> std::path::PathBuf {
+    let mut pending = vec![root.to_path_buf()];
+    while let Some(dir) = pending.pop() {
+        for entry in std::fs::read_dir(&dir).expect("dir").flatten() {
+            let path = entry.path();
+            if path.is_dir() {
+                pending.push(path);
+            } else if path
+                .file_name()
+                .is_some_and(|name| name == "operator_events.jsonl")
+            {
+                return path;
+            }
+        }
+    }
+    panic!("no operator stream under {}", root.display());
+}
+
+#[test]
+fn a1_recovery_never_interprets_a_worker_row_this_build_cannot_admit() {
+    // Review reproduction: a schema-999 `worker_launched` under a valid Work,
+    // with no real provider process, must not become a current-schema marker.
+    let work = prepared_work("A1 future schema");
+    let stream = operator_stream(&work.runtime_root);
+    let original = std::fs::read_to_string(&stream).expect("stream");
+    let last: Value =
+        serde_json::from_str(original.lines().last().expect("an envelope")).expect("envelope");
+    let mut future = last.clone();
+    let record = future["record"].as_object_mut().expect("record");
+    let thread_id = record["thread_id"].clone();
+    record.insert("schema_version".into(), 999.into());
+    record.insert("event_id".into(), "future-launch-event".into());
+    record.insert("event_type".into(), "worker_launched".into());
+    record.insert("work_id".into(), work.work_id.as_str().into());
+    record.insert("thread_id".into(), thread_id);
+    record.insert("run_id".into(), "future-run".into());
+    record.insert("turn_id".into(), Value::Null);
+    record.insert("call_id".into(), Value::Null);
+    record.insert(
+        "actor".into(),
+        serde_json::json!({"kind": "worker", "id": "future-worker"}),
+    );
+    record.insert(
+        "payload".into(),
+        serde_json::json!({
+            "worker_id": "future-worker", "provider": "fixture", "provider_session_ref": null,
+            "executable_path": "/bin/true", "executable_sha256": "a".repeat(64),
+            "cwd": "/tmp", "repo_root": "/tmp", "branch": "fixture",
+            "base_commit": "b".repeat(40), "lease_id": "fixture-lease",
+            "installation_id": "install-test",
+        }),
+    );
+    let mut appended = original.clone();
+    appended.push_str(&serde_json::to_string(&future).expect("encode"));
+    appended.push('\n');
+    std::fs::write(&stream, &appended).expect("append future row");
+
+    let report = json(recover(&work), "work recover");
+    assert_eq!(report["runs_marked_stale"], 0, "{report}");
+    let unadmitted = report["unadmitted_worker_events"]
+        .as_array()
+        .expect("unadmitted");
+    assert!(
+        unadmitted
+            .iter()
+            .any(|doubt| doubt["run_id"] == "future-run" && doubt["reason"] == "unsupported_schema"),
+        "the uninterpreted row is reported: {report}"
+    );
+    assert_eq!(
+        std::fs::read_to_string(&stream).expect("stream after"),
+        appended,
+        "recovery preserved the unsupported evidence and appended nothing"
+    );
+}

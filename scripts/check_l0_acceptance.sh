@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# acceptance-scope: apps crates Cargo.toml Cargo.lock scripts/check_l0_acceptance.sh scripts/lib/verification_logs.sh
+# acceptance-scope: apps crates Cargo.toml Cargo.lock scripts/check_l0_acceptance.sh scripts/lib/verification_logs.sh scripts/lib/acceptance_stamp.sh
 #
 # Broad on purpose. Checks 1-4 only read apps/heiwa_app/desktop, but check 5
 # scans every runtime source under apps/ and crates/ for home-path resolution
@@ -24,6 +24,8 @@ set -euo pipefail
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$repo_root"
 source "$repo_root/scripts/lib/verification_logs.sh"
+source "$repo_root/scripts/lib/acceptance_stamp.sh"
+acceptance_source_begin
 umask 077
 log_dir="$(verification_log_dir "$repo_root" "l0")"
 
@@ -188,12 +190,4 @@ if (( fail != 0 )); then
   printf 'L0 acceptance gate FAILED.\n' >&2
   exit 1
 fi
-# Stamp HEAD only when HEAD is what actually passed. With a dirty tree the
-# gate ran against uncommitted work, and attesting the commit would make the
-# stamp a claim about code that was never tested.
-if git diff --quiet && git diff --cached --quiet; then
-  mkdir -p .claude && git rev-parse HEAD > .claude/l0-accept-sha
-  printf 'L0 acceptance gate passed (stamp written for HEAD).\n'
-else
-  printf 'L0 acceptance gate passed. Tree is dirty, so no HEAD stamp was written.\n'
-fi
+acceptance_source_finish "L0" ".claude/l0-accept-sha" || exit 1

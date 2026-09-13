@@ -9,8 +9,8 @@ use heiwa_evidence::{
     OperatorSensitivity, OPERATOR_EVENT_SCHEMA_VERSION,
 };
 use heiwa_session::operator::{
-    OperatorAppRuntimeLease, OperatorOwnershipError, OperatorSessionService, RecoveryPlanner,
-    RouteMode, StartTurnRequest, ThreadMetadataUpdate, TurnSubmissionError,
+    EventAdmission, OperatorAppRuntimeLease, OperatorOwnershipError, OperatorSessionService,
+    RecoveryPlanner, RouteMode, StartTurnRequest, ThreadMetadataUpdate, TurnSubmissionError,
 };
 #[cfg(feature = "lance")]
 use heiwa_session::{operator_event_key, SessionSearchHit};
@@ -738,15 +738,17 @@ struct MarkTurnStarts {
 }
 
 impl RecoveryPlanner for MarkTurnStarts {
-    fn observe(&mut self, event: &OperatorEvent) {
+    type Report = ();
+
+    fn observe(&mut self, event: &OperatorEvent, _admission: EventAdmission) {
         self.seen.lock().unwrap().push(event.event_type.clone());
         if event.event_type == OperatorEventType::TurnStarted {
             self.starts.push(event.clone());
         }
     }
 
-    fn plan(self) -> anyhow::Result<Vec<OperatorEvent>> {
-        Ok(self
+    fn plan(self, _unreadable_lines: usize) -> anyhow::Result<(Vec<OperatorEvent>, ())> {
+        let markers = self
             .starts
             .into_iter()
             .map(|start| OperatorEvent {
@@ -760,8 +762,99 @@ impl RecoveryPlanner for MarkTurnStarts {
                 payload: json!({ "code": "test_marker" }),
                 ..start
             })
-            .collect())
+            .collect();
+        Ok((markers, ()))
     }
+}
+
+/// Records the admission replay decided for every row, and unreadable lines.
+struct RecordAdmissions {
+    seen: Arc<Mutex<Vec<(String, EventAdmission)>>>,
+    unreadable: Arc<Mutex<Option<usize>>>,
+}
+
+impl RecoveryPlanner for RecordAdmissions {
+    type Report = ();
+
+    fn observe(&mut self, event: &OperatorEvent, admission: EventAdmission) {
+        self.seen
+            .lock()
+            .unwrap()
+            .push((event.event_id.clone(), admission));
+    }
+
+    fn plan(self, unreadable_lines: usize) -> anyhow::Result<(Vec<OperatorEvent>, ())> {
+        *self.unreadable.lock().unwrap() = Some(unreadable_lines);
+        Ok((Vec::new(), ()))
+    }
+}
+
+#[test]
+fn restart_recovery_planners_see_the_admission_materialization_decides() {
+    let dir = tempfile::tempdir().unwrap();
+    let service = test_service(dir.path());
+    service.ensure_thread("known").unwrap();
+    let journal = OperatorJournal::new(dir.path().to_path_buf()).unwrap();
+    let note = |event_id: &str, thread_id: &str, schema_version: u32| OperatorEvent {
+        schema_version,
+        event_id: event_id.to_string(),
+        thread_id: thread_id.to_string(),
+        turn_id: None,
+        run_id: Some("run-1".to_string()),
+        call_id: None,
+        work_id: None,
+        event_type: OperatorEventType::WorkerHeartbeat,
+        occurred_at: "2026-09-13T00:00:00Z".to_string(),
+        actor: OperatorActor {
+            kind: "worker".to_string(),
+            id: "worker-1".to_string(),
+        },
+        risk_class: OperatorRisk::Low,
+        sensitivity: OperatorSensitivity::LocalPrivate,
+        parent_event_id: None,
+        correlation_id: None,
+        source_refs: Vec::new(),
+        evidence_refs: Vec::new(),
+        payload: json!({ "worker_id": "worker-1", "pid": 1 }),
+    };
+    journal
+        .append(&note("admitted", "known", OPERATOR_EVENT_SCHEMA_VERSION))
+        .unwrap();
+    journal
+        .append(&note("admitted", "known", OPERATOR_EVENT_SCHEMA_VERSION))
+        .unwrap();
+    journal.append(&note("future", "known", 999)).unwrap();
+    journal
+        .append(&note(
+            "orphan",
+            "no-such-thread",
+            OPERATOR_EVENT_SCHEMA_VERSION,
+        ))
+        .unwrap();
+
+    let seen = Arc::new(Mutex::new(Vec::new()));
+    let unreadable = Arc::new(Mutex::new(None));
+    service
+        .recover_interrupted_with(RecordAdmissions {
+            seen: seen.clone(),
+            unreadable: unreadable.clone(),
+        })
+        .unwrap();
+
+    let seen = seen.lock().unwrap().clone();
+    let decided = |id: &str| {
+        seen.iter()
+            .filter(|(event_id, _)| event_id == id)
+            .map(|(_, admission)| *admission)
+            .collect::<Vec<_>>()
+    };
+    assert_eq!(
+        decided("admitted"),
+        vec![EventAdmission::Admitted, EventAdmission::Duplicate]
+    );
+    assert_eq!(decided("future"), vec![EventAdmission::UnsupportedSchema]);
+    assert_eq!(decided("orphan"), vec![EventAdmission::Rejected]);
+    assert_eq!(*unreadable.lock().unwrap(), Some(0));
 }
 
 #[test]

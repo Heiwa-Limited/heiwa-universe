@@ -1036,7 +1036,10 @@ async fn start(args: &[String]) -> Result<()> {
     let recovery = crate::cmd::recover::recover(&sessions)
         .map_err(|error| anyhow!("operator restart recovery failed: {error}"))?;
     let recovered_runs = crate::cmd::recover::report(&recovery);
-    if recovered_runs["runs_marked_stale"].as_u64().unwrap_or(0) > 0 {
+    let withheld = !recovery.report.runs_withheld.is_empty()
+        || !recovery.report.unadmitted_worker_events.is_empty()
+        || recovery.report.unreadable_journal_lines > 0;
+    if !recovery.appended.is_empty() || withheld {
         eprintln!("heiwa app: restart recovery {recovered_runs}");
     }
 
@@ -2120,7 +2123,7 @@ async fn operator_http_response(
         ("GET", OperatorHttpRoute::WorkSurfaces(work_id)) => work_surfaces_response(
             &heiwa_config::HeiwaPaths::resolve().evidence_dir,
             &work_id,
-            &format!("app-{}", std::process::id()),
+            runtime_instance_epoch_seed(),
         ),
         ("GET", OperatorHttpRoute::Catalog) => match sessions.catalog(100) {
             Ok(catalog) => (200, json!({"ok": true, "data": catalog})),
@@ -2333,9 +2336,18 @@ async fn operator_http_response(
     }
 }
 
+/// Projection epoch seed for this runtime instance.
+///
+/// Minted once per process from a random identity rather than the pid, so a
+/// restarted runtime that happens to reuse a pid still starts a new epoch.
+fn runtime_instance_epoch_seed() -> &'static str {
+    static SEED: std::sync::OnceLock<String> = std::sync::OnceLock::new();
+    SEED.get_or_init(|| format!("app-instance-{}", uuid::Uuid::new_v4()))
+}
+
 /// `GET /api/v1/operator/work/{work_id}/surfaces`: the same one-snapshot views
-/// `heiwa work show --surface all` prints. The epoch is per app process, so it
-/// changes exactly when the projector restarts.
+/// `heiwa work show --surface all` prints. The epoch belongs to this runtime
+/// instance, so it changes exactly when the projector restarts.
 fn work_surfaces_response(evidence_root: &Path, work_id: &str, epoch_seed: &str) -> (u16, Value) {
     match crate::cmd::work::surfaces_json(evidence_root, work_id, epoch_seed) {
         Ok(surfaces) => (200, json!({"ok": true, "data": surfaces})),
@@ -5883,6 +5895,20 @@ mod app_readmodel_tests {
     use heiwa_evidence::OperatorJournal;
     use heiwa_session::operator::{OperatorSessionService, StartTurnRequest};
     use tokio::sync::broadcast;
+
+    #[test]
+    fn work_surface_epoch_belongs_to_the_runtime_instance_not_its_pid() {
+        let seed = runtime_instance_epoch_seed();
+        assert_eq!(
+            seed,
+            runtime_instance_epoch_seed(),
+            "stable within one instance"
+        );
+        assert_ne!(seed, format!("app-{}", std::process::id()));
+        let instance = seed.strip_prefix("app-instance-").expect("instance seed");
+        assert!(uuid::Uuid::parse_str(instance).is_ok(), "{seed}");
+        assert!(!instance.contains(&std::process::id().to_string()));
+    }
 
     #[test]
     fn work_surfaces_route_serves_one_snapshot_and_refuses_unknown_work() {

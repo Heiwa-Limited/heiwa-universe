@@ -246,6 +246,23 @@ fn recover_command(args: &[String]) -> Result<()> {
             run["work_id"].as_str().unwrap_or("?")
         );
     }
+    for run in report["runs_withheld"].as_array().into_iter().flatten() {
+        println!(
+            "  run {}  {}  not marked: {}",
+            run["run_id"].as_str().unwrap_or("?"),
+            run["work_id"].as_str().unwrap_or("?"),
+            run["reason"].as_str().unwrap_or("unknown evidence")
+        );
+    }
+    let unadmitted = report["unadmitted_worker_events"]
+        .as_array()
+        .map_or(0, Vec::len);
+    let unreadable = report["unreadable_journal_lines"].as_u64().unwrap_or(0);
+    if unadmitted > 0 || unreadable > 0 {
+        println!(
+            "! {unadmitted} worker row(s) this build does not admit and {unreadable} unreadable journal line(s) were preserved uninterpreted"
+        );
+    }
     Ok(())
 }
 

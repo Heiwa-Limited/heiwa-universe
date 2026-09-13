@@ -117,6 +117,23 @@ cases kill a real `heiwa work run` owner (surviving child recorded alive once,
 no relaunch or file change), kill both (recorded gone), and restart
 `heiwa app start` over an orphan (recorded before the port serves).
 
+### A1-c3 review repair — 2026-09-13
+
+Astra reproduced three boundary defects at `614960f1` with disposable
+fixtures; each repair below first failed against that revision.
+
+| # | Repaired invariant | Status | Verification |
+|---|---|---|---|
+| 1 | An acceptance stamp names only the clean source (tracked and untracked) its checks observed; a revision committed or source added during checks fails the gate, and a dirty start never stamps | done | `bash scripts/tests/test_acceptance_stamp.sh` |
+| 2 | Recovery interprets only rows the service's replay admits; unsupported-schema, rejected, unplaced, scope-mismatched, or unreadable worker evidence withholds the run and is reported, never marked | done | `cargo test -p heiwa-shell --bin heiwa cmd::recover` |
+| 3 | Linux start identity carries the kernel boot identity; the app API surface epoch is minted per runtime instance, not per pid | done | `cargo test -p heiwa-shell --bin heiwa -- linux_start_identity work_surface_epoch` |
+
+All four acceptance gates (L0, L1, L2, Work Fabric A1) now stamp through
+`scripts/lib/acceptance_stamp.sh`; L0-L2 had the same end-only stamp check.
+Recovery replays through `sync_materialized`'s paging and `apply_event`
+admission, so damage and admission are counted exactly as materialization
+counts them.
+
 ## Execution and Evidence checkpoint — 2026-09-12
 
 DREX distinguishes known rates from missing price evidence both within an

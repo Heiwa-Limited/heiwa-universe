@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# acceptance-scope: apps crates Cargo.toml Cargo.lock scripts/check_work_fabric_a1_acceptance.sh scripts/lib/verification_logs.sh
+# acceptance-scope: apps crates Cargo.toml Cargo.lock scripts/check_work_fabric_a1_acceptance.sh scripts/lib/verification_logs.sh scripts/lib/acceptance_stamp.sh
 #
 # The claims below are behaviour of the Rust runtime and the shipped binary,
 # so any change under apps/ or crates/ can invalidate them.
@@ -30,6 +30,8 @@ set -euo pipefail
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$repo_root"
 source "$repo_root/scripts/lib/verification_logs.sh"
+source "$repo_root/scripts/lib/acceptance_stamp.sh"
+acceptance_source_begin
 umask 077
 log_dir="$(verification_log_dir "$repo_root" "work-fabric-a1")"
 
@@ -80,10 +82,4 @@ if (( fail != 0 )); then
   printf 'Work Fabric A1 acceptance gate FAILED.\n' >&2
   exit 1
 fi
-# Stamp HEAD only when HEAD is what actually passed.
-if git diff --quiet && git diff --cached --quiet; then
-  mkdir -p .claude && git rev-parse HEAD > .claude/work-fabric-a1-accept-sha
-  printf 'Work Fabric A1 acceptance gate passed (stamp written for HEAD).\n'
-else
-  printf 'Work Fabric A1 acceptance gate passed. Tree is dirty, so no HEAD stamp was written.\n'
-fi
+acceptance_source_finish "Work Fabric A1" ".claude/work-fabric-a1-accept-sha" || exit 1
