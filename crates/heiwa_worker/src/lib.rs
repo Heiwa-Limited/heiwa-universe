@@ -9,15 +9,20 @@ pub mod events;
 pub mod model;
 pub mod pane;
 pub mod projector;
+pub mod recovery;
 
 pub use events::{
     pane_closed_event, pane_opened_event, worker_exited_event, worker_heartbeat_event,
-    worker_launched_event, PaneClosedPayload, PaneOpenedPayload, WorkerExitedPayload,
-    WorkerHeartbeatPayload, WorkerLaunchedPayload,
+    worker_launched_event, worker_stale_event, PaneClosedPayload, PaneOpenedPayload, RunRef,
+    WorkerExitedPayload, WorkerHeartbeatPayload, WorkerLaunchedPayload, WorkerStalePayload,
+    OWNER_LOST,
 };
-pub use model::{PaneIdentity, PaneState, WorkerIdentity, WorkerState, SCHEMA_VERSION};
+pub use model::{
+    ObservedProcess, PaneIdentity, PaneState, WorkerIdentity, WorkerState, SCHEMA_VERSION,
+};
 pub use pane::{PaneTail, PANE_LINE_BYTES, PANE_TAIL_LINES};
-pub use projector::{fold_runs, RunRow};
+pub use projector::{fold_all_runs, fold_runs, RunRow, SupervisionLoss};
+pub use recovery::{observe_process, stale_marker, unfinished_runs, ProcessSighting};
 
 #[derive(Debug, thiserror::Error)]
 pub enum WorkerError {

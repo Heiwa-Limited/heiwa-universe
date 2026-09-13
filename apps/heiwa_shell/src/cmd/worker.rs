@@ -301,11 +301,15 @@ fn run_in_prepared_workspace_with_output(
     // The child exists, so the worker is live rather than merely declared.
     let pid = child.id();
     let child = heartbeat_or_reap(child, |pid| {
+        // Start identity is read while the child is still ours and unreaped,
+        // so recovery can later tell this process from one that reused the pid.
+        let start_id = crate::cmd::recover::process_start_id(pid);
         service
             .append_event(worker_heartbeat_event(
                 &worker,
                 &run_id,
                 pid,
+                start_id.as_deref(),
                 &chrono::Utc::now().to_rfc3339(),
                 new_event_id,
             ))

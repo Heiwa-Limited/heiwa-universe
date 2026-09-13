@@ -132,6 +132,9 @@ pub enum OperatorEventType {
     WorkerLaunched,
     WorkerHeartbeat,
     WorkerExited,
+    /// Restart recovery could no longer vouch for a run: its supervising
+    /// process was gone. Not an ending — the run's process may still be alive.
+    WorkerStale,
     PaneOpened,
     PaneClosed,
 }

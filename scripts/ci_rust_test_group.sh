@@ -58,6 +58,7 @@ shell_ops_targets=(
   mail_triage
   schedule
   smoke
+  work_fabric_a1
   work_run
 )
 
@@ -106,6 +107,7 @@ foundation_b_targets=(
   smoke
   telemetry_pane
   runs
+  surface_agreement
   work_core
   work_session
   workspace_core

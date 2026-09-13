@@ -883,6 +883,7 @@ fn worker_and_pane_event_types_round_trip_through_json() {
         (OperatorEventType::WorkerLaunched, "worker_launched"),
         (OperatorEventType::WorkerHeartbeat, "worker_heartbeat"),
         (OperatorEventType::WorkerExited, "worker_exited"),
+        (OperatorEventType::WorkerStale, "worker_stale"),
         (OperatorEventType::PaneOpened, "pane_opened"),
         (OperatorEventType::PaneClosed, "pane_closed"),
     ] {

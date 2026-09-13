@@ -91,6 +91,58 @@ impl OperatorAppRuntimeLease {
     }
 }
 
+/// How replay treated one parsed operator row — the same decision
+/// materialization makes for this service's own state.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum EventAdmission {
+    /// Folded into current state.
+    Admitted,
+    /// A repeated `event_id`; its first occurrence already decided.
+    Duplicate,
+    /// Parsed, but written in a schema this build does not understand.
+    UnsupportedSchema,
+    /// Current schema, but rejected by replay validation.
+    Rejected,
+}
+
+/// Extends one exclusive restart-recovery pass with appends derived from the
+/// operator stream — for example, marking worker runs whose supervisor died.
+pub trait RecoveryPlanner {
+    /// What the planner reports besides the events it appends.
+    type Report;
+    /// Called once for every parsed operator row, in append order, with the
+    /// admission decision this service's own replay made for it. A planner
+    /// must not derive state from rows this service does not admit.
+    fn observe(&mut self, event: &OperatorEvent, admission: EventAdmission);
+    /// Events to append, in order, before the exclusive section ends.
+    /// `unreadable_lines` counts journal rows no parser could read; what they
+    /// recorded is unknown.
+    fn plan(self, unreadable_lines: usize) -> Result<(Vec<OperatorEvent>, Self::Report)>;
+}
+
+/// A planner that adds nothing to turn recovery.
+pub struct NoFurtherRecovery;
+
+impl RecoveryPlanner for NoFurtherRecovery {
+    type Report = ();
+
+    fn observe(&mut self, _event: &OperatorEvent, _admission: EventAdmission) {}
+
+    fn plan(self, _unreadable_lines: usize) -> Result<(Vec<OperatorEvent>, ())> {
+        Ok((Vec::new(), ()))
+    }
+}
+
+/// What one exclusive restart-recovery pass appended.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct RecoveryOutcome<R = ()> {
+    pub interrupted_turns: usize,
+    /// The planner's events, exactly as appended.
+    pub appended: Vec<OperatorEvent>,
+    /// The planner's report.
+    pub report: R,
+}
+
 #[derive(Debug)]
 struct OperatorActivityLease {
     root: PathBuf,
@@ -1026,6 +1078,24 @@ impl OperatorSessionService {
     /// Idempotent: once every turn is terminal, subsequent calls return
     /// `0` and append nothing.
     pub fn recover_interrupted(&self) -> Result<usize> {
+        Ok(self
+            .recover_interrupted_with(NoFurtherRecovery)?
+            .interrupted_turns)
+    }
+
+    /// [`Self::recover_interrupted`], extended by `planner` inside the same
+    /// exclusive recovery section.
+    ///
+    /// Holding the exclusive activity lease is the proof that no app, CLI,
+    /// REPL, or loop writer is live on this evidence root, so anything the
+    /// stream still shows in flight has lost its supervisor. `planner` sees the
+    /// complete stream in append order and its events are appended before the
+    /// section ends. If another writer holds activity, nothing is read or
+    /// appended and the error names the held lease.
+    pub fn recover_interrupted_with<P: RecoveryPlanner>(
+        &self,
+        planner: P,
+    ) -> Result<RecoveryOutcome<P::Report>> {
         let _write_transaction = self.lock_write_transaction()?;
         let mut activity_lease = self
             .activity_lease
@@ -1065,7 +1135,24 @@ impl OperatorSessionService {
                     closed += 1;
                 }
             }
-            Ok(closed)
+
+            // Replay through the same paging and admission materialization
+            // uses, so the planner sees exactly which rows this service
+            // accepts as state, and damage is counted the same way.
+            let mut planner = planner;
+            let mut replay = MaterializedJournal::default();
+            sync_materialized_observing(&self.journal, &mut replay, false, |row, admission| {
+                planner.observe(&row.event, admission)
+            })?;
+            let (appended, report) = planner.plan(replay.skipped_lines())?;
+            for event in &appended {
+                self.journal.append(event)?;
+            }
+            Ok(RecoveryOutcome {
+                interrupted_turns: closed,
+                appended,
+                report,
+            })
         })
     }
 
@@ -1802,11 +1889,28 @@ fn sync_materialized(
     journal: &OperatorJournal,
     projection: &mut MaterializedJournal,
 ) -> Result<()> {
+    sync_materialized_observing(journal, projection, true, |_, _| {})
+}
+
+/// [`sync_materialized`], reporting each row's admission to `observe`.
+///
+/// `rebuild_on_reset` says whether an unknown cursor lineage may restart the
+/// fold from stream start. An observer cannot un-see rows it was already
+/// given, so an observing replay passes `false` and fails instead.
+fn sync_materialized_observing(
+    journal: &OperatorJournal,
+    projection: &mut MaterializedJournal,
+    rebuild_on_reset: bool,
+    mut observe: impl FnMut(&CursorEvent, EventAdmission),
+) -> Result<()> {
     const PAGE_SIZE: usize = 256;
     loop {
         let page = match journal.read_after(projection.cursor.as_deref(), PAGE_SIZE) {
             Ok(page) => page,
             Err(CursorError::InvalidCursor { .. }) if projection.cursor.is_some() => {
+                if !rebuild_on_reset {
+                    bail!("operator journal lineage changed during an observing replay");
+                }
                 *projection = MaterializedJournal::default();
                 continue;
             }
@@ -1837,7 +1941,8 @@ fn sync_materialized(
             projection.order = projection.order.saturating_add(1);
             projection.applied_event_rows = projection.applied_event_rows.saturating_add(1);
             let order = projection.order;
-            apply_event(projection, row, order);
+            let admission = apply_event(projection, row, order);
+            observe(row, admission);
         }
         projection.cursor = page.next_cursor;
         if stable_tail.is_some() {
@@ -1847,10 +1952,14 @@ fn sync_materialized(
     Ok(())
 }
 
-fn apply_event(projection: &mut MaterializedJournal, row: &CursorEvent, order: usize) {
+fn apply_event(
+    projection: &mut MaterializedJournal,
+    row: &CursorEvent,
+    order: usize,
+) -> EventAdmission {
     let event = &row.event;
     if !projection.seen_event_ids.insert(event.event_id.clone()) {
-        return; // Reader-side dedup of a repeated event_id.
+        return EventAdmission::Duplicate; // Reader-side dedup of a repeated event_id.
     }
 
     if event.schema_version != OPERATOR_EVENT_SCHEMA_VERSION {
@@ -1858,7 +1967,7 @@ fn apply_event(projection: &mut MaterializedJournal, row: &CursorEvent, order: u
             .unsupported_schema_events
             .entry(event.thread_id.clone())
             .or_default() += 1;
-        return;
+        return EventAdmission::UnsupportedSchema;
     }
 
     // Project rows use a project-specific subject and are folded before any
@@ -1871,15 +1980,15 @@ fn apply_event(projection: &mut MaterializedJournal, row: &CursorEvent, order: u
                 .get("project_id")
                 .and_then(|value| value.as_str())
             else {
-                return;
+                return EventAdmission::Rejected;
             };
             let Some(title) = event.payload.get("title").and_then(|value| value.as_str()) else {
-                return;
+                return EventAdmission::Rejected;
             };
             if event.thread_id != project_subject(project_id)
                 || projection.projects.contains_key(project_id)
             {
-                return;
+                return EventAdmission::Rejected;
             }
             projection.projects.insert(
                 project_id.to_string(),
@@ -1890,7 +1999,7 @@ fn apply_event(projection: &mut MaterializedJournal, row: &CursorEvent, order: u
                     last_order: order,
                 },
             );
-            return;
+            return EventAdmission::Admitted;
         }
         OperatorEventType::ProjectMetadataUpdated => {
             let Some(project_id) = event
@@ -1898,13 +2007,13 @@ fn apply_event(projection: &mut MaterializedJournal, row: &CursorEvent, order: u
                 .get("project_id")
                 .and_then(|value| value.as_str())
             else {
-                return;
+                return EventAdmission::Rejected;
             };
             let Some(project) = projection.projects.get_mut(project_id) else {
-                return;
+                return EventAdmission::Rejected;
             };
             if event.thread_id != project_subject(project_id) {
-                return;
+                return EventAdmission::Rejected;
             }
             if let Some(title) = event.payload.get("title").and_then(|value| value.as_str()) {
                 project.title = title.to_string();
@@ -1917,7 +2026,7 @@ fn apply_event(projection: &mut MaterializedJournal, row: &CursorEvent, order: u
                 project.archived = archived;
             }
             project.last_order = order;
-            return;
+            return EventAdmission::Admitted;
         }
         _ => {}
     }
@@ -1926,10 +2035,10 @@ fn apply_event(projection: &mut MaterializedJournal, row: &CursorEvent, order: u
         if apply_to_existing_thread(entry, event, row) {
             entry.last_order = order;
             apply_work_membership(&mut projection.work_threads, event);
-        } else {
-            entry.skipped_events += 1;
+            return EventAdmission::Admitted;
         }
-        return;
+        entry.skipped_events += 1;
+        return EventAdmission::Rejected;
     }
 
     // Only explicit thread lifecycle and synthetic turn-start records may
@@ -1963,11 +2072,13 @@ fn apply_event(projection: &mut MaterializedJournal, row: &CursorEvent, order: u
             .threads
             .insert(event.thread_id.clone(), candidate);
         apply_work_membership(&mut projection.work_threads, event);
+        EventAdmission::Admitted
     } else {
         *projection
             .rejected_current_schema_events
             .entry(event.thread_id.clone())
             .or_default() += 1;
+        EventAdmission::Rejected
     }
 }
 
@@ -2057,6 +2168,7 @@ fn apply_to_existing_thread(
         | OperatorEventType::WorkerLaunched
         | OperatorEventType::WorkerHeartbeat
         | OperatorEventType::WorkerExited
+        | OperatorEventType::WorkerStale
         | OperatorEventType::PaneOpened
         | OperatorEventType::PaneClosed => apply_nonterminal_touch(entry, event),
         // Project events were handled before thread projection above.

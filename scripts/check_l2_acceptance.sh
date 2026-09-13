@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# acceptance-scope: apps crates Cargo.toml Cargo.lock scripts/check_l2_acceptance.sh scripts/lib/verification_logs.sh
+# acceptance-scope: apps crates Cargo.toml Cargo.lock scripts/check_l2_acceptance.sh scripts/lib/verification_logs.sh scripts/lib/acceptance_stamp.sh
 #
 # Same reason as L1, plus the readiness-decider scan, which walks all of
 # apps/ and crates/ looking for a second place that decides onboarding.
@@ -27,6 +27,8 @@ set -euo pipefail
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$repo_root"
 source "$repo_root/scripts/lib/verification_logs.sh"
+source "$repo_root/scripts/lib/acceptance_stamp.sh"
+acceptance_source_begin
 umask 077
 log_dir="$(verification_log_dir "$repo_root" "l2")"
 
@@ -81,10 +83,4 @@ if (( fail != 0 )); then
   printf 'L2 acceptance gate FAILED.\n' >&2
   exit 1
 fi
-# Stamp HEAD only when HEAD is what actually passed.
-if git diff --quiet && git diff --cached --quiet; then
-  mkdir -p .claude && git rev-parse HEAD > .claude/l2-accept-sha
-  printf 'L2 acceptance gate passed (stamp written for HEAD).\n'
-else
-  printf 'L2 acceptance gate passed. Tree is dirty, so no HEAD stamp was written.\n'
-fi
+acceptance_source_finish "L2" ".claude/l2-accept-sha" || exit 1
