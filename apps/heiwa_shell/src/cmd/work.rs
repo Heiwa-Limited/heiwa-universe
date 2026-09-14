@@ -299,28 +299,51 @@ pub(crate) fn create(root: &Path, intent: &str, installation_id: &str) -> Result
 /// Every Work visible on this installation, plus damage found while folding.
 pub(crate) fn summarize(root: &Path) -> Result<Value> {
     let projection = project(root)?;
-    let work: Vec<Value> = projection
-        .all()
-        .map(|work| {
-            json!({
-                "work_id": work.work_id.as_str(),
-                "intent": work.intent,
-                "status": work.status,
-                "revision": work.revision,
-                "primary_thread_id": work.primary_thread_id,
-                "related_thread_ids": work.related_thread_ids,
-                "origin_installation_id": work.origin_installation_id,
-                "replicable": work.is_replicable(),
-                "created_at": work.created_at,
-                "updated_at": work.updated_at,
-            })
-        })
-        .collect();
+    let work: Vec<Value> = projection.all().map(work_row).collect();
 
     Ok(json!({
         "work": work,
         "skipped_events": projection.skipped_events,
     }))
+}
+
+/// A bounded Work catalog, most recently updated first.
+///
+/// Every Work is folded, so `total` and `skipped_events` describe the whole
+/// installation even when only `limit` rows are returned; `truncated` counts
+/// the rows left out so a reader never mistakes a bound for completeness.
+pub(crate) fn catalog_json(root: &Path, limit: usize) -> Result<Value> {
+    let projection = project(root)?;
+    let mut works: Vec<&Work> = projection.all().collect();
+    works.sort_by(|left, right| {
+        right
+            .updated_at
+            .cmp(&left.updated_at)
+            .then_with(|| left.work_id.as_str().cmp(right.work_id.as_str()))
+    });
+    let total = works.len();
+    let rows: Vec<Value> = works.into_iter().take(limit).map(work_row).collect();
+    Ok(json!({
+        "work": rows,
+        "total": total,
+        "truncated": total.saturating_sub(limit),
+        "skipped_events": projection.skipped_events,
+    }))
+}
+
+fn work_row(work: &Work) -> Value {
+    json!({
+        "work_id": work.work_id.as_str(),
+        "intent": work.intent,
+        "status": work.status,
+        "revision": work.revision,
+        "primary_thread_id": work.primary_thread_id,
+        "related_thread_ids": work.related_thread_ids,
+        "origin_installation_id": work.origin_installation_id,
+        "replicable": work.is_replicable(),
+        "created_at": work.created_at,
+        "updated_at": work.updated_at,
+    })
 }
 
 /// Fold the operator stream in durable append order.

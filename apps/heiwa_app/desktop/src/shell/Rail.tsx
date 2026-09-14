@@ -5,12 +5,13 @@ import { Icon } from "./Icon";
 import { CreateProjectControl, ProjectActions, SessionActions } from "./SessionControls";
 
 const NAV: Array<{
-  id: "home" | "sessions" | "calendar" | "mail";
+  id: "home" | "sessions" | "work" | "calendar" | "mail";
   label: string;
-  icon: "home" | "sessions" | "calendar" | "mail";
+  icon: "home" | "sessions" | "work" | "calendar" | "mail";
 }> = [
   { id: "home", label: "Home", icon: "home" },
   { id: "sessions", label: "All sessions", icon: "sessions" },
+  { id: "work", label: "Work", icon: "work" },
   { id: "calendar", label: "Calendar", icon: "calendar" },
   { id: "mail", label: "Mail", icon: "mail" },
 ];

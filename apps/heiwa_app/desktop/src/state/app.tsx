@@ -11,6 +11,7 @@ import { createHerdState, type HerdState, type HerdStateOptions } from "./herd";
 import { createOperatorState, type OperatorState, type OperatorStateOptions } from "./operator";
 import { createRuntimeState, type RuntimeState, type RuntimeStateOptions } from "./runtime";
 import { createSessionState, type SessionState } from "./sessions";
+import { createWorkState, type WorkState, type WorkStateOptions } from "./work";
 import type { SessionStateOptions } from "./sessions";
 import type { SubApp } from "./types";
 
@@ -24,6 +25,8 @@ export type AppState = {
   runtime: RuntimeState;
   herd: HerdState;
   sessions: SessionState;
+  /** The one owner of Work catalog and Work-surface snapshots. */
+  work: WorkState;
   view: Accessor<SurfaceId>;
   navigate: (view: SurfaceId) => void;
   selectedProjectId: Accessor<string | undefined>;
@@ -37,6 +40,7 @@ export type AppStateOptions = {
   runtime?: RuntimeStateOptions;
   herd?: HerdStateOptions;
   sessions?: Omit<Partial<SessionStateOptions>, "start" | "dispose">;
+  work?: WorkStateOptions;
   initialView?: SurfaceId;
   initialSelectedSessionId?: string;
 };
@@ -50,6 +54,7 @@ export function createAppState(options: AppStateOptions = {}): AppState {
     initialSelectedId: options.initialSelectedSessionId,
   });
   const runtime = createRuntimeState(options.runtime);
+  const work = createWorkState(options.work);
   const herd = createHerdState(options.herd);
   const [view, setView] = createSignal<SurfaceId>(options.initialView ?? "home");
   const [selectedProjectId, setSelectedProjectId] = createSignal<string | undefined>();
@@ -114,7 +119,7 @@ export function createAppState(options: AppStateOptions = {}): AppState {
     },
   ]);
 
-  return { operator, runtime, herd, sessions, view, navigate: setView, selectedProjectId, selectProject: setSelectedProjectId, subApps };
+  return { operator, runtime, herd, sessions, work, view, navigate: setView, selectedProjectId, selectProject: setSelectedProjectId, subApps };
 }
 
 function runtimeStatusLabel(runtime: RuntimeState): string {

@@ -39,6 +39,7 @@ function harness(
     machineSyncStatus?: string;
     emptyHerd?: boolean;
     readAppleMail?: () => Promise<{ fetched: number; appended: number; deduplicated: number }>;
+    workGet?: (path: string) => Promise<unknown>;
   } = {},
 ): Harness {
   const post = vi.fn().mockResolvedValue({
@@ -55,6 +56,11 @@ function harness(
   let emit: (frame: OperatorFrame) => void = () => {};
 
   const state = createAppState({
+    // A fresh profile has no Work; a test that needs Work supplies its runtime.
+    work: {
+      get: overrides.workGet
+        ?? (async () => ({ ok: true, data: { work: [], total: 0, truncated: 0, skipped_events: 0 } })),
+    },
     operator: {
       get: vi.fn().mockResolvedValue(EMPTY_HISTORY),
       post,
@@ -179,6 +185,7 @@ const SURFACE_MARKERS: Record<string, string | RegExp> = {
   home: "What’s on your mind?",
   sessions: "Every conversation",
   projects: "Select a project from the sidebar.",
+  work: "Durable goals on this Mac",
   ai: "No messages yet.",
   windows: "Terminal panes",
   calendar: "Upcoming",
@@ -198,6 +205,7 @@ describe("shell", () => {
       "home",
       "sessions",
       "projects",
+      "work",
       "ai",
       "windows",
       "calendar",
@@ -353,7 +361,7 @@ describe("shell", () => {
     const { state } = harness();
     render(() => <App state={state} />);
     const labels = [...document.querySelectorAll<HTMLButtonElement>(".sidebar-navlist button")].map((button) => button.textContent);
-    expect(labels).toEqual(["Home", "All sessions", "Calendar", "Mail"]);
+    expect(labels).toEqual(["Home", "All sessions", "Work", "Calendar", "Mail"]);
   });
 
   it.each(SURFACES.map((surface) => surface.id))("mounts the %s surface", (id) => {

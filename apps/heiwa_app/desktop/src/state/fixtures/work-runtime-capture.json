@@ -1,0 +1,657 @@
+{
+ "_note": "Captured 2026-09-14 from a real `heiwa app start` over a disposable HEIWA_HOME: Work A has a finished run and a run whose owner was SIGKILLed while its child survived; Work B's owner and child were both killed; Work C has no runs. Temporary paths are rewritten; everything else is the runtime's output.",
+ "ids": {
+  "stale_alive_and_finished": "work-3af7e41c-844f-4937-82e1-3ec23ad989f8",
+  "stale_gone": "work-44acf0f7-f8d6-47e8-be5c-5ac1bf83ddf9",
+  "no_runs": "work-c037b1cb-bab7-4df1-8bea-ea7f31aa23ec"
+ },
+ "catalog": {
+  "data": {
+   "skipped_events": 0,
+   "total": 3,
+   "truncated": 0,
+   "work": [
+    {
+     "created_at": "2026-09-14T03:49:17.467258+00:00",
+     "intent": "Draft release notes",
+     "origin_installation_id": "fixture-install",
+     "primary_thread_id": "thread-2d8e261d-531d-4908-86fb-0523c79be135",
+     "related_thread_ids": [],
+     "replicable": false,
+     "revision": 1,
+     "status": "active",
+     "updated_at": "2026-09-14T03:49:17.467258+00:00",
+     "work_id": "work-c037b1cb-bab7-4df1-8bea-ea7f31aa23ec"
+    },
+    {
+     "created_at": "2026-09-14T03:49:17.193515+00:00",
+     "intent": "Summarize the calendar plan",
+     "origin_installation_id": "fixture-install",
+     "primary_thread_id": "thread-2b14a505-0acb-4677-b458-64317ca44d97",
+     "related_thread_ids": [],
+     "replicable": false,
+     "revision": 1,
+     "status": "active",
+     "updated_at": "2026-09-14T03:49:17.193515+00:00",
+     "work_id": "work-44acf0f7-f8d6-47e8-be5c-5ac1bf83ddf9"
+    },
+    {
+     "created_at": "2026-09-14T03:49:16.882268+00:00",
+     "intent": "Repair the recovery report",
+     "origin_installation_id": "fixture-install",
+     "primary_thread_id": "thread-e6a19998-16c5-47e4-af7d-f5d056dd46f7",
+     "related_thread_ids": [],
+     "replicable": false,
+     "revision": 1,
+     "status": "active",
+     "updated_at": "2026-09-14T03:49:16.882268+00:00",
+     "work_id": "work-3af7e41c-844f-4937-82e1-3ec23ad989f8"
+    }
+   ]
+  },
+  "ok": true
+ },
+ "surfaces": {
+  "stale-alive-and-finished": {
+   "data": {
+    "surfaces": [
+     {
+      "collections": {
+       "approvals": {},
+       "blockers": {},
+       "receipts": {},
+       "runs": {
+        "run-3b7d53b5-fcca-4757-bbf9-69a4f832f545": {
+         "base_commit": "8e3f5276a46ed187b62324a9466418ccbe74c7d0",
+         "branch": "heiwa/work-3af7e41c-844f-4937-82e1-3ec23ad989f8",
+         "cwd": "/tmp/heiwa-work-fixture/runtime/worktrees/work-3af7e41c-844f-4937-82e1-3ec23ad989f8",
+         "ended_at": null,
+         "executable_path": "/bin/sh",
+         "executable_sha256": "84ca7f9b83021621e16059a1c7850df72a462d879e8239d566236ca6ddd00953",
+         "exit_code": null,
+         "failure_code": null,
+         "lease_id": "0bb1c5f3-cc78-4dfe-ac9a-533e5aa79c3a",
+         "pane_dropped_lines": 0,
+         "pane_id": "pane-ae5d607d-257c-4314-abd7-6bfa939fd29f",
+         "pane_state": "stale",
+         "pane_tail": [],
+         "pid": 29022,
+         "process_start_id": "1789357757.046185",
+         "provider": "local",
+         "provider_session_ref": null,
+         "repo_root": "/tmp/heiwa-work-fixture/repo-a",
+         "run_id": "run-3b7d53b5-fcca-4757-bbf9-69a4f832f545",
+         "started_at": "2026-09-14T03:49:17.036163+00:00",
+         "supervision": {
+          "pid": 29022,
+          "process": "alive",
+          "reason": "owner_lost",
+          "recorded_at": "2026-09-14T03:49:17.505476+00:00"
+         },
+         "thread_id": "thread-e6a19998-16c5-47e4-af7d-f5d056dd46f7",
+         "work_id": "work-3af7e41c-844f-4937-82e1-3ec23ad989f8",
+         "worker_id": "worker-7e6cadcc-74cf-4473-b827-bee1e755d22a",
+         "worker_state": "stale"
+        },
+        "run-9c1a2f1d-7aea-4cf0-b699-677fb1d3a634": {
+         "base_commit": "8e3f5276a46ed187b62324a9466418ccbe74c7d0",
+         "branch": "heiwa/work-3af7e41c-844f-4937-82e1-3ec23ad989f8",
+         "cwd": "/tmp/heiwa-work-fixture/runtime/worktrees/work-3af7e41c-844f-4937-82e1-3ec23ad989f8",
+         "ended_at": "2026-09-14T03:49:17.011643+00:00",
+         "executable_path": "/bin/sh",
+         "executable_sha256": "84ca7f9b83021621e16059a1c7850df72a462d879e8239d566236ca6ddd00953",
+         "exit_code": 0,
+         "failure_code": null,
+         "lease_id": "0bb1c5f3-cc78-4dfe-ac9a-533e5aa79c3a",
+         "pane_dropped_lines": 0,
+         "pane_id": "pane-ffe60f21-2b93-4a93-8d9f-6308948a760c",
+         "pane_state": "done",
+         "pane_tail": [],
+         "pid": 29013,
+         "process_start_id": "1789357757.006318",
+         "provider": "local",
+         "provider_session_ref": null,
+         "repo_root": "/tmp/heiwa-work-fixture/repo-a",
+         "run_id": "run-9c1a2f1d-7aea-4cf0-b699-677fb1d3a634",
+         "started_at": "2026-09-14T03:49:16.996189+00:00",
+         "supervision": null,
+         "thread_id": "thread-e6a19998-16c5-47e4-af7d-f5d056dd46f7",
+         "work_id": "work-3af7e41c-844f-4937-82e1-3ec23ad989f8",
+         "worker_id": "worker-7e6cadcc-74cf-4473-b827-bee1e755d22a",
+         "worker_state": "exited"
+        }
+       },
+       "work": {
+        "work-3af7e41c-844f-4937-82e1-3ec23ad989f8": {
+         "intent": "Repair the recovery report",
+         "primary_thread_id": "thread-e6a19998-16c5-47e4-af7d-f5d056dd46f7",
+         "related_thread_ids": [],
+         "revision": 1,
+         "status": "active",
+         "updated_at": "2026-09-14T03:49:16.882268+00:00",
+         "work_id": "work-3af7e41c-844f-4937-82e1-3ec23ad989f8"
+        }
+       }
+      },
+      "identity": {
+       "operator_cursor": "eyJ2ZXJzaW9uIjoxLCJmaW5nZXJwcmludCI6IjE2NjAyYzhjMzMwNzFmMDM0NWMzNmQ2NTdmMTY0OGM3YjU4ZTFkNjViMTIyNTM3M2RjNzVkMjM4NTEyMWJhZTEiLCJvZmZzZXQiOjE4NzIyfQ",
+       "projection_epoch": "bc1254292a415bc0",
+       "projection_revision": 11,
+       "work_id": "work-3af7e41c-844f-4937-82e1-3ec23ad989f8",
+       "work_revision": 1
+      },
+      "surface": "home",
+      "truncated_collections": {}
+     },
+     {
+      "collections": {
+       "actions": {},
+       "artifacts": {},
+       "blockers": {},
+       "receipts": {},
+       "runs": {
+        "run-3b7d53b5-fcca-4757-bbf9-69a4f832f545": {
+         "base_commit": "8e3f5276a46ed187b62324a9466418ccbe74c7d0",
+         "branch": "heiwa/work-3af7e41c-844f-4937-82e1-3ec23ad989f8",
+         "cwd": "/tmp/heiwa-work-fixture/runtime/worktrees/work-3af7e41c-844f-4937-82e1-3ec23ad989f8",
+         "ended_at": null,
+         "executable_path": "/bin/sh",
+         "executable_sha256": "84ca7f9b83021621e16059a1c7850df72a462d879e8239d566236ca6ddd00953",
+         "exit_code": null,
+         "failure_code": null,
+         "lease_id": "0bb1c5f3-cc78-4dfe-ac9a-533e5aa79c3a",
+         "pane_dropped_lines": 0,
+         "pane_id": "pane-ae5d607d-257c-4314-abd7-6bfa939fd29f",
+         "pane_state": "stale",
+         "pane_tail": [],
+         "pid": 29022,
+         "process_start_id": "1789357757.046185",
+         "provider": "local",
+         "provider_session_ref": null,
+         "repo_root": "/tmp/heiwa-work-fixture/repo-a",
+         "run_id": "run-3b7d53b5-fcca-4757-bbf9-69a4f832f545",
+         "started_at": "2026-09-14T03:49:17.036163+00:00",
+         "supervision": {
+          "pid": 29022,
+          "process": "alive",
+          "reason": "owner_lost",
+          "recorded_at": "2026-09-14T03:49:17.505476+00:00"
+         },
+         "thread_id": "thread-e6a19998-16c5-47e4-af7d-f5d056dd46f7",
+         "work_id": "work-3af7e41c-844f-4937-82e1-3ec23ad989f8",
+         "worker_id": "worker-7e6cadcc-74cf-4473-b827-bee1e755d22a",
+         "worker_state": "stale"
+        },
+        "run-9c1a2f1d-7aea-4cf0-b699-677fb1d3a634": {
+         "base_commit": "8e3f5276a46ed187b62324a9466418ccbe74c7d0",
+         "branch": "heiwa/work-3af7e41c-844f-4937-82e1-3ec23ad989f8",
+         "cwd": "/tmp/heiwa-work-fixture/runtime/worktrees/work-3af7e41c-844f-4937-82e1-3ec23ad989f8",
+         "ended_at": "2026-09-14T03:49:17.011643+00:00",
+         "executable_path": "/bin/sh",
+         "executable_sha256": "84ca7f9b83021621e16059a1c7850df72a462d879e8239d566236ca6ddd00953",
+         "exit_code": 0,
+         "failure_code": null,
+         "lease_id": "0bb1c5f3-cc78-4dfe-ac9a-533e5aa79c3a",
+         "pane_dropped_lines": 0,
+         "pane_id": "pane-ffe60f21-2b93-4a93-8d9f-6308948a760c",
+         "pane_state": "done",
+         "pane_tail": [],
+         "pid": 29013,
+         "process_start_id": "1789357757.006318",
+         "provider": "local",
+         "provider_session_ref": null,
+         "repo_root": "/tmp/heiwa-work-fixture/repo-a",
+         "run_id": "run-9c1a2f1d-7aea-4cf0-b699-677fb1d3a634",
+         "started_at": "2026-09-14T03:49:16.996189+00:00",
+         "supervision": null,
+         "thread_id": "thread-e6a19998-16c5-47e4-af7d-f5d056dd46f7",
+         "work_id": "work-3af7e41c-844f-4937-82e1-3ec23ad989f8",
+         "worker_id": "worker-7e6cadcc-74cf-4473-b827-bee1e755d22a",
+         "worker_state": "exited"
+        }
+       },
+       "tests": {},
+       "threads": {},
+       "work": {
+        "work-3af7e41c-844f-4937-82e1-3ec23ad989f8": {
+         "intent": "Repair the recovery report",
+         "primary_thread_id": "thread-e6a19998-16c5-47e4-af7d-f5d056dd46f7",
+         "related_thread_ids": [],
+         "revision": 1,
+         "status": "active",
+         "updated_at": "2026-09-14T03:49:16.882268+00:00",
+         "work_id": "work-3af7e41c-844f-4937-82e1-3ec23ad989f8"
+        }
+       },
+       "workspace": {
+        "/tmp/heiwa-work-fixture/repo-a": {
+         "base_commit": "8e3f5276a46ed187b62324a9466418ccbe74c7d0",
+         "branch": "heiwa/work-3af7e41c-844f-4937-82e1-3ec23ad989f8",
+         "repo_root": "/tmp/heiwa-work-fixture/repo-a",
+         "state": "prepared",
+         "updated_at": "2026-09-14T03:49:16.976036+00:00",
+         "worktree_path": "/tmp/heiwa-work-fixture/runtime/worktrees/work-3af7e41c-844f-4937-82e1-3ec23ad989f8"
+        }
+       }
+      },
+      "identity": {
+       "operator_cursor": "eyJ2ZXJzaW9uIjoxLCJmaW5nZXJwcmludCI6IjE2NjAyYzhjMzMwNzFmMDM0NWMzNmQ2NTdmMTY0OGM3YjU4ZTFkNjViMTIyNTM3M2RjNzVkMjM4NTEyMWJhZTEiLCJvZmZzZXQiOjE4NzIyfQ",
+       "projection_epoch": "bc1254292a415bc0",
+       "projection_revision": 11,
+       "work_id": "work-3af7e41c-844f-4937-82e1-3ec23ad989f8",
+       "work_revision": 1
+      },
+      "surface": "work",
+      "truncated_collections": {}
+     },
+     {
+      "collections": {
+       "actions": {},
+       "approvals": {},
+       "runs": {
+        "run-3b7d53b5-fcca-4757-bbf9-69a4f832f545": {
+         "base_commit": "8e3f5276a46ed187b62324a9466418ccbe74c7d0",
+         "branch": "heiwa/work-3af7e41c-844f-4937-82e1-3ec23ad989f8",
+         "cwd": "/tmp/heiwa-work-fixture/runtime/worktrees/work-3af7e41c-844f-4937-82e1-3ec23ad989f8",
+         "ended_at": null,
+         "executable_path": "/bin/sh",
+         "executable_sha256": "84ca7f9b83021621e16059a1c7850df72a462d879e8239d566236ca6ddd00953",
+         "exit_code": null,
+         "failure_code": null,
+         "lease_id": "0bb1c5f3-cc78-4dfe-ac9a-533e5aa79c3a",
+         "pane_dropped_lines": 0,
+         "pane_id": "pane-ae5d607d-257c-4314-abd7-6bfa939fd29f",
+         "pane_state": "stale",
+         "pane_tail": [],
+         "pid": 29022,
+         "process_start_id": "1789357757.046185",
+         "provider": "local",
+         "provider_session_ref": null,
+         "repo_root": "/tmp/heiwa-work-fixture/repo-a",
+         "run_id": "run-3b7d53b5-fcca-4757-bbf9-69a4f832f545",
+         "started_at": "2026-09-14T03:49:17.036163+00:00",
+         "supervision": {
+          "pid": 29022,
+          "process": "alive",
+          "reason": "owner_lost",
+          "recorded_at": "2026-09-14T03:49:17.505476+00:00"
+         },
+         "thread_id": "thread-e6a19998-16c5-47e4-af7d-f5d056dd46f7",
+         "work_id": "work-3af7e41c-844f-4937-82e1-3ec23ad989f8",
+         "worker_id": "worker-7e6cadcc-74cf-4473-b827-bee1e755d22a",
+         "worker_state": "stale"
+        },
+        "run-9c1a2f1d-7aea-4cf0-b699-677fb1d3a634": {
+         "base_commit": "8e3f5276a46ed187b62324a9466418ccbe74c7d0",
+         "branch": "heiwa/work-3af7e41c-844f-4937-82e1-3ec23ad989f8",
+         "cwd": "/tmp/heiwa-work-fixture/runtime/worktrees/work-3af7e41c-844f-4937-82e1-3ec23ad989f8",
+         "ended_at": "2026-09-14T03:49:17.011643+00:00",
+         "executable_path": "/bin/sh",
+         "executable_sha256": "84ca7f9b83021621e16059a1c7850df72a462d879e8239d566236ca6ddd00953",
+         "exit_code": 0,
+         "failure_code": null,
+         "lease_id": "0bb1c5f3-cc78-4dfe-ac9a-533e5aa79c3a",
+         "pane_dropped_lines": 0,
+         "pane_id": "pane-ffe60f21-2b93-4a93-8d9f-6308948a760c",
+         "pane_state": "done",
+         "pane_tail": [],
+         "pid": 29013,
+         "process_start_id": "1789357757.006318",
+         "provider": "local",
+         "provider_session_ref": null,
+         "repo_root": "/tmp/heiwa-work-fixture/repo-a",
+         "run_id": "run-9c1a2f1d-7aea-4cf0-b699-677fb1d3a634",
+         "started_at": "2026-09-14T03:49:16.996189+00:00",
+         "supervision": null,
+         "thread_id": "thread-e6a19998-16c5-47e4-af7d-f5d056dd46f7",
+         "work_id": "work-3af7e41c-844f-4937-82e1-3ec23ad989f8",
+         "worker_id": "worker-7e6cadcc-74cf-4473-b827-bee1e755d22a",
+         "worker_state": "exited"
+        }
+       },
+       "work": {
+        "work-3af7e41c-844f-4937-82e1-3ec23ad989f8": {
+         "intent": "Repair the recovery report",
+         "primary_thread_id": "thread-e6a19998-16c5-47e4-af7d-f5d056dd46f7",
+         "related_thread_ids": [],
+         "revision": 1,
+         "status": "active",
+         "updated_at": "2026-09-14T03:49:16.882268+00:00",
+         "work_id": "work-3af7e41c-844f-4937-82e1-3ec23ad989f8"
+        }
+       },
+       "workspace": {
+        "/tmp/heiwa-work-fixture/repo-a": {
+         "base_commit": "8e3f5276a46ed187b62324a9466418ccbe74c7d0",
+         "branch": "heiwa/work-3af7e41c-844f-4937-82e1-3ec23ad989f8",
+         "repo_root": "/tmp/heiwa-work-fixture/repo-a",
+         "state": "prepared",
+         "updated_at": "2026-09-14T03:49:16.976036+00:00",
+         "worktree_path": "/tmp/heiwa-work-fixture/runtime/worktrees/work-3af7e41c-844f-4937-82e1-3ec23ad989f8"
+        }
+       }
+      },
+      "identity": {
+       "operator_cursor": "eyJ2ZXJzaW9uIjoxLCJmaW5nZXJwcmludCI6IjE2NjAyYzhjMzMwNzFmMDM0NWMzNmQ2NTdmMTY0OGM3YjU4ZTFkNjViMTIyNTM3M2RjNzVkMjM4NTEyMWJhZTEiLCJvZmZzZXQiOjE4NzIyfQ",
+       "projection_epoch": "bc1254292a415bc0",
+       "projection_revision": 11,
+       "work_id": "work-3af7e41c-844f-4937-82e1-3ec23ad989f8",
+       "work_revision": 1
+      },
+      "surface": "agent",
+      "truncated_collections": {}
+     }
+    ]
+   },
+   "ok": true
+  },
+  "stale-gone": {
+   "data": {
+    "surfaces": [
+     {
+      "collections": {
+       "approvals": {},
+       "blockers": {},
+       "receipts": {},
+       "runs": {
+        "run-db1d5b4a-179b-47b7-8da3-2fb94340b310": {
+         "base_commit": "8e3f5276a46ed187b62324a9466418ccbe74c7d0",
+         "branch": "heiwa/work-44acf0f7-f8d6-47e8-be5c-5ac1bf83ddf9",
+         "cwd": "/tmp/heiwa-work-fixture/runtime/worktrees/work-44acf0f7-f8d6-47e8-be5c-5ac1bf83ddf9",
+         "ended_at": null,
+         "executable_path": "/bin/sh",
+         "executable_sha256": "84ca7f9b83021621e16059a1c7850df72a462d879e8239d566236ca6ddd00953",
+         "exit_code": null,
+         "failure_code": null,
+         "lease_id": "f8f758ef-1b84-4304-8886-127fc9b4b9d7",
+         "pane_dropped_lines": 0,
+         "pane_id": "pane-44a664a9-addd-4244-9080-948422bdae9f",
+         "pane_state": "stale",
+         "pane_tail": [],
+         "pid": 29053,
+         "process_start_id": "1789357757.322472",
+         "provider": "local",
+         "provider_session_ref": null,
+         "repo_root": "/tmp/heiwa-work-fixture/repo-b",
+         "run_id": "run-db1d5b4a-179b-47b7-8da3-2fb94340b310",
+         "started_at": "2026-09-14T03:49:17.312619+00:00",
+         "supervision": {
+          "pid": 29053,
+          "process": "gone",
+          "reason": "owner_lost",
+          "recorded_at": "2026-09-14T03:49:17.505476+00:00"
+         },
+         "thread_id": "thread-2b14a505-0acb-4677-b458-64317ca44d97",
+         "work_id": "work-44acf0f7-f8d6-47e8-be5c-5ac1bf83ddf9",
+         "worker_id": "worker-053f01e4-d1f6-4272-b27a-3007671632dd",
+         "worker_state": "stale"
+        }
+       },
+       "work": {
+        "work-44acf0f7-f8d6-47e8-be5c-5ac1bf83ddf9": {
+         "intent": "Summarize the calendar plan",
+         "primary_thread_id": "thread-2b14a505-0acb-4677-b458-64317ca44d97",
+         "related_thread_ids": [],
+         "revision": 1,
+         "status": "active",
+         "updated_at": "2026-09-14T03:49:17.193515+00:00",
+         "work_id": "work-44acf0f7-f8d6-47e8-be5c-5ac1bf83ddf9"
+        }
+       }
+      },
+      "identity": {
+       "operator_cursor": "eyJ2ZXJzaW9uIjoxLCJmaW5nZXJwcmludCI6IjE2NjAyYzhjMzMwNzFmMDM0NWMzNmQ2NTdmMTY0OGM3YjU4ZTFkNjViMTIyNTM3M2RjNzVkMjM4NTEyMWJhZTEiLCJvZmZzZXQiOjE4NzIyfQ",
+       "projection_epoch": "bc1254292a415bc0",
+       "projection_revision": 6,
+       "work_id": "work-44acf0f7-f8d6-47e8-be5c-5ac1bf83ddf9",
+       "work_revision": 1
+      },
+      "surface": "home",
+      "truncated_collections": {}
+     },
+     {
+      "collections": {
+       "actions": {},
+       "artifacts": {},
+       "blockers": {},
+       "receipts": {},
+       "runs": {
+        "run-db1d5b4a-179b-47b7-8da3-2fb94340b310": {
+         "base_commit": "8e3f5276a46ed187b62324a9466418ccbe74c7d0",
+         "branch": "heiwa/work-44acf0f7-f8d6-47e8-be5c-5ac1bf83ddf9",
+         "cwd": "/tmp/heiwa-work-fixture/runtime/worktrees/work-44acf0f7-f8d6-47e8-be5c-5ac1bf83ddf9",
+         "ended_at": null,
+         "executable_path": "/bin/sh",
+         "executable_sha256": "84ca7f9b83021621e16059a1c7850df72a462d879e8239d566236ca6ddd00953",
+         "exit_code": null,
+         "failure_code": null,
+         "lease_id": "f8f758ef-1b84-4304-8886-127fc9b4b9d7",
+         "pane_dropped_lines": 0,
+         "pane_id": "pane-44a664a9-addd-4244-9080-948422bdae9f",
+         "pane_state": "stale",
+         "pane_tail": [],
+         "pid": 29053,
+         "process_start_id": "1789357757.322472",
+         "provider": "local",
+         "provider_session_ref": null,
+         "repo_root": "/tmp/heiwa-work-fixture/repo-b",
+         "run_id": "run-db1d5b4a-179b-47b7-8da3-2fb94340b310",
+         "started_at": "2026-09-14T03:49:17.312619+00:00",
+         "supervision": {
+          "pid": 29053,
+          "process": "gone",
+          "reason": "owner_lost",
+          "recorded_at": "2026-09-14T03:49:17.505476+00:00"
+         },
+         "thread_id": "thread-2b14a505-0acb-4677-b458-64317ca44d97",
+         "work_id": "work-44acf0f7-f8d6-47e8-be5c-5ac1bf83ddf9",
+         "worker_id": "worker-053f01e4-d1f6-4272-b27a-3007671632dd",
+         "worker_state": "stale"
+        }
+       },
+       "tests": {},
+       "threads": {},
+       "work": {
+        "work-44acf0f7-f8d6-47e8-be5c-5ac1bf83ddf9": {
+         "intent": "Summarize the calendar plan",
+         "primary_thread_id": "thread-2b14a505-0acb-4677-b458-64317ca44d97",
+         "related_thread_ids": [],
+         "revision": 1,
+         "status": "active",
+         "updated_at": "2026-09-14T03:49:17.193515+00:00",
+         "work_id": "work-44acf0f7-f8d6-47e8-be5c-5ac1bf83ddf9"
+        }
+       },
+       "workspace": {
+        "/tmp/heiwa-work-fixture/repo-b": {
+         "base_commit": "8e3f5276a46ed187b62324a9466418ccbe74c7d0",
+         "branch": "heiwa/work-44acf0f7-f8d6-47e8-be5c-5ac1bf83ddf9",
+         "repo_root": "/tmp/heiwa-work-fixture/repo-b",
+         "state": "prepared",
+         "updated_at": "2026-09-14T03:49:17.291204+00:00",
+         "worktree_path": "/tmp/heiwa-work-fixture/runtime/worktrees/work-44acf0f7-f8d6-47e8-be5c-5ac1bf83ddf9"
+        }
+       }
+      },
+      "identity": {
+       "operator_cursor": "eyJ2ZXJzaW9uIjoxLCJmaW5nZXJwcmludCI6IjE2NjAyYzhjMzMwNzFmMDM0NWMzNmQ2NTdmMTY0OGM3YjU4ZTFkNjViMTIyNTM3M2RjNzVkMjM4NTEyMWJhZTEiLCJvZmZzZXQiOjE4NzIyfQ",
+       "projection_epoch": "bc1254292a415bc0",
+       "projection_revision": 6,
+       "work_id": "work-44acf0f7-f8d6-47e8-be5c-5ac1bf83ddf9",
+       "work_revision": 1
+      },
+      "surface": "work",
+      "truncated_collections": {}
+     },
+     {
+      "collections": {
+       "actions": {},
+       "approvals": {},
+       "runs": {
+        "run-db1d5b4a-179b-47b7-8da3-2fb94340b310": {
+         "base_commit": "8e3f5276a46ed187b62324a9466418ccbe74c7d0",
+         "branch": "heiwa/work-44acf0f7-f8d6-47e8-be5c-5ac1bf83ddf9",
+         "cwd": "/tmp/heiwa-work-fixture/runtime/worktrees/work-44acf0f7-f8d6-47e8-be5c-5ac1bf83ddf9",
+         "ended_at": null,
+         "executable_path": "/bin/sh",
+         "executable_sha256": "84ca7f9b83021621e16059a1c7850df72a462d879e8239d566236ca6ddd00953",
+         "exit_code": null,
+         "failure_code": null,
+         "lease_id": "f8f758ef-1b84-4304-8886-127fc9b4b9d7",
+         "pane_dropped_lines": 0,
+         "pane_id": "pane-44a664a9-addd-4244-9080-948422bdae9f",
+         "pane_state": "stale",
+         "pane_tail": [],
+         "pid": 29053,
+         "process_start_id": "1789357757.322472",
+         "provider": "local",
+         "provider_session_ref": null,
+         "repo_root": "/tmp/heiwa-work-fixture/repo-b",
+         "run_id": "run-db1d5b4a-179b-47b7-8da3-2fb94340b310",
+         "started_at": "2026-09-14T03:49:17.312619+00:00",
+         "supervision": {
+          "pid": 29053,
+          "process": "gone",
+          "reason": "owner_lost",
+          "recorded_at": "2026-09-14T03:49:17.505476+00:00"
+         },
+         "thread_id": "thread-2b14a505-0acb-4677-b458-64317ca44d97",
+         "work_id": "work-44acf0f7-f8d6-47e8-be5c-5ac1bf83ddf9",
+         "worker_id": "worker-053f01e4-d1f6-4272-b27a-3007671632dd",
+         "worker_state": "stale"
+        }
+       },
+       "work": {
+        "work-44acf0f7-f8d6-47e8-be5c-5ac1bf83ddf9": {
+         "intent": "Summarize the calendar plan",
+         "primary_thread_id": "thread-2b14a505-0acb-4677-b458-64317ca44d97",
+         "related_thread_ids": [],
+         "revision": 1,
+         "status": "active",
+         "updated_at": "2026-09-14T03:49:17.193515+00:00",
+         "work_id": "work-44acf0f7-f8d6-47e8-be5c-5ac1bf83ddf9"
+        }
+       },
+       "workspace": {
+        "/tmp/heiwa-work-fixture/repo-b": {
+         "base_commit": "8e3f5276a46ed187b62324a9466418ccbe74c7d0",
+         "branch": "heiwa/work-44acf0f7-f8d6-47e8-be5c-5ac1bf83ddf9",
+         "repo_root": "/tmp/heiwa-work-fixture/repo-b",
+         "state": "prepared",
+         "updated_at": "2026-09-14T03:49:17.291204+00:00",
+         "worktree_path": "/tmp/heiwa-work-fixture/runtime/worktrees/work-44acf0f7-f8d6-47e8-be5c-5ac1bf83ddf9"
+        }
+       }
+      },
+      "identity": {
+       "operator_cursor": "eyJ2ZXJzaW9uIjoxLCJmaW5nZXJwcmludCI6IjE2NjAyYzhjMzMwNzFmMDM0NWMzNmQ2NTdmMTY0OGM3YjU4ZTFkNjViMTIyNTM3M2RjNzVkMjM4NTEyMWJhZTEiLCJvZmZzZXQiOjE4NzIyfQ",
+       "projection_epoch": "bc1254292a415bc0",
+       "projection_revision": 6,
+       "work_id": "work-44acf0f7-f8d6-47e8-be5c-5ac1bf83ddf9",
+       "work_revision": 1
+      },
+      "surface": "agent",
+      "truncated_collections": {}
+     }
+    ]
+   },
+   "ok": true
+  },
+  "no-runs": {
+   "data": {
+    "surfaces": [
+     {
+      "collections": {
+       "approvals": {},
+       "blockers": {},
+       "receipts": {},
+       "runs": {},
+       "work": {
+        "work-c037b1cb-bab7-4df1-8bea-ea7f31aa23ec": {
+         "intent": "Draft release notes",
+         "primary_thread_id": "thread-2d8e261d-531d-4908-86fb-0523c79be135",
+         "related_thread_ids": [],
+         "revision": 1,
+         "status": "active",
+         "updated_at": "2026-09-14T03:49:17.467258+00:00",
+         "work_id": "work-c037b1cb-bab7-4df1-8bea-ea7f31aa23ec"
+        }
+       }
+      },
+      "identity": {
+       "operator_cursor": "eyJ2ZXJzaW9uIjoxLCJmaW5nZXJwcmludCI6IjE2NjAyYzhjMzMwNzFmMDM0NWMzNmQ2NTdmMTY0OGM3YjU4ZTFkNjViMTIyNTM3M2RjNzVkMjM4NTEyMWJhZTEiLCJvZmZzZXQiOjE4NzIyfQ",
+       "projection_epoch": "bc1254292a415bc0",
+       "projection_revision": 1,
+       "work_id": "work-c037b1cb-bab7-4df1-8bea-ea7f31aa23ec",
+       "work_revision": 1
+      },
+      "surface": "home",
+      "truncated_collections": {}
+     },
+     {
+      "collections": {
+       "actions": {},
+       "artifacts": {},
+       "blockers": {},
+       "receipts": {},
+       "runs": {},
+       "tests": {},
+       "threads": {},
+       "work": {
+        "work-c037b1cb-bab7-4df1-8bea-ea7f31aa23ec": {
+         "intent": "Draft release notes",
+         "primary_thread_id": "thread-2d8e261d-531d-4908-86fb-0523c79be135",
+         "related_thread_ids": [],
+         "revision": 1,
+         "status": "active",
+         "updated_at": "2026-09-14T03:49:17.467258+00:00",
+         "work_id": "work-c037b1cb-bab7-4df1-8bea-ea7f31aa23ec"
+        }
+       },
+       "workspace": {}
+      },
+      "identity": {
+       "operator_cursor": "eyJ2ZXJzaW9uIjoxLCJmaW5nZXJwcmludCI6IjE2NjAyYzhjMzMwNzFmMDM0NWMzNmQ2NTdmMTY0OGM3YjU4ZTFkNjViMTIyNTM3M2RjNzVkMjM4NTEyMWJhZTEiLCJvZmZzZXQiOjE4NzIyfQ",
+       "projection_epoch": "bc1254292a415bc0",
+       "projection_revision": 1,
+       "work_id": "work-c037b1cb-bab7-4df1-8bea-ea7f31aa23ec",
+       "work_revision": 1
+      },
+      "surface": "work",
+      "truncated_collections": {}
+     },
+     {
+      "collections": {
+       "actions": {},
+       "approvals": {},
+       "runs": {},
+       "work": {
+        "work-c037b1cb-bab7-4df1-8bea-ea7f31aa23ec": {
+         "intent": "Draft release notes",
+         "primary_thread_id": "thread-2d8e261d-531d-4908-86fb-0523c79be135",
+         "related_thread_ids": [],
+         "revision": 1,
+         "status": "active",
+         "updated_at": "2026-09-14T03:49:17.467258+00:00",
+         "work_id": "work-c037b1cb-bab7-4df1-8bea-ea7f31aa23ec"
+        }
+       },
+       "workspace": {}
+      },
+      "identity": {
+       "operator_cursor": "eyJ2ZXJzaW9uIjoxLCJmaW5nZXJwcmludCI6IjE2NjAyYzhjMzMwNzFmMDM0NWMzNmQ2NTdmMTY0OGM3YjU4ZTFkNjViMTIyNTM3M2RjNzVkMjM4NTEyMWJhZTEiLCJvZmZzZXQiOjE4NzIyfQ",
+       "projection_epoch": "bc1254292a415bc0",
+       "projection_revision": 1,
+       "work_id": "work-c037b1cb-bab7-4df1-8bea-ea7f31aa23ec",
+       "work_revision": 1
+      },
+      "surface": "agent",
+      "truncated_collections": {}
+     }
+    ]
+   },
+   "ok": true
+  }
+ },
+ "unknown_work_http_body": "{\"error\":{\"code\":\"unknown_work\"},\"ok\":false}"
+}

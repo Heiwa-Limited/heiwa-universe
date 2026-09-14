@@ -10,6 +10,7 @@ import { mailSurface } from "./mail";
 import { socialSurface } from "./social";
 import { windowsSurface } from "./windows";
 import { workersSurface } from "./workers";
+import { workSurface } from "./work";
 import { SURFACE_IDS, type SurfaceId } from "./ids";
 import type { SurfaceModule } from "./types";
 
@@ -21,6 +22,7 @@ export const SURFACES: SurfaceModule[] = [
   homeSurface,
   sessionsSurface,
   projectsSurface,
+  workSurface,
   aiSurface,
   windowsSurface,
   calendarSurface,
