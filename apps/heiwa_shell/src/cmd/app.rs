@@ -2098,6 +2098,7 @@ enum OperatorHttpRoute {
     Events(String),
     Turns(String),
     Cancel(String),
+    WorkCatalog,
     WorkSurfaces(String),
 }
 
@@ -2120,6 +2121,10 @@ async fn operator_http_response(
     let runner = runtime.runner;
 
     match (method, route) {
+        ("GET", OperatorHttpRoute::WorkCatalog) => work_catalog_response(
+            &heiwa_config::HeiwaPaths::resolve().evidence_dir,
+            WORK_CATALOG_LIMIT,
+        ),
         ("GET", OperatorHttpRoute::WorkSurfaces(work_id)) => work_surfaces_response(
             &heiwa_config::HeiwaPaths::resolve().evidence_dir,
             &work_id,
@@ -2345,13 +2350,32 @@ fn runtime_instance_epoch_seed() -> &'static str {
     SEED.get_or_init(|| format!("app-instance-{}", uuid::Uuid::new_v4()))
 }
 
+/// Most Work rows one catalog response carries. The desktop fetches detail for
+/// one selected Work at a time, so this also bounds what a list can fan out to.
+const WORK_CATALOG_LIMIT: usize = 100;
+
+/// `GET /api/v1/operator/work`: bounded Work discovery for the desktop. An
+/// installation with no Work answers an empty list, never an error.
+fn work_catalog_response(evidence_root: &Path, limit: usize) -> (u16, Value) {
+    match crate::cmd::work::catalog_json(evidence_root, limit) {
+        Ok(catalog) => (200, json!({"ok": true, "data": catalog})),
+        Err(_) => operator_error(503, "operator_unavailable"),
+    }
+}
+
 /// `GET /api/v1/operator/work/{work_id}/surfaces`: the same one-snapshot views
 /// `heiwa work show --surface all` prints. The epoch belongs to this runtime
 /// instance, so it changes exactly when the projector restarts.
 fn work_surfaces_response(evidence_root: &Path, work_id: &str, epoch_seed: &str) -> (u16, Value) {
     match crate::cmd::work::surfaces_json(evidence_root, work_id, epoch_seed) {
         Ok(surfaces) => (200, json!({"ok": true, "data": surfaces})),
-        Err(error) if error.to_string().contains("unknown") => operator_error(404, "unknown_work"),
+        Err(error)
+            if error
+                .downcast_ref::<heiwa_work::WorkSessionBuildError>()
+                .is_some() =>
+        {
+            operator_error(404, "unknown_work")
+        }
         Err(_) => operator_error(503, "operator_unavailable"),
     }
 }
@@ -2387,6 +2411,7 @@ fn parse_operator_route(path: &str) -> std::result::Result<Option<OperatorHttpRo
         ["api", "v1", "operator", "turns", turn_id, "cancel"] => Ok(Some(
             OperatorHttpRoute::Cancel(decode_operator_path_id(turn_id)?),
         )),
+        ["api", "v1", "operator", "work"] => Ok(Some(OperatorHttpRoute::WorkCatalog)),
         ["api", "v1", "operator", "work", work_id, "surfaces"] => Ok(Some(
             OperatorHttpRoute::WorkSurfaces(decode_operator_path_id(work_id)?),
         )),
@@ -5895,6 +5920,50 @@ mod app_readmodel_tests {
     use heiwa_evidence::OperatorJournal;
     use heiwa_session::operator::{OperatorSessionService, StartTurnRequest};
     use tokio::sync::broadcast;
+
+    #[test]
+    fn work_catalog_route_is_bounded_newest_first_and_empty_is_not_an_error() {
+        match parse_operator_route("/api/v1/operator/work") {
+            Ok(Some(OperatorHttpRoute::WorkCatalog)) => {}
+            _ => panic!("work catalog route must parse"),
+        }
+        assert!(parse_operator_route("/api/v1/operator/work/").is_err());
+
+        let runtime = tempfile::tempdir().expect("runtime");
+        let evidence = runtime.path().join("evidence");
+        let (status, body) = work_catalog_response(&evidence, 2);
+        assert_eq!(status, 200, "{body}");
+        assert_eq!(body["data"]["work"], json!([]), "no Work is an empty list");
+        assert_eq!(body["data"]["total"], json!(0));
+        assert_eq!(body["data"]["truncated"], json!(0));
+
+        let mut created = Vec::new();
+        for intent in ["first", "second", "third"] {
+            let work = crate::cmd::work::create(&evidence, intent, "install-1").expect("create");
+            created.push(work["work_id"].as_str().expect("id").to_string());
+            std::thread::sleep(std::time::Duration::from_millis(5));
+        }
+        let (status, body) = work_catalog_response(&evidence, 2);
+        assert_eq!(status, 200, "{body}");
+        let rows = body["data"]["work"].as_array().expect("rows");
+        assert_eq!(rows.len(), 2, "bounded to the limit");
+        assert_eq!(
+            rows[0]["work_id"],
+            json!(created[2]),
+            "most recently updated first"
+        );
+        assert_eq!(rows[1]["work_id"], json!(created[1]));
+        assert_eq!(rows[0]["intent"], json!("third"));
+        assert_eq!(rows[0]["status"], json!("active"));
+        assert!(rows[0]["primary_thread_id"].as_str().is_some());
+        assert_eq!(body["data"]["total"], json!(3));
+        assert_eq!(
+            body["data"]["truncated"],
+            json!(1),
+            "the omitted row is counted"
+        );
+        assert_eq!(body["data"]["skipped_events"], json!(0));
+    }
 
     #[test]
     fn work_surface_epoch_belongs_to_the_runtime_instance_not_its_pid() {

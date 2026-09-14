@@ -10,6 +10,7 @@ export const SURFACE_IDS = [
   "home",
   "sessions",
   "projects",
+  "work",
   "ai",
   "windows",
   "calendar",

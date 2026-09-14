@@ -2,6 +2,8 @@ import { createMemo, Index, Show } from "solid-js";
 import { cssToken, timeFmt } from "../../lib/format";
 import type { OperatorProjection, OperatorSnapshot, OperatorTurn } from "../../operator/types";
 import { useApp } from "../../state/app";
+import { workRecord } from "../../state/work-model";
+import { DetailNotice, WorkRunList } from "../shared/WorkViews";
 import type { SurfaceModule } from "../types";
 import "./workers.css";
 
@@ -29,6 +31,33 @@ function taskWorkerCount(snapshot: OperatorSnapshot, reported: number): number {
   return active + reported;
 }
 
+/** The selected Work's Agent view: its runs and any lost supervision. */
+function SelectedWorkRuns() {
+  const app = useApp();
+  const detail = () => app.work.detail();
+  const hasCatalog = () => app.work.rows().length > 0;
+  return <Show
+    when={detail().workId}
+    fallback={<Show when={hasCatalog()}>
+      <section class="panel work-runs-panel">
+        <p class="muted">Select a Work to inspect its runs. <button class="work-link" onClick={() => app.navigate("work")}>Choose Work</button></p>
+      </section>
+    </Show>}
+  >
+    <section class="panel work-runs-panel" aria-label="Work runs">
+      <div class="view-header">
+        <h2>{detail().surfaces ? `Runs for “${workRecord(detail().surfaces!).intent || "Untitled Work"}”` : "Work runs"}</h2>
+        <div class="work-runs-actions">
+          <button class="work-link" onClick={() => app.navigate("work")}>Work details</button>
+          <button class="work-link" disabled={detail().loading} onClick={() => void app.work.refresh()}>Refresh</button>
+        </div>
+      </div>
+      <DetailNotice state={detail()} onRetry={() => void app.work.refresh()} />
+      <Show when={detail().surfaces} keyed>{(surfaces) => <WorkRunList view={surfaces.agent} />}</Show>
+    </section>
+  </Show>;
+}
+
 function WorkersSurface() {
   const app = useApp();
   let dispatchInput: HTMLTextAreaElement | undefined;
@@ -54,6 +83,7 @@ function WorkersSurface() {
 
   return (
     <div class="view workers-view">
+      <SelectedWorkRuns />
       <div class="view-header">
         <h2>Operator turns</h2>
         <p class="muted">
@@ -115,6 +145,7 @@ export const workersSurface: SurfaceModule = {
   glyph: "◇",
   caption: "workers window",
   Component: WorkersSurface,
+  refresh: (app) => app.work.refresh(),
   preview: (app) => {
     const snapshot = app.operator.snapshot();
     return {

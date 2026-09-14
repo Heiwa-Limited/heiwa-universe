@@ -1,6 +1,6 @@
 import type { JSX } from "solid-js";
 
-export function Icon(props: { name: "home" | "sessions" | "calendar" | "mail" | "search" | "plus" | "send" | "more" | "chevron" | "heiwa" | "close" | "folder"; size?: number }) {
+export function Icon(props: { name: "home" | "sessions" | "calendar" | "mail" | "search" | "plus" | "send" | "more" | "chevron" | "heiwa" | "close" | "folder" | "work"; size?: number }) {
   const size = props.size ?? 18;
   const paths: Record<string, JSX.Element> = {
     home: <><path d="m3 10 9-7 9 7v10a1 1 0 0 1-1 1h-5v-6H9v6H4a1 1 0 0 1-1-1Z" /></>,
@@ -13,6 +13,7 @@ export function Icon(props: { name: "home" | "sessions" | "calendar" | "mail" | 
     heiwa: <><path d="m12 2 8.5 5v10L12 22l-8.5-5V7Z" /><path d="m3.5 7 8.5 5 8.5-5M12 12v10M12 2v10L3.5 17m8.5-5 8.5 5" /></>,
     close: <path d="m6 6 12 12M6 18 18 6" />,
     folder: <path d="M3 7V5h6l2 2h10v13H3Z" />,
+    work: <><rect x="3" y="7" width="18" height="13" rx="2" /><path d="M9 7V5a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2M3 13h18" /></>,
     more: <path d="M5 12h.01M12 12h.01M19 12h.01" />,
     chevron: <path d="m9 18 6-6-6-6" />,
   };
