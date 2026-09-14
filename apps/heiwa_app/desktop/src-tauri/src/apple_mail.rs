@@ -166,15 +166,44 @@ mod tests {
         assert!(acquire_scan_lock().is_ok());
     }
 
+    /// Write an executable stand-in for the runtime.
+    #[cfg(unix)]
+    fn runtime_script(body: &str) -> std::path::PathBuf {
+        use std::os::unix::fs::PermissionsExt;
+        let path = std::env::temp_dir().join(format!("heiwa-mail-scan-{}", uuid::Uuid::new_v4()));
+        std::fs::write(&path, body).unwrap();
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o700)).unwrap();
+        path
+    }
+
+    /// Run a freshly written script as the runtime.
+    ///
+    /// Tests run in parallel, and another test's fork can inherit this
+    /// script's write descriptor for the instant before that child execs.
+    /// Linux refuses to execute a file that is open for writing (ETXTBSY), so
+    /// the spawn fails with "could not start". That is a harness race, not the
+    /// behaviour under test: a failed start is retried briefly and every other
+    /// outcome is returned exactly as observed.
+    #[cfg(unix)]
+    fn run_fresh_script(path: &Path, timeout: Duration) -> Result<AppleMailScanResult, String> {
+        let deadline = Instant::now() + Duration::from_secs(1);
+        loop {
+            let result = run_scan_process(path, timeout);
+            let could_not_start =
+                matches!(&result, Err(error) if error.contains("could not start"));
+            if !could_not_start || Instant::now() >= deadline {
+                return result;
+            }
+            std::thread::sleep(Duration::from_millis(10));
+        }
+    }
+
     #[cfg(unix)]
     #[test]
     fn times_out_a_hung_runtime_process() {
-        use std::os::unix::fs::PermissionsExt;
-        let path = std::env::temp_dir().join(format!("heiwa-mail-scan-{}", uuid::Uuid::new_v4()));
-        std::fs::write(&path, "#!/bin/sh\nsleep 10\n").unwrap();
-        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o700)).unwrap();
+        let path = runtime_script("#!/bin/sh\nsleep 10\n");
         let started = Instant::now();
-        let result = run_scan_process(&path, Duration::from_millis(50));
+        let result = run_fresh_script(&path, Duration::from_millis(50));
         let _ = std::fs::remove_file(&path);
         assert!(result.unwrap_err().contains("timed out"));
         assert!(started.elapsed() < Duration::from_secs(2));
@@ -183,12 +212,9 @@ mod tests {
     #[cfg(unix)]
     #[test]
     fn times_out_when_a_descendant_keeps_stdout_open_after_the_parent_exits() {
-        use std::os::unix::fs::PermissionsExt;
-        let path = std::env::temp_dir().join(format!("heiwa-mail-scan-{}", uuid::Uuid::new_v4()));
-        std::fs::write(&path, "#!/bin/sh\nsleep 10 &\nprintf '%s' '{\"sources\":[{\"source\":\"apple\",\"status\":\"scanned\"}],\"fetched\":0,\"appended\":0,\"deduplicated\":0}'\n").unwrap();
-        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o700)).unwrap();
+        let path = runtime_script("#!/bin/sh\nsleep 10 &\nprintf '%s' '{\"sources\":[{\"source\":\"apple\",\"status\":\"scanned\"}],\"fetched\":0,\"appended\":0,\"deduplicated\":0}'\n");
         let started = Instant::now();
-        let result = run_scan_process(&path, Duration::from_millis(100));
+        let result = run_fresh_script(&path, Duration::from_millis(100));
         let _ = std::fs::remove_file(&path);
         assert!(result.unwrap_err().contains("timed out"));
         assert!(started.elapsed() < Duration::from_secs(2));
@@ -197,11 +223,8 @@ mod tests {
     #[cfg(unix)]
     #[test]
     fn rejects_oversized_runtime_output() {
-        use std::os::unix::fs::PermissionsExt;
-        let path = std::env::temp_dir().join(format!("heiwa-mail-scan-{}", uuid::Uuid::new_v4()));
-        std::fs::write(&path, "#!/bin/sh\nyes x | head -c 70000\n").unwrap();
-        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o700)).unwrap();
-        let result = run_scan_process(&path, Duration::from_secs(2));
+        let path = runtime_script("#!/bin/sh\nyes x | head -c 70000\n");
+        let result = run_fresh_script(&path, Duration::from_secs(2));
         let _ = std::fs::remove_file(&path);
         assert!(result.unwrap_err().contains("oversized"));
     }
