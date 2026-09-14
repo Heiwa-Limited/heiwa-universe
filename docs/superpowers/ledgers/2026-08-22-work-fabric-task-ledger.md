@@ -60,11 +60,13 @@ not compose across journal, Work, and Workspace boundaries.
 
 Plan: `docs/superpowers/plans/2026-08-25-work-fabric-a1c1-work-bound-turns.md`
 
-Release A1-c is **in progress**. A1-c1 closed the durable identity gap between
-Work and the existing operator/Action Gate runtime. A1-c2
+Release A1-c is **complete as scoped**, verified by
+`scripts/check_work_fabric_a1_acceptance.sh`. A1-c1 closed the durable identity
+gap between Work and the existing operator/Action Gate runtime. A1-c2
 (`docs/superpowers/plans/2026-08-26-work-fabric-a1c2-worker-and-pane-identity.md`)
 adds a provider-owned worker running inside the prepared worktree and a durable
-pane bound to it. Neither claims tri-surface or restart-recovery completion.
+pane bound to it. A1-c3 makes the surfaces agree and records restart truth.
+Surface agreement is contract level — CLI and app API — not desktop UI.
 
 | # | Step | Status | Verification |
 |---|---|---|---|
@@ -75,9 +77,9 @@ pane bound to it. Neither claims tri-surface or restart-recovery completion.
 | 5 | `heiwa work show <work-id>` renders the canonical session projector | done | `cargo test -p heiwa-shell cmd::work` |
 | 6 | Provider-owned worker runs inside the prepared Work workspace | done | `cargo test -p heiwa-shell --bin heiwa cmd::worker` |
 | 7 | Durable terminal pane binds to Work and worker identity | done | `cargo test -p heiwa_worker --test runs` |
-| 8 | Home, Work, and Agent surfaces agree on Work/revision/cursor | pending | A1-c3 |
-| 9 | Restart recovery exposes stale/closed worker and pane truth without repeating effects | pending | A1-c3 |
-| 10 | Additive exact-HEAD `scripts/check_work_fabric_a1_acceptance.sh` | pending | A1-c3 |
+| 8 | Home, Work, and Agent surfaces agree on Work/revision/cursor | done | `cargo test -p heiwa_work --test surface_agreement` |
+| 9 | Restart recovery exposes stale/closed worker and pane truth without repeating effects | done | `cargo test -p heiwa-shell --test work_fabric_a1` |
+| 10 | Additive exact-HEAD `scripts/check_work_fabric_a1_acceptance.sh` | done | `bash scripts/check_work_fabric_a1_acceptance.sh` |
 
 ### A1-c2 review repair — 2026-08-28
 
@@ -90,6 +92,49 @@ pane bound to it. Neither claims tri-surface or restart-recovery completion.
 | 5 | Relative provider commands execute the canonical binary recorded in the receipt | done | `cargo test -p heiwa-shell --test work_run relative_provider_runs_the_executable_whose_identity_was_recorded` |
 | 6 | A failed initial heartbeat kills and reaps the provider child | done | `cargo test -p heiwa-shell --bin heiwa a_child_whose_heartbeat_cannot_be_persisted_is_not_left_running` |
 | 7 | Sensitivity-screen rejection of a pane tail still permits worker exit evidence | done | `cargo test -p heiwa-shell --test work_run a_refused_pane_tail_still_records_that_the_worker_exited` |
+
+### A1-c3 surface agreement and restart truth — 2026-09-13
+
+Plane: Execution / Evidence. `heiwa_work::surface` derives Home, Work, and
+Agent from one `WorkSessionSnapshotV1`, so they carry one Work, revision,
+epoch, cursor, and bound, and each surface's `ClientProjection` refuses
+cross-Work, cross-fold, stale, and gapped deltas. `heiwa work show --surface`
+and `GET /api/v1/operator/work/{work_id}/surfaces` serve the same function.
+
+Restart recovery appends one run-scoped `worker_stale` marker per unfinished
+run, inside `OperatorSessionService::recover_interrupted_with`'s exclusive
+section — at app runtime start and through `heiwa work recover`. The marker
+records loss of supervision and the observed process: `alive` needs a pid
+and matching platform start identity (now recorded with the heartbeat);
+`gone` needs the pid absent or reused; everything else is `unknown`.
+Recovery never stops, reattaches, or relaunches a process; a stale run has no
+exit and `heiwa work show` says whether its process is still running. Ended
+runs and earlier runs of the same worker keep their outcomes, and a live
+owner's activity lease keeps its run from being marked.
+
+Verification: `bash scripts/check_work_fabric_a1_acceptance.sh`. The binary
+cases kill a real `heiwa work run` owner (surviving child recorded alive once,
+no relaunch or file change), kill both (recorded gone), and restart
+`heiwa app start` over an orphan (recorded before the port serves).
+
+### A1-c3 review repair — 2026-09-13
+
+Astra reproduced three boundary defects at `614960f1`, and a fourth (malformed
+current-schema payload) at `14459ef2`, with disposable fixtures; each repair
+below first failed against the revision it was found at.
+
+| # | Repaired invariant | Status | Verification |
+|---|---|---|---|
+| 1 | An acceptance stamp names only the clean source (tracked and untracked) its checks observed; a revision committed or source added during checks fails the gate, and a dirty start never stamps | done | `bash scripts/tests/test_acceptance_stamp.sh` |
+| 2 | Recovery interprets only rows the service's replay admits; unsupported-schema, rejected, unplaced, scope-mismatched, or unreadable worker evidence withholds the run and is reported, never marked | done | `cargo test -p heiwa-shell --bin heiwa cmd::recover` |
+| 3 | Linux start identity carries the kernel boot identity; the app API surface epoch is minted per runtime instance, not per pid | done | `cargo test -p heiwa-shell --bin heiwa -- linux_start_identity work_surface_epoch` |
+| 4 | A current-schema worker row whose payload does not parse as its typed worker payload withholds its run and is reported; no marker or process observation comes from it | done | `cargo test -p heiwa-shell --bin heiwa malformed` |
+
+All four acceptance gates (L0, L1, L2, Work Fabric A1) now stamp through
+`scripts/lib/acceptance_stamp.sh`; L0-L2 had the same end-only stamp check.
+Recovery replays through `sync_materialized`'s paging and `apply_event`
+admission, so damage and admission are counted exactly as materialization
+counts them.
 
 ## Execution and Evidence checkpoint — 2026-09-12
 
@@ -196,17 +241,24 @@ results belong in their generated receipts; these changes do not complete A1.
   node. The attested-prefix design exists so binding adds a later event without
   changing an earlier one, so building the type now would produce something
   nothing can emit.
-- `scripts/check_work_fabric_a1_acceptance.sh` lands in A1-c3, when the whole
-  A1 checkpoint can pass. A1-c1 intentionally cannot satisfy the worker, pane,
-  tri-surface, or restart-recovery rows.
 - Multi-repository coordination (`WorkTaskGraphV1`, scope reservation,
   barriers, publication sagas) is Release A2. A1-b's lease is per repository.
 - Interactive pane operations — `send`, `split`, `focus`, `pause`, `resume`
   from the Terminal Runtime contract need a PTY adapter. A1-c2 delivers
   `create`, `read`, and `stop` over pipes; the rest wait for that adapter
   rather than being faked through a pipe that cannot carry them.
-- Restart reattach is row 9, in A1-c3. A worker whose process is gone folds as
-  `stale` rather than being resurrected.
+- Restart reattach, and containing a surviving orphan, stay deferred. A1-c3
+  records lost supervision and the observed process; stopping an unsupervised
+  provider is a separate action under its own authorization.
+- `heiwa work recover` needs the exclusive activity lease, so it refuses while
+  the app runtime or any worker writer is live. A worker whose owner dies while
+  the app keeps running is recorded at the next app start. Per-run supervision
+  proof would close that window.
+- Worker launch stays ungated: `heiwa work run` spawns the raw command it is
+  given. The Action Gate for raw terminal commands closes it.
+- Desktop consumption of the Work surfaces. The macOS contract centers the
+  desktop, whose Workers surface still reads the operator projection; A1's
+  surface agreement is proven at the CLI and app API boundary only.
 - A worker's parent, and the separate tool/filesystem/network/budget/action
   leases the spec's "Legitimate Workers" lists, are not on `WorkerIdentity`.
   A1-c2 has exactly one writer lease and no child workers, so those fields
@@ -221,7 +273,7 @@ results belong in their generated receipts; these changes do not complete A1.
 
 ## Next experimental slice
 
-- A1-c3 — make Home, Work, and Agent agree on Work/revision/cursor; expose
-  stale and closed worker and pane truth after a restart without repeating
-  effects; and land `scripts/check_work_fabric_a1_acceptance.sh` so the whole
-  A1 checkpoint can pass at an exact HEAD.
+- Desktop Work surfaces — the Workers and Home surfaces read
+  `/api/v1/operator/work/{work_id}/surfaces`, and a stale run shows whether its
+  process is still running.
+- Release A2 — multi-repository coordination.

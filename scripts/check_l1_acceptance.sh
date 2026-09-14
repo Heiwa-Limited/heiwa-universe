@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# acceptance-scope: apps crates Cargo.toml Cargo.lock scripts/check_l1_acceptance.sh scripts/lib/verification_logs.sh
+# acceptance-scope: apps crates Cargo.toml Cargo.lock scripts/check_l1_acceptance.sh scripts/lib/verification_logs.sh scripts/lib/acceptance_stamp.sh
 #
 # Wider than the files this reads directly: it builds heiwa-shell and tests
 # heiwa-provider, both of which compile most of the workspace, so a change in
@@ -26,6 +26,8 @@ set -euo pipefail
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$repo_root"
 source "$repo_root/scripts/lib/verification_logs.sh"
+source "$repo_root/scripts/lib/acceptance_stamp.sh"
+acceptance_source_begin
 umask 077
 log_dir="$(verification_log_dir "$repo_root" "l1")"
 
@@ -93,10 +95,4 @@ if (( fail != 0 )); then
   printf 'L1 acceptance gate FAILED.\n' >&2
   exit 1
 fi
-# Stamp HEAD only when HEAD is what actually passed.
-if git diff --quiet && git diff --cached --quiet; then
-  mkdir -p .claude && git rev-parse HEAD > .claude/l1-accept-sha
-  printf 'L1 acceptance gate passed (stamp written for HEAD).\n'
-else
-  printf 'L1 acceptance gate passed. Tree is dirty, so no HEAD stamp was written.\n'
-fi
+acceptance_source_finish "L1" ".claude/l1-accept-sha" || exit 1

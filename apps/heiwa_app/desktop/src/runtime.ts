@@ -95,6 +95,7 @@ export type MachineSnapshot = {
   runtime?: {
     version?: string;
     channel?: string;
+    build_commit?: string | null;
     install_path?: string | null;
   };
   perspective?: {

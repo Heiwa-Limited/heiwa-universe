@@ -357,6 +357,29 @@ fn compute_effects(id: &str, approve: bool) -> Result<Value> {
                 "kind": "hold_drop",
             }));
         }
+        ("calendar_plan", plan_id, true) if !plan_id.is_empty() => {
+            let intent = request.get("intent").cloned().unwrap_or(Value::Null);
+            let work_id = request
+                .get("work_id")
+                .and_then(Value::as_str)
+                .ok_or_else(|| anyhow!("approved calendar plan has no work_id"))?;
+            effects.push(json!({
+                "surface": "calendar_plan",
+                "target": plan_id,
+                "change": crate::cmd::calendar_plan::effect_summary(&intent),
+                "kind": "apple_calendar_plan_apply",
+                "work_id": work_id,
+                "intent": intent,
+            }));
+        }
+        ("calendar_plan", plan_id, false) if !plan_id.is_empty() => {
+            effects.push(json!({
+                "surface": "calendar_plan",
+                "target": plan_id,
+                "change": "staged plan changes discarded (nothing written)",
+                "kind": "calendar_plan_discard",
+            }));
+        }
         ("mail", message_key, true) if !message_key.is_empty() => {
             effects.push(json!({
                 "surface": "mail",
@@ -407,6 +430,25 @@ fn apply_effects(id: &str, plan: &Value, approve: bool) -> Result<Value> {
                         external_event.get("external_id").and_then(Value::as_str).unwrap_or("?")
                     ),
                     "external_event": external_event,
+                }));
+            }
+            ("apple_calendar_plan_apply", true) => {
+                let work_id = effect
+                    .get("work_id")
+                    .and_then(Value::as_str)
+                    .ok_or_else(|| anyhow!("calendar plan effect has no work_id"))?;
+                let intent = effect.get("intent").cloned().unwrap_or(Value::Null);
+                let receipt = crate::cmd::calendar_plan::apply_approved(id, work_id, &intent)?;
+                applied.push(json!({
+                    "kind": "apple_calendar_plan_apply",
+                    "summary": crate::cmd::calendar_plan::effect_summary(&intent),
+                    "receipt_id": receipt.get("receipt_id").cloned().unwrap_or(Value::Null),
+                }));
+            }
+            ("calendar_plan_discard", false) => {
+                applied.push(json!({
+                    "kind": "calendar_plan_discard",
+                    "summary": format!("{target}: staged plan changes discarded"),
                 }));
             }
             ("hold_confirm", true) => {

@@ -23,6 +23,7 @@ pub fn run(args: &[String]) -> Result<()> {
         Some("create") => create_command(&args[1..]),
         Some("show") => show_command(&args[1..]),
         Some("run") => crate::cmd::worker::run(&args[1..]),
+        Some("recover") => recover_command(&args[1..]),
         Some("--help") | Some("-h") => {
             print_help();
             Ok(())
@@ -37,7 +38,12 @@ fn print_help() {
     println!("  heiwa work list [--json]              what Work exists and where it stands");
     println!("  heiwa work create <intent> [--json]   open a new Work and its primary thread");
     println!("  heiwa work show <work-id> [--json]    bounded session truth for one Work");
+    println!("  heiwa work show <work-id> --surface home|work|agent|all");
+    println!("                                        surface views of one snapshot, as JSON");
     println!("  heiwa work run <work-id> -- <cmd>     run a provider-owned worker in its worktree");
+    println!(
+        "  heiwa work recover [--json]           record runs whose supervising process is gone"
+    );
 }
 
 fn service(root: &Path) -> Result<OperatorSessionService> {
@@ -101,11 +107,32 @@ fn create_command(args: &[String]) -> Result<()> {
 }
 
 fn show_command(args: &[String]) -> Result<()> {
+    let surface = flag_value(args, "--surface");
+    let surface_value = args
+        .iter()
+        .position(|arg| arg == "--surface")
+        .map(|index| index + 1);
     let work_id = args
         .iter()
-        .find(|arg| !arg.starts_with("--"))
-        .ok_or_else(|| anyhow!("usage: heiwa work show <work-id> [--json]"))?;
+        .enumerate()
+        .find(|(index, arg)| !arg.starts_with("--") && Some(*index) != surface_value)
+        .map(|(_, arg)| arg)
+        .ok_or_else(|| anyhow!("usage: heiwa work show <work-id> [--json | --surface <name>]"))?;
     let paths = heiwa_config::HeiwaPaths::resolve();
+    if let Some(surface) = surface {
+        let epoch_seed = format!("cli-{}", uuid::Uuid::new_v4());
+        let rendered = if surface == "all" {
+            surfaces_json(&paths.evidence_dir, work_id, &epoch_seed)?
+        } else {
+            let snapshot = session(&paths.evidence_dir, work_id, &epoch_seed)?;
+            let view = heiwa_work::view_for(&snapshot, surface).ok_or_else(|| {
+                anyhow!("unknown surface {surface}; expected home, work, agent, or all")
+            })?;
+            serde_json::to_value(view)?
+        };
+        println!("{rendered}");
+        return Ok(());
+    }
     let snapshot = session(
         &paths.evidence_dir,
         work_id,
@@ -139,10 +166,14 @@ fn show_command(args: &[String]) -> Result<()> {
                 run["provider"].as_str().unwrap_or("-")
             );
             println!("    cwd  {}", run["cwd"].as_str().unwrap_or("?"));
-            match run["exit_code"].as_i64() {
-                Some(code) => println!("    exit {code}"),
-                None if run["ended_at"].is_null() => println!("    exit (still running)"),
-                None => println!("    exit (signalled)"),
+            if run["worker_state"].as_str() == Some("stale") {
+                println!("    {}", describe_supervision_loss(run));
+            } else {
+                match run["exit_code"].as_i64() {
+                    Some(code) => println!("    exit {code}"),
+                    None if run["ended_at"].is_null() => println!("    exit (still running)"),
+                    None => println!("    exit (signalled)"),
+                }
             }
             if let Some(pane) = run["pane_id"].as_str() {
                 println!(
@@ -172,6 +203,65 @@ fn show_command(args: &[String]) -> Result<()> {
         if count > 0 || omitted > 0 {
             println!("  {name}: {count} visible, {omitted} omitted");
         }
+    }
+    Ok(())
+}
+
+/// One line for a stale run that never lets "stale" read as "stopped".
+fn describe_supervision_loss(run: &Value) -> String {
+    let loss = &run["supervision"];
+    let pid = loss["pid"]
+        .as_u64()
+        .map(|pid| format!(" (pid {pid})"))
+        .unwrap_or_default();
+    match loss["process"].as_str() {
+        Some("alive") => format!(
+            "supervision lost: process still running unsupervised{pid}; recovery did not stop it"
+        ),
+        Some("gone") => {
+            format!("supervision lost: process no longer running{pid}; no exit was observed")
+        }
+        _ => format!("supervision lost: process state unknown{pid}"),
+    }
+}
+
+fn recover_command(args: &[String]) -> Result<()> {
+    let paths = heiwa_config::HeiwaPaths::resolve();
+    let outcome = crate::cmd::recover::recover(&service(&paths.evidence_dir)?)?;
+    let report = crate::cmd::recover::report(&outcome);
+    if has_flag(args, "--json") {
+        println!("{report}");
+        return Ok(());
+    }
+    println!(
+        "recovered {} interrupted turn(s); {} run(s) marked stale",
+        report["interrupted_turns"].as_u64().unwrap_or(0),
+        report["runs_marked_stale"].as_u64().unwrap_or(0)
+    );
+    for run in report["runs"].as_array().into_iter().flatten() {
+        let described = describe_supervision_loss(&json!({ "supervision": run }));
+        println!(
+            "  run {}  {}  {described}",
+            run["run_id"].as_str().unwrap_or("?"),
+            run["work_id"].as_str().unwrap_or("?")
+        );
+    }
+    for run in report["runs_withheld"].as_array().into_iter().flatten() {
+        println!(
+            "  run {}  {}  not marked: {}",
+            run["run_id"].as_str().unwrap_or("?"),
+            run["work_id"].as_str().unwrap_or("?"),
+            run["reason"].as_str().unwrap_or("unknown evidence")
+        );
+    }
+    let unadmitted = report["unadmitted_worker_events"]
+        .as_array()
+        .map_or(0, Vec::len);
+    let unreadable = report["unreadable_journal_lines"].as_u64().unwrap_or(0);
+    if unadmitted > 0 || unreadable > 0 {
+        println!(
+            "! {unadmitted} worker row(s) this build does not admit and {unreadable} unreadable journal line(s) were preserved uninterpreted"
+        );
     }
     Ok(())
 }
@@ -280,6 +370,20 @@ fn read_rows(root: &Path) -> Result<Vec<CursorEvent>> {
 
 pub(crate) fn find(root: &Path, work_id: &str) -> Result<Option<Work>> {
     Ok(project(root)?.work(work_id).cloned())
+}
+
+/// Home, Work, and Agent views of one Work, all from one snapshot so they
+/// cannot disagree. The CLI and the app API both serve exactly this.
+pub(crate) fn surfaces_json(root: &Path, work_id: &str, epoch_seed: &str) -> Result<Value> {
+    let snapshot = session(root, work_id, epoch_seed)?;
+    Ok(json!({ "surfaces": heiwa_work::surfaces(&snapshot) }))
+}
+
+fn flag_value<'a>(args: &'a [String], flag: &str) -> Option<&'a str> {
+    args.iter()
+        .position(|arg| arg == flag)
+        .and_then(|index| args.get(index + 1))
+        .map(String::as_str)
 }
 
 fn has_flag(args: &[String], flag: &str) -> bool {

@@ -11,6 +11,7 @@ pub mod model;
 pub mod projector;
 pub mod session;
 pub mod snapshot;
+pub mod surface;
 
 pub use events::{
     work_created_event, work_linked_event, WorkCreatedPayload, WorkLinkOrigin, WorkLinkedPayload,
@@ -22,6 +23,9 @@ pub use session::{build_work_session, WorkSessionBuildError, WorkSessionBuildOpt
 pub use snapshot::{
     ClientProjection, CollectionRows, DeltaApplyOutcome, ProjectionEpoch, ResyncReason,
     WorkSessionDeltaV1, WorkSessionSnapshotV1,
+};
+pub use surface::{
+    agent_view, home_view, surfaces, view_for, work_view, SurfaceIdentity, SurfaceView, SURFACES,
 };
 
 #[derive(Debug, thiserror::Error)]

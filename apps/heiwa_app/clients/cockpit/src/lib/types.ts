@@ -14,7 +14,9 @@ export interface Session {
   operator_id: string;
   hostname: string;
   runtime_version: string;
-  channel: "stable" | "nightly";
+  /** Build channel: "main" for releases, "dev" for dev-channel builds, "local" otherwise. */
+  channel: string;
+  build_commit: string | null;
   default_route_role: string;
   app_url: string;
 }

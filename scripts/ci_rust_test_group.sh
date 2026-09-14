@@ -48,14 +48,17 @@ shell_state_targets=(
   first_run
   fresh_install
   local_boot
+  update_channel
 )
 
 shell_ops_targets=(
   apple_calendar_connector
+  calendar_plan_sync
   calendar_sync
   mail_triage
   schedule
   smoke
+  work_fabric_a1
   work_run
 )
 
@@ -104,6 +107,7 @@ foundation_b_targets=(
   smoke
   telemetry_pane
   runs
+  surface_agreement
   work_core
   work_session
   workspace_core

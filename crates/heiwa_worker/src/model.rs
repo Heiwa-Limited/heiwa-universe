@@ -34,6 +34,33 @@ pub enum PaneState {
     Stale,
 }
 
+/// What restart recovery saw of a run's process after its supervisor was gone.
+///
+/// Absence of proof is not proof of death, so a sighting that cannot tell the
+/// recorded process from another one is `Unknown`, never `Gone`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ObservedProcess {
+    /// The recorded process is still running, now without a supervisor.
+    Alive,
+    /// The recorded process is not running: nothing holds its pid, or what
+    /// does started at a different time.
+    Gone,
+    /// Recovery could not tell: no pid was ever recorded, the record predates
+    /// start identity, or the OS would not describe the process.
+    Unknown,
+}
+
+impl ObservedProcess {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            ObservedProcess::Alive => "alive",
+            ObservedProcess::Gone => "gone",
+            ObservedProcess::Unknown => "unknown",
+        }
+    }
+}
+
 impl PaneState {
     pub fn for_worker(worker: WorkerState) -> Self {
         match worker {

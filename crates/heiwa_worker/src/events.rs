@@ -11,7 +11,7 @@ use heiwa_evidence::{
 };
 use serde::{Deserialize, Serialize};
 
-use crate::model::{PaneIdentity, WorkerIdentity, SCHEMA_VERSION};
+use crate::model::{ObservedProcess, PaneIdentity, WorkerIdentity, SCHEMA_VERSION};
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct WorkerLaunchedPayload {
@@ -32,6 +32,11 @@ pub struct WorkerLaunchedPayload {
 pub struct WorkerHeartbeatPayload {
     pub worker_id: String,
     pub pid: u32,
+    /// Platform start identity of the process holding `pid`, compared only
+    /// for equality. It is what lets recovery tell the recorded process from
+    /// a later one that reused the pid. Absent on records that predate it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub process_start_id: Option<String>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -42,6 +47,23 @@ pub struct WorkerExitedPayload {
     /// Set when the worker failed rather than completing.
     pub failure_code: Option<String>,
 }
+
+/// Restart recovery's record that a run lost its supervisor.
+///
+/// Two separate facts: supervision was lost (`reason`), and what recovery saw
+/// of the process when it looked (`process`). Neither is an exit.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct WorkerStalePayload {
+    pub worker_id: String,
+    pub reason: String,
+    pub process: ObservedProcess,
+    /// The pid recovery looked for, when one was ever recorded.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pid: Option<u32>,
+}
+
+/// The only reason recovery marks a run stale today: nothing supervises it.
+pub const OWNER_LOST: &str = "owner_lost";
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct PaneOpenedPayload {
@@ -78,8 +100,32 @@ macro_rules! from_event {
 from_event!(WorkerLaunchedPayload, OperatorEventType::WorkerLaunched);
 from_event!(WorkerHeartbeatPayload, OperatorEventType::WorkerHeartbeat);
 from_event!(WorkerExitedPayload, OperatorEventType::WorkerExited);
+from_event!(WorkerStalePayload, OperatorEventType::WorkerStale);
 from_event!(PaneOpenedPayload, OperatorEventType::PaneOpened);
 from_event!(PaneClosedPayload, OperatorEventType::PaneClosed);
+
+/// The address of one recorded run.
+///
+/// Recovery has no live [`WorkerIdentity`] — only what the journal recorded —
+/// so a marker is addressed by the ids that make it land on exactly one run.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct RunRef<'a> {
+    pub work_id: &'a str,
+    pub thread_id: &'a str,
+    pub run_id: &'a str,
+    pub worker_id: &'a str,
+}
+
+impl<'a> RunRef<'a> {
+    pub fn of(identity: &'a WorkerIdentity, run_id: &'a str) -> Self {
+        Self {
+            work_id: &identity.work_id,
+            thread_id: &identity.thread_id,
+            run_id,
+            worker_id: &identity.worker_id,
+        }
+    }
+}
 
 /// One worker-authored event, scoped to its Work and thread.
 ///
@@ -163,12 +209,14 @@ pub fn worker_heartbeat_event(
     identity: &WorkerIdentity,
     run_id: &str,
     pid: u32,
+    process_start_id: Option<&str>,
     occurred_at: &str,
     new_event_id: impl FnOnce() -> String,
 ) -> OperatorEvent {
     let payload = serde_json::to_value(WorkerHeartbeatPayload {
         worker_id: identity.worker_id.clone(),
         pid,
+        process_start_id: process_start_id.map(str::to_string),
     })
     .expect("worker heartbeat payload is plain data");
     worker_scoped(
@@ -211,6 +259,42 @@ pub fn worker_exited_event(
         payload,
         new_event_id,
     )
+}
+
+/// Mark one run as no longer supervised, recording what recovery observed of
+/// its process. The actor is the runtime, not the worker: the worker did not
+/// say this about itself.
+pub fn worker_stale_event(
+    run: RunRef<'_>,
+    process: ObservedProcess,
+    pid: Option<u32>,
+    occurred_at: &str,
+    new_event_id: impl FnOnce() -> String,
+) -> OperatorEvent {
+    let payload = serde_json::to_value(WorkerStalePayload {
+        worker_id: run.worker_id.to_string(),
+        reason: OWNER_LOST.to_string(),
+        process,
+        pid,
+    })
+    .expect("worker stale payload is plain data");
+    let mut event = worker_scoped(
+        WorkerScope {
+            work_id: run.work_id,
+            thread_id: run.thread_id,
+            run_id: run.run_id,
+            worker_id: run.worker_id,
+        },
+        OperatorEventType::WorkerStale,
+        occurred_at,
+        payload,
+        new_event_id,
+    );
+    event.actor = OperatorActor {
+        kind: "runtime".to_string(),
+        id: "worker-recovery".to_string(),
+    };
+    event
 }
 
 pub fn pane_opened_event(

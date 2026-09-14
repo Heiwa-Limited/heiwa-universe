@@ -110,6 +110,16 @@ testing, verification is waived entirely. Build against real scopes now.
   failure leaves the hold draft and writes no approval decision. Once the
   external side effect succeeds, its deterministic receipt id supports
   at-least-once evidence without ambiguous action identity.
+- **AD-31 — Many-event changes are one plan, one approval, one commit.** A
+  calendar plan is desired state: every event carries
+  `heiwa://calendar/plan/<plan_id>/<key>` as its URL, so a change is an edit to
+  the plan file, not a re-import. `heiwa calendar plan stage` diffs the plan
+  against the plan's own marked events and files one T2 approval that lists
+  every create/update/delete. Approval re-scans, refuses if Calendar drifted
+  since staging, and applies the delta in a single EventKit commit (a failure
+  writes nothing) with one journaled receipt. Unmarked events are never touched
+  unless `--adopt` claims an exact title/start/end match. This replaces
+  per-event scripting and blind `.ics` re-imports, which duplicate on retry.
 
 ## Build order
 
