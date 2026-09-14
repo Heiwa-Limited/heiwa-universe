@@ -136,6 +136,38 @@ Recovery replays through `sync_materialized`'s paging and `apply_event`
 admission, so damage and admission are counted exactly as materialization
 counts them.
 
+## Desktop Work surfaces — 2026-09-14
+
+Plane: Intake / Evidence. The macOS desktop reads Work instead of only the
+operator projection. `GET /api/v1/operator/work` (authenticated operator API)
+returns a bounded catalog — 100 rows, newest first, with `total`, `truncated`,
+and `skipped_events` — and an installation without Work answers an empty list.
+One desktop service (`state/work.ts`) owns catalog and per-Work snapshot
+fetches: each surfaces response is accepted only as exactly Home, Work, and
+Agent with one identity for the requested Work; each Work has its own request
+generation, so a late reply lands only on its own Work and never replaces a
+newer one. Catalog rows show a snapshot's values when its durable Work revision
+is at least the row's, so discovery and detail cannot disagree and an older
+list cannot downgrade newer detail. Failures keep the last snapshot visibly
+stale with Retry; an unknown Work is dropped; incompatible payloads never
+render; an installation is called empty only with positive evidence.
+
+Home lists unfinished Work first and reads up to three Home projections for
+their attention facts. The Work view shows objective, linked conversation
+status, run summary, blockers, approvals, actions, artifacts, tests, receipts,
+and workspace, with bounds labelled and identifiers in Diagnostics. Workers
+shows the selected Work's runs with each run's recorded state kept separate
+from any supervision loss, which reads as a dated observation (alive, gone, or
+unknown) — never stopped, recovered, or running now. The rail has a Work entry.
+
+Verification: `npm test` in `apps/heiwa_app/desktop` (service races, epochs,
+identity mismatch, retry, truncation, skipped and unreadable rows, repeated
+runs, supervision states, reconciliation, bounded prefetch, focus retention,
+and payloads captured from a real `heiwa app start` over disposable Work);
+`cargo test -p heiwa-shell --bin heiwa work_catalog_route`. Keyboard and
+narrow-window use were checked in an isolated browser fixture over those
+captured payloads, not in the installed app.
+
 ## Execution and Evidence checkpoint — 2026-09-12
 
 DREX distinguishes known rates from missing price evidence both within an
@@ -256,9 +288,13 @@ results belong in their generated receipts; these changes do not complete A1.
   proof would close that window.
 - Worker launch stays ungated: `heiwa work run` spawns the raw command it is
   given. The Action Gate for raw terminal commands closes it.
-- Desktop consumption of the Work surfaces. The macOS contract centers the
-  desktop, whose Workers surface still reads the operator projection; A1's
-  surface agreement is proven at the CLI and app API boundary only.
+- Work-scoped continuation from the desktop. The desktop now reads Work
+  (below), but it offers no "continue in conversation" action: composer turns go
+  through `OperatorClient.submitTurn` without a `work_id`, and the server accepts
+  unscoped turns in a Work's thread, so opening one there would silently create
+  unscoped activity. Closing it needs an explicit Work scope on submission,
+  taken from validated thread membership, with an approved operator-seam
+  baseline update.
 - A worker's parent, and the separate tool/filesystem/network/budget/action
   leases the spec's "Legitimate Workers" lists, are not on `WorkerIdentity`.
   A1-c2 has exactly one writer lease and no child workers, so those fields
@@ -273,7 +309,5 @@ results belong in their generated receipts; these changes do not complete A1.
 
 ## Next experimental slice
 
-- Desktop Work surfaces — the Workers and Home surfaces read
-  `/api/v1/operator/work/{work_id}/surfaces`, and a stale run shows whether its
-  process is still running.
+- Work-scoped composer continuation (see Deferred with reason).
 - Release A2 — multi-repository coordination.

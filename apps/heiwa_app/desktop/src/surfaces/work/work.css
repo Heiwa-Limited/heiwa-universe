@@ -1,0 +1,27 @@
+.work-layout { display: grid; grid-template-columns: minmax(220px, 320px) minmax(0, 1fr); gap: 28px; align-items: start; }
+.work-list { display: grid; border-top: 1px solid var(--border-subtle); }
+.work-list-row { display: flex; align-items: center; gap: 12px; width: 100%; min-height: 60px; padding: 12px 8px; border-bottom: 1px solid var(--border-subtle); text-align: left; }
+.work-list-row:hover { background: var(--surface-raised); }
+.work-list-row.selected { background: var(--surface-overlay); box-shadow: inset 3px 0 0 var(--accent); }
+.work-list-row:focus-visible { outline: 2px solid var(--accent-ring); outline-offset: -2px; }
+.work-list-text { display: grid; gap: 4px; flex: 1; min-width: 0; }
+.work-list-text strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 14px; font-weight: 500; }
+.work-list-text small { color: var(--content-secondary); font-size: 12px; }
+.work-detail { min-width: 0; }
+.work-detail-head { display: grid; gap: 8px; margin-bottom: 18px; }
+.work-detail-head h2 { font-size: 22px; font-weight: 500; letter-spacing: -0.02em; overflow-wrap: anywhere; }
+.work-detail-head > div { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; }
+.work-detail-head small { color: var(--content-secondary); font-size: 12px; }
+.work-section { padding: 14px 0; border-top: 1px solid var(--border-subtle); }
+.work-section h3 { display: flex; align-items: baseline; gap: 8px; margin-bottom: 8px; font-size: 13px; font-weight: 500; color: var(--content-primary); }
+.work-section h3 small { color: var(--content-muted); font-size: 12px; }
+.work-lines { display: grid; gap: 6px; margin: 0; padding: 0; list-style: none; }
+.work-lines li { display: grid; gap: 2px; }
+.work-line-main { font-size: 14px; overflow-wrap: anywhere; }
+.work-line-sub { color: var(--content-secondary); font-size: 12px; overflow-wrap: anywhere; }
+.work-refresh { display: inline-flex; align-items: center; min-height: 32px; padding: 6px 10px; border: 1px solid var(--border-subtle); border-radius: 7px; color: var(--content-secondary); font-size: 13px; }
+.work-refresh:focus-visible { outline: 2px solid var(--accent-ring); outline-offset: 2px; }
+
+@media (max-width: 860px) {
+  .work-layout { grid-template-columns: minmax(0, 1fr); gap: 18px; }
+}

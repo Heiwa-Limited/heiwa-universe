@@ -99,3 +99,10 @@
   max-height: 220px;
   overflow-y: auto;
 }
+
+.work-runs-panel { display: grid; gap: 12px; margin-bottom: 20px; padding: 16px 18px; }
+.work-runs-panel h2 { font-size: 18px; font-weight: 500; overflow-wrap: anywhere; }
+.work-runs-panel .view-header { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: baseline; gap: 8px 16px; }
+.work-runs-actions { display: flex; gap: 14px; }
+/* The view scrolls; its panels keep their content height instead of clipping. */
+.workers-view > * { flex-shrink: 0; }
