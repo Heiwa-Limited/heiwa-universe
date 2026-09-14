@@ -175,7 +175,13 @@ function WorkSurface() {
               aria-current={app.work.selectedId() === row().workId ? "true" : undefined}
               onClick={() => void app.work.select(row().workId)}
             >
-              <span class="work-list-text"><strong>{row().intent || "Untitled Work"}</strong><small>Updated {formatRecordedTime(row().updatedAt)}</small></span>
+              <span class="work-list-text">
+                <strong>{row().intent || "Untitled Work"}</strong>
+                <small>Updated {formatRecordedTime(row().updatedAt)}</small>
+                <Show when={row().detail?.error && app.work.selectedId() !== row().workId}>
+                  <small class="work-list-problem">{row().snapshot ? "Details may be out of date" : "Details could not be loaded"}</small>
+                </Show>
+              </span>
               <WorkStatusChip status={row().status} raw={row().rawStatus} />
             </button>
           )}</Index>

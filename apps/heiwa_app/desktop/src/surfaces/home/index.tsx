@@ -11,7 +11,7 @@ import {
   summarizeRuns,
 } from "../../state/work-model";
 import type { WorkRow } from "../../state/work";
-import { CatalogNotice, WorkStatusChip } from "../shared/WorkViews";
+import { CatalogNotice, WorkDetailProblem, WorkStatusChip } from "../shared/WorkViews";
 import { TodayBriefing } from "./TodayBriefing";
 import type { SurfaceModule } from "../types";
 import "./home.css";
@@ -81,13 +81,14 @@ function HomeSurface() {
           <Show when={app.work.evidence() === "uncertain"}>
             <p class="home-project-empty">No readable Work to show, but the runtime reports Work this app could not list.</p>
           </Show>
-          <Index each={work()}>{(row) => (
+          <Index each={work()}>{(row) => <>
             <button class="home-session-row" onClick={() => openWork(row().workId)}>
               <span class="home-row-icon"><Icon name="work" size={18} /></span>
               <span class="home-row-text"><strong>{row().intent || "Untitled Work"}</strong><small>Updated {formatRecordedTime(row().updatedAt)}{facts(row())}</small></span>
               <WorkStatusChip status={row().status} raw={row().rawStatus} /><Icon name="chevron" size={16} />
             </button>
-          )}</Index>
+            <WorkDetailProblem row={row()} onRetry={() => void app.work.retry(row().workId)} />
+          </>}</Index>
         </section>
       </Show>
       <Show when={hasToday()}><TodayBriefing /></Show>

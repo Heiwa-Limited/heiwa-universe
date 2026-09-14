@@ -298,6 +298,30 @@ describe("desktop Work", () => {
     expect(document.activeElement).toBe(row);
   });
 
+  // Regression from Astra's second desktop review (desktop-work-astra-review-2.md).
+  it("keeps a Work's failed snapshot refresh visible on Home, with a retry, until a valid snapshot arrives", async () => {
+    const { state, answer } = workApp({ catalog: catalog([{ id: "work-a", intent: "Watch the build", updated: "2026-09-14T03:00:00+00:00" }]) });
+    render(() => <App state={state} />);
+    const lost = surfaces("work-a", "Watch the build", {
+      runs: { r: runRow("r", { worker_state: "stale", supervision: { reason: "owner_lost", process: "gone", pid: 7, recorded_at: "2026-09-14T02:00:00+00:00" } }) },
+    });
+    await answer("work-a", lost);
+    const home = (await screen.findByRole("heading", { name: "Work" })).closest("section")!;
+    await waitFor(() => expect(home.textContent).toMatch(/1 lost supervision/));
+
+    // The catalog keeps succeeding while this Work's own snapshot fails.
+    void state.work.loadCatalog({ prefetch: 3 });
+    await answer("work-a", { kind: "Http", detail: { status: 503, body: "{\"ok\":false}" } }, true);
+    const problem = await within(home).findByText(/Showing an earlier snapshot\. The runtime could not load Work \(HTTP 503\)\./);
+    expect(home.textContent).toMatch(/1 lost supervision/);
+    expect(screen.queryByText(/not reachable/)).toBeNull();
+
+    fireEvent.click(within(problem).getByRole("button", { name: "Retry" }));
+    await answer("work-a", surfaces("work-a", "Watch the build"));
+    await waitFor(() => expect(within(home).queryByText(/Showing an earlier snapshot/)).toBeNull());
+    expect(home.textContent).not.toMatch(/lost supervision/);
+  });
+
   it("reads at most three Work projections for Home", async () => {
     const rows = Array.from({ length: 6 }, (_, index) => ({
       id: `work-${index}`, intent: `Goal ${index}`, updated: `2026-09-14T0${9 - index}:00:00+00:00`,

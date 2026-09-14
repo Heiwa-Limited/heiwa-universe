@@ -31,3 +31,5 @@
 .work-link:focus-visible,
 .work-more:focus-visible,
 .work-notice button:focus-visible { outline: 2px solid var(--accent-ring); outline-offset: 2px; }
+.work-row-problem { margin: 6px 0 10px; }
+.work-list-problem { color: var(--content-primary); }

@@ -1,5 +1,5 @@
 import { For, Show, createMemo } from "solid-js";
-import type { CatalogState, SnapshotState } from "../../state/work";
+import type { CatalogState, SnapshotState, WorkRow } from "../../state/work";
 import {
   describeRun,
   formatRecordedTime,
@@ -54,6 +54,21 @@ export function DetailNotice(props: { state: SnapshotState; onRetry: () => void 
       </p>
     )}</Show>
   </>;
+}
+
+/**
+ * One Work's detail problem, shown beside what came from its snapshot. The
+ * catalog can succeed while a Work's own snapshot fails; this keeps that
+ * failure visible, with a retry, until a valid snapshot replaces it.
+ */
+export function WorkDetailProblem(props: { row: WorkRow; onRetry: () => void }) {
+  const error = () => props.row.detail?.error;
+  return <Show when={error()}>{(problem) => (
+    <p class="work-notice work-notice-problem work-row-problem">
+      {props.row.snapshot ? `Showing an earlier snapshot. ${problem().message}` : `Details could not be loaded. ${problem().message}`}
+      <Show when={problem().kind !== "not_found"}>{" "}<button onClick={() => props.onRetry()} disabled={props.row.detail?.loading}>Retry</button></Show>
+    </p>
+  )}</Show>;
 }
 
 /** A bounded collection's omitted-row label, or nothing when it is complete. */

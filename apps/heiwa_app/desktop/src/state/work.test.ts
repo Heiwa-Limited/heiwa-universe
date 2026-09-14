@@ -450,3 +450,42 @@ describe("summaries that never overclaim", () => {
     expect(runSummaryText(summarizeRuns(view({}, { runs: 3 })))).not.toBe("No runs recorded.");
   });
 });
+
+describe("per-Work detail state on shared rows", () => {
+  it("carries a Work's refresh failure on its row until that Work's retry succeeds", async () => {
+    const runtime = controllableRuntime();
+    const state = createWorkState({ get: runtime.get });
+    const catalog = state.loadCatalog({ prefetch: 3 });
+    runtime.take("/operator/work").resolve(catalogPayload([{ id: "work-a", intent: "A" }, { id: "work-b", intent: "B" }]));
+    await settle();
+    runtime.take("/work/work-a/").resolve(surfacesPayload("work-a"));
+    runtime.take("/work/work-b/").resolve(surfacesPayload("work-b"));
+    await catalog;
+
+    const again = state.loadCatalog({ prefetch: 3 });
+    runtime.take("/operator/work").resolve(catalogPayload([{ id: "work-a", intent: "A" }, { id: "work-b", intent: "B" }]));
+    await settle();
+    runtime.take("/work/work-a/").reject({ kind: "Offline", detail: "down" });
+    runtime.take("/work/work-b/").resolve(surfacesPayload("work-b"));
+    await again;
+
+    const rowA = () => state.rows().find((row) => row.workId === "work-a")!;
+    const rowB = () => state.rows().find((row) => row.workId === "work-b")!;
+    expect(state.catalog().error).toBeUndefined();
+    expect(rowA().detail).toMatchObject({ stale: true, loading: false });
+    expect(rowA().detail?.error?.kind).toBe("offline");
+    expect(rowA().snapshot).toBeDefined();
+    expect(rowB().detail?.error).toBeUndefined();
+    expect(state.selectedId()).toBeUndefined();
+
+    const retry = state.retry("work-a");
+    await settle();
+    expect(rowA().detail).toMatchObject({ loading: true, stale: true });
+    expect(rowA().detail?.error?.kind).toBe("offline");
+    runtime.take("/work/work-a/").resolve(surfacesPayload("work-a", { revision: 8 }));
+    await retry;
+    expect(rowA().detail).toMatchObject({ loading: false, stale: false });
+    expect(rowA().detail?.error).toBeUndefined();
+    expect(state.selectedId()).toBeUndefined();
+  });
+});

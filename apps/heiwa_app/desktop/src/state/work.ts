@@ -52,8 +52,15 @@ export type SnapshotState = {
   stale: boolean;
 };
 
-/** A discovered Work, showing its snapshot's values when the snapshot is at least as new. */
-export type WorkRow = WorkCatalogRow & { snapshot?: WorkSurfaces };
+/**
+ * A discovered Work, showing its snapshot's values when the snapshot is at
+ * least as new. `detail` carries that Work's snapshot loading, staleness, and
+ * error with the row, so anything shown from the snapshot shows its age too.
+ */
+export type WorkRow = WorkCatalogRow & {
+  snapshot?: WorkSurfaces;
+  detail?: Pick<SnapshotState, "loading" | "stale" | "error">;
+};
 
 export type WorkState = {
   catalog: Accessor<CatalogState>;
@@ -67,6 +74,8 @@ export type WorkState = {
   select: (workId: string) => Promise<void>;
   /** Reload the selected Work. A no-op when nothing is selected. */
   refresh: () => Promise<void>;
+  /** Reload one Work's snapshot without changing the selection. */
+  retry: (workId: string) => Promise<void>;
   dispose: () => void;
 };
 
@@ -158,8 +167,10 @@ export function createWorkState(options: WorkStateOptions = {}): WorkState {
   const rows = createMemo<WorkRow[]>(() => {
     const known = snapshots();
     return (catalog().catalog?.rows ?? []).map((row) => {
-      const surfaces = known.get(row.workId)?.surfaces;
-      if (!surfaces || surfaces.identity.workRevision < row.revision) return row;
+      const entry = known.get(row.workId);
+      const detail = entry ? { loading: entry.loading, stale: entry.stale, error: entry.error } : undefined;
+      const surfaces = entry?.surfaces;
+      if (!surfaces || surfaces.identity.workRevision < row.revision) return { ...row, detail };
       const record = workRecord(surfaces);
       return {
         ...row,
@@ -169,6 +180,7 @@ export function createWorkState(options: WorkStateOptions = {}): WorkState {
         revision: surfaces.identity.workRevision,
         updatedAt: record.updatedAt ?? row.updatedAt,
         snapshot: surfaces,
+        detail,
       };
     });
   });
@@ -238,6 +250,10 @@ export function createWorkState(options: WorkStateOptions = {}): WorkState {
     loadCatalog,
     select,
     refresh,
+    retry: async (workId: string) => {
+      if (disposed || !workId) return;
+      await fetchSnapshot(workId);
+    },
     dispose: () => {
       disposed = true;
       catalogGeneration += 1;
