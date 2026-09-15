@@ -159,3 +159,17 @@ export type MailMessage = {
   mailbox?: string;
   date?: string;
 };
+
+/** Freshness and outcome of the local Apple Mail metadata sync. */
+export type MailSyncStatus = {
+  status: "scanned" | "fresh" | "no_consent" | "mail_not_running" | "backoff" | "error" | "skipped";
+  freshness?: string;
+  fetched?: number;
+  appended?: number;
+  updated?: number;
+  removed?: number;
+  error?: string | null;
+  error_class?: "timeout" | "permission_pending" | "automation_denied" | "backoff" | "failed" | string | null;
+  last_scan_at?: string | null;
+  last_attempt_at?: string | null;
+};

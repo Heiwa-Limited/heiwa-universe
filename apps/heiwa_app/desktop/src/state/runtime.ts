@@ -16,6 +16,7 @@ import type {
   CalendarSyncStatus,
   InboxItem,
   MailMessage,
+  MailSyncStatus,
 } from "./types";
 
 /** Runtime-derived state consumed by more than one surface. */
@@ -38,6 +39,8 @@ export type RuntimeState = {
   /** Whether the mail snapshot has been read at least once this session. */
   mailLoaded: Accessor<boolean>;
   mailError: Accessor<string | undefined>;
+  mailSync: Accessor<MailSyncStatus | null>;
+  mailSyncing: Accessor<boolean>;
   loadHealth: () => Promise<void>;
   /** Load a local-day range, or reload the last one requested. */
   loadCalendar: (range?: CalendarRange) => Promise<void>;
@@ -58,6 +61,7 @@ export type RuntimeState = {
   loadInbox: () => Promise<void>;
   loadMail: () => Promise<void>;
   readAppleMail: () => Promise<AppleMailScanResult>;
+  syncMail: (options?: { background?: boolean; staleSeconds?: number }) => Promise<MailSyncStatus | null>;
 };
 
 export type CalendarHoldInput = {
@@ -116,6 +120,8 @@ export function createRuntimeState(options: RuntimeStateOptions = {}): RuntimeSt
   const [mail, setMail] = createSignal<MailMessage[]>([]);
   const [mailLoaded, setMailLoaded] = createSignal(false);
   const [mailError, setMailError] = createSignal<string>();
+  const [mailSync, setMailSync] = createSignal<MailSyncStatus | null>(null);
+  const [mailSyncing, setMailSyncing] = createSignal(false);
 
   async function loadHealth(): Promise<void> {
     const next = await health$().catch(
@@ -252,9 +258,45 @@ export function createRuntimeState(options: RuntimeStateOptions = {}): RuntimeSt
   }
 
   async function readAppleMailSnapshot(): Promise<AppleMailScanResult> {
-    const result = await scanAppleMail();
+    const result = await scanAppleMail({ background: false });
     await loadMailSnapshot(true);
     return result;
+  }
+
+  let mailSyncInFlight: Promise<MailSyncStatus | null> | undefined;
+  function syncMail(
+    options: { background?: boolean; staleSeconds?: number } = {},
+  ): Promise<MailSyncStatus | null> {
+    if (mailSyncInFlight) return mailSyncInFlight;
+    setMailSyncing(true);
+    mailSyncInFlight = (async () => {
+      try {
+        const result = await scanAppleMail({
+          background: options.background ?? true,
+          staleSeconds: options.staleSeconds,
+        });
+        const status: MailSyncStatus = {
+          ...result,
+          status: result.status ?? "scanned",
+        };
+        setMailSync(status);
+        const changed = (result.appended ?? 0) + (result.updated ?? 0) + (result.removed ?? 0);
+        if (status.status === "scanned" && changed > 0) await loadMailSnapshot(false);
+        return status;
+      } catch {
+        const status: MailSyncStatus = {
+          ...(mailSync() ?? {}),
+          status: "error",
+          error: "Mail sync could not reach the Heiwa runtime.",
+        };
+        setMailSync(status);
+        return status;
+      } finally {
+        mailSyncInFlight = undefined;
+        setMailSyncing(false);
+      }
+    })();
+    return mailSyncInFlight;
   }
 
   async function loadInbox(): Promise<void> {
@@ -282,6 +324,8 @@ export function createRuntimeState(options: RuntimeStateOptions = {}): RuntimeSt
     mail,
     mailLoaded,
     mailError,
+    mailSync,
+    mailSyncing,
     loadHealth,
     loadCalendar,
     loadCalendarResources,
@@ -294,5 +338,6 @@ export function createRuntimeState(options: RuntimeStateOptions = {}): RuntimeSt
     loadInbox,
     loadMail,
     readAppleMail: readAppleMailSnapshot,
+    syncMail,
   };
 }
