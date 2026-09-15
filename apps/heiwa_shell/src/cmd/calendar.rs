@@ -646,33 +646,62 @@ fn google_calendar_api_base() -> String {
 }
 
 async fn google_calendar_get_retry(url: &str, access_token: &mut String) -> Result<Value> {
-    let first = google_calendar_get(url, access_token)?;
+    let first = google_calendar_get(url, access_token).await?;
     if google_error_code(&first) == Some(401) {
         *access_token =
             crate::cmd::connectors::force_refresh_connector_access_token("google_calendar").await?;
-        return google_calendar_get(url, access_token);
+        return google_calendar_get(url, access_token).await;
     }
     Ok(first)
 }
 
-fn google_calendar_get(url: &str, access_token: &str) -> Result<Value> {
-    use anyhow::Context;
-    let auth_header = ["Authorization: Bearer ", access_token].concat();
-    let output = std::process::Command::new("curl")
-        .arg("-s")
-        .arg("-H")
-        .arg(auth_header)
-        .arg(url)
-        .output()
-        .context("failed to run curl for Google Calendar request")?;
-    if !output.status.success() {
-        return Err(anyhow!(
-            "Google Calendar request failed: {}",
-            String::from_utf8_lossy(&output.stderr).trim()
-        ));
-    }
-    serde_json::from_slice(&output.stdout)
-        .map_err(|e| anyhow!("Google Calendar returned non-JSON: {e}"))
+/// A fresh client per call rather than a shared static: call volume here is
+/// bounded (one list plus one events call per synced calendar per sync), and
+/// a fresh client keeps this trivially testable against a local fake server
+/// with no process-wide client state to reset between tests.
+///
+/// `redirect::Policy::none()` matches curl's own default (no `-L` was ever
+/// passed) — reqwest follows redirects by default, curl does not, and
+/// preserving "does not follow" is part of keeping the request shape.
+/// Neither connect nor overall timeout was set for curl before, so any
+/// finite bound here is strictly tighter, never looser, than "today's".
+fn google_calendar_http_client() -> Result<reqwest::Client> {
+    reqwest::Client::builder()
+        .connect_timeout(std::time::Duration::from_secs(10))
+        .timeout(std::time::Duration::from_secs(30))
+        .redirect(reqwest::redirect::Policy::none())
+        .build()
+        .context("failed to build Google Calendar HTTP client")
+}
+
+/// Async `reqwest`, not `reqwest::blocking`: this runs inside async callers
+/// (`sync_google_calendar`, `google_events_for_calendar`), and a blocking
+/// subprocess or client there would block the executor thread. The prior
+/// `curl -H "Authorization: Bearer <token>"` put the live OAuth token in the
+/// process argument vector, readable from `ps`, `/proc/<pid>/cmdline`, and
+/// crash/accounting logs; a request header is not process-visible the same
+/// way. Status handling is unchanged from before: neither curl's exit code
+/// nor the HTTP status line was ever inspected — a successful round trip
+/// (transport-level) is parsed as JSON and the caller reads Google's own
+/// `error.code` field from the body, so 401/403/429/500 all still flow
+/// through as `Ok(json)` here exactly as they did before, and only a
+/// transport failure or a non-JSON body becomes `Err` here.
+async fn google_calendar_get(url: &str, access_token: &str) -> Result<Value> {
+    let client = google_calendar_http_client()?;
+    let response = client
+        .get(url)
+        .header(
+            reqwest::header::AUTHORIZATION,
+            format!("Bearer {access_token}"),
+        )
+        .send()
+        .await
+        .map_err(|error| anyhow!("Google Calendar request failed: {error}"))?;
+    let body = response
+        .bytes()
+        .await
+        .map_err(|error| anyhow!("Google Calendar request failed: {error}"))?;
+    serde_json::from_slice(&body).map_err(|e| anyhow!("Google Calendar returned non-JSON: {e}"))
 }
 
 fn google_error_code(payload: &Value) -> Option<i64> {
