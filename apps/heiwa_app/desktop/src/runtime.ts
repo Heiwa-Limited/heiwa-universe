@@ -218,9 +218,15 @@ export type UpdateOffer = {
 };
 
 export type AppleMailScanResult = {
+  status?: "scanned" | "fresh" | "no_consent" | "mail_not_running" | "backoff" | "error" | "skipped";
+  freshness?: "scanned" | "fresh" | "backoff" | "closed";
   fetched: number;
   appended: number;
   deduplicated: number;
+  updated?: number;
+  removed?: number;
+  error?: string | null;
+  error_class?: string | null;
 };
 
 export async function runtimeHealth(): Promise<RuntimeHealth> {
@@ -250,9 +256,11 @@ export async function installUpdate(): Promise<void> {
   return invoke<void>("update_install");
 }
 
-export async function readAppleMail(): Promise<AppleMailScanResult> {
+export async function readAppleMail(options: { background?: boolean; staleSeconds?: number } = {}): Promise<AppleMailScanResult> {
   try {
-    return await invoke<AppleMailScanResult>("apple_mail_scan");
+    return await invoke<AppleMailScanResult>("apple_mail_scan", {
+      options: { background: options.background ?? false, stale_seconds: options.staleSeconds },
+    });
   } catch (cause) {
     if (cause instanceof Error) throw cause;
     if (typeof cause === "string") throw new Error(cause);

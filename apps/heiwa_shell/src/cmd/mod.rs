@@ -13,6 +13,7 @@ pub mod goal;
 pub mod life;
 pub mod mail;
 pub mod mesh;
+pub(crate) mod osascript;
 pub(crate) mod recover;
 pub mod release_update;
 pub mod schedule;

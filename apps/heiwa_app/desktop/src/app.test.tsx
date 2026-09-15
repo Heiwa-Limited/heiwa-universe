@@ -737,13 +737,15 @@ describe("operator seam", () => {
     });
     state.navigate("mail");
     render(() => <App state={state} />);
-    expect(readAppleMail).not.toHaveBeenCalled();
+    await Promise.resolve();
+    expect(readAppleMail).toHaveBeenCalledWith({ background: true, staleSeconds: 180 });
 
     fireEvent.click(screen.getByRole("button", { name: "Read Apple Mail" }));
     const pending = screen.getByRole("button", { name: "Reading…" }) as HTMLButtonElement;
     expect(pending.disabled).toBe(true);
     fireEvent.click(pending);
-    expect(readAppleMail).toHaveBeenCalledOnce();
+    expect(readAppleMail).toHaveBeenCalledTimes(2);
+    expect(readAppleMail).toHaveBeenLastCalledWith({ background: false });
     finishRead({ fetched: 2, appended: 1, deduplicated: 1 });
     expect(await screen.findByText("Fresh mail")).toBeTruthy();
     expect((await screen.findByRole("status")).textContent).toContain("Read 2 headers; 1 added");
