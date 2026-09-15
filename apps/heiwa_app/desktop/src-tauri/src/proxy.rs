@@ -131,8 +131,23 @@ pub(crate) fn validate_loopback_url(
     Ok(url)
 }
 
+/// A `.`/`..` path segment would be resolved away by [`reqwest::Url::join`]
+/// before the request is ever sent (RFC 3986 dot-segment removal), which
+/// could let a path like `/api/v1/../../admin` slip past the `/api/v1/`
+/// prefix check below (and past [`post_path_allowed`]'s allowlist) even
+/// though neither check ever looks unsafe on its own — both check the raw
+/// string, not the string `Url::join` actually resolves to. Rejecting any
+/// dot segment up front keeps the raw string and the resolved request path
+/// identical, so checking one is checking both.
+fn has_dot_segment(path: &str) -> bool {
+    path.split('/').any(|segment| segment == "." || segment == "..")
+}
+
 fn endpoint_url(base_url: &str, path: &str) -> Result<reqwest::Url, ProxyError> {
     if !path.starts_with("/api/v1/") && path != "/status/health" {
+        return Err(ProxyError::InvalidPath(path.to_string()));
+    }
+    if has_dot_segment(path) {
         return Err(ProxyError::InvalidPath(path.to_string()));
     }
     let base = validate_loopback_url(base_url, "http")?;
@@ -142,6 +157,69 @@ fn endpoint_url(base_url: &str, path: &str) -> Result<reqwest::Url, ProxyError> 
     let final_url = base.join(path).map_err(|_| ProxyError::InvalidEndpoint)?;
     validate_loopback_url(final_url.as_str(), "http")?;
     Ok(final_url)
+}
+
+/// Endpoints the desktop UI is allowed to reach through the write proxy.
+/// `api_get` stays passthrough-by-prefix (read-only; the same rigor for GET
+/// is called out as an open question in `reports/L-009-desktop-ipc-least-privilege.md`
+/// rather than silently folded into this task). Keep this list in sync with
+/// the mirrored allowlist in `src/state/api-post-allowlist.test.ts`, which
+/// scans the frontend for every literal POST path it actually calls and
+/// fails if either side has an entry the other does not.
+const ALLOWED_POST_EXACT: &[&str] = &[
+    "/api/v1/agents/dispatch",
+    "/api/v1/calendar/sync",
+    "/api/v1/calendar/read",
+    "/api/v1/calendar/holds",
+    "/api/v1/connectors/apple_calendar/connect",
+    "/api/v1/connectors/apple_calendar/disconnect",
+    "/api/v1/operator/threads",
+    "/api/v1/operator/projects",
+];
+
+/// A POST path shaped `prefix + "<one id segment, no '/'>" + suffix`. The id
+/// segment only has to be non-empty and slash-free: the frontend already
+/// percent-encodes whatever it substitutes in (`encodeURIComponent`), and
+/// the runtime behind this proxy is responsible for validating the id
+/// itself. This layer's job is narrower — stop the *path shape* from
+/// reaching an endpoint the UI never asked for, not revalidate the id.
+struct AllowedPostIdRoute {
+    prefix: &'static str,
+    suffix: &'static str,
+}
+
+const ALLOWED_POST_ID_PATTERNS: &[AllowedPostIdRoute] = &[
+    AllowedPostIdRoute {
+        prefix: "/api/v1/approvals/",
+        suffix: "/approve",
+    },
+    AllowedPostIdRoute {
+        prefix: "/api/v1/approvals/",
+        suffix: "/deny",
+    },
+    AllowedPostIdRoute {
+        prefix: "/api/v1/operator/threads/",
+        suffix: "/metadata",
+    },
+    AllowedPostIdRoute {
+        prefix: "/api/v1/operator/threads/",
+        suffix: "/turns",
+    },
+    AllowedPostIdRoute {
+        prefix: "/api/v1/operator/projects/",
+        suffix: "/metadata",
+    },
+];
+
+fn post_path_allowed(path: &str) -> bool {
+    if ALLOWED_POST_EXACT.contains(&path) {
+        return true;
+    }
+    ALLOWED_POST_ID_PATTERNS.iter().any(|route| {
+        path.strip_prefix(route.prefix)
+            .and_then(|rest| rest.strip_suffix(route.suffix))
+            .is_some_and(|id| !id.is_empty() && !id.contains('/'))
+    })
 }
 
 pub(crate) fn value_contains_secret(value: &Value, secret: &str) -> bool {
@@ -294,6 +372,9 @@ pub(crate) async fn api_post_with_auth(
     token: &str,
 ) -> Result<Value, ProxyError> {
     validate_auth_token(token)?;
+    if !post_path_allowed(path) {
+        return Err(ProxyError::InvalidPath(path.to_string()));
+    }
     let url = endpoint_url(base_url, path)?;
     let body = serde_json::to_vec(&body).map_err(|error| ProxyError::Decode(error.to_string()))?;
     let signed = signed_local_request("POST", &url, &body, token)?;
@@ -793,5 +874,87 @@ mod tests {
             !decoy_rx.recv().unwrap(),
             "system proxy received a connection"
         );
+    }
+
+    #[test]
+    fn post_path_allowed_accepts_every_exact_route_the_ui_calls() {
+        for path in ALLOWED_POST_EXACT {
+            assert!(post_path_allowed(path), "{path} should be allowed");
+        }
+    }
+
+    #[test]
+    fn post_path_allowed_accepts_id_patterns_with_a_single_clean_segment() {
+        assert!(post_path_allowed("/api/v1/approvals/abc123/approve"));
+        assert!(post_path_allowed("/api/v1/approvals/abc123/deny"));
+        assert!(post_path_allowed(
+            "/api/v1/operator/threads/thread-1/metadata"
+        ));
+        assert!(post_path_allowed("/api/v1/operator/threads/thread-1/turns"));
+        assert!(post_path_allowed(
+            "/api/v1/operator/projects/proj-1/metadata"
+        ));
+    }
+
+    #[test]
+    fn post_path_allowed_rejects_unknown_and_malformed_paths() {
+        assert!(!post_path_allowed("/api/v1/agents/dispatch/extra"));
+        assert!(!post_path_allowed("/api/v1/unknown/route"));
+        assert!(
+            !post_path_allowed("/api/v1/approvals//approve"),
+            "empty id segment"
+        );
+        assert!(
+            !post_path_allowed("/api/v1/approvals/a/b/approve"),
+            "id segment must not smuggle an extra path component"
+        );
+        assert!(
+            !post_path_allowed("/api/v1/approvals/abc123/revoke"),
+            "suffix not allowlisted"
+        );
+        assert!(
+            !post_path_allowed("/status/health"),
+            "GET-only path, never a POST target"
+        );
+    }
+
+    #[tokio::test]
+    async fn api_post_rejects_a_disallowed_path_before_any_network_request() {
+        let (base, request_rx) = inspecting_stub_server("200 OK", r#"{"ok":true}"#);
+        let error = api_post_with_auth(
+            &base,
+            "/api/v1/not/allowlisted",
+            json!({}),
+            "post-allowlist-token",
+        )
+        .await
+        .expect_err("disallowed path must be rejected");
+        assert!(matches!(error, ProxyError::InvalidPath(_)));
+        assert!(
+            request_rx
+                .recv_timeout(std::time::Duration::from_millis(100))
+                .is_err(),
+            "the stub server must never see a request for a disallowed path"
+        );
+    }
+
+    #[test]
+    fn endpoint_url_rejects_dot_segments_that_url_join_would_normalize_away() {
+        // Without the dot-segment guard, `Url::join` would resolve this down
+        // to `/admin`, escaping both the `/api/v1/` prefix check and the
+        // POST allowlist, which only ever inspect the raw string.
+        let error = endpoint_url("http://127.0.0.1:9", "/api/v1/../../admin")
+            .expect_err("a dot segment must be rejected before it can be normalized away");
+        assert!(matches!(error, ProxyError::InvalidPath(_)));
+    }
+
+    #[test]
+    fn has_dot_segment_flags_single_and_double_dot_segments_only() {
+        assert!(has_dot_segment("/api/v1/../evil"));
+        assert!(has_dot_segment("/api/v1/./evil"));
+        assert!(!has_dot_segment("/api/v1/operator/threads"));
+        // A segment that merely contains dots (not equal to "." or "..") is
+        // a legitimate id shape (e.g. a version string) and must pass.
+        assert!(!has_dot_segment("/api/v1/operator/threads/v1.2.3/metadata"));
     }
 }

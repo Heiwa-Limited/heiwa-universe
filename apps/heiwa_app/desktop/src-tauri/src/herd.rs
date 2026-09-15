@@ -310,6 +310,102 @@ fn panes_from_herdr_cli() -> Result<Vec<HerdPane>, String> {
     Ok(panes_from_herdr_values(workspaces, panes, agents))
 }
 
+/// The live pane ids `herd_pane_send` checks a target against, or `None`
+/// when neither listing source could be reached. `None` deliberately does
+/// not block a send: with the bridge and the CLI both down, the
+/// `run_herdr_text` call downstream fails on its own, so refusing here would
+/// only add a second, redundant "herdr unavailable" error rather than a
+/// second layer of safety.
+async fn known_pane_ids() -> Option<Vec<String>> {
+    if let Ok(panes) = panes_from_deno_bridge().await {
+        return Some(panes.into_iter().map(|pane| pane.pane).collect());
+    }
+    panes_from_herdr_cli()
+        .ok()
+        .map(|panes| panes.into_iter().map(|pane| pane.pane).collect())
+}
+
+/// Longest text a single `herd_pane_send` call may type into a pane at once.
+/// Generous for a shell command or a short prompt line; pasting a whole file
+/// this way was never the intended use.
+const MAX_PANE_TEXT_LEN: usize = 4096;
+
+/// Longest a pane id may be. Real herdr ids (`workspace:pane`-shaped, see
+/// this module's tests) are short; this only exists to cap the work the
+/// charset check below does on hostile input.
+const MAX_PANE_ID_LEN: usize = 256;
+
+/// ASCII control bytes `herd_pane_send` rejects outright: everything in
+/// 0x00-0x08, 0x0A-0x1F, and 0x7F. Tab (0x09) is the only control byte let
+/// through. This range specifically includes newline (0x0A) and carriage
+/// return (0x0D) — raw text with an embedded newline would let a caller
+/// inject a second `send-keys ... enter`-worth of terminal input inside what
+/// is supposed to be one line, and ESC (0x1B) starts ANSI/VT escape
+/// sequences, which is exactly the class of "control the pane, not just
+/// fill it with text" input this validation exists to stop.
+fn contains_disallowed_control_byte(text: &str) -> bool {
+    text.bytes()
+        .any(|byte| matches!(byte, 0x00..=0x08 | 0x0A..=0x1F | 0x7F))
+}
+
+fn validate_pane_text(text: &str) -> Result<(), String> {
+    if text.trim().is_empty() {
+        return Err("text is required".to_string());
+    }
+    if text.chars().count() > MAX_PANE_TEXT_LEN {
+        return Err(format!(
+            "text exceeds the {MAX_PANE_TEXT_LEN}-character limit for a single send"
+        ));
+    }
+    if contains_disallowed_control_byte(text) {
+        return Err(
+            "text contains a control character (including newline, carriage return, or an \
+             escape sequence) that herd_pane_send does not allow"
+                .to_string(),
+        );
+    }
+    Ok(())
+}
+
+/// The same charset real herdr pane/workspace ids use today (the
+/// `w1:p1`-shaped ids in this module's tests): ASCII letters, digits, and
+/// `:_-.`. Nothing else can be a real herdr pane id, so nothing else needs
+/// to reach the `herdr` subprocess call below.
+fn validate_pane_id_format(pane: &str) -> Result<(), String> {
+    let trimmed = pane.trim();
+    if trimmed.is_empty() {
+        return Err("pane is required".to_string());
+    }
+    if trimmed.len() > MAX_PANE_ID_LEN {
+        return Err("pane id is too long".to_string());
+    }
+    if !trimmed
+        .chars()
+        .all(|c| c.is_ascii_alphanumeric() || matches!(c, ':' | '-' | '_' | '.'))
+    {
+        return Err("pane id contains unexpected characters".to_string());
+    }
+    Ok(())
+}
+
+/// Pure validation core for `herd_pane_send`, factored out so unit tests can
+/// cover every rejection and the happy path without shelling out to a real
+/// `herdr`. See [`known_pane_ids`] for what `known_panes: None` means.
+fn validate_pane_send(
+    pane: &str,
+    text: &str,
+    known_panes: Option<&[String]>,
+) -> Result<(), String> {
+    validate_pane_id_format(pane)?;
+    validate_pane_text(text)?;
+    if let Some(known) = known_panes {
+        if !known.iter().any(|id| id == pane.trim()) {
+            return Err(format!("{} is not a live herdr pane", pane.trim()));
+        }
+    }
+    Ok(())
+}
+
 #[tauri::command]
 pub fn herd_command_catalog() -> Vec<HerdCommandSpec> {
     command_catalog()
@@ -383,10 +479,25 @@ pub async fn herd_pane_read(pane: String) -> HerdPaneRead {
     }
 }
 
+/// Types `text` into a live terminal pane followed by Enter.
+///
+/// `text` is rejected outright if it contains a newline (see
+/// [`contains_disallowed_control_byte`]): today's one caller,
+/// `WindowsSurface`'s pane control in `src/surfaces/windows/index.tsx`, binds
+/// this to a plain `<input type="text">` — HTML text inputs cannot contain a
+/// newline character at all, so nothing in the current UI can legitimately
+/// send multi-line text this way. (The desktop's other multi-line input, the
+/// `Composer` textarea, submits through `app.operator.submit` to the
+/// authenticated `/api/v1/operator/threads/{id}/turns` endpoint, an entirely
+/// separate path that never touches `herd_pane_send`.) If a future UI needs
+/// to paste multiple lines into a pane, that needs its own opt-in path
+/// (e.g. an herdr paste mode with no `Enter` sent per line) rather than
+/// relaxing this check.
 #[tauri::command]
 pub async fn herd_pane_send(pane: String, text: String) -> HerdActionResult {
-    if pane.trim().is_empty() || text.trim().is_empty() {
-        return err("pane and text are required");
+    let known_panes = known_pane_ids().await;
+    if let Err(error) = validate_pane_send(&pane, &text, known_panes.as_deref()) {
+        return err(error);
     }
     let send_text = vec![
         "pane".to_string(),
@@ -536,5 +647,76 @@ mod tests {
         assert_eq!(spec.id, "raw.operator");
         assert_eq!(spec.command, "echo ok");
         assert_eq!(spec.approval, "operator_env_opt_in");
+    }
+
+    #[test]
+    fn validate_pane_send_happy_path_with_known_pane() {
+        let known = vec!["w1:p1".to_string()];
+        assert!(validate_pane_send("w1:p1", "git status", Some(&known)).is_ok());
+    }
+
+    #[test]
+    fn validate_pane_send_happy_path_when_listing_is_unavailable() {
+        // herdr and the bridge are both unreachable: format/content checks
+        // still run, but existence cannot be enforced (see `known_pane_ids`).
+        assert!(validate_pane_send("w1:p1", "git status", None).is_ok());
+    }
+
+    #[test]
+    fn validate_pane_send_rejects_empty_pane_or_text() {
+        assert!(validate_pane_send("", "text", None).is_err());
+        assert!(validate_pane_send("   ", "text", None).is_err());
+        assert!(validate_pane_send("w1:p1", "", None).is_err());
+        assert!(validate_pane_send("w1:p1", "   ", None).is_err());
+    }
+
+    #[test]
+    fn validate_pane_send_rejects_an_unknown_pane_when_the_listing_is_available() {
+        let known = vec!["w1:p1".to_string()];
+        let error = validate_pane_send("w9:p9", "git status", Some(&known)).unwrap_err();
+        assert!(error.contains("not a live herdr pane"));
+    }
+
+    #[test]
+    fn validate_pane_send_rejects_pane_ids_outside_the_herdr_charset() {
+        assert!(validate_pane_send("w1;rm -rf /", "text", None).is_err());
+        assert!(validate_pane_send("../etc/passwd", "text", None).is_err());
+        assert!(validate_pane_send("w1 p1", "text", None).is_err());
+    }
+
+    #[test]
+    fn validate_pane_send_rejects_an_oversized_pane_id() {
+        let huge_pane = "a".repeat(MAX_PANE_ID_LEN + 1);
+        assert!(validate_pane_send(&huge_pane, "text", None).is_err());
+    }
+
+    #[test]
+    fn validate_pane_send_rejects_newline_and_carriage_return() {
+        assert!(validate_pane_send("w1:p1", "line one\nline two", None).is_err());
+        assert!(validate_pane_send("w1:p1", "line one\r\nline two", None).is_err());
+    }
+
+    #[test]
+    fn validate_pane_send_rejects_escape_sequences_and_other_control_bytes() {
+        assert!(validate_pane_send("w1:p1", "\u{1b}[31mred\u{1b}[0m", None).is_err());
+        assert!(validate_pane_send("w1:p1", "bell\u{7}", None).is_err());
+        assert!(validate_pane_send("w1:p1", "del\u{7f}", None).is_err());
+    }
+
+    #[test]
+    fn validate_pane_send_allows_tab() {
+        assert!(validate_pane_send("w1:p1", "a\tb", None).is_ok());
+    }
+
+    #[test]
+    fn validate_pane_send_rejects_text_over_the_length_cap() {
+        let huge_text = "a".repeat(MAX_PANE_TEXT_LEN + 1);
+        assert!(validate_pane_send("w1:p1", &huge_text, None).is_err());
+    }
+
+    #[test]
+    fn validate_pane_send_accepts_text_at_exactly_the_length_cap() {
+        let text = "a".repeat(MAX_PANE_TEXT_LEN);
+        assert!(validate_pane_send("w1:p1", &text, None).is_ok());
     }
 }

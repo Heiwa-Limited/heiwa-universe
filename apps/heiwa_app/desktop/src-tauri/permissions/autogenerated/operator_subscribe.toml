@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-operator-subscribe"
+description = "Enables the operator_subscribe command without any pre-configured scope."
+commands.allow = ["operator_subscribe"]
+
+[[permission]]
+identifier = "deny-operator-subscribe"
+description = "Denies the operator_subscribe command without any pre-configured scope."
+commands.deny = ["operator_subscribe"]

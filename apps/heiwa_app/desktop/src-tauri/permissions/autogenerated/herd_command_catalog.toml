@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-herd-command-catalog"
+description = "Enables the herd_command_catalog command without any pre-configured scope."
+commands.allow = ["herd_command_catalog"]
+
+[[permission]]
+identifier = "deny-herd-command-catalog"
+description = "Denies the herd_command_catalog command without any pre-configured scope."
+commands.deny = ["herd_command_catalog"]

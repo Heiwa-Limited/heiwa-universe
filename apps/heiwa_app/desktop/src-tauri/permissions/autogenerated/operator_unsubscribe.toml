@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-operator-unsubscribe"
+description = "Enables the operator_unsubscribe command without any pre-configured scope."
+commands.allow = ["operator_unsubscribe"]
+
+[[permission]]
+identifier = "deny-operator-unsubscribe"
+description = "Denies the operator_unsubscribe command without any pre-configured scope."
+commands.deny = ["operator_unsubscribe"]

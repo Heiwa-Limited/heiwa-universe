@@ -44,6 +44,13 @@ function BrowserSurface() {
           own origin would share that origin with the shell, and the shell's
           CSP already permits `ipc:`. The frame is display-only until L4
           replaces it with the runtime-owned browser.
+
+          tauri.conf.json's CSP keeps `frame-src http: https:` this broad on
+          purpose: this surface's whole job is framing whatever URL the user
+          types into the address bar above, so narrowing frame-src to a host
+          allowlist would break normal browsing, not attackers. The safety
+          net is this sandbox attribute (no allow-same-origin, no top
+          navigation, no allow-modals) rather than the CSP frame source list.
         */}
         <iframe
           title="Heiwa browser"
