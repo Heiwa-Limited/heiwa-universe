@@ -6680,7 +6680,9 @@ mod app_readmodel_tests {
             "/api/v1/zz-future",
         ] {
             let response = response_for_request(move |port| {
-                format!("GET {path} HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\nConnection: close\r\n\r\n")
+                format!(
+                    "GET {path} HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\nConnection: close\r\n\r\n"
+                )
             })
             .await;
             assert!(
