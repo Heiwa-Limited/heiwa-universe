@@ -1506,6 +1506,66 @@ async fn handle_connection(
         return serve_repl_stream(stream, prompt).await;
     }
 
+    if matches!(method, "GET" | "HEAD") && path == "/api/v1/calendar/events" {
+        let from = query_param(target, "from");
+        let to = query_param(target, "to");
+        let result = tokio::task::spawn_blocking(move || {
+            crate::cmd::calendar::events_range_payload(from.as_deref(), to.as_deref())
+        })
+        .await
+        .map_err(|_| anyhow!("Calendar loading stopped unexpectedly"))
+        .and_then(|result| result);
+        let (status, payload) = match result {
+            Ok(data) => (200, json!({"ok": true, "data": data})),
+            Err(error) => (
+                400,
+                json!({"ok": false, "error": {"code": "invalid_calendar_range", "message": error.to_string()}}),
+            ),
+        };
+        return write_response(
+            &mut stream,
+            status,
+            "application/json",
+            payload.to_string().into_bytes(),
+            head_only,
+        )
+        .await;
+    }
+
+    if method == "POST" && path == "/api/v1/calendar/sync" {
+        let request = if body.trim().is_empty() {
+            Ok(super::calendar_read::SyncRequest::default())
+        } else {
+            serde_json::from_str::<super::calendar_read::SyncRequest>(&body)
+        };
+        let result = match request {
+            Ok(request) => {
+                tokio::task::spawn_blocking(move || super::calendar_read::sync_selected(request))
+                    .await
+                    .map_err(|_| anyhow!("Calendar sync stopped unexpectedly"))
+                    .and_then(|result| result)
+            }
+            Err(_) => Err(anyhow!("Send max_age_seconds and force, or an empty body")),
+        };
+        // A read that ran and failed is a sync outcome (status "error"), not a
+        // bad request; only malformed input and local state failures are 400.
+        let (status, payload) = match result {
+            Ok(data) => (200, json!({"ok": true, "data": data})),
+            Err(error) => (
+                400,
+                json!({"ok": false, "error": {"code": "calendar_sync_failed", "message": error.to_string()}}),
+            ),
+        };
+        return write_response(
+            &mut stream,
+            status,
+            "application/json",
+            payload.to_string().into_bytes(),
+            false,
+        )
+        .await;
+    }
+
     if method == "POST" && path == "/api/v1/calendar/read" {
         let request = serde_json::from_str::<super::calendar_read::ReadRequest>(&body);
         let result = match request {

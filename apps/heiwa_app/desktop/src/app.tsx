@@ -1,4 +1,4 @@
-import { createEffect, createSignal, on, Show } from "solid-js";
+import { createEffect, createSignal, on, onCleanup, Show } from "solid-js";
 import { Dynamic } from "solid-js/web";
 import { AppProvider, useApp, type AppState } from "./state/app";
 import { Composer } from "./shell/Composer";
@@ -16,6 +16,9 @@ import "./theme/base.css";
 import "./shell/shell.css";
 
 assertRegistryComplete();
+
+/** Least time between refreshes the window's own focus changes may trigger. */
+const RETURN_REFRESH_MIN_MS = 10_000;
 
 function Shell(props: { onResources?: () => void; blocked?: boolean }) {
   const app = useApp();
@@ -50,9 +53,43 @@ function Shell(props: { onResources?: () => void; blocked?: boolean }) {
   // `on` pins the dependency to the view id: refresh reads runtime signals,
   // and a tracked read of those inside the effect would re-run it on every
   // data change.
+  //
+  // Arrival alone left a surface frozen at the moment it was opened: an event
+  // added in Calendar.app appeared only after navigating away and back. So
+  // the visible surface also refreshes when the window returns to view, and
+  // on its own interval when it declares one. One refresh runs at a time.
   createEffect(
     on(app.view, (id) => {
-      void surfaceById(id).refresh?.(app);
+      const surface = surfaceById(id);
+      const refresh = surface.refresh;
+      if (!refresh) return;
+      let running = false;
+      let startedAt = 0;
+      const run = () => {
+        if (running) return;
+        running = true;
+        startedAt = Date.now();
+        void refresh(app)
+          .catch(() => undefined)
+          .finally(() => {
+            running = false;
+          });
+      };
+      const visible = () => document.visibilityState !== "hidden";
+      const onReturn = () => {
+        if (visible() && Date.now() - startedAt >= RETURN_REFRESH_MIN_MS) run();
+      };
+      run();
+      window.addEventListener("focus", onReturn);
+      document.addEventListener("visibilitychange", onReturn);
+      const timer = surface.liveIntervalMs
+        ? setInterval(() => visible() && run(), surface.liveIntervalMs)
+        : undefined;
+      onCleanup(() => {
+        window.removeEventListener("focus", onReturn);
+        document.removeEventListener("visibilitychange", onReturn);
+        if (timer !== undefined) clearInterval(timer);
+      });
     }),
   );
 
