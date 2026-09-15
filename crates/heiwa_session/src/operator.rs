@@ -175,10 +175,39 @@ impl OperatorActivityLease {
         Ok(())
     }
 
+    /// Runs `operation` while holding the exclusive lease, then always
+    /// leaves this lease holding the shared lock again — on success, on a
+    /// failure inside `operation`, and when the exclusive attempt itself is
+    /// denied.
+    ///
+    /// This upgrades and downgrades the lease on the *same* open file
+    /// description throughout, via repeated `flock`-equivalent calls on one
+    /// `File`, instead of dropping the shared handle and racing a brand new
+    /// one into an exclusive lock. The two are not equivalent: `flock`
+    /// treats descriptors as independent, so a lock held via one descriptor
+    /// blocks a different descriptor's request for the same file — even
+    /// within one process, even for descriptors that both belong to this
+    /// same lease — so any handoff through a second descriptor has a real
+    /// gap where neither descriptor holds the lease. This runtime spawns
+    /// worker processes with `Command::spawn`, which forks the whole
+    /// process, duplicating every open file descriptor into the child; if
+    /// that fork lands inside the gap, the child inherits a reference to the
+    /// shared lock's *old* open file description and keeps it alive
+    /// (`close-on-exec` does not run until the child actually execs) even
+    /// though the child has nothing to do with this evidence root. A fresh
+    /// exclusive descriptor opened in that window loses to the child's
+    /// borrowed lock and `recover_interrupted_with` fails closed with
+    /// `operator_activity_lease_held` despite no real writer being left.
+    /// Reusing one descriptor for the whole upgrade/downgrade cycle closes
+    /// that gap: converting a lock in place is atomic, and a fork on another
+    /// thread cannot affect a descriptor it never had a reference to.
     fn with_exclusive<T>(&mut self, operation: impl FnOnce() -> Result<T>) -> Result<T> {
-        let exclusive_file = open_ownership_file(&self.root, OPERATOR_ACTIVITY_LEASE_FILE)?;
-        drop(self.shared_file.take());
-        let acquired = exclusive_file.try_lock().map_err(|source| match source {
+        let file = match self.shared_file.take() {
+            Some(file) => file,
+            None => open_ownership_file(&self.root, OPERATOR_ACTIVITY_LEASE_FILE)?,
+        };
+
+        let acquired = file.try_lock().map_err(|source| match source {
             std::fs::TryLockError::WouldBlock => OperatorOwnershipError::ActivityAlreadyHeld {
                 root: self.root.clone(),
             },
@@ -188,19 +217,17 @@ impl OperatorActivityLease {
             },
         });
         if let Err(error) = acquired {
-            drop(exclusive_file);
-            self.restore_shared()?;
+            self.restore_shared(file)?;
             return Err(anyhow!(error));
         }
 
         let operation_result = operation();
-        drop(exclusive_file);
-        self.restore_shared()?;
+        self.restore_shared(file)?;
         operation_result
     }
 
-    fn restore_shared(&mut self) -> Result<()> {
-        let file = open_ownership_file(&self.root, OPERATOR_ACTIVITY_LEASE_FILE)?;
+    /// Converts `file`'s own lock back to shared in place and stores it.
+    fn restore_shared(&mut self, file: File) -> Result<()> {
         file.lock_shared().map_err(|source| {
             anyhow!(OperatorOwnershipError::Storage {
                 root: self.root.clone(),
