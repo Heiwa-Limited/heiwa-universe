@@ -119,6 +119,7 @@ export const homeSurface: SurfaceModule = {
     app.runtime.syncCalendar({ maxAgeSeconds: 300 }),
     app.runtime.loadCalendar(),
     app.runtime.loadMail(),
+    app.runtime.syncMail({ background: true, staleSeconds: 300 }),
     app.work.loadCatalog({ prefetch: HOME_WORK_ROWS }),
   ]).then(() => undefined),
 };

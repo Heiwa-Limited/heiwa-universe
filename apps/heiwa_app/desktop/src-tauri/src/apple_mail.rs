@@ -13,17 +13,39 @@ static SCAN_LOCK: Mutex<()> = Mutex::new(());
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct AppleMailScanResult {
+    status: String,
+    freshness: Option<String>,
     fetched: usize,
     appended: usize,
     deduplicated: usize,
+    updated: usize,
+    removed: usize,
+}
+
+#[derive(Debug, Default, Deserialize)]
+pub struct AppleMailScanOptions {
+    #[serde(default)]
+    background: bool,
+    #[serde(default)]
+    stale_seconds: Option<u64>,
 }
 
 #[derive(Debug, Deserialize)]
 struct ScanPayload {
+    #[serde(default)]
+    status: Option<String>,
+    #[serde(default)]
+    freshness: Option<String>,
     sources: Vec<SourceReport>,
     fetched: usize,
+    #[serde(default)]
     appended: usize,
+    #[serde(default)]
     deduplicated: usize,
+    #[serde(default)]
+    updated: usize,
+    #[serde(default)]
+    removed: usize,
 }
 
 #[derive(Debug, Deserialize)]
@@ -35,7 +57,10 @@ struct SourceReport {
 }
 
 #[tauri::command]
-pub async fn apple_mail_scan(app: tauri::AppHandle) -> Result<AppleMailScanResult, String> {
+pub async fn apple_mail_scan(
+    app: tauri::AppHandle,
+    options: Option<AppleMailScanOptions>,
+) -> Result<AppleMailScanResult, String> {
     if !cfg!(target_os = "macos") {
         return Err("Apple Mail reading is available only on macOS.".to_string());
     }
@@ -53,7 +78,13 @@ pub async fn apple_mail_scan(app: tauri::AppHandle) -> Result<AppleMailScanResul
         )
         .ok_or_else(|| "The bundled Heiwa runtime could not be found.".to_string())?;
 
-        run_scan_process(&binary, SCAN_TIMEOUT)
+        let options = options.unwrap_or_default();
+        run_scan_process(
+            &binary,
+            SCAN_TIMEOUT,
+            options.background,
+            options.stale_seconds,
+        )
     })
     .await
     .map_err(|_| "Apple Mail reading stopped unexpectedly.".to_string())?
@@ -71,12 +102,20 @@ fn acquire_scan_lock() -> Result<std::sync::MutexGuard<'static, ()>, String> {
     }
 }
 
-fn run_scan_process(binary: &Path, timeout: Duration) -> Result<AppleMailScanResult, String> {
+fn run_scan_process(
+    binary: &Path,
+    timeout: Duration,
+    background: bool,
+    stale_seconds: Option<u64>,
+) -> Result<AppleMailScanResult, String> {
     let mut command = Command::new(binary);
+    command.args(["mail", "scan", "--source", "apple"]);
+    if background {
+        command.args(["--if-running", "--if-stale"]);
+        command.arg(stale_seconds.unwrap_or(180).min(86_400).to_string());
+    }
     command
-        .args([
-            "mail", "scan", "--source", "apple", "--limit", "50", "--json",
-        ])
+        .arg("--json")
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::null());
@@ -93,7 +132,11 @@ fn parse_scan_output(output: &[u8]) -> Result<AppleMailScanResult, String> {
         .iter()
         .find(|report| report.source == "apple")
         .ok_or_else(|| "The Heiwa runtime did not report an Apple Mail result.".to_string())?;
-    if source.status != "scanned" {
+    let status = payload
+        .status
+        .clone()
+        .unwrap_or_else(|| source.status.clone());
+    if matches!(status.as_str(), "error" | "skipped") {
         let detail = source
             .error
             .as_deref()
@@ -113,9 +156,13 @@ fn parse_scan_output(output: &[u8]) -> Result<AppleMailScanResult, String> {
         return Err(format!("Apple Mail could not be read: {detail}"));
     }
     Ok(AppleMailScanResult {
+        status,
+        freshness: payload.freshness,
         fetched: payload.fetched,
         appended: payload.appended,
         deduplicated: payload.deduplicated,
+        updated: payload.updated,
+        removed: payload.removed,
     })
 }
 
@@ -135,9 +182,13 @@ mod tests {
         assert_eq!(
             result,
             AppleMailScanResult {
+                status: "scanned".into(),
+                freshness: None,
                 fetched: 3,
                 appended: 2,
-                deduplicated: 1
+                deduplicated: 1,
+                updated: 0,
+                removed: 0,
             }
         );
     }
@@ -188,7 +239,7 @@ mod tests {
     fn run_fresh_script(path: &Path, timeout: Duration) -> Result<AppleMailScanResult, String> {
         let deadline = Instant::now() + Duration::from_secs(1);
         loop {
-            let result = run_scan_process(path, timeout);
+            let result = run_scan_process(path, timeout, false, None);
             let could_not_start =
                 matches!(&result, Err(error) if error.contains("could not start"));
             if !could_not_start || Instant::now() >= deadline {

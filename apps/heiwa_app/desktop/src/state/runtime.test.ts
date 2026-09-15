@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
+import type { AppleMailScanResult } from "../runtime";
 import { createRuntimeState } from "./runtime";
 
 describe("RuntimeState calendar", () => {
@@ -164,5 +165,33 @@ describe("RuntimeState Apple Mail", () => {
     expect(state.mail()).toEqual([]);
     expect(state.mailLoaded()).toBe(true);
     expect(state.mailError()).toBe("The local Mail snapshot could not be loaded.");
+  });
+
+  it("shares one background sync and never throws on a runtime failure", async () => {
+    let finish!: (result: AppleMailScanResult) => void;
+    const readAppleMail = vi.fn(() => new Promise<AppleMailScanResult>((resolve) => { finish = resolve; }));
+    const get = vi.fn().mockResolvedValue({ data: { priority: [] } });
+    const state = createRuntimeState({ get, readAppleMail });
+
+    const first = state.syncMail({ background: true, staleSeconds: 300 });
+    const second = state.syncMail({ background: true, staleSeconds: 300 });
+    expect(state.mailSyncing()).toBe(true);
+    expect(readAppleMail).toHaveBeenCalledOnce();
+    finish({ status: "scanned", fetched: 1, appended: 1, deduplicated: 0, updated: 0, removed: 0 });
+    await Promise.all([first, second]);
+
+    expect(state.mailSync()?.status).toBe("scanned");
+    expect(get).toHaveBeenCalledWith("/api/v1/mail/summary");
+    expect(state.mailSyncing()).toBe(false);
+  });
+
+  it("turns a background native error into a status without rejecting", async () => {
+    const state = createRuntimeState({
+      get: vi.fn(),
+      readAppleMail: vi.fn().mockRejectedValue(new Error("private runtime detail")),
+    });
+
+    await expect(state.syncMail({ background: true })).resolves.toMatchObject({ status: "error" });
+    expect(state.mailSync()?.error).toBe("Mail sync could not reach the Heiwa runtime.");
   });
 });

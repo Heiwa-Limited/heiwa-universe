@@ -1,4 +1,5 @@
 use anyhow::{anyhow, Result};
+use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use std::path::PathBuf;
 
@@ -101,8 +102,8 @@ impl MailProbe {
     fn detect() -> Self {
         let app_path = PathBuf::from("/System/Applications/Mail.app");
         let app_present = app_path.exists() || PathBuf::from("/Applications/Mail.app").exists();
-        let data_dir = crate::home::heiwa_home()
-            .unwrap_or_else(|| PathBuf::from("."))
+        let data_dir = heiwa_config::HeiwaPaths::resolve()
+            .home_dir
             .join("Library")
             .join("Mail");
         let data_present = data_dir.exists();
@@ -171,49 +172,173 @@ pub(crate) fn apple_mail_accounts_present() -> bool {
 
 /// Snapshot stays bounded so the read model never pays for mailbox history.
 const MAX_SNAPSHOT_LINES: usize = 1000;
-/// Default messages pulled per source per scan.
-const DEFAULT_SCAN_LIMIT: usize = 25;
+const RETENTION_DAYS: i64 = 60;
+const DEFAULT_SCAN_DAYS: u64 = 14;
+const DEFAULT_PER_ACCOUNT: usize = 200;
 
-/// JXA program: metadata-only pull from Mail.app inboxes. Emits one JSON row
-/// per message on stdout. Bodies are never touched — policy is enforced by
-/// only ever reading sender/subject/date/readStatus.
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[serde(deny_unknown_fields)]
+struct MailSyncState {
+    schema_version: u32,
+    consented_at: Option<chrono::DateTime<chrono::Utc>>,
+    last_attempt_at: Option<chrono::DateTime<chrono::Utc>>,
+    last_scan_at: Option<chrono::DateTime<chrono::Utc>>,
+    complete: Option<bool>,
+    fetched: Option<usize>,
+    error: Option<String>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum MailSyncDecision {
+    NoConsent,
+    Fresh,
+    Backoff,
+    Scan,
+}
+
+fn mail_sync_state_path() -> PathBuf {
+    crate::home::heiwa_state_dir()
+        .join("mail")
+        .join("apple_sync.json")
+}
+
+fn load_mail_sync_state() -> MailSyncState {
+    std::fs::read(mail_sync_state_path())
+        .ok()
+        .and_then(|raw| serde_json::from_slice(&raw).ok())
+        .filter(|state: &MailSyncState| state.schema_version == 1)
+        .unwrap_or_default()
+}
+
+fn save_mail_sync_state(state: &MailSyncState) -> Result<()> {
+    let path = mail_sync_state_path();
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+    atomic_private_write(&path, serde_json::to_string_pretty(state)?.as_bytes())
+}
+
+fn mail_sync_decision(
+    saved: &MailSyncState,
+    now: chrono::DateTime<chrono::Utc>,
+    stale_seconds: Option<u64>,
+    background: bool,
+) -> MailSyncDecision {
+    if background && saved.consented_at.is_none() {
+        return MailSyncDecision::NoConsent;
+    }
+    let Some(max_age) =
+        stale_seconds.map(|seconds| chrono::Duration::seconds(seconds.min(86_400) as i64))
+    else {
+        return MailSyncDecision::Scan;
+    };
+    if saved.error.is_some()
+        && saved.last_attempt_at.is_some()
+        && saved.last_attempt_at >= saved.last_scan_at
+    {
+        if let Some(attempt) = saved.last_attempt_at {
+            if now - attempt < max_age.min(chrono::Duration::seconds(60)) {
+                return MailSyncDecision::Backoff;
+            }
+        }
+    }
+    if saved.last_scan_at.is_some_and(|scan| now - scan < max_age) {
+        MailSyncDecision::Fresh
+    } else {
+        MailSyncDecision::Scan
+    }
+}
+
+#[derive(Debug, Clone)]
+struct AccountScan {
+    account: String,
+    window_start: String,
+    window_end: String,
+    matched: usize,
+    rows: Vec<Value>,
+}
+
+#[derive(Debug, Default)]
+struct MailScanOutput {
+    status: String,
+    accounts: Vec<AccountScan>,
+}
+
+#[derive(Debug, Default)]
+struct ReconcileCounts {
+    appended: usize,
+    updated: usize,
+    removed: usize,
+    total: usize,
+}
+
+/// JXA program: query each account's INBOX independently, newest first. The
+/// only properties read are metadata fields; no body or recipient content is
+/// ever touched.
 const APPLE_MAIL_JXA: &str = r#"
 function run(argv) {
-  const limit = parseInt(argv[0] || "25", 10);
+  const days = Math.max(1, parseInt(argv[0] || "14", 10));
+  const perAccount = Math.max(1, parseInt(argv[1] || "200", 10));
+  const ifRunning = argv[2] === "1";
+  if (ifRunning) {
+    const probe = Application("Mail");
+    if (!probe.running()) return JSON.stringify({kind: "status", status: "mail_not_running"});
+  }
   const Mail = Application("Mail");
-  const rows = [];
+  const cutoff = new Date(Date.now() - days * 86400000);
+  const now = new Date();
+  const output = [];
   let accounts = [];
   try { accounts = Mail.accounts(); } catch (e) {
     throw new Error("Apple Mail account query failed: " + e);
   }
-  for (let a = 0; a < accounts.length && rows.length < limit; a++) {
+  for (let a = 0; a < accounts.length; a++) {
     let accountName = "";
-    let mailboxes = [];
-    try { accountName = accounts[a].name(); } catch (e) { continue; }
-    try { mailboxes = accounts[a].mailboxes(); } catch (e) { continue; }
-    for (let m = 0; m < mailboxes.length && rows.length < limit; m++) {
-      let boxName = "";
-      try { boxName = mailboxes[m].name(); } catch (e) { continue; }
-      if (!/^(INBOX|Inbox)$/.test(boxName)) continue;
-      let count = 0;
-      try { count = mailboxes[m].messages.length; } catch (e) { continue; }
-      const take = Math.min(limit, count);
-      for (let i = 0; i < take && rows.length < limit; i++) {
-        try {
-          const msg = mailboxes[m].messages[i];
-          rows.push(JSON.stringify({
-            account: accountName,
-            mailbox: boxName,
-            sender: String(msg.sender()),
-            subject: String(msg.subject()),
-            date: msg.dateReceived().toISOString(),
-            unread: !msg.readStatus(),
-          }));
-        } catch (e) {}
+    let inbox;
+    try {
+      accountName = String(accounts[a].name());
+      const mailboxes = accounts[a].mailboxes();
+      inbox = mailboxes.find((box) => /^(INBOX|Inbox)$/.test(String(box.name())));
+    } catch (e) { continue; }
+    if (!inbox) continue;
+    try {
+      const spec = inbox.messages.whose({dateReceived: {_greaterThan: cutoff}});
+      const dates = spec.dateReceived();
+      const senders = spec.sender();
+      const subjects = spec.subject();
+      const readStates = spec.readStatus();
+      const messageIds = spec.messageId();
+      const rows = [];
+      for (let i = 0; i < dates.length; i++) {
+        const date = new Date(dates[i]);
+        if (isNaN(date.getTime())) continue;
+        rows.push({
+          account: accountName,
+          mailbox: String(inbox.name()),
+          sender: String(senders[i] || ""),
+          subject: String(subjects[i] || ""),
+          date: date.toISOString(),
+          unread: !Boolean(readStates[i]),
+          message_id: messageIds[i] ? String(messageIds[i]) : ""
+        });
       }
-    }
+      rows.sort((left, right) => right.date.localeCompare(left.date));
+      const kept = rows.slice(0, perAccount);
+      const windowStart = rows.length > kept.length && kept.length
+        ? kept[kept.length - 1].date
+        : cutoff.toISOString();
+      output.push(JSON.stringify({
+        kind: "account",
+        account: accountName,
+        window_start: windowStart,
+        window_end: now.toISOString(),
+        matched: rows.length,
+        kept: kept.length
+      }));
+      for (const row of kept) output.push(JSON.stringify(row));
+    } catch (e) { continue; }
   }
-  return rows.join("\n");
+  return output.join("\n");
 }
 "#;
 
@@ -232,151 +357,370 @@ fn scan(args: &[String]) -> Result<()> {
             "unknown mail scan source: {source} (expected all or apple)"
         ));
     }
-    let limit = flag_value(args, "--limit")
+    let days = flag_value(args, "--days")
+        .and_then(|raw| raw.parse::<u64>().ok())
+        .unwrap_or(DEFAULT_SCAN_DAYS)
+        .clamp(1, 60);
+    let per_account = flag_value(args, "--per-account")
+        .or_else(|| flag_value(args, "--limit"))
         .and_then(|raw| raw.parse::<usize>().ok())
-        .unwrap_or(DEFAULT_SCAN_LIMIT)
-        .clamp(1, 200);
+        .unwrap_or(DEFAULT_PER_ACCOUNT)
+        .clamp(1, 500);
     let dry_run = has_flag(args, "--dry-run");
     let json_output = has_flag(args, "--json");
-
-    let apple_ready = apple_mail_accounts_present();
+    let if_running = has_flag(args, "--if-running");
+    let stale_seconds = flag_value(args, "--if-stale").and_then(|raw| raw.parse::<u64>().ok());
+    let background = if_running;
 
     if dry_run {
+        let ready = apple_mail_accounts_present() || std::env::var_os("HEIWA_OSASCRIPT").is_some();
         let payload = json!({
             "command": "mail scan",
             "dry_run": true,
             "policy": POLICY,
-            "limit": limit,
+            "days": days,
+            "per_account": per_account,
             "snapshot": headers_snapshot_path().display().to_string(),
-            "sources": {
-                "apple": {
-                    "selected": source == "all" || source == "apple",
-                    "ready": apple_ready,
-                    "blocker": if apple_ready { Value::Null } else {
-                        Value::String("no Apple Mail accounts configured".into())
-                    },
-                },
-            },
+            "sources": {"apple": {
+                "selected": source == "all" || source == "apple",
+                "ready": ready,
+                "blocker": if ready { Value::Null } else {
+                    Value::String("no Apple Mail accounts configured".into())
+                }
+            }}
         });
         println!("{payload}");
         return Ok(());
     }
 
-    let mut fetched: Vec<Value> = Vec::new();
-    let mut source_reports: Vec<Value> = Vec::new();
-
-    if source == "all" || source == "apple" {
-        if apple_ready {
-            match scan_apple_mail(limit) {
-                Ok(rows) => {
-                    source_reports.push(json!({
-                        "source": "apple", "status": "scanned", "fetched": rows.len(),
-                    }));
-                    fetched.extend(rows);
-                }
-                Err(error) => {
-                    source_reports.push(json!({
-                        "source": "apple", "status": "error", "error": error.to_string(),
-                    }));
-                }
+    let now = chrono::Utc::now();
+    let mut saved = load_mail_sync_state();
+    if stale_seconds.is_some() || background {
+        match mail_sync_decision(&saved, now, stale_seconds, background) {
+            MailSyncDecision::NoConsent => {
+                return print_scan_payload(
+                    json!({"status": "no_consent", "sources": [{"source":"apple","status":"no_consent"}], "fetched":0, "appended":0, "updated":0, "removed":0}),
+                    json_output,
+                );
             }
-        } else {
-            source_reports.push(json!({
-                "source": "apple", "status": "skipped",
-                "reason": format!(
-                    "no Apple Mail accounts found under {}; open Mail.app and add an account, \
-                     or grant Heiwa automation access in System Settings > Privacy & Security > Automation",
-                    MailProbe::detect().data_dir.display()
-                ),
-            }));
+            MailSyncDecision::Fresh => {
+                return print_scan_payload(
+                    json!({"status": "fresh", "freshness":"fresh", "sources": [{"source":"apple","status":"fresh"}], "fetched":saved.fetched.unwrap_or(0), "appended":0, "updated":0, "removed":0, "last_scan_at":saved.last_scan_at, "last_attempt_at":saved.last_attempt_at}),
+                    json_output,
+                );
+            }
+            MailSyncDecision::Backoff => {
+                return print_scan_payload(
+                    json!({"status": "error", "freshness":"backoff", "sources": [{"source":"apple","status":"error","error":saved.error.clone().unwrap_or_else(||"previous scan failed".into())}], "fetched":0, "appended":0, "updated":0, "removed":0}),
+                    json_output,
+                );
+            }
+            MailSyncDecision::Scan => {}
         }
     }
 
-    let appended = append_snapshot_rows(&fetched)?;
-    let receipt = write_scan_receipt(&source_reports, fetched.len(), appended)?;
+    let apple_ready =
+        apple_mail_accounts_present() || std::env::var_os("HEIWA_OSASCRIPT").is_some();
+    if source != "all" && source != "apple" && source != "apple_mail" {
+        return Err(anyhow!(
+            "only Apple Mail metadata scanning is currently available"
+        ));
+    }
+    if !apple_ready {
+        let reason = format!(
+            "no Apple Mail accounts found under {}; open Mail.app and add an account, or grant Heiwa automation access",
+            MailProbe::detect().data_dir.display()
+        );
+        let payload = json!({"status":"skipped","sources":[{"source":"apple","status":"skipped","reason":reason}],"fetched":0,"appended":0,"updated":0,"removed":0});
+        return print_scan_payload(payload, json_output);
+    }
 
-    let payload = json!({
-        "command": "mail scan",
-        "policy": POLICY,
-        "sources": source_reports,
-        "fetched": fetched.len(),
-        "appended": appended,
-        "deduplicated": fetched.len().saturating_sub(appended),
-        "snapshot": headers_snapshot_path().display().to_string(),
-        "receipt": receipt,
+    saved.schema_version = 1;
+    saved.last_attempt_at = Some(now);
+    let output = match scan_apple_mail(days, per_account, if_running) {
+        Ok(output) => output,
+        Err(error) => {
+            saved.error = Some(error.to_string());
+            let _ = save_mail_sync_state(&saved);
+            let payload = json!({"status":"error","sources":[{"source":"apple","status":"error","error":error.to_string()}],"fetched":0,"appended":0,"updated":0,"removed":0});
+            return print_scan_payload(payload, json_output);
+        }
+    };
+    if output.status == "mail_not_running" {
+        saved.error = None;
+        let _ = save_mail_sync_state(&saved);
+        return print_scan_payload(
+            json!({"status":"mail_not_running","freshness":"closed","sources":[{"source":"apple","status":"mail_not_running"}],"fetched":0,"appended":0,"updated":0,"removed":0}),
+            json_output,
+        );
+    }
+
+    let counts = reconcile_snapshot(&output.accounts)?;
+    saved.consented_at = if background {
+        saved.consented_at
+    } else {
+        saved.consented_at.or(Some(now))
+    };
+    saved.last_scan_at = Some(now);
+    saved.complete = Some(true);
+    saved.fetched = Some(counts.total);
+    saved.error = None;
+    save_mail_sync_state(&saved)?;
+    let source_report = json!({
+        "source": "apple", "status": "scanned", "accounts": output.accounts.len(),
+        "matched": output.accounts.iter().map(|account| account.matched).sum::<usize>(),
+        "fetched": counts.total, "updated": counts.updated, "removed": counts.removed
     });
+    let receipt = write_scan_receipt(
+        std::slice::from_ref(&source_report),
+        counts.total,
+        counts.appended,
+    )?;
+    let payload = json!({
+        "status": "scanned", "freshness": "scanned", "sources": [source_report],
+        "fetched": counts.total, "appended": counts.appended, "updated": counts.updated,
+        "removed": counts.removed, "deduplicated": counts.updated, "snapshot": headers_snapshot_path(),
+        "receipt": receipt, "last_scan_at": saved.last_scan_at, "last_attempt_at": saved.last_attempt_at
+    });
+    print_scan_payload(payload, json_output)
+}
+
+fn print_scan_payload(payload: Value, json_output: bool) -> Result<()> {
     if json_output {
         println!("{payload}");
     } else {
         println!("mail scan");
-        println!("  fetched: {}", fetched.len());
-        println!("  appended: {appended}");
-        for report in payload["sources"].as_array().unwrap_or(&Vec::new()) {
-            let source = report.get("source").and_then(Value::as_str).unwrap_or("?");
-            let status = report.get("status").and_then(Value::as_str).unwrap_or("?");
-            // A source that did nothing has to say why. `apple: skipped`
-            // alone leaves the user with no idea whether Heiwa is broken,
-            // unsupported, or simply looking in a place they can fix.
-            let why = report
-                .get("reason")
-                .or_else(|| report.get("error"))
-                .and_then(Value::as_str);
-            match why {
-                Some(why) => println!("  {source}: {status} — {why}"),
-                None => println!("  {source}: {status}"),
-            }
-        }
-        println!("  snapshot: {}", headers_snapshot_path().display());
+        println!(
+            "  status: {}",
+            payload["status"].as_str().unwrap_or("unknown")
+        );
+        println!("  fetched: {}", payload["fetched"].as_u64().unwrap_or(0));
+        println!("  added: {}", payload["appended"].as_u64().unwrap_or(0));
+        println!("  updated: {}", payload["updated"].as_u64().unwrap_or(0));
+        println!("  removed: {}", payload["removed"].as_u64().unwrap_or(0));
     }
     Ok(())
 }
 
 /// Pull inbox metadata from Mail.app via JXA (osascript -l JavaScript).
-fn scan_apple_mail(limit: usize) -> Result<Vec<Value>> {
-    use anyhow::Context;
-    let output = std::process::Command::new("osascript")
-        .arg("-l")
-        .arg("JavaScript")
-        .arg("-e")
-        .arg(APPLE_MAIL_JXA)
-        .arg(limit.to_string())
-        .output()
-        .context("failed to run osascript for Apple Mail scan")?;
-    if !output.status.success() {
-        return Err(anyhow!(
-            "Apple Mail scan failed (Automation permission?): {}",
-            String::from_utf8_lossy(&output.stderr).trim()
-        ));
+fn scan_apple_mail(days: u64, per_account: usize, if_running: bool) -> Result<MailScanOutput> {
+    let output = crate::cmd::osascript::run_jxa(
+        APPLE_MAIL_JXA,
+        &[
+            days.to_string(),
+            per_account.to_string(),
+            if if_running {
+                "1".to_string()
+            } else {
+                "0".to_string()
+            },
+        ],
+    )?;
+    let text = String::from_utf8_lossy(&output);
+    let mut result = MailScanOutput::default();
+    let mut current: Option<AccountScan> = None;
+    for line in text.lines().filter(|line| !line.trim().is_empty()) {
+        let value: Value = serde_json::from_str(line.trim())
+            .map_err(|error| anyhow!("invalid Apple Mail scan output: {error}"))?;
+        if value.get("kind").and_then(Value::as_str) == Some("status") {
+            result.status = value
+                .get("status")
+                .and_then(Value::as_str)
+                .unwrap_or("error")
+                .to_string();
+            continue;
+        }
+        if value.get("kind").and_then(Value::as_str) == Some("account") {
+            if let Some(account) = current.take() {
+                result.accounts.push(account);
+            }
+            current = Some(AccountScan {
+                account: value["account"].as_str().unwrap_or("").to_string(),
+                window_start: value["window_start"].as_str().unwrap_or("").to_string(),
+                window_end: value["window_end"].as_str().unwrap_or("").to_string(),
+                matched: value["matched"].as_u64().unwrap_or(0) as usize,
+                rows: Vec::new(),
+            });
+        } else if let Some(account) = current.as_mut() {
+            let mut row = value;
+            let account_name = row["account"].as_str().unwrap_or("").to_string();
+            let message_id = row.get("message_id").and_then(Value::as_str).unwrap_or("");
+            let id = mail_row_id(&account_name, message_id, &row);
+            if let Some(object) = row.as_object_mut() {
+                object.remove("message_id");
+                object.insert("id".into(), json!(id));
+                object.insert("scanned_at".into(), json!(chrono::Utc::now().to_rfc3339()));
+            }
+            account.rows.push(row);
+        }
     }
-    Ok(String::from_utf8_lossy(&output.stdout)
-        .lines()
-        .filter_map(|line| serde_json::from_str::<Value>(line.trim()).ok())
-        .collect())
+    if let Some(account) = current {
+        result.accounts.push(account);
+    }
+    if result.status.is_empty() {
+        result.status = "scanned".into();
+    }
+    Ok(result)
+}
+
+fn mail_row_id(account: &str, message_id: &str, row: &Value) -> String {
+    use sha2::{Digest, Sha256};
+    let fallback = format!(
+        "{}|{}|{}|{}",
+        account,
+        row.get("sender").and_then(Value::as_str).unwrap_or(""),
+        row.get("subject").and_then(Value::as_str).unwrap_or(""),
+        row.get("date").and_then(Value::as_str).unwrap_or(""),
+    );
+    let source = if message_id.is_empty() {
+        fallback
+    } else {
+        format!("{account}\0{message_id}")
+    };
+    let digest = Sha256::digest(source.as_bytes());
+    let hex = digest
+        .iter()
+        .map(|byte| format!("{byte:02x}"))
+        .collect::<String>();
+    format!("mail_{}", &hex[..16])
 }
 
 /// Stable identity for a snapshot row so repeated scans never duplicate.
 fn snapshot_dedupe_key(row: &Value) -> String {
-    let field = |key: &str| row.get(key).and_then(Value::as_str).unwrap_or("");
-    format!(
-        "{}|{}|{}|{}",
-        field("account"),
-        field("sender"),
-        field("subject"),
-        field("date"),
-    )
+    row.get("id")
+        .and_then(Value::as_str)
+        .map(ToOwned::to_owned)
+        .unwrap_or_else(|| {
+            mail_row_id(
+                row.get("account").and_then(Value::as_str).unwrap_or(""),
+                row.get("message_id").and_then(Value::as_str).unwrap_or(""),
+                row,
+            )
+        })
 }
 
-/// Append unique rows to headers.jsonl, keeping the file bounded.
-/// Returns how many rows were actually appended.
-fn append_snapshot_rows(rows: &[Value]) -> Result<usize> {
-    append_snapshot_rows_at(&headers_snapshot_path(), rows)
+fn reconcile_snapshot(accounts: &[AccountScan]) -> Result<ReconcileCounts> {
+    reconcile_snapshot_at(&headers_snapshot_path(), accounts)
+}
+
+fn reconcile_snapshot_at(
+    path: &std::path::Path,
+    accounts: &[AccountScan],
+) -> Result<ReconcileCounts> {
+    use anyhow::Context;
+    use std::fs::OpenOptions;
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+    let lock_path = path.with_extension("jsonl.lock");
+    let mut lock_options = OpenOptions::new();
+    lock_options.create(true).read(true).write(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        lock_options.mode(0o600);
+    }
+    let lock = lock_options
+        .open(&lock_path)
+        .with_context(|| format!("failed to open mail snapshot lock {}", lock_path.display()))?;
+    lock.lock().context("failed to lock mail snapshot")?;
+    let raw = match std::fs::read_to_string(path) {
+        Ok(raw) => raw,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => String::new(),
+        Err(error) => return Err(error).context("failed to read mail snapshot"),
+    };
+    let mut existing = Vec::new();
+    for line in raw.lines().filter(|line| !line.trim().is_empty()) {
+        let parsed: Value = serde_json::from_str(line).context("invalid mail snapshot JSON")?;
+        if !parsed.is_object() {
+            return Err(anyhow!("invalid mail snapshot row: expected object"));
+        }
+        existing.push(parsed);
+    }
+    let mut counts = ReconcileCounts::default();
+    let now = chrono::Utc::now();
+    let retention_cutoff = now - chrono::Duration::days(RETENTION_DAYS);
+    existing.retain(|row| {
+        row.get("date")
+            .and_then(Value::as_str)
+            .and_then(|date| chrono::DateTime::parse_from_rfc3339(date).ok())
+            .map(|date| date.with_timezone(&chrono::Utc) >= retention_cutoff)
+            .unwrap_or(true)
+    });
+    for account in accounts {
+        let start = chrono::DateTime::parse_from_rfc3339(&account.window_start)
+            .ok()
+            .map(|d| d.with_timezone(&chrono::Utc));
+        let end = chrono::DateTime::parse_from_rfc3339(&account.window_end)
+            .ok()
+            .map(|d| d.with_timezone(&chrono::Utc));
+        let returned: std::collections::HashMap<String, Value> = account
+            .rows
+            .iter()
+            .map(|row| (snapshot_dedupe_key(row), row.clone()))
+            .collect();
+        let mut next = Vec::with_capacity(existing.len() + returned.len());
+        for row in existing.drain(..) {
+            let same_account =
+                row.get("account").and_then(Value::as_str) == Some(account.account.as_str());
+            let inside = same_account
+                && start.zip(end).is_some_and(|(start, end)| {
+                    row.get("date")
+                        .and_then(Value::as_str)
+                        .and_then(|date| chrono::DateTime::parse_from_rfc3339(date).ok())
+                        .map(|date| {
+                            let date = date.with_timezone(&chrono::Utc);
+                            date >= start && date <= end
+                        })
+                        .unwrap_or(false)
+                });
+            if inside {
+                if let Some(replacement) = returned.get(&snapshot_dedupe_key(&row)) {
+                    next.push(replacement.clone());
+                } else {
+                    counts.removed += 1;
+                }
+            } else {
+                next.push(row);
+            }
+        }
+        existing = next;
+        for (key, row) in returned {
+            if !existing
+                .iter()
+                .any(|candidate| snapshot_dedupe_key(candidate) == key)
+            {
+                existing.push(row);
+                counts.appended += 1;
+            } else {
+                counts.updated += 1;
+            }
+        }
+    }
+    existing.sort_by(|a, b| {
+        let left = a.get("date").and_then(Value::as_str).unwrap_or("");
+        let right = b.get("date").and_then(Value::as_str).unwrap_or("");
+        right.cmp(left)
+    });
+    if existing.len() > MAX_SNAPSHOT_LINES {
+        existing.truncate(MAX_SNAPSHOT_LINES);
+    }
+    let serialized = existing
+        .iter()
+        .map(Value::to_string)
+        .collect::<Vec<_>>()
+        .join("\n")
+        + if existing.is_empty() { "" } else { "\n" };
+    atomic_private_write(path, serialized.as_bytes())?;
+    counts.total = accounts.iter().map(|account| account.rows.len()).sum();
+    drop(lock);
+    Ok(counts)
 }
 
 fn atomic_private_write(path: &std::path::Path, contents: &[u8]) -> Result<()> {
     use anyhow::Context;
     use std::fs::OpenOptions;
     use std::io::Write;
-
     let parent = path
         .parent()
         .ok_or_else(|| anyhow!("mail snapshot has no parent: {}", path.display()))?;
@@ -411,12 +755,7 @@ fn atomic_private_write(path: &std::path::Path, contents: &[u8]) -> Result<()> {
         #[cfg(unix)]
         std::fs::File::open(parent)
             .and_then(|directory| directory.sync_all())
-            .with_context(|| {
-                format!(
-                    "failed to sync mail snapshot directory {}",
-                    parent.display()
-                )
-            })?;
+            .context("failed to sync mail snapshot directory")?;
         Ok(())
     })();
     if write_result.is_err() {
@@ -425,14 +764,13 @@ fn atomic_private_write(path: &std::path::Path, contents: &[u8]) -> Result<()> {
     write_result
 }
 
+#[cfg(test)]
 fn append_snapshot_rows_at(path: &std::path::Path, rows: &[Value]) -> Result<usize> {
     use anyhow::Context;
     use std::fs::OpenOptions;
-
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent)?;
     }
-
     let lock_path = path.with_extension("jsonl.lock");
     let mut lock_options = OpenOptions::new();
     lock_options.create(true).read(true).write(true);
@@ -444,35 +782,17 @@ fn append_snapshot_rows_at(path: &std::path::Path, rows: &[Value]) -> Result<usi
     let lock = lock_options
         .open(&lock_path)
         .with_context(|| format!("failed to open mail snapshot lock {}", lock_path.display()))?;
-    lock.lock()
-        .with_context(|| format!("failed to lock mail snapshot {}", path.display()))?;
-
+    lock.lock().context("failed to lock mail snapshot")?;
     let existing_raw = match std::fs::read_to_string(path) {
         Ok(raw) => raw,
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => String::new(),
-        Err(error) => {
-            return Err(error)
-                .with_context(|| format!("failed to read mail snapshot {}", path.display()));
-        }
+        Err(error) => return Err(error).context("failed to read mail snapshot"),
     };
     let mut existing_rows = Vec::new();
-    for (index, line) in existing_raw.lines().enumerate() {
-        if line.trim().is_empty() {
-            continue;
-        }
-        let parsed = serde_json::from_str::<Value>(line).with_context(|| {
-            format!(
-                "invalid JSON in mail snapshot {} at line {}",
-                path.display(),
-                index + 1
-            )
-        })?;
+    for line in existing_raw.lines().filter(|line| !line.trim().is_empty()) {
+        let parsed: Value = serde_json::from_str(line).context("invalid mail snapshot JSON")?;
         if !parsed.is_object() {
-            return Err(anyhow!(
-                "invalid mail snapshot row in {} at line {}: expected object",
-                path.display(),
-                index + 1
-            ));
+            return Err(anyhow!("invalid mail snapshot row: expected object"));
         }
         existing_rows.push(parsed);
     }
@@ -481,14 +801,13 @@ fn append_snapshot_rows_at(path: &std::path::Path, rows: &[Value]) -> Result<usi
         .enumerate()
         .map(|(index, row)| (snapshot_dedupe_key(row), index))
         .collect();
-
     let scanned_at = chrono::Utc::now().to_rfc3339();
     let mut appended = 0;
     for row in rows {
         let key = snapshot_dedupe_key(row);
         let mut stamped = row.clone();
         if let Some(obj) = stamped.as_object_mut() {
-            obj.insert("scanned_at".to_string(), json!(&scanned_at));
+            obj.insert("scanned_at".into(), json!(&scanned_at));
         }
         if let Some(index) = positions.get(&key).copied() {
             existing_rows[index] = stamped;
@@ -499,7 +818,6 @@ fn append_snapshot_rows_at(path: &std::path::Path, rows: &[Value]) -> Result<usi
             appended += 1;
         }
     }
-
     if existing_rows.len() > MAX_SNAPSHOT_LINES {
         let drop = existing_rows.len() - MAX_SNAPSHOT_LINES;
         existing_rows.drain(..drop);
@@ -523,17 +841,15 @@ fn write_scan_receipt(sources: &[Value], fetched: usize, appended: usize) -> Res
     std::fs::create_dir_all(&receipts_dir)?;
     let receipt_id = format!("scan-{}", chrono::Utc::now().format("%Y%m%dT%H%M%SZ"));
     let receipt = json!({
-        "receipt_id": receipt_id,
-        "kind": "mail_metadata_scan",
-        "policy": POLICY,
-        "sources": sources,
-        "fetched": fetched,
-        "appended": appended,
+        "receipt_id": receipt_id, "kind": "mail_metadata_scan", "policy": POLICY,
+        "sources": sources, "fetched": fetched, "appended": appended,
         "snapshot": headers_snapshot_path().display().to_string(),
         "scanned_at": chrono::Utc::now().to_rfc3339(),
     });
-    let path = receipts_dir.join(format!("{receipt_id}.json"));
-    std::fs::write(&path, receipt.to_string())?;
+    std::fs::write(
+        receipts_dir.join(format!("{receipt_id}.json")),
+        receipt.to_string(),
+    )?;
     Ok(receipt_id)
 }
 
@@ -1064,7 +1380,7 @@ fn print_help() {
     println!("  heiwa mail status [--json]");
     println!("  heiwa mail accounts [--json]");
     println!("  heiwa mail summary");
-    println!("  heiwa mail scan [--source apple|all] [--limit N] [--dry-run] [--json]");
+    println!("  heiwa mail scan [--source apple|all] [--days N] [--per-account N] [--if-running] [--if-stale SECONDS] [--dry-run] [--json]");
     println!("  heiwa mail triage [--limit N] [--no-draft] [--dry-run] [--json]");
     println!();
     println!("Policy: {POLICY}.");
@@ -1123,6 +1439,128 @@ mod tests {
     fn apple_mail_script_propagates_account_query_failure() {
         assert!(APPLE_MAIL_JXA.contains("Apple Mail account query failed"));
         assert!(!APPLE_MAIL_JXA.contains("catch (e) { return \"\"; }"));
+    }
+
+    #[test]
+    fn sync_decision_covers_consent_freshness_backoff_and_scan() {
+        let now = chrono::Utc::now();
+        let empty = MailSyncState::default();
+        assert_eq!(
+            mail_sync_decision(&empty, now, Some(180), true),
+            MailSyncDecision::NoConsent
+        );
+        let fresh = MailSyncState {
+            schema_version: 1,
+            consented_at: Some(now),
+            last_scan_at: Some(now),
+            ..Default::default()
+        };
+        assert_eq!(
+            mail_sync_decision(&fresh, now, Some(180), true),
+            MailSyncDecision::Fresh
+        );
+        let failed = MailSyncState {
+            schema_version: 1,
+            consented_at: Some(now),
+            last_attempt_at: Some(now),
+            error: Some("denied".into()),
+            ..Default::default()
+        };
+        assert_eq!(
+            mail_sync_decision(&failed, now, Some(180), true),
+            MailSyncDecision::Backoff
+        );
+        assert_eq!(
+            mail_sync_decision(&empty, now, None, false),
+            MailSyncDecision::Scan
+        );
+    }
+
+    #[test]
+    fn reconcile_updates_unread_removes_inside_window_and_preserves_unscanned_rows() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("headers.jsonl");
+        let now = chrono::Utc::now();
+        let target_date = (now - chrono::Duration::minutes(10)).to_rfc3339();
+        let removed_date = (now - chrono::Duration::minutes(20)).to_rfc3339();
+        let outside_date = (now - chrono::Duration::hours(3)).to_rfc3339();
+        let target_id = mail_row_id("a", "<target>", &json!({}));
+        let gone_id = mail_row_id("a", "<gone>", &json!({}));
+        let target = json!({"account":"a","mailbox":"INBOX","sender":"s","subject":"x","date":target_date,"unread":true,"id":target_id});
+        let removed = json!({"account":"a","mailbox":"INBOX","sender":"s","subject":"gone","date":removed_date,"unread":true,"id":gone_id});
+        let outside = json!({"account":"a","mailbox":"INBOX","sender":"s","subject":"outside","date":outside_date,"unread":true,"id":"mail_outside"});
+        let unscanned = json!({"account":"b","mailbox":"INBOX","sender":"s","subject":"untouched","date":target_date,"unread":true,"id":"mail_b"});
+        let initial = [target.clone(), removed, outside.clone(), unscanned.clone()]
+            .iter()
+            .map(Value::to_string)
+            .collect::<Vec<_>>()
+            .join("\n")
+            + "\n";
+        std::fs::write(&path, initial).unwrap();
+        let refreshed = json!({"account":"a","mailbox":"INBOX","sender":"s","subject":"x","date":target_date,"unread":false,"id":target["id"]});
+        let account = AccountScan {
+            account: "a".into(),
+            window_start: (now - chrono::Duration::hours(1)).to_rfc3339(),
+            window_end: (now + chrono::Duration::minutes(1)).to_rfc3339(),
+            matched: 1,
+            rows: vec![refreshed],
+        };
+        let counts = reconcile_snapshot_at(&path, &[account]).unwrap();
+        let rows: Vec<Value> = std::fs::read_to_string(&path)
+            .unwrap()
+            .lines()
+            .map(|line| serde_json::from_str(line).unwrap())
+            .collect();
+        assert_eq!(counts.removed, 1);
+        assert!(rows.iter().any(|row| row["id"] == "mail_outside"));
+        assert!(rows.iter().any(|row| row["id"] == "mail_b"));
+        assert!(rows
+            .iter()
+            .any(|row| row["id"] == target["id"] && row["unread"] == false));
+        assert!(!rows.iter().any(|row| row["id"] == gone_id));
+    }
+
+    #[test]
+    fn capped_account_only_deletes_inside_shortened_window() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("headers.jsonl");
+        let now = chrono::Utc::now();
+        let older = json!({"account":"a","mailbox":"INBOX","sender":"s","subject":"older","date":(now - chrono::Duration::hours(2)).to_rfc3339(),"unread":true,"id":"mail_older"});
+        let recent = json!({"account":"a","mailbox":"INBOX","sender":"s","subject":"recent","date":(now - chrono::Duration::minutes(10)).to_rfc3339(),"unread":true,"id":"mail_recent"});
+        std::fs::write(
+            &path,
+            [older.clone(), recent.clone()]
+                .iter()
+                .map(Value::to_string)
+                .collect::<Vec<_>>()
+                .join("\n")
+                + "\n",
+        )
+        .unwrap();
+        let account = AccountScan {
+            account: "a".into(),
+            window_start: (now - chrono::Duration::hours(1)).to_rfc3339(),
+            window_end: (now + chrono::Duration::minutes(1)).to_rfc3339(),
+            matched: 1,
+            rows: vec![],
+        };
+        reconcile_snapshot_at(&path, &[account]).unwrap();
+        let rows: Vec<Value> = std::fs::read_to_string(&path)
+            .unwrap()
+            .lines()
+            .map(|line| serde_json::from_str(line).unwrap())
+            .collect();
+        assert!(rows.iter().any(|row| row["id"] == "mail_older"));
+        assert!(!rows.iter().any(|row| row["id"] == "mail_recent"));
+    }
+
+    #[test]
+    fn message_ids_are_hashed_and_never_stored() {
+        let row = json!({"account":"a","sender":"s","subject":"x","date":"2026-09-14T00:00:00Z"});
+        let id = mail_row_id("a", "<secret-message-id>", &row);
+        assert!(id.starts_with("mail_"));
+        assert_eq!(id.len(), 21);
+        assert!(!id.contains("secret-message-id"));
     }
 
     #[test]
