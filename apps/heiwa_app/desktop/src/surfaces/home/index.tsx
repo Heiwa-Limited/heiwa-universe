@@ -2,6 +2,7 @@ import { For, Index, Show } from "solid-js";
 import { useApp } from "../../state/app";
 import { Icon } from "../../shell/Icon";
 import { localIsoDate } from "../../lib/format";
+import { normalizeEvents, occursOn } from "../../state/calendar-model";
 import {
   blockerCount,
   formatRecordedTime,
@@ -25,7 +26,7 @@ function HomeSurface() {
     .filter((thread) => !thread.archived && Boolean(thread.title?.trim()) && (thread.turn_count ?? 1) > 0)
     .slice(0, 6);
   const projects = () => app.sessions.projects().filter((project) => !project.archived);
-  const hasToday = () => app.runtime.calendarEvents().some((event) => event.date === localIsoDate())
+  const hasToday = () => normalizeEvents(app.runtime.calendarEvents()).some((event) => occursOn(event, localIsoDate()))
     || app.runtime.mail().some((message) => message.unread);
   const projectTitle = (id: string | null | undefined) =>
     app.sessions.projects().find((project) => project.project_id === id)?.title;
@@ -112,5 +113,12 @@ function HomeSurface() {
 export const homeSurface: SurfaceModule = {
   id: "home", label: "Home", glyph: "", caption: "Viewing Home", Component: HomeSurface,
   preview: () => ({ title: "Home", lines: ["Recent work"] }),
-  refresh: (app) => Promise.all([app.runtime.loadCalendar(), app.runtime.loadMail(), app.work.loadCatalog({ prefetch: HOME_WORK_ROWS })]).then(() => undefined),
+  // The briefing answers "today" from the calendar, so arriving also asks the
+  // runtime to re-read it when its copy is more than a few minutes old.
+  refresh: (app) => Promise.all([
+    app.runtime.syncCalendar({ maxAgeSeconds: 300 }),
+    app.runtime.loadCalendar(),
+    app.runtime.loadMail(),
+    app.work.loadCatalog({ prefetch: HOME_WORK_ROWS }),
+  ]).then(() => undefined),
 };

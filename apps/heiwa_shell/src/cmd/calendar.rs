@@ -4,7 +4,7 @@
 //! T2 effect and can execute only from the approval service.
 
 use anyhow::{anyhow, Context, Result};
-use chrono::{Duration, Local, NaiveDateTime, TimeZone, Utc};
+use chrono::{DateTime, Duration, Local, NaiveDate, NaiveDateTime, TimeZone, Utc};
 use serde_json::{json, Value};
 use std::collections::HashSet;
 use std::fs;
@@ -900,21 +900,37 @@ fn event_date(start: &str) -> String {
 }
 
 fn event_occurs_on(event: &Value, date: &str) -> bool {
-    event.get("date").and_then(Value::as_str) == Some(date)
-        || event
-            .get("start")
-            .and_then(Value::as_str)
-            .is_some_and(|start| start.starts_with(date))
+    event_occurs_on_in(event, date, &Local)
+}
+
+/// Whether the event touches the local day `date` in `zone`. Matching the UTC
+/// prefix of `start` put every evening event west of UTC on tomorrow.
+fn event_occurs_on_in<Tz: TimeZone>(event: &Value, date: &str, zone: &Tz) -> bool {
+    compact_event_in(event, zone).is_some_and(|(_, row)| {
+        row["date"].as_str().is_some_and(|first| first <= date)
+            && row["end_date"].as_str().is_some_and(|last| date <= last)
+    })
 }
 
 fn event_start_time(event: &Value) -> String {
+    event_start_time_in(event, &Local)
+}
+
+/// `HH:MM` in `zone`, rather than the clock digits of a UTC timestamp.
+fn event_start_time_in<Tz: TimeZone>(event: &Value, zone: &Tz) -> String
+where
+    Tz::Offset: std::fmt::Display,
+{
+    if event.get("all_day").and_then(Value::as_bool) == Some(true) {
+        return "all-day".to_string();
+    }
     let Some(start) = event.get("start").and_then(Value::as_str) else {
         return "--:--".to_string();
     };
-    if start.len() >= 16 && start.as_bytes().get(10) == Some(&b'T') {
-        start[11..16].to_string()
-    } else {
-        "all-day".to_string()
+    match rfc3339_instant(Some(start)) {
+        Some(instant) => instant.with_timezone(zone).format("%H:%M").to_string(),
+        None if start.len() == 10 => "all-day".to_string(),
+        None => "--:--".to_string(),
     }
 }
 
@@ -1611,6 +1627,213 @@ pub(crate) fn summary_payload() -> Value {
     })
 }
 
+/// Most rows one events response carries. Rows are compact, so this keeps a
+/// response well inside the desktop proxy's 2 MiB bound.
+const MAX_RANGE_ROWS: usize = 4000;
+/// Longest local-day span one events request may ask for.
+const MAX_RANGE_DAYS: i64 = 400;
+
+/// Calendar rows overlapping the local days `[from, to]`, served at
+/// `/api/v1/calendar/events`.
+///
+/// The summary returns the whole snapshot, which grows with every read and
+/// has no upper bound. Views ask for the days they show instead, and every row
+/// carries the local days it spans, so no client has to turn a UTC instant
+/// into a day on its own.
+pub(crate) fn events_range_payload(from: Option<&str>, to: Option<&str>) -> Result<Value> {
+    let today = Local::now().date_naive();
+    let day = |raw: Option<&str>, fallback: NaiveDate| match raw.map(str::trim) {
+        None | Some("") => Ok(fallback),
+        Some(value) => NaiveDate::parse_from_str(value, "%Y-%m-%d")
+            .map_err(|_| anyhow!("from and to must be YYYY-MM-DD dates")),
+    };
+    let from = day(from, today - Duration::days(1))?;
+    let to = day(to, today + Duration::days(42))?;
+    if to < from || (to - from).num_days() > MAX_RANGE_DAYS {
+        return Err(anyhow!(
+            "request at most {MAX_RANGE_DAYS} days, with to on or after from"
+        ));
+    }
+
+    let mut rows: Vec<(DateTime<Utc>, Value)> = Vec::new();
+    let mut keep = |row: Option<(DateTime<Utc>, Value)>| {
+        if let Some((sort, row)) = row {
+            let first = row["date"]
+                .as_str()
+                .and_then(|v| NaiveDate::parse_from_str(v, "%Y-%m-%d").ok());
+            let last = row["end_date"]
+                .as_str()
+                .and_then(|v| NaiveDate::parse_from_str(v, "%Y-%m-%d").ok());
+            if first.is_some_and(|first| first <= to) && last.is_some_and(|last| last >= from) {
+                rows.push((sort, row));
+            }
+        }
+    };
+    for event in load_events() {
+        keep(compact_event(&event));
+    }
+    for hold in load_holds() {
+        keep(compact_hold(&hold));
+    }
+    if (from..=to).contains(&today) {
+        for appointment in crate::cmd::life::appointments_for_today() {
+            keep(compact_appointment(&appointment));
+        }
+    }
+    rows.sort_by(|left, right| {
+        left.0.cmp(&right.0).then_with(|| {
+            right.1["all_day"]
+                .as_bool()
+                .cmp(&left.1["all_day"].as_bool())
+        })
+    });
+    let truncated = rows.len() > MAX_RANGE_ROWS;
+    rows.truncate(MAX_RANGE_ROWS);
+    Ok(json!({
+        "from": from.to_string(),
+        "to": to.to_string(),
+        "today": today.to_string(),
+        "timezone": local_timezone_name(),
+        "events": rows.into_iter().map(|(_, row)| row).collect::<Vec<_>>(),
+        "truncated": truncated,
+        "sync": super::calendar_read::sync_status(),
+    }))
+}
+
+fn rfc3339_instant(raw: Option<&str>) -> Option<DateTime<Utc>> {
+    raw.and_then(|value| DateTime::parse_from_rfc3339(value).ok())
+        .map(|parsed| parsed.with_timezone(&Utc))
+}
+
+fn local_midnight(day: NaiveDate) -> DateTime<Utc> {
+    zone_midnight(day, &Local)
+}
+
+fn zone_midnight<Tz: TimeZone>(day: NaiveDate, zone: &Tz) -> DateTime<Utc> {
+    let midnight = day.and_hms_opt(0, 0, 0).unwrap_or_default();
+    zone.from_local_datetime(&midnight)
+        .earliest()
+        .map(|local| local.with_timezone(&Utc))
+        .unwrap_or_else(|| midnight.and_utc())
+}
+
+/// A synced event as a compact row with the local days it touches.
+fn compact_event(event: &Value) -> Option<(DateTime<Utc>, Value)> {
+    compact_event_in(event, &Local)
+}
+
+fn compact_event_in<Tz: TimeZone>(event: &Value, zone: &Tz) -> Option<(DateTime<Utc>, Value)> {
+    let text = |key: &str| event.get(key).and_then(Value::as_str);
+    let date_only =
+        |raw: Option<&str>| raw.and_then(|v| NaiveDate::parse_from_str(v, "%Y-%m-%d").ok());
+    let start = rfc3339_instant(text("start"));
+    let end = rfc3339_instant(text("end"));
+    let all_day = event
+        .get("all_day")
+        .and_then(Value::as_bool)
+        .unwrap_or(false)
+        || (start.is_none() && date_only(text("start")).is_some());
+    let local_day = |instant: DateTime<Utc>| instant.with_timezone(zone).date_naive();
+    let local_midnight = |day: NaiveDate| zone_midnight(day, zone);
+
+    let (first, last, sort) = if all_day {
+        // The calendar's day wins over instants, which move with the zone.
+        let first = date_only(text("date"))
+            .or_else(|| date_only(text("start")))
+            .or_else(|| start.map(local_day))?;
+        let last = date_only(text("end"))
+            .map(|exclusive| exclusive - Duration::days(1))
+            .or_else(|| {
+                end.filter(|end| Some(*end) > start)
+                    .map(|end| local_day(end - Duration::seconds(1)))
+            })
+            .unwrap_or(first)
+            .max(first);
+        (first, last, local_midnight(first))
+    } else if let Some(start) = start {
+        let last = end
+            .filter(|end| *end > start)
+            .map(|end| local_day(end - Duration::seconds(1)))
+            .unwrap_or_else(|| local_day(start));
+        (local_day(start), last, start)
+    } else {
+        let first = date_only(text("date"))?;
+        (first, first, local_midnight(first))
+    };
+
+    let recurring = text("occurrence").is_some_and(|occurrence| !occurrence.is_empty());
+    Some((
+        sort,
+        json!({
+            "id": event.get("id").cloned().unwrap_or(Value::Null),
+            "title": text("title").unwrap_or("Untitled"),
+            "source": text("source").unwrap_or("calendar"),
+            "calendar": text("calendar"),
+            "start": text("start"),
+            "end": text("end"),
+            "date": first.to_string(),
+            "end_date": last.to_string(),
+            "all_day": all_day,
+            "recurring": recurring,
+            "status": text("status").unwrap_or("confirmed"),
+            "kind": "event",
+        }),
+    ))
+}
+
+/// A local hold: a date plus optional `HH:MM` clock times.
+fn compact_hold(hold: &Value) -> Option<(DateTime<Utc>, Value)> {
+    let text = |key: &str| hold.get(key).and_then(Value::as_str);
+    let date = NaiveDate::parse_from_str(text("date")?, "%Y-%m-%d").ok()?;
+    let start =
+        text("start").and_then(|clock| chrono::NaiveTime::parse_from_str(clock, "%H:%M").ok());
+    let sort = start
+        .and_then(|clock| Local.from_local_datetime(&date.and_time(clock)).earliest())
+        .map(|local| local.with_timezone(&Utc))
+        .unwrap_or_else(|| local_midnight(date));
+    Some((
+        sort,
+        json!({
+            "id": hold.get("id").cloned().unwrap_or(Value::Null),
+            "title": text("title").unwrap_or("Hold"),
+            "source": "heiwa_hold",
+            "calendar": "Heiwa holds",
+            "start": text("start"),
+            "end": text("end"),
+            "date": date.to_string(),
+            "end_date": date.to_string(),
+            "all_day": start.is_none(),
+            "recurring": false,
+            "status": text("status").unwrap_or("draft"),
+            "kind": text("kind").unwrap_or("focus"),
+            "note": text("note"),
+        }),
+    ))
+}
+
+/// A dated appointment from the life register, shown as an all-day row.
+fn compact_appointment(appointment: &Value) -> Option<(DateTime<Utc>, Value)> {
+    let text = |key: &str| appointment.get(key).and_then(Value::as_str);
+    let date = NaiveDate::parse_from_str(text("date")?, "%Y-%m-%d").ok()?;
+    let kind = text("kind").unwrap_or("external");
+    Some((
+        local_midnight(date),
+        json!({
+            "id": format!("appointment-{date}-{kind}"),
+            "title": format!("{kind} appointment"),
+            "source": "life_register",
+            "calendar": "Life register",
+            "date": date.to_string(),
+            "end_date": date.to_string(),
+            "all_day": true,
+            "recurring": false,
+            "status": "confirmed",
+            "kind": "appointment",
+            "note": text("note"),
+        }),
+    ))
+}
+
 fn has_flag(args: &[String], flag: &str) -> bool {
     args.iter().any(|arg| arg == flag)
 }
@@ -1653,5 +1876,43 @@ mod tests {
     fn create_hold_rejects_unknown_kind() {
         let request = json!({"title": "x", "kind": "party"});
         assert!(create_hold(&request).is_err());
+    }
+
+    #[test]
+    fn synced_rows_are_filed_under_the_local_days_they_touch() {
+        let pacific = chrono::FixedOffset::west_opt(7 * 3600).unwrap();
+        let days = |row: &Value| {
+            let (_, compact) = compact_event_in(row, &pacific).expect("readable row");
+            (
+                compact["date"].as_str().unwrap().to_string(),
+                compact["end_date"].as_str().unwrap().to_string(),
+            )
+        };
+
+        // 01:00 UTC on the 15th is the evening of the 14th at UTC-7.
+        let evening = json!({"title": "Dinner", "date": "2026-09-14",
+            "start": "2026-09-15T01:00:00Z", "end": "2026-09-15T02:00:00Z"});
+        assert_eq!(days(&evening), ("2026-09-14".into(), "2026-09-14".into()));
+        assert!(event_occurs_on_in(&evening, "2026-09-14", &pacific));
+        assert!(
+            !event_occurs_on_in(&evening, "2026-09-15", &pacific),
+            "the UTC date is not the local day"
+        );
+        assert_eq!(event_start_time_in(&evening, &pacific), "18:00");
+
+        let overnight = json!({"title": "Shift",
+            "start": "2026-09-15T06:30:00Z", "end": "2026-09-15T07:15:00Z"});
+        assert_eq!(days(&overnight), ("2026-09-14".into(), "2026-09-15".into()));
+        assert!(event_occurs_on_in(&overnight, "2026-09-15", &pacific));
+
+        let all_day = json!({"all_day": true, "date": "2026-09-14",
+            "start": "2026-09-14T07:00:00Z", "end": "2026-09-15T06:59:59Z"});
+        assert_eq!(days(&all_day), ("2026-09-14".into(), "2026-09-14".into()));
+        assert_eq!(event_start_time_in(&all_day, &pacific), "all-day");
+
+        // Google's all-day end date is exclusive.
+        let google =
+            json!({"source": "google_calendar", "start": "2026-09-20", "end": "2026-09-22"});
+        assert_eq!(days(&google), ("2026-09-20".into(), "2026-09-21".into()));
     }
 }

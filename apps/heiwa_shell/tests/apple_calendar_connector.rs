@@ -837,3 +837,190 @@ print(json.dumps(result))
     assert!(!read().status.success());
     assert_eq!(calls_before, fs::read(&calls).unwrap());
 }
+
+/// A reader that answers like EventKit through the helper: events overlapping
+/// the requested range, in start order, but at most two per response.
+const PAGING_EVENTKIT_FIXTURE: &str = r#"#!/usr/bin/env python3
+import json, os, sys
+from datetime import datetime
+PAGE = 2
+request = json.loads(sys.argv[1])
+with open(os.environ['FIXTURE_CALLS'], 'a') as log:
+    log.write(request['operation'] + '\n')
+if request['operation'] == 'list':
+    print(json.dumps({'schema_version': 1, 'calendars': [{'id': 'work', 'name': 'Work', 'writable': True}]}))
+    sys.exit(0)
+parse = lambda text: datetime.fromisoformat(text.replace('Z', '+00:00'))
+start, end = parse(request['start']), parse(request['end'])
+events = json.load(open(os.environ['FIXTURE_SOURCE']))
+overlapping = sorted((e for e in events if parse(e['start']) < end and parse(e['end']) > start),
+                     key=lambda e: (e['start'], e['external_id']))
+rows = [dict(e, source='apple_calendar', calendar_id='work', calendar='Work', occurrence='',
+             all_day=False, status='confirmed', date=e['start'][:10]) for e in overlapping[:PAGE]]
+print(json.dumps({'schema_version': 1, 'calendar_ids': request['calendar_ids'], 'start': request['start'],
+                  'end': request['end'], 'truncated': len(overlapping) > PAGE, 'events': rows}))
+"#;
+
+#[test]
+fn live_sync_reads_past_one_reader_page_and_serves_local_days() {
+    let fixture = Fixture::new();
+    fixture.establish_local_identity();
+    let root = fixture._root.path();
+    let helper = root.join("eventkit-paging");
+    let source = root.join("eventkit-events.json");
+    let calls = root.join("eventkit-calls");
+    fs::write(&helper, PAGING_EVENTKIT_FIXTURE).unwrap();
+    fs::set_permissions(&helper, fs::Permissions::from_mode(0o700)).unwrap();
+
+    let today = chrono::Utc::now().date_naive();
+    let at = |days: i64, hour: u32| {
+        (today + chrono::Duration::days(days))
+            .and_hms_opt(hour, 0, 0)
+            .unwrap()
+            .format("%Y-%m-%dT%H:%M:%SZ")
+            .to_string()
+    };
+    let event = |id: &str, days: i64, hour: u32| serde_json::json!({"external_id": id, "title": id, "start": at(days, hour), "end": at(days, hour + 1)});
+    // Five events against a two-event page: the far ones only arrive if the
+    // read keeps paging instead of stopping at the reader's limit.
+    let mut events = vec![
+        event("soon", 1, 15),
+        event("evening", 2, 3),
+        event("later", 3, 15),
+        event("next-month", 40, 15),
+        event("next-quarter", 80, 15),
+    ];
+    fs::write(&source, serde_json::Value::from(events.clone()).to_string()).unwrap();
+    let command = || {
+        let mut cmd = fixture.heiwa();
+        cmd.env("HEIWA_APPLE_RESOURCES_HELPER", &helper)
+            .env("FIXTURE_SOURCE", &source)
+            .env("FIXTURE_CALLS", &calls)
+            .env("TZ", "America/Vancouver");
+        cmd
+    };
+    assert!(command()
+        .args(["connect", "apple-calendar", "--authorize"])
+        .output()
+        .unwrap()
+        .status
+        .success());
+
+    // A malformed request is the caller's mistake, not a sync failure: it must
+    // not leave an error that holds back the next background sync.
+    let malformed = command()
+        .args(["calendar", "read-selected", "--calendar-ids", "[]"])
+        .output()
+        .unwrap();
+    assert!(!malformed.status.success());
+    assert!(!fixture
+        .home
+        .join(".heiwa/state/calendar/apple_sync.json")
+        .exists());
+
+    let read = command()
+        .args(["calendar", "read-selected", "--calendar-ids", "[\"work\"]"])
+        .output()
+        .unwrap();
+    assert!(
+        read.status.success(),
+        "{}",
+        String::from_utf8_lossy(&read.stderr)
+    );
+    let receipt: serde_json::Value = serde_json::from_slice(&read.stdout).unwrap();
+    assert_eq!(receipt["truncated"], false, "{receipt}");
+    assert_eq!(receipt["fetched"], 5, "{receipt}");
+    let snapshot = fixture.home.join(".heiwa/state/calendar/events.jsonl");
+    let stored = |path: &Path| -> Vec<String> {
+        let mut ids: Vec<String> = fs::read_to_string(path)
+            .unwrap()
+            .lines()
+            .map(|line| {
+                serde_json::from_str::<serde_json::Value>(line).unwrap()["external_id"]
+                    .as_str()
+                    .unwrap()
+                    .to_string()
+            })
+            .collect();
+        ids.sort();
+        ids
+    };
+    assert_eq!(
+        stored(&snapshot),
+        ["evening", "later", "next-month", "next-quarter", "soon"]
+    );
+
+    // The source changes behind Heiwa's back: one event is deleted.
+    events.retain(|event| event["external_id"] != "next-month");
+    fs::write(&source, serde_json::Value::from(events).to_string()).unwrap();
+
+    let port = available_port();
+    let child = command()
+        .env("HEIWA_MACHINE_AUTH_TOKEN", "apple-connector-test-token")
+        .args(["app", "start", "--port", &port.to_string(), "--no-open"])
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .spawn()
+        .expect("start temporary runtime");
+    let _child = ChildGuard(child);
+    wait_for_runtime(port);
+
+    let synced = response_json(&post_json(
+        port,
+        "/api/v1/calendar/sync",
+        &serde_json::json!({"force": true}),
+    ));
+    assert_eq!(synced["data"]["status"], "synced", "{synced}");
+    assert_eq!(synced["data"]["complete"], true, "{synced}");
+    assert_eq!(
+        stored(&snapshot),
+        ["evening", "later", "next-quarter", "soon"],
+        "a complete read removes what the calendar no longer has"
+    );
+
+    // A recent read is reused rather than relaunching the reader.
+    let calls_before = fs::read(&calls).unwrap();
+    let fresh = response_json(&post_json(
+        port,
+        "/api/v1/calendar/sync",
+        &serde_json::json!({}),
+    ));
+    assert_eq!(fresh["data"]["status"], "fresh", "{fresh}");
+    assert_eq!(calls_before, fs::read(&calls).unwrap());
+
+    let range = format!(
+        "/api/v1/calendar/events?from={}&to={}",
+        today,
+        today + chrono::Duration::days(100)
+    );
+    let served = response_json(&get(port, &range));
+    let rows = served["data"]["events"].as_array().expect("event rows");
+    let titles: Vec<&str> = rows
+        .iter()
+        .map(|row| row["title"].as_str().unwrap())
+        .collect();
+    assert_eq!(
+        titles,
+        ["soon", "evening", "later", "next-quarter"],
+        "{served}"
+    );
+    // 03:00 UTC is the previous evening in Vancouver, whatever the season.
+    let evening = &rows[1];
+    assert_eq!(
+        evening["date"],
+        (today + chrono::Duration::days(1)).to_string(),
+        "{evening}"
+    );
+    assert_eq!(evening["end_date"], evening["date"]);
+    assert!(
+        evening.get("signal").is_none(),
+        "rows are compact: {evening}"
+    );
+    assert_eq!(served["data"]["sync"]["status"], "fresh");
+
+    let backwards = get(
+        port,
+        "/api/v1/calendar/events?from=2026-01-10&to=2026-01-01",
+    );
+    assert!(backwards.starts_with("HTTP/1.1 400"), "{backwards}");
+}

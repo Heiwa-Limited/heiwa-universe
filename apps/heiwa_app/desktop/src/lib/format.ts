@@ -14,9 +14,27 @@ export function timeFmt(ts?: number): string {
 
 export function shortDate(raw?: string): string {
   if (!raw) return "";
-  const parsed = new Date(raw);
+  const parsed = parseLocalDate(raw) ?? new Date(raw);
   if (Number.isNaN(parsed.getTime())) return raw;
   return parsed.toLocaleDateString([], { month: "short", day: "numeric" });
+}
+
+/**
+ * A `YYYY-MM-DD` calendar day as local midnight, or null for anything else.
+ *
+ * `new Date("2026-09-14")` is UTC midnight by specification, which is the
+ * evening of the 13th anywhere west of UTC. Calendar days are local, so they
+ * are built from their parts instead.
+ */
+export function parseLocalDate(raw: string): Date | null {
+  const match = raw.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (!match) return null;
+  const [year, month, day] = [Number(match[1]), Number(match[2]), Number(match[3])];
+  const date = new Date(year, month - 1, day);
+  // Reject rollovers such as 2026-02-30 rather than silently moving the day.
+  return date.getFullYear() === year && date.getMonth() === month - 1 && date.getDate() === day
+    ? date
+    : null;
 }
 
 /**

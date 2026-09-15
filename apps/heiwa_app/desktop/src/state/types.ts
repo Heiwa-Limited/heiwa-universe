@@ -1,15 +1,46 @@
 /** Shared shapes for data the runtime serves to more than one surface. */
 
+/**
+ * A calendar row as the runtime serves it. `start`/`end` are RFC 3339 instants
+ * for synced events, `HH:MM` clock times for local holds, or bare dates for
+ * Google all-day events; `surfaces/calendar/model.ts` is the one reader.
+ */
 export type CalendarEvent = {
   id?: string;
   title?: string;
   start?: string;
   end?: string;
+  /** Local day the event starts on. */
   date?: string;
+  /** Last local day the event touches, inclusive. */
+  end_date?: string;
+  all_day?: boolean;
+  recurring?: boolean;
+  calendar?: string;
   kind?: string;
   status?: string;
   source?: string;
   note?: string;
+};
+
+/** Inclusive local-day range of calendar rows to load. */
+export type CalendarRange = { from: string; to: string };
+
+/**
+ * Freshness of the selected Apple calendars, owned by the runtime.
+ *
+ * `synced` means this request read EventKit; `fresh` means a recent read was
+ * reused. `complete` is false when a read could not see the whole window, in
+ * which case nothing unseen was deleted.
+ */
+export type CalendarSyncStatus = {
+  status: "synced" | "fresh" | "not_connected" | "no_selection" | "error" | "never";
+  last_read_at?: string | null;
+  last_attempt_at?: string | null;
+  complete?: boolean | null;
+  fetched?: number | null;
+  selected_count?: number;
+  error?: string | null;
 };
 
 export type CalendarResource = {
