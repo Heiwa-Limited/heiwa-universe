@@ -176,17 +176,32 @@ fn has_disallowed_path_byte(path: &str) -> bool {
 }
 
 fn endpoint_url(base_url: &str, path: &str) -> Result<reqwest::Url, ProxyError> {
-    if !path.starts_with("/api/v1/") && path != "/status/health" {
+    // Every check below is about the path. Reads legitimately carry a query
+    // (`/api/v1/calendar/events?from=…`, with `encodeURIComponent` escapes),
+    // so the query is split off first and passed through untouched: it cannot
+    // change which path the request reaches. A POST never arrives here with a
+    // query, because `post_path_allowed` rejects `?` before this runs.
+    let (path_only, query) = match path.split_once('?') {
+        Some((path_only, query)) => (path_only, Some(query)),
+        None => (path, None),
+    };
+    if !path_only.starts_with("/api/v1/") && path_only != "/status/health" {
         return Err(ProxyError::InvalidPath(path.to_string()));
     }
-    if has_dot_segment(path) || has_disallowed_path_byte(path) {
+    if has_dot_segment(path_only)
+        || has_disallowed_path_byte(path_only)
+        || query.is_some_and(|query| query.contains('#'))
+    {
         return Err(ProxyError::InvalidPath(path.to_string()));
     }
     let base = validate_loopback_url(base_url, "http")?;
     if base.path() != "/" || base.query().is_some() {
         return Err(ProxyError::InvalidEndpoint);
     }
-    let final_url = base.join(path).map_err(|_| ProxyError::InvalidEndpoint)?;
+    let mut final_url = base
+        .join(path_only)
+        .map_err(|_| ProxyError::InvalidEndpoint)?;
+    final_url.set_query(query);
     validate_loopback_url(final_url.as_str(), "http")?;
     Ok(final_url)
 }
@@ -194,10 +209,10 @@ fn endpoint_url(base_url: &str, path: &str) -> Result<reqwest::Url, ProxyError> 
 /// Endpoints the desktop UI is allowed to reach through the write proxy.
 /// `api_get` stays passthrough-by-prefix (read-only; the same rigor for GET
 /// is called out as an open question in `reports/L-009-desktop-ipc-least-privilege.md`
-/// rather than silently folded into this task). Keep this list in sync with
-/// the mirrored allowlist in `src/state/api-post-allowlist.test.ts`, which
-/// scans the frontend for every literal POST path it actually calls and
-/// fails if either side has an entry the other does not.
+/// rather than silently folded into this task). This file is the only copy:
+/// `src/state/api-post-allowlist.test.ts` parses these two consts out of
+/// proxy.rs and fails if the frontend calls a POST path they do not allow,
+/// or if an entry here is used by nothing.
 const ALLOWED_POST_EXACT: &[&str] = &[
     "/api/v1/agents/dispatch",
     "/api/v1/calendar/sync",
@@ -1059,7 +1074,6 @@ mod tests {
             "/api/v1/operator/threads/.%2e/turns",
             "/api/v1/operator/threads/%2E./turns",
             "/api/v1/operator/threads/../turns",
-            "/api/v1/approvals/x?evil=1/approve",
             "/api/v1/approvals/x#frag/approve",
             "/api/v1/operator/threads/a%2fb/turns",
             "/api/v1/operator/threads/a\\../turns",
@@ -1090,6 +1104,50 @@ mod tests {
                 endpoint_url("http://127.0.0.1:9", path).expect("ordinary path must be accepted");
             assert_eq!(url.path(), path);
         }
+    }
+
+    #[test]
+    fn endpoint_url_keeps_the_read_queries_the_ui_sends() {
+        // Shapes from src/state/runtime.ts (calendar range) and
+        // src/operator/client.ts (thread events), encodeURIComponent escapes included.
+        for (path, expected_path, expected_query) in [
+            (
+                "/api/v1/calendar/events?from=2026-09-15T07%3A00%3A00.000Z&to=2026-10-15T07%3A00%3A00.000Z",
+                "/api/v1/calendar/events",
+                "from=2026-09-15T07%3A00%3A00.000Z&to=2026-10-15T07%3A00%3A00.000Z",
+            ),
+            (
+                "/api/v1/operator/threads/thread-0f8c1d2e-1111-4a2b-9c3d-123456789abc/events?limit=500&after=opaque%2B%2F%3D",
+                "/api/v1/operator/threads/thread-0f8c1d2e-1111-4a2b-9c3d-123456789abc/events",
+                "limit=500&after=opaque%2B%2F%3D",
+            ),
+        ] {
+            let url = endpoint_url("http://127.0.0.1:9", path)
+                .expect("a read query the UI sends must be accepted");
+            assert_eq!(url.path(), expected_path);
+            assert_eq!(url.query(), Some(expected_query));
+        }
+    }
+
+    #[test]
+    fn endpoint_url_still_checks_the_path_when_a_query_is_present() {
+        for path in [
+            "/api/v1/operator/threads/%2e%2e/events?limit=500",
+            "/api/v1/operator/threads/a\\b/events?limit=500",
+            "/api/v1/../admin?x=1",
+            "/api/v2/anything?x=1",
+            "/api/v1/calendar/events?from=a#frag",
+        ] {
+            assert!(
+                endpoint_url("http://127.0.0.1:9", path).is_err(),
+                "{path:?} must be rejected"
+            );
+        }
+    }
+
+    #[test]
+    fn post_path_allowed_rejects_a_query_riding_on_an_id() {
+        assert!(!post_path_allowed("/api/v1/approvals/x?evil=1/approve"));
     }
 
     #[test]
