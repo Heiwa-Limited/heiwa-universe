@@ -6,11 +6,12 @@
 # Do NOT add new fingerprints without a recorded triage. Format: commit:file:rule:line
 #
 # Triaged 2026-09-15 (L-007): 2 findings, 0 active secrets. Both are the
-# RFC 6455 sec 1.3 example WebSocket handshake key
-# (`Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==`, the base64 of the literal
-# string "the sample nonce"), the same test-fixture pattern already triaged
-# for operator_api.rs above, now also used by new L-007 WebSocket-upgrade
-# tests in app.rs. Public example data from the spec, not a credential.
+# RFC 6455 section 1.3 example WebSocket handshake key header — the base64
+# encoding of the literal phrase "the sample nonce" — the same test-fixture
+# pattern already triaged for operator_api.rs above, now also used by new
+# L-007 WebSocket-upgrade tests in app.rs. Public example data from the
+# spec, not a credential. (Not reproduced verbatim here so this comment
+# does not itself become a new finding.)
 be2a81c801a31168773188ec4a935601f42c8926:apps/heiwa_shell/src/cmd/app.rs:generic-api-key:6638
 be2a81c801a31168773188ec4a935601f42c8926:apps/heiwa_shell/src/cmd/app.rs:generic-api-key:6774
 1197b1171c3a7d5934b34dd40a46b417841e0bb6:apps/heiwa_shell/tests/operator_api.rs:generic-api-key:732
