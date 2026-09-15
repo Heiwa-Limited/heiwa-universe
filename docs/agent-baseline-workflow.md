@@ -56,7 +56,7 @@ bash scripts/check_agent_baseline.sh
 ```
 
 On an experimental branch, declare the topology explicitly so the same full
-local gate proves the branch descends from current `dev`:
+local gate proves the branch descends from cached `origin/dev`:
 
 ```bash
 HEIWA_BRANCH_MODE=experimental bash scripts/check_agent_baseline.sh
@@ -75,8 +75,8 @@ Do not add empty or sentinel commits merely to make `dev` appear ahead.
 
 The gate is intentionally local-only. It does not fetch, push, call GitHub, or verify remote CI. It checks:
 
-- branch topology matches the declared mode (`dev` ahead for integration, a branch descended from `dev` for experimental work, or synchronized `dev` during post-promotion handoff)
-- cached `origin/dev` exists by default and local ahead/behind can be reported; topology also checks cached `origin/main`
+- branch topology matches the declared mode (`dev` ahead for integration, a branch descended from `origin/dev` for experimental work, or synchronized `dev` during post-promotion handoff)
+- cached `origin/dev` exists by default for experimental work and local ahead/behind can be reported; topology also checks cached `origin/main`
 - tracked tree is clean
 - untracked files are absent except ignored or explicit `vendor/` quarantine entries
 - exactly one linked worktree owns the configured integration branch, `dev` by default
