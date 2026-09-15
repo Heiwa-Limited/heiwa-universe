@@ -1888,6 +1888,166 @@ fn print_help() {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::io::{Read, Write};
+    use std::net::TcpListener;
+
+    /// A fake Google Calendar endpoint bound to an ephemeral loopback port.
+    /// Accepts exactly one connection, captures the raw request text it
+    /// received, and answers with the given status line and body. Mirrors
+    /// the stub-server idiom already used in
+    /// `apps/heiwa_app/desktop/src-tauri/src/proxy.rs`.
+    fn stub_server_capturing_request(
+        status_line: &str,
+        body: &str,
+    ) -> (String, std::sync::mpsc::Receiver<String>) {
+        let listener = TcpListener::bind("127.0.0.1:0").expect("bind stub server");
+        let address = listener.local_addr().expect("stub addr");
+        let status_line = status_line.to_string();
+        let body = body.to_string();
+        let (request_tx, request_rx) = std::sync::mpsc::channel();
+        std::thread::spawn(move || {
+            let (mut stream, _) = listener.accept().expect("accept request");
+            let mut buffer = [0_u8; 4096];
+            let read = stream.read(&mut buffer).expect("read request");
+            let _ = request_tx.send(String::from_utf8_lossy(&buffer[..read]).to_string());
+            let response = format!(
+                "HTTP/1.1 {status_line}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+                body.len()
+            );
+            stream
+                .write_all(response.as_bytes())
+                .expect("write response");
+        });
+        (format!("http://{address}"), request_rx)
+    }
+
+    /// A synthetic access token shaped like a real OAuth bearer token but
+    /// built at test run time from a fresh UUID rather than as a literal, so
+    /// it never reads as fixture-shaped high-entropy text to a secret
+    /// scanner.
+    fn synthetic_access_token() -> String {
+        format!("ya29.test-{}", uuid::Uuid::new_v4().simple())
+    }
+
+    #[tokio::test]
+    async fn google_calendar_get_sends_the_bearer_token_intact_in_the_authorization_header() {
+        let token = synthetic_access_token();
+        let (base, requests) = stub_server_capturing_request(
+            "200 OK",
+            r#"{"items":[{"id":"primary","summary":"Home"}]}"#,
+        );
+        let payload = google_calendar_get(&format!("{base}/users/me/calendarList"), &token)
+            .await
+            .expect("stub response parses");
+        assert_eq!(payload["items"][0]["id"], json!("primary"));
+
+        let request = requests
+            .recv_timeout(std::time::Duration::from_secs(5))
+            .expect("stub server received a request");
+        // reqwest sends the header name lowercased (HTTP header names are
+        // case-insensitive), unlike curl's `-H "Authorization: ..."`.
+        assert!(
+            request.to_ascii_lowercase().contains(&format!(
+                "authorization: bearer {}",
+                token.to_ascii_lowercase()
+            )),
+            "token must arrive intact in the Authorization header: {request}"
+        );
+        // The prior curl implementation put the token in argv; there is no
+        // argv here at all, but confirm it never leaked into the request
+        // line or any other header by accident either.
+        assert_eq!(
+            request.matches(&token).count(),
+            1,
+            "token must appear exactly once, in Authorization: {request}"
+        );
+    }
+
+    #[tokio::test]
+    async fn google_calendar_get_classifies_a_non_json_body_the_same_way_as_before() {
+        let token = synthetic_access_token();
+        let (base, _requests) = stub_server_capturing_request("200 OK", "not json at all");
+        let error = google_calendar_get(&format!("{base}/x"), &token)
+            .await
+            .expect_err("non-JSON body must be an error");
+        assert!(
+            error
+                .to_string()
+                .contains("Google Calendar returned non-JSON"),
+            "{error}"
+        );
+        assert!(
+            !error.to_string().contains(&token),
+            "token must not leak into the non-JSON error: {error}"
+        );
+    }
+
+    #[tokio::test]
+    async fn google_calendar_get_retry_does_not_retry_on_429_or_5xx_and_keeps_status_in_the_body() {
+        // Status handling is unchanged from the curl implementation: neither
+        // the HTTP status line nor an exit code was ever inspected before,
+        // only the JSON body's own error.code field, read by the caller —
+        // and only a 401 ever triggered the refresh-and-retry path. A 429 or
+        // 500 must still resolve in exactly one request, as Ok(json).
+        for (status_line, code) in [
+            ("429 Too Many Requests", 429),
+            ("500 Internal Server Error", 500),
+        ] {
+            let mut token = synthetic_access_token();
+            let body = json!({"error": {"code": code, "message": "synthetic failure"}}).to_string();
+            let (base, requests) = stub_server_capturing_request(status_line, &body);
+            let payload = google_calendar_get_retry(&format!("{base}/x"), &mut token)
+                .await
+                .expect("429/5xx must surface as Ok(json), not Err, exactly as before");
+            assert_eq!(google_error_code(&payload), Some(code));
+            assert!(
+                requests
+                    .recv_timeout(std::time::Duration::from_secs(5))
+                    .is_ok(),
+                "the single expected request must have arrived for status {status_line}"
+            );
+            assert!(
+                requests
+                    .recv_timeout(std::time::Duration::from_millis(200))
+                    .is_err(),
+                "a second request would mean an unwanted retry for status {status_line}"
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn google_calendar_get_never_leaks_the_token_formatting_401_403_429_or_500() {
+        let token = synthetic_access_token();
+        for (status_line, code) in [
+            ("401 Unauthorized", 401),
+            ("403 Forbidden", 403),
+            ("429 Too Many Requests", 429),
+            ("500 Internal Server Error", 500),
+        ] {
+            let body = json!({"error": {"code": code, "message": "synthetic failure"}}).to_string();
+            let (base, _requests) = stub_server_capturing_request(status_line, &body);
+            let result = google_calendar_get(&format!("{base}/x"), &token).await;
+            // Status handling is preserved: none of these are Err here (only
+            // a transport failure or a non-JSON body is); the caller reads
+            // error.code from the Ok(json) payload.
+            let payload = result.expect("401/403/429/500 must surface as Ok(json)");
+            assert_eq!(google_error_code(&payload), Some(code));
+            let debug_formatted = format!("{payload:?}");
+            assert!(
+                !debug_formatted.contains(&token),
+                "token must not appear when the {code} payload is formatted: {debug_formatted}"
+            );
+            // Reproduce the caller-level error text (as google_events_for_calendar
+            // and sync_google_calendar build it) and check that too.
+            if let Some(error) = payload.get("error") {
+                let caller_error = anyhow!("google calendar request failed: {error}").to_string();
+                assert!(
+                    !caller_error.contains(&token),
+                    "token must not appear in the caller-facing error for {code}: {caller_error}"
+                );
+            }
+        }
+    }
 
     #[test]
     fn create_hold_rejects_bad_date() {
