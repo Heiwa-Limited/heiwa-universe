@@ -175,10 +175,30 @@ impl OperatorActivityLease {
         Ok(())
     }
 
+    /// Runs `operation` under the exclusive lease, then always leaves the
+    /// lease holding the shared lock again — on success, on a failure
+    /// inside `operation`, and when the exclusive attempt is denied.
+    ///
+    /// Reuses the *same* open file description for the whole upgrade and
+    /// downgrade, instead of closing it and racing a brand new descriptor
+    /// into an exclusive lock. `flock(2)` conversion is not atomic — the
+    /// existing lock is dropped, then the new one is requested — but a
+    /// duplicate of *this* description (for example a `Command::spawn`-ed
+    /// child that has not yet exec'd, which inherits every open descriptor)
+    /// shares the same lock state, so it can never be the competing request
+    /// that wins that gap. Only a genuinely independent descriptor, a real
+    /// other writer, can still deny the upgrade, correctly failing closed
+    /// as `ActivityAlreadyHeld`. A second, independently opened descriptor
+    /// (the previous approach) has no such immunity: a forked child's
+    /// inherited copy of the *old* descriptor keeps that lock alive on its
+    /// own, so it could and did deny an upgrade that should have succeeded.
     fn with_exclusive<T>(&mut self, operation: impl FnOnce() -> Result<T>) -> Result<T> {
-        let exclusive_file = open_ownership_file(&self.root, OPERATOR_ACTIVITY_LEASE_FILE)?;
-        drop(self.shared_file.take());
-        let acquired = exclusive_file.try_lock().map_err(|source| match source {
+        let file = match self.shared_file.take() {
+            Some(file) => file,
+            None => open_ownership_file(&self.root, OPERATOR_ACTIVITY_LEASE_FILE)?,
+        };
+
+        let acquired = file.try_lock().map_err(|source| match source {
             std::fs::TryLockError::WouldBlock => OperatorOwnershipError::ActivityAlreadyHeld {
                 root: self.root.clone(),
             },
@@ -188,19 +208,17 @@ impl OperatorActivityLease {
             },
         });
         if let Err(error) = acquired {
-            drop(exclusive_file);
-            self.restore_shared()?;
+            self.restore_shared(file)?;
             return Err(anyhow!(error));
         }
 
         let operation_result = operation();
-        drop(exclusive_file);
-        self.restore_shared()?;
+        self.restore_shared(file)?;
         operation_result
     }
 
-    fn restore_shared(&mut self) -> Result<()> {
-        let file = open_ownership_file(&self.root, OPERATOR_ACTIVITY_LEASE_FILE)?;
+    /// Converts `file`'s own lock back to shared in place and stores it.
+    fn restore_shared(&mut self, file: File) -> Result<()> {
         file.lock_shared().map_err(|source| {
             anyhow!(OperatorOwnershipError::Storage {
                 root: self.root.clone(),
@@ -2394,7 +2412,10 @@ mod tests {
     use heiwa_evidence::{OperatorActor, OperatorEvent, OperatorEventType, OperatorJournal};
     use serde_json::json;
 
-    use super::{new_event, now_iso, OperatorSessionService, StartTurnRequest};
+    use super::{
+        new_event, now_iso, open_ownership_file, OperatorSessionService, StartTurnRequest,
+        OPERATOR_ACTIVITY_LEASE_FILE,
+    };
 
     #[test]
     fn read_only_replay_does_not_wait_for_a_write_transaction() {
@@ -2458,6 +2479,62 @@ mod tests {
             service.projection.lock().unwrap().applied_event_rows,
             first_applied + 1
         );
+    }
+
+    #[test]
+    fn with_exclusive_upgrades_past_a_duplicated_shared_descriptor() {
+        // `Command::spawn` forks the whole process, duplicating every open
+        // file descriptor into the child before it execs, including this
+        // lease's shared-lock file. The duplicate shares the *same* open
+        // file description (and its lock) as the original -- exactly what
+        // `File::try_clone` gives us -- so cloning the lease's file here
+        // reproduces a forked-but-not-yet-exec'd child deterministically,
+        // with no real child process and no timing dependency.
+        let dir = tempfile::tempdir().unwrap();
+        let service =
+            OperatorSessionService::new(OperatorJournal::new(dir.path().to_path_buf()).unwrap());
+        service
+            .start_turn("default", StartTurnRequest::auto("req-1", "hello"))
+            .unwrap();
+
+        let inherited = service
+            .activity_lease
+            .lock()
+            .unwrap()
+            .shared_file
+            .as_ref()
+            .expect("start_turn's append_event acquired the shared lease")
+            .try_clone()
+            .expect("dup the shared-lease file, modeling a forked child's inherited fd");
+
+        // The exclusive upgrade must still succeed: `inherited` is a
+        // duplicate of our own open file description, never a second
+        // writer, so it must not be able to deny the upgrade.
+        assert_eq!(
+            service.recover_interrupted().expect(
+                "an inherited duplicate of our own shared descriptor must never look like \
+                 another live session writer"
+            ),
+            1,
+            "closes the unfinished turn started above"
+        );
+
+        // The lease must be shared again afterwards -- not exclusive, and
+        // not unheld either (a silently failed `restore_shared` would also
+        // let a plain `try_lock_shared` below succeed). An independent
+        // descriptor denied `try_lock` but granted `try_lock_shared` is the
+        // only outcome that proves a shared lock, specifically, is held.
+        let independent = open_ownership_file(dir.path(), OPERATOR_ACTIVITY_LEASE_FILE).unwrap();
+        assert!(
+            independent.try_lock().is_err(),
+            "the lease's shared lock must still deny an independent exclusive attempt"
+        );
+        assert!(
+            independent.try_lock_shared().is_ok(),
+            "with_exclusive must leave the lease shared again, not exclusive"
+        );
+
+        drop(inherited);
     }
 
     #[test]
