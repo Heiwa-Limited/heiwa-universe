@@ -218,13 +218,15 @@ export type UpdateOffer = {
 };
 
 export type AppleMailScanResult = {
-  status?: "scanned" | "fresh" | "no_consent" | "mail_not_running" | "error" | "skipped";
+  status?: "scanned" | "fresh" | "no_consent" | "mail_not_running" | "backoff" | "error" | "skipped";
   freshness?: "scanned" | "fresh" | "backoff" | "closed";
   fetched: number;
   appended: number;
   deduplicated: number;
   updated?: number;
   removed?: number;
+  error?: string | null;
+  error_class?: string | null;
 };
 
 export async function runtimeHealth(): Promise<RuntimeHealth> {

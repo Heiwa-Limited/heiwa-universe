@@ -27,7 +27,12 @@ function Mail() {
   const freshness = () => {
     const status = sync();
     if (!status) return undefined;
-    if (status.status === "error") return `Sync failed: ${status.error ?? "unknown error"}`;
+    if (status.status === "error" || status.status === "backoff" || status.status === "skipped") {
+      if (status.error_class === "timeout") return "Mail sync timed out; try Read Apple Mail again.";
+      if (status.error_class === "automation_denied") return "Allow Heiwa in System Settings › Privacy & Security › Automation.";
+      if (status.status === "backoff") return "Mail sync paused briefly after a failed read.";
+      return `Sync failed: ${status.error ?? "unknown error"}`;
+    }
     if (status.status === "mail_not_running") return "Open Mail to refresh";
     if (status.status === "no_consent") return "Open Mail to refresh";
     if (status.status === "fresh" && status.last_scan_at) {

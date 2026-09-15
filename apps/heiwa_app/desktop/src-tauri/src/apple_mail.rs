@@ -7,7 +7,9 @@ use std::time::Duration;
 use std::time::Instant;
 use tauri::Manager;
 
-const SCAN_TIMEOUT: Duration = Duration::from_secs(20);
+const BACKGROUND_SCAN_TIMEOUT: Duration = Duration::from_secs(25);
+const EXPLICIT_SCAN_TIMEOUT: Duration = Duration::from_secs(45);
+const TAURI_TIMEOUT_GRACE: Duration = Duration::from_secs(5);
 const MAX_RESULT_BYTES: usize = 64 * 1024;
 static SCAN_LOCK: Mutex<()> = Mutex::new(());
 
@@ -20,6 +22,8 @@ pub struct AppleMailScanResult {
     deduplicated: usize,
     updated: usize,
     removed: usize,
+    error: Option<String>,
+    error_class: Option<String>,
 }
 
 #[derive(Debug, Default, Deserialize)]
@@ -46,6 +50,8 @@ struct ScanPayload {
     updated: usize,
     #[serde(default)]
     removed: usize,
+    #[serde(default)]
+    error_class: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -54,6 +60,7 @@ struct SourceReport {
     status: String,
     error: Option<String>,
     reason: Option<String>,
+    error_class: Option<String>,
 }
 
 #[tauri::command]
@@ -79,9 +86,14 @@ pub async fn apple_mail_scan(
         .ok_or_else(|| "The bundled Heiwa runtime could not be found.".to_string())?;
 
         let options = options.unwrap_or_default();
+        let cli_timeout = if options.background {
+            BACKGROUND_SCAN_TIMEOUT
+        } else {
+            EXPLICIT_SCAN_TIMEOUT
+        };
         run_scan_process(
             &binary,
-            SCAN_TIMEOUT,
+            cli_timeout + TAURI_TIMEOUT_GRACE,
             options.background,
             options.stale_seconds,
         )
@@ -120,7 +132,24 @@ fn run_scan_process(
         .stdout(Stdio::piped())
         .stderr(Stdio::null());
 
-    let output = heiwa_core::subprocess::bounded_output(&mut command, timeout, MAX_RESULT_BYTES)?;
+    let output =
+        match heiwa_core::subprocess::bounded_output(&mut command, timeout, MAX_RESULT_BYTES) {
+            Ok(output) => output,
+            Err(error) if error.contains("timed out") => {
+                return Ok(AppleMailScanResult {
+                    status: "error".into(),
+                    freshness: Some("timeout".into()),
+                    fetched: 0,
+                    appended: 0,
+                    deduplicated: 0,
+                    updated: 0,
+                    removed: 0,
+                    error: Some(error),
+                    error_class: Some("timeout".into()),
+                });
+            }
+            Err(error) => return Err(error),
+        };
     parse_scan_output(&output)
 }
 
@@ -136,25 +165,17 @@ fn parse_scan_output(output: &[u8]) -> Result<AppleMailScanResult, String> {
         .status
         .clone()
         .unwrap_or_else(|| source.status.clone());
-    if matches!(status.as_str(), "error" | "skipped") {
-        let detail = source
-            .error
-            .as_deref()
-            .or(source.reason.as_deref())
-            .unwrap_or("Apple Mail is not ready on this Mac.");
-        let detail: String = detail
-            .chars()
-            .map(|character| {
-                if character.is_control() {
-                    ' '
-                } else {
-                    character
-                }
-            })
-            .take(512)
-            .collect();
-        return Err(format!("Apple Mail could not be read: {detail}"));
-    }
+    let detail = source
+        .error
+        .as_deref()
+        .or(source.reason.as_deref())
+        .map(sanitize_detail);
+    let error_class = payload
+        .error_class
+        .clone()
+        .or(source.error_class.clone())
+        .or_else(|| detail.as_deref().map(classify_error).map(str::to_string));
+    let structured_error = matches!(status.as_str(), "error" | "backoff" | "skipped");
     Ok(AppleMailScanResult {
         status,
         freshness: payload.freshness,
@@ -163,7 +184,41 @@ fn parse_scan_output(output: &[u8]) -> Result<AppleMailScanResult, String> {
         deduplicated: payload.deduplicated,
         updated: payload.updated,
         removed: payload.removed,
+        error: if structured_error {
+            detail.or_else(|| Some("Apple Mail is not ready on this Mac.".into()))
+        } else {
+            detail
+        },
+        error_class,
     })
+}
+
+fn sanitize_detail(detail: &str) -> String {
+    detail
+        .chars()
+        .map(|character| {
+            if character.is_control() {
+                ' '
+            } else {
+                character
+            }
+        })
+        .take(512)
+        .collect()
+}
+
+fn classify_error(detail: &str) -> &'static str {
+    let lower = detail.to_ascii_lowercase();
+    if lower.contains("timed out") || lower.contains("timeout") {
+        "timeout"
+    } else if lower.contains("permission")
+        || lower.contains("automation")
+        || lower.contains("access denied")
+    {
+        "automation_denied"
+    } else {
+        "failed"
+    }
 }
 
 #[cfg(test)]
@@ -189,12 +244,14 @@ mod tests {
                 deduplicated: 1,
                 updated: 0,
                 removed: 0,
+                error: None,
+                error_class: None,
             }
         );
     }
 
     #[test]
-    fn treats_structured_error_and_skipped_sources_as_failures() {
+    fn preserves_structured_error_and_skipped_sources_for_the_ui() {
         for (status, field, detail) in [
             ("error", "error", "Automation access denied"),
             ("skipped", "reason", "No Apple Mail account is configured"),
@@ -202,8 +259,8 @@ mod tests {
             let payload = format!(
                 r#"{{"sources":[{{"source":"apple","status":"{status}","{field}":"{detail}"}}],"fetched":0,"appended":0,"deduplicated":0}}"#,
             );
-            let error = parse_scan_output(payload.as_bytes()).unwrap_err();
-            assert!(error.contains(detail));
+            let result = parse_scan_output(payload.as_bytes()).unwrap();
+            assert_eq!(result.error.as_deref(), Some(detail));
         }
     }
 
@@ -256,7 +313,9 @@ mod tests {
         let started = Instant::now();
         let result = run_fresh_script(&path, Duration::from_millis(50));
         let _ = std::fs::remove_file(&path);
-        assert!(result.unwrap_err().contains("timed out"));
+        let result = result.unwrap();
+        assert_eq!(result.status, "error");
+        assert_eq!(result.error_class.as_deref(), Some("timeout"));
         assert!(started.elapsed() < Duration::from_secs(2));
     }
 
@@ -267,7 +326,9 @@ mod tests {
         let started = Instant::now();
         let result = run_fresh_script(&path, Duration::from_millis(100));
         let _ = std::fs::remove_file(&path);
-        assert!(result.unwrap_err().contains("timed out"));
+        let result = result.unwrap();
+        assert_eq!(result.status, "error");
+        assert_eq!(result.error_class.as_deref(), Some("timeout"));
         assert!(started.elapsed() < Duration::from_secs(2));
     }
 

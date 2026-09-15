@@ -175,6 +175,8 @@ const MAX_SNAPSHOT_LINES: usize = 1000;
 const RETENTION_DAYS: i64 = 60;
 const DEFAULT_SCAN_DAYS: u64 = 14;
 const DEFAULT_PER_ACCOUNT: usize = 200;
+const BACKGROUND_SCAN_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(25);
+const EXPLICIT_SCAN_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(45);
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 #[serde(deny_unknown_fields)]
@@ -185,6 +187,9 @@ struct MailSyncState {
     last_scan_at: Option<chrono::DateTime<chrono::Utc>>,
     complete: Option<bool>,
     fetched: Option<usize>,
+    accounts_total: Option<usize>,
+    accounts_with_inbox: Option<usize>,
+    accounts_scanned: Option<usize>,
     error: Option<String>,
 }
 
@@ -262,6 +267,9 @@ struct AccountScan {
 struct MailScanOutput {
     status: String,
     accounts: Vec<AccountScan>,
+    accounts_total: usize,
+    accounts_with_inbox: usize,
+    accounts_scanned: usize,
 }
 
 #[derive(Debug, Default)]
@@ -272,74 +280,137 @@ struct ReconcileCounts {
     total: usize,
 }
 
-/// JXA program: query each account's INBOX independently, newest first. The
-/// only properties read are metadata fields; no body or recipient content is
-/// ever touched.
-const APPLE_MAIL_JXA: &str = r#"
-function run(argv) {
-  const days = Math.max(1, parseInt(argv[0] || "14", 10));
-  const perAccount = Math.max(1, parseInt(argv[1] || "200", 10));
-  const ifRunning = argv[2] === "1";
-  if (ifRunning) {
-    const probe = Application("Mail");
-    if (!probe.running()) return JSON.stringify({kind: "status", status: "mail_not_running"});
-  }
-  const Mail = Application("Mail");
-  const cutoff = new Date(Date.now() - days * 86400000);
-  const now = new Date();
-  const output = [];
-  let accounts = [];
-  try { accounts = Mail.accounts(); } catch (e) {
-    throw new Error("Apple Mail account query failed: " + e);
-  }
-  for (let a = 0; a < accounts.length; a++) {
-    let accountName = "";
-    let inbox;
-    try {
-      accountName = String(accounts[a].name());
-      const mailboxes = accounts[a].mailboxes();
-      inbox = mailboxes.find((box) => /^(INBOX|Inbox)$/.test(String(box.name())));
-    } catch (e) { continue; }
-    if (!inbox) continue;
-    try {
-      const spec = inbox.messages.whose({dateReceived: {_greaterThan: cutoff}});
-      const dates = spec.dateReceived();
-      const senders = spec.sender();
-      const subjects = spec.subject();
-      const readStates = spec.readStatus();
-      const messageIds = spec.messageId();
-      const rows = [];
-      for (let i = 0; i < dates.length; i++) {
-        const date = new Date(dates[i]);
-        if (isNaN(date.getTime())) continue;
-        rows.push({
-          account: accountName,
-          mailbox: String(inbox.name()),
-          sender: String(senders[i] || ""),
-          subject: String(subjects[i] || ""),
-          date: date.toISOString(),
-          unread: !Boolean(readStates[i]),
-          message_id: messageIds[i] ? String(messageIds[i]) : ""
-        });
-      }
-      rows.sort((left, right) => right.date.localeCompare(left.date));
-      const kept = rows.slice(0, perAccount);
-      const windowStart = rows.length > kept.length && kept.length
-        ? kept[kept.length - 1].date
-        : cutoff.toISOString();
-      output.push(JSON.stringify({
-        kind: "account",
-        account: accountName,
-        window_start: windowStart,
-        window_end: now.toISOString(),
-        matched: rows.length,
-        kept: kept.length
-      }));
-      for (const row of kept) output.push(JSON.stringify(row));
-    } catch (e) { continue; }
-  }
-  return output.join("\n");
-}
+/// AppleScript program: query each account's INBOX through a bounded range,
+/// newest first. ASCII record/unit separators keep the protocol independent
+/// of locale and JSON escaping; no body or recipient content is read.
+const APPLE_MAIL_APPLESCRIPT: &str = r#"
+on stripSeparators(value)
+    set valueText to value as text
+    set AppleScript's text item delimiters to (character id 30)
+    set valueText to (text items of valueText) as text
+    set AppleScript's text item delimiters to (character id 31)
+    set valueText to (text items of valueText) as text
+    set AppleScript's text item delimiters to ""
+    return valueText
+end stripSeparators
+
+on run argv
+    set daysBack to (item 1 of argv) as integer
+    set perAccount to (item 2 of argv) as integer
+    set ifRunning to (item 3 of argv is "1")
+    set us to character id 31
+    set rs to character id 30
+    set nowDate to current date
+    set cutoffDate to nowDate - (daysBack * 86400)
+    set epochDate to current date
+    set year of epochDate to 1970
+    set month of epochDate to January
+    set day of epochDate to 1
+    set time of epochDate to 0
+    if ifRunning then
+        tell application "Mail"
+            if not running then return "S" & us & "mail_not_running"
+        end tell
+    end if
+    set outputRecords to {}
+    set accountsTotal to 0
+    set accountsWithInbox to 0
+    set accountsScanned to 0
+    set mailAccounts to {}
+    try
+        tell application "Mail" to set mailAccounts to accounts
+    on error errorText
+        error "Apple Mail account query failed: " & errorText
+    end try
+    set accountsTotal to count of mailAccounts
+    repeat with accountRef in mailAccounts
+        set accountName to ""
+        set inboxName to ""
+        set inboxRef to missing value
+        try
+            tell application "Mail"
+                set accountName to name of accountRef as text
+                set accountMailboxes to mailboxes of accountRef
+                repeat with boxRef in accountMailboxes
+                    set boxName to name of boxRef as text
+                    if boxName is "INBOX" or boxName is "Inbox" then
+                        set inboxRef to boxRef
+                        set inboxName to boxName
+                        exit repeat
+                    end if
+                end repeat
+            end tell
+        end try
+        if inboxRef is not missing value then
+            set accountsWithInbox to accountsWithInbox + 1
+            try
+                tell application "Mail"
+                    set messageCount to count of messages of inboxRef
+                    if messageCount is greater than 0 then
+                        set firstDate to date received of message 1 of inboxRef
+                        set lastDate to date received of message messageCount of inboxRef
+                        set newestFirst to firstDate is greater than or equal to lastDate
+                        set k to perAccount
+                        if k is greater than messageCount then set k to messageCount
+                        if newestFirst then
+                            set rangeStart to 1
+                        else
+                            set rangeStart to messageCount - k + 1
+                        end if
+                        set rangeEnd to rangeStart + k - 1
+                        set selectedMessages to messages rangeStart thru rangeEnd of inboxRef
+                        set receivedDates to date received of selectedMessages
+                        set senders to sender of selectedMessages
+                        set subjects to subject of selectedMessages
+                        set readStates to read status of selectedMessages
+                        set messageIds to message id of selectedMessages
+                        set boundaryDate to item 1 of receivedDates
+                        if newestFirst then set boundaryDate to item k of receivedDates
+                        set windowStartDate to cutoffDate
+                        if k is less than messageCount and boundaryDate is greater than cutoffDate then set windowStartDate to boundaryDate
+                        set matched to 0
+                        set kept to 0
+                        repeat with i from 1 to k
+                            set receivedDate to item i of receivedDates
+                            if receivedDate is greater than cutoffDate then set matched to matched + 1
+                        end repeat
+                        set headerRecord to "A" & us & my stripSeparators(accountName) & us & (((windowStartDate - epochDate) as integer) as text) & us & (((nowDate - epochDate) as integer) as text) & us & matched & us & matched
+                        set end of outputRecords to headerRecord
+                        repeat with i from 1 to k
+                            set receivedDate to item i of receivedDates
+                            if receivedDate is greater than cutoffDate then
+                                set kept to kept + 1
+                                set senderValue to my stripSeparators(item i of senders)
+                                set subjectValue to my stripSeparators(item i of subjects)
+                                set readValue to "0"
+                                if (item i of readStates) is false then set readValue to "1"
+                                set messageIdValue to ""
+                                try
+                                    set messageIdValue to my stripSeparators(item i of messageIds)
+                                end try
+                                set rowRecord to "R" & us & my stripSeparators(accountName) & us & my stripSeparators(inboxName) & us & senderValue & us & subjectValue & us & (((receivedDate - epochDate) as integer) as text) & us & readValue & us & messageIdValue
+                                set end of outputRecords to rowRecord
+                            end if
+                        end repeat
+                        set accountsScanned to accountsScanned + 1
+                    else
+                        set headerRecord to "A" & us & my stripSeparators(accountName) & us & (((cutoffDate - epochDate) as integer) as text) & us & (((nowDate - epochDate) as integer) as text) & us & "0" & us & "0"
+                        set end of outputRecords to headerRecord
+                        set accountsScanned to accountsScanned + 1
+                    end if
+                end tell
+            on error
+                -- A failed account is deliberately omitted so reconciliation
+                -- leaves its existing rows untouched.
+            end try
+        end if
+    end repeat
+    set end of outputRecords to "T" & us & accountsTotal & us & accountsWithInbox & us & accountsScanned
+    set AppleScript's text item delimiters to rs
+    set resultText to outputRecords as text
+    set AppleScript's text item delimiters to ""
+    return resultText
+end run
 "#;
 
 fn scan(args: &[String]) -> Result<()> {
@@ -411,7 +482,7 @@ fn scan(args: &[String]) -> Result<()> {
             }
             MailSyncDecision::Backoff => {
                 return print_scan_payload(
-                    json!({"status": "error", "freshness":"backoff", "sources": [{"source":"apple","status":"error","error":saved.error.clone().unwrap_or_else(||"previous scan failed".into())}], "fetched":0, "appended":0, "updated":0, "removed":0}),
+                    json!({"status": "backoff", "freshness":"backoff", "error_class":"backoff", "sources": [{"source":"apple","status":"backoff","error":saved.error.clone().unwrap_or_else(||"previous scan failed".into()),"error_class":"backoff"}], "fetched":0, "appended":0, "updated":0, "removed":0}),
                     json_output,
                 );
             }
@@ -437,12 +508,17 @@ fn scan(args: &[String]) -> Result<()> {
 
     saved.schema_version = 1;
     saved.last_attempt_at = Some(now);
+    // Record an in-progress attempt before crossing the Apple Events
+    // boundary. If the process is killed, the next background tick enters
+    // backoff instead of relaunching a second scan.
+    saved.error = Some("interrupted".into());
+    save_mail_sync_state(&saved)?;
     let output = match scan_apple_mail(days, per_account, if_running) {
         Ok(output) => output,
         Err(error) => {
             saved.error = Some(error.to_string());
             let _ = save_mail_sync_state(&saved);
-            let payload = json!({"status":"error","sources":[{"source":"apple","status":"error","error":error.to_string()}],"fetched":0,"appended":0,"updated":0,"removed":0});
+            let payload = json!({"status":"error","error_class":mail_error_class(&error.to_string()),"sources":[{"source":"apple","status":"error","error":error.to_string(),"error_class":mail_error_class(&error.to_string())}],"fetched":0,"appended":0,"updated":0,"removed":0});
             return print_scan_payload(payload, json_output);
         }
     };
@@ -455,19 +531,32 @@ fn scan(args: &[String]) -> Result<()> {
         );
     }
 
-    let counts = reconcile_snapshot(&output.accounts)?;
+    let counts = match reconcile_snapshot(&output.accounts) {
+        Ok(counts) => counts,
+        Err(error) => {
+            saved.error = Some(error.to_string());
+            let _ = save_mail_sync_state(&saved);
+            let payload = json!({"status":"error","error_class":"failed","sources":[{"source":"apple","status":"error","error":error.to_string(),"error_class":"failed"}],"fetched":0,"appended":0,"updated":0,"removed":0});
+            return print_scan_payload(payload, json_output);
+        }
+    };
     saved.consented_at = if background {
         saved.consented_at
     } else {
         saved.consented_at.or(Some(now))
     };
     saved.last_scan_at = Some(now);
-    saved.complete = Some(true);
+    saved.complete = Some(output.accounts_scanned == output.accounts_with_inbox);
     saved.fetched = Some(counts.total);
+    saved.accounts_total = Some(output.accounts_total);
+    saved.accounts_with_inbox = Some(output.accounts_with_inbox);
+    saved.accounts_scanned = Some(output.accounts_scanned);
     saved.error = None;
     save_mail_sync_state(&saved)?;
     let source_report = json!({
         "source": "apple", "status": "scanned", "accounts": output.accounts.len(),
+        "accounts_total": output.accounts_total, "accounts_with_inbox": output.accounts_with_inbox,
+        "accounts_scanned": output.accounts_scanned, "complete": saved.complete,
         "matched": output.accounts.iter().map(|account| account.matched).sum::<usize>(),
         "fetched": counts.total, "updated": counts.updated, "removed": counts.removed
     });
@@ -502,10 +591,24 @@ fn print_scan_payload(payload: Value, json_output: bool) -> Result<()> {
     Ok(())
 }
 
-/// Pull inbox metadata from Mail.app via JXA (osascript -l JavaScript).
+fn mail_error_class(error: &str) -> &'static str {
+    let lower = error.to_ascii_lowercase();
+    if lower.contains("timed out") || lower.contains("timeout") {
+        "timeout"
+    } else if lower.contains("permission")
+        || lower.contains("automation")
+        || lower.contains("access denied")
+    {
+        "automation_denied"
+    } else {
+        "failed"
+    }
+}
+
+/// Pull inbox metadata from Mail.app via bounded AppleScript ranges.
 fn scan_apple_mail(days: u64, per_account: usize, if_running: bool) -> Result<MailScanOutput> {
-    let output = crate::cmd::osascript::run_jxa(
-        APPLE_MAIL_JXA,
+    let output = crate::cmd::osascript::run_applescript(
+        APPLE_MAIL_APPLESCRIPT,
         &[
             days.to_string(),
             per_account.to_string(),
@@ -515,39 +618,60 @@ fn scan_apple_mail(days: u64, per_account: usize, if_running: bool) -> Result<Ma
                 "0".to_string()
             },
         ],
+        if if_running {
+            BACKGROUND_SCAN_TIMEOUT
+        } else {
+            EXPLICIT_SCAN_TIMEOUT
+        },
     )?;
     let text = String::from_utf8_lossy(&output);
     let mut result = MailScanOutput::default();
     let mut current: Option<AccountScan> = None;
-    for line in text.lines().filter(|line| !line.trim().is_empty()) {
-        let value: Value = serde_json::from_str(line.trim())
-            .map_err(|error| anyhow!("invalid Apple Mail scan output: {error}"))?;
-        if value.get("kind").and_then(Value::as_str) == Some("status") {
-            result.status = value
-                .get("status")
-                .and_then(Value::as_str)
-                .unwrap_or("error")
-                .to_string();
+    for record in text
+        .split('\u{1e}')
+        .filter(|record| !record.trim().is_empty())
+    {
+        let fields: Vec<&str> = record.split('\u{1f}').collect();
+        let kind = fields.first().copied().unwrap_or("");
+        if kind == "S" {
+            result.status = fields.get(1).copied().unwrap_or("error").to_string();
             continue;
         }
-        if value.get("kind").and_then(Value::as_str) == Some("account") {
+        if kind == "T" {
+            result.accounts_total = parse_usize(fields.get(1));
+            result.accounts_with_inbox = parse_usize(fields.get(2));
+            result.accounts_scanned = parse_usize(fields.get(3));
+            continue;
+        }
+        if kind == "A" {
             if let Some(account) = current.take() {
                 result.accounts.push(account);
             }
             current = Some(AccountScan {
-                account: value["account"].as_str().unwrap_or("").to_string(),
-                window_start: value["window_start"].as_str().unwrap_or("").to_string(),
-                window_end: value["window_end"].as_str().unwrap_or("").to_string(),
-                matched: value["matched"].as_u64().unwrap_or(0) as usize,
+                account: fields.get(1).copied().unwrap_or("").to_string(),
+                window_start: epoch_to_rfc3339(fields.get(2))?,
+                window_end: epoch_to_rfc3339(fields.get(3))?,
+                matched: parse_usize(fields.get(4)),
                 rows: Vec::new(),
             });
-        } else if let Some(account) = current.as_mut() {
-            let mut row = value;
-            let account_name = row["account"].as_str().unwrap_or("").to_string();
-            let message_id = row.get("message_id").and_then(Value::as_str).unwrap_or("");
-            let id = mail_row_id(&account_name, message_id, &row);
+        } else if kind == "R" {
+            let Some(account) = current.as_mut() else {
+                continue;
+            };
+            let account_name = fields.get(1).copied().unwrap_or("");
+            let message_id = fields.get(7).copied().unwrap_or("");
+            let date = epoch_to_rfc3339(fields.get(5))?;
+            let row = json!({
+                "account": account_name,
+                "mailbox": fields.get(2).copied().unwrap_or(""),
+                "sender": fields.get(3).copied().unwrap_or(""),
+                "subject": fields.get(4).copied().unwrap_or(""),
+                "date": date,
+                "unread": fields.get(6).copied() == Some("1"),
+            });
+            let id = mail_row_id(account_name, message_id, &row);
+            let mut row = row;
             if let Some(object) = row.as_object_mut() {
-                object.remove("message_id");
                 object.insert("id".into(), json!(id));
                 object.insert("scanned_at".into(), json!(chrono::Utc::now().to_rfc3339()));
             }
@@ -561,6 +685,19 @@ fn scan_apple_mail(days: u64, per_account: usize, if_running: bool) -> Result<Ma
         result.status = "scanned".into();
     }
     Ok(result)
+}
+
+fn parse_usize(value: Option<&&str>) -> usize {
+    value.and_then(|raw| raw.parse::<usize>().ok()).unwrap_or(0)
+}
+
+fn epoch_to_rfc3339(value: Option<&&str>) -> Result<String> {
+    let seconds = value
+        .and_then(|raw| raw.parse::<i64>().ok())
+        .ok_or_else(|| anyhow!("invalid Apple Mail timestamp"))?;
+    chrono::DateTime::<chrono::Utc>::from_timestamp(seconds, 0)
+        .map(|date| date.to_rfc3339())
+        .ok_or_else(|| anyhow!("invalid Apple Mail timestamp"))
 }
 
 fn mail_row_id(account: &str, message_id: &str, row: &Value) -> String {
@@ -647,6 +784,7 @@ fn reconcile_snapshot_at(
             .map(|date| date.with_timezone(&chrono::Utc) >= retention_cutoff)
             .unwrap_or(true)
     });
+    let mut existing_keys: std::collections::HashSet<String>;
     for account in accounts {
         let start = chrono::DateTime::parse_from_rfc3339(&account.window_start)
             .ok()
@@ -670,7 +808,7 @@ fn reconcile_snapshot_at(
                         .and_then(|date| chrono::DateTime::parse_from_rfc3339(date).ok())
                         .map(|date| {
                             let date = date.with_timezone(&chrono::Utc);
-                            date >= start && date <= end
+                            date > start && date <= end
                         })
                         .unwrap_or(false)
                 });
@@ -685,11 +823,9 @@ fn reconcile_snapshot_at(
             }
         }
         existing = next;
+        existing_keys = existing.iter().map(snapshot_dedupe_key).collect();
         for (key, row) in returned {
-            if !existing
-                .iter()
-                .any(|candidate| snapshot_dedupe_key(candidate) == key)
-            {
+            if existing_keys.insert(key) {
                 existing.push(row);
                 counts.appended += 1;
             } else {
@@ -1437,8 +1573,9 @@ mod tests {
 
     #[test]
     fn apple_mail_script_propagates_account_query_failure() {
-        assert!(APPLE_MAIL_JXA.contains("Apple Mail account query failed"));
-        assert!(!APPLE_MAIL_JXA.contains("catch (e) { return \"\"; }"));
+        assert!(APPLE_MAIL_APPLESCRIPT.contains("Apple Mail account query failed"));
+        assert!(APPLE_MAIL_APPLESCRIPT.contains("messages rangeStart thru rangeEnd"));
+        assert!(!APPLE_MAIL_APPLESCRIPT.contains("whose"));
     }
 
     #[test]
@@ -1552,6 +1689,26 @@ mod tests {
             .collect();
         assert!(rows.iter().any(|row| row["id"] == "mail_older"));
         assert!(!rows.iter().any(|row| row["id"] == "mail_recent"));
+    }
+
+    #[test]
+    fn capped_window_keeps_equal_timestamp_at_exclusive_boundary() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("headers.jsonl");
+        let now = chrono::Utc::now();
+        let boundary_date = (now - chrono::Duration::hours(1)).to_rfc3339();
+        let boundary = json!({"account":"a","mailbox":"INBOX","sender":"s","subject":"tie","date":boundary_date,"unread":true,"id":"mail_tie"});
+        std::fs::write(&path, boundary.to_string() + "\n").unwrap();
+        let account = AccountScan {
+            account: "a".into(),
+            window_start: boundary_date,
+            window_end: (now + chrono::Duration::minutes(1)).to_rfc3339(),
+            matched: 0,
+            rows: vec![],
+        };
+        reconcile_snapshot_at(&path, &[account]).unwrap();
+        let rows = std::fs::read_to_string(path).unwrap();
+        assert!(rows.contains("mail_tie"));
     }
 
     #[test]

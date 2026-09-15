@@ -13,19 +13,25 @@ fn fixture(root: &Path) -> PathBuf {
         r#"#!/bin/sh
 set -eu
 printf '%s\n' "${FIXTURE_PHASE:-live}" >> "$FIXTURE_LOG"
+us=$(printf '\037')
+rs=$(printf '\036')
 if [ "${FIXTURE_PHASE:-live}" = "closed" ]; then
-  printf '%s\n' '{"kind":"status","status":"mail_not_running"}'
+  printf 'S%smail_not_running' "$us"
   exit 0
 fi
-printf '%s\n' '{"kind":"account","account":"alpha","window_start":"2026-09-01T00:00:00Z","window_end":"2026-09-14T23:59:59Z","matched":2,"kept":1}'
-if [ "${FIXTURE_PHASE:-live}" != "changed" ]; then
-  printf '%s\n' '{"account":"alpha","mailbox":"INBOX","sender":"ada@example.com","subject":"keep","date":"2026-09-14T12:00:00Z","unread":true,"message_id":"<keep@example.com>"}'
-  printf '%s\n' '{"account":"alpha","mailbox":"INBOX","sender":"ada@example.com","subject":"gone","date":"2026-09-14T11:00:00Z","unread":true,"message_id":"<gone@example.com>"}'
-else
-  printf '%s\n' '{"account":"alpha","mailbox":"INBOX","sender":"ada@example.com","subject":"keep","date":"2026-09-14T12:00:00Z","unread":false,"message_id":"<keep@example.com>"}'
+if [ "${FIXTURE_PHASE:-live}" = "fail" ]; then
+  exit 1
 fi
-printf '%s\n' '{"kind":"account","account":"beta","window_start":"2026-09-01T00:00:00Z","window_end":"2026-09-14T23:59:59Z","matched":1,"kept":1}'
-printf '%s\n' '{"account":"beta","mailbox":"INBOX","sender":"bob@example.com","subject":"beta","date":"2026-09-14T10:00:00Z","unread":true,"message_id":"<beta@example.com>"}'
+printf 'A%salpha%s1788220800%s1789430399%s2%s2%s' "$us" "$us" "$us" "$us" "$us" "$rs"
+if [ "${FIXTURE_PHASE:-live}" != "changed" ]; then
+  printf 'R%salpha%sINBOX%sada@example.com%skeep%s1789387200%s1%s<keep@example.com>%s' "$us" "$us" "$us" "$us" "$us" "$us" "$us" "$rs"
+  printf 'R%salpha%sINBOX%sada@example.com%sgone%s1789383600%s1%s<gone@example.com>%s' "$us" "$us" "$us" "$us" "$us" "$us" "$us" "$rs"
+else
+  printf 'R%salpha%sINBOX%sada@example.com%skeep%s1789387200%s0%s<keep@example.com>%s' "$us" "$us" "$us" "$us" "$us" "$us" "$us" "$rs"
+fi
+printf 'A%sbeta%s1788220800%s1789430399%s1%s1%s' "$us" "$us" "$us" "$us" "$us" "$rs"
+printf 'R%sbeta%sINBOX%sbob@example.com%sbeta%s1789380000%s1%s<beta@example.com>%s' "$us" "$us" "$us" "$us" "$us" "$us" "$us" "$rs"
+printf 'T%s2%s2%s2' "$us" "$us" "$us"
 "#,
     )
     .unwrap();
@@ -63,6 +69,9 @@ fn explicit_scan_reconciles_unread_removal_and_preserves_both_accounts() {
     let first = run(&state, &bridge, &log, "live", &[]);
     assert_eq!(first["status"], "scanned");
     assert_eq!(first["fetched"], 3);
+    assert_eq!(first["sources"][0]["complete"], true);
+    assert_eq!(first["sources"][0]["accounts_total"], 2);
+    assert_eq!(first["sources"][0]["accounts_scanned"], 2);
     assert!(first["snapshot"].as_str().is_some());
     let snapshot = state.join("mail/headers.jsonl");
     let raw = fs::read_to_string(&snapshot).unwrap();
@@ -76,6 +85,36 @@ fn explicit_scan_reconciles_unread_removal_and_preserves_both_accounts() {
     assert!(rows.contains("\"unread\":false"));
     assert!(rows.contains("\"account\":\"beta\""));
     assert!(!rows.contains("\"subject\":\"gone\""));
+    assert_eq!(fs::read_to_string(log).unwrap().lines().count(), 2);
+}
+
+#[test]
+fn failed_attempt_is_recorded_and_background_backs_off_without_relaunch() {
+    let root = tempfile::tempdir().unwrap();
+    let state = root.path().join("state");
+    let log = root.path().join("fixture.log");
+    fs::create_dir_all(&state).unwrap();
+    let bridge = fixture(root.path());
+
+    let _ = run(&state, &bridge, &log, "live", &[]);
+    let failed = run(&state, &bridge, &log, "fail", &[]);
+    assert_eq!(failed["status"], "error");
+    let state_file: serde_json::Value =
+        serde_json::from_str(&fs::read_to_string(state.join("mail/apple_sync.json")).unwrap())
+            .unwrap();
+    assert!(state_file["error"]
+        .as_str()
+        .unwrap()
+        .contains("could not be read"));
+
+    let backoff = run(
+        &state,
+        &bridge,
+        &log,
+        "live",
+        &["--if-running", "--if-stale", "180"],
+    );
+    assert_eq!(backoff["status"], "backoff");
     assert_eq!(fs::read_to_string(log).unwrap().lines().count(), 2);
 }
 
