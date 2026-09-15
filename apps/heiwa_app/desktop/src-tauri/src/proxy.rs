@@ -140,7 +140,8 @@ pub(crate) fn validate_loopback_url(
 /// dot segment up front keeps the raw string and the resolved request path
 /// identical, so checking one is checking both.
 fn has_dot_segment(path: &str) -> bool {
-    path.split('/').any(|segment| segment == "." || segment == "..")
+    path.split('/')
+        .any(|segment| segment == "." || segment == "..")
 }
 
 fn endpoint_url(base_url: &str, path: &str) -> Result<reqwest::Url, ProxyError> {

@@ -71,8 +71,8 @@ fn unquote(entry: &str) -> String {
 }
 
 fn generate_handler_commands() -> Vec<String> {
-    let lib_rs = fs::read_to_string(manifest_dir().join("src/lib.rs"))
-        .expect("src/lib.rs must be readable");
+    let lib_rs =
+        fs::read_to_string(manifest_dir().join("src/lib.rs")).expect("src/lib.rs must be readable");
     extract_bracketed(&lib_rs, "tauri::generate_handler!", '[', ']')
         .into_iter()
         .map(|entry| bare_command_name(&entry))
