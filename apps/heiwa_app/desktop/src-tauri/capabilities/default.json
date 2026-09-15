@@ -29,7 +29,6 @@
     "allow-api-get",
     "allow-api-post",
     "allow-runtime-health",
-    "allow-runtime-startup",
     "allow-update-check",
     "allow-update-install"
   ]

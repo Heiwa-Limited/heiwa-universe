@@ -335,17 +335,22 @@ const MAX_PANE_TEXT_LEN: usize = 4096;
 /// charset check below does on hostile input.
 const MAX_PANE_ID_LEN: usize = 256;
 
-/// ASCII control bytes `herd_pane_send` rejects outright: everything in
-/// 0x00-0x08, 0x0A-0x1F, and 0x7F. Tab (0x09) is the only control byte let
-/// through. This range specifically includes newline (0x0A) and carriage
-/// return (0x0D) — raw text with an embedded newline would let a caller
-/// inject a second `send-keys ... enter`-worth of terminal input inside what
-/// is supposed to be one line, and ESC (0x1B) starts ANSI/VT escape
-/// sequences, which is exactly the class of "control the pane, not just
-/// fill it with text" input this validation exists to stop.
-fn contains_disallowed_control_byte(text: &str) -> bool {
-    text.bytes()
-        .any(|byte| matches!(byte, 0x00..=0x08 | 0x0A..=0x1F | 0x7F))
+/// Every Unicode control character (general category Cc) except tab.
+///
+/// This covers the ASCII C0 controls and DEL (U+0000-U+001F, U+007F) —
+/// newline and carriage return among them, so a caller cannot inject a
+/// second `send-keys ... enter`-worth of terminal input inside what is
+/// supposed to be one line, and ESC (U+001B) cannot start an ANSI/VT escape
+/// sequence — *and* the C1 controls (U+0080-U+009F). Review round 1 (Opus,
+/// on PR #131) caught that a byte-range check over `text.bytes()` cannot see
+/// C1 controls at all: they are multi-byte in UTF-8 (e.g. U+009B, the
+/// single-character "8-bit" form of CSI — the same escape-sequence class as
+/// ESC `[` in 7-bit form — encodes as `0xC2 0x9B`, neither byte of which
+/// falls in the C0/DEL ranges a byte-level check looked for). Matching on
+/// `char` and `char::is_control()` instead closes that gap in one line
+/// rather than extending the byte-range list by hand.
+fn contains_disallowed_control_char(text: &str) -> bool {
+    text.chars().any(|c| c.is_control() && c != '\t')
 }
 
 fn validate_pane_text(text: &str) -> Result<(), String> {
@@ -357,7 +362,7 @@ fn validate_pane_text(text: &str) -> Result<(), String> {
             "text exceeds the {MAX_PANE_TEXT_LEN}-character limit for a single send"
         ));
     }
-    if contains_disallowed_control_byte(text) {
+    if contains_disallowed_control_char(text) {
         return Err(
             "text contains a control character (including newline, carriage return, or an \
              escape sequence) that herd_pane_send does not allow"
@@ -482,7 +487,7 @@ pub async fn herd_pane_read(pane: String) -> HerdPaneRead {
 /// Types `text` into a live terminal pane followed by Enter.
 ///
 /// `text` is rejected outright if it contains a newline (see
-/// [`contains_disallowed_control_byte`]): today's one caller,
+/// [`contains_disallowed_control_char`]): today's one caller,
 /// `WindowsSurface`'s pane control in `src/surfaces/windows/index.tsx`, binds
 /// this to a plain `<input type="text">` — HTML text inputs cannot contain a
 /// newline character at all, so nothing in the current UI can legitimately
@@ -706,6 +711,18 @@ mod tests {
     #[test]
     fn validate_pane_send_allows_tab() {
         assert!(validate_pane_send("w1:p1", "a\tb", None).is_ok());
+    }
+
+    /// Review round 1 (Opus, on PR #131): C1 controls (U+0080-U+009F) are
+    /// multi-byte in UTF-8, so the original byte-range check never saw them.
+    /// U+009B is the 8-bit form of CSI -- the same escape-sequence class as
+    /// ESC `[` in 7-bit form (already covered by
+    /// `validate_pane_send_rejects_escape_sequences_and_other_control_bytes`).
+    #[test]
+    fn validate_pane_send_rejects_c1_control_characters() {
+        assert!(validate_pane_send("w1:p1", "\u{9b}31mred\u{9b}0m", None).is_err());
+        assert!(validate_pane_send("w1:p1", "pad\u{80}", None).is_err());
+        assert!(validate_pane_send("w1:p1", "nel\u{85}", None).is_err());
     }
 
     #[test]
