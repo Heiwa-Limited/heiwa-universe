@@ -1344,10 +1344,29 @@ async fn handle_connection(
         return Ok(());
     }
 
+    // Pre-routing trust boundary: pin Host before any handler runs or any
+    // state is read. Without this, only the browser-bootstrap and session
+    // paths ever checked Host, so a DNS-rebound page could hit every other
+    // route — including every unauthenticated GET below — with the real
+    // loopback response. This runs ahead of the WebSocket-upgrade branch too,
+    // so a rebound upgrade attempt never reaches `handle_websocket`.
+    if enforce_bound_host(&request, local_port).is_err() {
+        return write_response(
+            &mut stream,
+            403,
+            "application/json",
+            json!({"ok": false, "error": {"code": "invalid_host"}})
+                .to_string()
+                .into_bytes(),
+            false,
+        )
+        .await;
+    }
+
     if is_websocket_request(&request) {
         let target = request_target(&request).unwrap_or("/").to_string();
         let path = request_path(&request).unwrap_or("/").to_string();
-        if path == "/ws/v1/operator" {
+        if is_runtime_authenticated_request(&path) {
             if let Err(error) = operator_http_auth_subject(
                 &request,
                 "GET",
@@ -1409,7 +1428,7 @@ async fn handle_connection(
     }
     let head_only = method == "HEAD";
 
-    if is_runtime_authenticated_request(method, path) {
+    if is_runtime_authenticated_request(path) {
         if let Err(error) = operator_http_auth_subject(
             &request,
             method,
@@ -1882,12 +1901,17 @@ async fn handle_connection(
 enum OperatorAuthError {
     NotConfigured,
     Unauthorized,
+    /// A present `Origin` or `Sec-Fetch-Site` that proves the request came
+    /// from a different site, rather than merely lacking credentials. That is
+    /// a CSRF/rebinding signal, so it is a hard 403 instead of a soft 401.
+    ForeignOrigin,
 }
 
 fn operator_auth_response(error: OperatorAuthError) -> (u16, &'static str) {
     match error {
         OperatorAuthError::NotConfigured => (500, "auth_not_configured"),
         OperatorAuthError::Unauthorized => (401, "unauthorized"),
+        OperatorAuthError::ForeignOrigin => (403, "foreign_origin"),
     }
 }
 
@@ -1895,13 +1919,14 @@ fn is_operator_api_path(path: &str) -> bool {
     path == "/api/v1/operator" || path.starts_with("/api/v1/operator/")
 }
 
-fn is_runtime_authenticated_request(method: &str, path: &str) -> bool {
-    if is_operator_api_path(path) || matches!(path, "/api/v1/repl" | "/api/v1/repl/stream") {
-        return true;
-    }
-    path.starts_with("/api/v1/")
-        && matches!(method, "POST" | "PUT" | "PATCH" | "DELETE")
-        && path != "/api/v1/route/preview"
+/// Default-deny: every `/api/` or `/ws/` path needs the runtime's existing
+/// authentication (a signed desktop request, a browser session cookie, or a
+/// bearer token) regardless of method. The liveness path (`/status/health`)
+/// and the browser-bootstrap endpoint (`/`) are the only exceptions, and both
+/// stay excluded simply by not matching either prefix. New routes are
+/// authenticated automatically; there is no per-route opt-out.
+fn is_runtime_authenticated_request(path: &str) -> bool {
+    path.starts_with("/api/") || path.starts_with("/ws/")
 }
 
 const MAX_LOCAL_REQUEST_NONCES: usize = 4096;
@@ -2034,16 +2059,51 @@ fn operator_http_auth_subject(
     let expected_origin = exact_loopback_origin(request, local_port)?;
     let supplied_origin =
         strict_header_value(request, "origin").map_err(|_| OperatorAuthError::Unauthorized)?;
-    if supplied_origin
-        .as_deref()
-        .is_some_and(|origin| origin != expected_origin)
-    {
-        return Err(OperatorAuthError::Unauthorized);
+    // A browser omits Origin on a same-origin GET/HEAD (a WebSocket upgrade
+    // included — it is always sent as a GET), so a missing Origin stays
+    // allowed there. A *present* foreign Origin is a stronger signal than
+    // simply lacking credentials — cross-site or DNS-rebound — so reads
+    // reject it with 403. Unsafe methods keep the original rule unchanged:
+    // present-and-different is a 401.
+    let is_safe_read = matches!(method, "GET" | "HEAD");
+    if let Some(origin) = supplied_origin.as_deref() {
+        if origin != expected_origin {
+            return Err(if is_safe_read {
+                OperatorAuthError::ForeignOrigin
+            } else {
+                OperatorAuthError::Unauthorized
+            });
+        }
+    }
+    // Sec-Fetch-Site is the browser's own, unspoofable classification of a
+    // request's relationship to the page that sent it, and modern browsers
+    // send it on every fetch/XHR/navigation/WebSocket regardless of method —
+    // unlike Origin, so it also catches an embedding trick that could still
+    // forge a matching Origin header. A signed desktop request never sets
+    // this header at all, so its absence never blocks anything here. When it
+    // IS present, only "same-origin" and "none" (top-level/extension-
+    // initiated navigations) are accepted; both "cross-site" and
+    // "same-site" are rejected — "same-site" specifically covers another
+    // local port sharing this machine's site for cookie purposes, which
+    // Origin/Host alone would not catch.
+    let foreign_fetch_site = strict_header_value(request, "sec-fetch-site")
+        .map_err(|_| OperatorAuthError::ForeignOrigin)?
+        .is_some_and(|value| {
+            !value.eq_ignore_ascii_case("same-origin") && !value.eq_ignore_ascii_case("none")
+        });
+    if foreign_fetch_site {
+        return Err(OperatorAuthError::ForeignOrigin);
     }
     let cookie =
         strict_header_value(request, "cookie").map_err(|_| OperatorAuthError::Unauthorized)?;
+    // Origin was already proven either absent or an exact match above. A
+    // same-origin GET/HEAD may omit it entirely, so the cookie path may
+    // proceed on those methods even without one; unsafe methods still
+    // require that it was present (unchanged from before).
+    let origin_acceptable_for_cookie =
+        is_safe_read || supplied_origin.as_deref() == Some(expected_origin.as_str());
     if cookie.is_some_and(|cookie| {
-        supplied_origin.as_deref() == Some(expected_origin.as_str())
+        origin_acceptable_for_cookie
             && browser_sessions.lock().ok().is_some_and(|mut sessions| {
                 sessions.authenticates_cookie_at(
                     &cookie,
@@ -2102,6 +2162,32 @@ fn exact_loopback_origin(
         return Err(OperatorAuthError::Unauthorized);
     }
     Ok(format!("http://{expected_host}"))
+}
+
+/// The two spellings a browser or client may legitimately use for this
+/// bound loopback port.
+fn bound_host_candidates(local_port: u16) -> [String; 2] {
+    [
+        format!("127.0.0.1:{local_port}"),
+        format!("localhost:{local_port}"),
+    ]
+}
+
+/// Pre-routing Host pin (spec L-007 part A). Reuses the same strict,
+/// duplicate-rejecting header lookup as `exact_loopback_origin` — a missing,
+/// duplicate, wrong-port, or foreign Host is rejected identically. Unlike
+/// `exact_loopback_origin`, this accepts either loopback spelling, because it
+/// runs ahead of, and independently from, the narrower Origin/session
+/// matching used for CSRF-style checks.
+fn enforce_bound_host(request: &str, local_port: u16) -> std::result::Result<(), ()> {
+    let host = strict_header_value(request, "host")
+        .map_err(|_| ())?
+        .ok_or(())?;
+    if bound_host_candidates(local_port).contains(&host) {
+        Ok(())
+    } else {
+        Err(())
+    }
 }
 
 fn local_request_signature_headers(
@@ -3536,6 +3622,7 @@ async fn write_response_with_headers(
         303 => "See Other",
         400 => "Bad Request",
         401 => "Unauthorized",
+        403 => "Forbidden",
         404 => "Not Found",
         405 => "Method Not Allowed",
         409 => "Conflict",
@@ -6413,41 +6500,383 @@ mod app_readmodel_tests {
         assert!(!replay.contains(&bootstrap));
     }
 
-    #[tokio::test]
-    async fn runtime_snapshot_http_is_safe_inside_async_server_context() {
-        let listener = TcpListener::bind(("127.0.0.1", 0)).await.unwrap();
+    /// `operator_http_auth_subject` reads `RuntimeConfig::from_env()`, which
+    /// is process-global and falls back to a real `$HEIWA_HOME` on disk when
+    /// no token env var is set. Every test below that exercises it takes this
+    /// lock and pins a fixed token so concurrently-running tests in this same
+    /// binary never race each other or pick up a real machine's configured
+    /// secret.
+    static AUTH_ENV_LOCK: Mutex<()> = Mutex::new(());
+    const TEST_MACHINE_AUTH_TOKEN: &str = "trust-boundary-test-token";
+
+    struct MachineAuthTestEnv {
+        _lock: std::sync::MutexGuard<'static, ()>,
+    }
+
+    impl MachineAuthTestEnv {
+        fn configured() -> Self {
+            let lock = AUTH_ENV_LOCK
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
+            env::set_var("HEIWA_MACHINE_AUTH_TOKEN", TEST_MACHINE_AUTH_TOKEN);
+            env::remove_var("HEIWA_AUTH_TOKEN");
+            env::remove_var("HEIWA_JWT_SIGNING_SECRET");
+            env::remove_var("HEIWA_AUTH_SECRET");
+            Self { _lock: lock }
+        }
+    }
+
+    impl Drop for MachineAuthTestEnv {
+        fn drop(&mut self) {
+            env::remove_var("HEIWA_MACHINE_AUTH_TOKEN");
+        }
+    }
+
+    /// Send one raw request over an already-bound listener, reusing whatever
+    /// browser-session state the caller passes in. Lets a test mint a
+    /// bootstrap/session pair against a known port and then send several
+    /// follow-up requests against that same port and store.
+    async fn response_over(
+        listener: &TcpListener,
+        browser_sessions: Arc<Mutex<BrowserSessionStore>>,
+        request: String,
+    ) -> String {
         let address = listener.local_addr().unwrap();
         let client = tokio::spawn(async move {
             let mut client = TcpStream::connect(address).await.unwrap();
-            client
-                .write_all(
-                    format!(
-                        "GET /api/v1/runtime/snapshot HTTP/1.1\r\nHost: {address}\r\nConnection: close\r\n\r\n"
-                    )
-                    .as_bytes(),
-                )
-                .await
-                .unwrap();
+            client.write_all(request.as_bytes()).await.unwrap();
             let mut response = Vec::new();
             client.read_to_end(&mut response).await.unwrap();
             String::from_utf8(response).unwrap()
         });
         let (server, _) = listener.accept().await.unwrap();
-
         handle_connection(
             server,
-            Arc::new("2026-08-01T00:00:00Z".to_string()),
+            Arc::new("2026-09-15T00:00:00Z".to_string()),
             Arc::new(Mutex::new(LocalRequestReplayCache::default())),
-            Arc::new(Mutex::new(BrowserSessionStore::default())),
+            browser_sessions,
         )
         .await
         .unwrap();
+        client.await.unwrap()
+    }
 
-        let response = client.await.unwrap();
-        assert!(response.starts_with("HTTP/1.1 200 OK\r\n"));
+    /// Bind a fresh ephemeral listener and fresh session store, then send one
+    /// request built from the real bound port.
+    async fn response_for_request(build_request: impl FnOnce(u16) -> String) -> String {
+        let listener = TcpListener::bind(("127.0.0.1", 0)).await.unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let request = build_request(port);
+        response_over(
+            &listener,
+            Arc::new(Mutex::new(BrowserSessionStore::default())),
+            request,
+        )
+        .await
+    }
+
+    #[tokio::test]
+    async fn runtime_snapshot_http_rejects_unauthenticated_reads() {
+        // This is the exact leak L-007 closes: runtime/snapshot (and every
+        // other GET) used to answer with no credentials at all.
+        let _env = MachineAuthTestEnv::configured();
+        let response = response_for_request(|port| {
+            format!(
+                "GET /api/v1/runtime/snapshot HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\nConnection: close\r\n\r\n"
+            )
+        })
+        .await;
+        assert!(
+            response.starts_with("HTTP/1.1 401 Unauthorized\r\n"),
+            "{response}"
+        );
         let body = response.split("\r\n\r\n").nth(1).expect("response body");
-        let payload: Value = serde_json::from_str(body).expect("JSON snapshot");
-        assert_eq!(payload["ok"], true);
+        let payload: Value = serde_json::from_str(body).expect("JSON body");
+        assert_eq!(payload["ok"], false);
+        assert_eq!(payload["error"]["code"], json!("unauthorized"));
+    }
+
+    #[tokio::test]
+    async fn pre_routing_host_gate_rejects_bad_hosts_for_api_and_static_requests() {
+        type HostLines = fn(u16) -> String;
+        let scenarios: [(&str, HostLines); 4] = [
+            ("missing", |_port| String::new()),
+            ("foreign", |port| format!("Host: evil.example:{port}\r\n")),
+            ("wrong_port", |port| {
+                format!("Host: 127.0.0.1:{}\r\n", port.wrapping_add(1))
+            }),
+            ("duplicate", |port| {
+                format!("Host: 127.0.0.1:{port}\r\nHost: 127.0.0.1:{port}\r\n")
+            }),
+        ];
+        for path in ["/api/v1/session", "/index.html"] {
+            for (label, host_lines) in scenarios {
+                let response = response_for_request(move |port| {
+                    format!(
+                        "GET {path} HTTP/1.1\r\n{}Connection: close\r\n\r\n",
+                        host_lines(port)
+                    )
+                })
+                .await;
+                assert!(
+                    response.starts_with("HTTP/1.1 403"),
+                    "{path} host={label}: {response}"
+                );
+                assert!(
+                    response.contains("invalid_host"),
+                    "{path} host={label}: {response}"
+                );
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn pre_routing_host_gate_rejects_bad_hosts_for_websocket_upgrade() {
+        type HostLines = fn(u16) -> String;
+        let scenarios: [(&str, HostLines); 4] = [
+            ("missing", |_port| String::new()),
+            ("foreign", |port| format!("Host: evil.example:{port}\r\n")),
+            ("wrong_port", |port| {
+                format!("Host: 127.0.0.1:{}\r\n", port.wrapping_add(1))
+            }),
+            ("duplicate", |port| {
+                format!("Host: 127.0.0.1:{port}\r\nHost: 127.0.0.1:{port}\r\n")
+            }),
+        ];
+        for (label, host_lines) in scenarios {
+            let response = response_for_request(move |port| {
+                format!(
+                    "GET /ws/v1/events HTTP/1.1\r\n{}Upgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\nSec-WebSocket-Version: 13\r\n\r\n",
+                    host_lines(port)
+                )
+            })
+            .await;
+            assert!(
+                response.starts_with("HTTP/1.1 403"),
+                "ws host={label}: {response}"
+            );
+            assert!(
+                !response.starts_with("HTTP/1.1 101"),
+                "ws host={label} must not upgrade: {response}"
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn pre_routing_host_gate_accepts_both_loopback_spellings() {
+        for host in ["127.0.0.1", "localhost"] {
+            let response = response_for_request(move |port| {
+                format!(
+                    "GET /status/health HTTP/1.1\r\nHost: {host}:{port}\r\nConnection: close\r\n\r\n"
+                )
+            })
+            .await;
+            assert!(
+                response.starts_with("HTTP/1.1 200 OK\r\n"),
+                "host={host}: {response}"
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn default_deny_rejects_every_unauthenticated_api_get() {
+        let _env = MachineAuthTestEnv::configured();
+        for path in [
+            "/api/v1/calendar/events",
+            "/api/v1/mail/summary",
+            "/api/v1/receipts",
+            "/api/v1/approvals",
+            "/api/v1/runtime/snapshot",
+            "/api/runtime/snapshot",
+            "/api/v1/zz-future",
+        ] {
+            let response = response_for_request(move |port| {
+                format!(
+                    "GET {path} HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\nConnection: close\r\n\r\n"
+                )
+            })
+            .await;
+            assert!(
+                response.starts_with("HTTP/1.1 401 Unauthorized\r\n"),
+                "{path}: {response}"
+            );
+            assert!(response.contains("\"unauthorized\""), "{path}: {response}");
+        }
+    }
+
+    #[tokio::test]
+    async fn liveness_endpoint_is_allowlisted_and_carries_no_personal_data() {
+        // Deliberately no MachineAuthTestEnv: liveness must answer with
+        // nothing configured at all, for the supervisor and doctor probes.
+        let response = response_for_request(|port| {
+            format!("GET /status/health HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\nConnection: close\r\n\r\n")
+        })
+        .await;
+        assert!(response.starts_with("HTTP/1.1 200 OK\r\n"), "{response}");
+        let body = response.split("\r\n\r\n").nth(1).expect("body");
+        let payload: Value = serde_json::from_str(body).expect("json");
+        let data = &payload["data"];
+        assert_eq!(data["status"], json!("ok"));
+        assert!(data.get("operator_id").is_none(), "{data}");
+        assert!(data.get("hostname").is_none(), "{data}");
+        assert!(data.get("app_url").is_none(), "{data}");
+    }
+
+    #[tokio::test]
+    async fn session_cookie_reads_allow_missing_origin_but_reject_foreign_signals() {
+        let _env = MachineAuthTestEnv::configured();
+        let listener = TcpListener::bind(("127.0.0.1", 0)).await.unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let origin = format!("http://127.0.0.1:{port}");
+        let sessions = Arc::new(Mutex::new(BrowserSessionStore::default()));
+        let session_token = {
+            let mut store = sessions.lock().unwrap();
+            let now = chrono::Utc::now().timestamp();
+            let bootstrap = store.issue_bootstrap_at(now, &origin);
+            store
+                .consume_bootstrap_at(&bootstrap, now, &origin)
+                .expect("mint session")
+        };
+        let cookie = format!("{}={session_token}", browser_session_cookie_name(port));
+
+        // 1. Cookie, no Origin at all: browsers omit it on a same-origin GET.
+        let response = response_over(
+            &listener,
+            sessions.clone(),
+            format!(
+                "GET /api/v1/session HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\nCookie: {cookie}\r\nConnection: close\r\n\r\n"
+            ),
+        )
+        .await;
+        assert!(response.starts_with("HTTP/1.1 200 OK\r\n"), "{response}");
+
+        // 2. Cookie plus a foreign Origin: 403, a stronger signal than simply
+        //    lacking credentials.
+        let response = response_over(
+            &listener,
+            sessions.clone(),
+            format!(
+                "GET /api/v1/session HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\nOrigin: http://evil.example\r\nCookie: {cookie}\r\nConnection: close\r\n\r\n"
+            ),
+        )
+        .await;
+        assert!(response.starts_with("HTTP/1.1 403"), "{response}");
+        assert!(response.contains("foreign_origin"), "{response}");
+
+        // 3. Cookie plus a matching Origin, but Sec-Fetch-Site: cross-site —
+        //    the browser's own unspoofable classification wins even though
+        //    Origin looked fine.
+        let response = response_over(
+            &listener,
+            sessions.clone(),
+            format!(
+                "GET /api/v1/session HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\nOrigin: {origin}\r\nSec-Fetch-Site: cross-site\r\nCookie: {cookie}\r\nConnection: close\r\n\r\n"
+            ),
+        )
+        .await;
+        assert!(response.starts_with("HTTP/1.1 403"), "{response}");
+        assert!(response.contains("foreign_origin"), "{response}");
+
+        // 4. A WebSocket upgrade with a foreign Origin: 403, blocking
+        //    cross-site WebSocket hijacking rather than relying on
+        //    SameSite=Strict alone to keep the cookie from attaching.
+        let response = response_over(
+            &listener,
+            sessions.clone(),
+            format!(
+                "GET /ws/v1/events HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\nOrigin: http://evil.example\r\nCookie: {cookie}\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\nSec-WebSocket-Version: 13\r\n\r\n"
+            ),
+        )
+        .await;
+        assert!(response.starts_with("HTTP/1.1 403"), "{response}");
+        assert!(
+            !response.starts_with("HTTP/1.1 101"),
+            "must not upgrade: {response}"
+        );
+    }
+
+    #[tokio::test]
+    async fn fetch_metadata_rejects_cross_site_and_same_site_on_every_method() {
+        let _env = MachineAuthTestEnv::configured();
+        let listener = TcpListener::bind(("127.0.0.1", 0)).await.unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let origin = format!("http://127.0.0.1:{port}");
+        let sessions = Arc::new(Mutex::new(BrowserSessionStore::default()));
+        let session_token = {
+            let mut store = sessions.lock().unwrap();
+            let now = chrono::Utc::now().timestamp();
+            let bootstrap = store.issue_bootstrap_at(now, &origin);
+            store
+                .consume_bootstrap_at(&bootstrap, now, &origin)
+                .expect("mint session")
+        };
+        let cookie = format!("{}={session_token}", browser_session_cookie_name(port));
+
+        // 1. Cookie POST with Sec-Fetch-Site: same-site is rejected, not just
+        //    cross-site — another local port shares this machine's site for
+        //    cookie purposes, which Origin/Host alone would not catch.
+        let body = "{}";
+        let response = response_over(
+            &listener,
+            sessions.clone(),
+            format!(
+                "POST /api/v1/route/preview HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\nOrigin: {origin}\r\nSec-Fetch-Site: same-site\r\nCookie: {cookie}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+                body.len()
+            ),
+        )
+        .await;
+        assert!(response.starts_with("HTTP/1.1 403"), "{response}");
+        assert!(response.contains("foreign_origin"), "{response}");
+
+        // 2. Cookie GET with Sec-Fetch-Site: same-site is rejected too — the
+        //    check now applies to every method, not just unsafe ones.
+        let response = response_over(
+            &listener,
+            sessions.clone(),
+            format!(
+                "GET /api/v1/session HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\nOrigin: {origin}\r\nSec-Fetch-Site: same-site\r\nCookie: {cookie}\r\nConnection: close\r\n\r\n"
+            ),
+        )
+        .await;
+        assert!(response.starts_with("HTTP/1.1 403"), "{response}");
+        assert!(response.contains("foreign_origin"), "{response}");
+
+        // 3. Cookie GET with Sec-Fetch-Site: none (a top-level or extension-
+        //    initiated navigation) is allowed.
+        let response = response_over(
+            &listener,
+            sessions.clone(),
+            format!(
+                "GET /api/v1/session HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\nOrigin: {origin}\r\nSec-Fetch-Site: none\r\nCookie: {cookie}\r\nConnection: close\r\n\r\n"
+            ),
+        )
+        .await;
+        assert!(response.starts_with("HTTP/1.1 200 OK\r\n"), "{response}");
+
+        // 4. A signed desktop request never sends Sec-Fetch-Site at all —
+        //    its absence must never block anything.
+        let signed = heiwa_core::auth::sign_local_request(
+            heiwa_core::auth::LocalRequestParts {
+                method: "GET",
+                port,
+                target: "/api/v1/session",
+                body: b"",
+            },
+            chrono::Utc::now().timestamp(),
+            &uuid::Uuid::new_v4().simple().to_string(),
+            TEST_MACHINE_AUTH_TOKEN,
+        )
+        .unwrap();
+        let response = response_over(
+            &listener,
+            sessions.clone(),
+            format!(
+                "GET /api/v1/session HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\nX-Heiwa-Local-Auth-Version: {}\r\nX-Heiwa-Local-Auth-Timestamp: {}\r\nX-Heiwa-Local-Auth-Nonce: {}\r\nX-Heiwa-Local-Auth-Signature: {}\r\nConnection: close\r\n\r\n",
+                signed.version, signed.timestamp, signed.nonce, signed.signature,
+            ),
+        )
+        .await;
+        assert!(response.starts_with("HTTP/1.1 200 OK\r\n"), "{response}");
     }
 
     #[test]
@@ -6481,27 +6910,37 @@ mod app_readmodel_tests {
     }
 
     #[test]
-    fn runtime_auth_classifier_defaults_api_mutations_closed() {
-        for method in ["POST", "PUT", "PATCH", "DELETE"] {
-            assert!(is_runtime_authenticated_request(
-                method,
-                "/api/v1/future-action"
-            ));
+    fn runtime_auth_classifier_defaults_every_api_and_ws_path_closed() {
+        // Every /api/ path needs auth now, regardless of method: no more
+        // per-route opt-out (route/preview) and no more unauthenticated GETs.
+        for path in [
+            "/api/v1/future-action",
+            "/api/v1/operator/threads",
+            "/api/v1/calendar/holds",
+            "/api/v1/calendar/events",
+            "/api/v1/route/preview",
+            "/api/v1/status",
+            "/api/v1/runtime/snapshot",
+            "/api/runtime/snapshot",
+            "/api/v1/zz-future",
+        ] {
+            assert!(
+                is_runtime_authenticated_request(path),
+                "{path} must require auth"
+            );
         }
-        assert!(is_runtime_authenticated_request(
-            "GET",
-            "/api/v1/operator/threads"
-        ));
-        assert!(is_runtime_authenticated_request(
-            "POST",
-            "/api/v1/calendar/holds"
-        ));
-        assert!(!is_runtime_authenticated_request(
-            "POST",
-            "/api/v1/route/preview"
-        ));
-        assert!(!is_runtime_authenticated_request("GET", "/api/v1/status"));
-        assert!(!is_runtime_authenticated_request("GET", "/"));
+        // Every /ws/ path needs auth too, including routes that previously
+        // had no auth check at all (only /ws/v1/operator did).
+        for path in ["/ws/v1/operator", "/ws/v1/events", "/ws/anything"] {
+            assert!(
+                is_runtime_authenticated_request(path),
+                "{path} must require auth"
+            );
+        }
+        // The liveness allowlist path and the bootstrap root stay open; they
+        // are excluded by not matching either prefix, not by a special case.
+        assert!(!is_runtime_authenticated_request("/status/health"));
+        assert!(!is_runtime_authenticated_request("/"));
     }
 
     async fn written_status_line(status: u16) -> String {

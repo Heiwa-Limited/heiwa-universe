@@ -152,9 +152,12 @@ fn post_json(port: u16, target: &str, body: &serde_json::Value) -> String {
 
 fn get(port: u16, target: &str) -> String {
     let mut stream = TcpStream::connect(("127.0.0.1", port)).expect("connect runtime");
+    // L-007: every /api/ path now requires auth regardless of method. This
+    // fixture's runtime is started with HEIWA_MACHINE_AUTH_TOKEN set to the
+    // same bearer value `post_json` below already uses.
     write!(
         stream,
-        "GET {target} HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\nConnection: close\r\n\r\n"
+        "GET {target} HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\nAuthorization: Bearer apple-connector-test-token\r\nConnection: close\r\n\r\n"
     )
     .expect("write request");
     let mut response = String::new();

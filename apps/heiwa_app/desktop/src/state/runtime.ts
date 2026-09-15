@@ -304,7 +304,7 @@ export function createRuntimeState(options: RuntimeStateOptions = {}): RuntimeSt
       const response = await get<InboxResponse>("/api/v1/inbox");
       setInbox(response?.data?.items ?? []);
     } catch {
-      // Keep the last known rows; the legacy event socket retries on change.
+      // Keep the last known rows; the legacy event poll retries on schedule.
     }
   }
 
