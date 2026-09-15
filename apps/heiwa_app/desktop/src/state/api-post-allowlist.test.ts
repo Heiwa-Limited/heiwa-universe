@@ -1,0 +1,184 @@
+import { describe, expect, it } from "vitest";
+
+/**
+ * L-009: `api_post` on the Rust side (`src-tauri/src/proxy.rs`) enforces an
+ * explicit allowlist of POST endpoints instead of passing every
+ * `/api/v1/*` path through with the machine credential. This test is the
+ * other half of that guarantee: it scans the frontend for every literal
+ * path a `post`/`apiPost` call actually uses and fails if either side has an
+ * entry the other does not, so the two allowlists cannot silently drift
+ * apart.
+ *
+ * Review round 1 (Opus, on PR #131): the allowlist used to live twice --
+ * once enforced here as `ALLOWED_POST_EXACT`/`ALLOWED_POST_ID_PATTERNS` in
+ * proxy.rs, and once hand-copied into a TS `ALLOWED_POST_SHAPES` const that
+ * only this test read. Nothing failed if the two copies drifted from each
+ * other, only if either one drifted from actual frontend usage. This test
+ * now reads proxy.rs itself, through Vite's raw glob import, and parses its
+ * two consts directly -- there is exactly one place this allowlist is
+ * declared, and proxy.rs is it.
+ */
+
+const rustSources = import.meta.glob("/src-tauri/src/proxy.rs", {
+  query: "?raw",
+  import: "default",
+  eager: true,
+}) as Record<string, string>;
+const PROXY_RS_PATH = "/src-tauri/src/proxy.rs";
+const proxyRs = rustSources[PROXY_RS_PATH];
+if (!proxyRs) {
+  throw new Error(
+    `could not read ${PROXY_RS_PATH} via import.meta.glob (matched: ` +
+      `${Object.keys(rustSources).join(", ") || "none"}) -- Vite's root may not reach ` +
+      "src-tauri from here; see the L-009 report for the documented fallback.",
+  );
+}
+
+/**
+ * Pulls the comma-separated contents out of the first `[`..matching `]`
+ * found after `marker`, assuming no nested `[`/`]` inside (true for both
+ * consts this reads). Mirrors `extract_bracketed` in
+ * `src-tauri/tests/command_manifest.rs`, reimplemented here since this file
+ * cannot import Rust code.
+ */
+function extractBracketed(source: string, marker: string): string {
+  const markerAt = source.indexOf(marker);
+  if (markerAt === -1) {
+    throw new Error(`expected to find ${JSON.stringify(marker)} in proxy.rs`);
+  }
+  const afterMarker = source.slice(markerAt + marker.length);
+  const openAt = afterMarker.indexOf("[");
+  if (openAt === -1) {
+    throw new Error(`expected "[" after ${JSON.stringify(marker)}`);
+  }
+  const closeAt = afterMarker.indexOf("]", openAt + 1);
+  if (closeAt === -1) {
+    throw new Error(`expected closing "]" after ${JSON.stringify(marker)}`);
+  }
+  return afterMarker.slice(openAt + 1, closeAt);
+}
+
+function parseAllowedExact(source: string): string[] {
+  const body = extractBracketed(source, "const ALLOWED_POST_EXACT: &[&str] = &");
+  return body
+    .split(",")
+    .map((entry) => entry.trim())
+    .filter(Boolean)
+    .map((entry) => entry.slice(1, -1)); // strip the surrounding "..."
+}
+
+type IdRoute = { prefix: string; suffix: string };
+
+function parseAllowedIdPatterns(source: string): IdRoute[] {
+  const body = extractBracketed(
+    source,
+    "const ALLOWED_POST_ID_PATTERNS: &[AllowedPostIdRoute] = &",
+  );
+  const routeRe = /prefix:\s*"([^"]*)"\s*,\s*suffix:\s*"([^"]*)"\s*,?/g;
+  const routes: IdRoute[] = [...body.matchAll(routeRe)].map((match) => ({
+    prefix: match[1],
+    suffix: match[2],
+  }));
+  if (routes.length === 0) {
+    throw new Error("parsed zero AllowedPostIdRoute entries out of proxy.rs");
+  }
+  return routes;
+}
+
+const ALLOWED_EXACT = parseAllowedExact(proxyRs);
+const ALLOWED_ID_ROUTES = parseAllowedIdPatterns(proxyRs);
+const ALLOWED_POST_SHAPES = new Set<string>([
+  ...ALLOWED_EXACT,
+  ...ALLOWED_ID_ROUTES.map((route) => `${route.prefix}:id:${route.suffix}`),
+]);
+
+/**
+ * Matches a call to `post(...)` or `apiPost(...)` -- with or without a
+ * `<Generic>` type argument -- capturing the first argument when it is a
+ * plain string or a template literal.
+ *
+ * A call whose first argument is a bare variable (no literal at all) is
+ * invisible to this static scan. Every real POST call site in this codebase
+ * uses a literal or template literal today (verified by inspection during
+ * L-009: `src/runtime.ts`, `src/state/runtime.ts`, `src/state/sessions.ts`,
+ * `src/operator/client.ts`); this is a documented limitation, not a silent
+ * gap in current coverage.
+ */
+const POST_CALL =
+  /\b(?:apiPost|post)\s*(?:<[^>()]*>)?\s*\(\s*(`[^`]*`|"[^"]*"|'[^']*')/g;
+
+// Raw source text of every non-test module, read through Vite's glob import
+// rather than Node's `fs` so this test needs no extra type declarations
+// beyond what the rest of the Vite/Vitest toolchain already provides.
+const sourceFiles = import.meta.glob(
+  ["/src/**/*.{ts,tsx}", "!/src/**/*.test.{ts,tsx}"],
+  { eager: true, query: "?raw", import: "default" },
+) as Record<string, string>;
+
+/**
+ * Collapses a template literal's `${...}` holes to the placeholder `:id:`,
+ * with one exception: a hole that is a ternary between exactly two string
+ * literals (this codebase's one case -- the approve/deny route) is expanded
+ * into its two concrete branches instead, because `ALLOWED_POST_ID_PATTERNS`
+ * models that route as two literal-suffix entries (`/approve` and `/deny`),
+ * not one "any id" entry -- collapsing it to a generic `:id:` here would
+ * compare a looser shape than proxy.rs actually enforces.
+ */
+function toShapes(rawLiteral: string): string[] {
+  const quote = rawLiteral[0];
+  const inner = rawLiteral.slice(1, -1);
+  if (quote !== "`") return [inner];
+
+  const genericHoles = /\$\{[^}]*\}/g;
+  const ternaryHole = /\$\{[^{}]*?\?\s*"([^"]*)"\s*:\s*"([^"]*)"[^{}]*?\}/;
+  const ternaryMatch = inner.match(ternaryHole);
+  if (!ternaryMatch) return [inner.replace(genericHoles, ":id:")];
+
+  const [wholeMatch, branchA, branchB] = ternaryMatch;
+  const placeholder = "\u0000";
+  const skeleton = inner.replace(wholeMatch, placeholder).replace(genericHoles, ":id:");
+  return [skeleton.replace(placeholder, branchA), skeleton.replace(placeholder, branchB)];
+}
+
+/** Path shape -> the files it was found in (for a readable failure message). */
+function findUsedPostShapes(): Map<string, string[]> {
+  const usages = new Map<string, string[]>();
+  for (const [file, text] of Object.entries(sourceFiles)) {
+    for (const match of text.matchAll(POST_CALL)) {
+      for (const shape of toShapes(match[1])) {
+        if (!shape.startsWith("/")) continue; // not a path at all
+        const files = usages.get(shape) ?? [];
+        files.push(file);
+        usages.set(shape, files);
+      }
+    }
+  }
+  return usages;
+}
+
+describe("api_post allowlist matches what the UI actually calls", () => {
+  it("parsed a non-trivial allowlist out of proxy.rs (parser sanity check)", () => {
+    expect(ALLOWED_EXACT.length).toBeGreaterThan(0);
+    expect(ALLOWED_ID_ROUTES.length).toBeGreaterThan(0);
+  });
+
+  it("has no used path outside the allowlist, and no allowlist entry that goes unused", () => {
+    const used = findUsedPostShapes();
+
+    const notAllowlisted = [...used.keys()]
+      .filter((shape) => !ALLOWED_POST_SHAPES.has(shape))
+      .map((shape) => `${shape} (used in ${used.get(shape)?.join(", ")})`);
+    const unused = [...ALLOWED_POST_SHAPES].filter((shape) => !used.has(shape));
+
+    expect(
+      notAllowlisted,
+      "path(s) used by the UI are not accepted by proxy.rs's ALLOWED_POST_EXACT / " +
+        "ALLOWED_POST_ID_PATTERNS",
+    ).toEqual([]);
+    expect(
+      unused,
+      "proxy.rs allows a POST shape that is not called anywhere in src/**/*.{ts,tsx} -- " +
+        "narrow the allowlist, or this is wider than the UI needs",
+    ).toEqual([]);
+  });
+});

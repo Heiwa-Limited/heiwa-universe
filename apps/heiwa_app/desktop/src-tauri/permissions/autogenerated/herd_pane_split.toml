@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-herd-pane-split"
+description = "Enables the herd_pane_split command without any pre-configured scope."
+commands.allow = ["herd_pane_split"]
+
+[[permission]]
+identifier = "deny-herd-pane-split"
+description = "Denies the herd_pane_split command without any pre-configured scope."
+commands.deny = ["herd_pane_split"]

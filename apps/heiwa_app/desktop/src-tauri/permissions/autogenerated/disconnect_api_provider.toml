@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-disconnect-api-provider"
+description = "Enables the disconnect_api_provider command without any pre-configured scope."
+commands.allow = ["disconnect_api_provider"]
+
+[[permission]]
+identifier = "deny-disconnect-api-provider"
+description = "Denies the disconnect_api_provider command without any pre-configured scope."
+commands.deny = ["disconnect_api_provider"]

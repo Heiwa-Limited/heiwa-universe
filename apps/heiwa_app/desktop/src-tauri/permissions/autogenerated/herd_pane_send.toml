@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-herd-pane-send"
+description = "Enables the herd_pane_send command without any pre-configured scope."
+commands.allow = ["herd_pane_send"]
+
+[[permission]]
+identifier = "deny-herd-pane-send"
+description = "Denies the herd_pane_send command without any pre-configured scope."
+commands.deny = ["herd_pane_send"]
