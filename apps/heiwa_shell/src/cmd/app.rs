@@ -1344,10 +1344,29 @@ async fn handle_connection(
         return Ok(());
     }
 
+    // Pre-routing trust boundary: pin Host before any handler runs or any
+    // state is read. Without this, only the browser-bootstrap and session
+    // paths ever checked Host, so a DNS-rebound page could hit every other
+    // route — including every unauthenticated GET below — with the real
+    // loopback response. This runs ahead of the WebSocket-upgrade branch too,
+    // so a rebound upgrade attempt never reaches `handle_websocket`.
+    if enforce_bound_host(&request, local_port).is_err() {
+        return write_response(
+            &mut stream,
+            403,
+            "application/json",
+            json!({"ok": false, "error": {"code": "invalid_host"}})
+                .to_string()
+                .into_bytes(),
+            false,
+        )
+        .await;
+    }
+
     if is_websocket_request(&request) {
         let target = request_target(&request).unwrap_or("/").to_string();
         let path = request_path(&request).unwrap_or("/").to_string();
-        if path == "/ws/v1/operator" {
+        if is_runtime_authenticated_request(&path) {
             if let Err(error) = operator_http_auth_subject(
                 &request,
                 "GET",
@@ -1409,7 +1428,7 @@ async fn handle_connection(
     }
     let head_only = method == "HEAD";
 
-    if is_runtime_authenticated_request(method, path) {
+    if is_runtime_authenticated_request(path) {
         if let Err(error) = operator_http_auth_subject(
             &request,
             method,
@@ -1882,12 +1901,17 @@ async fn handle_connection(
 enum OperatorAuthError {
     NotConfigured,
     Unauthorized,
+    /// A present `Origin` or `Sec-Fetch-Site` that proves the request came
+    /// from a different site, rather than merely lacking credentials. That is
+    /// a CSRF/rebinding signal, so it is a hard 403 instead of a soft 401.
+    ForeignOrigin,
 }
 
 fn operator_auth_response(error: OperatorAuthError) -> (u16, &'static str) {
     match error {
         OperatorAuthError::NotConfigured => (500, "auth_not_configured"),
         OperatorAuthError::Unauthorized => (401, "unauthorized"),
+        OperatorAuthError::ForeignOrigin => (403, "foreign_origin"),
     }
 }
 
@@ -1895,13 +1919,14 @@ fn is_operator_api_path(path: &str) -> bool {
     path == "/api/v1/operator" || path.starts_with("/api/v1/operator/")
 }
 
-fn is_runtime_authenticated_request(method: &str, path: &str) -> bool {
-    if is_operator_api_path(path) || matches!(path, "/api/v1/repl" | "/api/v1/repl/stream") {
-        return true;
-    }
-    path.starts_with("/api/v1/")
-        && matches!(method, "POST" | "PUT" | "PATCH" | "DELETE")
-        && path != "/api/v1/route/preview"
+/// Default-deny: every `/api/` or `/ws/` path needs the runtime's existing
+/// authentication (a signed desktop request, a browser session cookie, or a
+/// bearer token) regardless of method. The liveness path (`/status/health`)
+/// and the browser-bootstrap endpoint (`/`) are the only exceptions, and both
+/// stay excluded simply by not matching either prefix. New routes are
+/// authenticated automatically; there is no per-route opt-out.
+fn is_runtime_authenticated_request(path: &str) -> bool {
+    path.starts_with("/api/") || path.starts_with("/ws/")
 }
 
 const MAX_LOCAL_REQUEST_NONCES: usize = 4096;
@@ -2034,16 +2059,40 @@ fn operator_http_auth_subject(
     let expected_origin = exact_loopback_origin(request, local_port)?;
     let supplied_origin =
         strict_header_value(request, "origin").map_err(|_| OperatorAuthError::Unauthorized)?;
-    if supplied_origin
-        .as_deref()
-        .is_some_and(|origin| origin != expected_origin)
-    {
-        return Err(OperatorAuthError::Unauthorized);
+    // A browser omits Origin on a same-origin GET/HEAD (a WebSocket upgrade
+    // included — it is always sent as a GET), so a missing Origin stays
+    // allowed there. A *present* foreign Origin is a stronger signal than
+    // simply lacking credentials — cross-site or DNS-rebound — so reads
+    // reject it with 403. Unsafe methods keep the original rule unchanged:
+    // present-and-different is a 401.
+    let is_safe_read = matches!(method, "GET" | "HEAD");
+    if let Some(origin) = supplied_origin.as_deref() {
+        if origin != expected_origin {
+            return Err(if is_safe_read {
+                OperatorAuthError::ForeignOrigin
+            } else {
+                OperatorAuthError::Unauthorized
+            });
+        }
+    }
+    if is_safe_read {
+        let cross_site = strict_header_value(request, "sec-fetch-site")
+            .map_err(|_| OperatorAuthError::ForeignOrigin)?
+            .is_some_and(|value| value.eq_ignore_ascii_case("cross-site"));
+        if cross_site {
+            return Err(OperatorAuthError::ForeignOrigin);
+        }
     }
     let cookie =
         strict_header_value(request, "cookie").map_err(|_| OperatorAuthError::Unauthorized)?;
+    // Origin was already proven either absent or an exact match above. A
+    // same-origin GET/HEAD may omit it entirely, so the cookie path may
+    // proceed on those methods even without one; unsafe methods still
+    // require that it was present (unchanged from before).
+    let origin_acceptable_for_cookie =
+        is_safe_read || supplied_origin.as_deref() == Some(expected_origin.as_str());
     if cookie.is_some_and(|cookie| {
-        supplied_origin.as_deref() == Some(expected_origin.as_str())
+        origin_acceptable_for_cookie
             && browser_sessions.lock().ok().is_some_and(|mut sessions| {
                 sessions.authenticates_cookie_at(
                     &cookie,
