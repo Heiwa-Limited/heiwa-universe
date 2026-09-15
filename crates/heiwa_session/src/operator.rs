@@ -175,32 +175,23 @@ impl OperatorActivityLease {
         Ok(())
     }
 
-    /// Runs `operation` while holding the exclusive lease, then always
-    /// leaves this lease holding the shared lock again — on success, on a
-    /// failure inside `operation`, and when the exclusive attempt itself is
-    /// denied.
+    /// Runs `operation` under the exclusive lease, then always leaves the
+    /// lease holding the shared lock again — on success, on a failure
+    /// inside `operation`, and when the exclusive attempt is denied.
     ///
-    /// This upgrades and downgrades the lease on the *same* open file
-    /// description throughout, via repeated `flock`-equivalent calls on one
-    /// `File`, instead of dropping the shared handle and racing a brand new
-    /// one into an exclusive lock. The two are not equivalent: `flock`
-    /// treats descriptors as independent, so a lock held via one descriptor
-    /// blocks a different descriptor's request for the same file — even
-    /// within one process, even for descriptors that both belong to this
-    /// same lease — so any handoff through a second descriptor has a real
-    /// gap where neither descriptor holds the lease. This runtime spawns
-    /// worker processes with `Command::spawn`, which forks the whole
-    /// process, duplicating every open file descriptor into the child; if
-    /// that fork lands inside the gap, the child inherits a reference to the
-    /// shared lock's *old* open file description and keeps it alive
-    /// (`close-on-exec` does not run until the child actually execs) even
-    /// though the child has nothing to do with this evidence root. A fresh
-    /// exclusive descriptor opened in that window loses to the child's
-    /// borrowed lock and `recover_interrupted_with` fails closed with
-    /// `operator_activity_lease_held` despite no real writer being left.
-    /// Reusing one descriptor for the whole upgrade/downgrade cycle closes
-    /// that gap: converting a lock in place is atomic, and a fork on another
-    /// thread cannot affect a descriptor it never had a reference to.
+    /// Reuses the *same* open file description for the whole upgrade and
+    /// downgrade, instead of closing it and racing a brand new descriptor
+    /// into an exclusive lock. `flock(2)` conversion is not atomic — the
+    /// existing lock is dropped, then the new one is requested — but a
+    /// duplicate of *this* description (for example a `Command::spawn`-ed
+    /// child that has not yet exec'd, which inherits every open descriptor)
+    /// shares the same lock state, so it can never be the competing request
+    /// that wins that gap. Only a genuinely independent descriptor, a real
+    /// other writer, can still deny the upgrade, correctly failing closed
+    /// as `ActivityAlreadyHeld`. A second, independently opened descriptor
+    /// (the previous approach) has no such immunity: a forked child's
+    /// inherited copy of the *old* descriptor keeps that lock alive on its
+    /// own, so it could and did deny an upgrade that should have succeeded.
     fn with_exclusive<T>(&mut self, operation: impl FnOnce() -> Result<T>) -> Result<T> {
         let file = match self.shared_file.take() {
             Some(file) => file,
@@ -2421,7 +2412,10 @@ mod tests {
     use heiwa_evidence::{OperatorActor, OperatorEvent, OperatorEventType, OperatorJournal};
     use serde_json::json;
 
-    use super::{new_event, now_iso, OperatorSessionService, StartTurnRequest};
+    use super::{
+        new_event, now_iso, open_ownership_file, OperatorSessionService, StartTurnRequest,
+        OPERATOR_ACTIVITY_LEASE_FILE,
+    };
 
     #[test]
     fn read_only_replay_does_not_wait_for_a_write_transaction() {
@@ -2485,6 +2479,55 @@ mod tests {
             service.projection.lock().unwrap().applied_event_rows,
             first_applied + 1
         );
+    }
+
+    #[test]
+    fn with_exclusive_upgrades_past_a_duplicated_shared_descriptor() {
+        // `Command::spawn` forks the whole process, duplicating every open
+        // file descriptor into the child before it execs, including this
+        // lease's shared-lock file. The duplicate shares the *same* open
+        // file description (and its lock) as the original -- exactly what
+        // `File::try_clone` gives us -- so cloning the lease's file here
+        // reproduces a forked-but-not-yet-exec'd child deterministically,
+        // with no real child process and no timing dependency.
+        let dir = tempfile::tempdir().unwrap();
+        let service =
+            OperatorSessionService::new(OperatorJournal::new(dir.path().to_path_buf()).unwrap());
+        service
+            .start_turn("default", StartTurnRequest::auto("req-1", "hello"))
+            .unwrap();
+
+        let inherited = service
+            .activity_lease
+            .lock()
+            .unwrap()
+            .shared_file
+            .as_ref()
+            .expect("start_turn's append_event acquired the shared lease")
+            .try_clone()
+            .expect("dup the shared-lease file, modeling a forked child's inherited fd");
+
+        // The exclusive upgrade must still succeed: `inherited` is a
+        // duplicate of our own open file description, never a second
+        // writer, so it must not be able to deny the upgrade.
+        assert_eq!(
+            service.recover_interrupted().expect(
+                "an inherited duplicate of our own shared descriptor must never look like \
+                 another live session writer"
+            ),
+            1,
+            "closes the unfinished turn started above"
+        );
+
+        // The lease must be shared again afterwards, not exclusive: an
+        // independently opened descriptor can still take a shared lock.
+        let independent = open_ownership_file(dir.path(), OPERATOR_ACTIVITY_LEASE_FILE).unwrap();
+        assert!(
+            independent.try_lock_shared().is_ok(),
+            "with_exclusive must leave the lease shared again, not exclusive"
+        );
+
+        drop(inherited);
     }
 
     #[test]
