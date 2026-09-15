@@ -169,7 +169,7 @@ export type MailSyncStatus = {
   updated?: number;
   removed?: number;
   error?: string | null;
-  error_class?: "timeout" | "automation_denied" | "backoff" | "failed" | string | null;
+  error_class?: "timeout" | "permission_pending" | "automation_denied" | "backoff" | "failed" | string | null;
   last_scan_at?: string | null;
   last_attempt_at?: string | null;
 };

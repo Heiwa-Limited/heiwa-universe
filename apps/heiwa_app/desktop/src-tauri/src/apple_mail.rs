@@ -211,7 +211,9 @@ fn classify_error(detail: &str) -> &'static str {
     let lower = detail.to_ascii_lowercase();
     if lower.contains("timed out") || lower.contains("timeout") {
         "timeout"
-    } else if lower.contains("permission")
+    } else if lower.contains("not authorized")
+        || lower.contains("-1743")
+        || lower.contains("permission")
         || lower.contains("automation")
         || lower.contains("access denied")
     {

@@ -27,6 +27,9 @@ function Mail() {
   const freshness = () => {
     const status = sync();
     if (!status) return undefined;
+    if (status.error_class === "permission_pending") {
+      return "macOS needs your OK for Heiwa to read Mail. Allow the ‘Heiwa wants to control Mail’ prompt, or enable it under System Settings › Privacy & Security › Automation, then click Read Apple Mail again.";
+    }
     if (status.status === "error" || status.status === "backoff" || status.status === "skipped") {
       if (status.error_class === "timeout") return "Mail sync timed out; try Read Apple Mail again.";
       if (status.error_class === "automation_denied") return "Allow Heiwa in System Settings › Privacy & Security › Automation.";

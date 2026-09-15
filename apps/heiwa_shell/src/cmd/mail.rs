@@ -518,7 +518,8 @@ fn scan(args: &[String]) -> Result<()> {
         Err(error) => {
             saved.error = Some(error.to_string());
             let _ = save_mail_sync_state(&saved);
-            let payload = json!({"status":"error","error_class":mail_error_class(&error.to_string()),"sources":[{"source":"apple","status":"error","error":error.to_string(),"error_class":mail_error_class(&error.to_string())}],"fetched":0,"appended":0,"updated":0,"removed":0});
+            let error_class = scan_error_class(&error.to_string(), saved.consented_at);
+            let payload = json!({"status":"error","error_class":error_class,"sources":[{"source":"apple","status":"error","error":error.to_string(),"error_class":error_class}],"fetched":0,"appended":0,"updated":0,"removed":0});
             return print_scan_payload(payload, json_output);
         }
     };
@@ -593,7 +594,9 @@ fn print_scan_payload(payload: Value, json_output: bool) -> Result<()> {
 
 fn mail_error_class(error: &str) -> &'static str {
     let lower = error.to_ascii_lowercase();
-    if lower.contains("timed out") || lower.contains("timeout") {
+    if lower.contains("not authorized") || lower.contains("-1743") {
+        "automation_denied"
+    } else if lower.contains("timed out") || lower.contains("timeout") {
         "timeout"
     } else if lower.contains("permission")
         || lower.contains("automation")
@@ -602,6 +605,18 @@ fn mail_error_class(error: &str) -> &'static str {
         "automation_denied"
     } else {
         "failed"
+    }
+}
+
+fn scan_error_class(
+    error: &str,
+    consented_at: Option<chrono::DateTime<chrono::Utc>>,
+) -> &'static str {
+    let class = mail_error_class(error);
+    if class == "timeout" && consented_at.is_none() {
+        "permission_pending"
+    } else {
+        class
     }
 }
 
@@ -1610,6 +1625,32 @@ mod tests {
         assert_eq!(
             mail_sync_decision(&empty, now, None, false),
             MailSyncDecision::Scan
+        );
+    }
+
+    #[test]
+    fn first_run_timeout_is_permission_pending_but_later_timeout_is_timeout() {
+        assert_eq!(
+            scan_error_class(
+                "The local resource did not respond before the read timed out",
+                None
+            ),
+            "permission_pending"
+        );
+        assert_eq!(
+            scan_error_class(
+                "The local resource did not respond before the read timed out",
+                Some(chrono::Utc::now())
+            ),
+            "timeout"
+        );
+    }
+
+    #[test]
+    fn apple_event_not_authorized_is_automation_denied() {
+        assert_eq!(
+            mail_error_class("Not authorized to send Apple events to Mail (-1743)"),
+            "automation_denied"
         );
     }
 
