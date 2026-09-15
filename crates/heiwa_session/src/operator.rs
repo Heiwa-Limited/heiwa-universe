@@ -2519,9 +2519,16 @@ mod tests {
             "closes the unfinished turn started above"
         );
 
-        // The lease must be shared again afterwards, not exclusive: an
-        // independently opened descriptor can still take a shared lock.
+        // The lease must be shared again afterwards -- not exclusive, and
+        // not unheld either (a silently failed `restore_shared` would also
+        // let a plain `try_lock_shared` below succeed). An independent
+        // descriptor denied `try_lock` but granted `try_lock_shared` is the
+        // only outcome that proves a shared lock, specifically, is held.
         let independent = open_ownership_file(dir.path(), OPERATOR_ACTIVITY_LEASE_FILE).unwrap();
+        assert!(
+            independent.try_lock().is_err(),
+            "the lease's shared lock must still deny an independent exclusive attempt"
+        );
         assert!(
             independent.try_lock_shared().is_ok(),
             "with_exclusive must leave the lease shared again, not exclusive"
