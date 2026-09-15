@@ -14,6 +14,13 @@
 # does not itself become a new finding.)
 be2a81c801a31168773188ec4a935601f42c8926:apps/heiwa_shell/src/cmd/app.rs:generic-api-key:6638
 be2a81c801a31168773188ec4a935601f42c8926:apps/heiwa_shell/src/cmd/app.rs:generic-api-key:6774
+#
+# A same-day follow-up commit quoted that key verbatim in the triage comment
+# above to explain the finding, which made the comment itself match the
+# rule. History cannot be rewritten on a pushed branch, so the superseded
+# line is allowlisted here rather than reproduced or removed retroactively;
+# the corrected comment text above replaces it going forward.
+27219da1b04b9ea0b55fb97c6d97b4266ad97029:.gitleaksignore:generic-api-key:10
 1197b1171c3a7d5934b34dd40a46b417841e0bb6:apps/heiwa_shell/tests/operator_api.rs:generic-api-key:732
 196e079b4da41602e0a5a7409e2a6523fa7ebfd2:apps/heiwa_shell/tests/operator_api.rs:generic-api-key:475
 1a6abe3a36a7ea6261c07d6a58e0285539c2004f:config/swarm/profiles/heiwa-one-system.yaml:generic-api-key:382
