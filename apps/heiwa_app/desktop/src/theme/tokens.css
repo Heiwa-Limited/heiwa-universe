@@ -112,6 +112,18 @@
   --status-error: var(--p-red-500);
   --status-idle: var(--content-muted);
 
+  /* ── Series: categorical colors for items the user tells apart at a glance,
+     such as calendars. Tuned to read on the dark surfaces. Surfaces choose a
+     series by stable index and never build a color themselves. ── */
+  --series-1: #8fb8e8;
+  --series-2: #e8a0b4;
+  --series-3: #9ed6a8;
+  --series-4: #e8c27a;
+  --series-5: #b9a3e8;
+  --series-6: #7fd1d1;
+  --series-7: #e8a37f;
+  --series-8: #c9d27f;
+
   /* ── Elevation ── */
   --elevation-1: 0 1px 2px rgb(0 0 0 / 30%);
   --elevation-2: 0 8px 20px rgb(0 0 0 / 28%);

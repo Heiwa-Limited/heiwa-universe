@@ -303,14 +303,20 @@ export function ageLabel(then: Date, now: Date): string {
   return `on ${monthDay(then)}`;
 }
 
-/** A stable hue per calendar, so the same calendar keeps its color. */
-export function calendarHue(name: string): number {
+/** Categorical colors the theme defines as `--series-1` … `--series-N`. */
+export const SERIES_COUNT = 8;
+
+/**
+ * A stable theme series (1-based) per calendar, so the same calendar keeps its
+ * color. The color itself stays in the theme layer.
+ */
+export function calendarSeries(name: string): number {
   let hash = 2166136261;
   for (let index = 0; index < name.length; index += 1) {
     hash ^= name.charCodeAt(index);
     hash = Math.imul(hash, 16777619);
   }
-  return Math.abs(hash) % 360;
+  return (Math.abs(hash) % SERIES_COUNT) + 1;
 }
 
 export type MonthCell = { day: number; iso: string; inMonth: boolean; isToday: boolean };

@@ -154,7 +154,7 @@
   width: 6px;
   height: 6px;
   border-radius: var(--radius-pill);
-  background: hsl(var(--cal-hue, 110) 50% 64%);
+  background: var(--cal-series, var(--accent));
 }
 
 .cal-more {
@@ -248,7 +248,7 @@
   width: 4px;
   min-height: 1em;
   border-radius: var(--radius-pill);
-  background: hsl(var(--cal-hue, 110) 50% 64%);
+  background: var(--cal-series, var(--accent));
 }
 
 .cal-agenda-text {

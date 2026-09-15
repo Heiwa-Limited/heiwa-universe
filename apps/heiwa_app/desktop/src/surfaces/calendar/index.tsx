@@ -5,7 +5,7 @@ import {
   addIsoDays,
   ageLabel,
   agendaTimeLabel,
-  calendarHue,
+  calendarSeries,
   dayLabel,
   durationLabel,
   groupByDay,
@@ -37,8 +37,9 @@ function countLabel(count: number): string {
   return count === 1 ? "1 event" : `${count} events`;
 }
 
-function hueStyle(event: AgendaEvent): Record<string, string> {
-  return { "--cal-hue": String(calendarHue(event.calendar)) };
+/** Points the calendar's color at its theme series token. */
+function seriesStyle(event: AgendaEvent): Record<string, string> {
+  return { "--cal-series": `var(--series-${calendarSeries(event.calendar)})` };
 }
 
 function CalendarSurface() {
@@ -262,7 +263,7 @@ function CalendarSurface() {
                           <span class="cal-day">{cell.day}</span>
                           <span class="cal-dots" aria-hidden="true">
                             <For each={dayEvents().slice(0, 3)}>
-                              {(event) => <span class="cal-dot" style={hueStyle(event)} />}
+                              {(event) => <span class="cal-dot" style={seriesStyle(event)} />}
                             </For>
                             <Show when={dayEvents().length > 3}>
                               <span class="cal-more">+{dayEvents().length - 3}</span>
@@ -357,7 +358,7 @@ function AgendaRow(props: {
     <li
       class="cal-agenda-item"
       classList={{ expanded: props.expanded, cancelled: props.event.status === "cancelled" }}
-      style={hueStyle(props.event)}
+      style={seriesStyle(props.event)}
     >
       <button
         ref={row}
