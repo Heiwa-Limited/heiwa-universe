@@ -2075,13 +2075,24 @@ fn operator_http_auth_subject(
             });
         }
     }
-    if is_safe_read {
-        let cross_site = strict_header_value(request, "sec-fetch-site")
-            .map_err(|_| OperatorAuthError::ForeignOrigin)?
-            .is_some_and(|value| value.eq_ignore_ascii_case("cross-site"));
-        if cross_site {
-            return Err(OperatorAuthError::ForeignOrigin);
-        }
+    // Sec-Fetch-Site is the browser's own, unspoofable classification of a
+    // request's relationship to the page that sent it, and modern browsers
+    // send it on every fetch/XHR/navigation/WebSocket regardless of method —
+    // unlike Origin, so it also catches an embedding trick that could still
+    // forge a matching Origin header. A signed desktop request never sets
+    // this header at all, so its absence never blocks anything here. When it
+    // IS present, only "same-origin" and "none" (top-level/extension-
+    // initiated navigations) are accepted; both "cross-site" and
+    // "same-site" are rejected — "same-site" specifically covers another
+    // local port sharing this machine's site for cookie purposes, which
+    // Origin/Host alone would not catch.
+    let foreign_fetch_site = strict_header_value(request, "sec-fetch-site")
+        .map_err(|_| OperatorAuthError::ForeignOrigin)?
+        .is_some_and(|value| {
+            !value.eq_ignore_ascii_case("same-origin") && !value.eq_ignore_ascii_case("none")
+        });
+    if foreign_fetch_site {
+        return Err(OperatorAuthError::ForeignOrigin);
     }
     let cookie =
         strict_header_value(request, "cookie").map_err(|_| OperatorAuthError::Unauthorized)?;
@@ -6782,6 +6793,90 @@ mod app_readmodel_tests {
             !response.starts_with("HTTP/1.1 101"),
             "must not upgrade: {response}"
         );
+    }
+
+    #[tokio::test]
+    async fn fetch_metadata_rejects_cross_site_and_same_site_on_every_method() {
+        let _env = MachineAuthTestEnv::configured();
+        let listener = TcpListener::bind(("127.0.0.1", 0)).await.unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let origin = format!("http://127.0.0.1:{port}");
+        let sessions = Arc::new(Mutex::new(BrowserSessionStore::default()));
+        let session_token = {
+            let mut store = sessions.lock().unwrap();
+            let now = chrono::Utc::now().timestamp();
+            let bootstrap = store.issue_bootstrap_at(now, &origin);
+            store
+                .consume_bootstrap_at(&bootstrap, now, &origin)
+                .expect("mint session")
+        };
+        let cookie = format!("{}={session_token}", browser_session_cookie_name(port));
+
+        // 1. Cookie POST with Sec-Fetch-Site: same-site is rejected, not just
+        //    cross-site — another local port shares this machine's site for
+        //    cookie purposes, which Origin/Host alone would not catch.
+        let body = "{}";
+        let response = response_over(
+            &listener,
+            sessions.clone(),
+            format!(
+                "POST /api/v1/route/preview HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\nOrigin: {origin}\r\nSec-Fetch-Site: same-site\r\nCookie: {cookie}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+                body.len()
+            ),
+        )
+        .await;
+        assert!(response.starts_with("HTTP/1.1 403"), "{response}");
+        assert!(response.contains("foreign_origin"), "{response}");
+
+        // 2. Cookie GET with Sec-Fetch-Site: same-site is rejected too — the
+        //    check now applies to every method, not just unsafe ones.
+        let response = response_over(
+            &listener,
+            sessions.clone(),
+            format!(
+                "GET /api/v1/session HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\nOrigin: {origin}\r\nSec-Fetch-Site: same-site\r\nCookie: {cookie}\r\nConnection: close\r\n\r\n"
+            ),
+        )
+        .await;
+        assert!(response.starts_with("HTTP/1.1 403"), "{response}");
+        assert!(response.contains("foreign_origin"), "{response}");
+
+        // 3. Cookie GET with Sec-Fetch-Site: none (a top-level or extension-
+        //    initiated navigation) is allowed.
+        let response = response_over(
+            &listener,
+            sessions.clone(),
+            format!(
+                "GET /api/v1/session HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\nOrigin: {origin}\r\nSec-Fetch-Site: none\r\nCookie: {cookie}\r\nConnection: close\r\n\r\n"
+            ),
+        )
+        .await;
+        assert!(response.starts_with("HTTP/1.1 200 OK\r\n"), "{response}");
+
+        // 4. A signed desktop request never sends Sec-Fetch-Site at all —
+        //    its absence must never block anything.
+        let signed = heiwa_core::auth::sign_local_request(
+            heiwa_core::auth::LocalRequestParts {
+                method: "GET",
+                port,
+                target: "/api/v1/session",
+                body: b"",
+            },
+            chrono::Utc::now().timestamp(),
+            &uuid::Uuid::new_v4().simple().to_string(),
+            TEST_MACHINE_AUTH_TOKEN,
+        )
+        .unwrap();
+        let response = response_over(
+            &listener,
+            sessions.clone(),
+            format!(
+                "GET /api/v1/session HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\nX-Heiwa-Local-Auth-Version: {}\r\nX-Heiwa-Local-Auth-Timestamp: {}\r\nX-Heiwa-Local-Auth-Nonce: {}\r\nX-Heiwa-Local-Auth-Signature: {}\r\nConnection: close\r\n\r\n",
+                signed.version, signed.timestamp, signed.nonce, signed.signature,
+            ),
+        )
+        .await;
+        assert!(response.starts_with("HTTP/1.1 200 OK\r\n"), "{response}");
     }
 
     #[test]

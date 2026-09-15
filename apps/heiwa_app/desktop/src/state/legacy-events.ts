@@ -16,28 +16,35 @@ import type { AppState } from "./app";
  * session cookie either (and `SameSite=Strict` would block the cookie from
  * attaching cross-site even if it somehow did). There is no way for a raw
  * socket here to authenticate, so this polls the same signed Tauri commands
- * (`loadInbox`, `loadApprovals`, `loadHealth`) the message handler already
- * called once notified, rather than adding a new native command surface —
- * L-009 is mid-flight on that command manifest and a new command would break
- * its drift test. Mirrors the visible/hidden/focus refresh idiom in
- * `app.tsx`'s surface loop. Folds into the connector plane at L3.
+ * the message handler already called once notified, rather than adding a new
+ * native command surface — L-009 is mid-flight on that command manifest and
+ * a new command would break its drift test. Mirrors the visible/hidden/focus
+ * refresh idiom in `app.tsx`'s surface loop. Folds into the connector plane
+ * at L3.
+ *
+ * `loadHealth` is on its own, much slower cadence than `loadInbox` /
+ * `loadApprovals`: the runtime snapshot it reads is comparatively expensive
+ * (mail, approvals, workers, and hooks state, a keep-awake check, and a
+ * self-probe of the port), and nothing else in the shell polls it — only
+ * `main.tsx` calls it once, at boot. Polling it on the same 5s cadence as
+ * the cheap inbox/approval reads would be new sustained load with no
+ * corresponding need for that freshness.
  */
 export function connectLegacyEvents(
   app: AppState,
-  options: { intervalMs?: number } = {},
+  options: { intervalMs?: number; healthIntervalMs?: number } = {},
 ): () => void {
   const intervalMs = options.intervalMs ?? 5000;
+  const healthIntervalMs = options.healthIntervalMs ?? 30000;
   let running = false;
+  let healthRunning = false;
+  let lastHealthAttempt = 0;
   const visible = () => document.visibilityState !== "hidden";
 
   const run = (): void => {
     if (running) return;
     running = true;
-    Promise.all([
-      app.runtime.loadInbox(),
-      app.runtime.loadApprovals(),
-      app.runtime.loadHealth(),
-    ])
+    Promise.all([app.runtime.loadInbox(), app.runtime.loadApprovals()])
       .catch(() => undefined) // each loader already keeps its last-known
       // state on failure; this only stops a poll tick from becoming an
       // unhandled rejection or an error storm.
@@ -46,14 +53,36 @@ export function connectLegacyEvents(
       });
   };
 
-  const onReturn = (): void => {
-    if (visible()) run();
+  // Gated by elapsed time since the last attempt (successful or not), not
+  // just "in flight", so a rapid string of ticks/focus bounces cannot queue
+  // up calls the moment the current one finishes.
+  const maybeRefreshHealth = (): void => {
+    if (healthRunning) return;
+    const now = Date.now();
+    if (now - lastHealthAttempt < healthIntervalMs) return;
+    lastHealthAttempt = now;
+    healthRunning = true;
+    app.runtime
+      .loadHealth()
+      .catch(() => undefined)
+      .finally(() => {
+        healthRunning = false;
+      });
   };
 
-  run();
+  const tick = (): void => {
+    run();
+    maybeRefreshHealth();
+  };
+
+  const onReturn = (): void => {
+    if (visible()) tick();
+  };
+
+  tick();
   window.addEventListener("focus", onReturn);
   document.addEventListener("visibilitychange", onReturn);
-  const timer = setInterval(() => visible() && run(), intervalMs);
+  const timer = setInterval(() => visible() && tick(), intervalMs);
 
   return () => {
     window.removeEventListener("focus", onReturn);
