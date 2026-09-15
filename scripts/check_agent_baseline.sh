@@ -16,7 +16,8 @@ Local-only agent baseline gate. This script does not fetch, push, call gh, or
 perform network health checks. Remote pre-flight is separate evidence collected
 within an authorized publishing or remote-audit assignment.
 
-Set HEIWA_BRANCH_MODE to `experimental` for a branch descended from `dev`, or
+Set HEIWA_BRANCH_MODE to `experimental` for a branch descended from cached
+`origin/dev`, or
 to `post-promotion` for the brief synchronized dev/main handoff. The default is
 `integration`, which requires value-bearing work on `dev` ahead of `main`.
 
