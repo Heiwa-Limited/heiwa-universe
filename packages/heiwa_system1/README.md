@@ -102,7 +102,7 @@ lets one wrong dispatch through on the demo corpus; `0.925` gets it to zero.
 When nothing meets the budget it returns *nothing*, which means confidence
 does not separate right from wrong for that question and no threshold will.
 
-## Three things worth knowing before using this
+## Four things worth knowing before using this
 
 1. **A confidence gate is not a safety gate.** The bands measure how *sure*
    the model is, never whether the answer is acceptable. A confident "yes,
@@ -117,3 +117,17 @@ does not separate right from wrong for that question and no threshold will.
    drift, prototype pollution, a tool that explodes — returns a typed
    `Result` and quarantines. Absence of a judgment is never treated as
    permission.
+
+4. **Use a non-reasoning model for the fallback.** Measured live: qwen3.5 on
+   Ollama's OpenAI-compatible route spent 3745 tokens on chain-of-thought,
+   hit the context limit and returned an *empty* answer after 75 seconds.
+   Neither `think: false` nor `chat_template_kwargs.enable_thinking` is
+   honoured there. gemma4 answered the same fan correctly in 17s. The
+   adapter always sends `max_tokens` so a runaway model fails fast with a
+   message naming the cause, rather than hanging.
+
+   Also: Ollama's `json_schema` enforces structure and `enum` but **ignores
+   `minimum`/`maximum`** — a real run returned `noul: 2` and `score: -0.8`.
+   Those are passed through unrepaired for the decoder to reject, because
+   clamping would turn "the model returned nonsense" into "we confidently
+   made an answer up".
