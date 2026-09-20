@@ -45,6 +45,15 @@ cd packages/heiwa_system1 && npm install && npm test
 Node 26 runs the TypeScript directly — no build step. `zod` is the only
 runtime dependency.
 
+To check the real endpoint (skipped without a key, so it never blocks CI):
+
+```bash
+TYPESAFE_API_KEY=sk-... npm run test:live
+```
+
+That asserts the contract and prints observed latency, tokens, and
+per-question confidence with its provenance.
+
 ## Shape
 
 ```ts

@@ -395,9 +395,32 @@ the network is gone — degraded, capped, and honest about being so.
   false-auto-dispatch rate is near zero. Until then treat them as a starting
   point.
 
-**Next steps to close the gap.**
-1. Run the fan against live Jev with a real API key; record observed latency
-   distribution and compare against the 500ms budget.
-2. Confirm or correct the OpenRouter path and model id.
-3. Build a labelled corpus and calibrate thresholds per question.
+**Closing the gap is one command.** `test/live/jev.live.test.ts` drives the
+real endpoint and is skipped unless a key is present, so it never blocks CI:
+
+```bash
+TYPESAFE_API_KEY=sk-...   npm --prefix packages/heiwa_system1 run test:live
+OPENROUTER_API_KEY=or-... npm --prefix packages/heiwa_system1 run test:live
+```
+
+It asserts the **contract, never a specific answer** — a model may disagree
+with us about a ticket; it may not return a shape we cannot decode, omit a
+question, emit a distribution that does not sum to 1, or blow the budget. It
+prints observed latency, token usage, and per-question confidence with its
+provenance, which is the data needed for calibration. Running it with
+`OPENROUTER_API_KEY` is what confirms or refutes the unverified route in §8;
+a failure there means the constants in `adapters/http.ts` need correcting,
+not that the engine is broken.
+
+**Remaining steps.**
+1. Run `test:live` against real Jev; record the latency distribution.
+2. Confirm or correct the OpenRouter path and model id (same command).
+3. Build a labelled corpus and calibrate thresholds per question — sweep to
+   the point where the quarantine rate is affordable and false auto-dispatch
+   is near zero.
 4. Wire `CallTelemetry` into `crates/heiwa_evidence`.
+5. Consider promoting the package to a root npm workspace. It currently
+   self-installs (its own `package.json` + lockfile) to avoid rewriting the
+   shared root lockfile while other agents are working in the tree; root
+   scripts `test:system1` / `typecheck:system1` / `demo:system1` bridge the
+   gap in the meantime.
