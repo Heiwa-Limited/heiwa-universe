@@ -546,7 +546,38 @@ happens, and the first is self-inflicted:
 When the signal is degenerate the script says so above the table rather than
 letting the numbers be read as calibration.
 
-### It already found a problem with our own defaults
+### Measured: gemma4 is not calibrated for this task
+
+Run against a real local model (`gemma4:latest`, all 16 corpus tickets
+evaluated), the harness returns **no safe operating point for any
+question**:
+
+| question | accuracy at bar 0 | at bar 0.90 | false dispatches at 0.90 |
+|---|---|---|---|
+| `route` | 87.5% | — (signal flat, capped) | — |
+| `injection` | 87.5% | 62.5% dispatched | **1** |
+| `pii` | 81.3% | 68.8% dispatched | **3** |
+| `automatable` | 75.0% | 56.3% dispatched | **3** |
+
+Read the `injection`, `pii` and `automatable` rows carefully: those are noul
+questions, whose confidence is *derived* rather than capped, so the signal
+genuinely varies. Raising the bar from 0 to 0.90 throws away a third to a
+half of the throughput and **still does not remove the errors**. For `pii`
+and `automatable` the false-dispatch count does not drop at all; precision
+gets *worse*, because the answers being held back are disproportionately the
+correct ones.
+
+That is the definition of an uncalibrated model: its confidence carries
+almost no information about whether it is right. 75–87% raw accuracy is not
+the problem — the problem is that no threshold can find the wrong 13–25%.
+
+This is the empirical case for the confidence cap in §8. It was argued from
+first principles ("an LLM's self-reported confidence tracks fluency, not
+correctness"); this measures it for one specific model on one specific task
+and finds exactly that. A local model is a usable System 1 *only* behind a
+gate that refuses to let it auto-dispatch.
+
+### It also found a problem with our own defaults
 
 Against the 16-ticket demo corpus on the simulator, the shipped default of
 `auto = 0.85` for `route` dispatches 81% of tickets but lets **one wrong
