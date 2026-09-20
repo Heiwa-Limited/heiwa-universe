@@ -275,10 +275,19 @@ tool; zero throw.**
 
 ### What survives translation to an ordinary LLM — and what does not
 
-**Survives: schema conformity.** `questionsToJsonSchema` emits `enum` over
-exactly the offered keys, numeric bounds on scores, `required` on every
-question, `additionalProperties: false`. A constrained decoder cannot produce
-an unoffered option, and `decodeResponse` re-checks anyway.
+**Partly survives: schema conformity.** `questionsToJsonSchema` emits `enum`
+over exactly the offered keys, `required` on every question, and
+`additionalProperties: false`. Those *are* enforced — verified live against
+Ollama, which respected the `enum` on every run.
+
+**Numeric bounds are not enforced.** Measured against live Ollama: its
+schema constraint honours structure and `enum` but ignores `minimum` /
+`maximum`. One real run returned `noul: 2`, `noul: 4` and `score: -0.8`.
+So this adapter's guarantee is **weaker than Jev's** and must not be
+described as equivalent. Out-of-range values are passed through unrepaired
+for `decodeResponse` to reject and quarantine — clamping them would convert
+"the model returned nonsense" into "we confidently made an answer up", which
+is strictly worse. Two tests pin the no-repair behaviour.
 
 **Does not survive: calibration.** Jev's probabilities are trained against
 outcomes. An LLM asked "how confident are you?" produces a number correlated
@@ -300,6 +309,27 @@ worth believing. A test asserts `FALLBACK_CONFIDENCE_CEILING <=
 DEFAULT_THRESHOLDS.auto`, so retuning the gate fails loudly.
 
 Raising `confidenceCeiling` is possible, and requires saying so out loud.
+
+### Reasoning models are the wrong tool for this path
+
+Measured live. A reasoning model (`qwen3.5:4b`) on Ollama's OpenAI-compatible
+route spent **3745 completion tokens on chain-of-thought**, hit the context
+limit, and returned an **empty `content`** with its thinking in a separate
+`reasoning` field — after **75 seconds**, for a six-question fan. Neither
+`think: false` nor `chat_template_kwargs.enable_thinking` is honoured on that
+route. A non-reasoning model of similar size (`gemma4`) answered the same fan
+correctly and in range in 17s.
+
+Two consequences, both implemented:
+
+- **`max_tokens` is always sent**, defaulting to `256 + 96 × questions`. An
+  unbounded output budget is not a default, it is a hang.
+- **Truncation is diagnosed distinctly from malformed JSON.** An empty body
+  with `finish_reason: "length"` reports the chain-of-thought length and says
+  to raise the budget or change model. Calling that "not JSON" sends the
+  operator to the wrong fix.
+
+Prefer a non-reasoning model for the fallback path.
 
 ---
 
@@ -372,19 +402,31 @@ the network is gone — degraded, capped, and honest about being so.
 ## 12. Verification status
 
 **Verified.**
-- 162 tests pass; typecheck clean under `strict` + `noUncheckedIndexedAccess`
-  + `erasableSyntaxOnly`.
+- 189 tests pass offline (unit + integration), plus 4 against live Ollama;
+  typecheck clean under `strict` + `noUncheckedIndexedAccess` +
+  `erasableSyntaxOnly`; biome clean.
 - HTTP adapters exercised against a real `node:http` server: real sockets,
   real status codes, real aborts.
 - Zero parse failures across the hostile-input corpus (see §7).
 - End-to-end routing agent completes well inside the 500ms budget.
 - The TypeSafe request/response contract matches TypeSafe's published API
   reference.
+- **The fallback path is verified against a live model.** `gemma4:latest` via
+  local Ollama answered the full six-judgment fan in 17.5s (1295 in / 113
+  out), stayed inside the offered options, and — the property that matters —
+  **could not reach the auto band**. Every model-reported confidence came
+  back at exactly the 0.850 ceiling, i.e. the model claimed ≥0.85 on
+  everything and the cap did all the work. That is the predicted
+  overconfidence, caught by construction.
+- **The latency budget works against a genuinely slow provider.** A 500ms
+  budget against that same 17s model aborted after 507ms as a typed
+  `timeout`, rather than blocking.
 
 **Not verified.**
-- **No call has been made to a live Jev endpoint.** Everything provider-facing
-  is tested against the documented contract and local servers. Real latency,
-  real calibration quality, and real error behaviour are unmeasured.
+- **No call has been made to a live Jev endpoint.** The TypeSafe adapter is
+  tested against the documented contract and local servers only. Real
+  latency, real calibration quality, and real error behaviour are unmeasured.
+  (The *fallback* adapter is now live-verified; the primary one is not.)
 - The **OpenRouter route is unverified** (§8).
 - The offline simulator is keyword heuristics, not a model. It produces
   well-formed answers for deterministic tests. It says nothing about Jev's
@@ -401,6 +443,9 @@ real endpoint and is skipped unless a key is present, so it never blocks CI:
 ```bash
 TYPESAFE_API_KEY=sk-...   npm --prefix packages/heiwa_system1 run test:live
 OPENROUTER_API_KEY=or-... npm --prefix packages/heiwa_system1 run test:live
+
+# the fallback path needs no account — it skips cleanly with no Ollama running
+OLLAMA_MODEL=gemma4:latest npm --prefix packages/heiwa_system1 run test:live
 ```
 
 It asserts the **contract, never a specific answer** — a model may disagree

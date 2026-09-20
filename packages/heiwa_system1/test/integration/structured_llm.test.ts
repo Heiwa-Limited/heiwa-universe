@@ -312,3 +312,186 @@ describe("structuredLlmAdapter failure handling", () => {
     );
   });
 });
+
+describe("structuredLlmAdapter output budget", () => {
+  // Found against real Ollama: a reasoning model with no max_tokens spent
+  // 3745 completion tokens on chain-of-thought, hit the context limit, and
+  // returned an EMPTY content field after 75 seconds. An unbounded output
+  // budget is not a default, it is a hang.
+  test("caps the output budget by default rather than letting a model run away", async () => {
+    reply = () =>
+      completion({
+        team: { choice: "billing" },
+        urgency: { score: 1 },
+        refund: { noul: 0.5 },
+      });
+    received.length = 0;
+
+    await call(structuredLlmAdapter({ baseUrl, model: "m" }));
+
+    const sent = received[0] as { max_tokens?: number };
+    assert.ok(
+      typeof sent.max_tokens === "number",
+      "max_tokens must always be sent",
+    );
+    assert.ok(sent.max_tokens > 0);
+  });
+
+  test("scales the default budget with the number of questions", async () => {
+    reply = () =>
+      completion({
+        team: { choice: "billing" },
+        urgency: { score: 1 },
+        refund: { noul: 0.5 },
+      });
+
+    received.length = 0;
+    await call(structuredLlmAdapter({ baseUrl, model: "m" }));
+    const forThree = (received[0] as { max_tokens: number }).max_tokens;
+
+    received.length = 0;
+    const one: AdapterRequest = {
+      body: {
+        state: "x",
+        model: "m",
+        questions: { only: { type: "noul", instructions: "?" } },
+      },
+    };
+    await structuredLlmAdapter({ baseUrl, model: "m" }).evaluate(
+      one,
+      new AbortController().signal,
+    );
+    const forOne = (received[0] as { max_tokens: number }).max_tokens;
+
+    assert.ok(
+      forThree > forOne,
+      `${forThree} should exceed ${forOne} for more questions`,
+    );
+  });
+
+  test("honours an explicit maxTokens", async () => {
+    reply = () =>
+      completion({
+        team: { choice: "billing" },
+        urgency: { score: 1 },
+        refund: { noul: 0.5 },
+      });
+    received.length = 0;
+
+    await call(structuredLlmAdapter({ baseUrl, model: "m", maxTokens: 77 }));
+
+    assert.equal((received[0] as { max_tokens: number }).max_tokens, 77);
+  });
+});
+
+describe("structuredLlmAdapter diagnoses truncation distinctly", () => {
+  // "not JSON" is the wrong diagnosis for a model that never got to answer.
+  // The operator's fix differs: raise max_tokens or switch model, versus
+  // fix the schema. The error message has to say which.
+  test("names truncation when the model hit the output budget with nothing to show", async () => {
+    reply = () => ({
+      choices: [
+        {
+          finish_reason: "length",
+          message: { role: "assistant", content: "" },
+        },
+      ],
+      usage: { prompt_tokens: 351, completion_tokens: 512 },
+    });
+
+    const r = await call(structuredLlmAdapter({ baseUrl, model: "m" }));
+    assert.equal(r.ok, false);
+    if (r.ok) return;
+    assert.equal(r.error.kind, "schema_violation");
+    assert.match(r.error.message, /truncat|output budget|max_tokens/i);
+    assert.doesNotMatch(
+      r.error.message,
+      /not JSON/i,
+      "truncation is not a JSON syntax problem",
+    );
+  });
+
+  test("names chain-of-thought when a reasoning model returned only reasoning", async () => {
+    reply = () => ({
+      choices: [
+        {
+          finish_reason: "length",
+          message: {
+            role: "assistant",
+            content: "",
+            reasoning: "Thinking Process: ...".repeat(50),
+          },
+        },
+      ],
+      usage: { prompt_tokens: 351, completion_tokens: 3745 },
+    });
+
+    const r = await call(structuredLlmAdapter({ baseUrl, model: "m" }));
+    assert.equal(r.ok, false);
+    if (r.ok) return;
+    assert.match(
+      r.error.message,
+      /reasoning/i,
+      "must point at the actual cause",
+    );
+  });
+
+  test("still reports a genuine syntax error as one", async () => {
+    reply = () => ({
+      choices: [
+        {
+          finish_reason: "stop",
+          message: { content: "I think it's billing, probably?" },
+        },
+      ],
+      usage: {},
+    });
+
+    const r = await call(structuredLlmAdapter({ baseUrl, model: "m" }));
+    assert.equal(r.ok, false);
+    if (r.ok) return;
+    assert.match(r.error.message, /not JSON/i);
+  });
+});
+
+describe("structuredLlmAdapter does not repair out-of-range values", () => {
+  // Found against real Ollama: its json_schema constraint enforces object
+  // shape and `enum`, but IGNORES `minimum`/`maximum`. A real run produced
+  // noul: 2, noul: 4 and score: -0.8. Clamping those would convert "the
+  // model returned nonsense" into "we confidently made an answer up", so
+  // they are passed through for the decoder to reject and quarantine.
+  test("passes an out-of-range noul through so the decoder can reject it", async () => {
+    reply = () =>
+      completion({
+        team: { choice: "billing" },
+        urgency: { score: 1 },
+        refund: { noul: 4 },
+      });
+
+    const r = await call(structuredLlmAdapter({ baseUrl, model: "m" }));
+    assert.equal(r.ok, true, "the adapter itself does not judge values");
+    if (!r.ok) return;
+
+    const refund = (
+      r.value as { answers: Record<string, { noul?: number } | undefined> }
+    ).answers.refund;
+    assert.equal(refund?.noul, 4, "must not be silently clamped to 1");
+  });
+
+  test("passes a negative score through unrepaired", async () => {
+    reply = () =>
+      completion({
+        team: { choice: "billing" },
+        urgency: { score: -0.8 },
+        refund: { noul: 0.5 },
+      });
+
+    const r = await call(structuredLlmAdapter({ baseUrl, model: "m" }));
+    assert.equal(r.ok, true);
+    if (!r.ok) return;
+    const urgency = (
+      r.value as { answers: Record<string, { score?: number } | undefined> }
+    ).answers.urgency;
+    assert.equal(urgency?.score, -0.8);
+  });
+});

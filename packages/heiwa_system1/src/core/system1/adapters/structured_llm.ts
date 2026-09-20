@@ -11,11 +11,18 @@
  *
  * Two of Jev's guarantees survive the translation and one does not.
  *
- * SURVIVES — schema conformity. `questionsToJsonSchema` turns the question map
- * into a JSON Schema with `enum` over exactly the offered option keys,
- * numeric bounds on scores, `required` on every question, and
- * `additionalProperties: false`. A constrained decoder cannot emit an option
- * we did not offer, and the ordinary `decodeResponse` re-checks it anyway.
+ * PARTLY SURVIVES — schema conformity. `questionsToJsonSchema` emits `enum`
+ * over exactly the offered option keys, `required` on every question, and
+ * `additionalProperties: false`, and those ARE enforced: a constrained
+ * decoder cannot invent an option we did not offer.
+ *
+ * Numeric bounds are a different story. Measured against a live Ollama, its
+ * schema constraint honours structure and `enum` but IGNORES `minimum` and
+ * `maximum` — one real run returned `noul: 2`, `noul: 4` and `score: -0.8`.
+ * So the guarantee here is weaker than Jev's and must not be described as
+ * equivalent. Out-of-range values are passed through unrepaired for
+ * `decodeResponse` to reject; clamping them would turn "the model returned
+ * nonsense" into "we confidently made an answer up", which is worse.
  *
  * DOES NOT SURVIVE — calibration. Jev's probabilities are trained against
  * outcomes. An LLM asked "how confident are you?" produces a number that
@@ -53,6 +60,15 @@ import type { Adapter, AdapterRequest } from "./types.ts";
  */
 export const FALLBACK_CONFIDENCE_CEILING = 0.85;
 
+/** Base output allowance, plus {@link TOKENS_PER_QUESTION} for each question. */
+export const BASE_OUTPUT_TOKENS = 256;
+export const TOKENS_PER_QUESTION = 96;
+
+/** The default output budget for a fan of `n` questions. */
+export function defaultMaxTokens(questionCount: number): number {
+  return BASE_OUTPUT_TOKENS + TOKENS_PER_QUESTION * questionCount;
+}
+
 export type StructuredLlmOptions = {
   readonly model: string;
   readonly baseUrl: string;
@@ -60,6 +76,12 @@ export type StructuredLlmOptions = {
   readonly path?: string;
   /** Raise only with a calibrated model and eyes open. */
   readonly confidenceCeiling?: number;
+  /**
+   * Output token budget. Always sent — see the reasoning-model note above.
+   * Defaults to a per-question allowance, which is ample for typed answers
+   * and small enough that a runaway model fails fast instead of hanging.
+   */
+  readonly maxTokens?: number;
   readonly temperature?: number;
   readonly fetchImpl?: typeof fetch;
 };
@@ -206,6 +228,9 @@ export function structuredLlmAdapter(options: StructuredLlmOptions): Adapter {
           body: JSON.stringify({
             model: options.model,
             temperature: options.temperature ?? 0,
+            max_tokens:
+              options.maxTokens ??
+              defaultMaxTokens(Object.keys(questions).length),
             messages: [
               {
                 role: "system",
@@ -266,15 +291,41 @@ export function structuredLlmAdapter(options: StructuredLlmOptions): Adapter {
         );
       }
 
-      const content = (
-        completion as { choices?: Array<{ message?: { content?: unknown } }> }
-      )?.choices?.[0]?.message?.content;
+      const choice = (
+        completion as {
+          choices?: Array<{
+            finish_reason?: unknown;
+            message?: { content?: unknown; reasoning?: unknown };
+          }>;
+        }
+      )?.choices?.[0];
+      const content = choice?.message?.content;
+      const truncated = choice?.finish_reason === "length";
+      const reasoning = choice?.message?.reasoning;
+      const reasoningChars =
+        typeof reasoning === "string" ? reasoning.length : 0;
 
-      if (typeof content !== "string") {
+      // Diagnose BEFORE parsing. An empty body from a truncated response is
+      // not a syntax error, and calling it one sends the operator to the
+      // wrong fix — raise the budget or change model, not repair the schema.
+      if (typeof content !== "string" || content.trim().length === 0) {
+        if (truncated) {
+          return err(
+            system1Error(
+              "schema_violation",
+              reasoningChars > 0
+                ? `${name} hit its output budget while still emitting reasoning (${reasoningChars} chars of chain-of-thought, no answer). This model reasons before answering; raise maxTokens or use a non-reasoning model.`
+                : `${name} was truncated at its output budget before emitting an answer; raise maxTokens.`,
+              { adapter: name },
+            ),
+          );
+        }
         return err(
           system1Error(
             "schema_violation",
-            `${name} returned no assistant content to decode`,
+            reasoningChars > 0
+              ? `${name} returned only reasoning (${reasoningChars} chars) and an empty answer.`
+              : `${name} returned no assistant content to decode`,
             { adapter: name },
           ),
         );
