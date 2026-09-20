@@ -479,19 +479,31 @@ async fn main() -> Result<()> {
                 println!("  none registered");
             } else {
                 for account in &provider_registry.accounts {
+                    // `label()` rather than `{:?}`: the user should not read
+                    // a Rust variant name, and its vocabulary deliberately
+                    // avoids "connected" so it cannot be confused with the
+                    // CLI Discovery section below, which answers a different
+                    // question (is auth present for the provider's own CLI).
                     println!(
-                        "  {:<20} {:<20} ({}) [{:?}] — {} model{}",
+                        "  {:<20} {:<20} ({}) [{}] — {} model{}",
                         account.account_id,
                         account.provider,
                         account.credential.kind_label(),
-                        account.status,
+                        account.status.label(),
                         account.models.len(),
                         if account.models.len() == 1 { "" } else { "s" },
                     );
+                    // An account that cannot serve a turn always says what
+                    // would fix it, in the same place the problem is shown.
+                    if let Some(step) = account.status.next_step(&account.provider) {
+                        println!("  {:<20} Next: {}", "", step);
+                    }
                 }
             }
             println!();
             println!("CLI Discovery (auth presence only):");
+            println!("  A provider CLI can be signed in here while its Heiwa account");
+            println!("  above is still unlinked — these answer different questions.");
             for status in &provider_statuses {
                 let kind = match status.auth_kind {
                     heiwa_provider::AuthKind::OauthCli => "oauth_cli",
