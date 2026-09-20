@@ -402,7 +402,7 @@ the network is gone — degraded, capped, and honest about being so.
 ## 12. Verification status
 
 **Verified.**
-- 205 tests pass offline (unit + integration), plus 4 against live Ollama;
+- 207 tests pass offline (unit + integration), plus 4 against live Ollama;
   typecheck clean under `strict` + `noUncheckedIndexedAccess` +
   `erasableSyntaxOnly`; biome clean.
 - HTTP adapters exercised against a real `node:http` server: real sockets,
@@ -504,7 +504,16 @@ the question splitting.
 
 `autoPrecision` is `undefined`, never `1`, when nothing dispatched. Reporting
 1 there would make the *safest possible* threshold look like the best
-performing one.
+performing one. For the same reason a bar that dispatches
+*nothing* is never recommended, even though it trivially has zero false
+dispatches: "0 wrong out of 0" is a disabled fast path dressed up as a
+perfect score.
+
+Only the `auto` bar is swept; `deliberate` is held fixed. A full 2-D sweep
+would also tune the deliberate/quarantine split — System 2 spend against
+human review load — but that split does not affect `falseAutoRate`, so it is
+left to the operator, who knows what an hour of review costs relative to a
+System 2 call.
 
 ### Running it
 

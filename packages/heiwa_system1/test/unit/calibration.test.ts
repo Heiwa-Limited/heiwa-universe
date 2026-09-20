@@ -183,4 +183,26 @@ describe("recommendThresholds()", () => {
       undefined,
     );
   });
+
+  test("refuses a bar that dispatches nothing, which is a disabled gate not an operating point", () => {
+    // Every sample confidently wrong: the only "safe" bars are those that
+    // never fire. Zero false dispatches out of zero dispatches is not a
+    // result, and returning it would read as success.
+    const hopeless = cohort("bad", 10, 0, 0.99);
+    assert.equal(
+      recommendThresholds(hopeless, "route", { maxFalseAutoRate: 0 }),
+      undefined,
+    );
+  });
+
+  test("still recommends when some traffic genuinely clears the bar", () => {
+    const rec = recommendThresholds(
+      [...cohort("hi", 8, 8, 0.95), ...cohort("lo", 2, 0, 0.3)],
+      "route",
+      { maxFalseAutoRate: 0 },
+    );
+    assert.ok(rec);
+    if (!rec) return;
+    assert.ok(rec.metrics.autoRate > 0);
+  });
 });

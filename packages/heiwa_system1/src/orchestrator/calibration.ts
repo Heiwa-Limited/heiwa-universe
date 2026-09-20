@@ -204,6 +204,19 @@ export type RecommendOptions = SweepOptions & {
  * Returns `undefined` when no candidate qualifies. That is a finding, not a
  * failure: it means confidence does not separate right from wrong for this
  * question on this corpus, and no threshold will fix that.
+ *
+ * A bar that dispatches nothing never qualifies, even though it trivially
+ * has zero false dispatches. "0 wrong out of 0" is a disabled fast path
+ * dressed up as a perfect score.
+ *
+ * ## Limitation
+ *
+ * Only the `auto` bar is swept; `deliberate` is held fixed. A full 2-D sweep
+ * would also tune the deliberate/quarantine split, which trades System 2
+ * spend against human review load. That split does not affect
+ * `falseAutoRate` — the number this optimises — so it is left to the
+ * operator, who knows what an hour of review costs relative to a System 2
+ * call.
  */
 export function recommendThresholds(
   samples: readonly LabelledSample[],
@@ -216,6 +229,10 @@ export function recommendThresholds(
   const viable = points.filter(
     (p) =>
       p.metrics.evaluated > 0 &&
+      // A bar that never fires trivially has zero false dispatches. That is
+      // a disabled fast path, not an operating point, and returning it would
+      // read as success — so it never qualifies.
+      p.metrics.autoRate > 0 &&
       p.metrics.falseAutoRate <= options.maxFalseAutoRate + 1e-9 &&
       p.metrics.autoRate >= minAutoRate,
   );
