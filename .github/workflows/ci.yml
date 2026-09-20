@@ -296,7 +296,10 @@ jobs:
   system1-engine:
     name: System 1 Engine
     runs-on: ubuntu-latest
-    timeout-minutes: 5
+    # Feedback lane. Measured from a clean node_modules: install 0.3s,
+    # typecheck 0.7s, 225 tests 0.7s. Well inside the 1m budget even on a
+    # much slower runner.
+    timeout-minutes: 1
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
         with:
