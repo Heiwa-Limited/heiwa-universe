@@ -3553,6 +3553,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "heiwa_judgment"
+version = "0.1.0"
+dependencies = [
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "heiwa_mcp"
 version = "0.1.0"
 dependencies = [
