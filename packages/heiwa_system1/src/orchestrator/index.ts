@@ -1,6 +1,21 @@
 /** Public surface of the orchestrator. */
 
 export type {
+  CalibrationMetrics,
+  LabelledSample,
+  RecommendOptions,
+  SweepOptions,
+  SweepPoint,
+  TruthValue,
+} from "./calibration.ts";
+export {
+  formatSweep,
+  isAnswerCorrect,
+  metricsAt,
+  recommendThresholds,
+  sweep,
+} from "./calibration.ts";
+export type {
   BatchGate,
   GateBand,
   GateDecision,

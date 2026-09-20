@@ -86,6 +86,22 @@ const pipeline = new Pipeline({
 const outcome = await pipeline.run(inboundMessage); // never throws
 ```
 
+## Calibrating the gate
+
+Hand-picked thresholds are guesses. Given a labelled corpus, the harness
+sweeps candidates and picks the most permissive bar that still meets a hard
+ceiling on wrong auto-dispatches:
+
+```bash
+node src/examples/routing_agent/calibrate.ts                  # offline demo
+OLLAMA_MODEL=gemma4:latest node src/examples/routing_agent/calibrate.ts
+```
+
+It already caught a problem with our own default — `auto = 0.85` for `route`
+lets one wrong dispatch through on the demo corpus; `0.925` gets it to zero.
+When nothing meets the budget it returns *nothing*, which means confidence
+does not separate right from wrong for that question and no threshold will.
+
 ## Three things worth knowing before using this
 
 1. **A confidence gate is not a safety gate.** The bands measure how *sure*

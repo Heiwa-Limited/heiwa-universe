@@ -402,7 +402,7 @@ the network is gone — degraded, capped, and honest about being so.
 ## 12. Verification status
 
 **Verified.**
-- 189 tests pass offline (unit + integration), plus 4 against live Ollama;
+- 205 tests pass offline (unit + integration), plus 4 against live Ollama;
   typecheck clean under `strict` + `noUncheckedIndexedAccess` +
   `erasableSyntaxOnly`; biome clean.
 - HTTP adapters exercised against a real `node:http` server: real sockets,
@@ -431,11 +431,9 @@ the network is gone — degraded, capped, and honest about being so.
 - The offline simulator is keyword heuristics, not a model. It produces
   well-formed answers for deterministic tests. It says nothing about Jev's
   accuracy.
-- Thresholds in `ROUTING_POLICIES` are **reasoned defaults, not calibrated**.
-  Calibration needs labelled outcomes: sweep thresholds against a scored
-  corpus and pick the point where the quarantine rate is affordable and the
-  false-auto-dispatch rate is near zero. Until then treat them as a starting
-  point.
+- Thresholds in `ROUTING_POLICIES` are **reasoned defaults, not calibrated**
+  against production traffic. They are, however, no longer unmeasurable —
+  see §13.
 
 **Closing the gap is one command.** `test/live/jev.live.test.ts` drives the
 real endpoint and is skipped unless a key is present, so it never blocks CI:
@@ -469,3 +467,66 @@ not that the engine is broken.
    shared root lockfile while other agents are working in the tree; root
    scripts `test:system1` / `typecheck:system1` / `demo:system1` bridge the
    gap in the meantime.
+
+---
+
+## 13. Calibrating the thresholds
+
+Shipping a gate with hand-picked thresholds is shipping a guess. `0.85` is
+plausible, not measured, and the right value is a property of *your*
+questions, *your* model, and *your* tolerance for a wrong auto-dispatch.
+
+`orchestrator/calibration.ts` turns the guess into a measurement. Given a
+corpus labelled with ground truth, it sweeps candidate thresholds and reports
+what you actually trade off at each one:
+
+| Metric | Meaning |
+|---|---|
+| `autoRate` | throughput — the share taking the cheap fast path |
+| `falseAutoRate` | **danger** — the share auto-dispatched *and wrong* |
+| `autoPrecision` | how right the fast path was, when it fired |
+| `deliberateRate` | System 2 spend |
+| `quarantineRate` | human review load |
+
+### The asymmetry that drives it
+
+These costs are not comparable. A quarantine costs a human a minute. A false
+auto-dispatch refunds an attacker, routes a security incident to billing, or
+emails the wrong customer. So this does **not** maximise accuracy and does
+**not** balance precision against recall. It maximises throughput **subject
+to a hard ceiling on false auto-dispatch**.
+
+When no threshold meets the budget, `recommendThresholds` returns
+`undefined` rather than a best-effort suggestion. That is a finding, not a
+failure: confidence does not separate right from wrong for that question on
+that corpus, and no threshold will fix it — the criteria need separating or
+the question splitting.
+
+`autoPrecision` is `undefined`, never `1`, when nothing dispatched. Reporting
+1 there would make the *safest possible* threshold look like the best
+performing one.
+
+### Running it
+
+```bash
+node packages/heiwa_system1/src/examples/routing_agent/calibrate.ts          # offline simulator
+OLLAMA_MODEL=gemma4:latest node .../calibrate.ts                             # a real local model
+TYPESAFE_API_KEY=sk-...   node .../calibrate.ts                              # real Jev
+```
+
+It prints a per-question sweep table and a recommendation, and it warns
+loudly when the backend is the simulator — a calibration table is exactly the
+kind of output that gets screenshotted out of context.
+
+### It already found a problem with our own defaults
+
+Against the 16-ticket demo corpus on the simulator, the shipped default of
+`auto = 0.85` for `route` dispatches 81% of tickets but lets **one wrong
+dispatch** through. The recommended bar is **0.925**: 63% fast path, **zero**
+wrong dispatches, 19% quarantined.
+
+That is the tool working. It is also why `ROUTING_POLICIES` should be treated
+as a starting point rather than a setting: 16 hand-written tickets scored by
+a keyword simulator is a demonstration of the workflow, not evidence about
+production. Run it against real traffic and real Jev before trusting a
+number.
