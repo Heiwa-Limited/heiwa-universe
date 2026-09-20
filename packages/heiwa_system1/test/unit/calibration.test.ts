@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { describe, test } from "node:test";
 import type { DecodedAnswer } from "../../src/core/system1/types.ts";
 import {
+  confidenceSpread,
   isAnswerCorrect,
   type LabelledSample,
   metricsAt,
@@ -56,6 +57,64 @@ describe("isAnswerCorrect()", () => {
     assert.equal(isAnswerCorrect({ kind: "noul", noul: 0.92 }, true), true);
     assert.equal(isAnswerCorrect({ kind: "noul", noul: 0.92 }, false), false);
     assert.equal(isAnswerCorrect({ kind: "noul", noul: 0.08 }, false), true);
+  });
+});
+
+describe("confidenceSpread()", () => {
+  // A sweep over a flat signal produces a normal-looking table that means
+  // nothing. The capped fallback adapter creates exactly this: every
+  // sufficiently-confident answer reports the identical ceiling value, so
+  // the sweep shows a cliff at the ceiling and no discrimination anywhere.
+  test("flags a capped adapter, where every answer reports the same confidence", () => {
+    const capped = Array.from({ length: 12 }, (_, i) => ({
+      id: `c${i}`,
+      answers: { route: ch(i % 3 === 0 ? "technical" : "billing", 0.85) },
+      truth: { route: "billing" as const },
+    }));
+
+    const spread = confidenceSpread(capped, "route");
+    assert.equal(spread.distinctValues, 1);
+    assert.equal(spread.modeShare, 1);
+    assert.equal(
+      spread.degenerate,
+      true,
+      "a single confidence value cannot separate anything",
+    );
+  });
+
+  test("does not flag a genuinely varied signal", () => {
+    const varied = [
+      ...cohort("a", 5, 5, 0.95),
+      ...cohort("b", 5, 0, 0.3),
+      ...cohort("c", 5, 3, 0.6),
+    ];
+    const spread = confidenceSpread(varied, "route");
+    assert.equal(spread.distinctValues, 3);
+    assert.equal(spread.degenerate, false);
+    assert.ok(Math.abs(spread.min - 0.3) < 1e-9);
+    assert.ok(Math.abs(spread.max - 0.95) < 1e-9);
+  });
+
+  test("flags a signal where almost everything shares one value", () => {
+    const lopsided = [...cohort("a", 19, 19, 0.9), ...cohort("b", 1, 0, 0.2)];
+    assert.equal(confidenceSpread(lopsided, "route").degenerate, true);
+  });
+
+  test("treats an absent question as degenerate rather than crashing", () => {
+    const spread = confidenceSpread(cohort("a", 3, 3, 0.9), "nonexistent");
+    assert.equal(spread.distinctValues, 0);
+    assert.equal(spread.degenerate, true);
+  });
+
+  test("is not fooled by float noise into seeing variety that is not there", () => {
+    // |2*0.9 - 1| and friends do not land on exact decimals; without
+    // rounding, identical capped values would look distinct.
+    const noisy = Array.from({ length: 10 }, (_, i) => ({
+      id: `n${i}`,
+      answers: { route: { kind: "noul", noul: 0.95 } as const },
+      truth: { route: true },
+    }));
+    assert.equal(confidenceSpread(noisy, "route").distinctValues, 1);
   });
 });
 

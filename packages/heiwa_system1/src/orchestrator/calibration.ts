@@ -37,6 +37,7 @@
  * "guess" to "measured"; a thousand is enough to trust the tails.
  */
 
+import { confidenceOf } from "../core/system1/confidence.ts";
 import type { DecodedAnswer } from "../core/system1/types.ts";
 import {
   type GateBand,
@@ -71,6 +72,30 @@ export type CalibrationMetrics = {
   readonly missedAutoCount: number;
 };
 
+/**
+ * How much the confidence signal actually varies across the corpus.
+ *
+ * A sweep is only meaningful if confidence discriminates. Two situations
+ * make it meaningless, and both look like a normal table unless you check:
+ *
+ *  - A capped adapter. `structuredLlmAdapter` clamps confidence to a
+ *    ceiling, so every sufficiently-confident answer reports the SAME
+ *    number. The sweep then shows a cliff at the ceiling and nothing else —
+ *    not because the threshold is right, but because the signal is gone.
+ *  - A model that reports one confidence for everything.
+ *
+ * `distinctValues === 1` means no threshold can separate anything.
+ */
+export type ConfidenceSpread = {
+  readonly distinctValues: number;
+  readonly min: number;
+  readonly max: number;
+  /** Share of answers sitting on the single most common value. */
+  readonly modeShare: number;
+  /** True when the signal is too flat for a sweep to mean anything. */
+  readonly degenerate: boolean;
+};
+
 export type SweepPoint = {
   readonly thresholds: GateThresholds;
   readonly metrics: CalibrationMetrics;
@@ -98,6 +123,50 @@ export function isAnswerCorrect(
     case "noul":
       return answer.noul > 0.5 === Boolean(truth);
   }
+}
+
+/**
+ * Measure how much the confidence signal varies for one question.
+ * Call this before trusting a sweep.
+ */
+export function confidenceSpread(
+  samples: readonly LabelledSample[],
+  questionId: string,
+  degenerateModeShare = 0.9,
+): ConfidenceSpread {
+  const values: number[] = [];
+  for (const sample of samples) {
+    const answer = sample.answers[questionId];
+    if (answer) values.push(confidenceOf(answer));
+  }
+
+  if (values.length === 0) {
+    return {
+      distinctValues: 0,
+      min: 0,
+      max: 0,
+      modeShare: 0,
+      degenerate: true,
+    };
+  }
+
+  const counts = new Map<number, number>();
+  for (const v of values) {
+    // Round before bucketing: float noise would otherwise make identical
+    // capped values look distinct and hide the very problem we are checking.
+    const key = Math.round(v * 1e6) / 1e6;
+    counts.set(key, (counts.get(key) ?? 0) + 1);
+  }
+  const modeCount = Math.max(...counts.values());
+
+  return {
+    distinctValues: counts.size,
+    min: Math.min(...values),
+    max: Math.max(...values),
+    modeShare: modeCount / values.length,
+    degenerate:
+      counts.size <= 1 || modeCount / values.length >= degenerateModeShare,
+  };
 }
 
 export function metricsAt(

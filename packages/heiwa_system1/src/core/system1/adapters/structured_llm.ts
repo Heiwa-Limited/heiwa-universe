@@ -60,9 +60,20 @@ import type { Adapter, AdapterRequest } from "./types.ts";
  */
 export const FALLBACK_CONFIDENCE_CEILING = 0.85;
 
-/** Base output allowance, plus {@link TOKENS_PER_QUESTION} for each question. */
-export const BASE_OUTPUT_TOKENS = 256;
-export const TOKENS_PER_QUESTION = 96;
+/**
+ * Base output allowance, plus {@link TOKENS_PER_QUESTION} for each question.
+ *
+ * Sized generously on purpose. The token cap is a BACKSTOP against a
+ * pathological model, not the runaway control — the client's
+ * `AbortController` latency budget is, and it fires in 500ms regardless of
+ * how many tokens were allowed. A first cut used 256 + 96/question, which
+ * measured out at 832 for a six-question fan and cut gemma4 off mid-answer
+ * on 2 of 16 real tickets (it emitted ~870 tokens of chain-of-thought on the
+ * harder ones). A tight cap manufactures failures; the wall clock is what
+ * actually needs bounding.
+ */
+export const BASE_OUTPUT_TOKENS = 512;
+export const TOKENS_PER_QUESTION = 256;
 
 /** The default output budget for a fan of `n` questions. */
 export function defaultMaxTokens(questionCount: number): number {

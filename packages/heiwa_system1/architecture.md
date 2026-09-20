@@ -402,7 +402,7 @@ the network is gone — degraded, capped, and honest about being so.
 ## 12. Verification status
 
 **Verified.**
-- 207 tests pass offline (unit + integration), plus 4 against live Ollama;
+- 213 tests pass offline (unit + integration), plus 4 against live Ollama;
   typecheck clean under `strict` + `noUncheckedIndexedAccess` +
   `erasableSyntaxOnly`; biome clean.
 - HTTP adapters exercised against a real `node:http` server: real sockets,
@@ -526,6 +526,25 @@ TYPESAFE_API_KEY=sk-...   node .../calibrate.ts                              # r
 It prints a per-question sweep table and a recommendation, and it warns
 loudly when the backend is the simulator — a calibration table is exactly the
 kind of output that gets screenshotted out of context.
+
+### A sweep is only meaningful if the signal varies
+
+`confidenceSpread` is checked before every table, because a flat signal
+produces a normal-looking sweep that discriminates nothing. Two ways that
+happens, and the first is self-inflicted:
+
+- **A capped adapter.** `structuredLlmAdapter` clamps confidence to a
+  ceiling, so every sufficiently-confident answer reports the *identical*
+  number. Measured against gemma4, all six judgments came back at exactly
+  0.850. The sweep then shows a cliff at the ceiling and nothing else — not
+  because 0.85 is correct, but because the cap destroyed the signal.
+  **Corollary: you cannot calibrate a capped fallback, and you should not
+  try.** Calibrate against the primary model; the fallback's job is to stay
+  out of the auto band, which the cap already guarantees.
+- A model that reports the same confidence for everything.
+
+When the signal is degenerate the script says so above the table rather than
+letting the numbers be read as calibration.
 
 ### It already found a problem with our own defaults
 

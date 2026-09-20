@@ -24,6 +24,7 @@ import {
   typesafeAdapter,
 } from "../../core/system1/index.ts";
 import {
+  confidenceSpread,
   formatSweep,
   type LabelledSample,
   recommendThresholds,
@@ -122,6 +123,20 @@ const QUESTIONS_TO_CALIBRATE = [
 
 for (const questionId of QUESTIONS_TO_CALIBRATE) {
   console.log(`\n${"─".repeat(64)}\n${questionId}\n`);
+  // Check the signal before trusting the table. A capped adapter reports one
+  // identical confidence for every sufficiently-confident answer, producing a
+  // normal-looking sweep that discriminates nothing.
+  const spread = confidenceSpread(samples, questionId);
+  if (spread.degenerate) {
+    console.log(
+      `  !!  FLAT CONFIDENCE SIGNAL - ${spread.distinctValues} distinct value(s), ` +
+        `${(spread.modeShare * 100).toFixed(0)}% on one.\n` +
+        `      No threshold can separate right from wrong here. If this backend\n` +
+        `      caps confidence (the structured-LLM fallback does), the cap has\n` +
+        `      flattened the signal and the table below is not calibration.\n`,
+    );
+  }
+
   const points = sweep(samples, questionId, { steps: 11 });
   console.log(formatSweep(points));
 

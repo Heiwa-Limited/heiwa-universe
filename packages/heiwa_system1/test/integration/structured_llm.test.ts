@@ -369,6 +369,30 @@ describe("structuredLlmAdapter output budget", () => {
     );
   });
 
+  test("leaves enough headroom that a model which reasons a little still answers", async () => {
+    // Measured: gemma4 emitted ~3480 chars (~870 tokens) of chain-of-thought
+    // on the harder corpus tickets before answering, and a 832-token cap cut
+    // it off — 2 of 16 tickets lost. The token cap is a backstop against a
+    // pathological model; the AbortController latency budget is the real
+    // control. So the cap must be generous enough not to manufacture
+    // failures on ordinary inputs.
+    reply = () =>
+      completion({
+        team: { choice: "billing" },
+        urgency: { score: 1 },
+        refund: { noul: 0.5 },
+      });
+    received.length = 0;
+
+    await call(structuredLlmAdapter({ baseUrl, model: "m" }));
+
+    const sent = received[0] as { max_tokens: number };
+    assert.ok(
+      sent.max_tokens >= 1024,
+      `default of ${sent.max_tokens} is too tight for a model that reasons before answering`,
+    );
+  });
+
   test("honours an explicit maxTokens", async () => {
     reply = () =>
       completion({

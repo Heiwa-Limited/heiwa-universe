@@ -2,6 +2,7 @@
 
 export type {
   CalibrationMetrics,
+  ConfidenceSpread,
   LabelledSample,
   RecommendOptions,
   SweepOptions,
@@ -9,6 +10,7 @@ export type {
   TruthValue,
 } from "./calibration.ts";
 export {
+  confidenceSpread,
   formatSweep,
   isAnswerCorrect,
   metricsAt,
