@@ -1,0 +1,142 @@
+{
+  "$comment": [
+    "The confidence gate's behaviour, as data, so two implementations cannot drift.",
+    "",
+    "The gate exists in TypeScript (packages/heiwa_system1, used by the calibration",
+    "and model-doctor tooling) and in Rust (this crate, used by the runtime, because",
+    "provider credentials live in Rust and never reach the frontend). Two gates that",
+    "can disagree about whether an action is safe to auto-dispatch is precisely the",
+    "class of bug the repo's L2 gate guards against elsewhere, so both read THIS file",
+    "and must produce identical verdicts.",
+    "",
+    "Rust is authoritative: it is the one that gates real actions. If the two ever",
+    "disagree, the TypeScript is wrong.",
+    "",
+    "Every case here is a decision that cost thought, not filler coverage."
+  ],
+  "defaults": { "auto": 0.85, "deliberate": 0.5 },
+  "single": [
+    {
+      "name": "choice above the auto bar dispatches",
+      "answer": { "kind": "choice", "choice": "billing", "probabilities": { "billing": 0.9, "technical": 0.1 }, "confidence": 0.9 },
+      "expect": { "band": "auto", "reason": "confident" }
+    },
+    {
+      "name": "exactly at the auto bar deliberates, because the comparison is strictly greater",
+      "answer": { "kind": "choice", "choice": "billing", "probabilities": { "billing": 0.9, "technical": 0.1 }, "confidence": 0.85 },
+      "expect": { "band": "deliberate", "reason": "uncertain" }
+    },
+    {
+      "name": "exactly at the deliberate bar still deliberates, because that comparison is inclusive",
+      "answer": { "kind": "choice", "choice": "billing", "probabilities": { "billing": 0.6, "technical": 0.4 }, "confidence": 0.5 },
+      "expect": { "band": "deliberate", "reason": "uncertain" }
+    },
+    {
+      "name": "just below the deliberate bar quarantines",
+      "answer": { "kind": "choice", "choice": "billing", "probabilities": { "billing": 0.6, "technical": 0.4 }, "confidence": 0.49 },
+      "expect": { "band": "quarantine", "reason": "low_confidence" }
+    },
+    {
+      "name": "a noul derives confidence as |2p-1|, so 0.92 lands mid-band not high",
+      "answer": { "kind": "noul", "noul": 0.92 },
+      "expect": { "band": "deliberate", "reason": "uncertain", "confidence": 0.84, "confidence_source": "derived" }
+    },
+    {
+      "name": "a certainly-false noul is just as certain as a certainly-true one",
+      "answer": { "kind": "noul", "noul": 0.0 },
+      "expect": { "band": "auto", "reason": "confident", "confidence": 1.0, "confidence_source": "derived" }
+    },
+    {
+      "name": "a coin-flip noul has zero confidence",
+      "answer": { "kind": "noul", "noul": 0.5 },
+      "expect": { "band": "quarantine", "reason": "low_confidence", "confidence": 0.0 }
+    },
+    {
+      "name": "a score reports model confidence, not a derived one",
+      "answer": { "kind": "score", "score": 1.5, "legend": ["a", "b", "c"], "probabilities": [0.2, 0.6, 0.2], "confidence": 0.9 },
+      "expect": { "band": "auto", "reason": "confident", "confidence_source": "model" }
+    },
+    {
+      "name": "a near-tie quarantines as ambiguous even when confidence looks high",
+      "answer": { "kind": "choice", "choice": "billing", "probabilities": { "billing": 0.5, "technical": 0.48, "legal": 0.02 }, "confidence": 0.95 },
+      "policy": { "min_margin": 0.15 },
+      "expect": { "band": "quarantine", "reason": "ambiguous" }
+    },
+    {
+      "name": "a clear winner passes the same margin check",
+      "answer": { "kind": "choice", "choice": "billing", "probabilities": { "billing": 0.9, "technical": 0.1 }, "confidence": 0.95 },
+      "policy": { "min_margin": 0.15 },
+      "expect": { "band": "auto", "reason": "confident" }
+    },
+    {
+      "name": "no margin check runs unless one is configured",
+      "answer": { "kind": "choice", "choice": "billing", "probabilities": { "billing": 0.5, "technical": 0.48 }, "confidence": 0.95 },
+      "expect": { "band": "auto", "reason": "confident" }
+    },
+    {
+      "name": "a veto outranks a confident answer, because certainty about a dangerous answer is the dangerous case",
+      "answer": { "kind": "noul", "noul": 0.97 },
+      "policy": { "veto_noul_above": 0.5 },
+      "expect": { "band": "quarantine", "reason": "vetoed" }
+    },
+    {
+      "name": "a veto also catches a low-confidence dangerous answer",
+      "answer": { "kind": "noul", "noul": 0.6 },
+      "policy": { "veto_noul_above": 0.5 },
+      "expect": { "band": "quarantine", "reason": "vetoed" }
+    },
+    {
+      "name": "a veto that does not fire leaves the answer alone",
+      "answer": { "kind": "noul", "noul": 0.02 },
+      "policy": { "veto_noul_above": 0.5 },
+      "expect": { "band": "auto", "reason": "confident" }
+    },
+    {
+      "name": "a stricter per-question bar demotes an otherwise-auto answer",
+      "answer": { "kind": "choice", "choice": "billing", "probabilities": { "billing": 0.95, "technical": 0.05 }, "confidence": 0.95 },
+      "policy": { "thresholds": { "auto": 0.99, "deliberate": 0.9 } },
+      "expect": { "band": "deliberate", "reason": "uncertain" }
+    }
+  ],
+  "batch": [
+    {
+      "name": "the worst gating band wins and names its blocker",
+      "answers": {
+        "route": { "kind": "choice", "choice": "billing", "probabilities": { "billing": 0.95, "technical": 0.05 }, "confidence": 0.95 },
+        "pii": { "kind": "noul", "noul": 0.55 }
+      },
+      "expect": { "band": "quarantine", "blockers": ["pii"] }
+    },
+    {
+      "name": "an informational question is still judged but does not vote",
+      "answers": {
+        "route": { "kind": "choice", "choice": "billing", "probabilities": { "billing": 0.95, "technical": 0.05 }, "confidence": 0.95 },
+        "pii": { "kind": "noul", "noul": 0.55 }
+      },
+      "policies": { "pii": { "informational": true } },
+      "expect": { "band": "auto", "blockers": [] }
+    },
+    {
+      "name": "all clear dispatches with no blockers",
+      "answers": {
+        "route": { "kind": "choice", "choice": "billing", "probabilities": { "billing": 0.95, "technical": 0.05 }, "confidence": 0.95 },
+        "safe": { "kind": "noul", "noul": 0.99 }
+      },
+      "expect": { "band": "auto", "blockers": [] }
+    },
+    {
+      "name": "a single veto quarantines the whole batch",
+      "answers": {
+        "route": { "kind": "choice", "choice": "billing", "probabilities": { "billing": 0.95, "technical": 0.05 }, "confidence": 0.95 },
+        "injection": { "kind": "noul", "noul": 0.97 }
+      },
+      "policies": { "injection": { "veto_noul_above": 0.5 } },
+      "expect": { "band": "quarantine", "blockers": ["injection"] }
+    },
+    {
+      "name": "an empty batch is vacuously auto",
+      "answers": {},
+      "expect": { "band": "auto", "blockers": [] }
+    }
+  ]
+}

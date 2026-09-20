@@ -12,6 +12,7 @@ members = [
     "crates/heiwa_evidence",
     "crates/heiwa_identity",
     "crates/heiwa_install",
+    "crates/heiwa_judgment",
     "crates/heiwa_loop",
     "crates/heiwa_memory",
     "crates/heiwa_mesh",
