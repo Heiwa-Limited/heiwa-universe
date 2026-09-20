@@ -12,6 +12,13 @@ export {
   TYPESAFE_PATH,
   typesafeAdapter,
 } from "./adapters/http.ts";
+export type {
+  ProbeCode,
+  ProbeFinding,
+  ProbeOptions,
+  ProbeResult,
+} from "./adapters/probe.ts";
+export { probeModel } from "./adapters/probe.ts";
 export type { StructuredLlmOptions } from "./adapters/structured_llm.ts";
 export {
   FALLBACK_CONFIDENCE_CEILING,

@@ -12,7 +12,12 @@ raise 'protected status context changed' unless aggregate.fetch('name') == 'Rust
 raise 'aggregate must always run' unless aggregate.fetch('if') == 'always()'
 step = aggregate.fetch('steps').find { |item| item.key?('run') }
 bindings = step.fetch('env').transform_values do |value|
-  match = value.match(/\A\$\{\{ needs\.([a-z-]+)\.result \}\}\z/)
+  # GitHub job ids allow digits and underscores, not just [a-z-]. The narrow
+  # pattern made this guard raise on any legal job name containing a digit
+  # (e.g. system1-engine, l0-acceptance) rather than checking it. Widening the
+  # extractor does not weaken the assertion below — every need must still be
+  # bound to a result, and only the binding's shape is being parsed here.
+  match = value.match(/\A\$\{\{ needs\.([a-z0-9_-]+)\.result \}\}\z/)
   raise "unexpected result binding: #{value}" unless match
   match[1]
 end

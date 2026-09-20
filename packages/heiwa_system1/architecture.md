@@ -402,7 +402,7 @@ the network is gone — degraded, capped, and honest about being so.
 ## 12. Verification status
 
 **Verified.**
-- 213 tests pass offline (unit + integration), plus 4 against live Ollama;
+- 225 tests pass offline (unit + integration), plus 4 against live Ollama;
   typecheck clean under `strict` + `noUncheckedIndexedAccess` +
   `erasableSyntaxOnly`; biome clean.
 - HTTP adapters exercised against a real `node:http` server: real sockets,
@@ -470,7 +470,42 @@ not that the engine is broken.
 
 ---
 
-## 13. Calibrating the thresholds
+## 13. Preflight: is this model usable?
+
+`core/system1/adapters/probe.ts` answers that in one small request, and
+`npm run doctor` runs it across every model a user already has.
+
+Each check exists because it cost real debugging time during development:
+
+| Finding | Severity | Why |
+|---|---|---|
+| `reasons_before_answering` | blocker | A reasoning model on an OpenAI-compatible route spends its output budget on chain-of-thought and returns empty `content`. Measured: qwen3.5 burned 3745 tokens and answered nothing, in 75s. `think:false` is not honoured there. |
+| `ignores_enum` | blocker | If the decoder is not genuinely constrained, "cannot emit an unoffered option" is gone and the model cannot be trusted for classification. |
+| `ignores_numeric_bounds` | warning | Measured: Ollama honours `enum` but ignores `minimum`/`maximum`. The decoder rejects those downstream, so it costs throughput, not safety. |
+| `emits_reasoning` | warning | Answered, but thought first — slower and nearer the budget than it looks. |
+| `unparseable` / `unreachable` / `timeout` | blocker | — |
+
+It deliberately does **not** check accuracy or calibration. One request
+cannot measure either, and a probe that guessed would be worse than one that
+stays silent. That is §14's job.
+
+Real output, three local models, no configuration:
+
+```
+qwen3.5:9b:    NOT SUITABLE (34307ms)
+  [blocker] reasons_before_answering: answered nothing after 4803 chars of
+            chain-of-thought and hit the output budget
+gemma4:latest: SUITABLE (15858ms)
+  [warning] emits_reasoning: answered, but emitted 1366 chars first
+```
+
+This is the design principle the package tries to hold to generally: **a
+lesson learned once should cost the next operator zero.** A finding written
+only into a document is a finding the next person rediscovers the slow way.
+
+---
+
+## 14. Calibrating the thresholds
 
 Shipping a gate with hand-picked thresholds is shipping a guess. `0.85` is
 plausible, not measured, and the right value is a property of *your*

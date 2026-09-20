@@ -20,7 +20,7 @@
 
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
-
+import { probeModel } from "../../src/core/system1/adapters/probe.ts";
 import {
   FALLBACK_CONFIDENCE_CEILING,
   memorySink,
@@ -32,15 +32,17 @@ import { DEFAULT_THRESHOLDS, gateBatch } from "../../src/orchestrator/index.ts";
 
 const OLLAMA_URL = process.env.OLLAMA_URL ?? "http://127.0.0.1:11434";
 /**
- * Defaults to a NON-reasoning model on purpose.
+ * The model is DISCOVERED, not hardcoded.
  *
- * Measured here: qwen3.5:4b spends its whole output budget on
- * chain-of-thought and returns an empty answer, and neither `think: false`
- * nor `chat_template_kwargs.enable_thinking` is honoured on Ollama's
- * OpenAI-compatible route. gemma4 answers the same fan correctly. Override
- * with OLLAMA_MODEL to try your own.
+ * A default like "gemma4:latest" is a statement about the author's laptop.
+ * A stranger with Ollama running but that model absent would get a
+ * confusing failure instead of a skip. So the suite asks the endpoint what
+ * it has, probes candidates, and runs against the first suitable one —
+ * skipping with a clear reason if none qualifies.
+ *
+ * Set OLLAMA_MODEL to pin a specific model instead.
  */
-const MODEL = process.env.OLLAMA_MODEL ?? "gemma4:latest";
+let MODEL = process.env.OLLAMA_MODEL ?? "";
 /** Local models are far slower than Jev; this is a correctness budget. */
 const GENEROUS_BUDGET_MS = Number(process.env.OLLAMA_BUDGET_MS ?? 180_000);
 
@@ -66,7 +68,28 @@ const reachable = await (async () => {
     const res = await fetch(`${OLLAMA_URL}/api/tags`, {
       signal: AbortSignal.timeout(2000),
     });
-    return res.ok;
+    if (!res.ok) return false;
+    if (MODEL) return true;
+
+    const body = (await res.json()) as { models?: Array<{ name?: unknown }> };
+    const candidates = (body.models ?? [])
+      .map((m) => (typeof m.name === "string" ? m.name : ""))
+      .filter((n) => n.length > 0 && !/embed/i.test(n));
+
+    // Probe rather than guess. A reasoning model looks fine in a model list
+    // and then answers nothing; only a probe can tell them apart.
+    for (const candidate of candidates) {
+      const probe = await probeModel({
+        model: candidate,
+        baseUrl: OLLAMA_URL,
+        timeoutMs: 120_000,
+      });
+      if (probe.suitable) {
+        MODEL = candidate;
+        return true;
+      }
+    }
+    return false;
   } catch {
     return false;
   }

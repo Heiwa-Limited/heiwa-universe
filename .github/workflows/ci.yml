@@ -211,7 +211,7 @@ jobs:
     # the crate a user actually double-clicks. Left out of the aggregate, a
     # broken desktop lane merges while the only required Rust context stays
     # green.
-    needs: [rust-tests, rust-static, desktop-app, python-tests]
+    needs: [rust-tests, rust-static, desktop-app, python-tests, system1-engine]
     if: always()
     runs-on: ubuntu-latest
     timeout-minutes: 1
@@ -222,6 +222,7 @@ jobs:
           RUST_STATIC_RESULT: ${{ needs.rust-static.result }}
           DESKTOP_APP_RESULT: ${{ needs.desktop-app.result }}
           PYTHON_TESTS_RESULT: ${{ needs.python-tests.result }}
+          SYSTEM1_ENGINE_RESULT: ${{ needs.system1-engine.result }}
         run: |
           set -euo pipefail
           echo "rust-tests=$RUST_TESTS_RESULT rust-static=$RUST_STATIC_RESULT desktop-app=$DESKTOP_APP_RESULT"
@@ -240,6 +241,10 @@ jobs:
           fi
           if [[ "$PYTHON_TESTS_RESULT" != "success" ]]; then
             echo "Python Tests did not succeed" >&2
+            status=1
+          fi
+          if [[ "$SYSTEM1_ENGINE_RESULT" != "success" ]]; then
+            echo "System 1 Engine did not succeed" >&2
             status=1
           fi
           if (( status != 0 )); then
@@ -287,6 +292,33 @@ jobs:
         run: |
           python3 apps/heiwa_app/scripts/check_static_surface.py
           bash scripts/check_public_web_package.sh
+
+  system1-engine:
+    name: System 1 Engine
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          persist-credentials: false
+      - name: Set up Node
+        uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+          cache-dependency-path: packages/heiwa_system1/package-lock.json
+      # The package self-installs rather than joining the root workspace, so
+      # that adding it never rewrites the shared root lockfile. Its own
+      # lockfile is committed, so `npm ci` here is reproducible.
+      - name: Install
+        run: npm ci --prefix packages/heiwa_system1
+      - name: Typecheck
+        run: npm run typecheck:system1
+      # Unit + integration only. The live suites (test/live) need an API key
+      # or a local Ollama and are opt-in; they skip cleanly, but running them
+      # here would prove nothing.
+      - name: Test
+        run: npm run test:system1
 
   docs-build:
     name: Docs Build

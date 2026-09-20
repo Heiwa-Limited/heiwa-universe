@@ -86,6 +86,26 @@ const pipeline = new Pipeline({
 const outcome = await pipeline.run(inboundMessage); // never throws
 ```
 
+## Which of your models can do this?
+
+```bash
+npm run doctor
+```
+
+Discovers the local models you already have, probes each one, and says which
+are usable and why the others are not. Nothing configured, nothing assumed:
+
+```
+  qwen3.5:9b    … unsuitable (34.3s)
+  qwen3.5:4b    … unsuitable (20.1s)
+  gemma4:latest … OK (15.9s)
+
+  1 of 3 usable. Fastest: gemma4:latest
+```
+
+Every check it runs is a mistake that cost real debugging time here. The
+point of encoding them is that they cost you nothing.
+
 ## Calibrating the gate
 
 Hand-picked thresholds are guesses. Given a labelled corpus, the harness
