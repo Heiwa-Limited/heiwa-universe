@@ -1,0 +1,314 @@
+import assert from "node:assert/strict";
+import http from "node:http";
+import type { AddressInfo } from "node:net";
+import { after, before, describe, test } from "node:test";
+
+import {
+  FALLBACK_CONFIDENCE_CEILING,
+  questionsToJsonSchema,
+  structuredLlmAdapter,
+} from "../../src/core/system1/adapters/structured_llm.ts";
+import type { AdapterRequest } from "../../src/core/system1/adapters/types.ts";
+import { DEFAULT_THRESHOLDS } from "../../src/orchestrator/gate.ts";
+
+let server: http.Server;
+let baseUrl: string;
+let reply: (body: unknown) => unknown;
+const received: unknown[] = [];
+
+before(async () => {
+  server = http.createServer((req, res) => {
+    let raw = "";
+    req.on("data", (c) => (raw += c));
+    req.on("end", () => {
+      const parsed = raw ? JSON.parse(raw) : null;
+      received.push(parsed);
+      res.writeHead(200, { "content-type": "application/json" });
+      res.end(JSON.stringify(reply(parsed)));
+    });
+  });
+  await new Promise<void>((r) => server.listen(0, "127.0.0.1", r));
+  baseUrl = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
+});
+
+after(async () => {
+  await new Promise<void>((r) => server.close(() => r()));
+});
+
+/** Wrap a model answer object in an OpenAI-compatible chat completion. */
+function completion(content: unknown) {
+  return {
+    choices: [
+      { message: { role: "assistant", content: JSON.stringify(content) } },
+    ],
+    usage: { prompt_tokens: 300, completion_tokens: 40 },
+  };
+}
+
+const request: AdapterRequest = {
+  body: {
+    state: "I was charged twice for order A-104",
+    model: "jev-latest",
+    questions: {
+      team: {
+        type: "choice",
+        instructions: "Which team?",
+        criteria: { billing: "money", technical: "bugs" },
+      },
+      urgency: {
+        type: "score",
+        instructions: "How urgent?",
+        criteria: ["low", "mid", "high"],
+      },
+      refund: { type: "noul", instructions: "Refund requested?" },
+    },
+  },
+};
+
+function call(adapter: ReturnType<typeof structuredLlmAdapter>) {
+  return adapter.evaluate(request, new AbortController().signal);
+}
+
+describe("questionsToJsonSchema()", () => {
+  const schema = questionsToJsonSchema(request.body.questions);
+
+  /** Read `schema.properties[id].properties[field]`, failing loudly if absent. */
+  function prop(id: string, field: string): unknown {
+    const props = schema.properties as Record<
+      string,
+      { properties?: Record<string, unknown> }
+    >;
+    const entry = props[id];
+    assert.ok(entry, `schema has no property for question "${id}"`);
+    assert.ok(entry.properties, `question "${id}" has no nested properties`);
+    return entry.properties[field];
+  }
+
+  test("constrains a choice to an enum of exactly the offered keys", () => {
+    assert.deepEqual((prop("team", "choice") as { enum: string[] }).enum, [
+      "billing",
+      "technical",
+    ]);
+  });
+
+  test("constrains a score to the numeric span of the scale", () => {
+    assert.deepEqual(prop("urgency", "score"), {
+      type: "number",
+      minimum: 0,
+      maximum: 2,
+    });
+  });
+
+  test("constrains a noul to a probability", () => {
+    assert.deepEqual(prop("refund", "noul"), {
+      type: "number",
+      minimum: 0,
+      maximum: 1,
+    });
+  });
+
+  test("requires every question so the model cannot quietly skip one", () => {
+    assert.deepEqual((schema.required as string[]).sort(), [
+      "refund",
+      "team",
+      "urgency",
+    ]);
+  });
+
+  test("forbids extra properties so the model cannot invent an answer", () => {
+    assert.equal(schema.additionalProperties, false);
+  });
+});
+
+describe("structuredLlmAdapter request", () => {
+  test("sends the schema as a json_schema response format", async () => {
+    reply = () =>
+      completion({
+        team: {
+          choice: "billing",
+          probabilities: { billing: 0.9, technical: 0.1 },
+        },
+        urgency: { score: 2, probabilities: [0.1, 0.1, 0.8] },
+        refund: { noul: 0.9 },
+      });
+    received.length = 0;
+
+    await call(structuredLlmAdapter({ baseUrl, model: "qwen3.5:9b" }));
+
+    const sent = received[0] as {
+      model: string;
+      response_format: { type: string };
+    };
+    assert.equal(sent.model, "qwen3.5:9b");
+    assert.equal(sent.response_format.type, "json_schema");
+  });
+
+  test("puts the state in the prompt so the model has something to judge", async () => {
+    reply = () =>
+      completion({
+        team: { choice: "billing" },
+        urgency: { score: 1 },
+        refund: { noul: 0.5 },
+      });
+    received.length = 0;
+
+    await call(structuredLlmAdapter({ baseUrl, model: "m" }));
+
+    const sent = received[0] as { messages: Array<{ content: string }> };
+    assert.ok(sent.messages.some((m) => m.content.includes("A-104")));
+  });
+});
+
+describe("structuredLlmAdapter response translation", () => {
+  test("produces a System One shaped body the ordinary decoder accepts", async () => {
+    reply = () =>
+      completion({
+        team: {
+          choice: "billing",
+          probabilities: { billing: 0.9, technical: 0.1 },
+        },
+        urgency: { score: 2, probabilities: [0.1, 0.1, 0.8] },
+        refund: { noul: 0.93 },
+      });
+
+    const r = await call(structuredLlmAdapter({ baseUrl, model: "m" }));
+    assert.equal(r.ok, true);
+    if (!r.ok) return;
+
+    const body = r.value as {
+      answers: Record<string, Record<string, unknown> | undefined>;
+      usage: unknown;
+    };
+    assert.equal(body.answers.team?.choice, "billing");
+    assert.deepEqual(body.answers.urgency?.legend, ["low", "mid", "high"]);
+    assert.equal(body.answers.refund?.noul, 0.93);
+    assert.deepEqual(body.usage, { input_tokens: 300, output_tokens: 40 });
+  });
+
+  test("fills a uniform distribution when the model supplied none", async () => {
+    reply = () =>
+      completion({
+        team: { choice: "billing" },
+        urgency: { score: 1 },
+        refund: { noul: 0.5 },
+      });
+
+    const r = await call(structuredLlmAdapter({ baseUrl, model: "m" }));
+    assert.equal(r.ok, true);
+    if (!r.ok) return;
+
+    const team = (
+      r.value as {
+        answers: Record<
+          string,
+          { probabilities: Record<string, number> } | undefined
+        >;
+      }
+    ).answers.team;
+    assert.ok(team, "the translated body must carry a team answer");
+    assert.deepEqual(Object.keys(team.probabilities).sort(), [
+      "billing",
+      "technical",
+    ]);
+  });
+});
+
+describe("structuredLlmAdapter confidence honesty", () => {
+  test("caps confidence below the auto threshold, because an LLM is not calibrated", async () => {
+    reply = () =>
+      completion({
+        team: {
+          choice: "billing",
+          probabilities: { billing: 1, technical: 0 },
+          confidence: 1,
+        },
+        urgency: { score: 2, confidence: 1 },
+        refund: { noul: 1 },
+      });
+
+    const r = await call(structuredLlmAdapter({ baseUrl, model: "m" }));
+    assert.equal(r.ok, true);
+    if (!r.ok) return;
+
+    const answers = (
+      r.value as { answers: Record<string, { confidence?: number }> }
+    ).answers;
+    assert.equal(answers.team?.confidence, FALLBACK_CONFIDENCE_CEILING);
+    assert.equal(answers.urgency?.confidence, FALLBACK_CONFIDENCE_CEILING);
+  });
+
+  test("the ceiling sits below the auto band, so a fallback can never auto-dispatch by default", () => {
+    assert.ok(
+      FALLBACK_CONFIDENCE_CEILING <= DEFAULT_THRESHOLDS.auto,
+      "a degraded adapter must not be able to open the fast path",
+    );
+    assert.ok(FALLBACK_CONFIDENCE_CEILING >= DEFAULT_THRESHOLDS.deliberate);
+  });
+
+  test("an operator can raise the ceiling deliberately, but must do so explicitly", async () => {
+    reply = () =>
+      completion({
+        team: { choice: "billing", confidence: 0.99 },
+        urgency: { score: 1 },
+        refund: { noul: 1 },
+      });
+
+    const r = await call(
+      structuredLlmAdapter({ baseUrl, model: "m", confidenceCeiling: 0.95 }),
+    );
+    assert.equal(r.ok, true);
+    if (!r.ok) return;
+    assert.equal(
+      (r.value as { answers: Record<string, { confidence: number }> }).answers
+        .team?.confidence,
+      0.95,
+    );
+  });
+
+  test("keeps a low self-reported confidence rather than raising it to the ceiling", async () => {
+    reply = () =>
+      completion({
+        team: { choice: "billing", confidence: 0.2 },
+        urgency: { score: 1 },
+        refund: { noul: 1 },
+      });
+
+    const r = await call(structuredLlmAdapter({ baseUrl, model: "m" }));
+    assert.equal(r.ok, true);
+    if (!r.ok) return;
+    assert.equal(
+      (r.value as { answers: Record<string, { confidence: number }> }).answers
+        .team?.confidence,
+      0.2,
+    );
+  });
+});
+
+describe("structuredLlmAdapter failure handling", () => {
+  test("turns a model that emitted non-JSON content into a schema violation", async () => {
+    reply = () => ({
+      choices: [{ message: { content: "I think it's billing, probably?" } }],
+    });
+
+    const r = await call(structuredLlmAdapter({ baseUrl, model: "m" }));
+    assert.equal(r.ok, false);
+    if (r.ok) return;
+    assert.equal(r.error.kind, "schema_violation");
+  });
+
+  test("turns a completion with no choices into a schema violation", async () => {
+    reply = () => ({ choices: [] });
+
+    const r = await call(structuredLlmAdapter({ baseUrl, model: "m" }));
+    assert.equal(r.ok, false);
+    if (r.ok) return;
+    assert.equal(r.error.kind, "schema_violation");
+  });
+
+  test("is named distinctly so telemetry shows a degraded decision", () => {
+    assert.match(
+      structuredLlmAdapter({ baseUrl, model: "qwen3.5:9b" }).name,
+      /structured-llm/,
+    );
+  });
+});

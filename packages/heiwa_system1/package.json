@@ -1,0 +1,32 @@
+{
+  "name": "@heiwa/system1",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "license": "Apache-2.0",
+  "description": "Heiwa System 1 — deterministic, schema-constrained fast-path judgment and confidence-gated orchestration over TypeSafe Jev.",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Heiwa-Limited/heiwa-universe.git",
+    "directory": "packages/heiwa_system1"
+  },
+  "exports": {
+    ".": "./src/index.ts",
+    "./core": "./src/core/system1/index.ts",
+    "./orchestrator": "./src/orchestrator/index.ts"
+  },
+  "scripts": {
+    "test": "node --test 'test/**/*.test.ts'",
+    "test:unit": "node --test 'test/unit/**/*.test.ts'",
+    "test:integration": "node --test 'test/integration/**/*.test.ts'",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "demo": "node src/examples/routing_agent/demo.ts"
+  },
+  "dependencies": {
+    "zod": "^4.6.5"
+  },
+  "devDependencies": {
+    "@types/node": "^26.6.2",
+    "typescript": "5.9.3"
+  }
+}
