@@ -136,6 +136,7 @@ fn decode_answer(id: &str, question: &Question, raw: &Value) -> Result<Answer, J
             for (key, _) in options {
                 probabilities.push((key.clone(), probability(id, key, &distribution[key])?));
             }
+            sums_to_one(id, probabilities.iter().map(|(_, p)| *p))?;
             Ok(Answer::Choice {
                 choice,
                 probabilities,
@@ -186,6 +187,7 @@ fn decode_answer(id: &str, question: &Question, raw: &Value) -> Result<Answer, J
                         .to_string(),
                 );
             }
+            sums_to_one(id, probabilities.iter().copied())?;
             Ok(Answer::Score {
                 score,
                 legend: descriptions,
@@ -237,6 +239,25 @@ fn probability_map<'a>(
         .get("probabilities")
         .and_then(Value::as_object)
         .ok_or_else(|| JudgmentError::schema(format!("answer {id:?} has no `probabilities` map")))
+}
+
+/// TypeSafe documents every distribution as "floats that sum to 1". The only
+/// slack allowed is what rounding each value to two decimals can produce, so
+/// an incoherent distribution — which makes any estimate read from it
+/// meaningless — is a schema violation rather than an answer.
+fn sums_to_one(
+    id: &str,
+    probabilities: impl ExactSizeIterator<Item = f64>,
+) -> Result<(), JudgmentError> {
+    let count = probabilities.len();
+    let total: f64 = probabilities.sum();
+    let slack = 0.005 * count as f64 + 1e-9;
+    if (total - 1.0).abs() > slack {
+        return Err(JudgmentError::schema(format!(
+            "answer {id:?} probabilities sum to {total}, not 1"
+        )));
+    }
+    Ok(())
 }
 
 fn probability(id: &str, key: &str, value: &Value) -> Result<f64, JudgmentError> {

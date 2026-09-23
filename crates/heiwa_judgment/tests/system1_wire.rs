@@ -297,3 +297,28 @@ fn a_body_without_usage_or_model_still_decodes() {
     assert_eq!(decoded.usage.input_tokens, 0);
     assert_eq!(decoded.missing.len(), 2);
 }
+
+// TypeSafe documents every distribution as "floats that sum to 1". A live
+// local model returned `score: 2.0` over [1.0, 0.03, 0.85, 0.02, 0.0] — mass
+// 1.9 — and an estimate read from it contradicted the model's own score.
+
+#[test]
+fn a_distribution_that_does_not_sum_to_one_is_a_schema_violation() {
+    let mut body = documented_body();
+    body["answers"]["frustration"]["probabilities"] = json!({ "0": 1.0, "1": 0.03, "2": 0.85 });
+    assert_violation(body, "frustration");
+
+    let mut body = documented_body();
+    body["answers"]["department"]["probabilities"] =
+        json!({ "billing": 0.5, "technical": 0.2, "sales": 0.1 });
+    assert_violation(body, "department");
+}
+
+#[test]
+fn a_distribution_rounded_to_two_decimals_still_decodes() {
+    // Three options each rounded to two decimals can miss 1 by up to 0.015.
+    let mut body = documented_body();
+    body["answers"]["department"]["probabilities"] =
+        json!({ "billing": 0.33, "technical": 0.33, "sales": 0.33 });
+    assert!(decode_response(&documented_questions(), &body).is_ok());
+}

@@ -271,13 +271,17 @@ fn completion(content: Value) -> Value {
     })
 }
 
+/// A small local model's self-reported distributions are not coherent — one
+/// live gemma4 answer put 1.9 of probability mass on a five-level scale — so
+/// the fallback asks only for what its grammar can enforce: one option or one
+/// level (an `enum`, which Ollama honours) and a confidence.
 #[tokio::test]
-async fn the_fallback_constrains_the_model_and_translates_to_the_documented_shape() {
+async fn the_fallback_asks_for_a_selection_and_records_a_point_mass() {
     let server = Server::start(reply(
         200,
         completion(json!({
-            "team": { "choice": "billing", "probabilities": { "billing": 0.9, "technical": 0.1 }, "confidence": 0.3 },
-            "urgency": { "score": 2, "probabilities": [0.1, 0.1, 0.8], "confidence": 1.0 },
+            "team": { "choice": "billing", "confidence": 0.3 },
+            "urgency": { "level": 2, "confidence": 1.0 },
             "refund": { "noul": 0.9 }
         })),
     ));
@@ -291,27 +295,29 @@ async fn the_fallback_constrains_the_model_and_translates_to_the_documented_shap
             BUDGET,
         )
         .await;
+    assert_eq!(evaluation.backend, "structured_llm");
     let decoded = evaluation.outcome.expect("decoded");
 
     // An admitted low confidence is the one number worth believing: kept.
-    match decoded.answer("team") {
-        Some(Answer::Choice { confidence, .. }) => assert_eq!(*confidence, 0.3),
-        other => panic!("unexpected {other:?}"),
-    }
+    assert_eq!(
+        decoded.answer("team"),
+        Some(&Answer::Choice {
+            choice: "billing".into(),
+            probabilities: vec![("billing".into(), 1.0), ("technical".into(), 0.0)],
+            confidence: 0.3,
+        })
+    );
     // A claimed 1.0 is capped, so a fallback can never reach the auto band.
-    match decoded.answer("urgency") {
-        Some(Answer::Score {
-            probabilities,
-            confidence,
-            ..
-        }) => {
-            assert_eq!(probabilities, &vec![0.1, 0.1, 0.8]);
-            assert_eq!(*confidence, FALLBACK_CONFIDENCE_CEILING);
-        }
-        other => panic!("unexpected {other:?}"),
-    }
+    assert_eq!(
+        decoded.answer("urgency"),
+        Some(&Answer::Score {
+            score: 2.0,
+            legend: vec!["low".into(), "mid".into(), "high".into()],
+            probabilities: vec![0.0, 0.0, 1.0],
+            confidence: FALLBACK_CONFIDENCE_CEILING,
+        })
+    );
     assert_eq!(decoded.usage.input_tokens, 300);
-    assert_eq!(evaluation.backend, "structured_llm");
 
     let sent = &server.requests()[0];
     assert_eq!(sent.path, "/v1/chat/completions");
@@ -321,11 +327,19 @@ async fn the_fallback_constrains_the_model_and_translates_to_the_documented_shap
         "an output budget is always sent"
     );
     let schema = &sent.body["response_format"]["json_schema"]["schema"];
+    assert_eq!(schema["additionalProperties"], json!(false));
     assert_eq!(
         schema["properties"]["team"]["properties"]["choice"]["enum"],
         json!(["billing", "technical"])
     );
-    assert_eq!(schema["additionalProperties"], json!(false));
+    assert_eq!(
+        schema["properties"]["urgency"]["properties"]["level"],
+        json!({ "type": "integer", "enum": [0, 1, 2] })
+    );
+    assert!(
+        schema["properties"]["urgency"]["properties"]["probabilities"].is_null(),
+        "no distribution is asked of a model that cannot produce a coherent one"
+    );
     let prompt = sent.body["messages"][1]["content"].as_str().unwrap();
     assert!(prompt.contains("A-104"), "the state reaches the model");
     assert!(prompt.contains("true means: Asks for money back"));
@@ -333,22 +347,46 @@ async fn the_fallback_constrains_the_model_and_translates_to_the_documented_shap
 
 #[tokio::test]
 async fn the_fallback_does_not_repair_out_of_range_values() {
-    let server = Server::start(reply(
-        200,
-        completion(json!({
-            "team": { "choice": "billing", "probabilities": { "billing": 0.9, "technical": 0.1 }, "confidence": 0.5 },
-            "urgency": { "score": 1, "probabilities": [0.1, 0.8, 0.1], "confidence": 0.5 },
-            "refund": { "noul": 2.0 }
-        })),
-    ));
-    let backend = Backend::structured_llm(&server.base_url, "gemma4:latest");
-    let error = backend
-        .evaluate(&client(), "x", &questions(), BUDGET)
-        .await
-        .outcome
-        .unwrap_err();
-    assert_eq!(error.kind, ErrorKind::SchemaViolation);
-    assert!(error.message.contains("refund"), "{}", error.message);
+    for (answers, culprit) in [
+        (
+            json!({
+                "team": { "choice": "billing", "confidence": 0.5 },
+                "urgency": { "level": 1, "confidence": 0.5 },
+                "refund": { "noul": 2.0 }
+            }),
+            "refund",
+        ),
+        (
+            json!({
+                "team": { "choice": "billing", "confidence": 0.5 },
+                "urgency": { "level": 7, "confidence": 0.5 },
+                "refund": { "noul": 0.5 }
+            }),
+            "urgency",
+        ),
+        (
+            json!({
+                "team": { "choice": "billing", "confidence": -0.2 },
+                "urgency": { "level": 1, "confidence": 0.5 },
+                "refund": { "noul": 0.5 }
+            }),
+            "team",
+        ),
+    ] {
+        let server = Server::start(reply(200, completion(answers)));
+        let backend = Backend::structured_llm(&server.base_url, "gemma4:latest");
+        let error = backend
+            .evaluate(&client(), "x", &questions(), BUDGET)
+            .await
+            .outcome
+            .unwrap_err();
+        assert_eq!(error.kind, ErrorKind::SchemaViolation);
+        assert!(
+            error.message.contains(culprit),
+            "{culprit}: {}",
+            error.message
+        );
+    }
 }
 
 #[tokio::test]

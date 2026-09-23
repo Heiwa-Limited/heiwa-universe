@@ -8,11 +8,16 @@
 //!
 //! The fallback is a worse System 1 than Jev and is labelled as one. Its
 //! schema constraint honours `enum` but, measured against a live Ollama, not
-//! numeric bounds, and its self-reported confidence is uncalibrated. So values
-//! pass through unrepaired for the decoder to reject, and confidence is capped
-//! at [`FALLBACK_CONFIDENCE_CEILING`] — the gate's `auto` bar, compared with a
-//! strict `>` — so a fallback answer can never reach the auto band.
-//! See `packages/heiwa_system1/architecture.md` §8 and §14.
+//! numeric bounds; its self-reported confidence is uncalibrated; and its
+//! self-reported distributions are not coherent (a live gemma4 answer put 1.9
+//! of probability mass on a five-level scale). So it is asked only for what
+//! its grammar enforces — one option, or one level, as an `enum` — plus a
+//! confidence, and the answer is recorded as a point mass on that selection:
+//! the fallback has no distribution, and says so rather than inventing one.
+//! Values pass through unrepaired for the decoder to reject, and confidence
+//! is capped at [`FALLBACK_CONFIDENCE_CEILING`] — the gate's `auto` bar,
+//! compared with a strict `>` — so a fallback answer can never reach the auto
+//! band. See `packages/heiwa_system1/architecture.md` §8 and §14.
 
 use std::time::{Duration, Instant};
 
@@ -320,8 +325,8 @@ async fn structured(
 }
 
 /// A JSON Schema the fallback is decoded against. `enum` over exactly the
-/// offered keys is what keeps an unoffered option unreachable; distributions
-/// and confidence are required so no answer arrives without them.
+/// offered keys — and over exactly the scale's levels — is what keeps an
+/// unoffered answer unreachable; a confidence is required with each.
 fn json_schema(questions: &QuestionSet) -> Value {
     let unit = json!({ "type": "number", "minimum": 0, "maximum": 1 });
     let mut properties = Map::new();
@@ -334,24 +339,14 @@ fn json_schema(questions: &QuestionSet) -> Value {
                 options,
             } => {
                 let keys: Vec<&str> = options.iter().map(|(key, _)| key.as_str()).collect();
-                let distribution: Map<String, Value> = keys
-                    .iter()
-                    .map(|key| (key.to_string(), unit.clone()))
-                    .collect();
                 json!({
                     "type": "object",
                     "description": instructions,
                     "properties": {
                         "choice": { "type": "string", "enum": keys },
-                        "probabilities": {
-                            "type": "object",
-                            "properties": distribution,
-                            "required": keys,
-                            "additionalProperties": false
-                        },
                         "confidence": unit
                     },
-                    "required": ["choice", "probabilities", "confidence"],
+                    "required": ["choice", "confidence"],
                     "additionalProperties": false
                 })
             }
@@ -362,16 +357,10 @@ fn json_schema(questions: &QuestionSet) -> Value {
                 "type": "object",
                 "description": instructions,
                 "properties": {
-                    "score": { "type": "number", "minimum": 0, "maximum": levels.len() - 1 },
-                    "probabilities": {
-                        "type": "array",
-                        "items": unit,
-                        "minItems": levels.len(),
-                        "maxItems": levels.len()
-                    },
+                    "level": { "type": "integer", "enum": (0..levels.len()).collect::<Vec<_>>() },
                     "confidence": unit
                 },
-                "required": ["score", "probabilities", "confidence"],
+                "required": ["level", "confidence"],
                 "additionalProperties": false
             }),
             Question::Noul { instructions, .. } => json!({
@@ -396,7 +385,8 @@ fn render_prompt(state: &str, questions: &QuestionSet) -> String {
     let mut lines = vec![
         "Evaluate the STATE below against each question independently.".to_string(),
         "Answer only from the state. Do not explain. Emit JSON matching the schema.".to_string(),
-        "For each choice and score, give a probability for every option or level.".to_string(),
+        "For each choice pick one option, for each score pick one level, and give each a confidence from 0 to 1."
+            .to_string(),
         String::new(),
         "STATE:".to_string(),
         state.to_string(),
@@ -419,7 +409,7 @@ fn render_prompt(state: &str, questions: &QuestionSet) -> String {
                 levels,
             } => {
                 lines.push(format!(
-                    "- {id} (score 0..{}): {instructions}",
+                    "- {id} (score, one level 0..{}): {instructions}",
                     levels.len() - 1
                 ));
                 for (level, description) in levels.iter().enumerate() {
@@ -446,7 +436,8 @@ fn render_prompt(state: &str, questions: &QuestionSet) -> String {
     lines.join("\n")
 }
 
-/// Reshape the model's JSON into TypeSafe's documented answer shape.
+/// Reshape the model's selections into TypeSafe's documented answer shape:
+/// a point mass on the selected option or level.
 ///
 /// Deliberately permissive: a malformed value passes through as-is so the
 /// decoder rejects it with a precise message, rather than being patched into
@@ -466,20 +457,47 @@ fn translate(raw: &Value, questions: &QuestionSet, ceiling: f64) -> Value {
             None => answer.get("confidence").cloned().unwrap_or(Value::Null),
         };
         let translated = match question {
-            Question::Choice { .. } => json!({
-                "type": "choice",
-                "choice": answer.get("choice").cloned().unwrap_or(Value::Null),
-                "probabilities": answer.get("probabilities").cloned().unwrap_or(Value::Null),
-                "confidence": capped,
-            }),
+            Question::Choice { options, .. } => {
+                let choice = answer.get("choice").cloned().unwrap_or(Value::Null);
+                // An unoffered choice gets no mass; the decoder rejects the
+                // choice itself by name.
+                let probabilities: Map<String, Value> = options
+                    .iter()
+                    .map(|(key, _)| {
+                        let mass = if choice.as_str() == Some(key.as_str()) {
+                            1.0
+                        } else {
+                            0.0
+                        };
+                        (key.clone(), json!(mass))
+                    })
+                    .collect();
+                json!({
+                    "type": "choice",
+                    "choice": choice,
+                    "probabilities": probabilities,
+                    "confidence": capped,
+                })
+            }
             Question::Score { levels, .. } => {
-                let probabilities = match answer.get("probabilities") {
-                    Some(Value::Array(values)) => by_level(values.iter().cloned()),
-                    other => other.cloned().unwrap_or(Value::Null),
+                let level = answer.get("level").cloned().unwrap_or(Value::Null);
+                // Mass is keyed by the level exactly as given, so a level off
+                // the scale lands off the scale and the decoder names it.
+                let mut probabilities: Map<String, Value> = (0..levels.len())
+                    .map(|index| (index.to_string(), json!(0.0)))
+                    .collect();
+                let key = match &level {
+                    Value::Number(number) => number.to_string(),
+                    other => other.to_string(),
                 };
+                probabilities.insert(key, json!(1.0));
+                let score = level
+                    .as_u64()
+                    .map(|index| json!(index as f64))
+                    .unwrap_or_else(|| level.clone());
                 json!({
                     "type": "score",
-                    "score": answer.get("score").cloned().unwrap_or(Value::Null),
+                    "score": score,
                     "legend": by_level(levels.iter().map(|level| Value::String(level.clone()))),
                     "probabilities": probabilities,
                     "confidence": capped,
