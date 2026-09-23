@@ -25,7 +25,7 @@ use heiwa_shell::operator::{
     OperatorModelTurn, OperatorTurnRunner, OperatorTurnWork, ShadowObserver, ShadowTurn,
 };
 use heiwa_shell::system1_shadow::{
-    render_report, report, turn_route_questions, ShadowJudge, SHADOW_STREAM,
+    render_report, report, turn_route_questions, Admission, ShadowJudge, SHADOW_STREAM,
 };
 use heiwa_work::{work_created_event, WorkId};
 use serde_json::{json, Value};
@@ -203,6 +203,24 @@ fn judge_at(base_url: &str, dir: &Path) -> ShadowJudge {
 
 const PROMPT: &str =
     "Split the parser module into lexer and grammar files and keep the tests green";
+
+/// The single cohort a report is expected to hold; a test that mixes
+/// policies asserts on `cohorts` directly.
+fn cohort_with(report: &Value, identity: &str) -> Value {
+    report["cohorts"]
+        .as_array()
+        .expect("cohorts")
+        .iter()
+        .find(|cohort| cohort["cohort"]["model_identity"]["status"] == identity)
+        .cloned()
+        .unwrap_or_else(|| panic!("no {identity} cohort: {report:#}"))
+}
+
+fn only_cohort(report: &Value) -> &Value {
+    let cohorts = report["cohorts"].as_array().expect("cohorts");
+    assert_eq!(cohorts.len(), 1, "expected exactly one cohort: {report:#}");
+    &cohorts[0]
+}
 
 // ---- the judgment ----------------------------------------------------------
 
@@ -510,25 +528,28 @@ async fn the_report_joins_shadow_records_with_what_the_turns_actually_did() {
     wait_for_records(dir.path(), 2).await;
     let report = report(dir.path(), Some("work-shadow")).expect("report");
 
-    assert_eq!(report["schema"], json!("heiwa.system1_shadow.report.v1"));
+    assert_eq!(report["schema"], json!("heiwa.system1_shadow.report.v2"));
     assert_eq!(report["work_id"], json!("work-shadow"));
     assert_eq!(report["records"], json!(2), "{report:#}");
-    assert_eq!(report["status"]["judged"], json!(2));
+    assert_eq!(only_cohort(&report)["status"]["judged"], json!(2));
     assert_eq!(report["coverage"]["work_model_turns"], json!(2));
     assert_eq!(report["coverage"]["without_record"], json!(0));
-    assert_eq!(report["bands"]["auto"], json!(2));
-    assert_eq!(report["intent"]["agree"], json!(2));
-    assert_eq!(report["route"]["would_raise_floor"], json!(2));
-    assert_eq!(report["route"]["would_change_model"], json!(1));
+    assert_eq!(only_cohort(&report)["bands"]["auto"], json!(2));
+    assert_eq!(only_cohort(&report)["intent"]["agree"], json!(2));
+    assert_eq!(only_cohort(&report)["route"]["would_raise_floor"], json!(2));
+    assert_eq!(
+        only_cohort(&report)["route"]["would_change_model"],
+        json!(1)
+    );
 
-    let changed = &report["outcomes"]["would_change_model"];
+    let changed = &only_cohort(&report)["outcomes"]["would_change_model"];
     assert_eq!(changed["turns"], json!(1));
     assert_eq!(changed["completed"], json!(1));
     assert_eq!(changed["completed_uncancelled"], json!(1));
     assert_eq!(changed["interrupted"], json!(0));
     assert_eq!(changed["executed_models"]["ollama/small-local"], json!(1));
 
-    let same = &report["outcomes"]["same_route"];
+    let same = &only_cohort(&report)["outcomes"]["same_route"];
     assert_eq!(same["turns"], json!(1));
     assert_eq!(same["completed"], json!(0));
     assert_eq!(same["interrupted"], json!(1));
@@ -876,27 +897,32 @@ async fn the_report_keeps_cost_truth_through_aggregation() {
 
     // All known: one known zero, one exact charge.
     let known = report(dir.path(), Some("work-known")).expect("report");
-    let cost = &known["execution_cost"];
+    let cost = &only_cohort(&known)["execution_cost"];
     assert_eq!(cost["known_zero"], json!(1), "{known:#}");
     assert_eq!(cost["exact"], json!(1));
     assert_eq!(cost["unknown"], json!(0));
     assert!((cost["known_usd"].as_f64().unwrap() - 0.004).abs() < 1e-12);
     assert!((cost["total_usd"].as_f64().unwrap() - 0.004).abs() < 1e-12);
     assert_eq!(cost["basis"], json!("exact"));
-    let per = &known["cost_per_completed_turn"];
+    let per = &only_cohort(&known)["cost_per_completed_turn"];
     assert!((per["usd"].as_f64().unwrap() - 0.002).abs() < 1e-12);
     assert_eq!(per["basis"], json!("exact"));
     assert_eq!(
-        known["outcomes"]["same_route"]["completed_uncancelled"],
+        only_cohort(&known)["outcomes"]["same_route"]["completed_uncancelled"],
         json!(2)
     );
-    assert!(known["outcomes"]["same_route"].get("accepted").is_none());
+    assert!(only_cohort(&known)["outcomes"]["same_route"]
+        .get("accepted")
+        .is_none());
 
     // An estimate is a total, labelled as one.
     let estimate = report(dir.path(), Some("work-estimate")).expect("report");
-    assert_eq!(estimate["execution_cost"]["estimated"], json!(1));
+    assert_eq!(
+        only_cohort(&estimate)["execution_cost"]["estimated"],
+        json!(1)
+    );
     assert!(
-        (estimate["execution_cost"]["estimated_usd"]
+        (only_cohort(&estimate)["execution_cost"]["estimated_usd"]
             .as_f64()
             .unwrap()
             - 0.002)
@@ -904,24 +930,24 @@ async fn the_report_keeps_cost_truth_through_aggregation() {
             < 1e-12
     );
     assert_eq!(
-        estimate["execution_cost"]["basis"],
+        only_cohort(&estimate)["execution_cost"]["basis"],
         json!("includes_estimates")
     );
     assert_eq!(
-        estimate["cost_per_completed_turn"]["basis"],
+        only_cohort(&estimate)["cost_per_completed_turn"]["basis"],
         json!("includes_estimates")
     );
 
     // One unknown amount means there is no total and no cost per turn —
     // the known and estimated subtotals stay visible, labelled.
     let mixed = report(dir.path(), Some("work-mixed")).expect("report");
-    let cost = &mixed["execution_cost"];
+    let cost = &only_cohort(&mixed)["execution_cost"];
     assert_eq!(cost["unknown"], json!(1), "{mixed:#}");
     assert!(cost["total_usd"].is_null(), "an unknown amount is not zero");
     assert_eq!(cost["basis"], json!("incomplete"));
     assert!((cost["known_usd"].as_f64().unwrap() - 0.004).abs() < 1e-12);
     assert!((cost["estimated_usd"].as_f64().unwrap() - 0.002).abs() < 1e-12);
-    let per = &mixed["cost_per_completed_turn"];
+    let per = &only_cohort(&mixed)["cost_per_completed_turn"];
     assert!(per["usd"].is_null());
     assert_eq!(per["basis"], json!("incomplete"));
     assert_eq!(per["turns_with_unknown_cost"], json!(1));
@@ -1076,9 +1102,9 @@ async fn the_report_counts_every_stage_of_a_tool_turn() {
 
     // Both calls were charged exactly; the receipt alone says 0.004.
     let whole = report(dir.path(), Some("work-two-stage")).expect("report");
-    let cost = &whole["execution_cost"];
+    let cost = &only_cohort(&whole)["execution_cost"];
     assert_eq!(
-        whole["outcomes"]["same_route"]["completed"],
+        only_cohort(&whole)["outcomes"]["same_route"]["completed"],
         json!(1),
         "{whole:#}"
     );
@@ -1093,9 +1119,9 @@ async fn the_report_counts_every_stage_of_a_tool_turn() {
     // The follow-up failed with no known cost: the first call's charge stays
     // in the known subtotal, and there is no total.
     let failed = report(dir.path(), Some("work-later-stage-fails")).expect("report");
-    let cost = &failed["execution_cost"];
+    let cost = &only_cohort(&failed)["execution_cost"];
     assert_eq!(
-        failed["outcomes"]["same_route"]["interrupted"],
+        only_cohort(&failed)["outcomes"]["same_route"]["interrupted"],
         json!(1),
         "{failed:#}"
     );
@@ -1106,4 +1132,451 @@ async fn the_report_counts_every_stage_of_a_tool_turn() {
     );
     assert!(cost["total_usd"].is_null());
     assert_eq!(cost["basis"], json!("incomplete"));
+}
+
+// ---- bounded admission --------------------------------------------------------
+//
+// A sustained turn stream must not queue judgments (and the prompts they
+// hold) without bound, nor judge a turn long after it ended. Every observed
+// turn still gets exactly one record.
+
+/// An endpoint that holds every request until released, so the in-flight
+/// judgment and the queue behind it are exactly observable.
+struct Gate {
+    open: std::sync::Mutex<bool>,
+    changed: std::sync::Condvar,
+}
+
+impl Gate {
+    fn release(&self) {
+        *self.open.lock().unwrap() = true;
+        self.changed.notify_all();
+    }
+}
+
+fn blocked_endpoint() -> (Endpoint, Arc<Gate>) {
+    let gate = Arc::new(Gate {
+        open: std::sync::Mutex::new(false),
+        changed: std::sync::Condvar::new(),
+    });
+    let held = gate.clone();
+    let payload = jev_answers().to_string();
+    let server = endpoint_with(
+        200,
+        Arc::new(move |_| {
+            let mut open = held.open.lock().unwrap();
+            while !*open {
+                open = held.changed.wait(open).unwrap();
+            }
+            payload.clone()
+        }),
+        None,
+    );
+    (server, gate)
+}
+
+async fn wait_for_hits(server: &Endpoint, hits: usize) {
+    for _ in 0..500 {
+        if server.hits.load(Ordering::SeqCst) >= hits {
+            return;
+        }
+        tokio::time::sleep(Duration::from_millis(5)).await;
+    }
+    panic!("the backend never received {hits} request(s)");
+}
+
+fn turn_numbered(n: usize) -> ShadowTurn {
+    let mut turn = shadow_turn(PROMPT, 1, PrivacyClass::Standard);
+    turn.turn_id = format!("turn-{n}");
+    turn.request.turn_id = turn.turn_id.clone();
+    turn
+}
+
+fn statuses(records: &[Value]) -> (usize, usize, usize) {
+    let judged = records.iter().filter(|r| r["status"] == "judged").count();
+    let backlog = records
+        .iter()
+        .filter(|r| r["skip_reason"] == "backlog")
+        .count();
+    let expired = records
+        .iter()
+        .filter(|r| r["skip_reason"] == "queue_expired")
+        .count();
+    (judged, backlog, expired)
+}
+
+#[tokio::test]
+async fn a_burst_retains_at_most_capacity_plus_one_and_records_the_rest() {
+    let dir = tempfile::tempdir().unwrap();
+    let (server, gate) = blocked_endpoint();
+    let judge = judge_at(&server.base_url, dir.path())
+        .with_admission(Admission {
+            capacity: 2,
+            max_wait: Duration::from_secs(60),
+            refusal_capacity: 64,
+        })
+        .expect("admission");
+
+    // One judgment in flight, held by the backend.
+    ShadowObserver::observe(&judge, turn_numbered(1));
+    wait_for_hits(&server, 1).await;
+    // A burst behind it: two may wait, the other four are refused at once.
+    for n in 2..=7 {
+        ShadowObserver::observe(&judge, turn_numbered(n));
+    }
+    // The writer records refusals while the judgment is still held.
+    let refused = wait_for_records(dir.path(), 4).await;
+    assert_eq!(
+        server.hits.load(Ordering::SeqCst),
+        1,
+        "nothing released yet"
+    );
+    assert!(refused.iter().all(|r| r["skip_reason"] == "backlog"));
+    assert!(
+        refused.iter().all(|r| r["call"].is_null()),
+        "a refusal calls nothing"
+    );
+
+    gate.release();
+    let records = wait_for_records(dir.path(), 7).await;
+    let (judged, backlog, expired) = statuses(&records);
+    assert_eq!(
+        (judged, backlog, expired),
+        (3, 4, 0),
+        "capacity 2 plus the one in flight"
+    );
+    assert_eq!(server.hits.load(Ordering::SeqCst), 3);
+    let mut turns: Vec<&str> = records
+        .iter()
+        .map(|r| r["turn_id"].as_str().unwrap())
+        .collect();
+    turns.sort_unstable();
+    assert_eq!(
+        turns,
+        ["turn-1", "turn-2", "turn-3", "turn-4", "turn-5", "turn-6", "turn-7"]
+    );
+
+    let report = report(dir.path(), None).expect("report");
+    assert_eq!(
+        cohort_with(&report, "no_model_response")["skip_reasons"]["backlog"],
+        json!(4),
+        "{report:#}"
+    );
+    assert_eq!(cohort_with(&report, "pinned")["status"]["judged"], json!(3));
+}
+
+#[tokio::test]
+async fn a_turn_that_waited_past_the_bound_is_recorded_without_contacting_the_backend() {
+    let dir = tempfile::tempdir().unwrap();
+    let (server, gate) = blocked_endpoint();
+    let judge = judge_at(&server.base_url, dir.path())
+        .with_admission(Admission {
+            capacity: 4,
+            max_wait: Duration::from_millis(100),
+            refusal_capacity: 64,
+        })
+        .expect("admission");
+
+    ShadowObserver::observe(&judge, turn_numbered(1));
+    wait_for_hits(&server, 1).await;
+    ShadowObserver::observe(&judge, turn_numbered(2));
+    ShadowObserver::observe(&judge, turn_numbered(3));
+    tokio::time::sleep(Duration::from_millis(250)).await;
+    gate.release();
+    let records = wait_for_records(dir.path(), 3).await;
+
+    let (judged, _, expired) = statuses(&records);
+    assert_eq!((judged, expired), (1, 2), "{records:#?}");
+    assert_eq!(
+        server.hits.load(Ordering::SeqCst),
+        1,
+        "an expired turn is never sent"
+    );
+    for record in records
+        .iter()
+        .filter(|r| r["skip_reason"] == "queue_expired")
+    {
+        assert!(record["admission"]["queue_wait_ms"].as_u64().unwrap() >= 100);
+    }
+
+    // Queue wait is budgeted and reported apart from classifier runtime.
+    let judged = records.iter().find(|r| r["status"] == "judged").unwrap();
+    assert!(
+        judged["admission"]["queue_wait_ms"].as_u64().is_some(),
+        "{judged:#}"
+    );
+    assert!(judged["call"]["latency_ms"].as_u64().is_some());
+    let report = report(dir.path(), None).expect("report");
+    let expired = cohort_with(&report, "no_model_response");
+    assert_eq!(
+        expired["skip_reasons"]["queue_expired"],
+        json!(2),
+        "{report:#}"
+    );
+    assert!(
+        expired["admission"]["queue_wait_ms"]["max"]
+            .as_u64()
+            .unwrap()
+            >= 100
+    );
+    let judged = cohort_with(&report, "pinned");
+    assert!(judged["classifier"]["latency_ms"]["max"].is_u64());
+    assert!(judged["admission"]["queue_wait_ms"]["max"].is_u64());
+}
+
+/// Hold the shadow stream's append lock the way another process would.
+fn hold_stream_lock(dir: &Path) -> std::fs::File {
+    let lock = std::fs::OpenOptions::new()
+        .create(true)
+        .read(true)
+        .write(true)
+        .truncate(false)
+        .open(dir.join(format!(".{SHADOW_STREAM}.jsonl.lock")))
+        .expect("lock file");
+    lock.lock().expect("hold the stream lock");
+    lock
+}
+
+async fn wait_until_finished(worker: &tokio::task::AbortHandle) {
+    for _ in 0..500 {
+        if worker.is_finished() {
+            return;
+        }
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
+    panic!("the shadow tasks never finished");
+}
+
+#[tokio::test]
+async fn an_overflow_never_waits_on_the_stream_lock() {
+    let dir = tempfile::tempdir().unwrap();
+    let (server, gate) = blocked_endpoint();
+    let judge = judge_at(&server.base_url, dir.path())
+        .with_admission(Admission {
+            capacity: 1,
+            max_wait: Duration::from_secs(60),
+            refusal_capacity: 64,
+        })
+        .expect("admission");
+    let lock = hold_stream_lock(dir.path());
+
+    ShadowObserver::observe(&judge, turn_numbered(1));
+    wait_for_hits(&server, 1).await;
+    let started = std::time::Instant::now();
+    for n in 2..=20 {
+        ShadowObserver::observe(&judge, turn_numbered(n));
+    }
+    let elapsed = started.elapsed();
+    assert!(
+        elapsed < Duration::from_millis(250),
+        "19 observations took {elapsed:?} while another holder had the stream lock"
+    );
+
+    drop(lock);
+    gate.release();
+    let records = wait_for_records(dir.path(), 20).await;
+    let (judged, backlog, _) = statuses(&records);
+    assert_eq!((judged, backlog), (2, 18));
+}
+
+#[tokio::test]
+async fn refusals_beyond_the_record_queue_are_counted_never_lost_silently() {
+    let dir = tempfile::tempdir().unwrap();
+    let (server, gate) = blocked_endpoint();
+    let judge = judge_at(&server.base_url, dir.path())
+        .with_admission(Admission {
+            capacity: 1,
+            max_wait: Duration::from_secs(60),
+            refusal_capacity: 2,
+        })
+        .expect("admission");
+    let lock = hold_stream_lock(dir.path());
+
+    ShadowObserver::observe(&judge, turn_numbered(1));
+    wait_for_hits(&server, 1).await;
+    for n in 2..=10 {
+        ShadowObserver::observe(&judge, turn_numbered(n));
+    }
+    let worker = judge.worker().expect("worker");
+    drop(judge);
+    drop(lock);
+    gate.release();
+    wait_until_finished(&worker).await;
+
+    let report = report(dir.path(), None).expect("report");
+    let recorded = report["records"].as_u64().unwrap();
+    let unrecorded = report["coverage"]["unrecorded_refusals"].as_u64().unwrap();
+    assert!(unrecorded >= 1, "{report:#}");
+    assert_eq!(
+        recorded + unrecorded,
+        10,
+        "every turn is a record or a count: {report:#}"
+    );
+    assert!(render_report(&report).contains("unrecorded"));
+}
+
+#[tokio::test]
+async fn dropping_the_last_judge_drains_admitted_turns_and_stops() {
+    let dir = tempfile::tempdir().unwrap();
+    let (server, gate) = blocked_endpoint();
+    let judge = judge_at(&server.base_url, dir.path())
+        .with_admission(Admission {
+            capacity: 4,
+            max_wait: Duration::from_secs(60),
+            refusal_capacity: 64,
+        })
+        .expect("admission");
+    let observer = judge.clone();
+    for n in 1..=3 {
+        ShadowObserver::observe(&observer, turn_numbered(n));
+    }
+    let worker = judge.worker().expect("worker");
+    drop(observer);
+    drop(judge);
+    wait_for_hits(&server, 1).await;
+    assert!(
+        !worker.is_finished(),
+        "admitted turns are still owed a judgment"
+    );
+
+    gate.release();
+    wait_until_finished(&worker).await;
+    let records = heiwa_evidence::read_stream(dir.path(), SHADOW_STREAM).unwrap();
+    assert_eq!(
+        records.events.len(),
+        3,
+        "the queue drained before the tasks stopped"
+    );
+    assert!(records
+        .events
+        .iter()
+        .all(|e| e.record["status"] == "judged"));
+}
+
+#[test]
+fn invalid_admission_bounds_are_refused_not_adjusted() {
+    let dir = tempfile::tempdir().unwrap();
+    for bounds in [
+        Admission {
+            capacity: 0,
+            ..Admission::default()
+        },
+        Admission {
+            refusal_capacity: 0,
+            ..Admission::default()
+        },
+        Admission {
+            max_wait: Duration::ZERO,
+            ..Admission::default()
+        },
+    ] {
+        let judge = judge_at("http://127.0.0.1:9", dir.path());
+        assert!(judge.with_admission(bounds).is_err(), "{bounds:?}");
+    }
+}
+
+// ---- cohorts ------------------------------------------------------------------
+
+fn structured_answers() -> Value {
+    json!({
+        "choices": [{
+            "finish_reason": "stop",
+            "message": {
+                "role": "assistant",
+                "content": json!({
+                    "intent": { "choice": "build", "confidence": 0.7 },
+                    "capability": { "level": 2, "confidence": 0.7 }
+                }).to_string()
+            }
+        }],
+        "usage": { "prompt_tokens": 90, "completion_tokens": 9 }
+    })
+}
+
+#[tokio::test]
+async fn different_policies_and_model_identities_are_separate_cohorts() {
+    let dir = tempfile::tempdir().unwrap();
+    let with_model = |model: &str| {
+        let mut body = jev_answers();
+        body["model"] = json!(model);
+        body
+    };
+    let pinned = endpoint(200, with_model("jev-1.13.0"));
+    let alias_echoed = endpoint(200, with_model("jev-latest"));
+    let alias_resolved = endpoint(200, with_model("jev-1.13.0"));
+    let local = endpoint(200, structured_answers());
+    let backends = [
+        Backend::typesafe_at(&pinned.base_url, "sk-test", "jev-1.13.0"),
+        Backend::typesafe_at(&alias_echoed.base_url, "sk-test", "jev-latest"),
+        Backend::typesafe_at(&alias_resolved.base_url, "sk-test", "jev-latest"),
+        Backend::structured_llm(&local.base_url, "gemma4:latest"),
+    ];
+    for (n, backend) in backends.into_iter().enumerate() {
+        let judge = ShadowJudge::new(backend, Duration::from_secs(5), dir.path().to_path_buf())
+            .expect("judge");
+        let record = judge.judge(&turn_numbered(n + 1)).await;
+        judge.record(&record).expect("record");
+    }
+    // A record from before provenance and answer shape were kept.
+    judge_at("http://127.0.0.1:9", dir.path())
+        .record(&json!({
+            "schema": "heiwa.system1_shadow.v1",
+            "turn_id": "turn-legacy",
+            "work_id": "work-shadow",
+            "status": "judged",
+            "policy": { "question_set": "turn-route-v1", "backend": "structured_llm", "model": "gemma4:latest" },
+            "call": { "latency_ms": 18000, "model_answered": "gemma4:latest" },
+        }))
+        .expect("legacy record");
+
+    let report = report(dir.path(), None).expect("report");
+    let cohorts = report["cohorts"].as_array().unwrap();
+    assert_eq!(cohorts.len(), 5, "{report:#}");
+    assert!(cohorts.iter().all(|cohort| cohort["records"] == json!(1)));
+    let ids: std::collections::BTreeSet<&str> = cohorts
+        .iter()
+        .map(|cohort| cohort["cohort"]["id"].as_str().unwrap())
+        .collect();
+    assert_eq!(ids.len(), 5, "cohort ids are distinct");
+
+    assert_eq!(
+        cohort_with(&report, "pinned")["cohort"]["model_identity"]["version"],
+        json!("jev-1.13.0")
+    );
+    assert_eq!(
+        cohort_with(&report, "resolved_by_provider")["cohort"]["model_identity"]["version"],
+        json!("jev-1.13.0")
+    );
+    let unresolved: Vec<&Value> = cohorts
+        .iter()
+        .filter(|cohort| cohort["cohort"]["model_identity"]["status"] == "version_unresolved")
+        .collect();
+    assert_eq!(unresolved.len(), 2, "an echoed alias and a local tag");
+    assert!(unresolved
+        .iter()
+        .all(|cohort| cohort["cohort"]["model_identity"]["version"].is_null()));
+    assert_eq!(
+        cohort_with(&report, "legacy_unrecorded")["records"],
+        json!(1)
+    );
+
+    let text = render_report(&report);
+    assert!(text.contains("not comparable"), "{text}");
+    for line in text
+        .lines()
+        .filter(|line| line.contains("classifier:") || line.contains("gate:"))
+    {
+        assert!(
+            line.starts_with("  "),
+            "metrics appear only inside a cohort block: {line}"
+        );
+    }
+    for status in [
+        "pinned",
+        "resolved_by_provider",
+        "version_unresolved",
+        "legacy_unrecorded",
+    ] {
+        assert!(text.contains(status), "{status} missing from:\n{text}");
+    }
 }

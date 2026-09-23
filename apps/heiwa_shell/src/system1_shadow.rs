@@ -52,7 +52,7 @@ use crate::operator::{ShadowObserver, ShadowTurn};
 
 pub const SHADOW_STREAM: &str = "system1_shadow";
 pub const RECORD_SCHEMA: &str = "heiwa.system1_shadow.v1";
-pub const REPORT_SCHEMA: &str = "heiwa.system1_shadow.report.v1";
+pub const REPORT_SCHEMA: &str = "heiwa.system1_shadow.report.v2";
 pub const QUESTION_SET: &str = "turn-route-v1";
 /// State sent to the backend: the prompt, bounded well inside TypeSafe's
 /// 32k-token allowance for state plus the longest question.
@@ -132,33 +132,123 @@ pub fn turn_route_questions() -> QuestionSet {
     .expect("static question set is valid")
 }
 
+/// Bounds on what a judge may hold. Nothing past them waits: a refused or
+/// expired turn is recorded without calling the backend, and a refusal that
+/// cannot even be queued for recording is counted and reported.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Admission {
+    /// Turns that may wait, each holding its prompt, while one is judged.
+    /// At least 1; the judge holds at most `capacity + 1` prompts.
+    pub capacity: usize,
+    /// A turn that waited longer than this is recorded, not judged. Queue
+    /// wait is budgeted here, apart from the backend's own `budget_ms`.
+    pub max_wait: Duration,
+    /// Records (metadata, never a prompt) that may wait to be written.
+    /// At least 1. Past it, a refusal is counted rather than queued.
+    pub refusal_capacity: usize,
+}
+
+impl Default for Admission {
+    fn default() -> Self {
+        Admission {
+            capacity: 8,
+            max_wait: Duration::from_secs(600),
+            refusal_capacity: 64,
+        }
+    }
+}
+
+impl Admission {
+    fn validate(&self) -> Result<()> {
+        if self.capacity == 0 {
+            return Err(anyhow!("admission capacity must be at least 1"));
+        }
+        if self.refusal_capacity == 0 {
+            return Err(anyhow!("admission refusal_capacity must be at least 1"));
+        }
+        if self.max_wait.is_zero() {
+            return Err(anyhow!("admission max_wait must be greater than zero"));
+        }
+        Ok(())
+    }
+}
+
 /// Judges finished Work-scoped turns in the background and records them.
 #[derive(Clone)]
 pub struct ShadowJudge {
     inner: Arc<Inner>,
 }
 
+/// What the judge handles own. The admission sender lives here and nowhere
+/// else, so dropping the last `ShadowJudge` closes admission: the judging
+/// task drains it and exits, which closes the record queue, and the writer
+/// drains that and exits. Neither task holds a `ShadowJudge`.
 struct Inner {
+    shared: Arc<Shared>,
+    queues: std::sync::OnceLock<Queues>,
+}
+
+struct Queues {
+    admitted: tokio::sync::mpsc::Sender<Admitted>,
+    records: tokio::sync::mpsc::Sender<Value>,
+    writer: tokio::task::AbortHandle,
+}
+
+/// Everything the worker needs, and nothing that keeps the queues open.
+struct Shared {
     /// The backend with its transport policy (no redirects; no proxy for a
     /// local backend). Nothing else sends a judgment request.
     system1: System1Client,
     budget: Duration,
     questions: QuestionSet,
     journal: JsonlTransport,
-    /// One judgment at a time: a local backend shares the machine with the
-    /// turns it shadows, and the turn stream is human-paced.
-    in_flight: tokio::sync::Semaphore,
+    admission: Admission,
+    /// Refusals that could not be queued for recording since the last
+    /// record was written. The next record carries the count.
+    unrecorded: std::sync::atomic::AtomicU64,
+}
+
+/// A finished turn waiting for its judgment.
+struct Admitted {
+    turn: ShadowTurn,
+    admitted_at: std::time::Instant,
 }
 
 impl ShadowJudge {
     pub fn new(backend: Backend, budget: Duration, evidence_dir: PathBuf) -> Result<Self> {
         Ok(ShadowJudge {
             inner: Arc::new(Inner {
-                system1: System1Client::new(backend).map_err(|error| anyhow!(error))?,
-                budget,
-                questions: turn_route_questions(),
-                journal: JsonlTransport::new(evidence_dir)?,
-                in_flight: tokio::sync::Semaphore::new(1),
+                shared: Arc::new(Shared {
+                    system1: System1Client::new(backend).map_err(|error| anyhow!(error))?,
+                    budget,
+                    questions: turn_route_questions(),
+                    journal: JsonlTransport::new(evidence_dir)?,
+                    admission: Admission::default(),
+                    unrecorded: std::sync::atomic::AtomicU64::new(0),
+                }),
+                queues: std::sync::OnceLock::new(),
+            }),
+        })
+    }
+
+    /// Replace the admission bounds. Only before the judge is shared or has
+    /// observed a turn; invalid bounds are refused, never silently adjusted.
+    pub fn with_admission(self, admission: Admission) -> Result<Self> {
+        admission.validate()?;
+        let inner = Arc::try_unwrap(self.inner)
+            .map_err(|_| anyhow!("with_admission must precede sharing the judge"))?;
+        if inner.queues.get().is_some() {
+            return Err(anyhow!(
+                "with_admission must precede the first observed turn"
+            ));
+        }
+        let mut shared = Arc::try_unwrap(inner.shared)
+            .map_err(|_| anyhow!("with_admission must precede sharing the judge"))?;
+        shared.admission = admission;
+        Ok(ShadowJudge {
+            inner: Arc::new(Inner {
+                shared: Arc::new(shared),
+                queues: std::sync::OnceLock::new(),
             }),
         })
     }
@@ -212,41 +302,29 @@ impl ShadowJudge {
 
     /// Judge one turn. Always returns a record; a skip or failure is data.
     pub async fn judge(&self, turn: &ShadowTurn) -> Value {
-        let inner = &self.inner;
-        let prompt = turn.request.raw_text.as_str();
-        let (state, truncated) = bounded(prompt, MAX_STATE_CHARS);
+        self.inner.shared.judge(turn).await
+    }
 
-        // The executor narrows the ceiling to the remaining budget before it
-        // plans; the replay must start from the same request.
-        let mut planned = turn.request.clone();
-        crate::model_calls::apply_remaining_budget(&mut planned, turn.remaining_budget_usd);
+    /// Append one record to the `system1_shadow` stream. Synchronous: it
+    /// takes the stream's append lock. The observer path never calls it on
+    /// the turn's task; its worker writes on the blocking pool.
+    pub fn record(&self, record: &Value) -> Result<()> {
+        self.inner.shared.append(record.clone())
+    }
+
+    /// The writer task's handle, once a turn has been observed. It finishes
+    /// last: after the last judge is dropped, admitted turns are judged or
+    /// expired, and every queued record is written.
+    pub fn worker(&self) -> Option<tokio::task::AbortHandle> {
+        self.inner.queues.get().map(|queues| queues.writer.clone())
+    }
+}
+
+impl Shared {
+    async fn judge(&self, turn: &ShadowTurn) -> Value {
+        let (mut record, planned) = self.base_record(turn);
         let applied_floor = planned.minimum_quality_class;
-
-        let mut record = json!({
-            "schema": RECORD_SCHEMA,
-            "recorded_at": heiwa_evidence::now_iso(),
-            "thread_id": turn.thread_id,
-            "turn_id": turn.turn_id,
-            "work_id": turn.work_id,
-            "status": Value::Null,
-            "policy": self.policy(),
-            "input": {
-                "chars": prompt.chars().count(),
-                "digest": format!("sha256:{:x}", Sha256::digest(prompt.as_bytes())),
-                "truncated": truncated,
-            },
-            "baseline": {
-                "intent": planned.intent,
-                "minimum_quality_class": applied_floor,
-                "plan": plan_summary(&planned, &turn.candidates),
-            },
-            "call": Value::Null,
-            "judgments": [],
-            "gate": Value::Null,
-            "recommendation": Value::Null,
-            "counterfactual": Value::Null,
-            "agreement": Value::Null,
-        });
+        let (state, _) = bounded(turn.request.raw_text.as_str(), MAX_STATE_CHARS);
 
         if let Some(reason) = self.skip_reason(&planned) {
             record["status"] = json!("skipped");
@@ -254,9 +332,9 @@ impl ShadowJudge {
             return record;
         }
 
-        let evaluation = inner
+        let evaluation = self
             .system1
-            .evaluate(&state, &inner.questions, inner.budget)
+            .evaluate(&state, &self.questions, self.budget)
             .await;
         record["call"] = call_summary(&evaluation);
         let Ok(decoded) = evaluation.outcome else {
@@ -326,16 +404,81 @@ impl ShadowJudge {
         record
     }
 
-    /// Append one record to the `system1_shadow` stream.
+    /// The part of every record that needs no judgment: identity, policy,
+    /// the prompt's digest, and the deterministic baseline plan. CPU only.
+    fn base_record(&self, turn: &ShadowTurn) -> (Value, ModelCallRequest) {
+        let prompt = turn.request.raw_text.as_str();
+        let (_, truncated) = bounded(prompt, MAX_STATE_CHARS);
+        // The executor narrows the ceiling to the remaining budget before it
+        // plans; the replay must start from the same request.
+        let mut planned = turn.request.clone();
+        crate::model_calls::apply_remaining_budget(&mut planned, turn.remaining_budget_usd);
+        let record = json!({
+            "schema": RECORD_SCHEMA,
+            "recorded_at": heiwa_evidence::now_iso(),
+            "thread_id": turn.thread_id,
+            "turn_id": turn.turn_id,
+            "work_id": turn.work_id,
+            "status": Value::Null,
+            "policy": self.policy(),
+            "input": {
+                "chars": prompt.chars().count(),
+                "digest": format!("sha256:{:x}", Sha256::digest(prompt.as_bytes())),
+                "truncated": truncated,
+            },
+            "baseline": {
+                "intent": planned.intent,
+                "minimum_quality_class": planned.minimum_quality_class,
+                "plan": plan_summary(&planned, &turn.candidates),
+            },
+            "call": Value::Null,
+            "judgments": [],
+            "gate": Value::Null,
+            "recommendation": Value::Null,
+            "counterfactual": Value::Null,
+            "agreement": Value::Null,
+        });
+        (record, planned)
+    }
+
+    /// A turn admission refused or gave up on: recorded, never judged.
+    fn not_admitted(&self, turn: &ShadowTurn, reason: &str, waited: Option<Duration>) -> Value {
+        let (mut record, _) = self.base_record(turn);
+        record["status"] = json!("skipped");
+        record["skip_reason"] = json!(reason);
+        record["admission"] = self.admission_json(waited);
+        record
+    }
+
+    fn admission_json(&self, waited: Option<Duration>) -> Value {
+        let admission = self.admission;
+        json!({
+            "capacity": admission.capacity,
+            "refusal_capacity": admission.refusal_capacity,
+            "max_wait_ms": admission.max_wait.as_millis() as u64,
+            "queue_wait_ms": waited.map(|waited| waited.as_millis() as u64),
+        })
+    }
+
+    /// Append one record, carrying any refusals that could not be recorded
+    /// since the last one.
     ///
     /// Records are built only from local values and validated answers; that
-    /// construction is what keeps prompt and provider text out. This screen is
-    /// a further defense, not a detector of all private text: a record that
-    /// still matches the evidence plane's sensitive-pattern rules (credential
-    /// shapes, key names, secret paths) is replaced by one that keeps the turn
-    /// accountable and drops everything else.
-    pub fn record(&self, record: &Value) -> Result<()> {
-        let persisted = if find_sensitive(record).is_some() {
+    /// construction is what keeps prompt and provider text out. The screen
+    /// here is a further defense, not a detector of all private text: a
+    /// record that still matches the evidence plane's sensitive-pattern rules
+    /// (credential shapes, key names, secret paths) is replaced by one that
+    /// keeps the turn accountable and drops everything else.
+    fn append(&self, mut record: Value) -> Result<()> {
+        use std::sync::atomic::Ordering;
+        let unrecorded = self.unrecorded.swap(0, Ordering::AcqRel);
+        if unrecorded > 0 {
+            if !record["admission"].is_object() {
+                record["admission"] = json!({});
+            }
+            record["admission"]["unrecorded_refusals_before"] = json!(unrecorded);
+        }
+        let persisted = if find_sensitive(&record).is_some() {
             json!({
                 "schema": RECORD_SCHEMA,
                 "recorded_at": heiwa_evidence::now_iso(),
@@ -344,15 +487,21 @@ impl ShadowJudge {
                 "work_id": record["work_id"],
                 "status": "withheld",
                 "withheld_reason": "sensitive_match",
+                "admission": { "unrecorded_refusals_before": unrecorded },
             })
         } else {
-            record.clone()
+            record
         };
-        self.inner.journal.journal(SHADOW_STREAM, persisted)
+        self.journal
+            .journal(SHADOW_STREAM, persisted)
+            .inspect_err(|_| {
+                // Not written: the count must survive to the next record.
+                self.unrecorded.fetch_add(unrecorded, Ordering::AcqRel);
+            })
     }
 
     fn skip_reason(&self, request: &ModelCallRequest) -> Option<&'static str> {
-        if !self.inner.system1.backend().is_remote() {
+        if !self.system1.backend().is_remote() {
             return None;
         }
         match request.privacy {
@@ -366,12 +515,11 @@ impl ShadowJudge {
     /// Everything that must be pinned together for records to be comparable:
     /// question wording, backend and model, thresholds, and the floor rule.
     fn policy(&self) -> Value {
-        let inner = &self.inner;
-        let backend = inner.system1.backend();
+        let backend = self.system1.backend();
         let thresholds = Thresholds::default();
         json!({
             "question_set": QUESTION_SET,
-            "question_digest": inner.questions.digest(),
+            "question_digest": self.questions.digest(),
             "backend": backend.name(),
             "model": backend.model(),
             "remote": backend.is_remote(),
@@ -385,30 +533,109 @@ impl ShadowJudge {
             },
             "thresholds": { "auto": thresholds.auto, "deliberate": thresholds.deliberate },
             "gating": ["capability"],
-            "budget_ms": inner.budget.as_millis() as u64,
+            "budget_ms": self.budget.as_millis() as u64,
             "floor_rule": "raise_only",
         })
     }
 }
 
+/// Write one record on the blocking pool, off the async workers: the append
+/// takes a cross-process file lock and syncs to disk. One at a time.
+async fn persist(shared: &Arc<Shared>, record: Value) {
+    let turn = record["turn_id"].as_str().unwrap_or("?").to_string();
+    let writer = shared.clone();
+    match tokio::task::spawn_blocking(move || writer.append(record)).await {
+        Ok(Ok(())) => {}
+        Ok(Err(error)) => {
+            eprintln!("heiwa: System 1 shadow record for turn {turn} was not written: {error}")
+        }
+        Err(error) => {
+            eprintln!("heiwa: System 1 shadow writer for turn {turn} failed: {error}")
+        }
+    }
+}
+
+/// Judge admitted turns in order. A turn that waited past `max_wait` is
+/// recorded without contacting the backend. Records go to the writer; this
+/// task never touches the journal, so a held stream lock cannot stall it.
+async fn judge_admitted(
+    shared: Arc<Shared>,
+    mut admitted: tokio::sync::mpsc::Receiver<Admitted>,
+    records: tokio::sync::mpsc::Sender<Value>,
+) {
+    while let Some(turn) = admitted.recv().await {
+        let waited = turn.admitted_at.elapsed();
+        let record = if waited > shared.admission.max_wait {
+            shared.not_admitted(&turn.turn, "queue_expired", Some(waited))
+        } else {
+            let mut record = shared.judge(&turn.turn).await;
+            record["admission"] = shared.admission_json(Some(waited));
+            record
+        };
+        // The prompt is released before the record waits to be written.
+        drop(turn);
+        if records.send(record).await.is_err() {
+            shared
+                .unrecorded
+                .fetch_add(1, std::sync::atomic::Ordering::AcqRel);
+        }
+    }
+}
+
+/// Write records one at a time until every sender is gone, then leave a
+/// coverage record if refusals were counted with nothing left to carry them.
+async fn write_records(shared: Arc<Shared>, mut records: tokio::sync::mpsc::Receiver<Value>) {
+    while let Some(record) = records.recv().await {
+        persist(&shared, record).await;
+    }
+    if shared.unrecorded.load(std::sync::atomic::Ordering::Acquire) > 0 {
+        persist(
+            &shared,
+            json!({ "schema": RECORD_SCHEMA, "recorded_at": heiwa_evidence::now_iso(), "status": "coverage" }),
+        )
+        .await;
+    }
+}
+
 impl ShadowObserver for ShadowJudge {
+    /// CPU only on the turn's task: no lock, no file, no await. A refused
+    /// turn's prompt is dropped here; only its metadata is queued to be
+    /// written, and if that queue is full too, the refusal is counted.
     fn observe(&self, turn: ShadowTurn) {
+        use std::sync::atomic::Ordering;
+        use tokio::sync::mpsc::error::TrySendError;
         let Ok(runtime) = tokio::runtime::Handle::try_current() else {
             return;
         };
-        let judge = self.clone();
-        runtime.spawn(async move {
-            let Ok(_permit) = judge.inner.in_flight.acquire().await else {
-                return;
-            };
-            let record = judge.judge(&turn).await;
-            if let Err(error) = judge.record(&record) {
-                eprintln!(
-                    "heiwa: System 1 shadow record for turn {} was not written: {error}",
-                    turn.turn_id
-                );
+        let shared = &self.inner.shared;
+        let queues = self.inner.queues.get_or_init(|| {
+            let (admitted, admitted_rx) = tokio::sync::mpsc::channel(shared.admission.capacity);
+            let (records, records_rx) =
+                tokio::sync::mpsc::channel(shared.admission.refusal_capacity);
+            runtime.spawn(judge_admitted(shared.clone(), admitted_rx, records.clone()));
+            let writer = runtime
+                .spawn(write_records(shared.clone(), records_rx))
+                .abort_handle();
+            Queues {
+                admitted,
+                records,
+                writer,
             }
         });
+        let admitted = Admitted {
+            turn,
+            admitted_at: std::time::Instant::now(),
+        };
+        let Err(TrySendError::Full(refused) | TrySendError::Closed(refused)) =
+            queues.admitted.try_send(admitted)
+        else {
+            return;
+        };
+        let record = shared.not_admitted(&refused.turn, "backlog", None);
+        drop(refused);
+        if queues.records.try_send(record).is_err() {
+            shared.unrecorded.fetch_add(1, Ordering::AcqRel);
+        }
     }
 }
 
@@ -848,26 +1075,91 @@ fn percentile(sorted: &[u64], fraction: f64) -> Option<u64> {
     Some(sorted[index])
 }
 
-/// Join shadow records with what their turns actually did.
-pub fn report(evidence_dir: &Path, work_id: Option<&str>) -> Result<Value> {
-    let stream = heiwa_evidence::read_stream(evidence_dir, SHADOW_STREAM)?;
-    // One record per turn; a later record for the same turn replaces an
-    // earlier one.
-    let mut records: BTreeMap<String, Value> = BTreeMap::new();
-    for event in stream.events {
-        let record = event.record;
-        if record["schema"] != RECORD_SCHEMA {
-            continue;
+/// Rebuild a JSON value with every object's keys sorted, so equal content
+/// always serializes to equal bytes whatever the map implementation keeps.
+fn canonical(value: &Value) -> Value {
+    match value {
+        Value::Object(map) => {
+            let mut keys: Vec<&String> = map.keys().collect();
+            keys.sort();
+            Value::Object(
+                keys.into_iter()
+                    .map(|key| (key.clone(), canonical(&map[key])))
+                    .collect(),
+            )
         }
-        if work_id.is_some_and(|wanted| record["work_id"] != wanted) {
-            continue;
-        }
-        if let Some(turn_id) = record["turn_id"].as_str() {
-            records.insert(turn_id.to_string(), record);
-        }
+        Value::Array(items) => Value::Array(items.iter().map(canonical).collect()),
+        other => other.clone(),
     }
-    let facts = turn_facts(evidence_dir, work_id)?;
+}
 
+fn digest_of(value: &Value) -> String {
+    let bytes = serde_json::to_vec(&canonical(value)).unwrap_or_default();
+    format!("sha256:{:x}", Sha256::digest(bytes))
+}
+
+/// `family-1.2.3`: a version id that cannot move, unlike an alias.
+fn is_pinned_version(model: &str) -> bool {
+    let Some((family, version)) = model.split_once('-') else {
+        return false;
+    };
+    !family.is_empty()
+        && family.chars().all(|c| c.is_ascii_alphanumeric())
+        && version.contains('.')
+        && version
+            .split('.')
+            .all(|part| !part.is_empty() && part.chars().all(|c| c.is_ascii_digit()))
+}
+
+/// What can safely be said about which model answered. A mutable tag or
+/// alias is never presented as an immutable identity.
+fn model_identity(record: &Value) -> Value {
+    let policy = &record["policy"];
+    let requested = policy["model"].as_str().unwrap_or("?");
+    let backend = policy["backend"].as_str().unwrap_or("?");
+    let provenance = &record["call"]["model"];
+    let legacy = policy["question_digest"].is_null()
+        || policy["answer_shape"].is_null()
+        || (record["status"] == "judged" && !provenance.is_object());
+    if legacy {
+        return json!({ "status": "legacy_unrecorded", "requested": requested });
+    }
+    match provenance["returned"].as_str() {
+        None => json!({ "status": "no_model_response", "requested": requested }),
+        Some("version") => json!({
+            "status": "resolved_by_provider",
+            "requested": requested,
+            "version": provenance["returned_version"],
+        }),
+        Some("unrecognised") => json!({
+            "status": "unrecognised",
+            "requested": requested,
+            "returned_digest": provenance["returned_digest"],
+        }),
+        Some(_) if backend == "typesafe" && is_pinned_version(requested) => json!({
+            "status": "pinned",
+            "requested": requested,
+            "version": requested,
+        }),
+        Some(_) => json!({
+            "status": "version_unresolved",
+            "requested": requested,
+            "why": if backend == "structured_llm" {
+                "a local model tag can move and no content digest was recorded"
+            } else {
+                "the requested id is an alias the provider did not resolve to a version"
+            },
+        }),
+    }
+}
+
+/// Metrics for one cohort. Nothing here is ever combined across cohorts.
+fn cohort_summary(
+    identity: Value,
+    policy: &Value,
+    records: &[(&String, &Value)],
+    facts: &BTreeMap<String, TurnFacts>,
+) -> Value {
     let mut status: BTreeMap<String, u64> = BTreeMap::new();
     let mut skip_reasons: BTreeMap<String, u64> = BTreeMap::new();
     let mut error_kinds: BTreeMap<String, u64> = BTreeMap::new();
@@ -876,12 +1168,12 @@ pub fn report(evidence_dir: &Path, work_id: Option<&str>) -> Result<Value> {
     let (mut intent_agree, mut intent_disagree) = (0u64, 0u64);
     let (mut raise_floor, mut change_model) = (0u64, 0u64);
     let mut latencies = Vec::new();
+    let mut waits = Vec::new();
     let (mut over_budget, mut input_tokens, mut output_tokens) = (0u64, 0u64, 0u64);
     let mut changed = Bucket::default();
     let mut same = Bucket::default();
-    let mut capped: BTreeMap<String, f64> = BTreeMap::new();
 
-    for (turn_id, record) in &records {
+    for (turn_id, record) in records {
         let state = record["status"].as_str().unwrap_or("unknown").to_string();
         *status.entry(state.clone()).or_default() += 1;
         if let Some(reason) = record["skip_reason"].as_str() {
@@ -893,18 +1185,14 @@ pub fn report(evidence_dir: &Path, work_id: Option<&str>) -> Result<Value> {
         if let Some(latency) = record["call"]["latency_ms"].as_u64() {
             latencies.push(latency);
         }
+        if let Some(wait) = record["admission"]["queue_wait_ms"].as_u64() {
+            waits.push(wait);
+        }
         if record["call"]["over_budget"] == true {
             over_budget += 1;
         }
         input_tokens += record["call"]["input_tokens"].as_u64().unwrap_or(0);
         output_tokens += record["call"]["output_tokens"].as_u64().unwrap_or(0);
-        if let Some(ceiling) = record["policy"]["confidence_ceiling"].as_f64() {
-            let model = record["policy"]["model"]
-                .as_str()
-                .unwrap_or("?")
-                .to_string();
-            capped.insert(model, ceiling);
-        }
         if state != "judged" {
             continue;
         }
@@ -930,19 +1218,15 @@ pub fn report(evidence_dir: &Path, work_id: Option<&str>) -> Result<Value> {
         match record["agreement"]["same_model"].as_bool() {
             Some(false) => {
                 change_model += 1;
-                changed.add(facts.get(turn_id));
+                changed.add(facts.get(*turn_id));
             }
-            Some(true) => same.add(facts.get(turn_id)),
+            Some(true) => same.add(facts.get(*turn_id)),
             None => {}
         }
     }
 
     latencies.sort_unstable();
-    let work_model_turns = facts.values().filter(|fact| fact.model_turn).count();
-    let without_record = facts
-        .iter()
-        .filter(|(turn_id, fact)| fact.model_turn && !records.contains_key(*turn_id))
-        .count();
+    waits.sort_unstable();
     let completed = changed.completed_uncancelled + same.completed_uncancelled;
     let mut execution_cost = changed.cost.clone();
     execution_cost.merge(&same.cost);
@@ -967,14 +1251,17 @@ pub fn report(evidence_dir: &Path, work_id: Option<&str>) -> Result<Value> {
         }),
     };
 
-    let mut caveats = vec![
-        "No quality labels are collected yet: completed means the turn finished with no cancel request, not that its result was accepted or correct."
-            .to_string(),
-        "Outcomes are the deterministic route's; a counterfactual was never executed.".to_string(),
-    ];
-    for (model, ceiling) in &capped {
+    let mut caveats = Vec::new();
+    if let Some(ceiling) = policy["confidence_ceiling"].as_f64() {
         caveats.push(format!(
-            "{model} is capped at confidence {ceiling}, so it can never reach the auto band; its counterfactuals show what would change if it were trusted."
+            "{} is capped at confidence {ceiling}, so it can never reach the auto band; its counterfactuals show what would change if it were trusted.",
+            policy["model"].as_str().unwrap_or("?")
+        ));
+    }
+    if identity["status"] == "version_unresolved" {
+        caveats.push(format!(
+            "Model identity is unresolved: {}.",
+            identity["why"].as_str().unwrap_or("no version")
         ));
     }
     if execution_cost.unknown > 0 {
@@ -987,25 +1274,29 @@ pub fn report(evidence_dir: &Path, work_id: Option<&str>) -> Result<Value> {
         caveats
             .push("Estimated amounts are price-list or proxy estimates, not charges.".to_string());
     }
-    if records.is_empty() {
-        caveats.push(
-            "No shadow records yet. Enable `[system1] shadow = true` in config.toml and run Work-scoped turns."
-                .to_string(),
-        );
-    }
 
-    Ok(json!({
-        "schema": REPORT_SCHEMA,
-        "work_id": work_id,
-        "question_set": QUESTION_SET,
+    json!({
+        "cohort": {
+            "id": digest_of(&json!([digest_of(policy), identity]))[7..19].to_string(),
+            "policy_digest": digest_of(policy),
+            "question_set": policy["question_set"],
+            "question_digest": policy["question_digest"],
+            "backend": policy["backend"],
+            "model": policy["model"],
+            "answer_shape": policy["answer_shape"],
+            "model_identity": identity,
+            "policy": policy,
+        },
         "records": records.len(),
         "status": status,
         "skip_reasons": skip_reasons,
         "error_kinds": error_kinds,
-        "coverage": {
-            "work_model_turns": work_model_turns,
-            "without_record": without_record,
-            "skipped_stream_lines": stream.skipped_lines,
+        "admission": {
+            "queue_wait_ms": {
+                "p50": percentile(&waits, 0.5),
+                "p95": percentile(&waits, 0.95),
+                "max": waits.last(),
+            },
         },
         "classifier": {
             "latency_ms": {
@@ -1033,10 +1324,98 @@ pub fn report(evidence_dir: &Path, work_id: Option<&str>) -> Result<Value> {
         "cost_per_completed_turn": cost_per_completed_turn,
         "classifier_input_tokens_per_completed_turn": if completed > 0 { json!(input_tokens as f64 / completed as f64) } else { Value::Null },
         "caveats": caveats,
+    })
+}
+
+/// Join shadow records with what their turns actually did, one cohort per
+/// exact policy and model identity. Cohorts are never pooled: latency, gate
+/// bands, and agreement from different policies or models are not
+/// comparable.
+pub fn report(evidence_dir: &Path, work_id: Option<&str>) -> Result<Value> {
+    let stream = heiwa_evidence::read_stream(evidence_dir, SHADOW_STREAM)?;
+    // One record per turn; a later record for the same turn replaces an
+    // earlier one. Refusals nobody could record are counted from every
+    // record that carries them, including coverage-only records.
+    let mut records: BTreeMap<String, Value> = BTreeMap::new();
+    let mut unrecorded_refusals = 0u64;
+    for event in stream.events {
+        let record = event.record;
+        if record["schema"] != RECORD_SCHEMA {
+            continue;
+        }
+        unrecorded_refusals += record["admission"]["unrecorded_refusals_before"]
+            .as_u64()
+            .unwrap_or(0);
+        if work_id.is_some_and(|wanted| record["work_id"] != wanted) {
+            continue;
+        }
+        if let Some(turn_id) = record["turn_id"].as_str() {
+            records.insert(turn_id.to_string(), record);
+        }
+    }
+    let facts = turn_facts(evidence_dir, work_id)?;
+
+    let mut cohorts: BTreeMap<String, (Value, Value, Vec<(&String, &Value)>)> = BTreeMap::new();
+    for (turn_id, record) in &records {
+        let identity = model_identity(record);
+        let key = digest_of(&json!([digest_of(&record["policy"]), identity]));
+        cohorts
+            .entry(key)
+            .or_insert_with(|| (identity, record["policy"].clone(), Vec::new()))
+            .2
+            .push((turn_id, record));
+    }
+    let cohorts: Vec<Value> = cohorts
+        .into_values()
+        .map(|(identity, policy, members)| cohort_summary(identity, &policy, &members, &facts))
+        .collect();
+
+    let work_model_turns = facts.values().filter(|fact| fact.model_turn).count();
+    let without_record = facts
+        .iter()
+        .filter(|(turn_id, fact)| fact.model_turn && !records.contains_key(*turn_id))
+        .count();
+
+    let mut caveats = vec![
+        "No quality labels are collected yet: completed means the turn finished with no cancel request, not that its result was accepted or correct."
+            .to_string(),
+        "Outcomes are the deterministic route's; a counterfactual was never executed.".to_string(),
+    ];
+    if cohorts.len() > 1 {
+        caveats.push(
+            "Cohorts are reported separately: latency, gate bands, and agreement are not comparable across them."
+                .to_string(),
+        );
+    }
+    if unrecorded_refusals > 0 {
+        caveats.push(format!(
+            "{unrecorded_refusals} refused turn(s) have no record because the refusal queue was full; they are counted, not attributed to a Work."
+        ));
+    }
+    if records.is_empty() {
+        caveats.push(
+            "No shadow records yet. Enable `[system1] shadow = true` in config.toml and run Work-scoped turns."
+                .to_string(),
+        );
+    }
+
+    Ok(json!({
+        "schema": REPORT_SCHEMA,
+        "work_id": work_id,
+        "records": records.len(),
+        "coverage": {
+            "work_model_turns": work_model_turns,
+            "without_record": without_record,
+            "unrecorded_refusals": unrecorded_refusals,
+            "skipped_stream_lines": stream.skipped_lines,
+        },
+        "cohorts": cohorts,
+        "caveats": caveats,
     }))
 }
 
-/// A short human rendering of [`report`].
+/// A short human rendering of [`report`]: one block per cohort, and nothing
+/// that pools calibration, latency, or cost across cohorts.
 pub fn render_report(report: &Value) -> String {
     let count = |value: &Value| value.as_u64().unwrap_or(0);
     let tally = |value: &Value| -> String {
@@ -1050,96 +1429,129 @@ pub fn render_report(report: &Value) -> String {
             })
             .unwrap_or_default()
     };
-    let mut lines = vec![format!(
-        "System 1 shadow — {} ({})",
-        report["work_id"].as_str().unwrap_or("all Work"),
-        report["question_set"].as_str().unwrap_or(QUESTION_SET)
-    )];
-    lines.push(format!(
-        "records {}: {}",
-        count(&report["records"]),
-        tally(&report["status"])
-    ));
-    if report["skip_reasons"]
-        .as_object()
-        .is_some_and(|map| !map.is_empty())
-    {
-        lines.push(format!("  skipped: {}", tally(&report["skip_reasons"])));
-    }
-    if report["error_kinds"]
-        .as_object()
-        .is_some_and(|map| !map.is_empty())
-    {
-        lines.push(format!("  failed: {}", tally(&report["error_kinds"])));
-    }
+    let non_empty = |value: &Value| value.as_object().is_some_and(|map| !map.is_empty());
     let coverage = &report["coverage"];
-    lines.push(format!(
-        "coverage: {} Work model turn(s), {} without a record",
-        count(&coverage["work_model_turns"]),
-        count(&coverage["without_record"])
-    ));
-    let classifier = &report["classifier"];
-    let latency = &classifier["latency_ms"];
-    if latency["p50"].is_u64() {
-        lines.push(format!(
-            "classifier: p50 {}ms, p95 {}ms, max {}ms; over budget {}; tokens {} in / {} out",
-            count(&latency["p50"]),
-            count(&latency["p95"]),
-            count(&latency["max"]),
-            count(&classifier["over_budget"]),
-            count(&classifier["input_tokens"]),
-            count(&classifier["output_tokens"])
-        ));
-    }
-    lines.push(format!("gate: {}", tally(&report["bands"])));
-    let intent = &report["intent"];
-    lines.push(format!(
-        "intent: agrees with keyword rules on {} of {}{}",
-        count(&intent["agree"]),
-        count(&intent["agree"]) + count(&intent["disagree"]),
-        if intent["pairs"]
-            .as_object()
-            .is_some_and(|map| !map.is_empty())
-        {
-            format!(" (keyword->judged: {})", tally(&intent["pairs"]))
-        } else {
-            String::new()
-        }
-    ));
-    let route = &report["route"];
-    lines.push(format!(
-        "route: would raise the floor on {}; would pick a different model on {}",
-        count(&route["would_raise_floor"]),
-        count(&route["would_change_model"])
-    ));
-    for (label, key) in [
-        ("would change model", "would_change_model"),
-        ("same route", "same_route"),
-    ] {
-        let bucket = &report["outcomes"][key];
-        lines.push(format!(
-            "outcomes ({label}): {} turn(s), {} completed, {} interrupted, {} cancel requested, {} completed without a cancel; cost {}",
-            count(&bucket["turns"]),
-            count(&bucket["completed"]),
-            count(&bucket["interrupted"]),
-            count(&bucket["cancel_requested"]),
-            count(&bucket["completed_uncancelled"]),
-            cost_phrase(&bucket["cost"])
-        ));
-    }
-    lines.push(format!(
-        "execution cost: {}",
-        cost_phrase(&report["execution_cost"])
-    ));
-    let per = &report["cost_per_completed_turn"];
-    lines.push(match (per["usd"].as_f64(), per["basis"].as_str()) {
-        (Some(usd), Some(basis)) => format!("cost per completed turn: ${usd:.4} ({basis})"),
-        (None, Some("incomplete")) => format!(
-            "cost per completed turn: unavailable ({} turn(s) with unknown cost)",
-            count(&per["turns_with_unknown_cost"])
+    let cohorts = report["cohorts"].as_array().cloned().unwrap_or_default();
+    let mut lines = vec![
+        format!(
+            "System 1 shadow — {}",
+            report["work_id"].as_str().unwrap_or("all Work")
         ),
-        _ => "cost per completed turn: no completed turns".to_string(),
-    });
+        format!(
+            "coverage: {} Work model turn(s), {} without a record, {} refused turn(s) unrecorded",
+            count(&coverage["work_model_turns"]),
+            count(&coverage["without_record"]),
+            count(&coverage["unrecorded_refusals"])
+        ),
+        format!(
+            "{} record(s) in {} cohort(s); cohorts are not comparable to one another",
+            count(&report["records"]),
+            cohorts.len()
+        ),
+    ];
+    for cohort in &cohorts {
+        let id = &cohort["cohort"];
+        let identity = &id["model_identity"];
+        lines.push(String::new());
+        lines.push(format!(
+            "cohort {} — {} {} [{}{}] · {} q:{} · {}: {} record(s)",
+            id["id"].as_str().unwrap_or("?"),
+            id["backend"].as_str().unwrap_or("?"),
+            id["model"].as_str().unwrap_or("?"),
+            identity["status"].as_str().unwrap_or("?"),
+            identity["version"]
+                .as_str()
+                .map(|version| format!(" {version}"))
+                .unwrap_or_default(),
+            id["question_set"].as_str().unwrap_or("?"),
+            id["question_digest"]
+                .as_str()
+                .and_then(|digest| digest.strip_prefix("sha256:"))
+                .map(|digest| &digest[..8.min(digest.len())])
+                .unwrap_or("?"),
+            id["answer_shape"].as_str().unwrap_or("legacy"),
+            count(&cohort["records"])
+        ));
+        lines.push(format!("  status: {}", tally(&cohort["status"])));
+        if non_empty(&cohort["skip_reasons"]) {
+            lines.push(format!("  skipped: {}", tally(&cohort["skip_reasons"])));
+        }
+        if non_empty(&cohort["error_kinds"]) {
+            lines.push(format!("  failed: {}", tally(&cohort["error_kinds"])));
+        }
+        let wait = &cohort["admission"]["queue_wait_ms"];
+        if wait["p50"].is_u64() {
+            lines.push(format!(
+                "  queue wait: p50 {}ms, p95 {}ms, max {}ms",
+                count(&wait["p50"]),
+                count(&wait["p95"]),
+                count(&wait["max"])
+            ));
+        }
+        let classifier = &cohort["classifier"];
+        let latency = &classifier["latency_ms"];
+        if latency["p50"].is_u64() {
+            lines.push(format!(
+                "  classifier: p50 {}ms, p95 {}ms, max {}ms; over budget {}; tokens {} in / {} out",
+                count(&latency["p50"]),
+                count(&latency["p95"]),
+                count(&latency["max"]),
+                count(&classifier["over_budget"]),
+                count(&classifier["input_tokens"]),
+                count(&classifier["output_tokens"])
+            ));
+        }
+        lines.push(format!("  gate: {}", tally(&cohort["bands"])));
+        let intent = &cohort["intent"];
+        lines.push(format!(
+            "  intent: agrees with keyword rules on {} of {}{}",
+            count(&intent["agree"]),
+            count(&intent["agree"]) + count(&intent["disagree"]),
+            if non_empty(&intent["pairs"]) {
+                format!(" (keyword->judged: {})", tally(&intent["pairs"]))
+            } else {
+                String::new()
+            }
+        ));
+        let route = &cohort["route"];
+        lines.push(format!(
+            "  route: would raise the floor on {}; would pick a different model on {}",
+            count(&route["would_raise_floor"]),
+            count(&route["would_change_model"])
+        ));
+        for (label, key) in [
+            ("would change model", "would_change_model"),
+            ("same route", "same_route"),
+        ] {
+            let bucket = &cohort["outcomes"][key];
+            lines.push(format!(
+                "  outcomes ({label}): {} turn(s), {} completed, {} interrupted, {} cancel requested, {} completed without a cancel; cost {}",
+                count(&bucket["turns"]),
+                count(&bucket["completed"]),
+                count(&bucket["interrupted"]),
+                count(&bucket["cancel_requested"]),
+                count(&bucket["completed_uncancelled"]),
+                cost_phrase(&bucket["cost"])
+            ));
+        }
+        lines.push(format!(
+            "  execution cost: {}",
+            cost_phrase(&cohort["execution_cost"])
+        ));
+        let per = &cohort["cost_per_completed_turn"];
+        lines.push(match (per["usd"].as_f64(), per["basis"].as_str()) {
+            (Some(usd), Some(basis)) => format!("  cost per completed turn: ${usd:.4} ({basis})"),
+            (None, Some("incomplete")) => format!(
+                "  cost per completed turn: unavailable ({} turn(s) with unknown cost)",
+                count(&per["turns_with_unknown_cost"])
+            ),
+            _ => "  cost per completed turn: no completed turns".to_string(),
+        });
+        for caveat in cohort["caveats"].as_array().into_iter().flatten() {
+            lines.push(format!("  ! {}", caveat.as_str().unwrap_or("")));
+        }
+    }
+    lines.push(String::new());
     lines.push("caveats:".to_string());
     for caveat in report["caveats"].as_array().into_iter().flatten() {
         lines.push(format!("  - {}", caveat.as_str().unwrap_or("")));
