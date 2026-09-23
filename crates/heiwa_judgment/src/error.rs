@@ -22,6 +22,9 @@ pub enum ErrorKind {
     InvalidRequest,
     /// The body arrived but does not answer the questions that were asked.
     SchemaViolation,
+    /// The endpoint answered with a redirect. Judgment requests never follow
+    /// one: the destination was classified before the state was sent.
+    Redirected,
 }
 
 impl ErrorKind {
@@ -35,6 +38,7 @@ impl ErrorKind {
             ErrorKind::Unauthorized => "unauthorized",
             ErrorKind::InvalidRequest => "invalid_request",
             ErrorKind::SchemaViolation => "schema_violation",
+            ErrorKind::Redirected => "redirected",
         }
     }
 

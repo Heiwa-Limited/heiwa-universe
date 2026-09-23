@@ -398,6 +398,29 @@ records with what the turns actually did. It never changes execution, and it
 is off unless `[system1] shadow = true`. Design:
 `docs/superpowers/specs/2026-09-23-system1-shadow-judgment-design.md`.
 
+**What the runtime path now enforces (review round 1, 2026-09-23).** Astra's
+independent review reproduced three gaps. Each is fixed and pinned by a
+regression that failed first:
+
+- *Provider text never reaches the journal.* Error messages are generated in
+  `heiwa_judgment` (no response bodies, echoed values, or transport-library
+  text); decoder diagnostics name only the question and what was offered;
+  the provider's `model` string is reduced to provenance. A final
+  sensitive-pattern screen withholds any record that still matches. It is a
+  defense for credential-shaped material, not proof that all private text is
+  detected.
+- *The classified endpoint is the only destination.* `System1Client` never
+  follows a redirect, and never sends a local backend's request through an
+  environment or system proxy. This package's `fetch` adapters refuse
+  redirects too (`redirect: "error"`).
+- *Unknown cost is never zero.* The report keeps cost truth per attempt
+  across every call of a turn, including a tool turn's follow-up. It gives a
+  total only when nothing is unknown.
+
+This package's decoder still quotes provider values in its diagnostics. It
+persists nothing; the calibration tools print to a terminal. The Rust
+runtime path persists, so there the rule is structural.
+
 **The Rust fallback answers with selections, not distributions.** The first
 live shadow run showed `gemma4` returning 1.9 of probability mass on a
 five-level scale, so the Rust structured-output backend asks only for what its

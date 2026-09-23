@@ -8,7 +8,9 @@ use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::Duration;
 
-use heiwa_judgment::backend::{Backend, FALLBACK_CONFIDENCE_CEILING, TYPESAFE_DEFAULT_MODEL};
+use heiwa_judgment::backend::{
+    Backend, Evaluation, System1Client, FALLBACK_CONFIDENCE_CEILING, TYPESAFE_DEFAULT_MODEL,
+};
 use heiwa_judgment::question::{Question, QuestionSet};
 use heiwa_judgment::{Answer, ErrorKind};
 use serde_json::{json, Value};
@@ -27,6 +29,7 @@ type Reply = Arc<dyn Fn(&Seen) -> (u16, String, Duration) + Send + Sync>;
 struct Server {
     base_url: String,
     seen: Arc<Mutex<Vec<Seen>>>,
+    location: Arc<Mutex<Option<String>>>,
 }
 
 impl Server {
@@ -35,11 +38,14 @@ impl Server {
         let base_url = format!("http://{}", listener.local_addr().unwrap());
         let seen = Arc::new(Mutex::new(Vec::new()));
         let recorded = seen.clone();
+        let location: Arc<Mutex<Option<String>>> = Arc::new(Mutex::new(None));
+        let redirect_to = location.clone();
         thread::spawn(move || {
             for stream in listener.incoming() {
                 let Ok(mut stream) = stream else { continue };
                 let recorded = recorded.clone();
                 let reply = reply.clone();
+                let redirect_to = redirect_to.clone();
                 thread::spawn(move || {
                     let mut reader = BufReader::new(stream.try_clone().unwrap());
                     let mut request_line = String::new();
@@ -77,15 +83,30 @@ impl Server {
                     recorded.lock().unwrap().push(seen.clone());
                     let (status, payload, delay) = reply(&seen);
                     thread::sleep(delay);
+                    let location = redirect_to
+                        .lock()
+                        .unwrap()
+                        .as_ref()
+                        .map(|to| format!("location: {to}\r\n"))
+                        .unwrap_or_default();
                     let response = format!(
-                        "HTTP/1.1 {status} X\r\ncontent-type: application/json\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{payload}",
+                        "HTTP/1.1 {status} X\r\ncontent-type: application/json\r\n{location}content-length: {}\r\nconnection: close\r\n\r\n{payload}",
                         payload.len()
                     );
                     let _ = stream.write_all(response.as_bytes());
                 });
             }
         });
-        Server { base_url, seen }
+        Server {
+            base_url,
+            seen,
+            location,
+        }
+    }
+
+    fn with_location(self, location: String) -> Self {
+        *self.location.lock().unwrap() = Some(location);
+        self
     }
 
     fn requests(&self) -> Vec<Seen> {
@@ -140,8 +161,12 @@ fn jev_body() -> Value {
     })
 }
 
-fn client() -> reqwest::Client {
-    reqwest::Client::new()
+/// Every call goes through `System1Client`: the transport policy under test.
+async fn evaluate(backend: Backend, state: &str, budget: Duration) -> Evaluation {
+    System1Client::new(backend)
+        .expect("client")
+        .evaluate(state, &questions(), budget)
+        .await
 }
 
 const BUDGET: Duration = Duration::from_secs(5);
@@ -153,9 +178,7 @@ async fn typesafe_sends_the_documented_request_and_decodes_the_answer() {
     let server = Server::start(reply(200, jev_body()));
     let backend = Backend::typesafe_at(&server.base_url, "sk-test", TYPESAFE_DEFAULT_MODEL);
 
-    let evaluation = backend
-        .evaluate(&client(), "I was charged twice", &questions(), BUDGET)
-        .await;
+    let evaluation = evaluate(backend, "I was charged twice", BUDGET).await;
 
     assert!(!evaluation.over_budget());
     assert_eq!(evaluation.backend, "typesafe");
@@ -178,7 +201,7 @@ async fn typesafe_sends_the_documented_request_and_decodes_the_answer() {
 async fn typesafe_without_a_key_is_not_configured_and_sends_nothing() {
     let server = Server::start(reply(200, jev_body()));
     let backend = Backend::typesafe_at(&server.base_url, "", TYPESAFE_DEFAULT_MODEL);
-    let evaluation = backend.evaluate(&client(), "x", &questions(), BUDGET).await;
+    let evaluation = evaluate(backend, "x", BUDGET).await;
     assert_eq!(
         evaluation.outcome.unwrap_err().kind,
         ErrorKind::NotConfigured
@@ -196,11 +219,7 @@ async fn documented_error_statuses_become_typed_failures() {
     ] {
         let server = Server::start(reply(status, json!({ "error": "nope" })));
         let backend = Backend::typesafe_at(&server.base_url, "sk-test", TYPESAFE_DEFAULT_MODEL);
-        let error = backend
-            .evaluate(&client(), "x", &questions(), BUDGET)
-            .await
-            .outcome
-            .unwrap_err();
+        let error = evaluate(backend, "x", BUDGET).await.outcome.unwrap_err();
         assert_eq!(error.kind, kind, "status {status}");
         assert_eq!(error.status, Some(status));
     }
@@ -213,9 +232,7 @@ async fn a_slow_provider_is_a_timeout_at_the_budget_not_a_hang() {
         (200, body.clone(), Duration::from_secs(3))
     }));
     let backend = Backend::typesafe_at(&server.base_url, "sk-test", TYPESAFE_DEFAULT_MODEL);
-    let evaluation = backend
-        .evaluate(&client(), "x", &questions(), Duration::from_millis(300))
-        .await;
+    let evaluation = evaluate(backend, "x", Duration::from_millis(300)).await;
     assert_eq!(evaluation.outcome.unwrap_err().kind, ErrorKind::Timeout);
     assert!(
         evaluation.latency_ms < 2_000,
@@ -234,11 +251,7 @@ async fn a_200_that_is_not_json_is_a_schema_violation() {
         )
     }));
     let backend = Backend::typesafe_at(&server.base_url, "sk-test", TYPESAFE_DEFAULT_MODEL);
-    let error = backend
-        .evaluate(&client(), "x", &questions(), BUDGET)
-        .await
-        .outcome
-        .unwrap_err();
+    let error = evaluate(backend, "x", BUDGET).await.outcome.unwrap_err();
     assert_eq!(error.kind, ErrorKind::SchemaViolation);
 }
 
@@ -254,11 +267,7 @@ async fn an_unreachable_endpoint_is_a_transport_failure() {
         "sk-test",
         TYPESAFE_DEFAULT_MODEL,
     );
-    let error = backend
-        .evaluate(&client(), "x", &questions(), BUDGET)
-        .await
-        .outcome
-        .unwrap_err();
+    let error = evaluate(backend, "x", BUDGET).await.outcome.unwrap_err();
     assert_eq!(error.kind, ErrorKind::Transport);
 }
 
@@ -287,14 +296,7 @@ async fn the_fallback_asks_for_a_selection_and_records_a_point_mass() {
     ));
     let backend = Backend::structured_llm(&server.base_url, "gemma4:latest");
 
-    let evaluation = backend
-        .evaluate(
-            &client(),
-            "I was charged twice for A-104",
-            &questions(),
-            BUDGET,
-        )
-        .await;
+    let evaluation = evaluate(backend, "I was charged twice for A-104", BUDGET).await;
     assert_eq!(evaluation.backend, "structured_llm");
     let decoded = evaluation.outcome.expect("decoded");
 
@@ -375,11 +377,7 @@ async fn the_fallback_does_not_repair_out_of_range_values() {
     ] {
         let server = Server::start(reply(200, completion(answers)));
         let backend = Backend::structured_llm(&server.base_url, "gemma4:latest");
-        let error = backend
-            .evaluate(&client(), "x", &questions(), BUDGET)
-            .await
-            .outcome
-            .unwrap_err();
+        let error = evaluate(backend, "x", BUDGET).await.outcome.unwrap_err();
         assert_eq!(error.kind, ErrorKind::SchemaViolation);
         assert!(
             error.message.contains(culprit),
@@ -401,11 +399,7 @@ async fn a_reasoning_model_that_hits_its_budget_is_diagnosed_as_such() {
         }),
     ));
     let backend = Backend::structured_llm(&server.base_url, "qwen3.5:9b");
-    let error = backend
-        .evaluate(&client(), "x", &questions(), BUDGET)
-        .await
-        .outcome
-        .unwrap_err();
+    let error = evaluate(backend, "x", BUDGET).await.outcome.unwrap_err();
     assert_eq!(error.kind, ErrorKind::SchemaViolation);
     assert!(error.message.contains("reasoning"), "{}", error.message);
 }
@@ -420,4 +414,137 @@ fn only_a_loopback_fallback_counts_as_local() {
         Backend::structured_llm("not a url", "m").is_remote(),
         "unknown is not local"
     );
+}
+
+// ---- review round 1 (Astra, 2026-09-23) --------------------------------------
+//
+// Provider-controlled text is data, not a diagnostic. Every `JudgmentError`
+// message is persisted by the shadow journal, so it must be generated here.
+
+const SENTINEL: &str = "SYNTHETIC_PRIVATE_PROMPT_SENTINEL";
+const CREDENTIAL: &str = "sk-synthetic-credential-0000";
+
+#[tokio::test]
+async fn provider_text_never_enters_an_error_message() {
+    let echoed = format!("{{\"detail\": \"{SENTINEL} Authorization: Bearer {CREDENTIAL}\"}}");
+    let cases: Vec<(Reply, ErrorKind)> = vec![
+        (
+            Arc::new(move |_| (422, echoed.clone(), Duration::ZERO)),
+            ErrorKind::InvalidRequest,
+        ),
+        (
+            Arc::new(|_| (200, format!("<html>{SENTINEL}</html>"), Duration::ZERO)),
+            ErrorKind::SchemaViolation,
+        ),
+        (
+            reply(200, {
+                let mut body = jev_body();
+                body["answers"]["team"]["choice"] = json!(SENTINEL);
+                body
+            }),
+            ErrorKind::SchemaViolation,
+        ),
+        (
+            reply(200, {
+                let mut body = jev_body();
+                body["answers"]["team"]["probabilities"] =
+                    json!({ SENTINEL: 0.9, "technical": 0.1 });
+                body
+            }),
+            ErrorKind::SchemaViolation,
+        ),
+        (
+            reply(200, {
+                let mut body = jev_body();
+                body["answers"]["urgency"]["legend"] =
+                    json!({ "0": "low", "1": "mid", SENTINEL: "high" });
+                body
+            }),
+            ErrorKind::SchemaViolation,
+        ),
+        (
+            reply(200, {
+                let mut body = jev_body();
+                body["answers"]["refund"]["type"] = json!(SENTINEL);
+                body
+            }),
+            ErrorKind::SchemaViolation,
+        ),
+    ];
+    for (index, (answer, kind)) in cases.into_iter().enumerate() {
+        let server = Server::start(answer);
+        let backend = Backend::typesafe_at(&server.base_url, "sk-test", TYPESAFE_DEFAULT_MODEL);
+        let error = evaluate(backend, "x", BUDGET).await.outcome.unwrap_err();
+        assert_eq!(error.kind, kind, "case {index}: {}", error.message);
+        assert!(
+            !error.message.contains(SENTINEL),
+            "case {index} leaked: {}",
+            error.message
+        );
+        assert!(
+            !error.message.contains(CREDENTIAL),
+            "case {index} leaked: {}",
+            error.message
+        );
+    }
+}
+
+#[tokio::test]
+async fn an_endpoint_credential_never_enters_a_transport_error() {
+    let port = TcpListener::bind("127.0.0.1:0")
+        .unwrap()
+        .local_addr()
+        .unwrap()
+        .port();
+    let backend = Backend::typesafe_at(
+        format!("http://operator:{SENTINEL}@127.0.0.1:{port}"),
+        "sk-test",
+        TYPESAFE_DEFAULT_MODEL,
+    );
+    let error = evaluate(backend, "x", BUDGET).await.outcome.unwrap_err();
+    assert_eq!(error.kind, ErrorKind::Transport);
+    assert!(
+        !error.message.contains(SENTINEL),
+        "leaked: {}",
+        error.message
+    );
+}
+
+/// An origin that answers every request with a redirect to `location`.
+fn redirecting(status: u16, location: String) -> Server {
+    Server::start(Arc::new(move |_| (status, String::new(), Duration::ZERO)))
+        .with_location(location)
+}
+
+#[tokio::test]
+async fn a_redirect_never_carries_the_state_to_another_origin() {
+    for (status, path) in [(307, "/v1/chat/completions"), (308, "/v1/systemone")] {
+        let elsewhere = Server::start(reply(200, jev_body()));
+        let origin = redirecting(status, format!("{}{path}", elsewhere.base_url));
+        let backend = if path.ends_with("systemone") {
+            Backend::typesafe_at(&origin.base_url, "sk-test", TYPESAFE_DEFAULT_MODEL)
+        } else {
+            Backend::structured_llm(&origin.base_url, "gemma4:latest")
+        };
+        let evaluation = evaluate(backend, SENTINEL, BUDGET).await;
+
+        assert_eq!(
+            origin.requests().len(),
+            1,
+            "{status}: the configured origin was asked"
+        );
+        assert!(
+            elsewhere.requests().is_empty(),
+            "{status}: the redirect target received {:?}",
+            elsewhere.requests()
+        );
+        let error = evaluation.outcome.unwrap_err();
+        assert_eq!(
+            error.kind,
+            ErrorKind::Redirected,
+            "{status}: {}",
+            error.message
+        );
+        assert_eq!(error.status, Some(status));
+    }
 }

@@ -11,8 +11,16 @@
 //! answer is listed in `missing` (whether that matters is policy, decided by
 //! the gate), and a malformed answer fails the whole body, because a wrong
 //! answer is more dangerous than an absent one.
+//!
+//! Messages name the question id, what was offered, and counts or numbers —
+//! never a string the provider sent. They are persisted as evidence, and a
+//! provider can echo the request into any string field. The provider's
+//! `model` string is the same kind of value: persist it only through
+//! [`model_provenance`].
 
+use serde::Serialize;
 use serde_json::{Map, Value};
+use sha2::{Digest, Sha256};
 
 use crate::error::JudgmentError;
 use crate::question::{Question, QuestionSet};
@@ -27,6 +35,7 @@ pub struct Usage {
 #[derive(Debug, Clone, PartialEq)]
 pub struct Decoded {
     /// The model id the provider says answered; `"unknown"` when absent.
+    /// Provider-controlled text: persist it through [`model_provenance`].
     pub model: String,
     /// Answers in question-set order.
     pub answers: Vec<(String, Answer)>,
@@ -104,7 +113,7 @@ fn decode_answer(id: &str, question: &Question, raw: &Value) -> Result<Answer, J
     if let Some(tag) = object.get("type") {
         if tag.as_str() != Some(question.kind()) {
             return Err(JudgmentError::schema(format!(
-                "answer {id:?} is tagged {tag} but the question is a {}",
+                "answer {id:?} is tagged with a type other than {}",
                 question.kind()
             )));
         }
@@ -116,7 +125,7 @@ fn decode_answer(id: &str, question: &Question, raw: &Value) -> Result<Answer, J
             if !options.iter().any(|(key, _)| *key == choice) {
                 let offered: Vec<&str> = options.iter().map(|(key, _)| key.as_str()).collect();
                 return Err(JudgmentError::schema(format!(
-                    "choice answer {id:?} selected {choice:?}, which was not offered ({})",
+                    "choice answer {id:?} selected an option that was not offered ({})",
                     offered.join(", ")
                 )));
             }
@@ -126,10 +135,11 @@ fn decode_answer(id: &str, question: &Question, raw: &Value) -> Result<Answer, J
                     .iter()
                     .all(|(key, _)| distribution.contains_key(key))
             {
-                let returned: Vec<&str> = distribution.keys().map(String::as_str).collect();
+                let offered: Vec<&str> = options.iter().map(|(key, _)| key.as_str()).collect();
                 return Err(JudgmentError::schema(format!(
-                    "choice answer {id:?} returned a distribution over [{}] that is not the offered options",
-                    returned.join(", ")
+                    "choice answer {id:?} returned a distribution over {} key(s) that are not exactly the offered options ({})",
+                    distribution.len(),
+                    offered.join(", ")
                 )));
             }
             let mut probabilities = Vec::with_capacity(options.len());
@@ -157,10 +167,10 @@ fn decode_answer(id: &str, question: &Question, raw: &Value) -> Result<Answer, J
                 if map.len() != level_keys.len()
                     || !level_keys.iter().all(|key| map.contains_key(key))
                 {
-                    let returned: Vec<&str> = map.keys().map(String::as_str).collect();
                     return Err(JudgmentError::schema(format!(
-                        "score answer {id:?} returned {name} for levels [{}] on a {}-level scale",
-                        returned.join(", "),
+                        "score answer {id:?} returned {name} for {} key(s) that are not exactly the levels 0..{} of a {}-level scale",
+                        map.len(),
+                        levels.len() - 1,
                         levels.len()
                     )));
                 }
@@ -269,4 +279,66 @@ fn probability(id: &str, key: &str, value: &Value) -> Result<f64, JudgmentError>
                 "answer {id:?} probability for {key:?} is not a number in [0, 1]"
             ))
         })
+}
+
+/// How a provider's own `model` string relates to the model that was asked
+/// for, in terms safe to persist.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ReturnedModel {
+    /// Exactly the requested id.
+    Requested,
+    /// A version id of the requested family, such as `jev-1.13.0` answering
+    /// for `jev-latest`.
+    Version,
+    /// Anything else. Only its digest is kept.
+    Unrecognised,
+}
+
+/// Provenance of an answer: the requested model (this process's own
+/// configuration) and what the provider claims, reduced to a value that
+/// cannot carry echoed text.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct ModelProvenance {
+    pub requested: String,
+    pub returned: ReturnedModel,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub returned_version: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub returned_digest: Option<String>,
+}
+
+/// Reduce a provider-reported model id to safe provenance. A version is
+/// accepted only as `<family>-<digits and dots>`, where the family is the
+/// requested id's own prefix, so it cannot carry prose or a credential.
+pub fn model_provenance(requested: &str, returned: &str) -> ModelProvenance {
+    let mut provenance = ModelProvenance {
+        requested: requested.to_string(),
+        returned: ReturnedModel::Unrecognised,
+        returned_version: None,
+        returned_digest: None,
+    };
+    if returned == requested {
+        provenance.returned = ReturnedModel::Requested;
+        return provenance;
+    }
+    let family = requested.split('-').next().unwrap_or("");
+    let version = returned
+        .strip_prefix(family)
+        .and_then(|rest| rest.strip_prefix('-'))
+        .filter(|_| !family.is_empty() && family.chars().all(|c| c.is_ascii_alphanumeric()));
+    let is_version = version.is_some_and(|version| {
+        !version.is_empty()
+            && version
+                .split('.')
+                .all(|part| !part.is_empty() && part.chars().all(|c| c.is_ascii_digit()))
+    });
+    if is_version {
+        provenance.returned = ReturnedModel::Version;
+        provenance.returned_version = Some(returned.to_string());
+    } else {
+        provenance.returned_digest =
+            Some(format!("sha256:{:x}", Sha256::digest(returned.as_bytes())));
+    }
+    provenance
 }

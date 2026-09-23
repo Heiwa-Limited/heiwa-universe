@@ -6,6 +6,15 @@
 //! [`JudgmentError`]; nothing here panics on a runtime condition, and nothing
 //! here retries — a caller that needs retries owns that policy and its budget.
 //!
+//! Requests go only through [`System1Client`], which owns the HTTP policy:
+//! redirects are never followed, and a backend classified local is never
+//! reached through a proxy. The endpoint [`Backend::is_remote`] judged is the
+//! only one that can receive the state.
+//!
+//! Every [`JudgmentError`] message is generated here. Response bodies,
+//! echoed values, and transport library text never enter one, because callers
+//! persist these messages as evidence.
+//!
 //! The fallback is a worse System 1 than Jev and is labelled as one. Its
 //! schema constraint honours `enum` but, measured against a live Ollama, not
 //! numeric bounds; its self-reported confidence is uncalibrated; and its
@@ -138,7 +147,7 @@ impl Backend {
         }
     }
 
-    pub async fn evaluate(
+    async fn evaluate_with(
         &self,
         client: &reqwest::Client,
         state: &str,
@@ -181,6 +190,50 @@ impl Backend {
     }
 }
 
+/// A backend and the HTTP policy every judgment request to it uses.
+///
+/// Built once per backend. The policy is the point: a redirect could carry
+/// the state to an origin the locality decision never saw, and so could a
+/// proxy taken from the environment or the OS. So redirects are never
+/// followed — a redirect is a typed [`ErrorKind::Redirected`] failure — and a
+/// local backend is always reached directly.
+#[derive(Debug, Clone)]
+pub struct System1Client {
+    backend: Backend,
+    http: reqwest::Client,
+}
+
+impl System1Client {
+    pub fn new(backend: Backend) -> Result<Self, JudgmentError> {
+        let mut builder = reqwest::Client::builder().redirect(reqwest::redirect::Policy::none());
+        if !backend.is_remote() {
+            builder = builder.no_proxy();
+        }
+        let http = builder.build().map_err(|_| {
+            JudgmentError::new(
+                ErrorKind::NotConfigured,
+                "the judgment HTTP client could not be built",
+            )
+        })?;
+        Ok(System1Client { backend, http })
+    }
+
+    pub fn backend(&self) -> &Backend {
+        &self.backend
+    }
+
+    pub async fn evaluate(
+        &self,
+        state: &str,
+        questions: &QuestionSet,
+        budget: Duration,
+    ) -> Evaluation {
+        self.backend
+            .evaluate_with(&self.http, state, questions, budget)
+            .await
+    }
+}
+
 fn endpoint(base_url: &str, path: &str) -> String {
     format!("{}{path}", base_url.trim_end_matches('/'))
 }
@@ -199,15 +252,28 @@ async fn post_json(
         .await
         .map_err(|error| transport_error(&error, what))?;
     let status = response.status();
+    if status.is_redirection() {
+        // Never followed (see `System1Client`), and the Location is not read:
+        // it is the provider's text, and following it is the risk.
+        return Err(JudgmentError::new(
+            ErrorKind::Redirected,
+            format!(
+                "{what} answered with a redirect (HTTP {}); judgment requests never follow one",
+                status.as_u16()
+            ),
+        )
+        .with_status(status.as_u16()));
+    }
     let bytes = response
         .bytes()
         .await
         .map_err(|error| transport_error(&error, what))?;
     if !status.is_success() {
-        let detail: String = String::from_utf8_lossy(&bytes).chars().take(300).collect();
+        // The status is the diagnostic. The body is the provider's text and
+        // can echo the request, so it never enters the message.
         return Err(JudgmentError::new(
             ErrorKind::for_status(status.as_u16()),
-            format!("{what} returned HTTP {}: {detail}", status.as_u16()),
+            format!("{what} returned HTTP {}", status.as_u16()),
         )
         .with_status(status.as_u16()));
     }
@@ -216,18 +282,22 @@ async fn post_json(
         .map_err(|_| JudgmentError::schema(format!("{what} returned a non-JSON 200 body")))
 }
 
+/// Classify a transport failure with a message written here. The library's
+/// own text can include the URL, and a configured URL can carry credentials.
 fn transport_error(error: &reqwest::Error, what: &str) -> JudgmentError {
-    if error.is_timeout() {
-        JudgmentError::new(
-            ErrorKind::Timeout,
-            format!("{what} exceeded its latency budget"),
+    let (kind, reason) = if error.is_timeout() {
+        (ErrorKind::Timeout, "exceeded its latency budget")
+    } else if error.is_connect() {
+        (ErrorKind::Transport, "could not be connected to")
+    } else if error.is_body() || error.is_decode() {
+        (
+            ErrorKind::Transport,
+            "sent a response body that could not be read",
         )
     } else {
-        JudgmentError::new(
-            ErrorKind::Transport,
-            format!("{what} could not be reached: {error}"),
-        )
-    }
+        (ErrorKind::Transport, "could not be reached")
+    };
+    JudgmentError::new(kind, format!("{what} {reason}"))
 }
 
 async fn typesafe(

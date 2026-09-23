@@ -101,6 +101,7 @@ foundation_a_targets=(
   operator_journal
   state
   system1_backend
+  system1_proxy
   system1_wire
 )
 

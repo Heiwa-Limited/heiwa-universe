@@ -238,9 +238,12 @@ fn assert_violation(body: serde_json::Value, needle: &str) {
 
 #[test]
 fn the_decoder_holds_answers_to_the_questions_that_were_asked() {
+    // The diagnostic names the question, never the value the provider sent.
     let mut body = documented_body();
     body["answers"]["department"]["choice"] = json!("legal");
-    assert_violation(body, "legal");
+    assert_violation(body.clone(), "department");
+    let error = decode_response(&documented_questions(), &body).unwrap_err();
+    assert!(!error.message.contains("legal"), "{}", error.message);
 
     let mut body = documented_body();
     body["answers"]["department"]["probabilities"] = json!({ "billing": 0.9, "legal": 0.1 });
@@ -321,4 +324,96 @@ fn a_distribution_rounded_to_two_decimals_still_decodes() {
     body["answers"]["department"]["probabilities"] =
         json!({ "billing": 0.33, "technical": 0.33, "sales": 0.33 });
     assert!(decode_response(&documented_questions(), &body).is_ok());
+}
+
+// ---- review round 1: provider text is not a diagnostic ----------------------
+
+const SENTINEL: &str = "SYNTHETIC_PRIVATE_PROMPT_SENTINEL";
+
+#[test]
+fn decoder_messages_never_repeat_a_provider_supplied_string() {
+    let edits: Vec<(&str, Box<dyn Fn(&mut serde_json::Value)>)> = vec![
+        (
+            "choice",
+            Box::new(|b| b["answers"]["department"]["choice"] = json!(SENTINEL)),
+        ),
+        (
+            "distribution key",
+            Box::new(|b| {
+                b["answers"]["department"]["probabilities"] =
+                    json!({ SENTINEL: 0.88, "technical": 0.12, "sales": 0.0 })
+            }),
+        ),
+        (
+            "level key",
+            Box::new(|b| {
+                b["answers"]["frustration"]["probabilities"] =
+                    json!({ "0": 0.0, "1": 0.95, SENTINEL: 0.05 })
+            }),
+        ),
+        (
+            "legend key",
+            Box::new(|b| {
+                b["answers"]["frustration"]["legend"] =
+                    json!({ "0": "Calm", "1": "Frustrated", SENTINEL: "Very angry" })
+            }),
+        ),
+        (
+            "type tag",
+            Box::new(|b| b["answers"]["is_urgent"]["type"] = json!(SENTINEL)),
+        ),
+    ];
+    for (case, edit) in edits {
+        let mut body = documented_body();
+        edit(&mut body);
+        let error = decode_response(&documented_questions(), &body).unwrap_err();
+        assert_eq!(error.kind, ErrorKind::SchemaViolation, "{case}");
+        assert!(
+            !error.message.contains(SENTINEL),
+            "{case} leaked: {}",
+            error.message
+        );
+    }
+}
+
+#[test]
+fn a_returned_model_reduces_to_safe_provenance() {
+    use heiwa_judgment::decode::{model_provenance, ReturnedModel};
+
+    let same = model_provenance("jev-1.13.0", "jev-1.13.0");
+    assert_eq!(same.returned, ReturnedModel::Requested);
+    assert!(same.returned_digest.is_none() && same.returned_version.is_none());
+
+    let pinned = model_provenance("jev-latest", "jev-1.13.0");
+    assert_eq!(pinned.returned, ReturnedModel::Version);
+    assert_eq!(pinned.returned_version.as_deref(), Some("jev-1.13.0"));
+
+    for hostile in [
+        format!("{SENTINEL} Bearer sk-synthetic-credential-0000"),
+        "jev-1.13.0 plus some prose".to_string(),
+        "gpt-4.1".to_string(),
+        "jev-".to_string(),
+        "jev-1..3".to_string(),
+    ] {
+        let provenance = model_provenance("jev-latest", &hostile);
+        assert_eq!(
+            provenance.returned,
+            ReturnedModel::Unrecognised,
+            "{hostile}"
+        );
+        assert!(provenance.returned_version.is_none(), "{hostile}");
+        // Only what came back is checked: `requested` is our own configuration.
+        let returned = serde_json::to_value(&provenance).unwrap();
+        let returned = json!({
+            "returned": returned["returned"],
+            "returned_version": returned["returned_version"],
+            "returned_digest": returned["returned_digest"],
+        })
+        .to_string();
+        assert!(
+            !returned.contains(&hostile),
+            "{hostile} survived: {returned}"
+        );
+        assert!(returned.contains("sha256:"), "{returned}");
+    }
 }

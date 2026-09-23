@@ -15,9 +15,17 @@
 //! - **Exact replay.** Baseline and counterfactual both run the executor's
 //!   own `plan_model_call` over the same request, candidates, and remaining
 //!   budget, so a difference is a difference in the floor and nothing else.
-//! - **Nothing sensitive leaves the machine.** A remote backend receives only
-//!   `standard`-privacy prompts with no sensitive match; the record carries a
-//!   digest and length of the prompt, never its text.
+//! - **A remote backend gets only what policy allows.** It receives only
+//!   `standard`-privacy prompts with no sensitive-pattern match (a pattern
+//!   screen, not a detector of all private text). Requests never follow
+//!   a redirect, and a local backend is never reached through a proxy, so the
+//!   endpoint classified is the only one that can receive the prompt.
+//! - **Nothing the provider says is persisted as text.** The record carries a
+//!   digest and length of the prompt, errors as kind, status, and a message
+//!   generated here, answers only as offered options and numbers, and the
+//!   provider's model id only as provenance. That is what keeps provider and
+//!   prompt text out; a final sensitive-pattern screen is a further defense
+//!   that withholds any record still matching credential-shaped patterns.
 //! - **A capped backend is labelled.** A structured-output fallback cannot
 //!   reach the auto band, and the record says which backend answered.
 //!
@@ -33,7 +41,8 @@ use heiwa_core::drex::{
     default_policy, plan_model_call, ModelCallCandidate, ModelCallRequest, PrivacyClass,
 };
 use heiwa_evidence::{find_sensitive, EvidenceTransport, JsonlTransport, OperatorEventType};
-use heiwa_judgment::backend::{Backend, Evaluation, TYPESAFE_DEFAULT_MODEL};
+use heiwa_judgment::backend::{Backend, Evaluation, System1Client, TYPESAFE_DEFAULT_MODEL};
+use heiwa_judgment::decode::model_provenance;
 use heiwa_judgment::question::{Question, QuestionSet};
 use heiwa_judgment::{gate_batch, Answer, Band, Policy, Thresholds};
 use serde_json::{json, Value};
@@ -130,10 +139,11 @@ pub struct ShadowJudge {
 }
 
 struct Inner {
-    backend: Backend,
+    /// The backend with its transport policy (no redirects; no proxy for a
+    /// local backend). Nothing else sends a judgment request.
+    system1: System1Client,
     budget: Duration,
     questions: QuestionSet,
-    client: reqwest::Client,
     journal: JsonlTransport,
     /// One judgment at a time: a local backend shares the machine with the
     /// turns it shadows, and the turn stream is human-paced.
@@ -144,10 +154,9 @@ impl ShadowJudge {
     pub fn new(backend: Backend, budget: Duration, evidence_dir: PathBuf) -> Result<Self> {
         Ok(ShadowJudge {
             inner: Arc::new(Inner {
-                backend,
+                system1: System1Client::new(backend).map_err(|error| anyhow!(error))?,
                 budget,
                 questions: turn_route_questions(),
-                client: reqwest::Client::builder().build()?,
                 journal: JsonlTransport::new(evidence_dir)?,
                 in_flight: tokio::sync::Semaphore::new(1),
             }),
@@ -246,8 +255,8 @@ impl ShadowJudge {
         }
 
         let evaluation = inner
-            .backend
-            .evaluate(&inner.client, &state, &inner.questions, inner.budget)
+            .system1
+            .evaluate(&state, &inner.questions, inner.budget)
             .await;
         record["call"] = call_summary(&evaluation);
         let Ok(decoded) = evaluation.outcome else {
@@ -318,12 +327,32 @@ impl ShadowJudge {
     }
 
     /// Append one record to the `system1_shadow` stream.
+    ///
+    /// Records are built only from local values and validated answers; that
+    /// construction is what keeps prompt and provider text out. This screen is
+    /// a further defense, not a detector of all private text: a record that
+    /// still matches the evidence plane's sensitive-pattern rules (credential
+    /// shapes, key names, secret paths) is replaced by one that keeps the turn
+    /// accountable and drops everything else.
     pub fn record(&self, record: &Value) -> Result<()> {
-        self.inner.journal.journal(SHADOW_STREAM, record.clone())
+        let persisted = if find_sensitive(record).is_some() {
+            json!({
+                "schema": RECORD_SCHEMA,
+                "recorded_at": heiwa_evidence::now_iso(),
+                "thread_id": record["thread_id"],
+                "turn_id": record["turn_id"],
+                "work_id": record["work_id"],
+                "status": "withheld",
+                "withheld_reason": "sensitive_match",
+            })
+        } else {
+            record.clone()
+        };
+        self.inner.journal.journal(SHADOW_STREAM, persisted)
     }
 
     fn skip_reason(&self, request: &ModelCallRequest) -> Option<&'static str> {
-        if !self.inner.backend.is_remote() {
+        if !self.inner.system1.backend().is_remote() {
             return None;
         }
         match request.privacy {
@@ -338,17 +367,18 @@ impl ShadowJudge {
     /// question wording, backend and model, thresholds, and the floor rule.
     fn policy(&self) -> Value {
         let inner = &self.inner;
+        let backend = inner.system1.backend();
         let thresholds = Thresholds::default();
         json!({
             "question_set": QUESTION_SET,
             "question_digest": inner.questions.digest(),
-            "backend": inner.backend.name(),
-            "model": inner.backend.model(),
-            "remote": inner.backend.is_remote(),
-            "confidence_ceiling": inner.backend.confidence_ceiling(),
+            "backend": backend.name(),
+            "model": backend.model(),
+            "remote": backend.is_remote(),
+            "confidence_ceiling": backend.confidence_ceiling(),
             // A capped fallback answers with one selection recorded as a point
             // mass; only a System One model returns a real distribution.
-            "answer_shape": if inner.backend.confidence_ceiling().is_some() {
+            "answer_shape": if backend.confidence_ceiling().is_some() {
                 "point_mass"
             } else {
                 "distribution"
@@ -440,12 +470,19 @@ fn call_summary(evaluation: &Evaluation) -> Value {
     });
     match &evaluation.outcome {
         Ok(decoded) => {
-            call["model_answered"] = json!(decoded.model);
+            // The provider's `model` string is its text: provenance only.
+            call["model"] = json!(model_provenance(
+                &evaluation.requested_model,
+                &decoded.model
+            ));
             call["input_tokens"] = json!(decoded.usage.input_tokens);
             call["output_tokens"] = json!(decoded.usage.output_tokens);
             call["missing"] = json!(decoded.missing);
         }
         Err(error) => {
+            call["model"] = json!({ "requested": evaluation.requested_model });
+            // Kind, status, and a message the judgment crate generated; never
+            // a response body or an echoed value.
             call["error"] = json!({
                 "kind": error.kind.as_str(),
                 "message": error.message,
@@ -475,6 +512,77 @@ fn answer_summary(answer: &Answer) -> Value {
 
 // ---- report -----------------------------------------------------------------
 
+/// What is known about one provider attempt's cost. The executor writes
+/// `cost_usd: 0.0` with `cost_truth: cannot_confirm` for an amount it cannot
+/// state; that zero is not a cost, so it is `Unknown` here.
+#[derive(Debug, Clone, Copy, PartialEq)]
+enum AttemptCost {
+    /// Nothing was charged: a model on this device.
+    KnownZero,
+    /// The provider reported the charge.
+    Exact(f64),
+    /// A price-list or proxy estimate, not a charge.
+    Estimated(f64),
+    /// No amount can be stated.
+    Unknown,
+}
+
+/// Read an amount together with its cost truth, never the amount alone.
+fn attempt_cost(payload: &Value) -> AttemptCost {
+    let amount = payload["cost_usd"]
+        .as_f64()
+        .filter(|amount| amount.is_finite() && *amount >= 0.0);
+    match (payload["cost_truth"].as_str(), amount) {
+        (Some("local_zero_cost"), Some(0.0)) => AttemptCost::KnownZero,
+        (Some("exact_provider_report"), Some(amount)) => AttemptCost::Exact(amount),
+        (Some("proxy_estimate" | "target_only"), Some(amount)) => AttemptCost::Estimated(amount),
+        _ => AttemptCost::Unknown,
+    }
+}
+
+/// A turn's execution cost: every provider attempt of every model call in
+/// the turn. A tool turn makes a follow-up call with its own call id, and its
+/// receipt carries only that call's cost, so the receipt is not the episode.
+#[derive(Debug, Default, Clone, PartialEq)]
+struct EpisodeCost {
+    known_usd: f64,
+    estimated_usd: f64,
+    exact: u64,
+    known_zero: u64,
+    estimated: u64,
+    unknown: u64,
+}
+
+impl EpisodeCost {
+    fn add(&mut self, cost: AttemptCost) {
+        match cost {
+            AttemptCost::KnownZero => self.known_zero += 1,
+            AttemptCost::Exact(amount) => {
+                self.exact += 1;
+                self.known_usd += amount;
+            }
+            AttemptCost::Estimated(amount) => {
+                self.estimated += 1;
+                self.estimated_usd += amount;
+            }
+            AttemptCost::Unknown => self.unknown += 1,
+        }
+    }
+
+    /// The turn's weakest cost truth.
+    fn truth(&self) -> AttemptCost {
+        if self.unknown > 0 {
+            AttemptCost::Unknown
+        } else if self.estimated > 0 {
+            AttemptCost::Estimated(self.estimated_usd)
+        } else if self.exact > 0 {
+            AttemptCost::Exact(self.known_usd)
+        } else {
+            AttemptCost::KnownZero
+        }
+    }
+}
+
 /// What one Work-scoped turn actually did, read from the operator journal.
 #[derive(Debug, Default)]
 struct TurnFacts {
@@ -484,7 +592,104 @@ struct TurnFacts {
     cancel_requested: bool,
     approvals_not_granted: u64,
     executed: Option<String>,
-    cost_usd: f64,
+    /// Every provider attempt, keyed by `(call_id, attempt)`: `None` once
+    /// `route_attempted` announces it, then its own cost from the
+    /// `route_completed` or `route_failed` that ends it. The per-call
+    /// cumulative fields are never read, so nothing is counted twice.
+    attempts: BTreeMap<(String, u64), Option<AttemptCost>>,
+    /// The receipt's cost, used only if a turn has no attempt events at all.
+    receipt_cost: Option<AttemptCost>,
+}
+
+impl TurnFacts {
+    fn cost(&self) -> EpisodeCost {
+        let mut episode = EpisodeCost::default();
+        if self.attempts.is_empty() {
+            // No provider was invoked: the executor announces every attempt
+            // before it calls a provider.
+            episode.add(self.receipt_cost.unwrap_or(AttemptCost::KnownZero));
+            return episode;
+        }
+        for outcome in self.attempts.values() {
+            // An attempt with no recorded end (the process stopped mid-call)
+            // may have been charged: unknown, never zero.
+            episode.add(outcome.unwrap_or(AttemptCost::Unknown));
+        }
+        episode
+    }
+}
+
+/// Execution cost over a set of turns. Turns are counted by their weakest
+/// cost truth; amounts are summed per attempt, so a turn with one unknown
+/// attempt still contributes its known charges to the subtotals.
+#[derive(Debug, Default, Clone)]
+struct CostTally {
+    turns: u64,
+    known_zero: u64,
+    exact: u64,
+    estimated: u64,
+    unknown: u64,
+    unknown_attempts: u64,
+    known_usd: f64,
+    estimated_usd: f64,
+}
+
+impl CostTally {
+    fn add(&mut self, episode: &EpisodeCost) {
+        self.turns += 1;
+        match episode.truth() {
+            AttemptCost::KnownZero => self.known_zero += 1,
+            AttemptCost::Exact(_) => self.exact += 1,
+            AttemptCost::Estimated(_) => self.estimated += 1,
+            AttemptCost::Unknown => self.unknown += 1,
+        }
+        self.unknown_attempts += episode.unknown;
+        self.known_usd += episode.known_usd;
+        self.estimated_usd += episode.estimated_usd;
+    }
+
+    fn merge(&mut self, other: &CostTally) {
+        self.turns += other.turns;
+        self.known_zero += other.known_zero;
+        self.exact += other.exact;
+        self.estimated += other.estimated;
+        self.unknown += other.unknown;
+        self.unknown_attempts += other.unknown_attempts;
+        self.known_usd += other.known_usd;
+        self.estimated_usd += other.estimated_usd;
+    }
+
+    /// A total exists only when no contributing amount is unknown.
+    fn total(&self) -> Option<f64> {
+        (self.turns > 0 && self.unknown == 0).then_some(self.known_usd + self.estimated_usd)
+    }
+
+    fn basis(&self) -> &'static str {
+        if self.turns == 0 {
+            "no_turns"
+        } else if self.unknown > 0 {
+            "incomplete"
+        } else if self.estimated > 0 {
+            "includes_estimates"
+        } else {
+            "exact"
+        }
+    }
+
+    fn to_json(&self) -> Value {
+        json!({
+            "turns": self.turns,
+            "known_zero": self.known_zero,
+            "exact": self.exact,
+            "estimated": self.estimated,
+            "unknown": self.unknown,
+            "unknown_attempts": self.unknown_attempts,
+            "known_usd": self.known_usd,
+            "estimated_usd": self.estimated_usd,
+            "total_usd": self.total(),
+            "basis": self.basis(),
+        })
+    }
 }
 
 #[derive(Debug, Default)]
@@ -496,8 +701,9 @@ struct Bucket {
     open: u64,
     cancel_requested: u64,
     approvals_not_granted: u64,
-    accepted: u64,
-    executed_cost_usd: f64,
+    /// Completed with no cancel request. Not acceptance: no labels exist.
+    completed_uncancelled: u64,
+    cost: CostTally,
     executed_models: BTreeMap<String, u64>,
     interrupt_reasons: BTreeMap<String, u64>,
 }
@@ -507,6 +713,9 @@ impl Bucket {
         self.turns += 1;
         let Some(facts) = facts else {
             self.open += 1;
+            let mut unknown = EpisodeCost::default();
+            unknown.add(AttemptCost::Unknown);
+            self.cost.add(&unknown);
             return;
         };
         match facts.terminal {
@@ -520,9 +729,9 @@ impl Bucket {
         }
         self.approvals_not_granted += facts.approvals_not_granted;
         if facts.terminal == Some("completed") && !facts.cancel_requested {
-            self.accepted += 1;
+            self.completed_uncancelled += 1;
         }
-        self.executed_cost_usd += facts.cost_usd;
+        self.cost.add(&facts.cost());
         if let Some(executed) = &facts.executed {
             *self.executed_models.entry(executed.clone()).or_default() += 1;
         }
@@ -540,8 +749,8 @@ impl Bucket {
             "open": self.open,
             "cancel_requested": self.cancel_requested,
             "approvals_not_granted": self.approvals_not_granted,
-            "accepted": self.accepted,
-            "executed_cost_usd": self.executed_cost_usd,
+            "completed_uncancelled": self.completed_uncancelled,
+            "cost": self.cost.to_json(),
             "executed_models": self.executed_models,
             "interrupt_reasons": self.interrupt_reasons,
         })
@@ -580,6 +789,27 @@ fn turn_facts(evidence_dir: &Path, work_id: Option<&str>) -> Result<BTreeMap<Str
                 {
                     entry.model_turn = true;
                 }
+                OperatorEventType::RouteAttempted => {
+                    if let (Some(call_id), Some(attempt)) =
+                        (event.call_id.as_ref(), payload["attempt"].as_u64())
+                    {
+                        entry
+                            .attempts
+                            .entry((call_id.clone(), attempt))
+                            .or_insert(None);
+                    }
+                }
+                // Deterministic routes carry no attempt; only executor
+                // attempts end with their own cost.
+                OperatorEventType::RouteCompleted | OperatorEventType::RouteFailed => {
+                    if let (Some(call_id), Some(attempt)) =
+                        (event.call_id.as_ref(), payload["attempt"].as_u64())
+                    {
+                        entry
+                            .attempts
+                            .insert((call_id.clone(), attempt), Some(attempt_cost(payload)));
+                    }
+                }
                 OperatorEventType::TurnCompleted => entry.terminal = Some("completed"),
                 OperatorEventType::TurnInterrupted => {
                     entry.terminal = Some("interrupted");
@@ -600,7 +830,7 @@ fn turn_facts(evidence_dir: &Path, work_id: Option<&str>) -> Result<BTreeMap<Str
                         (payload["provider"].as_str(), payload["model"].as_str())
                     {
                         entry.executed = Some(format!("{provider}/{model}"));
-                        entry.cost_usd += payload["cost_usd"].as_f64().unwrap_or(0.0);
+                        entry.receipt_cost = Some(attempt_cost(payload));
                     }
                 }
                 _ => {}
@@ -713,11 +943,32 @@ pub fn report(evidence_dir: &Path, work_id: Option<&str>) -> Result<Value> {
         .iter()
         .filter(|(turn_id, fact)| fact.model_turn && !records.contains_key(*turn_id))
         .count();
-    let accepted = changed.accepted + same.accepted;
-    let executed_cost = changed.executed_cost_usd + same.executed_cost_usd;
+    let completed = changed.completed_uncancelled + same.completed_uncancelled;
+    let mut execution_cost = changed.cost.clone();
+    execution_cost.merge(&same.cost);
+    let cost_per_completed_turn = match (completed, execution_cost.total()) {
+        (0, _) => json!({
+            "usd": Value::Null,
+            "basis": "no_completed_turns",
+            "completed_uncancelled": 0,
+            "turns_with_unknown_cost": execution_cost.unknown,
+        }),
+        (_, None) => json!({
+            "usd": Value::Null,
+            "basis": "incomplete",
+            "completed_uncancelled": completed,
+            "turns_with_unknown_cost": execution_cost.unknown,
+        }),
+        (_, Some(total)) => json!({
+            "usd": total / completed as f64,
+            "basis": execution_cost.basis(),
+            "completed_uncancelled": completed,
+            "turns_with_unknown_cost": 0,
+        }),
+    };
 
     let mut caveats = vec![
-        "No quality labels are collected yet: accepted means completed with no cancel request, not judged correct."
+        "No quality labels are collected yet: completed means the turn finished with no cancel request, not that its result was accepted or correct."
             .to_string(),
         "Outcomes are the deterministic route's; a counterfactual was never executed.".to_string(),
     ];
@@ -725,6 +976,16 @@ pub fn report(evidence_dir: &Path, work_id: Option<&str>) -> Result<Value> {
         caveats.push(format!(
             "{model} is capped at confidence {ceiling}, so it can never reach the auto band; its counterfactuals show what would change if it were trusted."
         ));
+    }
+    if execution_cost.unknown > 0 {
+        caveats.push(format!(
+            "{} turn(s) have no known execution cost, so there is no total and no cost per completed turn; known and estimated subtotals are shown separately.",
+            execution_cost.unknown
+        ));
+    }
+    if execution_cost.estimated > 0 {
+        caveats
+            .push("Estimated amounts are price-list or proxy estimates, not charges.".to_string());
     }
     if records.is_empty() {
         caveats.push(
@@ -768,8 +1029,9 @@ pub fn report(evidence_dir: &Path, work_id: Option<&str>) -> Result<Value> {
             "same_route": same.turns,
         },
         "outcomes": { "would_change_model": changed.to_json(), "same_route": same.to_json() },
-        "cost_per_accepted_usd": if accepted > 0 { json!(executed_cost / accepted as f64) } else { Value::Null },
-        "classifier_input_tokens_per_accepted": if accepted > 0 { json!(input_tokens as f64 / accepted as f64) } else { Value::Null },
+        "execution_cost": execution_cost.to_json(),
+        "cost_per_completed_turn": cost_per_completed_turn,
+        "classifier_input_tokens_per_completed_turn": if completed > 0 { json!(input_tokens as f64 / completed as f64) } else { Value::Null },
         "caveats": caveats,
     }))
 }
@@ -856,23 +1118,66 @@ pub fn render_report(report: &Value) -> String {
     ] {
         let bucket = &report["outcomes"][key];
         lines.push(format!(
-            "outcomes ({label}): {} turn(s), {} completed, {} interrupted, {} cancel requested, {} accepted, ${:.4}",
+            "outcomes ({label}): {} turn(s), {} completed, {} interrupted, {} cancel requested, {} completed without a cancel; cost {}",
             count(&bucket["turns"]),
             count(&bucket["completed"]),
             count(&bucket["interrupted"]),
             count(&bucket["cancel_requested"]),
-            count(&bucket["accepted"]),
-            bucket["executed_cost_usd"].as_f64().unwrap_or(0.0)
+            count(&bucket["completed_uncancelled"]),
+            cost_phrase(&bucket["cost"])
         ));
     }
-    if let Some(cost) = report["cost_per_accepted_usd"].as_f64() {
-        lines.push(format!("cost per accepted result: ${cost:.4} executed"));
-    }
+    lines.push(format!(
+        "execution cost: {}",
+        cost_phrase(&report["execution_cost"])
+    ));
+    let per = &report["cost_per_completed_turn"];
+    lines.push(match (per["usd"].as_f64(), per["basis"].as_str()) {
+        (Some(usd), Some(basis)) => format!("cost per completed turn: ${usd:.4} ({basis})"),
+        (None, Some("incomplete")) => format!(
+            "cost per completed turn: unavailable ({} turn(s) with unknown cost)",
+            count(&per["turns_with_unknown_cost"])
+        ),
+        _ => "cost per completed turn: no completed turns".to_string(),
+    });
     lines.push("caveats:".to_string());
     for caveat in report["caveats"].as_array().into_iter().flatten() {
         lines.push(format!("  - {}", caveat.as_str().unwrap_or("")));
     }
     lines.join("\n") + "\n"
+}
+
+/// One cost tally, stated with its truth: known and estimated amounts apart,
+/// unknown turns counted, and a total only when nothing is unknown.
+fn cost_phrase(cost: &Value) -> String {
+    let count = |value: &Value| value.as_u64().unwrap_or(0);
+    if count(&cost["turns"]) == 0 {
+        return "no turns".to_string();
+    }
+    let mut parts = vec![format!(
+        "${:.4} known ({} exact, {} known zero)",
+        cost["known_usd"].as_f64().unwrap_or(0.0),
+        count(&cost["exact"]),
+        count(&cost["known_zero"])
+    )];
+    if count(&cost["estimated"]) > 0 {
+        parts.push(format!(
+            "${:.4} estimated ({})",
+            cost["estimated_usd"].as_f64().unwrap_or(0.0),
+            count(&cost["estimated"])
+        ));
+    }
+    if count(&cost["unknown"]) > 0 {
+        parts.push(format!("{} unknown", count(&cost["unknown"])));
+    }
+    let total = match cost["total_usd"].as_f64() {
+        Some(total) => format!(
+            "total ${total:.4} ({})",
+            cost["basis"].as_str().unwrap_or("?")
+        ),
+        None => "total unavailable".to_string(),
+    };
+    format!("{}; {total}", parts.join(", "))
 }
 
 #[cfg(test)]

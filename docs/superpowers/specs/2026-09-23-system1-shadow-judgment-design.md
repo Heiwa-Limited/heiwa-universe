@@ -59,15 +59,27 @@ is the user's prompt only, bounded to 8,000 characters, never the response.
   builders and wire encoding, a decoder for the documented TypeSafe contract,
   and two backends — TypeSafe HTTP and an OpenAI-compatible structured-output
   fallback (Ollama) whose confidence is capped at 0.85. One attempt, bounded
-  by a wall-clock budget; every failure is a typed value.
+  by a wall-clock budget; every failure is a typed value. Requests go only
+  through `System1Client`, which never follows a redirect (a redirect is a
+  typed `redirected` failure) and reaches a local backend without any proxy,
+  so the endpoint `Backend::is_remote` classified is the only one that can
+  receive the prompt.
 - `OperatorTurnRunner::with_shadow_observer` receives the post-policy request
   and candidates of each Work-scoped model turn after its terminal event is
-  durable. The observer is called once, after the active registration is
-  released, so it cannot delay, alter, or cancel the turn.
+  durable. The observer is called once, before the turn is released, and
+  only spawns its work; a panic in it is contained, so it cannot delay,
+  alter, cancel, or strand the turn.
 - `heiwa_shell::system1_shadow` judges in a detached task, one at a time,
   and appends one `heiwa.system1_shadow.v1` record to the
-  `system1_shadow` evidence stream. The record carries a digest and length of
-  the prompt, never its text.
+  `system1_shadow` evidence stream. Nothing a provider sends is persisted as
+  text: the prompt appears only as a digest and length; errors as kind,
+  status, and a message the judgment crate generates (never a response body,
+  echoed value, or transport-library text); answers only as offered options
+  and numbers; the provider's `model` string only as provenance (requested
+  model, whether the returned id matched or is a version of it, else a
+  digest). A final sensitive-pattern screen replaces any record that still
+  matches with a `withheld` record that keeps the turn accountable; it is a
+  defense for credential-shaped material, not a detector of all private text.
 - Guards: a remote backend receives only `standard`-privacy prompts with no
   sensitive match; anything else is recorded as skipped with its reason.
 - Off by default. Enabled by `[system1] shadow = true` in
@@ -81,9 +93,20 @@ is the user's prompt only, bounded to 8,000 characters, never the response.
 journal: coverage, skips and errors, classifier latency and tokens, gate bands,
 intent agreement, would-raise-floor and would-change-model counts, and turn
 outcomes (completed, interrupted, cancel requested, approval not granted,
-executed cost) split by whether the counterfactual differed. Accepted means
-completed with no cancel request. Quality labels are not collected yet; the
-report says so rather than implying quality.
+completed without a cancel) split by whether the counterfactual differed.
+Completion is not acceptance: no quality labels exist yet, and the report
+says so.
+
+Execution cost is an episode: every provider attempt of every model call in
+the turn, read from each attempt's own `route_completed` or `route_failed`
+event and keyed by `(call_id, attempt)`. A tool turn's receipt carries only
+its follow-up call, and per-call cumulative fields are never summed. Each
+amount keeps its cost truth: known zero, exact, estimated (price-list or
+proxy), or unknown (`cannot_confirm`, a missing amount, or an attempt with no
+recorded end). A total and a cost per completed turn exist only when nothing
+is unknown; otherwise the known and estimated subtotals are shown, labelled,
+and the total is unavailable. Classifier tokens are reported apart from
+execution cost.
 
 ## Failure and restart behaviour
 

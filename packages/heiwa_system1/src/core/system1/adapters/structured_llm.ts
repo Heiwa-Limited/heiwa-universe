@@ -231,6 +231,8 @@ export function structuredLlmAdapter(options: StructuredLlmOptions): Adapter {
         response = await doFetch(url, {
           method: "POST",
           signal,
+          // Never follow: a 307/308 re-sends this body to an unclassified origin.
+          redirect: "error",
           headers: {
             "content-type": "application/json",
             ...(options.apiKey

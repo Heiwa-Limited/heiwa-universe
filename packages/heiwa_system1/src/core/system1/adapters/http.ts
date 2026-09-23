@@ -94,6 +94,8 @@ function httpAdapter(
           response = await doFetch(url, {
             method: "POST",
             signal,
+            // Never follow: a 307/308 re-sends this body to an unclassified origin.
+            redirect: "error",
             headers: {
               authorization: `Bearer ${options.apiKey}`,
               "content-type": "application/json",

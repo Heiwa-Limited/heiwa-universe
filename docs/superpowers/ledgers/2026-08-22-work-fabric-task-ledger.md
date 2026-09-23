@@ -304,6 +304,23 @@ Not established: any live Jev call, any quality label, or any evidence that
 the judgment improves routing. The five-turn sample is a smoke test of the
 loop. Promotion to an executing floor remains a separate decision.
 
+Review round 1 — Astra's independent review found these gaps in the shadow
+path, and each was reproduced with synthetic data before its repair.
+
+| # | Repaired invariant | Status | Verification |
+|---|---|---|---|
+| 5 | Provider text never reaches the shadow journal: response bodies, echoed values, invalid keys, and the returned `model` (now provenance), with a final sensitive screen | done | `cargo test -p heiwa_judgment --test system1_backend --test system1_wire`; `cargo test -p heiwa-shell --test system1_shadow -- provider_text a_returned_model withheld` |
+| 6 | A judgment request reaches only the classified endpoint: no redirects (typed `redirected`), no proxy for a local backend; TS adapters refuse redirects | done | `cargo test -p heiwa_judgment --test system1_backend --test system1_proxy`; `cargo test -p heiwa-shell --test system1_shadow redirected`; `npm --prefix packages/heiwa_system1 test` |
+| 7 | Report cost keeps its truth per attempt across every call of a turn; totals and cost per completed turn exist only when nothing is unknown; completion is not called acceptance | done | `cargo test -p heiwa-shell --test system1_shadow -- cost_truth every_stage` |
+
+Before the repair, the old report described a synthetic mixed Work as
+$0.006 total and $0.0015 per result. That Work's accurate description is an
+exact $0.004 plus an estimated $0.002, plus one unknown charge. A two-stage
+tool turn charged $0.003 and then $0.004 reported $0.004 as its exact cost.
+Mutation checks: following redirects, allowing proxies for a local backend,
+removing the record screen, persisting the raw model, or reading only the
+receipt each makes its regression fail.
+
 ## Deferred with reason
 
 - `work_node_bound` and `prior_history_digest` (WF-R15) need an enrolled mesh

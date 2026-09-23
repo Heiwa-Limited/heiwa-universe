@@ -24,7 +24,9 @@ use heiwa_shell::model_calls::ModelCallExecutor;
 use heiwa_shell::operator::{
     OperatorModelTurn, OperatorTurnRunner, OperatorTurnWork, ShadowObserver, ShadowTurn,
 };
-use heiwa_shell::system1_shadow::{report, turn_route_questions, ShadowJudge, SHADOW_STREAM};
+use heiwa_shell::system1_shadow::{
+    render_report, report, turn_route_questions, ShadowJudge, SHADOW_STREAM,
+};
 use heiwa_work::{work_created_event, WorkId};
 use serde_json::{json, Value};
 use tokio::sync::mpsc;
@@ -36,17 +38,33 @@ struct Endpoint {
     hits: Arc<AtomicUsize>,
 }
 
+/// Builds a response body from the request body it received.
+type Responder = Arc<dyn Fn(&str) -> String + Send + Sync>;
+
 fn endpoint(status: u16, body: Value) -> Endpoint {
+    let payload = body.to_string();
+    endpoint_with(status, Arc::new(move |_| payload.clone()), None)
+}
+
+/// An origin that answers every request with a redirect to `location`.
+fn redirecting(status: u16, location: String) -> Endpoint {
+    endpoint_with(status, Arc::new(|_| String::new()), Some(location))
+}
+
+fn endpoint_with(status: u16, respond: Responder, location: Option<String>) -> Endpoint {
     let listener = TcpListener::bind("127.0.0.1:0").expect("bind");
     let base_url = format!("http://{}", listener.local_addr().unwrap());
     let hits = Arc::new(AtomicUsize::new(0));
     let counted = hits.clone();
-    let payload = body.to_string();
+    let location = location
+        .map(|to| format!("location: {to}\r\n"))
+        .unwrap_or_default();
     thread::spawn(move || {
         for stream in listener.incoming() {
             let Ok(mut stream) = stream else { continue };
             counted.fetch_add(1, Ordering::SeqCst);
-            let payload = payload.clone();
+            let respond = respond.clone();
+            let location = location.clone();
             thread::spawn(move || {
                 let mut reader = BufReader::new(stream.try_clone().unwrap());
                 let mut length = 0usize;
@@ -61,8 +79,9 @@ fn endpoint(status: u16, body: Value) -> Endpoint {
                 }
                 let mut body = vec![0u8; length];
                 let _ = reader.read_exact(&mut body);
+                let payload = respond(&String::from_utf8_lossy(&body));
                 let response = format!(
-                    "HTTP/1.1 {status} X\r\ncontent-type: application/json\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{payload}",
+                    "HTTP/1.1 {status} X\r\ncontent-type: application/json\r\n{location}content-length: {}\r\nconnection: close\r\n\r\n{payload}",
                     payload.len()
                 );
                 let _ = stream.write_all(response.as_bytes());
@@ -220,7 +239,8 @@ async fn a_judged_turn_records_the_recommendation_and_its_exact_counterfactual()
     assert_eq!(record["policy"]["model"], json!("jev-1.13.0"));
     assert_eq!(record["policy"]["floor_rule"], json!("raise_only"));
     assert_eq!(record["policy"]["answer_shape"], json!("distribution"));
-    assert_eq!(record["call"]["model_answered"], json!("jev-1.13.0"));
+    assert_eq!(record["call"]["model"]["requested"], json!("jev-1.13.0"));
+    assert_eq!(record["call"]["model"]["returned"], json!("requested"));
     assert_eq!(record["call"]["input_tokens"], json!(410));
 
     // The deterministic route: floor 1, cheapest admitted model.
@@ -504,7 +524,7 @@ async fn the_report_joins_shadow_records_with_what_the_turns_actually_did() {
     let changed = &report["outcomes"]["would_change_model"];
     assert_eq!(changed["turns"], json!(1));
     assert_eq!(changed["completed"], json!(1));
-    assert_eq!(changed["accepted"], json!(1));
+    assert_eq!(changed["completed_uncancelled"], json!(1));
     assert_eq!(changed["interrupted"], json!(0));
     assert_eq!(changed["executed_models"]["ollama/small-local"], json!(1));
 
@@ -512,7 +532,7 @@ async fn the_report_joins_shadow_records_with_what_the_turns_actually_did() {
     assert_eq!(same["turns"], json!(1));
     assert_eq!(same["completed"], json!(0));
     assert_eq!(same["interrupted"], json!(1));
-    assert_eq!(same["accepted"], json!(0));
+    assert_eq!(same["completed_uncancelled"], json!(0));
 
     assert!(report["caveats"]
         .as_array()
@@ -535,4 +555,555 @@ fn a_report_over_an_empty_journal_says_so_rather_than_failing() {
     let report = report(dir.path(), None).expect("report");
     assert_eq!(report["records"], json!(0));
     assert_eq!(report["coverage"]["work_model_turns"], json!(0));
+}
+
+// ---- review round 1 (Astra, 2026-09-23) ---------------------------------------
+//
+// The invariant: nothing a provider sends — response bodies, echoed values,
+// invalid keys, its `model` string — is persisted. Checked on the raw JSONL
+// bytes the real journal wrote, not on the in-memory record.
+
+const SENTINEL: &str = "SYNTHETIC_PRIVATE_PROMPT_SENTINEL";
+const CREDENTIAL: &str = "sk-synthetic-credential-0000";
+
+fn sentinel_turn(privacy: PrivacyClass) -> ShadowTurn {
+    shadow_turn(&format!("Summarise {SENTINEL} for the notes"), 1, privacy)
+}
+
+/// Judge one turn, persist it through the real journal, and return the
+/// persisted record with the raw stream text.
+async fn judge_and_persist(judge: &ShadowJudge, turn: &ShadowTurn, dir: &Path) -> (Value, String) {
+    let record = judge.judge(turn).await;
+    judge.record(&record).expect("record");
+    let raw = std::fs::read_to_string(dir.join(format!("{SHADOW_STREAM}.jsonl"))).expect("stream");
+    let last = raw.lines().last().expect("one record");
+    let persisted = serde_json::from_str::<Value>(last).expect("envelope")["record"].clone();
+    (persisted, raw)
+}
+
+fn assert_clean(raw: &str, case: &str) {
+    assert!(
+        !raw.contains(SENTINEL),
+        "{case}: provider text reached the journal: {raw}"
+    );
+    assert!(
+        !raw.contains(CREDENTIAL),
+        "{case}: a credential reached the journal: {raw}"
+    );
+}
+
+#[tokio::test]
+async fn provider_text_never_reaches_the_shadow_journal() {
+    let hostile = format!("{SENTINEL} Authorization: Bearer {CREDENTIAL}");
+    let with_answers = |edit: &dyn Fn(&mut Value)| {
+        let mut body = jev_answers();
+        edit(&mut body);
+        body.to_string()
+    };
+    let cases: Vec<(&str, u16, String, Option<&str>)> = vec![
+        // A proxy that echoes the request (and so the prompt) in its error.
+        (
+            "echoed error body",
+            422,
+            String::new(),
+            Some("invalid_request"),
+        ),
+        (
+            "invalid choice",
+            200,
+            with_answers(&|body| body["answers"]["intent"]["choice"] = json!(hostile)),
+            Some("schema_violation"),
+        ),
+        (
+            "invalid distribution key",
+            200,
+            with_answers(&|body| {
+                body["answers"]["intent"]["probabilities"] = json!({ hostile.clone(): 1.0 })
+            }),
+            Some("schema_violation"),
+        ),
+        (
+            "echoed model on a valid answer",
+            200,
+            with_answers(&|body| body["model"] = json!(hostile)),
+            None,
+        ),
+    ];
+
+    for (case, status, body, error_kind) in cases {
+        let dir = tempfile::tempdir().unwrap();
+        let echo = body.is_empty();
+        let respond: Responder = Arc::new(move |request: &str| {
+            if echo {
+                json!({ "detail": request, "auth": format!("Bearer {CREDENTIAL}") }).to_string()
+            } else {
+                body.clone()
+            }
+        });
+        let server = endpoint_with(status, respond, None);
+        let judge = judge_at(&server.base_url, dir.path());
+
+        let (persisted, raw) =
+            judge_and_persist(&judge, &sentinel_turn(PrivacyClass::Standard), dir.path()).await;
+
+        assert_clean(&raw, case);
+        match error_kind {
+            Some(kind) => {
+                assert_eq!(persisted["status"], json!("failed"), "{case}");
+                assert_eq!(persisted["call"]["error"]["kind"], json!(kind), "{case}");
+                if status != 200 {
+                    assert_eq!(
+                        persisted["call"]["error"]["status"],
+                        json!(status),
+                        "{case}"
+                    );
+                }
+            }
+            None => {
+                assert_eq!(persisted["status"], json!("judged"), "{case}");
+                let model = &persisted["call"]["model"];
+                assert_eq!(model["requested"], json!("jev-1.13.0"), "{case}");
+                assert_eq!(model["returned"], json!("unrecognised"), "{case}");
+                assert!(
+                    model["returned_digest"]
+                        .as_str()
+                        .is_some_and(|d| d.starts_with("sha256:")),
+                    "{case}: {model}"
+                );
+            }
+        }
+    }
+}
+
+#[tokio::test]
+async fn a_returned_model_is_provenance_not_free_text() {
+    let dir = tempfile::tempdir().unwrap();
+    let server = endpoint(200, jev_answers());
+    let judge = judge_at(&server.base_url, dir.path());
+    let (persisted, _) =
+        judge_and_persist(&judge, &sentinel_turn(PrivacyClass::Standard), dir.path()).await;
+    let model = &persisted["call"]["model"];
+    assert_eq!(model["requested"], json!("jev-1.13.0"));
+    assert_eq!(model["returned"], json!("requested"), "{model}");
+    assert!(model["returned_digest"].is_null());
+}
+
+#[tokio::test]
+async fn a_local_backend_cannot_be_redirected_to_another_origin() {
+    let dir = tempfile::tempdir().unwrap();
+    let elsewhere = endpoint(200, jev_answers());
+    let origin = redirecting(307, format!("{}/v1/chat/completions", elsewhere.base_url));
+    let judge = ShadowJudge::new(
+        Backend::structured_llm(&origin.base_url, "gemma4:latest"),
+        Duration::from_secs(5),
+        dir.path().to_path_buf(),
+    )
+    .expect("judge");
+
+    // Local-only is allowed to reach a loopback backend, so the call is made.
+    let (persisted, raw) =
+        judge_and_persist(&judge, &sentinel_turn(PrivacyClass::LocalOnly), dir.path()).await;
+
+    assert_eq!(
+        origin.hits.load(Ordering::SeqCst),
+        1,
+        "the classified origin was asked"
+    );
+    assert_eq!(
+        elsewhere.hits.load(Ordering::SeqCst),
+        0,
+        "the redirect target must never receive the local-only state"
+    );
+    assert_eq!(persisted["status"], json!("failed"));
+    assert_eq!(persisted["call"]["error"]["kind"], json!("redirected"));
+    assert_eq!(persisted["call"]["error"]["status"], json!(307));
+    assert_clean(&raw, "redirect");
+}
+
+#[test]
+fn a_record_that_still_looks_sensitive_is_withheld() {
+    let dir = tempfile::tempdir().unwrap();
+    let judge = judge_at("http://127.0.0.1:9", dir.path());
+    judge
+        .record(&json!({
+            "schema": "heiwa.system1_shadow.v1",
+            "thread_id": "thread-x",
+            "turn_id": "turn-x",
+            "work_id": "work-x",
+            "status": "judged",
+            "call": { "note": format!("Authorization: Bearer {CREDENTIAL}") },
+        }))
+        .expect("record");
+
+    let raw = std::fs::read_to_string(dir.path().join(format!("{SHADOW_STREAM}.jsonl"))).unwrap();
+    assert_clean(&raw, "screen");
+    let persisted =
+        serde_json::from_str::<Value>(raw.lines().last().unwrap()).unwrap()["record"].clone();
+    assert_eq!(persisted["status"], json!("withheld"));
+    assert_eq!(
+        persisted["turn_id"],
+        json!("turn-x"),
+        "the turn stays accountable"
+    );
+}
+
+// ---- review round 1: cost truth survives aggregation ------------------------
+
+/// A provider that reports what the call cost, as an exact provider report.
+struct PricedAdapter {
+    cost_usd: f64,
+}
+
+#[async_trait]
+impl ProviderAdapter for PricedAdapter {
+    async fn send(
+        &self,
+        _model: &str,
+        _messages: &[Message],
+        stream_tx: mpsc::Sender<StreamEvent>,
+    ) -> anyhow::Result<()> {
+        stream_tx.send(StreamEvent::Token("done".into())).await?;
+        stream_tx
+            .send(StreamEvent::Done(TokenUsage {
+                cost_usd: self.cost_usd,
+                ..TokenUsage::default()
+            }))
+            .await?;
+        Ok(())
+    }
+
+    async fn interrupt(&self) -> anyhow::Result<()> {
+        Ok(())
+    }
+
+    fn supported_models(&self) -> Vec<String> {
+        vec![]
+    }
+}
+
+/// One candidate per kind of cost truth the executor can write. All are
+/// class 5, so the counterfactual never moves the route.
+fn priced(kind: &str) -> ModelCallCandidate {
+    let mut candidate = candidate(0, kind, 5, 0.0, false);
+    candidate.tier.provider = kind.to_string();
+    match kind {
+        // Known zero: a model on this device.
+        "local-zero" => {
+            candidate.locality = ExecutionLocality::OnDevice;
+            candidate.cost_truth = CostTruth::LocalZeroCost;
+            candidate.marginal_cost_usd = Some(0.0);
+        }
+        // Exact: the provider reports the charge (see `PricedAdapter`).
+        "paid-exact" => {
+            candidate.cost_truth = CostTruth::ProxyEstimate;
+            candidate.marginal_cost_usd = Some(0.001);
+        }
+        "estimated" => {
+            candidate.cost_truth = CostTruth::ProxyEstimate;
+            candidate.marginal_cost_usd = Some(0.002);
+        }
+        // Unknown: the executor records `cost_usd: 0.0` with `cannot_confirm`.
+        "unknown" => {
+            candidate.cost_truth = CostTruth::CannotConfirm;
+            candidate.marginal_cost_usd = None;
+        }
+        other => panic!("no cost kind {other}"),
+    }
+    candidate
+}
+
+#[tokio::test]
+async fn the_report_keeps_cost_truth_through_aggregation() {
+    let dir = tempfile::tempdir().unwrap();
+    let sessions = Arc::new(OperatorSessionService::new(
+        OperatorJournal::new(dir.path().to_path_buf()).unwrap(),
+    ));
+    let works: [(&str, &[&str]); 3] = [
+        ("work-known", &["local-zero", "paid-exact"]),
+        ("work-estimate", &["local-zero", "estimated"]),
+        (
+            "work-mixed",
+            &["local-zero", "paid-exact", "estimated", "unknown"],
+        ),
+    ];
+    for (work, _) in works {
+        let thread = format!("thread-{work}");
+        sessions.ensure_thread(&thread).unwrap();
+        sessions
+            .append_event(work_created_event(
+                &WorkId::parse(work).unwrap(),
+                &thread,
+                "price the turns",
+                "installation-test",
+                "2026-09-23T00:00:00Z",
+                || format!("evt-create-{work}"),
+            ))
+            .unwrap();
+    }
+
+    let server = endpoint(200, jev_answers());
+    let exact: Arc<dyn ProviderAdapter> = Arc::new(PricedAdapter { cost_usd: 0.004 });
+    let free: Arc<dyn ProviderAdapter> = Arc::new(DoneAdapter);
+    let executor = Arc::new(ModelCallExecutor::new(
+        Arc::new(move |provider: &str, _: &str| {
+            Some(if provider == "paid-exact" {
+                exact.clone()
+            } else {
+                free.clone()
+            })
+        }),
+        sessions.clone(),
+    ));
+    let runner = OperatorTurnRunner::new(sessions.clone(), executor)
+        .with_shadow_observer(Arc::new(judge_at(&server.base_url, dir.path())));
+
+    let mut total = 0;
+    for (work, kinds) in works {
+        for kind in kinds {
+            let mut request = StartTurnRequest::auto(format!("cost-{work}-{kind}"), PROMPT);
+            request.work_id = Some(work.to_string());
+            run_to_terminal(
+                &runner,
+                &format!("thread-{work}"),
+                request,
+                model_turn(PROMPT, vec![priced(kind)]),
+            )
+            .await;
+            total += 1;
+        }
+    }
+    wait_for_records(dir.path(), total).await;
+
+    // All known: one known zero, one exact charge.
+    let known = report(dir.path(), Some("work-known")).expect("report");
+    let cost = &known["execution_cost"];
+    assert_eq!(cost["known_zero"], json!(1), "{known:#}");
+    assert_eq!(cost["exact"], json!(1));
+    assert_eq!(cost["unknown"], json!(0));
+    assert!((cost["known_usd"].as_f64().unwrap() - 0.004).abs() < 1e-12);
+    assert!((cost["total_usd"].as_f64().unwrap() - 0.004).abs() < 1e-12);
+    assert_eq!(cost["basis"], json!("exact"));
+    let per = &known["cost_per_completed_turn"];
+    assert!((per["usd"].as_f64().unwrap() - 0.002).abs() < 1e-12);
+    assert_eq!(per["basis"], json!("exact"));
+    assert_eq!(
+        known["outcomes"]["same_route"]["completed_uncancelled"],
+        json!(2)
+    );
+    assert!(known["outcomes"]["same_route"].get("accepted").is_none());
+
+    // An estimate is a total, labelled as one.
+    let estimate = report(dir.path(), Some("work-estimate")).expect("report");
+    assert_eq!(estimate["execution_cost"]["estimated"], json!(1));
+    assert!(
+        (estimate["execution_cost"]["estimated_usd"]
+            .as_f64()
+            .unwrap()
+            - 0.002)
+            .abs()
+            < 1e-12
+    );
+    assert_eq!(
+        estimate["execution_cost"]["basis"],
+        json!("includes_estimates")
+    );
+    assert_eq!(
+        estimate["cost_per_completed_turn"]["basis"],
+        json!("includes_estimates")
+    );
+
+    // One unknown amount means there is no total and no cost per turn —
+    // the known and estimated subtotals stay visible, labelled.
+    let mixed = report(dir.path(), Some("work-mixed")).expect("report");
+    let cost = &mixed["execution_cost"];
+    assert_eq!(cost["unknown"], json!(1), "{mixed:#}");
+    assert!(cost["total_usd"].is_null(), "an unknown amount is not zero");
+    assert_eq!(cost["basis"], json!("incomplete"));
+    assert!((cost["known_usd"].as_f64().unwrap() - 0.004).abs() < 1e-12);
+    assert!((cost["estimated_usd"].as_f64().unwrap() - 0.002).abs() < 1e-12);
+    let per = &mixed["cost_per_completed_turn"];
+    assert!(per["usd"].is_null());
+    assert_eq!(per["basis"], json!("incomplete"));
+    assert_eq!(per["turns_with_unknown_cost"], json!(1));
+
+    let text = render_report(&mixed);
+    assert!(text.contains("unknown"), "{text}");
+    assert!(text.contains("unavailable"), "{text}");
+    // Only the caveats may mention acceptance, and only to deny it.
+    let metrics = text.split("caveats:").next().unwrap();
+    assert!(
+        !metrics.contains("accepted"),
+        "completion is not acceptance: {text}"
+    );
+    let text = render_report(&known);
+    assert!(text.contains("exact"), "{text}");
+}
+
+// ---- review round 1, addendum: a tool turn is one episode of several calls --
+//
+// The runner makes a first model call, runs the requested tool, then makes a
+// follow-up call with a new call id. Its receipt carries only the follow-up's
+// cost. Episode cost comes from every attempt's own route event.
+
+enum LaterStage {
+    Charge(f64),
+    Fail,
+}
+
+/// Asks for a tool on the first call; answers later calls as told. Every call
+/// that succeeds reports its exact charge.
+struct TwoStageAdapter {
+    calls: AtomicUsize,
+    first_cost: f64,
+    later: LaterStage,
+}
+
+#[async_trait]
+impl ProviderAdapter for TwoStageAdapter {
+    async fn send(
+        &self,
+        _model: &str,
+        _messages: &[Message],
+        stream_tx: mpsc::Sender<StreamEvent>,
+    ) -> anyhow::Result<()> {
+        let (text, cost) = match (self.calls.fetch_add(1, Ordering::SeqCst), &self.later) {
+            (0, _) => (
+                r#"{"tool_calls":[{"id":"list-1","name":"fs.list","arguments":{"path":"."}}]}"#
+                    .to_string(),
+                self.first_cost,
+            ),
+            (_, LaterStage::Charge(cost)) => ("tool complete".to_string(), *cost),
+            (_, LaterStage::Fail) => {
+                stream_tx
+                    .send(StreamEvent::Error("synthetic provider failure".into()))
+                    .await?;
+                return Ok(());
+            }
+        };
+        stream_tx.send(StreamEvent::Token(text)).await?;
+        stream_tx
+            .send(StreamEvent::Done(TokenUsage {
+                cost_usd: cost,
+                ..TokenUsage::default()
+            }))
+            .await?;
+        Ok(())
+    }
+
+    async fn interrupt(&self) -> anyhow::Result<()> {
+        Ok(())
+    }
+
+    fn supported_models(&self) -> Vec<String> {
+        vec![]
+    }
+}
+
+#[tokio::test]
+async fn the_report_counts_every_stage_of_a_tool_turn() {
+    let dir = tempfile::tempdir().unwrap();
+    let workspace = tempfile::tempdir().unwrap();
+    let sessions = Arc::new(OperatorSessionService::new(
+        OperatorJournal::new(dir.path().to_path_buf()).unwrap(),
+    ));
+    for work in ["work-two-stage", "work-later-stage-fails"] {
+        let thread = format!("thread-{work}");
+        sessions.ensure_thread(&thread).unwrap();
+        sessions
+            .append_event(work_created_event(
+                &WorkId::parse(work).unwrap(),
+                &thread,
+                "use a tool",
+                "installation-test",
+                "2026-09-23T00:00:00Z",
+                || format!("evt-create-{work}"),
+            ))
+            .unwrap();
+    }
+
+    let charged: Arc<dyn ProviderAdapter> = Arc::new(TwoStageAdapter {
+        calls: AtomicUsize::new(0),
+        first_cost: 0.003,
+        later: LaterStage::Charge(0.004),
+    });
+    let failing: Arc<dyn ProviderAdapter> = Arc::new(TwoStageAdapter {
+        calls: AtomicUsize::new(0),
+        first_cost: 0.003,
+        later: LaterStage::Fail,
+    });
+    let executor = Arc::new(ModelCallExecutor::new(
+        Arc::new(move |provider: &str, _: &str| {
+            Some(if provider == "two-stage" {
+                charged.clone()
+            } else {
+                failing.clone()
+            })
+        }),
+        sessions.clone(),
+    ));
+    let server = endpoint(200, jev_answers());
+    let runner = OperatorTurnRunner::new(sessions.clone(), executor)
+        .with_shadow_observer(Arc::new(judge_at(&server.base_url, dir.path())));
+
+    for (work, provider, cost_truth, marginal) in [
+        (
+            "work-two-stage",
+            "two-stage",
+            CostTruth::ProxyEstimate,
+            Some(0.001),
+        ),
+        // A failed attempt on a candidate with no known price has no known cost.
+        (
+            "work-later-stage-fails",
+            "two-stage-fails",
+            CostTruth::CannotConfirm,
+            None,
+        ),
+    ] {
+        let mut candidate = candidate(0, provider, 5, 0.0, false);
+        candidate.tier.provider = provider.to_string();
+        candidate.cost_truth = cost_truth;
+        candidate.marginal_cost_usd = marginal;
+        let mut turn = model_turn(PROMPT, vec![candidate]);
+        turn.tool_scope = Some(heiwa_protocol::ExecutionScope::local_default(
+            workspace.path().to_path_buf(),
+        ));
+        let mut request = StartTurnRequest::auto(format!("two-stage-{work}"), PROMPT);
+        request.work_id = Some(work.to_string());
+        run_to_terminal(&runner, &format!("thread-{work}"), request, turn).await;
+    }
+    wait_for_records(dir.path(), 2).await;
+
+    // Both calls were charged exactly; the receipt alone says 0.004.
+    let whole = report(dir.path(), Some("work-two-stage")).expect("report");
+    let cost = &whole["execution_cost"];
+    assert_eq!(
+        whole["outcomes"]["same_route"]["completed"],
+        json!(1),
+        "{whole:#}"
+    );
+    assert_eq!(cost["exact"], json!(1), "{whole:#}");
+    assert!(
+        (cost["known_usd"].as_f64().unwrap() - 0.007).abs() < 1e-12,
+        "episode cost is every call's charge: {cost}"
+    );
+    assert!((cost["total_usd"].as_f64().unwrap() - 0.007).abs() < 1e-12);
+    assert_eq!(cost["basis"], json!("exact"));
+
+    // The follow-up failed with no known cost: the first call's charge stays
+    // in the known subtotal, and there is no total.
+    let failed = report(dir.path(), Some("work-later-stage-fails")).expect("report");
+    let cost = &failed["execution_cost"];
+    assert_eq!(
+        failed["outcomes"]["same_route"]["interrupted"],
+        json!(1),
+        "{failed:#}"
+    );
+    assert_eq!(cost["unknown"], json!(1), "{failed:#}");
+    assert!(
+        (cost["known_usd"].as_f64().unwrap() - 0.003).abs() < 1e-12,
+        "an earlier charge is not erased by a later failure: {cost}"
+    );
+    assert!(cost["total_usd"].is_null());
+    assert_eq!(cost["basis"], json!("incomplete"));
 }
