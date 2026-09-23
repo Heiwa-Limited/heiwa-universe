@@ -3131,7 +3131,16 @@ fn default_model_call_runtime() -> Result<DefaultModelCallRuntime, String> {
             let resolver =
                 Arc::new(|provider: &str, model: &str| resolve_adapter(provider, model).ok());
             let executor = Arc::new(ModelCallExecutor::new(resolver, sessions.clone()));
-            let runner = Arc::new(OperatorTurnRunner::new(sessions.clone(), executor.clone()));
+            let mut runner = OperatorTurnRunner::new(sessions.clone(), executor.clone());
+            // Shadow System 1 judgment is off unless `[system1] shadow` asks
+            // for it, and it never changes execution. A bad setting disables
+            // it, loudly, rather than the runtime.
+            match heiwa_shell::system1_shadow::ShadowJudge::from_config(&heiwa_config::load()) {
+                Ok(Some(judge)) => runner = runner.with_shadow_observer(Arc::new(judge)),
+                Ok(None) => {}
+                Err(error) => eprintln!("heiwa: System 1 shadow judgment disabled: {error}"),
+            }
+            let runner = Arc::new(runner);
             Ok(DefaultModelCallRuntime {
                 executor,
                 sessions,

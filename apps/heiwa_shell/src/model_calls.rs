@@ -736,7 +736,9 @@ fn planned_payload(
     })
 }
 
-fn apply_remaining_budget(request: &mut ModelCallRequest, remaining: Option<f64>) {
+/// Narrow the request's cost ceiling to the turn's remaining budget, exactly
+/// as each attempt does before it plans. Shared so a replay plans identically.
+pub(crate) fn apply_remaining_budget(request: &mut ModelCallRequest, remaining: Option<f64>) {
     if let Some(remaining) = remaining {
         request.maximum_marginal_cost_usd = Some(
             request

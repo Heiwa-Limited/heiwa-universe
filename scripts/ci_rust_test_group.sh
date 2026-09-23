@@ -40,6 +40,7 @@ shell_api_targets=(
   app_api
   model_call_executor
   operator_api
+  system1_shadow
 )
 
 shell_state_targets=(
@@ -99,6 +100,8 @@ foundation_a_targets=(
   journal
   operator_journal
   state
+  system1_backend
+  system1_wire
 )
 
 foundation_b_targets=(

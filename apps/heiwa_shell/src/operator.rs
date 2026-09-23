@@ -172,6 +172,31 @@ pub trait OperatorToolExecutor: Send + Sync {
     )>;
 }
 
+/// The routing inputs of one finished Work-scoped model turn. `request` and
+/// `candidates` are exactly what DREX planned with — route and candidate
+/// policy already applied — so a shadow can replay the plan rather than
+/// reconstruct it.
+#[derive(Debug, Clone)]
+pub struct ShadowTurn {
+    pub thread_id: String,
+    pub turn_id: String,
+    pub work_id: String,
+    pub request: ModelCallRequest,
+    pub candidates: Vec<ModelCallCandidate>,
+    pub remaining_budget_usd: Option<f64>,
+}
+
+/// Observes finished Work-scoped model turns without taking part in them.
+///
+/// Called once per turn, after its terminal event is durable and before the
+/// runner releases it. Implementations return promptly and do their work
+/// elsewhere. A panic is contained here, so a defective observer cannot
+/// strand the turn; nothing an observer does can change routing, execution,
+/// or the turn's outcome.
+pub trait ShadowObserver: Send + Sync {
+    fn observe(&self, turn: ShadowTurn);
+}
+
 #[derive(Default)]
 struct AgenticToolExecutor;
 
@@ -714,6 +739,7 @@ pub struct OperatorTurnRunner {
     artifacts: Arc<dyn OperatorArtifactStore>,
     approvals: Arc<dyn OperatorApprovalService>,
     tools: Arc<dyn OperatorToolExecutor>,
+    shadow: Option<Arc<dyn ShadowObserver>>,
 }
 
 #[derive(Clone, Debug)]
@@ -740,6 +766,7 @@ impl OperatorTurnRunner {
             artifacts: Arc::new(LocalArtifactStore::default()),
             approvals: Arc::new(DrexApprovalService),
             tools: Arc::new(AgenticToolExecutor),
+            shadow: None,
         }
     }
 
@@ -755,6 +782,13 @@ impl OperatorTurnRunner {
 
     pub fn with_tool_executor(mut self, tools: Arc<dyn OperatorToolExecutor>) -> Self {
         self.tools = tools;
+        self
+    }
+
+    /// Offer every finished Work-scoped model turn to `observer`. See
+    /// [`ShadowObserver`] for what the observer may and may not do.
+    pub fn with_shadow_observer(mut self, observer: Arc<dyn ShadowObserver>) -> Self {
+        self.shadow = Some(observer);
         self
     }
 
@@ -979,6 +1013,7 @@ impl OperatorTurnRunner {
                 prepared = &mut preparation => prepared,
             }
         };
+        let mut shadow_turn = None;
         let result = match prepared {
             Ok(work) => {
                 self.run_turn(
@@ -989,6 +1024,7 @@ impl OperatorTurnRunner {
                     work,
                     cancel.clone(),
                     &direct_frames,
+                    &mut shadow_turn,
                 )
                 .await
             }
@@ -1029,6 +1065,13 @@ impl OperatorTurnRunner {
                 .await;
             }
         }
+        // The turn is terminal and durable. Observe before release, so a turn
+        // that has left the active registry has already been offered.
+        if let (Some(observer), Some(turn)) = (self.shadow.as_ref(), shadow_turn) {
+            let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                observer.observe(turn);
+            }));
+        }
         self.active.remove(&turn_id);
         if let Ok(mut active_scopes) = self.active_scopes.lock() {
             active_scopes.remove(&turn_id);
@@ -1044,6 +1087,7 @@ impl OperatorTurnRunner {
         work: OperatorTurnWork,
         cancel: watch::Receiver<bool>,
         direct_frames: &mpsc::Sender<OperatorStreamFrame>,
+        shadow_turn: &mut Option<ShadowTurn>,
     ) -> Result<()> {
         let mut cursor = self
             .append_and_publish(
@@ -1128,6 +1172,18 @@ impl OperatorTurnRunner {
                 model.request.work_id = work_id.map(str::to_string);
                 model.remaining_budget_usd =
                     stricter_budget(route_policy.turn_budget_usd, model.remaining_budget_usd);
+                // Captured before execution so failed and cancelled turns are
+                // observed too; cloned only when an observer is configured.
+                if let (Some(work_id), Some(_)) = (work_id, self.shadow.as_ref()) {
+                    *shadow_turn = Some(ShadowTurn {
+                        thread_id: thread_id.to_string(),
+                        turn_id: turn_id.to_string(),
+                        work_id: work_id.to_string(),
+                        request: model.request.clone(),
+                        candidates: model.candidates.clone(),
+                        remaining_budget_usd: model.remaining_budget_usd,
+                    });
+                }
                 let result = self
                     .execute_model(
                         thread_id,
@@ -4274,5 +4330,226 @@ mod tests {
         assert_eq!(executor.calls.load(Ordering::SeqCst), 1);
         std::fs::remove_dir(&stream).unwrap();
         std::fs::rename(&backup, &stream).unwrap();
+    }
+
+    // ---- shadow observation ----------------------------------------------
+
+    /// Records what the runner hands a shadow observer, and whether the turn
+    /// was already terminal in the journal at that moment.
+    #[derive(Default)]
+    struct RecordingShadow {
+        sessions: Mutex<Option<Arc<OperatorSessionService>>>,
+        seen: Mutex<Vec<(super::ShadowTurn, bool)>>,
+    }
+
+    impl super::ShadowObserver for RecordingShadow {
+        fn observe(&self, turn: super::ShadowTurn) {
+            let terminal = self
+                .sessions
+                .lock()
+                .unwrap()
+                .as_ref()
+                .and_then(|sessions| sessions.thread(&turn.thread_id).ok())
+                .is_some_and(|thread| {
+                    thread
+                        .turns
+                        .iter()
+                        .any(|view| view.turn_id == turn.turn_id && view.status != "open")
+                });
+            self.seen.lock().unwrap().push((turn, terminal));
+        }
+    }
+
+    struct PanickingShadow;
+
+    impl super::ShadowObserver for PanickingShadow {
+        fn observe(&self, _turn: super::ShadowTurn) {
+            panic!("a defective shadow observer");
+        }
+    }
+
+    struct FailingExecutor;
+
+    #[async_trait]
+    impl OperatorModelExecutor for FailingExecutor {
+        async fn execute(
+            &self,
+            _execution: ModelCallExecution,
+        ) -> Result<ModelCallResult, ModelCallError> {
+            Err(ModelCallError::Planning("no admitted candidate".into()))
+        }
+    }
+
+    fn shadow_for(sessions: &Arc<OperatorSessionService>) -> Arc<RecordingShadow> {
+        Arc::new(RecordingShadow {
+            sessions: Mutex::new(Some(sessions.clone())),
+            ..RecordingShadow::default()
+        })
+    }
+
+    /// The runner releases a turn only after observing it, so once the turn
+    /// has left the active registry any observation has already happened.
+    async fn wait_until_released(runner: &OperatorTurnRunner, turn_id: &str) {
+        for _ in 0..200 {
+            if !runner.active_turns().contains(turn_id) {
+                return;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(5)).await;
+        }
+        panic!("turn {turn_id} was never released");
+    }
+
+    #[tokio::test]
+    async fn operator_shadow_sees_a_work_scoped_model_turn_after_it_is_terminal() {
+        let dir = tempfile::tempdir().unwrap();
+        let sessions = service(dir.path());
+        create_work(&sessions, "work-shadow", "thread-shadow");
+        let shadow = shadow_for(&sessions);
+        let runner =
+            OperatorTurnRunner::new(sessions.clone(), Arc::new(RecordingExecutor::default()))
+                .with_shadow_observer(shadow.clone());
+        let mut request = StartTurnRequest::auto("shadow-work-turn", "refactor the parser");
+        request.work_id = Some("work-shadow".to_string());
+        request.route_policy.minimum_quality_class = 2;
+        let mut turn = model_turn();
+        turn.remaining_budget_usd = Some(0.25);
+        turn.candidates = vec![ModelCallCandidate {
+            tier: ModelTier {
+                id: 7,
+                model_id: "small".into(),
+                provider: "ollama".into(),
+                capability_class: 2,
+                ..ModelTier::default()
+            },
+            locality: ExecutionLocality::OnDevice,
+            connected: true,
+            adapter_capable: true,
+            quota_available: true,
+            marginal_cost_usd: Some(0.0),
+            cost_truth: CostTruth::LocalZeroCost,
+        }];
+
+        let mut handle = runner
+            .submit(
+                "thread-shadow",
+                request,
+                OperatorTurnWork::Model(Box::new(turn)),
+            )
+            .unwrap();
+        wait_for_terminal(&mut handle).await;
+        wait_until_released(&runner, &handle.turn_id).await;
+
+        let seen = shadow.seen.lock().unwrap();
+        assert_eq!(seen.len(), 1, "exactly one observation per turn");
+        let (observed, terminal) = &seen[0];
+        assert!(
+            *terminal,
+            "observed only after the terminal event is durable"
+        );
+        assert_eq!(observed.turn_id, handle.turn_id);
+        assert_eq!(observed.thread_id, "thread-shadow");
+        assert_eq!(observed.work_id, "work-shadow");
+        // The inputs DREX actually planned with: route policy applied.
+        assert_eq!(observed.request.minimum_quality_class, 2);
+        assert_eq!(observed.request.work_id.as_deref(), Some("work-shadow"));
+        assert_eq!(observed.request.turn_id, handle.turn_id);
+        assert_eq!(observed.remaining_budget_usd, Some(0.25));
+        assert_eq!(observed.candidates.len(), 1);
+    }
+
+    #[tokio::test]
+    async fn operator_shadow_is_not_offered_turns_outside_work_or_without_a_model() {
+        let dir = tempfile::tempdir().unwrap();
+        let sessions = service(dir.path());
+        create_work(&sessions, "work-quiet", "thread-quiet");
+        let shadow = shadow_for(&sessions);
+        let runner =
+            OperatorTurnRunner::new(sessions.clone(), Arc::new(RecordingExecutor::default()))
+                .with_shadow_observer(shadow.clone());
+
+        let mut unscoped = runner
+            .submit(
+                "default",
+                StartTurnRequest::auto("shadow-unscoped", "hello"),
+                OperatorTurnWork::Model(Box::new(model_turn())),
+            )
+            .unwrap();
+        wait_for_terminal(&mut unscoped).await;
+        wait_until_released(&runner, &unscoped.turn_id).await;
+
+        let mut request = StartTurnRequest::auto("shadow-deterministic", "status");
+        request.work_id = Some("work-quiet".to_string());
+        let mut deterministic = runner
+            .submit(
+                "thread-quiet",
+                request,
+                OperatorTurnWork::Deterministic {
+                    response: "ok".into(),
+                    route: json!({"mode": "deterministic"}),
+                    done: json!({"mode": "deterministic"}),
+                },
+            )
+            .unwrap();
+        wait_for_terminal(&mut deterministic).await;
+        wait_until_released(&runner, &deterministic.turn_id).await;
+
+        assert!(shadow.seen.lock().unwrap().is_empty());
+    }
+
+    #[tokio::test]
+    async fn operator_shadow_sees_a_turn_whose_execution_failed() {
+        let dir = tempfile::tempdir().unwrap();
+        let sessions = service(dir.path());
+        create_work(&sessions, "work-fails", "thread-fails");
+        let shadow = shadow_for(&sessions);
+        let runner = OperatorTurnRunner::new(sessions.clone(), Arc::new(FailingExecutor))
+            .with_shadow_observer(shadow.clone());
+        let mut request = StartTurnRequest::auto("shadow-failed", "do the thing");
+        request.work_id = Some("work-fails".to_string());
+
+        let mut handle = runner
+            .submit(
+                "thread-fails",
+                request,
+                OperatorTurnWork::Model(Box::new(model_turn())),
+            )
+            .unwrap();
+        wait_for_terminal(&mut handle).await;
+        wait_until_released(&runner, &handle.turn_id).await;
+
+        let seen = shadow.seen.lock().unwrap();
+        assert_eq!(
+            seen.len(),
+            1,
+            "failures are the turns a shadow most needs to see"
+        );
+        assert!(seen[0].1, "observed after the interruption is durable");
+    }
+
+    #[tokio::test]
+    async fn operator_a_panicking_shadow_cannot_strand_the_turn_or_the_runner() {
+        let dir = tempfile::tempdir().unwrap();
+        let sessions = service(dir.path());
+        create_work(&sessions, "work-panic", "thread-panic");
+        let runner =
+            OperatorTurnRunner::new(sessions.clone(), Arc::new(RecordingExecutor::default()))
+                .with_shadow_observer(Arc::new(PanickingShadow));
+
+        for key in ["shadow-panic-1", "shadow-panic-2"] {
+            let mut request = StartTurnRequest::auto(key, "hello");
+            request.work_id = Some("work-panic".to_string());
+            let mut handle = runner
+                .submit(
+                    "thread-panic",
+                    request,
+                    OperatorTurnWork::Model(Box::new(model_turn())),
+                )
+                .unwrap();
+            let frames = wait_for_terminal(&mut handle).await;
+            assert!(frames.last().is_some_and(|frame| frame.is_terminal()));
+            wait_until_released(&runner, &handle.turn_id).await;
+        }
+        let thread = sessions.thread("thread-panic").unwrap();
+        assert!(thread.turns.iter().all(|turn| turn.status == "completed"));
     }
 }
