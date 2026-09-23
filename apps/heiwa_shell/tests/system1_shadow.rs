@@ -219,6 +219,7 @@ async fn a_judged_turn_records_the_recommendation_and_its_exact_counterfactual()
     assert_eq!(record["policy"]["question_set"], json!("turn-route-v1"));
     assert_eq!(record["policy"]["model"], json!("jev-1.13.0"));
     assert_eq!(record["policy"]["floor_rule"], json!("raise_only"));
+    assert_eq!(record["policy"]["answer_shape"], json!("distribution"));
     assert_eq!(record["call"]["model_answered"], json!("jev-1.13.0"));
     assert_eq!(record["call"]["input_tokens"], json!(410));
 

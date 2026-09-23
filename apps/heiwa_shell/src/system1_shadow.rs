@@ -346,6 +346,13 @@ impl ShadowJudge {
             "model": inner.backend.model(),
             "remote": inner.backend.is_remote(),
             "confidence_ceiling": inner.backend.confidence_ceiling(),
+            // A capped fallback answers with one selection recorded as a point
+            // mass; only a System One model returns a real distribution.
+            "answer_shape": if inner.backend.confidence_ceiling().is_some() {
+                "point_mass"
+            } else {
+                "distribution"
+            },
             "thresholds": { "auto": thresholds.auto, "deliberate": thresholds.deliberate },
             "gating": ["capability"],
             "budget_ms": inner.budget.as_millis() as u64,
