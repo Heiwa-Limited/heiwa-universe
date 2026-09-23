@@ -382,15 +382,38 @@ economics before it invalidates correctness.
 
 Classified **Execution** under `HEIWA.md`'s three-plane rule.
 
-Two seams that are deliberately not built yet, to avoid overstating maturity:
+**The runtime engine is Rust.** Provider credentials live in Rust, so
+`crates/heiwa_judgment` carries the engine the runtime uses: question
+builders, a decoder for TypeSafe's documented contract, the TypeSafe and
+structured-output backends, and the authoritative gate. This package remains
+the calibration, doctor, and demonstration tooling around it.
 
-- **DREX.** `crates/heiwa_drex` already chooses a provider by capability floor
-  and price. A System One tier belongs in that ladder as the cheapest rung
-  above local, and `Choice` is a natural fit for DREX's own routing decision.
-  Not wired — that is a Rust-side change with its own design.
-- **Evidence.** `CallTelemetry` and `QuarantineRecord` are shaped to serialise
-  straight into `crates/heiwa_evidence` JSONL. No writer is included here;
-  this package stays sink-agnostic.
+**Shadow judgment in Work-scoped turns is wired (2026-09-23).** After each
+Work-scoped operator model turn is terminal, `OperatorTurnRunner` offers its
+exact DREX inputs to `heiwa_shell::system1_shadow`, which asks question set
+`turn-route-v1` (intent; capability class), replays DREX's plan with a
+raise-only floor, and appends one `heiwa.system1_shadow.v1` record to the
+`system1_shadow` evidence stream. `heiwa work shadow [<work-id>]` joins those
+records with what the turns actually did. It never changes execution, and it
+is off unless `[system1] shadow = true`. Design:
+`docs/superpowers/specs/2026-09-23-system1-shadow-judgment-design.md`.
+
+**The Rust fallback answers with selections, not distributions.** The first
+live shadow run showed `gemma4` returning 1.9 of probability mass on a
+five-level scale, so the Rust structured-output backend asks only for what its
+grammar enforces — one option, or one level as an integer `enum` — plus a
+confidence, and records a point mass. Its decoder rejects any distribution
+that does not sum to 1 beyond two-decimal rounding. This package's
+`structuredLlmAdapter` still requests distributions; per §14 a capped fallback
+cannot be calibrated either way.
+
+Still deliberately not built, to avoid overstating maturity:
+
+- **Executing on a judgment.** DREX does not act on a System 1 recommendation.
+  Promotion from shadow to an executing floor is a separate decision that
+  needs shadow evidence, quality labels, and a live-calibrated primary model.
+- **This package's telemetry.** `CallTelemetry` and `QuarantineRecord` remain
+  sink-agnostic; the runtime's evidence comes from the Rust shadow records.
 
 Consistent with the repo's Optimization Doctrine (`quality + accuracy +
 efficiency`, local models as the default working tier), the
@@ -402,15 +425,32 @@ the network is gone — degraded, capped, and honest about being so.
 ## 12. Verification status
 
 **Verified.**
-- 225 tests pass offline (unit + integration), plus 4 against live Ollama;
+- 253 tests pass offline (unit + integration), plus 4 against live Ollama;
   typecheck clean under `strict` + `noUncheckedIndexedAccess` +
   `erasableSyntaxOnly`; biome clean.
 - HTTP adapters exercised against a real `node:http` server: real sockets,
   real status codes, real aborts.
 - Zero parse failures across the hostile-input corpus (see §7).
 - End-to-end routing agent completes well inside the 500ms budget.
-- The TypeSafe request/response contract matches TypeSafe's published API
-  reference.
+- **The wire contract is checked against TypeSafe's verbatim examples.** An
+  earlier note here claimed it matched the published reference; it did not.
+  Read on 2026-09-23 (docs.typesafe.ai/api), the reference keys a Score
+  answer's `legend` and `probabilities` by level index, names Noul criteria
+  `true`/`false`, and caps a Score at 10 levels. The decoder demanded arrays,
+  so every live Score answer would have been quarantined. All three are fixed
+  in both languages, each pinned by a test that failed first.
+- **Shadow judgment ran live inside the real Work flow.** A checkout runtime
+  on port 7475 (disposable evidence and state, `local_only` turns, `gemma4`
+  judge) shadowed five Work-scoped operator turns sent through the
+  authenticated operator API: 5/5 judged, none failed; judge latency p50
+  18.0s, p95 30.8s; every judgment `deliberate` (capped, as designed). Intent
+  agreed with the keyword rules on 2 of 5, and the judge read two of the
+  misses more plausibly than the rules ("review this function for bugs":
+  keyword `build`, judged `audit`; "capital of France": keyword `research`,
+  judged `chat`). It would have raised the floor on 3 of 5 and changed the
+  model on none: with only local candidates, DREX's $0 tie-break already
+  picks the most capable local model, so a floor below its class cannot move
+  the route. Five turns is a smoke test of the loop, not evidence of value.
 - **The fallback path is verified against a live model.** `gemma4:latest` via
   local Ollama answered the full six-judgment fan in 17.5s (1295 in / 113
   out), stayed inside the offered options, and — the property that matters —
@@ -423,10 +463,13 @@ the network is gone — degraded, capped, and honest about being so.
   `timeout`, rather than blocking.
 
 **Not verified.**
-- **No call has been made to a live Jev endpoint.** The TypeSafe adapter is
-  tested against the documented contract and local servers only. Real
-  latency, real calibration quality, and real error behaviour are unmeasured.
-  (The *fallback* adapter is now live-verified; the primary one is not.)
+- **No call has been made to a live Jev endpoint** from either language. The
+  TypeScript adapter and the Rust backend are tested against the documented
+  contract and local servers only. Real latency, real calibration quality,
+  and real error behaviour are unmeasured. (The *fallback* path is
+  live-verified; the primary one is not.)
+- **No quality labels exist.** The shadow report's "accepted" means completed
+  with no cancel request, not judged correct, and it says so.
 - The **OpenRouter route is unverified** (§8).
 - The offline simulator is keyword heuristics, not a model. It produces
   well-formed answers for deterministic tests. It says nothing about Jev's
@@ -456,12 +499,17 @@ a failure there means the constants in `adapters/http.ts` need correcting,
 not that the engine is broken.
 
 **Remaining steps.**
-1. Run `test:live` against real Jev; record the latency distribution.
+1. Run `test:live` against real Jev; record the latency distribution. Then
+   run the runtime shadow with `[system1] backend = "typesafe"` and a key in
+   `TYPESAFE_API_KEY` or the `heiwa` keychain (account `typesafe`).
 2. Confirm or correct the OpenRouter path and model id (same command).
-3. Build a labelled corpus and calibrate thresholds per question — sweep to
-   the point where the quarantine rate is affordable and false auto-dispatch
-   is near zero.
-4. Wire `CallTelemetry` into `crates/heiwa_evidence`.
+3. Label shadowed turns (accepted, and the floor that was actually needed),
+   turn failures and corrections into evaluation cases, and calibrate
+   thresholds per question — sweep to the point where the quarantine rate is
+   affordable and false auto-dispatch is near zero.
+4. Shadow `standard`-privacy turns, where remote candidates make a floor
+   above the best local class change the route; only those disagreements can
+   show whether the judgment predicts trouble.
 5. Consider promoting the package to a root npm workspace. It currently
    self-installs (its own `package.json` + lockfile) to avoid rewriting the
    shared root lockfile while other agents are working in the tree; root

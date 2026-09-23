@@ -267,6 +267,43 @@ interruption, concurrent receipts, aggregate failure propagation, retired
 runners, and tag/main version divergence. Exact committed local and remote
 results belong in their generated receipts; these changes do not complete A1.
 
+## System 1 shadow judgment — 2026-09-23
+
+Plane: Execution / Evidence. Design:
+`docs/superpowers/specs/2026-09-23-system1-shadow-judgment-design.md`.
+Work-scoped operator model turns now carry a shadow System 1 judgment: after
+the terminal event is durable, the runner hands the exact DREX inputs to
+`heiwa_shell::system1_shadow`. That module asks `turn-route-v1` (intent over
+the DREX keys; capability class 1-5), replays `plan_model_call` with a
+raise-only floor, and appends `heiwa.system1_shadow.v1` to the
+`system1_shadow` stream. Execution never changes. The feature is off unless
+`[system1] shadow = true`.
+
+| # | Step | Status | Verification |
+|---|---|---|---|
+| 1 | TypeScript experiment speaks TypeSafe's documented contract (Score maps keyed by level, Noul `true`/`false`, at most 10 levels); typecheck clean | done | `npm --prefix packages/heiwa_system1 test` (253) and `run typecheck` |
+| 2 | Rust System 1 engine: question builders, documented-contract decoder (distributions must sum to 1), TypeSafe backend pinned to `jev-1.13.0`, capped selection-only fallback | done | `cargo test -p heiwa_judgment --locked` (34) |
+| 3 | Runner offers finished Work-scoped model turns to a shadow observer; a panicking observer cannot strand a turn | done | `cargo test -p heiwa-shell --lib shadow` |
+| 4 | Shadow records with raise-only counterfactual, privacy/sensitivity guards, `[system1]` config, `heiwa work shadow` report | done | `cargo test -p heiwa-shell --test system1_shadow`; `cargo test -p heiwa_config` |
+
+Live check: a checkout runtime on 7475 ran with a disposable journal,
+`local_only` turns, and a `gemma4` judge. Five Work-scoped turns went
+through the authenticated operator API, and all five were judged. Judge
+latency: p50 18.0s, p95 30.8s. Intent agreed with the keyword rules on
+2 of 5. The judge would have raised the floor on 3 of 5 and changed the
+model on none, because DREX already picks the most capable free local
+model. Mutation checks: removing the panic containment, the raise-only
+rule, or the privacy guard makes its test fail.
+
+The first live run found a defect the stubs could not: the fallback
+returned incoherent distributions (1.9 of probability mass). The decoder
+now rejects them. The fallback asks only for a grammar-enforced selection,
+and records note `answer_shape`.
+
+Not established: any live Jev call, any quality label, or any evidence that
+the judgment improves routing. The five-turn sample is a smoke test of the
+loop. Promotion to an executing floor remains a separate decision.
+
 ## Deferred with reason
 
 - `work_node_bound` and `prior_history_digest` (WF-R15) need an enrolled mesh
@@ -311,3 +348,7 @@ results belong in their generated receipts; these changes do not complete A1.
 
 - Work-scoped composer continuation (see Deferred with reason).
 - Release A2 — multi-repository coordination.
+- System 1 shadow evidence: run the TypeSafe backend with a key and
+  shadow `standard`-privacy Work turns, where a floor above the best local
+  class changes the route. Collect accept/reject labels and the floor that
+  was actually needed, then calibrate before any promotion decision.
