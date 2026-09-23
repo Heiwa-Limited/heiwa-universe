@@ -19,6 +19,9 @@
 /** Jev's documented ceiling on the number of options in a single Choice. */
 export const MAX_CHOICE_OPTIONS = 255;
 
+/** The most levels the API accepts on a Score (docs.typesafe.ai/api). */
+export const MAX_SCORE_LEVELS = 10;
+
 export type PrimitiveKind = "choice" | "score" | "noul";
 
 export type ChoiceWire<K extends string = string> = {
@@ -36,7 +39,8 @@ export type ScoreWire = {
 export type NoulWire = {
   readonly type: "noul";
   readonly instructions: string;
-  readonly criteria?: { readonly yes?: string; readonly no?: string };
+  /** TypeSafe names the outcomes `true` (yes) and `false` (no). */
+  readonly criteria?: { readonly true?: string; readonly false?: string };
 };
 
 export type QuestionWire = ChoiceWire | ScoreWire | NoulWire;
@@ -112,6 +116,11 @@ export function score(spec: {
       `a score needs at least 2 levels to span a scale, received ${spec.criteria.length}`,
     );
   }
+  if (spec.criteria.length > MAX_SCORE_LEVELS) {
+    throw new TypeError(
+      `a score accepts at most ${MAX_SCORE_LEVELS} levels, received ${spec.criteria.length}`,
+    );
+  }
 
   return {
     kind: "score",
@@ -126,7 +135,7 @@ export function score(spec: {
 
 export function noul(spec: {
   instructions: string;
-  criteria?: { yes?: string; no?: string };
+  criteria?: { true?: string; false?: string };
 }): NoulQuestion {
   requireInstructions(spec.instructions);
 

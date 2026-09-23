@@ -100,8 +100,8 @@ const PROBE_QUESTIONS = {
   probe_choice: choice({
     instructions: "The state says the word 'yes'. Which option matches?",
     criteria: {
-      yes: "The state contains the word yes",
-      no: "The state contains the word no",
+      true: "The state contains the word yes",
+      false: "The state contains the word no",
     },
   }),
   probe_noul: noul({ instructions: "Does the state contain the word 'yes'?" }),

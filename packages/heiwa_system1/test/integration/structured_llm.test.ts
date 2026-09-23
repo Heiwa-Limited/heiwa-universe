@@ -9,6 +9,8 @@ import {
   structuredLlmAdapter,
 } from "../../src/core/system1/adapters/structured_llm.ts";
 import type { AdapterRequest } from "../../src/core/system1/adapters/types.ts";
+import { choice, noul, score } from "../../src/core/system1/primitives.ts";
+import { decodeResponse } from "../../src/core/system1/schema.ts";
 import { DEFAULT_THRESHOLDS } from "../../src/orchestrator/gate.ts";
 
 let server: http.Server;
@@ -63,6 +65,19 @@ const request: AdapterRequest = {
       refund: { type: "noul", instructions: "Refund requested?" },
     },
   },
+};
+
+/** The same questions as `request`, built so the decoder can check answers. */
+const builtQuestions = {
+  team: choice({
+    instructions: "Which team?",
+    criteria: { billing: "money", technical: "bugs" },
+  }),
+  urgency: score({
+    instructions: "How urgent?",
+    criteria: ["low", "mid", "high"],
+  }),
+  refund: noul({ instructions: "Refund requested?" }),
 };
 
 function call(adapter: ReturnType<typeof structuredLlmAdapter>) {
@@ -180,9 +195,23 @@ describe("structuredLlmAdapter response translation", () => {
       usage: unknown;
     };
     assert.equal(body.answers.team?.choice, "billing");
-    assert.deepEqual(body.answers.urgency?.legend, ["low", "mid", "high"]);
+    // TypeSafe's documented Score shape: maps keyed by level index.
+    assert.deepEqual(body.answers.urgency?.legend, {
+      "0": "low",
+      "1": "mid",
+      "2": "high",
+    });
+    assert.deepEqual(body.answers.urgency?.probabilities, {
+      "0": 0.1,
+      "1": 0.1,
+      "2": 0.8,
+    });
     assert.equal(body.answers.refund?.noul, 0.93);
     assert.deepEqual(body.usage, { input_tokens: 300, output_tokens: 40 });
+
+    // The claim in this test's name, checked rather than assumed.
+    const decoded = decodeResponse(builtQuestions, r.value);
+    assert.equal(decoded.ok, true, decoded.ok ? "" : decoded.error.message);
   });
 
   test("fills a uniform distribution when the model supplied none", async () => {

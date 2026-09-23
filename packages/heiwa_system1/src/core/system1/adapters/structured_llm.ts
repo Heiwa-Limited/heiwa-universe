@@ -51,6 +51,7 @@ import {
   system1Error,
 } from "../errors.ts";
 import type { QuestionWire } from "../primitives.ts";
+import { byLevel } from "../schema.ts";
 import type { Adapter, AdapterRequest } from "./types.ts";
 
 /**
@@ -198,8 +199,8 @@ function renderPrompt(
       lines.push(
         `- ${id} (noul, probability 0..1 that this is true): ${q.instructions}`,
       );
-      if (q.criteria?.yes) lines.push(`    true means: ${q.criteria.yes}`);
-      if (q.criteria?.no) lines.push(`    false means: ${q.criteria.no}`);
+      if (q.criteria?.true) lines.push(`    true means: ${q.criteria.true}`);
+      if (q.criteria?.false) lines.push(`    false means: ${q.criteria.false}`);
     }
   }
 
@@ -416,12 +417,14 @@ function translate(
             );
       answers[id] = { choice: a.choice, probabilities, confidence: capped };
     } else if (q.type === "score") {
+      // The model answers in the array shape our JSON Schema asks for; the
+      // wire contract keys levels by index, so re-key rather than reshape.
       answers[id] = {
         score: a.score,
-        legend: q.criteria,
+        legend: byLevel(q.criteria),
         probabilities: Array.isArray(a.probabilities)
-          ? a.probabilities
-          : uniform(q.criteria.length),
+          ? byLevel(a.probabilities as unknown[])
+          : byLevel(uniform(q.criteria.length)),
         confidence: capped,
       };
     } else {

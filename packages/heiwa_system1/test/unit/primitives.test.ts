@@ -73,12 +73,15 @@ describe("noul()", () => {
     });
   });
 
-  test("carries the optional yes/no clarification when supplied", () => {
+  // TypeSafe names a Noul's outcomes `true` and `false` on the wire and in
+  // its SDK (docs.typesafe.ai/api). An earlier builder sent `yes`/`no`,
+  // which no live request had exercised.
+  test("carries the optional true/false clarification in the documented keys", () => {
     const q = noul({
       instructions: "Does this contain PII?",
       criteria: {
-        yes: "Names, emails, card numbers",
-        no: "No identifying data",
+        true: "Names, emails, card numbers",
+        false: "No identifying data",
       },
     });
 
@@ -86,10 +89,28 @@ describe("noul()", () => {
       type: "noul",
       instructions: "Does this contain PII?",
       criteria: {
-        yes: "Names, emails, card numbers",
-        no: "No identifying data",
+        true: "Names, emails, card numbers",
+        false: "No identifying data",
       },
     });
+  });
+});
+
+describe("score()", () => {
+  test("rejects more than the 10 levels the API accepts", () => {
+    const eleven = Array.from({ length: 11 }, (_, i) => `level ${i}`);
+    assert.throws(
+      () => score({ instructions: "How much?", criteria: eleven }),
+      /at most 10 levels/,
+    );
+  });
+
+  test("accepts exactly 10 levels", () => {
+    const ten = Array.from({ length: 10 }, (_, i) => `level ${i}`);
+    assert.equal(
+      score({ instructions: "How much?", criteria: ten }).levels,
+      10,
+    );
   });
 });
 

@@ -26,14 +26,123 @@ const goodBody = {
     },
     urgency: {
       score: 1.5,
-      legend: ["low", "mid", "high"],
-      probabilities: [0.2, 0.6, 0.2],
+      legend: { "0": "low", "1": "mid", "2": "high" },
+      probabilities: { "0": 0.2, "1": 0.6, "2": 0.2 },
       confidence: 0.6,
     },
     refund: { noul: 0.92 },
   },
   usage: { input_tokens: 412, output_tokens: 33 },
 };
+
+/**
+ * Verbatim response examples from TypeSafe's API reference
+ * (docs.typesafe.ai/api, read 2026-09-23). A Score answer's `legend` and
+ * `probabilities` are maps keyed by the level index as a string, and every
+ * answer carries a `type`. An earlier decoder expected arrays, so every real
+ * Jev Score answer would have been quarantined as a schema violation while
+ * the stub-backed tests stayed green.
+ */
+describe("decodeResponse() on TypeSafe's documented response bodies", () => {
+  const documented = {
+    frustration: score({
+      instructions: "How frustrated is the customer?",
+      criteria: ["Calm", "Frustrated", "Very angry"],
+    }),
+    department: choice({
+      instructions: "Which team should handle this?",
+      criteria: {
+        billing: "Payments, invoicing, refunds",
+        technical: "Bugs, outages, integrations",
+        sales: "Pricing, upgrades, new accounts",
+      },
+    }),
+    is_urgent: noul({ instructions: "Does this convey urgency?" }),
+  };
+  const body = {
+    model: "jev-1.13.0",
+    answers: {
+      frustration: {
+        type: "score",
+        score: 1.05,
+        legend: { "0": "Calm", "1": "Frustrated", "2": "Very angry" },
+        probabilities: { "0": 0.0, "1": 0.95, "2": 0.05 },
+        confidence: 0.92,
+      },
+      department: {
+        type: "choice",
+        choice: "billing",
+        probabilities: { billing: 0.88, technical: 0.12, sales: 0.0 },
+        confidence: 0.81,
+      },
+      is_urgent: { type: "noul", noul: 0.95 },
+    },
+    usage: { input_tokens: 304, output_tokens: 18 },
+  };
+
+  test("a documented Score answer decodes into level order", () => {
+    const r = decodeResponse(documented, body);
+    assert.equal(r.ok, true, r.ok ? "" : r.error.message);
+    if (!r.ok) return;
+    assert.deepEqual(r.value.answers.frustration, {
+      kind: "score",
+      score: 1.05,
+      legend: ["Calm", "Frustrated", "Very angry"],
+      probabilities: [0.0, 0.95, 0.05],
+      confidence: 0.92,
+    });
+    assert.equal(r.value.model, "jev-1.13.0");
+  });
+
+  test("documented Choice and Noul answers decode with their type tags", () => {
+    const r = decodeResponse(documented, body);
+    assert.equal(r.ok, true, r.ok ? "" : r.error.message);
+    if (!r.ok) return;
+    assert.equal(r.value.answers.department?.kind, "choice");
+    assert.deepEqual(r.value.answers.is_urgent, { kind: "noul", noul: 0.95 });
+  });
+
+  test("a Score distribution that skips a level is a schema violation", () => {
+    const r = decodeResponse(documented, {
+      ...body,
+      answers: {
+        ...body.answers,
+        frustration: {
+          ...body.answers.frustration,
+          probabilities: { "0": 0.0, "1": 0.95, "3": 0.05 },
+        },
+      },
+    });
+    assert.equal(r.ok, false);
+    if (r.ok) return;
+    assert.equal(r.error.kind, "schema_violation");
+    assert.match(r.error.message, /frustration/);
+  });
+
+  test("a Score legend that does not cover the scale is a schema violation", () => {
+    const r = decodeResponse(documented, {
+      ...body,
+      answers: {
+        ...body.answers,
+        frustration: {
+          ...body.answers.frustration,
+          legend: { "0": "Calm", "1": "Frustrated" },
+        },
+      },
+    });
+    assert.equal(r.ok, false);
+  });
+
+  test("an answer tagged with a different type than its question is rejected", () => {
+    const r = decodeResponse(documented, {
+      ...body,
+      answers: { ...body.answers, is_urgent: { type: "choice", noul: 0.95 } },
+    });
+    assert.equal(r.ok, false);
+    if (r.ok) return;
+    assert.match(r.error.message, /is_urgent/);
+  });
+});
 
 describe("decodeResponse() on a well-formed body", () => {
   test("returns ok with every answer decoded and tagged by primitive kind", () => {
@@ -148,9 +257,9 @@ describe("decodeResponse() enforces the question contract, not just JSON shape",
 
   test("rejects a score distribution whose length does not match the scale", () => {
     const body = structuredClone(goodBody);
-    (body.answers.urgency as { probabilities: number[] }).probabilities = [
-      0.5, 0.5,
-    ];
+    (
+      body.answers.urgency as { probabilities: Record<string, number> }
+    ).probabilities = { "0": 0.5, "1": 0.5 };
     const r = decodeResponse(questions, body);
     assert.equal(r.ok, false);
     if (r.ok) return;

@@ -57,22 +57,48 @@ const responseEnvelope = z.object({
     .optional(),
 });
 
+// Every documented answer carries `type`. It is optional here so an adapter
+// that emulates the contract may omit it, but when present it must name the
+// question's own primitive — a cross-wired answer is a malformed answer.
 const choiceAnswerShape = z.object({
+  type: z.literal("choice").optional(),
   choice: z.string(),
   probabilities: z.record(z.string(), probability),
   confidence: probability,
 });
 
+// TypeSafe keys a Score's `legend` and `probabilities` by the level index as
+// a string ("0", "1", …), per docs.typesafe.ai/api. `decodeOne` converts
+// both maps into level order once the key set is proven to be the scale.
 const scoreAnswerShape = z.object({
+  type: z.literal("score").optional(),
   score: z.number(),
-  legend: z.array(z.string()),
-  probabilities: z.array(probability),
+  legend: z.record(z.string(), z.string()),
+  probabilities: z.record(z.string(), probability),
   confidence: probability,
 });
 
 const noulAnswerShape = z.object({
+  type: z.literal("noul").optional(),
   noul: probability,
 });
+
+/** `"0".."levels-1"` — the only key set a Score map may carry. */
+function levelKeys(levels: number): string[] {
+  return Array.from({ length: levels }, (_, level) => String(level));
+}
+
+/**
+ * Key level-ordered values by level index, the shape TypeSafe puts on the
+ * wire for a Score's `legend` and `probabilities`. Adapters that emulate the
+ * contract use this so every provider feeds the one decoder above. Values
+ * pass through unrepaired — a malformed value is the decoder's to reject.
+ */
+export function byLevel<T>(values: readonly T[]): Record<string, T> {
+  return Object.fromEntries(
+    values.map((value, level) => [String(level), value]),
+  );
+}
 
 export type TokenUsage = {
   readonly inputTokens: number;
@@ -199,11 +225,22 @@ function decodeOne(
           ),
         );
       }
-      if (parsed.data.probabilities.length !== question.levels) {
+      const levels = levelKeys(question.levels);
+      const returned = Object.keys(parsed.data.probabilities);
+      if (!sameKeySet(levels, returned)) {
         return err(
           system1Error(
             "schema_violation",
-            `score answer "${id}" returned ${parsed.data.probabilities.length} probabilities for a ${question.levels}-level scale`,
+            `score answer "${id}" returned probabilities for levels [${returned.join(", ")}] on a ${question.levels}-level scale`,
+          ),
+        );
+      }
+      const legendKeys = Object.keys(parsed.data.legend);
+      if (!sameKeySet(levels, legendKeys)) {
+        return err(
+          system1Error(
+            "schema_violation",
+            `score answer "${id}" returned a legend for levels [${legendKeys.join(", ")}] on a ${question.levels}-level scale`,
           ),
         );
       }
@@ -215,11 +252,13 @@ function decodeOne(
           ),
         );
       }
+      // Key sets are proven equal to the scale above, so every lookup hits.
+      const { legend, probabilities } = parsed.data;
       return ok({
         kind: "score",
         score: parsed.data.score,
-        legend: parsed.data.legend,
-        probabilities: parsed.data.probabilities,
+        legend: levels.map((level) => legend[level] ?? ""),
+        probabilities: levels.map((level) => probabilities[level] ?? 0),
         confidence: parsed.data.confidence,
       });
     }

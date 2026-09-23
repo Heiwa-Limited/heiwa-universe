@@ -13,6 +13,7 @@
  */
 
 import type { QuestionWire } from "../../core/system1/primitives.ts";
+import { byLevel } from "../../core/system1/schema.ts";
 
 function textOf(state: unknown): string {
   return (
@@ -132,8 +133,9 @@ export function simulateJev(
       const index = Math.min(hits(text, words), levels - 1);
       answers[id] = {
         score: index,
-        legend: q.criteria,
-        probabilities: peakedArray(levels, index, 0.9),
+        // TypeSafe keys a Score's legend and distribution by level index.
+        legend: byLevel(q.criteria),
+        probabilities: byLevel(peakedArray(levels, index, 0.9)),
         confidence: 0.9,
       };
       continue;
