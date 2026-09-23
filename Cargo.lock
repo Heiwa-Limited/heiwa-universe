@@ -3556,8 +3556,11 @@ dependencies = [
 name = "heiwa_judgment"
 version = "0.1.0"
 dependencies = [
+ "reqwest 0.12.28",
  "serde",
  "serde_json",
+ "sha2 0.10.9",
+ "tokio",
 ]
 
 [[package]]

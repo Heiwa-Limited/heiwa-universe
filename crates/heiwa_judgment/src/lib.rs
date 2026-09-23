@@ -52,6 +52,13 @@
 
 use serde::{Deserialize, Serialize};
 
+pub mod backend;
+pub mod decode;
+mod error;
+pub mod question;
+
+pub use error::{ErrorKind, JudgmentError};
+
 /// A decoded answer from a schema-constrained judgment.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
