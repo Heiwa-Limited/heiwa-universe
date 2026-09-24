@@ -1580,3 +1580,86 @@ async fn different_policies_and_model_identities_are_separate_cohorts() {
         assert!(text.contains(status), "{status} missing from:\n{text}");
     }
 }
+
+#[tokio::test]
+async fn a_changed_question_or_threshold_policy_is_its_own_cohort() {
+    // Every record shares the backend, the requested model, and the model
+    // that answered, so only the policy can tell them apart.
+    let dir = tempfile::tempdir().unwrap();
+    let server = endpoint(200, jev_answers());
+    let judge = judge_at(&server.base_url, dir.path());
+    let base = judge.judge(&turn_numbered(1)).await;
+    assert_eq!(base["status"], "judged", "{base:#}");
+
+    let variant = |turn: &str, policy: Value| {
+        let mut record = base.clone();
+        record["turn_id"] = json!(turn);
+        record["request"]["turn_id"] = json!(turn);
+        record["policy"] = policy;
+        record
+    };
+    // Equal content, built in the opposite key order.
+    let reordered: serde_json::Map<String, Value> = base["policy"]
+        .as_object()
+        .expect("policy")
+        .iter()
+        .rev()
+        .map(|(key, value)| (key.clone(), value.clone()))
+        .collect();
+    let mut reworded = base["policy"].clone();
+    reworded["question_digest"] = json!("sha256:reworded-question-set");
+    let mut retuned = base["policy"].clone();
+    retuned["thresholds"]["auto"] = json!(0.9);
+    for record in [
+        base.clone(),
+        variant("turn-2", Value::Object(reordered)),
+        variant("turn-3", reworded),
+        variant("turn-4", retuned),
+    ] {
+        judge.record(&record).expect("record");
+    }
+
+    let report = report(dir.path(), None).expect("report");
+    let cohorts = report["cohorts"].as_array().unwrap();
+    assert_eq!(cohorts.len(), 3, "{report:#}");
+    let identities: std::collections::BTreeSet<String> = cohorts
+        .iter()
+        .map(|cohort| cohort["cohort"]["model_identity"].to_string())
+        .collect();
+    assert_eq!(
+        identities.len(),
+        1,
+        "one model identity throughout: {report:#}"
+    );
+    let policies: std::collections::BTreeSet<&str> = cohorts
+        .iter()
+        .map(|cohort| cohort["cohort"]["policy_digest"].as_str().unwrap())
+        .collect();
+    assert_eq!(policies.len(), 3, "{report:#}");
+
+    let grouped = cohorts
+        .iter()
+        .find(|cohort| cohort["records"] == json!(2))
+        .unwrap_or_else(|| panic!("equal policies share a cohort: {report:#}"));
+    assert_eq!(
+        grouped["cohort"]["question_digest"],
+        base["policy"]["question_digest"]
+    );
+    assert_eq!(
+        grouped["cohort"]["policy"]["thresholds"],
+        base["policy"]["thresholds"]
+    );
+    let reworded = cohorts
+        .iter()
+        .find(|cohort| cohort["cohort"]["question_digest"] == "sha256:reworded-question-set")
+        .expect("reworded question cohort");
+    assert_eq!(reworded["records"], json!(1));
+    let retuned = cohorts
+        .iter()
+        .find(|cohort| cohort["cohort"]["policy"]["thresholds"]["auto"] == json!(0.9))
+        .expect("retuned threshold cohort");
+    assert_eq!(retuned["records"], json!(1));
+
+    let text = render_report(&report);
+    assert!(text.contains("4 record(s) in 3 cohort(s)"), "{text}");
+}
