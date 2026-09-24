@@ -15,7 +15,7 @@ use heiwa_evidence::{
     OperatorRisk, OperatorSensitivity, PersistedArtifact, OPERATOR_EVENT_SCHEMA_VERSION,
 };
 use heiwa_protocol::ExecutionScope;
-use heiwa_provider::adapter::{Message, StreamEvent};
+use heiwa_provider::adapter::{Message, Role, StreamEvent};
 use heiwa_session::operator::{
     OperatorSessionService, RouteMode, StartTurnRequest, TurnRoutePolicy, TurnSubmissionError,
 };
@@ -406,6 +406,37 @@ impl OperatorArtifactStore for LocalArtifactStore {
         sync_directory_if_supported(&dir);
         Ok(())
     }
+}
+
+/// Teach the tool-call protocol that [`crate::agentic::parse_tool_calls`]
+/// reads, at the boundary that parses it, so every caller of the runner —
+/// production Work turns and evaluation harnesses alike — gets one contract.
+/// A turn hears it only when its scope grants an allowed lease for a tool the
+/// protocol names; it is sent once, after the caller's leading system
+/// messages, and kept for the follow-up stage. Leases still gate every call:
+/// this adds no tool and no authority.
+fn with_tool_protocol(mut messages: Vec<Message>, scope: Option<&ExecutionScope>) -> Vec<Message> {
+    let granted = scope.is_some_and(|scope| {
+        scope.tool_leases.iter().any(|lease| {
+            lease.allowed && crate::agentic::TOOL_PROTOCOL_TOOLS.contains(&lease.name.as_str())
+        })
+    });
+    let protocol = crate::agentic::tool_instruction_prompt();
+    if !granted || messages.iter().any(|message| message.content == protocol) {
+        return messages;
+    }
+    let preamble_end = messages
+        .iter()
+        .position(|message| !matches!(message.role, Role::System))
+        .unwrap_or(messages.len());
+    messages.insert(
+        preamble_end,
+        Message {
+            role: Role::System,
+            content: protocol,
+        },
+    );
+    messages
 }
 
 fn validate_artifact_id(artifact_id: &str) -> Result<()> {
@@ -1228,7 +1259,7 @@ impl OperatorTurnRunner {
     ) -> Result<CompletedModelTurn> {
         let request_template = model.request.clone();
         let candidates = model.candidates.clone();
-        let mut messages = model.messages.clone();
+        let mut messages = with_tool_protocol(model.messages, model.tool_scope.as_ref());
         let remaining_budget_usd = model.remaining_budget_usd;
         let max_attempts = model.max_attempts;
         let done_payload = model.done_payload;
@@ -1240,7 +1271,7 @@ impl OperatorTurnRunner {
                 cursor,
                 model.request,
                 model.candidates,
-                model.messages,
+                messages.clone(),
                 remaining_budget_usd,
                 max_attempts,
                 cancel.clone(),

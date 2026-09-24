@@ -41,6 +41,7 @@ shell_api_targets=(
   model_call_executor
   operator_api
   operator_artifact_root
+  operator_tool_protocol
   system1_shadow
 )
 
