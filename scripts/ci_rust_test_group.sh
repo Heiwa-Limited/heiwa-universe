@@ -42,6 +42,7 @@ shell_api_targets=(
   operator_api
   operator_artifact_root
   operator_tool_protocol
+  routing_eval
   system1_shadow
 )
 

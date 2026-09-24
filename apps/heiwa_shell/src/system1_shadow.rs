@@ -743,7 +743,7 @@ fn answer_summary(answer: &Answer) -> Value {
 /// `cost_usd: 0.0` with `cost_truth: cannot_confirm` for an amount it cannot
 /// state; that zero is not a cost, so it is `Unknown` here.
 #[derive(Debug, Clone, Copy, PartialEq)]
-enum AttemptCost {
+pub(crate) enum AttemptCost {
     /// Nothing was charged: a model on this device.
     KnownZero,
     /// The provider reported the charge.
@@ -755,7 +755,7 @@ enum AttemptCost {
 }
 
 /// Read an amount together with its cost truth, never the amount alone.
-fn attempt_cost(payload: &Value) -> AttemptCost {
+pub(crate) fn attempt_cost(payload: &Value) -> AttemptCost {
     let amount = payload["cost_usd"]
         .as_f64()
         .filter(|amount| amount.is_finite() && *amount >= 0.0);
@@ -771,17 +771,17 @@ fn attempt_cost(payload: &Value) -> AttemptCost {
 /// the turn. A tool turn makes a follow-up call with its own call id, and its
 /// receipt carries only that call's cost, so the receipt is not the episode.
 #[derive(Debug, Default, Clone, PartialEq)]
-struct EpisodeCost {
-    known_usd: f64,
-    estimated_usd: f64,
-    exact: u64,
-    known_zero: u64,
-    estimated: u64,
-    unknown: u64,
+pub(crate) struct EpisodeCost {
+    pub(crate) known_usd: f64,
+    pub(crate) estimated_usd: f64,
+    pub(crate) exact: u64,
+    pub(crate) known_zero: u64,
+    pub(crate) estimated: u64,
+    pub(crate) unknown: u64,
 }
 
 impl EpisodeCost {
-    fn add(&mut self, cost: AttemptCost) {
+    pub(crate) fn add(&mut self, cost: AttemptCost) {
         match cost {
             AttemptCost::KnownZero => self.known_zero += 1,
             AttemptCost::Exact(amount) => {
@@ -797,7 +797,7 @@ impl EpisodeCost {
     }
 
     /// The turn's weakest cost truth.
-    fn truth(&self) -> AttemptCost {
+    pub(crate) fn truth(&self) -> AttemptCost {
         if self.unknown > 0 {
             AttemptCost::Unknown
         } else if self.estimated > 0 {
