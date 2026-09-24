@@ -11,9 +11,8 @@ use anyhow::{anyhow, Result};
 use async_trait::async_trait;
 use heiwa_core::drex::{ExecutionLocality, ModelCallCandidate, ModelCallRequest, PrivacyClass};
 use heiwa_evidence::{
-    find_sensitive, journal_root, now_iso, CursorEvent, OperatorActor, OperatorEvent,
-    OperatorEventType, OperatorRisk, OperatorSensitivity, PersistedArtifact,
-    OPERATOR_EVENT_SCHEMA_VERSION,
+    find_sensitive, now_iso, CursorEvent, OperatorActor, OperatorEvent, OperatorEventType,
+    OperatorRisk, OperatorSensitivity, PersistedArtifact, OPERATOR_EVENT_SCHEMA_VERSION,
 };
 use heiwa_protocol::ExecutionScope;
 use heiwa_provider::adapter::{Message, StreamEvent};
@@ -241,29 +240,27 @@ impl OperatorApprovalService for DrexApprovalService {
     }
 }
 
-#[derive(Default)]
+/// Raw artifacts beside the journal whose `artifact_created` links make them
+/// durable. Reconciliation judges files against that journal's links, so the
+/// directory must belong to the same root: pointing it anywhere else would
+/// delete artifacts the other root still links.
 struct LocalArtifactStore {
-    root: Option<PathBuf>,
+    root: PathBuf,
 }
 
 impl LocalArtifactStore {
-    fn artifact_dir(&self) -> Result<PathBuf> {
-        Ok(self
-            .root
-            .clone()
-            .unwrap_or(journal_root()?)
-            .join("operator_artifacts"))
+    fn at(root: PathBuf) -> Self {
+        Self { root }
     }
 
-    #[cfg(test)]
-    fn at(root: PathBuf) -> Self {
-        Self { root: Some(root) }
+    fn artifact_dir(&self) -> PathBuf {
+        self.root.join("operator_artifacts")
     }
 }
 
 impl OperatorArtifactStore for LocalArtifactStore {
     fn commit(&self, artifact: PersistedArtifact) -> Result<CommittedOperatorArtifact> {
-        let dir = self.artifact_dir()?;
+        let dir = self.artifact_dir();
         fs::create_dir_all(&dir)?;
         validate_artifact_id(&artifact.artifact_id)?;
         let path = dir.join(format!("{}.json", artifact.artifact_id));
@@ -331,7 +328,7 @@ impl OperatorArtifactStore for LocalArtifactStore {
     }
 
     fn reconcile(&self, sessions: &OperatorSessionService) -> Result<()> {
-        let dir = self.artifact_dir()?;
+        let dir = self.artifact_dir();
         if !dir.exists() {
             return Ok(());
         }
@@ -754,6 +751,7 @@ impl OperatorTurnRunner {
         executor: Arc<dyn OperatorModelExecutor>,
     ) -> Self {
         let (frames, _) = broadcast::channel(OPERATOR_STREAM_CAPACITY);
+        let artifacts = Arc::new(LocalArtifactStore::at(sessions.root().to_path_buf()));
         Self {
             sessions,
             executor,
@@ -763,7 +761,7 @@ impl OperatorTurnRunner {
             recoverable_orphans: Arc::new(Mutex::new(HashSet::new())),
             active_scopes: Arc::new(Mutex::new(HashMap::new())),
             frames,
-            artifacts: Arc::new(LocalArtifactStore::default()),
+            artifacts,
             approvals: Arc::new(DrexApprovalService),
             tools: Arc::new(AgenticToolExecutor),
             shadow: None,
@@ -3015,7 +3013,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let sessions = service(dir.path());
         let store = LocalArtifactStore::at(dir.path().to_path_buf());
-        let artifact_dir = store.artifact_dir().unwrap();
+        let artifact_dir = store.artifact_dir();
         std::fs::create_dir_all(&artifact_dir).unwrap();
         let raw_temp = artifact_dir.join(format!(".artifact-temp.{}.tmp", uuid::Uuid::new_v4()));
         let pending_temp = artifact_dir.join(format!(
