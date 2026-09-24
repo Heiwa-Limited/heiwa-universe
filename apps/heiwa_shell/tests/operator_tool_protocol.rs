@@ -309,3 +309,35 @@ fn the_protocol_names_every_tool_that_unlocks_it() {
         assert!(protocol.contains(tool), "{tool} missing from the protocol");
     }
 }
+
+#[tokio::test]
+async fn a_quoted_protocol_does_not_stand_in_for_the_system_instruction() {
+    // A user quote (or an echoed assistant turn) is untrusted content; only
+    // an existing System message may count as the runner's instruction.
+    let workspace = tempfile::tempdir().unwrap();
+    let scope = scope_granting(
+        workspace.path(),
+        &[("fs.list", RiskClass::HostSafeReadonly, true)],
+    );
+    let stages = delivered(
+        LIST_CALL,
+        turn(
+            vec![system("caller preamble"), user(&tool_instruction_prompt())],
+            Some(scope),
+        ),
+    )
+    .await;
+    let protocol = tool_instruction_prompt();
+    for (stage, messages) in stages.iter().enumerate() {
+        let taught: Vec<usize> = messages
+            .iter()
+            .enumerate()
+            .filter(|(_, message)| {
+                matches!(message.role, Role::System) && message.content == protocol
+            })
+            .map(|(index, _)| index)
+            .collect();
+        assert_eq!(taught, vec![1], "stage {stage}: {messages:#?}");
+        assert!(matches!(messages[2].role, Role::User), "stage {stage}");
+    }
+}

@@ -412,7 +412,8 @@ impl OperatorArtifactStore for LocalArtifactStore {
 /// reads, at the boundary that parses it, so every caller of the runner —
 /// production Work turns and evaluation harnesses alike — gets one contract.
 /// A turn hears it only when its scope grants an allowed lease for a tool the
-/// protocol names; it is sent once, after the caller's leading system
+/// protocol names; it is sent once as a System message (a caller's own System
+/// copy counts, a quoted one does not), after the caller's leading system
 /// messages, and kept for the follow-up stage. Leases still gate every call:
 /// this adds no tool and no authority.
 fn with_tool_protocol(mut messages: Vec<Message>, scope: Option<&ExecutionScope>) -> Vec<Message> {
@@ -422,7 +423,12 @@ fn with_tool_protocol(mut messages: Vec<Message>, scope: Option<&ExecutionScope>
         })
     });
     let protocol = crate::agentic::tool_instruction_prompt();
-    if !granted || messages.iter().any(|message| message.content == protocol) {
+    // Only a System message counts as already taught: a user quote or an
+    // echoed assistant turn is untrusted content and must not stand in.
+    let taught = messages
+        .iter()
+        .any(|message| matches!(message.role, Role::System) && message.content == protocol);
+    if !granted || taught {
         return messages;
     }
     let preamble_end = messages
