@@ -321,6 +321,23 @@ Mutation checks: following redirects, allowing proxies for a local backend,
 removing the record screen, persisting the raw model, or reading only the
 receipt each makes its regression fail.
 
+Review round 2 — the first real local-model routing episode exposed the next
+measurement boundary. The replayable Rust harness now runs a fixed,
+read-only repository-analysis task through the production Work runner and
+binds its machine label to the exact output digest. Its version-2 rubric
+rejects extra keys and duplicate entries, and records workflow acceptance
+separately from content correctness. Four synthetic tests pass, including
+cases where the answer is correct but the turn is interrupted, cancelled,
+timed out, or denied its read tool.
+
+The live `gemma4:latest` smoke episode completed the runner but emitted
+malformed follow-up tool-call JSON after one successful read. The harness
+labelled that output `fail`/`wrong_shape` and kept workflow acceptance false;
+this is evidence that the measurement catches a bad episode, not evidence
+that the model should route Heiwa. The local run was zero-cost and took about
+29 seconds. No Jev call, production quality label, routing promotion, or
+installed-runtime change is established by this slice.
+
 ## Deferred with reason
 
 - `work_node_bound` and `prior_history_digest` (WF-R15) need an enrolled mesh

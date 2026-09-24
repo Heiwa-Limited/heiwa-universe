@@ -484,6 +484,13 @@ the network is gone — degraded, capped, and honest about being so.
 - **The latency budget works against a genuinely slow provider.** A 500ms
   budget against that same 17s model aborted after 507ms as a typed
   `timeout`, rather than blocking.
+- **The Rust runtime now has a replayable routing-evaluation harness.** A
+  development fixture runs through the real Work-scoped operator runner with
+  read-only leases, exact fixture/input/output digests, and an exact JSON
+  rubric. Labels also record workflow acceptance separately from answer
+  content, so a correct-looking answer cannot hide an interrupted, cancelled,
+  timed-out, or tool-failed turn. This is wiring and measurement evidence,
+  not a Jev quality benchmark.
 
 **Not verified.**
 - **No call has been made to a live Jev endpoint** from either language. The
@@ -491,8 +498,10 @@ the network is gone — degraded, capped, and honest about being so.
   contract and local servers only. Real latency, real calibration quality,
   and real error behaviour are unmeasured. (The *fallback* path is
   live-verified; the primary one is not.)
-- **No quality labels exist.** The shadow report's "accepted" means completed
-  with no cancel request, not judged correct, and it says so.
+- **No production quality labels exist.** The shadow report's "accepted" means
+  completed with no cancel request, not judged correct. The Rust harness has
+  only a versioned development fixture and its labels are bounded workflow
+  smoke evidence, not labels for production routing quality.
 - The **OpenRouter route is unverified** (§8).
 - The offline simulator is keyword heuristics, not a model. It produces
   well-formed answers for deterministic tests. It says nothing about Jev's

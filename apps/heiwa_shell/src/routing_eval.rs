@@ -42,10 +42,10 @@ pub const EVAL_SCHEMA: &str = "heiwa.routing_eval.v1";
 /// The task, its fixture, and its rubric are versioned together: changing
 /// any of them is a new version, never an edit.
 pub const TASK_ID: &str = "repo-analysis/retry-functions";
-pub const TASK_VERSION: u32 = 1;
+pub const TASK_VERSION: u32 = 2;
 /// Inspected while the harness was built, so never an untouched holdout.
 pub const TASK_SPLIT: &str = "development";
-pub const RUBRIC: &str = "exact-function-set@1";
+pub const RUBRIC: &str = "exact-function-set@2";
 
 pub const TASK_PROMPT: &str = "The repository to analyse is the current directory. List every Rust function defined in it whose name starts with `retry_`, with the file that defines it. Reply with JSON only, in exactly this shape: {\"functions\": [{\"name\": \"<function name>\", \"file\": \"<path relative to the repository root>\"}]}";
 
@@ -565,6 +565,19 @@ pub fn append_label(
         bail!("the labelled output is not the episode's output");
     }
     let verdict = check(output);
+    // An answer can be correct without the workflow completing. Keep the
+    // content label separate from the terminal, cancellation, and tool proof.
+    let workflow_checks = vec![
+        json!({ "id": "answer_passed", "passed": verdict["label"] == "pass" }),
+        json!({ "id": "turn_completed", "passed": episode["episode"]["terminal"] == "completed" }),
+        json!({ "id": "not_cancelled", "passed": episode["episode"]["cancel_requested"] == false }),
+        json!({ "id": "within_timeout", "passed": episode["episode"]["timed_out"] == false }),
+        json!({ "id": "successful_read_tool", "passed": episode["episode"]["tool_calls"]
+            .as_array().is_some_and(|calls| calls.iter().any(|call|
+                call["status"] == "success" && call["name"].as_str().is_some_and(|name|
+                    crate::agentic::TOOL_PROTOCOL_TOOLS.contains(&name)))) }),
+    ];
+    let workflow_accepted = workflow_checks.iter().all(|check| check["passed"] == true);
     append(
         root,
         json!({
@@ -578,6 +591,8 @@ pub fn append_label(
             "reason": verdict["reason"],
             "rubric": RUBRIC,
             "checks": verdict["checks"],
+            "workflow_accepted": workflow_accepted,
+            "workflow_checks": workflow_checks,
             "reviewer": reviewer,
             "supersedes": Value::Null,
         }),
@@ -612,11 +627,13 @@ fn render((name, file): &(String, String)) -> String {
     }
 }
 
-/// Rubric `exact-function-set@1`, fixed before any live run: the trimmed
+/// Rubric `exact-function-set@2`: the trimmed
 /// answer, optionally one surrounding code fence, must parse as JSON of the
 /// shape `{"functions": [{"name", "file"}]}` whose (name, file) pairs, with
-/// a leading `./` dropped, equal the expected set. No output is unjudged;
-/// anything else fails. The answer is never repaired.
+/// a leading `./` dropped, equal the expected set. Extra keys and duplicate
+/// entries fail. An absent output is unjudged; other invalid answers fail.
+/// Version 2 tightens version 1's shape checks after review; the development
+/// run under version 1 remains a separate receipt. The answer is never repaired.
 pub fn check(output: Option<&str>) -> Value {
     let verdict = |label: &str, reason: &str, checks: Vec<Value>| json!({ "label": label, "reason": reason, "checks": checks });
     let Some(text) = output else {
@@ -637,26 +654,44 @@ pub fn check(output: Option<&str>) -> Value {
     let Some(parsed) = parsed else {
         return verdict("fail", "not_json", checks);
     };
-    let pairs: Option<Vec<(String, String)>> = parsed["functions"].as_array().and_then(|items| {
-        items
-            .iter()
-            .map(|item| {
-                Some((
-                    item["name"].as_str()?.trim().to_string(),
-                    item["file"]
-                        .as_str()?
-                        .trim()
-                        .trim_start_matches("./")
-                        .to_string(),
-                ))
-            })
-            .collect()
-    });
+    let exact_object = parsed
+        .as_object()
+        .is_some_and(|object| object.len() == 1 && object.contains_key("functions"));
+    let pairs: Option<Vec<(String, String)>> = parsed["functions"]
+        .as_array()
+        .filter(|_| exact_object)
+        .and_then(|items| {
+            items
+                .iter()
+                .map(|item| {
+                    let object = item.as_object()?;
+                    if object.len() != 2
+                        || !object.contains_key("name")
+                        || !object.contains_key("file")
+                    {
+                        return None;
+                    }
+                    Some((
+                        item["name"].as_str()?.trim().to_string(),
+                        item["file"]
+                            .as_str()?
+                            .trim()
+                            .trim_start_matches("./")
+                            .to_string(),
+                    ))
+                })
+                .collect()
+        });
     checks.push(json!({ "id": "shape", "passed": pairs.is_some() }));
     let Some(pairs) = pairs else {
         return verdict("fail", "wrong_shape", checks);
     };
+    let pair_count = pairs.len();
     let observed: BTreeSet<(String, String)> = pairs.into_iter().collect();
+    if observed.len() != pair_count {
+        checks.push(json!({ "id": "unique_entries", "passed": false }));
+        return verdict("fail", "duplicate_entries", checks);
+    }
     let expected: BTreeSet<(String, String)> = EXPECTED
         .iter()
         .map(|(name, file)| (name.to_string(), file.to_string()))

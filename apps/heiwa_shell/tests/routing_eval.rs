@@ -47,6 +47,20 @@ fn the_rubric_labels_exact_sets_and_never_repairs() {
     assert_eq!(label(Some(&format!("Here you go:\n{CORRECT}"))), "fail");
     assert_eq!(label(Some(r#"{"functions": "retry_post"}"#)), "fail");
 
+    let mut extra: Value = serde_json::from_str(CORRECT).unwrap();
+    extra["comment"] = json!("extra field");
+    assert_eq!(check(Some(&extra.to_string()))["reason"], "wrong_shape");
+    let mut extra: Value = serde_json::from_str(CORRECT).unwrap();
+    extra["functions"][0]["comment"] = json!("extra field");
+    assert_eq!(check(Some(&extra.to_string()))["reason"], "wrong_shape");
+    let mut duplicate: Value = serde_json::from_str(CORRECT).unwrap();
+    let first = duplicate["functions"][0].clone();
+    duplicate["functions"].as_array_mut().unwrap().push(first);
+    assert_eq!(
+        check(Some(&duplicate.to_string()))["reason"],
+        "duplicate_entries"
+    );
+
     let missing = check(Some(
         r#"{"functions": [{"name": "retry_post", "file": "src/ledger.rs"}]}"#,
     ));
@@ -264,6 +278,7 @@ async fn a_synthetic_episode_binds_work_turn_receipts_and_digests() {
 
     assert_eq!(label["record"], "label");
     assert_eq!(label["label"], "pass", "{label:#}");
+    assert_eq!(label["workflow_accepted"], true, "{label:#}");
     assert_eq!(label["output_digest"], record["digests"]["output"]);
     assert_eq!(label["episode_id"], record["episode_id"]);
     assert_eq!(label["reviewer"]["kind"], "machine_rubric");
@@ -313,21 +328,37 @@ async fn a_wrong_answer_is_labelled_fail_at_its_own_digest() {
     );
 }
 
+#[tokio::test]
+async fn a_correct_answer_does_not_make_an_incomplete_workflow_accepted() {
+    let root = tempfile::tempdir().unwrap();
+    let episode = synthetic(root.path(), CORRECT).await;
+    for (field, value) in [
+        ("terminal", json!("interrupted")),
+        ("cancel_requested", json!(true)),
+        ("timed_out", json!(true)),
+        ("tool_calls", json!([])),
+        (
+            "tool_calls",
+            json!([{ "name": "fs.read", "status": "denied" }]),
+        ),
+    ] {
+        let mut record = episode.record.clone();
+        record["episode"][field] = value;
+        let label = append_label(
+            root.path(),
+            &record,
+            episode.output.as_deref(),
+            machine_reviewer(&record["harness"]["revision"]),
+        )
+        .expect("label");
+        assert_eq!(label["label"], "pass", "answer content still passes");
+        assert_eq!(label["workflow_accepted"], false, "{field}: {label:#}");
+    }
+}
+
 // ---- live: one bounded episode on a local model ------------------------------
 
-fn ollama_base() -> String {
-    std::env::var("OLLAMA_HOST")
-        .ok()
-        .filter(|host| !host.is_empty())
-        .map(|host| {
-            if host.starts_with("http") {
-                host
-            } else {
-                format!("http://{host}")
-            }
-        })
-        .unwrap_or_else(|| "http://127.0.0.1:11434".to_string())
-}
+const OLLAMA_BASE: &str = "http://127.0.0.1:11434";
 
 /// The content digest the local tag resolves to right now, if any.
 async fn ollama_digest(model: &str) -> Option<String> {
@@ -338,7 +369,7 @@ async fn ollama_digest(model: &str) -> Option<String> {
         .build()
         .ok()?;
     let tags: Value = client
-        .get(format!("{}/api/tags", ollama_base()))
+        .get(format!("{OLLAMA_BASE}/api/tags"))
         .send()
         .await
         .ok()?
@@ -370,6 +401,11 @@ fn local_only_resolver(
 #[tokio::test]
 #[ignore = "runs a local Ollama model; needs HEIWA_EVAL_LIVE_MODEL and a disposable HEIWA_EVIDENCE_DIR"]
 async fn live_local_model_smoke() {
+    assert_eq!(
+        std::env::var("OLLAMA_HOST").as_deref(),
+        Ok(OLLAMA_BASE),
+        "set OLLAMA_HOST explicitly so the CLI and digest probes use the same loopback server"
+    );
     let model = std::env::var("HEIWA_EVAL_LIVE_MODEL").expect("HEIWA_EVAL_LIVE_MODEL");
     let root = PathBuf::from(std::env::var("HEIWA_EVIDENCE_DIR").expect("HEIWA_EVIDENCE_DIR"));
     let real = PathBuf::from(std::env::var("HOME").expect("HOME")).join(".heiwa");
@@ -417,6 +453,7 @@ async fn live_local_model_smoke() {
             _ => "observed_digest_changed_or_missing",
         },
         "requested": model,
+        "endpoint": OLLAMA_BASE,
         "digest_before": before,
         "digest_after": after,
         "note": "a local tag can move; the digest was observed before and after, not pinned",
