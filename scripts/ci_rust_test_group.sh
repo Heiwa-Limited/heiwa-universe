@@ -23,6 +23,7 @@ foundation_packages=(
   heiwa_config
   heiwa_embed
   heiwa_evidence
+  heiwa_finance
   heiwa_identity
   heiwa_mcp
   heiwa_mesh
@@ -56,6 +57,7 @@ shell_ops_targets=(
   apple_calendar_connector
   calendar_plan_sync
   calendar_sync
+  finance_cli
   mail_triage
   schedule
   smoke

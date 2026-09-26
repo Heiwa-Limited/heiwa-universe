@@ -1,0 +1,77 @@
+{
+  "$schema": "./schema/connector.schema.json",
+  "id": "snaptrade",
+  "name": "SnapTrade",
+  "vendor": "SnapTrade",
+  "summary": "Read-only brokerage accounts (Wealthsimple, Questrade, and others) through a SnapTrade Personal API key the user creates. The user links brokerages in SnapTrade's own portal, so Heiwa never sees a brokerage password. Heiwa's client is GET-only and has no trading or money-movement path.",
+  "support_level": "third_party_bridge",
+  "auth": ["api_key"],
+  "revocation_path": "Delete the Personal API key and unlink brokerages at https://dashboard.snaptrade.com; `heiwa connect snaptrade --disconnect` removes the local copy of the key.",
+  "receipt_required": true,
+  "claim_aliases": ["SnapTrade"],
+  "source_notes": [
+    {
+      "title": "SnapTrade Personal vs Commercial API keys",
+      "url": "https://docs.snaptrade.com/docs/personal-vs-commercial"
+    },
+    {
+      "title": "SnapTrade OpenAPI specification and SDKs",
+      "url": "https://github.com/passiv/snaptrade-sdks"
+    },
+    {
+      "title": "SnapTrade rate limiting",
+      "url": "https://docs.snaptrade.com/docs/ratelimiting"
+    }
+  ],
+  "capabilities": [
+    {
+      "id": "finance.accounts.read",
+      "description": "List brokerage accounts with the brokerage-reported total and per-currency cash. Only the last four characters of an account number are stored.",
+      "risk_class": "silent",
+      "receipt_required": true,
+      "support_status": "target",
+      "side_effect": "read",
+      "permissions": ["Personal API key: account data (read)"],
+      "scopes": ["finance.accounts.read"],
+      "rate_hint": "250 requests/minute per client; 10 requests/minute per account for Personal keys where enforced."
+    },
+    {
+      "id": "finance.positions.read",
+      "description": "Read positions per account: symbol, units, last price, and average cost.",
+      "risk_class": "silent",
+      "receipt_required": true,
+      "support_status": "target",
+      "side_effect": "read",
+      "permissions": ["Personal API key: account data (read)"],
+      "scopes": ["finance.positions.read"]
+    },
+    {
+      "id": "finance.activities.read",
+      "description": "Read transactions (buys, sells, dividends, contributions, withdrawals, fees) with pagination, incrementally after the first full read.",
+      "risk_class": "silent",
+      "receipt_required": true,
+      "support_status": "target",
+      "side_effect": "read",
+      "permissions": ["Personal API key: account data (read)"],
+      "scopes": ["finance.activities.read"]
+    },
+    {
+      "id": "finance.trade.place",
+      "description": "Place, replace, or cancel an order. Heiwa does not do this and has no code path for it.",
+      "risk_class": "forbidden",
+      "receipt_required": true,
+      "support_status": "unsupported",
+      "side_effect": "write",
+      "permission_notes": "Refused by design: the SnapTrade client issues only signed GETs against read paths, and a unit test fails if a write verb or trading path is added to it."
+    },
+    {
+      "id": "finance.funds.move",
+      "description": "Deposit, withdraw, or transfer money. Heiwa does not do this and has no code path for it.",
+      "risk_class": "forbidden",
+      "receipt_required": true,
+      "support_status": "unsupported",
+      "side_effect": "write",
+      "permission_notes": "Refused by design; money movement stays with the user in their brokerage's own app."
+    }
+  ]
+}
