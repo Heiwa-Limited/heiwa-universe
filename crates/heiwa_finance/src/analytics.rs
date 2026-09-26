@@ -188,6 +188,8 @@ pub fn portfolio(accounts: &[Account], holdings: &[Holding], fx: &FxTable) -> Po
         first: Option<&'a Holding>,
         units: f64,
         value_base: Option<f64>,
+        /// Book cost in the position's own currency, and in CAD.
+        book_native: f64,
         book_base: Option<f64>,
         cost_complete: bool,
         price: Option<f64>,
@@ -222,11 +224,12 @@ pub fn portfolio(accounts: &[Account], holdings: &[Holding], fx: &FxTable) -> Po
                 .to_ascii_uppercase();
             *exposure.entry(currency).or_insert(0.0) += value;
         }
-        match holding
-            .book_value()
-            .and_then(|book| fx.to_base(book, holding.currency.as_deref()))
-        {
-            Some(book) => *entry.book_base.get_or_insert(0.0) += book,
+        let book = holding.book_value();
+        match book.and_then(|book| fx.to_base(book, holding.currency.as_deref())) {
+            Some(book_base) => {
+                entry.book_native += book.unwrap_or_default();
+                *entry.book_base.get_or_insert(0.0) += book_base;
+            }
             None => entry.cost_complete = false,
         }
     }
@@ -251,15 +254,6 @@ pub fn portfolio(accounts: &[Account], holdings: &[Holding], fx: &FxTable) -> Po
                 .value_base
                 .zip(book)
                 .map(|(value, book)| value - book);
-            let native_book: Option<f64> = if aggregate.cost_complete {
-                holdings
-                    .iter()
-                    .filter(|h| h.symbol == symbol)
-                    .map(|h| h.book_value())
-                    .sum::<Option<f64>>()
-            } else {
-                None
-            };
             PositionView {
                 symbol: symbol.to_string(),
                 description: first.description.clone(),
@@ -272,9 +266,8 @@ pub fn portfolio(accounts: &[Account], holdings: &[Holding], fx: &FxTable) -> Po
                     .value_base
                     .filter(|_| total_value > 0.0)
                     .map(|value| value / total_value),
-                average_cost: native_book
-                    .filter(|_| aggregate.units != 0.0)
-                    .map(|book| book / aggregate.units),
+                average_cost: (aggregate.cost_complete && aggregate.units != 0.0)
+                    .then(|| aggregate.book_native / aggregate.units),
                 unrealized_gain_base: gain,
                 unrealized_pct: gain
                     .zip(book)
