@@ -195,3 +195,67 @@ describe("RuntimeState Apple Mail", () => {
     expect(state.mailSync()?.error).toBe("Mail sync could not reach the Heiwa runtime.");
   });
 });
+
+describe("RuntimeState finance", () => {
+  const summary = {
+    schema_version: "heiwa_finance_summary_v1",
+    policy: "read_only",
+    connections: { brokerage: true, market_data: false },
+    portfolio: { total_value: 560, positions: [] },
+    next_actions: [],
+  };
+
+  it("loads the read-only finance read model", async () => {
+    const get = vi.fn().mockResolvedValue({ data: summary });
+    const state = createRuntimeState({ get });
+
+    await state.loadFinance();
+
+    expect(get).toHaveBeenCalledWith("/api/v1/finance/summary");
+    expect(state.finance()?.portfolio?.total_value).toBe(560);
+    expect(state.financeError()).toBeUndefined();
+  });
+
+  it("keeps the last read model and a generic message when a refresh fails", async () => {
+    const get = vi.fn()
+      .mockResolvedValueOnce({ data: summary })
+      .mockRejectedValueOnce(new Error("private runtime detail"));
+    const state = createRuntimeState({ get });
+
+    await state.loadFinance();
+    await expect(state.loadFinance()).resolves.toBeUndefined();
+
+    expect(state.finance()?.portfolio?.total_value).toBe(560);
+    expect(state.financeError()).toBe("The finance read model could not be loaded.");
+  });
+
+  it("shares one sync, then reloads the read model it changed", async () => {
+    let finish!: (value: unknown) => void;
+    const post = vi.fn(() => new Promise((resolve) => { finish = resolve; }));
+    const get = vi.fn().mockResolvedValue({ data: summary });
+    const state = createRuntimeState({ get, post: post as never });
+
+    const first = state.syncFinance();
+    const second = state.syncFinance();
+    expect(state.financeSyncing()).toBe(true);
+    expect(post).toHaveBeenCalledOnce();
+    expect(post).toHaveBeenCalledWith("/api/v1/finance/sync", {});
+    finish({ data: { outcome: "partial", counts: {}, issues: [{ source: "Alpha Vantage", message: "rate limited" }] } });
+    await Promise.all([first, second]);
+
+    expect(state.financeSync()?.outcome).toBe("partial");
+    expect(get).toHaveBeenCalledWith("/api/v1/finance/summary");
+    expect(state.financeSyncing()).toBe(false);
+  });
+
+  it("turns an unreachable runtime into a message, never a thrown error", async () => {
+    const state = createRuntimeState({
+      get: vi.fn(),
+      post: vi.fn().mockRejectedValue(new Error("private runtime detail")) as never,
+    });
+
+    await expect(state.syncFinance()).resolves.toBeNull();
+    expect(state.financeError()).toBe("Finance sync could not reach the Heiwa runtime.");
+    expect(state.financeSyncing()).toBe(false);
+  });
+});
