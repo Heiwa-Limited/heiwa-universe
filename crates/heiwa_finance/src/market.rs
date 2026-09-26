@@ -393,6 +393,18 @@ mod tests {
         assert!(!format!("{error:?}").contains("test-market-key"));
     }
 
+    /// Live check against the real Valet API. Ignored so CI stays hermetic:
+    /// `cargo test -p heiwa_finance -- --ignored live_`.
+    #[test]
+    #[ignore = "reaches the public Bank of Canada API"]
+    fn live_valet_publishes_a_plausible_usd_cad_rate() {
+        let client = bank_of_canada::Client::new().unwrap();
+        let rates = client.observations("FXUSDCAD", "2026-01-01").unwrap();
+        let latest = rates.last().expect("at least one observation this year");
+        assert!((1.0..2.0).contains(&latest.rate), "{latest:?}");
+        assert!(rates.windows(2).all(|pair| pair[0].date < pair[1].date));
+    }
+
     #[test]
     fn daily_client_refuses_symbols_it_cannot_map_without_a_request() {
         let client =

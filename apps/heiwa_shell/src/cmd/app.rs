@@ -1566,6 +1566,28 @@ async fn handle_connection(
         .await;
     }
 
+    if method == "POST" && path == "/api/v1/finance/sync" {
+        let result = tokio::task::spawn_blocking(crate::cmd::finance::sync_blocking)
+            .await
+            .map_err(|_| anyhow!("Finance sync stopped unexpectedly"))
+            .and_then(|result| result);
+        let (status, payload) = match result {
+            Ok(data) => (200, json!({"ok": true, "data": data})),
+            Err(error) => (
+                400,
+                json!({"ok": false, "error": {"code": "finance_sync_failed", "message": error.to_string()}}),
+            ),
+        };
+        return write_response(
+            &mut stream,
+            status,
+            "application/json",
+            payload.to_string().into_bytes(),
+            false,
+        )
+        .await;
+    }
+
     if method == "POST" && path == "/api/v1/calendar/read" {
         let request = serde_json::from_str::<super::calendar_read::ReadRequest>(&body);
         let result = match request {
@@ -1897,6 +1919,11 @@ fn is_operator_api_path(path: &str) -> bool {
 
 fn is_runtime_authenticated_request(method: &str, path: &str) -> bool {
     if is_operator_api_path(path) || matches!(path, "/api/v1/repl" | "/api/v1/repl/stream") {
+        return true;
+    }
+    // Finance read models carry balances and holdings: authenticated for
+    // every method, reads included.
+    if path == "/api/v1/finance" || path.starts_with("/api/v1/finance/") {
         return true;
     }
     path.starts_with("/api/v1/")
@@ -3605,6 +3632,7 @@ fn api_payload_for_port(path: &str, started_at: &str, app_port: u16) -> Option<V
             crate::cmd::calendar::apple_calendar_resources_payload_or_error()
         }
         "/api/v1/mail/summary" => crate::cmd::mail::summary_payload(),
+        "/api/v1/finance/summary" => crate::cmd::finance::summary_payload(),
         "/api/v1/automations" => crate::cmd::auto::automations_payload(),
         "/api/v1/receipts" => receipts_payload_for_state_dir(&state_dir()),
         "/api/v1/connectors" => crate::cmd::connectors::connectors_payload(),
@@ -6502,6 +6530,25 @@ mod app_readmodel_tests {
         ));
         assert!(!is_runtime_authenticated_request("GET", "/api/v1/status"));
         assert!(!is_runtime_authenticated_request("GET", "/"));
+    }
+
+    #[test]
+    fn finance_read_models_require_runtime_auth_even_for_reads() {
+        for method in ["GET", "HEAD", "POST"] {
+            assert!(is_runtime_authenticated_request(
+                method,
+                "/api/v1/finance/summary"
+            ));
+            assert!(is_runtime_authenticated_request(
+                method,
+                "/api/v1/finance/sync"
+            ));
+        }
+        assert!(is_runtime_authenticated_request("GET", "/api/v1/finance"));
+        assert!(!is_runtime_authenticated_request(
+            "GET",
+            "/api/v1/financeish"
+        ));
     }
 
     async fn written_status_line(status: u16) -> String {

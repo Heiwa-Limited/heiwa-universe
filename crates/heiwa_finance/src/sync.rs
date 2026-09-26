@@ -24,6 +24,9 @@ pub struct SyncOptions {
     pub max_bar_requests: usize,
     /// A bar series fetched more recently than this is not fetched again.
     pub bar_refresh_hours: i64,
+    /// Problems the caller found before the sync (a credential missing from
+    /// the vault, say); reported, and counted in the outcome.
+    pub preflight_issues: Vec<SourceIssue>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -45,10 +48,12 @@ pub fn sync(
     let mut status = store.load_sync_status()?;
     let settings = store.load_settings()?;
     let mut counts = SyncCounts::default();
-    let mut issues = Vec::new();
+    let mut issues = options.preflight_issues.clone();
     let mut refreshed = false;
 
-    if sources.brokerage.is_none() && sources.fx.is_none() && sources.bars.is_none() {
+    let unconfigured =
+        sources.brokerage.is_none() && sources.fx.is_none() && sources.bars.is_none();
+    if unconfigured && issues.is_empty() {
         issues.push(SourceIssue {
             source: "Heiwa".into(),
             message: "No finance source is connected. Run `heiwa connect snaptrade` for brokerage accounts or `heiwa connect alpha-vantage` for market data.".into(),
@@ -347,6 +352,7 @@ mod tests {
             today: "2026-09-25".into(),
             max_bar_requests: 8,
             bar_refresh_hours: 20,
+            preflight_issues: Vec::new(),
         }
     }
 
@@ -602,6 +608,25 @@ mod tests {
             20
         ));
         assert!(!is_fresh(None, "2026-09-25T11:00:00Z", 20));
+    }
+
+    #[test]
+    fn preflight_issues_are_reported_instead_of_the_nothing_connected_hint() {
+        let (_dir, store) = temp_store();
+        let options = SyncOptions {
+            preflight_issues: vec![SourceIssue {
+                source: "SnapTrade".into(),
+                message:
+                    "the key is missing from the vault; reconnect with `heiwa connect snaptrade`"
+                        .into(),
+            }],
+            ..options()
+        };
+        let report = sync(&store, &Sources::default(), &options).unwrap();
+        assert_eq!(report.outcome, "error");
+        assert_eq!(report.issues.len(), 1);
+        assert_eq!(report.issues[0].source, "SnapTrade");
+        assert_eq!(store.load_sync_status().unwrap().issues, report.issues);
     }
 
     #[test]

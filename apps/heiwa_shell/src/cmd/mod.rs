@@ -9,6 +9,7 @@ pub mod capabilities;
 pub mod compress;
 pub mod connectors;
 pub mod cost;
+pub mod finance;
 pub mod goal;
 pub mod life;
 pub mod mail;

@@ -988,6 +988,9 @@ fn print_help() {
     println!("  auto status|create|tick       Manage local background automations");
     println!("  approvals list|show|decide    Manage local approval packets");
     println!("  mail status|accounts          Mail.app metadata-only bridge probe");
+    println!(
+        "  finance status|sync|summary   Read-only brokerage accounts and prices (never trades)"
+    );
     println!("  setup [--name <name>]         First-run setup: identity, provider, readiness");
     println!("  whoami                        Show this installation's local identity");
     println!("  ask <prompt>                  Run one non-interactive turn and print the reply");
