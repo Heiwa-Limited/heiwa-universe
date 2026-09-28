@@ -55,25 +55,25 @@ pub struct VerifierDef {
 pub const VERIFIERS: &[VerifierDef] = &[
     VerifierDef {
         id: "symbols-present",
-        version: "2",
+        version: "3",
         kind: VerifierKind::SymbolsPresent,
         description: "Every named symbol appears in at least one file under the claim's scope.",
     },
     VerifierDef {
         id: "text-absent",
-        version: "2",
+        version: "3",
         kind: VerifierKind::TextAbsent,
         description: "No named pattern appears in any file under the claim's scope.",
     },
     VerifierDef {
         id: "cargo-test",
-        version: "2",
+        version: "3",
         kind: VerifierKind::CargoTest,
         description: "`cargo test -p <package>` passes for one declared workspace member.",
     },
     VerifierDef {
         id: "l0-acceptance",
-        version: "2",
+        version: "3",
         kind: VerifierKind::Script {
             program: "bash",
             args: &["scripts/check_l0_acceptance.sh"],
@@ -82,7 +82,7 @@ pub const VERIFIERS: &[VerifierDef] = &[
     },
     VerifierDef {
         id: "l1-acceptance",
-        version: "2",
+        version: "3",
         kind: VerifierKind::Script {
             program: "bash",
             args: &["scripts/check_l1_acceptance.sh"],
@@ -91,7 +91,7 @@ pub const VERIFIERS: &[VerifierDef] = &[
     },
     VerifierDef {
         id: "l2-acceptance",
-        version: "2",
+        version: "3",
         kind: VerifierKind::Script {
             program: "bash",
             args: &["scripts/check_l2_acceptance.sh"],
@@ -100,7 +100,7 @@ pub const VERIFIERS: &[VerifierDef] = &[
     },
     VerifierDef {
         id: "agent-baseline",
-        version: "2",
+        version: "3",
         kind: VerifierKind::Script {
             program: "bash",
             args: &["scripts/check_agent_baseline.sh"],

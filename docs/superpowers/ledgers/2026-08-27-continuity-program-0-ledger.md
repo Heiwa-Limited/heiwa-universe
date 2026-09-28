@@ -113,3 +113,12 @@ without the requirement digest degrade and must be regenerated.
 and claim-gate portability checks pass locally. All eight seed claims were reverified at `be0cebe3`; `bash scripts/check_claims.sh`
 passes with requirement-bound evidence (claims 40 tests, Work 40, receipts 24). Local records detect
 staleness; they are not signed attestations or independent release proof.
+
+Peer review also found dirty inputs outside a command verifier's declared scope,
+untracked files hidden by user Git settings, missing Cargo dependency scopes,
+and fixture commits inheriting signing configuration. Command verifiers now
+require a clean repository except evidence records, explicit untracked checks,
+and complete local Cargo dependency/build scopes. Fixtures disable signing and
+hooks locally. Non-regular entries remain visible to the read model but cannot
+be verified; file modes participate in scope digests. Final source/evidence
+refresh follows these repairs before promotion.

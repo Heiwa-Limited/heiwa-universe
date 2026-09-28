@@ -200,7 +200,11 @@ pub fn verify(repo_root: &Path, claim: &Claim) -> Result<EvidenceRecord> {
             "claim requirements do not match HEAD".into(),
         ));
     }
+    manifest::validate_cargo_scope(repo_root, claim)?;
     let entries = scope::resolve_at(repo_root, &claim.scope, &head)?;
+    for entry in &entries {
+        scope::require_regular(entry)?;
+    }
     let mut inputs = claim.scope.clone();
     // Evidence writes are deliberately excluded so sequential verification converges.
     inputs.extend(
@@ -209,8 +213,13 @@ pub fn verify(repo_root: &Path, claim: &Claim) -> Result<EvidenceRecord> {
             .filter(|e| e.path.ends_with(".toml"))
             .map(|e| e.path),
     );
+    let execution = matches!(
+        def.kind,
+        VerifierKind::CargoTest | VerifierKind::Script { .. }
+    );
     let require_clean = || -> Result<()> {
-        let dirty = dirty_scope_paths(repo_root, &inputs)?;
+        let checked_paths = if execution { &[][..] } else { &inputs[..] };
+        let dirty = dirty_scope_paths(repo_root, checked_paths, execution)?;
         if !dirty.is_empty() {
             return Err(ClaimError::DirtyScope(dirty.join(", ")));
         }
@@ -243,13 +252,19 @@ pub fn verify(repo_root: &Path, claim: &Claim) -> Result<EvidenceRecord> {
     Ok(record)
 }
 
-fn dirty_scope_paths(repo_root: &Path, scope: &[String]) -> Result<Vec<String>> {
+fn dirty_scope_paths(
+    repo_root: &Path,
+    scope: &[String],
+    exempt_evidence: bool,
+) -> Result<Vec<String>> {
     let mut cmd = Command::new("git");
     cmd.arg("--literal-pathspecs")
         .arg("-C")
         .arg(repo_root)
         .arg("status")
-        .arg("--porcelain")
+        .arg("--porcelain=v1")
+        .arg("-z")
+        .arg("--untracked-files=all")
         .arg("--");
     for path in scope {
         cmd.arg(path);
@@ -263,9 +278,15 @@ fn dirty_scope_paths(repo_root: &Path, scope: &[String]) -> Result<Vec<String>> 
         ));
     }
     Ok(String::from_utf8_lossy(&out.stdout)
-        .lines()
-        .map(|l| l.trim().to_string())
-        .filter(|l| !l.is_empty())
+        .split('\0')
+        .filter(|record| !record.is_empty())
+        .filter(|record| {
+            !exempt_evidence
+                || !record
+                    .get(3..)
+                    .is_some_and(|path| path.starts_with("claims/evidence/"))
+        })
+        .map(str::to_string)
         .collect())
 }
 

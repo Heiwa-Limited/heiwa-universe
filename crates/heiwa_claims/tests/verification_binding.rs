@@ -48,6 +48,8 @@ verifier_id = "{verifier}"
     )
     .unwrap();
     git(root, &["init", "-q"]);
+    git(root, &["config", "commit.gpgsign", "false"]);
+    git(root, &["config", "core.hooksPath", ".git/empty-test-hooks"]);
     git(root, &["config", "user.email", "claims@example.test"]);
     git(root, &["config", "user.name", "Claim Test"]);
     commit(root);
@@ -169,4 +171,59 @@ fn text_verification_does_not_follow_tracked_symlinks() {
     let claim = Registry::load(root).unwrap().claims.remove(0);
     assert!(verify(root, &claim).is_err());
     assert!(evidence::load(root, &claim.claim_id).is_none());
+}
+
+#[test]
+fn execution_verifiers_refuse_dirty_or_untracked_inputs_outside_declared_scope() {
+    for (script, untracked, hide_untracked) in [
+        ("grep -q ok data/outside.txt\n", false, false),
+        ("test -f data/new.txt\n", true, false),
+        ("test -f src/new.txt\n", true, true),
+    ] {
+        let dir = repository("l0-acceptance", "");
+        let root = dir.path();
+        fs::create_dir(root.join("data")).unwrap();
+        fs::write(root.join("data/outside.txt"), "no").unwrap();
+        fs::write(root.join("scripts/check_l0_acceptance.sh"), script).unwrap();
+        commit(root);
+        if hide_untracked {
+            git(root, &["config", "status.showUntrackedFiles", "no"]);
+        }
+        let input = if hide_untracked {
+            "src/new.txt"
+        } else if untracked {
+            "data/new.txt"
+        } else {
+            "data/outside.txt"
+        };
+        fs::write(root.join(input), "ok").unwrap();
+        let claim = Registry::load(root).unwrap().claims.remove(0);
+        assert!(
+            verify(root, &claim).is_err(),
+            "accepted uncommitted input: {input}"
+        );
+        assert!(evidence::load(root, &claim.claim_id).is_none());
+    }
+}
+
+#[test]
+#[cfg(unix)]
+fn an_unsupported_scope_does_not_hide_other_claims() {
+    let dir = repository("symbols-present", "params = { symbols = [\"original\"] }");
+    let root = dir.path();
+    fs::create_dir(root.join("links")).unwrap();
+    std::os::unix::fs::symlink("../src/input.txt", root.join("links/fixture")).unwrap();
+    let path = root.join("claims/test.toml");
+    let first = fs::read_to_string(&path).unwrap();
+    let second = first
+        .replace("test.proof", "test.symlink")
+        .replace("[\"src\", \"scripts\"]", "[\"links\"]");
+    fs::write(path, first + &second).unwrap();
+    commit(root);
+    let registry = Registry::load(root).unwrap();
+    let reports = evaluate(root, &registry).expect("one unsupported claim must not hide its peers");
+    assert_eq!(reports.len(), 2);
+    assert_eq!(reports[0].claim_id, "test.proof");
+    assert_ne!(reports[1].state, ClaimState::Verified);
+    assert!(verify(root, &registry.claims[1]).is_err());
 }

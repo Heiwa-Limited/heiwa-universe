@@ -22,6 +22,7 @@ use crate::ClaimError;
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
 pub struct ScopeEntry {
     pub path: String,
+    pub mode: String,
     pub blob: String,
 }
 
@@ -70,17 +71,13 @@ pub(crate) fn resolve_at(
             None => continue,
         };
         let fields: Vec<_> = meta.split_whitespace().collect();
-        if !matches!(fields.first().copied(), Some("100644" | "100755")) {
-            return Err(ClaimError::Manifest(format!(
-                "scope contains non-regular tracked file `{path}`"
-            )));
-        }
         let blob = match meta.split_whitespace().nth(2) {
             Some(blob) => blob,
             None => continue,
         };
         entries.push(ScopeEntry {
             path: path.to_string(),
+            mode: fields.first().unwrap_or(&"").to_string(),
             blob: blob.to_string(),
         });
     }
@@ -91,6 +88,7 @@ pub(crate) fn resolve_at(
 
 /// Read the object actually fingerprinted, never a working-tree symlink or file.
 pub(crate) fn read_text(repo_root: &Path, entry: &ScopeEntry) -> Result<String, ClaimError> {
+    require_regular(entry)?;
     let out = Command::new("git")
         .arg("-C")
         .arg(repo_root)
@@ -108,6 +106,16 @@ pub(crate) fn read_text(repo_root: &Path, entry: &ScopeEntry) -> Result<String, 
         .map_err(|_| ClaimError::Io(format!("{} is not UTF-8 text", entry.path)))
 }
 
+pub(crate) fn require_regular(entry: &ScopeEntry) -> Result<(), ClaimError> {
+    if !matches!(entry.mode.as_str(), "100644" | "100755") {
+        return Err(ClaimError::Manifest(format!(
+            "scope contains non-regular tracked file `{}`",
+            entry.path
+        )));
+    }
+    Ok(())
+}
+
 /// Digest a resolved scope.
 ///
 /// Path is folded in alongside content so that moving a file invalidates the
@@ -117,6 +125,8 @@ pub fn digest(entries: &[ScopeEntry]) -> String {
     let mut hasher = Sha256::new();
     for entry in entries {
         hasher.update(entry.path.as_bytes());
+        hasher.update(b"\0");
+        hasher.update(entry.mode.as_bytes());
         hasher.update(b"\0");
         hasher.update(entry.blob.as_bytes());
         hasher.update(b"\n");

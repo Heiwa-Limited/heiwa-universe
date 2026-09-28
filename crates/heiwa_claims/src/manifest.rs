@@ -6,8 +6,8 @@
 //! where prose can declare itself verified is the failure this crate exists to
 //! prevent.
 
-use std::collections::BTreeMap;
-use std::path::Path;
+use std::collections::{BTreeMap, BTreeSet};
+use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
@@ -187,6 +187,7 @@ impl Registry {
             }
             let def = claim.verifier()?;
             claim.params.validate(def, &workspace_packages)?;
+            validate_cargo_scope(repo_root, claim)?;
         }
 
         claims.sort_by(|a, b| a.claim_id.cmp(&b.claim_id));
@@ -217,4 +218,105 @@ impl Registry {
     pub fn get(&self, claim_id: &str) -> Option<&Claim> {
         self.claims.iter().find(|c| c.claim_id == claim_id)
     }
+}
+
+/// Cargo reads local dependencies and workspace configuration outside the
+/// selected package. Refuse an authored scope that omits those known inputs.
+/// Arbitrary extra files read by a build script still belong in the claim.
+pub(crate) fn validate_cargo_scope(repo_root: &Path, claim: &Claim) -> Result<(), ClaimError> {
+    if claim.verifier()?.kind != crate::VerifierKind::CargoTest {
+        return Ok(());
+    }
+    let package = claim
+        .params
+        .package
+        .as_deref()
+        .ok_or_else(|| ClaimError::Params("cargo-test requires a package".into()))?;
+    let packages = crate::workspace_packages(repo_root)?;
+    let member = packages
+        .get(package)
+        .ok_or_else(|| ClaimError::Params(format!("unknown workspace package `{package}`")))?;
+    let root = repo_root
+        .canonicalize()
+        .map_err(|e| ClaimError::Io(e.to_string()))?;
+    let root_manifest = read_cargo_manifest(&root.join("Cargo.toml"))?;
+    let inherited = root_manifest
+        .get("workspace")
+        .and_then(|v| v.get("dependencies"));
+    let mut pending = vec![root.join(member)];
+    let mut visited = BTreeSet::new();
+    let mut required: BTreeSet<String> =
+        ["Cargo.toml", "Cargo.lock", "rust-toolchain.toml", ".cargo"]
+            .into_iter()
+            .map(str::to_string)
+            .collect();
+    while let Some(directory) = pending.pop() {
+        let directory = directory
+            .canonicalize()
+            .map_err(|e| ClaimError::Io(format!("{}: {e}", directory.display())))?;
+        if !visited.insert(directory.clone()) {
+            continue;
+        }
+        let relative = directory.strip_prefix(&root).map_err(|_| {
+            ClaimError::Manifest("cargo claim depends on source outside the repository".into())
+        })?;
+        required.insert(relative.to_string_lossy().replace('\\', "/"));
+        let manifest = read_cargo_manifest(&directory.join("Cargo.toml"))?;
+        collect_path_dependencies(&manifest, &directory, &root, inherited, &mut pending)?;
+        if let Some(targets) = manifest.get("target").and_then(toml::Value::as_table) {
+            for target in targets.values() {
+                collect_path_dependencies(target, &directory, &root, inherited, &mut pending)?;
+            }
+        }
+    }
+    for path in required {
+        let covered = claim.scope.iter().any(|scope| {
+            let scope = scope.trim_end_matches('/');
+            path == scope || path.starts_with(&format!("{scope}/"))
+        });
+        if !covered {
+            return Err(ClaimError::Manifest(format!(
+                "claim `{}` omits Cargo input `{path}` from scope",
+                claim.claim_id
+            )));
+        }
+    }
+    Ok(())
+}
+
+fn read_cargo_manifest(path: &Path) -> Result<toml::Value, ClaimError> {
+    let text = std::fs::read_to_string(path)
+        .map_err(|e| ClaimError::Io(format!("{}: {e}", path.display())))?;
+    toml::from_str(&text).map_err(|e| ClaimError::Manifest(format!("{}: {e}", path.display())))
+}
+
+fn collect_path_dependencies(
+    manifest: &toml::Value,
+    directory: &Path,
+    root: &Path,
+    inherited: Option<&toml::Value>,
+    pending: &mut Vec<PathBuf>,
+) -> Result<(), ClaimError> {
+    for section in ["dependencies", "dev-dependencies", "build-dependencies"] {
+        let Some(dependencies) = manifest.get(section).and_then(toml::Value::as_table) else {
+            continue;
+        };
+        for (name, declared) in dependencies {
+            let (dependency, base) =
+                if declared.get("workspace").and_then(toml::Value::as_bool) == Some(true) {
+                    (
+                        inherited.and_then(|v| v.get(name)).ok_or_else(|| {
+                            ClaimError::Manifest(format!("missing workspace dependency `{name}`"))
+                        })?,
+                        root,
+                    )
+                } else {
+                    (declared, directory)
+                };
+            if let Some(path) = dependency.get("path").and_then(toml::Value::as_str) {
+                pending.push(base.join(path));
+            }
+        }
+    }
+    Ok(())
 }

@@ -28,6 +28,8 @@ fn repository() -> tempfile::TempDir {
     fs::write(root.join("src/tracked.txt"), "committed\n").unwrap();
 
     git(root, &["init", "-q"]);
+    git(root, &["config", "commit.gpgsign", "false"]);
+    git(root, &["config", "core.hooksPath", ".git/empty-test-hooks"]);
     git(root, &["config", "user.email", "claims@example.test"]);
     git(root, &["config", "user.name", "Heiwa Claims Test"]);
     git(root, &["add", "."]);

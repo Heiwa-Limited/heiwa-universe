@@ -37,7 +37,7 @@ claim_id = "demo.one"
 subject = "crates/demo"
 claim = "demo builds"
 required_state = "verified"
-scope = ["crates/demo"]
+scope = ["crates/demo", "Cargo.toml", "Cargo.lock", "rust-toolchain.toml", ".cargo"]
 verifier_id = "cargo-test"
 params = {{ package = "demo" }}
 {extra}
@@ -64,7 +64,7 @@ claim_id = "demo.one"
 subject = "crates/demo"
 claim = "demo builds"
 required_state = "verified"
-scope = ["crates/demo"]
+scope = ["crates/demo", "Cargo.toml", "Cargo.lock", "rust-toolchain.toml", ".cargo"]
 verifier_id = "make-it-so"
 "#,
     );
@@ -129,7 +129,7 @@ claim_id = "demo.one"
 subject = "crates/demo"
 claim = "demo builds"
 required_state = "verified"
-scope = ["crates/demo"]
+scope = ["crates/demo", "Cargo.toml", "Cargo.lock", "rust-toolchain.toml", ".cargo"]
 verifier_id = "cargo-test"
 params = { package = "not_a_member" }
 "#,
@@ -225,7 +225,7 @@ claim_id = "demo.one"
 subject = "x"
 claim = "x"
 required_state = "verified"
-scope = ["claims/test.toml"]
+scope = ["claims/test.toml", "crates/demo", "Cargo.toml", "Cargo.lock", "rust-toolchain.toml", ".cargo"]
 verifier_id = "cargo-test"
 params = { package = "demo" }
 "#,
@@ -239,5 +239,41 @@ fn claim_ids_are_validated_before_becoming_evidence_paths() {
         let dir = scaffold(&valid_claim("").replace("demo.one", bad));
         assert!(Registry::load(dir.path()).is_err(), "accepted {bad:?}");
         assert!(evidence::path_for(dir.path(), bad).is_err());
+    }
+}
+
+#[test]
+fn cargo_claims_cover_local_dependencies_and_build_configuration() {
+    let dir = scaffold(&valid_claim(""));
+    let root = dir.path();
+    fs::write(root.join("Cargo.toml"), "[workspace]\nmembers = [\"crates/demo\", \"crates/helper\"]\n[workspace.dependencies]\nalias = { package = \"helper\", path = \"crates/helper\" }\n").unwrap();
+    fs::create_dir_all(root.join("crates/helper")).unwrap();
+    fs::write(
+        root.join("crates/helper/Cargo.toml"),
+        "[package]\nname = \"helper\"\nversion = \"0.1.0\"\n",
+    )
+    .unwrap();
+    let demo = root.join("crates/demo/Cargo.toml");
+    fs::write(
+        &demo,
+        fs::read_to_string(&demo).unwrap() + "\n[dev-dependencies]\nalias = { workspace = true }\n",
+    )
+    .unwrap();
+    assert!(
+        Registry::load(root).is_err(),
+        "unbound local dev dependency was admitted"
+    );
+    let complete = valid_claim("").replace("scope = [", "scope = [\"crates/helper\", ");
+    fs::write(root.join("claims/test.toml"), complete).unwrap();
+    Registry::load(root).expect("complete dependency closure");
+}
+
+#[test]
+fn cargo_claims_cannot_omit_workspace_build_configuration() {
+    for input in ["Cargo.toml", "Cargo.lock", "rust-toolchain.toml", ".cargo"] {
+        let manifest = valid_claim("").replace(&format!(", \"{input}\""), "");
+        let dir = scaffold(&manifest);
+        let error = Registry::load(dir.path()).unwrap_err().to_string();
+        assert!(error.contains(input), "{error}");
     }
 }
