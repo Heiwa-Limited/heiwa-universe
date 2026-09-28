@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-herd-pane-run"
+description = "Enables the herd_pane_run command without any pre-configured scope."
+commands.allow = ["herd_pane_run"]
+
+[[permission]]
+identifier = "deny-herd-pane-run"
+description = "Denies the herd_pane_run command without any pre-configured scope."
+commands.deny = ["herd_pane_run"]

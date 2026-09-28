@@ -61,7 +61,8 @@ impl TestRuntime {
             .env_remove("HEIWA_HOME")
             .env("HEIWA_EVIDENCE_DIR", evidence.path())
             .env("HEIWA_OLLAMA_BASE", override_endpoint)
-            .env_remove("HEIWA_MACHINE_AUTH_TOKEN")
+            // L-007: every /api/ path now requires auth, including this one.
+            .env("HEIWA_MACHINE_AUTH_TOKEN", TOKEN)
             .env_remove("HEIWA_AUTH_TOKEN")
             .env_remove("HEIWA_JWT_SIGNING_SECRET")
             .env_remove("HEIWA_AUTH_SECRET")
@@ -354,7 +355,12 @@ fn attacker_loopback_host_cannot_relay_authenticated_post_or_websocket() {
         })
         .to_string(),
     );
-    assert_eq!(post.status, 401, "{}", post.body);
+    // L-007: the pre-routing Host gate now rejects a foreign Host before any
+    // handler or auth check runs at all, so this is a 403 invalid_host, not
+    // the narrower (and later-running) 401 the old per-path Origin check
+    // alone produced.
+    assert_eq!(post.status, 403, "{}", post.body);
+    assert_eq!(post.body["error"]["code"], "invalid_host");
     assert_eq!(runtime.calendar_hold_count(), 0);
 
     let ws = websocket_handshake_with_host(
@@ -363,8 +369,9 @@ fn attacker_loopback_host_cannot_relay_authenticated_post_or_websocket() {
         "/ws/v1/operator",
         &format!("Authorization: Bearer {TOKEN}\r\n"),
     );
-    assert_eq!(ws.status, 401, "{}", ws.head);
+    assert_eq!(ws.status, 403, "{}", ws.head);
     assert!(!ws.head.contains("101 Switching Protocols"));
+    assert_eq!(ws.body["error"]["code"], "invalid_host");
 }
 
 #[test]
@@ -686,7 +693,12 @@ fn ollama_models_payload_uses_child_override_before_stored_live_endpoint() {
 
     let runtime =
         TestRuntime::start_with_ollama_override(&override_endpoint, "http://127.0.0.1:11434");
-    let response = runtime.request("GET", "/api/v1/providers/ollama/models", None, json!(null));
+    let response = runtime.request(
+        "GET",
+        "/api/v1/providers/ollama/models",
+        Some(TOKEN),
+        json!(null),
+    );
 
     assert_eq!(response.status, 200, "{}", response.body);
     assert_eq!(
