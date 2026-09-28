@@ -13,6 +13,8 @@ use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output};
 
+mod cli_v1;
+
 const PLAN_ID: &str = "operator-2026-09";
 
 fn marker(key: &str) -> String {
@@ -112,6 +114,17 @@ esac
             String::from_utf8_lossy(&output.stderr)
         );
         serde_json::from_slice(&output.stdout).expect("JSON output")
+    }
+
+    /// `data` of a successful `heiwa.cli/v1` command.
+    fn v1_json(&self, args: &[&str]) -> Value {
+        let output = self.run(args);
+        assert!(
+            output.status.success(),
+            "heiwa {args:?} failed: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        cli_v1::data(&output.stdout)
     }
 
     fn connect(&self) {
@@ -237,14 +250,14 @@ fn one_approval_applies_only_the_delta_in_one_batch_with_a_replayable_receipt() 
         ),
     ]));
 
-    let diff = f.ok_json(&["calendar", "plan", "diff", f.plan_path(), "--json"]);
+    let diff = f.v1_json(&["calendar", "plan", "diff", f.plan_path(), "--json"]);
     assert_eq!(
         diff["counts"],
         json!({"create": 1, "update": 1, "delete": 1, "adopt": 0, "unchanged": 1})
     );
     assert!(f.helper_calls("plan_apply").is_empty(), "diff never writes");
 
-    let staged = f.ok_json(&["calendar", "plan", "stage", f.plan_path(), "--json"]);
+    let staged = f.v1_json(&["calendar", "plan", "stage", f.plan_path(), "--json"]);
     assert_eq!(staged["in_sync"], false);
     let request_id = staged["approval_request"]["request_id"]
         .as_str()
@@ -331,7 +344,7 @@ fn one_approval_applies_only_the_delta_in_one_batch_with_a_replayable_receipt() 
             "ek-open"
         ),
     ]));
-    let again = f.ok_json(&["calendar", "plan", "stage", f.plan_path(), "--json"]);
+    let again = f.v1_json(&["calendar", "plan", "stage", f.plan_path(), "--json"]);
     assert_eq!(again["in_sync"], true);
 }
 
@@ -346,7 +359,7 @@ fn approval_refuses_to_write_when_the_calendar_drifted_after_staging() {
         "2026-09-14T12:00:00-07:00"
     )]));
     f.write_scan(json!([]));
-    let staged = f.ok_json(&["calendar", "plan", "stage", f.plan_path(), "--json"]);
+    let staged = f.v1_json(&["calendar", "plan", "stage", f.plan_path(), "--json"]);
     let request_id = staged["approval_request"]["request_id"]
         .as_str()
         .unwrap()

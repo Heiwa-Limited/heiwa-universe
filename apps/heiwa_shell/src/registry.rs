@@ -69,11 +69,14 @@ pub const COMMANDS: &[CommandSpec] = &[
     command("receipts", "receipts", "Show run receipt status"),
     command("cost", "cost", "Token and cost totals from local receipts"),
     command("compress", "compress [--text|--file] [--json]", "Compress text with a local model"),
-    command(
-        "calendar",
-        "calendar status|sync|hold|plan",
-        "Calendar lanes, local holds, and plan sync",
-    ),
+    CommandSpec {
+        v1: &["calendar plan diff", "calendar plan stage"],
+        ..command(
+            "calendar",
+            "calendar status|sync|hold|plan",
+            "Calendar lanes, local holds, and plan sync",
+        )
+    },
     command("schedule", "schedule <text>", "Turn free text into a staged calendar hold"),
     command("mail", "mail status|accounts", "Mail.app metadata-only bridge probe"),
     command(
