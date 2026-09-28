@@ -134,17 +134,28 @@ pub fn catalog_json() -> Value {
     })
 }
 
+/// Human catalog. Written line by line through `print_line`, so
+/// `heiwa help | head` stops quietly instead of panicking on a closed pipe.
 pub fn print_help() {
-    println!("Heiwa — BYOK terminal agent");
-    println!();
-    println!("Usage: heiwa [COMMAND]");
-    println!();
-    println!("Commands:");
-    for command in COMMANDS {
-        println!("  {:<44} {}", command.usage, command.summary);
+    let header = [
+        "Heiwa — BYOK terminal agent".to_string(),
+        String::new(),
+        "Usage: heiwa [COMMAND]".to_string(),
+        String::new(),
+        "Commands:".to_string(),
+    ];
+    let rows = COMMANDS
+        .iter()
+        .map(|command| format!("  {:<44} {}", command.usage, command.summary));
+    let footer = [
+        String::new(),
+        "Machine-readable catalog: heiwa help --json".to_string(),
+    ];
+    for line in header.into_iter().chain(rows).chain(footer) {
+        if !matches!(crate::output::print_line(&line), Ok(true)) {
+            break;
+        }
     }
-    println!();
-    println!("Machine-readable catalog: heiwa help --json");
 }
 
 /// `heiwa help [--json]`.

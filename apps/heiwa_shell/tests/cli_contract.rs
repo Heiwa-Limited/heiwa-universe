@@ -222,3 +222,24 @@ fn a_closed_pipe_ends_the_stream_without_a_panic() {
     assert!(!stderr.contains("panicked"), "{stderr}");
     assert!(output.status.success(), "{stderr}");
 }
+
+#[test]
+fn help_survives_a_closed_pipe() {
+    let home = tempfile::tempdir().expect("home");
+    let mut child = Command::new(env!("CARGO_BIN_EXE_heiwa"))
+        .env_clear()
+        .env("HOME", home.path())
+        .env("HEIWA_HOME", home.path().join(".heiwa"))
+        .env("PATH", "/usr/bin:/bin")
+        .env("LANG", "C")
+        .arg("help")
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .spawn()
+        .expect("spawn heiwa");
+    drop(child.stdout.take());
+    let output = child.wait_with_output().expect("wait");
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(!stderr.contains("panicked"), "{stderr}");
+    assert!(output.status.success(), "{stderr}");
+}
