@@ -1,0 +1,31 @@
+{
+  "$schema": "./schema/connector.schema.json",
+  "id": "alpha_vantage",
+  "name": "Alpha Vantage",
+  "vendor": "Alpha Vantage Inc.",
+  "summary": "Daily prices for TSX (.TRT), TSX Venture (.TRV), and US listings with the user's own API key. Public market data only; no user account data.",
+  "support_level": "official_api",
+  "auth": ["api_key"],
+  "revocation_path": "Request a new key at https://www.alphavantage.co/support/#api-key to retire the old one; `heiwa connect alpha-vantage --disconnect` removes the local copy.",
+  "receipt_required": true,
+  "claim_aliases": ["Alpha Vantage"],
+  "source_notes": [
+    {
+      "title": "Alpha Vantage API documentation (TIME_SERIES_DAILY, Toronto Stock Exchange symbols)",
+      "url": "https://www.alphavantage.co/documentation/"
+    }
+  ],
+  "capabilities": [
+    {
+      "id": "market.daily_bars.read",
+      "description": "Read the latest ~100 daily bars for a symbol (the free tier's compact window) into local price history.",
+      "risk_class": "silent",
+      "receipt_required": true,
+      "support_status": "target",
+      "side_effect": "read",
+      "permission_notes": "Any Alpha Vantage key. The free tier allows 25 requests a day; full history requires a premium key.",
+      "scopes": ["market.daily_bars.read"],
+      "rate_hint": "Free tier: 25 requests/day. Heiwa spends at most 8 per sync and skips series fetched in the last 20 hours."
+    }
+  ]
+}

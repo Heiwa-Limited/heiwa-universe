@@ -149,6 +149,11 @@ pub const COMMANDS: &[CommandSpec] = &[
         "Mail.app metadata-only bridge probe",
     ),
     command(
+        "finance",
+        "finance status|summary|sync",
+        "Read-only brokerage accounts and prices (never trades)",
+    ),
+    command(
         "life",
         "life status|today|freshness|approvals|import",
         "Inspect and import life read models",

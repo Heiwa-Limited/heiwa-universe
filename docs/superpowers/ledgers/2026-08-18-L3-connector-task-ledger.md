@@ -18,10 +18,16 @@ when its verification runs.
 | 6 | Google Calendar read/write | blocked (external setup) | offline caller path is wired; needs Google account 2-step verification and a Desktop OAuth client id for live acceptance |
 | 5b | Calendar plans: many events, one approval, one EventKit commit (AD-31) | **done (hermetic)** | 2026-09-13: `cargo test -p heiwa-shell --test calendar_plan_sync` 3/3 (delta-only single batch, replay without rewrite, `in_sync` after apply, drift refusal writes nothing, invalid plans rejected before any read); `calendar_plan` unit tests 4/4; `apple_calendar_connector` 9/9 and `calendar_sync` still green; heiwa-shell unit suite 242/242. Live EventKit acceptance pending Full Calendar access for the Heiwa helper |
 | 7 | `gmail.send` on the same path | pending | needs Google setup plus an approval-backed sender; Gmail reads remain local through Mail.app |
+| 8 | Finance read plane: `heiwa_finance` (SnapTrade Personal read-only, Bank of Canada FX, Alpha Vantage bars, private store, analytics), `heiwa finance`, `heiwa connect snaptrade\|alpha-vantage`, `/api/v1/finance/*`, desktop Finance surface | **done (hermetic)** | 2026-09-25: `cargo test -p heiwa_finance` 55/55; live Bank of Canada read (`-- --ignored live_`) 1/1; `heiwa-shell --test finance_cli` 7/7; desktop vitest 201/201 and `tsc --noEmit`; manifests pass `validate_connector_manifests.py`; checkout runtime on 7475: unauthenticated `GET /api/v1/finance/summary` → 401, authenticated → `heiwa_finance_summary_v1`. Contract: `docs/superpowers/specs/2026-09-25-L3-finance-read-plane.md` |
+| 9 | Live finance acceptance | pending (external setup) | needs a SnapTrade Personal key with a linked brokerage and an Alpha Vantage key; after one successful `heiwa finance sync`, move the manifests' read capabilities to `live` |
 
 Steps 1–5 establish the product-grade Mac-first connector without a Google
 account. Google and Gmail breadth remain separate work rather than an L3
 milestone blocker.
+
+Steps 8–9 are the finance lane (AD-37 to AD-41 in the finance spec). It is
+read-only by construction; trading and money movement are declared
+`forbidden` in `connectors/snaptrade.connector.json`.
 
 ## External dependency
 

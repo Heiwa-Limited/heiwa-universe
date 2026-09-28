@@ -93,10 +93,14 @@ export function createAppState(options: AppStateOptions = {}): AppState {
     {
       id: "finance",
       title: "Finance",
-      server: "finance sub-app",
-      state: "read model pending",
-      skills: ["cashflow", "debt plan", "receipt audit"],
-      tools: ["local docs", "calculators", "approval ledger"],
+      server: "finance read model",
+      state: runtime.finance()?.portfolio
+        ? "read-only · synced"
+        : runtime.finance()?.connections?.brokerage
+          ? "read-only · not synced"
+          : "not connected",
+      skills: ["holdings", "TFSA room", "benchmark shadow"],
+      tools: ["snaptrade.read", "market.read", "never trades"],
       personalization: [],
     },
     {

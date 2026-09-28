@@ -105,8 +105,10 @@ async fn connect(connector: &str, args: &[String]) -> Result<()> {
             println!("imap: configure Himalaya at ~/.config/himalaya/config.toml; Heiwa probes it read-only.");
             Ok(())
         }
+        "snaptrade" => crate::cmd::finance::connect_snaptrade(args).await,
+        "alpha_vantage" => crate::cmd::finance::connect_alpha_vantage(args).await,
         other => Err(anyhow!(
-            "unknown connector: {other} (try: google-calendar, gmail, apple-calendar, apple-mail, imap)"
+            "unknown connector: {other} (try: google-calendar, gmail, apple-calendar, apple-mail, imap, snaptrade, alpha-vantage)"
         )),
     }
 }
@@ -304,7 +306,7 @@ pub(crate) fn disconnect_apple_calendar() -> Result<Value> {
     }))
 }
 
-fn write_owner_private_json<T: Serialize>(path: &Path, value: &T) -> Result<()> {
+pub(crate) fn write_owner_private_json<T: Serialize>(path: &Path, value: &T) -> Result<()> {
     let parent = path
         .parent()
         .ok_or_else(|| anyhow!("connector enrollment path has no parent"))?;
@@ -315,7 +317,7 @@ fn write_owner_private_json<T: Serialize>(path: &Path, value: &T) -> Result<()> 
         fs::set_permissions(parent, fs::Permissions::from_mode(0o700))?;
     }
     let temporary = parent.join(format!(
-        ".apple_calendar.{}.{}.tmp",
+        ".enrollment.{}.{}.tmp",
         std::process::id(),
         uuid::Uuid::new_v4().simple()
     ));
@@ -578,8 +580,15 @@ fn print_help() {
     println!("  heiwa connect google-calendar --authorize");
     println!("  heiwa connect google-calendar --disconnect");
     println!();
+    println!("  heiwa connect snaptrade [--client-id <id>]   (consumer key at a hidden prompt or on stdin)");
+    println!("  heiwa connect snaptrade --disconnect");
+    println!(
+        "  heiwa connect alpha-vantage                  (API key at a hidden prompt or on stdin)"
+    );
+    println!();
     println!("Google Calendar uses loopback PKCE with calendar.readonly.");
     println!("The public client id lands in node config; tokens stay in the OS credential vault.");
+    println!("SnapTrade and Alpha Vantage are read-only; Heiwa cannot trade or move money.");
 }
 
 // ---------------------------------------------------------------------------
@@ -755,6 +764,51 @@ pub(crate) fn connectors_payload() -> Value {
         "next_action": if imap_configured() { Value::Null } else {
             Value::String("configure ~/.config/himalaya/config.toml".into())
         },
+    }));
+
+    let finance_lane = |connector: &str| {
+        if crate::cmd::finance::is_enrolled(connector) {
+            "connected"
+        } else {
+            "needs_auth"
+        }
+    };
+    let snaptrade = finance_lane("snaptrade");
+    rows.push(json!({
+        "id": "snaptrade",
+        "kind": "finance",
+        "display_name": "SnapTrade (Wealthsimple and other brokerages)",
+        "status": snaptrade,
+        "auth_kind": "api_key",
+        "scopes": "finance.accounts.read finance.positions.read finance.activities.read",
+        "detail": "Read-only balances, positions, and transactions. Brokerages are linked in SnapTrade's portal; Heiwa never sees a brokerage password and cannot trade or move money.",
+        "next_action": if snaptrade == "connected" {
+            Value::String("heiwa finance sync".into())
+        } else {
+            Value::String("heiwa connect snaptrade".into())
+        },
+    }));
+    let alpha_vantage = finance_lane("alpha_vantage");
+    rows.push(json!({
+        "id": "alpha_vantage",
+        "kind": "market_data",
+        "display_name": "Alpha Vantage",
+        "status": alpha_vantage,
+        "auth_kind": "api_key",
+        "scopes": "market.daily_bars.read",
+        "detail": "Daily prices for TSX and US listings with your own key (free tier: 25 requests a day).",
+        "next_action": if alpha_vantage == "connected" { Value::Null } else {
+            Value::String("heiwa connect alpha-vantage".into())
+        },
+    }));
+    rows.push(json!({
+        "id": "bank_of_canada",
+        "kind": "market_data",
+        "display_name": "Bank of Canada Valet",
+        "status": "connected",
+        "auth_kind": "public",
+        "detail": "Official daily exchange rates against the Canadian dollar; no credential.",
+        "next_action": Value::Null,
     }));
 
     let mut counts = serde_json::Map::new();

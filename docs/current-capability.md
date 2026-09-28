@@ -92,7 +92,11 @@
 - iMessage as a productized ingress surface
 - broad computer-use automation
 - `Heiwa.app` as a fully native desktop runtime
-- live connector read models behind Finance and the broader Social surfaces
+- live connector read models behind the broader Social surfaces
+- the Finance lane as live: the read-only SnapTrade and Alpha Vantage lanes,
+  the authenticated finance read model, and the desktop Finance surface are
+  implemented and hermetically tested, but await live acceptance with a
+  user's own keys; Heiwa has no trading or money-movement path
 - the Browser surface as an actionable, approval-gated automation surface; it
   is an iframe until the L4 runtime-owned browser lands
 - cross-device evidence sync or a hosted state backbone
