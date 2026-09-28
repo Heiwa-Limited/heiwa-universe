@@ -65,7 +65,10 @@ pub const COMMANDS: &[CommandSpec] = &[
     },
     command("workspace", "workspace status|prepare", "Repository hold for a Work"),
     command("workers", "workers heartbeat|status", "Worker liveness registry"),
-    command("approvals", "approvals list|show|decide", "Review and decide staged actions"),
+    CommandSpec {
+        v1: &["approvals list", "approvals show", "approvals decide"],
+        ..command("approvals", "approvals list|show|decide", "Review and decide staged actions")
+    },
     command("receipts", "receipts", "Show run receipt status"),
     command("cost", "cost", "Token and cost totals from local receipts"),
     command("compress", "compress [--text|--file] [--json]", "Compress text with a local model"),

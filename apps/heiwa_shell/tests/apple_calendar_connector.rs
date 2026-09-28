@@ -14,6 +14,8 @@ use std::process::{Child, Command, Stdio};
 use std::thread;
 use std::time::Duration;
 
+mod cli_v1;
+
 fn fixture_osascript(root: &Path) -> PathBuf {
     let path = root.join("fixture-osascript");
     fs::write(
@@ -610,8 +612,7 @@ fn approval_executes_apple_write_and_replays_connector_receipt() {
         "stderr: {}",
         String::from_utf8_lossy(&approved.stderr)
     );
-    let approved: serde_json::Value =
-        serde_json::from_slice(&approved.stdout).expect("approval JSON");
+    let approved = cli_v1::data(&approved.stdout);
     assert_eq!(
         approved["decision"]["applied_effects"][0]["kind"],
         "apple_calendar_create"

@@ -288,3 +288,38 @@ fn a_replaced_stream_without_the_work_is_not_found_rather_than_stale() {
     assert_eq!(output.status.code(), Some(10), "{}", stderr(&output));
     assert_eq!(cli_v1::error(&output.stdout)["code"], "not_found");
 }
+
+#[test]
+fn approvals_list_is_an_envelope() {
+    let home = tempfile::tempdir().expect("home");
+    let output = heiwa(home.path(), &["approvals", "list", "--json"]);
+    assert!(output.status.success(), "{}", stderr(&output));
+    assert_eq!(
+        cli_v1::data(&output.stdout)["pending_summary"],
+        serde_json::json!([])
+    );
+}
+
+#[test]
+fn showing_an_unknown_approval_is_not_found() {
+    let home = tempfile::tempdir().expect("home");
+    let output = heiwa(home.path(), &["approvals", "show", "req_missing", "--json"]);
+    assert_eq!(output.status.code(), Some(10), "{}", stderr(&output));
+    assert_eq!(cli_v1::error(&output.stdout)["code"], "not_found");
+}
+
+#[test]
+fn an_approval_id_cannot_walk_out_of_the_requests_directory() {
+    let home = tempfile::tempdir().expect("home");
+    let output = heiwa(home.path(), &["approvals", "show", "../../secrets", "--json"]);
+    assert_eq!(output.status.code(), Some(2), "{}", stderr(&output));
+    assert_eq!(cli_v1::error(&output.stdout)["code"], "usage");
+}
+
+#[test]
+fn deciding_without_an_outcome_is_a_usage_error() {
+    let home = tempfile::tempdir().expect("home");
+    let output = heiwa(home.path(), &["approvals", "decide", "req_any", "--json"]);
+    assert_eq!(output.status.code(), Some(2), "{}", stderr(&output));
+    assert_eq!(cli_v1::error(&output.stdout)["code"], "usage");
+}

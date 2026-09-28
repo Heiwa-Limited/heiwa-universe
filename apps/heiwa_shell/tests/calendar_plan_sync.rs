@@ -106,16 +106,6 @@ esac
         self.heiwa().args(args).output().expect("run heiwa")
     }
 
-    fn ok_json(&self, args: &[&str]) -> Value {
-        let output = self.run(args);
-        assert!(
-            output.status.success(),
-            "heiwa {args:?} failed: {}",
-            String::from_utf8_lossy(&output.stderr)
-        );
-        serde_json::from_slice(&output.stdout).expect("JSON output")
-    }
-
     /// `data` of a successful `heiwa.cli/v1` command.
     fn v1_json(&self, args: &[&str]) -> Value {
         let output = self.run(args);
@@ -286,7 +276,7 @@ fn one_approval_applies_only_the_delta_in_one_batch_with_a_replayable_receipt() 
         .to_string(),
     )
     .unwrap();
-    let decided = f.ok_json(&["approvals", "decide", &request_id, "--approve", "--json"]);
+    let decided = f.v1_json(&["approvals", "decide", &request_id, "--approve", "--json"]);
     let applied = &decided["decision"]["applied_effects"][0];
     assert_eq!(applied["kind"], "apple_calendar_plan_apply");
     let receipt_id = applied["receipt_id"].as_str().unwrap().to_string();
@@ -317,7 +307,7 @@ fn one_approval_applies_only_the_delta_in_one_batch_with_a_replayable_receipt() 
     );
 
     // Replaying the decision returns the recorded outcome without writing again.
-    f.ok_json(&["approvals", "decide", &request_id, "--approve", "--json"]);
+    f.v1_json(&["approvals", "decide", &request_id, "--approve", "--json"]);
     assert_eq!(f.helper_calls("plan_apply").len(), 1);
 
     // Once Calendar matches the plan, staging has nothing to approve.

@@ -5,6 +5,8 @@ use std::fs;
 use std::io::Write;
 use std::path::{Path, PathBuf};
 
+use crate::output::{self, CliError};
+
 pub fn run(args: &[String]) -> Result<()> {
     match args.first().map(String::as_str) {
         Some("list") | Some("status") | None => list(args),
@@ -14,7 +16,9 @@ pub fn run(args: &[String]) -> Result<()> {
             print_help();
             Ok(())
         }
-        Some(other) => Err(anyhow!("unknown approvals command: {other}")),
+        Some(other) => Err(CliError::usage(format!("unknown approvals command: {other}"))
+            .with_hint("run `heiwa approvals --help`")
+            .into()),
     }
 }
 
@@ -22,27 +26,33 @@ fn list(args: &[String]) -> Result<()> {
     let pending = scan_pending_requests();
     let decisions = scan_decisions();
     let pending_summary: Vec<Value> = pending.iter().map(approval_request_summary).collect();
-    if has_flag(args, "--json") {
-        println!(
-            "{}",
-            json!({
-                "command": "approvals list",
-                "requests_dir": requests_dir().display().to_string(),
-                "decisions_dir": decisions_dir().display().to_string(),
-                "pending": pending,
-                "pending_summary": pending_summary,
-                "decided": decisions,
-            })
-        );
-        return Ok(());
-    }
+    let next: Vec<String> = pending_summary
+        .iter()
+        .filter_map(|summary| summary["id"].as_str())
+        .take(10)
+        .map(|id| format!("heiwa approvals show {id}"))
+        .collect();
+    let data = json!({
+        "requests_dir": requests_dir().display().to_string(),
+        "decisions_dir": decisions_dir().display().to_string(),
+        "pending": pending,
+        "pending_summary": pending_summary,
+        "decided": decisions,
+    });
+    output::emit(has_flag(args, "--json"), data, &next, render_list)
+}
+
+fn render_list(data: &Value) {
+    let pending = data["pending_summary"].as_array().cloned().unwrap_or_default();
     println!("approvals");
     println!("  requests: {} pending", pending.len());
-    println!("  decisions: {} on record", decisions.len());
-    println!("  requests dir: {}", requests_dir().display());
-    println!("  decisions dir: {}", decisions_dir().display());
-    for req in pending.iter().take(10) {
-        let summary = approval_request_summary(req);
+    println!(
+        "  decisions: {} on record",
+        data["decided"].as_array().map_or(0, Vec::len)
+    );
+    println!("  requests dir: {}", data["requests_dir"].as_str().unwrap_or("?"));
+    println!("  decisions dir: {}", data["decisions_dir"].as_str().unwrap_or("?"));
+    for summary in pending.iter().take(10) {
         let id = summary.get("id").and_then(Value::as_str).unwrap_or("?");
         let action = summary.get("action").and_then(Value::as_str).unwrap_or("?");
         let target = summary.get("target").and_then(Value::as_str).unwrap_or("?");
@@ -52,36 +62,39 @@ fn list(args: &[String]) -> Result<()> {
     if pending.len() > 10 {
         println!("    ... {} more", pending.len() - 10);
     }
-    Ok(())
 }
 
 fn show(args: &[String]) -> Result<()> {
     let id = args
         .first()
-        .ok_or_else(|| anyhow!("usage: heiwa approvals show <id>"))?;
+        .filter(|arg| !arg.starts_with("--"))
+        .ok_or_else(|| CliError::usage("usage: heiwa approvals show <id> [--json]"))?;
+    // Validate before touching the filesystem: an id must never walk out of
+    // the requests directory.
+    validate_request_id(id).map_err(|error| CliError::usage(format!("{error}")))?;
     let path = requests_dir().join(format!("{id}.json"));
     if !path.exists() {
-        return Err(anyhow!("approval not found: {}", path.display()));
+        return Err(CliError::not_found(format!("approval not found: {id}"))
+            .with_hint("list pending approvals with `heiwa approvals list`")
+            .into());
     }
     let raw = fs::read_to_string(&path)?;
     let value: Value = serde_json::from_str(&raw).unwrap_or(Value::String(raw));
-    if has_flag(args, "--json") {
-        println!("{}", serde_json::to_string_pretty(&value)?);
-    } else {
+    let next = vec![format!("heiwa approvals decide {id} --approve|--deny")];
+    output::emit(has_flag(args, "--json"), value, &next, |value| {
         println!("approval {id}");
-        println!("{}", serde_json::to_string_pretty(&value)?);
-    }
-    Ok(())
+        println!("{}", serde_json::to_string_pretty(value).unwrap_or_default());
+    })
 }
 
 fn decide(args: &[String]) -> Result<()> {
-    let id = args.first().ok_or_else(|| {
-        anyhow!("usage: heiwa approvals decide <id> --approve|--deny [--note ...]")
+    let id = args.first().filter(|arg| !arg.starts_with("--")).ok_or_else(|| {
+        CliError::usage("usage: heiwa approvals decide <id> --approve|--deny [--note ...]")
     })?;
     let approve = has_flag(args, "--approve");
     let deny = has_flag(args, "--deny");
     if approve == deny {
-        return Err(anyhow!("must pass exactly one of --approve or --deny"));
+        return Err(CliError::usage("must pass exactly one of --approve or --deny").into());
     }
     let dry_run = has_flag(args, "--dry-run");
 
@@ -97,17 +110,12 @@ fn decide(args: &[String]) -> Result<()> {
     });
     let path = decisions_dir().join(format!("{id}.json"));
     if dry_run {
-        if has_flag(args, "--json") {
-            println!(
-                "{}",
-                json!({
-                    "command": "approvals decide",
-                    "dry_run": true,
-                    "path": path.display().to_string(),
-                    "decision": decision,
-                })
-            );
-        } else {
+        let data = json!({
+            "dry_run": true,
+            "path": path.display().to_string(),
+            "decision": decision,
+        });
+        return output::emit(has_flag(args, "--json"), data, &[], |_| {
             println!("approvals decide (dry-run)");
             println!("  id: {id}");
             println!("  outcome: {}", decision["outcome"]);
@@ -121,24 +129,18 @@ fn decide(args: &[String]) -> Result<()> {
                 );
             }
             println!("  would write: {}", path.display());
-        }
-        return Ok(());
+        });
     }
 
     let result = decide_request(id, approve, flag_value(args, "--note"), "local-cli")?;
     let decision_out = result["decision"].clone();
     let applied = decision_out["applied_effects"].clone();
-    if has_flag(args, "--json") {
-        println!(
-            "{}",
-            json!({
-                "command": "approvals decide",
-                "dry_run": false,
-                "path": path.display().to_string(),
-                "decision": decision_out,
-            })
-        );
-    } else {
+    let data = json!({
+        "dry_run": false,
+        "path": path.display().to_string(),
+        "decision": decision_out,
+    });
+    output::emit(has_flag(args, "--json"), data, &[], |_| {
         println!("approvals decide");
         println!("  id: {id}");
         println!("  outcome: {}", decision_out["outcome"]);
@@ -154,8 +156,7 @@ fn decide(args: &[String]) -> Result<()> {
             }
         }
         println!("  wrote: {}", path.display());
-    }
-    Ok(())
+    })
 }
 
 /// Apply one immutable local decision through the same service used by the
