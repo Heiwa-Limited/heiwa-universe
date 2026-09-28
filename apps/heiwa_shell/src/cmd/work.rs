@@ -17,6 +17,9 @@ use heiwa_work::{
     WorkSessionBuildOptions, WorkSessionSnapshotV1,
 };
 
+use crate::cmd::args::{flag_value, has_flag, positionals};
+use crate::output::{self, CliError};
+
 pub fn run(args: &[String]) -> Result<()> {
     match args.first().map(String::as_str) {
         Some("list") | Some("status") | None => list(args),
@@ -28,7 +31,9 @@ pub fn run(args: &[String]) -> Result<()> {
             print_help();
             Ok(())
         }
-        Some(other) => Err(anyhow!("unknown work command: {other}")),
+        Some(other) => Err(CliError::usage(format!("unknown work command: {other}"))
+            .with_hint("run `heiwa work --help`")
+            .into()),
     }
 }
 
@@ -55,10 +60,15 @@ fn service(root: &Path) -> Result<OperatorSessionService> {
 fn list(args: &[String]) -> Result<()> {
     let paths = heiwa_config::HeiwaPaths::resolve();
     let summary = summarize(&paths.evidence_dir)?;
-    if has_flag(args, "--json") {
-        println!("{summary}");
-        return Ok(());
-    }
+    let next = if summary["work"].as_array().is_none_or(Vec::is_empty) {
+        vec!["heiwa work create \"<what you want done>\"".to_string()]
+    } else {
+        Vec::new()
+    };
+    output::emit(has_flag(args, "--json"), summary, &next, render_list)
+}
+
+fn render_list(summary: &Value) {
     let works = summary["work"].as_array().cloned().unwrap_or_default();
     if works.is_empty() {
         println!("no Work on this installation yet");
@@ -79,68 +89,65 @@ fn list(args: &[String]) -> Result<()> {
         println!();
         println!("! {skipped} work event(s) could not be folded; run `heiwa doctor` for detail");
     }
-    Ok(())
 }
 
 fn create_command(args: &[String]) -> Result<()> {
-    let intent = args
-        .iter()
-        .find(|arg| !arg.starts_with("--"))
-        .ok_or_else(|| anyhow!("usage: heiwa work create \"<intent>\""))?;
+    let intent = positionals(args, &[])
+        .first()
+        .copied()
+        .ok_or_else(|| CliError::usage("usage: heiwa work create \"<intent>\" [--json]"))?;
     let paths = heiwa_config::HeiwaPaths::resolve();
     let identity = heiwa_identity::load_from(&paths.runtime_root)
         .map_err(|error| anyhow!("{error}"))?
         .ok_or_else(|| {
-            anyhow!(
-                "no local identity on this installation; run first-run setup before creating Work"
-            )
+            CliError::failure("no local identity on this installation")
+                .with_hint("run `heiwa setup` before creating Work")
         })?;
 
     let created = create(&paths.evidence_dir, intent, &identity.installation_id)?;
-    if has_flag(args, "--json") {
-        println!("{created}");
-    } else {
+    let work_id = created["work_id"].as_str().unwrap_or("?").to_string();
+    let next = vec![format!("heiwa work show {work_id}")];
+    output::emit(has_flag(args, "--json"), created, &next, |created| {
         println!("opened {}", created["work_id"].as_str().unwrap_or("?"));
-        println!("  {intent}");
-    }
-    Ok(())
+        println!("  {}", created["intent"].as_str().unwrap_or(""));
+    })
 }
 
 fn show_command(args: &[String]) -> Result<()> {
+    let json = has_flag(args, "--json");
     let surface = flag_value(args, "--surface");
-    let surface_value = args
-        .iter()
-        .position(|arg| arg == "--surface")
-        .map(|index| index + 1);
-    let work_id = args
-        .iter()
-        .enumerate()
-        .find(|(index, arg)| !arg.starts_with("--") && Some(*index) != surface_value)
-        .map(|(_, arg)| arg)
-        .ok_or_else(|| anyhow!("usage: heiwa work show <work-id> [--json | --surface <name>]"))?;
+    let work_id = positionals(args, &["--surface"])
+        .first()
+        .copied()
+        .ok_or_else(|| {
+            CliError::usage("usage: heiwa work show <work-id> [--json | --surface <name>]")
+        })?;
     let paths = heiwa_config::HeiwaPaths::resolve();
+    if find(&paths.evidence_dir, work_id)?.is_none() {
+        return Err(CliError::not_found(format!("no Work {work_id} on this installation"))
+            .with_hint("list Work with `heiwa work list`")
+            .into());
+    }
+    let epoch_seed = format!("cli-{}", uuid::Uuid::new_v4());
     if let Some(surface) = surface {
-        let epoch_seed = format!("cli-{}", uuid::Uuid::new_v4());
         let rendered = if surface == "all" {
             surfaces_json(&paths.evidence_dir, work_id, &epoch_seed)?
         } else {
             let snapshot = session(&paths.evidence_dir, work_id, &epoch_seed)?;
             let view = heiwa_work::view_for(&snapshot, surface).ok_or_else(|| {
-                anyhow!("unknown surface {surface}; expected home, work, agent, or all")
+                CliError::usage(format!(
+                    "unknown surface {surface}; expected home, work, agent, or all"
+                ))
             })?;
             serde_json::to_value(view)?
         };
-        println!("{rendered}");
-        return Ok(());
+        return output::emit(json, rendered, &[], |rendered| {
+            println!("{}", serde_json::to_string_pretty(rendered).unwrap_or_default());
+        });
     }
-    let snapshot = session(
-        &paths.evidence_dir,
-        work_id,
-        &format!("cli-{}", uuid::Uuid::new_v4()),
-    )?;
-    if has_flag(args, "--json") {
-        println!("{}", serde_json::to_string(&snapshot)?);
-        return Ok(());
+    let snapshot = session(&paths.evidence_dir, work_id, &epoch_seed)?;
+    if json {
+        return output::emit(true, serde_json::to_value(&snapshot)?, &[], |_| {});
     }
 
     println!(
@@ -229,10 +236,10 @@ fn recover_command(args: &[String]) -> Result<()> {
     let paths = heiwa_config::HeiwaPaths::resolve();
     let outcome = crate::cmd::recover::recover(&service(&paths.evidence_dir)?)?;
     let report = crate::cmd::recover::report(&outcome);
-    if has_flag(args, "--json") {
-        println!("{report}");
-        return Ok(());
-    }
+    output::emit(has_flag(args, "--json"), report, &[], render_recovery)
+}
+
+fn render_recovery(report: &Value) {
     println!(
         "recovered {} interrupted turn(s); {} run(s) marked stale",
         report["interrupted_turns"].as_u64().unwrap_or(0),
@@ -263,7 +270,6 @@ fn recover_command(args: &[String]) -> Result<()> {
             "! {unadmitted} worker row(s) this build does not admit and {unreadable} unreadable journal line(s) were preserved uninterpreted"
         );
     }
-    Ok(())
 }
 
 /// Create one Work and its primary thread, atomically from the caller's view:
@@ -400,17 +406,6 @@ pub(crate) fn find(root: &Path, work_id: &str) -> Result<Option<Work>> {
 pub(crate) fn surfaces_json(root: &Path, work_id: &str, epoch_seed: &str) -> Result<Value> {
     let snapshot = session(root, work_id, epoch_seed)?;
     Ok(json!({ "surfaces": heiwa_work::surfaces(&snapshot) }))
-}
-
-fn flag_value<'a>(args: &'a [String], flag: &str) -> Option<&'a str> {
-    args.iter()
-        .position(|arg| arg == flag)
-        .and_then(|index| args.get(index + 1))
-        .map(String::as_str)
-}
-
-fn has_flag(args: &[String], flag: &str) -> bool {
-    args.iter().any(|arg| arg == flag)
 }
 
 #[cfg(test)]

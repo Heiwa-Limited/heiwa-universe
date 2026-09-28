@@ -45,12 +45,18 @@ fn json(output: std::process::Output, command: &str) -> Value {
     })
 }
 
+/// A successful `heiwa.cli/v1` command's `data`.
+fn v1(output: std::process::Output, command: &str) -> Value {
+    let output = successful(output, command);
+    work_support::cli_v1::data(&output.stdout)
+}
+
 fn surfaces(work: &PreparedWork) -> Vec<Value> {
-    let rendered = json(
+    let rendered = v1(
         heiwa(
             &work.runtime_root,
             &work.repo,
-            &["work", "show", &work.work_id, "--surface", "all"],
+            &["work", "show", &work.work_id, "--surface", "all", "--json"],
         ),
         "work show --surface all",
     );
@@ -160,7 +166,7 @@ fn start_long_worker(work: &PreparedWork) -> (Reaped, OrphanGuard) {
 
     let deadline = Instant::now() + Duration::from_secs(30);
     loop {
-        let shown = json(
+        let shown = v1(
             heiwa(
                 &work.runtime_root,
                 &work.repo,
@@ -224,7 +230,7 @@ fn a1_surfaces_agree_and_a_completed_run_needs_no_recovery() {
     assert!(run["supervision"].is_null());
 
     for pass in ["first", "second"] {
-        let report = json(recover(&work), "work recover");
+        let report = v1(recover(&work), "work recover");
         assert_eq!(
             report["runs_marked_stale"], 0,
             "{pass} recovery of a finished run"
@@ -254,11 +260,11 @@ fn a1_restart_recovery_records_a_surviving_child_once_and_repeats_no_effect() {
     assert!(process_alive(pid), "the provider outlived its owner");
     let before = worktree_listing(&work.worktree);
 
-    let report = json(recover(&work), "work recover");
+    let report = v1(recover(&work), "work recover");
     assert_eq!(report["runs_marked_stale"], 1);
     assert_eq!(report["runs"][0]["process"], "alive");
     assert_eq!(report["runs"][0]["pid"], pid);
-    let again = json(recover(&work), "work recover (repeat)");
+    let again = v1(recover(&work), "work recover (repeat)");
     assert_eq!(again["runs_marked_stale"], 0, "recovery is idempotent");
 
     // Each read below is a fresh process over the durable journal.
@@ -305,7 +311,7 @@ fn a1_restart_recovery_records_a_dead_owner_and_child_as_gone() {
     owner.0.wait().expect("reap owner");
     kill_and_wait_gone(pid);
 
-    let report = json(recover(&work), "work recover");
+    let report = v1(recover(&work), "work recover");
     assert_eq!(report["runs_marked_stale"], 1);
     assert_eq!(report["runs"][0]["process"], "gone");
 
@@ -391,7 +397,7 @@ fn a1_app_restart_recovers_an_orphaned_run_before_it_serves() {
     );
 
     // A second restart has nothing left to record.
-    let report = json(recover(&work), "work recover after app restart");
+    let report = v1(recover(&work), "work recover after app restart");
     assert_eq!(report["runs_marked_stale"], 0);
 
     kill_and_wait_gone(pid);
@@ -459,7 +465,7 @@ fn a1_recovery_never_interprets_a_worker_row_this_build_cannot_admit() {
         appended.push('\n');
         std::fs::write(&stream, &appended).expect("append row");
 
-        let report = json(recover(&work), "work recover");
+        let report = v1(recover(&work), "work recover");
         assert_eq!(report["runs_marked_stale"], 0, "{reason}: {report}");
         let unadmitted = report["unadmitted_worker_events"]
             .as_array()

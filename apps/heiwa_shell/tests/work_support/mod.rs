@@ -6,6 +6,9 @@
 //! never reads or writes durable operator state.
 #![allow(dead_code)]
 
+#[path = "../cli_v1/mod.rs"]
+pub mod cli_v1;
+
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output};
 
@@ -84,7 +87,7 @@ pub fn prepared_work(intent: &str) -> PreparedWork {
         heiwa(&runtime_root, &repo, &["work", "create", intent, "--json"]),
         "work create",
     );
-    let created: serde_json::Value = serde_json::from_slice(&created.stdout).expect("create JSON");
+    let created = cli_v1::data(&created.stdout);
     let work_id = created["work_id"].as_str().expect("work id").to_string();
 
     let prepared = successful(
