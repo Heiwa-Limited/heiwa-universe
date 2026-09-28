@@ -309,5 +309,24 @@ results belong in their generated receipts; these changes do not complete A1.
 
 ## Next experimental slice
 
-- Work-scoped composer continuation (see Deferred with reason).
-- Release A2 — multi-repository coordination.
+- Release C1-a containment and authority proof, including Work-scoped composer
+  continuation (see Deferred with reason and the C1 rows below).
+- Release A2 — multi-repository coordination remains tracked after the current
+  macOS/Apple workflow slice.
+
+## Release C1 — Engines and Apple reminders
+
+Design: `docs/superpowers/specs/2026-09-27-heiwa-engines-design.md`.
+This records current local development evidence, not release acceptance.
+
+| Slice | Scope | Status | Evidence / remaining work |
+| --- | --- | --- | --- |
+| C1-a | Authority, containment, grants, Work-scoped submission | doing | Offline fixture probe and 8 regression tests pass on macOS; whole-provider enforcement and runtime authority integration remain. See `docs/superpowers/plans/2026-09-27-engines-c1a-enforcement.md`. |
+| C1-b | Shared tools and recoverable Apple effects | pending | Depends on runtime grants; no Reminders write acceptance claimed. |
+| C1-c | Claude and Ollama execution families | pending | Offline Seatbelt canaries do not admit a provider engine. |
+| C1-d | Lightweight answers, allowance pools, and surfaces | pending | Bounded read-only tools remain eligible for Answer; routing not implemented here. |
+| C1-e | Fresh-profile end-to-end acceptance | pending | `scripts/check_engines_c1_acceptance.sh` does not yet exist. |
+
+Verification for the offline C1-a spike:
+`python3 -m unittest discover -s scripts/tests -p test_engine_enforcement_probe.py -v`
+and `python3 scripts/probe_engine_enforcement.py`.

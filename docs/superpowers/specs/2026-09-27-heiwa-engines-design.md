@@ -16,9 +16,9 @@ from one app for two kinds of request:
 - **Answer.** A question, search, or explanation. It runs as a lightweight
   conversation turn with bounded retrieval and the smallest sufficient route. It
   does not create Work, a worker, a worktree, or a planning loop.
-- **Execute.** An outcome that needs tools, changes, effects, or recovery. It
-  runs as durable Work, with grants, a governed tool loop, approvals, and
-  receipts.
+- **Execute.** An outcome that needs changes, effects, sustained execution, or
+  recovery. It runs as durable Work, with grants, a governed tool loop,
+  approvals, and receipts.
 
 Execution has two families that share one tool and effect service, one Action
 Gate, one lifecycle vocabulary, and one Work timeline in the app and the CLI:
@@ -68,11 +68,12 @@ the `heiwa` CLI as users do.
 - Heiwa.app, through the existing signed native request contract;
 - the `heiwa` CLI, through the user's local runtime credential.
 
-Any process that is not sandboxed and holds the user's credential acts with the
-user's authority. That includes the user's own desktop assistants. Devon
-directed on 2026-09-27 that his assistants hold his authority at every tier once
-he has asked for the outcome. A client's self-reported identity, such as the
-`CLAUDE_CODE_ENTRYPOINT` environment variable, is recorded as an audit label
+Possession of a user credential is a technical access boundary, not proof of
+human intent or new authorization. Desktop collaborators carry the user's
+existing task authorization; this product spec does not widen it. The product
+must protect its user credential and decision store from workers. A client's
+self-reported identity, such as the `CLAUDE_CODE_ENTRYPOINT` environment
+variable, is recorded as an audit label
 marked `self_reported`. It never grants authority.
 
 **Workers** are engines that Heiwa launches for Work. A worker holds only an
@@ -87,13 +88,17 @@ by the authenticated client principal.
 ### Enforcement is a gate, not a claim
 
 A worktree is a separate checkout. It is not a sandbox. The current worker
-spawn path sets a working directory and nothing more, and the ledger records
-raw worker launch as ungated. "A worker cannot approve itself" is true only
+spawn path sets a working directory and clears the environment, and the ledger
+records raw worker launch as ungated. "A worker cannot approve itself" is true only
 when the worker cannot obtain the user's credential or reach the user-authority
 API.
 
-- **Heiwa tool loop.** Enforced by construction: the model has no access to the
-  machine. Only Heiwa tools execute, and only under the worker's grant.
+- **Heiwa tool loop.** The model receives no direct host-process capability.
+  Tool requests are untrusted inputs; the Rust tool service must validate the
+  worker's grant, source scope, egress, budget, and effect policy on every call.
+  This boundary needs denial tests. Running the loop in Rust alone does not
+  establish containment or prevent an overly privileged tool from misusing
+  the runtime's authority.
 - **Provider agent sessions.** Admitted for execution only when an enforcement
   probe passes for the installed provider version on the user's machine. The
   probe proves that the worker's process tree cannot:
@@ -103,8 +108,11 @@ API.
   - spawn processes that escape the sandbox;
   - write outside its worktree.
 
-  Where the provider allows it, network egress is also limited to what the
-  provider requires.
+  Network egress is limited to the admitted provider route and scoped tool
+  transport. Required inference connectivity must work, while alternate paths
+  to local authority and unauthorized disclosure must remain blocked. A profile
+  that denies all networking is useful for an offline spike but cannot admit
+  a cloud engine.
 
 The mechanism is decided by C1's first task, an enforcement spike. Candidates
 are the provider's own sandbox configuration pinned by Heiwa (Claude Code
@@ -112,9 +120,20 @@ sandbox settings, Codex sandbox policy) and a Heiwa Seatbelt profile where
 nested sandboxing permits.
 
 A route that fails the probe is shown as **not enforceable** and is not used
-for execution. The user may still run it through an explicit, per-Work
-"unrestricted" choice. That choice is labelled on every surface, and the route
-still never receives effect grants.
+for C1 execution. An unrestricted host session would have to be a separately
+designed user-authority mode, outside C1's governed worker promise. Withholding
+Heiwa effect grants cannot prevent an unrestricted process from making the
+same effects through native tools or reading the user's credentials.
+
+The provider's Bash sandbox is not a process-wide sandbox: its built-in file
+tools use separate permission checks, and integrations can execute outside the
+shell sandbox. Admission must cover the complete launch and tool configuration,
+not just a successful Bash denial. See the provider's
+[sandbox scope](https://code.claude.com/docs/en/sandboxing#scope).
+
+The reproducible offline spike and remaining integration proof are recorded in
+`docs/superpowers/plans/2026-09-27-engines-c1a-enforcement.md`. Its canary results
+cannot set an Engine to `enforceable`.
 
 ## Answer and Execute
 
@@ -144,7 +163,10 @@ recovery.
 ### Promotion
 
 A request is promoted from Answer to Execute when it needs effects, file
-changes, multi-step tool use, or recovery.
+changes, sustained execution, or recovery. Bounded read-only search, fetching
+sources, and Calendar lookup can use multiple tools while remaining Answer;
+tool count alone is not the classification rule. Answer reads still pass the
+same data-access and egress policy, with sources and usage recorded.
 
 - Classification is deterministic rules first, then a local model. A paid call
   is never made only to classify, as `HEIWA.md` § Optimization Doctrine
@@ -413,7 +435,7 @@ Provider count and successful process launches are not success measures.
 | --- | --- |
 | No eligible answer route | Explain which connection or permission is missing; do not consume a reserved pool |
 | Engine auth expired or account failure | Mark the Engine disconnected; re-route if eligible, else block with the remedy |
-| Enforcement probe fails | Engine is `not enforceable`; execution refused unless the user explicitly chooses unrestricted |
+| Enforcement probe fails | Engine is `not enforceable`; governed execution refused; no unrestricted fallback in C1 |
 | Permission wait timeout | Deny the provider request with a reason; the Work records a blocker |
 | Malformed stream or missing terminal result | Step is `indeterminate`; the user sees it and may retry explicitly |
 | Provider protocol drift | Count unknown types; drift warning on the Engine; continue if the terminal result is valid |
@@ -431,7 +453,11 @@ per-user profile, and the tests below pass under the existing CI groups.
 
 0. **Enforcement spike.** Prove or refute each boundary in § Enforcement for
    Claude Code (installed version and current release) on macOS 27. Record the
-   mechanism chosen and the version matrix.
+   mechanism chosen and the version matrix. Each denial requires a successful
+   positive control; crashes, timeouts, missing files, and unavailable services
+   are inconclusive. Policy queries are distinct from real effects. Bind later
+   admission to the provider executable, effective configuration, sandbox
+   profile, transport, and host evidence; invalidate it when those inputs change.
 1. **Authority.**
    - Desktop and CLI submissions bind to durable Work.
    - A worker cannot approve itself or escape its scope. Tested attempts:
@@ -503,7 +529,8 @@ Changes from the original conversation design:
 **Independently checked at `origin/dev` `5de52e1b`:**
 
 - desktop `submitTurn` carries no `work_id`;
-- worker spawn sets only a working directory;
+- worker spawn sets a working directory and clears its environment, without an
+  enforced sandbox;
 - the ledger records worker launch as ungated;
 - approval decisions use the `local-cli` label;
 - Gemini uses `stream-json`;
