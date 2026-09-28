@@ -1,12 +1,12 @@
 {
   "claim_id": "heiwa.receipts.tamper-evident-chain",
-  "claim_digest": "6c0b97dfdc115bcb7811b1c49fe0a179bcfdca93fcd2eeb138ea4e7f082efc7d",
+  "claim_digest": "25581708767c74ce5ca4ed8e00d5d1b3cadc6c115dddae16e09930a78b05ccbe",
   "verifier_id": "cargo-test",
-  "verifier_version": "2",
+  "verifier_version": "3",
   "result": "pass",
-  "commit": "be0cebe3603b4683be662d7b5463206a96d9532f",
-  "scope_digest": "92ffb80d6d222bb3117214eb25de679e8a0fc293387c32bb32ab96e953c34e4a",
-  "verified_at": 1790561593,
+  "commit": "21e4c9e59b8270bd55a91e80872bbac476f60bc3",
+  "scope_digest": "967885e70c157d503b6b5ebf4e48d9188f3085d4f57cf739a47820c384de3d0c",
+  "verified_at": 1790562579,
   "environment": {
     "os": "macos",
     "arch": "aarch64"

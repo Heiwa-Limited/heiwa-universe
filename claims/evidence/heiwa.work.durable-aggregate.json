@@ -1,12 +1,12 @@
 {
   "claim_id": "heiwa.work.durable-aggregate",
-  "claim_digest": "b4f8df904b3e11f92ccf170c8fddae79cb5f5b38569c2ef8e920ece746cb18f1",
+  "claim_digest": "c6df1a5e51ff80b7e942f00464c029614fba84fb9ddf9e10f3aa0cfb3ba04fb3",
   "verifier_id": "cargo-test",
-  "verifier_version": "2",
+  "verifier_version": "3",
   "result": "pass",
-  "commit": "be0cebe3603b4683be662d7b5463206a96d9532f",
-  "scope_digest": "c7ae78bf4639aa40839d8d90750be9f01d6f6a86ab27e9598bf32e1ca0af5aef",
-  "verified_at": 1790561599,
+  "commit": "21e4c9e59b8270bd55a91e80872bbac476f60bc3",
+  "scope_digest": "520f357f84da5a97d1cb586c59c4dc60a47aa109e0caa5e250cd2482fccecd07",
+  "verified_at": 1790562584,
   "environment": {
     "os": "macos",
     "arch": "aarch64"

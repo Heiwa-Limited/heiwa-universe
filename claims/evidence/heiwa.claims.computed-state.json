@@ -1,15 +1,15 @@
 {
   "claim_id": "heiwa.claims.computed-state",
-  "claim_digest": "d5dc9d4e9a253979e8d2f869d55a5d9ab88fff348d883c6909cee7c652c598c1",
+  "claim_digest": "49db1b94ca24edadc49cdca12ebe011bad083cd3cd0d035b44450180656c5a96",
   "verifier_id": "cargo-test",
-  "verifier_version": "2",
+  "verifier_version": "3",
   "result": "pass",
-  "commit": "be0cebe3603b4683be662d7b5463206a96d9532f",
-  "scope_digest": "ede083addb7858902108821e59ac5681db25a155ff97c9f148b469d43c516b3e",
-  "verified_at": 1790561592,
+  "commit": "21e4c9e59b8270bd55a91e80872bbac476f60bc3",
+  "scope_digest": "74a6deecc1cb110f87f99559b6e19739f3b2a0eb3f5e8dcace039756154b5098",
+  "verified_at": 1790562578,
   "environment": {
     "os": "macos",
     "arch": "aarch64"
   },
-  "detail": "40 passed, 0 failed, 0 ignored across 7 target(s)"
+  "detail": "44 passed, 0 failed, 0 ignored across 7 target(s)"
 }
