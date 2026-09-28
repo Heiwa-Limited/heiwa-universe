@@ -20,9 +20,9 @@ nothing can falsify is a marketing sentence wearing a schema.
 | 3 | Scope digest over tracked blobs, generalizing `# acceptance-scope:` | done | `cargo test -p heiwa_claims` |
 | 4 | Provider-neutral evidence records under `claims/evidence/` | done | `cargo test -p heiwa_claims --test claim_manifest` |
 | 5 | Computed state ladder: planned/implemented/verified/degraded/retired | done | `cargo test -p heiwa_claims --test claim_state` |
-| 6 | `heiwa-claims` CLI: list, check, show, verify, verifiers | verification pending after consolidation | `bash scripts/check_claims.sh` |
-| 7 | Seed manifests for claims true at HEAD | verification pending after consolidation | `bash scripts/check_claims.sh` |
-| 8 | Repository gate | verification pending after consolidation | `bash scripts/check_claims.sh` |
+| 6 | `heiwa-claims` CLI: list, check, show, verify, verifiers | done | `bash scripts/check_claims.sh` |
+| 7 | Seed manifests for claims true at HEAD | done | `bash scripts/check_claims.sh` |
+| 8 | Repository gate | done | `bash scripts/check_claims.sh` |
 
 ### Drift detection shipped in P0-a
 
@@ -54,7 +54,7 @@ distinct types exist today and none of them means "an external effect happened":
 | 1 | `CallReceipt` naming with a deprecated `Receipt` alias | done | `cargo test -p heiwa_receipts` |
 | 2 | Retire STDB mirror vocabulary from the crate boundary | done | `heiwa-claims verify heiwa.receipts.boundary-states-what-it-is-not` |
 | 3 | Retire STDB mirror vocabulary from the canonical document | done | `heiwa-claims verify heiwa.docs.receipts-mirror-retired` |
-| 4 | Registry claims separating call accounting from effect proof | verification pending after consolidation | `bash scripts/check_claims.sh` |
+| 4 | Registry claims separating call accounting from effect proof | done | `bash scripts/check_claims.sh` |
 | 5 | `EffectReceiptV1` fixtures and serialization tests | pending | `cargo test -p heiwa_evidence` |
 
 Step 5 is open, not blocked. It is the first place Program 0 stops being about
@@ -110,6 +110,6 @@ refuses changed HEAD or dirty inputs before recording evidence. Legacy records
 without the requirement digest degrade and must be regenerated.
 
 `cargo test --locked -p heiwa_claims -p heiwa_receipts`, the CI target inventory,
-and claim-gate portability checks pass locally. Seed evidence and the repository
-gate must be refreshed after the final source integration. Local records detect
+and claim-gate portability checks pass locally. All eight seed claims were reverified at `be0cebe3`; `bash scripts/check_claims.sh`
+passes with requirement-bound evidence (claims 40 tests, Work 40, receipts 24). Local records detect
 staleness; they are not signed attestations or independent release proof.

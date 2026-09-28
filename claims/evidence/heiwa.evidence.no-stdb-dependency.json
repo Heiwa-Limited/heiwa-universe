@@ -1,11 +1,12 @@
 {
   "claim_id": "heiwa.evidence.no-stdb-dependency",
+  "claim_digest": "be32a4dd595df46369a21fa7003ad5df4d3fc4c9804acefb7d264e1bf19208c8",
   "verifier_id": "text-absent",
-  "verifier_version": "1",
+  "verifier_version": "2",
   "result": "pass",
-  "commit": "c9cfcdb6e500cf9d66eab18503a278882cf8ecb1",
+  "commit": "be0cebe3603b4683be662d7b5463206a96d9532f",
   "scope_digest": "432db3e7632671292af35e233eddb263ddfb59f3345aea97d18bd22bf5330975",
-  "verified_at": 1787882416,
+  "verified_at": 1790561592,
   "environment": {
     "os": "macos",
     "arch": "aarch64"

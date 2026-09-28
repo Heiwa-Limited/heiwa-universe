@@ -1,11 +1,12 @@
 {
   "claim_id": "heiwa.docs.receipts-mirror-retired",
+  "claim_digest": "57f6c61ba7cef677b34ae36cc62809224554f89825f93877f536231cc0caecf3",
   "verifier_id": "text-absent",
-  "verifier_version": "1",
+  "verifier_version": "2",
   "result": "pass",
-  "commit": "c9cfcdb6e500cf9d66eab18503a278882cf8ecb1",
-  "scope_digest": "942d7f92da7aacfc23d6de46c53895475bbe01ca735156b83b9019f053fb9547",
-  "verified_at": 1787882416,
+  "commit": "be0cebe3603b4683be662d7b5463206a96d9532f",
+  "scope_digest": "d555a398aa3c38ebe943da5620c752ab1014974b0e48b493c9b84d544985970f",
+  "verified_at": 1790561592,
   "environment": {
     "os": "macos",
     "arch": "aarch64"
