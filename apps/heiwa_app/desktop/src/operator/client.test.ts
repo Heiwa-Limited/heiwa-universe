@@ -69,6 +69,96 @@ function deferred<T>(): { promise: Promise<T>; resolve: (value: T) => void; reje
 }
 
 describe("OperatorClient", () => {
+  it("retains explicit Work scope through reconnect and clears it on ordinary selection", async () => {
+    const stream = deferred<void>();
+    const post = vi.fn(async (_path: string, body: { work_id?: string }) => ({
+      ok: true,
+      data: { thread_id: "default", turn_id: "turn-new", cursor: "cursor-new", duplicate: false, stream_url: "/ws", work_id: body.work_id ?? null },
+    }));
+    const client = new OperatorClient(new OperatorStore(), dependencies({
+      post,
+      subscribe: vi.fn().mockReturnValueOnce(stream.promise).mockImplementation(() => new Promise<void>(() => {})),
+    }));
+    await client.start("default", "work-one");
+    await flushAsyncWork();
+    stream.reject(new Error("offline"));
+    await flushAsyncWork();
+    await client.reconnect();
+    await client.submitTurn("continue");
+    expect(post.mock.calls[0][1].work_id).toBe("work-one");
+
+    await client.start("default", "work-two");
+    await client.submitTurn("a different Work in the same conversation");
+    expect(post.mock.calls[1][1].work_id).toBe("work-two");
+    await client.start("default");
+    await client.submitTurn("ordinary question");
+    expect(post.mock.calls[2][1]).not.toHaveProperty("work_id");
+    client.dispose();
+  });
+
+  it.each([undefined, null, "work-other"])("rejects a Work acknowledgement with scope %s without resubmitting", async (workId) => {
+    const post = vi.fn(async () => ({ ok: true, data: {
+      thread_id: "default", turn_id: "turn-new", cursor: "cursor-new", duplicate: false, stream_url: "/ws", work_id: workId,
+    } }));
+    const client = new OperatorClient(new OperatorStore(), dependencies({ post }));
+    await client.start("default", "work-one");
+    await expect(client.submitTurn("continue")).rejects.toThrow("operator_submission_unavailable");
+    expect(post).toHaveBeenCalledOnce();
+  });
+
+  it("does not let an earlier scoped request overwrite a newly selected scope", async () => {
+    const pending = deferred<OperatorTurnSubmissionResponse>();
+    const post = vi.fn().mockReturnValueOnce(pending.promise).mockResolvedValue({ ok: true, data: {
+      thread_id: "second", work_id: "work-two", turn_id: "second-turn", cursor: "c2", duplicate: false, stream_url: "/ws",
+    } });
+    const client = new OperatorClient(new OperatorStore(), dependencies({ post }));
+    await client.start("first", "work-one");
+    const first = client.submitTurn("first");
+    await client.start("second", "work-two");
+    pending.resolve({ ok: true, data: { thread_id: "first", work_id: "work-one", turn_id: "first-turn", cursor: "c1", duplicate: false, stream_url: "/ws" } });
+    await first;
+    await client.submitTurn("second");
+    expect(post.mock.calls[1]).toEqual(["/api/v1/operator/threads/second/turns", expect.objectContaining({ work_id: "work-two" })]);
+    expect(client.state().status).toBe("ready");
+    client.dispose();
+  });
+
+  it("reuses the unacknowledged request id for an explicit retry, then mints a new id after success", async () => {
+    const post = vi.fn().mockRejectedValueOnce(new Error("ack lost"))
+      .mockResolvedValue({ ok: true, data: { thread_id: "default", work_id: "work-one", turn_id: "turn", cursor: "cursor", duplicate: true, stream_url: "/ws" } });
+    const randomUUID = vi.fn().mockReturnValueOnce("first-request").mockReturnValueOnce("next-request");
+    const client = new OperatorClient(new OperatorStore(), dependencies({ post, randomUUID }));
+    await client.start("default", "work-one");
+    await expect(client.submitTurn("continue")).rejects.toThrow("operator_submission_unavailable");
+    await client.reconnect();
+    expect(post).toHaveBeenCalledTimes(1);
+    await client.submitTurn("continue");
+    expect(post.mock.calls[1][1].client_request_id).toBe("first-request");
+    await client.submitTurn("continue");
+    expect(post.mock.calls[2][1].client_request_id).toBe("next-request");
+    expect(randomUUID).toHaveBeenCalledTimes(2);
+  });
+
+  it("never reuses an unacknowledged request id for a different Work", async () => {
+    const post = vi.fn().mockRejectedValueOnce(new Error("ack lost"))
+      .mockResolvedValue({ ok: true, data: { thread_id: "default", work_id: "work-two", turn_id: "turn", cursor: "cursor", duplicate: false, stream_url: "/ws" } });
+    const randomUUID = vi.fn().mockReturnValueOnce("first-request").mockReturnValueOnce("next-request");
+    const client = new OperatorClient(new OperatorStore(), dependencies({ post, randomUUID }));
+    await client.start("default", "work-one");
+    await expect(client.submitTurn("continue")).rejects.toThrow("operator_submission_unavailable");
+    await client.start("default", "work-two");
+    await client.submitTurn("continue");
+    expect(post.mock.calls[1][1].client_request_id).toBe("next-request");
+  });
+
+  it("rejects an ordinary chat acknowledgement that unexpectedly assigns Work", async () => {
+    const post = vi.fn(async () => ({ ok: true, data: { thread_id: "default", work_id: "work-unrequested", turn_id: "turn", cursor: "cursor", duplicate: false, stream_url: "/ws" } }));
+    const client = new OperatorClient(new OperatorStore(), dependencies({ post }));
+    await client.start("default");
+    await expect(client.submitTurn("just a question")).rejects.toThrow("operator_submission_unavailable");
+    expect(post).toHaveBeenCalledOnce();
+  });
+
   it("explicitly reconnects from durable history after exhausted transport retries", async () => {
     const firstStream = deferred<void>();
     const replay = deferred<OperatorHistoryResponse>();

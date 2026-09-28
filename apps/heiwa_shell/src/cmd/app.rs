@@ -2362,6 +2362,7 @@ async fn operator_http_response(
                             "data": {
                                 "thread_id": handle.thread_id,
                                 "turn_id": handle.turn_id,
+                                "work_id": handle.work_id,
                                 "cursor": handle.cursor,
                                 "duplicate": handle.duplicate,
                                 "stream_url": stream_url,

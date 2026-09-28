@@ -793,6 +793,13 @@ fn operator_http_accepts_work_id_syntax_and_rejects_unknown_scope_without_rows()
     assert_eq!(rejected.status, 409, "{}", rejected.body);
     assert_eq!(rejected.body["error"]["code"], "invalid_work_scope");
     assert_eq!(operator_event_count(&runtime, "thread-work"), before);
+    let unknown = runtime.request(
+        "GET",
+        "/api/v1/operator/threads/thread-work",
+        Some(TOKEN),
+        Value::Null,
+    );
+    assert_eq!(unknown.body["data"]["thread"]["work_ids"], json!([]));
 }
 
 #[test]
@@ -811,6 +818,18 @@ fn operator_http_propagates_known_work_scope_through_terminal_execution() {
         ))
         .unwrap();
 
+    let detail = runtime.request(
+        "GET",
+        "/api/v1/operator/threads/thread-work-known",
+        Some(TOKEN),
+        Value::Null,
+    );
+    assert_eq!(detail.status, 200);
+    assert_eq!(
+        detail.body["data"]["thread"]["work_ids"],
+        json!(["work-known"])
+    );
+
     let accepted = runtime.request(
         "POST",
         "/api/v1/operator/threads/thread-work-known/turns",
@@ -822,8 +841,42 @@ fn operator_http_propagates_known_work_scope_through_terminal_execution() {
         }),
     );
     assert_eq!(accepted.status, 202, "{}", accepted.body);
+    assert_eq!(accepted.body["data"]["work_id"], "work-known");
     let turn_id = accepted.body["data"]["turn_id"].as_str().unwrap();
     wait_for_terminal_event(&runtime, "thread-work-known", turn_id);
+
+    let before = operator_event_count(&runtime, "thread-work-known");
+    let retry = runtime.request(
+        "POST",
+        "/api/v1/operator/threads/thread-work-known/turns",
+        Some(TOKEN),
+        json!({ "client_request_id": "work-http-known", "prompt": "hi", "work_id": "work-known" }),
+    );
+    assert_eq!(retry.status, 202, "{}", retry.body);
+    assert_eq!(retry.body["data"]["work_id"], "work-known");
+    assert_eq!(retry.body["data"]["turn_id"], turn_id);
+    assert_eq!(retry.body["data"]["duplicate"], true);
+    assert_eq!(operator_event_count(&runtime, "thread-work-known"), before);
+
+    let changed_scope = runtime.request(
+        "POST",
+        "/api/v1/operator/threads/thread-work-known/turns",
+        Some(TOKEN),
+        json!({ "client_request_id": "work-http-known", "prompt": "hi" }),
+    );
+    assert_eq!(changed_scope.status, 409, "{}", changed_scope.body);
+    assert_eq!(changed_scope.body["error"]["code"], "idempotency_conflict");
+    assert_eq!(operator_event_count(&runtime, "thread-work-known"), before);
+
+    let unrelated = runtime.request(
+        "POST",
+        "/api/v1/operator/threads/thread-unrelated/turns",
+        Some(TOKEN),
+        json!({ "client_request_id": "work-http-other", "prompt": "hi", "work_id": "work-known" }),
+    );
+    assert_eq!(unrelated.status, 409, "{}", unrelated.body);
+    assert_eq!(unrelated.body["error"]["code"], "invalid_work_scope");
+    assert_eq!(operator_event_count(&runtime, "thread-unrelated"), 0);
 
     let turn_rows = external
         .events_after("thread-work-known", None, 128)

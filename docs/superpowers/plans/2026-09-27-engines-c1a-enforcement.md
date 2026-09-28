@@ -75,9 +75,19 @@ fallback. Source: [Claude sandbox scope](https://code.claude.com/docs/en/sandbox
    grant expansion, and decision-store access. A provider permission response
    must never mint user authority. Model output and MCP annotations cannot grant
    privileges to Heiwa's internal tool loop either.
-3. **Work continuity.** Bind desktop and CLI submissions to validated thread
-   membership and a durable Work. Preserve lightweight read-only Answer turns;
-   multiple bounded reads are not by themselves an execution task.
+3. **Work continuity.** The C1-a1 desktop checkpoint adds an explicit Continue
+   conversation action for an existing Work. It reads the actual thread's
+   admitted `work_ids` before enabling scoped submission; an older runtime
+   without this field cannot silently receive a scoped prompt. It carries
+   `work_id` through submission and reconnect and requires the runtime
+   acknowledgement to confirm the admitted scope. Unacknowledged requests keep
+   their request ID for an explicit retry of the same prompt and scope within
+   the client lifetime. Ordinary chat selection
+   clears that scope; delayed replies cannot replace a newer selection.
+   Existing Rust admission validates Work/thread membership and retry scope.
+   Automatic execution Work creation and the future CLI answer/execute paths
+   remain. Preserve lightweight read-only Answer turns; multiple bounded reads
+   are not by themselves an execution task. A Work ID is not a tool grant.
 4. **Real effect and recovery tests.** Use an explicitly disposable source-app
    fixture for Apple Events and Reminders integration. Test approval lifecycle,
    revoked access, and crash/reconcile behavior with no duplicate effects.

@@ -531,6 +531,8 @@ impl From<OperatorTurnWork> for OperatorTurnPreparation {
 pub struct OperatorTurnHandle {
     pub thread_id: String,
     pub turn_id: String,
+    /// The scope admitted by the session service, including on retries.
+    pub work_id: Option<String>,
     /// Stable public cursor immediately after the admitted user message.
     /// It is identical on original and duplicate submissions and never
     /// doubles as mutable replay progress.
@@ -879,6 +881,7 @@ impl OperatorTurnRunner {
         Ok(OperatorTurnHandle {
             thread_id: submission.thread_id,
             turn_id: submission.turn_id,
+            work_id: submission.work_id,
             cursor: submission.cursor,
             duplicate: submission.duplicate,
             replay_cursor,
@@ -3206,6 +3209,7 @@ mod tests {
         drop(global);
         let mut handle = super::OperatorTurnHandle {
             thread_id: "default".to_string(),
+            work_id: None,
             turn_id,
             cursor: String::new(),
             duplicate: false,

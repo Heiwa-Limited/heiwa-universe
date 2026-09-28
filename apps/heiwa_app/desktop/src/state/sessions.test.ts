@@ -2,6 +2,65 @@ import { describe, expect, it, vi } from "vitest";
 import { createSessionState } from "./sessions";
 
 describe("SessionState", () => {
+  it("loads a Work conversation outside the catalog and preserves its scope through refresh", async () => {
+    const start = vi.fn(async () => undefined);
+    const getThread = vi.fn(async () => ({ ok: true, data: { thread: { thread_id: "work-thread", title: "Existing conversation", archived: false, work_ids: ["work-one"] } } }));
+    const state = createSessionState({ start, getThread,
+      get: async () => ({ ok: true, data: { threads: [], projects: [], truncated: true } }),
+    });
+    await state.load();
+    expect(await state.openWork("work-thread", { workId: "work-one", title: "Ship the fix" })).toBe(true);
+    expect(getThread).toHaveBeenCalledWith("/api/v1/operator/threads/work-thread");
+    expect(start).toHaveBeenLastCalledWith("work-thread", "work-one");
+    await state.refresh();
+    await state.load();
+    expect(state.selectedWork()).toEqual({ workId: "work-one", title: "Ship the fix" });
+    expect(start).toHaveBeenLastCalledWith("work-thread", "work-one");
+    await state.select("work-thread");
+    expect(state.selectedWork()).toBeUndefined();
+    expect(start).toHaveBeenLastCalledWith("work-thread");
+  });
+
+  it.each(["new selection", "aborted opening"])("ignores a late Work lookup after %s", async (reason) => {
+    let release!: (value: { ok: boolean; data: { thread: { thread_id: string; archived: boolean } } }) => void;
+    const pending = new Promise<{ ok: boolean; data: { thread: { thread_id: string; archived: boolean } } }>((resolve) => { release = resolve; });
+    const start = vi.fn(async () => undefined);
+    const state = createSessionState({ start, getThread: () => pending,
+      get: async () => ({ ok: true, data: { threads: [{ thread_id: "ordinary" }], projects: [] } }),
+    });
+    await state.load();
+    const controller = new AbortController();
+    const opening = state.openWork("work-thread", { workId: "work-one", title: "Fix" }, controller.signal);
+    if (reason === "new selection") await state.select("ordinary");
+    else controller.abort();
+    release({ ok: true, data: { thread: { thread_id: "work-thread", archived: false } } });
+    expect(await opening).toBe(false);
+    expect(state.selectedId()).toBe("ordinary");
+    expect(state.selectedWork()).toBeUndefined();
+    expect(state.threads()).toEqual([{ thread_id: "ordinary" }]);
+    expect(start).not.toHaveBeenCalledWith("work-thread", "work-one");
+  });
+
+  it.each([
+    { thread_id: "wrong-thread", archived: false },
+    { thread_id: "work-thread", archived: true },
+    { thread_id: "work-thread" },
+  ])("refuses unavailable Work conversation metadata %j", async (data) => {
+    const start = vi.fn(async () => undefined);
+    const state = createSessionState({ start, getThread: async () => ({ ok: true, data: { thread: data } }) });
+    await expect(state.openWork("work-thread", { workId: "work-one", title: "Fix" })).rejects.toThrow("unavailable or archived");
+    expect(start).not.toHaveBeenCalled();
+    expect(state.selectedWork()).toBeUndefined();
+  });
+
+  it.each([undefined, [], ["work-other"]])("refuses missing or wrong runtime membership %j before starting observation", async (workIds) => {
+    const start = vi.fn(async () => undefined);
+    const state = createSessionState({ start, getThread: async () => ({ ok: true, data: { thread: { thread_id: "work-thread", archived: false, work_ids: workIds } } }) });
+    await expect(state.openWork("work-thread", { workId: "work-one", title: "Fix" })).rejects.toThrow("could not confirm");
+    expect(start).not.toHaveBeenCalled();
+    expect(state.selectedId()).toBeUndefined();
+  });
+
   it("keeps drafts separate while sessions switch and moves a session through the runtime service", async () => {
     const start = vi.fn(async () => undefined);
     const post = vi.fn(async (path: string, body: unknown) => {

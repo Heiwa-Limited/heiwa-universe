@@ -1,4 +1,4 @@
-import { For, Index, Show, createMemo, createSignal, type JSX } from "solid-js";
+import { For, Index, Show, createEffect, createMemo, createSignal, on, onCleanup, type JSX } from "solid-js";
 import { Icon } from "../../shell/Icon";
 import { useApp } from "../../state/app";
 import {
@@ -61,7 +61,32 @@ const SUMMARY_COLLECTIONS: Array<[name: string, view: "work" | "agent"]> = [
 
 function WorkDetail(props: { surfaces: WorkSurfaces }) {
   const app = useApp();
+  const [opening, setOpening] = createSignal(false);
+  const [openError, setOpenError] = createSignal<string>();
+  let openingController: AbortController | undefined;
+  createEffect(on(() => props.surfaces.identity.workId, () => {
+    openingController?.abort();
+    setOpening(false);
+    setOpenError(undefined);
+  }));
+  onCleanup(() => openingController?.abort());
   const record = createMemo(() => workRecord(props.surfaces));
+  const continueConversation = async () => {
+    const threadId = record().primaryThreadId;
+    if (!threadId || opening()) return;
+    setOpening(true);
+    setOpenError(undefined);
+    const controller = new AbortController();
+    openingController = controller;
+    try {
+      if (await app.sessions.openWork(threadId, {
+        workId: props.surfaces.identity.workId,
+        title: record().intent || "Untitled Work",
+      }, controller.signal)) app.navigate("ai");
+    } catch {
+      if (!controller.signal.aborted) setOpenError("This Work's conversation could not be confirmed. Refresh Work, restore it if archived, or update the runtime if it is older than the app.");
+    } finally { if (openingController === controller) setOpening(false); }
+  };
   const runs = createMemo(() => summarizeRuns(props.surfaces.agent));
   const conversation = createMemo(() => {
     const id = record().primaryThreadId;
@@ -90,6 +115,10 @@ function WorkDetail(props: { surfaces: WorkSurfaces }) {
         {conversation().status ? `Last recorded turn: ${conversation().status}, ${formatRecordedTime(conversation().updatedAt)}` : "No turns recorded in this Work yet."}
         <Show when={record().relatedThreadIds.length > 0}>{` · ${record().relatedThreadIds.length} related conversation(s)`}</Show>
       </p>
+      <button class="work-link" disabled={!record().primaryThreadId || opening()} onClick={() => void continueConversation()}>
+        {opening() ? "Opening conversation…" : "Continue conversation"} <Icon name="chevron" size={14} />
+      </button>
+      <Show when={openError()}><p role="alert">{openError()}</p></Show>
     </section>
 
     <section class="work-section">

@@ -434,6 +434,10 @@ pub struct OperatorThreadView {
     pub title: Option<String>,
     pub project_id: Option<String>,
     pub archived: bool,
+    /// Work memberships admitted by this journal projection. These are
+    /// continuity identifiers, not tool grants; submission revalidates them.
+    #[serde(default)]
+    pub work_ids: Vec<String>,
     pub turns: Vec<OperatorTurnView>,
     /// Schema/state-level rejects: events whose line parsed fine but that
     /// could not be projected — unsupported schema versions, or
@@ -1019,7 +1023,7 @@ impl OperatorSessionService {
     /// and is reported even on the empty-thread branch.
     pub fn thread(&self, thread_id: &str) -> Result<OperatorThreadView> {
         let materialized = self.materialized()?;
-        Ok(match materialized.threads.get(thread_id) {
+        let mut view = match materialized.threads.get(thread_id) {
             Some(folded) => folded.to_view(
                 materialized.skipped_lines(),
                 materialized
@@ -1038,6 +1042,7 @@ impl OperatorSessionService {
                 title: None,
                 project_id: None,
                 archived: false,
+                work_ids: Vec::new(),
                 turns: Vec::new(),
                 skipped_events: materialized
                     .unsupported_schema_events
@@ -1051,7 +1056,15 @@ impl OperatorSessionService {
                         .unwrap_or(0),
                 skipped_lines: materialized.skipped_lines(),
             },
-        })
+        };
+        view.work_ids = materialized
+            .work_threads
+            .iter()
+            .filter(|(_, threads)| threads.contains(thread_id))
+            .map(|(work_id, _)| work_id.clone())
+            .collect();
+        view.work_ids.sort();
+        Ok(view)
     }
 
     /// Summaries of the most recently active threads, most recent first,
@@ -1791,6 +1804,7 @@ impl FoldedThread {
             }),
             project_id: self.project_id.clone(),
             archived: self.archived,
+            work_ids: Vec::new(),
             turns: self
                 .turns
                 .iter()

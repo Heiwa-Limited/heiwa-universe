@@ -288,13 +288,10 @@ results belong in their generated receipts; these changes do not complete A1.
   proof would close that window.
 - Worker launch stays ungated: `heiwa work run` spawns the raw command it is
   given. The Action Gate for raw terminal commands closes it.
-- Work-scoped continuation from the desktop. The desktop now reads Work
-  (below), but it offers no "continue in conversation" action: composer turns go
-  through `OperatorClient.submitTurn` without a `work_id`, and the server accepts
-  unscoped turns in a Work's thread, so opening one there would silently create
-  unscoped activity. Closing it needs an explicit Work scope on submission,
-  taken from validated thread membership, with an approved operator-seam
-  baseline update.
+- Automatic creation/routing of execution Work remains deferred. Explicit
+  desktop continuation of an existing Work is implemented in C1-a1 below;
+  ordinary conversation selection remains unscoped. A Work association is
+  evidence continuity, not a tool grant or engine admission certificate.
 - A worker's parent, and the separate tool/filesystem/network/budget/action
   leases the spec's "Legitimate Workers" lists, are not on `WorkerIdentity`.
   A1-c2 has exactly one writer lease and no child workers, so those fields
@@ -309,8 +306,8 @@ results belong in their generated receipts; these changes do not complete A1.
 
 ## Next experimental slice
 
-- Release C1-a containment and authority proof, including Work-scoped composer
-  continuation (see Deferred with reason and the C1 rows below).
+- Release C1-a whole-provider containment and authority proof (see the C1 rows
+  below); explicit desktop Work continuation is the C1-a1 checkpoint.
 - Release A2 — multi-repository coordination remains tracked after the current
   macOS/Apple workflow slice.
 
@@ -322,6 +319,7 @@ This records current local development evidence, not release acceptance.
 | Slice | Scope | Status | Evidence / remaining work |
 | --- | --- | --- | --- |
 | C1-a | Authority, containment, grants, Work-scoped submission | doing | Offline fixture probe and 8 regression tests pass on macOS; whole-provider enforcement and runtime authority integration remain. See `docs/superpowers/plans/2026-09-27-engines-c1a-enforcement.md`. |
+| C1-a1 | Explicit desktop continuation of existing Work | done | 212 desktop, 9 packaging, 45 shell library, 22 operator HTTP, and 58 session-service tests pass. L0 gate passes with updated seam hashes. Rust exposes and revalidates admitted membership; old runtimes fail before submission, lost acknowledgements retain request identity, and ordinary chat remains unscoped. No automatic Work creation, engine admission, installation, or release is claimed. |
 | C1-b | Shared tools and recoverable Apple effects | pending | Depends on runtime grants; no Reminders write acceptance claimed. |
 | C1-c | Claude and Ollama execution families | pending | Offline Seatbelt canaries do not admit a provider engine. |
 | C1-d | Lightweight answers, allowance pools, and surfaces | pending | Bounded read-only tools remain eligible for Answer; routing not implemented here. |
