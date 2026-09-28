@@ -264,3 +264,27 @@ fn a_surface_flag_without_a_value_is_a_usage_error() {
     assert_eq!(output.status.code(), Some(2), "{}", stderr(&output));
     assert_eq!(cli_v1::error(&output.stdout)["code"], "usage");
 }
+
+#[test]
+fn a_replaced_stream_without_the_work_is_not_found_rather_than_stale() {
+    let here = home_with_identity();
+    let elsewhere = home_with_identity();
+    let work_id = create_work(here.path(), "watched here");
+    create_work(elsewhere.path(), "the only Work elsewhere");
+    let cursor = ndjson(&heiwa(here.path(), &["work", "watch", &work_id, "--once", "--json"]).stdout)
+        .last()
+        .expect("end")["cursor"]
+        .as_str()
+        .expect("cursor")
+        .to_string();
+
+    let stream = |home: &Path| home.join(".heiwa/evidence/operator_events.jsonl");
+    std::fs::copy(stream(elsewhere.path()), stream(here.path())).expect("replace the stream");
+
+    let output = heiwa(
+        here.path(),
+        &["work", "watch", &work_id, "--since", &cursor, "--once", "--json"],
+    );
+    assert_eq!(output.status.code(), Some(10), "{}", stderr(&output));
+    assert_eq!(cli_v1::error(&output.stdout)["code"], "not_found");
+}

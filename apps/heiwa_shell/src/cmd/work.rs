@@ -324,8 +324,22 @@ pub(crate) enum WatchStep {
     Resync { reason: String },
 }
 
+/// Resolve the Work from the stream as it is *now*. Used at start and after
+/// every resync: a replacement stream may no longer contain the Work, and
+/// its old membership must not be carried into a different lineage.
+fn current_scope(root: &Path, work_id: &str) -> Result<WatchScope> {
+    let work = find(root, work_id)?.ok_or_else(|| {
+        CliError::not_found(format!("no Work {work_id} on this installation"))
+            .with_hint("list Work with `heiwa work list`")
+    })?;
+    Ok(WatchScope::new(&work))
+}
+
 /// Decode-stage rejections from `heiwa_evidence`: the value was never a
 /// cursor. Every other `InvalidCursor` means a real cursor has expired.
+/// This couples to the reason strings of `heiwa_evidence::decode_cursor`; the
+/// malformed- and foreign-cursor tests fail loudly if they change. A typed
+/// classification belongs in `heiwa_evidence`, not in a shell-side decoder.
 fn cursor_is_malformed(reason: &str) -> bool {
     reason.starts_with("cursor is not valid base64")
         || reason.starts_with("cursor payload is malformed")
@@ -383,14 +397,9 @@ fn watch_command(args: &[String]) -> Result<()> {
         })?;
     let json = has_flag(args, "--json");
     let once = has_flag(args, "--once");
-    let paths = heiwa_config::HeiwaPaths::resolve();
-    let work = find(&paths.evidence_dir, work_id)?.ok_or_else(|| {
-        CliError::not_found(format!("no Work {work_id} on this installation"))
-            .with_hint("list Work with `heiwa work list`")
-    })?;
-
-    let mut scope = WatchScope::new(&work);
     let mut cursor = optional_value(args, "--since")?.map(str::to_string);
+    let paths = heiwa_config::HeiwaPaths::resolve();
+    let mut scope = current_scope(&paths.evidence_dir, work_id)?;
     let mut resyncs = 0usize;
     loop {
         match watch_page(&paths.evidence_dir, &mut scope, cursor.as_deref(), PAGE_SIZE)? {
@@ -407,7 +416,7 @@ fn watch_command(args: &[String]) -> Result<()> {
                     return Ok(());
                 }
                 cursor = None;
-                scope = WatchScope::new(&work);
+                scope = current_scope(&paths.evidence_dir, work_id)?;
             }
             WatchStep::Page { lines, cursor: next } => {
                 resyncs = 0;
@@ -984,6 +993,26 @@ mod tests {
             scope.admit(&legacy),
             Some("thread"),
             "unscoped turns in this Work's thread stay visible"
+        );
+    }
+
+    #[test]
+    fn a_resync_resolves_the_work_again_and_refuses_one_that_is_gone() {
+        let here = root();
+        let elsewhere = root();
+        let created = create(here.path(), "watched", "installation-1").expect("create");
+        create(elsewhere.path(), "unrelated", "installation-1").expect("create elsewhere");
+        let work_id = created["work_id"].as_str().expect("id");
+
+        assert!(current_scope(here.path(), work_id).is_ok());
+        let error = match current_scope(elsewhere.path(), work_id) {
+            Ok(_) => panic!("a stream without this Work must not keep its old membership"),
+            Err(error) => error,
+        };
+        assert_eq!(
+            crate::output::classify(&error).code,
+            crate::output::ErrorCode::NotFound,
+            "{error:#}"
         );
     }
 
