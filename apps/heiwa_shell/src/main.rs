@@ -1,6 +1,8 @@
 mod cli;
 mod cmd;
 mod home;
+mod output;
+mod registry;
 
 use anyhow::{anyhow, Result};
 use chrono::Utc;
@@ -206,8 +208,10 @@ async fn main() -> Result<()> {
         return Ok(());
     }
 
-    if cli::try_handle(&args).await? {
-        return Ok(());
+    match cli::try_handle(&args).await {
+        Ok(true) => return Ok(()),
+        Ok(false) => {}
+        Err(error) => std::process::exit(output::report_error(&error, output::wants_json(&args))),
     }
 
     match args[1].as_str() {
@@ -856,15 +860,19 @@ async fn main() -> Result<()> {
             run_repl(use_cockpit).await?;
         }
         "--help" | "-h" | "help" => {
-            print_help();
+            if let Err(error) = registry::run(&args[2..]) {
+                std::process::exit(output::report_error(&error, output::wants_json(&args)));
+            }
         }
         "--version" | "-V" | "version" => {
             println!("heiwa {}", env!("CARGO_PKG_VERSION"));
         }
         _ => {
-            println!("Heiwa AI runtime and shell");
-            println!("Unknown command: {}", args[1]);
-            print_help();
+            let error = anyhow::Error::new(
+                output::CliError::usage(format!("unknown command: {}", args[1]))
+                    .with_hint("run `heiwa help` for the command catalog"),
+            );
+            std::process::exit(output::report_error(&error, output::wants_json(&args)));
         }
     }
 
@@ -957,45 +965,6 @@ async fn run_setup(name: Option<&str>) -> Result<()> {
 /// display name is the single-seat assumption in miniature.
 fn default_display_name() -> String {
     "Heiwa user".to_string()
-}
-
-fn print_help() {
-    println!("Heiwa — BYOK terminal agent");
-    println!();
-    println!("Usage: heiwa [COMMAND]");
-    println!();
-    println!("Commands:");
-    println!("  install [gh:owner/repo[@ref]] Bootstrap Heiwa or install a GitHub plugin");
-    println!("  login [token]                 Sign in to Heiwa");
-    println!("  logout                        Sign out from Heiwa");
-    println!("  doctor [--ai-ops] [--json]    Check installation, identity, providers, local app reachability");
-    println!("  register                      Register the current device");
-    println!("  receipts                      Show run receipt status");
-    println!("  devices                       Show registered devices");
-    println!("  auth status                   Show all connected accounts and CLI discovery");
-    println!("  auth add-key <provider> <key> Register an API key for a provider");
-    println!("  auth login <provider>         Login to a provider CLI");
-    println!("  auth logout <provider>        Logout from a provider CLI");
-    println!("  providers                     List connected accounts and models");
-    println!("  models                        List all detected models by rate group");
-    println!("  life <command>                Inspect/import life readmodel data");
-    println!("  app [runtime status]          Probe local Heiwa.app runtime readiness");
-    println!("  workers heartbeat             Register local worker liveness");
-    println!("  workers status                Show worker registry");
-    println!("  mesh status|enroll            Node identity for this machine (no peers yet)");
-    println!("  work list|create              Durable Work on this installation");
-    println!("  workspace status|prepare      Repository hold for a Work");
-    println!("  auto status|create|tick       Manage local background automations");
-    println!("  approvals list|show|decide    Manage local approval packets");
-    println!("  mail status|accounts          Mail.app metadata-only bridge probe");
-    println!("  setup [--name <name>]         First-run setup: identity, provider, readiness");
-    println!("  whoami                        Show this installation's local identity");
-    println!("  ask <prompt>                  Run one non-interactive turn and print the reply");
-    println!("  route preview <prompt>        Preview DREX routing without execution");
-    println!("  session attach                Attach to a Heiwa session");
-    println!("  loop [turns] <objective>      Run a bounded execution loop");
-    println!("  shell                         Enter interactive mode");
-    println!("  help                          Print this message");
 }
 
 async fn run_route_command(args: &[String]) -> Result<()> {

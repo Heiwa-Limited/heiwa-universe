@@ -56,6 +56,7 @@ shell_ops_targets=(
   apple_calendar_connector
   calendar_plan_sync
   calendar_sync
+  cli_contract
   mail_triage
   schedule
   smoke

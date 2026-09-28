@@ -5,6 +5,7 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::process::Stdio;
 use tempfile::tempdir;
+mod cli_v1;
 
 struct HermeticCommand {
     command: Command,
@@ -856,19 +857,19 @@ fn test_approvals_list_json_reports_dispatch_paths() {
         .expect("failed to execute approvals list");
 
     assert!(output.status.success());
-    let stdout = String::from_utf8_lossy(&output.stdout);
+    let data = cli_v1::data(&output.stdout);
+    let requests_dir = data["requests_dir"]
+        .as_str()
+        .expect("requests_dir")
+        .replace('\\', "/");
+    let decisions_dir = data["decisions_dir"]
+        .as_str()
+        .expect("decisions_dir")
+        .replace('\\', "/");
+    assert!(requests_dir.contains("dispatch/requests"), "{data}");
     assert!(
-        stdout.contains("\"command\":\"approvals list\""),
-        "expected approvals list json marker: {stdout}"
-    );
-    let normalized_stdout = stdout.replace("\\\\", "/").replace('\\', "/");
-    assert!(
-        normalized_stdout.contains("dispatch/requests"),
-        "expected dispatch/requests directory in approvals list: {stdout}"
-    );
-    assert!(
-        normalized_stdout.contains("dispatch/approvals/decisions"),
-        "expected dispatch/approvals/decisions directory in approvals list: {stdout}"
+        decisions_dir.contains("dispatch/approvals/decisions"),
+        "{data}"
     );
 }
 
@@ -901,9 +902,7 @@ fn test_approvals_list_json_reports_dispatch_v1_summary() {
         .expect("failed to execute approvals list");
 
     assert!(output.status.success());
-    let stdout = String::from_utf8_lossy(&output.stdout);
-    let parsed: serde_json::Value =
-        serde_json::from_str(stdout.trim()).expect("approvals list --json must be valid JSON");
+    let parsed = cli_v1::data(&output.stdout);
     let summary = parsed["pending_summary"]
         .as_array()
         .and_then(|items| items.first())

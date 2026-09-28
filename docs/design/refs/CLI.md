@@ -74,7 +74,45 @@ Shared flags that behave identically across verbs:
 - `3` — provider auth failure
 - `4` — approval required and not granted
 - `5` — sandbox required and unavailable
+- `10` — not found: the named object does not exist
 - `10+` — verb-specific
+
+## Result Contract (`heiwa.cli/v1`)
+
+Invocations listed under `v1` in `heiwa help --json` follow this contract.
+Other commands keep their current output until they migrate.
+
+- `--json` prints exactly one envelope on stdout:
+  - success: `{"schema": "heiwa.cli/v1", "ok": true, "data": {...}, "next": ["<suggested command>"]}`
+  - error: `{"schema": "heiwa.cli/v1", "ok": false, "error": {"code": "usage", "message": "...", "hint": "..."}, "next": []}`
+- On error, a readable diagnostic always goes to stderr, with or without `--json`.
+- `error.code` names the exit code: `failure` 1, `usage` 2, `not_found` 10.
+- A value flag given without its value (for example `--since --once`) is a
+  usage error. It never falls back silently to a default.
+- `next` suggests follow-up commands. It is advice, never authority: a
+  suggested `approvals decide` still goes through the approval service and
+  its policy. File arguments in generated POSIX-shell commands are quoted as
+  literal data; a Calendar stage suggestion retains the diff's `--adopt` flag.
+- Migrated commands never prompt and never read stdin, so they are safe in
+  pipelines and agent tool calls. A TTY is not authentication.
+- JSON envelopes, help, and Work streams handle a closed stdout (for example
+  `heiwa help | head`) quietly. Other human renderers retain their existing
+  output behavior.
+
+### Streams (`heiwa.cli.stream/v1`)
+
+`heiwa work watch <work-id> [--since <cursor>] [--once] [--json]` prints NDJSON
+lines, each carrying `"schema": "heiwa.cli.stream/v1"` and a `type`:
+
+| `type` | Meaning |
+| --- | --- |
+| `event` | One operator event in this Work. `scope` is `work` when the event carries the Work's id, or `thread` for an unscoped event in one of the Work's threads. Events explicitly scoped to another Work are never included. Each event line carries the `cursor` to resume after it. |
+| `resync` | The resume cursor no longer fits the stream: it was repaired, replaced, or compacted, or the cursor came from another stream or an older binary. The Work is re-resolved and replayed from the start, so de-duplicate by `event.event_id`. `cursor` is `null`. More than 3 consecutive resyncs fail the command. |
+| `end` | With `--once`: caught up. Its `cursor` resumes with `--since`. |
+
+A malformed `--since` value is a usage error (exit 2). A Work absent from the
+current stream is `not_found` (exit 10). That holds after a resync too, so old
+membership is never carried into a replacement stream.
 
 ## Environment
 
