@@ -23,9 +23,9 @@ pub(crate) fn optional_value<'a>(
     if !has_flag(args, flag) {
         return Ok(None);
     }
-    flag_value(args, flag).map(Some).ok_or_else(|| {
-        crate::output::CliError::usage(format!("{flag} needs a value"))
-    })
+    flag_value(args, flag)
+        .map(Some)
+        .ok_or_else(|| crate::output::CliError::usage(format!("{flag} needs a value")))
 }
 
 /// Arguments that are neither flags nor the values of `value_flags`. A value
@@ -88,10 +88,16 @@ mod tests {
     #[test]
     fn a_value_flag_without_a_value_is_a_usage_error() {
         let absent = argv(&["work-1", "--once"]);
-        assert_eq!(optional_value(&absent, "--since").expect("absent is fine"), None);
+        assert_eq!(
+            optional_value(&absent, "--since").expect("absent is fine"),
+            None
+        );
 
         let present = argv(&["work-1", "--since", "c-9"]);
-        assert_eq!(optional_value(&present, "--since").expect("value"), Some("c-9"));
+        assert_eq!(
+            optional_value(&present, "--since").expect("value"),
+            Some("c-9")
+        );
 
         let missing = argv(&["work-1", "--since", "--once"]);
         let error = optional_value(&missing, "--since").expect_err("missing value");

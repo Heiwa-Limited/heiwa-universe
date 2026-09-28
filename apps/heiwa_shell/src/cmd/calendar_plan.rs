@@ -457,9 +457,11 @@ pub(crate) fn run(args: &[String]) -> Result<()> {
             let next = staged_next(&staged);
             output::emit(as_json, staged, &next, render_staged)
         }
-        other => Err(CliError::usage(format!("unknown calendar plan command: {other}"))
-            .with_hint(usage)
-            .into()),
+        other => Err(
+            CliError::usage(format!("unknown calendar plan command: {other}"))
+                .with_hint(usage)
+                .into(),
+        ),
     }
 }
 

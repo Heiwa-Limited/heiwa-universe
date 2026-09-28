@@ -29,9 +29,21 @@ const fn command(name: &'static str, usage: &'static str, summary: &'static str)
 }
 
 pub const COMMANDS: &[CommandSpec] = &[
-    command("install", "install [gh:owner/repo[@ref]]", "Bootstrap Heiwa or install a GitHub plugin"),
-    command("setup", "setup [--name <name>]", "First-run setup: identity, provider, readiness"),
-    command("whoami", "whoami", "Show this installation's local identity"),
+    command(
+        "install",
+        "install [gh:owner/repo[@ref]]",
+        "Bootstrap Heiwa or install a GitHub plugin",
+    ),
+    command(
+        "setup",
+        "setup [--name <name>]",
+        "First-run setup: identity, provider, readiness",
+    ),
+    command(
+        "whoami",
+        "whoami",
+        "Show this installation's local identity",
+    ),
     command("login", "login [token]", "Sign in to Heiwa"),
     command("logout", "logout", "Sign out from Heiwa"),
     command("register", "register", "Register the current device"),
@@ -46,32 +58,78 @@ pub const COMMANDS: &[CommandSpec] = &[
         "auth status|add-key|login|logout",
         "Connected accounts, API keys, and provider CLI login",
     ),
-    command("providers", "providers", "List connected accounts and models"),
+    command(
+        "providers",
+        "providers",
+        "List connected accounts and models",
+    ),
     command("models", "models", "List all detected models by rate group"),
-    command("connect", "connect <connector>", "Connect a provider CLI or life connector"),
-    command("ask", "ask <prompt>", "Run one non-interactive turn and print the reply"),
-    command("route", "route preview <prompt>", "Preview DREX routing without execution"),
+    command(
+        "connect",
+        "connect <connector>",
+        "Connect a provider CLI or life connector",
+    ),
+    command(
+        "ask",
+        "ask <prompt>",
+        "Run one non-interactive turn and print the reply",
+    ),
+    command(
+        "route",
+        "route preview <prompt>",
+        "Preview DREX routing without execution",
+    ),
     command("session", "session attach", "Attach to a Heiwa session"),
-    command("loop", "loop [turns] <objective>", "Run a bounded execution loop"),
+    command(
+        "loop",
+        "loop [turns] <objective>",
+        "Run a bounded execution loop",
+    ),
     command("shell", "shell", "Enter interactive mode"),
-    command("goal", "goal <subcommand>", "Long-running goals: start, show, step, finish"),
+    command(
+        "goal",
+        "goal <subcommand>",
+        "Long-running goals: start, show, step, finish",
+    ),
     CommandSpec {
-        v1: &["work list", "work create", "work show", "work watch", "work recover"],
+        v1: &[
+            "work list",
+            "work create",
+            "work show",
+            "work watch",
+            "work recover",
+        ],
         ..command(
             "work",
             "work list|create|show|watch|run|recover",
             "Durable Work on this installation",
         )
     },
-    command("workspace", "workspace status|prepare", "Repository hold for a Work"),
-    command("workers", "workers heartbeat|status", "Worker liveness registry"),
+    command(
+        "workspace",
+        "workspace status|prepare",
+        "Repository hold for a Work",
+    ),
+    command(
+        "workers",
+        "workers heartbeat|status",
+        "Worker liveness registry",
+    ),
     CommandSpec {
         v1: &["approvals list", "approvals show", "approvals decide"],
-        ..command("approvals", "approvals list|show|decide", "Review and decide staged actions")
+        ..command(
+            "approvals",
+            "approvals list|show|decide",
+            "Review and decide staged actions",
+        )
     },
     command("receipts", "receipts", "Show run receipt status"),
     command("cost", "cost", "Token and cost totals from local receipts"),
-    command("compress", "compress [--text|--file] [--json]", "Compress text with a local model"),
+    command(
+        "compress",
+        "compress [--text|--file] [--json]",
+        "Compress text with a local model",
+    ),
     CommandSpec {
         v1: &["calendar plan diff", "calendar plan stage"],
         ..command(
@@ -80,8 +138,16 @@ pub const COMMANDS: &[CommandSpec] = &[
             "Calendar lanes, local holds, and plan sync",
         )
     },
-    command("schedule", "schedule <text>", "Turn free text into a staged calendar hold"),
-    command("mail", "mail status|accounts", "Mail.app metadata-only bridge probe"),
+    command(
+        "schedule",
+        "schedule <text>",
+        "Turn free text into a staged calendar hold",
+    ),
+    command(
+        "mail",
+        "mail status|accounts",
+        "Mail.app metadata-only bridge probe",
+    ),
     command(
         "life",
         "life status|today|freshness|approvals|import",
@@ -89,11 +155,27 @@ pub const COMMANDS: &[CommandSpec] = &[
     ),
     CommandSpec {
         aliases: &["automations"],
-        ..command("auto", "auto status|create|tick", "Manage local background automations")
+        ..command(
+            "auto",
+            "auto status|create|tick",
+            "Manage local background automations",
+        )
     },
-    command("capabilities", "capabilities", "Refresh the local capability inventory"),
-    command("mesh", "mesh status|enroll", "Node identity for this machine (no peers yet)"),
-    command("app", "app [runtime status]", "Probe local Heiwa.app runtime readiness"),
+    command(
+        "capabilities",
+        "capabilities",
+        "Refresh the local capability inventory",
+    ),
+    command(
+        "mesh",
+        "mesh status|enroll",
+        "Node identity for this machine (no peers yet)",
+    ),
+    command(
+        "app",
+        "app [runtime status]",
+        "Probe local Heiwa.app runtime readiness",
+    ),
     CommandSpec {
         aliases: &["--help", "-h"],
         v1: &["help"],
@@ -179,7 +261,9 @@ mod tests {
     fn catalog_names() -> BTreeSet<&'static str> {
         COMMANDS
             .iter()
-            .flat_map(|command| std::iter::once(command.name).chain(command.aliases.iter().copied()))
+            .flat_map(|command| {
+                std::iter::once(command.name).chain(command.aliases.iter().copied())
+            })
             .collect()
     }
 
@@ -223,12 +307,18 @@ mod tests {
             .into_iter()
             .chain(main_dispatch_names())
             .collect();
-        assert!(dispatched.len() >= 30, "scanner found too little: {dispatched:?}");
+        assert!(
+            dispatched.len() >= 30,
+            "scanner found too little: {dispatched:?}"
+        );
         let missing: Vec<&String> = dispatched
             .iter()
             .filter(|name| !known.contains(name.as_str()))
             .collect();
-        assert!(missing.is_empty(), "missing from registry::COMMANDS: {missing:?}");
+        assert!(
+            missing.is_empty(),
+            "missing from registry::COMMANDS: {missing:?}"
+        );
     }
 
     #[test]

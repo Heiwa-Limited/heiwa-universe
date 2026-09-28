@@ -130,9 +130,11 @@ fn show_command(args: &[String]) -> Result<()> {
         })?;
     let paths = heiwa_config::HeiwaPaths::resolve();
     if find(&paths.evidence_dir, work_id)?.is_none() {
-        return Err(CliError::not_found(format!("no Work {work_id} on this installation"))
-            .with_hint("list Work with `heiwa work list`")
-            .into());
+        return Err(
+            CliError::not_found(format!("no Work {work_id} on this installation"))
+                .with_hint("list Work with `heiwa work list`")
+                .into(),
+        );
     }
     let epoch_seed = format!("cli-{}", uuid::Uuid::new_v4());
     if let Some(surface) = surface {
@@ -148,7 +150,10 @@ fn show_command(args: &[String]) -> Result<()> {
             serde_json::to_value(view)?
         };
         return output::emit(json, rendered, &[], |rendered| {
-            println!("{}", serde_json::to_string_pretty(rendered).unwrap_or_default());
+            println!(
+                "{}",
+                serde_json::to_string_pretty(rendered).unwrap_or_default()
+            );
         });
     }
     let snapshot = session(&paths.evidence_dir, work_id, &epoch_seed)?;
@@ -393,7 +398,9 @@ fn watch_command(args: &[String]) -> Result<()> {
         .first()
         .copied()
         .ok_or_else(|| {
-            CliError::usage("usage: heiwa work watch <work-id> [--since <cursor>] [--once] [--json]")
+            CliError::usage(
+                "usage: heiwa work watch <work-id> [--since <cursor>] [--once] [--json]",
+            )
         })?;
     let json = has_flag(args, "--json");
     let once = has_flag(args, "--once");
@@ -402,7 +409,12 @@ fn watch_command(args: &[String]) -> Result<()> {
     let mut scope = current_scope(&paths.evidence_dir, work_id)?;
     let mut resyncs = 0usize;
     loop {
-        match watch_page(&paths.evidence_dir, &mut scope, cursor.as_deref(), PAGE_SIZE)? {
+        match watch_page(
+            &paths.evidence_dir,
+            &mut scope,
+            cursor.as_deref(),
+            PAGE_SIZE,
+        )? {
             WatchStep::Resync { reason } => {
                 resyncs += 1;
                 if resyncs > MAX_RESYNCS {
@@ -418,7 +430,10 @@ fn watch_command(args: &[String]) -> Result<()> {
                 cursor = None;
                 scope = current_scope(&paths.evidence_dir, work_id)?;
             }
-            WatchStep::Page { lines, cursor: next } => {
+            WatchStep::Page {
+                lines,
+                cursor: next,
+            } => {
                 resyncs = 0;
                 let advanced = next != cursor;
                 for line in &lines {
@@ -466,7 +481,9 @@ fn print_watch_resync(reason: &str, json: bool) -> Result<bool> {
         })
         .to_string()
     } else {
-        format!("! the operator stream was rewritten ({reason}); replaying this Work from the start")
+        format!(
+            "! the operator stream was rewritten ({reason}); replaying this Work from the start"
+        )
     };
     Ok(output::print_line(&text)?)
 }
@@ -876,9 +893,8 @@ mod tests {
             .iter()
             .all(|line| line["schema"] == "heiwa.cli.stream/v1" && line["type"] == "event"));
 
-        let (resumed, resumed_cursor) = page_lines(
-            watch_page(dir.path(), &mut scope, cursor.as_deref(), 256).expect("resume"),
-        );
+        let (resumed, resumed_cursor) =
+            page_lines(watch_page(dir.path(), &mut scope, cursor.as_deref(), 256).expect("resume"));
         assert!(resumed.is_empty(), "{resumed:?}");
         assert_eq!(resumed_cursor, cursor, "an idle page keeps its place");
     }

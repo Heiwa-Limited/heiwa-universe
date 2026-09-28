@@ -53,7 +53,10 @@ fn help_json_is_a_v1_catalog_that_includes_every_command() {
         .map(|command| command["name"].as_str().expect("name"))
         .collect();
     for expected in ["calendar", "connect", "approvals", "work", "version"] {
-        assert!(names.contains(&expected), "{expected} missing from {names:?}");
+        assert!(
+            names.contains(&expected),
+            "{expected} missing from {names:?}"
+        );
     }
 }
 
@@ -129,11 +132,16 @@ fn watching_once_streams_events_then_an_end_line_to_resume_from() {
     let home = home_with_identity();
     let work_id = create_work(home.path(), "watch me");
 
-    let watched = heiwa(home.path(), &["work", "watch", &work_id, "--once", "--json"]);
+    let watched = heiwa(
+        home.path(),
+        &["work", "watch", &work_id, "--once", "--json"],
+    );
     assert!(watched.status.success(), "{}", stderr(&watched));
     let lines = ndjson(&watched.stdout);
     assert!(
-        lines.iter().all(|line| line["schema"] == "heiwa.cli.stream/v1"),
+        lines
+            .iter()
+            .all(|line| line["schema"] == "heiwa.cli.stream/v1"),
         "{lines:?}"
     );
     assert!(
@@ -148,11 +156,17 @@ fn watching_once_streams_events_then_an_end_line_to_resume_from() {
 
     let resumed = heiwa(
         home.path(),
-        &["work", "watch", &work_id, "--since", &cursor, "--once", "--json"],
+        &[
+            "work", "watch", &work_id, "--since", &cursor, "--once", "--json",
+        ],
     );
     assert!(resumed.status.success(), "{}", stderr(&resumed));
     let resumed_lines = ndjson(&resumed.stdout);
-    assert_eq!(resumed_lines.len(), 1, "only the end line: {resumed_lines:?}");
+    assert_eq!(
+        resumed_lines.len(),
+        1,
+        "only the end line: {resumed_lines:?}"
+    );
     assert_eq!(resumed_lines[0]["type"], "end");
     assert_eq!(resumed_lines[0]["cursor"], cursor.as_str());
 }
@@ -164,7 +178,11 @@ fn a_cursor_from_another_stream_resyncs_instead_of_failing() {
     let work_id = create_work(here.path(), "watched here");
     let other_id = create_work(elsewhere.path(), "watched elsewhere");
     let foreign = ndjson(
-        &heiwa(elsewhere.path(), &["work", "watch", &other_id, "--once", "--json"]).stdout,
+        &heiwa(
+            elsewhere.path(),
+            &["work", "watch", &other_id, "--once", "--json"],
+        )
+        .stdout,
     );
     let foreign_cursor = foreign.last().expect("end")["cursor"]
         .as_str()
@@ -173,7 +191,15 @@ fn a_cursor_from_another_stream_resyncs_instead_of_failing() {
 
     let output = heiwa(
         here.path(),
-        &["work", "watch", &work_id, "--since", &foreign_cursor, "--once", "--json"],
+        &[
+            "work",
+            "watch",
+            &work_id,
+            "--since",
+            &foreign_cursor,
+            "--once",
+            "--json",
+        ],
     );
     assert!(output.status.success(), "{}", stderr(&output));
     let lines = ndjson(&output.stdout);
@@ -194,7 +220,15 @@ fn a_malformed_cursor_is_a_usage_error() {
     let work_id = create_work(home.path(), "watched");
     let output = heiwa(
         home.path(),
-        &["work", "watch", &work_id, "--since", "not-a-cursor", "--once", "--json"],
+        &[
+            "work",
+            "watch",
+            &work_id,
+            "--since",
+            "not-a-cursor",
+            "--once",
+            "--json",
+        ],
     );
     assert_eq!(output.status.code(), Some(2), "{}", stderr(&output));
     assert_eq!(cli_v1::error(&output.stdout)["code"], "usage");
@@ -260,7 +294,10 @@ fn a_since_flag_without_a_value_is_a_usage_error_not_a_replay() {
 fn a_surface_flag_without_a_value_is_a_usage_error() {
     let home = home_with_identity();
     let work_id = create_work(home.path(), "shown");
-    let output = heiwa(home.path(), &["work", "show", &work_id, "--surface", "--json"]);
+    let output = heiwa(
+        home.path(),
+        &["work", "show", &work_id, "--surface", "--json"],
+    );
     assert_eq!(output.status.code(), Some(2), "{}", stderr(&output));
     assert_eq!(cli_v1::error(&output.stdout)["code"], "usage");
 }
@@ -271,9 +308,15 @@ fn a_replaced_stream_without_the_work_is_not_found_rather_than_stale() {
     let elsewhere = home_with_identity();
     let work_id = create_work(here.path(), "watched here");
     create_work(elsewhere.path(), "the only Work elsewhere");
-    let cursor = ndjson(&heiwa(here.path(), &["work", "watch", &work_id, "--once", "--json"]).stdout)
-        .last()
-        .expect("end")["cursor"]
+    let cursor = ndjson(
+        &heiwa(
+            here.path(),
+            &["work", "watch", &work_id, "--once", "--json"],
+        )
+        .stdout,
+    )
+    .last()
+    .expect("end")["cursor"]
         .as_str()
         .expect("cursor")
         .to_string();
@@ -283,7 +326,9 @@ fn a_replaced_stream_without_the_work_is_not_found_rather_than_stale() {
 
     let output = heiwa(
         here.path(),
-        &["work", "watch", &work_id, "--since", &cursor, "--once", "--json"],
+        &[
+            "work", "watch", &work_id, "--since", &cursor, "--once", "--json",
+        ],
     );
     assert_eq!(output.status.code(), Some(10), "{}", stderr(&output));
     assert_eq!(cli_v1::error(&output.stdout)["code"], "not_found");
@@ -311,7 +356,10 @@ fn showing_an_unknown_approval_is_not_found() {
 #[test]
 fn an_approval_id_cannot_walk_out_of_the_requests_directory() {
     let home = tempfile::tempdir().expect("home");
-    let output = heiwa(home.path(), &["approvals", "show", "../../secrets", "--json"]);
+    let output = heiwa(
+        home.path(),
+        &["approvals", "show", "../../secrets", "--json"],
+    );
     assert_eq!(output.status.code(), Some(2), "{}", stderr(&output));
     assert_eq!(cli_v1::error(&output.stdout)["code"], "usage");
 }

@@ -858,8 +858,14 @@ fn test_approvals_list_json_reports_dispatch_paths() {
 
     assert!(output.status.success());
     let data = cli_v1::data(&output.stdout);
-    let requests_dir = data["requests_dir"].as_str().expect("requests_dir").replace('\\', "/");
-    let decisions_dir = data["decisions_dir"].as_str().expect("decisions_dir").replace('\\', "/");
+    let requests_dir = data["requests_dir"]
+        .as_str()
+        .expect("requests_dir")
+        .replace('\\', "/");
+    let decisions_dir = data["decisions_dir"]
+        .as_str()
+        .expect("decisions_dir")
+        .replace('\\', "/");
     assert!(requests_dir.contains("dispatch/requests"), "{data}");
     assert!(
         decisions_dir.contains("dispatch/approvals/decisions"),

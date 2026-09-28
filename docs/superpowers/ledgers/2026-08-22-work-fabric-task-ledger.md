@@ -325,6 +325,7 @@ This records current local development evidence, not release acceptance.
 | C1-b | Shared tools and recoverable Apple effects | pending | Depends on runtime grants; no Reminders write acceptance claimed. |
 | C1-c | Claude and Ollama execution families | pending | Offline Seatbelt canaries do not admit a provider engine. |
 | C1-d | Lightweight answers, allowance pools, and surfaces | pending | Bounded read-only tools remain eligible for Answer; routing not implemented here. |
+| C1-d1 | CLI contract: `heiwa.cli/v1` envelope and exit codes, `help --json` catalog, resumable `work watch` stream; `work`, `calendar plan`, `approvals` migrated | done | `cargo test -p heiwa-shell` passes locally with the new `cli_contract` target; plan `docs/superpowers/plans/2026-09-27-engines-c1d1-cli-contract.md`. Approvals changed rendering only. Other commands keep legacy output until migrated. |
 | C1-e | Fresh-profile end-to-end acceptance | pending | `scripts/check_engines_c1_acceptance.sh` does not yet exist. |
 
 Verification for the offline C1-a spike:

@@ -16,9 +16,11 @@ pub fn run(args: &[String]) -> Result<()> {
             print_help();
             Ok(())
         }
-        Some(other) => Err(CliError::usage(format!("unknown approvals command: {other}"))
-            .with_hint("run `heiwa approvals --help`")
-            .into()),
+        Some(other) => Err(
+            CliError::usage(format!("unknown approvals command: {other}"))
+                .with_hint("run `heiwa approvals --help`")
+                .into(),
+        ),
     }
 }
 
@@ -43,15 +45,24 @@ fn list(args: &[String]) -> Result<()> {
 }
 
 fn render_list(data: &Value) {
-    let pending = data["pending_summary"].as_array().cloned().unwrap_or_default();
+    let pending = data["pending_summary"]
+        .as_array()
+        .cloned()
+        .unwrap_or_default();
     println!("approvals");
     println!("  requests: {} pending", pending.len());
     println!(
         "  decisions: {} on record",
         data["decided"].as_array().map_or(0, Vec::len)
     );
-    println!("  requests dir: {}", data["requests_dir"].as_str().unwrap_or("?"));
-    println!("  decisions dir: {}", data["decisions_dir"].as_str().unwrap_or("?"));
+    println!(
+        "  requests dir: {}",
+        data["requests_dir"].as_str().unwrap_or("?")
+    );
+    println!(
+        "  decisions dir: {}",
+        data["decisions_dir"].as_str().unwrap_or("?")
+    );
     for summary in pending.iter().take(10) {
         let id = summary.get("id").and_then(Value::as_str).unwrap_or("?");
         let action = summary.get("action").and_then(Value::as_str).unwrap_or("?");
@@ -83,14 +94,20 @@ fn show(args: &[String]) -> Result<()> {
     let next = vec![format!("heiwa approvals decide {id} --approve|--deny")];
     output::emit(has_flag(args, "--json"), value, &next, |value| {
         println!("approval {id}");
-        println!("{}", serde_json::to_string_pretty(value).unwrap_or_default());
+        println!(
+            "{}",
+            serde_json::to_string_pretty(value).unwrap_or_default()
+        );
     })
 }
 
 fn decide(args: &[String]) -> Result<()> {
-    let id = args.first().filter(|arg| !arg.starts_with("--")).ok_or_else(|| {
-        CliError::usage("usage: heiwa approvals decide <id> --approve|--deny [--note ...]")
-    })?;
+    let id = args
+        .first()
+        .filter(|arg| !arg.starts_with("--"))
+        .ok_or_else(|| {
+            CliError::usage("usage: heiwa approvals decide <id> --approve|--deny [--note ...]")
+        })?;
     let approve = has_flag(args, "--approve");
     let deny = has_flag(args, "--deny");
     if approve == deny {
