@@ -22,6 +22,9 @@ use std::collections::{BTreeMap, HashSet};
 use std::fs;
 use std::path::PathBuf;
 
+use crate::cmd::args::{has_flag, positionals, shell_quote};
+use crate::output::{self, CliError};
+
 pub(crate) const MARKER_ROOT: &str = "heiwa://calendar/plan/";
 const MAX_EVENTS: usize = 2000;
 const MAX_WINDOW_DAYS: i64 = 400;
@@ -424,11 +427,12 @@ fn helper_changes(changes: &[Change]) -> Vec<Value> {
 
 pub(crate) fn run(args: &[String]) -> Result<()> {
     let usage = "usage: heiwa calendar plan diff|stage <plan.json> [--adopt] [--json]";
-    let (Some(sub), Some(path)) = (args.first().map(String::as_str), args.get(1)) else {
-        bail!("{usage}");
+    let positional = positionals(args, &[]);
+    let (Some(sub), Some(path)) = (positional.first().copied(), positional.get(1).copied()) else {
+        return Err(CliError::usage(usage).into());
     };
-    let adopt = args.iter().any(|arg| arg == "--adopt");
-    let as_json = args.iter().any(|arg| arg == "--json");
+    let adopt = has_flag(args, "--adopt");
+    let as_json = output::wants_json(args);
     match sub {
         "diff" => {
             super::connectors::require_apple_calendar_connection()?;
@@ -436,42 +440,75 @@ pub(crate) fn run(args: &[String]) -> Result<()> {
             let (marked, unmarked) = scan(&plan, adopt)?;
             let changes = diff(&plan, &marked, &unmarked, adopt)?;
             let counts = counts(&changes, &plan);
-            if as_json {
-                println!(
-                    "{}",
-                    json!({"command": "calendar plan diff", "plan_id": plan.plan_id, "counts": counts, "changes": review_rows(&changes)})
-                );
-            } else {
+            let data = json!({
+                "plan_id": plan.plan_id,
+                "counts": counts,
+                "changes": review_rows(&changes),
+            });
+            let next = vec![stage_command_hint(path, adopt)];
+            output::emit(as_json, data, &next, |_| {
                 println!("calendar plan diff: {}", plan.plan_id);
                 println!("  {}", summary_line(&counts));
                 print_rows(&changes);
-            }
-            Ok(())
+            })
         }
         "stage" => {
             let staged = stage(path, adopt)?;
-            if as_json {
-                println!("{staged}");
-            } else if staged["in_sync"] == true {
-                println!(
-                    "calendar plan {}: already in sync, nothing to approve",
-                    staged["plan_id"].as_str().unwrap_or("?")
-                );
-            } else {
-                let id = staged["approval_request"]["request_id"]
-                    .as_str()
-                    .unwrap_or("?");
-                println!("calendar plan staged: {id} (T2)");
-                println!(
-                    "  {}",
-                    summary_line(&staged["approval_request"]["intent"]["counts"])
-                );
-                println!("  review: heiwa approvals show {id}");
-                println!("  apply:  heiwa approvals decide {id} --approve");
-            }
-            Ok(())
+            let next = staged_next(&staged);
+            output::emit(as_json, staged, &next, render_staged)
         }
-        _ => bail!("{usage}"),
+        other => Err(
+            CliError::usage(format!("unknown calendar plan command: {other}"))
+                .with_hint(usage)
+                .into(),
+        ),
+    }
+}
+
+fn stage_command_hint(path: &str, adopt: bool) -> String {
+    format!(
+        "heiwa calendar plan stage {}{}",
+        shell_quote(path),
+        if adopt { " --adopt" } else { "" },
+    )
+}
+
+/// Follow-up commands for a staged plan: review, then decide. The staged id
+/// becomes part of a suggested shell command, so an id that is not a valid,
+/// flag-free request id yields no hint at all (fail safe).
+fn staged_next(staged: &Value) -> Vec<String> {
+    match staged["approval_request"]["request_id"].as_str() {
+        Some(id) if staged["in_sync"] != true && super::approvals::is_hintable_request_id(id) => {
+            vec![
+                format!("heiwa approvals show {id}"),
+                format!("heiwa approvals decide {id} --approve"),
+            ]
+        }
+        _ => Vec::new(),
+    }
+}
+
+fn render_staged(staged: &Value) {
+    if staged["in_sync"] == true {
+        println!(
+            "calendar plan {}: already in sync, nothing to approve",
+            staged["plan_id"].as_str().unwrap_or("?")
+        );
+        return;
+    }
+    println!("calendar plan staged (T2)");
+    println!(
+        "  {}",
+        summary_line(&staged["approval_request"]["intent"]["counts"])
+    );
+    match staged_next(staged).as_slice() {
+        [review, apply] => {
+            println!("  review: {review}");
+            println!("  apply:  {apply}");
+        }
+        _ => println!(
+            "  ! the staged request id is not a valid approval id; review with `heiwa approvals list`"
+        ),
     }
 }
 
@@ -899,5 +936,67 @@ mod tests {
         let mut upper = plan(vec![]);
         upper.plan_id = "Operator".into();
         assert!(validate(&upper).is_err());
+    }
+
+    #[test]
+    fn a_plan_command_without_arguments_is_a_usage_error() {
+        let error = run(&[]).expect_err("usage");
+        assert_eq!(
+            crate::output::classify(&error).code,
+            crate::output::ErrorCode::Usage
+        );
+    }
+
+    #[test]
+    fn a_staged_plan_points_at_its_approval() {
+        let staged = json!({"in_sync": false, "approval_request": {"request_id": "req_1"}});
+        assert_eq!(
+            staged_next(&staged),
+            vec![
+                "heiwa approvals show req_1".to_string(),
+                "heiwa approvals decide req_1 --approve".to_string()
+            ]
+        );
+        assert!(staged_next(&json!({"in_sync": true})).is_empty());
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn stage_hint_preserves_literal_paths_and_the_reviewed_adoption_flag() {
+        for path in [
+            "/tmp/plan with spaces.json",
+            "/tmp/it's $(printf unexpected); plan.json",
+        ] {
+            for adopt in [false, true] {
+                // Replace only the executable with an argv recorder. No Heiwa
+                // command, Calendar read, or approval effect is performed.
+                let script = format!(
+                    "heiwa() {{ printf '%s\\0' \"$@\"; }}; {}",
+                    stage_command_hint(path, adopt)
+                );
+                let output = std::process::Command::new("/bin/sh")
+                    .env_clear()
+                    .args(["-c", &script])
+                    .output()
+                    .expect("run argument recorder");
+                assert!(output.status.success(), "{:?}", output.stderr);
+                let mut expected = format!("calendar\0plan\0stage\0{path}\0");
+                if adopt {
+                    expected.push_str("--adopt\0");
+                }
+                assert_eq!(output.stdout, expected.as_bytes());
+            }
+        }
+    }
+
+    #[test]
+    fn an_invalid_staged_request_id_yields_no_command_hints() {
+        for id in ["req_1; rm -rf ~", "--json", "../escape"] {
+            let staged = json!({"in_sync": false, "approval_request": {"request_id": id}});
+            assert!(
+                staged_next(&staged).is_empty(),
+                "{id} must not become a command"
+            );
+        }
     }
 }

@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-herd-pane-focus"
+description = "Enables the herd_pane_focus command without any pre-configured scope."
+commands.allow = ["herd_pane_focus"]
+
+[[permission]]
+identifier = "deny-herd-pane-focus"
+description = "Denies the herd_pane_focus command without any pre-configured scope."
+commands.deny = ["herd_pane_focus"]

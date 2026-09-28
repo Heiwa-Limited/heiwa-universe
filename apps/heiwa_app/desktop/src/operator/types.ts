@@ -89,6 +89,9 @@ export type OperatorThreadSummary = {
   archived?: boolean;
 };
 
+/** Full thread reads expose memberships on runtimes supporting scoped turns. */
+export type OperatorThreadDetails = OperatorThreadSummary & { work_ids?: string[] };
+
 export type OperatorProject = {
   project_id: string;
   title: string;
@@ -108,6 +111,8 @@ export type OperatorTurnSubmission = {
   client_request_id: string;
   prompt: string;
   route_policy: OperatorRoutePolicy;
+  /** Explicit continuation; Rust validates the Work-to-thread relationship. */
+  work_id?: string;
 };
 
 export type OperatorTurnSubmissionResponse = {
@@ -115,6 +120,7 @@ export type OperatorTurnSubmissionResponse = {
   data: {
     thread_id: string;
     turn_id: string;
+    work_id?: string | null;
     cursor: string;
     duplicate: boolean;
     stream_url: string;

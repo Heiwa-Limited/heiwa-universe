@@ -481,6 +481,7 @@ fn work_scoped_turn_refuses_an_unknown_work_without_writing_rows() {
         .events
         .is_empty());
     assert!(!dir.path().join("operator_events.jsonl").exists());
+    assert!(service.thread("thread-1").unwrap().work_ids.is_empty());
 }
 
 #[test]
@@ -498,6 +499,15 @@ fn work_scoped_turn_refuses_a_thread_not_linked_to_the_work() {
         "primary_thread_id": "thread-foreign",
     });
     service.append_event(duplicate_creation).unwrap();
+    assert!(service
+        .thread("thread-foreign")
+        .unwrap()
+        .work_ids
+        .is_empty());
+    assert_eq!(
+        service.thread("thread-primary").unwrap().work_ids,
+        vec!["work-abc"]
+    );
     let rows_before = service
         .events_after("thread-foreign", None, 100)
         .unwrap()
@@ -600,6 +610,14 @@ fn work_scoped_turn_accepts_a_related_thread_and_binds_retries_to_work() {
     linked.work_id = Some("work-abc".to_string());
     linked.payload = json!({"thread_id": "thread-related", "origin": "adopted"});
     service.append_event(linked).unwrap();
+    assert_eq!(
+        service.thread("thread-related").unwrap().work_ids,
+        vec!["work-abc"]
+    );
+    assert_eq!(
+        service.thread("thread-other").unwrap().work_ids,
+        vec!["work-def"]
+    );
 
     let first = service
         .start_turn(

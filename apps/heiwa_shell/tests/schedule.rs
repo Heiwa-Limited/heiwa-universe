@@ -4,6 +4,8 @@
 
 use std::process::Command;
 
+mod cli_v1;
+
 fn run_schedule(home: &std::path::Path, extra: &[&str]) -> (bool, String, String) {
     let mut cmd = Command::new(env!("CARGO_BIN_EXE_heiwa"));
     cmd.env("HOME", home)
@@ -80,7 +82,7 @@ fn real_run_stages_approval_and_hold_under_home() {
         .args(["approvals", "list", "--json"])
         .output()
         .expect("approvals list runs");
-    let listing: serde_json::Value = serde_json::from_slice(&out.stdout).expect("approvals json");
+    let listing = cli_v1::data(&out.stdout);
     let pending = listing["pending_summary"]
         .as_array()
         .expect("pending array");

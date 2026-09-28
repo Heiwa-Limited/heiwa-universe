@@ -44,6 +44,7 @@ export type OperatorClientDependencies = {
 
 export class OperatorClient {
   private threadId: string | null = null;
+  private workId: string | undefined;
   private startPromise: Promise<void> | null = null;
   private lifecycleState: OperatorLifecycleState = { status: "idle", error: null };
   private recovery: { generation: number; promise: Promise<void> } | null = null;
@@ -51,6 +52,8 @@ export class OperatorClient {
   private generation = 0;
   private invalidCursorRecoveries = 0;
   private activeSubmissions = new Map<number, number>();
+  /** Failed acknowledgements remain bound to the original intent until retried. */
+  private unacknowledged = new Map<string, string>();
   private retryableHistoryFailure = false;
 
   constructor(
@@ -58,10 +61,11 @@ export class OperatorClient {
     private readonly dependencies: OperatorClientDependencies,
   ) {}
 
-  start(threadId: string): Promise<void> {
+  start(threadId: string, workId?: string): Promise<void> {
     const normalized = threadId.trim();
     if (!normalized) return Promise.reject(new Error("thread_id_required"));
-    if (this.threadId === normalized && this.startPromise && (this.lifecycleState.status !== "error" || !this.retryableHistoryFailure)) return this.startPromise;
+    if (workId !== undefined && !/^work-[A-Za-z0-9_-]{1,128}$/.test(workId)) return Promise.reject(new Error("invalid_work_id"));
+    if (this.threadId === normalized && this.workId === workId && this.startPromise && (this.lifecycleState.status !== "error" || !this.retryableHistoryFailure)) return this.startPromise;
     // A changed session is a new projection. Abort the native observation
     // before replaying it; the runtime keeps any underlying turn alive.
     this.activeSubscription?.controller.abort();
@@ -69,6 +73,7 @@ export class OperatorClient {
     this.invalidCursorRecoveries = 0;
     this.retryableHistoryFailure = false;
     this.threadId = normalized;
+    this.workId = workId;
     const startPromise = Promise.resolve().then(() => this.initialize(normalized, generation));
     this.startPromise = startPromise;
     this.store.resetProjectionForReplay();
@@ -88,7 +93,7 @@ export class OperatorClient {
       return this.recovery?.promise ?? this.startPromise ?? Promise.resolve();
     }
     this.startPromise = null;
-    return this.start(this.threadId);
+    return this.start(this.threadId, this.workId);
   }
 
   /** Stop this window's observation without cancelling runtime work. */
@@ -97,6 +102,8 @@ export class OperatorClient {
     this.activeSubscription = null;
     this.generation += 1;
     this.threadId = null;
+    this.workId = undefined;
+    this.unacknowledged = new Map();
     this.startPromise = null;
     this.recovery = null;
     this.store.resetProjectionForReplay();
@@ -124,6 +131,7 @@ export class OperatorClient {
 
   async submitTurn(prompt: string): Promise<OperatorTurnSubmissionResponse> {
     const threadId = this.threadId;
+    const workId = this.workId;
     if (!threadId) throw new Error("operator_client_not_started");
     if (this.lifecycleState.status !== "ready") {
       throw new Error("operator_client_not_ready");
@@ -131,6 +139,9 @@ export class OperatorClient {
     const generation = this.generation;
     const trimmed = prompt.trim();
     if (!trimmed) throw new Error("prompt_required");
+    const unacknowledged = this.unacknowledged;
+    const requestBinding = JSON.stringify([threadId, workId ?? null, trimmed]);
+    const requestId = unacknowledged.get(requestBinding) ?? this.dependencies.randomUUID();
     this.incrementSubmission(generation);
     this.dependencies.onChange?.();
     let response: OperatorTurnSubmissionResponse;
@@ -138,16 +149,32 @@ export class OperatorClient {
       response = await this.dependencies.post(
         `/api/v1/operator/threads/${encodeURIComponent(threadId)}/turns`,
         {
-          client_request_id: this.dependencies.randomUUID(),
+          client_request_id: requestId,
           prompt: trimmed,
           route_policy: { mode: "auto" },
+          ...(workId === undefined ? {} : { work_id: workId }),
         },
       );
+      // A runtime predating Work acknowledgement must not silently accept a
+      // scoped continuation as ordinary chat. A lost/mismatched ack may still
+      // have admitted work, so report failure without retrying the POST.
+      if (workId !== undefined && (!response?.ok
+        || response.data?.thread_id !== threadId
+        || response.data?.work_id !== workId
+        || typeof response.data?.turn_id !== "string" || !response.data.turn_id
+        || typeof response.data?.cursor !== "string" || !response.data.cursor)) {
+        throw new Error("operator_work_acknowledgement_mismatch");
+      }
+      if (workId === undefined && response?.data?.work_id != null) {
+        throw new Error("operator_work_acknowledgement_mismatch");
+      }
     } catch {
+      unacknowledged.set(requestBinding, requestId);
       this.decrementSubmission(generation);
       this.reportError("operator_submission_unavailable", generation);
       throw new Error("operator_submission_unavailable");
     }
+    if (unacknowledged.get(requestBinding) === requestId) unacknowledged.delete(requestBinding);
     this.decrementSubmission(generation);
     if (this.isCurrent(threadId, generation)
       && this.submissionsFor(generation) === 0

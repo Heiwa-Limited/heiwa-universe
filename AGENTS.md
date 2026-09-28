@@ -173,6 +173,37 @@ resolve, not permission to disregard the user or claim a plan is shipped.
   distinguish local checks, remote CI/review, release artifacts, and installed
   behavior. Skipped, deferred, or stale evidence cannot prove completion.
 
+### Verification Hygiene
+
+Rules earned by getting them wrong. Each one turned a real failure into
+wasted time at least once.
+
+- **Freeze the tree before a gate.** A promotion gate run against a tree you
+  are still editing produces results that describe neither revision — the L1
+  acceptance gate says exactly that and aborts. Commit, then gate. Three of
+  four failures in one run here were self-inflicted this way: a dirty tree, a
+  moved HEAD, and files not yet formatted.
+- **Prove "pre-existing", never infer it.** "I did not touch that file" is not
+  evidence. Check out the base revision in a throwaway worktree and run the
+  same check there. A gate that fails on untouched `origin/dev` is a repo
+  finding worth filing; a gate that only fails on your branch is yours.
+- **A test that cannot fail is not coverage.** Test options are evaluated when
+  the test registers, so a `skip` flag computed in a `before()` hook skips the
+  suite unconditionally while looking green. Before trusting a new guard, make
+  it fail on purpose once.
+- **Assert that an edit landed.** A scripted patch whose anchor no longer
+  matches silently changes nothing, and the next green test run looks like
+  success. Fail the patch when the anchor is missing.
+- **Live-verify a provider claim before writing it down as a property.** A
+  stub returns what you told it to, so it can only confirm what you already
+  believed. Pointing the same code at a real provider here produced five
+  defects a stub could not, including one in a document that asserted a
+  guarantee the provider does not give.
+- **Encode a finding as a check, not a paragraph.** A hard-won fact written
+  only into a doc is one the next person rediscovers the slow way. Where a
+  finding can be detected at runtime, make the product detect it and attach
+  the remedy. A lesson learned once should cost the next operator zero.
+
 ## Context and Reporting
 
 - Output defaults to `$caveman`: result/action/blocker first, no filler, exact

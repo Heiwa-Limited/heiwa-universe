@@ -14,6 +14,8 @@ import type {
   CalendarRange,
   CalendarResources,
   CalendarSyncStatus,
+  FinanceSummary,
+  FinanceSyncResult,
   InboxItem,
   MailMessage,
   MailSyncStatus,
@@ -41,6 +43,11 @@ export type RuntimeState = {
   mailError: Accessor<string | undefined>;
   mailSync: Accessor<MailSyncStatus | null>;
   mailSyncing: Accessor<boolean>;
+  /** The read-only finance read model; null until first loaded. */
+  finance: Accessor<FinanceSummary | null>;
+  financeError: Accessor<string | undefined>;
+  financeSync: Accessor<FinanceSyncResult | null>;
+  financeSyncing: Accessor<boolean>;
   loadHealth: () => Promise<void>;
   /** Load a local-day range, or reload the last one requested. */
   loadCalendar: (range?: CalendarRange) => Promise<void>;
@@ -62,6 +69,9 @@ export type RuntimeState = {
   loadMail: () => Promise<void>;
   readAppleMail: () => Promise<AppleMailScanResult>;
   syncMail: (options?: { background?: boolean; staleSeconds?: number }) => Promise<MailSyncStatus | null>;
+  loadFinance: () => Promise<void>;
+  /** Read accounts and prices now. Never throws; failures land in `financeError`. */
+  syncFinance: () => Promise<FinanceSyncResult | null>;
 };
 
 export type CalendarHoldInput = {
@@ -299,12 +309,50 @@ export function createRuntimeState(options: RuntimeStateOptions = {}): RuntimeSt
     return mailSyncInFlight;
   }
 
+  const [finance, setFinance] = createSignal<FinanceSummary | null>(null);
+  const [financeError, setFinanceError] = createSignal<string>();
+  const [financeSync, setFinanceSync] = createSignal<FinanceSyncResult | null>(null);
+  const [financeSyncing, setFinanceSyncing] = createSignal(false);
+
+  async function loadFinance(): Promise<void> {
+    try {
+      const response = await get<{ data?: FinanceSummary }>("/api/v1/finance/summary");
+      if (response?.data) setFinance(response.data);
+      setFinanceError(undefined);
+    } catch {
+      // Keep the last read model on screen; say so without runtime detail.
+      setFinanceError("The finance read model could not be loaded.");
+    }
+  }
+
+  let financeSyncInFlight: Promise<FinanceSyncResult | null> | undefined;
+  function syncFinance(): Promise<FinanceSyncResult | null> {
+    if (financeSyncInFlight) return financeSyncInFlight;
+    setFinanceSyncing(true);
+    financeSyncInFlight = (async () => {
+      try {
+        const response = await post<{ data?: FinanceSyncResult }>("/api/v1/finance/sync", {});
+        const result = response?.data ?? null;
+        setFinanceSync(result);
+        await loadFinance();
+        return result;
+      } catch {
+        setFinanceError("Finance sync could not reach the Heiwa runtime.");
+        return null;
+      } finally {
+        setFinanceSyncing(false);
+        financeSyncInFlight = undefined;
+      }
+    })();
+    return financeSyncInFlight;
+  }
+
   async function loadInbox(): Promise<void> {
     try {
       const response = await get<InboxResponse>("/api/v1/inbox");
       setInbox(response?.data?.items ?? []);
     } catch {
-      // Keep the last known rows; the legacy event socket retries on change.
+      // Keep the last known rows; the legacy event poll retries on schedule.
     }
   }
 
@@ -326,6 +374,10 @@ export function createRuntimeState(options: RuntimeStateOptions = {}): RuntimeSt
     mailError,
     mailSync,
     mailSyncing,
+    finance,
+    financeError,
+    financeSync,
+    financeSyncing,
     loadHealth,
     loadCalendar,
     loadCalendarResources,
@@ -339,5 +391,7 @@ export function createRuntimeState(options: RuntimeStateOptions = {}): RuntimeSt
     loadMail,
     readAppleMail: readAppleMailSnapshot,
     syncMail,
+    loadFinance,
+    syncFinance,
   };
 }

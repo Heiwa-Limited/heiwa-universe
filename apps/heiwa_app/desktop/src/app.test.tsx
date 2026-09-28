@@ -192,7 +192,8 @@ const SURFACE_MARKERS: Record<string, string | RegExp> = {
   approvals: "Pending decisions",
   // Mail now renders the local snapshot rather than an L3 placeholder.
   mail: /metadata only, read\s+from this machine/,
-  finance: /Read model arrives with the L3 connector plane/,
+  // Finance renders its read-only read model rather than an L3 placeholder.
+  finance: /cannot trade or move money/,
   social: /Ingress arrives with the L3 connector plane/,
   workers: "Operator turns",
   browser: "Go",

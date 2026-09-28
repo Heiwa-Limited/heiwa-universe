@@ -1,5 +1,6 @@
 pub mod app;
 pub mod approvals;
+pub(crate) mod args;
 pub mod auto;
 pub mod calendar;
 pub(crate) mod calendar_apple;
@@ -9,6 +10,7 @@ pub mod capabilities;
 pub mod compress;
 pub mod connectors;
 pub mod cost;
+pub mod finance;
 pub mod goal;
 pub mod life;
 pub mod mail;

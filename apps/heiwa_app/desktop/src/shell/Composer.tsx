@@ -83,7 +83,9 @@ export function Composer(props: { caption: string }) {
       </Show>
       <Show when={error()}><p class="composer-error" role="alert">{error()}</p></Show>
       <div class="composer-context" aria-label={props.caption}>
-        <span>{app.view() === "ai" ? conversationTitle() : `Viewing ${app.view() === "projects" ? "project" : app.view() === "sessions" ? "all sessions" : app.view()}`}</span>
+        <span>{app.sessions.selectedWork()
+          ? `Continuing Work: ${app.sessions.selectedWork()!.title}`
+          : app.view() === "ai" ? conversationTitle() : `Viewing ${app.view() === "projects" ? "project" : app.view() === "sessions" ? "all sessions" : app.view()}`}</span>
         <Show when={app.view() !== "ai" && !responseOpen()}>
           <button class="response-reopen" onClick={() => setResponseOpen(true)}><Icon name="sessions" size={14} />Show conversation</button>
         </Show>

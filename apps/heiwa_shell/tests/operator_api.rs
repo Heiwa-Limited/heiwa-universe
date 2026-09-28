@@ -61,7 +61,8 @@ impl TestRuntime {
             .env_remove("HEIWA_HOME")
             .env("HEIWA_EVIDENCE_DIR", evidence.path())
             .env("HEIWA_OLLAMA_BASE", override_endpoint)
-            .env_remove("HEIWA_MACHINE_AUTH_TOKEN")
+            // L-007: every /api/ path now requires auth, including this one.
+            .env("HEIWA_MACHINE_AUTH_TOKEN", TOKEN)
             .env_remove("HEIWA_AUTH_TOKEN")
             .env_remove("HEIWA_JWT_SIGNING_SECRET")
             .env_remove("HEIWA_AUTH_SECRET")
@@ -354,7 +355,12 @@ fn attacker_loopback_host_cannot_relay_authenticated_post_or_websocket() {
         })
         .to_string(),
     );
-    assert_eq!(post.status, 401, "{}", post.body);
+    // L-007: the pre-routing Host gate now rejects a foreign Host before any
+    // handler or auth check runs at all, so this is a 403 invalid_host, not
+    // the narrower (and later-running) 401 the old per-path Origin check
+    // alone produced.
+    assert_eq!(post.status, 403, "{}", post.body);
+    assert_eq!(post.body["error"]["code"], "invalid_host");
     assert_eq!(runtime.calendar_hold_count(), 0);
 
     let ws = websocket_handshake_with_host(
@@ -363,8 +369,9 @@ fn attacker_loopback_host_cannot_relay_authenticated_post_or_websocket() {
         "/ws/v1/operator",
         &format!("Authorization: Bearer {TOKEN}\r\n"),
     );
-    assert_eq!(ws.status, 401, "{}", ws.head);
+    assert_eq!(ws.status, 403, "{}", ws.head);
     assert!(!ws.head.contains("101 Switching Protocols"));
+    assert_eq!(ws.body["error"]["code"], "invalid_host");
 }
 
 #[test]
@@ -686,7 +693,12 @@ fn ollama_models_payload_uses_child_override_before_stored_live_endpoint() {
 
     let runtime =
         TestRuntime::start_with_ollama_override(&override_endpoint, "http://127.0.0.1:11434");
-    let response = runtime.request("GET", "/api/v1/providers/ollama/models", None, json!(null));
+    let response = runtime.request(
+        "GET",
+        "/api/v1/providers/ollama/models",
+        Some(TOKEN),
+        json!(null),
+    );
 
     assert_eq!(response.status, 200, "{}", response.body);
     assert_eq!(
@@ -793,6 +805,13 @@ fn operator_http_accepts_work_id_syntax_and_rejects_unknown_scope_without_rows()
     assert_eq!(rejected.status, 409, "{}", rejected.body);
     assert_eq!(rejected.body["error"]["code"], "invalid_work_scope");
     assert_eq!(operator_event_count(&runtime, "thread-work"), before);
+    let unknown = runtime.request(
+        "GET",
+        "/api/v1/operator/threads/thread-work",
+        Some(TOKEN),
+        Value::Null,
+    );
+    assert_eq!(unknown.body["data"]["thread"]["work_ids"], json!([]));
 }
 
 #[test]
@@ -811,6 +830,18 @@ fn operator_http_propagates_known_work_scope_through_terminal_execution() {
         ))
         .unwrap();
 
+    let detail = runtime.request(
+        "GET",
+        "/api/v1/operator/threads/thread-work-known",
+        Some(TOKEN),
+        Value::Null,
+    );
+    assert_eq!(detail.status, 200);
+    assert_eq!(
+        detail.body["data"]["thread"]["work_ids"],
+        json!(["work-known"])
+    );
+
     let accepted = runtime.request(
         "POST",
         "/api/v1/operator/threads/thread-work-known/turns",
@@ -822,8 +853,42 @@ fn operator_http_propagates_known_work_scope_through_terminal_execution() {
         }),
     );
     assert_eq!(accepted.status, 202, "{}", accepted.body);
+    assert_eq!(accepted.body["data"]["work_id"], "work-known");
     let turn_id = accepted.body["data"]["turn_id"].as_str().unwrap();
     wait_for_terminal_event(&runtime, "thread-work-known", turn_id);
+
+    let before = operator_event_count(&runtime, "thread-work-known");
+    let retry = runtime.request(
+        "POST",
+        "/api/v1/operator/threads/thread-work-known/turns",
+        Some(TOKEN),
+        json!({ "client_request_id": "work-http-known", "prompt": "hi", "work_id": "work-known" }),
+    );
+    assert_eq!(retry.status, 202, "{}", retry.body);
+    assert_eq!(retry.body["data"]["work_id"], "work-known");
+    assert_eq!(retry.body["data"]["turn_id"], turn_id);
+    assert_eq!(retry.body["data"]["duplicate"], true);
+    assert_eq!(operator_event_count(&runtime, "thread-work-known"), before);
+
+    let changed_scope = runtime.request(
+        "POST",
+        "/api/v1/operator/threads/thread-work-known/turns",
+        Some(TOKEN),
+        json!({ "client_request_id": "work-http-known", "prompt": "hi" }),
+    );
+    assert_eq!(changed_scope.status, 409, "{}", changed_scope.body);
+    assert_eq!(changed_scope.body["error"]["code"], "idempotency_conflict");
+    assert_eq!(operator_event_count(&runtime, "thread-work-known"), before);
+
+    let unrelated = runtime.request(
+        "POST",
+        "/api/v1/operator/threads/thread-unrelated/turns",
+        Some(TOKEN),
+        json!({ "client_request_id": "work-http-other", "prompt": "hi", "work_id": "work-known" }),
+    );
+    assert_eq!(unrelated.status, 409, "{}", unrelated.body);
+    assert_eq!(unrelated.body["error"]["code"], "invalid_work_scope");
+    assert_eq!(operator_event_count(&runtime, "thread-unrelated"), 0);
 
     let turn_rows = external
         .events_after("thread-work-known", None, 128)

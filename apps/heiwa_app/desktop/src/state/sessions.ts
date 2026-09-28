@@ -1,6 +1,8 @@
 import { createMemo, createSignal, type Accessor } from "solid-js";
-import type { OperatorCatalogResponse, OperatorProject, OperatorThreadSummary } from "../operator/types";
+import type { OperatorCatalogResponse, OperatorProject, OperatorThreadDetails, OperatorThreadSummary } from "../operator/types";
 import { apiGet, apiPost } from "../runtime";
+
+export type WorkConversationScope = { workId: string; title: string };
 
 export type SessionState = {
   threads: Accessor<OperatorThreadSummary[]>;
@@ -9,10 +11,12 @@ export type SessionState = {
   error: Accessor<string | undefined>;
   truncated: Accessor<boolean>;
   selectedId: Accessor<string | undefined>;
+  selectedWork: Accessor<WorkConversationScope | undefined>;
   draft: Accessor<string>;
   load: () => Promise<void>;
   refresh: () => Promise<void>;
   select: (threadId: string) => Promise<void>;
+  openWork: (threadId: string, scope: WorkConversationScope, signal?: AbortSignal) => Promise<boolean>;
   setDraft: (value: string) => void;
   setDraftFor: (threadId: string, value: string) => void;
   clearDraftIfUnchanged: (threadId: string, submitted: string) => void;
@@ -29,8 +33,9 @@ export type SessionState = {
 
 export type SessionStateOptions = {
   get?: (path: string) => Promise<OperatorCatalogResponse>;
+  getThread?: (path: string) => Promise<{ ok: boolean; data: { thread: OperatorThreadDetails } }>;
   post?: (path: string, body: unknown) => Promise<{ ok: boolean; data: { thread?: OperatorThreadSummary; project?: OperatorProject } }>;
-  start: (threadId: string) => Promise<void>;
+  start: (threadId: string, workId?: string) => Promise<void>;
   dispose?: () => void;
   initialSelectedId?: string;
 };
@@ -41,6 +46,7 @@ function message(error: unknown): string {
 
 export function createSessionState(options: SessionStateOptions): SessionState {
   const get = options.get ?? apiGet<OperatorCatalogResponse>;
+  const getThread = options.getThread ?? apiGet<{ ok: boolean; data: { thread: OperatorThreadDetails } }>;
   const post = options.post ?? apiPost;
   const [threads, setThreads] = createSignal<OperatorThreadSummary[]>([]);
   const [projects, setProjects] = createSignal<OperatorProject[]>([]);
@@ -48,19 +54,56 @@ export function createSessionState(options: SessionStateOptions): SessionState {
   const [error, setError] = createSignal<string>();
   const [truncated, setTruncated] = createSignal(false);
   const [selectedId, setSelectedId] = createSignal<string | undefined>(options.initialSelectedId);
+  const [selectedWork, setSelectedWork] = createSignal<WorkConversationScope>();
   const [drafts, setDrafts] = createSignal<Record<string, string>>({});
   const draft = createMemo(() => drafts()[selectedId() ?? ""] ?? "");
 
   let catalogGeneration = 0;
+  let selectionGeneration = 0;
   const invalidateCatalog = (): void => {
     catalogGeneration += 1;
     setLoading(false);
   };
 
-  const select = async (threadId: string): Promise<void> => {
+  const selectThread = async (threadId: string, scope?: WorkConversationScope): Promise<void> => {
+    selectionGeneration += 1;
     if (!threads().some((thread) => thread.thread_id === threadId && !thread.archived)) return;
     setSelectedId(threadId);
-    await options.start(threadId);
+    setSelectedWork(scope ? { ...scope } : undefined);
+    if (scope) await options.start(threadId, scope.workId);
+    else await options.start(threadId);
+  };
+  const select = (threadId: string): Promise<void> => selectThread(threadId);
+
+  const openWork = async (threadId: string, scope: WorkConversationScope, signal?: AbortSignal): Promise<boolean> => {
+    if (!threadId.trim() || !/^work-[A-Za-z0-9_-]{1,128}$/.test(scope.workId)) {
+      throw new Error("This Work has no valid conversation to continue.");
+    }
+    const generation = ++selectionGeneration;
+    const boundScope = { ...scope };
+    // A Work's conversation may be outside the bounded catalog. Read the
+    // actual thread instead of fabricating a session or assuming it is live.
+    const response = await getThread(`/api/v1/operator/threads/${encodeURIComponent(threadId)}`);
+    if (generation !== selectionGeneration || signal?.aborted) return false;
+    const thread = response?.data?.thread;
+    if (!response?.ok || thread?.thread_id !== threadId || thread.archived !== false) {
+      throw new Error("This Work's conversation is unavailable or archived. Refresh Work and try again.");
+    }
+    if (!Array.isArray(thread.work_ids) || !thread.work_ids.includes(boundScope.workId)) {
+      throw new Error("The runtime could not confirm this conversation belongs to this Work. Refresh Work, or update the runtime if it is older than the app.");
+    }
+    invalidateCatalog();
+    // The detail endpoint also includes turns. Keep only catalog metadata here;
+    // OperatorClient remains the single owner of conversation history.
+    const summary: OperatorThreadSummary = {
+      thread_id: threadId,
+      archived: false,
+      title: typeof thread.title === "string" ? thread.title : null,
+      project_id: typeof thread.project_id === "string" ? thread.project_id : null,
+    };
+    setThreads((current) => [summary, ...current.filter((item) => item.thread_id !== threadId)]);
+    await selectThread(threadId, boundScope);
+    return generation + 1 === selectionGeneration && !signal?.aborted;
   };
 
   const loadCatalog = async (restoreSelection: boolean): Promise<void> => {
@@ -84,9 +127,13 @@ export function createSessionState(options: SessionStateOptions): SessionState {
       setProjects(response.data.projects);
       setTruncated(Boolean(response.data.truncated));
       const target = available.find((thread) => thread.thread_id === preferred) ?? available[0];
-      if (target && (restoreSelection || target.thread_id !== preferred)) await select(target.thread_id);
+      if (target && (restoreSelection || target.thread_id !== preferred)) {
+        await selectThread(target.thread_id, target.thread_id === preferred ? selectedWork() : undefined);
+      }
       else if (!target && (!response.data.truncated || nextThreads.some((thread) => thread.thread_id === preferred && thread.archived))) {
+        selectionGeneration += 1;
         setSelectedId(undefined);
+        setSelectedWork(undefined);
         options.dispose?.();
       }
     } catch (cause) {
@@ -125,7 +172,9 @@ export function createSessionState(options: SessionStateOptions): SessionState {
       const next = threads().find((item) => !item.archived);
       if (next) await select(next.thread_id);
       else {
+        selectionGeneration += 1;
         setSelectedId(undefined);
+        setSelectedWork(undefined);
         options.dispose?.();
       }
     }
@@ -146,10 +195,12 @@ export function createSessionState(options: SessionStateOptions): SessionState {
     error,
     truncated,
     selectedId,
+    selectedWork,
     draft,
     load: () => loadCatalog(true),
     refresh: () => loadCatalog(false),
     select,
+    openWork,
     setDraft: (value) => setDrafts((current) => ({ ...current, [selectedId() ?? ""]: value })),
     setDraftFor: (threadId, value) => setDrafts((current) => ({ ...current, [threadId]: value })),
     clearDraftIfUnchanged: (threadId, submitted) => setDrafts((current) => current[threadId] === submitted ? { ...current, [threadId]: "" } : current),

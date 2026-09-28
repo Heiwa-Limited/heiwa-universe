@@ -288,6 +288,45 @@ jobs:
           python3 apps/heiwa_app/scripts/check_static_surface.py
           bash scripts/check_public_web_package.sh
 
+  # NOT wired into the `rust-source-policy` aggregate, so this runs and goes
+  # red on failure but does not block merge. That is deliberate: the
+  # aggregate is the protected status context for `main`, and making a
+  # TypeScript package that is not yet part of the runtime a merge blocker
+  # for every Rust PR is disproportionate. Promote it when the engine is
+  # actually wired into the runtime — that means adding it here, to the
+  # pinned literal in scripts/check_release_metadata.sh, and widening the
+  # job-id regex in scripts/tests/test_ci_required_checks.sh (which today
+  # only matches [a-z-] and so raises on any job id containing a digit).
+  system1-engine:
+    name: System 1 Engine
+    runs-on: ubuntu-latest
+    # Feedback lane. Measured from a clean node_modules: install 0.3s,
+    # typecheck 0.7s, 225 tests 0.7s. Well inside the 1m budget even on a
+    # much slower runner.
+    timeout-minutes: 1
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          persist-credentials: false
+      - name: Set up Node
+        uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+          cache-dependency-path: packages/heiwa_system1/package-lock.json
+      # The package self-installs rather than joining the root workspace, so
+      # that adding it never rewrites the shared root lockfile. Its own
+      # lockfile is committed, so `npm ci` here is reproducible.
+      - name: Install
+        run: npm ci --prefix packages/heiwa_system1
+      - name: Typecheck
+        run: npm run typecheck:system1
+      # Unit + integration only. The live suites (test/live) need an API key
+      # or a local Ollama and are opt-in; they skip cleanly, but running them
+      # here would prove nothing.
+      - name: Test
+        run: npm run test:system1
+
   docs-build:
     name: Docs Build
     runs-on: ubuntu-latest

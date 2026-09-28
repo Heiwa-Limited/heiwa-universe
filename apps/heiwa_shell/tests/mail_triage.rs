@@ -4,6 +4,8 @@
 
 use std::process::Command;
 
+mod cli_v1;
+
 fn seed_snapshot(home: &std::path::Path) {
     let mail_dir = home.join(".heiwa/state/mail");
     std::fs::create_dir_all(&mail_dir).unwrap();
@@ -115,7 +117,7 @@ fn approve_moves_draft_to_outbox_with_receipt() {
         &["approvals", "decide", &request_id, "--approve", "--json"],
     );
     assert!(ok, "stderr: {stderr}");
-    let decision: serde_json::Value = serde_json::from_str(stdout.trim()).unwrap();
+    let decision = cli_v1::data(stdout.trim().as_bytes());
     let applied = decision["decision"]["applied_effects"].as_array().unwrap();
     assert_eq!(applied[0]["kind"], "mail_outbox_stage");
 
