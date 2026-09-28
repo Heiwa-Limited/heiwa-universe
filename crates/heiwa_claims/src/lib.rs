@@ -257,6 +257,11 @@ fn dirty_scope_paths(
     scope: &[String],
     exempt_evidence: bool,
 ) -> Result<Vec<String>> {
+    // Rename detection stays off so every `-z` record is exactly `XY path`: a
+    // rename or copy would add an unprefixed source field, which the evidence
+    // exemption below cannot read. Without it, a move across the evidence
+    // boundary reports its outside half, and a rename inside evidence is two
+    // exempt records.
     let mut cmd = Command::new("git");
     cmd.arg("--literal-pathspecs")
         .arg("-C")
@@ -265,6 +270,7 @@ fn dirty_scope_paths(
         .arg("--porcelain=v1")
         .arg("-z")
         .arg("--untracked-files=all")
+        .arg("--no-renames")
         .arg("--");
     for path in scope {
         cmd.arg(path);

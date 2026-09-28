@@ -5,7 +5,7 @@
 //! registry without a real verifier behind it.
 
 use std::fs;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use heiwa_claims::evidence::{self, Environment, EvidenceRecord, VerifyResult};
 use heiwa_claims::manifest::Registry;
@@ -276,4 +276,144 @@ fn cargo_claims_cannot_omit_workspace_build_configuration() {
         let error = Registry::load(dir.path()).unwrap_err().to_string();
         assert!(error.contains(input), "{error}");
     }
+}
+
+fn record(detail: &str) -> EvidenceRecord {
+    EvidenceRecord {
+        claim_id: "demo.one".into(),
+        claim_digest: "requirements".into(),
+        verifier_id: "cargo-test".into(),
+        verifier_version: "1".into(),
+        result: VerifyResult::Pass,
+        commit: "deadbeef".into(),
+        scope_digest: "digest".into(),
+        verified_at: 42,
+        environment: Environment::current(),
+        detail: detail.into(),
+    }
+}
+
+/// Every file under `dir` with its bytes. Links are listed, never followed.
+fn snapshot(dir: &Path) -> Vec<(PathBuf, Vec<u8>)> {
+    let mut files = Vec::new();
+    let mut pending = vec![dir.to_path_buf()];
+    while let Some(next) = pending.pop() {
+        for entry in fs::read_dir(&next).unwrap() {
+            let path = entry.unwrap().path();
+            if fs::symlink_metadata(&path).unwrap().is_dir() {
+                pending.push(path);
+            } else {
+                files.push((path.clone(), fs::read(&path).unwrap()));
+            }
+        }
+    }
+    files.sort();
+    files
+}
+
+#[test]
+#[cfg(unix)]
+fn linked_evidence_paths_never_redirect_a_write_or_a_read() {
+    use std::os::unix::fs::symlink;
+
+    // Each case links one component of `claims/evidence/demo.one.json` into a
+    // tree outside the repository that already holds a well-formed record, so
+    // following the link would both succeed and be visible.
+    for case in ["record", "evidence directory", "claims directory"] {
+        let repo = tempfile::tempdir().unwrap();
+        let root = repo.path();
+        let outside = tempfile::tempdir().unwrap();
+        let outside_evidence = outside.path().join("claims/evidence");
+        fs::create_dir_all(&outside_evidence).unwrap();
+        fs::write(
+            outside_evidence.join("demo.one.json"),
+            serde_json::to_string(&record("outside")).unwrap(),
+        )
+        .unwrap();
+        match case {
+            "record" => {
+                fs::create_dir_all(root.join("claims/evidence")).unwrap();
+                symlink(
+                    outside_evidence.join("demo.one.json"),
+                    root.join("claims/evidence/demo.one.json"),
+                )
+                .unwrap();
+            }
+            "evidence directory" => {
+                fs::create_dir(root.join("claims")).unwrap();
+                symlink(&outside_evidence, root.join("claims/evidence")).unwrap();
+            }
+            _ => symlink(outside.path().join("claims"), root.join("claims")).unwrap(),
+        }
+        let before = snapshot(outside.path());
+
+        assert!(
+            evidence::store(root, &record("inside")).is_err(),
+            "{case}: stored evidence through a link"
+        );
+        assert_eq!(
+            snapshot(outside.path()),
+            before,
+            "{case}: changed a file outside the repository"
+        );
+        assert!(
+            evidence::load(root, "demo.one").is_none(),
+            "{case}: loaded a record from outside the repository"
+        );
+    }
+}
+
+#[test]
+fn evidence_parents_must_be_directories_and_records_regular_files() {
+    for case in [
+        "claims is a file",
+        "evidence is a file",
+        "record is a directory",
+    ] {
+        let repo = tempfile::tempdir().unwrap();
+        let root = repo.path();
+        match case {
+            "claims is a file" => fs::write(root.join("claims"), "not a directory").unwrap(),
+            "evidence is a file" => {
+                fs::create_dir(root.join("claims")).unwrap();
+                fs::write(root.join("claims/evidence"), "not a directory").unwrap();
+            }
+            _ => fs::create_dir_all(root.join("claims/evidence/demo.one.json")).unwrap(),
+        }
+        assert!(
+            evidence::store(root, &record("inside")).is_err(),
+            "{case}: store accepted it"
+        );
+        assert!(
+            evidence::load(root, "demo.one").is_none(),
+            "{case}: load accepted it"
+        );
+    }
+}
+
+#[test]
+fn concurrent_stores_leave_one_complete_record_and_no_temporaries() {
+    let repo = tempfile::tempdir().unwrap();
+    let root = repo.path().to_path_buf();
+    let writers: Vec<_> = (0..8)
+        .map(|writer| {
+            let root = root.clone();
+            std::thread::spawn(move || {
+                let written = record(&format!("writer {writer}"));
+                evidence::store(&root, &written).map(|_| written)
+            })
+        })
+        .collect();
+    let written: Vec<EvidenceRecord> = writers
+        .into_iter()
+        .map(|writer| writer.join().unwrap().expect("concurrent store"))
+        .collect();
+
+    let stored = evidence::load(&root, "demo.one").expect("one complete record");
+    assert!(written.contains(&stored), "{stored:?}");
+    let names: Vec<String> = fs::read_dir(root.join("claims/evidence"))
+        .unwrap()
+        .map(|entry| entry.unwrap().file_name().into_string().unwrap())
+        .collect();
+    assert_eq!(names, vec!["demo.one.json"]);
 }

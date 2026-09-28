@@ -2,7 +2,7 @@
 
 use std::{fs, path::Path, process::Command};
 
-use heiwa_claims::{evaluate, evidence, verify, ClaimState, Registry, VerifyResult};
+use heiwa_claims::{evaluate, evidence, verify, ClaimError, ClaimState, Registry, VerifyResult};
 
 fn git(root: &Path, args: &[&str]) {
     let out = Command::new("git")
@@ -226,4 +226,39 @@ fn an_unsupported_scope_does_not_hide_other_claims() {
     assert_eq!(reports[0].claim_id, "test.proof");
     assert_ne!(reports[1].state, ClaimState::Verified);
     assert!(verify(root, &registry.claims[1]).is_err());
+}
+
+#[test]
+fn evidence_only_renames_stay_exempt_but_moves_across_the_boundary_block() {
+    // (tracked source, staged destination, the half that must block)
+    for (from, to, blocking) in [
+        ("claims/evidence/old.json", "claims/evidence/new.json", None),
+        (
+            "src/input.txt",
+            "claims/evidence/moved.json",
+            Some("src/input.txt"),
+        ),
+        (
+            "claims/evidence/old.json",
+            "src/moved.txt",
+            Some("src/moved.txt"),
+        ),
+    ] {
+        let dir = repository("l0-acceptance", "");
+        let root = dir.path();
+        fs::write(root.join("scripts/check_l0_acceptance.sh"), "exit 0\n").unwrap();
+        fs::create_dir_all(root.join("claims/evidence")).unwrap();
+        fs::write(root.join("claims/evidence/old.json"), "{}\n").unwrap();
+        commit(root);
+        git(root, &["mv", from, to]);
+
+        let claim = Registry::load(root).unwrap().claims.remove(0);
+        match (verify(root, &claim), blocking) {
+            (Ok(record), None) => assert_eq!(record.result, VerifyResult::Pass),
+            (Err(ClaimError::DirtyScope(dirty)), Some(path)) => {
+                assert!(dirty.contains(path), "{from} -> {to}: {dirty}");
+            }
+            (other, _) => panic!("{from} -> {to}: {other:?}"),
+        }
+    }
 }
