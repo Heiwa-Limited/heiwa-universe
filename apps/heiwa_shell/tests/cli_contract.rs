@@ -393,3 +393,51 @@ fn deciding_without_an_outcome_is_a_usage_error() {
     assert_eq!(output.status.code(), Some(2), "{}", stderr(&output));
     assert_eq!(cli_v1::error(&output.stdout)["code"], "usage");
 }
+
+#[test]
+fn approval_hints_come_from_validated_file_stems_never_request_content() {
+    let home = tempfile::tempdir().expect("home");
+    // Ask the binary where it reads requests instead of assuming a layout.
+    let listed = heiwa(home.path(), &["approvals", "list", "--json"]);
+    let requests = std::path::PathBuf::from(
+        cli_v1::data(&listed.stdout)["requests_dir"]
+            .as_str()
+            .expect("requests_dir"),
+    );
+    std::fs::create_dir_all(&requests).expect("requests dir");
+    let canary = home.path().join("pwned");
+    let hostile = format!("x; touch {}", canary.display());
+    let write = |name: &str, body: serde_json::Value| {
+        std::fs::write(requests.join(name), body.to_string()).expect("request file");
+    };
+    // A contained worker controls request content, never the command we suggest.
+    write(
+        "req_evil.json",
+        serde_json::json!({"id": hostile, "action": "write-file"}),
+    );
+    write(
+        "req_ok.json",
+        serde_json::json!({"request_id": "req_ok", "action": "write-file"}),
+    );
+    write("bad id.json", serde_json::json!({"action": "write-file"}));
+    write("--json.json", serde_json::json!({"action": "write-file"}));
+
+    let output = heiwa(home.path(), &["approvals", "list", "--json"]);
+    assert!(output.status.success(), "{}", stderr(&output));
+    let mut next = cli_v1::next(&output.stdout);
+    next.sort();
+    assert_eq!(
+        next,
+        vec![
+            "heiwa approvals show req_evil".to_string(),
+            "heiwa approvals show req_ok".to_string()
+        ],
+        "hints use validated stems only"
+    );
+    let summaries = cli_v1::data(&output.stdout)["pending_summary"].to_string();
+    assert!(
+        summaries.contains(&hostile),
+        "content stays visible as data: {summaries}"
+    );
+    assert!(!canary.exists());
+}

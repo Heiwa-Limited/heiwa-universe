@@ -473,13 +473,17 @@ fn stage_command_hint(path: &str, adopt: bool) -> String {
     )
 }
 
-/// Follow-up commands for a staged plan: review, then decide.
+/// Follow-up commands for a staged plan: review, then decide. The staged id
+/// becomes part of a suggested shell command, so an id that is not a valid,
+/// flag-free request id yields no hint at all (fail safe).
 fn staged_next(staged: &Value) -> Vec<String> {
     match staged["approval_request"]["request_id"].as_str() {
-        Some(id) if staged["in_sync"] != true => vec![
-            format!("heiwa approvals show {id}"),
-            format!("heiwa approvals decide {id} --approve"),
-        ],
+        Some(id) if staged["in_sync"] != true && super::approvals::is_hintable_request_id(id) => {
+            vec![
+                format!("heiwa approvals show {id}"),
+                format!("heiwa approvals decide {id} --approve"),
+            ]
+        }
         _ => Vec::new(),
     }
 }
@@ -492,16 +496,20 @@ fn render_staged(staged: &Value) {
         );
         return;
     }
-    let id = staged["approval_request"]["request_id"]
-        .as_str()
-        .unwrap_or("?");
-    println!("calendar plan staged: {id} (T2)");
+    println!("calendar plan staged (T2)");
     println!(
         "  {}",
         summary_line(&staged["approval_request"]["intent"]["counts"])
     );
-    println!("  review: heiwa approvals show {id}");
-    println!("  apply:  heiwa approvals decide {id} --approve");
+    match staged_next(staged).as_slice() {
+        [review, apply] => {
+            println!("  review: {review}");
+            println!("  apply:  {apply}");
+        }
+        _ => println!(
+            "  ! the staged request id is not a valid approval id; review with `heiwa approvals list`"
+        ),
+    }
 }
 
 fn print_rows(changes: &[Change]) {
@@ -978,6 +986,17 @@ mod tests {
                 }
                 assert_eq!(output.stdout, expected.as_bytes());
             }
+        }
+    }
+
+    #[test]
+    fn an_invalid_staged_request_id_yields_no_command_hints() {
+        for id in ["req_1; rm -rf ~", "--json", "../escape"] {
+            let staged = json!({"in_sync": false, "approval_request": {"request_id": id}});
+            assert!(
+                staged_next(&staged).is_empty(),
+                "{id} must not become a command"
+            );
         }
     }
 }
