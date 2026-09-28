@@ -24,7 +24,9 @@ foundation_packages=(
   heiwa_config
   heiwa_embed
   heiwa_evidence
+  heiwa_finance
   heiwa_identity
+  heiwa_judgment
   heiwa_mcp
   heiwa_mesh
   heiwa_oauth
@@ -40,6 +42,10 @@ shell_api_targets=(
   app_api
   model_call_executor
   operator_api
+  operator_artifact_root
+  operator_tool_protocol
+  routing_eval
+  system1_shadow
 )
 
 shell_state_targets=(
@@ -58,6 +64,7 @@ shell_ops_targets=(
   calendar_plan_sync
   calendar_sync
   cli_contract
+  finance_cli
   mail_triage
   schedule
   smoke
@@ -99,10 +106,14 @@ foundation_a_targets=(
   cockpit_contract
   drex_golden
   full_flow
+  gate_contract
   install_doctor
   journal
   operator_journal
   state
+  system1_backend
+  system1_proxy
+  system1_wire
 )
 
 foundation_b_targets=(

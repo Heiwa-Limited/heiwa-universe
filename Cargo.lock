@@ -3429,7 +3429,9 @@ dependencies = [
  "heiwa_config",
  "heiwa_drex",
  "heiwa_evidence",
+ "heiwa_finance",
  "heiwa_identity",
+ "heiwa_judgment",
  "heiwa_mcp",
  "heiwa_mesh",
  "heiwa_oauth",
@@ -3554,6 +3556,21 @@ dependencies = [
 ]
 
 [[package]]
+name = "heiwa_finance"
+version = "0.1.0"
+dependencies = [
+ "base64 0.22.1",
+ "hmac",
+ "reqwest 0.12.28",
+ "serde",
+ "serde_json",
+ "sha2 0.10.9",
+ "tempfile",
+ "thiserror 2.0.18",
+ "url",
+]
+
+[[package]]
 name = "heiwa_identity"
 version = "0.1.0"
 dependencies = [
@@ -3562,6 +3579,17 @@ dependencies = [
  "serde_json",
  "tempfile",
  "uuid",
+]
+
+[[package]]
+name = "heiwa_judgment"
+version = "0.1.0"
+dependencies = [
+ "reqwest 0.12.28",
+ "serde",
+ "serde_json",
+ "sha2 0.10.9",
+ "tokio",
 ]
 
 [[package]]
@@ -3692,6 +3720,15 @@ name = "hex"
 version = "0.4.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7f24254aa9a54b5c858eaee2f5bccdb46aaf0e486a595ed5fd8f86ba55232a70"
+
+[[package]]
+name = "hmac"
+version = "0.12.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "6c49c37c09c17a53d937dfbb742eb3a961d65a994e6bcdcf37e7399d0cc8ab5e"
+dependencies = [
+ "digest 0.10.7",
+]
 
 [[package]]
 name = "hostname"

@@ -12,6 +12,9 @@
       "apps/heiwa_app/clients/cockpit/src/**/*.{css,ts,tsx}",
       "apps/heiwa_app/clients/cockpit/*.{json,ts}",
       "apps/heiwa_app/package.json",
+      "packages/heiwa_system1/src/**/*.ts",
+      "packages/heiwa_system1/test/**/*.ts",
+      "packages/heiwa_system1/package.json",
       "package.json",
       "package-lock.json"
     ]

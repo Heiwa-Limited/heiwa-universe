@@ -2,7 +2,7 @@
 
 > Canonical map of tracked repo paths to surface classes. This file is read by `scripts/audit_product_surface.sh`. Update it when a path changes class; do not move class boundaries without checking `HEIWA.md`.
 
-**Last updated:** 2026-08-27
+**Last updated:** 2026-09-27
 **Authority:** `HEIWA.md` defines what is product. This file labels tracked paths for repo hygiene and LOC accounting.
 
 ## Classes
@@ -35,6 +35,8 @@ Longest prefix wins. Put narrower paths above broader parents when a child has a
 | `claims/evidence`          | generated        |
 | `claims`                   | product          |
 | `crates`                   | product          |
+| `packages/heiwa_system1/package-lock.json` | generated |
+| `packages/heiwa_system1`   | product          |
 | `packages/heiwa_skills`    | product          |
 | `packages/heiwa_sdk`       | product          |
 | `packages/heiwa_protocol`  | product          |

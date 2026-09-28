@@ -25,15 +25,11 @@ pub fn run(args: &[String]) -> Result<()> {
 }
 
 fn list(args: &[String]) -> Result<()> {
-    let pending = scan_pending_requests();
+    let entries = pending_request_entries_in(&requests_dir(), &decisions_dir());
+    let next = list_next(&entries);
+    let pending: Vec<Value> = entries.into_iter().map(|(_, request)| request).collect();
     let decisions = scan_decisions();
     let pending_summary: Vec<Value> = pending.iter().map(approval_request_summary).collect();
-    let next: Vec<String> = pending_summary
-        .iter()
-        .filter_map(|summary| summary["id"].as_str())
-        .take(10)
-        .map(|id| format!("heiwa approvals show {id}"))
-        .collect();
     let data = json!({
         "requests_dir": requests_dir().display().to_string(),
         "decisions_dir": decisions_dir().display().to_string(),
@@ -42,6 +38,26 @@ fn list(args: &[String]) -> Result<()> {
         "decided": decisions,
     });
     output::emit(has_flag(args, "--json"), data, &next, render_list)
+}
+
+/// Follow-up commands for pending requests. A request's *content* is
+/// untrusted data (a contained worker may have staged it), so hints come only
+/// from the file stem, the key that `show` and decisions resolve, and only
+/// when that stem is a valid, flag-free request id.
+fn list_next(entries: &[(String, Value)]) -> Vec<String> {
+    entries
+        .iter()
+        .map(|(stem, _)| stem.as_str())
+        .filter(|stem| is_hintable_request_id(stem))
+        .take(10)
+        .map(|stem| format!("heiwa approvals show {stem}"))
+        .collect()
+}
+
+/// Whether `id` may appear in a suggested shell command: a valid request id
+/// (only `[A-Za-z0-9._-]`) that cannot be mistaken for a flag.
+pub(crate) fn is_hintable_request_id(id: &str) -> bool {
+    validate_request_id(id).is_ok() && !id.starts_with('-')
 }
 
 fn render_list(data: &Value) {
@@ -231,7 +247,26 @@ pub(crate) fn decide_request(
 /// identity or decision content; the operating-system lock is the authority.
 #[derive(Debug)]
 struct DecisionLease {
-    _file: fs::File,
+    file: fs::File,
+}
+
+impl Drop for DecisionLease {
+    /// Release the lock explicitly. Closing this descriptor alone does not
+    /// release an flock while another descriptor on the same open file
+    /// description survives, such as one briefly inherited by a child process
+    /// spawned while the lease was held.
+    fn drop(&mut self) {
+        let _ = self.file.unlock();
+    }
+}
+
+#[cfg(test)]
+impl DecisionLease {
+    /// A second descriptor on the same open file description, as a briefly
+    /// inherited child descriptor would be.
+    fn duplicate_handle_for_test(&self) -> fs::File {
+        self.file.try_clone().expect("duplicate lease descriptor")
+    }
 }
 
 impl DecisionLease {
@@ -255,7 +290,7 @@ impl DecisionLease {
             fs::TryLockError::WouldBlock => anyhow!("approval decision is already in progress"),
             fs::TryLockError::Error(error) => anyhow!(error),
         })?;
-        Ok(Self { _file: file })
+        Ok(Self { file })
     }
 }
 
@@ -523,6 +558,15 @@ pub(crate) fn scan_pending_requests() -> Vec<Value> {
 }
 
 pub(crate) fn scan_pending_requests_in(requests: &Path, decisions: &Path) -> Vec<Value> {
+    pending_request_entries_in(requests, decisions)
+        .into_iter()
+        .map(|(_, request)| request)
+        .collect()
+}
+
+/// Pending request files as `(file stem, parsed request)`. The stem is the
+/// key `show` and decisions resolve; the parsed content is untrusted data.
+fn pending_request_entries_in(requests: &Path, decisions: &Path) -> Vec<(String, Value)> {
     let mut out = Vec::new();
     let Ok(entries) = fs::read_dir(requests) else {
         return out;
@@ -548,10 +592,10 @@ pub(crate) fn scan_pending_requests_in(requests: &Path, decisions: &Path) -> Vec
         let mut value: Value = serde_json::from_str(&raw).unwrap_or_else(|_| json!({"raw": raw}));
         if value.get("id").is_none() {
             if let Some(obj) = value.as_object_mut() {
-                obj.insert("id".to_string(), Value::String(stem));
+                obj.insert("id".to_string(), Value::String(stem.clone()));
             }
         }
-        out.push(value);
+        out.push((stem, value));
     }
     out
 }
@@ -666,6 +710,77 @@ fn print_help() {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_decision_lease_is_released_on_drop_even_if_a_duplicate_handle_survives() {
+        // A child spawned while the lease is held can briefly share its open
+        // file description (fork before exec). flock belongs to the
+        // description, so closing only the owner's handle would leave the
+        // lock held and make the next decision report "already in progress".
+        let dir = tempfile::tempdir().expect("temp decision dir");
+        let path = dir.path().join(".req_123.lock");
+        let lease = DecisionLease::acquire_at(&path).expect("first lease");
+        let inherited = lease.duplicate_handle_for_test();
+
+        drop(lease);
+        let next = DecisionLease::acquire_at(&path)
+            .expect("the lease is released even while a duplicate handle survives");
+
+        // Mutual exclusion still holds for the new owner.
+        let blocked = DecisionLease::acquire_at(&path).expect_err("second lease must be blocked");
+        assert!(blocked.to_string().contains("already in progress"));
+        drop(next);
+        drop(inherited);
+    }
+
+    #[test]
+    fn list_hints_use_validated_stems_not_request_content() {
+        let entries = vec![
+            ("req_evil".to_string(), json!({"id": "x; touch /tmp/pwned"})),
+            ("bad id".to_string(), json!({})),
+            ("--json".to_string(), json!({})),
+            ("req_ok".to_string(), json!({"request_id": "req_ok"})),
+        ];
+        assert_eq!(
+            list_next(&entries),
+            vec![
+                "heiwa approvals show req_evil".to_string(),
+                "heiwa approvals show req_ok".to_string()
+            ]
+        );
+    }
+
+    #[test]
+    fn pending_entries_keep_the_file_stem_and_the_scan_output_is_unchanged() {
+        let root = tempfile::tempdir().expect("root");
+        let requests = root.path().join("requests");
+        let decisions = root.path().join("decisions");
+        fs::create_dir_all(&requests).expect("requests");
+        fs::create_dir_all(&decisions).expect("decisions");
+        fs::write(requests.join("req_a.json"), r#"{"id": "content-id"}"#).expect("a");
+        fs::write(requests.join("req_b.json"), r#"{"action": "x"}"#).expect("b");
+
+        let mut entries = pending_request_entries_in(&requests, &decisions);
+        entries.sort_by(|left, right| left.0.cmp(&right.0));
+        let stems: Vec<&str> = entries.iter().map(|(stem, _)| stem.as_str()).collect();
+        assert_eq!(stems, vec!["req_a", "req_b"]);
+
+        let mut scanned = scan_pending_requests_in(&requests, &decisions);
+        scanned.sort_by_key(|value| value["id"].as_str().unwrap_or("").to_string());
+        assert_eq!(scanned[0]["id"], "content-id", "content id kept as data");
+        assert_eq!(
+            scanned[1]["id"], "req_b",
+            "stem fills a missing id, as before"
+        );
+    }
+
+    #[test]
+    fn hintable_ids_reject_shell_syntax_and_flag_lookalikes() {
+        assert!(is_hintable_request_id("req_800eab706401"));
+        assert!(!is_hintable_request_id("x; touch /tmp/pwned"));
+        assert!(!is_hintable_request_id("--json"));
+        assert!(!is_hintable_request_id(""));
+    }
 
     #[test]
     fn approval_decision_lease_excludes_a_second_process_handle() {
