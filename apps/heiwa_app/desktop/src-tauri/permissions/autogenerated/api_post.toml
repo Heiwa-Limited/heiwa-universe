@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-api-post"
+description = "Enables the api_post command without any pre-configured scope."
+commands.allow = ["api_post"]
+
+[[permission]]
+identifier = "deny-api-post"
+description = "Denies the api_post command without any pre-configured scope."
+commands.deny = ["api_post"]

@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-complete-workspace-setup"
+description = "Enables the complete_workspace_setup command without any pre-configured scope."
+commands.allow = ["complete_workspace_setup"]
+
+[[permission]]
+identifier = "deny-complete-workspace-setup"
+description = "Denies the complete_workspace_setup command without any pre-configured scope."
+commands.deny = ["complete_workspace_setup"]

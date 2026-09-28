@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-establish-identity"
+description = "Enables the establish_identity command without any pre-configured scope."
+commands.allow = ["establish_identity"]
+
+[[permission]]
+identifier = "deny-establish-identity"
+description = "Denies the establish_identity command without any pre-configured scope."
+commands.deny = ["establish_identity"]

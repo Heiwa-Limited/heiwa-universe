@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-connect-api-provider"
+description = "Enables the connect_api_provider command without any pre-configured scope."
+commands.allow = ["connect_api_provider"]
+
+[[permission]]
+identifier = "deny-connect-api-provider"
+description = "Denies the connect_api_provider command without any pre-configured scope."
+commands.deny = ["connect_api_provider"]

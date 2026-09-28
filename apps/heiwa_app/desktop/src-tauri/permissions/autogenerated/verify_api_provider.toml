@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-verify-api-provider"
+description = "Enables the verify_api_provider command without any pre-configured scope."
+commands.allow = ["verify_api_provider"]
+
+[[permission]]
+identifier = "deny-verify-api-provider"
+description = "Denies the verify_api_provider command without any pre-configured scope."
+commands.deny = ["verify_api_provider"]
