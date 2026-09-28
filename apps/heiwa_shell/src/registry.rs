@@ -56,8 +56,12 @@ pub const COMMANDS: &[CommandSpec] = &[
     command("shell", "shell", "Enter interactive mode"),
     command("goal", "goal <subcommand>", "Long-running goals: start, show, step, finish"),
     CommandSpec {
-        v1: &["work list", "work create", "work show", "work recover"],
-        ..command("work", "work list|create|show|run|recover", "Durable Work on this installation")
+        v1: &["work list", "work create", "work show", "work watch", "work recover"],
+        ..command(
+            "work",
+            "work list|create|show|watch|run|recover",
+            "Durable Work on this installation",
+        )
     },
     command("workspace", "workspace status|prepare", "Repository hold for a Work"),
     command("workers", "workers heartbeat|status", "Worker liveness registry"),

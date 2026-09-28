@@ -95,3 +95,130 @@ fn an_unknown_work_subcommand_is_a_usage_error() {
     assert_eq!(output.status.code(), Some(2), "{}", stderr(&output));
     assert_eq!(cli_v1::error(&output.stdout)["code"], "usage");
 }
+
+fn home_with_identity() -> tempfile::TempDir {
+    let home = tempfile::tempdir().expect("home");
+    heiwa_identity::establish_in(
+        &home.path().join(".heiwa"),
+        "Test operator",
+        "2026-09-27T00:00:00Z",
+        || "install-test".to_string(),
+    )
+    .expect("identity");
+    home
+}
+
+fn create_work(home: &Path, intent: &str) -> String {
+    let created = heiwa(home, &["work", "create", intent, "--json"]);
+    assert!(created.status.success(), "{}", stderr(&created));
+    cli_v1::data(&created.stdout)["work_id"]
+        .as_str()
+        .expect("work id")
+        .to_string()
+}
+
+fn ndjson(stdout: &[u8]) -> Vec<Value> {
+    String::from_utf8_lossy(stdout)
+        .lines()
+        .map(|line| serde_json::from_str(line).expect("each stream line is JSON"))
+        .collect()
+}
+
+#[test]
+fn watching_once_streams_events_then_an_end_line_to_resume_from() {
+    let home = home_with_identity();
+    let work_id = create_work(home.path(), "watch me");
+
+    let watched = heiwa(home.path(), &["work", "watch", &work_id, "--once", "--json"]);
+    assert!(watched.status.success(), "{}", stderr(&watched));
+    let lines = ndjson(&watched.stdout);
+    assert!(
+        lines.iter().all(|line| line["schema"] == "heiwa.cli.stream/v1"),
+        "{lines:?}"
+    );
+    assert!(
+        lines
+            .iter()
+            .any(|line| line["type"] == "event" && line["event"]["event_type"] == "work_created"),
+        "{lines:?}"
+    );
+    let end = lines.last().expect("an end line");
+    assert_eq!(end["type"], "end");
+    let cursor = end["cursor"].as_str().expect("resume cursor").to_string();
+
+    let resumed = heiwa(
+        home.path(),
+        &["work", "watch", &work_id, "--since", &cursor, "--once", "--json"],
+    );
+    assert!(resumed.status.success(), "{}", stderr(&resumed));
+    let resumed_lines = ndjson(&resumed.stdout);
+    assert_eq!(resumed_lines.len(), 1, "only the end line: {resumed_lines:?}");
+    assert_eq!(resumed_lines[0]["type"], "end");
+    assert_eq!(resumed_lines[0]["cursor"], cursor.as_str());
+}
+
+#[test]
+fn a_cursor_from_another_stream_resyncs_instead_of_failing() {
+    let here = home_with_identity();
+    let elsewhere = home_with_identity();
+    let work_id = create_work(here.path(), "watched here");
+    let other_id = create_work(elsewhere.path(), "watched elsewhere");
+    let foreign = ndjson(
+        &heiwa(elsewhere.path(), &["work", "watch", &other_id, "--once", "--json"]).stdout,
+    );
+    let foreign_cursor = foreign.last().expect("end")["cursor"]
+        .as_str()
+        .expect("cursor")
+        .to_string();
+
+    let output = heiwa(
+        here.path(),
+        &["work", "watch", &work_id, "--since", &foreign_cursor, "--once", "--json"],
+    );
+    assert!(output.status.success(), "{}", stderr(&output));
+    let lines = ndjson(&output.stdout);
+    assert_eq!(lines[0]["type"], "resync", "{lines:?}");
+    assert!(lines[0]["cursor"].is_null(), "{lines:?}");
+    assert!(
+        lines
+            .iter()
+            .any(|line| line["type"] == "event" && line["event"]["event_type"] == "work_created"),
+        "the Work replays after a resync: {lines:?}"
+    );
+    assert_eq!(lines.last().expect("end")["type"], "end");
+}
+
+#[test]
+fn a_malformed_cursor_is_a_usage_error() {
+    let home = home_with_identity();
+    let work_id = create_work(home.path(), "watched");
+    let output = heiwa(
+        home.path(),
+        &["work", "watch", &work_id, "--since", "not-a-cursor", "--once", "--json"],
+    );
+    assert_eq!(output.status.code(), Some(2), "{}", stderr(&output));
+    assert_eq!(cli_v1::error(&output.stdout)["code"], "usage");
+}
+
+#[test]
+fn a_closed_pipe_ends_the_stream_without_a_panic() {
+    let home = home_with_identity();
+    let work_id = create_work(home.path(), "watched");
+    let mut child = Command::new(env!("CARGO_BIN_EXE_heiwa"))
+        .env_clear()
+        .env("HOME", home.path())
+        .env("HEIWA_HOME", home.path().join(".heiwa"))
+        .env("HEIWA_DISABLE_KEYCHAIN", "1")
+        .env("PATH", "/usr/bin:/bin")
+        .env("LANG", "C")
+        .args(["work", "watch", &work_id, "--once", "--json"])
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .spawn()
+        .expect("spawn heiwa");
+    drop(child.stdout.take());
+    let output = child.wait_with_output().expect("wait");
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(!stderr.contains("panicked"), "{stderr}");
+    assert!(output.status.success(), "{stderr}");
+}
