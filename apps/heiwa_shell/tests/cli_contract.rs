@@ -39,3 +39,30 @@ fn an_unknown_command_is_a_usage_error_on_both_streams() {
         stderr(&output)
     );
 }
+
+#[test]
+fn help_json_is_a_v1_catalog_that_includes_every_command() {
+    let home = tempfile::tempdir().expect("home");
+    let output = heiwa(home.path(), &["help", "--json"]);
+    assert!(output.status.success(), "{}", stderr(&output));
+    let data = cli_v1::data(&output.stdout);
+    let names: Vec<&str> = data["commands"]
+        .as_array()
+        .expect("commands")
+        .iter()
+        .map(|command| command["name"].as_str().expect("name"))
+        .collect();
+    for expected in ["calendar", "connect", "approvals", "work", "version"] {
+        assert!(names.contains(&expected), "{expected} missing from {names:?}");
+    }
+}
+
+#[test]
+fn human_help_lists_commands_the_old_help_omitted() {
+    let home = tempfile::tempdir().expect("home");
+    let output = heiwa(home.path(), &["help"]);
+    assert!(output.status.success(), "{}", stderr(&output));
+    let text = String::from_utf8_lossy(&output.stdout);
+    assert!(text.contains("calendar status|sync|hold|plan"), "{text}");
+    assert!(text.contains("connect <connector>"), "{text}");
+}
