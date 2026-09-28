@@ -17,7 +17,7 @@ use heiwa_work::{
     WorkSessionBuildOptions, WorkSessionSnapshotV1,
 };
 
-use crate::cmd::args::{flag_value, has_flag, positionals};
+use crate::cmd::args::{has_flag, optional_value, positionals};
 use crate::output::{self, CliError, STREAM_SCHEMA};
 
 pub fn run(args: &[String]) -> Result<()> {
@@ -121,7 +121,7 @@ fn create_command(args: &[String]) -> Result<()> {
 
 fn show_command(args: &[String]) -> Result<()> {
     let json = has_flag(args, "--json");
-    let surface = flag_value(args, "--surface");
+    let surface = optional_value(args, "--surface")?;
     let work_id = positionals(args, &["--surface"])
         .first()
         .copied()
@@ -296,16 +296,18 @@ impl WatchScope {
 
     /// `"work"` when the event carries this Work's id. Its thread then joins
     /// the scope, so threads linked after the watch began stay visible.
-    /// `"thread"` marks an unscoped event in one of those threads; it is shown
-    /// rather than hidden.
+    /// `"thread"` marks an *unscoped* event in one of those threads; it is
+    /// shown rather than hidden. Two Works may share a thread, so an event
+    /// explicitly scoped to another Work is never this Work's context.
     pub(crate) fn admit(&mut self, event: &OperatorEvent) -> Option<&'static str> {
-        if event.work_id.as_deref() == Some(self.work_id.as_str()) {
-            self.threads.insert(event.thread_id.clone());
-            Some("work")
-        } else if self.threads.contains(&event.thread_id) {
-            Some("thread")
-        } else {
-            None
+        match event.work_id.as_deref() {
+            Some(work_id) if work_id == self.work_id => {
+                self.threads.insert(event.thread_id.clone());
+                Some("work")
+            }
+            Some(_) => None,
+            None if self.threads.contains(&event.thread_id) => Some("thread"),
+            None => None,
         }
     }
 }
@@ -388,7 +390,7 @@ fn watch_command(args: &[String]) -> Result<()> {
     })?;
 
     let mut scope = WatchScope::new(&work);
-    let mut cursor = flag_value(args, "--since").map(str::to_string);
+    let mut cursor = optional_value(args, "--since")?.map(str::to_string);
     let mut resyncs = 0usize;
     loop {
         match watch_page(&paths.evidence_dir, &mut scope, cursor.as_deref(), PAGE_SIZE)? {
@@ -942,6 +944,47 @@ mod tests {
                 panic!("a cursor from another lineage must resync, got {lines:?}")
             }
         }
+    }
+
+    #[test]
+    fn another_works_events_in_a_shared_thread_are_not_this_works_context() {
+        let dir = root();
+        let created = create(dir.path(), "watched", "installation-1").expect("create");
+        let work_id = created["work_id"].as_str().expect("id").to_string();
+        let shared = created["primary_thread_id"]
+            .as_str()
+            .expect("thread")
+            .to_string();
+        let mut scope = WatchScope::new(&found(dir.path(), &created));
+
+        let other = scoped_event(
+            "work-b",
+            &shared,
+            "turn-b",
+            None,
+            OperatorEventType::TurnStarted,
+            json!({}),
+        );
+        assert_eq!(
+            scope.admit(&other),
+            None,
+            "another Work's explicitly scoped events are not this Work's context"
+        );
+
+        let mut legacy = scoped_event(
+            &work_id,
+            &shared,
+            "turn-legacy",
+            None,
+            OperatorEventType::TurnStarted,
+            json!({}),
+        );
+        legacy.work_id = None;
+        assert_eq!(
+            scope.admit(&legacy),
+            Some("thread"),
+            "unscoped turns in this Work's thread stay visible"
+        );
     }
 
     #[test]

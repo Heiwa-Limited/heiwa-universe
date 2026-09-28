@@ -13,14 +13,32 @@ pub(crate) fn flag_value<'a>(args: &'a [String], flag: &str) -> Option<&'a str> 
         .filter(|value| !value.starts_with("--"))
 }
 
-/// Arguments that are neither flags nor the values of `value_flags`.
+/// The value after `flag`. `Ok(None)` when the flag is absent; a usage error
+/// when it is present without a value, so `--since --once` never silently
+/// drops the cursor.
+pub(crate) fn optional_value<'a>(
+    args: &'a [String],
+    flag: &str,
+) -> Result<Option<&'a str>, crate::output::CliError> {
+    if !has_flag(args, flag) {
+        return Ok(None);
+    }
+    flag_value(args, flag).map(Some).ok_or_else(|| {
+        crate::output::CliError::usage(format!("{flag} needs a value"))
+    })
+}
+
+/// Arguments that are neither flags nor the values of `value_flags`. A value
+/// flag never swallows a following flag; consistent with `flag_value`.
 pub(crate) fn positionals<'a>(args: &'a [String], value_flags: &[&str]) -> Vec<&'a str> {
     let mut found = Vec::new();
     let mut skip_value = false;
     for arg in args {
         if skip_value {
             skip_value = false;
-            continue;
+            if !arg.starts_with("--") {
+                continue;
+            }
         }
         if value_flags.contains(&arg.as_str()) {
             skip_value = true;
@@ -59,5 +77,25 @@ mod tests {
     fn positionals_skip_flags_and_the_values_of_value_flags() {
         let args = argv(&["--since", "c-9", "work-1", "--json", "extra"]);
         assert_eq!(positionals(&args, &["--since"]), vec!["work-1", "extra"]);
+    }
+
+    #[test]
+    fn a_value_flag_never_swallows_the_next_flag() {
+        let args = argv(&["--since", "--once", "work-1"]);
+        assert_eq!(positionals(&args, &["--since"]), vec!["work-1"]);
+    }
+
+    #[test]
+    fn a_value_flag_without_a_value_is_a_usage_error() {
+        let absent = argv(&["work-1", "--once"]);
+        assert_eq!(optional_value(&absent, "--since").expect("absent is fine"), None);
+
+        let present = argv(&["work-1", "--since", "c-9"]);
+        assert_eq!(optional_value(&present, "--since").expect("value"), Some("c-9"));
+
+        let missing = argv(&["work-1", "--since", "--once"]);
+        let error = optional_value(&missing, "--since").expect_err("missing value");
+        assert_eq!(error.code, crate::output::ErrorCode::Usage);
+        assert!(error.message.contains("--since"), "{}", error.message);
     }
 }

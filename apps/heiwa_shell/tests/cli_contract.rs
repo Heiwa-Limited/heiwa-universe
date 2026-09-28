@@ -243,3 +243,24 @@ fn help_survives_a_closed_pipe() {
     assert!(!stderr.contains("panicked"), "{stderr}");
     assert!(output.status.success(), "{stderr}");
 }
+
+#[test]
+fn a_since_flag_without_a_value_is_a_usage_error_not_a_replay() {
+    let home = home_with_identity();
+    let work_id = create_work(home.path(), "watched");
+    let output = heiwa(
+        home.path(),
+        &["work", "watch", &work_id, "--since", "--once", "--json"],
+    );
+    assert_eq!(output.status.code(), Some(2), "{}", stderr(&output));
+    assert_eq!(cli_v1::error(&output.stdout)["code"], "usage");
+}
+
+#[test]
+fn a_surface_flag_without_a_value_is_a_usage_error() {
+    let home = home_with_identity();
+    let work_id = create_work(home.path(), "shown");
+    let output = heiwa(home.path(), &["work", "show", &work_id, "--surface", "--json"]);
+    assert_eq!(output.status.code(), Some(2), "{}", stderr(&output));
+    assert_eq!(cli_v1::error(&output.stdout)["code"], "usage");
+}
