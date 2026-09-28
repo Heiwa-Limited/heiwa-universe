@@ -247,7 +247,26 @@ pub(crate) fn decide_request(
 /// identity or decision content; the operating-system lock is the authority.
 #[derive(Debug)]
 struct DecisionLease {
-    _file: fs::File,
+    file: fs::File,
+}
+
+impl Drop for DecisionLease {
+    /// Release the lock explicitly. Closing this descriptor alone does not
+    /// release an flock while another descriptor on the same open file
+    /// description survives, such as one briefly inherited by a child process
+    /// spawned while the lease was held.
+    fn drop(&mut self) {
+        let _ = self.file.unlock();
+    }
+}
+
+#[cfg(test)]
+impl DecisionLease {
+    /// A second descriptor on the same open file description, as a briefly
+    /// inherited child descriptor would be.
+    fn duplicate_handle_for_test(&self) -> fs::File {
+        self.file.try_clone().expect("duplicate lease descriptor")
+    }
 }
 
 impl DecisionLease {
@@ -271,7 +290,7 @@ impl DecisionLease {
             fs::TryLockError::WouldBlock => anyhow!("approval decision is already in progress"),
             fs::TryLockError::Error(error) => anyhow!(error),
         })?;
-        Ok(Self { _file: file })
+        Ok(Self { file })
     }
 }
 
@@ -691,6 +710,28 @@ fn print_help() {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_decision_lease_is_released_on_drop_even_if_a_duplicate_handle_survives() {
+        // A child spawned while the lease is held can briefly share its open
+        // file description (fork before exec). flock belongs to the
+        // description, so closing only the owner's handle would leave the
+        // lock held and make the next decision report "already in progress".
+        let dir = tempfile::tempdir().expect("temp decision dir");
+        let path = dir.path().join(".req_123.lock");
+        let lease = DecisionLease::acquire_at(&path).expect("first lease");
+        let inherited = lease.duplicate_handle_for_test();
+
+        drop(lease);
+        let next = DecisionLease::acquire_at(&path)
+            .expect("the lease is released even while a duplicate handle survives");
+
+        // Mutual exclusion still holds for the new owner.
+        let blocked = DecisionLease::acquire_at(&path).expect_err("second lease must be blocked");
+        assert!(blocked.to_string().contains("already in progress"));
+        drop(next);
+        drop(inherited);
+    }
 
     #[test]
     fn list_hints_use_validated_stems_not_request_content() {
