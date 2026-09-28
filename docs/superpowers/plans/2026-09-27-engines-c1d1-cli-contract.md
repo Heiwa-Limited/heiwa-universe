@@ -2114,3 +2114,49 @@ Expected: every check `OK` except `cached remote ref missing` while the branch i
 git add docs/design/refs/CLI.md docs/superpowers/ledgers/2026-08-22-work-fabric-task-ledger.md
 git commit -m "docs(cli): heiwa.cli/v1 result contract; ledger C1-d1"
 ```
+
+---
+
+## Execution Notes (2026-09-28)
+
+Before implementation I reviewed the plan against the real
+`OperatorJournal::read_after`. Codex asked for this review. Where the notes
+below and the task code differ, the implemented commits supersede the embedded
+code.
+
+1. **Output never panics on a closed pipe.**
+   - `output::print_line` writes and flushes stdout. It returns `Ok(false)` when
+     the reader has gone away (`BrokenPipe`), so a `… --json | head -1`
+     pipeline ends quietly instead of panicking inside `println!`.
+   - `output::emit` therefore returns `anyhow::Result<()>`, and call sites
+     return it.
+   - Human renderers still use `println!`, which is unchanged pre-existing
+     behavior.
+2. **Cursor semantics come from the journal, not the plan.**
+   - A cursor is `{version, fingerprint of the stream's first line, byte
+     offset}`.
+   - `read_after` rejects a cursor whose fingerprint no longer matches (the
+     stream was repaired, replaced, or compacted), whose offset is past the end
+     or off an event boundary, or whose lineage changes mid-read. All of these
+     arrive as `CursorError::InvalidCursor`, which is the same variant used for
+     undecodable input.
+   - `work watch` therefore separates two cases:
+     - **Malformed** (the reason starts `cursor is not valid base64` or
+       `cursor payload is malformed`): usage error, exit 2.
+     - **Expired** (any other `InvalidCursor`, including a version from an
+       older binary): emit `{"type": "resync", "reason": ..., "cursor": null}`
+       and replay the Work from the start. Consumers de-duplicate by
+       `event.event_id`.
+   - Consecutive resyncs are capped at 3, after which the command fails.
+     `UnstableLineage` is a failure.
+   - Tests pin both classes against the real journal, so rewording in
+     `heiwa_evidence` fails loudly instead of misclassifying.
+3. **The resume point is `page.next_cursor`.** The journal documents it as
+   never regressing: when a page has no events it echoes the input cursor.
+4. **Threads linked after start stay visible.** The watcher tracks the Work's
+   threads as it goes. Every event carrying the Work's id adds its thread, so
+   unscoped events in threads linked after the watch began are included.
+5. **A torn trailing line is safe.** It is a write still in progress. The
+   journal stops before it and re-reads it once it is complete. `skipped_lines`
+   is therefore not surfaced per page, because it would flicker during
+   concurrent writes.

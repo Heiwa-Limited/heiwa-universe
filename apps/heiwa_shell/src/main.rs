@@ -1,6 +1,7 @@
 mod cli;
 mod cmd;
 mod home;
+mod output;
 
 use anyhow::{anyhow, Result};
 use chrono::Utc;
@@ -206,8 +207,10 @@ async fn main() -> Result<()> {
         return Ok(());
     }
 
-    if cli::try_handle(&args).await? {
-        return Ok(());
+    match cli::try_handle(&args).await {
+        Ok(true) => return Ok(()),
+        Ok(false) => {}
+        Err(error) => std::process::exit(output::report_error(&error, output::wants_json(&args))),
     }
 
     match args[1].as_str() {
@@ -862,9 +865,11 @@ async fn main() -> Result<()> {
             println!("heiwa {}", env!("CARGO_PKG_VERSION"));
         }
         _ => {
-            println!("Heiwa AI runtime and shell");
-            println!("Unknown command: {}", args[1]);
-            print_help();
+            let error = anyhow::Error::new(
+                output::CliError::usage(format!("unknown command: {}", args[1]))
+                    .with_hint("run `heiwa help` for the command catalog"),
+            );
+            std::process::exit(output::report_error(&error, output::wants_json(&args)));
         }
     }
 
