@@ -89,6 +89,56 @@ pub enum AccountStatus {
     Error(String),
 }
 
+impl AccountStatus {
+    /// How this status reads to a person.
+    ///
+    /// `heiwa doctor` previously rendered the enum with `{:?}`, which showed
+    /// the user a Rust variant name and, for `Error`, Rust string quoting.
+    ///
+    /// The vocabulary deliberately avoids "connected". The doctor's "CLI
+    /// Discovery" section already uses connected/not_installed to mean
+    /// *auth is present for the provider's own CLI*, which is a different
+    /// question from *can Heiwa route a turn to this account*. Printing
+    /// "[Disconnected]" three lines above "claude: connected" made one
+    /// install look broken when it was merely unlinked. Different questions
+    /// get different words.
+    pub fn label(&self) -> String {
+        match self {
+            AccountStatus::Connected => "ready".to_string(),
+            AccountStatus::Disconnected => "not linked".to_string(),
+            AccountStatus::NeedsAuth => "needs sign-in".to_string(),
+            // Interpolated, not `{:?}`: the message is for the user, so it
+            // must not arrive wrapped in Rust quoting.
+            AccountStatus::Error(detail) => format!("error: {detail}"),
+        }
+    }
+
+    /// The concrete action that makes this account usable, if any.
+    ///
+    /// Same rule `heiwa_identity::onboarding` holds itself to: a surface
+    /// that says "not ready" without saying what to do is documentation the
+    /// user does not have. Returns `None` only when nothing is needed.
+    pub fn next_step(&self, provider: &str) -> Option<String> {
+        match self {
+            AccountStatus::Connected => None,
+            AccountStatus::Disconnected => Some(format!(
+                "run `heiwa auth login {provider}` to link this account"
+            )),
+            AccountStatus::NeedsAuth => Some(format!(
+                "credentials expired — run `heiwa auth login {provider}`"
+            )),
+            AccountStatus::Error(_) => Some(format!(
+                "run `heiwa doctor --ai-ops` for detail, then `heiwa auth login {provider}`"
+            )),
+        }
+    }
+
+    /// Whether Heiwa can route a turn to this account right now.
+    pub fn is_ready(&self) -> bool {
+        matches!(self, AccountStatus::Connected)
+    }
+}
+
 // ---------------------------------------------------------------------------
 // Model inventory
 // ---------------------------------------------------------------------------
@@ -495,6 +545,84 @@ pub fn add_cli_account(
     registry.save()?;
 
     Ok(account_id)
+}
+
+#[cfg(test)]
+mod account_status_label_tests {
+    use super::*;
+
+    // `heiwa doctor` rendered this enum with `{:?}`, so a user read the Rust
+    // variant name. Worse, "Disconnected" sat directly above a "CLI
+    // Discovery" section reporting "connected" for the same provider — two
+    // different meanings for one word, adjacent on screen, which reads as a
+    // broken install rather than an unlinked account.
+
+    #[test]
+    fn labels_avoid_the_word_connected_entirely() {
+        // CLI Discovery owns "connected"/"not_installed" for auth presence.
+        // Account status must not reuse that vocabulary for routability.
+        for status in [
+            AccountStatus::Connected,
+            AccountStatus::Disconnected,
+            AccountStatus::NeedsAuth,
+            AccountStatus::Error("boom".into()),
+        ] {
+            let label = status.label();
+            assert!(
+                !label.to_lowercase().contains("connect"),
+                "label {label:?} collides with CLI Discovery vocabulary"
+            );
+        }
+    }
+
+    #[test]
+    fn a_routable_account_reads_as_ready() {
+        assert_eq!(AccountStatus::Connected.label(), "ready");
+    }
+
+    #[test]
+    fn an_unlinked_account_says_so_in_plain_words() {
+        assert_eq!(AccountStatus::Disconnected.label(), "not linked");
+    }
+
+    #[test]
+    fn an_account_needing_sign_in_says_so() {
+        assert_eq!(AccountStatus::NeedsAuth.label(), "needs sign-in");
+    }
+
+    #[test]
+    fn an_error_surfaces_its_message_without_rust_quoting() {
+        let label = AccountStatus::Error("token expired".into()).label();
+        assert!(label.contains("token expired"), "got {label:?}");
+        assert!(!label.contains('"'), "Debug quoting leaked into {label:?}");
+    }
+
+    #[test]
+    fn every_unready_status_offers_a_next_step() {
+        // Same rule the onboarding module holds itself to: a surface that
+        // says "not ready" without saying what to do is documentation the
+        // user does not have.
+        for status in [
+            AccountStatus::Disconnected,
+            AccountStatus::NeedsAuth,
+            AccountStatus::Error("boom".into()),
+        ] {
+            let step = status.next_step("anthropic");
+            let step = step.expect("an unready status must offer a next step");
+            assert!(!step.is_empty());
+        }
+    }
+
+    #[test]
+    fn a_ready_account_offers_no_busywork() {
+        assert_eq!(AccountStatus::Connected.next_step("anthropic"), None);
+    }
+
+    #[test]
+    fn the_next_step_names_the_provider_so_it_can_be_pasted() {
+        let step = AccountStatus::NeedsAuth.next_step("anthropic").unwrap();
+        assert!(step.contains("anthropic"), "got {step:?}");
+    }
 }
 
 #[cfg(test)]

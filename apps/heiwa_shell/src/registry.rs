@@ -98,10 +98,11 @@ pub const COMMANDS: &[CommandSpec] = &[
             "work show",
             "work watch",
             "work recover",
+            "work shadow",
         ],
         ..command(
             "work",
-            "work list|create|show|watch|run|recover",
+            "work list|create|show|watch|run|recover|shadow",
             "Durable Work on this installation",
         )
     },

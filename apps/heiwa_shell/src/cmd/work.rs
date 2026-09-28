@@ -28,6 +28,7 @@ pub fn run(args: &[String]) -> Result<()> {
         Some("watch") => watch_command(&args[1..]),
         Some("run") => crate::cmd::worker::run(&args[1..]),
         Some("recover") => recover_command(&args[1..]),
+        Some("shadow") => shadow_command(&args[1..]),
         Some("--help") | Some("-h") => {
             print_help();
             Ok(())
@@ -52,6 +53,18 @@ fn print_help() {
     println!(
         "  heiwa work recover [--json]           record runs whose supervising process is gone"
     );
+    println!("  heiwa work shadow [<work-id>] [--json] System 1 shadow judgments against what ran");
+}
+
+/// `heiwa work shadow`: shadow System 1 judgments joined with the turns they
+/// judged. Read-only; judgments are recorded only when `[system1] shadow` is on.
+fn shadow_command(args: &[String]) -> Result<()> {
+    let work_id = positionals(args, &[]).first().copied();
+    let paths = heiwa_config::HeiwaPaths::resolve();
+    let report = heiwa_shell::system1_shadow::report(&paths.evidence_dir, work_id)?;
+    output::emit(has_flag(args, "--json"), report, &[], |report| {
+        print!("{}", heiwa_shell::system1_shadow::render_report(report));
+    })
 }
 
 fn service(root: &Path) -> Result<OperatorSessionService> {

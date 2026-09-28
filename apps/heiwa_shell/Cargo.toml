@@ -49,6 +49,7 @@ heiwa-protocol = { path = "../../crates/heiwa_protocol" }
 heiwa_mcp = { path = "../../crates/heiwa_mcp" }
 heiwa-tui = { path = "../../crates/heiwa_tui" }
 heiwa_drex = { path = "../../crates/heiwa_drex" }
+heiwa_judgment = { path = "../../crates/heiwa_judgment" }
 heiwa_automations = { path = "../../crates/heiwa_automations" }
 heiwa_oauth = { path = "../../crates/heiwa_oauth" }
 heiwa_vault = { path = "../../crates/heiwa_vault" }

@@ -526,6 +526,13 @@ impl OperatorSessionService {
         }
     }
 
+    /// Evidence root this service's journal owns. Stores layered on the same
+    /// sessions, such as operator artifacts, derive their location from it
+    /// so they never act on another root's files.
+    pub fn root(&self) -> &Path {
+        self.journal.root()
+    }
+
     /// Durably create an empty operator thread if it does not already exist.
     ///
     /// Returns `true` only when this call appended `thread_created`. The

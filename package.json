@@ -20,7 +20,10 @@
   "scripts": {
     "check:runtime": "bash scripts/check_runtime_baseline.sh",
     "lint": "biome ci .",
-    "typecheck": "tsc -p apps/heiwa_app/tsconfig.json --noEmit && npm --prefix apps/heiwa_app/clients/cockpit run typecheck"
+    "typecheck": "tsc -p apps/heiwa_app/tsconfig.json --noEmit && npm --prefix apps/heiwa_app/clients/cockpit run typecheck",
+    "test:system1": "npm --prefix packages/heiwa_system1 test",
+    "typecheck:system1": "npm --prefix packages/heiwa_system1 run typecheck",
+    "demo:system1": "node packages/heiwa_system1/src/examples/routing_agent/demo.ts"
   },
   "devDependencies": {
     "@biomejs/biome": "^2.4.15",

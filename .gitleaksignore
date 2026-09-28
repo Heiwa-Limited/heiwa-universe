@@ -67,3 +67,11 @@ eadab1834a574301afebf7675332494f79f80d42:core/profiles/heiwa-limited.yaml:generi
 eadab1834a574301afebf7675332494f79f80d42:core/profiles/heiwa-one-system.yaml:generic-api-key:382
 eadab1834a574301afebf7675332494f79f80d42:runtime/libs/heiwa_sdk/sanity/auditor.py:generic-api-key:20
 fb08594d1ff04d85a9267be98e6fdb7aae0d810b:apps/heiwa_shell/tests/operator_api.rs:generic-api-key:1239
+# 2026-09-23 triage (Astra; context re-verified by Opus, booleans only): the RFC 6455 example
+# Sec-WebSocket-Key handshake value, a public sample published in the RFC text (7 occurrences), not a
+# credential. Two hits are #[cfg(test)] handshake fixtures in app.rs; one is a comment in an older copy of
+# this file. Both commits are reachable only from experimental/L-007-runtime-trust-boundary; history is
+# kept, not rewritten. Evidence: codex-security scans/system1-jev 2026-09-23-rfc6455-gitleaks-triage.json.
+be2a81c801a31168773188ec4a935601f42c8926:apps/heiwa_shell/src/cmd/app.rs:generic-api-key:6638
+be2a81c801a31168773188ec4a935601f42c8926:apps/heiwa_shell/src/cmd/app.rs:generic-api-key:6774
+27219da1b04b9ea0b55fb97c6d97b4266ad97029:.gitleaksignore:generic-api-key:10

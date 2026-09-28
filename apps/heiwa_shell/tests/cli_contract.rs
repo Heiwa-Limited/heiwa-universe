@@ -441,3 +441,15 @@ fn approval_hints_come_from_validated_file_stems_never_request_content() {
     );
     assert!(!canary.exists());
 }
+
+#[test]
+fn work_shadow_reports_through_the_envelope_with_nothing_recorded_by_default() {
+    let home = tempfile::tempdir().expect("home");
+    let output = heiwa(home.path(), &["work", "shadow", "--json"]);
+    assert!(output.status.success(), "{}", stderr(&output));
+    let data = cli_v1::data(&output.stdout);
+    // System 1 is shadow-only and off unless enabled: a fresh profile has
+    // recorded nothing.
+    assert_eq!(data["records"], 0, "{data}");
+    assert!(data["coverage"].is_object(), "{data}");
+}

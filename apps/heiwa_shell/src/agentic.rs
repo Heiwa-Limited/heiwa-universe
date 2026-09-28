@@ -395,6 +395,10 @@ pub async fn execute_approved_tool_call(
     }
 }
 
+/// The read tools [`tool_instruction_prompt`] names. A turn is taught that
+/// protocol only when its scope grants an allowed lease for one of them.
+pub const TOOL_PROTOCOL_TOOLS: [&str; 3] = ["fs.list", "fs.read", "repo.grep"];
+
 pub fn tool_instruction_prompt() -> String {
     "Agentic mode is active. If repo/file context is needed, respond only with JSON: {\"tool_calls\":[{\"name\":\"fs.list|fs.read|repo.grep\",\"arguments\":{...}}]}. Available tools: fs.list {path}, fs.read {path,max_bytes}, repo.grep {pattern,path,max_matches}. Use paths relative to current directory. If no tool is needed, answer normally.".to_string()
 }

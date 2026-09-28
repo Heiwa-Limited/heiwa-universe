@@ -186,16 +186,70 @@ pub struct EmbeddingConfig {
     pub request_timeout_ms: u64,
 }
 
+/// System 1 (typed, confidence-gated judgment) settings. Only shadow mode
+/// exists: judgments are recorded as evidence and never change execution.
+#[derive(Debug, Clone, PartialEq)]
+pub struct System1Config {
+    /// Record a shadow judgment for each Work-scoped model turn. Off unless
+    /// asked for, because a remote backend receives the turn's prompt.
+    pub shadow: bool,
+    /// `typesafe` (the default) or `ollama`, case-folded.
+    pub backend: String,
+    /// Model id override; each backend has its own pinned default.
+    pub model: Option<String>,
+    /// Endpoint override; each backend has its own default.
+    pub base_url: Option<String>,
+    /// Wall-clock budget for one judgment, in milliseconds.
+    pub budget_ms: Option<u64>,
+}
+
 #[derive(Debug, Clone)]
 pub struct AppConfig {
     pub paths: HeiwaPaths,
     pub embedding: EmbeddingConfig,
+    pub system1: System1Config,
 }
 
 #[derive(Debug, Default, Deserialize)]
 struct FileConfig {
     #[serde(default)]
     embedding: EmbeddingFileConfig,
+    #[serde(default)]
+    system1: System1FileConfig,
+}
+
+#[derive(Debug, Default, Deserialize)]
+struct System1FileConfig {
+    shadow: Option<bool>,
+    backend: Option<String>,
+    model: Option<String>,
+    base_url: Option<String>,
+    budget_ms: Option<u64>,
+}
+
+/// Resolve `[system1]` against `HEIWA_SYSTEM1_*` overrides. Pure, so the
+/// precedence is testable without touching the process environment.
+fn system1_from(file: &System1FileConfig, env: impl Fn(&str) -> Option<String>) -> System1Config {
+    let text = |key: &str, fallback: &Option<String>| {
+        env(key)
+            .map(|value| value.trim().to_string())
+            .filter(|value| !value.is_empty())
+            .or_else(|| fallback.clone())
+    };
+    System1Config {
+        shadow: env("HEIWA_SYSTEM1_SHADOW")
+            .and_then(|value| parse_bool(&value))
+            .or(file.shadow)
+            .unwrap_or(false),
+        backend: text("HEIWA_SYSTEM1_BACKEND", &file.backend)
+            .map(|backend| backend.to_ascii_lowercase())
+            .unwrap_or_else(|| "typesafe".to_string()),
+        model: text("HEIWA_SYSTEM1_MODEL", &file.model),
+        base_url: text("HEIWA_SYSTEM1_BASE_URL", &file.base_url),
+        budget_ms: env("HEIWA_SYSTEM1_BUDGET_MS")
+            .and_then(|value| value.trim().parse::<u64>().ok())
+            .or(file.budget_ms),
+    }
 }
 
 #[derive(Debug, Default, Deserialize)]
@@ -262,7 +316,13 @@ pub fn load() -> AppConfig {
             .unwrap_or(1_500),
     };
 
-    AppConfig { paths, embedding }
+    let system1 = system1_from(&file.system1, |key| env::var(key).ok());
+
+    AppConfig {
+        paths,
+        embedding,
+        system1,
+    }
 }
 
 fn load_file_config(path: &PathBuf) -> FileConfig {
@@ -273,7 +333,10 @@ fn load_file_config(path: &PathBuf) -> FileConfig {
 }
 
 fn env_bool(key: &str) -> Option<bool> {
-    let value = env::var(key).ok()?;
+    parse_bool(&env::var(key).ok()?)
+}
+
+fn parse_bool(value: &str) -> Option<bool> {
     match value.trim().to_ascii_lowercase().as_str() {
         "1" | "true" | "yes" | "on" => Some(true),
         "0" | "false" | "no" | "off" => Some(false),
@@ -516,5 +579,83 @@ mod tests {
         assert_eq!(EmbedBackend::parse("sqlite"), Some(EmbedBackend::Sqlite));
         assert_eq!(EmbedBackend::parse("Lance"), Some(EmbedBackend::Lance));
         assert_eq!(EmbedBackend::parse("stdb"), None);
+    }
+}
+
+#[cfg(test)]
+mod system1_config_tests {
+    use super::*;
+
+    fn env_of<'a>(pairs: &'a [(&'a str, &'a str)]) -> impl Fn(&str) -> Option<String> + 'a {
+        move |key: &str| {
+            pairs
+                .iter()
+                .find(|(k, _)| *k == key)
+                .map(|(_, v)| v.to_string())
+        }
+    }
+
+    fn file(raw: &str) -> System1FileConfig {
+        toml::from_str::<FileConfig>(raw).expect("config").system1
+    }
+
+    #[test]
+    fn shadow_judgment_is_off_unless_asked_for() {
+        let config = system1_from(&System1FileConfig::default(), env_of(&[]));
+        assert!(!config.shadow);
+        assert_eq!(config.backend, "typesafe");
+        assert_eq!(config.model, None);
+        assert_eq!(config.base_url, None);
+        assert_eq!(config.budget_ms, None);
+    }
+
+    #[test]
+    fn the_config_file_enables_a_named_backend() {
+        let config = system1_from(
+            &file(
+                r#"
+                [system1]
+                shadow = true
+                backend = "ollama"
+                model = "gemma4:latest"
+                base_url = "http://127.0.0.1:11434"
+                budget_ms = 45000
+                "#,
+            ),
+            env_of(&[]),
+        );
+        assert!(config.shadow);
+        assert_eq!(config.backend, "ollama");
+        assert_eq!(config.model.as_deref(), Some("gemma4:latest"));
+        assert_eq!(config.base_url.as_deref(), Some("http://127.0.0.1:11434"));
+        assert_eq!(config.budget_ms, Some(45_000));
+    }
+
+    #[test]
+    fn the_environment_overrides_the_file_and_can_switch_shadow_off() {
+        let config = system1_from(
+            &file("[system1]\nshadow = true\nbackend = \"ollama\"\nbudget_ms = 45000\n"),
+            env_of(&[
+                ("HEIWA_SYSTEM1_SHADOW", "0"),
+                ("HEIWA_SYSTEM1_BACKEND", "TypeSafe"),
+                ("HEIWA_SYSTEM1_MODEL", "jev-1.13.0"),
+                ("HEIWA_SYSTEM1_BUDGET_MS", "not-a-number"),
+            ]),
+        );
+        assert!(!config.shadow);
+        assert_eq!(config.backend, "typesafe", "backend names are case-folded");
+        assert_eq!(config.model.as_deref(), Some("jev-1.13.0"));
+        assert_eq!(
+            config.budget_ms,
+            Some(45_000),
+            "an unparseable override is ignored"
+        );
+    }
+
+    #[test]
+    fn a_config_file_without_the_section_still_parses_the_rest() {
+        let parsed: FileConfig =
+            toml::from_str("[embedding]\nenabled = true\n").expect("config without system1");
+        assert!(!system1_from(&parsed.system1, env_of(&[])).shadow);
     }
 }
