@@ -22,20 +22,20 @@ PRIVATE_REQUEST = json.dumps(
 
 
 @unittest.skipUnless(
-    sys.platform == "darwin" and shutil.which("xcrun"),
-    "unsupported: Apple EventKit SDK is available only on macOS",
+    sys.platform == "darwin",
+    "unsupported: Apple EventKit helper transport requires macOS",
 )
 class AppleHelperTransportTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls) -> None:
-        try:
-            sdk = subprocess.check_output(
-                ["xcrun", "--sdk", "macosx", "--show-sdk-path"], text=True
-            ).strip()
-        except (OSError, subprocess.CalledProcessError) as error:
-            raise unittest.SkipTest(f"unsupported: macOS SDK unavailable ({error})")
+        xcrun = shutil.which("xcrun")
+        if xcrun is None:
+            raise RuntimeError("required native helper coverage unavailable: xcrun is missing")
+        sdk = subprocess.check_output(
+            [xcrun, "--sdk", "macosx", "--show-sdk-path"], text=True, timeout=15
+        ).strip()
         if not (pathlib.Path(sdk) / "System/Library/Frameworks/EventKit.framework").exists():
-            raise unittest.SkipTest("unsupported: macOS SDK does not contain EventKit")
+            raise RuntimeError("required native helper coverage unavailable: EventKit SDK is missing")
 
         cls._temporary = tempfile.TemporaryDirectory(prefix="heiwa-apple-helper-tests-")
         cls.addClassCleanup(cls._temporary.cleanup)
@@ -100,6 +100,7 @@ class AppleHelperTransportTests(unittest.TestCase):
             check=True,
             capture_output=True,
             text=True,
+            timeout=120,
         )
 
     def run_harness(
@@ -120,6 +121,7 @@ class AppleHelperTransportTests(unittest.TestCase):
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
             env=env,
+            timeout=15,
         )
         self.assertEqual(result.returncode == 0, accepted, result.stderr)
         self.assertEqual(result.stdout.strip(), b"accepted" if accepted else b"rejected")
@@ -157,6 +159,7 @@ class AppleHelperTransportTests(unittest.TestCase):
                     input=payload,
                     stdout=subprocess.PIPE,
                     stderr=subprocess.PIPE,
+                    timeout=15,
                 )
                 self.assertNotEqual(result.returncode, 0)
                 self.assertNotIn(b"PRIVATE_SENTINEL", result.stdout + result.stderr)
