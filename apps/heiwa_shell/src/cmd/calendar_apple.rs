@@ -30,19 +30,24 @@ function eventRow(event, calendarName, marker, created) {
   };
 }
 
+function readStandardInput() {
+  ObjC.import("Foundation");
+  const data = $.NSFileHandle.fileHandleWithStandardInput.readDataToEndOfFile;
+  return ObjC.unwrap($.NSString.alloc.initWithDataEncoding(data, $.NSUTF8StringEncoding));
+}
+
 function run(argv) {
   const operation = String(argv[0] || "");
+  if (operation !== "list" && operation !== "create") {
+    throw new Error(`unsupported Apple Calendar bridge operation: ${operation}`);
+  }
+  const request = operation === "create" ? JSON.parse(readStandardInput()) : null;
   const Calendar = Application("Calendar");
 
   if (operation === "list") {
     return JSON.stringify(Calendar.calendars().map(calendarRow));
   }
 
-  if (operation !== "create") {
-    throw new Error(`unsupported Apple Calendar bridge operation: ${operation}`);
-  }
-
-  const request = JSON.parse(String(argv[1] || "{}"));
   const calendars = Calendar.calendars.whose({ name: String(request.calendar) })();
   if (calendars.length !== 1) {
     throw new Error(`expected exactly one Apple calendar named ${request.calendar}; found ${calendars.length}`);
@@ -195,22 +200,28 @@ fn run_bridge(operation: &str, payload: Option<&Value>) -> Result<Value> {
         .arg("-e")
         .arg(APPLE_CALENDAR_JXA)
         .arg(operation);
-    if let Some(payload) = payload {
-        command.arg(payload.to_string());
+    let bytes = if let Some(payload) = payload {
+        let input =
+            serde_json::to_vec(payload).context("serialize Apple Calendar bridge request")?;
+        heiwa_core::subprocess::bounded_output_with_input(
+            &mut command,
+            &input,
+            std::time::Duration::from_secs(45),
+            4 * 1024 * 1024,
+        )
+    } else {
+        heiwa_core::subprocess::bounded_output(
+            &mut command,
+            std::time::Duration::from_secs(45),
+            4 * 1024 * 1024,
+        )
     }
-    let output = command.output().with_context(|| {
-        format!(
-            "failed to run Apple Calendar bridge {}",
-            executable.display()
+    .map_err(|error| {
+        anyhow!(
+            "Apple Calendar {operation} failed (Automation permission or calendar target): {error}"
         )
     })?;
-    if !output.status.success() {
-        let detail = String::from_utf8_lossy(&output.stderr).trim().to_string();
-        return Err(anyhow!(
-            "Apple Calendar {operation} failed (Automation permission or calendar target): {detail}"
-        ));
-    }
-    serde_json::from_slice(&output.stdout)
+    serde_json::from_slice(&bytes)
         .map_err(|error| anyhow!("Apple Calendar bridge returned invalid JSON: {error}"))
 }
 

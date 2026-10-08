@@ -348,20 +348,14 @@ fn load_plan(path: &str) -> Result<Plan> {
 // ------------------------------------------------------------------ helper IO
 
 fn call_helper(request: &Value, timeout_secs: u64) -> Result<Value> {
-    let helper = super::calendar_read::helper_path().ok_or_else(|| {
-        anyhow!("The Apple resource helper is missing. Install the complete Heiwa app.")
-    })?;
-    let mut command = std::process::Command::new(helper);
-    command.env_remove("XPC_SERVICE_NAME");
-    command.arg(request.to_string());
-    let bytes = heiwa_core::subprocess::bounded_output(
-        &mut command,
+    let value = super::calendar_read::helper_request(
+        request,
         std::time::Duration::from_secs(timeout_secs),
         16 * 1024 * 1024,
+        "The Apple resource helper is missing. Install the complete Heiwa app.",
+        "read Apple Calendar plan response",
     )
     .map_err(|error| anyhow!("Apple Calendar plan helper failed: {error}"))?;
-    let value: Value =
-        serde_json::from_slice(&bytes).context("read Apple Calendar plan response")?;
     if value["schema_version"] != 1 {
         bail!("Apple Calendar plan helper returned an unsupported response");
     }
