@@ -34,8 +34,9 @@ The default receipt explicitly records native desktop certification as deferred.
 Each run retains separate step
 logs and a structured receipt binding results to the checkout revision and
 reported worktree state. Required gates fail when missing or unsuccessful;
-deferred acceptance is recorded explicitly. Work Fabric A1 remains deferred
-until its acceptance gate exists and passes. A local receipt establishes only
+deferred acceptance is recorded explicitly. Work Fabric A1 has a scoped gate in
+`scripts/check_work_fabric_a1_acceptance.sh`; completion requires a passing receipt
+for its declared scope. A local receipt establishes only
 the checks actually run; it does not prove remote CI, release availability, or
 installed-runtime behavior.
 
