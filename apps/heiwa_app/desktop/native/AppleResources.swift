@@ -78,8 +78,24 @@ struct AppleResources {
             if chunk.isEmpty { break }
             data.append(chunk)
         }
-        guard !data.isEmpty, data.count <= maximumRequestBytes else { throw ReadError.invalidRequest }
-        return data
+        guard data.count <= maximumRequestBytes else { throw ReadError.invalidRequest }
+        let arguments = Array(CommandLine.arguments.dropFirst())
+        if !data.isEmpty {
+            // The new runtime always uses stdin. Reject mixed/extra arguments;
+            // only the old released CLI used one JSON argument during upgrade.
+            guard arguments.isEmpty else { throw ReadError.invalidRequest }
+            return data
+        }
+        return try legacyRequest(arguments)
+    }
+
+    static func legacyRequest(_ arguments: [String]) throws -> Data {
+        guard arguments.count == 1 else { throw ReadError.invalidRequest }
+        let legacyData = Data(arguments[0].utf8)
+        guard !legacyData.isEmpty, legacyData.count <= maximumRequestBytes else {
+            throw ReadError.invalidRequest
+        }
+        return legacyData
     }
 
     // MARK: plan sync
