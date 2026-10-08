@@ -4,7 +4,9 @@
 //! `com.heiwa.` or `ltd.heiwa.`, the matching `launchctl` service state, the
 //! persisted disable overrides, and the listener on a supervised local port.
 //! Nothing here mutates launchd, files, or provider state. Reports carry the
-//! program path and missing paths only: no other argv, environment, or logs.
+//! program path and missing required inputs only: no other argv, environment,
+//! or logs. A failed or incomplete probe degrades the report; it never reads
+//! as healthy.
 
 use serde::Serialize;
 use serde_json::Value;
@@ -13,6 +15,21 @@ use std::path::{Path, PathBuf};
 const LABEL_PREFIXES: [&str; 2] = ["com.heiwa.", "ltd.heiwa."];
 const MAX_AGENTS: usize = 32;
 const OLLAMA_DEFAULT_PORT: u16 = 11434;
+/// Interpreters whose first non-flag operand is the script they run.
+const SCRIPT_LAUNCHERS: [&str; 12] = [
+    "node",
+    "nodejs",
+    "bun",
+    "python",
+    "python3",
+    "ruby",
+    "perl",
+    "php",
+    "bash",
+    "sh",
+    "zsh",
+    "osascript",
+];
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct PortListener {
@@ -36,6 +53,57 @@ pub struct ServiceState {
     pub last_exit_code: Option<i64>,
 }
 
+/// What `KeepAlive` establishes. Dictionaries are conditions, not a promise
+/// to restart: only a lone `SuccessfulExit` is decidable from an exit code.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum RestartPolicy {
+    None,
+    Always,
+    OnFailure,
+    OnSuccess,
+    Conditional,
+}
+
+impl RestartPolicy {
+    fn from_plist(value: &Value) -> Self {
+        match value {
+            Value::Null | Value::Bool(false) => Self::None,
+            Value::Bool(true) => Self::Always,
+            Value::Object(conditions) if conditions.is_empty() => Self::None,
+            Value::Object(conditions) if conditions.len() == 1 => {
+                match conditions.get("SuccessfulExit") {
+                    Some(Value::Bool(false)) => Self::OnFailure,
+                    Some(Value::Bool(true)) => Self::OnSuccess,
+                    _ => Self::Conditional,
+                }
+            }
+            _ => Self::Conditional,
+        }
+    }
+
+    /// Whether launchd restarts the job after this exit code; `None` when
+    /// conditions outside the exit code decide.
+    fn restarts_after(self, exit_code: i64) -> Option<bool> {
+        match self {
+            Self::None => Some(false),
+            Self::Always => Some(true),
+            Self::OnFailure => Some(exit_code != 0),
+            Self::OnSuccess => Some(exit_code == 0),
+            Self::Conditional => None,
+        }
+    }
+
+    /// `SuccessfulExit` implies a first run at load (launchd.plist(5)).
+    fn starts_at_load(self) -> Option<bool> {
+        match self {
+            Self::None => Some(false),
+            Self::Always | Self::OnFailure | Self::OnSuccess => Some(true),
+            Self::Conditional => None,
+        }
+    }
+}
+
 #[derive(Debug, Clone, Serialize)]
 pub struct LaunchdAgentHealth {
     pub label: String,
@@ -43,11 +111,15 @@ pub struct LaunchdAgentHealth {
     pub program: Option<String>,
     /// `None` when the program is not an absolute path and cannot be checked.
     pub program_exists: Option<bool>,
+    /// Missing WorkingDirectory or launcher script; other operands may be
+    /// outputs and are never inferred as required.
     pub missing_paths: Vec<String>,
-    pub loaded: bool,
+    /// `None` when the service probe failed.
+    pub loaded: Option<bool>,
     pub disabled: Option<bool>,
     pub run_at_load: bool,
-    pub keep_alive: bool,
+    pub restart_policy: RestartPolicy,
+    /// Loads at next login: present and not persistently disabled.
     pub reloads_at_login: Option<bool>,
     pub service: Option<ServiceState>,
     pub port_conflict: Option<PortConflict>,
@@ -57,11 +129,16 @@ pub struct LaunchdAgentHealth {
 
 #[derive(Debug, Clone, Serialize)]
 pub struct LaunchdHealthReport {
-    /// `ok`, `attention`, `unsupported`, or `unavailable`.
+    /// `ok`, `attention`, `degraded` (some evidence missing), `unavailable`,
+    /// or `unsupported`. `attention` wins over `degraded`; check
+    /// `evidence_complete` as well.
     pub status: String,
+    pub evidence_complete: bool,
     pub platform: String,
     pub scope: String,
     pub agents: Vec<LaunchdAgentHealth>,
+    /// Plists in scope whose label is not Heiwa-owned.
+    pub skipped: Vec<String>,
     pub probe_errors: Vec<String>,
 }
 
@@ -69,9 +146,11 @@ impl LaunchdHealthReport {
     fn empty(status: &str) -> Self {
         Self {
             status: status.to_string(),
+            evidence_complete: status == "ok",
             platform: std::env::consts::OS.to_string(),
             scope: "user LaunchAgents with com.heiwa.* or ltd.heiwa.* labels".to_string(),
             agents: Vec::new(),
+            skipped: Vec::new(),
             probe_errors: Vec::new(),
         }
     }
@@ -81,17 +160,18 @@ impl LaunchdHealthReport {
     }
 }
 
-/// Read-only sources for the assessment. The system probe shells out to
-/// `plutil`, `launchctl`, and `lsof`; tests substitute fixtures.
 /// Each candidate plist path with its JSON form, or why it could not be read.
 pub type AgentPlists = Vec<(PathBuf, Result<Value, String>)>;
 
+/// Read-only sources for the assessment. The system probe shells out to
+/// `plutil`, `launchctl`, and `lsof` under one time budget; tests substitute
+/// fixtures. An `Err` means the evidence is missing or incomplete.
 pub trait LaunchdProbe {
-    /// Plist path and its JSON form for each candidate agent file.
     fn agent_plists(&self) -> Result<AgentPlists, String>;
-    /// `launchctl print` text for a loaded label; `Ok(None)` when not loaded.
+    /// `launchctl print` text for a loaded label; `Ok(None)` only when launchd
+    /// reports the service does not exist.
     fn service(&self, label: &str) -> Result<Option<String>, String>;
-    /// `launchctl print-disabled` text for the user domain.
+    /// Complete `launchctl print-disabled` text for the user domain.
     fn disabled_overrides(&self) -> Result<String, String>;
     fn listener(&self, port: u16) -> Result<Option<PortListener>, String>;
     fn path_exists(&self, path: &Path) -> bool;
@@ -100,13 +180,11 @@ pub trait LaunchdProbe {
 pub fn check_launchd_health() -> LaunchdHealthReport {
     #[cfg(target_os = "macos")]
     {
-        match system::SystemProbe::new() {
-            Some(probe) => assess(&probe),
-            None => {
+        match system::SystemProbe::new(system::TOTAL_BUDGET) {
+            Ok(probe) => assess(&probe),
+            Err(error) => {
                 let mut report = LaunchdHealthReport::empty("unavailable");
-                report
-                    .probe_errors
-                    .push("home directory or user id unavailable".to_string());
+                report.probe_errors.push(error);
                 report
             }
         }
@@ -123,6 +201,7 @@ pub fn assess(probe: &dyn LaunchdProbe) -> LaunchdHealthReport {
         Ok(plists) => plists,
         Err(error) => {
             report.status = "unavailable".to_string();
+            report.evidence_complete = false;
             report.probe_errors.push(error);
             return report;
         }
@@ -130,11 +209,14 @@ pub fn assess(probe: &dyn LaunchdProbe) -> LaunchdHealthReport {
     let overrides = match probe.disabled_overrides() {
         Ok(text) => Some(parse_disabled_overrides(&text)),
         Err(error) => {
-            report.probe_errors.push(error);
+            report
+                .probe_errors
+                .push(format!("disable overrides: {error}"));
             None
         }
     };
     let mut listener_cache: Vec<(u16, Result<Option<PortListener>, String>)> = Vec::new();
+    let mut attention = false;
 
     for (plist_path, parsed) in plists.into_iter().take(MAX_AGENTS) {
         let name = plist_path
@@ -152,9 +234,7 @@ pub fn assess(probe: &dyn LaunchdProbe) -> LaunchdHealthReport {
             .as_str()
             .filter(|label| is_heiwa_label(label))
         else {
-            report
-                .probe_errors
-                .push(format!("{name}: label is not Heiwa-owned; skipped"));
+            report.skipped.push(name);
             continue;
         };
 
@@ -170,56 +250,57 @@ pub fn assess(probe: &dyn LaunchdProbe) -> LaunchdHealthReport {
             .as_deref()
             .filter(|program| program.starts_with('/'))
             .map(|program| probe.path_exists(Path::new(program)));
-        // Absolute operands (scripts, configs) and the working directory must
-        // exist for the job to start. Other argv stays out of the report.
-        let mut missing_paths: Vec<String> = arguments
-            .iter()
-            .skip(1)
-            .chain(plist["WorkingDirectory"].as_str().iter())
-            .filter(|value| value.starts_with('/') && !probe.path_exists(Path::new(value)))
-            .map(|value| value.to_string())
-            .collect();
-        missing_paths.dedup();
+        let missing_paths: Vec<String> = required_inputs(
+            program.as_deref(),
+            &arguments,
+            plist["WorkingDirectory"].as_str(),
+        )
+        .into_iter()
+        .filter(|path| !probe.path_exists(Path::new(path)))
+        .map(str::to_string)
+        .collect();
         let run_at_load = plist["RunAtLoad"].as_bool().unwrap_or(false);
-        let keep_alive = match &plist["KeepAlive"] {
-            Value::Bool(value) => *value,
-            Value::Object(conditions) => !conditions.is_empty(),
-            _ => false,
+        let restart_policy = RestartPolicy::from_plist(&plist["KeepAlive"]);
+        let starts_at_login = if run_at_load {
+            Some(true)
+        } else {
+            restart_policy.starts_at_load()
         };
         let disabled = overrides.as_ref().map(|overrides| {
             overrides
                 .iter()
                 .any(|(name, disabled)| name == label && *disabled)
         });
-
-        let mut findings = Vec::new();
-        let (loaded, service) = match probe.service(label) {
-            Ok(Some(text)) => (true, Some(parse_service(&text))),
-            Ok(None) => (false, None),
-            Err(error) => {
-                report.probe_errors.push(format!("{label}: {error}"));
-                (false, None)
-            }
-        };
         // A plist in LaunchAgents loads at login unless a persisted disable
         // override exists. Unknown overrides leave the answer unknown.
         let reloads_at_login = disabled.map(|disabled| !disabled);
+
+        let mut findings = Vec::new();
+        let (loaded, service) = match probe.service(label) {
+            Ok(Some(text)) => (Some(true), Some(parse_service(&text))),
+            Ok(None) => (Some(false), None),
+            Err(error) => {
+                report.probe_errors.push(format!("{label}: {error}"));
+                findings.push("service state unavailable".to_string());
+                (None, None)
+            }
+        };
 
         let port_conflict = if program
             .as_deref()
             .and_then(|program| Path::new(program).file_name())
             .is_some_and(|name| name == "ollama")
-            && (loaded || reloads_at_login == Some(true))
+            && (loaded == Some(true) || reloads_at_login == Some(true))
         {
             let port = ollama_port(&plist);
             let cached = match listener_cache.iter().find(|(cached, _)| *cached == port) {
                 Some((_, result)) => result.clone(),
                 None => {
                     let result = probe.listener(port);
-                    listener_cache.push((port, result.clone()));
                     if let Err(error) = &result {
                         report.probe_errors.push(format!("port {port}: {error}"));
                     }
+                    listener_cache.push((port, result.clone()));
                     result
                 }
             };
@@ -240,7 +321,7 @@ pub fn assess(probe: &dyn LaunchdProbe) -> LaunchdHealthReport {
             findings.push("program path is missing".to_string());
         }
         if !missing_paths.is_empty() {
-            findings.push("an absolute path the job needs is missing".to_string());
+            findings.push("a required input path is missing".to_string());
         }
         if let Some(conflict) = &port_conflict {
             findings.push(format!(
@@ -248,41 +329,54 @@ pub fn assess(probe: &dyn LaunchdProbe) -> LaunchdHealthReport {
                 conflict.port, conflict.listener_command, conflict.listener_pid
             ));
         }
-        let defective = !findings.is_empty();
+        let defective =
+            program_exists == Some(false) || !missing_paths.is_empty() || port_conflict.is_some();
         let running = service.as_ref().and_then(|service| service.pid).is_some();
-        let last_failed = service
-            .as_ref()
-            .and_then(|service| service.last_exit_code)
-            .is_some_and(|code| code != 0);
+        let last_exit = service.as_ref().and_then(|service| service.last_exit_code);
+        let last_failed = last_exit.is_some_and(|code| code != 0);
 
-        // A loop needs a live restart policy, no running process, a failed
-        // last exit, and a deterministic cause. Run count alone is history.
-        let classification = if loaded && !running && keep_alive && last_failed && defective {
-            findings.push("launchd keeps restarting a job that cannot start".to_string());
-            "crash_loop"
-        } else if loaded && defective {
-            "failing"
-        } else if disabled == Some(true) {
-            "disabled"
-        } else if !loaded
-            && defective
-            && reloads_at_login == Some(true)
-            && (run_at_load || keep_alive)
-        {
-            findings.push("will start at next login and fail".to_string());
-            "reload_risk"
-        } else if running {
-            "running"
-        } else if last_failed {
-            "historic_failure"
-        } else if loaded {
-            "loaded"
-        } else {
-            "not_loaded"
+        // A loop needs launchd to restart after the observed exit, no running
+        // process, and a deterministic cause. Run count alone is history.
+        let classification = match loaded {
+            Some(true) if defective && !running && last_failed => {
+                match last_exit.and_then(|code| restart_policy.restarts_after(code)) {
+                    Some(true) => {
+                        findings.push("launchd keeps restarting a job that cannot start".into());
+                        "crash_loop"
+                    }
+                    None => {
+                        findings.push(
+                            "KeepAlive is conditional; a restart loop is not established".into(),
+                        );
+                        "failing"
+                    }
+                    Some(false) => "failing",
+                }
+            }
+            Some(true) if defective => "failing",
+            _ if disabled == Some(true) => "disabled",
+            None => "unknown",
+            Some(false) if defective => {
+                if reloads_at_login == Some(true) && starts_at_login == Some(true) {
+                    findings.push("will start at next login and fail".to_string());
+                    "reload_risk"
+                } else {
+                    findings.push(
+                        "not loaded; whether it starts at login depends on unknown overrides or conditions"
+                            .to_string(),
+                    );
+                    "defective"
+                }
+            }
+            _ if running => "running",
+            _ if last_failed => "historic_failure",
+            Some(true) => "loaded",
+            Some(false) => "not_loaded",
         };
-        if matches!(classification, "crash_loop" | "failing" | "reload_risk") {
-            report.status = "attention".to_string();
-        }
+        attention |= matches!(
+            classification,
+            "crash_loop" | "failing" | "reload_risk" | "defective"
+        );
 
         report.agents.push(LaunchdAgentHealth {
             label: label.to_string(),
@@ -293,7 +387,7 @@ pub fn assess(probe: &dyn LaunchdProbe) -> LaunchdHealthReport {
             loaded,
             disabled,
             run_at_load,
-            keep_alive,
+            restart_policy,
             reloads_at_login,
             service,
             port_conflict,
@@ -301,7 +395,57 @@ pub fn assess(probe: &dyn LaunchdProbe) -> LaunchdHealthReport {
             findings,
         });
     }
+
+    report.evidence_complete = report.probe_errors.is_empty();
+    report.status = if attention {
+        "attention"
+    } else if !report.evidence_complete {
+        "degraded"
+    } else {
+        "ok"
+    }
+    .to_string();
     report
+}
+
+/// Inputs that must exist for the job to start: the WorkingDirectory and,
+/// for a recognized script launcher (optionally behind `env`), its script.
+/// Any other absolute operand may be an output and is not inferred.
+fn required_inputs<'a>(
+    program: Option<&str>,
+    arguments: &[&'a str],
+    working_directory: Option<&'a str>,
+) -> Vec<&'a str> {
+    let mut required: Vec<&'a str> = working_directory
+        .filter(|path| path.starts_with('/'))
+        .into_iter()
+        .collect();
+    let base = |value: &str| {
+        Path::new(value)
+            .file_name()
+            .map(|name| name.to_string_lossy().into_owned())
+            .unwrap_or_default()
+    };
+    let mut rest = arguments.get(1..).unwrap_or_default();
+    let mut launcher = program.map(base).unwrap_or_default();
+    if launcher == "env" {
+        let skip = rest
+            .iter()
+            .take_while(|arg| arg.starts_with('-') || arg.contains('='))
+            .count();
+        rest = &rest[skip..];
+        launcher = rest.first().map(|arg| base(arg)).unwrap_or_default();
+        rest = rest.get(1..).unwrap_or_default();
+    }
+    if SCRIPT_LAUNCHERS.contains(&launcher.as_str()) {
+        if let Some(script) = rest.iter().find(|arg| !arg.starts_with('-')) {
+            if script.starts_with('/') && !rest.iter().any(|arg| *arg == "-c" || *arg == "-e") {
+                required.push(script);
+            }
+        }
+    }
+    required.dedup();
+    required
 }
 
 /// Port from `OLLAMA_HOST` (`host:port`, `:port`, or a URL), else the default.
@@ -388,32 +532,73 @@ pub fn is_heiwa_label(label: &str) -> bool {
         .any(|prefix| label.starts_with(prefix))
 }
 
+/// Raw result of one bounded command.
+#[derive(Debug)]
+pub struct ProbeOutput {
+    pub status: i32,
+    pub stdout: String,
+    pub truncated: bool,
+}
+
+/// `launchctl print`: 0 is loaded, 113 is "no such service", anything else
+/// (or a truncated listing) is a failed probe.
+pub fn interpret_service(output: ProbeOutput) -> Result<Option<String>, String> {
+    match output.status {
+        _ if output.truncated => Err("launchctl print output truncated".to_string()),
+        0 => Ok(Some(output.stdout)),
+        113 => Ok(None),
+        code => Err(format!("launchctl print exited {code}")),
+    }
+}
+
+/// `launchctl print-disabled`: a partial override list cannot prove that a
+/// label is absent, so truncation is a failure.
+pub fn interpret_overrides(output: ProbeOutput) -> Result<String, String> {
+    match output.status {
+        _ if output.truncated => Err("override list truncated".to_string()),
+        0 => Ok(output.stdout),
+        code => Err(format!("launchctl print-disabled exited {code}")),
+    }
+}
+
 #[cfg(target_os = "macos")]
 mod system {
     use super::{
-        is_heiwa_label, parse_listener, AgentPlists, LaunchdProbe, PortListener, MAX_AGENTS,
+        interpret_overrides, interpret_service, is_heiwa_label, parse_listener, AgentPlists,
+        LaunchdProbe, PortListener, ProbeOutput, MAX_AGENTS,
     };
     use std::io::Read;
     use std::path::{Path, PathBuf};
     use std::process::{Command, Stdio};
     use std::time::{Duration, Instant};
 
-    const TIMEOUT: Duration = Duration::from_secs(3);
+    /// One budget for every probe in a doctor run.
+    pub(crate) const TOTAL_BUDGET: Duration = Duration::from_secs(8);
+    const PER_CALL: Duration = Duration::from_secs(3);
     const MAX_OUTPUT: usize = 256 * 1024;
 
-    pub(super) struct SystemProbe {
+    pub(crate) struct SystemProbe {
         agents_dir: PathBuf,
         domain: String,
+        deadline: Instant,
     }
 
     impl SystemProbe {
-        pub(super) fn new() -> Option<Self> {
-            let home = std::env::var_os("HOME").filter(|value| !value.is_empty())?;
-            let (status, uid) = run("/usr/bin/id", &["-u"]).ok()?;
-            let uid: u32 = (status == 0).then(|| uid.trim().parse().ok())??;
-            Some(Self {
-                agents_dir: PathBuf::from(home).join("Library/LaunchAgents"),
+        pub(crate) fn new(budget: Duration) -> Result<Self, String> {
+            let deadline = Instant::now() + budget;
+            let home = heiwa_config::HeiwaPaths::try_resolve()
+                .map(|paths| paths.home_dir)
+                .filter(|home| home.is_absolute())
+                .ok_or_else(|| "home directory unavailable".to_string())?;
+            let output = run("/usr/bin/id", &["-u"], deadline, MAX_OUTPUT)?;
+            let uid: u32 = (output.status == 0)
+                .then(|| output.stdout.trim().parse().ok())
+                .flatten()
+                .ok_or_else(|| "user id unavailable".to_string())?;
+            Ok(Self {
+                agents_dir: home.join("Library/LaunchAgents"),
                 domain: format!("gui/{uid}"),
+                deadline,
             })
         }
     }
@@ -444,13 +629,18 @@ mod system {
                         .to_str()
                         .ok_or_else(|| "plist path is not UTF-8".to_string())
                         .and_then(|text| {
-                            run("/usr/bin/plutil", &["-convert", "json", "-o", "-", text])
+                            run(
+                                "/usr/bin/plutil",
+                                &["-convert", "json", "-o", "-", text],
+                                self.deadline,
+                                MAX_OUTPUT,
+                            )
                         })
-                        .and_then(|(status, output)| {
-                            if status != 0 {
+                        .and_then(|output| {
+                            if output.status != 0 || output.truncated {
                                 return Err("plist could not be read".to_string());
                             }
-                            serde_json::from_str(&output)
+                            serde_json::from_str(&output.stdout)
                                 .map_err(|_| "plist could not be read".to_string())
                         });
                     (path, parsed)
@@ -460,28 +650,37 @@ mod system {
 
         fn service(&self, label: &str) -> Result<Option<String>, String> {
             let target = format!("{}/{label}", self.domain);
-            let (status, output) = run("/bin/launchctl", &["print", &target])?;
-            // 113: launchd has no such service in this domain.
-            Ok((status == 0).then_some(output))
+            interpret_service(run(
+                "/bin/launchctl",
+                &["print", &target],
+                self.deadline,
+                MAX_OUTPUT,
+            )?)
         }
 
         fn disabled_overrides(&self) -> Result<String, String> {
-            let (status, output) = run("/bin/launchctl", &["print-disabled", &self.domain])?;
-            if status != 0 {
-                return Err("launchctl print-disabled failed".to_string());
-            }
-            Ok(output)
+            interpret_overrides(run(
+                "/bin/launchctl",
+                &["print-disabled", &self.domain],
+                self.deadline,
+                MAX_OUTPUT,
+            )?)
         }
 
         fn listener(&self, port: u16) -> Result<Option<PortListener>, String> {
             let filter = format!("-iTCP:{port}");
-            let (status, output) =
-                run("/usr/sbin/lsof", &["-nP", &filter, "-sTCP:LISTEN", "-Fpc"])?;
-            // lsof exits 1 when nothing matches.
-            if status != 0 && output.trim().is_empty() {
-                return Ok(None);
+            let output = run(
+                "/usr/sbin/lsof",
+                &["-nP", &filter, "-sTCP:LISTEN", "-Fpc"],
+                self.deadline,
+                MAX_OUTPUT,
+            )?;
+            // lsof exits 1 with no output when nothing matches.
+            match (output.status, output.stdout.trim().is_empty()) {
+                (_, true) if output.status <= 1 => Ok(None),
+                (0, false) => Ok(parse_listener(&output.stdout)),
+                (code, _) => Err(format!("lsof exited {code}")),
             }
-            Ok(parse_listener(&output))
         }
 
         fn path_exists(&self, path: &Path) -> bool {
@@ -489,8 +688,20 @@ mod system {
         }
     }
 
-    /// Bounded read-only command: fixed timeout and output cap, stderr dropped.
-    fn run(program: &str, args: &[&str]) -> Result<(i32, String), String> {
+    /// Bounded read-only command. Each call gets the smaller of the per-call
+    /// limit and what remains of the shared deadline; stdout beyond `cap` is
+    /// dropped and flagged; stderr is discarded.
+    pub(crate) fn run(
+        program: &str,
+        args: &[&str],
+        deadline: Instant,
+        cap: usize,
+    ) -> Result<ProbeOutput, String> {
+        let remaining = deadline.saturating_duration_since(Instant::now());
+        if remaining.is_zero() {
+            return Err("probe time budget exhausted".to_string());
+        }
+        let timeout = remaining.min(PER_CALL);
         let mut child = Command::new(program)
             .args(args)
             .stdin(Stdio::null())
@@ -504,26 +715,26 @@ mod system {
             .ok_or_else(|| format!("{program} output unavailable"))?;
         let reader = std::thread::spawn(move || {
             let mut buffer = Vec::new();
+            let mut truncated = false;
             let mut chunk = [0u8; 8192];
             loop {
                 match stdout.read(&mut chunk) {
                     Ok(0) | Err(_) => break,
                     Ok(read) => {
-                        if buffer.len() < MAX_OUTPUT {
-                            let take = read.min(MAX_OUTPUT - buffer.len());
-                            buffer.extend_from_slice(&chunk[..take]);
-                        }
+                        let take = read.min(cap.saturating_sub(buffer.len()));
+                        buffer.extend_from_slice(&chunk[..take]);
+                        truncated |= take < read;
                     }
                 }
             }
-            buffer
+            (buffer, truncated)
         });
         let started = Instant::now();
         let status = loop {
             match child.try_wait() {
                 Ok(Some(status)) => break status,
-                Ok(None) if started.elapsed() < TIMEOUT => {
-                    std::thread::sleep(Duration::from_millis(20))
+                Ok(None) if started.elapsed() < timeout => {
+                    std::thread::sleep(Duration::from_millis(10))
                 }
                 _ => {
                     let _ = child.kill();
@@ -533,11 +744,44 @@ mod system {
                 }
             }
         };
-        let output = reader.join().unwrap_or_default();
-        Ok((
-            status.code().unwrap_or(-1),
-            String::from_utf8_lossy(&output).into_owned(),
-        ))
+        let (output, truncated) = reader.join().unwrap_or_default();
+        Ok(ProbeOutput {
+            status: status.code().unwrap_or(-1),
+            stdout: String::from_utf8_lossy(&output).into_owned(),
+            truncated,
+        })
+    }
+
+    #[cfg(test)]
+    mod tests {
+        use super::*;
+
+        #[test]
+        fn exhausted_budget_spawns_nothing() {
+            let started = Instant::now();
+            let error = run("/bin/sleep", &["5"], Instant::now(), MAX_OUTPUT).unwrap_err();
+            assert_eq!(error, "probe time budget exhausted");
+            assert!(started.elapsed() < Duration::from_millis(100));
+        }
+
+        #[test]
+        fn remaining_budget_bounds_a_slow_probe() {
+            let started = Instant::now();
+            let deadline = Instant::now() + Duration::from_millis(300);
+            let error = run("/bin/sleep", &["5"], deadline, MAX_OUTPUT).unwrap_err();
+            assert!(error.contains("timed out"), "{error}");
+            assert!(started.elapsed() < Duration::from_secs(2));
+        }
+
+        #[test]
+        fn output_beyond_the_cap_is_flagged_as_truncated() {
+            let deadline = Instant::now() + Duration::from_secs(5);
+            let output = run("/bin/echo", &["0123456789"], deadline, 4).unwrap();
+            assert!(output.truncated);
+            assert_eq!(output.stdout, "0123");
+            let output = run("/bin/echo", &["01"], deadline, 64).unwrap();
+            assert!(!output.truncated);
+        }
     }
 }
 
@@ -551,6 +795,7 @@ mod tests {
     struct Fixture {
         plists: Vec<(PathBuf, Result<Value, String>)>,
         services: HashMap<String, String>,
+        service_errors: HashSet<String>,
         disabled: String,
         listeners: HashMap<u16, PortListener>,
         existing: HashSet<PathBuf>,
@@ -567,11 +812,14 @@ mod tests {
             Ok(self.plists.clone())
         }
         fn service(&self, label: &str) -> Result<Option<String>, String> {
+            if self.service_errors.contains(label) {
+                return Err("launchctl print exited 5".to_string());
+            }
             Ok(self.services.get(label).cloned())
         }
         fn disabled_overrides(&self) -> Result<String, String> {
             if self.fail_disabled {
-                return Err("launchctl print-disabled failed".to_string());
+                return Err("override list truncated".to_string());
             }
             Ok(self.disabled.clone())
         }
@@ -602,6 +850,16 @@ mod tests {
             self.existing.insert(PathBuf::from(path));
             self
         }
+        fn held_port(mut self, port: u16, pid: u32) -> Self {
+            self.listeners.insert(
+                port,
+                PortListener {
+                    pid,
+                    command: "ollama".to_string(),
+                },
+            );
+            self
+        }
     }
 
     fn service_text(state: &str, pid: Option<u32>, runs: u64, last_exit: &str) -> String {
@@ -613,12 +871,12 @@ mod tests {
         )
     }
 
-    fn orchestrator_plist() -> Value {
+    fn orchestrator_plist(keep_alive: Value) -> Value {
         json!({
             "Label": "com.heiwa.orchestrator",
             "ProgramArguments": ["/opt/homebrew/bin/node", "/home/u/.heiwa/orchestrator/daemon.js"],
             "EnvironmentVariables": {"SECRET_TOKEN": "do-not-print"},
-            "KeepAlive": {"SuccessfulExit": false},
+            "KeepAlive": keep_alive,
             "RunAtLoad": true
         })
     }
@@ -632,6 +890,16 @@ mod tests {
         })
     }
 
+    fn failing_orchestrator(keep_alive: Value) -> Fixture {
+        Fixture::default()
+            .agent("com.heiwa.orchestrator", orchestrator_plist(keep_alive))
+            .loaded(
+                "com.heiwa.orchestrator",
+                &service_text("spawn scheduled", None, 4517, "1"),
+            )
+            .exists("/opt/homebrew/bin/node")
+    }
+
     fn agent<'a>(report: &'a LaunchdHealthReport, label: &str) -> &'a LaunchdAgentHealth {
         report
             .agents
@@ -641,17 +909,11 @@ mod tests {
     }
 
     #[test]
-    fn missing_daemon_script_under_keepalive_is_a_crash_loop() {
-        let fixture = Fixture::default()
-            .agent("com.heiwa.orchestrator", orchestrator_plist())
-            .loaded(
-                "com.heiwa.orchestrator",
-                &service_text("spawn scheduled", None, 4517, "1"),
-            )
-            .exists("/opt/homebrew/bin/node");
-        let report = assess(&fixture);
+    fn missing_daemon_script_restarted_on_failure_is_a_crash_loop() {
+        let report = assess(&failing_orchestrator(json!({"SuccessfulExit": false})));
         let orchestrator = agent(&report, "com.heiwa.orchestrator");
         assert_eq!(orchestrator.classification, "crash_loop");
+        assert_eq!(orchestrator.restart_policy, RestartPolicy::OnFailure);
         assert_eq!(
             orchestrator.missing_paths,
             vec!["/home/u/.heiwa/orchestrator/daemon.js".to_string()]
@@ -659,27 +921,99 @@ mod tests {
         assert_eq!(orchestrator.program_exists, Some(true));
         assert_eq!(orchestrator.reloads_at_login, Some(true));
         assert_eq!(report.status, "attention");
+        assert!(report.evidence_complete);
         let serialized = serde_json::to_string(&report).unwrap();
         assert!(!serialized.contains("do-not-print"));
         assert!(!serialized.contains("SECRET_TOKEN"));
     }
 
     #[test]
+    fn keepalive_after_success_only_does_not_loop_on_a_failed_exit() {
+        let report = assess(&failing_orchestrator(json!({"SuccessfulExit": true})));
+        let orchestrator = agent(&report, "com.heiwa.orchestrator");
+        assert_eq!(orchestrator.restart_policy, RestartPolicy::OnSuccess);
+        assert_eq!(orchestrator.classification, "failing");
+        assert!(!orchestrator
+            .findings
+            .iter()
+            .any(|finding| finding.contains("restarting")));
+    }
+
+    #[test]
+    fn conditional_keepalive_does_not_claim_a_loop() {
+        let report = assess(&failing_orchestrator(
+            json!({"PathState": {"/tmp/x": true}, "SuccessfulExit": false}),
+        ));
+        let orchestrator = agent(&report, "com.heiwa.orchestrator");
+        assert_eq!(orchestrator.restart_policy, RestartPolicy::Conditional);
+        assert_eq!(orchestrator.classification, "failing");
+        assert!(orchestrator
+            .findings
+            .iter()
+            .any(|finding| finding.contains("not established")));
+    }
+
+    #[test]
+    fn absolute_output_operands_are_not_required_inputs() {
+        let fixture = Fixture::default()
+            .agent(
+                "ltd.heiwa.app",
+                json!({
+                    "Label": "ltd.heiwa.app",
+                    "ProgramArguments": ["/home/u/.heiwa/bin/heiwa", "app", "start",
+                        "--log", "/home/u/.heiwa/logs/new.log", "--export", "/home/u/out/report.json"],
+                    "KeepAlive": true,
+                    "RunAtLoad": true
+                }),
+            )
+            .loaded(
+                "ltd.heiwa.app",
+                &service_text("running", Some(80860), 1, "(never exited)"),
+            )
+            .exists("/home/u/.heiwa/bin/heiwa");
+        let report = assess(&fixture);
+        let app = agent(&report, "ltd.heiwa.app");
+        assert!(app.missing_paths.is_empty(), "{:?}", app.missing_paths);
+        assert_eq!(app.classification, "running");
+        assert_eq!(report.status, "ok");
+    }
+
+    #[test]
+    fn required_inputs_cover_launchers_env_and_working_directory() {
+        assert_eq!(
+            required_inputs(
+                Some("/usr/bin/env"),
+                &[
+                    "/usr/bin/env",
+                    "PYTHONUNBUFFERED=1",
+                    "python3",
+                    "-u",
+                    "/srv/job.py",
+                    "/srv/out.txt"
+                ],
+                Some("/srv"),
+            ),
+            vec!["/srv", "/srv/job.py"]
+        );
+        assert!(required_inputs(Some("/bin/sh"), &["/bin/sh", "-c", "/srv/run"], None).is_empty());
+        assert!(required_inputs(
+            Some("/opt/homebrew/bin/ollama"),
+            &["/opt/homebrew/bin/ollama", "serve", "/srv/models"],
+            None
+        )
+        .is_empty());
+    }
+
+    #[test]
     fn duplicate_ollama_supervisor_on_held_port_is_a_crash_loop() {
-        let mut fixture = Fixture::default()
+        let fixture = Fixture::default()
             .agent("com.heiwa.ollama", ollama_plist())
             .loaded(
                 "com.heiwa.ollama",
                 &service_text("spawn scheduled", None, 27032, "1"),
             )
-            .exists("/opt/homebrew/bin/ollama");
-        fixture.listeners.insert(
-            OLLAMA_DEFAULT_PORT,
-            PortListener {
-                pid: 80861,
-                command: "ollama".to_string(),
-            },
-        );
+            .exists("/opt/homebrew/bin/ollama")
+            .held_port(OLLAMA_DEFAULT_PORT, 80861);
         let report = assess(&fixture);
         let ollama = agent(&report, "com.heiwa.ollama");
         assert_eq!(ollama.classification, "crash_loop");
@@ -698,20 +1032,14 @@ mod tests {
     fn ollama_host_port_override_is_respected() {
         let mut plist = ollama_plist();
         plist["EnvironmentVariables"] = json!({"OLLAMA_HOST": "127.0.0.1:11500"});
-        let mut fixture = Fixture::default()
+        let fixture = Fixture::default()
             .agent("com.heiwa.ollama", plist)
             .loaded(
                 "com.heiwa.ollama",
                 &service_text("running", Some(42), 1, "(never exited)"),
             )
-            .exists("/opt/homebrew/bin/ollama");
-        fixture.listeners.insert(
-            OLLAMA_DEFAULT_PORT,
-            PortListener {
-                pid: 80861,
-                command: "ollama".to_string(),
-            },
-        );
+            .exists("/opt/homebrew/bin/ollama")
+            .held_port(OLLAMA_DEFAULT_PORT, 80861);
         let report = assess(&fixture);
         let ollama = agent(&report, "com.heiwa.ollama");
         assert_eq!(ollama.port_conflict, None);
@@ -721,18 +1049,15 @@ mod tests {
     #[test]
     fn disabled_retained_plists_do_not_warn_and_external_ollama_is_preserved() {
         let mut fixture = Fixture::default()
-            .agent("com.heiwa.orchestrator", orchestrator_plist())
+            .agent(
+                "com.heiwa.orchestrator",
+                orchestrator_plist(json!({"SuccessfulExit": false})),
+            )
             .agent("com.heiwa.ollama", ollama_plist())
             .exists("/opt/homebrew/bin/node")
-            .exists("/opt/homebrew/bin/ollama");
+            .exists("/opt/homebrew/bin/ollama")
+            .held_port(OLLAMA_DEFAULT_PORT, 80861);
         fixture.disabled = "disabled services = {\n\t\t\"com.heiwa.orchestrator\" => disabled\n\t\t\"com.heiwa.ollama\" => disabled\n\t\t\"homebrew.mxcl.ollama\" => enabled\n\t}\n".to_string();
-        fixture.listeners.insert(
-            OLLAMA_DEFAULT_PORT,
-            PortListener {
-                pid: 80861,
-                command: "ollama".to_string(),
-            },
-        );
         let report = assess(&fixture);
         for label in ["com.heiwa.orchestrator", "com.heiwa.ollama"] {
             let entry = agent(&report, label);
@@ -742,7 +1067,6 @@ mod tests {
             assert!(entry.port_conflict.is_none());
         }
         assert_eq!(report.status, "ok");
-        // Only Heiwa-owned labels are reported.
         assert!(report
             .agents
             .iter()
@@ -752,14 +1076,38 @@ mod tests {
     #[test]
     fn retained_enabled_plist_with_defect_is_a_login_reload_risk() {
         let fixture = Fixture::default()
-            .agent("com.heiwa.orchestrator", orchestrator_plist())
+            .agent(
+                "com.heiwa.orchestrator",
+                orchestrator_plist(json!({"SuccessfulExit": false})),
+            )
             .exists("/opt/homebrew/bin/node");
         let report = assess(&fixture);
         let orchestrator = agent(&report, "com.heiwa.orchestrator");
-        assert!(!orchestrator.loaded);
+        assert_eq!(orchestrator.loaded, Some(false));
         assert_eq!(orchestrator.reloads_at_login, Some(true));
         assert_eq!(orchestrator.classification, "reload_risk");
         assert_eq!(report.status, "attention");
+    }
+
+    #[test]
+    fn conditional_start_without_runatload_is_not_a_definite_login_failure() {
+        let fixture = Fixture::default()
+            .agent(
+                "com.heiwa.orchestrator",
+                json!({
+                    "Label": "com.heiwa.orchestrator",
+                    "ProgramArguments": ["/opt/homebrew/bin/node", "/home/u/.heiwa/orchestrator/daemon.js"],
+                    "KeepAlive": {"PathState": {"/tmp/x": true}}
+                }),
+            )
+            .exists("/opt/homebrew/bin/node");
+        let report = assess(&fixture);
+        let orchestrator = agent(&report, "com.heiwa.orchestrator");
+        assert_eq!(orchestrator.classification, "defective");
+        assert!(!orchestrator
+            .findings
+            .iter()
+            .any(|finding| finding.contains("will start")));
     }
 
     #[test]
@@ -809,17 +1157,17 @@ mod tests {
         assert_eq!(service.last_exit_code, None);
         assert_eq!(service.state.as_deref(), Some("running"));
         assert_eq!(report.status, "ok");
+        assert!(report.evidence_complete);
     }
 
     #[test]
-    fn unavailable_probes_degrade_without_failing() {
-        let fixture = Fixture {
+    fn failed_probes_degrade_the_report_instead_of_reading_ok() {
+        let unavailable = assess(&Fixture {
             fail_listing: true,
             ..Fixture::default()
-        };
-        let report = assess(&fixture);
-        assert_eq!(report.status, "unavailable");
-        assert!(!report.probe_errors.is_empty());
+        });
+        assert_eq!(unavailable.status, "unavailable");
+        assert!(!unavailable.evidence_complete);
 
         let mut partial = Fixture::default()
             .agent("com.heiwa.ollama", ollama_plist())
@@ -835,26 +1183,48 @@ mod tests {
         assert_eq!(ollama.disabled, None);
         assert_eq!(ollama.reloads_at_login, None);
         assert_eq!(ollama.port_conflict, None);
-        assert_eq!(ollama.classification, "running");
-        assert_eq!(report.status, "ok");
+        assert_eq!(report.status, "degraded");
+        assert!(!report.evidence_complete);
         assert_eq!(report.probe_errors.len(), 2);
-
-        // Unknown overrides leave an unloaded agent's port unprobed.
-        let mut unknown = Fixture::default()
-            .agent("com.heiwa.ollama", ollama_plist())
-            .exists("/opt/homebrew/bin/ollama");
-        unknown.fail_disabled = true;
-        unknown.fail_listener = true;
-        let report = assess(&unknown);
-        assert_eq!(
-            agent(&report, "com.heiwa.ollama").classification,
-            "not_loaded"
-        );
-        assert_eq!(report.probe_errors.len(), 1);
     }
 
     #[test]
-    fn unreadable_or_foreign_plists_are_reported_or_skipped() {
+    fn failed_service_probe_is_unknown_not_unloaded() {
+        let mut fixture = Fixture::default()
+            .agent(
+                "ltd.heiwa.app",
+                json!({"Label": "ltd.heiwa.app", "Program": "/x"}),
+            )
+            .exists("/x");
+        fixture.service_errors.insert("ltd.heiwa.app".to_string());
+        let report = assess(&fixture);
+        let app = agent(&report, "ltd.heiwa.app");
+        assert_eq!(app.loaded, None);
+        assert_eq!(app.classification, "unknown");
+        assert_eq!(report.status, "degraded");
+    }
+
+    #[test]
+    fn launchctl_exit_codes_and_truncation_are_interpreted_strictly() {
+        let output = |status, truncated| ProbeOutput {
+            status,
+            stdout: "x".to_string(),
+            truncated,
+        };
+        assert_eq!(
+            interpret_service(output(0, false)),
+            Ok(Some("x".to_string()))
+        );
+        assert_eq!(interpret_service(output(113, false)), Ok(None));
+        assert!(interpret_service(output(5, false)).is_err());
+        assert!(interpret_service(output(0, true)).is_err());
+        assert_eq!(interpret_overrides(output(0, false)), Ok("x".to_string()));
+        assert!(interpret_overrides(output(0, true)).is_err());
+        assert!(interpret_overrides(output(1, false)).is_err());
+    }
+
+    #[test]
+    fn unreadable_plists_degrade_and_foreign_labels_are_skipped() {
         let mut fixture = Fixture::default().agent(
             "com.heiwa.mislabeled",
             json!({"Label": "homebrew.mxcl.ollama", "Program": "/opt/homebrew/bin/ollama"}),
@@ -865,7 +1235,12 @@ mod tests {
         ));
         let report = assess(&fixture);
         assert!(report.agents.is_empty());
-        assert_eq!(report.probe_errors.len(), 2);
+        assert_eq!(
+            report.skipped,
+            vec!["com.heiwa.mislabeled.plist".to_string()]
+        );
+        assert_eq!(report.probe_errors.len(), 1);
+        assert_eq!(report.status, "degraded");
     }
 
     #[cfg(not(target_os = "macos"))]

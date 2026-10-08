@@ -1084,8 +1084,14 @@ fn print_launchd_health(report: &heiwa_install::LaunchdHealthReport) {
             println!("  {:<38} - missing: {path}", "");
         }
     }
+    for name in &report.skipped {
+        println!("  skipped: {name} (label is not Heiwa-owned)");
+    }
     for error in &report.probe_errors {
         println!("  probe: {error}");
+    }
+    if !report.evidence_complete && report.status != "unsupported" {
+        println!("  Evidence is incomplete; unprobed agents are not known to be healthy.");
     }
     if report.needs_attention() {
         println!("  Next: inspect with `launchctl print gui/$(id -u)/<label>`; disable a broken agent with `launchctl disable` after confirming it is unused");
