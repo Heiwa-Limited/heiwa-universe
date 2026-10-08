@@ -170,6 +170,8 @@ pub struct LaunchdAgentHealth {
     pub missing_paths: Vec<String>,
     /// `None` when the service probe failed.
     pub loaded: Option<bool>,
+    /// Persisted override, otherwise the plist's `Disabled` default; unknown
+    /// when overrides could not be read.
     pub disabled: Option<bool>,
     pub run_at_load: bool,
     pub restart_policy: RestartPolicy,
@@ -357,10 +359,11 @@ pub fn assess(probe: &dyn LaunchdProbe) -> LaunchdHealthReport {
         let disabled = overrides.as_ref().map(|overrides| {
             overrides
                 .iter()
-                .any(|(name, disabled)| name == label && *disabled)
+                .find_map(|(name, disabled)| (name == label).then_some(*disabled))
+                .unwrap_or_else(|| plist["Disabled"].as_bool().unwrap_or(false))
         });
-        // A plist in LaunchAgents loads at login unless a persisted disable
-        // override exists. Unknown overrides leave the answer unknown.
+        // Persisted enable/disable overrides take precedence over the plist
+        // default. Unknown overrides leave login loading unknown.
         let reloads_at_login = disabled.map(|disabled| !disabled);
 
         let mut findings = Vec::new();
@@ -1313,6 +1316,34 @@ mod tests {
         );
         assert_ne!(inline.classification, "reload_risk");
         assert_eq!(report.status, "ok");
+    }
+
+    #[test]
+    fn plist_disabled_default_and_persisted_overrides_determine_login_loading() {
+        for (default, overrides, disabled) in [
+            (true, "", true),
+            (true, "\"com.heiwa.default\" => enabled", false),
+            (false, "\"com.heiwa.default\" => disabled", true),
+        ] {
+            let mut fixture = Fixture::default().agent(
+                "com.heiwa.default",
+                json!({
+                    "Label": "com.heiwa.default",
+                    "Program": "/missing/program",
+                    "RunAtLoad": true,
+                    "Disabled": default
+                }),
+            );
+            fixture.disabled = overrides.to_string();
+            let report = assess(&fixture);
+            let job = agent(&report, "com.heiwa.default");
+            assert_eq!(job.disabled, Some(disabled));
+            assert_eq!(job.reloads_at_login, Some(!disabled));
+            assert_eq!(
+                job.classification,
+                if disabled { "disabled" } else { "reload_risk" }
+            );
+        }
     }
 
     #[test]
