@@ -239,9 +239,10 @@ fn call(request: &Value) -> Result<Value> {
     // TCC to reject an otherwise authorized Calendar read. Keep the service
     // identity on Heiwa itself, but do not pass it to the native helper.
     command.env_remove("XPC_SERVICE_NAME");
-    command.arg(request.to_string());
-    let bytes = heiwa_core::subprocess::bounded_output(
+    let request = serde_json::to_vec(request).context("serialize Apple resource request")?;
+    let bytes = heiwa_core::subprocess::bounded_output_with_input(
         &mut command,
+        &request,
         std::time::Duration::from_secs(45),
         4 * 1024 * 1024,
     )

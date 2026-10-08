@@ -755,7 +755,8 @@ fn selected_calendar_read_reconciles_real_service_state_and_respects_disconnect(
     let calls = fixture._root.path().join("eventkit-calls");
     fs::write(&helper, r#"#!/usr/bin/env python3
 import datetime, json, os, sys
-request = json.loads(sys.argv[1])
+assert len(sys.argv) == 1
+request = json.loads(sys.stdin.read())
 with open(os.environ['FIXTURE_CALLS'], 'a') as log: log.write(request['operation'] + '\n')
 if request['operation'] == 'list':
     result = {'schema_version':1, 'calendars':[{'id':'work','name':'Work','writable':True},{'id':'private','name':'Private','writable':True}]}
@@ -848,7 +849,8 @@ const PAGING_EVENTKIT_FIXTURE: &str = r#"#!/usr/bin/env python3
 import json, os, sys
 from datetime import datetime
 PAGE = 2
-request = json.loads(sys.argv[1])
+assert len(sys.argv) == 1
+request = json.loads(sys.stdin.read())
 with open(os.environ['FIXTURE_CALLS'], 'a') as log:
     log.write(request['operation'] + '\n')
 if request['operation'] == 'list':
