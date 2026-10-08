@@ -70,7 +70,9 @@ struct AppleResources {
         }
     }
 
-    static func readRequest() throws -> Data {
+    static func readRequest(
+        arguments: [String] = Array(CommandLine.arguments.dropFirst())
+    ) throws -> Data {
         var data = Data()
         while data.count <= maximumRequestBytes {
             let remaining = maximumRequestBytes + 1 - data.count
@@ -79,7 +81,6 @@ struct AppleResources {
             data.append(chunk)
         }
         guard data.count <= maximumRequestBytes else { throw ReadError.invalidRequest }
-        let arguments = Array(CommandLine.arguments.dropFirst())
         if !data.isEmpty {
             // The new runtime always uses stdin. Reject mixed/extra arguments;
             // only the old released CLI used one JSON argument during upgrade.
