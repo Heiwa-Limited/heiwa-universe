@@ -85,6 +85,17 @@ Heiwa must initialize and adapt per machine through `~/.heiwa/machine.json`; do 
 
 Promotion rule (experimental -> integration -> production): work starts on a short-lived experimental branch from current `dev` (`codex/*` for Codex; use the provider's equivalent prefix). All agent commits land there first; direct commits and pushes to `dev` or `main` are forbidden. Run `HEIWA_BRANCH_MODE=experimental bash scripts/check_ci_local.sh`, open an experimental -> `dev` pull request, resolve review and CI, then merge. `dev` is the protected integration branch and must never be behind `main`; at integration and promotion handoffs it must contain at least one verified, value-bearing commit beyond `main`. Equality is allowed only during the brief post-promotion synchronization window — use `HEIWA_BRANCH_MODE=post-promotion bash scripts/check_agent_baseline.sh` — and the next accepted experimental merge restores the ahead invariant. Never create empty/sentinel commits merely to alter the count. Update production only via a `dev` -> `main` pull request after `bash scripts/check_ci_local.sh` passes on `dev`. GitHub branch protection on both branches (`enforce_admins`, required status checks, 0 approvals — self-merge is fine) blocks direct pushes; do not bypass it. Do not hold a standing `dev` -> `main` PR open between promotions. Immediately before merging, recheck the exact PR head, required checks, merge state, and unresolved review threads. Publishing does not imply restarting the installed runtime: installation is a separately authorized step. GitHub Releases is the public install authority; `heiwa app update --source checkout` is development/recovery promotion with a commit receipt.
 
+Promotion timing, Devon's direction 2026-10-07: promote verified `dev` to `main`
+when a meaningful upgrade to Heiwa's value is apparent. Name the capability,
+reliability/security repair, or measured efficiency gain and its before/after
+evidence in the PR. For desktop/CLI changes, test the matching development bundle
+on device before promoting. Commit count and cosmetic churn do not establish
+value. During authorized delivery, carry a qualifying checkpoint through review,
+repair, required checks, and protected merge. Use cheaper capable agents for
+bounded reviews and scheduled merge follow-through when delegation is authorized;
+bind their decisions to the exact head and verification receipts. Follow
+[`docs/agent-baseline-workflow.md`](docs/agent-baseline-workflow.md#value-triggered-promotion-and-refactoring).
+
 CI economy: iterate with targeted local checks; run the full local gate before promotion. Required PR feedback jobs are bounded at one minute and Rust jobs at 20 minutes. Preserve the required aggregate status name `Rust Source Policy`. Active workflows use GitHub-hosted runners; custom-runner experiments belong in an isolated dispatch-only canary and need evidence before adoption. `scripts/check_ci_job_deadlines.rb` validates runner selection and job deadlines. Every protected-main commit reruns CI and cross-platform certification; releases require both at the exact source commit. Deploy remains dispatch-only. Local success does not prove remote checks, release availability, or installed behavior.
 
 Agent baseline gate: before claiming a clean repo-health or promotion handoff, run `bash scripts/check_agent_baseline.sh` on `dev`, or set `HEIWA_BRANCH_MODE=experimental` on an experimental branch. During uncommitted development, use `--allow-dirty` and report that limitation. Never commit, stash, or discard existing work merely to make a handoff green. The gate is local-only. Use the authorization and remote pre-flight in `docs/agent-baseline-workflow.md` for publishing.
@@ -98,7 +109,7 @@ Work Fabric A1 — durable `Work` and the one-repository loop.
 - Contract: `docs/superpowers/specs/2026-08-22-heiwa-work-fabric-design.md`. It is the product-sequencing authority after L3; it supersedes the roadmap's post-L3 sequencing without erasing accepted layers.
 - Ledger (repo truth, update alongside the work): `docs/superpowers/ledgers/2026-08-22-work-fabric-task-ledger.md`. A row is `done` only with verification evidence for the implementation it describes.
 - Accepted prerequisites: L0-L2 with their acceptance scripts and SHA stamps; L3's Apple Calendar lane. Google Calendar remains blocked on external account setup.
-- `scripts/hooks/stop_ledger_gate.sh` checks completion claims against acceptance stamps. Stamps require a clean tree when written; reuse requires an ancestor revision with unchanged declared acceptance scope. This local scope check does not replace exact-commit public release evidence. Work Fabric A1 acceptance remains deferred until its gate exists and passes.
+- `scripts/hooks/stop_ledger_gate.sh` checks completion claims against acceptance stamps. Stamps require a clean tree when written; reuse requires an ancestor revision with unchanged declared acceptance scope. This local scope check does not replace exact-commit public release evidence. Work Fabric A1 has `scripts/check_work_fabric_a1_acceptance.sh`; completion requires passing evidence for the implementation scope in its ledger.
 
 ## Working Priorities
 
@@ -162,6 +173,11 @@ resolve, not permission to disregard the user or claim a plan is shipped.
   tests before changing a boundary. Explain consequential tradeoffs in the
   reviewable change. Use an existing approved design when it fits; do not force
   a new design ceremony for an already authorized implementation.
+  Consider refactoring across the codebase when confirmed defects, duplicated
+  authority, or measured delivery cost show a better way to meet the user's
+  goals. Choose cohesive slices with a demonstrated benefit, preserved contracts,
+  regression evidence, and a recovery path; justify a whole-codebase replacement
+  with comparative evidence before expanding an authorized slice to that scope.
 - **Proportionate verification:** Test changed behavior and failure boundaries.
   Reproduce bug reports and external review findings before changing runtime
   code when feasible. Prefer a meaningful failing regression for durable bugs;
