@@ -17,6 +17,8 @@ const MAX_AGENTS: usize = 32;
 const OLLAMA_DEFAULT_PORT: u16 = 11434;
 /// Plist files scanned for a Heiwa `Label`; more leaves the inventory incomplete.
 const MAX_PLISTS: usize = 256;
+/// Directory entries examined while looking for plists.
+const MAX_DIRECTORY_ENTRIES: usize = 2048;
 
 /// Interpreter options that decide whether the first operand is a script.
 /// Inline/module options mean no script file; options outside the known
@@ -568,29 +570,52 @@ fn script_operand<'a>(options: &LauncherOptions, arguments: &[&'a str]) -> Optio
     None
 }
 
-/// Sorted `*.plist` candidates, capped, with entry errors and the cap
-/// recorded rather than dropped.
+/// Sorted `*.plist` candidates from a streamed directory listing. At most
+/// `max_entries` entries are examined and `cap` candidates kept; the scan stops
+/// at the first plist past the cap, the entry budget, or the deadline, and
+/// each stop or unreadable entry is recorded rather than dropped.
 fn collect_candidates(
     entries: impl Iterator<Item = std::io::Result<PathBuf>>,
+    max_entries: usize,
     cap: usize,
+    deadline: std::time::Instant,
 ) -> (Vec<PathBuf>, Vec<String>) {
     let mut incomplete = Vec::new();
     let mut failed = 0usize;
-    let mut paths: Vec<PathBuf> = entries
-        .filter_map(|entry| entry.map_err(|_| failed += 1).ok())
-        .filter(|path| path.extension().is_some_and(|ext| ext == "plist"))
-        .collect();
+    let mut paths = Vec::new();
+    let mut entries = entries;
+    let mut examined = 0usize;
+    loop {
+        if std::time::Instant::now() >= deadline {
+            incomplete.push("LaunchAgents scan stopped at the probe deadline".to_string());
+            break;
+        }
+        if examined == max_entries {
+            incomplete.push(format!(
+                "LaunchAgents scan stopped after {max_entries} directory entries"
+            ));
+            break;
+        }
+        let Some(entry) = entries.next() else { break };
+        examined += 1;
+        match entry {
+            Err(_) => failed += 1,
+            Ok(path) if path.extension().is_some_and(|ext| ext == "plist") => {
+                if paths.len() == cap {
+                    incomplete.push(format!(
+                        "more plists than the {cap}-file scan cap; the rest were not inspected"
+                    ));
+                    break;
+                }
+                paths.push(path);
+            }
+            Ok(_) => {}
+        }
+    }
     if failed > 0 {
         incomplete.push(format!("{failed} LaunchAgents entries could not be read"));
     }
     paths.sort();
-    if paths.len() > cap {
-        incomplete.push(format!(
-            "{} plists beyond the {cap}-file scan cap were not inspected",
-            paths.len() - cap
-        ));
-        paths.truncate(cap);
-    }
     (paths, incomplete)
 }
 
@@ -707,11 +732,24 @@ pub fn interpret_overrides(output: ProbeOutput) -> Result<String, String> {
     }
 }
 
+/// `lsof -Fpc`: exit 1 with no output means no listener; truncated output or
+/// any other failure is a probe error.
+pub fn interpret_listener(output: ProbeOutput) -> Result<Option<PortListener>, String> {
+    if output.truncated {
+        return Err("lsof output truncated".to_string());
+    }
+    match (output.status, output.stdout.trim().is_empty()) {
+        (_, true) if output.status <= 1 => Ok(None),
+        (0, false) => Ok(parse_listener(&output.stdout)),
+        (code, _) => Err(format!("lsof exited {code}")),
+    }
+}
+
 #[cfg(target_os = "macos")]
 mod system {
     use super::{
-        collect_candidates, interpret_overrides, interpret_service, parse_listener, Inventory,
-        LaunchdProbe, PortListener, ProbeOutput, MAX_PLISTS,
+        collect_candidates, interpret_listener, interpret_overrides, interpret_service, Inventory,
+        LaunchdProbe, PortListener, ProbeOutput, MAX_DIRECTORY_ENTRIES, MAX_PLISTS,
     };
     use std::io::Read;
     use std::path::{Path, PathBuf};
@@ -760,7 +798,9 @@ mod system {
             };
             let (paths, incomplete) = collect_candidates(
                 entries.map(|entry| entry.map(|entry| entry.path())),
+                MAX_DIRECTORY_ENTRIES,
                 MAX_PLISTS,
+                self.deadline,
             );
             let plists = paths
                 .into_iter()
@@ -816,12 +856,7 @@ mod system {
                 self.deadline,
                 MAX_OUTPUT,
             )?;
-            // lsof exits 1 with no output when nothing matches.
-            match (output.status, output.stdout.trim().is_empty()) {
-                (_, true) if output.status <= 1 => Ok(None),
-                (0, false) => Ok(parse_listener(&output.stdout)),
-                (code, _) => Err(format!("lsof exited {code}")),
-            }
+            interpret_listener(output)
         }
 
         fn path_exists(&self, path: &Path) -> bool {
@@ -1364,6 +1399,61 @@ mod tests {
     }
 
     #[test]
+    fn candidate_collection_stops_without_consuming_the_whole_directory() {
+        let later = std::time::Instant::now() + std::time::Duration::from_secs(5);
+        let consumed = std::cell::Cell::new(0usize);
+        let entries = (0..100_000).map(|index| {
+            consumed.set(consumed.get() + 1);
+            Ok(PathBuf::from(format!("/la/{index}.plist")))
+        });
+        let (paths, incomplete) = collect_candidates(entries, 1_000, 3, later);
+        assert_eq!(paths.len(), 3);
+        assert_eq!(consumed.get(), 4, "stops at the first plist past the cap");
+        assert_eq!(incomplete.len(), 1, "{incomplete:?}");
+
+        consumed.set(0);
+        let others = (0..100_000).map(|index| {
+            consumed.set(consumed.get() + 1);
+            Ok(PathBuf::from(format!("/la/{index}.txt")))
+        });
+        let (paths, incomplete) = collect_candidates(others, 50, 3, later);
+        assert!(paths.is_empty());
+        assert_eq!(consumed.get(), 50, "entry budget bounds non-plist scanning");
+        assert_eq!(incomplete.len(), 1, "{incomplete:?}");
+
+        consumed.set(0);
+        let expired = std::time::Instant::now();
+        let entries = (0..100_000).map(|index| {
+            consumed.set(consumed.get() + 1);
+            Ok(PathBuf::from(format!("/la/{index}.plist")))
+        });
+        let (paths, incomplete) = collect_candidates(entries, 1_000, 256, expired);
+        assert!(paths.is_empty());
+        assert_eq!(consumed.get(), 0, "an expired deadline inspects nothing");
+        assert!(incomplete[0].contains("deadline"), "{incomplete:?}");
+    }
+
+    #[test]
+    fn truncated_or_failed_lsof_output_is_a_probe_error() {
+        let output = |status, stdout: &str, truncated| ProbeOutput {
+            status,
+            stdout: stdout.to_string(),
+            truncated,
+        };
+        assert!(interpret_listener(output(0, "p80861\ncollama\n", true)).is_err());
+        assert!(interpret_listener(output(1, "", true)).is_err());
+        assert!(interpret_listener(output(2, "", false)).is_err());
+        assert_eq!(interpret_listener(output(1, "", false)), Ok(None));
+        assert_eq!(
+            interpret_listener(output(0, "p80861\ncollama\n", false)),
+            Ok(Some(PortListener {
+                pid: 80861,
+                command: "ollama".to_string()
+            }))
+        );
+    }
+
+    #[test]
     fn candidate_collection_counts_entry_errors_and_scan_cap() {
         let entries = vec![
             Ok(PathBuf::from("/la/b.plist")),
@@ -1372,7 +1462,8 @@ mod tests {
             Ok(PathBuf::from("/la/a.plist")),
             Ok(PathBuf::from("/la/c.plist")),
         ];
-        let (paths, incomplete) = collect_candidates(entries.into_iter(), 2);
+        let later = std::time::Instant::now() + std::time::Duration::from_secs(5);
+        let (paths, incomplete) = collect_candidates(entries.into_iter(), 100, 2, later);
         assert_eq!(
             paths,
             vec![PathBuf::from("/la/a.plist"), PathBuf::from("/la/b.plist")]
