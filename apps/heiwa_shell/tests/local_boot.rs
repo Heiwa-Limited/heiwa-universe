@@ -135,3 +135,65 @@ fn doctor_points_antigravity_auth_to_the_provider_owned_surface() {
     );
     assert!(!stdout.contains("install antigravity CLI"), "{stdout}");
 }
+
+#[test]
+fn doctor_reports_heiwa_launch_agents_without_changing_them() {
+    let root = tempfile::tempdir().expect("hermetic doctor root");
+    let home = root.path().join("home");
+    let evidence = root.path().join("evidence");
+    let state = root.path().join("state");
+    let agents = home.join("Library/LaunchAgents");
+    for path in [&home, &evidence, &state, &agents] {
+        std::fs::create_dir_all(path).unwrap();
+    }
+    // A unique label is never loaded or disabled in the real user domain.
+    let label = format!("com.heiwa.doctor-test-{}", std::process::id());
+    let plist_path = agents.join(format!("{label}.plist"));
+    let missing = root.path().join("missing/daemon.js");
+    let plist = format!(
+        r#"<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0"><dict>
+  <key>Label</key><string>{label}</string>
+  <key>ProgramArguments</key><array><string>/bin/sh</string><string>{}</string></array>
+  <key>EnvironmentVariables</key><dict><key>TOKEN</key><string>hermetic-secret</string></dict>
+  <key>RunAtLoad</key><true/>
+</dict></plist>"#,
+        missing.display()
+    );
+    std::fs::write(&plist_path, &plist).unwrap();
+
+    let output = Command::new(env!("CARGO_BIN_EXE_heiwa"))
+        .env_clear()
+        .env("HOME", &home)
+        .env("HEIWA_EVIDENCE_DIR", evidence)
+        .env("HEIWA_STATE_DIR", state)
+        .env("HEIWA_OLLAMA_BASE", "disabled-for-hermetic-tests")
+        .env("PATH", "/usr/bin:/bin")
+        .args(["doctor", "--json"])
+        .output()
+        .expect("failed to execute doctor");
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(!stdout.contains("hermetic-secret"), "{stdout}");
+    let report: serde_json::Value = serde_json::from_str(&stdout).expect("doctor json");
+    let launchd = &report["launchd"];
+    if cfg!(target_os = "macos") {
+        assert_eq!(launchd["status"], "attention", "{launchd}");
+        let agent = launchd["agents"]
+            .as_array()
+            .and_then(|agents| agents.iter().find(|agent| agent["label"] == label.as_str()))
+            .unwrap_or_else(|| panic!("agent reported: {launchd}"));
+        assert_eq!(agent["classification"], "reload_risk", "{agent}");
+        assert_eq!(agent["loaded"], false);
+        assert_eq!(agent["missing_paths"][0], missing.display().to_string());
+    } else {
+        assert_eq!(launchd["status"], "unsupported", "{launchd}");
+    }
+    // Report-only: the plist is untouched.
+    assert_eq!(std::fs::read_to_string(&plist_path).unwrap(), plist);
+}

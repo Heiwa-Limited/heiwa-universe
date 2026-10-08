@@ -8,8 +8,10 @@ use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
+pub mod launchd_health;
 mod runtime_binary;
 pub mod update_channel;
+pub use launchd_health::{check_launchd_health, LaunchdHealthReport};
 pub use runtime_binary::install_runtime_binary;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
