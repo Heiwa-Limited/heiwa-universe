@@ -738,10 +738,12 @@ pub fn interpret_listener(output: ProbeOutput) -> Result<Option<PortListener>, S
     if output.truncated {
         return Err("lsof output truncated".to_string());
     }
-    match (output.status, output.stdout.trim().is_empty()) {
-        (_, true) if output.status <= 1 => Ok(None),
-        (0, false) => Ok(parse_listener(&output.stdout)),
-        (code, _) => Err(format!("lsof exited {code}")),
+    match output.status {
+        1 if output.stdout.trim().is_empty() => Ok(None),
+        0 => parse_listener(&output.stdout)
+            .map(Some)
+            .ok_or_else(|| "lsof output contains no valid listener".to_string()),
+        code => Err(format!("lsof exited {code}")),
     }
 }
 
@@ -1443,6 +1445,11 @@ mod tests {
         assert!(interpret_listener(output(0, "p80861\ncollama\n", true)).is_err());
         assert!(interpret_listener(output(1, "", true)).is_err());
         assert!(interpret_listener(output(2, "", false)).is_err());
+        for status in [-1, -9, 0] {
+            assert!(interpret_listener(output(status, "", false)).is_err());
+        }
+        assert!(interpret_listener(output(0, "unrecognized output\n", false)).is_err());
+        assert!(interpret_listener(output(1, "p80861\ncollama\n", false)).is_err());
         assert_eq!(interpret_listener(output(1, "", false)), Ok(None));
         assert_eq!(
             interpret_listener(output(0, "p80861\ncollama\n", false)),
