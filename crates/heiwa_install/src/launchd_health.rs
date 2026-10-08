@@ -16,8 +16,10 @@ const LABEL_PREFIXES: [&str; 2] = ["com.heiwa.", "ltd.heiwa."];
 const MAX_AGENTS: usize = 32;
 const OLLAMA_DEFAULT_PORT: u16 = 11434;
 /// Plist files scanned for a Heiwa `Label`; more leaves the inventory incomplete.
+#[cfg(target_os = "macos")]
 const MAX_PLISTS: usize = 256;
 /// Directory entries examined while looking for plists.
+#[cfg(target_os = "macos")]
 const MAX_DIRECTORY_ENTRIES: usize = 2048;
 
 /// Interpreter options that decide whether the first operand is a script.
@@ -577,6 +579,7 @@ fn script_operand<'a>(options: &LauncherOptions, arguments: &[&'a str]) -> Optio
 /// `max_entries` entries are examined and `cap` candidates kept; the scan stops
 /// at the first plist past the cap, the entry budget, or the deadline, and
 /// each stop or unreadable entry is recorded rather than dropped.
+#[cfg(any(target_os = "macos", test))]
 fn collect_candidates(
     entries: impl Iterator<Item = std::io::Result<PathBuf>>,
     max_entries: usize,
