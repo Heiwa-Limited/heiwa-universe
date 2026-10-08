@@ -1084,9 +1084,6 @@ fn print_launchd_health(report: &heiwa_install::LaunchdHealthReport) {
             println!("  {:<38} - missing: {path}", "");
         }
     }
-    for name in &report.skipped {
-        println!("  skipped: {name} (label is not Heiwa-owned)");
-    }
     for error in &report.probe_errors {
         println!("  probe: {error}");
     }

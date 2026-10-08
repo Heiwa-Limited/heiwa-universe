@@ -15,20 +15,72 @@ use std::path::{Path, PathBuf};
 const LABEL_PREFIXES: [&str; 2] = ["com.heiwa.", "ltd.heiwa."];
 const MAX_AGENTS: usize = 32;
 const OLLAMA_DEFAULT_PORT: u16 = 11434;
-/// Interpreters whose first non-flag operand is the script they run.
-const SCRIPT_LAUNCHERS: [&str; 12] = [
-    "node",
-    "nodejs",
-    "bun",
-    "python",
-    "python3",
-    "ruby",
-    "perl",
-    "php",
-    "bash",
-    "sh",
-    "zsh",
-    "osascript",
+/// Plist files scanned for a Heiwa `Label`; more leaves the inventory incomplete.
+const MAX_PLISTS: usize = 256;
+
+/// Interpreter options that decide whether the first operand is a script.
+/// Inline/module options mean no script file; options outside the known
+/// self-contained set may consume the next operand, so inference stops there.
+struct LauncherOptions {
+    names: &'static [&'static str],
+    /// Short options that make the job inline or module code (attached or not).
+    inline_short: &'static str,
+    /// Short options that take no value and may be clustered.
+    flag_short: &'static str,
+    inline_long: &'static [&'static str],
+    flag_long: &'static [&'static str],
+}
+
+const LAUNCHERS: [LauncherOptions; 6] = [
+    LauncherOptions {
+        names: &["node", "nodejs", "bun"],
+        inline_short: "ep",
+        flag_short: "",
+        inline_long: &["--eval", "--print", "--input-type"],
+        flag_long: &[
+            "--enable-source-maps",
+            "--no-warnings",
+            "--trace-warnings",
+            "--expose-gc",
+            "--no-deprecation",
+            "--trace-uncaught",
+        ],
+    },
+    LauncherOptions {
+        names: &["python", "python3"],
+        inline_short: "cm",
+        flag_short: "bBdEiIOqsSuvx",
+        inline_long: &[],
+        flag_long: &[],
+    },
+    LauncherOptions {
+        names: &["bash", "sh", "zsh"],
+        inline_short: "c",
+        flag_short: "aefhlnuvx",
+        inline_long: &[],
+        flag_long: &["--login", "--noprofile", "--norc", "--posix"],
+    },
+    LauncherOptions {
+        names: &["ruby"],
+        inline_short: "e",
+        flag_short: "dvwW",
+        inline_long: &[],
+        flag_long: &[],
+    },
+    LauncherOptions {
+        names: &["perl"],
+        inline_short: "eE",
+        flag_short: "tTwW",
+        inline_long: &[],
+        flag_long: &[],
+    },
+    LauncherOptions {
+        names: &["osascript"],
+        inline_short: "e",
+        flag_short: "",
+        inline_long: &[],
+        flag_long: &[],
+    },
 ];
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -137,8 +189,9 @@ pub struct LaunchdHealthReport {
     pub platform: String,
     pub scope: String,
     pub agents: Vec<LaunchdAgentHealth>,
-    /// Plists in scope whose label is not Heiwa-owned.
-    pub skipped: Vec<String>,
+    /// Readable LaunchAgents plists whose `Label` is not Heiwa-owned. Only
+    /// the count is reported.
+    pub other_plists: usize,
     pub probe_errors: Vec<String>,
 }
 
@@ -150,7 +203,7 @@ impl LaunchdHealthReport {
             platform: std::env::consts::OS.to_string(),
             scope: "user LaunchAgents with com.heiwa.* or ltd.heiwa.* labels".to_string(),
             agents: Vec::new(),
-            skipped: Vec::new(),
+            other_plists: 0,
             probe_errors: Vec::new(),
         }
     }
@@ -163,11 +216,19 @@ impl LaunchdHealthReport {
 /// Each candidate plist path with its JSON form, or why it could not be read.
 pub type AgentPlists = Vec<(PathBuf, Result<Value, String>)>;
 
+/// Every `*.plist` in scope, parsed so ownership is decided by `Label`, plus
+/// anything that kept the inventory from being complete.
+#[derive(Debug, Clone, Default)]
+pub struct Inventory {
+    pub plists: AgentPlists,
+    pub incomplete: Vec<String>,
+}
+
 /// Read-only sources for the assessment. The system probe shells out to
 /// `plutil`, `launchctl`, and `lsof` under one time budget; tests substitute
 /// fixtures. An `Err` means the evidence is missing or incomplete.
 pub trait LaunchdProbe {
-    fn agent_plists(&self) -> Result<AgentPlists, String>;
+    fn agent_plists(&self) -> Result<Inventory, String>;
     /// `launchctl print` text for a loaded label; `Ok(None)` only when launchd
     /// reports the service does not exist.
     fn service(&self, label: &str) -> Result<Option<String>, String>;
@@ -197,8 +258,8 @@ pub fn check_launchd_health() -> LaunchdHealthReport {
 
 pub fn assess(probe: &dyn LaunchdProbe) -> LaunchdHealthReport {
     let mut report = LaunchdHealthReport::empty("ok");
-    let plists = match probe.agent_plists() {
-        Ok(plists) => plists,
+    let inventory = match probe.agent_plists() {
+        Ok(inventory) => inventory,
         Err(error) => {
             report.status = "unavailable".to_string();
             report.evidence_complete = false;
@@ -215,28 +276,53 @@ pub fn assess(probe: &dyn LaunchdProbe) -> LaunchdHealthReport {
             None
         }
     };
-    let mut listener_cache: Vec<(u16, Result<Option<PortListener>, String>)> = Vec::new();
-    let mut attention = false;
-
-    for (plist_path, parsed) in plists.into_iter().take(MAX_AGENTS) {
+    report.probe_errors.extend(inventory.incomplete);
+    let mut unreadable: Vec<(String, String)> = Vec::new();
+    let mut heiwa_plists = Vec::new();
+    for (plist_path, parsed) in inventory.plists {
         let name = plist_path
             .file_name()
             .map(|name| name.to_string_lossy().into_owned())
             .unwrap_or_default();
-        let plist = match parsed {
-            Ok(plist) => plist,
-            Err(error) => {
-                report.probe_errors.push(format!("{name}: {error}"));
-                continue;
+        match parsed {
+            Ok(plist) if plist["Label"].as_str().is_some_and(is_heiwa_label) => {
+                heiwa_plists.push((plist_path, plist))
             }
+            Ok(_) => report.other_plists += 1,
+            Err(error) => unreadable.push((error, name)),
+        }
+    }
+    // Ownership of an unreadable plist is unknown, so it may hide an agent.
+    unreadable.sort();
+    for (error, names) in unreadable
+        .chunk_by(|left, right| left.0 == right.0)
+        .map(|group| (&group[0].0, group.iter().map(|(_, name)| name.as_str())))
+    {
+        let names: Vec<&str> = names.collect();
+        let shown = names.iter().take(5).copied().collect::<Vec<_>>().join(", ");
+        let more = names.len().saturating_sub(5);
+        let more = if more > 0 {
+            format!(" and {more} more")
+        } else {
+            String::new()
         };
-        let Some(label) = plist["Label"]
-            .as_str()
-            .filter(|label| is_heiwa_label(label))
-        else {
-            report.skipped.push(name);
-            continue;
-        };
+        report
+            .probe_errors
+            .push(format!("ownership unknown, {error}: {shown}{more}"));
+    }
+    if heiwa_plists.len() > MAX_AGENTS {
+        report.probe_errors.push(format!(
+            "{} Heiwa agents beyond the {MAX_AGENTS}-agent cap were not assessed",
+            heiwa_plists.len() - MAX_AGENTS
+        ));
+        heiwa_plists.truncate(MAX_AGENTS);
+    }
+    let mut listener_cache: Vec<(u16, Result<Option<PortListener>, String>)> = Vec::new();
+    let mut attention = false;
+
+    for (plist_path, plist) in heiwa_plists {
+        let label = plist["Label"].as_str().unwrap_or_default().to_string();
+        let label = label.as_str();
 
         let arguments: Vec<&str> = plist["ProgramArguments"]
             .as_array()
@@ -437,15 +523,75 @@ fn required_inputs<'a>(
         launcher = rest.first().map(|arg| base(arg)).unwrap_or_default();
         rest = rest.get(1..).unwrap_or_default();
     }
-    if SCRIPT_LAUNCHERS.contains(&launcher.as_str()) {
-        if let Some(script) = rest.iter().find(|arg| !arg.starts_with('-')) {
-            if script.starts_with('/') && !rest.iter().any(|arg| *arg == "-c" || *arg == "-e") {
-                required.push(script);
-            }
-        }
+    if let Some(script) = LAUNCHERS
+        .iter()
+        .find(|options| options.names.contains(&launcher.as_str()))
+        .and_then(|options| script_operand(options, rest))
+    {
+        required.push(script);
     }
     required.dedup();
     required
+}
+
+/// The script an interpreter will run, when its options establish one. Inline
+/// or module code, `-` (stdin), a relative path, or any option outside the
+/// known self-contained set yields `None`: uncertainty is preserved.
+fn script_operand<'a>(options: &LauncherOptions, arguments: &[&'a str]) -> Option<&'a str> {
+    let mut arguments = arguments.iter();
+    while let Some(argument) = arguments.next() {
+        let operand = if *argument == "--" {
+            arguments.next().copied()?
+        } else if let Some(long) = argument.strip_prefix("--") {
+            let name = format!("--{}", long.split('=').next().unwrap_or_default());
+            if options.inline_long.contains(&name.as_str()) {
+                return None;
+            }
+            // `--name=value` carries its own value; a bare `--name` is safe
+            // only when known not to consume the next operand.
+            if long.contains('=') || options.flag_long.contains(&name.as_str()) {
+                continue;
+            }
+            return None;
+        } else if let Some(short) = argument.strip_prefix('-').filter(|short| !short.is_empty()) {
+            for flag in short.chars() {
+                if options.inline_short.contains(flag) || !options.flag_short.contains(flag) {
+                    return None;
+                }
+            }
+            continue;
+        } else {
+            argument
+        };
+        return operand.starts_with('/').then_some(operand);
+    }
+    None
+}
+
+/// Sorted `*.plist` candidates, capped, with entry errors and the cap
+/// recorded rather than dropped.
+fn collect_candidates(
+    entries: impl Iterator<Item = std::io::Result<PathBuf>>,
+    cap: usize,
+) -> (Vec<PathBuf>, Vec<String>) {
+    let mut incomplete = Vec::new();
+    let mut failed = 0usize;
+    let mut paths: Vec<PathBuf> = entries
+        .filter_map(|entry| entry.map_err(|_| failed += 1).ok())
+        .filter(|path| path.extension().is_some_and(|ext| ext == "plist"))
+        .collect();
+    if failed > 0 {
+        incomplete.push(format!("{failed} LaunchAgents entries could not be read"));
+    }
+    paths.sort();
+    if paths.len() > cap {
+        incomplete.push(format!(
+            "{} plists beyond the {cap}-file scan cap were not inspected",
+            paths.len() - cap
+        ));
+        paths.truncate(cap);
+    }
+    (paths, incomplete)
 }
 
 /// Port from `OLLAMA_HOST` (`host:port`, `:port`, or a URL), else the default.
@@ -564,8 +710,8 @@ pub fn interpret_overrides(output: ProbeOutput) -> Result<String, String> {
 #[cfg(target_os = "macos")]
 mod system {
     use super::{
-        interpret_overrides, interpret_service, is_heiwa_label, parse_listener, AgentPlists,
-        LaunchdProbe, PortListener, ProbeOutput, MAX_AGENTS,
+        collect_candidates, interpret_overrides, interpret_service, parse_listener, Inventory,
+        LaunchdProbe, PortListener, ProbeOutput, MAX_PLISTS,
     };
     use std::io::Read;
     use std::path::{Path, PathBuf};
@@ -604,25 +750,19 @@ mod system {
     }
 
     impl LaunchdProbe for SystemProbe {
-        fn agent_plists(&self) -> Result<AgentPlists, String> {
+        fn agent_plists(&self) -> Result<Inventory, String> {
             let entries = match std::fs::read_dir(&self.agents_dir) {
                 Ok(entries) => entries,
-                Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(Vec::new()),
+                Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+                    return Ok(Inventory::default())
+                }
                 Err(_) => return Err("LaunchAgents directory is unreadable".to_string()),
             };
-            let mut paths: Vec<PathBuf> = entries
-                .filter_map(|entry| entry.ok().map(|entry| entry.path()))
-                .filter(|path| {
-                    path.extension().is_some_and(|ext| ext == "plist")
-                        && path
-                            .file_stem()
-                            .and_then(|stem| stem.to_str())
-                            .is_some_and(is_heiwa_label)
-                })
-                .collect();
-            paths.sort();
-            paths.truncate(MAX_AGENTS);
-            Ok(paths
+            let (paths, incomplete) = collect_candidates(
+                entries.map(|entry| entry.map(|entry| entry.path())),
+                MAX_PLISTS,
+            );
+            let plists = paths
                 .into_iter()
                 .map(|path| {
                     let parsed = path
@@ -645,7 +785,8 @@ mod system {
                         });
                     (path, parsed)
                 })
-                .collect())
+                .collect();
+            Ok(Inventory { plists, incomplete })
         }
 
         fn service(&self, label: &str) -> Result<Option<String>, String> {
@@ -799,17 +940,21 @@ mod tests {
         disabled: String,
         listeners: HashMap<u16, PortListener>,
         existing: HashSet<PathBuf>,
+        inventory_incomplete: Vec<String>,
         fail_listing: bool,
         fail_disabled: bool,
         fail_listener: bool,
     }
 
     impl LaunchdProbe for Fixture {
-        fn agent_plists(&self) -> Result<AgentPlists, String> {
+        fn agent_plists(&self) -> Result<Inventory, String> {
             if self.fail_listing {
                 return Err("LaunchAgents directory is unreadable".to_string());
             }
-            Ok(self.plists.clone())
+            Ok(Inventory {
+                plists: self.plists.clone(),
+                incomplete: self.inventory_incomplete.clone(),
+            })
         }
         fn service(&self, label: &str) -> Result<Option<String>, String> {
             if self.service_errors.contains(label) {
@@ -976,6 +1121,133 @@ mod tests {
         assert!(app.missing_paths.is_empty(), "{:?}", app.missing_paths);
         assert_eq!(app.classification, "running");
         assert_eq!(report.status, "ok");
+    }
+
+    #[test]
+    fn inline_node_job_with_absolute_output_operand_is_not_a_login_failure() {
+        // Reproduced by Codex: node exits 0 and never creates the operand.
+        let fixture = Fixture::default()
+            .agent(
+                "com.heiwa.inline",
+                json!({
+                    "Label": "com.heiwa.inline",
+                    "ProgramArguments": ["/opt/homebrew/bin/node",
+                        "--eval=console.log(\"valid inline job\")", "/home/u/missing/output.txt"],
+                    "RunAtLoad": true
+                }),
+            )
+            .exists("/opt/homebrew/bin/node");
+        let report = assess(&fixture);
+        let inline = agent(&report, "com.heiwa.inline");
+        assert!(
+            inline.missing_paths.is_empty(),
+            "{:?}",
+            inline.missing_paths
+        );
+        assert_ne!(inline.classification, "reload_risk");
+        assert_eq!(report.status, "ok");
+    }
+
+    #[test]
+    fn interpreter_inline_module_and_unknown_options_never_infer_a_script() {
+        let none: Vec<&str> = Vec::new();
+        for args in [
+            vec!["/n/node", "--eval=1", "/out"],
+            vec!["/n/node", "--print=1", "/out"],
+            vec!["/n/node", "-e", "1", "/out"],
+            vec!["/n/node", "-p1", "/out"],
+            vec!["/n/node", "-r", "/hook.js", "/app.js"],
+            vec!["/p/python3", "-m", "pkg", "/out"],
+            vec!["/p/python3", "-cprint(1)", "/out"],
+            vec!["/p/python3", "-W", "ignore", "/app.py"],
+            vec!["/b/bash", "-lc", "/run", "/out"],
+            vec!["/b/perl", "-e1", "/out"],
+            vec!["/b/osascript", "-l", "JavaScript", "/out"],
+        ] {
+            assert_eq!(
+                required_inputs(Some(args[0]), &args, None),
+                none,
+                "{args:?}"
+            );
+        }
+        for (args, script) in [
+            (
+                vec!["/n/node", "--enable-source-maps", "/app.js", "/out"],
+                "/app.js",
+            ),
+            (
+                vec!["/n/node", "--max-old-space-size=512", "/app.js"],
+                "/app.js",
+            ),
+            (vec!["/p/python3", "-uB", "/app.py", "/out"], "/app.py"),
+            (vec!["/b/bash", "-e", "/run.sh"], "/run.sh"),
+            (vec!["/n/node", "--", "/app.js"], "/app.js"),
+        ] {
+            assert_eq!(
+                required_inputs(Some(args[0]), &args, None),
+                vec![script],
+                "{args:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn heiwa_label_in_a_custom_filename_is_assessed_and_others_are_counted() {
+        let mut fixture = Fixture::default().exists("/x");
+        fixture.plists.push((
+            PathBuf::from("/home/u/Library/LaunchAgents/custom-agent.plist"),
+            Ok(json!({"Label": "com.heiwa.foo", "Program": "/x"})),
+        ));
+        fixture.plists.push((
+            PathBuf::from("/home/u/Library/LaunchAgents/homebrew.mxcl.ollama.plist"),
+            Ok(json!({"Label": "homebrew.mxcl.ollama", "Program": "/opt/homebrew/bin/ollama"})),
+        ));
+        let report = assess(&fixture);
+        assert_eq!(agent(&report, "com.heiwa.foo").classification, "not_loaded");
+        assert_eq!(report.other_plists, 1);
+        assert_eq!(report.status, "ok");
+    }
+
+    #[test]
+    fn incomplete_inventory_and_agent_cap_degrade_the_report() {
+        let report = assess(&Fixture {
+            inventory_incomplete: vec!["1 LaunchAgents entry unreadable".to_string()],
+            ..Fixture::default()
+        });
+        assert_eq!(report.status, "degraded");
+        assert!(!report.evidence_complete);
+
+        let mut capped = Fixture::default().exists("/x");
+        for index in 0..MAX_AGENTS + 2 {
+            capped.plists.push((
+                PathBuf::from(format!("/home/u/Library/LaunchAgents/a{index}.plist")),
+                Ok(json!({"Label": format!("com.heiwa.a{index}"), "Program": "/x"})),
+            ));
+        }
+        let report = assess(&capped);
+        assert_eq!(report.agents.len(), MAX_AGENTS);
+        assert_eq!(report.status, "degraded");
+        assert!(report
+            .probe_errors
+            .iter()
+            .any(|error| error.contains("2 Heiwa agents")));
+    }
+
+    #[test]
+    fn candidate_collection_counts_entry_errors_and_scan_cap() {
+        let entries = vec![
+            Ok(PathBuf::from("/la/b.plist")),
+            Err(std::io::Error::other("bad entry")),
+            Ok(PathBuf::from("/la/notes.txt")),
+            Ok(PathBuf::from("/la/a.plist")),
+            Ok(PathBuf::from("/la/c.plist")),
+        ];
+        let (paths, incomplete) = collect_candidates(entries.into_iter(), 2);
+        assert_eq!(
+            paths,
+            vec![PathBuf::from("/la/a.plist"), PathBuf::from("/la/b.plist")]
+        );
+        assert_eq!(incomplete.len(), 2, "{incomplete:?}");
     }
 
     #[test]
@@ -1224,7 +1496,7 @@ mod tests {
     }
 
     #[test]
-    fn unreadable_plists_degrade_and_foreign_labels_are_skipped() {
+    fn unreadable_plists_degrade_and_foreign_labels_are_only_counted() {
         let mut fixture = Fixture::default().agent(
             "com.heiwa.mislabeled",
             json!({"Label": "homebrew.mxcl.ollama", "Program": "/opt/homebrew/bin/ollama"}),
@@ -1235,11 +1507,10 @@ mod tests {
         ));
         let report = assess(&fixture);
         assert!(report.agents.is_empty());
-        assert_eq!(
-            report.skipped,
-            vec!["com.heiwa.mislabeled.plist".to_string()]
-        );
+        assert_eq!(report.other_plists, 1);
         assert_eq!(report.probe_errors.len(), 1);
+        assert!(report.probe_errors[0].contains("ownership unknown"));
+        assert!(!serde_json::to_string(&report).unwrap().contains("homebrew"));
         assert_eq!(report.status, "degraded");
     }
 

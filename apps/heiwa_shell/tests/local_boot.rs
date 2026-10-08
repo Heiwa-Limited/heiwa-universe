@@ -148,7 +148,15 @@ fn doctor_reports_heiwa_launch_agents_without_changing_them() {
     }
     // A unique label is never loaded or disabled in the real user domain.
     let label = format!("com.heiwa.doctor-test-{}", std::process::id());
-    let plist_path = agents.join(format!("{label}.plist"));
+    // Ownership comes from Label, not the filename.
+    let plist_path = agents.join("custom-agent.plist");
+    std::fs::write(
+        agents.join("org.example.other.plist"),
+        r#"<?xml version="1.0" encoding="UTF-8"?>
+<plist version="1.0"><dict><key>Label</key><string>org.example.other</string>
+<key>Program</key><string>/usr/bin/true</string></dict></plist>"#,
+    )
+    .unwrap();
     let missing = root.path().join("missing/daemon.js");
     let plist = format!(
         r#"<?xml version="1.0" encoding="UTF-8"?>
@@ -191,6 +199,8 @@ fn doctor_reports_heiwa_launch_agents_without_changing_them() {
         assert_eq!(agent["classification"], "reload_risk", "{agent}");
         assert_eq!(agent["loaded"], false);
         assert_eq!(agent["missing_paths"][0], missing.display().to_string());
+        assert_eq!(launchd["other_plists"], 1, "{launchd}");
+        assert!(!stdout.contains("org.example.other"), "{stdout}");
     } else {
         assert_eq!(launchd["status"], "unsupported", "{launchd}");
     }
