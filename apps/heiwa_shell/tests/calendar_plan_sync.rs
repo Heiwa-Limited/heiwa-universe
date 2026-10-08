@@ -51,25 +51,23 @@ impl Fixture {
         let helper = root.path().join("fixture-apple-resources");
         fs::write(
             &helper,
-            r#"#!/bin/sh
-set -eu
-request="$1"
-printf '%s\n' "$request" >> "$HEIWA_PLAN_FIXTURE_LOG"
-case "$request" in
-  *'"operation":"list"'*)
-    printf '%s' '{"schema_version":1,"calendars":[{"id":"cal-life","name":"Life","source":"iCloud","writable":true}]}'
-    ;;
-  *'"operation":"plan_scan"'*)
-    cat "$HEIWA_PLAN_FIXTURE_SCAN"
-    ;;
-  *'"operation":"plan_apply"'*)
-    cat "$HEIWA_PLAN_FIXTURE_APPLY"
-    ;;
-  *)
-    printf '%s' '{"schema_version":1,"error":"invalid_request"}'
-    exit 1
-    ;;
-esac
+            r#"#!/usr/bin/env python3
+import json, os, sys
+assert len(sys.argv) == 1, "helper request must not be passed in argv"
+raw = sys.stdin.buffer.read()
+request = json.loads(raw)
+with open(os.environ['HEIWA_PLAN_FIXTURE_LOG'], 'ab') as log:
+    log.write(raw + b'\n')
+operation = request.get('operation')
+if operation == 'list':
+    sys.stdout.write('{"schema_version":1,"calendars":[{"id":"cal-life","name":"Life","source":"iCloud","writable":true}]}')
+elif operation == 'plan_scan':
+    sys.stdout.buffer.write(open(os.environ['HEIWA_PLAN_FIXTURE_SCAN'], 'rb').read())
+elif operation == 'plan_apply':
+    sys.stdout.buffer.write(open(os.environ['HEIWA_PLAN_FIXTURE_APPLY'], 'rb').read())
+else:
+    sys.stdout.write('{"schema_version":1,"error":"invalid_request"}')
+    sys.exit(1)
 "#,
         )
         .expect("write helper fixture");
@@ -94,6 +92,7 @@ esac
             .env("HOME", &self.home)
             .env("HEIWA_EVIDENCE_DIR", &self.evidence)
             .env("HEIWA_APPLE_RESOURCES_HELPER", &self.helper)
+            .env("HEIWA_APPLE_CALENDAR_OSASCRIPT", "/bin/false")
             .env("HEIWA_PLAN_FIXTURE_LOG", &self.log)
             .env("HEIWA_PLAN_FIXTURE_SCAN", &self.scan)
             .env("HEIWA_PLAN_FIXTURE_APPLY", &self.apply)

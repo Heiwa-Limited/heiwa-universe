@@ -4,10 +4,12 @@ import EventKit
 // Protocol data only. Rust owns enrollment, selection, persistence, and effects.
 @main
 struct AppleResources {
+    static let maximumRequestBytes = 4 * 1024 * 1024
+
     static func main() async {
         do {
-            let input = CommandLine.arguments.dropFirst().first ?? "{}"
-            guard let request = try JSONSerialization.jsonObject(with: Data(input.utf8)) as? [String: Any],
+            let data = try readRequest()
+            guard let request = try JSONSerialization.jsonObject(with: data) as? [String: Any],
                   let operation = request["operation"] as? String,
                   ["list", "scan", "plan_scan", "plan_apply"].contains(operation) else { throw ReadError.invalidRequest }
             let store = EKEventStore()
@@ -66,6 +68,35 @@ struct AppleResources {
             output(["schema_version": 1, "error": (error as? ReadError)?.rawValue ?? "calendar_read_failed"])
             exit(1)
         }
+    }
+
+    static func readRequest(
+        arguments: [String] = Array(CommandLine.arguments.dropFirst())
+    ) throws -> Data {
+        var data = Data()
+        while data.count <= maximumRequestBytes {
+            let remaining = maximumRequestBytes + 1 - data.count
+            let chunk = FileHandle.standardInput.readData(ofLength: min(64 * 1024, remaining))
+            if chunk.isEmpty { break }
+            data.append(chunk)
+        }
+        guard data.count <= maximumRequestBytes else { throw ReadError.invalidRequest }
+        if !data.isEmpty {
+            // The new runtime always uses stdin. Reject mixed/extra arguments;
+            // only the old released CLI used one JSON argument during upgrade.
+            guard arguments.isEmpty else { throw ReadError.invalidRequest }
+            return data
+        }
+        return try legacyRequest(arguments)
+    }
+
+    static func legacyRequest(_ arguments: [String]) throws -> Data {
+        guard arguments.count == 1 else { throw ReadError.invalidRequest }
+        let legacyData = Data(arguments[0].utf8)
+        guard !legacyData.isEmpty, legacyData.count <= maximumRequestBytes else {
+            throw ReadError.invalidRequest
+        }
+        return legacyData
     }
 
     // MARK: plan sync

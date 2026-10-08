@@ -20,8 +20,9 @@ fn fixture_osascript(root: &Path) -> PathBuf {
     let path = root.join("fixture-osascript");
     fs::write(
         &path,
-        r#"#!/bin/sh
+r#"#!/bin/sh
 set -eu
+test "$#" -eq 5 || { echo "unexpected osascript argument count: $#" >&2; exit 90; }
 mode="$5"
 printf '%s\n' "$mode" >> "$HEIWA_APPLE_CALENDAR_FIXTURE_LOG"
 case "$mode" in
@@ -29,6 +30,7 @@ case "$mode" in
     printf '%s\n' '[{"name":"Calendar","writable":true},{"name":"Birthdays","writable":false}]'
     ;;
   create)
+    cat > "$HEIWA_APPLE_CALENDAR_FIXTURE_PAYLOAD"
     if [ -e "$HEIWA_APPLE_CALENDAR_FIXTURE_EVENT" ]; then
       created=false
     else
@@ -179,6 +181,7 @@ struct Fixture {
     bridge: PathBuf,
     log: PathBuf,
     event_state: PathBuf,
+    payload: PathBuf,
 }
 
 impl Fixture {
@@ -188,6 +191,7 @@ impl Fixture {
         let evidence = root.path().join("evidence");
         let log = root.path().join("bridge.log");
         let event_state = root.path().join("event-created");
+        let payload = root.path().join("bridge-payload.json");
         fs::create_dir_all(&home).expect("create temp home");
         let bridge = fixture_osascript(root.path());
         Self {
@@ -197,6 +201,7 @@ impl Fixture {
             bridge,
             log,
             event_state,
+            payload,
         }
     }
 
@@ -208,6 +213,7 @@ impl Fixture {
             .env("HEIWA_APPLE_CALENDAR_OSASCRIPT", &self.bridge)
             .env("HEIWA_APPLE_CALENDAR_FIXTURE_LOG", &self.log)
             .env("HEIWA_APPLE_CALENDAR_FIXTURE_EVENT", &self.event_state)
+            .env("HEIWA_APPLE_CALENDAR_FIXTURE_PAYLOAD", &self.payload)
             .env_remove("HEIWA_HOME")
             .env_remove("HEIWA_STATE_DIR");
         command
@@ -625,6 +631,11 @@ fn approval_executes_apple_write_and_replays_connector_receipt() {
         "fixture-event-123"
     );
     assert!(fixture.event_state.exists());
+    let helper_request: serde_json::Value =
+        serde_json::from_slice(&fs::read(&fixture.payload).expect("stdin payload captured"))
+            .expect("bridge request JSON");
+    assert_eq!(helper_request["title"], "call mom");
+    assert_eq!(helper_request["calendar"], "Calendar");
 
     let hold_path = fixture
         .home
@@ -755,7 +766,8 @@ fn selected_calendar_read_reconciles_real_service_state_and_respects_disconnect(
     let calls = fixture._root.path().join("eventkit-calls");
     fs::write(&helper, r#"#!/usr/bin/env python3
 import datetime, json, os, sys
-request = json.loads(sys.argv[1])
+assert len(sys.argv) == 1
+request = json.loads(sys.stdin.read())
 with open(os.environ['FIXTURE_CALLS'], 'a') as log: log.write(request['operation'] + '\n')
 if request['operation'] == 'list':
     result = {'schema_version':1, 'calendars':[{'id':'work','name':'Work','writable':True},{'id':'private','name':'Private','writable':True}]}
@@ -848,7 +860,8 @@ const PAGING_EVENTKIT_FIXTURE: &str = r#"#!/usr/bin/env python3
 import json, os, sys
 from datetime import datetime
 PAGE = 2
-request = json.loads(sys.argv[1])
+assert len(sys.argv) == 1
+request = json.loads(sys.stdin.read())
 with open(os.environ['FIXTURE_CALLS'], 'a') as log:
     log.write(request['operation'] + '\n')
 if request['operation'] == 'list':

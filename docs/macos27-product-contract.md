@@ -165,6 +165,30 @@ APIs; [Apple's transition notice](https://developer.apple.com/news/?id=dz9wvq0r)
 describes the change. Native materials, keyboard navigation, reduced motion,
 accessibility, window restoration, and system permissions are acceptance work.
 
+Apple direction checked on 2026-10-08: prioritize event/message-to-reminder and
+draft workflows with persisted source-app results. The Calendar helper now uses
+bounded stdin requests instead of exposing event fields in process arguments;
+the runtime and helper must ship together. Evaluate a persistent Swift bridge
+when live resource notifications need it, proving permission attribution,
+reconnection, cancellation, shutdown and freshness before migrating connectors.
+Keep the current Tauri host unless a comparative native prototype demonstrates
+a required capability or measurable improvement it cannot deliver.
+
+Evaluate on-device Foundation Models availability and accepted task quality
+before admitting an Apple execution channel. Rust retains route and effect
+authority, and unavailable devices retain provider-independent workspace entry.
+Apple's [PCC eligibility requirements](https://developer.apple.com/private-cloud-compute/)
+include Small Business Program enrollment, a managed entitlement and App Store
+distribution; TestFlight and ad hoc testing are supported. GitHub/Developer ID
+distribution must not promise PCC availability. Apple recommends starting with
+the [on-device model](https://developer.apple.com/documentation/FoundationModels/adding-server-side-intelligence-with-private-cloud-compute)
+before evaluating server-side execution.
+
+Siri/Spotlight entities and named Shortcuts are subsequent integration slices.
+They must target stable Work/session/request identities and preserve the existing
+Rust authorization and approval boundary. External invocation does not grant
+access to unrelated content or authorize pending effects.
+
 ## Delivery and acceptance
 
 | Work | Current change / gap | Proof required |

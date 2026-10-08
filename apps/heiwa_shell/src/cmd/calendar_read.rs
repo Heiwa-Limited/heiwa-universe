@@ -227,28 +227,42 @@ pub(crate) fn helper_path() -> Option<PathBuf> {
         .filter(|path| path.is_file())
 }
 
-fn call(request: &Value) -> Result<Value> {
-    let helper = helper_path().ok_or_else(|| {
-        anyhow!(
-            "The Apple resource reader is missing. Install the complete Heiwa app and reopen it."
-        )
-    })?;
+pub(crate) fn helper_request(
+    request: &Value,
+    timeout: std::time::Duration,
+    max_output_bytes: usize,
+    missing_message: &'static str,
+    response_context: &'static str,
+) -> Result<Value> {
+    let helper = helper_path().ok_or_else(|| anyhow!(missing_message))?;
     let mut command = std::process::Command::new(helper);
     // launchd labels the always-on runtime with its XPC service identity. That
     // identity is not valid for the standalone EventKit reader and causes
     // TCC to reject an otherwise authorized Calendar read. Keep the service
     // identity on Heiwa itself, but do not pass it to the native helper.
     command.env_remove("XPC_SERVICE_NAME");
-    command.arg(request.to_string());
-    let bytes = heiwa_core::subprocess::bounded_output(
+    let request = serde_json::to_vec(request).context("serialize Apple resource request")?;
+    let bytes = heiwa_core::subprocess::bounded_output_with_input(
         &mut command,
-        std::time::Duration::from_secs(45),
-        4 * 1024 * 1024,
+        &request,
+        timeout,
+        max_output_bytes,
     )
     .map_err(|error| {
         anyhow!("{error} Check Heiwa access in System Settings > Privacy & Security > Calendars.")
     })?;
-    let value: Value = serde_json::from_slice(&bytes).context("read Apple resource response")?;
+    let value: Value = serde_json::from_slice(&bytes).context(response_context)?;
+    Ok(value)
+}
+
+fn call(request: &Value) -> Result<Value> {
+    let value = helper_request(
+        request,
+        std::time::Duration::from_secs(45),
+        4 * 1024 * 1024,
+        "The Apple resource reader is missing. Install the complete Heiwa app and reopen it.",
+        "read Apple resource response",
+    )?;
     if value["schema_version"] != 1 || value.get("error").is_some() {
         bail!("The Apple resource reader returned an unsupported or failed response");
     }

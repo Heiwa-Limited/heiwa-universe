@@ -7,6 +7,7 @@ if [[ ! "$desktop_target" =~ ^[a-zA-Z0-9_-]+$ ]]; then
   echo "Unable to resolve the native Rust target" >&2
   exit 1
 fi
+"${HEIWA_PYTHON:-python3}" -m unittest discover -s scripts/tests -p 'test_apple_helper_transport.py' -v
 cargo test -p heiwa-desktop --locked --target "$desktop_target"
 cargo clippy -p heiwa-desktop --locked --all-targets --target "$desktop_target" -- -D warnings
 cargo build --release -p heiwa-desktop --locked --target "$desktop_target"
