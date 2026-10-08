@@ -829,32 +829,44 @@ mod system {
         }
     }
 
-    /// Bounded read-only command. Each call gets the smaller of the per-call
-    /// limit and what remains of the shared deadline; stdout beyond `cap` is
-    /// dropped and flagged; stderr is discarded.
+    /// Bounded read-only command in its own process group.
+    ///
+    /// Guarantee: `run` returns by the smaller of `PER_CALL` and the shared
+    /// deadline (plus one poll interval and SIGKILL/reap latency). Success
+    /// needs both the direct child's exit and EOF on stdout; a descendant
+    /// that keeps the inherited pipe open cannot extend the wait. On every
+    /// return path after spawn the probe's process group receives SIGKILL,
+    /// so descendants that stayed in the group end too. The reader thread is
+    /// detached and finishes once the pipe's last writer is gone. Stdout past
+    /// `cap` is dropped and flagged; stderr is discarded.
     pub(crate) fn run(
         program: &str,
         args: &[&str],
         deadline: Instant,
         cap: usize,
     ) -> Result<ProbeOutput, String> {
+        use std::os::unix::process::CommandExt;
+        use std::sync::mpsc::{sync_channel, TryRecvError};
+
         let remaining = deadline.saturating_duration_since(Instant::now());
         if remaining.is_zero() {
             return Err("probe time budget exhausted".to_string());
         }
-        let timeout = remaining.min(PER_CALL);
+        let limit = Instant::now() + remaining.min(PER_CALL);
         let mut child = Command::new(program)
             .args(args)
             .stdin(Stdio::null())
             .stdout(Stdio::piped())
             .stderr(Stdio::null())
+            .process_group(0)
             .spawn()
             .map_err(|_| format!("{program} could not start"))?;
-        let mut stdout = child
-            .stdout
-            .take()
-            .ok_or_else(|| format!("{program} output unavailable"))?;
-        let reader = std::thread::spawn(move || {
+        let Some(mut stdout) = child.stdout.take() else {
+            release_group(&mut child);
+            return Err(format!("{program} output unavailable"));
+        };
+        let (sender, receiver) = sync_channel(1);
+        std::thread::spawn(move || {
             let mut buffer = Vec::new();
             let mut truncated = false;
             let mut chunk = [0u8; 8192];
@@ -868,29 +880,62 @@ mod system {
                     }
                 }
             }
-            (buffer, truncated)
+            let _ = sender.send((buffer, truncated));
         });
-        let started = Instant::now();
-        let status = loop {
-            match child.try_wait() {
-                Ok(Some(status)) => break status,
-                Ok(None) if started.elapsed() < timeout => {
-                    std::thread::sleep(Duration::from_millis(10))
-                }
-                _ => {
-                    let _ = child.kill();
-                    let _ = child.wait();
-                    let _ = reader.join();
-                    return Err(format!("{program} timed out"));
+
+        let mut status = None;
+        let mut output = None;
+        loop {
+            if output.is_none() {
+                match receiver.try_recv() {
+                    Ok(read) => output = Some(read),
+                    Err(TryRecvError::Disconnected) => {
+                        release_group(&mut child);
+                        return Err(format!("{program} output unavailable"));
+                    }
+                    Err(TryRecvError::Empty) => {}
                 }
             }
-        };
-        let (output, truncated) = reader.join().unwrap_or_default();
-        Ok(ProbeOutput {
-            status: status.code().unwrap_or(-1),
-            stdout: String::from_utf8_lossy(&output).into_owned(),
-            truncated,
-        })
+            if status.is_none() {
+                match child.try_wait() {
+                    Ok(next) => status = next,
+                    Err(_) => {
+                        release_group(&mut child);
+                        return Err(format!("{program} could not be observed"));
+                    }
+                }
+            }
+            if let (Some(status), Some((stdout, truncated))) = (status, &output) {
+                let output = ProbeOutput {
+                    status: status.code().unwrap_or(-1),
+                    stdout: String::from_utf8_lossy(stdout).into_owned(),
+                    truncated: *truncated,
+                };
+                release_group(&mut child);
+                return Ok(output);
+            }
+            if Instant::now() >= limit {
+                release_group(&mut child);
+                return Err(if status.is_some() {
+                    format!("{program} timed out: output stayed open after exit")
+                } else {
+                    format!("{program} timed out")
+                });
+            }
+            std::thread::sleep(Duration::from_millis(5));
+        }
+    }
+
+    /// SIGKILL the probe's own process group (pgid = the child's pid, set at
+    /// spawn), then reap the child. Processes that left the group via
+    /// setsid/setpgid are not reached.
+    fn release_group(child: &mut std::process::Child) {
+        // SAFETY: killpg only signals; the pgid is the group this probe created.
+        unsafe {
+            libc::killpg(child.id() as libc::pid_t, libc::SIGKILL);
+        }
+        let _ = child.kill();
+        let _ = child.wait();
     }
 
     #[cfg(test)]
@@ -912,6 +957,91 @@ mod system {
             let error = run("/bin/sleep", &["5"], deadline, MAX_OUTPUT).unwrap_err();
             assert!(error.contains("timed out"), "{error}");
             assert!(started.elapsed() < Duration::from_secs(2));
+        }
+
+        /// Waits until the recorded descendant pid is gone (killed, then
+        /// reaped by launchd once orphaned).
+        fn assert_descendant_gone(pid_file: &Path) {
+            let pid: i32 = std::fs::read_to_string(pid_file)
+                .expect("descendant pid recorded")
+                .trim()
+                .parse()
+                .expect("numeric pid");
+            let started = Instant::now();
+            while started.elapsed() < Duration::from_secs(2) {
+                if unsafe { libc::kill(pid, 0) } != 0 {
+                    return;
+                }
+                std::thread::sleep(Duration::from_millis(20));
+            }
+            unsafe { libc::kill(pid, libc::SIGKILL) };
+            panic!("descendant {pid} outlived the probe");
+        }
+
+        fn pid_script(dir: &Path, script: &str) -> (PathBuf, String) {
+            let pid_file = dir.join("descendant.pid");
+            (
+                pid_file.clone(),
+                script.replace("PIDFILE", &pid_file.display().to_string()),
+            )
+        }
+
+        #[test]
+        fn exited_parent_with_inherited_stdout_obeys_the_deadline() {
+            let dir = tempfile::tempdir().unwrap();
+            let (pid_file, script) = pid_script(dir.path(), "sleep 5 & echo $! > PIDFILE");
+            let started = Instant::now();
+            let deadline = Instant::now() + Duration::from_millis(300);
+            let result = run("/bin/sh", &["-c", &script], deadline, MAX_OUTPUT);
+            assert!(
+                started.elapsed() < Duration::from_secs(1),
+                "{:?}",
+                started.elapsed()
+            );
+            assert!(result.is_err(), "{result:?}");
+            assert_descendant_gone(&pid_file);
+        }
+
+        #[test]
+        fn timed_out_parent_with_inherited_pipe_releases_its_group() {
+            let dir = tempfile::tempdir().unwrap();
+            let (pid_file, script) = pid_script(dir.path(), "sleep 5 & echo $! > PIDFILE; sleep 5");
+            let started = Instant::now();
+            let deadline = Instant::now() + Duration::from_millis(300);
+            let error = run("/bin/sh", &["-c", &script], deadline, MAX_OUTPUT).unwrap_err();
+            assert!(error.contains("timed out"), "{error}");
+            assert!(
+                started.elapsed() < Duration::from_secs(1),
+                "{:?}",
+                started.elapsed()
+            );
+            assert_descendant_gone(&pid_file);
+        }
+
+        #[test]
+        fn completed_probe_leaves_no_descendants() {
+            let dir = tempfile::tempdir().unwrap();
+            let (pid_file, script) = pid_script(
+                dir.path(),
+                "sleep 5 >/dev/null & echo $! > PIDFILE; echo ok",
+            );
+            let deadline = Instant::now() + Duration::from_secs(3);
+            let output = run("/bin/sh", &["-c", &script], deadline, MAX_OUTPUT).unwrap();
+            assert_eq!((output.status, output.stdout.as_str()), (0, "ok\n"));
+            assert_descendant_gone(&pid_file);
+        }
+
+        #[test]
+        fn output_closed_before_exit_is_kept() {
+            let deadline = Instant::now() + Duration::from_secs(3);
+            let output = run(
+                "/bin/sh",
+                &["-c", "echo ok; exec >&-; sleep 0.2"],
+                deadline,
+                MAX_OUTPUT,
+            )
+            .unwrap();
+            assert_eq!((output.status, output.stdout.as_str()), (0, "ok\n"));
         }
 
         #[test]
