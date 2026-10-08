@@ -28,7 +28,7 @@ export type OperatorState = {
   error: Accessor<OperatorClientError | null>;
   /** True when a turn can be submitted right now. */
   ready: Accessor<boolean>;
-  start: (threadId: string) => Promise<void>;
+  start: (threadId: string, workId?: string) => Promise<void>;
   reconnect: () => Promise<void>;
   submit: (prompt: string) => Promise<void>;
   dispose: () => void;
@@ -81,7 +81,7 @@ export function createOperatorState(options: OperatorStateOptions = {}): Operato
     status,
     error,
     ready: () => status() === "ready",
-    start: (threadId) => client.start(threadId),
+    start: (threadId, workId) => client.start(threadId, workId),
     reconnect: () => client.reconnect(),
     submit: async (prompt) => {
       await client.submitTurn(prompt);

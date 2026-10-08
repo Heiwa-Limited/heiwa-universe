@@ -4,31 +4,38 @@
 //! this command adds no second writer; it resolves the runtime root once and
 //! hands it down.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::path::Path;
 
 use anyhow::{anyhow, Result};
 use serde_json::{json, Value};
 
-use heiwa_evidence::{CursorEvent, OperatorJournal};
+use heiwa_evidence::{CursorError, CursorEvent, OperatorEvent, OperatorJournal};
 use heiwa_session::operator::OperatorSessionService;
 use heiwa_work::{
     build_work_session, fold, work_created_event, Work, WorkId, WorkProjection,
     WorkSessionBuildOptions, WorkSessionSnapshotV1,
 };
 
+use crate::cmd::args::{has_flag, optional_value, positionals};
+use crate::output::{self, CliError, STREAM_SCHEMA};
+
 pub fn run(args: &[String]) -> Result<()> {
     match args.first().map(String::as_str) {
         Some("list") | Some("status") | None => list(args),
         Some("create") => create_command(&args[1..]),
         Some("show") => show_command(&args[1..]),
+        Some("watch") => watch_command(&args[1..]),
         Some("run") => crate::cmd::worker::run(&args[1..]),
         Some("recover") => recover_command(&args[1..]),
+        Some("shadow") => shadow_command(&args[1..]),
         Some("--help") | Some("-h") => {
             print_help();
             Ok(())
         }
-        Some(other) => Err(anyhow!("unknown work command: {other}")),
+        Some(other) => Err(CliError::usage(format!("unknown work command: {other}"))
+            .with_hint("run `heiwa work --help`")
+            .into()),
     }
 }
 
@@ -40,10 +47,24 @@ fn print_help() {
     println!("  heiwa work show <work-id> [--json]    bounded session truth for one Work");
     println!("  heiwa work show <work-id> --surface home|work|agent|all");
     println!("                                        surface views of one snapshot, as JSON");
+    println!("  heiwa work watch <work-id> [--since <cursor>] [--once] [--json]");
+    println!("                                        stream this Work's events; resumable");
     println!("  heiwa work run <work-id> -- <cmd>     run a provider-owned worker in its worktree");
     println!(
         "  heiwa work recover [--json]           record runs whose supervising process is gone"
     );
+    println!("  heiwa work shadow [<work-id>] [--json] System 1 shadow judgments against what ran");
+}
+
+/// `heiwa work shadow`: shadow System 1 judgments joined with the turns they
+/// judged. Read-only; judgments are recorded only when `[system1] shadow` is on.
+fn shadow_command(args: &[String]) -> Result<()> {
+    let work_id = positionals(args, &[]).first().copied();
+    let paths = heiwa_config::HeiwaPaths::resolve();
+    let report = heiwa_shell::system1_shadow::report(&paths.evidence_dir, work_id)?;
+    output::emit(has_flag(args, "--json"), report, &[], |report| {
+        print!("{}", heiwa_shell::system1_shadow::render_report(report));
+    })
 }
 
 fn service(root: &Path) -> Result<OperatorSessionService> {
@@ -55,10 +76,15 @@ fn service(root: &Path) -> Result<OperatorSessionService> {
 fn list(args: &[String]) -> Result<()> {
     let paths = heiwa_config::HeiwaPaths::resolve();
     let summary = summarize(&paths.evidence_dir)?;
-    if has_flag(args, "--json") {
-        println!("{summary}");
-        return Ok(());
-    }
+    let next = if summary["work"].as_array().is_none_or(Vec::is_empty) {
+        vec!["heiwa work create \"<what you want done>\"".to_string()]
+    } else {
+        Vec::new()
+    };
+    output::emit(has_flag(args, "--json"), summary, &next, render_list)
+}
+
+fn render_list(summary: &Value) {
     let works = summary["work"].as_array().cloned().unwrap_or_default();
     if works.is_empty() {
         println!("no Work on this installation yet");
@@ -79,68 +105,73 @@ fn list(args: &[String]) -> Result<()> {
         println!();
         println!("! {skipped} work event(s) could not be folded; run `heiwa doctor` for detail");
     }
-    Ok(())
 }
 
 fn create_command(args: &[String]) -> Result<()> {
-    let intent = args
-        .iter()
-        .find(|arg| !arg.starts_with("--"))
-        .ok_or_else(|| anyhow!("usage: heiwa work create \"<intent>\""))?;
+    let intent = positionals(args, &[])
+        .first()
+        .copied()
+        .ok_or_else(|| CliError::usage("usage: heiwa work create \"<intent>\" [--json]"))?;
     let paths = heiwa_config::HeiwaPaths::resolve();
     let identity = heiwa_identity::load_from(&paths.runtime_root)
         .map_err(|error| anyhow!("{error}"))?
         .ok_or_else(|| {
-            anyhow!(
-                "no local identity on this installation; run first-run setup before creating Work"
-            )
+            CliError::failure("no local identity on this installation")
+                .with_hint("run `heiwa setup` before creating Work")
         })?;
 
     let created = create(&paths.evidence_dir, intent, &identity.installation_id)?;
-    if has_flag(args, "--json") {
-        println!("{created}");
-    } else {
+    let work_id = created["work_id"].as_str().unwrap_or("?").to_string();
+    let next = vec![
+        format!("heiwa work show {work_id}"),
+        format!("heiwa work watch {work_id}"),
+    ];
+    output::emit(has_flag(args, "--json"), created, &next, |created| {
         println!("opened {}", created["work_id"].as_str().unwrap_or("?"));
-        println!("  {intent}");
-    }
-    Ok(())
+        println!("  {}", created["intent"].as_str().unwrap_or(""));
+    })
 }
 
 fn show_command(args: &[String]) -> Result<()> {
-    let surface = flag_value(args, "--surface");
-    let surface_value = args
-        .iter()
-        .position(|arg| arg == "--surface")
-        .map(|index| index + 1);
-    let work_id = args
-        .iter()
-        .enumerate()
-        .find(|(index, arg)| !arg.starts_with("--") && Some(*index) != surface_value)
-        .map(|(_, arg)| arg)
-        .ok_or_else(|| anyhow!("usage: heiwa work show <work-id> [--json | --surface <name>]"))?;
+    let json = has_flag(args, "--json");
+    let surface = optional_value(args, "--surface")?;
+    let work_id = positionals(args, &["--surface"])
+        .first()
+        .copied()
+        .ok_or_else(|| {
+            CliError::usage("usage: heiwa work show <work-id> [--json | --surface <name>]")
+        })?;
     let paths = heiwa_config::HeiwaPaths::resolve();
+    if find(&paths.evidence_dir, work_id)?.is_none() {
+        return Err(
+            CliError::not_found(format!("no Work {work_id} on this installation"))
+                .with_hint("list Work with `heiwa work list`")
+                .into(),
+        );
+    }
+    let epoch_seed = format!("cli-{}", uuid::Uuid::new_v4());
     if let Some(surface) = surface {
-        let epoch_seed = format!("cli-{}", uuid::Uuid::new_v4());
         let rendered = if surface == "all" {
             surfaces_json(&paths.evidence_dir, work_id, &epoch_seed)?
         } else {
             let snapshot = session(&paths.evidence_dir, work_id, &epoch_seed)?;
             let view = heiwa_work::view_for(&snapshot, surface).ok_or_else(|| {
-                anyhow!("unknown surface {surface}; expected home, work, agent, or all")
+                CliError::usage(format!(
+                    "unknown surface {surface}; expected home, work, agent, or all"
+                ))
             })?;
             serde_json::to_value(view)?
         };
-        println!("{rendered}");
-        return Ok(());
+        return output::emit(json, rendered, &[], |rendered| {
+            println!(
+                "{}",
+                serde_json::to_string_pretty(rendered).unwrap_or_default()
+            );
+        });
     }
-    let snapshot = session(
-        &paths.evidence_dir,
-        work_id,
-        &format!("cli-{}", uuid::Uuid::new_v4()),
-    )?;
-    if has_flag(args, "--json") {
-        println!("{}", serde_json::to_string(&snapshot)?);
-        return Ok(());
+    let snapshot = session(&paths.evidence_dir, work_id, &epoch_seed)?;
+    if json {
+        return output::emit(true, serde_json::to_value(&snapshot)?, &[], |_| {});
     }
 
     println!(
@@ -229,10 +260,10 @@ fn recover_command(args: &[String]) -> Result<()> {
     let paths = heiwa_config::HeiwaPaths::resolve();
     let outcome = crate::cmd::recover::recover(&service(&paths.evidence_dir)?)?;
     let report = crate::cmd::recover::report(&outcome);
-    if has_flag(args, "--json") {
-        println!("{report}");
-        return Ok(());
-    }
+    output::emit(has_flag(args, "--json"), report, &[], render_recovery)
+}
+
+fn render_recovery(report: &Value) {
     println!(
         "recovered {} interrupted turn(s); {} run(s) marked stale",
         report["interrupted_turns"].as_u64().unwrap_or(0),
@@ -263,6 +294,228 @@ fn recover_command(args: &[String]) -> Result<()> {
             "! {unadmitted} worker row(s) this build does not admit and {unreadable} unreadable journal line(s) were preserved uninterpreted"
         );
     }
+}
+
+/// Which events belong to one Work while it is being watched.
+pub(crate) struct WatchScope {
+    work_id: String,
+    threads: BTreeSet<String>,
+}
+
+impl WatchScope {
+    pub(crate) fn new(work: &Work) -> Self {
+        let mut threads: BTreeSet<String> = work.related_thread_ids.iter().cloned().collect();
+        threads.insert(work.primary_thread_id.clone());
+        Self {
+            work_id: work.work_id.as_str().to_string(),
+            threads,
+        }
+    }
+
+    /// `"work"` when the event carries this Work's id. Its thread then joins
+    /// the scope, so threads linked after the watch began stay visible.
+    /// `"thread"` marks an *unscoped* event in one of those threads; it is
+    /// shown rather than hidden. Two Works may share a thread, so an event
+    /// explicitly scoped to another Work is never this Work's context.
+    pub(crate) fn admit(&mut self, event: &OperatorEvent) -> Option<&'static str> {
+        match event.work_id.as_deref() {
+            Some(work_id) if work_id == self.work_id => {
+                self.threads.insert(event.thread_id.clone());
+                Some("work")
+            }
+            Some(_) => None,
+            None if self.threads.contains(&event.thread_id) => Some("thread"),
+            None => None,
+        }
+    }
+}
+
+pub(crate) enum WatchStep {
+    /// This Work's stream lines, and the journal's own resume cursor. That
+    /// cursor never regresses: an empty page echoes the input cursor.
+    Page {
+        lines: Vec<Value>,
+        cursor: Option<String>,
+    },
+    /// The cursor no longer fits the stream: it was repaired, replaced, or
+    /// compacted, or the cursor came from another stream or an older binary.
+    Resync { reason: String },
+}
+
+/// Resolve the Work from the stream as it is *now*. Used at start and after
+/// every resync: a replacement stream may no longer contain the Work, and
+/// its old membership must not be carried into a different lineage.
+fn current_scope(root: &Path, work_id: &str) -> Result<WatchScope> {
+    let work = find(root, work_id)?.ok_or_else(|| {
+        CliError::not_found(format!("no Work {work_id} on this installation"))
+            .with_hint("list Work with `heiwa work list`")
+    })?;
+    Ok(WatchScope::new(&work))
+}
+
+/// Decode-stage rejections from `heiwa_evidence`: the value was never a
+/// cursor. Every other `InvalidCursor` means a real cursor has expired.
+/// This couples to the reason strings of `heiwa_evidence::decode_cursor`; the
+/// malformed- and foreign-cursor tests fail loudly if they change. A typed
+/// classification belongs in `heiwa_evidence`, not in a shell-side decoder.
+fn cursor_is_malformed(reason: &str) -> bool {
+    reason.starts_with("cursor is not valid base64")
+        || reason.starts_with("cursor payload is malformed")
+}
+
+/// Read one journal page after `since` and keep this Work's events.
+pub(crate) fn watch_page(
+    root: &Path,
+    scope: &mut WatchScope,
+    since: Option<&str>,
+    limit: usize,
+) -> Result<WatchStep> {
+    let journal = OperatorJournal::new(root.to_path_buf()).map_err(|error| anyhow!("{error}"))?;
+    let page = match journal.read_after(since, limit) {
+        Ok(page) => page,
+        Err(CursorError::InvalidCursor { reason }) if cursor_is_malformed(&reason) => {
+            return Err(CliError::usage(format!("invalid --since cursor: {reason}"))
+                .with_hint("pass a cursor printed by `heiwa work watch`")
+                .into());
+        }
+        Err(CursorError::InvalidCursor { reason }) => return Ok(WatchStep::Resync { reason }),
+        Err(other) => return Err(anyhow!("{other}")),
+    };
+    let lines = page
+        .events
+        .into_iter()
+        .filter_map(|CursorEvent { cursor, event }| {
+            scope.admit(&event).map(|scope_name| {
+                json!({
+                    "schema": STREAM_SCHEMA,
+                    "type": "event",
+                    "scope": scope_name,
+                    "cursor": cursor,
+                    "event": event,
+                })
+            })
+        })
+        .collect();
+    Ok(WatchStep::Page {
+        lines,
+        cursor: page.next_cursor,
+    })
+}
+
+fn watch_command(args: &[String]) -> Result<()> {
+    const PAGE_SIZE: usize = 256;
+    const MAX_RESYNCS: usize = 3;
+    const POLL: std::time::Duration = std::time::Duration::from_millis(500);
+
+    let work_id = positionals(args, &["--since"])
+        .first()
+        .copied()
+        .ok_or_else(|| {
+            CliError::usage(
+                "usage: heiwa work watch <work-id> [--since <cursor>] [--once] [--json]",
+            )
+        })?;
+    let json = has_flag(args, "--json");
+    let once = has_flag(args, "--once");
+    let mut cursor = optional_value(args, "--since")?.map(str::to_string);
+    let paths = heiwa_config::HeiwaPaths::resolve();
+    let mut scope = current_scope(&paths.evidence_dir, work_id)?;
+    let mut resyncs = 0usize;
+    loop {
+        match watch_page(
+            &paths.evidence_dir,
+            &mut scope,
+            cursor.as_deref(),
+            PAGE_SIZE,
+        )? {
+            WatchStep::Resync { reason } => {
+                resyncs += 1;
+                if resyncs > MAX_RESYNCS {
+                    return Err(CliError::failure(format!(
+                        "the operator stream kept changing under this watch: {reason}"
+                    ))
+                    .with_hint("retry once the runtime is idle")
+                    .into());
+                }
+                if !print_watch_resync(&reason, json)? {
+                    return Ok(());
+                }
+                cursor = None;
+                scope = current_scope(&paths.evidence_dir, work_id)?;
+            }
+            WatchStep::Page {
+                lines,
+                cursor: next,
+            } => {
+                resyncs = 0;
+                let advanced = next != cursor;
+                for line in &lines {
+                    if !print_watch_line(line, json)? {
+                        return Ok(());
+                    }
+                }
+                cursor = next;
+                if advanced {
+                    continue;
+                }
+                if once {
+                    return print_watch_end(work_id, cursor.as_deref(), json);
+                }
+                std::thread::sleep(POLL);
+            }
+        }
+    }
+}
+
+/// `Ok(false)`: the reader closed the pipe, so stop quietly.
+fn print_watch_line(line: &Value, json: bool) -> Result<bool> {
+    let text = if json {
+        line.to_string()
+    } else {
+        let event = &line["event"];
+        format!(
+            "{}  {:<22} {:<6} {}",
+            event["occurred_at"].as_str().unwrap_or("?"),
+            event["event_type"].as_str().unwrap_or("?"),
+            line["scope"].as_str().unwrap_or("?"),
+            event["actor"]["id"].as_str().unwrap_or("?"),
+        )
+    };
+    Ok(output::print_line(&text)?)
+}
+
+fn print_watch_resync(reason: &str, json: bool) -> Result<bool> {
+    let text = if json {
+        json!({
+            "schema": STREAM_SCHEMA,
+            "type": "resync",
+            "reason": reason,
+            "cursor": Value::Null,
+        })
+        .to_string()
+    } else {
+        format!(
+            "! the operator stream was rewritten ({reason}); replaying this Work from the start"
+        )
+    };
+    Ok(output::print_line(&text)?)
+}
+
+fn print_watch_end(work_id: &str, cursor: Option<&str>, json: bool) -> Result<()> {
+    let text = if json {
+        json!({
+            "schema": STREAM_SCHEMA,
+            "type": "end",
+            "reason": "caught_up",
+            "cursor": cursor,
+        })
+        .to_string()
+    } else if let Some(cursor) = cursor {
+        format!("caught up; resume with: heiwa work watch {work_id} --since {cursor}")
+    } else {
+        "caught up; no events yet".to_string()
+    };
+    output::print_line(&text)?;
     Ok(())
 }
 
@@ -400,17 +653,6 @@ pub(crate) fn find(root: &Path, work_id: &str) -> Result<Option<Work>> {
 pub(crate) fn surfaces_json(root: &Path, work_id: &str, epoch_seed: &str) -> Result<Value> {
     let snapshot = session(root, work_id, epoch_seed)?;
     Ok(json!({ "surfaces": heiwa_work::surfaces(&snapshot) }))
-}
-
-fn flag_value<'a>(args: &'a [String], flag: &str) -> Option<&'a str> {
-    args.iter()
-        .position(|arg| arg == flag)
-        .and_then(|index| args.get(index + 1))
-        .map(String::as_str)
-}
-
-fn has_flag(args: &[String], flag: &str) -> bool {
-    args.iter().any(|arg| arg == flag)
 }
 
 #[cfg(test)]
@@ -622,6 +864,214 @@ mod tests {
             summary["work"][0]["related_thread_ids"],
             serde_json::json!(["thread-a-related"]),
             "{summary}"
+        );
+    }
+
+    fn page_lines(step: WatchStep) -> (Vec<Value>, Option<String>) {
+        match step {
+            WatchStep::Page { lines, cursor } => (lines, cursor),
+            WatchStep::Resync { reason } => panic!("unexpected resync: {reason}"),
+        }
+    }
+
+    fn found(root: &Path, created: &Value) -> Work {
+        find(root, created["work_id"].as_str().expect("work id"))
+            .expect("find")
+            .expect("work exists")
+    }
+
+    #[test]
+    fn watching_reads_only_this_works_events_and_resumes_from_its_cursor() {
+        let dir = root();
+        let first = create(dir.path(), "first", "installation-1").expect("create first");
+        let second = create(dir.path(), "second", "installation-1").expect("create second");
+        let mut scope = WatchScope::new(&found(dir.path(), &first));
+
+        let (lines, cursor) =
+            page_lines(watch_page(dir.path(), &mut scope, None, 256).expect("page"));
+        assert!(
+            lines.iter().any(|line| {
+                line["event"]["event_type"] == "work_created" && line["scope"] == "work"
+            }),
+            "{lines:?}"
+        );
+        assert!(
+            lines.iter().all(|line| {
+                line["event"]["work_id"] != second["work_id"]
+                    && line["event"]["thread_id"] != second["primary_thread_id"]
+            }),
+            "the other Work leaked into this stream: {lines:?}"
+        );
+        assert!(lines
+            .iter()
+            .all(|line| line["schema"] == "heiwa.cli.stream/v1" && line["type"] == "event"));
+
+        let (resumed, resumed_cursor) =
+            page_lines(watch_page(dir.path(), &mut scope, cursor.as_deref(), 256).expect("resume"));
+        assert!(resumed.is_empty(), "{resumed:?}");
+        assert_eq!(resumed_cursor, cursor, "an idle page keeps its place");
+    }
+
+    #[test]
+    fn watching_reports_activity_appended_after_the_cursor() {
+        let dir = root();
+        let created = create(dir.path(), "watched", "installation-1").expect("create");
+        let work_id = created["work_id"].as_str().expect("id").to_string();
+        let thread_id = created["primary_thread_id"]
+            .as_str()
+            .expect("thread")
+            .to_string();
+        let mut scope = WatchScope::new(&found(dir.path(), &created));
+        let (_, caught_up) =
+            page_lines(watch_page(dir.path(), &mut scope, None, 256).expect("page"));
+
+        let service = service(dir.path()).expect("service");
+        let mut request =
+            heiwa_session::operator::StartTurnRequest::auto("work-watch", "keep going");
+        request.work_id = Some(work_id.clone());
+        service.start_turn(&thread_id, request).expect("start turn");
+
+        let (lines, cursor) = page_lines(
+            watch_page(dir.path(), &mut scope, caught_up.as_deref(), 256).expect("next page"),
+        );
+        assert!(
+            lines
+                .iter()
+                .any(|line| line["event"]["event_type"] == "turn_started"),
+            "{lines:?}"
+        );
+        assert!(lines
+            .iter()
+            .all(|line| line["event"]["thread_id"] == thread_id.as_str()));
+        assert_ne!(cursor, caught_up);
+    }
+
+    #[test]
+    fn a_malformed_cursor_is_a_usage_error() {
+        let dir = root();
+        let created = create(dir.path(), "watched", "installation-1").expect("create");
+        let mut scope = WatchScope::new(&found(dir.path(), &created));
+        let error = match watch_page(dir.path(), &mut scope, Some("not-a-cursor"), 256) {
+            Ok(_) => panic!("a malformed cursor must be refused"),
+            Err(error) => error,
+        };
+        assert_eq!(
+            crate::output::classify(&error).code,
+            crate::output::ErrorCode::Usage,
+            "{error:#}"
+        );
+    }
+
+    #[test]
+    fn a_cursor_from_another_stream_asks_for_a_resync() {
+        let here = root();
+        let elsewhere = root();
+        let created = create(here.path(), "watched", "installation-1").expect("create");
+        create(elsewhere.path(), "unrelated", "installation-1").expect("create elsewhere");
+        let foreign = OperatorJournal::new(elsewhere.path().to_path_buf())
+            .expect("journal")
+            .read_after(None, 256)
+            .expect("read")
+            .next_cursor
+            .expect("a cursor from the other stream");
+
+        let mut scope = WatchScope::new(&found(here.path(), &created));
+        match watch_page(here.path(), &mut scope, Some(&foreign), 256).expect("step") {
+            WatchStep::Resync { reason } => assert!(reason.contains("fingerprint"), "{reason}"),
+            WatchStep::Page { lines, .. } => {
+                panic!("a cursor from another lineage must resync, got {lines:?}")
+            }
+        }
+    }
+
+    #[test]
+    fn another_works_events_in_a_shared_thread_are_not_this_works_context() {
+        let dir = root();
+        let created = create(dir.path(), "watched", "installation-1").expect("create");
+        let work_id = created["work_id"].as_str().expect("id").to_string();
+        let shared = created["primary_thread_id"]
+            .as_str()
+            .expect("thread")
+            .to_string();
+        let mut scope = WatchScope::new(&found(dir.path(), &created));
+
+        let other = scoped_event(
+            "work-b",
+            &shared,
+            "turn-b",
+            None,
+            OperatorEventType::TurnStarted,
+            json!({}),
+        );
+        assert_eq!(
+            scope.admit(&other),
+            None,
+            "another Work's explicitly scoped events are not this Work's context"
+        );
+
+        let mut legacy = scoped_event(
+            &work_id,
+            &shared,
+            "turn-legacy",
+            None,
+            OperatorEventType::TurnStarted,
+            json!({}),
+        );
+        legacy.work_id = None;
+        assert_eq!(
+            scope.admit(&legacy),
+            Some("thread"),
+            "unscoped turns in this Work's thread stay visible"
+        );
+    }
+
+    #[test]
+    fn a_resync_resolves_the_work_again_and_refuses_one_that_is_gone() {
+        let here = root();
+        let elsewhere = root();
+        let created = create(here.path(), "watched", "installation-1").expect("create");
+        create(elsewhere.path(), "unrelated", "installation-1").expect("create elsewhere");
+        let work_id = created["work_id"].as_str().expect("id");
+
+        assert!(current_scope(here.path(), work_id).is_ok());
+        let error = match current_scope(elsewhere.path(), work_id) {
+            Ok(_) => panic!("a stream without this Work must not keep its old membership"),
+            Err(error) => error,
+        };
+        assert_eq!(
+            crate::output::classify(&error).code,
+            crate::output::ErrorCode::NotFound,
+            "{error:#}"
+        );
+    }
+
+    #[test]
+    fn a_thread_joins_the_watch_once_the_work_acts_in_it() {
+        let dir = root();
+        let created = create(dir.path(), "watched", "installation-1").expect("create");
+        let work_id = created["work_id"].as_str().expect("id").to_string();
+        let mut scope = WatchScope::new(&found(dir.path(), &created));
+        let late = |turn: &str, scoped: bool| {
+            let mut event = scoped_event(
+                &work_id,
+                "thread-late",
+                turn,
+                None,
+                OperatorEventType::TurnStarted,
+                json!({}),
+            );
+            if !scoped {
+                event.work_id = None;
+            }
+            event
+        };
+
+        assert_eq!(scope.admit(&late("turn-1", false)), None, "not yet watched");
+        assert_eq!(scope.admit(&late("turn-2", true)), Some("work"));
+        assert_eq!(
+            scope.admit(&late("turn-3", false)),
+            Some("thread"),
+            "the thread joined once the Work acted in it"
         );
     }
 }

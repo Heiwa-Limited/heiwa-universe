@@ -1,0 +1,15 @@
+{
+  "claim_id": "heiwa.docs.receipts-mirror-retired",
+  "claim_digest": "57f6c61ba7cef677b34ae36cc62809224554f89825f93877f536231cc0caecf3",
+  "verifier_id": "text-absent",
+  "verifier_version": "3",
+  "result": "pass",
+  "commit": "21e4c9e59b8270bd55a91e80872bbac476f60bc3",
+  "scope_digest": "b2b0ad25f9009d38e1011a185d052e750317300cd555e8221e9b314f3461355f",
+  "verified_at": 1790562578,
+  "environment": {
+    "os": "macos",
+    "arch": "aarch64"
+  },
+  "detail": "6 pattern(s) absent across 1 file(s)"
+}

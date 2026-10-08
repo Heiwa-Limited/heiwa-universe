@@ -3,6 +3,7 @@ import { cleanup, fireEvent, render, screen, waitFor, within } from "@solidjs/te
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { App } from "../../app";
 import { createAppState } from "../../state/app";
+import type { OperatorTurnSubmission } from "../../operator/types";
 
 afterEach(cleanup);
 
@@ -31,12 +32,17 @@ function workApp(options: { catalog?: unknown; catalogError?: unknown } = {}) {
     }
   };
   const waiting = (workId: string) => pending.get(`/api/v1/operator/work/${workId}/surfaces`)?.length ?? 0;
+  const post = vi.fn(async (path: string, body: OperatorTurnSubmission) => ({ ok: true, data: {
+    thread_id: decodeURIComponent(path.split("/").at(-2)!), work_id: body.work_id ?? null,
+    turn_id: "turn-1", cursor: "cursor-1", duplicate: false, stream_url: "/ws",
+  } }));
+  const getThread = vi.fn(async (path: string) => ({ ok: true, data: { thread: { thread_id: decodeURIComponent(path.split("/").at(-1)!), archived: false, work_ids: ["work-a"] as string[] | undefined } } }));
   const state = createAppState({
     work: { get: workGet },
-    sessions: { get: vi.fn().mockResolvedValue({ ok: true, data: { threads: [], projects: [], truncated: false } }) as never },
+    sessions: { getThread, get: vi.fn().mockResolvedValue({ ok: true, data: { threads: [], projects: [], truncated: true } }) as never },
     operator: {
       get: vi.fn().mockResolvedValue({ ok: true, data: { events: [], next_cursor: null, skipped_lines: 0 } }),
-      post: vi.fn().mockResolvedValue({ ok: true, data: {} }),
+      post,
       subscribe: () => new Promise<void>(() => {}),
       randomUUID: () => "req-1",
       schedule: (task) => task(),
@@ -53,7 +59,7 @@ function workApp(options: { catalog?: unknown; catalogError?: unknown } = {}) {
       read: vi.fn().mockResolvedValue({ ok: true, pane: "", text: "", source: "test", error: null }),
     },
   });
-  return { state, answer, waiting };
+  return { state, answer, waiting, post, getThread };
 }
 
 function catalog(rows: Array<{ id: string; intent: string; status?: string; updated: string }>, bounds: { total?: number; truncated?: number; skipped?: number } = {}) {
@@ -97,6 +103,72 @@ const runRow = (runId: string, fields: Record<string, unknown>) => ({
 });
 
 describe("desktop Work", () => {
+  it("explicitly continues Work through the composer and clears scope on ordinary chat selection", async () => {
+    const { state, answer, post } = workApp({ catalog: catalog([
+      { id: "work-a", intent: "Repair the release", updated: "2026-09-14T02:00:00Z" },
+    ]) });
+    render(() => <App state={state} />);
+    await answer("work-a", surfaces("work-a", "Repair the release"));
+    state.navigate("work");
+    const selected = state.work.select("work-a");
+    await answer("work-a", surfaces("work-a", "Repair the release"));
+    await selected;
+    expect(state.sessions.selectedWork()).toBeUndefined();
+    expect(post).not.toHaveBeenCalled();
+    fireEvent.click(await screen.findByRole("button", { name: "Continue conversation" }));
+    await waitFor(() => expect(state.operator.ready()).toBe(true));
+    expect(state.view()).toBe("ai");
+    expect(screen.getByText("Continuing Work: Repair the release")).toBeTruthy();
+    const composer = screen.getByRole("textbox", { name: "Message Heiwa" });
+    fireEvent.input(composer, { target: { value: "Continue the fix" } });
+    fireEvent.click(screen.getByRole("button", { name: "Send" }));
+    await waitFor(() => expect(post).toHaveBeenCalledWith("/api/v1/operator/threads/thread-work-a/turns", expect.objectContaining({ work_id: "work-a", prompt: "Continue the fix" })));
+    await waitFor(() => expect(state.sessions.draft()).toBe(""));
+    await state.sessions.select("thread-work-a");
+    fireEvent.input(composer, { target: { value: "Just a question" } });
+    fireEvent.click(screen.getByRole("button", { name: "Send" }));
+    await waitFor(() => expect(post).toHaveBeenCalledTimes(2));
+    expect(post.mock.calls[1][1]).not.toHaveProperty("work_id");
+  });
+
+  it("preserves the draft when the runtime does not acknowledge the Work binding", async () => {
+    const { state, answer, post } = workApp({ catalog: catalog([
+      { id: "work-a", intent: "Repair the release", updated: "2026-09-14T02:00:00Z" },
+    ]) });
+    render(() => <App state={state} />);
+    await answer("work-a", surfaces("work-a", "Repair the release"));
+    state.navigate("work");
+    const selected = state.work.select("work-a");
+    await answer("work-a", surfaces("work-a", "Repair the release"));
+    await selected;
+    fireEvent.click(await screen.findByRole("button", { name: "Continue conversation" }));
+    await waitFor(() => expect(state.operator.ready()).toBe(true));
+    post.mockResolvedValueOnce({ ok: true, data: { thread_id: "thread-work-a", work_id: null, turn_id: "turn-1", cursor: "cursor-1", duplicate: false, stream_url: "/ws" } });
+    fireEvent.input(screen.getByRole("textbox", { name: "Message Heiwa" }), { target: { value: "Keep this draft" } });
+    fireEvent.click(screen.getByRole("button", { name: "Send" }));
+    expect(await screen.findByText(/Message not acknowledged/)).toBeTruthy();
+    expect(state.sessions.draft()).toBe("Keep this draft");
+    expect(post).toHaveBeenCalledOnce();
+  });
+
+  it("does not enable a scoped turn on a runtime that cannot confirm membership", async () => {
+    const { state, answer, post, getThread } = workApp({ catalog: catalog([
+      { id: "work-a", intent: "Repair the release", updated: "2026-09-14T02:00:00Z" },
+    ]) });
+    render(() => <App state={state} />);
+    await answer("work-a", surfaces("work-a", "Repair the release"));
+    state.navigate("work");
+    const selected = state.work.select("work-a");
+    await answer("work-a", surfaces("work-a", "Repair the release"));
+    await selected;
+    getThread.mockResolvedValueOnce({ ok: true, data: { thread: { thread_id: "thread-work-a", archived: false, work_ids: undefined } } });
+    fireEvent.click(await screen.findByRole("button", { name: "Continue conversation" }));
+    expect(await screen.findByText(/This Work's conversation could not be confirmed/)).toBeTruthy();
+    expect(state.view()).toBe("work");
+    expect(state.sessions.selectedWork()).toBeUndefined();
+    expect(post).not.toHaveBeenCalled();
+  });
+
   it("navigates from Home to a Work's detail and on to its runs, describing lost supervision truthfully", async () => {
     const { state, answer, waiting } = workApp({
       catalog: catalog([

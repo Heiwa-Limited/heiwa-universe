@@ -57,14 +57,15 @@ fi
 # ── 3. Operator seam preserved: implementation and tests match reviewed baseline ───────
 # The seam is the implementation as much as its tests: pinning only the
 # tests would let store.ts be rewritten under a passing suite.
-# Reviewed 2026-09-12: additive session metadata, generation-guarded switching,
-# window observation disposal, and regression coverage. Store replay is unchanged.
+# Reviewed 2026-09-27: explicit Work continuation, scoped acknowledgement,
+# generation-safe switching and idempotent retry after lost acknowledgement.
+# Membership preflight and HTTP admission are tested; store replay is unchanged.
 declare -A seam_baseline=(
   ["$desktop/src/operator/store.test.ts"]="7f68b72bc113940349648ef505bc49b52ecd11d21410b046b05fee06b8e6b2a0"
-  ["$desktop/src/operator/client.test.ts"]="128f056d7cdb0d2f7657df77a84d38158417dde31844ffde298d199994dd034e"
+  ["$desktop/src/operator/client.test.ts"]="d33044d7ab90838c9ac74ddb7460a96ef27e87e3b55cbcd292766a63c1991947"
   ["$desktop/src/operator/store.ts"]="e2ca87af2c7e975b38b7f6eafb90d0ae4f8b5d44b5cf1b12bad5bd33607ae793"
-  ["$desktop/src/operator/client.ts"]="60cd2c763214b0b02dd4ebb115ec29e790c521bfdf70c1140a3e00a320f9d793"
-  ["$desktop/src/operator/types.ts"]="4086ff8536f9d7d376a9dd74adf28f680d7405d82b54a0cd0110f5d2261bef2b"
+  ["$desktop/src/operator/client.ts"]="b56f43d7f02c02d488369966fa112dbb278f8024290687a53734801891199af8"
+  ["$desktop/src/operator/types.ts"]="d71840bae42f4202b17eb0b7cf63c049feb5e57b33e2f830ee2975cdfd5d262e"
 )
 for file in "${!seam_baseline[@]}"; do
   if [[ ! -f "$file" ]]; then

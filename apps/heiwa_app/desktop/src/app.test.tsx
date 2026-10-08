@@ -192,7 +192,8 @@ const SURFACE_MARKERS: Record<string, string | RegExp> = {
   approvals: "Pending decisions",
   // Mail now renders the local snapshot rather than an L3 placeholder.
   mail: /metadata only, read\s+from this machine/,
-  finance: /Read model arrives with the L3 connector plane/,
+  // Finance renders its read-only read model rather than an L3 placeholder.
+  finance: /cannot trade or move money/,
   social: /Ingress arrives with the L3 connector plane/,
   workers: "Operator turns",
   browser: "Go",
@@ -406,6 +407,48 @@ describe("shell", () => {
     render(() => <App state={state} />);
     await state.runtime.loadHealth();
     expect(screen.getByText(/0\.1\.0-test · 1 providers/)).toBeTruthy();
+  });
+
+  it("keeps the visible surface current when the window returns and while it stays open", async () => {
+    // Arrival-only refresh is why a calendar edited in Calendar.app never
+    // showed up until the user navigated away and back.
+    vi.useFakeTimers({ toFake: ["setInterval", "clearInterval", "Date"] });
+    const flush = async () => {
+      for (let tick = 0; tick < 25; tick += 1) await Promise.resolve();
+    };
+    try {
+      vi.setSystemTime(new Date(2026, 8, 14, 12));
+      const { state, runtimePost } = harness();
+      const syncs = () => runtimePost.mock.calls.filter(([path]) => path === "/api/v1/calendar/sync").length;
+      state.navigate("calendar");
+      render(() => <App state={state} />);
+      await flush();
+      expect(syncs()).toBe(1);
+
+      // A focus bounce right after arriving is not a reason to read again.
+      window.dispatchEvent(new Event("focus"));
+      await flush();
+      expect(syncs()).toBe(1);
+
+      vi.advanceTimersByTime(20_000);
+      window.dispatchEvent(new Event("focus"));
+      await flush();
+      expect(syncs()).toBe(2);
+
+      vi.advanceTimersByTime(60_000);
+      await flush();
+      expect(syncs()).toBe(3);
+
+      // Leaving the surface stops its interval and its focus listener.
+      state.navigate("mail");
+      await flush();
+      vi.advanceTimersByTime(180_000);
+      window.dispatchEvent(new Event("focus"));
+      await flush();
+      expect(syncs()).toBe(3);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });
 
@@ -695,13 +738,15 @@ describe("operator seam", () => {
     });
     state.navigate("mail");
     render(() => <App state={state} />);
-    expect(readAppleMail).not.toHaveBeenCalled();
+    await Promise.resolve();
+    expect(readAppleMail).toHaveBeenCalledWith({ background: true, staleSeconds: 180 });
 
     fireEvent.click(screen.getByRole("button", { name: "Read Apple Mail" }));
     const pending = screen.getByRole("button", { name: "Reading…" }) as HTMLButtonElement;
     expect(pending.disabled).toBe(true);
     fireEvent.click(pending);
-    expect(readAppleMail).toHaveBeenCalledOnce();
+    expect(readAppleMail).toHaveBeenCalledTimes(2);
+    expect(readAppleMail).toHaveBeenLastCalledWith({ background: false });
     finishRead({ fetched: 2, appended: 1, deduplicated: 1 });
     expect(await screen.findByText("Fresh mail")).toBeTruthy();
     expect((await screen.findByRole("status")).textContent).toContain("Read 2 headers; 1 added");
@@ -732,14 +777,26 @@ describe("operator seam", () => {
     // without the user going and looking in two places.
     // Local, matching what a machine's calendar hands back.
     const today = localIsoDate();
+    const now = new Date();
+    const evening = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 18, 0);
     const { state } = harness({
       get: async (path: string) => {
-        if (path === "/api/v1/calendar/summary") {
+        if (path.startsWith("/api/v1/calendar/events?")) {
           return {
             data: {
               events: [
                 { id: "e1", title: "Standup", date: today, start: "09:30" },
                 { id: "e2", title: "Design review", date: today, start: "14:00" },
+                // EventKit hands back UTC instants; the briefing must show the
+                // local clock time, never the raw timestamp.
+                {
+                  id: "e4",
+                  title: "Dinner",
+                  source: "apple_calendar",
+                  date: today,
+                  start: evening.toISOString(),
+                  end: new Date(evening.getTime() + 3_600_000).toISOString(),
+                },
                 { id: "e3", title: "Next week thing", date: "2099-01-01", start: "10:00" },
               ],
             },
@@ -772,6 +829,21 @@ describe("operator seam", () => {
         expect(text).toContain("Standup");
         expect(text).not.toContain("Next week thing");
         expect(text).toContain("1 unread");
+        expect(text).toContain(evening.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" }));
+        expect(text).not.toContain(evening.toISOString());
+        expect(Array.from(briefing!.querySelectorAll(".today-event-title"), (node) => node.textContent))
+          .toEqual(["Standup", "Design review", "Dinner"]);
+
+        // A briefing row opens that event in the Calendar.
+        fireEvent.click(screen.getByRole("button", { name: /Design review/ }));
+        expect(state.view()).toBe("calendar");
+      })
+      .then(() => screen.findByRole("region", { name: "Design review details" }))
+      .then((details) => {
+        const twoPm = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 14, 0);
+        expect(details.textContent).toContain(twoPm.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" }));
+        // The request is consumed once the Calendar has opened the event.
+        expect(state.runtime.calendarFocus()).toBeUndefined();
       });
   });
 

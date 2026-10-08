@@ -13,6 +13,8 @@ use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output};
 
+mod cli_v1;
+
 const PLAN_ID: &str = "operator-2026-09";
 
 fn marker(key: &str) -> String {
@@ -49,25 +51,23 @@ impl Fixture {
         let helper = root.path().join("fixture-apple-resources");
         fs::write(
             &helper,
-            r#"#!/bin/sh
-set -eu
-request="$1"
-printf '%s\n' "$request" >> "$HEIWA_PLAN_FIXTURE_LOG"
-case "$request" in
-  *'"operation":"list"'*)
-    printf '%s' '{"schema_version":1,"calendars":[{"id":"cal-life","name":"Life","source":"iCloud","writable":true}]}'
-    ;;
-  *'"operation":"plan_scan"'*)
-    cat "$HEIWA_PLAN_FIXTURE_SCAN"
-    ;;
-  *'"operation":"plan_apply"'*)
-    cat "$HEIWA_PLAN_FIXTURE_APPLY"
-    ;;
-  *)
-    printf '%s' '{"schema_version":1,"error":"invalid_request"}'
-    exit 1
-    ;;
-esac
+            r#"#!/usr/bin/env python3
+import json, os, sys
+assert len(sys.argv) == 1, "helper request must not be passed in argv"
+raw = sys.stdin.buffer.read()
+request = json.loads(raw)
+with open(os.environ['HEIWA_PLAN_FIXTURE_LOG'], 'ab') as log:
+    log.write(raw + b'\n')
+operation = request.get('operation')
+if operation == 'list':
+    sys.stdout.write('{"schema_version":1,"calendars":[{"id":"cal-life","name":"Life","source":"iCloud","writable":true}]}')
+elif operation == 'plan_scan':
+    sys.stdout.buffer.write(open(os.environ['HEIWA_PLAN_FIXTURE_SCAN'], 'rb').read())
+elif operation == 'plan_apply':
+    sys.stdout.buffer.write(open(os.environ['HEIWA_PLAN_FIXTURE_APPLY'], 'rb').read())
+else:
+    sys.stdout.write('{"schema_version":1,"error":"invalid_request"}')
+    sys.exit(1)
 "#,
         )
         .expect("write helper fixture");
@@ -92,6 +92,7 @@ esac
             .env("HOME", &self.home)
             .env("HEIWA_EVIDENCE_DIR", &self.evidence)
             .env("HEIWA_APPLE_RESOURCES_HELPER", &self.helper)
+            .env("HEIWA_APPLE_CALENDAR_OSASCRIPT", "/bin/false")
             .env("HEIWA_PLAN_FIXTURE_LOG", &self.log)
             .env("HEIWA_PLAN_FIXTURE_SCAN", &self.scan)
             .env("HEIWA_PLAN_FIXTURE_APPLY", &self.apply)
@@ -104,14 +105,15 @@ esac
         self.heiwa().args(args).output().expect("run heiwa")
     }
 
-    fn ok_json(&self, args: &[&str]) -> Value {
+    /// `data` of a successful `heiwa.cli/v1` command.
+    fn v1_json(&self, args: &[&str]) -> Value {
         let output = self.run(args);
         assert!(
             output.status.success(),
             "heiwa {args:?} failed: {}",
             String::from_utf8_lossy(&output.stderr)
         );
-        serde_json::from_slice(&output.stdout).expect("JSON output")
+        cli_v1::data(&output.stdout)
     }
 
     fn connect(&self) {
@@ -237,14 +239,14 @@ fn one_approval_applies_only_the_delta_in_one_batch_with_a_replayable_receipt() 
         ),
     ]));
 
-    let diff = f.ok_json(&["calendar", "plan", "diff", f.plan_path(), "--json"]);
+    let diff = f.v1_json(&["calendar", "plan", "diff", f.plan_path(), "--json"]);
     assert_eq!(
         diff["counts"],
         json!({"create": 1, "update": 1, "delete": 1, "adopt": 0, "unchanged": 1})
     );
     assert!(f.helper_calls("plan_apply").is_empty(), "diff never writes");
 
-    let staged = f.ok_json(&["calendar", "plan", "stage", f.plan_path(), "--json"]);
+    let staged = f.v1_json(&["calendar", "plan", "stage", f.plan_path(), "--json"]);
     assert_eq!(staged["in_sync"], false);
     let request_id = staged["approval_request"]["request_id"]
         .as_str()
@@ -273,7 +275,7 @@ fn one_approval_applies_only_the_delta_in_one_batch_with_a_replayable_receipt() 
         .to_string(),
     )
     .unwrap();
-    let decided = f.ok_json(&["approvals", "decide", &request_id, "--approve", "--json"]);
+    let decided = f.v1_json(&["approvals", "decide", &request_id, "--approve", "--json"]);
     let applied = &decided["decision"]["applied_effects"][0];
     assert_eq!(applied["kind"], "apple_calendar_plan_apply");
     let receipt_id = applied["receipt_id"].as_str().unwrap().to_string();
@@ -304,7 +306,7 @@ fn one_approval_applies_only_the_delta_in_one_batch_with_a_replayable_receipt() 
     );
 
     // Replaying the decision returns the recorded outcome without writing again.
-    f.ok_json(&["approvals", "decide", &request_id, "--approve", "--json"]);
+    f.v1_json(&["approvals", "decide", &request_id, "--approve", "--json"]);
     assert_eq!(f.helper_calls("plan_apply").len(), 1);
 
     // Once Calendar matches the plan, staging has nothing to approve.
@@ -331,7 +333,7 @@ fn one_approval_applies_only_the_delta_in_one_batch_with_a_replayable_receipt() 
             "ek-open"
         ),
     ]));
-    let again = f.ok_json(&["calendar", "plan", "stage", f.plan_path(), "--json"]);
+    let again = f.v1_json(&["calendar", "plan", "stage", f.plan_path(), "--json"]);
     assert_eq!(again["in_sync"], true);
 }
 
@@ -346,7 +348,7 @@ fn approval_refuses_to_write_when_the_calendar_drifted_after_staging() {
         "2026-09-14T12:00:00-07:00"
     )]));
     f.write_scan(json!([]));
-    let staged = f.ok_json(&["calendar", "plan", "stage", f.plan_path(), "--json"]);
+    let staged = f.v1_json(&["calendar", "plan", "stage", f.plan_path(), "--json"]);
     let request_id = staged["approval_request"]["request_id"]
         .as_str()
         .unwrap()

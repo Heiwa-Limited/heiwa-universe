@@ -120,6 +120,19 @@ testing, verification is waived entirely. Build against real scopes now.
   writes nothing) with one journaled receipt. Unmarked events are never touched
   unless `--adopt` claims an exact title/start/end match. This replaces
   per-event scripting and blind `.ics` re-imports, which duplicate on retry.
+- **AD-32 — The Apple read model stays current by paged, provably complete
+  reads.** The EventKit helper answers at most 500 events per request in start
+  order, so one read of the 31-days-back / 90-days-ahead window pages: a
+  truncated page proves everything starting before its last event was seen and
+  the next page resumes there. Deletion is inferred only inside the proven
+  range; a read that cannot advance deletes nothing past where it stopped.
+  `POST /api/v1/calendar/sync` re-reads the saved selection only when the last
+  read is older than the caller allows (default 120 s; `force` for an explicit
+  request) and backs off 60 s after a failed read. The desktop asks on arrival,
+  window focus, and every 60 s while Calendar is open. Views read
+  `GET /api/v1/calendar/events?from=&to=` — compact rows for the local days on
+  screen, each carrying its local `date`/`end_date` — rather than the unbounded
+  summary. This is desktop-driven freshness, not a passive background feed.
 
 ## Build order
 

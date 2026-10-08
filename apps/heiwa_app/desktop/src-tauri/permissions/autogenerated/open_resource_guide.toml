@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-open-resource-guide"
+description = "Enables the open_resource_guide command without any pre-configured scope."
+commands.allow = ["open_resource_guide"]
+
+[[permission]]
+identifier = "deny-open-resource-guide"
+description = "Denies the open_resource_guide command without any pre-configured scope."
+commands.deny = ["open_resource_guide"]

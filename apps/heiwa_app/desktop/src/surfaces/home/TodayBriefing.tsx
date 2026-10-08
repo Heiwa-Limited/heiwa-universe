@@ -1,6 +1,7 @@
-import { For, Show } from "solid-js";
+import { createMemo, For, Show } from "solid-js";
 import { localIsoDate } from "../../lib/format";
 import { useApp } from "../../state/app";
+import { agendaTimeLabel, normalizeEvents, occursOn } from "../../state/calendar-model";
 import "./today-briefing.css";
 
 /**
@@ -19,15 +20,11 @@ export function TodayBriefing() {
   const app = useApp();
 
   // Local, not UTC: the events came off this machine's calendar, so "today"
-  // has to mean the day the machine is having.
-  const todayIso = () => localIsoDate();
-
-  const todaysEvents = () =>
-    app.runtime
-      .calendarEvents()
-      .filter((event) => event.date === todayIso())
-      // Chronological: a briefing is read top to bottom as the day runs.
-      .sort((left, right) => (left.start ?? "").localeCompare(right.start ?? ""));
+  // has to mean the day the machine is having. The shared calendar model owns
+  // that reading, including events that started yesterday and run into today.
+  const today = () => localIsoDate();
+  const todaysEvents = createMemo(() =>
+    normalizeEvents(app.runtime.calendarEvents()).filter((event) => occursOn(event, today())));
 
   const unread = () => app.runtime.mail().filter((message) => message.unread).length;
 
@@ -47,9 +44,18 @@ export function TodayBriefing() {
         <ul class="today-events">
           <For each={todaysEvents()}>
             {(event) => (
-              <li class="today-event">
-                <span class="today-time">{event.start || "--:--"}</span>
-                <span class="today-event-title">{event.title}</span>
+              <li class="today-event" classList={{ cancelled: event.status === "cancelled" }}>
+                <button
+                  type="button"
+                  class="today-event-open"
+                  onClick={() => {
+                    app.runtime.focusCalendarEvent(event.id);
+                    app.navigate("calendar");
+                  }}
+                >
+                  <span class="today-time">{agendaTimeLabel(event, today())}</span>
+                  <span class="today-event-title">{event.title}</span>
+                </button>
               </li>
             )}
           </For>

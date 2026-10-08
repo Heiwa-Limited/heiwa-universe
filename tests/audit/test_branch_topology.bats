@@ -11,6 +11,7 @@ setup() {
     git -C "$FIXTURE" commit -q --allow-empty -m "initial"
     git -C "$FIXTURE" branch dev
     git -C "$FIXTURE" update-ref refs/remotes/origin/main "$(git -C "$FIXTURE" rev-parse main)"
+    git -C "$FIXTURE" update-ref refs/remotes/origin/dev "$(git -C "$FIXTURE" rev-parse dev)"
 }
 
 run_check() {
@@ -65,18 +66,68 @@ run_check() {
     run run_check --mode experimental
 
     [ "$status" -eq 0 ]
-    [[ "$output" == *"codex/experiment descends from dev"* ]]
+    [[ "$output" == *"codex/experiment descends from origin/dev"* ]]
 }
 
 @test "experimental rejects a branch that did not start from current dev" {
     git -C "$FIXTURE" checkout -q dev
     git -C "$FIXTURE" commit -q --allow-empty -m "verified integration value"
+    git -C "$FIXTURE" update-ref refs/remotes/origin/dev "$(git -C "$FIXTURE" rev-parse dev)"
     git -C "$FIXTURE" checkout -q -b codex/experiment main
 
     run run_check --mode experimental
 
     [ "$status" -ne 0 ]
-    [[ "$output" == *"codex/experiment does not descend from dev"* ]]
+    [[ "$output" == *"codex/experiment does not descend from origin/dev"* ]]
+}
+
+@test "experimental uses current origin/dev when local dev is stale" {
+    git -C "$FIXTURE" checkout -q -b published-dev dev
+    git -C "$FIXTURE" commit -q --allow-empty -m "published integration value"
+    git -C "$FIXTURE" update-ref refs/remotes/origin/dev "$(git -C "$FIXTURE" rev-parse published-dev)"
+    git -C "$FIXTURE" checkout -q dev
+    git -C "$FIXTURE" checkout -q -b codex/experiment refs/remotes/origin/dev
+
+    run run_check --mode experimental
+
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"origin/dev is 1 commit(s) ahead of origin/main"* ]]
+    [[ "$output" == *"codex/experiment descends from origin/dev"* ]]
+}
+
+@test "experimental rejects origin/dev behind origin/main by naming origin/dev" {
+    git -C "$FIXTURE" checkout -q main
+    git -C "$FIXTURE" commit -q --allow-empty -m "published production value"
+    git -C "$FIXTURE" update-ref refs/remotes/origin/main "$(git -C "$FIXTURE" rev-parse main)"
+    git -C "$FIXTURE" checkout -q dev
+    git -C "$FIXTURE" checkout -q -b codex/experiment dev
+
+    run run_check --mode experimental
+
+    [ "$status" -ne 0 ]
+    [[ "$output" == *"origin/dev is behind origin/main by 1 commit(s)"* ]]
+}
+
+@test "experimental requires cached origin/dev and gives a fetch hint" {
+    git -C "$FIXTURE" update-ref -d refs/remotes/origin/dev
+    git -C "$FIXTURE" checkout -q -b codex/experiment dev
+
+    run run_check --mode experimental
+
+    [ "$status" -ne 0 ]
+    [[ "$output" == *"cached integration ref is missing: origin/dev; run git fetch origin dev"* ]]
+}
+
+@test "experimental accepts an explicit integration ref override" {
+    git -C "$FIXTURE" update-ref refs/remotes/origin/published dev
+    git -C "$FIXTURE" checkout -q -b codex/experiment dev
+
+    cd "$FIXTURE"
+    run env HEIWA_INTEGRATION_REF=refs/remotes/origin/published \
+        "$CHECK" --mode experimental
+
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"codex/experiment descends from origin/published"* ]]
 }
 
 @test "agent baseline accepts an explicitly declared experimental checkout" {

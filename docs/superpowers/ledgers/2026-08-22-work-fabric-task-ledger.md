@@ -267,6 +267,77 @@ interruption, concurrent receipts, aggregate failure propagation, retired
 runners, and tag/main version divergence. Exact committed local and remote
 results belong in their generated receipts; these changes do not complete A1.
 
+## System 1 shadow judgment — 2026-09-23
+
+Plane: Execution / Evidence. Design:
+`docs/superpowers/specs/2026-09-23-system1-shadow-judgment-design.md`.
+Work-scoped operator model turns now carry a shadow System 1 judgment: after
+the terminal event is durable, the runner hands the exact DREX inputs to
+`heiwa_shell::system1_shadow`. That module asks `turn-route-v1` (intent over
+the DREX keys; capability class 1-5), replays `plan_model_call` with a
+raise-only floor, and appends `heiwa.system1_shadow.v1` to the
+`system1_shadow` stream. Execution never changes. The feature is off unless
+`[system1] shadow = true`.
+
+| # | Step | Status | Verification |
+|---|---|---|---|
+| 1 | TypeScript experiment speaks TypeSafe's documented contract (Score maps keyed by level, Noul `true`/`false`, at most 10 levels); typecheck clean | done | `npm --prefix packages/heiwa_system1 test` (253) and `run typecheck` |
+| 2 | Rust System 1 engine: question builders, documented-contract decoder (distributions must sum to 1), TypeSafe backend pinned to `jev-1.13.0`, capped selection-only fallback | done | `cargo test -p heiwa_judgment --locked` (34) |
+| 3 | Runner offers finished Work-scoped model turns to a shadow observer; a panicking observer cannot strand a turn | done | `cargo test -p heiwa-shell --lib shadow` |
+| 4 | Shadow records with raise-only counterfactual, privacy/sensitivity guards, `[system1]` config, `heiwa work shadow` report | done | `cargo test -p heiwa-shell --test system1_shadow`; `cargo test -p heiwa_config` |
+
+Live check: a checkout runtime on 7475 ran with a disposable journal,
+`local_only` turns, and a `gemma4` judge. Five Work-scoped turns went
+through the authenticated operator API, and all five were judged. Judge
+latency: p50 18.0s, p95 30.8s. Intent agreed with the keyword rules on
+2 of 5. The judge would have raised the floor on 3 of 5 and changed the
+model on none, because DREX already picks the most capable free local
+model. Mutation checks: removing the panic containment, the raise-only
+rule, or the privacy guard makes its test fail.
+
+The first live run found a defect the stubs could not: the fallback
+returned incoherent distributions (1.9 of probability mass). The decoder
+now rejects them. The fallback asks only for a grammar-enforced selection,
+and records note `answer_shape`.
+
+Not established: any live Jev call, any quality label, or any evidence that
+the judgment improves routing. The five-turn sample is a smoke test of the
+loop. Promotion to an executing floor remains a separate decision.
+
+Review round 1 — Astra's independent review found these gaps in the shadow
+path, and each was reproduced with synthetic data before its repair.
+
+| # | Repaired invariant | Status | Verification |
+|---|---|---|---|
+| 5 | Provider text never reaches the shadow journal: response bodies, echoed values, invalid keys, and the returned `model` (now provenance), with a final sensitive screen | done | `cargo test -p heiwa_judgment --test system1_backend --test system1_wire`; `cargo test -p heiwa-shell --test system1_shadow -- provider_text a_returned_model withheld` |
+| 6 | A judgment request reaches only the classified endpoint: no redirects (typed `redirected`), no proxy for a local backend; TS adapters refuse redirects | done | `cargo test -p heiwa_judgment --test system1_backend --test system1_proxy`; `cargo test -p heiwa-shell --test system1_shadow redirected`; `npm --prefix packages/heiwa_system1 test` |
+| 7 | Report cost keeps its truth per attempt across every call of a turn; totals and cost per completed turn exist only when nothing is unknown; completion is not called acceptance | done | `cargo test -p heiwa-shell --test system1_shadow -- cost_truth every_stage` |
+
+Before the repair, the old report described a synthetic mixed Work as
+$0.006 total and $0.0015 per result. That Work's accurate description is an
+exact $0.004 plus an estimated $0.002, plus one unknown charge. A two-stage
+tool turn charged $0.003 and then $0.004 reported $0.004 as its exact cost.
+Mutation checks: following redirects, allowing proxies for a local backend,
+removing the record screen, persisting the raw model, or reading only the
+receipt each makes its regression fail.
+
+Review round 2 — the first real local-model routing episode exposed the next
+measurement boundary. The replayable Rust harness now runs a fixed,
+read-only repository-analysis task through the production Work runner and
+binds its machine label to the exact output digest. Its version-2 rubric
+rejects extra keys and duplicate entries, and records workflow acceptance
+separately from content correctness. Four synthetic tests pass, including
+cases where the answer is correct but the turn is interrupted, cancelled,
+timed out, or denied its read tool.
+
+The live `gemma4:latest` smoke episode completed the runner but emitted
+malformed follow-up tool-call JSON after one successful read. The harness
+labelled that output `fail`/`wrong_shape` and kept workflow acceptance false;
+this is evidence that the measurement catches a bad episode, not evidence
+that the model should route Heiwa. The local run was zero-cost and took about
+29 seconds. No Jev call, production quality label, routing promotion, or
+installed-runtime change is established by this slice.
+
 ## Deferred with reason
 
 - `work_node_bound` and `prior_history_digest` (WF-R15) need an enrolled mesh
@@ -288,13 +359,10 @@ results belong in their generated receipts; these changes do not complete A1.
   proof would close that window.
 - Worker launch stays ungated: `heiwa work run` spawns the raw command it is
   given. The Action Gate for raw terminal commands closes it.
-- Work-scoped continuation from the desktop. The desktop now reads Work
-  (below), but it offers no "continue in conversation" action: composer turns go
-  through `OperatorClient.submitTurn` without a `work_id`, and the server accepts
-  unscoped turns in a Work's thread, so opening one there would silently create
-  unscoped activity. Closing it needs an explicit Work scope on submission,
-  taken from validated thread membership, with an approved operator-seam
-  baseline update.
+- Automatic creation/routing of execution Work remains deferred. Explicit
+  desktop continuation of an existing Work is implemented in C1-a1 below;
+  ordinary conversation selection remains unscoped. A Work association is
+  evidence continuity, not a tool grant or engine admission certificate.
 - A worker's parent, and the separate tool/filesystem/network/budget/action
   leases the spec's "Legitimate Workers" lists, are not on `WorkerIdentity`.
   A1-c2 has exactly one writer lease and no child workers, so those fields
@@ -309,5 +377,30 @@ results belong in their generated receipts; these changes do not complete A1.
 
 ## Next experimental slice
 
-- Work-scoped composer continuation (see Deferred with reason).
-- Release A2 — multi-repository coordination.
+- Release C1-a whole-provider containment and authority proof (see the C1 rows
+  below); explicit desktop Work continuation is the C1-a1 checkpoint.
+- Release A2 — multi-repository coordination remains tracked after the current
+  macOS/Apple workflow slice.
+- System 1 shadow evidence: run the TypeSafe backend with a key and
+  shadow `standard`-privacy Work turns, where a floor above the best local
+  class changes the route. Collect accept/reject labels and the floor that
+  was actually needed, then calibrate before any promotion decision.
+
+## Release C1 — Engines and Apple reminders
+
+Design: `docs/superpowers/specs/2026-09-27-heiwa-engines-design.md`.
+This records current local development evidence, not release acceptance.
+
+| Slice | Scope | Status | Evidence / remaining work |
+| --- | --- | --- | --- |
+| C1-a | Authority, containment, grants, Work-scoped submission | doing | Offline fixture probe and 8 regression tests pass on macOS; whole-provider enforcement and runtime authority integration remain. See `docs/superpowers/plans/2026-09-27-engines-c1a-enforcement.md`. |
+| C1-a1 | Explicit desktop continuation of existing Work | done | 212 desktop, 9 packaging, 45 shell library, 22 operator HTTP, and 58 session-service tests pass. L0 gate passes with updated seam hashes. Rust exposes and revalidates admitted membership; old runtimes fail before submission, lost acknowledgements retain request identity, and ordinary chat remains unscoped. No automatic Work creation, engine admission, installation, or release is claimed. |
+| C1-b | Shared tools and recoverable Apple effects | pending | Depends on runtime grants; no Reminders write acceptance claimed. |
+| C1-c | Claude and Ollama execution families | pending | Offline Seatbelt canaries do not admit a provider engine. |
+| C1-d | Lightweight answers, allowance pools, and surfaces | pending | Bounded read-only tools remain eligible for Answer; routing not implemented here. |
+| C1-d1 | CLI contract: `heiwa.cli/v1` envelope and exit codes, `help --json` catalog, resumable `work watch` stream; `work`, `calendar plan`, `approvals` migrated | done | Combined desktop/CLI tree: `cargo test --locked -p heiwa-shell` passes 500 tests, including 19 CLI contract tests and real-shell argument preservation. Human and JSON watch resumption, cross-Work filtering, missing flag values, and rewritten journals are covered. Approvals decision internals remain unchanged. Other commands keep legacy output until migrated; C1 engine acceptance remains pending. |
+| C1-e | Fresh-profile end-to-end acceptance | pending | `scripts/check_engines_c1_acceptance.sh` does not yet exist. |
+
+Verification for the offline C1-a spike:
+`python3 -m unittest discover -s scripts/tests -p test_engine_enforcement_probe.py -v`
+and `python3 scripts/probe_engine_enforcement.py`.

@@ -28,6 +28,14 @@ export type SurfaceModule = {
   Component: Component;
   /** Rail hover card. Pure: derives from state, never triggers loads. */
   preview: (app: AppState) => DockPreview;
-  /** Data this surface needs before it is shown. Optional. */
+  /**
+   * Data this surface needs before it is shown. Optional. The shell runs it on
+   * arrival and again when the window comes back into view.
+   */
   refresh?: (app: AppState) => Promise<void>;
+  /**
+   * Also re-run `refresh` this often while the surface stays visible, for a
+   * surface whose source changes outside Heiwa (a calendar edited on a phone).
+   */
+  liveIntervalMs?: number;
 };

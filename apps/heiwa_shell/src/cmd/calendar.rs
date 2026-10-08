@@ -4,7 +4,7 @@
 //! T2 effect and can execute only from the approval service.
 
 use anyhow::{anyhow, Context, Result};
-use chrono::{Duration, Local, NaiveDateTime, TimeZone, Utc};
+use chrono::{DateTime, Duration, Local, NaiveDate, NaiveDateTime, TimeZone, Utc};
 use serde_json::{json, Value};
 use std::collections::HashSet;
 use std::fs;
@@ -646,33 +646,62 @@ fn google_calendar_api_base() -> String {
 }
 
 async fn google_calendar_get_retry(url: &str, access_token: &mut String) -> Result<Value> {
-    let first = google_calendar_get(url, access_token)?;
+    let first = google_calendar_get(url, access_token).await?;
     if google_error_code(&first) == Some(401) {
         *access_token =
             crate::cmd::connectors::force_refresh_connector_access_token("google_calendar").await?;
-        return google_calendar_get(url, access_token);
+        return google_calendar_get(url, access_token).await;
     }
     Ok(first)
 }
 
-fn google_calendar_get(url: &str, access_token: &str) -> Result<Value> {
-    use anyhow::Context;
-    let auth_header = ["Authorization: Bearer ", access_token].concat();
-    let output = std::process::Command::new("curl")
-        .arg("-s")
-        .arg("-H")
-        .arg(auth_header)
-        .arg(url)
-        .output()
-        .context("failed to run curl for Google Calendar request")?;
-    if !output.status.success() {
-        return Err(anyhow!(
-            "Google Calendar request failed: {}",
-            String::from_utf8_lossy(&output.stderr).trim()
-        ));
-    }
-    serde_json::from_slice(&output.stdout)
-        .map_err(|e| anyhow!("Google Calendar returned non-JSON: {e}"))
+/// A fresh client per call rather than a shared static: call volume here is
+/// bounded (one list plus one events call per synced calendar per sync), and
+/// a fresh client keeps this trivially testable against a local fake server
+/// with no process-wide client state to reset between tests.
+///
+/// `redirect::Policy::none()` matches curl's own default (no `-L` was ever
+/// passed) — reqwest follows redirects by default, curl does not, and
+/// preserving "does not follow" is part of keeping the request shape.
+/// Neither connect nor overall timeout was set for curl before, so any
+/// finite bound here is strictly tighter, never looser, than "today's".
+fn google_calendar_http_client() -> Result<reqwest::Client> {
+    reqwest::Client::builder()
+        .connect_timeout(std::time::Duration::from_secs(10))
+        .timeout(std::time::Duration::from_secs(30))
+        .redirect(reqwest::redirect::Policy::none())
+        .build()
+        .context("failed to build Google Calendar HTTP client")
+}
+
+/// Async `reqwest`, not `reqwest::blocking`: this runs inside async callers
+/// (`sync_google_calendar`, `google_events_for_calendar`), and a blocking
+/// subprocess or client there would block the executor thread. The prior
+/// `curl -H "Authorization: Bearer <token>"` put the live OAuth token in the
+/// process argument vector, readable from `ps`, `/proc/<pid>/cmdline`, and
+/// crash/accounting logs; a request header is not process-visible the same
+/// way. Status handling is unchanged from before: neither curl's exit code
+/// nor the HTTP status line was ever inspected — a successful round trip
+/// (transport-level) is parsed as JSON and the caller reads Google's own
+/// `error.code` field from the body, so 401/403/429/500 all still flow
+/// through as `Ok(json)` here exactly as they did before, and only a
+/// transport failure or a non-JSON body becomes `Err` here.
+async fn google_calendar_get(url: &str, access_token: &str) -> Result<Value> {
+    let client = google_calendar_http_client()?;
+    let response = client
+        .get(url)
+        .header(
+            reqwest::header::AUTHORIZATION,
+            format!("Bearer {access_token}"),
+        )
+        .send()
+        .await
+        .map_err(|error| anyhow!("Google Calendar request failed: {error}"))?;
+    let body = response
+        .bytes()
+        .await
+        .map_err(|error| anyhow!("Google Calendar request failed: {error}"))?;
+    serde_json::from_slice(&body).map_err(|e| anyhow!("Google Calendar returned non-JSON: {e}"))
 }
 
 fn google_error_code(payload: &Value) -> Option<i64> {
@@ -900,21 +929,37 @@ fn event_date(start: &str) -> String {
 }
 
 fn event_occurs_on(event: &Value, date: &str) -> bool {
-    event.get("date").and_then(Value::as_str) == Some(date)
-        || event
-            .get("start")
-            .and_then(Value::as_str)
-            .is_some_and(|start| start.starts_with(date))
+    event_occurs_on_in(event, date, &Local)
+}
+
+/// Whether the event touches the local day `date` in `zone`. Matching the UTC
+/// prefix of `start` put every evening event west of UTC on tomorrow.
+fn event_occurs_on_in<Tz: TimeZone>(event: &Value, date: &str, zone: &Tz) -> bool {
+    compact_event_in(event, zone).is_some_and(|(_, row)| {
+        row["date"].as_str().is_some_and(|first| first <= date)
+            && row["end_date"].as_str().is_some_and(|last| date <= last)
+    })
 }
 
 fn event_start_time(event: &Value) -> String {
+    event_start_time_in(event, &Local)
+}
+
+/// `HH:MM` in `zone`, rather than the clock digits of a UTC timestamp.
+fn event_start_time_in<Tz: TimeZone>(event: &Value, zone: &Tz) -> String
+where
+    Tz::Offset: std::fmt::Display,
+{
+    if event.get("all_day").and_then(Value::as_bool) == Some(true) {
+        return "all-day".to_string();
+    }
     let Some(start) = event.get("start").and_then(Value::as_str) else {
         return "--:--".to_string();
     };
-    if start.len() >= 16 && start.as_bytes().get(10) == Some(&b'T') {
-        start[11..16].to_string()
-    } else {
-        "all-day".to_string()
+    match rfc3339_instant(Some(start)) {
+        Some(instant) => instant.with_timezone(zone).format("%H:%M").to_string(),
+        None if start.len() == 10 => "all-day".to_string(),
+        None => "--:--".to_string(),
     }
 }
 
@@ -1611,6 +1656,213 @@ pub(crate) fn summary_payload() -> Value {
     })
 }
 
+/// Most rows one events response carries. Rows are compact, so this keeps a
+/// response well inside the desktop proxy's 2 MiB bound.
+const MAX_RANGE_ROWS: usize = 4000;
+/// Longest local-day span one events request may ask for.
+const MAX_RANGE_DAYS: i64 = 400;
+
+/// Calendar rows overlapping the local days `[from, to]`, served at
+/// `/api/v1/calendar/events`.
+///
+/// The summary returns the whole snapshot, which grows with every read and
+/// has no upper bound. Views ask for the days they show instead, and every row
+/// carries the local days it spans, so no client has to turn a UTC instant
+/// into a day on its own.
+pub(crate) fn events_range_payload(from: Option<&str>, to: Option<&str>) -> Result<Value> {
+    let today = Local::now().date_naive();
+    let day = |raw: Option<&str>, fallback: NaiveDate| match raw.map(str::trim) {
+        None | Some("") => Ok(fallback),
+        Some(value) => NaiveDate::parse_from_str(value, "%Y-%m-%d")
+            .map_err(|_| anyhow!("from and to must be YYYY-MM-DD dates")),
+    };
+    let from = day(from, today - Duration::days(1))?;
+    let to = day(to, today + Duration::days(42))?;
+    if to < from || (to - from).num_days() > MAX_RANGE_DAYS {
+        return Err(anyhow!(
+            "request at most {MAX_RANGE_DAYS} days, with to on or after from"
+        ));
+    }
+
+    let mut rows: Vec<(DateTime<Utc>, Value)> = Vec::new();
+    let mut keep = |row: Option<(DateTime<Utc>, Value)>| {
+        if let Some((sort, row)) = row {
+            let first = row["date"]
+                .as_str()
+                .and_then(|v| NaiveDate::parse_from_str(v, "%Y-%m-%d").ok());
+            let last = row["end_date"]
+                .as_str()
+                .and_then(|v| NaiveDate::parse_from_str(v, "%Y-%m-%d").ok());
+            if first.is_some_and(|first| first <= to) && last.is_some_and(|last| last >= from) {
+                rows.push((sort, row));
+            }
+        }
+    };
+    for event in load_events() {
+        keep(compact_event(&event));
+    }
+    for hold in load_holds() {
+        keep(compact_hold(&hold));
+    }
+    if (from..=to).contains(&today) {
+        for appointment in crate::cmd::life::appointments_for_today() {
+            keep(compact_appointment(&appointment));
+        }
+    }
+    rows.sort_by(|left, right| {
+        left.0.cmp(&right.0).then_with(|| {
+            right.1["all_day"]
+                .as_bool()
+                .cmp(&left.1["all_day"].as_bool())
+        })
+    });
+    let truncated = rows.len() > MAX_RANGE_ROWS;
+    rows.truncate(MAX_RANGE_ROWS);
+    Ok(json!({
+        "from": from.to_string(),
+        "to": to.to_string(),
+        "today": today.to_string(),
+        "timezone": local_timezone_name(),
+        "events": rows.into_iter().map(|(_, row)| row).collect::<Vec<_>>(),
+        "truncated": truncated,
+        "sync": super::calendar_read::sync_status(),
+    }))
+}
+
+fn rfc3339_instant(raw: Option<&str>) -> Option<DateTime<Utc>> {
+    raw.and_then(|value| DateTime::parse_from_rfc3339(value).ok())
+        .map(|parsed| parsed.with_timezone(&Utc))
+}
+
+fn local_midnight(day: NaiveDate) -> DateTime<Utc> {
+    zone_midnight(day, &Local)
+}
+
+fn zone_midnight<Tz: TimeZone>(day: NaiveDate, zone: &Tz) -> DateTime<Utc> {
+    let midnight = day.and_hms_opt(0, 0, 0).unwrap_or_default();
+    zone.from_local_datetime(&midnight)
+        .earliest()
+        .map(|local| local.with_timezone(&Utc))
+        .unwrap_or_else(|| midnight.and_utc())
+}
+
+/// A synced event as a compact row with the local days it touches.
+fn compact_event(event: &Value) -> Option<(DateTime<Utc>, Value)> {
+    compact_event_in(event, &Local)
+}
+
+fn compact_event_in<Tz: TimeZone>(event: &Value, zone: &Tz) -> Option<(DateTime<Utc>, Value)> {
+    let text = |key: &str| event.get(key).and_then(Value::as_str);
+    let date_only =
+        |raw: Option<&str>| raw.and_then(|v| NaiveDate::parse_from_str(v, "%Y-%m-%d").ok());
+    let start = rfc3339_instant(text("start"));
+    let end = rfc3339_instant(text("end"));
+    let all_day = event
+        .get("all_day")
+        .and_then(Value::as_bool)
+        .unwrap_or(false)
+        || (start.is_none() && date_only(text("start")).is_some());
+    let local_day = |instant: DateTime<Utc>| instant.with_timezone(zone).date_naive();
+    let local_midnight = |day: NaiveDate| zone_midnight(day, zone);
+
+    let (first, last, sort) = if all_day {
+        // The calendar's day wins over instants, which move with the zone.
+        let first = date_only(text("date"))
+            .or_else(|| date_only(text("start")))
+            .or_else(|| start.map(local_day))?;
+        let last = date_only(text("end"))
+            .map(|exclusive| exclusive - Duration::days(1))
+            .or_else(|| {
+                end.filter(|end| Some(*end) > start)
+                    .map(|end| local_day(end - Duration::seconds(1)))
+            })
+            .unwrap_or(first)
+            .max(first);
+        (first, last, local_midnight(first))
+    } else if let Some(start) = start {
+        let last = end
+            .filter(|end| *end > start)
+            .map(|end| local_day(end - Duration::seconds(1)))
+            .unwrap_or_else(|| local_day(start));
+        (local_day(start), last, start)
+    } else {
+        let first = date_only(text("date"))?;
+        (first, first, local_midnight(first))
+    };
+
+    let recurring = text("occurrence").is_some_and(|occurrence| !occurrence.is_empty());
+    Some((
+        sort,
+        json!({
+            "id": event.get("id").cloned().unwrap_or(Value::Null),
+            "title": text("title").unwrap_or("Untitled"),
+            "source": text("source").unwrap_or("calendar"),
+            "calendar": text("calendar"),
+            "start": text("start"),
+            "end": text("end"),
+            "date": first.to_string(),
+            "end_date": last.to_string(),
+            "all_day": all_day,
+            "recurring": recurring,
+            "status": text("status").unwrap_or("confirmed"),
+            "kind": "event",
+        }),
+    ))
+}
+
+/// A local hold: a date plus optional `HH:MM` clock times.
+fn compact_hold(hold: &Value) -> Option<(DateTime<Utc>, Value)> {
+    let text = |key: &str| hold.get(key).and_then(Value::as_str);
+    let date = NaiveDate::parse_from_str(text("date")?, "%Y-%m-%d").ok()?;
+    let start =
+        text("start").and_then(|clock| chrono::NaiveTime::parse_from_str(clock, "%H:%M").ok());
+    let sort = start
+        .and_then(|clock| Local.from_local_datetime(&date.and_time(clock)).earliest())
+        .map(|local| local.with_timezone(&Utc))
+        .unwrap_or_else(|| local_midnight(date));
+    Some((
+        sort,
+        json!({
+            "id": hold.get("id").cloned().unwrap_or(Value::Null),
+            "title": text("title").unwrap_or("Hold"),
+            "source": "heiwa_hold",
+            "calendar": "Heiwa holds",
+            "start": text("start"),
+            "end": text("end"),
+            "date": date.to_string(),
+            "end_date": date.to_string(),
+            "all_day": start.is_none(),
+            "recurring": false,
+            "status": text("status").unwrap_or("draft"),
+            "kind": text("kind").unwrap_or("focus"),
+            "note": text("note"),
+        }),
+    ))
+}
+
+/// A dated appointment from the life register, shown as an all-day row.
+fn compact_appointment(appointment: &Value) -> Option<(DateTime<Utc>, Value)> {
+    let text = |key: &str| appointment.get(key).and_then(Value::as_str);
+    let date = NaiveDate::parse_from_str(text("date")?, "%Y-%m-%d").ok()?;
+    let kind = text("kind").unwrap_or("external");
+    Some((
+        local_midnight(date),
+        json!({
+            "id": format!("appointment-{date}-{kind}"),
+            "title": format!("{kind} appointment"),
+            "source": "life_register",
+            "calendar": "Life register",
+            "date": date.to_string(),
+            "end_date": date.to_string(),
+            "all_day": true,
+            "recurring": false,
+            "status": "confirmed",
+            "kind": "appointment",
+            "note": text("note"),
+        }),
+    ))
+}
+
 fn has_flag(args: &[String], flag: &str) -> bool {
     args.iter().any(|arg| arg == flag)
 }
@@ -1636,6 +1888,166 @@ fn print_help() {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::io::{Read, Write};
+    use std::net::TcpListener;
+
+    /// A fake Google Calendar endpoint bound to an ephemeral loopback port.
+    /// Accepts exactly one connection, captures the raw request text it
+    /// received, and answers with the given status line and body. Mirrors
+    /// the stub-server idiom already used in
+    /// `apps/heiwa_app/desktop/src-tauri/src/proxy.rs`.
+    fn stub_server_capturing_request(
+        status_line: &str,
+        body: &str,
+    ) -> (String, std::sync::mpsc::Receiver<String>) {
+        let listener = TcpListener::bind("127.0.0.1:0").expect("bind stub server");
+        let address = listener.local_addr().expect("stub addr");
+        let status_line = status_line.to_string();
+        let body = body.to_string();
+        let (request_tx, request_rx) = std::sync::mpsc::channel();
+        std::thread::spawn(move || {
+            let (mut stream, _) = listener.accept().expect("accept request");
+            let mut buffer = [0_u8; 4096];
+            let read = stream.read(&mut buffer).expect("read request");
+            let _ = request_tx.send(String::from_utf8_lossy(&buffer[..read]).to_string());
+            let response = format!(
+                "HTTP/1.1 {status_line}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+                body.len()
+            );
+            stream
+                .write_all(response.as_bytes())
+                .expect("write response");
+        });
+        (format!("http://{address}"), request_rx)
+    }
+
+    /// A synthetic access token shaped like a real OAuth bearer token but
+    /// built at test run time from a fresh UUID rather than as a literal, so
+    /// it never reads as fixture-shaped high-entropy text to a secret
+    /// scanner.
+    fn synthetic_access_token() -> String {
+        format!("ya29.test-{}", uuid::Uuid::new_v4().simple())
+    }
+
+    #[tokio::test]
+    async fn google_calendar_get_sends_the_bearer_token_intact_in_the_authorization_header() {
+        let token = synthetic_access_token();
+        let (base, requests) = stub_server_capturing_request(
+            "200 OK",
+            r#"{"items":[{"id":"primary","summary":"Home"}]}"#,
+        );
+        let payload = google_calendar_get(&format!("{base}/users/me/calendarList"), &token)
+            .await
+            .expect("stub response parses");
+        assert_eq!(payload["items"][0]["id"], json!("primary"));
+
+        let request = requests
+            .recv_timeout(std::time::Duration::from_secs(5))
+            .expect("stub server received a request");
+        // reqwest sends the header name lowercased (HTTP header names are
+        // case-insensitive), unlike curl's `-H "Authorization: ..."`.
+        assert!(
+            request.to_ascii_lowercase().contains(&format!(
+                "authorization: bearer {}",
+                token.to_ascii_lowercase()
+            )),
+            "token must arrive intact in the Authorization header: {request}"
+        );
+        // The prior curl implementation put the token in argv; there is no
+        // argv here at all, but confirm it never leaked into the request
+        // line or any other header by accident either.
+        assert_eq!(
+            request.matches(&token).count(),
+            1,
+            "token must appear exactly once, in Authorization: {request}"
+        );
+    }
+
+    #[tokio::test]
+    async fn google_calendar_get_classifies_a_non_json_body_the_same_way_as_before() {
+        let token = synthetic_access_token();
+        let (base, _requests) = stub_server_capturing_request("200 OK", "not json at all");
+        let error = google_calendar_get(&format!("{base}/x"), &token)
+            .await
+            .expect_err("non-JSON body must be an error");
+        assert!(
+            error
+                .to_string()
+                .contains("Google Calendar returned non-JSON"),
+            "{error}"
+        );
+        assert!(
+            !error.to_string().contains(&token),
+            "token must not leak into the non-JSON error: {error}"
+        );
+    }
+
+    #[tokio::test]
+    async fn google_calendar_get_retry_does_not_retry_on_429_or_5xx_and_keeps_status_in_the_body() {
+        // Status handling is unchanged from the curl implementation: neither
+        // the HTTP status line nor an exit code was ever inspected before,
+        // only the JSON body's own error.code field, read by the caller —
+        // and only a 401 ever triggered the refresh-and-retry path. A 429 or
+        // 500 must still resolve in exactly one request, as Ok(json).
+        for (status_line, code) in [
+            ("429 Too Many Requests", 429),
+            ("500 Internal Server Error", 500),
+        ] {
+            let mut token = synthetic_access_token();
+            let body = json!({"error": {"code": code, "message": "synthetic failure"}}).to_string();
+            let (base, requests) = stub_server_capturing_request(status_line, &body);
+            let payload = google_calendar_get_retry(&format!("{base}/x"), &mut token)
+                .await
+                .expect("429/5xx must surface as Ok(json), not Err, exactly as before");
+            assert_eq!(google_error_code(&payload), Some(code));
+            assert!(
+                requests
+                    .recv_timeout(std::time::Duration::from_secs(5))
+                    .is_ok(),
+                "the single expected request must have arrived for status {status_line}"
+            );
+            assert!(
+                requests
+                    .recv_timeout(std::time::Duration::from_millis(200))
+                    .is_err(),
+                "a second request would mean an unwanted retry for status {status_line}"
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn google_calendar_get_never_leaks_the_token_formatting_401_403_429_or_500() {
+        let token = synthetic_access_token();
+        for (status_line, code) in [
+            ("401 Unauthorized", 401),
+            ("403 Forbidden", 403),
+            ("429 Too Many Requests", 429),
+            ("500 Internal Server Error", 500),
+        ] {
+            let body = json!({"error": {"code": code, "message": "synthetic failure"}}).to_string();
+            let (base, _requests) = stub_server_capturing_request(status_line, &body);
+            let result = google_calendar_get(&format!("{base}/x"), &token).await;
+            // Status handling is preserved: none of these are Err here (only
+            // a transport failure or a non-JSON body is); the caller reads
+            // error.code from the Ok(json) payload.
+            let payload = result.expect("401/403/429/500 must surface as Ok(json)");
+            assert_eq!(google_error_code(&payload), Some(code));
+            let debug_formatted = format!("{payload:?}");
+            assert!(
+                !debug_formatted.contains(&token),
+                "token must not appear when the {code} payload is formatted: {debug_formatted}"
+            );
+            // Reproduce the caller-level error text (as google_events_for_calendar
+            // and sync_google_calendar build it) and check that too.
+            if let Some(error) = payload.get("error") {
+                let caller_error = anyhow!("google calendar request failed: {error}").to_string();
+                assert!(
+                    !caller_error.contains(&token),
+                    "token must not appear in the caller-facing error for {code}: {caller_error}"
+                );
+            }
+        }
+    }
 
     #[test]
     fn create_hold_rejects_bad_date() {
@@ -1653,5 +2065,43 @@ mod tests {
     fn create_hold_rejects_unknown_kind() {
         let request = json!({"title": "x", "kind": "party"});
         assert!(create_hold(&request).is_err());
+    }
+
+    #[test]
+    fn synced_rows_are_filed_under_the_local_days_they_touch() {
+        let pacific = chrono::FixedOffset::west_opt(7 * 3600).unwrap();
+        let days = |row: &Value| {
+            let (_, compact) = compact_event_in(row, &pacific).expect("readable row");
+            (
+                compact["date"].as_str().unwrap().to_string(),
+                compact["end_date"].as_str().unwrap().to_string(),
+            )
+        };
+
+        // 01:00 UTC on the 15th is the evening of the 14th at UTC-7.
+        let evening = json!({"title": "Dinner", "date": "2026-09-14",
+            "start": "2026-09-15T01:00:00Z", "end": "2026-09-15T02:00:00Z"});
+        assert_eq!(days(&evening), ("2026-09-14".into(), "2026-09-14".into()));
+        assert!(event_occurs_on_in(&evening, "2026-09-14", &pacific));
+        assert!(
+            !event_occurs_on_in(&evening, "2026-09-15", &pacific),
+            "the UTC date is not the local day"
+        );
+        assert_eq!(event_start_time_in(&evening, &pacific), "18:00");
+
+        let overnight = json!({"title": "Shift",
+            "start": "2026-09-15T06:30:00Z", "end": "2026-09-15T07:15:00Z"});
+        assert_eq!(days(&overnight), ("2026-09-14".into(), "2026-09-15".into()));
+        assert!(event_occurs_on_in(&overnight, "2026-09-15", &pacific));
+
+        let all_day = json!({"all_day": true, "date": "2026-09-14",
+            "start": "2026-09-14T07:00:00Z", "end": "2026-09-15T06:59:59Z"});
+        assert_eq!(days(&all_day), ("2026-09-14".into(), "2026-09-14".into()));
+        assert_eq!(event_start_time_in(&all_day, &pacific), "all-day");
+
+        // Google's all-day end date is exclusive.
+        let google =
+            json!({"source": "google_calendar", "start": "2026-09-20", "end": "2026-09-22"});
+        assert_eq!(days(&google), ("2026-09-20".into(), "2026-09-21".into()));
     }
 }

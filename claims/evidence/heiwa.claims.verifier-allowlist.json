@@ -1,0 +1,15 @@
+{
+  "claim_id": "heiwa.claims.verifier-allowlist",
+  "claim_digest": "9b8c5f7d5730bab664bc9d88bf9633e934e1191fff4647fb3a60f567788a3cec",
+  "verifier_id": "symbols-present",
+  "verifier_version": "3",
+  "result": "pass",
+  "commit": "21e4c9e59b8270bd55a91e80872bbac476f60bc3",
+  "scope_digest": "fb886713792df9bda9359b27108a152629a259c22d75f5c1a3d955f0ce403147",
+  "verified_at": 1790562578,
+  "environment": {
+    "os": "macos",
+    "arch": "aarch64"
+  },
+  "detail": "4 symbol(s) present"
+}

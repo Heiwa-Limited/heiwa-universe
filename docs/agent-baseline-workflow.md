@@ -34,8 +34,9 @@ The default receipt explicitly records native desktop certification as deferred.
 Each run retains separate step
 logs and a structured receipt binding results to the checkout revision and
 reported worktree state. Required gates fail when missing or unsuccessful;
-deferred acceptance is recorded explicitly. Work Fabric A1 remains deferred
-until its acceptance gate exists and passes. A local receipt establishes only
+deferred acceptance is recorded explicitly. Work Fabric A1 has a scoped gate in
+`scripts/check_work_fabric_a1_acceptance.sh`; completion requires a passing receipt
+for its declared scope. A local receipt establishes only
 the checks actually run; it does not prove remote CI, release availability, or
 installed-runtime behavior.
 
@@ -47,6 +48,44 @@ requirements. This follows OpenAI's [current model guidance](https://developers.
 on auditing conflicting instructions, completing authorized work, preparing
 reviewable outcomes, and using meaningful targeted tests.
 
+## Value-triggered promotion and refactoring
+
+Devon's direction, 2026-10-07: merge verified `dev` into `main` when a meaningful
+upgrade to Heiwa's value is apparent. A checkpoint qualifies when it delivers a
+usable capability, repairs demonstrated reliability/security risk, or reduces
+measured execution or development cost while preserving the product contracts.
+State the user outcome and before/after evidence in the promotion PR. Commit
+count, a large diff, and cosmetic changes alone do not qualify.
+
+For desktop/CLI work, build one matching runtime, desktop shell, cockpit, and
+Apple helper from the recorded source revision. Test that bundle on the device
+with an isolated profile and alternate runtime port, including the relevant
+failure boundary. Record the source commit, artifact hashes, commands, outcomes,
+and any remaining gaps. Stop the temporary runtime afterward. A development
+bundle test does not authorize replacing the installed app or prove a public
+release.
+
+Within an authorized delivery, drive a qualifying checkpoint through the
+experimental PR, review/repair, integration gate, and `dev` -> `main` promotion.
+When delegation and scheduling are authorized, assign bounded review and merge
+follow-through to a cheaper capable agent with file/worktree ownership and
+explicit acceptance criteria. Scheduled work must inspect fresh exact-head CI,
+review threads, and matching verification evidence before each merge; any head
+change requires checking which evidence still applies. Stay quiet while the
+state is unchanged or non-actionable, and report completion, failures, or a
+decision/access blocker. Never bypass branch protection or manufacture commits
+to satisfy topology. Synchronize `dev` after promotion through the protected
+flow. Provider configuration, installation, releases, and external commitments
+retain their applicable authorization boundaries.
+
+Evaluate foundation changes against the macOS product contract and the active
+Work Fabric ledger. Start from reproduced defects, duplicated state/authority,
+or measured cost and compare a proposed refactor with the current implementation.
+Prefer the existing Rust services and shared typed clients. A useful slice has
+one value boundary, preserved public contracts, regression tests that can fail,
+and a recovery path. Broader refactoring is justified by comparative evidence
+that these slices cannot achieve the user's goals; code size alone is insufficient.
+
 ## Local baseline gate
 
 Run this before claiming a clean repo-health or promotion handoff:
@@ -56,7 +95,7 @@ bash scripts/check_agent_baseline.sh
 ```
 
 On an experimental branch, declare the topology explicitly so the same full
-local gate proves the branch descends from current `dev`:
+local gate proves the branch descends from cached `origin/dev`:
 
 ```bash
 HEIWA_BRANCH_MODE=experimental bash scripts/check_agent_baseline.sh
@@ -75,8 +114,8 @@ Do not add empty or sentinel commits merely to make `dev` appear ahead.
 
 The gate is intentionally local-only. It does not fetch, push, call GitHub, or verify remote CI. It checks:
 
-- branch topology matches the declared mode (`dev` ahead for integration, a branch descended from `dev` for experimental work, or synchronized `dev` during post-promotion handoff)
-- cached `origin/dev` exists by default and local ahead/behind can be reported; topology also checks cached `origin/main`
+- branch topology matches the declared mode (`dev` ahead for integration, a branch descended from `origin/dev` for experimental work, or synchronized `dev` during post-promotion handoff)
+- cached `origin/dev` exists by default for experimental work and local ahead/behind can be reported; topology also checks cached `origin/main`
 - tracked tree is clean
 - untracked files are absent except ignored or explicit `vendor/` quarantine entries
 - exactly one linked worktree owns the configured integration branch, `dev` by default

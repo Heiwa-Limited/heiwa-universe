@@ -64,6 +64,10 @@ pub async fn try_handle(args: &[String]) -> Result<bool> {
             cmd::calendar::run(&args[2..]).await?;
             Ok(true)
         }
+        Some("finance") => {
+            cmd::finance::run(&args[2..]).await?;
+            Ok(true)
+        }
         Some("connect") => {
             cmd::connectors::run(&args[2..]).await?;
             Ok(true)

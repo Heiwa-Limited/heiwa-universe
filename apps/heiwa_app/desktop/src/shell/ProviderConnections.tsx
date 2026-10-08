@@ -14,8 +14,20 @@ const providers = [
   { id: "openrouter", name: "OpenRouter" },
 ];
 const label = (provider: string) => providers.find((entry) => entry.id === provider)?.name ?? provider;
+/**
+ * The same words `heiwa doctor` uses, deliberately.
+ *
+ * This panel and the CLI describe one account read from one AccountStatus,
+ * so they must not use different words for it. The vocabulary also avoids
+ * "connected" entirely, because the doctor's "CLI Discovery" section uses
+ * that to mean something else — auth is present for the provider's own CLI,
+ * which is not the same question as whether Heiwa can route a turn here.
+ * Showing "Disconnected" beside "claude: connected" made a merely-unlinked
+ * install read as broken. Kept in step by ProviderConnections.test.tsx and,
+ * on the Rust side, AccountStatus::label().
+ */
 const statusLabel = (status: ProviderConnection["status"]) => ({
-  connected: "Connected", disconnected: "Disconnected",
+  connected: "Ready", disconnected: "Not linked",
   needs_verification: "Needs verification", verification_failed: "Verification failed",
 })[status];
 

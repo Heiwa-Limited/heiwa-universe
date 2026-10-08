@@ -7,23 +7,51 @@ use std::time::Duration;
 use std::time::Instant;
 use tauri::Manager;
 
-const SCAN_TIMEOUT: Duration = Duration::from_secs(20);
+const BACKGROUND_SCAN_TIMEOUT: Duration = Duration::from_secs(25);
+const EXPLICIT_SCAN_TIMEOUT: Duration = Duration::from_secs(45);
+const TAURI_TIMEOUT_GRACE: Duration = Duration::from_secs(5);
 const MAX_RESULT_BYTES: usize = 64 * 1024;
 static SCAN_LOCK: Mutex<()> = Mutex::new(());
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct AppleMailScanResult {
+    status: String,
+    freshness: Option<String>,
     fetched: usize,
     appended: usize,
     deduplicated: usize,
+    updated: usize,
+    removed: usize,
+    error: Option<String>,
+    error_class: Option<String>,
+}
+
+#[derive(Debug, Default, Deserialize)]
+pub struct AppleMailScanOptions {
+    #[serde(default)]
+    background: bool,
+    #[serde(default)]
+    stale_seconds: Option<u64>,
 }
 
 #[derive(Debug, Deserialize)]
 struct ScanPayload {
+    #[serde(default)]
+    status: Option<String>,
+    #[serde(default)]
+    freshness: Option<String>,
     sources: Vec<SourceReport>,
     fetched: usize,
+    #[serde(default)]
     appended: usize,
+    #[serde(default)]
     deduplicated: usize,
+    #[serde(default)]
+    updated: usize,
+    #[serde(default)]
+    removed: usize,
+    #[serde(default)]
+    error_class: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -32,10 +60,14 @@ struct SourceReport {
     status: String,
     error: Option<String>,
     reason: Option<String>,
+    error_class: Option<String>,
 }
 
 #[tauri::command]
-pub async fn apple_mail_scan(app: tauri::AppHandle) -> Result<AppleMailScanResult, String> {
+pub async fn apple_mail_scan(
+    app: tauri::AppHandle,
+    options: Option<AppleMailScanOptions>,
+) -> Result<AppleMailScanResult, String> {
     if !cfg!(target_os = "macos") {
         return Err("Apple Mail reading is available only on macOS.".to_string());
     }
@@ -53,7 +85,18 @@ pub async fn apple_mail_scan(app: tauri::AppHandle) -> Result<AppleMailScanResul
         )
         .ok_or_else(|| "The bundled Heiwa runtime could not be found.".to_string())?;
 
-        run_scan_process(&binary, SCAN_TIMEOUT)
+        let options = options.unwrap_or_default();
+        let cli_timeout = if options.background {
+            BACKGROUND_SCAN_TIMEOUT
+        } else {
+            EXPLICIT_SCAN_TIMEOUT
+        };
+        run_scan_process(
+            &binary,
+            cli_timeout + TAURI_TIMEOUT_GRACE,
+            options.background,
+            options.stale_seconds,
+        )
     })
     .await
     .map_err(|_| "Apple Mail reading stopped unexpectedly.".to_string())?
@@ -71,17 +114,42 @@ fn acquire_scan_lock() -> Result<std::sync::MutexGuard<'static, ()>, String> {
     }
 }
 
-fn run_scan_process(binary: &Path, timeout: Duration) -> Result<AppleMailScanResult, String> {
+fn run_scan_process(
+    binary: &Path,
+    timeout: Duration,
+    background: bool,
+    stale_seconds: Option<u64>,
+) -> Result<AppleMailScanResult, String> {
     let mut command = Command::new(binary);
+    command.args(["mail", "scan", "--source", "apple"]);
+    if background {
+        command.args(["--if-running", "--if-stale"]);
+        command.arg(stale_seconds.unwrap_or(180).min(86_400).to_string());
+    }
     command
-        .args([
-            "mail", "scan", "--source", "apple", "--limit", "50", "--json",
-        ])
+        .arg("--json")
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::null());
 
-    let output = heiwa_core::subprocess::bounded_output(&mut command, timeout, MAX_RESULT_BYTES)?;
+    let output =
+        match heiwa_core::subprocess::bounded_output(&mut command, timeout, MAX_RESULT_BYTES) {
+            Ok(output) => output,
+            Err(error) if error.contains("timed out") => {
+                return Ok(AppleMailScanResult {
+                    status: "error".into(),
+                    freshness: Some("timeout".into()),
+                    fetched: 0,
+                    appended: 0,
+                    deduplicated: 0,
+                    updated: 0,
+                    removed: 0,
+                    error: Some(error),
+                    error_class: Some("timeout".into()),
+                });
+            }
+            Err(error) => return Err(error),
+        };
     parse_scan_output(&output)
 }
 
@@ -93,30 +161,66 @@ fn parse_scan_output(output: &[u8]) -> Result<AppleMailScanResult, String> {
         .iter()
         .find(|report| report.source == "apple")
         .ok_or_else(|| "The Heiwa runtime did not report an Apple Mail result.".to_string())?;
-    if source.status != "scanned" {
-        let detail = source
-            .error
-            .as_deref()
-            .or(source.reason.as_deref())
-            .unwrap_or("Apple Mail is not ready on this Mac.");
-        let detail: String = detail
-            .chars()
-            .map(|character| {
-                if character.is_control() {
-                    ' '
-                } else {
-                    character
-                }
-            })
-            .take(512)
-            .collect();
-        return Err(format!("Apple Mail could not be read: {detail}"));
-    }
+    let status = payload
+        .status
+        .clone()
+        .unwrap_or_else(|| source.status.clone());
+    let detail = source
+        .error
+        .as_deref()
+        .or(source.reason.as_deref())
+        .map(sanitize_detail);
+    let error_class = payload
+        .error_class
+        .clone()
+        .or(source.error_class.clone())
+        .or_else(|| detail.as_deref().map(classify_error).map(str::to_string));
+    let structured_error = matches!(status.as_str(), "error" | "backoff" | "skipped");
     Ok(AppleMailScanResult {
+        status,
+        freshness: payload.freshness,
         fetched: payload.fetched,
         appended: payload.appended,
         deduplicated: payload.deduplicated,
+        updated: payload.updated,
+        removed: payload.removed,
+        error: if structured_error {
+            detail.or_else(|| Some("Apple Mail is not ready on this Mac.".into()))
+        } else {
+            detail
+        },
+        error_class,
     })
+}
+
+fn sanitize_detail(detail: &str) -> String {
+    detail
+        .chars()
+        .map(|character| {
+            if character.is_control() {
+                ' '
+            } else {
+                character
+            }
+        })
+        .take(512)
+        .collect()
+}
+
+fn classify_error(detail: &str) -> &'static str {
+    let lower = detail.to_ascii_lowercase();
+    if lower.contains("timed out") || lower.contains("timeout") {
+        "timeout"
+    } else if lower.contains("not authorized")
+        || lower.contains("-1743")
+        || lower.contains("permission")
+        || lower.contains("automation")
+        || lower.contains("access denied")
+    {
+        "automation_denied"
+    } else {
+        "failed"
+    }
 }
 
 #[cfg(test)]
@@ -135,15 +239,21 @@ mod tests {
         assert_eq!(
             result,
             AppleMailScanResult {
+                status: "scanned".into(),
+                freshness: None,
                 fetched: 3,
                 appended: 2,
-                deduplicated: 1
+                deduplicated: 1,
+                updated: 0,
+                removed: 0,
+                error: None,
+                error_class: None,
             }
         );
     }
 
     #[test]
-    fn treats_structured_error_and_skipped_sources_as_failures() {
+    fn preserves_structured_error_and_skipped_sources_for_the_ui() {
         for (status, field, detail) in [
             ("error", "error", "Automation access denied"),
             ("skipped", "reason", "No Apple Mail account is configured"),
@@ -151,8 +261,8 @@ mod tests {
             let payload = format!(
                 r#"{{"sources":[{{"source":"apple","status":"{status}","{field}":"{detail}"}}],"fetched":0,"appended":0,"deduplicated":0}}"#,
             );
-            let error = parse_scan_output(payload.as_bytes()).unwrap_err();
-            assert!(error.contains(detail));
+            let result = parse_scan_output(payload.as_bytes()).unwrap();
+            assert_eq!(result.error.as_deref(), Some(detail));
         }
     }
 
@@ -188,7 +298,7 @@ mod tests {
     fn run_fresh_script(path: &Path, timeout: Duration) -> Result<AppleMailScanResult, String> {
         let deadline = Instant::now() + Duration::from_secs(1);
         loop {
-            let result = run_scan_process(path, timeout);
+            let result = run_scan_process(path, timeout, false, None);
             let could_not_start =
                 matches!(&result, Err(error) if error.contains("could not start"));
             if !could_not_start || Instant::now() >= deadline {
@@ -205,7 +315,9 @@ mod tests {
         let started = Instant::now();
         let result = run_fresh_script(&path, Duration::from_millis(50));
         let _ = std::fs::remove_file(&path);
-        assert!(result.unwrap_err().contains("timed out"));
+        let result = result.unwrap();
+        assert_eq!(result.status, "error");
+        assert_eq!(result.error_class.as_deref(), Some("timeout"));
         assert!(started.elapsed() < Duration::from_secs(2));
     }
 
@@ -216,7 +328,9 @@ mod tests {
         let started = Instant::now();
         let result = run_fresh_script(&path, Duration::from_millis(100));
         let _ = std::fs::remove_file(&path);
-        assert!(result.unwrap_err().contains("timed out"));
+        let result = result.unwrap();
+        assert_eq!(result.status, "error");
+        assert_eq!(result.error_class.as_deref(), Some("timeout"));
         assert!(started.elapsed() < Duration::from_secs(2));
     }
 

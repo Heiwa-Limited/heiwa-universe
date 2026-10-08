@@ -22,6 +22,29 @@ function Mail() {
   const [reading, setReading] = createSignal(false);
   const [error, setError] = createSignal<string>();
   const [result, setResult] = createSignal<string>();
+  const sync = () => app.runtime.mailSync();
+
+  const freshness = () => {
+    const status = sync();
+    if (!status) return undefined;
+    if (status.error_class === "permission_pending") {
+      return "macOS needs your OK for Heiwa to read Mail. Allow the ‘Heiwa wants to control Mail’ prompt, or enable it under System Settings › Privacy & Security › Automation, then click Read Apple Mail again.";
+    }
+    if (status.status === "error" || status.status === "backoff" || status.status === "skipped") {
+      if (status.error_class === "timeout") return "Mail sync timed out; try Read Apple Mail again.";
+      if (status.error_class === "automation_denied") return "Allow Heiwa in System Settings › Privacy & Security › Automation.";
+      if (status.status === "backoff") return "Mail sync paused briefly after a failed read.";
+      return `Sync failed: ${status.error ?? "unknown error"}`;
+    }
+    if (status.status === "mail_not_running") return "Open Mail to refresh";
+    if (status.status === "no_consent") return "Open Mail to refresh";
+    if (status.status === "fresh" && status.last_scan_at) {
+      const minutes = Math.max(0, Math.floor((Date.now() - Date.parse(status.last_scan_at)) / 60000));
+      return `Updated ${minutes} min ago`;
+    }
+    if (status.status === "scanned") return "Updated 0 min ago";
+    return undefined;
+  };
 
   const read = async () => {
     if (reading()) return;
@@ -30,7 +53,7 @@ function Mail() {
     setResult(undefined);
     try {
       const scan = await app.runtime.readAppleMail();
-      setResult(`Read ${scan.fetched} header${scan.fetched === 1 ? "" : "s"}; ${scan.appended} added to the local snapshot.`);
+      setResult(`Read ${scan.fetched} header${scan.fetched === 1 ? "" : "s"}; ${scan.appended ?? 0} added, ${scan.updated ?? 0} updated, ${scan.removed ?? 0} removed.`);
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : typeof cause === "string" ? cause : "Apple Mail could not be read.");
     } finally {
@@ -51,7 +74,8 @@ function Mail() {
         {reading() ? "Reading…" : "Read Apple Mail"}
       </button>
     </header>
-    <p class="mail-policy">Reads up to 50 inbox headers into the local snapshot: sender, subject, date, and unread state. Message bodies stay unread.</p>
+    <Show when={freshness()}><p class="mail-result" role="status">{freshness()}</p></Show>
+    <p class="mail-policy">Reads up to 200 recent inbox headers per account into the local snapshot: sender, subject, date, and unread state. Message bodies stay unread.</p>
     <Show when={error() ?? app.runtime.mailError()}><p class="mail-error" role="alert">{error() ?? app.runtime.mailError()}</p></Show>
     <Show when={result()}><p class="mail-result" role="status">{result()}</p></Show>
 
@@ -90,5 +114,9 @@ export const mailSurface: SurfaceModule = {
       ],
     };
   },
-  refresh: (app) => app.runtime.loadMail(),
+  liveIntervalMs: 120_000,
+  refresh: (app) => Promise.all([
+    app.runtime.loadMail(),
+    app.runtime.syncMail({ background: true, staleSeconds: 180 }),
+  ]).then(() => undefined),
 };

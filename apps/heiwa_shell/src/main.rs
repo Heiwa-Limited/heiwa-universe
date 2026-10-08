@@ -1,6 +1,8 @@
 mod cli;
 mod cmd;
 mod home;
+mod output;
+mod registry;
 
 use anyhow::{anyhow, Result};
 use chrono::Utc;
@@ -206,8 +208,10 @@ async fn main() -> Result<()> {
         return Ok(());
     }
 
-    if cli::try_handle(&args).await? {
-        return Ok(());
+    match cli::try_handle(&args).await {
+        Ok(true) => return Ok(()),
+        Ok(false) => {}
+        Err(error) => std::process::exit(output::report_error(&error, output::wants_json(&args))),
     }
 
     match args[1].as_str() {
@@ -479,19 +483,31 @@ async fn main() -> Result<()> {
                 println!("  none registered");
             } else {
                 for account in &provider_registry.accounts {
+                    // `label()` rather than `{:?}`: the user should not read
+                    // a Rust variant name, and its vocabulary deliberately
+                    // avoids "connected" so it cannot be confused with the
+                    // CLI Discovery section below, which answers a different
+                    // question (is auth present for the provider's own CLI).
                     println!(
-                        "  {:<20} {:<20} ({}) [{:?}] — {} model{}",
+                        "  {:<20} {:<20} ({}) [{}] — {} model{}",
                         account.account_id,
                         account.provider,
                         account.credential.kind_label(),
-                        account.status,
+                        account.status.label(),
                         account.models.len(),
                         if account.models.len() == 1 { "" } else { "s" },
                     );
+                    // An account that cannot serve a turn always says what
+                    // would fix it, in the same place the problem is shown.
+                    if let Some(step) = account.status.next_step(&account.provider) {
+                        println!("  {:<20} Next: {}", "", step);
+                    }
                 }
             }
             println!();
             println!("CLI Discovery (auth presence only):");
+            println!("  A provider CLI can be signed in here while its Heiwa account");
+            println!("  above is still unlinked — these answer different questions.");
             for status in &provider_statuses {
                 let kind = match status.auth_kind {
                     heiwa_provider::AuthKind::OauthCli => "oauth_cli",
@@ -856,15 +872,19 @@ async fn main() -> Result<()> {
             run_repl(use_cockpit).await?;
         }
         "--help" | "-h" | "help" => {
-            print_help();
+            if let Err(error) = registry::run(&args[2..]) {
+                std::process::exit(output::report_error(&error, output::wants_json(&args)));
+            }
         }
         "--version" | "-V" | "version" => {
             println!("heiwa {}", env!("CARGO_PKG_VERSION"));
         }
         _ => {
-            println!("Heiwa AI runtime and shell");
-            println!("Unknown command: {}", args[1]);
-            print_help();
+            let error = anyhow::Error::new(
+                output::CliError::usage(format!("unknown command: {}", args[1]))
+                    .with_hint("run `heiwa help` for the command catalog"),
+            );
+            std::process::exit(output::report_error(&error, output::wants_json(&args)));
         }
     }
 
@@ -957,45 +977,6 @@ async fn run_setup(name: Option<&str>) -> Result<()> {
 /// display name is the single-seat assumption in miniature.
 fn default_display_name() -> String {
     "Heiwa user".to_string()
-}
-
-fn print_help() {
-    println!("Heiwa — BYOK terminal agent");
-    println!();
-    println!("Usage: heiwa [COMMAND]");
-    println!();
-    println!("Commands:");
-    println!("  install [gh:owner/repo[@ref]] Bootstrap Heiwa or install a GitHub plugin");
-    println!("  login [token]                 Sign in to Heiwa");
-    println!("  logout                        Sign out from Heiwa");
-    println!("  doctor [--ai-ops] [--json]    Check installation, identity, providers, local app reachability");
-    println!("  register                      Register the current device");
-    println!("  receipts                      Show run receipt status");
-    println!("  devices                       Show registered devices");
-    println!("  auth status                   Show all connected accounts and CLI discovery");
-    println!("  auth add-key <provider> <key> Register an API key for a provider");
-    println!("  auth login <provider>         Login to a provider CLI");
-    println!("  auth logout <provider>        Logout from a provider CLI");
-    println!("  providers                     List connected accounts and models");
-    println!("  models                        List all detected models by rate group");
-    println!("  life <command>                Inspect/import life readmodel data");
-    println!("  app [runtime status]          Probe local Heiwa.app runtime readiness");
-    println!("  workers heartbeat             Register local worker liveness");
-    println!("  workers status                Show worker registry");
-    println!("  mesh status|enroll            Node identity for this machine (no peers yet)");
-    println!("  work list|create              Durable Work on this installation");
-    println!("  workspace status|prepare      Repository hold for a Work");
-    println!("  auto status|create|tick       Manage local background automations");
-    println!("  approvals list|show|decide    Manage local approval packets");
-    println!("  mail status|accounts          Mail.app metadata-only bridge probe");
-    println!("  setup [--name <name>]         First-run setup: identity, provider, readiness");
-    println!("  whoami                        Show this installation's local identity");
-    println!("  ask <prompt>                  Run one non-interactive turn and print the reply");
-    println!("  route preview <prompt>        Preview DREX routing without execution");
-    println!("  session attach                Attach to a Heiwa session");
-    println!("  loop [turns] <objective>      Run a bounded execution loop");
-    println!("  shell                         Enter interactive mode");
-    println!("  help                          Print this message");
 }
 
 async fn run_route_command(args: &[String]) -> Result<()> {
@@ -3119,7 +3100,16 @@ fn default_model_call_runtime() -> Result<DefaultModelCallRuntime, String> {
             let resolver =
                 Arc::new(|provider: &str, model: &str| resolve_adapter(provider, model).ok());
             let executor = Arc::new(ModelCallExecutor::new(resolver, sessions.clone()));
-            let runner = Arc::new(OperatorTurnRunner::new(sessions.clone(), executor.clone()));
+            let mut runner = OperatorTurnRunner::new(sessions.clone(), executor.clone());
+            // Shadow System 1 judgment is off unless `[system1] shadow` asks
+            // for it, and it never changes execution. A bad setting disables
+            // it, loudly, rather than the runtime.
+            match heiwa_shell::system1_shadow::ShadowJudge::from_config(&heiwa_config::load()) {
+                Ok(Some(judge)) => runner = runner.with_shadow_observer(Arc::new(judge)),
+                Ok(None) => {}
+                Err(error) => eprintln!("heiwa: System 1 shadow judgment disabled: {error}"),
+            }
+            let runner = Arc::new(runner);
             Ok(DefaultModelCallRuntime {
                 executor,
                 sessions,
@@ -3472,7 +3462,7 @@ fn record_call_receipt(
     rates: &heiwa_receipts::RateTable,
     input: CallReceiptInput<'_>,
 ) {
-    use heiwa_receipts::{runtime, Receipt};
+    use heiwa_receipts::{runtime, CallReceipt};
 
     let env = runtime::env_for_provider(&input.result.provider);
     let tokens_in = input
@@ -3495,7 +3485,7 @@ fn record_call_receipt(
         tokens_out,
     );
 
-    let mut receipt = Receipt::new(
+    let mut receipt = CallReceipt::new(
         Utc::now().timestamp(),
         env,
         input.result.provider.clone(),
