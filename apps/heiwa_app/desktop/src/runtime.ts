@@ -1,4 +1,5 @@
 import { Channel, invoke } from "@tauri-apps/api/core";
+import { observedAge } from "./lib/format";
 import type { OperatorFrame } from "./operator/types";
 
 // Dev-only Deno herd bridge, reached when the Tauri command layer is absent
@@ -64,6 +65,10 @@ export type ProviderSnapshot = {
    * and a past success does not mean the provider works now.
    */
   execution_evidence?: "complete" | "partial" | "empty" | "unavailable";
+  /** Registry account this row describes, when it comes from the registry. */
+  account_id?: string;
+  /** The exact channel the execution fields were matched against. */
+  execution_channel?: { kind: string; account_id?: string | null; binary?: string | null };
   last_execution_success_at?: string | null;
   last_execution_failure_at?: string | null;
   last_execution_failure_class?: string | null;
@@ -490,6 +495,91 @@ export function providerPresence(providers: ProviderSnapshot[]): { connected: nu
     connected: connected.length,
     withRuns: connected.filter((provider) => Boolean(provider.last_execution_success_at)).length,
   };
+}
+
+/** A dated observation with its age at render time. */
+export type ExecutionFact = { at: string; age: string };
+
+/**
+ * Execution history for one account or CLI, from the runtime snapshot the
+ * desktop already reads with this profile's credentials. Never a readiness
+ * verdict: states say what is known, including what is not.
+ */
+export type ExecutionFacts =
+  | {
+      state: "recorded";
+      partial: boolean;
+      success?: ExecutionFact;
+      failure?: ExecutionFact & { class: string };
+    }
+  | { state: "none" | "none_in_window" | "unavailable" | "not_reported" | "runtime_unreachable" | "not_tracked" };
+
+export function executionFacts(
+  health: RuntimeHealth | null,
+  match: { accountId?: string; binary?: string },
+  now: Date,
+): ExecutionFacts {
+  if (!health?.reachable) return { state: "runtime_unreachable" };
+  const rows = providersFromSnapshot(health);
+  const matched = rows.find((row) => {
+    const channel = row.execution_channel;
+    if (!channel) return false;
+    if (match.accountId) return channel.account_id === match.accountId;
+    return Boolean(match.binary) && channel.binary === match.binary
+      && (channel.kind === "oauth_cli" || channel.kind === "local_runtime");
+  });
+  if (!matched) {
+    // A runtime that predates execution fields reports none of them; a
+    // current one simply has no row for this account or tool.
+    const reported = rows.some((row) => row.execution_evidence !== undefined);
+    return { state: reported ? "not_tracked" : "not_reported" };
+  }
+  const evidence = matched.execution_evidence;
+  if (evidence === undefined) return { state: "not_reported" };
+  if (evidence === "unavailable") return { state: "unavailable" };
+  const successAt = matched.last_execution_success_at;
+  const failureAt = matched.last_execution_failure_at;
+  if (successAt || failureAt) {
+    return {
+      state: "recorded",
+      partial: evidence === "partial",
+      ...(successAt ? { success: { at: successAt, age: observedAge(successAt, now) } } : {}),
+      ...(failureAt
+        ? { failure: { at: failureAt, age: observedAge(failureAt, now), class: matched.last_execution_failure_class ?? "unclassified" } }
+        : {}),
+    };
+  }
+  return { state: evidence === "partial" ? "none_in_window" : "none" };
+}
+
+function utcMinute(at: string): string {
+  const parsed = new Date(at);
+  return Number.isNaN(parsed.getTime()) ? at : `${parsed.toISOString().slice(0, 16).replace("T", " ")} UTC`;
+}
+
+/** One honest line for a provider row, or `null` when nothing applies. */
+export function executionLine(facts: ExecutionFacts): string | null {
+  switch (facts.state) {
+    case "recorded": {
+      const parts: string[] = [];
+      if (facts.success) parts.push(`Last run succeeded ${utcMinute(facts.success.at)} (${facts.success.age})`);
+      if (facts.failure) parts.push(`Last run failed: ${facts.failure.class} ${utcMinute(facts.failure.at)} (${facts.failure.age})`);
+      if (facts.partial) parts.push("history partial");
+      return parts.join(" · ");
+    }
+    case "none":
+      return "No run recorded";
+    case "none_in_window":
+      return "No run in the inspected history";
+    case "unavailable":
+      return "Run history unavailable";
+    case "not_reported":
+      return "Run history not reported by this runtime";
+    case "runtime_unreachable":
+      return "Run history unavailable: Heiwa runtime not reachable";
+    case "not_tracked":
+      return null;
+  }
 }
 
 export function resourceFromSnapshot(health: RuntimeHealth | null): ResourceSnapshot | null {

@@ -4771,6 +4771,13 @@ fn add_execution_fields(
     let success = observed.and_then(|observation| observation.last_success.as_ref());
     let failure = observed.and_then(|observation| observation.last_failure.as_ref());
     row["execution_evidence"] = json!(view.evidence.state);
+    // The exact channel this row was matched against, so clients never
+    // guess identity from vendor names or auth-kind labels.
+    row["execution_channel"] = json!({
+        "kind": kind,
+        "account_id": account_id,
+        "binary": binary,
+    });
     row["last_execution_success_at"] = json!(success.map(|seen| &seen.at));
     row["last_execution_failure_at"] = json!(failure.map(|seen| &seen.at));
     row["last_execution_failure_class"] = json!(failure.map(|seen| &seen.class));
@@ -4884,6 +4891,10 @@ mod provider_projection_tests {
         ]);
         let rows = registered_provider_rows(&registry, &view);
         assert_eq!(rows[0]["last_execution_success_at"], "2026-10-08T10:00:00Z");
+        assert_eq!(
+            rows[0]["execution_channel"],
+            json!({"kind": "api_key", "account_id": "openai-api-seat", "binary": null})
+        );
         assert_eq!(rows[0]["execution_evidence"], "complete");
         // Another account of the same vendor inherits nothing.
         assert!(rows[1]["last_execution_success_at"].is_null());
@@ -4894,6 +4905,8 @@ mod provider_projection_tests {
         assert_eq!(cli["status"], "connected");
         assert!(cli["last_execution_success_at"].is_null());
         assert_eq!(cli["last_execution_failure_class"], "quota_exhausted");
+        assert_eq!(cli["execution_channel"]["binary"], "gemini");
+        assert_eq!(cli["execution_channel"]["kind"], "oauth_cli");
 
         let mut absent = json!({});
         add_execution_fields(

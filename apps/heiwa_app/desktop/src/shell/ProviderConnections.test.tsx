@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { cleanup, fireEvent, render, screen, waitFor } from "@solidjs/testing-library";
-import { afterEach, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { ProviderConnections } from "./ProviderConnections";
 import type { ProviderConnection } from "../state/types";
 
@@ -74,7 +74,9 @@ it("uses the same words as `heiwa doctor` for an unlinked account", () => {
 });
 
 it("uses the same words as `heiwa doctor` for a usable account", () => {
-  expect(rowText("connected")).toContain("Ready");
+  // An undated key check is a configuration, not a readiness claim.
+  expect(rowText("connected")).toContain("Configured");
+  expect(rowText("connected")).not.toContain("Ready");
 });
 
 it("never labels an account with a word the doctor gives a different meaning", () => {
@@ -86,4 +88,70 @@ it("never labels an account with a word the doctor gives a different meaning", (
     expect(text).not.toMatch(/\bDisconnected\b/);
     expect(text).not.toMatch(/·\s*Connected\s*·/);
   }
+});
+
+describe("execution history on account rows", () => {
+  const now = new Date("2026-10-08T12:00:00Z");
+  const apiConnection = (accountId: string): ProviderConnection => ({
+    account_id: accountId,
+    provider: "openai",
+    channel: "API key",
+    status: "connected",
+    model_count: 2,
+    can_manage_key: true,
+  });
+  const runtimeRow = (accountId: string, extra: Record<string, unknown>) => ({
+    provider_id: "openai",
+    display_name: "OpenAI",
+    status: "connected",
+    auth_kind: "api_key",
+    default_model: null,
+    supported_lanes: [],
+    last_error: null,
+    last_validated_at: null,
+    account_id: accountId,
+    execution_evidence: "complete" as const,
+    execution_channel: { kind: "api_key", account_id: accountId, binary: null },
+    ...extra,
+  });
+
+  it("shows the dated failure for this account and nothing inherited by another", () => {
+    const health = {
+      reachable: true,
+      snapshot: {
+        data: {
+          providers: [
+            runtimeRow("openai-api-a", {
+              last_execution_failure_at: "2026-10-08T10:00:00Z",
+              last_execution_failure_class: "authentication",
+            }),
+            runtimeRow("openai-api-b", {}),
+          ],
+        },
+      },
+    };
+    render(() => (
+      <ProviderConnections
+        connections={[apiConnection("openai-api-a"), apiConnection("openai-api-b")]}
+        executions={{ health, now }}
+      />
+    ));
+    const rows = screen.getAllByRole("listitem").map((row) => row.textContent ?? "");
+    expect(rows[0]).toContain("Configured");
+    expect(rows[0]).toContain("Last run failed: authentication 2026-10-08 10:00 UTC (2h ago)");
+    expect(rows[1]).toContain("No run recorded");
+    expect(rows[1]).not.toContain("authentication");
+  });
+
+  it("says when the runtime cannot be reached instead of implying no runs", () => {
+    render(() => (
+      <ProviderConnections connections={[apiConnection("openai-api-a")]} executions={{ health: null, now }} />
+    ));
+    expect(screen.getByRole("listitem").textContent).toContain("Heiwa runtime not reachable");
+  });
+
+  it("renders no history line when no runtime data was supplied", () => {
+    render(() => <ProviderConnections connections={[apiConnection("openai-api-a")]} />);
+    expect(screen.getByRole("listitem").textContent).not.toContain("run");
+  });
 });

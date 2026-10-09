@@ -1117,7 +1117,9 @@ impl OperatorSessionService {
         let skipped_lines = materialized.skipped_lines();
         let state = if skipped_lines > 0 {
             EvidenceState::Partial
-        } else if materialized.provider_executions.events_inspected() == 0 {
+        } else if materialized.provider_executions.events_inspected() == 0
+            && materialized.provider_executions.unsupported_schema_events() == 0
+        {
             EvidenceState::Empty
         } else {
             EvidenceState::Complete
@@ -1130,6 +1132,8 @@ impl OperatorSessionService {
             skipped_lines,
             starts_mid_stream: false,
             dropped_events: 0,
+            unsupported_schema_events: 0,
+            rejected_facts: 0,
             error: None,
         }))
     }
@@ -2009,11 +2013,16 @@ fn sync_materialized_observing(
             projection.applied_event_rows = projection.applied_event_rows.saturating_add(1);
             let order = projection.order;
             let admission = apply_event(projection, row, order);
-            if matches!(
-                admission,
-                EventAdmission::Admitted | EventAdmission::Rejected
-            ) {
-                projection.provider_executions.observe(&row.event);
+            match admission {
+                EventAdmission::Admitted | EventAdmission::Rejected => {
+                    projection.provider_executions.observe(&row.event)
+                }
+                // A future schema may carry a route outcome this build cannot
+                // read: evidence is partial, not empty or complete.
+                EventAdmission::UnsupportedSchema => {
+                    projection.provider_executions.note_unsupported_schema()
+                }
+                EventAdmission::Duplicate => {}
             }
             observe(row, admission);
         }

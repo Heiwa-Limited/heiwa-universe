@@ -18,7 +18,7 @@ export const aiSurface: SurfaceModule = {
       title: "AI Console",
       lines: [
         `${snapshot.messages.length} messages`,
-        `${presence.connected} connected providers, ${presence.withRuns} with recorded runs`,
+        `${presence.connected} providers present, ${presence.withRuns} with recorded runs`,
         routing ? "route in flight" : app.operator.status(),
       ],
     };

@@ -275,8 +275,15 @@ fn malformed_identity_is_not_projected() {
         completed("bad-kind", 3, "gemini", Some(json!({"kind": "keychain"}))),
     ]);
     assert_eq!(view.excluded.malformed, 1);
-    assert!(row(&view, "gemini", "api_key").channel.account_id.is_none());
-    assert_eq!(row(&view, "gemini", "unknown").successes, 1);
+    // An unsafe identity is not trimmed into a partial channel: the whole
+    // channel becomes unknown and the rejection is reported.
+    assert!(view
+        .observations
+        .iter()
+        .all(|row| row.channel.kind != "api_key"));
+    assert_eq!(row(&view, "gemini", "unknown").successes, 2);
+    assert_eq!(view.evidence.rejected_facts, 2);
+    assert_eq!(view.evidence.state, EvidenceState::Partial);
 }
 
 #[test]
@@ -333,4 +340,181 @@ fn a_replaced_journal_lineage_rebuilds_observations() {
     let view = service.provider_executions().unwrap();
     assert_eq!(view.observations.len(), 1, "{view:#?}");
     assert_eq!(view.observations[0].provider, "codex");
+}
+
+// ---- Review remediation (78ec27f2 findings) ----
+
+fn future_schema(id: &str, minute: u32) -> OperatorEvent {
+    let mut row = completed(id, minute, "claude", Some(cli("claude")));
+    row.schema_version = OPERATOR_EVENT_SCHEMA_VERSION + 1;
+    row
+}
+
+#[test]
+fn unsupported_schema_rows_make_tail_evidence_partial() {
+    let dir = tempfile::tempdir().unwrap();
+    let journal = OperatorJournal::new(dir.path().into()).unwrap();
+    journal
+        .append(&completed("ok", 1, "codex", Some(cli("codex"))))
+        .unwrap();
+    journal.append(&future_schema("future", 2)).unwrap();
+    let view = observe_journal_tail(&journal, 1 << 20, 100);
+    assert_eq!(view.evidence.state, EvidenceState::Partial, "{view:#?}");
+    assert_eq!(view.evidence.unsupported_schema_events, 1);
+}
+
+#[test]
+fn unsupported_schema_rows_make_runtime_evidence_partial() {
+    let (_dir, only_future) = view_of(&[future_schema("future", 1)]);
+    assert_eq!(
+        only_future.evidence.state,
+        EvidenceState::Partial,
+        "{only_future:#?}"
+    );
+    let (_dir, mixed) = view_of(&[
+        completed("ok", 1, "codex", Some(cli("codex"))),
+        future_schema("future", 2),
+    ]);
+    assert_eq!(mixed.evidence.state, EvidenceState::Partial, "{mixed:#?}");
+    // Duplicates alone are not missing evidence.
+    let (_dir, duplicated) = view_of(&[
+        completed("same", 1, "codex", Some(cli("codex"))),
+        completed("same", 1, "codex", Some(cli("codex"))),
+    ]);
+    assert_eq!(duplicated.evidence.state, EvidenceState::Complete);
+}
+
+#[cfg(unix)]
+#[test]
+fn an_unreadable_evidence_root_is_unavailable_not_empty() {
+    use heiwa_session::provider_executions::observe_root_tail;
+    let dir = tempfile::tempdir().unwrap();
+    let looped = dir.path().join("loop");
+    std::os::unix::fs::symlink(&looped, &looped).unwrap();
+    let view = observe_root_tail(&looped, 4096, 10);
+    assert_eq!(view.evidence.state, EvidenceState::Unavailable, "{view:#?}");
+
+    let file_root = dir.path().join("not-a-directory");
+    std::fs::write(&file_root, b"x").unwrap();
+    let view = observe_root_tail(&file_root, 4096, 10);
+    assert_eq!(view.evidence.state, EvidenceState::Unavailable, "{view:#?}");
+
+    let missing = dir.path().join("missing");
+    let view = observe_root_tail(&missing, 4096, 10);
+    assert_eq!(view.evidence.state, EvidenceState::Empty);
+    assert!(!missing.exists());
+}
+
+#[cfg(unix)]
+#[test]
+fn a_root_without_search_permission_is_unavailable() {
+    use heiwa_session::provider_executions::observe_root_tail;
+    use std::os::unix::fs::PermissionsExt;
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path().join("evidence");
+    let journal = OperatorJournal::new(root.clone()).unwrap();
+    journal
+        .append(&completed("ok", 1, "codex", Some(cli("codex"))))
+        .unwrap();
+    std::fs::set_permissions(&root, std::fs::Permissions::from_mode(0o000)).unwrap();
+    let probe = std::fs::metadata(root.join("operator_events.jsonl"));
+    let view = observe_root_tail(&root, 4096, 10);
+    std::fs::set_permissions(&root, std::fs::Permissions::from_mode(0o700)).unwrap();
+    if probe.is_ok() {
+        return; // Running with privileges that ignore permissions.
+    }
+    assert_eq!(view.evidence.state, EvidenceState::Unavailable, "{view:#?}");
+}
+
+#[test]
+fn url_userinfo_never_reaches_the_projection() {
+    let secret = "FAKE-PRIVATE-USERINFO";
+    let url = format!("https://fixture:{secret}@host.invalid/provider");
+    let (_dir, view) = view_of(&[
+        completed(
+            "bin",
+            1,
+            "gemini",
+            Some(json!({"kind": "oauth_cli", "binary": url})),
+        ),
+        completed(
+            "acct",
+            2,
+            "gemini",
+            Some(json!({"kind": "api_key", "account_id": url})),
+        ),
+        event(
+            "model",
+            OperatorEventType::RouteCompleted,
+            3,
+            json!({"attempt": 1, "provider": "codex", "model": url, "channel": cli("codex")}),
+        ),
+    ]);
+    let serialized = serde_json::to_string(&view).unwrap();
+    assert!(!serialized.contains(secret), "{serialized}");
+    assert!(!serialized.contains("host.invalid"), "{serialized}");
+    assert_eq!(view.evidence.state, EvidenceState::Partial, "{view:#?}");
+}
+
+#[test]
+fn legitimate_identity_forms_are_preserved() {
+    let model = |id: &str, minute: u32, value: &str| {
+        event(
+            id,
+            OperatorEventType::RouteCompleted,
+            minute,
+            json!({"attempt": 1, "provider": "openrouter", "model": value,
+                "channel": api("openrouter-api-3f2a9c1e-77b0-4c1e-9d2f-0a1b2c3d4e5f")}),
+        )
+    };
+    let (_dir, view) = view_of(&[
+        model("a", 1, "meta-llama/llama-3.3-70b-instruct:free"),
+        completed(
+            "b",
+            2,
+            "ollama",
+            Some(json!({"kind": "local_runtime", "binary": "ollama"})),
+        ),
+        completed(
+            "c",
+            3,
+            "ollama",
+            Some(json!({"kind": "local_runtime", "binary": "/opt/homebrew/bin/ollama"})),
+        ),
+    ]);
+    assert_eq!(view.evidence.state, EvidenceState::Complete, "{view:#?}");
+    let router = row(&view, "openrouter", "api_key");
+    assert_eq!(
+        router.last_success.as_ref().unwrap().model,
+        "meta-llama/llama-3.3-70b-instruct:free"
+    );
+    assert_eq!(
+        router.channel.account_id.as_deref(),
+        Some("openrouter-api-3f2a9c1e-77b0-4c1e-9d2f-0a1b2c3d4e5f")
+    );
+    let binaries: Vec<_> = view
+        .observations
+        .iter()
+        .filter_map(|row| row.channel.binary.as_deref())
+        .collect();
+    assert!(binaries.contains(&"ollama") && binaries.contains(&"/opt/homebrew/bin/ollama"));
+    let (_dir, tagged) = view_of(&[
+        model("d", 1, "qwen3.5:9b"),
+        model("e", 2, "claude-3-5-sonnet@20240620"),
+    ]);
+    assert_eq!(
+        tagged.evidence.state,
+        EvidenceState::Complete,
+        "{tagged:#?}"
+    );
+}
+
+#[test]
+fn an_impossible_timestamp_is_not_a_dated_observation() {
+    let mut impossible = completed("bad-time", 1, "claude", Some(cli("claude")));
+    impossible.occurred_at = "2026-99-99T99:99:99Z".to_string();
+    let (_dir, view) = view_of(&[impossible]);
+    assert!(view.observations.is_empty(), "{view:#?}");
+    assert_eq!(view.evidence.state, EvidenceState::Partial, "{view:#?}");
+    assert_eq!(view.evidence.rejected_facts, 1);
 }

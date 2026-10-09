@@ -183,8 +183,23 @@ Evidence, with truthful Intake presentation. Routing is unchanged.
   fields beside the unchanged auth fields; the desktop counts providers with
   recorded runs separately from signed-in providers.
 
-Not done here: the desktop Resources panel (`ProviderConnections`, served by
-the Tauri host) does not show execution facts yet; worker (`heiwa work run`)
+- Review repairs: events in an unsupported schema and rejected facts
+  (impossible timestamps, unsafe identities) make evidence partial in both
+  the runtime projection and the doctor tail, with counts; only a missing
+  evidence root reads as empty, while permission errors, symlink loops and
+  non-directories are unavailable, and the read-only path never creates the
+  root; channel identities use context-specific rules so URL userinfo is
+  never projected.
+- Desktop: runtime rows carry the matched `execution_channel`; the Resources
+  panel shows each API account's and each detected CLI tool's dated last
+  success/failure with age and channel, matched by exact account id or
+  binary, with distinct unreachable, older-runtime, unavailable, empty and
+  partial states, from the snapshot the window already reads with its own
+  profile credentials. The account status label reads "configured" rather
+  than "ready" in doctor and the desktop; status values, `last_validated_at`,
+  routing and auth are unchanged. Aggregate counts use presence wording.
+
+Not done here: worker (`heiwa work run`)
 exits remain excluded because their provider label is user supplied; CLI
 observations identify the binary, not the signed-in account; entitlement is
 not inferred without structured provider error provenance.

@@ -1142,11 +1142,15 @@ fn print_provider_executions(
                 .as_deref()
                 .map(|from| format!(" since {from}"))
                 .unwrap_or_default(),
-            if evidence.skipped_lines > 0 {
-                format!(", {} damaged line(s)", evidence.skipped_lines)
-            } else {
-                String::new()
-            }
+            [
+                (evidence.skipped_lines, "damaged line(s)"),
+                (evidence.unsupported_schema_events, "event(s) in an unsupported schema"),
+                (evidence.rejected_facts, "rejected fact(s)"),
+            ]
+            .iter()
+            .filter(|(count, _)| *count > 0)
+            .map(|(count, what)| format!(", {count} {what}"))
+            .collect::<String>()
         ),
         EvidenceState::Complete if view.observations.is_empty() => {
             println!("  No provider execution recorded on this profile.")

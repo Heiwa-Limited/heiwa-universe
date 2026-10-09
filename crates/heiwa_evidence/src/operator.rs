@@ -269,6 +269,23 @@ impl OperatorJournal {
         })
     }
 
+    /// Open an existing evidence root without creating anything, for
+    /// read-only callers. A missing root is `NotFound`; anything that is not
+    /// a directory (or cannot be inspected) is an error, never an empty root.
+    pub fn open_existing(dir: PathBuf) -> std::io::Result<Self> {
+        let metadata = std::fs::metadata(&dir)?;
+        if !metadata.is_dir() {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::NotADirectory,
+                "evidence root is not a directory",
+            ));
+        }
+        Ok(Self {
+            dir,
+            write_lock: Mutex::new(()),
+        })
+    }
+
     /// Evidence root used by ownership services layered above this dumb
     /// append/replay primitive.
     pub fn root(&self) -> &Path {
@@ -1120,6 +1137,20 @@ mod lineage_race_tests {
             .iter()
             .map(|row| row.event.event_id.as_str())
             .collect()
+    }
+
+    #[test]
+    fn open_existing_creates_nothing_and_rejects_non_directories() {
+        let dir = tempfile::tempdir().unwrap();
+        let missing = dir.path().join("missing");
+        let error = OperatorJournal::open_existing(missing.clone()).unwrap_err();
+        assert_eq!(error.kind(), std::io::ErrorKind::NotFound);
+        assert!(!missing.exists());
+        let file = dir.path().join("file");
+        std::fs::write(&file, b"x").unwrap();
+        let error = OperatorJournal::open_existing(file).unwrap_err();
+        assert_eq!(error.kind(), std::io::ErrorKind::NotADirectory);
+        assert!(OperatorJournal::open_existing(dir.path().to_path_buf()).is_ok());
     }
 
     #[test]

@@ -120,7 +120,7 @@ export function Composer(props: { caption: string }) {
       <div class="composer-hint">
         <span class="hint">Enter to send · Shift Enter for a new line · ⌘L to focus</span>
         <span class="hint">
-          {runtimeVersion(app.runtime.health())} · {presence().connected} providers · {presence().withRuns} with recorded runs
+          {runtimeVersion(app.runtime.health())} · {presence().connected} providers present · {presence().withRuns} with recorded runs
         </span>
       </div>
     </div>

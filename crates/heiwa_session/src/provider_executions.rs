@@ -69,18 +69,28 @@ impl ObservedChannel {
         }
     }
 
-    fn from_payload(value: &Value) -> Self {
+    /// The recorded channel, or `unknown` with `rejected = true` when an
+    /// identity was present but failed its context-specific check.
+    fn from_payload(value: &Value) -> (Self, bool) {
         let Some(kind) = value["kind"]
             .as_str()
             .filter(|kind| KNOWN_CHANNEL_KINDS.contains(kind))
         else {
-            return Self::unknown();
+            return (Self::unknown(), false);
         };
-        Self {
-            kind: kind.to_string(),
-            account_id: value["account_id"].as_str().and_then(identifier),
-            binary: value["binary"].as_str().and_then(identifier),
+        let checked_account = value["account_id"].as_str().map(account_identifier);
+        let checked_binary = value["binary"].as_str().map(binary_identifier);
+        if matches!(checked_account, Some(None)) || matches!(checked_binary, Some(None)) {
+            return (Self::unknown(), true);
         }
+        (
+            Self {
+                kind: kind.to_string(),
+                account_id: checked_account.flatten(),
+                binary: checked_binary.flatten(),
+            },
+            false,
+        )
     }
 }
 
@@ -167,6 +177,11 @@ pub struct ExecutionEvidence {
     pub skipped_lines: usize,
     pub starts_mid_stream: bool,
     pub dropped_events: usize,
+    /// Parseable events written in a schema this build cannot interpret.
+    pub unsupported_schema_events: usize,
+    /// Route rows or identities that failed validation and were not
+    /// projected (bad provider name, impossible time, unsafe identity).
+    pub rejected_facts: usize,
     /// Error category when `state` is `unavailable`.
     pub error: Option<&'static str>,
 }
@@ -196,6 +211,8 @@ pub struct ProviderExecutionFold {
     order: u64,
     first_seen_at: Option<String>,
     events_inspected: usize,
+    unsupported_schema_events: usize,
+    rejected_facts: usize,
 }
 
 impl ProviderExecutionFold {
@@ -222,12 +239,16 @@ impl ProviderExecutionFold {
             timestamp(&event.occurred_at),
         ) else {
             self.excluded.malformed += 1;
+            self.rejected_facts += 1;
             return;
         };
-        let model = payload["model"]
-            .as_str()
-            .and_then(identifier)
-            .unwrap_or_else(|| "unknown".to_string());
+        let model = match payload["model"].as_str() {
+            None => "unknown".to_string(),
+            Some(raw) => model_identifier(raw).unwrap_or_else(|| {
+                self.rejected_facts += 1;
+                "unknown".to_string()
+            }),
+        };
         let attempt_key = format!(
             "{}#{}",
             event.call_id.as_deref().unwrap_or(""),
@@ -253,12 +274,12 @@ impl ProviderExecutionFold {
             }
             OperatorEventType::RouteCompleted => {
                 self.close(&attempt_key);
-                let channel = ObservedChannel::from_payload(&payload["channel"]);
+                let channel = self.channel(&payload["channel"]);
                 self.success(provider, channel, model, at, order);
             }
             _ => {
                 self.close(&attempt_key);
-                let channel = ObservedChannel::from_payload(&payload["channel"]);
+                let channel = self.channel(&payload["channel"]);
                 let class = payload["failure_class"]
                     .as_str()
                     .filter(|class| KNOWN_FAILURE_CLASSES.contains(class))
@@ -318,6 +339,24 @@ impl ProviderExecutionFold {
         ));
     }
 
+    fn channel(&mut self, value: &Value) -> ObservedChannel {
+        let (channel, rejected) = ObservedChannel::from_payload(value);
+        if rejected {
+            self.rejected_facts += 1;
+        }
+        channel
+    }
+
+    /// Count a parseable event this build's schema cannot interpret; it may
+    /// hide a route outcome, so the evidence is partial.
+    pub fn note_unsupported_schema(&mut self) {
+        self.unsupported_schema_events = self.unsupported_schema_events.saturating_add(1);
+    }
+
+    pub fn unsupported_schema_events(&self) -> usize {
+        self.unsupported_schema_events
+    }
+
     fn close(&mut self, attempt_key: &str) {
         if let Some(index) = self.pending.iter().position(|(key, _)| key == attempt_key) {
             self.pending.remove(index);
@@ -350,10 +389,22 @@ impl ProviderExecutionFold {
                 }
             })
             .collect();
+        // Facts this fold could not interpret make any otherwise complete or
+        // empty answer partial; unavailable stays unavailable.
+        let uninterpreted = self.unsupported_schema_events + self.rejected_facts > 0;
+        let state = match evidence.state {
+            EvidenceState::Complete | EvidenceState::Empty if uninterpreted => {
+                EvidenceState::Partial
+            }
+            state => state,
+        };
         ProviderExecutionView {
             evidence: ExecutionEvidence {
+                state,
                 window_from: self.first_seen_at.clone(),
                 events_inspected: self.events_inspected,
+                unsupported_schema_events: self.unsupported_schema_events,
+                rejected_facts: self.rejected_facts,
                 ..evidence
             },
             observations,
@@ -370,20 +421,32 @@ pub fn observe_root_tail(
     max_bytes: u64,
     max_events: usize,
 ) -> ProviderExecutionView {
-    let stream = root.join(format!("{}.jsonl", heiwa_evidence::OPERATOR_STREAM_KIND));
-    if !root.is_dir() || !stream.exists() {
-        return observe_tail(&OperatorTail {
+    let absent = || {
+        observe_tail(&OperatorTail {
             events: Vec::new(),
             stream_present: false,
             starts_mid_stream: false,
             dropped_events: 0,
             skipped_lines: 0,
             window_bytes: 0,
-        });
-    }
-    match OperatorJournal::new(root.to_path_buf()) {
-        Ok(journal) => observe_journal_tail(&journal, max_bytes, max_events),
-        Err(_) => unavailable("storage"),
+        })
+    };
+    // Only `NotFound` means nothing was recorded. Permission errors, symlink
+    // loops and non-directories are unreadable evidence, not an empty root.
+    // `open_existing` never creates the root, even if it vanishes after this.
+    let journal = match OperatorJournal::open_existing(root.to_path_buf()) {
+        Ok(journal) => journal,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return absent(),
+        Err(error) if error.kind() == std::io::ErrorKind::NotADirectory => {
+            return unavailable("invalid_path")
+        }
+        Err(_) => return unavailable("inaccessible"),
+    };
+    let stream = root.join(format!("{}.jsonl", heiwa_evidence::OPERATOR_STREAM_KIND));
+    match std::fs::symlink_metadata(&stream) {
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => absent(),
+        Err(_) => unavailable("inaccessible"),
+        Ok(_) => observe_journal_tail(&journal, max_bytes, max_events),
     }
 }
 
@@ -397,6 +460,8 @@ pub fn unavailable(error: &'static str) -> ProviderExecutionView {
         skipped_lines: 0,
         starts_mid_stream: false,
         dropped_events: 0,
+        unsupported_schema_events: 0,
+        rejected_facts: 0,
         error: Some(error),
     })
 }
@@ -426,9 +491,11 @@ pub fn observe_tail(tail: &OperatorTail) -> ProviderExecutionView {
     let mut fold = ProviderExecutionFold::default();
     let mut seen = HashSet::new();
     for row in &tail.events {
-        if !seen.insert(row.event.event_id.as_str())
-            || row.event.schema_version != OPERATOR_EVENT_SCHEMA_VERSION
-        {
+        if !seen.insert(row.event.event_id.as_str()) {
+            continue; // A repeated event id re-states a fact already seen.
+        }
+        if row.event.schema_version != OPERATOR_EVENT_SCHEMA_VERSION {
+            fold.note_unsupported_schema();
             continue;
         }
         fold.observe(&row.event);
@@ -448,6 +515,8 @@ pub fn observe_tail(tail: &OperatorTail) -> ProviderExecutionView {
         skipped_lines: tail.skipped_lines,
         starts_mid_stream: tail.starts_mid_stream,
         dropped_events: tail.dropped_events,
+        unsupported_schema_events: 0,
+        rejected_facts: 0,
         error: None,
     })
 }
@@ -461,24 +530,51 @@ fn provider_name(raw: &str) -> Option<String> {
     .then(|| raw.to_string())
 }
 
-/// Non-secret identifiers (account ids, binaries, model ids): bounded and
-/// free of whitespace or control characters.
-fn identifier(raw: &str) -> Option<String> {
+/// Registry account ids: `{provider}-api-{uuid}`, `anthropic-cli`, ...
+fn account_identifier(raw: &str) -> Option<String> {
     (!raw.is_empty()
         && raw.len() <= MAX_IDENTIFIER_LEN
         && raw
             .bytes()
-            .all(|byte| byte.is_ascii_alphanumeric() || b"._-:/@+".contains(&byte)))
+            .all(|byte| byte.is_ascii_alphanumeric() || b"._-".contains(&byte)))
     .then(|| raw.to_string())
 }
 
-/// An RFC 3339-shaped timestamp; parsing is left to presentation.
+/// An executable: a bare name or an absolute path. No URL or authority
+/// syntax, so an endpoint (and any userinfo in it) is never projected.
+fn binary_identifier(raw: &str) -> Option<String> {
+    let allowed = |byte: u8| byte.is_ascii_alphanumeric() || b"._+-".contains(&byte);
+    let valid = !raw.is_empty()
+        && raw.len() <= MAX_IDENTIFIER_LEN
+        && if let Some(path) = raw.strip_prefix('/') {
+            !path.is_empty()
+                && path
+                    .split('/')
+                    .all(|part| !part.is_empty() && part.bytes().all(allowed))
+        } else {
+            raw.bytes().all(allowed)
+        };
+    valid.then(|| raw.to_string())
+}
+
+/// Provider model ids keep their native forms (`qwen3.5:9b`,
+/// `vendor/model:free`, `model@20240620`) but never URL or userinfo shapes.
+fn model_identifier(raw: &str) -> Option<String> {
+    let charset = raw
+        .bytes()
+        .all(|byte| byte.is_ascii_alphanumeric() || b"._:/@+-".contains(&byte));
+    let url_like = raw.contains("://")
+        || raw.starts_with("//")
+        || raw
+            .split_once('@')
+            .is_some_and(|(before, _)| before.contains(':') || before.contains('/'));
+    (!raw.is_empty() && raw.len() <= MAX_IDENTIFIER_LEN && charset && !url_like)
+        .then(|| raw.to_string())
+}
+
+/// A valid RFC 3339 timestamp, or `None`.
 fn timestamp(raw: &str) -> Option<&str> {
-    (raw.len() >= 20
-        && raw.len() <= 40
-        && raw.as_bytes()[4] == b'-'
-        && raw
-            .bytes()
-            .all(|byte| byte.is_ascii_digit() || b"-:.TZ+".contains(&byte)))
-    .then_some(raw)
+    time::OffsetDateTime::parse(raw, &time::format_description::well_known::Rfc3339)
+        .ok()
+        .map(|_| raw)
 }
