@@ -5,7 +5,7 @@ set -eu
 # time; this pin is what it falls back to when that lookup fails. release.yml
 # refuses to publish a tag that does not match it, so the fallback cannot go
 # stale behind a release.
-pinned_version="0.3.3"
+pinned_version="0.3.4"
 heiwa_home="${HEIWA_HOME:-$HOME/.heiwa}"
 repo="Heiwa-Limited/heiwa-universe"
 
