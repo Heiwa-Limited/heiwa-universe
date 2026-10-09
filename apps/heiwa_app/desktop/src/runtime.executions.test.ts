@@ -61,6 +61,57 @@ describe("executionFacts", () => {
     expect(executionFacts(snapshot, { accountId: "openai-api-b" }, now)).toEqual({ state: "none" });
   });
 
+  it("shows a registered CLI or local account's own facts by its row account id", () => {
+    const snapshot = health([
+      row({
+        provider_id: "anthropic",
+        auth_kind: "oauth_cli",
+        account_id: "anthropic-cli",
+        execution_evidence: "complete",
+        // CLI and local provenance carry no account id; the row does.
+        execution_channel: { kind: "oauth_cli", account_id: null, binary: "claude" },
+        last_execution_success_at: "2026-10-08T11:00:00Z",
+      }),
+      row({
+        provider_id: "ollama",
+        auth_kind: "local_runtime",
+        account_id: "ollama-local",
+        execution_evidence: "complete",
+        execution_channel: { kind: "local_runtime", account_id: null, binary: "ollama" },
+        last_execution_failure_at: "2026-10-08T10:00:00Z",
+        last_execution_failure_class: "availability",
+      }),
+      api("anthropic-api-neighbor"),
+    ]);
+    const cliFacts = executionFacts(snapshot, { accountId: "anthropic-cli" }, now);
+    expect(cliFacts).toEqual({ state: "recorded", partial: false, success: { at: "2026-10-08T11:00:00Z", age: "1h ago" } });
+    const localFacts = executionFacts(snapshot, { accountId: "ollama-local" }, now);
+    expect(localFacts.state).toBe("recorded");
+    if (localFacts.state === "recorded") expect(localFacts.failure?.class).toBe("availability");
+    // A neighbouring API account of the same vendor inherits nothing.
+    expect(executionFacts(snapshot, { accountId: "anthropic-api-neighbor" }, now)).toEqual({ state: "none" });
+  });
+
+  it("never borrows another account when a row lacks its own identity", () => {
+    const legacyCli = row({
+      provider_id: "claude",
+      auth_kind: "oauth_cli",
+      execution_evidence: "complete",
+      execution_channel: { kind: "oauth_cli", account_id: null, binary: "claude" },
+      last_execution_success_at: "2026-10-08T11:00:00Z",
+    });
+    // An older runtime row without `account_id` matches only by its API channel.
+    const olderApi = row({
+      execution_evidence: "complete",
+      execution_channel: { kind: "api_key", account_id: "openai-api-old", binary: null },
+      last_execution_success_at: "2026-10-08T09:00:00Z",
+    });
+    const snapshot = health([legacyCli, olderApi]);
+    expect(executionFacts(snapshot, { accountId: "anthropic-cli" }, now)).toEqual({ state: "not_tracked" });
+    expect(executionFacts(snapshot, { accountId: "openai-api-old" }, now).state).toBe("recorded");
+    expect(executionFacts(snapshot, { accountId: "openai-api-other" }, now)).toEqual({ state: "not_tracked" });
+  });
+
   it("matches a CLI tool by binary and ignores same-vendor API rows", () => {
     const snapshot = health([
       api("google-api-1", { last_execution_success_at: "2026-10-08T11:00:00Z" }),

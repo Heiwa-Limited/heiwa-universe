@@ -524,7 +524,14 @@ export function executionFacts(
   const matched = rows.find((row) => {
     const channel = row.execution_channel;
     if (!channel) return false;
-    if (match.accountId) return channel.account_id === match.accountId;
+    if (match.accountId) {
+      // A registry row names its own account; its execution fields were
+      // already matched to that account's channel (API by account id, CLI
+      // and local by binary). Without a row identity, only an API channel
+      // naming this exact account may match, so nothing is borrowed.
+      if (row.account_id !== undefined) return row.account_id === match.accountId;
+      return channel.kind === "api_key" && channel.account_id === match.accountId;
+    }
     return Boolean(match.binary) && channel.binary === match.binary
       && (channel.kind === "oauth_cli" || channel.kind === "local_runtime");
   });

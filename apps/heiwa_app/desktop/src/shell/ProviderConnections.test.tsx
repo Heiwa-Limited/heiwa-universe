@@ -143,6 +143,42 @@ describe("execution history on account rows", () => {
     expect(rows[1]).not.toContain("authentication");
   });
 
+  it("shows a registered CLI account's own history by its account id", () => {
+    const cliConnection: ProviderConnection = {
+      account_id: "anthropic-cli",
+      provider: "anthropic",
+      channel: "Provider CLI",
+      status: "connected",
+      model_count: 0,
+      can_manage_key: false,
+    };
+    const health = {
+      reachable: true,
+      snapshot: {
+        data: {
+          providers: [
+            runtimeRow("anthropic-cli", {
+              provider_id: "anthropic",
+              auth_kind: "oauth_cli",
+              execution_channel: { kind: "oauth_cli", account_id: null, binary: "claude" },
+              last_execution_success_at: "2026-10-08T11:00:00Z",
+            }),
+            runtimeRow("anthropic-api-neighbor", { provider_id: "anthropic" }),
+          ],
+        },
+      },
+    };
+    render(() => (
+      <ProviderConnections
+        connections={[cliConnection, apiConnection("anthropic-api-neighbor")]}
+        executions={{ health, now }}
+      />
+    ));
+    const rows = screen.getAllByRole("listitem").map((row) => row.textContent ?? "");
+    expect(rows[0]).toContain("Last run succeeded 2026-10-08 11:00 UTC (1h ago)");
+    expect(rows[1]).toContain("No run recorded");
+  });
+
   it("says when the runtime cannot be reached instead of implying no runs", () => {
     render(() => (
       <ProviderConnections connections={[apiConnection("openai-api-a")]} executions={{ health: null, now }} />
