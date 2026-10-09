@@ -59,9 +59,10 @@ fn heiwa_home_from_env() -> Option<PathBuf> {
     heiwa_config::HeiwaPaths::try_resolve().map(|paths| paths.runtime_root)
 }
 
-/// Bootstrap only the private desktop-to-runtime credential on a fresh profile.
+/// Bootstrap only the private local-client-to-runtime credential on a fresh
+/// profile, whether the desktop app or a CLI-started runtime gets there first.
 /// Existing credentials, including malformed files, are never replaced here.
-pub fn ensure_desktop_machine_auth() -> std::io::Result<()> {
+pub fn ensure_local_machine_auth() -> std::io::Result<()> {
     if !RuntimeConfig::from_env().machine_auth_token.is_empty() {
         return Ok(());
     }

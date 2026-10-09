@@ -97,6 +97,17 @@ impl TestRuntime {
             .stderr(Stdio::null());
         if configured_auth {
             command.env("HEIWA_MACHINE_AUTH_TOKEN", TOKEN);
+        } else {
+            // `app start` provisions a credential on a fresh profile, so an
+            // unconfigured runtime now means a preserved invalid credential.
+            let secrets = home.path().join(".heiwa/secrets");
+            std::fs::create_dir_all(&secrets).unwrap();
+            #[cfg(unix)]
+            {
+                use std::os::unix::fs::PermissionsExt;
+                std::fs::set_permissions(&secrets, std::fs::Permissions::from_mode(0o700)).unwrap();
+            }
+            std::fs::write(secrets.join("machine_auth_token"), "").unwrap();
         }
         if !provider_path {
             let empty_path = home.path().join("empty-path");

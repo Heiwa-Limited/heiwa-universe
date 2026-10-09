@@ -247,3 +247,81 @@ fn runtime_keep_awake_exits_after_forced_parent_stop() {
     }
     panic!("keep-awake helper {helper} outlived its force-stopped runtime");
 }
+
+/// A public install runs `heiwa app start` with no desktop app to provision
+/// the machine credential. The runtime must provision its own, or every
+/// authenticated API answers `auth_not_configured` and the install is unusable.
+#[test]
+fn cli_app_start_provisions_machine_auth_on_a_fresh_profile() {
+    use std::io::{BufRead, BufReader};
+    use std::process::Stdio;
+    use std::time::{Duration, Instant};
+
+    let home = tempfile::tempdir().unwrap();
+    let port = std::net::TcpListener::bind(("127.0.0.1", 0))
+        .unwrap()
+        .local_addr()
+        .unwrap()
+        .port();
+    let mut runtime = Command::new(env!("CARGO_BIN_EXE_heiwa"))
+        .env("HOME", home.path())
+        .env_remove("HEIWA_HOME")
+        .env_remove("HEIWA_MACHINE_AUTH_TOKEN")
+        .env_remove("HEIWA_AUTH_TOKEN")
+        .env_remove("HEIWA_JWT_SIGNING_SECRET")
+        .env_remove("HEIWA_AUTH_SECRET")
+        .env("HEIWA_OLLAMA_BASE", "http://127.0.0.1:9")
+        .args(["app", "start", "--port", &port.to_string(), "--no-open"])
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .spawn()
+        .unwrap();
+    let stdout = runtime.stdout.take().unwrap();
+    std::thread::spawn(move || for _ in BufReader::new(stdout).lines() {});
+    let deadline = Instant::now() + Duration::from_secs(30);
+    while std::net::TcpStream::connect(("127.0.0.1", port)).is_err() {
+        assert!(Instant::now() < deadline, "runtime never served");
+        std::thread::sleep(Duration::from_millis(100));
+    }
+
+    let snapshot = Command::new(env!("CARGO_BIN_EXE_heiwa"))
+        .env("HOME", home.path())
+        .env_remove("HEIWA_HOME")
+        .env_remove("HEIWA_MACHINE_AUTH_TOKEN")
+        .env_remove("HEIWA_AUTH_TOKEN")
+        .args([
+            "app",
+            "api",
+            "get",
+            "/api/v1/runtime/snapshot",
+            "--port",
+            &port.to_string(),
+            "--json",
+        ])
+        .output()
+        .expect("binary runs");
+    let _ = runtime.kill();
+    let _ = runtime.wait();
+
+    let stdout = String::from_utf8_lossy(&snapshot.stdout);
+    let stderr = String::from_utf8_lossy(&snapshot.stderr);
+    assert!(
+        snapshot.status.success(),
+        "stdout: {stdout}\nstderr: {stderr}"
+    );
+    assert!(stdout.contains("\"status\":\"ok\""), "stdout: {stdout}");
+
+    let credential = home.path().join(".heiwa/secrets/machine_auth_token");
+    let metadata = std::fs::metadata(&credential).expect("credential provisioned");
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        assert_eq!(
+            metadata.permissions().mode() & 0o077,
+            0,
+            "credential must be owner-private"
+        );
+    }
+    assert!(metadata.len() > 0);
+}

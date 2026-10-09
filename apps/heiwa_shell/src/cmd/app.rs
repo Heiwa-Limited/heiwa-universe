@@ -1014,6 +1014,13 @@ async fn start(args: &[String]) -> Result<()> {
         channel: runtime_channel(),
         install_path,
     })?;
+    // A runtime started from the CLI has no desktop app to provision the
+    // machine credential, and without it every authenticated API answers
+    // `auth_not_configured`. A preserved invalid credential is reported, not
+    // replaced, and the runtime still serves so the condition is visible.
+    if let Err(error) = heiwa_core::config::ensure_local_machine_auth() {
+        eprintln!("heiwa app: local API credential unavailable: {error}");
+    }
     let worker_id = format!("heiwa-app-{}", std::process::id());
     let started_at = Arc::new(chrono::Utc::now().to_rfc3339());
     let runtime_state_dir = state_dir();
