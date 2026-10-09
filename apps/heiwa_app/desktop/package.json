@@ -1,7 +1,7 @@
 {
   "name": "@heiwa/desktop",
   "private": true,
-  "version": "0.3.1",
+  "version": "0.3.2",
   "description": "Heiwa native desktop shell \u2014 Tauri 2 + Vite over the local Heiwa runtime.",
   "license": "Apache-2.0",
   "type": "module",
