@@ -74,7 +74,7 @@ pub fn run() {
                         })?;
                     }
                 }
-                heiwa_core::config::ensure_desktop_machine_auth().map_err(|error| error.to_string())
+                heiwa_core::config::ensure_local_machine_auth().map_err(|error| error.to_string())
             };
             let (decision, owned) = match prepare() {
                 Ok(()) => runtime_supervisor::ensure_runtime(
