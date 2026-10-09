@@ -61,5 +61,6 @@ tree. Older stamps are reusable only when the checker confirms an ancestor
 revision and unchanged declared acceptance scope. That local scope check does
 not replace exact-source-commit CI and certification for a public release.
 
-The A1 acceptance gate remains deferred until implemented and passed. A plan,
-partial feature, or passing prerequisite cannot establish A1 completion.
+The A1 acceptance gate is `scripts/check_work_fabric_a1_acceptance.sh`; A1
+completion requires its passing receipt for the declared scope. A plan, partial
+feature, or passing prerequisite cannot establish A1 completion.

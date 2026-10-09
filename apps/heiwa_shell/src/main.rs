@@ -374,6 +374,7 @@ async fn main() -> Result<()> {
             let identity = heiwa_provider::load_identity();
             let app_probe = crate::cmd::app::probe_local_app(crate::cmd::app::DEFAULT_PORT);
             let layout = heiwa_install::check_runtime_layout();
+            let launchd = heiwa_install::check_launchd_health();
             let evidence_dir = heiwa_evidence::journal_root()?;
             let evidence_streams = heiwa_evidence::journal_summary(&evidence_dir)
                 .unwrap_or_default()
@@ -437,6 +438,7 @@ async fn main() -> Result<()> {
                         "provider_accounts": provider_accounts,
                         "heiwa_app": app_probe,
                         "layout": layout,
+                        "launchd": launchd,
                         "evidence": evidence_status,
                         "ai_ops": ai_ops,
                     })
@@ -572,6 +574,9 @@ async fn main() -> Result<()> {
             if !layout.is_complete() {
                 println!("  Next: heiwa install");
             }
+
+            println!();
+            print_launchd_health(&launchd);
 
             println!();
             println!("Evidence:");
@@ -1046,6 +1051,48 @@ async fn run_route_command(args: &[String]) -> Result<()> {
         }
     }
     Ok(())
+}
+
+/// Report-only; doctor never changes launchd state.
+fn print_launchd_health(report: &heiwa_install::LaunchdHealthReport) {
+    println!("Launch Agents ({}):", report.status);
+    match report.status.as_str() {
+        "unsupported" => println!("  launchd is not available on {}", report.platform),
+        _ if report.agents.is_empty() && report.probe_errors.is_empty() => {
+            println!("  none installed")
+        }
+        _ => {}
+    }
+    for agent in &report.agents {
+        let runs = agent
+            .service
+            .as_ref()
+            .and_then(|service| service.runs)
+            .map(|runs| format!(", runs {runs}"))
+            .unwrap_or_default();
+        let exit = agent
+            .service
+            .as_ref()
+            .and_then(|service| service.last_exit_code)
+            .map(|code| format!(", last exit {code}"))
+            .unwrap_or_default();
+        println!("  {:<38} {}{runs}{exit}", agent.label, agent.classification);
+        for finding in &agent.findings {
+            println!("  {:<38} - {finding}", "");
+        }
+        for path in &agent.missing_paths {
+            println!("  {:<38} - missing: {path}", "");
+        }
+    }
+    for error in &report.probe_errors {
+        println!("  probe: {error}");
+    }
+    if !report.evidence_complete && report.status != "unsupported" {
+        println!("  Evidence is incomplete; unprobed agents are not known to be healthy.");
+    }
+    if report.needs_attention() {
+        println!("  Next: inspect with `launchctl print gui/$(id -u)/<label>`; disable a broken agent with `launchctl disable` after confirming it is unused");
+    }
 }
 
 fn print_ai_ops_check(label: &str, ok: bool) {
