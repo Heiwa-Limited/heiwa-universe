@@ -61,7 +61,7 @@ heiwa doctor
 heiwa app start --no-open
 ```
 
-Pin a version with `HEIWA_VERSION=0.2.0`. To read the script before running it,
+Pin a version with `HEIWA_VERSION=0.3.0`. To read the script before running it,
 fetch it first: `curl -fsSL https://heiwa.ltd/install -o heiwa-install.sh`.
 
 What each platform gets today:
@@ -78,11 +78,15 @@ published release; the [Releases page](https://github.com/Heiwa-Limited/heiwa-un
 is the download authority. The current macOS 27 checkpoint is a development
 installation, not a newly published public release.
 
-The next macOS release pipeline requires Developer ID signing and Apple
-notarization. It builds a browser-downloadable DMG and an updater archive,
-verifies the notarization ticket, and compares the bundled runtime with the
-signed CLI release candidate. Publication remains blocked until the Apple
-credentials and the release's exact-commit checks are available.
+macOS releases ship in one of two signing lanes. A **Developer ID** release
+is signed and notarized and also offers a browser-downloadable DMG. An
+**ad-hoc** release is signed without an Apple account and is delivered only by
+the installer: `curl` downloads are not quarantined, so Gatekeeper does not
+block the app it places. Browser-downloaded ad-hoc archives are quarantined;
+use the installer instead. With ad-hoc signing, macOS may ask again for
+Calendar, Reminders, or other privacy access after an update, because it
+cannot match the new build to the one you approved. Both lanes compare the
+bundled runtime with the released CLI.
 
 Opening the packaged app installs its matching CLI under the selected user's
 Heiwa directory. It needs no Rust, Node.js, or Python installation. Inside

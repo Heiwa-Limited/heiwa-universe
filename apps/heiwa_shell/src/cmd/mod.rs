@@ -1,4 +1,5 @@
 pub mod app;
+pub mod apple_resources;
 pub mod approvals;
 pub(crate) mod args;
 pub mod auto;
@@ -18,6 +19,7 @@ pub mod mesh;
 pub(crate) mod osascript;
 pub(crate) mod recover;
 pub mod release_update;
+pub mod reminders;
 pub mod schedule;
 pub(crate) mod update_channel;
 pub mod work;

@@ -5,14 +5,18 @@
 //! read in pages: each truncated page proves everything starting before its
 //! last event was seen, and the next page resumes there. Only a range proven
 //! complete may delete rows, so a partial read never erases unseen events.
-use anyhow::{anyhow, bail, Context, Result};
+use anyhow::{bail, Context, Result};
 use chrono::{DateTime, Duration, SecondsFormat, Timelike, Utc};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use std::collections::HashSet;
 use std::fs::{self, File, OpenOptions};
-use std::io::Write;
 use std::path::{Path, PathBuf};
+
+use super::apple_resources::{helper_request, load_selection, store_selection, AppleResource};
+// Calendar callers keep their paths; the mechanics live in `apple_resources`.
+pub(super) use super::apple_resources::atomic_write;
+pub(crate) use super::apple_resources::helper_path;
 
 /// Events the helper returns per request; its protocol maximum.
 const SCAN_PAGE_LIMIT: usize = 500;
@@ -55,13 +59,6 @@ enum SyncDecision {
     Fresh,
     BackOff,
     Read,
-}
-
-#[derive(Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-struct Selection {
-    schema_version: u32,
-    calendar_ids: Vec<String>,
 }
 
 fn selection_path() -> PathBuf {
@@ -204,59 +201,12 @@ pub(crate) fn sync_selected(request: SyncRequest) -> Result<Value> {
 }
 
 pub(crate) fn selected_ids() -> Result<Vec<String>> {
-    let raw = match fs::read(selection_path()) {
-        Ok(raw) => raw,
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(vec![]),
-        Err(error) => return Err(error.into()),
-    };
-    let selection: Selection = serde_json::from_slice(&raw).context("read calendar selection")?;
-    if selection.schema_version != 1 {
-        bail!("Unsupported calendar selection version");
-    }
-    Ok(selection.calendar_ids)
-}
-
-pub(crate) fn helper_path() -> Option<PathBuf> {
-    if let Some(path) = std::env::var_os("HEIWA_APPLE_RESOURCES_HELPER").filter(|v| !v.is_empty()) {
-        return Some(PathBuf::from(path));
-    }
-    std::env::current_exe()
-        .ok()?
-        .parent()
-        .map(|dir| dir.join("heiwa-apple-resources"))
-        .filter(|path| path.is_file())
-}
-
-pub(crate) fn helper_request(
-    request: &Value,
-    timeout: std::time::Duration,
-    max_output_bytes: usize,
-    missing_message: &'static str,
-    response_context: &'static str,
-) -> Result<Value> {
-    let helper = helper_path().ok_or_else(|| anyhow!(missing_message))?;
-    let mut command = std::process::Command::new(helper);
-    // launchd labels the always-on runtime with its XPC service identity. That
-    // identity is not valid for the standalone EventKit reader and causes
-    // TCC to reject an otherwise authorized Calendar read. Keep the service
-    // identity on Heiwa itself, but do not pass it to the native helper.
-    command.env_remove("XPC_SERVICE_NAME");
-    let request = serde_json::to_vec(request).context("serialize Apple resource request")?;
-    let bytes = heiwa_core::subprocess::bounded_output_with_input(
-        &mut command,
-        &request,
-        timeout,
-        max_output_bytes,
-    )
-    .map_err(|error| {
-        anyhow!("{error} Check Heiwa access in System Settings > Privacy & Security > Calendars.")
-    })?;
-    let value: Value = serde_json::from_slice(&bytes).context(response_context)?;
-    Ok(value)
+    load_selection(&selection_path(), "calendar_ids", "calendar")
 }
 
 fn call(request: &Value) -> Result<Value> {
     let value = helper_request(
+        AppleResource::Calendar,
         request,
         std::time::Duration::from_secs(45),
         4 * 1024 * 1024,
@@ -335,13 +285,7 @@ fn read_locked(state: &Path, ids: Vec<String>) -> Result<Value> {
     super::connectors::require_apple_calendar_connection()?;
     let (next, fetched) = reconcile(existing, &scan.rows, &ids, start, scan.covered_until);
     atomic_write(&state.join("events.jsonl"), &serialize_rows(&next))?;
-    atomic_write(
-        &selection_path(),
-        &serde_json::to_vec(&Selection {
-            schema_version: 1,
-            calendar_ids: ids.clone(),
-        })?,
-    )?;
+    store_selection(&selection_path(), "calendar_ids", &ids)?;
     let receipt = json!({"schema_version":1, "id":uuid::Uuid::new_v4().to_string(),
         "kind":"calendar_read", "source":"apple_calendar", "calendar_ids":ids,
         "fetched":fetched, "truncated":!complete, "complete":complete, "pages":scan.pages,
@@ -547,17 +491,6 @@ pub(super) fn serialize_rows(rows: &[Value]) -> Vec<u8> {
         .map(|row| format!("{row}\n"))
         .collect::<String>()
         .into_bytes()
-}
-
-pub(super) fn atomic_write(path: &Path, bytes: &[u8]) -> Result<()> {
-    let parent = path.parent().context("missing state directory")?;
-    let mut temp = tempfile::NamedTempFile::new_in(parent)?;
-    temp.write_all(bytes)?;
-    temp.as_file().sync_all()?;
-    temp.persist(path)?;
-    #[cfg(unix)]
-    File::open(parent)?.sync_all()?;
-    Ok(())
 }
 
 #[cfg(test)]

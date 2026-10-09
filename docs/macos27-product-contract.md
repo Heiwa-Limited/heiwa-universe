@@ -157,6 +157,31 @@ private history. Apple documents [App Intents and View Annotations](https://deve
 | Safari / Messages / Shortcuts | Selected context, supported actions, handoff and execution receipts | Per-app capability and permission boundaries; no private-database shortcut |
 | Pages / Numbers / Keynote / Music | Selected documents or media, supported editing/playback, export | Specific adapters; playback/library access is separate from generation |
 
+Reminders R1 supplies a CLI read/propose boundary: `heiwa connect apple-reminders
+--authorize`, `heiwa reminders lists`, `select <list_id>...`, `read`, and
+`propose --list <id> --event <calendar_id> <external_id> [--occurrence <iso>]`.
+Enrollment is installation/device-bound and independent of Calendar enrollment
+and macOS permission. Only selected lists are scanned, with bounded results and
+explicit incompleteness. Propose uses only imported events from currently
+selected calendars; it neither rereads Calendar content nor writes reminders.
+The proposed title equals the imported title. An all-day event maps to its
+imported local date; a timed event maps to its start instant normalized to UTC.
+Gregorian Reminders due components use their timezone (the current timezone
+when unspecified); a date-only due remains a date. Unsupported calendars fail
+explicitly. Invalid due components cannot
+prove synchronization. Completed reminders conflict with an active proposal.
+
+The effect marker hashes a JSON tuple of the local calendar ID, event ID and
+exact imported occurrence string. This is device/store-local identity, with
+dedup limited to the selected lists; moving or syncing an event can change its
+identity. Truncated/unavailable scans remain undetermined and duplicate markers
+remain ambiguous. No notes or arbitrary URLs are projected. R1 does not supply
+an API/desktop tool, worker admission, approval, or write lane. Source/hermetic
+checks are distinct from device acceptance. A separate TCC identity isolates
+consent, not the user's EventKit database; real-data access or test-list creation
+needs separate authorization. C1-b write acceptance remains pending on authority,
+containment and fresh persisted-result proof.
+
 macOS 27 is the platform baseline. Follow the actual SDK and [Apple release notes](https://developer.apple.com/documentation/macos-release-notes/macos-27-release-notes).
 Foundation Models can be an Apple provider bridge, while Rust retains routing
 authority. Private Cloud Compute eligibility/entitlements must be proven for the

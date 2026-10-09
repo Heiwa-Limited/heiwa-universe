@@ -7,6 +7,17 @@ on:
         description: Existing git tag to release (for example v0.1.0)
         required: true
         type: string
+      macos_signing:
+        description: >-
+          macOS signing. developer-id signs and notarizes the app and DMG.
+          ad-hoc ships the app only through the installer (curl downloads are
+          not quarantined), with no DMG and no notarization.
+        required: true
+        default: developer-id
+        type: choice
+        options:
+          - developer-id
+          - ad-hoc
 
 permissions:
   actions: read
@@ -113,6 +124,7 @@ jobs:
         run: bash scripts/check_installer_version_pin.sh --served "$RELEASE_VERSION"
 
       - name: Require Apple distribution credentials
+        if: inputs.macos_signing == 'developer-id'
         shell: bash
         env:
           APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
@@ -219,7 +231,8 @@ jobs:
         include:
           - name: macos-aarch64
             runner: macos-26
-            # Both download paths contain the same signed, notarized app.
+            # developer-id: both download paths carry the same notarized app.
+            # ad-hoc builds only the app; the DMG glob then matches nothing.
             bundles: app,dmg
             artifact_glob: |
               dist/desktop/*-app.tar.gz
@@ -275,6 +288,7 @@ jobs:
           codesign --verify --strict apps/heiwa_app/desktop/src-tauri/resources/heiwa
 
       - name: Prepare Developer ID signing
+        if: inputs.macos_signing == 'developer-id'
         env:
           APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
           APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
@@ -289,8 +303,18 @@ jobs:
           APPLE_ID: ${{ secrets.APPLE_ID }}
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
           APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
+          MACOS_SIGNING: ${{ inputs.macos_signing }}
         run: |
           set -euo pipefail
+          if [[ "$MACOS_SIGNING" == "ad-hoc" ]]; then
+            # No Apple account: build with the checked-in ad-hoc signing
+            # config (the one local device proofs use) and never let Tauri
+            # attempt notarization. A DMG would be quarantined by the browser
+            # and blocked by Gatekeeper, so the installer is the only path.
+            unset APPLE_ID APPLE_TEAM_ID APPLE_PASSWORD APPLE_SIGNING_IDENTITY
+            npm --prefix apps/heiwa_app/desktop run tauri:build -- --bundles app
+            exit 0
+          fi
           python3 - <<'PYCONFIG'
           import json, os
           with open(os.path.join(os.environ['RUNNER_TEMP'], 'heiwa-signing.json'), 'w') as handle:
@@ -298,16 +322,21 @@ jobs:
           PYCONFIG
           npm --prefix apps/heiwa_app/desktop run tauri:build -- --bundles ${{ matrix.bundles }} --config "$RUNNER_TEMP/heiwa-signing.json"
 
-      - name: Verify notarized app and coherent runtime
+      - name: Verify signed app and coherent runtime
         shell: bash
         env:
           VERSION: ${{ needs.metadata.outputs.version }}
+          MACOS_SIGNING: ${{ inputs.macos_signing }}
         run: |
           set -euo pipefail
           app="target/release/bundle/macos/Heiwa.app"
           codesign --verify --deep --strict "$app"
-          xcrun stapler validate "$app"
-          spctl --assess --type execute --verbose=2 "$app"
+          if [[ "$MACOS_SIGNING" == "ad-hoc" ]]; then
+            codesign -dv "$app" 2>&1 | grep -q '^Signature=adhoc$'
+          else
+            xcrun stapler validate "$app"
+            spctl --assess --type execute --verbose=2 "$app"
+          fi
           cmp "runtime-unpacked/heiwa-${VERSION}-macos-aarch64/heiwa" "$app/Contents/Resources/resources/heiwa"
           codesign --verify --strict "$app/Contents/Resources/resources/heiwa-apple-resources"
 
@@ -319,6 +348,7 @@ jobs:
           APPLE_ID: ${{ secrets.APPLE_ID }}
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
           APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
+          MACOS_SIGNING: ${{ inputs.macos_signing }}
         run: |
           set -euo pipefail
           bundle_dir="target/release/bundle/macos"
@@ -337,13 +367,15 @@ jobs:
           asset="heiwa-${VERSION}-macos-aarch64-app.tar.gz"
           cp "$archive" "dist/desktop/${asset}"
           cp "$signature" "dist/desktop/${asset}.sig"
-          dmg=(target/release/bundle/dmg/*.dmg)
-          test "${#dmg[@]}" -eq 1 && test -f "${dmg[0]}"
-          xcrun notarytool submit "${dmg[0]}" --apple-id "$APPLE_ID" --team-id "$APPLE_TEAM_ID" --password "$APPLE_PASSWORD" --wait --output-format json > "$RUNNER_TEMP/heiwa-dmg-notarization.json"
-          python3 -c 'import json,sys; assert json.load(open(sys.argv[1]))["status"] == "Accepted", "DMG notarization was not accepted"' "$RUNNER_TEMP/heiwa-dmg-notarization.json"
-          xcrun stapler staple "${dmg[0]}"
-          xcrun stapler validate "${dmg[0]}"
-          cp "${dmg[0]}" "dist/desktop/heiwa-${VERSION}-macos-aarch64.dmg"
+          if [[ "$MACOS_SIGNING" == "developer-id" ]]; then
+            dmg=(target/release/bundle/dmg/*.dmg)
+            test "${#dmg[@]}" -eq 1 && test -f "${dmg[0]}"
+            xcrun notarytool submit "${dmg[0]}" --apple-id "$APPLE_ID" --team-id "$APPLE_TEAM_ID" --password "$APPLE_PASSWORD" --wait --output-format json > "$RUNNER_TEMP/heiwa-dmg-notarization.json"
+            python3 -c 'import json,sys; assert json.load(open(sys.argv[1]))["status"] == "Accepted", "DMG notarization was not accepted"' "$RUNNER_TEMP/heiwa-dmg-notarization.json"
+            xcrun stapler staple "${dmg[0]}"
+            xcrun stapler validate "${dmg[0]}"
+            cp "${dmg[0]}" "dist/desktop/heiwa-${VERSION}-macos-aarch64.dmg"
+          fi
 
           # The manifest points at the renamed asset, so the URL has to be
           # built from the release tag rather than copied from the bundler.
@@ -445,7 +477,7 @@ jobs:
           --features heiwa-shell/lance --target ${{ matrix.target }}
 
       - name: Prepare macOS CLI signing
-        if: runner.os == 'macOS'
+        if: runner.os == 'macOS' && inputs.macos_signing == 'developer-id'
         env:
           APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
           APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
@@ -456,9 +488,17 @@ jobs:
         if: runner.os == 'macOS'
         env:
           APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+          MACOS_SIGNING: ${{ inputs.macos_signing }}
         run: |
-          codesign --force --options runtime --timestamp --entitlements apps/heiwa_app/desktop/src-tauri/Heiwa.entitlements --sign "$APPLE_SIGNING_IDENTITY" target/aarch64-apple-darwin/release/heiwa
-          codesign --verify --strict target/aarch64-apple-darwin/release/heiwa
+          set -euo pipefail
+          binary=target/aarch64-apple-darwin/release/heiwa
+          if [[ "$MACOS_SIGNING" == "ad-hoc" ]]; then
+            codesign --force --sign - "$binary"
+            codesign -dv "$binary" 2>&1 | grep -q '^Signature=adhoc$'
+          else
+            codesign --force --options runtime --timestamp --entitlements apps/heiwa_app/desktop/src-tauri/Heiwa.entitlements --sign "$APPLE_SIGNING_IDENTITY" "$binary"
+          fi
+          codesign --verify --strict "$binary"
 
       - name: Download cockpit assets
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
