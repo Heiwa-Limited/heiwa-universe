@@ -217,8 +217,13 @@ async fn main() -> Result<()> {
     match args[1].as_str() {
         "install" => match heiwa_install::run_install_target(args.get(2).map(String::as_str))? {
             heiwa_install::InstallOutcome::RuntimeBootstrap => {
-                println!("Registering device...");
-                register_current_device().await?;
+                // A public install has no identity yet; the app's first run
+                // creates one. Only register a device that already belongs
+                // to someone, instead of telling a new user to log in.
+                if heiwa_provider::load_identity().is_some() {
+                    println!("Registering device...");
+                    register_current_device().await?;
+                }
             }
             heiwa_install::InstallOutcome::Plugin(plugin) => {
                 println!("Plugin installed: {}", plugin.canonical);
