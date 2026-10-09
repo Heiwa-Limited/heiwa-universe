@@ -16,6 +16,7 @@ export const SURFACE_IDS = [
   "calendar",
   "approvals",
   "mail",
+  "reminders",
   "finance",
   "social",
   "workers",

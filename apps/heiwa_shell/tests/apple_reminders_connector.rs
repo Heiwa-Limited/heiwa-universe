@@ -973,3 +973,101 @@ fn unavailable_scan_is_undetermined_and_read_projection_drops_notes_and_raw_urls
     assert!(!output.contains("PRIVATE_NOTES_SENTINEL"));
     assert!(!output.contains("private.example.invalid"));
 }
+
+/// The desktop reaches Reminders through the app runtime, so that macOS
+/// attributes the permission to Heiwa. The API must keep every CLI guard:
+/// no helper call before enrollment, explicit selection, read-only helper ops.
+#[test]
+fn app_api_connects_selects_and_reads_reminders_with_the_cli_guards() {
+    use std::io::{BufRead, BufReader};
+    use std::process::Stdio;
+    use std::time::{Duration, Instant};
+
+    let fixture = Fixture::new();
+    let port = std::net::TcpListener::bind(("127.0.0.1", 0))
+        .unwrap()
+        .local_addr()
+        .unwrap()
+        .port();
+    let mut runtime = fixture
+        .heiwa()
+        .env("HEIWA_OLLAMA_BASE", "http://127.0.0.1:9")
+        .args(["app", "start", "--port", &port.to_string(), "--no-open"])
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .spawn()
+        .expect("start app runtime");
+    let stdout = runtime.stdout.take().unwrap();
+    std::thread::spawn(move || for _ in BufReader::new(stdout).lines() {});
+    let deadline = Instant::now() + Duration::from_secs(30);
+    while std::net::TcpStream::connect(("127.0.0.1", port)).is_err() {
+        assert!(Instant::now() < deadline, "runtime never served");
+        std::thread::sleep(Duration::from_millis(100));
+    }
+    let api = |method: &str, path: &str, body: Option<Value>| -> Value {
+        let mut args = vec![
+            "app".to_string(),
+            "api".to_string(),
+            method.to_string(),
+            path.to_string(),
+            "--port".to_string(),
+            port.to_string(),
+            "--json".to_string(),
+        ];
+        if let Some(body) = body {
+            args.push("--body".to_string());
+            args.push(body.to_string());
+        }
+        let output = fixture.heiwa().args(&args).output().expect("app api");
+        serde_json::from_slice(&output.stdout).unwrap_or_else(|_| {
+            panic!(
+                "non-JSON app api output: {}{}",
+                String::from_utf8_lossy(&output.stdout),
+                String::from_utf8_lossy(&output.stderr)
+            )
+        })
+    };
+    let requests = || fs::read_to_string(&fixture.request_log).unwrap_or_default();
+
+    let status = api("get", "/api/v1/reminders/status", None);
+    let text = status.to_string();
+    assert!(text.contains("\"disconnected\""), "{text}");
+    let refused = api("get", "/api/v1/reminders/lists", None).to_string();
+    assert!(refused.contains("not connected"), "{refused}");
+    assert!(requests().is_empty(), "helper called before enrollment");
+
+    let connected = api(
+        "post",
+        "/api/v1/connectors/apple_reminders/connect",
+        Some(json!({})),
+    )
+    .to_string();
+    assert!(connected.contains("\"resource_count\":3"), "{connected}");
+    assert!(requests().contains("\"request_access\":true"));
+
+    let selected = api(
+        "post",
+        "/api/v1/reminders/select",
+        Some(json!({"list_ids": [LIST_ID]})),
+    )
+    .to_string();
+    assert!(selected.contains(LIST_ID), "{selected}");
+    let read = api("get", "/api/v1/reminders", None).to_string();
+    assert!(read.contains("\"complete\":true"), "{read}");
+    let status = api("get", "/api/v1/reminders/status", None).to_string();
+    assert!(
+        status.contains("\"connected\"") && status.contains(LIST_ID),
+        "{status}"
+    );
+
+    let _ = runtime.kill();
+    let _ = runtime.wait();
+    for line in requests().lines() {
+        let op = serde_json::from_str::<Value>(line).unwrap()["operation"].clone();
+        assert!(
+            op == "reminders_list" || op == "reminders_scan",
+            "non-read helper op {op}"
+        );
+    }
+}

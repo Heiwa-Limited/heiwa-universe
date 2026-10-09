@@ -1642,6 +1642,62 @@ async fn handle_connection(
         .await;
     }
 
+    // Apple Reminders, read and propose only. Every call that reaches the
+    // EventKit helper runs off the async executor; from the app, macOS
+    // attributes the Reminders permission to Heiwa rather than a terminal.
+    let reminders_route = match (method, path) {
+        ("GET", "/api/v1/reminders/status") => Some("status"),
+        ("GET", "/api/v1/reminders/lists") => Some("lists"),
+        ("GET", "/api/v1/reminders") => Some("read"),
+        ("POST", "/api/v1/reminders/select") => Some("select"),
+        ("POST", "/api/v1/connectors/apple_reminders/connect") => Some("connect"),
+        ("POST", "/api/v1/connectors/apple_reminders/disconnect") => Some("disconnect"),
+        _ => None,
+    };
+    if let Some(route) = reminders_route {
+        let request_body = body.clone();
+        let result = tokio::task::spawn_blocking(move || -> Result<Value> {
+            match route {
+                "status" => Ok(crate::cmd::reminders::status()),
+                "lists" => crate::cmd::reminders::lists(),
+                "read" => crate::cmd::reminders::read(),
+                "select" => {
+                    let ids = serde_json::from_str::<Value>(&request_body)
+                        .ok()
+                        .and_then(|value| {
+                            value["list_ids"].as_array().map(|ids| {
+                                ids.iter()
+                                    .filter_map(|id| id.as_str().map(str::to_string))
+                                    .collect::<Vec<_>>()
+                            })
+                        })
+                        .ok_or_else(|| anyhow!("Select Reminders lists with a list_ids array"))?;
+                    crate::cmd::reminders::select(&ids)
+                }
+                "connect" => crate::cmd::reminders::authorize(),
+                _ => crate::cmd::reminders::disconnect(),
+            }
+        })
+        .await
+        .map_err(|_| anyhow!("Apple Reminders stopped unexpectedly"))
+        .and_then(|result| result);
+        let (status, payload) = match result {
+            Ok(data) => (200, json!({"ok": true, "data": data})),
+            Err(error) => (
+                400,
+                json!({"ok": false, "error": {"code": "reminders_failed", "message": error.to_string()}}),
+            ),
+        };
+        return write_response(
+            &mut stream,
+            status,
+            "application/json",
+            payload.to_string().into_bytes(),
+            false,
+        )
+        .await;
+    }
+
     if method == "POST"
         && matches!(
             path,

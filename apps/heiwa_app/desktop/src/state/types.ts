@@ -140,7 +140,7 @@ export type DiscoveredResource = {
   tools_detected: string[];
   registered_accounts: number;
   detail: string;
-  surface: "calendar" | "mail" | null;
+  surface: "calendar" | "mail" | "reminders" | null;
   has_guide: boolean;
 };
 
@@ -272,3 +272,24 @@ export type FinanceSyncResult = {
   issues: FinanceIssue[];
   receipt_id?: string | null;
 };
+
+/** Apple Reminders connection: enrollment and the saved list selection. */
+export type ReminderStatus = {
+  connector: "apple_reminders";
+  status: "connected" | "disconnected" | "config_error";
+  detail?: string;
+  selected_list_ids?: string[];
+};
+
+export type ReminderList = { id: string; name: string; source: string; writable: boolean };
+
+export type ReminderRow = {
+  id: string;
+  list_id: string;
+  title: string;
+  due: { date?: string; instant?: string } | null;
+  completed: boolean;
+};
+
+/** One bounded read of the selected lists. `complete: false` means absence is not established. */
+export type ReminderRead = { reminders: ReminderRow[]; selected_list_ids: string[]; truncated: boolean; complete: boolean };

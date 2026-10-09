@@ -1,12 +1,13 @@
 import type { JSX } from "solid-js";
 
-export function Icon(props: { name: "home" | "sessions" | "calendar" | "mail" | "search" | "plus" | "send" | "more" | "chevron" | "heiwa" | "close" | "folder" | "work"; size?: number }) {
+export function Icon(props: { name: "home" | "sessions" | "calendar" | "mail" | "reminders" | "search" | "plus" | "send" | "more" | "chevron" | "heiwa" | "close" | "folder" | "work"; size?: number }) {
   const size = props.size ?? 18;
   const paths: Record<string, JSX.Element> = {
     home: <><path d="m3 10 9-7 9 7v10a1 1 0 0 1-1 1h-5v-6H9v6H4a1 1 0 0 1-1-1Z" /></>,
     sessions: <><path d="M5 5h14v10H9l-4 4v-4H5Z" /><path d="M8 9h8M8 12h5" /></>,
     calendar: <><rect x="3" y="5" width="18" height="16" rx="2" /><path d="M7 3v4M17 3v4M3 10h18" /></>,
     mail: <><rect x="3" y="5" width="18" height="14" rx="2" /><path d="m4 7 8 6 8-6" /></>,
+    reminders: <><path d="m4 6 1.5 1.5L8 5" /><path d="m4 12 1.5 1.5L8 11" /><path d="M4 18h4" /><path d="M11 6h9M11 12h9M11 18h9" /></>,
     search: <><circle cx="11" cy="11" r="6" /><path d="m16 16 4 4" /></>,
     plus: <path d="M12 5v14M5 12h14" />,
     send: <path d="M12 19V5m-6 6 6-6 6 6" />,
