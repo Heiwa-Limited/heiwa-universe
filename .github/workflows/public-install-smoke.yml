@@ -135,9 +135,12 @@ jobs:
           }
           trap cleanup EXIT HUP INT TERM
 
+          # Every /api/ path requires auth (L-007). A CLI-started runtime
+          # provisions its own machine credential, and the CLI client reads
+          # it from the same runtime root, as a stranger's install would.
           ready=0
           for _ in $(seq 1 30); do
-            if curl --fail --silent --show-error "http://127.0.0.1:${PORT}/api/v1/runtime/snapshot" \
+            if "$HEIWA_HOME/bin/heiwa" app api get /api/v1/runtime/snapshot --port "$PORT" --json 2>/dev/null \
               | grep -q '"status":"ok"'; then
               ready=1
               break
@@ -146,6 +149,12 @@ jobs:
           done
           if [[ "$ready" != "1" ]]; then
             cat "${RUNNER_TEMP}/heiwa-app.log" >&2
+            exit 1
+          fi
+          unauthenticated="$(curl --silent --output /dev/null --write-out '%{http_code}' \
+            "http://127.0.0.1:${PORT}/api/v1/runtime/snapshot")"
+          if [[ "$unauthenticated" != "401" ]]; then
+            echo "unauthenticated snapshot returned HTTP $unauthenticated, expected 401" >&2
             exit 1
           fi
 
