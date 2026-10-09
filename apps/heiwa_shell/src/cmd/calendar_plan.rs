@@ -348,7 +348,8 @@ fn load_plan(path: &str) -> Result<Plan> {
 // ------------------------------------------------------------------ helper IO
 
 fn call_helper(request: &Value, timeout_secs: u64) -> Result<Value> {
-    let value = super::calendar_read::helper_request(
+    let value = super::apple_resources::helper_request(
+        super::apple_resources::AppleResource::Calendar,
         request,
         std::time::Duration::from_secs(timeout_secs),
         16 * 1024 * 1024,

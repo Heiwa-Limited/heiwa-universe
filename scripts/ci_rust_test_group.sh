@@ -61,6 +61,7 @@ shell_state_targets=(
 shell_ops_targets=(
   apple_mail_connector
   apple_calendar_connector
+  apple_reminders_connector
   calendar_plan_sync
   calendar_sync
   cli_contract
