@@ -5,7 +5,7 @@ set -eu
 # time; this pin is what it falls back to when that lookup fails. release.yml
 # refuses to publish a tag that does not match it, so the fallback cannot go
 # stale behind a release.
-pinned_version="0.3.2"
+pinned_version="0.3.3"
 heiwa_home="${HEIWA_HOME:-$HOME/.heiwa}"
 repo="Heiwa-Limited/heiwa-universe"
 
@@ -275,6 +275,20 @@ if [ -n "$installed_app" ]; then
   app: $installed_app"
 fi
 
+if [ -n "$installed_app" ]; then
+  next_steps="Next: open Heiwa to finish setup
+  open \"$installed_app\"
+
+Terminal (optional):
+  export PATH=\"$bin_dir:\$PATH\"
+  heiwa doctor"
+else
+  next_steps="Next:
+  export PATH=\"$bin_dir:\$PATH\"
+  heiwa doctor
+  heiwa app start --no-open"
+fi
+
 cat <<EOF
 heiwa install: complete
   version: v$version
@@ -283,8 +297,5 @@ heiwa install: complete
   archive: $archive_name
   sha256: $actual
 
-Next:
-  export PATH="$bin_dir:\$PATH"
-  heiwa doctor
-  heiwa app start --no-open
+$next_steps
 EOF
