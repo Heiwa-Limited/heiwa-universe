@@ -64,11 +64,14 @@ pub const COMMANDS: &[CommandSpec] = &[
         "List connected accounts and models",
     ),
     command("models", "models", "List all detected models by rate group"),
-    command(
-        "connect",
-        "connect <connector>",
-        "Connect a provider CLI or life connector",
-    ),
+    CommandSpec {
+        v1: &["connect apple-reminders"],
+        ..command(
+            "connect",
+            "connect <connector>",
+            "Connect a provider CLI or life connector",
+        )
+    },
     command(
         "ask",
         "ask <prompt>",
@@ -144,6 +147,19 @@ pub const COMMANDS: &[CommandSpec] = &[
         "schedule <text>",
         "Turn free text into a staged calendar hold",
     ),
+    CommandSpec {
+        v1: &[
+            "reminders lists",
+            "reminders select",
+            "reminders read",
+            "reminders propose",
+        ],
+        ..command(
+            "reminders",
+            "reminders lists|select|read|propose",
+            "Read selected Reminders lists and propose from imported events",
+        )
+    },
     command(
         "mail",
         "mail status|accounts",

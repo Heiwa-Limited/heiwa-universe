@@ -1,18 +1,34 @@
 import Foundation
+import CoreFoundation
 import EventKit
 
 // Protocol data only. Rust owns enrollment, selection, persistence, and effects.
 @main
 struct AppleResources {
     static let maximumRequestBytes = 4 * 1024 * 1024
+    static let maximumReminderResponseBytes = 1024 * 1024
+    static let maximumReminderTextBytes = 16 * 1024
+    static let maximumReminderIdentifierBytes = 1024
+    static let reminderFetchTimeout: TimeInterval = 5
 
     static func main() async {
+        var readFailure = "calendar_read_failed"
         do {
             let data = try readRequest()
             guard let request = try JSONSerialization.jsonObject(with: data) as? [String: Any],
                   let operation = request["operation"] as? String,
-                  ["list", "scan", "plan_scan", "plan_apply"].contains(operation) else { throw ReadError.invalidRequest }
+                  ["list", "scan", "plan_scan", "plan_apply", "reminders_list", "reminders_scan"].contains(operation) else { throw ReadError.invalidRequest }
+            if operation == "reminders_list" {
+                _ = try reminderAccessRequested(request)
+            } else if operation == "reminders_scan" {
+                _ = try reminderSelection(request)
+            }
             let store = EKEventStore()
+            if operation == "reminders_list" || operation == "reminders_scan" {
+                readFailure = ReadError.remindersReadFailed.rawValue
+                output(try await remindersRead(store: store, request: request, operation: operation))
+                return
+            }
             if [.notDetermined, .writeOnly].contains(EKEventStore.authorizationStatus(for: .event)) {
                 guard operation == "list", request["request_access"] as? Bool == true else { throw ReadError.permission }
                 guard try await store.requestFullAccessToEvents() else { throw ReadError.permission }
@@ -65,7 +81,7 @@ struct AppleResources {
                     "events": rows, "truncated": events.count > limit])
         } catch {
             // Never serialize an EventKit exception or user calendar contents.
-            output(["schema_version": 1, "error": (error as? ReadError)?.rawValue ?? "calendar_read_failed"])
+            output(["schema_version": 1, "error": (error as? ReadError)?.rawValue ?? readFailure])
             exit(1)
         }
     }
@@ -97,6 +113,258 @@ struct AppleResources {
             throw ReadError.invalidRequest
         }
         return legacyData
+    }
+
+    // MARK: Reminders read-only projection
+
+    static func reminderAccessRequested(_ request: [String: Any]) throws -> Bool {
+        guard let value = request["request_access"] else { return false }
+        guard let number = value as? NSNumber,
+              CFGetTypeID(number) == CFBooleanGetTypeID() else { throw ReadError.invalidRequest }
+        return number.boolValue
+    }
+
+    static func reminderSelection(_ request: [String: Any]) throws -> ([String], Int) {
+        guard let ids = request["list_ids"] as? [String], !ids.isEmpty, ids.count <= 100,
+              Set(ids).count == ids.count,
+              ids.allSatisfy(reminderIdentifierValid),
+              let number = request["limit"] as? NSNumber,
+              CFGetTypeID(number) != CFBooleanGetTypeID(),
+              (1...500).contains(number.intValue), number.doubleValue == Double(number.intValue) else {
+            throw ReadError.invalidRequest
+        }
+        return (ids, number.intValue)
+    }
+
+    static func reminderIdentifierValid(_ id: String) -> Bool {
+        !id.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty &&
+            id.utf8.count <= maximumReminderIdentifierBytes &&
+            !id.unicodeScalars.contains(where: CharacterSet.controlCharacters.contains)
+    }
+
+    static func remindersRead(store: EKEventStore, request: [String: Any], operation: String) async throws -> [String: Any] {
+        // This gate is independent of Calendar enrollment, selection, and TCC.
+        let status = EKEventStore.authorizationStatus(for: .reminder)
+        if [.notDetermined, .writeOnly].contains(status) {
+            guard operation == "reminders_list", try reminderAccessRequested(request) else {
+                throw ReadError.remindersPermission
+            }
+            guard try await store.requestFullAccessToReminders() else { throw ReadError.remindersPermission }
+        }
+        guard EKEventStore.authorizationStatus(for: .reminder) == .fullAccess else {
+            throw ReadError.remindersPermission
+        }
+        let lists = store.calendars(for: .reminder)
+        if operation == "reminders_list" {
+            var response = BoundedReminderResponse(key: "lists", envelope: ["schema_version": 1])
+            for list in lists.prefix(100) {
+                try response.append(["id": list.calendarIdentifier, "name": list.title,
+                                     "source": list.source.title, "writable": list.allowsContentModifications])
+            }
+            return response.value(truncated: lists.count > 100)
+        }
+        let (ids, limit) = try reminderSelection(request)
+        let selected = lists.filter { ids.contains($0.calendarIdentifier) }
+        guard selected.count == ids.count, Set(selected.map { $0.calendarIdentifier }) == Set(ids) else {
+            throw ReadError.missingReminderList
+        }
+        // Never pass nil or an empty selection: EventKit treats nil as all lists.
+        let predicate = store.predicateForReminders(in: selected)
+        // EventKit has no query row cap and may materialize the entire matching
+        // backend array. Bound the fetch wait and the projected rows/bytes below.
+        let reminders = try await fetchReminders(store: store, predicate: predicate)
+        var response = BoundedReminderResponse(key: "reminders", envelope: ["schema_version": 1, "list_ids": ids])
+        var seen: Set<String> = []
+        for reminder in reminders.prefix(limit) {
+            let id = reminder.calendarItemIdentifier
+            let listID = reminder.calendar.calendarIdentifier
+            guard !id.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+                  ids.contains(listID), seen.insert(id).inserted else { throw ReadError.remindersReadFailed }
+            let row: [String: Any] = ["id": id, "list_id": listID, "title": reminder.title ?? "",
+                                      "due": try reminderDue(reminder.dueDateComponents),
+                                      "completed": reminder.isCompleted,
+                                      "marker": try reminderMarker(reminder.url)]
+            try response.append(row)
+        }
+        return response.value(truncated: reminders.count > limit)
+    }
+
+    // Full matching fields are retained or the row is omitted and the response
+    // is explicitly partial. Clipped titles could falsely imply an in-sync effect.
+    struct BoundedReminderResponse {
+        let key: String
+        let envelope: [String: Any]
+        var rows: [[String: Any]] = []
+        var rowBytes = 0
+        var omitted = false
+
+        mutating func append(_ row: [String: Any]) throws {
+            if row.contains(where: { key, value in
+                guard let text = value as? String else { return false }
+                return ["id", "list_id"].contains(key) ? !reminderIdentifierValid(text) : text.utf8.count > maximumReminderTextBytes
+            }) {
+                omitted = true
+                return
+            }
+            let bytes = try JSONSerialization.data(withJSONObject: row, options: [.sortedKeys]).count
+            var base = envelope
+            base[key] = [] as [[String: Any]]
+            base["truncated"] = false
+            let overhead = try JSONSerialization.data(withJSONObject: base, options: [.sortedKeys]).count
+            let addition = bytes + (rows.isEmpty ? 0 : 1)
+            guard overhead + rowBytes + addition <= maximumReminderResponseBytes else {
+                omitted = true
+                return
+            }
+            rows.append(row)
+            rowBytes += addition
+        }
+
+        func value(truncated: Bool) -> [String: Any] {
+            var result = envelope
+            result[key] = rows
+            result["truncated"] = truncated || omitted
+            return result
+        }
+    }
+
+    static func reminderMarker(_ url: URL?) throws -> Any {
+        guard let url else { return NSNull() }
+        let text = url.absoluteString
+        guard let parts = URLComponents(url: url, resolvingAgainstBaseURL: false),
+              parts.scheme?.lowercased() == "heiwa", parts.host?.lowercased() == "effect" else {
+            return NSNull()
+        }
+        let prefix = "heiwa://effect/rem-evt-"
+        guard text.hasPrefix(prefix), text.utf8.count == prefix.utf8.count + 64,
+              parts.user == nil, parts.password == nil, parts.port == nil,
+              parts.query == nil, parts.fragment == nil,
+              text.dropFirst(prefix.count).utf8.allSatisfy({ (48...57).contains($0) || (97...102).contains($0) }) else {
+            throw ReadError.remindersReadFailed
+        }
+        return text
+    }
+
+    static func reminderDue(_ components: DateComponents?) throws -> Any {
+        guard let components else { return NSNull() }
+        guard let year = components.year, (1...9999).contains(year),
+              let month = components.month, (1...12).contains(month),
+              let day = components.day, (1...31).contains(day),
+              components.calendar == nil || components.calendar?.identifier == .gregorian,
+              components.era == nil || components.era == 1,
+              components.isLeapMonth != true,
+              components.nanosecond == nil || components.nanosecond == 0 else { throw ReadError.remindersReadFailed }
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = components.timeZone ?? components.calendar?.timeZone ?? .current
+        let timed = components.hour != nil || components.minute != nil || components.second != nil
+        var normalized = DateComponents(year: year, month: month, day: day)
+        if timed {
+            guard let hour = components.hour, (0...23).contains(hour),
+                  let minute = components.minute, (0...59).contains(minute),
+                  (0...59).contains(components.second ?? 0) else { throw ReadError.remindersReadFailed }
+            normalized.hour = hour
+            normalized.minute = minute
+            normalized.second = components.second ?? 0
+        }
+        guard let date = calendar.date(from: normalized) else { throw ReadError.remindersReadFailed }
+        // Calendar.date normalizes invalid days and nonexistent DST wall times.
+        // A round-trip detects that loss rather than substituting a different due.
+        let check = calendar.dateComponents([.year, .month, .day, .hour, .minute, .second], from: date)
+        guard check.year == year, check.month == month, check.day == day,
+              !timed || (check.hour == normalized.hour && check.minute == normalized.minute && check.second == normalized.second) else {
+            throw ReadError.remindersReadFailed
+        }
+        let metadata: Set<Calendar.Component> = [.weekday, .weekdayOrdinal, .quarter, .weekOfMonth, .weekOfYear, .yearForWeekOfYear]
+        let extra = calendar.dateComponents(metadata, from: date)
+        guard metadata.allSatisfy({ components.value(for: $0) == nil || components.value(for: $0) == extra.value(for: $0) }) else {
+            throw ReadError.remindersReadFailed
+        }
+        if timed {
+            let iso = ISO8601DateFormatter()
+            iso.timeZone = TimeZone(secondsFromGMT: 0)
+            return ["instant": iso.string(from: date)]
+        }
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.calendar = calendar
+        formatter.timeZone = calendar.timeZone
+        formatter.dateFormat = "yyyy-MM-dd"
+        return ["date": formatter.string(from: date)]
+    }
+
+    static func fetchReminders(store: EKEventStore, predicate: NSPredicate) async throws -> [EKReminder] {
+        let pending = ReminderFetch(store: store)
+        return try await withTaskCancellationHandler {
+            try await withCheckedThrowingContinuation { continuation in
+                guard pending.install(continuation) else { return }
+                let timer = DispatchWorkItem { pending.finish(.failure(ReadError.remindersReadFailed), cancel: true) }
+                pending.install(timer)
+                DispatchQueue.global().asyncAfter(deadline: .now() + reminderFetchTimeout, execute: timer)
+                let identifier = store.fetchReminders(matching: predicate) { reminders in
+                    if let reminders { pending.finish(.success(reminders), cancel: false) }
+                    else { pending.finish(.failure(ReadError.remindersReadFailed), cancel: false) }
+                }
+                pending.install(identifier: identifier)
+            }
+        } onCancel: {
+            pending.finish(.failure(ReadError.remindersReadFailed), cancel: true)
+        }
+    }
+
+    // EventKit cancellation suppresses its callback. Resolve the continuation
+    // ourselves, once, including timeout/cancellation before token registration.
+    final class ReminderFetch: @unchecked Sendable {
+        let store: EKEventStore
+        let lock = NSLock()
+        var continuation: CheckedContinuation<[EKReminder], Error>?
+        var identifier: Any?
+        var timer: DispatchWorkItem?
+        var finished = false
+        var cancelled = false
+
+        init(store: EKEventStore) { self.store = store }
+
+        func install(_ continuation: CheckedContinuation<[EKReminder], Error>) -> Bool {
+            lock.lock()
+            if finished {
+                lock.unlock()
+                continuation.resume(throwing: ReadError.remindersReadFailed)
+                return false
+            }
+            self.continuation = continuation
+            lock.unlock()
+            return true
+        }
+
+        func install(_ timer: DispatchWorkItem) {
+            lock.lock()
+            if finished { timer.cancel() } else { self.timer = timer }
+            lock.unlock()
+        }
+
+        func install(identifier: Any) {
+            lock.lock()
+            let cancel = finished && cancelled
+            if !finished { self.identifier = identifier }
+            lock.unlock()
+            if cancel { store.cancelFetchRequest(identifier) }
+        }
+
+        func finish(_ result: Result<[EKReminder], Error>, cancel: Bool) {
+            lock.lock()
+            guard !finished else { lock.unlock(); return }
+            finished = true
+            cancelled = cancel
+            let continuation = self.continuation
+            self.continuation = nil
+            let identifier = self.identifier
+            self.identifier = nil
+            timer?.cancel()
+            timer = nil
+            lock.unlock()
+            if cancel, let identifier { store.cancelFetchRequest(identifier) }
+            continuation?.resume(with: result)
+        }
     }
 
     // MARK: plan sync
@@ -227,5 +495,8 @@ struct AppleResources {
         case readOnlyCalendar = "selected_calendar_read_only"
         case staleEvent = "plan_event_changed"
         case writeFailed = "calendar_write_failed"
+        case remindersPermission = "reminders_access_required"
+        case missingReminderList = "selected_reminder_list_unavailable"
+        case remindersReadFailed = "reminders_read_failed"
     }
 }
