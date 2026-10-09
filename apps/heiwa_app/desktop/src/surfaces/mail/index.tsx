@@ -24,9 +24,9 @@ function Mail() {
   const [result, setResult] = createSignal<string>();
   const sync = () => app.runtime.mailSync();
 
-  const freshness = () => {
-    const status = sync();
-    if (!status) return undefined;
+  // One wording for a scan's state, whether it came from the background
+  // refresh or from the user pressing Read Apple Mail.
+  const describe = (status: { status?: string; error?: string | null; error_class?: string | null; last_scan_at?: string | null }) => {
     if (status.error_class === "permission_pending") {
       return "macOS needs your OK for Heiwa to read Mail. Allow the ‘Heiwa wants to control Mail’ prompt, or enable it under System Settings › Privacy & Security › Automation, then click Read Apple Mail again.";
     }
@@ -46,6 +46,11 @@ function Mail() {
     return undefined;
   };
 
+  const freshness = () => {
+    const status = sync();
+    return status ? describe(status) : undefined;
+  };
+
   const read = async () => {
     if (reading()) return;
     setReading(true);
@@ -53,6 +58,12 @@ function Mail() {
     setResult(undefined);
     try {
       const scan = await app.runtime.readAppleMail();
+      // A read that did not scan (timeout, permission, Mail closed) returns
+      // zero counts; report why rather than claim the inbox is empty.
+      if (scan.status && scan.status !== "scanned" && scan.status !== "fresh") {
+        setError(describe(scan) ?? "Apple Mail could not be read.");
+        return;
+      }
       setResult(`Read ${scan.fetched} header${scan.fetched === 1 ? "" : "s"}; ${scan.appended ?? 0} added, ${scan.updated ?? 0} updated, ${scan.removed ?? 0} removed.`);
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : typeof cause === "string" ? cause : "Apple Mail could not be read.");
