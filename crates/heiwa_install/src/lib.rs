@@ -12,7 +12,7 @@ pub mod launchd_health;
 mod runtime_binary;
 pub mod update_channel;
 pub use launchd_health::{check_launchd_health, LaunchdHealthReport};
-pub use runtime_binary::install_runtime_binary;
+pub use runtime_binary::{install_bundled_runtime, install_runtime_binary};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DoctorReport {

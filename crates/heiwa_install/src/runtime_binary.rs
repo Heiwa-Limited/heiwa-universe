@@ -4,6 +4,42 @@ use std::fs::{self, File, OpenOptions};
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 
+/// Provision the runtime an app bundle carries, unless the installed one is
+/// newer. LaunchServices may launch any registered copy of the app, including
+/// an old download or build; that must never roll back the CLI and helper a
+/// newer install placed. Explicit updates use [`install_runtime_binary`].
+/// Returns `None` when the installed runtime was kept.
+pub fn install_bundled_runtime(root: &Path, source: &Path) -> Result<Option<PathBuf>> {
+    let target = root
+        .join("bin")
+        .join(if cfg!(windows) { "heiwa.exe" } else { "heiwa" });
+    if let (Some(installed), Some(bundled)) = (runtime_version(&target), runtime_version(source)) {
+        if installed > bundled {
+            return Ok(None);
+        }
+    }
+    install_runtime_binary(root, source).map(Some)
+}
+
+/// `heiwa --version` as (major, minor, patch); `None` when it cannot be read,
+/// in which case provisioning keeps its unguarded behavior.
+fn runtime_version(binary: &Path) -> Option<(u64, u64, u64)> {
+    if !binary.is_file() {
+        return None;
+    }
+    let output = std::process::Command::new(binary)
+        .arg("--version")
+        .stdin(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .output()
+        .ok()?;
+    let text = String::from_utf8(output.stdout).ok()?;
+    let mut parts = text.trim().strip_prefix("heiwa ")?.split('.');
+    let mut next = || parts.next()?.parse::<u64>().ok();
+    let version = (next()?, next()?, next()?);
+    Some(version)
+}
+
 /// Copy a packaged runtime without truncating the executable a shell may be using.
 /// No checkout, compiler, package manager, or administrator access is required.
 pub fn install_runtime_binary(root: &Path, source: &Path) -> Result<PathBuf> {
@@ -96,6 +132,43 @@ fn files_match(source: &Path, target: &Path) -> Result<bool> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[cfg(unix)]
+    fn fake_runtime(path: &Path, version: &str) {
+        use std::os::unix::fs::PermissionsExt;
+        fs::create_dir_all(path.parent().unwrap()).unwrap();
+        fs::write(path, format!("#!/bin/sh\necho 'heiwa {version}'\n")).unwrap();
+        fs::set_permissions(path, fs::Permissions::from_mode(0o755)).unwrap();
+    }
+
+    /// An older app bundle launched by mistake (LaunchServices may pick any
+    /// registered copy) must not roll the installed CLI and helper back.
+    #[cfg(unix)]
+    #[test]
+    fn launching_an_older_bundle_never_downgrades_the_installed_runtime() -> Result<()> {
+        let temp = tempfile::tempdir()?;
+        let root = temp.path().join("user");
+        let newer = temp.path().join("new/heiwa");
+        fake_runtime(&newer, "0.3.2");
+        fs::write(newer.with_file_name("heiwa-apple-resources"), "helper new")?;
+        let installed = install_bundled_runtime(&root, &newer)?.expect("first install");
+
+        let older = temp.path().join("old/heiwa");
+        fake_runtime(&older, "0.3.0");
+        fs::write(older.with_file_name("heiwa-apple-resources"), "helper old")?;
+        assert!(install_bundled_runtime(&root, &older)?.is_none());
+        assert_eq!(fs::read(&installed)?, fs::read(&newer)?);
+        assert_eq!(
+            fs::read(root.join("bin/heiwa-apple-resources"))?,
+            b"helper new"
+        );
+
+        let newest = temp.path().join("newest/heiwa");
+        fake_runtime(&newest, "0.4.0");
+        assert!(install_bundled_runtime(&root, &newest)?.is_some());
+        assert_eq!(fs::read(&installed)?, fs::read(&newest)?);
+        Ok(())
+    }
 
     #[test]
     fn first_launch_and_update_are_portable_and_preserve_previous_bytes() -> Result<()> {

@@ -69,7 +69,7 @@ pub fn run() {
                     if binary.starts_with(resource_dir) {
                         let root = heiwa_install::try_get_heiwa_dir()
                             .ok_or("The local Heiwa directory could not be resolved.")?;
-                        heiwa_install::install_runtime_binary(&root, binary).map_err(|error| {
+                        heiwa_install::install_bundled_runtime(&root, binary).map_err(|error| {
                             format!("The bundled CLI could not be installed: {error}")
                         })?;
                     }
