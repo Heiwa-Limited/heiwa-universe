@@ -90,17 +90,20 @@ GitHub provenance. Publish with the release workflow after completing the
 
 ### macOS release packaging
 
-The desktop configuration uses ad-hoc macOS code signing
-(`signingIdentity: "-"`). The release workflow separately signs the updater
-archive using `TAURI_SIGNING_PRIVATE_KEY` and requires both the archive and its
-signature before publication. An updater signature is not Apple notarization
-or Developer ID signing.
+`release.yml` takes a `macos_signing` input:
 
-The shipped desktop payload is the macOS ARM64 app tarball consumed by the
-installer and updater, with its `.sig` file and `latest.json`. `release.yml`
-deliberately omits `.dmg` publication. The standalone desktop-build workflow can
-produce additional development bundles; those are not the release artifact
-contract.
+| Lane | Signing | Desktop payload | Delivery |
+| --- | --- | --- | --- |
+| `developer-id` (default) | Developer ID + hardened runtime, notarized and stapled | app tarball, `.sig`, `latest.json`, notarized DMG | installer, updater, browser download |
+| `ad-hoc` | `codesign --sign -` (the checked-in `signingIdentity: "-"` config) | app tarball, `.sig`, `latest.json`; no DMG | installer and updater only |
+
+Heiwa currently ships the `ad-hoc` lane: no Apple Developer account is
+configured, and `developer-id` fails closed without its secrets. `curl`
+downloads carry no quarantine attribute, so Gatekeeper does not block the app
+the installer places; a browser-downloaded archive is quarantined. Ad-hoc code
+has no stable signing identity across builds, so macOS may ask again for
+privacy access after an update. The updater archive is always signed with
+`TAURI_SIGNING_PRIVATE_KEY`; that signature is not notarization.
 
 **Cloudflare Pages → `heiwa.ltd`**
 
@@ -134,7 +137,9 @@ allows time for propagation.
    deployment. Publish docs with `gh workflow run pages.yml --ref main`.
 4. Dispatch `release.yml` from `main` with its `tag` input set to that existing
    tag. For example, replace `vX.Y.Z` in
-   `gh workflow run release.yml --ref main -f tag=vX.Y.Z`.
+   `gh workflow run release.yml --ref main -f tag=vX.Y.Z -f macos_signing=ad-hoc`.
+   `scripts/ship_release.sh <pr> <version>` runs steps 1–5 end to end from a
+   reviewed pull request into `dev`, stopping at the first failed gate.
 5. Wait for the entire release workflow, including public-install smoke and
    container packaging after publication. Release assets can already exist
    when a downstream check fails; their presence alone is not readiness.
