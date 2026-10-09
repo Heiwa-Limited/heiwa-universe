@@ -1,5 +1,5 @@
 import { createEffect, createSignal, onCleanup, onMount, Show } from "solid-js";
-import { providersFromSnapshot, runtimeVersion } from "../runtime";
+import { providerPresence, providersFromSnapshot, runtimeVersion } from "../runtime";
 import { useApp } from "../state/app";
 import { Conversation } from "./Conversation";
 import { Icon } from "./Icon";
@@ -32,10 +32,7 @@ export function Composer(props: { caption: string }) {
     }
   });
 
-  const connectedProviders = () =>
-    providersFromSnapshot(app.runtime.health()).filter(
-      (provider) => provider.status === "connected",
-    ).length;
+  const presence = () => providerPresence(providersFromSnapshot(app.runtime.health()));
   const conversationTitle = () => app.sessions.threads()
     .find((thread) => thread.thread_id === app.sessions.selectedId())?.title || "New conversation";
 
@@ -123,7 +120,7 @@ export function Composer(props: { caption: string }) {
       <div class="composer-hint">
         <span class="hint">Enter to send · Shift Enter for a new line · ⌘L to focus</span>
         <span class="hint">
-          {runtimeVersion(app.runtime.health())} · {connectedProviders()} providers
+          {runtimeVersion(app.runtime.health())} · {presence().connected} providers present · {presence().withRuns} with recorded runs
         </span>
       </div>
     </div>

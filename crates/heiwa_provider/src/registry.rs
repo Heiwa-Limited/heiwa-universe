@@ -104,7 +104,10 @@ impl AccountStatus {
     /// get different words.
     pub fn label(&self) -> String {
         match self {
-            AccountStatus::Connected => "ready".to_string(),
+            // "configured", not "ready": the status comes from the last
+            // discovery or key check, carries no time, and is not lowered
+            // when a run fails. Execution history is reported separately.
+            AccountStatus::Connected => "configured".to_string(),
             AccountStatus::Disconnected => "not linked".to_string(),
             AccountStatus::NeedsAuth => "needs sign-in".to_string(),
             // Interpolated, not `{:?}`: the message is for the user, so it
@@ -576,8 +579,8 @@ mod account_status_label_tests {
     }
 
     #[test]
-    fn a_routable_account_reads_as_ready() {
-        assert_eq!(AccountStatus::Connected.label(), "ready");
+    fn a_routable_account_reads_as_configured_not_ready() {
+        assert_eq!(AccountStatus::Connected.label(), "configured");
     }
 
     #[test]

@@ -60,3 +60,18 @@ export function shortenPath(raw: string): string {
 export function cssToken(raw: string): string {
   return raw.toLowerCase().replace(/[^a-z0-9_-]+/g, "-");
 }
+
+/**
+ * Age of a dated observation, e.g. `3h ago`. Unreadable or future times are
+ * shown as such rather than guessed. Mirrors `heiwa doctor`.
+ */
+export function observedAge(at: string, now: Date = new Date()): string {
+  const parsed = new Date(at);
+  if (Number.isNaN(parsed.getTime())) return "time unreadable";
+  const seconds = Math.floor((now.getTime() - parsed.getTime()) / 1000);
+  if (seconds <= -61) return "in the future";
+  if (seconds < 60) return "just now";
+  if (seconds < 3_600) return `${Math.floor(seconds / 60)}m ago`;
+  if (seconds < 172_800) return `${Math.floor(seconds / 3_600)}h ago`;
+  return `${Math.floor(seconds / 86_400)}d ago`;
+}

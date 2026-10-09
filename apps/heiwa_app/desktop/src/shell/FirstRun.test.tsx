@@ -64,3 +64,34 @@ describe("per-user workspace setup", () => {
     await waitFor(() => expect(open).toHaveBeenCalledWith("calendar"));
   });
 });
+
+describe("inference tool cards", () => {
+  const now = new Date("2026-10-08T12:00:00Z");
+  const withTools = (): OnboardingState => ({
+    complete: true, display_name: "Ada", gaps: [],
+    workspace: { can_enter: true, setup_complete: true, resources: [
+      { id: "google", name: "Google / Antigravity", category: "inference", app_detected: false, tools_detected: ["gemini"], registered_accounts: 0, detail: "Detection proves nothing.", surface: null, has_guide: false },
+      { id: "openai", name: "ChatGPT / OpenAI", category: "inference", app_detected: true, tools_detected: [], registered_accounts: 0, detail: "Detection proves nothing.", surface: null, has_guide: false },
+    ] },
+  });
+
+  it("shows the CLI channel's dated failure only on the detected tool", () => {
+    const health = {
+      reachable: true,
+      snapshot: { data: { providers: [{
+        provider_id: "gemini", display_name: "Gemini", status: "connected", auth_kind: "oauth_cli",
+        default_model: null, supported_lanes: [], last_error: null, last_validated_at: null,
+        execution_evidence: "partial" as const,
+        execution_channel: { kind: "oauth_cli", account_id: null, binary: "gemini" },
+        last_execution_failure_at: "2026-10-07T12:00:00Z",
+        last_execution_failure_class: "quota_exhausted",
+      }] } },
+    };
+    render(() => <FirstRun state={withTools()} onEstablishIdentity={() => {}} onRecheck={() => {}}
+      executions={{ health, now }} />);
+    const line = screen.getByText(/gemini: Last run failed: quota_exhausted/);
+    expect(line.textContent).toContain("(24h ago)");
+    expect(line.textContent).toContain("history partial");
+    expect(screen.queryByText(/codex:/)).toBeNull();
+  });
+});

@@ -96,6 +96,73 @@ pub trait ProviderAdapter: Send + Sync {
 
     /// Provider model IDs this adapter can serve.
     fn supported_models(&self) -> Vec<String>;
+
+    /// How this adapter executes, for outcome provenance. Adapters that do
+    /// not say stay `unknown`; nothing is inferred from a route's provider
+    /// name or rate group.
+    fn execution_channel(&self) -> ExecutionChannel {
+        ExecutionChannel::unknown()
+    }
+}
+
+/// The channel one provider attempt actually ran through.
+///
+/// `kind` uses the [`crate::Credential::kind_label`] vocabulary, or
+/// `unknown`. Identity is non-secret and deliberately limited: an API
+/// channel names the registry account, which may run with a key from the
+/// Keychain or the environment; a CLI channel names the binary on this
+/// machine, never the account signed in to it.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ExecutionChannel {
+    pub kind: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub account_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub binary: Option<String>,
+}
+
+impl ExecutionChannel {
+    pub const UNKNOWN: &'static str = "unknown";
+
+    pub fn unknown() -> Self {
+        Self {
+            kind: Self::UNKNOWN.to_string(),
+            account_id: None,
+            binary: None,
+        }
+    }
+
+    pub fn api_key(account_id: &str) -> Self {
+        Self {
+            kind: crate::Credential::ApiKey.kind_label().to_string(),
+            account_id: Some(account_id.to_string()),
+            binary: None,
+        }
+    }
+
+    pub fn cli(binary: &str) -> Self {
+        Self {
+            kind: crate::Credential::OauthCli {
+                binary: binary.to_string(),
+            }
+            .kind_label()
+            .to_string(),
+            account_id: None,
+            binary: Some(binary.to_string()),
+        }
+    }
+
+    pub fn local_runtime(binary: &str) -> Self {
+        Self {
+            kind: crate::Credential::LocalRuntime {
+                endpoint: String::new(),
+            }
+            .kind_label()
+            .to_string(),
+            account_id: None,
+            binary: Some(binary.to_string()),
+        }
+    }
 }
 
 #[cfg(all(test, unix))]
